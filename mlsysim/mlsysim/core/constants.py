@@ -133,12 +133,12 @@ TPUV5P_FLOPS_BF16 = 459 * TFLOPs / second
 TPUV5P_FLOPS_INT8 = 918 * TFLOPs / second          # INT8 (2x BF16)
 TPUV5P_MEM_BW = 2.76 * TB / second
 TPUV5P_MEM_CAPACITY = 95 * GiB
-TPUV5P_ICI_BW = 1600 * GB / second        # Inter-Chip Interconnect
+TPUV5P_ICI_BW = 1200 * GB / second        # Bidirectional Inter-Chip Interconnect
 
-# Google TPU v6 (Trillium, 2024/25) — Source: Google Blog (Projected/Early)
-TPUV6_FLOPS_BF16 = 2150 * TFLOPs / second  # ~4.7x over v5p (estimated peak)
-TPUV6_MEM_BW = 4.5 * TB / second
-TPUV6_MEM_CAPACITY = 128 * GiB
+# Google TPU v6e (Trillium) — Source: Google Cloud Documentation
+TPUV6_FLOPS_BF16 = 918 * TFLOPs / second
+TPUV6_MEM_BW = 1600 * GB / second
+TPUV6_MEM_CAPACITY = 32 * GiB
 
 # Cerebras Wafer-Scale Engine (WSE) — Source: Cerebras Whitepapers
 WSE1_CORES = 400000 * count

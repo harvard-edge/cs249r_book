@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-3646
+track: cloud
+level: L4
+zone: analyze
+topic: flash-attention
+competency_area: memory
+bloom_level: analyze
+phase: inference
+title: Flash Attention Tiling Strategy for H100 SRAM Constraints
+scenario: You're implementing Flash Attention v2 for a 4096-token context Llama-2 model on an accelerator with 256KB shared memory per SM. The attention matrix (Q, K, V in BF16) for a single head at seq_len=4096 is 32MB, scaling to 1GB for 32 heads in standard attention.
+question: What Flash Attention tile sizes would you choose for seq_len=4096 and d_head=128, and why?
+details:
+  realistic_solution: |
+    Start with a 64x64 query/key tile for d_head=128, then tune against occupancy and register pressure. The useful test is whether the kernel can stage K and V tiles, keep Q/partial output and the softmax running max/sum on chip, and still leave shared memory and registers for enough resident warps. A 64x64 tile is a reasonable candidate under a 256KB shared-memory limit, but it is not universally optimal; validate 64x64 against alternatives such as 64x128 or 128x64 with the actual kernel implementation.
+  common_mistake: |
+    **The Pitfall:** Choosing the largest possible block size (e.g., 256x256) to maximize SRAM occupancy.
+    **The Rationale:** Candidates only look at the SRAM size and try to fill it entirely with one massive tile.
+    **The Consequence:** This ignores register file pressure from multiple warps. Oversubscribing registers causes spilling to local HBM memory, completely destroying the speedup of Flash Attention.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Dimensions: seq_len=4096, d_head=128.
+    - Precision: BF16 (2 bytes).
+    - Hardware limit: 256 KB shared memory per SM.
+
+    **Calculations:**
+    - Candidate block size: B_r = 64, B_c = 64.
+    - One 64x128 BF16 tile is 64 * 128 * 2 bytes = 16 KB.
+    - K and V staging require about 16 KB + 16 KB = 32 KB.
+    - If Q and partial O are also staged on chip, add about 16 KB + 16 KB = 32 KB.
+    - Running softmax state for 64 rows is small: max and sum in FP32 are 64 * 2 * 4 bytes = 512 bytes.
+    - Approximate on-chip footprint is therefore about 64-70 KB plus kernel-specific buffering, not a materialized 64x64 score matrix.
+
+    **Conclusion & Interpretation:**
+    - **Result: Feasible starting tile.** A 64x64 tile comfortably fits within 256 KB shared memory while leaving tuning room, but occupancy and register spilling must be measured rather than inferred from shared-memory capacity alone.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

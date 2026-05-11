@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-0517
+track: cloud
+level: L4
+zone: diagnosis
+topic: mlops-lifecycle
+competency_area: data
+bloom_level: analyze
+phase: both
+title: The Data Pipeline Determinism Trap
+scenario: You have a PyTorch training pipeline. You set `torch.manual_seed(42)`, `np.random.seed(42)`, and `random.seed(42)`. You train a model twice on the exact same dataset on the exact same machine. The loss curves diverge after the first epoch.
+question: How can using multiple PyTorch DataLoader workers break reproducibility despite setting global seeds, and what is the correct fix?
+details:
+  realistic_solution: The culprit is not `num_workers > 0` by itself; it is using multiple DataLoader worker processes without controlling worker seeds and sampler order. Each worker has its own RNG state, so random augmentations, dataset sampling logic, or iterable-dataset sharding can diverge even when the main process was seeded. The fix is to pass a seeded `torch.Generator` to the DataLoader or sampler, define a `worker_init_fn` that deterministically seeds Python, NumPy, and PyTorch RNGs for each worker, and ensure the sampler or iterable dataset emits examples in a deterministic order.
+  common_mistake: |
+    **The Pitfall:** Blaming GPU floating-point math non-determinism.
+    **The Rationale:** Candidates know GPUs have atomic add non-determinism and over-apply this to all reproducibility issues.
+    **The Consequence:** Wasting time trying to force deterministic algorithms on the GPU instead of fixing the data loading pipeline.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Epoch of 1,000,000 images with batch size 32.
+    - 4 asynchronous DataLoader workers.
+    - Random augmentation or iterable-dataset sampling occurs inside workers.
+
+    **Calculations:**
+    - Total batches: 1,000,000 / 32 = 31,250 batches.
+    - Batches per worker: 31,250 / 4 = ~7,812 batches, each with worker-local RNG calls.
+    - Without deterministic worker seeding, those worker-local RNG streams are not fully specified by the main-process seeds.
+
+    **Conclusion & Interpretation:**
+    - **Result: Non-deterministic data transformations or sample streams.** Multiple workers are safe only when worker RNG seeding and sampler ordering are controlled.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

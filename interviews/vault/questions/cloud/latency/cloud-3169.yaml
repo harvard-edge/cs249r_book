@@ -1,0 +1,34 @@
+schema_version: '1.0'
+id: cloud-3169
+track: cloud
+level: L3
+zone: implement
+topic: speculative-decoding
+competency_area: latency
+bloom_level: apply
+phase: inference
+title: Speculative Decoding KV Cache Management
+scenario: During speculative decoding with K=5 draft tokens, the target model verifies by running a forward pass on all 5 tokens. Draft tokens 1, 2, and 3 are accepted, but token 4 is rejected.
+question: If draft tokens 1-3 are accepted and token 4 is rejected, which target KV cache entries are kept, discarded, and how is the correction KV stored?
+details:
+  realistic_solution: Before verification, the target KV cache has entries for tokens 1..t. The target verification pass may compute target KV entries for proposed draft positions, but only the accepted prefix can be committed. Since d1, d2, and d3 are accepted, keep the target-model KV entries at t+1, t+2, and t+3. Since d4 is the first rejected token, discard the target KV for d4 and discard all later speculative state, including d5; verification output after the first rejection is not part of the valid target history. Sample the correction token c4 for position t+4, then run or keep the target computation for c4 and store its target KV at t+4. The final valid target KV cache extends through t+4, where t+4 contains the correction token, not the rejected draft token. With PagedAttention, truncate the block table after t+3, append c4 at t+4, and free later speculative blocks.
+  common_mistake: |
+    **The Pitfall:** Keeping the draft model's KV cache entries for the accepted tokens.
+    **The Rationale:** Candidates intuitively think the draft tokens' states are reused to save compute.
+    **The Consequence:** The target model's generation breaks because the internal hidden representations (KV states) of the draft and target models are fundamentally different.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - K=5 draft tokens.
+    - Draft tokens d1, d2, d3 are accepted; d4 is the first rejection.
+
+    **Calculations:**
+    - Keep accepted target KV entries at t+1, t+2, and t+3.
+    - Discard the target KV for rejected draft token d4 at t+4.
+    - Discard d5 and any later speculative KV because verification stops at the first rejection.
+    - Sample correction token c4 for position t+4 from the adjusted distribution.
+    - Store the target KV for c4 at position t+4, replacing the rejected draft token's KV.
+
+    **Conclusion & Interpretation:**
+    - **Result: Commit Only the Accepted Prefix.** The valid target KV cache grows by 4 positions, but t+4 must contain the correction token's target KV and no KV from d5 is kept.
+status: published
+provenance: imported

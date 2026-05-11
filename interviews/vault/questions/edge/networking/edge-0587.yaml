@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: edge-0587
+track: edge
+level: L5
+zone: evaluation
+topic: real-time-deadlines
+competency_area: networking
+bloom_level: evaluate
+phase: inference
+title: The Sensor Fusion PCIe Trap
+scenario: Your team is building the perception stack for an autonomous vehicle. The system uses two Jetson AGX Orin modules connected via a PCIe Gen4 x8 link. GPU 0 processes LiDAR data, and GPU 1 processes a high-resolution camera stream. For sensor fusion, GPU 1 sends a 128 MB feature map to GPU 0. The current end-to-end latency is 25ms, safely within the 33ms hard real-time budget. A new camera sensor is proposed that would double the feature map size to 256 MB.
+question: What happens if the camera feature map grows from 128MB to 256MB over PCIe Gen4 x8, and why isn't an external InfiniBand link the right fix?
+details:
+  realistic_solution: The larger feature map roughly doubles the PCIe DMA time and, more importantly, increases the window where fusion traffic competes with local perception work for memory and scheduling resources. A 256MB transfer over PCIe Gen4 x8 is on the order of 16ms before protocol and synchronization overhead, versus about 8ms for 128MB, so the added transfer can consume much of the remaining 8ms slack in a 25ms pipeline. It may throttle or delay concurrent LiDAR kernels if they share memory-controller or copy-engine resources, but the right response is to profile and reduce the cross-module feature traffic. InfiniBand is not a practical fix for Jetson AGX Orin SOMs in an embedded vehicle envelope; prefer architectural mitigations such as smaller feature maps, compression, local fusion, pipelining, or co-scheduling.
+  common_mistake: |
+    **The Pitfall:** Assuming linear degradation and treating SOMs like Datacenters.
+    **The Rationale:** Engineers perform a simple linear bandwidth calculation (double data = double time) and assume the rest of the pipeline is unaffected, ignoring head-of-line blocking. They then recommend InfiniBand without realizing it's inappropriate for embedded SOM interconnects.
+    **The Consequence:** The perception task crashes due to internal memory starvation, and the hardware fix (InfiniBand) introduces completely unworkable form-factor and latency penalties.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - PCIe Gen4 x8 usable one-way bandwidth is approximately 15.75 GB/s before additional software/protocol overhead.
+    - Current feature map: 128MB.
+    - Proposed feature map: 256MB.
+    - Current pipeline latency: 25ms against a 33ms deadline, leaving 8ms slack.
+
+    **Calculations:**
+    - Current transfer floor: 128MB / 15.75GB/s = 8.1ms.
+    - Proposed transfer floor: 256MB / 15.75GB/s = 16.3ms.
+    - Added DMA floor: 16.3ms - 8.1ms = 8.2ms.
+    - The 8.2ms added floor alone can consume the full latency slack before synchronization, contention, or scheduling delays.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~8ms added transfer floor, ~16ms total transfer floor (I/O-Bound)**. The risk is deadline loss from PCIe transfer growth and local contention; an external network fabric does not solve the embedded intra-SOM data-movement problem.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-3666
+track: cloud
+level: L5
+zone: implement
+topic: model-tensor-parallelism
+competency_area: parallelism
+bloom_level: apply
+phase: training
+title: 'Tensor Parallelism Correctness: Dropout and Random State Synchronization'
+scenario: A 13B model trained with TP=4 on A100 (80GB HBM2e, 2TB/s) produces different loss values than the baseline single-GPU training run, even with the same random seed. The model uses dropout in the MLP layers. The differences are small (0.01%) but accumulate over training, causing divergence after 10K steps.
+question: Why can TP=4 training with dropout diverge from the single-GPU baseline despite the same seed, and how would you fix it?
+details:
+  realistic_solution: In TP training, use separate RNG streams for data-parallel and model-parallel regions, as in Megatron-LM. Seed and advance the model-parallel RNG state consistently across TP ranks so dropout in partitioned regions has the intended mathematical behavior. Identical masks are needed only where the sharded computation must match the unsharded operation; other placements may require independent masks. Verify by logging RNG state and dropout-mask checksums at the specific TP dropout sites, or move dropout after the all-reduce where the full tensor is available.
+  common_mistake: |
+    **The Pitfall:** Using a shared random seed across all TP ranks without understanding operation-specific RNG requirements.
+    **The Rationale:** Candidates assume `torch.manual_seed()` is sufficient, forgetting that dropout applied to tensor-parallel shards must generate consistent masks—or be intentionally independent—depending on the parallelism scheme.
+    **The Consequence:** Subtle model divergence over thousands of steps that is notoriously difficult to debug.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 13B model, TP=4, dropout p=0.1 in MLP.
+    - A single-GPU baseline applies dropout to one full activation tensor with one well-defined RNG stream.
+    - TP shards the tensor, so each rank consumes RNG values on a different slice unless the model-parallel RNG stream is controlled.
+
+    **Calculations:**
+    - Dropout output is mask * activation / (1 - p).
+    - If a dropout site is mathematically before a TP collective, the masks and RNG ordering must match the intended sharded operation; otherwise the all-reduce sums different random functions than the baseline.
+    - `torch.cuda.manual_seed_all()` only initializes device RNGs. It does not by itself keep model-parallel RNG streams aligned as ranks execute different partitioned kernels.
+    - A dedicated model-parallel RNG tracker makes each TP rank use the correct stream at the same logical dropout site.
+
+    **Conclusion & Interpretation:**
+    - **Result: RNG semantics bug (Synchronization-Bound)**. Fix the dropout RNG stream and placement rather than assuming one global seed reproduces single-GPU behavior.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

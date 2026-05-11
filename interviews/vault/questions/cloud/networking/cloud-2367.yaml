@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-2367
+track: cloud
+level: L5
+zone: evaluation
+topic: load-balancing
+competency_area: networking
+bloom_level: evaluate
+phase: inference
+title: ECMP vs Adaptive Routing for Elephant Flows
+scenario: In a 4,096 GPU cluster using 400 Gbps RoCEv2 over a 2-tier Fat-Tree, you observe that link utilization rarely exceeds 60% during 3D-parallel LLM training, yet the GPUs are network-bound. The network uses static ECMP (Equal-Cost Multi-Path) routing based on 5-tuple hashing. Tensor Parallelism generates massive 100 Gbps 'elephant flows'.
+question: Should you replace static ECMP with packet-level adaptive routing to push RoCEv2 utilization above 60%, and what hardware tradeoff does it create?
+details:
+  realistic_solution: |
+    The 60% utilization ceiling is a classic symptom of ECMP hash collisions. Because ECMP routes per-flow (based on the 5-tuple: source/dest IP, source/dest port, protocol), large ML workloads generating a small number of massive 'elephant flows' (like Tensor Parallelism transfers) do not hash evenly across available uplinks. Multiple 100 Gbps flows hash to the same 400 Gbps uplink, causing microbursts and PFC (Priority Flow Control) pauses, while other links remain idle.
+
+    Packet-level Adaptive Routing (AR) can help only on a fabric that is explicitly designed for it: switches must spray traffic based on congestion while the endpoints or DPUs tolerate and reorder packets at line rate. It is not a drop-in replacement for ordinary RoCEv2 ECMP. Standard RoCEv2 deployments generally assume in-order delivery within a flow; out-of-order packets can trigger NAKs, retransmissions, or head-of-line blocking. With the right switch/NIC support, AR can reduce hash-collision hot spots and raise utilization, but the tradeoff is specialized hardware, reordering buffers, and tighter fabric validation. Without that support, enabling packet spraying would likely collapse performance rather than fix the 60% ceiling.
+  common_mistake: |
+    **The Pitfall:** Assuming Adaptive Routing simply increases utilization to 100% without severe hardware tradeoffs.
+    **The Rationale:** Engineers recognize the hash collision problem of ECMP and assume dynamic routing is a free software fix.
+    **The Consequence:** Deploying Adaptive Routing without hardware support for out-of-order packet reassembly, which causes massive retransmissions and completely collapses network performance.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - ECMP hashes packet headers (5-tuple) to distribute flows.
+    - 400 Gbps uplinks, 100 Gbps elephant flows.
+    - Four distinguishable elephant flows are independently hashed across four equal uplinks.
+
+    **Calculations:**
+    - Total hash assignments = 4^4 = 256.
+    - Perfectly balanced assignments with one flow per uplink = 4! = 24.
+    - Probability of perfect balance = 24 / 256 = 9.4%; probability of at least one collision = 90.6%.
+    - In a common collision case, two 100 Gbps flows land on one 400 Gbps uplink while another uplink carries none. That creates queueing and PFC risk on the hot path even though the aggregate offered load is only 400 Gbps across 1.6 Tbps of uplink capacity.
+
+    **Conclusion & Interpretation:**
+    - **Result: Hash-Collision-Bound**. The calculation shows why a small number of elephant flows can leave ECMP imbalanced; the observed ~60% utilization ceiling is a workload measurement, not something derived directly from the 4-flow probability alone.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 15
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

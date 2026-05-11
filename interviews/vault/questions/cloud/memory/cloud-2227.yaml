@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-2227
+track: cloud
+level: L3
+zone: diagnosis
+topic: vram-budgeting
+competency_area: memory
+bloom_level: apply
+phase: both
+title: The NVMe Warm Cache Miss
+scenario: Your training cluster uses a two-tier storage architecture. A local NVMe SSD cache (3.84 TB per node, 6 GB/s read) and a shared Lustre parallel filesystem (500 GB/s aggregate). The training dataset is 50 TB. Each node processes a random shard of the data each epoch. During the first epoch, training throughput drops by 40% compared to subsequent epochs.
+question: Why does the training throughput drop by 40% during the first epoch?
+details:
+  realistic_solution: During the first epoch, none of the training data is cached on local NVMe. Cache misses are served by the remote Lustre filesystem, so batch assembly is exposed to network hops, filesystem queuing, and higher tail latency. The 500 GB/s aggregate filesystem number does not guarantee each node gets low-jitter service for random shard reads; a node is also limited by its network path and by contention on the OSTs holding its shard. After the first epoch, frequently accessed shards are served from local NVMe, reducing latency and smoothing batch delivery. The fix is to warm the cache before training starts, prefetch according to the training schedule, or use a cache layer that stages shards locally before they enter the critical path.
+  common_mistake: |
+    **The Pitfall:** Blaming the GPU or the data loading library for the throughput drop.
+    **The Rationale:** The throughput drop is not a compute problem — it is a cold cache problem in the storage hierarchy during the first epoch.
+    **The Consequence:** Wasting time profiling GPU kernels when the bottleneck is remote file I/O.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Local NVMe read bandwidth: 6 GB/s (Latency: ~50μs).
+    - Remote Lustre latency per access: ~3ms.
+    - Data loader pattern: 1,000 random reads/sec.
+
+    **Calculations:**
+    - A cold-cache read has about 3ms remote latency; a warm-cache read has about 50μs local latency.
+    - Latency ratio: 3ms / 50μs = 60× higher per random access before the cache is populated.
+    - The 1,000 reads/sec figure is a pressure indicator, not a derivation of 40% loss; parallelism and batching determine how much of that latency lands on the critical path.
+
+    **Conclusion & Interpretation:**
+    - **Result: Cold-cache remote reads create I/O stalls (I/O-Bound)**. The first epoch is slower because misses go to Lustre; warming or prefetching the NVMe cache reduces the stall risk without relying on an unsupported exact percentage.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,58 @@
+schema_version: '1.0'
+id: cloud-3115
+track: cloud
+level: L5
+zone: optimization
+topic: transformer-systems-cost
+competency_area: compute
+bloom_level: evaluate
+phase: both
+title: Speculative Decoding Speedup for 70B INT4 with 7B Draft
+scenario: A 70B LLM serving in INT4 generates 100 tokens/request at 10.45ms/token (memory-bound). You deploy speculative decoding with a 7B draft model. The draft generates 4 tokens speculatively (acceptance rate α=0.8).
+question: What speedup, cost reduction, and memory overhead does speculative decoding with a 7B draft model provide for the 70B INT4 service?
+details:
+  realistic_solution: 'Baseline decode: 100 tokens at 10.45ms/token = 1045ms/request. Speculative decode: the 7B INT4 draft generates 4 tokens at 1.045ms per draft token, or 4.18ms. The 70B model verifies the draft in one parallel step, costing 10.45ms. The expected accepted draft tokens are sum_{i=1..4} 0.8^i = 2.3616 tokens, excluding any extra token sampled by the target model after a rejection/all-accepted round. Effective decode time is (4.18+10.45)/2.3616 = 6.19ms/token, so the conservative decode-only speedup is 10.45/6.19 = 1.69x. The 100-token decode latency falls from about 1045ms to 619ms, ignoring prefill and network overhead. GPU-seconds per generated token fall by the same 1.69x, equivalent to using about 59% of the baseline decode cost. Memory overhead is the 7B INT4 draft weights: 7B * 0.5 bytes = 3.5GB. The 70B INT4 target weights are about 35GB, so total model weights are about 38.5GB, a 10% weight-memory overhead excluding KV cache and runtime buffers.'
+  common_mistake: |
+    **The Pitfall:** Calculating speedup incorrectly by directly dividing step time by acceptance rate.
+    **The Rationale:** Forgetting to account for the time taken by the full 70B model to verify the draft tokens.
+    **The Consequence:** Drastically overestimating the performance gains of speculative decoding.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 70B INT4 memory bound at 10.45ms/tok.
+    - 7B draft at 1.045ms/tok.
+    - 4 draft tokens (k=4), acceptance rate α=0.8.
+    - INT4 weight memory is 0.5 bytes/parameter.
+
+    **Calculations:**
+    - Baseline 100-token decode latency = 100 * 10.45ms = 1045ms.
+    - 4 draft tokens = 4.18ms.
+    - Verify (70B) = 10.45ms per verify step.
+    - Total time per round = 10.45ms + 4.18ms = 14.63ms.
+    - Expected accepted draft tokens (α=0.8, k=4) = 0.8 + 0.8^2 + 0.8^3 + 0.8^4 = 2.3616 tokens.
+    - Effective time = 14.63 / 2.3616 = 6.19ms/token.
+    - Speedup = 10.45 / 6.19 = 1.69x.
+    - Speculative 100-token decode latency = 100 * 6.19ms = 619ms.
+    - Decode cost fraction = 1 / 1.69 = 59.3% of baseline, or a 40.7% reduction in GPU-seconds per generated token.
+    - 70B INT4 weights = 70B * 0.5 bytes = 35GB.
+    - 7B INT4 draft weights = 7B * 0.5 bytes = 3.5GB.
+    - Weight-memory overhead = 3.5GB / 35GB = 10%; combined weight memory = 38.5GB, excluding KV cache and runtime buffers.
+
+    **Conclusion & Interpretation:**
+    - **Result: 1.69x conservative decode speedup with 10% weight-memory overhead.** Speculative decoding lowers decode GPU-seconds by about 41%, before accounting for prefill, networking, and scheduler overhead.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

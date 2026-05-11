@@ -1,0 +1,45 @@
+schema_version: '1.0'
+id: cloud-0207
+track: cloud
+level: L4
+zone: evaluation
+topic: compound-ai-systems
+competency_area: deployment
+bloom_level: analyze
+phase: both
+title: The Triton Inference Server Ensemble
+scenario: 'We''re deploying a RAG pipeline: text preprocessing -> retrieval model -> LLM generation -> JSON postprocessing. An engineer wants to chain these as a Triton Inference Server ensemble. Another says ''just put it all in one Python process.'''
+question: How do a Triton ensemble and a single Python process compare for latency and throughput in this RAG pipeline?
+details:
+  realistic_solution: |
+    A Triton ensemble mainly improves throughput, isolation, batching, and resource utilization; it does not usually make one isolated request faster than a well-written single Python process. For a single request, Triton adds small scheduling and tensor handoff overhead, so latency is roughly the sum of the same stages plus a few milliseconds. The win appears under concurrency: CPU preprocessing/postprocessing, retrieval, and one or more LLM instances can run as a pipeline with dynamic batching and independent instance groups. A monolithic Python process is simpler and may have the lowest single-request latency, but it often bottlenecks on the GIL, blocking stage execution, poor batching, and weaker GPU/CPU overlap.
+  common_mistake: |
+    **The Pitfall:** Assuming the ensemble adds network hops between stages.
+    **The Rationale:** Developers used to microservices assume splitting components implies network serialization overhead.
+    **The Consequence:** Incorrectly concluding the monolithic approach is universally faster, missing the massive pipeline parallelism and shared-memory zero-copy benefits of Triton.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Preprocessing (CPU): 5ms.
+    - Embedding retrieval (GPU): 3ms.
+    - LLM generation (GPU): 200ms.
+    - Postprocessing (CPU): 2ms.
+    - Triton scheduling overhead: ~1 ms per ensemble transition, ~3 ms total.
+    - Compare one LLM instance first, then four independent LLM instances under concurrent load.
+
+    **Calculations:**
+    - Monolithic (Serial) Latency: 5 + 3 + 200 + 2 = 210ms.
+    - Monolithic single-worker throughput: 1000 / 210 = 4.8 req/s.
+    - Triton Ensemble Latency: 210ms + 3ms overhead = 213ms.
+    - One Triton LLM instance bottleneck: max(5ms CPU preprocess, 3ms retrieval, 200ms LLM, 2ms postprocess) = 200ms, so throughput is ~5.0 req/s.
+    - With 4 LLM instances, LLM capacity is 4 * (1000 / 200) = 20 req/s.
+    - CPU stage capacity is 1000 / (5 + 2) = ~143 req/s if CPU work overlaps, so the LLM remains the bottleneck.
+    - After scheduling overhead and load imbalance, expected throughput is roughly 18-20 req/s.
+
+    **Conclusion & Interpretation:**
+    - **Result: Higher Throughput, Not Lower Single-Request Latency.** Triton is ~213 ms for one request versus ~210 ms monolithic, but under concurrency it can reach about 18-20 req/s with four LLM instances because the pipeline overlaps CPU and GPU stages.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+math_verified: true

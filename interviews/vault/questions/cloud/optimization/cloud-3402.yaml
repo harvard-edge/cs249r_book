@@ -1,0 +1,45 @@
+schema_version: '1.0'
+id: cloud-3402
+track: cloud
+level: L6+
+zone: realization
+topic: operator-scheduling
+competency_area: optimization
+bloom_level: analyze
+phase: inference
+title: Optimizing LLM Inference Scheduling on Google TPU v5e
+scenario: You are tasked with optimizing the execution of a large language model (LLM) inference workload on an accelerator equipped with 16 GB of HBM, capable of 197 TFLOPS, and boasting a memory bandwidth of 1.6 TB/s. Given the model's significant size, it's not feasible for all intermediate activations to reside entirely within the HBM concurrently.
+question: How would you schedule LLM operators to minimize execution time under the 16 GB HBM and 1.6 TB/s bandwidth limits?
+details:
+  realistic_solution: Schedule for data locality before peak FLOPS. Partition the LLM graph by layer or attention/MLP blocks so only the live activations, KV slices, and workspaces needed for the next block occupy the 16 GB HBM. Use tiled matmuls and attention kernels that maximize SRAM/register reuse, fuse normalization, bias, activation, and residual operations to avoid writing intermediates to HBM, and rematerialize cheap activations when storing them would displace larger tensors. Keep KV-cache access contiguous and batch requests with similar sequence lengths to reduce padding waste. Run independent work concurrently only when it does not increase HBM spills or bandwidth contention.
+  common_mistake: |
+    **The Pitfall:** Overly prioritizing compute utilization over memory bandwidth limits.
+    **The Rationale:** Focusing solely on maximizing TFLOPS without designing for data locality and HBM capacity.
+    **The Consequence:** Inefficient scheduling that incurs excessive data movement penalties between memory tiers, crippling real-world throughput.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       * 16 GB HBM, 1.6 TB/s memory bandwidth.
+       * 197 TFLOPS (BF16 peak performance).
+       * The schedule must fit live tensors within 16 GB and minimize repeated HBM reads/writes.
+    2. **Calculations:**
+       * Full HBM Scan: 16 GB / 1.6 TB/s = 0.01 seconds.
+       * Any schedule that spills or rereads an extra 16 GB of intermediates adds at least another 10 ms before compute and launch overhead.
+       * Fusing two operators that would otherwise write and reread an 8 GB activation can avoid roughly 16 GB of HBM traffic, saving up to 16 GB / 1.6 TB/s = 10 ms in the bandwidth-bound case.
+    3. **Conclusion & Interpretation:** **Result: HBM-traffic limited**. The schedule should tile, fuse, and rematerialize selectively so live tensors fit in 16 GB and large intermediates are not repeatedly moved through HBM.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

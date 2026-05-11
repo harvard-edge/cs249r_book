@@ -1,0 +1,33 @@
+schema_version: '1.0'
+id: mobile-0594
+track: mobile
+level: L4
+zone: diagnosis
+topic: real-time-deadlines
+competency_area: deployment
+bloom_level: analyze
+phase: inference
+title: The WebView WebGL Throttle
+scenario: You deploy a TensorFlow.js model inside a React Native app wrapped in a mobile WebView. The model uses WebGL to run on the mobile GPU. On a desktop browser, it runs at 60 FPS. On the mobile WebView, it runs at 15 FPS, even though the mobile GPU is mathematically powerful enough.
+question: What WebView architecture bottleneck causes WebGL inference to run slowly despite enough GPU math throughput?
+details:
+  realistic_solution: |
+    The bottleneck is the WebView/GPU architecture: the WebView, app process, and GPU/compositor services are separated by security-enforced IPC boundaries. When the TensorFlow.js WebGL path performs synchronous tensor readbacks such as `gl.readPixels`, those readbacks cross the process boundary and stall until the GPU work is visible to the WebView. Raw GPU throughput still matters, but it is hidden behind synchronization and IPC costs. The architectural fix is to reduce synchronous readbacks, move to a backend with asynchronous buffer flow where available, or bypass the WebView by compiling the model to Core ML or TFLite and passing only final results across the JavaScript bridge.
+  common_mistake: |
+    **The Pitfall:** Assuming mobile GPUs are simply too computationally weak compared to desktop GPUs.
+    **The Rationale:** Developers don't understand that WebViews operate in isolated sandboxed processes that require inter-process communication (IPC) for GPU access.
+    **The Consequence:** Attempting to prune or quantize the model pointlessly, failing to recognize a structural synchronization bottleneck.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Target framerate: 60 FPS (16.6ms budget).
+    - IPC synchronization penalty for `gl.readPixels`: ~5-10ms.
+    - Intermediate tensor readbacks per frame: 10.
+
+    **Calculations:**
+    - Total IPC overhead per frame: 10 readbacks * 5-10ms = 50-100ms.
+    - Maximum framerate from readback overhead alone: 1000ms / 50-100ms = ~10-20 FPS before model compute and rendering.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~10-20 FPS ceiling (IPC Synchronization-Bound)**. The sandboxed WebView process boundary and synchronous readbacks can dominate frame time even when the GPU has enough arithmetic throughput.
+status: published
+provenance: imported

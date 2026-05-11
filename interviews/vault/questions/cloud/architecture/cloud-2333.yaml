@@ -1,0 +1,39 @@
+schema_version: '1.0'
+id: cloud-2333
+track: cloud
+level: L6+
+zone: diagnosis
+topic: neural-architecture-search
+competency_area: architecture
+bloom_level: analyze
+phase: training
+title: Systolic Array Tile Padding Collapse
+scenario: You are deploying a BERT-style model on a custom cloud NPU featuring a massive 256x256 systolic array. At batch size 256, the NPU achieves 15,000 QPS. When the serving layer dynamically adjusts the batch size to 257 to handle a traffic spike, throughput inexplicably plummets to 3,500 QPS.
+question: Why does throughput collapse when the batch size changes from 256 to 257 on the 256x256 NPU, and how would you fix it?
+details:
+  realistic_solution: |
+    The symptom is a performance cliff caused by a mismatch between the algorithmic tensor dimensions and the hardware systolic array tile shape. At batch size 257, a naive compiler/runtime may allocate a second 256-row tile for the extra request, leaving most lanes in that tile padded or idle. The fix is to avoid issuing pathological shapes: use dynamic batching and bucketing that target tile-aligned sizes, split or defer the extra request, or change the compiler/layout to pack multiple small remainders together instead of forcing an almost-empty tile.
+  common_mistake: |
+    **The Pitfall:** Assuming the throughput drop is caused by exceeding total SRAM capacity and spilling to off-chip DRAM.
+    **The Rationale:** Candidates look for memory capacity cliffs, ignoring the rigid geometric constraints of fixed-size hardware systolic arrays.
+    **The Consequence:** Engineers might attempt to quantize the model to save memory, which fails to fix the >4x slowdown caused by dimension padding.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Hardware: 256x256 systolic array.
+    - Simplified model: the batch dimension is tiled in chunks of 256 rows.
+    - The compiler does not pack remainders from other requests into the partially filled tile.
+
+    **Calculations:**
+    - Batch 256: 1 batch tile is issued and all 256 rows are useful, so row utilization is 256 / 256 = 100%.
+    - Batch 257: 2 batch tiles are issued with capacity for 512 rows, but only 257 rows are useful.
+    - Row utilization in this simplified tiling model = 257 / 512 = 50.2%.
+    - The second tile carries 255 padded rows, so it can nearly double the tiled work for only one extra request.
+
+    **Conclusion & Interpretation:**
+    - **Result: Tile-Fragmentation Cliff**. The 50.2% figure is a simplified upper-bound utilization model for naive padding; the observed >4x QPS drop also reflects pipeline bubbles, memory scheduling, and runtime overhead. Bucketing, tile-aligned batching, or better compiler packing removes the bad batch boundary.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 18
+validated: true
+math_verified: true

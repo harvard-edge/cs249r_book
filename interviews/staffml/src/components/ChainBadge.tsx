@@ -24,6 +24,13 @@ export interface ChainBadgeProps {
   chainName?: string;
   position: number;    // 1-indexed
   total: number;
+  /**
+   * Chain tier (Phase 2 of CHAIN_ROADMAP.md). When "secondary", the badge
+   * renders an "alt path" pill so the learner knows this is a coverage
+   * chain rather than the canonical Bloom progression. Defaults to
+   * "primary" so existing callers don't need updating.
+   */
+  tier?: "primary" | "secondary";
   onClick?: () => void;
   className?: string;
 }
@@ -33,6 +40,7 @@ export default function ChainBadge({
   chainName,
   position,
   total,
+  tier = "primary",
   onClick,
   className,
 }: ChainBadgeProps) {
@@ -70,6 +78,14 @@ export default function ChainBadge({
     >
       <LinkIcon className="w-3 h-3" aria-hidden="true" />
       <span>{label}</span>
+      {tier === "secondary" && (
+        <span
+          className="ml-1 px-1.5 py-0.5 rounded-full bg-accentBlue/15 border border-accentBlue/30 text-[9px] tracking-wider"
+          title="Alternative path — this chain came from the second-pass coverage build."
+        >
+          alt path
+        </span>
+      )}
       <ChevronRight
         className="w-3 h-3 transition-transform group-hover:translate-x-0.5"
         aria-hidden="true"

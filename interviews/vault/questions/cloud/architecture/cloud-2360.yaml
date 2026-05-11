@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-2360
+track: cloud
+level: L5
+zone: diagnosis
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: evaluate
+phase: both
+title: Diagnosing PCIe Contention from Checkpointing
+scenario: During an LLM training run on a 4x GPU node, iteration time is perfectly stable at 2.5s, except every 1000 steps it spikes to 18.5 seconds. Asynchronous checkpointing is enabled, offloading 80GB of optimizer states from GPU memory to the host, and then writing to a local NVMe RAID. GPU utilization drops to 0% during the spike.
+question: Why does iteration time spike from 2.5s to 18.5s every 1000 steps during async 80GB checkpointing, and how would you reduce the stall?
+details:
+  realistic_solution: |
+    The spike is caused by the checkpoint path becoming the shared critical resource for the training step. Even though checkpointing is "asynchronous" at the software level, copying 80GB of optimizer state from GPU memory to host memory can saturate the PCIe/root-complex path for several seconds, and the subsequent 80GB host-to-NVMe write can consume enough host memory, DMA, and storage bandwidth that the next iteration cannot make progress until the checkpoint pipeline drains. The fix is to make checkpoint I/O genuinely non-blocking with respect to training: copy in smaller chunks, rate-limit or stagger checkpoint transfers, write from an already materialized host-side snapshot in a background process, and place checkpoint traffic on separate devices/links when the hardware actually provides isolation. Do not rely on pinning a thread to a different NUMA node as a substitute for bandwidth isolation.
+  common_mistake: |
+    **The Pitfall:** Blaming the NVMe drive write speed.
+    **The Rationale:** The candidate sees a slow I/O bound checkpoint and immediately assumes the physical disk is the bottleneck.
+    **The Consequence:** The team wastes money upgrading to faster NVMe drives or in-memory caches, completely failing to fix the shared PCIe bus saturation that is starving the dataloader.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Checkpoint size: 80 GB
+    - PCIe Gen4 x16 bandwidth: 20 GB/s
+    - NVMe write speed: 5 GB/s
+    - The asynchronous checkpoint path overlaps the 4s GPU-to-host copy with the beginning of the host-to-NVMe drain, but the next training step blocks until the 80GB host-side checkpoint write drains.
+
+    **Calculations:**
+    - GPU-to-host copy time = 80 GB / 20 GB/s = 4 seconds.
+    - Host-to-NVMe write time = 80 GB / 5 GB/s = 16 seconds.
+    - With double-buffered async checkpointing, the copy can fit inside the longer 16s write phase, so the checkpoint critical path is approximately max(4s, 16s) = 16s.
+    - Visible checkpoint iteration time = normal step time + checkpoint critical path = 2.5s + 16s = 18.5s.
+    - If the D2H copy and NVMe write were fully serialized, the spike would be closer to 2.5s + 4s + 16s = 22.5s; the observed 18.5s implies partial overlap but not full isolation from training.
+
+    **Conclusion & Interpretation:**
+    - **Result: 18.5 seconds (checkpoint-I/O-bound)**. The observed spike is consistent with a checkpoint pipeline whose long 80GB transfer/write phase is still on the critical path despite being launched asynchronously.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

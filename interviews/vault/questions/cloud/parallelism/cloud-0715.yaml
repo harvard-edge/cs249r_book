@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-0715
+track: cloud
+level: L5
+zone: optimization
+topic: 3d-parallelism
+competency_area: parallelism
+bloom_level: evaluate
+phase: training
+title: The Async SGD Staleness Problem
+scenario: To avoid synchronization barriers, your team switches from synchronous to asynchronous SGD for a 13B model on 64 GPUs. After 24 hours, the loss curve is 15% higher than the synchronous baseline at the same number of tokens processed. The team blames 'async is just worse'.
+question: Is that the full story, and can you quantify the staleness?
+details:
+  realistic_solution: 'In async SGD with 64 workers, when worker i reads the parameter server''s weights, computes a gradient, and pushes it back, other workers have updated the parameters ~63 times in between. Average staleness is 63 steps. Mitigation: (1) Bounded staleness - reject gradients older than a threshold. (2) Staleness-weighted updates - scale the learning rate by 1/staleness. (3) Local SGD - each worker does H local steps, then averages parameters globally every H steps.'
+  common_mistake: |
+    **The Pitfall:** Abandoning asynchronous SGD completely.
+    **The Rationale:** Engineers assume asynchronous SGD is inherently flawed or unstable when it fails to match synchronous convergence out-of-the-box.
+    **The Consequence:** The team misses the opportunity to compensate for quantifiable gradient staleness, sacrificing massive potential throughput gains.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 64 workers, 500ms step time.
+    - 64 workers, each taking 500 ms to compute one gradient.
+    - Parameter server applies gradients as they arrive.
+
+    **Calculations:**
+    - During the 500 ms that one worker spends computing its gradient, the other 63 workers each finish roughly one update.
+    - Average gradient staleness: about 63 parameter-server updates.
+    - Synchronous update rate: one global update every 500 ms = 2 global updates/sec.
+    - Asynchronous application rate: 64 worker updates every 500 ms = 128 applied updates/sec.
+    - The 128 updates/sec figure is an update-arrival rate, not a guaranteed convergence-rate gain, because many updates are computed on parameters that are about 63 versions old.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~63-step staleness.** The loss gap is not proof that async is inherently worse; it shows that the optimizer is applying stale gradients. Any throughput claim needs a separate convergence-efficiency model, so the defensible numeric answer here is the staleness estimate.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_status_pro: WARN
+validation_issues_pro:
+  - The Napkin Math section is incomplete, cutting off before the end of the explanation.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

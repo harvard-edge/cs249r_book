@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate publication-quality data figures for the StaffML paper.
 
-Pipeline: generated corpus.json (``vault build --legacy-json``) + chains
+Pipeline: generated corpus.json (``vault build --local-json``) + chains
   → analyze_corpus.py → corpus_stats.json → THIS → PDFs
 
 Run: python3 generate_figures.py

@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: edge-2226
+track: edge
+level: L3
+zone: optimization
+topic: autograd-computational-graphs
+competency_area: optimization
+bloom_level: evaluate
+phase: training
+title: Optimizing memory layout of saved tensors for backward on constrained Jetson Orin
+scenario: You are training a custom depthwise separable convolution model on Jetson Orin (32GB unified memory). Profiling shows that 60% of backward pass time is spent on memory transfers between CPU and GPU for saved activation tensors. The model intermittently offloads tensors to CPU during large batch training.
+question: How would you eliminate CPU-GPU activation offload bottlenecks during backward for the depthwise separable model on Orin?
+details:
+  realistic_solution: On Orin's unified memory, CPU fallback for saved activations can still stall backward because the GPU must wait on shared-memory traffic, cache coherency, and page migration or placement effects. Use activation checkpointing for cheap blocks so activations are recomputed instead of saved under memory pressure. If offload is intentional, use torch.autograd.graph.saved_tensors_hooks or an explicit activation-offload policy to decide which tensors move and when; otherwise reduce batch size or checkpoint more layers so saved tensors remain GPU-resident. torch.cuda.memory.set_per_process_memory_fraction() limits allocator growth but does not prevent autograd saved tensors from being offloaded.
+  common_mistake: |
+    **The Pitfall:** Letting autograd saved activations migrate or offload without an explicit placement policy.
+    **The Rationale:** Under memory pressure, saved feature maps for backward can end up CPU-resident or trigger unified-memory page migration at the exact point the GPU needs them.
+    **The Consequence:** Backward stalls on shared-memory movement and cache-coherency work on Orin, even though the device uses unified memory rather than discrete PCIe-attached VRAM.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Profiling shows 60% of backward time is spent waiting on saved-activation movement or placement.
+    - Let the current backward step time be T.
+    - Activation checkpointing adds recompute cost R but removes most of the transfer wait.
+
+    **Calculations:**
+    - Transfer-dominated time per step = 0.60T.
+    - Non-transfer compute time per step = 0.40T.
+    - With checkpointing, new time is approximately 0.40T + R.
+    - Checkpointing helps when R < 0.60T.
+    - Example: if recompute costs 0.20T, new time is 0.60T, a 40% reduction.
+
+    **Conclusion & Interpretation:**
+    - **Result: checkpoint when recompute is cheaper than the profiled transfer wait (Memory-Bandwidth Bound).** The decision should come from measured wait time and recompute cost, not an unsupported Orin transfer-bandwidth estimate.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

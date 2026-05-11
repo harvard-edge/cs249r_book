@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-3642
+track: cloud
+level: L5
+zone: design
+topic: tail-latency
+competency_area: latency
+bloom_level: create
+phase: inference
+title: Load Balancing Strategy to Minimize P999 on TPU v5e
+scenario: You're designing a load balancer for a TPU v5e (16GB HBM, 197 TFLOPS BF16) inference service running BERT-large at 50K RPS. Round-robin distribution gives P999=800ms. Analysis shows 0.1% of requests contain sequences >400 tokens (BERT max 512), causing disproportionate compute time.
+question: How should the BERT-large service route requests so the 0.1% long sequences stop driving P999 to 800ms?
+details:
+  realistic_solution: |
+    Implement cost-aware routing: classify requests into normal requests and long requests (>400 tokens) at the load balancer using a lightweight tokenizer or trusted length metadata. Route the 0.1% long-sequence traffic to a separate replica pool with enough headroom for its higher compute cost, while keeping normal requests on replicas protected from head-of-line blocking.
+  common_mistake: |
+    **The Pitfall:** Using least-connections load balancing without accounting for request cost heterogeneity.
+    **The Rationale:** Candidates assume all requests cost the same, but a single long-sequence request consumes 16x the TPU cycles of a short one.
+    **The Consequence:** The load balancer still routes massive jobs to arbitrarily "free" replicas, completely blocking the queue for subsequent short requests and ruining tail latency.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: BERT-large, Attention is O(n^2).
+    - Traffic: 50K RPS, 0.1% are 512-token requests.
+    - Hardware: TPU v5e (197 TFLOPS).
+
+    **Calculations:**
+    - Compute Scaling: A 512-token request takes (512/128)^2 = 16x the compute of a 128-token request.
+    - Long Request Volume: 50,000 * 0.001 = 50 requests/sec.
+    - Long Request Compute: 50 requests/sec * 680 GFLOP/request = 34 TFLOP/sec.
+    - TPU Equivalent: 34 TFLOP/sec / 197 TFLOP/sec = 17% of one TPU v5e's peak compute.
+
+    **Conclusion & Interpretation:**
+    - **Result: Compute-skewed traffic.** The rare long requests represent only 0.1% of request volume but a much larger share of compute demand. Separating them prevents short requests from queueing behind expensive long requests under round-robin.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

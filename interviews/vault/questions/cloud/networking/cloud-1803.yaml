@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-1803
+track: cloud
+level: L4
+zone: diagnosis
+topic: collective-communication
+competency_area: networking
+bloom_level: analyze
+phase: both
+title: Diagnosing RoCEv2 PFC Storms
+scenario: You are training a 70B parameter model on 1024 H100 GPUs across 128 nodes, communicating via a 400Gbps RoCEv2 fabric. During the All-Reduce phase, Model Flops Utilization (MFU) intermittently plummets from 55% to 15%. Network telemetry reveals a massive spike in PFC (Priority Flow Control) pause frames and subsequent UDP packet drops at the spine switches, leading to NCCL timeouts.
+question: How do you diagnose this bottleneck, and what configuration changes stabilize the fabric?
+details:
+  realistic_solution: Diagnose this as an incast-driven PFC storm by correlating the MFU collapse with synchronized AllReduce fan-in, spine egress queue growth, PFC pause-frame spikes, ECN marks, UDP drops, and NCCL timeout timing. Stabilize the fabric by tuning DCQCN/ECN so switches mark congestion safely before PFC headroom is exhausted, with ECN thresholds set below the PFC pause threshold based on measured RTT and buffer headroom rather than a fixed percentage alone. Also verify PFC headroom, isolate RDMA traffic classes, and add pacing or reduce burst size if incast still overwhelms the egress queue.
+  common_mistake: |
+    **The Pitfall:** Assuming raw bandwidth saturation or simply increasing NCCL timeouts will fix the drops.
+    **The Rationale:** Treating AI cluster networking like traditional loss-tolerant web traffic.
+    **The Consequence:** Failing to address RoCEv2's Go-Back-N behavior; PFC head-of-line blocking triggers catastrophic throughput collapse during incast microbursts regardless of configured timeouts.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Network: 400 Gbps (50 GB/s) per sender and 50 GB/s egress drain at the congested output port.
+    - Microburst incast: 8 senders simultaneously target one receiver.
+    - Switch buffer size: 2 MB.
+
+    **Calculations:**
+    - Aggregate offered load: 8 * 50 GB/s = 400 GB/s.
+    - Egress drain limit: 50 GB/s.
+    - Buffer ingress delta: 400 - 50 = 350 GB/s = 0.35 MB/us = 350 KB/us.
+    - Buffer fill time: 2 MB / 0.35 MB/us = 5.7 us.
+    - To leave roughly a 2 us RTT reaction window, ECN must fire before about 2 us * 0.35 MB/us = 0.7 MB of additional queue can accumulate.
+
+    **Conclusion & Interpretation:**
+    - **Result: Incast Buffer Overflow.** ECN should trigger well below the 2 MB PFC threshold, with the exact threshold chosen from buffer headroom and RTT so DCQCN can reduce sender rates before pause frames and drops cascade.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

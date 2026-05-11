@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: edge-0910
+track: edge
+level: L6+
+zone: mastery
+topic: memory-hierarchy-design
+competency_area: memory
+bloom_level: evaluate
+phase: both
+title: Wearable SRAM Weight Pinning
+scenario: You are designing an always-on keyword spotting system for a smartwatch with a strict 5mW active power budget. The microcontroller has 512KB of SRAM and 4MB of eXecute-In-Place (XIP) Flash memory. Your float32 audio model is 1.2MB. Initial testing shows the system drawing 15mW during inference.
+question: How would you modify the 1.2MB keyword-spotting model and memory layout to meet the 5mW smartwatch budget?
+details:
+  realistic_solution: The power drain is caused by repeatedly fetching the hot inference working set from high-latency, high-power Flash memory. Apply INT8 quantization and pruning to reduce the 1.2MB model toward ~300KB, then place the hottest weights, activations, stack, and DMA/audio buffers in the 512KB SRAM. Code, boot storage, metadata, and cold tables may still live in XIP Flash; the goal is not literally zero Flash use, but to avoid streaming large weight tensors from Flash on every inference. If the full working set still does not fit, reduce the model/window size or fuse/stream only cold layers so per-inference Flash traffic stays within the power budget.
+  common_mistake: |
+    **The Pitfall:** Using DMA to page FP32 weights from Flash to SRAM on demand.
+    **The Rationale:** Candidates think avoiding CPU overhead is enough and forget the extreme energy cost of activating the flash memory controller.
+    **The Consequence:** The system continues to draw high power, draining the smartwatch battery in hours.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Power budget: 5mW
+    - Flash read energy: ~20 pJ/bit
+    - FP32 model size: 1.2MB (9.6M bits)
+    - INT8/pruned hot working set target: ~300KB weights plus <=200KB activations, buffers, stack, and runtime state in SRAM
+    - Inference rate: 50 inferences/sec
+
+    **Calculations:**
+    - Worst case if the full FP32 model is streamed from Flash each inference: 9.6M bits * 20 pJ/bit = 192 µJ/inference.
+    - At 50 inferences/sec, that Flash traffic alone is 192 µJ * 50 = 9.6mW, already above the 5mW total budget.
+    - To keep Flash traffic below 1mW, per-inference Flash reads must be <= 1mW / 50 / 20 pJ/bit = 1.0M bits = 125KB.
+    - A ~300KB INT8 weight set can fit in SRAM only if activations, buffers, stack, and runtime state fit in the remaining ~212KB.
+
+    **Conclusion & Interpretation:**
+    - **Result: Streaming the full model from Flash violates the budget (Power-Bound)**. The model should be reduced and laid out so the hot working set fits in SRAM; otherwise, Flash reads must be limited to small cold-layer traffic rather than the full 1.2MB per inference.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

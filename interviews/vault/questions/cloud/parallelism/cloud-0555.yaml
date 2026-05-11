@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-0555
+track: cloud
+level: L6+
+zone: design
+topic: 3d-parallelism
+competency_area: parallelism
+bloom_level: create
+phase: training
+title: Context Parallelism for 1M-Token Attention
+scenario: You need to train a model with a 1M token context window. With a hidden dimension of 8192 and FP16 precision, standard self-attention requires O(n^2) memory, meaning a single attention head's score matrix for 1M tokens would be 2 TB, far exceeding a single GPU's memory.
+question: How do you distribute the sequence across GPUs, and what's the communication pattern?
+details:
+  realistic_solution: Use Ring Attention or context parallelism. Split the 1M-token sequence into P contiguous chunks across P GPUs. Each GPU owns the queries for its local chunk and streams key/value blocks from the other chunks through a ring or scheduled all-to-all pattern. For each received KV block, the GPU computes the local query block's attention contribution and maintains the online softmax state, as in FlashAttention, so it never materializes the full score matrix. Communication is a sequence of KV-block transfers, overlapped with attention compute; the total compute is still quadratic in sequence length, but the score-matrix and KV storage are distributed.
+  common_mistake: |
+    **The Pitfall:** Assuming FlashAttention alone solves the infinite context problem.
+    **The Rationale:** Candidates know FlashAttention reduces activation memory to O(n) and mistakenly think it scales infinitely.
+    **The Consequence:** They fail to realize the computation is still O(n^2) and the KV cache across all heads still exceeds VRAM, causing an OOM error at 1M tokens.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Context window: 1M tokens.
+    - Model dimensions: 128 heads, head_dim=64.
+    - Precision: FP16 (2 bytes).
+    - Ring size (GPUs): P=32.
+    - Hardware: H100 (989 TFLOPS), NVLink (900 GB/s), InfiniBand (50 GB/s).
+
+    **Calculations:**
+    - Hidden dim = 128 * 64 = 8192.
+    - Full K+V storage for one layer: 1M * 8192 * 2 tensors * 2 bytes ≈ 32 GB.
+    - Local K+V storage per GPU: 32 GB / 32 = 1 GB.
+    - A local query block has 1M / 32 = 31,250 tokens.
+    - One local-query by local-KV block attention step costs about 4 * 31,250 * 31,250 * 8192 ≈ 32 TFLOPs for QK and AV.
+    - Over all 32 KV blocks, one GPU performs about 32 * 32 TFLOPs ≈ 1.0 PFLOP per layer, or about 1.0 s at 989 TFLOP/s if peak were sustained.
+    - Each GPU receives about 31 remote KV blocks * 1 GB ≈ 31 GB per layer; at 50 GB/s this is about 620 ms if all traffic is inter-node and not hidden.
+
+    **Conclusion & Interpretation:**
+    - **Result: Distributed Quadratic Attention**. Context parallelism makes the memory footprint per GPU plausible by sharding K/V and avoiding materialized score matrices, but the workload remains extremely expensive. Whether compute hides communication depends on sustained FLOPs, topology, and overlap; the method is required for memory feasibility, not because the simple estimate proves a compute-only bottleneck.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

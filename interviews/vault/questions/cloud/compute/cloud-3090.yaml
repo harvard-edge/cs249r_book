@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-3090
+track: cloud
+level: L6+
+zone: mastery
+topic: systolic-dataflow
+competency_area: compute
+bloom_level: create
+phase: both
+title: 'Systolic Array Mastery: Full Transformer Layer Analysis on TPU'
+scenario: You must perform a complete performance analysis of a single transformer layer (hidden=4096, FFN=16384, heads=32, seq=2048, batch=16) on a TPU v5e instance.
+question: How do the attention and FFN FLOPs and bandwidth break down for this transformer layer, what is the bottleneck, and what tile/dataflow should XLA use?
+details:
+  realistic_solution: QKV projections are 3 * 2 * 16 * 2048 * 4096 * 4096 = 3.30 TFLOPs. The output projection adds 1.10 TFLOPs. QK^T is 2 * 16 * 32 * 2048 * 2048 * 128 = 0.55 TFLOPs, and Attn*V is another 0.55 TFLOPs. The two FFN matmuls total 2 * 2 * 16 * 2048 * 4096 * 16384 = 8.80 TFLOPs. Projection and FFN matmuls have high reuse and are compute-bound; unfused attention score/probability tensors create multi-GiB HBM traffic. XLA should use fused attention/FlashAttention-style tiling over heads and sequence blocks, keep Q/K/V tiles and partial softmax state on chip, and avoid materializing the full attention matrix to HBM.
+  common_mistake: |
+    **The Pitfall:** Treating the entire transformer layer as a monolithic operation.
+    **The Rationale:** Candidates fail to decompose the layer into sub-operations with different arithmetic intensities (attention is often memory-bound while FFN is compute-bound).
+    **The Consequence:** Incorrectly identifying the bottleneck and failing to propose proper dataflow optimizations.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Shape: batch=16, seq=2048, hidden=4096, heads=32, head_dim=128, FFN=16384.
+    - TPU v5e specs: 197 TFLOPS, 819 GB/s HBM bandwidth.
+
+    **Calculations:**
+    - QKV FLOPs = 3 * 2 * 16 * 2048 * 4096 * 4096 = 3.30T; output projection = 1.10T.
+    - QK^T FLOPs = 2 * 16 * 32 * 2048 * 2048 * 128 = 0.55T; Attn*V = 0.55T.
+    - FFN FLOPs = 2 * 2 * 16 * 2048 * 4096 * 16384 = 8.80T.
+    - Total compute = 14.30T; ideal compute lower bound = 14.30T / 197T = 72.6ms.
+    - Materialized attention scores = 16 * 32 * 2048 * 2048 * 2 = 4.00 GiB; probabilities are another 4.00 GiB if written and reread.
+    - Fused attention avoids those score/probability HBM round trips by tiling sequence blocks per head and keeping partial max/sum state on chip.
+
+    **Conclusion & Interpretation:**
+    - **Result: Mixed Bottleneck.** FFN and projections dominate FLOPs and are compute-bound, while naive attention is bandwidth-heavy. XLA should use fused, block-tiled attention plus output-stationary systolic matmuls for projections and FFN.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

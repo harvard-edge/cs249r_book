@@ -112,7 +112,14 @@ export default function TopicDetail({ topic, areaName, style, onClose, selectedT
                             <div className="min-w-0">
                               <p className="text-[14px] font-semibold text-textPrimary leading-snug mb-1">{q.title}</p>
                               <p className="text-[13px] text-textSecondary line-clamp-2 leading-relaxed">
-                                {q.scenario.replace(/^-\s*\*\*Interviewer:\*\*\s*/i, "").replace(/^"/, "").replace(/"$/, "").slice(0, 140)}...
+                                {(() => {
+                                  const text = (q.question ?? q.scenario)
+                                    .replace(/^-\s*\*\*Interviewer:\*\*\s*/i, "")
+                                    .replace(/^"/, "")
+                                    .replace(/"$/, "")
+                                    .trim();
+                                  return text.length > 140 ? `${text.slice(0, 140)}…` : text;
+                                })()}
                               </p>
                             </div>
                             <Play className="w-3.5 h-3.5 text-textMuted group-hover:text-textPrimary transition-colors shrink-0 mt-1" />

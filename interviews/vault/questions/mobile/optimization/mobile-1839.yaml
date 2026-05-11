@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: mobile-1839
+track: mobile
+level: L4
+zone: diagnosis
+topic: autograd-computational-graphs
+competency_area: optimization
+bloom_level: analyze
+phase: training
+title: Profiling PyTorch Mobile image inference tensor copies
+scenario: A PyTorch Mobile model processes images from the camera in real-time. Profiling shows 60% of inference time (12ms out of 20ms) is spent on memory operations, not compute. The model is a MobileNetV2 (3.4M params) which should be perfectly compute-bound.
+question: How would you profile and remove unnecessary tensor copies in a PyTorch Mobile image pipeline?
+details:
+  realistic_solution: 'Convert to channels-last memory format: model = model.to(memory_format=torch.channels_last). Process input in NHWC natively. Fuse the uint8->float32 conversion and normalization into a single operation. Eliminate unnecessary .contiguous() calls.'
+  common_mistake: |
+    **The Pitfall:** Overlooking implicit tensor format conversions.
+    **The Rationale:** Engineers forget that mobile camera frames arrive in NHWC format, while PyTorch expects NCHW, leading to implicit, non-contiguous memory copies when `.contiguous()` is called.
+    **The Consequence:** The model becomes severely memory-bound, spending the majority of its execution time copying data rather than computing.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Camera frame: 1 x 3 x 720 x 1280 (uint8).
+    - Sustained measured copy bandwidth can be far below peak bandwidth when format conversion, allocation, cache effects, and dtype conversion are included.
+
+    **Calculations:**
+    - Frame elements: 3 * 720 * 1280 = 2,764,800.
+    - uint8 frame size: 2,764,800 bytes = 2.76 MB.
+    - float32 tensor size after cast: 2,764,800 * 4 bytes = 11.06 MB.
+    - A separate NHWC-to-NCHW float32 copy reads and writes about 11.06 MB each, or 22.12 MB of raw memory traffic.
+    - Ideal raw traffic at 50 GB/s would take 22.12 MB / 50 GB/s = 0.44 ms, so peak bandwidth alone cannot explain a measured 12 ms memory section.
+    - The 12 ms profile must therefore include more than one raw copy: format conversion, uint8-to-float cast, normalization, allocation, possible .contiguous() calls, and non-contiguous access. Its effective bandwidth is 22.12 MB / 0.012 s = 1.84 GB/s for just one copy-equivalent.
+    - Profile with operator-level tracing to count copy-equivalent traffic; if tracing shows roughly 5-10 copy-equivalents plus conversion kernels, the observed 12 ms is plausible.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory Copy Bound**. The fix is to measure and remove the copy path, not assume one transpose costs 12 ms. Channels-last tensors, fused cast/normalization, and removing .contiguous() calls should collapse multiple memory passes into one pipeline.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed

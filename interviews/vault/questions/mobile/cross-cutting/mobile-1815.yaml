@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: mobile-1815
+track: mobile
+level: L3
+zone: implement
+topic: software-portability
+competency_area: cross-cutting
+bloom_level: apply
+phase: both
+title: 'Portable Feature Extraction Pipeline: Camera Input to Model Input'
+scenario: A cross-platform camera app preprocesses images. iOS outputs BGRA, Android outputs YUV_420_888. Both must produce a [1,3,224,224] float tensor.
+question: How would one preprocessing interface convert iOS BGRA and Android YUV_420_888 frames into a float tensor efficiently?
+details:
+  realistic_solution: 'Use platform-specific zero-copy or GPU-backed preprocessing behind one interface: (1) iOS: accept CVPixelBuffer, keep it in IOSurface/Metal-compatible storage, then use a Metal compute shader or Core Image/Metal path for BGRA->RGB, resize, normalization, and packing into the model input buffer. vImage/Accelerate is acceptable for a CPU-only fallback, but not the fastest path if the model runs on GPU/ANE afterward. (2) Android: accept YUV_420_888 through ImageReader or CameraX, import the planes through an external texture or hardware buffer when possible, then use Vulkan compute/OpenGL ES shader, GPUImage-style shader pipeline, or a current platform image pipeline to do YUV->RGB, resize, and normalization. Do not use RenderScript for new Android code. (3) Common interface: expose a PreprocessResult with backend-owned buffer handle, shape, dtype, layout, and synchronization token so the ML runtime can consume the tensor without an avoidable CPU round trip.'
+  common_mistake: |
+    **The Pitfall:** Writing preprocessing inside the ML framework (PyTorch/TFLite) for portability.
+    **The Rationale:** Attempting to reuse generic Python/C++ code instead of utilizing platform-native hardware acceleration APIs.
+    **The Consequence:** Slow, inefficient memory copies between the camera buffer and the ML runtime, adding crucial milliseconds to the pipeline.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Output Tensor Size: 224x224x3 floats.
+    - Raw Frame Size: 1080p BGRA.
+    - Goal: produce [1,3,224,224] float tensor without unnecessary camera-buffer readback.
+
+    **Calculations:**
+    - Output Size: 224 * 224 * 3 * 4 bytes = 602 KB.
+    - Input Size: 1920 * 1080 * 4 bytes = 8.3 MB.
+    - A CPU round trip must read the camera frame and later upload the 602 KB tensor or converted image back to the accelerator.
+    - A GPU-backed path fuses color conversion, resize, normalization, and layout packing into one pass over the source frame.
+
+    **Conclusion & Interpretation:**
+    - **Result: bandwidth- and copy-sensitive preprocessing.** The efficient interface passes platform-native image buffers through a GPU-backed conversion path and exposes a backend-owned tensor, with CPU preprocessing reserved as a fallback.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

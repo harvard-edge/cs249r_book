@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-3724
+track: cloud
+level: L4
+zone: diagnosis
+topic: memory-hierarchy-design
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: Memory Bandwidth Bottleneck Diagnosis for LLM Decode on MI300X
+scenario: An MI300X (192GB HBM3, 5.3 TB/s) serving Llama-3-70B at batch_size=4 shows 95 tok/s throughput but profiling shows only 63% HBM bandwidth utilization.
+question: Why is the MI300X deployment reaching only 63% HBM bandwidth at batch_size=4, and how would you investigate the gap?
+details:
+  realistic_solution: Treat the 63% figure as measured HBM bandwidth relative to the 5.3 TB/s peak, not as proof that each token literally streams all 140GB of weights. At 95 aggregate tok/s and batch_size=4, the decode step time is 4 / 95 = 42.1ms. The profiler-implied average bandwidth is 0.63 × 5.3TB/s = 3.34TB/s, so measured traffic is about 3.34TB/s × 42.1ms = 140GB per batched decode step. If the same measured working set were served at peak bandwidth, the step would be about 140GB / 5.3TB/s = 26.4ms, or 151 tok/s. The gap is therefore bandwidth underutilization and overhead, not necessarily compute-bound execution. Investigate with rocprof by measuring per-kernel bytes and bandwidth, launch gaps, occupancy, CPU-GPU synchronization from batching, attention/metadata overhead, and memory-access efficiency.
+  common_mistake: |
+    **The Pitfall:** Assuming low bandwidth utilization means the workload is compute-bound.
+    **The Rationale:** Engineers see 63% BW utilization and assume they hit a compute ceiling, ignoring launch overheads and inefficiencies.
+    **The Consequence:** Teams waste time optimizing tensor cores when the real issue is CPU-GPU sync or kernel launch latency.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: Llama-3-70B; profiler should determine actual bytes moved per decode step.
+    - Hardware: MI300X (5.3 TB/s bandwidth).
+    - Batch size: 4 active sequences, one generated token per sequence per decode step.
+
+    **Calculations:**
+    - Actual step time at 95 aggregate tok/s and batch=4: 4 / 95 = 42.1 ms per decode step.
+    - Measured bandwidth from profiler: 0.63 * 5.3 TB/s = 3.34 TB/s.
+    - Profiler-implied traffic per step: 3.34 TB/s * 42.1 ms = ~140 GB per batched decode step.
+    - If the same measured working set ran at peak bandwidth: 140 GB / 5.3 TB/s = 26.4 ms per step.
+    - Peak-bandwidth throughput for that measured traffic: 4 generated tokens / 26.4 ms = 151.5 tok/s.
+    - Achieved efficiency: 95 tok/s actual / 151.5 tok/s peak-bandwidth estimate = 62.7%.
+    - Lost Throughput: 151.5 - 95.0 = 56.5 tok/s lost to overhead.
+    - Kernel launch overhead example: 80 layers * 50µs = 4.0 ms per step.
+    - If added to the ideal 26.4ms step, launch overhead alone gives 4 tokens / 30.4ms = 131.6 tok/s, so the remaining gap to 95 tok/s must come from sync, attention overhead, or inefficient memory access.
+
+    **Conclusion & Interpretation:**
+    - **Result: 62.7% Bandwidth Efficiency.** The deployment is underutilizing HBM bandwidth; launch overhead explains part of the gap, and profiling should look for synchronization and memory-access inefficiencies rather than assuming a tensor-core compute bottleneck.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

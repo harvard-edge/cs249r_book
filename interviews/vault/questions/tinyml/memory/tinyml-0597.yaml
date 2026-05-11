@@ -1,0 +1,40 @@
+schema_version: '1.0'
+id: tinyml-0597
+track: tinyml
+level: L4
+zone: optimization
+topic: mcu-compute-constraints
+competency_area: memory
+bloom_level: evaluate
+phase: inference
+title: The Instruction Cache Thrashing Loop
+scenario: A depthwise convolution layer profiled on a 216 MHz Cortex-M7 (16 KB I-cache, 16 KB D-cache) takes 4.2 ms, drastically missing the MAC-based theoretical estimate of 1.1 ms. The D-cache hit rate is excellent at 98%.
+question: Where do the missing 3.1 ms go when a Cortex-M7 depthwise convolution takes 4.2 ms instead of 1.1 ms?
+details:
+  realistic_solution: Utilize deep cycle counters to uncover Instruction Cache (I-cache) thrashing. The optimized kernel unrolls aggressively into ~20 KB of binary assembly, violating the 16 KB I-cache boundary. Reallocating hot-path assembly physically into zero-wait-state Instruction Tightly Coupled Memory (ITCM) neutralizes the fetch bottleneck.
+  common_mistake: |
+    **The Pitfall:** Validating purely the D-cache hit rate and assuming the overarching memory fabric is healthy.
+    **The Rationale:** Candidates focus myopically on Data flow and completely forget to analyze instruction fetch pipelines inherent to Harvard architectures.
+    **The Consequence:** They misdiagnose cache thrashing penalties, proposing unhelpful data reshaping while leaving the execution path starved for instructions.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Architecture: Cortex-M7 at 216 MHz. I-cache size: 16 KB.
+    - Measured Latency: 4.2 ms. Theoretical Latency: 1.1 ms.
+    - Hot loop Kernel code size: 20 KB (overflows I-cache by 4 KB).
+
+    **Calculations:**
+    - Unexplained Gap: 4.2 ms - 1.1 ms = 3.1 ms penalty.
+    - Penalty in cycles: 3.1 ms * 216 MHz = about 670,000 cycles.
+    - A 20 KB hot loop exceeds the 16 KB I-cache by 4 KB, so repeated refills from flash can plausibly consume hundreds of thousands of fetch-stall cycles even when D-cache hits are high.
+    - Moving the hot instruction path to zero-wait-state ITCM removes the flash refill path from the inner loop.
+
+    **Conclusion & Interpretation:**
+    - **Result: The missing 3.1 ms is instruction-fetch starvation, not data-cache traffic (Instruction-Bound).** Placing the hot kernel in ITCM or reducing unrolling/code size is the appropriate fix.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+math_verified: true
+math_status: CORRECT

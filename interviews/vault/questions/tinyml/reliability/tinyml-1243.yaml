@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: tinyml-1243
+track: tinyml
+level: L5
+zone: realization
+topic: graceful-degradation
+competency_area: reliability
+bloom_level: evaluate
+phase: inference
+title: Graceful Degradation for Anomaly Detection on nRF5340
+scenario: We are deploying an industrial vibration monitoring sensor on a Nordic nRF5340 (128 MHz app core, 64 MHz net core, 256 KB SRAM, 1 MB flash). The device normally runs a high-fidelity 1D-CNN anomaly model and streams detailed spectrograms over BLE 5.3 (drawing ~5mA active). When the battery drops below 10% or the BLE environment becomes severely congested, we need a fail-operational degradation ladder to guarantee critical fault detection is not lost.
+question: How would you design this fallback architecture and concretely size the memory and compute allocations?
+details:
+  realistic_solution: 'A robust degradation ladder explicitly budgets both states. State 1 (Normal): keep the 1D-CNN resident on the 128 MHz app core with about 140 KB for weights/arena, reserve 64 KB for Zephyr/BLE/IPC, 16 KB for vibration ring buffers, and 24 KB for stack, heap, and fault logs, leaving roughly 12 KB of SRAM margin. The net core handles BLE streaming while the app core schedules inference in the remaining compute window. State 2 (Degraded): stop spectrogram streaming, keep only the critical alert path, and run a 15 KB fallback classifier plus a 32 KB feature/ring buffer and the same 24 KB stack/heap reserve. That gives a much larger SRAM margin and lowers app-core duty cycle by reducing feature extraction and inference frequency; the tradeoff is loss of detailed telemetry, not loss of catastrophic fault detection.'
+  common_mistake: |
+    **The Pitfall:** Offloading inference to the cloud as a fallback.
+    **The Rationale:** Candidates assume cloud fallback is universally applicable, ignoring that network congestion or low battery precludes reliable BLE transmission.
+    **The Consequence:** Breaking the fail-operational requirement when the network is unavailable or battery is critical.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Total SRAM: 256 KB.
+    - Normal overhead: BLE/RTOS/IPC 64 KB + vibration ring buffer 16 KB + stack/heap/log reserve 24 KB.
+    - Primary CNN weights + tensor arena: 140 KB.
+    - Fallback classifier: 15 KB model + 32 KB feature/ring buffer + 24 KB stack/heap/log reserve.
+    - Compute policy: normal inference every frame; degraded inference every other frame with alert-only logging.
+
+    **Calculations:**
+    - Normal non-model overhead: 64 KB + 16 KB + 24 KB = 104 KB.
+    - Normal SRAM used: 104 KB + 140 KB = 244 KB, leaving 12 KB margin.
+    - Degraded SRAM used: 15 KB + 32 KB + 24 KB = 71 KB, leaving 185 KB margin.
+    - Degraded compute allocation: halving the inference rate gives about 2x more time per critical decision while eliminating BLE streaming work.
+
+    **Conclusion & Interpretation:**
+    - **Result: 244 KB normal, 71 KB degraded.** The primary state barely fits, while the fallback state is fail-operational because it keeps the critical detector local, reduces compute duty cycle, and avoids relying on BLE during congestion or low battery.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 13
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

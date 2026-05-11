@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-2901
+track: cloud
+level: L5
+zone: evaluation
+topic: cnn-efficient-design
+competency_area: architecture
+bloom_level: evaluate
+phase: both
+title: Evaluate EfficientNet compound scaling coefficient impact on H100 memory bandwidth
+scenario: EfficientNet compound scaling uses φ to jointly scale width, depth, and resolution. You are evaluating whether increasing φ from 1 (B1) to 4 (B4) provides proportional accuracy gains on an H100.
+question: As EfficientNet scales from B1 to B4 on H100, where do memory pressure and accuracy gains begin to show diminishing returns?
+details:
+  realistic_solution: B1 to B4 accuracy gains show diminishing returns because compound scaling increases resolution and activation traffic faster than it increases useful work. For the stem input alone at batch=32 and fp16, B1 at 240x240 is about 11 MB while B4 at 380x380 is about 28 MB, a 2.5x increase from resolution before accounting for wider/deeper intermediate activations. A representative B4 depthwise layer has low arithmetic intensity, so it is limited by memory traffic and kernel efficiency rather than H100 peak compute. The practical saturation point starts around B4/B5 for serving efficiency, while accuracy gains usually flatten further around B5/B6 depending on the dataset.
+  common_mistake: |
+    **The Pitfall:** Assuming H100's high HBM3 bandwidth eliminates all memory bottlenecks.
+    **The Rationale:** Observing high peak bandwidth and ignoring the quadratic increase in activation memory and kernel launch overhead.
+    **The Consequence:** Misidentifying the bottleneck as bandwidth capacity rather than low arithmetic intensity and kernel launch overhead, leading to poor scaling efficiency.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - B1 input: 240x240. B4 input: 380x380. Batch size: 32. fp16 activations: 2 bytes.
+       - Representative B4 depthwise feature map: 12x12x320.
+       - H100 HBM3 Bandwidth: 3.35 TB/s. Peak Compute: 989 TFLOPS.
+    2. **Calculations:**
+       - B1 input activation bytes: 32 * 240 * 240 * 3 * 2 = 11.1 MB.
+       - B4 input activation bytes: 32 * 380 * 380 * 3 * 2 = 27.7 MB.
+       - Resolution-driven activation growth: 27.7 / 11.1 = 2.5x.
+       - B4 depthwise input read for batch=32: 32 * 12 * 12 * 320 * 2 = 2.95 MB.
+       - B4 depthwise output write: 2.95 MB; weights are only 320 * 9 * 2 = 5.8 KB.
+       - FLOPs: 2 * 32 * 320 * 9 * 144 = 26.5M FLOPs.
+       - Minimum traffic without halo reuse is about 5.9 MB, so arithmetic intensity is 26.5M / 5.9M = 4.5 FLOP/byte.
+       - Roofline limit: 3.35 TB/s * 4.5 FLOP/byte = 15 TFLOPS, far below the 989 TFLOPS compute peak.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Pressure Saturation.** Larger EfficientNet variants do not saturate raw HBM capacity, but depthwise layers have low arithmetic intensity and increasing activation traffic. Serving efficiency begins to saturate around B4/B5; accuracy gains often flatten around B5/B6.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

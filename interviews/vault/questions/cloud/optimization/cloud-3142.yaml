@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-3142
+track: cloud
+level: L5
+zone: optimization
+topic: flash-attention
+competency_area: optimization
+bloom_level: analyze
+phase: inference
+title: Optimizing FlashAttention Tile Size for MI300X
+scenario: AMD MI300X has 192GB HBM3 at 5.3 TB/s but smaller SRAM per CU (64KB LDS) compared to H100's 256KB SMEM. You are porting FlashAttention-2 to ROCm for a 70B model with head_dim=128, FP16. You must analyze how the smaller SRAM changes optimal tile size and determine what throughput impact this has.
+question: How does MI300X's 64KB LDS change FlashAttention tile size for head_dim=128 FP16, and what throughput impact should you expect?
+details:
+  realistic_solution: For head_dim=128 FP16, a 64-row Q tile is 64 x 128 x 2B = 16 KiB. A 64-column K tile is another 16 KiB, and a 64-column V tile is 16 KiB. FlashAttention also needs output accumulation plus row max/sum statistics; a full 64 x 128 FP16 output tile would be 16 KiB, leaving no LDS room for stats or buffering inside a 64 KiB budget. So MI300X kernels usually cannot treat Q, K, V, O, and stats as four neat 16 KiB resident tiles; they must reduce tile dimensions, keep some state in registers, stage K/V, or avoid full output residency in LDS. Compared with an H100 kernel that can use larger tiles under a 256 KiB SMEM budget, MI300X tends to run more, smaller block steps and may lose some tensor-core efficiency. Its higher HBM bandwidth helps, so the defensible expectation is shape- and kernel-dependent throughput that can be competitive, but the LDS limit is a real tiling constraint rather than a simple peak-TFLOPS comparison.
+  common_mistake: |
+    **The Pitfall:** Assuming the exact same tile sizes that work on NVIDIA will work on AMD.
+    **The Rationale:** Failing to account for architectural differences in SRAM per Compute Unit between accelerators.
+    **The Consequence:** OOM errors on SRAM/LDS or severe performance degradation, as the 4x smaller SRAM fundamentally changes required loop geometry.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - MI300X LDS: 64 KB. MI300X Peak FP16: 1307 TFLOPS.
+    - H100 SMEM: 256 KB. H100 Peak FP16: 989 TFLOPS.
+    - Head dimension: 128, FP16 (2 bytes).
+
+    **Calculations:**
+    - Candidate MI300X Br=Bc=64 tile components:
+      Q tile = 64 * 128 * 2B = 16 KiB.
+      K tile = 64 * 128 * 2B = 16 KiB.
+      V tile = 64 * 128 * 2B = 16 KiB.
+      Full O accumulator tile at FP16 would be 64 * 128 * 2B = 16 KiB.
+    - Q+K+V+O alone totals 64 KiB, leaving no LDS for row max/sum stats, masks, staging, or double buffering.
+    - Practical MI300X kernels therefore need a smaller effective resident tile, register-resident accumulators/stats, or staged K/V reuse rather than a naive 64x64 all-resident layout.
+    - H100's 256 KiB SMEM gives more room for larger resident tiles and buffering; the exact tile-count difference depends on the implemented Br/Bc, not just a blanket 4x factor.
+    - Throughput should be estimated from the actual ROCm kernel geometry and occupancy, not from peak TFLOPS alone.
+
+    **Conclusion & Interpretation:**
+    - **Result: Tile-Efficiency Limited**. MI300X's 64 KiB LDS constrains resident FlashAttention tiles for head_dim=128; expect throughput to depend on kernel staging and occupancy, with no defensible fixed slowdown from the prompt alone.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

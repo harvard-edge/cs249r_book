@@ -1,0 +1,36 @@
+schema_version: '1.0'
+id: cloud-3369
+track: cloud
+level: L4
+zone: diagnosis
+topic: encoder-decoder-tradeoffs
+competency_area: architecture
+bloom_level: analyze
+phase: both
+title: 'A100 Inference Optimization: Encoder-Decoder Tradeoffs for Real-time LLM Deployment'
+scenario: Your team is deploying a new large language model (LLM) for real-time customer support summarization and response generation. The inference workload is high-volume and latency-sensitive. You have access to a cluster of NVIDIA A100 GPUs. Currently, a full encoder-decoder transformer model is being used, but initial tests show unacceptable tail latencies and high operational costs.
+question: What is causing the A100 tail latency and cost issues, and what architecture would you use for summarization plus response generation?
+details:
+  realistic_solution: |
+    The tail latency and cost are caused by using one full encoder-decoder model for two different serving shapes: long-input summarization and short interactive response generation. Use a cascaded architecture: a smaller encoder-style summarizer or extractor for the customer-support context, followed by an optimized decoder-only generator for the response. Keep both models resident on A100s, batch the encoder stage aggressively, and run latency-bounded decode batches for the generator. This reduces resident memory, per-request FLOPs, and decoder KV-cache pressure compared with sending every request through a monolithic 20B encoder-decoder path.
+  common_mistake: |
+    **The Pitfall:** Keeping the full encoder-decoder model on the critical path for both summarization and response generation.
+    **The Rationale:** The summarization stage can be batched and compressed before generation, while the response stage is latency-sensitive autoregressive decode.
+    **The Consequence:** Every request pays for unnecessary encoder-decoder weights, cross-attention state, and decode work, producing A100 tail latency spikes and inflated cost per conversation.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Original: 20B FP16 encoder-decoder, approximated as 10B encoder parameters and 10B decoder parameters.
+    - Split: 1B encoder-style summarizer + 7B decoder-only generator.
+    - Sequence: 1000 input tokens, 100 output tokens.
+    - Rule of thumb: transformer inference costs about 2 FLOPs per active parameter per processed token.
+
+    **Calculations:**
+    - Original weights = 20B * 2 bytes = 40GB; split weights = (1B + 7B) * 2 bytes = 16GB, saving 24GB of resident weight memory.
+    - Original approximate compute = 2 * 10B * 1000 input tokens + 2 * 10B * 100 output tokens = 22 TFLOPs/request.
+    - Split approximate compute = 2 * 1B * 1000 summarized-input tokens + 2 * 7B * 100 generated tokens = 3.4 TFLOPs/request.
+    - Compute reduction = 22 / 3.4 ≈ 6.5x; weight-memory reduction = 40 / 16 = 2.5x.
+
+    **Conclusion & Interpretation:**
+    - **Result: Split-pipeline architecture.** The cascaded encoder-plus-decoder design directly addresses the latency cause by removing unnecessary monolithic work from each request while preserving generation quality where the decoder is needed.
+status: published
+provenance: imported

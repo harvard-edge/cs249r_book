@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: edge-1704
+track: edge
+level: L4
+zone: optimization
+topic: memory-pressure-management
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: Resolving Concurrent OOM on Jetson Orin
+scenario: You are deploying a multi-model pipeline on an NVIDIA Jetson Orin containing a 7B parameter LLM for text generation and a high-resolution vision model for object detection. The Orin has 32 GB of unified LPDDR5 memory shared between the CPU, Ampere GPU, and DLA. Under peak load, concurrent requests to both models cause sudden Out-Of-Memory crashes and system instability.
+question: How do you diagnose the memory bottleneck and quantify a structural fix to prevent OOM without exceeding the 60W TDP limit?
+details:
+  realistic_solution: |
+    Diagnose the OOM as unified-memory overlap: the 14GB LLM weights, 7GB vision model, and a 10GB KV-cache burst require about 31GB inside a 28GB usable budget. Quantize the vision model to INT8 and offload supported layers to DLA, reducing its resident footprint to about 3.5GB and lowering concurrent GPU load while unsupported layers remain on GPU. That leaves about 10.5GB for KV cache, enough for the 10-request burst with 0.5GB headroom. Enforce the 60W limit with a profiled power cap, for example a 45W GPU cap plus about 5W DLA and 8W CPU/memory budget, then validate with tegrastats under burst load.
+  common_mistake: |
+    **The Pitfall:** Suggesting naive fixes like reducing global batch size without analyzing unified memory.
+    **The Rationale:** Candidates fail to utilize the DLA to offload the vision model, and overlook the predictable memory scaling of the LLM's KV cache.
+    **The Consequence:** The system continues to crash under concurrent load because the core structural memory contention remains unresolved.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Budget: 32GB Total (28GB VRAM after OS limit)
+    - Current: 14GB (LLM) + 7GB Vision = 21GB allocated, 7GB KV Cache bound
+    - Peak burst: 10 concurrent LLM requests, each needing about 1GB KV cache.
+    - Power constraint: keep combined GPU + DLA + CPU/memory below 60W during the burst.
+    - Deployment power target after offload: 45W GPU cap + 5W DLA + 8W CPU/memory = 58W profiled budget.
+
+    **Calculations:**
+    - Current peak memory demand: 14GB LLM + 7GB vision + 10GB KV = 31GB.
+    - Current OOM amount: 31GB - 28GB usable budget = 3GB over budget.
+    - Current KV bound: 28GB - 14GB - 7GB = 7GB, so the 10GB burst exceeds it by 3GB.
+    - Fix: DLA + INT8 quant drops vision from 7GB to about 3.5GB.
+    - New KV bound: 28GB - 14GB - 3.5GB = 10.5GB.
+    - KV headroom after burst: 10.5GB - 10GB = 0.5GB.
+    - Power-budget check: 45W GPU cap + 5W DLA + 8W CPU/memory = 58W, leaving about 2W margin below the 60W TDP before final tegrastats validation.
+
+    **Conclusion & Interpretation:**
+    - **Result: 10.5 GB KV budget with 0.5 GB burst headroom.** DLA/INT8 vision offload structurally prevents the 10GB KV-cache burst from OOMing, while the 60W constraint must be enforced by measuring the mixed GPU+DLA profile.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

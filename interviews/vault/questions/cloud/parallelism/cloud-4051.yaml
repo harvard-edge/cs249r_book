@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-4051
+track: cloud
+level: L4
+zone: optimization
+topic: gradient-synchronization
+competency_area: parallelism
+bloom_level: apply
+phase: training
+title: Mixed-Precision Gradient Synchronization Pipeline
+scenario: 'Your 128-MI300X training job computes gradients in BF16 but the optimizer (Adam) requires FP32 master weights, momentum, and variance. Currently, the pipeline is: compute BF16 gradients → cast to FP32 → AllReduce FP32 → optimizer step. This AllReduces 4GB instead of 2GB.'
+question: How would you redesign the BF16-gradient Adam pipeline to minimize AllReduce communication while preserving FP32 optimizer precision?
+details:
+  realistic_solution: 'Redesigned pipeline: (1) compute BF16 gradients, (2) AllReduce the BF16 gradient buffer to transmit 2GB instead of 4GB, (3) cast the reduced gradient to FP32 locally, and (4) run Adam with FP32 master weights, momentum, and variance. This preserves FP32 optimizer state precision, but it does not make the reduction numerically identical to FP32: BF16 has 7 stored mantissa bits, so large reductions can accumulate more rounding error. If the training recipe is sensitive, use FP32 accumulation inside a hierarchical/compensated reduction, selectively keep unstable buckets in FP32, or validate BF16 communication against loss-scaling and convergence tests. With a 400Gbps link (50GB/s), a ring model gives FP32 time 2×127/128×4GB/50GB/s ≈ 159ms and BF16 time 2×127/128×2GB/50GB/s ≈ 79ms, saving about 79ms for the collective under the same algorithm.'
+  common_mistake: |
+    **The Pitfall:** Casting gradients to FP32 before AllReduce.
+    **The Rationale:** Candidates assume that because the optimizer requires FP32, the collective communication must also happen in FP32.
+    **The Consequence:** The system unnecessarily transmits double the data over the network, wasting significant iteration time.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Network BW: 400Gbps = 50GB/s effective for this collective model.
+    - Gradients: 4GB FP32 vs 2GB BF16.
+    - BF16 has 7 stored mantissa bits; FP32 optimizer states remain local and FP32.
+
+    **Calculations:**
+    - FP32 AllReduce: 4GB × 2 × (127/128) / 50GB/s = 158.8ms.
+    - BF16 AllReduce: 2GB × 2 × (127/128) / 50GB/s = 79.4ms.
+    - Savings per collective: 79.4ms, a 50% communication-volume reduction.
+    - Numerical tradeoff: BF16 communication may be acceptable, but there is no general <1% error guarantee for a 128-way reduction.
+
+    **Conclusion & Interpretation:**
+    - **Result: Communication-volume reduction with numerical validation required.** Keep Adam state updates in FP32, and use compensated, hierarchical, or selective FP32 reduction if BF16 summation changes convergence.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

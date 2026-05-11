@@ -1,0 +1,28 @@
+schema_version: 1
+id: cloud-0676
+title: The Inference Compiler Optimization
+topic: graph-compilation
+status: published
+provenance: human
+scenario: You compile your 7B LLM with TensorRT before deploying on an accelerator. The model has 1,200 individual operations in eager PyTorch. After TensorRT compilation, it's reduced to 80 fused kernels. Inference latency drops from 21ms to 6ms. Your colleague says 'operator fusion just reduces Python overhead.'
+question: What is the hardware-level reason operator fusion is so effective for this workload?
+details:
+  realistic_solution: 'Each CUDA kernel launch requires: (1) writing the input tensor to HBM, (2) launching the kernel (5-10μs overhead), (3) reading the input from HBM, computing, (4) writing the output to HBM. When two sequential operations are separate kernels, the intermediate tensor makes a round-trip to HBM between them. Fusion eliminates these intermediate HBM round-trips by keeping data in registers and shared memory (SRAM). For a chain of 15 elementwise operations (LayerNorm → GELU → Dropout → Add), unfused execution writes and reads the full activation tensor 15 times from HBM. Fused execution reads once, computes everything in SRAM, and writes once.'
+  common_mistake: |
+    **The Pitfall:** Believing operator fusion primarily eliminates Python interpreter or function call overhead.
+    **The Rationale:** Misattributing eager mode slowness to host-side Python rather than the massive cost of device memory traffic.
+    **The Consequence:** Failing to optimize memory-bound custom kernels, resulting in models that severely underutilize HBM bandwidth.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 7B model, seq=2048, hidden=4096, FP16.
+       - HBM bandwidth: ~3.35 TB/s. Kernel launch overhead: ~7 μs.
+    2. **Calculations:**
+       - Activation tensor: 2048 × 4096 × 2 bytes ≈ 16.7 MB.
+       - Unfused (1200 kernels): ~800 HBM round-trips. Data moved = 800 × 16.7 MB × 2 = 26.7 GB. Time = 26.7 GB / 3350 GB/s = 8.0 ms.
+       - Fused (80 kernels): ~60 round-trips. Data moved = 2.0 GB. Time = 0.6 ms.
+       - Kernel launch savings: (1200 - 80) × 7 μs ≈ 7.8 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bandwidth-Bound.** Total savings = 7.4 ms (memory) + 7.8 ms (launch) = 15.2 ms, explaining the exact latency drop observed.
+last_modified: '2026-04-01'
+tags:
+- scope:Single Machine

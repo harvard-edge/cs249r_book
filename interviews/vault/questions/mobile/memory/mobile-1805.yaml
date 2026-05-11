@@ -1,0 +1,37 @@
+schema_version: '1.0'
+id: mobile-1805
+track: mobile
+level: L4
+zone: evaluation
+topic: memory-mapped-inference
+competency_area: memory
+bloom_level: evaluate
+phase: inference
+title: Shared Mmap vs Heap Allocation for Multi-Process Edge LLM
+scenario: You are designing a local AI assistant on an edge device (32 GB LPDDR5) that requires three independent processes to concurrently run inference on the same 8 GB INT8 quantized LLM. The OS and base vision stack continuously consume 6 GB of RAM.
+question: Evaluate the tradeoffs between heap allocation and shared memory-mapped (mmap) file access, and determine which architecture is required for this system?
+details:
+  realistic_solution: |
+    Shared memory-mapped (`mmap`) access with `MAP_SHARED` is required for the weights. Heap allocation gives each process a private 8 GB copy once the model is materialized, so three processes can create up to 24 GB of resident weight pressure before workspace and KV cache. With shared mmap, each process has its own virtual mapping, but clean file-backed pages are resident once in the OS page cache and shared across processes. Per-process RSS may still report mapped pages, so the decision should be based on proportional set size, page-cache residency, page faults, and total memory pressure. Use warmup or `MAP_POPULATE` carefully to reduce cold-start faults without forcing all pages resident unnecessarily.
+  common_mistake: |
+    **The Pitfall:** Assuming heap allocation strictly consumes 24 GB without realizing OS page cache implications.
+    **The Rationale:** Engineers forget that standard file I/O operations also populate the OS page cache, meaning the memory pressure is functionally doubled if not managed via shared mmap.
+    **The Consequence:** Extreme memory starvation, severe major page faults, and catastrophic Out-Of-Memory (OOM) crashes.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Total RAM Available: 32 GB.
+    - Base OS/Vision RAM: 6 GB.
+    - Processes: 3.
+    - Model size: 8 GB.
+
+    **Calculations:**
+    - Heap allocation private weight pressure: 3 * 8 GB = 24 GB.
+    - Heap plus base OS/vision pressure: 6 GB + 24 GB = 30 GB before KV cache, activations, allocator overhead, and any file cache.
+    - Shared mmap weight residency: the three processes map 8 GB each in virtual address space, but clean file-backed physical pages are shared, so proportional weight pressure is about 8 GB total when the same pages are resident.
+    - Shared mmap plus base OS/vision pressure: about 6 GB + 8 GB shared file-backed weights = 14 GB before per-process runtime workspace.
+    - RSS can double-count shared pages across processes; PSS or system-wide resident/file-cache accounting is the right measurement.
+
+    **Conclusion & Interpretation:**
+    - **Result: shared mmap avoids duplicated resident weight pressure.** The important result is not an exact 14 GB guarantee; it is that shared file-backed pages keep the 8 GB model resident once, while heap allocation can create 24 GB of private weight pressure and leave too little room for KV cache and workspaces.
+status: published
+provenance: imported

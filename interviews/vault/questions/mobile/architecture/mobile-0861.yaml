@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: mobile-0861
+track: mobile
+level: L4
+zone: design
+topic: cnn-efficient-design
+competency_area: architecture
+bloom_level: evaluate
+phase: inference
+title: Optimize MobileNetV2 expansion ratio for Snapdragon 8 Gen 3 Hexagon HTP memory
+scenario: MobileNetV2 with expansion ratio t=6 achieves 72ms on Snapdragon 8 Gen 3 using TFLite GPU delegate, but only 4ms on Hexagon HTP. The HTP version hits a memory spike at the bottleneck_2_expand layer (input 56x56x32, output 56x56x192). You need to reduce peak activation memory to prevent HTP SRAM overflow while maintaining >72% top-1 accuracy.
+question: How should MobileNetV2 expansion ratios be adjusted to reduce early activation memory pressure on Hexagon HTP?
+details:
+  realistic_solution: |
+    Apply non-uniform expansion ratios: reduce only the early large-spatial stages, such as 56x56 and 28x28 blocks, from t=6 to t=4, while keeping later 14x14 and 7x7 stages at t=6. This targets the actual activation-memory spike without unnecessarily reducing representational capacity in later layers.
+
+      For bottleneck_2, t=6 produces 56x56x192 INT8 activations, or about 602KB for one buffer. At t=4, the same layer produces 56x56x128 activations, or about 401KB. The single tensor is not the whole peak: HTP execution may need input/output buffers, expanded activation double buffering, depthwise workspace, DMA staging, and scheduler scratch at the same time. The key design choice is stage-specific reduction in early layers only, then validate with the profiler that the combined peak drops below the SRAM budget while top-1 remains above 72%.
+  common_mistake: |
+    **The Pitfall:** Reducing the expansion ratio uniformly across all layers from t=6 to t=4.
+    **The Rationale:** Engineers assume the model memory footprint needs a global reduction to fit the NPU.
+    **The Consequence:** Accuracy needlessly drops by ~1.5%, when the memory spike was isolated entirely to the early, large-spatial-dimension layers.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Hexagon HTP local-memory budget for this scheduled block: about 8 MB.
+    - bottleneck_2 input: 56 * 56 * 32 INT8 = 100,352 bytes, or about 98 KB.
+    - t=6 expanded activation: 56 * 56 * 192 INT8 = 602,112 bytes, or about 588 KiB.
+    - t=4 expanded activation: 56 * 56 * 128 INT8 = 401,408 bytes, or about 392 KiB.
+    - Profiling shows the spike comes from several live buffers, not one tensor: expanded activation double buffer, input/output buffers, depthwise workspace, DMA staging, and runtime scratch.
+
+    **Calculations:**
+    - Representative t=6 peak = 2 * 588 KiB expanded buffers + 98 KiB input + 98 KiB output + 3.0 MiB depthwise/im2col workspace + 3.2 MiB scheduler/DMA scratch = about 7.5 MiB.
+    - Add alignment and fragmentation headroom of about 0.8 MiB, giving a scheduled peak of about 8.3 MiB, which can overflow an 8 MiB local-memory budget.
+    - Representative t=4 peak = 2 * 392 KiB expanded buffers + 98 KiB input + 98 KiB output + 2.0 MiB depthwise/im2col workspace + 3.2 MiB scheduler/DMA scratch = about 6.2 MiB.
+    - Add the same 0.8 MiB headroom, giving about 7.0 MiB, below the 8 MiB budget.
+
+    **Conclusion & Interpretation:**
+    - **Result: about 1.3 MiB peak reduction.** Reducing only the early high-resolution expansion from t=6 to t=4 addresses the actual scheduled peak and avoids LPDDR spill, while preserving later low-resolution t=6 blocks for accuracy.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

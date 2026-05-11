@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-2242
+track: cloud
+level: L3
+zone: fluency
+topic: data-pipeline-engineering
+competency_area: data
+bloom_level: apply
+phase: training
+title: The Petabyte Deduplication Shuffle Wall
+scenario: You need to deduplicate a 15 TB web crawl corpus (3 billion documents) for LLM pre-training. The naive approach computes a hash per document and groups by hash. But your team wants fuzzy deduplication — removing documents that are 80%+ similar, not just exact matches. A colleague proposes computing MinHash signatures (128 hash functions) for all 3B documents and then performing an all-pairs comparison.
+question: Why does this approach fail at petabyte scale, and what is the standard distributed deduplication pipeline?
+details:
+  realistic_solution: 'The standard approach is MinHash + Locality-Sensitive Hashing (LSH) banding. Instead of comparing all pairs, divide each MinHash signature into bands and emit one bucket key per band. Documents that collide in an LSH bucket become candidate pairs, then an exact or higher-fidelity Jaccard check filters those candidates. The key insight is that LSH reduces the candidate set before the expensive verification step; it is not simply O(n x b), because candidate generation and verification also depend on bucket occupancy, skew, and duplicate suppression across bands. The distributed pipeline: (1) MapReduce to compute MinHash signatures, (2) LSH banding to emit (band_hash, doc_id) records, (3) shuffle by band_hash to co-locate candidates, (4) generate candidate pairs within bounded buckets, and (5) verify local Jaccard similarity before removing duplicates.'
+  common_mistake: |
+    **The Pitfall:** Believing MinHash is globally O(n) simply because computing the signatures is O(n).
+    **The Rationale:** Candidates understand MinHash creates small constant-size representations, but forget the subsequent pairwise comparison step.
+    **The Consequence:** They prescribe an all-pairs comparison algorithm that mathematically implodes into an O(n²) shuffle/network bottleneck.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 3 Billion documents. Threshold: 80% similarity.
+    - MinHash LSH: 20 bands of 6 rows.
+
+    **Calculations:**
+    - Naive all-pairs: (3B × 3B) / 2 = 4.5 × 10^18 comparisons (Intractable).
+    - LSH banding emits 3B docs x 20 bands = 60B bucket records.
+    - At ~20 bytes per bucket record, shuffle volume is about 60B x 20 bytes = 1.2 TB before framework overhead.
+    - Candidate comparisons are not fixed by n x b; they are sum over buckets of k * (k - 1) / 2 after duplicate-pair suppression.
+    - If tuning keeps average non-empty buckets small, candidate verification can fall by many orders of magnitude; large or skewed buckets must be capped, split, or filtered.
+
+    **Conclusion & Interpretation:**
+    - **Result: Candidate-Generation-Bound**. MinHash+LSH makes fuzzy dedup feasible by shuffling compact bucket records and verifying only bucket collisions, but the real bottleneck is controlling bucket occupancy and skew.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

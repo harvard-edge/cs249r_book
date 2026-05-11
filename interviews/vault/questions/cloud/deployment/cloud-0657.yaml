@@ -1,0 +1,37 @@
+schema_version: '1.0'
+id: cloud-0657
+track: cloud
+level: L4
+zone: diagnosis
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: analyze
+phase: inference
+title: The Tokenizer Overhead Spikes
+scenario: Your LLM inference server is utilizing a 70B model on an H100. P99 latency suddenly spikes. You look at the GPU utilization metrics, and the GPU is sitting at 0% for 50 milliseconds before every generation request.
+question: What CPU-bound process is blocking the GPU from doing its job?
+details:
+  realistic_solution: You are hitting the **Tokenizer CPU Bottleneck**. A slow Python BPE tokenizer might process 100,000 tokens per second, so a 5,000-token prompt takes about 50ms to tokenize. The key symptom is not the absolute size of 50ms; it is that tokenization is synchronous and blocking, so the GPU has no work queued and sits at 0% before every request. The fix is to use a fast Rust-based tokenizer, pre-tokenize where possible, and run tokenization asynchronously so CPU preprocessing overlaps with GPU prefill/decode.
+  common_mistake: |
+    **The Pitfall:** Blaming the delay on PCIe bus transfer times.
+    **The Rationale:** Candidates know that moving data between CPU and GPU takes time and often overestimate the latency of small transfers.
+    **The Consequence:** Focusing on optimizing PCIe transfers while ignoring the massive synchronous blocking caused by the CPU tokenizer.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - CPU Tokenizer speed: 100,000 tokens/sec. Prompt: 5,000 tokens.
+    - Request arrival rate example: 1,000 req/min.
+
+    **Calculations:**
+    - Tokenizer Latency = 5,000 / 100,000 = 50 ms.
+    - If tokenization is on the critical path, the GPU sees a 50 ms no-work gap before each request regardless of how fast the later prefill is.
+    - At 1,000 req/min, serialized tokenizer work is 1,000 * 50 ms = 50,000 ms = 50 CPU-seconds of tokenizer work per wall-clock minute.
+    - That load is about 50 / 60 = 83% of one CPU core, or several cores if tokenization is parallelized imperfectly. It is not automatically 83% GPU idle unless requests are strictly serialized end-to-end.
+
+    **Conclusion & Interpretation:**
+    - **Result: CPU Preprocessing Stall.** The GPU idle gap is caused by synchronous tokenization blocking request submission; remove it by overlapping tokenization with GPU work and using a faster tokenizer implementation.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+math_verified: true

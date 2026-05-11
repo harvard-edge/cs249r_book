@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-4444
+track: cloud
+level: L4
+zone: design
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: apply
+phase: inference
+title: Chunked Prefill Optimal Chunk Size Selection
+scenario: A disaggregated serving system uses chunked prefill to interleave prefill and decode work on prefill GPUs. The chunk size is currently 256 tokens. Requests with 2048-token prompts show poor TTFT due to 8 chunks.
+question: What chunk size would you choose for 2048-token prompts, and how does it trade TTFT against decode TPOT?
+details:
+  realistic_solution: 'Chunked prefill tradeoff: small chunks (64-256 tokens) interleave decode work frequently, keeping TPOT low but paying more scheduler overhead and more chunk handoffs. Large chunks (512-2048) reduce overhead but block decode work for longer bursts. For a 2048-token prompt, the total prefill FLOPs are roughly fixed, so the compute-only TTFT is about 290ms regardless of 256- versus 512-token chunks; the difference is overhead and decode interference. If scheduler overhead is 2ms per chunk, 256-token chunks add about 16ms while 512-token chunks add about 8ms. A 512-token chunk is a reasonable starting point; move toward 1024 only if decode TPOT remains within SLO.'
+  common_mistake: |
+    **The Pitfall:** Maximizing chunk size purely to minimize TTFT.
+    **The Rationale:** Candidates don't consider that large chunks starve decode tokens from being processed.
+    **The Consequence:** Spiking token generation latency (TPOT) for already-running requests, violating SLAs.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 70B model, H100 (989 TFLOPS), 2048-token prompt.
+    - Approximate prefill compute: 2 * tokens * params / TFLOPS.
+    - Scheduler overhead: assume 2ms per chunk handoff.
+
+    **Calculations:**
+    - Total prefill compute for 2048 tokens = 2 * 2048 * 70e9 / 989e12 = 290ms.
+    - Chunk=256: 8 chunks, per-chunk compute = 36.3ms, overhead = 8 * 2ms = 16ms, end-to-end prefill time ≈ 306ms.
+    - Chunk=512: 4 chunks, per-chunk compute = 72.5ms, overhead = 4 * 2ms = 8ms, end-to-end prefill time ≈ 298ms.
+    - Chunk=1024: 2 chunks, overhead ≈ 4ms, but each chunk blocks decode for about 145ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: Start with chunk size 512 (Scheduling/Interference Tradeoff).** It cuts scheduler overhead versus 256 while avoiding the longer decode starvation bursts of 1024-token chunks.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: mobile-1412
+track: mobile
+level: L4
+zone: optimization
+topic: graceful-degradation
+competency_area: reliability
+bloom_level: analyze
+phase: inference
+title: NPU Preemption and CPU Fallback Optimization
+scenario: You are deploying an on-device language model for real-time translation on a smartphone featuring a dedicated NPU. During heavy multitasking, the NPU is preempted by a higher-priority camera workload, causing latency to spike beyond the 200ms budget and forcing a fallback to the CPU.
+question: How would you design NPU preemption handling and CPU fallback without crashing or stalling the user experience?
+details:
+  realistic_solution: |
+    The system needs explicit preemption handling rather than an immediate full-model CPU handoff. Add admission control for NPU work, timeouts around delegate calls, cancellation at token boundaries, and a resumable decode state so preempted requests can pause cleanly. If the NPU remains unavailable, switch to a CPU-tuned degraded mode with a smaller INT8 model, lower token rate, shorter context, and user-visible reduced-quality behavior gated by QoS so memory bandwidth is reserved for camera, UI, and audio.
+  common_mistake: |
+    **The Pitfall:** Assuming the CPU can immediately take over the exact same workload.
+    **The Rationale:** Candidates ignore memory bandwidth saturation on the shared LPDDR5X pool.
+    **The Consequence:** Falling back to a 3B model on the CPU can consume most shared-memory bandwidth, causing latency spikes, thermal pressure, and visible UI degradation.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Primary Model (3B INT8): about 3 GB of weight traffic per decoded token if streamed from memory.
+    - Fallback Model (1B INT8): about 1 GB of weight traffic per decoded token.
+    - Shared System Bandwidth: LPDDR5X peak is about 68 GB/s, but the fallback should budget no more than about 30 GB/s so UI/camera/audio keep headroom.
+    - Fallback target: 10 tokens/sec in degraded mode.
+
+    **Calculations:**
+    - CPU 3B at 10 tokens/sec: 3 GB/token * 10 tokens/sec = 30 GB/s before KV-cache and activation traffic.
+    - CPU 3B at 20 tokens/sec: 3 GB/token * 20 tokens/sec = 60 GB/s, leaving little headroom on a 68 GB/s shared bus.
+    - CPU 1B fallback at 10 tokens/sec: 1 GB/token * 10 tokens/sec = 10 GB/s before KV-cache traffic.
+    - Bandwidth Savings at 10 tokens/sec: 30 GB/s - 10 GB/s = 20 GB/s.
+
+    **Conclusion & Interpretation:**
+    - **Result: about 20 GB/s saved at the degraded token rate (Memory-Bandwidth Bound)**. The fallback should intentionally reduce model size and token rate so preemption causes degraded service instead of shared-memory saturation.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

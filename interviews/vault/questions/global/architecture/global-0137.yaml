@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: global-0137
+track: global
+level: L5
+zone: design
+topic: compound-ai-systems
+competency_area: architecture
+bloom_level: create
+phase: both
+title: Prompt Caching PCIe Bottleneck
+scenario: You are building a multi-tenant RAG application using a 70B model. Every request shares a massive 50k token system prompt. TTFT SLA is 500ms. Standard prefill takes 1.5s. You implement RadixAttention prompt caching, storing the 50k KV cache on host CPU RAM (NVMe offload) and loading it on demand over PCIe Gen4 x16. The TTFT drops, but only to ~700ms, failing the SLA.
+question: Why does loading the cached 50k-token KV prefix over PCIe Gen4 leave TTFT at 700ms, and how would you meet 500ms?
+details:
+  realistic_solution: 'Decompose the cached TTFT latency: TTFT = KV Cache PCIe Load Time + User Prompt Prefill + Decode Step. The 50k token system prompt generates a ~16.3 GB KV cache for a 70B model. PCIe Gen4 x16 has a theoretical max bandwidth of 32 GB/s (realistically ~26 GB/s). Transferring 16.3 GB takes ~620ms. The architecture is bound by PCIe bandwidth, not compute. To meet the 500ms SLA, the architecture must change: the shared 50k KV cache must be pinned as a resident block directly in GPU VRAM (sacrificing some batch size capacity), or the model must use MQA/GQA to drastically reduce the absolute size of the KV cache, or upgrade to PCIe Gen5 / NVLink.'
+  common_mistake: |
+    **The Pitfall:** Optimizing CPU RAM speed or compressing the KV cache using standard ZIP/LZ4 algorithms.
+    **The Rationale:** Engineers assume the bottleneck is memory speed or raw data size without considering decompression overhead.
+    **The Consequence:** Time saved on transfer is lost on CPU/GPU decompression, still failing the strict 500ms TTFT SLA.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - SLA = 500ms.
+    - KV Cache = 50,000 tokens * 327 KB/token = 16.35 GB.
+    - PCIe Gen4 x16 = ~26 GB/s effective.
+    - User Prompt Prefill = 50ms.
+
+    **Calculations:**
+    - Transfer Time = 16.35 GB / 26 GB/s = 628ms.
+    - Total TTFT = 628ms + 50ms = 678ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: PCIe-Bandwidth Bound**. PCIe transfer time alone violates the 500ms TTFT SLA.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

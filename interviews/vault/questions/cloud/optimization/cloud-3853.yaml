@@ -1,0 +1,37 @@
+schema_version: '1.0'
+id: cloud-3853
+track: cloud
+level: L5
+zone: design
+topic: knowledge-distillation
+competency_area: optimization
+bloom_level: evaluate
+phase: training
+title: Architecting an Online Distillation Pipeline for a 70B Model
+scenario: You must design a knowledge distillation pipeline to compress a 70B parameter teacher model into a 7B parameter student model (both FP16). You have a cloud cluster of 8-GPU A100 (80GB) nodes connected via InfiniBand NDR (400 Gb/s) and intra-node NVLink 4.0. The vocabulary size is 128,000.
+question: How would you architect the 70B-to-7B distillation pipeline to avoid logit I/O bottlenecks and keep student training busy?
+details:
+  realistic_solution: Design an online asynchronous distillation system with dedicated teacher workers and student workers. The 70B FP16 teacher needs about 140 GB just for weights, so run it with tensor parallelism on teacher nodes rather than co-locating it with the 7B student. Do not stream full-vocabulary FP16 logits on the critical path unless the step cadence can absorb the transfer. Instead, pipeline teacher generation ahead of student steps and transmit compressed targets such as top-K logits, quantized logits, or sampled-token distributions so the student input queue stays full.
+  common_mistake: |
+    **The Pitfall:** Proposing offline distillation or co-locating the teacher and student on the same GPUs.
+    **The Rationale:** Candidates either fail to calculate the massive storage requirements for full vocabulary logits or severely underestimate the memory constraints of running both models simultaneously.
+    **The Consequence:** The architecture is fundamentally infeasible, either running out of petabyte-scale storage or crashing with Out-Of-Memory errors.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Vocab size: 128,000.
+    - Student micro-batch size: 2,048 tokens per step.
+    - Precision: FP16 (2 bytes).
+    - InfiniBand: 400 Gbps (50 GB/s).
+    - Full-vocabulary logits are the worst-case target format.
+
+    **Calculations:**
+    - Full-logit payload per student step = 2,048 * 128,000 * 2 bytes = 524 MB.
+    - Minimum transfer time over one 400 Gb/s link = 524 MB / 50 GB/s = about 10.5 ms, before protocol overhead and contention.
+    - Sustaining one student step every 20 ms would require about 524 MB / 0.020 s = 26.2 GB/s of logit bandwidth per student stream.
+    - Full-logit storage for 300B tokens = 300e9 * 128,000 * 2 bytes = 76.8 PB.
+    - Top-K or quantized targets reduce both per-step bandwidth and storage by avoiding full 128K-way FP16 vectors.
+
+    **Conclusion & Interpretation:**
+    - **Result: full-vocabulary logits are an I/O bottleneck**. Use asynchronous teacher workers plus compressed targets so teacher generation and network transfer do not stall student training.
+status: published
+provenance: imported

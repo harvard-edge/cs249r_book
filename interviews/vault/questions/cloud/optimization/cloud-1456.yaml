@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-1456
+track: cloud
+level: L4
+zone: diagnosis
+topic: kernel-fusion
+competency_area: optimization
+bloom_level: analyze
+phase: inference
+title: Root-Causing Memory-Bound Activations
+scenario: While profiling a PyTorch recommendation model on an NVIDIA GPU (2 TB/s HBM bandwidth), you find that a custom element-wise activation block `y = x * torch.tanh(a * x + b)` (where 'a' and 'b' are learned scalars) operating on a 250MB activation tensor takes roughly 1.1 milliseconds. Nsight Systems reveals 5% SM utilization but 95% HBM bandwidth utilization.
+question: How do you analyze this bottleneck, and what is the structural cause within the framework?
+details:
+  realistic_solution: Diagnose this as eager-mode decomposition into multiple unfused elementwise kernels. PyTorch materializes intermediates for operations such as multiply, add, tanh, and final multiply, so the same 250MB tensor-sized data is repeatedly read from and written to HBM while SMs do very little arithmetic. The structural cause is lack of fusion and intermediate tensor materialization in the framework execution path. Resolve it with `torch.compile()` or a custom Triton kernel that fuses the expression into one pass.
+  common_mistake: |
+    **The Pitfall:** Assuming the bottleneck is compute-related.
+    **The Rationale:** Failing to account for the implicit intermediate tensor allocations caused by eager-mode execution.
+    **The Consequence:** Trying to optimize floating-point math instead of fusing kernels to reduce HBM traffic.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Activation tensor: 250MB.
+    - HBM bandwidth is 2 TB/s.
+
+    **Calculations:**
+    - Observed time of 1.1ms at 2TB/s implies about 1.1ms × 2TB/s = 2.2GB of HBM traffic.
+    - One ideal fused pass would read x once and write y once: 250MB + 250MB = 500MB.
+    - Ideal fused bandwidth time: 500MB / 2TB/s = 0.25ms.
+    - The implied traffic ratio is about 2.2GB / 0.5GB = 4.4x, consistent with several unfused elementwise kernels materializing intermediates.
+
+    **Conclusion & Interpretation:**
+    - **Result:** The bottleneck is framework-level eager execution without fusion. The measured time is consistent with roughly 4.4x more HBM traffic than a fused one-pass implementation, so fusion can remove most intermediate memory traffic even though realized speedup will include launch and scheduling overheads.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

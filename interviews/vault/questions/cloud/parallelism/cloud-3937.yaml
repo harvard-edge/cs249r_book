@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: cloud-3937
+track: cloud
+level: L4
+zone: optimization
+topic: communication-computation-overlap
+competency_area: parallelism
+bloom_level: apply
+phase: both
+title: FSDP Prefetch Policy Tuning for Communication-Compute Overlap
+scenario: 'You use PyTorch FSDP to train a 30B model across 32 GPUs. FSDP has three prefetch policies: BACKWARD_PRE, BACKWARD_POST, and NO_PREFETCH. With BACKWARD_PRE, memory spikes cause OOM. With NO_PREFETCH, training is 40% slower.'
+question: Which FSDP prefetch policy should you use when BACKWARD_PRE OOMs but NO_PREFETCH is 40% slower, and why?
+details:
+  realistic_solution: 'Use BACKWARD_POST. BACKWARD_PRE starts the next unit''s AllGather earlier, so it gives the most overlap but keeps more prefetched parameters live and is the policy already shown to OOM. NO_PREFETCH avoids the memory spike but exposes communication and is 40% slower. BACKWARD_POST is the middle policy: it schedules prefetch after the current unit''s backward work, reducing the transient memory peak while still hiding part of the next AllGather. The expected choice is therefore BACKWARD_POST, then re-profile memory and step time; do not keep BACKWARD_PRE unless the memory budget is separately increased.'
+  common_mistake: |
+    **The Pitfall:** Blindly using the most aggressive prefetch policy (BACKWARD_PRE) for large models.
+    **The Rationale:** Candidates often assume maximum communication overlap is always best without calculating the transient memory overhead required to hold multiple layers simultaneously.
+    **The Consequence:** Unnecessary Out-Of-Memory (OOM) errors that prevent the model from training at all.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - BACKWARD_PRE exceeds the available memory headroom in this run.
+    - NO_PREFETCH is measured at 1.40x the step time of the prefetching configuration.
+    - BACKWARD_POST has lower transient memory pressure than BACKWARD_PRE because it starts prefetch later.
+
+    **Calculations:**
+    - BACKWARD_PRE: best overlap, but infeasible because it OOMs.
+    - NO_PREFETCH: feasible, but step time is 40% slower.
+    - BACKWARD_POST: feasible middle point; it cannot expose all communication like NO_PREFETCH because it still prefetches, and it avoids the earlier memory peak that made BACKWARD_PRE fail.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Bound Tradeoff**. Choose BACKWARD_POST because BACKWARD_PRE is not runnable and NO_PREFETCH gives up too much overlap.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

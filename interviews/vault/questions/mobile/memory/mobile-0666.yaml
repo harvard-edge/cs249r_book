@@ -1,0 +1,36 @@
+schema_version: '1.0'
+id: mobile-0666
+track: mobile
+level: L3
+zone: fluency
+topic: memory-hierarchy-design
+competency_area: memory
+bloom_level: apply
+phase: inference
+title: Why a 1.2 GB Core ML Model Gets Jetsam-Killed on iOS
+scenario: You are building an iOS app that runs a 1.2 GB CoreML model on a device with 6 GB RAM. During testing, the app works fine in isolation but gets killed when the user switches to Safari and back.
+question: Why can a 1.2GB CoreML model be killed under iOS memory pressure, and how should weights be loaded to avoid Jetsam?
+details:
+  realistic_solution: iOS can Jetsam-kill an app even when total device RAM looks sufficient because the kill decision depends on current memory pressure, foreground/background priority, dirty resident pages, and process footprint. A 1.2 GB Core ML model may fit during isolated foreground testing, but loading it can create additional resident memory for compiled model structures, activation arenas, and temporary buffers. Loading weights through file-backed, read-only mappings can reduce duplicate dirty memory and make clean pages reclaimable, but it does not guarantee survival under Jetsam. The complete mitigation is to reduce peak resident memory, avoid writable copies of weights, lazy-load or unload model components around background transitions, quantize or split the model if needed, and test on memory-pressure scenarios.
+  common_mistake: |
+    **The Pitfall:** Believing that iOS has 6 GB, my model is 1.2 GB, so I have 4.8 GB free.
+    **The Rationale:** This ignores that iOS reserves substantial memory for the kernel and system daemons, and background apps face draconian memory ceilings.
+    **The Consequence:** The app inevitably crashes or gets killed in the background when the Jetsam limit drops.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Device RAM: 6.0 GB, but iOS does not expose this as a fixed per-app allowance.
+    - Serialized Core ML model: 1.2 GB.
+    - App/UI/runtime overhead: ~0.4-0.8 GB.
+    - Model loading may add activation arenas, compiled structures, and temporary buffers beyond the serialized file.
+
+    **Calculations:**
+    - Foreground resident footprint estimate = 1.2 GB model + 0.4-0.8 GB app overhead + 0.2-0.6 GB runtime/activation/temporary memory = ~1.8-2.6 GB.
+    - That footprint can work in isolation but becomes risky when the app is backgrounded or the system needs memory for Safari, camera, or other foreground work.
+    - File-backed read-only mapping can make clean weight pages reclaimable and avoid an extra 1.2 GB dirty copy, but dirty activations and runtime buffers still count against Jetsam pressure.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Pressure-Bound.** mmap/file-backed loading lowers peak dirty memory and improves reclaimability, but avoiding Jetsam also requires lowering resident peaks and handling background memory pressure explicitly.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4

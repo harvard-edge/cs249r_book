@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-3360
+track: cloud
+level: L5
+zone: specification
+topic: mixture-of-experts
+competency_area: architecture
+bloom_level: analyze
+phase: both
+title: Scaling a 1 Trillion Parameter Mixture of Experts Model on NVIDIA A100s
+scenario: Your team is tasked with deploying a 1 trillion parameter Mixture of Experts (MoE) Language Model, where each expert has 10 billion parameters. The model needs to handle a peak inference load of 10,000 queries per second (QPS) with an average token generation latency of 50ms. Each input sequence is 1024 tokens, and output sequence is 512 tokens. Assume a router selects 2 experts per token.
+question: How would you design and size a cost-minimal MoE inference system for 10,000 QPS at 50 ms token latency?
+details:
+  realistic_solution: Size the system from both throughput and per-token latency. Store the 1T FP16 parameters across at least 25 A100 80GB GPUs, but treat that as a storage floor only. At 10,000 QPS with 1024-token prefill and 512-token decode, top-2 routing over 10B-parameter experts implies roughly 614,400 TFLOP/s of sustained active-expert work before routing, attention, KV-cache, and communication overhead. At about 109 TFLOP/s sustained per A100 under a 35% efficiency assumption, the compute floor is about 5,600 A100s, so the serving design needs many replicas, expert parallelism, hot-expert replication, locality-aware routing, and separate batching policies for prefill and decode. A cost-minimal architecture would then reduce that floor with quantization or FP8/INT8 where quality permits, control all-to-all traffic, and budget KV-cache memory instead of sizing from parameter storage alone.
+  common_mistake: |
+    **The Pitfall:** Underestimating dynamic expert load balancing and neglecting tail latency due to cold experts or network overhead.
+    **The Rationale:** Assuming uniform expert activation and ignoring communication costs for routing tokens across GPUs.
+    **The Consequence:** Severe performance degradation and massive tail latency spikes during skewed traffic.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Parameters: 1T FP16 total; each token activates 2 experts * 10B parameters = 20B active parameters.
+    - Workload: 10,000 QPS, 1024 input tokens and 512 output tokens per query.
+    - A100 assumption: 80GB HBM, 312 TFLOPS FP16 peak; use 35% sustained efficiency for sizing.
+    - Target decode latency: 50 ms/token, with prefill batched separately from decode.
+
+    **Calculations:**
+    - Parameter storage floor = 1T * 2 bytes = 2 TB; 2 TB / 80 GB = 25 A100s before replicas, KV cache, and fragmentation.
+    - Active compute per token ≈ 2 * 20B = 40 GFLOPs.
+    - Token workload = 10,000 * (1024 + 512) = 15.36M tokens/sec across prefill and decode.
+    - Sustained compute needed ≈ 15.36M * 40 GFLOPs/s = 614,400,000 GFLOPs/s = 614,400 TFLOP/s (614.4 PFLOP/s).
+    - Sustained compute per A100 ≈ 312 * 0.35 = 109 TFLOP/s, so compute sizing ≈ 614,400 / 109 ≈ 5,637 A100s before attention, routing, KV-cache, and all-to-all overhead.
+
+    **Conclusion & Interpretation:**
+    - **Result: throughput, communication, and KV-cache bound, not storage-only.** The 25-GPU storage floor is far below the compute floor implied by the active-token workload; a practical cost-minimal design depends on batching, expert replication, quantization, and routing locality while preserving the 50 ms/token decode SLA.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

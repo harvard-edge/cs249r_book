@@ -1,0 +1,39 @@
+schema_version: '1.0'
+id: tinyml-0742
+track: tinyml
+level: L3
+zone: diagnosis
+topic: graph-compilation
+competency_area: optimization
+bloom_level: apply
+phase: inference
+title: Oversized TFLite Micro Tensor Arena Failure
+scenario: You are porting an anomaly detection Autoencoder to an STM32. The input is a very long 1D time-series signal of shape `(1, 1, 100000, 1)`. When you run this through TFLite Micro using CMSIS-NN kernels, the convolution layer produces completely random garbage outputs, but it doesn't crash.
+question: What is the most likely root cause of garbage outputs when a 100,000-sample TFLite Micro input ignores allocation and operator status checks?
+details:
+  realistic_solution: Do not diagnose this as a CMSIS-NN int16 dimension wrap. A 100,000-sample tensor is more likely to exceed the tensor arena, scratch-buffer budget, or supported operator shape for the STM32 deployment. If the firmware ignores AllocateTensors or Invoke error statuses, later code may read an output buffer that was never validly allocated or produced, which looks like random garbage without an obvious crash. Fix the error handling, size the tensor arena from the allocation report, and split the time series into smaller windows or use a model/operator path that explicitly supports the required shape.
+  common_mistake: |
+    **The Pitfall:** Assuming CMSIS-NN silently handles any tensor length that fits in the model schema.
+    **The Rationale:** Candidates focus on the nominal input shape and skip the TFLite Micro allocation and Invoke status checks that report unsupported shapes or insufficient arena memory.
+    **The Consequence:** Firmware reads an output buffer after a failed allocation or operator call, misdiagnosing invalid data as a numeric kernel bug.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Input shape: (1, 1, 100000, 1).
+    - INT8 input tensor alone is 100,000 bytes before intermediate activations and scratch buffers.
+    - TFLite Micro reports allocation and operator failures through status returns that firmware must check.
+
+    **Calculations:**
+    - Raw input storage at INT8 = 100,000 samples * 1 byte = 100 KB.
+    - Output activations, im2col/scratch, persistent tensors, stacks, and firmware memory are additional SRAM consumers.
+    - The claimed int16 wrap math is not valid: 100,000 modulo 65,536 = 34,464, and 34,464 represented as int16_t would be -31,072 only after an out-of-range cast; this is not a reliable CMSIS-NN loop-bound diagnosis.
+
+    **Conclusion & Interpretation:**
+    - **Result: Unsupported or under-allocated tensor execution (Memory-Bound)**. Treat garbage output as a missed allocation/operator failure first, then reduce the input window or provide enough arena and a supported kernel path.
+  options:
+    - The 100,000-sample input exceeds the Cortex-M's maximum DMA transfer size.
+    - CMSIS-NN uses int16_t for dimensions. 100,000 wraps to -31,072. The loop exits immediately, leaving uninitialized memory.
+    - The huge input and intermediate tensors exceed the TFLite Micro arena or supported operator shape; if status checks are ignored, firmware may read an invalid or unproduced output buffer as garbage.
+    - The STM32's memory protection unit (MPU) triggers a bus fault.
+  correct_index: 2
+status: published
+provenance: imported

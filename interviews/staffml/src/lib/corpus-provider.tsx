@@ -16,7 +16,7 @@
  *    responses for the per-question detail fetches.
  *
  * NEXT_PUBLIC_VAULT_FALLBACK=static is an OPT-IN local-dev affordance for
- * working without a reachable Worker (requires `vault build --legacy-json`
+ * working without a reachable Worker (requires `vault build --local-json`
  * to materialize corpus.json). Production never sets it.
  */
 

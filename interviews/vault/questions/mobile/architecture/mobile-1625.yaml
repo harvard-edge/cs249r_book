@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: mobile-1625
+track: mobile
+level: L4
+zone: optimization
+topic: encoder-decoder-tradeoffs
+competency_area: architecture
+bloom_level: analyze
+phase: inference
+title: Comparing Mobile NLU Architectures on Google Tensor G3
+scenario: Your team is developing an on-device NLU feature targeting Google Tensor G3. You must choose between encoder-only, decoder-only, or encoder-decoder architectures to meet a strict <150ms latency budget.
+question: How would you diagnose performance bottlenecks for each architecture on the Tensor G3 and quantify costs to make your recommendation?
+details:
+  realistic_solution: Profile the full Android pipeline with TensorFlow Lite/Core ML-equivalent mobile tooling, Perfetto, Android Studio Profiler, and the vendor delegate logs, not NVIDIA desktop tools. For pure NLU classification, recommend a compact INT8 encoder-only model because it processes the input in parallel and avoids autoregressive decode latency. A decoder-only model is useful only if the feature needs generation, since every output token adds a sequential pass and KV-cache traffic. An encoder-decoder model can support sequence-to-sequence tasks, but its decoder stage must be budgeted token by token. Quantify weight memory, activation/KV memory, pre/post-processing, and sustained TOPS rather than relying on peak marketing numbers.
+  common_mistake: |
+    **The Pitfall:** Choosing a decoder-only architecture based purely on cloud-based LLM trends or theoretical FLOPs.
+    **The Rationale:** Ignoring the catastrophic impact of sequential autoregressive memory loads on mobile LPDDR5X bandwidth.
+    **The Consequence:** Deploying a model that constantly stalls on the memory bus, missing the 150ms SLA entirely due to hardware starvation.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Target SLA: 150 ms.
+    - Tensor G3 mobile accelerator: use a conservative effective budget of 3 TOPS for supported INT8 kernels.
+    - Memory Bandwidth: ~50 GB/s.
+    - Compare 100M INT8 encoder-only, 500M INT8 decoder-only, and 300M INT8 encoder-decoder candidates.
+
+    **Calculations:**
+    - Available compute in 150ms = 3e12 ops/s * 0.15s = 450 GOPS.
+    - Encoder-only NLU pass, 100M params with one pass over a short utterance ≈ 100M-200M ops plus attention overhead, comfortably below 450 GOPS.
+    - Decoder-only generation, 500M params and 16 output tokens ≈ 500M * 16 = 8 GOP MACs before prompt prefill and sampling; latency is sequential across 16 steps.
+    - Encoder-decoder, 300M params and 8 target tokens ≈ encoder pass + 300M * 8 = 2.4 GOP MACs, but still has sequential decoder latency.
+    - Weight memory: 100M INT8 ≈ 100 MB; 500M INT8 ≈ 500 MB; 300M INT8 ≈ 300 MB, all fit, so the SLA risk is decode sequencing and pipeline overhead.
+
+    **Conclusion & Interpretation:**
+    - **Result: Latency-Bound Architecture Tradeoff.** For NLU classification, choose encoder-only because it avoids token-by-token decode and best fits the 150ms SLA. Use decoder-only or encoder-decoder only when generation is required, and budget each output token explicitly.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

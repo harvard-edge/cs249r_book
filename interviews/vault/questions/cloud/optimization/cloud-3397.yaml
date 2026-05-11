@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-3397
+track: cloud
+level: L4
+zone: mastery
+topic: graph-compilation
+competency_area: optimization
+bloom_level: analyze
+phase: inference
+title: Optimizing 7B LLM Inference on Google TPU v5e via AOT Compilation
+scenario: You are tasked with optimizing the inference latency of a 7 billion parameter large language model (LLM) on a single TPU. You need to achieve a target latency of 50ms per token generation.
+question: How do compilation techniques help meet a 50 ms/token decode target despite memory-bandwidth limits?
+details:
+  realistic_solution: AOT compilation cannot remove the need to stream most weights during single-token decode, so it should be used to keep the non-weight overhead below the 50 ms budget. Use XLA ahead-of-time compilation to select stable layouts, remove runtime dispatch, and specialize shapes for the decode path. Lower matmuls and attention to TPU MXU-friendly kernels, fuse adjacent elementwise operations so activations stay in SRAM, and constant-fold masks, RoPE tables, and shape-dependent constants. Quantization may further reduce weight bandwidth, but the core tradeoff is that compilation trims overhead and HBM traffic around a memory-bound lower bound rather than making decode compute-bound.
+  common_mistake: |
+    **The Pitfall:** Primarily focusing on maximizing floating-point operations per second (FLOPs) utilization and tuning math kernels.
+    **The Rationale:** Engineers often assume that large models are compute-bound because they require billions of matrix operations.
+    **The Consequence:** Optimizing compute kernels while ignoring that HBM memory bandwidth (data movement of weights and activations) is the true physical limit for low-batch autoregressive decode.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model Size: 7B parameters.
+    - Precision: BF16 (2 bytes/param).
+    - Hardware: TPU v5e (197 TFLOPS, 1.6 TB/s HBM bandwidth).
+
+    **Calculations:**
+    - Weight Payload: 7B * 2 Bytes = 14 GB.
+    - Best-case lower-bound weight-read time if most weights are streamed once for a low-batch decode token: 14 GB / 1.6 TB/s = 8.75 ms.
+    - Real decode also reads/writes KV cache and activations and pays kernel overhead; compilation can reduce this extra traffic by fusing elementwise work, specializing layouts, and folding constants.
+    - Compute Requirement: rough dense lower bound ~2 FLOPs/param/token = 14 GFLOPs.
+    - Compute Time: 14 GFLOPs / 197 TFLOPS = 0.071 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: memory-bandwidth bound lower bound, not compute-bound.** Even the best-case weight-read floor is much larger than compute time, so compilation helps by trimming dispatch, layout, activation, and KV overhead around the bandwidth floor rather than eliminating the floor itself.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

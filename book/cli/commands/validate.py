@@ -1,10 +1,24 @@
 """
 Native validation commands for MLSysBook Binder CLI.
 
-Validation logic is implemented in Binder where possible (e.g. references,
-citations, labels, figures, rendering). Some checks still delegate to scripts
-under book/tools/scripts/ (tables, spelling, epub, sources, grid-tables,
-images).
+Every `book-*` pre-commit hook dispatches through `./book/binder check <group>`
+so there is one entry point, one error format, and one place to add new
+checks. See the `ValidateCommand` class docstring below for the contract:
+
+    1. Add a `_run_<scope>` method that returns a ValidationRunResult.
+    2. Add a `Scope("<name>", "_run_<scope>", default=...)` to the relevant
+       group in GROUPS. Use `default=False` if the scope still fails on dev
+       or is intentionally opt-in (slow / heavy / manual stage).
+    3. Surface any new flags on the argparse block in `run()`.
+
+Pre-commit picks the new scope up automatically once `default=True` —
+no YAML edit needed. Ad-hoc audits use `--all-scopes` or `--scope <name>`.
+
+Some checks still delegate to scripts under book/tools/scripts/ (tables,
+spelling, epub, sources, grid-tables, images) and to standalone audit
+scripts under book/tools/audit/index/. The dispatch pattern uses
+`_delegate_script` for subprocess wrappers; preserve that pattern for new
+script-backed scopes.
 """
 
 from __future__ import annotations
@@ -114,57 +128,161 @@ LABEL_REF_PATTERN = re.compile(r"@((?:fig|tbl|sec|eq|lst)-[\w-]+)")
 EXCLUDED_CITATION_PREFIXES = ("fig-", "tbl-", "sec-", "eq-", "lst-", "ch-", "nb-")
 
 
+@dataclass(frozen=True)
+class Scope:
+    """One scope inside a binder check group.
+
+    A "scope" is a single check that lives inside a group (e.g.
+    `refs.citations`, `prose.contractions`). Scopes are the unit of dispatch:
+    `./binder check refs --scope citations` runs one. `./binder check refs`
+    runs every scope flagged `default=True`. Pre-commit consumes the
+    `default=True` set; ad-hoc audits opt into everything via
+    `./binder check refs --all-scopes`.
+
+    Why this matters: as the corpus matures, new scopes get added in a
+    "warning-only / not-yet-clean" state. Marking them `default=False`
+    lets them ship without blocking commits, while still being runnable
+    on demand. Flip to `default=True` once dev is clean for that scope.
+    """
+
+    name: str
+    runner: str
+    default: bool = True
+    note: str = ""
+
+
 class ValidateCommand:
     """Native `binder check` command group (also available as `binder validate`).
 
-    Groups:
-        refs        — inline-python, cross-refs, citations, inline patterns
-        labels      — duplicate labels, orphaned/unreferenced labels
-        headers     — section header IDs
-        footnotes   — placement rules, reference integrity, capitalization
-        figures     — captions/alt-text, float flow, image files
-        rendering   — render patterns, indexes, dropcaps, parts
-        all         — run every check
+    The hierarchy is:
+        binder check <group>                  # all default=True scopes
+        binder check <group> --scope <name>   # one specific scope
+        binder check <group> --all-scopes     # every scope (incl. default=False)
+
+    The `default` flag on each Scope encodes "is this scope curated for the
+    pre-commit/CI baseline today." That is the *only* concept the YAML and CI
+    need to know about. Adding a new check is therefore three things:
+
+        1. Add a `_run_<scope>` method below that returns a ValidationRunResult.
+        2. Add a `Scope("<name>", "_run_<scope>", default=...)` entry to the
+           appropriate group below. Use `default=False` when the scope still
+           fails on dev or is intentionally opt-in (slow, heavy, manual).
+        3. If the scope needs new flags, add them to the argparse block in
+           `run()` and dispatch them in `_run_group`.
+
+    No new pre-commit hook needed. Pre-commit runs `./binder check <group>`
+    and picks up the new scope automatically once it is `default=True`.
+
+    Group catalogue:
+        refs       — refs / citations / cross-refs hygiene
+        labels     — duplicate labels, orphaned/unreferenced labels
+        headers    — section header IDs and headline-case policy
+        bib        — bibliography (.bib) hygiene + canonical forms
+        footnotes  — definition-shape, placement, integrity, cross-chapter, capitalization
+        figures    — captions/alt-text, float flow, image files
+        markup     — low-level markup (patterns, div fences, dropcaps)
+        prose      — prose style (contractions, dup words, ASCII, ...)
+        punctuation — em-dash, slash, vs., e.g./i.e., en-dash ranges
+        numbers    — units / percent / binary units
+        math       — \\times spacing, attr-leaks, render-audit (manual)
+        structure  — heading levels, parts, Purpose-unnumbered
+        code       — python-echo, _str/_math LaTeX leak, LEGO dead code
+        tables     — grid → pipe, table content
+        index      — \\index{} placement, anti-patterns, tag-placement, xrefs
+        images     — file formats, externals, SVG well-formedness
+        json       — JSON syntax
+        units      — physics-engine unit conversion tests
+        notation   — iron-law symbol consistency (BW, R_peak, L_lat, D_vol)
+        spelling   — prose + TikZ spell checks (requires aspell)
+        epub       — source hygiene, smoke checks, epubcheck (built)
+        sources    — source citation patterns
+        references — bibliography vs. academic DBs (hallucinator; slow)
+        content    — content tree (shared/, frontmatter/ required)
+        all        — every group above
     """
 
-    # Maps group name → list of (scope_name, runner_method_name) pairs.
-    # This is the single source of truth for the hierarchy.
-    GROUPS: Dict[str, List[tuple]] = {
+    # Single source of truth for the group → scopes hierarchy.
+    # Order within each group: cheaper / earlier checks first, since later
+    # scopes typically build on earlier ones (e.g. labels.duplicates before
+    # labels.orphans). default=False scopes are listed alongside their kin
+    # so the file reads as a complete map of what *could* run.
+    GROUPS: Dict[str, List[Scope]] = {
         "refs": [
-            ("python-syntax", "_run_python_syntax"),
-            ("inline-python", "_run_inline_python"),
-            ("cross-refs", "_run_refs"),
-            ("citations", "_run_citations"),
-            ("duplicate-year", "_run_duplicate_citation_year"),  # "[@foo1964] (1964)" → redundant year
-            ("manual-bracket", "_run_manual_bracket_citation"),  # *et al.*(…) or *A & B*(…) + [@k] — citeproc dup
-            ("inline", "_run_inline_refs"),
-            ("self-ref", "_run_self_referential"),
-            ("capitalized", "_run_mitpress_capitalized_refs"),  # "chapter 12" lowercase in prose
+            # python-syntax: passes on dev but never wired to pre-commit historically;
+            # leaving default=False to preserve current coverage exactly. Flip later
+            # if we want it in the curated set.
+            Scope("python-syntax", "_run_python_syntax", default=False),
+            # inline-python + self-ref currently fail on dev (corpus debt).
+            # Runnable on demand via --scope or --all-scopes.
+            Scope("inline-python", "_run_inline_python", default=False),
+            Scope("cross-refs", "_run_refs"),
+            Scope("citations", "_run_citations"),
+            Scope("duplicate-year", "_run_duplicate_citation_year",
+                  note='"[@foo1964] (1964)" — redundant year after citation'),
+            Scope("duplicate-key", "_run_duplicate_citation_key",
+                  note='"[@k; @k]" or "[@k] [@k]" — same-key citeproc dup'),
+            Scope("manual-bracket", "_run_manual_bracket_citation",
+                  note='*et al.*(…) — manual attribution next to [@k]'),
+            Scope("principles", "_run_principle_refs",
+                  note="principles use #pri-* IDs and Principle \\ref{pri-*}"),
+            # inline scope is run with --check-patterns OFF in the curated set
+            # (matches former pre-commit hook). Pattern hazards still live in
+            # the corpus; opt in with --check-patterns when cleaning them up.
+            Scope("inline", "_run_inline_refs"),
+            Scope("self-ref", "_run_self_referential", default=False),
+            Scope("capitalized", "_run_mitpress_capitalized_refs",
+                  note='"chapter 12" lowercase in prose (§10.3.2)'),
         ],
         "labels": [
-            ("duplicates", "_run_duplicate_labels"),
-            ("orphans", "_run_unreferenced_labels"),
-            ("fig-labels", "_run_fig_label_underscores"),
+            # duplicates and orphans are both curated, but each carries its
+            # own implicit filter when invoked from pre-commit:
+            #   - duplicates: figures + tables + listings only (sections /
+            #     equations have legitimate dup-key collisions in vol2 WIP)
+            #   - orphans:    vol1 only (vol2 has many forward labels for
+            #     not-yet-authored chapters)
+            # The YAML hook embeds the appropriate flags. fig-labels currently
+            # fails (corpus debt) so it stays default=False until cleaned up.
+            Scope("duplicates", "_run_duplicate_labels"),
+            Scope("orphans", "_run_unreferenced_labels"),
+            Scope("fig-labels", "_run_fig_label_underscores", default=False),
         ],
         "headers": [
-            ("ids", "_run_headers"),
-            ("case", "_run_heading_case"),
+            # ids: vol1 only (vol2 chapters are early-development; many
+            # sections still missing IDs). YAML hook embeds --vol1.
+            Scope("ids", "_run_headers"),
+            Scope("case", "_run_heading_case",
+                  note="MIT Press headline-case (§10.3.1)"),
         ],
         "bib": [
-            ("hygiene", "_run_bib_hygiene"),
+            Scope("hygiene", "_run_bib_hygiene"),
+            # key-content fails on dev (legacy keys grandfathered).
+            # Was never wired to pre-commit; default=False preserves status quo.
+            Scope("key-content", "_run_bib_key_content", default=False),
         ],
         "footnotes": [
-            ("placement", "_run_footnote_placement"),
-            ("integrity", "_run_footnote_refs"),
-            ("cross-chapter", "_run_footnote_cross_chapter"),
-            ("capitalization", "_run_footnote_capitalization"),
+            Scope(
+                "definition-shape",
+                "_run_footnote_definition_shape",
+                note="bold head + colon per book-prose §5 (shapes S1–S5)",
+            ),
+            Scope("placement", "_run_footnote_placement"),
+            Scope("integrity", "_run_footnote_refs"),
+            Scope("cross-chapter", "_run_footnote_cross_chapter", default=False),
+            Scope("capitalization", "_run_footnote_capitalization"),
         ],
         "figures": [
-            ("captions", "_run_figures"),
-            ("div-syntax", "_run_figure_div_syntax"),
-            ("flow", "_run_float_flow"),
-            ("files", "_run_images"),
-            ("alt-text-style", "_run_alt_text_style"),   # alt-text follows body-prose rules (§10.12)
+            Scope("captions", "_run_figures"),
+            Scope("caption-heads", "_run_caption_head_style",
+                  note="fig-cap/tbl-cap/lst-cap use **Bold Title**: Explanation"),
+            Scope("div-syntax", "_run_figure_div_syntax"),
+            # flow: deferred to copyeditor's PDF layout pass (2026-05-03).
+            # The "near first reference" heuristic conflicts with the
+            # repositioning the copyeditor does to balance pages in print.
+            # Re-enable when we own figure placement again.
+            Scope("flow", "_run_float_flow", default=False),
+            Scope("files", "_run_images"),
+            Scope("alt-text-style", "_run_alt_text_style",
+                  note="alt-text follows body-prose rules (§10.12)"),
         ],
         # ------------------------------------------------------------------
         # Semantic check groups: classify checks by WHAT is validated
@@ -174,98 +292,156 @@ class ValidateCommand:
         # scopes. See .claude/rules/book-prose.md for style provenance.
         # ------------------------------------------------------------------
         "markup": [
-            ("patterns", "_run_rendering"),       # low-level markup patterns (backticks, dollar signs, asterisks)
-            ("div-fences", "_run_div_fences"),    # ::: / :::: balance + form
-            ("dropcaps", "_run_dropcaps"),        # drop-cap compatibility
+            Scope("patterns", "_run_rendering",
+                  note="low-level markup (backticks, dollar signs, asterisks)"),
+            Scope("div-fences", "_run_div_fences",
+                  note=":::/ :::: balance and form"),
+            Scope("callouts", "_run_callout_structure",
+                  note="supported callout types, titles, and attributes"),
+            Scope("dropcaps", "_run_dropcaps"),
         ],
         "prose": [
-            ("contractions", "_run_contractions"),           # no "can't", "it's" in body prose
-            ("duplicate-words", "_run_duplicate_words"),     # consecutive dup words
-            ("unblended-prose", "_run_unblended_prose"),     # space after period
-            ("above-below", "_run_mitpress_above_below"),    # no "above"/"below" spatial refs
-            ("ascii", "_run_ascii"),                         # non-ASCII chars
-            ("acknowledgements", "_run_mitpress_acknowledgements"),  # American spelling
-            ("compound-prefix", "_run_compound_prefix"),     # pre-/non- close-up (§10.8)
-            ("concept-caps", "_run_concept_term_capitalization"),  # iron law, memory wall lowercase (§10.3)
-            ("abbreviation-first-use", "_run_abbreviation_first_use"),  # expand on first use per chapter (§10.5)
-            ("latin-abbrevs", "_run_latin_running_text"),    # viz./e.g./etc. in running text (§10.6)
+            Scope("contractions", "_run_contractions",
+                  note='no "can\'t", "it\'s" in body prose'),
+            Scope("duplicate-words", "_run_duplicate_words"),
+            Scope("unblended-prose", "_run_unblended_prose",
+                  note="space after period"),
+            Scope("above-below", "_run_mitpress_above_below",
+                  note='no "above"/"below" spatial refs'),
+            # ascii: corpus has many legitimate non-ASCII chars (em-dashes,
+            # smart quotes from imports). Default=False until corpus-wide
+            # ASCII pass lands.
+            Scope("ascii", "_run_ascii", default=False),
+            Scope("acknowledgements", "_run_mitpress_acknowledgements",
+                  note="American spelling: Acknowledgments"),
+            Scope("compound-prefix", "_run_compound_prefix",
+                  note="pre-/non- close-up (§10.8)"),
+            Scope("concept-caps", "_run_concept_term_capitalization",
+                  note="iron law, memory wall lowercase (§10.3)"),
+            # abbreviation-first-use currently noisy; default=False until tuned.
+            Scope("abbreviation-first-use", "_run_abbreviation_first_use", default=False),
+            Scope("latin-abbrevs", "_run_latin_running_text",
+                  note="viz./e.g./etc. in running text (§10.6)"),
         ],
         "punctuation": [
-            ("emdash", "_run_mitpress_spaced_emdash"),        # word—word, no spaces
-            ("slash", "_run_mitpress_spaced_slash"),          # training/inference, no spaces
-            ("vs-period", "_run_mitpress_vs_period"),         # vs. not vs
-            ("eg-ie-comma", "_run_mitpress_eg_ie_comma"),     # comma after e.g./i.e.
-            ("hyphen-range", "_run_mitpress_hyphen_range"),   # en-dash for number ranges
+            Scope("emdash", "_run_mitpress_spaced_emdash",
+                  note="word—word, no spaces"),
+            Scope("slash", "_run_mitpress_spaced_slash",
+                  note="training/inference, no spaces"),
+            Scope("vs-period", "_run_mitpress_vs_period",
+                  note="vs. not vs"),
+            Scope("eg-ie-comma", "_run_mitpress_eg_ie_comma",
+                  note="comma after e.g./i.e."),
+            Scope("hyphen-range", "_run_mitpress_hyphen_range",
+                  note="en-dash for number ranges"),
         ],
         "numbers": [
-            ("unit-spacing", "_run_unit_spacing"),                          # 100 ms, not 100ms
-            ("binary-units", "_run_binary_units"),                          # GB/TB not GiB/TiB
-            ("percent-spacing", "_run_percent_spacing"),                    # no space before %
-            ("percent-in-captions", "_run_mitpress_percent_in_captions"),   # spell out in captions
+            Scope("unit-spacing", "_run_unit_spacing",
+                  note="100 ms, not 100ms"),
+            Scope("binary-units", "_run_binary_units",
+                  note="GB/TB not GiB/TiB"),
+            Scope("percent-spacing", "_run_percent_spacing",
+                  note="no space before %"),
+            Scope("percent-in-captions", "_run_mitpress_percent_in_captions",
+                  note="spell out 'percent' in captions"),
         ],
         "math": [
-            ("times-spacing", "_run_times_spacing"),                 # space after $\times$
-            ("times-product-spacing", "_run_times_product_spacing"), # space before $\times$ after inline code
-            ("attr-leaks", "_run_attr_latex_leaks"),                 # LaTeX in title=/fig-cap/tbl-cap/fig-alt/tbl-alt — won't render or leaks to lightbox
-            ("render-audit", "_run_math_render_audit"),              # full HTML build + leak scan (slow; manual stage)
+            Scope("times-spacing", "_run_times_spacing",
+                  note="space after $\\times$"),
+            Scope("times-product-spacing", "_run_times_product_spacing",
+                  note="space before $\\times$ after inline code"),
+            Scope("attr-leaks", "_run_attr_latex_leaks",
+                  note="LaTeX in title=/fig-cap/tbl-cap/fig-alt/tbl-alt"),
+            # render-audit builds every chapter (~10 min). Manual stage only;
+            # default=False ensures `binder check math` stays under 1s.
+            Scope("render-audit", "_run_math_render_audit", default=False),
         ],
         "structure": [
-            ("heading-levels", "_run_heading_levels"),    # H1→H2→H3 hierarchy
-            ("parts", "_run_parts"),                       # part keys valid
-            ("purpose-unnumbered", "_run_purpose_unnumbered"),  # Purpose sections unnumbered
+            Scope("heading-levels", "_run_heading_levels",
+                  note="H1→H2→H3 hierarchy"),
+            Scope("parts", "_run_parts",
+                  note="part keys valid"),
+            Scope("purpose-unnumbered", "_run_purpose_unnumbered",
+                  note="Purpose sections unnumbered"),
         ],
         "code": [
-            ("python-echo", "_run_python_echo"),           # echo: false on python blocks
-            ("str-latex-leak", "_run_str_latex_leak"),     # *_str exports must not contain raw LaTeX (use md()/md_math())
+            Scope("python-echo", "_run_python_echo",
+                  note="echo: false on python blocks"),
+            Scope("str-latex-leak", "_run_str_latex_leak",
+                  note="*_str exports must not contain raw LaTeX"),
+            # Migrated 2026-05-06: was scripts/check_lego_vars.py
+            Scope("lego-dead-code", "_run_lego_dead_code",
+                  note="LEGO variables defined but never referenced"),
         ],
         "tables": [
-            ("grid-tables", "_run_grid_tables"),           # prefer pipe tables
-            ("content", "_run_table_content"),             # bare pipes, fracs, HTML entities
+            Scope("grid-tables", "_run_grid_tables",
+                  note="prefer pipe tables"),
+            Scope("content", "_run_table_content",
+                  note="bare pipes, fracs, HTML entities"),
         ],
         "index": [
-            ("placement", "_run_indexes"),                 # \index{} not inline with headings/callouts
+            Scope("placement", "_run_indexes",
+                  note='\\index{} not inline with headings/callouts'),
+            # Migrated 2026-05-06: was book/tools/audit/index/check_anti_patterns.py
+            Scope("anti-patterns", "_run_index_anti_patterns",
+                  note="anti-patterns from .claude/rules/index.md §9"),
+            # Migrated 2026-05-06: was book/tools/audit/index/check_tag_placement.py
+            Scope("tag-placement", "_run_index_tag_placement",
+                  note='\\index{} not inside **bold**, *italic*, `code`, or headings'),
+            # Migrated 2026-05-06: was book/tools/audit/index/check_xref_resolves.py
+            Scope("xref-resolves", "_run_index_xref_resolves",
+                  note="every |see / |seealso target resolves to a real main entry"),
         ],
 
         "images": [
-            ("formats", "_run_image_formats"),
-            ("external", "_run_external_images"),
-            ("svg-xml", "_run_svg_wellformedness"),
+            Scope("formats", "_run_image_formats"),
+            Scope("external", "_run_external_images"),
+            Scope("svg-xml", "_run_svg_wellformedness"),
         ],
         "json": [
-            ("syntax", "_run_json_syntax"),
+            Scope("syntax", "_run_json_syntax"),
         ],
         "units": [
-            ("physics", "_run_unit_tests"),
+            # Physics-engine unit tests. Heavyweight for pre-commit; runs in
+            # under 5s today but is fundamentally a test suite, not a static
+            # check. TODO: consider moving to CI.
+            Scope("physics", "_run_unit_tests"),
         ],
         "notation": [
-            ("consistency", "_run_notation_consistency"),  # iron-law symbols (BW, R_peak, L_lat, D_vol)
+            Scope("consistency", "_run_notation_consistency",
+                  note="iron-law symbols (BW, R_peak, L_lat, D_vol)"),
         ],
         "spelling": [
-            ("prose", "_run_spelling_prose"),
-            ("tikz", "_run_spelling_tikz"),
+            # Both scopes require aspell. Heavy and not part of pre-commit
+            # today. Default=False until aspell is on every contributor box.
+            Scope("prose", "_run_spelling_prose", default=False),
+            Scope("tikz", "_run_spelling_tikz", default=False),
         ],
         "epub": [
-            # Fast source-level invariants. No EPUB build required. Suitable
-            # for pre-commit — runs in <1s across all SVGs + .bib files.
-            ("hygiene", "_run_epub_hygiene"),
+            # Fast source-level invariants (<1s across SVGs + .bib).
+            # Suitable for pre-commit.
+            Scope("hygiene", "_run_epub_hygiene"),
             # Reader-compatibility smoke checks against the built EPUB.
-            # No Java required; catches patterns epubcheck does not, e.g.
-            # CSS custom properties (ClearView / Tolino compat) and
-            # external resource references.
-            ("smoke", "_run_epub_smoke"),
-            # Full W3C epubcheck validation of built EPUB artifacts under
-            # _build/epub-vol*/. Requires epubcheck + JRE. Slow (~30s per
-            # volume) — appropriate for CI, not pre-commit.
-            ("epubcheck", "_run_epubcheck"),
+            # Requires a prior epub build under _build/epub-vol*/.
+            # Default=False because it presupposes a build step.
+            Scope("smoke", "_run_epub_smoke", default=False),
+            # Full W3C epubcheck validation. Requires epubcheck + JRE,
+            # slow (~30s per volume). CI-only.
+            Scope("epubcheck", "_run_epubcheck", default=False),
         ],
         "sources": [
-            ("citations", "_run_sources"),
+            Scope("citations", "_run_sources"),
         ],
         "references": [
-            ("hallucinator", "_run_check_references"),
+            # Hits external academic DBs (slow, network-dependent).
+            # Manual / CI-only by design.
+            Scope("hallucinator", "_run_check_references", default=False),
         ],
         "content": [
-            ("tree", "_run_content_tree"),
+            # Currently fails on this checkout (contents/shared/ structure
+            # not present on every branch). Was never wired to pre-commit.
+            # Run on demand via --scope tree.
+            Scope("tree", "_run_content_tree", default=False),
         ],
     }
 
@@ -298,7 +474,17 @@ class ValidateCommand:
             choices=all_group_names,
             help="Check group to run (refs, labels, headers, footnotes, figures, rendering, references, content, all)",
         )
+        parser.add_argument(
+            "files",
+            nargs="*",
+            help="Optional file(s) or directories to check; used by pre-commit",
+        )
         parser.add_argument("--scope", default=None, help="Narrow to a specific check within a group")
+        parser.add_argument(
+            "--all-scopes", action="store_true", default=False,
+            help="Include scopes marked default=False (heavy / not-yet-clean / opt-in). "
+                 "Without this flag, `binder check <group>` runs only the curated set.",
+        )
         parser.add_argument("--path", default=None, help="File or directory path to check")
         parser.add_argument("--vol1", action="store_true", help="Scope to Volume I")
         parser.add_argument("--vol2", action="store_true", help="Scope to Volume II")
@@ -307,8 +493,11 @@ class ValidateCommand:
         parser.add_argument("--quiet", "-q", action="store_true", dest="quiet", help="Suppress verbose output")
         parser.add_argument("--citations-in-code", action="store_true", help="refs: check citations in code fences")
         parser.add_argument("--citations-in-raw", action="store_true", help="refs: check citations in raw blocks")
-        parser.add_argument("--check-patterns", action="store_true", default=True, help="refs --scope inline: include pattern hazard checks (default: on)")
-        parser.add_argument("--no-check-patterns", action="store_false", dest="check_patterns", help="refs --scope inline: skip pattern hazard checks")
+        # Default OFF: the inline scope ships in the curated set without
+        # pattern checks (matches pre-2026-05 hook behavior; the pattern
+        # corpus has known noise that needs cleanup before flipping default).
+        parser.add_argument("--check-patterns", action="store_true", default=False, help="refs --scope inline: include pattern hazard checks (opt-in; noisy on dev)")
+        parser.add_argument("--no-check-patterns", action="store_false", dest="check_patterns", help="refs --scope inline: skip pattern hazard checks (default)")
         parser.add_argument("--check-scope", action="store_true", default=False, help="refs --scope inline: detect bare variable refs in class bodies that need ClassName.attr")
         parser.add_argument("--no-check-scope", action="store_false", dest="check_scope", help="refs --scope inline: skip scope analysis")
         parser.add_argument("--include-lightbox", action="store_true", default=False, help="math --scope attr-leaks: also surface fig-cap/tbl-cap math that leaks into HTML lightbox tooltips (warning, opt-in; ~70 pre-existing instances on dev)")
@@ -382,8 +571,8 @@ class ValidateCommand:
         else:
             group_name = ns.subcommand
             scope = ns.scope
-            if scope and not any(s == scope for s, _ in self.GROUPS.get(group_name, [])):
-                valid = [s for s, _ in self.GROUPS[group_name]]
+            if scope and not any(sc.name == scope for sc in self.GROUPS.get(group_name, [])):
+                valid = [sc.name for sc in self.GROUPS[group_name]]
                 console.print(f"[red]Unknown scope '{scope}' for group '{group_name}'.[/red]")
                 console.print(f"[yellow]Valid scopes: {', '.join(valid)}[/yellow]")
                 return False
@@ -417,10 +606,28 @@ class ValidateCommand:
         root: Path,
         ns: argparse.Namespace,
     ) -> List[ValidationRunResult]:
-        """Run all checks in *group*, or just the one matching *scope*."""
+        """Run checks in *group*.
+
+        Selection rules (in order):
+          1. If `scope` is set: run that one scope (regardless of its `default` flag).
+          2. Otherwise, run every scope in the group whose `default=True`.
+          3. If `--all-scopes` is set: also include `default=False` scopes.
+
+        This three-way distinction is what lets pre-commit run a curated
+        set without flag soup, while ad-hoc audits (`--all-scopes`) and
+        targeted runs (`--scope`) still reach every scope on demand.
+        """
+        all_scopes = getattr(ns, "all_scopes", False)
         results: List[ValidationRunResult] = []
-        for scope_name, method_name in self.GROUPS[group]:
-            if scope and scope != scope_name:
+        for scope_obj in self.GROUPS[group]:
+            scope_name = scope_obj.name
+            method_name = scope_obj.runner
+            if scope:
+                if scope != scope_name:
+                    continue
+            elif not all_scopes and not scope_obj.default:
+                # Default group invocation skips scopes flagged default=False.
+                # Run them via `--scope <name>` or `--all-scopes`.
                 continue
             method = getattr(self, method_name)
             # Some runners need extra kwargs
@@ -433,9 +640,31 @@ class ValidateCommand:
                                       check_scope=getattr(ns, 'check_scope', False)))
             elif method_name == "_run_attr_latex_leaks":
                 results.append(method(root, include_lightbox=getattr(ns, 'include_lightbox', False)))
-            elif method_name in ("_run_duplicate_labels", "_run_unreferenced_labels"):
+            elif method_name == "_run_duplicate_labels":
+                # Curated default for duplicates: figures + tables + listings only.
+                # Section / equation dup-keys are legitimately ambiguous in vol2
+                # WIP (forward-referenced labels not yet authored) and would
+                # block every commit. Explicit type flags from the user override
+                # this default and switch to the user-selected subset.
+                explicit = (ns.figures or ns.tables or ns.sections or
+                            ns.equations or ns.listings or ns.all_types)
+                if explicit:
+                    label_types = self._selected_label_types(ns)
+                else:
+                    label_types = {
+                        k: v for k, v in LABEL_DEF_PATTERNS.items()
+                        if k in ("Figure", "Table", "Listing")
+                    }
+                results.append(method(root, label_types))
+            elif method_name == "_run_unreferenced_labels":
+                # Curated default for orphans: all label types. The vol filter
+                # comes from --vol1 / --vol2 at the path level (vol2 has many
+                # forward references not yet authored — pre-commit pins to
+                # --vol1 to avoid blocking commits on legitimate forwards).
                 results.append(method(root, self._selected_label_types(ns)))
             elif method_name == "_run_check_references":
+                results.append(method(root, ns))
+            elif method_name == "_run_sources":
                 results.append(method(root, ns))
             elif method_name == "_run_epubcheck":
                 # Thresholds come from --max-fatal / --max-errors; when not
@@ -487,18 +716,23 @@ class ValidateCommand:
             "content": "Content tree (shared/, frontmatter/ required)",
         }
         for group_name, checks in self.GROUPS.items():
-            scopes = ", ".join(s for s, _ in checks)
-            desc = descriptions.get(group_name, "")
-            table.add_row(group_name, scopes, desc)
-        table.add_row("all", "(everything)", "Run all checks")
+            # Show curated scopes plain; mark default=False ones with a dim asterisk
+            # so the user knows they exist but require --all-scopes / --scope opt-in.
+            parts = []
+            for sc in checks:
+                parts.append(sc.name if sc.default else f"{sc.name}*")
+            table.add_row(group_name, ", ".join(parts), descriptions.get(group_name, ""))
+        table.add_row("all", "(every group)", "Run every group's curated set; add --all-scopes for opt-in too")
 
         console.print(Panel(table, title="binder check <group> [--scope <name>]", border_style="cyan"))
         console.print("[dim]Examples:[/dim]")
-        console.print("  [cyan]./binder check refs[/cyan]              [dim]# all reference checks[/dim]")
-        console.print("  [cyan]./binder check refs --scope citations[/cyan]  [dim]# only citation check[/dim]")
-        console.print("  [cyan]./binder check figures --vol1[/cyan]    [dim]# all figure checks, Vol I[/dim]")
-        console.print("  [cyan]./binder check all[/cyan]               [dim]# everything[/dim]")
-        console.print("  [cyan]./binder check <group> help[/cyan]      [dim]# per-group error codes + guidance[/dim]")
+        console.print("  [cyan]./binder check refs[/cyan]                [dim]# curated default scopes for refs[/dim]")
+        console.print("  [cyan]./binder check refs --scope citations[/cyan]  [dim]# one specific scope[/dim]")
+        console.print("  [cyan]./binder check refs --all-scopes[/cyan]   [dim]# every scope including opt-in (* in table)[/dim]")
+        console.print("  [cyan]./binder check figures --vol1[/cyan]      [dim]# default figure scopes, Vol I only[/dim]")
+        console.print("  [cyan]./binder check all[/cyan]                 [dim]# every group, default scopes[/dim]")
+        console.print("  [cyan]./binder check <group> help[/cyan]        [dim]# per-group error codes + guidance[/dim]")
+        console.print("[dim]An asterisk (*) marks a scope that is default=False — runnable via --scope or --all-scopes.[/dim]")
         console.print()
 
     # ------------------------------------------------------------------
@@ -508,16 +742,26 @@ class ValidateCommand:
         if group == "epub":
             self._print_epub_help()
             return
-        # Generic fallback: list scopes and a one-line description.
+        # Generic fallback: list scopes, default flag, runner method, and the
+        # short note (if any). The Default column is the contract pre-commit /
+        # CI rely on.
         scopes = self.GROUPS.get(group, [])
         table = Table(show_header=True, header_style="bold cyan", box=None)
         table.add_column("Scope", style="yellow")
-        table.add_column("Method", style="dim")
-        for s, m in scopes:
-            table.add_row(s, m)
+        table.add_column("Default", style="green", width=8)
+        table.add_column("Note", style="white")
+        table.add_column("Runner", style="dim")
+        for sc in scopes:
+            table.add_row(
+                sc.name,
+                "yes" if sc.default else "opt-in",
+                _rich_escape(sc.note) if sc.note else "",
+                sc.runner,
+            )
         console.print(Panel(table, title=f"binder check {group}", border_style="cyan"))
-        console.print(f"[dim]Run `./binder check {group}` to run every scope, or "
-                      f"`./binder check {group} --scope <name>` for one.[/dim]")
+        console.print(f"[dim]Run [cyan]./binder check {group}[/cyan] for the curated set "
+                      f"(Default = yes), [cyan]--scope <name>[/cyan] for one specific scope, "
+                      f"or [cyan]--all-scopes[/cyan] to include opt-in scopes.[/dim]")
         console.print()
 
     def _print_epub_help(self) -> None:
@@ -874,6 +1118,111 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - start) * 1000),
         )
 
+    _CALLOUT_OPEN_RE = re.compile(r"^:{3,}\s*\{([^}]*)\}")
+    _ATTR_CLASS_RE = re.compile(r"\.([A-Za-z0-9_-]+)")
+    _ATTR_ID_RE = re.compile(r"#([A-Za-z0-9_-]+)")
+
+    def _run_principle_refs(self, root: Path) -> ValidationRunResult:
+        """Validate semantic principle IDs and references.
+
+        This is a markup/semantic invariant, not a style-capitalization pass:
+        it does not decide whether a principle name should be lowercase in
+        prose. It only enforces the reference mechanics in book-prose §4.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        manual_principle_re = re.compile(r"\b[Pp]rinciple\s+\d+(?:\.\d+)?\b")
+        bad_principle_ref_re = re.compile(r"\b[Pp]rinciple\s+\\ref\{(?!pri-)([^}]+)\}")
+        cite_principle_re = re.compile(r"@pri-[A-Za-z0-9_-]+")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+
+                opener = self._CALLOUT_OPEN_RE.match(stripped)
+                if opener:
+                    attrs = opener.group(1)
+                    classes = set(self._ATTR_CLASS_RE.findall(attrs))
+                    if "callout-principle" in classes:
+                        ids = self._ATTR_ID_RE.findall(attrs)
+                        if not any(label.startswith("pri-") for label in ids):
+                            issues.append(
+                                ValidationIssue(
+                                    file=self._relative_file(file),
+                                    line=idx,
+                                    code="principle_missing_pri_id",
+                                    message="Principle callout must use a semantic #pri-* ID",
+                                    severity="error",
+                                    context=stripped[:160],
+                                )
+                            )
+                        if any(label.startswith("nte-") for label in ids):
+                            issues.append(
+                                ValidationIssue(
+                                    file=self._relative_file(file),
+                                    line=idx,
+                                    code="principle_uses_note_id",
+                                    message="Principle callout uses #nte-*; use #pri-* for principles",
+                                    severity="error",
+                                    context=stripped[:160],
+                                )
+                            )
+
+                manual_match = manual_principle_re.search(line)
+                if manual_match:
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="manual_principle_number",
+                            message="Avoid manual principle numbering; use Principle \\ref{pri-*}",
+                            severity="error",
+                            context=line.strip()[:160],
+                        )
+                    )
+
+                bad_ref_match = bad_principle_ref_re.search(line)
+                if bad_ref_match:
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="principle_ref_non_pri",
+                            message="Principle references must point to \\ref{pri-*}",
+                            severity="error",
+                            context=line.strip()[:160],
+                        )
+                    )
+
+                cite_match = cite_principle_re.search(line)
+                if cite_match:
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="principle_citation_syntax",
+                            message="Use Principle \\ref{pri-*}, not @pri-* citation syntax",
+                            severity="error",
+                            context=line.strip()[:160],
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="principles",
+            description="Principle callout IDs and reference mechanics",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
     def _bibliography_for_qmd(self, file: Path) -> Optional[Path]:
         """Resolve the volume backmatter references.bib for a .qmd from its path."""
         try:
@@ -993,30 +1342,180 @@ class ValidateCommand:
         )
 
 
-    def _run_manual_bracket_citation(self, root: Path) -> ValidationRunResult:
-        """Flag a hand-typed author/venue line before a bracket cite on the same run.
+    def _run_duplicate_citation_key(self, root: Path) -> ValidationRunResult:
+        """Flag same-key duplicates in cite groups: `[@k; @k]` or `[@k] [@k]`.
 
-        Citeproc already renders names and (usually) year from `[@key]`. Writing
-        "Jeon et al. (ATC 2019) [@jeon2019analysis]" or "Cohen & Welling (2016) [@c]"
-        duplicates the in-text citation. Prefer only [@key] / [@a; @b], or
-        narrative @key, without a parallel hand-typed attribution in front.
+        Both patterns render through citeproc as a visible duplicate
+        "(Author Year) (Author Year)" because the renderer treats each
+        appearance of the same key as a separate citation event.
 
-        Shapes we flag (prose, not code fences; inline backticks scrubbed first):
+        Two shapes caught:
 
-        - *et al.* (…) … [@ — the common *venue/year* lead-in
-        - ``Surname & Surname (…)`` … [@ — two capitalized surnames joined by &
+        1. **Same key inside one bracket** — `[@key; @key]` or
+           `[@a; @b; @a]`. Common cause: copy-paste while authoring a
+           multi-cite. The fix is to drop the duplicate key:
+           `[@key]` or `[@a; @b]`.
 
-        We do **not** flag acronyms in parentheses that are not *author* lines, e.g.
-        "DARTS (Differentiable …) [@liu2019darts]": that has no *et al.* and no
-        *Word & Word* before the paren. Fenced code and inline backtick docs
-        of anti-patterns are skipped.
+        2. **Same key in stacked brackets** — `[@key][@key]` or
+           `[@key] [@key]`. Common cause: two separate cite-additions
+           in the same paragraph that landed adjacent to each other.
+           The fix is to remove one of the brackets, OR — if both
+           cites genuinely anchor different facts — separate them with
+           prose so the reader sees each cite anchor a distinct claim.
+
+        Distinct from `duplicate-year` (which flags `[@k] (YEAR)`) and
+        from `manual-bracket` (which flags hand-typed author/year + cite).
+        Skips fenced code blocks and inline backticks so anti-pattern
+        documentation does not fire.
         """
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
-        # "… et al. ( … ) [@"  — chains: "A et al. (x) [@a], B et al. (y) [@b]"
+        # "[@key; ...; @key]" — same key appears twice within one
+        # multi-cite bracket group, possibly with other keys between.
+        # Backreference (?P=k) requires the second occurrence to match
+        # the first capture exactly. Spans up to 8 keys per group to
+        # keep the regex bounded; longer multi-cites are rare.
+        same_bracket_dup = re.compile(
+            r"\[@(?P<k>[A-Za-z][\w:.-]*)"
+            r"(?:\s*;\s*@[\w:.-]+){0,8}"
+            r"\s*;\s*@(?P=k)\b"
+        )
+        # "[@key][@key]" or "[@key] [@key]" — same key in adjacent
+        # bracket groups. Allow whitespace, comma, semicolon, or period
+        # between the brackets (typical sentence punctuation that does
+        # not change the citeproc-duplicate outcome).
+        stacked_same_dup = re.compile(
+            r"\[@(?P<k>[A-Za-z][\w:.-]*)\][\s,;.]*\[@(?P=k)\b"
+        )
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                # Strip inline code spans so anti-pattern documentation
+                # in backticks does not fire on the example string.
+                scrubbed = re.sub(r"`[^`]+`", "", line)
+                for m in same_bracket_dup.finditer(scrubbed):
+                    context = scrubbed[max(0, m.start() - 10) : min(len(scrubbed), m.end() + 10)].strip()
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="duplicate_citation_key_in_bracket",
+                            message=(
+                                f"Same key @{m.group('k')} appears twice inside one cite group. "
+                                "Citeproc renders each occurrence as a separate (Author Year), "
+                                "duplicating the rendered citation. Drop the redundant copy."
+                            ),
+                            severity="error",
+                            context=context,
+                        )
+                    )
+                for m in stacked_same_dup.finditer(scrubbed):
+                    context = scrubbed[max(0, m.start() - 10) : min(len(scrubbed), m.end() + 10)].strip()
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="duplicate_citation_key_stacked",
+                            message=(
+                                f"Same key @{m.group('k')} appears in two adjacent cite brackets. "
+                                "Citeproc renders each as '(Author Year)', producing a visible "
+                                "(Author Year) (Author Year) duplicate. Remove one bracket, or "
+                                "separate the two facts with prose so each cite anchors a distinct claim."
+                            ),
+                            severity="error",
+                            context=context,
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="duplicate-citation-key",
+            description='Flag "[@k; @k]" or "[@k] [@k]" — same-key citeproc dup',
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+
+    def _run_manual_bracket_citation(self, root: Path) -> ValidationRunResult:
+        """Flag hand-typed author/year attributions in prose.
+
+        Two failure modes are caught here, both rooted in the same anti-pattern:
+        an author + year written by hand instead of letting citeproc render the
+        name from a `@key` / `[@key]` citation.
+
+        1. **Manual + bracket** (citeproc duplicate). Writing
+           "Jeon et al. (ATC 2019) [@jeon2019analysis]" or
+           "Cohen & Welling (2016) [@c]" duplicates the in-text citation —
+           citeproc already prints "Jeon et al. (2019)" / "Cohen and Welling
+           (2016)" from the key. Prefer `[@key]` / `[@a; @b]` alone, or
+           narrative `@key`.
+
+        1b. **Narrative + duplicated year**. Writing
+            "@williams2009roofline introduced the model at UC Berkeley in
+            2009" repeats the year that the narrative citation already
+            renders. If the year is only there to identify the cited work,
+            move or drop it. If the year is a separate timeline fact, reword
+            so the prose does not read like duplicated attribution.
+
+        2. **Bare attribution** (no bib citation at all). Writing
+           "Tri Dao et al. at Stanford (2022)" or "Coffman et al. (1971)"
+           with no accompanying `[@key]` or narrative `@bibkey` on the line
+           bypasses the bibliography entirely — the cited work is not in
+           references.bib and the rendered text reads as plain prose
+           rather than a verifiable citation. This pattern shows up most
+           often inside footnote definitions where authors hand-type a
+           provenance line. Fix with narrative `@key` (renders as
+           "Dao et al. (2022)") or restructure to drop the attribution
+           when no bib entry exists.
+
+        Shapes we flag (prose, not code fences; inline backticks scrubbed first):
+
+        Manual + bracket (citeproc duplicate):
+        - `… et al. <opt-words> ( … YEAR … ) [@key]`  — *et al.* + paren + bracket.
+        - `Surname & Surname ( … ) [@key]`            — two-author + bracket.
+
+        Bare attribution (no [@key] or narrative @bibkey on the line):
+        - `… et al. <opt-words> ( … YEAR … )`         — classic *et al.* + paren-year.
+        - `… et al.` with no paren-year on line       — e.g. "Sambasivan et al. found
+          that…" — author + year claim with nothing for the reader to look up.
+        - `Surname and Surname ( … YEAR … )`          — e.g. "Frankle and Carbin
+          (MIT, 2019)".
+        - `Surname, Surname, and Surname ( … YEAR … )` — e.g. "Hinton, Vinyals,
+          and Dean (Google, 2015)".
+        - `(Surname and Surname, YEAR)`               — e.g. "(Ioffe and Szegedy,
+          2015)".
+
+        These six bare patterns share a fix: replace the manual attribution with
+        narrative `@key` (which renders as "Author et al. (YEAR)") or `[@key]`
+        as a fact anchor. If no bib entry exists, restructure to drop the date
+        and author rather than leaving an unverifiable claim.
+
+        We do **not** flag acronyms in parentheses that are not *author* lines, e.g.
+        "DARTS (Differentiable …) [@liu2019darts]": that has no *et al.* and no
+        *Word & Word* before the paren. The bare-attribution branches that involve
+        a paren require a 4-digit publication year (19xx/20xx) inside the
+        parenthetical, so "(5--10)% improvement" or "(in production)" do not
+        trigger it. Fenced code and inline backtick docs of anti-patterns are
+        skipped.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        # "et al. <opt-words> ( … ) [@"
+        # The intermediate `[^.\n\[(]{0,80}` allows phrases like "at Stanford"
+        # or "in 2014" between `et al.` and the year-paren without crossing
+        # a sentence boundary, an opening bracket, or a nested paren.
         et_al_bracket = re.compile(
-            r"et al\.\s*\([^)\n]{0,500}\)\s*,?\s*\[@",
+            r"et al\.[^.\n\[(]{0,80}\([^)\n]{0,500}\)\s*,?\s*\[@",
             re.IGNORECASE,
         )
         # "Cohen & Welling (ReCOL 2016) [@"  — two Titlecase tokens and & (surname style)
@@ -1024,7 +1523,101 @@ class ValidateCommand:
             r"\b[A-Z][a-z][a-zA-Z'-]*\s+&\s+[A-Z][a-z][a-zA-Z'-]*\s*"
             r"\([^)\n]{0,500}\)\s*,?\s*\[@"
         )
-        # Same issue code: message differentiates
+        # "Hennessy and Patterson [@Patterson2021]" — two surnames + and + bracket
+        # cite, with no paren-year between. Distinct from `two_surname_and_paren`
+        # (which requires a paren-year and is a *bare* attribution) and from
+        # `two_surname_amp_bracket` (which uses & and requires a paren). Citeproc
+        # renders [@key] as "(Author and Author YEAR)" — duplicates the prose.
+        two_surname_and_bracket = re.compile(
+            r"\b[A-Z][a-z][a-zA-Z'-]+\s+and\s+[A-Z][a-z][a-zA-Z'-]+\s*,?\s*\[@"
+        )
+        # "(Sweeney, 2002) [@sweeney2002k]" — single-author parenthetical year
+        # immediately before a bracket cite. Citeproc renders [@key] as
+        # "(Author YEAR)" so the (Surname, YEAR) prose duplicates it.
+        single_paren_author_year_bracket = re.compile(
+            r"\(\s*[A-Z][a-z][a-zA-Z'-]+,\s*(?:19|20)\d{2}\s*\)\s*,?\s*\[@"
+        )
+        # "**Optimal Brain Damage (LeCun, 1989)** [@cite]:" — footnote bold head
+        # whose parenthetical already names (Author, YEAR) or (YEAR), followed
+        # immediately by [@cite]. Per the book's footnote convention (Dartmouth
+        # Conference, AlexNet, HIPAA, EU AI Act, A11 Bionic, Optimal Brain
+        # Damage, etc.), the bold head IS the attribution — adding a bracket
+        # cite right after produces "(YEAR) (Author YEAR)" in the rendered output.
+        bold_head_year_bracket = re.compile(
+            r"\*\*[^*\n]*\([^)\n]*\b(?:19|20)\d{2}\b[^)\n]*\)\*\*\s*\[@"
+        )
+        # "[^fn-X]: **Term** [@cite]: ..." — footnote bold head followed
+        # immediately by a [@cite], even when the head has no parenthetical
+        # year. citeproc still inserts "(Author YEAR)" right where you put
+        # [@cite], producing rendered output like "**Federated Learning**
+        # (Li et al. 2020): A distributed training paradigm…" — the cite
+        # reads as part of the term name. Place the cite inside the body
+        # sentence at a specific factual claim instead.
+        footnote_head_then_bracket = re.compile(
+            r"^\[\^fn-[a-z0-9-]+\]:\s*\*\*[^*\n]+\*\*\s*\[@",
+            re.M,
+        )
+        # "text.[@cite]" — period BEFORE the cite. Convention is the
+        # opposite: the cite is part of the sentence, so it goes before the
+        # terminal punctuation: "text [@cite]." Pandoc renders the wrong
+        # order with the period jammed against the citation visually.
+        period_before_bracket = re.compile(r"\S\.\[@[A-Za-z]")
+        # "word[@cite]" — no space before the cite. A parenthetical citation
+        # always takes a leading space in body prose. Excludes footnote
+        # markers and reference labels.
+        no_space_before_bracket = re.compile(r"[a-zA-Z]\[@(?!sec-|fig-|tbl-|eq-|lst-|exr-|exm-|thm-|cor-|cnj-|def-|prp-|rem-|prf-|alg-)[A-Za-z]")
+        # "[@a, @b]" — comma-separated multi-cite. Pandoc's citation syntax
+        # requires semicolons: "[@a; @b]".
+        comma_multicite = re.compile(r"\[@[A-Za-z][\w:.-]+,\s*@[A-Za-z]")
+        # "et al. <opt-words> ( … YEAR … )" — bare attribution.
+        # Requires a 4-digit publication year inside the paren so we don't
+        # flag unrelated parentheticals.
+        et_al_bare = re.compile(
+            r"et al\.[^.\n\[(]{0,100}"
+            r"\(\s*[^)\n]{0,60}\b(?:19|20)\d{2}\b[^)\n]{0,60}\)",
+            re.IGNORECASE,
+        )
+        # "… et al." anywhere on a line, with no paren-year nearby.
+        # Catches "Sambasivan et al. found that…" — the author makes an
+        # attribution claim but provides no citation for the reader to verify.
+        # The line-level no-cite suppression below ensures we only flag prose
+        # that genuinely lacks a [@key] or narrative @bibkey.
+        et_al_loose = re.compile(r"\bet\s+al\.", re.IGNORECASE)
+        # "Surname and Surname (… YEAR …)" — two-author parenthetical year.
+        # Catches "Frankle and Carbin (MIT, 2019)". Requires both surnames to
+        # start with a capital letter and be followed by lowercase, so common
+        # phrases like "this and that" / "Apple and Microsoft (2024 deal)"
+        # have a lower hit rate. We also require a 4-digit year inside the
+        # paren to avoid matching bare phrases like "Cohen and Welling".
+        two_surname_and_paren = re.compile(
+            r"\b[A-Z][a-z][a-zA-Z'-]+\s+and\s+[A-Z][a-z][a-zA-Z'-]+\s*"
+            r"\(\s*[^)\n]{0,80}\b(?:19|20)\d{2}\b[^)\n]{0,80}\)"
+        )
+        # "Surname, Surname, and Surname (… YEAR …)" — three-author.
+        # Catches "Hinton, Vinyals, and Dean (Google, 2015)". Optional Oxford
+        # comma (`,?`) before "and". Same paren-year requirement as above.
+        three_surname_paren = re.compile(
+            r"\b[A-Z][a-z][a-zA-Z'-]+,\s+[A-Z][a-z][a-zA-Z'-]+,?\s+and\s+"
+            r"[A-Z][a-z][a-zA-Z'-]+\s*"
+            r"\(\s*[^)\n]{0,80}\b(?:19|20)\d{2}\b[^)\n]{0,80}\)"
+        )
+        # "(Surname and Surname, YEAR)" — fully parenthesized two-author cite.
+        # Catches "(Ioffe and Szegedy, 2015)". Tighter than the two-surname
+        # form above because both surnames AND the year live inside one
+        # parenthesis with a comma separator — almost always an author cite.
+        paren_two_authors = re.compile(
+            r"\(\s*[A-Z][a-z][a-zA-Z'-]+\s+and\s+[A-Z][a-z][a-zA-Z'-]+,\s*"
+            r"(?:19|20)\d{2}\s*\)"
+        )
+        # Cite detectors used to suppress the bare branch when the line
+        # already has a real citation. Excludes Quarto cross-ref prefixes
+        # (@sec-, @fig-, etc.) so those are not mistaken for bibkeys.
+        bracket_cite = re.compile(r"\[@[A-Za-z]")
+        narrative_cite = re.compile(
+            r"@(?!sec-|fig-|tbl-|eq-|lst-|exr-|exm-|thm-|cor-|cnj-|"
+            r"def-|prp-|rem-|prf-|alg-)[A-Za-z][\w:-]*"
+        )
+
         def issue_et_al(
             f: Path, line_num: int, context: str
         ) -> ValidationIssue:
@@ -1057,6 +1650,227 @@ class ValidateCommand:
                 context=context,
             )
 
+        def issue_bare_attribution(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="bare_manual_attribution",
+                message=(
+                    "Hand-typed *Author et al. (YEAR)* with no bibliography citation "
+                    "on this line. Use narrative @key (renders as 'Author et al. "
+                    "(YEAR)') so the work appears in references.bib, or restructure "
+                    "to drop the attribution when no bib entry exists."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_etal_no_cite(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="bare_etal_no_cite",
+                message=(
+                    "Used *Author et al.* in prose with no citation on the line. "
+                    "Either add narrative @key (renders as 'Author et al. (YEAR)') "
+                    "or [@key] as a fact anchor, or rewrite to drop the named "
+                    "attribution when no bib entry exists."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_two_authors_no_cite(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="bare_two_author_attribution",
+                message=(
+                    "Hand-typed *Surname and Surname (YEAR)* with no bibliography "
+                    "citation on this line. Use narrative @key (renders as "
+                    "'Surname and Surname (YEAR)') or [@key] as a fact anchor, "
+                    "not the manual paren-year form."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_three_authors_no_cite(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="bare_three_author_attribution",
+                message=(
+                    "Hand-typed *Surname, Surname, and Surname (YEAR)* with no "
+                    "bibliography citation on this line. Replace with narrative "
+                    "@key (citeproc renders the names from the bib entry) or "
+                    "[@key] as a fact anchor."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_paren_authors_no_cite(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="bare_paren_author_attribution",
+                message=(
+                    "Hand-typed *(Surname and Surname, YEAR)* parenthetical "
+                    "with no bibliography citation on this line. Replace with "
+                    "[@key] — citeproc renders it the same way and links to "
+                    "the bib entry."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_two_surname_and_bracket(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="manual_bracket_citation",
+                message=(
+                    "Hand-typed *Surname and Surname* before a bracket cite — "
+                    "citeproc already prints both authors from [@key]. Use "
+                    "narrative @key (renders as 'Surname and Surname (YEAR)') "
+                    "or [@key] alone, not both."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_single_paren_year_bracket(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="manual_bracket_citation",
+                message=(
+                    "Hand-typed *(Surname, YEAR)* before a bracket cite — "
+                    "citeproc renders [@key] as '(Author YEAR)' immediately "
+                    "after, duplicating the prose. Use [@key] alone."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_bold_head_bracket(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="manual_bracket_citation",
+                message=(
+                    "Footnote bold head **Term (Author, YEAR)** is followed by "
+                    "a bracket cite [@key]; citeproc renders '(Author YEAR)' "
+                    "right after, duplicating the head's parenthetical. Per "
+                    "book convention (Dartmouth Conference, AlexNet, HIPAA, "
+                    "EU AI Act, etc.), the bold head IS the attribution — drop "
+                    "the cite, or place it later in the body attached to a "
+                    "specific factual claim."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_footnote_head_then_bracket(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="manual_bracket_citation",
+                message=(
+                    "Footnote bold head **Term** followed immediately by "
+                    "[@cite] — citeproc inserts '(Author YEAR)' right after "
+                    "the term name, making the cite read as part of the term "
+                    "rather than attribution for the body. Place the cite "
+                    "inside the body sentence at a specific factual claim "
+                    "(e.g., '...without centralizing the raw information "
+                    "[@key].')."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_narrative_year_dup(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="narrative_citation_year",
+                message=(
+                    "Narrative citation already renders the cited work's year. "
+                    "Do not repeat the same year later in the clause; move it "
+                    "or remove it unless it is a genuinely separate timeline fact."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_period_before_bracket(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="cite_placement",
+                message=(
+                    "Period BEFORE the citation. Convention is "
+                    "\"text [@cite].\" not \"text.[@cite]\" — the citation "
+                    "is part of the sentence and goes before terminal "
+                    "punctuation."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_no_space_before_bracket(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="cite_placement",
+                message=(
+                    "Citation glued to the preceding word. Always insert a "
+                    "space: \"word [@cite]\" not \"word[@cite]\"."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_comma_multicite(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="cite_placement",
+                message=(
+                    "Comma-separated multi-cite [@a, @b]. Pandoc's citation "
+                    "syntax requires semicolons: [@a; @b]."
+                ),
+                severity="error",
+                context=context,
+            )
+
         for file in files:
             lines = self._read_text(file).splitlines()
             in_code = False
@@ -1078,10 +1892,111 @@ class ValidateCommand:
                         max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
                     ].strip()
                     issues.append(issue_ampersand(file, idx, context))
+                for m in two_surname_and_bracket.finditer(scrubbed):
+                    context = scrubbed[
+                        max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                    ].strip()
+                    issues.append(issue_two_surname_and_bracket(file, idx, context))
+                for m in single_paren_author_year_bracket.finditer(scrubbed):
+                    context = scrubbed[
+                        max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                    ].strip()
+                    issues.append(issue_single_paren_year_bracket(file, idx, context))
+                for m in bold_head_year_bracket.finditer(scrubbed):
+                    context = scrubbed[
+                        max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                    ].strip()
+                    issues.append(issue_bold_head_bracket(file, idx, context))
+                if footnote_head_then_bracket.match(scrubbed):
+                    context = scrubbed[: min(len(scrubbed), 80)]
+                    issues.append(issue_footnote_head_then_bracket(file, idx, context))
+                for m in period_before_bracket.finditer(scrubbed):
+                    context = scrubbed[
+                        max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                    ].strip()
+                    issues.append(issue_period_before_bracket(file, idx, context))
+                for m in no_space_before_bracket.finditer(scrubbed):
+                    # Skip footnote markers like text[^fn-...] which look similar but
+                    # the regex requires "[@" so footnote markers (which use "[^") don't match.
+                    context = scrubbed[
+                        max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                    ].strip()
+                    issues.append(issue_no_space_before_bracket(file, idx, context))
+                for m in comma_multicite.finditer(scrubbed):
+                    context = scrubbed[
+                        max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                    ].strip()
+                    issues.append(issue_comma_multicite(file, idx, context))
+                for m in narrative_cite.finditer(scrubbed):
+                    key = m.group(0)[1:]
+                    key_year_match = re.search(r"(?:18|19|20)\d{2}", key)
+                    if not key_year_match:
+                        continue
+                    key_year = key_year_match.group(0)
+                    tail = scrubbed[m.end() : m.end() + 120]
+                    year_dup = re.search(
+                        rf"\b(?:in|at|on|from|during|since)\s*\(?{key_year}\)?\b"
+                        rf"|(?:\(\s*{key_year}\s*\))",
+                        tail,
+                    )
+                    if year_dup:
+                        context = scrubbed[
+                            max(0, m.start() - 5) : min(len(scrubbed), m.end() + 80)
+                        ].strip()
+                        issues.append(issue_narrative_year_dup(file, idx, context))
+                # Bare attribution: only flag when the line carries no real
+                # citation. A bracket cite anywhere or a narrative @bibkey
+                # (i.e., @ followed by a non-cross-ref word) suppresses this.
+                line_has_cite = bool(
+                    bracket_cite.search(scrubbed)
+                    or narrative_cite.search(scrubbed)
+                )
+                # Skip lines that look like code-comment annotations rather
+                # than body prose. Two signals: a leading `#` followed by
+                # ALL-CAPS content (e.g. "# VERIFIED DATA"), or any
+                # `arXiv:NNNN.NNNNN` token on the line. These appear inside
+                # `{python}` cells whose opening fence is mis-detected when
+                # the file has unbalanced fences elsewhere.
+                looks_like_code_comment = (
+                    bool(re.match(r"^\s*#\s+[A-Z]{3,}", line))
+                    or "arXiv:" in scrubbed
+                )
+                if not line_has_cite and not looks_like_code_comment:
+                    for m in et_al_bare.finditer(scrubbed):
+                        context = scrubbed[
+                            max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                        ].strip()
+                        issues.append(issue_bare_attribution(file, idx, context))
+                    # If et_al_bare did not fire but et al. appears anywhere
+                    # on the line, the author claim still lacks a citation.
+                    if not et_al_bare.search(scrubbed):
+                        for m in et_al_loose.finditer(scrubbed):
+                            context = scrubbed[
+                                max(0, m.start() - 30) : min(len(scrubbed), m.end() + 40)
+                            ].strip()
+                            issues.append(issue_etal_no_cite(file, idx, context))
+                    for m in two_surname_and_paren.finditer(scrubbed):
+                        context = scrubbed[
+                            max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                        ].strip()
+                        issues.append(issue_two_authors_no_cite(file, idx, context))
+                    for m in three_surname_paren.finditer(scrubbed):
+                        context = scrubbed[
+                            max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                        ].strip()
+                        issues.append(issue_three_authors_no_cite(file, idx, context))
+                    for m in paren_two_authors.finditer(scrubbed):
+                        context = scrubbed[
+                            max(0, m.start() - 10) : min(len(scrubbed), m.end() + 24)
+                        ].strip()
+                        issues.append(issue_paren_authors_no_cite(file, idx, context))
 
         return ValidationRunResult(
             name="manual-bracket",
-            description="Flag hand-typed author (…) + [@key] on one line (citeproc duplicate)",
+            description=(
+                "Flag hand-typed Author et al. (YEAR) attributions: "
+                "manual+bracket duplicates and bare prose without [@key]"
+            ),
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
@@ -1358,9 +2273,23 @@ class ValidateCommand:
             lines = self._read_text(file).splitlines()
             in_code = False
             in_div = False
+            in_html_comment = False
 
             for idx, line in enumerate(lines, 1):
                 stripped = line.strip()
+                # HTML comments are tracked OUTSIDE code blocks. A code fence
+                # inside an HTML comment (e.g. a hidden TikZ example) is just
+                # text, not a real fence — toggling in_code on it would mis-
+                # classify the rest of the file. See `_maintain_section_ids`
+                # in maintenance.py for the matching writer-side fix.
+                if not in_code:
+                    if "<!--" in stripped and "-->" not in stripped:
+                        in_html_comment = True
+                        continue
+                    if in_html_comment:
+                        if "-->" in stripped:
+                            in_html_comment = False
+                        continue
                 if code_block_pat.match(stripped):
                     in_code = not in_code
                     continue
@@ -1687,6 +2616,144 @@ class ValidateCommand:
     # ------------------------------------------------------------------
     # Figures  (ported from check_figure_completeness.py)
     # ------------------------------------------------------------------
+
+    _CAPTION_HEAD_ATTR_RE = re.compile(
+        r"""\b(?P<key>fig-cap|tbl-cap|lst-cap)\s*=\s*"(?P<value>[^"]*)\""""
+    )
+    _MARKDOWN_CAPTION_HEAD_RE = re.compile(
+        r"""^\s*:\s+(?P<value>.+?)\s+\{#(?P<label>(?:fig|tbl|lst)-[\w-]+)"""
+    )
+    _CHUNK_CAPTION_HEAD_RE = re.compile(
+        r"""^\s*(?:#|%%)\|\s*(?P<key>fig-cap|tbl-cap|lst-cap)\s*:\s*(?P<value>.*?)\s*$"""
+    )
+    _CAPTION_HEAD_STYLE_RE = re.compile(
+        r"""^\*\*(?P<head>[^*\n]+)\*\*(?P<index>(?:\\index\{[^}\n]+\})*):\s+(?P<body>\S.*)$"""
+    )
+
+    def _run_caption_head_style(self, root: Path) -> ValidationRunResult:
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        def check_caption(
+            file: Path,
+            line_no: int,
+            key: str,
+            value: str,
+            context: str,
+        ) -> None:
+            if not value.startswith("**"):
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=line_no,
+                        code="caption_head_missing_bold",
+                        message=f"{key} must start with a bold caption head: **Bold Title**: Explanation",
+                        severity="error",
+                        context=context[:160],
+                    )
+                )
+                return
+
+            match = self._CAPTION_HEAD_STYLE_RE.match(value)
+            if not match:
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=line_no,
+                        code="caption_head_separator",
+                        message=f"{key} must use colon outside bold: **Bold Title**: Explanation",
+                        severity="error",
+                        context=context[:160],
+                    )
+                )
+                return
+
+            head = match.group("head").strip()
+            body = match.group("body").lstrip()
+            if head.endswith((".", ":", ";", "!", "?")):
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=line_no,
+                        code="caption_head_terminal_punctuation",
+                        message=f"{key} caption head should not end with punctuation inside bold",
+                        severity="error",
+                        context=context[:160],
+                    )
+                )
+            if body and re.match(r"[a-z]", body[0]):
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=line_no,
+                        code="caption_body_lowercase_after_colon",
+                        message=f"{key} caption text after the colon should begin as a sentence",
+                        severity="error",
+                        context=context[:160],
+                    )
+                )
+            if "**" in body:
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=line_no,
+                        code="caption_body_extra_bold",
+                        message=f"{key} caption body should be plain prose; only the leading caption head is bold",
+                        severity="error",
+                        context=context[:160],
+                    )
+                )
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.rstrip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                chunk_match = self._CHUNK_CAPTION_HEAD_RE.match(line)
+                if chunk_match:
+                    check_caption(
+                        file,
+                        idx,
+                        chunk_match.group("key"),
+                        chunk_match.group("value").strip().strip("'\""),
+                        line.strip(),
+                    )
+                    continue
+                if in_code:
+                    continue
+
+                for attr_match in self._CAPTION_HEAD_ATTR_RE.finditer(line):
+                    check_caption(
+                        file,
+                        idx,
+                        attr_match.group("key"),
+                        attr_match.group("value").strip(),
+                        line.strip(),
+                    )
+
+                md_match = self._MARKDOWN_CAPTION_HEAD_RE.match(line)
+                if md_match:
+                    label = md_match.group("label")
+                    key = f"{label.split('-', 1)[0]}-caption"
+                    check_caption(
+                        file,
+                        idx,
+                        key,
+                        md_match.group("value").strip(),
+                        line.strip(),
+                    )
+
+        return ValidationRunResult(
+            name="caption-heads",
+            description="Check figure, table, and listing caption heads use **Bold Title**: Explanation",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
 
     def _run_figures(self, root: Path) -> ValidationRunResult:
         start = time.time()
@@ -2064,6 +3131,10 @@ class ValidateCommand:
         hex_literal_pat = re.compile(r"0x[0-9a-fA-F]")
         # Cross-reference ID pattern: @tbl-foo300x, @fig-bar2x, @sec-baz1x — these are labels not multiplication
         xref_id_pat = re.compile(r"@(?:tbl|fig|sec|eq|lst)-[a-z0-9_-]+x\b")
+        # Quarto attribute blocks can contain IDs such as
+        # {#tbl-assumptions-mi300x tbl-colwidths="[...]"}; those are
+        # identifiers, not prose multiplication.
+        attr_block_pat = re.compile(r"\{[^{}]*(?:#[A-Za-z0-9_-]+|\.[A-Za-z0-9_-]+)[^{}]*\}")
         # fig-alt lines to skip
         fig_alt_pat = re.compile(r'fig-alt\s*=\s*"')
 
@@ -2122,7 +3193,8 @@ class ValidateCommand:
                 # Skip fig-alt lines and index entries
                 if not fig_alt_pat.search(line) and not stripped.startswith("\\index"):
                     # Strip cross-reference IDs before checking (e.g. @tbl-mi300x, @fig-foo2x)
-                    line_no_xrefs = xref_id_pat.sub("", line)
+                    line_no_attrs = attr_block_pat.sub("", line)
+                    line_no_xrefs = xref_id_pat.sub("", line_no_attrs)
                     for rm in lowercase_x_mult_pat.finditer(line_no_xrefs):
                         # Exclude hex literals like 0x61, 0xff
                         ctx_start = max(0, rm.start() - 1)
@@ -3705,6 +4777,113 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - start) * 1000),
         )
 
+    _ALLOWED_CALLOUT_CLASSES = {
+        "callout-chapter-connection",
+        "callout-checkpoint",
+        "callout-colab",
+        "callout-definition",
+        "callout-example",
+        "callout-important",
+        "callout-learning-objectives",
+        "callout-lighthouse",
+        "callout-note",
+        "callout-notebook",
+        "callout-perspective",
+        "callout-principle",
+        "callout-takeaways",
+        "callout-theorem",
+        "callout-tip",
+        "callout-war-story",
+        "callout-warning",
+    }
+    _CALLOUT_TITLE_OPTIONAL_CLASSES = {"callout-learning-objectives"}
+
+    def _run_callout_structure(self, root: Path) -> ValidationRunResult:
+        """Validate generic callout mechanics from book-prose §4."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+
+                opener = self._CALLOUT_OPEN_RE.match(stripped)
+                if not opener:
+                    continue
+
+                attrs = opener.group(1)
+                classes = [
+                    cls for cls in self._ATTR_CLASS_RE.findall(attrs)
+                    if cls.startswith("callout-")
+                ]
+                if not classes:
+                    continue
+
+                if "icon=false" in attrs:
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="callout_icon_false",
+                            message="Remove icon=false; callout icons should follow the type default",
+                            severity="error",
+                            context=stripped[:160],
+                        )
+                    )
+
+                has_title = re.search(r'\btitle\s*=', attrs) is not None
+                for cls in classes:
+                    if cls not in self._ALLOWED_CALLOUT_CLASSES:
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="unsupported_callout_type",
+                                message=f"Unsupported callout type .{cls}; use a type from book-prose §4",
+                                severity="error",
+                                context=stripped[:160],
+                            )
+                        )
+                    if cls in self._CALLOUT_TITLE_OPTIONAL_CLASSES:
+                        if has_title:
+                            issues.append(
+                                ValidationIssue(
+                                    file=self._relative_file(file),
+                                    line=idx,
+                                    code="learning_objectives_explicit_title",
+                                    message="Learning Objectives callouts use the auto-generated label; omit title=",
+                                    severity="warning",
+                                    context=stripped[:160],
+                                )
+                            )
+                    elif not has_title:
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="callout_missing_title",
+                                message=f".{cls} callout needs an explicit chapter-specific title",
+                                severity="error",
+                                context=stripped[:160],
+                            )
+                        )
+
+        return ValidationRunResult(
+            name="callouts",
+            description="Callout types, required titles, and unsupported attributes",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
     # ==================================================================
     # MIT PRESS CHECKS (§10 of book-prose-merged.md)
     # ==================================================================
@@ -4176,6 +5355,102 @@ class ValidateCommand:
         return ValidationRunResult(
             name="footnote_capitalization",
             description="Footnote definitions must begin with a capital letter",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Footnote definition shape  (book-prose.md §5 — S1–S5 canonical openers)
+    # ------------------------------------------------------------------
+
+    def _run_footnote_definition_shape(self, root: Path) -> ValidationRunResult:
+        """Footnote definition lines must match one canonical opener shape.
+
+        After ``[^fn-slug]:`` and optional ``[offset=…mm]``, the body must begin with:
+
+        - **S3** ``**Term** (gloss): `` — etymology / parenthetical gloss before colon
+        - **S2** ``**Term**\\index{…}\\index{…}: `` — index tags stacked before colon
+        - **S1/S5** ``**Term**: `` — standard definitional head (incl. biography)
+
+        Bare ``@sec-`` openers and plain prose (no bold head) are rejected.
+        Reference: ``.claude/rules/book-prose.md`` *Canonical definition-line shapes*.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        def_line = re.compile(r"^\[\^(fn-[a-z0-9-]+)\]:\s*(.*)$")
+        offset_prefix = re.compile(r"^\[offset=[^\]]+\]\s*")
+        # S3: **Term** (…): or **Term**\index{}… (…): — gloss colon after closing )
+        pat_etymology = re.compile(
+            r"^\*\*.+?\*\*(?:\\index\{[^}]+\}\s*)*\s*\([^)]*\):\s*",
+            re.DOTALL,
+        )
+        # S2: **Term**\index{}…+: before colon
+        pat_index_first = re.compile(
+            r"^\*\*.+?\*\*\s*(?:\\index\{[^}]+\}\s*)+:\s*",
+            re.DOTALL,
+        )
+        # S1/S5: **Term**: — bold span then colon
+        pat_standard = re.compile(
+            r"^\*\*.+?\*\*:\s*",
+            re.DOTALL,
+        )
+
+        def opener_ok(rest: str) -> bool:
+            rest = rest.strip()
+            om = offset_prefix.match(rest)
+            if om:
+                rest = rest[om.end() :].lstrip()
+            if not rest:
+                return False
+            if rest.startswith("@"):
+                return False
+            if pat_etymology.match(rest):
+                return True
+            if pat_index_first.match(rest):
+                return True
+            if pat_standard.match(rest):
+                return True
+            return False
+
+        for file in files:
+            text = self._read_text(file)
+            in_fence = False
+            for idx, line in enumerate(text.splitlines(), 1):
+                if line.lstrip().startswith("```"):
+                    in_fence = not in_fence
+                    continue
+                if in_fence:
+                    continue
+                m = def_line.match(line)
+                if not m:
+                    continue
+                body = m.group(2)
+                if opener_ok(body):
+                    continue
+                fn_id = m.group(1)
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=idx,
+                        code="footnote_definition_shape",
+                        message=(
+                            f"Footnote [^{fn_id}] does not match canonical opener "
+                            r"(**Term**:, **Term**\index{}:, or **Term** (gloss):). "
+                            "See book-prose.md §5 Canonical definition-line shapes."
+                        ),
+                        severity="error",
+                        context=(line.strip()[:140]),
+                    )
+                )
+
+        return ValidationRunResult(
+            name="footnote-definition-shape",
+            description=(
+                "Footnote definitions use bold head + colon per book-prose §5 (S1–S5)"
+            ),
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
@@ -4715,101 +5990,31 @@ class ValidateCommand:
         )
 
     # ------------------------------------------------------------------
-    # Source citation validation  (delegated to manage_sources.py)
+    # Source citation validation (native audit.checks.source_citations)
     # ------------------------------------------------------------------
 
-    def _run_sources(self, root: Path) -> ValidationRunResult:
-        """Validate source citation patterns (asterisk sources, missing periods, etc.).
-
-        Native import of book/tools/scripts/utilities/manage_sources.py via
-        importlib — no subprocess. Instantiates SourceChecker pointed at
-        the contents directory, runs analyze_sources(), and reads the
-        populated `problems` dict to emit one ValidationIssue per
-        pattern hit. The script itself remains callable as a standalone
-        CLI for its --clean / --report modes.
-        """
-        import importlib.util
-        import sys as _sys
-        import io
-        import contextlib
-
-        script = (
-            Path(__file__).resolve().parent.parent.parent
-            / "tools" / "scripts" / "utilities" / "manage_sources.py"
-        )
-        mod_name = "mlsys_manage_sources"
-        if mod_name in _sys.modules:
-            mod = _sys.modules[mod_name]
-        else:
-            spec = importlib.util.spec_from_file_location(mod_name, script)
-            mod = importlib.util.module_from_spec(spec)
-            _sys.modules[mod_name] = mod
-            spec.loader.exec_module(mod)
-
-        t0 = time.time()
-        # SourceChecker resolves files via target_directories — pass an absolute
-        # path to contents/ so we don't depend on cwd (the original subprocess
-        # invocation set cwd=quarto_dir; this is the cwd-free equivalent).
-        contents_dir = root if root.name == "contents" else root / "contents"
-        if not contents_dir.exists():
-            # Fall back to the canonical book/quarto/contents location.
-            contents_dir = (
-                Path(__file__).resolve().parent.parent.parent
-                / "quarto" / "contents"
-            )
-
-        checker = mod.SourceChecker(target_directories=[str(contents_dir)])
-        # SourceChecker's analyze_sources() prints status banners; suppress
-        # them so binder's own renderer owns the output channel.
-        with contextlib.redirect_stdout(io.StringIO()):
-            try:
-                checker.analyze_sources()
-            except Exception as e:
-                elapsed = int((time.time() - t0) * 1000)
-                return ValidationRunResult(
-                    name="sources", description="Source citation validation",
-                    files_checked=0, elapsed_ms=elapsed,
-                    issues=[ValidationIssue(
-                        file=str(script.relative_to(root)) if script.is_relative_to(root) else str(script),
-                        line=0, code="sources-runtime-error",
-                        message=f"SourceChecker failed: {type(e).__name__}: {e}",
-                        severity="error",
-                    )],
+    def _run_sources(self, root: Path, ns: Optional[argparse.Namespace] = None) -> ValidationRunResult:
+        """Validate source citation patterns via `audit.checks.source_citations`."""
+        if ns is not None and getattr(ns, "files", None):
+            file_paths: list[Path] = []
+            for raw in ns.files:
+                p = Path(raw)
+                if not p.is_absolute():
+                    p = self.config_manager.root_dir / p
+                if p.is_file():
+                    file_paths.append(p)
+            if file_paths:
+                return self._run_audit_check_files(
+                    file_paths,
+                    "audit.checks.source_citations",
+                    "sources",
+                    "Source citation validation",
                 )
-
-        issues: List[ValidationIssue] = []
-        # checker.problems is dict[category, list[{file, line, text, ...}]]
-        for category, hits in checker.problems.items():
-            for hit in hits:
-                hit_file = str(hit.get("file", "?"))
-                p = Path(hit_file)
-                if p.is_absolute():
-                    try:
-                        rel = str(p.relative_to(root))
-                    except ValueError:
-                        rel = hit_file
-                else:
-                    rel = hit_file
-                issues.append(ValidationIssue(
-                    file=rel,
-                    line=int(hit.get("line", 0) or 0),
-                    code=category,
-                    message=str(hit.get("text", ""))[:200],
-                    severity="error",
-                    context="",
-                ))
-
-        elapsed = int((time.time() - t0) * 1000)
-        if not issues:
-            return ValidationRunResult(
-                name="sources", description="Source citation validation",
-                files_checked=int(checker.stats.get("total_files", 0) or 0),
-                issues=[], elapsed_ms=elapsed,
-            )
-        return ValidationRunResult(
-            name="sources", description="Source citation validation",
-            files_checked=int(checker.stats.get("total_files", 0) or 0),
-            issues=issues, elapsed_ms=elapsed,
+        return self._run_audit_check(
+            root,
+            "audit.checks.source_citations",
+            "sources",
+            "Source citation validation",
         )
 
     def _run_check_references(self, root: Path, ns: Optional[argparse.Namespace] = None) -> ValidationRunResult:
@@ -5205,6 +6410,231 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
+    def _run_bib_key_content(self, root: Path) -> ValidationRunResult:
+        """Verify bib key surname/year tokens match the entry's actual
+        author and year fields.
+
+        The bib **key** is a contract: `surname[firstauthor]year[topicword]`.
+        When the key drifts from the entry body, citing the key in prose
+        renders text that contradicts the key. No existing check catches
+        this — `citations` confirms the key resolves to *some* entry,
+        `bib-hygiene` confirms required fields are present, but neither
+        compares the key prefix against the entry's content.
+
+        Real failure observed (May 2026): vol2 had
+
+            @article{shewhart1931economic,
+              author = {Carroll, Alison R. and Johnson, David P.},
+              year = {2020},
+              title = {Know It When You See It: ...},
+              ...
+            }
+
+        Citing [@shewhart1931economic] rendered as "(Carroll and Johnson,
+        2020)" — silently misleading.
+
+        Heuristics to reduce false positives:
+
+        - Only check keys that follow the canonical surname-year convention
+          (`^[a-z]+\\d{4}`). Keys like `the_pile`, `deepbench_github`, or
+          `flexpoint_2017` (which use a separator) are intentional non-author
+          identifiers and skipped.
+        - Surname check passes if the key prefix is a prefix of *any* author's
+          surname, not just the first. Tolerates legitimate re-keys like
+          `harlap2018pipedream` where Harlap is the second author.
+        - Skip entries whose first author looks corporate / institutional
+          (Google, DeepMind, Intel, etc.).
+        - Surname comparison folds diacritics and strips non-alpha so
+          `hebert2018multicalibration` matches `H{\'e}bert-Johnson`.
+        """
+        import unicodedata
+
+        def fold(s: str) -> str:
+            norm = unicodedata.normalize("NFKD", s.lower())
+            return "".join(c for c in norm if not unicodedata.combining(c))
+
+        # Single-token names that almost always indicate a corporate /
+        # institutional author rather than a person. When one of these
+        # appears as a "surname" in the first or second position of the
+        # author field, the entry is skipped — the bib key uses a topic
+        # rather than a personal surname.
+        CORPORATE_AUTHOR_TOKENS = {
+            "google", "deepmind", "microsoft", "openai", "anthropic", "meta",
+            "facebook", "amazon", "aws", "nvidia", "intel", "apple", "ibm",
+            "huggingface", "kaggle", "baidu", "alibaba", "tencent", "samsung",
+            "qualcomm", "arm", "tesla", "siemens", "epoch", "stability",
+            "mistral", "cohere", "deepseek", "moonshot", "perplexity",
+            "cerebras", "graphcore", "groq", "sambanova", "mlcommons",
+            "discord", "github", "gitlab", "wikipedia", "stackoverflow",
+            "openreview", "arxiv", "papers", "pytorch", "tensorflow", "jax",
+            "onnx", "kubernetes", "docker",
+            "corporation", "inc", "ltd", "llc", "research", "team", "labs",
+            "foundation", "consortium", "association", "council", "committee",
+            "group", "network", "alliance", "initiative", "project", "society",
+            "european", "national", "international", "world", "united",
+            "systems", "contributors", "developers", "authors", "community",
+            "staff", "editors", "board", "office", "department", "ministry",
+            "agency", "bureau", "commission", "service", "services",
+        }
+
+        def author_list_surnames(author_field: str) -> List[str]:
+            if not author_field:
+                return []
+            # Strip common LaTeX accent commands so `H\'ebert` → `Hebert`.
+            a = re.sub(r"\\['\"`^~]\{?(\w)\}?", r"\1", author_field)
+            a = a.strip().strip("{}").strip()
+            authors = re.split(r"\s+and\s+", a)
+            surnames: List[str] = []
+            for raw in authors:
+                ent = raw.strip().strip("{}").strip()
+                if not ent:
+                    continue
+                if "," in ent:
+                    surname = ent.split(",", 1)[0].strip().strip("{}").strip()
+                else:
+                    parts = ent.split()
+                    surname = parts[-1] if parts else ""
+                if surname:
+                    surnames.append(surname)
+            for s in surnames[:2]:
+                if fold(s) in CORPORATE_AUTHOR_TOKENS:
+                    return []
+            return surnames
+
+        t0 = time.time()
+        bib_files = sorted(root.rglob("*.bib"))
+        issues: List[ValidationIssue] = []
+
+        entry_header_re = re.compile(r"^@(\w+)\s*\{\s*([\w:_-]+)\s*,", re.M)
+        # Surname-year canonical key: lowercase letters then 4-digit year.
+        convention_re = re.compile(r"^([a-z]+)(\d{4})")
+        # Tolerates one level of nested braces in field values.
+        field_re = re.compile(
+            r"\b(\w+)\s*=\s*"
+            r"(?:\{((?:[^{}]|\{[^{}]*\})*)\}|\"([^\"]*)\")",
+            re.S,
+        )
+
+        for bib_path in bib_files:
+            try:
+                text = bib_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            try:
+                rel = str(bib_path.relative_to(root))
+            except ValueError:
+                rel = str(bib_path)
+
+            for hm in entry_header_re.finditer(text):
+                entry_type = hm.group(1).lower()
+                key = hm.group(2)
+                line_no = text[:hm.start()].count("\n") + 1
+
+                # Walk balanced braces from the entry's opening { to its
+                # matching }. Skips escaped braces inside field values.
+                open_brace = text.find("{", hm.start())
+                if open_brace < 0:
+                    continue
+                depth = 0
+                i = open_brace
+                n = len(text)
+                while i < n:
+                    ch = text[i]
+                    if ch == "\\" and i + 1 < n:
+                        i += 2
+                        continue
+                    if ch == "{":
+                        depth += 1
+                    elif ch == "}":
+                        depth -= 1
+                        if depth == 0:
+                            break
+                    i += 1
+                body = text[open_brace + 1 : i]
+
+                cm = convention_re.match(key.lower())
+                if not cm:
+                    continue
+                key_surname = cm.group(1)
+                key_year = cm.group(2)
+
+                fields: Dict[str, str] = {}
+                for fm in field_re.finditer(body):
+                    name = fm.group(1).lower()
+                    value = fm.group(2) if fm.group(2) is not None else fm.group(3)
+                    fields[name] = (value or "").strip()
+
+                author = fields.get("author", "")
+                year_field = fields.get("year", "")
+
+                surnames = author_list_surnames(author)
+
+                if surnames:
+                    # Bidirectional prefix match: tolerates both
+                    # `boroumandasplos2018` (key longer than surname,
+                    # appended venue) AND `hebert2018multicalibration`
+                    # (key shorter, only catches the prefix of a hyphenated
+                    # surname). One direction must match for it to count.
+                    matched = False
+                    for s in surnames:
+                        sa = re.sub(r"[^a-z]", "", fold(s))
+                        if sa.startswith(key_surname) or key_surname.startswith(sa):
+                            matched = True
+                            break
+                    if not matched:
+                        first = surnames[0]
+                        issues.append(ValidationIssue(
+                            file=rel,
+                            line=line_no,
+                            code="bib_key_surname_mismatch",
+                            message=(
+                                f"@{entry_type}{{{key}}} — key surname "
+                                f"'{key_surname}' matches no author in this "
+                                f"entry (first author: '{first}'). Citing the "
+                                f"key in prose renders content that contradicts "
+                                f"the key. Either rename the key to match an "
+                                f"actual author, or replace the entry body to "
+                                f"match the work the key names."
+                            ),
+                            severity="warning",
+                            context="",
+                        ))
+
+                if year_field and year_field != key_year:
+                    # Tolerate a one-year gap: papers commonly key from
+                    # the arXiv preprint year (e.g. 2021) but record the
+                    # conference proceedings year (e.g. 2022) in the year
+                    # field. Both attributions are correct; the gap is
+                    # convention drift, not corruption. Larger gaps almost
+                    # always indicate real key/content mismatch.
+                    try:
+                        gap = abs(int(year_field) - int(key_year))
+                    except ValueError:
+                        gap = 99  # unparsable year → flag
+                    if gap > 1:
+                        issues.append(ValidationIssue(
+                            file=rel,
+                            line=line_no,
+                            code="bib_key_year_mismatch",
+                            message=(
+                                f"@{entry_type}{{{key}}} — key year {key_year} "
+                                f"does not match year field {year_field} "
+                                f"(gap of {gap} years). The key suggests a "
+                                f"different work than the entry actually "
+                                f"describes."
+                            ),
+                            severity="error",
+                            context="",
+                        ))
+
+        return ValidationRunResult(
+            name="bib-key-content",
+            description="Bib key prefix must match author surname + year (§5)",
+            files_checked=len(bib_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
     # ──────────────────────────────────────────────────────────────────────
     # Native audit-check adapters (book/tools/audit/checks/*).
     #
@@ -5287,6 +6717,59 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
+    def _run_audit_check_files(
+        self,
+        files: list[Path],
+        module_path: str,
+        name: str,
+        description: str,
+    ) -> ValidationRunResult:
+        """Run an audit check against an explicit file list."""
+        import importlib
+        import sys as _sys
+
+        audit_root = Path(__file__).resolve().parent.parent.parent / "tools"
+        audit_root_str = str(audit_root)
+        if audit_root_str not in _sys.path:
+            _sys.path.insert(0, audit_root_str)
+        mod = importlib.import_module(module_path)
+
+        t0 = time.time()
+        issues: List[ValidationIssue] = []
+        counter = 0
+        checked = 0
+        for qmd in files:
+            if qmd.suffix != ".qmd" or not qmd.exists():
+                continue
+            try:
+                text = qmd.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            checked += 1
+            audit_issues, counter = mod.check(qmd, text, "both", counter)
+            for issue in audit_issues:
+                message = issue.reason or issue.rule_text or issue.category
+                severity = "warning" if getattr(issue, "needs_subagent", False) else "error"
+                try:
+                    rel = str(qmd.relative_to(self.config_manager.root_dir))
+                except ValueError:
+                    rel = str(qmd)
+                issues.append(ValidationIssue(
+                    file=rel,
+                    line=issue.line,
+                    code=issue.category,
+                    message=message,
+                    severity=severity,
+                    context=(issue.before or "")[:160],
+                ))
+        return ValidationRunResult(
+            name=name,
+            description=description,
+            files_checked=checked,
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
     def _run_compound_prefix(self, root: Path) -> ValidationRunResult:
         """Close up pre-/non- compound prefixes per §10.8 (strict 6-term list).
 
@@ -5306,7 +6789,7 @@ class ValidateCommand:
         wall, data wall, bitter lesson, scaling laws, verification gap,
         degradation equation, etc. Respects the exception contexts
         (bold first-definition, §10.3 exception 2; §10.9 H1/H2 headline
-        case; callout titles; `\\index{}` keys).
+        case; principle callout titles; `\\index{}` keys).
         """
         return self._run_audit_check(
             root, "audit.checks.concept_term_capitalization",
@@ -5698,3 +7181,56 @@ class ValidateCommand:
             files_checked=len(test_fns), issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
         )
+
+    # ------------------------------------------------------------------
+    # Migrated runners (2026-05-06): scripts that previously lived as
+    # standalone pre-commit entries have moved into binder so every
+    # book-* check has one entry point. The scripts themselves remain
+    # callable from the CLI for ad-hoc use; these wrappers convert their
+    # exit code to a ValidationRunResult so they show up in the standard
+    # check summary table.
+    # ------------------------------------------------------------------
+
+    def _run_index_anti_patterns(self, root: Path) -> ValidationRunResult:
+        """index --scope anti-patterns: \\index{} anti-patterns from §9.
+
+        Wraps book/tools/audit/index/check_anti_patterns.py.
+        """
+        script = (
+            Path(__file__).resolve().parent.parent.parent
+            / "tools" / "audit" / "index" / "check_anti_patterns.py"
+        )
+        return self._delegate_script(script, [], "index-anti-patterns")
+
+    def _run_index_tag_placement(self, root: Path) -> ValidationRunResult:
+        """index --scope tag-placement: \\index{} not inside bold/italic/code/heading.
+
+        Wraps book/tools/audit/index/check_tag_placement.py.
+        """
+        script = (
+            Path(__file__).resolve().parent.parent.parent
+            / "tools" / "audit" / "index" / "check_tag_placement.py"
+        )
+        return self._delegate_script(script, [], "index-tag-placement")
+
+    def _run_index_xref_resolves(self, root: Path) -> ValidationRunResult:
+        """index --scope xref-resolves: every |see / |seealso resolves.
+
+        Wraps book/tools/audit/index/check_xref_resolves.py.
+        """
+        script = (
+            Path(__file__).resolve().parent.parent.parent
+            / "tools" / "audit" / "index" / "check_xref_resolves.py"
+        )
+        return self._delegate_script(script, [], "index-xref-resolves")
+
+    def _run_lego_dead_code(self, root: Path) -> ValidationRunResult:
+        """code --scope lego-dead-code: LEGO variables defined but never used.
+
+        Wraps scripts/check_lego_vars.py.
+        """
+        script = (
+            Path(__file__).resolve().parent.parent.parent.parent
+            / "scripts" / "check_lego_vars.py"
+        )
+        return self._delegate_script(script, [], "lego-dead-code")

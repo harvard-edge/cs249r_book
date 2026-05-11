@@ -31,6 +31,11 @@ name: '🎯 StaffML · ✅ Validate (Dev)'
 
 on:
   workflow_dispatch:
+  # Reusable: staffml-preview-dev.yml calls this via `uses:` so the deploy
+  # job can `needs:` a green validate. Standalone push/PR triggers below
+  # stay so the publish guard (infra-publish-guard.yml) and README badge
+  # still see direct runs on dev.
+  workflow_call:
   pull_request:
     paths:
       - 'interviews/staffml/**'
@@ -47,7 +52,18 @@ permissions:
   contents: read
 
 concurrency:
-  group: staffml-validate-${{ github.ref }}
+  # Group key uses a literal workflow-identifying string instead of
+  # ${{ github.workflow }} because the latter resolves to the CALLER's
+  # workflow name when this runs via `workflow_call`. Without the
+  # literal, both staffml-validate-dev and staffml-validate-vault — when
+  # called from the same staffml-preview-dev parent — collapse to the
+  # same group (parent-name + parent-run-id) and cancel each other.
+  # `head_ref || run_id` still preserves PR cancel-on-amend (head_ref
+  # set on PRs, stable across amends) and per-run uniqueness for push/
+  # dispatch (head_ref empty → run_id fallback) so a push to dev that
+  # triggers BOTH this workflow standalone AND Preview's `uses:` call
+  # into it doesn't share a group either.
+  group: staffml-validate-dev-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
 env:
@@ -87,7 +103,7 @@ jobs:
 
       - name: 🔄 Regenerate staffml data bundle (corpus.json; not in git)
         run: |
-          vault build --vault-dir "$VAULT_DIR" --release-id validate-dev-tsc --legacy-json
+          vault build --vault-dir "$VAULT_DIR" --release-id validate-dev-tsc --local-json
 
       - name: 🔧 Setup Node.js
         uses: actions/setup-node@v6
@@ -133,7 +149,7 @@ jobs:
 
       - name: 🔄 Regenerate staffml data bundle (corpus.json; not in git)
         run: |
-          vault build --vault-dir "$VAULT_DIR" --release-id validate-dev-build --legacy-json
+          vault build --vault-dir "$VAULT_DIR" --release-id validate-dev-build --local-json
 
       - name: 🔧 Setup Node.js
         uses: actions/setup-node@v6
@@ -221,7 +237,7 @@ jobs:
       - name: 🔄 Regenerate corpus from YAMLs
         # Ensures the E2E build sees current YAML state (same as preview/
         # publish workflows do).
-        run: vault build --vault-dir "$VAULT_DIR" --release-id e2e-smoke --legacy-json
+        run: vault build --vault-dir "$VAULT_DIR" --release-id e2e-smoke --local-json
 
       - name: 🔨 Build StaffML for E2E (no base-path)
         working-directory: ${{ env.STAFFML_ROOT }}
@@ -265,10 +281,10 @@ jobs:
 
       - name: 🔄 Regenerate staffml bundle (corpus.json is a build artifact)
         # Same contract as staffml-preview-dev / publish-live: YAMLs are
-        # source of truth; --legacy-json emits staffml/src/data/corpus.json
+        # source of truth; --local-json emits staffml/src/data/corpus.json
         # for validate-vault.py and inline corpus invariants (not in git).
         run: |
-          vault build --vault-dir "$VAULT_DIR" --release-id validate-dev-smoke --legacy-json
+          vault build --vault-dir "$VAULT_DIR" --release-id validate-dev-smoke --local-json
 
       - name: 🐍 Install PyYAML (for schema drift check)
         run: pip install pyyaml

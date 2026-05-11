@@ -61,7 +61,7 @@ def _registry_ids(text: str) -> set[str]:
 
 
 def _disk_ids() -> set[str]:
-    return {p.stem for p in QUESTIONS_DIR.glob("*/*.yaml")}
+    return {p.stem for p in QUESTIONS_DIR.rglob('*.yaml')}
 
 
 def main() -> int:

@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-4249
+track: cloud
+level: L5
+zone: diagnosis
+topic: autograd-computational-graphs
+competency_area: optimization
+bloom_level: analyze
+phase: training
+title: Debugging torch.compile MoE routing graph breaks on H100
+scenario: You are optimizing inference for a mixture-of-experts (MoE) model on H100. torch.compile generates a graph but the TorchInductor-generated CUDA kernels are slower than hand-written ones.
+question: How would you inspect and fix the torch.compile graph breaks or missed fusion in the H100 MoE routing path?
+details:
+  realistic_solution: Use `torch._dynamo.explain(model)(inputs)` and `TORCH_LOGS="graph_breaks,output_code"` to locate breaks and inspect generated Inductor/Triton code. Isolate the MoE router, then check whether Python control flow, data-dependent indexing, topk/scatter patterns, or dynamic expert loops prevent fusion. Prefer refactoring into supported tensor operations with stable shapes, bucketing experts, or hoisting Python decisions out of the compiled region. If the routing primitive is still unsupported, implement a real custom op with `torch.library` plus an Inductor lowering, or call a dedicated Triton routing kernel.
+  common_mistake: |
+    **The Pitfall:** Assuming every graph break in the router is harmless because `torch.compile` still returns a callable model.
+    **The Rationale:** Engineers look only at end-to-end correctness and miss that Python-side expert loops or unsupported scatter patterns can split the hot routing path into many small kernels.
+    **The Consequence:** The compiled model remains correct but dispatch-heavy, so H100 time is lost to launch overhead and missed fusion instead of expert computation.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 1024 tokens, 8 experts, top-2 routing (8192 values).
+    - Kernel launch overhead on H100: ~5µs.
+
+    **Calculations:**
+    - Fusion Difference: 3 separate kernels (15µs) vs 1 fused kernel (5µs).
+    - Savings per step: 10µs.
+    - Overhead at 1000 steps/sec: 10ms/sec (1% raw overhead penalty).
+
+    **Conclusion & Interpretation:**
+    - **Result: 1% raw penalty (CPU-Dispatch-Bound)**. Destructively compounds in sequence-parallel setups.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

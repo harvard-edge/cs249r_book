@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: cloud-4447
+track: cloud
+level: L5
+zone: realization
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: apply
+phase: inference
+title: Context Caching with Disaggregated KV Stores
+scenario: A disaggregated serving system receives many requests sharing a common 1024-token system prompt. Without caching, each request re-computes the system prompt KV cache during prefill.
+question: How would you design a distributed KV cache for the common 1024-token system prompt?
+details:
+  realistic_solution: |
+    Distributed prefix KV cache architecture: hash the normalized 1024-token system prompt to a prefix ID, shard prefix ownership across prefill nodes, and route requests with that prefix to a node that already holds the KV in local HBM. Replicate very hot prefixes to several owners to avoid hotspots. A centralized remote KV store is useful for metadata and warmup, but not for the latency-critical path: transferring a 2.68 GB, or about 2.50 GiB, 70B prefix KV over 400 Gbps takes about 53.7ms before protocol overhead. With owner-aware routing, a cache hit skips recomputing the prefix and only computes the request-specific suffix. With a 30GB HBM budget per prefill node, each owner can hold about 11 such prefixes, so hot-prefix replication is feasible.
+  common_mistake: |
+    **The Pitfall:** Putting every prefix KV in one remote cache service and fetching it for each request.
+    **The Rationale:** The design saves compute but moves multi-GB KV tensors onto the latency-critical network path.
+    **The Consequence:** Cross-rack transfer can erase much of the prefill latency savings and create a centralized bottleneck.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 70B model with 80 layers, 64 KV heads, 128 head_dim, BF16 KV.
+    - 1024-token shared prefix.
+    - 400 Gbps network = 50 GB/s ideal decimal payload bandwidth.
+    - H100 prefill nodes reserve 30GB decimal HBM for prefix KV cache.
+    - Measured 70B prefill for this 1024-token prefix is assumed to be in the 120-180ms range on the target serving stack.
+
+    **Calculations:**
+    - Prefix KV size: 2 for K/V * 80 layers * 64 heads * 128 head_dim * 1024 tokens * 2B = 2,684,354,560 bytes.
+    - Unit conversion: 2,684,354,560 bytes = 2.68 GB decimal = 2.50 GiB.
+    - Remote transfer time over 400 Gbps: 2.684 GB / 50 GB/s = 53.7ms before protocol overhead.
+    - Local cache capacity: 30GB / 2.684GB ≈ 11 hot prefixes per prefill node.
+    - Cache hit benefit should be compared with measured prefix prefill latency, assumed here at roughly 120-180ms, not estimated from raw parameter count alone.
+
+    **Conclusion & Interpretation:**
+    - **Result: Sharded and replicated prefix ownership (Memory/Network Tradeoff).** Route matching requests to nodes with local KV; remote fetch can still be cheaper than recompute for a hot 70B prefix, but it is large enough that cross-rack transfer should stay off the critical path.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+  - 2*80*64*128*1024*2B is 2.68GB, not 3.36GB
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

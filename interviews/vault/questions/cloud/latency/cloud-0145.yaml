@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-0145
+track: cloud
+level: L4
+zone: evaluation
+topic: latency-decomposition
+competency_area: latency
+bloom_level: analyze
+phase: both
+title: 'The SLO Squeeze: Interactive vs. Batch Throughput'
+scenario: 'You run a unified inference service for a 70B parameter model on a cluster of 8 GPUs. Your traffic is mixed: 80% is low-latency interactive chat with a P99 Time-to-First-Token (TTFT) SLO of 500ms, and 20% is high-throughput batch summarization jobs. Your current system uses a single FIFO queue with continuous batching. You are meeting your batch throughput goals, but violating the chat TTFT SLO due to head-of-line blocking from large summarization requests.'
+question: Should you use priority scheduling or partition the 8 GPUs between chat and batch jobs, and what trade-off does that create?
+details:
+  realistic_solution: |
+    The trade-off is isolation vs. efficiency. Priority scheduling in a shared pool lets chat requests bypass or preempt large summarization work, preserving utilization when traffic is bursty, but it requires careful starvation prevention, admission control, and preemption-safe execution. Partitioning the 8 GPUs, such as reserving some for chat and some for batch, gives a simpler and stronger SLO boundary, but it can strand capacity when either workload is quiet. The right answer depends on how hard the chat SLO is and how variable the traffic is: use partitioning for strict isolation, priority scheduling for higher utilization, or combine both with a small protected chat pool plus overflow priority scheduling.
+  common_mistake: |
+    **The Pitfall:** Assuming static partitioning is the optimal, flawless solution.
+    **The Rationale:** Engineers seek the easiest path to guarantee SLOs (physical separation) but ignore the dynamic, bursty nature of interactive traffic.
+    **The Consequence:** Severe cluster underutilization during off-peak hours, wasting hundreds of thousands of dollars in idle GPU time.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Chat SLO: P99 TTFT < 500ms.
+       - Shared FIFO queue currently allows summarization prefills to run ahead of chat requests.
+       - Large prefills are non-preemptible at the scheduler level unless the serving system explicitly supports preemption or chunked prefill.
+    2. **Calculations:**
+       - If a chat request arrives behind a summarization prefill lasting T ms, its TTFT includes roughly T ms of queueing before its own prefill begins.
+       - To meet a 500ms P99 TTFT, the scheduler must bound high-priority queueing plus chat prefill below 500ms.
+       - A dedicated chat partition bounds this by reserving capacity; priority scheduling bounds it by letting chat bypass or interrupt lower-priority work.
+    3. **Conclusion & Interpretation:**
+       - **Result: Isolation vs. Utilization Trade-off.** Partitioning buys predictable chat latency at the cost of idle GPUs; priority scheduling keeps the pool efficient but must enforce a hard queueing bound for chat.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-3409
+track: cloud
+level: L2
+zone: analyze
+topic: flash-attention
+competency_area: optimization
+bloom_level: analyze
+phase: inference
+title: 'FlashAttention on A100: Optimizing for Sequence Length and Throughput'
+scenario: You are developing an LLM inference service and need to optimize the self-attention mechanism for maximum throughput and longer sequence lengths on an NVIDIA A100 GPU. Your current implementation struggles with memory limits for sequences exceeding 8k tokens.
+question: How would you redesign self-attention with FlashAttention-style tiling and online softmax to support long sequences on the A100?
+details:
+  realistic_solution: The optimal approach involves implementing FlashAttention-style tiling, where the attention mechanism is broken down into smaller, manageable blocks that fit within the SRAM (on-chip memory). This reduces the number of times Q, K, and V are read from/written to the slower HBM2e. An online softmax algorithm is crucial to avoid storing the entire N x N attention matrix. By doing so, computation can be performed in SRAM, and only the final output (O) is written back to HBM2e.
+  common_mistake: |
+    **The Pitfall:** Performing the full attention matrix computation in global memory.
+    **The Rationale:** Engineers rely on standard framework operations that materialize the N x N attention matrix, ignoring the O(N^2) memory footprint and HBM read/write overhead.
+    **The Consequence:** Exhausting HBM capacity and becoming severely memory-bandwidth bound even for moderate sequence lengths.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Sequence length (N): 80,000 as a stress-case extension of a service that already struggles beyond 8k.
+    - Head dimension (D): 128.
+    - Heads: 16.
+    - Precision: FP16 (2 bytes).
+    - A100 Memory Bandwidth: 2.0 TB/s.
+
+    **Calculations:**
+    - One standard attention score matrix is N^2 FP16 elements: 80,000^2 * 2 bytes = 12.8 GB per head, before softmax buffers.
+    - If a per-layer implementation holds the full score/probability tensors for all 16 heads at once, the score tensor alone is 12.8 GB * 16 = 204.8 GB, which exceeds an 80 GB A100. Some kernels stream heads or recompute, but any full N^2 materialization is the memory risk.
+    - FlashAttention keeps the running softmax statistics and Q/O tiles in SRAM and streams K/V tiles; it does not need an N x N HBM tensor.
+    - The persistent sequence tensors for Q, K, V, and output are 4 * Heads * N * D * 2 bytes = 4 * 16 * 80,000 * 128 * 2 = 1.31 GB, but this is model data around the kernel, not the peak temporary score matrix.
+    - A lower-bound HBM time for one pass over those tensors is 1.31 GB / 2.0 TB/s = 0.655 ms; real time is much higher because K/V tiles are streamed repeatedly and the QK/O matmuls dominate.
+
+    **Conclusion & Interpretation:**
+    - **Result: Avoids N^2 HBM Materialization**. For the 80k stress case, FlashAttention makes long-sequence attention feasible by eliminating the full multi-head score/probability tensor, while the final bottleneck still depends on tile reuse, bandwidth, and Tensor Core utilization.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

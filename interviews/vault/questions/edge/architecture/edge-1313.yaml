@@ -1,0 +1,56 @@
+schema_version: '1.0'
+id: edge-1313
+track: edge
+level: L5
+zone: evaluation
+topic: cnn-efficient-design
+competency_area: architecture
+bloom_level: evaluate
+phase: both
+title: Evaluating MobileNetV2 vs ResNet on Hailo-8 Dataflow
+scenario: Your team is deploying an object detection model onto a Hailo-8 class spatial dataflow accelerator with no external DRAM on the accelerator package. Intermediate activations and weights must be scheduled through the on-chip memory fabric, so layers with poor reuse can underutilize the compute array even when their total MAC count is small. You are evaluating a standard MobileNetV2 (heavy depthwise convolutions) versus a custom ResNet-50 variant optimized for INT8.
+question: Which architecture do you choose for this specific hardware, and how do the platform's memory characteristics drive your decision?
+details:
+  realistic_solution: Prefer the custom INT8 ResNet-style variant if its layer shapes fit the compiler's on-chip scheduling model. On a spatial dataflow accelerator, standard 3x3 convolutions reuse each input activation across many output channels and reuse each weight across many spatial positions, which keeps the compute array fed from the on-chip fabric. MobileNetV2's depthwise layers have far fewer MACs, but each input channel is used only for its own channel, so arithmetic intensity is low and the layer can become limited by activation movement, buffering, and scheduling overhead. The choice should be verified with the Hailo compiler's per-layer utilization and memory-plan reports rather than by FLOP count alone.
+  common_mistake: |
+    **The Pitfall:** Assuming fewer FLOPs automatically translates to lower latency and power on dataflow hardware.
+    **The Rationale:** Depthwise convolutions reduce MACs, but they also reduce channel reuse and can expose activation movement, tiling, and scheduling overheads on a spatial fabric.
+    **The Consequence:** The compute array may run at low utilization even though the model appears cheap on a FLOP spreadsheet.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Compare one 112x112 feature map with 64 INT8 channels; INT8 activations and weights are 1 byte each.
+    - Standard 3x3 conv: 64 input channels, 64 output channels.
+    - Depthwise 3x3 conv: 64 input channels, one filter per channel.
+    - Count 1 MAC as 2 operations.
+    - First-order traffic model counts one input read, one output write, and one weight read per layer; it ignores tiling overhead and cache refetches.
+
+    **Calculations:**
+    - Input activations: 112 * 112 * 64 = 802,816 bytes.
+    - Output activations: 112 * 112 * 64 = 802,816 bytes.
+    - Standard weights: 3 * 3 * 64 * 64 = 36,864 bytes.
+    - Standard compute: 112 * 112 * 64 * 64 * 3 * 3 * 2 = 924,844,032 ops.
+    - Standard arithmetic intensity: 924.8M ops / (802.8KB + 802.8KB + 36.9KB) ≈ 563 ops/byte.
+    - Depthwise weights: 3 * 3 * 64 = 576 bytes.
+    - Depthwise compute: 112 * 112 * 64 * 3 * 3 * 2 = 14,450,688 ops.
+    - Depthwise arithmetic intensity: 14.45M ops / (802.8KB + 802.8KB + 0.6KB) ≈ 9.0 ops/byte.
+    - Intensity ratio: 563 / 9.0 ≈ 63x.
+
+    **Conclusion & Interpretation:**
+    - **Result: the standard convolution has about 63x higher arithmetic intensity for this traffic model (Data-Reuse Bound)**. Depthwise layers reduce total compute, but their low reuse can starve a spatial dataflow fabric; choose the ResNet-style design if compiler reports show its layer shapes fit on-chip scheduling efficiently.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,37 @@
+schema_version: '1.0'
+id: cloud-2689
+track: cloud
+level: L5
+zone: evaluation
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: evaluate
+phase: training
+title: Scaling Strategy Under Physical Constraints
+scenario: 'Training a 175B model. Your facility supports 2,000 GPUs (power ceiling). Current approach: pure data parallelism with batch size 4M tokens, hitting critical batch size. MFU is 35% due to communication overhead. Option A: switch to 3D parallelism (tensor + pipeline + data). Option B: use gradient compression (8x). Option C: build a second facility with 2,000 more GPUs connected via WAN.'
+question: Which scaling strategy maximizes time-to-train reduction under the physical facility constraints?
+details:
+  realistic_solution: Option A (3D parallelism) is the correct approach under the 2,000-GPU facility ceiling. Pure data parallelism is already at the critical batch size, so adding more data-parallel workers would not efficiently reduce time to train and would keep large AllReduce groups. A tensor + pipeline + data-parallel layout partitions the 175B-parameter model so each worker owns only a shard of the model state and communicates within smaller tensor, pipeline, and data-parallel groups. That directly addresses the facility-local communication bottleneck without increasing the global batch beyond the useful range. Option B, gradient compression, can reduce bytes on the wire but adds compression overhead and convergence risk; it does not solve the need to partition a 175B model efficiently. Option C, a second facility over WAN, adds GPUs but makes synchronous training communication cross a high-latency link, so it is a poor fit for step-by-step gradient exchange. The exact MFU gain depends
+    on implementation, network topology, microbatching, and overlap, but the constraint-based choice is Option A.
+  common_mistake: |
+    **The Pitfall:** Trying to scale with pure data parallelism beyond the critical batch size.
+    **The Rationale:** Engineers assume data parallelism is the simplest and most scalable method.
+    **The Consequence:** They hit severe communication bottlenecks, dragging MFU down, when 3D parallelism is actually a strict requirement for models above ~10B parameters.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 175B model, 2,000 GPU power ceiling.
+    - Current pure DP has 35% MFU.
+
+    **Calculations:**
+    - Option A (3D parallelism) partitions the model across tensor and pipeline dimensions, then uses data parallelism only around those partitioned replicas.
+    - This reduces per-rank model-state pressure and confines high-frequency communication to facility-local groups instead of trying to scale pure DP beyond the critical batch size.
+    - Option B (gradient compression) reduces gradient bytes, but it adds compression/decompression overhead and may require accuracy or convergence validation; it does not reduce model-state footprint or fix over-large global batches.
+    - Option C (second facility over WAN) doubles nominal GPU count, but step-synchronous training would put latency-sensitive communication over a 1-10ms WAN path.
+    - Because the hard constraint is one 2,000-GPU facility and the current bottleneck is communication at critical batch size, the best time-to-train lever is to improve parallel decomposition inside that facility.
+
+    **Conclusion & Interpretation:**
+    - **Result: Option A.** 3D parallelism is the best constraint-aware strategy because it partitions the 175B model and reduces facility-local communication pressure; the prompt does not provide enough data to assign a defensible MFU percentage to any option.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12

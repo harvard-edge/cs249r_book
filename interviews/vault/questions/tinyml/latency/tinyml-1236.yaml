@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: tinyml-1236
+track: tinyml
+level: L4
+zone: optimization
+topic: real-time-deadlines
+competency_area: latency
+bloom_level: analyze
+phase: inference
+title: Mitigating Shared SRAM Contention in U55
+scenario: You are deploying a predictive maintenance model on an ARM Cortex-M7 + Ethos-U55 (Corstone-300) platform to meet a strict 10ms real-time deadline per sensor reading. The system features a 480 MHz M7 and 512 KB of shared SRAM. While the Ethos-U55 is configured for 256 MAC/cycle, sporadic inference latencies spike to 12ms when the M7 concurrently processes high-frequency sensor interrupts and logs data into the same SRAM.
+question: Why do Ethos-U55 latencies spike to 12 ms when M7 sensor interrupts log into the shared 512 KB SRAM, and how is it resolved?
+details:
+  realistic_solution: 'The bottleneck is AXI bus contention for the shared 512 KB SRAM. The M7''s continuous memory accesses during interrupts stall the U55''s DMA memory controller. The solution is to isolate memory traffic: map the M7''s sensor logging buffers and stack/heap to the M7''s Tightly Coupled Memory (TCM), which has a dedicated internal bus, and reserve the main 512 KB SRAM for the U55''s tensors. This reduces bus contention and allows the U55 to return to predictable latency.'
+  common_mistake: |
+    **The Pitfall:** Suggesting the model be aggressively pruned or quantized further to speed up compute.
+    **The Rationale:** Candidates see a latency spike and assume the NPU compute pipeline is too slow.
+    **The Consequence:** The model accuracy drops, but the latency spikes persist because the root cause (AXI bus contention over SRAM) remains completely unaddressed.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - System: 480 MHz Corstone-300.
+    - Deadline: 10 ms.
+    - Model: 20M MACs.
+    - Observed worst-case latency during M7 logging interrupts: 12 ms.
+
+    **Calculations:**
+    - Ethos-U55 peak compute = 480 MHz * 256 MAC/cycle = 122.8 GMAC/s.
+    - Ideal compute lower bound for 20M MACs = 20M / 122.8G = 0.163 ms.
+    - The measured 12 ms latency is 12 ms / 0.163 ms = ~74x slower than the compute-only lower bound.
+    - Because 12 ms exceeds the 10 ms deadline while the compute lower bound is far below it, the spike must come from memory-service delays, interrupt interference, or bus contention rather than raw NPU arithmetic.
+    - Moving M7 logging buffers and stack/heap to TCM removes the competing M7 SRAM traffic from the U55 tensor path.
+
+    **Conclusion & Interpretation:**
+    - **Result: The 12 ms spike is a latency-bound AXI/SRAM contention problem**. TCM isolation should bring latency back below the 10 ms deadline; the exact post-fix latency must be measured because it depends on the model's real memory traffic, not just peak MAC throughput.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

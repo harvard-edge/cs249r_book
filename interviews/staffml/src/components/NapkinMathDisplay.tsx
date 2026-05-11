@@ -1,71 +1,46 @@
 "use client";
 
 import clsx from "clsx";
+import MarkdownText from "./MarkdownText";
 
 /**
  * Renders napkin math text with structured formatting.
- *
- * Handles common patterns in the corpus:
- * - Pipe-separated steps: "step1 | step2 | step3"
- * - Dash-prefixed bullets: "- step1\n- step2"
- * - Numbered steps: "1. **Title:** content"
- * - Inline markdown bold: **text**
- * - Arrow markers: => (final answers)
- * - Simple one-liners
  */
 export default function NapkinMathDisplay({ text }: { text: string }) {
   const steps = parseSteps(text);
 
   if (steps.length === 1 && !steps[0].isResult) {
-    // Simple one-liner — render inline
     return (
       <div className="font-mono text-[13px] text-textSecondary leading-relaxed">
-        <FormattedText text={steps[0].text} />
+        <MarkdownText text={steps[0].text} />
       </div>
     );
   }
 
   return (
-    <div className="space-y-2">
-      {steps.map((step, i) => (
-        <div
-          key={i}
-          className={clsx(
-            "flex gap-3 items-start",
-            step.isResult && "mt-1"
-          )}
-        >
-          {/* Step indicator */}
-          <div className="shrink-0 mt-0.5">
-            {step.isResult ? (
-              <span className="text-[11px] font-mono font-bold text-accentGreen bg-accentGreen/10 px-1.5 py-0.5 rounded">
-                →
-              </span>
-            ) : (
-              <span className="text-[11px] font-mono text-textMuted bg-surface px-1.5 py-0.5 rounded">
-                {steps.filter((s, j) => j <= i && !s.isResult).length}
-              </span>
-            )}
-          </div>
-
-          {/* Step content */}
+    <div className="flex flex-col">
+      {steps.map((step, i) => {
+        const isHeader = step.text.startsWith('**') && step.text.includes(':');
+        
+        return (
           <div
+            key={i}
             className={clsx(
-              "flex-1 font-mono text-[13px] leading-relaxed min-w-0",
-              step.isResult
-                ? "text-accentGreen font-semibold"
-                : "text-textSecondary"
+              "font-mono text-[13px] leading-relaxed",
+              step.isResult 
+                ? "mt-4 p-3 bg-accentGreen/5 border-t border-accentGreen/20 text-accentGreen font-semibold" 
+                : isHeader 
+                ? "mt-4 mb-1 text-textPrimary font-bold" 
+                : "pl-4 text-textSecondary relative before:content-['-'] before:absolute before:left-0 before:text-textTertiary/40"
             )}
           >
-            <FormattedText text={step.text} />
+            <MarkdownText text={step.text} />
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
-
-// ─── Parsing ──────────────────────────────────────────────────
 
 interface Step {
   text: string;
@@ -73,137 +48,59 @@ interface Step {
 }
 
 function parseSteps(raw: string): Step[] {
-  const trimmed = raw.trim();
+  const lines = raw.trim().split("\n").filter((l) => l.trim());
 
-  // Check if pipe-separated (common pattern: "step1 | step2 | => result")
-  if (trimmed.includes(" | ")) {
-    return trimmed.split(/\s*\|\s*/).map((part) => ({
-      text: cleanStepText(part),
-      isResult: part.trim().startsWith("=>") || part.trim().startsWith("- =>"),
-    }));
-  }
+  return lines
+    .map((line) => {
+      const trimmedLine = line.trim();
+      // A "section header" line is alone-on-its-line bold like
+      // "**Conclusion & Interpretation:**". Treat that as a header
+      // (bold subtitle), NOT as a result, so we don't conjure an empty
+      // green callout when the actual result bullet is the next line.
+      const isHeader = /^\*\*[^*]+:?\*\*\s*$/.test(trimmedLine);
+      const isResult =
+        !isHeader &&
+        (trimmedLine.startsWith("=>") ||
+          /\bresult:/i.test(trimmedLine));
 
-  // Check for numbered/bulleted lines
-  const lines = trimmed.split("\n").filter((l) => l.trim());
-  if (lines.length > 1) {
-    return lines.map((line) => ({
-      text: cleanStepText(line),
-      isResult: line.trim().startsWith("=>"),
-    }));
-  }
-
-  // Single line — check if it has => marker
-  if (trimmed.startsWith("=>")) {
-    return [{ text: cleanStepText(trimmed), isResult: true }];
-  }
-
-  // Long single-line text: split on sentence boundaries that contain calculations
-  // Look for patterns like "result. Next sentence" or "value). Next"
-  if (trimmed.length > 120) {
-    const sentenceSteps = splitOnSentences(trimmed);
-    if (sentenceSteps.length > 1) {
-      return sentenceSteps;
-    }
-  }
-
-  return [{ text: trimmed, isResult: false }];
-}
-
-/** Split a dense paragraph into steps at sentence boundaries */
-function splitOnSentences(text: string): Step[] {
-  // Split on ". " that follows a closing paren, number, unit, or word
-  // but NOT on decimal points like "3.5" or abbreviations
-  const parts = text.split(/(?<=[\d)%a-z])\.\s+(?=[A-Z])/g);
-  if (parts.length <= 1) return [{ text, isResult: false }];
-
-  return parts.map((part, i) => {
-    const cleaned = part.trim();
-    // Last sentence or sentences containing final "=" result tend to be conclusions
-    const isResult = i === parts.length - 1 && /=\s*[\d,]+/.test(cleaned);
-    return { text: cleaned, isResult };
-  });
+      return {
+        text: cleanStepText(trimmedLine),
+        isResult,
+      };
+    })
+    // After cleaning, some lines collapse to empty (e.g. a bare "**Result:**"
+    // header that was stripped). Drop them rather than render empty bullets.
+    .filter((step) => step.text.length > 0);
 }
 
 function cleanStepText(text: string): string {
-  return text
+  let out = text
     .replace(/^-\s*/, "") // strip leading dash
     .replace(/^\d+\.\s*/, "") // strip leading number
-    .replace(/^=>\s*/, "") // strip => for result lines (we show our own indicator)
+    .replace(/^=>\s*/, "") // strip =>
     .trim();
-}
 
-// ─── Inline Formatting ───────────────────────────────────────
+  // For result steps: strip the redundant "Conclusion & Interpretation:" and
+  // "Result:" prefixes. The green callout already carries that signal, so
+  // leaving the labels in produces noise like
+  //   "Conclusion & Interpretation: **Result: Memory-Bound**. ..."
+  // when "**Memory-Bound**. ..." is what the reader actually needs.
 
-function FormattedText({ text }: { text: string }) {
-  // Split on **bold** markers and inline code `backticks`
-  // Match **bold**, `code`, and ~~strikethrough~~ (double tilde only — single ~ means "approximately")
-  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`|~~[^~]+~~)/g);
+  // Strip "Conclusion & Interpretation:" / "Conclusion:" — bold and unbold.
+  out = out
+    .replace(/^\*\*conclusion(?:\s+&\s+interpretation)?:\*\*\s*/i, "")
+    .replace(/^conclusion(?:\s+&\s+interpretation)?:\s*/i, "");
 
-  return (
-    <>
-      {parts.map((part, i) => {
-        if (part.startsWith("**") && part.endsWith("**")) {
-          return (
-            <span key={i} className="font-bold text-textPrimary">
-              {part.slice(2, -2)}
-            </span>
-          );
-        }
-        if (part.startsWith("`") && part.endsWith("`")) {
-          return (
-            <code
-              key={i}
-              className="text-accentBlue bg-accentBlue/10 px-1 py-0.5 rounded text-[12px]"
-            >
-              {part.slice(1, -1)}
-            </code>
-          );
-        }
-        if (part.startsWith("~~") && part.endsWith("~~")) {
-          return (
-            <span key={i} className="text-textTertiary line-through">
-              {part.slice(2, -2)}
-            </span>
-          );
-        }
-        // Highlight numbers and units inline
-        return <HighlightNumbers key={i} text={part} />;
-      })}
-    </>
-  );
-}
+  // Strip the "Result:" label even when the *whole phrase* "Result: <verdict>"
+  // is wrapped in one **bold** span (a common YAML pattern). Rewrite
+  //   **Result: Memory-Bound**. ...   →   **Memory-Bound**. ...
+  out = out.replace(/^\*\*result:\s*/i, "**");
 
-function HighlightNumbers({ text }: { text: string }) {
-  // Highlight numbers with units (e.g., "5 ms", "3.35 TB/s", "989 TFLOPS")
-  const parts = text.split(
-    /([\d,]+(?:\.\d+)?(?:×\d+(?:\^\d+)?)?)\s*((?:TFLOPS|TOPS|GFLOPS|TB\/s|GB\/s|MB\/s|GB|MB|KB|ms|μs|ns|s|%|FLOPs\/byte|FLOPs|bytes?|FLOP)(?:\/s)?)/gi
-  );
+  // Unbold form: "Result: Memory-Bound. ..." → "Memory-Bound. ..."
+  out = out.replace(/^result:\s*/i, "");
 
-  if (parts.length === 1) return <>{text}</>;
+  // Self-bold form: "**Result:**" already closed, then a verdict — drop the label.
+  out = out.replace(/^\*\*result:?\*\*\s*/i, "");
 
-  return (
-    <>
-      {parts.map((part, i) => {
-        // Pattern: [before, number, unit, ...rest]
-        // Groups come in triples: text, number, unit
-        if (i % 3 === 1) {
-          // This is the number part
-          return (
-            <span key={i} className="font-semibold text-textPrimary">
-              {part}
-            </span>
-          );
-        }
-        if (i % 3 === 2) {
-          // This is the unit part
-          return (
-            <span key={i} className="text-textTertiary">
-              {" "}{part}
-            </span>
-          );
-        }
-        return <span key={i}>{part}</span>;
-      })}
-    </>
-  );
+  return out.trim();
 }

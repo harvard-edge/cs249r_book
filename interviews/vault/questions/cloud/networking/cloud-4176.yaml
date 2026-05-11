@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-4176
+track: cloud
+level: L5
+zone: evaluation
+topic: interconnect-topology
+competency_area: networking
+bloom_level: evaluate
+phase: both
+title: Network Partitioning for Failure Isolation
+scenario: Your 1024-GPU H100 fat-tree cluster experiences a spine switch failure, partitioning the network into two 512-GPU halves. Your 3D parallel training job (TP=8, PP=8, DP=16) spans both halves.
+question: Which 3D parallelism dimension is most affected by the 512-GPU partition, and how would you design the topology to contain failures?
+details:
+  realistic_solution: 'Pipeline parallelism is the most vulnerable dimension if a PP stage chain is split across the 512-GPU partition, because activations and gradients must flow between adjacent stages every microbatch. TP=8 should be placed inside one NVLink domain, so it is normally contained within a node and is least affected by a spine failure. DP=16 spans replicas and its gradient AllReduce is degraded or interrupted across the partition, but a job can sometimes continue within each half only after an explicit reconfiguration of batch size, optimizer state, and membership. The failure is a full-job stall only when PP chains or required DP collectives cross the failed cut without a working alternate path. Containment design: keep each TP group inside a node, keep every 8-stage PP chain inside one pod/failure domain, let DP span pods because it is the most natural dimension to sacrifice or re-form, and provide redundant spine/ECMP paths so one spine failure does not bisect a PP chain.'
+  common_mistake: |
+    **The Pitfall:** Assuming a spine switch failure only causes a bandwidth degradation due to oversubscription.
+    **The Rationale:** Engineers familiar with generic web architectures assume routing protocols inherently route around damage without penalty, ignoring the strict synchronized pipeline dependencies of distributed training.
+    **The Consequence:** If a pipeline-parallel group is bisected, the entire 1024-GPU training run freezes completely because data dependencies stall, turning a partial network fault into a catastrophic global failure.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 1024-GPU cluster partitioned into two 512-GPU halves.
+    - 3D Parallelism: TP=8, PP=8, DP=16.
+
+    **Calculations:**
+    - Logical layout: TP=8 GPUs per pipeline stage, PP=8 stages per replica, DP=16 replicas.
+    - GPUs per DP replica: TP * PP = 8 * 8 = 64 GPUs.
+    - Number of DP replicas: 1024 / 64 = 16.
+    - One pipeline chain has 8 stages; each stage is a TP group of 8 GPUs. The PP dependency is the ordered chain of 8 stages, not a separate 64-GPU AllReduce group.
+    - A 512-GPU partition can hold 512 / 64 = 8 complete DP replicas if placement keeps whole PP chains inside each half.
+    - If a PP chain is split across halves, the cross-partition stage edge cannot exchange activations/gradients and the affected replica stalls.
+    - If DP replicas are split 8 and 8 across the halves, the global DP=16 AllReduce cannot complete, but the job has a recoverability option: reform as two DP=8 jobs or one surviving DP=8 job with adjusted global batch and optimizer membership.
+    - TP is least exposed when each TP=8 group is placed inside one node/NVLink island, so no TP collective should cross the spine-failure cut.
+
+    **Conclusion & Interpretation:**
+    - **Result: PP is the most placement-sensitive dimension, while DP is the most recoverable dimension to sacrifice.** Place complete 64-GPU TP×PP replicas inside a 512-GPU failure domain, let DP span domains only with restart/reconfiguration support, and use redundant spines so a single spine failure does not bisect a PP chain.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

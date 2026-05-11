@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: tinyml-1465
+track: tinyml
+level: L4
+zone: analyze
+topic: streaming-ingestion
+competency_area: data
+bloom_level: analyze
+phase: inference
+title: 'TinyML Stream Processing on STM32F4: Anomaly Detection Bottlenecks'
+scenario: A TinyML vibration monitoring system is deployed using an ARM Cortex-M4 STM32F4 microcontroller (168 MHz CPU, 256 KB SRAM, no FPU). It samples 3-axis, 16-bit accelerometer data at 1 kHz, requiring real-time processing for anomaly detection. Initially, a simple FFT-based algorithm runs effectively. However, when the team attempts to deploy a more sophisticated, lightweight neural network (e.g., a small CNN with ~50k parameters) for enhanced anomaly detection, they observe significant data processing delays, increased latency, and occasional dropped data packets. The system fails to maintain real-time ingestion requirements.
+question: Why does moving from FFT to a small CNN break real-time STM32F4 vibration ingestion despite only 6 KB/s raw data?
+details:
+  realistic_solution: |
+    The raw 6 KB/s stream is not the bottleneck; the per-window inference workload and memory traffic are. The FFT path can be implemented as fixed-point O(n log n) code with small, predictable buffers and optimized CMSIS-DSP kernels. A 50k-parameter CNN in FP32 consumes about 200 KB for weights alone, leaving little of the 256 KB SRAM for activations, input windows, stacks, and DMA buffers. On the stated Cortex-M4 configuration without an FPU, FP32 convolutions are software-emulated, so each multiply-accumulate and activation is far slower than the fixed-point FFT path. Even if the sensor delivers one sample every 1 ms, the CNN usually runs on a window of samples; if that inference takes longer than the window hop or blocks DMA/buffer servicing, ingestion falls behind and packets are dropped.
+  common_mistake: |
+    **The Pitfall:** Overlooking the penalty of software-emulated floating-point math on CPUs without an FPU.
+    **The Rationale:** Engineers familiar with cloud or mobile environments assume floating-point math is "fast enough" and underestimate the memory footprint of lightweight networks.
+    **The Consequence:** Deploying a model that runs orders of magnitude slower than expected, breaking real-time constraints and corrupting the continuous sensor stream.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Raw Sensor Data Rate: 3 axes * 2 bytes/sample * 1000 samples/sec = 6 KB/s.
+    - CNN weights: 50,000 FP32 parameters * 4 bytes = 200 KB.
+    - SRAM: 256 KB total before activations, input windows, stacks, DMA buffers, and runtime arena.
+    - Example windowed CNN workload: 250,000 FP32 MACs per 100 ms vibration window with a 10 ms hop.
+    - Software-emulated FP32 on a Cortex-M4 without FPU can cost roughly 10-20 cycles per MAC before activation and memory overhead.
+
+    **Calculations:**
+    - Weight memory remaining: 256 KB - 200 KB = 56 KB for everything else, which is too small for activations plus system buffers.
+    - Compute latency at 10 cycles/MAC: 250,000 * 10 / 168,000,000 = 14.9 ms per window.
+    - Compute latency at 20 cycles/MAC: 250,000 * 20 / 168,000,000 = 29.8 ms per window.
+
+    **Conclusion & Interpretation:**
+    - **Result: CNN inference can exceed a 10 ms window-hop budget and nearly exhaust SRAM**. The failure comes from compute latency, software FP32 cost, activation buffering, and memory bandwidth, not from the 6 KB/s raw sensor rate.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

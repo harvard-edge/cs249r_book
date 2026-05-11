@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-4085
+track: cloud
+level: L3
+zone: implement
+topic: model-tensor-parallelism
+competency_area: parallelism
+bloom_level: apply
+phase: training
+title: AllReduce Volume for an MI300X Transformer Block
+scenario: A Llama-70B transformer block has hidden_dim=8192 and runs with TP=8 on MI300X GPUs. Each transformer block requires 2 AllReduce operations in the forward pass (one for attention, one for MLP).
+question: For hidden=8192, TP=8, and batch=2048 on MI300X, what are the per-AllReduce and summed per-block volumes and times?
+details:
+  realistic_solution: Each AllReduce operates on a tensor of shape [2048, 8192] in BF16, so the logical payload is 2048 × 8192 × 2 = 33.6 MB. The two forward-pass AllReduces in one block therefore have 67.2 MB of summed logical payload. For ring AllReduce with TP=8, the bytes transferred per GPU are 2 × (7/8) × 33.6 MB = 58.8 MB per AllReduce. With intra-node MI300X Infinity Fabric bandwidth estimated at 400 GB/s, each AllReduce takes about 58.8 MB / 400 GB/s = 0.15 ms. Two AllReduces sum to 117.6 MB transferred per GPU and about 0.30 ms per block. This answers only the per-block communication cost; compute-bound versus communication-bound requires a compute-time estimate that is not provided.
+  common_mistake: |
+    **The Pitfall:** Forgetting that AllReduce = ReduceScatter + AllGather.
+    **The Rationale:** Candidates often assume the data sent over the wire is exactly equal to the message size.
+    **The Consequence:** They underestimate network traffic by ~2x, and sometimes erroneously use HBM bandwidth instead of interconnect bandwidth (NVLink/Infinity Fabric) for calculations.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Batch=2048, Hidden=8192, TP=8, BF16.
+    - Infinity Fabric Bandwidth: 400 GB/s.
+
+    **Calculations:**
+    - Tensor Size: 2048 (batch) × 8192 (hidden) × 2 bytes (BF16) = 33.55 MB ≈ 33.6 MB.
+    - Ring AllReduce Cost: 2 × ((N - 1) / N) × Message Size.
+    - Volume per GPU: 2 × (7 / 8) × 33.6 MB = 58.8 MB per AllReduce.
+    - Time per AllReduce: 58.8 MB / 400 GB/s (Infinity Fabric) ≈ 0.15 ms.
+    - Summed per-block volume: 2 × 58.8 MB = 117.6 MB per GPU.
+    - Total time per block: 2 AllReduces × 0.15 ms = 0.30 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 117.6 MB per GPU and about 0.30 ms per block.** The logical payload is 67.2 MB across the two collectives, while the ring transfers 117.6 MB per GPU; compute-bound status cannot be concluded without compute timing.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

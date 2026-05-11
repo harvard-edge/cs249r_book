@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-2417
+track: cloud
+level: L5
+zone: design
+topic: vram-budgeting
+competency_area: memory
+bloom_level: evaluate
+phase: both
+title: Custom ASIC SRAM Tiling
+scenario: You are writing the compiler for a new cloud NPU. The NPU has 16MB of ultra-fast SRAM and 500GB/s HBM. Running self-attention on a sequence length of 4096 (hidden dim 1024, FP16) results in heavy HBM spilling. The attention block takes 45ms, severely underperforming the theoretical compute limit of 5ms.
+question: How should the compiler map self-attention for sequence length 4096 onto the 16MB SRAM to avoid HBM spilling?
+details:
+  realistic_solution: |
+    The latency is dominated by intermediate memory reads/writes to HBM because the full O(N^2) attention matrix does not fit in SRAM. The compiler should use FlashAttention-style loop ordering: tile Q rows and K/V columns, stream K and V blocks from HBM, keep only the current score tile, running softmax statistics, and partial output tile in the 16MB SRAM, then write the final output once. The tile sizes must account for all live buffers, not just the score tile. This avoids materializing the 4096x4096 attention matrix in HBM and trades some extra on-chip recomputation or reductions for a large reduction in HBM traffic, turning the kernel from spill-bound toward SRAM/compute-bound execution.
+  common_mistake: |
+    **The Pitfall:** Adding more HBM bandwidth to the chip design to solve the problem.
+    **The Rationale:** Hardware solutions increase packaging costs and power consumption drastically.
+    **The Consequence:** Fails to utilize efficient hardware-compiler co-design (e.g., tiling), leading to an unnecessarily expensive and power-hungry chip.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Sequence length: 4096. Hidden dim: 1024. FP16.
+    - 16MB SRAM.
+
+    **Calculations:**
+    - Each full Q, K, or V tensor is 4096 * 1024 * 2 bytes = 8MB, but a tiled kernel does not need all three full tensors resident in SRAM at once.
+    - The naive score/probability matrix is the main spill source: 4096 * 4096 * 2 bytes = 32MB, already 2x larger than the 16MB SRAM.
+    - If the implementation also keeps large Q/K/V slices and output buffers around the materialized score matrix, the live working set easily exceeds 16MB.
+    - Tiled approach: a 1024x1024 score tile is 1024 * 1024 * 2 bytes = 2MB, leaving SRAM for the current Q tile, K/V tiles, partial output/accumulation buffers, and running softmax statistics.
+    - The compiler must choose block sizes so the entire live tile working set, not just the score tile, stays below 16MB.
+
+    **Conclusion & Interpretation:**
+    - **Result: 56MB naive working set vs sub-16MB tiled live working set (Memory-Capacity-Bound)**. FlashAttention-style tiling avoids materializing the full 32MB attention matrix in HBM while keeping the per-tile live state in SRAM.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

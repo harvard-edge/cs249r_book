@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-4313
+track: cloud
+level: L5
+zone: evaluation
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: evaluate
+phase: inference
+title: Disaggregation vs. Colocation Break-Even Analysis
+scenario: Your team is deciding whether to adopt disaggregated serving or stick with colocated serving for a new 13B FP16 model deployment. The workload is 70% short input/output (≤256/≤64) and 30% long input/output (4096/512) on an H100 cluster of 32 GPUs. The TTFT SLO is 100 ms, and the TPOT SLO is 40 ms.
+question: When does disaggregated serving outperform colocation for the 13B mixed workload on 32 H100s after KV transfer overhead?
+details:
+  realistic_solution: |
+    Disaggregation outperforms colocation when the workload has enough long-prefill traffic that colocating prefill and decode either violates the 100 ms TTFT SLO for long inputs or strands decode capacity behind prefill bursts, and the saved queueing/placement efficiency is larger than the KV-transfer cost. Short requests are not the reason to disaggregate: their ideal prefill time is only about 6.7 ms. Long 4096-token requests are the driver: ideal single-GPU prefill is about 107.6 ms before decode queueing, already above the 100 ms TTFT SLO. A disaggregated design can put long prefill on a dedicated prefill pool and use TP=2 or faster prefill kernels to get the prefill compute portion to about 54 ms, then pay the KV-transfer overhead. If the model uses GQA with 8 KV heads, the 4096-token KV transfer is about 671 MB; at 50 GB/s that adds about 13 ms, for roughly 67 ms TTFT before scheduler overhead. If the deployment uses full multi-head KV or slow host staging, the transfer can erase the benefit. So the decision is SLO- and load-dependent, not a universal 300 RPS threshold: choose disaggregation once long-input arrivals make colocated TTFT exceed 100 ms or cause decode starvation after accounting for measured KV-transfer time.
+  common_mistake: |
+    **The Pitfall:** Saying disaggregation is always better or always worse.
+    **The Rationale:** Engineers ignore that the break-even fundamentally depends on the workload mix and the variance in compute-to-bandwidth ratios.
+    **The Consequence:** The team over-engineers a disaggregated setup for a uniform short-request workload, adding KV-transfer latency for absolutely zero benefit.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 13B FP16 model. H100 (989 TFLOPS). 32 GPUs.
+    - Long prefill: 4096 tokens. TTFT SLO = 100ms.
+    - Illustrative GQA KV layout: 40 layers, 8 KV heads, head_dim 128, FP16.
+
+    **Calculations:**
+    - Prefill compute lower bound uses dense forward cost of about 2P FLOPs/token: time = 2 * parameters * input_tokens / GPU_FLOP/s.
+    - Short prefill lower bound: 2 * 13e9 * 256 / 989e12 = 6.7 ms.
+    - Long prefill lower bound on one GPU: 2 * 13e9 * 4096 / 989e12 = 107.6 ms, before queueing, so colocation is already risky for a 100 ms TTFT SLO.
+    - Long prefill with TP=2 or equivalent prefill parallelism: 107.6 / 2 = 53.8 ms compute.
+    - GQA KV transfer: 2 * 8 * 128 * 4096 * 40 * 2 bytes = 671 MB. At 50 GB/s, transfer time = 671 MB / 50 GB/s = 13.4 ms.
+    - Disaggregated long TTFT lower bound: 53.8 + 13.4 = 67.2 ms before scheduling overhead.
+
+    **Conclusion & Interpretation:**
+    - **Result: workload-dependent break-even (TTFT-Bound)**. Disaggregation wins when saved long-prefill queueing plus prefill parallelism exceeds the measured KV-transfer latency. With the stated GQA transfer path, TP=2 disaggregated prefill has about 33 ms of lower-bound TTFT margin versus the 100 ms SLO; with full-head KV, host staging, or heavy queueing, that margin can disappear.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

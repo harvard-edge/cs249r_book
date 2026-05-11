@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-4038
+track: cloud
+level: L4
+zone: diagnosis
+topic: gradient-synchronization
+competency_area: parallelism
+bloom_level: analyze
+phase: training
+title: Diagnosing Gradient Staleness in Async SGD
+scenario: Your 64-MI300X async SGD training job converges 30% slower than synchronous SGD at the same learning rate. The parameter server receives gradient updates with an average staleness of 12 iterations (some workers are 25 iterations behind). The model is a 13B parameter LLM.
+question: Why does average staleness of 12 iterations hurt async SGD convergence for a 13B LLM, and what staleness is tolerable?
+details:
+  realistic_solution: 'Staleness of τ iterations means a worker computes a gradient on weights w_t, but the server applies it to weights closer to w_{t+τ}. For a 13B LLM, the loss surface and optimizer state can move enough over 12 updates that the gradient is biased toward an old objective rather than being harmless noise; the 25-iteration tail is especially risky because those updates can pull against newer gradients. There is no universal safe staleness such as sqrt(N). A practical policy is bounded staleness: target average staleness of only a few iterations, drop or down-weight updates beyond a measured threshold, and validate loss curves. For this case, average 12 and tail 25 are too high; start by capping at about 4-8 iterations or switch to local/periodic synchronous SGD so throughput improves without unbounded stale updates.'
+  common_mistake: |
+    **The Pitfall:** Assuming staleness is just a minor noise source that the optimizer can naturally smooth out.
+    **The Rationale:** Async SGD promises high hardware utilization, leading to the assumption that more updates always equal faster convergence.
+    **The Consequence:** Stale gradients point in the direction of a loss surface that no longer exists. Applying them introduces massive error, leading to slower convergence or divergence despite high GPU utilization.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 64 workers.
+    - Average staleness is 12 iterations.
+    - Tail staleness reaches 25 iterations.
+    - Tolerable staleness must be chosen from validation loss stability, not a fixed closed-form rule.
+
+    **Calculations:**
+    - An update with staleness 12 is applied after 12 newer optimizer steps have already changed the weights.
+    - The tail update with staleness 25 is more than 2x older than the average stale update: 25 / 12 ≈ 2.1.
+    - If the acceptable cap is 8 iterations, the average update is 12 / 8 = 1.5x over the cap, and the tail is 25 / 8 ≈ 3.1x over the cap.
+    - These ratios do not compute a convergence speedup; they show why the observed 30% slower convergence is plausible despite high hardware utilization.
+
+    **Conclusion & Interpretation:**
+    - **Result: Convergence-Bound.** Average staleness of 12 with a 25-iteration tail is not tolerable for this job without bounding, dropping, or down-weighting stale updates; use measured validation stability to tune the cap.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

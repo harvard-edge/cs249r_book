@@ -1,0 +1,45 @@
+schema_version: '1.0'
+id: edge-1140
+track: edge
+level: L5
+zone: optimization
+topic: systolic-dataflow
+competency_area: compute
+bloom_level: evaluate
+phase: both
+title: 'Edge Systolic Array Optimization: Fix Memory-Bound Conv on Hailo-8'
+scenario: A Hailo-8 deployment achieves only 3 TOPS effective throughput on a custom CNN. Profiling shows 72% of time in 1x1 pointwise convolutions with very low arithmetic intensity. For this roofline estimate, use an illustrative 26 TOPS peak and 6 GB/s effective off-chip data-movement budget.
+question: What bottleneck explains the CNN's 11.5% MFU, and how do channel grouping and larger spatial resolution change its intensity and speed?
+details:
+  realistic_solution: The 11.5% MFU matches 3 TOPS effective throughput on the illustrative 26 TOPS peak, and the bottleneck is low arithmetic intensity in small 1x1 convolutions. A 7x7, 512->1024 1x1 layer has only about 86 FLOPs/byte, far below the illustrative 4333 ops/byte ridge from 26 TOPS and 6 GB/s, so bandwidth and data movement dominate. Channel grouping reduces FLOPs, but it also reduces weight reuse and leaves input/output traffic in place; for group=4 the AI drops to about 62 FLOPs/byte, so the roofline time improves by roughly 3x rather than the 4x FLOP reduction. Larger spatial resolution improves intensity because the same 1x1 weights are reused over more pixels; at 28x28 the AI rises to about 476 FLOPs/byte, still memory-bound but with much higher effective throughput, roughly 3 TOPS under the same bandwidth model. Prefer fusion, layout-aware scheduling, and larger spatial/batch reuse over grouping as the main fix.
+  common_mistake: |
+    **The Pitfall:** Applying channel grouping to fix a memory bandwidth bottleneck.
+    **The Rationale:** Candidates blindly apply FLOP-reduction techniques (like MobileNet's depthwise design) without calculating the Arithmetic Intensity ratio.
+    **The Consequence:** The layer remains memory-bound, latency fails to improve, and model accuracy degrades unnecessarily.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Illustrative hardware model for this deployment: 6 GB/s effective off-chip bandwidth, 26 TOPS peak. Ridge Point = 26e12 ops/s / 6e9 bytes/s = 4333 ops/byte.
+    - Baseline: 1x1 Conv, 7x7 spatial, Cin=512, Cout=1024.
+
+    **Calculations:**
+    - Baseline FLOPs = 2 * 7 * 7 * 512 * 1024 = 51.4M.
+    - Baseline bytes = input 25.1KB + weights 524.3KB + output 50.2KB = 599.6KB. AI = 51.4M / 599.6K = 85.7 ops/byte.
+    - Group=4 FLOPs = 51.4M / 4 = 12.85M. Bytes = input 25.1KB + grouped weights 131.1KB + output 50.2KB = 206.3KB. AI = 62.3 ops/byte.
+    - 28x28 FLOPs = 2 * 28 * 28 * 512 * 1024 = 822M. Bytes = input 401KB + weights 524KB + output 803KB = 1.73MB. AI = 476 ops/byte.
+    - Bandwidth-bound time estimates are rough lower bounds: baseline ≈ 599.6KB / 6GB/s ≈ 0.10ms; group=4 ≈ 206.3KB / 6GB/s ≈ 0.034ms, about 2.9x faster rather than 4x; 28x28 ≈ 1.73MB / 6GB/s ≈ 0.29ms with effective throughput ≈ 822M / 0.29ms ≈ 2.8-2.9 TOPS.
+    - Observed MFU = 3 TOPS / 26 TOPS = 11.5%.
+
+    **Conclusion & Interpretation:**
+    - **Result: memory-bound 1x1 convolutions explain the 11.5% MFU.** Grouping lowers AI from about 86 to 62 ops/byte and gives sublinear speedup; larger spatial resolution raises AI to about 476 ops/byte by amortizing weights over more pixels, improving utilization even though the larger layer has more total work.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview

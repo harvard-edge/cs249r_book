@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-0676
+track: cloud
+level: L4
+zone: evaluation
+topic: graph-compilation
+competency_area: optimization
+bloom_level: analyze
+phase: inference
+title: The Inference Compiler Optimization
+scenario: You compile your 7B LLM with TensorRT before deploying on an H100. The model has 1,200 individual operations in eager PyTorch. After TensorRT compilation, it's reduced to 80 fused kernels. Inference latency drops from 21ms to 6ms. Your colleague says 'operator fusion just reduces Python overhead.'
+question: What is the real hardware-level reason fusion is so effective?
+details:
+  realistic_solution: The main hardware benefit is eliminating intermediate HBM round-trips between separate kernels, not just reducing Python overhead. Inputs are already resident in GPU memory; the waste comes when one kernel writes an intermediate activation to HBM and the next kernel reads it back. Fusion keeps those intermediate values in registers and shared memory where possible. For a chain of elementwise operations such as LayerNorm → GELU → Dropout → Add, unfused execution repeatedly materializes full activation tensors between kernels, while fused execution can read the input once, compute several operations on-chip, and write the final output once.
+  common_mistake: |
+    **The Pitfall:** Assuming operator fusion primarily reduces Python interpreter or function call overhead.
+    **The Rationale:** Developers used to standard software optimization think in terms of CPU execution paths rather than GPU memory hierarchies.
+    **The Consequence:** Misunderstanding the performance bottlenecks of modern AI models, leading to poor architectural decisions.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 7B model (sequence=2048, hidden=4096, FP16).
+       - Representative activation tensor size = 2048 * 4096 * 2 = 16.7 MB.
+       - Kernel launches cost roughly 5-10 μs each; use 7 μs as a midpoint.
+       - The compile reduces 1,200 eager operations to 80 fused kernels.
+    2. **Calculations:**
+       - Kernel Launch Savings = (1200 - 80) * 7 μs = 7.8 ms.
+       - If fusion eliminates roughly 700 intermediate activation read/write pairs, avoided traffic ≈ 700 * 16.7 MB * 2 = 23.4 GB.
+       - HBM time saved at 3.35 TB/s ≈ 23.4 GB / 3350 GB/s = 7.0 ms.
+       - Estimated total savings ≈ 7.8 ms + 7.0 ms = 14.8 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: ~15 ms Latency Drop.** The observed 21 ms to 6 ms improvement is consistent with reducing 1,120 kernel launches and avoiding many intermediate HBM round-trips. Fusion is effective because it keeps intermediate values in registers/shared memory instead of repeatedly writing and rereading them from HBM.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,35 @@
+schema_version: '1.0'
+id: edge-0877
+track: edge
+level: L6+
+zone: mastery
+topic: power-budgeting
+competency_area: power
+bloom_level: create
+phase: both
+title: AR Glasses Power Bottleneck
+scenario: You are designing the ML architecture for next-gen AR glasses. A 1.2B parameter Vision Transformer (ViT) runs continuous object tracking at 30fps. The hardware has a strict <1W power budget for ML and 1.5GB total ML RAM. Standard INT4 Post-Training Quantization (PTQ) fits the memory budget but accuracy collapses from 94% to 71% specifically in low-light environments.
+question: How would you quantize the 1.2B ViT to fit 1.5GB and under 1W while avoiding the low-light INT4 PTQ accuracy collapse?
+details:
+  realistic_solution: Implement mixed-precision Quantization-Aware Training (QAT) with low-light calibration data. Use SmoothQuant-style offline scaling to reduce activation outliers, keep attention projections, early vision blocks, and other low-light-sensitive layers in INT8 or higher precision, and quantize tolerant middle blocks to INT4. Verify activation and KV-cache memory against the 1.5GB RAM budget and profile attention cost at 30fps; the goal is a mostly static INT4/INT8 path with calibrated scales, not per-frame dynamic activation quantization.
+  common_mistake: |
+    **The Pitfall:** Using dynamic quantization for activations to handle low-light variance.
+    **The Rationale:** Candidates try to solve the accuracy drop by applying runtime min/max scaling calculations without profiling the power cost.
+    **The Consequence:** The runtime scaling overhead destroys the strict 1W power budget, draining the battery unacceptably fast.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 1.2B params. 1.5GB RAM budget. 1W power budget.
+    - 50G MACs/frame at 30fps = 1.5T MACs/sec.
+    - FP16 MAC power = ~1.5pJ. INT4 MAC power = ~0.5pJ.
+    - Activations, attention KV/state, and runtime buffers must fit in the remaining RAM after weights.
+
+    **Calculations:**
+    - INT4 weights = 600MB. Mixed precision (5% INT8) adds ~30MB. Total = 630MB (fits 1.5GB).
+    - Remaining RAM for activations/KV/cache = 1.5GB - 630MB = ~870MB before allocator and runtime overheads.
+    - Ideal INT4 MAC power draw = 1.5T * 0.5pJ = 0.75W, leaving only ~0.25W for memory movement, attention overhead, and control logic.
+    - Runtime dynamic activation scaling would spend part of that narrow margin every frame, so low-light outliers should be handled by QAT/calibration and selective INT8 layers instead.
+
+    **Conclusion & Interpretation:**
+    - **Result: weight memory fits, power margin is tight (Power-Bound Mitigation)**. Mixed-precision QAT with low-light calibration preserves the fragile layers and keeps runtime scaling out of the 30fps path, while activation/KV-cache and attention traffic must still be profiled inside the remaining RAM and power headroom.
+status: published
+provenance: imported

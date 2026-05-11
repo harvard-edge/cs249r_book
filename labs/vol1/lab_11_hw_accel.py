@@ -956,7 +956,7 @@ At low AI (memory-bound), the $E_{\\text{DRAM}}/\\text{AI}$ term dominates. At A
         </div>
         """))
 
-        if pE_pred.value == "2_4":
+        if pE_pred.value == "10x":
             items.append(mo.callout(mo.md(f"**Correct.** FlashAttention achieves {_speedup:.1f}x by tiling "
                 "the attention computation to fit in SRAM, eliminating redundant HBM round-trips. "
                 "Increase sequence length to see even larger gains."), kind="success"))

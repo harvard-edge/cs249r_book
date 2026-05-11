@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-0736
+track: cloud
+level: L4
+zone: diagnosis
+topic: collective-communication
+competency_area: networking
+bloom_level: analyze
+phase: both
+title: The Ring AllReduce Bottleneck
+scenario: We scale our data-parallel training from 32 GPUs to 512 GPUs. On 32 GPUs, AllReduce takes 15% of each training step. On 512 GPUs, it takes 60%. The network hardware is exactly the same 400 Gbps (50 GB/s) InfiniBand fabric.
+question: Why does ring AllReduce degrade massively at scale despite constant per-GPU bandwidth, and what replaces it?
+details:
+  realistic_solution: Ring AllReduce is bandwidth efficient, but it still has 2(p-1) communication phases. As p grows from 32 to 512, the per-rank payload term stays close to 2N/B, while the per-phase latency, software overhead, and tail jitter are paid many more times. A single slow phase can hold the whole collective open, so p99 behavior matters more at scale. Hierarchical, tree, SHARP-assisted, or hybrid collectives can reduce latency depth and localize synchronization, but they do not universally replace ring AllReduce; the best algorithm depends on message size, topology, and implementation.
+  common_mistake: |
+    **The Pitfall:** Assuming ring AllReduce scales perfectly because it is bandwidth-optimal.
+    **The Rationale:** Theoretical CS courses emphasize the bandwidth optimality of ring AllReduce, often ignoring the practical latency term.
+    **The Consequence:** Experiencing massive, unexplained performance degradation at scale when network latency and synchronization jitter begin to dominate the step time.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Tensor size per rank: 7B FP32 parameters = 28 GB.
+    - Link bandwidth: 400 Gbps = 50 GB/s effective upper bound.
+    - Per-phase latency/software overhead: 15μs.
+    - Ring AllReduce uses 2(p - 1) phases and moves 2N(p - 1)/p bytes per rank.
+
+    **Calculations:**
+    - 32 GPUs bandwidth time: 2 * 28 GB * 31/32 / 50 GB/s ≈ 1.09s.
+    - 512 GPUs bandwidth time: 2 * 28 GB * 511/512 / 50 GB/s ≈ 1.12s.
+    - 32 GPUs latency floor: 2 * 31 * 15μs ≈ 0.93 ms.
+    - 512 GPUs latency floor: 2 * 511 * 15μs ≈ 15.3 ms.
+    - Any additional p99 phase jitter is also paid across many more phases at 512 GPUs.
+
+    **Conclusion & Interpretation:**
+    - **Result: Latency/Jitter-Bound at Scale.** The raw bandwidth term barely changes, but the phase count grows 16.5x from 32 to 512 GPUs. Hierarchical or hybrid collectives reduce the exposed latency depth and can outperform a pure ring for large jobs.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

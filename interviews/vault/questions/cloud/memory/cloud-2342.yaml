@@ -1,0 +1,57 @@
+schema_version: '1.0'
+id: cloud-2342
+track: cloud
+level: L6+
+zone: diagnosis
+topic: memory-hierarchy-design
+competency_area: memory
+bloom_level: evaluate
+phase: both
+title: ZeRO-3 Host Offload PCIe Contention
+scenario: You are training a 200B parameter model on a single node with 8 GPUs using DeepSpeed ZeRO-3 with CPU NVMe offload. System utilization is 12%, NVLink is 95% idle, and the training step takes 4500ms.
+question: Why are the 8 GPUs only 12% utilized with ZeRO-3 CPU offload despite idle NVLink, and what architecture changes would fix it?
+details:
+  realistic_solution: |
+    The symptom (GPUs idle, NVLink unused, waiting on memory copies) reveals a severe PCIe bottleneck caused by CPU offloading. ZeRO-3 offload stores model parameters in host CPU RAM or NVMe. During the forward/backward pass, parameters must be fetched to the GPU immediately before computation. GPU-to-GPU links are idle because the hot path is host-to-device traffic over PCIe. PCIe Gen5 x16 is about 64 GB/s per direction at the theoretical link level, and real sustained tensor-copy bandwidth is often closer to ~50 GB/s after protocol, DMA, and software overheads. The algorithm is bottlenecked by that host-to-device bandwidth. Because the prefetch buffer is likely too small or too synchronous, the compute units stall waiting for weights. Co-design fixes are to increase and pipeline the parameter prefetch buffer, stage checkpoint/offload traffic so it does not contend with compute, or disable CPU offload and shard the model across GPU HBM so parameter movement uses GPU-local memory and GPU interconnects instead of host PCIe.
+  common_mistake: |
+    **The Pitfall:** Assuming NVLink is broken or the CPU lacks compute power.
+    **The Rationale:** Misdiagnosing idle GPUs as a software bug rather than a fundamental hardware interconnect bottleneck.
+    **The Consequence:** Wasting time tuning optimizer hyperparameters when the real fixes are larger overlapped prefetch buffers, less CPU offload, or a GPU-only sharding layout.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model Size: 200B parameters in BF16 (400 GB).
+    - Under ZeRO-3 offload, parameters are gathered layer-by-layer from host memory; across a full pass, each GPU can stream roughly one model copy's worth of parameter shards from CPU.
+    - PCIe Gen5 x16 effective bandwidth: ~50 GB/s.
+    - Compute time per step: ~1.25 seconds.
+
+    **Calculations:**
+    - Node-wide parameter movement per pass: 400 GB total = 50 GB per GPU on average.
+    - Per-GPU PCIe transfer time for that pass: 50 GB / 50 GB/s = 1.0 second if perfectly sustained.
+    - If forward and backward both require host gathers that cannot be fully reused, exposed transfer can approach 2 × 50 GB = 100 GB per GPU.
+    - Exposed PCIe time in that case: 100 GB / 50 GB/s = 2.0 seconds per GPU.
+    - Total step time estimate: 2.0s PCIe + 1.25s compute + prefetch, synchronization, and NVMe/CPU overhead ≈ 4.5s observed.
+
+    **Conclusion & Interpretation:**
+    - **Result: PCIe-Bandwidth-Bound**. The system is severely bound by host-to-device PCIe bandwidth, leaving NVLink idle.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 18
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+  - zero-3
+  - pcie
+  - offloading
+  - gpu-architecture

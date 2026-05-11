@@ -1,0 +1,33 @@
+schema_version: '1.0'
+id: edge-2220
+track: edge
+level: L3
+zone: diagnosis
+topic: autograd-computational-graphs
+competency_area: optimization
+bloom_level: evaluate
+phase: training
+title: Debugging gradient flow through quantization-aware training on Jetson Orin
+scenario: You are implementing quantization-aware training (QAT) for an EfficientNet-B0 model targeting INT8 deployment. After inserting fake quantization nodes, the model's validation accuracy during QAT plateaus at 10% below the FP32 baseline.
+question: How should FakeQuant be implemented so gradients flow during QAT for the INT8 target?
+details:
+  realistic_solution: 'Implement FakeQuant using a Straight-Through Estimator (STE): the forward pass computes true quantization simulation (round), but the backward pass returns the gradient unchanged (identity). Verify gradient flow using `register_hook` on each layer''s output to confirm non-zero gradients bypass the non-differentiable rounding nodes.'
+  common_mistake: |
+    **The Pitfall:** Using a standard step function (round-to-nearest) as-is in fake quantization.
+    **The Rationale:** Candidates implement the forward pass correctly but forget that step functions have zero gradients almost everywhere.
+    **The Consequence:** Without a Straight-Through Estimator (STE), gradients drop to zero and the model cannot learn quantization-friendly weight placements.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Fake quantization uses rounding/clamping in the forward pass.
+    - Rounding is non-differentiable and has zero gradient almost everywhere.
+    - QAT still needs useful gradients to update the underlying FP32 weights.
+
+    **Calculations:**
+    - Forward: simulate INT8 with scale, zero point, clamp, and round.
+    - Backward: use an STE or clipped identity gradient for values in the quantization range.
+    - This does not make rounding differentiable; it supplies a surrogate gradient so training can continue.
+
+    **Conclusion & Interpretation:**
+    - **Result: STE required for QAT gradient flow.** The STE lets gradients pass through fake-quant nodes and can help recover accuracy, but it does not guarantee full FP32 accuracy.
+status: published
+provenance: imported

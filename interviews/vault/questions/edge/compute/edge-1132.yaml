@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: edge-1132
+track: edge
+level: L4
+zone: evaluation
+topic: systolic-dataflow
+competency_area: compute
+bloom_level: evaluate
+phase: both
+title: EfficientNet-B0 32x112x112 Depthwise Convolution WS vs RS SRAM Access
+scenario: Compare weight-stationary (WS) and row-stationary (RS) dataflow for an INT8 depthwise convolution on an edge accelerator. The block is an EfficientNet-B0 block (32 channels, 112x112, 3x3 dw-conv).
+question: For the 32-channel 112x112 3x3 depthwise conv, how do WS and RS dataflows compare in SRAM access and energy?
+details:
+  realistic_solution: 'DW conv: 32 channels, weights = 32*9 = 288 INT8 values. Activations: 32*112^2 = 401K values. Under a compulsory SRAM-access convention, WS keeps the 288 weights in the register file and streams the padded input once: 32*114^2 = 415,872 reads, then writes 32*112^2 = 401,408 outputs. That is about 817K activation/weight accesses. RS processes one output row band at a time with a 3-row input window and local partial sums; for depthwise conv there are only 9 MACs per output, so partial-sum traffic is tiny and the same input/output activation traffic dominates. RS can be slightly better or worse depending on row-buffer capacity and halo rereads, but it is the same order as WS for this depthwise layer. The important conclusion is not exact equality: depthwise weights are too small for WS to save much energy, while RS shows larger advantages on standard convolutions with large partial sums.'
+  common_mistake: |
+    **The Pitfall:** Applying weight-stationary dataflow logic strictly to depthwise convolutions.
+    **The Rationale:** Candidates assume weights dominate memory accesses, forgetting that depthwise weights are tiny (9 values per channel).
+    **The Consequence:** Memory bandwidth bottlenecks are completely misidentified, as activations heavily dominate the dataflow.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Depthwise 32ch, 3x3, 112x112, INT8.
+    - Count compulsory SRAM reads/writes for weights, padded input, and output; ignore cache-line effects and optional halo rereads.
+    - Weight size: 32 * 9 = 288 bytes.
+
+    **Calculations:**
+    - Activation in (with padding): 32 * (112+2)^2 = 415,872 bytes.
+    - Output: 32 * 112^2 = 401,408 bytes.
+    - Weight reads: 288 bytes.
+    - WS compulsory traffic ≈ input 415,872 + output 401,408 + weights 288 = 817,568 bytes = 0.818 MB.
+    - RS with a 3-row input window has the same compulsory input/output/weight traffic; extra halo rereads are implementation-dependent and small relative to activation traffic for this estimate.
+    - FLOPs: 2 * 32 * 112^2 * 9 = 7,225,344 FLOPs = 7.225M FLOPs.
+    - Arithmetic Intensity = 7.225M / 0.818M bytes = 8.8 FLOPs/byte.
+    - Under this counting convention, WS ≈ 817.6KB and RS ≈ 817.6KB plus any halo rereads, so the energy difference is not meaningfully quantified without a lower-level SRAM/register energy model.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~8.8 FLOPs/byte and activation-dominated.** WS and RS have similar SRAM traffic for this depthwise layer under the stated counting convention; neither gets the large reuse benefit seen in dense convolution.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

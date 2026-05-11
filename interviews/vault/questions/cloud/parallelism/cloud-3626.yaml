@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-3626
+track: cloud
+level: L6+
+zone: mastery
+topic: gradient-synchronization
+competency_area: parallelism
+bloom_level: create
+phase: training
+title: 'Gradient Synchronization Mastery: Pipeline Parallelism + AllReduce Co-Design'
+scenario: You are designing a 1024-GPU training system for a 175B parameter model using 3D parallelism (tensor-parallel=8, pipeline-parallel=16, data-parallel=8). Each node has 900GB/s intra-node bandwidth and 400Gbps inter-node bandwidth.
+question: How would you schedule tensor, pipeline, and data-parallel communication for the 1024-GPU 3D-parallel 175B training system?
+details:
+  realistic_solution: Use a 3D schedule instead of one global AllReduce. During each microbatch forward and backward pass, tensor-parallel collectives stay inside the 8-GPU node over NVLink and run inside the layer compute window. Pipeline-parallel stages send activations forward and gradients backward only to adjacent stages; these point-to-point transfers run as each microbatch crosses a stage boundary and are overlapped with compute on other microbatches. Data parallelism has DP=1024/(8×16)=8, so each pipeline stage synchronizes gradients only across its 8 DP replicas for the parameters owned by that TP×PP shard, not across all 1024 GPUs. Bucket the 2.73GB gradient shard and launch DP AllReduce as soon as each bucket is ready, overlapping it with remaining backward layers, pipeline drain, and optimizer preparation. The dominant exposed traffic is usually the DP AllReduce or pipeline bubble after overlap, not the intra-node TP traffic.
+  common_mistake: |
+    **The Pitfall:** Applying a single AllReduce across all 1024 GPUs.
+    **The Rationale:** Engineers familiar with simple data parallelism assume all GPUs must sync the entire model.
+    **The Consequence:** Completely saturating the inter-node network by attempting to AllReduce 350GB globally, leading to catastrophic scaling efficiency.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 175B params (350GB BF16). TP=8 (900GB/s), PP=16, DP=8 (400Gbps = 50GB/s).
+
+    **Calculations:**
+    - DP degree = 1024 / (TP * PP) = 1024 / (8 * 16) = 8.
+    - Gradient shard per GPU = 350GB / (8 * 16) = 2.73GB.
+    - DP ring traffic per rank = 2 * (7/8) * 2.73GB = 4.78GB, so time at 50GB/s is 4.78GB / 50GB/s = 0.0956s = 96ms before overlap.
+    - TP activation example = 4 * 2048 * 12288 * 2B = 201MB. A ring-style TP collective of that tensor over 8 GPUs would be about 1.75 * 201MB / 900GB/s = 0.39ms, but TP collectives occur inside layers and should be overlapped with layer compute rather than summed blindly across all layers.
+    - PP send/recv per adjacent stage for that activation is about 201MB / 50GB/s = 4.0ms per microbatch direction before protocol overhead, overlapped by the pipeline schedule.
+
+    **Conclusion & Interpretation:**
+    - **Result: Overlap-Critical 3D Schedule.** Keep TP intra-node, stream PP point-to-point traffic between adjacent stages, and bucket DP AllReduce during backward/flush windows; the exposed bottleneck is whichever of DP AllReduce or PP drain remains after overlap.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

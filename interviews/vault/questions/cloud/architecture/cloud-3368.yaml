@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-3368
+track: cloud
+level: L3
+zone: implement
+topic: encoder-decoder-tradeoffs
+competency_area: architecture
+bloom_level: analyze
+phase: both
+title: Encoder-Decoder Tradeoffs on AMD MI300X for Deployment
+scenario: Your team is deploying a large language model on an AMD MI300X accelerator. The model needs to serve both high-throughput batch inference and low-latency interactive tasks. You are evaluating an encoder-only model, a decoder-only model, and an encoder-decoder model.
+question: What are the inference compute, memory, and bandwidth costs of encoder-only, decoder-only, and encoder-decoder models on the MI300X?
+details:
+  realistic_solution: For high-throughput batch understanding tasks, choose an encoder-only model because the full input sequence can be processed in parallel and large batches can exploit MI300X compute. For interactive generation, choose a decoder-only model sized to fit weights and KV cache in the 192GB HBM; decode is sequential, so cost is driven by per-token latency, KV-cache bandwidth, and batch size rather than peak TFLOPS alone. Use an encoder-decoder model only when the task truly needs separate input encoding and conditional generation, because it pays the encoder pass plus autoregressive decoder cost and often carries two sets of weights and KV state. On MI300X, the large HBM capacity makes 7B- to mid-size FP16 models easy to fit, but architecture choice should still be based on batch vs. interactive traffic.
+  common_mistake: |
+    **The Pitfall:** Picking an architecture based solely on offline quality metrics (e.g., BLEU, ROUGE).
+    **The Rationale:** Ignoring the hardware-specific inference time, memory footprint, and bandwidth utilization implications (like the sequential bottleneck of decoders).
+    **The Consequence:** Deploying a decoder-only model for batch tasks that chokes on memory bandwidth, leaving massive compute resources idle.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - MI300X capabilities: 192GB HBM, 5.3 TB/s bandwidth, 1307 TFLOPS FP16 sparse peak.
+    - Example 7B FP16 model weights require about 7B * 2 bytes = 14GB.
+    - Compare a 2048-token batch input and 256-token interactive output.
+
+    **Calculations:**
+    - Memory fit: one 7B model uses 14GB, leaving about 178GB for KV cache, activations, and batching; even two 7B components use only about 28GB of weights.
+    - Encoder-only: processes all 2048 input tokens in parallel, so larger batches can raise arithmetic intensity and use more of the MI300X compute.
+    - Decoder-only: generates 256 tokens sequentially; each step reuses resident weights but reads and writes growing KV cache, so latency depends heavily on batch size and HBM traffic.
+    - Encoder-decoder: pays the encoder pass over 2048 tokens plus 256 sequential decoder steps and cross-attention state, so it is the most flexible but highest-cost option.
+
+    **Conclusion & Interpretation:**
+    - **Result: Workload-shape bound.** MI300X capacity makes model fit easy for this size, but encoder-only is best for batch understanding, decoder-only is best for interactive generation, and encoder-decoder should be reserved for tasks that need conditional generation quality enough to justify the extra cost.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+  - 'MI300X FLOPS mismatch: expected 1307, got 1300 in scenario and napkin_math'
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

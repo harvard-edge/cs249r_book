@@ -1,0 +1,59 @@
+schema_version: '1.0'
+id: edge-0867
+track: edge
+level: L3
+zone: diagnosis
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: apply
+phase: inference
+title: The Low-Rank Decomposition Latency Paradox
+scenario: You decompose a $4096 \times 4096$ weight matrix in an edge-deployed transformer into two low-rank matrices of dimensions $4096 \times 256$ and $256 \times 4096$ (rank 256). This reduces parameters from 16.8M to 2.1M — an 8x reduction. However, inference latency on a Jetson Orin (with Tensor Cores) only drops by 15%, not the expected 8x.
+question: Why does the 8x low-rank FLOP reduction for the 4096x4096 matrix yield only a 15% latency drop on the Jetson Orin?
+details:
+  realistic_solution: The 8x arithmetic reduction is real, but it applies only to the matrix multiply count, not directly to end-to-end latency. The low-rank rewrite replaces one large, hardware-friendly GEMM with two skinny GEMMs that have lower arithmetic intensity, poorer Tensor Core occupancy, extra reads and writes for the intermediate rank-256 activation, and an additional kernel launch unless the runtime fuses them. Other transformer work such as normalization, attention, memory movement, scheduling, and CPU/GPU synchronization is unchanged. The observed 15% latency drop means the saved FLOPs are mostly hidden by utilization and overhead effects, so parameter count is a poor predictor of wall-clock speed.
+  common_mistake: |
+    **The Pitfall:** Equating parameter reduction with proportional speedup.
+    **The Rationale:** Candidates assume that having 8x fewer parameters automatically yields an ~8x speedup, confusing model size with compute time and ignoring hardware execution realities.
+    **The Consequence:** This leads to drastically incorrect performance estimates and missed latency targets.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Original matmul: 4096x4096.
+    - Decomposed matmuls: 4096x256 + 256x4096.
+    - Latency measurement: 15% end-to-end drop after decomposition.
+
+    **Calculations:**
+    - Original matrix-vector FLOPs = 2 * 4096 * 4096 = 33.6M FLOPs.
+    - Decomposed FLOPs = 2 * (4096 * 256 + 256 * 4096) = 4.2M FLOPs.
+    - Arithmetic reduction = 33.6M / 4.2M = 8x.
+    - Observed end-to-end speedup = 1 / 0.85 = 1.18x, not 8x.
+    - The remaining 85% of latency comes from skinny-GEMM underutilization, intermediate memory traffic, extra launch/synchronization overhead, and unreduced transformer work.
+
+    **Conclusion & Interpretation:**
+    - **Result: 15% net latency drop (Utilization/Overhead-Bound).** The FLOP count shrinks by 8x, but the deployed kernel mix becomes less efficient and much of the end-to-end path is not reduced by the decomposition.
+  options:
+    - The 8x FLOP reduction is real, but the decomposed skinny GEMMs underutilize Tensor Cores, add intermediate memory traffic and launch overhead, and leave other transformer work unchanged, so wall-clock latency falls only modestly.
+    - Graph-level optimizations are always superior to kernel-level optimizations because they capture global data flow patterns.
+    - Equating parameter reduction with proportional speedup. 'We have 8x fewer parameters, so we should see ~8x speedup.' This confuses model size with compute time and ignores hardware execution realities.
+    - The latency is dominated by data preprocessing on the CPU; moving to GPU-accelerated preprocessing will resolve the bottleneck.
+  correct_index: 0
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_status_pro: ERROR
+validation_issues_pro:
+  - The solution's central claim that FLOP reduction is 4x is incorrect; the FLOP reduction is 8x, the same as the parameter reduction. Additionally, the FLOP counts are mislabeled as GFLOPs instead of MFLOPs.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

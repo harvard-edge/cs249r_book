@@ -1,0 +1,35 @@
+schema_version: '1.0'
+id: edge-1271
+track: edge
+level: L5
+zone: design
+topic: memory-mapped-inference
+competency_area: memory
+bloom_level: evaluate
+phase: inference
+title: Architecting Multi-Tenant Memory-Mapped Inference for Edge
+scenario: You are designing an on-premise defect detection system using a Qualcomm Cloud AI 100 edge inference accelerator. The service must multiplex between a dozen specialized visual inspection models without incurring cold-start latency when switching assembly lines.
+question: How would you memory-map and share a dozen model weights to allow processes to switch lines without cold starts within 32 GB?
+details:
+  realistic_solution: Implement a model server that exposes each model as a read-only file-backed `mmap` using `MAP_SHARED`, so worker processes share the same physical pages instead of copying weights per process. Warm the page cache for the active line set during startup and line-change scheduling, and use `mlock` only for the hot resident models or critical early layers that fit after reserving RAM for the OS, activations, and accelerator buffers. INT8 or weight-only quantization can reduce the footprint if accuracy is validated, but 12 quantized models still may not all fit; use an explicit residency policy, prefetch the next scheduled line, and shard rarely used models so switching among the hot set is cold-start-free while cold models are admitted predictably.
+  common_mistake: |
+    **The Pitfall:** Proposing naive dynamic weight loading or standard disk-backed OS paging.
+    **The Rationale:** Candidates assume standard virtual memory paging is sufficient for dynamic loading.
+    **The Consequence:** This introduces severe latency spikes and unpredictable cold starts, and fails to leverage shared memory across processes, quickly exhausting RAM.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Total RAM: 32 GB.
+    - 12 models at 6 GB (FP16) each.
+    - Reserve 8 GB for OS, activations, page tables, and accelerator staging buffers.
+
+    **Calculations:**
+    - FP16 footprint = 12 * 6 GB = 72 GB (exceeds 32 GB limit).
+    - INT8 footprint, if accuracy permits = 12 * 3 GB = 36 GB (still exceeds the full 32 GB RAM budget).
+    - Practical resident weight budget = 32 GB - 8 GB reserve = 24 GB.
+    - Hot INT8 resident set = 24 GB / 3 GB per model = up to 8 active models.
+    - Shared read-only mmap means N worker processes still map one physical copy of each resident model, not N copies.
+
+    **Conclusion & Interpretation:**
+    - **Result: Hot-set cold-start mitigation (Memory-Bound Mitigation)**. Shared mmap removes duplicate weight copies, and page-cache warming plus selective `mlock` can make switches among the resident hot set cold-start-free. All 12 models cannot be pinned under 32 GB, so the design needs scheduled prefetching, eviction, or sharding for less common lines instead of claiming universal zero cold-starts.
+status: published
+provenance: imported

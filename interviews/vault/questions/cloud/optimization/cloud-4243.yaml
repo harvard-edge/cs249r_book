@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-4243
+track: cloud
+level: L4
+zone: evaluation
+topic: autograd-computational-graphs
+competency_area: optimization
+bloom_level: evaluate
+phase: training
+title: Bounded K-FAC graph memory for ResNet-152 on MI300X
+scenario: You are implementing K-FAC (Kronecker-Factored Approximate Curvature) on MI300X for training a ResNet-152. A naive implementation retains the computational graph after backward() while collecting Fisher blocks, and memory usage explodes unexpectedly.
+question: How would you compute K-FAC second-order gradients for ResNet-152 on MI300X without unbounded graph memory growth?
+details:
+  realistic_solution: Do not keep full training graphs alive for K-FAC. Register per-layer forward hooks to save detached activations and backward hooks to save detached output-gradient samples, then compute each layer's Kronecker factors from those tensors under torch.no_grad(). Update Fisher blocks periodically, discard the saved tensors after each block update, and avoid repeated backward(retain_graph=True) loops. Use create_graph=True only for a specific higher-order product that truly needs it, then immediately drop references and zero gradients with set_to_none=True.
+  common_mistake: |
+    **The Pitfall:** Calling `loss.backward(retain_graph=True)` in a loop to accumulate gradient statistics.
+    **The Rationale:** It appears to be the standard PyTorch way to perform multiple backward passes on the same graph.
+    **The Consequence:** Each call accumulates gradients by adding to `.grad` instead of replacing them, and failing to clear the graph between Fisher estimation steps causes unbounded memory growth and immediate OOMs.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Retained ResNet-152 training graph at batch=32: about 6GB of activations.
+    - K-FAC needs detached per-layer activation and gradient samples, not a retained graph per Fisher block.
+    - Adam states: 3 × 60M params × 4 bytes = about 720MB.
+    - MI300X VRAM: 192GB.
+
+    **Calculations:**
+    - Retaining one graph for a higher-order product costs about 6GB, and create_graph=True can add another graph of similar size.
+    - Retaining 100 Fisher-estimation graphs would scale to roughly 100 × 6GB = 600GB, which is impossible.
+    - Detached K-FAC statistics stay bounded by the current batch samples plus factor matrices and do not grow with the number of update loops.
+
+    **Conclusion & Interpretation:**
+    - **Result: Bounded graph memory.** The fix is to detach hook-captured tensors and free references after each block update, so memory is bounded by one step's samples instead of unbounded retained autograd graphs.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

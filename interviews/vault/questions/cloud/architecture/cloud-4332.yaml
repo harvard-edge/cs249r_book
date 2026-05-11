@@ -1,0 +1,56 @@
+schema_version: '1.0'
+id: cloud-4332
+track: cloud
+level: L5
+zone: evaluation
+topic: recommendation-systems-engineering
+competency_area: architecture
+bloom_level: evaluate
+phase: inference
+title: Serving Latency vs. Model Freshness Tradeoff
+scenario: 'You can deploy one of two update strategies: (A) Synchronous online learning — every 1000 requests update the model and immediately swap it into serving (update latency: 2 seconds, serving latency increase: +20 ms during swap). (B) Asynchronous shadow updates — model updates accumulate in shadow weights, applied every 5 minutes via atomic weight swap (no serving latency impact). At 100k QPS, evaluate the CTR impact of each strategy, considering that recommendation quality decays 0.5% per minute of staleness.'
+question: At 100k QPS, how do synchronous online updates compare with 5-minute shadow updates for CTR staleness and serving latency?
+details:
+  realistic_solution: 'Strategy A: updates trigger every 1000 requests / 100k QPS = 0.01 seconds, but each update/swap path takes 2 seconds. If swaps are synchronous, about 200 update operations would overlap or queue, and the +20 ms serving penalty would affect traffic almost continuously rather than only rare requests. CTR staleness is excellent because the model is updated every 10 ms, but the serving latency behavior makes the strategy operationally unsafe. Strategy B: shadow weights swap atomically every 5 minutes with no serving latency impact. Average staleness is 2.5 minutes, so 0.5% relative CTR decay/minute gives 1.25% relative loss. At a 2% baseline CTR, that is a 0.025 percentage-point absolute drop, or 0.00025 fewer clicks per request. Revenue impact: 0.00025 × 100k QPS × $0.001/click × 86400s = $2,160/day. Verdict: Strategy B is the better direct choice unless Strategy A is redesigned with asynchronous updates and nonblocking double-buffered swaps.'
+  common_mistake: |
+    **The Pitfall:** Choosing Strategy A purely because it is "fresher".
+    **The Rationale:** Candidates prioritize the theoretical CTR gains of zero-staleness without accounting for the catastrophic serving latency and throughput penalties of constant weight swapping at high QPS.
+    **The Consequence:** The system violates strict P99 latency SLOs and collapses under load due to blocking swap operations.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - QPS: 100k.
+    - Sync swap: every 1000 requests, 2s latency, +20ms serving latency.
+    - Shadow swap: 5 minutes, 0ms impact.
+    - CTR decay: 0.5% relative drop per minute of staleness.
+    - Baseline CTR: 2%, CPC: $0.001.
+
+    **Calculations:**
+    - Strategy A (Sync) frequency: 1000 requests / 100k QPS = 10 ms.
+    - Overlap pressure: 2s update latency / 10ms trigger interval = ~200 updates in flight or queued.
+    - Serving impact: a +20ms synchronous swap path recurring every 10ms would effectively keep the service in an elevated-latency state.
+    - Strategy B (Shadow) staleness: 2.5 mins average.
+    - CTR decay: 2.5 min * 0.5%/min = 1.25% relative decay.
+    - Absolute CTR loss: 2% baseline CTR * 1.25% relative decay = 0.025 percentage points = 0.00025 fewer clicks/request.
+    - Daily revenue impact: 0.00025 lost clicks/request * 100,000 req/s * $0.001/click * 86400s = $2,160/day.
+
+    **Conclusion & Interpretation:**
+    - **Result: Throughput-Bound**. Strategy A is functionally impossible at 100k QPS. Strategy B is stable, and the $2,160/day staleness cost is minimal compared to systemic collapse.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+  - 'Math error: 0.025% * 100k QPS * $0.001/impression * 86400s equals $2160, not $2.16M. Off by 1000x.'
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

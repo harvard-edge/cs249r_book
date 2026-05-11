@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-3434
+track: cloud
+level: L6+
+zone: realization
+topic: 3d-parallelism
+competency_area: parallelism
+bloom_level: analyze
+phase: training
+title: Optimizing Frontier Model Training with 3D Parallelism on NVIDIA A100
+scenario: Your team is tasked with training a new frontier large language model with 500 billion parameters. Each parameter is stored in FP16 precision. You have access to a cluster of machines, each equipped with 8 NVIDIA A100 GPUs (80 GB HBM2e) interconnected by NVLink within the node.
+question: How would you design 3D parallel training for a 500B FP16 model on 8-GPU A100 nodes while managing memory and communication?
+details:
+  realistic_solution: A realistic solution should be topology-aware rather than a single magic GPU count. Use tensor parallelism inside each 8-GPU A100 node, where NVLink can carry the layer-shard collectives. Use pipeline parallelism across groups of nodes to spread model layers and reduce per-rank weight memory, then add data parallel replicas only with ZeRO/FSDP-style sharding so gradients and optimizer state are not fully replicated. A node-friendly candidate is TP=8, PP=16, DP=2 with optimizer/gradient sharding, but the exact PP depth should be chosen from the model layer count, activation budget, and measured pipeline bubble. Activation checkpointing remains necessary for the reserved activation/workspace memory.
+  common_mistake: |
+    **The Pitfall:** Underestimating the optimizer and gradient memory footprint.
+    **The Rationale:** Candidates often multiply the 500B parameters by 2 bytes (FP16) and assume the memory requirement is simply 1 TB, completely neglecting the Adam optimizer states (which are usually stored in FP32).
+    **The Consequence:** The design immediately Out-Of-Memory (OOM) crashes because it severely under-provisions the cluster by at least 5x.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model Parameters: 500 billion
+    - Mixed-precision Adam memory model: FP16 weights (2 bytes), FP16 gradients (2 bytes), FP32 master weights (4 bytes), FP32 first moment (4 bytes), FP32 second moment (4 bytes) = 16 bytes/parameter before activation memory.
+    - Reserve 20 GB per GPU for activations, checkpointed intermediates, communication buffers, and workspace.
+    - Usable model-state capacity per A100 = 80 GB - 20 GB = 60 GB.
+
+    **Calculations:**
+    - Model state = 500B * 16 bytes = 8,000 GB = 8 TB.
+    - Raw model-state GPU floor with reserve = 8,000 GB / 60 GB = 133.4, so at least 134 GPUs.
+    - Illustrative node-friendly 3D layout: TP=8 within each A100 node, PP=16 across layer groups, DP=2 replicas with ZeRO/FSDP sharding for optimizer state and gradients.
+    - Total GPUs = 8 * 16 * 2 = 256 GPUs = 32 nodes.
+    - FP16 weights alone are 500B * 2 bytes = 1,000 GB; sharded by TP * PP = 128 gives 1,000 / 128 = 7.8 GB per GPU.
+    - Master weights, gradients, and Adam moments are the remaining 14 bytes/param = 7,000 GB; sharding them by TP * PP * DP = 256 gives 7,000 / 256 = 27.3 GB per GPU.
+    - Average sharded model state per GPU is 7.8 + 27.3 = 35.1 GB, leaving about 24.9 GB within the 60 GB model-state budget.
+
+    **Conclusion & Interpretation:**
+    - **Result: a 256-A100 TP=8, PP=16, DP=2 layout is a defensible starting point, not a uniquely derived answer.** TP handles intra-node layer shards, PP spreads layers across nodes, and DP/ZeRO shards optimizer and gradient state while preserving communication locality.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

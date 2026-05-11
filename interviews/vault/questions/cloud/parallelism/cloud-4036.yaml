@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-4036
+track: cloud
+level: L4
+zone: design
+topic: gradient-synchronization
+competency_area: parallelism
+bloom_level: create
+phase: training
+title: Gradient Compression with Top-K Sparsification
+scenario: Your 256-H100 distributed training job sends 4GB of gradients per iteration. Communication takes 80ms (AllReduce at 400Gbps), while computation takes 120ms. You want to overlap more communication with computation using Top-K gradient sparsification that transmits only the largest 1% of gradient values.
+question: How would you use Top-K gradient sparsification at 1% density for 4GB gradients, and what happens to the dropped 99%?
+details:
+  realistic_solution: 'Use Top-K with error feedback. Each GPU computes the full gradient, adds its residual buffer from prior iterations, selects the largest 1% by magnitude, communicates those sparse updates, and writes the unsent 99% back into the residual buffer: e_t = g_t + e_{t-1} - topk(g_t + e_{t-1}). The dropped entries are therefore delayed, not discarded; if they remain important, accumulated residual makes them more likely to be sent later. For 4GB of FP16 gradients, 1% values are 40MB, but sparse metadata matters: about 20M values need 20M indices, so an int32-index plus FP16-value representation is about 120MB before compression. Treat the communication reduction as roughly 4GB to 120MB ideal payload, then account for Top-K selection, sparse exchange, and reconstruction overhead. To overlap with computation, form and send sparse buckets as backward layers finish, and keep the residual buffer per parameter bucket so communication can run while earlier layers are still computing.'
+  common_mistake: |
+    **The Pitfall:** Naively dropping 99% of gradients permanently.
+    **The Rationale:** Candidates assume that sparsification implies throwing away small gradients immediately, ignoring the need for error feedback.
+    **The Consequence:** This causes model divergence; without adding the accumulated error to the next iteration's gradients, convergence degrades significantly.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Dense communication: 4GB in 80ms, given by the scenario.
+    - FP16 gradients: 2 bytes per value.
+    - Top-K density: 1%.
+    - Sparse encoding: int32 index plus FP16 value = 6 bytes per retained element.
+    - Original computation: 120ms.
+
+    **Calculations:**
+    - Dense element count: 4GB / 2 bytes ≈ 2 billion values.
+    - Retained values: 1% * 2 billion ≈ 20 million values.
+    - Value payload: 20 million * 2 bytes = 40MB.
+    - Index payload: 20 million * 4 bytes = 80MB.
+    - Sparse payload before compression: 40MB + 80MB = 120MB.
+    - Ideal payload reduction: 4GB / 120MB ≈ 33x; using the given 80ms dense time, the bandwidth-only lower bound is about 80ms / 33 ≈ 2.4ms before sparse-kernel and exchange overhead.
+
+    **Conclusion & Interpretation:**
+    - **Result: Top-K reduces the communicated payload sharply, but the unsent 99% must be accumulated with error feedback.** The practical gain depends on sparse overhead and overlap; the 2.4ms figure is only a bandwidth lower bound, not a guaranteed AllReduce time.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

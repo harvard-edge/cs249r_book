@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-3817
+track: cloud
+level: L5
+zone: optimization
+topic: mixture-of-experts
+competency_area: architecture
+bloom_level: evaluate
+phase: both
+title: MoE Serving with Expert Caching
+scenario: You serve a large MoE model (64 experts, top-2) where most conversations activate only 12-15 unique experts across all tokens.
+question: How would you design a GPU expert cache for a 64-expert top-2 MoE when most conversations activate only 12-15 experts?
+details:
+  realistic_solution: |
+    Design the cache as a semantics-preserving expert-weight cache: if the routed expert is not resident, fetch that exact expert shard or delay the token; do not substitute a nearby cached expert. Use a frequency-aware plus recency-aware policy with admission control, because conversations often have a 12-15 expert working set but routing still has bursty sequence locality. Keep the hottest experts resident, prefetch likely next-layer experts from router predictions at the batch/sequence level, transfer sharded or chunked expert weights, and overlap PCIe copies with compute where possible. A pure LFU cache is too static, and a pure LRU cache misses global popularity. The design is viable only when the working set mostly fits in the cache and miss transfers are overlapped or rare; otherwise misses dominate latency.
+  common_mistake: |
+    **The Pitfall:** Treating expert caching like an ordinary page cache with a single eviction rule and no prefetch.
+    **The Rationale:** MoE routing has both popularity and sequence locality, and the next needed expert can often be predicted from router scores before the layer executes.
+    **The Consequence:** The system misses avoidable prefetch windows, stalls on full expert transfers, or worse, changes model semantics by substituting the wrong expert.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 64 experts, 12.5 GB per expert in FP16.
+    - VRAM Allocation: 80 GB dedicated for expert cache.
+    - Precision: INT8 cache (6.25 GB/expert).
+    - Working set: most conversations use 12-15 unique experts.
+
+    **Calculations:**
+    - Total FP16 expert storage: 64 × 12.5 GB = 800 GB.
+    - INT8 expert size: 12.5 GB / 2 = 6.25 GB.
+    - Cache capacity: 80 GB / 6.25 GB ≈ 12 full experts.
+    - Full-expert PCIe 5.0 transfer time: 6.25 GB / 64 GB/s ≈ 98 ms.
+    - If each expert is sharded into 4 equal chunks, one shard transfer is 1.56 GB / 64 GB/s ≈ 24 ms, still too large to ignore on a token's critical path.
+    - A 12-expert cache can cover the low end of the 12-15 expert working set; misses for the tail experts must be prefetched or overlapped.
+
+    **Conclusion & Interpretation:**
+    - **Result: Working-set and prefetch bound.** Expert caching can help when the active working set fits, but full misses are too expensive to handle synchronously; never replace a missed expert with a different cached expert.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

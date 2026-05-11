@@ -6,7 +6,7 @@
  * Architecture: visuals live as static SVG assets under
  * `interviews/vault/visuals/<track>/` and are mirrored to
  * `interviews/staffml/public/question-visuals/<track>/` at bundle
- * build time (`vault build --legacy-json`). Here we just load them
+ * build time (`vault build --local-json`). Here we just load them
  * as `<img>` elements — browser caching, no inline-SVG sanitization,
  * and the HTTP request is a single static asset hit.
  *

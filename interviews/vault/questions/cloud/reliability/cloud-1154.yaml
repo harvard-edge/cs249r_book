@@ -1,0 +1,33 @@
+schema_version: '1.0'
+id: cloud-1154
+track: cloud
+level: L5
+zone: evaluation
+topic: fault-tolerance-checkpointing
+competency_area: reliability
+bloom_level: evaluate
+phase: training
+title: Distributed ZeRO-3 Checkpointing Across Object-Storage Prefixes
+scenario: You are training a 175B parameter LLM using ZeRO-3 on 128 compute nodes, each with 8x A100 80GB GPUs. The full model state requires 2.1 TB of storage. Your cloud provider limits single-node network egress to 400 Gbps, and shared object storage limits throughput to 100 Gbps per prefix.
+question: How should you checkpoint the 2.1TB ZeRO-3 state to minimize pause time and avoid object-storage prefix throttling?
+details:
+  realistic_solution: Implement distributed checkpointing where each of the 128 nodes writes its local partitions in parallel. To bypass the 100 Gbps per-prefix object storage bottleneck, prepend a hash of the node ID to the storage path, distributing the 2.1 TB write across 128 distinct prefixes. Treat the aggregate throughput gain as something to benchmark because object storage may not scale perfectly linearly across hot prefixes.
+  common_mistake: |
+    **The Pitfall:** Relying on Rank 0 to gather and write the entire checkpoint.
+    **The Rationale:** Candidates default to standard PyTorch checkpointing paradigms, ignoring the single-node egress limit and storage API prefix bottlenecks at scale.
+    **The Consequence:** Checkpointing takes several minutes, wasting thousands of dollars of idle GPU compute per save and risking API throttling.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 2.1 TB ZeRO-3 state. Object storage limits throughput to 100 Gbps (12.5 GB/s) per prefix.
+       - 128 compute nodes available. Each node has a 400 Gbps (50 GB/s) egress limit.
+    2. **Calculations:**
+       - Centralized checkpointing: 2,100 GB written to one prefix at 12.5 GB/s = 168 seconds.
+       - Distributed checkpointing with hashed prefixes avoids forcing all writes through one prefix.
+       - If the object store actually scales linearly across 128 hot prefixes and the writers can fill them, the prefix-side aggregate rate would be 128 × 12.5 GB/s = 1,600 GB/s.
+       - That optimistic rate implies 2,100 GB / 1,600 GB/s = 1.31 seconds, with each node writing about 16.4 GB at an average of 12.5 GB/s, below the 50 GB/s node egress ceiling.
+       - This is a best-case measurement target, not a guaranteed bound. Without verified multi-prefix scaling and end-to-end network capacity, the only derivable storage-prefix bound is the single-prefix 168 seconds.
+    3. **Conclusion & Interpretation:**
+       - **Distributed hashed prefixes remove the guaranteed 168s single-prefix bottleneck; the 1.3s estimate is an optimistic best case that requires measured linear scaling across prefixes and sufficient end-to-end network capacity.**
+       - **Result: IO-Bound**
+status: published
+provenance: imported

@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-4097
+track: cloud
+level: L5
+zone: realization
+topic: model-tensor-parallelism
+competency_area: parallelism
+bloom_level: analyze
+phase: training
+title: Megatron Fused Block Backward TP Communication
+scenario: In the forward pass of Megatron's fused column->row design, an AllReduce follows the row-parallel layer.
+question: In Megatron's fused column->row block, what TP communications occur in backward, and what are the per-block and full-step volumes?
+details:
+  realistic_solution: 'Forward: Identity (replicate input) -> Column-parallel GEMM -> Row-parallel GEMM -> AllReduce (sum partials). Backward (reverse order): AllReduce backward = Identity, so gradients pass through without another collective. Row-parallel backward is local for its column-partitioned input gradient. Column-parallel backward creates partial replicated-input gradients, and the gradient of the forward identity/replication path is one AllReduce to sum those partials. Thus a fused column->row pair has one forward AllReduce and one backward AllReduce. For a transformer block with both Attention and MLP pairs, use 4 AllReduces per block. The activation payload per AllReduce is batch × seq × hidden × bytes; a ring AllReduce moves 2 × (P-1)/P times that payload per rank.'
+  common_mistake: |
+    **The Pitfall:** Assuming backward communication mirrors forward exactly.
+    **The Rationale:** It intuitively makes sense that operations reverse symmetrically in the backward pass.
+    **The Consequence:** Candidates miscalculate the communication volume, failing to realize the backward pass through an AllReduce in the forward becomes a no-op (identity) in backward, while the forward identity becomes an AllReduce in backward.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 70B model, hidden=8192, TP=8, batch×seq=8192.
+    - FP16 representation (2 bytes/param).
+
+    **Calculations:**
+    - Activation payload per AllReduce = 8192 × 8192 × 2B = 134.2 MB decimal = 128 MiB.
+    - Ring AllReduce wire traffic per rank = 2 × (7/8) × 128 MiB = 224 MiB, or about 234.9 MB decimal.
+    - One fused column->row pair per step = 2 AllReduces = 256 MiB of logical payload, or 448 MiB per rank on a ring.
+    - One transformer block with Attention and MLP = 4 AllReduces = 512 MiB of logical payload, or 896 MiB per rank on a ring.
+    - For 80 blocks: 80 × 896 MiB = 70 GiB per rank of ring traffic, equivalent to about 75.2 GB decimal.
+
+    **Conclusion & Interpretation:**
+    - **Result: Network-Bandwidth-Bound.** Backward adds one AllReduce for the replicated input path, not another collective through the forward AllReduce. The full step is about 40 GiB of logical AllReduce payload or about 70 GiB per rank of ring wire traffic.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 13
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

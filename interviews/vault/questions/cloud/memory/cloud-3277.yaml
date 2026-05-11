@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-3277
+track: cloud
+level: L4
+zone: specification
+topic: activation-memory
+competency_area: memory
+bloom_level: analyze
+phase: training
+title: Optimizing Large Model Training on NVIDIA A100 with Gradient Checkpointing
+scenario: You are tasked with training a 50 billion parameter Transformer model on a single NVIDIA A100 GPU (80 GB HBM2e memory, 312 TFLOPS FP16 peak performance, 2.0 TB/s memory bandwidth). Due to the model's size, standard training methods lead to out-of-memory errors during the backward pass.
+question: How would you apply gradient checkpointing to train the 50B Transformer on one 80 GB A100, and what compute-memory trade-off would you expect?
+details:
+  realistic_solution: |
+    Gradient checkpointing should be applied selectively to activation-heavy transformer blocks, saving only checkpoint boundaries and recomputing interior activations during the backward pass. The trade-off is lower activation memory at the cost of extra forward FLOPs per step, with overhead depending on the FLOPs in the checkpointed segments. It does not make a 50B FP16 training job fit on one 80 GB A100 by itself: FP16 weights alone are about 100 GB, and optimizer state plus gradients are larger still. A workable plan would combine checkpointing with sharding, offload, optimizer-state reduction, and smaller microbatches.
+  common_mistake: |
+    **The Pitfall:** Applying gradient checkpointing naively across all layers.
+    **The Rationale:** Aiming for maximum memory reduction without considering the variable cost of recomputation per layer type.
+    **The Consequence:** Negating memory savings with excessive training time by recomputing layers with high FLOPs and low activation memory.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 50B parameter model in FP16 = 100 GB weights.
+    - A100: 312 TFLOP/s FP16 peak. Recomputation time for a segment with F FLOPs is roughly F / 312e12 seconds at peak.
+    - Example checkpointed segment: 10 TFLOPs of forward work.
+
+    **Calculations:**
+    - Weights alone: 50B * 2 bytes = 100 GB, already above 80 GB before gradients, optimizer state, or activations.
+    - Example recomputation time: 10e12 FLOPs / 312e12 FLOP/s ≈ 0.032 seconds = 32ms at peak.
+    - Checkpointing N such segments adds about N * 32ms of ideal recomputation time, plus kernel and memory overhead.
+
+    **Conclusion & Interpretation:**
+    - **Result: checkpointing trades activation memory for extra forward recomputation**. It is useful inside a sharded/offloaded training plan, but it cannot overcome the 100 GB weight lower bound for one 80 GB A100.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

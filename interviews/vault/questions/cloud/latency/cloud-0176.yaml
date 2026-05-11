@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-0176
+track: cloud
+level: L5
+zone: evaluation
+topic: latency-decomposition
+competency_area: latency
+bloom_level: evaluate
+phase: both
+title: The SLO Violation Cascade
+scenario: 'Your team runs a multi-tenant LLM serving platform on H100 GPUs. It must handle two distinct workloads: 1. Interactive Chat (High-priority, strict P99 TTFT SLO of 150ms). 2. Batch Summarization (Low-priority, 100k+ token documents, throughput goal).'
+question: Why won't adding replicas fix 150ms chat TTFT when 100k-token summarization prefills run on the same H100 pool?
+details:
+  realistic_solution: |
+    The playbook is wrong because simply adding replicas does not remove the per-replica blocking mode. A 100k-token summarization prefill launches long GPU work that cannot be interrupted quickly by an interactive chat request. If chat and summarization share the same H100 pool, round-robin or least-loaded routing can still place chat behind a long prefill on any replica, so the P99 is dominated by unlucky placement and non-preemptible work rather than aggregate fleet capacity. Fixing the 150ms TTFT requires workload isolation, priority-aware routing, chunked/paged prefill, or preemption-aware scheduling, not just more identical replicas.
+  common_mistake: |
+    **The Pitfall:** Assuming high GPU utilization means the system needs more replicas.
+    **The Rationale:** SREs apply standard web-service scaling rules, failing to recognize Head-of-Line blocking at the non-preemptible CUDA kernel level.
+    **The Consequence:** Indiscriminately throwing more hardware at the problem without actually fixing the latency starvation for high-priority interactive traffic.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Chat P99 TTFT SLO: 150ms.
+    - Summarization prefills use 100k+ token prompts and are low priority.
+    - A shared pool routes chat and summarization to the same replicas.
+    - Long GPU work is only preemptible at scheduler-defined boundaries, not at arbitrary request arrival times.
+
+    **Calculations:**
+    - Chat TTFT = routing queue delay + scheduler wait + chat prefill/decode time.
+    - The allowed non-model overhead is less than 150ms minus the chat request's own compute time.
+    - If a chat request lands behind a summarization prefill that holds the replica for even 200ms, the SLO is already impossible: 200ms > 150ms before chat work begins.
+    - Adding N more identical shared replicas reduces average queue depth, but P99 still includes unlucky placements behind long low-priority work unless the router can avoid or interrupt those placements.
+
+    **Conclusion & Interpretation:**
+    - **Result: Latency-Bound Head-of-Line Blocking**. The fix is workload isolation, priority routing, chunked prefill, or preemption-aware scheduling; replicas alone do not remove the per-replica blocking mode.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_status_pro: WARN
+validation_issues_pro:
+  - The Napkin Math section is incomplete; it sets up the problem of a long-running kernel but does not calculate its duration.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

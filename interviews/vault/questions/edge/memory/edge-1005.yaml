@@ -1,0 +1,43 @@
+schema_version: '1.0'
+id: edge-1005
+track: edge
+level: L4
+zone: diagnosis
+topic: activation-memory
+competency_area: memory
+bloom_level: apply
+phase: training
+title: Realizing Activation Memory Reduction Through Quantization-Aware Fine-Tuning on Jetson Orin
+scenario: You are fine-tuning a quantization-aware training (QAT) version of MobileNetV2 on an edge device. QAT inserts fake-quantization nodes that simulate int8 forward passes but maintain fp32 activations for gradient computation. Your team expects QAT to reduce activation memory versus full fp32 training, but profiling shows QAT uses significantly more memory than the baseline.
+question: Why does QAT for MobileNetV2 use more activation memory than fp32 training on the edge device, and how can you fix it?
+details:
+  realistic_solution: QAT uses more training memory than plain fp32 because fake-quant and observer modules add autograd nodes, scale/zero-point statistics, saved tensors for the straight-through estimator, and extra temporary buffers around quantize-dequantize operations. It does not generally require storing a full raw fp32 activation and a separate full int8 activation at every fake-quant node for the whole backward pass. To reduce the footprint, use activation checkpointing, reduce batch size, freeze observers after calibration, limit fake-quant placement to necessary boundaries, and use mixed precision where the training recipe supports it.
+  common_mistake: |
+    **The Pitfall:** Expecting QAT training memory footprint to equal the INT8 inference memory footprint.
+    **The Rationale:** Candidates conflate the memory benefits of the final compiled artifact with the heavy intermediate tensor requirements of the training process.
+    **The Consequence:** OOM (Out Of Memory) crashes during edge fine-tuning due to severely underestimated activation lifetimes.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - MobileNetV2 at Batch Size 8
+    - FP32 training baseline memory has already stored the activations needed for backward.
+    - QAT overhead comes from fake-quant/observer bookkeeping and temporary tensors, not from duplicating every activation as both FP32 and INT8.
+
+    **Calculations:**
+    - A representative 56x56x32 fp32 activation at batch 8 is 56 * 56 * 32 * 8 * 4 B = 3.21 MB.
+    - If many fake-quant sites save small metadata plus occasional temporary tensors, overhead can accumulate, but it should be estimated from profiler-reported saved tensors rather than assuming every node stores two full feature maps.
+    - Mitigations reduce the number or lifetime of saved tensors: checkpointing recomputes activations, freezing observers removes observer updates, and smaller batches scale activation memory linearly.
+
+    **Conclusion & Interpretation:**
+    - **Result: QAT overhead is implementation- and graph-dependent (Memory-Capacity Bound)**. The fix is to reduce saved-tensor lifetime and fake-quant/observer bookkeeping, not to assume INT8 inference memory applies during training.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 9
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview

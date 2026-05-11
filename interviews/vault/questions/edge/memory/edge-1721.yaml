@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: edge-1721
+track: edge
+level: L4
+zone: optimization
+topic: memory-hierarchy-design
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: Optimizing ViT Activation Memory Bandwidth on Jetson Orin
+scenario: You are deploying a 4-camera surround-view Vision Transformer (ViT) on an NVIDIA Jetson Orin (32 GB LPDDR5, 275 TOPS INT8, Ampere GPU + DLA). Despite profiling showing we are far below the 275 TOPS compute limit, the pipeline is stalling at 15 FPS instead of the target 30 FPS. Profiling reveals that reading and writing large intermediate feature maps to the 32 GB LPDDR5 is creating a severe bottleneck.
+question: How do you diagnose the exact memory hierarchy constraint and quantify the impact of operator fusion to hit the framerate target within the 60W TDP?
+details:
+  realistic_solution: The exact constraint is LPDDR5 bandwidth from repeatedly spilling large ViT intermediates, not TOPS. Diagnose it with Nsight Systems/Compute by checking low SM utilization alongside high DRAM throughput, cache miss traffic, and read/write bytes for LayerNorm, Softmax, attention, and projection kernels. Operator fusion, such as fused attention or LayerNorm fusion, keeps tiles in registers/shared memory and cuts LPDDR5 reads and writes; the impact is quantified from profiler byte counters by comparing unfused versus fused bytes per block at the target FPS.
+  common_mistake: |
+    **The Pitfall:** Suggesting lowering precision to INT4 or offloading to the DLA, missing the memory bandwidth bottleneck entirely.
+    **The Rationale:** Candidates see a low framerate and immediately reach for compute optimizations, failing to calculate the massive LPDDR5 bandwidth consumed by unfused memory-bound operators like LayerNorm and Softmax.
+    **The Consequence:** The proposed "optimizations" degrade model accuracy without improving latency, as the system remains starved for memory bandwidth.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Working-set activation: 2 MiB per camera * 4 cameras = 8 MiB.
+    - Blocks per frame: 12 blocks at 30 FPS.
+    - Architecture: Jetson Orin 32GB LPDDR5.
+    - Profiling model: use measured DRAM read/write bytes per block, not an assumed compiler spill count.
+
+    **Calculations:**
+    - Example profiler result for the unfused attention/LN/projection sequence: 64 MiB DRAM traffic per block for the 8 MiB working set.
+    - At 12 blocks and 30 FPS, unfused traffic = 64 MiB * 12 * 30 = 23,040 MiB/s = 22.5 GiB/s.
+    - Example profiler result for the fused kernel: one input read plus one output write = 8 MiB * 2 = 16 MiB per block.
+    - Fused traffic at 30 FPS = 16 MiB * 12 * 30 = 5,760 MiB/s = 5.625 GiB/s.
+    - Bandwidth saved = 23,040 MiB/s - 5,760 MiB/s = 17,280 MiB/s = 16.875 GiB/s.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~16.9 GiB/s saved in the example profiler model (LPDDR5 Bandwidth-Bound)**. The optimization is justified only if measured kernel bytes show this traffic pattern; fusion reduces traffic from ~22.5 GiB/s to ~5.6 GiB/s for the stated working set.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

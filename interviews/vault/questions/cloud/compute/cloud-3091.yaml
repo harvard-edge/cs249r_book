@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-3091
+track: cloud
+level: L6+
+zone: mastery
+topic: systolic-dataflow
+competency_area: compute
+bloom_level: evaluate
+phase: both
+title: TPU v5e Roofline Analysis for Batch-1 LLM Decode
+scenario: 'A custom fused LLM decoding kernel on one TPU v5e chip (197 TFLOPS BF16 peak, 819 GB/s) shows 12 TFLOPS effective throughput during profiling (6.1% MFU). The kernel does: load attention KV cache (batch=1, L=512, H=16, D=128, BF16), and compute 1 decode step.'
+question: Is the 12 TFLOPS decode kernel compute- or memory-bound, what is the attainable performance, and which optimization gives the largest gain?
+details:
+  realistic_solution: Decode step batch=1 must read the KV cache for all 512 context tokens. KV traffic is 512 * 16 * 128 * 2 tensors * 2 bytes = 4 MiB. The attention over that cache is about 4.2M FLOPs, so the KV-only arithmetic intensity is about 1 FLOP/byte and the KV attention sub-op is memory-bound at roughly 0.8 TFLOPS of attention FLOPs. The observed 12 TFLOPS profiling number should be treated as an effective model-level throughput measurement, not proof that the KV attention sub-op is compute-bound; it may use a different FLOP denominator or amortize/reuse fused projection weights. The optimization with the largest gain is reducing bytes per decoded token, especially GQA/MQA, KV quantization, paged/cache layout improvements, or batching to reuse weights.
+  common_mistake: |
+    **The Pitfall:** Blaming compute efficiency (low MFU) for the poor performance.
+    **The Rationale:** Candidates see 6.1% MFU and assume the kernel logic is bad, failing to realize that batch=1 decoding is overwhelmingly memory-bandwidth bound.
+    **The Consequence:** Wasting time unrolling loops or tweaking instructions when the only way to improve throughput is to reduce memory traffic (e.g., using Grouped Query Attention) or increase batch size.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Hardware: one TPU v5e chip, using 197 TFLOPS BF16 peak and 819 GB/s HBM bandwidth.
+    - Config: Batch=1, L=512, H=16, D=128, BF16.
+
+    **Calculations:**
+    - KV traffic = 512 * 16 * 128 * 2 * 2 = 4,194,304 bytes = 4 MiB.
+    - Weight traffic = 4 * 4096 * 4096 * 2 = 134,217,728 bytes = 128 MiB.
+    - Total traffic = 132 MiB = 138.4 MB.
+    - Attention FLOPs over the KV cache ≈ QK dot products plus AV combine = 2 * 512 * 16 * 128 * 2 = 4.19M FLOPs.
+    - KV-only AI = 4.19M FLOPs / 4.19M bytes ≈ 1 FLOP/byte.
+    - KV attention memory roofline = 819 GB/s * 1 FLOP/byte ≈ 0.82 TFLOPS, far below the 197 TFLOPS compute peak.
+    - If a profiler reports 12 TFLOPS, it is an observed effective model-level metric, not the KV-only roofline. It can be reconciled only by changing the FLOP denominator or assuming additional fused compute with much lower effective HBM traffic than streaming all weights every step.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Bound Decode.** The KV attention sub-op is bandwidth-bound; optimize by reducing KV bytes or increasing reuse/batch size, and interpret the 12 TFLOPS profile number as an effective observed metric rather than the KV-only roofline.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

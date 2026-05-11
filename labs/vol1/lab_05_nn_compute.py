@@ -141,7 +141,8 @@ def _(COLORS, mo):
                     a layer's activations land in given batch size and width, and identify the
                     batch size threshold where a 10x latency cliff appears.</div>
                 <div style="margin-bottom: 3px;">3. <strong>Calculate the Floating Point Operations (FLOPs) scaling law</strong>
-                    for dense layers: doubling width yields ~4x FLOPs, not 2x.</div>
+                    for dense layers: doubling width yields ~2x total FLOPs (hidden-to-hidden
+                    layer quadruples, but input/output layers only double).</div>
                 <div style="margin-bottom: 3px;">4. <strong>Compare forward vs. backward memory</strong>:
                     training stores all layer activations simultaneously, creating a 4-10x
                     memory multiplier over inference.</div>
@@ -831,16 +832,18 @@ The quadratic term dominates as W grows.
 
         _actual_256 = (2*784*256 + 2*256*256 + 2*256*10) / (2*784*128 + 2*128*128 + 2*128*10)
         _pred = partC_prediction.value
-        if _pred == "4x":
+        if _pred == "2x":
             items.append(mo.callout(mo.md(
                 f"**Correct.** Doubling width from 128 to 256 increases total FLOPs by "
-                f"~{_actual_256:.1f}x. The hidden-to-hidden layer scales as W^2. "
-                f"Architecture decisions -- not just hardware -- dominate the Operations term."
+                f"~{_actual_256:.1f}x. The hidden-to-hidden layer scales as W^2, but the "
+                f"input and output layers scale linearly, pulling the total below 4x."
             ), kind="success"))
-        elif _pred == "2x":
+        elif _pred == "4x":
             items.append(mo.callout(mo.md(
-                f"**Linear intuition fails here.** Doubling width actually yields ~{_actual_256:.1f}x "
-                f"FLOPs. The hidden-to-hidden layer has FLOPs=2*W*W. Double W: 4x that layer."
+                f"**The quadratic layer dominates but doesn't tell the whole story.** "
+                f"The hidden-to-hidden layer (2*W^2) quadruples, but the input layer "
+                f"(2*784*W) and output layer (2*W*10) only double, pulling total to "
+                f"~{_actual_256:.1f}x."
             ), kind="warn"))
         else:
             items.append(mo.callout(mo.md(
@@ -857,7 +860,7 @@ Layer 2: 2 * {_w} * {_w} = {_flops_l2:,}
 Layer 3: 2 * {_w} * 10  = {_flops_l3:,}
 Total = {_total_flops:,}
 ```
-Doubling 128->256: ratio = {_actual_256:.2f}x (not 2x!)
+Doubling 128->256: ratio = {_actual_256:.2f}x (not 4x!)
 
 Source: @sec-nn-computation-flop-counting
 """),

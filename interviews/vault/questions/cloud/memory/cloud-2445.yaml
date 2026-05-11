@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-2445
+track: cloud
+level: L5
+zone: diagnosis
+topic: vram-budgeting
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: FlashAttention Head Dimension Spillage
+scenario: A researcher designs a custom Transformer. They change the attention head dimension from d=128 to d=256, while halving the number of heads to keep the total hidden dimension and FLOPs exactly identical to the baseline. Despite using FlashAttention-2 and identical FLOP counts, the training step time increases by 45%.
+question: Why does doubling the attention head dimension from 128 to 256 slow FlashAttention-2 training by 45% despite identical FLOPs?
+details:
+  realistic_solution: The likely root cause is increased per-head memory pressure that reduces tile size, occupancy, and effective arithmetic intensity. FlashAttention tiles Q, K, V, softmax state, and accumulators into limited shared memory and registers on each SM. When d doubles to 256, the per-token vector footprint and register pressure rise; depending on the kernel shape, the implementation may need smaller sequence tiles or fewer resident blocks. That reduces K/V reuse, increases HBM traffic and scheduling overhead, and can plausibly produce a large slowdown even though model-level FLOPs are unchanged.
+  common_mistake: |
+    **The Pitfall:** Assuming that identical FLOP counts guarantee identical performance.
+    **The Rationale:** Candidates forget to consider the strict SRAM capacity constraints of fused kernels like FlashAttention.
+    **The Consequence:** Deploying suboptimal model dimensions that silently spill to HBM and bottleneck training.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Fixed SRAM size = 228KB (H100 SM).
+    - Head dimension (d) doubles from 128 to 256.
+
+    **Calculations:**
+    - FlashAttention performance depends on tile shapes that keep Q, K, V fragments, softmax state, and accumulators in SRAM/registers.
+    - Doubling d from 128 to 256 doubles the per-token vector footprint and increases register/shared-memory pressure per tile.
+    - If the d=128 kernel was near the SRAM/register capacity limit, d=256 forces smaller sequence tiles or lower occupancy.
+    - Smaller tiles reduce K/V reuse and increase HBM traffic and scheduling overhead, even though the model-level FLOP count is unchanged.
+
+    **Conclusion & Interpretation:**
+    - **Result: SRAM/Occupancy-Bound Kernel Regression.** The 45% slowdown is a plausible capacity and occupancy effect, not a direct mathematical consequence of FLOPs or a guaranteed 50% arithmetic-intensity drop.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

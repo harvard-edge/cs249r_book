@@ -1,0 +1,40 @@
+schema_version: '1.0'
+id: mobile-1769
+track: mobile
+level: L3
+zone: analyze
+topic: data-efficiency-selection
+competency_area: data
+bloom_level: analyze
+phase: training
+title: On-Device Coreset Selection for Gemini Nano
+scenario: A mobile team personalizes a 1.8B parameter model directly on the Google Tensor G3. The background process is strictly limited to a 50 MB replay buffer out of the 12 GB LPDDR5X memory pool, and 1 hour of TPU time at 7.5 TOPS for weekly fine-tuning. The system collects 1,000,000 user interaction logs (500 bytes each) per week, but using uniform random sampling to fit the 50 MB buffer causes the model to suffer catastrophic forgetting on rare user commands.
+question: Why does random pruning cause model collapse under these hardware constraints, and what is the tradeoff of switching to gradient-based coreset selection?
+details:
+  realistic_solution: |
+    Uniform random sampling preserves the original long-tailed data distribution. In a highly compute-constrained environment, this wastes the TPU's budget on redundant common logs and leaves too few examples of rare commands to provide a meaningful gradient signal. By using coreset selection, the system prioritizes high-information (high-loss) samples, maximizing the Information-Compute Ratio (ICR). The tradeoff is that gradient-based selection costs extra scoring compute and may bias the replay buffer toward hard examples, so it needs diversity constraints.
+  common_mistake: |
+    **The Pitfall:** Suggesting increased buffer size or more training epochs.
+    **The Rationale:** Candidates ignore the strict 50 MB memory limit and thermal constraints of the Tensor G3, failing to recognize that random sampling wastes compute on redundant data.
+    **The Consequence:** The proposed solution violates device constraints and fails to solve the catastrophic forgetting problem.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Buffer Capacity: 50 MB.
+    - Log size: 500 bytes.
+    - TPU Budget: 7.5 TOPS for 1 hour.
+    - Weekly corpus: 1,000,000 logs.
+
+    **Calculations:**
+    - Total weekly logs = 1,000,000 * 500 bytes = 500 MB.
+    - Buffer capacity = 50 MB / 500 bytes = 100,000 logs.
+    - Retained fraction = 100,000 / 1,000,000 = 10%.
+    - TPU Compute Budget = 7.5 TOPS * 3600s = 27 PetaOps.
+    - Random pruning gives each rare command family only its base-rate share of the 100,000 retained slots; a command family with 0.01% frequency contributes about 10 examples on average.
+    - Gradient-based coreset selection requires an extra scoring pass or proxy-gradient estimate, so some TPU time shifts from training steps to selecting higher-information examples.
+    - The tradeoff is worthwhile only if the selected buffer improves rare-command coverage enough to offset the scoring cost and any hard-example bias.
+
+    **Conclusion & Interpretation:**
+    - **Result: 10% storage retention under a fixed 27 PetaOps weekly budget.** Random pruning can drop rare commands and spend scarce training steps on redundant common logs; coreset selection trades extra scoring compute for a higher-information, diversity-constrained replay set.
+status: published
+provenance: imported
+validated: true

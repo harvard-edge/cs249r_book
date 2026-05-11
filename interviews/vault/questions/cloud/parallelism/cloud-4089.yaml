@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-4089
+track: cloud
+level: L4
+zone: optimization
+topic: model-tensor-parallelism
+competency_area: parallelism
+bloom_level: evaluate
+phase: training
+title: TP Degree Selection for Inference
+scenario: You are deploying a 70B parameter model (BF16) for inference. The model weights alone are 140 GB. You must choose between running on a single 192GB GPU or distributed across two identical GPUs.
+question: Should you use TP=1 with a single GPU or TP=2 across two GPUs?
+details:
+  realistic_solution: 'Use TP=2 for the stated long-context deployment. TP=1 fits the 140 GB weights on a 192 GB GPU but leaves only 52 GB for KV cache, runtime activations, allocator reserve, and serving overhead. With 32K tokens, 80 layers, 64 KV heads, head_dim=128, and BF16, an MHA-style KV cache is 2 × 32768 × 80 × 64 × 128 × 2B = about 85.9 GB total, so TP=1 does not fit. With TP=2, weights shard to 70 GB per GPU. If KV heads are sharded consistently with tensor parallelism, each GPU holds about 42.9 GB of KV cache, for roughly 112.9 GB per GPU before smaller runtime overheads, which fits in 192 GB. TP=2 can improve decode throughput by using two GPUs worth of memory bandwidth, but the gain is not a guaranteed 2× because tensor-parallel AllReduce/AllGather traffic, kernel efficiency, batching, and interconnect bandwidth matter. The safe conclusion is memory-driven: TP=2 is required for this long context and may improve throughput if communication overhead is controlled.'
+  common_mistake: |
+    **The Pitfall:** Selecting Tensor Parallelism degree based strictly on whether weights fit on a single GPU.
+    **The Rationale:** Ignoring the massive dynamic memory footprint of the KV cache and the performance benefits of doubling aggregate memory bandwidth.
+    **The Consequence:** OOM errors during long-context generation and significantly slower decoding throughput due to memory bandwidth starvation.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Model: 70B parameters, BF16 (140 GB weights).
+       - Memory: 192 GB total per GPU.
+       - Context: 32K tokens, 80 layers, 64 KV heads, head_dim 128.
+       - Assume KV heads are sharded across TP ranks; if replicated, TP=2 would need more memory.
+    2. **Calculations:**
+       - KV Cache Size = 2 * 32768 * 80 * 64 * 128 * 2 bytes = 85,899,345,920 bytes ≈ 85.9 GB.
+       - TP=1 Memory Req = 140 GB + 85.9 GB = 225.9 GB, before activations and allocator reserve, so it exceeds 192 GB.
+       - TP=2 Weights per GPU = 140 GB / 2 = 70 GB.
+       - TP=2 KV per GPU if sharded = 85.9 GB / 2 = 42.95 GB.
+       - TP=2 Memory Req per GPU = 70 GB + 42.95 GB = 112.95 GB, before smaller runtime overheads, so it fits 192 GB.
+       - Throughput cannot be derived just by dividing weight bytes by bandwidth; TP=2 adds communication and kernel-efficiency costs.
+    3. **Conclusion & Interpretation:**
+       - **Result: TP=2 Required (Memory-Capacity-Bound).** TP=2 avoids OOM for the long-context KV cache and may improve decode throughput, but the speedup must be measured with communication overhead included.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

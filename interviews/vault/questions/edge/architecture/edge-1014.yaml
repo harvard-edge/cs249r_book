@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: edge-1014
+track: edge
+level: L4
+zone: design
+topic: cnn-efficient-design
+competency_area: architecture
+bloom_level: evaluate
+phase: both
+title: Optimize Jetson Orin Depthwise Convolution Latency with TensorRT Fusion
+scenario: MobileNetV2 inference on a Jetson Orin achieves 120 FPS with TensorRT FP16. Profiling shows 35% of the execution time is spent in depthwise convolution layers, even though they represent only 5% of total FLOPs.
+question: How would you optimize the depthwise convolutions specifically for the Jetson Orin's Ampere architecture to reduce this latency?
+details:
+  realistic_solution: |
+    Treat the depthwise layers as CUDA-core, memory-access, and launch-efficiency problems rather than tensor-core problems. Build the TensorRT engine with profiling enabled, inspect the selected tactics for depthwise layers, and test TensorRT fusion of depthwise + BN + ReLU6 or adjacent pointwise operations where the graph permits it. Keep channel counts aligned to hardware-friendly multiples, avoid layouts that introduce reformat kernels, and compare FP16 versus calibrated INT8 only when accuracy and tactic selection are validated. Use Nsight Systems and TensorRT layer profiling to confirm that the depthwise section shrinks; do not claim a fixed speedup without measurements from this engine.
+  common_mistake: |
+    **The Pitfall:** Switching depthwise layers to FP32 to target Ampere tensor cores.
+    **The Rationale:** Candidates assume tensor cores can accelerate any dense operation if the precision is changed.
+    **The Consequence:** No speedup occurs because tensor cores only accelerate dense matmul (not depthwise), wasting engineering effort.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Current metrics: 120 FPS = 8.3ms total time. 35% of 8.3ms = 2.9ms spent in depthwise ops.
+    - FLOPs utilization: 5% of 0.3 GFLOPs = 15M FLOPs.
+    - Hardware capability: peak dense FP16 throughput is not a useful bound for depthwise kernels, which are often memory/launch/occupancy limited.
+
+    **Calculations:**
+    - Observed performance: 15M FLOPs / 2.9ms = 5.2 GFLOPS.
+    - This low observed arithmetic rate indicates the depthwise section is not limited by peak tensor throughput.
+    - Optimization target: remove reformat kernels, fuse legal adjacent ops, and choose tactics that improve memory coalescing and occupancy.
+    - The measurable success criterion is reduced depthwise-layer time from the current 2.9 ms, not a theoretical dense-FP16 throughput bound.
+    - Any launch-overhead savings must be measured from the actual TensorRT engine trace because MobileNetV2 block fusion, tactic choice, and scheduling vary by graph and TensorRT version.
+
+    **Conclusion & Interpretation:**
+    - **Result: Depthwise Section Is Kernel-Efficiency Bound**. TensorRT fusion, layout cleanup, channel alignment, and tactic profiling are the appropriate Orin-specific levers; report speedup only after profiling the actual engine.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview

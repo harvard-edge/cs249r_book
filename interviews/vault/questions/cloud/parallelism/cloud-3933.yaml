@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: cloud-3933
+track: cloud
+level: L3
+zone: implement
+topic: communication-computation-overlap
+competency_area: parallelism
+bloom_level: apply
+phase: both
+title: CUDA Stream Priority for Communication vs Computation Scheduling
+scenario: 'You have a training loop with three CUDA streams: compute (default), AllReduce (communication), and data prefetch (H2D transfer). All three contend for GPU resources. You observe that AllReduce sometimes delays compute kernels.'
+question: How do you prioritize CUDA streams to prevent communication from blocking computation?
+details:
+  realistic_solution: Use CUDA stream priorities to bias scheduling toward critical-path compute, but do not treat them as hard SM reservations. Create the compute stream at the highest available priority, put NCCL communication on a lower-priority nonblocking stream, and keep H2D prefetch on a low-priority transfer stream. Stream priority affects which pending work is scheduled first; it does not guarantee that already-running NCCL kernels are preempted or that compute receives all SMs. Validate with Nsight Systems/Compute and add synchronization only where correctness requires it.
+  common_mistake: |
+    **The Pitfall:** Setting all streams to the same priority and relying on the default GPU scheduler's round-robin mechanism.
+    **The Rationale:** Engineers assume that concurrent stream execution automatically perfectly overlaps without realizing that background communication kernels can preempt critical-path compute blocks.
+    **The Consequence:** The compute kernels—which gate the entire forward/backward pass progress—are stalled waiting for SMs occupied by communication, completely breaking the communication-computation overlap and lowering TFLOPS utilization.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Hardware: NVIDIA H100 with 132 SMs.
+    - NCCL AllReduce kernel requirement: 8–16 SMs.
+    - Two hardware-supported CUDA stream priority levels: High (0) and Low (non-zero).
+
+    **Calculations:**
+    - If an NCCL kernel occupies up to 16 SMs while compute is ready, the maximum concurrent SM share is 16/132 = ~12%.
+    - That share is only a contention indicator; wall-clock slowdown is not necessarily linear because it depends on occupancy, kernel duration, launch order, and whether kernels can actually co-reside.
+    - Higher compute priority can reduce future scheduling interference, but it does not hard-preempt running NCCL work or guarantee 132 SMs for compute.
+
+    **Conclusion & Interpretation:**
+    - **Result: Priority-Biased Scheduling (Scheduling-Bound)**. Stream priorities can reduce communication interference with critical compute, but overlap is not zero-cost and must be verified with profiling.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

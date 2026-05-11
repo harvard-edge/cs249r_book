@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: tinyml-1007
+track: tinyml
+level: L4
+zone: diagnosis
+topic: knowledge-distillation
+competency_area: optimization
+bloom_level: analyze
+phase: training
+title: Distilled Student SRAM Exhaustion
+scenario: A team compressed a predictive maintenance model for the Nordic nRF5340 using knowledge distillation instead of structured pruning. The distilled student model has 150 KB of weights, fitting easily into the 1 MB flash, while an alternatively pruned teacher model has 200 KB of weights. However, when deployed to the 128 MHz app core, the distilled model immediately causes a hard fault due to SRAM exhaustion, whereas the pruned model executes successfully.
+question: Why can a smaller distilled nRF5340 model OOM while a larger pruned model runs successfully?
+details:
+  realistic_solution: The crash is caused by the peak activation memory footprint, which dictates SRAM usage on microcontrollers. Structured pruning directly reduces the number of channels, inherently shrinking intermediate feature maps. In contrast, the custom student architecture designed for distillation likely utilized wider layers or larger spatial dimensions early in the network to match the teacher's capacity, resulting in peak activations that exceeded the available SRAM despite having fewer total weights.
+  common_mistake: |
+    **The Pitfall:** Assuming a lower parameter count (flash usage) perfectly correlates with lower SRAM usage.
+    **The Rationale:** Candidates fixate on weight storage, neglecting the memory required for intermediate activations during forward passes.
+    **The Consequence:** The model deploys cleanly to Flash but causes an immediate hard fault when inference is triggered.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Total SRAM reserved for this app-core configuration: 256 KiB.
+    - BLE/RTOS footprint: 64 KiB.
+    - Usable ML SRAM is for the tensor arena, including peak activations and scratch.
+    - Pruned teacher peak live activations after structured channel pruning: 64 channels * 1000 steps * 1 byte, with one similarly sized scratch buffer.
+    - Distilled student peak live activations from a wider early layer: 128 channels * 1000 steps * 1 byte, with one similarly sized scratch buffer.
+
+    **Calculations:**
+    - Usable ML SRAM: 256 KiB - 64 KiB = 192 KiB = 196,608 bytes.
+    - Pruned teacher peak arena: (64 * 1000 * 1) * 2 = 128,000 bytes (~125 KiB), which fits inside 192 KiB.
+    - Distilled student peak arena: (128 * 1000 * 1) * 2 = 256,000 bytes (~250 KiB), which exceeds 192 KiB by about 53 KiB before allocator overhead.
+    - Weight storage differs in flash (150 KB vs 200 KB) and does not determine the peak tensor-arena allocation.
+
+    **Conclusion & Interpretation:**
+    - **Result: student peak tensor arena is ~250 KiB versus 192 KiB available.** The smaller distilled model hard-faults because its wider intermediate activations exceed app-core SRAM, while the larger pruned model runs because channel pruning lowers peak live activation memory. **Bottleneck: Peak Activation SRAM.**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

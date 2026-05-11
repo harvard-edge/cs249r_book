@@ -1,0 +1,62 @@
+schema_version: '1.0'
+id: edge-1909
+track: edge
+level: L4
+zone: optimization
+topic: mixed-precision-training
+competency_area: precision
+bloom_level: analyze
+phase: training
+title: Optimizing Real-time Object Detection on NVIDIA Jetson Orin via Mixed-Precision
+scenario: You are tasked with deploying a high-accuracy real-time object detection model (e.g., YOLOv8 large) on an NVIDIA Jetson Orin development kit, which features 32 GB LPDDR5 memory, 275 TOPS INT8 performance, and a 60W power budget. The current FP32 model achieves 15 FPS on average, but the strict requirement is 30 FPS for multiple camera streams, and it consumes 25GB of the available 32GB GPU memory during peak load, frequently leading to Out-Of-Memory (OOM) errors.
+question: How would you diagnose bottlenecks and design a quantified mixed-precision plan for YOLOv8-L on Jetson Orin to reach 30 FPS without OOMs?
+details:
+  realistic_solution: |
+    A realistic solution involves a multi-stage, data-driven approach:
+
+    1.  **Profile FP32 Baseline:** Use tools like NVIDIA Nsight Systems or PyTorch Profiler on the Jetson Orin to get a detailed breakdown of FP32 inference performance and memory usage. Identify the most computationally intensive layers and those with large activation footprints.
+
+    2.  **Initial FP16/TensorRT Baseline:** Build an FP16 TensorRT engine or use AMP as an intermediate measurement. This should roughly halve weight and activation storage for supported layers, reduce OOM risk, and establish whether 30 FPS is already reachable without INT8 accuracy risk.
+
+    3.  **Optional INT8 Quantization via TensorRT:** If FP16 still misses 30 FPS or memory headroom, apply TensorRT INT8 PTQ with a representative calibration set. If PTQ loses too much mAP, train a QAT checkpoint and rebuild the engine. Inspect TensorRT layer reports for FP32/FP16 fallbacks, unsupported plugins, and reformat layers, because INT8 only helps when most heavy convolutions run on accelerated kernels.
+
+    4.  **Layer-Specific Precision:** Retain FP16 or FP32 only where needed for accuracy or unsupported INT8 kernels, and quantify the cost of each fallback. For inference, ignore loss components and focus on detector backbone, neck, head, NMS, preprocessing, and post-processing.
+
+    5.  **Batching & Memory Optimization:** Optimize the batch size for inference and explore TensorRT's memory-saving optimizations (e.g., layer fusion, efficient memory allocation strategies). Continuously monitor accuracy against a validation dataset after each optimization step.
+  common_mistake: |
+    **The Pitfall:** A "one-size-fits-all" approach to mixed-precision.
+    **The Rationale:** Candidates blindly convert the entire model to INT8 without profiling, completely ignoring the numerical sensitivities of different layers or specific hardware support.
+    **The Consequence:** The model suffers severe accuracy drops or introduces new performance bottlenecks due to frequent precision casting, failing to fully utilize the INT8 accelerators.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Current state (FP32): 25 GB peak memory, 15 FPS, so frame time is 66.7 ms.
+    - Stage 1 converts supported weights and activations to FP16.
+    - Stage 2 optional TensorRT INT8 uses 70% of runtime in INT8-accelerated layers and 30% in FP16/fallback layers.
+    - Assumed relative costs versus FP32 for this engine: FP16 costs 0.55x; INT8 costs 0.30x on layers that compile to INT8.
+
+    **Calculations:**
+    - FP16 memory estimate: 25 GB x 0.5 = 12.5 GB for tensor storage before TensorRT workspace and buffers.
+    - Reserve 4-8 GB for TensorRT workspace, camera buffers, and post-processing, giving roughly 16.5-20.5 GB peak and avoiding the 32 GB OOM condition.
+    - FP16 speed estimate: 66.7 ms x 0.55 = 36.7 ms, or about 27 FPS.
+    - Mixed INT8/FP16 relative time: (0.70 x 0.30) + (0.30 x 0.55) = 0.375.
+    - Mixed frame time: 66.7 ms x 0.375 = 25.0 ms, or 40 FPS.
+
+    **Conclusion & Interpretation:**
+    - **Result: staged precision plan with measured stop criteria**. FP16 likely fixes memory but may still miss 30 FPS, while a well-covered TensorRT INT8 engine can reach about 40 FPS under these assumptions. The conclusion depends on actual layer coverage, fallback cost, workspace size, and validation mAP, so profiling decides whether to stop at FP16 or proceed to INT8/QAT.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

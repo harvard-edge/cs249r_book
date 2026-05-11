@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-3839
+track: cloud
+level: L3
+zone: analyze
+topic: graceful-degradation
+competency_area: reliability
+bloom_level: analyze
+phase: both
+title: Throughput Collapse in Fallback Model Degradation
+scenario: An NLP inference service runs on a cloud node with a single GPU. Under heavy load, the system triggers a quality-of-service degradation ladder to shed load, switching from its primary 30-billion parameter model running at a batch size of 16, to a much smaller 7-billion parameter fallback model. To minimize response latency for the fallback model, the system processes requests immediately at a batch size of 1. However, during a production incident, this degradation strategy actually reduced the total cluster throughput (tokens/second) by nearly 4x, exacerbating the queue buildup and causing a complete outage.
+question: Why does switching from a batched 30B model to a batch-1 7B fallback reduce total tokens/second instead of shedding load?
+details:
+  realistic_solution: The system's throughput collapses because autoregressive decode often becomes memory-bandwidth and kernel-overhead limited at small batches. The 7B fallback is cheaper per token than the 30B model, but batch-1 serving destroys weight/KV reuse and leaves the GPU underutilized, so aggregate tokens/second can fall even while single-request latency improves. A safer degradation ladder should cap admission, preserve micro-batching on the fallback path, and shed or queue low-priority traffic rather than immediately draining every request at batch size 1 during an incident.
+  common_mistake: |
+    **The Pitfall:** Assuming smaller models inherently guarantee higher throughput regardless of batching.
+    **The Rationale:** Candidates assume that because the 7B model is roughly 4x smaller and requires fewer FLOPs, it will inherently have higher throughput and alleviate the overload. They fail to identify that autoregressive inference is memory-bandwidth bound.
+    **The Consequence:** Dropping the batch size to 1 destroys the efficiency of weight loading, leading to system collapse.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Autoregressive decoding at small batch sizes is often dominated by repeated weight access and low arithmetic intensity.
+    - Batch size changes utilization, memory reuse, and scheduling overhead; it does not imply a universal linear tokens/sec formula.
+    - Use only a qualitative roofline-style comparison because exact throughput depends on GPU, kernels, sequence lengths, and KV-cache behavior.
+
+    **Calculations:**
+    - Primary FP16 weights are roughly 30B * 2 bytes = 60 GB; fallback FP16 weights are roughly 7B * 2 bytes = 14 GB.
+    - The fallback has about 4.3x fewer weights, but batch size falls from 16 to 1, increasing per-request launch overhead and reducing arithmetic intensity.
+    - In a bandwidth-sensitive decode workload, the smaller model can still deliver lower aggregate tokens/sec if batch-1 execution fails to saturate HBM bandwidth and tensor units.
+    - Mitigation is operational as well as model-level: keep controlled batching on fallback, apply admission control, and shed low-priority work before queues saturate.
+
+    **Conclusion & Interpretation:**
+    - **Result: batch-1 fallback can reduce total throughput despite lower per-token model cost**. The incident response should preserve batching and load shedding instead of optimizing only single-request latency.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

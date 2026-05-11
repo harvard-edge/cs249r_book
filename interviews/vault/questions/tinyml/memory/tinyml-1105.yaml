@@ -1,0 +1,38 @@
+schema_version: '1.0'
+id: tinyml-1105
+track: tinyml
+level: L4
+zone: diagnosis
+topic: dma-data-movement
+competency_area: memory
+bloom_level: analyze
+phase: inference
+title: NPU Garbage Predictions After CPU Preprocessing
+scenario: A 480 MHz Cortex-M7 computes MFCCs in a 16 KB DMA buffer, then triggers the Ethos-U55 NPU. CPU logs match expected features, but the NPU infers completely random garbage predictions.
+question: Why does Ethos-U55 read random features after the M7 computes MFCCs in a 16 KB DMA buffer?
+details:
+  realistic_solution: The architecture suffers a catastrophic cache coherency violation. The Cortex-M7 retains the processed MFCCs inside its L1 Write-Back D-cache. The independent Ethos-U55 NPU bus master fetches raw, stale uninitialized data directly from Main SRAM. Explicit software D-cache invalidation/flushing is mandatory.
+  common_mistake: |
+    **The Pitfall:** Misdiagnosing the hardware cache state as a generic DMA asynchronous race condition or software misalignment.
+    **The Rationale:** Candidates completely abstract away independent processor memory hierarchy mechanisms like L1 Write-Back caches.
+    **The Consequence:** They inject arbitrary OS sleep delays or redundant double-buffering structures that fundamentally fail to solve the coherency defect.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Buffer size: 16 KB DMA vector.
+       - CPU: Cortex-M7 at 480 MHz (32 bytes/cache line).
+       - M7 uses a write-back D-cache; the Ethos-U55 reads main SRAM as an independent bus master.
+    2. **Calculations:**
+       - Cache lines required: 16,384 bytes / 32 bytes/line = 512 cache lines.
+       - After CPU preprocessing writes MFCCs, the CPU must clean the affected cache lines before starting an NPU read.
+       - If the NPU or DMA later writes data that the CPU will read, the CPU must invalidate those destination lines before consuming them.
+       - The maintenance cost is implementation-dependent across cache controller, memory bus, and line state, so it should be measured on target rather than assumed to be a fixed 2 cycles per line.
+    3. **Conclusion & Interpretation:**
+       - **Result: cache-maintenance bug, not an arithmetic performance limit.** The diagnostic fix is explicit clean-before-NPU-read and invalidate-before-CPU-read on the exact 16 KB buffer range; do not rely on sleeps or precise overhead claims unless measured on the board.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+math_verified: true
+math_status: UNCHECKED

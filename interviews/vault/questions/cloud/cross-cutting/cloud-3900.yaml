@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-3900
+track: cloud
+level: L4
+zone: diagnosis
+topic: software-portability
+competency_area: cross-cutting
+bloom_level: analyze
+phase: both
+title: Warp Size Divergence When Porting CUDA Kernels to AMD CDNA
+scenario: After porting a reduction kernel from CUDA to HIP for an AMD accelerator, correctness tests pass but performance is 40% worse than expected. The kernel uses __shfl_down_sync with a mask of 0xFFFFFFFF for warp-level reductions. The accelerator uses 64-wide wavefronts.
+question: What warp-size assumption makes the HIP reduction slow on 64-wide wavefronts, and how should the reduction be fixed?
+details:
+  realistic_solution: 'The port likely kept a 32-lane CUDA warp assumption in code that now executes on 64-lane CDNA wavefronts. The fix is to make the reduction wavefront-width-aware: use HIP reduction primitives such as __reduce_add_sync() where available, or write the shuffle loop using warpSize and correct active-lane handling so it includes the offset-32 step on 64-wide wavefronts. Treat the 40% slowdown as a profiling symptom of underutilization and extra reduction work, not as a value derived from the mask literal alone.'
+  common_mistake: |
+    **The Pitfall:** Using a 32-bit mask (0xFFFFFFFF) for warp-level reductions on AMD hardware.
+    **The Rationale:** Candidates copy-paste standard CUDA code perfectly tuned for NVIDIA's 32-lane warps.
+    **The Consequence:** The upper 32 lanes of the 64-wide wavefront are excluded from the shuffle, wasting 50% of the lanes and returning incorrect partial reductions.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - NVIDIA CUDA: 32-lane warp. Mask 0xFFFFFFFF (32-bit).
+    - AMD CDNA: 64-lane wavefront. Mask required: 64-bit.
+
+    **Calculations:**
+    - CUDA shuffle steps: log2(32) = 5 steps.
+    - CDNA shuffle steps: log2(64) = 6 steps.
+    - A CUDA-style 32-bit mask is not a valid description of full 64-lane participation.
+    - Correct code must use a 64-lane-aware reduction and include the extra offset-32 combine step.
+
+    **Conclusion & Interpretation:**
+    - **Result: 64-lane reduction mismatch (Architecture-Bound)**. The concrete fix is to use a 64-bit/full-wavefront mask or HIP reduction primitive and verify the 6-step tree; the observed 40% slowdown should be treated as a profiling symptom, not derived from the mask alone.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

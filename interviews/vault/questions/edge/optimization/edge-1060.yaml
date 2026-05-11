@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: edge-1060
+track: edge
+level: L4
+zone: optimization
+topic: kernel-fusion
+competency_area: optimization
+bloom_level: evaluate
+phase: inference
+title: 'Kernel Fusion: Optimize Inference Kernel for Depthwise Separable Convolution'
+scenario: Your MobileNetV3 deployment on Jetson Orin (32GB LPDDR5, 275 TOPS INT8, 60W) spends 35% of inference time in DWConv operations. Profiling shows DWConv arithmetic intensity = 2 OPS/byte, well below the ridge point of 4 OPS/byte.
+question: With DWConv taking 35% of time at 2 OPS/byte versus a 4 OPS/byte ridge point, what is the bottleneck and how would you optimize it?
+details:
+  realistic_solution: |
+    The profiled DWConv is memory-bound because its measured arithmetic intensity is 2 OPS/byte, below the 4 OPS/byte ridge point. Treat the profile result as the decisive evidence. Optimize by fusing adjacent BN/activation/pointwise operations, improving layout and tiling to reduce external traffic, and considering a different block design if DWConv remains a major power or latency cost. Batch size may improve throughput in some deployments, but it is not the primary fix for a single-stream latency target.
+  common_mistake: |
+    **The Pitfall:** Trying to optimize DWConv compute operations.
+    **The Rationale:** Not recognizing that DWConv has inherently low arithmetic intensity due to a lack of weight reuse across channels.
+    **The Consequence:** Wasting time on compute optimizations when the operation is fundamentally memory-bound, yielding zero performance improvement.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - DWConv Compute: 3x3 kernel, Input HxWxC. FLOPs = 9 * H * W * C.
+    - DWConv Bytes: 9C (weights) + H*W*C (input) + H*W*C (output) = 9C + 2HWC.
+
+    **Calculations:**
+    - Theoretical AI from this simplified activation+weight model: 9HWC / (9C + 2HWC).
+    - For large H and W, AI approaches 9 / 2 = 4.5 OPS/byte.
+    - Example (3x3 feature map, C=96): FLOPs = 9 * 3 * 3 * 96 = 7,776. Bytes = 9 * 96 + 2 * 3 * 3 * 96 = 2,592. AI = 7,776 / 2,592 = 3.0 OPS/byte.
+    - The measured profile says AI = 2 OPS/byte, which is below the 4 OPS/byte ridge point, so this implementation is memory-bound.
+
+    **Conclusion & Interpretation:**
+    - **Result: Profiled AI=2 (Memory-Bound Implementation)**. The simplified formula explains why DWConv has limited reuse, while the profile proves this case is below the ridge point. Prioritize fusion and memory-traffic reduction over raw compute tuning.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

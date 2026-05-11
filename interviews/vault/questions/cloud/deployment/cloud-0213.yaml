@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-0213
+track: cloud
+level: L4
+zone: diagnosis
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: analyze
+phase: inference
+title: The GC Pause Latency Spike
+scenario: Your Python-based inference server on an A100 serves a 7B model with P50 latency of 40 ms. But every ~30 seconds, a burst of requests hits P99 latency of 800 ms — 20× the normal. The GPU utilization trace shows brief drops to 0% that correlate exactly with the spikes. The model and batch size haven't changed.
+question: What's stealing 760 ms from your GPU?
+details:
+  realistic_solution: The strongest diagnosis is a stop-the-world pause in the Python control plane, with CPython cyclic GC as a leading suspect rather than a proven fact from the prompt alone. During a long GC or explicit `gc.collect()`, Python threads that launch CUDA work stop running. The GPU drains its queued kernels in a few milliseconds and then sits idle until Python resumes, producing the correlated 0% utilization dip and the ~760ms latency gap. Confirm it with GC logs, pause counters, allocator/object-churn metrics, and Python profiler traces. Fix by disabling automatic GC on the hot path and collecting during low-traffic windows, reducing Python object churn, preallocating scheduler/request objects, or moving hot scheduling state into C++/Rust.
+  common_mistake: |
+    **The Pitfall:** Blaming thermal throttling or network congestion.
+    **The Rationale:** Engineers unfamiliar with CPython's GIL and GC behavior assume infrastructure-level disruptions.
+    **The Consequence:** They waste time profiling hardware, missing the fact that thermal throttling is gradual (not a sharp 0% drop) and network issues wouldn't zero out GPU utilization.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    1. Normal request latency is ~40 ms; spike latency is ~800 ms, so the missing time is ~760 ms.
+    2. A large Python serving heap could contain ~5M reachable objects.
+    3. If GC/profiler logs show tracing throughput around 6.6M objects/s, a pause of this size is plausible.
+    **Calculations:**
+    4. Plausible GC pause time = 5M objects / 6.6M objects/s = ~0.76 s = 760 ms.
+    5. GPU kernel queue depth ≈ 20 kernels × 0.05 ms each = drains in ~1 ms.
+    6. GPU idle time during the pause is therefore ~759 ms, matching the observed drop to 0% utilization.
+    7. Requests queuing at 100 req/s during 760 ms: 100 * 0.760 = ~76 requests affected.
+    8. If hot-path reachable object state is reduced to 500K objects, the same illustrative scaling predicts 500K / 6.6M = ~76 ms pauses; scheduling GC in low-traffic windows removes those pauses from P99.
+    **Conclusion & Interpretation:**
+    9. **Result: Python Stop-the-World Pause, Likely GC**. The queue drains almost immediately, then the GPU sits idle until Python can launch kernels again. Treat GC as the first hypothesis to verify with logs and counters, then fix by controlling collection timing and reducing hot-path object churn.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-3782
+track: cloud
+level: L4
+zone: design
+topic: flash-attention
+competency_area: optimization
+bloom_level: evaluate
+phase: inference
+title: 'FlashDecoding: Parallelizing Attention During Inference'
+scenario: During autoregressive decoding, each new token attends to all previous tokens. For a single query token with a 32K context, standard FlashAttention iterates over KV blocks sequentially within one thread block, under-utilizing the GPU SMs.
+question: How does FlashDecoding parallelize a single-token decode over KV blocks for a 32K context, and what throughput improvement does it provide?
+details:
+  realistic_solution: Standard FlashAttention during decoding often exposes only about one thread block per attention head for a single query token, so 64 heads cannot fill 132 SMs in one wave. FlashDecoding splits the KV cache into P partitions and assigns each head-partition pair to a separate thread block, computing a partial softmax and weighted sum. A final reduction kernel combines results via the logsumexp trick. With P=16, the launch exposes 64 × 16 = 1024 blocks, enough to keep 132 SMs busy across multiple waves. The expected improvement is a long-context throughput gain from much higher occupancy, but not a pure 16x gain because the final reduction, extra reads/writes, and scheduling overhead consume time; a defensible estimate is several-fold, often around 4-8x for long contexts when attention is the bottleneck.
+  common_mistake: |
+    **The Pitfall:** Confusing FlashDecoding with speculative decoding.
+    **The Rationale:** Candidates hear "decode optimization" and assume it means predicting future tokens, rather than parallelizing the attention computation across KV cache blocks.
+    **The Consequence:** Providing an incorrect architectural explanation that fails to address the SM utilization bottleneck.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 64 attention heads, 132 SMs.
+    - Context: 32K.
+
+    **Calculations:**
+    - Standard decode exposed parallelism: 64 blocks, so one wave can occupy at most 64 / 132 = 48.5% of SMs.
+    - FlashDecoding with P=16: 64 * 16 = 1024 blocks.
+    - 1024 blocks / 132 SMs = 7.8 waves, enough block-level parallelism to saturate SMs during the partitioned attention phase.
+    - Speedup is bounded by the occupancy gain 132 / 64 = 2.06x plus better latency hiding, but reduced by the extra reduction pass and memory traffic.
+
+    **Conclusion & Interpretation:**
+    - **Result: several-fold throughput improvement for long contexts**. The math supports full SM occupancy for the partitioned phase, while the exact speedup is workload-dependent rather than a derivable 5.7x from block counts alone.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

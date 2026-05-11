@@ -1,0 +1,58 @@
+schema_version: '1.0'
+id: edge-2357
+track: edge
+level: L5
+zone: evaluation
+topic: kv-cache-management
+competency_area: architecture
+bloom_level: evaluate
+phase: both
+title: PagedAttention Block Size Fragmentation
+scenario: An edge deployment of Llama-2-7B on a Jetson AGX Orin uses PagedAttention. The iGPU has a limited translation cache of about 512 entries. The system runs 32 concurrent sessions averaging 1024 tokens each. The architect is comparing 16-token vs 256-token blocks.
+question: Starting from the fragmentation comparison shown, explain why the fragmentation argument inverts on this iGPU once you account for block-table entries, and recommend a block size?
+visual:
+  kind: svg
+  path: edge-2357.svg
+  alt: Bar chart showing high internal fragmentation for 256-token blocks compared to 16-token blocks.
+  caption: KV Cache Internal Fragmentation Ratio.
+details:
+  realistic_solution: 16-token blocks minimize internal KV waste, but they create 64 blocks per 1024-token session. Across 32 sessions that is 2048 block-table entries, far beyond a roughly 512-entry translation cache, so the attention kernel pays more pointer chasing and translation misses. 256-token blocks need only 128 entries, but they can waste many KV slots at sequence tails. A 64-token block gives 16 blocks per session and 512 entries for this workload, matching the translation-cache scale while keeping tail fragmentation much lower than 256-token blocks. If production traces show extra translation pressure, 128 tokens is the next conservative step, but the stated comparison supports 64 tokens as the starting recommendation.
+  common_mistake: |
+    **The Pitfall:** Focusing exclusively on internal fragmentation ratios.
+    **The Rationale:** Candidates look only at wasted KV slots (like CPU RAM fragmentation) but ignore MMU capabilities.
+    **The Consequence:** Thrashing the small TLB on the iGPU, creating massive memory latency that negates any capacity savings.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Concurrent sessions: 32.
+    - Average tokens per session: 1024.
+    - TLB entries available: ~512.
+
+    **Calculations:**
+    - 16-token blocks: 1024 / 16 = 64 blocks/session. 64 * 32 sessions = 2048 block-table entries.
+    - 256-token blocks: 1024 / 256 = 4 blocks/session. 4 * 32 sessions = 128 block-table entries.
+    - 64-token blocks: 1024 / 64 = 16 blocks/session. 16 * 32 sessions = 512 block-table entries.
+    - Average tail waste is roughly half a block per session: 8 tokens/session for 16-token blocks, 32 for 64-token blocks, and 128 for 256-token blocks.
+
+    **Conclusion & Interpretation:**
+    - **Result: 64-token block size (Translation-Bound)**. The 16-token option overflows the translation-cache scale by 4x, while 256-token blocks reduce table pressure at high fragmentation cost. A 64-token block lands at about 512 entries and is the best starting point for this workload.
+status: published
+provenance: llm-draft
+requires_explanation: true
+expected_time_minutes: 9
+validated: true
+validation_status: passed
+validation_date: '2026-04-25'
+validation_model: pydantic-1.0
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-25'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+  - gemini-generated
+  - target-recall-L5
+created_at: '2026-04-25'

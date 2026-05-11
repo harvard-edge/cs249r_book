@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-4312
+track: cloud
+level: L5
+zone: optimization
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: analyze
+phase: inference
+title: Tail Latency of Decode Under Mixed Workloads
+scenario: Your decode pool shows P50 TPOT of 35 ms and P99 TPOT of 280 ms — an 8× tail ratio. The workload mix is 70% short-output requests (≤50 tokens) and 30% long-output requests (500–2000 tokens). The decode GPU is an H100.
+question: What causes the 8× P99/P50 TPOT tail on H100 with 30% long outputs, and what priority scheduling intervention would reduce it?
+details:
+  realistic_solution: 'The 8× tail is head-of-line blocking in continuous decode. Long-output requests hold KV-cache and batch slots for hundreds to thousands of decode steps, so short requests can sit behind long requests even though they only need ≤50 output tokens. The intervention is SLO-aware priority scheduling: classify predicted short outputs into a high-priority decode queue and give that queue reserved or preemptive decode slots whenever it is non-empty, while capping the slowdown imposed on long requests. This reduces short-request P99 TPOT by bounding queue wait per token. For example, if the hardware step service time is about the P50 TPOT of 35 ms and the current P99 includes about 245 ms of queueing, priority admission that bounds short-request wait to one extra step yields P99 TPOT near 70 ms; bounding it to two extra steps yields about 105 ms. The exact number depends on load, but the mechanism removes most of the 280 ms tail rather than changing HBM bandwidth.'
+  common_mistake: |
+    **The Pitfall:** Attributing tail TPOT to memory bandwidth variability or thermal throttling.
+    **The Rationale:** These cause 10-20% variance, not 8×.
+    **The Consequence:** Implementing hardware-level fixes instead of addressing head-of-line blocking from large batches.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Observed P50 TPOT is 35 ms, which approximates the service time of an uncongested decode step.
+    - Observed P99 TPOT is 280 ms, so the tail includes about 280 - 35 = 245 ms of queueing/head-of-line delay.
+    - Priority scheduling does not make a decode step faster; it reduces how many long-request steps a short request waits behind.
+
+    **Calculations:**
+    - Without priority: P99 TPOT = 35 ms service + 245 ms wait = 280 ms.
+    - With high-priority short queue and <=1 extra-step wait: P99 TPOT ~= 35 ms service + 35 ms wait = 70 ms.
+    - With a more conservative <=2 extra-step wait: P99 TPOT ~= 35 ms + 70 ms = 105 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: about 70-105 ms P99 TPOT (Latency-Bound)**. Priority decode scheduling can cut short-request tail TPOT by roughly 2.7-4.0x by reducing queueing delay from long-output head-of-line blocking.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

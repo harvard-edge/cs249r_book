@@ -1,8 +1,37 @@
+import pytest
+import subprocess
+import sys
+from pathlib import Path
 from mlsysim.core.evaluation import SystemEvaluator
 from mlsysim.hardware.registry import Hardware
 from mlsysim.models.registry import Models
-from mlsysim import Applications, plot_evaluation_scorecard
+from mlsysim import Applications, Q_, plot_evaluation_scorecard
 from mlsysim.systems.registry import Systems
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_top_level_import_exports_quantity_constructor_without_pyplot():
+    """The public API should expose Q_ without importing GUI plotting backends."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys, mlsysim; "
+                "assert mlsysim.Q_('1 GB').magnitude == 1; "
+                "assert 'matplotlib.pyplot' not in sys.modules"
+            ),
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert Q_("1 GB").magnitude == 1
 
 
 def test_system_evaluation_json_contract_includes_tco():
@@ -23,6 +52,23 @@ def test_system_evaluation_json_contract_includes_tco():
     assert payload["m_status"] == "PASS"
     assert payload["m_tco_usd"] > 0
     assert "macro" not in payload
+
+
+def test_distributed_evaluation_exposes_real_effective_mfu():
+    evaluation = SystemEvaluator.evaluate(
+        scenario_name="distributed-mfu",
+        model_obj=Models.Llama3_8B,
+        hardware_obj=Hardware.H100,
+        batch_size=512,
+        precision="fp16",
+        efficiency=0.4,
+        fleet_obj=Systems.Clusters.Research_256,
+        nodes=256,
+    )
+
+    metrics = evaluation.performance.metrics
+    assert 0 < metrics["mfu"] <= 1
+    assert metrics["mfu"] == pytest.approx(metrics["node_mfu"] * metrics["scaling_efficiency"])
 
 
 def test_single_node_evaluation_passed_all_with_skipped_macro():
@@ -53,6 +99,7 @@ def test_infeasible_single_node_marks_performance_failed():
 
 def test_scorecard_plot_accepts_scenario_evaluation_quantities():
     """Scenario evaluations expose Pint quantities; plots normalize them."""
+    pytest.importorskip("matplotlib")
     evaluation = Applications.Doorbell.evaluate()
     fig, ax = plot_evaluation_scorecard(evaluation)
     try:

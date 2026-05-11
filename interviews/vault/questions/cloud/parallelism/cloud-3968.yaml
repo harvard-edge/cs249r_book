@@ -1,0 +1,36 @@
+schema_version: '1.0'
+id: cloud-3968
+track: cloud
+level: L5
+zone: analyze
+topic: communication-computation-overlap
+competency_area: parallelism
+bloom_level: analyze
+phase: both
+title: Overlapping Collective Permute with MoE Expert Computation on TPU
+scenario: Your MoE model uses collective_permute to route tokens to expert chips on a TPU v5e pod. XLA profiles show collective_permute takes 12ms per MoE layer, and expert computation takes 8ms.
+question: Can overlap still work between ICI transfers and expert computation on TPU v5e?
+details:
+  realistic_solution: Overlap can still work on TPU v5e, but only when XLA can find independent work. XLA can lower collective_permute as an async collective, schedule computation that does not consume the routed tokens while the ICI transfer is in flight, and then insert the wait at the first true dependency. The amount hidden depends on the HLO dependency graph, expert placement, token balance, and whether expert compute competes with ICI/HBM bandwidth. If the 8ms expert computation depends entirely on the 12ms routed-token output, it cannot hide that transfer; if there is independent expert or non-MoE work, up to that independent work duration can be overlapped.
+  common_mistake: |
+    **The Pitfall:** Assuming TPU cannot overlap compute and communication because it lacks a separate DMA engine like GPU's copy engine.
+    **The Rationale:** Candidates often know GPUs use dedicated copy engines for overlap and assume the lack of this on TPU means strict serialization.
+    **The Consequence:** Failing to realize XLA's compiler can schedule ICI transfers to overlap with independent computations, leading to inaccurate performance modeling.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - collective_permute takes 12ms.
+    - Expert computation takes 8ms.
+    - Overlap requires compute that is independent of the collective_permute output.
+    - No fixed TPU-vs-GPU hidden percentage is implied by the prompt.
+
+    **Calculations:**
+    - If the expert computation depends on routed tokens, critical path = 12ms transfer + 8ms expert compute = 20ms.
+    - If XLA can schedule 8ms of independent compute during the transfer, critical path = max(12ms transfer, 8ms independent compute) + dependent work that remains.
+    - In the best case for the stated numbers, exposed transfer is 12ms - min(12ms, 8ms) = 4ms.
+    - In the worst case, exposed transfer is the full 12ms because no independent work exists before the wait.
+    - Therefore the hidden amount is schedule- and workload-dependent, from 0ms to at most 8ms for this layer model.
+
+    **Conclusion & Interpretation:**
+    - **Result: Conditional Overlap, Not a Fixed Percentage.** TPU v5e can overlap collective_permute with independent work through XLA async scheduling, but the exposed communication is determined by the dependency graph and memory-system contention.
+status: published
+provenance: imported

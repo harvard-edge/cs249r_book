@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-2486
+track: cloud
+level: L4
+zone: evaluation
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: evaluate
+phase: training
+title: Multi-Tenant Edge Accelerator Allocation
+scenario: A cloud service manages factory edge gateways. Each gateway has a single Edge TPU. It must run Model A (ResNet-18, 10ms execution, needs 30fps) and Model B (YOLOv5s, 30ms execution, needs 10fps). Naive concurrent multi-threading causes Model A latency to spike to 80ms due to accelerator runtime contention, queueing jitter, and graph handoff overhead.
+question: How would you schedule Model A and Model B on one Edge TPU to meet 30fps and 10fps requirements without 80ms latency spikes?
+details:
+  realistic_solution: |
+    Treat the Edge TPU as a non-preemptive single accelerator and schedule it deterministically rather than allowing unconstrained threads to compete for it. A simple feasible policy is a 100ms cycle: run three Model A inferences first (30ms), then one Model B inference (30ms), leaving 40ms slack for runtime handoff and arrival jitter. This directly matches 30 A/sec and 10 B/sec while bounding Model A completion inside each frame. If measured handoff overhead cannot fit inside the slack, use compiler-supported co-compilation or reduce work; do not rely on OS-level concurrency to virtualize the accelerator.
+  common_mistake: |
+    **The Pitfall:** Trying to use OS-level threading or Docker container limits to manage the NPU.
+    **The Rationale:** Candidates assume edge accelerators have hardware-level virtualization or efficient context switching like modern CPUs, which they lack.
+    **The Consequence:** Severe context-switching overhead causes both models to fail real-time latency SLAs.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Target: 30 A (10ms) and 10 B (30ms) per second.
+    - Treat the Edge TPU as a non-preemptive single server.
+    - Use a 100ms frame: run 3 A in 30ms, then 1 B in 30ms, then leave 40ms slack.
+    - Switch only at model groups inside each 100ms frame.
+
+    **Calculations:**
+    - Aggregate compute needed: 30 * 10ms + 10 * 30ms = 600ms/sec, or 60% utilization before switch overhead.
+    - In each 100ms frame, compute time = 3 * 10ms + 1 * 30ms = 60ms.
+    - Model A requests complete within the first 30ms of each frame, supporting 30fps with bounded latency.
+    - Model B completes by 60ms of each frame, supporting 10fps with latency below the 80ms spike constraint.
+    - The 40ms slack per frame is the budget for queueing jitter and any compiler/runtime handoff cost; if measured switch cost exceeds this slack, co-compile the models or reduce work because the single TPU cannot meet the latency SLA.
+
+    **Conclusion & Interpretation:**
+    - **Result: Use deterministic 100ms micro-batches or co-compilation, not unconstrained threading.** The workload has enough aggregate throughput headroom, but the schedule must bound per-request latency and keep switch overhead inside the 40ms/frame slack.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

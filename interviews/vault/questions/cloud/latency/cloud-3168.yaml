@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-3168
+track: cloud
+level: L5
+zone: design
+topic: speculative-decoding
+competency_area: latency
+bloom_level: create
+phase: inference
+title: Designing Medusa Heads for Self-Speculation
+scenario: Instead of a separate draft model, Medusa adds K lightweight prediction heads to the target 70B model's last hidden layer. Each head i predicts token at position t+i. You need to deploy this on 4x H100 with tensor parallelism. The hidden_dim of the target is 8192.
+question: How would you design the Medusa heads for a 70B target with hidden_dim=8192 on 4x H100, and what is their overhead?
+details:
+  realistic_solution: Use K=5 lightweight offset heads on the final hidden state, not five independent dense vocabulary matrices. A practical design is an offset-specific residual MLP with a 2048-dim bottleneck, producing an 8192-dim hidden vector for each future offset, then reusing the existing tensor-parallel LM head for logits/top-k. The added parameters are about 8192 x 2048 + 2048 x 8192 + 2048 x 2048 = 37.7M per offset head, or 188M parameters and 376MB FP16 for five heads. That is roughly 94MB/GPU if sharded four ways, before small norm/bias terms. The dense-vocab alternative, 8192 x 128K = 1.05B weights or 2.1GB per head, is a worst-case design that would add 10.5GB for five heads and is usually too heavy. Inference still pays for K small heads plus K sharded vocab projections unless top-k/logit work is fused or pruned. If acceptance alphas are treated as marginal survival probabilities, 1 + sum(alphas) = 3.99 served tokens/round is only a first-order yield estimate, not a guaranteed
+    speedup.
+  common_mistake: |
+    **The Pitfall:** Making Medusa heads too large by matching the target model's full FFN dimensions.
+    **The Rationale:** Engineers intuitively mirror the base model's architectural complexity for the prediction heads to maintain accuracy.
+    **The Consequence:** Eliminating the latency advantage entirely, as the complex heads take as long to execute as a full transformer layer.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Hidden dim: 8192. Vocab size: 128K.
+    - 5 Medusa heads.
+    - Practical head: 2048-dim bottleneck residual MLP, then reuse the existing tensor-parallel LM head.
+
+    **Calculations:**
+    - Added params per lightweight head: 8192 * 2048 + 2048 * 8192 + 2048 * 2048 = 37.7M parameters.
+    - Five lightweight heads: 5 * 37.7M = 188M parameters = 376MB FP16 total.
+    - With 4-way sharding, added head storage is about 94MB/GPU, plus small norm/bias terms.
+    - Worst-case independent dense vocab head: 8192 * 128K = 1.05B parameters = 2.1GB FP16 per head.
+    - Five dense vocab heads would add 10.5GB total, or 2.6GB/GPU with 4-way vocab sharding, so this should be treated as a bound rather than the default design.
+    - Lightweight MLP arithmetic per head: about 2 * 37.7M = 75M FLOPs; five heads are about 0.38 GFLOP before reused LM-head logit projection and top-k communication.
+    - If acceptance probabilities are interpreted as marginal survival probabilities for offsets 1..5, first-order served-token estimate = 1 + 0.85 + 0.72 + 0.61 + 0.52 + 0.29 = 3.99 tokens/round.
+
+    **Conclusion & Interpretation:**
+    - **Result: Lightweight Heads, Not Dense Copies.** A practical Medusa design adds about 376MB total head weights plus reused LM-head compute; dense per-offset vocab heads are a multi-GB worst-case bound, and the served-token estimate is approximate.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

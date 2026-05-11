@@ -1,0 +1,38 @@
+schema_version: '1.0'
+id: tinyml-1519
+track: tinyml
+level: L4
+zone: diagnosis
+topic: tensor-arena-planning
+competency_area: memory
+bloom_level: analyze
+phase: inference
+title: Tensor Lifetime Analysis for U-Net on MCU
+scenario: 'You''re deploying a tiny U-Net (for anomaly detection) on Cortex-M7 (512 KB SRAM). The U-Net has skip connections: encoder layer 1 output must stay alive until it''s consumed by decoder layer 4 (the last decoder layer). This means the encoder 1 tensor (32 KB) has a very long lifetime — it''s alive during the entire encoder and decoder. Combined with normal activation memory, the arena peaks at 580 KB.'
+question: How do you reduce peak memory below 512 KB without changing the model architecture?
+details:
+  realistic_solution: 'The 580 KB peak is 68 KB above the 512 KB SRAM cap, so the fix must remove at least 68 KB of simultaneously live tensors without changing the graph. Use memory planning, not architecture changes: shorten the lifetime of skip tensors by recomputing cheap encoder outputs when the decoder needs them or spilling selected skips outside the tensor arena, then let the TFLM planner reuse those freed ranges for decoder temporaries. The four long-lived skips total 32 KB + 16 KB + 8 KB + 4 KB = 60 KB, which lowers the peak to 520 KB. That is still 8 KB over the cap, so also remove at least 8 KB of peak scratch overlap through operator scheduling and buffer reuse. A 12 KB scratch/lifetime reduction gives 580 - 60 - 12 = 508 KB. This keeps the model architecture and weights unchanged; the tradeoff is extra compute for recomputation or extra I/O for spill.'
+  common_mistake: |
+    **The Pitfall:** Removing skip connections to reduce memory.
+    **The Rationale:** Candidates assume that simply cutting out layers or connections is a valid optimization without considering the functional impact.
+    **The Consequence:** This fundamentally changes the model architecture and degrades accuracy significantly, as skip connections are essential for U-Net's precision in dense prediction tasks.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Peak memory: 580 KB (exceeds 512 KB limit).
+    - Skip connections: 32 KB, 16 KB, 8 KB, 4 KB (total 60 KB).
+
+    **Calculations:**
+    - Original Peak: 580 KB (68 KB over).
+    - Removing only Encoder-1 skip: 580 KB - 32 KB = 548 KB (still over).
+    - Removing Encoder-1 and Encoder-2 skips: 580 KB - 32 KB - 16 KB = 532 KB (still over).
+    - Removing all long-lived skips from the arena: 580 KB - (32 + 16 + 8 + 4) KB = 520 KB (still 8 KB over).
+    - Need at least 8 KB more reduction after skip lifetime shortening.
+    - Add operator scheduling and scratch-buffer reuse at the peak decoder block to save 12 KB.
+    - Final estimated peak: 520 KB - 12 KB = 508 KB.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~508 KB peak after lifetime shortening plus scratch reuse.** Skip recomputation/spill alone is not enough for the stated 580 KB peak; combine it with a small buffer-reuse reduction to get below 512 KB without changing the model architecture.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10

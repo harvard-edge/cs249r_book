@@ -64,7 +64,7 @@ async def _():
     ESP32 = Hardware.Tiny.ESP32_S3
     ESP32_TFLOPS  = ESP32.compute.peak_flops.m_as("TFLOPs/s")
     ESP32_BW_GBS  = ESP32.memory.bandwidth.m_as("GB/s")
-    ESP32_RAM_KB  = ESP32.memory.capacity.m_as("KiB")
+    ESP32_RAM_KB  = ESP32.memory.sram_capacity.m_as("KiB")
     ESP32_RAM_GB  = ESP32_RAM_KB / (1024 * 1024)
     ESP32_TDP_W   = ESP32.tdp.m_as("W")
 
@@ -144,7 +144,7 @@ def _(LAB_CSS, mo):
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
                 <span class="badge badge-info">D-A-M Triad Diagnosis</span>
                 <span class="badge badge-warn">Iron Law T = D/BW + O/R + L</span>
-                <span class="badge badge-fail">200x Out of Memory (OOM) on ESP32</span>
+                <span class="badge badge-fail">~100x Out of Memory (OOM) on ESP32</span>
             </div>
         </div>
         """),
@@ -175,7 +175,7 @@ def _(COLORS, mo):
                     at batch=1, not compute-bound.</div>
                 <div style="margin-bottom: 3px;">3. <strong>Quantify the deployment spectrum</strong> &mdash; measure
                     the ~1,000,000x compute gap between H100 and ESP32 and explain why
-                    the same model is infeasible on a microcontroller by 200x.</div>
+                    the same model is infeasible on a microcontroller by ~100x.</div>
             </div>
         </div>
 
@@ -298,7 +298,7 @@ def _(mo):
         options={
             "A) ~2x over budget (need a small trim)":                   "2x",
             "B) ~10x over budget (need significant compression)":        "10x",
-            "C) ~200x over budget (fundamentally infeasible)":           "200x",
+            "C) ~100x over budget (fundamentally infeasible)":           "200x",
             "D) It fits with INT8 quantization":                         "fits",
         },
         label="ResNet-50 requires ~49 MB in FP16. The ESP32-S3 has 512 KB of SRAM. "
@@ -1033,12 +1033,12 @@ Since {RESNET50_FLOPS/(RESNET50_SIZE_MB/1024*1e9):.0f} << {_ridge_point:.0f}, th
         elif _pred == "10x":
             _rev = (f"**The gap is ~{_actual_ratio:.0f}x, not 10x.** "
                     "Even aggressive 8x compression (INT4 quantization) would leave a "
-                    "~25x memory gap. The model architecture must change entirely.")
+                    "~12x memory gap. The model architecture must change entirely.")
             _rkind = "warn"
         else:
             _rev = (f"**INT8 quantization only halves the memory to ~25 MB.** "
                     f"The ESP32 has {ESP32_RAM_KB:.0f} KB. The gap is ~{_actual_ratio:.0f}x. "
-                    "Quantization helps but cannot bridge a 200x gap.")
+                    "Quantization helps but cannot bridge a ~100x gap.")
             _rkind = "warn"
 
         items.append(mo.callout(mo.md(

@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-2337
+track: cloud
+level: L6+
+zone: diagnosis
+topic: vram-budgeting
+competency_area: memory
+bloom_level: evaluate
+phase: both
+title: 3D Convolution L2 Cache Thrashing
+scenario: You are optimizing a 3D medical imaging CNN on an NVIDIA A100. The input volume is 256x256x256 FP32. Profiling via Nsight Compute reveals an abysmal 8% SM compute utilization, accompanied by a 94% L2 cache miss rate and massive HBM read volumes that exceed theoretical requirements by 8x.
+question: What causes the 94% L2 miss rate and 8x HBM read amplification in the 256x256x256 3D CNN, and how would you change the layout?
+details:
+  realistic_solution: |
+    The symptom (massive L2 miss rate and 8x HBM read amplification) is caused by poor spatial and temporal locality from the tensor layout, convolution traversal order, and kernel tiling. A 3D stencil reuses neighboring voxels across X, Y, and Z, but a naive layout and schedule can make one direction contiguous while another direction has a 256*256*4 = 262,144 byte stride. If the kernel does not tile the working set so neighboring planes stay resident, L2 lines are evicted before reuse and the same voxel neighborhoods are fetched repeatedly from HBM. The co-design solution is to choose a layout and schedule together: use layouts such as NDHWC/NCDHW variants, blocked channel layouts, or spatially blocked/Morton-style ordering only where they match the kernel, and tile the convolution so depth planes and channels are reused from shared memory/L2. These changes reduce amplification by improving cache-line utilization and reuse; they do not universally eliminate all misses.
+  common_mistake: |
+    **The Pitfall:** Assuming the model inherently requires massive bandwidth and upgrading the hardware blindly.
+    **The Rationale:** Candidates see severe memory bottlenecks and immediately assume the GPU memory system is too slow, completely missing the layout, tiling, and reuse pattern.
+    **The Consequence:** The team wastes capital on larger GPUs and still sees high HBM traffic because the kernel continues to thrash cache lines.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 256x256x256 FP32, 40MB L2 cache.
+    - 32-byte cache lines.
+
+    **Calculations:**
+    - Z-axis stride for an X-Y contiguous FP32 layout: 256 * 256 * 4 = 262,144 bytes between adjacent depth samples for the same (x, y).
+    - A single isolated FP32 load can use only 4 bytes of a 32-byte cache line, but the observed 8x HBM amplification means the kernel is also failing to reuse cache lines and neighboring planes across the convolution window.
+    - If the ideal convolution needs V bytes of unique voxel data, the profile's 8x amplification means HBM reads are about 8V, so roughly 7V of traffic is repeated or poorly utilized fetches.
+
+    **Conclusion & Interpretation:**
+    - **Result: Layout-and-tiling locality issue.** Blocked layouts, spatial blocking, and better traversal order can reduce the 8x amplification by increasing cache-line use and plane reuse, but no single layout universally eliminates the penalty.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 18
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+  - gpu-architecture
+  - l2-cache
+  - memory-layout
+  - 3d-cnn

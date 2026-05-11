@@ -66,7 +66,7 @@ def main() -> int:
         f"This file is GENERATED from vault/questions/ YAML per ARCHITECTURE.md §11.1.\n"
         f"If you really need to hand-edit, add this trailer to your commit message:\n\n"
         f"    {OVERRIDE_TRAILER}: <one-line justification>\n\n"
-        f"Otherwise: edit the underlying YAML and regenerate with `vault build --legacy-json`.\n"
+        f"Otherwise: edit the underlying YAML and regenerate with `vault build --local-json`.\n"
     )
     return 1
 

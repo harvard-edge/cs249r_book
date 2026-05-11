@@ -329,6 +329,26 @@ class TestDataModel:
         result = solver.solve(demand, h100)
         assert result.bottleneck in ["Storage", "Interconnect"]
 
+    def test_missing_storage_does_not_zero_valid_interconnect(self):
+        """Absent storage metadata should not erase a modeled I/O path."""
+        a100 = Hardware.A100  # has PCIe interconnect but no StorageHierarchy
+        demand = Q_("1 GB/s")
+        solver = DataModel()
+        result = solver.solve(demand, a100)
+        assert result.bottleneck == "Interconnect"
+        assert result.supply_bw.magnitude > 0
+        assert result.is_stalled is False
+
+    def test_no_modeled_data_path_reports_unknown_stall(self):
+        """If neither storage nor interconnect is modeled, report unknown zero supply."""
+        jetson = Hardware.Jetson
+        demand = Q_("1 GB/s")
+        solver = DataModel()
+        result = solver.solve(demand, jetson)
+        assert result.bottleneck == "Unknown"
+        assert result.supply_bw.magnitude == 0
+        assert result.is_stalled is True
+
 
 # ======================================================================
 # 5. ScalingModel
@@ -760,6 +780,25 @@ class TestEconomicsModel:
         expected = result.capex_usd + result.opex_energy_usd + result.opex_maintenance_usd
         assert result.tco_usd == pytest.approx(expected, rel=0.001)
 
+    def test_missing_unit_cost_does_not_default_to_h100_price(self):
+        """Unpriced hardware should not silently inherit datacenter GPU CapEx."""
+        from mlsysim.systems.types import Node, Fleet
+        from mlsysim.systems.registry import Fabrics
+
+        node = Node(
+            name="ESP32 node",
+            accelerator=Hardware.ESP32,
+            accelerators_per_node=1,
+            intra_node_bw=Q_("1 GB/s"),
+        )
+        fleet = Fleet(name="ESP32 fleet", node=node, count=1, fabric=Fabrics.Ethernet_10G)
+        result = EconomicsModel().solve(fleet, duration_days=365, grid=Infra.Quebec)
+
+        assert Hardware.ESP32.unit_cost is None
+        assert result.capex_usd == 0
+        assert result.opex_maintenance_usd == 0
+        assert result.tco_usd == pytest.approx(result.opex_energy_usd)
+
     def test_iowa_region_registered_for_examples(self):
         """Placement examples reference Iowa, so it must resolve in the grid registry."""
         assert Infra.Grids.Iowa.name.startswith("Iowa")
@@ -1032,6 +1071,18 @@ class TestSensitivitySolver:
         a100 = Hardware.A100
         result = solver.solve(resnet, a100)
         assert result.baseline_latency.magnitude > 0
+
+    def test_tiny_hardware_sensitivity_preserves_memory_hierarchy(self):
+        """Perturbations should not drop SRAM/flash fields from TinyML hardware."""
+        solver = SensitivitySolver()
+        tiny_model = Models.Tiny.WakeVision
+        esp32 = Hardware.ESP32
+        baseline = SingleNodeModel().solve(tiny_model, esp32, precision="fp16")
+        result = solver.solve(tiny_model, esp32, precision="fp16")
+
+        assert esp32.memory.sram_bandwidth is not None
+        assert baseline.peak_bw_actual == esp32.memory.sram_bandwidth
+        assert result.sensitivities["memory_bandwidth"] <= 0.0 + 1e-9
 
 
 # ======================================================================

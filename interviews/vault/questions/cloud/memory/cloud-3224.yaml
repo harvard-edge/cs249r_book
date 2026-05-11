@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-3224
+track: cloud
+level: L4
+zone: implement
+topic: kv-cache-management
+competency_area: memory
+bloom_level: apply
+phase: inference
+title: KV-Cache Impact on Decode Memory Bandwidth
+scenario: During autoregressive decode of Llama 3 70B on 2xH100, each new token must attend to all previous KV-cache entries.
+question: At position 4096, what per-token HBM traffic comes from KV-cache reads versus resident 70B weight reads, and which dominates?
+details:
+  realistic_solution: During one decode step, the model weights are resident in HBM; 140 GB is the storage footprint, not an added per-token allocation. A simple bandwidth estimate still treats the step as streaming the active weights through the matmuls once, so the weight-read traffic is on the order of 140 GB per generated token, subject to cache reuse and tensor parallel partitioning. The KV-cache read at position 4096 is 4096 tokens × 8 KV heads × 128 dim × 2B × 2 (K+V) × 80 layers = 1.25 GiB, or about 1.34 GB decimal. Under that per-step streaming model, weight reads dominate at 4K context by roughly 100x. The important distinction is that this compares HBM traffic for the decode step, not total model size as a separate memory cost; as context grows, the KV term increases linearly while the weight-read term is roughly fixed per token.
+  common_mistake: |
+    **The Pitfall:** Ignoring KV-cache memory bandwidth consumption.
+    **The Rationale:** Candidates focus solely on the massive parameter count of the model weights, forgetting that the KV cache grows linearly with sequence length.
+    **The Consequence:** Severely underestimating decode latency for long-context requests, as KV-cache loading becomes the dominant memory bandwidth bottleneck.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 70B model with about 140 GB of FP16/BF16 weights resident in HBM.
+    - Decode step approximates one streaming read of active weights plus one read of prior KV entries.
+
+    **Calculations:**
+    - KV bytes/token across layers = 8 heads * 128 dim * 2B * 2 * 80 = 327,680 B ≈ 320 KiB.
+    - KV read at position 4096 = 4096 * 320 KiB = 1,310,720 KiB = 1.25 GiB, or about 1.34 GB decimal.
+    - Approximate weight-read traffic per decode step ≈ 140 GB before accounting for partitioning/cache reuse.
+
+    **Conclusion & Interpretation:**
+    - **Result: Weight-read bandwidth dominates at 4K** under the one-streaming-pass assumption. KV-cache bandwidth is real and grows linearly with context, but the 140 GB weight footprint should not be described as newly loaded into memory each token.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

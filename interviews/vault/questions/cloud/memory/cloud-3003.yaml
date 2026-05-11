@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-3003
+track: cloud
+level: L3
+zone: implement
+topic: kv-cache-management
+competency_area: memory
+bloom_level: apply
+phase: inference
+title: Per-GPU KV Cache Capacity for a 70B GQA Model
+scenario: 'A 70B LLM (GQA: 64 Q heads, 8 KV heads, head_dim=128, 80 layers, bf16) is deployed on 8 GPUs with tensor parallelism.'
+question: What is the per-GPU HBM allocation for model weights, KV cache, and activations, and how many tokens can be cached simultaneously?
+details:
+  realistic_solution: |
+    With tensor parallelism TP=8, each GPU holds 1/8 of model weights, about 17.5 GB decimal, or 16.3 GiB, for bf16 weights. In a standard serving configuration where the full GQA KV cache is resident on each TP rank, each GPU must budget all 8 KV heads for cached tokens: 320 KiB/token. Converting the advertised 80 GB HBM to about 74.5 GiB and reserving 1 GiB for activations/runtime leaves about 57.2 GiB for KV, or about 187K cached tokens per GPU, roughly 91 requests at 2048 tokens. If a specific runtime shards KV heads across TP ranks, the cache can be divided by 8, but that is an implementation-specific optimization rather than the default assumption.
+  common_mistake: |
+    **The Pitfall:** Assuming tensor parallelism automatically divides KV-cache memory by the TP size.
+    **The Rationale:** Tensor-parallel implementations shard model weights, but KV-cache placement depends on the serving runtime; many stacks keep the full GQA KV cache resident on each TP rank.
+    **The Consequence:** They overestimate cache capacity and size batches that OOM when all TP ranks need the same cached token state.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 70B model, TP=8, 8 GPUs (80 GB decimal HBM each = about 74.5 GiB).
+    - KV cache: 80 layers, 8 heads, 128 dim, BF16 (2 bytes).
+
+    **Calculations:**
+    - Weights per GPU: 70B × 2 bytes / 8 GPUs = 17.5 GB decimal = 16.3 GiB.
+    - Standard serving assumption: all 8 KV heads are resident on each TP rank.
+    - KV size per token per GPU: 2 (K,V) × 8 heads × 128 dim × 2 bytes × 80 layers = 327,680 bytes = 320 KiB.
+    - Available HBM using GiB for the capacity calculation: 74.5 GiB - 16.3 GiB weights - 1.0 GiB activations/runtime = 57.2 GiB.
+    - Token capacity: 57.2 GiB / 320 KiB = ~187,000 cached tokens per GPU/TP rank.
+    - Request capacity at 2048 cached tokens/request: 187,000 / 2048 = ~91 requests.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~187K tokens cached per GPU/TP rank, or about 91 requests at 2048 tokens (Memory-Capacity Bound)**. A KV-sharded runtime would raise this, but the serving assumption must be stated explicitly.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

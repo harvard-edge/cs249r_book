@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: cloud-4375
+track: cloud
+level: L3
+zone: mastery
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: evaluate
+phase: both
+title: 'Small Chips vs Large GPUs: Serving Cost Per Token at Scale'
+scenario: 'You are choosing infrastructure for serving a 7B LLM at 100B tokens/day. Option A is a cluster of smaller chips ($1.2/chip-hr, 197 TFLOPS BF16, 819 GB/s, 16GB HBM). Option B is a cluster of large GPUs ($5.5/GPU-hr, 1,307 TFLOPS FP16, 5,300 GB/s, 192GB HBM). The 7B model (FP16, 14GB) fits on either device. Assume steady-state decode is bandwidth-bound with batch 64: amortized weight traffic is 14GB/64 per token, plus 32MB/token for KV-cache and activation traffic.'
+question: For serving the 7B LLM at 100B tokens/day, how many small chips or large GPUs are needed and what is the cost per 1M tokens?
+details:
+  realistic_solution: |
+    Use the prompt's batched decode model rather than pretending each output token rereads the entire 14GB model independently. At batch 64, the amortized weight traffic is 14GB / 64 = 0.21875GB per token. Adding 32MB/token of KV-cache and activation traffic gives about 0.251GB/token. The workload is 100B / 86,400 = 1.157M tokens/s. Option A delivers 819GB/s / 0.251GB = about 3,260 tokens/s per chip, requiring 355 chips. Daily cost is 355 * $1.20 * 24 = about $10,224, or $0.10 per 1M tokens. Option B delivers 5,300GB/s / 0.251GB = about 21,100 tokens/s per GPU, requiring 55 GPUs. Daily cost is 55 * $5.50 * 24 = $7,260, or $0.073 per 1M tokens. The large GPU option is cheaper and uses far fewer devices under the stated saturated-batch assumptions.
+  common_mistake: |
+    **The Pitfall:** Treating decode as one unbatched full-model weight stream per generated token.
+    **The Rationale:** Candidates divide bandwidth by the full 14GB model size and ignore batching, KV-cache traffic, and residency.
+    **The Consequence:** They estimate implausibly large fleets and make the cost comparison depend on a false serving model.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Workload: 100B tokens/day (1.157e6 tok/sec).
+    - Model: 7B FP16 (14 GB).
+    - Decode model: batch 64, so weight traffic is amortized; add 32MB/token for KV-cache and activation traffic.
+    - Option A: $1.2/hr, 819 GB/s BW, 16 GB HBM.
+    - Option B: $5.5/hr, 5300 GB/s BW, 192 GB HBM.
+
+    **Calculations:**
+    - Per-token traffic = 14GB / 64 + 0.032GB = 0.251GB/token.
+    - Option A throughput: 819 GB/s / 0.251 GB/token = 3,260 tok/sec per chip.
+    - Option A scale: ceil(1.157e6 / 3,260) = 355 chips.
+    - Option A cost: 355 * $1.2 * 24 = $10,224/day -> $0.10 / 1M tokens.
+    - Option B throughput: 5300 GB/s / 0.251 GB/token = 21,100 tok/sec per GPU.
+    - Option B scale: ceil(1.157e6 / 21,100) = 55 GPUs.
+    - Option B cost: 55 * $5.5 * 24 = $7,260/day -> $0.073 / 1M tokens.
+
+    **Conclusion & Interpretation:**
+    - **Result: batched memory-bandwidth cost bound.** Option B wins at about $0.073 per 1M tokens versus about $0.10 for Option A, and needs far fewer devices.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

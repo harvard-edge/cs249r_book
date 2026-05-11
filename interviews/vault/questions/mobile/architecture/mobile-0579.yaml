@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: mobile-0579
+track: mobile
+level: L4
+zone: analyze
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: analyze
+phase: inference
+title: The Transformer vs CNN on Mobile
+scenario: ViT-Small (22M params, 4.6 GFLOPs) and MobileNetV3-Large (5.4M params, 0.22 GFLOPs) both achieve ~75% top-1 on ImageNet. On a Snapdragon 8 Gen 3, MobileNetV3 runs in 3ms while ViT-Small takes 35ms. Despite ViT having only 21x more FLOPs, it's 12x slower.
+question: Why is ViT-Small disproportionately slower than MobileNetV3 on Snapdragon 8 Gen 3 despite having only 21x more FLOPs?
+details:
+  realistic_solution: Memory access patterns, not arithmetic alone. MobileNetV3's convolutions have high data reuse and map well to mobile NPU kernels, so much of the work stays in local SRAM. ViT-Small has lower arithmetic intensity in attention, frequent reshapes/transposes, and less favorable NPU kernel coverage. Even when the arithmetic count is only 21x larger, extra DRAM traffic, layout conversions, and possible delegation overhead make ViT disproportionately slower. Treat any exact stall or fallback number as device/compiler-specific; the durable lesson is that ViT is much more memory- and layout-bound than MobileNetV3 on this class of phone.
+  common_mistake: |
+    **The Pitfall:** Assuming latency scales linearly with FLOPs or parameter count.
+    **The Rationale:** Candidates see a 21x FLOP difference and assume ViT's slowdown is purely computational, missing the memory-bound nature of attention mechanisms.
+    **The Consequence:** Trying to optimize ViT by pruning FLOPs instead of addressing memory access patterns or switching to a CNN.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Hardware: Snapdragon 8 Gen 3-class phone with high NPU TOPS but limited shared memory bandwidth.
+    - MobileNetV3-Large: 0.22 GFLOPs.
+    - ViT-Small: 4.6 GFLOPs. Attention matrices: 196x196 tokens across 6 heads.
+    - Latency observed in the scenario: MobileNetV3 3ms, ViT-Small 35ms.
+
+    **Calculations:**
+    - FLOP ratio: 4.6 / 0.22 = about 21x.
+    - Latency ratio: 35ms / 3ms = about 12x.
+    - Attention score storage per layer, if materialized: 196 * 196 * 6 heads * 2 bytes = about 461 KB before additional Q/K/V tensors, projections, transposes, and intermediate buffers.
+    - The 461 KB score tensor may fit in local memory by itself, but the full ViT block repeatedly moves and reshapes several tensors. Those layout passes have low arithmetic intensity, so wall-clock latency is governed by memory movement and kernel/delegation efficiency, not just GFLOPs.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory/layout-bound.** The observed 35ms is explained qualitatively by lower data reuse, reshapes/transposes, and weaker NPU mapping for attention. Do not derive it from a speculative stall multiplier or fixed GPU-fallback penalty.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -77,7 +77,7 @@ generation passes.
 - `scripts/analyze_coverage_gaps.py`: `--include-areas <areas>` flag
   injects area-targeted cells into the recommended_plan. Closes the
   topic-priority-misses-area-gaps mismatch.
-- `vault build --legacy-json`: auto-emits `vault-manifest.json`
+- `vault build --local-json`: auto-emits `vault-manifest.json`
   alongside corpus.json. Eliminates the recurring stale-manifest
   pre-commit failure.
 - `vault doctor`: `registry-integrity` check split into `disk-coverage`
@@ -216,7 +216,10 @@ silently dropped everything else.
 
 ### Retired tooling
 
-Archived to `scripts/_archive/` (preserved for forensic reference):
+These one-off scripts originally lived under `vault/scripts/archive/` and
+`vault-cli/scripts/archive/` after migration. **Those directories are no longer
+in the tree** (retrieve earlier revisions from git if you need the files for
+comparison):
 
 - `vault-cli/scripts/split_corpus.py` — the pre-v1.0 exporter, source of
   the defects this migration corrects.

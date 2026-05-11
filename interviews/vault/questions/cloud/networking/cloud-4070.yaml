@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-4070
+track: cloud
+level: L5
+zone: evaluation
+topic: rdma-transport
+competency_area: networking
+bloom_level: evaluate
+phase: both
+title: RDMA Reliable Connection vs Unreliable Datagram
+scenario: 'InfiniBand offers two transport modes: Reliable Connection (RC) with guaranteed delivery and ordering, and Unreliable Datagram (UD) with no delivery guarantees. NCCL uses both: RC for point-to-point transfers and UD for some collective operations. Evaluate the tradeoffs for AllReduce on a 512-GPU cluster, considering QP scalability, failure handling, and throughput.'
+question: For AllReduce on 512 GPUs, how do InfiniBand RC and UD transports trade off QP scalability, failures, and throughput?
+details:
+  realistic_solution: |
+    RC (Reliable Connection) provides ordered, reliable point-to-point delivery with hardware retransmission, which is why it is the normal choice for bulk AllReduce data movement. Its downside is QP state: with 512 GPUs and 8 rails, a full all-peer RC design needs 511 * 8 = 4088 QPs per GPU, or 2,093,056 QPs across the cluster. That is feasible but consumes HCA memory and connection setup time. UD (Unreliable Datagram) uses much less connection state because one datagram QP per rail can send to many destinations, but it does not provide reliable delivery or ordered byte streams. Software must handle loss, ordering, retries, and congestion interactions, so UD is not a drop-in multicast-based AllReduce transport. For 512 GPUs, use RC for reduce-scatter/all-gather data transfers; reserve UD-style datagrams for discovery, control-plane messages, or specialized collectives where the software protocol explicitly handles reliability.
+  common_mistake: |
+    **The Pitfall:** Choosing InfiniBand Reliable Connection (RC) for all operations.
+    **The Rationale:** SREs assume "reliable is always better," ignoring the O(N²) QP scaling requirements.
+    **The Consequence:** The network architecture fails to scale to thousands of GPUs due to HCA memory exhaustion from excessive Queue Pairs.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 512 GPUs, 8 rails, about 1KB HCA memory per QP.
+    - Full all-peer RC uses one QP per peer per rail on each GPU.
+    - UD-style datagram use can share one QP per rail for many destinations, but software must add reliability if needed.
+
+    **Calculations:**
+    - RC QPs per GPU at 512 GPUs: 511 peers * 8 rails = 4088 QPs.
+    - RC QP memory per GPU: 4088 * 1KB = about 4MB.
+    - RC QPs cluster-wide: 512 * 4088 = 2,093,056 QPs.
+    - At 16,384 GPUs, RC QPs per GPU: 16,383 * 8 = 131,064 QPs, or about 128MB at 1KB/QP.
+    - UD-style QPs per GPU if one per rail: 8 QPs; cluster-wide at 512 GPUs: 512 * 8 = 4096 QPs.
+
+    **Conclusion & Interpretation:**
+    - **Result: RC is reliable and feasible at 512 GPUs but becomes HCA-state-bound at much larger scale.** UD reduces QP state dramatically, but it shifts reliability and ordering into software and is not a generic high-throughput AllReduce replacement.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-2186
+track: cloud
+level: L4
+zone: diagnosis
+topic: collective-communication
+competency_area: networking
+bloom_level: analyze
+phase: both
+title: The Hierarchical AllReduce Asymmetry
+scenario: Your 256-GPU cluster has 32 nodes, each with 8 GPUs connected by NVLink at 900 GB/s. Nodes are connected by 8x InfiniBand NICs at 400 Gb/s each (400 GB/s aggregate per node). You run a flat Ring AllReduce across all 256 GPUs and observe that gradient synchronization takes 180 ms for 2 GB of gradients — far worse than the bandwidth-optimal prediction.
+question: Why is flat Ring AllReduce slow for 2 GB gradients across 256 GPUs, and what topology-aware algorithm would you use instead?
+details:
+  realistic_solution: 'The problem is treating the topology as a flat 256-GPU ring. Each GPU effectively gets one 400 Gb/s NIC lane, about 50 GB/s, while each node has 8 such lanes for 400 GB/s aggregate. A flat ring exposes many inter-node steps and suffers from topology contention, which explains the 180 ms observed time versus the lower bandwidth-only estimate. Hierarchical AllReduce solves this in three phases: Intra-node ReduceScatter over NVLink, Inter-node AllReduce across the 32 nodes using the 8 NIC lanes in parallel, and Intra-node AllGather over NVLink.'
+  common_mistake: |
+    **The Pitfall:** Blaming the InfiniBand switches or assuming the networking hardware is faulty.
+    **The Rationale:** Engineers assume standard algorithms automatically optimize for hardware, ignoring that a flat ring forces intra-node traffic to cross slow inter-node links unnecessarily.
+    **The Consequence:** Tearing down working network fabrics instead of simply enabling topology-aware collectives in the software.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 256 GPUs, 2 GB tensor.
+    - 32 nodes x 8 GPUs. NVLink: 900 GB/s per GPU.
+    - InfiniBand: 8 x 400 Gb/s NICs per node = 8 x 50 GB/s = 400 GB/s aggregate, modeled as one 50 GB/s NIC lane per GPU for the inter-node ring.
+
+    **Calculations:**
+    - Flat ring bandwidth lower bound per GPU: 2 x (255/256) x 2 GB / 50 GB/s ≈ 79.7 ms before latency, PCIe/NIC mapping, and contention. The observed 180 ms indicates topology and congestion overhead above the bandwidth-only model.
+    - Hierarchical intra-node ReduceScatter: (7/8) x 2 GB / 900 GB/s ≈ 1.9 ms.
+    - Inter-node AllReduce: each GPU/NIC lane carries a 2 GB / 8 = 256 MB shard across 32 nodes, so 2 x (31/32) x 256 MB / 50 GB/s ≈ 9.9 ms. Equivalently, the node moves 2 GB over 400 GB/s with the same ring factor.
+    - Hierarchical intra-node AllGather: (7/8) x 2 GB / 900 GB/s ≈ 1.9 ms.
+    - Hierarchical bandwidth estimate: 1.9 + 9.9 + 1.9 ≈ 13.7 ms, plus software and synchronization overhead.
+
+    **Conclusion & Interpretation:**
+    - **Result: Network-topology-bound.** Hierarchical AllReduce is far faster because it uses NVLink inside each node and all 8 InfiniBand NIC lanes per node for the inter-node phase, instead of exposing the full 256-GPU ring to slow inter-node steps.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

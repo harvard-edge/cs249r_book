@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-3200
+track: cloud
+level: L5
+zone: specification
+topic: mixture-of-experts
+competency_area: architecture
+bloom_level: evaluate
+phase: both
+title: MoE Fine-Grained Expert Parallelism Communication
+scenario: You are scaling a 256-expert MoE model across 32 nodes (256 H100 GPUs total, 1 expert per GPU). Within a node, GPUs communicate via NVLink (900 GB/s). Between nodes, InfiniBand NDR (400 Gb/s = 50 GB/s). Specify the communication constraints for the all-to-all expert dispatch.
+question: What communication constraints and placement rules should the all-to-all expert dispatch use across 32 H100 nodes with NVLink and NDR?
+details:
+  realistic_solution: 'The dispatch policy should treat NVLink and NDR as different tiers, not as one flat all-to-all fabric. Keep co-activated and frequently routed experts on the same node when possible, route local expert requests over NVLink first, and send only unavoidable remote expert traffic over InfiniBand NDR. Use a hierarchical all-to-all: bucket tokens by destination node, perform intra-node exchange over NVLink, perform inter-node exchange only for remote buckets, then overlap remote exchange with local expert compute. Placement should be driven by routing locality and load balance, with hot experts replicated or moved when cross-node traffic becomes the bottleneck.'
+  common_mistake: |
+    **The Pitfall:** Treating all-to-all as if all links have uniform bandwidth.
+    **The Rationale:** Failing to recognize the 18x bandwidth gap between intra-node NVLink and inter-node InfiniBand.
+    **The Consequence:** This fundamentally changes how you must place experts, leading to massive network bottlenecks if ignored.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - NVLink bandwidth: 900 GB/s.
+    - InfiniBand NDR bandwidth: 400 Gb/s = 50 GB/s.
+    - Cross-node expert traffic is far more expensive than intra-node expert traffic.
+
+    **Calculations:**
+    - Bandwidth ratio: 900 GB/s / 50 GB/s = 18x more bandwidth inside a node.
+    - A flat all-to-all can force token dispatch over the slower fabric even when colocated expert placement could keep traffic local.
+    - A hierarchical dispatch first consumes local NVLink capacity, then uses NDR only for remote expert buckets.
+
+    **Conclusion & Interpretation:**
+    - **Result: Hierarchical dispatch required.** The correct constraint is to minimize and overlap inter-node expert traffic, not to depend on hidden batch-size or token-dimension latency estimates.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

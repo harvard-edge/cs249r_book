@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: edge-1222
+track: edge
+level: L2
+zone: analyze
+topic: extreme-quantization
+competency_area: precision
+bloom_level: analyze
+phase: both
+title: GPTQ 3-bit Latency Degradation on Ampere
+scenario: Your team deployed a 70B parameter LLM onto an NVIDIA Jetson Orin edge device for a robotics application. To fit the model into the Orin's 32 GB LPDDR5 memory, the team aggressively quantized the model weights to 3-bit using GPTQ. However, during production inference, the token generation latency is exceptionally high, and profiling shows that the Ampere GPU compute units are severely underutilized despite the availability of the DLA accelerator.
+question: Why does 3-bit GPTQ make the 70B model fit on Jetson Orin but still degrade token-generation performance?
+details:
+  realistic_solution: While 3-bit quantization reduces the model size enough to fit into memory, the Ampere architecture on Jetson Orin does not provide native 3-bit tensor-core matrix multiplication. Inference kernels usually have to unpack packed 3-bit weights, apply GPTQ scales/zero-points, and feed a supported compute type such as INT8 or FP16. That runtime dequantization and packing overhead can dominate token generation, especially at batch size 1, so the smaller memory footprint does not automatically translate into lower latency.
+  common_mistake: |
+    **The Pitfall:** Assuming a smaller memory footprint always directly translates to faster inference.
+    **The Rationale:** Candidates ignore hardware-specific instruction set constraints, incorrectly assuming the Jetson Orin's Ampere GPU has native hardware support for 3-bit matrix multiplications.
+    **The Consequence:** The system can lose much of the expected memory-bandwidth benefit to unpacking, scaling, and non-native kernel overhead during runtime dequantization.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model Size: 70 billion parameters.
+    - Quantization: 3 bits per parameter, before scale/zero-point/group metadata.
+    - Hardware Capability: Jetson Orin has high INT8 throughput but lacks native 3-bit tensor-core MMA support.
+
+    **Calculations:**
+    - Packed weight size: 70e9 * 3 / 8 = 26.25e9 bytes = 26.25 GB decimal.
+    - Binary size: 26.25e9 / 2^30 = 24.4 GiB.
+    - Real footprint is larger after GPTQ group scales, zero-points, alignment, and runtime work buffers.
+    - Dequantization overhead is kernel-dependent: packed 3-bit values must be unpacked and scaled into a supported compute path, rather than executed as native 3-bit tensor operations.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~26.25 GB packed weights, plus metadata (Non-Native Precision Bound)**. The model can fit, but performance depends on the efficiency of unpack/dequant kernels and may be slower than a larger native INT8/FP16 path.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+  - reasoning_competency and reasoning_mode are not specified.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

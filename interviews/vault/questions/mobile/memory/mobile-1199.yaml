@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: mobile-1199
+track: mobile
+level: L3
+zone: analyze
+topic: kv-cache-management
+competency_area: memory
+bloom_level: analyze
+phase: inference
+title: Exynos Shared Memory KV-Cache Eviction
+scenario: You are deploying a 4B parameter int8 LLM on the Samsung Exynos 2400 NPU to process live transcriptions. The SoC utilizes a shared 12 GB LPDDR5X memory pool across the CPU, GPU, ISP, and NPU. Users report that the transcription abruptly crashes with an Out-Of-Memory (OOM) error exactly when the context reaches 4,000 tokens, but only if they are simultaneously using the camera.
+question: Why does the Exynos 2400 transcription app hit OOM near 4,000 tokens only when the camera is active?
+details:
+  realistic_solution: In a shared memory system like the Exynos 2400, the NPU does not have dedicated VRAM. The baseline system and the ISP (when the camera is active) lock down large contiguous memory segments. By calculating the remaining memory pool after the OS, ISP, and model weights are loaded, we can see that the free RAM is severely constrained. When the dynamic KV-cache allocation hits 4,000 tokens, it exhausts the last remaining bytes of the shared 12 GB pool, forcing the Linux kernel OOM killer to terminate the NPU task to protect critical system and ISP stability. Mitigating this requires paged attention or aggressive KV-cache eviction policies that monitor system-wide memory pressure.
+  common_mistake: |
+    **The Pitfall:** Assuming 12 GB of RAM is plenty for a 4 GB model and its KV cache.
+    **The Rationale:** Engineers look at total physical memory and neglect the unified architecture, failing to deduct concurrent allocations from the OS and active ISP pipelines.
+    **The Consequence:** They misdiagnose the OOM as a memory leak rather than a systemic memory exhaustion.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Total Memory Pool: 12.0 GB.
+    - Model Weights: 4B INT8 = 4.0 GB.
+    - Context Cache Rate: ~0.5 MB/token.
+
+    **Calculations:**
+    - Reserved Memory (Camera On): Baseline OS (3.5 GB) + Active ISP pipeline (2.5 GB) + Weights (4.0 GB) = 10.0 GB.
+    - Remaining Memory for KV Cache: 12.0 GB - 10.0 GB = 2.0 GB.
+    - KV Cache at 4,000 tokens: 4,000 * 0.5 MB = 2,000 MB (2.0 GB).
+
+    **Conclusion & Interpretation:**
+    - **Result: OS-Level OOM Eviction**. The KV cache consumes the final available bytes of the shared 12 GB pool, forcing the kernel to terminate the NPU process to preserve system stability.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

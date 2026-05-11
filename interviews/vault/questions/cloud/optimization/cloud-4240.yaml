@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-4240
+track: cloud
+level: L5
+zone: design
+topic: autograd-computational-graphs
+competency_area: optimization
+bloom_level: evaluate
+phase: training
+title: Quantifying activation checkpointing trade-off for LLM pretraining on MI300X
+scenario: You are pretraining a 70B parameter model on an MI300X cluster with pipeline parallelism across 8 nodes. Without activation checkpointing, peak activation memory is 130GB per device, exceeding the 192GB limit when accounting for parameters and optimizer states.
+question: How much memory does checkpointing every other transformer block save, and what compute overhead does it add on MI300X?
+details:
+  realistic_solution: 'Checkpoint every other transformer block: saves about 50% of activation memory per device, reducing activations from 130GB to 65GB. Parameters are 70B × 2 bytes / 8 = 17.5GB/device. The Adam estimate assumes FP32 master weights plus first and second moments: 3 × 70B × 4 bytes / 8 = 105GB/device, so non-activation memory is 122.5GB/device. Total memory becomes 122.5GB + 65GB = 187.5GB/device, fitting just under the 192GB MI300X limit. With every-other-block checkpointing, backward reruns forward work for the checkpointed half of the network. Treat that as about 0.5 extra forward-equivalent; under the common coarse step model where an uncheckpointed step is about 1.5 forward-equivalents of wall-clock work, the overhead is roughly 0.5 / 1.5 ≈ 33%.'
+  common_mistake: |
+    **The Pitfall:** Assuming activation checkpointing is 'free' because MI300X has high bandwidth.
+    **The Rationale:** The cost is a full extra forward pass per checkpointed segment, adding ~33% to total training FLOPs. Teams often checkpoint every block when checkpointing every other block is sufficient.
+    **The Consequence:** Wasting compute resources and slowing down training unnecessarily.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 70B params FP16 = 140GB total / 8 devices = 17.5GB params per device.
+    - Adam states (FP32 params + m + v) = 3 * 70B * 4B / 8 = 105GB per device.
+    - Activations without checkpoint = 130GB.
+
+    **Calculations:**
+    - With every-other-block checkpoint = ~65GB.
+    - Total: 17.5 + 105 + 65 = ~187.5GB.
+    - Recompute overhead: checkpointed half of blocks adds roughly one extra forward over half the network = ~0.5 full-forward equivalents.
+    - Common coarse step convention for this estimate: uncheckpointed forward+backward wall-clock work is about 1.5 forward-equivalents.
+    - Overhead = 0.5 / 1.5 ≈ 33% added step time, before cluster-specific pipeline and kernel effects.
+
+    **Conclusion & Interpretation:**
+    - **Result: 187.5GB per device and roughly 33% step overhead.** The memory fits just within the MI300X 192GB limit when scoped per device.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

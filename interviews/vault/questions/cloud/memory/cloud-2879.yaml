@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-2879
+track: cloud
+level: L4
+zone: design
+topic: activation-memory
+competency_area: memory
+bloom_level: create
+phase: training
+title: Designing a Gradient Checkpointing Segment Strategy for a 70B Model on A100
+scenario: You are fine-tuning a 70B dense Transformer on 8x A100 GPUs (Tensor Parallelism = 8). Model/optimizer states consume 52 GB per GPU, leaving ~28 GB for activations.
+question: Given a 40 GB/GPU uncheckpointed activation footprint, what gradient-checkpointing strategy keeps activations under 28 GB/GPU while minimizing recomputation for this fine-tune?
+details:
+  realistic_solution: 'Use selective checkpointing: discard and recompute the profiled checkpointable attention score/probability residency, which scales as O(S^2), while keeping MLP and residual activations that scale linearly and are more expensive to regenerate wholesale. Under tensor parallelism, each GPU owns 8 of the 64 heads, and the profiler attributes 12.88 GB of the 40 GB activation footprint to reclaimable attention tensors after kernel memory reuse. Starting from that profiled 40 GB footprint, this leaves 40 - 12.88 = 27.12 GB per GPU, just under the 28 GB budget with less recompute than full layer checkpointing.'
+  common_mistake: |
+    **The Pitfall:** Applying uniform layer-level checkpointing.
+    **The Rationale:** Candidates fail to recognize that O(S^2) attention tensors dominate memory, while O(S) MLP layers checkpoint much more cheaply.
+    **The Consequence:** Unnecessary massive recomputation overhead by throwing away MLP activations.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - VRAM budget = 80 - 52 = 28 GB for activations.
+    - Profiled uncheckpointed activation footprint = 40 GB per GPU.
+    - B=2, S=2048, 8 local heads (TP=8), 96 layers.
+    - Attention score/probability residency is FP16 and sharded by local attention heads.
+    - The 40 GB profile already includes all retained activations; profiler attribution shows 12.88 GB decimal is reclaimable by selectively checkpointing attention residency.
+
+    **Calculations:**
+    - One FP16 attention-residency tensor per layer per GPU = B * local_heads * S * S * 2 bytes.
+    - Per-layer tensor size = 2 * 8 * 2048^2 * 2 = 134,217,728 bytes = 0.125 GiB.
+    - Profiled reclaimable attention residency across 96 layers = 0.125 GiB * 96 = 12.0 GiB = 12.88 GB decimal.
+    - Remaining activation footprint after selective checkpointing = 40.00 GB - 12.88 GB = 27.12 GB.
+    - 27.12 GB < 28 GB activation budget, leaving about 0.88 GB headroom.
+
+    **Conclusion & Interpretation:**
+    - **Result:** Selectively recomputing the sharded attention score/probability tensors keeps activations at about 27.1 GB per GPU, satisfying the 28 GB budget while avoiding full-layer recomputation.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: mobile-0953
+track: mobile
+level: L6+
+zone: mastery
+topic: kv-cache-management
+competency_area: memory
+bloom_level: create
+phase: inference
+title: 'KV-Cache: Mastery — KV Cache Co-Design for Mobile LLM Architecture'
+scenario: You are designing a new 1B LLM architecture specifically for an NPU (45 TOPS INT8, 68 GB/s bandwidth) targeting 30 tok/sec at 4096-token context.
+question: How would you co-design the model architecture and KV cache management policy to meet the target?
+details:
+  realistic_solution: Co-design both the model shape and the cache policy from the 33.3ms/token budget. Use packed INT4 weights with fused dequantized matmuls, and treat the 500MB weight read as a coarse worst-case streaming lower bound rather than an exact per-token cost. Avoid standard MHA; choose GQA-4 or MQA/GQA-8 only if quality requires it, and store KV in INT8 or calibrated INT4 rather than BF16. Keep the active context at 4096 tokens for the target mode, use paged contiguous KV blocks, evict low-value old turns before code or system prompt anchors, and preserve a small sink or summary region for quality. Validate p95 decode latency with KV reads, writes, dequantization, and compute running together; if measured latency is still over 33.3ms, reduce layers, KV heads, or head_dim before increasing context length.
+  common_mistake: |
+    **The Pitfall:** Designing model depth/heads without working backward from memory bandwidth limits.
+    **The Rationale:** Candidates often use standard desktop LLM dimension ratios, assuming TOPS is the main constraint.
+    **The Consequence:** The model achieves high theoretical TOPS but fails real-world tok/sec targets because the KV cache is too large to stream over the memory bus every step.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Target: 30 tok/sec (33.3ms/token).
+    - Model: 1B params at INT4 effective storage = ~500 MB. The bandwidth estimates below use a conservative one-streamed-weight-pass-per-decode-step model; real kernels may reuse tiles or overlap traffic, so these are lower bounds, not exact latency predictions.
+    - Context: 4096.
+    - Bandwidth: 68 GB/s.
+    - Candidate transformer: 32 layers, head_dim 128.
+    - Compare BF16 MHA-16, BF16 GQA-8, and INT8 GQA-4 KV policies.
+
+    **Calculations:**
+    - BF16 MHA-16 KV read at 4096 tokens = 32 * 2 * 16 * 128 * 2B * 4096 = 1,073,741,824 bytes = 1.00 GiB = 1,073.7 MB.
+    - MHA bandwidth lower bound with streamed weights and KV read traffic = (500 MB + 1,073.7 MB) / 68 GB/s = 23.1ms/token, leaving only about 10ms for compute, dequantization, scheduling, and thermal overhead.
+    - BF16 GQA-8 KV read = 32 * 2 * 8 * 128 * 2B * 4096 = 536.9 MB; total lower bound = (500 + 536.9) / 68 = 15.2ms/token.
+    - INT8 GQA-4 KV read = 32 * 2 * 4 * 128 * 1B * 4096 = 134,217,728 bytes = 128 MiB = 134.2 MB.
+    - INT8 GQA-4 total bandwidth lower bound = (500 MB weights + 134.2 MB KV) / 68 GB/s = 9.3ms/token, leaving about 24ms for compute, dequantization, scheduling, and thermal overhead.
+    - New-token KV writes are small by comparison: INT8 GQA-4 writes 32 * 2 * 4 * 128 * 1B = 32,768 bytes/token.
+
+    **Conclusion & Interpretation:**
+    - **Result: Co-Design Needed, Not GQA Alone.** Packed INT4 weights plus INT8 GQA-4 KV gives a roughly 9.3ms bandwidth lower bound under the stated streaming model and enough margin to attempt a 30 tok/sec target; MHA or BF16 KV may fit raw bandwidth on paper but leaves too little production margin once compute and runtime overhead are included.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

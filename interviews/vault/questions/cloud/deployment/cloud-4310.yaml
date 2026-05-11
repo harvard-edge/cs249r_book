@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-4310
+track: cloud
+level: L4
+zone: diagnosis
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: analyze
+phase: inference
+title: Prefill Throughput Saturation Diagnosis
+scenario: Your prefill pool of 4 GPUs is processing at 150k tokens/s aggregate, but expected throughput is 400k tokens/s. Profiling shows GPU compute utilization at 35% and PCIe transfer utilization at 90%. All requests have sequence lengths of 512 tokens.
+question: Why is the 4-GPU prefill pool stuck at 150k tokens/s with 35% GPU compute and 90% PCIe utilization, and how would you fix it?
+details:
+  realistic_solution: 'PCIe at 90% utilization with only 35% GPU compute means the serving path is moving too much data over host-to-GPU PCIe instead of keeping the hot path resident on GPU. Token IDs and normal request metadata are far too small to explain this at 150k tokens/s, so look for weight streaming, CPU-side activation/KV staging, or a prefill-to-decode handoff that copies large tensors through pinned host memory. Fix the data path that is crossing PCIe: keep model weights resident in HBM through enough replication/sharding or quantization, send KV directly over GPU networking when available, and avoid CPU staging for intermediate tensors. Increasing batch size alone will not fix it; the goal is to remove the repeated host-device transfer causing PCIe saturation, then retune batching once GPU compute becomes the limiter.'
+  common_mistake: |
+    **The Pitfall:** Tuning batch size to fix compute utilization.
+    **The Rationale:** The real bottleneck is PCIe bandwidth.
+    **The Consequence:** Increasing batch size only increases PCIe pressure further, resulting in zero or negative throughput gains.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 150k tok/s / 512 tok/request = 293 requests/s.
+    - PCIe 4.0 x16 practical one-way payload bandwidth is roughly 25-32 GB/s per GPU.
+    - The 4-GPU pool is using about 90% of PCIe bandwidth, so observed PCIe traffic is on the order of 4 * 0.9 * 25-32 = 90-115 GB/s across the pool.
+
+    **Calculations:**
+    - Normal token input is tiny: 512 token IDs * 4 bytes * 293 requests/s ~= 0.6 MB/s, so it cannot explain 90% PCIe utilization.
+    - If host staging moves KV or activations at 64 MB/request, traffic is 293 * 64 MB ~= 18.8 GB/s; at 128 MB/request, it is ~= 37.5 GB/s.
+    - If weights or large intermediates are repeatedly streamed from host memory, only a few hundred MB/request is enough to consume the measured PCIe budget: 293 * 350 MB ~= 103 GB/s.
+
+    **Conclusion & Interpretation:**
+    - **Result: host-device transfer bound (PCIe-Bandwidth-Bound)**. The measured utilization is consistent with repeated large tensor movement, not normal request input; keep weights/KV/intermediates on the GPU path or shard/replicate so the hot data fits in HBM.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

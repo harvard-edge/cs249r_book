@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-0192
+track: cloud
+level: L6+
+zone: mastery
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: create
+phase: inference
+title: The Two-Tier SLA Conundrum
+scenario: You are the founding ML Systems Engineer at a well-funded startup. Your first product is an API powered by a 70B parameter LLM, running on a fixed cluster of 16 modern GPUs. The product has two tiers with conflicting requirements.
+question: How would you architect serving for the two product tiers on 16 GPUs without one tier hurting the other's SLA?
+details:
+  realistic_solution: |
+    Split the 16 GPUs into isolated serving pools instead of one shared queue. For example, reserve 8 GPUs as four TP=2 replicas for the premium tier and 8 GPUs as four TP=2 replicas for the standard tier, then adjust the split only from measured load. Premium replicas use small max-batch limits, short queue deadlines, reserved KV-cache, priority scheduling, and admission control that rejects or degrades requests before TTFT/TPOT SLOs are violated. Standard replicas use larger continuous batches, longer queue deadlines, lower priority, and cheaper policies such as longer batching windows or async completion. A global router enforces hard quotas and never lets standard traffic consume premium GPU memory or queue slots. If premium demand spikes, standard work can be paused or shifted to overflow capacity; premium traffic should not wait behind long standard generations.
+  common_mistake: |
+    **The Pitfall:** Proposing a single, unified serving cluster for both traffic types.
+    **The Rationale:** Less experienced engineers assume that a modern continuous batching server can handle both workloads by itself.
+    **The Consequence:** 'Head-of-Line Blocking' occurs, where a single large, long-running batch job (Standard Tier) can occupy a GPU for seconds, causing interactive requests (Premium Tier) to miss strict latency deadlines.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 16 GPUs run a 70B model with TP=2, giving 8 independent replicas.
+    - Premium SLO: TTFT <= 500 ms; standard tier tolerates multi-second queueing.
+    - A standard request may generate 500 tokens at 40 ms/token, occupying its decode slot for ~20 s.
+    - Peak mix: 20 premium requests/s and 4 standard requests/s.
+
+    **Calculations:**
+    - In a unified FIFO queue, one long standard request can sit ahead of premium work for up to ~20 s, far above the 500 ms TTFT budget.
+    - With 4 premium replicas, each handles ~5 premium requests/s. A 500 ms TTFT budget allows only about 2-3 queued premium requests per replica before violating SLO.
+    - Hard isolation gives premium replicas their own queue, KV-cache, and batching limits; standard traffic can fill the remaining 4 replicas without increasing premium queueing delay.
+
+    **Conclusion & Interpretation:**
+    - **Result: Queue Isolation Required.** The quantitative risk is not average utilization; it is that a 20 s standard decode can consume the entire premium latency budget many times over. Separate pools, quotas, and admission control make the tier SLOs independently enforceable.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

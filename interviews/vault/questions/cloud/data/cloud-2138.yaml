@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-2138
+track: cloud
+level: L4
+zone: optimization
+topic: feature-store-management
+competency_area: data
+bloom_level: analyze
+phase: both
+title: The Feature Store Hot Key Problem
+scenario: Your feature store is backed by a Redis Cluster with 16 shards. Feature keys are sharded by user_id. During a viral marketing campaign, a single celebrity influencer drives 500K simultaneous users to view their profile page. The recommendation model needs to look up the influencer's item features for ranking. Redis P99 latency spikes from 2ms to 800ms, and the single shard holding the influencer's user_id becomes CPU-saturated.
+question: How do you fix this single-shard saturation without re-architecting the entire feature store?
+details:
+  realistic_solution: |
+    This is the hot-key problem: one logical key is concentrating reads on one Redis shard. Immediate fixes include request coalescing in the serving tier, a short-TTL cache when feature freshness allows it, and read replication/key salting for the hot key so reads fan out across multiple shards. If writes are frequent, route them through a single source of truth and asynchronously refresh replicas; otherwise replicas can serve stale or inconsistent features. Adding generic shards alone is insufficient because the unsalted hot key still hashes to one shard.
+  common_mistake: |
+    **The Pitfall:** Adding more Redis shards to the cluster.
+    **The Rationale:** Engineers assume scaling horizontally solves all database load issues.
+    **The Consequence:** Because the hot key lives on exactly one shard, adding shards doesn't split a single key's traffic. The single shard remains saturated while the new shards sit idle.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Traffic spike: 500K QPS.
+    - Feature lookups per request: 3.
+    - Redis shard limit: ~100K ops/sec.
+
+    **Calculations:**
+    - Total ops to hot shard: 500K QPS * 3 = 1.5M ops/sec.
+    - Overload factor: 1.5M ops/sec / 100K ops/sec = 15x overload.
+    - To stay under 100K ops/sec per shard using salting/replicas, need ceil(1.5M / 100K) = 15 shards or replicas serving the hot key.
+    - With 16-way salting across the existing cluster, load per shard is 1.5M / 16 ≈ 94K ops/sec.
+    - Client TTL caching can reduce this further, but the reduction depends on the number of serving processes and request reuse, not just the TTL.
+
+    **Conclusion & Interpretation:**
+    - **Result: Hot-Key Fanout Needed**. The single shard is overloaded by 15x; salting or read replicas spread the hot key enough to fit within shard capacity, while coalescing and TTL caches reduce upstream request amplification.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

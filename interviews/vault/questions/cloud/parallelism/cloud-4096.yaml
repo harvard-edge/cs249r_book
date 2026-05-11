@@ -1,0 +1,39 @@
+schema_version: '1.0'
+id: cloud-4096
+track: cloud
+level: L4
+zone: design
+topic: model-tensor-parallelism
+competency_area: parallelism
+bloom_level: analyze
+phase: training
+title: Embedding Table Parallelism Strategy
+scenario: A large language model has a vocabulary of 128K tokens with hidden_dim=12288. The embedding table is 128K × 12288 × 2B ≈ 3.15 GB in BF16. You are using Tensor Parallelism (TP) = 8.
+question: For a 3.15 GB embedding table with TP=8, what are two valid sharding strategies and their tradeoffs?
+details:
+  realistic_solution: 'Strategy 1 — Vocabulary Parallelism: Split the embedding table along the vocabulary dimension. Each GPU holds 16K rows, about 393 MB decimal. Pros: memory efficient and naturally aligns with a tied vocabulary-parallel output head. Cons: token lookups require routing/combining partial embeddings, typically via reduce-scatter, all-gather, or an equivalent collective depending on the downstream layout. Strategy 2 — Column Parallelism: Split along hidden_dim. Each GPU holds 1536 columns, also about 393 MB. Pros: each rank produces a local hidden slice that can feed column-sharded downstream layers. Cons: it is less natural if the embedding is tied to the output projection, which is usually vocabulary-parallel.'
+  common_mistake: |
+    **The Pitfall:** Assuming the embedding table must be fully replicated on all GPUs.
+    **The Rationale:** Candidates default to replicating "small" input layers to avoid initial communication overhead.
+    **The Consequence:** This wastes VRAM unnecessarily since each token only accesses one row, consuming about 25 GB cluster-wide instead of one 3.15 GB sharded copy.
+  napkin_math: |
+    **Assumptions & Constraints:** 128K vocab, 12288 hidden_dim, TP=8, BF16 (2 bytes/param), decimal GB.
+    **Calculations:** Full table = 128,000 × 12,288 × 2 = 3,145,728,000 bytes ≈ 3.15 GB. Vocabulary parallelism: 128K / 8 = 16K rows per GPU, so 3.15 GB / 8 ≈ 393 MB/GPU. Column parallelism: 12288 / 8 = 1536 columns per GPU, also 3.15 GB / 8 ≈ 393 MB/GPU. Full replication would consume 3.15 GB × 8 ≈ 25.2 GB cluster-wide, about 22 GB more than a single sharded copy.
+    **Conclusion & Interpretation:** **Result: Sharding reduces per-GPU footprint to ~393 MB.** Vocabulary sharding is usually best for tied input/output embeddings; column sharding can be useful when the next layers consume hidden-dimension shards.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

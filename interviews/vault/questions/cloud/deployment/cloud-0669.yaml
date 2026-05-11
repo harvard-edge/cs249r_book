@@ -1,0 +1,45 @@
+schema_version: '1.0'
+id: cloud-0669
+track: cloud
+level: L5
+zone: design
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: create
+phase: inference
+title: The Disaggregated Serving Architecture
+scenario: In an LLM deployment, users sending very long prompts are causing massive latency spikes for other users who are currently in the middle of generating tokens.
+question: How do we structurally isolate compute-bound long prompts from memory-bound token generation?
+details:
+  realistic_solution: Use phase-aware isolation for serving. Prefill is compute-bound and can monopolize GPU ALUs, while decode is memory-bandwidth-bound and latency-sensitive. A valid design can split prefill and decode onto separate GPU pools, or isolate them with separate queues, admission control, and schedulers that reserve decode capacity. In a disaggregated design, prefill workers produce the initial KV cache and hand it off to decode workers or a KV-cache service, while the scheduler controls batching and backpressure so long prompts cannot block active token generation.
+  common_mistake: |
+    **The Pitfall:** Suggesting naive solutions like "Rate-limit long prompts" or "Add more GPUs to the pool."
+    **The Rationale:** These don't address the fundamental resource contention. The prompt phase (Prefill) is heavily compute-bound and monopolizes the GPU ALUs, starving the token generation phase (Decode), which is memory-bandwidth bound.
+    **The Consequence:** Persistent tail latency issues and poor resource utilization despite scaling up the cluster.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - One long 10k-token prefill occupies a shared GPU for 2.0 seconds.
+       - Active decode requests need one scheduling slot every 50 ms to sustain 20 tokens/sec.
+       - Concurrent active decode requests: 50.
+    2. **Calculations:**
+       - During a 2.0 second uninterrupted prefill, each decode request misses 2.0 / 0.05 = 40 decode slots.
+       - Across 50 users, the shared pool defers 50 × 40 = 2,000 token-generation opportunities.
+       - User-visible stall exposure is 50 users × 2.0 seconds = 100 user-seconds.
+    3. **Conclusion & Interpretation:** **Head-of-Line Blocking.** Phase isolation prevents compute-heavy prefill work from consuming the scheduling slots and GPU resources needed by memory-heavy decode.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

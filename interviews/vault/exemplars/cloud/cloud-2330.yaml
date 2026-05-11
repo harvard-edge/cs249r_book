@@ -1,0 +1,28 @@
+schema_version: 1
+id: cloud-2330
+title: MoE Router Overhead in FP8 Inference
+topic: profiling-bottleneck-analysis
+status: published
+provenance: human
+scenario: You are serving a 140B MoE model. The entire model is quantized to FP8 E4M3. Because MoE router logits overflow the E4M3 range, the architecture requires casting activations to E5M2 just for the router, then back to E4M3. This casting introduces a 15ms latency penalty per generated token.
+question: How should the architecture be optimized to eliminate this latency penalty?
+details:
+  realistic_solution: 'Optimizing the cast is the wrong architectural approach because the router computation itself is purely compute-bound (a tiny matrix multiplication compared to the massive expert layers). The memory bandwidth saved by keeping the router inputs in FP8 is negligible, but the latency cost of dispatching casting kernels is high. The correct architecture is to keep the router inputs, weights, and computation entirely in higher precision (BF16 or FP16). By bypassing FP8 entirely for the routing mechanism, you eliminate the casting overhead, prevent numeric overflow, and incur almost zero memory penalty since the router parameters represent <0.1% of the model.'
+  common_mistake: |
+    **The Pitfall:** Attempting to optimize the casting kernel using shared memory to make the E4M3 to E5M2 conversion faster.
+    **The Rationale:** Focusing on optimizing the symptoms (the cast operation) rather than questioning the architectural necessity of the cast.
+    **The Consequence:** Kernel launch overhead remains, resulting in wasted optimization effort and persistent latency penalties.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 140B MoE model, hidden_dim = 8192, num_experts = 8.
+       - 32 layers, requiring 2 casting kernels (upcast, downcast) per layer.
+    2. **Calculations:**
+       - Router weights: 8192 × 8 = 65,536 parameters.
+       - FP8 memory: 65 KB. BF16 memory: 131 KB.
+       - Kernel launch overhead: ~0.2 ms per kernel.
+       - Total overhead: 32 layers × 2 kernels × 0.2 ms = 12.8 ms pure launch overhead.
+    3. **Conclusion & Interpretation:**
+       - **Result: Kernel-Launch-Bound.** The memory difference is negligible (<100 KB), but kernel launches dominate. Bypassing FP8 for the router entirely is optimal.
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

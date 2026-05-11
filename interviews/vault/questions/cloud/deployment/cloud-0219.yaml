@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-0219
+track: cloud
+level: L5
+zone: diagnosis
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: evaluate
+phase: inference
+title: The Multi-Tenant GPU Sharing Problem
+scenario: 'You manage an inference platform serving 7 different small models (each <10GB). Your finance team wants to consolidate them onto a single A100-80GB using MIG (Multi-Instance GPU) to save costs. Each MIG slice gets 1/7th of the GPU: ~11 GB memory, ~45 TFLOPS. After deployment, while average throughput scales down predictably, two of the seven models experience severe, unpredictable tail latency spikes.'
+question: What went wrong?
+details:
+  realistic_solution: MIG partitions compute and memory capacity, but it does not give every tenant the same isolation for shared cache and HBM behavior that a dedicated GPU would provide. The two affected models are likely memory-bandwidth-bound or cache-sensitive, so their tail latency is coupled to the other tenants' memory traffic. The important failure is not that each slice gets an exact 1/7 share of bandwidth; it is that low-arithmetic-intensity models have little compute slack when shared L2/HBM pressure rises. Compute-heavy tenants should degrade more predictably with the smaller MIG compute slice, but they are not guaranteed to be completely isolated from all QoS effects.
+  common_mistake: |
+    **The Pitfall:** "MIG provides perfect isolation, so each model should perform as if it has a dedicated 1/7th GPU."
+    **The Rationale:** MIG isolates compute and memory capacity.
+    **The Consequence:** But it does not isolate all resources.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - A100-80GB specs: 2 TB/s bandwidth, 312 TFLOPS FP16.
+    - Ridge point = 312 TFLOPS / 2 TB/s = 156 Ops/Byte.
+    - MIG 1g.10gb slice: ~45 TFLOPS (1/7 of compute, more isolated than shared cache/HBM behavior).
+
+    **Calculations:**
+    - Memory-bound model example (AI = 5 Ops/Byte): with a dedicated full GPU, the roof is 5 Ops/Byte * 2 TB/s = 10 TOPS.
+    - Under MIG consolidation, the model no longer has the full-GPU cache/bandwidth environment. If shared-memory pressure reduces effective bandwidth to some fraction f of 2 TB/s, its roof becomes 5 * f * 2 TB/s.
+    - For example, f = 1/3 gives ~3.3 TOPS and f = 1/7 gives ~1.4 TOPS; the exact split is workload- and scheduler-dependent, which is why tail latency can be unpredictable.
+    - Compute-bound model (AI = 300 Ops/Byte): demand is well above the full-GPU ridge point, so it is limited mostly by the smaller MIG compute allocation. It still can see QoS effects, but the primary expected slowdown is the smaller compute slice rather than bandwidth collapse.
+
+    **Conclusion & Interpretation:**
+    - **Result: Shared L2/HBM Contention**. MIG improves isolation for compute and memory capacity, but memory-bound or cache-sensitive models can still be coupled through shared bandwidth/cache behavior, causing tail latency spikes that average throughput hides.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

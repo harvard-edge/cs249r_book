@@ -1,0 +1,56 @@
+schema_version: '1.0'
+id: edge-2378
+track: edge
+level: L3
+zone: implement
+topic: communication-computation-overlap
+competency_area: optimization
+bloom_level: apply
+phase: both
+title: Asynchronous Double-Buffering for Edge Bounding Box Tracking
+scenario: A smart camera uses a Hailo-8 accelerator to run an object detector cascaded with a heavy tracker running on the host ARM CPU, communicating over PCIe Gen3 x2.
+question: How would you apply a double-buffering scheme to overlap the host's bounding box decoding with the accelerator's INT8 convolutions?
+details:
+  realistic_solution: |
+    Allocate two pinned host/DMA buffers and alternate their roles. While the Hailo-8 accelerator runs INT8 convolutions for frame N using buffer A, the host CPU decodes and post-processes completed bounding boxes for frame N-1 from buffer B, then refills buffer B for frame N+1. Schedule PCIe transfers with explicit completion events: host-to-device copy, accelerator inference, device-to-host output copy, then host decode. A small queue or fence marks each buffer as free, in-flight on the accelerator, or ready for host decoding, so the CPU never reads a buffer until accelerator output is complete and the accelerator never consumes a buffer while the host is modifying it.
+  common_mistake: |
+    **The Pitfall:** Failing to account for the latency of the PCIe bus transfer itself.
+    **The Rationale:** Candidates assume computations on the next frame can begin instantly without accounting for the time required to copy data to the accelerator.
+    **The Consequence:** The overlapping scheme is broken because the accelerator is left starving for data, failing to hide the transfer latency.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 1080p frame size: 1920 * 1080 * 3 bytes (RGB) = 6.22 MB.
+    - PCIe Gen3 x2 usable bandwidth estimate: about 1.6 GB/s after overhead.
+    - Accelerator INT8 convolution time example: 12 ms per frame.
+    - Host bounding-box decode/tracker update example: 4 ms per frame.
+
+    **Calculations:**
+    - Host-to-device frame transfer time ~= 6.22 MB / 1600 MB/s = 3.9 ms.
+    - Device-to-host bounding-box output is small, so assume <1 ms unless detections are unusually dense.
+    - Without overlap, per-frame path ~= 3.9 ms copy + 12 ms accelerator + 1 ms output + 4 ms host decode = 20.9 ms.
+    - With double-buffering after pipeline warm-up, frame period is bounded by max(accelerator path 3.9 + 12 + 1 = 16.9 ms, host decode/refill path about 4 ms), so about 16.9 ms.
+    - Two input DMA buffers require 2 * 6.22 MB = 12.44 MB, which is small relative to the latency saved.
+
+    **Conclusion & Interpretation:**
+    - **Result: communication/computation overlap reduces the steady-state frame period from about 20.9 ms to about 16.9 ms in this example.** The design is PCIe-latency-hiding, not primarily memory-footprint-bound.
+status: published
+provenance: llm-draft
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: passed
+validation_date: '2026-04-25'
+validation_model: pydantic-1.0
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-25'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+  - gemini-generated
+  - target-mastery-L3
+created_at: '2026-04-25'

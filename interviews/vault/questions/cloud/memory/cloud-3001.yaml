@@ -1,0 +1,56 @@
+schema_version: '1.0'
+id: cloud-3001
+track: cloud
+level: L5
+zone: evaluation
+topic: kv-cache-management
+competency_area: memory
+bloom_level: evaluate
+phase: inference
+title: 'KV-Cache: Evaluate KV Cache Quantization Tradeoffs on H100'
+scenario: 'For a 13B LLM on a GPU serving 50 concurrent users with max 4096-token sequences, compare three KV cache strategies: (A) FP16, (B) INT8, (C) INT4.'
+question: How do FP16, INT8, and INT4 KV caches compare for HBM usage, decode throughput, and quality on this 13B workload?
+details:
+  realistic_solution: |
+    FP16 is the quality baseline but uses the most HBM and KV read bandwidth. INT8 roughly halves KV traffic with small quality risk when scales are chosen per group or per channel. INT4 cuts KV traffic to about one quarter of FP16 before metadata, but dequantization overhead and lower numerical fidelity mean throughput does not automatically improve by 4x. For this 50-user workload, INT8 is the conservative production choice; INT4 is useful when HBM capacity or long-context concurrency is the bottleneck and must be gated by quality evaluation.
+  common_mistake: |
+    **The Pitfall:** Assuming INT4 KV cache has exactly 4x less memory than FP16.
+    **The Rationale:** Candidates forget to account for quantization overhead (scale factors and zero points).
+    **The Consequence:** Memory budgets are overly optimistic, leading to OOM errors when deploying at max concurrency.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 13B model: 40 layers, 8 KV heads, 128 head_dim.
+    - 50 users × 4096 tokens = 204,800 token slots.
+    - KV stores both K and V.
+    - Quantization metadata: one scale/zero group per 128 values, approximated as 4 bytes per group.
+
+    **Calculations:**
+    - FP16 per token per layer: 2 tensors * 8 heads * 128 dim * 2B = 4096B.
+    - FP16 per token all layers: 4096B * 40 = 163,840B = 160 KiB.
+    - FP16 total: 204,800 * 163,840B = 33.55 GB.
+    - INT8 per token per layer: 2048B data + (2048 / 128) * 4B metadata = 2112B.
+    - INT8 total: 204,800 * 2112B * 40 = 17.30 GB.
+    - INT4 per token per layer: 1024B data + 64B metadata = 1088B.
+    - INT4 total: 204,800 * 1088B * 40 = 8.91 GB.
+    - Bandwidth-limited decode upper-bound traffic ratios: FP16/INT8 = 1.94x, FP16/INT4 = 3.76x.
+    - Real end-to-end throughput gains are lower because attention compute, dequantization, scheduling, and sampling remain.
+
+    **Conclusion & Interpretation:**
+    - **Result: FP16 ~33.55 GB, INT8 ~17.30 GB, INT4 ~8.91 GB for the KV cache.** INT8 usually gives safer quality with about 2x KV bandwidth relief; INT4 gives the largest capacity gain but needs stricter quality validation and will not guarantee a 4x decode-throughput gain.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

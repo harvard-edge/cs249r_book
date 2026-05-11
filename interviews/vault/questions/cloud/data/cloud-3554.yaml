@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-3554
+track: cloud
+level: L3
+zone: analyze
+topic: storage-format-selection
+competency_area: data
+bloom_level: analyze
+phase: both
+title: 'H100 Data Ingestion: Optimizing Storage for Large-Scale ML'
+scenario: You're responsible for optimizing the data pipeline for a massive deep learning model training on an NVIDIA H100 GPU cluster. Your dataset, comprising billions of high-resolution image feature vectors, totals 10 PB and is currently stored in a generic row-oriented format on a shared network file system. You've observed significant GPU idle time, indicating an I/O bottleneck.
+question: How would you redesign storage and ingestion for the 10 PB image-feature dataset to maximize H100 utilization?
+details:
+  realistic_solution: |
+    Redesign the hot training path as sharded, sequential tensor records rather than a generic row store on a shared filesystem. For image-feature vectors, use large TFRecord/WebDataset-style shards or a custom binary tensor format with compact metadata; keep Parquet only for metadata, labels, and feature-analysis queries where columnar access helps. Stage active shards from object or network storage into a node-local NVMe cache, prefetch from NVMe into host memory, decode or decompress with parallel data-loader workers, and feed H100 workers with bounded queues. Size the network and cache for both average epoch throughput and burst throughput during worker synchronization. GPUDirect Storage can help for local NVMe-to-GPU transfers after data is already in a GPU-readable tensor layout, but it does not replace sharding, caching, decompression sizing, or loader parallelism.
+  common_mistake: |
+    **The Pitfall:** Focusing solely on raw GPU compute power and neglecting the I/O subsystem.
+    **The Rationale:** Candidates assume standard storage solutions can keep up with modern accelerators.
+    **The Consequence:** They propose solutions that shift the bottleneck to CPU-intensive compression or fail to address the data delivery bottleneck to HBM3, causing severe GPU underutilization.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Dataset size is 10PB in decimal units.
+    - One weekly full pass requires streaming the whole dataset over 7 days.
+    - Each NVMe drive provides about 5GB/s sustained reads.
+    - Design for 4x burst headroom above the average epoch rate to cover synchronization and readahead bursts.
+
+    **Calculations:**
+    - Average weekly scan rate = 10PB / (7 * 24 * 3600s) = about 16.5GB/s.
+    - Burst target = 16.5GB/s * 4 = about 66GB/s per training island or cache domain.
+    - NVMe drives for that burst target = 66GB/s / 5GB/s = 13.2, so plan for at least 14 drives before replication and failure headroom.
+    - Compression lowers bytes read only when decompression can keep up; otherwise it moves the bottleneck to CPU data loaders.
+
+    **Conclusion & Interpretation:**
+    - **Result: Cache and loader sizing, not format alone, determines utilization.** A defensible design needs sharded tensor records, local NVMe cache capacity, parallel decompression, prefetch queues, and enough network bandwidth to sustain about 16.5GB/s average plus burst headroom.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

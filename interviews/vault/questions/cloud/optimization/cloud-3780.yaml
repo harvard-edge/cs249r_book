@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-3780
+track: cloud
+level: L5
+zone: specification
+topic: flash-attention
+competency_area: optimization
+bloom_level: evaluate
+phase: inference
+title: 'FlashAttention on TPU: XLA Attention vs Pallas Kernels'
+scenario: Your team trains a 40B model on TPU v5e pods. XLA generates attention kernels automatically, but profiling shows one attention path materializes large intermediates for your shape. A colleague suggests writing custom FlashAttention-style kernels using JAX Pallas.
+question: What architectural differences matter for FlashAttention-style kernels on TPU v5e versus GPUs, and is a manual JAX Pallas kernel worth it?
+details:
+  realistic_solution: The important difference is not a simple "TPU has more SRAM" rule. TPU v5e exposes per-core VMEM and MXU-oriented matrix execution, while GPUs expose per-SM shared memory, warps, tensor cores, and different memory hierarchy constraints. Larger VMEM can permit larger software tiles, but tile choices also depend on layout, double buffering, compiler scheduling, and MXU utilization. XLA may already generate fused or memory-efficient attention for some shapes, while other paths can still materialize large intermediates or miss a useful tiling strategy. A manual JAX Pallas kernel is worth considering only after profiling shows attention is dominated by avoidable HBM traffic or poor fusion for the target shapes. It is justified when a Pallas prototype beats XLA-generated attention after accounting for maintenance, numerical stability, backward pass needs, and compiler maturity. It is not justified from sequence length alone; for supported shapes where XLA already emits an
+    efficient attention kernel, the custom kernel may add risk without speedup.
+  common_mistake: |
+    **The Pitfall:** Assuming a TPU's FlashAttention implementation is identical to a GPU's.
+    **The Rationale:** Candidates ignore that TPU VMEM, MXU execution, GPU shared memory, tensor cores, compiler fusion, and layout constraints lead to different tile and scheduling choices.
+    **The Consequence:** Sub-optimal tile sizing that fails to leverage the TPU's architecture, missing out on massive matrix multiply unit (MXU) utilization gains.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Compare one BF16 attention tile with Br=Bc=B and d=128.
+    - Store Q, K, V, O tiles plus the score tile S: memory ~= 2 bytes * (4Bd + B^2), ignoring small row statistics and double buffers.
+    - TPU v5e VMEM is much larger than a typical GPU SM shared-memory budget, but usable tile size also depends on layout and compiler scheduling.
+
+    **Calculations:**
+    - B=128: 2 * (4 * 128 * 128 + 128^2) = 163,840 bytes = 160 KiB.
+    - B=512: 2 * (4 * 512 * 128 + 512^2) = 1,048,576 bytes = 1 MiB.
+    - A larger VMEM budget can make B=512-style tiles plausible on TPU, while the B=128 example is closer to a GPU shared-memory-sized tile.
+
+    **Conclusion & Interpretation:**
+    - **Result: workload-dependent**. Pallas is justified only if profiling shows XLA's generated attention path is leaving avoidable HBM traffic or poor tiling for the target shapes; there is no fixed sequence-length threshold.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

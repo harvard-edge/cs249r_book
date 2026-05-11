@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: edge-0583
+track: edge
+level: L5
+zone: specification
+topic: real-time-deadlines
+competency_area: compute
+bloom_level: evaluate
+phase: inference
+title: The Perception Pipeline Fusion Fallacy
+scenario: 'Your autonomous vehicle perception team is working to hit a strict 33ms per-frame deadline on a power-budgeted Jetson AGX Orin platform (60W). Currently, the pipeline runs two separate INT8-quantized models sequentially: a 5 TFLOP object detector and an 8 TFLOP segmentation model, taking a combined 47ms. A teammate proposes fusing these into a single, multi-headed model. The fused model has a shared backbone, reducing the total compute to 11 TFLOPs. They argue this will save ~15% of FLOPs and should easily get you under the 33ms deadline.'
+question: Under what conditions could this optimization paradoxically increase end-to-end latency and cause you to miss the deadline even more severely?
+details:
+  realistic_solution: The proposal is risky if fusion creates a large shared intermediate tensor that no longer fits in cache or in the runtime's preferred tiling plan. A 300MB tensor spilled through DRAM adds about 600MB of read/write traffic per frame, and peak-bandwidth arithmetic only captures the best-case transfer floor. In practice, that traffic can evict useful data from L2, invalidate kernel-fusion locality, force layout conversions, and introduce CPU/GPU synchronization around the multi-head boundary. The paradoxical latency increase occurs when those DRAM, tiling, and synchronization costs outweigh the 15% FLOP reduction.
+  common_mistake: |
+    **The Pitfall:** Focusing exclusively on FLOP reduction.
+    **The Rationale:** Engineers assume that a reduction in total operations automatically translates to lower latency, arguing '11 TFLOPs is faster than 13 TFLOPs'.
+    **The Consequence:** This completely ignores the memory subsystem, which is often the real bottleneck. Memory stalling leads to massive latency regressions despite lower raw compute operations.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Sequential models: 13 TFLOPs.
+    - Fused model FLOPs reduced to 11 TFLOPs.
+    - Jetson AGX Orin memory bandwidth = 204.8 GB/s.
+    - Fusion creates a 300MB intermediate tensor requiring one DRAM write and one later DRAM read.
+
+    **Calculations:**
+    - Intermediate tensor traffic = 300MB read + 300MB write = 600MB.
+    - Peak-bandwidth transfer floor = 600MB / 204.8GB/s = 2.93ms.
+    - If this spill is the only extra traffic, it is small compared with the 33ms deadline.
+    - If the spill breaks tiling/fusion across many layers, the runtime may reread activations and weights repeatedly, adding many GB of traffic and cache misses beyond the 600MB floor.
+
+    **Conclusion & Interpretation:**
+    - **Result: Peak DRAM math gives only a lower bound**. The fused model can still be slower when cache thrashing and repeated activation movement degrade kernel efficiency; the issue is not proven away by dividing FLOPs by one 600MB transfer.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

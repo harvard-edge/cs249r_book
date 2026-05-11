@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: edge-1328
+track: edge
+level: L5
+zone: evaluation
+topic: mixed-precision-training
+competency_area: precision
+bloom_level: evaluate
+phase: training
+title: Mixed-Precision Strategy for On-Premise LLM
+scenario: You are deploying a 20B parameter autoregressive LLM on an edge accelerator with 32 GB of memory, 136 GB/s memory bandwidth, 400 TOPS of INT8 compute, and a 75W power envelope. Option A uses strict W8A8. Option B uses W8A16.
+question: Should the 20B LLM use W8A8 or W8A16, and how do memory bandwidth and accuracy drive the choice?
+details:
+  realistic_solution: |
+    Choose Option B (W8A16) for batch-1 autoregressive decoding unless profiling shows activation bandwidth is the dominant bottleneck and W8A8 passes accuracy checks. Both options keep weights at INT8, so the 20B weights occupy about 20 GB and fit within the 32 GB memory budget while leaving room for KV cache and runtime buffers. The difference is activation precision: W8A8 reduces activation traffic and may help prefill or large-batch throughput, but decoding is usually dominated by streaming the large weight working set and KV-cache accesses, so the extra INT8 activation speedup often cannot be realized. W8A16 preserves more activation precision and is therefore the safer default for decoding; W8A8 is reasonable only when measured latency or power gains justify the accuracy risk.
+  common_mistake: |
+    **The Pitfall:** Assuming W8A8 is strictly better for end-to-end latency.
+    **The Rationale:** Candidates focus solely on the INT8 compute advantage and ignore the decoding phase's bottleneck.
+    **The Consequence:** Sacrificing accuracy for a compute speedup that cannot be realized because generation is memory-bound.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 20B model.
+    - Both options use INT8 weights: 20B parameters * 1 byte ≈ 20 GB.
+    - Memory bandwidth = 136 GB/s.
+    - Peak compute = 400 TOPS.
+    - Autoregressive decoding batch size = 1.
+
+    **Calculations:**
+    - Approximate decode compute per token: 20B MACs * 2 ops/MAC = 40 GOPs.
+    - Compute-only lower bound: 40 GOPs / 400 TOPS = 0.1 ms.
+    - If the implementation streams the full INT8 weight working set from DRAM for one generated token, the worst-case bandwidth time is 20 GB / 136 GB/s ≈ 147 ms.
+    - Real decode latency depends on layer scheduling, on-chip reuse, KV-cache reads/writes, batch size, and runtime kernels, so 147 ms is a harsh streaming bound rather than a guaranteed per-token lower bound.
+    - Switching W8A16 to W8A8 reduces activation traffic, but it does not reduce the 20 GB INT8 weights common to both options or eliminate KV-cache bandwidth.
+
+    **Conclusion & Interpretation:**
+    - **Result: decoding is likely memory-sensitive, but the exact bottleneck must be profiled.** W8A16 is the safer default because it preserves activation accuracy while W8A8's activation-bandwidth savings may not matter when weights, KV cache, and scheduling overhead dominate; choose W8A8 only if profiling and accuracy validation support it.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

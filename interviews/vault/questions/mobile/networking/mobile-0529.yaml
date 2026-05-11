@@ -1,0 +1,58 @@
+schema_version: '1.0'
+id: mobile-0529
+track: mobile
+level: L3
+zone: fluency
+topic: collective-communication
+competency_area: networking
+bloom_level: apply
+phase: inference
+title: The Cross-Country Trip on a City Bus
+scenario: You are the Staff ML Engineer on a mobile team building a real-time translation app. The app streams audio to a cloud-hosted ASR+LLM pipeline. Mobile-side profiling shows that network round-trip time is fast (40ms), but cloud traces isolate 500ms P99 latency inside a single multi-GPU LLM serving node. The LLM uses tensor parallelism across 8 GPUs, but the server is moving tensor-parallel exchanges over PCIe Gen4 instead of NVLink.
+question: Why is the cloud LLM server showing 500ms P99 latency despite fast network RTT and high GPU utilization?
+details:
+  realistic_solution: The correct diagnosis is a severe interconnect bottleneck on the PCIe bus inside the serving node. Tensor parallelism for large models requires frequent, high-bandwidth communication between GPUs for every generated token. NVLink is purpose-built for this traffic, while PCIe Gen4 provides far less bandwidth for peer-to-peer exchanges. The high GPU utilization is misleading; the GPUs can appear busy while kernels are stalled on tensor-parallel communication. This is a communication-bound serving problem, not a mobile RTT or GPU-compute problem.
+  common_mistake: |
+    **The Pitfall:** Misinterpreting high GPU utilization as a compute bottleneck.
+    **The Rationale:** Engineers often see high GPU utilization and assume the system is compute-bound, or they incorrectly blame the data center network instead of intra-server communication.
+    **The Consequence:** This leads to purchasing more powerful GPUs or upgrading external networks, neither of which solves the PCIe interconnect bottleneck.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Network round-trip: 40ms, already measured separately from server time.
+    - Cloud trace shows 500ms P99 inside the LLM serving node.
+    - Tensor-parallel exchange volume: 4GB aggregate per generated token across GPUs.
+    - PCIe Gen4 peer-to-peer bandwidth: ~32 GB/s.
+    - NVLink-class fabric bandwidth: ~900 GB/s.
+
+    **Calculations:**
+    - PCIe transfer time per token = 4GB / 32 GB/s = 0.125s = 125ms.
+    - Three generated tokens with this exchange volume add about 3 * 125ms = 375ms of communication.
+    - NVLink transfer time for the same volume = 4GB / 900 GB/s = ~4.4ms per token.
+
+    **Conclusion & Interpretation:**
+    - **Result: Hundreds of ms of PCIe Data Movement (Communication-Bound)**. The 500ms P99 is consistent with tensor-parallel traffic crossing PCIe instead of NVLink inside the serving node.
+  options:
+    - The server is compute-bound because GPU utilization is at 90%, and a more powerful GPU like the B200 is needed.
+    - The HBM3 memory latency is too high (~300 ns), creating a memory wall that stalls the GPU cores.
+    - The system is communication-bound due to using the low-bandwidth PCIe bus for tensor parallel exchanges instead of the high-bandwidth NVLink fabric.
+    - The data center's InfiniBand network is saturated, as the 8 GPUs are likely in different racks, causing high latency between them.
+  correct_index: 2
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+  - Reasoning_competency and reasoning_mode are not specified, which is unusual for an L3 question.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

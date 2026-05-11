@@ -36,7 +36,7 @@ async def _():
 
     H100_TFLOPS = Hardware.Cloud.H100.compute.peak_flops.m_as("TFLOPs/s")
     H100_RAM    = Hardware.Cloud.H100.memory.capacity.m_as("GB")
-    ESP32_RAM_KB = Hardware.Tiny.ESP32_S3.memory.capacity.m_as("KiB")
+    ESP32_RAM_KB = Hardware.Tiny.ESP32_S3.memory.sram_capacity.m_as("KiB")
 
     RESNET50_PARAMS = Models.ResNet50.parameters.m_as("count")
     RESNET50_SIZE_MB = RESNET50_PARAMS * 2 / (1024 * 1024)
@@ -96,7 +96,7 @@ def _(LAB_CSS, mo):
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
                 <span class="badge badge-info">Exponential Cost Curve 2^(N-1)</span>
                 <span class="badge badge-warn">Iteration Velocity &gt; Starting Accuracy</span>
-                <span class="badge badge-fail">200x OOM Discovered at Stage 5</span>
+                <span class="badge badge-fail">~100x OOM Discovered at Stage 5</span>
             </div>
         </div>
         """),

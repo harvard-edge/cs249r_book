@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-4456
+track: cloud
+level: L4
+zone: diagnosis
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: analyze
+phase: inference
+title: Decode Straggler Detection in Large Batch Disaggregated Serving
+scenario: Decode pool P99 TPOT is 3x higher than median TPOT. Profiling shows most requests complete in 40ms/token but 1% take 120ms/token. GPU utilization shows no idle time.
+question: What is likely causing 1% of decode requests to see 120ms/token while the median is 40ms/token?
+details:
+  realistic_solution: 'In continuous batching, token steps are scheduled together, so a 3x TPOT tail usually means the slow requests are hitting a different execution path or resource tier, not merely having somewhat longer in-HBM attention reads. Possible causes: (1) Long sequence KV cache access, especially when long-context requests are co-batched with normal requests; (2) CPU-offloaded KV pages that stall the GPU on PCIe transfer; (3) fallback or serialized attention kernels for unusual shapes. The shown 10K-context HBM-read estimate explains only a modest overhead, so confirm with per-request context length, KV swap metrics, and CUDA traces before declaring PCIe the root cause. Fix: (1) If long context: separate long-context requests into a dedicated decode pool with smaller batch size; (2) If KV swap: increase KV cache capacity or reduce batch size; (3) If kernel fallback: update attention implementation.'
+  common_mistake: |
+    **The Pitfall:** Assuming the 1% slow requests are simply longer sequences requiring more memory.
+    **The Rationale:** In continuous batching, all requests in a batch proceed token-by-token together.
+    **The Consequence:** A single slow operation delays the entire batch, meaning the bottleneck impacts overall throughput, not just the isolated request.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Batch of 128 requests: 127 have 512-token context, 1 has 10K-token context.
+    - KV per token: 2 * 32 layers * 32 heads * 128 head_dim * 2 bytes = 512 KiB.
+    - Normal request KV read per step at 512 context: 512 * 512 KiB = 256 MiB, about 268 MB.
+
+    **Calculations:**
+    - 10K context request KV read: 268 MB * (10000/512) = 5.23 GB.
+    - Total batch KV load per step: 127 * 268 MB + 1 * 5.23 GB = 34 GB + 5.23 GB = 39.23 GB.
+    - Time per step at 3.35 TB/s: 39.23 GB / 3350 GB/s = 11.7 ms.
+    - Time without 10K request: 34 GB / 3350 GB/s = 10.1 ms.
+    - The added HBM read time is about 1.6ms, far less than the observed 80ms tail increase from 40ms to 120ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: HBM-only long-context reads do not explain 3x TPOT.** The likely cause is a smaller set of stragglers hitting KV swap, fallback kernels, or bad long-context co-batching; verify with swap counters and kernel traces.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

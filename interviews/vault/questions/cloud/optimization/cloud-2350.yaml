@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-2350
+track: cloud
+level: L6+
+zone: mastery
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: analyze
+phase: training
+title: The Auto-Scaler Fragmentation Deadlock
+scenario: You manage a multi-tenant 1,000-node GPU cluster. Overall utilization is mysteriously stuck at 45% (3,600 GPUs active, 4,400 idle). However, 50 large LLM training jobs (each requiring a strict 64-GPU gang schedule) are permanently stuck in the pending queue. Seeing the 3,200-GPU pending demand, your cloud auto-scaler provisions 50 new nodes daily, wasting $28,800/day, but the 64-GPU jobs still will not start. Meanwhile, small inference tasks (1-2 GPUs) launch instantly.
+question: Why are 50 strict 64-GPU jobs stuck despite 4,400 idle GPUs, and why does adding 50 nodes per day not fix the queue?
+details:
+  realistic_solution: The root cause is severe cluster fragmentation combined with a topology-ignorant, aggregate-demand auto-scaler. Small 1-2 GPU inference jobs are being loosely bin-packed across the cluster without node-level affinity, leaving partial nodes across the fleet. The 64-GPU gang-scheduled jobs require eight 8-GPU nodes that can be reserved together in the required placement domain, so aggregate idle GPUs are not enough if those GPUs are scattered across many partially occupied nodes.
+  common_mistake: |
+    **The Pitfall:** Assuming the cluster lacks aggregate capacity and blindly increasing the auto-scaler limits.
+    **The Rationale:** Cloud operations teams often rely on simple aggregate metrics rather than topological awareness of workload constraints.
+    **The Consequence:** The auto-scaler provisions expensive hardware indefinitely without ever unblocking the gang-scheduled workloads.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 1,000 nodes * 8 GPUs = 8,000 total GPUs.
+    - Each 64-GPU job needs eight compatible 8-GPU nodes allocated as one gang.
+    - The scheduler cannot compose a gang from arbitrary idle GPUs scattered across partially occupied nodes.
+    - 50 nodes added daily cost $28,800/day, implying $28,800 / 50 = $576 per node-day.
+
+    **Calculations:**
+    - Active GPUs: 8,000 * 0.45 = 3,600. Idle GPUs: 8,000 - 3,600 = 4,400.
+    - Average occupancy is 3,600 / 1,000 = 3.6 GPUs per node, leaving 4.4 idle GPUs per node on average.
+    - One pending job needs 8 empty compatible nodes; 50 pending jobs represent 50 * 64 = 3,200 GPUs of demand.
+    - Aggregate idle capacity could satisfy the demand only if enough compatible 8-node groups were empty at the same time.
+    - Scattered 1-2 GPU jobs can leave thousands of idle GPUs while producing few or no eight-node groups for strict 64-GPU gangs.
+    - Adding 50 nodes/day costs 50 * $576 = $28,800/day, but those nodes do not unblock the queue if the scheduler immediately admits small jobs onto them instead of reserving gang-sized placement groups.
+
+    **Conclusion & Interpretation:**
+    - **Result: Scheduler-Fragmentation-Bound.** The cluster has enough idle GPUs in aggregate, but not enough topology-compatible empty node groups for the 64-GPU jobs; a topology-ignorant auto-scaler burns $28.8K/day without fixing placement fragmentation.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 18
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

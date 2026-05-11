@@ -19,17 +19,44 @@ proven exception logic while reusing the shared
 (e.g. footnote references, bracketed citations) are inherited
 automatically.
 
-§10.3 exception contexts (capitals stay):
+§10.3 exception contexts — *headline-style* contexts where capitals stay:
 
     1. Start of sentence
     2. Inside **bold** (first definition)
     3. Inside ***triple bold*** (definition callout term)
     4. In H1 and H2 section headers (headline style)
     5. In `\\index{}` entries
-    6. In callout `title="..."` attributes
-    7. In bold table headers
-    8. "Iron Law of Processor Performance" (H&P canonical reference)
-    9. "Bitter Lesson" when used as Sutton's essay title
+    6. In bold table headers
+    7. In bold structural labels inside callouts (e.g. `**The Iron Law Connection:**`)
+    8. In table cells that list principles by name (pipe-table rows
+       that reference a canonical principle anchor like `\\ref{pri-...}`)
+    9. In `fig-cap` / `tbl-cap` / `lst-cap` bold-title position — the
+       `**Bold Title**:` part *before* the colon. Detected via the bold-span
+       logic, which sees the `**...**` markers regardless of whether the
+       text sits in body prose or in an attribute value (Quarto renders
+       both as bold).
+    10. "Iron Law of Processor Performance" (H&P canonical reference)
+    11. "Bitter Lesson" when used as Sutton's essay title
+
+§10.3 *sentence-style* display contexts — concept terms STAY LOWERCASE:
+
+    - Non-principle callout `title="..."` attributes ("box heads") —
+      concept terms in ordinary callout titles follow the same lowercase
+      rule as body prose. Per MIT Press style sheet: "Figure captions,
+      table titles, and box heads are set sentence style."
+    - `.callout-principle` titles are formal principle labels, not
+      ordinary box heads, and stay Title Case.
+    - `fig-cap` / `tbl-cap` descriptive text *after* the bold title.
+    - `fig-alt` / `tbl-alt` (entire content, no bold-title position).
+    - `lst-cap` descriptive text after bold title.
+
+These contexts are NOT broadly protected — concept terms in them flag.
+Only the `**Bold Title**:` portion within captions is protected (via the
+bold-span detection at exception #9).
+
+See `book-prose.md §10.3` (rule), `§10.3.2` (5-tier list), and `§10.3.3`
+(audit and edit workflow). When the rule and this script disagree, the
+rule wins; update this script to match.
 
 Auto-fixable: YES. The lowercase replacement is deterministic and has
 been validated against vol1 in round 1 pass 4. Detection and fix are
@@ -46,14 +73,17 @@ from audit.protected_contexts import (
     LineWalker,
     heading_level,
     inline_protected_spans,
-    is_div_attribute_line,
     is_inside_index_entry,
-    is_inside_protected_attribute,
     is_python_chunk_option,
     is_sentence_start,
     is_table_header_row,
     position_in_spans,
 )
+# Direct import of the attribute regex so we can subtract attribute spans
+# from the standard protected-span list — concept-caps treats callout
+# `title=` and caption descriptive text as scan-able sentence-style
+# contexts per §10.3.
+from audit.protected_contexts import _ATTR_RE  # noqa: WPS437 (intentional)
 
 CATEGORY = "concept-term-capitalization"
 RULE = "book-prose-merged.md section 10.3"
@@ -95,7 +125,62 @@ _TERMS = {
     "Starving Accelerator": "starving accelerator",
     "Latency Cliff":       "latency cliff",
     "Four Pillars Framework": "four pillars framework",
+    #
+    # Tier 5 family extensions (walls, taxes, gaps, bottlenecks, cliffs
+    # beyond the core list above) are NOT enforced auto-fixably here.
+    # They follow the categorical-default lowercase rule per §10.3.2 but
+    # have contextual exceptions the auto-fix cannot reliably distinguish:
+    # scare-quoted canonical introductions ("Coordination Tax." at first
+    # mention), pedagogical bullets in `.callout-learning-objectives` and
+    # `.callout-checkpoint`, italic uniform structural-label patterns
+    # ("**The Impediment**: *Physical Limits*" / "*The Coordination Tax*").
+    # Use the manual grep + LLM-Edit workflow per §10.3.3 for Tier 5
+    # family sweeps. Audit grep example:
+    #
+    #   grep -rEn '\b(Coordination Tax|Iteration Tax|...|Network Wall|
+    #     Capacity Wall|Communication Wall)\b' book/quarto/contents \
+    #     --include='*.qmd' \
+    #     | grep -vE '(\\index\{|^[^:]*:[0-9]+:##|title=|...)'
 }
+
+
+# ── Span helper that excludes attribute values ────────────────────────────
+#
+# Per the §10.3 update of 2026-05-07, non-principle callout `title=`
+# attributes and caption descriptive text are sentence-style display
+# contexts that DO need concept-term scanning. The shared
+# `inline_protected_spans` covers attribute spans (so the em-dash /
+# quoting checks don't scan them); for concept-caps we subtract those
+# attribute spans so terms inside ordinary titles and captions become
+# visible to the audit.
+
+def _spans_excluding_attributes(line: str) -> list[tuple[int, int]]:
+    """Like `inline_protected_spans` but does NOT protect attribute
+    values (non-principle callout title=, fig-cap, fig-alt, lst-cap, tbl-cap,
+    tbl-alt).
+    The bold-span check still handles `**Bold Title**:` portions inside
+    captions; the descriptive text after the bold title and ordinary
+    callout title attributes fall back to the sentence-style rule.
+    """
+    spans = inline_protected_spans(line)
+    if not spans:
+        return spans
+    # Find attribute spans on this line
+    attr_spans = [(m.start(), m.end()) for m in _ATTR_RE.finditer(line)]
+    if not attr_spans:
+        return spans
+    # Subtract attribute spans from the protected-span list. Because
+    # attribute spans completely contain any sub-spans we'd want to keep
+    # protected (inline math `$...$`, code `` `...` ``, `\index{}` —
+    # none of which appear inside `title=` / caption attributes in
+    # practice), the simplest correct answer is to drop any protected
+    # span whose interval falls fully inside an attribute span.
+    result: list[tuple[int, int]] = []
+    for s, e in spans:
+        contained = any(a_s <= s and e <= a_e for a_s, a_e in attr_spans)
+        if not contained:
+            result.append((s, e))
+    return result
 
 
 # ── Bold-span predicate ────────────────────────────────────────────────────
@@ -234,8 +319,15 @@ def _skip_concept_term_line(line: str, state) -> bool:
     # Python chunk option directive (`#| echo: false`, etc.)
     if is_python_chunk_option(line):
         return True
-    # Quarto div fence (`::: {...}` or bare `:::`)
-    if is_div_attribute_line(line):
+    # Principle callout titles are formal labels, not ordinary box heads.
+    if ".callout-principle" in line:
+        return True
+    # Quarto div fence: skip only BARE closes / openers with no `title=`
+    # attribute. Opener lines containing `title="..."` in non-principle
+    # callouts are sentence-style display contexts that DO need to flag
+    # concept terms per §10.3.
+    stripped = line.lstrip()
+    if stripped.startswith(":::") and 'title="' not in line:
         return True
     # H1 and H2 use headline-case; H3+ follow sentence-case but concept
     # terms in headings are still ambiguous (the book has many correct
@@ -245,6 +337,14 @@ def _skip_concept_term_line(line: str, state) -> bool:
         return True
     # Bold table header rows
     if is_table_header_row(line):
+        return True
+    # §10.3 exception #9: pipe-table rows that list principles by name.
+    # Detection: the row starts with `|` and contains a canonical
+    # principle anchor reference (`\ref{pri-...}`). The principle-name
+    # cell in such a row is a label, not body prose, so concept terms
+    # like "Iron Law of ML Systems" stay Title Case.
+    stripped = line.lstrip()
+    if stripped.startswith("|") and "\\ref{pri-" in line:
         return True
     return False
 
@@ -287,9 +387,13 @@ def _skip_match(
     #    covers this, but kept for clarity and parity with the proven script).
     if is_inside_index_entry(line, start):
         return True
-    # 5. Inside title=/fig-cap=/fig-alt=/lst-cap=/tbl-cap=
-    if is_inside_protected_attribute(line, start):
-        return True
+    # 5. NOTE: non-principle callout title=, fig-cap, fig-alt, tbl-cap,
+    #    tbl-alt, lst-cap are sentence-style display contexts per MIT Press
+    #    style sheet and are NO LONGER broadly protected here. The bold-span
+    #    check (rule 2) handles the `**Bold Title**:` portion of captions;
+    #    the descriptive text after the bold title and ordinary callout
+    #    `title=` attributes follow the same lowercase-concept-term rule as
+    #    body prose.
     # 6. Per-term special cases
     if term == "Iron Law" and _is_hp_reference(line, end):
         return True
@@ -321,7 +425,7 @@ def check(
         if _skip_concept_term_line(line, state):
             continue
 
-        spans = inline_protected_spans(line)
+        spans = _spans_excluding_attributes(line)
         bold_spans = _bold_spans(line)
 
         # Collect every non-skipped match for every term on this line.
@@ -407,6 +511,8 @@ _POSITIVE_LINES = [
     "A Starving Accelerator is bottlenecked on data delivery.",
     "The Four Pillars Framework organizes our analysis.",
     "With Data Gravity, computation pulls toward large corpora.",
+    # Non-principle callout titles are sentence-style box heads.
+    '::: {.callout-definition title="Iron Law"}',
 ]
 
 _NEGATIVE_LINES = [
@@ -432,8 +538,8 @@ _NEGATIVE_LINES = [
     "### The Bitter Lesson",
     # Exception 5: inside \index{}
     "Earlier discussion \\index{Iron Law!definition} established the framework.",
-    # Exception 6: inside title="..."
-    '::: {.callout-definition title="Iron Law"}',
+    # Exception 6: principle callout titles are formal labels.
+    '::: {.callout-principle title="The Iron Law of ML Systems"}',
     # Exception 7: table header row (bold-in-pipe)
     "| **Iron Law** | **Memory Wall** | **Power Wall** |",
     # Exception 8: H&P canonical reference
@@ -459,7 +565,7 @@ def _self_test() -> int:
     def _has_match(line: str) -> bool:
         if _skip_concept_term_line(line, state):
             return False
-        spans = inline_protected_spans(line)
+        spans = _spans_excluding_attributes(line)
         bold_spans = _bold_spans(line)
         for term in _TERMS:
             offset = 0

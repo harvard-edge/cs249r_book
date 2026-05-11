@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-0841
+track: cloud
+level: L4
+zone: diagnosis
+topic: activation-memory
+competency_area: memory
+bloom_level: analyze
+phase: training
+title: High-Resolution ViT OOM Analysis
+scenario: You are training a Vision Transformer on an 80GB A100 GPU. When scaling input resolution to 1024x1024, the job OOMs during the backward pass. The memory profile shows 15GB for model states and 75GB for activations. The team tries CPU offloading for activations, but PCIe Gen4 bandwidth causes a 4x throughput drop.
+question: What is the bottleneck, and what compute-based trade-off would fit the 1024x1024 ViT in 80GB without CPU offloading?
+details:
+  realistic_solution: |
+    Implement activation (gradient) checkpointing to save selected boundary activations and recompute intermediate ones during the backward pass. With a chunked schedule that reduces stored activation memory by roughly 7x, activations drop from 75GB to about 10.7GB; adding the 15GB model state gives about 25.7GB total, leaving more than 50GB of headroom on an 80GB A100. This trades about 33% extra compute for keeping all operations on-device and avoiding the PCIe bottleneck that caused the 4x throughput drop with CPU offloading.
+  common_mistake: |
+    **The Pitfall:** Persistently trying to offload high-bandwidth activations over a slow PCIe bus, or checkpointing every single layer.
+    **The Rationale:** PCIe Gen4 (32 GB/s) cannot match HBM bandwidth (2 TB/s), and over-checkpointing maximizes compute overhead unnecessarily.
+    **The Consequence:** Severe throughput degradation that defeats the purpose of high-end GPU training.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - GPU VRAM: 80GB.
+    - Model states: 15GB. Base activations: 75GB.
+    - Chunked activation checkpointing is assumed to reduce stored activations by about 7x with ~33% extra compute.
+    - PCIe Gen4 bandwidth is insufficient for activation offloading.
+
+    **Calculations:**
+    - Checkpointed activation memory: 75GB / 7 = ~10.7GB.
+    - Total VRAM: 15GB (states) + 10.7GB (activations) = ~25.7GB.
+    - Headroom: 80GB - 25.7GB = ~54.3GB.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~25.7GB total VRAM with ~54GB headroom (Activation-Memory-Bound)**. Activation checkpointing safely fits the model within 80GB, entirely avoiding the PCIe offloading bottleneck.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-23T20:52:11.867750'

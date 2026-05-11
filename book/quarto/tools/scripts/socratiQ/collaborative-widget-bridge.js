@@ -1,10 +1,42 @@
+function secureRandomIndex(e) {
+  const t = new Uint32Array(1);
+  crypto.getRandomValues(t);
+  return t[0] % e;
+}
+function secureRandomFloat() {
+  const e = new Uint32Array(1);
+  crypto.getRandomValues(e);
+  return e[0] / 4294967296;
+}
+function secureRandomString() {
+  return crypto.randomUUID ? crypto.randomUUID() : Array.from(crypto.getRandomValues(new Uint8Array(16)), (e) => e.toString(16).padStart(2, "0")).join("");
+}
+function safeObjectKey(e) {
+  const t = String(e);
+  return t === "__proto__" || t === "constructor" || t === "prototype" ? null : t;
+}
+function decodeHtmlEntities(e) {
+  const t = document.createElement("textarea");
+  return t.innerHTML = e, t.value;
+}
+function safeLinkHtml(e, t, o = "system-link") {
+  try {
+    const s = new URL(e, window.location.href);
+    if (s.protocol !== "http:" && s.protocol !== "https:")
+      return "";
+    const n = document.createElement("a");
+    return n.href = s.href, n.target = "_blank", n.className = o, n.rel = "noopener noreferrer", n.textContent = t, n.outerHTML;
+  } catch {
+    return "";
+  }
+}
 class C {
   constructor(e = {}) {
     const o = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" || window.location.hostname === "0.0.0.0" ? "ws://localhost:8789" : "wss://sync-server.mlsysbook.workers.dev";
     this.signalingServerUrl = e.signalingServerUrl || o, this.iceServers = e.iceServers || [
       { urls: "stun:stun.l.google.com:19302" },
       { urls: "stun:stun1.l.google.com:19302" }
-    ], this.ws = null, this.myUsername = e.username || this.generateRandomUsername(), this.roomName = null, this.actualRoomName = null, this.myClientId = null, this.isHub = !1, this.peers = {}, this.typingTimers = {}, this.typingUsers = /* @__PURE__ */ new Set(), this.userCountValue = 1, this.heartbeatInterval = null, this.inputTimeout = null, this.connectionHealth = {
+    ], this.ws = null, this.myUsername = e.username || this.generateRandomUsername(), this.roomName = null, this.actualRoomName = null, this.myClientId = null, this.isHub = !1, this.peers = /* @__PURE__ */ Object.create(null), this.typingTimers = /* @__PURE__ */ Object.create(null), this.typingUsers = /* @__PURE__ */ new Set(), this.userCountValue = 1, this.heartbeatInterval = null, this.inputTimeout = null, this.connectionHealth = {
       startTime: Date.now(),
       lastHeartbeat: Date.now(),
       connectionAttempts: 0,
@@ -29,7 +61,7 @@ class C {
   }
   generateRandomUsername() {
     const e = ["Happy", "Cool", "Smart", "Fast", "Bright", "Kind", "Bold", "Wise", "Swift", "Brave"], t = ["Tiger", "Eagle", "Wolf", "Bear", "Fox", "Lion", "Hawk", "Falcon", "Panther", "Lynx"];
-    return `${e[Math.floor(Math.random() * e.length)]}${t[Math.floor(Math.random() * t.length)]}`;
+    return `${e[secureRandomIndex(e.length)]}${t[secureRandomIndex(t.length)]}`;
   }
   /**
    * Extract current page data for content collection (synchronous version for constructor)
@@ -192,11 +224,13 @@ class C {
     }
   }
   createPeerConnection(e, t, o = !1) {
+    if (e = safeObjectKey(e), e === null)
+      return;
     if (this.peers[e]) {
-      console.warn(`Connection to ${e} already exists or is in progress.`);
+      console.warn("Connection already exists or is in progress for peer:", e);
       return;
     }
-    t && !this.isHub && !o ? (console.warn(`⚠️ Non-hub user attempting to initiate connection to ${e} - this could cause dual-offer conflicts`), t = !1, console.log(`🔄 Converted to receiver mode for ${e} to prevent dual-offer`)) : t && !this.isHub && o && console.log(`✅ Fallback-initiated connection allowed: ${this.myClientId} initiating to ${e}`), console.log(`Creating peer connection to ${e}, isInitiator: ${t}, isHub: ${this.isHub}`);
+    t && !this.isHub && !o ? (console.warn("Non-hub user attempted to initiate connection to peer:", e), t = !1, console.log("Converted to receiver mode for peer to prevent dual-offer:", e)) : t && !this.isHub && o && console.log("Fallback-initiated connection allowed:", this.myClientId, e), console.log("Creating peer connection:", { peerId: e, isInitiator: t, isHub: this.isHub });
     const s = new RTCPeerConnection({ iceServers: this.iceServers });
     if (this.peers[e] = {
       pc: s,
@@ -208,42 +242,44 @@ class C {
     }, console.log("Peer connection created, total peers:", Object.keys(this.peers).length), s.onicecandidate = (n) => {
       n.candidate && this.ws.send(JSON.stringify({ type: "ice-candidate", to: e, candidate: n.candidate }));
     }, s.onconnectionstatechange = () => {
-      console.log(`🔗 Connection state with ${e}: ${s.connectionState}`), this.peers[e].connectionState = s.connectionState, s.connectionState === "connected" ? console.log(`✅ Successfully connected to ${e}`) : s.connectionState === "disconnected" || s.connectionState === "failed" || s.connectionState === "closed" ? (console.log(`❌ Connection lost with ${e}`), this.handleUserLeft(e)) : s.connectionState === "connecting" && setTimeout(() => {
+      console.log("Connection state changed:", e, s.connectionState), this.peers[e].connectionState = s.connectionState, s.connectionState === "connected" ? console.log("Successfully connected to peer:", e) : s.connectionState === "disconnected" || s.connectionState === "failed" || s.connectionState === "closed" ? (console.log("Connection lost with peer:", e), this.handleUserLeft(e)) : s.connectionState === "connecting" && setTimeout(() => {
         this.peers[e] && this.peers[e].connectionState === "connecting" && (console.log(`⚠️ Connection to ${e} is stuck in 'connecting' state - this may indicate a deadlock`), console.log("🔍 Current connection states:", Object.entries(this.peers).map(([n, i]) => `${n}: ${i.connectionState}`)));
       }, 1e4);
     }, s.oniceconnectionstatechange = () => {
       console.log(`🧊 ICE connection state with ${e}: ${s.iceConnectionState}`);
     }, t) {
-      console.log(`🚀 Creating data channel for ${e} (Hub: ${this.isHub})`);
+      console.log("Creating data channel:", { peerId: e, isHub: this.isHub });
       const n = s.createDataChannel("chat", {
         ordered: !0,
         maxRetransmits: 3
       });
-      this.setupDataChannel(n, e), this.peers[e].dc = n, s.createOffer().then((i) => (console.log(`📤 Created offer for ${e} (Hub: ${this.isHub})`), s.setLocalDescription(i))).then(() => {
-        console.log(`📤 Sending offer to ${e} (Hub: ${this.isHub})`), this.ws.send(JSON.stringify({ type: "offer", to: e, sdp: s.localDescription }));
-      }).catch((i) => console.error(`❌ Error creating offer for ${e}:`, i));
+      this.setupDataChannel(n, e), this.peers[e].dc = n, s.createOffer().then((i) => (console.log("Created offer:", { peerId: e, isHub: this.isHub }), s.setLocalDescription(i))).then(() => {
+        console.log("Sending offer:", { peerId: e, isHub: this.isHub }), this.ws.send(JSON.stringify({ type: "offer", to: e, sdp: s.localDescription }));
+      }).catch((i) => console.error("Error creating offer for peer:", e, i));
     } else
-      console.log(`⏳ Waiting for data channel from ${e} (Hub: ${this.isHub})`), s.ondatachannel = (n) => {
-        console.log(`📨 Received data channel from ${e} (Hub: ${this.isHub})`);
+      console.log("Waiting for data channel:", { peerId: e, isHub: this.isHub }), s.ondatachannel = (n) => {
+        console.log("Received data channel:", { peerId: e, isHub: this.isHub });
         const i = n.channel;
         this.setupDataChannel(i, e), this.peers[e].dc = i;
       };
   }
   setupDataChannel(e, t) {
+    if (t = safeObjectKey(t), t === null)
+      return;
     e.onopen = () => {
-      console.log(`✅ Data channel with ${t} is open!`), e.send(JSON.stringify({
+      console.log("Data channel is open:", t), e.send(JSON.stringify({
         type: "username",
         payload: this.myUsername,
         url: window.location.href,
         title: document.title
-      })), console.log(`Sent username to ${t}: ${this.myUsername}`), this.triggerRetryQueue();
+      })), console.log("Sent username to peer:", t, this.myUsername), this.triggerRetryQueue();
     }, e.onmessage = (o) => {
       const s = JSON.parse(o.data);
-      s.type !== "cursor_update" && s.type !== "presence_update" && console.log(`📨 Received message from ${t}:`, s), this.handleDataChannelMessage(s, t);
+      s.type !== "cursor_update" && s.type !== "presence_update" && console.log("Received message from peer:", t, s), this.handleDataChannelMessage(s, t);
     }, e.onclose = () => {
-      console.log(`❌ Data channel with ${t} has closed.`), this.handleUserLeft(t);
+      console.log("Data channel closed:", t), this.handleUserLeft(t);
     }, e.onerror = (o) => {
-      console.error(`❌ Data channel error with ${t}:`, o);
+      console.error("Data channel error:", t, o);
     };
   }
   handleDataChannelMessage(e, t) {
@@ -268,7 +304,7 @@ class C {
         this.showTypingIndicator(o);
         break;
       case "username":
-        this.peers[t].username = e.payload, this.peers[t].url = e.url, this.peers[t].title = e.title, this.onInfoMessage(`${e.payload} has connected.`, "success");
+        t = safeObjectKey(t), t !== null && this.peers[t] && (this.peers[t].username = e.payload, this.peers[t].url = e.url, this.peers[t].title = e.title, this.onInfoMessage(`${e.payload} has connected.`, "success"));
         break;
       case "comment_add":
         this.onCommentAdd(e.data, t);
@@ -311,47 +347,47 @@ class C {
   }
   // Highlight methods removed - highlights only appear when comments are saved
   async handleOffer(e, t) {
-    console.log(`📥 Received offer from ${e}`), this.peers[e] || (console.log(`🆕 Creating new peer connection for ${e}`), this.createPeerConnection(e, !1));
+    console.log("Received offer from peer:", e), this.peers[e] || (console.log("Creating new peer connection for:", e), this.createPeerConnection(e, !1));
     const o = this.peers[e].pc;
     if (o.signalingState === "stable" && this.peers[e].connectionState === "connected") {
-      console.log(`⚠️ Ignoring offer from ${e} - connection already established`);
+      console.log("Ignoring offer; connection already established:", e);
       return;
     }
     if (o.signalingState === "have-local-offer" && this.peers[e].connectionState === "connected") {
-      console.log(`⚠️ Ignoring offer from ${e} - connection already established (dual-offer prevention)`);
+      console.log("Ignoring offer; connection already established:", e);
       return;
-    } else o.signalingState === "have-local-offer" && console.log(`🔄 Processing offer from ${e} despite local offer - connection not yet established`);
+    } else o.signalingState === "have-local-offer" && console.log("Processing offer despite local offer:", e);
     try {
-      console.log(`📥 Setting remote description for ${e}`), await o.setRemoteDescription(new RTCSessionDescription(t)), await this.processQueuedIceCandidates(e), console.log(`📤 Creating answer for ${e}`);
+      console.log("Setting remote description for peer:", e), await o.setRemoteDescription(new RTCSessionDescription(t)), await this.processQueuedIceCandidates(e), console.log("Creating answer for peer:", e);
       const s = await o.createAnswer();
-      console.log(`📤 Setting local description for ${e}`), await o.setLocalDescription(s), console.log(`📤 Sending answer to ${e}`), this.ws.send(JSON.stringify({ type: "answer", to: e, sdp: o.localDescription }));
+      console.log("Setting local description for peer:", e), await o.setLocalDescription(s), console.log("Sending answer to peer:", e), this.ws.send(JSON.stringify({ type: "answer", to: e, sdp: o.localDescription }));
     } catch (s) {
-      console.error(`❌ Error handling offer from ${e}:`, s);
+      console.error("Error handling offer from peer:", e, s);
     }
   }
   async handleAnswer(e, t) {
-    if (console.log(`📥 Received answer from ${e}`), this.peers[e])
+    if (console.log("Received answer from peer:", e), this.peers[e])
       try {
         if (this.peers[e].pc.signalingState === "stable") {
-          console.log(`⚠️ Ignoring answer from ${e} - connection already stable`);
+          console.log("Ignoring answer; connection already stable:", e);
           return;
         }
-        console.log(`📥 Setting remote description for ${e}`), await this.peers[e].pc.setRemoteDescription(new RTCSessionDescription(t)), await this.processQueuedIceCandidates(e), console.log(`✅ Set remote description for ${e}`);
+        console.log("Setting remote description for peer:", e), await this.peers[e].pc.setRemoteDescription(new RTCSessionDescription(t)), await this.processQueuedIceCandidates(e), console.log("Set remote description for peer:", e);
       } catch (o) {
-        console.error(`❌ Error handling answer from ${e}:`, o);
+        console.error("Error handling answer from peer:", e, o);
       }
     else
-      console.error(`❌ No peer connection found for ${e}`);
+      console.error("No peer connection found for peer:", e);
   }
   async handleIceCandidate(e, t) {
-    if (console.log(`🧊 Received ICE candidate from ${e}`), this.peers[e])
+    if (console.log("Received ICE candidate from peer:", e), this.peers[e])
       try {
-        this.peers[e].pc.remoteDescription ? (await this.peers[e].pc.addIceCandidate(new RTCIceCandidate(t)), console.log(`✅ Added ICE candidate for ${e}`)) : (this.peers[e].pendingIceCandidates.push(t), console.log(`⏳ Queued ICE candidate for ${e} (remote description not set yet)`));
+        this.peers[e].pc.remoteDescription ? (await this.peers[e].pc.addIceCandidate(new RTCIceCandidate(t)), console.log("Added ICE candidate for peer:", e)) : (this.peers[e].pendingIceCandidates.push(t), console.log("Queued ICE candidate for peer:", e));
       } catch (o) {
-        console.error(`❌ Error adding ICE candidate for ${e}:`, o);
+        console.error("Error adding ICE candidate for peer:", e, o);
       }
     else
-      console.error(`❌ No peer connection found for ${e}`);
+      console.error("No peer connection found for peer:", e);
   }
   /**
    * Process queued ICE candidates for a peer
@@ -361,14 +397,14 @@ class C {
       return;
     const t = this.peers[e].pendingIceCandidates;
     if (t.length !== 0) {
-      console.log(`🔄 Processing ${t.length} queued ICE candidates for ${e}`);
+      console.log("Processing queued ICE candidates for peer:", e, t.length);
       for (const o of t)
         try {
-          await this.peers[e].pc.addIceCandidate(new RTCIceCandidate(o)), console.log(`✅ Added queued ICE candidate for ${e}`);
+          await this.peers[e].pc.addIceCandidate(new RTCIceCandidate(o)), console.log("Added queued ICE candidate for peer:", e);
         } catch (s) {
-          console.error(`❌ Error adding queued ICE candidate for ${e}:`, s);
+          console.error("Error adding queued ICE candidate for peer:", e, s);
         }
-      this.peers[e].pendingIceCandidates = [], console.log(`✅ Processed all queued ICE candidates for ${e}`);
+      this.peers[e].pendingIceCandidates = [], console.log("Processed all queued ICE candidates for peer:", e);
     }
   }
   handleUserLeft(e) {
@@ -469,7 +505,7 @@ class C {
       message: e,
       attempts: 0,
       timestamp: Date.now(),
-      id: `retry-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+      id: `retry-${Date.now()}-${secureRandomString()}`
     };
     this.commentRetryQueue.push(t), console.log(`📝 Comment queued for retry: ${t.id}`), this.scheduleRetry();
   }
@@ -2553,7 +2589,7 @@ class x {
   static async generateQuiz(e) {
     try {
       const t = this.buildQuizPrompt(e), o = await this.callAIProxy(t), s = this.parseQuizResponse(o);
-      return s.quizId = `quiz-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, s.metadata = {
+      return s.quizId = `quiz-${Date.now()}-${secureRandomString()}`, s.metadata = {
         generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
         userCount: e.userCount,
         contentSources: e.content.map((n) => n.pageTitle),
@@ -2735,7 +2771,7 @@ ${t}`
    */
   static createFallbackQuiz(e) {
     return {
-      quizId: `quiz-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      quizId: `quiz-${Date.now()}-${secureRandomString()}`,
       question: "What is the main topic covered in the collaborative content?",
       choices: {
         A: "Technology and Innovation",
@@ -3019,7 +3055,7 @@ ${JSON.stringify(o).replace(/[\r\n\t]/g, "")}
    * @returns {string} Unique quiz identifier
    */
   generateQuizId() {
-    return `kapoot-quiz-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    return `kapoot-quiz-${Date.now()}-${secureRandomString()}`;
   }
   /**
    * Get current quiz
@@ -4368,8 +4404,10 @@ class D {
     const o = t.querySelectorAll(".team-section"), s = t.querySelector(".unassigned-players");
     s.innerHTML = "", e.forEach((n, i) => {
       const a = i % o.length, c = o[a].querySelector(".team-players"), l = this.shadowRoot.ownerDocument.createElement("div");
-      l.className = "player-item", l.draggable = !0, l.dataset.player = n.username, l.innerHTML = `<span class="player-name">${n.username}</span>`, l.addEventListener("dragstart", (d) => {
-        d.target.classList.add("dragging");
+      l.className = "player-item", l.draggable = !0, l.dataset.player = n.username;
+      const d = document.createElement("span");
+      d.className = "player-name", d.textContent = n.username, l.appendChild(d), l.addEventListener("dragstart", (h) => {
+        h.target.classList.add("dragging");
       }), l.addEventListener("dragend", (d) => {
         d.target.classList.remove("dragging");
       }), c.appendChild(l);
@@ -4953,7 +4991,7 @@ class k {
         try {
           o = decodeURIComponent(o), console.log("🎮 URI decoded quiz data string:", o);
         } catch {
-          console.log("🎮 Not URI encoded, trying HTML entity decoding"), o = o.replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#39;/g, "'").replace(/&apos;/g, "'");
+          console.log("🎮 Not URI encoded, trying HTML entity decoding"), o = decodeHtmlEntities(o);
         }
         console.log("🎮 Final decoded quiz data string:", o);
         const s = JSON.parse(o);
@@ -4997,7 +5035,7 @@ class k {
       const n = Object.entries(t.teamResponses).map(
         ([i, a]) => `${i}: ${a.answered ? "✓ Answered" : "⏳ Thinking"}`
       ).join(" | ");
-      o.innerHTML = `<strong>Teams:</strong> ${Object.keys(t.teamResponses).join(", ")}<br><strong>Status:</strong> ${n}`;
+	      o.textContent = `Teams: ${Object.keys(t.teamResponses).join(", ")} | Status: ${n}`;
     }
     e.querySelectorAll(".quiz-kapoot-choice").forEach((n) => {
       const i = n.dataset.choice, a = t.currentUserTeam;
@@ -5094,26 +5132,26 @@ class k {
         const m = this.getExplanationForChoice(t, d);
         if (m) {
           const u = document.createElement("div");
-          u.className = "choice-explanation correct", u.innerHTML = `
-                        <svg class="explanation-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M9 12l2 2 4-4"/>
-                            <circle cx="12" cy="12" r="10"/>
-                        </svg>
-                        <span class="explanation-text">${m}</span>
-                    `, h.appendChild(u);
+	          u.className = "choice-explanation correct", u.innerHTML = `
+	                        <svg class="explanation-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+	                            <path d="M9 12l2 2 4-4"/>
+	                            <circle cx="12" cy="12" r="10"/>
+	                        </svg>
+	                        <span class="explanation-text"></span>
+	                    `, u.querySelector(".explanation-text").textContent = m, h.appendChild(u);
         }
       } else if (d === c) {
         const m = this.getExplanationForChoice(t, d);
         if (m) {
           const u = document.createElement("div");
-          u.className = "choice-explanation incorrect", u.innerHTML = `
-                        <svg class="explanation-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="12" r="10"/>
-                            <line x1="15" y1="9" x2="9" y2="15"/>
-                            <line x1="9" y1="9" x2="15" y2="15"/>
-                        </svg>
-                        <span class="explanation-text">${m}</span>
-                    `, h.appendChild(u);
+	          u.className = "choice-explanation incorrect", u.innerHTML = `
+	                        <svg class="explanation-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+	                            <circle cx="12" cy="12" r="10"/>
+	                            <line x1="15" y1="9" x2="9" y2="15"/>
+	                            <line x1="9" y1="9" x2="15" y2="15"/>
+	                        </svg>
+	                        <span class="explanation-text"></span>
+	                    `, u.querySelector(".explanation-text").textContent = m, h.appendChild(u);
         }
       }
     }), i && (i.style.display = "none"), this.trackQuizSubmission(e, c, r, !0), c === r && (this.awardQuizPoints(), this.toastNotifications.showPointAward(
@@ -5320,27 +5358,27 @@ class k {
       const u = document.createElement("div");
       u.className = `choice-explanation ${h ? "correct" : "incorrect"}`;
       const f = this.getExplanationForChoice(t, d);
-      h ? u.innerHTML = `
-                    <svg class="explanation-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M9 12l2 2 4-4"/>
-                        <circle cx="12" cy="12" r="10"/>
-                    </svg>
-                    <span class="explanation-text">${f || "Correct answer"}</span>
-                ` : m ? u.innerHTML = `
-                    <svg class="explanation-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="10"/>
-                        <line x1="15" y1="9" x2="9" y2="15"/>
-                        <line x1="9" y1="9" x2="15" y2="15"/>
-                    </svg>
-                    <span class="explanation-text">${f || "Incorrect answer"}</span>
-                ` : u.innerHTML = `
-                    <svg class="explanation-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="10"/>
-                        <line x1="15" y1="9" x2="9" y2="15"/>
-                        <line x1="9" y1="9" x2="15" y2="15"/>
-                    </svg>
-                    <span class="explanation-text">${f || "Incorrect option"}</span>
-                `;
+	      h ? (u.innerHTML = `
+	                    <svg class="explanation-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+	                        <path d="M9 12l2 2 4-4"/>
+	                        <circle cx="12" cy="12" r="10"/>
+	                    </svg>
+	                    <span class="explanation-text"></span>
+	                `, u.querySelector(".explanation-text").textContent = f || "Correct answer") : m ? (u.innerHTML = `
+	                    <svg class="explanation-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+	                        <circle cx="12" cy="12" r="10"/>
+	                        <line x1="15" y1="9" x2="9" y2="15"/>
+	                        <line x1="9" y1="9" x2="15" y2="15"/>
+	                    </svg>
+	                    <span class="explanation-text"></span>
+	                `, u.querySelector(".explanation-text").textContent = f || "Incorrect answer") : (u.innerHTML = `
+	                    <svg class="explanation-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+	                        <circle cx="12" cy="12" r="10"/>
+	                        <line x1="15" y1="9" x2="9" y2="15"/>
+	                        <line x1="9" y1="9" x2="15" y2="15"/>
+	                    </svg>
+	                    <span class="explanation-text"></span>
+	                `, u.querySelector(".explanation-text").textContent = f || "Incorrect option");
       const p = l.parentNode, b = l.nextSibling;
       b ? p.insertBefore(u, b) : p.appendChild(u);
     }), i && (i.style.display = "none");
@@ -5419,7 +5457,7 @@ class H {
   getRandomGreeting(e) {
     if (this.sessionGreeting)
       return this.sessionGreeting;
-    const t = this.greetingMessages[Math.floor(Math.random() * this.greetingMessages.length)];
+    const t = this.greetingMessages[secureRandomIndex(this.greetingMessages.length)];
     return this.sessionGreeting = t.replace("{name}", e || "there"), console.log(`New session greeting selected: "${this.sessionGreeting}"`), this.sessionGreeting;
   }
   /**
@@ -5553,8 +5591,8 @@ class H {
     let n = Array(s).fill("").map(() => this.getRandomSymbol()), i = /* @__PURE__ */ new Set(), a = performance.now();
     const r = (c) => {
       if ((c - a) / this.roomAnimationDuration < 1) {
-        if (Math.random() < 0.3 && i.size < s) {
-          const m = Math.floor(Math.random() * s);
+        if (secureRandomFloat() < 0.3 && i.size < s) {
+          const m = secureRandomIndex(s);
           i.has(m) || i.add(m);
         }
         const h = n.map((m, u) => i.has(u) ? t[u] : m);
@@ -5571,7 +5609,7 @@ class H {
    * @returns {string} Random symbol
    */
   getRandomSymbol() {
-    return this.symbols[Math.floor(Math.random() * this.symbols.length)];
+    return this.symbols[secureRandomIndex(this.symbols.length)];
   }
   /**
    * Add pulsing effect to stats when they update
@@ -5617,7 +5655,7 @@ class H {
    * @returns {string} New random greeting message
    */
   forceNewGreeting(e) {
-    const t = this.greetingMessages[Math.floor(Math.random() * this.greetingMessages.length)];
+    const t = this.greetingMessages[secureRandomIndex(this.greetingMessages.length)];
     return this.sessionGreeting = t.replace("{name}", e || "there"), console.log(`Forced new greeting: "${this.sessionGreeting}"`), this.sessionGreeting;
   }
   /**
@@ -5835,16 +5873,21 @@ class F {
       let o = null;
       const s = (i) => {
         if (o) return;
-        o = document.createElement("div"), o.className = "comment-hover-tooltip", o.innerHTML = `
-                    <div class="comment-hover-header">
-                        <span class="comment-hover-author">${t.author}</span>
-                        <span class="comment-hover-time">${this.formatTimestamp(t.timestamp)}</span>
-                    </div>
-                    <div class="comment-hover-content">${this.escapeHtml(t.text)}</div>
-                    ${t.resolved ? '<div class="comment-hover-resolved">✓ Resolved</div>' : ""}
-                `, document.body.appendChild(o);
-        const a = e.getBoundingClientRect();
-        o.style.position = "absolute", o.style.top = `${a.top - o.offsetHeight - 5}px`, o.style.left = `${a.left}px`, o.style.zIndex = "10001";
+        o = document.createElement("div"), o.className = "comment-hover-tooltip";
+        const a = document.createElement("div");
+        a.className = "comment-hover-header";
+        const r = document.createElement("span");
+        r.className = "comment-hover-author", r.textContent = t.author || "";
+        const c = document.createElement("span");
+        c.className = "comment-hover-time", c.textContent = this.formatTimestamp(t.timestamp), a.append(r, c);
+        const l = document.createElement("div");
+        if (l.className = "comment-hover-content", l.textContent = t.text || "", o.append(a, l), t.resolved) {
+          const d = document.createElement("div");
+          d.className = "comment-hover-resolved", d.textContent = "✓ Resolved", o.appendChild(d);
+        }
+        document.body.appendChild(o);
+        const h = e.getBoundingClientRect();
+        o.style.position = "absolute", o.style.top = `${h.top - o.offsetHeight - 5}px`, o.style.left = `${h.left}px`, o.style.zIndex = "10001";
       }, n = () => {
         o && (o.remove(), o = null);
       };
@@ -7004,30 +7047,33 @@ class Q {
       const i = (r) => {
         n && (clearTimeout(n), n = null), !o && (s = setTimeout(() => {
           if (o) return;
-          o = document.createElement("div"), o.className = "comment-hover-tooltip", o.innerHTML = `
-                        <div class="comment-hover-header">
-                            <span class="comment-hover-author">${this.createClickableAuthor(t)}</span>
-                            <span class="comment-hover-time">${this.formatTimestamp(t.timestamp)}</span>
-                        </div>
-                        <div class="comment-hover-content">${this.escapeHtml(t.text)}</div>
-                        ${t.resolved ? '<div class="comment-hover-resolved">✓ Resolved</div>' : ""}
-                        ${t.resolved ? "" : `
-                            <div class="comment-hover-actions">
-                                <button class="comment-resolve-btn" data-comment-id="${t.id}" data-highlight-id="${t.highlightId}">
-                                    ✓ Resolve
-                                </button>
-                            </div>
-                        `}
-                    `, document.body.appendChild(o), o.addEventListener("mouseenter", () => {
+          o = document.createElement("div"), o.className = "comment-hover-tooltip";
+          const c = document.createElement("div");
+          c.className = "comment-hover-header";
+          const l = document.createElement("span");
+          l.className = "comment-hover-author", l.appendChild(this.createAuthorNode(t));
+          const d = document.createElement("span");
+          d.className = "comment-hover-time", d.textContent = this.formatTimestamp(t.timestamp), c.append(l, d);
+          const h = document.createElement("div");
+          if (h.className = "comment-hover-content", h.textContent = t.text || "", o.append(c, h), t.resolved) {
+            const m = document.createElement("div");
+            m.className = "comment-hover-resolved", m.textContent = "✓ Resolved", o.appendChild(m);
+          } else {
+            const m = document.createElement("div");
+            m.className = "comment-hover-actions";
+            const u = document.createElement("button");
+            u.className = "comment-resolve-btn", u.dataset.commentId = t.id || "", u.dataset.highlightId = t.highlightId || "", u.textContent = "✓ Resolve", m.appendChild(u), o.appendChild(m);
+          }
+          document.body.appendChild(o), o.addEventListener("mouseenter", () => {
             n && (clearTimeout(n), n = null);
           }), o.addEventListener("mouseleave", () => {
             a();
           });
-          const c = o.querySelector(".comment-resolve-btn");
-          c && c.addEventListener("click", (l) => {
-            l.preventDefault(), l.stopPropagation();
-            const d = c.dataset.commentId, h = c.dataset.highlightId;
-            this.resolveComment(d, h), a();
+          const p = o.querySelector(".comment-resolve-btn");
+          p && p.addEventListener("click", (m) => {
+            m.preventDefault(), m.stopPropagation();
+            const u = p.dataset.commentId, f = p.dataset.highlightId;
+            this.resolveComment(u, f), a();
           }), setTimeout(() => {
             if (o) {
               const l = e.getBoundingClientRect(), d = o.getBoundingClientRect();
@@ -7164,7 +7210,24 @@ class Q {
    * Create clickable author element
    */
   createClickableAuthor(e) {
-    return e.author === "You" ? e.author : e.authorUrl ? `<a href="${e.authorUrl}" target="_blank" class="comment-author-link" title="${e.authorTitle || "View user page"}">${e.author}</a>` : e.author;
+    if (e.author === "You")
+      return this.escapeHtml(e.author);
+    if (!e.authorUrl)
+      return this.escapeHtml(e.author);
+    return safeLinkHtml(e.authorUrl, e.author, "comment-author-link") || this.escapeHtml(e.author);
+  }
+  createAuthorNode(e) {
+    if (e.author !== "You" && e.authorUrl)
+      try {
+        const t = new URL(e.authorUrl, window.location.href);
+        if (t.protocol === "http:" || t.protocol === "https:") {
+          const o = document.createElement("a");
+          return o.href = t.href, o.target = "_blank", o.className = "comment-author-link", o.rel = "noopener noreferrer", o.title = e.authorTitle || "View user page", o.textContent = e.author || "", o;
+        }
+      } catch {
+      }
+    const t = document.createElement("span");
+    return t.textContent = e.author || "", t;
   }
   /**
    * Format timestamp for display
@@ -7650,8 +7713,8 @@ class G {
     try {
       console.log("📝 CommentManager.handleCommentSave called with:", { commentText: e, selectionData: t });
       const o = this.webrtcChat?.myClientId || "unknown", s = {
-        id: `${o}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        highlightId: `highlight-${o}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        id: `${o}-${Date.now()}-${secureRandomString()}`,
+        highlightId: `highlight-${o}-${Date.now()}-${secureRandomString()}`,
         peerId: o,
         text: e,
         url: t.url || window.location.href,
@@ -7919,12 +7982,12 @@ class ae {
   }
   generateRandomUsername() {
     const e = ["Curious", "Smart", "Focused", "Creative", "Analytical", "Innovative", "Brilliant", "Sharp", "Wise", "Insightful"], t = ["Researcher", "Scholar", "Explorer", "Thinker", "Learner", "Analyst", "Scientist", "Expert", "Guru", "Master"];
-    return `${e[Math.floor(Math.random() * e.length)]}${t[Math.floor(Math.random() * t.length)]}`;
+    return `${e[secureRandomIndex(e.length)]}${t[secureRandomIndex(t.length)]}`;
   }
   // Persistent User ID System
   getPersistentUserId() {
     let e = localStorage.getItem("collaborative-widget-persistent-user-id");
-    return e ? console.log("Retrieved existing persistent user ID:", e) : (e = "user_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9), localStorage.setItem("collaborative-widget-persistent-user-id", e), console.log("Generated new persistent user ID:", e)), e;
+    return e ? console.log("Retrieved existing persistent user ID:", e) : (e = "user_" + Date.now() + "_" + secureRandomString(), localStorage.setItem("collaborative-widget-persistent-user-id", e), console.log("Generated new persistent user ID:", e)), e;
   }
   loadUserStats() {
     const e = `collaborative-widget-user-stats-${this.persistentUserId}`, t = localStorage.getItem(e);
@@ -8142,7 +8205,7 @@ class ae {
     const n = {
       username: e,
       roomName: t,
-      password: o,
+	      password: null,
       mode: s,
       timestamp: Date.now(),
       domain: window.location.hostname
@@ -8698,7 +8761,7 @@ ${t}`, s = new Blob([o], { type: "text/plain" }), n = URL.createObjectURL(s), i 
   }
   _getRandomBadges() {
     const e = [];
-    return Math.random() > 0.5 && e.push({ icon: "💬", text: "Chatterbox" }), Math.random() > 0.7 && e.push({ icon: "✍️", text: "Commentator" }), e;
+    return secureRandomFloat() > 0.5 && e.push({ icon: "💬", text: "Chatterbox" }), secureRandomFloat() > 0.7 && e.push({ icon: "✍️", text: "Commentator" }), e;
   }
   updatePresenceList() {
     const e = this.shadowRoot.getElementById("presence-list"), t = [], o = this.webrtcChat.myClientId;
@@ -9821,8 +9884,8 @@ ${t}`, s = new Blob([o], { type: "text/plain" }), n = URL.createObjectURL(s), i 
   async saveComment(e, t, o) {
     try {
       const s = {
-        id: `${t}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        highlightId: `highlight-${t}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        id: `${t}-${Date.now()}-${secureRandomString()}`,
+        highlightId: `highlight-${t}-${Date.now()}-${secureRandomString()}`,
         peerId: t,
         text: e,
         url: o.url,
@@ -9942,14 +10005,14 @@ ${t}`, s = new Blob([o], { type: "text/plain" }), n = URL.createObjectURL(s), i 
     if (!s) return;
     const n = document.createElement("div");
     n.className = "chat-message system";
-    let i = "";
-    if (t)
-      try {
-        const a = new URL(t), r = a.hostname, c = a.pathname, l = c && c !== "/" ? `View ${c}` : `View on ${r}`;
-        i = `<a href="${t}" target="_blank" class="system-link" rel="noopener noreferrer">${l}</a>`;
-      } catch {
-        i = `<a href="${t}" target="_blank" class="system-link" rel="noopener noreferrer">View Page</a>`;
-      }
+	    let i = "";
+	    if (t)
+	      try {
+	        const a = new URL(t), r = a.hostname, c = a.pathname, l = c && c !== "/" ? `View ${c}` : `View on ${r}`;
+	        i = safeLinkHtml(a.href, l);
+	      } catch {
+	        i = safeLinkHtml(t, "View Page");
+	      }
     for (n.innerHTML = `
             <div class="system-message">
                 <span class="system-icon">🔔</span>
@@ -10021,7 +10084,9 @@ ${t}`, s = new Blob([o], { type: "text/plain" }), n = URL.createObjectURL(s), i 
     const t = this.shadowRoot.getElementById("chat-messages");
     if (!t) return;
     const o = document.createElement("div");
-    o.className = "chat-message system", o.innerHTML = `<div class="message-text">${this.escapeHtml(e)}</div>`, t.appendChild(o), t.scrollTop = t.scrollHeight;
+    o.className = "chat-message system";
+    const s = document.createElement("div");
+    s.className = "message-text", s.textContent = e, o.appendChild(s), t.appendChild(o), t.scrollTop = t.scrollHeight;
   }
   escapeHtml(e) {
     const t = document.createElement("div");
@@ -10310,7 +10375,7 @@ class K {
   static shuffleArray(e) {
     const t = [...e];
     for (let o = t.length - 1; o > 0; o--) {
-      const s = Math.floor(Math.random() * (o + 1));
+      const s = secureRandomIndex(o + 1);
       [t[o], t[s]] = [t[s], t[o]];
     }
     return t;
@@ -10420,7 +10485,7 @@ class w {
   static shuffleArray(e) {
     const t = [...e];
     for (let o = t.length - 1; o > 0; o--) {
-      const s = Math.floor(Math.random() * (o + 1));
+      const s = secureRandomIndex(o + 1);
       [t[o], t[s]] = [t[s], t[o]];
     }
     return t;
@@ -11190,7 +11255,7 @@ class V {
       this.currentLeader = null;
       return;
     }
-    const e = Array.from(this.members.keys()), t = e[Math.floor(Math.random() * e.length)];
+    const e = Array.from(this.members.keys()), t = e[secureRandomIndex(e.length)];
     this.members.forEach((s, n) => {
       s.isLeader = n === t;
     }), this.currentLeader = t;
@@ -11345,7 +11410,7 @@ class V {
   async generateAndDistributeQuiz(e) {
     try {
       console.log(`Generating quiz from content: ${w.getContentSummary(e)}`);
-      const t = this.minWaitTime + Math.random() * (this.maxWaitTime - this.minWaitTime);
+      const t = this.minWaitTime + secureRandomFloat() * (this.maxWaitTime - this.minWaitTime);
       console.log(`Waiting ${Math.round(t / 1e3)}s before AI call...`), await new Promise((n) => setTimeout(n, t));
       const o = await x.generateQuiz(e), s = {
         type: "quiz_message",
@@ -11814,7 +11879,7 @@ class oe {
   static async render(e) {
     if (!this.validateQuizData(e))
       return '<div class="component-error">Invalid quiz data format</div>';
-    const t = e.quizId || `quiz-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const t = e.quizId || `quiz-${Date.now()}-${secureRandomString()}`;
     return `
       <div class="message-quiz-component" data-quiz-id="${t}" data-correct-answer="${e.correctAnswer}">
         <div class="quiz-header">
@@ -12333,7 +12398,9 @@ class ne {
       if (r === -1) break;
       const c = i.substring(a + s.length, r).trim();
       try {
-        let l = c.replace(/<br\s*\/?>/gi, "").replace(/<[^>]*>/g, "").replace(/[\r\n\t]/g, "").trim();
+        const m = document.createElement("template");
+        m.innerHTML = c.replaceAll("<br>", "").replaceAll("<br/>", "").replaceAll("<br />", "");
+        let l = (m.content.textContent || "").replace(/[\r\n\t]/g, "").trim();
         console.log(`Parsing ${t} JSON:`, l);
         const d = JSON.parse(l);
         if (t === "quiz" && !d.quizId) {
@@ -12343,7 +12410,7 @@ class ne {
         const h = await o.render(d);
         i = i.substring(0, a) + h + i.substring(r + n.length);
       } catch (l) {
-        console.error(`Failed to parse ${t} component:`, l), console.error("JSON content was:", c), i = i.substring(0, a) + `<div class="component-error">Invalid ${t} format: ${l.message}</div>` + i.substring(r + n.length);
+        console.error(`Failed to parse ${t} component:`, l), console.error("JSON content was:", c), i = i.substring(0, a) + `<div class="component-error">Invalid ${t} format</div>` + i.substring(r + n.length);
       }
       a = i.indexOf(s, a);
     }

@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-3416
+track: cloud
+level: L4
+zone: analyze
+topic: data-parallelism
+competency_area: parallelism
+bloom_level: analyze
+phase: training
+title: Analyzing Data Parallelism Bottlenecks on Google TPU v5e
+scenario: You are training a 500M parameter ResNet-200 on TPU v5e devices (16GB HBM, 1.6 TB/s interconnect) using FSDP data parallelism. Beyond 64 devices, per-device throughput degrades significantly.
+question: Why does FSDP data-parallel ResNet-200 training on TPU v5e degrade beyond 64 devices, and how would you improve scaling?
+details:
+  realistic_solution: |
+    Beyond 64 TPU v5e devices, the per-device batch and compute work shrink enough that FSDP collectives dominate the step. Each step must materialize parameter shards with all-gather, reduce gradients with reduce-scatter or all-reduce, and synchronize across a larger ICI/DCN topology. The fix is to improve the compute-to-communication ratio and keep collectives local where possible: use topology-aware FSDP meshes, avoid sharding groups that span slow links, increase per-device batch size or use gradient accumulation, overlap all-gather/reduce-scatter with forward and backward compute, and cap the data-parallel group size if larger runs reduce efficiency.
+  common_mistake: |
+    **The Pitfall:** Assuming adding more compute devices yields linear scaling.
+    **The Rationale:** Overlooking the increasing overhead of FSDP gradient synchronization and all-gather operations as the physical network topology expands.
+    **The Consequence:** Hitting a harsh scaling wall where adding expensive TPUs actually slows down the absolute training time due to communication saturation.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 500M BF16 parameters = 500M * 2 bytes = 1.0 GB of weights.
+    - A rough FSDP step moves about one model copy in all-gather and one in reduce-scatter/all-reduce per rank: about 2 GB/rank before bucket and topology overhead.
+    - Effective sustained bandwidth for a large multi-device collective is far below peak chip bandwidth; assume 100 GB/s at 64 devices and 50 GB/s at 128 devices for an order-of-magnitude estimate.
+
+    **Calculations:**
+    - 64-device communication time: 2 GB / 100 GB/s = 20 ms.
+    - 128-device communication time: 2 GB / 50 GB/s = 40 ms.
+    - If per-rank compute falls from roughly 50 ms to 25 ms as devices double, the step stops scaling because communication grows from a minority to a dominant share.
+
+    **Conclusion & Interpretation:**
+    - **Result: scaling degrades once tens of milliseconds of FSDP communication exceed the shrinking per-device compute.** Improve scaling by increasing local work, overlapping collectives, and choosing topology-aware sharding groups.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+  - Napkin math mixes GB and TB/s units without showing explicit conversion for the final communication time calculation.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

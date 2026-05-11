@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-3079
+track: cloud
+level: L3
+zone: design
+topic: queueing-theory
+competency_area: latency
+bloom_level: apply
+phase: inference
+title: 'Queueing Theory Realization: Size an H100 Inference Queue for Black Friday Traffic'
+scenario: 'Concretely size an H100 inference cluster for a retail AI assistant expected to handle Black Friday peak: 2000 req/s with 30-minute burst, P99<2s SLO. Normal load is 200 req/s. Each request: 1500 input + 300 output tokens on LLaMA-3-70B. Calculate fleet size for peak, cost for the 30-min burst, and whether pre-warming is needed.'
+question: How many H100s are needed for the 2000 req/s Black Friday burst, what does the 30-minute burst cost, and should you pre-warm capacity?
+details:
+  realistic_solution: Do not size LLaMA-3-70B decode by assuming the full 140GB model is streamed from HBM for every token. Use an empirical serving-throughput assumption for the chosen engine and sequence shape. If an 8xH100 TP node sustains about 5,500 generated tokens/s for 1500-token prompts and 300-token outputs while meeting the 2s P99 target, then one node serves 5,500/300 = 18.3 req/s at saturation. At a 70% safe operating point, capacity is 12.8 req/s per node, so 2000 req/s requires ceil(2000/12.8) = 157 TP=8 nodes, or 1,256 H100s. The 30-minute burst cost is 1,256 * $3/hr * 0.5hr = $1,884. Pre-warming is required because provisioning GPUs and loading 70B weights takes minutes, which is material relative to a 30-minute burst.
+  common_mistake: |
+    **The Pitfall:** Sizing only for average load and not accounting for autoscaling lag.
+    **The Rationale:** Engineers often assume auto-scaling can instantly provision hardware to meet traffic spikes.
+    **The Consequence:** Forgetting that pre-warming H100 instances takes 3-5 minutes means the system can't scale fast enough for a sudden burst, resulting in severe SLO violations.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - LLaMA-3-70B served on TP=8 H100 nodes.
+    - Request shape: 1500 input tokens + 300 output tokens.
+    - Planning benchmark: one TP=8 node sustains 5,500 generated tokens/s at this shape while meeting P99 < 2s.
+    - Safe utilization target = 70%. Cost = $3/hr per H100.
+
+    **Calculations:**
+    - Saturation request throughput per TP=8 node = 5,500 output tok/s / 300 output tok/req = 18.3 req/s.
+    - Safe capacity per node = 18.3 * 0.70 = 12.8 req/s.
+    - Required TP=8 nodes = ceil(2000 / 12.8) = 157 nodes.
+    - Required GPUs = 157 nodes * 8 H100/node = 1,256 H100s.
+    - Burst cost = 1,256 GPUs * $3/hr * 0.5hr = $1,884.
+
+    **Conclusion & Interpretation:**
+    - **Result: 157 TP=8 nodes, or 1,256 H100s, costing about $1.9k for the 30-minute burst.** Pre-warm the capacity because autoscaling and weight loading are too slow for a sudden Black Friday spike.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 9
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

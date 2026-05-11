@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-4477
+track: cloud
+level: L5
+zone: specification
+topic: recommendation-systems-engineering
+competency_area: architecture
+bloom_level: apply
+phase: inference
+title: 'DLRM Training on TPU v5e Pod: Embedding Table Placement'
+scenario: A team is porting a DLRM training job to a TPU pod (256 chips). The embedding tables total 8TB. TPU HBM is 16GB per chip, providing 4TB total HBM. Embedding tables don't fit.
+question: How would you place 8TB of embedding tables on a 256-chip TPU pod with only 4TB total HBM?
+details:
+  realistic_solution: |
+    The 8TB table set cannot be fully resident in 4TB of pod HBM, so the placement plan must be tiered at pod level. Shard the hot partition across all 256 chips in HBM; for example, if the top 20% of rows drive most lookups, that is 1.6TB total or 6.25GB/chip. Use the remaining HBM for model state, activations, optimizer/training buffers, and a bounded cache/prefetch area, not for assuming the whole table fits. Place at least the cold 4TB, and likely more after training headroom, in host DRAM or a distributed parameter server. Keep warm rows in host/extended memory with step-ahead prefetch into the HBM cache, and fetch cold rows asynchronously with admission limits so remote lookups do not dominate the step time. This is a capacity-driven hybrid HBM/off-chip embedding system, not pure in-HBM placement.
+  common_mistake: |
+    **The Pitfall:** Attempting to fit all embedding tables in HBM by aggressive quantization (e.g., INT4).
+    **The Rationale:** Engineers accustomed to LLM weight quantization assume the same techniques apply to recommendation models without quality loss.
+    **The Consequence:** INT4 embedding quality degrades significantly for recommendation models, and 1TB still strains capacity, fundamentally harming model accuracy.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Total embedding tables = 8TB.
+    - TPU HBM = 16GB/chip * 256 chips = 4096GB ~= 4TB total.
+    - Access pattern: top 20% of rows receive most lookups.
+
+    **Calculations:**
+    - Required embedding capacity per chip if fully resident: 8TB / 256 = 31.25GB/chip, which exceeds 16GB/chip before any non-embedding state.
+    - Minimum off-HBM data: 8TB - 4TB = 4TB, even if all HBM were used only for embeddings.
+    - Hot partition: 8TB * 0.20 = 1.6TB.
+    - Per-chip hot shard: 1.6TB / 256 = 6.25GB/chip, leaving 9.75GB/chip for model/training state and cache if the hot partition is evenly sharded.
+    - Remaining non-hot embeddings: 8TB - 1.6TB = 6.4TB, which must be served from host/parameter-server tiers with prefetching and caching.
+
+    **Conclusion & Interpretation:**
+    - **Result: only the hot shard and cache belong in HBM; at least 4TB and practically the 6.4TB non-hot partition live off-chip.** The operational plan is shard hot rows across the pod, prefetch warm rows, and pipeline cold parameter-server lookups.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

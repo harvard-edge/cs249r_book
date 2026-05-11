@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: edge-0971
+track: edge
+level: L4
+zone: evaluation
+topic: model-size-estimation
+competency_area: architecture
+bloom_level: analyze
+phase: both
+title: Pipeline vs Tensor Parallelism for a 30B Transformer over 1GbE Edge Orins
+scenario: Deploying a 30B parameter transformer across an edge cluster of 4 Orin devices communicating via 1Gbps Ethernet.
+question: For a 30B transformer across 4 Orins on 1Gbps Ethernet, should you use pipeline parallelism or tensor parallelism, and why?
+details:
+  realistic_solution: Tensor parallelism requires frequent synchronization for every layer, which is a poor match for a 1Gbps Ethernet link. Pipeline parallelism only requires passing intermediate activations at the boundaries of model partitions. With a 30B FP16 model split by layers across four devices, prefer pipeline parallelism unless benchmarking shows a different partition is viable; it minimizes communication frequency despite startup and teardown bubble overhead.
+  common_mistake: |
+    **The Pitfall:** Applying cloud data center topologies (like Megatron-LM TP) directly to edge hardware.
+    **The Rationale:** Candidates assume tensor parallelism scales universally, ignoring the catastrophic latency of 1Gbps Ethernet compared to NVLink.
+    **The Consequence:** The cluster spends 99% of its time blocked on network I/O, reducing inference throughput to zero.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 30B model (60GB FP16); 4 Orins
+    - Network: 1Gbps Ethernet (125 MB/s)
+    - Example pipeline boundary activation: batch 1, sequence length 1000, hidden size 8192, FP16
+    - Example transformer depth: 60 layers, split into 4 pipeline stages.
+
+    **Calculations:**
+    - Pipeline sends the boundary activation once per partition handoff: 1 * 1000 * 8192 * 2 B = 16,384,000 B = ~16.4 MB.
+    - Transfer time per handoff over 1GbE: 16.4 MB / 125 MB/s = ~0.131 s (~131 ms), plus protocol latency.
+    - With 4 stages, a single forward pass has 3 pipeline boundary transfers, roughly 3 * 131 ms = 393 ms of activation-transfer lower bound.
+    - Tensor parallelism would move comparable activation-sized tensors for synchronization at many layers. At 60 layers, even one 16.4 MB transfer per layer is 60 * 131 ms = 7.9 s of network-transfer lower bound; all-reduce/all-gather patterns can add more traffic.
+
+    **Conclusion & Interpretation:**
+    - **Result: Pipeline Parallelism is favored for this assumption set (Network-Bound)**. 1GbE makes per-layer tensor-parallel synchronization much more expensive than a few pipeline boundary transfers, though the exact split still needs benchmarking.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

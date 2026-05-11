@@ -1,0 +1,59 @@
+schema_version: '1.0'
+id: cloud-2896
+track: cloud
+level: L5
+zone: design
+topic: cnn-efficient-design
+competency_area: architecture
+bloom_level: create
+phase: both
+title: Design EfficientNetV2 training pipeline for large-scale cloud fine-tuning
+scenario: You need to fine-tune EfficientNetV2-XL (208M params) on a proprietary 50M-image dataset using 8 GPUs. The model uses Fused-MBConv blocks with progressive learning (small images early, larger later).
+question: What distributed training, gradient accumulation, and memory plan would let EfficientNetV2-XL fine-tune on 50M images in under 48 hours?
+details:
+  realistic_solution: |
+    Use 8-way DDP with BF16 autocast, channels-last tensors, fused optimizer, activation checkpointing on the high-resolution MBConv/Fused-MBConv blocks, and gradient accumulation only where the per-GPU micro-batch must shrink. Keep optimizer state local under DDP: EfficientNetV2-XL has 208M parameters, so BF16 weights plus FP32 master weights, gradients, and Adam moments are only a few GiB per GPU; activations dominate at large resolution.
+
+    A coherent schedule is progressive resolution with throughput measured at each stage: 128x128 with batch 512/GPU and no accumulation, 224x224 with batch 256/GPU and no accumulation, and 380x380 with micro-batch 64/GPU and 4 accumulation steps for an effective batch of 2048. Use checkpointing on later MBConv blocks at 380x380 to keep activations under budget, overlap DDP all-reduce with backward, and use enough dataloader/GPU preprocessing capacity to avoid starving the GPUs. The 48-hour target is feasible only if the measured image/sec across the schedule meets the required average, so the plan must include a short calibration run before committing the SLA.
+  common_mistake: |
+    **The Pitfall:** Assuming the low-resolution batch size can be reused unchanged at the final high resolution.
+    **The Rationale:** Candidates underestimate how activation memory grows with image area and forget to adjust micro-batch size, checkpointing scope, precision, or accumulation.
+    **The Consequence:** The high-resolution phase OOMs or falls far below the planned throughput, even though smaller micro-batches with checkpointing could have fit on 80GB GPUs.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - EfficientNetV2-XL: 208M parameters.
+    - 50M images, 60 epochs total.
+    - Target completion time: 48 hours.
+    - 8 GPUs (80 GiB HBM3 each).
+    - BF16 DDP training with FP32 Adam states.
+    - Approximate EfficientNetV2-XL inference cost at 380x380: 94 GFLOPs/image; training forward+backward ≈ 3x, or 282 GFLOPs/image before checkpoint recompute.
+    - Final 380x380 phase uses checkpointing with about 25% recompute overhead.
+
+    **Calculations:**
+    - Parameter/optimizer memory estimate: 208M params * 16 bytes ≈ 3.3 GB, plus buckets/workspace headroom.
+    - Activation memory with checkpointing at 380x380, micro-batch 64: about 18 GiB.
+    - Verify memory fit with 10 GiB communication/runtime headroom: 3.3 GB + 18 GiB + 10 GiB ≈ 31-32 GiB < 80 GiB.
+    - Required throughput: 50M images * 60 epochs = 3B images.
+    - Total images/sec required: 3B / (48 hours * 3600s) = 17,361 images/sec (~2,170 per GPU).
+    - Worst-case final-phase compute at 380x380: 2,170 images/sec/GPU * 282 GFLOPs/image * 1.25 recompute = 765 TFLOPS/GPU, which is not a realistic sustained requirement for the final resolution.
+    - Therefore the 48-hour plan depends on most epochs being cheaper progressive-resolution epochs and on measured throughput, not on claiming the final high-resolution phase alone sustains the average.
+
+    **Conclusion & Interpretation:**
+    - **Result: Feasible Only With Progressive Throughput Validation**. The memory plan is plausible on 80GB GPUs, but the 48-hour SLA requires measured throughput across the staged schedule, aggressive input pipeline tuning, and limiting the expensive 380x380 phase.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

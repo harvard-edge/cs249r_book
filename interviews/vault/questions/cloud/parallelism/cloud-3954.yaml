@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-3954
+track: cloud
+level: L3
+zone: implement
+topic: communication-computation-overlap
+competency_area: parallelism
+bloom_level: apply
+phase: both
+title: Overlapping Gradient Norm Computation with AllReduce
+scenario: Gradient clipping requires computing the global gradient norm across all parameters on all GPUs before the optimizer step, typically via a separate AllReduce performed after the gradient AllReduce.
+question: How can you overlap the global gradient norm computation with the gradient AllReduce to eliminate its latency overhead?
+details:
+  realistic_solution: 'Overlap strategy: as each gradient bucket becomes available, compute that bucket''s local sum of squared gradients on the GPU and accumulate it into one local squared-norm scalar exactly once per parameter. This local accumulation can run while later buckets are still being reduced. After all buckets have completed and the local squared sum is complete, perform one scalar AllReduce across ranks, then take sqrt(global_sum) to get the true global norm before clipping. The overlap hides most local norm computation, but the final scalar AllReduce and sqrt remain on the critical path.'
+  common_mistake: |
+    **The Pitfall:** Computing gradient norms only after all gradients are fully reduced.
+    **The Rationale:** Candidates follow the naive mathematical definition, fully sequentializing: backward → AllReduce → norm computation → norm AllReduce → clip.
+    **The Consequence:** A synchronous computation blocks the pipeline, adding 2-5ms of latency to every single training step.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Sequential local norm accumulation after all gradient communication would take about 2.0 ms.
+    - A scalar cross-rank reduction is still required to combine squared sums from all ranks.
+    - Later gradient buckets provide enough communication time to hide most local per-bucket norm work.
+
+    **Calculations:**
+    - Naive critical path: finish gradient AllReduce, then local squared-sum pass (2.0 ms), then scalar AllReduce, then sqrt.
+    - Overlapped critical path: per-bucket local squared sums run during remaining bucket communication.
+    - Remaining critical path: wait for any unfinished local accumulation, then one scalar AllReduce of the summed squares, then sqrt.
+    - Correct global norm: sqrt(AllReduce_sum(local_sum_of_squared_gradients)).
+
+    **Conclusion & Interpretation:**
+    - **Result: Local Work Mostly Hidden**. The optimization removes the separate full-gradient norm pass from the critical path, but it must still perform the final scalar reduction before clipping.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,57 @@
+schema_version: '1.0'
+id: mobile-1997
+track: mobile
+level: L5
+zone: mastery
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: evaluate
+phase: both
+title: Mobile NPU versus GPU Memory Bandwidth Tradeoffs
+scenario: An on-device LLM on an iPhone 15 Pro uses the A17 Pro SoC to serve autocomplete requests, dynamically switching hardware blocks.
+question: Should the A17 Pro Neural Engine or the GPU handle KV cache updates for a 1B parameter INT8 model to maximize throughput?
+details:
+  realistic_solution: |
+    Do not model KV-cache updates as rereading the 1 GB INT8 model per token. The KV path appends the current token's K/V vectors and, during attention, reads prior K/V entries from the cache. Those are memory-layout and bandwidth-sensitive operations with gathers, appends, transposes, and cache management, while the Neural Engine is strongest on dense tiled matrix multiplies. A practical A17 Pro split is to keep dense projections and MLPs on the Neural Engine when Core ML exposes the needed operators and cache layout, but run KV-cache update/layout work on the GPU or a dedicated memory path when the deployed stack requires programmable Metal kernels. The right default is framework- and operator-dependent, with memory bandwidth and layout conversion usually deciding the split.
+  common_mistake: |
+    **The Pitfall:** Blindly assigning all LLM tasks to the Neural Engine.
+
+    **The Rationale:** Developers assume the AI accelerator is universally best for all layers of an AI workload.
+
+    **The Consequence:** Autoregressive decoding performance tanks because the memory-bound KV cache operations stall on the NPU's internal data paths.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Plausible 1B-class decoder geometry: 24 layers, 16 KV heads, 128 head dimension, hidden size about 2048.
+    - KV-cache element precision: INT8 for this deployment example (1 byte per scalar).
+    - Context length for attention read example: 1024 tokens.
+    - System memory bandwidth is the limiting shared resource for cache movement.
+
+    **Calculations:**
+    - KV bytes appended per new token = 24 layers * 2 tensors * 16 KV heads * 128 head dimension * 1 byte = 98,304 bytes, or about 96 KB.
+    - KV bytes read for attention at 1024-token context = 98,304 bytes/token * 1024 = 100,663,296 bytes, or about 96 MiB.
+    - This is cache traffic, not model-weight traffic; the 1 GB model is not a valid per-token KV-update cost.
+    - The hardware decision should minimize cache movement and layout conversion: use the Neural Engine for dense INT8 compute when the framework supports the full path, and use GPU/Metal when KV append, gather, or layout kernels need programmable memory movement.
+
+    **Conclusion & Interpretation:**
+    - **Result: split by operator support and memory layout, not by accelerator name alone.** Under this KV-size estimate, cache work is dominated by reads/writes and layout handling, so GPU/Metal is appropriate when programmability is needed, while the Neural Engine remains appropriate for supported dense model layers.
+status: published
+provenance: llm-draft
+requires_explanation: true
+expected_time_minutes: 12
+validated: true
+validation_status: passed
+validation_date: '2026-04-25'
+validation_model: pydantic-1.0
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-25'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+  - gemini-generated
+  - target-mastery-L5
+created_at: '2026-04-25'

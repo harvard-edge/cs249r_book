@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-3645
+track: cloud
+level: L5
+zone: evaluation
+topic: tail-latency
+competency_area: latency
+bloom_level: evaluate
+phase: inference
+title: Measuring and Setting Realistic P999 SLOs for Autoregressive Generation
+scenario: A product team wants P999 < 5s for a GPT-4-class model (70B parameters) running on A100 (80GB HBM2e, 2TB/s, 400W) nodes. Requests generate 200-2000 output tokens. You must set a technically defensible SLA and architect the system to meet it.
+question: What SLA would you propose for 200-2000 token generations on the 70B A100 service, and how would you architect to meet it?
+details:
+  realistic_solution: |
+    Do not accept a single P999 < 5s SLA for all 200-2000 token generations. Propose length-conditioned SLOs: TTFT P99 < 1s, sustained decode P99 >= 40 tok/s for admitted requests, and total generation time expressed as TTFT + output_tokens / observed_decode_rate. A 2000-token response at 40 tok/s is about 50s, so the SLA must be streaming and length-aware. Architect for it with at least 2 A100s to fit the 70B FP16 weights and often 4-way tensor parallelism for KV-cache, batching, and throughput headroom. Add continuous batching for decode, prefill/decode separation, KV-cache admission control, and request caps or queue shedding when the token budget would violate the published SLO.
+  common_mistake: |
+    **The Pitfall:** Setting a single P999 SLA without conditioning on output length.
+    **The Rationale:** A 2000-token generation is physically 10x slower than 200 tokens and cannot meet the same SLA.
+    **The Consequence:** Conflating TTFT (time to first token) with total generation time in the SLA sets unachievable goals and violates SLAs.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - A100 80GB, 2TB/s.
+    - 70B model at FP16 = 140GB (needs minimum 2 A100s).
+    - Decode lower bound is approximated from per-rank weight bandwidth for batch-1.
+    - Real throughput is lower after tensor-parallel communication, KV-cache reads/writes, kernel overhead, and prefill/decode scheduling.
+
+    **Calculations:**
+    - TP=2: each rank owns about 140GB / 2 = 70GB of weights; reading that shard once gives a bandwidth lower bound, not an operational token time.
+    - TP=2 lower-bound latency: 70GB / 2TB/s = 35ms/token, or at most about 28 tok/s before communication, KV-cache traffic, and kernel overhead.
+    - TP=4: each rank owns about 140GB / 4 = 35GB of weights.
+    - TP=4 lower-bound latency: 35GB / 2TB/s = 17.5ms/token, or at most about 57 tok/s before overhead.
+    - Full-generation time at 40 tok/s: 200 tokens ≈ 5s, while 2000 tokens ≈ 50s.
+
+    **Conclusion & Interpretation:**
+    - **Result: Length-conditioned SLA required.** TP=4 gives enough bandwidth headroom for a 40 tok/s streaming target, but a universal 5s P999 total-latency SLA is only plausible for short outputs, not 2000-token generations.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

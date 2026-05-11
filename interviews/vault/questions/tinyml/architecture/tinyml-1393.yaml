@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: tinyml-1393
+track: tinyml
+level: L5
+zone: specification
+topic: neural-architecture-search
+competency_area: architecture
+bloom_level: analyze
+phase: training
+title: Hardware-Aware NAS on ESP32-S3 for TinyML Vision
+scenario: You are developing a 32x32 grayscale image classification model for an ESP32-S3. The model must execute in under 200ms and peak SRAM usage must remain below 400KB.
+question: How should an ESP32-S3 hardware-aware NAS constrain its search space and construct its reward function to ensure the model satisfies the SRAM and latency targets?
+details:
+  realistic_solution: The NAS search space must be structurally constrained to low-bit quantization (e.g., INT8) and depthwise-separable architectures (e.g., MobileNet variants). The multi-objective reward function must aggressively penalize candidates breaching the 400KB SRAM constraint, analyzed via static tensor lifetime profiling. External PSRAM must be rigidly designated for boot-time weight storage only, never for intermediate activations during the critical execution path.
+  common_mistake: |
+    **The Pitfall:** Integrating external PSRAM into the active tensor pool.
+    **The Rationale:** Candidates assume the 8 MB PSRAM acts identically to internal SRAM, treating it as a large, homogeneous memory space.
+    **The Consequence:** The NAS proposes massively bloated models that fit mathematically but utterly fail the 200ms deadline due to the disastrous latency of continuously fetching intermediate tensors over the SPI bus.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - ESP32-S3 at 240 MHz. Deadline = 200ms.
+    - Peak SRAM = 400 KB.
+    - Peak SRAM includes activations, scratch buffers, tensor arena metadata, and any SRAM-resident weights.
+
+    **Calculations:**
+    - Available cycles before stalls: 240,000,000 Hz * 0.200 seconds = 48,000,000 cycles, but this is not the same as 48M MACs because kernel efficiency, memory stalls, and operator choice matter.
+    - Example SRAM reserve for runtime/stack/I/O: 60 KB.
+    - Remaining ML arena budget: 400 KB - 60 KB = 340 KB.
+    - Candidate peak SRAM estimate: max(live activation tensors + scratch buffers) + SRAM-resident constants + arena overhead.
+    - If a candidate has 180 KB live activations, 80 KB scratch, 40 KB SRAM-resident constants, and 20 KB overhead, peak SRAM = 320 KB and passes the 340 KB arena budget.
+    - If static profiling reports 360 KB arena use, it fails even if parameter count is small.
+
+    **Conclusion & Interpretation:**
+    - **Result: Profiled SRAM-and-latency constraint, not a parameter-count rule.** The NAS should reject candidates whose profiled peak arena exceeds the SRAM budget and penalize measured or cycle-estimated latency above 200ms; quantization and depthwise operators help, but "sub-100K parameters" is not sufficient or necessary by itself.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

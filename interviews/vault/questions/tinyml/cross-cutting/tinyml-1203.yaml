@@ -1,0 +1,58 @@
+schema_version: '1.0'
+id: tinyml-1203
+track: tinyml
+level: L6+
+zone: mastery
+topic: responsible-ai
+competency_area: cross-cutting
+bloom_level: create
+phase: inference
+title: On-Device PII Redaction Guardrail
+scenario: You are designing an acoustic monitoring wearable for hospital staff using an ARM Cortex-M7 + Ethos-U55 (Corstone-300) with 512 KB shared SRAM. Strict privacy governance requires an on-device guardrail that detects and irreversibly scrambles spoken patient names (PII) before logging the audio to prevent data leaks.
+question: How should Corstone-300 detect and redact spoken PII on-device while fitting DSP, CNN, and buffers in 512 KB SRAM?
+details:
+  realistic_solution: |
+    Implement an owned-buffer pipeline rather than logging directly from the live DMA ring. The M7 writes audio into a 32 KB double buffer, extracts Mel features in a bounded DSP scratch region, and invokes the Ethos-U55 on an INT8 PII-spotting CNN whose live tensor arena fits the remaining SRAM through tiling or compression. Audio windows remain in a pending queue and are not persisted until the classifier result is known. If PII is flagged, the M7 overwrites the pending raw samples with irreversible redacted content, such as silence, deterministic tone masking, or a stored feature-only summary, then flushes the cache before any logging task can read the buffer. Buffer ownership must be explicit: DMA owns the capture buffer, DSP/NPU owns the feature buffer, and the logger only receives already-approved or already-redacted windows.
+  common_mistake: |
+    **The Pitfall:** Proposing complex transformer-based redaction models and ignoring shared memory contention.
+    **The Rationale:** Candidates ignore the lack of external memory on typical microcontroller profiles and forget that the Cortex-M7 and Ethos-U55 share the same SRAM.
+    **The Consequence:** The proposed models vastly exceed the 512 KB SRAM limit, and simultaneous DSP scrambling and NPU activation fetches cause severe memory bandwidth contention.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Audio: 16 kHz, 16-bit (32 KB/sec).
+    - Window: 500 ms double-buffered.
+    - MCU SRAM: 512 KB (128 KB for RTOS).
+    - Ethos-U55: use a conservative sustained deployment estimate of 20 GMAC/s after memory and operator overheads.
+    - CNN: 20 million MACs, 250 KB weights, 50 KB activations.
+
+    **Calculations:**
+    - Audio rate: 16,000 samples/s * 2 bytes/sample = 32,000 bytes/s, about 32 KB/s.
+    - One 500 ms audio buffer: 32 KB/s * 0.5 s = 16 KB.
+    - Double-buffered audio capture: 16 KB * 2 = 32 KB total.
+    - Non-CNN runtime reservation: 128 KB RTOS + 32 KB audio + 64 KB DSP scratch + 32 KB redaction/logging staging = 256 KB.
+    - SRAM left for CNN weights, activations, and tensor arena: 512 KB - 256 KB = 256 KB.
+    - Untiled CNN peak: 250 KB weights + 50 KB activations = 300 KB.
+    - CNN exceeds the remaining SRAM by 300 KB - 256 KB = 44 KB before alignment, stack growth, and guard space.
+    - Concrete feasible layout target: keep fixed reservations at 256 KB, limit the live CNN arena to <=224 KB, and leave about 32 KB guard/alignment margin.
+    - Required CNN reduction: 300 KB untiled peak - 224 KB target = at least 76 KB via weight tiling/streaming, compression, or activation reuse.
+    - Inference latency at 20 GMAC/s sustained, counting one MAC as one multiply-accumulate rather than two FLOPs: 20M MACs / 20,000M MAC/s = 1 ms before scheduling overhead.
+
+    **Conclusion & Interpretation:**
+    - **Result: memory plan is the binding constraint, not peak compute**. The PII guardrail is feasible only if raw audio is withheld from persistence until classification completes and the CNN live arena is reduced to about 224 KB so it coexists with DSP, audio, redaction staging, RTOS, and guard space inside 512 KB SRAM.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

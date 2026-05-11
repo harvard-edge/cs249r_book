@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-4450
+track: cloud
+level: L6+
+zone: mastery
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: create
+phase: inference
+title: 'Speculative Decoding in Disaggregated Architecture: Draft Pool Design'
+scenario: You are designing a speculative decoding architecture integrated into a disaggregated serving system. The draft model is 7B, the target model is 70B. Both have separate GPU pools.
+question: How would you design the request flow, acceptance sampling, and resource sizing for 7B-draft/70B-target speculative decoding?
+details:
+  realistic_solution: 'Disaggregated speculative decoding flow: (1) The gateway routes a request to the 7B draft pool. (2) The draft worker generates K=4 candidate tokens, about 20ms total in this example. (3) Send token IDs, logits metadata needed for acceptance, and compact request state to the target pool; do not describe this as an 8-byte transfer because KV deltas and scheduler metadata dominate token IDs. (4) The 70B target verifies the K-token block in one batched target forward pass, assumed here to take 5.57ms including memory traffic and kernel overhead. (5) Use speculative acceptance sampling; with alpha=0.8 and K=4, expected emitted tokens are the accepted draft-token expectation alpha + alpha^2 + alpha^3 + alpha^4 plus one bonus token only when all four draft tokens are accepted, alpha^4, for 2.7712 tokens per target verify. (6) Return accepted tokens and correction state, then continue drafting from the accepted prefix. Size pools from measured draft round time, target verify
+    time, acceptance rate, batching, and network/KV synchronization overhead, not from a fixed 10:1 parameter-count rule.'
+  common_mistake: |
+    **The Pitfall:** Running draft and target models on the identical shared GPU pool sequentially.
+    **The Rationale:** Engineers treat speculative decoding as a simple drop-in runtime optimization instead of a systemic architectural change.
+    **The Consequence:** The synchronization overhead and context switching between draft and target completely negates the speedup, especially when compounded by network round-trips.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 70B decode without spec = 41.8ms/token.
+    - Spec decoding K=4, acceptance rate alpha=0.8.
+    - Target verifies the K-token block in 5.57ms including memory and kernel overhead.
+    - Draft takes 20ms for 4 tokens.
+    - Network and KV synchronization overhead are not modeled as zero; they must be measured in production.
+
+    **Calculations:**
+    - Expected accepted draft tokens = 0.8 + 0.8^2 + 0.8^3 + 0.8^4 = 2.3616 tokens.
+    - Bonus token is emitted only when all K=4 draft tokens are accepted: 0.8^4 = 0.4096 tokens in expectation.
+    - Expected accepted-or-bonus tokens per target verify = 2.3616 + 0.4096 = 2.7712 tokens.
+    - Total round time = 20ms (draft) + 5.57ms (verify) = 25.57ms.
+    - Time per accepted-or-bonus token = 25.57ms / 2.7712 tokens = 9.23ms/token.
+    - Effective throughput per serial stream = 2.7712 / 0.02557s ≈ 108 tok/sec.
+    - Speedup over non-speculative 70B decode = 41.8ms / 9.23ms ≈ 4.5x before adding network/KV synchronization overhead.
+
+    **Conclusion & Interpretation:**
+    - **Result: About 9.2ms/token before network and KV-sync overhead.** Resource sizing should be based on measured draft and target service times, acceptance rate, and batching rather than a fixed draft-to-target GPU ratio.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview

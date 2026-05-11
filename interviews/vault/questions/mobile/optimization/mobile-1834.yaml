@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: mobile-1834
+track: mobile
+level: L4
+zone: optimization
+topic: autograd-computational-graphs
+competency_area: optimization
+bloom_level: evaluate
+phase: training
+title: Minimizing computational graph size for on-device fine-tuning on Snapdragon 8 Gen 3
+scenario: You are implementing LoRA fine-tuning on a device with 8GB RAM for a 1B parameter LLM. Standard LoRA with rank=4 adds 2xrank trainable matrices per attention layer. The backward pass for 32 transformer layers with LoRA adapters takes 800ms, far too slow for interactive use.
+question: How would you shrink the autograd graph for LoRA fine-tuning a 1B LLM?
+details:
+  realistic_solution: Freeze the base model parameters and ensure only LoRA adapter weights have requires_grad=True. Detach cached frozen activations before feeding the LoRA path, or use torch.no_grad() only around frozen base computations when adapter operations remain outside that block and differentiable. This shrinks the backward graph from full transformer layers to the small adapter path; the memory and latency savings are workload-dependent rather than a fixed percentage.
+  common_mistake: |
+    **The Pitfall:** Keeping `requires_grad=True` on frozen base model parameters while fine-tuning with LoRA.
+    **The Rationale:** Engineers think that correctly setting the optimizer to only update LoRA parameters is enough, but PyTorch still builds the computational graph for any operation where ANY tensor has `requires_grad=True`.
+    **The Consequence:** This needlessly stores massive activation tensors for the full forward pass, wasting memory and dramatically slowing down the backward pass.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - LLM Layers: 32.
+    - Hidden size: 2048.
+    - LoRA Rank: 4.
+    - FP16 tensors: 2 bytes/element.
+
+    **Calculations:**
+    - If the frozen base forward is tracked, autograd must retain large per-layer activation tensors for 32 transformer layers.
+    - A single batch-token hidden activation is 2048 * 2 bytes = 4 KB before intermediate tensors and batch/sequence scaling.
+    - LoRA trainable weights per projection: 2048 * 4 + 4 * 2048 = 16,384 elements = 32 KB FP16.
+    - Four LoRA projections per layer across 32 layers: 32 * 4 * 32 KB = about 4 MB of adapter weights.
+    - Detaching the frozen base prevents storing the full base-model backward graph; only adapter inputs/outputs and LoRA parameters need gradient tracking.
+
+    **Conclusion & Interpretation:**
+    - **Result: much smaller autograd graph, not a fixed 267x speedup.** The defensible claim is memory reduction from full-layer activation tracking to LoRA-adapter tracking, with actual runtime savings depending on sequence length, checkpointing, and kernels.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

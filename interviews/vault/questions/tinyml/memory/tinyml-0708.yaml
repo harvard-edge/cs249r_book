@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: tinyml-0708
+track: tinyml
+level: L4
+zone: optimization
+topic: mcu-compute-constraints
+competency_area: memory
+bloom_level: analyze
+phase: inference
+title: The CMSIS-NN Alignment Fault
+scenario: You define a global `int8_t tensor_arena[20000]` for a TFLite Micro model using the ARM CMSIS-NN library. The model compiles, but calling `invoke()` instantly crashes the MCU with a Hard Fault (Unaligned Memory Access), despite having enough memory.
+question: Why does an unaligned int8_t tensor_arena[20000] crash CMSIS-NN with a Hard Fault?
+details:
+  realistic_solution: |
+    The failure is an alignment contract problem between the byte-typed arena, the TFLite Micro allocator, the compiler, and CMSIS-NN kernels. A plain global `int8_t tensor_arena[20000]` only promises 1-byte natural alignment. Optimized CMSIS-NN code may issue word or dual-register loads and stores for packed data or scratch buffers; depending on the Cortex-M configuration and the exact instruction, an unaligned address can trap as a UsageFault escalated to HardFault.
+
+    The fix is to declare the arena with at least the alignment required by TFLite Micro, CMSIS-NN, and the target ABI, and to keep tensor/scratch offsets rounded up to that alignment. In practice this usually means using the runtime's arena alignment constant or an explicit compiler alignment such as `alignas(16)` when that is what the port requires. The important point is not that every `int8_t` access needs 16-byte alignment, but that optimized kernels and non-byte metadata must never receive under-aligned pointers. The fix has no runtime compute cost, but it can add a few bytes of padding.
+  common_mistake: |
+    **The Pitfall:** Assuming the neural network model weights are too large and overflowing the stack/heap.
+    **The Rationale:** Candidates confuse hardware execution pipeline faults with simple memory capacity exhaustion errors.
+    **The Consequence:** They waste days unnecessarily quantizing or pruning the model instead of applying a trivial 1-line C++ memory alignment compiler directive.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Standard C/C++ `int8_t` array has 1-byte natural alignment.
+    - CMSIS-NN and TFLite Micro may require word-aligned or stronger-aligned pointers for optimized kernels and scratch buffers.
+
+    **Calculations:**
+    - If `tensor_arena` is placed by the linker at `0x20000001`, a 32-bit load from the arena base is misaligned because `0x20000001 mod 4 = 1`.
+    - A dual-register or wider optimized load may have an 8-byte alignment expectation; `0x20000001 mod 8 = 1`.
+    - Aligning the arena base and rounding allocator offsets up to the required boundary prevents under-aligned kernel pointers. Worst-case padding is less than the chosen alignment per relevant buffer, not literally zero bytes.
+
+    **Conclusion & Interpretation:**
+    - **Result: alignment-contract fault, not a capacity fault.** Some optimized Cortex-M/CMSIS-NN accesses can fault on under-aligned addresses, so the arena must use the alignment required by the runtime, toolchain, and kernels, for example `alignas(16)` on ports that require 16-byte arena alignment.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

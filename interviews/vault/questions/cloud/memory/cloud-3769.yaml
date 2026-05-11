@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-3769
+track: cloud
+level: L5
+zone: specification
+topic: memory-mapped-inference
+competency_area: memory
+bloom_level: evaluate
+phase: inference
+title: Shared mmap for Multi-Tenant GPU Inference
+scenario: You run a multi-tenant inference platform where 8 worker processes on one server each serve the same 13B model (26 GB FP16). Without mmap, each process loads its own copy in host memory (208 GB), exceeding your 256 GB system memory.
+question: How would you design a memory-efficient architecture using mmap to share the 26 GB model across 8 workers, and how would you manage the GPU memory?
+details:
+  realistic_solution: On the host side, all 8 processes memory-map (`mmap`) the same safetensors file. The OS page cache backs those mappings with one shared 26 GB set of physical host pages instead of 8 private copies. On the GPU side, host `mmap` does not share device allocations. A single owner process or serving runtime should load the 26 GB weights to the GPU once, then either multiplex all requests through that owner or export CUDA IPC handles to worker processes. KV cache memory is not shared the same way as weights; it must be budgeted per active request pool or worker. If each of 8 workers is allowed a 6 GB KV-cache budget, device memory is 26 GB shared weights + 48 GB KV cache = 74 GB, leaving only a small margin on an 80 GB GPU.
+  common_mistake: |
+    **The Pitfall:** Assuming host-side `mmap` automatically shares GPU memory allocations.
+    **The Rationale:** Engineers conflate OS virtual memory page sharing with physical PCIe/GPU allocations, assuming `cudaMemcpy` from an mmap'd file behaves magically.
+    **The Consequence:** Each worker process invokes its own `cudaMemcpy`, duplicating the 26GB model 8 times on the GPU, immediately causing a hardware Out-Of-Memory (OOM) crash.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 8 worker processes, 13B model (26 GB).
+       - Host RAM: 256 GB.
+       - GPU VRAM: 80 GB.
+    2. **Calculations:**
+       - Naive Host RAM: 8 * 26 GB = 208 GB for private file buffers.
+       - mmap Host RAM: 1 * 26 GB = 26 GB in the shared OS page cache, saving 182 GB of host RAM.
+       - Naive GPU VRAM: 8 * 26 GB = 208 GB (OOM on 80GB GPU).
+       - Shared GPU VRAM requires one owner allocation or serving runtime: 26 GB weights.
+       - Per-worker/request-pool KV cache budget: 8 * 6 GB = 48 GB.
+       - Total shared-weight VRAM plan: 26 GB + 48 GB = 74 GB.
+    3. **Conclusion & Interpretation:**
+       - **Result: 26 GB shared host page cache and 74 GB planned VRAM under the stated KV-cache budget.** Host mmap saves RAM; GPU sharing requires a single weight owner, CUDA IPC, or a serving runtime, and KV cache remains separately budgeted.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

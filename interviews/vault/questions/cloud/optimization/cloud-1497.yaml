@@ -1,0 +1,33 @@
+schema_version: '1.0'
+id: cloud-1497
+track: cloud
+level: L4
+zone: diagnosis
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: analyze
+phase: training
+title: Fused Residual Add and LayerNorm for HBM Bandwidth
+scenario: You are profiling a 50B parameter Transformer model on A100 80GB GPUs. The PyTorch profiler shows that default LayerNorm operations and preceding residual additions consume a disproportionate amount of step time and are memory bandwidth-bound, with multiple separate read/write trips to HBM.
+question: How do you analyze this bottleneck and what implementation resolves it?
+details:
+  realistic_solution: Identify that the PyTorch default implementation uses separate kernels for the residual addition and the normalization, causing redundant trips to HBM. The bottleneck is memory traffic from reading and writing the same activation tensor across separate Add and LayerNorm passes, not LayerNorm arithmetic. Resolve this by deploying a fused Add + LayerNorm CUDA kernel (like Apex FusedLayerNorm) that performs the addition, computes statistics, and normalizes with intermediate values kept on chip.
+  common_mistake: |
+    **The Pitfall:** Assuming LayerNorm is compute-bound or suggesting a switch to Batch Normalization.
+    **The Rationale:** Candidates often try to optimize ALUs instead of memory access, or they suggest Batch Normalization, which incorrectly normalizes across the batch dimension and breaks sequence independence.
+    **The Consequence:** The proposed optimizations fail to reduce memory bandwidth saturation and may actually degrade model quality.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - FP16 tensor shape: 8x2048x8192 = 134,217,728 elements.
+    - One tensor size: 134,217,728 × 2 bytes = 268 MB decimal, or 256 MiB.
+
+    **Calculations:**
+    - Unfused residual add: read activation and residual = 2 tensors, then write the summed tensor = 1 tensor.
+    - Separate LayerNorm: read the summed tensor for statistics = 1 tensor, read it again for normalization = 1 tensor, then write output = 1 tensor.
+    - Unfused HBM traffic: 6 tensor trips × 268 MB = 1.61 GB decimal.
+    - Fused HBM traffic: read 2 inputs + write final output = 3 tensor trips × 268 MB = 804 MB decimal.
+
+    **Conclusion & Interpretation:**
+    - **Result: 804 MB fused traffic (HBM-Bandwidth-Bound).** Kernel fusion removes the intermediate write/read passes, reducing this activation traffic by about 50%.
+status: published
+provenance: imported

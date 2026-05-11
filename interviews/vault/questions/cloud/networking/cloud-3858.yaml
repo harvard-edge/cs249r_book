@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-3858
+track: cloud
+level: L5
+zone: design
+topic: rdma-transport
+competency_area: networking
+bloom_level: evaluate
+phase: both
+title: Architecting RDMA Transport for H100 Distributed Training
+scenario: A distributed training cluster has 128 nodes, where each node has 8 GPUs connected via NVLink. Inter-node networking uses 8x InfiniBand HCAs per node.
+question: How would you architect the RDMA transport, memory registration, and buffering for the 128-node ring all-reduce?
+details:
+  realistic_solution: |
+    The transport should use GPUDirect RDMA with long-lived, pre-registered GPU buffer pools rather than registering memory on the collective critical path. Each rank reuses fixed send/receive staging buffers from a registration cache whose lifetime matches the training job or communicator. The ring all-reduce is chunked and double-buffered: while the GPU reduces one chunk, the NIC issues one-sided RDMA Writes into the next peer's registered receive slot and completion queues recycle buffers. Buffer sizing should provide enough in-flight chunks to fill the 8 HCAs without excessive HBM pressure, and the design should fall back to a bounded registration cache for rare dynamic buffers.
+  common_mistake: |
+    **The Pitfall:** Proposing two-sided Send/Recv semantics or dynamically registering memory regions during the collective.
+    **The Rationale:** Candidates default to standard message passing paradigms and ignore the CPU and PCIe bottlenecks inherent to two-sided verbs.
+    **The Consequence:** Severe latency on the critical path, throttling the NVLink down to host memory speeds.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Nodes: 128 (8 GPUs each).
+    - Inter-node BW: 8 * 50 GB/s = 400 GB/s per node.
+    - Intra-node BW: 900 GB/s (NVLink). Gradient size: 16 GB.
+
+    **Calculations:**
+    - Ring all-reduce network volume per node = 2 * (N - 1) / N * tensor size = 2 * 127/128 * 16 GB = 31.75 GB.
+    - Ideal network time at full HCA utilization = 31.75 GB / 400 GB/s = 79.4 ms.
+    - Intra-node reductions and copies use NVLink and can overlap with network chunks, but pipeline fill/drain, reductions, PCIe/NIC injection, and synchronization prevent treating them as fully hidden in all cases.
+
+    **Conclusion & Interpretation:**
+    - **Result: about 80 ms ideal network time, plus pipeline and synchronization overhead.** The transport should be designed so pre-registration, chunking, and double-buffering keep the critical path close to the network volume bound without claiming NVLink work is always completely hidden.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

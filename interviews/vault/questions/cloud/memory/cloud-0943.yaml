@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-0943
+track: cloud
+level: L5
+zone: evaluation
+topic: vram-budgeting
+competency_area: memory
+bloom_level: evaluate
+phase: both
+title: Mitigating Memory Fragmentation in Dynamic LLM Serving
+scenario: You are optimizing a production inference service for a 13B parameter LLM on a single A100 80GB GPU. The service handles highly variable sequence lengths. Despite the theoretical peak memory usage for weights and KV cache being around 55GB, the system periodically crashes with 'CUDA out of memory' when a 2048-token request arrives after a burst of 128-token requests. Profiling shows heavy external fragmentation. Team A proposes disabling the caching allocator to manage memory manually via direct cudaMalloc calls. Team B proposes padding all requests to 2048 tokens to standardize allocation sizes.
+question: How would you evaluate disabling the allocator versus padding to 2048 tokens, and what memory strategy should replace them?
+details:
+  realistic_solution: Reject both proposals. Direct cudaMalloc can add workload- and allocator-dependent CPU-GPU synchronization latency per allocation, which is dangerous in a high-throughput serving loop. Padding to 2048 causes extreme compute waste. The optimal solution is to implement PagedAttention to allocate the KV cache in fixed-size, non-contiguous blocks (e.g., 16 tokens per block), reducing external fragmentation and padding waste without requiring one large contiguous KV allocation per request.
+  common_mistake: |
+    **The Pitfall:** Accepting Team B's padding strategy or Team A's manual cudaMalloc approach.
+    **The Rationale:** Candidates fail to calculate the quadratic compute penalty of padding or the severe CPU-GPU synchronization latency introduced by direct memory allocation.
+    **The Consequence:** Padding results in massive compute waste, while manual allocation destroys throughput.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Dynamic seq length: 128 to 2048 tokens (average 512).
+    - Team A: cudaMalloc latency = 20 \u00b5s. Allocations per step = 1,000.
+    - Team B: Pad all to 2048 tokens.
+    - PagedAttention block size: 16 tokens. Heads = 40, Head dim = 128, Precision = FP16 (2 bytes).
+    - KV cache stores both keys and values.
+
+    **Calculations:**
+    - Team A CPU sync overhead: 1,000 * 20 \u00b5s = 20 ms per step.
+    - Team B compute waste multiplier: (2048 / 512)^2 = 16x extra attention FLOPs.
+    - PagedAttention KV block memory per layer: 16 tokens * 40 heads * 128 dim * 2 bytes * 2 (K and V) = 327,680 bytes (320 KiB).
+    - Fixed-size KV pages remove the need for one large contiguous allocation per request, while the final page may still be partially filled.
+
+    **Conclusion & Interpretation:**
+    - **Result: Lower fragmentation and much less padding-driven waste (Memory-Bound Bottleneck)**. PagedAttention avoids padding every request to 2048 tokens and removes external fragmentation pressure, but it still has page metadata and partially filled final-block overhead rather than literally zero overhead.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-23T21:12:46.938288'

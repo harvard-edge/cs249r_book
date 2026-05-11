@@ -1,0 +1,21 @@
+schema_version: 1
+id: cloud-2367
+title: ECMP vs Adaptive Routing for Elephant Flows
+topic: load-balancing
+status: published
+provenance: human
+scenario: In a 4,096 GPU cluster using 400 Gbps RoCEv2 over a 2-tier Fat-Tree, you observe that link utilization rarely exceeds 60% during 3D-parallel LLM training, yet the GPUs are network-bound. The network uses static ECMP (Equal-Cost Multi-Path) routing based on 5-tuple hashing. Tensor Parallelism generates massive 100 Gbps 'elephant flows'.
+question: What is the tradeoff of replacing ECMP with packet-level Adaptive Routing (AR) to solve this utilization ceiling?
+details:
+  realistic_solution: "The 60% utilization ceiling is a symptom of ECMP hash collisions. Large ML workloads generating 'elephant flows' do not hash evenly across available uplinks. Switching to packet-level Adaptive Routing (AR) sprays packets of a single flow across all available paths based on switch queue depths, pushing utilization near 100%. However, packets arrive out-of-order. RoCEv2 NICs expect in-order delivery; out-of-order packets trigger NAKs and retransmissions. To support AR, the receiving NICs must possess massive reordering buffers. If the NICs lack this hardware support, AR will collapse performance due to CPU overhead. The tradeoff is between the simplicity and in-order guarantee of ECMP versus the high utilization of AR (requiring expensive NICs)."
+  common_mistake: |
+    **The Pitfall:** Assuming Adaptive Routing simply increases utilization to 100% without architectural side effects.
+    **The Rationale:** Treating network packets generically without considering the strictly in-order expectations of the RoCEv2 protocol.
+    **The Consequence:** Enabling AR on incompatible NICs, triggering massive out-of-order packet retransmissions that collapse the network.
+  napkin_math: |
+    - Static ECMP routes traffic by hashing the packet headers.
+    - If a Leaf switch has 4 uplinks and needs to route 4 flows, the probability of perfect load balancing is $4! / 4^4 = 24 / 256 = 9.375\%$.
+    - **Therefore, ~90.6% of the time, multiple flows hash to the same uplink, creating collisions and severely limiting utilization to ~60%.**
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

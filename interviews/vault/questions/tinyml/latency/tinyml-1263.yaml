@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: tinyml-1263
+track: tinyml
+level: L5
+zone: realization
+topic: real-time-deadlines
+competency_area: latency
+bloom_level: evaluate
+phase: inference
+title: Keyword Spotting Deadlines on ESP32-S3
+scenario: We are deploying a continuous keyword spotting (KWS) model on a dual-core MCU. The system captures audio at 16kHz and we must run inference every 20ms to meet our UX latency budget. The KWS model is quantized to INT8, requires 2.5 million MACs per inference, and has 350 KB of weights. The MCU has 512 KB of internal SRAM and 8 MB of external PSRAM. The system also runs a BLE stack requiring 100 KB of SRAM and frequent high-priority interrupts.
+question: How do you partition the memory and schedule the inference to guarantee the 20ms deadline without dropping audio frames or breaking the BLE connection?
+details:
+  realistic_solution: Reserve internal SRAM first for the BLE stack, audio DMA ping-pong buffers, tensor arena, hot kernels, and any weight tiles needed inside the 20 ms window; 350 KB of weights plus 100 KB of BLE state leaves too little room to lock every real-time buffer in the 512 KB SRAM. Pin BLE and radio-interrupt handling to one core and run inference as a high-priority task on the other, with DMA buffers protected from preemption. Use PSRAM only for non-real-time assets or cold model storage, and tile or prefetch weights into SRAM when needed so the timed portion of inference does not depend on unpredictable PSRAM cache misses.
+  common_mistake: |
+    **The Pitfall:** Placing the model in spacious PSRAM and failing to isolate OS interrupts across cores.
+    **The Rationale:** Engineers assume PSRAM behaves identically to SRAM and allow symmetric multiprocessing to handle interrupts.
+    **The Consequence:** Cache miss storms from PSRAM combined with BLE interrupt preemptions shatter the 20ms Worst-Case Execution Time (WCET) budget, systematically dropping audio frames.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - MCU: 240 MHz. Budget: 20 ms. Workload: 2.5M MACs.
+    - Ideal SRAM-resident inner loop: 1 cycle/MAC.
+    - PSRAM cache miss penalty: ~40 extra cycles per miss.
+
+    **Calculations:**
+    - SRAM-resident timed work: 2.5M cycles / 240 MHz = 10.4 ms, leaving ~9.6 ms for DMA handoff, scheduling, and BLE interference.
+    - If one PSRAM miss occurs for every 5 MACs, average cost = 1 + (0.2 * 40) = 9 cycles/MAC.
+    - PSRAM-dependent timed work: (2.5M * 9) / 240 MHz = 93.75 ms, which misses the 20 ms deadline.
+
+    **Conclusion & Interpretation:**
+    - **Result: SRAM timing fits only if the real-time working set is kept deterministic; PSRAM-dependent execution can miss the deadline by several times under the stated miss assumption.** Partition SRAM for BLE, DMA, kernels, tensor arena, and hot weight tiles rather than assuming all 350 KB of weights fit alongside every other real-time allocation.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 13
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-3226
+track: cloud
+level: L5
+zone: design
+topic: kv-cache-management
+competency_area: memory
+bloom_level: create
+phase: inference
+title: KV-Cache Compression via Sliding Window + Sink Tokens
+scenario: Your chatbot application uses Mistral 7B (sliding window attention, window=4096) but receives multi-turn conversations of 20K+ tokens. Users report quality degradation after turn 5.
+question: How should you manage KV-cache for 20K-token conversations on Mistral 7B while respecting its 4096-token sliding window?
+details:
+  realistic_solution: Respect Mistral 7B sliding-window attention by keeping a fixed 4096-token KV footprint per request. The direct implementation keeps the most recent 4096 tokens and evicts older KV blocks as the window advances; if using a StreamingLLM-style serving policy, reserve a small number of initial sink tokens and reduce the recent-token window by the same amount, for example 4 sink tokens + 4092 recent tokens = 4096 total. Do not add separate pinned-token storage unless the prompt explicitly budgets for it, because pinned tokens must displace recent-window tokens to stay within 4096. With a 131 KB/token total KV estimate, the serving footprint is constant at about 536 MB decimal (524 MiB) per request instead of growing with the full 20K-token conversation.
+  common_mistake: |
+    **The Pitfall:** Simply discarding all KV entries beyond the recent window.
+    **The Rationale:** Engineers implement the naive sliding window exactly as described in the original paper.
+    **The Consequence:** The model loses critical context from early conversation turns (e.g., user name, persona constraints), degrading response quality over long sessions.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Standard window memory: 4096 tokens * 131 KB = 536,576 KB ≈ 536 MB decimal (524 MiB) per request.
+    - Full 20K memory (no window): 20,000 * 131 KB = 2.62 GB decimal.
+    - Optional sink-token budget: 4 sink + 4092 recent = 4096 tokens.
+
+    **Calculations:**
+    - Full memory multiplier: 2.62 GB / 0.536 GB ≈ 4.9x more memory.
+    - Total memory with sliding window: constant 4096-token footprint.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Capacity Bound**. Sliding-window KV management keeps memory near 536 MB per request; quality claims require separate evaluation and should not be inferred from the memory budget.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

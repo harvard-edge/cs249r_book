@@ -1,0 +1,36 @@
+schema_version: '1.0'
+id: edge-2260
+track: edge
+level: L3
+zone: implement
+topic: model-adaptation-systems
+competency_area: architecture
+bloom_level: apply
+phase: inference
+title: LoRA Fine-Tuning on Jetson Orin Unified Memory
+scenario: An edge device needs to fine-tune a 3B model with LoRA on domain-specific data collected locally, but it does not have a discrete GPU (uses unified LPDDR5 memory). The default PyTorch CUDA training fails.
+question: How do you configure and run LoRA training on a Jetson Orin NX without a discrete GPU?
+details:
+  realistic_solution: |
+    Use the Jetson GPU through the JetPack CUDA/cuDNN stack; the issue is not the lack of CUDA, but ARM64 package support and tight unified-memory capacity. Install a JetPack-compatible ARM64 PyTorch build, use PEFT/LoRA with bitsandbytes or another Jetson-supported quantization path only if the wheel is available, and fall back to PyTorch/Transformers builds known to work on Jetson. Load the 3B base quantized, freeze it, train only LoRA tensors, use micro-batch size 1, short sequence lengths, gradient checkpointing, gradient accumulation, mixed precision where supported, and aggressive memory monitoring. Validate thermal throttling and save checkpoints locally because training will be slow and memory-sensitive.
+  common_mistake: |
+    **The Pitfall:** Treating Jetson like a standard x86 server GPU environment.
+    **The Rationale:** Many Python wheels and quantization libraries are not available for ARM64/JetPack, and the integrated GPU shares limited LPDDR5 with the CPU.
+    **The Consequence:** Training fails from unsupported packages, CUDA/PyTorch version mismatches, or unified-memory OOM unless batches, sequence length, and optimizer state are tightly controlled.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 3B INT4 base weights: about 1.5GB, frozen.
+    - LoRA rank: 8 on Q and V projections, 32 layers, hidden size 4096.
+    - Use micro-batch 1 with gradient accumulation.
+
+    **Calculations:**
+    - LoRA trainable params per projection: A (8 * 4096) + B (4096 * 8) = 65,536 params.
+    - Total LoRA trainable params: 65,536 * 2 projections/layer * 32 layers = 4,194,304 params.
+    - LoRA params+grads+Adam states at roughly 16 bytes/param = 67MB.
+    - Base weights plus LoRA optimizer state: 1.5GB + 0.067GB = 1.57GB before activations and framework overhead.
+    - Activations, CUDA workspace, dataloader, and OS can consume multiple additional GB, so micro-batches and checkpointing are required on 8-16GB unified memory.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Capacity Bound.** LoRA keeps trainable state small, but Jetson training is constrained by ARM64 software compatibility, unified-memory headroom, and thermal/performance limits rather than a simple server-GPU compute estimate.
+status: published
+provenance: imported

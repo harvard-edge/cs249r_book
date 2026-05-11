@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-2576
+track: cloud
+level: L2
+zone: recall
+topic: vram-budgeting
+competency_area: memory
+bloom_level: understand
+phase: both
+title: Why ZeRO-3 Is Overkill for a 7B Model on 4 GPUs
+scenario: Your colleague proposes using DeepSpeed ZeRO-3 for a 7B model on 4 GPUs, but training is much slower than expected.
+question: What are ZeRO-1, ZeRO-2, and ZeRO-3, and why might ZeRO-3 be overkill for a 7B model on 4 GPUs?
+details:
+  realistic_solution: |
+    ZeRO-1 partitions only optimizer states across GPUs. For AdamW with 7B params, assume 12 bytes/param of optimizer-related state: FP32 master weights plus FP32 m and v, or about 84 GB total, sharded to 21 GB per GPU. ZeRO-2 also partitions gradients after reduction, so gradients do not remain fully replicated on every GPU. ZeRO-3 partitions parameters as well; each GPU stores only 1/N of weights but must all-gather parameter shards layer by layer during forward and backward passes. For 7B on 4 GPUs, ZeRO-1 gives each GPU 14 + 14 + 21 = 49 GB, which fits in 80 GB before activations. ZeRO-3 reduces the model-state footprint to about 28 GB per GPU, but that memory saving is unnecessary here and the extra per-layer all-gathers can slow training.
+  common_mistake: |
+    **The Pitfall:** Always using the highest ZeRO stage for maximum memory savings.
+    **The Rationale:** Candidates assume more memory savings is universally better, without considering the nonlinear communication overhead.
+    **The Consequence:** Unnecessary all-gather operations for every layer drastically slow down training when a lower stage already perfectly fits in memory.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 7B parameters. Memory capacity: 80 GB per GPU.
+    - Weights = 14 GB, gradients = 14 GB.
+    - AdamW optimizer-related state = 12 bytes/param = 84 GB total.
+
+    **Calculations:**
+    - ZeRO-1 memory = 14 (W) + 14 (G) + 84/4 (OS) = 49 GB per GPU.
+    - ZeRO-2 memory = 14 (W) + (14 + 84)/4 = 38.5 GB per GPU.
+    - ZeRO-3 memory = (14 + 14 + 84)/4 = 28 GB per GPU.
+    - ZeRO-3 saves 21 GB/GPU versus ZeRO-1, but it introduces parameter all-gathers during forward and backward execution.
+
+    **Conclusion & Interpretation:**
+    - **Result: ZeRO-1 Already Fits.** ZeRO-1 comfortably fits within the 80 GB budget before activations. ZeRO-3 saves more memory, but the added communication is not justified when the lower stage already fits.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

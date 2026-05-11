@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# STATUS (2026-05-03): preserved as a reference pattern — see vault/scripts/DEPRECATED.md
+# §"Preserved for adaptation". `vault generate` (vault-cli) is the modern
+# entrypoint but does NOT batch — it calls per-question. This script's batching
+# (12 cells / call, balanced track×area×zone×level round-robin) is the
+# single-call efficiency pattern we want when generating in bulk.
 """Gemini 3.1 Pro driven, BATCHED question generation.
 
 Why batched: the gemini-3.1-pro-preview API has a 250-call/day cap, and

@@ -1,0 +1,39 @@
+schema_version: '1.0'
+id: mobile-1061
+track: mobile
+level: L5
+zone: specification
+topic: transformer-systems-cost
+competency_area: compute
+bloom_level: create
+phase: inference
+title: On-Device Multi-Task Model Memory Budgeting
+scenario: Specify the model architecture and memory allocation for a multi-task on-device AI system on a device with 16GB RAM and 77GB/s bandwidth. Tasks include always-on keyword spotting (P99 < 10ms), on-demand chat assistant (P99 < 3s for 100 tokens), and document summarization (P99 < 10s for 500 tokens).
+question: Which model architecture and memory allocation allows keyword spotting, chat, and summarization to meet their SLOs simultaneously?
+details:
+  realistic_solution: |
+    Use three explicitly budgeted components. Keyword spotting should be a 1MB INT8 CNN/RNN running on the audio DSP with a small ring buffer, so it does not contend with the main LLM path and can meet P99<10ms from measured DSP latency. For chat, keep a 3B INT4 instruction model resident (1.5GB) and require an optimized measured decode rate of at least 34 tok/s to meet 100 tokens in 3s. For document summarization, use a distilled 1B INT4 summarization model or summarization adapter path (0.5GB) that sustains at least 50 tok/s for 500 tokens in 10s; a 3B chat model alone should not be claimed to meet this without a benchmark. Memory allocation: 4GB OS reserve, ~1MB KWS, 1.5GB chat model, 0.5GB summarizer, ~0.4GB KV caches/workspaces/adapters, leaving about 9.6GB of the 12GB app-accessible budget for app state and larger contexts.
+  common_mistake: |
+    **The Pitfall:** Loading entirely separate LLMs into memory for chat and summarization.
+    **The Rationale:** Candidates do not consider sharing a single backbone architecture (multi-task model or adapter-based LoRA) to economize unified memory.
+    **The Consequence:** The system runs out of memory (OOM) or thrashes constantly when trying to keep multiple redundant models resident.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Total RAM: 16 GB (OS takes 4 GB; 12 GB available to app/ML).
+    - KWS Model: ~1 MB on audio DSP, measured P99 must be <10 ms.
+    - Chat Model: 3B INT4 = 1.5 GB, measured decode target >=34 tok/s.
+    - Summarization Model: 1B INT4 distilled summarizer = 0.5 GB, measured decode target >=50 tok/s.
+
+    **Calculations:**
+    - KWS: allocate 1 MB weights + audio ring buffer on DSP; accept only if measured P99 <10 ms.
+    - Chat latency budget: 100 tokens / 3s = 33.4 tok/s required; 3B optimized path at >=34 tok/s meets SLO.
+    - Summarization latency budget: 500 tokens / 10s = 50 tok/s required; use the 1B distilled summarizer at >=50 tok/s.
+    - Resident ML memory: 0.001 GB (KWS) + 1.5 GB (chat) + 0.5 GB (summary) + ~0.4 GB KV/workspaces = ~2.4 GB.
+    - Headroom: 12 GB - 2.4 GB = ~9.6 GB for app state and larger KV caches.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~2.4 GB resident ML allocation.** The architecture meets the simultaneous memory requirement and ties each latency SLO to a measured per-task inference rate instead of unsupported model-size/bandwidth arithmetic.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16

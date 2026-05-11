@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: tinyml-0946
+track: tinyml
+level: L4
+zone: design
+topic: transformer-systems-cost
+competency_area: compute
+bloom_level: apply
+phase: inference
+title: Realize Quantization-Aware Training Pipeline for MCU Transformer
+scenario: You must deploy an INT8 transformer for predictive maintenance on Cortex-M7 within 3 weeks. The FP32 baseline achieves 95% F1 at 48ms inference. PTQ drops accuracy to 88% (unacceptable). You must implement QAT using TensorFlow Lite Micro's QAT API with fake quantization. The training dataset has 50K samples, training time budget is 24 GPU-hours on a single A10G GPU.
+question: How should an INT8 QAT pipeline be staged for the Cortex-M7 transformer to recover F1 within the 24 GPU-hour budget?
+details:
+  realistic_solution: 'Pipeline: (1) Load the 95% F1 FP32 checkpoint and a held-out validation split. (2) Insert fake-quant nodes matching the TFLM INT8 kernels: per-channel weights where supported and per-tensor activations. (3) Calibrate activation ranges with weights frozen for a short warm-up so the PTQ failure is not amplified by unstable scales. (4) Gradually unfreeze quantized blocks, starting from the classifier and later transformer blocks, then run full QAT with a low learning rate and STE gradients. (5) Checkpoint on validation F1 and stop when the recovered INT8 model is within the product tolerance, rather than committing to a fixed number of epochs. (6) Export through the TFLM converter and validate both F1 and the 48ms Cortex-M7 latency target on-device.'
+  common_mistake: |
+    **The Pitfall:** Applying QAT to all layers simultaneously from the start.
+    **The Rationale:** Engineers assume QAT works identical to standard fine-tuning, flipping on all fake quantization nodes immediately.
+    **The Consequence:** Gradients become highly unstable due to the Straight-Through Estimator (STE), causing the model to diverge or fail to recover the target F1 score within the limited time budget.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Dataset: 50K samples, Batch size = 64.
+    - Time estimates require a measured dry-run benchmark; use ~500 steps/min only as an illustrative A10G benchmark after confirming it on the target training code.
+    - Time budget: 24h = 1440 mins.
+
+    **Calculations:**
+    - Steps per epoch = 50,000 / 64 = 781.25 steps, rounded up to 782.
+    - If the measured benchmark is 500 steps/min, time per epoch = 782 / 500 = 1.56 min/epoch.
+    - Under that measured-throughput assumption, the 24h budget supports about 1440 / 1.56 = 923 epochs.
+    - Illustrative staged budget using the measured 500 steps/min rate:
+      - Activation-scale warm-up: 25 epochs * 1.56 = 39 mins.
+      - Gradual unfreezing: 150 epochs * 1.56 = 234 mins.
+      - Full QAT fine-tuning: 400 epochs * 1.56 = 624 mins.
+      - Validation/export margin: about 120 mins.
+    - Total planned time = 39 + 234 + 624 + 120 = 1017 mins, or about 17.0 GPU-hours.
+
+    **Conclusion & Interpretation:**
+    - **Result: staged QAT plan with benchmark-gated epoch counts (Budget-Safe).** If the dry-run confirms ~500 steps/min, the example plan uses ~17 GPU-hours and leaves roughly 7 hours for failed runs, extra validation, or additional fine-tuning. If throughput differs, keep the same warm-up/unfreeze/full-QAT stages and scale epochs to the measured time per epoch.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 9
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

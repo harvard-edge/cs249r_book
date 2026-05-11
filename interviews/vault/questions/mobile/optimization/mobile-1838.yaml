@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: mobile-1838
+track: mobile
+level: L4
+zone: optimization
+topic: autograd-computational-graphs
+competency_area: optimization
+bloom_level: evaluate
+phase: training
+title: Efficient gradient-based hyperparameter search within 8GB on Snapdragon
+scenario: You are implementing DARTS (Differentiable Architecture Search) on Snapdragon 8 Gen 3 (45 TOPS, 8GB) to find the optimal neural architecture for a task-specific model. DARTS requires maintaining architecture parameters alongside model weights and differentiating through the architecture sampling.
+question: How would you make DARTS architecture search fit in 8GB on Snapdragon without running the full supernet?
+details:
+  realistic_solution: Use PC-DARTS (Partial Channel DARTS) which samples a fraction of channels per operation, reducing memory proportionally. Alternatively, use Single-Path One-Shot (SPOS) NAS which samples one operation per edge per step. Combining this with a tiny supernet prevents OOM on mobile hardware.
+  common_mistake: |
+    **The Pitfall:** Running the full continuous relaxation of the DARTS supernet concurrently.
+    **The Rationale:** Candidates directly port server-side code without realizing the activation memory scales linearly with the number of candidate operations per edge.
+    **The Consequence:** The device immediately OOMs because the backward pass requires storing activations for hundreds of simultaneous candidate operations.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Feature map per sample: 128 * 32 * 32 * 4 bytes = 0.5 MB.
+    - Batch size: 64, so one feature map batch is 0.5 MB * 64 = 32 MB.
+    - Full DARTS keeps multiple candidate-op activations per edge; actual retention depends on implementation and checkpointing.
+    - Search cell: 14 edges and 8 candidate ops per edge.
+
+    **Calculations:**
+    - One edge with all 8 candidate outputs materialized: 8 * 32 MB = 256 MB.
+    - If all 14 edges retained full candidate outputs naively: 14 * 256 MB = 3.6 GB of candidate activations.
+    - Backward metadata, gradients, weights, optimizer state, and framework overhead can push peak memory well above the forward activation estimate.
+    - PC-DARTS with K=4 processes roughly one quarter of channels per mixed op, so the candidate-activation component can drop from about 3.6 GB toward about 0.9 GB before overhead.
+
+    **Conclusion & Interpretation:**
+    - **Result: memory-bound with implementation-dependent headroom.** PC-DARTS or single-path sampling can make the search feasible by reducing candidate-op activation storage, but fit must still be validated with checkpointing, batch size, and framework overhead included.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

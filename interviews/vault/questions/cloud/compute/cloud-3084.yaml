@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-3084
+track: cloud
+level: L5
+zone: design
+topic: systolic-dataflow
+competency_area: compute
+bloom_level: create
+phase: both
+title: 'Systolic Array Design: Weight-Stationary vs Output-Stationary Tradeoff'
+scenario: Design the dataflow strategy for a custom 256x256 systolic array computing one attention head score matrix Q*K^T with seq=2048, head_dim=64, BF16 on a TPU. Choose between weight-stationary and output-stationary dataflow, and justify with memory reuse analysis.
+question: For the 2048-token attention layer Q*K^T on a 256x256 systolic array, should you use weight-stationary or output-stationary dataflow, and why?
+details:
+  realistic_solution: |
+    For one head, Q and K are each 2048x64 BF16 = 256 KiB, and the score output is 2048x2048 BF16 = 8 MiB. A 256x256 array cannot use all columns for a single 64-wide dot product unless the mapping batches multiple rows/columns, so make the data-movement model explicit: compute 256x256 score tiles, each using a 256x64 Q tile and a 256x64 K tile. There are 8 Q-blocks and 8 K-blocks. If K is reloaded independently for every Q-block/K-block pair, K traffic is 64 * 32 KiB = 2 MiB. If K blocks are kept stationary across all 8 Q-blocks, K traffic is 8 * 32 KiB = 256 KiB. Output-stationary accumulation still happens inside each tile, but the larger reuse win is keeping K tiles resident while streaming Q tiles and writing each score tile once.
+  common_mistake: |
+    **The Pitfall:** Misapplying output-stationary dataflow to attention computation.
+    **The Rationale:** Candidates treat attention weights (Q*K^T) like standard fully connected layers, failing to recognize that they are recomputed from inputs and benefit massively from caching K in registers.
+    **The Consequence:** Generating 99.9% unnecessary memory reads, destroying memory bandwidth and throttling the systolic array.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Attention head: Q and K are both 2048x64 BF16.
+    - Score output is 2048x2048 BF16.
+    - Compare 256x256 score tiles. Each tile multiplies Q_block(256x64) by K_block^T(64x256).
+
+    **Calculations:**
+    - Q size = 2048 * 64 * 2 = 262,144 bytes = 256 KiB.
+    - K size = 2048 * 64 * 2 = 262,144 bytes = 256 KiB.
+    - Score output = 2048 * 2048 * 2 = 8,388,608 bytes = 8 MiB.
+    - There are 2048/256 = 8 Q row blocks and 8 K column blocks, so 64 score tiles.
+    - Per K block size = 256 * 64 * 2 = 32 KiB.
+    - Naive tiled K traffic if each score tile reloads its K block = 64 * 32 KiB = 2 MiB.
+    - Weight-stationary K traffic if each K block is loaded once and reused across all Q blocks = 8 * 32 KiB = 256 KiB.
+    - Q traffic has the symmetric reuse opportunity; output traffic is fixed at one 8 MiB score write if materialized.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Reuse Bound.** Keep K tiles stationary while streaming Q tiles; under the explicit 256x256 score-tile model this cuts K read traffic from about 2 MiB to 256 KiB, while output-stationary accumulation remains the per-tile mechanism.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

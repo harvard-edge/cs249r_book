@@ -1,0 +1,56 @@
+schema_version: '1.0'
+id: cloud-3733
+track: cloud
+level: L4
+zone: optimization
+topic: memory-hierarchy-design
+competency_area: memory
+bloom_level: evaluate
+phase: both
+title: Activation Checkpointing Need for 70B Training on 64 A100s
+scenario: You are training a 70B model on 64x A100 GPUs arranged as 8-way tensor parallelism and 8-way data parallelism with ZeRO-1 optimizer-state sharding across the 8 DP ranks. Each A100 holds an 8.75B parameter shard. Without gradient checkpointing, activation memory is 6GB/GPU at batch=8. With checkpointing, activation is 0.5GB but requires a 33% recomputation overhead.
+question: Does this 8-way TP and 8-way DP 70B training setup need activation checkpointing at batch=8 on 64 A100s?
+details:
+  realistic_solution: 'With 8-way tensor parallelism, each GPU holds one 70B/8 = 8.75B parameter TP shard. The 8-way data-parallel dimension creates 8 replicas of each TP shard; ZeRO-1 shards only optimizer state across those 8 DP ranks, not the weights or gradients. Per GPU: weights are 8.75B × 2B = 17.5GB, gradients are another 17.5GB, and Adam-style optimizer state for the shard is 8.75B × 12B = 105GB before ZeRO-1, or 105/8 = 13.1GB per GPU after DP sharding. Fixed memory is 48.1GB. At batch=8, activations without checkpointing are 6GB, so total memory is 54.1GB, well below the 80GB A100 limit. No, checkpointing is not needed at batch=8; it would reduce activations from 6GB to 0.5GB and save 5.5GB, but that saving is not worth the stated 33% recomputation overhead unless another memory consumer raises the footprint.'
+  common_mistake: |
+    **The Pitfall:** Forgetting to account for optimizer states and gradients alongside activations.
+    **The Rationale:** Engineers focus solely on the size of the model weights and the activations.
+    **The Consequence:** They incorrectly estimate available VRAM and misjudge whether gradient checkpointing's 33% compute penalty is necessary.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - GPU memory: A100 (80GB).
+    - Parallel layout: 8-way tensor parallelism and 8-way data parallelism.
+    - Optimizer: ZeRO-1 shards optimizer state across 8 DP ranks.
+    - Tensor-parallel shard per GPU: 70B / 8 = 8.75B parameters (BF16).
+    - The 8 DP ranks replicate weights and gradients for a given TP shard; ZeRO-1 shards optimizer state across those DP ranks.
+    - Activations (batch=8): 6GB.
+
+    **Calculations:**
+    - Weights memory: 8.75B * 2 bytes = 17.5GB.
+    - Gradients memory: 17.5GB.
+    - Optimizer state before ZeRO-1 for this TP shard: 8.75B * 12 bytes = 105GB.
+    - Optimizer memory after ZeRO-1 across 8 DP ranks: 105GB / 8 = 13.1GB.
+    - Total fixed memory: 17.5 + 17.5 + 13.1 = 48.1GB.
+    - Total memory at batch=8 without checkpointing: 48.1GB + 6GB = 54.1GB.
+    - Total memory at batch=8 with checkpointing: 48.1GB + 0.5GB = 48.6GB.
+    - Checkpointing savings at batch=8: 6GB - 0.5GB = 5.5GB, at the cost of 33% recomputation overhead.
+
+    **Conclusion & Interpretation:**
+    - **Result: No Checkpointing Needed at Batch=8.** The uncheckpointed footprint is 54.1GB, leaving about 25.9GB on an 80GB A100. Checkpointing would save 5.5GB but adds 33% recomputation overhead, so it is optional rather than required for this batch size.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

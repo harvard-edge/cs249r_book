@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-2003
+track: cloud
+level: L5
+zone: evaluation
+topic: collective-communication
+competency_area: networking
+bloom_level: evaluate
+phase: both
+title: Evaluating Telemetry Aggregation for LLM Inference Fleets
+scenario: You operate a global fleet of 500 inference nodes (8xH100 each) serving an LLM at an aggregate 50,000 requests per second. Each request generates 4KB of telemetry (token-by-token latencies, generation stats, GPU metrics). The centralized ingestion pipeline is dropping logs, and cross-AZ egress costs exceed $50,000/month. Evaluate the trade-offs between implementing 1% head-based random sampling at the API gateway versus deploying node-level telemetry sidecars to compute HDR histograms and pre-aggregate metrics.
+question: Should you use 1% random sampling or node-level sidecar aggregation for the 50,000 QPS telemetry pipeline, and why?
+details:
+  realistic_solution: Prefer node-level sidecar aggregation over 1% random sampling. Sidecars can emit compact HDR histograms and counters for every node while using tail-based policies to retain errors and slow traces. This preserves tail-latency visibility much better than head-based random sampling, while reducing central ingress from the raw 200 MB/s stream to a few MB/s of sampled traces plus aggregated metrics.
+  common_mistake: |
+    **The Pitfall:** Blindly scaling up the Kafka ingestion cluster or using aggressive random sampling.
+    **The Rationale:** Random sampling destroys the statistical validity of P99 tail latency monitoring.
+    **The Consequence:** It drops rare out-of-memory (OOM) traces and fails to capture critical tail anomalies.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Raw throughput: 50,000 req/s * 4KB = 200 MB/s (~17 TB/day).
+    - 500 nodes.
+    - Sidecar metrics: 100 histogram buckets at 8 bytes per bucket per node every 10s.
+    - Tail-based trace sampling budget: 1% of request payloads.
+
+    **Calculations:**
+    - Raw telemetry: 50,000 req/s * 4KB = 200,000 KB/s ≈ 200 MB/s.
+    - 1% head-based random sampling: 50,000 * 0.01 = 500 req/s; 500 * 4KB = 2,000 KB/s ≈ 2 MB/s, but rare errors and tail traces can be missed.
+    - Sidecar histogram metrics: 500 nodes * 100 buckets * 8 bytes / 10s = 40,000 bytes/s ≈ 40 KB/s.
+    - Sidecar output with a 1% tail-based trace budget: 2 MB/s traces + 0.04 MB/s metrics ≈ 2.04 MB/s.
+
+    **Conclusion & Interpretation:**
+    - **Result:** Sidecar aggregation cuts central ingress by about 99% while retaining full-fleet latency distributions and preferentially keeping errors or slow traces. It does not preserve every diagnostic event, but it preserves the tail signals random sampling is most likely to lose.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-24T01:41:10.382983'

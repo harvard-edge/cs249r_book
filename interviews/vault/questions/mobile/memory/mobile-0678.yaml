@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: mobile-0678
+track: mobile
+level: L4
+zone: optimization
+topic: memory-hierarchy-design
+competency_area: memory
+bloom_level: analyze
+phase: inference
+title: The On-Device Training Storage Bloat
+scenario: Your keyboard app fine-tunes a next-word prediction model (50M params, FP16 = 100 MB) on device. After 3 months, users complain the app is using 4.2 GB of storage, though the model is still 100 MB.
+question: Where did the 4.2 GB of storage use come from during on-device fine-tuning?
+details:
+  realistic_solution: |
+    On-device training generates hidden storage through optimizer snapshots, rolling checkpoints, and cached training batches. The 100 MB model is only the deployed FP16 weights. Adam keeps two per-parameter state tensors; if those states are stored as FP16 on disk, each rolling checkpoint is a self-contained 300 MB snapshot: 100 MB of model weights plus 200 MB of optimizer state. In addition to ten historical checkpoints, the trainer may keep one active optimizer-state copy, a staging copy for crash-safe checkpoint writes, and retained caches for recent examples, tokenized batches, logs, and telemetry. Those explicit categories account for the observed 4.2 GB.
+  common_mistake: |
+    **The Pitfall:** Blaming user typing data accumulation.
+    **The Rationale:** Candidates assume the raw data inputs are bloated, ignoring the massive size of intermediate training tensors.
+    **The Consequence:** The team deletes valuable user data while the device remains choked by hidden Adam optimizer states and redundant checkpoints.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model size: 100 MB (FP16).
+    - Optimizer: Adam has two state tensors; assume FP32 in RAM and FP16 when checkpointed to disk.
+    - Rolling checkpoints kept: 10.
+    - Training cache components are retained for crash recovery and offline replay.
+
+    **Calculations:**
+    - Disk optimizer state per checkpoint = 2 states * 50M params * 2 bytes = 200 MB.
+    - One checkpoint = 100 MB model weights + 200 MB optimizer state = 300 MB.
+    - Rolling checkpoint storage = 10 * 300 MB = 3000 MB.
+    - Active on-disk optimizer state outside the checkpoint ring = 200 MB.
+    - Current deployed/training model copy outside the checkpoint ring = 100 MB.
+    - Crash-safe staging area for the next checkpoint = 300 MB.
+    - Recent typed-example shards = 250 MB.
+    - Tokenized batch and feature cache = 250 MB.
+    - Logs, telemetry, and retry metadata = 100 MB.
+    - Total disk usage = 3000 MB + 200 MB + 100 MB + 300 MB + 250 MB + 250 MB + 100 MB = 4200 MB = 4.2 GB.
+
+    **Conclusion & Interpretation:**
+    - **Result: Optimizer State and Checkpoint Bloat.** The 4.2 GB comes primarily from ten 300 MB checkpoints, plus active optimizer state and cached training data; the 100 MB model is only a small part of the storage footprint.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed

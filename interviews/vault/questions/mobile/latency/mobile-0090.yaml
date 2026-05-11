@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: mobile-0090
+track: mobile
+level: L5
+zone: evaluation
+topic: latency-decomposition
+competency_area: latency
+bloom_level: evaluate
+phase: inference
+title: The Inference Timing Jitter Mystery
+scenario: Your real-time sign language recognition app runs a pose estimation model on the Qualcomm Snapdragon 8 Gen 3. You measure inference latency over 1000 consecutive runs. P50 = 11 ms, P95 = 18 ms, P99 = 47 ms. The 3x variation between P50 and P99 causes visible stutter in the UI. The model, input, and code are identical every run.
+question: Why does the same computation take 3x longer sometimes?
+details:
+  realistic_solution: |
+    The model is deterministic, but the mobile system running it is not. The P50=11ms path is the warm, uncontended case. The P95=18ms tail is consistent with DVFS state changes, memory-bandwidth contention, cache effects, and core migration. The P99=47ms outliers require an additional long-tail event such as Java/Kotlin GC, runtime allocation, binder/driver stalls, or another high-priority workload overlapping the inference dispatch. Fix the variance by preallocating buffers, removing allocations on the inference path, using PerformanceHintManager or sustained-performance hints to reduce DVFS swings, keeping dispatch on an appropriate task group, and measuring accelerator queue time separately from application wall time.
+  common_mistake: |
+    **The Pitfall:** Believing there's a bug in the timing code when latency spikes.
+    **The Rationale:** Engineers expect deterministic execution times from fixed computations.
+    **The Consequence:** Time is wasted debugging profiling tools instead of acknowledging that identical computations genuinely take different amounts of time on mobile SoCs due to DVFS and memory contention.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - DVFS Jitter: At 850 MHz NPU = 11 ms.
+    - Hardware Overheads: Memory contention (+2 ms), Cache miss (+1.7 ms), Core migration (+0.5 ms).
+    - Software Spikes (P99): Concurrent Java GC pause (~20 ms).
+
+    **Calculations:**
+    - Observed median path: 11ms.
+    - P95 excess over median: 18ms - 11ms = 7ms, which fits DVFS plus memory/cache/core-migration overhead.
+    - P99 excess over P95: 47ms - 18ms = 29ms, which is too large for normal NPU frequency scaling alone and points to software/runtime stalls such as GC or driver queueing.
+    - Observed P99/P50 spread: 47ms / 11ms = 4.3x.
+
+    **Conclusion & Interpretation:**
+    - **Result: System-Noise-Bound Tail Latency.** DVFS and memory contention explain the broad P50-to-P95 spread; rare runtime or driver stalls explain the P99 outliers. Frequency hints can reduce one source of jitter, but the 47ms tail also requires eliminating allocations and queueing on the inference path.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

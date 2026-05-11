@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-2294
+track: cloud
+level: L5
+zone: evaluation
+topic: latency-decomposition
+competency_area: latency
+bloom_level: analyze
+phase: both
+title: Real-Time Aggregates Latency Tradeoff
+scenario: 'Your fraud detection system has a strict 50ms p99 latency SLA, leaving 15ms for Feature Retrieval. You must add a "user transaction amount z-score over the last 30 days" feature. Users average 1,000 transactions/month (~50KB of raw data). You evaluate: (A) On-the-fly computation from Redis, or (B) Streaming updates via Flink.'
+question: How do the on-the-fly and streaming designs compare for the 30-day z-score, and what architecture would you choose?
+details:
+  realistic_solution: |
+    Approach A (On-the-fly) fetches the user's 30-day transaction history and computes the z-score at request time. Its p99 latency is Redis lookup/serialization plus transferring and parsing about 50KB, then computing count, sum, and sum of squares over roughly 1,000 transactions. That can land around 8-16ms and has little margin inside a 15ms feature budget. Approach B (Streaming) stores the rolling 30-day count, sum, and sum_squares in Redis; retrieval reads one compact aggregate record and computes the z-score in about 1-3ms. The tradeoff is write amplification and stream state: Flink must update or expire rolling aggregates on transaction events and handle late data. I would choose streaming aggregates for the p99 SLA, or a hybrid that stores daily rollups plus the current day's small delta when exact per-event streaming state is operationally too expensive.
+  common_mistake: |
+    **The Pitfall:** Assuming on-the-fly compute only adds CPU latency.
+    **The Rationale:** Modern CPUs parse JSON fast, so engineers assume the math is cheap.
+    **The Consequence:** Ignoring the P99 network I/O cost and TCP overhead of fetching 50KB payloads per request, resulting in constant SLA violations.
+  napkin_math: |
+    **Assumptions & Constraints:**
+       - SLA budget: 15ms for feature retrieval.
+       - On-the-fly fetch size: 50 KB per active user.
+       - Redis p99 lookup plus serialization: 3-6ms.
+       - CPU parse/math for ~1,000 monthly transactions: 5-10ms.
+       - Streaming state keeps rolling count, sum, sum of squares, and expiry metadata per user.
+       - Optional sizing example assumes 10M active users; the architecture choice does not depend on that exact count.
+    **Calculations:**
+       - Ideal wire time: 50 KB / 1.25 GB/s = ~0.04ms, so p99 latency is dominated by Redis lookup, serialization, and client/runtime overhead.
+       - On-the-fly p99 estimate: 3-6ms fetch + 5-10ms parse/math = 8-16ms, which can exceed the 15ms budget.
+       - Streaming Redis value: count, sum, sum_squares, and timestamp/expiry metadata is roughly 32-64 bytes/user.
+       - Example aggregate state for 10M users: 10M * 64 bytes = 640 MB in Redis, plus Flink window/timer overhead; this replaces fetching 50KB of raw history on every scored request.
+       - Hybrid daily rollups store up to 30 daily aggregate rows per user and merge only the current-day delta, keeping request-time work bounded by a small number of aggregates rather than 1,000 raw events.
+    **Conclusion & Interpretation:** **8-16ms on-the-fly vs 1-3ms aggregate lookup (P99-Latency-Bound).** Precomputed rolling aggregates or a hybrid daily-rollup design meet the SLA more reliably than parsing 30 days of raw events per request.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

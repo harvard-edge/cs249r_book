@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-0531
+track: cloud
+level: L5
+zone: diagnosis
+topic: 3d-parallelism
+competency_area: parallelism
+bloom_level: evaluate
+phase: training
+title: The Sequence Parallelism Necessity
+scenario: You are fine-tuning a 70B model with 128k context length using tensor parallelism across 8 GPUs. The model weights fit comfortably, taking only 17.5 GB per GPU in FP16. However, you encounter an Out-Of-Memory (OOM) error immediately upon training. Your colleague suggests adding more tensor parallelism.
+question: Why is tensor parallelism alone insufficient, and what additional technique do you need?
+details:
+  realistic_solution: Tensor parallelism partitions the weight matrices and their corresponding GEMMs, but the activations between the partitioned regions — specifically LayerNorm inputs, dropout masks, and the residual stream — are replicated on every GPU. These "non-tensor-parallel" activations scale with sequence length and are identical on all 8 GPUs. At 128k context, they dominate memory. You need Sequence Parallelism (SP), which partitions these replicated activations along the sequence dimension across the tensor-parallel group.
+  common_mistake: |
+    **The Pitfall:** Believing that Tensor Parallelism shards all memory evenly across the GPUs.
+    **The Rationale:** Candidates incorrectly assume that "TP=8 means 1/8th the memory for everything," forgetting that non-GEMM activations are fully replicated.
+    **The Consequence:** Wasting time trying to scale TP further when the true bottleneck is the duplicated activation memory from sequence length.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Sequence length: 128k. Hidden dim: 8192. Layers: 80.
+    - One hidden-state-sized activation: 128k * 8192 FP16 values.
+    - Tensor parallelism shards GEMM weights but leaves several sequence-dimension activations replicated unless sequence parallelism is enabled.
+    - Precision: FP16 (2 bytes).
+
+    **Calculations:**
+    - One replicated hidden-state tensor is 128,000 * 8192 * 2 bytes = 2,097,152,000 bytes, or about 2.10 GB decimal / 1.95 GiB per GPU.
+    - Residual and normalization/dropout boundaries can require multiple such tensors to be live around a layer; even 2-3 live replicated tensors are about 4.2-6.3 GB decimal (3.9-5.9 GiB) per GPU before attention/MLP workspaces.
+    - Over many layers, activation checkpointing changes how many layer activations are saved, but it does not change the key fact: each non-sequence-parallel hidden-state tensor is fully replicated across all 8 tensor-parallel GPUs.
+    - Sequence Parallelism shards the sequence dimension, so each 2.10 GB replicated tensor becomes about 2.10 GB / 8 ≈ 0.26 GB decimal per GPU.
+
+    **Conclusion & Interpretation:**
+    - **Result: Activation-Memory-Bound**. The OOM is caused by large hidden-state activations that tensor parallelism does not shard. Sequence Parallelism is needed because it cuts each replicated sequence-length activation by the tensor-parallel degree.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

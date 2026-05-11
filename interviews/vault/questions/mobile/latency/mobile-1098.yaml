@@ -1,0 +1,40 @@
+schema_version: '1.0'
+id: mobile-1098
+track: mobile
+level: L3
+zone: analyze
+topic: latency-decomposition
+competency_area: latency
+bloom_level: analyze
+phase: inference
+title: Analyzing TTFT vs TPOT Bottlenecks
+scenario: You are analyzing the end-to-end latency of a 3-billion parameter on-device LLM running on an NPU. You observe that while the Time To First Token (TTFT) for a 50-token prompt is relatively fast, the Time Per Output Token (TPOT) is surprisingly slow, causing the total generation time to be the major bottleneck.
+question: Why does the end-to-end latency of an on-device LLM become heavily bottlenecked during the decode phase (TPOT) rather than the prefill phase (TTFT)?
+details:
+  realistic_solution: End-to-end latency breaks down into TTFT (prefill) and TPOT (decode). During prefill, the NPU processes many prompt tokens in parallel, so matrix operations have higher arithmetic intensity and better accelerator utilization. During decode, the system generates one token step at a time, with less parallelism and repeated weight, activation, and KV-cache traffic. Decode is therefore often memory-bandwidth limited and underutilizes peak TOPS, although the exact balance depends on model size, quantization, batching, and KV-cache implementation.
+  common_mistake: |
+    **The Pitfall:** Assuming the NPUs peak TOPS dictates the speed of all generative phases equally.
+    **The Rationale:** Candidates fail to decompose latency and realize that while prefill can saturate compute, decode is intrinsically memory-bandwidth bound.
+    **The Consequence:** They focus on compute optimizations (like pruning) instead of memory-bound optimizations (like quantization or KV cache tuning) for the decode phase.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 3B parameters at 8-bit = 3 GB footprint.
+    - NPU Compute: 7.5 TOPS.
+    - Effective decode memory traffic per token from weights, activations, and KV-cache: 1.0 GB.
+    - Sustained decode memory bandwidth after system contention: 50 GB/s.
+
+    **Calculations:**
+    - Approximate TTFT compute (50 prompt tokens, using ~2 ops per parameter per token) = 2 * 3B * 50 = 300 GigaOps.
+    - TTFT time = 300 / 7500 = 0.04s (40ms).
+    - Decode compute per output token = 2 * 3B = 6 GigaOps.
+    - Decode compute time floor = 6 / 7500 = 0.8ms per token.
+    - Decode memory time estimate = 1.0 GB/token / 50 GB/s = 20ms per generated token.
+    - TPOT is therefore dominated by memory time: 20ms memory vs 0.8ms compute per token.
+    - Optional total decode extension: 50 generated tokens * 20ms/token = about 1.0s of decode wall time.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~20ms TPOT estimate (Often Memory-Bound)**. TTFT for the prompt can be short because it is parallelized, while each decode step repeatedly pays a per-token memory cost that is much larger than the compute floor.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5

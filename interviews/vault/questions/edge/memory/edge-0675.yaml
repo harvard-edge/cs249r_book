@@ -1,0 +1,44 @@
+schema_version: '1.0'
+id: edge-0675
+track: edge
+level: L5
+zone: diagnosis
+topic: memory-hierarchy-design
+competency_area: memory
+bloom_level: evaluate
+phase: both
+title: The Edge LLM Memory Wall
+scenario: You're deploying a 3B parameter small language model (Phi-3-mini) on a Jetson Orin NX. The model weights in INT4 are 1.5 GB. Your colleague says 'plenty of room — we have 6.5 GB free.' The first few conversation turns work fine, but at turn 15 the system crashes with an OOM error.
+question: What's consuming the memory?
+details:
+  realistic_solution: 'The KV-cache. During autoregressive generation, the model stores the key and value tensors for every token generated so far, across every layer. For Phi-3-mini (32 layers, 32 heads, head_dim=96): KV-cache per token = 2 (K+V) × 32 layers × 32 heads × 96 dim × 2 bytes (FP16) = 393 KB per token. The colleague''s 6.5 GB figure is just 8 GB minus 1.5 GB of weights; it ignores the OS, camera stack, allocator reserve, and inference workspace. After ~3.5 GB of OS/sensor overhead, ~1.2 GB of runtime workspace, and ~0.8 GB of safety margin/fragmentation, only about 1.0 GB is practically available for KV-cache. At turn 15-20, a 2,000-3,000 token conversation consumes ~0.8-1.2 GB of KV-cache, so a camera ISP burst or allocator spike pushes the process into OOM.'
+  common_mistake: |
+    **The Pitfall:** Blaming the memory leak on activations or static weights.
+    **The Rationale:** Engineers used to CNNs assume memory usage is static once the model is loaded, forgetting autoregressive state.
+    **The Consequence:** They waste time looking for memory leaks or shrinking the batch size instead of implementing KV-cache quantization or limiting the context window.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Phi-3-mini KV-cache size: 393 KB per token.
+    - Physical memory: 8 GB.
+    - Non-KV footprint: 1.5 GB weights + 3.5 GB OS/sensors + 1.2 GB runtime workspace + 0.8 GB fragmentation/safety margin = 7.0 GB.
+
+    **Calculations:**
+    - Practical KV budget: 8.0 GB - 7.0 GB = ~1.0 GB.
+    - KV at 2,000 tokens: 2,000 * 393 KB = ~786 MB.
+    - KV at 3,000 tokens: 3,000 * 393 KB = ~1.18 GB.
+    - Context limit before other spikes: 1.0 GB / 393 KB = ~2,600 tokens.
+
+    **Conclusion & Interpretation:**
+    - **Result: OOM around 2,600 tokens under the real device budget (Memory-Bound)**. The apparent 6.5 GB free ignores platform overhead; unquantized KV-cache growth consumes the remaining headroom by turn 15-20.
+  options:
+    - The model is leaking memory. or "Activations are too large." The weights are static and activations are small for a single-token decode step.
+    - 'The KV-cache. During autoregressive generation, the model stores the key and value tensors for every token generated so far, across every layer. For Phi-3-mini (32 layers, 32 heads, head_dim=96): KV-cache per token = 2 (K+V) × 32 layers × 32 heads × 96 dim × 2 bytes (FP16) = 393 KB per token.'
+    - If the inference process is still running (visible in ps/top), the system is healthy and no recovery action is needed.
+    - Increasing the number of inference threads will proportionally increase throughput, since modern accelerators scale linearly with thread count.
+  correct_index: 1
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK

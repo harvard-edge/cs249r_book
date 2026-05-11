@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-3147
+track: cloud
+level: L5
+zone: optimization
+topic: flash-attention
+competency_area: optimization
+bloom_level: analyze
+phase: inference
+title: FlashDecoding for Long-Context Decode
+scenario: During autoregressive decoding of a 70B model, each step attends to the full KV cache. At context length 32K with 80 layers, 8 GQA KV heads, and head_dim=128, standard FlashAttention processes KV sequentially within one thread block per head. FlashDecoding parallelizes across the KV sequence.
+question: How much speedup should FlashDecoding provide at 32K context, and why does splitting the KV sequence across blocks help?
+details:
+  realistic_solution: |
+    Decode attention has one query token and a 32K-token KV cache. Across 8 GQA KV heads, reading K and V costs 32K x 8 x 128 x 2B x 2 = about 134 MB per layer per decoded token, while the arithmetic is small enough that the kernel is memory-bandwidth bound. Standard FlashAttention exposes roughly one block per KV head, or only about 8 blocks, so it cannot keep 132 H100 SMs busy while streaming that KV. FlashDecoding splits each head's KV sequence into chunks, for example 32K/256 = 128 chunks per head, giving 1024 blocks of parallel work. A second reduction combines the partial online-softmax results. The bandwidth floor is about 134 MB / 3.35 TB/s = 40 us per layer; practical standard decode attention might be several hundred microseconds because of underutilization, so a defensible estimate is roughly 8-12x speedup toward the bandwidth floor, not a guaranteed 100% occupancy result.
+  common_mistake: |
+    **The Pitfall:** Not recognizing that decode attention is memory-bound.
+    **The Rationale:** Candidates assume FlashAttention's compute-bound optimization is sufficient, missing that decode attention processes 1 query token against 32K KV tokens, leading to low SM occupancy when bounded to one block per head.
+    **The Consequence:** Failing to address the memory bandwidth bottleneck, resulting in poor latency for long-context generation.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Q is 1 token, K/V are 32K tokens, 8 GQA KV heads, head_dim 128.
+    - SM count: 132.
+    - Memory bandwidth: 3.35 TB/s.
+
+    **Calculations:**
+    - K+V bytes per layer per decoded token: 32K * 8 heads * 128 dim * 2B * 2 = 134 MB.
+    - Bandwidth floor: 134 MB / 3.35 TB/s ≈ 40 us.
+    - Standard FA exposes about 8 head-level blocks, far fewer than 132 SMs, so measured latency can be several hundred microseconds despite the 40 us bandwidth floor.
+    - FlashDecoding with 256-token chunks exposes 128 chunks/head * 8 heads = 1024 blocks, plus a small reduction over partial softmax state.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory Bandwidth Bound**. Splitting the KV scan increases parallel work and moves latency toward the ~40 us bandwidth floor; a reasonable expectation is about 8-12x speedup at 32K context, workload and kernel dependent.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

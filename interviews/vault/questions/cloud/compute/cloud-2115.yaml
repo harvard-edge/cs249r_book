@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-2115
+track: cloud
+level: L3
+zone: diagnosis
+topic: roofline-analysis
+competency_area: compute
+bloom_level: apply
+phase: both
+title: The LayerNorm Bandwidth Tax
+scenario: A profiler trace of your transformer training shows that LayerNorm operations consume only 0.1% of total FLOPs but account for 8% of wall-clock time.
+question: Why does LayerNorm take 8% of wall time despite only 0.1% of FLOPs, and why is kernel fusion critical?
+details:
+  realistic_solution: LayerNorm computes mean and variance reductions, then normalizes and applies scale/bias. The FLOP count is tiny compared with GEMMs, but each pass over the activation tensor moves data through HBM and launches small kernels. A fused implementation reads the tensor, computes statistics within a row/block, and writes the normalized output while minimizing intermediate HBM traffic. Arithmetic intensity is only a few FLOPs per byte under realistic read/write accounting, far below the ridge point of modern GPUs, so wall time is dominated by bandwidth and launch/round-trip overhead. Fusion is critical because it reduces HBM passes and kernel launches; the speedup is workload-dependent, not a guaranteed fixed 4x.
+  common_mistake: |
+    **The Pitfall:** Judging an operation's cost based purely on its FLOP count.
+    **The Rationale:** Candidates ignore the arithmetic intensity of the operation; LayerNorm has extremely low AI and is entirely memory-bandwidth-bound.
+    **The Consequence:** Leaving massive performance gains on the table by failing to fuse memory-bound element-wise and reduction kernels.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Unfused LayerNorm: separate kernels may read/write intermediates for mean, variance, normalization, and affine scale/bias.
+    - Fused LayerNorm: one kernel minimizes HBM traffic by keeping per-row statistics on chip.
+    - Tensor shape [B=32, S=2048, H=4096] in FP16 = 512 MB.
+
+    **Calculations:**
+    - Tensor elements: 32 * 2048 * 4096 = 268,435,456 FP16 values, or 512 MiB read for one full pass.
+    - Fused lower-bound traffic: read input once and write output once = ~1 GiB, plus small statistic/parameter traffic.
+    - If an unfused implementation makes roughly 3-4 full read/write passes through HBM, traffic is ~3-4 GiB.
+    - At 2 TB/s, 1 GiB takes about 0.5 ms and 4 GiB takes about 2 ms before launch overhead and imperfect bandwidth utilization.
+    - Arithmetic intensity with ~5 FLOPs/element and read+write traffic is about 5 FLOPs / 4 bytes = ~1.25 FLOPs/byte, far below compute-bound regimes.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Bandwidth Bound.** LayerNorm can consume visible wall time despite negligible FLOPs because it repeatedly moves large tensors. Fusion reduces HBM traffic and launches, often producing large but implementation-dependent speedups.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

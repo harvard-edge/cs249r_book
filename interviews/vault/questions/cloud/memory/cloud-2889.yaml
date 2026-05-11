@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-2889
+track: cloud
+level: L4
+zone: specification
+topic: activation-memory
+competency_area: memory
+bloom_level: analyze
+phase: training
+title: Specifying Activation Memory Budget for a Multi-Tenant Training Cluster on H100
+scenario: You are writing memory budget specifications for a shared training cluster that will run jobs from multiple teams with models ranging from 1B to 70B parameters. You need to define a per-job activation memory allocation policy that accounts for model size, sequence length, batch size, and gradient checkpointing configuration, and that can be enforced by the cluster scheduler before job launch.
+question: What activation memory allocation policy should the scheduler enforce for jobs across model size, sequence length, batch, and checkpointing?
+details:
+  realistic_solution: |
+    Require each job to submit a memory contract with model layers, hidden size, sequence length, micro-batch size per GPU, precision, checkpoint interval, attention implementation, and sharding plan. The scheduler should estimate M_act_peak = stored_layers * (residual + checkpoint boundaries + non-recomputed intermediates) + active_segment_workspace, then multiply by a 1.2-1.3 safety factor for fragmentation and fused-kernel workspaces. For FlashAttention, do not budget an S^2 attention matrix; for unfused attention, include the B * heads * S^2 term.
+
+    Enforcement should happen at placement time: reserve GPU memory against the actual HBM capacity of the target SKU, subtract weights, optimizer state, gradients, communication buckets, and runtime headroom, and reject or resize jobs whose requested activation budget exceeds the remaining per-GPU capacity. Use Kubernetes/Slurm admission controls, MIG where applicable, cgroup/container memory limits for host memory, and launcher-side validation. `torch.cuda.set_per_process_memory_fraction` can be a guardrail inside a job, but it is not the cluster scheduler's enforcement policy.
+  common_mistake: |
+    **The Pitfall:** Specifying only peak theoretical activation memory.
+    **The Rationale:** Candidates forget to account for memory fragmentation overhead (typically 10-20%), intermediate workspace buffers for fused kernels, and gradient buffers that co-exist at the backward-pass peak.
+    **The Consequence:** Setting a rigid memory boundary that causes jobs to randomly OOM during training spikes.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Use decimal GB consistently because GPU SKUs are sold as 80 GB HBM.
+    - Reserve at least 10% of HBM for fragmentation, CUDA context, communication buckets, and fused-kernel workspaces.
+    - Each job must provide stored layer count, bytes per stored activation layer, active segment workspace, and non-activation memory after sharding.
+
+    **Calculations:**
+    - Target GPU budget: 80 GB * 0.90 = 72 GB usable after scheduler reserve.
+    - Remaining activation headroom per GPU: 72 GB - weights - optimizer_state - gradients - communication_buckets - runtime_buffers.
+    - Requested activation budget: (stored_layers * bytes_per_stored_layer + active_segment_workspace + non_recomputed_intermediates) * safety_factor.
+    - Admit the job only if requested activation budget <= remaining activation headroom.
+    - If the inequality fails, require smaller micro-batches, shorter sequence length, more checkpointing, stronger sharding, FlashAttention/fused kernels, or a different placement.
+
+    **Conclusion & Interpretation:**
+    - **Result: Scheduler-Enforced Activation Reservation**. The policy admits jobs based on remaining per-GPU HBM after all non-activation allocations, not on a fixed per-process fraction or a claim that the examples always fit.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -38,7 +38,7 @@ LEVEL_WEIGHTS = {"L5": 1.20, "L6+": 1.20, "L4": 1.10, "L3": 1.00, "L2": 0.85, "L
 
 def load_questions() -> list[dict[str, Any]]:
     questions: list[dict[str, Any]] = []
-    for path in QUESTIONS_DIR.glob("*/*.yaml"):
+    for path in QUESTIONS_DIR.rglob('*.yaml'):
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         data["_path"] = str(path.relative_to(ROOT_DIR))
         questions.append(data)

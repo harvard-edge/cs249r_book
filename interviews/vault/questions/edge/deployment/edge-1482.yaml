@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: edge-1482
+track: edge
+level: L5
+zone: design
+topic: model-format-conversion
+competency_area: deployment
+bloom_level: evaluate
+phase: inference
+title: Hailo-8 Multi-Model Pipeline Design and Host Memory Offloading
+scenario: 'You are designing an edge AI system using a host processor connected via PCIe to a Hailo-8 accelerator (26 TOPS INT8, 2.5W). Your system needs to run a cascade of three models: an object detector, a pose estimator, and an action recognition model. Since the Hailo-8 is a dataflow accelerator without local DRAM, all intermediate activations must be streamed back to the host memory between models.'
+question: Would you fuse the detector, pose, and action models for Hailo-8 or deploy separate ONNX graphs, and why?
+details:
+  realistic_solution: A successful design minimizes PCIe round-trips by aggressively fusing the three models into a single continuous dataflow graph during the ONNX-to-Hailo compiler stage. If complete fusion isn't possible due to operator coverage gaps, the candidate must strategically place the split points at layers with the smallest activation volumes (bottlenecks). Furthermore, they should evaluate delegating unsupported operations (like complex custom NMS) to the host CPU while keeping the heavy INT8 matrix multiplications entirely on the Hailo-8.
+  common_mistake: |
+    **The Pitfall:** Candidates often treat the Hailo-8 like a traditional GPU with its own HBM/DRAM, failing to account for the host memory streaming requirement. They might design a pipeline with massive intermediate feature maps (like high-res feature pyramids) moving back and forth across the PCIe bus, causing severe memory bandwidth bottlenecks that stall the accelerator.
+    **The Rationale:** Hailo dataflow execution benefits when tensors stay inside a compiled graph or cross graph boundaries only at small bottleneck tensors. Splitting every model independently forces intermediate activations through host memory and PCIe.
+    **The Consequence:** The accelerator can sit idle behind host-device transfers even when raw TOPS look sufficient, increasing latency and reducing the number of camera streams that fit.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Intermediate tensor: 1x256x64x64 INT8 = 1,048,576 bytes = 1 MiB.
+    - Framerate: 30 FPS.
+    - Two model boundaries: detector to pose and pose to action.
+    - Each unfused boundary requires a device-to-host and host-to-device transfer.
+
+    **Calculations:**
+    - Transfer per boundary per frame: 2 * 1 MiB = 2 MiB.
+    - Transfer across two boundaries: 2 * 2 MiB = 4 MiB/frame.
+    - Per-camera traffic: 4 MiB * 30 FPS = 120 MiB/s.
+    - Eight cameras: 120 MiB/s * 8 = 960 MiB/s before protocol overhead and any additional feature maps.
+
+    **Conclusion & Interpretation:**
+    - **Result: About 960 MiB/s avoidable transfer traffic.** Fusion is preferred when operator coverage permits it; otherwise place split points at small bottleneck tensors so PCIe and host-memory traffic do not dominate latency.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

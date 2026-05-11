@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-0772
+track: cloud
+level: L4
+zone: diagnosis
+topic: 3d-parallelism
+competency_area: parallelism
+bloom_level: analyze
+phase: training
+title: The NCCL Timeout
+scenario: You are training a 30B model across 64 H100 GPUs (8 nodes × 8 GPUs). At random intervals—sometimes after 2 hours, sometimes after 20—the job hangs and eventually dies with `NCCL WARN Timeout on rank 47`. The hang always resolves to a different rank. Your network monitoring shows no packet loss.
+question: What is causing the random NCCL timeout hangs across different ranks, and how do you diagnose it?
+details:
+  realistic_solution: 'The timeout means at least one rank stopped making progress in a collective, so the other ranks waited until NCCL declared the operation failed. Because the reported rank changes and network monitoring shows no packet loss, look first for intermittent per-node or per-GPU stalls rather than a single bad switch. Top suspects: (1) **thermal or power throttling** from marginal cooling, power limits, or node-level airflow, visible as clocks dropping under sustained load; (2) **flaky PCIe/NVLink/NIC paths** causing retries or transient link resets without steady packet loss; (3) **host interference** such as kernel stalls, log rotation, NUMA pressure, or PCIe DMA delays; (4) elevated ECC or Xid events as supporting evidence, not as a direct explanation for multi-second stalls by themselves. Diagnosis: set `NCCL_DEBUG=INFO` and `NCCL_DEBUG_SUBSYS=COLL` to log per-rank timing. Correlate the slow rank and timestamp with DCGM or nvidia-smi clocks/power/temperature/ECC, NCCL
+    topology, fabric counters, Xid/dmesg logs, and host scheduler traces.'
+  common_mistake: |
+    **The Pitfall:** Assuming it's a network issue and increasing `NCCL_TIMEOUT` to give the slow node more time.
+    **The Rationale:** Because NCCL errors mention timeouts, engineers reflexively treat it as a network configuration problem.
+    **The Consequence:** Increasing the timeout just delays the crash; it doesn't fix the root cause, and the randomness across ranks rules out a single bad NIC.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - A gradient AllReduce for a 30B model at 4 bytes/parameter moves 120 GB of logical gradient data.
+    - Ring AllReduce communication time per rank is approximately 2 × (N - 1) / N × data_size / bandwidth.
+    - With N = 64 and 50 GB/s effective bandwidth, time ≈ 2 × 63/64 × 120 GB / 50 GB/s ≈ 4.7 s for that large collective.
+
+    **Calculations:**
+    - If one rank stalls for 10 seconds during a collective, the whole collective takes about 4.7 s + 10 s while every other rank waits.
+    - A single 30-60 second host pause, link reset, or severe thermal/power throttle episode can exceed common watchdog or configured timeout budgets even if the average network looks healthy.
+    - Microsecond-scale ECC corrections are useful diagnostic signals for hardware health, but they do not by themselves explain multi-second NCCL hangs.
+
+    **Conclusion & Interpretation:**
+    - **Result: Timeout is tail-latency-bound.** One intermittent rank-level stall during a collective is enough to block all 64 ranks; diagnose by correlating NCCL per-rank timing with GPU clocks, thermals, link counters, Xid logs, and host stalls.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: mobile-1000
+track: mobile
+level: L3
+zone: analyze
+topic: network-bandwidth-bottlenecks
+competency_area: networking
+bloom_level: analyze
+phase: inference
+title: Shared LPDDR5X Bandwidth Bottleneck for LLM and 4K Video Encode
+scenario: A mobile SoC uses a unified LPDDR5X memory bus shared between CPU, GPU, and DSP. Analyze how memory bandwidth contention between a 3B INT4 LLM and a concurrent video encode task (H.265 encoder reading/writing 4K frames) creates a bottleneck.
+question: How much of a 77 GB/s Snapdragon memory bus does a 3B INT4 LLM consume alongside 4K H.265 encoding, and how does it degrade TPOT?
+details:
+  realistic_solution: A 3B INT4 model streams about 1.5GB of weights per decoded token in this simplified lower-bound model; real traffic depends on cache reuse, quantization layout, fusion, and KV access. If it achieves 19.5ms/token in isolation, the implied token-time traffic is 1.5GB / 0.0195s = 76.9GB/s, effectively the full 77GB/s bus. A 4K30 YUV420 frame is 4096×2160×1.5 bytes = 13.27MB; reading and writing one frame per encode step is about 26.54MB/frame × 30fps = 0.80GB/s. If the hardware path only counts one major DRAM pass, use the lower 0.40GB/s estimate. With the toy one-pass video estimate plus 1.0GB/s ISP/display traffic, non-LLM traffic reserves 1.4GB/s. Under that residual-bandwidth approximation, the LLM gets 77 - 1.4 = 75.6GB/s, so TPOT becomes 1.5 / 75.6 = 19.8ms/token. This is not a real H.265 contention model; it is a quick headroom check showing that the LLM has almost no bus slack.
+  common_mistake: |
+    **The Pitfall:** Analyzing the LLM and video encoder in isolation.
+    **The Rationale:** Candidates assume each gets the full 77 GB/s, forgetting the shared LPDDR5X bus means their bandwidths sum together.
+    **The Consequence:** Failing to predict TPOT degradation or request queuing when concurrent media workloads consume the small remaining bus headroom.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - LLM Size: 3B INT4 (1.5 GB weights), treated as one simplified weight stream per decoded token.
+    - Video Encode: 4096x2160, YUV420, 30 FPS, 1.5 bytes/pixel.
+    - Bus Capacity: 77 GB/s.
+    - ISP/Display Bandwidth Baseline: 1.0 GB/s.
+
+    **Calculations:**
+    - LLM implied token-time bandwidth: 1.5GB / 0.0195s = 76.9 GB/s.
+    - One 4K YUV420 frame: 4096 * 2160 * 1.5 bytes = 13.27 MB.
+    - One-pass video DRAM traffic: 13.27 MB * 30 FPS = 398 MB/s = 0.40 GB/s.
+    - Read+write upper toy estimate: 2 * 0.40 = 0.80 GB/s.
+    - Residual-bandwidth model using the one-pass estimate: non-LLM reserve = 0.40 + 1.0 = 1.40 GB/s.
+    - Total implied demand: 76.9 + 0.40 + 1.0 = 78.3 GB/s (> 77 GB/s limit).
+    - LLM available bandwidth: 77 - 1.40 = 75.6 GB/s.
+    - Residual-model TPOT: 1.5 GB / 75.6 GB/s = 0.0198s = 19.8 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 19.8 ms in the simplified residual-bandwidth model.** The LLM nearly saturates the bus; the stated one-pass video workload reduces available bandwidth from 77 to 75.6 GB/s. Real H.265 and LLM kernels need profiling because reuse, fusion, cache behavior, and extra read/write passes can change the actual contention.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

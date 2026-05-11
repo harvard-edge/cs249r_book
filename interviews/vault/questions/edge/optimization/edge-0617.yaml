@@ -1,0 +1,56 @@
+schema_version: '1.0'
+id: edge-0617
+track: edge
+level: L6+
+zone: mastery
+topic: kernel-fusion
+competency_area: optimization
+bloom_level: create
+phase: inference
+title: The Autonomous Perception Deadline Miss
+scenario: You are the tech lead for the perception system of a new autonomous vehicle. The system must process high-resolution camera images and run a large object detection model with a hard real-time deadline of 33ms per frame (30 FPS). The current model, developed on cloud GPUs, is a heavy custom CNN that requires 20 T-FLOPs per frame and takes 120ms on the target hardware, a Jetson AGX Orin. This causes the vehicle to drop 3 out of every 4 frames.
+question: What multi-stage optimization strategy would bring the 20 TFLOP model below 33ms on Orin, and why in that order?
+details:
+  realistic_solution: |
+    Use a staged plan because the baseline has a 3.6x latency gap and a 20 TFLOP/frame model is too large for reliable 30 FPS edge inference. Start by profiling the TensorRT trace and memory roofline to identify layers with poor utilization; this prevents optimizing layers that are not on the critical path. Next apply architecture-level reduction: lower the expensive input pyramid branches, replace dense blocks with depthwise or grouped variants, and use structured channel pruning or distillation to cut the model from 20 TFLOP/frame to roughly 6-8 TFLOP/frame while preserving detector quality. Then apply QAT/INT8 only after the retained structure is stable, so calibration is performed on the final graph. Finally use TensorRT engine building, kernel fusion, static shapes, CUDA graphs, and preallocated buffers to remove launch and memory overhead.
+
+    The order matters because compiler and quantization wins are bounded if the graph is still too large, while pruning after quantization often forces recalibration and can destroy accuracy.
+  common_mistake: |
+    **The Pitfall:** Suggesting a single solution like 'just use 50% unstructured pruning'.
+    **The Rationale:** Engineers often underestimate the magnitude of a 4x latency gap and fail to realize that sequenced, multi-stage optimizations are necessary.
+    **The Consequence:** Proposing inadequate optimization plans that fall far short of the strict 33ms real-time deadline.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Baseline model: 20 TFLOP per frame, measured 120ms on target hardware.
+    - Target: <33ms per frame.
+    - Treat 275 TOPS as an optimistic INT8 sparse peak; sustained dense detector throughput is lower.
+    - Assumed realistic sustained INT8 throughput after TensorRT and QAT: ~120 TOPS for the optimized graph.
+
+    **Calculations:**
+    - Baseline measured effective throughput = 20 TFLOP / 0.120s = 167 TFLOP/s equivalent.
+    - Required work at 33ms with 120 TOPS sustained INT8 = 120 TOPS * 0.033s = 3.96 TOP per frame if the whole workload maps efficiently.
+    - Because detector graphs have memory and post-processing overhead, target compute should be below the theoretical limit; use <=3.5 TOP/frame as the design target.
+    - Stage 1: structured redesign/pruning/distillation cuts 20 TFLOP to ~5 TOP/frame INT8-equivalent work.
+    - Stage 2: QAT/INT8 plus sparsity-aware TensorRT raises sustained throughput and removes FP16 bottlenecks: 5 TOP / 120 TOPS = 41.7ms, still high.
+    - Stage 3: reduce input/pyramid work another ~30% and fuse kernels: 3.5 TOP / 120 TOPS = 29.2ms compute.
+    - Add memory and post-processing budget of ~2-3ms using static buffers and fused NMS, yielding ~31-32ms total.
+
+    **Conclusion & Interpretation:**
+    - **Result: The target is plausible only after model-size reduction, INT8/QAT, and compiler/runtime fusion are composed.** INT8 alone cannot rescue a 20 TFLOP/frame detector; the graph must be shrunk first and then mapped efficiently.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,33 @@
+schema_version: '1.0'
+id: cloud-3916
+track: cloud
+level: L1
+zone: recall
+topic: software-portability
+competency_area: cross-cutting
+bloom_level: remember
+phase: both
+title: 'Memory Layout Portability: NCHW vs NHWC Across Accelerators'
+scenario: Your CNN model uses the NCHW memory layout (PyTorch default). When deployed on TPU v5e and MI300X, performance drops 20-30% compared to an H100 GPU.
+question: Why do NCHW layouts cause a 20-30% drop on TPU v5e and MI300X, and how do you fix it?
+details:
+  realistic_solution: The drop comes from implicit layout transpositions or less efficient kernels at op boundaries when the model carries NCHW tensors onto backends whose convolution paths prefer backend-native layouts. TPU v5e should be compiled/exported with NHWC-centric XLA layouts, while MI300X deployments should use channels-last/NHWC paths where the ROCm framework and kernels support them. The fix is to keep inputs, weights, checkpoints, and exported graphs in the accelerator-native layout end to end, then verify the compiled graph does not reinsert hidden transposes.
+  common_mistake: |
+    **The Pitfall:** Ignoring memory layout as a performance-critical portability concern.
+    **The Rationale:** Candidates assume the framework will automatically handle layout differences efficiently, not realizing that NVIDIA historically optimized for NCHW while other accelerators prefer NHWC.
+    **The Consequence:** The framework inserts implicit, expensive transpositions at boundaries, causing severe performance degradation.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - TPU and MI300X convolution paths commonly prefer NHWC/channels-last access patterns.
+    - NCHW tensors can force implicit copies or select less efficient kernels at framework boundaries.
+    - The exact 20-30% drop depends on tensor shapes and how often conversions occur.
+
+    **Calculations:**
+    - A layout conversion must at least read and write the affected activation tensor, so the cost scales with activation bytes rather than model parameters.
+    - If conversions occur around several high-resolution convolution blocks, repeated memory traffic and kernel-format changes can plausibly consume 20-30% of step time.
+    - Keeping tensors channels-last end-to-end removes those boundaries and lets the backend choose native NHWC kernels.
+
+    **Conclusion & Interpretation:**
+    - **Result: layout-bound portability loss.** The fix is not a one-off transpose; set channels_last/NHWC consistently through inputs, model weights, checkpoints, and kernels so conversions are not reintroduced.
+status: published
+provenance: imported

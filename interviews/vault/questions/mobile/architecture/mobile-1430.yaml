@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: mobile-1430
+track: mobile
+level: L5
+zone: realization
+topic: attention-scaling
+competency_area: architecture
+bloom_level: evaluate
+phase: inference
+title: GQA Sizing for On-Device 3B LLMs
+scenario: A 3B conversational agent on a mobile NPU must handle up to 4K context windows within a strict 4 GB memory allocation and ~5W power envelope.
+question: How should Grouped-Query Attention (GQA) be sized to reduce the KV-cache footprint compared to Multi-Head Attention (MHA)?
+details:
+  realistic_solution: The candidate should calculate the KV cache memory footprint and realize MHA leaves too little headroom for activations and runtime buffers. They should propose GQA sized around an 8:1 query-to-KV head ratio, so 24 query heads share 3 KV heads, reducing KV cache by 8x compared with MHA. This keeps the 4-bit model weights plus KV estimate well below the 4 GB allocation, with remaining headroom reserved for activations, temporary buffers, and runtime overhead.
+  common_mistake: |
+    **The Pitfall:** Sizing only the model weights and ignoring the dynamic KV cache footprint.
+    **The Rationale:** Assuming the mobile NPU compute peak is the sole bottleneck for long-context generation.
+    **The Consequence:** Encountering out-of-memory (OOM) errors and exceeding power limits due to excessive memory access.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 3B params, hidden size 3072, 32 layers.
+    - Baseline MHA: 24 query heads, 24 KV heads, head_dim = 128.
+    - GQA target: 8 query heads per KV head, so 24 query heads use 3 KV heads.
+    - Weights (4-bit): ~1.5 GB.
+    - Memory limit: 4 GB.
+
+    **Calculations:**
+    - MHA KV cache (FP16, 4K context): K/V * layers * tokens * KV heads * head_dim * bytes = 2 * 32 * 4096 * 24 * 128 * 2 = 1,610,612,736 bytes = 1.61 GB.
+    - MHA Total Memory: 1.5 GB + 1.61 GB = 3.11 GB (dangerously close to 4GB with activations).
+    - GQA KV cache: 2 * 32 * 4096 * 3 * 128 * 2 = 201,326,592 bytes = ~201 MB.
+    - GQA Total Memory: 1.5 GB + 201 MB = ~1.70 GB.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~1.7 GB for weights plus GQA KV cache (Memory-Capacity Bound).** This fits comfortably under the stated weights+KV estimate, but the deployment still needs explicit headroom for activations, temporary buffers, and runtime overhead inside the 4 GB allocation.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 13
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

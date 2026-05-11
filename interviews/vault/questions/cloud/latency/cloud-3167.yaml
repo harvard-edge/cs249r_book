@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-3167
+track: cloud
+level: L5
+zone: evaluation
+topic: speculative-decoding
+competency_area: latency
+bloom_level: evaluate
+phase: inference
+title: Tree-Structured Speculation vs Linear Speculation
+scenario: A team is comparing linear speculation (K=5 sequential draft tokens) with tree-structured speculation (branching factor 2, depth 3, total 7 draft tokens) for a 70B target on 4x H100. Draft acceptance rate alpha=0.75.
+question: Which produces more served tokens per verification round, and what is the verification cost difference?
+details:
+  realistic_solution: 'Linear (K=5, alpha=0.75): expected accepted draft tokens are alpha + alpha^2 + ... + alpha^5 = 2.29. Including the one correction/next token emitted by the target, expected served tokens are 3.29 per verification round. For a 70B model (140GB) on 4x H100 (13.4 TB/s aggregate), the simplified batch=1 linear verification pass is memory-bandwidth bound, taking ~10.5ms (140GB / 13.4 TB/s). Tree (depth=3, branch=2, 7 nodes): explores alternatives and is assumed to yield about 3.8 served tokens per round under the stated acceptance profile. Its tree attention mask and node structure are modeled as a 10% verification overhead over the same memory-bandwidth baseline, so the tree verify time is ~11.6ms. The tree therefore serves 0.51 more tokens per round while adding ~1.1ms of verification cost. Throughput ignoring draft time is secondary: tree yields 3.8/11.6ms = 327.6 tok/s versus linear 3.29/10.5ms = 313.3 tok/s.'
+  common_mistake: |
+    **The Pitfall:** Assuming tree speculation automatically and unequivocally wins without understanding the FlashAttention overhead.
+    **The Rationale:** Candidates look at the higher token yield but forget that the tree attention requires a complex, non-contiguous causal mask that reduces FlashAttention efficiency.
+    **The Consequence:** Inaccurate architectural planning that ignores the software-hardware co-design realities of sparse attention masking.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 70B target (140GB) on 4x H100 (13.4 TB/s aggregate).
+    - Linear K=5, p=0.75.
+    - Tree depth=3, branch=2 (7 nodes). Assume the tree returns ~3.8 served tokens/round under this acceptance profile.
+    - Model tree verification as the same memory-bandwidth baseline plus 10% mask/node overhead.
+
+    **Calculations:**
+    - Linear accepted draft tokens: 0.75 + 0.75^2 + 0.75^3 + 0.75^4 + 0.75^5 = 2.29 tokens.
+    - Linear served tokens per round: 2.29 accepted draft tokens + 1 correction/next token = 3.29 tokens.
+    - Tree served tokens per round: 3.8 tokens by the stated empirical yield assumption.
+    - Served-token delta: 3.8 - 3.29 = 0.51 more tokens/round for tree.
+    - Linear verify time: 140GB / 13.4 TB/s = ~10.5ms.
+    - Tree verify time: 10.5ms * 1.10 = ~11.6ms.
+    - Verification cost delta: 11.6ms - 10.5ms = ~1.1ms more for tree.
+    - Secondary throughput check: linear = 3.29/10.5ms = 313.3 tok/s; tree = 3.8/11.6ms = 327.6 tok/s.
+
+    **Conclusion & Interpretation:**
+    - **Result: Tree serves more tokens per round at modest extra verification cost.** It adds ~0.51 served tokens/round and ~1.1ms verify time, producing a small throughput win under the stated 10% overhead assumption.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

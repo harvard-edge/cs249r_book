@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-0220
+track: cloud
+level: L5
+zone: evaluation
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: evaluate
+phase: inference
+title: Mixed SLA Head-of-Line Blocking in a Shared GPU Pool
+scenario: Our LLM API serves both autocomplete requests (~10 output tokens, 50ms SLA) and document summarization requests (~10,000 output tokens, no strict SLA). Both hit the same pool of 8x GPUs. Autocomplete users are furious — P99 latency is 4 seconds instead of 50ms. The summarization users are fine.
+question: Why do autocomplete requests experience 4-second P99 latency on a shared GPU pool, and how do you fix it?
+details:
+  realistic_solution: 'Head-of-line blocking from mixed request lengths. With continuous batching, long requests consume KV-cache memory, reducing the maximum batch size and blocking prefill for incoming autocomplete requests. The fix is workload-aware routing: separate GPU pools for latency-sensitive short requests vs throughput-oriented long requests.'
+  common_mistake: |
+    **The Pitfall:** Throwing more hardware at the problem by adding more GPUs to handle the load.
+    **The Rationale:** High P99 latency is often misdiagnosed as a raw capacity issue.
+    **The Consequence:** The system remains structurally flawed because mixing incompatible SLA profiles in the same scheduling queue causes head-of-line blocking regardless of capacity.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Shared pool: 8x GPUs, continuous batching, max batch size = 32.
+    - Summarization request length: ~10,000 output tokens.
+    - Autocomplete request length: ~10 output tokens with a 50ms SLA.
+    - Decode rate for one active sequence: ~25 tokens/sec.
+    - Model-specific KV-cache footprint: assume ~0.5 MB/token for an illustrative large LLM.
+
+    **Calculations:**
+    - A 10,000-token summarization decode occupies a scheduler slot for 10,000 / 25 = 400 seconds.
+    - A 10-token autocomplete decode needs only 10 / 25 = 0.4 seconds of decode work once admitted.
+    - If 32 long summarizations fill the continuous batch, their KV cache is roughly 32 * 10,000 * 0.5 MB = 160 GB across the serving pool, before allocator overhead and prefill workspace.
+    - The problem is not the 400-second total decode time by itself; it is that long-lived sequences keep batch slots and KV blocks reserved, so short prefill/decode work waits behind them.
+
+    **Conclusion & Interpretation:**
+    - **Result: mixed-SLA head-of-line blocking**. Long summarizations occupy scheduler capacity and KV-cache blocks for minutes, so autocomplete requests can spend seconds waiting for admission even though their own decode work is sub-second. Separate pools or SLA-aware scheduling are required.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

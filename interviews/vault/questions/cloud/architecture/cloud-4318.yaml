@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-4318
+track: cloud
+level: L4
+zone: fluency
+topic: recommendation-systems-engineering
+competency_area: architecture
+bloom_level: apply
+phase: inference
+title: Multi-Stage Ranking Latency Budget
+scenario: 'A social platform''s recommendation pipeline has 4 stages: (1) Retrieval: 1B candidates → 10k, (2) Pre-ranking: 10k → 1k, (3) Ranking: 1k → 100, (4) Re-ranking: 100 → 10 final results. Total end-to-end SLO is 150 ms.'
+question: How would you allocate the 150 ms SLO across the 4-stage recommendation pipeline, and which stages benefit most from GPU acceleration?
+details:
+  realistic_solution: 'Allocate the 150 ms around stage selectivity and model cost: retrieval 25 ms for ANN over 1B candidates to 10k, pre-ranking 25 ms for a simple model over 10k candidates, ranking 65 ms for the full DLRM over 1k candidates, re-ranking 20 ms for business rules/diversity/context over 100 candidates, and 15 ms for feature fetch, network, and orchestration overhead. GPU acceleration helps most where there is large batched math or vector search: retrieval may use GPU ANN if the index and QPS justify it, and ranking is the clearest GPU target because it runs the heaviest model. Pre-ranking can use CPU if the model is intentionally small and feature-local; GPU is useful at high QPS but not mandatory. Re-ranking often stays CPU because it handles few candidates and includes branching/rules.'
+  common_mistake: |
+    **The Pitfall:** Allocating equal latency budgets to each stage of the recommendation pipeline.
+    **The Rationale:** Failing to account for the exponentially decreasing number of candidates processed at each stage.
+    **The Consequence:** Bottlenecking the retrieval stage (which processes 1B items) while wasting compute time on the re-ranking stage (which processes only 100).
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - End-to-end SLO: 150 ms.
+    - Candidates per stage: 1B -> 10k -> 1k -> 100 -> 10.
+    - Feature fetch and network overhead must be included, not assigned entirely to model compute.
+
+    **Calculations:**
+    - Retrieval: 25 ms for ANN/index lookup, because scanning 1B candidates exactly is not feasible in the request path.
+    - Pre-ranking: 25 ms for a cheap model over 10k candidates; keep it CPU-feasible by limiting feature joins and model size, or batch it on GPU at high QPS.
+    - Ranking: 65 ms for the full DLRM over 1k candidates; this is the best GPU target because batched dense compute and embedding lookup dominate.
+    - Re-ranking: 20 ms for 100 candidates, including diversity, policy, freshness, and light contextual features.
+    - Overhead reserve: 15 ms for RPC, feature reads, queueing, and serialization. Total = 25 + 25 + 65 + 20 + 15 = 150 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: stage-balanced latency budget.** GPU acceleration is most valuable for ranking and sometimes retrieval/pre-ranking, but it is not strictly required for every stage; the final allocation should be validated with measured model and feature costs.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: tinyml-1089
+track: tinyml
+level: L5
+zone: design
+topic: model-format-conversion
+competency_area: deployment
+bloom_level: evaluate
+phase: inference
+title: Corstone-300 NPU Delegation and Memory Architecture
+scenario: You are deploying a 250 KB audio classification model onto an ARM Cortex-M7 + Ethos-U55 (Corstone-300) platform running at 480 MHz with 512 KB of shared SRAM. The model is exported to TFLite, but the Vela compiler indicates an unsupported custom activation in the middle of the network must fall back to the M7 CPU. Design the conversion and delegation strategy to handle this CPU-NPU context switch while ensuring the system operates within the strict 512 KB SRAM limit.
+question: How would you design the conversion and delegation strategy to handle this CPU-NPU context switch while ensuring the system operates within the strict 512 KB SRAM limit?
+details:
+  realistic_solution: |
+    The conversion plan should keep the graph as fully delegateable as possible: train or export with Ethos-U55-supported operators, replace the custom activation only with a validated supported equivalent, or restructure the graph before TFLite/Vela compilation so unsupported CPU islands are avoided. If CPU fallback is unavoidable, explicitly budget the TFLite Micro arena, NPU command stream, CPU fallback tensor, and RTOS buffers, and place partition-boundary tensors so they can be reused or overlapped instead of duplicated across CPU and NPU subgraphs.
+  common_mistake: |
+    **The Pitfall:** Assuming automatic graph partitioning by the Vela compiler is sufficient.
+    **The Rationale:** Candidates ignore the memory penalty of CPU-NPU fallback and fail to account for materializing large intermediate tensors during the context switch.
+    **The Consequence:** The fallback intermediate tensors exceed the remaining available memory budget, leading to out-of-memory errors.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Total shared SRAM is 512 KB.
+    - Model weights are 250 KB before Vela placement decisions.
+    - Fallback tensor is 128x128x8 int8.
+    - RTOS, audio buffers, command stream, and base tensor arena reserve about 150 KB before the fallback boundary.
+
+    **Calculations:**
+    - Boundary buffer size: 128 * 128 * 8 bytes = 131,072 bytes = 128 KiB.
+    - SRAM left after weights and baseline runtime: 512 - 250 - 150 = 112 KB.
+    - A 128 KiB partition-boundary tensor is larger than that 112 KB remainder before considering alignment, scratch, or double buffering.
+    - If weights are not all resident in SRAM, the same risk still appears in the arena: the CPU island forces a large materialized activation that must coexist with TFLite Micro and Ethos-U55 working memory.
+
+    **Conclusion & Interpretation:**
+    - **Result: 128 KiB boundary tensor creates an SRAM risk.** Avoiding unsupported ops or re-exporting with supported equivalents can reduce or remove CPU-NPU copies, but if a fallback partition remains, its boundary tensors and arena reuse must be planned explicitly within the full 512 KB shared SRAM budget.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+  - RC, KA, and Mode are all set to None; these should be explicitly classified for a Staff-level question.
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

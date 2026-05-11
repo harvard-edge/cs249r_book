@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-3041
+track: cloud
+level: L5
+zone: design
+topic: network-bandwidth-bottlenecks
+competency_area: networking
+bloom_level: create
+phase: both
+title: 'Network Bandwidth Bottlenecks: Design NVLink vs. PCIe Topology for 8xH100 Training'
+scenario: An 8xH100 DGX node is used for training a 13B model with data-parallel + tensor-parallel (TP-2, DP-4).
+question: For TP-2 and DP-4 training on an 8xH100 DGX, which traffic uses NVLink versus PCIe, and how much bandwidth does each consume?
+details:
+  realistic_solution: On an 8xH100 DGX, both TP-2 activation collectives and DP-4 gradient collectives should stay inside the NVLink/NVSwitch GPU fabric; PCIe is not on the GPU-GPU critical path. PCIe is used for host-to-GPU input staging, CPU/NVMe traffic, and checkpoint paths, not for these intra-node collectives. For the TP-2 activation all-reduces, a [4,2048,5120] FP16 tensor is about 83.9MB per operation; with 2 operations per layer and 40 layers, that is about 6.7GB of NVLink traffic per rank per step, or 7.5ms at 900GB/s before collective overheads. For DP-4, each TP shard has 13B/2 parameters = 13GB of FP16 gradients. A ring all-reduce over 4 DP ranks moves 2*(4-1)/4*13GB = 19.5GB per rank, or about 21.7ms at 900GB/s. The expected PCIe bandwidth for these model-parallel and data-parallel collectives is approximately zero if placement is correct.
+  common_mistake: |
+    **The Pitfall:** Assuming all GPU-GPU communication uses NVLink.
+    **The Rationale:** Candidates overlook how models are sharded across different network domains.
+    **The Consequence:** They fail to realize that gradient AllReduce in data-parallel training may cross PCIe to CPU/InfiniBand when GPUs are in different NVLink domains.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - TP-2 all-reduce: 2 operations per layer, hidden_dim=5120, seq_len=2048, batch=4. 40 layers.
+    - FP16 precision (2 bytes). DP-4 gradient sync is over each TP shard: 13B params / 2 * 2 bytes = 13GB per rank.
+    - NVLink bandwidth: 900 GB/s. PCIe bandwidth for GPU-GPU collectives should be 0 in this single-DGX placement.
+
+    **Calculations:**
+    - TP-2 AllReduce payload per op: 4 * 2048 * 5120 * 2 bytes = 83.9MB. For two ranks, ring volume per rank equals the tensor size.
+    - TP-2 Total NVLink traffic per rank per step: 83.9MB * 2 ops/layer * 40 layers = 6.7GB.
+    - TP-2 Time: 6.7GB / 900GB/s = 7.5ms.
+    - DP-4 ring volume per rank: 2 * (4-1)/4 * 13GB = 19.5GB.
+    - DP-4 Time: 19.5GB / 900GB/s = 21.7ms.
+    - PCIe GPU-GPU traffic: approximately 0GB for the TP and DP collectives when all groups are placed inside the DGX NVLink domain.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~29ms NVLink traffic and ~0ms PCIe GPU-GPU traffic.** TP and DP collectives are NVLink/NVSwitch-bound within the DGX; PCIe matters only for host input or storage paths.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

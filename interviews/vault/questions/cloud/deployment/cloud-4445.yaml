@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-4445
+track: cloud
+level: L5
+zone: design
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: apply
+phase: inference
+title: HDR vs NDR KV Cache Transfer Latency
+scenario: A disaggregated serving cluster has prefill nodes and decode nodes in separate racks, connected via 400 Gbps InfiniBand HDR. KV cache transfer adds 4ms P99 latency. The network team proposes moving to InfiniBand NDR (800 Gbps).
+question: How much P99 latency would 800 Gbps NDR save over 400 Gbps HDR for KV transfer, and what alternative would you propose?
+details:
+  realistic_solution: |
+    KV cache size analysis: assume a 7B-style model with 32 layers, 16 KV heads, 128 head_dim, BF16 KV, and a 512-token prompt. KV bytes = 2 for K/V * 32 * 16 * 128 * 512 * 2 bytes = 134,217,728 bytes, about 134 MB. At 400 Gbps HDR (50 GB/s), serialization is about 2.68ms; adding 1.5ms fabric overhead gives about 4.18ms. At 800 Gbps NDR (100 GB/s), serialization is about 1.34ms; total is about 2.84ms. Under these assumptions, NDR reduces serialization by about 1.34ms and total transfer latency by the same amount because the fixed fabric overhead is unchanged. Alternative: co-locate prefill and decode within the same node or placement group so KV movement uses local high-bandwidth GPU interconnect paths and avoids the cross-rack hop; benchmark the actual copy path instead of assuming a generic NVLink bandwidth number.
+  common_mistake: |
+    **The Pitfall:** Assuming doubling link bandwidth directly halves the total transfer time.
+    **The Rationale:** Focusing purely on serialization delay while ignoring the fixed fabric latency (1-3us per hop across multiple switches).
+    **The Consequence:** Spending millions on network upgrades for a trivial 1-2ms improvement when the workload is latency-bound, not just bandwidth-bound.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 7B-style model: 32 layers, 16 KV heads, 128 head_dim, BF16 KV, 512 tokens.
+    - Fabric latency is ~1.5ms per hop.
+    - HDR at 50 GB/s and NDR at 100 GB/s ideal payload bandwidth.
+    - Same-node GPU interconnect is a placement alternative, but its effective bandwidth depends on topology and software path.
+
+    **Calculations:**
+    - KV cache size: 2 for K/V * 32 layers * 16 KV heads * 128 head_dim * 512 tokens * 2B = 134,217,728 bytes ≈ 134 MB.
+    - HDR transfer: 134MB / 50GB/s = 2.68ms serialization + 1.5ms fabric = 4.18ms total.
+    - NDR transfer: 134MB / 100GB/s = 1.34ms serialization + 1.5ms fabric = 2.84ms total.
+    - Serialization savings = 2.68ms - 1.34ms = 1.34ms.
+    - Total transfer savings under the fixed-overhead assumption = 4.18ms - 2.84ms = 1.34ms.
+    - Same-node placement avoids the cross-rack fabric term and can use local GPU interconnect, but the effective latency must be measured for the actual topology.
+
+    **Conclusion & Interpretation:**
+    - **Result: NDR saves about 1.34ms of transfer latency versus HDR.** The gain is serialization-only because fabric overhead is held constant; co-locating prefill and decode is often the better architectural alternative when placement is feasible.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

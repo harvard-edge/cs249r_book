@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-3931
+track: cloud
+level: L2
+zone: fluency
+topic: communication-computation-overlap
+competency_area: parallelism
+bloom_level: understand
+phase: both
+title: Tensor Parallelism AllReduce Overlap with Feedforward Computation
+scenario: 'In tensor-parallel training of a 70B LLM across 8 GPUs (NVLink), each transformer layer requires two AllReduce operations: one after the attention block and one after the MLP block. These AllReduces are on the critical path.'
+question: Can standard tensor parallelism AllReduces be overlapped with computation, and what techniques partially address this?
+details:
+  realistic_solution: Standard tensor-parallel AllReduces are mostly on the activation critical path because the next dependent operation often needs the reduced tensor. Some overlap is possible only when the computation is restructured so communication is split or delayed around independent work. Common techniques include decomposing collectives into reduce-scatter/all-gather where a kernel can consume sharded results, fusing communication with compatible GEMM or epilogue work, and using sequence parallelism to reduce activation communication volume and expose narrower overlap windows. These techniques reduce exposed communication but do not make the original blocking AllReduce freely overlappable like DDP gradient synchronization.
+  common_mistake: |
+    **The Pitfall:** Assuming tensor parallelism AllReduces can be cleanly overlapped like DDP gradient AllReduces.
+    **The Rationale:** Conflating gradient synchronization (which happens at the end of the backward pass) with activation synchronization.
+    **The Consequence:** Attempting to build communication overlaps that are mathematically impossible due to strict data dependencies, breaking the forward pass.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Batch=4, Seq=2048, Hidden=8192, FP16 (2 Bytes/element).
+    - NVLink: 450 GB/s Unidirectional.
+    - Ring AllReduce over 8 GPUs: Data Traffic = 2 * (7/8) * MessageSize.
+
+    **Calculations:**
+    - MessageSize: 4 \times 2048 \times 8192 \times 2 = 134 MB.
+    - Ring AllReduce Traffic: 2 \times (7/8) \times 134 MB \approx 235 MB.
+    - Ideal bandwidth-only time per AllReduce: 235 MB / 450 GB/s \approx 0.52 ms, ignoring launch latency, protocol overhead, and contention.
+    - Two such collectives per layer give a lower bound of about 1.04 ms per layer before overlap or overheads.
+
+    **Conclusion & Interpretation:**
+    - **Result: Critical-Path Communication Lower Bound**. The 0.52 ms figure is only an ideal per-collective estimate; exposed cost depends on layer count, implementation, topology, and whether the model uses overlap-friendly decompositions.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

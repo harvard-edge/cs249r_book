@@ -1,0 +1,38 @@
+schema_version: '1.0'
+id: cloud-2348
+track: cloud
+level: L4
+zone: diagnosis
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: analyze
+phase: training
+title: NUMA Boundaries in High-Throughput DMA
+scenario: You are architecting a high-throughput video ingestion pipeline. A dual-socket AMD EPYC server with 8 GPUs processes 4K video frames. The CPU decodes frames and sends them to the GPUs via PCIe Gen4 x16. However, `nvidia-smi dmon` shows PCIe Rx bandwidth maxing out at 11 GB/s per GPU, and CPU usage is at 100% on a single thread. Inference is starved.
+question: Why is PCIe Rx capped at 11GB/s per GPU with one CPU thread saturated, and how would you fix the host transfer path?
+details:
+  realistic_solution: The data transfer is bottlenecked by two architectural flaws. First, using pageable (unpinned) memory forces the CPU to perform a costly memcpy to a hidden pinned bounce buffer before DMA can occur. Second, the system is crossing NUMA boundaries. The architecture must be updated to use pinned memory (cudaHostAlloc) and enforce strict NUMA affinity per GPU worker process.
+  common_mistake: |
+    **The Pitfall:** Assuming the PCIe bus is physically degraded or bottlenecked.
+    **The Rationale:** Treating memory allocations as uniform and ignoring host-to-device memory transfer mechanics.
+    **The Consequence:** Attempting to compress video frames further or debugging hardware, rather than fixing the memory pinning and NUMA boundaries in code.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - PCIe Gen4 x16 theoretical limit: ~32 GB/s.
+    - Sustained host-to-device DMA after protocol overhead is typically in the mid-to-high 20s GB/s when memory is pinned and NUMA-local.
+    - Current Rx: 11 GB/s.
+
+    **Calculations:**
+    - Pageable memory requires a CPU copy into a pinned bounce buffer; a single saturated memcpy path at ~10-15 GB/s matches the observed 11 GB/s ceiling.
+    - Crossing NUMA can cap the source path near the inter-socket bandwidth and adds contention before DMA even reaches the local PCIe root complex.
+    - With pinned, NUMA-local buffers, the CPU bounce copy is removed and the ceiling becomes sustained PCIe DMA rather than single-thread memcpy.
+    - Plausible post-fix throughput: ~24-28 GB/s per GPU, below the 32 GB/s link peak but well above the current 11 GB/s.
+
+    **Conclusion & Interpretation:**
+    - **Result: Host-transfer-path-bound.** Fixing memory pinning and NUMA affinity should move per-GPU throughput from ~11 GB/s toward the sustained PCIe range, not necessarily the theoretical link peak.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+math_verified: true

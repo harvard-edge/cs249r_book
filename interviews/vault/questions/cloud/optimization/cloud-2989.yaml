@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-2989
+track: cloud
+level: L5
+zone: evaluation
+topic: kernel-fusion
+competency_area: optimization
+bloom_level: evaluate
+phase: inference
+title: 'Kernel Fusion: Evaluate FlashAttention vs Standard Attention on H100'
+scenario: You are evaluating FlashAttention-2 versus standard unfused attention on an H100 for a 7B LLM with 32 heads and head dim 128 at sequence lengths 1K, 4K, and 16K.
+question: At 1K, 4K, and 16K context lengths, how do FlashAttention-2 and standard attention differ in memory use, throughput, and latency?
+details:
+  realistic_solution: For BF16/FP16 and batch size 1, each Q, K, or V tensor is S * 32 * 128 * 2 bytes. Standard attention also materializes the S * S * 32 score tensor, which grows from 64 MiB at 1K to 16 GiB at 16K. FlashAttention-2 has similar Q/K/V storage but avoids storing the full score matrix, so its memory use and HBM traffic scale much better. At 1K the latency difference can be small because tiling overhead matters; at 4K FlashAttention-2 is usually faster and lower memory; at 16K standard attention becomes memory-capacity and bandwidth limited while FlashAttention-2 is effectively required.
+  common_mistake: |
+    **The Pitfall:** Assuming FlashAttention is always faster at all sequence lengths.
+    **The Rationale:** Candidates ignore the tiling overhead of FlashAttention, which can outweigh benefits at very short sequences (< 512).
+    **The Consequence:** Over-optimizing short-context workloads where standard attention might actually be faster or equivalent.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 32 heads, 128 head dimension, BF16/FP16, batch size 1.
+    - Hidden dimension across heads: 32 * 128 = 4096.
+
+    **Calculations:**
+    - Seq=1K: each Q/K/V = 1024 * 4096 * 2B = 8 MiB; all three = 24 MiB. Scores = 1024^2 * 32 * 2B = 64 MiB.
+    - Seq=4K: each Q/K/V = 4096 * 4096 * 2B = 32 MiB; all three = 96 MiB. Scores = 4096^2 * 32 * 2B = 1 GiB.
+    - Seq=16K: each Q/K/V = 16384 * 4096 * 2B = 128 MiB; all three = 384 MiB. Scores = 16384^2 * 32 * 2B = 16 GiB.
+    - Standard attention writes/reads the score matrix; FlashAttention-2 streams tiles and stores only small online softmax state plus the output.
+
+    **Conclusion & Interpretation:**
+    - **Result: standard attention is acceptable only at short context, increasingly bandwidth-bound at 4K, and impractical at 16K because of the 16 GiB score tensor.** FlashAttention-2 improves throughput and p99 latency most at 4K and 16K by avoiding score-matrix materialization.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

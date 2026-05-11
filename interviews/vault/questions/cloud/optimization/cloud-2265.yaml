@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-2265
+track: cloud
+level: L5
+zone: evaluation
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: evaluate
+phase: training
+title: The MLIR Retargetability Boundary
+scenario: Your company trained a 70B transformer on NVIDIA GPUs using PyTorch. A cloud cost analysis shows that AMD MI300X GPUs offer 30% lower $/TFLOP. The plan is to retarget the compiled model using MLIR's multi-target lowering — keep the high-level dialects identical and swap only the final backend from NVVM to AMDGPU. After migration, actual training throughput is only 60% of the NVIDIA baseline, despite comparable peak TFLOPS.
+question: Where does MLIR retargetability break when moving to MI300X, and what extra optimization work is required?
+details:
+  realistic_solution: |
+    MLIR preserves legality across targets better than it preserves performance. The high-level graph and linalg-style operations may retarget, but the performance contract breaks at the lowering decisions that encode a specific GPU's execution model. The NVIDIA-tuned pipeline likely chose tile shapes, vector widths, memory layouts, async-copy schedules, and library calls that were profitable for NVVM but not for AMDGPU. On MI300X, the team must retune those choices for wavefront size, LDS/register pressure, cache behavior, memory coalescing, and the ROCm library/kernel surface. The extra work is: rerun shape-specific autotuning on MI300X, add target-specific cost models in the tiling/layout passes, audit which ops fall back from vendor libraries to generated kernels, and write or select AMD-optimized kernels for the few hot shapes. The retargetability boundary is therefore the target-aware optimization and runtime/library selection layer, not the final backend swap alone.
+  common_mistake: |
+    **The Pitfall:** Believing MLIR's retargetability promise equates to seamless performance portability.
+    **The Rationale:** MLIR is marketed as a multi-target compiler, leading engineers to think simply swapping the backend dialect will magically map to entirely different hardware architectures efficiently.
+    **The Consequence:** Migrations suffer massive throughput regressions because tile sizes, memory hierarchy utilizations, and custom kernels do not automatically translate across vendors without manual tuning.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Baseline NVIDIA throughput: 100%.
+    - MI300X advertised cost per peak TFLOP: 70% of the NVIDIA baseline.
+    - Observed naive MLIR retarget throughput: 60% of NVIDIA baseline.
+    - After target-specific tuning, assume measured throughput improves to 88% of the NVIDIA baseline.
+
+    **Calculations:**
+    - Naive normalized cost per unit throughput = 0.70 cost / 0.60 throughput = 1.17 of baseline, so the naive port is more expensive per unit of work.
+    - Normalized cost per unit throughput: 0.70 cost / 0.88 throughput = 0.795 of baseline.
+    - Effective savings versus baseline: 1 - 0.795 = 0.205, or about 20.5%.
+
+    **Conclusion & Interpretation:**
+    - **Result: Performance-Portability Gap.** Backend swapping alone loses money despite lower hardware cost; target-specific tiling, layout, scheduling, and kernel/library selection are required before the migration yields about 20% lower cost per unit throughput under these assumptions.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

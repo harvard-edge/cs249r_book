@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-3085
+track: cloud
+level: L5
+zone: design
+topic: systolic-dataflow
+competency_area: compute
+bloom_level: create
+phase: both
+title: 'Systolic Array Design: Tiling Strategy for Large Matrix on TPU'
+scenario: Design the tiling strategy for a 16384x16384 weight matrix (LLM FFN layer) that doesn't fit in a TPU v5e systolic array's local SRAM. The systolic array is 128x128 with 4MB SRAM.
+question: What tile sizes, tile counts, and HBM traffic are needed for the 16384x16384 FFN GEMM on a 128x128 array?
+details:
+  realistic_solution: 'Use output-stationary blocking with a C tile that fits beside one K-slice of A and B. A coherent choice is C tile 1024x1024 BF16 = 2 MiB, with K sliced in chunks of 256: A slice 1024x256 = 512 KiB and B slice 256x1024 = 512 KiB, for about 3 MiB live SRAM before double-buffering. Each C tile needs 64 K-slices. There are 16x16 = 256 C tiles. Per C tile, HBM reads are 64*(512 KiB + 512 KiB) = 64 MiB, and the final C write is 2 MiB. Total traffic is 256*(64 MiB + 2 MiB) = 16.5 GiB. The 128x128 systolic array computes each 1024x1024 tile as 8x8 output-array tiles over 128 K-slices.'
+  common_mistake: |
+    **The Pitfall:** Choosing square tiles without considering the output accumulation requirements.
+    **The Rationale:** Candidates forget that each tile result must be accumulated in SRAM before being written to HBM.
+    **The Consequence:** Spills output partial sums to HBM continuously, causing a massive memory bandwidth bottleneck.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - GEMM: C = A*B, with A, B, C all 16384x16384 BF16.
+    - SRAM budget: 4 MiB. Systolic array: 128x128.
+    - Use a 1024x1024 output-stationary C tile and K-slices of 256.
+
+    **Calculations:**
+    - C tile = 1024 * 1024 * 2 = 2 MiB.
+    - A slice = 1024 * 256 * 2 = 512 KiB; B slice = 256 * 1024 * 2 = 512 KiB.
+    - Live tile storage = 2 MiB + 512 KiB + 512 KiB = 3 MiB, which fits in 4 MiB.
+    - C tiles = (16384/1024)^2 = 256.
+    - K-slices per C tile = 16384/256 = 64.
+    - Reads per C tile = 64 * (512 KiB + 512 KiB) = 64 MiB.
+    - Writes per C tile = 1024 * 1024 * 2 = 2 MiB.
+    - Total HBM traffic = 256 * (64 MiB + 2 MiB) = 16,896 MiB = 16.5 GiB.
+    - Array tile operations per C tile = (1024/128) * (1024/128) * (16384/128) = 8192.
+
+    **Conclusion & Interpretation:**
+    - **Result: 16.5 GiB HBM traffic.** The tiling is physically consistent with 4 MiB SRAM and exposes reuse for the 128x128 array; compute versus memory time requires an explicit peak FLOP and bandwidth assumption.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

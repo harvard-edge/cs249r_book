@@ -1,0 +1,32 @@
+schema_version: '1.0'
+id: cloud-4213
+track: cloud
+level: L6+
+zone: evaluation
+topic: feature-store-management
+competency_area: data
+bloom_level: evaluate
+phase: both
+title: Feature Store Consistency Guarantees
+scenario: 'Your feature store uses a dual-write pattern: the batch pipeline writes to both the offline store (S3/Delta Lake) and online store (Redis) simultaneously. A production incident reveals that 2% of feature values diverge between stores.'
+question: Why does the dual-write feature store diverge, and what architecture provides eventual consistency with bounded staleness?
+details:
+  realistic_solution: 'The dual-write divergence occurs because writes to S3 and Redis are not atomic — a failure between the two creates inconsistency. Replace dual-write with a single source of truth plus CDC materialization pattern: write committed feature values once to the offline store, stream changes through a durable log, and have consumers materialize the online store. Delta Lake, Kafka, and Redis are one implementation of that pattern. Bounded divergence is controlled by consumer lag; at a net catch-up rate of 50K records/s, a 3M record backlog recovers in about 60 seconds.'
+  common_mistake: |
+    **The Pitfall:** Implementing strong consistency via distributed transactions (2PC) across S3 and Redis.
+    **The Rationale:** Engineers try to fix the symptom (divergence) by forcing atomicity, ignoring the operational reality of heterogeneous storage systems.
+    **The Consequence:** Adding 50-100ms latency to every write and creating a fragile pipeline where one unavailable system crashes all writes.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Dual-write failure rate: 2% divergence.
+    - CDC Kafka throughput is 100K records/s. Batch produces 50K records/s.
+    - Backlog: 3M records (e.g., 1-minute consumer restart at 50K/s).
+
+    **Calculations:**
+    - Net catch-up rate: 100K (consumer) - 50K (producer) = 50K records/s.
+    - Worst-case lag recovery: 3M backlog records / 50K net records/s = 60 seconds catch-up time.
+
+    **Conclusion & Interpretation:**
+    - **Result: bounded staleness of about 60 seconds.** A CDC pattern makes the offline store the source of truth and lets the online store converge as the materializer catches up.
+status: published
+provenance: imported

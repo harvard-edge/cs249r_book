@@ -1,0 +1,36 @@
+schema_version: '1.0'
+id: tinyml-0076
+track: tinyml
+level: L5
+zone: diagnosis
+topic: vram-budgeting
+competency_area: memory
+bloom_level: evaluate
+phase: inference
+title: The Continuous Logging Flash Death
+scenario: Your smart thermostat logs the room temperature and the ML model's occupancy prediction to internal Flash memory every 5 minutes for user analytics. You are using a standard SPIFFS filesystem. The internal flash has a 10,000 cycle erase limit. A year later, 15% of the devices are permanently bricked.
+question: How did logging 20 bytes every 5 minutes destroy the Flash?
+details:
+  realistic_solution: 'The failure mechanism is localized wear amplification, not capacity. A 20-byte append can force filesystem metadata and garbage-collection updates that erase one or more flash sectors; if those erases concentrate on the same metadata or log sectors, 288 writes/day can burn through a 10,000-cycle sector in about 35 days. The exact wear rate depends on SPIFFS configuration, free space, garbage collection, and update pattern, so it is wrong to assume every 20-byte log always maps to one fixed-sector erase. The fix is to design the log path for bounded wear: use a circular log in a dedicated flash region with explicit wear leveling, configure a filesystem with suitable wear distribution such as LittleFS and verify it under the workload, and batch writes only after deciding how much recent data can be lost on power failure.'
+  common_mistake: |
+    **The Pitfall:** "20 bytes * 105,000 logs a year is only 2 MB. It didn't fill up the drive."
+    **The Rationale:** The failure mechanism is not capacity exhaustion, but the 10,000 cycle erase limit of the flash memory.
+    **The Consequence:** It destroyed the silicon via Write Amplification.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Logs: 1 every 5 minutes.
+    - Flash erase rating: 10,000 cycles per sector.
+    - Worst-case workload: each log causes an erase on the same hot metadata/log sector.
+
+    **Calculations:**
+    - Logs per day: (60 / 5) * 24 = 288 logs/day.
+    - Worst-case hot-sector erases per year: 288 * 365 = 105,120 cycles/year.
+    - Worst-case hot-sector lifetime: 10,000 / 288 = ~34.7 days.
+    - If batching once per hour caused one hot-sector erase, hot-sector lifetime would be 10,000 / 24 = ~417 days; still not enough for multi-year life without wear distribution.
+
+    **Conclusion & Interpretation:**
+    - **Result: Endurance-Bound Hot Sectors**. Small logs can destroy flash when filesystem metadata or garbage collection concentrates erases; the release fix must verify average and worst-case sector wear, not just count stored bytes.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14

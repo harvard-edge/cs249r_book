@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: cloud-3063
+track: cloud
+level: L5
+zone: specification
+topic: pipeline-parallelism
+competency_area: parallelism
+bloom_level: create
+phase: training
+title: 'Pipeline Parallelism Specification: Design for <10% Bubble with Memory Constraint'
+scenario: You must specify a pipeline parallelism configuration for a 175B GPT-3 scale model on a fixed 512-GPU cluster with 80GB GPUs. Use TP=8 within each NVLink node, PP=8 pipeline stages, BF16 weights, ZeRO-2 optimizer sharding, and choose the smallest micro-batch count that keeps bubble overhead below 10% while keeping per-GPU peak memory under 70GB.
+question: With fixed TP=8 and PP=8 on 512 GPUs, what DP and smallest micro-batch count meet the 70GB memory and <10% bubble targets?
+details:
+  realistic_solution: 'The fixed 512-GPU cluster with TP=8 and PP=8 leaves DP = 512/(8*8) = 8 replicas. 175B params in BF16 are 350GB of model weights. Each GPU owns 175B/(8*8) = 2.734B parameters. Weights are not sharded by ZeRO-2, so BF16 weights are 2.734B*2 bytes = 5.47GB per GPU. ZeRO-2 shards gradients and optimizer states across DP replicas: the BF16 gradient shard is 5.47GB/8 = 0.68GB, and FP32 Adam states plus master weights are 2.734B*12 bytes/8 = 4.10GB. Add ~3GB checkpointed activations for an approximate peak of 13.25GB before communication buffers, temporary workspaces, and fragmentation, still well under 70GB. For PP=8, bubble is (PP-1)/(m+PP-1) = 7/(m+7). Requiring this below 10% gives m > 63, so the smallest valid micro-batch count is m=64. Spec: TP=8, PP=8, DP=8, m=64.'
+  common_mistake: |
+    **The Pitfall:** Failing to account for ZeRO-2 optimizer state distribution across data parallel ranks.
+    **The Rationale:** Candidates often assume that all optimizer states must fit entirely on each GPU without sharding, leading to impossible memory constraints.
+    **The Consequence:** Over-provisioning hardware or unnecessarily increasing tensor parallelism, leading to degraded training throughput.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 175B params, BF16 (2 bytes). Target Bubble < 10%. Target Memory < 70GB.
+    - Fixed cluster: 512 GPUs, TP=8, PP=8, ZeRO-2 over DP.
+
+    **Calculations:**
+    - Total weights: 175B * 2 bytes = 350GB.
+    - DP replicas = 512 / (TP 8 * PP 8) = 8.
+    - Local params per device: 175B / (TP 8 * PP 8) = 2.734B params.
+    - Weights per device: 2.734B * 2 bytes = 5.47GB.
+    - Gradients (ZeRO-2 over DP=8): 5.47GB / 8 = 0.68GB.
+    - Optimizer states + master weights (ZeRO-2 over DP=8): 2.734B local params * 12 bytes / 8 = 4.1GB.
+    - Activations (checkpointed): ~3.0GB.
+    - Approximate peak memory before temporary buffers = 5.47 + 0.68 + 4.1 + 3.0 = 13.25GB.
+    - Pipeline bubble for PP=8: (PP - 1) / (m + PP - 1) = 7 / (m + 7).
+    - Require 7 / (m + 7) < 0.10, so m > 63; smallest integer m = 64.
+    - Bubble at m=64: 7 / (64 + 7) = 9.86%.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-and-Bubble-Optimized**. The required config is TP=8, PP=8, DP=8, m=64; it fits the approximate model-state-plus-activation budget with a 9.86% bubble, with reserve still needed for buffers and workspace.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

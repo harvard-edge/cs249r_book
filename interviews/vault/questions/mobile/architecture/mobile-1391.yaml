@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: mobile-1391
+track: mobile
+level: L6+
+zone: mastery
+topic: model-size-estimation
+competency_area: architecture
+bloom_level: create
+phase: inference
+title: On-Device Multimodal Architecture for Snapdragon 8 Gen 3
+scenario: You are architecting an on-device multimodal agent running a 7B parameter LLM and a real-time Vision Transformer simultaneously on a Qualcomm Hexagon NPU.
+question: How would you architect a quantization and memory allocation strategy to fit a 7B LLM and ViT within 12-16GB RAM and 64GB/s while targeting 15 tok/s and 30 FPS?
+details:
+  realistic_solution: Use W4A8 quantization for the 7B LLM, an INT8 or mixed-precision KV-cache policy with a fixed 4K ring buffer, and admission control that reserves memory for the OS, camera, and compositor before starting the agent. Keep the ViT compact and schedule it on the NPU in alternating frame slots or on the GPU/ISP only if profiling shows the extra memory traffic still leaves LLM decode bandwidth. The runtime should partition memory into static weight mappings, bounded KV cache, vision input/output buffers, and temporary workspaces; it should target 15 tok/s and 30 FPS by time-slicing NPU work, reducing ViT resolution or LLM context when contention rises, and never promising both rates without measured headroom.
+  common_mistake: |
+    **The Pitfall:** Calculating static weight sizes and assuming it easily fits in RAM.
+    **The Rationale:** Candidates fail to account for the dynamic KV cache footprint and the baseline 4-6GB OS memory reservation.
+    **The Consequence:** The design triggers massive OS evictions and system crashes in production.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - LLM Size: 7B parameters (INT4).
+    - ViT weights and working buffers: 0.7 GB.
+    - Context Length: 4K.
+    - Bandwidth target from prompt: 64 GB/s total system budget; reserve part of it for non-LLM work.
+    - Decode target: 15 tok/s.
+    - KV estimate assumes 32 layers with full model hidden-width K/V of 4096 elements per token; GQA would reduce this.
+
+    **Calculations:**
+    - LLM Weights (INT4): 7B * 0.5 bytes = 3.5 GB.
+    - FP16 KV Cache: 4096 tokens * 32 layers * 4096 hidden values * 2 (K,V) * 2 bytes = 2.0 GiB, about 2.15 decimal GB.
+    - INT8 KV Cache option: ~1.1 GB, saving ~1.0 GB for activations and vision buffers.
+    - Total ML RAM with INT8 KV: 3.5 GB + 1.1 GB + 0.7 GB + 0.5 GB workspace = 5.8 GB.
+    - Pessimistic full-weight DRAM stream upper bound: 15 tok/s * 3.5 GB = 52.5 GB/s.
+    - This is an upper bound for a poorly cached or layer-streamed implementation, not a steady-state bandwidth claim; real decode bandwidth must be measured from layer weight residency, KV reads, activation spills, and ViT traffic.
+    - With a 64 GB/s total system budget, the design should reserve at least 10-15 GB/s for camera, display, CPU/GPU, and ViT bursts, so sustained LLM traffic must be kept well below the pessimistic upper bound.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~5.8 GB ML RAM with INT8 KV-cache and a bandwidth design that must be profiled.** The 15 tok/s plus 30 FPS target is plausible only when measured contention leaves scheduler headroom; otherwise the runtime must reduce ViT resolution, frame rate, LLM context, or token rate.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-3650
+track: cloud
+level: L3
+zone: implement
+topic: flash-attention
+competency_area: memory
+bloom_level: apply
+phase: inference
+title: Flash Attention with Variable-Length Sequences and Padding Masks
+scenario: You're using Flash Attention (via xformers or flash-attn library) in a training pipeline on A100 (80GB HBM2e, 2TB/s) with variable-length text sequences. Batches are padded to the maximum sequence length in the batch. You observe that actual speedup from Flash Attention is only 1.8x vs the theoretical 4x at seq_len=2048.
+question: How would you recover Flash Attention’s expected speedup for padded variable-length batches at seq_len=2048?
+details:
+  realistic_solution: Use flash_attn_varlen_qkvpacked_func with cu_seqlens (cumulative sequence lengths) to process only valid tokens. Pack all sequences into a single flattened tensor without padding. This eliminates attention work on padding tokens; with average length 1200 and max length 2048, the ideal attention-work reduction is about 2.9x for similarly sized sequences, before packing overhead and length variance.
+  common_mistake: |
+    **The Pitfall:** Not using the 'varlen' (variable-length) Flash Attention API.
+    **The Rationale:** With standard padding to max length, Flash Attention still processes all padded tokens, wasting compute on padding. The theoretical speedup assumes dense sequences.
+    **The Consequence:** You only get a fraction of the expected speedup because of wasted compute on padding tokens.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Batch of 32 sequences, max_len=2048, avg_len=1200.
+    - Attention work scales roughly with sequence_length^2.
+
+    **Calculations:**
+    - Padded token count: 32 * 2048 = 65,536 tokens.
+    - Valid token count: 32 * 1200 = 38,400 tokens.
+    - Token-level padding fraction: 1 - 1200 / 2048 = 41.4%.
+    - Quadratic attention-work fraction used by valid tokens: 1200^2 / 2048^2 = 34.3%.
+    - Quadratic attention-work wasted on padding: 65.7%.
+    - Ideal speedup from varlen attention for this average length: 2048^2 / 1200^2 = 2.91x.
+
+    **Conclusion & Interpretation:**
+    - **Result: Padding-work-bound.** Varlen Flash Attention should move the observed speedup toward about 2.9x for this length mix, not a universal 4x, because the average sequence length is 1200 rather than 1024.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

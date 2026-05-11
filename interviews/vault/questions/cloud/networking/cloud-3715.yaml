@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-3715
+track: cloud
+level: L5
+zone: mastery
+topic: collective-communication
+competency_area: networking
+bloom_level: evaluate
+phase: both
+title: ReduceScatter vs AllReduce for Pipeline Parallelism on H100 Cluster
+scenario: A 16-GPU cluster uses pipeline parallelism (8 pipeline stages) plus data parallelism (2-way DP). Micro-batch size is 4.
+question: How do ZeRO-1 and ZeRO-3 per-rank communication patterns compare within 2-way DP groups for an 8-stage PP 70B model?
+details:
+  realistic_solution: 'Hybrid setup: 8-stage PP × 2-way DP = 16 GPUs. Each PP stage holds ~70B/8 = 8.75B parameters, or 17.5GB of BF16 weights/gradients. ZeRO-1 shards optimizer state only; parameters and gradients remain replicated, so the main DP communication is a gradient AllReduce at the step boundary. For a 2-rank DP group, that is about one full gradient payload per rank, or 17.5GB, taking 17.5/450 = 38.9ms at 450 GB/s. ZeRO-3 shards parameters and gradients, so each micro-batch needs a parameter AllGather for the local stage and a gradient ReduceScatter after backward. Each 2-rank collective moves about half the stage payload per rank, or 8.75GB. With 4 micro-batches, that is 4 × 2 × 8.75GB = 70GB per rank, or about 155.6ms. ZeRO-1 is therefore lower latency for the pipeline critical path, while ZeRO-3 trades more communication for memory savings.'
+  common_mistake: |
+    **The Pitfall:** Applying ZeRO sharding blindly across all 16 GPUs.
+    **The Rationale:** Forgetting that pipeline parallelism requires adjacent stages to share full parameter copies.
+    **The Consequence:** Massive unnecessary communication overhead on the critical path.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 8-stage PP × 2-way DP = 16 GPUs.
+    - Each PP stage owns 70B / 8 = 8.75B parameters.
+    - Communication volumes below are per rank within a 2-GPU DP group for the local PP stage.
+    - Effective DP-link bandwidth is 450 GB/s.
+
+    **Calculations:**
+    - BF16 stage payload: 8.75B parameters * 2 bytes = 17.5GB.
+    - ZeRO-1 per-rank step communication: optimizer state is sharded, but gradients are still AllReduced across the 2-rank DP group; 2-rank AllReduce traffic is about one full 17.5GB gradient payload per rank.
+    - ZeRO-1 time: 17.5GB / 450 GB/s = 38.9ms.
+    - ZeRO-3 per-rank collective payload in 2-way DP: half the 17.5GB stage payload = 8.75GB.
+    - ZeRO-3 per-rank communication: 4 micro-batches × 2 collectives × 8.75GB = 70GB.
+    - Single ZeRO-3 collective time: 8.75GB / 450 GB/s = 19.4ms.
+    - ZeRO-3 time: 8 × 19.4ms = 155.6ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: ZeRO-1 adds ~38.9ms per rank, while ZeRO-3 adds ~155.6ms per rank (Communication-Bound)**. ZeRO-3 saves memory but puts more communication on the pipeline critical path.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 18
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

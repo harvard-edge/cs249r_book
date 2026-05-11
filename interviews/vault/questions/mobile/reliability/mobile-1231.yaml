@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: mobile-1231
+track: mobile
+level: L4
+zone: design
+topic: distribution-drift-detection
+competency_area: reliability
+bloom_level: evaluate
+phase: inference
+title: On-Device Drift Detection Architecture for Shared Memory Systems
+scenario: You are designing an on-device data drift detection pipeline for a real-time vision model deployed on an NPU. You must architect a system that monitors for training-serving skew without bottlenecking the shared memory bandwidth required by the active camera stream.
+question: How should Exynos 2400 perform on-device drift detection without caching raw frames or starving camera bandwidth?
+details:
+  realistic_solution: Compute lightweight statistical embeddings from the primary model's intermediate layers during the same forward pass that already consumes the camera frame. Immediately reduce those embeddings to small 1D histograms or counters in local buffers, commit only bounded summaries to a tiny ring buffer, and discard the raw frame. If the ring buffer is full, drop or coalesce drift samples rather than stalling the camera/NPU path. Run PSI comparisons against a reference distribution asynchronously during idle periods, so drift detection adds tiny summary writes instead of a second model pass or raw-frame cache that competes with ISP camera bandwidth.
+  common_mistake: |
+    **The Pitfall:** Caching raw input frames or running a concurrent secondary model.
+    **The Rationale:** Candidates rely on standard server-side drift techniques, forgetting that mobile memory is a heavily constrained, shared resource.
+    **The Consequence:** Massive memory bandwidth starvation for the ISP and GPU, causing dropped frames and severe system lag.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Camera: 1080p 30FPS.
+    - Memory: 12 GB LPDDR5X.
+    - Embedding size: 256 bytes/frame.
+    - Summary ring buffer: 60 seconds, overwrite-on-full or sample-dropping backpressure.
+
+    **Calculations:**
+    - Raw Caching = 1920 * 1080 * 3 bytes/frame * 30 FPS = 186.6 MB/second, or about 11.2 GB/minute.
+    - Embedding Caching = 256 bytes/frame * 30 FPS = 7.7 KB/second, or about 460.8 KB/minute.
+    - A 60-second embedding ring needs only 256 bytes/frame * 30 FPS * 60 seconds = 460,800 bytes, about 0.44 MiB.
+
+    **Conclusion & Interpretation:**
+    - **Result: Bounded On-Path Summaries**. Raw-frame caching would add about 11.2 GB/min of memory traffic and storage pressure, while embeddings use only ~461 KB/min. Single-pass extraction plus lossy backpressure keeps drift monitoring from starving the active camera pipeline.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

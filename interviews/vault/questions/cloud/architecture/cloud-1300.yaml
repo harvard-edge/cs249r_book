@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-1300
+track: cloud
+level: L4
+zone: diagnosis
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: analyze
+phase: both
+title: Diagnosing CPU Inefficiency in Transformer Inference
+scenario: Your team is running a low-latency, batch-size=1 Transformer inference service on dual-socket CPUs. The dashboard shows sustained 100% CPU utilization across all 112 cores, drawing nearly 700W. When profiled, the actual achieved TFLOP/s is less than 5% of theoretical peak FP32 performance.
+question: Why are 112 CPU cores at 100% utilization achieving under 5% peak TFLOPs for batch-size=1 Transformer inference?
+details:
+  realistic_solution: |
+    The service is busy but not doing dense math efficiently. Batch-size=1 Transformer inference has low arithmetic intensity: weights and KV-cache reads dominate, many kernels are small or memory-latency bound, and layernorm, softmax, sampling, framework overhead, and cache misses prevent sustained SIMD utilization. Improve locality and throughput with fused kernels, quantization, KV-cache layout tuning, thread/NUMA pinning, and modest batching where latency allows; use GPUs or NPUs when the workload needs higher effective matrix throughput.
+  common_mistake: |
+    **The Pitfall:** Assuming 100% CPU utilization means the processing units are fully saturated with math operations.
+    **The Rationale:** Candidates read core utilization as FLOP utilization, without checking arithmetic intensity, cache behavior, SIMD occupancy, batching, and non-matmul operator overhead.
+    **The Consequence:** They chase more CPU cores or higher clocks while the service remains limited by memory hierarchy effects, small kernels, and poor vectorization.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Sustained CPU power: ~700 W.
+    - Achieved throughput: less than 5% of theoretical FP32 peak.
+    - Batch size: 1, so each token has limited reuse of weights and activations.
+
+    **Calculations:**
+    - If theoretical peak is P TFLOP/s, observed throughput is <0.05P TFLOP/s even with all cores busy.
+    - Batch-size=1 limits reuse: a large weight matrix may be streamed from memory for one token rather than reused across many examples.
+    - Small and non-fused operators such as layernorm, softmax, embeddings, sampling, and KV-cache updates add memory traffic and synchronization without enough FLOPs to approach peak SIMD throughput.
+    - High CPU utilization can therefore mean threads are stalled, moving data, or executing scalar/control-heavy work rather than issuing vector FMAs every cycle.
+
+    **Conclusion & Interpretation:**
+    - **Result: Low Effective Arithmetic Intensity.** The bottleneck is memory locality, batching, kernel fusion, and SIMD efficiency, not a universal instruction-fetch energy tax. Fix the software/data path first, then move to accelerators if latency and throughput targets still require them.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

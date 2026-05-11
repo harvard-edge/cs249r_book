@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: edge-1461
+track: edge
+level: L5
+zone: design
+topic: batching-strategies
+competency_area: latency
+bloom_level: evaluate
+phase: inference
+title: Hailo-8 Multi-Stream Dataflow Batching Architecture
+scenario: You are designing an autonomous retail checkout system that processes 4 concurrent camera streams at 30 FPS using a single Hailo-8 dataflow accelerator. The Hailo-8 delivers 26 TOPS INT8 at 2.5W, but critically lacks local DRAM, meaning all activations and weights must stream directly from host memory over PCIe.
+question: What batching policy keeps four 30 FPS streams under 15 ms on one Hailo-8 while sustaining 120 FPS total?
+details:
+  realistic_solution: |
+    Use a fixed low-latency scheduler: four per-camera queues, round-robin admission, static batch size 1, and backpressure or frame dropping per camera if a queue falls behind. Because the accelerator has no local DRAM, keep pinned host buffers, precompiled graph residency where the toolchain supports it, and one in-flight DMA stream per admitted frame rather than staging large cross-camera bursts. This keeps each frame's service time around 3.6 ms while the accelerator processes frames continuously. Since the required inter-arrival rate is one frame every 8.3 ms across all cameras, a 3.6 ms service time sustains 120 FPS with headroom. Avoid large dynamic batches because they increase queueing delay and create PCIe bursts even when their raw batch latency appears just under 15 ms.
+  common_mistake: |
+    **The Pitfall:** Suggesting traditional dynamic batching with a timeout, aggregating frames across cameras into a single large batch to maximize throughput like they would on a GPU.
+    **The Rationale:** Candidates fail to account for the Hailo-8's lack of local DRAM.
+    **The Consequence:** Large batch sizes force massive concurrent DMA transfers from host memory, saturating the PCIe bus and causing severe latency spikes that violate the strict 15ms latency budget.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 4 cameras at 30 FPS = 120 FPS total.
+    - PCIe Gen3x4 bus (3.9 GB/s) transfer time for 6.2MB frame: ~1.6ms.
+    - Compute time for 50 GOPS model on 26 TOPS Hailo-8: ~2.0ms.
+
+    **Calculations:**
+    - Single-frame latency (Batch 1) = 1.6ms (transfer) + 2.0ms (compute) = 3.6ms.
+    - Single-frame service capacity = 1000ms / 3.6ms = ~278 FPS.
+    - Required aggregate throughput = 120 FPS, so utilization = 120 / 278 = ~43%.
+    - Aggregate frame arrival spacing = 1000ms / 120 = 8.3ms.
+    - Batch 4 transfer time = 4 * 1.6ms = 6.4ms.
+    - Batch 4 compute time = 4 * 2.0ms = 8.0ms.
+    - Batch 4 service time = 6.4ms + 8.0ms = 14.4ms, before queueing delay while waiting to collect frames.
+
+    **Conclusion & Interpretation:**
+    - **Result: batch-1 round-robin streaming sustains 120 FPS at about 43% utilization with ~3.6 ms service latency (Latency-Feasible).** Batch 4 is close to the 15 ms budget before queueing, so it is a worse policy for tail latency.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

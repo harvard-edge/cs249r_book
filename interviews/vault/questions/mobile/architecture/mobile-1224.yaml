@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: mobile-1224
+track: mobile
+level: L5
+zone: design
+topic: attention-scaling
+competency_area: architecture
+bloom_level: evaluate
+phase: inference
+title: Architecting Long-Context Attention on Tensor G3
+scenario: You are designing the attention architecture for a new long-document summarization feature powered by Gemini Nano on the Google Tensor G3. The feature requires processing up to 8K tokens of context, but the system must operate within the device's 12 GB LPDDR5X shared memory and the TPU's 7.5 TOPS compute limit without freezing the OS.
+question: How should Tensor G3 long-context summarization combine GQA, attention sinks, and sliding windows to fit 8K contexts?
+details:
+  realistic_solution: The architecture should use GQA as the primary KV-cache reduction, attention sinks to preserve a small set of initial or global document tokens, and a sliding window to keep recent local context. GQA reduces the number of KV heads, cutting cache size and decode bandwidth compared with full MHA while preserving more quality than pure MQA. Attention sinks prevent the summarizer from losing document-level anchors, while the sliding window bounds how much recent context is reread during decoding. KV-cache quantization can further reduce bandwidth, but it is an optional optimization, not a requirement implied by the prompt.
+  common_mistake: |
+    **The Pitfall:** Proposing standard Multi-Head Attention (MHA) or pure sliding window attention.
+    **The Rationale:** Candidates fail to realize MHA causes a severe memory bandwidth bottleneck during autoregressive decoding on mobile hardware, and pure sliding windows evict early document tokens needed for summarization.
+    **The Consequence:** The model either starves the TPU for data (leading to extreme latency) or loses the critical document context needed for accurate summarization.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Hidden dimension: 2048, 16 layers, 16 query heads, FP16 KV.
+    - Context limit: 8,192 tokens.
+    - GQA uses 4 KV heads, so KV cache is 4x smaller than MHA.
+    - Memory bandwidth: ~50 GB/s.
+
+    **Calculations:**
+    - MHA KV per token across all layers: 2 (K+V) x 2048 hidden x 2 bytes x 16 layers = 131,072 bytes.
+    - MHA KV at 8,192 tokens: 131,072 x 8,192 = ~1.07 GB.
+    - GQA with 4 KV heads instead of 16 query heads reduces KV by 4x: ~1.07 GB / 4 = ~268 MB.
+    - A sink of 128 tokens plus a 2,048-token sliding window keeps 2,176 active KV tokens for local decode access.
+    - Active GQA KV read set: 268 MB x (2,176 / 8,192) = ~71 MB before cache effects; optional INT8 KV would reduce this to ~36 MB.
+
+    **Conclusion & Interpretation:**
+    - **Result: bounded long-context KV traffic**. GQA makes the full 8K KV cache manageable, attention sinks preserve global anchors, and the sliding window bounds per-token decode traffic to recent context instead of rereading the entire 8K history.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

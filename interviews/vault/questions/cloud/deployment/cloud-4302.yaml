@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-4302
+track: cloud
+level: L3
+zone: implement
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: apply
+phase: inference
+title: Optimal Prefill Batch Size for TTFT
+scenario: On an H100 SXM5 running prefill for a 13B parameter FP16 model, you want to choose the batch size that maximizes GPU utilization without hurting TTFT.
+question: At what sequence length and batch size does the prefill become compute-bound versus memory-bandwidth-bound?
+details:
+  realistic_solution: 'For the simplified prefill roofline, GEMMs dominate: FLOPs = 2 × N_params × B × S, while each batch reuses one stream of FP16 weights, so weight traffic is about 2 × N_params bytes. Arithmetic intensity is therefore B × S FLOP/byte. The H100 ridge point is about 295 FLOP/byte, so prefill becomes compute-bound when B × S ≥ 295. For S=512, batch size 1 is already compute-bound; for S=128, use B≥3 if TTFT queueing allows. Choose the smallest batch that crosses the ridge point rather than batching so deeply that TTFT suffers.'
+  common_mistake: |
+    **The Pitfall:** Using total model capacity instead of analyzing the FLOPs-to-Bytes ratio of the forward pass.
+    **The Rationale:** Treating the forward pass as a black box and failing to decompose memory reads vs matrix multiplications.
+    **The Consequence:** Incorrectly optimizing memory pipelines when the prefill phase is actually bound by tensor core FLOPs.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Hardware: H100 SXM5 (989 TFLOPS FP16, 3.35 TB/s HBM3).
+       - Model: 13B parameters, FP16 (2 bytes).
+       - Simplified weight-streaming model: one read of FP16 weights per prefill batch.
+    2. **Calculations:**
+       - H100 Ridge Point: 989 TFLOPS / 3.35 TB/s = 295 FLOP/byte.
+       - FLOPs: 2 × 13e9 × B × S.
+       - Bytes (Weights): 13e9 × 2 bytes = 26 GB.
+       - Arithmetic Intensity: (2 × 13e9 × B × S) / (2 × 13e9) = B × S FLOP/byte.
+       - Crossover condition: B × S ≥ 295.
+       - At B=1, crossover sequence length is S ≥ 295 tokens.
+       - At S=512, minimum batch size is B ≥ ceil(295 / 512) = 1.
+       - At S=128, minimum batch size is B ≥ ceil(295 / 128) = 3.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound when B × S ≥ 295. For 512-token prompts, B=1 is enough; for shorter prompts, increase batch size only as far as TTFT allows.**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

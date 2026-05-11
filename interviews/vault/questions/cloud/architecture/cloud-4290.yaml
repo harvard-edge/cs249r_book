@@ -1,0 +1,35 @@
+schema_version: '1.0'
+id: cloud-4290
+track: cloud
+level: L6+
+zone: design
+topic: model-adaptation-systems
+competency_area: architecture
+bloom_level: create
+phase: both
+title: Mixture of LoRA Experts (MoLoRA) Architecture
+scenario: Design a per-layer mixture-of-LoRA-adapters system where each input token is routed to top-1 or top-2 of 8 rank-16 LoRA adapters by a 4096→256→8 router. Analyze the computational overhead and routing mechanism.
+question: How would you design token routing to 8 specialized LoRA adapters, and what are the compute and memory overheads?
+details:
+  realistic_solution: Use a per-layer token router that scores the 8 adapters from the current hidden state, then dispatches each token to top-1 or top-2 adapters with a load-balancing loss to avoid collapsed experts. Top-2 routing is a good default when quality matters because it lets the model blend specialties; top-1 is cheaper when latency is tighter. For rank-16 adapters on 32 layers with hidden dim 4096, one adapter path costs about 2 × 4096 × 16 = 131K MACs per token per layer, so top-2 costs about 262K MACs. The router adds about 1.05M MACs per token per layer, which is small compared with a full transformer layer but larger than one LoRA expert path and should be fused or shared if latency is tight. Stored adapter memory is 8 × 4.19M FP16 params = about 67.1 MB. A 4096→256→8 router per layer is about 1.05M params, or 33.6M params / 67.2 MB across 32 layers. Total added memory is about 134 MB before routing buffers.
+  common_mistake: |
+    **The Pitfall:** Implementing token-level routing with a separate learned router per layer while ignoring the multiplication of routing decisions.
+    **The Rationale:** Failing to recognize that 8 adapters per layer × 32 layers means 256 independent routing decisions per forward pass, multiplying the compute.
+    **The Consequence:** The routing overhead dominates the inference time, negating the efficiency benefits of using LoRA adapters.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Architecture: 32 layers, hidden dim 4096, 8 adapters/layer.
+    - Adapter: Rank 16. FP16 (2 bytes).
+    - Router: per-layer 4096→256→8 MLP.
+
+    **Calculations:**
+    - 1 Adapter (Rank 16): 2 * 16 * 4096 = 131,072 params. Across 32 layers: ~4.19M params (~8.39 MB).
+    - 8 Adapters memory: 8 * 8.39 MB = 67.1 MB.
+    - Router Params (per layer): (4096 * 256) + (256 * 8) = 1,050,112. Across 32 layers: 33,603,584 params (~67.2 MB).
+    - Adapter compute per token per layer: top-1 = ~131K MACs; top-2 = ~262K MACs.
+    - Router compute per token per layer: 4096 * 256 + 256 * 8 ≈ 1.05M MACs.
+
+    **Conclusion & Interpretation:**
+    - **Result: use top-1 or top-2 routing depending on latency/quality tradeoff.** The router consumes about 67.2 MB, roughly equal to the 8 adapters' 67.1 MB rather than negligible. Per-token compute is top-k adapter execution plus about 1.05M router MACs per layer, small relative to the base layer but not free.
+status: published
+provenance: imported

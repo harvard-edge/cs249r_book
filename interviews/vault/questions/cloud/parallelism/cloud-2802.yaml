@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-2802
+track: cloud
+level: L6+
+zone: mastery
+topic: data-parallelism
+competency_area: parallelism
+bloom_level: create
+phase: training
+title: Sequence Parallelism for 100k Contexts on 1T Models
+scenario: Training a 1T parameter model on an H100 cluster with massive 100k token context lengths. Activations are causing OOM errors.
+question: How would you combine sequence parallelism with Megatron-style training to handle 100k contexts for a 1T model without hitting HBM3 limits?
+details:
+  realistic_solution: |
+    Use Megatron sequence parallelism for the per-token activations that are naturally shardable across the tensor-parallel group, such as layernorm, dropout, and activation outputs, and combine it with activation checkpointing for the large retained tensors. For full 100k-context attention, add a sequence-parallel attention variant such as ring attention: shard the sequence across the TP group, keep each GPU's local Q block, and stream K/V blocks around NVLink so attention is computed without materializing the full sequence on every GPU. This distinction matters because standard Megatron sequence parallelism reduces activation replication, while the K/V ring is an additional long-context attention dataflow.
+  common_mistake: |
+    **The Pitfall:** Relying exclusively on activation recomputation (gradient checkpointing) to solve massive context lengths.
+    **The Rationale:** Engineers default to standard memory-saving techniques without realizing the computational penalty of re-calculating massive 100k attention matrices.
+    **The Consequence:** The VRAM limit is technically bypassed, but training throughput plummets to unusable levels due to massive recomputation waste.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 1T model, 100k context length, batch size 1.
+    - 8192 dim, 2 bytes/param (FP16/BF16).
+    - TP=8 with sequence parallelism.
+    - 100 transformer layers checkpointed in 10-layer segments.
+
+    **Calculations:**
+    - Global hidden activation for one layer boundary: 100k tokens * 8192 hidden * 2 bytes = 1.64 GB.
+    - With TP=8 sequence parallelism, shardable hidden boundaries are 1.64 GB / 8 ≈ 0.205 GB per GPU.
+    - Checkpointing every 10 layers retains about 100 / 10 = 10 segment boundaries.
+    - Retained sharded hidden-boundary memory: 10 * 0.205 GB ≈ 2.05 GB per GPU.
+    - KV memory cannot be inferred from hidden size alone; a complete estimate needs layers, KV heads, head dimension, precision, and whether KV is retained for backward or recomputed.
+    - Ring attention bounds the active attention workspace by streaming one local K/V block at a time and avoids materializing either full-sequence K/V on every GPU or a full 100k * 100k attention matrix.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~2 GB per GPU for retained sharded hidden boundaries, plus model-dependent streamed attention/KV workspace (Memory-Capacity-Bound).** The complete footprint also includes non-sharded intermediates, optimizer state, and workspaces, so the design needs sequence parallelism, segmented checkpointing, and ring-attention-style KV streaming.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

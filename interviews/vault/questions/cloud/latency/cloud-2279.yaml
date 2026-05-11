@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: cloud-2279
+track: cloud
+level: L4
+zone: optimization
+topic: mlops-lifecycle
+competency_area: latency
+bloom_level: analyze
+phase: both
+title: High-Fanout Item Feature Retrieval
+scenario: Your recommendation serving system scores 1,000 candidate items per request. End-to-end P99 latency is 320ms against a 150ms SLA. The 250ms item fetch bottleneck is caused by 10 concurrent threads making 100 sequential gRPC calls each to a Redis-backed feature store with a 0.5ms network RTT.
+question: How would you fix the 250ms item feature fetch and bring end-to-end P99 under the 150ms SLA?
+details:
+  realistic_solution: |
+    The 250ms bottleneck is an N+1 query anti-pattern. Optimization 1: implement batched retrievals (MGET) instead of per-item gRPC calls. Optimization 2: introduce an in-memory L1 cache (e.g., Caffeine) on the serving nodes. With an 80% hit rate, only about 200 of the 1,000 item features need a remote lookup; split those misses into a small number of parallel MGET batches so network round trips are paid per batch, not per item.
+  common_mistake: |
+    **The Pitfall:** Reducing the candidate pool from 1,000 to 200 items to cut down fetch times.
+    **The Rationale:** Candidates try to solve the N+1 network fetch problem by arbitrarily throwing away valid data.
+    **The Consequence:** Severely degrading recommendation quality and business metrics to hit an engineering SLA.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Current Fetch: 10 threads each issue 100 sequential calls; each thread's critical path is 100 * 2.5ms = 250ms.
+    - Target SLA: 150ms.
+    - Optimization: MGET + L1 Cache (80% hit rate).
+    - Network RTT: 0.5ms. Redis MGET processing: ~1.5ms.
+    **Calculations:**
+    - Remote misses after L1 cache = 1,000 * (1 - 0.80) = 200 items.
+    - Batch the 200 misses into 5 parallel MGET calls of ~40 item IDs each.
+    - Wall-clock fetch latency is the slowest parallel MGET: 0.5ms RTT + ~1.5ms Redis processing = ~2.0ms.
+    - New Latency Stack = 20ms (Gen) + 10ms (User) + 2ms (Fetch) + 10ms (Cross) + 30ms (Model) = 72ms.
+    **Conclusion & Interpretation:**
+    **P99 latency drops to about 72ms if the five MGET batches run in parallel, well below the 150ms SLA.**
+  options:
+    - Reduce the candidate pool from 1,000 to 200 items to cut down fetch times by 80%, reducing item fetch to 50ms and total latency to 120ms.
+    - Implement batched retrievals (MGET), add an in-memory L1 cache with an 80% hit rate, and fetch the remaining misses in parallel batches to drop remote fetch wall time to ~2ms.
+    - Upgrade the Redis-backed feature store to faster NVMe SSDs to reduce the 2.0ms database processing time per item down to 0.1ms.
+    - Increase the number of concurrent threads from 10 to 100 so each thread only makes 10 sequential calls, reducing fetch latency to 25ms.
+  correct_index: 1
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

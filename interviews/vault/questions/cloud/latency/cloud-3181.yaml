@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-3181
+track: cloud
+level: L5
+zone: design
+topic: speculative-decoding
+competency_area: latency
+bloom_level: create
+phase: inference
+title: Parallel Draft and Target Execution Scheduling
+scenario: In standard speculative decoding, draft generation and target verification are serial. On a 4-GPU system with the target using TP=4 and a 1B draft, you need to design a pipelining scheme to optimize throughput.
+question: How would you overlap draft generation of round N+1 with target verification of round N, and what rollback issue arises?
+details:
+  realistic_solution: Pipeline at speculation-round boundaries. While the TP=4 target model verifies round N on all four GPUs, run the 1B draft for round N+1 on isolated resources, such as a separate draft GPU, MIG/SM partition, or a carefully capped low-priority stream that does not steal the target's critical-path bandwidth. The draft starts from an optimistic prefix that includes the current speculative continuation. When target verification for round N completes, synchronize on the verified prefix. If all optimistic tokens used by the draft remain valid, keep the already generated draft for N+1. If verification rejects at position j, discard any draft work beyond the last accepted token and restart drafting from the corrected verified prefix. The core scheduling issue is not co-location on GPU-0; it is resource isolation plus reconciliation of speculative state after accept/reject decisions.
+  common_mistake: |
+    **The Pitfall:** Running draft and target kernels concurrently on the same GPUs without resource partitioning.
+    **The Rationale:** Candidates assume CUDA streams on the same GPU will perfectly parallelize without contention.
+    **The Consequence:** The concurrent kernels compete for SMs and memory bandwidth, slowing down both processes and increasing total latency.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Target model uses TP=4 for verification.
+    - Draft model is 1B and can run on isolated capacity or a separate device.
+    - Drafting N+1 before N is verified is optimistic.
+
+    **Calculations:**
+    - Serial schedule: draft round N, then target verifies round N, then draft round N+1.
+    - Pipelined schedule: target verifies round N while the isolated draft resource prepares round N+1.
+    - Synchronization point: after target verification returns the accepted prefix and any correction token.
+    - If the optimistic draft prefix matches the verified prefix, reuse the drafted N+1 tokens.
+    - If round N rejects, discard speculative tokens derived from the invalid suffix and restart from the corrected prefix.
+    - Without concrete target time, draft time, and rejection distribution, a numeric latency gain cannot be derived.
+
+    **Conclusion & Interpretation:**
+    - **Result: Pipeline With Rollback Reconciliation.** Overlap is valid only with resource isolation and a synchronization step that truncates invalid speculative state after the last accepted token.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

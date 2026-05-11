@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: edge-1241
+track: edge
+level: L3
+zone: analyze
+topic: neural-architecture-search
+competency_area: architecture
+bloom_level: analyze
+phase: training
+title: Hailo-8 Dataflow Topology Memory Bottleneck
+scenario: A hardware-aware NAS yielded two INT8 object detection models for a Hailo-8 edge device (dataflow architecture, no local DRAM). Model X requires 15 GOPs with heavy branching. Model Y requires 20 GOPs with a strictly sequential topology.
+question: Why does the lower-compute Model X run at 150 FPS while the higher-compute Model Y reaches 600 FPS on the Hailo-8?
+details:
+  realistic_solution: Because Hailo-8 is a dataflow accelerator, FPS depends on whether the compiler can map the graph into an efficient on-chip pipeline, not just on GOP count. Model Y's sequential topology maps cleanly and keeps the dataflow engine busy. Model X's branches create multiple live activation tensors and synchronization points, forcing graph partitioning and extra host-interface transfers between partitions. Those transfers and stalls dominate latency, so the lower-GOP model runs slower.
+  common_mistake: |
+    **The Pitfall:** Assuming that fewer FLOPs/GOPs mathematically guarantees lower latency on dataflow accelerators.
+    **The Rationale:** Candidates rely on standard CPU/GPU intuition, failing to account for the unique memory topology of specialized NPUs that lack local DRAM.
+    **The Consequence:** Selecting a theoretically "efficient" model that heavily thrashes the host PCIe bus because intermediate activations spill out of the chip's internal SRAM.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Peak INT8 compute: 26 TOPS = 26,000 GOPS.
+    - Host-interface bandwidth: 4 GB/s = 4,000 MB/s.
+    - Model X: 15 GOPs, heavy branching, four compiler partitions with about 6 MB of boundary activation traffic each.
+    - Model Y: 20 GOPs, sequential, one efficient dataflow pipeline.
+    - These are lower-bound estimates because compiler scheduling, SRAM allocation, and transfer overlap are not fully specified.
+
+    **Calculations:**
+    - Compute lower bound for Model X: 15 GOPs / 26,000 GOPS = 0.58 ms per frame.
+    - Compute lower bound for Model Y: 20 GOPs / 26,000 GOPS = 0.77 ms per frame.
+    - Extra Model X partition traffic: 4 * 6 MB / 4,000 MB/s = 6.0 ms.
+    - Model X lower-bound latency estimate: 0.58 ms compute + 6.0 ms transfer/stall = 6.58 ms, or about 152 FPS.
+    - Model Y can remain near a single efficient pipeline because it avoids the extra partition-boundary transfers that dominate Model X.
+
+    **Conclusion & Interpretation:**
+    - **Result: Model X achieves about 150 FPS because graph partition traffic and branch synchronization dominate.** Model Y avoids those extra transfers and reaches 600 FPS despite more GOPs.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-2102
+track: cloud
+level: L5
+zone: evaluation
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: evaluate
+phase: both
+title: MoE Expert Parallelism vs Tensor Parallelism
+scenario: You are deploying a 128-expert MoE model for inference across a 16-GPU cluster.
+question: When should you use expert parallelism versus tensor parallelism for 128-expert MoE inference, and what are the tradeoffs?
+details:
+  realistic_solution: 'Expert parallelism (EP): each GPU holds E/N complete experts. Pro: zero communication within expert computation — each GPU runs complete matmuls on its local experts. Con: requires AllToAll to dispatch tokens to the right GPU and collect results. Tensor parallelism (TP): each expert is split across GPUs. Pro: handles experts too large for one GPU. Con: requires AllReduce within each expert''s forward pass — much more frequent synchronization. EP wins when: individual experts fit on one GPU, batch sizes are large, and GPU count divides expert count cleanly. TP wins when: individual experts are too large for one GPU.'
+  common_mistake: |
+    **The Pitfall:** Defaulting to tensor parallelism because it is familiar from dense models.
+    **The Rationale:** Candidates apply standard dense-model logic to MoE, ignoring the massive synchronization overhead within experts.
+    **The Consequence:** Imposing severe AllReduce latency penalties on small experts, destroying inference throughput.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 128-expert model, 16 GPUs.
+    - Each MoE layer routes 4096 tokens, with an 8 KB activation payload per token.
+    - Compare synchronization pattern and activation communication for one MoE layer.
+
+    **Calculations:**
+    - Expert Parallelism (EP): 8 complete experts per GPU. Token dispatch moves up to 4096 * 8 KB = 32 MB of activations across the cluster, followed by a similar gather of expert outputs. Per-GPU send/receive volume is roughly a few MB if routing is balanced, but the AllToAll can be latency- and bandwidth-sensitive.
+    - Tensor Parallelism (TP): split each active expert across a TP group. Each expert FFN then needs reductions of its partial outputs; the payload is the expert activation tensor, and the count depends on top-k routing and how many experts each GPU serves.
+    - TP has more fine-grained collectives inside expert compute, while EP has fewer but larger token-dispatch AllToAll exchanges.
+
+    **Conclusion & Interpretation:**
+    - **Result: EP is preferred when experts fit in one GPU (Communication Tradeoff)**. EP avoids intra-expert AllReduce but pays AllToAll routing cost. TP is necessary when an expert is too large for one GPU, but it introduces synchronization in the expert matmuls, so the decision should be based on expert fit, activation volume, routing balance, and interconnect bandwidth rather than a simple collective-count ratio.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-2302
+track: cloud
+level: L5
+zone: diagnosis
+topic: mixture-of-experts
+competency_area: architecture
+bloom_level: evaluate
+phase: both
+title: MoE Expert Parallelism Decode Bottleneck
+scenario: You deploy an 8x8B Mixture-of-Experts (MoE) LLM (top-2 routing, ~16B active parameters) on a single 8-GPU node (640GB HBM total) to serve 500 QPS of chat completions. You observe decode latency stuck at 150ms/token with GPU SM utilization under 15%. A dense 13B model on the exact same hardware achieves 30ms/token.
+question: Why is the MoE model failing to achieve expected performance, and how do you redesign the deployment?
+details:
+  realistic_solution: The failure stems from using Expert Parallelism (EP) during the memory-bound autoregressive decode phase. In EP, each GPU owns a subset of experts, so top-2 routing creates small all-to-all exchanges and many synchronization points at low batch size. The active FP16 weights are about 32GB per token path, and the decode workload cannot amortize the communication or memory reads. Redesign the mapping by using tensor parallelism or a hybrid TP/EP layout that shards active expert weights across the 8 GPUs, improves aggregate bandwidth use, and reduces the per-token routing bottleneck; it changes the communication pattern rather than making communication disappear.
+  common_mistake: |
+    **The Pitfall:** Assuming the bottleneck is KV cache capacity and attempting to increase batch size or apply quantization.
+    **The Rationale:** Engineers see low SM utilization and assume standard dense-model bottlenecks, ignoring the unique architectural cost of EP all-to-all routing during decode.
+    **The Consequence:** The model remains structurally starved for memory bandwidth, never meeting the real-time 30ms/token SLA.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Active parameters per decoded token path: 16B.
+    - FP16 weight footprint: 16B * 2 bytes = 32 GB.
+    - Hardware: 8 GPUs, about 2.0 TB/s HBM bandwidth each.
+    - Workload: autoregressive decode at small batch size.
+
+    **Calculations:**
+    - If active weights are effectively read from one GPU at a time, the lower-bound HBM time is 32 GB / 2,000 GB/s = 16ms before kernels and communication.
+    - EP adds many small token-routing collectives and synchronization points across layers, which can push observed latency far above the HBM lower bound.
+    - Idealized TP=8 lower bound, ignoring activation movement and collectives: 32 GB / (8 * 2,000 GB/s) = 2ms aggregate HBM time.
+    - Real TP/hybrid decode still performs collectives and moves activations across shards, so it will not achieve a clean 8x latency reduction; the advantage is a more regular communication pattern that can be better amortized than per-token expert all-to-all at batch size 1.
+
+    **Conclusion & Interpretation:**
+    - **Result: Decode is memory-bandwidth and communication-bound.** TP or hybrid TP/EP reduces the active-weight read bottleneck and replaces tiny EP routing collectives with a more efficient communication pattern; it does not eliminate all communication.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

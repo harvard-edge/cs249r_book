@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-4317
+track: cloud
+level: L4
+zone: design
+topic: recommendation-systems-engineering
+competency_area: architecture
+bloom_level: apply
+phase: inference
+title: TB-Scale Embedding Table Sharding
+scenario: You have 50 embedding tables with sizes ranging from 1 GB to 2 TB (total 20 TB). You must shard them across a cluster of 128 GPUs, with 10 TB fitting in GPU HBM. The remaining 10 TB must live in CPU DRAM.
+question: How would you design the sharding strategy to minimize P99 lookup latency, and what determines which tables go to GPU vs CPU?
+details:
+  realistic_solution: 'Place tables by latency impact: hot, high-QPS, high-row-size tables go to GPU HBM because they dominate P99 lookup time; cold or low-QPS tables go to CPU DRAM because their added latency is rarely on the critical path. Use QPS × lookups/request × row_size_bytes as the ranking score, then fill the 10 TB HBM budget while leaving operational headroom for caching and fragmentation. For tables that exceed single-GPU capacity, row-shard across GPUs so each worker owns a row range. For very small tables that appear in nearly every request, replicate them on all GPUs when the replication cost is lower than repeated cross-device lookups. The sub-100 MB threshold is only a rule of thumb: replicate when the HBM cost is small relative to the P99 latency and communication saved.'
+  common_mistake: |
+    **The Pitfall:** Sharding by table size alone (large tables on CPU, small tables on GPU).
+    **The Rationale:** Candidates intuitively assume large tables won't fit well on GPUs and small tables are easier to replicate.
+    **The Consequence:** Hot large tables on the CPU will destroy P99 latency due to high lookup frequency over slower PCIe/DRAM paths, while cold small tables waste expensive HBM.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Total table size is 20 TB.
+    - Cluster HBM budget is 10 TB, so about half of the embedding bytes must remain in CPU DRAM.
+    - Placement must minimize P99 lookup latency, not merely maximize bytes in HBM.
+
+    **Calculations:**
+    - Rank each table by lookup demand: QPS * lookups_per_request * row_size_bytes. This estimates bytes/s and latency pressure on the serving path.
+    - Place the highest-demand tables in GPU HBM until the 10 TB budget is reached, with some practical headroom if the runtime needs cache/allocator slack.
+    - Put low-demand tables in CPU DRAM and prefetch where access is predictable; do not claim CPU latency is hidden unless measurements confirm it.
+    - Replicating a 100 MB table on 128 GPUs costs 12.8 GB cluster-wide, which is only about 0.13% of a 10 TB HBM budget, so replication is reasonable for universally accessed small tables.
+
+    **Conclusion & Interpretation:**
+    - **Result: latency-aware placement.** GPU vs CPU is determined by access heat and row bandwidth demand under the HBM budget; replication and row sharding are tactics for hot small and oversized hot tables, respectively.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

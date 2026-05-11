@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: mobile-1054
+track: mobile
+level: L3
+zone: implement
+topic: transformer-systems-cost
+competency_area: compute
+bloom_level: apply
+phase: inference
+title: 'Mobile Transformer Cost Implement: Calculate Token Budget for Mobile LLM'
+scenario: Implement the maximum context length calculation for Phi-3-Mini-3.8B (INT4, 32 layers, 32 heads, head_dim=64) on Snapdragon 8 Gen 3 (45 TOPS, 16GB, 77GB/s) that meets a target of P99 < 2s for 100 output tokens, leaving 4GB RAM for OS.
+question: How would you calculate model memory, KV cache per token, max context tokens given RAM constraints, and verify the throughput SLO?
+details:
+  realistic_solution: 'Memory budget allows about 39K context tokens: 3.8B INT4 weights are ~1.9GB, leaving 10.1GB for KV after reserving 4GB for the OS, and the FP16 KV cache is 256KB/token. The throughput SLO is stricter: 100 output tokens in 2s requires TPOT <=20ms. If weights are resident and each decode step mainly streams KV for the current context, KV bandwidth alone at a 4K context is about 1.0GB/token, or 13.6ms at 77GB/s before compute and kernel overhead. At the maximum memory-fit context, KV traffic is about 10.1GB/token, or 131ms, so the memory-fit context cannot meet the throughput SLO. The implementation should cap the active context to roughly 4K-5K tokens for this SLO or add speculative decoding/context compression.'
+  common_mistake: |
+    **The Pitfall:** Incorrectly calculating KV cache size and ignoring the bandwidth-limited throughput SLO.
+    **The Rationale:** Candidates often use `hidden_dim` instead of calculating `num_heads * head_dim * 2 * num_layers`, and they assume fitting in memory guarantees meeting the speed target.
+    **The Consequence:** Off-by-32x errors in cache sizing, and deploying a model that fits in RAM but catastrophically fails the latency requirements.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model Memory: 3.8B INT4 = ~1.9 GB resident in memory.
+    - Available RAM: 16 GB - 4 GB (OS) - 1.9 GB (model) = 10.1 GB.
+    - KV per cached context token: 2 (K+V) * 32 layers * 32 heads * 64 dim * 2 bytes = 262,144 bytes = 256 KiB.
+    - Decode bandwidth model: weights are already resident; each generated token streams the active KV cache once plus compute/kernel overhead.
+    - SLO Target: 2s / 100 tokens = 20 ms TPOT.
+
+    **Calculations:**
+    - Memory-fit context: 10.1 GB / 256 KiB = ~39K tokens.
+    - KV traffic at 4K context: 4096 * 256 KiB = 1.0 GiB/token.
+    - KV bandwidth time at 4K: 1.0 GiB / 77 GB/s ≈ 13-14 ms before compute.
+    - KV traffic at memory-fit context: ~10.1 GB/token.
+    - KV bandwidth time at memory-fit context: 10.1 GB / 77 GB/s ≈ 131 ms/token.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~39K tokens fit in RAM, but not within the 20 ms TPOT SLO.** A 4K-class active context may fit the bandwidth budget with little headroom; the maximum memory-fit context needs context compression, a much smaller active window, or speculative decoding.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

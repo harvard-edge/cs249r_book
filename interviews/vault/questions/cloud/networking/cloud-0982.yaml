@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-0982
+track: cloud
+level: L5
+zone: specification
+topic: collective-communication
+competency_area: networking
+bloom_level: evaluate
+phase: both
+title: Evaluating Network Upgrades vs ZeRO-3 for LLM Scaling
+scenario: A team is scaling a 175B parameter LLM training job from 128 to 512 GPUs connected via 400 Gbps InfiniBand. At 128 GPUs (TP=8, DP=16), the Model Flop Utilization (MFU) is 55%. Scaling to 512 GPUs (TP=8, DP=64) drops the MFU to 32% while batch size per GPU remains constant. The infrastructure team proposes upgrading to 800 Gbps NDR InfiniBand, while the ML team suggests implementing ZeRO-3 on the existing 400 Gbps network.
+question: Should the 512-GPU run use 800 Gbps InfiniBand or ZeRO-3 on 400 Gbps, and how does each affect the comm/compute ratio?
+details:
+  realistic_solution: Reject the ZeRO-3 proposal if memory is not the bottleneck, because ZeRO-3 primarily trades memory for additional per-layer communication and can worsen an already network-bound run. For the same per-GPU batch and compute, upgrading from 400 Gbps to 800 Gbps roughly halves the exposed data-parallel gradient synchronization time, improving the comm/compute ratio. ZeRO-3 on the existing 400 Gbps fabric should be chosen only if memory pressure is blocking the model or batch size, not as a generic communication optimization.
+  common_mistake: |
+    **The Pitfall:** Assuming that ZeRO-3 is a universal optimization that reduces communication time.
+    **The Rationale:** ZeRO-3 saves memory by sharding parameters, gradients, and optimizer state, but it introduces layer-time gathers and scatters whose exposed cost depends on implementation, overlap, and topology. It is not automatically a lower-communication replacement for standard DP when memory is not the limiter.
+    **The Consequence:** Applying ZeRO-3 to a bandwidth-bound 400 Gbps run can leave MFU unchanged or worse, because the intervention targets memory pressure rather than the dominant communication bottleneck.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 175B FP16 gradients: 175B * 2 bytes = 350 GB payload.
+    - DP degree at 512 GPUs with TP=8 is 64.
+    - Effective 400 Gbps bandwidth: 50 GB/s; 800 Gbps: 100 GB/s.
+    - For a concrete ratio, assume per-step compute time C = 20s at the fixed per-GPU batch size.
+
+    **Calculations:**
+    - Ring DP all-reduce traffic per rank ≈ 2 * (DP-1) / DP * payload = 2 * 63/64 * 350 GB = 689 GB.
+    - Standard DP comm time at 400 Gbps ≈ 689 GB / 50 GB/s = 13.8s, so comm/compute ratio ≈ 13.8 / 20 = 0.69.
+    - Standard DP comm time at 800 Gbps ≈ 689 GB / 100 GB/s = 6.9s, so comm/compute ratio ≈ 6.9 / 20 = 0.35.
+    - ZeRO-3 removes full-gradient all-reduce but adds reduce-scatter/all-gather style communication for partitioned gradients, parameters, and optimizer state around layer execution; its exact volume depends on implementation and overlap, but it is not a guaranteed reduction versus DP when memory is not the limiter.
+
+    **Conclusion & Interpretation:**
+    - **Result: 800 Gbps roughly halves the DP comm/compute ratio from about 0.69 to 0.35; ZeRO-3 on 400 Gbps does not (Network-Bound)**. Choose the network upgrade for this bandwidth bottleneck; choose ZeRO-3 only for memory pressure.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-23T21:21:24.368323'

@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-3370
+track: cloud
+level: L5
+zone: specification
+topic: encoder-decoder-tradeoffs
+competency_area: architecture
+bloom_level: analyze
+phase: both
+title: 'H100-Optimized LLM: Encoder vs. Decoder Architecture Tradeoffs for Cost-Effective Deployment'
+scenario: Your team is deploying a new large language model for a critical enterprise application on a cluster of NVIDIA H100 GPUs. The application involves both complex understanding and generation.
+question: How would you evaluate encoder-only, decoder-only, and encoder-decoder options on H100s against 50 ms latency, throughput, and cost?
+details:
+  realistic_solution: Evaluate the architectures against the actual mix of understanding and generation. Encoder-only models are cheapest and highest-throughput for classification, retrieval, reranking, or embedding workloads because they batch the whole input and have no autoregressive KV growth, but they do not generate long text. Decoder-only models are the natural fit for open-ended generation, yet they carry the largest per-token latency and KV-cache cost during decode. Encoder-decoder models can be more efficient for bounded sequence-to-sequence tasks because the encoder work is batched once and the decoder can be smaller, but they still pay autoregressive decode costs. On H100s, profile each candidate for weights, KV cache, tensor parallel collectives, FlashAttention/FP8 support, and cost per delivered token before choosing the smallest architecture that meets the 50 ms latency target and product quality.
+  common_mistake: |
+    **The Pitfall:** Focusing solely on theoretical FLOPs or parameter count.
+    **The Rationale:** Candidates overlook the real-world impact of memory bandwidth limitations, especially for KV cache access during decoding.
+    **The Consequence:** Deploying an architecture that hits a memory wall, violating the 50ms latency SLA and inflating infrastructure costs.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Hardware: H100 (80GB HBM3, 3.35 TB/s).
+    - Decoder-only model: 70B parameters (140 GB FP16).
+    - Sequence: 4096 tokens, batch=8.
+    - Example KV shape: 80 layers, 64 KV heads, d_head=128, FP16.
+
+    **Calculations:**
+    - Persistent weights: 140 GB requires at least 2 H100s with tensor parallelism, before KV cache and runtime overhead.
+    - For a 2-way tensor-parallel decoder-only serving plan, each GPU holds roughly a 70 GB weight shard. Low-batch decode can approach a bandwidth floor of rereading much of that shard across layers; 70 GB / 3350 GB/s ≈ 21 ms before compute, KV reads, collectives, and kernel overhead.
+    - KV cache per token = 2 (K,V) * 80 * 64 * 128 * 2 bytes ≈ 2.5 MB.
+    - KV cache for batch=8 at 4096 tokens = 2,621,440 bytes * 4096 * 8 ≈ 85.9 GB decimal, about 80 GiB, across the tensor-parallel group.
+
+    **Conclusion & Interpretation:**
+    - **Result: architecture choice depends on generation need.** Encoder-only is best for non-generative throughput and cost, decoder-only is most flexible but memory- and KV-heavy, and encoder-decoder can win for bounded seq2seq. The 50 ms target requires profiling batch size, tensor parallelism, KV layout, and workload fit instead of relying on weight size alone.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

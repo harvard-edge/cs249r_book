@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-2159
+track: cloud
+level: L5
+zone: optimization
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: evaluate
+phase: training
+title: The Slow Training Step Diagnosis
+scenario: Your 70B model training on 256 GPUs shows each training step takes 12 seconds, but your napkin math predicts it should take ~4 seconds. GPU utilization averages 35%.
+question: How would you profile a 70B run on 256 GPUs to find why steps take 12s instead of the expected 4s?
+details:
+  realistic_solution: 'Systematic decomposition of one training step: (1) **Forward pass**: profile with nsys — check kernel occupancy and whether matmuls are hitting Tensor Cores (look for SM efficiency >80%). (2) **Backward pass**: should be ~2× forward. If >2.5×, check for unintended gradient computation on frozen layers or recomputation without checkpointing benefits. (3) **AllReduce**: time the gradient sync and compare bytes moved per GPU against measured fabric bandwidth; if sync is much slower than the measured link budget, check for stragglers or network congestion. (4) **Optimizer step**: verify fused optimizer kernels and CPU/GPU sync points. (5) **Data loading**: if data pipeline is not prefetched, the GPU waits for the next batch. (6) **CUDA synchronization overhead and Python GIL**: torch.compile or CUDA graph capture eliminates this. Use the profile timeline to reconcile overlap: exposed gaps, not overlapped work, explain the 12s wall-clock step.'
+  common_mistake: |
+    **The Pitfall:** Immediately blaming the network or AllReduce.
+    **The Rationale:** A 3x performance gap requires systematically decomposing the step into all components (compute, sync, data loading).
+    **The Consequence:** Wasting time tuning network parameters when the bottleneck might be data loading or poor utilization.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Expected step from scenario: ~4s when compute, communication, and input pipeline overlap as designed.
+    - Observed step: 12 seconds.
+
+    **Calculations:**
+    - Exposed slowdown to explain: 12s - 4s = 8s.
+    - Example profile decomposition: 3s of input-pipeline gaps plus 5s of exposed synchronization/straggler time = 8s.
+    - Wall-clock step then reconciles as 4s expected work + 8s exposed stalls = 12s observed.
+    - Derive AllReduce expectations from measured bytes and bandwidth for this cluster; do not assume a fixed 1.5s value without measurement.
+
+    **Conclusion & Interpretation:**
+    - **Result: Exposed Pipeline or Synchronization Stalls**. The diagnosis is the measured 8s of non-overlapped idle/sync time, not a guessed communication constant.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,57 @@
+schema_version: '1.0'
+id: tinyml-0672
+track: tinyml
+level: L6+
+zone: realization
+topic: mcu-compute-constraints
+competency_area: precision
+bloom_level: create
+phase: inference
+title: The Automotive Sensor Fusion Overflow
+scenario: |
+  You are the lead architect for a new Automotive Emergency Braking System (AEBS) running on a Cortex-M7 microcontroller. The system must fuse data from two sensors: a standard camera (8-bit pixel values, 0-255) and a new, low-cost LiDAR sensor whose output represents distance in millimeters (0-65535, i.e., 16-bit). The fusion model has two input branches that meet at a shared 'fusion layer'. Your hard real-time deadline from sensor read to brake signal is 1ms. The MCU's SRAM is 1MB.
+question: 'Propose a quantization strategy for the two branches of the network, and determine what the dominant factor in your energy budget calculation is: compute or memory access?'
+details:
+  realistic_solution: The correct architectural decision is to use mixed precision. The camera branch starts from 8-bit pixels, so it is a strong candidate for INT8 after representative calibration confirms that its early activations and accuracy remain stable. The LiDAR branch should keep the raw input and early feature extraction in FP16 or 16-bit fixed point to preserve distance resolution and avoid excessive clipping. After normalization or range-reducing layers, the LiDAR branch can transition to INT8 before the fusion layer if calibration shows acceptable error. This hybrid approach preserves the high-dynamic-range sensor path while still gaining most of the SRAM and bandwidth benefits from INT8 in the camera path, later LiDAR layers, and fusion layers. The dominant energy cost is usually SRAM/Flash traffic for weights and activations, not the arithmetic alone.
+  common_mistake: |
+    **The Pitfall:** Quantizing the entire model, including the LiDAR front end, directly to INT8.
+    **The Rationale:** Engineers apply blanket INT8 quantization to maximize speed and minimize memory without calibrating the native dynamic range of each sensor branch.
+    **The Consequence:** The 16-bit LiDAR distance path loses resolution or clips important ranges, so the fusion model can mis-rank obstacles even though the camera branch still behaves well.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Latency constraint: 1 ms.
+    - Cortex-M7 clock: 480 MHz.
+    - FP32 throughput budget: roughly 480 Mops/s before pipeline and memory stalls.
+    - INT8 DSP throughput budget: up to roughly 1.92 Gops/s for well-mapped kernels.
+    - 250K-parameter fusion model: roughly 500K operations per inference.
+    - SRAM/Flash movement for weights and activations is often the dominant TinyML energy term; use 20 pJ/byte as an illustrative SRAM-access budget and 1 pJ/op as an illustrative MAC budget.
+
+    **Calculations:**
+    - FP32 compute lower-bound runtime: 500K ops / 480 Mops/s = 1.04 ms before sensor I/O, memory stalls, and control overhead.
+    - INT8 compute lower-bound runtime for supported layers: 500K ops / 1.92 Gops/s = 0.26 ms, leaving more schedule headroom.
+    - FP32 parameter traffic: 250K * 4 bytes = 1.0 MB; memory energy ≈ 1.0 MB * 20 pJ/byte = 20 µJ.
+    - INT8 parameter traffic: 250K * 1 byte = 250 KB; memory energy ≈ 250 KB * 20 pJ/byte = 5 µJ.
+    - Compute energy illustration: 500K ops * 1 pJ/op = 0.5 µJ, smaller than repeated parameter/activation traffic under these assumptions.
+    - Mixed precision keeps LiDAR raw input and early layers at FP16 or 16-bit fixed point, then uses INT8 only after calibration shows feature ranges are bounded.
+
+    **Conclusion & Interpretation:**
+    - **Result: mixed precision with memory traffic as the dominant energy term (Memory-Bound)**. Use INT8 for the calibrated camera branch and later normalized layers, while preserving FP16 or 16-bit precision for the LiDAR front end until quantization error is validated.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+  - Classification sanity - `reasoning_competency` and `reasoning_mode` are incorrectly set to `None` for a question that clearly tests Quantization, Mixed Precision, and Sensor Fusion.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

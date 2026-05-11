@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-0866
+track: cloud
+level: L5
+zone: specification
+topic: collective-communication
+competency_area: networking
+bloom_level: evaluate
+phase: both
+title: Flat vs Hierarchical AllGather
+scenario: You are deploying a 175B parameter model (350GB) using FSDP on a 64-node cluster (8x GPUs per node, 512 GPUs total). Intra-node NVLink bandwidth is 600 GB/s per GPU, while the available inter-node InfiniBand bandwidth is 25 GB/s per node.
+question: Should you use flat or hierarchical AllGather for FSDP weight reconstruction across 512 GPUs, and what latency difference drives that choice?
+details:
+  realistic_solution: A hierarchical AllGather isolates network tiers but does not eliminate the inter-node bottleneck for full FSDP weight reconstruction. With 64 nodes, each node initially owns about 1/64 of the 350GB model and must receive the other 63/64, or about 344.5GB, through its 25 GB/s InfiniBand connection. That sets an inter-node lower bound of about 13.8 seconds for either flat or hierarchical designs. Hierarchical AllGather is still preferred because it keeps fast intra-node exchange on NVLink and reduces cross-node participant count and contention, but it does not make the 350GB reconstruction a sub-second operation.
+  common_mistake: |
+    **The Pitfall:** Assuming a flat Ring AllGather is globally optimal for bandwidth utilization.
+    **The Rationale:** Candidates fail to recognize that in heterogeneous network topologies (NVLink vs IB), the majority of ring steps in a flat topology will be bottlenecked by the slowest inter-node link.
+    **The Consequence:** Wasting fast intra-node NVLink bandwidth and increasing critical path latency by 60x.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 175B model (350GB). 64 nodes, 8 GPUs/node (512 total).
+    - NVLink = 600 GB/s. IB = 25 GB/s per node.
+    - Model shards are evenly distributed; each node initially holds 1/64 of the global model.
+
+    **Calculations:**
+    - Per-node shard size = 350GB / 64 = 5.47GB.
+    - For a full inter-node AllGather, each node must receive the other 63 node-shards: 350GB * 63/64 = 344.5GB.
+    - Inter-node lower bound = 344.5GB / 25 GB/s = 13.8s per node.
+    - Hierarchical intra-node reconstruction of a 5.47GB node shard over NVLink is about 5.47GB / 600 GB/s = 9ms, small compared with the IB step.
+    - Flat AllGather has the same inter-node data lower bound and can be worse in practice because many GPU-level participants share the node's 25 GB/s NIC.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~13.8s inter-node lower bound (Network-Bandwidth-Bound).** Use hierarchical AllGather to reduce contention and map communication to NVLink plus IB tiers, but do not expect it to bypass the need for each node to import ~344.5GB over the slow tier.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-23T20:55:36.418560'

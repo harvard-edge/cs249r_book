@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-4276
+track: cloud
+level: L5
+zone: realization
+topic: model-adaptation-systems
+competency_area: architecture
+bloom_level: create
+phase: both
+title: 'Adapter Serving Infrastructure: S-LoRA Paged Memory Design'
+scenario: You are building a multi-adapter serving system to handle 1000 LoRA adapters on a cluster of 8 GPUs. Only 50 adapters are active at any given time.
+question: How would you design S-LoRA-style paged adapter memory for 1000 LoRA adapters with only 50 active, and what is the overhead?
+details:
+  realistic_solution: 'Use paged adapter management per GPU replica: maintain a GPU-resident adapter pool sized for the replica''s active working set, with 50 total active adapters requiring 650 MB cluster-wide if each is resident on one serving replica. Keep inactive adapters in CPU pinned memory or local storage and load an adapter page into a free or evicted slot on that replica on cache miss. A one-way 13 MB PCIe load at 16 GB/s takes about 0.8 ms; dirty write-back is an additional worst-case transfer only when evicted adapters have changed. Group requests by adapter to minimize swaps and track adapter hotness so frequently used adapters stay resident.'
+  common_mistake: |
+    **The Pitfall:** Pre-loading all 1000 adapters into GPU memory.
+    **The Rationale:** Opting for the simplest implementation to avoid the complexity of dynamic memory management and swapping.
+    **The Consequence:** 1000 adapters at 13 MB each consume 13 GB of VRAM, which is a massive waste of precious GPU memory when only 50 are active.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Adapter Size: Rank-16 on a 13B base model \approx 13 MB per adapter.
+    - Total Capacity: 1000 adapters. Active Pool: 50 adapters.
+    - Target workload: 1000 RPS with 5% miss rate.
+    - PCIe 4.0 bandwidth: 16 GB/s.
+
+    **Calculations:**
+    - Total Capacity memory: 1000 \times 13 MB = 13 GB.
+    - Active Pool memory: 50 \times 13 MB = 650 MB.
+    - One-way load cost: 13 MB / 16 GB/s ≈ 0.8ms per miss.
+    - Full swap with dirty eviction plus load: about 2 × 0.8ms = 1.6ms worst case.
+    - Miss rate per sec: 1000 RPS \times 5% = 50 misses/sec.
+    - Expected one-way load latency/sec: 50 \times 0.8ms = 40ms.
+    - Dirty eviction upper bound: if every miss also writes back a modified adapter, transfer time can double to 80ms/sec.
+
+    **Conclusion & Interpretation:**
+    - **Result: 0.04ms expected one-way load overhead per request.** Under a 5% miss rate, average load overhead is 40ms / 1000 requests = 0.04ms/request; dirty eviction can raise this toward 0.08ms/request only for misses that require write-back.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

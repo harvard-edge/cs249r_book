@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-2040
+track: cloud
+level: L3
+zone: diagnosis
+topic: compound-ai-systems
+competency_area: deployment
+bloom_level: analyze
+phase: both
+title: The Reranker Bottleneck Inversion
+scenario: Your RAG pipeline retrieves top-100 documents (8ms), then uses a 330M-parameter cross-encoder reranker on a GPU to select the top 5. After adding the reranker, retrieval quality improved 15%, but P99 latency doubled from 250ms to 500ms. The reranker compute takes 40ms on average.
+question: Where is the extra 210ms coming from?
+details:
+  realistic_solution: The extra 210ms is not the reranker forward pass; it is tail queueing around the reranker stage. The baseline pipeline was already 250ms P99. After adding the reranker, total P99 is 500ms, so the reranker contributes about 250ms at P99. If its compute averages 40ms, the remaining ~210ms comes from waiting for GPU capacity, batch formation, and contention with other inference work. The 100 query-document pairs also create tokenization and batching overhead, but the dominant diagnosis is queueing at the shared GPU reranker. Fix by isolating reranker capacity, reducing candidates before reranking, or setting batch/queue limits so P99 does not wait behind large inference batches.
+  common_mistake: |
+    **The Pitfall:** Blaming the reranker's pure compute time and attempting to optimize its weights.
+    **The Rationale:** If a new model increases latency, engineers assume the forward pass is too slow.
+    **The Consequence:** Missing the fact that GPU contention and batch queueing are the true bottlenecks, leaving tail latency unsolved.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Baseline pipeline P99 before reranker: 250ms.
+    - New pipeline P99 after reranker: 500ms.
+    - Reranker average compute time: 40ms.
+    - Reranker input workload: 100 query-document pairs.
+
+    **Calculations:**
+    - Added P99 latency from reranker stage = 500ms - 250ms = 250ms.
+    - Non-compute overhead at P99 = 250ms - 40ms = 210ms.
+    - That 210ms is attributable to queue wait, batch formation, tokenization/batching overhead, and GPU contention around the reranker.
+
+    **Conclusion & Interpretation:**
+    - **Result: 210ms queueing/batching overhead (GPU Contention/Queueing-Bound)**. The forward pass is only a minority of the added P99 latency.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

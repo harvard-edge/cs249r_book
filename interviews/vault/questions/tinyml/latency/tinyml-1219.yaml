@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: tinyml-1219
+track: tinyml
+level: L4
+zone: optimization
+topic: latency-decomposition
+competency_area: latency
+bloom_level: analyze
+phase: inference
+title: Corstone-300 Vision Pipeline Bottleneck
+scenario: You are deploying a quantized MobileNetV2 for object detection on an ARM Cortex-M7 + Ethos-U55 (Corstone-300) platform. The M7 runs at 480 MHz and shares 512 KB SRAM with the Ethos-U55 (configured for 256 MAC/cycle). The total inference latency per frame is 80ms, but the NPU hardware counters show it is only active for 20ms.
+question: What causes the 60 ms non-NPU latency in the Corstone-300 vision pipeline, and how should preprocessing and weight fetching be optimized?
+details:
+  realistic_solution: The bottleneck is the M7 spending excessive cycles on image resizing while the NPU also stalls on shared-SRAM contention and weight/activation fetches. The solution is to use CMSIS-DSP on the M7 for vectorized preprocessing, prefetch weights or activation tiles with DMA, and implement double-buffering. By separating the M7 working set from the NPU activation buffers where the memory map allows, you reduce contention instead of treating the NPU compute as the bottleneck.
+  common_mistake: |
+    **The Pitfall:** Assuming the NPU is strictly compute-bound and trying to prune the model.
+    **The Rationale:** Developers see high latency and automatically blame the ML model size, failing to profile the preprocessing and memory I/O bottlenecks.
+    **The Consequence:** Wasting time degrading the model's accuracy through pruning when the actual bottleneck is memory bandwidth contention on the M7's shared SRAM.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Measured frame latency: 80 ms total.
+    - NPU active time: 20 ms, so non-NPU pipeline time is 60 ms.
+    - M7 capacity: 480 MHz = 480k cycles/ms.
+    - Resize output: 120x120 = 14,400 pixels.
+
+    **Calculations:**
+    - Observed non-NPU time: 80 ms - 20 ms = 60 ms.
+    - Naive CPU resizing: 14,400 pixels * 1000 cycles/pixel = 14.4M cycles = 30 ms.
+    - Remaining non-NPU time: 60 ms - 30 ms = 30 ms of NPU stall / weight-fetch and memory wait.
+    - CMSIS-DSP resizing: 14,400 pixels * 200 cycles/pixel = 2.88M cycles = 6 ms.
+    - If DMA prefetch and SRAM bank separation hide the 30 ms wait, optimized latency is 20 ms NPU active + 6 ms preprocessing = 26 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 26 ms total latency if the memory stall is fully hidden (preprocessing and memory/I/O-bound)**. The original 60 ms gap is explained by scalar resizing plus shared-memory and weight-fetch stalls, not by NPU compute saturation.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

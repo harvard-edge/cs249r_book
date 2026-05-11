@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: tinyml-0740
+track: tinyml
+level: L2
+zone: design
+topic: mcu-compute-constraints
+competency_area: precision
+bloom_level: create
+phase: inference
+title: The Integer Arithmetic Engine
+scenario: A quantized INT8 Conv2D layer needs to execute on a Cortex-M4 microcontroller lacking a floating-point unit.
+question: How does an integer-only quantized Conv2D execute on a Cortex-M4 from inputs through requantized outputs?
+details:
+  realistic_solution: Integer-only Conv2D subtracts input and weight zero-points, multiplies INT8 values, and accumulates the products into INT32. It then adds the INT32 bias in the accumulator domain. The accumulated value is requantized with a precomputed integer multiplier and shift that approximates the real scale ratio, the output zero-point is added as an offset, and the result is clamped back to the INT8 range. Zero-points are offsets or cross-terms, not bit shifts, and no floating-point arithmetic is required at inference time.
+  common_mistake: |
+    **The Pitfall:** Over-simplifying INT8 convolution.
+    **The Rationale:** Candidates think INT8 convolution just means "multiply and truncate."
+    **The Consequence:** They ignore accumulator width overflows, zero-point offsets, and the complex integer-shift requantization step necessary for mathematical correctness.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Quantized equation uses input zero-point za, weight zero-point zw, and output zero-point zy.
+    - Accumulator type is INT32.
+    - Bias is pre-quantized into the accumulator scale.
+
+    **Calculations:**
+    - Inner term: (int32(input_i) - za) * (int32(weight_i) - zw).
+    - Accumulator: acc = sum(inner terms) + bias_int32.
+    - Requantization: scaled = MultiplyByQuantizedMultiplier(acc, multiplier, shift).
+    - Output: y = clamp_int8(scaled + zy).
+
+    **Conclusion & Interpretation:**
+    - **Result: Integer-only quantized pipeline (Precision-Bound)**. Correctness comes from INT32 accumulation, explicit zero-point handling, INT32 bias addition, fixed-point requantization, output zero-point addition, and clamping.
+  options:
+    - Simply multiply INT8 inputs by INT8 weights, truncate to INT8, and output. The zero-points and scales are only needed during training, not inference.
+    - 'Full integer pipeline: accumulate INT8xINT8 products into INT32, subtract cross-terms involving zero-points, add INT32 bias. Then requantize via integer multiply and bit-shift, apply zero-point, and clamp to [-128, 127]. No floats anywhere.'
+    - The Cortex-M4 must use software floating-point emulation for the scale factors during requantization, adding ~10 cycles per output element.
+    - 'The pipeline uses lookup tables (LUTs) for all multiplications: precompute all 256x256 possible INT8 products in a 64 KB table and replace multiplication with table lookups.'
+  correct_index: 1
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

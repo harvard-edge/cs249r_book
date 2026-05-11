@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: edge-2085
+track: edge
+level: L5
+zone: design
+topic: streaming-ingestion
+competency_area: data
+bloom_level: analyze
+phase: both
+title: 50ms Edge Anomaly Detection for 100 Hz Sensor Streams
+scenario: A real-time anomaly detection system for critical machinery is deployed at the edge. It receives high-frequency data from 1,000 sensors at 100 Hz. The edge unit features 32 GB LPDDR4x memory, 400 TOPS INT8 performance, and a 75W power envelope. The system must process streams, run ML inference, alert within a 50ms end-to-end latency, and handle intermittent cloud connectivity.
+question: How would you architect a 50ms edge anomaly detection pipeline for hundreds of 100 Hz sensors with intermittent cloud connectivity?
+details:
+  realistic_solution: 'Use a staged streaming pipeline with bounded queues and backpressure: ingest sensor packets into a lock-free or lightweight message buffer, normalize and validate them immediately, compute rolling-window features per machine or sensor group, run INT8 inference on microbatches/windows rather than every raw sample, and emit local alerts before cloud upload. Allocate the 50ms budget explicitly, for example 5ms ingestion/validation, 15ms windowed feature extraction, 20ms inference, and 10ms alert persistence/transmission. Keep raw history in a ring buffer and store alerts/features in a local durable queue such as RocksDB or SQLite for intermittent connectivity. The key design is reducing 100,000 raw samples/sec into bounded feature windows so the accelerator sees actionable inference units, not one inference per sensor sample.'
+  common_mistake: |
+    **The Pitfall:** Focusing solely on the ML model architecture and ignoring the end-to-end data pipeline.
+    **The Rationale:** Candidates often over-index on model optimization while neglecting data ingestion, real-time feature extraction, memory bandwidth, and power constraints.
+    **The Consequence:** The resulting system fails to meet the strict 50ms latency budget due to IO bottlenecks or drops critical alerts during network outages.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 1,000 sensors at 100 Hz (8 bytes/sample).
+    - Model requires 10 GOPs/inference.
+    - 50ms latency budget.
+    - 400 TOPS capacity.
+
+    **Calculations:**
+    - Ingestion = 1,000 * 100 * 8 = 800 KB/s.
+    - Naive compute = 100,000 inf/sec * 10 GOPs = 1,000 TOPS (exceeds 400 TOPS).
+    - Example latency partition, not hardware-derived: 5ms ingest/validate + 15ms feature windows + 20ms inference + 10ms local alerting = 50ms.
+    - If each inference window aggregates one 100-sample slice per sensor group, and the 1,000 sensors are organized into 10 groups, inference rate is 10 groups * 100 windows/sec = 1,000 inf/sec.
+    - Windowed compute = 1,000 inf/sec * 10 GOPs = 10 TOPS, leaving accelerator headroom for batching and jitter.
+    - Local buffering for a 10-minute cloud outage at raw-sample rate is 800 KB/s * 600s = 480 MB, which fits in 32 GB; durable queues should still apply backpressure if uploads lag.
+
+    **Conclusion & Interpretation:**
+    - **Result: naive per-sample inference exceeds 400 TOPS, while explicit grouped-window inference can fit the 50ms budget.** The architecture must reduce stream volume before inference and use local buffering/backpressure during cloud outages.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

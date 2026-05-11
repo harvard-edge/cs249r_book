@@ -33,13 +33,18 @@ def register(app: typer.Typer) -> None:
         ),
         release_id: str = typer.Option("dev", "--release-id", help="Release identifier to stamp."),
         as_json: bool = typer.Option(False, "--json", help="Emit machine-readable summary."),
-        legacy_json: bool = typer.Option(
+        local_json: bool = typer.Option(
             False,
-            "--legacy-json",
-            help="Also regenerate the site-compatible corpus.json at "
-                 "interviews/staffml/src/data/corpus.json from YAML. "
-                 "Required until Phase-4 cutover; closes §11.1 'corpus.json "
-                 "is generated, not authored'.",
+            "--local-json",
+            "--local",
+            help="Materialize the local-dev artifacts so the StaffML frontend "
+                 "can serve full question content from disk: writes "
+                 "interviews/staffml/src/data/corpus.json AND mirrors it to "
+                 "interviews/staffml/public/data/corpus.json (the path the "
+                 "Next.js loader actually fetches with "
+                 "NEXT_PUBLIC_VAULT_FALLBACK=static). Production never reads "
+                 "either file; this is dev-only. The shorter --local alias "
+                 "is preferred.",
         ),
     ) -> None:
         """Compile all YAML questions under vault/questions/ to a SQLite file.
@@ -64,13 +69,26 @@ def register(app: typer.Typer) -> None:
             release_id=release_id,
         )
 
-        if legacy_json:
-            legacy_out = Path("interviews/staffml/src/data/corpus.json")
-            legacy_result = emit_legacy_corpus(vault_dir, loaded, legacy_out)
-            result["legacy_json"] = legacy_result
+        if local_json:
+            local_out = Path("interviews/staffml/src/data/corpus.json")
+            local_result = emit_legacy_corpus(vault_dir, loaded, local_out)
+            result["local_json"] = local_result
             console.print(
-                f"[dim]legacy corpus.json: {legacy_result['count']} questions → "
-                f"{legacy_result['output']}[/dim]"
+                f"[dim]local corpus.json: {local_result['count']} questions → "
+                f"{local_result['output']}[/dim]"
+            )
+            # Mirror corpus.json into public/data/ so Next can serve it as a
+            # static asset. The frontend's getStaticFullDetail() fetches
+            # /data/corpus.json (set NEXT_PUBLIC_VAULT_FALLBACK=static to
+            # opt in) — Turbopack does not bundle the src/data/ copy because
+            # it would balloon the prod bundle, so the public mirror is the
+            # only reliable runtime path in local dev.
+            public_out = Path("interviews/staffml/public/data/corpus.json")
+            public_out.parent.mkdir(parents=True, exist_ok=True)
+            public_out.write_bytes(local_out.read_bytes())
+            console.print(
+                f"[dim]public mirror:    {local_result['count']} questions → "
+                f"{public_out}[/dim]"
             )
             # Mirror visual assets alongside the JSON. The frontend
             # references /question-visuals/<track>/<file>.svg directly
@@ -90,8 +108,8 @@ def register(app: typer.Typer) -> None:
             # recurring stale-manifest pre-commit failure (the manifest
             # was previously hand-maintained).
             manifest_out = Path("interviews/staffml/src/data/vault-manifest.json")
-            # Count chains from the corpus.json the legacy emitter just
-            # wrote — chain shape there is the canonical published view.
+            # Count chains from the corpus.json we just wrote — chain shape
+            # there is the canonical published view.
             chains_seen: set[str] = set()
             for lq in loaded:
                 if lq.question.status != "published":
@@ -105,7 +123,7 @@ def register(app: typer.Typer) -> None:
                 release_hash=str(result["release_hash"]),
                 schema_version="1",
                 policy_version=str(result["policy_version"]),
-                published_count=int(legacy_result["count"]),
+                published_count=int(local_result["count"]),
                 chain_count=len(chains_seen),
             )
             result["manifest"] = manifest_result

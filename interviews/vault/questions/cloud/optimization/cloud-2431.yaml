@@ -1,0 +1,36 @@
+schema_version: '1.0'
+id: cloud-2431
+track: cloud
+level: L5
+zone: diagnosis
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: evaluate
+phase: training
+title: The DLRM Vertical Fusion Trap
+scenario: Optimizing a DLRM (Deep Learning Recommendation Model) on Cloud TPU v4. The model has massive sparse embedding lookups followed by a dense MLP. Profiling shows TPU compute utilization is < 15%. An engineer writes a custom XLA pass to vertically fuse the embedding lookup with the first dense MLP layer to "eliminate intermediate HBM roundtrips". After deployment, overall step latency doubles.
+question: Why did fusing embedding lookup with the first dense MLP layer double DLRM step latency on TPU v4?
+details:
+  realistic_solution: |
+    This creates a poisoned execution profile. Embedding lookups are strictly memory-bandwidth bound. Dense MLPs are heavily compute-bound matrix multiplications. When they are scheduled as separate XLA computations, the runtime can overlap gather traffic, prefetching, and MXU work across batches or pipeline stages. Fusing them forces the sparse gather and dense matmul into one serialized program: the MXUs wait for irregular HBM gathers before each row/block can be consumed, and the memory system cannot run ahead cleanly. The lost latency hiding can dominate the saved intermediate write.
+  common_mistake: |
+    **The Pitfall:** Believing that eliminating HBM roundtrips always improves performance.
+    **The Rationale:** Candidates blindly apply kernel fusion, ignoring the arithmetic intensity mismatch between the fused operators.
+    **The Consequence:** The operations serialize at the vector level, destroying pipeline latency hiding and artificially lowering the arithmetic intensity of the compute-bound MLP, drastically reducing overall throughput.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Operations: Sparse embedding gather (memory-bound) + Dense MLP (compute-bound).
+
+    **Calculations:**
+    - Unfused pipelined execution: Gather stream = 5ms and MLP stream = 5ms can overlap across batches/stages, so exposed step time is about max(5, 5) = 5ms.
+    - Fused execution: sparse gather and dense MXU work serialize inside one fused program, so exposed time is about 5ms + 5ms = 10ms.
+    - Latency ratio: 10ms / 5ms = 2x.
+
+    **Conclusion & Interpretation:**
+    - **Result: 2x latency regression from serialization.** Fusing severely mismatched arithmetic intensities destroys pipeline latency hiding; the step becomes gated by sparse HBM gathers plus dense MXU work instead of overlapping them.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+math_verified: true

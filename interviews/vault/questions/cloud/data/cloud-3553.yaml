@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-3553
+track: cloud
+level: L4
+zone: diagnosis
+topic: storage-format-selection
+competency_area: data
+bloom_level: analyze
+phase: both
+title: Diagnosing HBM Underutilization in Sparse Feature Training on MI300X
+scenario: You are optimizing a large-scale recommendation model's training pipeline on accelerators. Terabytes of sparse feature data are stored in S3 as row-partitioned zstd-compressed Parquet files. You observe high I/O wait times and 35% HBM underutilization.
+question: Why is the training pipeline I/O-bound with zstd Parquet on S3, and what storage format strategy would fix it?
+details:
+  realistic_solution: |
+    The symptom is most likely CPU-bound zstd decompression and sparse-vector reconstruction, surfaced as I/O wait because accelerator workers are blocked on the host data loader. The fix is to create a hot training layout rather than retune the archive layout: use pre-sharded training files with lighter compression such as LZ4 or Snappy, or keep the hottest sparse tensors uncompressed if network and NVMe capacity allow. Group features by the model's actual access pattern so each step reads contiguous shards instead of many Parquet pages from S3. Keep Parquet with zstd for cold storage and feature analysis, but feed training from local/NVMe-cached shards with many parallel loader workers, asynchronous prefetch, and measured decompression throughput. If Parquet remains in the hot path, tune row groups and page sizes for sparse access, but the primary change is reducing host decompression and deserialization cost.
+  common_mistake: |
+    **The Pitfall:** Immediately suggesting a hardware upgrade (more S3 bandwidth or local NVMe).
+    **The Rationale:** Seeing an "I/O wait" error and assuming the disk or network is too slow.
+    **The Consequence:** Wasting time migrating data to faster storage mediums when the true bottleneck is single-thread host CPU decompression choking the pipeline.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Training step needs 40 GB/s of decompressed sparse feature tensors to keep accelerators busy.
+    - Current zstd Parquet loader runs on 16 effective CPU cores.
+    - zstd decompression for this layout averages about 0.8 GB/s per core after parsing and sparse reconstruction overhead.
+    - LZ4/Snappy or uncompressed hot shards trade storage size for lower CPU cost.
+
+    **Calculations:**
+    - Current decompressed throughput = 16 cores * 0.8 GB/s = 12.8 GB/s.
+    - Loader deficit = 40 GB/s - 12.8 GB/s = 27.2 GB/s.
+    - If lighter compression reaches 2.5 GB/s per core on the same layout, throughput = 16 * 2.5 = 40 GB/s.
+
+    **Conclusion & Interpretation:**
+    - **Result: CPU decompression and sparse deserialization are the bottleneck.** Move hot training data to lighter-compressed or uncompressed shards aligned with the model's access pattern, while keeping zstd Parquet for archival analytics.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

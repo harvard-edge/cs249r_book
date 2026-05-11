@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: mobile-1088
+track: mobile
+level: L3
+zone: analyze
+topic: distribution-drift-detection
+competency_area: reliability
+bloom_level: apply
+phase: inference
+title: On-Device PSI Drift Compute Bottleneck
+scenario: A mobile app uses an on-device LLM on a TPU to summarize notifications. To detect concept drift, a nightly background job calculates the Population Stability Index (PSI) by retrieving the last 50,000 raw notification texts, re-loading the embedding model, generating 768-dimensional FP16 embeddings for all 50,000 texts, and comparing their distribution against a baseline. Telemetry shows this nightly job frequently causes sustained TPU load, thermal throttling, and background-task termination.
+question: How would you analyze why this specific statistical detection workflow degrades system reliability?
+details:
+  realistic_solution: The system failure is caused by re-running model inference in a dense background batch rather than by the PSI calculation itself. Generating 50,000 embeddings creates a large burst of sustained TPU activity and memory traffic, which can push the SoC into thermal throttling and cause the OS to curtail the background task. The robust approach is to store embeddings incrementally when notifications are processed, then refresh or invalidate them when the embedding model changes. That leaves the nightly PSI job mostly as a lightweight histogram comparison over cached vectors.
+  common_mistake: |
+    **The Pitfall:** Assuming the PSI mathematical formula itself is the performance bottleneck.
+    **The Rationale:** Candidates focus on the statistical calculation and fail to distinguish it from the massive cost of data preparation (embedding generation).
+    **The Consequence:** The proposed fix focuses on optimizing the PSI math while ignoring the actual thermal and memory constraints triggered by the LLM.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 50,000 text notifications.
+    - Rough embedding compute cost: ~5 GOP/embedding.
+    - FP16 embedding storage: 768 dimensions x 2 bytes/dimension.
+    - Assume sustained background throughput after model load, thermal limits, and scheduling overheads is ~500 embeddings/sec.
+
+    **Calculations:**
+    - Rough compute cost to re-run: 50,000 texts x 5 GOP = 250,000 GOP = 250 TOP of embedding work.
+    - Estimated background job time under the throughput assumption: 50,000 embeddings / 500 embeddings/sec = 100 seconds of sustained TPU work.
+    - Embedding storage (cached): 50,000 x 768 dims x 2 bytes = 76.8 MB.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~250 TOP of Avoidable Embedding Work**. Re-computing embeddings creates a long sustained accelerator workload, leading to throttling risk. Incremental caching reduces the nightly job, but it must include freshness/versioning so stale embeddings are recomputed when needed.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

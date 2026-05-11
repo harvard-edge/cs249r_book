@@ -1,0 +1,34 @@
+schema_version: '1.0'
+id: mobile-1157
+track: mobile
+level: L4
+zone: diagnosis
+topic: distribution-drift-detection
+competency_area: reliability
+bloom_level: analyze
+phase: inference
+title: Diagnosing Drift Detection Latency Spikes on Hexagon NPU
+scenario: Your team deployed an on-device classification model to the Hexagon NPU. To monitor for data drift, a background job calculates the Population Stability Index (PSI) on user embeddings every hour. Users report severe UI stuttering exactly when this drift detection runs, even though the NPU is barely utilized.
+question: How would you diagnose why the PSI calculation is causing system-wide jank on this heterogeneous architecture?
+details:
+  realistic_solution: |
+    The root cause is memory bandwidth contention on the shared LPDDR5X memory. The PSI calculation, running in FP32 on the CPU, requires scanning large arrays of historical embeddings. This sudden, high-bandwidth CPU memory access starves the GPU. The fix involves throttling CPU memory access or downsampling embeddings.
+  common_mistake: |
+    **The Pitfall:** Assuming the issue is NPU thermal throttling or compute saturation.
+    **The Rationale:** Candidates see an ML task and assume the NPU is the bottleneck, failing to realize PSI requires FP32 math executing on the CPU.
+    **The Consequence:** Wasting time optimizing the NPU or model, while the actual issue is CPU memory bandwidth contention starving the GPU.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Embeddings Size: 50,000 events, 512 dimensions, FP32 (4 bytes).
+    - Frame Deadline: 16.6 ms (60 FPS).
+    - PSI compares the current hourly histogram against a baseline histogram, so the CPU scans two embedding windows unless the baseline is pre-aggregated.
+
+    **Calculations:**
+    - One Embedding Window Read: 50,000 * 512 * 4 bytes = 102.4 MB.
+    - Two-Window PSI Read: 102.4 MB current + 102.4 MB baseline = 204.8 MB.
+    - If this scan competes with rendering for even 10 GB/s of effective CPU memory bandwidth, read time alone is ~20 ms, already above a 16.6 ms frame budget before binning work and cache effects.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Bandwidth Contention.** PSI is not NPU-bound; the two large CPU scans can consume enough shared LPDDR bandwidth to delay GPU frame work. Pre-aggregating the baseline, chunking the scan, or downsampling embeddings makes the conclusion follow from the data-access pattern.
+status: published
+provenance: imported

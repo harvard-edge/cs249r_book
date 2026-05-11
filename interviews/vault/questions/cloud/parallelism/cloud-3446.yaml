@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-3446
+track: cloud
+level: L5
+zone: specification
+topic: scheduling-resource-management
+competency_area: parallelism
+bloom_level: analyze
+phase: inference
+title: Multi-Tenant H100 GPU Scheduling for Cloud ML
+scenario: You are designing the core scheduling and resource management system for a new multi-tenant ML cloud platform using GPUs. Your users range from research teams running large-scale distributed training jobs to inference services with strict latency requirements.
+question: How would you schedule and partition GPUs for mixed distributed training and latency-critical inference while ensuring utilization, fairness, and SLOs?
+details:
+  realistic_solution: 'A robust solution involves a hierarchical scheduling approach. At the lowest level, utilize NVIDIA MIG to partition H100 GPUs into smaller, isolated instances (e.g., 7x 1g.10gb partitions) for smaller inference or single-node training jobs. For larger training jobs, MPS can be used to share a full H100 more efficiently. Integrate this with a cluster-level scheduler (e.g., Kubernetes with a custom scheduler extender) that understands GPU topology. Implement gang scheduling for distributed training jobs. For mixed workloads, design preemption policies: lower-priority training jobs could be preempted to accommodate higher-priority inference requests. Dynamic scaling based on utilization metrics and workload queues is crucial for cost-efficiency.'
+  common_mistake: |
+    **The Pitfall:** Proposing a basic queueing system without considering GPU architecture and workload types.
+    **The Rationale:** Neglecting fine-grained partitioning capabilities (MIG/MPS) or advanced scheduling concepts (gang scheduling, preemption).
+    **The Consequence:** Inefficient resource allocation, massive GPU underutilization, and missed SLOs for latency-critical inference.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - H100 has 80 GB HBM and supports 7x 1g.10gb MIG instances.
+    - A 1g.10gb slice exposes about 10 GB HBM, so 7 slices account for about 70 GB of partitioned HBM; the rest is unavailable or reserved by the MIG layout.
+    - Each small inference service needs 5 GB HBM and 50 TFLOPS, but a 1g slice is an isolation boundary.
+    - Scheduling capacity must be based on measured per-model latency, memory, SM share, and batching behavior, not peak HBM bandwidth alone.
+
+    **Calculations:**
+    - Memory fit per 1g.10gb slice = floor(10 GB / 5 GB) = 2 model copies.
+    - Scheduling capacity is still 7 isolated slices; running 2 copies per slice is co-location inside a slice, not 14 independent MIG partitions.
+    - A 7-slice MIG layout gives isolation for at most 7 independent 1g services per H100.
+    - Training jobs that need collective performance should generally receive full GPUs or homogeneous larger MIG profiles, because mixing isolated inference slices with gang-scheduled distributed training can fragment topology and break placement.
+    - Per-slice QPS must come from load tests against the actual model and SLO; peak HBM bandwidth divided by request bytes is only a loose ceiling and is not a scheduler service-rate model.
+
+    **Conclusion & Interpretation:**
+    - **Result: schedule up to 7 isolated 1g services per H100, optionally co-locating two 5 GB replicas inside a slice only if SLO testing passes.** Use measured latency and utilization curves for admission control, and reserve topology-consistent full GPUs for distributed training.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

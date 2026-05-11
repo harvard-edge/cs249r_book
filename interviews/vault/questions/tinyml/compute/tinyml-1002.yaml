@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: tinyml-1002
+track: tinyml
+level: L4
+zone: diagnosis
+topic: compute-cost-estimation
+competency_area: compute
+bloom_level: analyze
+phase: inference
+title: ESP32-S3 PSRAM Bottleneck Diagnosis
+scenario: Your team deployed a 1.2 MB INT8 wake-word CNN (10 million MACs) to an ESP32-S3. Based on the 240 MHz dual-core CPU with INT8 vector extensions, the theoretical compute cost was estimated at ~10-15ms per inference. However, production profiling shows inference consistently taking over 120ms, leading to dropped audio frames.
+question: What is the root cause of this massive compute estimation discrepancy and how would you prove it?
+details:
+  realistic_solution: |
+    The root cause is a severe memory bandwidth and latency bottleneck caused by placing the 1.2 MB model weights in external PSRAM. Because the model exceeds the practical internal SRAM budget, the 240 MHz CPU and its INT8 vector extensions can stall on cache misses and SPI PSRAM transfers instead of sustaining the theoretical MAC rate. Prove it with embedded measurements: use the ESP cycle counter around inference, run an A/B build with the hottest weights or a reduced model placed in internal SRAM, and collect cache/PSRAM miss or bus statistics when available. Mitigate it by shrinking or quantizing the model, keeping hot tensors and frequently reused weights in internal SRAM, improving layer locality and memory layout, and using tiling or caching strategies rather than relying on a desktop GPU profiler or generic sparsification.
+  common_mistake: |
+    **The Pitfall:** Overlooking external memory latency.
+    **The Rationale:** Candidates blame RTOS scheduling, WiFi stacks, or dual-core utilization because they only compute theoretical ALU FLOPs.
+    **The Consequence:** They miss that the 1.2 MB model lives in slow external PSRAM, failing to diagnose the true memory bottleneck starving the CPU pipeline.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model size: 1.2 MB INT8.
+    - Compute: 10 million MACs.
+    - ESP32-S3: 240 MHz CPU with INT8 vector extensions.
+    - External PSRAM effective throughput under cache misses is workload-dependent; use 8-20 MB/s as an illustrative range, not the raw SPI clock.
+
+    **Calculations:**
+    - Optimistic compute lower bound: 10M MACs / (240M cycles/s * 4 MACs/cycle) ≈ 10.4 ms.
+    - PSRAM transfer estimate at 20 MB/s: 1.2 MB / 20 MB/s = 60 ms for one full pass over weights.
+    - PSRAM transfer estimate at 10 MB/s: 1.2 MB / 10 MB/s = 120 ms.
+    - Real CNN layers can reread weights and activations after cache eviction, so memory stalls can dominate the optimistic ALU time.
+
+    **Conclusion & Interpretation:**
+    - **Result: observed ~120 ms is plausible for PSRAM-bound inference, not a pure compute problem.** The exact value must be proven with cycle-counter timing and SRAM-vs-PSRAM A/B tests. **Bottleneck: External Memory Bandwidth and Locality.**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

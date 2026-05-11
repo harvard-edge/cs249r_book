@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-3530
+track: cloud
+level: L3
+zone: implement
+topic: feature-store-management
+competency_area: data
+bloom_level: analyze
+phase: both
+title: Real-time Feature Freshness and Throughput for Inference
+scenario: You are designing a real-time recommendation system that serves billions of requests daily. The inference models are deployed on a cluster of GPUs. For optimal recommendation quality, features must be as fresh as possible, ideally within 500ms of an event occurring. Your system generates a new set of 256 features (each feature is a 32-bit float) for each user interaction, which needs to be available in the online feature store within the freshness SLA. The models can process a batch of 1024 requests in 5ms if features are readily available in GPU memory.
+question: How would you design the recommendation feature pipeline to keep features fresh within 500 ms and point-in-time correct?
+details:
+  realistic_solution: |
+    Use a single event stream as the source of truth and have the streaming job compute feature values with event-time timestamps, feature version IDs, and watermarks. Push the latest value to the online store only when its event time is valid, and store historical versions in the offline store using the same feature definitions so training can do time-travel joins as of the label timestamp. Define late-event policy explicitly: update online values if still inside the freshness window, write corrections to offline history, and quarantine or backfill events that arrive beyond the watermark. Serving should read the versioned online value, verify feature age is under 500 ms, and fall back to a safe default or previous version when the SLA is violated. Cache and prefetch hot vectors near the GPUs, but treat that as a serving-throughput optimization, not the mechanism that proves point-in-time correctness.
+  common_mistake: |
+    **The Pitfall:** Underestimating the latency introduced by feature computation and retrieval from the online store.
+    **The Rationale:** Engineers often focus entirely on optimizing the inference speed.
+    **The Consequence:** Causing the feature pipeline to become the true bottleneck, starving the GPUs and failing the 500ms freshness SLA.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Freshness SLA: feature values available in the online store within 500 ms of the event.
+    - Feature vector size: 256 features × 4 bytes = 1,024 bytes = 1 KiB per request.
+    - Inference can consume a batch of 1,024 requests in 5 ms when features are already in GPU memory.
+
+    **Calculations:**
+    - Feature payload per inference batch = 1,024 requests × 1 KiB = 1 MiB.
+    - Required feature transfer throughput to keep up with inference = 1 MiB / 0.005 s = 200 MiB/s per serving worker.
+    - The 200 MiB/s number sizes the serving-worker feature transfer path; it does not prove freshness.
+    - Illustrative freshness propagation: CDC/write-ahead publish 80 ms + stream/window compute 220 ms + online-store write visibility 80 ms = 380 ms.
+    - Remaining freshness margin in that example = 500 ms - 380 ms = 120 ms.
+
+    **Conclusion & Interpretation:** **Result: 200 MiB/s serving payload and an illustrative 120 ms freshness margin.** Point-in-time correctness comes from event-time versions, watermarks, late-data policy, and time-travel joins, not from lookup throughput alone.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed

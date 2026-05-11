@@ -1,0 +1,44 @@
+schema_version: '1.0'
+id: cloud-3020
+track: cloud
+level: L5
+zone: design
+topic: mlops-lifecycle
+competency_area: deployment
+bloom_level: create
+phase: both
+title: 'MLOps Lifecycle: Design a CI/CD Pipeline for LLM Fine-Tuning'
+scenario: 'Design a CI/CD pipeline for continuous fine-tuning of a 7B LLaMA model on a cluster. The pipeline must support: nightly fine-tuning runs on new data, automated evaluation against 5 benchmark suites, canary deployment (5% traffic), and rollback in < 5 minutes.'
+question: What CI/CD pipeline would support nightly 7B fine-tuning, benchmark evaluation, 5% canaries, rollback under 5 minutes, and what are its storage and runtime budgets?
+details:
+  realistic_solution: |
+    Pipeline stages: (1) scheduled nightly data snapshot and validation, 5 minutes on CPU; (2) LoRA fine-tuning for 100K examples, batch 16 on 8 GPUs, about 39 minutes; (3) write checkpoint and model card to object storage, under 2 minutes; (4) run 5 benchmark suites in parallel on 2 GPUs, about 33 minutes; (5) package and register the candidate model, about 10 minutes; (6) deploy a canary by routing exactly 5% of production traffic to the candidate through the load balancer or service mesh while 95% remains on the stable model; (7) promote only if benchmark, error-rate, latency, and quality-drift gates pass. Keep the previous production model warm and registered, so rollback is a routing/config flip from 5% candidate traffic back to 0%, plus model-registry pointer rollback, comfortably under 5 minutes. Runtime budget is about 90 minutes before canary observation, or about 2 hours with a 30-minute canary window. Storage budget is 30 retained daily final checkpoints at 14GB each = 420GB, plus about 42GB for three transient intra-run checkpoints.
+  common_mistake: |
+    **The Pitfall:** Designing a generic software CI/CD pipeline.
+    **The Rationale:** Engineers apply standard software engineering practices without accounting for ML-specific resource constraints.
+    **The Consequence:** The pipeline fails to handle massive checkpoint storage sizes, GPU reservation overhead, and non-deterministic evaluation scores, leading to fragile and excessively expensive deployments.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 7B FP16 model checkpoint is 14GB.
+    - Fine-tuning runs 100K examples, batch 16, 8 GPUs.
+    - Evaluation covers 5 suites (5000 examples).
+    - Retention keeps 30 daily final checkpoints plus 3 transient intra-run checkpoints.
+    - Canary observation window is 30 minutes.
+
+    **Calculations:**
+    - Final checkpoint storage: 14GB * 30 daily checkpoints = 420GB/month.
+    - Transient intra-run storage: 14GB * 3 checkpoints = 42GB.
+    - Peak checkpoint storage budget: 420GB + 42GB = 462GB.
+    - Fine-Tuning Runtime: 781 steps at 3s/step = ~39 minutes.
+    - Evaluation Runtime: 5000 examples at 780ms/example = 65 mins on 1 GPU. Parallelized on 2 GPUs = 32.5 minutes.
+    - Build/register overhead: data validation 5 min + checkpoint/upload 2 min + packaging 10 min = 17 minutes.
+    - Pre-canary pipeline time: 39 min + 32.5 min + 17 min = 88.5 minutes.
+    - With a 30-minute canary window: ~119 minutes, or about 2 hours.
+    - Canary routing: stable=95%, candidate=5%; rollback sets candidate weight to 0% and restores the previous model-registry pointer.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~2 hours and 462GB peak checkpoint storage (Orchestration-Bound)**. The design satisfies nightly fine-tuning, benchmark gates, concrete 5% canary routing, and rollback under 5 minutes by keeping the previous production model warm.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16

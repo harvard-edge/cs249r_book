@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-3725
+track: cloud
+level: L5
+zone: evaluation
+topic: model-serving-infrastructure
+competency_area: latency
+bloom_level: evaluate
+phase: inference
+title: SLO Violation Root Cause Analysis for LLM Service on TPU v5e
+scenario: A TPU v5e deployment serves Gemma-7B with a P99 TTFT SLA of 500ms. During business hours, P99 TTFT spikes to 2.1 seconds while P50 remains at 180ms.
+question: What likely causes P99 TTFT to jump to 2.1s while P50 stays 180ms on the TPU v5e Gemma-7B service, and how would you fix it?
+details:
+  realistic_solution: 'P50=180ms, P99=2100ms: 11.7x P99/P50 ratio is diagnostic of queue buildup, not inference speed variance. Inference itself has low variance (P99/P50 typically <2x). Cause: request arrival bursts during business hours exceed service capacity. With 16 chips at ~100 req/s capacity: if 120 req/s arrive, queue builds -> P99 grows by Little''s Law (L = λxW). Fix options: (1) Autoscale: add TPU pod instances during business hours (dynamic provisioning). (2) Admission control: reject/redirect requests when queue depth > threshold. (3) Prefill-decode disaggregation: separate TPUs for prefill (high compute) vs decode (memory bandwidth), increasing throughput. (4) Request prioritization: apply strict deadline scheduling. Profile: check TPU utilization (if >95%, need more chips; if 70%, problem is batching or pipeline bubbles).'
+  common_mistake: |
+    **The Pitfall:** Blaming network latency or model complexity for the P99 spikes.
+    **The Rationale:** Sudden spikes in TTFT often feel like slow compute or network hiccups.
+    **The Consequence:** Wasting time profiling the model's forward pass when the gap between P50 (180ms) and P99 (2100ms) strictly indicates a queueing problem.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - TPU v5e pod (16 chips) serving Gemma-7B.
+    - P50 TTFT = 180ms, P99 SLA = 500ms.
+
+    **Calculations:**
+    - Chip service capacity = 1 / 0.180s ≈ 5.6 req/s.
+    - Total pod capacity = 16 chips × 5.6 req/s = 89.6 req/s.
+    - Business load > 90 req/s causes arrival rate (λ) > service rate.
+    - Little's Law queue growth pushes P99 to 2.1s.
+
+    **Conclusion & Interpretation:**
+    - **Result: Queue-Bound.** The P99 spike is caused by requests waiting in the queue, requiring autoscaling to 18+ chips or strict rate-limiting at 90 req/s.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

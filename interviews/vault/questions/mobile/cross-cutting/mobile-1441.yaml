@@ -1,0 +1,59 @@
+schema_version: '1.0'
+id: mobile-1441
+track: mobile
+level: L5
+zone: realization
+topic: fairness-evaluation
+competency_area: cross-cutting
+bloom_level: evaluate
+phase: inference
+title: On-Device LLM Intersectional Fairness Sizing
+scenario: You are deploying an on-device LLM on the Google Tensor G3 for real-time text summarization. To preserve privacy, intersectional fairness evaluation must run entirely on-device overnight while the phone is charging. The Tensor G3 has a 7.5 TOPS TPU and 12 GB LPDDR5X memory.
+question: How would you size an on-device LLM fairness evaluation so subgroup analysis does not exceed memory or latency budgets?
+details:
+  realistic_solution: |
+    Size the fairness run from both memory residency and measured token throughput. First fix the model precision, context length, KV-cache allocation, and batch size so a single evaluation stream fits the app's background memory budget. Then choose the subgroup grid and examples per subgroup so the total generated tokens fit the overnight thermal window. For intersectional coverage, prefer a minimum examples-per-cell target and reduce the number of subgroup sweeps or generated tokens per prompt before increasing batch size, because batch size increases KV memory and can reduce sustained throughput on mobile.
+  common_mistake: |
+    **The Pitfall:** Sizing the benchmark from subgroup count alone.
+    **The Rationale:** Candidates forget that each prompt also reserves KV cache and consumes sustained decode bandwidth, so adding cells, examples, or output tokens all draw from the same mobile budget.
+    **The Consequence:** The evaluation either runs past the charging window or gets killed under memory pressure when several long-context prompts are queued.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 2B parameter model quantized to 4-bit (INT4): ~1.0 GB weights.
+    - Background eval memory budget: 2.0 GB from the 12 GB system.
+    - Use decimal GB/MB for budget accounting; 65,536 bytes/token is ~0.066 MB/token.
+    - KV cache per prompt: 512-token prompt plus 100 generated tokens.
+    - Workspace and runtime reserve: 0.300 GB.
+    - Measured sustained decode throughput after thermal margin: 14 tokens/sec.
+    - Safe overnight eval window: 6 hours inside an 8-hour charging period.
+    - Subgroup grid: 72 intersectional cells.
+    - Evaluation runs serially at batch 1; multiple concurrent prompts would multiply KV memory.
+
+    **Calculations:**
+    - KV per active prompt = (512 + 100) * 65,536 bytes = 40,108,032 bytes = 0.040 GB.
+    - Batch-1 serial peak memory = 1.0 GB weights + 0.040 GB KV + 0.300 GB reserve = 1.34 GB, which fits the 2.0 GB budget.
+    - Memory headroom at batch 1 = 2.0 GB - 1.34 GB = 0.66 GB.
+    - Token budget in 6 hours = 6 * 3600 * 14 = 302,400 generated tokens.
+    - Prompt budget at 100 generated tokens each = 302,400 / 100 = 3,024 prompts.
+    - Prompts per subgroup = 3,024 / 72 = 42 prompts/cell.
+    - A conservative 30 prompts/cell plan uses 72 * 30 * 100 = 216,000 generated tokens and takes 216,000 / 14 = 15,429 seconds = 4.3 hours.
+
+    **Conclusion & Interpretation:**
+    - **Result: 30 prompts per subgroup fits under both constraints.** Memory fit depends on serial batch-1 execution, while throughput would allow up to 42 prompts/cell under the stated 6-hour budget; choosing 30 prompts/cell leaves thermal and retry margin.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 13
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

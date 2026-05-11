@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: tinyml-0926
+track: tinyml
+level: L5
+zone: design
+topic: transformer-systems-cost
+competency_area: compute
+bloom_level: create
+phase: inference
+title: Design Attention Approximation for 64KB KV-Cache Budget
+scenario: A keyword-spotting transformer needs 128-token context but the ESP32-S3's SRAM can only hold 64KB for the KV cache after reserving memory for weights, activations, and OS overhead. The model has 4 layers, 4 heads, 32-dimensional heads, INT8 precision.
+question: What attention approximation fits a 128-token transformer context into the ESP32-S3 KV-cache budget?
+details:
+  realistic_solution: Use sliding-window attention with a 32-token local window plus 4 persistent sink tokens. A full KV cache needs 4 layers * 2 K/V tensors * 4 heads * 32 dims * 128 tokens * 1B = 131,072B, which exceeds the 64 KiB KV-cache budget. The 36-token approximation needs 36,864B, leaving about 28 KiB of SRAM margin after weights, activations, and OS overhead have already been reserved. Sink tokens preserve a small global summary while the local window captures recent acoustic context; the accuracy impact must be validated on the keyword task rather than asserted from the byte count.
+  common_mistake: |
+    **The Pitfall:** Using full KV cache and swapping to flash.
+    **The Rationale:** Flash latency (100 us/read) massively dominates for 128-token context with frequent cache misses, destroying real-time performance.
+    **The Consequence:** The model fits in memory but critically misses real-time latency deadlines.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - KV Cache Budget: 64 KB.
+    - Transformer Architecture: 4 layers, 2 K/V tensors per layer, 4 heads, 32 dims/head, INT8 (1 byte).
+    - Sliding Window: 32 tokens + 4 sink tokens = 36 tokens.
+
+    **Calculations:**
+    - Per-token KV bytes per layer = 2 K/V * 4 heads * 32 dims/head * 1 byte = 256 bytes.
+    - Full KV Cache = 4 layers * 128 tokens * 256 bytes = 131,072 bytes (128 KiB), which does not fit the 64 KiB budget.
+    - Sliding Window KV Cache = 4 layers * 36 tokens * 256 bytes = 36,864 bytes (~36 KiB).
+    - SRAM margin inside the KV budget = 65,536 - 36,864 = 28,672 bytes (~28 KiB).
+
+    **Conclusion & Interpretation:**
+    - **Result: sliding window plus sink tokens fits with ~28 KiB margin (Memory-Bound)**. The approximation preserves latency by keeping KV data in the reserved SRAM budget; task accuracy should be checked empirically.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

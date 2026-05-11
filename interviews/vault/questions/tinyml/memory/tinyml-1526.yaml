@@ -1,0 +1,57 @@
+schema_version: '1.0'
+id: tinyml-1526
+track: tinyml
+level: L4
+zone: analyze
+topic: tensor-arena-planning
+competency_area: memory
+bloom_level: analyze
+phase: inference
+title: ESP32-S3 Ping-Pong DMA Audio Buffering for KWS
+scenario: |
+  Your keyword spotting model on ESP32-S3 processes 1-second audio windows at 16 kHz. The MFCC features require 7.84 KB. The tensor arena is 85 KB. You use double-buffered audio capture (2 x 32 KB = 64 KB). A colleague says you can reduce audio buffer memory by 50% using ping-pong DMA with smaller buffers.
+question: Can smaller ping-pong DMA buffers cut ESP32-S3 audio capture SRAM by 50% for 1-second, 16 kHz KWS windows?
+details:
+  realistic_solution: |
+    Yes for the audio capture buffers, but not for the whole KWS memory footprint. A 1-second, 16 kHz, 16-bit audio window contains 16,000 samples * 2 bytes = 32,000 bytes, or about 31.25 KiB. The current double-buffered capture allocation is 2 * 32 KB = 64 KB, which stores two full windows. Smaller ping-pong DMA buffers can capture shorter chunks, such as 250 ms, while MFCCs are computed incrementally into the persistent 7.84 KB feature buffer. A 250 ms chunk is 16,000 * 0.25 * 2 = 8,000 bytes, so two DMA buffers need about 16,000 bytes, or 15.6 KiB. That is a 75% reduction in capture-buffer SRAM and therefore more than the colleague's 50% claim.
+
+    The tradeoff is pipeline complexity: the system must process each chunk before the next buffer cycle overwrites it, preserve enough overlap for MFCC frames, and keep the 85 KB tensor arena separate from capture memory. The 85 KB arena and 7.84 KB MFCC feature buffer do not shrink just because the DMA buffers are smaller.
+  common_mistake: |
+    **The Pitfall:** Processing single 32 KB buffers in-place without double buffering.
+    **The Rationale:** Candidates fail to understand that physical sensors stream asynchronously and must be captured while the CPU is busy computing.
+    **The Consequence:** Single-buffering causes catastrophic data corruption and audio tearing when capture and processing overlap.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Audio: 16 kHz, 2 bytes/sample. Window: 1s.
+    - Original capture allocation: 2 * 32 KB = 64 KB.
+    - MFCC feature buffer: 7.84 KB.
+    - Tensor arena: 85 KB.
+    - Inference Time: 85 ms.
+
+    **Calculations:**
+    - Full 1-second audio window: 16,000 * 1.0 * 2 = 32,000 bytes = ~31.25 KiB.
+    - Original double-buffered full-window capture: 2 * 32 KB = 64 KB.
+    - 250 ms chunk: 16,000 * 0.25 * 2 = 8,000 bytes = ~7.8 KiB per buffer.
+    - Double-buffered 250 ms capture: 2 * 8,000 bytes = 16,000 bytes = ~15.6 KiB.
+    - Capture-buffer reduction: (64 KB - 16 KB) / 64 KB = 75%.
+    - Non-capture memory remains: 7.84 KB MFCC features + 85 KB tensor arena.
+
+    **Conclusion & Interpretation:**
+    - **Result: yes, smaller ping-pong DMA buffers can cut audio capture SRAM by more than 50%, from 64 KB to about 16 KB for 250 ms chunks.** This only reduces capture buffering; MFCC storage and the 85 KB tensor arena remain separate SRAM costs.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

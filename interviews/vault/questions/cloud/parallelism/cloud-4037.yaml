@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-4037
+track: cloud
+level: L3
+zone: implement
+topic: gradient-synchronization
+competency_area: parallelism
+bloom_level: apply
+phase: training
+title: Bucket Fusion in NCCL AllReduce
+scenario: A ResNet-152 model has 232 FP32 gradient tensors totaling 232MB. Assume NCCL greedily packs or chunks them in backward order into 4MB communication buckets.
+question: With NCCL_BUFFSIZE=4MB, how many fused AllReduce operations does ResNet-152 need, and what speedup comes from reduced launch overhead?
+details:
+  realistic_solution: With the stated FP32 total of 232MB and 4MB buckets, the bucketized communication count is ceil(232MB / 4MB) = 58 fused AllReduce buckets, assuming greedy packing and chunking in backward order. That replaces 232 tensor-level launches with 58 bucket launches. With about 30 microseconds of fixed launch/collective overhead per AllReduce, the saved fixed overhead is (232 - 58) * 30 microseconds = 5.22ms. The bandwidth term for moving 232MB is not removed; fusion mainly reduces per-launch latency and improves bandwidth utilization by sending larger chunks. The first buckets can still launch as soon as later-layer gradients are ready, preserving backward/communication overlap.
+  common_mistake: |
+    **The Pitfall:** Believing bucket fusion simply concatenates tensors randomly to hit a size target.
+    **The Rationale:** Candidates fail to understand that fusion must respect backward-pass reverse ordering to overlap communication with computation effectively.
+    **The Consequence:** Misconfiguring NCCL parameters or custom communication hooks that block the backward pass and eliminate all potential overlap gains.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Total FP32 gradient size: 232 MB
+    - Bucket size: 4 MB
+    - Fixed overhead per launch: ~30 microseconds
+    - Bandwidth: 50 GB/s
+
+    **Calculations:**
+    - Number of fused buckets = ceil(232 MB / 4 MB) = 58 launches.
+    - Saved overhead = (232 - 58) * 30 microseconds = 5.22 ms.
+    - Unfused time estimate = (232 * 30 microseconds) + (232 MB / 50 GB/s) = 6.96 ms + 4.64 ms = 11.6 ms.
+    - Fused time estimate = (58 * 30 microseconds) + (232 MB / 50 GB/s) = 1.74 ms + 4.64 ms = 6.38 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 58 fused AllReduce buckets and about 5.2 ms of launch overhead saved.** The communication phase estimate improves from 11.6 ms to 6.38 ms, about 1.8x under these assumptions.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

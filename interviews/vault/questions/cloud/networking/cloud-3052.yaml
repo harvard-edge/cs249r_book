@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-3052
+track: cloud
+level: L5
+zone: mastery
+topic: network-bandwidth-bottlenecks
+competency_area: networking
+bloom_level: evaluate
+phase: both
+title: '13B Training on 16 GPUs: TP-2 and DP-8 AllReduce Bottlenecks'
+scenario: A 13B model is trained on 16 GPUs across 2 nodes. The communication pattern includes within-node TP-2 all-reduces, between-node DP-8 gradient AllReduce, and data loading via PCIe.
+question: What communication schedule and optimizations are needed for 13B training on 16 GPUs across two nodes to reach over 90% GPU utilization?
+details:
+  realistic_solution: Separate the collectives. TP-2 all-reduces are intra-node NVLink collectives on activation shards and should be fused with layer kernels where possible. The blocking bottleneck is the DP-8 gradient AllReduce across replicas. Each TP rank owns half the 13B model, so its BF16 gradient shard is 13B/2 × 2B = 13GB. Ring AllReduce traffic per GPU is 2 × 7/8 × 13GB = 22.75GB. At 200 Gb/s = 25GB/s, the dense DP AllReduce takes about 910ms, far larger than a 200ms compute step. A concrete schedule is bucketed layer-by-layer DP reduce-scatter/AllReduce launched as soon as gradients are ready, concurrent with backward compute, while TP collectives stay on NVLink. Even with 90% overlap, dense DP communication leaves ~91ms exposed, so utilization is about 200/(200+91) = 69%. To exceed 90%, exposed communication must be below about 22ms; if measurements still show more exposed communication after bucketing, the system needs a smaller payload or more bandwidth, such as validated compression
+    that preserves convergence.
+  common_mistake: |
+    **The Pitfall:** Dividing the gradient size by the number of parallel rings.
+    **The Rationale:** Candidates incorrectly assume that using multiple parallel rings reduces the total communication volume per GPU.
+    **The Consequence:** Underestimating network transfer times and failing to implement the necessary compression algorithms.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - TP=2, DP=8 on 16 GPUs.
+    - BF16 gradients for one TP shard: 13GB.
+    - Inter-node bandwidth per GPU: 200 Gb/s = 25GB/s.
+    - Compute per step: 200ms.
+
+    **Calculations:**
+    - DP-8 Ring AllReduce Transfer: 2 * (7/8) * 13GB = 22.75GB per GPU.
+    - Dense DP Transfer Time: 22.75GB / 25GB/s = 910ms.
+    - With 90% overlap: exposed dense DP communication = 91ms.
+    - Dense overlapped utilization: 200ms / (200ms + 91ms) = 68.7%.
+    - To reach 90% utilization: exposed communication must be <= 200/0.90 - 200 = 22.2ms.
+    - Example payload reduction target: an 8x smaller communicated gradient payload would reduce raw DP transfer to 910ms / 8 = 113.75ms; with 90% overlap this exposes ~11.4ms, but compression must be validated for BF16-gradient convergence.
+
+    **Conclusion & Interpretation:**
+    - **Result: Dense DP-8 AllReduce is Network-Bound.** Use bucketed overlap first; if exposed communication remains above ~22ms, reaching 90% utilization requires lower payload, higher bandwidth, larger compute granularity, or another way to reduce the exposed DP synchronization cost.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 18
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

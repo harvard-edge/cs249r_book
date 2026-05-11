@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: mobile-1078
+track: mobile
+level: L3
+zone: analyze
+topic: accelerator-comparison
+competency_area: compute
+bloom_level: analyze
+phase: inference
+title: Tensor G3 CPU vs TPU Decoding Bottlenecks
+scenario: You are migrating the Gemini Nano model (3 billion parameters, 8-bit quantization) from the CPU to the on-device TPU (7.5 TOPS, 12 GB LPDDR5X) on a Google Tensor G3. Moving to the TPU accelerated the prompt prefill phase, but autoregressive token generation speed only improved marginally.
+question: Why does the highly efficient TPU not provide a proportional speedup for decoding, and what is its theoretical compute limit?
+details:
+  realistic_solution: |
+    Prefill batches many tokens into large matrix-matrix operations, so the TPU can keep its compute units busy. Autoregressive decoding is mostly a one-token-at-a-time matrix-vector workload: each step performs roughly 6 GOPs for a 3B-parameter 8-bit model while repeatedly touching a large resident weight footprint and KV state in shared LPDDR5X. The 7.5 TOPS TPU therefore has a compute-only ceiling of about 7,500 GOP/s / 6 GOP/token = 1,250 tokens/sec, but that ceiling is not achievable in decode. Actual generation is far lower because the accelerator waits on effective memory bandwidth, cache locality, and small-batch scheduling overhead rather than running out of arithmetic throughput.
+  common_mistake: |
+    **The Pitfall:** Assuming a custom ASIC with higher TOPS will uniformly accelerate all phases of execution.
+    **The Rationale:** Candidates fail to distinguish between the compute-bound prefill phase and the memory-bandwidth bound decoding phase.
+    **The Consequence:** They mistakenly attribute the lack of speedup to driver overhead or thermal throttling.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model memory footprint: 3B parameters x 1 byte (8-bit) = about 3 decimal GB.
+    - Decode compute required per token: 3B multiply-accumulates x 2 ops/MAC = about 6 GOPs.
+    - Decode runs at batch size 1, so weight reads are poorly amortized across tokens; the full 3GB footprint is a worst-case effective payload, not a claim that flash storage streams the model each step.
+
+    **Calculations:**
+    - TPU compute-only ceiling: 7.5 TOPS = 7,500 GOP/s.
+    - Compute-only token rate: 7,500 GOP/s / 6 GOP/token = 1,250 tokens/sec.
+    - Worst-case effective weight payload per decode step: up to about 3 GB of 8-bit resident weights, plus KV-cache reads.
+    - If effective shared-memory bandwidth during decode is 30-60 GB/s after cache reuse and locality effects, the bandwidth-limited practical range is roughly 10-20 tokens/sec before runtime overhead.
+
+    **Conclusion & Interpretation:**
+    - **Result: 1,250 tok/s compute ceiling, ~10-20 tok/s memory-bound practical range**. The large gap is why the TPU accelerates compute-heavy prefill but does not provide a proportional speedup for single-token decoding.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

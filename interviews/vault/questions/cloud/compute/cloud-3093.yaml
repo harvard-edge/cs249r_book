@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-3093
+track: cloud
+level: L3
+zone: realization
+topic: systolic-dataflow
+competency_area: compute
+bloom_level: apply
+phase: both
+title: Attention Layer Systolic Array Tile Count and Runtime
+scenario: You need to size a systolic array to process a multi-head attention layer (hidden=2048, heads=16, seq=512, batch=32, BF16) on a TPU v5e. Each systolic array tile is 128x128.
+question: How much memory and compute time does this attention layer need, and how many 128x128 systolic-array tiles are required?
+details:
+  realistic_solution: 'Q, K, V, and O weights are each 2048x2048 BF16 = 8 MiB, so weights total 32 MiB. Q, K, V outputs and the attention context are each 32*512*2048*2 = 64 MiB, so those four dense activations total 256 MiB. Materialized attention scores are 32*16*512*512*2 = 256 MiB, giving 512 MiB of activations and 544 MiB total including weights. Compute is 4 projection matmuls at 4 * 2 * (32*512) * 2048 * 2048 = 550G FLOPs, plus QK^T and Attn*V at 68.7G FLOPs, for 618.7G FLOPs or an ideal compute lower bound of 3.14ms at 197 TFLOPS. 128x128 tile counts are an idealized systolic matmul mapping: each projection is (16384/128)*(2048/128)*(2048/128) = 32,768 tile ops, so four projections are 131,072. For each batch-head, QK^T uses 16 tile ops and Attn*V another 16; across 512 batch-heads, attention totals 16,384 tile ops. Total is about 147,456 128x128 tile ops.'
+  common_mistake: |
+    **The Pitfall:** Computing memory for only the Q, K, V weight matrices.
+    **The Rationale:** Candidates often forget the intermediate state generated during forward passes.
+    **The Consequence:** They fail to include the intermediate activation tensors (Q, K, V projections and attention scores) that must reside in HBM, leading to severe memory under-provisioning.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Dim=2048, heads=16, seq=512, batch=32, BF16. TPU v5e (197 TFLOPS).
+    - 128x128 tiles (32KB).
+
+    **Calculations:**
+    - Dense activations: Q, K, V, and context are each 32 * 512 * 2048 * 2 = 64 MiB, totaling 256 MiB.
+    - Materialized attention scores: 32 * 16 * 512 * 512 * 2 = 256 MiB.
+    - Total Memory: Weights (32 MiB) + Activations (256 MiB + 256 MiB = 512 MiB) = 544 MiB.
+    - Compute: Projections (550 GFLOPs) + Attention (68.7 GFLOPs) = 618.7 GFLOPs.
+    - Ideal compute lower-bound time: 618.7 GFLOPs / 197 TFLOPS = 3.14 ms, before bandwidth, utilization, and non-matmul overheads.
+    - Projection matrix shape is MxK times KxN, where M=batch*seq=32*512=16384, K=2048, N=2048.
+    - Projection Tiles: (16384/128) * (2048/128) * (2048/128) = 32,768 tile ops per projection; 4 projections = 131,072.
+    - Attention per batch-head: (512/128) * (512/128) * (128/128) = 16 tile ops for QK^T, and 16 for Attn*V.
+    - Batch-heads = 32 * 16 = 512, so attention tile ops = 512 * (16 + 16) = 16,384.
+    - Total idealized systolic matmul tile ops = 131,072 + 16,384 = 147,456.
+
+    **Conclusion & Interpretation:**
+    - **Result: 3.14ms compute lower bound.** The layer fits in 16GB HBM and requires about 147,456 idealized 128x128 systolic tile operations.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 9
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

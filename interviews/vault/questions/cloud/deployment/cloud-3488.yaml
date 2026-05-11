@@ -1,0 +1,40 @@
+schema_version: '1.0'
+id: cloud-3488
+track: cloud
+level: L2
+zone: analyze
+topic: container-orchestration
+competency_area: deployment
+bloom_level: analyze
+phase: inference
+title: Optimizing ML Workloads on Kubernetes with Google TPU v5e
+scenario: Your team is deploying a large-scale ML model training job on a Kubernetes cluster configured with Google TPU v5e accelerators. The cluster utilizes a pod architecture where the interconnect fabric provides 1.6 TB/s bisection bandwidth. The training job requires significant compute and memory resources.
+question: How would you use Kubernetes device plugins, node affinity, and scheduling to run TPU v5e training efficiently?
+details:
+  realistic_solution: Use the TPU device plugin only to expose allocatable TPU resources; the important design is topology-aware scheduling around TPU slices. Request the full TPU slice needed by the training job, use node affinity or topology labels so workers land on the same pod/slice, and use gang scheduling so partial worker sets do not start and hold resources. The scheduler should understand TPU slice and queue semantics, reject placements that fragment the interconnect topology, and co-schedule controller, workers, and checkpoint sidecars with the same job identity. Add tolerations/priority classes for training queues, reserve host CPU and memory for input pipelines, and validate the compiled sharding plan so model, optimizer state, activations, and collectives fit the selected topology before the pod is admitted.
+  common_mistake: |
+    **The Pitfall:** Treating TPUs like generic GPUs or standard nodes during scheduling.
+    **The Rationale:** Candidates rely on standard K8s scheduling plugins, failing to understand that TPUs require strict gang scheduling and topology-aware placement to leverage their custom interconnects.
+    **The Consequence:** Pods are scattered across the cluster, destroying interconnect bandwidth and severely fragmenting resources, leading to massive training bottlenecks.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Compute target: 1 PFLOP/s BF16 peak budget for the job.
+    - TPU v5e: 197 TFLOPS/chip peak and 16 GB HBM per chip.
+    - Interconnect: 1.6 TB/s bisection bandwidth.
+    - Model size: 90 GB.
+    - Training memory includes parameters, gradients, optimizer state, activations, and runtime reserve, and must be checked against the compiled sharding plan.
+
+    **Calculations:**
+    - Compute lower bound = 1000 TFLOPS / 197 TFLOPS per chip = 5.1 chips, so at least 6 chips for peak compute capacity.
+    - Raw HBM across 6 chips = 6 * 16 GB = 96 GB, barely above the 90 GB parameter size and before optimizer state, gradients, activations, fragmentation, and runtime reserve.
+    - Therefore the Kubernetes placement cannot be chosen from peak FLOPS alone; it must admit a larger topology-compatible TPU slice whose compiled sharding plan fits memory and collective bandwidth.
+    - Bisection bandwidth constrains distributed collectives between placed chips; it is not a model-load-time denominator or an exact chip-count formula.
+
+    **Conclusion & Interpretation:**
+    - **Result: Topology-aware admission, not a fixed chip count.** Kubernetes should gang-place a TPU slice that satisfies the compiler's sharding, HBM, and collective requirements; the simple FLOPS math only shows why six chips is a lower bound, not a valid schedule.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 2
+validated: true
+math_verified: true

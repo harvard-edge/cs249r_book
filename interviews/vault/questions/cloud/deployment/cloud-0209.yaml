@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-0209
+track: cloud
+level: L4
+zone: evaluation
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: analyze
+phase: inference
+title: The A/B Testing at Scale
+scenario: We want to A/B test our current 13B model against a new 70B model in shadow mode. The product team says 'just mirror 100% of traffic to both models for a week to gather data.'
+question: Why is this statistically unnecessary but infrastructure-ruinous, and how does the GPU memory asymmetry between these models dictate your A/B testing architecture?
+details:
+  realistic_solution: |
+    Separate statistical need from serving capacity. Shadow mode should not mirror every production request into the 70B path unless the experiment truly needs that many paired samples. Log production requests and mirror only a sampled fraction to the 70B deployment, or replay sampled logs asynchronously through a small evaluation cluster. Keep the 13B production serving path unchanged; send sampled shadow traffic to a separately quota-limited 70B pool so evaluation cannot steal production KV cache or GPU slots. With FP16 weights, 13B is about 26 GB before KV cache, while 70B is about 140 GB before KV cache and usually needs a multi-GPU serving replica. The exact accelerator choice depends on production hardware, context length, and batch size, but the asymmetry is enough to dictate sampled or replayed shadow traffic instead of a 100% live mirror.
+  common_mistake: |
+    **The Pitfall:** Blindly mirroring 100% of traffic to the shadow deployment.
+    **The Rationale:** Engineers follow standard web-service A/B testing practices, forgetting the massive, non-linear hardware cost of LLM inference.
+    **The Consequence:** Hundreds of thousands of dollars are wasted on GPU compute to gather millions of statistically redundant data points.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Memory asymmetry: 13B FP16 ~= 26 GB; 70B FP16 ~= 140 GB.
+    - A 100% mirror would run the full production request stream through both models.
+    - Shadow evaluation only needs enough samples for the metric's confidence interval, not every request.
+    - The 70B path should have isolated GPU slots, KV cache, quotas, and backpressure so it cannot affect production.
+
+    **Calculations:**
+    - Weight memory alone: 13B FP16 ~= 13B * 2 bytes = 26 GB; 70B FP16 ~= 70B * 2 bytes = 140 GB.
+    - A 100% mirror requires enough 70B serving capacity for the same live QPS as production, plus separate KV cache for all mirrored contexts.
+    - A 1% sampled shadow sends only 1/100 of production requests to the 70B pool while preserving unbiased paired examples if sampling is random and logged.
+    - Offline replay can use the same sampled logs at a controlled rate, decoupling evaluation throughput from production peak QPS.
+
+    **Conclusion & Interpretation:**
+    - **Result: Sampled Shadowing Is Statistically Adequate and Infrastructure-Safe.** Route a small random sample, or replay logs offline, to a quota-limited 70B pool. Full mirroring duplicates the live serving problem with a much larger model and collects many redundant samples.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

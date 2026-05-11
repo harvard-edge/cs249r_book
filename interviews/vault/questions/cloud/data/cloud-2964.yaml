@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-2964
+track: cloud
+level: L5
+zone: optimization
+topic: dataset-curation
+competency_area: data
+bloom_level: evaluate
+phase: training
+title: Fix an NFS DataLoader Bottleneck in a 256-H100 Training Job
+scenario: 'Your 256 H100 training job is GPU-starved: GPUs run at 9% MFU instead of expected 45%. Profiling shows DataLoader workers are the bottleneck — each H100 waits 180ms per batch vs 45ms compute. Your dataset is 2TB stored on distributed NFS.'
+question: What is starving the 256-H100 training job, and how would you fix the DataLoader and storage path to recover the expected MFU?
+details:
+  realistic_solution: Bottleneck is the shared NFS input path, not GPU compute. At the target 45ms compute step, 256 GPUs need 256 / 0.045 = 5,689 GPU-batches/sec. If each GPU batch is 512 sequences × 2048 tokens × 4 bytes, that is 4 MiB per GPU-batch, or about 22.2 GiB/s aggregate input bandwidth before metadata and decompression overhead. The observed 180ms wait stretches each step to 225ms, so GPUs are active only 45/225 = 20% of wall time, matching the drop from expected 45% MFU to about 9% observed MFU. Fix by pre-tokenizing, packing into large sharded mmap files, staging shards to local NVMe per 8-GPU node, using persistent DataLoader workers with pinned-memory prefetch, and monitoring per-node read throughput. Local NVMe needs only about 0.69 GiB/s per node at the target step rate, well under a 6.4 GB/s device, so prefetch can hide the storage path if preprocessing is also overlapped.
+  common_mistake: |
+    **The Pitfall:** Adding more DataLoader workers without diagnosing the bottleneck.
+    **The Rationale:** Engineers assume CPU core starvation is always the root cause of data loading stalls.
+    **The Consequence:** Adding workers against an I/O bottleneck (like an overwhelmed NFS) only increases contention, failing to recover the expected MFU.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Current step: 180ms wait + 45ms compute = 225ms.
+    - Target MFU: 45%.
+    - Dataset: 2TB on NFS.
+    - Local NVMe bandwidth: 6.4 GB/s per node (8 GPUs).
+
+    **Calculations:**
+       - Current step time: 180ms wait + 45ms compute = 225ms.
+       - GPU active fraction: 45ms / 225ms = 20%; expected 45% MFU * 20% active fraction = ~9% observed MFU.
+       - Data per GPU-batch: 512 * 2048 * 4 bytes = 4,194,304 bytes = 4 MiB.
+       - Target aggregate bandwidth: 256 GPUs * 4 MiB / 45ms = ~22.2 GiB/s before metadata and decompression overhead.
+       - Current aggregate read rate implied by the stalled step: 256 GPUs * 4 MiB / 225ms = ~4.6 GiB/s, consistent with a saturated shared NFS path plus overhead.
+       - Per-node target bandwidth after sharding to local NVMe: 8 GPUs * 4 MiB / 45ms = ~711 MiB/s = ~0.69 GiB/s, below 6.4 GB/s local NVMe bandwidth.
+       - I/O time per node from NVMe: 32 MiB / 6.4 GB/s = about 5ms, so prefetch can overlap it with the 45ms compute step.
+       - Conditional step-time recovery: if the 180ms wait is fully eliminated and compute remains 45ms, step time moves from 225ms toward 45ms, up to a 5x wall-time improvement.
+
+    **Conclusion & Interpretation:**
+       - **Result: Shared-Storage DataLoader Bottleneck.** Sharded mmap data on local NVMe plus pinned-memory prefetch reduces the per-node read requirement below device capacity and can recover the expected 45% MFU if preprocessing is also overlapped.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

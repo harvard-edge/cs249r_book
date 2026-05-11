@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: edge-1761
+track: edge
+level: L5
+zone: realization
+topic: vram-budgeting
+competency_area: memory
+bloom_level: evaluate
+phase: both
+title: Edge TPU Activation and Weight Budgeting
+scenario: You are deploying a real-time object detection model for a battery-powered security camera using the Google Coral Edge TPU in a USB form factor. The platform provides 4 TOPS for INT8 operations and operates on a strict 2W power budget, so the detector should compile into one Edge TPU INT8 subgraph with minimal host fallback.
+question: How would you size the CNN weights, activations, and intermediate tensors so the Coral Edge TPU keeps the detector in one INT8 subgraph?
+details:
+  realistic_solution: Size the graph by peak live tensors, not just the model file. For each candidate block, list input tensor bytes, output activation bytes, weights, scratch/workspace, and any tensors that must remain live across fused operations. Then compile with the Edge TPU compiler and verify that every op is supported and remains in a single INT8 subgraph. Early high-resolution feature maps are usually the peak working set, so cap channels, downsample early when accuracy permits, and avoid unsupported ops that force CPU partitions.
+  common_mistake: |
+    **The Pitfall:** Sizing only the flatbuffer or parameter count.
+    **The Rationale:** Candidates miss that compiler placement depends on supported INT8 ops and the peak live activation/scratch working set.
+    **The Consequence:** The graph may be partitioned between Edge TPU and host CPU, adding USB transfers and host compute that break real-time latency and power targets.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Input Tensor: 256x256x3 RGB.
+    - Tensor precision: INT8 activations and weights, 1 byte/element.
+    - Example local working-set target for the first fused block: ~2.3 MB.
+    - Early Feature Map: 3x3 Conv, 32 filters.
+
+    **Calculations:**
+    - Input tensor = 256 * 256 * 3 * 1 byte = 196,608 bytes = 0.19 MiB.
+    - Conv weights = 3 * 3 * 3 * 32 * 1 byte = 864 bytes, small versus activations.
+    - Stride-1 output activation = 256 * 256 * 32 * 1 byte = 2,097,152 bytes = 2.00 MiB.
+    - Minimum live set for input + output + weights = ~2.19 MiB before scratch, alignment, and later live tensors.
+    - Stride-2 output activation = 128 * 128 * 32 * 1 byte = 524,288 bytes = 0.50 MiB.
+    - Minimum live set after stride-2 = 0.19 MiB + 0.50 MiB + weights = ~0.69 MiB before overhead.
+
+    **Conclusion & Interpretation:**
+    - **Result: Peak Activation Budget Drives Placement.** The stride-1 block leaves almost no room under a 2.3 MB working-set target once scratch and alignment are included; stride-2 saves about 1.5 MiB and is much more likely to remain in a single supported Edge TPU subgraph.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 13
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

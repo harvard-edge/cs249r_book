@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-3456
+track: cloud
+level: L5
+zone: design
+topic: network-bandwidth-bottlenecks
+competency_area: networking
+bloom_level: analyze
+phase: both
+title: Optimizing Distributed ML Training with Network Bandwidth Constraints on NVIDIA A100s
+scenario: You are designing a distributed training system for a large language model across a cluster of 64 GPUs. Each accelerator has 80 GB HBM2e memory, delivers 312 TFLOPS (FP16), and boasts a memory bandwidth of 2.0 TB/s. The cluster's network fabric has a bisection bandwidth of 400 Gbps per server containing 8 GPUs. Your model requires frequent synchronization of gradients and weights, leading to significant communication overhead.
+question: How would you architect the data flow and communication patterns to mitigate network bandwidth bottlenecks, analyze the communication-computation ratio, and model the bandwidth cost?
+details:
+  realistic_solution: |
+    Model the step at a consistent scope: after fast intra-node reduction, each 8-GPU server sends a 100 GB gradient shard through the 400 Gbps inter-node fabric, while its 8 GPUs compute the next step in parallel. Under the stated numbers, the inter-node all-reduce costs about 4.38 seconds per server versus 3.21 seconds of per-step compute, so communication is about 1.36x compute before overlap. Use hierarchical collectives, ZeRO-1/2 or hybrid data parallelism, gradient accumulation, and backward-pass overlap to reduce or hide the inter-node payload before adding more servers behind the same fabric.
+  common_mistake: |
+    **The Pitfall:** Focusing solely on single-device FLOPs optimization while ignoring the cluster topology.
+    **The Rationale:** Candidates assume that if a GPU is fast, the cluster is fast, failing to calculate the massive impedance mismatch between 2.0 TB/s HBM and 50 GB/s inter-node networking.
+    **The Consequence:** The GPUs spend the majority of their time idling, blocked on synchronous network collectives, reducing MFU to single digits.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 64 GPUs = 8 servers with 8 GPUs each.
+    - Inter-node network is 400 Gbps per server, about 50 GB/s raw; assume 40 GB/s effective after overhead.
+    - Gradient payload after intra-node aggregation is 100 GB per server for the inter-node all-reduce.
+    - Per-step compute work per GPU is 600 TFLOPs; sustained throughput is 60% of 312 TFLOPS = 187 TFLOPS.
+
+    **Calculations:**
+    - Ring all-reduce communicated volume per server: 2 * (N - 1) / N * S = 2 * 7 / 8 * 100 GB = 175 GB.
+    - Inter-node communication time per server: 175 GB / 40 GB/s = 4.38 seconds.
+    - Compute time per GPU: 600 TFLOPs / 187 TFLOPS = 3.21 seconds.
+    - Communication-to-compute ratio: 4.38 / 3.21 = 1.36x before overlap.
+
+    **Conclusion & Interpretation:**
+    - **Result: communication is likely dominant without overlap.** Hierarchical collectives, gradient accumulation, compression/sharding, and overlapping backward compute with communication are needed before adding more GPUs behind the same 400 Gbps per-server fabric.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

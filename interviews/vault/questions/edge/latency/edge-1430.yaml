@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: edge-1430
+track: edge
+level: L3
+zone: analyze
+topic: latency-decomposition
+competency_area: latency
+bloom_level: analyze
+phase: both
+title: Edge LLM Latency Breakdown on AI 100
+scenario: You are deploying a 5-billion parameter INT8 autoregressive LLM on an on-premise Qualcomm Cloud AI 100 accelerator (32 GB LPDDR4x, 400 TOPS INT8, 75W). A local client sends a request with a 500-token prompt and expects a 100-token response. The network round-trip takes 30ms, and CPU tokenization/preprocessing takes 20ms. The accelerator executes the prefill phase (TTFT) at 200 effective TOPS. During decode, weights are resident, kernels reuse them across the decode loop, and the effective KV-cache plus activation traffic is 250 MB per generated token at 50 GB/s.
+question: What is the end-to-end latency for the 500-token prompt and 100-token response, and why does 400 TOPS mainly help prefill?
+details:
+  realistic_solution: |
+    The correct approach decomposes latency into fixed overhead, prefill, and autoregressive decode: E2E = Network + Preprocessing + TTFT_compute + (Output tokens * TPOT). Fixed overhead is 30 ms + 20 ms = 50 ms. Using the scenario's effective prefill rate, the 500-token prompt requires about 5 TOP and takes 25 ms, so user-perceived TTFT is 75 ms. During decode, the weights are resident and the stated bottleneck is 250 MB of effective KV-cache plus activation traffic per generated token at 50 GB/s, so TPOT is 5 ms. For 100 output tokens, decode takes 500 ms and total E2E latency is 575 ms. Peak TOPS mainly helps prefill because prefill is compute-bound matrix-matrix work, while decode is serialized and bandwidth-bound.
+  common_mistake: |
+    **The Pitfall:** Dividing total operations for the entire request by 400 TOPS.
+    **The Rationale:** Failing to recognize that autoregressive generation is a memory-bound matrix-vector operation.
+    **The Consequence:** Drastically underestimating latency and failing to realize the 400 TOPS accelerator is mostly idle during the decode phase.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Fixed Overhead: Network (30 ms) + Preprocessing (20 ms) = 50 ms.
+    - LPDDR4x Bandwidth: 50 GB/s.
+    - Prefill operation model: roughly one multiply-add per parameter per prompt token, counted as 2 ops, so 500 tokens * 5B params * 2 = 5 TeraOPs.
+    - Effective Compute: 200 TOPS.
+    - Decode traffic model: weights are resident and reused by the decode kernels; effective KV-cache plus activation traffic is 250 MB per generated token.
+
+    **Calculations:**
+    - Prefill Time: 5 TeraOPs / 200 TOPS = 25 ms.
+    - User-perceived TTFT: 50 ms + 25 ms = 75 ms.
+    - Decode bandwidth estimate: 250 MB per token at 50 GB/s.
+    - Time per token (Decode): 0.25 GB per token / 50 GB/s = 0.005 s = 5 ms per token.
+    - Total Decode Time: 100 tokens * 5 ms = 500 ms.
+    - End-to-End Latency: 50 ms + 25 ms + 500 ms = 575 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 575 ms (Memory-Bound Decode)**. The high TOPS mainly accelerates prefill; decode remains governed by per-token memory traffic and serialization rather than peak INT8 TOPS.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

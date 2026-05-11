@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: mobile-1070
+track: mobile
+level: L5
+zone: analyze
+topic: speculative-decoding
+competency_area: latency
+bloom_level: analyze
+phase: inference
+title: Speculative Decoding Feasibility on Mobile NPU
+scenario: On a Snapdragon 8 Gen 3 device, you run a 3B INT4 target model. A 150M INT4 draft model achieves an acceptance rate (alpha) of 0.60.
+question: How does speculative decoding impact on-device latency given the NPU cannot run two models concurrently and must swap them in shared memory?
+details:
+  realistic_solution: Mobile NPUs rely on unified memory and small on-chip SRAM, so speculative decoding should be modeled as alternating draft and target passes plus driver/context-switch overhead, not as fully reloading both models for every accepted token. With a 150M draft, alpha=0.60, and K=5, the draft can reduce target invocations, but each iteration still pays for five draft steps, one target verification pass, and two model switches because the NPU cannot keep both execution contexts resident. Under plausible mobile timings, this yields only a marginal improvement over optimized autoregressive decoding, and the extra complexity is often not worth it unless the runtime can fuse or pipeline the draft and target paths.
+  common_mistake: |
+    **The Pitfall:** Ignoring the context-switching and weight-loading overhead of mobile NPUs.
+    **The Rationale:** Candidates often assume mobile NPUs can seamlessly multi-task or hold multiple models in SRAM like datacenter GPUs, forgetting LPDDR5X bandwidth limits.
+    **The Consequence:** The candidate incorrectly predicts a massive speedup (e.g., 2-3x), whereas the actual performance gain is heavily degraded by memory I/O bottlenecks.
+  napkin_math: |
+    **Assumptions & Constraints:**
+       - Baseline target decode latency: ~30 ms/token after weights and KV are resident in the runtime's normal decode path.
+       - Draft model latency: ~3 ms/token for the 150M INT4 model.
+       - Acceptance rate alpha = 0.60, draft length K = 5.
+       - NPU model/context switch overhead: ~4 ms each way, paid once to enter the draft path and once to return to target verification.
+    **Calculations:**
+       - Expected emitted tokens without a bonus token: 1 + alpha + alpha^2 + alpha^3 + alpha^4 = 2.31 tokens/iteration.
+       - Draft work: 5 tokens x 3 ms/token = 15 ms.
+       - Target verification pass for the 5 drafted tokens: ~35 ms. This is more than one target decode step but much less than five independent target steps because it is a short batched verification pass.
+       - Switching overhead: 2 x 4 ms = 8 ms.
+       - Total speculative iteration: 15 ms + 35 ms + 8 ms = 58 ms.
+       - Effective latency: 58 ms / 2.31 tokens = 25.1 ms/token.
+       - Baseline latency: 30 ms/token. Speedup: 30 / 25.1 = 1.2x.
+    **Conclusion & Interpretation:**
+       - **Result: Marginal ~1.2x Speedup (Switching-Bound)**. The acceptance rate helps, but serialized draft/target execution and context-switch overhead consume most of the theoretical gain on a mobile NPU.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview

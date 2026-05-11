@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: edge-1524
+track: edge
+level: L5
+zone: evaluation
+topic: batching-strategies
+competency_area: latency
+bloom_level: evaluate
+phase: inference
+title: Batching on Google Coral Edge TPU
+scenario: We are deploying an INT8 object detection model on a Google Coral Edge TPU for a factory inspection line with 4 cameras running at 30 FPS. Alternative A uses static batching with a compiled fixed batch size of 4. Alternative B uses host-side timeout batching with precompiled fixed-shape variants for batch 1 and batch 4, padding if needed. The model takes 8ms for a batch of 4 on the TPU, and 7ms for a batch of 1 because compute is nearly fixed at this small model size.
+question: Should you use static batching or dynamic batching for 4 Coral TPU cameras at 30 FPS to minimize p99 latency, and why?
+details:
+  realistic_solution: Alternative B is better for p99 latency only if it is implemented as a host-side timeout policy over supported fixed-shape Edge TPU executables, such as precompiled batch-1 and batch-4 variants or padding to a compiled shape. With a 5 ms timeout, the batch-1 worst case still has enough throughput and bounds added waiting to roughly timeout plus execution time. Static batch 4 improves utilization, but it can make early frames wait for the fourth camera frame and therefore raises p99 latency.
+  common_mistake: |
+    **The Pitfall:** Treating Edge TPU dynamic batching like GPU-style arbitrary runtime shapes.
+    **The Rationale:** The Edge TPU compiler requires fixed input tensor shapes, so a timeout policy still needs precompiled batch variants or padding to a supported shape.
+    **The Consequence:** The design either fails to compile or adds hidden host padding/copy overhead that invalidates the latency estimate.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 4 cameras at 30 FPS = 120 FPS total (1 frame per 8.3ms).
+    - Static batch 4 time: 8 ms.
+    - Dynamic batching is a host-side timeout policy over fixed-shape Edge TPU executables.
+    - Dynamic max batch is 4 with a 5 ms timeout; worst case is compiled batch 1 at 7 ms.
+
+    **Calculations:**
+    - Static batch 4 capacity = (1000 ms / 8 ms) * 4 = 500 FPS, so throughput is sufficient.
+    - With four 30 FPS cameras and no guarantee that frames arrive simultaneously, the aggregate stream can present one frame about every 33.3 ms / 4 = 8.3 ms.
+    - Static batch-fill wait for the first frame can approach three aggregate gaps: 3 * 8.3 ms = 25 ms, then 8 ms compute, or about 33 ms before host overhead.
+    - Dynamic batch 1 worst-case capacity = (1000 ms / 7 ms) * 1 = ~142 FPS, still above the 120 FPS requirement.
+    - Dynamic p99 service estimate is about 5 ms timeout + 7 ms compute = ~12 ms in the batch-1 case, assuming the precompiled fixed-shape path avoids extra copies.
+
+    **Conclusion & Interpretation:**
+    - **Result: host-side timeout batching over fixed-shape compiled Edge TPU paths minimizes p99 latency.** Static batching is throughput-safe but can add tens of milliseconds of queueing; the 5 ms timeout keeps tail latency low without missing the 120 FPS target.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

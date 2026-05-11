@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: edge-1496
+track: edge
+level: L5
+zone: design
+topic: kernel-fusion
+competency_area: optimization
+bloom_level: evaluate
+phase: inference
+title: Hailo-8 Dataflow Optimization and Memory-Bound Operator Fusion
+scenario: You are designing an object detection pipeline for a battery-powered drone using a Hailo-8 accelerator. The model contains a sequence of memory-bound operations following the main convolutions. Since the Hailo-8 is a dataflow accelerator with limited on-chip buffering, materializing intermediate tensors back to host memory would create a major bottleneck.
+question: How would you design the fusion strategy for these memory-bound operations to minimize latency and host memory access on the Hailo-8?
+details:
+  realistic_solution: |
+    The optimal design fuses the memory-bound post-convolution operations into one compiler-scheduled on-chip dataflow pipeline. The convolution output should feed activation, scaling, reshape, or elementwise stages through Hailo-8 routing and SRAM buffers without materializing each intermediate tensor in host memory. The strategy is therefore graph-level operator fusion and placement: keep adjacent low-arithmetic-intensity ops in the same streaming subgraph, only returning final outputs that are actually needed by the host.
+  common_mistake: |
+    **The Pitfall:** Proposing standard GPU-style kernel fusion or caching intermediate tensors in local memory.
+    **The Rationale:** Candidates apply CUDA thread block optimizations to a spatial dataflow architecture that lacks local DRAM.
+    **The Consequence:** The proposed solution cannot be physically implemented on the Hailo-8, and streaming intermediate activations back and forth crushes the real-time frame rate.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+    - Intermediate activation tensor: 4 MB (INT8).
+    - Host-link bandwidth if an intermediate is materialized: ~3.9 GB/s.
+    - Three memory-bound ops create two avoidable intermediate boundaries if not fused.
+       - Target Latency: 33 ms/frame.
+    2. **Calculations:**
+       - One avoidable host round trip for a 4 MB tensor = (4 MB write + 4 MB read) / 3.9 GB/s = ~2.05 ms.
+       - Avoiding two such boundaries saves about 2 * 2.05 ms = 4.1 ms before software scheduling overheads.
+    3. **Conclusion & Interpretation:**
+       - **Result: ~4.1 ms of avoidable host-link traffic removed.** The point is not that Hailo-8 must stream every layer through PCIe; it is that compiler fusion preserves the intended on-chip dataflow and prevents memory-bound intermediates from becoming host round trips.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

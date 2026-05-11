@@ -1,0 +1,35 @@
+schema_version: '1.0'
+id: edge-1270
+track: edge
+level: L5
+zone: design
+topic: load-balancing
+competency_area: networking
+bloom_level: evaluate
+phase: inference
+title: PCIe Coral Edge TPU Cluster Routing
+scenario: You are designing a local gateway for a smart factory that aggregates traffic from 10 high-speed cameras. The gateway is equipped with an array of 4 Google Coral Edge TPUs. Each incoming frame must be processed by an INT8-quantized anomaly detection model. The cameras collectively generate 200 requests per second.
+question: How would you route 200 FPS from 10 cameras across 4 PCIe Coral Edge TPUs while minimizing copies and respecting INT8-only execution?
+details:
+  realistic_solution: |
+    Use a low-copy host dispatcher rather than a network load balancer. Capture frames into reusable pinned or mmap-backed buffers, run resize/color conversion and INT8 input normalization on the host ISP/GPU before TPU submission, and enqueue only the compact INT8 tensor for inference. Route each camera stream to a per-TPU worker process or thread with CPU affinity and a dedicated Coral runtime/interpreter so frames are assigned directly to one of the four PCIe devices with minimal cross-device movement. Use stream hashing for locality, plus queue-depth backpressure or weighted fallback when one camera is hot. Enforce the INT8-only constraint at model-load time by rejecting non-fully-quantized models and by keeping preprocessing outputs in the exact UINT8/INT8 shape and scale expected by the Edge TPU compiler.
+  common_mistake: |
+    **The Pitfall:** Deploying complex network load balancers like HAProxy or dynamic routing.
+    **The Rationale:** Candidates use cloud-native tools that incur massive host-to-device memory transfer overheads across the PCIe bus.
+    **The Consequence:** Destroying latency and saturating the host CPU, ultimately bottlenecking the TPU array despite ample compute capacity.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Total incoming traffic = 200 FPS.
+    - Hardware: 4 x Coral Edge TPUs, each rated at 4 TOPS INT8 and about 2W for TPU compute. Total INT8 capacity = 16 TOPS.
+    - Model requirement: 50 GOPs per frame.
+
+    **Calculations:**
+    - Single TPU capacity: 4 TOPS INT8 = 4,000 GOPS INT8.
+    - Single TPU processing rate = 4,000 GOPS / 50 GOPs = 80 FPS.
+    - Total cluster capacity = 4 * 80 FPS = 320 FPS.
+    - Total cluster compute power draw = 4 * 2W = 8W.
+
+    **Conclusion & Interpretation:**
+    - **Result: 320 FPS INT8 compute capacity at about 8W for TPU compute.** The cluster handles 200 FPS comfortably, but this is not the full gateway system power draw.
+status: published
+provenance: imported

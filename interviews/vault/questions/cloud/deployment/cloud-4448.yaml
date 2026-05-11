@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-4448
+track: cloud
+level: L5
+zone: evaluation
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: evaluate
+phase: inference
+title: MI300X vs H100 Decode Pool Economics
+scenario: 'Your team is choosing between H100 SXM5 and MI300X for the decode pool of a 70B disaggregated serving cluster. Cost: H100 ~$3/hr, MI300X ~$4/hr.'
+question: Which GPU would you choose for the 70B decode pool, H100 SXM5 or MI300X, based on cost per token and memory capacity?
+details:
+  realistic_solution: 'Decode is usually memory-bandwidth sensitive once batching is high enough, and the 70B BF16 weights are about 140GB. A single 80GB H100 cannot hold the model, so the H100 option is a 2-GPU tensor-parallel slice costing about $6/hr; MI300X can fit the model on one 192GB GPU costing about $4/hr with more KV headroom. Do not claim throughput scales purely with aggregate HBM bandwidth across these non-equivalent setups: H100 TP=2 has more aggregate bandwidth but pays communication and sharding overhead, while MI300X avoids TP but depends on AMD kernel maturity. Choose MI300X if benchmarks show its single-GPU decode throughput is at least two-thirds of the H100 TP=2 slice; otherwise use H100 despite the higher memory footprint and hourly cost.'
+  common_mistake: |
+    **The Pitfall:** Comparing the GPUs solely on peak TFLOPS, peak bandwidth, or capacity without measuring the actual decode throughput of the required serving slice.
+    **The Rationale:** Engineers default to simple hardware ratios and miss tensor-parallel communication, kernel maturity, batching limits, and model-fit constraints.
+    **The Consequence:** Procurement can choose a part that looks cheaper or faster on paper but yields worse measured tokens per dollar in production.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 70B params (140GB in BF16).
+    - H100 SXM5: 80GB HBM, 3.35 TB/s bandwidth, ~$3/hr.
+    - MI300X: 192GB HBM, 5.3 TB/s bandwidth, ~$4/hr.
+
+    **Calculations:**
+    - H100 requires 2 GPUs (TP=2) to fit the 140GB model. Cost = $6/hr.
+    - MI300X fits the 140GB model on a single GPU. Cost = $4/hr.
+    - H100 TP=2 aggregate bandwidth is 6.7 TB/s before tensor-parallel communication overhead; total cost is $6/hr.
+    - MI300X single-GPU bandwidth is 5.3 TB/s and avoids TP all-reduce overhead; total cost is $4/hr.
+    - Cost per 1000 tokens from benchmarked throughput T: H100 pair = 6 / (T_H100 * 3600) * 1000; MI300X = 4 / (T_MI300X * 3600) * 1000.
+    - MI300X is cheaper per token when 4 / T_MI300X < 6 / T_H100, or T_MI300X > 0.667 * T_H100.
+    - If H100 TP=2 measures 6000 tok/sec, MI300X only needs >4000 tok/sec to win on hourly token cost.
+
+    **Conclusion & Interpretation:**
+    - **Result: Benchmark-Gated Memory-Capacity Choice.** MI300X has the memory-capacity advantage and lower hourly cost for a 70B slice, but the procurement decision should use measured throughput; it wins cost per token if its single-GPU decode throughput exceeds about two-thirds of the H100 TP=2 slice.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+  - Batching throughput calculated incorrectly; batch=128 yields ~6000 tok/sec, not 47.8 tok/sec
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

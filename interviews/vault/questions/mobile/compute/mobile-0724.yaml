@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: mobile-0724
+track: mobile
+level: L5
+zone: optimization
+topic: accelerator-comparison
+competency_area: compute
+bloom_level: evaluate
+phase: inference
+title: The UI Contention Crisis
+scenario: You are deploying a 7B parameter local LLM on an iPhone 15 Pro (A17 Pro). In your sterile testing environment, it reliably generates text at 25 tokens/second. But in production, users complain that whenever they scroll the app's rich 3D animation interface, the LLM generation speed plummets to 5 tokens/second.
+question: Why does an iPhone 15 Pro 7B local LLM drop from 25 to 5 tokens/sec when users scroll a 3D interface?
+details:
+  realistic_solution: Compute is not the bottleneck; shared memory bandwidth and locality are. Apple Silicon uses Unified Memory Architecture (UMA), so CPU, GPU, and Neural Engine traffic all traverse the same memory fabric. A 7B INT4 model has about 3.5 GB of weights, and autoregressive decode is often close to memory-bandwidth-bound, but traces should be used to estimate effective bytes per token rather than claiming the model file is literally reloaded every token. In sterile testing, the LLM reaches 25 tok/s because it gets a large share of the shared fabric. During rich 3D scrolling, GPU texture, geometry, and display traffic reduce the bandwidth and memory-controller service available to decode; a trace showing decode bandwidth falling to roughly one-fifth of the sterile case would explain the observed drop to about 5 tok/s.
+  common_mistake: |
+    **The Pitfall:** Assuming the NPU and GPU have separate, isolated memory bandwidth.
+    **The Rationale:** Candidates often think that because the LLM runs on the Neural Engine and the UI on the GPU, they won't interfere. They forget Apple Silicon uses Unified Memory Architecture (UMA).
+    **The Consequence:** The root cause (memory bandwidth starvation) is missed, leading to futile compute-side optimizations.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 7B parameters at INT4 is about 3.5 GB of weight data.
+    - During autoregressive decode with batch size 1, weight reads dominate and a useful first-order proxy is "roughly one model-weight pass per generated token."
+    - A17 Pro has about 120 GB/s shared memory bandwidth.
+    - Sterile measured throughput is 25 tokens/sec, so effective bandwidth demand is 25 * 3.5 GB = 87.5 GB/s after cache/reuse/runtime effects.
+    - Heavy 3D scrolling can consume enough shared bandwidth to leave roughly 20 GB/s effective bandwidth for decode.
+
+    **Calculations:**
+    - Sterile headroom check: 87.5 GB/s demand is below the 120 GB/s system ceiling.
+    - Contended decode estimate: 20 GB/s available / 3.5 GB per token proxy = 5.7 tokens/sec.
+    - Observed production speed of about 5 tokens/sec is consistent with shared-memory bandwidth contention.
+
+    **Conclusion & Interpretation:**
+    - **Result: about 5.7 tokens/sec under contention.** The 3.5 GB/token term is a decode-bandwidth proxy, not a claim that the model file is literally reloaded from storage for every token.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

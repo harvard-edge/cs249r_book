@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: edge-0622
+track: edge
+level: L6+
+zone: mastery
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: create
+phase: inference
+title: The Predictive Overtake Dilemma
+scenario: 'You are the architect for the ''Predictive Overtake'' system on a self-driving vehicle. An LLM predicts other drivers'' actions, but its 500ms latency on the vehicle''s Jetson AGX Orin is too high; the hard real-time budget is 50ms. The model has 2B parameters, and the input is a context of 1024 tokens representing the last 10 seconds of sensor data. Two proposals emerge: (A) Implement Speculative Decoding using a 50M parameter draft model. (B) Implement FlashAttention to speed up the context phase.'
+question: Which proposal is more appropriate for meeting the 50ms latency budget?
+details:
+  realistic_solution: |
+    Proposal A, speculative decoding with a small draft model, is the more appropriate proposal for the 50ms target. The current 500ms latency is too large for FlashAttention alone to close, especially because FlashAttention mainly improves the attention implementation during the context/prefill phase. For a 2B edge LLM, the repeated decode steps are dominated by resident weight bandwidth, KV-cache traffic, and low-batch utilization. A draft model can reduce the number of expensive 2B-model decode passes when it predicts tokens that the large model accepts.
+
+    FlashAttention may still be useful as a secondary optimization for the 1024-token context pass, but it is not the primary answer to a 10x end-to-end latency reduction requirement.
+  common_mistake: |
+    **The Pitfall:** Blindly applying server-side optimizations like FlashAttention to edge inference.
+    **The Rationale:** Engineers assume FlashAttention is universally beneficial because it accelerates training in the cloud.
+    **The Consequence:** They waste engineering effort implementing FlashAttention on short sequence lengths where the attention matrix already fits in SRAM, failing to address the actual memory bandwidth bottleneck of the decode phase.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 2B parameters.
+    - Target Budget: 50ms latency.
+    - Context Length: 1024 tokens.
+    - Draft Model: 50M params.
+
+    **Calculations:**
+    - INT8 weight footprint for the main model is about 2GB; a lower-bound bandwidth pass is 2GB / 204.8 GB/s = 9.8ms per large-model decode step before kernel and KV overhead.
+    - A 50M INT8 draft model is about 50MB; its lower-bound bandwidth pass is 50MB / 204.8 GB/s = 0.24ms per draft step.
+    - If the baseline spends about 500ms on serial decode/prefill work, FlashAttention can only help the attention portion; even a generous 2x speedup on 25% of total latency gives 500ms * (0.75 + 0.25/2) = 437.5ms, far above 50ms.
+    - Speculative decoding becomes useful if each large-model verification accepts several draft tokens. For an average accepted block of 4 tokens, the number of expensive large-model decode passes drops by about 4x; combined with prompt caching, quantization/runtime fusion, and shorter generated action outputs, it targets the dominant decode cost rather than only the attention kernel.
+
+    **Conclusion & Interpretation:**
+    - **Result: Choose Proposal A as the primary optimization.** Speculative decoding attacks the dominant serial decode cost; FlashAttention is a secondary prefill optimization and is not sufficient by itself to turn a 500ms edge LLM path into a 50ms control-path response.
+  options:
+    - Assuming that because FlashAttention is effective for training in the cloud, it's automatically the best choice for edge inference. At short sequence lengths typical of real-time edge tasks, the N^2 attention matrix may actually fit in on-chip SRAM, diminishing FlashAttention's advantage.
+    - The bottleneck is PCIe transfer between CPU and GPU; using zero-copy memory will eliminate this overhead entirely.
+    - The low utilization is due to kernel launch overhead on the NPU; fusing all layers into a single kernel will achieve near-peak throughput.
+    - 'Proposal A is more appropriate: use speculative decoding with the 50M draft model, then verify accepted token blocks with the 2B model; FlashAttention is only a secondary context-pass optimization and cannot close a 10x latency gap by itself.'
+  correct_index: 3
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK

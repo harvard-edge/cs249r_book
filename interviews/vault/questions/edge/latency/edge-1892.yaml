@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: edge-1892
+track: edge
+level: L4
+zone: optimization
+topic: batching-strategies
+competency_area: latency
+bloom_level: analyze
+phase: inference
+title: 'Jetson Orin: Latency vs. Throughput in Edge Inference Batching'
+scenario: A smart city surveillance system utilizes a YOLOv7-based object detection model for real-time traffic analysis, processing video streams from multiple cameras. Initially, the model uses a fixed batch size of 1 for minimum latency per frame. During peak hours, the aggregate frame rate exceeds single-inference throughput, leading to queue build-up and increased end-to-end latency.
+question: How would you batch and schedule multi-camera YOLOv7 to maximize effective FPS while keeping every frame under 100ms latency?
+details:
+  realistic_solution: Implement dynamic, deadline-aware batching rather than a fixed maximum batch. Start with batch size 1 or 2 for low load, monitor queue depth, frame age, and GPU utilization, and flush a batch whenever the oldest frame is close to its latency deadline. Use profiling to set a maximum batch that leaves room for both batching wait and inference time; a batch of 16 may have enough throughput to drain 150 FPS, but waiting for a full batch can already exceed the 100ms budget. A practical scheduler uses small batches under normal load, larger batches only when enough frames are already queued, and an express-lane or earliest-deadline policy for old or high-priority frames.
+  common_mistake: |
+    **The Pitfall:** Implementing continuous batching without considering overheads or using static batching that starves latency.
+    **The Rationale:** Engineers assume more complex batching is always superior, missing memory bandwidth constraints or framework overheads.
+    **The Consequence:** Sub-optimal throughput or violating the strict 100ms per-frame latency deadline.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Max latency budget: 100ms.
+    - Peak input: 150 FPS (5 cameras at 30 FPS).
+    - Measured service times: batch=1 takes 20ms, batch=8 takes 60ms, batch=16 takes 90ms.
+
+    **Calculations:**
+    - Batch=1 service rate = 1 / 0.020s = 50 FPS. With 150 FPS arrivals, backlog grows by 100 frames/s, so queueing delay soon dominates even though a single frame's inference is only 20ms.
+    - Batch=8 service rate = 8 / 0.060s = 133 FPS. This is still below 150 FPS, so backlog grows by 17 frames/s during sustained peak.
+    - Batch=16 service rate = 16 / 0.090s = 177 FPS, so throughput is sufficient in isolation.
+    - At 150 FPS, frames arrive every 1/150s = 6.7ms. Waiting to fill 16 frames takes about 15 gaps * 6.7ms = 100ms for the oldest frame before inference begins; adding 90ms inference gives about 190ms, which violates the deadline.
+    - With 90ms inference, the scheduler has only 10ms of batching wait, so it cannot wait for a full batch of 16. If batch=8 takes 60ms, the latency budget leaves 40ms of wait; at 6.7ms per arrival gap, a deadline flush can collect at most about 1 + floor(40/6.7) = 6 frames unless a backlog is already present.
+
+    **Conclusion & Interpretation:**
+    - **Result: dynamic, deadline-aware batching is required.** Static batch=1 and batch=8 cannot keep up with sustained 150 FPS, while a fixed wait-for-16 policy violates the 100ms deadline. Use queue-depth triggers plus oldest-frame deadlines, and cap or flush batches so queueing delay plus measured inference time stays below 100ms.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+  - Reasoning Competency, Knowledge Area, and Mode are missing for an L4 question.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

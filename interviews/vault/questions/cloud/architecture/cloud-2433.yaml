@@ -1,0 +1,56 @@
+schema_version: '1.0'
+id: cloud-2433
+track: cloud
+level: L5
+zone: diagnosis
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: evaluate
+phase: both
+title: The GQA Prefill Illusion
+scenario: A cloud provider serves a 70B LLM. To improve throughput, they switch from Multi-Head Attention (MHA) to Grouped-Query Attention (GQA), reducing KV heads by 8x. They observe a 3x throughput increase in the decoding phase. However, for a prominent enterprise customer who sends massive 50k-token prompts and only generates 10 tokens per request, the end-to-end latency drops by a mere 2%.
+question: Why does GQA improve decoding throughput 3x but reduce end-to-end latency by only 2% for 50k-token prompts and 10 outputs?
+details:
+  realistic_solution: |
+    GQA mainly improves decoding because each generated token rereads the prompt KV cache from HBM, and reducing KV heads cuts that memory traffic. The enterprise workload is different: it spends most of its request time processing the 50k-token prompt before only 10 decode tokens are generated. That prefill phase still runs the full model over 50k input tokens and includes large projection, MLP, and attention work; reducing decode KV traffic cannot materially shorten a request whose critical path is dominated by prefill. Amdahl's law explains the result: if the decode phase is only a few percent of total latency, even a 3x decode throughput gain produces only about a 2% end-to-end reduction.
+  common_mistake: |
+    **The Pitfall:** Assuming GQA uniformly accelerates all attention operations.
+    **The Rationale:** Failing to distinguish between memory-bound decoding (where GQA shines) and compute-bound prefill.
+    **The Consequence:** Promising massive latency reductions for long-context applications that mathematically cannot materialize.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Sequence length: 50,000 prompt tokens. Output: 10 tokens. Layers: 80.
+    - Decode throughput improves 3x after switching from MHA to GQA.
+    - Observed end-to-end latency reduction is 2%.
+
+    **Calculations:**
+    - Amdahl estimate: if decode fraction is f, a 3x decode speedup changes total time to (1 - f) + f/3.
+    - End-to-end reduction = 1 - [(1 - f) + f/3] = 2f/3.
+    - Setting 2f/3 = 0.02 gives f ≈ 0.03, so decode was only about 3% of the original request latency.
+    - That is plausible for 50k prompt tokens and only 10 output tokens: prefill processes 50,000 tokens once, while decode processes 10 serial steps and benefits from the smaller GQA KV cache.
+    - The 3% decode fraction is an inference from the observed 2% request-level improvement, not a standalone KV-traffic estimate.
+    - GQA reduces decode KV-cache bandwidth, but it does not remove the projection, MLP, and attention work needed to prefill a 50k-token prompt.
+
+    **Conclusion & Interpretation:**
+    - **Result: prefill-dominated request latency.** GQA can greatly improve decode throughput, but with 50k-token prompts and only 10 generated tokens, decode is too small a fraction of total time for the request-level latency to move much.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+  - llm
+  - attention
+  - throughput

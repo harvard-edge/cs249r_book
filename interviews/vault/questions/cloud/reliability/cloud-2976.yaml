@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-2976
+track: cloud
+level: L5
+zone: optimization
+topic: fault-tolerance-checkpointing
+competency_area: reliability
+bloom_level: evaluate
+phase: training
+title: 'Fault Tolerance: Optimize Checkpoint Write Throughput on Lustre Filesystem'
+scenario: Your 256-GPU H100 training job writes checkpoints to a Lustre filesystem at only 15 GB/s (measured) vs the theoretic 200 GB/s peak. Each checkpoint is 140GB and takes 9.3 seconds.
+question: Diagnose the Lustre bottleneck and explain how to tune it to reach at least 120 GB/s?
+details:
+  realistic_solution: 'Diagnose before tuning: use lfs getstripe to check whether checkpoint files are pinned to one or a few OSTs, collect per-OST/OSS throughput with iostat or Lustre metrics, and profile client write sizes and metadata create/rename rates. If bandwidth is concentrated on one OST, create checkpoint files with a wide stripe count and stripe size matched to large sequential writes. If write calls are small or serialized through one rank, aggregate shards per node and issue multi-MiB aligned writes from many clients. If MDT time dominates, reduce file count and use a temporary-file plus atomic-manifest commit pattern.'
+  common_mistake: |
+    **The Pitfall:** Blaming network bandwidth automatically.
+    **The Rationale:** Engineers assume slow storage writes are purely a network constraint.
+    **The Consequence:** Wasting time debugging network fabrics without profiling whether the bottleneck is metadata ops, stripe misconfiguration, or node-level I/O serialization.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Checkpoint size: 140 GB.
+    - Current speed: 15 GB/s (9.3 seconds).
+    - Target speed: >120 GB/s.
+    - Cluster: 256 GPUs.
+
+    **Calculations:**
+    - Current checkpoint time: 140 GB / 15 GB/s = 9.3 seconds.
+    - Target checkpoint time at 120 GB/s: 140 GB / 120 GB/s = 1.17 seconds.
+    - Speedup needed: 120 / 15 = 8x, still below the 200 GB/s filesystem peak.
+    - If metrics show stripe_count=1 and one OSS near 15 GB/s, the bottleneck is layout; use a wide stripe count across enough OSTs/OSSs that aggregate measured bandwidth exceeds 120 GB/s.
+    - Example target: 16 OSSs sustaining 8 GB/s each gives 128 GB/s; 32 OSSs at 4 GB/s each also gives 128 GB/s.
+    - If metrics instead show small writes or client serialization, fix rank aggregation and request size before increasing stripes.
+
+    **Conclusion & Interpretation:**
+    - **Result: Storage-IO Bound**. The 120 GB/s target requires proving whether the 15 GB/s limit is stripe layout, small I/O, metadata overhead, or client serialization; wide striping and large aligned writes are the fix only when the measurements show the data path can scale across enough OSTs/OSSs.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

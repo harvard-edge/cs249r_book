@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: tinyml-0859
+track: tinyml
+level: L3
+zone: evaluation
+topic: latency-decomposition
+competency_area: latency
+bloom_level: evaluate
+phase: inference
+title: 'Latency Decomposition: Compare ESP32-S3 vs. Cortex-M4 for Image Classification'
+scenario: A tiny image classifier (MobileNetV1-0.25, 475K params, INT8, 14.9 MOPs) runs on an ESP32-S3 vs. a Cortex-M4. The model uses a 28x28 input.
+question: How would you compare inference latency accounting for the PSRAM access penalty on the ESP32-S3?
+details:
+  realistic_solution: |
+    Compare compute and memory separately. A Cortex-M4 with weights in internal flash/SRAM-like access is mostly compute-limited: at 168 MHz and an optimistic 1 MAC/cycle, 14.9M MACs take about 89 ms before kernel overhead. On ESP32-S3, the 475 KB weight set leaves little room in 512 KB SRAM once activations and arenas are included, so layers that stream weights from 80 MHz PSRAM add bandwidth latency. Even one full sequential weight pass is about 12 ms at 40 MB/s, and two to four effective passes add roughly 24-49 ms. Thus the ESP32-S3 may have better SIMD kernels, but careless PSRAM placement can make it slower than the M4 baseline; tiled execution and SRAM reuse are the key comparison points.
+  common_mistake: |
+    **The Pitfall:** Assuming PSRAM bandwidth matches SRAM bandwidth.
+    **The Rationale:** Candidates treat the 8MB PSRAM as equivalent to the 512KB SRAM, ignoring the SPI interface bottlenecks.
+    **The Consequence:** Grossly underestimating inference latency by failing to account for the 4-8 cycle penalty per word when fetching weights from PSRAM.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 475KB INT8 weights (14.9M MACs).
+    - Cortex-M4 clock: 168 MHz, optimistic 1 MAC/cycle.
+    - ESP32-S3 clock: 240 MHz, assume optimized INT8 kernels average about 2 MAC/cycle when data is local.
+    - ESP32-S3 PSRAM: 80 MHz SPI, approximate sustained bandwidth 40 MB/s.
+
+    **Calculations:**
+    - Cortex-M4 compute time ≈ 14.9M / 168M = 88.7 ms, plus implementation overhead.
+    - ESP32-S3 local compute time ≈ 14.9M / (240M * 2) = 31.0 ms.
+    - One full weight stream from PSRAM: 475 KB / 40 MB/s ≈ 11.9 ms.
+    - If tiling/reuse causes 2-4 effective weight streams, PSRAM time ≈ 24-48 ms.
+    - ESP32-S3 estimate with PSRAM traffic ≈ 31 + 24-48 = 55-79 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: M4 ≈ 90+ ms compute-limited; ESP32-S3 ≈ 55-80 ms if PSRAM is streamed efficiently, worse if weights are reread excessively**. The comparison hinges on memory placement and layer tiling, not just peak clock rate.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 3
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-4319
+track: cloud
+level: L5
+zone: evaluation
+topic: recommendation-systems-engineering
+competency_area: architecture
+bloom_level: analyze
+phase: inference
+title: Embedding Lookup All-to-All Communication
+scenario: Your DLRM training cluster shows that GPU utilization during embedding forward passes is 8% while MLP backward passes reach 90%. Profiling shows an all-to-all collective taking 85% of the embedding step time.
+question: Why does embedding all-to-all dominate DLRM training, and what architectural change would reduce communication volume?
+details:
+  realistic_solution: 'In DLRM training, embedding tables are sharded across GPUs while each GPU owns a different local batch for the dense MLP. For row-sharded embeddings, most looked-up rows for a local batch live on remote GPUs, so each GPU sends embedding vectors to many other GPUs and waits at an all-to-all barrier. With 64 GPUs, local batch 32, 100 tables, and 64-dim FP32 vectors, each GPU produces about 0.82 MB of embedding output per step and sends roughly 63/64 of it remotely under even sharding. The primary architectural fix is to reduce fanout: replicate small hot tables or hot rows, and co-locate tables that are commonly accessed together. Use row-wise sharding only for large cold tables; dimension reduction is a secondary lever when accuracy allows.'
+  common_mistake: |
+    **The Pitfall:** Trying to optimize the NCCL all-to-all implementation directly.
+    **The Rationale:** Performance engineers see a collective bottleneck and immediately try to tune the network layer or environment variables.
+    **The Consequence:** Ignoring the fundamental architectural flaw of the sharding strategy, which mathematically forces an O(N²) communication scaling bottleneck.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 64 GPUs, global batch=2048, local batch=2048/64=32.
+    - 100 tables, dim=64, FP32, so each embedding vector is 64 * 4 = 256 bytes.
+    - Compute step time is 2 ms.
+    - Cross-node InfiniBand is 200 Gbps, about 25 GB/s peak before collective overheads.
+
+    **Calculations:**
+    - Local embedding output per GPU before exchange: 32 * 100 * 64 * 4 bytes = 819,200 bytes ~= 0.82 MB.
+    - In an even row-sharded layout, each GPU keeps about 1/64 locally and sends about 63/64 remotely, so per-GPU payload is about 0.82 MB * 63/64 = 0.81 MB per step, not 0.82 MB to each destination.
+    - Payload bandwidth needed per GPU to hide this in 2 ms is about 0.81 MB / 2 ms = 0.4 GB/s, below the raw 25 GB/s link bandwidth.
+    - The profiler's 85% all-to-all time therefore points to collective latency, many small exchanges, poor table placement, and synchronization overhead, not only raw byte bandwidth.
+
+    **Conclusion & Interpretation:**
+    - **Result: communication-pattern bound.** Replicating small hot tables, co-locating tables accessed together, and using hybrid row/table sharding can reduce all-to-all fanout and message count; replication is a strong option for hot small tables but not the only possible architectural change.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

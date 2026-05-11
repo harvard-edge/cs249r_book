@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-1422
+track: cloud
+level: L4
+zone: diagnosis
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: analyze
+phase: both
+title: Diagnosing Input Stationary Bottlenecks in MLP Workloads
+scenario: You are porting a DLRM model with $4096 \times 4096$ MLP layers to a legacy accelerator with a 64x64 MAC array and 2MB SRAM using a strict Input Stationary (IS) dataflow. At batch size 256, DRAM bandwidth (800 GB/s) is saturated but MAC utilization is 4%.
+question: Why does the Input Stationary dataflow bottleneck MLP layers, and how do you quantify the architectural mismatch?
+details:
+  realistic_solution: The Input Stationary architecture pins input activations in the MACs and streams weights. With a 64-row batch tile assumption, batch 256 requires four tiles, so a poor strict-IS mapping can reload the same 33.55MB weight matrix about four times from DRAM. A software transpose does not change a strict IS dataflow into weight-stationary hardware. The real remedy is dataflow-aware tiling/layout so reuse appears on the dimension the hardware can keep stationary, or moving this MLP layer to a weight-stationary/output-stationary accelerator when the legacy IS mapping cannot expose enough reuse.
+  common_mistake: |
+    **The Pitfall:** Assuming the problem is simply a 'memory-bound' matrix-vector multiplication.
+    **The Rationale:** Failing to realize that at Batch=256, the layer should be compute-bound, but the hardware dataflow is forcing redundant memory reads.
+    **The Consequence:** Attempting to prune or quantize the model, or relying on a simple software transpose, instead of fixing the dataflow-aware tiling or moving the layer to hardware that can exploit weight reuse.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Weights: $4096 \times 4096$ FP16 = 33.55 MB.
+    - Hardware: Input Stationary, 64x64 MAC array, 800 GB/s DRAM.
+    - FLOP convention: one multiply-add counts as 2 FLOPs.
+    - Tiling assumption: the strict IS mapping processes 64 batch rows at a time.
+
+    **Calculations:**
+    - Input tiles for Batch 256: 256 / 64 = 4 passes.
+    - Estimated DRAM weight traffic under this tiling: 4 passes * 33.55 MB = 134.2 MB per layer.
+    - Total compute: $2 \times 256 \times 4096 \times 4096 = 8.59\text{ GFLOPs}$.
+    - Arithmetic intensity from the estimated traffic: 8.59e9 FLOPs / 134.2e6 bytes ≈ 64 FLOPs/Byte.
+    - Max throughput: 800 GB/s * 64 = 51.2 TFLOPs/s.
+
+    - If the 64x64 MAC array performs one FMA per MAC per cycle at 1 GHz, peak compute is about 64 × 64 × 2 × 1GHz = 8.2 TFLOPs/s.
+    - The bandwidth roof from this mapping is 800 GB/s × 64 FLOPs/Byte = 51.2 TFLOPs/s, above that illustrative compute peak.
+    - Observed 4% MAC utilization therefore indicates a dataflow/tiling utilization problem, not a pure bandwidth-roof limit from these idealized bytes alone.
+
+    **Conclusion & Interpretation:**
+    - **Result: Dataflow-Mismatch Bound.** Redundant weight streaming and poor SRAM/MAC reuse under strict Input Stationary mapping explain the low utilization; fixing it requires dataflow-aware compilation or different hardware/dataflow, not a simple matrix transpose.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview

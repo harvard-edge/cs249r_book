@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-2312
+track: cloud
+level: L4
+zone: diagnosis
+topic: profiling-bottleneck-analysis
+competency_area: latency
+bloom_level: analyze
+phase: both
+title: Periodic Latency Spikes in Feature Store
+scenario: 'In our real-time fraud detection pipeline, features flow via Kafka -> Flink -> Redis. Base ingestion latency is 15ms. However, exactly every 5 minutes, P99 latency spikes to 3000ms, causing fraud prediction timeouts (SLA: 100ms) at our peak load of 100,000 events/sec.'
+question: What is causing the 5-minute 3000ms latency spikes in the Kafka-Flink-Redis pipeline, and how would you eliminate them?
+details:
+  realistic_solution: The symptom of highly periodic, massive latency spikes in a streaming system points to background maintenance interacting badly with the hot write path. The 5-minute interval strongly correlates with Redis BGSAVE (RDB snapshotting). BGSAVE forks Redis, and at 100,000 writes/sec the parent keeps mutating pages while the child snapshots the dataset, causing copy-on-write memory pressure, page faults, and occasional event-loop stalls. Fix by moving snapshots to a replica, disabling BGSAVE on the write master, or using AOF with an fsync policy chosen explicitly for the latency/durability tradeoff.
+  common_mistake: |
+    **The Pitfall:** Scaling out the Flink cluster by adding more TaskManagers.
+    **The Rationale:** Assuming the compute layer is falling behind the Kafka stream because latency is high.
+    **The Consequence:** Wasting money on Flink nodes while the true bottleneck (the single-threaded Redis instance blocking on background snapshotting) remains unfixed.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Ingestion: 100,000 events/sec * 1 KB/event.
+    - Write load: about 100 MB/sec.
+    - BGSAVE runs every 5 minutes and takes roughly 60 seconds.
+    - Redis dataset is already in memory; incoming writes determine how many pages are dirtied during the forked snapshot.
+
+    **Calculations:**
+    - Bytes written during a 60-second snapshot window: 100 MB/sec * 60 sec = 6 GB of incoming updates.
+    - Copy-on-write impact is page-based: updates that touch distinct pages force the parent to retain old page copies for the child snapshot.
+    - The worst case is several GB of extra memory churn plus kernel page faults during the snapshot, not Redis garbage collection.
+
+    **Conclusion & Interpretation:**
+    - **Result: Snapshot/COW-Latency-Bound.** The periodic 3000ms spikes are consistent with Redis forked snapshotting under heavy writes; move persistence off the hot master or choose an AOF policy with known fsync tradeoffs.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 18
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

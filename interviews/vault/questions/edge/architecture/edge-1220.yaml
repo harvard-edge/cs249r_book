@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: edge-1220
+track: edge
+level: L3
+zone: analyze
+topic: encoder-decoder-tradeoffs
+competency_area: architecture
+bloom_level: apply
+phase: both
+title: Encoder vs Decoder Utilization on Jetson Orin
+scenario: You are deploying a 2-billion parameter natural language application on an NVIDIA Jetson Orin (32 GB LPDDR5, 275 TOPS INT8, 60W TDP). The team compares an encoder-only model (parallel processing) and an autoregressive decoder-only model, both quantized to INT8 to occupy 2GB of memory. During testing, the encoder achieves near-peak utilization of the 275 TOPS Ampere GPU during sequence processing. However, during the token generation phase of the decoder model, compute utilization drops drastically, resulting in high latency.
+question: What is the decoder generation arithmetic intensity on the Jetson Orin, and why does it bottleneck while the encoder does not?
+details:
+  realistic_solution: The performance drop occurs because autoregressive decoding processes one token at a time, so each layer performs small batch-size-1 matrix-vector work with poor reuse. The model is not "loaded" once per token as a software event, but the decoder still has to stream or touch most weight bytes across the layer passes for each generated token because the 2 GB of weights cannot be reused like a large batched encoder matrix multiply. This gives generation very low arithmetic intensity and leaves the 275 TOPS compute units waiting on LPDDR5 bandwidth. Encoder processing, by contrast, uses parallel sequence/batch work that reuses weights across many tokens and reaches much higher arithmetic intensity.
+  common_mistake: |
+    **The Pitfall:** Candidates often assume that because both models have 2 billion parameters and run on the same 275 TOPS INT8 accelerator, they will have similar latency profiles.
+    **The Rationale:** They fail to distinguish between the compute-bound nature of parallel matrix multiplications in an encoder and the memory-bandwidth-bound nature of autoregressive generation in a decoder.
+    **The Consequence:** The massive 275 TOPS compute capacity is left starved for data.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model Size: 2 billion parameters quantized to INT8 (1 byte per parameter) = about 2 GB of weights.
+    - Accelerator: Jetson Orin (32 GB LPDDR5, 275 TOPS INT8).
+    - LPDDR5 bandwidth: ~200 GB/s.
+    - Decode is batch-size-1, so weight reuse across tokens is poor compared with encoder sequence processing.
+
+    **Calculations:**
+    - Compute needed per generated token: 2B parameters * 2 operations (MAC) = 4 GOPS.
+    - Approximate weight bytes touched per token across layer passes: ~2 GB.
+    - Arithmetic Intensity: 4 GOPS / 2 GB accessed = ~2 OPS/byte.
+    - Theoretical compute time: 4 GOPS / 275,000 GOPS = ~0.0145 ms per token.
+    - Approximate memory streaming time: 2 GB / 200 GB/s = ~10 ms per token before cache, activation, and kernel overheads.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~2 OPS/byte for batch-1 decode (Memory-Bandwidth Bound)**. The 10 ms figure is a bandwidth lower-bound intuition for repeatedly touching weights during decode, not a separate full model reload event.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

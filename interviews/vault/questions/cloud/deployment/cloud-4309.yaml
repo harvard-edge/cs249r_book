@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-4309
+track: cloud
+level: L6+
+zone: mastery
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: create
+phase: inference
+title: Multi-Model Disaggregated Serving Isolation
+scenario: You run a platform serving 5 different LLM models (7B, 13B, 34B, 70B, 140B) to thousands of tenants with different SLOs.
+question: How would you architect disaggregated serving for 5 LLMs and thousands of tenants while isolating KV caches and capacity across SLOs?
+details:
+  realistic_solution: 'Use a two-level architecture: (1) Physical pools: separate prefill and decode pools, using one coherent GPU family per pool unless the organization has a clear operational reason for heterogeneous fleets. Prefill is compute-heavy; decode is memory-capacity and memory-bandwidth heavy. (2) Logical isolation: maintain virtual queues per model and SLO tier with reserved plus burstable capacity. Each model/SLO slice has guaranteed prefill slots, decode slots, and KV-cache budget, then can borrow unused capacity under weighted fair sharing. (3) Model placement: keep popular models warm on enough replicas or tensor-parallel shards to fit weights plus runtime overhead and KV cache. TP is chosen from model weights, activation/runtime overhead, KV-cache headroom, throughput, and failure-domain constraints, not from raw weight size alone. Small models can share GPUs only after reserving KV cache, allocator slack, and tenant isolation headroom. (4) KV-cache isolation: use per-tenant
+    namespaces, accounting, and admission-control quotas at the block allocator/scheduler boundary; do not rely on cross-tenant block reuse for isolation. (5) Capacity allocation: route prefill by SLO-aware fair queuing, then place decode on workers that have the model resident and enough tenant/model KV quota. Spikes can burst into unused capacity, but autoscaling or admission control triggers before they consume another model''s reserved SLO budget.'
+  common_mistake: |
+    **The Pitfall:** Statically partitioning prefill and decode hardware pools per model.
+    **The Rationale:** Statically assigning resources (e.g., 5 dedicated pools for 5 models) seems like the easiest way to ensure strict isolation and predictable performance.
+    **The Consequence:** This drastically wastes compute capacity when models have non-simultaneous traffic peaks, severely impacting the cost-efficiency of the platform.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - FP16 weights are about 2 bytes/parameter before overhead.
+    - Decode placement must reserve HBM for weights, runtime overhead, KV cache, allocator fragmentation, and per-tenant quotas.
+    - Capacity is sized independently for each model/SLO tier, then pooled with controlled bursting.
+
+    **Calculations:**
+    - Weight footprints: 7B ~= 14 GB, 13B ~= 26 GB, 34B ~= 68 GB, 70B ~= 140 GB, 140B ~= 280 GB before overhead.
+    - A 192 GB GPU cannot host a 140B FP16 model as one replica because 280 GB exceeds HBM before KV cache; use TP or quantization so each shard leaves explicit KV headroom.
+    - A 7B model leaves large apparent HBM headroom, but multiplexing count is limited by concurrent KV cache, per-tenant reservations, runtime overhead, and fragmentation rather than 192/14 alone.
+    - Required decode GPUs = sum over model/SLO tiers of ceil((reserved tokens/s and KV bytes under SLO) / per-GPU measured capacity), with separate reserved and burstable pools.
+
+    **Conclusion & Interpretation:**
+    - **Result: quota-isolated pooled serving (Memory-Bound)**. The defensible design is not a fixed GPU count from raw weights; it is a measured capacity plan that keeps models resident, reserves KV cache by tenant/SLO, and permits controlled burst without violating reserved capacity.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

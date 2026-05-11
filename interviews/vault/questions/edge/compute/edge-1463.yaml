@@ -1,0 +1,42 @@
+schema_version: '1.0'
+id: edge-1463
+track: edge
+level: L5
+zone: design
+topic: compute-cost-estimation
+competency_area: compute
+bloom_level: evaluate
+phase: both
+title: Multi-Model Drone Inspection Design on Hailo-8
+scenario: You are designing a low-power drone inspection system that must run 4 concurrent neural networks (each requiring 15 GOPS per frame) at 30 FPS. The target platform pairs a low-power host processor with a Hailo-8 accelerator. The Hailo-8 is a pure dataflow accelerator with no local DRAM, meaning all inputs, outputs, and model weights must stream continuously from host memory.
+question: What is the true system-level cost of running four 15 GOPS/frame networks at 30 FPS on Hailo-8, and how would you avoid bandwidth stalls?
+details:
+  realistic_solution: |
+    A strong L5 candidate separates accelerator compute from end-to-end system cost. The four networks require only 1.8 TOPS, so raw Hailo-8 compute is not the bottleneck. The real cost is host memory and PCIe traffic from inputs, outputs, orchestration, and especially repeated weight streaming. Avoid stalls by compiling the graphs so resident weights/intermediates are reused on-chip where possible, using a steady single-pass stream schedule, and eliminating unnecessary host round-trips. This reduces but does not eliminate host-side I/O, so the system budget must still include frame input/output traffic and host scheduling power.
+  common_mistake: |
+    **The Pitfall:** Calculating compute utilization while ignoring weight streaming bandwidth.
+    **The Rationale:** Candidates perform the raw compute calculation (1.8 TOPS vs 26 TOPS) and assume the system will run at negligible power without considering data movement.
+    **The Consequence:** They fail to account for the massive host-side compute and memory cost of swapping weights over PCIe, leading to severe power overruns and thermal throttling.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Models: 4 concurrent networks.
+    - Compute Demand: 15 GOPS/frame each at 30 FPS.
+    - Accelerator: 26 TOPS, 2.5W limit.
+    - Example weight payload: 20MB per model if streamed per frame.
+    - Example input/output traffic: 6MB input + 1MB output per frame set.
+
+    **Calculations:**
+    - Total Compute Demand: 4 models * 30 FPS * 15 GOPS = 1800 GOPS = 1.8 TOPS.
+    - Theoretical Utilization: 1.8 TOPS / 26 TOPS = ~6.9%.
+    - Naive weight streaming: 20MB * 4 models * 30 FPS = 2.4 GB/s continuous PCIe traffic.
+    - Input/output streaming floor: (6MB input + 1MB output) * 30 FPS = 210 MB/s.
+    - If weights are kept resident/reused by the compiled dataflow graph, the recurring traffic drops from about 2.61 GB/s to about 210 MB/s plus control overhead.
+
+    **Conclusion & Interpretation:**
+    - **Result: 1.8 TOPS compute demand but up to 2.61 GB/s naive host traffic (Bandwidth-Bound).** Co-compilation and on-chip reuse make the accelerator compute feasible, but they do not make system cost zero because frame I/O and host orchestration remain.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK

@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: cloud-1188
+track: cloud
+level: L5
+zone: optimization
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: evaluate
+phase: training
+title: Evaluating the LLM Efficiency Frontier
+scenario: You are serving a 70B parameter LLM for an interactive coding assistant. The current deployment uses FP16 weights across 4x A100 (80GB) GPUs to meet a strict 50ms Time-Between-Tokens (TBT) SLA and handle the KV cache for high concurrency. Finance mandates a 50% infrastructure cost reduction.
+question: Should you downsize to an 8B FP16 model or run a W4A16 70B model on 2 A100s to cut cost by 50%, and why?
+details:
+  realistic_solution: Prefer evaluating the W4A16 70B model on 2x A100s before falling back to a native 8B model, because it preserves much more model quality while cutting the GPU count in half. The 4-bit weights are about 35GB, so the weights fit, but the 50ms Time-Between-Tokens SLA is not proven by simply dividing 35GB by peak HBM bandwidth. Decode latency also includes dequantization kernels, KV-cache reads/writes, tensor-parallel communication, and lower-than-peak effective bandwidth. The deployment is viable only if profiling at the target concurrency shows the KV cache still fits and the measured decode path stays under 50ms.
+  common_mistake: |
+    **The Pitfall:** Incorrectly assuming heavy quantization destroys accuracy.
+    **The Rationale:** Candidates often believe a native FP16 small model (8B) will outperform a heavily quantized large model (W4A16 70B).
+    **The Consequence:** The candidate chooses an inferior 8B model, sacrificing massive amounts of model reasoning quality while failing to leverage the A100 memory bandwidth.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    *   **70B FP16:** ~140GB weights.
+    *   **70B W4A16:** ~35GB weights (fits on 2x A100 80GB GPUs).
+    *   **Peak bandwidth on 2x A100s:** ~3.8 TB/s, with lower sustained effective bandwidth in real decode.
+    *   **Decode overheads:** dequantization, attention/KV-cache traffic, tensor-parallel communication, and scheduler/kernel overhead.
+    **Calculations:**
+    *   **Naive lower bound:** 35GB / 3800 GB/s = 9.2ms if every token streamed the quantized weights at peak bandwidth with no overhead.
+    *   **More realistic bound:** at 40-60% effective bandwidth, weight traffic alone is roughly 15-25ms per generated token before KV-cache traffic, communication, and kernel overhead.
+    *   **Capacity check:** 2x A100 80GB provides 160GB nominal HBM; after ~35GB weights, only the remaining memory can hold KV cache and runtime workspace, so high concurrency must be profiled rather than assumed.
+    **Conclusion:**
+    *   **Result:** The **W4A16 70B model** is the quality-preserving cost-reduction candidate, but it does not "easily" meet the 50ms SLA from peak-bandwidth math alone. Choose it only after target-concurrency profiling confirms TBT and KV-cache headroom; otherwise the smaller 8B model is the safer latency option.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-23T22:07:40.419350'

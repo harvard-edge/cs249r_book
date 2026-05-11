@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-3285
+track: cloud
+level: L5
+zone: evaluation
+topic: dma-data-movement
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: 'Optimizing Data Movement for LLM Inference: A100 vs. V100 Evaluation'
+scenario: You are designing a high-throughput, low-latency inference system for a large language model. The model's architecture requires loading input data from host memory to GPU memory, processing it, and transferring intermediate results back to the host. You need to choose between two GPU configurations with different PCIe bandwidths.
+question: How do host-device data movement, DMA, zero-copy, and pinned memory affect latency and throughput in the two architectures?
+details:
+  realistic_solution: Use pinned host memory for staging buffers so the GPU can perform direct asynchronous DMA instead of copying through pageable host memory first. On the A100 PCIe Gen4 system, the higher link bandwidth roughly halves bulk transfer time versus the V100 PCIe Gen3 system, so it supports higher request throughput when transfers are on the critical path. Zero-copy can help for small, latency-sensitive control data or sparse reads by letting the GPU access mapped host memory without an explicit copy, but it is usually slower than copying large tensors into HBM before compute. Use CUDA streams and double buffering to overlap host-to-device copies, GPU execution, and device-to-host copies; if transfers cannot be overlapped, PCIe bandwidth becomes the throughput limiter in both architectures.
+  common_mistake: |
+    **The Pitfall:** Focusing exclusively on GPU compute (FLOPS) and on-device memory bandwidth.
+    **The Rationale:** Engineers overlook the critical role of host-device interconnect bandwidth (PCIe).
+    **The Consequence:** System throughput bottlenecks at the PCIe transfer layer, preventing the GPUs from reaching high utilization.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 10GB host->device + 2GB device->host (12 GB total).
+    - A100 PCIe Gen4: ~32 GB/s.
+    - V100 PCIe Gen3: ~16 GB/s.
+
+    **Calculations:**
+    - Bulk copy time without overlap on A100: 12 GB / 32 GB/s = 0.375 seconds.
+    - Bulk copy time without overlap on V100: 12 GB / 16 GB/s = 0.75 seconds.
+    - Pinned memory enables asynchronous DMA from host pages, avoiding an extra pageable-memory staging copy and allowing H2D and D2H copies to run in CUDA streams.
+    - With double buffering and 0.50 seconds of GPU compute, effective stage time is max(compute, copy): A100 max(0.50, 0.375) = 0.50 seconds; V100 max(0.50, 0.75) = 0.75 seconds.
+    - Zero-copy avoids an explicit copy but reads over PCIe at link latency/bandwidth, so it is appropriate for small control structures or sparse reads, not 10-12 GB bulk tensor movement.
+
+    **Conclusion & Interpretation:**
+    - **Result: PCIe Gen4 cuts raw copy time from 0.75s to 0.375s, and pinned asynchronous DMA can hide the A100 transfer under 0.50s of compute while the V100 remains I/O-bound.** Zero-copy is a latency tool for small mapped accesses, not a replacement for bulk DMA into HBM.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,45 @@
+schema_version: '1.0'
+id: mobile-1397
+track: mobile
+level: L6+
+zone: mastery
+topic: responsible-ai
+competency_area: cross-cutting
+bloom_level: create
+phase: inference
+title: On-Device Guardrail Architecture for Exynos
+scenario: You are tasked with designing an on-device safety guardrail system that filters toxic inputs and hallucinated outputs for a local LLM assistant on a shared-memory mobile NPU.
+question: How would you design a concurrent architecture that ensures strict policy enforcement without degrading the user experience or starving the ISP during multimodal tasks?
+details:
+  realistic_solution: Design a concurrent guardrail pipeline with strict commit control. Run an input classifier before decode, then let the LLM generate into a staging buffer while a small INT8 guardrail model checks output chunks on a reserved low-latency queue. The UI may stream provisional text, but final commit, TTS, tool calls, and network actions wait for guardrail approval; failed chunks are redacted or trigger refusal. Memory is partitioned up front for OS/ISP/GPU, LLM weights, KV cache, guardrail weights, and bounded staging buffers. The scheduler gives ISP/camera DMA priority during multimodal use, reserves guardrail deadlines ahead of best-effort LLM decode, and throttles token generation before starving safety checks or camera work.
+  common_mistake: |
+    **The Pitfall:** Proposing a sequential guardrail execution or forgetting that mobile memory is unified.
+    **The Rationale:** Engineers treat the LLM like a cloud API and assume all 12 GB of RAM is dedicated.
+    **The Consequence:** Unacceptable user-perceived latency and frequent OOM crashes when the ISP claims memory.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Total RAM: 12 GB, with 5 GB reserved for OS/GPU/ISP.
+    - LLM (3B 4-bit) = 1.5 GB. KV cache = 1 GB.
+    - Guardrail model (200M 8-bit) = 200 MB.
+    - Guardrail checks operate on bounded chunks in a reserved queue.
+
+    **Calculations:**
+    - AI RAM required = 1.5 GB + 1 GB + 0.2 GB = 2.7 GB, leaving 4.3 GB under the 7 GB AI limit for activations and shared buffers.
+    - Enforce separate queues: ISP/camera DMA has highest priority, guardrail checks have deadline priority, and LLM decode is best-effort within the remaining NPU and memory bandwidth budget.
+    - Keep output chunks in a staging buffer until policy approval so strict enforcement does not require sequentially blocking every token on the UI path.
+    - Bound chunk size and buffer count so safety work cannot grow unbounded during long generations.
+
+    **Conclusion & Interpretation:**
+    - **Result: strict enforcement with bounded contention.** The design fits the static AI footprint under the reserved 7 GB budget and relies on admission control, priority queues, and commit gating rather than unsupported peak-TOPS assumptions.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview

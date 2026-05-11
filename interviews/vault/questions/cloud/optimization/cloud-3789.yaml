@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-3789
+track: cloud
+level: L5
+zone: optimization
+topic: flash-attention
+competency_area: optimization
+bloom_level: evaluate
+phase: inference
+title: 'Chunked Prefill: Balancing TTFT and Decode Throughput'
+scenario: In an LLM serving system on H100, a long prefill request (8192 tokens) monopolizes the GPU for 40ms, stalling all decode requests in the batch. This causes tail latency spikes for concurrent users.
+question: How does chunked prefill with FlashAttention prevent 8192-token prefills from stalling decode, and what chunk size should you choose?
+details:
+  realistic_solution: 'Chunked prefill is primarily a serving-scheduler and framework technique: the runtime breaks a long prefill into smaller kernel launches and interleaves those launches with decode iterations. FlashAttention can be the efficient attention kernel used inside each chunk, but it does not by itself provide prefill scheduling or preemption. For example, the scheduler might process 512 prefill tokens, run one decode iteration for active requests, then process the next prefill chunk. At roughly 5µs per prefill token, a 512-token chunk blocks decode for about 2.5ms instead of the full 40ms prefill. Chunk size should be chosen by profiling against the decode-latency SLA, launch overhead, tensor-core utilization, batch shape, and TTFT impact. Too-small chunks waste overhead and reduce throughput; too-large chunks recreate decode stalls. There is no universal H100 token threshold or fixed 1000-token rule.'
+  common_mistake: |
+    **The Pitfall:** Thinking you can simply preempt the prefill kernel mid-execution.
+    **The Rationale:** Candidates treat CUDA kernels like OS threads, forgetting that GPU kernels are non-preemptible and run to completion.
+    **The Consequence:** Proposing impossible scheduler designs instead of realizing the solution must chunk the work at the framework level before launching kernels.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Full prefill is 8192 tokens.
+    - Chunked prefill uses Chunk=512.
+    - Decode iterations run at 2ms decode per token.
+
+    **Calculations:**
+    - Full prefill blocking delay: 8192 tokens * 5µs/token = 40ms.
+    - Chunked prefill delay per chunk: 512 tokens * 5µs/token = 2.5ms.
+    - Number of chunks: 8192 / 512 = 16.
+    - Decode scheduling opportunity: after each 2.5ms prefill chunk, instead of after the full 40ms prefill.
+    - Worst prefill-induced wait between decode opportunities improves from 40ms to about 2.5ms, a 16x reduction in blocking delay.
+    - End-to-end prefill completion time depends on how many decode steps are interleaved and whether they overlap; it is not computed by simply adding decode time to every chunk.
+
+    **Conclusion & Interpretation:** Chunking trades some scheduling overhead and possibly longer wall-clock prefill completion for a 16x reduction in prefill-induced decode blocking delay.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

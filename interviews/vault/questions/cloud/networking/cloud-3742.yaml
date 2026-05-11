@@ -1,0 +1,43 @@
+schema_version: '1.0'
+id: cloud-3742
+track: cloud
+level: L5
+zone: mastery
+topic: collective-communication
+competency_area: networking
+bloom_level: evaluate
+phase: both
+title: ZeRO-3 Communication Volume Analysis for 175B Model on 256 A100s
+scenario: Training GPT-3 175B on 256 GPUs using ZeRO-3. Each GPU holds 175B/256 = 684M params. For each forward pass, each layer's parameters must be AllGathered. The model has 96 transformer layers.
+question: How much ZeRO-3 AllGather communication occurs per forward pass for GPT-3 175B on 256 GPUs, and how does it compare to compute time?
+details:
+  realistic_solution: 'Params per layer: 175B / 96 layers = 1.82B params * 2B (BF16) = 3.64GB per layer. AllGather per layer: broadcast 3.64GB from 256 GPUs. Using ring AllReduce for AllGather: time = (N-1)/N * M / BW_per_link. Assume 200 Gbps = 25 GB/s IB per GPU. Ring AllGather: (255/256) * 3.64GB / 25 GB/s = 0.145s per layer. 96 layers forward: 96 * 0.145s = 13.9s. Backward needs another 96 AllGathers + 96 ReduceScatters = 27.8s. Compute per layer: 175B/96 * 2 FLOPs * batch_tokens. At batch=2048 tokens: 2 * 1.82B * 2048 = 7.45T FLOPs. GPU at 312 TFLOPS: 7.45T/312T = 24ms per layer. Total compute: 96 * 24ms = 2.3s. ZeRO-3 comm/compute ratio: 13.9s/2.3s = 6.0x — communication completely dominates. ZeRO-3 requires much faster interconnect or gradient checkpointing reduction to be viable.'
+  common_mistake: |
+    **The Pitfall:** Counting only one AllGather per layer for the entire model.
+    **The Rationale:** Candidates forget that ZeRO-3 immediately discards parameters after each layer to free memory, requiring repeated AllGathers.
+    **The Consequence:** Massively underestimating the network communication overhead, making ZeRO-3 seem much more efficient than it actually is without fast interconnects.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 175B model, 96 layers, 256 GPUs, Batch=2048.
+       - Precision: BF16 (2 bytes).
+       - Interconnect: 200 Gbps (25 GB/s) per GPU.
+       - GPU Compute: 312 TFLOPS.
+    2. **Calculations:**
+       - Params per layer: 175B / 96 = 1.82B params = 3.64 GB.
+       - Ring AllGather time per layer: (255/256) * 3.64 GB / 25 GB/s = 0.145s.
+       - Total 96 layers forward communication time: 96 * 0.145s = 13.9 seconds.
+       - Compute per layer at batch=2048: 2 * 1.82B * 2048 = 7.45 TFLOPs.
+       - Compute time per layer: 7.45 TFLOPs / 312 TFLOPS = 24 ms.
+       - Total compute time: 96 * 24 ms = 2.3 seconds.
+    3. **Conclusion & Interpretation:**
+       - **Result: Communication-Bound.** The ZeRO-3 comm/compute ratio is 13.9s / 2.3s = ~6.0x; communication completely dominates compute.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 18
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT

@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-2447
+track: cloud
+level: L5
+zone: diagnosis
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: evaluate
+phase: both
+title: MoE Routing at High Batch Size
+scenario: You replace a dense 30B parameter LLM with a 16x10B Mixture of Experts (MoE) model. Top-1 routing is used, so active parameters per token is 10B. You serve this at a high batch size of 128 on an 8xH100 cluster. You expect the MoE to be 3x faster than the dense model because active FLOPs per token drop from 30B to 10B. Instead, the MoE model is 30% slower than the 30B dense model.
+question: Why is the 16x10B top-1 MoE 30% slower than the dense 30B model at batch size 128 despite 3x fewer active FLOPs?
+details:
+  realistic_solution: Diagnose that MoE routing shatters the effective batch size per expert, causing a large drop in arithmetic intensity. The dense model applies one 30B-parameter weight set to all 128 tokens, while the 16-expert MoE spreads those tokens across many experts, so each expert may only see around 8 tokens. Even though only 10B parameters are active per token, the per-expert GEMMs are smaller, weight reuse is lower, and expert dispatch/all-to-all overhead becomes visible. Apply capacity-aware routing, expert parallelism, expert locality, or larger effective expert batches to mitigate.
+  common_mistake: |
+    **The Pitfall:** Calculating performance purely based on active FLOPs.
+    **The Rationale:** Candidates ignore how MoE routing shatters the batch size across experts.
+    **The Consequence:** They fail to realize that the arithmetic intensity drops severely, pushing the workload into a memory-bound regime.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Batch size 128. Dense model: 30B. MoE: 16x10B (160B total, 10B active).
+    - Assume roughly uniform top-1 routing, so 128 tokens / 16 experts ≈ 8 tokens per active expert.
+    - H100 peak compute: ~989 TFLOPS. HBM bandwidth: ~3.35 TB/s.
+
+    **Calculations:**
+    - Dense batch work = 2 * 30B * 128 = 7.68 TFLOPs.
+    - Dense weight traffic ≈ 30B * 2 bytes = 60 GB, so dense AI ≈ 7.68 TFLOPs / 60 GB = 128 FLOPs/Byte.
+    - Dense memory floor ≈ 60 GB / 3.35 TB/s = 17.9 ms; compute floor ≈ 7.68 TFLOPs / 989 TFLOPS = 7.8 ms.
+    - MoE per expert work ≈ 2 * 10B * 8 tokens = 160 GFLOPs.
+    - MoE per expert weight traffic ≈ 10B * 2 bytes = 20 GB, so per-expert AI ≈ 160 GFLOPs / 20 GB = 8 FLOPs/Byte.
+    - The MoE does not need to stream all 160B parameters for every token, but the batch is fragmented into many low-AI expert GEMMs plus dispatch/all-to-all traffic.
+
+    **Conclusion & Interpretation:**
+    - **Result: Expert Batch Fragmentation.** The dense model reuses one weight set across 128 tokens; the MoE reuses each expert weight set across only about 8 tokens. That lower arithmetic intensity and routing overhead can outweigh the 3x active-FLOP reduction.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,34 @@
+schema_version: '1.0'
+id: global-0060
+track: global
+level: L5
+zone: evaluation
+topic: memory-hierarchy-design
+competency_area: memory
+bloom_level: evaluate
+phase: both
+title: Tiered KV-Cache Page Size Tradeoffs
+scenario: You are architecting a tiered KV-cache (HBM3 + Host DRAM) for serving a 70B LLM (256 KB KV-cache per token) handling highly variable sequence lengths (100 to 50,000 tokens). To prevent OOMs, the system aggressively swaps KV-cache to Host DRAM via PCIe Gen5 x16 (64 GB/s). You must determine the uniform memory block size for the PagedAttention memory manager. Option A uses 16-token blocks (4MB); Option B uses 256-token blocks (64MB).
+question: How would you choose and manage KV-cache block sizes to minimize HBM fragmentation while keeping PCIe Gen5 prefetches efficient?
+details:
+  realistic_solution: 'Adopt a decoupled, two-level memory management architecture to get the best of both worlds. Use 16-token (4MB) logical pages in HBM to strictly minimize internal fragmentation. For a batch of 1024 requests, large 64MB pages would waste ~32GB of HBM due to internal fragmentation. Small 4MB pages reduce this waste to ~2GB. To resolve the PCIe scatter-gather latency tradeoff, manage Host DRAM in large 256-token (64MB) physical segments. Implement an asynchronous compaction engine: when evicting, gather 16-token HBM pages into a contiguous 64MB Host DRAM buffer. When prefetching, issue a single 64MB DMA read over PCIe Gen5.'
+  common_mistake: |
+    **The Pitfall:** Selecting 256-token blocks purely to maximize PCIe throughput.
+    **The Rationale:** Focusing entirely on I/O burst efficiency without modeling the capacity cost of the chosen block size.
+    **The Consequence:** Wasting over 30 GB of ultra-expensive HBM to internal fragmentation, causing Out-Of-Memory errors well before the PCIe bus is saturated.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Block options: 16-token (4MB) vs 256-token (64MB).
+    - PCIe Gen5 Transfer: 64 GB/s.
+
+    **Calculations:**
+    - Large Block Waste (256 tokens): Average waste is 128 tokens (32 MB). For 1024 requests, waste = 32.7 GB of HBM.
+    - Small Block Waste (16 tokens): Average waste is 8 tokens (2 MB). For 1024 requests, waste = 2.0 GB of HBM.
+    - PCIe Transfer Time: 64 MB / 64 GB/s = 1 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 32.7 GB Waste (Memory-Bound)**. Large blocks waste ~32 GB to internal fragmentation, causing premature OOMs. A decoupled page manager is required.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12

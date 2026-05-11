@@ -1,0 +1,36 @@
+schema_version: '1.0'
+id: cloud-4248
+track: cloud
+level: L5
+zone: implement
+topic: autograd-computational-graphs
+competency_area: optimization
+bloom_level: create
+phase: training
+title: Implementing gradient checkpointing for a custom attention mechanism
+scenario: You have a custom chunked attention mechanism for processing 100K-token sequences on an 80GB GPU. Standard checkpointing wraps your attention block, but the recompute during backward is 3x slower than the original forward because it also recomputes the KV cache generation that should be shared across chunks.
+question: How would you checkpoint the 100K-token chunked attention so backward does not recompute shared KV projections?
+details:
+  realistic_solution: Place the checkpoint boundary inside the chunked attention graph, not around the whole attention module. Compute Q/K/V projections once per layer, then pass K and V as explicit inputs to a checkpointed chunk-score/value function so backward recomputes the large score/softmax tensors but does not rebuild shared K/V once per chunk. If HBM is tight, keep K/V for the active layer, offload saved K/V, or use a custom autograd function that saves K/V and recomputes only scores. Use checkpoint with use_reentrant=False and verify saved tensors with torch.autograd.graph.saved_tensors_hooks().
+  common_mistake: |
+    **The Pitfall:** Wrapping the entire attention function (including KV projection) in the checkpoint.
+    **The Rationale:** Developers often treat the entire attention block as a black box for checkpointing, overlooking that intermediate tensors like KV projections are small enough to keep in memory.
+    **The Consequence:** KV projections are redundantly recomputed for every window during the backward pass, turning a memory-saving checkpoint into avoidable recompute that can dominate training throughput.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Batch size = 1, sequence length = 100K, BF16/FP16 tensors = 2 bytes.
+    - Hidden size = 4096, 32 heads, local attention window = 4096.
+    - K and V each have shape [batch, sequence, hidden]; local scores have shape [batch, heads, sequence, window] if materialized.
+
+    **Calculations:**
+    - Attention scores per layer = 1 * 32 * 100,000 * 4,096 * 2 bytes = 26.2 GB.
+    - Across 32 layers, materialized scores would be 26.2 GB * 32 = 838 GB, so scores must be streamed or recomputed.
+    - K/V projections per layer = 1 * 100,000 * 4096 hidden * 2 tensors * 2 bytes = 1.64 GB.
+    - Across 32 layers, retaining all K/V would be 1.64 GB * 32 = 52.4 GB before parameters, optimizer states, and other activations.
+
+    **Conclusion & Interpretation:**
+    - **Result: checkpoint the score/softmax/value chunk, not the Q/K/V projections.** K/V are far smaller than attention scores but not free; save or offload them at the right graph boundary so backward recomputes large score tensors without repeating shared K/V projection work per chunk.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8

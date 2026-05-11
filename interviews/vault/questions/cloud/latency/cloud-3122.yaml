@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-3122
+track: cloud
+level: L4
+zone: diagnosis
+topic: queueing-theory
+competency_area: latency
+bloom_level: analyze
+phase: inference
+title: Diagnose Head-of-Line Blocking in LLM Serving Queue
+scenario: 'An LLM serving system processes requests with median latency 180ms and P99 latency 4.2 seconds at 60% utilization. The service time distribution has high variance: short prompts take 50ms; long prompts take 3.2 seconds. The system uses FCFS scheduling.'
+question: What is causing the 4.2s P99 latency at 60% utilization, and how would you fix the scheduler?
+details:
+  realistic_solution: The 4.2s P99 is caused by head-of-line blocking under FCFS with a high-variance service-time distribution. At 60% utilization, the long 3.2s requests dominate E[S^2], so even short 50ms prompts can sit behind long prompts and inherit multi-second queueing delay. The scheduler fix is shortest-job-first, shortest-remaining-processing-time where preemption is practical, or length-based priority queues. Route short prompts, such as <512 tokens, into a priority lane with admission control so they are not queued behind long generations. The expected improvement is specifically for the short-prompt latency distribution; the overall system P99 still depends on the long-request class.
+  common_mistake: |
+    **The Pitfall:** Adding more GPU capacity to reduce utilization because latency is high.
+    **The Rationale:** Candidates instinctively throw hardware at performance problems without diagnosing that high service time variance (head-of-line blocking) is the true mathematical culprit at 60% utilization.
+    **The Consequence:** Wasting massive capital on new hardware while P99 latency remains unacceptably high for short interactive requests.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - M/G/1 queueing, 60% utilization (ρ=0.6).
+    - Service time: 50% 50ms, 50% 3200ms.
+    - FCFS makes short jobs wait behind long jobs.
+
+    **Calculations:**
+    - Mean service time E[S] = 0.5*50ms + 0.5*3200ms = 1625ms = 1.625s.
+    - E[S²] = 0.5*(0.05s)^2 + 0.5*(3.2s)^2 = 5.121s².
+    - Arrival rate implied by ρ=0.6: λ = ρ / E[S] = 0.6 / 1.625 = 0.369 req/s.
+    - M/G/1 FCFS mean wait from Pollaczek-Khinchine: Wq = λE[S²] / (2(1-ρ)) = 0.369*5.121 / 0.8 = 2.36s.
+    - Mean response time is already E[S] + Wq = 1.625s + 2.36s = 3.99s, so a 4.2s P99 is plausible without needing high utilization.
+    - Under length-based priority, short prompts no longer wait behind 3.2s jobs; their latency is dominated by their 50ms service time plus the short-lane queue, so their P99 can fall to the low hundreds of milliseconds if admission control keeps the short lane lightly loaded.
+
+    **Conclusion & Interpretation:**
+    - **Result: Head-of-line blocking under FCFS is the cause.** Use SJF or length-based priority queues to reduce short-prompt P99; do not claim an overall sub-300ms P99 unless the long-request class is separated or excluded from that SLO.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

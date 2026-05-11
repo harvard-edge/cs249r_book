@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: edge-1198
+track: edge
+level: L4
+zone: diagnosis
+topic: transformer-systems-cost
+competency_area: compute
+bloom_level: analyze
+phase: both
+title: Diagnose Decode Latency Regression from KV Cache Format on Hailo-8
+scenario: A 3B transformer on Hailo-8 shows 8ms/token during the first 32 decode steps, then degrades to 22ms/token for steps 33-128. The KV cache is stored in row-major format [seq][layer][head][dim]. During attention, each layer/head reads K/V across the sequence dimension.
+question: Why does the Hailo-8 transformer slow from 8ms/token to 22ms/token after step 32, and what KV layout fixes it?
+details:
+  realistic_solution: |
+    In a `[seq][layer][head][dim]` layout, the decoder's inner attention loop reads all sequence positions for one layer/head, so consecutive tokens for that head are separated by the full per-token stride across layers and heads. That prevents long DMA bursts and turns a sequential attention scan into many small strided transactions. The slowdown after step 32 is therefore a coalescing and transaction-overhead problem, not a meaningful jump in attention compute. Transposing the cache to `[layer][head][seq][dim]` makes the sequence dimension contiguous for the actual traversal, so each layer/head scan can be read as a burst.
+  common_mistake: |
+    **The Pitfall:** Attributing the latency degradation to the O(n²) scaling of attention compute.
+    **The Rationale:** Candidates know attention compute scales quadratically, but fail to realize the compute difference between N=32 and N=33 is negligible.
+    **The Consequence:** Proposing compute-bound solutions (like sparse attention) instead of addressing the actual memory access pattern and cache line aliasing bottleneck.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Example layout: `[seq][layer][head][dim]` with 8 layers, 8 heads, 64 dim, 2 bytes (FP16).
+    - Useful vector per sequence position for one head: 64 * 2B = 128B.
+    - Per-token stride in the old layout: 8 layers * 8 heads * 64 dim * 2B = 8,192B.
+
+    **Calculations:**
+    - Old layout access for one layer/head over sequence: read 128B, then jump 8KB to the next token's 128B vector.
+    - At 128 tokens and 64 layer/head pairs, that is 128 * 64 = 8,192 tiny strided transactions per decode step.
+    - A 10ns DRAM row penalty alone would be only 8,192 * 10ns = 0.082ms, so it cannot explain a 14ms regression by itself.
+    - The observed 8ms to 22ms jump is explained by lost burst efficiency and DMA transaction overhead once the sequence scan exceeds the small coalescing window.
+    - New layout `[layer][head][seq][dim]`: each layer/head scan is 128 tokens * 128B = 16KB contiguous, reducing 8,192 tiny accesses to 64 burst reads.
+
+    **Conclusion & Interpretation:**
+    - **Result: use `[layer][head][seq][dim]` so the sequence scan is contiguous.** The fix aligns layout with the decoder access pattern; the 14ms regression is a DMA coalescing/burst-efficiency failure, not a simple 10ns row-miss calculation.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

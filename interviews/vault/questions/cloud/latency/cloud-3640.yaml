@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-3640
+track: cloud
+level: L4
+zone: diagnosis
+topic: tail-latency
+competency_area: latency
+bloom_level: analyze
+phase: inference
+title: P99 Latency Spike Diagnosis on H100 Inference Cluster
+scenario: Your H100 inference cluster serves a recommender model at 10K RPS. P50 latency is 8ms, but P99 has crept to 180ms. The SLA requires P99 < 50ms. GPU utilization averages 72%, and you see occasional 2-3 second stalls in traces.
+question: How would you diagnose and reduce the recommender service's P99 latency from 180ms to under the 50ms SLA?
+details:
+  realistic_solution: 'Diagnose tail latency from traces before naming a root cause. Break P99 into queueing delay, batch wait, host preprocessing, RPC fanout, GPU execution, synchronization, and response serialization. The 2-3 second stalls are large enough to contaminate P99 if they affect more than 1% of requests, so correlate them with GC pauses, allocator stalls, model reloads, lock contention, dynamic batching flushes, CUDA context or kernel-launch stalls, NCCL/PCIe issues, and upstream dependency spikes. Mitigations depend on the attribution: cap batch wait below the SLA budget, isolate queues per model or tenant, remove stop-the-world GC and global locks, preallocate GPU buffers, keep CUDA graphs or persistent kernels warm, add hedging or circuit breakers for fanout, and shed or route around overloaded replicas.'
+  common_mistake: |
+    **The Pitfall:** Immediately adding more replicas.
+    **The Rationale:** High tail latency is often misattributed to overall capacity saturation.
+    **The Consequence:** Scaling up fails to address the root cause (synchronization or GC events), wasting money while P99 spikes persist.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 10K RPS, P50 = 8ms. SLA P99 < 50ms.
+    - Stall: 2 seconds every 100 seconds.
+    - Assume requests arriving during a full service stall queue behind it.
+
+    **Calculations:**
+    - In-Flight Requests: 10,000 RPS * 0.008s = 80 requests.
+    - Requests arriving during one 2s stall: 10,000 RPS * 2s = 20,000 requests.
+    - Requests over 100s: 10,000 RPS * 100s = 1,000,000 requests.
+    - Fraction directly exposed to the stall window: 20,000 / 1,000,000 = 2%.
+    - Since P99 is the slowest 1% cutoff, a stall affecting about 2% of requests can dominate P99 unless the queued latency is bounded below 50ms or the affected fraction is reduced below 1%.
+
+    **Conclusion & Interpretation:**
+    - **Result: Tail Stall Dominates P99.** A 2s stall every 100s affects about 2% of requests at 10K RPS, so fixing P99 requires attributing and eliminating the stall path, not only optimizing median GPU execution.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

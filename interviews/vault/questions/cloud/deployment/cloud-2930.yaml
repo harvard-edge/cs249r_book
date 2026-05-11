@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-2930
+track: cloud
+level: L3
+zone: specification
+topic: container-orchestration
+competency_area: deployment
+bloom_level: create
+phase: inference
+title: Set Kubernetes memory limits and readiness probes to prevent vLLM OOMKilled restarts
+scenario: An inference service runs vLLM on 80 GB nodes inside Kubernetes. Operations notices pods are occasionally OOMKilled and restarted, causing 30-second cold-start latency spikes. The pod spec currently sets CPU/RAM limits but no GPU memory limits.
+question: What Kubernetes resource and readiness configuration would reduce vLLM OOMKilled restarts on A100 nodes without over-provisioning?
+details:
+  realistic_solution: 'Use explicit Kubernetes resources for both the host process and the accelerator: set `nvidia.com/gpu: 1` in both `resources.requests` and `resources.limits`, request about 32 GiB CPU RAM, and set a 64 GiB CPU RAM limit for a 7B BF16 vLLM pod. Kubernetes does not enforce an HBM byte limit from the pod spec, so cap vLLM itself with `--gpu-memory-utilization 0.85` on the 80 GB A100, leaving about 12 GB HBM for CUDA graphs, fragmentation, and NCCL/runtime buffers. Add startup and readiness probes against the vLLM health endpoint: the startup probe covers model load and cache initialization, while readiness stays false until the server reports healthy and a small warmup request succeeds. This reduces OOMKilled restarts from host RAM pressure and prevents traffic from hitting pods during 30-second cold starts without reserving the whole node.'
+  common_mistake: |
+    **The Pitfall:** Setting only the GPU limits (`nvidia.com/gpu`) and neglecting the container's CPU memory limit.
+    **The Rationale:** Developers assume LLM serving is entirely GPU-bound and forget that vLLM pins large CPU RAM buffers for KV cache paging and weight loading.
+    **The Consequence:** The Linux OOM killer terminates the host process due to RAM exhaustion, crashing the GPU allocation and spiking latency.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - A100 node: 80 GB HBM.
+    - Example served model: 7B BF16 weights, about 14 GB on GPU and during load.
+    - vLLM GPU memory cap: 85% of 80 GB.
+    - CPU RAM holds tokenizer/runtime state, mmap buffers, temporary load buffers, logs, and page-cache pressure; it is not the same as the GPU KV cache budget.
+
+    **Calculations:**
+    - vLLM HBM budget: 80 GB * 0.85 = 68 GB, leaving 12 GB for allocator fragmentation and runtime overhead.
+    - After 14 GB weights, approximate remaining HBM for KV/cache/workspace inside vLLM's cap: 68 GB - 14 GB = 54 GB.
+    - CPU RAM request: 32 GiB covers normal host-side serving state and load buffers.
+    - CPU RAM limit: 64 GiB gives about 2x request headroom while still allowing Kubernetes to bin-pack safely.
+    - Readiness must stay false during model load and KV/cache warmup, so the service does not send traffic to a pod that is still allocating memory.
+
+    **Conclusion & Interpretation:**
+    - **Result: Resource-Capped and Readiness-Gated vLLM Pod.** Use 1 GPU request/limit, 32 GiB CPU RAM request, 64 GiB CPU RAM limit, an 85% vLLM HBM cap, and startup/readiness probes so Kubernetes schedules the pod predictably and only routes traffic after warmup.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

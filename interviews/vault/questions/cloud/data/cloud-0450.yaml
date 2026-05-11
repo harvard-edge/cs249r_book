@@ -1,0 +1,40 @@
+schema_version: '1.0'
+id: cloud-0450
+track: cloud
+level: L3
+zone: diagnosis
+topic: data-pipeline-engineering
+competency_area: data
+bloom_level: apply
+phase: training
+title: The PCIe Starvation
+scenario: You are training a large vision model using a dataset stored on a local, high-speed NVMe SSD array. Your GPU reports fluctuating utilization, averaging only 35%. Profiling shows that the forward and backward passes are extremely fast, but there are large gaps of GPU inactivity between training steps. You are using PyTorch's DataLoader with pin_memory enabled.
+question: What is the most probable architectural bottleneck causing the GPU to starve?
+details:
+  realistic_solution: The bottleneck is the PCIe bus. Modern GPUs can process data from their High-Bandwidth Memory (HBM) at immense speeds (>3 TB/s). However, the training data must first travel from system RAM to the GPU over the PCIe bus, which tops out at ~64 GB/s (Gen5). The GPU is processing batches faster than the PCIe bus can ship them across the interconnect.
+  common_mistake: |
+    **The Pitfall:** Blaming the NVMe storage or the CPU worker count.
+    **The Rationale:** Engineers see data-loading issues and assume the disks are too slow or the CPU isn't pre-processing fast enough, missing the massive impedance mismatch of the PCIe interconnect.
+    **The Consequence:** Wasting money on faster NVMe arrays or higher-core CPUs without actually improving GPU utilization.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Profiling shows fast forward/backward passes followed by large GPU-idle gaps between steps.
+       - `pin_memory` is enabled, reducing pageable-memory overhead, so the remaining host-to-device path is primarily the PCIe transfer.
+       - Maximum PCIe Gen5 bandwidth is about 64 GB/s theoretical and lower in practice.
+       - The prompt does not specify exact host-to-device bytes per step, so a precise GB/s requirement cannot be derived from batch size alone.
+    2. **Calculations:**
+       - GPU utilization is only 35%, so roughly 65% of wall time is not spent on GPU compute.
+       - Because compute kernels are fast and storage is local high-speed NVMe, the idle gaps point to the staging path into GPU memory.
+       - Large batches that must be copied from host RAM to HBM every step can hit the practical PCIe bandwidth ceiling before HBM or compute is saturated.
+    3. **Conclusion & Interpretation:**
+       - **Result: PCIe-Bandwidth-Bound.** The evidence supports host-to-device transfer over PCIe as the bottleneck; the exact required bandwidth would need measured per-step transfer bytes rather than an assumed batch-volume calculation.
+  options:
+    - The NVMe SSD array cannot provide data fast enough to the CPU.
+    - The bandwidth of the PCIe Gen5 bus is insufficient to keep the GPU's memory fed with data.
+    - The number of CPU workers in the DataLoader is too low, causing a preprocessing bottleneck.
+    - The GPU's L2 cache is too small, causing frequent, slow misses to HBM.
+  correct_index: 1
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6

@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-4146
+track: cloud
+level: L5
+zone: evaluation
+topic: container-orchestration
+competency_area: deployment
+bloom_level: evaluate
+phase: inference
+title: K8s Scheduling Latency for Real-Time Inference
+scenario: Your ML platform auto-deploys new model versions as Kubernetes Deployments. A rolling update replaces old pods with new ones. During the rollout, you observe a 30-second gap where some requests fail with 503 errors.
+question: What caused the 30-second 503 gap during rolling updates, and how would you deploy GPU inference pods with zero downtime?
+details:
+  realistic_solution: 'Root cause: the rollout allowed serving capacity to drop before replacement GPU pods were Ready. Kubernetes does not terminate old pods merely because new pods exist; timing depends on maxSurge, maxUnavailable, readiness, traffic draining, and terminationGracePeriodSeconds. For zero-downtime GPU inference, use a Deployment strategy with maxUnavailable=0 and enough maxSurge capacity to run old and warming pods at the same time. Readiness must return success only after model download, CUDA initialization, and warm-up inference complete. Old pods should fail readiness before shutdown, drain in-flight requests through a preStop hook, and have terminationGracePeriodSeconds sized to the observed drain plus model startup window.'
+  common_mistake: |
+    **The Pitfall:** Assuming maxUnavailable=0 in Kubernetes guarantees zero downtime for ML workloads.
+    **The Rationale:** Candidates trust default Kubernetes orchestration logic without considering the unique initialization delays of GPUs and massive model weights.
+    **The Consequence:** Kubernetes marks old pods for termination immediately, but new pods take 30+ seconds to load weights into VRAM, causing a massive gap where no pods are ready to serve traffic.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Observed rollout gap: 30 seconds of 503s.
+    - New pod readiness path: model pull, CUDA context initialization, and warm-up inference.
+    - Old pods may stop receiving or serving traffic before replacements are Ready if rollout and draining settings are wrong.
+
+    **Calculations:**
+    - If capacity drops at t=0 and new GPU pods become Ready at t=30s, the service has a 30-second window with insufficient Ready endpoints.
+    - maxUnavailable=0 preserves old Ready pods during replacement.
+    - maxSurge>=1 per unavailable capacity unit allows new pods to warm while old pods still serve.
+    - preStop plus terminationGracePeriodSeconds must cover request drain time; readiness must gate traffic until warm-up is complete.
+
+    **Conclusion & Interpretation:**
+    - **Result: the 30-second 503 gap is a rollout/readiness/draining failure.** Readiness after warm-up, maxUnavailable=0, sufficient surge capacity, and graceful shutdown remove the capacity gap instead of trying to mask it with a fixed sleep.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: mobile-1438
+track: mobile
+level: L5
+zone: realization
+topic: encoder-decoder-tradeoffs
+competency_area: architecture
+bloom_level: evaluate
+phase: inference
+title: Sizing On-Device Translation Architectures
+scenario: You are designing an on-device real-time translation system targeting a modern NPU. You need to evaluate the deployment tradeoffs between a 1B parameter encoder-decoder model and a 1.5B parameter decoder-only model.
+question: How should an on-device translation architecture be sized for NPU memory-bandwidth limits?
+details:
+  realistic_solution: |
+    Size the architecture around measured decode-time bandwidth, because batch-1 generation is dominated by the active decoder working set, KV cache, and attention-state reads. Prefer the 1B encoder-decoder design when quality is comparable: it pays an upfront encoder pass once per source sentence, then decodes with a smaller 500M decoder and bounded cross-attention state. The 1.5B decoder-only model is simpler, but its larger decoder working set is the higher-risk choice for a bandwidth-limited NPU. Validate the choice by profiling resident weights, KV reads, encoder-state cache reads, and token latency at the target sentence length.
+  common_mistake: |
+    **The Pitfall:** Assuming fewer total parameters guarantees lower latency.
+    **The Rationale:** Candidates falsely equate total parameter count directly to inference speed, missing the distinction between compute-bound prefill and bandwidth-bound generation.
+    **The Consequence:** Deploying an encoder-decoder architecture that stalls the memory bus during cross-attention generation phases.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Hardware: NPU with 35 TOPS peak, 50 GB/s sustained memory bandwidth.
+    - Precision: 8-bit weights for sizing.
+    - Models: 1B encoder-decoder (500M encoder/500M decoder) vs 1.5B decoder-only.
+    - Translation request: 80 source tokens, 80 generated target tokens.
+    - Weights are resident in shared memory; decode latency depends on the active decoder footprint, KV-cache reads/writes, and cross-attention state, not on a full model-size transfer per token.
+
+    **Calculations:**
+    - Decoder-only resident weight footprint: 1.5B * 1 byte = 1.5 GB.
+    - Encoder-decoder resident footprint: 0.5 GB encoder + 0.5 GB decoder = 1.0 GB, with only the 0.5 GB decoder active on each generated token after the encoder pass.
+    - The encoder pass is paid once for 80 source tokens; its encoded states are cached and reused for all 80 target tokens.
+    - Decode-time KV cache grows with generated target length for both designs; encoder-decoder cross-attention state is bounded by the fixed 80-token source rather than by the full parameter count.
+    - Qualitative bandwidth pressure: decoder-only repeatedly touches a larger active decoder and larger decoder KV path, while encoder-decoder shifts work to one upfront encoder pass and a smaller per-token decoder.
+
+    **Conclusion & Interpretation:**
+    - **Result: prefer the encoder-decoder design when quality is comparable.** It trades one upfront encoder pass and bounded cross-attention reads for a smaller active decoder footprint; choose decoder-only only if profiling shows its larger decode path, KV cache, and bandwidth demand still meet the latency target.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 13
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

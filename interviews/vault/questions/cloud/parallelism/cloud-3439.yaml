@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-3439
+track: cloud
+level: L5
+zone: evaluation
+topic: gradient-synchronization
+competency_area: parallelism
+bloom_level: analyze
+phase: training
+title: Optimizing Gradient Synchronization for LLM Training on H100 Clusters
+scenario: 'You are tasked with training a large language model with 175 billion parameters using synchronous data-parallel training. You have access to NVIDIA H100 GPUs. Consider two proposed infrastructure architectures for gradient synchronization: Architecture A (single server with 8x H100s via NVLink) and Architecture B (two servers, 4x H100s each, via 200 Gb/s Ethernet).'
+question: Which gradient synchronization strategy would you use for 175B-parameter training on 8 H100s in one NVLink server versus two 4-GPU servers over 200 Gb/s Ethernet?
+details:
+  realistic_solution: |
+    For Architecture A, use standard synchronous NCCL AllReduce or reduce-scatter/all-gather over the 8-GPU NVLink fabric, bucketed and overlapped with backward compute. The single-server topology has enough bandwidth that uncompressed BF16 gradient synchronization is the clean default. For Architecture B, use hierarchical synchronization: first reduce within each 4-GPU NVLink node, then exchange only the reduced buckets across the 200 Gb/s Ethernet link, and finally broadcast or all-gather within each node. If the cross-node link still dominates, add gradient accumulation and carefully validated compression for the inter-node phase; do not switch to asynchronous SGD unless the training recipe tolerates staleness.
+  common_mistake: |
+    **The Pitfall:** Underestimating the communication overhead and focusing purely on compute TFLOPS.
+    **The Rationale:** Candidates assume standard networking (200 Gbps) is "fast enough" for distributed deep learning without calculating the raw gradient transfer time.
+    **The Consequence:** Training throughput is completely destroyed by synchronization wait times, leaving the powerful H100s idle 95% of the time.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 175B params in FP16 (2 bytes/param) = 350 GB gradient size.
+    - Arch A: NVLink ~1.2 TB/s effective across 8 GPUs.
+    - Arch B: 200 Gb/s Ethernet = 25 GB/s.
+
+    **Calculations:**
+    - Ring all-reduce traffic per GPU is about 2 * (N - 1) / N * gradient_size = 2 * 7/8 * 350 GB = 612.5 GB.
+    - Arch A rough lower bound: 612.5 GB / 1200 GB/s = 0.51 seconds if the whole model were synchronized as one exposed bucket; overlap and bucketization hide part of this.
+    - In Arch B, the unavoidable inter-node exchange after local reduction is roughly one 350 GB gradient payload in each direction across the 25 GB/s link.
+    - Arch B inter-node lower bound: 350 GB / 25 GB/s = 14 seconds before protocol overhead.
+
+    **Conclusion & Interpretation:**
+    - **Result: Architecture A should use standard overlapped NCCL collectives; Architecture B needs hierarchical reduction and likely accumulation or compression because the cross-node phase alone is about 14 seconds.** The Ethernet topology, not H100 compute, sets the synchronization strategy.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,39 @@
+schema_version: '1.0'
+id: cloud-4301
+track: cloud
+level: L4
+zone: diagnosis
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: analyze
+phase: inference
+title: Decode Preemption and KV Swap
+scenario: Under heavy load, your decode scheduler preempts low-priority in-flight sequences by swapping their KV-cache to CPU DRAM to free HBM for new high-priority requests. Resume waves restore about 30 GB of KV over PCIe while decoding continues. Users report that preempted requests, when resumed, have TPOT 8x higher than normal for the first 20 tokens before recovering.
+question: Why do resumed preempted sequences have 8x TPOT for the first 20 tokens, and how would you fix it?
+details:
+  realistic_solution: 'When a preempted sequence resumes, its KV-cache must be restored from CPU DRAM to GPU HBM before decode can run at normal speed. The 8x slowdown is caused by KV swap-in latency and insufficient overlap: the first resumed decode steps are waiting behind PCIe transfers or reading partially restored blocks. Fix it with asynchronous bulk restore before scheduling the sequence, double-buffered KV blocks, restore prioritization for soon-to-run sequences, fewer preemptions through a larger HBM KV pool, and admission control so resume waves do not saturate PCIe.'
+  common_mistake: |
+    **The Pitfall:** Attributing the slowdown to CPU-GPU synchronization overhead or Python scheduler latency.
+    **The Rationale:** Candidates often jump to software overheads when seeing latency spikes upon resuming a task, forgetting hardware data movement.
+    **The Consequence:** The real cause (PCIe bandwidth saturation or page faults) is ignored, leading to ineffective software-only fixes.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Normal TPOT: 60 ms/token.
+    - Resume wave restores 30 GB of KV over PCIe.
+    - Effective PCIe bandwidth after contention: ~64 GB/s.
+    - Restore is not overlapped with the first 20 resumed decode steps.
+
+    **Calculations:**
+    - KV restore time: 30 GB / 64 GB/s = 0.469 s = 469 ms.
+    - If that restore blocks the first resumed token, observed TPOT for the first token is approximately 469 ms.
+    - Slowdown ratio: 469 ms / 60 ms = 7.8x, which appears as an 8x TPOT spike.
+    - Once the restore completes and blocks are resident in HBM, TPOT returns toward the normal 60 ms/token.
+
+    **Conclusion & Interpretation:**
+    - **Result: 8x Overhead (Memory-Bound)**. The direct cause is KV restore latency on the resume path, especially when swap-in is not overlapped or buffered before decode resumes.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+math_verified: true

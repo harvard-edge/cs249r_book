@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-2274
+track: cloud
+level: L5
+zone: diagnosis
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: evaluate
+phase: training
+title: The Caching Allocator Fragmentation Trap
+scenario: Your serving system runs a 13B model. System tools report 45GB used, and PyTorch telemetry shows 30GB allocated. Yet when you try to allocate a 20GB KV-cache buffer, PyTorch throws an OOM error despite 50GB appearing 'free' on the device.
+question: Why does the allocation fail, and what is the role of PyTorch's caching allocator in this failure?
+details:
+  realistic_solution: 'PyTorch''s CUDACachingAllocator distinguishes allocated tensor memory from memory reserved by PyTorch but currently held in allocator pools. System tools can show memory that appears free from the model''s point of view, while PyTorch has reserved blocks split across size classes and streams. A 20GB KV-cache request can fail when the allocator cannot find or obtain a sufficiently large available block from its pools or from the driver after accounting for reserved memory, fragmentation, and other process usage. Diagnosis: `torch.cuda.memory_stats()` shows `allocated_bytes`, `reserved_bytes`, inactive split blocks, and `num_alloc_retries`. Fix: (1) `torch.cuda.empty_cache()` can return unused cached blocks to the CUDA driver, at reallocation cost, (2) pre-allocate the KV-cache at startup before allocator fragmentation, (3) tune allocator splitting such as `max_split_size_mb`, and (4) use memory-pool-aware KV management like vLLM''s PagedAttention.'
+  common_mistake: |
+    **The Pitfall:** Confusing system 'used memory' with PyTorch's actual allocated memory.
+    **The Rationale:** Failing to understand that PyTorch uses a caching memory allocator that holds onto freed CUDA blocks instead of returning them to the driver.
+    **The Consequence:** Spending hours debugging phantom OOM errors caused by memory fragmentation within PyTorch's own cache.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - System Used Memory: 45GB.
+       - PyTorch Allocated Memory: 30GB.
+       - Difference between system-used and allocated memory: 15GB reserved/cached by PyTorch.
+       - Device tools also report 50GB apparently free, but that is not the same as one immediately usable PyTorch allocation.
+       - Requested Allocation: 20GB KV-cache buffer.
+    2. **Calculations:**
+       - Cached/reserved-but-unallocated memory visible to PyTorch = 45GB system used - 30GB allocated = 15GB.
+       - The new request is 20GB, so the allocator cannot satisfy it from cached free blocks alone.
+       - It must either release cached blocks and obtain a large new allocation from the driver, or fail if fragmentation, stream ordering, or other reservations prevent that.
+    3. **Conclusion & Interpretation:**
+       - **Result: OOM Error (Allocator-Fragmentation/Reservation-Bound).** The failure comes from the allocator's reserved-vs-allocated state and fragmented free pools, not from a literal lack of physical contiguous GPU memory.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

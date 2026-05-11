@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-4466
+track: cloud
+level: L4
+zone: specification
+topic: recommendation-systems-engineering
+competency_area: architecture
+bloom_level: apply
+phase: inference
+title: Multi-Stage Ranking Latency Budget Decomposition
+scenario: 'A recommendation pipeline has a 100ms total latency SLO. It runs: retrieval (ANN search), light ranking (score 10K candidates), and heavy ranking (score 500 candidates).'
+question: How would you allocate a 100ms recommendation latency budget across retrieval, light ranking, and heavy ranking?
+details:
+  realistic_solution: |
+    Allocate the 100ms budget from measured stage latency, not ideal accelerator math. A reasonable starting budget is about 5-10ms for retrieval, 15-25ms for light ranking, 40-55ms for heavy ranking, and 20-30ms for shared overhead such as feature fetch, RPCs, serialization, batching delay, sorting, and fallbacks. Retrieval should be tight because it is approximate and heavily indexed; light ranking gets enough budget to score 10K candidates and reduce fanout; heavy ranking receives the largest share because it is the quality-critical stage over the final 500 candidates. Keep p99 headroom in each stage and rebalance after trace measurements rather than treating the first split as a fixed contract.
+  common_mistake: |
+    **The Pitfall:** Allocating latency budget equally across stages (33ms each).
+    **The Rationale:** Retrieval is embarrassingly parallel and can be very fast, while heavy ranking is the accuracy bottleneck and should receive the most budget.
+    **The Consequence:** Equal allocation wastes budget on fast stages and under-allocates to the quality-critical stage.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Total SLO is 100ms end to end.
+    - Pipeline stages are retrieval, light ranking over 10K candidates, heavy ranking over 500 candidates, and shared serving overhead.
+    - Production p99 latency includes feature fetches, RPCs, batching delay, sorting, cache misses, and scheduler overhead, not just model FLOPs.
+
+    **Calculations:**
+    - Example starting split: retrieval 8ms, light ranking 20ms, heavy ranking 47ms, shared overhead 25ms.
+    - Total = 8 + 20 + 47 + 25 = 100ms.
+    - Each stage should target measured p99 below its allocation with local headroom; for example, if retrieval p99 is 4ms, the extra 4ms can absorb index growth or be reallocated.
+    - If heavy ranking p99 exceeds about 47ms, reduce candidate count, simplify features, batch differently, or move work into the light ranker rather than borrowing all overhead budget.
+
+    **Conclusion & Interpretation:**
+    - **Result: measured-budget allocation.** A practical split gives the largest budget to heavy ranking while preserving explicit overhead and p99 headroom; exact numbers should be tuned from traces, not idealized FLOP or bandwidth calculations.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

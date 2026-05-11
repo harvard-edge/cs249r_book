@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-2971
+track: cloud
+level: L5
+zone: design
+topic: fault-tolerance-checkpointing
+competency_area: reliability
+bloom_level: create
+phase: training
+title: 'Fault Tolerance: Design Checkpointing Architecture for 1024-GPU Training'
+scenario: You are designing checkpointing for a 175B model training on 1,024 GPUs. The full checkpoint is 700GB. Your shared Lustre filesystem peaks at 200 GB/s write throughput.
+question: What checkpointing strategy minimizes interruption for a 175B model on 1,024 GPUs while preserving full recovery capability?
+details:
+  realistic_solution: Use asynchronous sharded checkpointing with a rollback-safe commit protocol. Each host snapshots its GPU shards into CPU memory or local NVMe, records the training step and shard manifest, and immediately resumes training once the local snapshot is consistent. Background writers flush shards to Lustre using temporary names, fsync or otherwise wait for acknowledged durable completion, verify sizes/checksums, and then atomically publish a manifest that marks the checkpoint complete. Recovery loads only the latest committed manifest; incomplete async writes are ignored or retried from local staging.
+  common_mistake: |
+    **The Pitfall:** Blocking all GPUs during the full checkpoint write to network storage.
+    **The Rationale:** It guarantees consistency and avoids complex async buffer management.
+    **The Consequence:** Creating a massive I/O traffic jam that locks up 1,024 expensive GPUs for 30-60 seconds due to filesystem contention, burning huge amounts of money as overhead.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Hardware: 1,024 GPUs.
+    - Checkpoint size: 700GB.
+    - Shared Lustre filesystem peak write: 200 GB/s.
+    - Local snapshot uses CPU memory or local NVMe staging on each host; assume 8 GPUs per host and a conservative 100 GB/s aggregate host staging bandwidth.
+
+    **Calculations:**
+    - Per-GPU checkpoint shard: 700GB / 1024 = 683MB.
+    - Per-host checkpoint shard: 700GB / 128 hosts = 5.47GB.
+    - Local snapshot pause per host: 5.47GB / 100 GB/s = ~55ms, plus coordination overhead; budget ~100ms before GPUs resume.
+    - Async Lustre write completion: 700GB / 200 GB/s = ~3.5s cluster-wide at peak.
+    - Required local staging for one in-flight checkpoint: 700GB total, or 5.47GB per host; provision at least 2 in-flight checkpoints to survive a delayed background write.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~100ms Training Pause, ~3.5s Background Completion.** The design minimizes interruption only if local staging is consistent and durable enough to cover the background Lustre write window. Full recovery is unambiguous because a checkpoint is eligible for restore only after all shards are verified and the durable commit manifest is published.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

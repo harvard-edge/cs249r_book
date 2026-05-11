@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: tinyml-0110
+track: tinyml
+level: L5
+zone: evaluation
+topic: accelerator-comparison
+competency_area: compute
+bloom_level: evaluate
+phase: inference
+title: The Heterogeneous MCU Scheduling Problem
+scenario: 'You''re deploying a multi-modal anomaly detection system on a heterogeneous MCU. Your system runs two models: a vibration FFT + classifier (compute-heavy, 2M MACs) and a temperature trend LSTM (memory-heavy, 500K MACs but 180 KB of state).'
+question: If both models must complete once per sampling cycle and may run in parallel, which i.MX RT1170 core should run the 2M-MAC vibration classifier and which should run the 180 KB-state temperature LSTM?
+details:
+  realistic_solution: Assign by bottleneck type, subject to memory placement. Run the 2M-MAC vibration classifier on the M7 because it is compute-bound and benefits from the 1 GHz core, FPU, DSP instructions, and caches. Run the temperature LSTM on the M4 only if its 180 KB recurrent state plus working buffers fit in SRAM accessible to that core without starving shared buffers; otherwise the memory plan must be changed before the core assignment is valid. With independent models, parallel execution latency is bounded by the slower of the two scheduled tasks, plus shared-memory handoff overhead. The intended assignment is M7 for the classifier and M4 for the LSTM, but the release-quality justification is memory-fit and contention analysis, not an unsupported fixed energy percentage.
+  common_mistake: |
+    **The Pitfall:** Putting both models on the faster M7 core.
+    **The Rationale:** Candidates assume the faster core will complete tasks quicker sequentially, ignoring the massive cache thrashing caused by the memory-bound LSTM model.
+    **The Consequence:** Wasting the M4 entirely, doubling inference latency, and dramatically increasing energy consumption.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Vibration classifier: 2M MACs, compute-heavy.
+    - Temperature LSTM: 500K MACs, 180 KB recurrent state plus working buffers.
+    - i.MX RT1170 has heterogeneous M7/M4 cores with different compute capability and memory access paths.
+    - The M4 assignment is valid only if the LSTM state and arena fit in SRAM available to the M4 and leave room for communication buffers.
+
+    **Calculations:**
+    - Classifier mapping: high MAC count and cache-friendly compute path -> M7.
+    - LSTM mapping: lower MAC count but large recurrent state -> M4 if the 180 KB state plus activation arena fit in M4-accessible SRAM.
+    - Parallel latency model: total cycle time ≈ max(M7 classifier time, M4 LSTM time) + synchronization overhead.
+    - If the LSTM does not fit locally, the plan becomes invalid because shared-memory traffic or external-memory placement can dominate any parallelism benefit.
+
+    **Conclusion & Interpretation:**
+    - **Result: M7 for compute-heavy classifier, M4 for LSTM only after SRAM fit is proven**. The core choice follows bottlenecks and memory placement; unsupported fixed speedup or energy claims should not drive the decision.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

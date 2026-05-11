@@ -1,0 +1,35 @@
+schema_version: '1.0'
+id: cloud-2578
+track: cloud
+level: L5
+zone: evaluation
+topic: vram-budgeting
+competency_area: memory
+bloom_level: evaluate
+phase: both
+title: Flat Versus Hierarchical ZeRO Communication for a 30B Model on 64 GPUs
+scenario: For a 30B model on 64 GPUs across 8 nodes (NVLink intra-node, 100 Gbps inter-node), you must select a parallelism strategy.
+question: 'Which is more communication-efficient for the 30B model: flat ZeRO-3 across 64 GPUs or hierarchical ZeRO, and why?'
+details:
+  realistic_solution: |
+    Option A (flat ZeRO-3): parameters are sharded across all 64 GPUs, so parameter all-gathers for forward and backward cross node boundaries, and gradient reduce-scatter also crosses nodes. With a 60 GB FP16 model, an idealized per-node ring-collective estimate counts three cross-node model-sized phases: forward parameter all-gather, backward parameter all-gather, and gradient reduce-scatter. That gives 60 GB * 3 * 7/8 = 157.5 GB over the 100 Gbps fabric, or 12.6s before overlap. Option B (hierarchical ZeRO): shard parameters within each 8-GPU NVLink node and organize the nodes as data-parallel replicas that synchronize gradients across the inter-node fabric. Parameter all-gathers stay on NVLink; the main cross-node exchange is data-parallel gradient synchronization, about 2 * 60 GB * 7/8 = 105 GB, or 8.4s before overlap. The exact values depend on microbatching, prefetch, overlap, and implementation details, but Option B is more communication-efficient because it keeps latency-sensitive parameter gathers off the slow inter-node link.
+  common_mistake: |
+    **The Pitfall:** Applying ZeRO-3 uniformly across all nodes without considering network topology.
+    **The Rationale:** Engineers fail to realize that inter-node Ethernet/InfiniBand is an order of magnitude slower than intra-node NVLink.
+    **The Consequence:** Massive network bottlenecks during the forward/backward passes as parameters are fetched across slow inter-node links.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 30B model (60 GB at FP16).
+    - 64 GPUs across 8 nodes.
+    - Network: NVLink intra-node, 100 Gbps (12.5 GB/s) inter-node.
+    - Simplified per-node ring model before overlap; optimizer-state traffic and microbatch effects are ignored.
+    - The 7/8 factor is the ideal ring term for 8 nodes; it is applied only to inter-node phases in this rough comparison.
+
+    **Calculations:**
+    - Flat ZeRO-3 (Option A): illustrative cross-node traffic = 60 GB * 3 phases * (7/8 cross-node factor) = 157.5 GB. The three inter-node phases are forward parameter all-gather, backward parameter all-gather, and gradient reduce-scatter. Ideal time = 157.5 / 12.5 = 12.6s.
+    - Hierarchical ZeRO (Option B): parameter gathers stay within each NVLink node; illustrative cross-node gradient all-reduce = 60 GB * 2 * (7/8) = 105 GB. Ideal time = 105 / 12.5 = 8.4s.
+
+    **Conclusion & Interpretation:**
+    - **Result: Network-Bound by Inter-Node Links.** Under this simplified illustrative model, hierarchical ZeRO reduces estimated cross-node traffic by 52.5 GB per step and keeps parameter all-gathers on NVLink.
+status: published
+provenance: imported

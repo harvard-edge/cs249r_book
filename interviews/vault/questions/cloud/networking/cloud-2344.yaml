@@ -1,0 +1,37 @@
+schema_version: '1.0'
+id: cloud-2344
+track: cloud
+level: L4
+zone: design
+topic: collective-communication
+competency_area: networking
+bloom_level: create
+phase: both
+title: Hybrid Interconnect MoE Routing
+scenario: 'You are architecting the deployment for an 8x100B Mixture-of-Experts model on a cloud instance with 8 GPUs. The GPUs are connected via a hybrid topology: pairs of GPUs have NVLink bridges (100 GB/s bidirectional), but pairs connect to each other via a central PCIe Gen4 switch (32 GB/s). The MoE token routing requires an All-to-All collective of 2 GB per GPU per layer. The training throughput is currently degraded by 60% compared to dense models of similar FLOPs.'
+question: How would you map the 2GB-per-GPU MoE All-to-All onto the NVLink-pair plus PCIe-switch topology to reduce the 60% throughput loss?
+details:
+  realistic_solution: |
+    The architectural requirement is to map the logical MoE token routing to the physical asymmetric interconnect. A standard, flat All-to-All treats all links equally, causing severe congestion on the slower PCIe switch while underutilizing the NVLink bridges. The solution is to architect a hierarchical All-to-All algorithm: Phase 1 performs local exchange within the NVLink-connected pairs and aggregates tokens by destination pair. Phase 2 sends coalesced pair-to-pair streams across the PCIe switch. Phase 3 distributes the tokens locally again over NVLink. This does not magically remove cross-pair traffic under uniform routing, but it reduces small PCIe transfers, preserves pair-local traffic on NVLink, and gives the runtime a communication schedule matched to the 3.1x bandwidth asymmetry.
+  common_mistake: |
+    **The Pitfall:** Using a standard, flat NCCL All-to-All collective for MoE routing.
+    **The Rationale:** Standard collectives assume a uniform bandwidth topology and treat all peer-to-peer links equally.
+    **The Consequence:** Severe congestion on the slower PCIe switch while massively underutilizing the high-speed NVLink bridges, causing a severe training bottleneck.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 8 GPU node. 2 GB/GPU All-to-All.
+    - NVLink pairs are (0,1), (2,3), (4,5), and (6,7).
+    - Token destinations are uniform across the 8 GPUs.
+    - NVLink pair bandwidth: 100 GB/s. PCIe switch bandwidth: 32 GB/s.
+
+    **Calculations:**
+    - Flat All-to-All payload per GPU to remote peers: 7/8 × 2 GB = 1.75 GB.
+    - Of that, 1 peer is the NVLink partner and 6 peers are outside the pair, so PCIe-bound payload is 6/8 × 2 GB = 1.5 GB per GPU.
+    - Node-wide PCIe-bound payload is 8 × 1.5 GB = 12 GB of logical cross-pair traffic, scheduled bidirectionally through the PCIe switch.
+    - Hierarchical All-to-All first exchanges/aggregates within each NVLink pair, then sends one coalesced stream per destination pair over PCIe, then redistributes within the destination pair over NVLink.
+    - The hierarchy does not change the logical cross-pair token volume under uniform routing, but it reduces PCIe transaction count, avoids treating the NVLink partner like a PCIe peer, and lets the scheduler use pair-level streams that better match the asymmetric topology.
+
+    **Conclusion & Interpretation:**
+    - **Result: Bandwidth Over-subscription.** A flat topology mapping over-saturates the PCIe switch and underuses pair-local NVLink. A hierarchical pair-aware All-to-All reduces overhead and contention; exact transfer time depends on the switch schedule and concurrent bidirectional utilization.
+status: published
+provenance: imported

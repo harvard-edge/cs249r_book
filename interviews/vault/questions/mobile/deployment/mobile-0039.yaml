@@ -1,0 +1,35 @@
+schema_version: '1.0'
+id: mobile-0039
+track: mobile
+level: L6+
+zone: mastery
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: create
+phase: inference
+title: The Multi-Model Orchestration Nightmare
+scenario: 'Your team is building a sophisticated AR application that requires running three ML models concurrently: a body pose estimation (high-res video input, GPU/NPU), a small speech recognition (audio input, CPU), and a gesture classifier (low-res video region, NPU). All must run in real-time.'
+question: How would you orchestrate pose, speech, and gesture models concurrently on one mobile SoC without missing real-time budgets?
+details:
+  realistic_solution: 'A robust pipeline requires hardware-aware scheduling: 1. **Task Prioritization & Scheduling:** Identify the latency-sensitive model, assign higher OS thread priorities for pre/post-processing and accelerator dispatch, and use asynchronous queues with explicit deadlines. 2. **Accelerator Allocation & Contention Management:** Speech is CPU-bound and targets big cores. Pose and gesture both target the NPU, so do not let two NPU graphs thrash concurrently; batch or sequence the small gesture classifier immediately after pose, or run it at a lower cadence when pose owns the NPU. 3. **Memory Bandwidth Management:** Minimize copies with zero-copy shared buffers (`AHardwareBuffer`) and reuse preprocessed regions. 4. **Power & Thermal Management:** Monitor DVFS/thermal state and degrade cadence or resolution before real-time budgets are missed.'
+  common_mistake: |
+    **The Pitfall:** Simply dispatching all models in parallel on different threads and hoping the OS resolves the contention.
+    **The Rationale:** Developers rely on default abstractions without manually configuring OS thread priorities, NPU time-slicing, and memory bus traffic control.
+    **The Consequence:** Severe accelerator contention, context-switching overhead, and missed real-time latency deadlines (jank).
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 3 models: Pose (NPU), Speech (CPU), Gesture (NPU).
+    - Pose latency: 30ms inference + 20ms pre/post.
+    - Gesture latency: 10ms inference.
+    - Shared LPDDR5 bus bandwidth: 60 GB/s.
+
+    **Calculations:**
+    - NPU serial budget if sequenced: Pose NPU 30ms + Gesture NPU 10ms = 40ms of accelerator work in the frame window.
+    - Shared memory demand: Pose (20 GB/s) + Speech (5 GB/s) + Gesture (5 GB/s) = 30 GB/s.
+    - Bus utilization: 30 GB/s / 60 GB/s = 50%.
+    - Headroom: 60 GB/s - 30 GB/s = 30 GB/s for camera, display, OS, and burst traffic.
+
+    **Conclusion & Interpretation:**
+    - **Result: 50% estimated bus utilization plus 40ms sequenced NPU work (Contention-Bound)**. Speech should stay on CPU big cores, pose should own the NPU during its deadline, and gesture should be sequenced, batched, or rate-limited to avoid NPU time-slicing jitter while preserving memory headroom.
+status: published
+provenance: imported

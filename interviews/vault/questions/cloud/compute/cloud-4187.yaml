@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-4187
+track: cloud
+level: L3
+zone: fluency
+topic: gpu-compute-architecture
+competency_area: compute
+bloom_level: apply
+phase: both
+title: Tensor Core Utilization vs CUDA Core Fallback
+scenario: An H100 has 989 TFLOPS FP16 Tensor Core throughput but only 67 TFLOPS FP16 on CUDA cores. Your kernel performs a $4096 \times 4096$ matrix multiplication followed by a GELU activation.
+question: What is the unfused runtime breakdown for the 4096 x 4096 matmul plus GELU, and why does fusion matter?
+details:
+  realistic_solution: Unfused total is roughly matmul 0.139ms + GELU arithmetic 0.002-0.003ms + extra HBM traffic about 0.02ms, before launch overhead. The bottleneck is not the GELU arithmetic itself; it is the separate element-wise kernel and extra HBM read/write round-trip caused by not fusing GELU into the matmul epilogue.
+  common_mistake: |
+    **The Pitfall:** Assuming the GELU activation time is negligible because it has far fewer FLOPs than the matrix multiplication.
+    **The Rationale:** Candidates forget that element-wise activations run on slower CUDA cores (not Tensor Cores) and, critically, require full HBM round-trips when unfused.
+    **The Consequence:** Failing to implement kernel fusion, leaving massive performance gains on the table because the system is starved by memory latency.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Operation: 4096 x 4096 Matmul + GELU.
+    - Hardware: H100 (989 TFLOPS Tensor Cores, 67 TFLOPS CUDA Cores).
+
+    **Calculations:**
+    - Matmul FLOPs: 2 * 4096^3 = 137.4e9 FLOPs.
+    - Matmul time on Tensor Cores: 137.4e9 / 989e12 = 0.139 ms.
+    - GELU elements: 4096^2 = 16.78M. At roughly 10 FP16-equivalent ops/element, GELU is about 168M ops.
+    - GELU arithmetic lower bound on CUDA cores: 168e6 / 67e12 = 0.0025 ms.
+    - Extra unfused HBM traffic: read 16.78M FP16 values and write 16.78M FP16 values = about 67 MB.
+    - With about 3.3 TB/s HBM bandwidth, memory lower bound = 67 MB / 3.3 TB/s = about 0.020 ms.
+    - Total lower-bound unfused time: 0.139 + 0.0025 + 0.020 = about 0.162 ms, plus kernel-launch and scheduling overhead.
+
+    **Conclusion & Interpretation:**
+    - **Result: about 0.16 ms lower-bound unfused total.** GELU arithmetic is small relative to matmul; fusion matters because it removes a separate memory pass and launch overhead that can dominate the activation kernel.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

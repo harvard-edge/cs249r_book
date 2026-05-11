@@ -80,7 +80,8 @@ def calc_monthly_egress_cost(bytes_per_sec, cost_per_gb):
     """Calculates monthly cloud egress cost based on standard cloud egress rates."""
     b_s = _ensure_unit(bytes_per_sec, ureg.byte / ureg.second, "bytes_per_sec")
     monthly_bytes = b_s * (30 * ureg.day)
-    cost = monthly_bytes * cost_per_gb
+    cost_rate = _ensure_unit(cost_per_gb, ureg.dollar / ureg.gigabyte, "cost_per_gb")
+    cost = monthly_bytes * cost_rate.to(ureg.dollar / ureg.byte)
     return cost.m_as(ureg.dollar)
 
 def calc_fleet_tco(unit_cost, power_w, quantity, years, kwh_price):

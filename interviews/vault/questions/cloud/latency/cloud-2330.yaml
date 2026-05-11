@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-2330
+track: cloud
+level: L4
+zone: specification
+topic: profiling-bottleneck-analysis
+competency_area: latency
+bloom_level: evaluate
+phase: both
+title: MoE Router Overhead in FP8 Inference
+scenario: You are serving a 140B MoE model. The entire model (weights and activations) is quantized to FP8 E4M3. However, because MoE router logits overflow the E4M3 range, the architecture requires casting activations to E5M2 just for the router, then back to E4M3. This casting introduces a 15ms latency penalty per generated token.
+question: How would you eliminate the 15ms/token router casting penalty while preventing FP8 E4M3 router overflow?
+details:
+  realistic_solution: |
+    Keep the FP8 deployment for the experts and dense blocks, but carve the router out as an explicit mixed-precision exception. The router should consume the layer activation in a fused routing kernel that converts only the small router input fragment to BF16/FP16 or accumulates the logits in FP32, computes softmax/top-k safely, and returns expert IDs/weights without writing an E5M2 activation tensor and then converting it back to E4M3. An even simpler implementation is to store router weights and run router matmuls in BF16/FP16 while the rest of the model remains FP8. This eliminates the per-layer cast kernels and intermediate format traffic, prevents E4M3 overflow in router logits, and keeps the memory overhead tiny because router weights are a small fraction of a 140B MoE.
+  common_mistake: |
+    **The Pitfall:** Attempting to optimize the casting kernels using shared memory tricks to speed up the E4M3 to E5M2 conversion.
+    **The Rationale:** Engineers often reach for low-level CUDA optimization when faced with latency penalties, missing the architectural flaw.
+    **The Consequence:** Wasting effort optimizing a kernel that shouldn't exist, as the casting overhead will still remain a bottleneck.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Observed router format-conversion penalty: 15ms/token.
+    - Mitigation preserves FP8 for non-router weights/activations and removes separate E4M3->E5M2->E4M3 router cast kernels.
+    - Router compute and parameters are small relative to expert FFN work and the full 140B-parameter model.
+
+    **Calculations:**
+    - The current path pays the measured cost of separate E4M3->E5M2 and E5M2->E4M3 conversions on the critical token path: 15ms/token.
+    - A router-specific BF16/FP16 or FP32-accumulation path avoids exposing router logits to E4M3 range limits.
+    - Because only router weights/activations use the exception path, the added memory is tiny relative to 140B FP8 weights; the design should be chosen for latency and numerical range, not model-capacity savings.
+    - The defensible latency bound is qualitative: the fix can recover most of the observed 15ms/token if the fused router path replaces the standalone cast kernels and does not add equivalent synchronization or materialization elsewhere.
+
+    **Conclusion & Interpretation:**
+    - **Result: Latency-Path Bound.** Use a router-specific higher-precision or fused mixed-precision path while leaving the rest of the model in FP8; this removes the measured 15ms/token cast path without exposing router logits to E4M3 overflow.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+  - inference
+  - fp8
+  - moe

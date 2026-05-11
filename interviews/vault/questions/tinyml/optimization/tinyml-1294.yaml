@@ -1,0 +1,37 @@
+schema_version: '1.0'
+id: tinyml-1294
+track: tinyml
+level: L4
+zone: specification
+topic: graph-compilation
+competency_area: optimization
+bloom_level: analyze
+phase: inference
+title: Ethos-U55 Operator Offloading and Fallback Analysis
+scenario: A custom CNN compiled for Cortex-M7 with Ethos-U55 triggers an unsupported activation fallback, forcing the subgraph back to the host CPU.
+question: How would you analyze the system-level implications of this compilation outcome and specify a graph optimization strategy to satisfy strict latency constraints?
+details:
+  realistic_solution: Analyze the fallback as a graph-partitioning problem, not just a slow single operator. Moving an intermediate tensor from Ethos-U55 to the Cortex-M7 and back adds SRAM traffic, synchronization, cache effects, and scheduling overhead that can dominate a small activation's arithmetic. The optimization strategy is to rewrite or approximate the custom activation with Ethos-U55-supported operators, fuse it with adjacent supported layers when possible, or deliberately repartition the graph so the tensor crosses the CPU/NPU boundary as few times as possible. If a LUT form is supported for the activation and data type, target that supported path through Vela; otherwise choose a supported piecewise or clamp-based equivalent and re-profile the compiled graph.
+  common_mistake: |
+    **The Pitfall:** Assuming the only penalty is the slower localized execution of the custom activation on the Cortex-M7 CPU.
+    **The Rationale:** Candidates analyze computational FLOPs but miss the monolithic memory bandwidth penalty caused by bouncing execution domains.
+    **The Consequence:** They trigger extra SRAM traffic and partition overhead that can break the latency budget even when the custom activation's arithmetic cost looks small.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Hardware: Cortex-M7 with Ethos-U55 (512 KiB shared SRAM).
+       - Intermediate Tensor: 64 channels * 50 features * 1 byte = 3,200 bytes.
+       - Sustainable shared-SRAM bandwidth must be measured; use 4 bytes/cycle only as an illustrative planning value.
+    2. **Calculations:**
+       - If fallback requires NPU output materialization, M7 read, M7 write, and NPU read, traffic is 4 * 3,200 bytes = 12,800 bytes.
+       - Illustrative transfer penalty: 12,800 bytes / 4 bytes/cycle = 3,200 cycles, before synchronization and cache effects.
+       - A supported fused or LUT-style NPU path can avoid most of those boundary-crossing transfers.
+    3. **Conclusion & Interpretation:**
+       - **Result: CPU fallback can be linearly dominated by extra memory traffic and partition overhead (Bandwidth-Bound).** Optimize by keeping the activation inside supported Ethos-U55 graph regions or by making any CPU/NPU boundary crossing explicit and rare.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+math_verified: true
+math_status: CORRECT

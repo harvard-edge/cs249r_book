@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-4202
+track: cloud
+level: L3
+zone: implement
+topic: feature-store-management
+competency_area: data
+bloom_level: apply
+phase: both
+title: Feature Store Serving Throughput Under Load
+scenario: Your ad ranking system serves 50,000 QPS, each request requiring 150 features for 100 candidate ads. The online feature store uses Redis.
+question: What total Redis operations per second does this ad ranking feature workload require, can one 300K ops/s instance handle it, and how would you scale?
+details:
+  realistic_solution: Break features into user-level (fetched once per request) and item-level (fetched per candidate). If 80 features are user-level and 70 are item-level, and item features are stored as one Redis hash/key per candidate ad, the request needs 1 MGET/HMGET for the user plus 100 item MGET/HMGET operations. At 50K QPS, that is 50K user ops/s + 5M item ops/s = ~5.05M Redis operations/s. A single 300K ops/s Redis instance cannot handle this. You would need at least 17 shards by throughput before headroom (5.05M / 300K = 16.8), so provision roughly 20+ shards and hash item keys across them. If the service can redesign storage to fetch all candidate item features in larger multi-key batches, the operation count falls, but the architecture must be sized from that measured batching pattern.
+  common_mistake: |
+    **The Pitfall:** Calculating independent point lookups without batching or shared features.
+    **The Rationale:** Candidates naively calculate 50K * 100 * 150 = 750M ops/s, ignoring MGET and the fact that user features are identical across all candidates in a single request.
+    **The Consequence:** Massively over-provisioning the Redis cluster by multiple orders of magnitude.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 50K QPS.
+    - Feature Split: assume 80 user features shared by the request and 70 item features per ad.
+    - Access pattern: user features are fetched in one batched Redis call; each candidate ad's item features are stored together and require one batched Redis call.
+
+    **Calculations:**
+    - User Fetches: 50K QPS * 1 user batch = 50K ops/s.
+    - Item Fetches: 50K QPS * 100 candidate batches = 5.0M ops/s.
+    - Total Load: 50K + 5.0M = 5.05M ops/s.
+    - Minimum Shards: 5.05M / 300K = 16.8, so at least 17 shards before operational headroom.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~5.05M ops/s (Throughput-Bound)** under the stated per-candidate batching pattern. Use a Redis Cluster with roughly 20+ shards or redesign the storage/access pattern to batch item features across candidates and then resize from the measured op count.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

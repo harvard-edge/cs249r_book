@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-2887
+track: cloud
+level: L5
+zone: realization
+topic: activation-memory
+competency_area: memory
+bloom_level: apply
+phase: training
+title: Realizing Activation Checkpointing in a ZeRO-3 + Tensor-Parallel Hybrid Configuration
+scenario: You are deploying a 65B model training job on 32 GPUs using DeepSpeed ZeRO-3 with tensor parallelism degree 4. Activation memory profiling shows 22 GB per GPU before checkpointing. ZeRO-3 shards parameters and gradients across all 32 GPUs but does NOT shard activations.
+question: What happens to the 22 GB/GPU activation memory when DeepSpeed activation checkpointing is enabled, and how does it interact with TP=4?
+details:
+  realistic_solution: |
+    ZeRO-3 shards parameters, gradients, and optimizer state, but it does not shard activation tensors across the data-parallel dimension. With TP=4, only tensors inside tensor-parallel layers are partitioned per rank; residual streams, layernorm inputs, checkpoint boundaries, and non-sharded intermediates can still remain local to each GPU. DeepSpeed activation checkpointing reduces the 22 GB/GPU peak by saving only checkpoint boundary tensors and recomputing intermediate forward activations during backward. The tradeoff is extra forward compute and re-executed tensor-parallel collectives during recomputation, not a simple 22 GB / 4 memory division.
+  common_mistake: |
+    **The Pitfall:** Assuming ZeRO-3 activation checkpointing will shard activation tensors across the data-parallel dimension.
+    **The Rationale:** Candidates wrongly assume ZeRO-3 shards all memory structures, including activations.
+    **The Consequence:** They miscalculate memory requirements, leading to unexpected OOMs when activations remain fully local to each GPU.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 65B model, 80 layers.
+       - Pre-checkpointing activation memory = 22 GB/GPU.
+       - Checkpointing interval = 20 layers (4 segments).
+       - Tensor Parallelism (TP) = 4.
+    2. **Calculations:**
+       - The 22 GB/GPU is already a per-rank measurement under TP=4, so dividing it by TP again would double-count TP sharding.
+       - With 4 checkpoint segments, the saved boundary activations are roughly one segment's boundaries plus local layer inputs, while intermediate activations inside each segment are discarded.
+       - A simple planning estimate is that checkpointing removes most intermediate saved activations, often reducing activation memory by 50-80%, so 22 GB/GPU might become roughly 4-11 GB/GPU depending on boundary tensor size and non-checkpointed layers.
+       - Recompute overhead must be measured or modeled from segment forward time and TP collective time: overhead = recomputed_forward_time / original_step_time. No numeric percentage follows from TP=4 alone.
+    3. **Conclusion & Interpretation:** **Activation checkpointing can substantially reduce the 22 GB/GPU activation peak, but TP=4 does not imply 5.5 GB/GPU. The cost is extra recompute and repeated TP communication that should be benchmarked for the chosen checkpoint interval. Result: Memory-Bound (Mitigated by Recompute).**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 13
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+  - 'Contradictory math and logic: ''22 GB / 32 GPUs; per-GPU activation = 22 GB''.'
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

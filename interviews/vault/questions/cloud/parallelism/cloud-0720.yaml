@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-0720
+track: cloud
+level: L4
+zone: design
+topic: 3d-parallelism
+competency_area: parallelism
+bloom_level: create
+phase: training
+title: Dimensioning the 3D Cube
+scenario: We have a cluster of 1,024 GPUs and need to train a 175B parameter dense model with 96 transformer layers. Each node has 8 GPUs connected by NVLink, and cross-node links are InfiniBand. The per-GPU training-state budget after reserving activation memory is 64 GB. To keep activation memory and recompute manageable, each pipeline stage should own no more than 6 transformer layers, and the schedule has enough microbatches to hide a 16-stage pipeline bubble.
+question: Given those memory, layer-count, and topology constraints, how do you allocate the dimensions for Data (D), Tensor (T), and Pipeline (P) parallelism for a 175B model?
+details:
+  realistic_solution: |
+    You solve a constraint problem rather than choosing a neat factorization. Use T=8 because tensor-parallel collectives run every layer and should stay inside the 8-GPU NVLink domain; TP can cross nodes, but the bandwidth cliff makes that unattractive here. Use P=16 because 96 layers / 16 = 6 layers per stage, satisfying the per-stage activation and recompute constraint. Data parallelism gets the remaining factor: D = 1024 / (8 * 16) = 8.
+  common_mistake: |
+    **The Pitfall:** Proposing an even split like D=T=P or using pure Data Parallelism for everything.
+    **The Rationale:** Many engineers default to simple divisions without considering the physical memory limits of individual GPUs or the specific constraints of the hardware interconnect (like NVLink domains).
+    **The Consequence:** The model simply will not fit in memory (pure DP), or the configuration will cause massive communication bottlenecks across slow interconnects.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model weights: 175B params = 350 GB in FP16.
+    - Approximate training state before DP sharding: weights + gradients + optimizer states ≈ 16 bytes/parameter = 2.8 TB per model replica.
+    - GPUs: 1,024 with 80 GB capacity each; usable training-state budget is 64 GB after activation reserve.
+    - NVLink domain: 8 GPUs per node. Model has 96 layers, with at most 6 layers per pipeline stage.
+
+    **Calculations:**
+    - Tensor Parallelism (T): choose T=8 to keep per-layer TP AllReduce inside one NVLink node.
+    - Minimum T*P for memory: 2.8 TB / 64 GB = 43.75, so T=8 requires P >= 6 for training state alone.
+    - Pipeline Parallelism (P): 96 layers / 6 layers per stage = 16 stages, satisfying both layer placement and memory constraints.
+    - Per-GPU training state with T=8 and P=16: 2.8 TB / (8 * 16) = 21.9 GB, leaving room for activations, temporary buffers, and fragmentation under the 64 GB budget.
+    - Data Parallelism (D): 1024 / (8 * 16) = 8.
+
+    **Conclusion & Interpretation:**
+    - **Result: D=8, T=8, P=16.** T follows the NVLink topology, P follows the 96-layer and per-stage memory constraints, and D uses the remaining GPUs.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

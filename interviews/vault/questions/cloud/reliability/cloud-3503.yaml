@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-3503
+track: cloud
+level: L4
+zone: analyze
+topic: fault-tolerance-checkpointing
+competency_area: reliability
+bloom_level: analyze
+phase: training
+title: Choosing Checkpoint Frequency for a 1000-GPU LLM Training Run
+scenario: You are training a multi-trillion parameter LLM on a distributed cluster utilizing 1000 GPUs. The training job is expected to run for several weeks. Due to the scale, transient failures and preemptions are common.
+question: How would you choose checkpoint frequency, contents, and method for a weeks-long 1000-GPU LLM training run with frequent failures?
+details:
+  realistic_solution: |
+    Choose the interval from observed job-level MTBF and measured checkpoint cost, then adjust it as failures and I/O load change. A first-pass Young/Daly interval is about sqrt(2*C*MTBF), but the decision should compare checkpoint overhead with expected lost work and restart cost rather than claim a fixed savings. Checkpoint the full restart state: model weights, optimizer state, scheduler state, RNG/data-loader position, sharding metadata, and framework version/config. Write checkpoints asynchronously and shard them by data/model-parallel rank so training resumes quickly without gathering the entire state through one node; keep periodic durable checkpoints plus more frequent local or incremental snapshots if preemptions are common.
+  common_mistake: |
+    **The Pitfall:** Using a fixed, arbitrary checkpointing interval and saving only model weights.
+    **The Rationale:** Choosing 'once per epoch' or 'every hour' without doing the math on failure probabilities.
+    **The Consequence:** Wasting huge amounts of compute either on excessive I/O overhead or on re-warming optimizer states from scratch after a crash.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Checkpoint write cost C = 30 seconds.
+    - Job-level MTBF = 12 hours = 43,200 seconds.
+    - Compare fixed intervals using expected checkpoint overhead plus expected lost work.
+
+    **Calculations:**
+    - First-pass Young/Daly interval = sqrt(2 * C * MTBF) = sqrt(2 * 30 * 43,200) = 1,610 seconds, about 27 minutes.
+    - Expected waste per hour at interval T is checkpoint overhead 3600*C/T plus lost work 3600*T/(2*MTBF).
+    - At T = 27 minutes: overhead = 3600*30/1610 = 67 seconds/hour; lost work = 3600*1610/(2*43,200) = 67 seconds/hour; total about 134 seconds/hour.
+    - At T = 60 minutes: overhead = 30 seconds/hour; lost work = 3600*3600/(2*43,200) = 150 seconds/hour; total about 180 seconds/hour.
+    - Over 4 weeks, the 27-minute policy saves roughly (180 - 134) * 672 = 30,912 seconds, about 8.6 hours versus hourly checkpoints under this simplified model.
+
+    **Conclusion & Interpretation:**
+    - **Result: About a 27-minute starting interval.** The math supports frequency only; the checkpoint contents and asynchronous sharded method are required so the saved interval is actually restartable at 1000-GPU scale.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

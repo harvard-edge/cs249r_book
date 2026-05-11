@@ -1,0 +1,35 @@
+schema_version: '1.0'
+id: cloud-2426
+track: cloud
+level: L5
+zone: evaluation
+topic: extreme-quantization
+competency_area: compute
+bloom_level: analyze
+phase: both
+title: W4A16 Batch-Size Latency Inversion
+scenario: Serving a 70B model via GPTQ (INT4 weights, FP16 activations). At batch size 1, latency is 15ms/token. At batch size 128, latency is 120ms/token, which is actually 20% slower than the pure FP16 model at the same batch size.
+question: Why is the GPTQ INT4 model faster at batch size 1 but slower than FP16 at batch size 128?
+details:
+  realistic_solution: This is a computation vs memory-bandwidth crossover. At BS=1, operations are memory-bandwidth bound, so smaller INT4 weights fetch faster. At BS=128, operations are compute-bound. W4A16 requires dequantizing weights to FP16 in registers before performing MACs, adding ALU overhead.
+  common_mistake: |
+    **The Pitfall:** Blaming the PCIe interconnect bottleneck between the 2x A100s.
+    **The Rationale:** Candidates incorrectly assume data transfer between GPUs is the issue, though it affects both precisions equally.
+    **The Consequence:** Misdiagnosing a compute-bound problem as an IO problem, leading to useless network or topology optimizations.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 70B parameters require about 140 GB in FP16 and about 35 GB in INT4 weight storage before metadata.
+    - Batch size 1 decode is dominated by streaming weights from HBM because there is little reuse across requests.
+    - Batch size 128 decode reuses each loaded weight across many activation vectors, so the bottleneck shifts toward GEMM efficiency and dequantization overhead.
+    - The measured FP16 latency at batch size 128 is implied by the scenario: 120ms / 1.2 = 100ms/token.
+
+    **Calculations:**
+    - Weight-traffic reduction from FP16 to INT4 is roughly 140 GB / 35 GB = 4x, explaining why GPTQ can be faster at batch size 1.
+    - At batch size 128, each weight is reused across 128 rows, so the per-token weight-read advantage is amortized rather than a clean 4x latency win.
+    - The observed high-batch comparison is direct: GPTQ INT4 takes 120ms/token versus FP16 at 100ms/token, so GPTQ is (120 - 100) / 100 = 20% slower.
+    - The missing 4x speedup is consumed by INT4 unpacking, per-group scale/zero-point application, less efficient W4A16 kernels, and lower Tensor Core utilization compared with mature FP16 GEMMs.
+
+    **Conclusion & Interpretation:**
+    - **Result: Bandwidth-to-Compute Crossover.** INT4 helps when weight bandwidth dominates, but at batch size 128 the model is no longer primarily bandwidth-bound; dequantization and kernel efficiency make GPTQ slower than optimized FP16 for this workload.
+status: published
+provenance: imported

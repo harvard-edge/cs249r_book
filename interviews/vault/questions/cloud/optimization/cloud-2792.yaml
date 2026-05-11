@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-2792
+track: cloud
+level: L6+
+zone: mastery
+topic: graph-compilation
+competency_area: optimization
+bloom_level: create
+phase: inference
+title: Hybrid AOT JIT Compilation for Dynamic 13B Inference
+scenario: You need to serve a 13B model with highly dynamic sequence lengths (10 to 8000) using a hybrid AOT/JIT compilation architecture. The goal is to minimize both kernel launch overhead and compilation latency.
+question: How would you design a hybrid AOT/JIT compiler for a 13B model with sequence lengths from 10 to 8000?
+details:
+  realistic_solution: |
+    Architect a bucketing system combined with a bounded JIT cache. Pre-compile (AOT) kernels for fixed sequence buckets such as 32, 128, 512, 2048, and 8192 so common shapes reuse optimized kernels and avoid compile latency. Route requests to the nearest upper bucket and pad only within the selected bucket; use JIT compilation in the background for outlier shapes that repeatedly waste too much padding or trigger fragmentation. On an 80GB GPU, 13B FP16 weights use about 26GB, leaving about 54GB before runtime overhead. If the total KV cache for one request is 800KB per allocated token across all layers, one 8192-token bucket consumes about 6.55GB; after a 10% reserve for workspaces, activations, and fragmentation, plan for roughly 7 concurrent max-bucket requests rather than the arithmetic ceiling of 8. The design tradeoff is bucket count versus padding waste: more AOT buckets reduce memory waste but increase compile and cache-management surface area.
+  common_mistake: |
+    **The Pitfall:** Attempting to JIT compile kernels on-the-fly for every unique sequence length.
+    **The Rationale:** Engineers want to perfectly optimize hardware usage for every request to avoid padding waste.
+    **The Consequence:** The compilation overhead far exceeds the execution time, introducing massive CPU bottlenecks and severe latency spikes for end users.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model size: 13B (26GB FP16).
+    - KV cache: 800KB per allocated token for one request, total across all layers and KV heads.
+    - Max bucket size: 8192 context.
+    - GPU memory: 80GB, with 10% of post-weight memory reserved for workspaces, activations, fragmentation, and runtime buffers.
+
+    **Calculations:**
+    - Memory for one max-bucket request: 8192 tokens * 800KB/token = 6,553,600KB ≈ 6.55GB decimal.
+    - Padding penalty for routing a 4000-token request to the 8192 bucket: (8192 - 4000) * 800KB = 3,353,600KB ≈ 3.35GB decimal.
+    - Raw remaining memory on 80GB GPU: 80GB - 26GB = 54GB.
+    - Theoretical max-bucket capacity: 54GB / 6.55GB ≈ 8.2, so at most 8 fully padded requests before overhead.
+    - With a 10% reserve on post-weight memory: 54GB * 0.90 = 48.6GB usable; 48.6GB / 6.55GB ≈ 7.4, so plan for 7 concurrent max-bucket requests.
+    - Adding an intermediate AOT bucket, such as 4096, cuts the 4000-token padding penalty from about 3.35GB to 96 * 800KB ≈ 77MB, at the cost of another compiled shape to build, test, and cache.
+
+    **Conclusion & Interpretation:**
+    - **Result: Bucketed AOT with Cached JIT.** Bucketing trades memory for low launch and compilation latency; 8 max-bucket requests is the arithmetic ceiling, 7 is the safer target after overhead, and extra buckets are justified when they avoid repeated multi-GB padding waste.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

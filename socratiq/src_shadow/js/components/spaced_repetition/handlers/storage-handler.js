@@ -716,14 +716,13 @@ export class SpacedRepetitionStorageHandler extends EventTarget {
         const loadingId = this.notificationHandler.showLoadingState('Processing flashcards...');
         
         try {
-            // Clean the text before processing
-            const cleanedText = text.replace(/<svg[\s\S]*?<\/svg>/gi, '') // Remove SVG content
-                .replace(/<style[\s\S]*?<\/style>/gi, '') // Remove CSS style tags
-                .replace(/data:image\/[^;]+;base64[^"']+/gi, '') // Remove base64 images
-                .replace(/<img[^>]+>/gi, '') // Remove img tags
-                .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, '') // Remove punctuation
-                .replace(/\s{2,}/g, ' ') // Replace multiple spaces with single space
-                .trim(); // Remove leading/trailing whitespace
+            const template = document.createElement('template');
+            template.innerHTML = text;
+            template.content.querySelectorAll('svg, style, img').forEach((node) => node.remove());
+            const cleanedText = (template.content.textContent || text)
+                .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, '')
+                .replace(/\s{2,}/g, ' ')
+                .trim();
 
             
             // Get current chapter

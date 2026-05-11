@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-4020
+track: cloud
+level: L5
+zone: design
+topic: congestion-control
+competency_area: networking
+bloom_level: create
+phase: both
+title: Congestion Control for Pipeline-Parallel Microbatches
+scenario: A 128-GPU pipeline-parallel training job uses 16 pipeline stages across 16 nodes. Each stage sends activation tensors (8MB per microbatch) to the next stage every 2ms. Unlike AllReduce, this is a point-to-point flow that must maintain strict ordering and low latency.
+question: How would you design congestion control for 8MB activation transfers every 2ms to minimize 16-stage pipeline bubble time?
+details:
+  realistic_solution: Design the fabric policy around latency isolation for ordered point-to-point activation traffic. Put pipeline activations in a dedicated high-priority traffic class or queue, keep bulk AllReduce in a lower-priority class, and enforce per-class buffer limits so elephant collectives cannot fill queues needed by activations. Use ECN early enough in the bulk class to prevent shared-buffer pressure, while the activation class should rely on priority scheduling, shallow queues, and admission or pacing rather than aggressive rate cuts that create bubbles. Preserve ordering by keeping each activation flow on a stable path; do not rebalance packets within a microbatch. If dedicated rails or virtual lanes exist, reserve capacity for pipeline traffic, but specify the service objective in latency and queue-depth terms rather than vendor-specific environment variables.
+  common_mistake: |
+    **The Pitfall:** Applying standard DCQCN parameters designed for massive AllReduce elephant flows to pipeline parallelism.
+    **The Rationale:** Engineers reuse global congestion control tuning without distinguishing between bandwidth-heavy AllReduce operations and latency-sensitive point-to-point microbatch transfers.
+    **The Consequence:** DCQCN's aggressive rate reduction on the first congestion notification over-throttles these small "mice" flows, drastically inflating the pipeline bubble and degrading throughput.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 16 pipeline stages create 15 inter-stage transfers.
+    - Baseline pipeline fill bubble: 15 * 2ms = 30ms.
+    - Each activation tensor is 8MB on a 400Gbps link = 50GB/s.
+    - Activation traffic is ordered point-to-point; reordering is not acceptable.
+    - Queueing delay, not serialization, is the controllable congestion component.
+
+    **Calculations:**
+    - Ideal serialization time: 8MB / 50GB/s = 160us.
+    - Serialization share of a 2ms microbatch interval: 160us / 2ms = 8%.
+    - If congestion adds 200us of queueing at each of 15 boundaries, added bubble = 15 * 200us = 3ms.
+    - Added bubble versus pipeline-fill baseline: 3ms / 30ms = 10%.
+    - If priority isolation caps added queueing at 50us per boundary, added bubble = 15 * 50us = 750us.
+    - Optimized added bubble versus baseline: 750us / 30ms = 2.5%.
+
+    **Conclusion & Interpretation:**
+    - **Result: Prioritize Queue Isolation Over Vendor Knobs.** The design goal is to keep activation queueing tens of microseconds, because repeated 200us stalls across pipeline boundaries can add 10% to the pipeline-fill bubble.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

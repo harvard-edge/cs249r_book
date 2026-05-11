@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-3196
+track: cloud
+level: L4
+zone: analyze
+topic: mixture-of-experts
+competency_area: architecture
+bloom_level: analyze
+phase: both
+title: MoE Training Throughput vs Dense Model
+scenario: A team trains both a dense 13B model and a Mixtral-style 8x7B MoE (47B total, 13B active) on 64 H100 GPUs. The dense model achieves 3200 tokens/sec/GPU. The MoE model only achieves 2100 tokens/sec/GPU despite having the same active FLOPs.
+question: Why is the 8x7B MoE 34% slower than a dense 13B on 64 H100s despite similar active FLOPs?
+details:
+  realistic_solution: 'The 34% throughput gap is not because the MoE loads all 47B parameters on every token. With 13B active FLOPs, the active expert work is roughly comparable to the dense 13B baseline. The gap comes from MoE-specific overheads around that active work: dispatch and combine all-to-all traffic at MoE layers, less regular expert GEMMs with smaller per-expert batches, load imbalance where the slowest expert gates the layer, router/top-k overhead, and extra activation/gradient movement during training. A reasonable decomposition is communication plus synchronization around 10-15%, expert load imbalance around 10%, and reduced kernel efficiency/router overhead around another 5-10%, which can explain the observed 3200 to 2100 tokens/sec/GPU drop without claiming a 3.6x full-weight HBM load per step.'
+  common_mistake: |
+    **The Pitfall:** Attributing the throughput gap entirely to all-to-all communication overhead.
+    **The Rationale:** MoE introduces complex networking requirements, so it's the most obvious scapegoat for performance loss.
+    **The Consequence:** Focusing optimization efforts solely on NVLink routing while ignoring expert load balance, smaller GEMM efficiency, router overhead, synchronization, and overlap.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Dense 13B and MoE 8x7B both have about 13B active FLOPs per token.
+    - MoE adds routing, all-to-all dispatch/combine, and expert load imbalance.
+
+    **Calculations:**
+    - Throughput ratio = 2100 / 3200 = 0.656, so MoE delivers 34.4% fewer tokens/sec/GPU than the dense baseline.
+    - If expressed as time per token, the normalized cost rises from 1/3200 to 1/2100, or 3200/2100 - 1 = 52.4% more time per token.
+    - Treat any component split as illustrative, not exact: all-to-all dispatch/combine might account for about 10-15 throughput percentage points, load imbalance/synchronization about 8-12 points, and smaller expert GEMMs plus router/top-k overhead about 5-10 points.
+    - Those ranges can cover the observed 34.4-point throughput loss without claiming a precise decomposition.
+    - These overheads apply around the active expert computation; the prompt does not justify charging all 47B parameters as if they are loaded for every token.
+
+    **Conclusion & Interpretation:**
+    - **Result: Communication, imbalance, and kernel-efficiency overheads plausibly explain the 34% throughput gap.** The comparison should be framed around active experts and MoE dispatch costs, not full-model weight loading.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

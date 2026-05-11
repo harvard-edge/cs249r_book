@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-4055
+track: cloud
+level: L4
+zone: analyze
+topic: gradient-synchronization
+competency_area: parallelism
+bloom_level: analyze
+phase: training
+title: TPU v5e AllReduce over ICI Torus
+scenario: A TPU v5e pod slice has 256 chips arranged in a 16x16 2D torus, each with 1.6 Tbps ICI bandwidth.
+question: How does 1GB AllReduce time on the torus compare with 256 H100s on 400Gbps Ethernet, and why does topology matter?
+details:
+  realistic_solution: |
+    TPU v5e uses topology-aware, dimension-ordered collectives: reduce-scatter and all-gather traffic is split across the X and Y torus dimensions so each chip mainly uses local ICI links and predictable hop-by-hop bandwidth. For a 1GB payload, a simple bandwidth model gives about 10ms on the 2D torus versus about 40ms on one ideal 400Gbps Ethernet rail per H100. Ethernet only reaches about 5ms in this model if the design supplies roughly 8 independent 400Gbps rails, or equivalent nonblocking aggregate bandwidth, per GPU communication group. In practice oversubscription, incast, routing, and congestion control can add variance. Topology matters because the torus trades lower per-chip bisection for deterministic nearest-neighbor scheduling, while Clos/Ethernet relies on enough global fabric capacity and good congestion behavior.
+  common_mistake: |
+    **The Pitfall:** Using the ring AllReduce formula directly for a torus.
+    **The Rationale:** Engineers default to the standard flat ring algorithm without recognizing multi-dimensional topology.
+    **The Consequence:** Miscalculating communication overhead and selecting sub-optimal communication algorithms for torus hardware.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 1GB AllReduce payload on 256 devices.
+    - Use a 2x data-movement factor for bandwidth-limited AllReduce.
+    - TPU torus effective bandwidth after multi-hop scheduling: ~200 GB/s aggregate per chip.
+    - H100 Ethernet effective bandwidth in an ideal 400Gbps fabric: ~50 GB/s per GPU.
+
+    **Calculations:**
+    - TPU torus time: 2 * 1GB / 200GB/s = 0.010s = 10ms.
+    - Ideal H100 Ethernet time: 2 * 1GB / 50GB/s = 0.040s = 40ms.
+    - If the Ethernet design provides 8 independent 400Gbps rails per GPU-equivalent communication group, the ideal aggregate is 8 * 50GB/s = 400GB/s, giving 2GB / 400GB/s = 5ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~10ms on the TPU torus vs ~40ms on a single 400Gbps rail, or ~5ms only with an ideal 8-rail Ethernet design.** Torus collectives are predictable because traffic follows fixed dimensions; Clos/Ethernet can be faster with enough rails but is more sensitive to congestion and fabric assumptions.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

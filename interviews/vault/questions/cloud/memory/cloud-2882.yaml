@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-2882
+track: cloud
+level: L4
+zone: diagnosis
+topic: activation-memory
+competency_area: memory
+bloom_level: evaluate
+phase: training
+title: Evaluating Activation Memory Profiler Output for Silent Memory Fragmentation
+scenario: A PyTorch memory snapshot shows peak allocated memory of 68 GB during training a 30B model, but the job crashes with an OOM at step 47 despite peak allocation appearing stable. The memory timeline shows reserved memory is consistently 74 GB.
+question: How would you evaluate whether activation memory fragmentation is the cause and determine a remediation path?
+details:
+  realistic_solution: Inspect allocator evidence rather than inferring fragmentation from allocated versus reserved memory alone. Use `torch.cuda.memory_summary()`, `torch.cuda.memory_snapshot()`, and the PyTorch profiler memory timeline to check allocation sizes, inactive split blocks, and whether a large contiguous allocation fails while enough total free memory appears to exist. The 74 GB reserved and 68 GB allocated numbers suggest caching or possible fragmentation, but they do not prove it. Remediation should focus on allocator and allocation-pattern changes such as tuning `PYTORCH_CUDA_ALLOC_CONF` (for example `max_split_size_mb` or expandable segments where supported), reducing allocation churn and variable tensor shapes, using memory-efficient attention or activation checkpointing, and restructuring checkpointed segments so large tensors are allocated and freed predictably.
+  common_mistake: |
+    **The Pitfall:** Confusing PyTorch's 'allocated' metric with 'reserved' metric.
+    **The Rationale:** Engineers assume that if allocated memory is lower than total VRAM, the job shouldn't OOM.
+    **The Consequence:** Failing to diagnose memory fragmentation, leading to wasted time trying to reduce batch size or precision unnecessarily.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Reserved memory = 74 GB.
+    - Allocated memory = 68 GB.
+    - Reserved minus allocated is allocator-held memory, not automatically unusable fragmented memory.
+
+    **Calculations:**
+    - Reserved - allocated = 74 GB - 68 GB = 6 GB.
+    - That 6 GB is the upper bound on cached/inactive allocator memory visible in these counters.
+    - To diagnose fragmentation, inspect snapshot fields such as inactive split blocks and the largest reusable block relative to the failing allocation size.
+    - If the snapshot shows many inactive split blocks and no block large enough for the failed allocation, fragmentation is plausible; otherwise the OOM may be true capacity pressure, a delayed allocation spike, or non-PyTorch CUDA memory.
+
+    **Conclusion & Interpretation:**
+    - **Result:** The counters indicate a 6 GB reserved/allocated gap, not "6 GB fragmented." Fragmentation remains a hypothesis that must be confirmed with allocator snapshots before choosing allocator tuning or activation-layout mitigations.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

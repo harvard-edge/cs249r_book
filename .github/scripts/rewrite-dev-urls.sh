@@ -38,16 +38,11 @@ declare -A SUBSITES=(
 )
 
 # ── Compute prefix ────────────────────────────────────────────────────────────
-# PREFIX is the number of "../" hops needed to climb from the *current build
-# location* on dev back to the dev site root. It depends on how deep the
-# subsite lives on dev. With every subsite at top level, depth is 1 and
-# PREFIX is "../". The depth computation below stays generic so a future
-# nested subsite (depth > 1) would still resolve correctly.
-#
-# SELF_PREFIX is "./" — a self-link rewrites to the current dir.
-SELF_PREFIX="./"
+# We still compute from the subsite path, but the actual "../" prefix now has
+# to be derived per rendered HTML file, not once per subsite. That lets nested
+# pages like kits/contents/... rewrite navbar URLs correctly.
 if [[ "$SUBSITE" == "root" ]]; then
-  PREFIX=""
+  SUBSITE_DEPTH=0
 else
   # Note: under `set -u`, indexing an associative array with a missing key
   # triggers an unbound-variable error in some bash builds. Probe with the
@@ -62,13 +57,20 @@ else
   fi
   SELF_DEV_PATH="${SUBSITES[$SUBSITE]}"
   # Depth = number of path segments in the dev-side path (book/vol1 → 2).
-  DEPTH=$(awk -F/ '{print NF}' <<< "$SELF_DEV_PATH")
-  PREFIX=""
-  for ((i = 0; i < DEPTH; i++)); do PREFIX+="../"; done
+  SUBSITE_DEPTH=$(awk -F/ '{print NF}' <<< "$SELF_DEV_PATH")
 fi
 
+repeat_parent_prefix() {
+  local depth="${1:-0}"
+  local prefix=""
+  for ((i = 0; i < depth; i++)); do
+    prefix+="../"
+  done
+  printf '%s' "$prefix"
+}
+
 # ── Rewrite ───────────────────────────────────────────────────────────────────
-echo "🔗 Rewriting mlsysbook.ai URLs for dev site (subsite=$SUBSITE, prefix='$PREFIX')..."
+echo "🔗 Rewriting mlsysbook.ai URLs for dev site (subsite=$SUBSITE, subsite_depth=$SUBSITE_DEPTH)..."
 
 FIND_DEPTH=""
 if [[ "$SHALLOW" == "--shallow" ]]; then
@@ -76,23 +78,46 @@ if [[ "$SHALLOW" == "--shallow" ]]; then
 fi
 
 find "$BUILD_DIR" $FIND_DEPTH -name "*.html" -type f | while read -r f; do
+  file_dir="$(dirname "$f")"
+  rel_dir="${file_dir#$BUILD_DIR}"
+  rel_dir="${rel_dir#/}"
+
+  if [[ -z "$rel_dir" || "$rel_dir" == "." ]]; then
+    FILE_DEPTH=0
+  else
+    FILE_DEPTH=$(awk -F/ '{print NF}' <<< "$rel_dir")
+  fi
+
+  ROOT_PREFIX="$(repeat_parent_prefix $((SUBSITE_DEPTH + FILE_DEPTH)))"
+  if [[ "$FILE_DEPTH" -eq 0 ]]; then
+    SELF_PREFIX="./"
+  else
+    SELF_PREFIX="$(repeat_parent_prefix "$FILE_DEPTH")"
+  fi
+
   for key in "${!SUBSITES[@]}"; do
     dev_path="${SUBSITES[$key]}"
+
     # Self-link match is by mlsysbook.ai key, not dev_path. Previously this
     # compared dev_path to SUBSITE which silently failed for nested subsites.
     if [[ "$SUBSITE" != "root" && "$key" == "$SUBSITE" ]]; then
-      # Self-links: mlsysbook.ai/<key>/ → ./ (when building <key>)
+      # Self-links: mlsysbook.ai/<key>/ → current subsite root from this file.
       sed -i "s|https://mlsysbook.ai/${key}/|${SELF_PREFIX}|g" "$f"
     else
-      sed -i "s|https://mlsysbook.ai/${key}/|${PREFIX}${dev_path}/|g" "$f"
+      sed -i "s|https://mlsysbook.ai/${key}/|${ROOT_PREFIX}${dev_path}/|g" "$f"
     fi
   done
+
   # Catch-all: any remaining mlsysbook.ai/ base URL → dev root.
   # (Used by the navbar title-href and footer site links.)
   if [[ "$SUBSITE" == "root" ]]; then
-    sed -i 's|https://mlsysbook.ai/|./|g' "$f"
+    if [[ "$FILE_DEPTH" -eq 0 ]]; then
+      sed -i 's|https://mlsysbook.ai/|./|g' "$f"
+    else
+      sed -i "s|https://mlsysbook.ai/|${SELF_PREFIX}|g" "$f"
+    fi
   else
-    sed -i "s|https://mlsysbook.ai/|${PREFIX}|g" "$f"
+    sed -i "s|https://mlsysbook.ai/|${ROOT_PREFIX}|g" "$f"
   fi
 done
 

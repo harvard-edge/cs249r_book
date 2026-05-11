@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-0620
+track: cloud
+level: L5
+zone: optimization
+topic: memory-hierarchy-design
+competency_area: memory
+bloom_level: evaluate
+phase: both
+title: The HBM vs SRAM Bandwidth Gap
+scenario: You profile a custom attention kernel on a GPU. The kernel takes 10ms. You move a 2MB intermediate activation tensor from High Bandwidth Memory (HBM) into the GPU's Shared Memory (SRAM), and the kernel time instantly drops to 2ms.
+question: Why did a seemingly small change in where a tensor is stored yield a 5x speedup?
+details:
+  realistic_solution: |
+    The speedup comes from locality and reuse, not from placing a full 2 MB tensor into one block's shared memory. On A100, shared memory is a small per-SM/per-block scratchpad, so the physically plausible optimization is tiling: load a small working set from HBM into shared memory, reuse it many times within the block, and write back only the final result. That reduces repeated HBM traffic, improves coalescing, and exposes much higher on-chip bandwidth for the hot tile. The observed 5x speedup means the original kernel was dominated by repeated HBM reads and memory stalls; after tiling, only the non-reused portion still pays HBM latency and bandwidth.
+  common_mistake: |
+    **The Pitfall:** Stating that SRAM is faster than HBM without quantifying the magnitude of the difference.
+    **The Rationale:** Candidates treat all GPU memory as roughly equivalent, ignoring the massive bandwidth gap between hierarchy levels.
+    **The Consequence:** Failing to recognize when an algorithm is severely memory-bound and missing massive optimization opportunities.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - The 2MB intermediate is too large to place entirely in one block's shared memory, so the realistic optimization is tiled reuse.
+       - A100 HBM2 bandwidth is roughly 1.5 TB/s, while shared-memory/register bandwidth is much higher on-chip.
+       - The profile reports a 10ms to 2ms speedup, but the prompt does not specify reuse count or exact byte traffic.
+    2. **Calculations:**
+       - Moving a value from HBM to shared memory once is not enough to explain a 5x speedup; the same tile must be reused multiple times.
+       - If runtime is dominated by repeated HBM reads, reducing effective HBM traffic and stalls by about 5x can reduce a 10ms kernel to about 2ms.
+       - The exact traffic reduction cannot be derived from the prompt without reuse counts, tile sizes, occupancy, and coalescing behavior.
+    3. **Conclusion & Interpretation:**
+       **Result: Memory Bandwidth Bound. The 10ms to 2ms drop is consistent with replacing repeated global-memory traffic with tiled on-chip reuse. The whole 2MB tensor is not pinned in shared memory at once; small tiles are reused enough to cut HBM traffic and stalls.**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

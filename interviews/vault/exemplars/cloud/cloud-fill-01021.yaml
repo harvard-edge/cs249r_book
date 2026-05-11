@@ -1,0 +1,27 @@
+schema_version: 1
+id: cloud-fill-01021
+title: Designing Efficient Tensor Parallelism for Large Language Models on Google TPU v5e
+topic: model-tensor-parallelism
+status: published
+provenance: human
+scenario: You are tasked with deploying a 100-billion parameter Large Language Model for inference on a cluster of Google TPU v5e devices. The model's weights alone consume significantly more memory than a single TPU's HBM.
+question: How would you partition the model's layers across devices and overlap communication with computation to minimize inference latency and maximize throughput?
+details:
+  realistic_solution: 'A realistic solution would involve a combination of tensor and possibly pipeline parallelism, carefully orchestrated to exploit the TPU v5e architecture: 1. **Tensor Partitioning (Intra-layer)**: For large linear layers, apply column parallelism for the first linear layer in a block and row parallelism for the subsequent linear layer. This ensures that the output of the first partitioned layer can be immediately used by the second partitioned layer on the same device without an `all-gather` operation between the two linear layers within a block. 2. **Layer Partitioning (Inter-layer)**: If pure tensor parallelism isn''t sufficient for the model weights, partition entire transformer blocks or groups of layers across TPUs. 3. **Communication-Computation Overlap**: Utilize non-blocking collective operations (e.g., `jax.lax.all_reduce_p`, `all_gather`). Communication for the next layer''s inputs should be initiated while the current layer is performing its computation. 4. **TPU-Specific Optimizations**: Leverage the high-bandwidth inter-chip interconnect (ICI) on TPUs for efficient collective operations.'
+  common_mistake: |
+    **The Pitfall:** Proposing naive partitioning without considering the actual data movement costs between TPU cores.
+    **The Rationale:** Overlooking the significant impact of inter-device communication latency and bandwidth, especially for small batch sizes typical in inference.
+    **The Consequence:** Asymmetric communication patterns, severe communication bubbles, and severely underutilized TPUs.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 100B params in BF16 = 200 GB.
+    - TPU v5e HBM = 16 GB. ICI Interconnect bandwidth = ~200 GB/s.
+    - Activation tensor size: batch=1, seq=2048, hidden=8192 (BF16) = 33.5 MB.
+
+    **Calculations:**
+    - Min TPUs required = ceil(200 / 16) = 13 TPUs (practically 16 for powers of 2).
+    - Transfer latency per all-reduce step = 33.5 MB / 200 GB/s = 0.16 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 0.16 ms per step (Communication-Bound)**. Accumulating 0.16 ms transfers across hundreds of layers causes massive latency. Strict communication-computation overlap is mandatory.
+last_modified: '2026-04-01'

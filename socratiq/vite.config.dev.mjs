@@ -175,9 +175,14 @@ export default defineConfig({
               // Remove ANY script tags pointing to src_shadow/js/index.js or production dist
               // This handles various relative paths and optional attributes like type="module"
               const distScriptRe = /<script\b[^>]*src=["'](?:(?:\.\.\/)*src_shadow\/js\/|\.\/scripts\/ai_menu\/dist\/)[^"']+\.js["'][^>]*><\/script>/gi;
-              const before = html;
-              html = html.replace(distScriptRe, '');
-              const removedCount = (before.match(distScriptRe) || []).length;
+              const removedCount = (html.match(distScriptRe) || []).length;
+              // Loop until stable: a single replace can leave overlapping matches re-formed
+              // (e.g. <scrip<script ...></script>t...></script>). Iterating closes that gap.
+              let prev;
+              do {
+                prev = html;
+                html = html.replace(distScriptRe, '');
+              } while (html !== prev);
               if (removedCount > 0) console.log(`[vite-dev] injector removed ${removedCount} script tag(s)`);
 
               // Append dev entry which Vite will transform & HMR

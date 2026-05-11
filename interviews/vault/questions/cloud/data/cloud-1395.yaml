@@ -1,0 +1,45 @@
+schema_version: '1.0'
+id: cloud-1395
+track: cloud
+level: L4
+zone: diagnosis
+topic: mlops-lifecycle
+competency_area: data
+bloom_level: analyze
+phase: both
+title: Debugging Intermittent Duplicate Features in Spot-Backed Pipelines
+scenario: You are running a daily batch ETL pipeline processing 50TB of log data on 200 AWS Spot instances to generate training features for a recommendation model. Spot preemptions occur on ~15% of nodes daily, triggering Spark task retries. Downstream, the ML team reports that their model evaluation metrics are inexplicably fluctuating, and they've found duplicate user interaction records with different unique interaction IDs in the feature store. The pipeline uses a standard uuid4() function to assign primary keys to new user sessions.
+question: How do you diagnose the root cause and resolve this issue without disabling Spot instances?
+details:
+  realistic_solution: |
+    Diagnose the issue by correlating duplicate feature rows with Spark retry attempts on Spot-preempted executors, then replaying the same input partition to confirm that uuid4() emits different primary keys for the same logical records. The root cause is a non-idempotent transformation: retries generate new UUIDs, so downstream upsert logic treats duplicate records as net-new rows. Keep Spot instances, but replace UUIDv4 with a deterministic UUIDv5 generated from immutable record attributes such as user_id and session_start_timestamp.
+  common_mistake: |
+    **The Pitfall:** Adding a global deduplication step (e.g., DISTINCT or dropDuplicates()) at the end of the pipeline.
+    **The Rationale:** Engineers rely on framework-level "exactly-once" semantics or brute-force deduplication without recognizing the network shuffle cost on massive datasets.
+    **The Consequence:** The global shuffle requires transferring 50TB of data across the network, doubling execution time and risking massive disk spills.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Spot preemptions cause Spark task retries.
+    - uuid4() returns a fresh random identifier each execution.
+    - Feature-store upserts use the generated interaction ID as the primary key.
+
+    **Calculations:**
+    - Original task attempt for record R emits key uuid4() = A.
+    - Retried task attempt for the same record R emits key uuid4() = B.
+    - Because A != B, the feature store sees two distinct primary keys for the same logical interaction.
+    - Deterministic UUIDv5 over immutable fields maps record R to the same key on every attempt.
+
+    **Conclusion & Interpretation:**
+    - **Result: Retry-Induced Non-Idempotency.** The fix is deterministic key generation plus retry-aware diagnostics, not a network shuffle or disabling Spot instances.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview

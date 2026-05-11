@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: cloud-2248
+track: cloud
+level: L4
+zone: optimization
+topic: data-pipeline-engineering
+competency_area: data
+bloom_level: analyze
+phase: training
+title: The Distributed Join Strategy Selection
+scenario: 'You need to enrich a 50 TB training dataset with metadata from three lookup tables: a 5 GB language-detection table, a 200 GB domain-quality table, and a 2 TB URL-to-category mapping. Each join is on a different key. You have a 500-node Spark cluster with 64 GB RAM per executor.'
+question: Which join strategy should you use for the 5 GB, 200 GB, and 2 TB lookup joins, and what is the total network I/O?
+details:
+  realistic_solution: 'Assuming these are three independent joins against the 50 TB base table and neither side is already partitioned on the relevant key: Join 1 (50 TB x 5 GB) should broadcast the 5 GB table if it fits the configured broadcast limit and executor memory, moving about 5 GB x 500 = 2.5 TB aggregate while avoiding a 50 TB base-table shuffle. Join 2 (50 TB x 200 GB) should use a shuffle-based join because the lookup table is too large to broadcast; approximate shuffle I/O is 50 TB + 200 GB = 50.2 TB. Join 3 (50 TB x 2 TB) must also use a shuffle-based join, usually sort-merge unless memory/skew makes shuffle hash preferable; approximate shuffle I/O is 50 TB + 2 TB = 52 TB.'
+  common_mistake: |
+    **The Pitfall:** Using Sort-Merge join for everything.
+    **The Rationale:** Candidates assume that because the main table is massive (50 TB), all joins must be heavily shuffled.
+    **The Consequence:** The candidate generates 50 TB of completely unnecessary shuffle network I/O for a tiny 5 GB table that could have simply been broadcasted.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Main table: 50 TB.
+    - Executors: 500, RAM: 64 GB each.
+    - Cost model: three independent joins against the base table, with no compatible pre-partitioning on the join keys.
+
+    **Calculations:**
+    - Join 1 (5 GB): Broadcast. 5 GB x 500 = 2.5 TB.
+    - Join 2 (200 GB): Shuffle-based join. 50 TB + 200 GB ~= 50.2 TB.
+    - Join 3 (2 TB): Shuffle-based join. 50 TB + 2 TB ~= 52 TB.
+    - Total aggregate bytes moved across the three independent joins: 2.5 TB + 50.2 TB + 52 TB = 104.7 TB.
+
+    **Conclusion & Interpretation:**
+    - **Result: 104.7 TB (Network-I/O-Bound)**. Broadcast only the 5 GB lookup table; use shuffle-based joins for the 200 GB and 2 TB tables, with the exact physical operator depending on memory, sort order, and skew.
+  options:
+    - Use Broadcast join for all three tables; this is invalid because 200 GB and 2 TB are too large to broadcast safely. Total network I/O is 2.5 TB.
+    - Use Sort-Merge join for all three tables as one combined pass. Total network I/O is 50 TB + 5 GB + 200 GB + 2 TB =~ 52.2 TB.
+    - Use Broadcast join for the 5 GB table, and Sort-Merge or Shuffle Hash join for the 200 GB and 2 TB tables. Total network I/O is roughly 2.5 TB (broadcast) + 50.2 TB (shuffle 2) + 52 TB (shuffle 3) = 104.7 TB.
+    - Use Shuffle Hash join for the 5 GB and 200 GB tables, and Sort-Merge join for the 2 TB table. Total network I/O is 154 TB.
+  correct_index: 2
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

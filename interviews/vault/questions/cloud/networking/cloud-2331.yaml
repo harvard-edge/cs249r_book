@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: cloud-2331
+track: cloud
+level: L6+
+zone: mastery
+topic: collective-communication
+competency_area: networking
+bloom_level: evaluate
+phase: both
+title: MoE Interconnect Bottleneck on TPU Pods
+scenario: 'You are training a 1.2T parameter Mixture of Experts (MoE) model (64 experts) on a TPU v5e Pod (256 chips). Symptom: Model Flop Utilization (MFU) is stuck at 15%. Profiling shows 65% of step time is spent in `all-to-all` communication. The batch size per chip is 16, sequence length is 2048, and hidden dimension is 8192.'
+question: Why is MFU stuck at 15% for the 1.2T MoE on TPU v5e, and how would you redesign MoE routing and parallelism?
+details:
+  realistic_solution: |
+    The cause is a severe hardware-algorithm mismatch: MoE token dispatch is dominated by all-to-all traffic over the TPU ICI, and the current routing spreads small payloads across too many destinations. With 64 experts and 256 chips, uniform global routing creates many cross-chip transfers that are latency-, packetization-, and contention-bound. Redesign routing and parallelism together: place expert replicas/shards so the router prefers local or nearby experts within high-bandwidth torus neighborhoods; use hierarchical routing with local all-to-all inside a group before any cross-group exchange; combine Expert Parallelism with Tensor Parallelism so expert compute stays local to the shard group; increase effective batch/tokens-per-expert with gradient accumulation or sequence parallelism; and use capacity factors/load-balancing loss to bound worst-case traffic. The key is router-aware expert placement and locality, not just larger batches.
+  common_mistake: |
+    **The Pitfall:** Assuming the issue is memory bandwidth and trying to implement FlashAttention or ZeRO-3.
+    **The Rationale:** Candidates jump to standard dense LLM optimization techniques without analyzing the specific networking pattern of sparse MoE models.
+    **The Consequence:** Fails to address the all-to-all routing overhead bottleneck, resulting in zero MFU improvement.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Chips: 256, Experts: 64.
+       - Tokens per chip: 16 * 2048 = 32,768.
+       - Hidden dim: 8192 (BF16, 2 bytes).
+       - ICI Bandwidth: 400 GB/s.
+    2. **Calculations:**
+       - Per-chip token payload before routing = 32,768 * 8192 * 2 bytes = ~536 MB.
+       - With uniform routing across 64 experts, each expert shard receives about 32,768 / 64 = 512 tokens from this chip.
+       - Per-destination payload = 512 * 8192 * 2 bytes = ~8.39 MB.
+       - Total sent per chip is still 64 * 8.39 MB = ~536 MB; this partitions the original token payload rather than adding a second copy.
+       - Theoretical transfer time = 536 MB / 400 GB/s = 1.34 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: >=1.34ms Lower Bound, Higher in Practice (Latency/Contention-Bound).** Because profiling already shows all-to-all is 65% of step time, reducing this term is the direct path out of 15% MFU. Locality-aware expert placement, hierarchical all-to-all, and EP+TP reduce the cross-chip traffic that the bandwidth-only lower bound hides.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 18
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+  - tpu
+  - moe
+  - interconnect
+  - distributed-training

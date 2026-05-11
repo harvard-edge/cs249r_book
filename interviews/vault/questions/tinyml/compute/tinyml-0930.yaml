@@ -1,0 +1,44 @@
+schema_version: '1.0'
+id: tinyml-0930
+track: tinyml
+level: L4
+zone: diagnosis
+topic: transformer-systems-cost
+competency_area: compute
+bloom_level: analyze
+phase: inference
+title: Diagnose Memory Fragmentation During Transformer Layer Execution
+scenario: A 3-layer transformer on ESP32-S3 with 512KB SRAM crashes intermittently with out-of-memory errors during the second attention layer despite static analysis showing peak usage of 288KB. The model uses dynamic allocation for intermediate activations.
+question: Why does an ESP32-S3 transformer with 160 KB free heap fail to allocate a 128 KB QK^T buffer, and how can it be fixed?
+details:
+  realistic_solution: 'With dynamic allocation, Layer 1 allocates tensors (Q, K, V, QK^T, Context, Output) sequentially. Because tensors have different lifespans (e.g., QK^T is freed before Output is computed), freeing them creates holes. When Layer 2 begins, it allocates its Q, K, and V (32KB each) into these fragmented holes. This leaves the remaining 160KB of free memory split into blocks smaller than 128KB. When Layer 2 requests 128KB contiguous for QK^T, it fails. Fix: Use an arena allocator with static memory planning (e.g., TFLite Micro''s memory planner) to calculate overlapping tensor lifetimes offline, ensuring a single pre-allocated contiguous buffer is perfectly reused without fragmentation.'
+  common_mistake: |
+    **The Pitfall:** Increasing the SRAM budget or reducing the model size.
+    **The Rationale:** Assuming the OOM error is due to a total memory shortage rather than dynamic allocator fragmentation.
+    **The Consequence:** Scrapping a perfectly viable model design because of a runtime memory management flaw.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - QK^T buffer size: seq_len (128) * seq_len (128) * heads (4) * 2 bytes (INT16).
+       - Q, K, V buffers: 128 * 256 * 1 byte = 32 KB each.
+    2. **Calculations:**
+       - QK^T buffer = 131,072 bytes = 128 KB.
+       - Free memory 160 KB is fragmented into < 128 KB blocks due to dynamic allocation of Q, K, V (3x32 KB).
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Fragmentation-Bound**. Dynamic allocation creates sub-128KB holes. Using a static memory arena allocator ensures perfect packing.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: mobile-0899
+track: mobile
+level: L3
+zone: fluency
+topic: dataset-curation
+competency_area: data
+bloom_level: apply
+phase: training
+title: 'Dataset Curation: Fluency — Token Budget for On-Device Fine-Tuning on A17 Pro'
+scenario: On an A17 Pro, you want to fine-tune a 1B parameter language model for personalization using 500 user-generated examples of average 128 tokens each.
+question: How would you estimate the total fine-tuning compute, memory required, and time to complete?
+details:
+  realistic_solution: A17 Pro Neural Engine is inference-only, so fine-tuning must use CPU or GPU cores and may be impractical on an iPhone-class device. Use LoRA to keep trainable state small, but the frozen 1B-parameter base still runs forward and must propagate gradients through activations to update the adapters; this is cheaper than full-model optimizer state, not cheaper than touching the base model. With 500 examples at 128 tokens for 3 epochs, the job processes 192K tokens. A coarse planning heuristic of about 4-6x the 1B-model forward cost gives 768-1152 TFLOPs total. At a sustained 25-100 GFLOPS on the mobile CPU/GPU training stack, that is roughly 2.1-12.8 hours before thermal throttling surprises. Memory needs at least 2GiB for FP16 base weights, about 24MB for a small LoRA Adam state, and likely another 1-3GiB for activations, temporary tensors, and framework buffers with tiny batches and checkpointing; device-specific testing is required to prove it fits and completes.
+  common_mistake: |
+    **The Pitfall:** Assuming the Neural Engine supports training, or underestimating FLOPs.
+    **The Rationale:** Mistakenly believing only the 1M trainable LoRA parameters determine the required FLOPs, ignoring the full forward/backward pass through the 1B frozen model.
+    **The Consequence:** Massively underestimating the fine-tuning time or attempting to execute backward passes on the inference-only ANE, where training is unsupported rather than merely slow.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Tokens: 500 examples * 128 tokens = 64K tokens.
+       - Training pass: 3 epochs, so 64K * 3 = 192K token-updates.
+       - Model: 1B frozen params with LoRA adapters. A coarse training heuristic is ~4-6x the 1B-model forward cost, or roughly 4-6 GFLOPs/token; this is an offline planning estimate, not a guaranteed mobile runtime measurement.
+       - Sustained CPU/GPU training throughput after framework overhead and thermal limits: 25-100 GFLOPS, not peak ANE inference throughput.
+    2. **Calculations:**
+       - Total Compute Range: 192K tokens * 4-6 GFLOPs/token = 768-1152 TFLOPs.
+       - Time at 100 GFLOPS sustained: 768,000-1,152,000 GFLOPs / 100 GFLOPS = 2.1-3.2 hours.
+       - Time at 25 GFLOPS sustained: 8.5-12.8 hours.
+       - Memory floor: 2.0 GiB FP16 base weights + adapter weights/gradients + optimizer state + activations + framework buffers.
+       - LoRA/optimizer example: 2M trainable params with FP16 weights/grads and FP32 Adam moments is roughly 2M * (2 + 2 + 8) bytes = 24 MB, before activations and temporary tensors.
+       - Activation and framework allowance for tiny batches: budget another ~1-3 GiB depending on sequence length, checkpointing, kernel workspace, and the training framework.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound and Feasibility-Risky. Memory may fit inside 8 GiB only with tiny batches and checkpointing, but the multi-hour estimate and training support must be validated on the actual CPU/GPU stack before committing to on-device fine-tuning.**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

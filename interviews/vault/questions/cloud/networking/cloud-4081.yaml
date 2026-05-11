@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-4081
+track: cloud
+level: L6+
+zone: mastery
+topic: rdma-transport
+competency_area: networking
+bloom_level: evaluate
+phase: both
+title: RDMA Connection Scaling for 16,384 GPUs
+scenario: You are architecting the RDMA transport for a 16,384 GPU cluster. Traditional RDMA requires O(N²) QP connections for all-to-all communication.
+question: What are the QP state memory and setup-time costs for naive RDMA at 16,384 GPUs, and what sub-quadratic design would you use?
+details:
+  realistic_solution: 'Naive O(N²): each GPU needs 16,383 peers × 8 rails = 131,064 QPs. Cluster-wide, that is 16,384 × 131,064 = about 2.15 billion directed QPs. With ~1KB of HCA state per QP, the naive design needs about 131MB per GPU before CQs, MRs, receive buffers, and implementation overheads. That does not by itself exceed a 256MB HCA-memory budget, but it leaves little headroom and scales poorly as the cluster grows. Connection setup is also painful: 131,064 QPs × 0.3ms/QP = 39.3 seconds per GPU on the critical path for initialization or elastic replacement. Use a sub-quadratic design such as Dynamic Connected transport or a SHARP/DC-style architecture where each rail keeps a small number of endpoint QPs and remote connection context is resolved dynamically. With 8 DC-style QPs per GPU, state falls to about 8KB for endpoint QPs, and setup is milliseconds rather than tens of seconds. Keep fixed RC QPs only for a small set of latency-critical fixed peers if needed.'
+  common_mistake: |
+    **The Pitfall:** Dismissing the O(N²) connection problem because "host memory is cheap."
+    **The Rationale:** Forgetting that RDMA connection states reside on the heavily constrained NIC HCA hardware memory, not system RAM.
+    **The Consequence:** The cluster simply fails to initialize, or elasticity becomes impossible due to agonizing 40-second connection negotiation stalls.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Cluster size: 16,384 GPUs.
+    - 8 rails (NICs) per GPU. QP state size: ~1KB.
+    - ConnectX-7 HCA memory limit: ~256MB.
+    - QP setup time: ~0.3ms per QP.
+
+    **Calculations:**
+    - Naive O(N²) QPs per GPU: 16,383 peers × 8 rails = 131,064 QPs.
+    - Naive HCA Memory per GPU: 131,064 × 1KB = ~131MB (before CQs, MRs, receive buffers, and implementation overheads).
+    - Naive directed QPs cluster-wide: 16,384 × 131,064 ≈ 2.15B.
+    - Naive Setup Time: 131,064 × 0.3ms = 39.3 seconds per node.
+    - Dynamic Connected (DC) QPs: 8 QPs (1 per rail).
+    - DC Memory: 8 × 1KB = 8KB (16,000× reduction).
+    - DC-style setup for endpoint QPs: 8 × 0.3ms = 2.4ms, plus implementation-specific context setup.
+
+    **Conclusion & Interpretation:**
+    - **Result: connection-state and setup-time bound**. Naive O(N²) RDMA consumes about 131MB of QP state per GPU and causes 39s setup stalls; DC/SHARP-style sub-quadratic connection scaling cuts endpoint QP state by roughly 16,000×.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

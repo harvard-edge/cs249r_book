@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-4195
+track: cloud
+level: L4
+zone: design
+topic: gpu-compute-architecture
+competency_area: compute
+bloom_level: apply
+phase: both
+title: H100 Persisting L2 Hints for Multi-Model Serving
+scenario: 'Your H100 (50 MB L2 cache) serves 3 models concurrently using CUDA MPS. Model A (7B, latency-critical) needs 12 MB of L2 for hot weights. Model B (13B, throughput-oriented) streams 80 MB of activations through L2. Model C (3B, background) uses 8 MB. Total demand: 100 MB. How do you prioritize Model A''s cache residency without assuming hard L2 partitioning?'
+question: How would you use H100 L2 residency controls under MPS to protect Model A's P99 latency without hard cache partitioning?
+details:
+  realistic_solution: Do not describe this as a hard three-way L2 partition. CUDA persisting L2 and access policy windows are cache-residency hints. Reserve a persisting-L2 budget large enough for Model A's 12 MB hot set, then mark Model A's hot weight address range with an access policy window using `hitProp=PERSISTING`. Mark Model B's large activation stream as `STREAMING` so it is less likely to displace useful resident data, and leave Model C as normal priority or throttle it at the scheduler level if it harms P99. The 50 MB L2 is still shared and the hardware may evict lines; isolation must be validated with L2 hit-rate counters and P99 latency measurements. If Model A needs strict isolation, use scheduling, MIG where available, separate GPUs, or admission control rather than relying on persisting L2 as a partition allocator.
+  common_mistake: |
+    **The Pitfall:** Letting all three models compete for L2 cache equally. Without partitioning, Model B's streaming access pattern evicts Model A's hot weights, causing unpredictable latency spikes for the latency-critical workload.
+    **The Rationale:** Included in pitfall.
+    **The Consequence:** Included in pitfall.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - H100 L2 is 50 MB shared cache, not a hard per-MPS-client partition pool.
+    - Model A hot set: 12 MB.
+    - Model B streaming set: 80 MB.
+    - HBM bandwidth estimate: 3.35 TB/s.
+    - Example inference touches Model A's hot set 100 times.
+
+    **Calculations:**
+    - Without useful residency, assume Model A's hot-weight hit rate falls to 20% under Model B's streaming pressure.
+    - Model A HBM reads: (1 - 0.20) * 12 MB * 100 = 960 MB.
+    - With persisting hints and B marked streaming, assume measured hit rate improves to 95%, not guaranteed 99%+.
+    - Model A HBM reads: (1 - 0.95) * 12 MB * 100 = 60 MB.
+    - Avoided HBM reads: 900 MB.
+    - Best-case bandwidth time avoided: 900 MB / 3.35 TB/s = ~0.27 ms per inference, before queueing and contention effects.
+
+    **Conclusion & Interpretation:**
+    - **Result: Soft L2 Residency Mitigation.** Persisting L2 can reduce Model A's cache misses if the counters confirm higher hit rate, but it does not enforce a 15 MB/35 MB/0 MB partition or guarantee P99 latency by itself.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

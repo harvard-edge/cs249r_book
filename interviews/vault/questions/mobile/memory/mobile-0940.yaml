@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: mobile-0940
+track: mobile
+level: L3
+zone: analyze
+topic: kv-cache-management
+competency_area: memory
+bloom_level: analyze
+phase: inference
+title: 'KV-Cache: Analyze KV Cache Memory Pressure on A17 Pro'
+scenario: 'A 1B LLM on a mobile SoC (8GB unified memory) shows increasing latency as conversation grows longer. At 512 tokens context: 30 tok/sec. At 2048 tokens: 18 tok/sec. At 4096 tokens: 11 tok/sec.'
+question: How would you analyze why KV cache growth causes this degradation and compute the expected latency scaling?
+details:
+  realistic_solution: |
+    Each decoding step requires reading the full KV cache for all previously generated tokens from DRAM. As the context window grows, the time spent reading the KV cache increases linearly. The FLOPs per token remain constant, meaning the workload fundamentally shifts to being memory-bandwidth bound at long contexts.
+  common_mistake: |
+    **The Pitfall:** Blaming compute or framework overhead for the slowdown.
+    **The Rationale:** Candidates assume the compute cost of attention scales quadratically and causes the bottleneck, forgetting that decoding is dominated by memory bandwidth, not compute.
+    **The Consequence:** Attempting to optimize compute kernels instead of addressing memory access patterns or using techniques like Grouped-Query Attention (GQA).
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Use the observed throughput points to separate fixed per-token work from context-length-dependent KV reads.
+    - Decode attention reads prior K and V entries, so KV traffic grows approximately linearly with context length.
+
+    **Calculations:**
+    - Observed latency at 512 tokens: 1000 / 30 = 33.3 ms/token.
+    - Observed latency at 2048 tokens: 1000 / 18 = 55.6 ms/token.
+    - Observed latency at 4096 tokens: 1000 / 11 = 90.9 ms/token.
+    - Increment from 512 to 2048: 55.6 - 33.3 = 22.3 ms over 1536 tokens = 0.0145 ms per added context token.
+    - Increment from 2048 to 4096: 90.9 - 55.6 = 35.3 ms over 2048 tokens = 0.0172 ms per added context token.
+    - A simple linear fit from 512 to 4096 gives slope (90.9 - 33.3) / 3584 = 0.0161 ms per context token and fixed component 33.3 - 512 * 0.0161 = 25.1 ms.
+    - Predicted at 2048: 25.1 + 2048 * 0.0161 = 58.1 ms/token, close to the observed 55.6 ms/token.
+
+    **Conclusion & Interpretation:**
+    - **Result: observed scaling reaches 90.9 ms/token, or 11 tok/sec, at 4096 tokens.** The roughly linear latency increase with context length is the KV-cache read signature; optimize by reducing KV bytes read per step or the effective context scanned, not by assuming a fixed weight-load term explains the slowdown.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

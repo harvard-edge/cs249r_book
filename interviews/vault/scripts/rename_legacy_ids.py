@@ -234,7 +234,7 @@ def main() -> int:
     n_chain = update_chains(rename_map, dry_run=False)
     print(f"  YAMLs renamed: {n_renamed}")
     print(f"  Chain refs rewritten: {n_chain}")
-    print("\nNext: run `vault check --strict` and `vault build --legacy-json`.")
+    print("\nNext: run `vault check --strict` and `vault build --local-json`.")
     return 0
 
 

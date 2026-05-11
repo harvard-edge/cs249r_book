@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-4219
+track: cloud
+level: L4
+zone: diagnosis
+topic: storage-format-selection
+competency_area: data
+bloom_level: analyze
+phase: both
+title: Storage Format for Streaming vs Random Access
+scenario: A team stores their 2 TB NLP dataset as a single large TFRecord file. Training works fine (sequential streaming), but when they try to evaluate on a random 10K sample, it takes 45 minutes to read—almost as long as scanning the entire dataset.
+question: What storage format property causes this extreme random access latency, and how do you fix it without duplicating the dataset?
+details:
+  realistic_solution: 'TFRecord stores records as sequential length-prefixed protocol buffers with no global index. To read record N, you must scan through records 0 to N-1 to find offset boundaries. Fixes: Build an external index file mapping record_id to byte_offset by scanning once and storing offsets. Random access then becomes seek(offset) + read(record_length).'
+  common_mistake: |
+    **The Pitfall:** Blaming TFRecord as a inherently "bad format" or attempting to load the entire 2TB into RAM.
+    **The Rationale:** Engineers experience the slow random access and assume the format is globally inefficient.
+    **The Consequence:** Teams abandon TFRecord, missing out on its excellent sequential streaming capabilities, or waste engineering cycles re-writing 2TB of data into a new format.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 2 TB TFRecord dataset.
+    - 10K random sample evaluation.
+    - 2 GB/s local scan speed, ~200 MB/s single-stream S3 throughput, 50ms S3 GET latency.
+    - External index maps record_id to byte offset and length.
+
+    **Calculations:**
+    - Full local scan time: 2 TB / 2 GB/s = 1,000 seconds = ~16.7 minutes.
+    - Full single-stream S3 scan time: 2 TB / 200 MB/s = 10,000 seconds = ~2.8 hours.
+    - Without an index, random records in one large TFRecord require scanning to discover record boundaries, so a 10K sample can approach full-scan behavior.
+    - With an index and sequential GETs: 10K reads * 50ms/read = 500 seconds = ~8.3 minutes, plus payload transfer.
+    - With 100-way parallel indexed reads: 500 seconds / 100 = ~5 seconds of request-latency time, plus payload transfer and S3 throttling limits.
+
+    **Conclusion & Interpretation:**
+    - **Result: scan-bound without an index, request-latency-bound with indexed random reads.** The index changes random evaluation from near-full-file scanning to parallel seek-and-read operations without duplicating the dataset.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

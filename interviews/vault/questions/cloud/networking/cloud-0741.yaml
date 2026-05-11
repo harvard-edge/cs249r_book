@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-0741
+track: cloud
+level: L5
+zone: optimization
+topic: collective-communication
+competency_area: networking
+bloom_level: evaluate
+phase: both
+title: The Network Congestion Collapse
+scenario: You have 256 GPUs across 32 nodes, connected by a 2-tier fat-tree with 400 Gbps InfiniBand. During a 70B model AllReduce, your monitoring shows aggregate switch throughput drops from 90% link utilization to 35% as you scale from 64 to 256 GPUs. The switches aren't dropping packets.
+question: What is happening to cause this throughput drop?
+details:
+  realistic_solution: 'You''re experiencing **congestion spreading** via InfiniBand''s credit-based flow control. When multiple flows converge on a single switch port (incast), the receiver''s buffer fills. The switch stops issuing credits to the senders, which back-pressures upstream switches, which stop issuing credits to *their* senders. This "credit stall" propagates backwards through the fat-tree, throttling even flows that don''t traverse the congested port (head-of-line blocking at the switch level). At 256 GPUs, the AllReduce traffic pattern creates many-to-one incast at every tier of the fat-tree simultaneously. Solutions: adaptive routing (NVIDIA SHARP, or switch-level adaptive routing), AllReduce decomposition into smaller sub-groups, or using in-network reduction (SHARP) to reduce traffic at the switch.'
+  common_mistake: |
+    **The Pitfall:** Assuming zero packet loss implies a healthy network.
+    **The Rationale:** Candidates conclude that if the network isn't dropping packets, the bottleneck must be on the GPU compute side.
+    **The Consequence:** Ignoring credit-based flow control (InfiniBand), which prevents drops by throttling senders, leading to severe under-utilization.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 70B model, FP16 gradients = 140 GB per full gradient tensor.
+    - 256 GPUs, 400 Gbps = 50 GB/s per GPU link.
+    - Ring AllReduce per-rank traffic is 2N(p - 1)/p.
+
+    **Calculations:**
+    - Per-rank bytes for 256-GPU AllReduce: 2 * 140 GB * 255/256 ≈ 279 GB.
+    - Best-case per-rank serialization time at line rate: 279 GB / 50 GB/s ≈ 5.6s.
+    - At 90% link utilization, effective bandwidth is about 45 GB/s; at 35%, it is about 17.5 GB/s.
+    - The same communication volume therefore stretches from roughly 6.2s to 15.9s if credit stalls reduce usable throughput to 35%.
+
+    **Conclusion & Interpretation:**
+    - **Result: Congestion Spreading, Not Packet Loss.** InfiniBand prevents drops by withholding credits. Under incast, backpressure can reduce usable throughput across otherwise healthy links, so zero drops can still coincide with a large AllReduce slowdown.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

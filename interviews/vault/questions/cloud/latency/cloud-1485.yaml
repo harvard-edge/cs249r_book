@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-1485
+track: cloud
+level: L5
+zone: evaluation
+topic: latency-decomposition
+competency_area: latency
+bloom_level: evaluate
+phase: both
+title: Mitigating Tail Latency Jitter in Real-time LLM Serving
+scenario: 'Your team is serving a real-time conversational voice AI model using a cluster of NVIDIA H100s. The strict latency SLA requires P99 response times under 250ms. Profiling shows that while median latency is a stable 120ms, the P99 latency frequently spikes to over 400ms. These spikes are not correlated with sudden bursts in request volume or garbage collection pauses. System-level tracing indicates that CPU context switching, NUMA boundary crossings, and OS interrupt handling are contributing to unpredictable variations in request processing times on the CPU before they even reach the GPU queue. You must evaluate two different strategies to mitigate this operating system-induced latency jitter: (1) Implementing strict CPU core pinning with thread affinity and NUMA-aware memory allocation, versus (2) Adopting an OS-bypass network stack (like DPDK/RDMA) to handle incoming requests directly.'
+question: 'Which is more cost-effective for cutting OS-induced P99 jitter below 250ms: CPU pinning and NUMA isolation or DPDK/RDMA, and how would you justify this quantitatively?'
+details:
+  realistic_solution: Implement strict CPU pinning, thread affinity, interrupt affinity, and NUMA-aware allocations first. While OS-bypass (DPDK/RDMA) can reduce network-stack overhead, CPU isolation is cheaper and easier to deploy in standard Kubernetes. Pinning the inference server's network I/O and GPU launch threads to dedicated cores on the same NUMA node as the GPU prevents scheduler migration, reduces interrupt contention, and avoids remote-memory jitter; DPDK/RDMA is a later step if tracing still shows network-stack latency after host scheduling jitter is controlled.
+  common_mistake: |
+    **The Pitfall:** Assuming the GPU is the bottleneck for tail latency and trying to optimize the model inference speed.
+    **The Rationale:** Relying solely on model-centric optimizations (e.g., lower precision, smaller batch size) when facing latency issues.
+    **The Consequence:** Wasting effort on model optimization while completely ignoring the host-side OS resource contention that is actually causing the jitter.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Target P99 SLA: < 250ms. Median latency is ~120ms and current P99 is >400ms.
+    - The removable host-side jitter budget is roughly 400ms - 120ms = 280ms; meeting SLA requires cutting at least 150ms of that tail.
+    - Realistic NUMA remote-memory penalties are tens to low hundreds of nanoseconds per access, not tens of microseconds.
+
+    **Calculations:**
+    - NUMA penalty example: 10,000 remote accesses × 100 ns ≈ 1 ms, so NUMA access latency alone cannot explain a 200ms tail.
+    - The large P99 spike is more plausibly from scheduler migration, run-queue delay, interrupt/softirq contention, and CPU queueing before GPU launch.
+    - If pinning and interrupt affinity remove ~170ms of observed host-side tail jitter, P99 falls from ~400ms to ~230ms, under the 250ms SLA.
+
+    **Conclusion & Interpretation:**
+    - **Result: Host-Jitter Bound.** CPU pinning and NUMA/IRQ isolation are the cost-effective first fix because they target the traced scheduler and interrupt jitter; DPDK/RDMA is harder to deploy and should be justified only if network-stack time remains the measured bottleneck.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-23T23:11:16.494289'

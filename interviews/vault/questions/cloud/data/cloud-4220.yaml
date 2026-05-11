@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-4220
+track: cloud
+level: L4
+zone: optimization
+topic: storage-format-selection
+competency_area: data
+bloom_level: analyze
+phase: both
+title: Parquet Row Group Sizing for ML Training
+scenario: Your Parquet files use the default 128 MB row group size. Training on an 8× H100 cluster reads 50 columns out of 2,000 (2.5% column selectivity). Each worker processes one row group at a time. You notice that workers spend 60% of time waiting for I/O despite S3 bandwidth being underutilized.
+question: What causes the Parquet I/O bottleneck, and how should you fix it?
+details:
+  realistic_solution: 'The bottleneck is sparse column access over Parquet on S3, not simply an oversized row group. With 128 MB row groups and 2,000 columns, reading 50 columns touches only about 3.2 MB of column data per row group, but the selected chunks may be scattered across the file and require many small range reads plus footer/metadata work. Smaller row groups can improve skip granularity for predicates, but they also create more row groups and more metadata, so reducing to 8-16 MB is not a general fix. Prefer a layout that reduces unnecessary reads: physically cluster frequently co-accessed columns, partition or predicate-prune rows before training, use column projection and range-read coalescing, or switch to a format/index such as Lance/Arrow IPC that is designed for sparse ML reads over object storage.'
+  common_mistake: |
+    **The Pitfall:** Increasing row group size to reduce S3 GET requests.
+    **The Rationale:** Candidates know that larger files are generally better for S3 throughput, applying this logic blindly to row groups without considering column selectivity.
+    **The Consequence:** I/O bottleneck worsens because each request fetches massive amounts of unused column data, further starving the H100s.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Parquet uses default 128 MB row group size.
+    - Training reads 50 columns out of 2,000 (2.5% column selectivity).
+    - Selected column chunks may require multiple S3 range reads unless the reader coalesces adjacent chunks.
+    - More row groups improve pruning granularity but increase metadata and seek overhead.
+
+    **Calculations:**
+    - Useful data per row group = 128 MB * 2.5% = 3.2 MB.
+    - If the reader fetches only projected columns, useful payload is small, but request overhead dominates when 50 chunks are scattered.
+    - Making row groups 16 MB would reduce useful bytes per group to 16 MB * 2.5% = 0.4 MB, but creates 8x as many row groups for the same data.
+    - Therefore small row groups alone can increase footer, scheduling, and range-read overhead instead of reducing S3 requests.
+    - Better fixes reduce scatter: cluster co-accessed columns, enable range coalescing, partition/prune rows before training, or use an indexed ML format.
+
+    **Conclusion:** The workload is sparse-column I/O bound. Tune row groups only after measuring; the primary fix is data layout or format support that avoids many scattered reads.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

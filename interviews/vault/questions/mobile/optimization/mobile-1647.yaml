@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: mobile-1647
+track: mobile
+level: L4
+zone: specification
+topic: operator-scheduling
+competency_area: optimization
+bloom_level: analyze
+phase: inference
+title: 'On-Device LLM Deployment on Apple A17 Pro: Operator Scheduling for Latency and Memory Optimization'
+scenario: You are tasked with deploying a 5 billion parameter LLM for on-device inference on an iPhone 15 Pro (Apple A17 Pro). The chip features a 35 TOPS Neural Engine, operates within a ~5W power budget, and has 8 GB of unified memory. The LLM has been quantized to INT8, resulting in a model footprint of 5GB.
+question: How would you schedule operators in a 5B INT8 LLM on A17 Pro to meet a 50ms per token generation latency within 8 GB memory?
+details:
+  realistic_solution: Use a static, memory-planned decode schedule for the repeated transformer block. Keep the 5 GB INT8 weights resident in unified memory, stream layer tiles through the Neural Engine, and reuse a small activation arena rather than allocating per operator. Fuse RMSNorm/linear/dequant or requant steps where supported, fuse attention projection and softmax-related kernels through Core ML graph optimizations, and schedule attention-head or MLP tiles so only the current tile, KV-cache slice, and output buffer are live. Avoid CPU/GPU fallbacks in the decode path because transfers and synchronization will dominate a 50 ms token budget. The schedule should prepack weights in Neural Engine-friendly layouts, use paged or contiguous KV-cache blocks to reduce gather overhead, and profile with Instruments to verify per-layer latency, peak live memory, and thermal behavior. If the profiled bytes moved per token remain too high, the fix is not more scheduling alone; use smaller context,
+    GQA/MQA, 4-bit weight-only kernels where supported, or distillation.
+  common_mistake: |
+    **The Pitfall:** Overlooking the interplay between memory bandwidth, operator fusion, and parallel execution.
+    **The Rationale:** Candidates assume naive sequential execution is sufficient and neglect the specific capabilities of the Neural Engine's optimized INT8 pipelines.
+    **The Consequence:** Missing the 50ms target latency due to extreme memory I/O and kernel launch overheads.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Memory Budget: 8 GB total unified memory with a 5 GB INT8 weight footprint, leaving roughly 3 GB for OS, app, activations, KV-cache, and allocator headroom.
+    - Target Latency: 50 ms per token.
+    - Illustrative decode compute requirement: 100 GOP per token.
+    - Hardware Capability: 35 TOPS (35,000 GOPS) peak.
+    - Use an illustrative 100 GB/s effective unified-memory bandwidth for lower-bound traffic estimates.
+
+    **Calculations:**
+    - Raw compute time = 100 GOP / 35,000 GOP/s = 0.00286 s = ~2.9 ms compute-only floor.
+    - The 5 GB weight footprint should be treated as resident model state, not automatically as 5 GB of DRAM traffic per token.
+    - If profiling shows 2 GB of actual per-token reads/writes across tiled weights, activations, and KV-cache, ideal memory time = 2 GB / 100 GB/s = 20 ms.
+    - If actual traffic grows to 4 GB/token after refetches and spills, ideal memory time = 4 GB / 100 GB/s = 40 ms before launch, synchronization, and thermal effects.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~2.9 ms compute floor, with memory traffic likely setting the practical TPOT.** Meeting 50 ms requires measured per-token traffic to stay low after tiling, fusion, and KV-cache layout; the 5 GB footprint is a residency constraint, not by itself the per-token transfer amount.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

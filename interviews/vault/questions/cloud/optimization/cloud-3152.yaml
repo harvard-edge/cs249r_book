@@ -1,0 +1,45 @@
+schema_version: '1.0'
+id: cloud-3152
+track: cloud
+level: L4
+zone: evaluation
+topic: flash-attention
+competency_area: optimization
+bloom_level: evaluate
+phase: inference
+title: Multi-Query Attention vs GQA with FlashAttention
+scenario: You are choosing between MQA (1 KV head) and GQA-8 (8 KV heads) for a new 30B model deployed on 4x H100. Both use FlashAttention. For inference at batch=64, seq_len=4096, 48 query heads, head_dim=128, you must compare decode throughput, KV cache size, and quality.
+question: How do MQA and GQA-8 compare for decode throughput, KV cache size, and quality at batch=64 and seq_len=4096?
+details:
+  realistic_solution: |
+    Per request at seq_len=4096, the logical KV cache is 60 layers x K/V x KV heads x head_dim x tokens x bytes. MQA with 1 KV head is 60 x 2 x 1 x 128 x 4096 x 2B = about 120 MiB. GQA-8 is about 960 MiB, exactly 8x larger. For batch=64, the logical batch KV footprint is about 7.5 GiB for MQA versus 60 GiB for GQA-8 before any TP sharding or replication details. Decode KV-read bandwidth scales the same way: with balanced sharding across 4 H100s, the aggregate bandwidth floor is about 7.5 GiB / 13.4 TB/s = 0.57 ms for MQA and 60 GiB / 13.4 TB/s = 4.6 ms for GQA-8 per generated token across all layers. MQA therefore gives about 8x lower KV memory and bandwidth cost, but GQA-8 usually preserves quality better because more KV heads reduce head sharing.
+  common_mistake: |
+    **The Pitfall:** Assuming MQA is strictly better because it minimizes the KV cache size.
+    **The Rationale:** Engineers focus exclusively on memory footprint, missing that MQA with a single KV head creates a bandwidth bottleneck where all 48 query heads compete for the same data.
+    **The Consequence:** Significant model quality degradation (perplexity drop) with diminishing marginal returns on decode latency compared to GQA.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 30B, 60 layers, 48 Q heads, head_dim=128, 4x H100.
+    - Workload: batch=64, seq_len=4096, FlashAttention-2.
+    - Precision: FP16 (2 bytes/value). H100 Bandwidth: 3.35 TB/s each, 13.4 TB/s aggregate for 4 H100s if KV reads are balanced.
+
+    **Calculations:**
+    - MQA logical KV size/request: 60 * 2 * 1 * 128 * 4096 * 2B = 125.8 MB = 120 MiB.
+    - GQA-8 logical KV size/request: 60 * 2 * 8 * 128 * 4096 * 2B = 1006.6 MB = 960 MiB.
+    - Batch=64 logical KV: MQA = 7.5 GiB; GQA-8 = 60 GiB.
+    - Aggregate decode KV-read floor if balanced across 4 H100s: MQA ≈ 7.5 GiB / 13.4 TB/s = 0.57 ms; GQA-8 ≈ 60 GiB / 13.4 TB/s = 4.6 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: Quality-Latency Tradeoff.** MQA is about 8x smaller and 8x lighter on decode KV bandwidth than GQA-8, while GQA-8 generally provides better model quality through less aggressive KV-head sharing.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview

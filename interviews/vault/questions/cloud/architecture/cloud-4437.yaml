@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-4437
+track: cloud
+level: L6+
+zone: mastery
+topic: model-adaptation-systems
+competency_area: architecture
+bloom_level: create
+phase: inference
+title: LoRA Adapter Distillation for Latency-Sensitive Serving
+scenario: A latency-sensitive serving system has a 70B base model with a domain LoRA adapter (r=16) but cannot meet P95 TTFT < 50ms.
+question: How would you distill the r=16 domain LoRA adapter for a 70B model to meet a P95 TTFT target below 50 ms while preserving quality?
+details:
+  realistic_solution: Use adapter-aware distillation within the 70B serving path rather than changing the model family. First freeze the 70B base and treat the current r=16 adapter as the teacher behavior on domain prompts. Train a smaller or structurally cheaper adapter, such as r=4 or r=8 with the same target modules, using KL loss on teacher logits plus task labels and regression tests on domain and general holdouts. For serving, pre-merge the distilled adapter into the 70B weights for that domain or compile a fused adapter path so TTFT is not paying dynamic adapter dispatch, extra unfused matmuls, or adapter loading. If the base 70B prefill lower bound is already near 50ms, adapter distillation alone cannot guarantee P95; combine it with prompt trimming, prefix caching, admission control, and prefill tensor parallelism. Speculative decoding may improve later tokens but does not remove the first-token prefill constraint.
+  common_mistake: |
+    **The Pitfall:** Distilling the full 70B adapted model into a smaller 7B model.
+    **The Rationale:** Candidates assume standard knowledge distillation is the only way to shrink the model size, ignoring the specific adapter structure.
+    **The Consequence:** Full distillation takes weeks, requires massive datasets, and often fails to preserve the domain-specific knowledge held within the small LoRA adapter.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 70B base model with r=16 LoRA adapter. TTFT goal < 50ms.
+    - 512-token prefill. H100 TP=4 effective 1600 TFLOPS for dense prefill.
+    - Hidden size example h=8192; a LoRA path adds low-rank A and B matmuls on adapted projections.
+
+    **Calculations:**
+    - Dense 70B prefill lower bound: 2 * 512 * 70e9 = 71.7T FLOPs.
+    - Ideal dense prefill latency: 71.7T / 1600T = 44.8ms before queueing, memory stalls, runtime overhead, and P95 variance.
+    - Per adapted h x h projection, r=16 LoRA adds about 2 * h * r = 2 * 8192 * 16 = 262k multiply-add units versus h^2 = 67.1M dense units, or about 0.39% extra projection math.
+    - Distilling r=16 to r=4 makes that adapter term about 0.10% of the dense projection, but the main TTFT gain comes from pre-merging or fusing the adapter path and avoiding dynamic adapter overhead.
+    - Because 44.8ms is already close to 50ms, the remaining budget is only about 5.2ms for runtime overhead; P95 compliance must be verified on the actual 70B+adapter prefill path.
+
+    **Conclusion & Interpretation:**
+    - **Result: 70B Prefill-Bound.** Adapter-aware distillation should preserve the 70B teacher behavior in a cheaper fused or pre-merged adapter path; if measured P95 still exceeds 50ms, reduce prompt/prefill work or change serving parallelism rather than claiming a 7B student solves the stated 70B+LoRA deployment problem.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

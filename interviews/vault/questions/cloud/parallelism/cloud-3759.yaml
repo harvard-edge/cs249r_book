@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: cloud-3759
+track: cloud
+level: L4
+zone: design
+topic: pipeline-parallelism
+competency_area: parallelism
+bloom_level: evaluate
+phase: training
+title: 'Pipeline Parallelism vs Tensor Parallelism: When to Choose Which'
+scenario: You are training a 175B model on 64 GPUs across 8 nodes. Within each node, the interconnect provides 896 GB/s between GPUs, while between nodes the interconnect drops to 50 GB/s (400 Gbps). You must design the parallelism topology for TP, PP, and DP.
+question: Why should tensor parallelism stay within each MI300X node rather than crossing the 400 Gb/s InfiniBand links?
+details:
+  realistic_solution: TP AllReduce volume is proportional to batch x seq x hidden_dim (activation shape). Weight AllReduce is done once in DP, not per-step in TP. TP requires AllReduce on every layer's output, so spanning nodes severely bottlenecks the system.
+  common_mistake: |
+    **The Pitfall:** Extending Tensor Parallelism (TP) across nodes.
+    **The Rationale:** Engineers attempt to maximize the pooled memory of a single TP group, failing to realize the massive communication volume required.
+    **The Consequence:** TP requires blocking AllReduce operations after every layer, which heavily saturates the slow inter-node InfiniBand and craters training throughput.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Intra-node bandwidth: 896 GB/s.
+       - Inter-node bandwidth: 50 GB/s.
+       - TP AllReduce volume depends on activation shape: batch * seq * hidden_dim * 2 bytes.
+    2. **Calculations:**
+       - A standard TP step requires O(hidden_dim) communication volume at every layer boundary.
+       - Over 50 GB/s inter-node links, this transfer takes ~18x longer than over the 896 GB/s intra-node links.
+       - Pipeline Parallelism only transfers point-to-point boundary activations, minimizing required bandwidth.
+    3. **Conclusion & Interpretation:**
+       - **Result: Network-Bound.** TP must be strictly constrained within the node (896 GB/s) to avoid severe inter-node communication bottlenecks.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

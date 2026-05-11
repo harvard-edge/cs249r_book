@@ -1,0 +1,38 @@
+schema_version: '1.0'
+id: edge-2170
+track: edge
+level: L4
+zone: diagnosis
+topic: software-portability
+competency_area: cross-cutting
+bloom_level: analyze
+phase: both
+title: Handling INT8 Quantization Discrepancies Across Edge Runtimes
+scenario: Your INT8-quantized object detection model achieves 42.1 mAP when quantized with TensorRT's PTQ on Jetson Orin, but only 39.8 mAP when the same FP32 model is quantized with ONNX Runtime's built-in quantizer using the same calibration dataset. The 2.3 mAP gap is unacceptable.
+question: Why is ORT INT8 quantization 2.3 mAP worse than TensorRT on the same calibration set, and how would you close the gap?
+details:
+  realistic_solution: 'The gap is usually not the calibration set alone; it comes from a mismatch between the TensorRT PTQ recipe and the ONNX Runtime quantization recipe. Use ORT static quantization for this detection model, preferably QDQ format, and match TensorRT as closely as possible: calibration method (entropy, percentile, or minmax), preprocessing, representative images, activation ranges, per-channel Conv weight quantization, symmetric/asymmetric settings, and op exclusions for sensitive detection heads. Do not use quantize_dynamic as the fix; dynamic quantization is mainly a CPU-weight quantization path and will not reproduce TensorRT PTQ on Jetson. If the gap remains, compare TensorRT EP/CUDA EP operator coverage, fusion, Q/DQ placement, unsupported INT8 fallbacks, and NMS/post-processing parity.'
+  common_mistake: |
+    **The Pitfall:** Blaming only the calibration dataset size for the mAP gap.
+    **The Rationale:** Engineers assume more data will fix quantization errors without matching the quantization format, calibration method, Q/DQ placement, and execution provider behavior.
+    **The Consequence:** They apply a CPU-oriented dynamic quantization fix and still ship a detector whose INT8 graph differs materially from the TensorRT-calibrated graph.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Same FP32 detector and same representative calibration images.
+    - TensorRT and ORT can still choose different activation ranges, Q/DQ placement, per-channel weight handling, fusions, and fallback kernels.
+    - Example outlier-sensitive tensor: minmax range is 10.0, while percentile clipping keeps the useful range near 2.5.
+
+    **Calculations:**
+    - Minmax 8-bit scale example: 10.0 / 255 = 0.039 per quantization step.
+    - Percentile-clipped scale example: 2.5 / 255 = 0.0098 per quantization step.
+    - The clipped range gives roughly 0.039 / 0.0098 = 4x finer resolution for the bulk of that tensor, at the cost of clipping rare outliers.
+    - This explains a possible accuracy mechanism; the actual 2.3 mAP gap must be verified with an ablation of calibration method, per-channel weights, Q/DQ placement, and execution provider parity.
+
+    **Conclusion & Interpretation:**
+    - **Result: match ORT static QDQ quantization to the TensorRT PTQ recipe before blaming the model.** The scale example shows why calibration choices can matter, but it is not a direct mAP formula.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK

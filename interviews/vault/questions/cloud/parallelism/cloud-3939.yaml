@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: cloud-3939
+track: cloud
+level: L5
+zone: analyze
+topic: communication-computation-overlap
+competency_area: parallelism
+bloom_level: analyze
+phase: both
+title: MI300X Infinity Fabric vs H100 NVLink for Communication Overlap
+scenario: You are choosing between an 8x H100 DGX node (NVLink 900 GB/s bisection) and an 8x MI300X node (Infinity Fabric 896 GB/s bisection) for distributed training of a 70B LLM.
+question: How do H100 NVSwitch and MI300X Infinity Fabric topology differences affect overlap for 70B LLM training?
+details:
+  realistic_solution: 'For communication overlap, the important difference is not the headline bisection number but how predictable collectives are under the chosen parallelism pattern. H100 DGX systems expose a high-bandwidth switched NVLink fabric, so tensor-parallel collectives among the 8 GPUs tend to have more uniform paths and are easier to schedule into narrow backward-compute windows. MI300X systems also provide high intra-node bandwidth, but the fabric and collective implementation may have more topology-sensitive path choices, so overlap should be validated with the exact AllReduce and AllGather sizes. For 70B training, prefer the topology with lower tail latency for the frequent collectives in your plan: TP-heavy training benefits from predictable intra-node AllReduce timing, while FSDP/ZeRO-heavy training should be judged by measured AllGather/ReduceScatter overlap rather than VRAM size alone.'
+  common_mistake: |
+    **The Pitfall:** Comparing only peak aggregate bandwidth numbers.
+    **The Rationale:** 900 GB/s vs 896 GB/s looks identical on paper.
+    **The Consequence:** Missing the fact that Infinity Fabric is hierarchical while NVSwitch is flat, leading to uneven AllReduce latency that ruins communication-computation overlap scheduling.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 70B training uses many per-layer tensor-parallel collectives.
+    - Each collective must finish inside a finite backward-compute window to be hidden.
+    - The scenario gives aggregate bisection bandwidth, not a complete collective latency model.
+
+    **Calculations:**
+    - If a collective takes C ms and the available compute window is W ms, the exposed latency is max(0, C - W).
+    - A topology with lower tail latency reduces C for the slowest collective instance, which matters more for overlap than peak aggregate bandwidth alone.
+    - Because both nodes advertise similar bisection bandwidth, the release-quality decision requires profiling the actual collective sizes and tail latencies instead of deriving a precise millisecond delta from the headline numbers.
+
+    **Conclusion & Interpretation:**
+    - **Result: Topology-sensitive overlap**. Prefer the node whose measured collective tail latency fits inside the compute windows for the intended TP/FSDP schedule.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

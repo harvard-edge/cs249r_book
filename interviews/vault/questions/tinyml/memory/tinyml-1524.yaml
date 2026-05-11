@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: tinyml-1524
+track: tinyml
+level: L4
+zone: optimization
+topic: tensor-arena-planning
+competency_area: memory
+bloom_level: analyze
+phase: inference
+title: PSRAM Spilling Strategy for ESP32-S3
+scenario: Your model on ESP32-S3 (240 MHz, 512 KB SRAM, 8 MB PSRAM) needs a 1.2 MB tensor arena — far exceeding SRAM. The ESP32-S3's PSRAM is accessible via SPI at 80 MHz (effective bandwidth ~40 MB/s vs SRAM's ~960 MB/s). If you place the entire arena in PSRAM, how much slower is inference, and what hybrid SRAM/PSRAM placement minimizes the slowdown?
+question: If you place the entire arena in PSRAM, how much slower is inference, and what hybrid SRAM/PSRAM placement minimizes the slowdown?
+details:
+  realistic_solution: 'PSRAM bandwidth is 40 MB/s versus roughly 960 MB/s peak SRAM bandwidth, so a pure memory-streaming access to the 1.2 MB arena is about 24× slower for the memory portion. One full sequential pass over 1.2 MB costs about 30 ms from PSRAM versus 1.25 ms from SRAM, so the added cost is about 28.8 ms per full-arena pass. Real inference may touch hot tensors many times, so placing the entire arena in PSRAM can be much worse than a single-pass estimate. The hybrid strategy is to keep hot tensors in SRAM: current layer input/output activations, scratch/im2col buffers, and any tensors used in tight inner loops. Put cold, long-lived tensors such as skip connections or saved early activations in PSRAM, and prefetch/copy them into an SRAM staging buffer before the consuming layer. This minimizes slowdown by paying PSRAM bandwidth only for cold tensors that are read infrequently.'
+  common_mistake: |
+    **The Pitfall:** Placing everything in PSRAM and accepting the 24x bandwidth penalty, or placing everything in SRAM and failing because 1.2 MB > 512 KB.
+    **The Rationale:** Candidates treat memory allocation as an all-or-nothing approach instead of selectively placing tensors based on access patterns.
+    **The Consequence:** Inference becomes unnecessarily slow due to I/O bottlenecks, or the system crashes with out-of-memory errors.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - PSRAM Bandwidth: 40 MB/s.
+    - SRAM Bandwidth: 960 MB/s.
+    - Tensor arena size: 1.2 MB.
+    - Use one full-arena sequential pass as a lower-bound memory traffic estimate.
+
+    **Calculations:**
+    - All-PSRAM one-pass arena access: 1.2 MB / 40 MB/s = 0.030 s = 30 ms.
+    - All-SRAM one-pass arena access if it fit: 1.2 MB / 960 MB/s = 0.00125 s = 1.25 ms.
+    - Memory-only slowdown for one pass: 30 ms / 1.25 ms = 24x.
+    - Added time per full-arena pass: 30 ms - 1.25 ms = 28.75 ms.
+    - Hybrid example: keep 450 KB hot tensors in SRAM and 750 KB cold tensors in PSRAM.
+    - If the cold region is streamed once: 0.75 MB / 40 MB/s = 18.75 ms of PSRAM traffic, while hot repeated accesses stay in SRAM.
+
+    **Conclusion & Interpretation:**
+    - **Result: all-PSRAM is ~24x slower for the memory-access portion, or about 29 ms added per full 1.2 MB pass.** A hybrid placement minimizes slowdown by keeping repeatedly accessed activations and scratch in SRAM and using PSRAM only for cold tensors.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-0976
+track: cloud
+level: L4
+zone: diagnosis
+topic: collective-communication
+competency_area: networking
+bloom_level: analyze
+phase: both
+title: Diagnosing DDP All-Reduce Bottlenecks
+scenario: A team is training a 5B parameter transformer using PyTorch DDP across 64 A100 (80GB) GPUs on 8 nodes. The inter-node networking is 4x 200 Gbps HDR InfiniBand (800 Gbps total per node). GPU utilization is struggling at 45%, and the profiler reveals significant idle time spent waiting on `ncclAllReduce`.
+question: How do you analyze the DDP all-reduce bottleneck, and which fixes reduce exposed communication or increase overlap?
+details:
+  realistic_solution: The system is communication-bound because each rank must exchange nearly the full 20GB FP32 gradient payload during every data-parallel all-reduce. Increasing local batch size or using gradient accumulation can help if memory and step semantics allow it, because more compute per synchronization improves overlap. Reducing the communicated payload with FP16/BF16 gradient communication hooks directly lowers all-reduce time. Smaller batches or faster GPUs without a network or overlap change make exposed communication worse.
+  common_mistake: |
+    **The Pitfall:** Assuming faster GPUs or smaller batch sizes will improve overall throughput.
+    **The Rationale:** Smaller batches reduce compute density and worsen the communication-computation ratio, while faster GPUs merely finish compute faster and increase idle time waiting for the network.
+    **The Consequence:** It exacerbates the poor communication-computation ratio, leading to lower utilization and worse end-to-end performance.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 5B parameters in FP32 (4 bytes/param) = 20GB full-gradient payload per rank.
+    - 64 DDP ranks across 8 nodes with 800 Gbps total inter-node bandwidth per node (100 GB/s).
+    - Ring all-reduce communicated volume per rank ≈ 2 * (R-1)/R * payload.
+
+    **Calculations:**
+    - Per-rank ring all-reduce volume ≈ 2 * (63/64) * 20GB = 39.4GB.
+    - At the node boundary, the aggregate node NIC budget is 100 GB/s, so a lower-bound communication time is roughly 39.4GB / 100 GB/s = 394ms before protocol and topology overheads.
+    - If local FWD+BWD compute takes 300ms, at least about 94ms of communication is exposed unless bucketization overlaps it with compute.
+    - FP16/BF16 gradient communication halves the payload; larger local batches or gradient accumulation increase compute per synchronization and can improve overlap if they fit.
+
+    **Conclusion & Interpretation:**
+    - **Result: about 394ms lower-bound all-reduce time and roughly 94ms exposed wait per step (Communication-Bound)**. Fixes should either reduce gradient volume or increase overlap; smaller batches or faster compute alone worsen the communication-compute ratio.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-23T21:19:38.927798'

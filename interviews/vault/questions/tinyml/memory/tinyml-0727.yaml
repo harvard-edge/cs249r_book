@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: tinyml-0727
+track: tinyml
+level: L5
+zone: evaluation
+topic: mcu-compute-constraints
+competency_area: memory
+bloom_level: evaluate
+phase: inference
+title: The DMA Buffer Corruption
+scenario: Your audio keyword spotting system on a Cortex-M7 uses DMA to stream PDM microphone data into a circular buffer in AXI SRAM. The model reads from this buffer for inference. Occasionally — about once every 500 inferences — the model outputs a confident but completely wrong classification. The audio data in the buffer looks correct when you pause and inspect it.
+question: Why does Cortex-M7 DMA audio in AXI SRAM produce one confident wrong KWS result every 500 inferences?
+details:
+  realistic_solution: The Cortex-M7 has a data cache (D-cache) between the CPU and AXI SRAM. The DMA controller writes directly to AXI SRAM, bypassing the D-cache. If the CPU previously cached part of the audio buffer, inference can read stale cached samples instead of the fresh DMA data. Pausing in the debugger can invalidate or otherwise disturb cache state, which explains why the buffer then appears correct. The fix is to invalidate the D-cache region for the DMA buffer before the CPU reads it, or place the DMA buffer in non-cacheable memory.
+  common_mistake: |
+    **The Pitfall:** Trusting the debugger's view of memory completely.
+    **The Rationale:** Engineers assume that if the data looks correct when paused, the hardware is fine and the model must be at fault.
+    **The Consequence:** They fail to realize that pausing the processor flushes the cache, hiding the underlying coherency issue and leading to pointless model retraining.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - D-cache: 16 KB, 4-way set associative, 32-byte lines.
+    - DMA buffer: 4 KB = 128 cache lines.
+    - CPU reads must see the DMA producer's latest writes.
+
+    **Calculations:**
+    - DMA buffer cache footprint: 4 KB / 32 bytes per line = 128 cache lines.
+    - The observed one-in-500 symptom is a diagnostic clue, not a derivable probability from the stated cache geometry.
+    - Correctness requirement: invalidate all 128 DMA-buffer cache lines before inference reads them.
+    - Cache invalidation cost: 128 lines x 8 cycles/line = 1,024 cycles = 2.1 µs at 480 MHz.
+
+    **Conclusion & Interpretation:**
+    - **Result: Cache coherency failure (Memory-Bound)**. The rare failure rate is consistent with stale cached DMA data. Invalidation takes a negligible 2.1 µs and prevents this stale-read path when applied correctly.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

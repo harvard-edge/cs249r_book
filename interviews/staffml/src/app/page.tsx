@@ -438,6 +438,7 @@ function HomePage() {
                         else next.add(area.id);
                         return next;
                       });
+                      setHeaderCollapsed(true);
                     }}
                   />
                 );
@@ -494,7 +495,10 @@ function HomePage() {
             {searchResults ? (
               <>
                 <SearchResults results={searchResults} query={query}
-                  selectedId={selectedTopic?.id ?? null} onSelect={setSelectedTopic} />
+                  selectedId={selectedTopic?.id ?? null} onSelect={(topic) => {
+                    setSelectedTopic(topic);
+                    setHeaderCollapsed(true);
+                  }} />
                 {/* Full-text question matches */}
                 {questionSearchResults.length > 0 && (
                   <div className="mt-8">
@@ -514,7 +518,7 @@ function HomePage() {
                             <span className="text-[10px] font-mono text-textMuted">{q.track}</span>
                           </div>
                           <p className="text-sm font-medium text-textPrimary group-hover:text-accentBlue transition-colors">{q.title}</p>
-                          <p className="text-[12px] text-textTertiary mt-1 line-clamp-2">{q.scenario.slice(0, 150)}{q.scenario.length > 150 ? '...' : ''}</p>
+                          <p className="text-[12px] text-textTertiary mt-1 line-clamp-2">{(() => { const t = q.question ?? q.scenario; return t.length > 150 ? `${t.slice(0, 150)}…` : t; })()}</p>
                         </Link>
                       ))}
                     </div>
@@ -526,10 +530,23 @@ function HomePage() {
               </>
             ) : singleExpandedArea ? (
               <ExpandedArea area={singleExpandedArea}
-                selectedId={selectedTopic?.id ?? null} onSelect={setSelectedTopic} />
+                selectedId={selectedTopic?.id ?? null} onSelect={(topic) => {
+                  setSelectedTopic(topic);
+                  setHeaderCollapsed(true);
+                }} />
             ) : (
-              <AreaOverview areas={displayAreas} onExpand={(id) => setSelectedAreas(new Set([id]))} onSelectTopic={setSelectedTopic}
-                selectedId={selectedTopic?.id ?? null} />
+              <AreaOverview 
+                areas={displayAreas} 
+                onExpand={(id) => {
+                  setSelectedAreas(new Set([id]));
+                  setHeaderCollapsed(true);
+                }} 
+                onSelectTopic={(topic) => {
+                  setSelectedTopic(topic);
+                  setHeaderCollapsed(true);
+                }}
+                selectedId={selectedTopic?.id ?? null} 
+              />
             )}
 
             {/* Footer */}

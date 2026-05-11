@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: cloud-3960
+track: cloud
+level: L3
+zone: diagnosis
+topic: communication-computation-overlap
+competency_area: parallelism
+bloom_level: analyze
+phase: both
+title: GradScaler Synchronization as a Hidden Overlap Barrier
+scenario: Your DDP training with mixed-precision (FP16) and GradScaler runs 20% slower than expected despite good overlap. Profiling shows a synchronization point between the backward pass and optimizer step where all GPUs wait. This sync does not appear in FP32 training.
+question: What causes it?
+details:
+  realistic_solution: 'GradScaler workflow: (1) After backward, unscale_() divides gradients by the current loss scale. (2) The scaler checks whether any local gradient contains inf/nan and DDP must make a consistent per-step decision about applying or skipping the optimizer step. (3) That overflow decision introduces a synchronization point after backward, even if the payload is tiny, because optimizer progress cannot safely continue until ranks agree. Fix: (a) Use BF16 instead of FP16 when supported to avoid dynamic loss scaling. (b) If FP16 is required, profile the scaler path and avoid redundant collectives by combining compatible checks such as overflow and norm reductions where the framework permits. (c) Reduce stragglers before the scaler boundary by fixing input imbalance or late gradient buckets.'
+  common_mistake: |
+    **The Pitfall:** Not realizing that `GradScaler.step()` enforces an all-GPU synchronization barrier.
+    **The Rationale:** Developers treat FP16 mixed precision as a "free" speedup, ignoring the hidden collective communications required to safely manage scale factors.
+    **The Consequence:** Unexplained 20% latency overheads per step as fast GPUs idle waiting for stragglers to confirm they didn't encounter NaNs.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - GradScaler inf/nan check requires an AllReduce of a tiny boolean flag.
+    - This AllReduce acts as a blocking synchronization barrier.
+
+    **Calculations:**
+    - Expected step without the scaler boundary = 25ms.
+    - The overflow-check payload may take only ~0.05ms, but the synchronization exposes the slowest rank.
+    - If the slowest rank arrives 5ms later than the fastest ranks, the effective step becomes 25ms + 5ms = 30ms.
+    - Slowdown = (30ms - 25ms) / 25ms = 20%.
+
+    **Conclusion & Interpretation:**
+    - **Result: Synchronization-Bound**. The issue is not the flag payload size; it is the per-step overflow decision exposing rank skew before the optimizer step.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

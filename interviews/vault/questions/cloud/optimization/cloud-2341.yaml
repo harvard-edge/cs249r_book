@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-2341
+track: cloud
+level: L4
+zone: diagnosis
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: analyze
+phase: training
+title: XLA Compiler Host OOM on Long Sequence Attention
+scenario: You are compiling a Transformer model with a 128k sequence length using JAX/XLA. The accelerator has 95GB of HBM. The theoretical memory requirement for FlashAttention at 128k is <2GB. However, the compilation process runs for 4 hours and then crashes with an Out-Of-Memory (OOM) error on the Host CPU machine (512GB RAM).
+question: Why does compiling 128k FlashAttention OOM the 512GB host CPU despite <2GB device memory, and how would you avoid it?
+details:
+  realistic_solution: |
+    The symptom (Host CPU OOMing during compilation, not device OOM during execution) points to compiler graph growth rather than FlashAttention runtime memory. At a 128k sequence length, an implementation that expresses attention blocks through Python loops, static unrolling, or large broadcasted index expressions can force XLA to materialize a very large HLO graph before execution. Compilation passes such as shape inference, fusion, CSE, and liveness analysis keep metadata for those HLO operations in host RAM, so the compiler can exhaust a 512GB host even when the eventual device execution would need less than 2GB of HBM. The fix is to keep the computation looped in the lowered IR: use `jax.lax.scan`, `jax.lax.while_loop`, or a FlashAttention kernel/lowering that preserves block loops instead of expanding every block interaction into separate HLO operations.
+  common_mistake: |
+    **The Pitfall:** Assuming the HBM is OOMing due to materialized attention matrices, and trying to implement gradient checkpointing.
+    **The Rationale:** The symptom explicitly points to Host CPU OOMing during compilation, not device OOM during execution. The compiler is exhausting host RAM due to massive HLO graph representation from loop unrolling.
+    **The Consequence:** Wasting time optimizing model memory usage while the compiler remains fundamentally broken.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Sequence length: 128k.
+       - Block size: 128 tokens, so 128k / 128 = 1024 query blocks and 1024 key/value blocks.
+       - A bad static lowering emits HLO for each query-block/key-block interaction instead of a loop.
+       - Compiler metadata per expanded block interaction can be hundreds of KB after fusion, shape, and liveness state.
+       - Host RAM limit: 512 GB.
+    2. **Calculations:**
+       - Static block interactions: 1024 × 1024 = 1,048,576 HLO regions or region fragments.
+       - At 0.5 MB of compiler state per expanded block interaction, host compiler memory is about 1,048,576 × 0.5 MB ≈ 524 GB.
+       - A loop-preserving lowering keeps the graph size proportional to the block kernel plus loop state, not to all 1M block interactions.
+    3. **Conclusion & Interpretation:** **Compiler graph materialization exhausts 512GB Host RAM. Compiler-State-Bound.**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 18
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+  - xla
+  - compiler
+  - tpu
+  - oom

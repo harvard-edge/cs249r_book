@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: mobile-0960
+track: mobile
+level: L5
+zone: specification
+topic: kv-cache-management
+competency_area: memory
+bloom_level: create
+phase: inference
+title: Production Mobile LLM KV Cache Requirements on A17 Pro
+scenario: A production mobile LLM chat app serves 10M users. The app supports a 3B parameter model and 4096-token contexts.
+question: What KV cache memory, quantization, eviction, and recovery requirements should a production A17 Pro chat app specify?
+details:
+  realistic_solution: 'Implement PagedAttention with isolated KV storage per conversation. Quantization: INT8 Grouped-Query Attention (GQA) for baseline, INT4 for max context. Eviction: Background conversations'' KV offloaded to flash memory. Recovery: KV is dropped under heavy memory pressure and asynchronously recomputed (prefilled) upon app resume, with user-visible latency budgeted from measurement rather than a fixed TOPS-only estimate.'
+  common_mistake: |
+    **The Pitfall:** Not specifying per-conversation KV isolation or leveraging GQA quantization.
+    **The Rationale:** Treating mobile LLM memory like cloud endpoints without strict per-user hardware boundaries.
+    **The Consequence:** Context leakage between chats and severe memory ballooning that results in the OS killing the application process.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 3B parameters INT4.
+    - Context: 4096 tokens, 32 layers, 8 KV heads, 128 head_dim.
+    - Hardware: A17 Pro (35 TOPS).
+
+    **Calculations:**
+    - INT8 KV bytes per token = 32 layers * 2 (K/V) * 8 KV heads * 128 head_dim * 1 byte = 65,536 bytes = 64 KiB/token.
+    - 4096-token INT8 KV cache = 4096 * 64 KiB = 256 MiB = 268.4 MB per active conversation.
+    - INT4 KV option uses the same dimensions at 0.5 byte/element: 32 * 2 * 8 * 128 * 0.5 byte = 32 KiB/token; 4096 tokens * 32 KiB = 128 MiB = 134.2 MB per active conversation.
+    - A dropped 4096-token cache must be recovered by prefill. The rebuilt KV writes are at least 256 MiB for INT8 or 128 MiB for INT4, plus prompt reads and layer activation traffic; at 68 GB/s, the KV-write traffic alone is a few milliseconds, but full recovery latency is dominated by measured prefill execution and cannot be derived from advertised TOPS alone.
+    - Production recovery requirement: dropped/offloaded KV must be recomputed in the background or behind an explicit resume latency budget measured on device, with admission control if memory pressure persists.
+
+    **Conclusion & Interpretation:**
+    - **Result: 268 MB INT8 KV per Active Conversation**. Production requirements should specify isolated per-chat KV allocation, INT4 fallback for pressure, eviction/offload policy, and measured prefill recovery behavior.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

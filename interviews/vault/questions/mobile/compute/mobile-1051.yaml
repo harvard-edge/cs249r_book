@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: mobile-1051
+track: mobile
+level: L4
+zone: evaluation
+topic: transformer-systems-cost
+competency_area: compute
+bloom_level: evaluate
+phase: inference
+title: 'Mobile Transformer Cost Evaluation: On-Device LLM Viability on A17 Pro'
+scenario: Evaluate whether an INT4 Llama-3-8B model can provide a good user experience on a mobile SoC with a P99 < 3s for 100-token responses.
+question: Can Llama-3-8B INT4 meet a P99 under 3 seconds for 100-token responses on the A17 Pro, given RAM and bandwidth limits?
+details:
+  realistic_solution: |
+    The model can fit, but fitting is not enough to meet the latency SLO. A17 Pro has 8GB of LPDDR5-class memory; after OS and app overhead, about 5-6GB may be available. An INT4 8B model uses roughly 4GB for weights, leaving about 1-2GB for KV cache and runtime buffers. For a simplified non-GQA cache estimate with 32 layers, 32 KV heads, and 128 head_dim, the KV cache is 32 layers * 2 KV tensors * 32 heads * 128 values * 0.5 bytes = 128KB/token, so a 1000-token context is about 128MB.
+
+    The 3s P99 target for 100 output tokens requires at least 33 tokens/s, or 30ms/token including scheduling, sampling, memory traffic, and thermal effects. You should not model this as loading 4GB from storage every token, but a bandwidth-bound decode still streams/touches a large fraction of the resident weights from LPDDR for each token. Even the optimistic full-weight-stream lower bound is 4GB / 68GB/s = 58.8ms/token, or about 17 tokens/s before KV, kernels, sampling, scheduling, and thermal throttling. That implies roughly 5.9s for 100 tokens, so Llama-3-8B INT4 should be treated as unlikely to meet the P99 target on A17 Pro without a measured implementation that beats this simple traffic model. Use a smaller 3-4B INT4 model, shorten the response, stream partial output while relaxing P99, or require an empirical benchmark before claiming success.
+  common_mistake: |
+    **The Pitfall:** Directly translating Neural Engine TOPS to autoregressive decode throughput.
+    **The Rationale:** Engineers assume peak compute represents model execution speed.
+    **The Consequence:** Failing to realize LLM generation is overwhelmingly memory-bandwidth bound, ignoring the ~100 GB/s ceiling.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - INT4 8B model size: 4 GB.
+       - KV cache: ~128KB/token for this 8B architecture.
+       - SLO: 100 tokens under 3 seconds, so required throughput is >=33.3 tokens/s.
+    2. **Calculations:**
+       - Required token time: 3s / 100 = 30ms/token.
+       - KV cache at 1000 context tokens: 128KB * 1000 = 128MB, so memory capacity is not the blocker.
+       - The 128KB/token cache estimate assumes non-GQA KV with 32 layers, 32 KV heads, 128 head_dim, 2 KV tensors, and INT4 storage: 32 * 2 * 32 * 128 * 0.5 bytes = 128KB/token.
+       - Optimistic full-weight-stream lower bound: 4GB / 68GB/s = 58.8ms/token, or about 17 tok/s before KV/kernel/scheduler overhead.
+       - 100-token response at that lower bound: 100 / 17 tok/s = about 5.9s.
+       - Practical decision rule: if measured sustained decode is below 33 tok/s, the 100-token response exceeds 3s P99.
+    3. **Conclusion & Interpretation:**
+       - **Result: capacity fits, latency likely fails.** The correct viability test is measured or realistically estimated tok/s; the target requires >=33 tok/s, which is not a safe assumption for an 8B INT4 model on A17 Pro.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview

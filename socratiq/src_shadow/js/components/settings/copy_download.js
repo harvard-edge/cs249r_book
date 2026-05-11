@@ -5,6 +5,21 @@ import { enableTooltip } from '../../components/tooltip/tooltip.js';
 // import { SpacedRepetitionModal } from '../../components/spaced_repetition/modal.js';
 import { SpacedRepetitionModal } from '../../components/spaced_repetition/spaced-repetition-modal-handler.js';
 
+function cleanMarkdownFragment(markdown) {
+    const template = document.createElement('template');
+    template.innerHTML = markdown;
+
+    template.content.querySelectorAll('script, style').forEach((node) => node.remove());
+    template.content.querySelectorAll('[style], [id], [class]').forEach((node) => {
+        node.removeAttribute('style');
+        node.removeAttribute('id');
+        node.removeAttribute('class');
+    });
+
+    return (template.content.textContent || '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
 
 // Add the back button creation function (same as in create_quiz_button_grp.js)
 function createBackButton(shadowEle) {
@@ -40,14 +55,7 @@ export function copy_download(shadowEle, clone) {
     const getMarkdownContent = () => {
         const markdown = clone.getAttribute('data-markdown');
         if (markdown) {
-            // Clean up the markdown by removing HTML style tags and attributes
-            return markdown.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '') // Remove style tags and their content
-                          .replace(/<[^>]+style="[^"]*"[^>]*>/g, '') // Remove style attributes
-                          .replace(/id="[^"]*"/g, '') // Remove id attributes
-                          .replace(/class="[^"]*"/g, '') // Remove class attributes
-                          .replace(/<div[^>]*>([\s\S]*?)<\/div>/g, '$1') // Replace div tags with their content
-                          .replace(/\s+/g, ' ') // Normalize whitespace
-                          .trim(); // Remove leading/trailing whitespace
+            return cleanMarkdownFragment(markdown);
         }
         
         const textSource = clone.querySelector('.text-sm.text-zinc-800');

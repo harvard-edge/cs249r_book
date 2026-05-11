@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-3185
+track: cloud
+level: L5
+zone: evaluation
+topic: speculative-decoding
+competency_area: latency
+bloom_level: evaluate
+phase: inference
+title: Speculative Decoding Cost-Benefit for Serving Economics
+scenario: 'Your serving cluster runs 64x H100 ($2/GPU/hr) serving a 70B model at 5K req/s. Current P50 latency: 30ms/tok. Product wants P50 < 15ms/tok (2x improvement). Option A: add speculative decoding (alpha=0.80, K=5, 7B draft). Option B: double the cluster to 128x H100. Compare the annual cost, latency distribution (P50/P99), and operational complexity of each approach.'
+question: Should you meet a 15 ms/token P50 target by adding speculation or doubling from 64 to 128 H100s, and what are the cost and tail-latency tradeoffs?
+details:
+  realistic_solution: 'Option A wins if the 7B draft can be co-located within memory headroom and the cluster is expanded only enough to recover the throughput loss. Model each speculative round as K=5 draft tokens plus the target-model token from verification; with independent per-depth acceptance alpha=0.80, E[tokens/round]=sum_{i=0}^{5} alpha^i=(1-0.80^6)/0.20=3.69. A round costs 5x2ms draft + 35ms verify = 45ms, so P50 token latency is 45/3.69=12.2ms and meets the 15ms target under this round model. For hard requests with alpha≈0.45, E[tokens/round]=sum_{i=0}^{5} 0.45^i=1.80, so tail token latency is about 45/1.80=25.0ms; speculation improves P50 more than P99. Treat the 20% capacity penalty as lost serving throughput from draft KV, draft compute, and verification scheduling overhead, not as extra latency in the 45ms round. Maintaining 5K req/s therefore requires about 64/0.8=80 H100s. Cost is 80 x $2 x 8760 = $1.40M/year. Option B doubles to 128 H100s for $2.24M/year. It reduces queuing
+    and can improve P99, but the prompt gives no queueing model that proves a 2x P50 reduction; if the 30ms/tok P50 is dominated by memory-bound decode service time, doubling capacity alone will not reach 15ms/tok. Verdict: choose speculation for the P50 target, while budgeting for higher operational complexity and monitoring tail latency.'
+  common_mistake: |
+    **The Pitfall:** Only comparing the steady-state P50.
+    **The Rationale:** Speculation adds variance to the latency distribution because acceptance rate varies per request.
+    **The Consequence:** This makes P99 worse even as P50 improves, leading to missed tail-latency SLAs.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 64x H100 serving a 70B model at 5K req/s, target 15ms/tok P50.
+    - Speculation co-locates the draft model and has a 20% serving-throughput penalty from draft compute/KV and scheduling overhead, requiring 80 GPUs to keep 5K req/s.
+    - No queueing model is provided for the doubled-cluster option, so only cost and qualitative latency effects are derivable.
+
+    **Calculations:**
+    - Round model: K=5 drafted tokens plus the target token from verification, so E[tokens/round]=sum_{i=0}^{5} alpha^i=(1-alpha^6)/(1-alpha).
+    - Speculation P50: E=(1-0.80^6)/0.20=3.69 tokens/round. Round=45ms. P50=45/3.69=12.2ms.
+    - Speculation tail proxy: E=(1-0.45^6)/0.55=1.80 tokens/round. P99 proxy=45/1.80=25.0ms.
+    - Capacity penalty: 20% lower usable serving throughput means 64 / 0.8 = 80 H100s to maintain 5K req/s.
+    - Speculation cost: 80 GPUs * $2/hr * 8760 hr = $1.40M/yr.
+    - Double cluster cost: 128 GPUs * $2/hr * 8760 hr = $2.24M/yr.
+    - Doubling reduces queueing headroom pressure, but without a queueing/service-time split it does not imply a 2x per-token P50 improvement. If current P50 is decode-service dominated, it misses the 15ms target.
+
+    **Conclusion & Interpretation:**
+    - **Result: Speculation meets P50 at about $840K/yr lower cost under the stated model, but P99 remains around 25ms and operations are more complex. Doubling is better for queueing risk but is not proven to meet 15ms/tok.**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 15
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

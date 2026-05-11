@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: edge-1686
+track: edge
+level: L4
+zone: optimization
+topic: batching-strategies
+competency_area: latency
+bloom_level: analyze
+phase: inference
+title: Dynamic Batching Latency Optimization on Jetson Orin
+scenario: Your team is deploying a multi-camera perception system for an autonomous vehicle. The system ingests 6 concurrent video streams at 30 FPS, and you are currently using dynamic batching on the Ampere GPU with a 15ms timeout window to maximize throughput. However, tail latency periodically spikes to 80ms, violating the strict 33.3ms real-time latency deadline for the control loop.
+question: What causes the 80ms tail latency from dynamic batching, and what batching strategy would meet the 33.3ms deadline?
+details:
+  realistic_solution: Replace dynamic batching with deterministic stream-aligned microbatching on the Ampere GPU. Split the 6 streams into three fixed batch-2 groups, release each group on a fixed phase within the 33.3ms frame period, and cap the queue so stale frames are dropped rather than allowed to wait behind a large dynamic batch. This removes the 15ms fill timeout and bounds tail latency by the fixed phase offset plus profiled batch-2 execution time.
+  common_mistake: |
+    **The Pitfall:** Simply reducing the dynamic batching timeout window.
+    **The Rationale:** Candidates assume that lowering the timeout will reduce average latency, but this fails to address tail latency from batch-fill waits, queue phase effects, and GPU memory contention.
+    **The Consequence:** The system will still experience tail latency spikes and miss the strict 33.3ms real-time deadline.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Target deadline: 1000ms / 30 FPS = 33.3ms.
+    - Model requires 0.5 TOP per frame.
+    - 6 streams at 30 FPS = 180 frames/sec = 90 TOPS total compute demand.
+    - Profiled batch-6 kernel sustains about 167 TOPS for this model: 6 frames * 0.5 TOP/frame / 167 TOPS ~= 18ms.
+    - Static batch-2 execution on the GPU after profiling: 8ms inference plus 3ms transfer/postprocess per microbatch.
+
+    **Calculations:**
+    - Current dynamic batch latency lower bound: 15ms timeout + 18ms GPU inference for batch 6 = 33ms before queueing or transfer/postprocess.
+    - Tail spikes occur when frames arrive just after a batch closes or when GPU memory contention delays a large batch; two wait windows plus contention can reach about 15ms + 15ms + 18ms + 32ms = 80ms.
+    - Static batch size 2 maps the 6 streams to three fixed groups. Releasing those groups evenly across the 33.3ms frame period gives a maximum phase wait of about 33.3ms / 3 = 11.1ms.
+    - Per-frame modeled latency under the static schedule: 8ms inference + 3ms transfer/postprocess + up to 11.1ms phase offset = 22.1ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: Scheduling & Contention-Bound.** The 80ms tail comes from dynamic batch fill waits, unlucky frame phase, and large-batch contention. Fixed-phase batch-2 scheduling plus deadline-based frame dropping bounds queueing and gives about 22ms modeled tail latency under the profiled assumptions, leaving margin below the 33.3ms deadline.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

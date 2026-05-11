@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-2924
+track: cloud
+level: L6+
+zone: mastery
+topic: compound-ai-systems
+competency_area: deployment
+bloom_level: create
+phase: both
+title: Memory Capacity Planning for Concurrent RAG Agents on H100
+scenario: You are deploying a compound AI system on a single node where 16 concurrent agent sessions each run a 13B LLM plus a shared 7B reranker. Each agent session holds an 8192-token KV cache.
+question: Do the 16 concurrent 13B agent sessions plus shared 7B reranker fit on one 8xH100 node, and how would you allocate memory with tensor parallelism?
+details:
+  realistic_solution: Allocate one 13B agent replica with TP=4 on GPUs 0-3 and route all 16 agent sessions through those four ranks. Require a serving stack that shards KV cache by tensor-parallel rank; if it replicated the full KV cache on every rank, the 8192-token sessions would not leave enough headroom. With BF16 weights, the 13B weight shard is 26GB/4=6.5GB per TP GPU. For a 40-layer, hidden-size-5120 13B model, full KV is about 13.4GB per session; sharded over TP=4 this is about 3.36GB per session per rank, or 53.7GB per rank for 16 sessions. Add about 8GB for activations, workspace, and allocator fragmentation, so each 13B TP GPU is roughly 68GB, under 80GB. Place the shared 7B reranker with TP=2 on GPUs 4-5; its BF16 weight shard is 14GB/2=7GB per GPU plus batching/workspace headroom. GPUs 6-7 remain for burst prefill, a second reranker replica, or operational headroom. Under these explicit sharded-KV and shared-reranker assumptions, the workload fits on one 8xH100 node.
+  common_mistake: |
+    **The Pitfall:** Forgetting to account for KV cache memory when planning model parallelism.
+    **The Rationale:** Teams focus exclusively on allocating GPU memory for model weights and activation memory.
+    **The Consequence:** Overloading the node by failing to realize that many concurrent sessions with large KV caches can consume more memory than the model weights themselves.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Single node with 8x 80GB GPUs.
+    - 13B model uses BF16 weights, about 26GB total, 40 layers, hidden size 5120.
+    - 7B reranker (bf16, 14GB weights).
+    - 16 concurrent sessions, 8192-token KV cache each.
+    - 13B serving uses TP=4 and shards attention heads and KV cache across the TP ranks.
+
+    **Calculations:**
+    - 13B weights per GPU (TP=4): 26 GB / 4 = 6.5 GB.
+    - Full KV cache per session: 2 (K,V) * 40 layers * 8192 tokens * 5120 hidden * 2 bytes = 13.42 GB.
+    - KV cache per session per TP rank with sharded KV: 13.42 GB / 4 = 3.36 GB.
+    - KV cache per 13B TP GPU for 16 sessions: 16 * 3.36 GB = 53.7 GB.
+    - 13B total memory per TP GPU: 6.5 GB + 53.7 GB + ~8 GB (activations/workspace/fragmentation) = 68.2 GB.
+    - 7B reranker per GPU (TP=2): 14 GB / 2 = 7 GB.
+    - Concrete placement: GPUs 0-3 run the 13B TP ranks and sharded session KV; GPUs 4-5 run the shared 7B reranker TP ranks; GPUs 6-7 remain available for redundancy or burst capacity.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Feasible with Sharded KV and Explicit Placement Assumptions.** The node fits when the 13B agent uses TP=4 with KV sharded across ranks, the 7B reranker is shared on a separate TP=2 pair, and workspace/fragmentation headroom is budgeted explicitly.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

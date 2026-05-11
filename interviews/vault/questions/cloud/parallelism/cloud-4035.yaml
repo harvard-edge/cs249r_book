@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-4035
+track: cloud
+level: L4
+zone: analyze
+topic: gradient-synchronization
+competency_area: parallelism
+bloom_level: analyze
+phase: training
+title: Ring vs Tree AllReduce Latency Tradeoff
+scenario: NCCL supports both ring and tree AllReduce algorithms. Ring achieves optimal bandwidth but has O(N) latency (N-1 steps). Tree has O(log N) latency but lower bandwidth utilization. You must analyze which algorithm is faster for a 1024-MI300X cluster synchronizing a 50MB gradient tensor.
+question: For 1024 MI300X GPUs synchronizing a 50MB tensor, which NCCL AllReduce algorithm is faster and where is the crossover point?
+details:
+  realistic_solution: |
+    Use a consistent latency-plus-bandwidth model. Ring AllReduce time is T_ring = 2(N-1)α + 2(N-1)/N × D/B. For a simple bandwidth-disadvantaged tree, use T_tree = 2log₂(N)α + 2D/(ηB), where η is tree bandwidth efficiency; assume η=0.5. With N=1024, α=10μs, B=50GB/s, and D=50MB: T_ring = 20.46ms + 2.0ms = 22.46ms. T_tree = 0.2ms + 4.0ms = 4.2ms. Tree is faster for the 50MB tensor because ring pays 2046 latency steps. The crossover is around 0.5GB under these assumptions; above that, ring's better bandwidth efficiency can overcome its higher step latency. The exact crossover depends on NCCL implementation, topology, and chunking, so it should be measured.
+  common_mistake: |
+    **The Pitfall:** Only comparing the bandwidth utilization terms and ignoring the per-step latency overhead.
+    **The Rationale:** For large models, bandwidth is usually the bottleneck, so candidates reflexively choose the bandwidth-optimal Ring algorithm.
+    **The Consequence:** Severely degraded training throughput for smaller models or gradient chunking strategies where the fixed O(N) kernel launch and network RTT costs dominate.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - GPUs (N): 1024.
+    - RoCE latency (α): 10μs.
+    - Network Bandwidth (B): 50 GB/s (400 Gbps).
+    - Gradient tensor size (D): 50 MB.
+
+    **Calculations:**
+    - Ring AllReduce Time: T_ring = 2*(1023)*10μs + 2*(1023/1024)*(50MB / 50GB/s) = 20.46ms + 1.997ms = 22.46ms.
+    - Tree model with 50% bandwidth efficiency: T_tree = 2*log2(1024)*10μs + 2*50MB/(0.5*50GB/s) = 0.2ms + 4.0ms = 4.2ms.
+    - Crossover calculation: set 20.46ms + 1.998*D/B = 0.2ms + 4*D/B, so D ≈ 0.51GB.
+
+    **Conclusion & Interpretation:**
+    - **Result: Tree is faster for 50MB (Latency-Bound), but ring can win for large tensors.** With these assumptions, the crossover is about 0.5GB, not hundreds of GB.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

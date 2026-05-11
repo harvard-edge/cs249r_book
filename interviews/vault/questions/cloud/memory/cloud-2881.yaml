@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-2881
+track: cloud
+level: L5
+zone: evaluation
+topic: activation-memory
+competency_area: memory
+bloom_level: evaluate
+phase: training
+title: Evaluating Gradient Checkpointing Overhead on Training Throughput for GPT-Scale Models
+scenario: Your team reports that enabling gradient checkpointing reduced peak activation memory by 8× on A100 but also reduced training throughput from 380 tokens/sec to 298 tokens/sec on a 13B GPT model (40 layers, H=5120, S=2048, B=4). Your manager asks you to evaluate whether the 21.6% throughput loss is acceptable given that without checkpointing the job OOMs, and to identify if the overhead matches theoretical expectations.
+question: Is the 21.6% throughput loss from checkpointing acceptable for the OOMing 13B job, and does it match theoretical recompute overhead?
+details:
+  realistic_solution: |
+    Theoretical overhead for full layer-level checkpointing: total FLOPs go from F+2F=3F to F+F+2F=4F, a 33% increase. Measured overhead is (380-298)/380 = 21.6%, which is below the full-checkpointing baseline. That means the implementation is likely doing selective checkpointing, using FlashAttention or fused kernels, or otherwise not recomputing every layer's full forward path. The overhead is acceptable if the alternative is OOM, but it should be verified with nsys/Nsight or PyTorch profiler traces to identify exactly which operations are recomputed and whether lower-overhead memory optimizations are available.
+  common_mistake: |
+    **The Pitfall:** Accepting the measured overhead without verifying it against theory.
+    **The Rationale:** Standard gradient checkpointing (checkpoint every layer) adds exactly one additional forward pass worth of FLOPs to the backward pass, increasing total training time by ~33%.
+    **The Consequence:** Misdiagnosing what the system is actually doing (selective vs. full checkpointing) and missing opportunities like FlashAttention.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Measured Overhead: (380 - 298) / 380 = 21.6%.
+    - Theoretical Overhead (Full Checkpointing): 33.3%.
+
+    **Calculations:**
+    - Measured throughput loss = 82 / 380 = 0.216 = 21.6%.
+    - Full layer checkpointing would add one extra forward pass to a forward+backward step: 4F / 3F - 1 = 33.3%.
+    - 21.6% < 33.3%, so the measured slowdown is materially lower than full layer-level checkpointing.
+    - Standard attention score storage, if materialized, is B * heads * S^2 * 2 bytes * layers = 4 * 64 * 2048^2 * 2 * 40 ≈ 85.9 GB decimal. FlashAttention can remove most of this O(S^2) storage, but the actual peak-memory savings must be confirmed because implementations may already use fused or memory-efficient attention.
+
+    **Conclusion & Interpretation:**
+    - **Result:** The 21.6% overhead is acceptable for an otherwise OOM job and is lower than the 33.3% full-checkpointing expectation. It does not imply a valid "1.5 layer" checkpoint interval; profile the run to confirm whether selective checkpointing, FlashAttention, or fused kernels explain the lower overhead.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

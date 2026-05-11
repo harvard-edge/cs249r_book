@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: mobile-0684
+track: mobile
+level: L5
+zone: evaluation
+topic: memory-hierarchy-design
+competency_area: memory
+bloom_level: evaluate
+phase: inference
+title: The Mobile Memory Controller Puzzle
+scenario: You're optimizing an on-device LLM on an SoC with LPDDR5X (68.3 GB/s theoretical peak bandwidth). A naive roofline using a 3.5 GB 4-bit weight footprint predicts about 19.5 tokens/sec, but profiling measures 11 tokens/sec.
+question: Where is the missing 44% of theoretical LPDDR5X memory bandwidth during generation?
+details:
+  realistic_solution: |
+    The missing bandwidth is the gap between a naive roofline and end-to-end effective bandwidth. The roofline treats the 3.5 GB weight footprint as a perfectly streamed payload, but transformer decode has layer-by-layer working sets, dequantization, KV-cache reads and writes, activation traffic, synchronization, kernel launch overhead, cache effects, and competing display/ISP/CPU traffic. These factors overlap, so they should not be subtracted as independent GB/s penalties. The fix is to profile effective bandwidth per kernel and reduce avoidable traffic with fused dequant-matmul, fused attention/norm kernels, contiguous weight layouts matched to the accelerator, KV-cache quantization/layout tuning, larger tiles where SRAM allows, and scheduling that limits competing memory clients during generation.
+  common_mistake: |
+    **The Pitfall:** Directly dividing the theoretical LPDDR5X bandwidth spec by the model size to calculate generation tokens per second.
+    **The Rationale:** Candidates fail to account for row-buffer page open/close latency penalties and OS-level traffic contention on unified memory buses.
+    **The Consequence:** Over-promising product KPIs to leadership and ignoring critical software-level memory layout optimizations.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Peak hardware bandwidth: 68.3 GB/s.
+    - Naive roofline payload: 3.5 GB 4-bit weight footprint.
+    - Ideal roofline prediction: 19.5 tok/s. Measured generation: 11 tok/s.
+
+    **Calculations:**
+    - Naive ideal rate = 68.3 GB/s / 3.5 GB/token = 19.5 tok/s.
+    - Effective bandwidth implied by measurement = 11 tok/s * 3.5 GB/token = 38.5 GB/s.
+    - Effective utilization = 38.5 / 68.3 = 56%.
+    - Gap from peak = 1 - 0.56 = 44%.
+    - The 44% gap is an aggregate efficiency loss from KV-cache traffic, dequantization and activation movement, imperfect reuse, row-buffer and cache behavior, kernel overhead, synchronization, and other SoC clients. These are overlapping effects, not additive bandwidth debits.
+
+    **Conclusion & Interpretation:**
+    - **Result: about 38.5 GB/s effective bandwidth (Memory-Bandwidth-Bound).** The measured 11 tok/s means the implementation realizes about 56% of peak LPDDR bandwidth. The missing 44% should be investigated with kernel and memory-controller counters rather than explained as independent subtractive penalties.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: mobile-1576
+track: mobile
+level: L5
+zone: design
+topic: mixed-precision-training
+competency_area: precision
+bloom_level: analyze
+phase: training
+title: Optimizing Large Language Model Inference with Mixed-Precision on Apple A17 Pro
+scenario: You are optimizing an FP32 LLM for efficient inference on a mobile NPU. Your goal is to get the model under 100 ms/token within an 8 GB memory limit and ~5W budget.
+question: Which mixed-precision plan gets an FP32 LLM under 100 ms/token on an NPU within 8 GB and ~5W?
+details:
+  realistic_solution: 'A feasible plan is weight-first compression rather than FP16-only mixed precision. Keep numerically sensitive activations, layer norms, and logits in FP16 or FP32 where the NPU/runtime requires it, but store most transformer weights in INT4 or INT8 using PTQ with a strong calibration set, escalating to QAT only if accuracy misses the target. INT8 weights alone leave little headroom in 8 GB once KV cache, activations, runtime buffers, and the OS are included, so a 4-bit weight-only path with FP16 activations is usually the safer starting point. The deployment gate is measured token latency and energy on device: if unsupported operators fall back to CPU/GPU or dequantization dominates, reduce context length, use a smaller model, or choose a supported INT8 profile instead.'
+  common_mistake: |
+    **The Pitfall:** Naïvely quantizing to FP16 or INT8 without QAT or calibration.
+    **The Rationale:** Candidates assume the hardware will perfectly compensate for standard PTQ, or fail to account for unified memory limits.
+    **The Consequence:** This leads to severe accuracy degradation or constant memory-swapping OOM errors.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Hardware: 8 GB unified-memory limit, ~5W mobile power envelope.
+    - Target SLA: < 100 ms/token.
+    - Model: 7B parameters. Use batch-1 decode with a bounded context.
+
+    **Calculations:**
+    - FP32 Memory: 7B * 4 bytes = 28 GB (Fails).
+    - FP16 Memory: 7B * 2 bytes = 14 GB (Fails before overhead).
+    - INT8 weights: 7B * 1 byte = 7 GB, leaving too little headroom for KV cache, activations, runtime buffers, and OS memory.
+    - INT4 weights: 7B * 0.5 bytes = 3.5 GB, leaving roughly 4.5 GB for KV cache, activations, runtime buffers, and OS pressure.
+    - Latency must be measured with memory bandwidth and operator fallback included; peak TOPS alone cannot prove <100 ms/token.
+
+    **Conclusion & Interpretation:**
+    - **Result: INT4 weight-only quantization with FP16 activations is the most plausible plan under 8 GB.** INT8 may work only with short context and low overhead, and the <100 ms/token target must be verified on the actual NPU runtime.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

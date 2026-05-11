@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: mobile-1621
+track: mobile
+level: L3
+zone: implement
+topic: encoder-decoder-tradeoffs
+competency_area: architecture
+bloom_level: analyze
+phase: inference
+title: 'On-Device Real-time Translation with Apple A17 Pro: Architecture Tradeoffs'
+scenario: 'Your team is tasked with deploying an advanced, real-time, on-device language translation service within a popular mobile application. The target device is an iPhone equipped with the Apple A17 Pro chip. The service needs to translate spoken phrases from one language to another with minimal latency (e.g., under 200ms end-to-end) and high accuracy, while ensuring the application remains responsive and battery efficient. You are evaluating different model architectures for on-device deployment: a compact encoder-decoder model (like a distilled mBART or NLLB variant) for direct translation, or a decoder-only model (e.g., a small Llama/GPT variant instruction-tuned for translation).'
+question: How would you analyze the tradeoffs for each approach considering the A17 Pro's specific hardware constraints and the service requirements?
+details:
+  realistic_solution: |
+    A realistic solution would compare the full spoken-phrase pipeline: audio front end, source encoding, target decoding, memory, and battery. Start with a compact distilled encoder-decoder translation model, quantized to INT8 and converted with Core ML Tools, because it encodes the source once and usually gives better translation quality per parameter. A decoder-only model may reuse a common LLM stack, but it pays prompt-prefill cost, stores a larger KV cache, and decodes sequentially, so it needs stronger evidence on latency and power. The final choice should be based on measured end-to-end latency under 200ms, translation quality on target languages, sustained thermal behavior, and graceful fallback when the Neural Engine cannot run an op.
+  common_mistake: |
+    **The Pitfall:** Focusing solely on theoretical FLOPs/parameters without considering practical deployment.
+    **The Rationale:** Neglecting INT8 quantization efficiency on the Apple Neural Engine and the sequential decoding latency bottleneck of decoder-only models.
+    **The Consequence:** Choosing a decoder-only architecture that exceeds the 8 GB unified memory or misses the 200ms real-time latency target due to high prompt engineering overhead.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Memory Budget: 8 GiB unified memory; reserve about 4 GiB for app, OS, activations, and KV cache.
+    - Compute Budget: 35 TOPS peak; assume 30% sustained utilization = 10.5 TOPS.
+    - Latency target: under 200ms end-to-end for a short spoken phrase.
+    - Compare a 300M INT8 encoder-decoder with a 1B INT8 decoder-only model for short spoken phrases.
+
+    **Calculations:**
+    - Encoder-decoder weights ≈ 300 MB; decoder-only weights ≈ 1 GB.
+    - Encoder-decoder can encode the source tokens once in parallel, then decode only the target tokens.
+    - Decoder-only must process instruction + source prompt and then generate sequentially, increasing prefill, KV-cache traffic, and per-token latency.
+    - Compute budget in 200ms at sustained throughput = 10.5e12 * 0.2 = 2.1e12 ops.
+    - For short phrases, both candidates may fit the rough compute budget on paper, but decoder-only latency grows with prompt length and target tokens because each decode step rereads KV/cache state.
+    - Battery risk is higher for the decoder-only path because larger weights and KV/cache traffic increase memory bandwidth and sustained accelerator duty cycle.
+
+    **Conclusion & Interpretation:**
+    - **Result: Latency-Bound Architecture Choice.** Prefer the compact distilled encoder-decoder: it uses less memory, reduces prompt overhead, and better matches sub-200ms translation. Decoder-only is feasible only if very small, tightly prompted, and heavily optimized.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

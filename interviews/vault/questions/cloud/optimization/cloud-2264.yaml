@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-2264
+track: cloud
+level: L5
+zone: optimization
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: evaluate
+phase: training
+title: The Custom Op Compiler Co-Design
+scenario: Your research team invents a novel 'Gated Linear Attention' (GLA) operator that replaces softmax attention. It achieves great accuracy but runs 2× slower than FlashAttention-2 despite having lower theoretical FLOP count. The operator involves a recurrent scan over sequence positions that cannot be expressed as a single GEMM call.
+question: Why can't the compiler generate efficient code for GLA, and how would you close the gap with FlashAttention-2?
+details:
+  realistic_solution: |
+    The gap is not just a missing compiler pattern. FlashAttention-2 is efficient because the algorithm is reformulated around tiled matrix products and on-chip reductions; a GLA-style recurrence has loop-carried state across sequence positions, so a compiler cannot automatically recover the same parallel schedule from a naive scan expression. Some parts may still use vectorized or matrix instructions, but the recurrence limits full tiling across the sequence dimension and can expose extra memory traffic and launch overhead.
+
+    To close the gap, first derive an algorithmic reformulation that is valid for the specific recurrence: chunk the sequence, compute per-chunk summaries, and combine chunks only if the update operator is associative or can be represented as a composable state transform. Then write a custom CUDA/Triton kernel that fuses projections, gating, scan work, and output materialization so intermediate tensors stay in registers/shared memory where possible. Finally, register the fused op with the compiler so graph-level scheduling treats it as one optimized primitive. The realistic target is to reduce overhead substantially, not to assume the compiler alone can make the recurrence match FlashAttention-2.
+  common_mistake: |
+    **The Pitfall:** Assuming either that recurrence makes the operator hopeless, or that the compiler can automatically make it FlashAttention-like.
+    **The Rationale:** Developers often skip the algorithmic question: whether the recurrence has an associative or otherwise composable form that supports chunking and fusion.
+    **The Consequence:** Teams either accept a 2x slowdown or chase compiler flags instead of building a valid fused kernel around the operator's actual dependency structure.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Sequence length: 4096, hidden size per head: 128.
+    - Baseline observation from profiling: naive GLA is about 2x slower than the FlashAttention-2 path for the same shape.
+    - The recurrence cannot be tiled across all sequence positions unless its state update is reformulated into a composable chunk summary.
+
+    **Calculations:**
+    - Naive expression: one long dependency chain, separate projection/scan/output kernels, and repeated reads/writes of intermediate tensors.
+    - Fused chunked expression: projection, gate update, scan state, and output are fused; intermediate tensors are materialized less often.
+    - If profiling shows 35-45% of time in intermediate tensor traffic and launch overhead, a fused kernel can plausibly recover much of that portion.
+    - The remaining gap is governed by the recurrence's true dependency structure, not by a generic HBM latency constant or a guaranteed O(L/64) serial reduction.
+
+    **Conclusion & Interpretation:**
+    - **Result: Algorithm-and-kernel-bound.** A valid chunked reformulation plus fused CUDA/Triton implementation can narrow the 2x gap, but FlashAttention-like efficiency is not automatically recoverable from compiler lowering alone.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed

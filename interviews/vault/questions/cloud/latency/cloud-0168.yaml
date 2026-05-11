@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: cloud-0168
+track: cloud
+level: L4
+zone: optimization
+topic: batching-strategies
+competency_area: latency
+bloom_level: evaluate
+phase: inference
+title: Head-of-Line Blocking in Continuous Batching
+scenario: Your team is serving a 70B parameter summarization model. To improve GPU utilization, you replace static batching with a continuous batching strategy. Average throughput triples, and utilization is stable at 80%. However, you receive an alert that P99 Time-To-First-Token has increased by 500ms, violating your 250ms SLA for interactive users.
+question: Why would a continuous batching strategy catastrophically degrade P99 TTFT for your most sensitive users?
+details:
+  realistic_solution: This is a classic Head-of-Line Blocking problem introduced by a naive FIFO continuous batcher. Continuous batching combines requests that arrive close together into a single dynamic batch. If a short, fast interactive query arrives right after a long, slow summarization query, the batcher groups them. The GPU processes the entire batch in parallel, but the short query is stuck waiting for the long query to finish its prefill. The fix is not to remove continuous batching, but to implement priority queuing where high-priority requests can bypass the queue of long-running jobs.
+  common_mistake: |
+    **The Pitfall:** Blaming Python overhead or turning off continuous batching.
+    **The Rationale:** Candidates misattribute the latency to microsecond-scale overheads or reactively revert the optimization instead of fixing the scheduling logic.
+    **The Consequence:** Throwing away massive throughput gains or failing to solve the actual Head-of-Line blocking issue.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Interactive TTFT SLO: 250ms.
+    - Observed P99 TTFT regression: +500ms.
+    - Long summarization prefills can occupy a decode/prefill scheduling slot for hundreds of milliseconds or more.
+    - The naive FIFO batcher does not separate priority classes or cap prefill chunk size.
+
+    **Calculations:**
+    - For an interactive request, TTFT = queueing delay + its own prefill/decode latency.
+    - A 500ms head-of-line wait already makes TTFT at least 500ms, before doing any work for the interactive request.
+    - Since 500ms > 250ms SLO, one FIFO placement behind a long prefill is enough to violate P99.
+    - Continuous batching improves throughput only if the scheduler can admit latency-sensitive work between bounded chunks.
+
+    **Conclusion & Interpretation:**
+    - **Result: Scheduling-Bound Head-of-Line Blocking**. The failure mode is priority inversion in the batcher, not evidence that continuous batching is bad. Fix it with priority queues, prefill chunking, or workload isolation for interactive traffic.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

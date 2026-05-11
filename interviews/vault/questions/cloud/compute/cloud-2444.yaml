@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-2444
+track: cloud
+level: L4
+zone: diagnosis
+topic: roofline-analysis
+competency_area: compute
+bloom_level: evaluate
+phase: both
+title: Batched Prefill Throughput Collapse
+scenario: You are serving a 70B model on an A100. During the prefill phase for 2048-token prompts, your system processes 1 request at a time, achieving ~150,000 tokens/sec. To maximize throughput, the team updates the serving engine to batch 16 of these 2048-token prompts together. They expect a massive throughput (tokens/sec) increase, similar to the gains seen when batching autoregressive decoding. Instead, the prefill throughput barely increases (less than 5%).
+question: Why does batching 16 simultaneous 2048-token prefill requests barely increase tokens/sec on the A100?
+details:
+  realistic_solution: The diagnosis is that the prefill phase for large prompts is already heavily compute-bound, meaning it has saturated the 'flat roof' of the roofline model. In decoding at batch size 1, each token gets little reuse from a weight stream, so batching can raise arithmetic intensity and throughput. In prefill, the projection and MLP weights are reused across all 2048 prompt tokens, and attention performs large sequence-level matrix multiplications. That puts arithmetic intensity well above the A100 ridge point of 156 FLOPs/byte before batching. Batching 16 prompts may improve occupancy or scheduling slightly, but it cannot create a large tokens/sec gain once the Tensor Core compute ceiling is already the limiter.
+  common_mistake: |
+    **The Pitfall:** Assuming that increasing batch size always increases GPU utilization and throughput.
+    **The Rationale:** Batching works wonders for memory-bound tasks like autoregressive decoding, so engineers assume it universally applies.
+    **The Consequence:** They waste engineering effort implementing complex batching mechanisms for a prefill phase that is already compute-bound.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - A100 peak compute: 312 TFLOPS.
+    - A100 memory bandwidth: 2000 GB/s.
+    - 70B parameters, stored in 140 GB of FP16/BF16 weights.
+    - Prompt length: 2048 tokens.
+
+    **Calculations:**
+    - A100 ridge point: 312 TFLOPS / 2000 GB/s = 156 FLOPs/byte.
+    - Rough transformer weight work for one prompt: 2 FLOPs/parameter/token * 70B parameters * 2048 tokens = 2.87e14 FLOPs.
+    - Weight traffic for that prompt pass is about one 140 GB model-weight stream if weights are reused across the prompt tokens.
+    - Approximate weight-reuse intensity: 2.87e14 FLOPs / 1.4e11 bytes ≈ 2048 FLOPs/byte.
+    - This estimate ignores activation traffic and kernel details, but it is already far above the 156 FLOPs/byte ridge point; attention prefill also uses large sequence-level matrix multiplies.
+    - Batching 16 prompts increases both work and activation traffic, but it does not reveal the decode-style weight-stream amortization opportunity because the single-prompt prefill already reuses weights across 2048 tokens.
+
+    **Conclusion & Interpretation:**
+    - **Result: Compute-Bound.** Prefill for a 2048-token prompt is already above the A100 ridge point, so batching 16 prompts can improve scheduling slightly but cannot deliver decode-style tokens/sec scaling.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

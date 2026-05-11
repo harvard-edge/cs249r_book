@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: edge-1735
+track: edge
+level: L5
+zone: realization
+topic: dataset-curation
+competency_area: data
+bloom_level: evaluate
+phase: training
+title: On-Device Active Learning Data Selection
+scenario: You are designing an active learning data curation system for a fleet of autonomous inspection robots powered by the NVIDIA Jetson Orin (32 GB LPDDR5, 275 TOPS INT8). The primary perception model runs on the Ampere GPU, consuming 20 GB of memory and strictly operating within a 60W TDP. You need to implement an on-device data selection strategy using uncertainty sampling to curate hard examples from a 30 FPS 1080p camera stream.
+question: How would you size and place uncertainty sampling on Jetson Orin while respecting memory, DLA limits, and a 5 Mbps uplink?
+details:
+  realistic_solution: Run the primary perception model on the Ampere GPU and keep the uncertainty path lightweight. If the estimator is a DLA-supported INT8 CNN, place it on the DLA; otherwise run only supported preprocessing or scoring pieces there and keep unsupported logic off the critical GPU path. Discard low-value frames immediately, compress selected high-entropy frames, and queue them in the remaining RAM before upload over the 5 Mbps link.
+  common_mistake: |
+    **The Pitfall:** Proposing complex ensemble-based uncertainty estimation (like MC Dropout) on the main GPU and failing to buffer frames appropriately.
+    **The Rationale:** Candidates ignore the strict 60W power limit, available RAM for raw frame buffering, and the severe 5 Mbps cellular uplink bottleneck.
+    **The Consequence:** The proposed solution violates power and resource constraints while failing to transmit the curated data over the network.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 1080p RGB frame: 1920 * 1080 * 3 bytes = 6,220,800 bytes = 6.22 MB decimal = 5.93 MiB.
+    - Frame rate: 30 FPS, so raw throughput is 6.22 MB * 30 = 186.6 MB/s.
+    - Jetson Orin RAM: 32 GB (20 GB main model + 2 GB OS = 10 GB available for buffer).
+    - Cellular uplink: 5 Mbps (0.625 MB/s).
+    - Compressed JPEG size: 1 MB.
+
+    **Calculations:**
+    - Raw video buffer capacity: 10 GB / 186.6 MB/s = ~53.6 seconds.
+    - Compressed buffer capacity: 10 GB / 1 MB = 10,000 frames.
+    - Upload time per compressed frame: 1 MB / 0.625 MB/s = 1.6 seconds.
+    - Max sustained upload rate: 0.625 MB/s / 1 MB per selected frame = 0.625 frames/s = 37.5 frames/minute.
+    - DLA placement is useful only for a supported lightweight INT8 CNN/scoring path; unsupported entropy logic or transformer-style ops must stay off the DLA and should not steal GPU memory from the 20 GB primary model.
+
+    **Conclusion & Interpretation:**
+    - **Result: about 37 selected frames per minute (Network-Bound)**. The 10 GB buffer provides about 54 seconds for raw frames or 10,000 compressed selected frames, but the long-term curation rate is capped by the uplink; place only DLA-supported uncertainty scoring there and drop nonselected frames immediately.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 13
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

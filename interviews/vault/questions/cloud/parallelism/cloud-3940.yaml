@@ -1,0 +1,45 @@
+schema_version: '1.0'
+id: cloud-3940
+track: cloud
+level: L3
+zone: diagnosis
+topic: communication-computation-overlap
+competency_area: parallelism
+bloom_level: analyze
+phase: both
+title: 'Diagnosing Failed Overlap: NCCL Blocking on Compute Stream'
+scenario: You set up DDP with gradient bucketing and NCCL on a separate CUDA stream. Nsight Systems profiling shows that the AllReduce kernels run sequentially with backward computation. Both the compute and NCCL kernels appear on the same stream in the timeline.
+question: Why are the NCCL AllReduce kernels failing to overlap with the backward computation, running sequentially instead?
+details:
+  realistic_solution: The timeline shows both compute and NCCL kernels on the same stream, so DDP is not actually launching the reducer collectives on an independent communication stream or something is synchronizing the streams before overlap can occur. Inspect the DDP reducer path, custom communication hooks, autograd hooks, bucket readiness, CUDA stream guards, and any implicit synchronizations such as cudaStreamSynchronize(), cudaDeviceSynchronize(), blocking tensor copies, or stream-capture constraints. NCCL_LAUNCH_MODE can affect grouped launch behavior, but it is not the primary explanation for DDP overlap; the first fix is to restore correct reducer stream usage and remove synchronization that serializes backward with AllReduce.
+  common_mistake: |
+    **The Pitfall:** Looking only at NCCL environment variables instead of the CUDA stream timeline.
+    **The Rationale:** DDP overlap depends on reducer bucket readiness, communication stream usage, and avoiding synchronizing hooks or copies.
+    **The Consequence:** The real serialization point remains in the training code, so AllReduce keeps running after backward instead of alongside it.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 200ms backward compute.
+    - 50ms AllReduce.
+
+    **Calculations:**
+    - Serialized Execution: 200ms + 50ms = 250ms per step.
+    - Overlapped Execution: max(200, 50) = 200ms per step.
+    - Throughput Loss: 50ms / 250ms = 20%.
+
+    **Conclusion & Interpretation:**
+    - **Result: 20% throughput loss from missing overlap (Concurrency-Bound).**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

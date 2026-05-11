@@ -1,0 +1,57 @@
+schema_version: '1.0'
+id: tinyml-1808
+track: tinyml
+level: L5
+zone: realization
+topic: collective-communication
+competency_area: cross-cutting
+bloom_level: evaluate
+phase: both
+title: Logical Ring on Physical Daisy-Chain
+scenario: An industrial pipe-monitoring sensor array uses 4 microcontrollers physically wired in a linear daisy-chain (Node 1-2-3-4) via SPI at 10 MHz, with one serialized neighbor transfer active at a time. They must synchronize 1 KB of INT8 activations.
+question: Evaluate the synchronization stall time of a logical Ring AllReduce versus a bidirectional line-accumulator (Tree), accounting for a 10 microsecond SPI interrupt latency per step?
+details:
+  realistic_solution: |
+    SPI at 10 MHz transfers at 1.25 MB/s, or 0.8 us/byte. With the stated serialized-link model, a line accumulator that reduces 1KB to one end of the chain and broadcasts the result back uses 3 neighbor hops each way, so its stall time is 6 * (1024 * 0.8 us + 10 us) = 4.9752 ms, about 4.98 ms. A 4-node Ring AllReduce has 6 logical steps, but each step sends a 1KB/4 = 256B chunk, not the full activation buffer. On the physical line, each logical ring step requires three adjacent sends plus the logical 4->1 wraparound routed as 4->3->2->1, for 6 serialized 256B neighbor transactions. The ring stall is 6 * 6 * (256 * 0.8 us + 10 us) = 7.7328 ms. The line accumulator remains the better fit under this serialized daisy-chain assumption, with a gap of about 2.76 ms.
+  common_mistake: |
+    **The Pitfall:** Applying theoretical datacenter communication formulas to physical embedded topologies.
+    **The Rationale:** Engineers assume logical algorithms like Ring AllReduce guarantee optimal performance regardless of hardware wiring.
+    **The Consequence:** Severe bus congestion and serialization occur because the physical daisy-chain cannot support the direct wraparound connection required by the ring.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - SPI Rate: 10 MHz = 1.25 MB/s (0.8 us/byte).
+    - Interrupt latency: 10 us per step.
+    - Payload: 1 KB (1024 bytes).
+
+    **Calculations:**
+    - Full-buffer neighbor transaction: 1024 bytes * 0.8 us/byte + 10 us = 819.2 us + 10 us = 829.2 us.
+    - Line Tree Time: 6 total full-buffer neighbor hops (3 reduce, 3 broadcast) * 829.2 us = 4975.2 us = 4.9752 ms (~4.98 ms).
+    - Ring chunk size: 1024 bytes / 4 nodes = 256 bytes.
+    - Ring chunk hop transaction: 256 bytes * 0.8 us/byte + 10 us = 204.8 us + 10 us = 214.8 us.
+    - Serialized physical-line model: only one neighbor transaction is counted at a time.
+    - Logical Ring per step on the physical line: 1->2 is 1 hop, 2->3 is 1 hop, 3->4 is 1 hop, and 4->1 wraparound routes as 4->3->2->1 for 3 more hops, so each logical step is 6 serialized chunk-hop transactions.
+    - Ring AllReduce Time: 6 logical steps * 6 chunk hops/step * 214.8 us = 7732.8 us = 7.7328 ms (~7.73 ms).
+
+    **Conclusion & Interpretation:**
+    - **Result: Line Tree ~4.98 ms vs Ring ~7.73 ms**. Under the serialized neighbor-transfer assumption, the Ring is slower on the daisy-chain because each logical wraparound step traverses intermediate nodes, even though standard Ring AllReduce sends 256B chunks rather than the full 1KB payload per hop.
+status: published
+provenance: llm-draft
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: passed
+validation_date: '2026-04-25'
+validation_model: pydantic-1.0
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-25'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+  - gemini-generated
+  - target-realization-L5
+created_at: '2026-04-25'

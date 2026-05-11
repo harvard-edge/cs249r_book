@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: cloud-3141
+track: cloud
+level: L5
+zone: realization
+topic: flash-attention
+competency_area: optimization
+bloom_level: create
+phase: inference
+title: Designing a Prefix Caching Strategy for RAG
+scenario: You run a RAG system on 4x A100-80GB serving a 13B model. 80% of requests share one of 50 system prompts (avg 2048 tokens each). Without prefix caching, every request recomputes the system prompt's KV cache.
+question: How would you design prefix caching for the 50 shared 2048-token prompts, and what memory cost, hit rate, and TTFT gain result?
+details:
+  realistic_solution: |
+    Cache the post-layer KV tensors for each of the 50 shared 2048-token prompts, keyed by canonical prompt hash plus model, tokenizer, adapter, and cache-format version. Keep all 50 entries pinned after warmup; if more prompts are later admitted, evict by recency/frequency only among non-pinned entries. For a 13B model with 40 layers, 40 heads, head_dim=128, and FP16 KV cache, one prefix costs 40 x 2 (K+V) x 40 x 128 x 2048 x 2B = 1.56 GiB across the model. Assuming the implementation shards KV heads with 4-way tensor parallelism, that is about 0.39 GiB per prefix per GPU, or about 19.5 GiB/GPU for 50 prefixes. The hit rate is the stated shared-prompt fraction, 80%, once the cache is warm and all 50 prompts are retained. Prefill compute saved per cache hit is about 2 x 13B x 2048 = 53 TFLOPs. On 4x A100 at 312 TFLOP/s each, the ideal lower-bound prefill time is about 43 ms; at a more realistic 30% serving efficiency it is about 142 ms. If cache hits fully skip shared-prefix prefill and other TTFT components are unchanged, the fleet-average TTFT gain at 80% hit rate is about 114 ms.
+  common_mistake: |
+    **The Pitfall:** Caching only the token embeddings.
+    **The Rationale:** Engineers assume the embedding lookup is the bottleneck, forgetting the forward pass through all layers to generate KV pairs is the true cost.
+    **The Consequence:** The caching system saves minimal compute and fails to improve TTFT.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 13B model with 40 layers, 40 heads, head_dim=128, FP16 KV cache.
+    - Prefix length is 2048 tokens.
+    - 4 GPUs; assume this serving stack shards KV heads across tensor-parallel ranks.
+    - 80% of requests use one of the 50 cached prompts.
+
+    **Calculations:**
+    - KV bytes per 2048-token prefix: 40 * 2 * 40 * 128 * 2048 * 2 = 1,677,721,600 bytes = 1.56 GiB.
+    - Per-prefix memory per GPU with 4-way tensor parallelism: 1.56 GiB / 4 = 0.39 GiB/GPU.
+    - Cache for 50 prefixes: 50 * 0.39 GiB = 19.5 GiB/GPU.
+    - Hit rate after warmup: 80% if all 50 shared prompts stay resident.
+    - Prefill compute saved per hit: 2 * 13B * 2048 = 53.2 TFLOPs.
+    - Ideal 4x A100 time saved: 53.2 TFLOPs / (4 * 312 TFLOP/s) = 0.043 s.
+    - At 30% effective serving efficiency: 0.043 / 0.30 = 0.142 s per hit.
+    - Average TTFT gain across all requests if cache hits fully skip shared-prefix prefill: 0.80 * 142 ms = 114 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: Prefix-Cache Tradeoff.** About 19.5 GiB/GPU buys an 80% prefix hit rate and roughly 114 ms average TTFT reduction under the stated efficiency assumption.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 13
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

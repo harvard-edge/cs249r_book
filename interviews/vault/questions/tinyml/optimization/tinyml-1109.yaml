@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: tinyml-1109
+track: tinyml
+level: L4
+zone: diagnosis
+topic: knowledge-distillation
+competency_area: optimization
+bloom_level: analyze
+phase: training
+title: Diagnosing BLE Drops from Dense Distilled Models
+scenario: You distilled a large audio model into a smaller dense student model on the Nordic nRF5340. The student model meets accuracy targets, but during deployment, the device frequently drops its BLE 5.3 connection and triggers watchdog resets precisely during inference.
+question: Why does a dense distilled model on nRF5340 drop BLE 5.3 connections and trigger watchdog resets during inference?
+details:
+  realistic_solution: |
+    The dense student model is likely starving the real-time firmware path during inference: the app core runs a long, non-yielding compute burst, delays RTOS work, masks or postpones interrupts, and can miss watchdog feeds or BLE host/controller service deadlines. On nRF5340 the fix is to slice inference into bounded chunks, yield to the scheduler between chunks, keep interrupt masking short, and coordinate BLE timing with the network core rather than assuming one monolithic inference call is harmless.
+  common_mistake: |
+    **The Pitfall:** Misdiagnosing the issue as a generic memory leak, OOM error, or power brownout.
+    **The Rationale:** Failing to recognize how a dense distilled model turns into a long, non-yielding compute section that can starve RTOS scheduling, watchdog service, BLE host work, or interrupt handling.
+    **The Consequence:** Wasting time debugging memory allocators while the actual solution requires slicing the inference into non-blocking yields.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - nRF5340: 128 MHz app core, 64 MHz net core. BLE 5.3 connection.
+    - Dense distilled model: Every parameter requires MAC.
+    - Example BLE connection interval: 30 ms; supervision timeout is configured separately and is normally multiple missed connection events, not a generic 100 ms BLE limit.
+
+    **Calculations:**
+    - Inference Cost: ~10M MACs.
+    - Compute time: 10M MACs * 2 cycles/MAC / 128 MHz = 156 ms.
+    - A single 156 ms non-yielding section spans about 156 / 30 = 5.2 connection intervals.
+    - If watchdog service, BLE host callbacks, or interrupt handling must run every 10-30 ms, the monolithic inference call violates those firmware deadlines even if the BLE supervision timeout is longer.
+
+    **Conclusion & Interpretation:**
+    - **Result: 156 ms blocking inference is a scheduling-latency failure.** The likely failure mode is CPU/RTOS starvation and delayed BLE servicing, not a generic BLE 5.3 100 ms limit or a shared AHB-matrix stall; slice inference and yield around connection events and watchdog deadlines.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed

@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-3649
+track: cloud
+level: L4
+zone: evaluation
+topic: flash-attention
+competency_area: memory
+bloom_level: evaluate
+phase: inference
+title: Multi-Query Attention Memory Savings vs Flash Attention
+scenario: A team is choosing between standard MHA with Flash Attention, Multi-Query Attention (MQA), and Grouped-Query Attention (GQA) for a 70B inference model on a GPU with 5.3 TB/s memory bandwidth. Decode latency is the primary concern at batch=1.
+question: For batch-1 decode, should you use MHA with Flash Attention, MQA, or GQA to minimize latency, and why?
+details:
+  realistic_solution: For batch-1 decode, the bottleneck is KV-cache bandwidth, not the full attention matrix computation that Flash Attention optimizes. Use MQA for the lowest latency if model quality is acceptable because it has one KV head, giving a 64x KV-cache reduction for 64 query heads. Use GQA as the usual quality/latency compromise; for example, 8 KV heads gives an 8x reduction. MHA with Flash Attention is useful for prefill, but it does not materially reduce the KV-cache reads that dominate decode.
+  common_mistake: |
+    **The Pitfall:** Treating Flash Attention as a substitute for reducing KV-cache size during decode.
+    **The Rationale:** Flash Attention improves attention-kernel IO by avoiding the full attention matrix, but batch-1 decode still has to read the accumulated K and V cache for every generated token.
+    **The Consequence:** The team optimizes prefill while leaving the dominant decode latency unchanged, instead of choosing MQA or GQA to cut KV-cache bandwidth.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 80 layers, 64 query heads, d_head=128, FP16 KV cache.
+    - Context length = 2048 tokens.
+    - Memory bandwidth = 5.3 TB/s.
+
+    **Calculations:**
+    - MHA KV cache per token: 80 * 2(K,V) * 64 * 128 * 2 bytes = 2,621,440 bytes ≈ 2.5 MiB.
+    - MHA KV cache at 2048 context: 2.5 MiB * 2048 = 5.0 GiB, or about 5.37 GB decimal.
+    - MHA decode cache-read lower bound: 5.37 GB / 5.3 TB/s ≈ 1.0 ms/token.
+    - GQA with 8 KV heads: 5.0 GiB / 8 = 640 MiB, about 0.13 ms/token.
+    - MQA with 1 KV head: 5.0 GiB / 64 = 80 MiB, about 0.016 ms/token.
+
+    **Conclusion & Interpretation:**
+    - **Result: KV-cache-bandwidth-bound decode.** MQA minimizes batch-1 latency, GQA trades some latency for quality, and MHA with Flash Attention does not reduce the per-token KV-cache read volume.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

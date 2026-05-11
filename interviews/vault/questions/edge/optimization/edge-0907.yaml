@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: edge-0907
+track: edge
+level: L4
+zone: specification
+topic: real-time-deadlines
+competency_area: optimization
+bloom_level: evaluate
+phase: inference
+title: Edge TPU Spatial Tiling Overhead
+scenario: You are deploying a U-Net based super-resolution model on a Google Edge TPU (8MB SRAM, USB 3.0 interface). To fit the 1080p input image, the host CPU spatially tiles the image into 16x16 overlapping patches and sends them to the TPU sequentially. The system targets 30 FPS but only achieves 4 FPS. USB bandwidth monitoring shows 1.8 GB/s of sustained bidirectional transfer.
+question: What is causing the 4 FPS bottleneck, and how would you change tiling and execution to reach 30 FPS?
+details:
+  realistic_solution: The severe bottleneck is redundant USB host-to-accelerator transfer caused by naive 16x16 spatial tiling. Convolutions require overlapping halo pixels around each tile; in a U-Net the required halo grows with the network receptive field and skip connections, not exponentially, so very small tiles can spend far more bandwidth on overlap than useful pixels. The fix is to avoid host-side micro-tiling and instead compile a supported, fully quantized model or supported subgraphs for the Edge TPU using larger tiles or full-frame staging on the host. Let the Edge TPU compiler schedule supported operators and SRAM tiling internally, while keeping unsupported U-Net operators on the host or redesigning the model to fit the Edge TPU op set. This reduces repeated USB traffic without implying arbitrary full-network fusion or large on-device DRAM.
+  common_mistake: |
+    **The Pitfall:** Compressing the image data over the USB bus using JPEG to save bandwidth.
+    **The Rationale:** Candidates see a bandwidth bottleneck and immediately apply standard image compression techniques from general networking.
+    **The Consequence:** JPEG compression introduces latency and artifacts that completely ruin the super-resolution model's output quality.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 1080p image = 1920 x 1080 x 3 = ~6.22 MB.
+       - Measured sustained bidirectional USB traffic: 1.8 GB/s aggregate host-to-TPU plus TPU-to-host bus usage.
+       - Observed throughput: 4 FPS.
+    2. **Calculations:**
+       - Effective aggregate USB traffic per frame = 1.8 GB/s / 4 FPS = 0.45 GB/frame = 450 MB/frame across both directions.
+       - Useful full-frame input+output traffic is only about 6.22 MB in + 6.22 MB out = 12.44 MB/frame before intermediate tensors.
+       - Implied traffic amplification = 450 MB / 12.44 MB = ~36x useful image I/O, consistent with tiny overlapping tiles plus host round-trips for intermediate tensors.
+       - To reach 30 FPS at the same aggregate bus rate, total upload+download traffic must fall below 1.8 GB/s / 30 = 60 MB/frame.
+    3. **Conclusion & Interpretation:**
+       - **Result: ~450 MB per frame observed.** The tiling strategy amplifies USB traffic far beyond useful image bytes, making the system critically **I/O-Bandwidth-Bound**. Larger host tiles plus compiler-managed SRAM tiling for supported Edge TPU subgraphs must reduce traffic to under ~60 MB/frame for 30 FPS.
+  options:
+    - The severe bottleneck is redundant USB host-to-accelerator transfer from naive spatial tiling; U-Net receptive fields require overlapping halos around each tile, so tiny host tiles repeatedly resend the same pixels and intermediate boundaries.
+    - The system should be redesigned to offload inference to the cloud, as edge hardware fundamentally cannot meet the latency and accuracy requirements.
+    - Profiling overhead is masking the true performance; disabling all instrumentation will reveal that the system is already meeting targets.
+    - Compressing the image data over the USB bus using JPEG, which introduces latency and compression artifacts ruining the super-resolution.
+  correct_index: 0
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+  - '`reasoning_competency` and `reasoning_mode` are set to `None`, which limits proper classification of the question''s learning objectives.'
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

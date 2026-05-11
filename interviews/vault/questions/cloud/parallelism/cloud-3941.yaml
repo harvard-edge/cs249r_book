@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-3941
+track: cloud
+level: L6+
+zone: mastery
+topic: communication-computation-overlap
+competency_area: parallelism
+bloom_level: create
+phase: both
+title: Expert Parallelism All-to-All Overlap in Mixture-of-Experts Training
+scenario: You train a 1.8T Mixture-of-Experts model (128 experts, top-2 routing) across 128 H100 GPUs. Each MoE layer requires All-to-All communication to route tokens to their assigned expert GPUs. The All-to-All takes 8ms per MoE layer, and expert computation takes 6ms. The model has 32 MoE layers.
+question: How would you overlap the 8 ms All-to-All routing with 6 ms expert compute across 32 MoE layers?
+details:
+  realistic_solution: 'Do not overlap a layer''s dispatch All-to-All with that same layer''s expert compute, because expert compute depends on dispatched tokens. Legal overlap comes from pipelining independent work across microbatches or adjacent nondependent phases: while microbatch i is in expert compute for layer L, dispatch microbatch i+1 for layer L using precomputed routing, and where the graph permits it, overlap combine communication with following dense work. Use separate CUDA/HIP streams, double-buffered dispatch/combine buffers, backpressure on expert queues, and correctness barriers before any consumer reads expert outputs. With only one microbatch and no dense work, the 8 ms dispatch plus 6 ms compute remains serial per layer; overlap benefits require a stream of microbatches or explicit independent work.'
+  common_mistake: |
+    **The Pitfall:** Trying to overlap All-to-All with expert computation within the same layer.
+    **The Rationale:** Candidates recognize the need for overlap but fail to account for data dependencies (the All-to-All output IS the expert input).
+    **The Consequence:** The proposed architecture is logically impossible and fails to execute.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - All-to-All routing/dispatch before expert compute: 8 ms.
+    - Expert computation: 6 ms.
+    - Same-layer dispatch and expert compute have a hard dependency.
+    - 32 MoE layers.
+
+    **Calculations:**
+    - Single-microbatch lower bound per MoE layer = 8 ms dispatch + 6 ms expert compute = 14 ms.
+    - Across 32 layers with no other overlap opportunity, lower-bound time = 32 * 14 ms = 448 ms.
+    - With enough microbatches and legal cross-microbatch pipelining, steady-state throughput can approach max(8 ms, 6 ms) = 8 ms per microbatch-layer after fill.
+    - That throughput bound is not the elapsed time for one 32-layer sample; it is the best steady-state rate when dependencies are satisfied by different microbatches.
+
+    **Conclusion & Interpretation:**
+    - **Result: communication-bound overlap is possible only across independent microbatches or phases.** For one dependency chain, the 448 ms serial bound remains; a saturated pipeline can approach an 8 ms steady-state stage time but must still pay fill/drain and combine/barrier costs.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

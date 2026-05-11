@@ -16,6 +16,7 @@ export interface QuestionSummary {
   level: string;
   track: string;
   scenario: string;
+  question?: string;
   zone: string;
 }
 
@@ -75,6 +76,7 @@ interface RawQuestion {
   level: string;
   title: string;
   scenario: string;
+  question?: string;
   topic: string;
   zone: string;
   competency_area: string;
@@ -114,7 +116,7 @@ const _areas: CompetencyArea[] = Object.entries(areaTopicQs)
           if (!questionsByLevel[q.level]) questionsByLevel[q.level] = [];
           questionsByLevel[q.level].push({
             id: q.id, title: q.title, level: q.level,
-            track: q.track, scenario: q.scenario, zone: q.zone,
+            track: q.track, scenario: q.scenario, question: q.question, zone: q.zone,
           });
         }
 

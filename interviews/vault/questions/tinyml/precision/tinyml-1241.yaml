@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: tinyml-1241
+track: tinyml
+level: L5
+zone: realization
+topic: extreme-quantization
+competency_area: precision
+bloom_level: evaluate
+phase: inference
+title: 2-Bit Weight Storage for Ethos-U55 Keyword Spotting
+scenario: You are deploying a 1.2 million parameter CNN for continuous keyword spotting on an Ethos-U55 system with 512 KB SRAM and external Flash. At standard INT8 quantization, the model's weights require 1.2 MB, so you are evaluating 2-bit packed weights to reduce storage and Flash traffic.
+question: How should you evaluate 2-bit packed weights for Ethos-U55 keyword spotting without assuming native 2-bit execution?
+details:
+  realistic_solution: A senior engineer treats 2-bit weights as a storage-compression format, not an Ethos-U55 execution format. A 1.2M-parameter model at 2 bits needs 300 KB in Flash or in a packed SRAM cache, but U55-supported kernels still need supported INT8/INT16 operands or an explicitly implemented custom path. The deployment plan should stream packed tiles, unpack or dequantize only the active tile into a bounded scratch buffer, and size that scratch together with activations, stack, DMA buffers, and workspace. It should not assume native 2-bit acceleration or require expanding the full 1.2 MB INT8 model into SRAM.
+  common_mistake: |
+    **The Pitfall:** Assuming 2-bit weights natively accelerate latency on the Ethos-U55.
+    **The Rationale:** Candidates assume lower bit-width automatically translates to faster NPU execution, ignoring that the U55 only natively accelerates INT8 and INT16.
+    **The Consequence:** The execution graph stalls completely or falls back to software because the NPU cannot natively execute 2-bit operations, requiring M7 intervention.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model parameters: 1.2M.
+    - SRAM available: 512 KB for activations, scratch, DMA buffers, and any optional packed tile cache.
+    - Example activation arena + stack/workspace budget: 160 KB.
+    - Optional CPU unpacking path: 4 weights per 4 cycles at 480 MHz.
+    - SPI Flash I/O throughput: 40 MB/s.
+
+    **Calculations:**
+    - 2-bit packed weight storage: 1.2M × 2 bits = 2.4M bits = 300 KB in Flash or an optional packed SRAM cache.
+    - If the full packed blob is cached in SRAM, remaining SRAM is 512 KB - 300 KB = 212 KB.
+    - Feasibility margin after the example activations/workspace would be 212 KB - 160 KB = 52 KB, before unpack scratch and alignment.
+    - If weights are streamed from Flash instead, SRAM holds only the active packed tile plus unpack/dequant scratch, but Flash traffic and unpack scheduling become the main runtime risks.
+    - If unpacking is required: 4 weights / 4 cycles = 1 weight/cycle, so 1.2M weights take 1.2M cycles.
+    - Unpack-only time: 1,200,000 cycles / 480,000,000 Hz = 2.5 ms.
+    - INT8 Flash read baseline for all weights: 1.2 MB / 40 MB/s = 30 ms, while packed 2-bit reads are 300 KB / 40 MB/s = 7.5 ms before unpack/dequant overhead.
+
+    **Conclusion & Interpretation:**
+    - **Result: storage compression, not native U55 2-bit execution.** The 2-bit format reduces weight storage and Flash traffic from 1.2 MB to 300 KB, but success depends on whether activations, workspace, active packed tiles, and unpack/dequant scratch fit together while feeding supported INT8/INT16 execution efficiently.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 13
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,45 @@
+schema_version: '1.0'
+id: edge-1455
+track: edge
+level: L3
+zone: analyze
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: apply
+phase: both
+title: Edge TPU Attention Cost Analysis
+scenario: You are deploying a small transformer-based wake-word model to a Google Coral Edge TPU. The model processes a 1-second audio window represented as a sequence of 256 tokens with an embedding dimension of 128. During deployment, the team notices that while the linear projection layers execute entirely on the Edge TPU, the attention computation falls back to the host CPU, drastically increasing latency.
+question: Why does the 256-token transformer's attention fall back to CPU on the Edge TPU, and how would you keep it on INT8 hardware?
+details:
+  realistic_solution: The fallback is triggered because the compiled TFLite graph contains unsupported attention subgraphs for the Edge TPU's limited INT8 operator set, not merely because the chip lacks peak TOPS. To keep execution on INT8 hardware, redesign the model around TPU-compatible integer ops, use quantization-aware architecture choices, or intentionally split the graph so supported projection blocks run on TPU while attention is batched or cached on CPU. Replacing Softmax with ReLU is not a drop-in fix because it changes attention semantics.
+  common_mistake: |
+    **The Pitfall:** Assuming sufficient TOPS implies support for all mathematical operations.
+    **The Rationale:** Candidates look at the 4 TOPS spec and assume the TPU can power through attention mechanisms natively.
+    **The Consequence:** Graph partitioning causes massive intermediate activation tensors to serialize over the slow USB/PCIe bus, destroying real-time performance.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Sequence (N): 256, Dimension (D): 128
+    - Attention requires QK^T, Softmax or normalization, masking, and weighted value aggregation.
+    - Coral Edge TPU executes only supported compiled INT8 TFLite subgraphs.
+    - Unsupported attention subgraphs are partitioned to the host CPU, forcing activation transfers across the device boundary.
+
+    **Calculations:**
+    - QK^T MACs alone = 256 * 256 * 128 = 8.38 million MACs.
+    - Attention with V aggregation is on the order of 16.7 million MACs before Softmax, masking, quantize/dequantize, and graph-boundary costs.
+    - The limiting step is not the MAC count; it is whether the full attention pattern lowers to Edge TPU-supported INT8 operators.
+    - If attention is unsupported, the compiler partitions the graph and host fallback latency includes CPU execution plus activation copies, usually dominating the small projection kernels that stayed on TPU.
+
+    **Conclusion & Interpretation:**
+    - **Result: operator-support bound, not TOPS-bound.** Keeping the block on INT8 hardware requires a TPU-compatible attention approximation or architecture change, not a theoretical compute-speed argument.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview

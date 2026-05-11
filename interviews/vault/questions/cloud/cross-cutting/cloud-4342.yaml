@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-4342
+track: cloud
+level: L5
+zone: optimization
+topic: differential-privacy
+competency_area: cross-cutting
+bloom_level: evaluate
+phase: both
+title: Privacy Amplification via Subsampling in Production
+scenario: Your DP training pipeline on 10M user records uses minibatch SGD with batch size 1,000. The privacy team says you can improve your ε by 10x 'for free' via subsampling amplification. A junior engineer proposes sampling without replacement instead of with replacement.
+question: Does this claim hold, and what are the implementation pitfalls in a distributed multi-GPU training context?
+details:
+  realistic_solution: The claim only holds after running the privacy accountant for the exact sampling mechanism. For DP-SGD with Poisson minibatch sampling, q = B/N = 1000/10M = 1e-4, and subsampling can substantially reduce the RDP/ε cost compared with processing the whole dataset each step. It is not a generic rule that ε_amplified = q × ε_base, and the improvement is not "free" unless the implementation really matches the accountant. In distributed training, per-GPU shard sampling is not equivalent to global Poisson sampling over all 10M records; it changes inclusion probabilities and correlations. Use a coordinated global sampler or an accountant that matches the distributed sampler, deterministic auditable RNG seeds, secure example assignment across ranks, and consistent logging of q, steps, clipping, and noise. Sampling without replacement can be valid, but it needs the right without-replacement amplification theorem rather than reusing a Poisson accountant.
+  common_mistake: |
+    **The Pitfall:** Assuming the sampler implementation does not matter.
+    **The Rationale:** Candidates reuse a Poisson-subsampling accountant for per-rank shard sampling or without-replacement minibatches without checking the theorem's assumptions.
+    **The Consequence:** The reported ε no longer corresponds to the training run, creating a compliance gap even if the model code adds the intended amount of noise.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Dataset (N): 10,000,000.
+       - Batch size (B): 1,000.
+       - Steps (T): 100,000.
+    2. **Calculations:**
+       - Poisson subsampling ratio (q) = 1,000 / 10,000,000 = 1e-4.
+       - Poisson subsampling ratio (q) = 1,000 / 10,000,000 = 1e-4.
+       - In a Poisson DP-SGD accountant, each record is independently included with probability q, then clipped gradients receive Gaussian noise.
+       - The accountant composes RDP over T steps using q, σ, clipping, and δ; it does not use a generic ε_eff = q * ε_base rule.
+       - Per-rank shard sampling across 8 GPUs can give each rank q_local = 1000/(10M/8) if implemented incorrectly, and it also changes which records can co-occur.
+       - Without-replacement sampling has separate amplification results; it is not invalid, but it cannot be certified by simply pretending it was Poisson sampling.
+    3. **Conclusion & Interpretation:** **Subsampling amplification can be large for q=1e-4, but the 10x claim is only valid if a matching accountant confirms it; distributed sampler semantics are part of the privacy guarantee.**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+  - 'Math error: Without subsampling, epsilon is 1380, not 138. The multiplier is 1/q = 10,000x, not 1000x.'
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

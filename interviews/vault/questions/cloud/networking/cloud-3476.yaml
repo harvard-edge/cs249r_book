@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-3476
+track: cloud
+level: L4
+zone: analyze
+topic: congestion-control
+competency_area: networking
+bloom_level: analyze
+phase: both
+title: Congestion Control in AMD MI300X GPU Clusters
+scenario: You are managing a large-scale ML training cluster utilizing MI300X accelerators. During intensive distributed training jobs involving all-reduce operations across many nodes, you observe intermittent training stalls. Network monitoring reveals transient periods of high switch port queue depths and packet drops at aggregation points where multiple GPUs converge their communication.
+question: Why do incast congestion and weak flow control stall all-reduce jobs, and how do ECN, PFC, and DCQCN mitigate this in RoCEv2?
+details:
+  realistic_solution: |
+    Incast stalls the all-reduce because many GPUs send synchronized RDMA bursts toward the same egress queue; with shallow switch buffers, a few microseconds of oversubscription can create drops or head-of-line blocking that RoCEv2 recovers from poorly. ECN should mark packets when queue depth crosses an early threshold, before the buffer is exhausted. PFC can make the lossless class pause upstream ports to avoid drops, but it must be tightly scoped because pauses can propagate and stall unrelated flows. DCQCN closes the loop at the sender: receivers reflect congestion notifications, senders reduce injection rate, then cautiously increase again as marks disappear. The mitigation is the chain of early ECN marking, limited PFC loss protection, and DCQCN sender throttling, not merely enabling RoCEv2.
+  common_mistake: |
+    **The Pitfall:** Assuming increasing switch buffer sizes or relying solely on standard TCP congestion control will resolve the issue.
+    **The Rationale:** Standard network troubleshooting often leans on deeper buffers to absorb traffic bursts.
+    **The Consequence:** TCP congestion control reacts too slowly for microsecond-scale RDMA bursts, leading to packet drops, severe retransmission penalties, and drastically reduced cluster throughput.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 8 GPUs transmitting simultaneously at 400 Gbps.
+    - Targeting 1 egress port (400 Gbps).
+    - At most 32MB of switch buffer is available to this incast.
+
+    **Calculations:**
+    - Aggregate burst: 8 GPUs * 400 Gbps = 3.2 Tbps aggregate burst.
+    - Switch buffer overflow: Net fill rate is 3.2 Tbps - 0.4 Tbps = 2.8 Tbps (350 GB/s).
+    - Time to drop if the full 32MB is available: 32MB / 350 GB/s = about 91 microseconds.
+    - If only 8MB is available to this queue, time to drop is 8MB / 350 GB/s = about 23 microseconds.
+
+    **Conclusion & Interpretation:**
+    - **Result: Microsecond-Scale Incast Risk.** ECN/DCQCN must mark and throttle early, and PFC may prevent loss, but the calculation does not guarantee reaction before drops unless thresholds and feedback latency are configured below the buffer-fill window.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues: []
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues: []
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

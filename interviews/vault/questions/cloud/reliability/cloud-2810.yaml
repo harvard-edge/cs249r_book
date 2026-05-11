@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-2810
+track: cloud
+level: L6+
+zone: mastery
+topic: fault-tolerance-checkpointing
+competency_area: reliability
+bloom_level: create
+phase: training
+title: Preemptible LLM KV-Cache Checkpointing and Migration
+scenario: Design a resilient KV-cache migration architecture for stateful LLM serving. Instances are preemptible. Ensure active user sessions don't lose context or experience massive latency spikes on preemption.
+question: How would you migrate KV-cache state for preemptible H100 LLM serving without losing sessions or causing large latency spikes?
+details:
+  realistic_solution: |
+    Architect a continuous, asynchronous background snapshotting service. As tokens are generated and appended to the KV cache in HBM, mirror newly sealed PagedAttention blocks to pinned host memory with a low-priority PCIe stream, then replicate those blocks to a fast distributed store. On preemption notice, stop admitting new tokens to the old worker, flush dirty blocks, and route the session to a warm standby that restores the KV cache into GPU memory before continuing decode. Distinguish the links: HBM serves active attention, PCIe moves blocks between GPU and host memory, and the network moves host-resident snapshots between machines. Large contexts may still need tens to hundreds of milliseconds to hydrate, so the router should use preemption notice, partial recompute, or A100/H100 fallback rather than assuming migration is invisible.
+  common_mistake: |
+    **The Pitfall:** Forcing the user client to resubmit the entire conversation history to a new node.
+    **The Rationale:** Treating LLM serving like stateless HTTP microservices, assuming client-side retries are sufficient.
+    **The Consequence:** Causing a massive 10+ second prefill latency spike for users every time a preemption event occurs.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Example model: 70B, 80 layers, hidden size 8192, grouped-query attention with 8 KV heads of head_dim 128.
+       - KV per token: 2 (K,V) * 80 layers * 8 heads * 128 dim * 2 bytes ≈ 327,680 bytes = 0.31 MiB.
+       - Block size: 16 tokens, so one KV block is about 5 MiB.
+       - Bandwidth: PCIe Gen4 x16 host link is about 32 GB/s; 400 Gbps network is about 50 GB/s before protocol overhead.
+       - Network: 400 Gbps network to Redis.
+    2. **Calculations:**
+       - Streaming one 5 MiB block over PCIe: about 5 MiB / 32 GB/s ≈ 0.16 ms, before copy setup overhead.
+       - A 1 GB snapshot over a 400 Gbps network has a raw transfer lower bound of 1 GB / 50 GB/s = 20 ms.
+       - Hydrating that 1 GB snapshot into GPU memory also requires about 1 GB / 32 GB/s ≈ 31 ms over PCIe, plus deserialization, allocation, and scheduler warmup.
+    3. **Conclusion & Interpretation:**
+       - **Result: Tens of Milliseconds Minimum Restore.** Background streaming can be overlapped with decode when throttled, but a cold restore of a large KV cache is bounded by both network and PCIe movement and is not guaranteed to mask preemption latency by itself.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

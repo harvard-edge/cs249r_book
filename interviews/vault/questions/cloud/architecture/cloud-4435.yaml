@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-4435
+track: cloud
+level: L5
+zone: evaluation
+topic: model-adaptation-systems
+competency_area: architecture
+bloom_level: evaluate
+phase: inference
+title: DPO vs PPO Infrastructure Cost for Alignment at 70B Scale
+scenario: 'A team must choose between DPO and PPO for aligning a 70B model. Budget: 32xH100 for 1 week. Preference dataset: 200K pairs.'
+question: With 32 H100s for 1 week and 200K preference pairs, should you choose DPO or PPO to align the 70B model, and why?
+details:
+  realistic_solution: Choose DPO for this exact scenario. With a fixed 200K preference-pair dataset and 32xH100 for one week, DPO is the simpler and lower-risk path because it trains directly on the offline pairs and avoids rollout generation, reward-model serving, value-model training, and PPO stability tuning. For a full-parameter 70B run, shard the trainable policy, gradients, and Adam states with FSDP/ZeRO across all 32 GPUs; keep the reference model frozen and sharded or serve reference logprobs through the same cluster. The memory question is sharded training state per GPU, not a single unsharded model copy. PPO is appropriate if the team needs iterative online alignment with fresh rollouts, but under this fixed-budget offline dataset it spends much of the week on rollout/RM infrastructure rather than preference optimization.
+  common_mistake: |
+    **The Pitfall:** Assuming DPO is always cheaper than PPO.
+    **The Rationale:** Engineers overlook that DPO requires loading both the policy and a full reference model simultaneously for log-probability ratios.
+    **The Consequence:** The training job OOMs or requires significantly more GPUs than anticipated, exceeding budget constraints.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 32xH100 at 989 TFLOPS with 40% MFU yields roughly 12.7 PFLOPS.
+    - 70B BF16 weights are about 140GB.
+    - Full-parameter DPO with 200K preference pairs, 512 tokens per completion, chosen plus rejected = 1024 tokens per pair.
+
+    **Calculations:**
+    - Sharded policy training state with Adam is roughly 16 bytes/param = 1.12TB, plus a frozen 140GB reference; across 32 GPUs this is about 39GB/GPU before activations and communication buffers.
+    - Policy forward/backward FLOPs per pair: 6 * 70B * 1024 = 430T FLOPs.
+    - Frozen reference forward FLOPs per pair: 2 * 70B * 1024 = 143T FLOPs.
+    - DPO total per pair: about 573T FLOPs.
+    - One epoch: 200,000 * 573T = 114.6 EFLOPs.
+    - Ideal compute time per epoch: 114.6E18 / 12.7E15 = ~9,000 seconds = ~2.5 hours.
+    - With activation checkpointing, communication, evaluation, and checkpoint overhead, plan roughly 1 day for a 3-epoch DPO run; PPO would add rollout generation and RM/value-model serving loops.
+
+    **Conclusion & Interpretation:**
+    - **Result: Choose DPO.** The sharded memory footprint fits 32xH100 and the compute budget leaves room inside one week, while PPO adds systems complexity and rollout latency that the fixed offline preference dataset does not require.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

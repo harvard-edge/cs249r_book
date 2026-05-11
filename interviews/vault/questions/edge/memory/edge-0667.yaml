@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: edge-0667
+track: edge
+level: L4
+zone: diagnosis
+topic: real-time-deadlines
+competency_area: memory
+bloom_level: analyze
+phase: inference
+title: The Inference Memory Leak
+scenario: Your TI TDA4VM-based dashcam runs a lane detection model 24/7. Memory usage starts at 1.8 GB after boot. After 3 days of continuous operation, memory usage reaches 7.2 GB and the OOM killer terminates the inference process. The model is loaded once at startup and never reloaded. The input pipeline processes frames in a fixed-size ring buffer.
+question: Where is the 5.4 GB leak coming from over 3 days of continuous inference?
+details:
+  realistic_solution: 'The leak is almost certainly in the video and application infrastructure around the fixed model, not in a TensorRT-style engine cache. On a TI TDA4VM system, the likely root cause is V4L2/DMA buffer lifetime handling: if an error path, timeout, or dropped-frame branch fails to return a captured buffer to the driver, each leaked 1080p NV12 DMA buffer is about 3 MB. A leak of roughly 24 buffers per hour for 72 hours accounts for about 5.4 GB. Smaller contributors can include user-space allocator fragmentation and unbounded logging, but the clear scenario-consistent answer is leaked camera/DMA buffers or retained frame objects despite the fixed-size intended ring buffer.'
+  common_mistake: |
+    **The Pitfall:** Blaming the ML model itself and suggesting switching frameworks to fix the memory leak.
+    **The Rationale:** Candidates assume the neural network execution is leaking memory, ignoring that the model weights and activations are static across inferences.
+    **The Consequence:** Wasting weeks rewriting the model pipeline in a new framework only to face the exact same OOM crashes caused by the surrounding infrastructure.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Uptime: 3 days (259,200 seconds) at 30 FPS.
+    - Total inferences: ~7.78 million.
+    - Total leak: 5.4 GB.
+
+    **Calculations:**
+    - 1080p NV12 frame buffer: 1920 * 1080 * 1.5 bytes = ~3.1 MB.
+    - Leak needed: 5.4 GB / 72 hours = ~75 MB/hour.
+    - DMA buffers leaked per hour: 75 MB/hour / 3.1 MB = ~24 buffers/hour.
+    - At 30 FPS, that is one unreleased buffer about every 4,500 frames, so a rare error path can explain the growth.
+
+    **Conclusion & Interpretation:**
+    - **Result: Infrastructure-Bound Leak (Memory-Capacity Bound)**. Audit V4L2 `QBUF`/`DQBUF` pairing, DMA buffer references, dropped-frame paths, and retained frame objects; the loaded TIDL model and fixed ring size should remain stable.
+  options:
+    - The model has a memory leak — switch to a different framework.. The model itself is stateless between inferences.
+    - The bottleneck is PCIe transfer between CPU and GPU; using zero-copy memory will eliminate this overhead entirely.
+    - A rare V4L2/DMA buffer release bug or retained frame reference leaks camera buffers over days, even though the model is loaded once and the intended ring buffer is fixed-size.
+    - Converting the model to a different framework's format (e.g., ONNX to TFLite) will automatically optimize it for the target hardware.
+  correct_index: 2
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

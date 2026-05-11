@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-3406
+track: cloud
+level: L3
+zone: implement
+topic: flash-attention
+competency_area: optimization
+bloom_level: analyze
+phase: inference
+title: H100 Memory Optimization for IO-Aware Attention
+scenario: You are tasked with optimizing the attention mechanism for a large language model on an NVIDIA H100 GPU. The model uses a head dimension `d_k = 128` and float16 precision.
+question: How would you compute the H100 standard-attention sequence limit, derive FlashAttention's HBM footprint, and explain the bandwidth gain?
+details:
+  realistic_solution: |
+    Standard attention is limited by the persistent N x N score/probability matrix: with FP16, one such matrix alone gives an optimistic H100 limit of about 207K tokens per head before Q, K, V, output, softmax workspace, KV cache, or other model tensors. FlashAttention keeps Q, K, V, output, and small per-row softmax state in HBM and streams score tiles through SRAM, so the persistent footprint is O(N * d_k) rather than O(N^2). That removes the dominant HBM allocation and reduces bandwidth by avoiding repeated materialization and rereads of the full attention matrix.
+  common_mistake: |
+    **The Pitfall:** Assuming standard attention can scale to very long sequences without hitting HBM capacity or bandwidth limits.
+    **The Rationale:** Overlooking the O(N^2) quadratic memory scaling of the attention matrix compared to the linear scaling of Q, K, V.
+    **The Consequence:** Severe memory bottlenecks and OOM errors when processing long context windows.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - H100 Memory: 80 GiB (85.89e9 bytes).
+    - Precision: FP16 (2 bytes).
+    - Head dimension (d_k): 128.
+    - Compare one attention head and ignore smaller metadata buffers.
+
+    **Calculations:**
+    - Standard attention must materialize an N x N score/probability matrix. One FP16 matrix requires 2N^2 bytes.
+    - Capacity bound from only that matrix: 2N^2 <= 85.89e9, so N <= sqrt(42.945e9) ≈ 207,232 tokens per head before Q/K/V, output, or extra softmax buffers.
+    - Q, K, V, and output together require 4 * N * 128 * 2 = 1024N bytes, which is about 212 MB at N=207K.
+    - FlashAttention avoids the persistent N^2 score matrix; its persistent HBM tensors are Q, K, V, output, and small per-row softmax state, so the large term is O(N * d_k), not O(N^2).
+
+    **Conclusion & Interpretation:**
+    - **Result: Standard Attention Is N^2-Limited**. The 207K figure is an optimistic one-matrix upper bound, while FlashAttention removes that persistent N^2 HBM allocation and reduces bandwidth pressure by streaming tiles through SRAM.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

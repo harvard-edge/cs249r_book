@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-0753
+track: cloud
+level: L4
+zone: analyze
+topic: fault-tolerance-checkpointing
+competency_area: reliability
+bloom_level: analyze
+phase: training
+title: The Checkpoint Storage Bottleneck
+scenario: You're training a 175B parameter model on 512 H100 GPUs using 3D parallelism. The cluster's estimated MTBF requires a checkpoint every 20 minutes. Each checkpoint must be written to persistent storage.
+question: What's the checkpoint size, how long does the write take, and what's the impact on training throughput?
+details:
+  realistic_solution: A restartable Adam training checkpoint normally needs FP16 weights (350 GB), FP32 master weights (700 GB), and Adam moments m and v (1,400 GB), for about 2.45 TB decimal. If gradient buffers are also saved, add 350 GB, giving about 2.8 TB. FSDP reduces the per-rank file size, but the wall-clock checkpoint time is still bounded by aggregate persistent-storage bandwidth and synchronization overhead. At 200 GB/s aggregate, 2.45-2.8 TB takes 12.25-14 seconds ideally; contention can make that 2-3x slower, about 25-42 seconds. At 20-minute intervals, that is about 2.1-3.5% throughput overhead. The real solution is to write to local NVMe first, then async-flush to persistent storage.
+  common_mistake: |
+    **The Pitfall:** Assuming the checkpoint size is just the 16-bit weights (350 GB).
+    **The Rationale:** Engineers equate model size directly with file size, forgetting training state.
+    **The Consequence:** Under-provisioning storage bandwidth by 8x, leading to massive metadata storms and I/O contention that paralyzes the cluster during checkpointing.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 175B parameters.
+    - Decimal units: 1 TB = 1,000 GB.
+    - Required restart state: FP16 weights (2B), FP32 master (4B), Adam moments m and v (2 * 4B = 8B).
+    - Optional saved gradients: 2B/parameter.
+    - GPU Count: 512.
+    - Lustre bandwidth: 200 GB/s aggregate.
+    - Checkpoint interval: 20 minutes (1200s).
+
+    **Calculations:**
+    - Required checkpoint bytes per parameter: 2 + 4 + 8 = 14 bytes.
+    - Required checkpoint size: 175B * 14 bytes = 2,450 GB = 2.45 TB decimal.
+    - With gradients: 2.45 TB + 175B * 2 bytes = 2,800 GB = 2.8 TB decimal.
+    - Ideal aggregate write time: 2,450-2,800 GB / 200 GB/s = 12.25-14 seconds.
+    - Realistic contention delay (2-3x penalty): about 25-42 seconds.
+    - Checkpoint overhead: 25-42s / 1200s = 2.1-3.5%.
+
+    **Conclusion & Interpretation:** **Result: 2.45 TB required, 2.8 TB with gradients, causing about 2.1-3.5% storage I/O overhead at 20-minute intervals.**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

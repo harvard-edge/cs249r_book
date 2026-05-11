@@ -1,0 +1,40 @@
+schema_version: '1.0'
+id: edge-1257
+track: edge
+level: L5
+zone: design
+topic: batching-strategies
+competency_area: latency
+bloom_level: evaluate
+phase: inference
+title: Dataflow Batching Architecture for Multi-Camera Edge Streams
+scenario: You are designing the inference pipeline for a smart intersection processing 4 concurrent 1080p camera streams at 30 FPS. The system uses a Hailo-8 dataflow accelerator which streams activations directly from host memory over PCIe Gen3x4.
+question: Would you use static or dynamic batching for the four 1080p streams on Hailo-8, and what scheduling policy meets a 15ms p99 SLA?
+details:
+  realistic_solution: |
+    Use static batch size 1 with an earliest-deadline-first dispatcher across the four camera streams. Each frame should be DMA-ready in pinned host memory and submitted as soon as preprocessing finishes. A batch of 4 only works if the four cameras are hardware-synchronized and the batch closes immediately; otherwise waiting to form the batch can consume most or all of the 15ms p99 budget before inference starts. The scheduling policy is therefore: no unbounded dynamic batching, per-camera queues of depth 1, drop or degrade stale frames, and only allow a micro-batch when all frames are already present within a tight sub-millisecond coalescing window.
+  common_mistake: |
+    **The Pitfall:** Proposing continuous batching or large dynamic batch sizes commonly used for data center GPUs.
+    **The Rationale:** Candidates apply cloud paradigms to edge dataflow accelerators, failing to realize the Hailo-8 lacks local DRAM.
+    **The Consequence:** Buffering large batches on the host delays the start of the streaming dataflow execution, directly violating the 15ms latency SLA.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Frame arrival: 4 streams at 30 FPS, so each camera produces one frame every 33.3 ms.
+    - SLA: p99 latency must be below 15 ms from frame readiness to result.
+    - Measured single-frame service time after preprocessing: about 2.5 ms on the compiled Hailo-8 pipeline, including host DMA and accelerator execution.
+    - A synchronized batch of 4 has about 7.8 ms service time once all four frames are ready.
+
+    **Calculations:**
+        - Batch 1 per-frame service time is about 2.5 ms from readiness to result when the accelerator starts that frame immediately.
+        - If four frames are already ready, serving them one by one takes about 4 * 2.5 ms = 10 ms total for the set, but that is aggregate drain time rather than one frame's batch-1 latency.
+        - Dynamic batch 4 waiting cost can approach one camera period: up to 33.3 ms before inference starts for the first ready frame.
+    - Dynamic batch 4 p99 estimate: up to 33.3 ms wait + 7.8 ms service = 41.1 ms, which violates the 15 ms SLA.
+    - Hardware-synchronized batch 4 p99 estimate: about 0 ms wait + 7.8 ms service = 7.8 ms, which fits only when synchronization is guaranteed.
+
+    **Conclusion & Interpretation:**
+    - **Result: Static batch 1 is the default SLA-safe policy.** Use batch 4 only as an immediate, synchronized micro-batch with no queueing delay; otherwise batching delay, not compute, breaks p99 latency.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true

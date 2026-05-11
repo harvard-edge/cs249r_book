@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-2808
+track: cloud
+level: L6+
+zone: mastery
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: create
+phase: inference
+title: Pipeline Parallel 7B Serving over PCIe Gen3
+scenario: You need to build a low-cost serving pipeline for a 7B model using older GPUs. The model weights barely fit in a single GPU's VRAM, limiting the maximum sequence length.
+question: How would you design a pipeline parallel serving architecture to maximize throughput and minimize latency for a 7B model?
+details:
+  realistic_solution: 'Implement a continuous-batching Pipeline Parallel (PP=2) architecture across two GPUs connected via PCIe Gen3. Split the transformer layers after profiling stage latency and memory, not just by layer count, and keep INT8 weights to leave room for KV cache and runtime workspace on each 16GB GPU. Place each layer''s KV cache on the GPU that owns that layer so decode does not shuttle historical keys/values across PCIe. Use a scheduler with separate prefill and decode queues: admit larger prefill micro-batches when the queue is deep, cap decode batch size for latency-sensitive requests, and tune micro-batch count so pipeline bubbles are small without adding excessive queueing delay. Overlap the single pipeline-boundary hidden-state transfer with compute, but fall back to lower batch/concurrency if one stage becomes the latency bottleneck. This maximizes throughput by continuous batching while preserving latency through admission control, stage balancing, and batch-size
+    caps.'
+  common_mistake: |
+    **The Pitfall:** Using Tensor Parallelism (TP) over PCIe instead of Pipeline Parallelism (PP).
+    **The Rationale:** Candidates default to TP because it is standard on NVLink-connected H100s, ignoring the slow PCIe Gen3 interconnect on older hardware.
+    **The Consequence:** The synchronous all-reduce operations required for every layer in TP over PCIe catastrophically bottleneck the system.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 7B model in INT8 is about 7e9 bytes = 6.5 GiB of weights before metadata and quantization scales.
+       - Hardware: 16 GB VRAM, PCIe Gen3 (16 GB/s).
+       - PP=2 distributes layers and layer-local KV cache across 2 GPUs.
+    2. **Calculations:**
+       - PP=2 uses about 3.25 GiB of weights per GPU before scales, leaving roughly 10-11 GiB per GPU after reserving memory for KV cache, CUDA graphs/workspace, allocator fragmentation, and serving buffers.
+       - Per-token boundary activation for batch=32 and hidden_size=4096 in FP16 is 32 * 4096 * 2 bytes ≈ 262 KB.
+       - Transfer time over PCIe Gen3 x16: 262 KB / 16 GB/s ≈ 16 microseconds per pipeline boundary transfer, before software overhead.
+       - For a generated sequence of 100 tokens, the raw boundary traffic is about 26 MB, which is small compared with PCIe capacity; latency depends on kernel scheduling and pipeline bubbles rather than the bulk bytes alone.
+    3. **Conclusion & Interpretation:** **Result: PCIe Transfer Is Small but Not Automatically Free.** PP=2 can be reasonable on PCIe because it avoids per-layer TP all-reduces, but only if stage latencies are balanced, KV cache stays layer-local, and the chosen micro-batch schedule keeps bubble and queueing overhead below the latency target.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

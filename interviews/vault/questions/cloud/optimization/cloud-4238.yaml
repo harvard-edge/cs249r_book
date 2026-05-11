@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-4238
+track: cloud
+level: L5
+zone: implement
+topic: autograd-computational-graphs
+competency_area: optimization
+bloom_level: create
+phase: training
+title: Stable fused softmax cross-entropy on MI300X
+scenario: You are implementing a custom cross-entropy variant that fuses the softmax and log-sum-exp into a single CUDA kernel for MI300X. The forward pass computes log(sum(exp(x))) but naively overflows in FP16.
+question: How would you implement a numerically stable forward and backward for this fused cross-entropy autograd Function on MI300X?
+details:
+  realistic_solution: 'In forward, subtract the per-row max before exponentiation: m = logits.max(dim=-1, keepdim=True), log_probs = logits - m - logsumexp(logits - m). The loss is -log_probs.gather(target), optionally reduced over the batch. Save either the softmax probabilities plus target indices, or save log_probs and reconstruct softmax if memory is tighter. In backward, build a full gradient tensor with the same shape as logits: grad_logits = softmax; grad_logits[batch_idx, target] -= 1; then multiply by the upstream loss gradient and divide by batch size if the forward used mean reduction. Integer targets should be marked non-differentiable.'
+  common_mistake: |
+    **The Pitfall:** Computing exp(x) directly in FP16 before subtracting the max.
+    **The Rationale:** Naively translating the math formula into code without considering FP16 numerical limits.
+    **The Consequence:** Causes `inf` values and NaN gradients due to FP16 overflow during the forward pass.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Batch = 512, C = 50,000.
+    - MI300X bandwidth = 5.3 TB/s.
+    - Saved softmax uses BF16/FP16, 2 bytes/element.
+    - Recompute requires another stable softmax over all logits in backward.
+
+    **Calculations:**
+    - Saved softmax footprint: 512 × 50,000 × 2 bytes = 51.2 MB.
+    - Reading 51.2 MB at 5.3 TB/s takes about 51.2e6 / 5.3e12 = 0.010 ms before overheads.
+    - Recomputing avoids the 51.2 MB save but repeats max, exp, sum, and normalization over 25.6M logits.
+
+    **Conclusion & Interpretation:**
+    - **Result: Save-or-recompute tradeoff.** Saving the softmax is a defensible default when 51.2 MB fits, because the backward becomes a scatter-subtract over the saved probabilities. Recompute is useful only when activation memory is the limiting constraint.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-2162
+track: cloud
+level: L6+
+zone: mastery
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: create
+phase: training
+title: 405B Pretraining Divergence at Step 80K
+scenario: You are leading pre-training of a 405B model on 16,384 H100 GPUs. At step 80K (out of 300K total), the training loss suddenly diverges. You roll back to the step-79K checkpoint and resume, but the divergence happens again at approximately the same step. This is not a hardware failure (the cluster is healthy).
+question: How would you systematically diagnose and recover from this reproducible loss divergence around step 80K?
+details:
+  realistic_solution: 'Treat same-step divergence as a reproducible systems or data/optimizer-state bug until proven otherwise. Start from the step-79K checkpoint and replay the exact data-shard order with deterministic seeds on a smaller slice of the cluster if possible. Verify checkpoint integrity, optimizer state, LR schedule, loss scale, and RNG state against the successful run. Add traces around steps 78K-82K: per-layer activation ranges, gradient norms, attention-logit ranges, overflow/NaN counters, and data batch IDs. Bisect controlled ablations: replay without the suspect shard, freeze data order but change LR/clipping only after reproducing, compare checkpoint diffs layer by layer, and test z-loss or tighter clipping only when traces show attention-logit or gradient explosion. Recover by rolling back to the last clean checkpoint, removing or fixing the triggering data/state issue, and resuming with additional monitors and a canary run before spending the full 16,384-GPU budget.'
+  common_mistake: |
+    **The Pitfall:** Simply reducing the learning rate globally or skipping the offending data batch.
+    **The Rationale:** Engineers treat the symptom (the spike) with a band-aid rather than diagnosing the underlying gradient explosion or representation collapse.
+    **The Consequence:** The instability likely masks deeper representation issues and will recur later, costing millions of dollars in wasted compute.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 16,384 GPUs costing $3 per GPU-hour.
+    - Rollback from 80K to 79K loses 1,000 steps.
+    - Training speed: ~12s/step.
+
+    **Calculations:**
+    - Cluster cost rate: 16,384 * $3/hr = $49,152/hr.
+    - Time lost per rollback: 1,000 steps * 12s/step = 12,000s = 3.33 hours.
+    - Financial waste per rollback: 3.33 hours * $49,152/hr = $163,674.
+    - Total waste for 3 diagnostic rollbacks: 3 * $163,674 = $491,022.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~$500K waste (Cost-Bound)**. Repeated full-cluster rollback experiments are expensive, so the recovery plan should prioritize deterministic replay, data/optimizer-state bisection, and targeted mitigations only after traces identify the failure mode.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1964,7 +1964,8 @@ export class SpacedRepetitionIndexDBHandler extends SpacedRepetitionStorageHandl
 
               .replace(/\s+/g, " ")
 
-              .replace(/"/g, '"')
+              // Normalize typographic double quotes to ASCII for JSON.parse (was a no-op .replace(/"/g, '"'))
+              .replace(/[\u201C\u201D\u201E\uFF02]/g, '"')
 
               .replace(/"{/g, "{")
 

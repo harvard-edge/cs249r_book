@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: edge-1133
+track: edge
+level: L4
+zone: evaluation
+topic: systolic-dataflow
+competency_area: compute
+bloom_level: evaluate
+phase: both
+title: Weight-Stationary vs Output-Stationary QK Attention
+scenario: You must configure the dataflow strategy for running a self-attention layer (seq=64, hidden=256, heads=4) on a Jetson Orin DLA (INT8) for a keyword spotting transformer.
+question: For QK^T with seq=64 and head_dim=64, is output-stationary or weight-stationary dataflow better, and what are the memory access counts?
+details:
+  realistic_solution: For one head, Q is 64x64, K is 64x64, and QK^T produces a 64x64 score matrix. Between output-stationary and weight-stationary, choose weight-stationary if the DLA can keep the 4KB K tile on chip. Treat K as the stationary operand, stream each Q row through the array, and produce all 64 scores for that row before writing them out. Under a unique-SRAM-read convention this loads K once (4096 values), Q once (4096 values), and writes 4096 outputs. A naive output-stationary schedule keeps each score accumulator local but reads a 64-element Q row and a 64-element K row for each output score, so it performs 4096*64 = 262,144 MAC input pairs, or 524,288 scalar operand reads if neither operand is reused across neighboring outputs. Actual DLA tiling can reduce the OS penalty when Q or K tiles fit on chip, but for this small per-head problem WS is the clearer memory-efficient choice.
+  common_mistake: |
+    **The Pitfall:** Treating attention matrices (QK^T) as standard MLPs and ignoring their quadratic memory footprint.
+    **The Rationale:** Engineers assume default dataflows (like Output-Stationary) are universally optimal without computing the distinct read/write ratios for sequence-to-sequence operations.
+    **The Consequence:** Extreme memory bandwidth saturation on the DLA, turning a compute-bound operation into a severe memory bottleneck.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - QK^T per head: Q=(64,64) = 4096 INT8 values, K=(64,64) = 4096 INT8 values.
+    - Output=(64,64) = 4096 bytes.
+    - Count scalar SRAM operand reads. A MAC input pair has two scalar operand reads unless one operand is held on chip.
+
+    **Calculations:**
+    - WS (K stationary): K loaded once = 4096 reads. Q streamed once = 64 rows * 64 elements = 4096 reads. Total operand reads = 8192. Output writes = 4096.
+    - Naive OS: each output score is a 64-element dot product, so there are 64 * 64 * 64 = 262,144 MAC input pairs.
+    - With no cross-output operand reuse in that naive OS schedule, scalar operand reads = 262,144 * 2 = 524,288 reads.
+    - If an OS tile reuses Q or K from on-chip buffers, the read count can fall between these bounds; the comparison depends on tile capacity.
+
+    **Conclusion & Interpretation:**
+    - **Result: choose weight-stationary under the stated tile-fit assumption.** WS needs about 8192 operand reads plus 4096 output writes, versus up to 524,288 scalar operand reads for naive OS. The advantage is strong when K fits on chip, but the exact factor depends on DLA tiling and buffer reuse.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

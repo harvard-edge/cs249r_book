@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-0621
+track: cloud
+level: L5
+zone: optimization
+topic: memory-hierarchy-design
+competency_area: memory
+bloom_level: evaluate
+phase: both
+title: The CXL Memory Tier
+scenario: Your inference server has 80 GB of HBM (GPU VRAM) and 512 GB of CXL-attached memory at ~200 ns latency and ~64 GB/s bandwidth. You are serving a 70B model (140 GB FP16).
+question: Can CXL memory avoid tensor parallelism for the 140 GB FP16 70B model, and what performance impact would it have?
+details:
+  realistic_solution: |
+    CXL can solve the capacity problem but not the hot-path bandwidth problem for low-latency decode. An 80 GB HBM GPU plus 512 GB of CXL memory can hold a 140 GB FP16 model on one host, so it may avoid tensor parallelism in a capacity-only sense. But decode repeatedly touches transformer weights and KV state; any layers or large weight blocks left in CXL are constrained by ~64 GB/s and much higher latency than HBM. The safe conclusion is access-pattern dependent: small cold components or prefetched blocks may be tolerable, but keeping a large fraction of decode-path weights in CXL will bottleneck tokens/sec and TTFT/TPOT. For production low-latency serving, tensor parallelism, quantization, or a tiering plan that keeps the hot model footprint in HBM is still needed.
+  common_mistake: |
+    **The Pitfall:** Assuming CXL memory is "just slower DRAM" and will only cause a minor slowdown.
+    **The Rationale:** Candidates ignore the access patterns. They fail to separate layers accessed once per token (embeddings) from those accessed once per layer per token (attention/MLP).
+    **The Consequence:** Misconfiguring memory tiering, resulting in catastrophic latency during low-batch decode.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - HBM vs CXL specs: HBM = 3.35 TB/s. CXL = 64 GB/s.
+    - 70B FP16 model = 140 GB.
+    - GPU HBM can hold 80 GB, leaving ~60 GB of weights in CXL if the full FP16 model is served on one GPU.
+    - Decode performance depends on which weights are touched on the critical path, not just total capacity.
+
+    **Calculations:**
+    - Bandwidth ratio: 3.35 TB/s / 64 GB/s = 3,350 / 64 ≈ 52x. A byte served from CXL has roughly 1/52 the bandwidth of a byte served from HBM before latency and software overheads.
+    - Capacity-only check: 80 GB HBM + 512 GB CXL can hold 140 GB, so the model can fit on one host.
+    - Hot-path check: if a fraction f of decode-path weight traffic comes from CXL, the bandwidth part of that traffic is slowed by about 52x for that fraction. Even f=10% makes the weighted bandwidth cost about 0.90 + (0.10 * 52) = 6.1x the all-HBM case.
+    - If the 60 GB offloaded portion is cold or prefetched ahead of use, the penalty can be much smaller; if it is repeatedly touched during every decode step, it dominates latency.
+
+    **Conclusion & Interpretation:**
+    - **Result: capacity yes, tensor-parallel replacement usually no.** CXL can hold the extra 60 GB, but large decode-path traffic from CXL is bandwidth-limited and access-pattern dependent. Use CXL for cold tiers or carefully prefetched pieces; use tensor parallelism or quantization when the hot 70B FP16 path must deliver low latency.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: cloud-2335
+track: cloud
+level: L4
+zone: diagnosis
+topic: neural-architecture-search
+competency_area: architecture
+bloom_level: analyze
+phase: training
+title: Dataflow Compiler Thrashing on Dynamic Shapes
+scenario: You migrate a speech-to-text Transformer model from GPUs to a static dataflow accelerator. On the GPU, p99 latency is 45ms. On the new dataflow architecture, despite having 10x the SRAM, p99 latency spikes to 850ms. Tracing shows the hardware is idle 90% of the time.
+question: Why does the static dataflow accelerator show 850ms p99 and 90% idle time for variable-length speech inputs, and how would you fix it?
+details:
+  realistic_solution: |
+    The symptom (massive latency spikes and idle hardware on a static dataflow chip) is caused by compile-cache misses from dynamic input shapes (variable audio sequence lengths). Static dataflow architectures rely on a deterministic compiler that schedules every instruction, memory fetch, and network route at compile time. They do not have dynamic instruction schedulers or hardware control flow like GPUs. When a request arrives with a novel sequence length that has no cached compiled shape, the runtime must either trigger a Just-In-Time (JIT) recompilation of the dataflow graph (taking hundreds of milliseconds) or pad the sequence to a massive pre-compiled maximum length, wasting cycles. The algorithm-compiler co-design solution is to implement 'bucketization'—compiling the model for 3-4 fixed sequence lengths (e.g., 128, 512, 2048) at deployment time, caching those schedules, and padding incoming requests to the nearest bucket to avoid runtime recompilation.
+  common_mistake: |
+    **The Pitfall:** Assuming the dataflow architecture lacks raw FLOPS or memory bandwidth.
+    **The Rationale:** Engineers apply dynamic GPU execution intuition to static graph hardware.
+    **The Consequence:** They fail to realize that dynamic input shapes trigger massive Just-In-Time (JIT) recompilation penalties on hardware that lacks dynamic instruction schedulers.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Observed p99 latency on the dataflow accelerator: 850ms.
+    - New sequence lengths can trigger a compile path instead of a precompiled static schedule.
+    - Precompiled bucket execution time is about 1ms, including padding to the selected bucket.
+
+    **Calculations:**
+    - Observed slow path = compile/setup time + static execution.
+    - Compile/setup component = 850ms - ~1ms = ~849ms.
+    - With 3-4 fixed buckets compiled at deployment, runtime avoids the ~849ms compile path.
+    - Bucketized request latency = bucket execution (~1ms) + dispatch/padding overhead (<1ms) = <2ms for this accelerator path.
+
+    **Conclusion & Interpretation:**
+    - **Result: Compiler-Bound Latency**. Bucketization connects the observed 850ms p99 to the compile path and replaces it with a precompiled static execution path under ~2ms.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 18
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+  - dataflow
+  - compiler
+  - dynamic-shapes
+  - latency

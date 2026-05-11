@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-2794
+track: cloud
+level: L6+
+zone: mastery
+topic: federated-learning
+competency_area: cross-cutting
+bloom_level: create
+phase: both
+title: Disaggregated A100 Prefill and T4 Decode for 30B LLMs
+scenario: Architect a cost-optimal heterogeneous serving platform for a 30B LLM. You have A100 80GB nodes for prefill and T4 16GB nodes for decoding. Assume A100 capacity costs 8x a T4, T4 decode must either use at least 4-way FP16 tensor parallelism or quantized weights with KV-cache headroom, and the prefill-to-decode link sustains 50 GB/s.
+question: How would you design disaggregated serving for a 30B LLM using A100s for prefill and T4s for decoding?
+details:
+  realistic_solution: Route long prompts to A100 80GB prefill workers, where the 30B FP16 weights fit on one GPU and prefill can use A100-class HBM bandwidth and tensor-core throughput. After prefill, transfer only the request's KV cache and scheduling metadata to a decode pool. A T4 16GB decoder is viable only with at least 4-way FP16 tensor parallelism, which leaves little KV-cache headroom, or with quantized weights that reserve memory for KV cache and fragmentation. Because A100 capacity is assumed to cost 8x a T4, offloading decode is cost-attractive only when the extra KV transfer and T4 memory-bandwidth latency do not dominate. The router should admit decode batches based on weight shard size, KV-cache size, fragmentation reserve, and priority, with fallback to A100 decode for large contexts or latency-critical sessions.
+  common_mistake: |
+    **The Pitfall:** Placing both prefill and decode on T4s, severely bottlenecking time-to-first-token due to their low 65 TFLOPS compute capability.
+    **The Rationale:** Understanding this distinction is critical for system optimization.
+    **The Consequence:** Failing to recognize this leads to poor architectural decisions and suboptimal performance.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 30B model, FP16 weights unless quantized for decode.
+    - A100 80GB for prefill; T4 16GB for decode.
+    - A100 capacity costs 8x T4 capacity.
+    - Prefill-to-decode link sustains 50 GB/s.
+
+    **Calculations:**
+    - 30B parameters in FP16 require about 60 GB for weights before KV cache or runtime overheads.
+    - A single T4 has 16 GB of memory, so FP16 decode cannot run on one T4. Four-way sharding gives 60GB / 4 = 15GB per T4 for weights, leaving only about 1GB before KV cache and runtime overheads.
+    - Practical FP16 decode therefore needs more than 4 T4s per replica, or quantized weights. For example, 8-bit weights are about 30GB total; 4-way sharding is 7.5GB per T4, leaving about 8.5GB before KV cache and overhead.
+    - A100 80GB HBM bandwidth is roughly 2 TB/s class; T4 memory bandwidth is roughly 320 GB/s class, so decode throughput and batching on T4s are the limiting resources.
+    - Transferring a 1 GB KV cache over a 50 GB/s link takes 1 GB / 50 GB/s = 20 ms before serialization and scheduling overhead.
+    - If the T4 decode pool replaces one A100-equivalent decode slot with up to 8 T4s, the hardware-cost budget can break even, but only if batching keeps token latency acceptable.
+
+    **Conclusion & Interpretation:**
+    - Disaggregation is plausible only when KV-cache handoff, decode admission control, T4 shard memory, and the A100:T4 cost ratio are explicit. The 20 ms KV transfer may be acceptable for long prompts, but it is not automatically hidden for short requests or latency-critical decode.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

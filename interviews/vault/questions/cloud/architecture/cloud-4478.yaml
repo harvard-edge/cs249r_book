@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-4478
+track: cloud
+level: L3
+zone: implement
+topic: recommendation-systems-engineering
+competency_area: architecture
+bloom_level: apply
+phase: inference
+title: Request Deduplication in High-Frequency Recommendation Serving
+scenario: A recommendation serving system receives 100K QPS. Analysis shows 15% of requests are exact duplicates (same user, same context, within 100ms). Each serving call takes 50ms on average.
+question: How would you design a deduplication layer for 100K QPS when 15% of requests are exact duplicates within 100ms?
+details:
+  realistic_solution: |
+    Request deduplication design: (1) Cache key definition: use a stable request fingerprint, such as a canonical hash of the full request payload and all ranking-affecting context. Do not use timestamp buckets as part of identity; use time only as an expiry window. (2) Implementation: keep an in-flight map per serving replica, or route identical fingerprints to the same shard before the model call. A request that finds an in-flight entry attaches as a waiter and receives the same response. A request that arrives shortly after completion can receive the cached result until the 100-200ms TTL expires. (3) Capacity: at 100K QPS and a 100ms dedupe window, each globally sharded layer must track about 10K recent request arrivals, plus completed entries for the TTL. With roughly 200-500B per key and waiter metadata, this is single-digit MB per global window before replication overhead. (4) Savings: 15% duplicates means up to 15K model calls/sec avoided. At 50ms average service time, that removes about 750 request-seconds/sec of model work, or 750 concurrent in-flight request slots. Convert that to GPUs only after measuring per-GPU serving concurrency and batching.
+  common_mistake: |
+    **The Pitfall:** Implementing deduplication keyed only on user_id in a distributed cache.
+    **The Rationale:** Engineers apply standard web-tier caching logic without understanding recommendation dynamics.
+    **The Consequence:** Serving stale results when a user's context changes quickly (scrolling, clicking), or missing the opportunity to coalesce entirely if the cache is too coarse.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Volume: 100K QPS. Cost: 50ms per request. Duplicates: 15%.
+       - Convert saved work to hardware only after measuring per-GPU concurrency.
+    2. **Calculations:**
+       - Duplicate Load: 15,000 req/s.
+       - Saved work: 15,000 * 50ms = 750 request-seconds/sec.
+       - Interpretation: this is 750 fewer concurrent in-flight request slots, not automatically 750 GPUs.
+       - Cache footprint: 100,000 req/s * 0.1s = 10,000 recent arrivals; at 200-500B per entry, track roughly 2-5MB before replication and waiter metadata.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound.** Short-window coalescing skips redundant dense compute, but hardware savings must be derived from measured per-GPU throughput and batching.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: edge-0607
+track: edge
+level: L6+
+zone: mastery
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: create
+phase: both
+title: The Hard Real-Time Factory Defect Detector
+scenario: You are the Principal Engineer designing a visual inspection system for a high-speed bottling line. The system must detect microscopic cracks in glass bottles using a 4K resolution camera (3840x2160) and trigger a robotic arm, all within a hard real-time budget of 10ms. A state-of-the-art Vision Transformer has shown unparalleled accuracy for this kind of fine-grained defect detection in offline tests. Your available hardware is a Hailo-8 accelerator.
+question: How would you architect the 4K crack detector to use the ViT within 10ms, and why is a naive ViT impossible?
+details:
+  realistic_solution: |
+    Do not run a full-frame 4K ViT on the Hailo-8. The token count, activation traffic, and attention memory make naive full-resolution inference incompatible with a 10ms hard deadline on this class of accelerator. Architect the detector as a cascade: use deterministic image pre-processing and a small CNN/segmentation model on tiles to preserve crack-scale detail, select a small set of suspicious ROIs, and run the ViT only on those cropped patches or on a compact patch sequence. FlashAttention-style kernels can reduce intermediate memory movement inside the ViT, but they do not remove the O(N^2) token interaction cost enough to make a full 4K ViT viable.
+  common_mistake: |
+    **The Pitfall:** Simply downsampling the 4K image to a smaller size like 224x224 to reduce compute.
+    **The Rationale:** This is the standard procedure for getting CNNs to run quickly on edge devices.
+    **The Consequence:** Downsampling destroys the high-frequency details required to see the microscopic cracks, making the entire inspection system useless.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Real-time budget: 10ms.
+    - Image resolution: 4K (3840x2160).
+    - ViT patch size: 16x16.
+    - Hardware marketed peak: ~26 TOPS, before utilization and memory effects.
+    - Example ViT width: d = 768.
+
+    **Calculations:**
+    - 4K Image: 3840 * 2160 = 8.29M pixels.
+    - Number of patches (tokens): (3840/16) * (2160/16) = 240 * 135 = 32,400 tokens.
+    - Attention score/value work per layer is approximately 4 * N^2 * d = 4 * 32,400^2 * 768 = 3.22e12 ops.
+    - QKV and output projections add approximately 8 * N * d^2 = 153e9 ops per layer.
+    - One attention layer is therefore roughly 3.37 TOPs before MLP blocks and memory traffic.
+    - Best-case compute time for one layer at 26 TOPS = 3.37 / 26 = 130ms, already 13x the full-system deadline.
+    - The attention matrix has N^2 = 1.05B entries; even FP16 storage would be about 2.1GB for one head's scores if materialized, so bandwidth and tiling overhead are also first-order constraints.
+
+    **Conclusion & Interpretation:**
+    - **Result: Full-frame ViT is infeasible on Hailo-8.** The design must reduce tokens before the ViT through tiling, ROI prefiltering, or a hierarchical detector; memory-efficient attention helps only after the token count has been reduced.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

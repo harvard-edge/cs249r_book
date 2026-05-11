@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-2105
+track: cloud
+level: L6+
+zone: mastery
+topic: mlops-lifecycle
+competency_area: architecture
+bloom_level: create
+phase: both
+title: DLRM Training Pipeline End-to-End Design
+scenario: 'You must design the training infrastructure for a production DLRM at social scale: 12 embedding tables totaling 4 TB, and an MLP bottom/top network of 50M parameters, training on 10B examples/day. The system must support hourly model updates.'
+question: What are the three critical systems bottlenecks for social-scale DLRM training with hourly updates, and how should the architecture address them?
+details:
+  realistic_solution: |
+    The three bottlenecks are embedding memory, sparse communication, and data pipeline throughput. First, 4 TB of embedding tables cannot fit on one node: raw BF16/resident capacity is 4 TB / 80 GB = 50 GPUs, and with 20% runtime headroom the resident embedding floor is about 63 GPUs before any GPU-resident optimizer state. Use table-wise sharding where possible, row-wise sharding only for oversized tables, and sharded/offloaded optimizer state for embeddings. Second, sparse embedding updates make dense AllReduce wasteful; aggregate touched rows with sparse collectives or parameter-server-style sharded optimizers over RDMA. Third, the input pipeline must feed 10B examples/day, about 10 TB/day or 115.7 MB/s sustained, and hourly updates require processing about 416.7M examples/hour. Keep dense MLPs data-parallel and small; the architecture should be built around sharded embeddings and sparse update flow, not standard dense-model parallelism.
+  common_mistake: |
+    **The Pitfall:** Treating DLRM training like standard dense LLM training.
+    **The Rationale:** Deep learning infrastructure is heavily biased toward dense transformers.
+    **The Consequence:** Attempting to use standard Pipeline or Tensor parallelism, which fails because DLRMs are bottlenecked by embedding memory and sparse AllToAll communication, not compute.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Embeddings: 4 TB total size.
+       - MLPs: 50M parameters.
+       - Data volume: 10B examples/day, ~1 KB per example.
+       - GPU Memory: 80 GB per GPU, with 20% reserved for fragmentation, buffers, activations, and runtime overhead.
+       - Optimizer state for embeddings is sharded/offloaded to parameter-server or optimizer nodes unless additional GPU memory is provisioned.
+    2. **Calculations:**
+       - Raw embedding memory minimum: 4 TB / 80 GB = 50 GPUs if every byte were usable.
+       - Practical resident-embedding capacity with 20% headroom: 4 TB / (80 GB * 0.8) = 62.5, so plan for ~64 GPUs before GPU-resident optimizer state.
+       - If optimizer state is also kept in GPU HBM, required capacity increases beyond this resident-weight floor; if it is sharded/offloaded, the ~64-GPU estimate covers only hot resident embeddings plus runtime headroom.
+       - Dense MLP memory is small compared with embeddings: 50M BF16 parameters are ~100 MB for weights, with optimizer state still on the order of hundreds of MB to a few GB depending on optimizer precision.
+       - Sparse update scale: 10B examples/day * 50 embedding lookups/example = ~500B row lookups or sparse update opportunities/day, so dense AllReduce over whole tables is the wrong communication primitive.
+       - Data I/O: 10B * 1 KB = 10 TB/day; 10 TB / 86,400s = about 115.7 MB/s sustained.
+       - Hourly refresh target: 10B / 24 = about 416.7M examples/hour.
+    3. **Conclusion & Interpretation:** **~64 GPUs for resident embeddings before GPU-resident optimizer state, plus sparse communication and 115.7 MB/s sustained ingestion (Memory Capacity, Network, and I/O-Bound).**
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

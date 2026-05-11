@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-0559
+track: cloud
+level: L6+
+zone: mastery
+topic: differential-privacy
+competency_area: cross-cutting
+bloom_level: create
+phase: both
+title: The Privacy Throughput Cliff
+scenario: A security audit reveals our medical LLM is vulnerable to membership inference attacks. The privacy team mandates Differentially Private SGD (DP-SGD) with ε=1, but the infrastructure team warns this will increase training time by 10x and require 3x more GPU memory.
+question: Why does adding privacy guarantees have such a devastating systems cost, and how do you bring it down to something feasible?
+details:
+  realistic_solution: 'Standard SGD computes one aggregate gradient for the batch. DP-SGD requires a per-example contribution so each example can be clipped before aggregation, then noise is added to the clipped sum. The systems cost comes from losing the usual batch efficiency in the backward pass: frameworks may need microbatching, extra activation storage, per-sample gradient norms, or per-example gradient intermediates. It is misleading to model this as holding 64 full model-gradient tensors at once; practical implementations stream, vectorize, or accumulate per-example contributions, but still pay substantial compute and memory overhead. Feasible designs use vectorized per-example gradients where supported, ghost clipping or layerwise norm accounting, microbatching with activation checkpointing, and parameter-efficient tuning such as DP-LoRA so the private gradient is computed only for a small adapter parameter set.'
+  common_mistake: |
+    **The Pitfall:** Assuming DP-SGD simply adds noise to gradients, which should be nearly computationally free.
+    **The Rationale:** Standard differential privacy math focuses on the noise addition step, masking the engineering reality of how gradients are calculated.
+    **The Consequence:** Massive, unexpected memory and compute blowups because DP-SGD fundamentally requires per-example gradients, breaking standard batch efficiency.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 7B model, FP16 parameters, batch size 64.
+    - A full FP16 model-gradient tensor is about 7B * 2 bytes = 14 GB.
+    - DP-SGD needs per-example clipping before aggregation, but implementations do not normally need to materialize 64 full 14 GB gradient tensors simultaneously.
+
+    **Calculations:**
+    - Fully materializing per-example gradients would be an upper bound of 64 * 14 GB = 896 GB, but that is the wrong common-case memory model.
+    - A streaming or microbatched implementation keeps one or a few examples' intermediates live, then accumulates clipped sums; the overhead shifts to extra backward work, activation storage, and norm computation.
+    - If DP is applied only to adapter weights with about 10M trainable parameters, the aggregate FP16 gradient tensor is about 10M * 2 bytes = 20 MB, orders of magnitude smaller than 14 GB for the full model.
+    - Per-example clipping still adds overhead for the adapter path, but the private gradient state is measured in MB-scale adapter tensors rather than full-model tensors.
+
+    **Conclusion & Interpretation:**
+    - **Result: Batch-Efficiency Cliff.** DP-SGD is expensive because clipping requires per-example gradient information, not because one must always store batch_size full model gradients. Efficient implementations reduce the blowup, and DP-LoRA is one feasible mitigation when adapter-only training preserves enough model quality.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

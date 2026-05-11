@@ -2,14 +2,16 @@
 ``binder bib`` — Bibliography management.
 
 Subcommands:
-    list    — Show all .bib files with entry counts
-    clean   — Remove unused entries from .bib files
-    update  — Run betterbib update -i on .bib files (fetch proper metadata)
-    sync    — Clean then update (full pipeline)
+    list     — Show all .bib files with entry counts
+    clean    — Remove unused entries from .bib files
+    update   — Run betterbib sync-preserve on .bib files (fetch metadata, keep citekeys stable)
+    sync     — Clean then update (full pipeline)
+    normalize — Full-tree: same 3 steps as pre-commit (mechanical → tidy → bib_lint check)
 """
 
 import argparse
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -42,7 +44,7 @@ class BibCommand:
         parser.add_argument(
             "subcommand",
             nargs="?",
-            choices=["list", "clean", "update", "sync"],
+            choices=["list", "clean", "update", "sync", "normalize"],
             help="Subcommand to run",
         )
         parser.add_argument("--path", default=None, help="File or directory")
@@ -64,6 +66,15 @@ class BibCommand:
             return True
 
         root = self._resolve_path(ns.path, ns.vol1, ns.vol2)
+        if ns.subcommand == "normalize":
+            # Full-repo normalize uses git ls-files inside the script; no path needed.
+            if not ns.path and not ns.vol1 and not ns.vol2:
+                return self._run_normalize(scoped=False, root=root)
+            if not root.exists():
+                console.print(f"[red]Path not found: {root}[/red]")
+                return False
+            return self._run_normalize(scoped=True, root=root)
+
         if not root.exists():
             console.print(f"[red]Path not found: {root}[/red]")
             return False
@@ -73,7 +84,7 @@ class BibCommand:
         elif ns.subcommand == "clean":
             return self._run_clean(root, ns.dry_run)
         elif ns.subcommand == "update":
-            return self._run_update(root)
+            return self._run_update(root, ns.dry_run)
         elif ns.subcommand == "sync":
             return self._run_sync(root, ns.dry_run)
         return False
@@ -88,14 +99,26 @@ class BibCommand:
         table.add_column("Description", style="white", width=50)
         table.add_row("list", "Show all .bib files with entry counts")
         table.add_row("clean", "Remove unused entries from .bib files")
-        table.add_row("update", "Run betterbib update -i (fetch proper metadata)")
+        table.add_row(
+            "update",
+            "Run betterbib sync-preserve (fetch metadata, keep citekeys stable)",
+        )
         table.add_row("sync", "Clean then update (full pipeline)")
+        table.add_row(
+            "normalize",
+            "§5 mechanical fixes + bibtex-tidy + bib_lint (aligns with pre-commit)",
+        )
         console.print(Panel(table, title="binder bib <subcommand>", border_style="cyan"))
         console.print("[dim]Examples:[/dim]")
         console.print("  [cyan]./binder bib list --vol1[/cyan]")
         console.print("  [cyan]./binder bib clean --vol1 --dry-run[/cyan]")
         console.print("  [cyan]./binder bib update --vol1[/cyan]")
         console.print("  [cyan]./binder bib sync --vol1[/cyan]")
+        console.print(
+            "  [cyan]./book/binder bib normalize[/cyan]   "
+            "# all git-tracked .bib (run from repo root)"
+        )
+        console.print("  [cyan]./book/binder bib normalize --vol1[/cyan]   # vol1 .bib only")
         console.print()
 
     # ------------------------------------------------------------------
@@ -324,11 +347,95 @@ class BibCommand:
         bib_path.write_text(cleaned.strip() + "\n", encoding="utf-8")
 
     # ------------------------------------------------------------------
+    # Normalize (mechanical fixes + pre-commit tidy + bib_lint check)
+    # ------------------------------------------------------------------
+
+    def _run_normalize(self, scoped: bool, root: Path) -> bool:
+        """Run the same pipeline needed for consistent .bib with pre-commit."""
+        repo = self.config_manager.root_dir
+        script = repo / "book" / "tools" / "bib_apply_mechanical_fixes.py"
+        if not script.is_file():
+            console.print(f"[red]Missing {script}[/red]")
+            return False
+
+        if scoped:
+            bibs = self._find_bib_files(root)
+            if not bibs:
+                console.print("[yellow]No .bib files in scope.[/yellow]")
+                return True
+            cmd = [sys.executable, str(script)] + [str(p) for p in bibs]
+        else:
+            cmd = [sys.executable, str(script)]
+
+        console.print(
+            "[bold]Step 1/3:[/bold] "
+            "Mechanical §5 fixes ([cyan]book/tools/bib_apply_mechanical_fixes.py[/cyan])…\n"
+        )
+        r = subprocess.run(cmd, cwd=str(repo))
+        if r.returncode != 0:
+            return False
+
+        if not shutil.which("pre-commit"):
+            console.print(
+                "\n[yellow]pre-commit not on PATH — skipped Step 2. "
+                "Install pre-commit and run: "
+                "[cyan]pre-commit run bibtex-tidy --all-files[/cyan][/yellow]\n"
+            )
+        else:
+            console.print(
+                "\n[bold]Step 2/3:[/bold] [cyan]pre-commit run bibtex-tidy --all-files[/cyan] "
+                "(loop until Pass)…\n"
+            )
+            settled = False
+            for _i in range(12):
+                p = subprocess.run(
+                    ["pre-commit", "run", "bibtex-tidy", "--all-files"],
+                    cwd=str(repo),
+                )
+                if p.returncode == 0:
+                    settled = True
+                    break
+            if not settled:
+                console.print(
+                    "\n[red]bibtex-tidy did not reach a stable pass in 12 attempts; "
+                    "resolve diff manually.[/red]"
+                )
+                return False
+
+        blpy = repo / "book" / "tools" / "bib_lint.py"
+        console.print(
+            "\n[bold]Step 3/3:[/bold] "
+            "[cyan]python3 book/tools/bib_lint.py --all --check[/cyan] "
+            "(same [bold]error[/bold] bar as the pre-commit [cyan]bib-lint[/cyan] hook)…\n"
+        )
+        p2 = subprocess.run(
+            [sys.executable, str(blpy), "--all", "--check"],
+            cwd=str(repo),
+        )
+        if p2.returncode != 0:
+            console.print(
+                "\n[red]bib_lint reported new errors. Fix or baseline per "
+                "book/tools/bib_lint_baseline.json.[/red]"
+            )
+        else:
+            console.print(
+                "\n[green]Bib files match the tidy + hygiene checks "
+                "used in pre-commit (warnings are OK).[/green]"
+            )
+        return p2.returncode == 0
+
+    # ------------------------------------------------------------------
     # Update
     # ------------------------------------------------------------------
 
-    def _run_update(self, root: Path) -> bool:
-        """Run betterbib update -i on .bib files."""
+    def _run_update(self, root: Path, dry_run: bool = False) -> bool:
+        """Run betterbib sync-preserve on .bib files."""
+        repo = self.config_manager.root_dir
+        script = repo / "book" / "tools" / "bib_sync_preserve.py"
+        if not script.is_file():
+            console.print(f"[red]Missing {script}[/red]")
+            return False
+
         # Check if betterbib is available
         try:
             subprocess.run(
@@ -348,32 +455,28 @@ class BibCommand:
             console.print("[yellow]No .bib files found.[/yellow]")
             return True
 
-        console.print(f"[bold]Updating {len(bib_files)} .bib files with betterbib...[/bold]\n")
+        console.print(
+            f"[bold]Updating {len(bib_files)} .bib file(s) with betterbib sync-preserve...[/bold]\n"
+        )
 
-        success = 0
-        failed = 0
-        for bib in bib_files:
-            rel = self._relative(bib)
-            console.print(f"  Updating {rel}...", end=" ")
-            try:
-                result = subprocess.run(
-                    ["betterbib", "update", "-i", str(bib)],
-                    capture_output=True,
-                    text=True,
-                    timeout=120,
-                )
-                if result.returncode == 0:
-                    console.print("[green]✓[/green]")
-                    success += 1
-                else:
-                    console.print(f"[red]✗[/red] [dim]{result.stderr.strip()[:80]}[/dim]")
-                    failed += 1
-            except subprocess.TimeoutExpired:
-                console.print("[red]✗ timed out[/red]")
-                failed += 1
+        cmd = [sys.executable, str(script)]
+        if dry_run:
+            cmd.append("--dry-run")
+        if root.is_file() and root.suffix == ".bib":
+            cmd.append(str(root))
+        else:
+            cmd.extend(str(b) for b in bib_files)
 
-        console.print(f"\n[bold]Done:[/bold] {success} updated, {failed} failed")
-        return failed == 0
+        result = subprocess.run(
+            cmd,
+            cwd=str(repo),
+            text=True,
+        )
+        if result.returncode == 0:
+            console.print("\n[green]Done.[/green]")
+            return True
+        console.print("\n[red]sync-preserve reported failures.[/red]")
+        return False
 
     # ------------------------------------------------------------------
     # Sync (clean + update)

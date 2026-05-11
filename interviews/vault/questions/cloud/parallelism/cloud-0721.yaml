@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-0721
+track: cloud
+level: L6+
+zone: mastery
+topic: 3d-parallelism
+competency_area: parallelism
+bloom_level: create
+phase: training
+title: The 3D Parallelism Orchestration
+scenario: You have 1,024 H100 GPUs across 128 DGX nodes. You need to train a 175B parameter GPT-style model with 96 transformer layers.
+question: How would you assign Tensor (T), Pipeline (P), and Data (D) parallelism across 1,024 H100s for a 175B, 96-layer model, and what physical constraint justifies each?
+details:
+  realistic_solution: |
+    Solve inside-out from physical constraints. **Tensor parallelism (T=8):** TP activation collectives happen at every layer, so keep each TP group inside one 8-GPU DGX NVLink domain. **Pipeline parallelism (P=8):** 96 layers / 8 stages = 12 layers per stage. A pipeline stage owns 1/8 of the model, or 350 GB / 8 = 43.75 GB of FP16 weights across the stage; tensor parallelism shards those layer weights across 8 GPUs, so each GPU holds about 43.75 GB / 8 = 5.47 GB of FP16 weights before optimizer, gradient, activation, and buffer overheads. **Data parallelism (D):** D = 1024 / (8 * 8) = 16. DP collectives operate on each GPU's TP/PP shard once per step, so they are better suited to InfiniBand than per-layer TP traffic.
+  common_mistake: |
+    **The Pitfall:** Maximizing data parallelism for simplicity (e.g., T=1, P=1, D=1024) or picking arbitrary dimensions.
+    **The Rationale:** Candidates ignore the physical memory constraints (a 175B model won't fit on one GPU) and the massive bandwidth drop-off between NVLink and InfiniBand.
+    **The Consequence:** Proposing impossible physical topologies or configurations that cause catastrophic network bottlenecks during training.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 175B model, 1024 H100s, DGX nodes (8 GPUs).
+
+    **Calculations:**
+    - Total FP16 weights: 175B * 2 bytes = 350 GB.
+    - T=8 aligns each tensor-parallel group with the 8-GPU NVLink domain.
+    - P=8 gives 96 / 8 = 12 layers per pipeline stage.
+    - Weight memory per pipeline stage before TP sharding: 350 GB / 8 = 43.75 GB.
+    - Weight memory per GPU after TP sharding within the stage: 43.75 GB / 8 = 5.47 GB.
+    - D=16 because 1024 / (T * P) = 1024 / 64 = 16.
+    - DP gradient shard per GPU is also about 5.47 GB; a D=16 ring AllReduce moves 2 * 5.47 GB * (15/16) = 10.25 GB per GPU per step.
+
+    **Conclusion & Interpretation:**
+    - **Result: T=8, P=8, D=16.** The memory arithmetic is per GPU after both pipeline partitioning and tensor sharding; the topology argument is that TP stays on NVLink while PP and DP can span nodes.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

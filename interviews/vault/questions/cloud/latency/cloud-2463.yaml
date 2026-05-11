@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-2463
+track: cloud
+level: L4
+zone: diagnosis
+topic: latency-decomposition
+competency_area: latency
+bloom_level: analyze
+phase: both
+title: The NPU Context-Switching Tax
+scenario: 'A cloud-managed edge gateway in a smart retail store processes camera streams by running 3 models sequentially per frame: Detection (10ms), Tracking (5ms), and Pose Estimation (15ms). The sum of individual model latencies is 30ms. All three models are perfectly compiled for the edge NPU. However, the measured end-to-end pipeline latency per frame is 80ms, limiting throughput to 12 FPS instead of the expected 33 FPS.'
+question: Why is the three-model edge pipeline 80ms instead of 30ms, and how would you restructure serving to improve throughput?
+details:
+  realistic_solution: |
+    The hidden latency comes from deployment-time NPU context switching, not from the compiler quality of the individual models. Each model may run in its advertised 10ms, 5ms, or 15ms once resident, but the sequential per-frame schedule forces the runtime to evict one model context and load the next before each stage. If the three model contexts cannot remain resident together on the NPU, those reloads add memory copies, cache/SRAM flushes, and driver setup time between Detection, Tracking, and Pose.
+
+    Restructure serving around model residency: run multiple frames through Detection while that model is loaded, then run those outputs through Tracking, then Pose, or fuse/merge stages if the model architecture allows it. This amortizes context reloads across a batch of frames and improves throughput, with the tradeoff that the first frame in a microbatch may see slightly higher pipeline latency.
+  common_mistake: |
+    **The Pitfall:** Blaming Python GIL overhead, image preprocessing, or PCIe transfer times for the camera frames.
+    **The Rationale:** Candidates often default to system-level software overheads without considering the hardware realities of accelerator memory hierarchies.
+    **The Consequence:** Proposing software-level optimizations that completely fail to address the fundamental hardware bottleneck, leaving throughput constrained.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Compute latencies: 10ms + 5ms + 15ms = 30ms.
+    - Model size: 5MB each. DRAM BW: 4 GB/s. NPU overhead: 15ms/swap.
+    - Sequential serving invokes three distinct model contexts per frame, so the driver reloads one model context for each Detection, Tracking, and Pose invocation.
+
+    **Calculations:**
+    - Swap read = 5MB / 4GB/s = 1.25ms.
+    - Per-model context load cost = 1.25ms + 15ms = 16.25ms.
+    - 3 model invocations * 16.25ms = 48.75ms hidden context-switch overhead.
+    - Total latency = 30ms + 48.75ms = 78.75ms (~80ms).
+
+    **Conclusion & Interpretation:**
+    - **Result: ~80ms Total Latency (Context-Switching Bound)**. The measured 80ms is the expected 30ms of compute plus about 50ms of hidden NPU context-switching overhead. Restructuring to batch frames per model amortizes the 48.75ms swap cost across multiple frames.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

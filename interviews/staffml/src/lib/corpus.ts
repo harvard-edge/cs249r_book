@@ -47,6 +47,15 @@ export interface Question {
   status?: string;          // draft | published | flagged | archived | deleted
   chain_ids?: string[];
   chain_positions?: Record<string, number>;
+  /**
+   * Per-membership tier label. "primary" chains came out of the strict
+   * Bloom-progression sweep and are surfaced by default; "secondary"
+   * chains came out of the lenient second-pass coverage build and are
+   * deprioritized in default UI surfaces. Mirrors chain_positions in
+   * shape — one entry per chain_id this question is in. See
+   * CHAIN_ROADMAP.md Phase 1/2 for the mechanism.
+   */
+  chain_tiers?: Record<string, "primary" | "secondary">;
 
   // ── Heavy fields (bundled as empty stubs; hydrated from worker) ──
   // The summary bundle ships scenario: "" and details with empty strings
@@ -369,15 +378,26 @@ export function extractFinalNumber(text: string): number | null {
 // ─── Chain helpers ──────────────────────────────────────────
 // Chains are deepening question sequences on a topic (L1 → L6+)
 
+export type ChainTier = "primary" | "secondary";
+
 export interface ChainInfo {
   chainId: string;
   position: number;       // 0-indexed position of current question
   total: number;          // total questions in chain
+  /**
+   * "primary" — surface by default (clean Bloom progression).
+   * "secondary" — deprioritized in default surfaces; reachable via the
+   * "more paths" UI or explicit ?chain= URL routing.
+   */
+  tier: ChainTier;
   questions: { id: string; title: string; level: string; position: number }[];
 }
 
-// Build chain index once
+// Build chain index once. Tier is a chain-level attribute (every member
+// of a chain shares the same tier), so we keep it in a sibling map rather
+// than embedding it in each question record.
 const _chainIndex = new Map<string, { id: string; title: string; level: string; position: number }[]>();
+const _chainTier = new Map<string, ChainTier>();
 for (const q of questions) {
   if (!q.chain_ids || !q.chain_positions) continue;
   for (const chainId of q.chain_ids) {
@@ -390,6 +410,10 @@ for (const q of questions) {
       level: q.level,
       position: pos,
     });
+    if (!_chainTier.has(chainId)) {
+      const t = q.chain_tiers?.[chainId];
+      _chainTier.set(chainId, t === "secondary" ? "secondary" : "primary");
+    }
   }
 }
 // Sort each chain by position
@@ -397,13 +421,30 @@ _chainIndex.forEach((qs) => {
   qs.sort((a, b) => a.position - b.position);
 });
 
-/** Get chain info for a question, or null if not in a chain */
-export function getChainForQuestion(questionId: string): ChainInfo | null {
+function _tierOf(chainId: string): ChainTier {
+  return _chainTier.get(chainId) ?? "primary";
+}
+
+/** Get chain info for a question, or null if not in a chain.
+ *
+ * When a question belongs to multiple chains (multi-membership pattern —
+ * a foundational L1/L2 question anchoring two distinct progressions),
+ * caller can disambiguate by passing `preferredChainId`. If omitted or
+ * not a match, falls back to the first chain. Tier-aware callers should
+ * prefer ``getPrimaryChainForQuestion`` for the default surface.
+ */
+export function getChainForQuestion(
+  questionId: string,
+  preferredChainId?: string,
+): ChainInfo | null {
   const q = questions.find(x => x.id === questionId);
   if (!q || !q.chain_ids || !q.chain_positions) return null;
 
-  // Use the first chain this question belongs to
-  const chainId = q.chain_ids[0];
+  // Pick preferred if it's actually one of this question's chains; else first.
+  const chainId =
+    (preferredChainId && q.chain_ids.includes(preferredChainId))
+      ? preferredChainId
+      : q.chain_ids[0];
   if (!chainId) return null;
   const pos = q.chain_positions[chainId];
   if (pos === undefined) return null;
@@ -415,8 +456,50 @@ export function getChainForQuestion(questionId: string): ChainInfo | null {
     chainId,
     position: pos,
     total: chain.length,
+    tier: _tierOf(chainId),
     questions: chain,
   };
+}
+
+/** Return ALL chains a question is in (size ≥ 2 only). Empty array if none.
+ *
+ * Order: primary chains first (in their original chain_ids order), then
+ * secondary chains. Callers that want primary-only should filter the
+ * result on ``c.tier === "primary"``.
+ */
+export function getAllChainsForQuestion(questionId: string): ChainInfo[] {
+  const q = questions.find(x => x.id === questionId);
+  if (!q || !q.chain_ids || !q.chain_positions) return [];
+  const out: ChainInfo[] = [];
+  for (const chainId of q.chain_ids) {
+    const pos = q.chain_positions[chainId];
+    if (pos === undefined) continue;
+    const chain = _chainIndex.get(chainId);
+    if (!chain || chain.length <= 1) continue;
+    out.push({
+      chainId,
+      position: pos,
+      total: chain.length,
+      tier: _tierOf(chainId),
+      questions: chain,
+    });
+  }
+  // Stable: primary first, then secondary; preserves intra-tier order.
+  out.sort((a, b) => {
+    if (a.tier === b.tier) return 0;
+    return a.tier === "primary" ? -1 : 1;
+  });
+  return out;
+}
+
+/** Return the question's primary chain if it has one; otherwise the
+ * first secondary; otherwise null. The default-surface helper for UI
+ * components that want to render one chain badge / one strip per question.
+ */
+export function getPrimaryChainForQuestion(questionId: string): ChainInfo | null {
+  const all = getAllChainsForQuestion(questionId);
+  if (all.length === 0) return null;
+  return all.find(c => c.tier === "primary") ?? all[0];
 }
 
 // ─── Async worker fetchers (for scenario/details, post-bundle-shrink) ──────
@@ -430,7 +513,7 @@ const _detailsCache = new Map<string, Question>();
 let _staticDetailsCache: Map<string, Question> | null = null;
 
 // Opt-in offline / local-dev mode. Set NEXT_PUBLIC_VAULT_FALLBACK=static and
-// run `vault build --legacy-json` to materialize corpus.json on disk. Not a
+// run `vault build --local-json` to materialize corpus.json on disk. Not a
 // prod safety net: production deploys neither emit nor bundle corpus.json.
 function shouldUseStaticDetails(): boolean {
   return process.env.NEXT_PUBLIC_VAULT_FALLBACK?.toLowerCase() === "static";
@@ -438,18 +521,20 @@ function shouldUseStaticDetails(): boolean {
 
 async function getStaticFullDetail(id: string, summary: Question): Promise<Question | undefined> {
   if (!_staticDetailsCache) {
-    // Function-constructor dynamic import: hides the path from Turbopack's
-    // static analyzer so prod builds don't require corpus.json to exist.
-    // corpus.json is materialized on disk only when a contributor runs
-    // `vault build --legacy-json` locally with NEXT_PUBLIC_VAULT_FALLBACK=
-    // static. If the file is missing at runtime, the import rejects and
-    // the caller surfaces an error to the UI.
-    const dynImport = new Function(
-      "p",
-      "return import(p)",
-    ) as (p: string) => Promise<{ default: Question[] }>;
-    const mod = await dynImport("../data/corpus.json");
-    _staticDetailsCache = new Map(mod.default.map((q) => [q.id, q]));
+    // Fetch corpus.json from /data/corpus.json (served from public/). This
+    // file is written by `vault build --local-json` and exists only in local
+    // dev. Production deploys neither emit nor bundle it; the worker fetch
+    // path handles those. If the file is missing at runtime the fetch fails
+    // and the caller surfaces an error to the UI.
+    const res = await fetch("/data/corpus.json");
+    if (!res.ok) {
+      throw new Error(
+        `Static corpus.json not available at /data/corpus.json (status ${res.status}). ` +
+        "Run 'vault build --local-json' from the repo root to regenerate it.",
+      );
+    }
+    const data = (await res.json()) as Question[];
+    _staticDetailsCache = new Map(data.map((q) => [q.id, q]));
   }
   const full = _staticDetailsCache.get(id);
   if (!full) return undefined;

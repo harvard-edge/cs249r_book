@@ -1,0 +1,56 @@
+schema_version: '1.0'
+id: cloud-0426
+track: cloud
+level: L3
+zone: diagnosis
+topic: roofline-analysis
+competency_area: compute
+bloom_level: apply
+phase: both
+title: The Batch Size Sweet Spot
+scenario: You are serving a 7B LLM on a single H100. At batch=1, you measure 35 tokens/sec. At batch=64, you measure 1,800 tokens/sec. You must determine the cause of this 51x throughput increase with only 64x more work and identify the batch size where diminishing returns begin.
+question: Why does throughput increase 51x with a 64x batch size increase, and at what batch size do diminishing returns begin?
+details:
+  realistic_solution: 'At batch=1, LLM decode is deeply memory-bound because each generated token streams about 14 GB of FP16 weights for only about 14 GFLOPs of matrix-vector work, or roughly 1 FLOP/Byte. Increasing batch size turns the work into matrix-matrix style reuse: the same weight read serves B token positions, so arithmetic intensity rises roughly with batch size. The H100 ridge point is about 989 TFLOPS / 3.35 TB/s = 295 FLOP/Byte, so a pure roofline transition would be near B≈295. In practice, VRAM/KV-cache capacity arrives earlier: for a 7B-style 32-layer, 4096-hidden model at 2K context, KV cache is about 1 GB/request. Batch 64 therefore uses about 14 GB weights + 64 GB KV = 78 GB before runtime reserve. Practical diminishing returns begin around the measured batch-64 regime because capacity and runtime headroom block much larger batching before the ridge point is reached.'
+  common_mistake: |
+    **The Pitfall:** Assuming throughput should scale linearly with batch size indefinitely.
+    **The Rationale:** Candidates know that larger batches are more efficient but fail to distinguish between the memory-bound regime (where linear scaling occurs) and the compute-bound regime (where throughput saturates).
+    **The Consequence:** Over-provisioning batch size beyond the ridge point, leading to OOM errors or unacceptable latency without meaningful throughput gains.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 7B model at FP16 = 14 GB weights.
+    - H100 hardware: 3.35 TB/s memory bandwidth, 989 TFLOPS compute.
+    - KV cache estimate for a 7B-style 32-layer, 4096-hidden FP16 model: 2 tensors (K,V) * 32 layers * 4096 values * 2 bytes ≈ 0.5 MB/token, or about 1 GB/request at 2K context.
+    - Total VRAM: 80 GB.
+
+    **Calculations:**
+    - Batch=1 decode proxy: one generated token does about 2 × 7B multiply-add FLOPs = 14 GFLOPs while streaming about 14 GB of FP16 weights, so AI ≈ 1 FLOP/Byte.
+    - Batch=B decode reuses the same streamed weights across B token positions, so the proxy AI scales to about B FLOPs/Byte until other traffic and kernel effects dominate.
+    - Hardware Ridge Point: 989 TFLOPS / 3.35 TB/s ≈ 295 FLOPs/Byte.
+    - VRAM capacity at Batch 64: 14 GB (weights) + (64 * 1 GB KV cache) = 78 GB before runtime reserve.
+
+    **Conclusion & Interpretation:**
+    - **Result: Practical diminishing returns around B≈64 on this setup (VRAM-Capacity-Bound)**. Throughput improves because weight reads are amortized across the batch, but KV-cache capacity and runtime reserve block useful scaling before the theoretical ridge point at B≈295.
+  options:
+    - Throughput increases because memory bandwidth scales linearly with batch size. Diminishing returns start at batch 64.
+    - Throughput increases because the GPU caches the weights in SRAM. Diminishing returns start at batch 1024 when SRAM is full.
+    - Throughput increases because the workload shifts from compute-bound to memory-bound. Diminishing returns start at batch 128 due to KV-cache limits.
+    - Throughput increases by reusing weight reads from HBM, increasing arithmetic intensity. Practical diminishing returns start around batch 64 due to KV-cache VRAM limits, even though the ridge point is near batch 295.
+  correct_index: 3
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

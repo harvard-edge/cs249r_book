@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-2457
+track: cloud
+level: L5
+zone: evaluation
+topic: roofline-analysis
+competency_area: compute
+bloom_level: evaluate
+phase: both
+title: System-Prompt Prefix Caching
+scenario: Your B2B summarization service prepends a complex 1500-token system prompt to every 500-token user document. The cluster handles 200 QPS. Profiling shows that computing the prefill for the 1500-token prompt dominates the cluster's GPU time. You decide to implement RadixAttention (Prefix Caching) to reuse the KV cache of the system prompt.
+question: What are the benefits and costs of using RadixAttention prefix caching for the shared 1500-token system prompt?
+details:
+  realistic_solution: Prefix caching presents a tradeoff between prefill compute reduction and GPU memory capacity. By retaining the KV cache of the 1500-token system prompt in VRAM, you completely bypass the compute-heavy prefill phase for those tokens. However, this cached prefix permanently occupies VRAM on every replica, slightly lowering the maximum possible continuous batch size.
+  common_mistake: |
+    **The Pitfall:** Assuming prefix caching has zero architectural downsides.
+    **The Rationale:** Caching saves massive compute time immediately, blinding engineers to memory constraints.
+    **The Consequence:** Ignoring that persistent cache blocks consume VRAM permanently, lowering the available pool for dynamic generation and peak batch sizes.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Shared prefix length: 1500 tokens.
+       - Llama-3-70B-style KV layout: 80 layers, 8 KV heads, 128 head_dim, FP16.
+       - Cluster load: 200 QPS.
+    2. **Calculations:**
+       - KV footprint per token = 2 (K,V) * 80 layers * 8 KV heads * 128 head_dim * 2 bytes = 327,680 bytes ≈ 320 KiB/token.
+       - Prefix-cache memory cost = 1500 * 327,680 bytes = 491,520,000 bytes ≈ 492 MB per replica.
+       - The cached KV represents the output of the full 1500-token prefix prefill, including attention over the prefix and layer MLP/projection work.
+       - Prefix caching avoids recomputing that shared prefix on cache hits; the exact FLOPs saved depend on model architecture, implementation, and prompt batching, so it should be measured from profiler counters rather than inferred from a simple parameter-count formula.
+       - At 200 QPS and high prefix-cache hit rate, even a millisecond-scale prefill saving per request becomes a large fleet-level throughput gain; the 492 MB persistent VRAM cost is the concrete capacity tradeoff to budget per replica.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Memory Tradeoff.** Prefix caching can remove a large amount of repeated prefill work, but it consumes persistent VRAM per replica and the two resources should be evaluated separately against throughput, batch-size, and cache-hit-rate targets.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,45 @@
+schema_version: '1.0'
+id: cloud-4018
+track: cloud
+level: L5
+zone: realization
+topic: congestion-control
+competency_area: networking
+bloom_level: create
+phase: both
+title: Throughput Impact of PFC Storms
+scenario: Your 256-A100 cluster experiences PFC storms lasting 2ms on average, occurring once per minute per ToR on average. Each storm pauses all 8 GPU ports on the affected ToR. Training uses synchronous data-parallel SGD with AllReduce.
+question: What is the throughput impact of 2ms PFC storms once per minute per ToR in this 256-A100 synchronous AllReduce job?
+details:
+  realistic_solution: With 32 ToR switches (256 GPUs / 8 per ToR), the expected storm count is 32 per minute across the cluster. In synchronous AllReduce, a storm on any ToR can delay the global step if it overlaps the communication barrier. Under a conservative upper-bound model where all 32 storms are non-overlapping and each blocks a distinct step for the full 2ms, the stall budget is 32 × 2ms = 64ms per minute, or about 0.107% throughput loss. The realized impact can be lower if storms overlap or occur outside the critical barrier, and higher only if storms trigger retries, timeouts, or longer recovery than the 2ms pause window.
+  common_mistake: |
+    **The Pitfall:** Calculating the throughput impact by only looking at the direct time a single ToR is paused, ignoring the global synchronization semantics.
+    **The Rationale:** Engineers assume network stalls affect only the local rack's throughput, failing to model the cascading "barrier effect" inherent in synchronous AllReduce operations.
+    **The Consequence:** The team either dismisses synchronized stalls as local events or overstates the minute-level loss without checking whether storms overlap the actual AllReduce barrier.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 256 GPUs across 32 ToR switches (8 GPUs per ToR).
+    - PFC storm rate: 1 per minute per ToR. Duration: 2ms.
+    - Training uses synchronous AllReduce barrier.
+
+    **Calculations:**
+    - Expected cluster-wide storms: 32 ToRs × 1 storm/min = 32 storms/min.
+    - With a global barrier, a 2ms delay on ANY ToR delays ALL 256 GPUs.
+    - Upper-bound stalled time per minute, assuming no overlap and every storm blocks a distinct step: 32 storms * 2ms = 64ms/min.
+    - Upper-bound direct loss: 64ms / 60,000ms = 0.00107 = 0.107%.
+    - Overlapping storms or storms outside the barrier reduce direct stall time; retries or watchdog recovery can increase it.
+
+    **Conclusion & Interpretation:**
+    - **Result: About 0.107% direct throughput loss as a rough non-overlap upper bound (Network-Bound)**. The exact impact depends on step timing, overlap, and whether the pause causes longer protocol recovery.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 13
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview

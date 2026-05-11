@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: tinyml-0714
+track: tinyml
+level: L4
+zone: diagnosis
+topic: mcu-compute-constraints
+competency_area: memory
+bloom_level: analyze
+phase: inference
+title: MCU Flash Wear Monitoring
+scenario: A fleet of environmental monitors logs 1 Hz inference outputs (64 bytes each) to a 64 KB reserved flash partition rated for 100,000 P/E cycles. The devices are targeted for a 10-year deployment.
+question: How should the circular flash log be designed so the ML output cadence stays within the 10-year endurance budget?
+details:
+  realistic_solution: Preserve endurance by reducing the logical logging rate and distributing erases across the partition. Aggregate the 1 Hz outputs into one compact summary per minute, append summaries sequentially in erase-block-aligned records across all sixteen 4 KB sectors, and rotate/compact sectors so no metadata or tail block becomes hot. This keeps each erase block's idealized average P/E count far below the 100,000-cycle limit over 10 years; byte totals alone are not the governing metric.
+  common_mistake: |
+    **The Pitfall:** Assuming 100,000 Program/Erase cycles is a practically infinite limit for embedded systems.
+    **The Rationale:** Candidates assume theoretical perfect flash translation layer (FTL) wear leveling, utterly ignoring high-frequency block churn.
+    **The Consequence:** Device silicon degrades structurally within ~3 years, precipitating catastrophic total fleet hardware failure long before the 10-year mark.
+  napkin_math: |
+    **Assumptions & Constraints:**
+       - Flash partition: 64 KB (Sixteen 4 KB sectors). Endurance limit: 100,000 P/E cycles.
+       - Default logging rate: 1 inference/sec, 64 bytes.
+
+    **Calculations:**
+       - Naive Sequential Output: 1 * 64 bytes * 86,400 sec = 5,529,600 bytes/day = ~5.27 MiB/day.
+       - Partition capacity: 64 KiB = sixteen 4 KiB sectors.
+       - Naive erase cycles across the partition: 5.27 MiB/day / 64 KiB = ~84.4 full-partition wraps/day.
+       - Naive P/E Load: each sector is erased ~84.4 times/day under even circular wear leveling.
+       - Naive Lifespan: 100,000 / 84.4 = ~1185 days (~3.25 years, fails 10-year target).
+       - Minutely Aggregation Design: 1 summary/min * 32 bytes * 1440 min/day = 46,080 bytes/day = 45 KiB/day.
+       - Aggregated full-partition wraps: 45 KiB/day / 64 KiB = 0.703 wraps/day.
+       - With erase-block-aligned appends and even sector rotation, the idealized average P/E load is ~0.703 cycles/sector/day.
+       - Aggregated 10-year load: 0.703 * 3650 days = ~2566 P/E cycles per sector.
+
+    **Conclusion & Interpretation:**
+       - **Result: 1-minute aggregation consumes about 2566 P/E cycles per sector over 10 years, well below the 100,000-cycle budget (Endurance-Bound).**
+  options:
+    - Flash has 100,000 write cycles — at 1 inference/second, that's enough for 100,000 seconds = 27.8 hours of operation before the flash wears out.
+    - 'At 1 Hz with 64 bytes/inference, the log writes ~5.27 MiB/day. Across a 64 KiB partition with even circular wear leveling, that is ~84.4 full-partition wraps/day, so each 4 KB sector sees ~84.4 P/E cycles/day and reaches 100K endurance in ~3.25 years. Fix: aggregate into 1-minute summaries of 32 bytes each, reducing writes to 45 KiB/day = 0.703 P/E cycles/sector/day = ~2,566 cycles over 10 years.'
+    - Flash endurance is determined only by total bytes written. 64 bytes x 86,400 inferences/day x 3,650 days = 20.2 GB, so compare byte totals and ignore which 4 KB erase blocks are being cycled.
+    - Use the ESP32's built-in wear leveling library, which automatically distributes writes across all flash sectors, ensuring uniform wear and guaranteeing the 10-year lifetime regardless of inference output size.
+  correct_index: 1
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+math_verified: true
+math_status: CORRECT

@@ -1,0 +1,56 @@
+schema_version: '1.0'
+id: mobile-0536
+track: mobile
+level: L3
+zone: diagnosis
+topic: interconnect-topology
+competency_area: networking
+bloom_level: apply
+phase: inference
+title: The Laggy Mobile Video Filter
+scenario: You are a Mobile ML Engineer for an app that applies a real-time generative AI filter to a user's video stream. The app requires a cloud backend for the heavy computation. You are debugging a critical latency issue where the P99 round-trip time is 150ms, far exceeding your 50ms budget for a smooth real-time feel.
+question: What backend topology problem most likely explains the 150ms P99 latency for the cloud-based mobile video filter?
+details:
+  realistic_solution: The most likely cause is a lack of topology awareness in the Kubernetes scheduler. The two GPUs in the model's pipeline are being scheduled on different physical servers. This forces a large intermediate activation tensor to traverse the inter-server fabric and host/network stack instead of staying on an intra-server NVLink path, adding enough communication time to dominate the P99 latency budget.
+  common_mistake: |
+    **The Pitfall:** Treating all available backend GPUs as interchangeable compute slots.
+    **The Rationale:** Engineers may scale the service by letting the orchestrator place pipeline stages anywhere in the cluster, missing that adjacent model stages need GPU affinity on the same NVLink-connected server.
+    **The Consequence:** Large activation tensors cross the inter-server fabric on tail requests, so the team wastes time tuning kernels while the real fix is topology-aware placement.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Total P99 round-trip latency: 150ms.
+    - Known latencies: 10ms device + 40ms network RTT + 20ms GPU compute = 70ms.
+    - Intermediate activation transfer: ~2GB.
+    - Effective cross-server GPU-to-GPU throughput after protocol, scheduling, and contention overhead: ~25 GB/s.
+    - Intra-server NVLink-class transfer path: hundreds of GB/s.
+
+    **Calculations:**
+    - Unaccounted latency = 150ms - 70ms = 80ms.
+    - Cross-server activation transfer = 2GB / 25 GB/s = 0.08s = 80ms.
+    - The same 2GB over a 300 GB/s local GPU path would be about 6.7ms before overhead.
+
+    **Conclusion & Interpretation:**
+    - **Result: 80ms Inter-Server Transfer Penalty.** The latency gap is consistent with a topology placement bug that sends large intermediate activations across servers instead of keeping the pipeline on locally connected GPUs.
+  options:
+    - The mobile client's 5G connection has high jitter, causing unpredictable packet delays.
+    - The data transfer from the server's network card to the GPU over the PCIe bus is the primary bottleneck.
+    - The backend orchestrator is placing the two model GPUs on different servers, forcing traffic over the slower InfiniBand network instead of NVLink.
+    - The H100 GPU is running too hot under load and is being thermally throttled, increasing inference time.
+  correct_index: 2
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

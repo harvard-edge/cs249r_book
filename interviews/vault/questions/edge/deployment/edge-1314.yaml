@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: edge-1314
+track: edge
+level: L5
+zone: evaluation
+topic: compound-ai-systems
+competency_area: deployment
+bloom_level: evaluate
+phase: both
+title: Heterogeneous Model Routing on Jetson Orin
+scenario: We are deploying a multi-model inspection pipeline on an NVIDIA Jetson Orin. The system features a 2B parameter vision-language router model (INT8) and an 8B specialized diagnostic LLM (INT4). The system must maintain a strict 150ms end-to-end latency budget per inference.
+question: Between running both models sequentially on the Ampere GPU (Architecture A) or pinning the router to the DLA and the LLM to the GPU (Architecture B), which architecture is better and why?
+details:
+  realistic_solution: Architecture B is better for the 150ms budget because it avoids serializing both models on the GPU and isolates the small INT8 router from the LLM's GPU memory and scheduling pressure. Architecture A can appear close to the budget on average, but adding router execution, GPU handoff overhead, and contention leaves little margin. Pinning the router to the DLA lets the router and LLM overlap where possible and keeps the GPU dedicated to the memory-heavy LLM decode path.
+  common_mistake: |
+    **The Pitfall:** Choosing Architecture A to maximize peak TOPS.
+    **The Rationale:** Candidates assume the Ampere GPU's higher peak performance yields the fastest sequential execution, ignoring memory bandwidth contention and context-switching overhead.
+    **The Consequence:** Pipeline handoffs cause latency spikes exceeding the 150ms budget due to constant weight swapping.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Memory: 32 GB LPDDR5 (~204 GB/s bandwidth).
+    - Target budget: 150ms end-to-end.
+    - Per request: router runs once; LLM generates 5 tokens.
+    - Estimated GPU scheduling/context handoff if both models share the GPU: 15 ms.
+    - Estimated non-weight compute/kernel time: router 15 ms, LLM 110 ms for 5 tokens.
+
+    **Calculations:**
+    - One full LLM weight sweep lower bound: 4.5 GB / 204 GB/s = 22 ms. This is a bandwidth floor, not automatically 22 ms per token unless the weights are reread from DRAM for each token.
+    - Router weight-read lower bound: 2.0 GB / 204 GB/s = 9.8 ms.
+    - Architecture A serialized estimate: router (15 ms) + GPU handoff (15 ms) + LLM decode (110 ms) = 140 ms, before contention jitter.
+    - Architecture B overlapped estimate: max(router on DLA 15 ms, LLM on GPU 110 ms) plus pipeline overhead ≈ 110-125 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: Architecture B has materially more latency margin (Scheduling and Memory-Contention Bound)**. The calculation distinguishes bandwidth floors from per-token inference time; B is preferred because it avoids GPU serialization and contention rather than because weight reads alone prove A impossible.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

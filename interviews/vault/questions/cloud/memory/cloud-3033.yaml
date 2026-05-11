@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-3033
+track: cloud
+level: L6+
+zone: mastery
+topic: model-size-estimation
+competency_area: memory
+bloom_level: evaluate
+phase: both
+title: 'Model Size Estimation: Master Full Memory Budget for LLM Training on H100'
+scenario: You are training a 13B parameter model on H100s with batch size 4, sequence length 2048, using AdamW in BF16 with FP32 optimizer states. You use gradient checkpointing.
+question: What is the full GPU memory budget including weights, gradients, optimizer states, and activations, and does it fit on a single H100?
+details:
+  realistic_solution: 'Weights BF16: 13B × 2 bytes = 26GB. Gradients BF16: 13B × 2 bytes = 26GB. AdamW FP32 moments (m + v): 13B × 4 bytes × 2 = 104GB. Under this BF16 formulation no separate FP32 master weights are assumed; if they are required, add another 52GB. The single-GPU model-state total is 26+26+104 = 156GB before activations, already far above an 80GB H100. Gradient-checkpointed activations add about 1.2GB for batch 4 and sequence 2048 under this estimate, so the full single-GPU budget is about 157.2GB plus framework workspace and fragmentation headroom. It does not fit on a single H100.'
+  common_mistake: |
+    **The Pitfall:** Forgetting the optimizer states and completely missing the FP32 inflation multiplier.
+    **The Rationale:** Candidates often equate model size (13B) directly with memory (26GB), ignoring that AdamW retains historical momentum and variance for every parameter, typically in FP32 to preserve precision.
+    **The Consequence:** Underestimating the true memory footprint by an astronomical 104GB, guaranteeing an instant OOM exception and a completely unworkable training plan.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 13B params, batch 4, seq 2048, BF16 weights/gradients, AdamW FP32 moments.
+    - No separate FP32 master weights are included; add 52GB if the training stack keeps them.
+
+    **Calculations:**
+    - BF16 weights: 13B * 2 bytes = 26 GB.
+    - BF16 gradients: 13B * 2 bytes = 26 GB.
+    - AdamW FP32 moments: 13B * 2 moments * 4 bytes = 104 GB.
+    - Single-GPU model states: 26 + 26 + 104 = 156 GB.
+    - Checkpointed activations: ~1.17 GB.
+    - Single-GPU training budget: 156 + 1.17 = 157.17 GB, before framework workspace/headroom.
+
+    **Conclusion & Interpretation:**
+    - **Result: Single-GPU OOM**. Full AdamW training needs about 157GB before runtime headroom, so it does not fit on one 80GB H100; a stack with FP32 master weights would need about 209GB.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-4464
+track: cloud
+level: L4
+zone: design
+topic: recommendation-systems-engineering
+competency_area: architecture
+bloom_level: apply
+phase: inference
+title: Embedding Table Sharding Strategy for 10TB Feature Space
+scenario: A production recommendation system has 50 embedding tables totaling 10TB. The largest table has 2B rows x 64-dim float32 (512GB). You have 128 GPUs each with 80GB HBM.
+question: How would you shard 50 embedding tables totaling 10TB across 128 GPUs, including the 512GB largest table?
+details:
+  realistic_solution: |
+    Use a hybrid placement plan driven first by capacity and then by access skew. The 128 GPUs provide 10.24TB raw HBM, so a 10TB embedding set leaves only about 240GB for metadata, optimizer-free serving state, and imbalance; target roughly 78GB/GPU and avoid full replication. Put the 512GB largest table on 8 GPUs with row-wise sharding: 2B rows / 8 = 250M rows per GPU, or 64GB per GPU. Place other very large tables in row-wise GPU groups sized so each shard stays below about 75GB. Pack small and medium tables table-wise onto the remaining capacity using bin packing by table size and lookup rate, reserving headroom for hot-row caches. Replicate only tiny hot tables or top hot rows where the extra memory is bounded and removes all-to-all traffic. Column-wise sharding is a fallback for very wide tables, not the default for the full 10TB plan.
+  common_mistake: |
+    **The Pitfall:** Sharding all tables uniformly across all GPUs.
+    **The Rationale:** Candidates treat embedding tables as uniform memory blocks, ignoring power-law access distributions where the top 0.1% of rows receive 10% of lookups.
+    **The Consequence:** Creating immense all-to-all network traffic and massive compute load imbalances because hot rows are arbitrarily scattered across the cluster.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Total tables: 10TB across 128 GPUs with 80GB HBM each.
+    - Largest table: 512GB with 2B rows and 64 float32 dimensions.
+    - Keep several GB per GPU for runtime headroom, so target less than 80GB of embeddings per GPU.
+
+    **Calculations:**
+    - Raw capacity: 128 * 80GB = 10.24TB.
+    - Average placement required: 10TB / 128 = 78.125GB/GPU, leaving about 1.875GB/GPU on average.
+    - Largest table on 8 GPUs: 512GB / 8 = 64GB/GPU.
+    - Largest-table row split: 2B rows / 8 = 250M rows/GPU.
+    - The largest-table group has 8 * (80GB - 64GB) = 128GB of spare raw HBM before runtime headroom.
+    - Remaining tables require about 9.49TB. If isolated on only 120 GPUs they average about 79GB/GPU, leaving too little headroom.
+    - Feasible packing must use all 128 GPUs as bins: keep the largest table at 64GB/GPU on its 8-GPU group, pack roughly 100GB of small cold tables into that group's spare capacity, and size other row-sharded groups so each GPU stays below the operational target.
+    - Hot-row replication must be explicitly budgeted, for example 0.5GB/GPU costs 64GB cluster-wide and should replace, not add to, unbounded table replication.
+
+    **Conclusion & Interpretation:**
+    - **Result: capacity is tight and requires hybrid sharding plus bin packing.** Row-wise shard large tables into groups under the per-GPU HBM target, bin-pack small tables into group spare capacity, and reserve only bounded hot-row or tiny-table replication.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

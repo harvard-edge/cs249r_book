@@ -1,0 +1,67 @@
+schema_version: '1.0'
+id: cloud-2285
+track: cloud
+level: L6+
+zone: mastery
+topic: extreme-quantization
+competency_area: deployment
+bloom_level: create
+phase: both
+title: The Full-Stack Compression Audit
+scenario: 'You inherit a production serving system for a 30B parameter LLM. The previous team applied the following compression techniques in this order: (1) LoRA fine-tuning on domain data, (2) unstructured magnitude pruning to 40% sparsity, (3) GPTQ 4-bit quantization, (4) knowledge distillation from the original 30B into the compressed model. The system works but quality is significantly below expectations. You are asked to audit the compression pipeline and redesign it from first principles.'
+question: What is wrong with the current compression pipeline, and how would you redesign it from first principles?
+details:
+  realistic_solution: |
+    There are at least 5 critical errors in the existing pipeline:
+
+    **Error 1: LoRA before pruning.** LoRA adapters modify the weight matrices by adding low-rank updates ($W + BA$). Pruning after LoRA is not automatically invalid, but it can remove or distort dimensions the adapter used for the domain update, especially if the adapters are merged before pruning. Fix: decide the target compressed structure first, then fine-tune or apply LoRA against that structure.
+
+    **Error 2: Unstructured pruning.** 40% arbitrary unstructured sparsity usually gives little or no speedup in dense Tensor Core GEMM paths unless the serving stack uses sparsity-aware kernels and storage. You paid an accuracy cost without guaranteeing a latency benefit. Fix: use structured pruning (remove entire heads/FFN dimensions) or a hardware-supported sparse pattern such as 2:4 when the runtime actually exploits it.
+
+    **Error 3: Quantization after unstructured pruning.** GPTQ can quantize pruned weights, but quantization quality depends on the post-pruning distribution and calibration data. Sparse zeros mixed into otherwise dense matrices can make the optimization less useful if the runtime still stores and multiplies them densely. Fix: prune into a deployable structure, recover quality, then quantize the final dense or hardware-supported sparse model with representative calibration data.
+
+    **Error 4: Distillation last.** Distillation is most useful while the compressed model still has trainable full-precision weights or adapters. If it is attempted only after final INT4 quantization and adapter merging, the update path is limited and recovery is harder. Fix: distill during the recovery fine-tune before final quantization; optionally use QAT or adapter tuning only if the deployment stack supports it.
+
+    **Error 5: No intermediate accuracy checkpoints.** Without measuring accuracy after each step, you can't tell which technique caused the 12% degradation.
+
+    **Correct pipeline:**
+    1. Choose a deployable compression target: structured pruning or hardware-supported sparsity, with latency measured in the serving runtime.
+    2. Prune the full-precision base model using importance scores and remove the structure physically where applicable.
+    3. Recover quality with supervised fine-tuning and/or knowledge distillation from the original 30B teacher.
+    4. Apply LoRA only if additional domain specialization is still needed, then merge it into the recovered model if the quantizer expects merged weights.
+    5. Apply GPTQ/AWQ 4-bit quantization last, calibrated on representative domain data.
+    6. Validate accuracy, latency, and memory after each step with rollback criteria.
+  common_mistake: |
+    **The Pitfall:** Fixing one isolated issue, like changing unstructured to structured pruning.
+    **The Rationale:** Candidates fail to realize the entire pipeline ordering and technique selection is fundamentally broken.
+    **The Consequence:** The pipeline remains flawed, and the compressed model suffers severe accuracy degradation with little to no performance gain.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 30B parameter LLM.
+       - Original size: ~60 GB.
+       - Current system has significant quality loss, but no reliable per-step checkpoints.
+    2. **Calculations:**
+       - FP16 baseline size: 30B * 2 bytes = 60 GB.
+       - Dense INT4 size after quantization: 30B * 0.5 bytes = 15 GB before scales, metadata, KV cache, and runtime overhead.
+       - Nominal 40% sparsity would leave 18B nonzero weights, but unstructured masks only reduce deployed weight storage/latency if the runtime stores sparse blocks and uses sparse kernels. On dense GEMM kernels, executed MACs remain close to the dense 30B-parameter path.
+       - Correct checkpoint flow: baseline 60 GB and baseline quality/latency -> deployable pruned or structured-sparse model with measured latency -> recovered/distilled full-precision model with quality delta -> optional domain LoRA merge with quality delta -> INT4 model around 15 GB plus metadata with final quality/latency.
+       - Each transition needs rollback criteria, for example no more than a small allowed quality loss after pruning/recovery and a measured serving-speed gain before accepting the structure.
+    3. **Conclusion & Interpretation:**
+       - **Result: Pipeline-ordering-bound.** Redesign around deployable structure, recovery/distillation before final quantization, and measured checkpoints rather than invented additive accuracy or throughput estimates.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

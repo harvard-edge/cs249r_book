@@ -1,0 +1,42 @@
+schema_version: '1.0'
+id: tinyml-0738
+track: tinyml
+level: L5
+zone: evaluation
+topic: quantization-fundamentals
+competency_area: precision
+bloom_level: evaluate
+phase: inference
+title: The Per-Channel Trade-off
+scenario: Your per-tensor quantized keyword spotting model loses 5% accuracy going from FP32 to INT8. Switching to per-channel quantization recovers 3%. Your colleague says 'always use per-channel — it's strictly better.'
+question: Why might an MCU still choose per-tensor quantization after per-channel recovers only 3% accuracy?
+details:
+  realistic_solution: |
+    Per-channel quantization assigns separate weight scales per output channel, usually with per-tensor activations on MCU inference paths. The accuracy benefit comes from each channel having its own weight range. However, the cost is backend-dependent: kernels may need extra scale loads, wider accumulators, and per-channel requantization work. If the backend lacks a fast per-channel path or the latency/SRAM margin is tight, the recovered 3% accuracy may not justify the added memory traffic and kernel complexity.
+  common_mistake: |
+    **The Pitfall:** Assuming more quantization parameters is strictly better.
+    **The Rationale:** Candidates see an accuracy boost in benchmarks and ignore the hardware cost of loading distinct scales/zero-points for every channel.
+    **The Consequence:** The overhead of metadata storage and extra per-element memory lookups causes the system to miss real-time inference deadlines.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Network: 20 layers, 64 output channels each.
+    - Common MCU setup: per-channel weight scales with per-tensor activations.
+    - Deadline: ~90ms latency budget.
+    - Per-tensor baseline: 85ms.
+
+    **Calculations:**
+    - Per-tensor metadata example: (1 scale * 4 bytes + 1 zero-point * 4 bytes) * 20 = 160 bytes.
+    - Per-channel weight-scale metadata example: 64 scales * 4 bytes * 20 = 5120 bytes = 5 KB; including per-channel zero-points would double this, but many weight-only schemes do not require them.
+    - Latency impact is not universal. It depends on whether CMSIS-NN or the chosen backend has optimized per-channel requantization for the exact layer shapes.
+    - Timing margin: 90ms - 85ms = 5ms, so overhead above 5/85 = ~5.9% misses the deadline.
+
+    **Conclusion & Interpretation:**
+    - **Result: per-tensor may be the right latency-bound choice.** Per-channel is not strictly better; it should be used when measured accuracy gain fits the backend's latency, SRAM, and metadata budget.
+  options:
+    - Always use per-channel quantization — it's strictly better because it recovers 3% accuracy with no downsides on any hardware.
+    - '''Per-channel often improves accuracy, but on an MCU it can add scale metadata, memory traffic, and per-channel requantization work unless the backend has a fast supported path. With an 85ms per-tensor baseline and a 90ms deadline, even a modest overhead can erase the timing margin. Choose per-tensor when latency or SRAM is tight; choose per-channel when the measured backend cost fits the budget.'''
+    - Per-tensor is always better on MCUs because the single scale/zero-point fits in a register, so optimized kernels never need extra loads or requantization work.
+    - The 3% accuracy recovery from per-channel is a benchmark artifact — in real-world deployment on MCUs, per-channel and per-tensor achieve identical accuracy because the quantization noise is dominated by other factors.
+  correct_index: 1
+status: published
+provenance: imported

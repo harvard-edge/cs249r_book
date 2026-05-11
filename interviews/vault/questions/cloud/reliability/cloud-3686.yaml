@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-3686
+track: cloud
+level: L4
+zone: diagnosis
+topic: scheduling-resource-management
+competency_area: reliability
+bloom_level: evaluate
+phase: inference
+title: Preemption Overhead in Long-Running Training Jobs
+scenario: A 3-day LLM pre-training job on 128 GPUs is being preempted every 4 hours by higher-priority jobs. Each preemption triggers a checkpoint save and reload that takes 18 minutes (checkpoint is 1.2 TB across 128 GPUs, written to NFS). The job is completing 30% slower than scheduled.
+question: How much overhead do the 4-hour preemptions and 18-minute NFS checkpoints add, and how would you reduce it?
+details:
+  realistic_solution: 'The scheduled preemptions add 18 × 18 minutes = 5.4 hours of checkpoint/restart overhead, or 7.5% on a 72-hour baseline. Reduce it with sharded asynchronous checkpointing: each rank writes its shard to local NVMe or a distributed checkpoint store, training resumes from the local shard, and upload to object storage happens in the background. Also checkpoint incrementally so preemption only flushes recent deltas instead of blocking on a full 1.2 TB NFS write.'
+  common_mistake: |
+    **The Pitfall:** Saving the full checkpoint synchronously through one shared NFS path during every preemption.
+    **The Rationale:** Candidates rely on standard file system paradigms, ignoring that a shared NFS mount can serialize distributed checkpoint writes and become the bottleneck.
+    **The Consequence:** Turning high-performance compute into I/O-bound bottlenecks, drastically increasing preemption downtime.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Preemption Frequency: 72h / 4h = 18 preemptions.
+    - I/O Overhead per Preemption: 18 min = 0.3h.
+    - Baseline job length: 72h.
+    - Observed slowdown: +30%.
+
+    **Calculations:**
+    - Total I/O Overhead: 18 * 0.3h = 5.4h.
+    - Direct checkpoint overhead: 18 × 0.3h = 5.4h.
+    - Expected time from checkpoint overhead alone: 72h + 5.4h = 77.4h.
+    - Percent overhead from checkpoints: 5.4h / 72h = 7.5%.
+    - A 30% slowdown would be 72h × 0.30 = 21.6h, so about 16.2h must come from other restart, queueing, or warmup effects.
+
+    **Conclusion & Interpretation:**
+    - **Result: Checkpoint-I/O Bound.** The stated NFS checkpoint cost explains 7.5% overhead directly; sharded async local checkpointing targets that cost, while the remaining observed slowdown needs separate restart and scheduling analysis.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

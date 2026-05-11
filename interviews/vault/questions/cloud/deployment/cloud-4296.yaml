@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-4296
+track: cloud
+level: L5
+zone: realization
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: evaluate
+phase: inference
+title: 80GB vs 192GB GPU Decode Pool Sizing
+scenario: You are choosing the GPU for your decode pool in a disaggregated serving deployment for a 70B FP16 model. You must compare an 80GB GPU against a 192GB GPU.
+question: For a 70B FP16 decode pool, how do the two GPUs compare on concurrency and token throughput, and which is better?
+details:
+  realistic_solution: |
+    Model weights for 70B FP16 are about 140 GB. The 80GB option needs TP=2, so each GPU stores about 70 GB of weights and has about 10 GB left for KV; the two-GPU pool has 20 GB total free KV memory. Assume TP shards KV across the two GPUs, so a sequence needing 1.5 GB total KV consumes 0.75 GB on each GPU and the pair supports about 13 sequences. The 192GB option fits the whole model on one GPU and leaves about 52 GB for unsharded KV, or about 34 sequences. A simple decode roofline should be computed from the per-GPU shard read: the TP=2 pair reads 70 GB per GPU per token, so 3.35 TB/s / 70 GB = about 47.9 tok/s per active sequence before TP communication overhead. The 192GB GPU reads the full 140 GB on one GPU, so 5.3 TB/s / 140 GB = about 37.9 tok/s per active sequence. At full KV capacity this gives roughly 623 tok/s per TP pair versus 1289 tok/s for the 192GB GPU. Choose the 192GB GPU when the objective is aggregate throughput and concurrency; choose TP=2 only if per-sequence latency is the priority and the extra GPU plus communication overhead are acceptable.
+  common_mistake: |
+    **The Pitfall:** Choosing the larger GPU purely for memory capacity without calculating bandwidth.
+    **The Rationale:** Knowing that decode is memory-bound, but forgetting that token generation throughput scales directly with memory *bandwidth*, not just capacity.
+    **The Consequence:** Failing to realize that higher capacity only provides higher aggregate throughput if the application has enough concurrent requests to utilize the deeper queues.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 70B parameters in FP16 = 140 GB.
+    - KV Cache per Sequence (4096 tokens, 96 layers, 8 heads, 128 dim): ~1.5 GB.
+    - GPU A: 80 GB capacity, 3.35 TB/s bandwidth. Requires Tensor Parallelism (TP=2).
+    - GPU B: 192 GB capacity, 5.3 TB/s bandwidth. Fits on 1 GPU.
+
+    **Calculations:**
+    - GPU A (TP=2) Free Memory: each GPU stores 70 GB of weights, leaving 10 GB/GPU and 20 GB per TP pair.
+    - With KV sharded by TP, a 1.5 GB sequence consumes 0.75 GB/GPU, so concurrency is 10 / 0.75 = ~13 sequences per TP pair.
+    - GPU A Throughput: each GPU reads its 70 GB weight shard per token, so 3.35 TB/s / 70 GB = 47.9 tok/s per active sequence before TP communication overhead.
+    - GPU A Aggregate: 47.9 tok/s/sequence * 13 sequences = 623 tok/s per 2-GPU pair, assuming enough requests and ideal TP overlap.
+    - GPU B Free Memory: 192 GB - 140 GB = 52 GB.
+    - GPU B Concurrency: 52 GB / 1.5 GB = ~34 sequences.
+    - GPU B Throughput: 5.3 TB/s / 140 GB = 37.9 tok/s per active sequence; 37.9 × 34 = 1289 aggregate tok/s.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Bandwidth-Bound**. Under these simplified assumptions, the 192GB GPU supports about 2.6x more concurrency and about 2.1x more aggregate decode throughput per pool. The TP=2 option has higher per-sequence roofline throughput, but it uses two GPUs, has lower KV capacity per pair, and pays TP communication overhead.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

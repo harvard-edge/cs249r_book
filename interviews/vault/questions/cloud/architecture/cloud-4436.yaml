@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-4436
+track: cloud
+level: L4
+zone: design
+topic: model-adaptation-systems
+competency_area: architecture
+bloom_level: apply
+phase: inference
+title: Adapter Versioning and Rollback in Production ML Systems
+scenario: A production system serving 100 LoRA adapters rolls out new adapter updates weekly. A deployment of adapter v23 causes a 5% increase in user complaint rate.
+question: How would you design adapter versioning and rollback so a bad LoRA adapter v23 can revert to v22 within 5 minutes?
+details:
+  realistic_solution: 'Adapter versioning system: (1) Object store (S3/GCS) stores all adapter versions in serialized format (safetensors): ~4MB per adapter per version. 100 adapters * 10 versions = 1GB storage, trivial cost. (2) Serving nodes maintain a signed version manifest and prefetch the previous known-good adapter version into local SSD or host memory before activating a new version. (3) Rollback API: PATCH /adapters/{adapter_id}/active_version changes the manifest pointer from v23 to v22, publishes it through the control plane, waits for serving nodes to acknowledge the new pointer, then drains in-flight v23 batches and loads v22 into the paged GPU adapter cache. If v22 is already prefetched, the mechanical swap is seconds; if a node must fetch from object storage, budget tens of seconds for retryable end-to-end propagation. (4) Blue-green/canary deployment routes 1% traffic to v23 first and keeps v22 warm until v23 passes automated complaint-rate checks.'
+  common_mistake: |
+    **The Pitfall:** Storing only the latest version of each adapter and relying on retraining to recover previous versions.
+    **The Rationale:** Treating adapters purely as ephemeral weights rather than versioned production artifacts.
+    **The Consequence:** Rollbacks take hours instead of minutes, violating SLAs and prolonging incident impact.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Adapter Size: ~4MB per version.
+       - Previous version is normally prefetched on each serving node.
+       - Rollback SLA: 5 minutes.
+    2. **Calculations:**
+       - Local hot-swap work: manifest pointer update, node acknowledgement, in-flight batch drain, and GPU adapter-cache update. Budget 30-60 seconds across the fleet.
+       - Cache-miss fallback: object-store fetch plus checksum and local cache write for a 4MB adapter is small in bandwidth terms, but production retries and propagation dominate; budget up to 60-90 seconds.
+       - Incident SLA with automated trigger: metric anomaly detection 60 seconds + rollback execution 60-90 seconds + verification 60 seconds = 3-3.5 minutes.
+       - Incident SLA with manual triage: reserve about 2 minutes for operator confirmation, leaving roughly 3 minutes for rollback and verification.
+    3. **Conclusion & Interpretation:**
+       - **Result: Control-Plane-Bound Rollback.** Versioned artifacts plus prefetching make the bytes easy; the 5-minute SLA is met by fast manifest propagation, acknowledgement, draining, and post-rollback verification.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

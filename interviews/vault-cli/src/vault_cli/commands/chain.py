@@ -112,8 +112,78 @@ def chain_show(
     console.print(table)
 
 
+@chain_app.command("audit")
+def chain_audit(
+    vault_dir: Path = typer.Option(Path("interviews/vault"), "--vault-dir"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
+    no_embeddings: bool = typer.Option(
+        False, "--no-embeddings",
+        help="Skip embedding-based drift score (faster; structural checks only)."
+    ),
+    sidecar: Path = typer.Option(
+        Path("interviews/vault/embeddings.npz"), "--sidecar",
+        help="Path to embedding sidecar (cached per-question vectors).",
+    ),
+    model: str = typer.Option(
+        "BAAI/bge-small-en-v1.5", "--model",
+        help="Sentence-transformer model. Calibrated default: bge-small."
+    ),
+) -> None:
+    """Audit chain integrity. Reports orphans, position drift, stale registry, and similarity drift."""
+    import json as _json
+
+    from vault_cli.chains import audit as audit_mod
+    from vault_cli.chains.embeddings import load_or_build
+
+    corpus = audit_mod.load_corpus(vault_dir)
+    store = None
+    if not no_embeddings:
+        store = load_or_build(list(corpus.values()), sidecar, model_name=model, progress=not json_output)
+
+    rep = audit_mod.run_audit(vault_dir, store=store)
+    if json_output:
+        typer.echo(_json.dumps(audit_mod.report_to_dict(rep), indent=2, default=str))
+    else:
+        typer.echo(audit_mod.format_text_report(rep))
+
+
+@chain_app.command("suggest")
+def chain_suggest(
+    vault_dir: Path = typer.Option(Path("interviews/vault"), "--vault-dir"),
+    json_output: bool = typer.Option(False, "--json"),
+    sidecar: Path = typer.Option(Path("interviews/vault/embeddings.npz"), "--sidecar"),
+    model: str = typer.Option("BAAI/bge-small-en-v1.5", "--model"),
+    tau_strong: float = typer.Option(0.85, "--tau-strong"),
+    tau_review: float = typer.Option(0.70, "--tau-review"),
+    top_k: int = typer.Option(5, "--top-k", help="Max candidates per orphan."),
+) -> None:
+    """Suggest rescue candidates for orphan singleton chains.
+
+    Outputs ranked candidates within each orphan's (track, topic) bucket.
+    Honors single-topic invariant + Bloom-monotonic level adjacency. Pure
+    embedding-based ranking — never auto-applies.
+    """
+    import json as _json
+
+    from vault_cli.chains import audit as audit_mod
+    from vault_cli.chains import rescue as rescue_mod
+    from vault_cli.chains.embeddings import load_or_build
+
+    corpus = audit_mod.load_corpus(vault_dir)
+    store = load_or_build(list(corpus.values()), sidecar, model_name=model, progress=not json_output)
+    rescues = rescue_mod.suggest_rescues(
+        vault_dir, store, tau_strong=tau_strong, tau_review=tau_review, top_k=top_k,
+    )
+    if json_output:
+        typer.echo(_json.dumps(rescue_mod.rescues_to_dict(rescues), indent=2, default=str))
+    else:
+        typer.echo(rescue_mod.format_rescue_report(rescues))
+
+
 def register(app: typer.Typer) -> None:
     app.add_typer(chain_app, name="chain")
+    # Also expose under "chains" plural for ergonomics — both work.
+    app.add_typer(chain_app, name="chains")
 
 
 __all__ = ["register"]

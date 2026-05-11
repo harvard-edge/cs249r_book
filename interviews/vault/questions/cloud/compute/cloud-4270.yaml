@@ -1,0 +1,44 @@
+schema_version: '1.0'
+id: cloud-4270
+track: cloud
+level: L5
+zone: design
+topic: chiplet-architecture
+competency_area: compute
+bloom_level: create
+phase: both
+title: Model Parallelism Partitioning for XCD Locality
+scenario: You are deploying a 70B parameter model on a single MI300X containing 8 independent XCD dies (192 GB total).
+question: How would you partition the 70B model across the 8 XCDs to maximize local memory access?
+details:
+  realistic_solution: Partition by contiguous transformer layer groups and place each group's weights, KV/cache state, and hot activation buffers on the XCD or XCD pair that executes that group. Prefer pipeline or tensor partitioning that preserves locality over round-robin all-to-all sharding across all 8 XCDs. Exact stage boundaries should be chosen from per-layer weight size, activation size, KV-cache footprint, and runtime overhead so no XCD exceeds its usable memory budget.
+  common_mistake: |
+    **The Pitfall:** Round-robin distributing weight shards across all XCDs (e.g., using FSDP indiscriminately).
+    **The Rationale:** Maximizing memory capacity utilization without considering the severe penalty of cross-XCD fabric bandwidth.
+    **The Consequence:** Every forward pass requires massive cross-XCD data movement, bottlenecking the unified package.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 70B params FP16: 140 GB.
+    - Hardware: 8 XCD dies, 192 GB total HBM.
+    - Exact layer count, activation sizes, KV-cache size, and runtime overhead are not specified.
+
+    **Calculations:**
+    - Average FP16 weight budget if balanced across 8 XCDs = 140 GB / 8 = 17.5 GB per XCD.
+    - Total non-weight headroom before optimizer/KV/activation/runtime overhead = 192 GB - 140 GB = 52 GB.
+    - Average remaining headroom = 52 GB / 8 = 6.5 GB per XCD-equivalent, so stage sizing must account for more than weights.
+    - All-to-all parameter sharding would require frequent remote gathers of layer weights or activations; contiguous layer placement limits cross-XCD traffic mainly to stage-boundary activations and any tensor-parallel collectives.
+
+    **Conclusion & Interpretation:**
+    - **Result: use locality-aware contiguous layer stages, then size stages from measured per-layer memory.** The simple 17.5 GB average shows weights can fit only with careful overhead budgeting; it does not justify arbitrary layer splits or an invalid per-layer FSDP traffic number.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview

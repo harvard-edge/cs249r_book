@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: mobile-0921
+track: mobile
+level: L3
+zone: design
+topic: fault-tolerance-checkpointing
+competency_area: reliability
+bloom_level: apply
+phase: training
+title: On-Device Training Checkpointing for Mobile Personalization
+scenario: An on-device personalization system trains nightly for 10 minutes and serves inferences asynchronously 24/7.
+question: How would you specify storage layout, checkpoint schedule, retention policy, and recovery paths for an on-device training system?
+details:
+  realistic_solution: Use two state families with explicit restore order. The serving path owns serving/latest.lora (4MB), a manifest, checksum, and base-model version; inference loads only this last completed adapter. The training path writes train/ckpt-<generation>-<minute>.tmp containing LoRA weights plus optimizer state, fsyncs it, then atomically renames it to a committed checkpoint. Checkpoint at minutes 0, 3, 6, 9 and final commit, retain the latest three committed training checkpoints during the nightly window, and promote only a verified final adapter to serving/latest.lora. On crash, load serving/latest.lora for inference, then resume training from the newest valid committed checkpoint; if all training checkpoints fail checksum, discard in-progress training and keep the previous serving adapter.
+  common_mistake: |
+    **The Pitfall:** Refusing to structurally separate the inference model state from the heavy training optimizer state.
+    **The Rationale:** Using standard server-side PyTorch checkpointing paradigms on a constrained mobile NAND flash system.
+    **The Consequence:** App restarts load massive 24MB optimizer states into RAM completely unnecessarily, wasting IO operations and risking background app eviction.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Base Model: 500 MB. Inference LoRA: 4 MB (FP32).
+    - Optimizer State (Adam): 24 MB.
+    - Checkpoint Frequency: minutes 0, 3, 6, 9, plus final commit at minute 10.
+    - Keep serving state separate from training state so 24/7 inference startup does not need optimizer state.
+
+    **Calculations:**
+    - Single Training Checkpoint Size: 4 MB (LoRA) + 24 MB (Optimizer) = 28 MB.
+    - Retaining the latest 3 committed training checkpoints gives recovery points at most about 3 minutes apart during the window.
+    - Worst-case lost training progress after a crash before final commit: about 3 minutes instead of the full 10-minute session.
+    - After final commit, the verified 4 MB LoRA adapter is promoted to the serving state and the optimizer checkpoints can be deleted or kept only until the next successful night.
+    - Storage footprint for rolling recovery: 28 MB * 3 = 84 MB.
+    - Serving startup reads only the 4 MB LoRA state, not the 28 MB training checkpoint.
+
+    **Conclusion & Interpretation:**
+    - **Result: Bounded Recovery With Small Serving State**. A 3-checkpoint rolling window costs 84 MB and bounds training loss to roughly 3 minutes, while decoupling serving weights from optimizer state keeps app restart and inference paths from loading unnecessary training data.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 9
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

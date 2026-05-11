@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: edge-1696
+track: edge
+level: L4
+zone: optimization
+topic: fairness-evaluation
+competency_area: cross-cutting
+bloom_level: analyze
+phase: both
+title: Optimizing Intersectional Fairness Evaluation
+scenario: You are deploying a biometric authentication system on an on-premise server powered by a Qualcomm Cloud AI 100. You need to continuously evaluate intersectional fairness (equalized odds) across 40 overlapping demographic subgroups on a rolling validation set of 1 million samples. Currently, the evaluation pipeline feeds each subgroup's data sequentially into the accelerator, which causes severe utilization drops and delays.
+question: How do you analyze this bottleneck and optimize the pipeline to ensure fairness metrics are calculated efficiently without exceeding the power budget or memory limits?
+details:
+  realistic_solution: Decouple neural network inference from subgroup metric aggregation. Pass the 1 million unique validation samples through the Qualcomm Cloud AI 100 in one highly batched INT8 stream, then export compact predictions, scores, and labels to the host. Compute equalized odds from per-subgroup true-positive and false-positive rates using binary subgroup membership masks. This avoids rerunning overlapping subgroup data, keeps accelerator utilization high, and keeps the power budget bounded by one inference pass plus lightweight host aggregation.
+  common_mistake: |
+    **The Pitfall:** Over-relying on data loaders or attempting simultaneous memory loads.
+    **The Rationale:** Candidates propose creating separate dataloaders for each of the 40 subgroups or loading all masks simultaneously to the device.
+    **The Consequence:** This causes severe host-to-device memory transfer bottlenecks or risks an OOM kill by exceeding capacity.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Hardware: Qualcomm Cloud AI 100-class accelerator with a fixed edge-server power envelope.
+    - Model throughput: 50,000 imgs/sec (based on 8 GOPS vision model).
+    - Dataset: 1 million unique validation samples, 40 subgroups.
+    - Stored host outputs: predicted label, true label, and two-class score per sample.
+
+    **Calculations:**
+    - Sequential subgroup inference work: 40 * 1,000,000 = 40,000,000 sample evaluations because groups overlap.
+    - Sequential inference time: 40,000,000 / 50,000 = 800 seconds.
+    - Single-pass inference time: 1,000,000 / 50,000 = 20 seconds.
+    - Host output storage: 1,000,000 * (2 FP32 scores * 4 bytes + 2 uint8 labels) ~= 10 MB before table overhead.
+    - Dense subgroup mask upper bound: 1,000,000 * 40 bits = 5 MB, or use sparse memberships if overlap is low.
+    - Power-budget effect: the accelerator runs one 20-second inference pass instead of 40 passes, so energy for inference drops by about 40x before host aggregation overhead.
+
+    **Conclusion & Interpretation:**
+    - **Result: single-pass equalized-odds evaluation**. Decoupling inference from aggregation drops accelerator time from ~800s to ~20s, stores only tens of MB of host-side outputs and masks, and avoids exceeding the power envelope by eliminating repeated subgroup inference.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

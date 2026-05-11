@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: edge-1931
+track: edge
+level: L4
+zone: optimization
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: analyze
+phase: both
+title: Reducing Transformer Attention Spikes on Edge Accelerators
+scenario: You are deploying a custom transformer-based language model for real-time intent recognition on an edge accelerator. The model has 50M parameters, 8 attention heads, 6 layers, and a hidden dimension of 512. Average sequence length is 256 tokens, but peak is 512 tokens. Processing peak 512-token sequences results in latency spikes (>200ms) and exceeds power limits.
+question: What bottlenecks cause 512-token latency and power spikes on the edge accelerator, and what quantified attention redesign would fix them?
+details:
+  realistic_solution: |
+    The root cause is the O(N^2) attention score computation and score-memory growth at N=512, combined with limited on-chip SRAM that forces attention intermediates or K/V tiles to spill to DRAM. A concrete redesign is sliding-window attention with a small number of global tokens for intent classification. With window size W=128, attention work scales as O(NW) instead of O(N^2), while the model still preserves local context and a global classification path. This does not make KV state magically O(1), but it reduces the active attention tile and score working set enough to keep more data on chip. The redesigned attention should be compiled as fused INT8 kernels, then validated against full attention on peak-length examples.
+  common_mistake: |
+    **The Pitfall:** Considering only overall model FLOPs and proposing generalized compute optimizations like increased INT8 quantization.
+    **The Rationale:** Failing to isolate the O(N²) quadratic scaling of the attention mechanism and the O(N) linear growth of the KV-cache as the specific bottlenecks at peak sequence lengths.
+    **The Consequence:** Implementing general optimizations that marginally improve average cases but still fail to meet hard real-time deadlines and power constraints for peak 512-token workloads.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 6 layers, D_model=512, 8 heads, D_head=64. Max Seq (N)=512.
+    - Memory math assumes compiled INT8 activations/K/V tensors at 1 byte/value; FP16 tensors would double these byte counts.
+    - Redesign: sliding-window attention with W=128 plus a global classification token.
+
+    **Calculations:**
+    - Standard Attention FLOPs (N=512): 4 * N^2 * D_model = 4 * 262,144 * 512 = 536M per layer. Total = 3.2 GFLOPs.
+    - Standard K/V working set for compiled INT8 tensors: 2 * N * D_model * 1 byte = 2 * 512 * 512 = 524 KB per layer before attention scores and other activations.
+    - Standard attention score tensor: N * N * 1 byte = 262 KB per layer if materialized.
+    - Sliding-window FLOPs: 4 * N * W * D_model = 4 * 512 * 128 * 512 = 134M per layer. Total = 805M FLOPs.
+    - Sliding-window score tensor: N * W * 1 byte = 512 * 128 = 64 KB per layer if materialized.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~4x Attention FLOP Reduction And Smaller Score Memory**. The fix targets the real N=512 bottleneck by reducing attention work and SRAM pressure without claiming a universal O(1) KV-cache.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

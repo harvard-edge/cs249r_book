@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: mobile-0072
+track: mobile
+level: L4
+zone: diagnosis
+topic: latency-decomposition
+competency_area: latency
+bloom_level: analyze
+phase: inference
+title: Snapdragon 8 Gen 3 Shared Resource Contention
+scenario: 'Your app runs three ML models simultaneously on a Snapdragon 8 Gen 3: always-on keyword detection (Sensing Hub), camera-based object detection (Hexagon NPU), and an LLM for text generation (CPU+GPU).'
+question: Why do camera detection and LLM decoding slow down together on Snapdragon 8 Gen 3 despite separate compute units, and how do you fix it?
+details:
+  realistic_solution: 'Separate compute units still share memory bandwidth, system-level cache, interconnect, and the thermal envelope. The LLM streams weights through the CPU/GPU path while camera detection uses the NPU, so both can slow when the shared LPDDR/SLC path and power budget saturate. Fix it by making camera inference the latency-critical workload: give it scheduling priority, cap or pause background LLM decoding during camera frames, reduce LLM bandwidth with smaller/quantized KV and weight formats, and monitor thermal headroom. Time-slicing is useful when it lowers overlap with camera inference; it is not magic unless the schedule actually preserves camera deadlines.'
+  common_mistake: |
+    **The Pitfall:** Assuming workloads on different compute units will not interfere with each other.
+    **The Rationale:** Candidates focus on compute isolation and ignore the impact of shared resources like memory bandwidth, SLC, and thermal limits.
+    **The Consequence:** Unexplained latency spikes and throughput drops due to resource contention.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - LLM demand: 3.5 GB * 8 tok/s = 28 GB/s.
+    - Available bandwidth: 51.2 GB/s.
+    - Camera detection baseline: 8 ms.
+
+    **Calculations:**
+    - No contention: 28 GB/s supports the target 8 tok/s LLM rate.
+    - Under contention, if the LLM effectively receives ~18 GB/s, throughput is 18 / 3.5 = ~5.1 tok/s.
+    - Under sustained thermal throttling, if effective LLM bandwidth falls to ~12 GB/s, throughput is 12 / 3.5 = ~3.4 tok/s.
+    - Camera detection can rise from 8 ms to ~25 ms when SLC misses, DRAM contention, and DVFS add roughly 17 ms of delay.
+    - A schedule that pauses or caps LLM decode during camera frames trades LLM throughput for bounded camera latency. The exact average LLM tok/s depends on the duty cycle chosen to meet the camera deadline.
+
+    **Conclusion & Interpretation:**
+    - **Result: Shared-Resource Bound**. The slowdown is caused by bandwidth/SLC/thermal contention, not lack of separate accelerators. The fix is priority scheduling and bandwidth reduction so camera deadlines are protected while background generation runs at a controlled lower rate.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

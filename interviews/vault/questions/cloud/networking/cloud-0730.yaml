@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-0730
+track: cloud
+level: L4
+zone: evaluation
+topic: compound-ai-systems
+competency_area: networking
+bloom_level: analyze
+phase: both
+title: '512-GPU FSDP Networking: InfiniBand NDR vs RoCE v2'
+scenario: Your company is building a new 512-GPU training cluster. The vendor offers InfiniBand NDR for $2.8M or RoCE v2 over standard Ethernet for $1.2M. Both claim lossless RDMA. Your workload is fine-tuning 70B models with FSDP across all 512 GPUs.
+question: Which networking option do you choose, and when does the cheaper option break down?
+details:
+  realistic_solution: 'For 512 GPUs doing FSDP, tail latency and operational predictability matter more than the RDMA label on the spec sheet. InfiniBand is usually the safer choice for large training fabrics because credit-based flow control, adaptive routing, congestion management, and mature tooling make it easier to keep collective latency stable under incast. RoCE v2 can work well beyond a single switch tier, but only when the Ethernet fabric is engineered and operated carefully: PFC and ECN must be tuned, buffers must be sized for burst patterns, congestion control must be validated, and operators must monitor pause storms and tail latency. Choose RoCE when cost pressure is high and the team can prove the fabric under realistic collectives; choose InfiniBand when training throughput, low jitter, and operational margin are worth the premium.'
+  common_mistake: |
+    **The Pitfall:** Assuming RoCE v2 is perfectly equivalent to InfiniBand because both support RDMA.
+    **The Rationale:** Engineers look at the spec sheet (lossless claim) and choose the cheaper option without understanding how Priority Flow Control (PFC) behaves at scale.
+    **The Consequence:** Experiencing severe tail latency spikes due to PFC pause frame cascades across multi-hop topologies, degrading cluster-wide throughput.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 70B parameters, FP16 (2 bytes/param).
+    - GPUs: 512.
+    - Network: 400 Gbps (50 GB/s) per link.
+
+    **Calculations:**
+    - Full FP16 parameter state: 70B * 2 bytes = 140 GB.
+    - In an FSDP all-gather, each GPU receives roughly the other 511/512 of the tensor.
+    - Per-GPU receive volume for one full-model materialization: 140 GB * 511/512 ≈ 139.7 GB.
+    - Best-case serialization time at 50 GB/s: 139.7 GB / 50 GB/s ≈ 2.8 s before protocol, topology, and overlap effects.
+    - A 10 ms tail-latency pause inside a synchronized collective delays all 512 ranks for roughly that collective phase; repeated pauses reduce throughput, but the impact must be measured from observed pause frequency and placement.
+
+    **Conclusion & Interpretation:**
+    - **Result: High Latency Sensitivity.** The communication volume is large enough that small amounts of congestion or pause-frame propagation can become visible in step time. RoCE breaks down when tail latency and pause behavior are not controlled, not at a fixed topology size.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues: []
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+classification_review: 'Flash correctly identifies that symptom-to-cause is wrong for this question. It is a design tradeoff/architecture question, better classified as tradeoff-analysis or requirements-to-architecture. The realistic_solution is NOT incomplete -- it ends with a clear recommendation (choose RoCE for small clusters, IB for larger). The napkin_math is reasonable: 70B/512=137M params, at FP16=274MB per shard, AllGather moves 274MB*511=~137GB (approximated correctly). The latency analysis is illustrative and reasonable.'

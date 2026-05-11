@@ -40,7 +40,7 @@ async def _():
     H100_BW_GBS = H100.memory.bandwidth.m_as("GB/s")
     H100_DISPATCH = H100.dispatch_tax.m_as("ms")
     H100_RAM_GB = H100.memory.capacity.m_as("GB")
-    ESP32_RAM_KB = ESP32.memory.capacity.m_as("KiB")
+    ESP32_RAM_KB = ESP32.memory.sram_capacity.m_as("KiB")
 
     # Framework runtime overheads (MB) -- from textbook Table 7.x
     FRAMEWORK_RUNTIMES_MB = {

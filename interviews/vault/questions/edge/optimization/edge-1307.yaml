@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: edge-1307
+track: edge
+level: L4
+zone: diagnosis
+topic: knowledge-distillation
+competency_area: optimization
+bloom_level: analyze
+phase: training
+title: Distilled INT8 Quantization Collapse
+scenario: We trained a 1.5B parameter student model using logit matching from a massive teacher to deploy on a high-memory NVIDIA Jetson Orin configuration. The student achieves excellent accuracy in FP16. To leverage the Orin's INT8 engine, we apply post-training INT8 quantization. However, after INT8 quantization, the distilled model's accuracy unexpectedly collapses by 20%, whereas an identical architecture trained from scratch drops only 2% under the same quantization.
+question: What causes this severe accuracy degradation specific to the distilled model after INT8 quantization?
+details:
+  realistic_solution: The root cause is that matching teacher logits often forces the student to produce extreme outlier activations to mimic the teacher's unconstrained probability distributions. When these extreme outliers are mapped to a limited INT8 dynamic range, it causes severe clipping and catastrophic precision loss. To diagnose this, you must profile the activation histograms of the distilled model versus the scratch model. The proper fix is to employ Quantization-Aware Distillation (QAD), where simulated INT8 quantization is applied during the distillation process to force hardware-friendly representations.
+  common_mistake: |
+    **The Pitfall:** Assuming distillation failure or blaming hardware operator support.
+    **The Rationale:** Candidates incorrectly assume the distillation process failed to transfer knowledge, missing that logit matching alters numerical distributions.
+    **The Consequence:** Wasting time tuning distillation loss weights instead of fixing the catastrophic clipping caused by INT8 quantization.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model Size: 1.5B parameters.
+    - FP16 weights require about 3 GB; INT8 weights require about 1.5 GB.
+    - Deployment assumes an Orin configuration with enough RAM for weights, activations, runtime buffers, and the OS.
+    - Accuracy loss is driven by activation distribution, not by streaming all weights from DRAM every frame.
+
+    **Calculations:**
+    - For a per-tensor INT8 activation scale, step size is approximately calibrated_range / 255.
+    - If distilled activations require a range R_distill and scratch activations require R_scratch, the distilled step is R_distill / R_scratch times larger.
+    - Even a modest outlier-driven range expansion, such as R_distill = 4 * R_scratch, makes common activations use 4x coarser steps.
+    - If calibration clips the outliers instead, those teacher-matching signals saturate, causing a different but still severe accuracy failure.
+
+    **Conclusion & Interpretation:**
+    - **Result: Distribution-Bound Quantization Failure.** INT8 reduces the weight footprint, but the 20% accuracy collapse is explained by outlier-heavy distilled activations causing clipping or coarse scales. Quantization-Aware Distillation (QAD), per-channel/per-group scaling, and outlier-aware calibration address the root cause.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

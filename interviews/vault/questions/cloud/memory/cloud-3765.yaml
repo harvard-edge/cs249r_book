@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-3765
+track: cloud
+level: L3
+zone: implement
+topic: memory-mapped-inference
+competency_area: memory
+bloom_level: apply
+phase: inference
+title: mmap for Zero-Copy Model Loading
+scenario: You serve a 7B model (14 GB in FP16) on an H100 with 80 GB HBM. The model is stored on a local NVMe SSD (7 GB/s sequential read).
+question: What are the cold-start times and memory implications for malloc+read versus mmap, and when does each loading strategy win?
+details:
+  realistic_solution: 'Strategy 1 (malloc + read): allocate 14 GB in host RAM and sequentially read the file. Host load time is 14 GB / 7 GB/s = 2.0 seconds, and host memory becomes 14 GB resident per process. If the model is then copied to the H100, add a separate GPU transfer of 14 GB / 64 GB/s = 0.22s, for about 2.2s host-to-GPU cold start. Strategy 2 (mmap): creating the mapping is fast, but cold access still has to fault the 14 GB from NVMe into the page cache. If the whole model is copied to GPU immediately, cold mmap is roughly the same I/O volume as a read and can be slower because page faults are less sequential. Warm mmap is different: if the file remains in the kernel page cache, startup can be near-instant on the host side and only the GPU copy remains. mmap wins for warm restarts, multi-process serving where N processes share the same 14 GB of physical host pages, and partial/lazy loading. malloc+read wins for one-shot cold loads when sequential throughput and predictable latency
+    matter.'
+  common_mistake: |
+    **The Pitfall:** Thinking `mmap` is universally faster for file loading under all conditions.
+    **The Rationale:** Engineers assume mapping a file directly to memory bypasses all I/O overhead.
+    **The Consequence:** Using `mmap` for single-shot, cold-start model loading, which actually performs slower than bulk sequential reads due to severe page-fault latency.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model size: 14 GB.
+    - Sequential read: NVMe speed 7 GB/s.
+    - Optional GPU copy: PCIe 5.0 at about 64 GB/s.
+    - mmap warm start assumes the model pages remain in the OS page cache.
+
+    **Calculations:**
+    - malloc + read host load: 14 GB / 7 GB/s = 2.0s cold.
+    - GPU transfer after either strategy: 14 GB / 64 GB/s = 0.22s.
+    - malloc + read host-to-GPU cold path: about 2.0s + 0.22s = 2.2s.
+    - mmap cold access: still reads up to 14 GB from NVMe; latency is about the same I/O floor and may be slower if page faults fragment the access pattern.
+    - mmap warm access: host pages are already cached, so host load is near 0s and only the 0.22s GPU copy remains if weights must move to GPU.
+    - Multi-process serving with 4 replicas: malloc uses 4 * 14 GB = 56 GB RAM; mmap can share about 14 GB of page-cache RAM.
+
+    **Conclusion & Interpretation:**
+    - **Result: malloc + read is best for predictable single cold loads; mmap wins for warm restarts, sharing, and lazy access**. For 4 replicas, mmap can reduce host RAM from 56 GB to about 14 GB.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

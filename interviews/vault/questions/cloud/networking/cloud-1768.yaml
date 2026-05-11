@@ -1,0 +1,39 @@
+schema_version: '1.0'
+id: cloud-1768
+track: cloud
+level: L3
+zone: fluency
+topic: collective-communication
+competency_area: networking
+bloom_level: apply
+phase: both
+title: Rail-Optimized DP Topology Bandwidth
+scenario: You are training a model on a 64-node cluster (8x GPUs/node) using an 8-rail 400Gbps InfiniBand network. The ToR (leaf) switches connect GPUs of the same local index across nodes, but cross-rail spine traffic is 4:1 oversubscribed. You use TP=1, PP=8, DP=64, and assume large-gradient ring AllReduce where each participant's effective sync rate is limited by the slowest network path.
+question: For TP=1, PP=8, DP=64 on a 4:1 oversubscribed spine, what is the effective per-GPU gradient sync bandwidth for naive versus rail-optimized placement?
+details:
+  realistic_solution: Under the stated link-limited ring model, naive placement lets a pipeline stage's DP traffic cross rails and hit the 4:1 oversubscribed spine, so the slowest path limits effective per-participant sync bandwidth to about 400 Gbps / 4 = 100 Gbps, or 12.5 GB/s, before protocol overhead. Rail-optimized placement pins each pipeline stage to the same local GPU index across nodes, keeping that 64-way DP AllReduce on its matching non-blocking rail, so the per-participant path limit is about 400 Gbps, or 50 GB/s. The optimized layout is therefore about 4x better for the network-bound portion of gradient sync, assuming balanced rail membership.
+  common_mistake: |
+    **The Pitfall:** Placing pipeline stages arbitrarily across local GPU indices.
+    **The Rationale:** Candidates assume the network is a flat, non-blocking fabric and ignore the physical topology of multi-rail clusters.
+    **The Consequence:** Data Parallel AllReduce traffic is forced through the oversubscribed spine switches, severely bottlenecking gradient synchronization.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 8-rail 400 Gbps IB network (50 GB/s per rail).
+    - Cross-rail spine paths are 4:1 oversubscribed.
+    - TP=1, PP=8, DP=64.
+    - Large-gradient ring AllReduce is limited by the slowest participant path; protocol overhead is ignored for this placement comparison.
+
+    **Calculations:**
+    - Rail line rate per participant path = 400 Gbps = 50 GB/s.
+    - Naive placement through 4:1 oversubscribed spine: 400 Gbps / 4 = 100 Gbps = 12.5 GB/s effective per participant.
+    - Rail-optimized placement: DP traffic stays on the matching rail, so the path limit remains 400 Gbps = 50 GB/s per participant.
+    - Improvement factor = 50 GB/s / 12.5 GB/s = 4x.
+
+    **Conclusion & Interpretation:**
+    - **Result: 12.5 GB/s naive vs 50 GB/s rail-optimized under the simplified path-limit model.** Pinning PP stages to rail-aligned GPU indices avoids the oversubscribed spine; actual AllReduce time still depends on algorithm overhead, message size, and rail balance.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+math_verified: true

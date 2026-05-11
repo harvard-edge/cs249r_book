@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: mobile-1066
+track: mobile
+level: L4
+zone: diagnosis
+topic: transformer-systems-cost
+competency_area: compute
+bloom_level: analyze
+phase: inference
+title: Diagnose Attention Softmax Precision Loss on Mobile NPU
+scenario: A mobile LLM deployment shows coherent output for short prompts but produces incoherent text for 512+ token contexts. The model uses INT8 activations throughout, including attention logits before softmax. The NPU performs softmax in INT8 with range [-128, 127].
+question: Why do INT8 attention logits on a mobile NPU degrade the LLM from 89% at 128 tokens to 61% at 512 tokens?
+details:
+  realistic_solution: Attention logits before softmax require enough precision and dynamic range to preserve the ordering and margins between competing tokens. Quantizing logits to INT8 before softmax adds input-dependent perturbations; the effect is not a fixed 2.5% probability error, because softmax depends on all logits after max subtraction and normalization. At longer contexts there are more near-tied keys, so small logit shifts can reorder attention mass or flatten/sharpen the distribution, causing quality to collapse even if short prompts look fine. The fix is to keep QK accumulation in INT32 or higher, perform scaling/masking/softmax in FP16/BF16 or a numerically stable mixed-precision online softmax, and only quantize values/outputs where calibration shows it is safe.
+  common_mistake: |
+    **The Pitfall:** Quantizing attention logits before softmax.
+    **The Rationale:** Candidates assume INT8 is safe everywhere since the model is small, including the accumulator prior to softmax exponentiation.
+    **The Consequence:** The small quantization error is exponentially magnified by the softmax function, destroying the model's focus at longer context lengths.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Max attention logit at 512 tokens: ~4.5.
+    - INT8 quantization scale: ~0.05.
+
+    **Calculations:**
+    - Max logit rounding error is about ±0.025 for this scale.
+    - Softmax probability is p_i = exp(l_i) / Σ_j exp(l_j), so the impact of a ±0.025 perturbation depends on every other logit, not just exp(0.025).
+    - For near-tied logits, a 0.025 shift can change ordering and move attention mass to a different token; for dominant logits, the same shift may have little effect.
+    - With 512 tokens there are many more competing logits than at 128 tokens, increasing the chance that quantization noise changes the attention pattern.
+
+    **Conclusion & Interpretation:**
+    - **Result: precision-bound attention logits.** The failure is quantizing logits/softmax too aggressively; keep accumulation and softmax in INT32-to-FP16/BF16 or another stable higher-precision path.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

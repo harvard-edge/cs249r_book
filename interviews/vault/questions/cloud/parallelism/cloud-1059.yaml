@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-1059
+track: cloud
+level: L3
+zone: fluency
+topic: data-parallelism
+competency_area: parallelism
+bloom_level: apply
+phase: training
+title: NCCL AllReduce vs Backward Compute Overlap on a 4-GPU T4 Box
+scenario: You are training a small classification model on 4x T4 GPUs (PCIe Gen3 x16, ~12 GB/s per link, no NVLink, NCCL over PCIe). Per-step backward compute = 90 ms; the gradient AllReduce moves a 2 GB FP32 gradient over a logical PCIe ring. You can either run AllReduce in a separate NCCL stream with bucketed overlap (bucket size 64 MB, AllReduce kicked off as each bucket completes during backward) or run a single AllReduce after backward finishes.
+question: On 4x T4s with no NVLink and a 2 GB FP32 gradient over PCIe, what does bucketed AllReduce overlap save versus a post-backward single AllReduce, and where do bucket-size returns diminish?
+details:
+  realistic_solution: 'Single post-backward AllReduce: bus traffic = 2*(3/4) * 2 GB = 3 GB on a logical PCIe ring at ~12 GB/s -> 250 ms. Step time = 90 ms backward + 250 ms comm = 340 ms with no overlap. Under an ideal overlap model with no launch overhead and buckets becoming ready uniformly during backward, a 64 MB bucket becomes ready every about 2.8 ms, while its AllReduce takes about 8 ms. Communication is slower than compute per bucket, so the step is still communication-bound: total time is approximately first-bucket ready time plus total communication time, or 2.8 ms + 250 ms = 252.8 ms, a 340/252.8 = 1.34x speedup. Bucket-size returns diminish once bucket communication time exceeds the compute interval by enough that the bus is already continuously busy; around 64 MB the link is saturated in this model, so larger buckets mainly increase pipeline fill time. Very large buckets, such as 1 GB, delay the first AllReduce by about 45 ms and push total time toward 170 ms for that bucket plus the remaining serialized traffic, losing overlap benefit.'
+  common_mistake: |
+    **The Pitfall:** Assuming communication completely hides inside compute blindly.
+    **The Rationale:** Candidates know overlapping is good but fail to check if communication is actually faster than compute.
+    **The Consequence:** They wrongly conclude that bucketed AllReduce makes the communication "zero cost" (step time = 90 ms), completely missing that this is a heavily communication-bound system.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Gradient size: 2 GB FP32
+    - PCIe bandwidth: 12 GB/s
+    - Ring AllReduce factor: 2(N-1)/N = 1.5
+
+    **Calculations:**
+    - Total bus traffic = 1.5 * 2 GB = 3 GB
+    - Single AllReduce Time = 3 GB / 12 GB/s = 250 ms
+    - No Overlap Step Time = 90 ms + 250 ms = 340 ms
+    - Bucketed Compute = 90 ms * (64/2000) = ~2.8 ms per 64 MB bucket
+    - Bucketed Comm = 1.5 * 64 MB / 12 GB/s = 8 ms per bucket
+    - Total Bucketed Time = 2.8 ms (first bucket) + 250 ms (total comm) = 252.8 ms
+    - Diminishing returns crossover: comm >= compute at 64 MB (8 ms > 2.8 ms), so the PCIe bus is already saturated; increasing bucket size cannot improve bandwidth use and only increases first-bucket delay.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~1.34x Speedup (Bandwidth-Bound)**. Communication dominates under ideal overlap, so overlap saves the 90 ms post-backward wait but cannot hide the 250 ms PCIe transfer; returns diminish once buckets are large enough to keep the bus continuously busy.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues: []
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-23T21:38:09.294410'

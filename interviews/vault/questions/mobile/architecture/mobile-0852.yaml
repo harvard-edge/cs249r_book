@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: mobile-0852
+track: mobile
+level: L4
+zone: design
+topic: cnn-efficient-design
+competency_area: architecture
+bloom_level: analyze
+phase: inference
+title: Diagnose accuracy regression after Core ML conversion of EfficientNet-B0 for A17 Pro
+scenario: After converting EfficientNet-B0 from PyTorch FP32 to Core ML FP16 for a mobile NPU, top-1 accuracy drops from 77.1% to 74.8% on a 500-image test set. The model uses Swish (SiLU) activations and SE blocks.
+question: How would you diagnose the sources of the 2.3pp accuracy regression?
+details:
+  realistic_solution: |
+    Diagnose it by isolating conversion, precision, and backend effects before changing the architecture. First run the original PyTorch FP32 model and the converted Core ML model on the same 500 images with identical resize, crop, normalization, labels, and top-1 metric. Then run Core ML with CPU-only FP32 or highest available precision, CPU/GPU FP16, and Neural Engine FP16 to separate graph-conversion error from precision and accelerator lowering error.
+
+    Next compare intermediate tensors for a small calibration set: after the stem, selected MBConv blocks, SiLU activations, SE squeeze/excitation outputs, and the classifier logits. Large drift appearing immediately after SiLU or SE blocks tells you where to focus, but do not assume a specific polynomial or hardsigmoid replacement unless the converted graph or compiler report shows it. Practical fixes include using a conversion path that preserves SiLU/SE semantics, checking for unsupported ops or CPU fallback, calibrating preprocessing exactly, and fine-tuning only after the failing stage is identified.
+  common_mistake: |
+    **The Pitfall:** Assuming the entire accuracy drop stems strictly from FP16 weight truncation.
+    **The Rationale:** Candidates fail to separate preprocessing mismatch, graph conversion, FP16 numerical drift, backend-specific lowering, and unsupported-operator fallback.
+    **The Consequence:** Endless attempts to re-train or QAT the weights without addressing the fundamental compiler-level operator mismatch.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - PyTorch FP32 top-1 on the 500-image set: 77.1%.
+    - Converted Core ML FP16 top-1 on the same set: 74.8%.
+    - Regression to explain: 77.1% - 74.8% = 2.3 percentage points.
+
+    **Calculations:**
+    - If Core ML CPU/high-precision accuracy is still near 74.8%, the issue is likely preprocessing or conversion semantics.
+    - If Core ML CPU/high-precision recovers near 77.1% but FP16 GPU/ANE drops, the issue is precision or backend lowering.
+    - If only ANE drops, inspect op coverage and per-layer drift around SiLU, SE, reshape, pooling, and classifier boundaries.
+    - For each suspect layer, compare max/mean absolute tensor error and top-k logit changes against the PyTorch reference on a fixed calibration subset.
+
+    **Conclusion & Interpretation:**
+    - **Result: 2.3pp measured regression (Conversion/Precision Isolation Problem)**. The math identifies the regression size; per-layer reference comparisons identify the source without inventing unsupported error-to-accuracy conversions.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

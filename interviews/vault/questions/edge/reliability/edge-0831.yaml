@@ -1,0 +1,41 @@
+schema_version: '1.0'
+id: edge-0831
+track: edge
+level: L4
+zone: diagnosis
+topic: fault-tolerance-checkpointing
+competency_area: reliability
+bloom_level: analyze
+phase: training
+title: Debugging SecAgg Stragglers and Metric Bias
+scenario: A fleet of 5 million mobile devices runs an on-device NLP model. You deploy a Federated Analytics pipeline using Secure Aggregation to collect quantized performance metrics (15KB per device). You configure the SecAgg coordinator with a 15-second round timeout and a minimum client survival threshold of 60%. Over a week, you observe that 85% of the rounds fail completely. In the few rounds that succeed, the aggregated average inference latency is 12ms, despite lab profiling showing a fleet-wide average of 35ms.
+question: Why are 85% of SecAgg rounds failing, and why do successful rounds report 12ms latency instead of the 35ms fleet average?
+details:
+  realistic_solution: The 15-second timeout governs whether the 15KB metric upload finishes in time, not the inference latency itself. It systematically excludes low-end devices that need about 25 seconds to compute, encrypt, and transmit their metrics. If the fleet is roughly half flagship and half low-end, many rounds only retain the fast half, so survival falls below the 60% SecAgg threshold and the round aborts. Successful rounds are biased toward flagship devices, so their aggregated inference latency can land near 12ms instead of the fleet-weighted 35ms. Fix this with tier-aware or adaptive timeouts, stratified analytics, or asynchronous aggregation that reports cohort composition.
+  common_mistake: |
+    **The Pitfall:** Suspecting data corruption, incorrect quantization scales, or uniform network outages.
+    **The Rationale:** Candidates fail to connect the strict timeout configuration with the statistical reality of device heterogeneity (flagship vs. low-end devices).
+    **The Consequence:** Chasing non-existent bugs in the metric payload instead of fixing the timeout or aggregation strategy, leaving the pipeline broken.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Fleet composition implied by lab average: ~50% flagships (12ms inference latency), ~50% low-end devices (58ms inference latency).
+    - SecAgg timeout for metric upload/aggregation: 15 seconds. Survival threshold: 60%.
+    - Flagship metric upload path: ~4s. Low-end metric upload path: ~25s.
+
+    **Calculations:**
+    - Upload timing: flagships finish in about 4s < 15s, while low-end devices need about 25s > 15s.
+    - Timeout effect: the 15s cutoff excludes low-end devices whose metric upload path exceeds the deadline.
+    - Round survival: if only the roughly 50% flagship half survives, 50% survival < 60% threshold, so most rounds abort.
+    - Fleet-weighted latency baseline = 0.5 * 12ms + 0.5 * 58ms = 35ms.
+    - Surviving-cohort latency is near 12ms when the successful cohort is dominated by flagships.
+
+    **Conclusion & Interpretation:**
+    - **Result: Biased Surviving-Cohort Average (Timeout-Bound)**. The strict 15s upload timeout causes round failures and biases successful aggregates toward fast devices; cohort weights must be reported before interpreting the 12ms value as fleet-wide latency.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+math_verified: true
+math_status: CORRECT

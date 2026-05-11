@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: tinyml-1195
+track: tinyml
+level: L6+
+zone: mastery
+topic: model-size-estimation
+competency_area: architecture
+bloom_level: create
+phase: inference
+title: ESP32-S3 Memory Hierarchy Design for Always-On Audio
+scenario: You are architecting an always-on acoustic anomaly detection system for industrial predictive maintenance on the ESP32-S3 (240 MHz dual-core, 512 KB SRAM, 8 MB PSRAM, INT8 vector extensions). The model requires extracting Mel-spectrograms and passing them through a CNN. You must design a memory hierarchy and execution strategy that guarantees the inference critical path never stalls due to external PSRAM latency, while fitting within the 512 KB internal SRAM limit alongside system tasks.
+question: How should ESP32-S3 keep the always-on audio inference critical path in SRAM while prefetching PSRAM weights?
+details:
+  realistic_solution: |
+    A robust L6 architecture reserves internal SRAM first for deterministic work: RTOS/network state, audio DMA rings, Mel feature buffers, the current layer's activations, and two bounded PSRAM weight staging buffers. The bulk INT8 weights live in PSRAM, but execution is scheduled layer-by-layer so Core 1/DMA prefetches the next layer's weight tile into one SRAM staging buffer while Core 0 computes from the other. The design must cap activation and weight-tile sizes so the deterministic SRAM working set fits with real headroom; it can hide most PSRAM latency only when each prefetch completes before the current layer finishes and bus contention is controlled.
+  common_mistake: |
+    **The Pitfall:** Placing both model weights and activations entirely in the 8 MB PSRAM simply because it has enough space.
+    **The Rationale:** Engineers treat all memory spaces uniformly and prioritize avoiding out-of-memory errors over optimizing access times.
+    **The Consequence:** The 240 MHz cores suffer catastrophic cache thrashing and latency penalties over the slower PSRAM bus, breaking the strict timing requirements of the always-on audio stream.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - ESP32-S3 internal SRAM: 512 KB.
+    - RTOS/Network/DMA overhead: ~200 KB.
+    - CNN layer (INT8, 64x64x32): 131 KB activations.
+    - Weights (3x3, 32 in, 64 out): ~18 KB.
+
+    **Calculations:**
+    - Remaining ML SRAM: 512 KB - 200 KB = 312 KB.
+    - Current and next activation buffers: 96 KB × 2 = 192 KB after depth-first scheduling/fusion.
+    - Weight DMA prefetch buffers: 18 KB × 2 = 36 KB.
+    - Mel/features and scratch buffers: 48 KB.
+    - Total deterministic ML SRAM used: 192 + 36 + 48 = 276 KB.
+    - Headroom inside remaining SRAM: 312 - 276 = 36 KB.
+
+    **Conclusion & Interpretation:**
+    - **Result: 276 KB ML working set (SRAM-Bound)**. The design fits within the post-overhead 312 KB SRAM budget with 36 KB of guard space. PSRAM latency is masked only for layers whose next weight tile can be fetched during the current layer's compute window; otherwise the scheduler must use smaller tiles or accept a bounded stall.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

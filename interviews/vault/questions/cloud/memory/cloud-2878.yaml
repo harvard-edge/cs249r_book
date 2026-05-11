@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: cloud-2878
+track: cloud
+level: L3
+zone: analyze
+topic: activation-memory
+competency_area: memory
+bloom_level: analyze
+phase: training
+title: Estimating Activation Memory for a Transformer Layer on H100
+scenario: You are profiling a 72-layer GPT-style Transformer with hidden size 8192, sequence length 4096, and batch size 8.
+question: How much activation memory will the forward pass consume across all 72 layers, and will it fit alongside fp16 70B weights?
+details:
+  realistic_solution: |
+    For a pure forward pass, do not add attention score tensors across all 72 layers as if they are retained for backward. The main live tensors are the residual stream, QKV/projection workspaces, attention output, and MLP intermediate for the current layer; earlier layer temporaries can be released as execution advances. FP16 70B weights require about 140 GB before activations. The forward activations are only several GB at peak with efficient attention, so the answer is: no on a single 80 GB H100 because the weights alone do not fit, but yes on a sharded inference setup with enough aggregate HBM for the 140 GB weights plus roughly 5-7 GB of peak forward activations.
+  common_mistake: |
+    **The Pitfall:** Counting only the attention weight matrix activations.
+    **The Rationale:** Candidates ignore MLP intermediate tensors, layer-norm inputs, and residual stream copies.
+    **The Consequence:** Drastically underestimating activation memory (often missing 60-70% of the true footprint), leading to catastrophic OOMs.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 72 layers, hidden size 8192, seq len 4096, batch 8.
+    - FP16 precision; pure forward/inference-style execution with layer temporaries freed after each layer.
+    - Use efficient attention that does not materialize and retain the full S × S score tensor for every layer.
+
+    **Calculations:**
+    - Hidden tensor size = B * S * H * 2 bytes = 8 * 4096 * 8192 * 2 = 536,870,912 bytes ≈ 0.50 GiB.
+    - QKV workspace ≈ 3 * hidden tensor = 1.50 GiB.
+    - MLP intermediate with 4H expansion ≈ 4 * hidden tensor = 2.00 GiB.
+    - Residual/attention output buffers add roughly 1-2 more hidden-sized tensors = 0.50-1.00 GiB.
+    - Peak forward activation/workspace estimate ≈ 0.50 + 1.50 + 2.00 + 0.50-1.00 = 4.5-5.0 GiB, plus allocator overhead.
+    - FP16 weights = 70B parameters * 2 bytes = 140 GB.
+    - Single-GPU total would be about 140 GB + 5-7 GB > 80 GB.
+
+    **Conclusion & Interpretation:**
+    - **Result:** The pure forward activations are not the dominant issue; the fp16 weights are. A single 80 GB H100 cannot fit 70B fp16 weights plus activations, while a tensor-parallel or multi-GPU inference placement with >150 GB aggregate HBM can fit the forward pass without invoking training-only gradient checkpointing.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: WARN
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+  - Total per layer exact sum is 21.36 GB (1.07 + 4.29 + 16.0), slightly overapproximated to 22 GB.
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

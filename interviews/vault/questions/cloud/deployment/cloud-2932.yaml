@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-2932
+track: cloud
+level: L5
+zone: evaluation
+topic: container-orchestration
+competency_area: deployment
+bloom_level: evaluate
+phase: inference
+title: Evaluating Gang Scheduling vs. Elastic Training Tradeoffs
+scenario: Your team must choose between strict gang scheduling (Volcano) and elastic distributed training (PyTorch Elastic / torchrun with --nnodes=4:8) for a shared H100 cluster running week-long LLM fine-tunes. The cluster has 128 H100 GPUs across 16 nodes and experiences a 5% node failure rate per week.
+question: For week-long fine-tunes on the 128-H100 cluster with a 5% weekly node failure rate, should you use Volcano gang scheduling or elastic training, and why?
+details:
+  realistic_solution: With a 5% weekly failure rate per node, an 8-node week-long job has a 1 - (0.95)^8, or about 33.7%, chance of at least one node failure. If strict gang scheduling requires all 8 nodes and any failed node forces a restart from the beginning, the expected lost wall-clock time is large because failures occur during a multi-day run. Elastic training with `--nnodes=4:8` can continue on 7 nodes after a single failure, trading the remaining work to about 87.5% of original throughput until capacity returns. Prefer elastic for week-long fine-tunes when the training code and optimizer state support membership changes; use gang scheduling only when fixed world size, deterministic scaling, or cluster policy outweighs the failure-recovery benefit.
+  common_mistake: |
+    **The Pitfall:** Defaulting to gang scheduling because it is simpler to configure.
+    **The Rationale:** Engineers assume checkpoint/restart overhead is small (just reloading weights), failing to account for the queue waiting time in a shared cluster.
+    **The Consequence:** A single node failure causes a full job restart, forcing the job to wait in the queue for a full block of nodes, vastly extending wall-clock completion time.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 5% weekly failure rate per node.
+    - 8-node job running for 7 days.
+
+    **Calculations:**
+    - Probability of 1 failure among 8 nodes over 7 days: 1 - (0.95)^8 \approx 33.6%.
+    - If a gang-scheduled job restarts from the beginning after one failure, and failure time is uniformly distributed during the week, expected lost progress conditional on failure is 3.5 days.
+    - Expected gang restart penalty without checkpoint recovery: 0.336 * 3.5 days = 1.18 days, or about 28 hours.
+    - If elastic drops from 8 to 7 nodes after one failure, throughput becomes 7/8 = 87.5% for the remaining work.
+    - Conditional extra wall-clock after a mid-run failure: 3.5 days * (8/7 - 1) = 0.5 days, or 12 hours.
+    - Expected elastic penalty under the same one-failure approximation: 0.336 * 12 hours = about 4 hours.
+
+    **Conclusion & Interpretation:**
+    - **Result: Lower Expected Wall-Clock Penalty with Elastic Training.** Under these assumptions, elastic training has about a 4-hour expected slowdown versus about 28 hours for full gang restart. The exact answer depends on checkpoint frequency and requeue delay, but the comparison must use wall-clock time for both strategies.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

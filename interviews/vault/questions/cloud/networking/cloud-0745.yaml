@@ -1,0 +1,35 @@
+schema_version: '1.0'
+id: cloud-0745
+track: cloud
+level: L5
+zone: evaluation
+topic: collective-communication
+competency_area: networking
+bloom_level: evaluate
+phase: both
+title: The InfiniBand Link Flap
+scenario: Your 256-GPU training job stalls for 30–90 seconds every 10–20 minutes, then resumes at full speed. NCCL logs show no timeouts. Your IB switch logs show a port on leaf switch 7 toggling UP/DOWN every 12 minutes. The ops team claims it only affects one GPU.
+question: Why does a single flapping InfiniBand link stall all 256 GPUs in the cluster?
+details:
+  realistic_solution: In a ring or tree AllReduce, the collective cannot complete until every participant contributes its data. When the IB link flaps, the Subnet Manager detects the failure, recalculates and distributes routes, and NCCL must retry or reconnect the affected path. If a training step is inside a collective during that event, the other 255 GPUs block waiting for the delayed rank. When the link comes back, the fabric may reconverge again. A 12-minute flap cycle can therefore create repeated 30-90 second whole-job stalls even though only one physical port is faulty.
+  common_mistake: |
+    **The Pitfall:** Assuming that a single link failure only impacts the directly connected node.
+    **The Rationale:** Candidates think InfiniBand has redundant paths and handles link failures locally without realizing that collective operations create global dependencies across all nodes.
+    **The Consequence:** Ignoring intermittent hardware faults, leading to massive amounts of wasted idle compute time across the cluster.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 256 GPUs at $3.50/GPU-hr.
+    - 12-minute flap interval = 5 flaps/hour.
+    - Observed stalls are 30-90 seconds; use 40 seconds as a conservative representative value.
+    - Assume the whole 256-GPU job is idle when a flap interrupts a collective.
+
+    **Calculations:**
+    - Stalled time: 5 flaps/hour * 40s/flap = 200 stalled seconds/hour.
+    - Stalled fraction: 200 / 3600 ≈ 5.6% of wall-clock time.
+    - Idle GPU-hours per day: 256 GPUs * 24 hours * 5.6% ≈ 341 GPU-hours/day.
+    - Cost of idle GPUs: 341 GPU-hours/day * $3.50/GPU-hour ≈ $1,194/day.
+
+    **Conclusion & Interpretation:**
+    - **Result: Network collective dependency.** One flapping link can stall the full job during collectives, wasting about $1.2k/day under the conservative 40-second stall assumption.
+status: published
+provenance: imported

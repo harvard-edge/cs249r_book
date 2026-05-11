@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: mobile-1632
+track: mobile
+level: L3
+zone: implement
+topic: knowledge-distillation
+competency_area: optimization
+bloom_level: analyze
+phase: training
+title: Knowledge Distillation for Vision Model Deployment on Snapdragon 8 Gen 3 NPU
+scenario: You are tasked with deploying a large vision transformer (teacher model) to a mobile device powered by the Snapdragon 8 Gen 3 Hexagon NPU, which offers 45 TOPS INT8 performance and access to 12-16 GB LPDDR5X memory. The teacher model achieves 90% accuracy but is too large and slow for the NPU's latency requirements (under 20ms per inference for 224x224 input images). You decide to use knowledge distillation to create a smaller student model.
+question: Design an implementation strategy detailing distillation techniques and how you would leverage the Snapdragon 8 Gen 3 NPU specs?
+details:
+  realistic_solution: A realistic solution starts with an INT8-first student, not an FP32 teacher-shaped model. Pick NPU-friendly blocks such as fused conv/attention variants with static 224x224 shapes, channel counts aligned to accelerator kernels, bounded activation sizes, and no unsupported resize or normalization ops in the hot path. Distill with a weighted loss combining hard labels, temperature-scaled logits, feature-map matching at selected stages, and optionally attention-map or relational losses, then run quantization-aware distillation with fake-quantized activations and weights so the student learns the INT8 numerics it will use on device. Export to the Snapdragon deployment stack, verify full Hexagon NPU placement, and profile latency, memory traffic, and thermal behavior on target hardware. The 45 TOPS / 20 ms budget says a small student has ample theoretical compute headroom, so the release gate should be measured p95 latency under 20 ms with no CPU fallback, no activation
+    spills that exceed the LPDDR5X budget, and accuracy close enough to the 90% teacher target.
+  common_mistake: |
+    **The Pitfall:** Applying generic distillation techniques without enforcing INT8 quantization constraints during the training process.
+    **The Rationale:** Candidates focus solely on model distillation math (logit matching) but distill into an FP32 student model, ignoring the edge hardware's required format.
+    **The Consequence:** The resulting student model suffers catastrophic accuracy collapse when post-training quantized to INT8, or runs painfully slow if executed in FP16.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Target Latency = 20 ms (50 Inferences / sec).
+    - NPU Capacity = 45 TOPS (INT8) = 45,000 GOP/s.
+    - Assume peak LPDDR5X bandwidth available to the inference is 64 GB/s.
+    - Candidate student model compute is ~20 GOP per inference, with ~50 MB weights and up to ~300 MB activation traffic per inference after fusion/reuse.
+
+    **Calculations:**
+    - Latency window per inference = 20 ms = 0.020 s.
+    - Peak operations available in that window = 45,000 GOP/s * 0.020 s = 900 GOP.
+    - Candidate compute check: 20 GOP / 45,000 GOP/s = 0.00044 s = 0.44 ms theoretical compute floor.
+    - Bandwidth available in 20 ms = 64 GB/s * 0.020 s = 1.28 GB transferred at peak.
+    - Traffic check: 50 MB weights + 300 MB activations = 350 MB, which is below the 1.28 GB ideal bandwidth window but still shares the 20 ms budget with compute, launch, synchronization, and non-ideal reuse.
+
+    **Conclusion & Interpretation:**
+    - **Result: This is a loose capacity check, not a feasibility proof.** The ~20 GOP student is not compute-limited on paper, but profiling must verify sustained NPU utilization, activation spills, repeated DRAM reads, and runtime overhead before the 20 ms target can be claimed.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview

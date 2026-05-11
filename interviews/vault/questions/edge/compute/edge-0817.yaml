@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: edge-0817
+track: edge
+level: L6+
+zone: mastery
+topic: 3d-parallelism
+competency_area: compute
+bloom_level: create
+phase: training
+title: The Multi-Model Memory Tetris
+scenario: 'A robotics platform runs 5 concurrent models on a Jetson Orin: SLAM (3.2 GB weights, 40ms), object detection (1.8 GB weights, 15ms), path planning (0.5 GB weights, 8ms), speech recognition (0.8 GB weights, 25ms), and gesture recognition (0.6 GB weights, 12ms). All models must run within a 50ms window. The total memory for weights is 6.9 GB, but with activations and workspace the 5-model concurrent reservation peaks at 18 GB. A proposed 6th model adds a 4 GB peak memory reservation and 20ms latency.'
+question: How should the models be scheduled within 32GB and 50ms, and what changes when adding the 6th 4GB-peak, 20ms model?
+details:
+  realistic_solution: 'For the 5-model case, run all five models concurrently if the runtime can reserve the stated 18 GB peak activation/workspace footprint: latency is max(40, 25, 15, 12, 8) = 40ms and peak memory is 18 GB, so both the 50ms deadline and 32 GB memory limit are satisfied. If the runtime must avoid concurrent workspace peaks, a two-phase schedule of detection/path/gesture followed by SLAM/speech takes 55ms and misses the deadline unless SLAM is optimized to about 25ms. Adding a 6th model with 4 GB and 20ms raises the concurrent peak to about 22 GB and latency remains max(40, 25, 20, 15, 12, 8) = 40ms, so it still fits 32 GB and 50ms under the stated peak-memory model; the risk becomes allocator/workspace fragmentation rather than raw capacity.'
+  common_mistake: |
+    **The Pitfall:** Only budgeting model weights and ignoring activation memory, or running everything concurrently.
+    **The Rationale:** Candidates forget about TensorRT workspace sizes and CUDA context overhead.
+    **The Consequence:** Severe memory fragmentation or unexpected OOM crashes when all models peak their activation memory simultaneously.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 32 GB total memory limit.
+    - 50ms total latency deadline.
+    - The 18 GB figure is the measured concurrent peak reservation for all five models, including activations and workspace.
+    - The max-latency schedule assumes enough parallel execution capacity and no additional compute or bandwidth contention beyond the measured per-model latencies.
+    - The 6th model's 4 GB is an additional peak reservation, not weights-only memory.
+
+    **Calculations:**
+    - Stated 5-model peak memory with activations/workspace = 18 GB < 32 GB.
+    - 5-model concurrent latency = max(40, 25, 15, 12, 8) = 40ms < 50ms.
+    - A conservative two-phase fallback gives max(15, 8, 12) + max(40, 25) = 15ms + 40ms = 55ms, so it would need SLAM optimization or overlap.
+    - Adding the 6th model increases peak reservation to about 18 GB + 4 GB = 22 GB < 32 GB.
+    - 6-model concurrent latency = max(40, 25, 20, 15, 12, 8) = 40ms < 50ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 40ms and about 18 GB for 5 models; 40ms and about 22 GB with the 6th model.** Both fit the stated limits, with the 6th model reducing memory headroom.
+  options:
+    - 'Run all 5 models sequentially: 40+15+8+25+12 = 100ms. This exceeds the deadline, so models must be pruned.'
+    - 'Run all 5 models concurrently using the stated 18 GB peak activation/workspace budget: max(40,15,8,25,12) = 40ms, which meets the deadline and fits within 32 GB. Adding the 6th 4 GB, 20ms model raises peak memory to about 22 GB and still leaves latency at 40ms.'
+    - 'Schedule in two phases to respect memory limits. Phase 1: detection, path, gesture (15ms). Phase 2: speech, SLAM. Total is 55ms, so this misses the 50ms deadline unless SLAM is separately optimized.'
+    - Only budget model weights (6.9 GB) and run everything concurrently, ignoring activation memory and workspace overhead.
+  correct_index: 1
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: WARN
+math_verified: true
+math_status: UNCHECKED

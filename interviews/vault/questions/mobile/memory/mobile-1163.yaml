@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: mobile-1163
+track: mobile
+level: L4
+zone: diagnosis
+topic: memory-pressure-management
+competency_area: memory
+bloom_level: analyze
+phase: inference
+title: Camera App Transition OOM on Exynos 2400
+scenario: Your team deployed a real-time video segmentation model on a device powered by the Samsung Exynos 2400. Although the dual-core NPU easily handles the compute with its 34.7 TOPS, users report sudden app crashes (OOM) specifically when switching back and forth between the native camera app and your application.
+question: Why does switching between the camera app and an Exynos 2400 segmentation app cause OOM despite the device having 12 GB of shared LPDDR5X memory?
+details:
+  realistic_solution: The root cause is Android process memory pressure during camera transitions. The camera app, ISP, GPU, graphics buffers, and your segmentation app all draw from the same shared LPDDR5X pool, so switching between camera and segmentation can temporarily raise system pressure even if the NPU has enough compute. Android LMKD may then evict the segmentation process to recover memory. The fix is to reduce the app working set, reuse inference buffers, stream frames instead of retaining large queues, release camera/graphics surfaces promptly, and avoid large allocations during app-switch transitions.
+  common_mistake: |
+    **The Pitfall:** Assuming the app has a standard memory leak or that NPU compute capacity prevents OOM.
+    **The Rationale:** Candidates fail to recognize the unified memory architecture where camera, graphics, OS services, and ML inference compete for the same RAM budget.
+    **The Consequence:** Teams optimize the model kernels while missing the app-switch memory pressure that triggers LMKD eviction.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Shared LPDDR5X is used by the OS, camera/ISP, GPU surfaces, app heap, and NPU runtime.
+    - App-switch transitions can briefly keep old camera surfaces, new preview buffers, segmentation input/output tensors, and runtime arenas resident at the same time.
+
+    **Calculations:**
+    - If the segmentation app holds 1.2 GB and camera/graphics transition buffers add a temporary 1.0-2.0 GB spike, the combined pressure can exceed the device-specific LMKD margin even though total installed RAM is 12 GB.
+    - The relevant measurement is proportional set size, graphics/camera buffer residency, and LMKD pressure events during the transition, not a fabricated contiguous 1.8 GB NPU allocation.
+
+    **Conclusion & Interpretation:**
+    - Result: OOM is best explained as shared-memory pressure causing LMKD eviction during camera transitions. Buffer reuse and lower peak working set address the failure more directly than pre-allocating a large contiguous NPU pool.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

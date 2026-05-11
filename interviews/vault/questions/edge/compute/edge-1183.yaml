@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: edge-1183
+track: edge
+level: L6+
+zone: mastery
+topic: transformer-systems-cost
+competency_area: compute
+bloom_level: evaluate
+phase: both
+title: 'Edge Transformer Cost Mastery: Quantization Tradeoff for Edge Deployment'
+scenario: 'Evaluate the full quantization tradeoff for deploying LLaMA-3-8B on Jetson Orin (32GB LPDDR5, 102.4GB/s) at FP16, INT8, INT4, and INT2. For each: calculate memory footprint, decode throughput, P99 latency at 10 req/s, and accuracy loss.'
+question: Which quantization levels are Pareto-optimal for LLaMA-3-8B on Jetson Orin under P99 <1s and <3% accuracy loss?
+details:
+  realistic_solution: |
+    Treat the queueing unit as one emitted decode token, not a whole multi-token request; a production request with many generated tokens would multiply this service demand. Under the simplified bandwidth-bound model where the quantized weight set is touched once per decode step, FP16 has a 16GB footprint and a 16GB / 102.4GB/s = 156ms/token lower bound. At 10 token-service arrivals/s, rho = 1.56, so FP16 is unstable. INT8 is 8GB and about 78ms/token, giving rho = 0.78 and a rough M/D/1 mean response of 216ms; an exponential-tail P99 proxy is about 995ms, with about 1% accuracy loss. INT4 is 4GB and about 39ms/token, giving rho = 0.39, mean response about 51.5ms, and a rough P99 proxy about 237ms, with about 2-3% accuracy loss. INT2 is faster but fails the <3% quality constraint and may lack reliable kernels. Within the stated latency and quality constraints, INT4 is the latency-efficient choice; INT8 remains non-dominated only if the extra accuracy margin is valued as a separate decision axis.
+  common_mistake: |
+    **The Pitfall:** Assuming throughput scales linearly with quantization bit reduction.
+    **The Rationale:** Candidates ignore that INT2 may require specialized kernels not available in standard frameworks, and INT4 dequantization overhead reduces expected gains.
+    **The Consequence:** Recommending an unsupported quantization level (INT2) that fails the accuracy SLO, or miscalculating P99 latencies for INT4/INT8.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - LLaMA-3-8B on Jetson Orin (32GB LPDDR5, 102.4 GB/s).
+       - Target: P99 <1s, <3% accuracy loss, 10 req/s.
+       - Queueing unit: one emitted decode token. Multi-token request latency scales with output length.
+       - Simplified lower bound: quantized weights touched once per decode step; KV/cache and kernel overheads are excluded.
+    2. **Calculations:**
+       - FP16: 16GB / 102.4 GB/s = 156ms/token. ρ = 10 token/s * 0.156 s/token = 1.56 (UNSTABLE).
+       - INT8: 8GB / 102.4 GB/s = 78ms/token. ρ = 10 * 0.078 = 0.78. Approx M/D/1 Wq = (0.78 * 78) / (2 * 0.22) = 138ms. Total W = 216ms. Rough P99 ≈ 4.6 * W = 995ms < 1s. Accuracy loss ≈ 1%.
+       - INT4: 4GB / 102.4 GB/s = 39ms/token. ρ = 10 * 0.039 = 0.39. Approx Wq = (0.39 * 39) / (2 * 0.61) = 12.5ms. Total W = 51.5ms. Rough P99 ≈ 4.6 * W = 237ms < 1s. Accuracy loss ≈ 2-3%.
+       - INT2: 2GB / 102.4 GB/s = 19.5ms/tok. ρ = 0.195. Approx Wq = (0.195 * 19.5) / (2 * 0.805) = 2.4ms. Total W = 21.9ms. Rough P99 ≈ 101ms, but accuracy loss is expected to exceed 3% and kernel support is less reliable.
+    3. **Conclusion & Interpretation:**
+       - **Result: INT4 is the best latency choice if measured accuracy loss stays under 3%; INT8 is retained only when its extra accuracy margin matters.** INT2 is rejected on accuracy/support. The workload is **Memory-Bandwidth-Bound**, and the queueing P99 is a per-token comparison proxy, not a substitute for request-level runtime measurement.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

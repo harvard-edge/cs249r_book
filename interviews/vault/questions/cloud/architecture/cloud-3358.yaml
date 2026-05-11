@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-3358
+track: cloud
+level: L2
+zone: analyze
+topic: mixture-of-experts
+competency_area: architecture
+bloom_level: analyze
+phase: both
+title: MoE Inference Optimization on NVIDIA A100
+scenario: You are designing an inference system for a large Mixture of Experts (MoE) model comprising 16 experts, each a 10-billion parameter (FP16) feed-forward network. Your target hardware is a single GPU with 80 GB memory and 2.0 TB/s memory bandwidth. Assume each input token activates 2 experts.
+question: What memory capacity and bandwidth bottlenecks arise for this single-GPU MoE design?
+details:
+  realistic_solution: 'The first bottleneck is capacity: each 10B FP16 expert is 20 GB, so an 80 GB GPU can keep only 4 of 16 experts resident before activations, KV cache, routing buffers, and allocator slack. Because each token activates 2 experts, the design works only when routing is constrained to resident experts or when expert placement/caching has a high hit rate. If tokens switch to nonresident experts, bandwidth becomes the next bottleneck because streaming two experts is 40 GB of weight traffic before useful compute. A practical design shards experts across GPUs, replicates hot experts, routes with capacity constraints, and overlaps prefetch with compute rather than treating the single GPU as able to host the whole MoE.'
+  common_mistake: |
+    **The Pitfall:** Overemphasizing raw FLOPs while ignoring memory bandwidth limits for expert weights.
+    **The Rationale:** Engineers see the massive compute capabilities of modern GPUs and assume compute is the primary constraint.
+    **The Consequence:** The system vastly underperforms theoretical limits because the GPU is starved while waiting for expert weights to be shuttled in and out of HBM.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 16 experts, 10B parameters each (FP16).
+    - Single GPU with 80 GB memory and 2.0 TB/s bandwidth.
+    - 2 experts active per token.
+
+    **Calculations:**
+    - Expert footprint: 10 billion parameters * 2 bytes/param (FP16) = 20 GB per expert.
+    - Memory capacity: 80 GB GPU stores at most 80 / 20 = 4 experts before activations, KV cache, routing buffers, and allocator slack.
+    - Full model footprint: 16 * 20 GB = 320 GB, so the single GPU cannot keep all experts resident.
+    - If the active experts are resident, the token does not require a full 40 GB expert reload; bandwidth is dominated by reading resident weights and intermediate traffic.
+    - If the active experts are not resident, streaming 2 experts requires 40 GB of weight traffic, and 40 GB / 2.0 TB/s = 20 ms as a lower-bound transfer time.
+
+    **Conclusion & Interpretation:**
+    - **Result: capacity-limited first, bandwidth-limited on expert switches.** A single 80 GB GPU can cache only a subset of the 16 experts, so expert placement and routing locality determine whether the bottleneck is resident capacity or expensive expert streaming.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

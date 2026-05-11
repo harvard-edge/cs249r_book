@@ -1,0 +1,57 @@
+schema_version: '1.0'
+id: mobile-2128
+track: mobile
+level: L6+
+zone: specification
+topic: pipeline-parallelism
+competency_area: parallelism
+bloom_level: create
+phase: both
+title: Drone Mesh Pipelining
+scenario: A 5-node drone testbed runs a distributed 3D semantic segmentation model over a research mesh Wi-Fi link with measured 100ms stage compute and a synthetic 30ms worst-case delay on each stage-to-stage handoff.
+question: Create a micro-batch pipeline schedule that masks the 30ms mesh multi-hop synchronization delay, ensuring GPU utilization remains >80%?
+details:
+  realistic_solution: |
+    Partition the model into 5 ordered stages and run enough micro-batches to keep every stage busy after warm-up, with double buffers for receive, compute, and send on each node. For one handoff, stage 1 computes micro-batch A from 0-100ms, starts the 30ms send for A at 100ms, and immediately computes B from 100-200ms. Stage 2 receives A at 130ms and computes A from 130-230ms while stage 1 finishes B, then receives B at 230ms and can compute B from 230-330ms. The same staggered pattern repeats across stages: each 30ms per-hop handoff is overlapped with a neighboring stage's 100ms compute slot, so the steady-state exposed bubble is near zero as long as handoff jitter stays within the 30ms budget. Fill/drain and occasional jitter still cost time, so the defensible claim is >80% steady-state utilization, not perfect utilization.
+  common_mistake: |
+    **The Pitfall:** Assuming static, tightly-coupled micro-batching works perfectly across wireless mesh hops.
+    **The Rationale:** Candidates port cloud datacenter pipelining schedules without accounting for multi-hop mesh routing jitter.
+    **The Consequence:** The schedule fails to hide network stalls, tanking GPU utilization far below the 80% target.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 5 ordered pipeline stages.
+    - 100ms compute per stage per micro-batch.
+    - 30ms delay on each stage-to-stage handoff.
+    - >80% target utilization.
+
+    **Calculations:**
+    - Util = 100ms / (100ms + bubble) > 0.8.
+    - Bubble must be < 25ms.
+    - Unhidden 30ms sync gives 100 / 130 = 76.9% utilization, which misses the target.
+    - With double-buffered overlap, each 30ms send can run during a neighboring 100ms compute slot, so the steady-state exposed bubble is approximately 0ms when jitter stays within the assumed bound.
+    - A stage timeline after warm-up is compute A for 100ms, receive/send for adjacent micro-batches in the overlapped 30ms windows, then compute B for 100ms without inserting a 30ms idle gap.
+    - Steady-state utilization is therefore above 80%; the ideal overlapped timeline approaches 100% for the compute slots, while fill/drain and real mesh jitter reduce the end-to-end average.
+
+    **Conclusion & Interpretation:**
+    - **Result: Double-buffered multi-micro-batch pipeline (Network-Bound)**. The schedule meets the >80% target only if the per-hop 30ms mesh handoff is overlapped with useful compute instead of inserted as an idle gap between stages.
+status: published
+provenance: llm-draft
+requires_explanation: true
+expected_time_minutes: 15
+validated: true
+validation_status: passed
+validation_date: '2026-04-25'
+validation_model: pydantic-1.0
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-25'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+  - gemini-generated
+  - target-specification-L6+
+created_at: '2026-04-25'

@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: mobile-0702
+track: mobile
+level: L4
+zone: diagnosis
+topic: quantization-fundamentals
+competency_area: precision
+bloom_level: analyze
+phase: inference
+title: The Zero-Point Drift
+scenario: You deploy an INT8 quantized image classification model to a mobile phone. During local testing with PyTorch, the model has 95% accuracy. On the phone, using TFLite, it drops to 82%. You discover that a specific intermediate activation tensor is consistently decoded as a large positive value when it should be near zero.
+question: Why does a TFLite INT8 activation decode incorrectly on-phone after a PyTorch model tested at 95% accuracy?
+details:
+  realistic_solution: You hit an asymmetric vs. symmetric quantization mismatch, specifically around the zero-point. In PyTorch you may have validated a symmetric simulation, while the exported TFLite tensor uses an affine mapping where real_value = scale * (int_value - zero_point). If a delegate, conversion step, or custom kernel treats that tensor as symmetric and ignores the zero-point, values near real zero are decoded as a biased nonzero activation. That bias can move a whole feature map before ReLU or the next convolution and destroy the calibration assumptions that held in local testing.
+  common_mistake: |
+    **The Pitfall:** Assuming INT8 is a universal, identical format everywhere.
+    **The Rationale:** Candidates believe 'quantized' means the same thing across all frameworks and hardware, ignoring asymmetric vs symmetric differences.
+    **The Consequence:** The model suffers massive accuracy degradation on-device due to zero-point offsets being ignored.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Quantization equation: Quantized = round(Float / Scale) + ZeroPoint.
+    - Scale = 0.1, ZeroPoint = 50.
+    - On-device kernel incorrectly ignores ZeroPoint during dequantization.
+
+    **Calculations:**
+    - Float 0.0 maps to INT8 value 50.
+    - Correct dequantization: (50 - 50) x 0.1 = 0.0.
+    - Incorrect symmetric dequantization: 50 x 0.1 = 5.0.
+    - The tensor receives a +5.0 bias wherever values near real zero are encoded as integer 50.
+
+    **Conclusion & Interpretation:**
+    - **Result: +5.0 activation bias (Precision-Bound).** The derived failure is the affine dequantization error; the observed accuracy drop is the downstream symptom and should be confirmed by comparing tensor dumps before and after the affected delegate/kernel.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

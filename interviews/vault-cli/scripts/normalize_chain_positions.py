@@ -41,7 +41,7 @@ def main() -> int:
             chains[lq.question.chain.id].append((lq.question.chain.position, lq))
 
     rewritten = 0
-    for chain_id, members in chains.items():
+    for _chain_id, members in chains.items():
         members.sort(key=lambda t: t[0])
         positions = [m[0] for m in members]
         expected = list(range(1, len(members) + 1))

@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-3570
+track: cloud
+level: L4
+zone: analyze
+topic: differential-privacy
+competency_area: cross-cutting
+bloom_level: analyze
+phase: both
+title: Optimizing DP-SGD on NVIDIA A100 for Federated Learning Privacy-Utility Tradeoff
+scenario: Imagine you are leading a machine learning engineering team developing a sensitive medical diagnostics AI model using federated learning. Your goal is to train this model on a distributed dataset across various hospitals while adhering to stringent privacy regulations. You've chosen DP-SGD for privacy assurance. The training infrastructure consists of NVIDIA A100 GPUs, each with 80 GB HBM2e memory, 312 TFLOPS FP16 performance, and 2.0 TB/s memory bandwidth. You have a privacy budget of ε=8 for the entire training process.
+question: How would you calibrate clipping, noise, and epsilon accounting for DP-SGD with epsilon=8 on A100s while preserving medical model utility?
+details:
+  realistic_solution: Choose the clipping norm C from private-safe pilot runs or public data by inspecting per-example gradient norms, then sweep a small set of C values and keep the smallest value that does not clip most useful gradients. Pick the effective batch size and number of optimizer steps, set δ from the dataset policy, and use an RDP or moments accountant to search for the noise multiplier σ that gives ε≤8 for that sampling rate and step count. Add Gaussian noise with standard deviation σC to the clipped average gradient. On A100s, preserve utility by using the largest effective batch that fits, memory-efficient per-example norm computation such as ghost clipping, gradient accumulation only for the logical DP batch, and validation monitoring that compares ε, clipping fraction, and medical-model metrics.
+  common_mistake: |
+    **The Pitfall:** Naively applying a fixed noise level or clipping threshold without considering the overall privacy budget accumulation and DP-SGD's overhead.
+    **The Rationale:** Advanced composition theorems are required to properly track the privacy budget, and DP-SGD significantly increases per-example gradient memory usage and compute on the GPUs.
+    **The Consequence:** You degrade model quality by over-applying noise, compromise privacy through insufficient clipping, or encounter out-of-memory errors due to scaling bottlenecks.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Dataset N=10^6, Batch size B=1000.
+    - Target ε=8 over T=100 epochs (100,000 steps).
+    - Model: 1B parameters (2GB per gradient).
+    - A100: 80GB HBM2e, 312 TFLOPS, 2.0 TB/s memory bandwidth.
+
+    **Calculations:**
+    - Sampling probability q = B/N = 0.001.
+    - Accountant inputs are q=0.001, T=100,000, δ selected by policy, and target ε=8.
+    - σ is not a per-step constant derived by division; run an RDP/moments accountant and binary-search σ until the composed ε is at most 8.
+    - A 1B-parameter FP16 gradient tensor is about 2 GB, but efficient DP-SGD should not materialize a 1000 x 2 GB per-example-gradient tensor.
+    - Memory pressure comes from activations, optimizer state, clipping statistics, and any temporary per-example gradient representation.
+    - If the implementation cannot compute norms without materializing per-example gradients, reduce physical micro-batch size and accumulate clipped sums to form the logical batch.
+
+    **Conclusion & Interpretation:**
+    - **Result: Accountant-Calibrated DP-SGD (Memory-Sensitive)**. The defensible configuration is C from gradient-norm sweeps, σ from an accountant for q and T, and a memory-efficient clipping implementation rather than an unsupported fixed σ or micro-batch bound.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-3230
+track: cloud
+level: L5
+zone: optimization
+topic: kv-cache-management
+competency_area: memory
+bloom_level: evaluate
+phase: inference
+title: KV-Cache and Speculative Decoding Interaction
+scenario: You use speculative decoding with a 1B draft model and a 70B verifier for serving. The draft model generates 8 candidate tokens, then the verifier checks them in a single forward pass.
+question: How should speculative decoding manage draft and verifier KV-caches when 5 of 8 candidate tokens are accepted?
+details:
+  realistic_solution: KV-cache management for speculative decoding is transactional. The draft model maintains a separate lightweight KV-cache for its 8 candidate tokens. The verifier checks the candidates in one forward pass and may create temporary verifier KV entries for all 8, but only the 5 accepted tokens are committed to the verifier sequence state. KV entries for the 3 rejected tokens are rolled back or discarded with a block-table/pointer update, and draft-cache state is not mixed into the verifier cache.
+  common_mistake: |
+    **The Pitfall:** Forgetting that rejected speculative tokens create orphaned KV-cache entries.
+    **The Rationale:** It's easy to assume the verifier only caches what it approves.
+    **The Consequence:** The verifier's KV-cache fills with garbage tokens from rejected drafts, causing corrupted outputs and rapid Out-Of-Memory errors. It must be managed transactionally.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Pre-allocated speculative tokens: 8.
+    - Memory cost per token: 320 KB.
+    - Verifier accepts 5 tokens, rejects 3.
+
+    **Calculations:**
+    - Temporary verifier KV for candidates: 8 tokens * 320 KB = 2.56 MB per request.
+    - Accepted KV retained: 5 tokens * 320 KB = 1.60 MB.
+    - Rejected KV discarded: 3 tokens * 320 KB = 0.96 MB, typically by rolling the sequence/block table back to the accepted prefix.
+    - Acceptance ratio: 5/8 = 62.5%; throughput gain depends on draft cost, verifier batching efficiency, and acceptance distribution.
+
+    **Conclusion & Interpretation:**
+    - **Result: Transactional KV rollback.** The cache impact is small and bounded for the 8 candidates, but 5 accepted tokens alone does not imply a 5x throughput gain.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

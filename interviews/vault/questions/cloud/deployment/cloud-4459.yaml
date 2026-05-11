@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-4459
+track: cloud
+level: L4
+zone: analyze
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: analyze
+phase: inference
+title: Decode Pool Tensor Parallelism Degree Selection
+scenario: A 70B model decode pool can use TP=1 (192GB MI300X single GPU), TP=2 (2xH100 NVLink), or TP=4 (4xH100 NVLink).
+question: How do TP=1 MI300X, TP=2 H100, and TP=4 H100 compare for 70B decode throughput, TPOT, and cost per token?
+details:
+  realistic_solution: |
+    Compare the three decode choices using TPOT, not just aggregate HBM bandwidth. With a 70B BF16 model (140GB weights) and small per-token all-reduce messages, a simple model is TPOT = weight-read time + decode communication. TP=1 MI300X reads 140GB at 5.3TB/s, about 26.4ms/token, or 37.9 tok/s at $0.000029/token. TP=2 H100 reads the sharded weights at 6.7TB/s, about 20.9ms/token before communication; a small NVLink all-reduce keeps TPOT near 20.9ms and throughput near 47.8 tok/s, but cost/token is about $0.0000349. TP=4 H100 reads at 13.4TB/s, about 10.45ms/token before communication; with small all-reduce overhead TPOT is near 10.45ms and throughput near 95.7 tok/s, but cost/token is also about $0.0000348. Decision: TP=4 maximizes throughput and lowest TPOT under the simplifying communication assumption, TP=1 MI300X is the best cost/token, and TP=2 is a middle latency/throughput point that is not cheaper than MI300X.
+  common_mistake: |
+    **The Pitfall:** Assuming higher Tensor Parallelism (TP) always improves decode performance.
+    **The Rationale:** TP reduces per-GPU memory bandwidth requirement but adds all-reduce communication overhead per decode step.
+    **The Consequence:** Picking the largest TP degree by bandwidth alone can buy lower TPOT at a worse cost/token, or even hurt decode latency if all-reduce overhead is no longer negligible.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 70B model decoding.
+    - MI300X: Cost $4/hr.
+    - H100: Cost $3/hr/GPU. TP=2 is $6/hr, TP=4 is $12/hr.
+    - Simplification: per-token TP all-reduce messages are small enough on NVLink to be treated as a sub-microsecond correction.
+
+    **Calculations:**
+    - TP=1 MI300X: TPOT = 140GB / 5.3TB/s = 26.4ms, throughput = 37.9 tok/s, cost/token = $4 / (37.9 * 3600) = $0.0000293.
+    - TP=2 H100: TPOT ~= 140GB / 6.7TB/s = 20.9ms plus small all-reduce, throughput ~= 47.8 tok/s, cost/token = $6 / (47.8 * 3600) = $0.0000349.
+    - TP=4 H100: TPOT ~= 140GB / 13.4TB/s = 10.45ms plus small all-reduce, throughput ~= 95.7 tok/s, cost/token = $12 / (95.7 * 3600) = $0.0000348.
+
+    **Conclusion & Interpretation:**
+    - **Result: TP=4 H100 has the best TPOT/throughput, while TP=1 MI300X has the best cost/token.** The choice depends on whether latency/throughput or token cost is the binding constraint.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

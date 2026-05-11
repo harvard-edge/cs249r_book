@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-2317
+track: cloud
+level: L4
+zone: diagnosis
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: analyze
+phase: both
+title: Attention Softmax FP16 Overflow
+scenario: You are serving a 70B model with a 32k context window. The KV cache is stored in FP16 to fit within 4 A100s. At context lengths below 16k, generation is flawless. As soon as the context exceeds 16k tokens, the model outputs completely black/empty tokens (NaNs).
+question: Why does the 70B model produce NaNs beyond 16k context, and what precision change fixes attention?
+details:
+  realistic_solution: The failure is a numerical stability problem in the attention softmax calculation. In self-attention, the dot product of Query and Key is scaled by 1/sqrt(d_k), but long contexts can still produce a wide logit range. A naive FP16 softmax can overflow when taking exp(logit), underflow small probabilities, or lose accuracy when accumulating the denominator in FP16. Numerically stable attention kernels avoid this by subtracting the row maximum and maintaining the running softmax denominator and related accumulators in FP32. If the kernel fails to upcast those intermediates, Inf or invalid values can propagate into NaN outputs.
+  common_mistake: |
+    **The Pitfall:** Assuming the KV cache memory allocation is fragmenting and causing out-of-memory errors that fail silently.
+    **The Rationale:** Candidates default to memory capacity issues for long context windows, ignoring the numerical stability limits of half-precision floating-point formats.
+    **The Consequence:** Wasting time debugging memory allocation and scaling strategies when the issue is a fundamental arithmetic overflow.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - FP16 max finite value = 65,504, but exp(x) overflows FP16 much earlier: ln(65,504) is about 11.09.
+    - Attention rows can contain logits with a large dynamic range at long context lengths.
+    - Stable attention should subtract the row max and accumulate the denominator in FP32.
+
+    **Calculations:**
+    - Naive FP16 path: a logit of 12 gives exp(12) about 162,755, which is larger than 65,504 and can become Inf in FP16.
+    - Stable path: compute exp(logit - max_logit). The largest exponent is exp(0) = 1, so the exponentials avoid overflow.
+    - The denominator may sum thousands of terms, so it should be accumulated in FP32 to preserve range and precision before normalizing.
+
+    **Conclusion & Interpretation:**
+    - **Result: Use a numerically stable attention kernel with FP32 softmax accumulation. (Precision-Bound Numerical Instability)**. FP16 storage for KV cache can be acceptable, but the softmax intermediates should not be computed and accumulated purely in FP16.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+  - inference
+  - fp16
+  - attention

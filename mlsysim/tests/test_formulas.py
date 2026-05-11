@@ -24,6 +24,7 @@ from mlsysim.core.formulas import (
     calc_hierarchical_allreduce_time,
     calc_young_daly_interval,
     calc_mtbf_cluster,
+    calc_mtbf_node,
     calc_pipeline_bubble,
     calc_kv_cache_size,
     calc_paged_kv_cache_size,
@@ -31,6 +32,8 @@ from mlsysim.core.formulas import (
     calc_failure_probability,
     calc_effective_flops,
     calc_availability_stacked,
+    calc_monthly_egress_cost,
+    calc_fleet_tco,
 )
 from mlsysim.core.constants import ureg, Q_, MB, GB
 
@@ -510,3 +513,84 @@ class TestAvailabilityStacked:
     def test_single_replica(self):
         result = calc_availability_stacked(0.99, 1)
         assert result == pytest.approx(0.99)
+
+
+# ======================================================================
+# calc_monthly_egress_cost
+# ======================================================================
+
+class TestMonthlyEgressCost:
+    """Monthly egress cost = bandwidth * 30 days * $/GB rate."""
+
+    def test_known_answer_raw(self):
+        # 1 MB/s * 30 days = 2,592 GB; at $0.09/GB = $233.28
+        result = calc_monthly_egress_cost(1e6, 0.09)
+        assert result == pytest.approx(233.28, rel=1e-4)
+
+    def test_known_answer_quantity(self):
+        result = calc_monthly_egress_cost(
+            Q_("1 MB/s"), Q_("0.09 dollar/GB")
+        )
+        assert result == pytest.approx(233.28, rel=1e-4)
+
+    def test_zero_bandwidth_is_free(self):
+        result = calc_monthly_egress_cost(0, 0.09)
+        assert result == pytest.approx(0.0)
+
+    def test_scales_linearly_with_bandwidth(self):
+        cost_1x = calc_monthly_egress_cost(1e6, 0.09)
+        cost_10x = calc_monthly_egress_cost(10e6, 0.09)
+        assert cost_10x == pytest.approx(cost_1x * 10, rel=1e-6)
+
+
+# ======================================================================
+# calc_fleet_tco
+# ======================================================================
+
+class TestFleetTCO:
+    """TCO = capex + opex (energy cost over N years)."""
+
+    def test_known_answer(self):
+        # 10 units x $1000 = $10,000 capex
+        # 100W * 10 * 1yr * $0.10/kWh = 100*10*8760*0.10/1000 = $8,760 opex
+        # total = $18,760
+        result = calc_fleet_tco(1000, 100, 10, 1, 0.10)
+        capex = 10 * 1000
+        energy_kwh = 0.1 * 10 * (1 * 365.25 * 24)
+        opex = energy_kwh * 0.10
+        assert result == pytest.approx(capex + opex, rel=1e-3)
+
+    def test_zero_quantity(self):
+        result = calc_fleet_tco(1000, 500, 0, 3, 0.10)
+        assert result == pytest.approx(0.0)
+
+    def test_scales_linearly_with_quantity(self):
+        cost_1 = calc_fleet_tco(1000, 500, 1, 3, 0.10)
+        cost_100 = calc_fleet_tco(1000, 500, 100, 3, 0.10)
+        assert cost_100 == pytest.approx(cost_1 * 100, rel=1e-6)
+
+
+# ======================================================================
+# calc_mtbf_node
+# ======================================================================
+
+class TestMTBFNode:
+    """Node MTBF from heterogeneous components: 1/MTBF = sum(n_i/MTBF_i)."""
+
+    def test_single_component_type(self):
+        # 1 GPU with 10,000 h MTBF => node MTBF = 10,000 h
+        result = calc_mtbf_node(10_000, 1, 1e9, 0, 1e9, 0)
+        assert result.m_as(ureg.hour) == pytest.approx(10_000.0, rel=1e-4)
+
+    def test_two_identical_gpus_halves_mtbf(self):
+        # 2 GPUs each at 10,000 h => failure rate doubles => node MTBF = 5,000 h
+        result = calc_mtbf_node(10_000, 2, 1e9, 0, 1e9, 0)
+        assert result.m_as(ureg.hour) == pytest.approx(5_000.0, rel=1e-4)
+
+    def test_mixed_components(self):
+        # GPU: 10,000 h x4, NIC: 50,000 h x2, PSU: 20,000 h x2
+        # rate = 4/10000 + 2/50000 + 2/20000 = 0.0004 + 0.00004 + 0.0001 = 0.00054
+        # MTBF = 1/0.00054 ≈ 1851.85 h
+        result = calc_mtbf_node(10_000, 4, 50_000, 2, 20_000, 2)
+        expected = 1 / (4/10_000 + 2/50_000 + 2/20_000)
+        assert result.m_as(ureg.hour) == pytest.approx(expected, rel=1e-4)

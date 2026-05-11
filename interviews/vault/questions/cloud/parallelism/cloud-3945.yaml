@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-3945
+track: cloud
+level: L3
+zone: design
+topic: communication-computation-overlap
+competency_area: parallelism
+bloom_level: apply
+phase: both
+title: Overlapping Dense MLP AllReduce with Sparse Embedding AlltoAll
+scenario: Your recommendation model has a 50GB embedding table (table-parallel across 8 GPUs) and a 2B-parameter MLP (data-parallel across the same 8 GPUs). The embedding lookup produces sparse gradients, while the MLP produces dense gradients. Both need synchronization across the 8 GPUs.
+question: Can the dense MLP AllReduce and the sparse embedding AlltoAll overlap, and what is the latency impact?
+details:
+  realistic_solution: Yes, they can overlap if they are issued on independent communication streams and their gradient dependencies are ready. Start the dense MLP gradient AllReduce when the MLP buckets become ready, and route sparse embedding updates to owner GPUs with AlltoAll when embedding backward produces them. The sparse table-parallel path usually moves far less data than a dense embedding AllReduce, but its exact size depends on IDs touched, optimizer state, index metadata, and duplicate coalescing. The latency impact is therefore bounded by the slower collective on the critical path; in this setup the dense MLP AllReduce is expected to dominate, while the sparse AlltoAll is mostly hidden if it fits inside that window.
+  common_mistake: |
+    **The Pitfall:** Using standard dense AllReduce for both embedding and MLP gradients.
+    **The Rationale:** Treating all gradients equally in the backward pass without recognizing the extreme sparsity of embedding lookups.
+    **The Consequence:** Forcing massive amounts of zero-value gradients across the network, turning a fast 0.56ms AlltoAll into a multi-millisecond bottleneck.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 50GB embedding table with 1% of rows touched before coalescing.
+    - Sparse embedding payload estimate: 0.5GB plus index/metadata overhead.
+    - 2B-parameter MLP with BF16 dense gradients: about 4GB of raw gradient data.
+    - Use payload-only lower-bound estimates; real collective time includes topology and algorithm overhead.
+
+    **Calculations:**
+    - Ring AllReduce byte factor for 8 GPUs: 2 x (8-1) / 8 = 1.75.
+    - Dense MLP payload lower bound: 1.75 x 4GB / 900 GB/s = 7.8ms.
+    - Sparse AlltoAll payload lower bound: 0.5GB / 900 GB/s = 0.56ms before metadata and routing overhead.
+    - If both collectives are independent, exposed communication is approximately max(7.8ms, 0.56ms plus overhead), not their sum.
+
+    **Conclusion & Interpretation:**
+    - **Result: Dense AllReduce Dominates**. Overlap can hide the sparse AlltoAll when it remains below the dense collective's critical-path time, but the exact latency must be measured for the real sparsity and collective implementation.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

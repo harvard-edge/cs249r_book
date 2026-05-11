@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-4357
+track: cloud
+level: L5
+zone: design
+topic: sustainability-carbon-accounting
+competency_area: power
+bloom_level: create
+phase: both
+title: Carbon-Aware Autoscaling for Inference Endpoints
+scenario: 'You operate an inference endpoint serving a non-latency-critical batch transcription workload (user uploads audio, gets transcript within 6 hours). The endpoint runs on cloud spot instances. Current autoscaling policy: scale to maintain queue depth < 1,000 jobs.'
+question: How would you redesign spot-instance autoscaling to use real-time carbon intensity while meeting the 6-hour SLA for 99% of transcription jobs?
+details:
+  realistic_solution: |
+    Carbon-aware autoscaling should be driven by backlog age, forecast capacity, and SLA slack. At each autoscaling tick, estimate the 99th-percentile completion time from queued work, arrival rate, current spot capacity, and the carbon-intensity forecast. If the oldest jobs have more than 3 hours of slack, scale down or hold steady during high-carbon periods and let backlog accumulate within the SLA budget. If projected p99 completion has less than 1 hour of slack, override the carbon signal and scale up to drain the queue. Before a forecast low-carbon window, pre-scale if spot capacity is available, then process both the accumulated backlog and new arrivals. Keep a floor fleet for retries, stragglers, and spot interruptions, and use per-job deadlines rather than a raw queue-depth threshold.
+  common_mistake: |
+    **The Pitfall:** Treating carbon-aware scheduling as binary (run/don't run) rather than as a continuous cost signal with SLA forecasting.
+    **The Rationale:** Engineers often simply turn off instances during high-carbon periods without predicting the queue buildup.
+    **The Consequence:** Severe SLA violations as the backlog builds up unmanageably during extended high-carbon periods.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 10K jobs/hour, 15s GPU time each, treated as stable for this estimate.
+       - 50 GPUs capacity = 12,000 jobs/hr.
+       - Assume 250 spot GPUs are available during the low-carbon window and interruption loss is covered by the floor fleet.
+    2. **Calculations:**
+       - High Carbon (hours 1-3): Defer jobs. Queue builds to 3 * 10K = 30K jobs.
+       - Low Carbon (hours 4-6): Scale to 250 spot GPUs. Capacity = 250 * 240 = 60,000 jobs/hr.
+       - Net drain rate during low-carbon window: 60,000 - 10,000 incoming = 50,000 jobs/hr.
+       - Time to clear 30K backlog while arrivals continue: 30,000 / 50,000 = 0.6 hours (36 minutes).
+       - Oldest deferred jobs wait 3 hours plus 0.6 hours to clear = 3.6 hours before processing, below the 6-hour SLA.
+    3. **Conclusion & Interpretation:**
+       - **Result: 36-Minute Net Clear Time.** Accounting for ongoing arrivals, the backlog still clears well inside the three-hour low-carbon window, leaving about 2.4 hours of SLA headroom for the oldest deferred jobs.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

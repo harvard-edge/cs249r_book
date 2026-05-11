@@ -1,0 +1,45 @@
+schema_version: '1.0'
+id: cloud-1821
+track: cloud
+level: L4
+zone: diagnosis
+topic: data-parallelism
+competency_area: parallelism
+bloom_level: analyze
+phase: training
+title: Diagnosing Elastic Scaling Collapse
+scenario: You are observing an elastic pre-training job for a 13B parameter LLM. The job uses a strict static global batch size of 2048 sequences. When the cluster scheduler dynamically scales the job from 64 to 128 GPUs, the global throughput only increases by 15%. The network is verified to be fully operational.
+question: Why does throughput rise only 15% when scaling from 64 to 128 GPUs with a static global batch size, and what should the scheduler do?
+details:
+  realistic_solution: With a static global batch size, doubling the GPU count halves the per-GPU micro-batch from 32 to 16 sequences, assuming the framework shards each global batch evenly across workers. That reduces useful compute per GPU while the synchronization latency remains roughly fixed, so communication consumes a larger share of each step. The scheduler should use measured scaling curves to either increase the effective global batch or accumulation policy when adding GPUs, or stop scaling past the efficiency knee when the batch cannot grow.
+  common_mistake: |
+    **The Pitfall:** Assuming an undetected network failure or straggler node.
+    **The Rationale:** Candidates often jump to hardware or network anomalies rather than mathematically analyzing the impact of static batching on per-GPU utilization as worker counts increase.
+    **The Consequence:** Misdiagnosing the throughput collapse, leading to unnecessary hardware troubleshooting instead of fixing the scheduler policy.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Global Batch Size: 2048.
+    - 64 GPUs: MBS = 32. 128 GPUs: MBS = 16.
+    - The following step times are illustrative, chosen to match the observed +15% throughput rather than derived uniquely from the prompt.
+    - Per-GPU compute time falls with the smaller micro-batch, while synchronization overhead grows as worker count increases.
+
+    **Calculations:**
+    - Observed gain is 1.15x, so if 64 GPUs process T sequences/sec, 128 GPUs process only 1.15T rather than the ideal 2T.
+    - Per-GPU throughput at 128 GPUs is 1.15T / 128, while per-GPU throughput at 64 GPUs is T / 64.
+    - Relative per-GPU throughput = (1.15T / 128) / (T / 64) = 1.15 / 2 = 0.575, so each GPU does only about 57.5% as much useful work after scale-out.
+    - One illustrative timing model is 55ms/step at 64 GPUs versus 48ms/step at 128 GPUs, which gives 2048/0.055 = 37,236 seq/s and 2048/0.048 = 42,667 seq/s, or 1.146x.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~15% throughput gain (Communication-Heavy Scaling)**. Fixed global batch size shrinks per-GPU work, so the scheduler should grow effective batch size when valid or cap allocation at the measured efficiency knee.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview

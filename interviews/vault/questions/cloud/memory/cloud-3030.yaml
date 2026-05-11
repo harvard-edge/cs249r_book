@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-3030
+track: cloud
+level: L3
+zone: evaluation
+topic: model-size-estimation
+competency_area: memory
+bloom_level: evaluate
+phase: both
+title: Comparing GPT-3 and LLaMA-2 Memory Footprints on H100
+scenario: Compare the memory footprints of GPT-3 (175B params, dense attention) vs. LLaMA-2-70B (70B params, GQA with 8 KV heads vs. 64 query heads) at inference time on H100s. Assume a batch of 16 requests with sequence length 2048.
+question: How do GPT-3 175B and LLaMA-2-70B compare in inference memory for weights, KV cache, and activations at batch 16 and seq 2048?
+details:
+  realistic_solution: 'GPT-3 175B FP16: weights are 175B × 2B = 350GB. Dense attention KV cache uses batch × sequence × layers × 2(K,V) × num_kv_heads × head_dim × bytes = 16 × 2048 × 96 × 2 × 96 × 128 × 2B = 154.6GB. Peak activations for inference are small relative to weights and KV cache, roughly 16 × 2048 × 12288 × 2B ≈ 0.8GB per layer workspace plus kernel overhead. Total planning footprint is about 506GB before serving headroom, so it needs about 7-8×80GB H100s and likely the high end once runtime workspace, fragmentation, and concurrency headroom are included. LLaMA-2-70B FP16: weights are 140GB. GQA KV cache is 16 × 2048 × 80 × 2 × 8 × 128 × 2B = 10.7GB. Peak activation workspace is about 16 × 2048 × 8192 × 2B ≈ 0.5GB per layer plus overhead. Total planning footprint is about 151-153GB before headroom, so 2×80GB H100s is only a tight capacity estimate, not a production-fit guarantee; practical serving may require more memory, lower concurrency, quantization, or an extra GPU. GQA
+    reduces KV cache by about 14.4x in this comparison.'
+  common_mistake: |
+    **The Pitfall:** Treating the KV cache size calculation as identical for both architectures, missing the drastic reduction factor.
+    **The Rationale:** Candidates often apply standard Multi-Head Attention formulas to modern LLMs, failing to account for the architectural leap of Grouped Query Attention (GQA).
+    **The Consequence:** The serving infrastructure is wildly over-provisioned with unnecessary GPUs to hold a KV cache that is actually an order of magnitude smaller than projected.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Batch: 16. Seq length: 2048. Format: FP16 (2 Bytes).
+    - GPT-3 dense attention: 175B params, 96 layers, 96 KV heads, 128 head dim.
+    - LLaMA-2-70B GQA: 70B params, 80 layers, 8 KV heads, 128 head dim.
+    - GPU count estimates below are capacity estimates before allocator fragmentation, runtime workspace, and serving headroom.
+
+    **Calculations:**
+    - LLaMA-2 KV cache: 16 × 2048 × 2 (K,V) × 8 KV heads × 128 dim × 2 bytes × 80 layers ≈ 10.7 GB.
+    - GPT-3 KV cache: 16 × 2048 × 2 (K,V) × 96 KV heads × 128 dim × 2 bytes × 96 layers ≈ 154.6 GB.
+    - GPT-3 weights: 175B × 2 bytes = 350 GB. Approximate total with KV cache and small activation workspace: ~506 GB before headroom.
+    - LLaMA-2 weights: 70B × 2 bytes = 140 GB. Approximate total with KV cache and small activation workspace: ~151-153 GB before headroom.
+    - Memory ratio: 154.6 GB / 10.7 GB ≈ 14.4x smaller cache.
+
+    **Conclusion & Interpretation:**
+    - **Result: 14.4x KV Cache Reduction (Memory-Capacity Bound)**. GPT-3 needs roughly 7-8 H100s for weights plus KV cache before headroom. LLaMA-2-70B is near the 2×80GB capacity line, but production serving should budget extra memory or reduce footprint with quantization, lower concurrency, or another GPU.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

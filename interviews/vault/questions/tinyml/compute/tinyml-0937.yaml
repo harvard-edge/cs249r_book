@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: tinyml-0937
+track: tinyml
+level: L4
+zone: implement
+topic: transformer-systems-cost
+competency_area: compute
+bloom_level: apply
+phase: inference
+title: Implement Tiled Matrix Multiply for Attention on Cortex-M7
+scenario: You are implementing the QK^T attention matrix multiply for a 4-head transformer with 32KB L1 data cache. Each head has 64-dim keys, sequence length 128. The full QK^T matrix per head is 128x128x2B = 32KB (exactly fitting L1). You must implement tiled matrix multiply ensuring tiles fit in cache with Q, K, and output simultaneously.
+question: How would you determine optimal tile size and compute expected speedup over naive implementation?
+details:
+  realistic_solution: Optimal tiling requires fitting Q_tile, K_tile, and output_tile in the 32KB L1 simultaneously. For a square T-by-T output tile, Q_tile is T*64, K_tile is T*64, and output_tile is T*T elements, all at 2 bytes, so footprint is (128T + T^2)*2 bytes. The cache constraint is 256T + 2T^2 <= 32,768, whose positive root is about T=79. A power-of-two tile of T=64 uses 24,576 bytes, leaving about 8KB for stack, prefetch, and loop overhead; T=80 would be too close to or above the practical cache budget. Smaller tiles fit but reuse less K/Q data per tile, so T=64 is the best aligned choice. A 3x speedup is an upper bound from replacing repeated SRAM traffic with L1 hits; expected end-to-end speedup should be described as up to about 3x for the memory-dominated QK^T kernel, not guaranteed for the whole model.'
+  common_mistake: |
+    **The Pitfall:** Sizing tiles so Q and K perfectly fill the L1 cache, forgetting the output tensor.
+    **The Rationale:** Engineers focus purely on input tensor footprints and neglect the space required for output accumulation.
+    **The Consequence:** The output tensor spills to SRAM, causing severe cache thrashing and destroying the intended speedup.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - L1 Cache: 32 KB = 32,768 bytes.
+    - Tensors: Q, K, and Output must coexist.
+
+    **Calculations:**
+    - Q tile bytes: T * 64 * 2.
+    - K tile bytes: T * 64 * 2.
+    - Output tile bytes: T * T * 2.
+    - Total tile bytes: (128T + T^2) * 2 = 256T + 2T^2.
+    - Budget limit: 256T + 2T^2 <= 32,768. Solving gives T <= about 79.
+    - For T=64: 256 * 64 + 2 * 64^2 = 16,384 + 8,192 = 24,576 bytes, or 75% of L1.
+    - For T=80: 20,480 + 12,800 = 33,280 bytes, exceeding 32KB before overhead.
+    - Speedup estimate: if the naive kernel repeatedly fetches from SRAM at ~12 cycles/access and tiled reuse hits L1 at ~4 cycles/access for the dominant memory traffic, the kernel-level upper bound is about 12/4 = 3x.
+
+    **Conclusion & Interpretation:**
+    - **Result: T=64 (Memory-Bandwidth Bound).** T=64 is the largest practical aligned tile with cache headroom, and the expected QK^T kernel speedup is up to about 3x when memory traffic dominates.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

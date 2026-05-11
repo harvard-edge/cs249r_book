@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-3018
+track: cloud
+level: L4
+zone: realization
+topic: latency-decomposition
+competency_area: latency
+bloom_level: apply
+phase: both
+title: 'Latency Decomposition: Size the Per-Component Latency for a 70B Model Serving Request'
+scenario: You need to size the per-component latency breakdown for serving a single request to a 70B LLaMA model on one H100 node (80GB HBM3, 3.35TB/s, 989 TFLOPS BF16). The request is 256 tokens prompt, 64 tokens output. Assume no batching, no speculative decoding, and that weights fit in HBM after tensor-parallel split across 4 GPUs with NVLink.
+question: What NVLink bandwidth and all-reduce overhead should be included in the 4-GPU tensor-parallel latency budget?
+details:
+  realistic_solution: |
+    Use one bandwidth convention consistently: budget 450GB/s unidirectional NVLink per GPU, equivalent to about 900GB/s bidirectional. For 4-GPU tensor parallelism, assume 2 all-reduces per transformer layer per generated token, so LLaMA-70B has 160 all-reduce calls per token. At batch size 1, the activation payload is only about 16KB; a ring all-reduce moves roughly 2 * (4-1) / 4 * 16KB = 24KB per GPU, so bandwidth time is far below 1 microsecond. The budget should therefore include NCCL/software latency: about 3 microseconds per call, or 160 * 3us = 0.48ms/token and about 31ms for 64 output tokens.
+  common_mistake: |
+    **The Pitfall:** Assuming tensor parallelism communication latency is bottlenecked by NVLink bandwidth for batch=1.
+    **The Rationale:** Candidates calculate gradient synchronization times (which are bandwidth-heavy for training), failing to see that tiny 16KB activations are bottlenecked entirely by NCCL software overhead.
+    **The Consequence:** Over-investing in raw NVLink bandwidth instead of optimizing NCCL overhead or kernel fusion.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 4-GPU Tensor Parallelism, BS=1.
+    - Activation size is 8192 hidden dim × 2 bytes = 16 KB.
+    - NVLink bandwidth convention: 450 GB/s unidirectional per GPU, about 900 GB/s bidirectional.
+    - NCCL Latency is ~3 µs.
+    - 2 AllReduces per layer × 80 layers = 160 AllReduces per token.
+
+    **Calculations:**
+    - Ring all-reduce traffic per GPU per call = 2 × (4-1)/4 × 16 KB = 24 KB.
+    - Bandwidth time = 24 KB / 450 GB/s ≈ 0.053 µs.
+    - Time per token = 160 × 3 µs = 480 µs (≈0.5 ms).
+    - Total overhead for 64 tokens = 64 × 0.5 ms = 32 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: Include 450GB/s unidirectional NVLink bandwidth and ~32ms of software-overhead communication latency for the 64-token decode**. Tiny 16KB activations are latency-dominated at BS=1; the NVLink transfer term is negligible but should be stated with the chosen convention.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 9
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-2262
+track: cloud
+level: L4
+zone: diagnosis
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: analyze
+phase: training
+title: HMMA to FFMA fallback in Tensor Core codegen
+scenario: You profile a compiled transformer training job on GPUs and find that Tensor Core utilization is only 35% despite the workload being compute-bound. The compiler's generated SASS shows that many matrix multiplies are using FFMA (FP32 fused multiply-add) instructions instead of HMMA (half-precision matrix multiply-accumulate on Tensor Cores). Diagnose why the compiler's target-specific code generation is failing to use the Tensor Cores and identify at which compilation stage the fix must be applied.
+question: Why is codegen falling back to FFMA instead of HMMA, and where in the compiler should you fix it?
+details:
+  realistic_solution: |
+    Tensor Core lowering depends on structural preconditions: supported operand types, compatible MMA tile shapes, legal memory layouts/strides for the selected instruction, and sufficient alignment for the generated vectorized/shared-memory accesses. The compiler is falling back to FFMA because one or more of those preconditions is not represented in the lowered IR. Common causes: (1) the tiling pass chose tile sizes or boundary handling that cannot map cleanly to HMMA fragments, (2) the layout pass left operands in a stride/order that the selected MMA lowering cannot consume without a copy or transpose, or (3) padding/masking for ragged dimensions was not introduced before the GPU lowering. The fix belongs in the tiling, padding, and layout lowering passes, not in final SASS/PTX emission. By the time NVVM/PTX generation runs, the operation has already been classified as scalar/vector FMA or matrix MMA.
+  common_mistake: |
+    **The Pitfall:** Attempting to force Tensor Core usage via nonexistent high-level compiler flags.
+    **The Rationale:** Practitioners treat compiler targets as a black box instead of understanding the rigid structural preconditions required for HMMA lowering.
+    **The Consequence:** Wasting time debugging final PTX generation when the structural failure occurred at the mid-level IR tiling pass.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - The workload is dominated by GEMM-like transformer kernels that are eligible for Tensor Cores after legal tiling/layout lowering.
+       - Profiling reports only 35% Tensor Core utilization, so many eligible matrix operations are being emitted as FFMA.
+       - Peak TFLOPS numbers cannot be mixed as a weighted average because instruction mix, memory traffic, occupancy, and problem shape determine realized throughput.
+    2. **Calculations:**
+       - Valid diagnosis: inspect the lowered IR/SASS and count which GEMM/attention matmul sites use HMMA versus FFMA.
+       - If a hot matmul accounts for fraction f of step time and HMMA makes that kernel s times faster, the step speedup is 1 / ((1 - f) + f / s).
+       - Example: if the affected kernels are 60% of step time and HMMA gives those kernels a measured 3x speedup, step speedup = 1 / (0.40 + 0.60 / 3) = 1.67x.
+    3. **Conclusion & Interpretation:**
+       - **Result: Codegen-Precondition Failure.** The evidence shows missed Tensor Core lowering, not a guaranteed 2.3x throughput gain. Fix the tiling/layout/padding passes and measure the affected kernels to establish the actual speedup.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

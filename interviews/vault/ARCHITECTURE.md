@@ -25,7 +25,7 @@
 > - **CI equivalence via Merkle hash (David N-1 / Chip N-H4)**: compare release_hash to `corpus-equivalence-hash.txt`, not 28 MB byte-diff. §11.5.
 > - **ID collision recovery (Dean N-2 / David N-2)**: `vault renumber` recovers from post-rebase dedup-seq collisions. §3.3.
 > - **FTS5 cost gate (Dean N-5)**: Phase-4 entry gated on ≤500 D1 row-reads per FTS5 query in addition to latency. §10.6.
-> - **Exemplar coverage audit (Chip N-H3)**: Phase 0 produces `vault/exemplar-gaps.yaml` inventory. §14.
+> - **Exemplar coverage audit (Chip N-H3)**: Phase 0 produces a generated `vault/exemplar-gaps.yaml` inventory. CI publishes it as an artifact. §14.
 > - **Codegen contract (Soumith H-NEW-3)**: PR authors run codegen locally; CI verifies via `vault codegen --check`, never pushes follow-up. §13.
 > - **Extended static fallback retention (Dean N-10)**: kept until first post-cutover schema-major bump OR 2 releases, whichever is later. §7.1.
 > - **Canary DAU-adjusted (David N-5)**: soak = max(15 min, ≥100 sessions observed). §4.3.
@@ -348,6 +348,88 @@ release_hash = sha256(b"\n".join(f"{id}:{h}".encode() for id, h in leaves))
 
 ---
 
+### 3.6 v1.1 architecture updates (post-Phase-1/2 — chain build)
+
+After the v1.0 design doc above was written, three deltas landed during
+the corpus growth workstream tracked in
+[`vault-cli/docs/CHAIN_ROADMAP.md`](../vault-cli/docs/CHAIN_ROADMAP.md).
+They are additive to the v1 invariants, not replacements:
+
+**1. Hierarchical question layout.** Questions live at
+`interviews/vault/questions/<track>/<area>/<id>.yaml` (the v1 design
+above sketched `<track>/L<N>/<zone>/`; the actual landed layout is
+`<track>/<area>/`). The hierarchy is a build-time concern — `corpus.json`
+is path-agnostic, so site/runtime code is unaffected. `vault check
+--strict` enforces a path-vs-body invariant: the directory shards
+(track/area) must match the YAML body's `track`/`competency_area` fields.
+
+**2. Sidecar chain architecture.** `interviews/vault/chains.json` is the
+authoritative chain registry. Per-question YAMLs no longer carry a
+`chains:` field — that field was retired in v1.1 to keep chain rebuilds
+to a single-file edit instead of touching 2k+ YAMLs. The exporter
+(`vault_cli.legacy_export._build_chain_index`) joins YAML + chains.json
+to produce per-question `chain_ids` / `chain_positions` in the runtime
+`corpus.json`. §3.3's chain-reference rules still hold for the
+**runtime artifact** (multi-chain membership, position monotonic, etc.);
+they no longer apply to YAML source.
+
+**3. Chain tier model.** Each entry in `chains.json` carries a
+`tier: "primary" | "secondary"` field:
+  - **primary** — the strict Bloom-progression sweep (Δ ∈ {1, 2}).
+    Rendered by default in practice/explore.
+  - **secondary** — the lenient second-pass coverage sweep
+    (Δ ∈ {0, 1, 2, 3}; Δ=0 only for shared-scenario pairs). Reachable
+    via `?chain=<id>` URL deep-links and the "more paths" UI; the
+    `ChainBadge` shows an inline "alt path" pill when rendering one.
+  - The legacy exporter emits `chain_tiers` per question alongside
+    `chain_positions`. Missing tier defaults to "primary" everywhere
+    on read (validator + TS runtime + UI), which keeps the v1.0
+    chains.json shape forward-compatible.
+
+Tooling that produced these: `diagnose_chain_coverage.py`,
+`build_chains_with_gemini.py` (with `--mode {strict,lenient}`),
+`merge_chain_passes.py`. See the README's "Chain build pipeline"
+section for invocation, and CHAIN_ROADMAP.md for the running log.
+
+The v1 release-pipeline invariants (§3.5 hashing, §5 validators)
+absorb these without modification — `chains.json` is a Merkle leaf,
+and the new `tier` field flows into that leaf transparently.
+
+#### 3.6.1 Authoring conventions introduced in Phase 3
+
+Two YAML-body conventions were introduced when LLM-authored questions
+started landing via [`generate_question_for_gap.py`](../vault-cli/scripts/generate_question_for_gap.py).
+Neither is enforced by the schema (Pydantic accepts extra keys); both
+are stable across the pipeline:
+
+- **Private `_authoring` block** (drafts only). Underscore-prefixed so
+  it's clearly metadata, not a content field. Recorded by
+  `generate_question_for_gap.py` and stripped at promotion time
+  (`promote_drafts.py`). Shape:
+  ```yaml
+  _authoring:
+    origin: gemini-3.1-pro-preview
+    tool: generate_question_for_gap.py
+    generated_at: <ISO-8601 UTC>
+    gap:
+      between: [<lower-qid>, <higher-qid>]
+      missing_level: L<N>
+      rationale: <free text>
+  ```
+  At promotion the block is unwound into proper schema fields:
+  `provenance: llm-draft`, `authors: [<origin>]`,
+  `human_reviewed: { status: ... }`, `created_at: <generated_at>`,
+  plus a `gap-bridge:<lower>-<higher>` tag (see below).
+
+- **`gap-bridge:<from>-<to>` tag.** Added to the question's `tags` list
+  at promotion. Lets you find every LLM-bridge question for a given
+  pair of anchors via plain `git grep`, and gives the chain rebuild a
+  signal that this question was authored to fit a specific bridge.
+  Format is intentionally machine-stable: lowercase qids joined by a
+  literal dash, no whitespace.
+
+---
+
 ## 4. CLI Specification (v2)
 
 Framework: **Typer** (declarative, type-hint-driven). Output: **Rich** (tables, progress, panels).
@@ -394,11 +476,11 @@ vault move <id> --to <track>/<level>/<zone> [--edit] [--dry-run]
 ### 4.2 Build primitives
 
 ```
-vault build [--output <path>] [--legacy-json]
+vault build [--output <path>] [--local-json]
     Walks questions/**/*.yaml. Validates each. Compiles to vault.db.
     Target: < 10s for 10K files (parallelized across cores). Reports all errors,
         does not fast-fail on first error.
-    --legacy-json: additionally emits corpus.json for generators that haven't been
+    --local-json: additionally emits corpus.json for generators that haven't been
         migrated. Used during Phase 1–3 only; removed at cutover. (Fixes C-2.)
 
 vault check [--strict] [--tier fast|structural|slow]
@@ -953,9 +1035,9 @@ If ANY of the three gates miss (p99 warm, p99 cold, cost), fall back to a Worker
 
 The moment the YAML split lands (Phase 1 milestone):
 - `vault/questions/**/*.yaml` is the **sole source of truth** for every question.
-- `vault/corpus.json` becomes a **generated artifact** (written by `vault build --legacy-json`). Read-only for humans.
+- `vault/corpus.json` becomes a **generated artifact** (written by `vault build --local-json`). Read-only for humans.
 - A **pre-commit hook** refuses any commit that touches `vault/corpus.json` directly (detects via `git diff --name-only` + rule). Override requires a one-line exception in a commit trailer (`Vault-Override: corpus-json-hand-edit` with justification) — used only if the author has to fix a build-time regeneration bug.
-- A **CI check** runs `vault build --legacy-json` and fails the PR if the committed `corpus.json` doesn't match the regenerated output byte-for-byte. This catches any drift immediately.
+- A **CI check** runs `vault build --local-json` and fails the PR if the committed `corpus.json` doesn't match the regenerated output byte-for-byte. This catches any drift immediately.
 
 ### 11.2 Downstream-consumer compatibility during phases 1–3
 
@@ -1176,7 +1258,7 @@ Each phase is a safe stopping point. If priorities shift, pause at a phase bound
 - Write `vault/schema/EVOLUTION.md` — SemVer rules, loader contract, migration mechanics. (Fixes H-1.)
 - Write `vault-cli/docs/JSON_OUTPUT.md` and `EXIT_CODES.md`.
 - CI scaffolding: `.github/workflows/staffml-validate-vault.yml` runs `vault check` placeholder (expanded in Phase 1).
-- **Exemplar-coverage audit** (v2.1 — Chip N-H3): `vault stats --exemplar-coverage` reports which `(track, level, zone)` cells have <3 human-reviewed questions eligible for the `vault/exemplars/` pool. Output to `vault/exemplar-gaps.yaml`. This is a READ-ONLY audit at Phase 0; filling gaps is backlog work that unblocks `vault generate` (Phase 7), not a Phase 0 blocker.
+- **Exemplar-coverage audit** (v2.1 — Chip N-H3): `vault stats --exemplar-coverage` reports which `(track, level, zone)` cells have <3 human-reviewed questions eligible for the `vault/exemplars/` pool. Output is generated as `vault/exemplar-gaps.yaml` for local use and published by CI as an artifact, not tracked as source. This is a READ-ONLY audit at Phase 0; filling gaps is backlog work that unblocks `vault generate` (Phase 7), not a Phase 0 blocker.
 - **Milestone**: `pip install -e vault-cli/ && vault --version` works. Skeleton CI green. Exemplar gap inventory produced.
 
 ### Phase 1 — Foundation (5 days) — was 3
@@ -1306,10 +1388,10 @@ When resuming:
 |---|---|
 | `interviews/vault/corpus.json` (28 MB) | **Generated, not authored.** Pre-commit hook refuses direct edits. Retained as pre-split reference snapshot. |
 | `interviews/vault/questions/**/*.yaml` | Sole source of truth. 9,657 files. |
-| `interviews/staffml/src/data/corpus.json` | **Regenerated** by `vault build --legacy-json` from YAML. 9,199 published questions. CI diff-check enforces equivalence. Bundled in site until Phase-4 cutover; removed 2 releases post-cutover per §7.1 retention. |
+| `interviews/staffml/src/data/corpus.json` | **Regenerated** by `vault build --local-json` from YAML. 9,199 published questions. CI diff-check enforces equivalence. Bundled in site until Phase-4 cutover; removed 2 releases post-cutover per §7.1 retention. |
 | `interviews/vault/scripts/generate.py` | Phase-7 follow-up: `vault generate --topic X --zone Y --level Lz --count N` (see §12). |
-| `interviews/vault/scripts/export_to_staffml.py` | **DEPRECATED** (header added). Replaced by `vault build --legacy-json`. |
-| `interviews/staffml/scripts/sync-vault.py` | **DEPRECATED** (header added). Replaced by `vault build --legacy-json`. |
+| `interviews/vault/scripts/export_to_staffml.py` | **DEPRECATED** (header added). Replaced by `vault build --local-json`. |
+| `interviews/staffml/scripts/sync-vault.py` | **DEPRECATED** (header added). Replaced by `vault build --local-json`. |
 | `interviews/staffml/scripts/generate-manifest.py` | **DEPRECATED** (header added). Manifest emitted as release artifact by `vault publish`. |
 | `interviews/paper/scripts/analyze_corpus.py` | **DEPRECATED** (header added). Replaced by `vault export-paper <version>` (SQL over vault.db). |
 | `interviews/paper/scripts/generate_macros.py` | **Rewritten** as thin wrapper over `vault export-paper`. Paper.tex needs no edits — legacy `\num*` namespace preserved alongside new `\staffml*`. |
@@ -1320,7 +1402,7 @@ When resuming:
 **Migration complete** (in-repo): YAML is authoritative; all downstream
 artifacts (vault.db, corpus.json, macros.tex, corpus_stats.json) regenerate
 deterministically from it via `vault build` + `vault export-paper` +
-`vault build --legacy-json`. Phase-4 cutover (swap site's bundled JSON for
+`vault build --local-json`. Phase-4 cutover (swap site's bundled JSON for
 live D1 reads) is the remaining step, deploy-gated on user action.
 
 ---

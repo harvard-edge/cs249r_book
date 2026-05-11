@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: edge-1730
+track: edge
+level: L5
+zone: realization
+topic: compound-ai-systems
+competency_area: deployment
+bloom_level: evaluate
+phase: both
+title: Multi-Model Pipelining on Hailo-8 Dataflow Architecture
+scenario: You are deploying a compound retail checkout pipeline on a single Hailo-8 accelerator (26 TOPS INT8, 2.5W, no local DRAM). The pipeline cascades a primary object detector to locate items and a secondary OCR network to read text on those items. Because the Hailo-8 lacks local DRAM and must stream from host memory, you must evaluate the tradeoffs between sequentially swapping the two models per frame versus co-compiling them to share the accelerator's spatial resources concurrently to meet a strict 30 FPS requirement.
+question: Should the detector and OCR networks be swapped sequentially or co-compiled on Hailo-8 to meet 30 FPS, and why?
+details:
+  realistic_solution: Co-compile the detector and OCR networks when the Hailo toolchain can fit and schedule the combined graph. Sequential swapping is the worse basis for 30 FPS because it repeatedly reloads model state from host memory and breaks the dataflow pipeline. Co-compilation can avoid repeated weight reloads and enable prioritized scheduling or resource sharing across the cascade, but it does not mean both full models always execute simultaneously or that host traffic disappears; normal input, output, and activation traffic still remains.
+  common_mistake: |
+    **The Pitfall:** Treating the Hailo-8 like a traditional edge GPU and swapping models sequentially.
+    **The Rationale:** Candidates assume model swapping is cheap, failing to account for the lack of local DRAM which forces constant reloading over the PCIe bus.
+    **The Consequence:** Severe PCIe bandwidth bottlenecks that destroy inference throughput and violate the 30 FPS deadline.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Hailo-8 (26 TOPS, 2.5W, no local DRAM)
+    - 30 FPS target
+    - Detector (30 GOPs, 20MB), OCR (10 GOPs, 10MB)
+
+    **Calculations:**
+    - Compute needed: (30 + 10) GOPs * 30 FPS = 1.2 TOPS (fits 26 TOPS budget)
+    - If the runtime reloads both weight sets every frame, avoidable weight traffic is (20MB + 10MB) * 30 FPS = 900 MB/s before activations.
+    - If both networks are co-compiled, weights are placed once in the compiled execution graph, so per-frame host traffic is dominated by inputs, outputs, and intermediate activations rather than repeated 30MB weight reloads.
+
+    **Conclusion & Interpretation:**
+    - **Result: Co-compilation removes up to 900 MB/s of avoidable per-frame weight reload traffic (Bandwidth-Bound)**. The exact remaining traffic depends on the deployed tensor pipeline, but repeated model swapping is the wrong basis for meeting 30 FPS.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 13
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

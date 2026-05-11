@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-4484
+track: cloud
+level: L3
+zone: recall
+topic: recommendation-systems-engineering
+competency_area: architecture
+bloom_level: understand
+phase: inference
+title: Retrieval Recall at 10K in Multi-Stage Recommendations
+scenario: A 3-stage recommendation pipeline (retrieval -> light rank -> heavy rank) outputs 20 final items from 1M candidates. An SRE notices that 30% of the 20 final items were not in the top 10K retrieved by the retrieval stage. This means the retrieval stage has 70% recall @10K.
+question: Given a launch gate of under 1% NDCG loss versus 50K oracle retrieval, is 70% recall@10K sufficient?
+details:
+  realistic_solution: Do not launch on recall@10K alone. The stated gate is final-quality loss, so run the heavy ranker with normal 10K retrieval and with a 50K oracle-style candidate set, then compare NDCG and the relevant business metric. If the 10K pipeline is within 1% NDCG loss and guardrail metrics are neutral, 70% recall@10K can be accepted temporarily while retrieval is improved. If the NDCG loss is 1% or more, or the missing items include highly ranked oracle winners, the retrieval stage is blocking launch. The follow-up work is to inspect recall@1K, recall@10K, and recall@50K curves by segment, because 70% recall@10K with a flat recall curve usually means the retrieval model or indexing features need improvement.
+  common_mistake: |
+    **The Pitfall:** Treating retrieval recall as an isolated system-level metric.
+    **The Rationale:** Assuming high recall directly translates to high final ranking quality without evaluating the full pipeline's final metric (NDCG).
+    **The Consequence:** Wasting resources optimizing retrieval recall when missed items have negligible impact on final ranking.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - The heavy ranker produces 20 final items.
+    - Retrieval recall @10K is 70%, so 30% of the heavy ranker's chosen final items were unavailable to the normal pipeline.
+    - Offline oracle retrieval can pass a larger candidate set, such as 50K, to estimate quality loss.
+
+    **Calculations:**
+    - Missed final items per request: 20 * 30% = 6 items.
+    - Current retrieved final items per request: 20 - 6 = 14 items.
+    - Launch check: run the same rankers with 10K retrieval and with 50K oracle-style retrieval, then compute NDCG loss = (NDCG_50K - NDCG_10K) / NDCG_50K.
+    - Decision rule: launch only if NDCG loss < 1% and guardrail metrics are neutral; otherwise improve retrieval before launch.
+    - Interpretation of the six missed items depends on rank position: missing six low-utility tail items may pass the NDCG gate, but missing top-ranked oracle items usually fails it.
+
+    **Conclusion & Interpretation:**
+    - **Result: Gate on final quality, not recall alone.** At 70% recall@10K, the system excludes about 6 of the oracle final-20 items per request; it is sufficient only if the measured 10K-vs-50K NDCG loss stays under 1%.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

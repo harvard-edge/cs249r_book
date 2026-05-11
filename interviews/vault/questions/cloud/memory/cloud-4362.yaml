@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-4362
+track: cloud
+level: L5
+zone: diagnosis
+topic: vram-budgeting
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: MI300X XCD Bandwidth Locality
+scenario: The MI300X has 8 XCDs (Compute Dies) sharing a unified 192GB HBM3 pool. A kernel achieves 4.2 TB/s measured bandwidth — 79% of the 5.3 TB/s peak. A developer then splits the workload across all 8 XCDs using hip-aware thread block placement and measures 3.1 TB/s. They expected 8× improvement from parallelism.
+question: Why does splitting the kernel across all 8 MI300X XCDs reduce bandwidth from 4.2 TB/s to 3.1 TB/s, and how should memory locality be handled?
+details:
+  realistic_solution: |
+    The MI300X is a multi-die chiplet design: 8 Compute Dies (XCDs) connected through the package fabric to a unified HBM3 pool. Unified memory does not mean uniform bandwidth for every access pattern: if thread blocks running on one XCD frequently touch pages physically served through another XCD or create cross-die synchronization, the package fabric can become the limiter. The bandwidth regression from 4.2 TB/s to 3.1 TB/s indicates that the split placement changed locality or scheduling enough to add cross-XCD traffic rather than exposing more HBM bandwidth. Fix by partitioning data per XCD, keeping each XCD's blocks mostly on the pages they stream, and using ROCm/HIP placement, affinity, and profiling tools to verify locality. Regular matmuls may tolerate the unified memory controller well, but placement and affinity still matter; do not assume all workloads see uniform HBM bandwidth automatically.
+  common_mistake: |
+    **The Pitfall:** Assuming all 8 XCDs have equal-latency access to all 192GB of HBM3.
+    **The Rationale:** Candidates miss that the MI300X has NUMA-like memory locality; crossing the Infinity Fabric for remote HBM3 access bottlenecks bandwidth.
+    **The Consequence:** Suboptimal thread placement causing unexpected bandwidth regressions on multi-die accelerators.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - MI300X peak HBM bandwidth is 5.3 TB/s across the package.
+    - The single-kernel measurement reaches 4.2 TB/s, or 79% of peak.
+    - The split-XCD measurement reaches 3.1 TB/s.
+    - The prompt does not specify a remote-access fraction or a sustained cross-die bandwidth model.
+
+    **Calculations:**
+    - Absolute bandwidth drop = 4.2 - 3.1 = 1.1 TB/s.
+    - Relative drop versus the original kernel = 1.1 / 4.2 = 26%.
+    - Peak utilization falls from 4.2 / 5.3 = 79% to 3.1 / 5.3 = 58%.
+    - Because arithmetic intensity and work volume did not change, the drop points to placement/locality overhead rather than lack of XCD parallelism.
+
+    **Conclusion & Interpretation:**
+    - **Result: 26% Bandwidth Regression (Locality-Bound)**. The defensible conclusion is qualitative: remote HBM access and cross-XCD traffic are likely bottlenecking the split placement, so bind work to local pages and partition data NUMA-aware instead of assuming all XCDs see uniform HBM bandwidth.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: edge-0953
+track: edge
+level: L4
+zone: evaluation
+topic: real-time-deadlines
+competency_area: optimization
+bloom_level: analyze
+phase: inference
+title: Orin Robotics CPU vs GPU Image Preprocessing
+scenario: A robotic arm uses Orin. Preprocessing an image takes 5ms on the ARM CPU or 1ms on the GPU. However, transferring the image to the GPU kernel costs 2ms.
+question: For the 60 FPS robotics loop, should image preprocessing stay on the ARM CPU or be offloaded to the GPU?
+details:
+  realistic_solution: |
+    Keep preprocessing on the ARM CPU if the GPU is already running the main inference stage. The isolated GPU preprocess path is faster at 3ms versus 5ms, but it consumes the same GPU resource needed for inference. At 60 FPS, the 5ms CPU stage can overlap with the previous frame's 10ms GPU inference and still fit within the 16.6ms frame budget. Offloading preprocessing to the GPU serializes 3ms of preprocessing with 10ms of inference on the GPU, reducing scheduling headroom even though single-frame latency may still meet 60 FPS.
+  common_mistake: |
+    **The Pitfall:** Blindly migrating all mathematical operations to the GPU to lower isolated micro-benchmarks.
+    **The Rationale:** Engineers assume "GPU is faster" without accounting for transfer overhead and context switching in a pipelined system.
+    **The Consequence:** Creating severe resource contention and pipeline stalls, ultimately increasing end-to-end latency.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 60 FPS loop requires 16.6ms latency budget.
+    - CPU Preprocessing: 5ms. GPU Preprocessing: 1ms (compute) + 2ms (transfer) = 3ms.
+    - GPU Inference time: ~10ms.
+
+    **Calculations:**
+    - CPU approach single-frame latency = 5ms preprocess + 10ms inference = 15ms, within 16.6ms.
+    - CPU pipelined period after fill = max(5ms CPU stage, 10ms GPU stage) = 10ms, if CPU/GPU overlap cleanly.
+    - GPU offload single-frame latency = 3ms preprocess + 10ms inference = 13ms, within 16.6ms.
+    - GPU offload pipelined period = 3ms + 10ms = 13ms on the GPU because both stages contend for the same accelerator.
+
+    **Conclusion & Interpretation:**
+    - **Result: keep preprocessing on CPU for better pipeline concurrency.** GPU offload improves the isolated preprocessing stage but lowers accelerator headroom by serializing preprocessing with inference.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

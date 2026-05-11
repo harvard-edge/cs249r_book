@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-2372
+track: cloud
+level: L6+
+zone: mastery
+topic: fault-tolerance-checkpointing
+competency_area: reliability
+bloom_level: evaluate
+phase: training
+title: PFC Deadlock Recovery Latency Tradeoff
+scenario: Your RoCEv2 network experiences cyclic buffer dependencies resulting in PFC deadlocks during intensive All-to-All communication. The switches support a deadlock recovery mechanism that drops packets after a timeout, allowing the network to unfreeze. You must configure the PFC deadlock timeout interval. The options are 100 microseconds or 50 milliseconds.
+question: How should you choose between 100us and 50ms PFC deadlock timeouts, and what are the performance and stability tradeoffs?
+details:
+  realistic_solution: |
+    Priority Flow Control (PFC) pauses traffic to prevent buffer overflow, but cyclic dependencies between paused queues can leave a set of switches unable to drain. A deadlock recovery timeout is a guardrail: after the timeout, the switch can break the condition through vendor-specific recovery behavior such as disabling the pause condition or dropping affected traffic, after which RoCEv2/RDMA recovery must repair any loss.
+
+    The 100us setting is aggressive. It minimizes the stall if the network is truly deadlocked, but it can misclassify normal microbursts or transient queue drain time as deadlock, causing avoidable packet loss and RDMA recovery overhead. The 50ms setting is conservative. It is much less likely to fire during normal congestion, but a true deadlock can freeze affected traffic for 50ms, which is a large tail-latency event for synchronized training.
+
+    The right choice depends on measured pause durations and the switch vendor's recovery behavior. Given only these two choices, choose 100us only if telemetry proves normal PFC pauses are well below that threshold; otherwise 50ms is safer for stability but accepts severe stalls on real deadlocks.
+  common_mistake: |
+    **The Pitfall:** Automatically setting the timeout to the lowest threshold (100us) assuming it provides the fastest possible recovery.
+    **The Rationale:** Novice operators falsely equate "faster timeouts" with "higher performance," ignoring the mechanics of RoCEv2 and normal port queuing microbursts.
+    **The Consequence:** Spurious recovery is triggered during ordinary congestion, causing avoidable packet loss, RDMA retry/recovery overhead, and unstable training throughput.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 400 Gbps network bandwidth per link.
+    - Choices: 100us (aggressive) or 50ms (conservative).
+
+    **Calculations:**
+    - Bandwidth conversion: 400 Gbps = 50 GB/s using decimal units.
+    - 100us false-positive cost: a spurious recovery can drop traffic during a normal pause and force RDMA recovery even though the queue would have drained naturally.
+    - 50ms true-deadlock cost: a 50ms freeze on one 400 Gbps link loses 50 GB/s * 0.05s = 2.5 GB of transfer opportunity.
+    - If an All-to-All phase normally takes 10ms, a 50ms deadlock stall adds 5x that phase's normal duration before recovery even begins.
+
+    **Conclusion & Interpretation:**
+    - **Result: timeout tradeoff.** 100us minimizes true-deadlock duration but risks false recovery during microbursts; 50ms avoids most false positives but can create large synchronized-training stalls on real deadlocks.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 15
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

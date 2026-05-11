@@ -1,0 +1,40 @@
+schema_version: '1.0'
+id: cloud-2413
+track: cloud
+level: L4
+zone: diagnosis
+topic: neural-architecture-search
+competency_area: architecture
+bloom_level: analyze
+phase: training
+title: Batch-1 TPU MXU Underutilization
+scenario: You are testing a latency-sensitive 7B parameter LLM inference service on TPU v4 instances after serving it on A100 GPUs. In your serving stack, A100 batch-1 latency is 35ms per token, while TPU v4 batch-1 latency is 90ms per token despite the TPU's higher peak theoretical TFLOPS. Profiling shows TPU Matrix eXecution Unit (MXU) utilization is below 5%.
+question: Why is TPU v4 slower than A100 at batch size 1, and how would you co-design the serving stack to fix it?
+details:
+  realistic_solution: The issue is a mismatch between the batch-1 serving shape and the TPU dataflow stack, not a universal rule that TPU v4 is slower than A100. TPUs use large systolic MXUs that are most efficient when matrix tiles and batches provide enough work to amortize array fill, compilation/runtime scheduling, and host-to-device overhead. At batch size 1, this service is effectively running small matrix-vector work that underfills the MXU and exposes fixed serving overheads. To fix it, co-design the serving stack with continuous batching, sequence packing, stable compiled shapes, and latency-aware admission control so the TPU sees larger effective matrix work without violating the request latency target.
+  common_mistake: |
+    **The Pitfall:** Blaming the TPU compiler (XLA) for poor fusion and attempting to manually write low-level custom kernels.
+    **The Rationale:** Engineers treat the TPU like a standard SIMT GPU, failing to recognize the rigid 128x128 spatial layout of a systolic array.
+    **The Consequence:** Development time is wasted on low-level optimizations that cannot physically overcome the underfilled matrix math hardware at batch size 1.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - TPU v4 MXU physical dimensions: 128x128 grid.
+       - Batch size: 1.
+    2. **Calculations:**
+       - A batch size of 1 requires multiplying a 1xN vector by an NxM matrix.
+       - Depending on tiling and hidden dimensions, the workload can underfill one spatial dimension of the MXU and pay fixed costs for array fill, scheduling, and kernel launch.
+       - The observed profiler result, below 5% MXU utilization, is therefore a workload measurement rather than a universal 1/128 hardware rule.
+    3. **Conclusion & Interpretation:**
+       - **Result: Utilization-Bound.** Continuous batching, sequence packing, and serving-stack co-design raise effective matrix sizes, improve arithmetic intensity, and amortize fixed TPU execution costs; the required batch depends on model shape and latency target.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview

@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-2807
+track: cloud
+level: L6+
+zone: mastery
+topic: data-parallelism
+competency_area: parallelism
+bloom_level: create
+phase: training
+title: Heterogeneous-Bandwidth Data-Parallel AllReduce Architecture
+scenario: Architect a data-parallel AllReduce strategy for a 13B parameter model trained on 128 A100 80 GB GPUs distributed across 16 nodes. The cluster has heterogeneous interconnect — 8 of the 16 nodes share an InfiniBand HDR (200 Gbps) island, while the other 8 nodes are connected only via 100 Gbps Ethernet to the IB island via two gateway switches. Per-node intra-node fabric is NVLink 3.0 (600 GB/s bidirectional / 300 GB/s unidirectional). Design a DP-only synchronization strategy that respects this asymmetric topology and bounds the exposed AllReduce time so that it fits inside the 380 ms backward pass.
+question: How would you architect data-parallel AllReduce on 128 A100s split between an InfiniBand HDR island and an Ethernet half so synchronization fits inside a 380 ms backward pass?
+details:
+  realistic_solution: 'Use topology-aware hierarchical AllReduce and be explicit that the stated 380 ms target is not reachable if all 26 GB of BF16 gradients must cross a single 100 Gbps gateway during the step. Level 1: reduce-scatter within each 8-GPU node over NVLink. Level 2: aggregate within the IB island and within the Ethernet half independently. Level 3: exchange only the already-reduced cross-partition shard through both gateway switches in parallel, using large buckets that start as soon as backward produces them. With two 100 Gbps gateways, the cross-partition payload is still about 26 GB over 25 GB/s aggregate, so roughly 1.04 s of gateway service time must be overlapped or reduced through compression/local-SGD. If exact DP AllReduce is mandatory, the design should relax the 380 ms bound; if the bound is mandatory, add lossy compression or less frequent cross-island averaging.'
+  common_mistake: |
+    **The Pitfall:** Treating the 128-GPU world as a flat ring AllReduce.
+    **The Rationale:** A flat ring is bottlenecked by the slowest link (the 100 Gbps Ethernet). The fix is hierarchy and topology awareness, not gradient compression alone.
+    **The Consequence:** Total bus traffic becomes roughly 51.6 GB at 12.5 GB/s, taking ~4.1 s — over 10x the backward pass time.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 13B params, BF16 = 26 GB gradient.
+    - The topology has two partitions of 64 GPUs each: an IB island and an Ethernet half.
+    - Gateway: two 100 Gbps links if both gateway switches can be used, for 25 GB/s aggregate; one gateway is 12.5 GB/s.
+    - Exact DP averaging requires the two 64-GPU partitions to exchange their reduced gradient information every step.
+
+    **Calculations:**
+    - BF16 gradient payload: 13B params * 2 bytes = 26 GB, not 52 GB.
+    - A flat 128-rank ring is bottlenecked by the 100 Gbps boundary and requires roughly 2*(127/128)*26 GB ≈ 51.6 GB of per-rank ring traffic, so a boundary rank can be exposed to seconds of service time at 12.5 GB/s.
+    - In the hierarchical design, first reduce within each 64-GPU partition, then exchange the already-reduced full 26 GB gradient across the IB/Ethernet boundary once for exact cross-partition averaging.
+    - Gateway service time for that boundary exchange is 26 GB / 12.5 GB/s ≈ 2.08 s with one gateway, or 26 GB / 25 GB/s ≈ 1.04 s with two active gateways.
+    - Backward overlap can hide at most 0.38 s of that service time, leaving at least 1.04 s - 0.38 s ≈ 0.66 s exposed even in the two-gateway case.
+
+    **Conclusion & Interpretation:**
+    - **Result:** Exact DP AllReduce cannot be bounded under 380 ms on the stated topology. Meeting that bound requires changing the requirement, such as compressed gradients, local-SGD with periodic cross-island averaging, or additional gateway bandwidth.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

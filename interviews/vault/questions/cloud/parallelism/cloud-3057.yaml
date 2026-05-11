@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-3057
+track: cloud
+level: L6+
+zone: mastery
+topic: pipeline-parallelism
+competency_area: parallelism
+bloom_level: create
+phase: training
+title: TP-PP-DP Sizing for 530B Training on 512 H100s
+scenario: You are designing a 3D parallel training system (data + tensor + pipeline) for a 530B parameter model (GPT-3 scale) using 512 H100 GPUs.
+question: How would you choose TP, PP, and DP degrees for a 530B model on 512 H100s, and what are the resulting bubble overhead and memory per device?
+details:
+  realistic_solution: Choose TP=8, PP=8, DP=8 so 8-way tensor parallelism stays inside an H100 node over NVLink, pipeline stages can be placed across nodes, and the product is 8*8*8 = 512 GPUs. The local TP/PP shard is 530B/(8*8) = 8.281B parameters. BF16 weights are 8.281B*2 bytes = 16.56GB per GPU. Assuming ZeRO-style sharding of BF16 gradients and Adam optimizer states across the 8 DP replicas, the gradient shard is 16.56/8 = 2.07GB and FP32 Adam moments plus master weights are 8.281B*12 bytes/8 = 12.42GB. Add about 8GB for checkpointed activations, giving roughly 39GB before temporary buffers and fragmentation. Bubble with m=64 is (8-1)/(64+8-1) = 7/71 = 9.9%. The design fits in 80GB while keeping TP node-local; without DP sharding of optimizer state it would not fit.
+  common_mistake: |
+    **The Pitfall:** Choosing parallelism degrees without verifying memory fits, or ignoring that tensor parallelism requires NVLink.
+    **The Rationale:** Candidates often focus purely on compute distribution and forget the massive memory footprint of optimizer states or the latency penalties of cross-node tensor parallelism.
+    **The Consequence:** The proposed design either OOMs immediately or suffers from catastrophic inter-node communication bottlenecks.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Model: 530B parameters. BF16 weights/gradients (2 bytes/param).
+       - Adam moments plus master weights: 12 bytes/param, sharded across DP=8.
+       - Cluster: 512 H100 GPUs (80 GB each).
+    2. **Calculations:**
+       - Parallelism Degrees: TP=8 (node size), PP=8, DP=8 (Total = 8 * 8 * 8 = 512).
+       - Params per TP/PP shard: 530B / (8 * 8) = 8.281B params.
+       - BF16 weights per GPU: 8.281B * 2 bytes = 16.56GB.
+       - BF16 gradient shard with DP sharding: 16.56GB / 8 = 2.07GB.
+       - Adam states plus master weights with DP sharding: 8.281B * 12 bytes / 8 = 12.42GB.
+       - Checkpointed activations: ~8GB.
+       - Estimated per-GPU memory: 16.56 + 2.07 + 12.42 + 8 = 39.05GB before temporary buffers.
+       - Bubble Overhead (PP=8, m=64 micro-batches) = (8-1)/(64+8-1) = 7/71 = ~9.9%.
+    3. **Conclusion & Interpretation:** **Result: TP=8, PP=8, DP=8 Fits with DP-Sharded Optimizer State**. The configuration fits within 80GB HBM with practical headroom and keeps high-bandwidth tensor-parallel communication inside a node.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

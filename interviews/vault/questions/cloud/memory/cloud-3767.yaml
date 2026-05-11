@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-3767
+track: cloud
+level: L4
+zone: analyze
+topic: memory-mapped-inference
+competency_area: memory
+bloom_level: analyze
+phase: inference
+title: 'mmap vs Safetensors: Cold Start Optimization for Model Serving'
+scenario: Your inference platform serves 50 different fine-tuned 7B models from a shared GPU pool. Models are stored as safetensors files on NVMe. When a cold request arrives, you need sub-3-second cold start latency.
+question: For sub-3-second cold starts across 50 safetensors 7B models, how do NVMe read, mmap, and host-RAM caching compare?
+details:
+  realistic_solution: 'Approach 1 (explicit NVMe read): a 7B FP16 model is about 14 GB, so NVMe-to-host read time is 14/7 = 2.0s. Copying those weights to GPU over PCIe 5.0 adds 14/64 = 0.22s, for about 2.22s before framework overhead. This can meet a sub-3-second target if allocation and deserialization overhead are controlled. Approach 2 (mmap safetensors): mapping the file is cheap, but mmap does not eliminate I/O; cold first access faults pages from NVMe into the page cache, then the GPU copy still has to read those host pages. Cold latency is therefore bounded by the same ~2.0s NVMe read plus ~0.22s GPU copy, with possible extra page-fault overhead depending on filesystem and access pattern. Warm mmap can be much faster because pages already in the OS page cache avoid NVMe reads. Approach 3 (host-RAM caching): preloading all 50 models needs 50*14 = 700 GB host RAM, which is expensive but removes cold NVMe reads for every model. A practical hybrid is to mmap all safetensors and budget
+    host RAM/page cache for the hot subset; hot models load near warm-cache speed, while cold models still pay the NVMe read floor.'
+  common_mistake: |
+    **The Pitfall:** Ignoring the zero-copy design of safetensors and failing to leverage mmap.
+    **The Rationale:** Candidates default to legacy loading methods (like pickle-based `.bin` files) that require CPU deserialization.
+    **The Consequence:** Unnecessarily slow load times and excessive CPU memory usage, severely limiting the number of models the platform can realistically host.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Models: 50 * 14 GB.
+    - NVMe BW: 7 GB/s. PCIe BW: 64 GB/s. Target: <3s.
+
+    **Calculations:**
+    - Explicit cold load: NVMe read = 14 GB / 7 GB/s = 2.0s.
+    - GPU copy after load: 14 GB / 64 GB/s = 0.22s.
+    - Explicit cold read + GPU copy = 2.22s before framework overhead.
+    - mmap cold: mapping is cheap, but first access still reads up to 14 GB from NVMe, so the same ~2.0s I/O floor applies, plus possible page-fault overhead, plus the 0.22s GPU copy.
+    - mmap warm: if pages are already in the OS page cache, NVMe read is avoided and the remaining weight transfer is dominated by the GPU copy and framework overhead.
+    - Host RAM cache for all models: 50 * 14 GB = 700 GB.
+
+    **Conclusion & Interpretation:**
+    - **Result: explicit reads and cold mmap both have a ~2.22s I/O-plus-copy floor; warm mmap or host-RAM caching removes the NVMe part**. Use mmap/page cache for hot-model sharing, but do not treat mmap as eliminating cold I/O.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

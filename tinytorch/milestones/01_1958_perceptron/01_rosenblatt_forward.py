@@ -85,7 +85,9 @@ This milestone shows you WHY training is essential - the model won't work withou
 import sys
 import os
 import numpy as np
-rng = np.random.default_rng(7)
+# Unseeded RNG: each run draws different cluster points so the demo lives up
+# to the on-screen "No random seed - each run will be different!" promise.
+rng = np.random.default_rng()
 import argparse
 
 # Add project root to path for correct tinytorch imports
@@ -299,6 +301,13 @@ def main():
     console.print("[bold]🧠 Step 2: Building Model[/bold]")
     console.print("   [yellow]⚠️  No training yet - you haven't learned Modules 05-07![/yellow]")
     console.print("   🧠 Assembling perceptron with YOUR Tiny🔥Torch modules...")
+
+    # Locally rebind the layers module's RNG to an unseeded one so this demo's
+    # Linear weights differ on every run (the on-screen promise above). The
+    # default in tinytorch.core.layers is seeded for test reproducibility;
+    # we only override here, in this milestone script.
+    import tinytorch.core.layers as _layers
+    _layers.rng = np.random.default_rng()
 
     model = Perceptron(input_size=2, output_size=1)
 

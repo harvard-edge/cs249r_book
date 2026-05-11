@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-3378
+track: cloud
+level: L4
+zone: analyze
+topic: knowledge-distillation
+competency_area: optimization
+bloom_level: analyze
+phase: training
+title: 70B-to-7B Distillation HBM and Throughput Tradeoffs
+scenario: Your team is deploying a distilled large language model (LLM) on an accelerator. The goal is to distill a 70B parameter teacher LLM into a 7B parameter student model, aiming for low inference latency and high throughput while preserving accuracy.
+question: How would you distill a 70B teacher into a 7B student while balancing logit or feature distillation, HBM use, and throughput?
+details:
+  realistic_solution: Use mixed-precision distillation, but do not assume the 70B teacher and 7B student can run comfortably from parameter bytes alone. FP16 weights consume about 154 GB, leaving only 38 GB for activations, KV/cache if generation is used, workspaces, runtime overhead, and feature buffers. Prefer logit matching or a small set of projected feature losses unless profiling shows enough HBM headroom for deeper feature distillation. Sparse acceleration should only be counted if the models and kernels use a supported structured sparsity pattern; otherwise throughput is governed by dense matmul, memory traffic, and pipeline scheduling.
+  common_mistake: |
+    **The Pitfall:** Defaulting to standard logit-matching distillation without analyzing hardware-specific bandwidth capabilities.
+    **The Rationale:** Logit matching is the most common, textbook form of distillation and is simplest to implement in PyTorch.
+    **The Consequence:** Failing to leverage the massive 5.3 TB/s bandwidth for deep feature distillation yields an inferior student model, leaving premium hardware underutilized.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Teacher weights: 70B FP16 parameters ≈ 140 GB.
+    - Student weights: 7B FP16 parameters ≈ 14 GB.
+    - Hardware: 192 GB HBM, 5.3 TB/s bandwidth.
+    - Training or distillation also needs activations, workspaces, runtime buffers, and any feature/logit tensors.
+
+    **Calculations:**
+    - Parameter footprint alone: 140 GB + 14 GB = 154 GB.
+    - Remaining HBM before activations and overhead: 192 GB - 154 GB = 38 GB.
+    - A 100 GB feature dump would not fit as an additional resident buffer with both models loaded.
+    - The lower-bound bulk transfer time for 100 GB is 100 GB / 5.3 TB/s ≈ 18.9 ms, but feature distillation is not a single HBM copy; it includes layer execution, synchronization, projection, loss computation, and pipeline overhead.
+    - Sparse throughput should not be assumed unless structured sparsity is present and the compiler/runtime uses supported sparse kernels.
+
+    **Conclusion & Interpretation:**
+    - **Result: Tight HBM headroom.** The models fit by parameter bytes, but deep feature distillation may exceed memory or become compute/pipeline-bound; use selective features or logit matching unless profiling proves the extra buffers and sparse kernels are viable.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

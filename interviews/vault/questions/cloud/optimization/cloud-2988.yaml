@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-2988
+track: cloud
+level: L3
+zone: design
+topic: kernel-fusion
+competency_area: optimization
+bloom_level: create
+phase: inference
+title: 'Kernel Fusion: Design a Fused Attention Kernel for H100'
+scenario: You are designing a custom fused attention kernel. The attention layer for a 70B model processes sequences of length 4096 with 64 heads and head dimension 128.
+question: For the 4096x64x128 attention layer, how large are Q, K, V and the full score matrix, and why is FlashAttention tiling mandatory?
+details:
+  realistic_solution: For one batch element in BF16/FP16, each of Q, K, and V has 4096 * 64 * 128 elements, or 64 MiB. The full attention score tensor has one 4096x4096 matrix per head, so it is 2 GiB across 64 heads before softmax or dropout intermediates. Q/K/V are manageable, but the O(S^2) score matrix cannot reside in shared memory or registers, and materializing it in HBM creates avoidable traffic. FlashAttention-style tiling streams blocks of Q, K, and V through on-chip memory and never stores the full score matrix.
+  common_mistake: |
+    **The Pitfall:** Ignoring the O(n\u00b2) attention matrix memory footprint.
+    **The Rationale:** Assuming that if Q, K, and V fit, the computation can just proceed directly without tiling.
+    **The Consequence:** The $S \times S$ intermediate matrix massively overflows the GPU SRAM, severely degrading performance by forcing trips to HBM.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Sequence length: 4096. Heads: 64. Head dimension: 128.
+    - Precision: FP16/BF16 (2 bytes per element).
+    - On-chip memory is highly constrained relative to multi-GiB intermediates.
+
+    **Calculations:**
+    - Q, K, V Tensors: 4096 \times 64 \times 128 \times 2 bytes = 67,108,864 bytes = 64 MiB each.
+    - Full Attention Matrix (per head): 4096 \times 4096 \times 2 bytes = 32 MiB.
+    - Total Attention Matrix (all heads): 32 MiB \times 64 heads = 2048 MiB = 2 GiB.
+
+    **Conclusion & Interpretation:**
+    - **Result: 2 GiB score matrix (On-Chip-Memory-Bound)**. The full score tensor is far too large for shared memory/register tiling space, so FlashAttention-style tiling is mandatory to stream blocks without materializing the matrix in HBM.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

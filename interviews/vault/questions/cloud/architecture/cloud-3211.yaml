@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-3211
+track: cloud
+level: L5
+zone: design
+topic: mixture-of-experts
+competency_area: architecture
+bloom_level: create
+phase: both
+title: Tiered MoE Expert Caching Across HBM DRAM and NVMe
+scenario: You want to serve a 1024-expert MoE model where each expert is 1B parameters (2 GB BF16). Total model size is 2 TB. Your single server has 8 GPUs (640 GB HBM total) and 8 NVMe SSDs (7 GB/s each, 56 GB/s aggregate).
+question: How would you design a tiered caching system for 1024 two-GB experts across GPU HBM, CPU DRAM, and NVMe SSDs?
+details:
+  realistic_solution: 'Use three-tier, router-aware expert placement. Tier 1 (GPU HBM): the server has 640 GB total HBM, or 80 GB per GPU, so the theoretical maximum is 320 two-GB experts before reserving space for shared layers, activations, KV cache, routing buffers, and replicas. In practice, reserve headroom and place a stage-local hot set on the GPUs that will execute those experts; shard cold-hot experts across GPUs for capacity, and replicate very hot experts on multiple GPUs to avoid routing imbalance. Tier 2 (CPU DRAM): keep the next hottest experts in pinned memory, partitioned by owning GPU or NUMA domain; a 2 GB expert moved over PCIe Gen5 at 64 GB/s takes about 31 ms. Tier 3 (NVMe SSD): keep cold experts striped across 8 SSDs; at 56 GB/s aggregate, reading a 2 GB expert is about 36 ms before the PCIe copy, while a single-drive read would be 286 ms. Use router forecasts from recent token batches to prefetch warm experts, admission control for cold misses, LFU/LRU eviction with
+    hysteresis so experts do not thrash, and per-GPU load-aware placement so a hot expert can be replicated instead of making one GPU the tail-latency bottleneck.'
+  common_mistake: |
+    **The Pitfall:** Treating expert loading as a simple LRU cache without considering data transfer paths.
+    **The Rationale:** Candidates forget that NVMe-to-GPU transfer must route through CPU memory and PCIe, adding significant latency.
+    **The Consequence:** Ignoring the necessity of speculative prefetching, resulting in the GPU stalling for 286ms every time a Tier 3 expert is selected.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Expert size: 2 GB BF16.
+    - Tier 1 HBM capacity: 640 GB total across 8 GPUs, or 80 GB/GPU.
+    - Tier 2 CPU-to-GPU bandwidth: PCIe Gen5 at 64 GB/s.
+    - Tier 3 NVMe bandwidth: 8 SSDs x 7 GB/s = 56 GB/s aggregate if striped; 7 GB/s if limited to one drive.
+
+    **Calculations:**
+    - Raw HBM expert capacity: 640 GB / 2 GB = 320 experts across the server, or 80 GB/GPU / 2 GB = 40 experts/GPU before reserves.
+    - Practical HBM placement: choose a hot working set below those raw limits after reserving HBM for shared layers, activations, KV cache, routing buffers, and hot-expert replicas.
+    - Tier 2 PCIe transfer: 2 GB / 64 GB/s = 31 ms.
+    - Tier 3 striped NVMe read: 2 GB / 56 GB/s = 36 ms before PCIe transfer.
+    - Tier 3 single-drive read: 2 GB / 7 GB/s = 286 ms before PCIe transfer.
+
+    **Conclusion & Interpretation:**
+    - **Result: Tail-latency-bound tiered cache.** Use HBM for the routed hot set on the GPUs that execute it, CPU DRAM for warm misses, striped NVMe for cold misses, and router-driven prefetch plus eviction/replication controls to prevent cold expert loads or hot-expert imbalance from stalling requests.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

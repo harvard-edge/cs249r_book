@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: tinyml-1107
+track: tinyml
+level: L4
+zone: diagnosis
+topic: extreme-quantization
+competency_area: precision
+bloom_level: analyze
+phase: inference
+title: Ethos-U55 W4A8 Fallback Stalls
+scenario: The team deployed a custom W4A8 quantized CNN on the Corstone-300 platform. The 400 KB model weights fit within SRAM, theoretically eliminating flash fetches. However, inference latency is disastrously high, and profiling shows the Ethos-U55 NPU utilization is nearly zero while the Cortex-M7 is pegged at 100% compute.
+question: Why does a W4A8 CNN on Corstone-300 run on the 480 MHz M7 instead of the Ethos-U55, and what is the hardware-level root cause?
+details:
+  realistic_solution: The Ethos-U55 matrix multiply engine natively accelerates INT8 and INT16 operations, relying on the Vela compiler for offline weight compression. Because the U55 lacks native hardware support for custom W4A8 MACs or dynamic 4-bit unpacking, the Vela compiler delegates the unmapped operations back to the Cortex-M7 CPU. The M7 must sequentially unpack the 4-bit weights using bitwise shifts and masks before executing the MACs, completely bypassing the NPU and bottlenecking the system.
+  common_mistake: |
+    **The Pitfall:** Blaming memory bandwidth bottlenecks or SRAM contention.
+    **The Rationale:** Candidates often assume that because weights fit in SRAM, performance issues must be memory access related, missing the NPU's operator support requirements.
+    **The Consequence:** The true root cause (unsupported sub-8-bit operations forcing CPU fallback) is missed, leading to futile memory optimization efforts.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Ethos-U55 Peak Throughput: 128 MACs/cycle at 480 MHz = 61.44 GMAC/s (for native INT8/INT16).
+    - W4A8 operation is unsupported by Ethos-U55 hardware, triggering a CPU fallback.
+    - Cortex-M7 Fallback Throughput: Unpacking 4-bit weights and MAC execution takes ~4 CPU cycles/op.
+
+    **Calculations:**
+    - M7 Effective Compute: 480 MHz / 4 cycles/MAC = 120 MMAC/s (0.12 GMAC/s).
+    - Slowdown Factor: 61.44 GMAC/s / 0.12 GMAC/s = 512.
+
+    **Conclusion & Interpretation:**
+    - **Result: 512x slowdown (Compute-Bound)**. The CPU fallback incurs a 512x theoretical compute slowdown compared to native NPU execution.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

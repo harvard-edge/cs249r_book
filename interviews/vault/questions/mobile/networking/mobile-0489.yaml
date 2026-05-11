@@ -1,0 +1,57 @@
+schema_version: '1.0'
+id: mobile-0489
+track: mobile
+level: L3
+zone: diagnosis
+topic: network-bandwidth-bottlenecks
+competency_area: networking
+bloom_level: apply
+phase: inference
+title: The Interconnect Blind Spot
+scenario: You are attempting to deploy a 3B parameter model trained on an H100 cluster onto a mobile device. The model heavily relies on Tensor Model Parallelism. Attempts to quantize the model to INT8 for mobile result in catastrophic accuracy degradation.
+question: Why can a cloud-trained tensor-parallel 3B model be a poor fit for mobile deployment and quantization?
+details:
+  realistic_solution: The correct diagnosis is that the model was trained and tuned assuming tensor-parallel execution across multiple GPUs connected by an ultra-high-speed interconnect like NVLink. Tensor parallelism splits individual layers or matrix multiplications across devices, so partial results must be exchanged frequently during each forward pass. A single mobile SoC cannot preserve that multi-GPU communication pattern, and quantizing the weights to INT8 does not remove the architecture's dependence on those partitioning and synchronization assumptions.
+  common_mistake: |
+    **The Pitfall:** Blaming the quantization algorithm or the mobile NPU's TOPS limit.
+    **The Rationale:** Engineers assume standard quantization techniques work universally without verifying the model's fundamental architectural assumptions.
+    **The Consequence:** They waste weeks tuning quantization parameters when the model's actual design inherently relies on massive, instantaneous inter-layer data synchronization.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model Size: 3B parameters (3 GB in INT8).
+    - Tensor-parallel execution splits layers across multiple GPUs.
+    - Each split layer requires collective communication of partial activations or results.
+    - Mobile deployment target: one SoC, no NVLink-class multi-GPU fabric.
+
+    **Calculations:**
+    - INT8 weight size alone: 3B parameters * 1 byte = ~3 GB, before KV cache and activations.
+    - Bandwidth-only weight reads do not determine full token latency because compute, KV-cache traffic, activations, and collectives are also on the critical path.
+    - The key portability failure is structural: tensor-parallel layers expect fast cross-device exchange, but the mobile target has no peer GPU fabric to execute those collectives.
+
+    **Conclusion & Interpretation:**
+    - **Result: Architecture/Interconnect Mismatch.** The poor fit is not proven by a simple GB/s per-token estimate; it comes from trying to deploy a model whose execution plan assumes NVLink-class tensor parallelism onto a single mobile device.
+  options:
+    - The model relies on tensor-parallel execution over NVLink-class multi-GPU links, which is absent on a single mobile SoC.
+    - The training cluster's InfiniBand network allowed for faster data loading, and the mobile device's slow UFS flash storage is causing a data input bottleneck.
+    - The Apple A17 Pro's 35 TOPS NPU is simply not enough compute power for a 3B parameter model that was trained on 989 TFLOPS H100s.
+    - The model requires PCIe Gen5 to feed the accelerator, and the mobile SoC's internal bus protocol has much higher latency, starving the NPU.
+  correct_index: 0
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+  - The memory bandwidth for the Mobile SoC is stated as 50 GB/s in the Napkin Math, but generally noted as 51.2 GB/s for the A17 Pro in other questions, which is a minor inconsistency.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

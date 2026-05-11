@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: mobile-1174
+track: mobile
+level: L5
+zone: evaluation
+topic: cnn-efficient-design
+competency_area: architecture
+bloom_level: evaluate
+phase: inference
+title: CNN Architecture Choice for Hexagon NPU
+scenario: You are evaluating a MobileNetV3-style network versus an EfficientNet-Lite variant for a real-time semantic segmentation model. The target device utilizes a shared 68 GB/s LPDDR5X memory pool across its heterogeneous compute engines.
+question: Which architectural design patterns are most optimal for maximizing utilization on this specific NPU, and what tradeoffs must you make?
+details:
+  realistic_solution: The best architecture is not automatically MobileNetV3 or EfficientNet-Lite; it is the one whose operators match the NPU's bandwidth and kernel support. Favor fused convolutions with higher arithmetic intensity, bounded feature-map sizes, and layouts that keep activations in local SRAM. Use depthwise or grouped convolutions only when profiling shows the reduced compute outweighs their lower data reuse, and fuse pointwise, activation, normalization, and SE-style reductions when the backend supports them. The tradeoff is accepting more MACs in selected layers to reduce memory stalls and improve sustained NPU utilization.
+  common_mistake: |
+    **The Pitfall:** Minimizing theoretical FLOPs instead of memory access.
+    **The Rationale:** Candidates assume architectures like MobileNetV3 with depthwise convolutions and SE blocks are optimal because they reduce FLOPs.
+    **The Consequence:** They select a network that relies on low arithmetic intensity operations, heavily bottlenecking on LPDDR5X bandwidth and leaving most of the NPU's TOPS unavailable for that layer.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - HW: 45 TOPS, 68 GB/s. Ridge point: 45e12 ops/s / 68e9 bytes/s ≈ 662 ops/byte when counting one MAC as 2 ops.
+    - Example depthwise layer: 112x112x256 input/output, 3x3 kernel, FP16 activations/weights.
+    - Minimum DRAM traffic if each activation is read and written once: input 6.42 MB + output 6.42 MB + weights 0.005 MB ≈ 12.85 MB.
+
+    **Calculations:**
+    - Depthwise Conv work: 112 * 112 * 256 * 3 * 3 = 28.9M MACs, or 57.8M ops under the 2-op MAC convention.
+    - Best-case arithmetic intensity: 57.8M ops / 12.85 MB ≈ 4.5 ops/byte before accounting for tiling overhead.
+    - Bandwidth-limited sustained compute ceiling: 68 GB/s * 4.5 ops/byte ≈ 306 GOPS, far below 45 TOPS.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Bandwidth-Bound Layer**. Low-reuse depthwise layers can sit far below the NPU's peak TOPS on this memory system, so the architecture should prefer fused, higher-intensity kernels where the extra compute buys better data reuse.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

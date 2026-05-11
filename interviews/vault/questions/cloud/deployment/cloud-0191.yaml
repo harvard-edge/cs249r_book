@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-0191
+track: cloud
+level: L6+
+zone: realization
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: create
+phase: inference
+title: The Bi-Modal GPU Dilemma
+scenario: 'You are the founding ML Systems Engineer at a startup that just secured a single, precious Blackwell B200 GPU. To maximize ROI, leadership wants to launch two products simultaneously: a background batch processing pipeline and a low-latency chatbot using a 70B parameter model.'
+question: How would you serve both products on a single B200 without violating SLAs or thrashing GPU memory?
+details:
+  realistic_solution: |
+    Do not run two independently loaded 70B services on the B200. Keep one resident serving stack on the GPU and make the chatbot the priority workload. Load the 70B model once, preferably weight-only quantized to 8-bit or 4-bit if quality allows, reserve a fixed KV-cache budget for interactive requests, and run the server with priority continuous batching so chatbot prefills and decode steps can preempt background work at token boundaries. The batch product should use the same resident model through a low-priority queue with capped batch size, capped context length, and admission control; it consumes only slack GPU time and is paused or drained when chatbot TTFT or TPOT approaches the SLA. If the batch job uses a different large model or requires long contexts that would evict chatbot KV cache, place it off-GPU, on a smaller distilled/quantized model, or on rented burst capacity instead of swapping models on the B200. The key mechanism is isolation by memory reservation and scheduler priority, not CUDA time-slicing that repeatedly reloads weights.
+  common_mistake: |
+    **The Pitfall:** Using time-slicing or CUDA MPS to rapidly swap models.
+    **The Rationale:** Standard resource schedulers multiplex smaller workloads easily.
+    **The Consequence:** This fundamentally misunderstands modern LLM memory physics. Evicting and reloading a ~170GB+ context to serve a chatbot query takes seconds in memory transfer time alone, catastrophically violating both SLAs.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - One 70B FP16 model uses about 70B * 2 bytes = 140 GB for weights.
+    - A B200 has 192 GB of HBM.
+    - Serving also needs memory for KV cache, CUDA graphs, activations, fragmentation, and runtime buffers.
+    - Leadership wants both a chatbot and a batch product active on the same GPU.
+
+    **Calculations:**
+    - Two independently loaded 70B FP16 services would require 2 * 140 GB = 280 GB for weights alone.
+    - 280 GB exceeds 192 GB before allocating any KV cache or runtime overhead.
+    - One resident FP16 copy leaves 192 GB - 140 GB = 52 GB for all serving headroom.
+    - If runtime overhead/reserve is roughly 10-20 GB, only about 32-42 GB remains for KV cache across both products.
+    - Long-context batch jobs can consume that shared KV headroom quickly, so they need admission control rather than a second resident service.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Capacity-Bound Shared Serving**. Two full 70B FP16 services do not fit on one B200. Keep one resident model, reserve chatbot KV/cache headroom, and let batch work use only low-priority slack or separate capacity.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

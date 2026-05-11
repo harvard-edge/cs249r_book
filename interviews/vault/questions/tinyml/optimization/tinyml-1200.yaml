@@ -1,0 +1,33 @@
+schema_version: '1.0'
+id: tinyml-1200
+track: tinyml
+level: L6+
+zone: mastery
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: create
+phase: training
+title: NPU-Aware Sparsity on Corstone-300
+scenario: You are deploying a 15 million MAC, 750 KB acoustic anomaly detection model on an ARM Cortex-M7 + Ethos-U55 (Corstone-300) system. The system has 512 KB of shared SRAM, but your model currently exceeds this physical budget. You must design a pruning methodology from scratch that not only compresses the model to fit into SRAM but also maximizes the specific MAC utilization of the Ethos-U55 NPU.
+question: How should a 750 KB acoustic model be pruned to fit Corstone-300's 512 KB SRAM and preserve Ethos-U55 utilization?
+details:
+  realistic_solution: Design a hardware-aware structured pruning pipeline that removes whole channels or Ethos-U55-friendly block patterns rather than arbitrary scalar weights. Start from layer sensitivity analysis, prune the least sensitive output channels/blocks until the serialized INT8 weights are at or below the SRAM budget, then fine-tune with quantization-aware retraining and re-run Vela to verify that the remaining operators stay delegated to the Ethos-U55. Keep the activation arena and weight layout separate in the memory plan, and validate accuracy, latency, and peak SRAM after compilation instead of assuming that every zero produces a proportional speedup.
+  common_mistake: |
+    **The Pitfall:** Proposing generic unstructured magnitude pruning to reach the size constraint.
+    **The Rationale:** Developers often apply standard cloud-based pruning techniques without realizing that unstructured sparse formats (like CSR) require indexing metadata and do not align with hardware acceleration blocks.
+    **The Consequence:** The model footprint may actually bloat due to metadata, or the Ethos-U55 NPU falls back to extremely slow execution because it cannot natively accelerate unstructured sparsity.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Target Memory: 512 KB SRAM - ~137 KB for activations = max 375 KB for weights.
+    - Target NPU: use structured channel/block pruning patterns that preserve dense delegated kernels after Vela compilation.
+
+    **Calculations:**
+    - Required weight-size reduction: 750 KB - 375 KB = 375 KB.
+    - Fraction to remove: 375 KB / 750 KB = 50% of the serialized weight bytes.
+    - If pruning removes complete output channels with proportional MAC reduction, nominal MACs drop from 15M to about 7.5M before retraining/regrowth adjustments.
+    - Latency should be estimated from the compiled Vela report and memory plan; the napkin result only proves that the target weight arena fits.
+
+    **Conclusion & Interpretation:**
+    - **Result: 375 KB target weight arena (SRAM-Fit).** The release-quality requirement is at least a 50% structured weight-byte reduction while keeping dense, delegated Ethos-U55 kernels. Actual latency is a measured compiler/runtime property, not guaranteed by the sparsity ratio alone.
+status: published
+provenance: imported

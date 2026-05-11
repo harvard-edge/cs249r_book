@@ -1,0 +1,66 @@
+schema_version: '1.0'
+id: tinyml-1439
+track: tinyml
+level: L5
+zone: evaluation
+topic: graceful-degradation
+competency_area: reliability
+bloom_level: analyze
+phase: inference
+title: Graceful Degradation Architectures for TinyML on ESP32-S3
+scenario: You are tasked with deploying a real-time predictive maintenance system on an ESP32-S3 microcontroller, specifically for anomaly detection in sensor data from industrial machinery. The ESP32-S3 features a 240 MHz dual-core processor, 512 KB of internal SRAM, and 8 MB of external PSRAM. Your primary anomaly detection model is a complex LSTM-based autoencoder that requires approximately 4.5 MB of PSRAM for its weights and intermediate activations, and utilizes both CPU cores significantly, resulting in a typical inference latency of 180 ms. The system must operate reliably under varying operational loads and maintain a minimum level of service even when resources are constrained or the primary model encounters issues.
+question: Which graceful degradation architecture is more suitable for critical ESP32-S3 anomaly detection, and why?
+details:
+  realistic_solution: |
+    A realistic solution would involve a well-defined multi-tiered degradation ladder combined with proactive monitoring.
+
+    **Approach 1: Multi-stage Degradation Ladder with QoS Shedding**
+    - **Detection:** Continuously monitor CPU load (e.g., average over 10s), inference latency, and available PSRAM. Triggers could be: CPU load >85% for 5s, average inference latency >250ms, or PSRAM free <1MB.
+    - **Fallback:**
+        - **Level 0 (Primary):** Full LSTM autoencoder (4.5 MB PSRAM, 180 ms latency).
+        - **Level 1 (High Load/Latency):** Switch to a smaller, quantized CNN or a simple statistical model (e.g., Exponential Moving Average with adaptive threshold) that uses <1 MB PSRAM (or fits entirely in SRAM for critical parts) and has <60 ms latency. Simultaneously, implement QoS shedding by reducing sensor sampling rate by 50%.
+        - **Level 2 (Critical Load/Failure):** Fallback to a highly optimized, rule-based anomaly detection (e.g., fixed thresholds on derivative of sensor data) that resides entirely in SRAM (<100KB) and has <5 ms latency. Further reduce sampling rate or disable non-critical features.
+    - **Hardware Leverage:** Uses PSRAM for larger models, internal SRAM for critical, ultra-fast fallbacks. Dual-core CPU allows dedicated monitoring thread on one core, ML inference on the other.
+
+    **Approach 2: Fail-Operational with Dedicated Fail-Safe and Model Fallback**
+    - **Detection:** A dedicated watchdog timer, regular self-diagnostics of the primary model (e.g., output sanity checks), and monitoring for critical resource exhaustion (e.g., PSRAM allocation failures).
+    - **Fallback:**
+        - **Primary Model:** LSTM autoencoder. Runs in parallel with a very lightweight, fail-safe heuristic.
+        - **Model Fallback (Primary Model Issue):** If the primary model's output is consistently invalid or it crashes, switch to a pre-loaded, pre-quantized small MLP model (~500KB PSRAM, ~40ms latency) as a secondary detection mechanism.
+        - **Fail-Safe (System-Wide Failure):** A separate, highly robust and simple thresholding logic, compiled to internal SRAM, that continuously monitors raw sensor data and can trigger a critical alert even if all ML components fail. This acts as an independent fail-operational layer.
+    - **Hardware Leverage:** Prioritizes SRAM for the fail-safe, ensuring its operation. Utilizes PSRAM for primary and fallback ML models. Dual-core for parallel execution of primary ML and fail-safe logic, enhancing operational safety.
+
+    **Comparison:** Approach 1 offers smoother performance degradation but is more complex to manage state transitions and requires careful threshold tuning. Approach 2 prioritizes absolute safety with a dedicated, isolated fail-safe, making it potentially more robust for truly critical applications, though it might be less 'graceful' in intermediate degradation stages. For a critical industrial application, Approach 2's emphasis on a guaranteed fail-safe is often preferred, with the small MLP as a valuable intermediate fallback. This ensures the system never completely loses its ability to detect critical anomalies, even at the cost of sophistication.
+  common_mistake: |
+    **The Pitfall:** Overlooking memory constraints and the distinction between internal SRAM and external PSRAM on the ESP32-S3.
+    **The Rationale:** Candidates propose fallback models that are still too large or computationally intensive, failing to define clear triggers for degradation or a robust, ultra-lightweight fail-safe mechanism.
+    **The Consequence:** The fallback system fails under the same resource constraints or crashes entirely during critical failures.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Primary Model: 4.5 MB PSRAM, 180 ms latency.
+    - Level 1 Fallback: ~1 MB PSRAM, ~60 ms latency.
+    - Fail-Safe: <50 KB internal SRAM, <1 ms latency.
+
+    **Calculations:**
+    - Total Memory: Fail-Safe (50 KB) + RTOS (~150 KB) leaves 312 KB SRAM free.
+    - Primary and Level 1 models exceed SRAM and must reside in PSRAM.
+
+    **Conclusion & Interpretation:**
+    - **Result: <50 KB Fail-Safe (Reliability-Bound)**. Sizing the fail-safe strictly below 100 KB ensures it always executes from fast internal SRAM, providing guaranteed operation even during catastrophic PSRAM allocation failures.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

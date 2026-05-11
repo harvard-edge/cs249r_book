@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: tinyml-1230
+track: tinyml
+level: L4
+zone: optimization
+topic: streaming-ingestion
+competency_area: data
+bloom_level: analyze
+phase: inference
+title: DMA Ping-Pong Buffering for Continuous Sensor Ingestion
+scenario: An ESP32-S3 is ingesting 4 channels of 16-bit acoustic data at 16 kHz via SPI. Core 1 uses CPU polling to read samples into a PSRAM ring buffer. Core 1 also executes an INT8 neural network taking 100 ms per inference. During inference, SPI polling is blocked, resulting in dropped streaming data.
+question: How would you diagnose the ingestion bottleneck, quantify the data loss, and determine the architectural fix required?
+details:
+  realistic_solution: Diagnose the bottleneck as CPU-polled SPI being blocked by the 100 ms inference window. At 4 channels * 16 kHz * 2 bytes, the stream produces 128 KB/s, so each 100 ms stall loses 12.8 KB of audio, or 6,400 aggregate channel samples, unless buffering covers the stall. The architectural fix is SPI DMA with ping-pong buffers in fast internal SRAM; each half should cover the worst-case service interval, and the CPU only handles block-complete interrupts and drains the inactive buffer.
+  common_mistake: |
+    **The Pitfall:** Suggesting the use of FreeRTOS tasks or timer interrupts to interleave SPI reads with the neural network inference loop.
+    **The Rationale:** Candidates try to solve a hardware I/O problem with software context-switching, failing to realize the CPU overhead of high-frequency interrupts.
+    **The Consequence:** High-frequency context switching completely thrashes the CPU pipeline, degrading inference latency further while still missing strict real-time acoustic sampling deadlines.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 4 channels, 16 kHz, 16-bit (2 bytes) = 128 KB/s byte rate.
+    - Aggregate sample words: 4 * 16,000 = 64,000 sample-words/s.
+    - Polling costs 40 cycles/sample-word.
+    - Inference blocks for 100 ms (0.1s).
+
+    **Calculations:**
+    - Data generated during 100 ms inference = 128 KB/s * 0.1 s = 12.8 KB.
+    - Minimum buffer depth to bridge one 100 ms compute stall: 12.8 KB.
+    - Ping-pong capacity with two such buffers: 2 * 12.8 KB = 25.6 KB in internal SRAM.
+    - CPU polling cost: 64,000 sample-words/s * 40 cycles/sample-word = 2.56M cycles/s, about 1% of a 240 MHz core before cache and scheduling overhead.
+
+    **Conclusion & Interpretation:**
+    - **Result: At least 12.8 KB of buffering is required per 100 ms stall (I/O-Bound)**. Two 12.8 KB DMA ping-pong buffers can bridge the stated inference pause if the CPU drains the completed buffer before the next one fills, preventing drops under that worst-case service interval and reclaiming the 2.56M cycles/s polling cost.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

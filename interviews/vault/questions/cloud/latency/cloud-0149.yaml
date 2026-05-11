@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-0149
+track: cloud
+level: L4
+zone: evaluation
+topic: latency-decomposition
+competency_area: latency
+bloom_level: analyze
+phase: both
+title: The Two-Tier Traffic Jam
+scenario: 'You manage a single GPU serving cluster for a 13B parameter model on H100s. The service has two use cases: interactive chat, where users demand low Time-To-First-Token (TTFT), and offline document summarization, where total job time (which depends on Throughput of Output Tokens, or TPOT) is the key metric. You are using continuous batching with a single configuration. Chat users complain of high latency, while the summarization workload is inefficient.'
+question: Why does a single continuous-batching configuration fail to optimize both chat TTFT and summarization TPOT?
+details:
+  realistic_solution: |
+    A single configuration fails because the two workloads are at opposite ends of the performance spectrum defined by the Roofline model.
+    - **TTFT Optimization (Chat):** To minimize TTFT, you must minimize the time a request waits in a queue before processing begins. This requires using a very small batch size and a short batching timeout. This keeps the system highly responsive. However, small batches have low arithmetic intensity, making them memory-bandwidth bound. The GPU is 'starved' for computation, leading to low efficiency and poor TPOT.
+    - **TPOT Optimization (Summarization):** To maximize TPOT, you need to make the GPU as efficient as possible. This requires assembling large batches to increase arithmetic intensity, pushing the workload over the 'ridge point' of the Roofline model into the compute-bound regime. This maximizes FLOPs utilization but introduces long queueing delays, which is poison for TTFT.
+  common_mistake: |
+    **The Pitfall:** Conflating latency and throughput and attempting to find a single "optimal" batch size.
+    **The Rationale:** Engineers are used to tuning a single parameter for general optimization, failing to recognize that TTFT and TPOT exist at opposite ends of the Roofline model.
+    **The Consequence:** Deploying a compromise configuration that is mediocre at both, leaving chat users with high latency and background jobs with poor throughput.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 13B model with FP16 weights: about 26 GB read pressure per decode step if weights are not fully reused across enough batch elements.
+    - H100 HBM bandwidth: about 3.35 TB/s.
+    - H100 peak compute depends on precision; the exact ridge point is hardware-mode specific, so avoid treating one batch-size threshold as universal.
+
+    **Calculations:**
+    - Small chat batches minimize batching timeout and queueing, which protects TTFT.
+    - Small decode batches have little weight reuse, so decode tends to be memory-bandwidth bound and TPOT is poor.
+    - Larger offline batches reuse the same weights across more sequences, increasing arithmetic intensity and improving aggregate TPOT.
+    - Those larger batches require waiting to assemble work and may run longer scheduling quanta, both of which raise TTFT for interactive traffic.
+
+    **Conclusion & Interpretation:**
+    - **Result: Throughput vs. Latency Trade-off.** The correct lesson is qualitative: chat wants short queues and small batches, while summarization wants larger effective batches for weight reuse and throughput. A single fixed configuration cannot optimize both.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

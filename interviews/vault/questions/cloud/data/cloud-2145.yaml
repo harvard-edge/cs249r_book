@@ -1,0 +1,60 @@
+schema_version: '1.0'
+id: cloud-2145
+track: cloud
+level: L6+
+zone: mastery
+topic: feature-store-management
+competency_area: data
+bloom_level: create
+phase: both
+title: Tiered Embedding Serving for 5ms P99 Lookups
+scenario: You need to serve embedding lookups for a search system at 10 million queries per second. Each query requires lookups from 5 embedding tables, each with 1 billion rows and 256-dimensional FP16 embeddings. Total embedding size is 2.56 TB. The P99 latency SLA for the embedding lookup service is 5ms.
+question: How would you design a 5ms-P99 embedding lookup service for 10M QPS over 2.56TB of embeddings?
+details:
+  realistic_solution: '**Architecture: Distributed embedding serving with hot-tier caching.** **(1) Storage tier analysis:** 2.56 TB total across all five tables. Power-law access: top 0.1% of rows (1M per table = 5M total) serve 80% of lookups = ~2.56 GB hot tier. Top 5% (50M per table = 250M total) serve about 99% of individual lookups = ~128 GB warm tier. **(2) Hot tier (L1 — in-process memory):** Top 5M embeddings (2.56 GB) cached in each serving node''s RAM. Latency: ~0.1ms. Handles 80% of lookups. **(3) Warm tier (L2 — distributed cache):** Top 250M embeddings (128 GB) distributed across a memcached/Redis cluster. Latency: ~1ms. Handles the next ~19% of lookups. **(4) Cold tier (L3 — SSD-backed store):** Full 2.56 TB on NVMe SSDs across a distributed KV store (RocksDB/Cassandra). Latency budget: ~3ms storage + ~1ms network. Handles the tail ~1% of lookups. **(5) Expected P99:** Because each query makes five lookups, 99% per-lookup warm coverage gives only about 95% of queries with
+    no cold lookup. End-to-end query P99 therefore includes the cold path unless the warm tier covers much more than 99% per lookup, so the cold path must also measure under 5ms including queueing. **(6) Capacity planning:** At 10M QPS and 5 lookups/query, aggregate lookup rate is 50M/s and aggregate payload bandwidth is 25.6 GB/s. With 200 serving nodes, each node handles ~50K queries/s, ~250K lookups/s, and ~128 MB/s of payload before protocol overhead, which fits a 10 Gbps NIC with headroom. Warm tier: 16-node Redis cluster (8 GB each) gives ~306 MB/s payload/node at 19% hit rate. Cold tier: 32-node SSD cluster gives ~8 MB/s payload/node at 1% hit rate, with latency validated under load. **(7) Consistency:** Embeddings update weekly via batch retraining. Cache invalidation via versioned keys — deploy new version, warm caches, swap traffic.'
+  common_mistake: |
+    **The Pitfall:** Trying to serve 2.56 TB of embeddings directly from GPU HBM to meet latency requirements.
+    **The Rationale:** Candidates focus on the sub-millisecond latency requirement and default to GPU memory, failing to recognize this is a distributed systems throughput problem.
+    **The Consequence:** An infeasible or astronomically expensive design that ignores the need for a tiered caching architecture.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 10M QPS, 5 lookups/query, 256-dim FP16 (512 bytes).
+       - 5 tables * 1B rows/table = 5B total embeddings, so 5B * 512B = 2.56 TB.
+       - P99 SLA: 5ms. Hot/warm/cold hit rates are approximately 80%/19%/1%.
+    2. **Calculations:**
+       - Hot tier rows: 0.1% * 5B = 5M rows; 5M * 512B = 2.56 GB.
+       - Warm tier rows: 5% * 5B = 250M rows; 250M * 512B = 128 GB.
+       - Aggregate Read Bandwidth: 10M QPS * 5 lookups * 512 bytes = 25.6 GB/s.
+       - L1 hit rate (80%): Serves 20.5 GB/s from local RAM. Distributed across 200 nodes = ~100 MB/s per node.
+       - L2 hit rate (19%): Serves 4.9 GB/s across 16 Redis nodes = ~306 MB/s per node.
+       - L3 hit rate (1%): Serves 256 MB/s across 32 SSD nodes = ~8 MB/s per node.
+       - Single-lookup latency CDF: P80 is the hot path at ~0.1ms. Hot+warm coverage of 99% means single-lookup P99 is near the warm path.
+       - Request-level CDF: each query needs 5 lookups, so probability of no cold lookup is 0.99^5 ≈ 95.1%. End-to-end query P99 includes a cold lookup unless per-lookup warm coverage is much higher than 99%.
+       - Therefore the cold path must still meet the SLA under load: ~3ms storage + ~1ms network = ~4ms before queueing headroom.
+       - Serving-node sizing: 10M QPS / 200 nodes = 50K queries/s/node = 250K lookups/s/node, or 250K * 512B = ~128 MB/s/node before overhead.
+    3. **Conclusion & Interpretation:**
+       - **Result: Feasible Architecture.** The tier sizes and bandwidths are corpus-wide across all 5 tables, and request-level P99 is met only if the provisioned cold path stays below 5ms under queueing or the warm tier covers far more than 99% of individual lookups.
+  options:
+    - 'Use a 3-tier architecture: in-process hot cache (top 0.1% rows, ~2.56 GB, <0.1ms), distributed warm cache (top 5% rows, ~128 GB Redis, ~1ms), and SSD-backed cold store (full 2.56 TB, ~4ms budget); validate that the measured P99 path stays under 5ms across about 200 serving nodes'
+    - Serve all 2.56 TB from GPU HBM across 32 A100s (80 GB each) for sub-millisecond latency; GPU memory bandwidth of 2 TB/s can handle the 25.6 GB/s aggregate read load easily
+    - Shard the 2.56 TB across 256 Redis nodes (10 GB each) with consistent hashing; Redis provides ~0.5ms P99 per lookup, meeting the 5ms SLA without any tiered caching
+    - Use a single 2.56 TB NVMe-backed server because the corpus fits on one machine, ignoring the 50M lookups/s fan-in, network fanout, and request-level P99 tail latency
+  correct_index: 0
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

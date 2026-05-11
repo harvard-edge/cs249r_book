@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: mobile-1193
+track: mobile
+level: L3
+zone: analyze
+topic: extreme-quantization
+competency_area: precision
+bloom_level: apply
+phase: inference
+title: 3-bit vs 4-bit Unpacking Overhead on Tensor G3
+scenario: Your team is deploying a 3 Billion parameter generative model to a mobile platform. To minimize memory footprint, the team applies 3-bit GPTQ extreme quantization instead of standard 4-bit. However, profiling shows that during auto-regressive decoding, the 3-bit model generates tokens significantly slower than the 4-bit version.
+question: Explain why the smaller 3-bit model exhibits worse latency than the larger 4-bit model?
+details:
+  realistic_solution: |
+    Mobile NPUs are rigorously optimized for power-of-two precisions (INT8, INT4) and lack native hardware instructions to directly compute or efficiently unpack 3-bit integers. The 3-bit weights must be unpacked to INT4 or FP16 using complex bit-shifting and masking operations. This dequantization overhead transforms a memory-bound process into a severe compute bottleneck, often forcing fallbacks to slower CPU cores and negating any memory read speedups.
+  common_mistake: |
+    **The Pitfall:** Assuming size reduction strictly equals latency reduction.
+    **The Rationale:** Candidates know LLM decoding is memory-bandwidth bound, but fail to account for the lack of native hardware support for odd-bit formats and the resulting unpacking penalty.
+    **The Consequence:** Deploying a model that saves marginal RAM but catastrophically tanks token generation speeds.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 3B parameter model.
+    - Bandwidth: 60 GB/s.
+    - 4-bit size: 1.5 GB. 3-bit size: 1.125 GB.
+    - Decode is modeled as a batch-size-1 stream over quantized weights; actual latency depends on cache residency, packing, and delegate support.
+
+    **Calculations:**
+    - Maximum read-time savings if all weights are streamed once per decoded token: (1.5 GB - 1.125 GB) / 60 GB/s = 6.25 ms/token.
+    - A 4-bit model maps cleanly to common nibble packing and INT4/INT8 NPU kernels.
+    - A 3-bit model packs values across byte and word boundaries, so the backend must unpack, mask, shift, and often repack to a supported format before compute.
+    - If that conversion runs on scalar CPU code or a non-fused delegate path, the extra pass over ~1.125 GB can erase the maximum 6.25 ms memory saving even without assigning a precise GOPS/token number.
+
+    **Conclusion & Interpretation:**
+    - **Result: Slower Despite Smaller Weights**. The 3-bit model saves only about 6 ms/token of raw memory traffic in the best case, while unsupported packing adds dequantization and fallback overhead; a larger hardware-friendly 4-bit model can therefore be faster.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: mobile-1264
+track: mobile
+level: L4
+zone: diagnosis
+topic: graceful-degradation
+competency_area: reliability
+bloom_level: analyze
+phase: inference
+title: Diagnosing A17 Pro Neural Engine OOM Under Thermal Throttling
+scenario: Your real-time video analytics app runs a heavy segmentation model on the Apple A17 Pro Neural Engine. Users report that after 15 minutes of use in warm environments, the app suddenly crashes with out-of-memory (OOM) OS jetsam events, even though memory usage was previously completely stable. Telemetry indicates that right before the crash, the SoC reaches its thermal limit and triggers a degradation ladder that attempts to shed load by dropping the camera pipeline from 60 FPS to 15 FPS.
+question: Why does an A17 Pro video app encounter sudden OOM crashes during thermal degradation after a period of stable memory use?
+details:
+  realistic_solution: The root cause is asynchronous queue buildup in shared unified memory during the thermal degradation transition. The app was stable while capture and segmentation stayed balanced at 60 FPS. When the degradation ladder drops the camera pipeline toward 15 FPS, any queue still receiving 60 FPS or draining only at the degraded 15 FPS rate accumulates high-resolution frames faster than they are processed. Because the CPU, GPU, and Neural Engine share the unified memory pool, that sudden frame-buffer spike can trigger an iOS jetsam kill before backpressure and frame dropping fully take effect.
+  common_mistake: |
+    **The Pitfall:** Diagnosing the crash as a standard application-layer memory leak.
+    **The Rationale:** Developers see an OOM crash and assume there is a retain cycle in their Swift code, failing to consider the physical system dynamics of a heterogeneous SoC under thermal stress.
+    **The Consequence:** Spending weeks auditing application code for leaks that don't exist, while the fundamental producer-consumer queue imbalance remains unfixed.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Frame Size: Uncompressed 4K NV12 video = 3840 * 2160 * 1.5 bytes ≈ 12.4 MB.
+    - Pre-degradation pipeline: 60 FPS.
+    - Degraded pipeline target: 15 FPS.
+
+    **Calculations:**
+    - Pre-degradation frame traffic: 60 FPS * 12.4 MB = ~744 MB/s.
+    - Backlog during transition: 60 FPS (producer) - 15 FPS (degraded consumer) = 45 frames/second.
+    - Memory bloat over 5 seconds: 45 frames/sec * 12.4 MB * 5 sec = 2.79 GB.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~2.8 GB Memory Spike (Memory-Bound).** The crash comes from producer-consumer imbalance during the 60 FPS to 15 FPS transition: buffered frames can accumulate quickly enough to trigger jetsam in the unified memory pool.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

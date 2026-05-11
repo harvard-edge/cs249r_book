@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-1916
+track: cloud
+level: L4
+zone: diagnosis
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: analyze
+phase: both
+title: SFU Bottlenecks in Custom Routing
+scenario: Your team deploys a novel Mixture of Experts (MoE) LLM on an NVIDIA A100 cluster. To improve expert routing, researchers replaced the standard Softmax with a custom gating function involving multiple division, exponential, and logarithm operations per token. Nsight Compute profiling reveals that despite doing O(N) operations compared to the O(N^2) MatMuls, this element-wise gating kernel has massive pipeline stalls, low warp occupancy, and takes up 35% of the total forward pass time.
+question: Why is the custom MoE gating function taking 35% of the forward pass despite being O(N), and how would you remove the bottleneck?
+details:
+  realistic_solution: The custom routing function heavily taxes the Special Function Units (SFUs) and other low-throughput math pipelines in the Streaming Multiprocessor (SM). Exp, log, reciprocal, and division are much scarcer than ordinary FMA throughput, so a dense cluster of transcendentals can stall warps even when the algorithm is O(N). Remove the bottleneck by reducing transcendental count, algebraically simplifying the gate, using compiler or library fast-math intrinsics where accuracy allows, fusing kernels to reduce launch and memory overhead, and validating any polynomial or lookup-table approximation against model quality.
+  common_mistake: |
+    **The Pitfall:** Assuming all element-wise O(N) operations are simply memory-bandwidth bound.
+    **The Rationale:** Candidates ignore the severe compute constraints and pipeline stalls caused by executing complex transcendental math on GPU hardware.
+    **The Consequence:** Attempting to optimize memory access patterns when the true bottleneck is an instruction pipeline structural hazard.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - The gating kernel performs several exp/log/divide-style operations per token.
+    - SFU/transcendental throughput is much lower than ordinary FP32 FMA throughput.
+    - Nsight shows low occupancy and pipeline stalls, so the limiting resource is instruction throughput, not asymptotic FLOP count.
+
+    **Calculations:**
+    - A normal elementwise affine gate can be mostly FMA and memory traffic.
+    - Adding multiple exp/log/divide operations serializes work onto lower-throughput special-function pipelines.
+    - If each token executes several such operations, warp schedulers can run out of ready warps while waiting on these instructions, producing the observed stalls despite O(N) work.
+
+    **Conclusion & Interpretation:**
+    - **Result: SFU/transcendental throughput bottleneck (Compute-Bound)**. Reduce or approximate expensive functions only within validated accuracy tolerance, and use fused or optimized kernels to avoid making routing dominate the forward pass.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-24T01:14:46.748787'

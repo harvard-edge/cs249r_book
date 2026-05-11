@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: cloud-3177
+track: cloud
+level: L6+
+zone: mastery
+topic: speculative-decoding
+competency_area: latency
+bloom_level: create
+phase: inference
+title: Sizing an EAGLE Draft Head for a 70B Model
+scenario: EAGLE uses the target model's hidden states as input to a lightweight draft head, achieving higher acceptance rates than token-level draft models. You are targeting a 70B model with hidden_dim=8192.
+question: How would you design an EAGLE-style draft head for a 70B target with hidden_dim=8192, and what memory and training costs follow?
+details:
+  realistic_solution: 'Use the target last hidden state and the embedding of the proposed next token as inputs: concat(8192, 8192) = 16384. First project 16384 -> 8192, then run one lightweight transformer block at hidden_dim=8192, then a vocab projection to 128K. With a 1x FFN and omitting small bias/layer-norm terms, parameters are: input projection 16384 x 8192 = 134M, attention projections 4 x 8192^2 = 268M, FFN projections 3 x 8192^2 = 201M, and vocab head 8192 x 128K = 1.05B. Total is about 1.65B parameters, or 3.3GB in FP16. If the head is tensor-parallel sharded four ways, serving memory is about 0.83GB/GPU; without sharding, it is 3.3GB replicated per GPU. Inference cost is roughly 2 x 1.65B = 3.3 GFLOP per token before communication and launch overhead, so it should be treated as a small but real extra model. Training requires target-model forward passes to produce hidden states and next-token losses for the draft head. Parameter training memory is roughly 3.3GB weights + 3.3GB
+    gradients + 6.6-13.2GB optimizer state, or about 13-20GB before activations; practical pipelines stream or recompute hidden states instead of materializing a large corpus of them.'
+  common_mistake: |
+    **The Pitfall:** Using only the last layer's hidden state.
+    **The Rationale:** Assuming the hidden state alone fully represents the token, similar to standard embeddings.
+    **The Consequence:** Failing to provide the surface-level embedding information crucial for predicting the exact next token identity, dropping the acceptance rate.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Target model: 70B, hidden_dim=8192.
+    - Draft head input: concat(hidden_state, embedding) = 16384 dim.
+    - Architecture: input projection to 8192, one transformer layer, then vocab projection to 128K.
+
+    **Calculations:**
+    - Input projection: 16384 x 8192 = 134M parameters.
+    - Attention params: 4 x 8192^2 = 268M.
+    - FFN params: 3 x 8192 x 8192 = 201M.
+    - Vocab head: 8192 x 128K = 1.05B.
+    - Total params: 134M + 268M + 201M + 1.05B = ~1.65B.
+    - FP16 serving footprint: 1.65B x 2 bytes = 3.3GB total, or 0.83GB/GPU with 4-way sharding.
+    - Approximate inference arithmetic: 2 x 1.65B = 3.3 GFLOP per generated draft token, before communication and kernel overhead.
+    - Training parameter memory is roughly 3.3GB weights + 3.3GB gradients + 6.6-13.2GB optimizer state = 13.2-19.8GB before activations and hidden-state buffers.
+    - Hidden-state generation also requires target-model forward passes; storing many 8192-dim hidden states is usually avoided by streaming or recomputation.
+
+    **Conclusion & Interpretation:**
+    - **Result: 3.3GB Total Head Footprint.** The head is modest beside a 70B target but not free; deployment should state whether it is sharded, and training needs roughly 13-20GB of parameter/optimizer memory before activations plus target hidden-state generation.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

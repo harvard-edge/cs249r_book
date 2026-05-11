@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: cloud-4487
+track: cloud
+level: L4
+zone: design
+topic: recommendation-systems-engineering
+competency_area: architecture
+bloom_level: apply
+phase: inference
+title: Hot Row Replication Strategy for Embedding Serving
+scenario: An embedding table with 100M rows is sharded across 16 GPUs. Access logs show top 1000 rows receive 20% of all lookup requests, and these lookups always route to the same 2 GPUs (hot shards). P99 lookup latency is 10ms vs 2ms for cold rows.
+question: How would you replicate the top 1000 hot rows across 16 GPUs while keeping embedding updates consistent?
+details:
+  realistic_solution: 'Hot row replication with update coalescing: (1) Identify hot rows: use a sliding window frequency counter (LFU) per shard. Top-K rows by access count flagged as hot. K=1000 rows, 128-dim × 4B = 512KB total. (2) Replication: hot rows are replicated to all 16 shards. Each shard has a ''hot row cache'' (512KB — trivial). Lookup for hot row: served locally from any shard. (3) Update coalescing: during training, gradient updates to hot rows are accumulated across all shards using all-reduce. Applied to the canonical shard, then broadcast to all caches. Update frequency: once per step (not per lookup). All-reduce overhead: 512KB across 16 GPUs at 900 GB/s NVLink: 512KB / 900GB/s = 0.57µs per step. Negligible. (4) Cache invalidation: on hot row update, invalidate cache on all non-canonical shards atomically using a version counter. Serving replicas re-fetch on version mismatch.'
+  common_mistake: |
+    **The Pitfall:** Replicating hot rows to all 16 GPUs without a coalesced update strategy.
+    **The Rationale:** Replication is an intuitive fix for read-heavy hotspots, but embeddings are updated dynamically during training.
+    **The Consequence:** Maintaining consistency across 16 replicas during gradient descent without coalescing requires a massive 512KB all-broadcast per step, introducing massive synchronization overhead.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Pre-replication Latency: 80% of traffic hits cold rows (2ms), 20% hits hot rows routed to 2 specific GPUs (10ms due to queuing/contention).
+    - Pre-replication P99: Since 20% of traffic takes 10ms, the 99th percentile falls well within this slower bucket. P99 = 10ms.
+
+    **Calculations:**
+    - Post-replication Latency: Hot rows (20% of traffic) are served locally from any GPU cache (0.5ms). Cold rows (80%) still take 2ms.
+    - Post-replication P99: The slowest 80% of traffic now takes 2ms, and the fastest 20% takes 0.5ms. The 99th percentile falls in the 2ms bucket. P99 = 2ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 2ms P99 (Latency-Bound)**. P99 latency improves from 10ms to 2ms (5x improvement).
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

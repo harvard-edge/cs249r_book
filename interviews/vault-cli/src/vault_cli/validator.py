@@ -10,6 +10,7 @@ This module is the engine; tier selection and reporting are in
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +18,17 @@ from pathlib import Path
 from vault_cli.loader import LoadedQuestion
 from vault_cli.paths import is_lowercase, vault_questions_root
 from vault_cli.yaml_io import load_file
+
+# Phase 6 (2026-05-04): the AUTHORING.md marker convention is now a
+# published-corpus invariant. Patterns mirror the LinkML source of truth at
+# interviews/vault/schema/question_schema.yaml. Both fields are optional;
+# only PRESENT-AND-MALFORMED triggers a failure (matches gate_format).
+_CM_MARKER_RE = re.compile(
+    r"(?s).*\*\*The Pitfall:\*\*.*\*\*The Rationale:\*\*.*\*\*The Consequence:\*\*.*"
+)
+_NM_MARKER_RE = re.compile(
+    r"(?s).*\*\*Assumptions.*\*\*Calculations:\*\*.*\*\*Conclusion.*"
+)
 
 
 @dataclass(frozen=True)
@@ -42,20 +54,82 @@ def fast_tier(loaded: list[LoadedQuestion], vault_dir: Path) -> list[InvariantFa
         if n > 1:
             failures.append(_fail("fast", "unique-id", qid=qid, message=f"ID appears {n} times"))
 
-    # Check #4: path components lowercase. v1.0: only the track dir is
-    # meaningful in the path; the filename itself carries the id.
+    # Check #4: path components lowercase + path mirrors body metadata.
+    # Hierarchical layout: <track>/<competency_area>/<id>.yaml.
+    # The path is a *derived* index over body fields — the body is the source
+    # of truth, the path must mirror it. This invariant prevents drift like
+    # "track field rewritten during audit but file not moved" silently breaking
+    # the directory structure.
     root = vault_questions_root(vault_dir)
     for lq in loaded:
         rel = lq.path.relative_to(root)
-        track_component = rel.parts[0] if rel.parts else ""
-        if not is_lowercase(track_component):
+        parts = rel.parts
+
+        # Lowercase check on path components (excluding filename)
+        for component in parts[:-1]:
+            if not is_lowercase(component):
+                failures.append(
+                    _fail(
+                        "fast",
+                        "path-lowercase",
+                        qid=lq.id,
+                        path=lq.path,
+                        message=f"path component {component!r} is not lowercase",
+                    )
+                )
+
+        # Hierarchical layout check: <track>/<area>/<file>
+        if len(parts) != 3:
             failures.append(
                 _fail(
                     "fast",
-                    "path-lowercase",
+                    "path-hierarchy-shape",
                     qid=lq.id,
                     path=lq.path,
-                    message=f"track directory {track_component!r} is not lowercase",
+                    message=(
+                        f"path has {len(parts)} segments under questions/; "
+                        "expected 3 (<track>/<competency_area>/<filename>)"
+                    ),
+                )
+            )
+            continue
+
+        path_track, path_area, path_filename = parts
+        if path_track != lq.question.track:
+            failures.append(
+                _fail(
+                    "fast",
+                    "path-track-match",
+                    qid=lq.id,
+                    path=lq.path,
+                    message=(
+                        f"path track segment {path_track!r} != body track "
+                        f"{lq.question.track!r}"
+                    ),
+                )
+            )
+        if path_area != lq.question.competency_area:
+            failures.append(
+                _fail(
+                    "fast",
+                    "path-area-match",
+                    qid=lq.id,
+                    path=lq.path,
+                    message=(
+                        f"path area segment {path_area!r} != body competency_area "
+                        f"{lq.question.competency_area!r}"
+                    ),
+                )
+            )
+        expected_filename = f"{lq.question.id}.yaml"
+        if path_filename != expected_filename:
+            failures.append(
+                _fail(
+                    "fast",
+                    "path-id-match",
+                    qid=lq.id,
+                    path=lq.path,
+                    message=f"filename {path_filename!r} != <id>.yaml ({expected_filename!r})",
                 )
             )
 
@@ -97,10 +171,12 @@ def structural_tier(
                 )
 
     # #12-13: chain membership + position integrity.
-    # v1.0 uses plural `chains: [{id, position}]` — a question can belong to
-    # multiple chains. chains.json is the canonical registry.
+    # v1.1: chains.json is the AUTHORITATIVE source. Question YAMLs no longer
+    # carry a chains: field. Build a chain_members view by joining each chain's
+    # questions list (position = array index) with the loaded YAML records.
     known_chains: set[str] = set()
     chain_registry_topic: dict[str, str] = {}
+    chain_registry_questions: dict[str, list[str]] = {}
     import json as _json
     chains_json = vault_dir / "chains.json"
     if chains_json.exists():
@@ -110,24 +186,32 @@ def structural_tier(
                 known_chains.add(cid)
                 if entry.get("topic"):
                     chain_registry_topic[cid] = entry["topic"]
+                chain_registry_questions[cid] = [
+                    q.get("id") for q in entry.get("questions", []) if q.get("id")
+                ]
 
     # Indexed view: chain_id -> list of (question_id, topic, level, position)
     LEVEL_RANK = {"L1": 1, "L2": 2, "L3": 3, "L4": 4, "L5": 5, "L6+": 6}
+    qid_to_loaded = {lq.id: lq for lq in loaded}
     chain_members: dict[str, list[tuple[str, str, str, int]]] = {}
-    for lq in loaded:
-        for c in lq.question.chains or []:
-            if known_chains and c.id not in known_chains:
+    for cid, member_ids in chain_registry_questions.items():
+        for pos, qid in enumerate(member_ids):
+            lq = qid_to_loaded.get(qid)
+            if lq is None:
                 failures.append(
                     _fail(
                         "structural",
-                        "chain-ref-exists",
-                        qid=lq.id,
-                        path=lq.path,
-                        message=f"chain {c.id!r} not found in chains.json",
+                        "chain-member-missing-yaml",
+                        qid=qid,
+                        message=(
+                            f"chain {cid!r} references question {qid!r} which "
+                            "does not exist in the YAML corpus"
+                        ),
                     )
                 )
-            chain_members.setdefault(c.id, []).append(
-                (lq.id, lq.question.topic, lq.question.level, c.position)
+                continue
+            chain_members.setdefault(cid, []).append(
+                (qid, lq.question.topic, lq.question.level, pos)
             )
 
     # #14: no duplicate positions within a chain.
@@ -220,6 +304,59 @@ def structural_tier(
     # #15: applicability matrix respected — no questions in excluded (track, topic) cells (B.8).
     failures.extend(_check_applicability(loaded, vault_dir))
 
+    # #19 (Phase 6, 2026-05-04): published YAMLs follow the AUTHORING.md
+    # marker convention on common_mistake / napkin_math. Lifts gate_format
+    # from validate_drafts.py / _judges.py to a corpus-wide invariant.
+    # Drafts are exempt — author-in-progress drafts may not yet be marker-
+    # compliant, and `vault check --strict` runs against the published set.
+    failures.extend(_check_format_markers(loaded))
+
+    return failures
+
+
+def _check_format_markers(loaded: list[LoadedQuestion]) -> list[InvariantFailure]:
+    """Invariant #19: published common_mistake / napkin_math follow markers.
+
+    Both fields are optional. Empty / absent values pass. A non-empty value
+    must contain the canonical AUTHORING.md markers in order — see
+    interviews/vault/schema/question_schema.yaml for the authoritative
+    pattern. Drafts are exempt; this is a published-corpus invariant.
+    """
+    failures: list[InvariantFailure] = []
+    for lq in loaded:
+        if lq.question.status != "published":
+            continue
+        details = lq.question.details
+        cm = (details.common_mistake or "").strip()
+        if cm and not _CM_MARKER_RE.match(cm):
+            failures.append(
+                _fail(
+                    "structural",
+                    "format-markers",
+                    qid=lq.id,
+                    path=lq.path,
+                    message=(
+                        "common_mistake missing AUTHORING.md markers — must "
+                        "contain **The Pitfall:** / **The Rationale:** / "
+                        "**The Consequence:** in order"
+                    ),
+                )
+            )
+        nm = (details.napkin_math or "").strip()
+        if nm and not _NM_MARKER_RE.match(nm):
+            failures.append(
+                _fail(
+                    "structural",
+                    "format-markers",
+                    qid=lq.id,
+                    path=lq.path,
+                    message=(
+                        "napkin_math missing AUTHORING.md markers — must "
+                        "contain **Assumptions** / **Calculations:** / "
+                        "**Conclusion** in order"
+                    ),
+                )
+            )
     return failures
 
 

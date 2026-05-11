@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-3629
+track: cloud
+level: L4
+zone: implement
+topic: rdma-transport
+competency_area: memory
+bloom_level: apply
+phase: both
+title: Zero-Copy RDMA Registration and Memory Pinning for GPU Direct
+scenario: An engineer enables GPUDirect RDMA on a GPU to allow an InfiniBand NIC to DMA directly from GPU memory. The first implementation shows 40% higher latency than CPU-path RDMA.
+question: Why might GPUDirect RDMA show 40% higher latency than CPU-path RDMA, and how would you fix the memory registration issue?
+details:
+  realistic_solution: Memory registration pins pages and creates HCA translation state. If the implementation calls ibv_reg_mr or performs equivalent GPU-memory registration on the hot path, the registration and mapping work can dominate small RDMA transfers and make GPUDirect slower than the CPU path. Fix it by allocating stable GPU communication buffers, registering or pinning them at startup, reusing the memory keys, and avoiding per-transfer registration. GPUDirect RDMA does not require NVLink; it can work over PCIe when the GPU, HCA, driver, IOMMU, and platform support peer-to-peer access. Also place the GPU and HCA under a topology that supports P2P, warm the registered buffers, and use large pages or registration caches where available.
+  common_mistake: |
+    **The Pitfall:** Registering GPU memory repeatedly on each transfer (dynamic registration).
+    **The Rationale:** Candidates overlook that HCA memory registration is an expensive, synchronous operation that pins physical pages.
+    **The Consequence:** The overhead of dynamic registration completely negates the latency benefits of bypassing the CPU.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Buffer: 40 GB. Page size: 4 KB.
+    - CPU-path baseline latency: 10 μs.
+    - Observed GPUDirect path is 40% higher, so it is 14 μs.
+
+    **Calculations:**
+    - Extra latency attributed to registration/mapping on the hot path = 14 μs - 10 μs = 4 μs per transfer.
+    - Relative penalty = 4 μs / 10 μs = 40%.
+    - Pages for a 40GB buffer with 4KB pages: 40GB / 4KB ≈ 10,000,000 pages.
+    - Registering that many small pages dynamically is inappropriate for the hot path; the cost should be paid once at startup or avoided with registration caching and larger pinned allocations.
+
+    **Conclusion & Interpretation:**
+    - **Result: Registration Hot-Path Penalty.** Pre-registering and reusing GPU buffers removes the 4 μs per-transfer overhead that explains the observed 40% latency increase.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+  - 40GB / 4KB is 10 million pages, not 1 million. The subsequent registration cost calculation should be 1s (1000ms), not 100ms.
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

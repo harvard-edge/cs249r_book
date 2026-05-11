@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-0612
+track: cloud
+level: L4
+zone: optimization
+topic: memory-hierarchy-design
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: The Gradient Checkpoint Trade-off
+scenario: You're training a 32-layer transformer and running out of memory. Your colleague suggests gradient checkpointing.
+question: For a 32-layer transformer, how much memory does gradient checkpointing every k layers save, and what compute overhead does it add?
+details:
+  realistic_solution: |
+    Without checkpointing, training stores activations for all 32 layers. With checkpointing every k layers, a simple segment model stores the segment boundaries plus a working buffer while replaying each segment during backward, so peak activation memory is bounded by the saved boundaries and the largest replayed segment rather than by all 32 layers. Recompute is also segment-based: in each segment, the forward activations between checkpoints are replayed during backward, so the added work is roughly one extra forward for the non-boundary layers, not an exact universal formula. Under the common approximation that backward costs about two forward passes, replaying about 24-28 illustrative layer-forwards adds roughly 25-30% step time. The best k depends on the memory target, micro-batch size, implementation, and accepted recompute.
+  common_mistake: |
+    **The Pitfall:** Believing gradient checkpointing eliminates all activation memory.
+    **The Rationale:** Candidates don't understand that checkpointing trades recomputation for memory by storing activations only at specific boundaries.
+    **The Consequence:** They miscalculate memory requirements and fail to optimize the checkpointing interval $k$, leading to excessive recomputation overhead.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 32-layer transformer.
+    - Activation memory baseline: 128 MB/layer.
+    - Illustrative segment checkpointing model: store only segment boundary activations during forward, then replay one segment at a time during backward.
+    - Baseline step cost is approximated as 1 forward + 2 backward-equivalent forward costs = 3 full forward equivalents.
+
+    **Calculations:**
+    - Baseline activation memory: 32 * 128 MB = 4,096 MB.
+    - With checkpoint interval k, saved boundary activations are about ceil(32/k) * 128 MB. During backward, the implementation also needs a working segment whose peak is up to about k * 128 MB, plus framework-specific retained tensors.
+    - k=4: boundaries are 8 * 128 MB = 1,024 MB; working segment is up to 512 MB; planning peak is roughly 1.0-1.5 GB, saving about 62-75% versus 4,096 MB.
+    - k=8: boundaries are 4 * 128 MB = 512 MB; working segment is up to 1,024 MB; planning peak is roughly 0.5-1.5 GB, saving about 62-88% versus 4,096 MB.
+    - Recompute work is the segment interiors replayed during backward. If about 24-28 of 32 layer-forwards are replayed, overhead is about 24/(3*32) to 28/(3*32) = 25-29% step time under this simple cost model.
+
+    **Conclusion & Interpretation:**
+    - **Result: Approximate Memory/Compute Trade-off.** Checkpointing can reduce activation memory from about 4.1 GB to roughly 0.5-1.5 GB in this example, depending on k and implementation, at the cost of about 25-30% extra step time. Treat these as planning estimates, not exact universal formulas.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

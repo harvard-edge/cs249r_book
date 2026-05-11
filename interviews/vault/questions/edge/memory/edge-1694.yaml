@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: edge-1694
+track: edge
+level: L4
+zone: optimization
+topic: dma-data-movement
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: Hailo-8 Zero-Copy Stream Optimization
+scenario: We are deploying a 4-camera traffic monitoring pipeline on an edge gateway equipped with a Hailo-8 accelerator. The pipeline processes 1080p frames but is bottlenecked at 40 FPS. Profiling reveals the Hailo-8 is idle 85% of the time while the host ARM CPU is pegged at 100% performing user-space to kernel-space buffer copies.
+question: What host-device data movement bottleneck stalls the pipeline, and how would zero-copy DMA fix it?
+details:
+  realistic_solution: The host CPU is choking on `memcpy` operations required to move uncompressed 1080p tensors from V4L2 capture buffers into HailoRT execution buffers. To resolve this, implement a zero-copy DMA pipeline using dma-buf-backed buffers that both the capture driver and HailoRT can import. This removes the user-space CPU copy and lets the device DMA from shared buffers where supported, but it does not make transfer latency literally zero; PCIe/DMA setup and bandwidth costs still remain.
+  common_mistake: |
+    **The Pitfall:** Attempting to solve low NPU utilization by increasing batch sizes or heavily compressing the input images.
+    **The Rationale:** Candidates incorrectly assume the NPU is inefficiently scheduled, failing to recognize that the pipeline is hard-locked by the host CPU's memory bandwidth limits.
+    **The Consequence:** Adding batching increases latency, and adding compression burns even more CPU cycles, causing the framerate to drop even further.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Frame size: 1080p RGB INT8 tensor = 1920 * 1080 * 3 bytes = 6.22 MB decimal.
+    - Edge CPU Memory Bandwidth: ~2 GB/s.
+    - Hailo-8 target compute: ~0.38 ms per frame.
+
+    **Calculations:**
+    - CPU read+write copy time = (6.22 MB * 2) / 2000 MB/s = ~6.2 ms per frame.
+    - Current theoretical max FPS (CPU bound) = 1000 ms / 6.2 ms = 161 FPS (split across 4 cameras = ~40 FPS).
+    - Zero-copy DMA removes the 6.2ms host memcpy from the CPU critical path.
+    - Remaining device transfer cost is DMA/PCIe dependent, not literally zero, and should be measured separately.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~6.2ms CPU-copy overhead removed**. Zero-copy DMA transitions the pipeline away from a host-CPU memcpy bottleneck, while remaining DMA/PCIe transfer time still counts in the end-to-end latency budget.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

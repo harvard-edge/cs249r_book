@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-0797
+track: cloud
+level: L4
+zone: diagnosis
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: analyze
+phase: inference
+title: The Model Deprecation Cliff
+scenario: Your platform has 23 models in production. You discover that 8 older models collectively serve only 2% of total traffic but consume 30% of your GPU fleet. Your PM asks why these old models can't just be co-located on the same GPUs as the newer models to save money.
+question: Why does maintaining multiple model generations simultaneously fragment your serving cluster and destroy GPU utilization?
+details:
+  realistic_solution: Co-locating multiple model generations on a single GPU creates severe memory fragmentation and scheduling bottlenecks. Old models often use different precision formats (e.g., FP32 vs FP16), different CUDA graph compilations, different KV-cache shapes, and different batch sizes. When you load multiple distinct models onto one GPU, each model statically reserves its own CUDA context, workspace memory, weights, and KV-cache blocks. Because the models usually do not share weights or compatible attention layouts, the serving framework (like vLLM or Triton) cannot easily batch requests across them except within compatible model families. The GPU ends up context-switching between different kernels, while VRAM is partitioned into small, inflexible scheduler pools that prevent any single model from achieving a large enough batch size to be compute-bound.
+  common_mistake: |
+    **The Pitfall:** "Just put them all in the same Docker container."
+    **The Rationale:** Treating GPU VRAM and scheduling exactly like system RAM and CPU processes.
+    **The Consequence:** Ignores static CUDA context allocation and KV-cache sharding, completely destroying GPU hardware utilization.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Production fleet has 23 models.
+    - Eight older models collectively serve 2% of traffic but consume 30% of the GPU fleet.
+    - Fragmentation comes from separate weights, KV-cache pools, CUDA graphs, and scheduler queues per incompatible model generation.
+
+    **Calculations:**
+    - Traffic-to-fleet imbalance: 30% fleet / 2% traffic = 15x more fleet share than traffic share.
+    - If those models scaled like a single compatible serving pool, their 2% traffic share would need roughly 2% of capacity, not 30%.
+    - The gap is explained by reserved weights and KV cache, low per-model request rates, isolated batching queues, and topology constraints that strand GPU memory and compute.
+    - Co-location can reduce some idle time only when model versions are compatible enough to share runtime assumptions; otherwise it creates several small pools instead of one efficient batch scheduler.
+
+    **Conclusion & Interpretation:**
+    - **Result: Fragmentation-Bound.** The defensible takeaway from the scenario is the 15x traffic-to-capacity imbalance: old generations consume fleet because incompatible weights, KV-cache shapes, and scheduler isolation prevent them from behaving like one shared serving pool.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

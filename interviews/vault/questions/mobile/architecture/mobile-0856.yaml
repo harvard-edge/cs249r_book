@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: mobile-0856
+track: mobile
+level: L3
+zone: fluency
+topic: cnn-efficient-design
+competency_area: architecture
+bloom_level: apply
+phase: inference
+title: 'Fluency: describe inverted residual block execution on Qualcomm Hexagon NPU'
+scenario: A mobile ML engineer on your team is new to Qualcomm Hexagon NPU. They ask how an inverted residual block from MobileNetV2 maps to Hexagon HTP operations and whether the expansion ratio t=6 is optimal for Hexagon.
+question: How should a MobileNetV2 inverted residual block map to Hexagon HTP, and when is expansion ratio 6 too large?
+details:
+  realistic_solution: |
+    Lower the block as three main compute stages: 1x1 expansion, 3x3 depthwise convolution, and 1x1 projection, with batch normalization folded into the neighboring convolutions and ReLU6 fused where the QNN/HTP backend supports it. Some adjacent stages may be fused or scheduled together, but a full expand-depthwise-project block should not be described as guaranteed single-dispatch execution; placement depends on tensor shapes, quantization, static-shape constraints, and the backend/compiler version.
+
+    Expansion ratio t=6 becomes too large when the expanded activation tensor drives tiling, memory traffic, or scheduling overhead enough that the extra channels no longer buy useful accuracy. The practical test is to profile high-channel stages and compare t=6 against t=4 or stage-specific ratios with the same quantization and accuracy target. For low-channel early blocks, t=6 may be fine; for high-channel blocks, t=4 can be a reasonable candidate, but the threshold and accuracy loss must be measured rather than assumed.
+  common_mistake: |
+    **The Pitfall:** Assuming Hexagon HTP maps the expand-depthwise-project sequence as three separate kernel calls.
+    **The Rationale:** Lack of awareness that modern mobile NPU compilers may fold constants, fuse activations, and schedule adjacent supported operations together, though not always as a single dispatch.
+    **The Consequence:** Designing suboptimal architectures that fail to leverage the NPU's ability to fuse operations into a single accelerated op.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Compare only the expanded activation size for an input block with C=160 channels.
+       - INT8 activations use 1 byte per element.
+       - Spatial size is H x W; exact HTP tiling limits are backend-specific and not assumed.
+    2. **Calculations:**
+       - t=6 expanded channels: 160 x 6 = 960 channels.
+       - t=4 expanded channels: 160 x 4 = 640 channels.
+       - Expanded activation bytes at 14x14:
+         - t=6: 14 x 14 x 960 x 1 byte = 188KB.
+         - t=4: 14 x 14 x 640 x 1 byte = 125KB.
+       - Expanded activation bytes at 28x28:
+         - t=6: 28 x 28 x 960 x 1 byte = 753KB.
+         - t=4: 28 x 28 x 640 x 1 byte = 502KB.
+       - Reducing t from 6 to 4 cuts the expanded-channel work and activation traffic by 1 - 4/6 = 33% for that block.
+    3. **Conclusion & Interpretation:**
+       **Result: Memory-and-Scheduling-Sensitive Optimization. t=6 is questionable in high-channel or large-spatial stages when profiling shows expanded activations causing extra tiling, memory traffic, or latency. t=4 is a candidate, not a guaranteed Hexagon rule.**
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

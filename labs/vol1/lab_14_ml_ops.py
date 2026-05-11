@@ -113,7 +113,7 @@ def _(COLORS, mo):
                 <div style="margin-bottom: 3px;">2. <strong>Calculate optimal retraining cadence</strong>
                     &mdash; T* = sqrt(2C / C_drift) produces a 6-day interval when drift costs $500/day.</div>
                 <div style="margin-bottom: 3px;">3. <strong>Quantify technical debt compounding</strong>
-                    &mdash; 3 deferred retraining cycles produce 5&ndash;6x accumulated loss, not 3x.</div>
+                    &mdash; 3 deferred retraining cycles produce ~10x accumulated loss, not 3x.</div>
             </div>
         </div>
         <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
@@ -237,7 +237,7 @@ def _(mo):
         options={
             "A) 3x (linear accumulation)": "3x",
             "B) 4x (slightly superlinear)": "4x",
-            "C) ~5-6x (debt compounds)": "5x",
+            "C) ~10x (debt compounds)": "10x",
             "D) 9x (quadratic)": "9x",
         },
         label="You defer retraining for 3 consecutive T* cycles. Total accuracy loss vs single miss?",
@@ -855,7 +855,7 @@ Debt multiplier:      {_total_with_cascade:.1f} / {_single_loss:.1f} = {_debt_mu
 *Source: technical debt model from @sec-ml-operations-debt-cascade*
         """))
 
-        if partD_pred.value == "5x":
+        if partD_pred.value == "10x":
             items.append(mo.callout(mo.md(
                 f"**Correct.** Debt compounds: {_N} missed cycles at {_bl} pp/cycle "
                 f"with {_nd} downstream models = {_debt_mult:.1f}x, not {_N}x."), kind="success"))
@@ -904,7 +904,7 @@ $$
             ), kind="info"),
             mo.callout(mo.md(
                 "**3. Technical debt compounds, not accumulates.**\n\n"
-                "3 missed retraining cycles produce 5-6x the loss of 1 missed cycle. "
+                "3 missed retraining cycles produce ~10x the loss of 1 missed cycle. "
                 "Downstream model dependencies multiply the damage."
             ), kind="info"),
             mo.Html(f"""

@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: mobile-0967
+track: mobile
+level: L4
+zone: optimization
+topic: latency-decomposition
+competency_area: latency
+bloom_level: evaluate
+phase: inference
+title: 'Latency Decomposition: Optimize Wake-Word Detection Latency on Tensor G3'
+scenario: A wake-word detection model runs continuously on a mobile SoC. Current latency from audio capture to detection trigger is 180ms P99. The target is < 80ms. The audio pipeline comprises mic capture (20ms buffer), CPU-based MFCC feature extraction, inference, and decision logic.
+question: How would you cut wake-word P99 latency from 180 ms to under 80 ms for a 1M-param INT8 model?
+details:
+  realistic_solution: |
+    The model compute is not the bottleneck: 0.05 GOPs on a 7.5 TOPS accelerator is about 6.7 microseconds before dispatch, while the 180ms P99 must come from capture buffering, CPU MFCC scheduling, queuing, and decision smoothing. Cut latency by moving MFCC to the low-power DSP, reducing capture from a 20ms buffer to a 10ms window with 50% overlap, pinning the audio path to a real-time priority thread, keeping the NPU invocation warm, and measuring P99 stage timings after each change. A defensible target budget is 10ms initial audio, 15ms for three 5ms smoothing strides, ~1ms DSP MFCC, ~2ms warm dispatch, ~1ms decision logic, and 20-30ms P99 scheduling margin, for roughly 49-59ms instead of an unsupported exact 37ms claim.
+  common_mistake: |
+    **The Pitfall:** Trying to optimize inference compute latency.
+    **The Rationale:** Candidates assume the NPU model is the slowest component of the pipeline.
+    **The Consequence:** They miss that the true bottleneck is the 20ms audio buffer and the MFCC feature extraction running on the CPU.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Target P99 latency: < 80ms.
+    - Inference compute: 0.05 GOPs.
+    - Proposed audio window: 10ms (160 samples at 16kHz) with 50% overlap, so stride is 5ms.
+    - Decision smoothing: 3 strides.
+
+    **Calculations:**
+    - Inference compute lower bound: 0.05 GOPs / 7.5 TOPS = 5e7 ops / 7.5e12 ops/s = 6.7 microseconds, so model arithmetic is negligible relative to audio scheduling.
+    - Audio evidence delay: initial 10ms window + 3 * 5ms strides = 25ms.
+    - Processing overhead after DSP migration: ~1ms MFCC + ~2ms warm NPU dispatch + ~1ms decision logic = ~4ms.
+    - Add explicit P99 scheduling margin after real-time thread/DSP changes: 20-30ms.
+    - Target P99 budget: 25ms + 4ms + 20-30ms = 49-59ms, below the 80ms SLA if measurements confirm the assumed DSP and scheduling bounds.
+
+    **Conclusion & Interpretation:**
+    - **Result: I/O and scheduling bound, not compute bound.** The plan should be validated by measured stage P99s, but the arithmetic shows that DSP MFCC, smaller overlapped windows, warm NPU dispatch, and a real-time audio path can plausibly bring P99 under 80ms.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

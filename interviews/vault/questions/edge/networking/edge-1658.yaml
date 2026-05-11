@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: edge-1658
+track: edge
+level: L6+
+zone: mastery
+topic: load-balancing
+competency_area: networking
+bloom_level: create
+phase: inference
+title: Edge TPU Cluster Load Balancing for Real-Time Video Analytics
+scenario: You are designing an edge computing node for a smart city intersection that processes video streams from 8 independent 30 FPS cameras. The node is equipped with a host CPU and an array of 4 Google Coral Edge TPUs.
+question: How would you route and load-balance 8 camera streams across 4 Coral Edge TPUs while handling bursts and frame drops?
+details:
+  realistic_solution: |
+    Compile the INT8 model ahead of time with the Edge TPU compiler and deploy only graph segments that run fully on the TPUs; unsupported operations must be removed, rewritten, or explicitly handled outside the hot path. The host CPU should decouple capture from inference with one bounded queue per camera and one bounded work queue per TPU. A scheduler assigns ready frames to the least-busy TPU or lets TPU worker threads pull from camera queues using fairness weights. Backpressure belongs at frame ingress: when a camera queue is full, drop the oldest or lowest-priority frame for that camera rather than allowing PCIe or inference queues to grow without bound. Batching should be used only if the compiled model and latency target support it.
+  common_mistake: |
+    **The Pitfall:** Proposing a basic round-robin load balancer that pushes frames directly to the PCIe bus.
+    **The Rationale:** Treating the Edge TPUs like standard web servers without understanding host CPU graph compilation and unsupported operator fallbacks.
+    **The Consequence:** Saturating the PCIe queue with unprocessable frames during a burst, leading to system-wide lockups instead of graceful frame dropping.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Workload: 8 cameras * 30 FPS = 240 FPS total.
+    - Hardware: 4 Edge TPUs.
+    - Scheduling target: each camera gets a bounded queue of 3 frames and drops oldest frames on overflow.
+    - Planning estimate: assume the compiled model sustains 120 FPS per TPU after PCIe and preprocessing overhead, then verify by profiling.
+
+    **Calculations:**
+    - Nominal assignment is 2 cameras per TPU, or 60 FPS of steady input per TPU.
+    - Estimated steady utilization per TPU = 60 / 120 = 50%, leaving about 60 FPS of burst headroom per TPU under this assumption.
+    - Cluster planning capacity = 4 * 120 FPS = 480 FPS, or 2x the 240 FPS steady workload.
+    - With 3-frame camera queues at 30 FPS, each camera can absorb about 3 / 30 = 100 ms of burst or scheduling jitter before dropping stale frames.
+    - PCIe bandwidth required for 270 KB tensors = 240 FPS * 270 KB = ~65 MB/s at steady state, before overhead.
+
+    **Conclusion & Interpretation:**
+    - **Result: use least-busy or weighted-fair dispatch with per-camera bounded queues and oldest-frame drop.** Under the 120 FPS/TPU planning assumption, the cluster has 2x steady FPS headroom and about 100 ms per-camera burst absorption, so correctness depends on backpressure policy and measured TPU latency rather than raw PCIe bandwidth alone.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

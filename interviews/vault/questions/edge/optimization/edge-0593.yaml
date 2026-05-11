@@ -1,0 +1,33 @@
+schema_version: '1.0'
+id: edge-0593
+track: edge
+level: L5
+zone: evaluation
+topic: graph-compilation
+competency_area: optimization
+bloom_level: evaluate
+phase: inference
+title: The Speculative Verifier Cold-Start Stall
+scenario: You are the tech lead for the perception team on a new autonomous vehicle. The core of your system is a large Vision Transformer (ViT) that processes 1200x1200 images for object detection. After TensorRT optimization and batching constraints for verifier use, its warm inference path runs in 25ms on your automotive ECU (an NVIDIA Jetson AGX Orin), meeting the hard 33ms real-time deadline.
+question: Why would a drafter-verifier design that invokes the ViT only occasionally blow the 33ms deadline with 100-200ms latency spikes?
+details:
+  realistic_solution: The likely root cause is a cold-start runtime stall, not ordinary steady-state FLOP cost. TensorRT engines are normally built ahead of time, but sparse verifier invocation can still trigger lazy CUDA context setup, tactic or engine cache reloads, memory pool growth, plugin initialization, or profile selection on the CPU/runtime path. When the ViT has been dormant for hundreds of frames, those cold-path costs can be paid on the verifier frame and turn a 25ms warm inference into a 100-200ms latency spike.
+  common_mistake: |
+    **The Pitfall:** Blaming data movement, cache pollution, or slow DRAM.
+    **The Rationale:** Memory stalls are the typical answer for edge bottlenecks, but they usually explain steady slowdowns, not rare 150ms+ cold-path spikes.
+    **The Consequence:** Misdiagnosing the non-linear system failure and failing to pre-warm the verifier path, pin engines and profiles, and eliminate lazy initialization from the deadline-critical frame.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - The ViT verifier normally runs in 25ms when its TensorRT engine, CUDA context, plugins, and memory pools are warm.
+    - The real-time budget is 33ms.
+    - Intermittent verifier calls may hit a cold or invalidated TensorRT/CUDA runtime path.
+
+    **Calculations:**
+    - Warm ViT verifier execution: ~25ms, within the 33ms deadline.
+    - Cold engine/profile reload, lazy initialization, or memory-pool growth cost: roughly 75-175ms on the CPU/runtime path.
+    - Intermittent invocation latency = 25ms warm execution + 75-175ms cold-runtime stall = 100-200ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 100-200ms latency spike (Software Cold-Path Bound)**. The spike is a cold engine, tactic, cache, or lazy-initialization stall layered on top of normal ViT inference, not a steady-state compute or DRAM throughput estimate.
+status: published
+provenance: imported

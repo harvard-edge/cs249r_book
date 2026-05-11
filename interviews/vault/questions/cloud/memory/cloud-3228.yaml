@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-3228
+track: cloud
+level: L3
+zone: implement
+topic: kv-cache-management
+competency_area: memory
+bloom_level: apply
+phase: inference
+title: KV-Cache Memory Planning for Multi-Turn Chat
+scenario: Your chat service uses Llama 3 8B (32 layers, 4 GQA KV heads, head_dim=128) with an 8K context window. Users average 6 turns per conversation, each turn adding 500 tokens (300 user + 200 assistant).
+question: How does KV-cache grow over 6 turns for Llama 3 8B, and how many concurrent conversations fit on one A100-80GB?
+details:
+  realistic_solution: |
+    KV per token per layer: 2 × 4 × 128 × 2B = 2,048 B = 2 KiB. Per token across 32 layers: 2 KiB × 32 = 64 KiB. The conversation adds 500 tokens per turn, so after 6 turns it has 3000 tokens, which fits within the 8K context window. KV therefore grows linearly through turn 6: turn 1 is 500 tokens × 64 KiB = 31.25 MiB, turn 2 is 62.5 MiB, turn 3 is 93.75 MiB, and turn 6 is 3000 tokens × 64 KiB = 187.5 MiB per conversation. Model weights take about 16 GiB, leaving 64 GiB before runtime overhead; assuming about 60 GiB is usable for KV after activations, allocator metadata, and safety headroom, turn-6 capacity is 60 GiB / 187.5 MiB ≈ 328 concurrent conversations. This estimate is conditional on the 60 GiB usable-KV budget; a smaller runtime headroom reduces concurrency proportionally, and growth is capped by the 8K window.
+  common_mistake: |
+    **The Pitfall:** Forgetting that multi-turn conversations accumulate KV-cache across all turns.
+    **The Rationale:** Candidates calculate the KV cache only for the current turn's newly generated tokens rather than the entire context history.
+    **The Consequence:** Turn 6 memory requirements are severely underestimated because it must attend to all previous turns' tokens, leading to out-of-memory errors in production.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Llama 3 8B: 32 layers, 4 GQA heads, 128 head_dim.
+    - 6 turns, 500 tokens/turn, with an 8K context window.
+    - A100-80GB budget: about 16 GiB weights leaves about 64 GiB before overhead; assume ~60 GiB usable for KV.
+
+    **Calculations:**
+    - KV per token per layer: 2 * 4 * 128 * 2B = 2,048 B = 2 KiB.
+    - KV per token across 32 layers: 2 KiB * 32 = 64 KiB.
+    - Turn 1: 500 * 64 KiB = 31.25 MiB.
+    - Turn 6 accumulated context: 6 * 500 = 3000 tokens, which is below the 8192-token window.
+    - Turn 6 KV: 3000 * 64 KiB = 187.5 MiB/conversation.
+    - Concurrency at 3K: 60 GiB / 187.5 MiB = 327.7, so about 328 conversations.
+    - Full-window cap: 8192 * 64 KiB = 512 MiB/conversation, so the same KV budget would fit about 120 full 8K conversations.
+
+    **Conclusion & Interpretation:**
+    - **Result: About 328 concurrent turn-6 conversations under a ~60 GiB usable-KV assumption.** Capacity planning must reserve overhead, use expected accumulated context length, and remember that growth is bounded by the 8K window.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

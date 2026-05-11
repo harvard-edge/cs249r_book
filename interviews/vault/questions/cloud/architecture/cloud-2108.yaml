@@ -1,0 +1,56 @@
+schema_version: '1.0'
+id: cloud-2108
+track: cloud
+level: L6+
+zone: mastery
+topic: mixture-of-experts
+competency_area: architecture
+bloom_level: create
+phase: both
+title: MoE Inference Memory Efficiency Problem
+scenario: Your 128-expert MoE model has 800B total parameters but only 12B active per token (top-2 of 128). During inference, all 800B parameters (1.6 TB in BF16) must reside in GPU HBM, but at any given moment only 1.5% of weights are 'hot.' This means 98.5% of your GPU investment is storing cold weights.
+question: How would you improve HBM memory utilization for the 128-expert 800B MoE without degrading inference latency?
+details:
+  realistic_solution: |
+    Deploy an expert-caching and quantization hierarchy.
+    1. Hot Expert Caching: Pin the most frequently routed experts in GPU HBM in BF16 or FP8 so common paths do not pay extra latency.
+    2. Cold Expert Quantization: Store long-tail experts in INT8 or INT4 after per-expert quality checks, reducing resident HBM footprint without changing the routing semantics.
+    3. Capacity-Aware Placement: Place hot replicas near the serving workers that use them most and keep cold experts compressed on the GPU path; do not depend on CPU/PCIe offload for latency-critical tokens.
+    4. Measurement Gate: Tune the hot set from router traces and promote experts when route frequency or tail latency changes. The strategy reduces HBM pressure while keeping latency safe because the fast path remains resident and high precision.
+  common_mistake: |
+    **The Pitfall:** Suggesting straightforward CPU offloading for the cold experts.
+    **The Rationale:** CPU offloading is a standard technique for memory-constrained training, leading engineers to incorrectly assume it applies perfectly to real-time generative inference.
+    **The Consequence:** The PCIe roundtrip latency (~10-50μs per expert) absolutely destroys token generation latency, making the model practically unusable for real-time serving.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 128-expert MoE (800B total parameters).
+    - Precision: BF16 at 2 bytes/parameter, so 800B parameters require 1.6 TB total weights.
+    - Routing: Top-2 experts per token.
+
+    **Calculations:**
+    - Active Utilization: 2 / 128 = 1.56% of parameters active per token.
+    - Per-expert BF16 weight size: 1.6 TB / 128 = 12.5 GB.
+    - Example hot set: top-16 experts in BF16 require 16 * 12.5 GB = 200 GB.
+    - Cold set: remaining 112 experts require 112 * 12.5 GB = 1.4 TB in BF16.
+    - INT4 cold storage is roughly one quarter of BF16 storage, so the cold set drops from ~1.4 TB to ~350 GB before metadata and scale overhead.
+    - Total illustrative resident weight footprint becomes ~200 GB hot + ~350 GB cold = ~550 GB, before replication for load balance, instead of 1.6 TB fully BF16.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory Capacity-Bound.** Only 1.56% of experts are active per token, so the latency-safe reduction is to keep hot experts resident and high precision while compressing cold experts that are rarely routed. The exact GPU count depends on replication, topology, and measured hotness, but the footprint reduction is grounded in quantizing the cold expert weights rather than in CPU offload.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

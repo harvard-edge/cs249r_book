@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: tinyml-0711
+track: tinyml
+level: L4
+zone: optimization
+topic: mcu-compute-constraints
+competency_area: memory
+bloom_level: analyze
+phase: inference
+title: The Cache Miss Penalty
+scenario: You're running a 400 KB INT8 model on a Cortex-M7. The model's weights are in flash. During profiling, you see inference takes 8ms when weights are in DTCM but 22ms when left in flash.
+question: How would you explain the 2.75x slowdown and estimate the total cache misses and average re-fetches per model cache line?
+details:
+  realistic_solution: 'The 2.75x slowdown is due to D-cache thrashing. The 400KB model far exceeds the 16KB D-cache. Because the working set of the largest layers exceeds the cache, convolution loops repeatedly evict and re-fetch the same weights. The 14ms penalty represents ~6.7M stall cycles, which at 6 cycles per miss equals ~1.12M additional cache misses. Since the model is about 12,800 32-byte cache lines, that is a rough average of ~87.5 extra fetches per model cache line per inference, not a true miss rate over all memory accesses. Fix: place the hottest layers'' weights in DTCM or otherwise improve locality to reduce repeated flash misses.'
+  common_mistake: |
+    **The Pitfall:** Assuming that because the MCU has a cache, flash reads are effectively zero-wait-state.
+    **The Rationale:** Candidates underestimate the massive write amplification that occurs when the working set of convolution loops continuously evicts the tiny 16KB D-cache.
+    **The Consequence:** Accepting a 3x performance penalty instead of simply placing the hottest layers in zero-wait-state DTCM memory.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 400 KB INT8 model. Cortex-M7 at 480 MHz. 16 KB D-cache. 6 wait states for flash miss. DTCM time 8ms, Flash time 22ms.
+
+    **Calculations:**
+    - Penalty = 22ms - 8ms = 14ms.
+    - Stall cycles = 14ms * 480 MHz = 6.72M cycles.
+    - Additional flash-line fetches inferred from stalls = 6.72M / 6 cycles = 1.12M fetches.
+    - Cache lines in model = 400 KB / 32 bytes/line = 12,800 lines, treating KB as 1024 bytes.
+    - Average extra fetches per model line = 1.12M / 12,800 = 87.5.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~1.12M additional misses, or ~87.5 average re-fetches per 32-byte model cache line (Memory-Bandwidth-Bound)**. This is an average reuse estimate from the stall delta, not a literal cache miss rate.
+  options:
+    - The first run is slow due to TFLite Micro interpreter initialization overhead. Subsequent runs reuse cached interpreter state and skip the setup, achieving the 8ms baseline.
+    - 'The 400 KB model far exceeds the 16 KB D-cache. When executing from flash, severe cache thrashing occurs. 14ms of stall = ~6.7M penalty cycles = ~1.12M additional cache misses at a 6-cycle miss penalty. Across about 12,800 32-byte model cache lines, that is a rough average of ~87.5 extra fetches per line per inference, not a true miss/access rate. Fix: place the hottest layers in DTCM or improve locality to reduce repeated flash misses.'
+    - The slowdown is caused by flash memory write-back operations that occur on first access. The flash controller must initialize its page buffers, which takes exactly 14ms for a 400 KB binary.
+    - The 2.75x slowdown is due to branch prediction cold-start. The Cortex-M7's branch predictor has no history on the first run, causing pipeline stalls on every conditional branch in the inference loop.
+  correct_index: 1
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

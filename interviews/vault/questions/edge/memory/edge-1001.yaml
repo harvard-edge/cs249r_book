@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: edge-1001
+track: edge
+level: L3
+zone: implement
+topic: activation-memory
+competency_area: memory
+bloom_level: apply
+phase: training
+title: Implementing Streaming Activation Processing for Video on Jetson Orin
+scenario: You are implementing a real-time action recognition pipeline on an edge device using a 3D ConvNet (SlowFast-R50) that takes 32-frame clips as input. You have only 6 GB available for action recognition activations, but processing the full 32-frame clip at once requires 14 GB of activation memory.
+question: How can you stream a 32-frame SlowFast-R50 model so activations fit within 6GB without accuracy loss?
+details:
+  realistic_solution: Stream the exact SlowFast-R50 computation by chunking the 32-frame clip along time and caching the temporal context needed at chunk boundaries, rather than replacing the model with a (2+1)D architecture. For each 3D convolution, keep the previous k_t - 1 feature slices needed by the temporal kernel and process the next chunk through the same weights; concatenate or carry boundary features so the output is numerically equivalent to the full-clip convolution except for the same padding rules. This reduces the live activation peak because only one temporal chunk plus boundary caches and downstream live buffers must be resident at once. With a 14 GB full-clip activation footprint, splitting into four 8-frame chunks gives an approximate activation peak of 14 GB * (8/32) = 3.5 GB plus cache overhead, which fits within the 6 GB budget if the implementation frees completed chunk activations promptly.
+  common_mistake: |
+    **The Pitfall:** Processing the full temporal dimension in a single forward pass.
+    **The Rationale:** Candidates assume that 3D convolutions inherently require all frames to be processed simultaneously.
+    **The Consequence:** Unnecessary memory spikes that lead to Out-Of-Memory (OOM) errors on edge devices.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Memory budget = 6 GB.
+    - 32-frame input.
+    - Full-clip activation footprint from profiling = 14 GB.
+    - Stream in 4 chunks of 8 frames.
+    - Temporal kernel boundary cache is small relative to the full chunk activation footprint.
+
+    **Calculations:**
+    - Approximate chunk activation footprint = 14 GB * (8 / 32) = 3.5 GB.
+    - Boundary cache for temporal convolutions stores only k_t - 1 feature slices per streamed layer, not all 32 frames.
+    - Planning headroom = 6 GB - 3.5 GB = 2.5 GB for boundary caches, allocator fragmentation, and live downstream buffers.
+
+    **Conclusion & Interpretation:**
+    - **Result: 8-frame equivalent streaming fits within 6 GB if cache overhead stays below about 2.5 GB (Memory-Capacity Bound)**. The key is exact temporal chunking with boundary-state reuse, not changing the network architecture.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+  - '3D activation calculation is incorrect: 32 * 56 * 56 * 256 * 4 bytes = ~102.7 MB, not 1.6 GB.'
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

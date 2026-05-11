@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: cloud-2020
+track: cloud
+level: L5
+zone: specification
+topic: tensor-arena-planning
+competency_area: memory
+bloom_level: evaluate
+phase: inference
+title: Evaluating NCHW vs NHWC Layouts
+scenario: 'You are optimizing a large computer vision model (ResNet-101 architecture) for inference on an NVIDIA A100 GPU (2000 GB/s memory bandwidth). The activation tensor $X$ at a critical layer has the shape `[N=64, C=512, H=112, W=112]` and is stored in FP16. By default, PyTorch uses contiguous NCHW format `(stride: C*H*W, H*W, W, 1)`. For many Tensor Core convolution kernels on A100, cuDNN performs best when tensors are already in `channels_last` NHWC format `(stride: H*W*C, W*C, C, 1)`, though the best layout depends on the operator and shape.'
+question: Should you leave the ResNet-101 in NCHW with implicit cuDNN transposes, or switch globally to NHWC, and why?
+details:
+  realistic_solution: Use NHWC (channels_last) globally when profiling shows the model's convolution layers are Tensor Core friendly and the layout can be preserved end-to-end. The goal is to avoid repeated layout conversions at boundaries between layers or operators. cuDNN supports many NCHW kernels, so the right answer is not that every layer silently transposes; it is that a mixed-layout pipeline can burn memory bandwidth, while a consistent channels_last pipeline often improves A100 convolution throughput.
+  common_mistake: |
+    **The Pitfall:** Arguing from a fixed NCHW-vs-NHWC rule instead of profiling the end-to-end operator mix.
+    **The Rationale:** Candidates often assume layout conversions are "zero-cost" or, conversely, that Tensor Cores universally require NHWC for every convolution.
+    **The Consequence:** Choosing a layout locally can create repeated boundary conversions or miss faster Tensor Core kernels, wasting memory bandwidth and reducing throughput.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Tensor elements: 64 * 512 * 112 * 112 = 411,041,792 elements.
+    - Tensor size: 411,041,792 * 2 bytes = 822,083,584 bytes, or about 822 MB.
+    - One full layout conversion reads the source tensor and writes the destination tensor: about 1.64 GB of memory traffic.
+
+    **Calculations:**
+    - If 50 layer boundaries each require a full layout conversion, traffic is 50 * 1.64 GB = 82 GB per forward pass.
+    - Bandwidth time at 2000 GB/s is 82 GB / 2000 GB/s = 0.041s, or about 41 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: up to 41 ms of avoidable layout-conversion latency (Memory-Bandwidth-Bound)**. Keeping channels_last end-to-end can remove this traffic when the operator set supports it, but NCHW may still be appropriate for unsupported or faster-NCHW operators.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-24T01:45:29.319687'

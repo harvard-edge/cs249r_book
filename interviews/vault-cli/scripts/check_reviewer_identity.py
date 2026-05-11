@@ -14,7 +14,6 @@ the commits that touched that file.
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path

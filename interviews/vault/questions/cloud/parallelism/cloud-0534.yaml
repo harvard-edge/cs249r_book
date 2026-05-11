@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-0534
+track: cloud
+level: L5
+zone: diagnosis
+topic: 3d-parallelism
+competency_area: parallelism
+bloom_level: evaluate
+phase: training
+title: Cross-Node Tensor Parallelism Bottleneck at T=16
+scenario: Your colleague suggests using tensor parallelism with $T=16$ across two DGX nodes to train a 70B model, arguing 'more parallelism is always better.' The model fits in 8 GPUs with $T=8$.
+question: Why is T=16 likely slower than T=8, and what is the exact communication cost per transformer layer?
+details:
+  realistic_solution: Megatron-style tensor parallelism splits each transformer layer's MLP and attention projections across the tensor-parallel group, then uses activation-gradient collectives to assemble the partial results. A training step has two activation-sized collectives in the forward pass and two corresponding collectives in the backward pass, so the per-layer communication cost is four AllReduce-equivalent payloads. At T=8 the group stays inside one DGX and the 128 MB payload moves over about 900 GB/s NVSwitch, so the per-layer collective time is about 4 * 0.14 ms = 0.57 ms. At T=16 the group crosses the node boundary and the same payload is limited by about 50 GB/s InfiniBand, so it becomes about 4 * 2.56 ms = 10.24 ms per layer. The compute per GPU may fall, but the communication cost rises by roughly 18x at every layer, making T=16 likely slower.
+  common_mistake: |
+    **The Pitfall:** Believing "doubling tensor parallelism halves the compute per GPU, so it should be faster."
+    **The Rationale:** This treats communication as free and ignores the node boundary, which drops bandwidth from 900 GB/s to 50 GB/s.
+    **The Consequence:** Designing slower systems by overly partitioning across slow interconnects.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 70B, hidden dim 8192, 80 layers.
+    - Interconnect intra-node (NVSwitch): 900 GB/s.
+    - Interconnect cross-node (InfiniBand): 50 GB/s.
+    - AllReduce payload (batch=1, seq=4096): 128 MB.
+
+    **Calculations:**
+    - One 128 MB AllReduce-equivalent payload on NVSwitch: 128 MB / 900 GB/s ≈ 0.14 ms.
+    - One 128 MB AllReduce-equivalent payload across InfiniBand: 128 MB / 50 GB/s ≈ 2.56 ms.
+    - Per transformer layer per training step: 2 forward collectives + 2 backward collectives = 4 payloads.
+    - T=8 intra-node per layer: 4 * 0.14 ms ≈ 0.57 ms.
+    - T=16 cross-node per layer: 4 * 2.56 ms ≈ 10.24 ms.
+    - For 80 layers, this communication component is about 46 ms at T=8 versus about 819 ms at T=16.
+    - Bandwidth drop: 900 / 50 = 18x reduction.
+
+    **Conclusion & Interpretation:**
+    - **Result: Interconnect-Bound Scaling**. The exact per-layer communication estimate rises from about 0.57 ms to about 10.24 ms because T=16 crosses the node boundary, so the larger tensor-parallel group can be slower despite doing less compute per GPU.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

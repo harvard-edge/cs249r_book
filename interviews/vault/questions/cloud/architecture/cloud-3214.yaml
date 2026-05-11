@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-3214
+track: cloud
+level: L6+
+zone: mastery
+topic: mixture-of-experts
+competency_area: architecture
+bloom_level: create
+phase: both
+title: DeepSeek-V3-Scale MoE Parallelism Layout on 2048 H100s
+scenario: Design the full parallelism strategy for training a DeepSeek-V3-scale model (671B total, 256 experts, top-8 routing, 37B active) on 2048 H100 GPUs across 256 nodes.
+question: What EP, TP, PP, and DP dimensions would you use to train this 671B, 256-expert MoE on 2048 H100s, and why?
+details:
+  realistic_solution: Use PP=8 pipeline stages. Within each stage, allocate 256 GPUs as a stage-local TP=8 by EP=32 mesh, so 8 pipeline stages x 256 GPUs/stage = 2048 GPUs total. EP=32 is not a global cluster-wide EP group; each pipeline stage has its own 32-way expert-parallel axis for the MoE layers assigned to that stage. Keep TP=8 within a node for dense attention and shared projections so tensor-parallel all-reduces stay on NVLink. For MoE layers, partition the 256 experts across the EP axis, with each EP rank owning about 8 experts per stage and each expert's large tensors sharded across the TP axis. Route tokens only within the stage-local EP group and overlap dispatch/combine with expert compute. For this exact 2048-GPU budget, DP=1 full replicas; if more GPUs were available, DP would replicate the whole PP x TP x EP training mesh. Memory feasibility relies on pipeline partitioning, TP sharding of dense and expert tensors, EP partitioning of experts, and sharded optimizer/checkpoint
+    state; it should not be argued from a naive per-GPU slice of the 37B active-parameter count.
+  common_mistake: |
+    **The Pitfall:** Applying standard 3D parallelism globally across the entire model without separating dense layers from sparse layers.
+    **The Rationale:** Treating MoE layers identically to dense attention layers.
+    **The Consequence:** Massive network bottlenecks, because MoE requires specialized all-to-all communication (EP) which must be routed differently than dense TP all-reduces.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 671B params, 37B active, 256 experts.
+    - Hardware: 2048 H100 GPUs (80GB) across 256 nodes (8 GPUs/node).
+    - Use the same TP/EP shape independently inside each pipeline stage.
+
+    **Calculations:**
+    - Layout: PP=8. Per pipeline stage: TP=8 x EP=32 = 256 GPUs. Total: 8 x 256 = 2048 GPUs.
+    - DP replicas: 2048 / (PP 8 x stage mesh 256) = 1.
+    - Stage-local EP interpretation: each pipeline stage has its own EP=32 group for the MoE layers in that stage. With 256 experts, each EP rank position owns about 256 / 32 = 8 experts, and those expert tensors can be TP-sharded across the TP=8 axis.
+    - The 37B active-parameter count is a global per-token model property, not a value to divide by 8 for a reliable per-stage memory estimate. Per-GPU memory depends on which layers are in the stage, which tensors are dense versus expert, TP sharding, EP placement, activation checkpointing, and optimizer sharding.
+    - Full checkpoint-state lower bound using decimal units: 671B * (2 bytes BF16 weights + 12 bytes optimizer/master/gradient state) = 9.394e12 bytes = 9.4 TB. If optimizer/checkpoint state is fully sharded across 2048 GPUs, this averages 9.4 TB / 2048 = 4.6 GB per GPU before metadata, activations, temporary buffers, and imbalance; without such sharding it is not feasible in 80 GB/GPU.
+
+    **Conclusion & Interpretation:**
+    - **Result: Consistent PP x TP x EP topology.** PP=8 and a stage-local TP=8 x EP=32 mesh exactly consume 2048 GPUs; DP is 1 for this budget, while memory feasibility depends on TP/EP tensor placement plus sharded optimizer and checkpoint state, not on a naive active-parameter split.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

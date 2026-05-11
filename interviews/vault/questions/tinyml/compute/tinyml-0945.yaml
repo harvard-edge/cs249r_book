@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: tinyml-0945
+track: tinyml
+level: L5
+zone: design
+topic: transformer-systems-cost
+competency_area: compute
+bloom_level: create
+phase: inference
+title: Specify KV Cache Memory Map for MCU NPU
+scenario: 'You are specifying the memory layout for a KV cache on a microcontroller with an NPU. The cache must support: 4 layers, 4 heads, 64-dim heads, up to 128-token context, INT8. The NPU DMA controller requires contiguous head-vector reads with 16-byte aligned start addresses. The SRAM is 512 KiB with 256 KiB reserved for weights and activations.'
+question: How would you specify the complete KV cache address map, including layer, K/V, head, sequence, dimension offsets, and any 16-byte alignment padding?
+details:
+  realistic_solution: Use a contiguous INT8 KV-cache layout [layer][kv][head][seq][dim] with the base address aligned to 16 bytes; this is a KV tensor linearization for DMA-friendly head-vector reads, not a literal NHWC activation layout. The address is base + layer*65,536 + kv*32,768 + head*8,192 + seq*64 + dim. Here kv=0 maps K and kv=1 maps V. The sequence stride is 64B because each head vector has 64 INT8 elements. All strides are multiples of 16, so no per-layer, per-head, or per-sequence padding is required. The cache occupies 262,144B, exactly the 256 KiB SRAM budget left after weights and activations.
+  common_mistake: |
+    **The Pitfall:** Storing KV cache in row-major [layer][seq][head][dim] format.
+    **The Rationale:** Not aligning the data layout with the NPU's specific DMA access patterns, which reads along the head dimension sequentially.
+    **The Consequence:** Forcing non-sequential, unaligned memory accesses that severely degrade NPU throughput.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Specs: 4 layers * 2 (K,V) * 4 heads * 128 tokens * 64 dim * 1 byte.
+    - Constraint: 16-byte alignment, 256 KiB KV budget after reserving the other 256 KiB SRAM for weights and activations.
+
+    **Calculations:**
+    - Dim stride = 1 byte.
+    - Sequence stride = 64 dim * 1 byte = 64 bytes.
+    - Head stride = 128 tokens * 64 bytes = 8,192 bytes.
+    - K/V stride = 4 heads * 8,192 bytes = 32,768 bytes.
+    - Layer stride = 2 K/V tensors * 32,768 bytes = 65,536 bytes.
+    - Total Size = 4 layers * 65,536 bytes = 262,144 bytes = 256 KiB.
+    - Address offset = layer*65,536 + kv*32,768 + head*8,192 + seq*64 + dim.
+
+    **Conclusion & Interpretation:**
+    - **Result: the KV cache exactly fits the reserved 256 KiB budget (Memory-Bound).** All sequence, head, K/V, and layer strides are multiples of 16, so no internal padding is required.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

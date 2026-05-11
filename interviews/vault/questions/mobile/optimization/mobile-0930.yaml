@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: mobile-0930
+track: mobile
+level: L3
+zone: implement
+topic: kernel-fusion
+competency_area: optimization
+bloom_level: apply
+phase: inference
+title: 'Kernel Fusion: Implement Fused Conv+BN+ReLU for Mobile CNN on Snapdragon'
+scenario: Implement a fused Conv+BN+ReLU layer for MobileNetV3 inference on Snapdragon 8 Gen 3 Hexagon DSP (45 TOPS INT8). The layer processes 112x112x32 activations with 32->64 channel 3x3 conv.
+question: How would you specify the fusion implementation, verify correctness, and quantify memory bandwidth savings?
+details:
+  realistic_solution: |
+    Treat the fusion as compile-time BN folding plus a runtime fused Conv+ReLU kernel. Precompute W' = W * gamma / sqrt(var + epsilon) and b' = beta + (b - mean) * gamma / sqrt(var + epsilon) per output channel, then emit one Hexagon/QNN conv2d op that writes the ReLU-clamped INT8 output directly. Verify by running representative calibration and test inputs through unfused Conv->BN->ReLU and fused Conv+ReLU, checking per-channel scales, max/mean absolute error, saturation counts, and top-1 task accuracy. Quantify savings as the intermediate activation traffic removed by not materializing the conv output for BN/ReLU.
+  common_mistake: |
+    **The Pitfall:** Not folding BN into conv at inference.
+    **The Rationale:** BN weights can be absorbed analytically into conv weights and bias.
+    **The Consequence:** Missing the most common and impactful mobile fusion, leaving free performance on the table.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Input: 112x112x32 activations.
+    - Conv 3x3x32->64: 18,432 INT8 params (~18KB).
+    - BN params: gamma,beta,mean,var for 64 channels are folded once at compile time.
+    - Snapdragon LPDDR5 bandwidth: 68 GB/s.
+    - Target: 33ms budget (30 fps).
+
+    **Calculations:**
+    - Folded weights pre-computation: ~18,432 ops for weights + 64 ops for biases (one-time).
+    - Intermediate activation size: 112 * 112 * 64 * 1 byte = 802,816 bytes = 0.803 MB.
+    - If Conv, BN, and ReLU are separate kernels, the conv output is written, read by BN, written by BN, then read by ReLU. The final ReLU output still must be written in both designs.
+    - Avoided traffic from fusion: 4 * 0.803 MB - 0.803 MB final output = 2.41 MB per layer. If BN and ReLU were already fused but Conv was not, the avoided traffic is one write plus one read = 1.61 MB.
+    - Time saved per layer at 68 GB/s: 2.41 MB / 68 GB/s = 0.035 ms, or 1.61 MB / 68 GB/s = 0.024 ms for the conservative Conv->BNReLU case.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~1.6-2.4 MB saved for this layer (~0.024-0.035 ms at peak bandwidth).** The per-layer gain is modest, but it is real only when the intermediate conv/BN tensors would otherwise be materialized; correctness must be verified numerically against the unfused graph.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: edge-0702
+track: edge
+level: L5
+zone: evaluation
+topic: accelerator-comparison
+competency_area: compute
+bloom_level: evaluate
+phase: both
+title: Scheduling Orin GPU, DLAs, and CPU Under a 33ms Deadline
+scenario: 'Your autonomous vehicle''s edge device runs 5 models simultaneously: YOLOv8m (18ms on GPU), LaneNet (6ms on DLA0), MiDaS-small (12ms on GPU), EfficientNet-B0 (4ms on DLA1), and MediaPipe Face (8ms on GPU or 14ms on CPU). All must complete within 33ms (30 FPS). The GPU models alone sum to 38ms sequentially, which is over budget.'
+question: How do you schedule these across the Orin's GPU, 2 DLAs, and CPU to meet the deadline?
+details:
+  realistic_solution: Use the Orin's heterogeneous compute to remove work from the saturated GPU instead of assuming CUDA streams create a fixed overlap. Keep YOLOv8m and MiDaS-small on the GPU sequentially for 18 + 12 = 30ms. Run LaneNet on DLA0 (6ms) and EfficientNet-B0 on DLA1 (4ms) in parallel with the GPU work. Move MediaPipe Face to its CPU path (14ms) because it is independent and fits under the GPU critical path. The pipeline latency is then max(30ms GPU, 6ms DLA0, 4ms DLA1, 14ms CPU) = 30ms, leaving 3ms of deadline margin. Verify the schedule with nsys/tegrastats and only use CUDA stream overlap as measured optimization, not as the basis of the deadline proof.
+  common_mistake: |
+    **The Pitfall:** Running all GPU models in parallel using CUDA streams and assuming a fixed overlap.
+    **The Rationale:** Candidates assume parallel streams reduce latency without measuring SM, memory, and Tensor Core contention.
+    **The Consequence:** The deadline proof depends on an unsupported scheduler effect, so a minor driver, batch, or scene-complexity change can push the pipeline over 33ms.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Sequential GPU if all GPU-capable models use GPU: 18 + 12 + 8 = 38ms.
+    - Parallel DLAs: LaneNet (6ms) on DLA0, EfficientNet (4ms) on DLA1.
+    - CPU fallback for Face: 14ms.
+
+    **Calculations:**
+    - GPU critical path after moving Face to CPU: YOLOv8m + MiDaS = 18 + 12 = 30ms.
+    - Parallel hardware paths: DLA0 = 6ms, DLA1 = 4ms, CPU Face = 14ms.
+    - End-to-end latency = max(30, 6, 4, 14) = 30ms.
+    - Deadline margin = 33 - 30 = 3ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 30ms (Latency-Bound)**. The schedule meets the 33ms deadline by moving independent work off the GPU, with the GPU remaining the critical path.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

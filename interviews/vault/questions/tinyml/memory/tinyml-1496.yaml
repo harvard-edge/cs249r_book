@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: tinyml-1496
+track: tinyml
+level: L3
+zone: realization
+topic: pruning-sparsity
+competency_area: memory
+bloom_level: apply
+phase: training
+title: Huffman Encoding for Weight Compression on Cortex-M4
+scenario: A 200KB INT8 CNN model needs to be compressed to fit alongside a 700KB firmware on a 1MB flash device. The weight histogram shows 60% of values cluster around 0 (±3), 30% in ±10, and 10% are outliers.
+question: For 200K INT8 weights, estimate compression using bucket-label Huffman codes plus exact value bits and the decode cost?
+details:
+  realistic_solution: |
+    The three histogram buckets are not enough to claim a 5.7x compression ratio for raw INT8 weights. They only describe a bucket label stream: a Huffman code with lengths about 1, 2, and 2 bits gives an average bucket-label cost of 0.60×1 + 0.30×2 + 0.10×2 = 1.4 bits/value. The actual encoded weight stream must still encode the exact INT8 value inside each bucket or use an explicit second-stage codebook. With a simple bound, the near-zero bucket needs about ceil(log2 7) = 3 bits/value for values -3..3, the ±10 bucket needs about 4 bits/value for the remaining in-range values, and outliers may need the raw 8-bit value. That gives roughly 0.60×(1+3) + 0.30×(2+4) + 0.10×(2+8) = 5.2 bits/weight before headers and tables, or only 8/5.2 = 1.54x compression. A 200KB model would compress to about 130KB, so the flash footprint with 700KB firmware is about 830KB and fits in 1MB, but not with the previously claimed margin. Runtime decompression remains 200K weights × 5 cycles/weight = 1.0M cycles; at 168MHz this is about 6ms if every weight is decoded once.
+  common_mistake: |
+    **The Pitfall:** Only calculating the compression ratio and ignoring the on-device decompression requirements.
+    **The Rationale:** Candidates forget that decompression at inference time on a Cortex-M4 adds cycle latency and requires a large decompression buffer in SRAM.
+    **The Consequence:** The model fits in Flash but violates real-time latency deadlines or crashes due to lack of SRAM for the decompression buffer.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Uncompressed Model: 200 KB (INT8).
+    - Flash Available: 1,024 KB - 700 KB = 324 KB.
+    - Decompression Target Hardware: 168 MHz CPU.
+
+    **Calculations:**
+    - Example bucket-label Huffman lengths: common bucket = 1 bit, two rarer buckets = 2 bits.
+    - Average bucket-label length: 0.60*1 + 0.30*2 + 0.10*2 = 1.4 bits/value.
+    - Exact value bits still required inside each bucket: near-zero values need ~3 bits, midrange values need ~4 bits, outliers use ~8 bits.
+    - Estimated total bits/weight: 0.60*(1+3) + 0.30*(2+4) + 0.10*(2+8) = 5.2 bits/weight before headers and code tables.
+    - Estimated compression ratio from 8-bit weights: 8 / 5.2 = ~1.54x.
+    - Estimated compressed size: 200 KB / 1.54 = ~130 KB.
+    - Total flash footprint: 700 KB + 130 KB = 830 KB < 1,024 KB, before alignment and decoder tables.
+    - Decompression cost: 200K weights * 5 cycles/weight = 1.0M cycles.
+    - Time: 1.0M cycles / 168M cycles/s = 0.006 s = ~6 ms per inference.
+
+    **Conclusion & Interpretation:**
+    - **Result: likely flash-feasible, but closer to ~1.5x compression than 5.7x under this representation, with about ~6 ms decode overhead under the stated cost model.** Runtime feasibility still depends on decode buffering, tables, alignment, and the latency target.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

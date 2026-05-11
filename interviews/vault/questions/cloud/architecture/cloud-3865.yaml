@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: cloud-3865
+track: cloud
+level: L3
+zone: diagnosis
+topic: encoder-decoder-tradeoffs
+competency_area: architecture
+bloom_level: analyze
+phase: both
+title: Diagnosing Low Decoder MFU on A100
+scenario: You deploy an FP16 encoder-decoder translation model on a single GPU. Monitoring shows the encoder phase achieves a healthy 45% Model FLOPs Utilization (MFU), but the decoder phase plummets to roughly 0.6% MFU when running with a batch size of 1. Diagnose the root cause of this massive performance drop in the decoder phase using the hardware specifications.
+question: Why does the decoder phase fall to roughly 0.6% MFU at batch size 1 while the encoder achieves 45% MFU?
+details:
+  realistic_solution: |
+    The root cause is that autoregressive decoding at batch size 1 is severely memory-bandwidth bound. The encoder processes all input tokens simultaneously (matrix-matrix multiplication) yielding high arithmetic intensity. The decoder processes one token at a time, loading the entire weight matrix for just one set of computations (matrix-vector multiplication). Because the arithmetic intensity is drastically lower than the GPU's ridge point, the hardware is starved for data and most compute units sit idle waiting for memory transfers.
+  common_mistake: |
+    **The Pitfall:** Attributing poor decoder performance to Python loop overheads or kernel launch latencies.
+    **The Rationale:** Engineers fail to differentiate the arithmetic intensity of matrix-matrix operations (encoder) versus matrix-vector operations (autoregressive decoder).
+    **The Consequence:** Wasting engineering cycles optimizing software logic instead of addressing the fundamental hardware memory bandwidth limits.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Hardware: 312 TFLOPS FP16, 2.0 TB/s bandwidth.
+       - Batch size 1 decoder linear layer (NxN weight matrix).
+    2. **Calculations:**
+       - Ridge Point = 312 TFLOPS / 2.0 TB/s = 156 FLOPs/Byte.
+       - Decoder FLOPs = 2*N² FLOPs. Memory loaded = 2*N² Bytes.
+       - Arithmetic Intensity = 2*N² / 2*N² = 1 FLOP/Byte.
+       - Max Performance = 2.0 TB/s * 1 FLOP/Byte = 2 TFLOPS.
+       - Max MFU = 2 TFLOPS / 312 TFLOPS = 0.0064 (0.64%).
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bandwidth-Bound**. At an intensity of 1 FLOP/Byte, the decoder is deeply starved for data, explaining the massive plunge to ~0.6% MFU compared to the dense encoder.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

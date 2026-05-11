@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-4314
+track: cloud
+level: L4
+zone: fluency
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: apply
+phase: inference
+title: Decode Throughput Scaling with Tensor Parallelism
+scenario: You are scaling a 70B FP16 decode cluster using tensor parallelism. Assume NVLink (600 GB/s bidirectional) between TP peers. You are evaluating whether to serve using two TP=2 H100 GPUs or a single TP=1 MI300X.
+question: How do TP=2 H100s and TP=1 MI300X compare for 70B decode latency and throughput, and when does AllReduce become the bottleneck?
+details:
+  realistic_solution: Decode latency should be modeled as a per-layer forward pass plus tensor-parallel communication, not as rereading the entire model once per token. TP=2 H100 reduces per-GPU memory footprint and can improve compute headroom, but it adds a synchronous AllReduce on the activation shard after tensor-parallel layers. TP=1 MI300X avoids that communication and has enough HBM for the 140 GB FP16 weights plus KV headroom, so it can be attractive for throughput-oriented decode if its measured per-token service time meets the TPOT target. AllReduce becomes the bottleneck when batch size is small, sequence concurrency is low, or kernels are otherwise latency-bound, because the activation collective has fixed per-layer latency while compute per token is small. At larger batches, GEMM and HBM bandwidth usually dominate before NVLink bandwidth does.
+  common_mistake: |
+    **The Pitfall:** Assuming TP=2 always immediately doubles throughput simply because compute and memory are divided.
+    **The Rationale:** Candidates forget that Tensor Parallelism requires synchronous AllReduce communication after every layer's GEMM, which introduces non-trivial overhead.
+    **The Consequence:** The chosen architecture scales poorly at small batch sizes where communication latency dominates compute speedups.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 70B FP16, about 140 GB weights.
+    - TP=2 H100 stores about 70 GB weights per GPU and communicates activation shards over NVLink.
+    - Scenario NVLink bandwidth is 600 GB/s bidirectional; effective one-way payload is lower and has a fixed collective latency term.
+    - TP=1 MI300X stores the full model and avoids TP collectives, but each GPU does the full per-token forward pass.
+
+    **Calculations:**
+    - Weight footprint is a capacity constraint: TP=2 H100 leaves more HBM per GPU for KV than TP=1 with a 140 GB model, while MI300X can host the full model because it has larger HBM.
+    - Per-token decode time is approximately max(layer GEMM/HBM time) + TP collective latency per layer, not 140 GB / HBM bandwidth as an isolated token latency.
+    - AllReduce dominates when collective_time_per_layer * layers > compute_time_per_token. This is most likely at batch=1 or very small batches, where GEMMs are small and the fixed NVLink collective latency is not amortized.
+    - At larger decode batches, compute and memory bandwidth grow with batch, while the per-layer communication latency is better amortized; TP overhead becomes a smaller fraction of TPOT.
+
+    **Conclusion & Interpretation:**
+    - **Result: regime-dependent decode scaling.** H100 TP=2 is useful when the model/KV footprint or per-GPU compute requires sharding; MI300X TP=1 avoids AllReduce and can be better for simple decode replicas. AllReduce becomes the bottleneck in the small-batch latency-bound regime.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

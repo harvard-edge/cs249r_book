@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: edge-1130
+track: edge
+level: L5
+zone: design
+topic: systolic-dataflow
+competency_area: compute
+bloom_level: create
+phase: both
+title: Output-Stationary MobileNetV2 Depthwise vs Pointwise Convolution on Jetson DLA
+scenario: 'An output-stationary (OS) dataflow is proposed for a depthwise separable convolution (MobileNetV2 block: 3x3 dw-conv, 64 channels, 112x112 feature map, stride=1) on Jetson Orin DLA.'
+question: How should an output-stationary dataflow run the MobileNetV2 depthwise convolution, and how does it compare with 1x1 pointwise convolution?
+details:
+  realistic_solution: 'DW 3x3, 64ch, 112x112: each output pixel for one channel uses only 9 weights and a 3x3 input window, so an output-stationary schedule mostly keeps the accumulator local while the 9 weights are reused as the filter slides across the spatial map. That is still activation-bound because the weights are tiny and channel reuse is limited. For the 1x1 pointwise conv (64\rightarrow128), output-stationary is much more effective because the same input activation participates in many output channels, which raises arithmetic intensity and makes the layer a much better fit for standard tiling on the DLA.'
+  common_mistake: |
+    **The Pitfall:** Assuming output-stationary dataflow helps depthwise convolution the same way it helps a 1x1 pointwise convolution.
+    **The Rationale:** Candidates focus on keeping partial sums local, but depthwise outputs have only 9 MACs per channel and almost no cross-channel reuse.
+    **The Consequence:** The depthwise layer remains activation-traffic dominated, while the pointwise layer is the one that benefits from high input reuse across many output channels.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - DW Conv: 64 channels, 3x3 kernel, 112x112 feature map.
+    - PW 1x1 Conv: 64->128 channels, 112x112 feature map.
+    - INT8 operands and outputs; count one compulsory read/write of inputs, weights, and outputs.
+    - Example Orin DLA roofline for comparison: 11 TOPS and 200 GB/s, ridge ≈ 55 FLOPs/byte.
+
+    **Calculations:**
+    - DW: Weights = 64 * 3 * 3 = 576 bytes. Input = 64 * 112² = 802,816 bytes. Output = 802,816 bytes. Total Bytes ≈ 1.61 MB.
+    - DW FLOPs = 2 * 64 * 112² * 9 = 14.5M.
+    - DW AI = 14.5M / 1.61M bytes = 9.0 FLOPs/byte, below the 55 FLOPs/byte ridge.
+    - PW 1x1: Weights = 64 * 128 = 8,192 bytes. Input = 802,816 bytes. Output = 128 * 112² = 1,605,632 bytes. Total Bytes ≈ 2.42 MB.
+    - PW FLOPs = 2 * 128 * 112² * 64 = 205.5M.
+    - PW AI = 205.5M / 2.42M bytes = 85.0 FLOPs/byte, above the ridge under ideal reuse.
+    - DW lower-bound time = max(14.5M / 11 TOPS, 1.61MB / 200GB/s) ≈ max(0.0013ms, 0.0080ms) = 0.0080ms.
+    - PW lower-bound time = max(205.5M / 11 TOPS, 2.42MB / 200GB/s) ≈ max(0.0187ms, 0.0121ms) = 0.0187ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: depthwise is memory-bound under OS; pointwise can be compute-bound with good tiling.** OS keeps the accumulator local for both layers, but depthwise has too little reuse per output. The 1x1 pointwise convolution reuses each input activation across 128 output channels, giving much higher arithmetic intensity.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

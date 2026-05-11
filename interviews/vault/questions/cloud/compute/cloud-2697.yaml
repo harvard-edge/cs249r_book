@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-2697
+track: cloud
+level: L3
+zone: fluency
+topic: roofline-analysis
+competency_area: compute
+bloom_level: apply
+phase: both
+title: Data Loading Bottleneck Analysis
+scenario: 'Training reads 2TB of images per epoch. Each GPU processes data at 3 GB/s during training on a 4-GPU node. Without GPUDirect Storage: NVMe read = 6 GB/s, CPU bounce buffer = 4 GB/s effective, PCIe to GPU = 12 GB/s. With GPUDirect Storage: NVMe direct to GPU = 5.5 GB/s.'
+question: What are the epoch times with and without GPUDirect Storage, and what is the true hardware bottleneck?
+details:
+  realistic_solution: |
+    Using decimal units (2 TB = 2,000 GB), without GPUDirect Storage the storage-to-GPU pipeline is limited by the CPU bounce-buffer path: min(NVMe 6 GB/s, bounce buffer 4 GB/s, PCIe 12 GB/s) = 4 GB/s. The four GPUs can consume 4 x 3 GB/s = 12 GB/s, so the data path supplies only one third of demand. Epoch time = 2,000 GB / 4 GB/s = 500 seconds. With GPUDirect Storage, the bounce buffer is removed, but the measured end-to-end direct path is limited to min(NVMe 6 GB/s, GDS direct path 5.5 GB/s) = 5.5 GB/s. Epoch time = 2,000 GB / 5.5 GB/s = 364 seconds, a 1.37x speedup. The bottleneck moves from the CPU bounce-buffer path to the measured NVMe-to-GPU direct path; the prompt does not distinguish whether that remaining 5.5 GB/s limit comes from drive media, PCIe routing, or GDS software overhead. To fully feed the GPUs, the storage subsystem would need at least 12 GB/s of delivered throughput; adding multiple drives could provide that only if their aggregate measured throughput exceeds 12 GB/s.
+  common_mistake: |
+    **The Pitfall:** Adding GPUDirect Storage without scaling the underlying physical NVMe drives.
+    **The Rationale:** Engineers assume GDS magically increases disk speed, ignoring the hardware read limit of the single drive.
+    **The Consequence:** The organization pays for premium networking software but only sees a marginal 1.37x speedup instead of the 3x compute-bound potential.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Decimal units: 2 TB = 2,000 GB.
+    - 4 GPUs needing 3 GB/s each = 12 GB/s aggregate demand.
+    - W/o GDS: min(6 GB/s NVMe, 4 GB/s CPU bounce buffer, 12 GB/s PCIe/GPU demand) = 4 GB/s.
+    - W/ GDS: min(6 GB/s NVMe, 5.5 GB/s direct path, 12 GB/s GPU demand) = 5.5 GB/s.
+
+    **Calculations:**
+    - Epoch time w/o GDS: 2,000 GB / 4 GB/s = 500s.
+    - Epoch time w/ GDS (single NVMe): 2,000 GB / 5.5 GB/s = 364s.
+    - To saturate the GPUs, storage must deliver at least 12 GB/s; the single-drive GDS path does not.
+
+    **Conclusion & Interpretation:**
+    - **Result: 364s with GDS, 500s without (Data-Path-Bound)**. GDS alone helps by removing the CPU bounce-buffer bottleneck, but the measured 5.5 GB/s direct path still cannot feed the 12 GB/s aggregate GPU consumption rate.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

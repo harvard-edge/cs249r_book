@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: mobile-1003
+track: mobile
+level: L4
+zone: design
+topic: network-bandwidth-bottlenecks
+competency_area: networking
+bloom_level: create
+phase: inference
+title: 3B INT4 On-Device Decode Bandwidth Pipeline for Sub-30ms TPOT
+scenario: Design a bandwidth-efficient decode pipeline for a 3B INT4 LLM targeting TPOT < 30ms. The baseline INT4 model uses 1.5GB.
+question: How would you design a bandwidth-efficient decode pipeline for a 3B INT4 LLM targeting TPOT < 30ms by leveraging weight tiling, prefetching, and KV-cache layouts?
+details:
+  realistic_solution: Under the simplified decode model, assume each verified token streams about 1.5 GB of INT4 weights from LPDDR because the full working set is not resident in SRAM. The design goal is to keep that stream sequential, overlapped, and protected from avoidable KV-cache traffic. Tile weights in layer order so each tile is consumed once from LPDDR and staged through SRAM, double-buffer the next tile with prefetch/DMA while the current tile computes, and avoid layouts that force small random DRAM reads. Use a paged or block-contiguous KV-cache layout grouped by layer/head so attention reads are coalesced, with INT8 KV only when measured context length makes KV traffic material. This simplified weight-stream budget is about 22.1 ms/token and leaves roughly 8 ms for compute, illustrative KV reads, and OS contention under a 30 ms target.
+  common_mistake: |
+    **The Pitfall:** Assuming weight tiling alone reduces main memory reads during autoregressive decode.
+    **The Rationale:** Candidates confuse compute-bound prefill optimizations (SRAM locality) with memory-bound decode realities.
+    **The Consequence:** Failing to realize that decode requires reading full weights from LPDDR5X once per token regardless of tiling, missing the TPOT SLA.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Memory Bandwidth: 68 GB/s.
+    - Model Size: 3B INT4 = 1.5 GB.
+    - Target TPOT: < 30 ms.
+    - Simplified decode assumption: the full INT4 weight stream is read once per verified token because it is not fully cached on chip.
+    - KV-cache examples below are illustrative short-context figures, not derived from a specific layer/head configuration.
+
+    **Calculations:**
+    - Weight-stream lower bound: 1.5 GB / 68 GB/s = 0.0221 s = about 22.1 ms/token.
+    - Rounded design budget: about 22 ms/token for weights before compute, KV reads, and scheduler overhead.
+    - Illustrative FP16 KV read at short context: 32 MB / 68 GB/s = 0.47 ms/token.
+    - Illustrative INT8 KV at the same context: 16 MB / 68 GB/s = 0.24 ms/token, saving about 0.23 ms/token.
+    - Practical budget: 22.1 ms weights + ~0.5 ms KV + a few ms compute/scheduling overhead remains below 30 ms if the weight stream is kept sequential and prefetch overlap is effective.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~22-27 ms/token (Memory-Bound)**. Weight tiling and prefetching do not amortize the full model read, but they prevent wasted bandwidth; coalesced/quantized KV layouts protect the remaining TPOT margin.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

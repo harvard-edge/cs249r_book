@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: edge-1231
+track: edge
+level: L3
+zone: analyze
+topic: load-balancing
+competency_area: networking
+bloom_level: apply
+phase: inference
+title: Dataflow Accelerator Round-Robin Degradation
+scenario: We are deploying a real-time computer vision system on an edge gateway equipped with 4 Hailo-8 dataflow accelerators (each providing 26 TOPS INT8 at 2.5W). Each accelerator runs a compiled dataflow graph with on-chip buffering and receives input frames from host pinned memory over PCIe. We initially route incoming 1080p video frames (2MB per frame) from 8 concurrent camera streams using a dynamic round-robin load balancer across the 4 accelerators. We observe that our 99th percentile inference latency spikes by 40% compared to a static routing policy where each camera stream is permanently pinned to a specific accelerator.
+question: Why does dynamic round-robin routing cause this performance degradation on this specific hardware?
+details:
+  realistic_solution: The performance degradation is caused by host memory access patterns, DMA churn, and PCIe contention, not insufficient TOPS. Round-robin routing sends consecutive frames from the same camera to different accelerators, so each device repeatedly sees new stream buffers and the host must reprogram or rotate DMA descriptors across endpoints. That hurts pinned-buffer locality, cache/TLB behavior, queue predictability, and bus scheduling. Static routing or consistent hashing by stream ID keeps each camera's frame buffers associated with one accelerator, allowing steadier DMA queues and more predictable dataflow execution.
+  common_mistake: |
+    **The Pitfall:** Blaming the software overhead of the load balancer or assuming compute limits are exceeded.
+    **The Rationale:** Candidates fail to analyze the memory architecture, missing that the Hailo-8 relies entirely on streaming from host memory over PCIe, where DMA and cache locality dominate performance.
+    **The Consequence:** Misdiagnosing the latency spike, leading to pointless code optimization instead of fixing the destructive memory routing strategy.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Workload: 8 cameras * 30 FPS = 240 FPS total.
+    - Input bandwidth: 240 FPS * 2 MB = 480 MB/s.
+    - Round-robin descriptor setup cost: 15 us average per frame transfer.
+    - Observed p99 spike: round-robin p99 = 1.40 * pinned p99.
+
+    **Calculations:**
+    - Average descriptor overhead: 240 * 15 us = 3.6 ms per second, or only 0.015 ms per frame.
+    - Therefore descriptor setup alone cannot explain a 40% p99 spike.
+    - The 40% tail increase means the per-frame tail penalty is 0.40 * pinned_p99. For example, if pinned p99 is 25 ms, round-robin adds 10 ms at p99.
+    - That tail penalty is consistent with occasional DMA queue stalls, pinned-buffer/cache misses, and PCIe endpoint contention rather than raw 480 MB/s bandwidth.
+
+    **Conclusion & Interpretation:**
+    - **Result: 40% p99 increase from locality and contention (I/O-Tail-Bound)**. Pinned routing works because it preserves stream-to-accelerator locality and keeps DMA behavior steady.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+  - reasoning_competency and reasoning_mode are not specified.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

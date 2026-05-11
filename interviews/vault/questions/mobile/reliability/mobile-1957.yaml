@@ -1,0 +1,60 @@
+schema_version: '1.0'
+id: mobile-1957
+track: mobile
+level: L6+
+zone: implement
+topic: fault-tolerance-checkpointing
+competency_area: reliability
+bloom_level: create
+phase: both
+title: On-Device Async Checkpointing
+scenario: Snapdragon 8 Gen 3 running training at 2 batches/sec. The app might be killed by OS OOM. UFS flash write blocks for 100ms.
+question: How can you implement an asynchronous checkpointing mechanism that bounds data loss to 10 seconds without slowing the training loop?
+visual:
+  kind: svg
+  path: mobile-1957.svg
+  alt: Timeline showing compute phase overlapping with flash write phase in a separate thread
+  caption: Asynchronous Thread Checkpointing
+details:
+  realistic_solution: 10s = 20 batches. Spawn a background I/O thread and have the main thread copy weights into a RAM checkpoint buffer every 20 batches, taking about 10 ms. The background thread then writes that buffer to UFS. This bounds data loss to the last 20 batches and avoids blocking on the 100 ms flash write as long as the writer sustains at least one checkpoint write per 10-second window and enough RAM buffers exist to absorb occasional write jitter.
+  common_mistake: |
+    **The Pitfall:** Writing synchronously to flash every batch.
+    **The Rationale:** Candidates prioritize preventing any data loss over maintaining high training throughput.
+    **The Consequence:** Adding 100ms to every step, drastically cutting the 2 batches/sec throughput.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Batch Rate: 2 batches/sec.
+    - Time Window: 10 seconds = 20 batches.
+    - RAM Copy Latency: ~10 ms.
+    - Flash Write Latency: 100 ms.
+
+    **Calculations:**
+    - Checkpoint interval: 2 batches/sec * 10 sec = 20 batches.
+    - Foreground RAM copy cost per interval: 10 ms.
+    - Amortized foreground copy cost: 10 ms / 20 batches = 0.5 ms per batch.
+    - Background flash requirement: complete one 100 ms write within each 10 sec interval.
+    - Average background utilization from writes: 100 ms / 10,000 ms = 1%.
+
+    **Conclusion & Interpretation:**
+    - **Result: bounded 10-second loss with conditional latency hiding (I/O-Bound)**. The training loop pays only the RAM-copy cost, about 0.5 ms amortized per batch, while the 100 ms flash latency is hidden if the background writer keeps up and buffering prevents backpressure.
+status: published
+provenance: llm-draft
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: passed
+validation_date: '2026-04-25'
+validation_model: pydantic-1.0
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-25'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+  - gemini-generated
+  - target-implement-L6+
+created_at: '2026-04-25'

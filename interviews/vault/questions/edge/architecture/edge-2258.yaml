@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: edge-2258
+track: edge
+level: L5
+zone: specification
+topic: model-adaptation-systems
+competency_area: architecture
+bloom_level: apply
+phase: inference
+title: Federated LoRA Aggregation for Edge Fleet Personalization
+scenario: A fleet of industrial edge devices each fine-tune local LoRA adapters on device-specific sensor data. The central server wants to aggregate these into a global adapter without transmitting raw data.
+question: How would you design a communication-efficient federated averaging protocol for LoRA?
+details:
+  realistic_solution: |
+    Use a fixed LoRA architecture across clients and have each device upload only its adapter parameter deltas, not raw data or dense delta_W matrices. For each adapted projection, the client sends A and B updates plus its sample count. The server performs weighted FedAvg elementwise over the matching A and B tensors, applies optional clipping/noise for DP before aggregation, validates the global adapter, and returns the updated adapter version. Avoid making truncated SVD of dense global products the default protocol; use reconstruction/recompression only as an optional post-processing step with accuracy validation.
+  common_mistake: |
+    **The Pitfall:** Expanding every LoRA adapter into a dense delta_W before aggregation.
+    **The Rationale:** Candidates forget that the trainable state is already the low-rank A/B tensors and can be aggregated under a fixed adapter layout.
+    **The Consequence:** Communication and server memory balloon by orders of magnitude, and any recompression step must be accuracy-validated.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 100 devices, rank=8, 32 layers. Q and V projections adapted per layer.
+    - Hidden size: d_in=d_out=4096.
+    - Precision: FP16 (2 bytes).
+    - Uplink: 10 Mbps (1.25 MB/s).
+
+    **Calculations:**
+    - Params per adapted projection: A (8 * 4096) + B (4096 * 8) = 65,536 params.
+    - Total adapter params: 65,536 * 2 projections/layer * 32 layers = 4,194,304 params.
+    - Per-client payload: 4,194,304 * 2 bytes = 8.39 MB.
+    - Per-client upload time: 8.39 MB / 1.25 MB/s = 6.7 seconds if each client has a 10 Mbps uplink.
+    - Server ingress for 100 clients: 100 * 8.39 MB = 839 MB per round before protocol overhead.
+
+    **Conclusion & Interpretation:**
+    - **Result: 8.39 MB Per Client (Network-Bound).** Transmitting LoRA A/B deltas keeps the round communication practical; wall-clock round time depends on parallel uplink and server ingress capacity.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

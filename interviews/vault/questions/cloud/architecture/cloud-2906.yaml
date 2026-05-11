@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-2906
+track: cloud
+level: L4
+zone: design
+topic: cnn-efficient-design
+competency_area: architecture
+bloom_level: apply
+phase: both
+title: Optimizing Depthwise Convolution with Shared Memory on H100
+scenario: The standard cuDNN depthwise conv achieves only 18% SM utilization on H100 for a 3x3 depthwise layer with C=512 channels, 14x14 spatial resolution, batch=32. You need to write or configure a higher-performance implementation.
+question: How would you optimize the C=512, 14x14, batch-32 depthwise 3x3 layer on H100 beyond cuDNN's 18% SM utilization?
+details:
+  realistic_solution: Treat this as a memory-traffic problem, not a Tensor Core problem. Write or select a depthwise kernel that tiles the 14x14 spatial region plus the 1-pixel halo into shared memory, uses coalesced/vectorized fp16 or bf16 global loads, assigns blocks across channel groups and batch items, and keeps the 3x3 filter coefficients in registers or constant cache. Because each channel is independent, expose parallelism by mapping warps across multiple channels and spatial rows rather than trying to increase dense-matmul occupancy. Fuse the epilogue only when BN/ReLU6 or a following activation is present, so the output is written once. Benchmark candidate tile sizes and channel blocking against cuDNN with Nsight memory-throughput counters; the main goal is fewer redundant halo reads and better memory coalescing, with SM utilization improving as a consequence.
+  common_mistake: |
+    **The Pitfall:** Trying to use Tensor Cores for depthwise convolutions.
+    **The Rationale:** Tensor Cores require dense matmul patterns (MMA instructions) and cannot be natively used for depthwise ops where each output channel depends only on one input channel.
+    **The Consequence:** Wasting time trying to map a fundamentally incompatible operation to matrix hardware.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Input: 32x512x14x14 = 3.2M elements * 2B = 6.4MB. Output: same = 6.4MB.
+    - HBM bandwidth: 3.35TB/s (H100).
+    - Peak compute: 989 TFLOPS.
+
+    **Calculations:**
+    - Total HBM traffic: 12.8MB. At 3.35TB/s: 3.8 µs minimum.
+    - FLOPs: 2*32*512*9*196 = 57.8M FLOPs.
+    - At 18% of 989 TFLOPS = 178 TFLOPS: 57.8M/178T = 0.32 µs compute.
+    - Ratio: memory is 12x slower -> severely memory-bound.
+
+    **Conclusion & Interpretation:**
+    - **Result: Shared memory tiling reduces HBM traffic (Memory-Bound)**. The optimization target is to reduce redundant halo reads and write the output once, so measured gains should come from higher effective memory bandwidth and fewer memory transactions rather than Tensor Core utilization.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

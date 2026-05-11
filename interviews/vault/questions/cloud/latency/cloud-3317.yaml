@@ -1,0 +1,64 @@
+schema_version: '1.0'
+id: cloud-3317
+track: cloud
+level: L5
+zone: evaluation
+topic: queueing-theory
+competency_area: latency
+bloom_level: analyze
+phase: inference
+title: Optimizing LLM Inference Latency with Queueing Theory on NVIDIA A100s
+scenario: You are designing a high-throughput, low-latency inference service for an LLM deployed on a cluster of NVIDIA A100 GPUs. Each A100 processes an average of 50 requests per second (RPS). You observe highly variable incoming traffic, with peak rates exceeding the average. Your current system uses a simple FIFO queue. You must ensure a target P99 end-to-end latency of 200ms.
+question: How would you apply queueing theory to analyze performance, determine optimal queue depth, and plan capacity to meet the 200ms P99 latency target?
+details:
+  realistic_solution: |
+    The solution involves several steps:
+    1.  **Characterize Arrival and Service Rates:** Monitor the request arrival rate (λ) and the GPU's service rate (μ) for your LLM inference. Understand their distributions, not just averages.
+    2.  **Set the Tail Budget:** Subtract measured P99 service time and non-GPU overhead from the 200 ms P99 target to get the queueing budget.
+    3.  **Model or Simulate Tails:** Use M/M/1 or M/M/c only as a first-pass tail check; for production, replay traces or simulate with the measured service-time distribution.
+    4.  **Capacity Planning & Queue Depth Sizing:**
+        *   Choose a per-GPU arrival cap whose modeled or simulated P99 wait fits the queueing budget.
+        *   Compute required A100 count as ceil(peak_arrival_rate / safe_per_gpu_arrival_rate).
+        *   Size queue depth from the deadline budget: queue_depth_per_gpu ≈ floor(safe_per_gpu_arrival_rate * Wq_budget). This is a deadline admission cap, not a throughput target.
+        *   If traffic exceeds that queue depth, add A100 capacity, route to a less loaded worker, or shed/defer requests. A deeper FIFO queue reduces drops but converts bursts into P99 violations.
+        *   Use adaptive batching only when the batch wait still fits the remaining deadline.
+    5.  **Monitoring and Feedback Loop:** Continuously monitor actual arrival rates, service times, queue lengths, and end-to-end latencies. Use this data to refine queueing parameters and validate capacity plans.
+  common_mistake: |
+    **The Pitfall:** Focusing only on average service time and targeting near 100% hardware utilization.
+    **The Rationale:** Engineers ignore the non-linear relationship between high utilization and queue waiting times under variable arrival rates.
+    **The Consequence:** P99 latency spikes uncontrollably during peak loads, and arbitrary queue depth limits lead to excessive dropped requests.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Service Rate (μ): 50 requests/second.
+    - Average Service Time (Ts): 1 / 50 = 0.02 seconds = 20 ms.
+    - Target P99 latency: 200 ms.
+    - Reserve 20 ms for network and non-GPU overhead.
+
+    **Calculations:**
+    - P99 queueing budget = 200 ms - 20 ms service - 20 ms overhead = 160 ms.
+    - P99 queueing budget = 200 ms - 20 ms service - 20 ms overhead = 160 ms.
+    - For a first-pass M/M/1 tail check, P(Wq > t) = ρ * exp(-(μ - λ) * t), where ρ = λ / μ.
+    - At λ = 25 RPS per A100, ρ = 0.50 and P(Wq > 160 ms) = 0.50 * exp(-25 * 0.160) ≈ 0.009, just under 1%.
+    - At λ = 40 RPS per A100, ρ = 0.80 and P(Wq > 160 ms) = 0.80 * exp(-10 * 0.160) ≈ 0.162, so P99 will violate 200 ms.
+    - Safe first-pass capacity is therefore about 25 RPS per A100, and required GPUs = ceil(peak_RPS / 25).
+    - Queue-depth cap from the deadline budget: floor(25 * 0.160) = 4 waiting requests per GPU, with a lower cap if measured P99 service time exceeds 20 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: use about 25 RPS per A100 as a first-pass safe cap, provision ceil(peak_RPS / 25) GPUs, and cap the per-GPU queue around 4 waiting requests before routing or shedding.** Validate the exact cap with measured traces.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
