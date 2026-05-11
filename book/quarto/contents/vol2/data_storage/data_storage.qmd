@@ -445,7 +445,7 @@ The storage hierarchy principle (Principle \ref{pri-storage-hierarchy}) governs 
 
 @fig-storage-pyramid maps these six tiers into a spatial hierarchy, showing how bandwidth decreases and capacity increases at each step away from the accelerator.
 
-::: {#fig-storage-pyramid fig-env="figure" fig-pos="htb" fig-cap="**ML Storage Hierarchy**: Six tiers grouped into Hot/Warm/Cold bands: GPU HBM (3.35 TB/s, 80 GB, ~\\$15/GB), CPU DRAM (300 GB/s, 512 GB--2 TB, ~\\$4/GB), NVMe SSD (7 GB/s, 8 TB, ~\\$0.10/GB), SATA SSD (0.5 GB/s, 32 TB, ~\\$0.06/GB), Object Storage/Lustre (50 GB/s aggregated, PB, \\$0.023/GB), and Tape Archive (0.3 GB/s, EB, \\$0.001/GB). Each step down trades bandwidth for capacity and cost." fig-alt="Six storage tiers from GPU HBM (fastest) down to Tape Archive (slowest). Columns show bandwidth, capacity, and cost per GB. A left-hand ribbon groups them into Hot, Warm, and Cold bands."}
+::: {#fig-storage-pyramid fig-env="figure" fig-pos="htb" fig-cap="**ML Storage Hierarchy**: Six tiers grouped into Hot, Warm, and Cold bands, from GPU HBM (terabytes per second, gigabytes of capacity) down to tape archive (sub-gigabyte-per-second bandwidth, effectively unlimited capacity), with cost per gigabyte changing inversely. See @tbl-storage-hierarchy-merged for the per-tier bandwidth, latency, capacity, and cost values used throughout this chapter." fig-alt="Six storage tiers from GPU HBM (fastest) down to Tape Archive (slowest). Columns show bandwidth, capacity, and cost per GB. A left-hand ribbon groups them into Hot, Warm, and Cold bands."}
 
 ![](images/svg/storage-hierarchy.svg)
 
@@ -1579,17 +1579,17 @@ A `{python} StorageHierarchyAnalysis.gpt3_params_b`B parameter model with Adam o
 
 **Problem**: A 256-node cluster saves a 175B-parameter checkpoint every 10 minutes. Each checkpoint totals `{python} StorageHierarchyAnalysis.ckpt_total_gb_str` GB. With ZeRO-3, each node saves roughly 7 GB.
 
-1. **Per-node write to local NVMe** (4 drives at 3.5 GB/s each = 14 GB/s): $4 \text{ GB} \div 14 \text{ GB/s} = 0.29$ seconds.
-2. **Async copy to PFS**\index{Async Copy to PFS}: 256 nodes$\times$ 4 GB = 1,024 GB total. If the PFS provides 1 TB/s aggregate, the storm completes in roughly 1 second.
-3. **Per-node PFS bandwidth**\index{Bandwidth!per-node pfs}: If all 256 nodes write simultaneously, each gets $1000/256 = 3.9$ GB/s. Per-node async copy: $4/3.9 = 1.03$ seconds.
-4. **Training pause**\index{Training!pause}: only 0.29 seconds (the local NVMe write). The PFS copy overlaps with the next training iteration.
-5. **Overhead**\index{Overhead}: 0.29 s pause every 600 s = **0.05 percent** training time lost to checkpointing.
+1. **Per-node write to local NVMe** (4 drives at 3.5 GB/s each = 14 GB/s): $7 \text{ GB} \div 14 \text{ GB/s} = 0.5$ seconds.
+2. **Async copy to PFS**\index{Async Copy to PFS}: 256 nodes$\times$ 7 GB $\approx$ 1.8 TB total. If the PFS provides 1 TB/s aggregate, the storm completes in roughly 1.8 seconds.
+3. **Per-node PFS bandwidth**\index{Bandwidth!per-node pfs}: If all 256 nodes write simultaneously, each gets $1000/256 = 3.9$ GB/s. Per-node async copy: $7/3.9 \approx 1.8$ seconds.
+4. **Training pause**\index{Training!pause}: only 0.5 seconds (the local NVMe write). The PFS copy overlaps with the next training iteration.
+5. **Overhead**\index{Overhead}: 0.5 s pause every 600 s $\approx$ **0.08 percent** training time lost to checkpointing.
 
 **Systems conclusion**: Tiered staging reduces checkpoint overhead from a potential 10+ second PFS-direct write to a sub-second local write. The key insight is that $T_{\text{write}}$ for the training pipeline is the *local* write time, not the *durable* write time.
 
 :::
 
-The **tiered staging** strategy minimizes $T_{\text{write}}$ by writing in two phases. In the first phase, each node writes its checkpoint shard to local NVMe at full bandwidth. With four NVMe drives providing 14 GB/s aggregate, a per-node shard of `{python} StorageHierarchyAnalysis.ckpt_total_gb_str` GB (for a 256-node cluster, each node saves roughly 7 GB) completes in under a second. The training pipeline can resume immediately after the local write completes.
+The **tiered staging** strategy minimizes $T_{\text{write}}$ by writing in two phases. In the first phase, each node writes its checkpoint shard to local NVMe at full bandwidth. With four NVMe drives providing 14 GB/s aggregate, a per-node shard of roughly 7 GB (a 256-node ZeRO-3 split of the `{python} StorageHierarchyAnalysis.ckpt_total_gb_str` GB total checkpoint) completes in under a second. The training pipeline can resume immediately after the local write completes.
 
 In the second phase, a background process asynchronously copies the local checkpoint to the parallel file system for durability. This copy can overlap with the next training iteration, so it does not block the pipeline. The risk is that if the node fails before the async copy completes, the local checkpoint is lost. The mitigation is to replicate checkpoints to at least two peer nodes' NVMe drives before declaring the save complete, providing durability even if one node fails.
 
@@ -1739,13 +1739,13 @@ class SyntheticStorage:
 3. **Verification Factor**\index{Verification Factor}: To avoid "Self-Poisoning," each sample is verified by **`{python} SyntheticStorage.verification_passes` independent "Judge" models**.
 4. **The amplification**: Total footprint = 1 TB $\times$ `{python} 1 + SyntheticStorage.provenance_metadata_overhead` $\times$ `{python} SyntheticStorage.verification_passes` = **`{python} SyntheticStorage.total_tb_str` TB**.
 
-**Systems insight**: Synthetic data is **Verified Data**\index{Verified Data}, and verification has a **`{python} SyntheticStorage.amp_str`$\times$ Storage Tax**. In the Machine Learning Fleet, storage moves from being a simple bit-bucket to a **Provenance Engine**. If you cannot store the *why* and *who* behind a synthetic token, you risk poisoning the future of the fleet with its own past mistakes.
+**Systems insight**: Synthetic data is **Verified Data**\index{Verified Data}, and verification has a **`{python} SyntheticStorage.amp_str`$\times$ Storage Tax**. In the Machine Learning Fleet, storage moves from being a simple bit-bucket to a **Provenance Engine**. A system that cannot store the *why* and *who* behind a synthetic token risks poisoning the future of the fleet with its own past mistakes.
 
 :::
 
 ## Summary {#sec-storage-summary}
 
-Storage in ML systems is not a passive repository; it is an active, multi-tiered pipeline whose sole purpose is to keep accelerator HBM populated with data. The hierarchy spanning HBM, host DRAM, local NVMe, parallel file systems, object storage, and cold archive exists because no single technology can simultaneously deliver the bandwidth, capacity, and cost profile that large-scale training demands. A 300,000$\times$ bandwidth gap separates the fastest tier from the slowest, and each intermediate tier serves as a staging buffer that absorbs the mismatch between the rate at which accelerators consume data and the rate at which persistent storage can supply it. The data pipeline throughput equation, $\text{BW}_{\text{required}} = N_{\text{GPUs}} \times U_{\text{target}} \times D_{\text{vol,batch}} / T_{\text{iteration}}$, provides the quantitative foundation for sizing every tier: miss the required bandwidth at any level and expensive accelerators idle; over-provision and capital is wasted on storage capacity that sits underutilized.
+Storage in ML systems is not a passive repository; it is an active, multi-tiered pipeline whose sole purpose is to keep accelerator HBM populated with data. The hierarchy spanning HBM, host DRAM, local NVMe, parallel file systems, object storage, and cold archive exists because no single technology can simultaneously deliver the bandwidth, capacity, and cost profile that large-scale training demands. Roughly three orders of magnitude in aggregate bandwidth separate HBM from cold archive, and each intermediate tier serves as a staging buffer that absorbs the mismatch between the rate at which accelerators consume data and the rate at which persistent storage can supply it. The data pipeline throughput equation, $\text{BW}_{\text{required}} = N_{\text{GPUs}} \times U_{\text{target}} \times D_{\text{vol,batch}} / T_{\text{iteration}}$, provides the quantitative foundation for sizing every tier: miss the required bandwidth at any level and expensive accelerators idle; over-provision and capital is wasted on storage capacity that sits underutilized.
 
 What makes ML storage particularly challenging is that these workloads invert nearly every assumption baked into decades of storage system design. Databases optimize for random IOPS, cacheable working sets, and continuous small writes. ML training demands sequential streaming throughput over datasets that dwarf all cache levels, punctuated by massive checkpoint bursts that saturate bandwidth for seconds before returning to silence. The metadata overhead of small files, harmless in traditional workloads, becomes the dominant bottleneck when millions of individual samples must be opened, stat'd, and closed per epoch. Aggregating samples into large shards, choosing sequential streaming formats like WebDataset or TFRecord, and designing prefetch pipelines sized for P99 tail latency rather than average latency are all direct engineering responses to these inverted access patterns. GPU Direct Storage pushes this optimization further by eliminating the CPU from the data path entirely, freeing host cores for the augmentation work that the training pipeline also requires.
 
@@ -1753,7 +1753,7 @@ The economics of the hierarchy are equally consequential. The orders-of-magnitud
 
 ::: {.callout-takeaways title="Feed the accelerators or waste them"}
 
-*   **HBM is the destination**: Every lower tier exists to keep GPU HBM populated. The 300,000$\times$ bandwidth gap between HBM and object storage drives every design decision in the ML storage hierarchy.
+*   **HBM is the destination**: Every lower tier exists to keep GPU HBM populated. The roughly 30$\times$ aggregate bandwidth gap between HBM and object storage (and the much larger per-client gap once a single instance pulls from a shared object endpoint) drives every design decision in the ML storage hierarchy.
 *   **ML workloads invert storage assumptions**\index{ML Workloads Invert Storage Assumptions}: Traditional caching, IOPS optimization, and small-write durability patterns all produce the wrong answer for ML training. Throughput (GB/s) matters more than IOPS. Small files are the enemy; aggregated shards are the solution.
 *   **The pipeline equation governs design**: Required bandwidth scales linearly with GPU count and inversely with iteration time. Use $\text{BW}_{\text{required}} = N_{\text{GPUs}} \times U_{\text{target}} \times D_{\text{vol,batch}} / T_{\text{iteration}}$ to size every tier.
 *   **Pipelining hides average latency, not tail latency**: Prefetch buffers must be sized for P99 I/O latency, not average, to prevent accelerator stalls at scale. Buffer depth of $\lceil T_{\text{I/O,p99}} / T_{\text{compute}} \rceil$ is the minimum.
