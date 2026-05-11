@@ -9,7 +9,7 @@ A working model is rarely an efficient one. Part II established how to construct
 - **Pruning** trades model capacity for smaller representations and can improve speed when the resulting sparsity or removed structures are supported by the target hardware.
 - **Distillation** trades training compute for inference efficiency.
 
-**Implication**: Systems engineers navigate this frontier to find the "sweet spot" for a specific deployment environment. There is no universal optimum.
+**Implication**: Systems engineers navigate this frontier to find the operating point appropriate to a specific deployment environment. There is no universal optimum.
 :::
 
 Navigating the Pareto frontier requires knowing *which* resource to optimize. Before selecting a technique, engineers must diagnose the bottleneck:
@@ -18,36 +18,36 @@ Navigating the Pareto frontier requires knowing *which* resource to optimize. Be
 **Invariant**: Attainable throughput ($R$) is bounded by the minimum of peak compute ($R_{\text{peak}}$) and memory bandwidth ($\text{BW}$) relative to the workload's arithmetic intensity ($I$) [@williams2009]:
 $$ R = \min(R_{\text{peak}}, I \times \text{BW}) $$
 
-**Implication**: Adding compute power to a memory-bound model yields **zero** performance gain. Engineers must identify whether the bottleneck is math (compute bound) or memory (bandwidth bound) before selecting an optimization technique.
+**Implication**: Adding compute power to a memory-bound model yields **zero** performance gain. Engineers must identify whether the bottleneck is compute (compute bound) or memory (bandwidth bound) before selecting an optimization technique.
 :::
 
 @tbl-bottleneck-diagnostic maps each bottleneck type to the optimization that addresses it—and, equally important, the optimization that would be wasted.
 
-| **If the workload is...** | **Dominant Term**                            | **Optimization That Works**              | **Optimization That is Wasted** |
-|:--------------------------|:---------------------------------------------|:-----------------------------------------|:--------------------------------|
-| **Memory-Bound**          | $D_{\text{vol}}/\text{BW}$                   | Quantization, pruning, batching          | Faster GPU (more FLOP/s)        |
-| **Compute-Bound**         | $O/(R_{\text{peak}} \cdot \eta_{\text{hw}})$ | Better kernels, Tensor Cores, faster GPU | More memory bandwidth           |
-| **Latency-Bound**         | $L_{\text{lat}}$                             | Batching, kernel fusion, async dispatch  | More FLOP/s or bandwidth alone  |
+| **If the workload is...** | **Dominant Term**                            | **Optimization That Works**                                                | **Optimization That is Wasted** |
+|:--------------------------|:---------------------------------------------|:---------------------------------------------------------------------------|:--------------------------------|
+| **Memory-Bound**          | $D_{\text{vol}}/\text{BW}$                   | Quantization, pruning, batching                                            | Faster GPU (more FLOP/s)        |
+| **Compute-Bound**         | $O/(R_{\text{peak}} \cdot \eta_{\text{hw}})$ | Better kernels, Tensor Cores, faster GPU                                   | More memory bandwidth           |
+| **Latency-Bound**         | $L_{\text{lat}}$                             | Kernel fusion, async dispatch, bounded microbatching under the latency SLO | More FLOP/s or bandwidth alone  |
 
 : **The Bottleneck Diagnostic**: Before optimizing, identify which iron law term dominates. Optimizing the wrong term yields zero improvement. {#tbl-bottleneck-diagnostic}
 
-Many important ML kernels fall on the memory-bound side of the ridge point, especially low-reuse operations such as embedding lookup, normalization, softmax, depthwise convolution, and small-batch inference paths. Dense matrix multiplications and convolutions can instead be compute-bound when batching and hardware utilization are high. This split is a consequence of the **memory wall**: processor speed has historically outpaced memory bandwidth, and the cumulative gap has widened over three decades. Neural networks, with their massive weight tensors and uneven temporal locality, are especially vulnerable. The Arithmetic Intensity Law diagnoses *where* you sit relative to this wall; the next principle explains *why* that wall is so punishing:
+Many important ML kernels fall on the memory-bound side of the ridge point, especially low-reuse operations such as embedding lookup, normalization, softmax, depthwise convolution, and small-batch inference paths. Dense matrix multiplications and convolutions can instead be compute-bound when batching and hardware utilization are high. This split is a consequence of the **memory wall**: processor speed has historically outpaced memory bandwidth, and the cumulative gap has widened over three decades. Neural networks, with their massive weight tensors and uneven temporal locality, are especially vulnerable. The Arithmetic Intensity Law diagnoses *where* a workload sits relative to this wall; the next principle explains *why* that wall is so punishing:
 
 ::: {.callout-principle #pri-energy-movement title="The Energy-Movement Invariant"}
 **Invariant**: Moving a 32-bit value from DRAM can cost roughly 100--1,000$\times$ more energy than a 32-bit arithmetic operation, depending on operation type and process technology.
 $$ E_{\text{move}} \gg E_{\text{compute}} $$
 
-**Implication**: **Data Locality** is the primary driver of efficiency for memory-bound workloads. Optimization strategies should prioritize **kernel fusion** (keeping data in registers) and **quantization** (reducing data size) when movement dominates, while reducing raw operation counts and improving arithmetic kernels remain central for compute-bound workloads.
+**Implication**: Data locality is the primary driver of efficiency for memory-bound workloads. Optimization strategies should prioritize **kernel fusion** (keeping data in registers) and **quantization** (reducing data size) when movement dominates, while reducing raw operation counts and improving arithmetic kernels remain central for compute-bound workloads.
 :::
 
 Even with perfect data locality and optimal bottleneck targeting, a final constraint limits how much speedup is achievable:
 
 ::: {.callout-principle #pri-amdahl title="Amdahl's Law"}
-**Invariant**: The maximum speedup of a system is limited by the fraction of the workload that cannot be accelerated.
+**Invariant**: The maximum speedup of a system is limited by the fraction of the workload that cannot be accelerated [@amdahl1967].
 $$ \text{Speedup} = \frac{1}{(1-p) + \frac{p}{s}} $$
 where $p$ is the parallelizable fraction and $s$ is the speedup of that fraction.
 
-**Implication**: If 95 percent of your model runs 100$\times$ faster on a GPU, your total system speedup is capped at ~16.8$\times$. This explains *why* **data loading** and **preprocessing** often become the ultimate bottlenecks in highly optimized systems.
+**Implication**: If 95 percent of a model runs 100$\times$ faster on a GPU, the total system speedup is capped at ~16.8$\times$. This explains *why* **data loading** and **preprocessing** often become the ultimate bottlenecks in highly optimized systems.
 :::
 
 Part III applies these principles systematically through the D·A·M taxonomy—Data, Algorithm, Machine—asking first whether the work is necessary, then whether it can be simplified, and finally how to do it faster (see @sec-dam-taxonomy for the full diagnostic framework).

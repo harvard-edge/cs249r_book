@@ -148,7 +148,7 @@ Each of these challenges opens a corresponding optimization pathway. Computation
 
 ### The staged system pipeline: Identifying "accelerator bubbles" {#sec-model-training-staged-pipeline}
 
-A training system is not a single loop; it is a **staged system pipeline**\index{Training Pipeline!staged system workflow}. To reach the "Titan" standard of efficiency, we must analyze training as a factory floor where four distinct stages coordinate to keep the ALUs busy:
+A training system is not a single loop; it is a **staged system pipeline**\index{Training Pipeline!staged system workflow}. Reaching high accelerator utilization requires analyzing training as a factory floor where four distinct stages coordinate to keep the ALUs busy:
 
 1.  **Data Loading & Preprocessing** (CPU/Storage): Fetching raw bits from Non-Volatile Memory Express (NVMe), decoding, and augmenting on CPU cores.
 2.  **Host-to-Device Transfer** (PCIe): Moving the processed batch over the **PCIe bus** into GPU memory via DMA.
@@ -165,15 +165,15 @@ The chapter proceeds through five stages. First, we formalize the *iron law of t
 
 Before formalizing the iron law, consider how these constraints interact in practice. The theoretical framework matters because failures are expensive: a single *gradient explosion* can erase days of computation worth thousands of dollars.
 
-::: {.callout-example title="The 3AM gradient explosion"}
+::: {.callout-war-story title="The 3AM gradient explosion"}
 
-**The scenario**: A team is training a 7B parameter large language model (LLM). The loss curve has been decreasing smoothly for four days. The engineers leave for the night.
+**The context**: A team is training a 7B parameter large language model (LLM). The loss curve has been decreasing smoothly for four days. The engineers leave for the night.
 
-**Failure**: At 3:00 AM, the training loss suddenly spikes from `{python} TrainingScenarios.loss_spike_val_str` to NaN (Not a Number). The training crashes. The team has lost `{python} TrainingScenarios.lost_days_str` days of compute ($\approx$ \$`{python} TrainingScenarios.lost_cost_str`).
+**The failure**: At 3:00 AM, the training loss suddenly spikes from `{python} TrainingScenarios.loss_spike_val_str` to NaN (Not a Number). The training crashes.
 
-**The Physics**\index{Gradient!explosion, physics of}: A single batch contained an outlier with extremely high activation values. In **Mixed Precision (FP16)**, these values exceeded the dynamic range (> `{python} TrainingScenarios.fp16_max_val_str`), causing an overflow to Infinity. The gradients became Infinite, updating all weights to NaN.
+**The consequence**\index{Gradient!explosion, physics of}: The team has lost `{python} TrainingScenarios.lost_days_str` days of compute ($\approx$ \$`{python} TrainingScenarios.lost_cost_str`). The mechanism: a single batch contained an outlier with extremely high activation values. In **Mixed Precision (FP16)**, these values exceeded the dynamic range (> `{python} TrainingScenarios.fp16_max_val_str`), causing an overflow to Infinity. The gradients became Infinite, updating all weights to NaN.
 
-**The systems fix**:
+**The systems lesson**: Three system-level safeguards prevent this class of failure.
 
 1.  **Checkpointing**: Save model state every hour to limit the loss to one hour of compute, not four days.
 2.  **Gradient Clipping**\index{Gradient Clipping!overflow prevention}: Cap the norm of gradient vectors to prevent single-batch spikes from destroying the weights.
@@ -613,7 +613,7 @@ class ActivationBenchmarks:
 
 \index{Activation Function!training efficiency}\index{ReLU!hardware efficiency}In @sec-neural-computation, we established the mathematical properties of activation functions like sigmoid, tanh, ReLU, and softmax. While their role is to introduce nonlinearity, their implementation characteristics significantly impact training system performance. From a systems perspective, the choice of activation function determines computational cost, hardware utilization, and memory access patterns during backpropagation.
 
-The critical question for ML systems engineers is not *what* these functions do mathematically, but *how* to implement them efficiently at scale. This section analyzes the computational trade-offs that determine real-world training efficiency.
+The critical question for ML systems engineers is not *what* these functions do mathematically, but *how* to implement them efficiently at scale. The computational trade-offs that govern this choice determine real-world training efficiency.
 
 Because activation functions execute millions of times per training step, even small per-operation differences compound into significant training time impact. The selection of an activation function directly influences training throughput and hardware efficiency. @fig-activation-perf quantifies these performance differences through CPU benchmarks on Apple M2 hardware, revealing that Tanh executes in `{python} ActivationBenchmarks.tanh_exec_time_str` seconds compared to Sigmoid's `{python} ActivationBenchmarks.sigmoid_exec_time_str` seconds, a `{python} ActivationBenchmarks.tanh_speedup_str`$\times$ speedup.
 
@@ -1049,7 +1049,7 @@ class GPT2Optimizer:
 
 ::: {.callout-notebook #notebook-gpt2-optimizer title="GPT-2 optimizer memory requirements"}
 
-GPT-2 training uses the Adam optimizer with these hyperparameters:
+A representative GPT-2 XL training configuration uses the Adam optimizer with the following hyperparameters:
 
 - β₁ = 0.9 (momentum decay)
 - β₂ = 0.999 (second moment decay)
@@ -1073,7 +1073,7 @@ This explains why GPT-2 training requires `{python} GPT2Optimizer.v100_mem_gib_s
 1. Mixed precision training (FP16) reduces operation precision but requires keeping FP32 master weights, maintaining the static memory footprint at ~`{python} GPT2Optimizer.total_static_amp_str` GB.
 2. Gradient accumulation (splitting effective batches into smaller micro-batches) allows effective batch_size = 512 despite memory limits.
 
-Adam's memory overhead is a necessary trade-off for convergence. GPT-2 converges in ~50K steps vs. ~150K+ steps with SGD+Momentum, saving weeks of training time despite higher per-step cost.
+Adam's memory overhead is a necessary trade-off for convergence. In this illustrative configuration, GPT-2 XL converges in ~50K steps vs. ~150K+ steps with SGD+Momentum, saving weeks of training time despite higher per-step cost.
 
 :::
 
@@ -1125,20 +1125,32 @@ The `optimizer.zero_grad()` call addresses a critical framework implementation d
 
 The `optimizer.step()` method encapsulates the mathematical update equations. For Adam optimization, this single call implements the momentum estimation, squared gradient tracking, bias correction, and parameter update computation automatically. @lst-adam-internals illustrates the mathematical operations that occur within the optimizer.
 
-::: {#lst-adam-internals lst-cap="**Adam Optimizer Internals**: Mathematical operations implemented by optimizer.step(), showing momentum estimation, variance tracking, bias correction, and parameter updates."}
+::: {#lst-adam-internals lst-cap="**Adam Optimizer Internals**: Illustrative pseudocode for the operations implemented by optimizer.step(), showing momentum estimation, variance tracking, bias correction, and parameter updates. Per-parameter optimizer state (momentum_buffer, variance_buffer, step_count) is initialized to zero on the first call and persisted across calls by the framework."}
 
 ```{.python}
-# Mathematical operations implemented by optimizer.step() for Adam
-# These computations happen automatically within the framework
+# Pseudocode for the operations implemented by optimizer.step() for
+# Adam.
+# In a real implementation these buffers are maintained per-parameter
+# by
+# the framework and persisted across training steps; they are shown
+# here
+# as in-scope variables for readability.
 
 # Adam hyperparameters (typically β₁=0.9, β₂=0.999, ε=1e-8)
 beta_1, beta_2, epsilon = 0.9, 0.999, 1e-8
 learning_rate = 0.001
 
+# Per-parameter optimizer state (zero-initialized on the first step,
+# persisted by the framework on subsequent steps):
+#   momentum_buffer   = torch.zeros_like(param.data)
+#   variance_buffer   = torch.zeros_like(param.data)
+#   step_count        = 0
+
 # For each parameter tensor in the model:
 for param in model.parameters():
     if param.grad is not None:
         grad = param.grad.data  # Current gradient
+        step_count += 1
 
         # Step 1: Update biased first moment estimate
         # (momentum)
@@ -1709,7 +1721,7 @@ Batch size directly influences arithmetic intensity. With batch = 1, many operat
 
 This analysis guides optimization strategy selection. For memory-bound operations, reducing data movement through operator fusion, reduced precision, or algorithmic improvements like FlashAttention provides the largest gains. For compute-bound operations, increasing throughput through Tensor Cores, parallelism, or quantization matters more. See @sec-hardware-acceleration for detailed roofline model analysis and hardware-specific optimization strategies.
 
-Look back at @fig-training-roofline and notice where standard attention sits (memory-bound region) vs. where FlashAttention[^fn-flashattention-training] lands (compute-bound region)—this shift represents the core insight of IO-aware algorithm design. By never materializing the full $N{\times}N$ attention matrix in HBM and instead processing tiles that fit in fast SRAM (on-chip static RAM), FlashAttention reduces attention activation memory from $O(N^2)$ to $O(N)$ and sharply reduces HBM traffic, achieving 2--4$\times$ speedups [@dao2022]. We examine the algorithm, its implementation, and when to use it in detail in @sec-model-training-flash-attention-ioaware-attention-optimization-3da0.
+In @fig-training-roofline, standard attention sits in the memory-bound region while FlashAttention[^fn-flashattention-training] shifts the same workload into the compute-bound region, which captures the core insight of IO-aware algorithm design. By never materializing the full $N{\times}N$ attention matrix in HBM and instead processing tiles that fit in fast SRAM (on-chip static RAM), FlashAttention reduces attention activation memory from $O(N^2)$ to $O(N)$ and sharply reduces HBM traffic, achieving 2--4$\times$ speedups [@dao2022]. The algorithm, its implementation, and the conditions under which it applies are examined in detail in @sec-model-training-flash-attention-ioaware-attention-optimization-3da0.
 
 [^fn-flashattention-training]: **FlashAttention**: The core mechanism is processing the attention calculation in small tiles that fit within the accelerator's fast, on-chip SRAM, which avoids writing the full intermediate $N{\times}N$ matrix to slower HBM. The exact HBM IO bound depends on tile size and SRAM capacity, but the practical effect is a large reduction in memory traffic and activation storage. The result is the 2--4$\times$ end-to-end speedup mentioned in the text. \index{FlashAttention!IO-aware design}
 
@@ -2525,7 +2537,7 @@ class NetworkWall:
 
 ::: {.callout-notebook #notebook-network-wall title="The network wall"}
 
-**Problem**: You are training a large model on eight GPUs. You want to know if the network is the bottleneck.
+**Problem**: A team is training a large model on eight GPUs. Is the network the bottleneck?
 
 **Math**: For a `{python} NetworkWall.model_params_b_str` B parameter model with FP16 gradients:
 
@@ -3362,7 +3374,7 @@ The composition phase combines multiple techniques to achieve cumulative benefit
 
 This systematic framework (profile, select, compose) applies to the four core optimization techniques examined in this section. Prefetching targets data movement latency. Mixed-precision training addresses both throughput and memory constraints. Flash Attention eliminates the memory-bandwidth bottleneck in attention layers. Gradient accumulation and checkpointing manage memory capacity limits by trading computation for storage. In practice, high-impact, low-complexity optimizations like data prefetching should be implemented first, while complex optimizations such as gradient checkpointing require cost-benefit analysis that accounts for development effort and debugging complexity.
 
-Use @fig-optimization-flowchart as a decision tree to operationalize this systematic framework. Starting from profiling results, follow the branches through bottleneck identification to technique selection, ensuring optimization effort targets the actual constraint rather than perceived issues.
+@fig-optimization-flowchart provides a decision tree that operationalizes this systematic framework. The branches lead from profiling results through bottleneck identification to technique selection, ensuring optimization effort targets the actual constraint rather than perceived issues.
 
 ::: {#fig-optimization-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Training Optimization Decision Flowchart**: Systematic approach to optimization selection based on profiling results. Begin by measuring accelerator utilization, then follow the decision path to identify whether the bottleneck is data-bound, memory bound, or compute bound. Each path leads to specific techniques that address the identified constraint." fig-alt="Flowchart showing optimization decision tree starting from profile training run, branching based on GPU utilization and memory pressure to different optimization techniques."}
 
@@ -4288,7 +4300,7 @@ class AttentionMemoryCalc:
     total_attn_gb_str = fmt(total_attn_gb, precision=0, commas=False)
 ```
 
-The memory bottleneck emerges from materializing the $n{\times}n$ intermediate matrices for scores and probabilities. For a sequence length of `{python} AttentionMemoryCalc.fa_seq_len_str` tokens with embedding dimension `{python} AttentionMemoryCalc.embed_dim_str` (typical for a single attention head), the attention score matrix alone requires \(`{python} AttentionMemoryCalc.fa_seq_len_str`^2 \times `{python} ResNetMemoryScaling.bytes_fp32_str`\) bytes = `{python} AttentionMemoryCalc.attn_matrix_mb_str` MB in FP32. With `{python} AttentionMemoryCalc.fa_n_heads_str` attention heads, this grows to `{python} AttentionMemoryCalc.total_attn_gb_str` GB just for intermediate attention matrices, not including the keys, queries, values, or output tensors.
+The memory bottleneck emerges from materializing the $n{\times}n$ intermediate matrices for scores and probabilities. For a sequence length of `{python} AttentionMemoryCalc.fa_seq_len_str` tokens with embedding dimension `{python} AttentionMemoryCalc.embed_dim_str` (typical for a single attention head), the attention score matrix alone requires \(`{python} AttentionMemoryCalc.fa_seq_len_str`^2 \times `{python} AttentionMemoryCalc.bytes_fp32_str`\) bytes = `{python} AttentionMemoryCalc.attn_matrix_mb_str` MB in FP32. With `{python} AttentionMemoryCalc.fa_n_heads_str` attention heads, this grows to `{python} AttentionMemoryCalc.total_attn_gb_str` GB just for intermediate attention matrices, not including the keys, queries, values, or output tensors.
 
 \index{HBM!memory bandwidth}\index{SRAM!on-chip memory}Modern GPU memory hierarchy exacerbates this bottleneck. HBM provides 40–80 GB capacity with 1–2 TB/s bandwidth, while SRAM provides only 20–40 MB capacity but delivers 20+ TB/s bandwidth (10$\times$ faster). Standard attention stores these large matrices in slow HBM and repeatedly loads them during the backward pass. For GPT-2 scale models processing 2048-token sequences, attention operations spend 70--80 percent of execution time waiting for memory transfers rather than computing, leaving expensive tensor cores underutilized.
 
@@ -4439,7 +4451,7 @@ def flash_attn_2(q, k, v):
 
 #### Benchmark results {#sec-model-training-benchmark-results-2c3f}
 
-The benefits of Flash Attention become concrete when measured on real hardware. Training a GPT-2 Small-scale transformer on an NVIDIA A100 GPU (12 layers, 768 hidden dim, 12 heads---smaller than our XL lighthouse model to fit benchmarks on a single GPU) with varying sequence lengths reveals dramatic improvements:
+The benefits of Flash Attention become concrete when measured on real hardware. The reference benchmarks in @dao2022 train a GPT-2 Small-scale transformer on an NVIDIA A100 GPU (12 layers, 768 hidden dim, 12 heads, smaller than the XL lighthouse model so the standard-attention runs fit on a single GPU) with varying sequence lengths and report the per-call timing and memory in @tbl-flashattention-benchmarks. The pattern recurs in independent reproductions on similar hardware:
 
 ::: {tbl-colwidths="[14,14,14,15,14,15,14]"}
 
@@ -4449,6 +4461,8 @@ The benefits of Flash Attention become concrete when measured on real hardware. 
 |         2048        |        45 ms         |       15 ms       |         120 ms        |       35 ms        |         18 GB         |        6 GB        |
 |         4096        |         OOM          |       32 ms       |          OOM          |       85 ms        |         >40 GB        |       12 GB        |
 |         8192        |         OOM          |       68 ms       |          OOM          |       180 ms       |         >80 GB        |       24 GB        |
+
+: **FlashAttention Benchmark Comparison**: Per-call timing and peak memory for standard attention vs. FlashAttention on an A100 across sequence lengths, as reported in [@dao2022]. OOM marks configurations where standard attention exceeds the A100's 80 GB memory budget. {#tbl-flashattention-benchmarks}
 
 :::
 
@@ -4501,7 +4515,7 @@ class FlashAttentionSpeedup:
 Standard attention runs out of memory beyond 2048 tokens on a 40 GB A100, while Flash Attention trains sequences up to 8192 tokens. Even at 2048 tokens where both fit, Flash Attention achieves `{python} FlashAttentionSpeedup.flash_fwd_speedup_str`$\times$ forward pass speedup and `{python} FlashAttentionSpeedup.flash_bwd_speedup_str`$\times$ backward pass speedup.
 
 \index{FlashAttention!2, improved parallelism}\index{FlashAttention!3, FP8 tensor cores}
-Subsequent versions have continued improving performance: Flash Attention two (2023) achieved 1.5--2$\times$ additional speedup through better parallelism and register allocation, while Flash Attention three (2024) exploits FP8 tensor cores and asynchronous memory operations on Hopper GPUs to reach 740 TFLOPS on H100 (75 percent of theoretical peak).
+Subsequent versions have continued improving performance: FlashAttention-2 [@dao2023flashattention2] achieved 1.5--2$\times$ additional speedup through better parallelism and register allocation, while FlashAttention-3 [@shah2024flashattention3] exploits FP8 tensor cores and asynchronous memory operations on Hopper GPUs and reports reaching approximately 740 TFLOPS on H100, around 75 percent of theoretical peak.
 
 #### When to use flash attention {#sec-model-training-use-flash-attention-375d}
 
@@ -5206,7 +5220,7 @@ Yet some models simply will not fit, and some training runs would take years eve
 ## Scaling Training Systems {#sec-model-training-scaling-training-systems-adfd}
 
 \index{Training!scaling strategies}\index{Scaling!single-device limitations}\index{Conservation of Complexity!distributed training}
-The optimization toolkit developed in the previous section (mixed precision, Flash Attention, gradient checkpointing, and data prefetching) can transform an infeasible training configuration into a practical one on a single machine. The GPT-2 walkthrough demonstrated reducing memory from 89 GB to 32 GB, bringing a 1.5B parameter model within reach of a single A100 (40 GB). However, some models simply will not fit, no matter how aggressively these techniques are applied. A 70B parameter model requires about 140 GB for FP16 weights alone, which exceeds 80 GB A100/H100-class accelerators and leaves little or no room even on newer 141 GB H200-class GPUs once gradients, optimizer state, and activations are included. Even when a model does fit, training on a single device may take years rather than weeks.
+The optimization toolkit developed in the previous section (mixed precision, Flash Attention, gradient checkpointing, and data prefetching) can transform an infeasible training configuration into a practical one on a single machine. The GPT-2 walkthrough demonstrated reducing memory from 89 GB to 32 GB, bringing a 1.5B parameter model within reach of a single A100 (40 GB). However, some models simply will not fit, no matter how aggressively these techniques are applied. A 70B parameter model requires about 140 GB for FP16 weights alone, which exceeds the 80 GB configurations of A100 and H100 SXM accelerators and leaves little or no room even on the newer 141 GB H100/H200 variants once gradients, optimizer state, and activations are included. Even when a model does fit, training on a single device may take years rather than weeks.
 
 When single-machine optimization has been exhausted, the only remaining option is to spread computation across multiple devices. Multi-device training provides three capabilities unavailable to a single GPU: aggregate memory capacity, aggregate compute throughput, and aggregate storage bandwidth. The following discussion covers when and how to scale beyond single-device training, from multi-GPU configurations within a single machine to the threshold where distributed systems become necessary. The key parallelism strategies and their trade-offs are introduced here; the implementation details of multi-node distributed training (collective communication primitives, fault tolerance, and elastic scheduling) are beyond our current scope.
 
@@ -5867,7 +5881,7 @@ Within a single node, GPUs communicate via high-bandwidth interconnects like NVL
 
 ::: {.callout-notebook title="Data vs. model parallelism"}
 
-**The physics of splitting**: The question is how to split a model that is too big or too slow.
+**The physics of splitting**: How should a model that is too big or too slow be split across multiple devices?
 
 **Scenario**: Training a model with parameters $P$ and batch size $B$ across $N$ GPUs.
 
@@ -6134,7 +6148,7 @@ With this vocabulary of parallelism strategies (data, model, pipeline, tensor, a
 
 Only when profiling reveals persistent bottlenecks despite these optimizations should multi-device approaches be considered. Every hardware device has a **physical ceiling**---for models like Llama-3 or GPT-4, even a fully optimized H100 GPU would take decades to complete training. The transition to multi-device training becomes necessary when one of three hard limits is reached:
 
-1. **Memory exhaustion**: The model weights, gradients, optimizer states, and activations exceed the VRAM of a single GPU. A 70B parameter model requires approximately 140 GB in FP16 for weights alone, exceeding 80 GB A100/H100-class accelerators and leaving little or no headroom on newer 141 GB H200-class GPUs once training state is included.
+1. **Memory exhaustion**: The model weights, gradients, optimizer states, and activations exceed the VRAM of a single GPU. A 70B parameter model requires approximately 140 GB in FP16 for weights alone, exceeding the 80 GB configurations of A100 and H100 SXM accelerators and leaving little or no headroom on the newer 141 GB H100/H200 variants once training state is included.
 2. **Training wall-clock time**: The estimated time to convergence on a single device exceeds the project's timeline (typically > two weeks). At $10^{15}$ FLOP/s sustained on one H100-class accelerator, a model requiring $10^{24}$ FLOPs would take about 32 years at perfect utilization and longer at realistic utilization.
 3. **Dataset scale**: The time required to stream the dataset from storage to a single node creates an insurmountable IO bottleneck. Training on petabyte-scale datasets requires distributed storage systems with aggregate bandwidth exceeding any single node's capacity.
 
@@ -6288,7 +6302,7 @@ The systematic approach developed throughout this chapter (quantifying costs thr
 
 **Fallacy**: *Larger models always yield better performance.*
 
-The allure of scale is seductive: if a 7B model works well, surely a 20B model works better. In practice, scaling without proportionally increasing data causes severe overfitting\index{Overfitting!model scaling failure}. A `{python} FallaciesPitfallsSetup.fp_model_20b_params_str`B parameter model requires approximately `{python} FallaciesPitfallsSetup.fp_model_20b_total_gb_str` GB memory (`{python} FallaciesPitfallsSetup.fp_model_20b_fp16_gb_str` GB parameters in FP16 + `{python} FallaciesPitfallsSetup.fp_model_20b_optim_gb_str` GB optimizer states) yet delivers *worse* accuracy than a `{python} FallaciesPitfallsSetup.fp_model_7b_params_str`B model when trained on datasets under `{python} FallaciesPitfallsSetup.fp_data_threshold_m_str`M examples. Beyond critical thresholds, doubling model size while holding data constant typically degrades validation accuracy by `{python} FallaciesPitfallsSetup.fp_overfit_degrade_min`--`{python} FallaciesPitfallsSetup.fp_overfit_degrade_max` percent due to overfitting. Model capacity must match dataset size, as established in @sec-model-training-mathematical-foundations-d894. Teams that pursue scale without commensurate data budgets waste months of compute on models that underperform smaller variants.
+Teams treat scale as a monotonic lever: if a 7B model works well, a 20B model must work better. In practice, scaling model capacity without proportionally increasing data causes severe overfitting\index{Overfitting!model scaling failure}. A `{python} FallaciesPitfallsSetup.fp_model_20b_params_str`B parameter model requires approximately `{python} FallaciesPitfallsSetup.fp_model_20b_total_gb_str` GB memory (`{python} FallaciesPitfallsSetup.fp_model_20b_fp16_gb_str` GB parameters in FP16 + `{python} FallaciesPitfallsSetup.fp_model_20b_optim_gb_str` GB optimizer states) yet delivers *worse* accuracy than a `{python} FallaciesPitfallsSetup.fp_model_7b_params_str`B model when trained on datasets under `{python} FallaciesPitfallsSetup.fp_data_threshold_m_str`M examples. Beyond critical thresholds, doubling model size while holding data constant typically degrades validation accuracy by `{python} FallaciesPitfallsSetup.fp_overfit_degrade_min`--`{python} FallaciesPitfallsSetup.fp_overfit_degrade_max` percent due to overfitting. Model capacity must match dataset size, as established in @sec-model-training-mathematical-foundations-d894. Teams that pursue scale without commensurate data budgets waste months of compute on models that underperform smaller variants.
 
 **Pitfall**: *Assuming distributed training automatically accelerates development.*
 
