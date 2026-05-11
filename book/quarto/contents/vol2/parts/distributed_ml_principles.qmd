@@ -5,17 +5,17 @@ Coordinating the **Fleet** requires solving problems that a single machine does 
 At this scale, the engineering challenge is a trade-off between parallelization and coordination. We can partition a model to reduce per-device memory pressure, but we necessarily increase the communication volume required to keep the weights synchronized. We can scale to thousands of nodes to reduce training time, but we simultaneously decrease the mean time between failures (MTBF), making fault tolerance a mandatory system component rather than an operational luxury. These principles quantify the "communication tax" and the "reliability tax" of scale.
 
 ::: {#pri-universal-scaling .callout-principle title="The Universal Scaling Law"}
-**Invariant**: Model loss ($\mathcal{L}$) improves as a power-law function of compute ($C$), dataset size ($D$), and parameters ($P$).
+**Invariant**: For frontier foundation models, loss ($\mathcal{L}$) improves as a power-law function of compute ($C$), dataset size ($D$), and parameters ($P$). The compute-only simplification used to illustrate diminishing returns is:
 $$ \mathcal{L}(C) \propto C^{-\alpha} $$
 
-**Implication**: Scale is not an option; it is a requirement for capability. Because loss improves sublinearly with compute, each equal-sized improvement requires disproportionately more compute; in practice this diminishing return drives the transition from single-server training to warehouse-scale clusters.
+**Implication**: At the frontier of model capability, scale is the binding requirement, not an optimization choice. Because loss improves sublinearly with compute, each equal-sized improvement requires disproportionately more compute; this diminishing return drives the transition from single-server training to warehouse-scale clusters.
 :::
 
 ::: {#pri-distributed-step-time .callout-principle title="The Distributed Step Time Law (Iron Law of Scale)"}
-**Invariant**: The time to complete one training step is the sum of computation and non-overlapped communication.
+**Invariant**: The time to complete one training step is the sum of parallelizable computation and the non-overlapped portion of communication, with $0 \le T_{\text{overlap}} \le T_{\text{comm}}(N)$.
 $$ T_{\text{step}}(N) = \frac{T_{\text{compute}}}{N} + T_{\text{comm}}(N) - T_{\text{overlap}} $$
 
-**Implication**: Scaling is a race between parallelizable compute (which shrinks with $N$) and communication overhead (which grows or stays constant). To scale efficiently, algorithms must reduce or amortize $T_{\text{comm}}$ (for example, through **Gradient Accumulation** or compression) and maximize $T_{\text{overlap}}$ through **Communication Hiding** and pipelined execution.
+**Implication**: Scaling is a race between parallelizable compute (which shrinks with $N$ under ideal partitioning) and communication overhead (which grows or stays constant). To scale efficiently, algorithms must reduce or amortize $T_{\text{comm}}$ (for example, through **Gradient Accumulation**, which alters the effective batch and convergence regime, or through compression, which can introduce numerical error) and maximize $T_{\text{overlap}}$ through **Communication Hiding** and pipelined execution.
 :::
 
 ::: {#pri-alpha-beta-model .callout-principle title="The Bandwidth-Latency Trade-off (α-β Model)"}
@@ -29,20 +29,20 @@ $$ T(n) = \alpha + \frac{n}{\beta} $$
 **Invariant**: The optimal checkpoint frequency balances the cost of writing the checkpoint ($T_{\text{write}}$) against the expected cost of reworking lost progress due to failures ($\text{MTBF}$).
 $$ \tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}} $$
 
-**Implication**: Checkpointing is not "free." As cluster size grows, MTBF drops, forcing more frequent checkpoints. This demands high-bandwidth storage (Burst Buffers) to prevent I/O from dominating training time.
+**Implication**: Checkpointing is not "free." As cluster size grows, MTBF drops, forcing more frequent checkpoints. This demands high-bandwidth storage (burst buffers) to prevent I/O from dominating training time.
 :::
 
 ::: {#pri-conservation-overhead .callout-principle title="The Conservation of Overhead"}
 **Invariant**: Overhead in a distributed ML system cannot be eliminated, only redistributed among Compute, Communication, and Coordination. Reducing one necessarily increases at least one other.
 
-**Implication**: Asynchronous training eliminates coordination barriers ($T_{\text{Coordination}} \to 0$) but introduces gradient staleness that manifests as additional training iterations ($T_{\text{Compute}} \uparrow$). Pipeline parallelism reduces communication volume but adds pipeline bubble time ($T_{\text{Coordination}} \uparrow$). There is no free lunch in distributed systems; the $C^3$ taxonomy reveals where the bill is being paid.
+**Implication**: Asynchronous training eliminates coordination barriers ($T_{\text{Coordination}} \to 0$) but introduces gradient staleness that manifests as additional training iterations ($T_{\text{Compute}} \uparrow$). Pipeline parallelism reduces communication volume but adds pipeline bubble time ($T_{\text{Coordination}} \uparrow$). There is no free lunch in distributed systems; the C$^3$ taxonomy reveals where the bill is being paid.
 :::
 
 ## Part II Roadmap: The Logic of Distribution {#sec-principles-distributed-ml-part-ii-roadmap-logic-distribution-b4e2}
 
-Part II establishes how we make the Fleet compute:
+Part II establishes how distributed training work is coordinated across the fleet:
 
-1.  **Distributed Training (@sec-distributed-training-systems)**: The strategies (Data, Tensor, Pipeline, Expert Parallelism) for partitioning the workload across the fleet.
+1.  **Distributed Training (@sec-distributed-training-systems)**: The strategies (data, tensor, pipeline, and expert parallelism) for partitioning the workload across the fleet.
 2.  **Collective Communication (@sec-collective-communication)**: The collective operations (AllReduce, AllGather, AllToAll) that bind the fleet together.
 3.  **Fault Tolerance (@sec-fault-tolerance-reliability)**: The mechanisms for surviving the inevitable failures of scale.
 4.  **Fleet Orchestration (@sec-fleet-orchestration)**: The schedulers and resource managers (Slurm, Kubernetes) that allocate the fleet to workloads.

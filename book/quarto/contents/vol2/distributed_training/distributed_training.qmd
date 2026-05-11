@@ -25,7 +25,7 @@ engine: jupyter
 
 _Why does the linear logic of "more hardware = faster training" collapse at the bisection bandwidth wall?_
 
-Distributed training appears simple: split the work across machines and combine the results. But as the Machine Learning Fleet grows, a new physics emerges [@hazelwood2018]. Communication costs scale with the number of machines while computation per machine shrinks, until synchronization overhead dominates and adding hardware actively degrades performance. *When* you train on a single GPU, you optimize for arithmetic intensity; *when* you train on 10,000 GPUs, you optimize for communication intensity. The scaling ceiling is not a bug to be fixed but a fundamental property of the reliability gap and communication-computation ratio\index{Communication-Computation Ratio}: coordinating independent machines requires moving terabytes of state across networks that are orders of magnitude slower than on-chip memory. The art of distributed training is managing this tension—partitioning work to minimize the **coordination tax**\index{Coordination Tax}, overlapping communication with computation to hide latency, and choosing synchronization strategies that balance consistency against throughput. Without this understanding, organizations waste millions on hardware that sits idle waiting for gradients to arrive, or produce models that never converge because stale updates corrupted the optimization.
+Distributed training appears simple: split the work across machines and combine the results. As the Machine Learning Fleet grows, however, a new physics emerges [@hazelwood2018]. Communication costs scale with the number of machines while computation per machine shrinks, until synchronization overhead dominates and adding hardware actively degrades performance. *When* a job trains on a single GPU, the design optimizes for arithmetic intensity; *when* it trains on 10,000 GPUs, the design optimizes for communication intensity. The scaling ceiling is not a bug to be fixed but a fundamental property of the reliability gap and communication-computation ratio\index{Communication-Computation Ratio}: coordinating independent machines requires moving terabytes of state across networks that are orders of magnitude slower than on-chip memory. The art of distributed training is managing this tension—partitioning work to minimize the **coordination tax**\index{Coordination Tax}, overlapping communication with computation to hide latency, and choosing synchronization strategies that balance consistency against throughput. Without this understanding, organizations waste millions on hardware that sits idle waiting for gradients to arrive, or produce models that never converge because stale updates corrupted the optimization.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -188,7 +188,7 @@ The bandwidth requirements impose a hard constraint on hardware placement, a pri
 
 ::: {.callout-perspective title="The Jeff Dean test"}
 
-If you attempt tensor parallelism across server racks connected by standard Ethernet, your training will stall. The communication volume (proportional to Batch $\times$ Layers) requires the `{python} DistTrainConstants.nvlink_a100_str`-`{python} DistTrainConstants.nvlink_h100_str` GB/s bandwidth of NVLink. For cross-rack scaling, you *must* switch to **Pipeline** or **Data**\index{Data} parallelism to respect the physics of the network.
+Tensor parallelism across server racks connected by standard Ethernet will stall. The communication volume (proportional to Batch $\times$ Layers) requires the `{python} DistTrainConstants.nvlink_a100_str`--`{python} DistTrainConstants.nvlink_h100_str` GB/s bandwidth of NVLink. For cross-rack scaling, the design *must* switch to **Pipeline** or **Data**\index{Data} parallelism to respect the physics of the network.
 
 :::
 
@@ -960,7 +960,7 @@ A better approach uses 8 GPUs with gradient accumulation to avoid the inter-node
 
 ::: {.callout-notebook title="Gradient accumulation speedup"}
 
-**Problem**: You are training GPT-2 on a commodity 10G network. A 32-GPU configuration was communication-bound, costing \$3,021 for a fixed number of samples. Can you achieve the same effective batch size on a single 8-GPU node using gradient accumulation more efficiently?
+**Problem**: A GPT-2 run on a commodity 10G network is communication-bound at 32 GPUs, costing \$3,021 for a fixed number of samples. Can a single 8-GPU node achieve the same effective batch size more efficiently using gradient accumulation?
 
 **Math**:
 
@@ -1304,9 +1304,9 @@ $$
 
 Layer-wise scaling prevents layers with small weights from receiving disproportionately large updates. LAMB enabled BERT training with batch sizes up to 64K while maintaining convergence quality.
 
-### Critical batch size: When does parallelism hurt? {#sec-distributed-training-systems-systems-critical-batch-size-parallelism-hurt-4961}
+### Critical batch size and diminishing returns {#sec-distributed-training-systems-systems-critical-batch-size-parallelism-hurt-4961}
 
-A fundamental question in distributed training is: when does adding more workers stop helping? The critical batch size $B^{*}$ marks the transition point beyond which increasing batch size yields diminishing returns in convergence per sample seen.
+A fundamental property of distributed training is that adding more workers stops helping past a threshold. The critical batch size $B^{*}$ marks the transition point beyond which increasing batch size yields diminishing returns in convergence per sample seen.
 
 ::: {.callout-definition title="Critical batch size"}
 
@@ -1760,7 +1760,7 @@ class PipelineBubble:
 
 ::: {.callout-notebook title="The cost of the pipeline bubble"}
 
-**Problem**: You are training a frontier model using pipeline parallelism across `{python} PipelineBubble.pb_stages_str` nodes. To hide the sequential delay, you split your batch into `{python} PipelineBubble.pb_microbatches_str` microbatches. What is your "bubble tax"—the fraction of GPU cycles lost to idle waiting?
+**Problem**: A frontier-model training run uses pipeline parallelism across `{python} PipelineBubble.pb_stages_str` nodes. To hide the sequential delay, the batch is split into `{python} PipelineBubble.pb_microbatches_str` microbatches. What is the "bubble tax"—the fraction of GPU cycles lost to idle waiting?
 
 **Math**:
 In a synchronous pipeline (1F1B), the bubble fraction is determined by the ratio of stages to microbatches.

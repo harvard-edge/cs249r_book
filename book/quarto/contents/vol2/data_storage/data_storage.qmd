@@ -199,7 +199,7 @@ class ShardContention:
 
 ::: {.callout-notebook title="The thundering herd: Shard contention"}
 
-**Problem**: You have a dataset split into `{python} ShardContention.sc_n_shards_str` shards on a shared file system. If `{python} ShardContention.sc_n_workers_str` GPUs each pick a shard at random to start their next epoch, what is the probability that at least two GPUs "collide" on the same storage server, causing a performance bottleneck?
+**Problem**: A dataset is split into `{python} ShardContention.sc_n_shards_str` shards on a shared file system. If `{python} ShardContention.sc_n_workers_str` GPUs each pick a shard at random to start their next epoch, what is the probability that at least two GPUs "collide" on the same storage server, causing a performance bottleneck?
 
 **Math**:
 This is a variant of the "Birthday Problem" in probability.
@@ -648,7 +648,7 @@ At the NVMe tier, compression represents a critical trade-off between I/O bandwi
 2.  **HDD Reality**\index{HDD Reality}: A 7200 RPM hard disk drive (HDD) delivers 100 random IOPS. Sustaining 1,000 images/s requires **`{python} NVMeTierCalcs.hdd_slowdown_factor`$\times$ more IOPS** than the disk provides.
 3.  **Result**: Shuffling individual files on an HDD will starve the GPU, reducing utilization to <5 percent.
 
-**Systems conclusion**: You must either use NVMe (sub-10 μs random access) or convert the dataset to a sequential format (TFRecord/WebDataset) to achieve sequential throughput.
+**Systems conclusion**: The pipeline must either use NVMe (sub-10 μs random access) or convert the dataset to a sequential format (TFRecord/WebDataset) to achieve sequential throughput.
 
 :::
 
@@ -696,7 +696,7 @@ class LocalCacheRoi:
 
 ::: {.callout-notebook title="ROI of local NVMe caching"}
 
-**Problem**: You are training a vision model where each step takes `{python} LocalCacheRoi.lc_compute_ms_str` ms. Fetching data from a shared Parallel File System adds `{python} LocalCacheRoi.lc_remote_io_ms_str` ms of I/O wait because of network congestion. How much does adding local NVMe SSDs to each node improve GPU utilization?
+**Problem**: A vision-model training pipeline runs each step in `{python} LocalCacheRoi.lc_compute_ms_str` ms. Fetching data from a shared Parallel File System adds `{python} LocalCacheRoi.lc_remote_io_ms_str` ms of I/O wait because of network congestion. How much does adding local NVMe SSDs to each node improve GPU utilization?
 
 **Math**:
 GPU utilization $(\eta_{\text{hw}})$ is the fraction of step time spent in computation.
@@ -1030,7 +1030,7 @@ where $T_{\text{step}} = \max(T_{\text{compute}}, T_{\text{I/O}})$ when I/O and 
 
 ::: {.callout-notebook title="The data stall ratio"}
 
-\index{Data!stall ratio, gpu utilization}**Scenario**: Your GPU processes a batch in `{python} PipelineCalcs.t_comp_stall_str` ms, but storage takes `{python} PipelineCalcs.t_io_stall_str` ms to deliver the next batch.
+\index{Data!stall ratio, gpu utilization}**Scenario**: A GPU processes a batch in `{python} PipelineCalcs.t_comp_stall_str` ms, but storage takes `{python} PipelineCalcs.t_io_stall_str` ms to deliver the next batch.
 
 **Without pipelining** (sequential I/O then compute):
 
@@ -1593,7 +1593,7 @@ The **tiered staging** strategy minimizes $T_{\text{write}}$ by writing in two p
 
 In the second phase, a background process asynchronously copies the local checkpoint to the parallel file system for durability. This copy can overlap with the next training iteration, so it does not block the pipeline. The risk is that if the node fails before the async copy completes, the local checkpoint is lost. The mitigation is to replicate checkpoints to at least two peer nodes' NVMe drives before declaring the save complete, providing durability even if one node fails.
 
-The total storage consumed by checkpoints over the life of a training run is substantial. A 175B parameter model checkpointed every 10 minutes over a 30-day training run generates roughly 4,320 checkpoints, each `{python} StorageHierarchyAnalysis.ckpt_total_gb_str` GB, for a total of approximately `{python} StorageHierarchyAnalysis.ckpt_fleet_total_pb` PB of checkpoint data. Retaining all of them is neither necessary nor economical. A common retention policy keeps the three most recent checkpoints on the parallel file system for fast recovery, copies every 100th checkpoint to object storage for long-term auditability, and deletes the rest. This policy reduces the parallel file system checkpoint footprint from `{python} StorageHierarchyAnalysis.ckpt_fleet_total_pb` PB to roughly 5.25 TB (three live full checkpoints) while preserving 43 historical snapshots in object storage for post-training analysis.
+The total storage consumed by checkpoints over the life of a training run is substantial. A 175B parameter model checkpointed every 10 minutes over a 30-day training run generates roughly 4,320 checkpoints, each `{python} StorageHierarchyAnalysis.ckpt_total_gb_str` GB, for a total of approximately `{python} StorageHierarchyAnalysis.ckpt_fleet_total_pb` PB of checkpoint data. Retaining all of them is neither necessary nor economical. A common retention policy keeps the three most recent checkpoints on the parallel file system for fast recovery, copies every 100th checkpoint to object storage for long-term auditability, and deletes the rest. This policy reduces the parallel file system checkpoint footprint from `{python} StorageHierarchyAnalysis.ckpt_fleet_total_pb` PB to roughly 5.25 TB (three live full checkpoints) while preserving 43 historical snapshots in object storage for posttraining analysis.
 
 Incremental checkpointing offers a further optimization for reducing $T_{\text{write}}$. Rather than saving the entire model state every checkpoint, an incremental checkpoint saves only the parameters that changed since the last full checkpoint. For models where a large fraction of parameters are frozen (such as fine-tuning scenarios where only the last few layers are updated), incremental checkpoints can be orders of magnitude smaller than full checkpoints. The trade-off is recovery complexity: restoring from an incremental checkpoint requires applying a chain of incremental updates to a base checkpoint, which extends recovery time. Most production systems use a hybrid approach, saving incremental checkpoints frequently and full checkpoints periodically (every 10th to 100th increment).
 

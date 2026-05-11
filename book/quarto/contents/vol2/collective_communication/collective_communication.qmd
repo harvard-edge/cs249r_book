@@ -37,7 +37,7 @@ Computation scales by adding processors; communication scales by moving data bet
 
 - Apply the $\alpha$-$\beta$ model to derive bandwidth and latency bounds and identify when communication dominates at different cluster scales
 - Compare AllReduce algorithms (ring, tree, hierarchical) by their time complexity and identify the crossover points where each becomes optimal
-- Select appropriate collective primitives (AllReduce, AlltoAll, AllGather, ReduceScatter) for different model architectures by matching communication patterns to workload requirements
+- Select appropriate collective primitives (AllReduce, AllToAll, AllGather, ReduceScatter) for different model architectures by matching communication patterns to workload requirements
 - Evaluate gradient compression techniques by analyzing bandwidth reduction vs. convergence impact trade-offs for quantization, sparsification, and error feedback mechanisms
 - Design topology-aware communication strategies by mapping collective operations to network architectures (fat-tree, rail-optimized, torus) to maximize bisection bandwidth utilization
 - Implement communication-computation overlap using pipelining and asynchronous operations to hide network latency behind gradient computation
@@ -291,7 +291,7 @@ Understanding this mapping is essential: the *what* of parallelism directly dete
 | **FSDP/ZeRO**                                        | Find shards, reconstruct the whole    | AllGather + ReduceScatter  | Bandwidth (High frequency)        |
 | **Tensor Parallelism**\index{Tensor Parallelism}     | Quick handshake within the node       | AllReduce                  | Latency (Speed is life)           |
 | **Pipeline Parallelism**\index{Pipeline Parallelism} | Handoff to the next neighbor          | Point-to-Point (Send/Recv) | Latency (Sequential dependencies) |
-| **Expert Parallelism (MoE)**                         | Targeted routing to a specialist      | AlltoAll                   | Latency + Contention              |
+| **Expert Parallelism (MoE)**                         | Targeted routing to a specialist      | AllToAll                   | Latency + Contention              |
 
 : **The Travel Manifest**: How the high-level math of @sec-distributed-training-systems manifests as low-level traffic patterns. {#tbl-parallelism-communication-mapping}
 
@@ -678,9 +678,9 @@ The contrast between AllToAll and AllReduce highlights a fundamental difference 
 
 While AllReduce scales efficiently because it can be pipelined in a ring (where each node only talks to its neighbor), AllToAll is fundamentally harder to scale.
 
-In an AlltoAll, every process has a unique piece of data for every other process. This creates $O(N^2)$ logical connections. At the hardware level, this leads to **network contention**\index{Network Contention}: if 1024 GPUs all try to send data to different targets simultaneously, the "Fat-Tree" or "Spine" switches in the datacenter become the bottleneck.
+In an AllToAll, every process has a unique piece of data for every other process. This creates $O(N^2)$ logical connections. At the hardware level, this leads to **network contention**\index{Network Contention}: if 1024 GPUs all try to send data to different targets simultaneously, the "Fat-Tree" or "Spine" switches in the datacenter become the bottleneck.
 
-This is why **Expert Parallelism (MoE)** and large-scale **Recommendation Systems**\index{Recommendation Systems} often hit a "communication wall" much earlier than standard data-parallel models. The algorithm choice (AllReduce vs. AlltoAll) determines the scaling ceiling.
+This is why **Expert Parallelism (MoE)** and large-scale **Recommendation Systems**\index{Recommendation Systems} often hit a "communication wall" much earlier than standard data-parallel models. The algorithm choice (AllReduce vs. AllToAll) determines the scaling ceiling.
 
 :::
 
@@ -770,8 +770,8 @@ In practice, MoE routing is rarely perfectly uniform. Popular experts receive mo
 | **Tensor Parallelism**   | AllReduce, AllGather       | Latency-bound (requires NVLink)       |
 | **Pipeline Parallelism** | Point-to-Point (Send/Recv) | Latency-bound (microbatch handoffs)   |
 | **Sequence Parallelism** | AllGather, ReduceScatter   | Bandwidth-bound (activation exchange) |
-| **MoE (Experts)**        | AlltoAll                   | Latency-bound (dynamic token routing) |
-| **DLRM (RecSys)**        | AlltoAll                   | Latency & Bandwidth (sparse lookups)  |
+| **MoE (Experts)**        | AllToAll                   | Latency-bound (dynamic token routing) |
+| **DLRM (RecSys)**        | AllToAll                   | Latency & Bandwidth (sparse lookups)  |
 
 : **Collective Operation Selection Guide**\index{Collective Operation Selection Guide}: Matching training strategies to their primary collective operations enables efficient distributed communication design. MoE and DLRM serve as canonical "lighthouse" workloads throughout this book, representing sparse expert architectures and recommendation systems respectively. Pipeline Parallelism uniquely relies on point-to-point rather than collective communication. {#tbl-collective-selection}
 
@@ -1239,7 +1239,7 @@ class CommInfraScenario:
     ib_ndr_bw_gbs = f"{ib_gbs:.0f}"
 ```
 
-A GPU node is a high-speed sanctuary (NVLink at `{python} CommInfraScenario.nvlink_h100_bw_gbs` GB/s), while the space between nodes is a slow, expensive bridge (InfiniBand at `{python} CommInfraScenario.ib_ndr_bw_gbs` GB/s).
+A GPU node delivers an order of magnitude more intra-node bandwidth (NVLink at `{python} CommInfraScenario.nvlink_h100_bw_gbs` GB/s) than inter-node bandwidth (InfiniBand at `{python} CommInfraScenario.ib_ndr_bw_gbs` GB/s).
 
 ### Hierarchical AllReduce {#sec-communication-collective-operations-collective-operations-hierarchical-allreduce-1338}
 
@@ -1638,13 +1638,13 @@ The problem is not merely practical; it is a fundamental mathematical obstacle. 
 
 ### Error feedback: The memory of the journey {#sec-communication-collective-operations-error-feedback}
 
-We solve the conflict between compression and convergence with **Error Feedback**. Like a traveler who can only carry 10kg but has 100kg of gear, we leave the excess behind but *remember* it. We maintain a local error accumulator $e_t$ that stores the compression residual.
+We solve the conflict between compression and convergence with **Error Feedback**. The system applies the compressor immediately to recover bandwidth, then stores the discarded residual in a local accumulator and re-injects it into the next gradient. The error is deferred, not destroyed. We maintain a local error accumulator $e_t$ that stores the compression residual.
 
 ::: {.callout-definition title="Error feedback mechanism"}
 
 ***Error Feedback***\index{Error Feedback!definition} is a convergence-preserving technique for gradient compression that maintains a per-worker residual accumulator $e_t$, re-injecting the compression error back into the next gradient update so that information deferred by the compressor is never permanently discarded.
 
-1.  **Significance (quantitative)**: Top-k sparsification at 1 percent keeps only the largest 1 percent of gradient values by magnitude, reducing AllReduce data volume from 140 GB to 1.4 GB for a 70B model—an 100$\times$ bandwidth reduction. Without error feedback, the discarded 99 percent of gradient values are lost, causing training loss to plateau 2–5 percent above the dense baseline. With error feedback, the residual accumulates until small components cross the Top-k threshold in subsequent steps, recovering convergence at the same asymptotic rate as uncompressed SGD.
+1.  **Significance (quantitative)**: Top-k sparsification at 1 percent keeps only the largest 1 percent of gradient values by magnitude, reducing AllReduce data volume from 140 GB to 1.4 GB for a 70B model—a 100$\times$ bandwidth reduction. Without error feedback, the discarded 99 percent of gradient values are lost, causing training loss to plateau 2–5 percent above the dense baseline. With error feedback, the residual accumulates until small components cross the Top-k threshold in subsequent steps, recovering convergence at the same asymptotic rate as uncompressed SGD.
 2.  **Distinction (durable)**: Unlike lossy compression (which permanently discards sub-threshold gradient components), error feedback is a delayed transmission strategy: the residual $e_t$ telescopes across steps so that $\frac{1}{T}\sum_{t=1}^{T} v_t \to \frac{1}{T}\sum_{t=1}^{T} g_t$ as $T \to \infty$, making the long-run average of transmitted gradients equal to the true gradient average.
 3.  **Common pitfall**: A frequent misconception is that error feedback is built into standard gradient compressors. PyTorch's built-in DDP gradient compression does not implement error feedback by default; without it, Top-k and 1-bit quantization introduce systematic bias that accumulates across steps, typically degrading final model accuracy by 1–3 percent on benchmark tasks compared to the feedback-corrected version.
 
@@ -1880,7 +1880,7 @@ A 20-millisecond network delay can effectively disappear—not by upgrading the 
 
 Gradient computation during the backward pass proceeds layer by layer, from the output layer back to the input layer. The gradient for layer $L$ is available as soon as that layer's backward pass completes, even while layers $L-1, L-2, \ldots$ are still computing. This creates an opportunity: begin communicating the gradient for layer $L$ immediately, while the GPU computes the gradient for layer $L-1$.
 
-In PyTorch's `DistributedDataParallel\index{DistributedDataParallel}` (DDP), this overlap is implemented through **gradient hooks**\index{Gradient Hook}. Each parameter registers a hook that fires when its gradient is ready. The hook triggers an asynchronous AllReduce for that parameter's gradient bucket. Meanwhile, the backward pass continues computing gradients for earlier layers. If the backward computation for the remaining layers takes longer than the AllReduce (the common case for large models), the communication is completely hidden.
+In PyTorch's `DistributedDataParallel`\index{DistributedDataParallel} (DDP), this overlap is implemented through **gradient hooks**\index{Gradient Hook}. Each parameter registers a hook that fires when its gradient is ready. The hook triggers an asynchronous AllReduce for that parameter's gradient bucket. Meanwhile, the backward pass continues computing gradients for earlier layers. If the backward computation for the remaining layers takes longer than the AllReduce (the common case for large models), the communication is completely hidden.
 
 The effectiveness of this overlap depends on the relative sizes of computation and communication at each layer. For transformer models, the largest gradient tensors belong to the attention and feed-forward weight matrices, which are also the most computationally expensive layers. This favorable correlation means that the layers with the most data to communicate are also the layers with the most computation behind which to hide that communication.
 
@@ -2034,7 +2034,7 @@ For small messages (pipeline parallelism activations, MoE tokens), latency ($\al
 
 **Pitfall**: *Assuming AllReduce works for everything.*
 
-AllReduce creates a global barrier and assumes all participants contribute identical data shapes. In **Expert Parallelism (MoE)** and **Recommendation Systems**, where each worker needs to send distinct data to every other worker, AllReduce is fundamentally wrong. These workloads require AlltoAll, which has $O(N^2)$ logical connections and hits network contention limits at much smaller cluster sizes.
+AllReduce creates a global barrier and assumes all participants contribute identical data shapes. In **Expert Parallelism (MoE)** and **Recommendation Systems**, where each worker needs to send distinct data to every other worker, AllReduce is fundamentally wrong. These workloads require AllToAll, which has $O(N^2)$ logical connections and hits network contention limits at much smaller cluster sizes.
 
 **Fallacy**: *Ring AllReduce is always optimal.*
 
@@ -2127,7 +2127,7 @@ class CompressionPayback:
 * **The $\alpha$-$\beta$ model reveals the bottleneck**: The critical message size $n^* = \alpha \cdot \beta$ determines whether to optimize software latency (small messages) or hardware bandwidth (large payloads). In practice, NCCL's effective $\alpha$ is 5--10$\times$ higher than wire-level latency.
 * **Algorithm choice is scale-dependent**: Ring AllReduce is bandwidth-optimal but pays $O(N)$ latency; Tree AllReduce is latency-optimal ($O(\log N)$) but bandwidth-inefficient. Use the crossover formula $M_{\text{crossover}} \approx N \alpha \beta$ to choose.
 * **Hierarchical algorithms multiply bandwidth**: By performing local reductions over fast NVLink before crossing the slow InfiniBand bridge, hierarchical collectives effectively multiply inter-node bandwidth by the number of GPUs per node.
-* **AlltoAll is the contention king**: Unlike AllReduce, AlltoAll creates $O(N^2)$ logical connections. This makes Expert Parallelism (MoE) and Recommendation Systems fundamentally harder to scale than dense LLMs.
+* **AllToAll is the contention king**: Unlike AllReduce, AllToAll creates $O(N^2)$ logical connections. This makes Expert Parallelism (MoE) and Recommendation Systems fundamentally harder to scale than dense LLMs.
 * **Error feedback makes lossy compression safe**: Sparsification can discard 99 percent of gradients, provided the "error" is accumulated locally and added to the next step. This turns biased estimators into unbiased ones over time.
 * **Overlap is the final multiplier**: Communication-computation pipelining through gradient hooks and bucket fusion can hide 90--95 percent of communication time behind backward pass computation for deep models.
 * **Topology discovery is not optional**: Modern libraries like NCCL dynamically map logical rings to physical wires to avoid "hot spots" and maximize bisection bandwidth. Misaligned rank-to-GPU mapping can degrade performance by 2--4$\times$.
