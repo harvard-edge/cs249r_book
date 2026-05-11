@@ -1744,6 +1744,57 @@ Microsoft reported that 1-bit Adam achieves 3.5$\times$ communication volume red
 
 The success of 1-bit Adam illustrates a broader principle: compression is most effective when it is co-designed with the optimization algorithm. Compressing raw gradients discards information indiscriminately. Compressing optimizer states exploits the structure of the optimization trajectory, achieving higher compression ratios with less convergence impact.
 
+```{python}
+#| label: compression-payback-notebook
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COMPRESSION PAYBACK (NOTEBOOK)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The Payback of Compression" .callout-notebook
+# │
+# │ Goal: Quantify the speedup of gradient compression (quantization).
+# │ Show: speedup as computed from T_compute, T_comm, and compression ratio
+# │       (current model produces ~5.7-fold; inline value drives prose).
+# │ How: T = T_compute + T_comm/Ratio.
+# │
+# │ Imports: mlsysim.book (check)
+# │ Exports: cp_comm_time_ms_str, cp_ratio_str, cp_overhead_ms_str, cp_speedup_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check
+
+class CompressionPayback:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    t_comm_ms = 40 # Original FP32 AllReduce time
+    ratio = 8      # 1-bit quantization (32\times compression, but with protocol overhead)
+    t_overhead_ms = 2 # Compute time to quantize/dequantize
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    t_compressed_comm = t_comm_ms/ratio
+    t_total_new = t_compressed_comm + t_overhead_ms
+    speedup = t_comm_ms/t_total_new
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(5 < speedup < 6, f"Speedup {speedup:.1f}x unexpected")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    cp_comm_time_ms_str = f"{t_comm_ms}"
+    cp_ratio_str = f"{ratio}"
+    cp_overhead_ms_str = f"{t_overhead_ms}"
+    cp_speedup_str = f"{speedup:.1f}"
+
+```
+
+::: {.callout-notebook title="The payback of compression"}
+
+**Problem**: A training job synchronizes a `{python} CompressionPayback.cp_comm_time_ms_str` ms gradient buffer. The system implements **1-bit Adam**, which reduces communication volume by 32$\times$ but adds `{python} CompressionPayback.cp_overhead_ms_str` ms of CPU/GPU overhead for the compression logic. If the effective network throughput improves by `{python} CompressionPayback.cp_ratio_str`$\times$, what is the actual communication speedup?
+
+**Math**:
+
+1. **Compressed communication time**: `{python} CompressionPayback.cp_comm_time_ms_str` ms divided by `{python} CompressionPayback.cp_ratio_str` = **5 ms**.
+2. **Total new time**: 5 ms (comm) + `{python} CompressionPayback.cp_overhead_ms_str` ms (overhead) = **7 ms**.
+3. **Effective speedup**: `{python} CompressionPayback.cp_comm_time_ms_str` divided by 7 $\approx$ **`{python} CompressionPayback.cp_speedup_str`$\times$**.
+
+**Systems insight**: Compression is a trade of **Compute for Bandwidth**. It pays off only when $T_{\text{overhead}} < T_{\text{comm}} \times (1 - 1/\text{Ratio})$. In this case, spending 2 ms to save 35 ms of network time is an exceptional trade. However, on a high-speed NVLink network where $T_{\text{comm}}$ is only 1 ms, this same compression logic would *slow down* training. Always profile the network before adding compression.
+
+:::
+
 ::: {.callout-checkpoint title="Gradient compression decisions"}
 
 Verify your understanding of when and how to apply gradient compression:
@@ -2068,60 +2119,7 @@ The **Collective Primitives** (AllReduce, AllGather/ReduceScatter, AllToAll) map
 
 The **Ring** and **Tree AllReduce**\index{Tree AllReduce} algorithms occupy opposite ends of the latency-bandwidth trade-off, with the crossover formula $M_{\text{crossover}} \approx N \cdot \alpha \cdot \beta$ determining which is optimal for a given configuration. **Hierarchical AllReduce** and **Rail-Optimized Routing** exploit the bandwidth hierarchy of modern GPU clusters to multiply effective inter-node bandwidth, while **in-network reduction (SHARP)** eliminates round-trips entirely by performing aggregation inside network switches.
 
-When even the fastest wires are not enough, gradient compression provides the final squeeze. Quantization, sparsification, and compression-aware optimizers like **1-bit Adam** reduce communication volume by 4--1000$\times$.
-
-```{python}
-#| label: compression-payback-notebook
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ COMPRESSION PAYBACK (NOTEBOOK)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "The Payback of Compression" .callout-notebook
-# │
-# │ Goal: Quantify the speedup of gradient compression (quantization).
-# │ Show: speedup as computed from T_compute, T_comm, and compression ratio
-# │       (current model produces ~5.7-fold; inline value drives prose).
-# │ How: T = T_compute + T_comm/Ratio.
-# │
-# │ Imports: mlsysim.book (check)
-# │ Exports: cp_comm_time_ms_str, cp_ratio_str, cp_overhead_ms_str, cp_speedup_str
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check
-
-class CompressionPayback:
-    # ┌── 1. LOAD ──────────────────────────────────────────
-    t_comm_ms = 40 # Original FP32 AllReduce time
-    ratio = 8      # 1-bit quantization (32\times compression, but with protocol overhead)
-    t_overhead_ms = 2 # Compute time to quantize/dequantize
-    # ┌── 2. EXECUTE ───────────────────────────────────────
-    t_compressed_comm = t_comm_ms/ratio
-    t_total_new = t_compressed_comm + t_overhead_ms
-    speedup = t_comm_ms/t_total_new
-    # ┌── 3. GUARD ─────────────────────────────────────────
-    check(5 < speedup < 6, f"Speedup {speedup:.1f}x unexpected")
-    # ┌── 4. OUTPUT ────────────────────────────────────────
-    cp_comm_time_ms_str = f"{t_comm_ms}"
-    cp_ratio_str = f"{ratio}"
-    cp_overhead_ms_str = f"{t_overhead_ms}"
-    cp_speedup_str = f"{speedup:.1f}"
-
-```
-
-::: {.callout-notebook title="The payback of compression"}
-
-**Problem**: A training job synchronizes a `{python} CompressionPayback.cp_comm_time_ms_str` ms gradient buffer. The system implements **1-bit Adam**, which reduces communication volume by 32$\times$ but adds `{python} CompressionPayback.cp_overhead_ms_str` ms of CPU/GPU overhead for the compression logic. If the effective network throughput improves by `{python} CompressionPayback.cp_ratio_str`$\times$, what is the actual communication speedup?
-
-**Math**:
-
-1. **Compressed communication time**: `{python} CompressionPayback.cp_comm_time_ms_str` ms divided by `{python} CompressionPayback.cp_ratio_str` = **5 ms**.
-2. **Total new time**: 5 ms (comm) + `{python} CompressionPayback.cp_overhead_ms_str` ms (overhead) = **7 ms**.
-3. **Effective speedup**: `{python} CompressionPayback.cp_comm_time_ms_str` divided by 7 $\approx$ **`{python} CompressionPayback.cp_speedup_str`$\times$**.
-
-**Systems insight**: Compression is a trade of **Compute for Bandwidth**. It pays off only when $T_{\text{overhead}} < T_{\text{comm}} \times (1 - 1/\text{Ratio})$. In this case, spending 2 ms to save 35 ms of network time is an exceptional trade. However, on a high-speed NVLink network where $T_{\text{comm}}$ is only 1 ms, this same compression logic would *slow down* training. Always profile the network before adding compression.
-
-:::
-
-**Error Feedback** ensures that while the journey may be compressed or delayed, no vital information is permanently lost, preserving the mathematical truth of the model's convergence. Finally, communication-computation overlap through layer-by-layer pipelining and bucket fusion\index{Bucket Fusion} hides the remaining communication time behind useful computation, reducing the effective communication overhead to 5--15 percent of total step time in well-configured systems.
+When even the fastest wires are not enough, gradient compression provides the final squeeze. Quantization, sparsification, and compression-aware optimizers like **1-bit Adam** reduce communication volume by 4--1000$\times$. **Error Feedback** ensures that while the journey may be compressed or delayed, no vital information is permanently lost, preserving the mathematical truth of the model's convergence. Finally, communication-computation overlap through layer-by-layer pipelining and bucket fusion\index{Bucket Fusion} hides the remaining communication time behind useful computation, reducing the effective communication overhead to 5--15 percent of total step time in well-configured systems.
 
 ::: {.callout-takeaways title="Every byte has a travel cost"}
 
