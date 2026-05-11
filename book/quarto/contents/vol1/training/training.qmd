@@ -1141,10 +1141,11 @@ beta_1, beta_2, epsilon = 0.9, 0.999, 1e-8
 learning_rate = 0.001
 
 # Per-parameter optimizer state (zero-initialized on the first step,
-# persisted by the framework on subsequent steps):
-#   momentum_buffer   = torch.zeros_like(param.data)
-#   variance_buffer   = torch.zeros_like(param.data)
-#   step_count        = 0
+# persisted by the framework on subsequent steps; shown here as
+# in-scope variables for readability):
+momentum_buffer = 0.0  # In practice: torch.zeros_like(param.data)
+variance_buffer = 0.0  # In practice: torch.zeros_like(param.data)
+step_count = 0
 
 # For each parameter tensor in the model:
 for param in model.parameters():
@@ -1922,7 +1923,7 @@ The data pipeline manages the ingestion, preprocessing, and batching of data for
 
 #### Training loop {#sec-model-training-training-loop-7fc8}
 
-\index{Training Loop!forward and backward passes}\index{Training Loop!parameter update cycle}The training loop is the computational core of the pipeline, where the model learns from the prepared data. Follow the data path in @fig-training-loop to see how this process unfolds through three sequential steps on a single accelerator: the forward pass generates predictions from input data, gradient computation propagates error signals backward through the network, and parameter updates apply the optimizer to minimize the loss function.
+\index{Training Loop!forward and backward passes}\index{Training Loop!parameter update cycle}The training loop is the computational core of the pipeline, where the model learns from the prepared data. The data path in @fig-training-loop traces how this process unfolds through three sequential steps on a single accelerator: the forward pass generates predictions from input data, gradient computation propagates error signals backward through the network, and parameter updates apply the optimizer to minimize the loss function.
 
 ::: {#fig-training-loop fig-env="figure" fig-pos="htb" fig-cap="**Training Loop**: A single iteration flows through three steps—(1) forward pass from batch to predictions, (2) loss and gradients via backpropagation, and (3) optimizer update—with the dashed arrow returning to the next iteration." fig-alt="Flow diagram with three labeled steps. Step 1 Predict: Training Batch to Forward Pass (Model) to Predicted Labels. Step 2 Gradients: Predicted Labels and Ground Truth feed Loss Function (Error Calculation), which flows to Backward Pass (Chain Rule) to Parameter Gradients. Step 3 Update: Parameter Gradients to Optimizer (Adam/SGD) to Update Parameters. A dashed arrow loops from Update Parameters back to Training Batch, labeled Next Iteration."}
 
@@ -2085,7 +2086,7 @@ class PreprocessingScenarios:
 
 ### Data pipeline {#sec-model-training-data-pipeline-8e71}
 
-The architectural overview identified the data pipeline as the first component in the training system. Its efficiency directly determines whether expensive accelerator resources remain fully utilized or sit idle waiting for data. While this section focuses on the systems aspects of data movement and preprocessing, the upstream data engineering practices are covered in @sec-data-engineering.
+The architectural overview identified the data pipeline as the first component in the training system. Its efficiency directly determines whether expensive accelerator resources remain fully utilized or sit idle waiting for data. The systems aspects of data movement and preprocessing are the focus here; the upstream data engineering practices are covered in @sec-data-engineering.
 
 The data pipeline running on the CPU bridges raw data storage and accelerator computation. @fig-data-pipeline breaks down this architecture into three distinct zones:
 
@@ -4667,7 +4668,7 @@ When gradient accumulation is combined with distributed data parallelism across 
 \index{Activation Checkpointing!memory-compute trade-off}\index{Activation Checkpointing!optimal placement}
 Activation checkpointing reduces memory usage during the backward pass by discarding and selectively recomputing activations. In standard training, activations from the forward pass are stored in memory for use in gradient computations during backpropagation. However, these activations can consume gigabytes of memory, particularly in deep networks.
 
-With checkpointing, only a subset of the activations is retained during the forward pass. Examine the two-pass structure in @fig-activation-checkpointing to understand this memory-compute trade-off: during the forward pass (top row), only checkpoint nodes (green, solid) are retained while intermediate nodes (white, dashed) are discarded. During the backward pass (bottom row), these discarded activations are recomputed on demand (orange nodes) from the nearest checkpoint, trading approximately thirty-three percent additional compute for memory savings that can exceed 70 percent in deep networks.\index{Activation Checkpointing!selective checkpointing}
+With checkpointing, only a subset of the activations is retained during the forward pass. The two-pass structure in @fig-activation-checkpointing illustrates this memory-compute trade-off: during the forward pass (top row), only checkpoint nodes (green, solid) are retained while intermediate nodes (white, dashed) are discarded. During the backward pass (bottom row), these discarded activations are recomputed on demand (orange nodes) from the nearest checkpoint, trading approximately thirty-three percent additional compute for memory savings that can exceed 70 percent in deep networks.\index{Activation Checkpointing!selective checkpointing}
 
 ::: {#fig-activation-checkpointing fig-env="figure" fig-pos="htb" fig-cap="**Activation Checkpointing**: Trading memory usage for recomputation during backpropagation enables training deeper neural networks. By storing only a subset of activations from the forward pass and recomputing others on demand, this technique reduces peak memory requirements at the cost of increased training time." fig-alt="Two-row diagram showing activation checkpointing. Top row: forward pass with checkpointed nodes (filled) and discarded nodes (dashed). Bottom row: backward pass recomputing discarded activations from checkpoints."}
 
@@ -5224,7 +5225,7 @@ The optimization toolkit developed in the previous section (mixed precision, Fla
 
 When single-machine optimization has been exhausted, the only remaining option is to spread computation across multiple devices. Multi-device training provides three capabilities unavailable to a single GPU: aggregate memory capacity, aggregate compute throughput, and aggregate storage bandwidth. The following discussion covers when and how to scale beyond single-device training, from multi-GPU configurations within a single machine to the threshold where distributed systems become necessary. The key parallelism strategies and their trade-offs are introduced here; the implementation details of multi-node distributed training (collective communication primitives, fault tolerance, and elastic scheduling) are beyond our current scope.
 
-Not all workloads benefit equally from adding more GPUs. The relationship between compute intensity and communication overhead determines whether scaling helps or hurts. This is the conservation of complexity (introduced in @sec-model-training-pipeline-optimizations-cd9d) at the system level: eliminating single-machine bottlenecks through parallelism introduces new communication bottlenecks across devices. Examine the scaling curves in @fig-communication-tax to see this trade-off quantified: compute-bound workloads like image classification (blue) maintain high efficiency as GPU count grows, balanced workloads like LLM training with high-speed interconnects (green) show moderate degradation, while bandwidth-bound workloads (red) suffer the full "communication tax" as synchronization overhead accumulates with cluster size. An arrow indicates this tax: the gap between theoretical linear scaling and actual achieved throughput. Here, $r$ denotes the fraction of step time spent on communication and the curves are illustrative.\index{Communication Tax!definition}
+Not all workloads benefit equally from adding more GPUs. The relationship between compute intensity and communication overhead determines whether scaling helps or hurts. This is the conservation of complexity (introduced in @sec-model-training-pipeline-optimizations-cd9d) at the system level: eliminating single-machine bottlenecks through parallelism introduces new communication bottlenecks across devices. The scaling curves in @fig-communication-tax quantify this trade-off: compute-bound workloads like image classification (blue) maintain high efficiency as GPU count grows, balanced workloads like LLM training with high-speed interconnects (green) show moderate degradation, while bandwidth-bound workloads (red) suffer the full "communication tax" as synchronization overhead accumulates with cluster size. An arrow indicates this tax: the gap between theoretical linear scaling and actual achieved throughput. Here, $r$ denotes the fraction of step time spent on communication and the curves are illustrative.\index{Communication Tax!definition}
 
 ::: {#fig-communication-tax fig-env="figure" fig-pos="htb" fig-cap="**The Communication Tax**: Effective throughput vs. GPU count (log-log scale). Ideal scaling (dashed gray) represents the linear ceiling. Compute-bound workloads like ResNet (blue) maintain high efficiency. Balanced workloads like LLMs with high-speed interconnects (green) show slight degradation, while bandwidth-bound workloads (red) suffer the full communication tax (indicated by the arrow). Here, r is the fraction of step time spent on communication (illustrative values)." fig-alt="Log-log plot of effective speedup vs. GPUs (up to 256). Three lines show varying scaling efficiencies: Compute Bound (Blue), Balanced (Green), and Bandwidth Bound (Red), with an arrow pointing to the gap illustrating the cumulative communication tax."}
 
@@ -5317,7 +5318,7 @@ The two foundational strategies, data parallelism and model parallelism, represe
 #### Data parallelism {#sec-model-training-data-parallelism-ad1c}
 
 \index{Data Parallelism!gradient synchronization}\index{Data Parallelism!framework implementation}
-Data parallelism replicates the entire model on each GPU, with each processing different batches. After computing gradients locally, GPUs synchronize via gradient averaging. Follow the data flow in @fig-train-data-parallelism: input data splits into non-overlapping batches, each accelerator computes forward and backward passes independently, then gradients aggregate before updating the shared model.\index{Data Parallelism!gradient averaging}
+Data parallelism replicates the entire model on each GPU, with each processing different batches. After computing gradients locally, GPUs synchronize via gradient averaging. @fig-train-data-parallelism shows the data flow: input data splits into non-overlapping batches, each accelerator computes forward and backward passes independently, then gradients aggregate before updating the shared model.\index{Data Parallelism!gradient averaging}
 
 ::: {#fig-train-data-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Data Parallelism**: Each GPU holds a complete model copy, processes different data batches, then synchronizes gradients. This approach scales training throughput linearly with GPU count when models fit in single-GPU memory." fig-alt="Diagram showing input data splitting into four batches, each assigned to a GPU for forward/backward pass, with gradients aggregating for model update."}
 
@@ -5534,7 +5535,7 @@ However, data parallelism has a hard constraint: every GPU must hold a complete 
 #### Model parallelism {#sec-model-training-model-parallelism-c97e}
 
 \index{Model Parallelism!memory constraints}\index{Distributed Training!scaling efficiency}
-Model parallelism partitions the model itself across GPUs, which becomes necessary when the model exceeds single-GPU memory. AlexNet used a simple form: certain layers resided on GPU 1, others on GPU 2, with activations passing between them. Trace the forward and backward paths in @fig-model-parallelism: data moves through model partitions on different devices, with gradients flowing backward during training.\index{Model Parallelism!layer-wise partitioning}
+Model parallelism partitions the model itself across GPUs, which becomes necessary when the model exceeds single-GPU memory. AlexNet used a simple form: certain layers resided on GPU 1, others on GPU 2, with activations passing between them. @fig-model-parallelism shows the forward and backward paths: data moves through model partitions on different devices, with gradients flowing backward during training.\index{Model Parallelism!layer-wise partitioning}
 
 ::: {#fig-model-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Model Parallelism**: The model is partitioned across devices, with intermediate activations passing between them. This enables training models larger than single-GPU memory at the cost of sequential dependencies." fig-alt="Diagram showing input flowing through model parts on different devices, with forward pass going right and backward pass returning left."}
 
@@ -6005,7 +6006,7 @@ name path=G1,anchor=south west, minimum height=\vi](V)at(B2.north west){};
 
 :::
 
-This architectural progression illuminates why traditional computing systems proved insufficient for neural network training. Study the co-evolution in @tbl-computing-eras: while HPC systems provided the foundation for parallel numerical computation and warehouse-scale systems demonstrated distributed processing at scale, neither fully addressed the computational patterns of model training. Modern neural networks combine intensive parameter updates, complex memory access patterns, and coordinated distributed computation in ways that demanded new architectural approaches.
+This architectural progression illuminates why traditional computing systems proved insufficient for neural network training. The co-evolution in @tbl-computing-eras shows that while HPC systems provided the foundation for parallel numerical computation and warehouse-scale systems demonstrated distributed processing at scale, neither fully addressed the computational patterns of model training. Modern neural networks combine intensive parameter updates, complex memory access patterns, and coordinated distributed computation in ways that demanded new architectural approaches.
 
 The practical consequence: when configuring a multi-GPU training job today, the practitioner implicitly chooses from parallelism strategies that evolved to address these distinct computational patterns. Understanding these strategies, their trade-offs, their communication costs, and their failure modes, enables informed decisions about when additional hardware will help and when it will merely add complexity.
 
