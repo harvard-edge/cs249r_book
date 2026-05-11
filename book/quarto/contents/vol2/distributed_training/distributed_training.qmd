@@ -157,7 +157,7 @@ Third, **dataset scale** exceeds single-machine storage when training data reach
 Distributed training introduces three primary complexity dimensions not present in single-machine scenarios:
 
 1.  **Communication Overhead**\index{Communication Overhead}: The cost of synchronizing gradients. For a model with $P$ parameters distributed across $N_{\text{dev}}$ devices, all-reduce operations must transfer approximately $2P(N_{\text{dev}}-1)/N_{\text{dev}}$ gradient values per step, multiplied by the bytes per gradient element. On commodity networks, this can dominate computation time.
-2.  **Fault Tolerance**\index{Fault Tolerance}: Requirements increase exponentially with cluster size. A 100-node cluster with 99.9 percent per-node reliability experiences failures every few hours.
+2.  **Fault Tolerance**\index{Fault Tolerance}: The expected number of failures per unit time grows linearly with cluster size, while the probability that the entire cluster survives an interval without any failure decays exponentially. A 100-node cluster with 99.9 percent per-node reliability experiences failures every few hours.
 3.  **Algorithmic Stability**\index{Algorithmic Stability}: Large batch sizes from data parallelism affect convergence behavior, requiring learning rate scaling and warmup strategies that single-machine training does not require [@goyal2017accurate].
 
 ### Single-machine to distributed transition {#sec-distributed-training-systems-systems-singlemachine-distributed-transition-1ee4}
@@ -222,16 +222,15 @@ A useful mental model frames these distributed strategies as *loop transformatio
 
 If we view the training process as a massive loop over data and layers, distributed strategies are simply **Loop Transformations** applied by the cluster-level compiler:
 
-```{text}
-%%| label: fig-loop-transforms
-%%| fig-cap: "**Distributed Strategies as Loop Transformations**: Visualizing how
-     DP, TP, and PP map to standard compiler optimizations applied at cluster scale."
+::: {#fig-loop-transforms fig-env="figure" fig-pos="htb" fig-cap="**Distributed Strategies as Loop Transformations**: The logical training loop nests over epochs, batches, and layers. Distributed strategies are loop transformations applied at cluster scale: Data Parallelism unrolls the batch loop across devices; Tensor Parallelism vectorizes the per-layer matrix operations across devices; Pipeline Parallelism pipelines the layer sequence across devices." fig-alt="Two-block flowchart. Left block shows the logical training loop nested over epochs, batches, and layers. Right block shows the three physical implementations: Data Parallelism unrolls the batch loop, Tensor Parallelism vectorizes layer operations, Pipeline Parallelism pipelines the layer sequence. A heavy arrow connects logical to physical."}
+
+```{mermaid}
 flowchart LR
     subgraph Logical[Logical Training Loop]
         direction TB
         L1[for epoch in epochs:] --> L2[for batch in data:]
         L2 --> L3[for layer in layers:]
-        L3 --> L4[Compute(layer, batch)]
+        L3 --> L4[Compute layer, batch]
     end
 
     subgraph Physical[Physical Implementation]
@@ -243,6 +242,8 @@ flowchart LR
 
     Logical ==> Physical
 ```
+
+:::
 
 *   **Data Parallelism = Parallel For Loop.** We unroll the outer loop (batch dimension) across devices. Each device runs the same code body on different data indices.
 *   **Tensor Parallelism = Vectorization (single instruction, multiple data (SIMD)).** We split the inner loops (matrix multiplication) across devices. This is "Cluster-Scale SIMD," where NVLink acts as the vector register file.
@@ -258,9 +259,9 @@ Coordination relies on consensus protocols and synchronization primitives that k
 
 The progression from single-device to distributed training follows a systematic scaling path where each stage builds on the previous level's challenges. Single-GPU training requires only local memory management and straightforward forward/backward passes, establishing the baseline computational patterns. Scaling to multiple GPUs within a single node introduces high-bandwidth communication requirements, typically handled through NVLink[^fn-nvlink-intranode] or PCIe connections with NCCL[^fn-nccl-topology] optimization while preserving the single-machine simplicity of fault tolerance and scheduling.
 
-[^fn-nvlink-intranode]: **NVLink**: NVIDIA's point-to-point GPU interconnect delivers `{python} DistTrainConstants.nvlink_a100_str`--`{python} DistTrainConstants.nvlink_h100_str` GB/s bidirectional bandwidth, roughly 10$\times$ InfiniBand HDR. This bandwidth gap is why tensor parallelism -- which requires AllReduce on every layer -- is confined to intra-node communication, while pipeline and data parallelism tolerate the slower inter-node fabric. \index{NVLink!distributed training}
+[^fn-nvlink-intranode]: **NVLink**: NVIDIA's point-to-point GPU interconnect delivers `{python} DistTrainConstants.nvlink_a100_str`--`{python} DistTrainConstants.nvlink_h100_str` GB/s bidirectional bandwidth, roughly 10$\times$ InfiniBand HDR. This bandwidth gap is why tensor parallelism, which requires AllReduce on every layer, is confined to intra-node communication, while pipeline and data parallelism tolerate the slower inter-node fabric. \index{NVLink!distributed training}
 
-[^fn-nccl-topology]: **NCCL (NVIDIA Collective Communications Library)**: Released in 2015, NCCL automatically selects ring, tree, or hierarchical AllReduce algorithms based on detected hardware topology -- NVLink within nodes, InfiniBand across nodes. This topology-aware routing is critical because a naive single-ring AllReduce across 128 nodes would force all traffic through the slowest inter-node link, collapsing bandwidth utilization to under 30 percent. \index{NCCL!topology}
+[^fn-nccl-topology]: **NCCL (NVIDIA Collective Communications Library)**: Released in 2015, NCCL automatically selects ring, tree, or hierarchical AllReduce algorithms based on detected hardware topology: NVLink within nodes, InfiniBand across nodes. This topology-aware routing is critical because a naive single-ring AllReduce across 128 nodes would force all traffic through the slowest inter-node link, collapsing bandwidth utilization to under 30 percent. \index{NCCL!topology}
 
 The leap to multi-node distributed training introduces new complexity dimensions: network communication overhead, fault tolerance requirements, and cluster orchestration challenges. Each scaling stage compounds the previous challenges as communication bottlenecks intensify, synchronization overhead grows, and failure probability increases. Practitioners should therefore optimize single-GPU performance before scaling to ensure efficient resource utilization at each level.
 
@@ -639,6 +640,14 @@ The specific algorithms for gradient synchronization—including **Ring AllReduc
 
 When synchronization performance deviates from theoretical expectations, the Fleet Stack framework provides a structured approach to isolating the bottleneck.
 
+<!-- TODO(numerical-audit): The debugging walkthrough below states an
+     observed 100 ms vs a 50 ms prediction, then computes a 120 ms naive
+     transfer and 240 ms ring AllReduce, and concludes the observed 100 ms
+     is "better than naive" with a 40 ms remaining gap. The arithmetic
+     does not reconcile across the four numbers (50, 100, 120, 240).
+     Pick one consistent baseline (either the 50 ms bandwidth prediction
+     OR the 240 ms ring-AllReduce model) and recompute the remaining-gap
+     analysis from there. -->
 ::: {.callout-perspective title="Debugging slow gradient synchronization"}
 
 **Problem statement**: An AllReduce operation takes 100 ms when the bandwidth calculation predicts 50 ms. The Fleet Stack framework provides a systematic debugging methodology by examining each layer:
@@ -686,7 +695,7 @@ Distributed training systems operate under explicit synchronization models that 
 
 The default model, Bulk Synchronous Parallel (BSP)[^fn-bsp] [@valiant1990], requires all workers to complete their local computation in forward and backward passes, synchronize gradients through a barrier with AllReduce, and then simultaneously update parameters.
 
-[^fn-bsp]: **Bulk Synchronous Parallel (BSP)**: Introduced by @valiant1990 as a "bridging model" between hardware and software for parallel computation. BSP divides work into supersteps -- compute, communicate, barrier -- guaranteeing mathematical equivalence to sequential execution. The cost: iteration time equals the slowest worker's time, and at 1,000 GPUs with 1 percent straggler probability per device, roughly 10 GPUs straggle every step, making the barrier increasingly expensive. \index{BSP!synchronization}
+[^fn-bsp]: **Bulk Synchronous Parallel (BSP)**: Introduced by @valiant1990 as a "bridging model" between hardware and software for parallel computation. BSP divides work into supersteps (compute, communicate, barrier), guaranteeing mathematical equivalence to sequential execution. The cost: iteration time equals the slowest worker's time, and at 1,000 GPUs with 1 percent straggler probability per device, roughly 10 GPUs straggle every step, making the barrier increasingly expensive. \index{BSP!synchronization}
 
 BSP provides strong guarantees where every worker sees identical parameter values at each step, ensuring mathematical equivalence to single-device training. The cost is that the slowest worker determines iteration time, creating the straggler\index{Straggler!synchronization delay} problem.
 
@@ -2615,18 +2624,13 @@ The chapter opened with a "scaling wall": the point where adding more GPUs event
 
 We explored the **3D Parallelism Cube** (@fig-3d-parallelism-cube-summary), the foundational framework for scaling frontier models. Data parallelism unrolls the outer loop of training to scale throughput; tensor parallelism vectorizes the inner loops of matrix multiplication to fit memory; and pipeline parallelism stages sequential layers to reduce communication frequency. Together, these strategies allow us to map models larger than any single memory bank onto a fleet of accelerators with finite bandwidth.
 
-::: {#fig-3d-parallelism-cube-summary fig-env="figure" fig-pos="htb" fig-cap="**3D Parallelism Strategy Space**: The three independent axes of distributed training parallelism. Data Parallelism (d) replicates models across workers. Pipeline Parallelism (p) partitions model layers vertically. Tensor Parallelism (t) splits individual operations horizontally. Real systems combine all three dimensions." fig-alt="Three-dimensional cube diagram with axes labeled Data Parallel, Pipeline Parallel, and Tensor Parallel. Colored planes show Model Replicas, Intra-layer partitioning, and pipeline stages."}
+::: {#fig-3d-parallelism-cube-summary fig-env="figure" fig-pos="htb" fig-cap="**3D Parallelism Strategy Space**: The three independent axes of distributed training parallelism. Data Parallelism ($d$) replicates models across workers. Pipeline Parallelism ($p$) partitions model layers vertically by depth (assigning layers to different stages). Tensor Parallelism ($t$) splits individual operations horizontally within each layer (assigning shards to different GPUs). A single training step coordinates $d \times p \times t$ GPUs, with tensor-parallel communication within layers, pipeline communication at microbatch stage boundaries, and data-parallel synchronization once per optimizer step. Archetype A occupies a coordinate $(d, t, p)$ in this cube to balance memory and bandwidth." fig-alt="Three-dimensional cube diagram with axes labeled Data Parallel, Pipeline Parallel, and Tensor Parallel. Colored planes show model replicas, intra-layer partitioning, and pipeline stages."}
 
 ![](images/svg/3d-parallelism.svg)
-**The 3D Parallelism Space**. Archetype A occupies a coordinate $(d, t, p)$ inside this cube to balance memory and bandwidth.
 
 :::
 
-Ultimately, the choice of parallelism is a **loop transformation** applied by the cluster-level compiler. By matching logical communication patterns to physical hardware hierarchies, we move from the "linear scaling regime" of small clusters to the "communication-bound" reality of the exascale supercomputer. @fig-3d-parallelism-sliced visualizes how a model is partitioned across the fleet.
-
-::: {#fig-3d-parallelism-sliced fig-env="figure" fig-pos="htb" fig-cap="**Anatomy of a Hybrid 3D Parallel Step**: Visualization of how a model is partitioned across the fleet. Pipeline parallelism ($p$) slices the model vertically by depth (assigning layers to different stages). Tensor parallelism $(t)$ slices the weight matrices horizontally within each layer (assigning shards to different GPUs). Data parallelism ($d$) replicates this sliced block $d$ times to process independent data samples. A single training step coordinates $d \times p \times t$ GPUs, with tensor-parallel communication occurring within layers, pipeline communication occurring at microbatch stage boundaries, and data-parallel synchronization occurring once per optimizer step." fig-alt="Diagram showing the hierarchical layout of 3D parallelism across 8 GPUs, with nested boxes for data replicas, pipeline stages, and tensor shards."}
-![](images/svg/3d-parallelism.svg)
-:::
+Ultimately, the choice of parallelism is a **loop transformation** applied by the cluster-level compiler. By matching logical communication patterns to physical hardware hierarchies, we move from the "linear scaling regime" of small clusters to the "communication-bound" reality of the exascale supercomputer.
 
 ::: {.callout-takeaways title="Parallelism is a loop transformation"}
 

@@ -108,192 +108,92 @@ All 26 chapters in `_quarto-pdf-vol1.yml` order have been touched. The next step
 
 ## vol2/conclusion/conclusion.qmd
 
-Applied: `high bandwidth flash` → `high-bandwidth flash` compound-modifier hyphen (241), brain-synaptic-activity rhetorical Q recast and "intuition pump" colloquial replaced with "Fermi-style sanity check" (359), "We have conquered Scale" triumphalist phrasing softened (378).
-
-Deferred to discussion:
-
-- **Compound capability law callout (177)**: bold paragraph starters "Observation/Principle/Implication" + rhetorical Q.
-- **Capability ∝ Model_IQ × Tools × Context × Planning^N speculative formula (184)**: define as heuristic or add derivation.
-- **Notebook callout rhetorical Qs (226, 277)**: convert.
-- **`1,000 TFLOPS` hardcoded vs `H100_FLOPS_FP16_TENSOR=989` (364)**: use computed value or mark approximate.
-- **Author signature before takeaways (388)**: move signature after takeaways or remove from chapter body.
-- **Time-sensitive phrases "today's challenges" / "next decade" / "already here" (173)**.
-- **"Build systems that..." manifesto-style closing (386)**.
+**Walkthrough complete.** Earlier prose-pass items resolved. Remaining 7 items consolidated into a `<!-- TODO(focused-followup) -->` block at the top of the chapter for a focused style-cleanup + numerical-audit pass.
 
 ## vol2/responsible_ai/responsible_ai.qmd
 
-Applied: "conscience"/"marvels" anthropomorphic opening recast (77), "You now possess..." second-person + rhetorical Q recast (79), CI memory-leak vs fairness-regression rhetorical Q → declarative pair (133).
-
-Deferred to discussion:
-
-- **Non-protected callout direct address (125, 281, 1098, 1522)**: multiple sites with "Use the section structure..." / "your immediate needs".
-- **Navigation callout subject-verb disagreement (117)**: "Principles and Foundations ... defines".
-- **Raw `\ref{...}` (399, 2113)**: convert to Quarto cross-ref.
-- **SHAP overhead 50--200 percent vs 50--1000x vs 200ms–5s+ (1044)**: normalize across exact SHAP / TreeSHAP / approx / async paths.
-- **Listing two adjacent string literals (1590)**: combine into single docstring.
-- **`confusion_matrix(...).ravel()` without `labels=[0,1]` (1633)**: edge case fails.
-- **Missing apostrophes throughout (190, 929, 1717, 2131)**: "the models", "a users", "an individuals", "the systems".
-- **`bias-loop.svg` reused for `fig-bias-amplification` (907) and `fig-bias-loop` (2117)**.
-- **FCC rural-broadband statistic uncited (865)**.
-- **Hyphen ranges in decision-framework table (2427)**.
-- **Compound forms drift (180): datacenter/data-center, high-traffic, real-time, post hoc/post-hoc, group-specific**.
+**Walkthrough complete.** Earlier prose-pass items resolved. Raw `\ref{pri-...}` cross-references at lines 399 and 2113 are **correct** per the vol1+vol2 principle-reference convention (previously flagged for conversion, but should stay). Remaining 10 items consolidated into a `<!-- TODO(focused-followup) -->` block at the top of the chapter.
 
 ## vol2/sustainable_ai/sustainable_ai.qmd
 
-Applied: fleet-stack callout "Here, we ensure" recast + "burns through" → "exceeds" (73), operational/embodied rhetorical-Q transition → declarative (1250 region), TinyML table split row merged into single "Neural Architecture Search for MCUs" cell (2539), `CO2` → `CO~2~` updated nearby, `datacenter` → `data center`.
-
-Deferred to discussion:
-
-- **Operational-carbon equation PUE double-count (1256)**: `E_total` ambiguity between IT and facility-included.
-- **Two near-duplicate energy-wall figures + narrative (373 vs 638)**.
-- **Fallacy grid-intensity numbers vs worked example (2848)**: 367/34.5 = 10.6 not 21.
-- **Embodied-carbon order-of-magnitude inconsistency (2852 vs 1501–1506)**: 108 kg amortized vs 10.5 tons upfront.
-- **GPT-3 household-energy comparison drift (85/91/304/665)**: 100/120/122/130.
-- **OpenAI supercomputer reference uncited/undated (1908)**.
-- **"Noise Event", "Voltage Spike", etc. invented-label capitalization (653)**.
+**Walkthrough complete.** Earlier prose-pass items resolved. Remaining 7 items consolidated into a `<!-- TODO(focused-followup + numerical-audit) -->` block at the top of the chapter.
 
 ## vol2/robust_ai/robust_ai.qmd
 
-Applied: fleet-stack callout "deep in" / "armored" / "absorb a hit" colloquial recast (53), robustness-tax Problem callout second-person → impersonal (618), `Decision Continue` plaintext-label → `**Decision**:` (1099).
-
-Deferred to discussion:
-
-- **`@fig-poisoning` caption-vs-prose contradiction (1866)**: caption describes online-learning incremental poisoning; prose describes Nightshade-style concept poisoning.
-- **Stale listing line refs (2030)**: prose cites 2190/2196/2199-2200; listing actually at 2008-2025.
-- **Attack-taxonomy table single-cell concatenation (1283)**: `FGSM PGD JSMA` etc. needs row/separator split.
-- **Notebook callouts 627/1936/1945 second-person + Qs**: similar pattern, additional sites.
-- **Informal figure-caption sources (1225, 2056, 2209)**: `ivezic`, `li`, `dertat`, uppercase `HTTPS://`.
-- **Quantitative claims uncited (728, 744, 746)**: nighttime degradation, weather mAP, fraud drift.
-- **Spaced triple-hyphens as em-dashes (83, 97)**: `---` source-style.
+**Walkthrough complete.** Earlier prose-pass items resolved. Remaining 7 items consolidated into a `<!-- TODO(focused-followup) -->` block at the top of the chapter.
 
 ## vol2/security_privacy/security_privacy.qmd
 
-Applied: DP-utility "kills utility" colloquial recast (190), `ML-allowd` → `ML-enabled` typo (1811), secure-multi-tenancy Problem callout second-person → impersonal (228), DP rhetorical-Q transition → declarative (2809).
+**Walkthrough complete.** Earlier prose-pass items resolved. Remaining 5 items consolidated into a `<!-- TODO(focused-followup) -->` block at the top of the chapter.
 
-Reverted on commit (heading-case hook conflict — section IDs encode lowercase form):
-
-- `Jeep cherokee hack` (837): hook enforces slug = visible-text case. Reverting "Cherokee" capitalization keeps hook green. **Action**: rename slug to `cherokee→Cherokee` (lockstep) OR adjust heading-case hook proper-noun list.
-- `Rnyi differential privacy and composition` (3063): same. Heading kept as `Rnyi` (no diacritic) to match slug. **Action**: rename slug to include `renyi` AND visible text to `Rényi` in lockstep.
-
-Also reverted similarly: `Meta grand teton` (network_fabrics:1360), `Advanced slurm configuration for ML` (fleet_orchestration:589) — same hook conflict on proper-noun product names embedded in H3 slugs.
-
-Deferred to discussion:
-
-- **Health-monitoring Problem second-person (2446)**: similar pattern, additional notebook callout site.
-- **Tesla/Zoox case study alleged-vs-established (1386)**: legal-care needed.
-- **Knowledge-check second-person opener (1875)**.
-- **Hardware-security mechanisms table split rows (2382)**.
-- **Salary example second-person narration (2813)**.
+Heading-case hook conflict items tracked separately as a lockstep slug-rename pass: `Jeep cherokee hack` (837), `Rnyi differential privacy and composition` (3063), `Meta grand teton` (network_fabrics:1360), `Advanced slurm configuration for ML` (fleet_orchestration:589). Each requires renaming the section-ID slug and the visible text in lockstep.
 
 ## vol2/ops_scale/ops_scale.qmd
 
-Applied: sharing-dividend Problem callout second-person → impersonal (152), "Even" mid-sentence cap typo fixed (2202).
-
-Deferred to discussion:
-
-- **Inference-cost equation dimensional analysis (line ~3265)**: `24 × 365` factor double-counts; equation as written overstates by 24x.
-- **3-sigma alerts weekly/daily mismatch (line ~2193)**: same setup yields different cadences.
-- **Non-protected `callout-notebook` second-person + Qs (lines 152, 326, 600, 725, 1396, 1493, 2401)**: 152 fixed; remaining sites need similar conversion.
-- **"Sharing Dividend" / "Infrastructure Multiplier" / "for free" / "secret" promotional register (line ~161)**.
-- **Bold paragraph starter callout (line ~3456)** + organizational-pattern bold-starter list (line ~3841).
-- **Organizational-pattern figure caption left/center/right not visible (line ~3768)**.
-- **Worked example after selection table redundant (line ~3933)**.
-- **Case-study overclaims (Uber/Vertex AI/Netflix/Spotify, line ~3964)**: tighten citations.
-- **Netflix interleaving "dramatic" intensifier (line ~3984)**.
+**Walkthrough complete.** Earlier prose-pass items resolved. Remaining 10 items consolidated into a `<!-- TODO(focused-followup) -->` block at the top of the chapter.
 
 ## vol2/edge_intelligence/edge_intelligence.qmd
 
-Applied: non-IID footnote expansion fixed (302), TikZ "loT" typo → "IoT" (597), "embraces chaos" → "tolerates" (2369), unit spacing 48MHz/3GHz/10μW (3094), memory-class hyphen ranges → en-dash (938).
-
-Deferred to discussion:
-
-- **`@fig-...` Local Only vs Centralized Cloud caption/prose flip (line ~308)**: A/B/C regions inconsistent between figure and prose.
-- **Constraint-solution table missing Federated Coordination pillar (line ~972)**: table only covers two of three pillars.
-- **Convergence-bound math F(theta) vs theta-star (line ~2255 & 2271)**: heterogeneity multiplier breaks beta=0 → IID-rate sanity check.
-- **Client scheduling repetition (line ~2383 vs 2385)**: stratified sampling and adaptive client selection re-stated in adjacent paragraphs.
-- **Performance-metrics paragraph (line ~2976)**: comma splices, overlong sentences. Needs prose rewrite.
-- **Non-protected callout-notebook second-person + Qs (lines 160, 921, 1024, 1819)**: similar pattern, multiple sites.
-- **Adaptation-strategy table caption vs row contents (line ~1605)**.
-- **Worked-example plaintext label (line ~2279)**: needs callout or subsection.
-- **`$E = 2$-$5$` math hyphen between math fragments (line ~2309)**.
+**Walkthrough complete.** Earlier prose-pass items resolved. Remaining 9 items consolidated into a `<!-- TODO(focused-followup) -->` block at the top of the chapter.
 
 ## vol2/inference/inference.qmd
 
-Applied: serving-cost-multiplier Problem callout second-person → impersonal (238), KV-cache wall rhetorical Q → declarative (2036), quantization opener "crush/blisteringly/brutally/massive" hype → declarative quantitative claim (4962), citation spacing fix `][@` → `] [@` (4976), case-studies hype + "we will now examine" → declarative transition (5245), cross-cutting "Separation of concerns" malformed bold-starter punctuated (5545 region), 1-5 percent hyphen → en-dash.
-
-Deferred to discussion (most high-yield items):
-
-- **Subsection-like labels rendered as plain paragraphs (line ~1053)**: "System Parameters", "Service Time Model", "Performance at Different Batch Sizes". Convert to proper headings.
-- **Quantization-section labels rendered as plain text (line ~4991)**: "Key insight", "Algorithm", "Core technique", "Critical distinction".
-- **Case-study recurring labels rendered as plain text (line ~5259)**: "Scale and requirements", "Architecture overview", "Key design decisions", "Lessons learned" — convert to consistent subheads or flowing prose.
-- **Other cross-cutting bold-starter sentences (~5545 region)**: "Hybrid architectures No system..." style still needs full sentence rewrite for the others I didn't reach.
-- **Fallacy "More GPU memory always means more batch size..." dangling without explanation (line ~5594)**: missing explanatory paragraph; Summary subsection appears immediately after.
-- **Case-study uncited proprietary claims (line ~5257)**: Meta, OpenAI, Google, TikTok specific infrastructure numbers.
-- **"4-5 requests", "10--30 percent" range form (line ~5572)**: en-dash audit.
-- **Fallacies-and-Pitfalls close hype "robust / fiercely responsive / We conclude" (line ~5641)**: rewrite.
+**Walkthrough complete.** Earlier prose-pass items resolved. The line ~1053 plaintext-label cluster ("System Parameters", "Service Time Model", "Optimal Batch Size Calculation") was converted inline to bold lead-ins. Remaining 7 items consolidated into a `<!-- TODO(style-cleanup) -->` block at the top of the chapter.
 
 ## vol2/performance_engineering/performance_engineering.qmd
 
-Applied: stray trailing QMD fragment + duplicate `.quiz-end` removed (line 2210), outlier-features footnote `Post-Training Quantization` → `post-training quantization` (PTQ kept hyphenated per term-of-art exception), blank line restored between footnote and following body prose at line 1002, `torch.compile` heuristic "No downsides" qualified with shape-stability / graph-break caveat, scholar's-library callout second-person + "walking down there takes an eternity" recast in third person, `Hero Runs` and `Gold Standard` lowercased in body prose.
+**Walkthrough complete.** Earlier prose-pass items + four deferred items resolved:
 
-Deferred to discussion:
-
-- **`fig-shifting-roofline` 4.0x vs 2x mismatch (line ~482)**: figure annotation says 4x, prose+table say ~2x.
-- **`fig-shifting-roofline` duplicate plotting (line ~405)**: roofline series plotted twice in the LEGO cell.
-- **`Speculative Decoding` near-empty section (line ~1371)**: redirects to another chapter; should add local pedagogical content.
-- **MFU cross-ref to wrong target (line ~1855)**: `@sec-performance-engineering-efficiency-frontier` is the iron-law subsection, not measurement-at-scale.
+- **`fig-shifting-roofline` 4x vs 2x mismatch**: figure annotation "Ridge point shifted 4.0x in 7 years" → "~2x in 7 years" matching the 139→281 FLOP/byte progression in the prose and table.
+- **`fig-shifting-roofline` duplicate plotting**: deleted the first redundant `for name, peak_tflops, bw_tbs, color in gpus:` loop; the second loop (with ridge labels) is retained.
+- **Speculative Decoding stub at line ~1370**: added local pedagogical content explaining the arithmetic-intensity shift, the acceptance-rate bound, and the interaction with batching, before forwarding to `@sec-inference-scale-speculative-decoding-c438`.
+- **MFU cross-ref**: corrected `@sec-performance-engineering-efficiency-frontier` → `@sec-performance-engineering-measurement-scale` (the actual measurement-at-scale section).
 
 ## vol2/fleet_orchestration/fleet_orchestration.qmd
 
-Applied: deadlock Problem callout second-person → impersonal (245), partition-dilemma rhetorical Qs → declarative pair (280), re-scheduling → rescheduling (298), Slurm heading capitalization (589), elastic-training transition rhetorical Q → declarative (925), cost-aware multi-question paragraph → declarative trade-off list (1316), parenthetical time-value Q → noun phrase (1318), 4-debug Problem second-person + Q → declarative (1956), `\\$` double-escape → `\$` (2008), debug-week Problem second-person → impersonal (2020), summary subject-predicate split with stray comma (2102, 2106).
+**Walkthrough complete.** Earlier prose-pass items + deferred items resolved:
 
-Deferred to discussion:
-
-- **2042 `2--4$\times$` range marker**: house-style debate; left as-is for now.
-- **2056 three audit questions paragraph**: not yet converted.
-- **1419 build-vs-buy "Is this effort justified?" inline rhetorical Q**: not yet converted.
-- **Repetition of "highest-leverage engineering investment" (lines 203, 510, 1116, 2120)**: pick strongest instance, vary or delete others.
+- Build-vs-buy "Is this effort justified?" rhetorical Q → declarative ("The ROI math is what justifies the effort").
+- "Highest-leverage engineering investment" repetition trimmed: two of the four instances (lines 510 and 1116 region) removed; kept the strongest at line 203 (initial economic-stakes paragraph) and line 2120 (Summary takeaway).
+- `2--4$\times$` range marker (line 2042): left as-is — within house style.
+- 2056 three audit questions paragraph: left as-is (similar to Fallacies pattern; questions in a "checklist" context are acceptable).
 
 ## vol2/fault_tolerance/fault_tolerance.qmd
 
-Applied: 9s-of-reliability Problem callout second-person → impersonal (293), Byzantine fig-cap "validational redundancy" → "redundant validation" (typo fix), Numerical-Garbage colloquial recast (~line 870 region), radiation-or-beam-testing leading sentence-fragment fixed (1852), em-dash–unclosed parenthetical at storage cross-ref fixed (2322), `$k=1–3$` math en-dash range → `$1 \le k \le 3$` (2363), 1-2/0.01-0.1/1-10 hyphen ranges → en-dash, "It has been established" + "But"-start chapter-connection recast, "lesson here is" + "democratizes" recast.
+**Walkthrough complete.** Earlier prose-pass items + deferred items resolved:
 
-Deferred to discussion:
-
-- **1741 region notebook second-person + "Numerical Garbage" alarmist phrasing**: I tightened the line at the systems-insight callout, but the YAML may have flagged a separate second-person notebook at 1741 — re-confirm against current line numbers.
-- **Predictive-maintenance duplicate sentence (line ~744)**: Two adjacent sentences say the same thing. **Action**: merge.
-- **Repetitive "For X..." sentence frames (line ~2624)**: List rhythm in body prose. **Action**: condense into causal paragraph.
-- **Case-study uncited operational claims (line ~3293)**: OPT-175B failures, Google TPU pod recovery targets, Netflix MTTR, DeepSpeed overhead figures — all uncited.
-- **3289 rhetorical Q opening case-study section**: Already partially addressed via "It has been established" fix nearby; re-confirm if separate rhetorical-Q opener remains.
+- Predictive-maintenance duplicate sentence (line ~744): merged into single causal sentence.
+- Repetitive "For X..." sentence frames (line ~2624): condensed into a single causal sentence about elastic training converting hard failures into graceful capacity adjustments.
+- Case-study section (line ~3293): opening question removed; replaced with declarative thesis. Bib-pass TODO comment added at the start of `## Case Studies` enumerating OPT-175B/Google TPU/Netflix/DeepSpeed claims that need citations.
+- 1741 notebook context (Numerical-Garbage callout): already tightened in the earlier prose pass; line numbers shifted, no fresh second-person site remains.
 
 ## vol2/collective_communication/collective_communication.qmd
 
-Applied: AlltoAll → AllToAll canonicalization (8 instances), traveler analogy at line 1641 replaced with technical description (kg unit issue moot), "an 100$\times$" → "a 100$\times$" article fix at line 1647, "sanctuary"/"bridge" colloquial metaphor at line 1242 replaced with direct bandwidth comparison, `DistributedDataParallel\index{}` markup leak inside backticks moved outside.
+**Walkthrough complete.** Earlier prose-pass items + deferred items resolved:
 
-Deferred to discussion:
+- BF16 70B AllReduce: `L_lat` → "bandwidth (data-movement) term" (correctly identifying the 140 GB / 50 GB/s transfer as bandwidth-bound).
+- Raw `\ref{pri-alpha-beta-model}` (line ~602): **kept as `\ref{}`** per the vol1+vol2 principle-reference convention (user correction during walkthrough).
+- NCCL reality-gap table caption (line ~613): relabeled as illustrative reference numbers ("Values are illustrative reference numbers... actual measurements vary with topology, NCCL version, and tuning").
+- "Can an algorithm achieve the best of both?" rhetorical Q (line ~950): replaced with declarative ("A third approach combines the logarithmic latency of Tree with better bandwidth utilization").
+- "Roads are constantly crumbling" colloquial chapter-connection (line ~2159): replaced with neutral "In production, however, hardware fails as a statistical certainty...".
+- Compression-payback comment drift (line ~2082): code comment updated to match the actual ~5.7-fold value the cell computes.
 
-- **BF16 70B AllReduce dominates `L_lat` claim (line ~59)**: A 140 GB/50 GB/s transfer is bandwidth-bound, not latency-bound. **Action**: change to "dominates the bandwidth/data-movement term" or split contributions.
-- **BF16 vs FP32 precision drift for 70B running example (lines 59/69 vs 157/511 vs 592)**: Chapter alternates precision. **Action**: declare each switch or pick one canonical precision.
-- **Raw `\ref{pri-alpha-beta-model}` (line ~602)**: Use Quarto's `@pri-alpha-beta-model` cross-reference.
-- **NCCL reality-gap table uncited (line ~602)**: Add source or relabel as illustrative model.
-- **"can an algorithm achieve the best of both?" rhetorical Q (line ~950)**: Convert to declarative transition.
-- **Fallacies bold paragraph starters (line ~2031)**: Operations-manual anti-pattern.
-- **New compression-payback notebook after Summary opens (line ~2073)**: Move into compression trade-offs section.
-- **"roads are constantly crumbling" colloquial chapter-connection (line ~2159)**: Replace with direct transition.
-- **3.5x vs 5.7x compression-payback comment drift (line ~2082)**: Update source comment to match calculated value.
+Deferred to focused follow-up:
+
+- **BF16 vs. FP32 precision drift for 70B running example** (lines 59/69 vs. 157/511 vs. 592): chapter alternates between BF16 (140 GB) and FP32 (280 GB) for the same model. Needs explicit precision declaration at each scenario switch, or standardization on one canonical precision.
+- **Fallacies bold paragraph starters** (line ~2031): kept as canonical `**Fallacy**: *italic.* / Corrective paragraph` form per book-prose §3.
+- **Compression-payback notebook after Summary opens** (line ~2073): pedagogically defensible as a final illustration before takeaways; can move into the compression-trade-offs section if a stricter Summary boundary is wanted.
 
 ## vol2/distributed_training/distributed_training.qmd
 
-Applied: Purpose body second-person → impersonal + "But" → "however" recast (line 28), Jeff Dean test callout second-person → impersonal (line 191), `nvlink_a100_str`-`nvlink_h100_str` hyphen → en-dash (`--`), GPT-2 notebook second-person + rhetorical Q → declarative (line 963 region), "When does parallelism hurt?" heading → "Critical batch size and diminishing returns" + opener recast (1307), pipeline-bubble Problem callout second-person → impersonal (1763 region).
+**Walkthrough complete.** Earlier prose-pass items + deferred items resolved:
 
-Deferred to discussion:
-
-- **"Exponentially" with cluster size (line ~160)**: Conflates expected failure rate (~linear) with system survival probability (~exponential). **Action**: specify which quantity, align scaling language.
-- **Loop-transform diagram in `{text}` block (line ~223)**: `fig-loop-transforms` label and caption inside a text fence won't render as a numbered figure. **Action**: use TikZ/Mermaid/Graphviz or convert to SVG with a real `#fig-` div.
-- **Slow-AllReduce debugging example arithmetic (line ~644)**: Numbers don't add up. 100ms observed vs 50ms predicted vs 120ms naive vs 240ms ring-AllReduce; "better than naive" + 40ms remaining gap inconsistent. **Action**: pick one baseline.
-- **Footnote `-- ` ASCII double-hyphens as parenthetical breaks (line ~261)**: Should be em-dash or recast.
-- **3D parallelism summary figures reuse same asset (line ~2618)**: Two `fig-` divs use `images/svg/3d-parallelism.svg` with different captions, one claiming sliced/hierarchical view. **Action**: distinct asset for `fig-3d-parallelism-sliced` OR revise caption.
-- **Manual bold caption outside `fig-cap` (line ~2621)**: Duplicates Quarto's caption mechanism.
+- "Exponentially with cluster size" (line 160): split into the two distinct quantities — expected failures per unit time grows linearly with cluster size, while probability of full-cluster survival decays exponentially.
+- Loop-transform diagram in `{text}` block (line ~225): converted to a proper `{mermaid}` fence inside a `::: {#fig-loop-transforms fig-env=...}` div with proper `fig-cap` and `fig-alt`.
+- Slow-AllReduce debugging arithmetic (line ~648): TODO(numerical-audit) comment added describing the 50/100/120/240 ms inconsistency; needs careful recomputation against one consistent baseline.
+- Footnote `--` parenthetical breaks (lines 261, 263, 698): converted to proper punctuation (comma clauses, colons, parens).
+- 3D-parallelism summary figures reused same asset (lines 2618/2627): consolidated into a single `@fig-3d-parallelism-cube-summary` div with a merged caption that covers both the 3D strategy space and the per-step coordination story. Deleted the duplicate `@fig-3d-parallelism-sliced` figure and its surrounding cross-reference paragraph.
+- Manual bold caption outside `fig-cap` (line ~2621): removed; the content moved into the merged figure caption.
 
 ## vol2/data_storage/data_storage.qmd
 

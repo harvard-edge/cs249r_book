@@ -399,26 +399,6 @@ ai_range = np.logspace(0, 4, 500)  # 1 to 10000 FLOP/byte
 
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-for name, peak_tflops, bw_tbs, color in gpus:
-    bw_bytes = bw_tbs * 1e12  # bytes/s
-    peak_flops = peak_tflops * 1e12  # FLOPS
-    ridge = peak_flops/bw_bytes  # FLOP/byte
-
-    # Roofline: min(peak, BW * AI), expressed in TFLOPS
-    attainable = np.minimum(peak_tflops, bw_tbs * 1e3 * ai_range / 1e3)
-    # Simpler: attainable TFLOPS = min(peak_tflops, BW_TB/s * AI * 1e-0)
-    # BW in TB/s * AI in FLOP/byte = TFLOP/s (since TB/s * FLOP/byte = 1e12 * FLOP / (1e12 * byte) * byte/s... )
-    # Let's compute correctly:
-    # attainable FLOPS = min(peak_flops, bw_bytes * AI)
-    # attainable TFLOPS = attainable FLOPS / 1e12
-    attainable_tflops = np.minimum(peak_tflops, (bw_tbs * ai_range))
-
-    ax.plot(ai_range, attainable_tflops, color=color, linewidth=2.0, label=f"{name}")
-
-    # Mark ridge point
-    ax.plot(ridge, peak_tflops, "o", color=color, markersize=8, zorder=5)
-    # Label ridge point
-    # Label ridge point
 label_pos = {
     "V100":  (10, -25, "left", "bottom"),
     "A100":  (13, -23, "left",   "bottom"),
@@ -479,7 +459,7 @@ ax.annotate("",
             )
 )
 
-ax.text(105, 600, "Ridge point shifted\n4.0x in 7 years",
+ax.text(105, 600, "Ridge point shifted\n~2x in 7 years",
         fontsize=8, color="crimson", fontweight="bold",
         ha="center", va="center",
         bbox=dict(boxstyle="round,pad=0.5",
@@ -1369,7 +1349,7 @@ Graph compilation automates what manual kernel engineering achieves for individu
 
 ## Speculative Decoding {#sec-performance-engineering-speculative}
 
-Speculative decoding is a latency optimization that breaks the sequential bottleneck of autoregressive generation by using a smaller draft model to predict multiple tokens, which are then verified in parallel by the target model. Because this technique is primarily employed to meet strict latency service level agreements (SLAs) during model serving, we examine the core algorithm, speedup analysis, and hardware resource implications in detail in @sec-inference-scale-speculative-decoding-c438.
+Speculative decoding is a latency optimization that breaks the sequential bottleneck of autoregressive generation by using a smaller draft model to predict multiple tokens, which are then verified in parallel by the target model. The performance-engineering relevance is that speculative decoding raises the *effective* arithmetic intensity of the decode phase: a single forward pass of the target model now processes $k$ candidate tokens for the same weight-streaming cost as one token, shifting the operating point from deeply memory-bound toward the ridge point on the roofline. The speedup is bounded by the draft model's acceptance rate and breaks down when the draft model is too cheap (low acceptance) or too expensive (compute-bound verification). It interacts with batching: at large batch sizes the decode phase is already closer to compute-bound, so the marginal benefit of speculation shrinks. The full algorithm, speedup analysis, and SLA-driven deployment patterns are in @sec-inference-scale-speculative-decoding-c438.
 
 ```{python}
 #| echo: false
@@ -1853,7 +1833,7 @@ While Hardware Utilization reports how often GPUs are busy, it fails to distingu
 
 ::: {.callout-definition title="Model FLOPs utilization (MFU)"}
 
-***Model FLOPs Utilization (MFU)***\index{Model FLOPS Utilization!definition} is the fraction of the hardware's theoretical peak throughput ($R_{\text{peak}}$) consumed by FLOPs that directly advance model training or inference, excluding overhead from recomputation, padding, and synchronization. The formula and fleet-scale application appear in @sec-performance-engineering-efficiency-frontier.
+***Model FLOPs Utilization (MFU)***\index{Model FLOPS Utilization!definition} is the fraction of the hardware's theoretical peak throughput ($R_{\text{peak}}$) consumed by FLOPs that directly advance model training or inference, excluding overhead from recomputation, padding, and synchronization. The formula and fleet-scale application are developed in @sec-performance-engineering-measurement-scale.
 
 1.  **Significance (quantitative)**: At fleet scale, MFU aggregates across all nodes: communication overhead, load imbalance, and pipeline bubbles each compound the utilization loss, so fleet MFU is consistently below single-node MFU. It is the primary diagnostic for whether hardware investment is translating into model progress, and a 1 percent improvement in MFU across a 10,000-GPU cluster reduces cost by the equivalent of 100 GPUs.
 2.  **Distinction (durable)**: Unlike **Hardware Utilization**\index{Hardware Utilization} (which reports how often the accelerator is "busy"), MFU reports how much of that activity contributes to **Model Convergence** or inference, excluding waste FLOPs from recomputation, padding, and gradient checkpointing overhead.

@@ -56,7 +56,7 @@ The gap between that assumption and reality reveals a fundamental asymmetry in *
 
 ***Gradient Synchronization***\index{Gradient Synchronization!definition} is the collective communication protocol executed at each training step in which every worker transmits its locally computed gradient tensor to all other workers, receives their gradients, and computes an aggregate update that all workers apply identically to their model copies.
 
-1.  **Significance (quantitative)**: A 70B-parameter model in BF16 generates 140 GB of gradient data per worker per step. Synchronizing across 1,000 GPUs via ring AllReduce at 50 GB/s per link requires approximately $2 \times 140$ GB/50 GB/s $\approx 5.6$ seconds of communication per step—dominating the $L_{\text{lat}}$ term in the iron law and consuming 40–70 percent of total training time before overlap techniques are applied.
+1.  **Significance (quantitative)**: A 70B-parameter model in BF16 generates 140 GB of gradient data per worker per step. Synchronizing across 1,000 GPUs via ring AllReduce at 50 GB/s per link requires approximately $2 \times 140/50 \approx 5.6$ seconds of communication per step—dominating the bandwidth (data-movement) term in the iron law and consuming 40--70 percent of total training time before overlap techniques are applied.
 2.  **Distinction (durable)**: Unlike parameter-server approaches (where all workers send gradients to a centralized aggregator whose bandwidth scales as $O(N)$), ring AllReduce distributes the communication across all workers so that each worker's per-step communication cost stays constant at $2 \times (N-1)/N \times M$ regardless of cluster size.
 3.  **Common pitfall**: A frequent misconception is that gradient synchronization overhead scales with the number of GPUs. In ring AllReduce, per-node communication volume is constant as the cluster grows—the bottleneck is the gradient volume per step (proportional to model size), not the number of participants.
 
@@ -610,7 +610,7 @@ The bandwidth-latency trade-off (Principle \ref{pri-alpha-beta-model}) provides 
 | 1 GB             |                          ~20 ms |            ~23 ms |                  ~1.15$\times$ | Bandwidth-dominant; NCCL nearly optimal |
 | 10 GB            |                         ~200 ms |           ~215 ms |                  ~1.08$\times$ | Large payloads saturate the wire        |
 
-: **$\alpha$-$\beta$ Predictions vs. Measured NCCL Performance**: For small messages, NCCL's protocol overhead (memory registration, channel setup, kernel launch) inflates the effective latency by 7--8$\times$ over the bare-wire alpha. For large messages, NCCL achieves within 8--15 percent of theoretical bandwidth, validating the model's predictions in the bandwidth-bound regime. Measurements represent Ring AllReduce on 8-node DGX H100 clusters with InfiniBand NDR 400G. {#tbl-nccl-vs-theory}
+: **$\alpha$-$\beta$ Predictions vs. Measured NCCL Performance**: For small messages, NCCL's protocol overhead (memory registration, channel setup, kernel launch) inflates the effective latency by 7--8$\times$ over the bare-wire alpha. For large messages, NCCL achieves within 8--15 percent of theoretical bandwidth, validating the model's predictions in the bandwidth-bound regime. Values are illustrative reference numbers for Ring AllReduce on 8-node DGX H100 clusters with InfiniBand NDR 400G; actual measurements vary with topology, NCCL version, and tuning. {#tbl-nccl-vs-theory}
 
 The table reveals two critical lessons. First, the alpha-beta model underestimates small-message latency by 7--8$\times$ because it accounts only for wire-level propagation, not the software stack overhead. For latency-sensitive operations (tensor parallelism AllReduce, MoE token routing), the effective alpha is 5--10$\times$ higher than the physical wire latency. Second, for large messages the model is accurate to within 8--15 percent, confirming that bandwidth is the binding constraint and that NCCL's internal optimizations (channel pipelining, kernel fusion) successfully saturate the available links.
 
@@ -947,7 +947,7 @@ Tree AllReduce is, however, the correct choice when latency is the primary bottl
 
 ### Recursive halving-doubling (butterfly) {#sec-communication-butterfly}
 
-Ring and Tree represent two extremes of the latency-bandwidth trade-off: Ring is bandwidth-optimal but latency-poor, while Tree is latency-optimal but bandwidth-poor. A natural question arises: can an algorithm achieve the best of both? A third approach attempts to combine the logarithmic latency of Tree with better bandwidth utilization. The **Recursive Halving-Doubling**\index{Recursive Halving-Doubling} algorithm (sometimes called the Butterfly algorithm\index{Butterfly Algorithm}) operates in $\log_2 N$ rounds. In each round $k$, every GPU exchanges data with a partner at distance $2^k$ in the logical numbering, and the message size halves (in the ReduceScatter phase) or doubles (in the AllGather phase).
+Ring and Tree represent two extremes of the latency-bandwidth trade-off: Ring is bandwidth-optimal but latency-poor, while Tree is latency-optimal but bandwidth-poor. A third approach combines the logarithmic latency of Tree with better bandwidth utilization. The **Recursive Halving-Doubling**\index{Recursive Halving-Doubling} algorithm (sometimes called the Butterfly algorithm\index{Butterfly Algorithm}) operates in $\log_2 N$ rounds. In each round $k$, every GPU exchanges data with a partner at distance $2^k$ in the logical numbering, and the message size halves (in the ReduceScatter phase) or doubles (in the AllGather phase).
 
 In the ReduceScatter phase (first $\log_2 N$ rounds), GPU $i$ partners with GPU $i \oplus 2^k$ (XOR of indices), and they exchange half of their current data. After receiving, each GPU sums its half with the received half, then discards the other half. After $\log_2 N$ rounds, each GPU holds $M/N$ bytes of the fully reduced result. The AllGather phase reverses the process: in each round, partners exchange their reduced chunks, doubling the data each GPU holds until all GPUs have the complete result.
 
@@ -2079,7 +2079,8 @@ When even the fastest wires are not enough, gradient compression provides the fi
 # │ Context: "The Payback of Compression" .callout-notebook
 # │
 # │ Goal: Quantify the speedup of gradient compression (quantization).
-# │ Show: speedup ≈ 3.5x—inline in notebook result.
+# │ Show: speedup as computed from T_compute, T_comm, and compression ratio
+# │       (current model produces ~5.7-fold; inline value drives prose).
 # │ How: T = T_compute + T_comm/Ratio.
 # │
 # │ Imports: mlsysim.book (check)
@@ -2156,7 +2157,7 @@ As clusters grow from hundreds to tens of thousands of accelerators, the communi
 
 ::: {.callout-chapter-connection title="From logic to resilience"}
 
-The fleet now has its *logic* (Parallelism) and its *traffic patterns* (Communication). The map is drawn and the vehicles are built. In the real world, however, the roads are constantly crumbling. GPUs overheat, networks drop packets, and nodes fail mid-calculation.
+The fleet now has its *logic* (Parallelism) and its *traffic patterns* (Communication). The map is drawn and the vehicles are built. In production, however, hardware fails as a statistical certainty: GPUs overheat, networks drop packets, and nodes fail mid-calculation.
 
 In fault tolerance (@sec-fault-tolerance-reliability), we examine how to maintain the illusion of a perfect supercomputer on imperfect hardware. We move from the logic of movement to the mechanics of survival, exploring checkpointing, recovery, and elastic training.
 
