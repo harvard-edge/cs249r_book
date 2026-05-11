@@ -16,7 +16,7 @@ This appendix provides a compact diagnostic framework—**Data · Algorithm · M
 
 This appendix is designed as a reference. Start with the scorecard-style metrics, form a hypothesis about which axis dominates, and then pick the tool that can confirm (or falsify) that hypothesis. Conventions used here follow the book-wide notation (for example, we reserve $B$ for batch size and use $\text{BW}$ for bandwidth).
 
-When training is slow, check accelerator utilization, data wait time, and MFU, then map each to its Data, Algorithm, or Machine axis. When serving misses a Service Level Agreement (SLA), identify whether you are latency-bound (overhead), memory-bound (weight/KV movement), or compute bound. When cost is exploding, use the D·A·M rubric to ensure you are improving the dominant term, not polishing a non-bottleneck.
+When training is slow, check accelerator utilization, data wait time, and Model FLOPs Utilization (MFU), then map each to its Data, Algorithm, or Machine axis. When serving misses a Service Level Agreement (SLA), identify whether you are latency-bound (overhead), memory-bound (weight/KV movement), or compute bound. When cost is exploding, use the D·A·M rubric to ensure you are improving the dominant term, not polishing a non-bottleneck.
 
 ```{python}
 #| echo: false
@@ -114,7 +114,7 @@ class DAMTaxonomy:
 
 :::
 
-The **Data · Algorithm · Machine (D·A·M) taxonomy** is the primary diagnostic framework for ML systems engineering. It formalizes the interdependence between information flow, mathematical logic, and physical execution. When performance stalls or behavior degrades, ask: *where is the flow blocked?* This taxonomy helps practitioners isolate the dominant bottleneck among three collectively exhaustive axes[^fn-mece], while recognizing that real systems often involve boundary cases where two or more axes interact.
+The **Data · Algorithm · Machine (D·A·M) taxonomy** is the primary diagnostic framework for ML systems engineering. It formalizes the interdependence between information flow, mathematical logic, and physical execution. When performance stalls or behavior degrades, the diagnostic task is to identify *where the flow is blocked*. This taxonomy helps practitioners isolate the dominant bottleneck among three collectively exhaustive axes[^fn-mece], while recognizing that real systems often involve boundary cases where two or more axes interact.
 
 [^fn-mece]: **MECE (Mutually Exclusive, Collectively Exhaustive)**: A classification principle from management consulting (popularized by McKinsey) requiring that categories do not overlap and together cover every possibility. D·A·M uses the exhaustive part as a first-pass diagnostic: every bottleneck should be explainable through Data, Algorithm, Machine, or their interactions, even when the cleanest diagnosis names a dominant axis plus a boundary effect.
 
@@ -164,10 +164,10 @@ Understanding the landscape tells you *where* a technique lives. The next step i
 
 ## Iron Law Mapping {#sec-dam-taxonomy-iron-law-mapping-05db}
 
-The performance of any ML task is governed by the distribution of work across the D·A·M axes. The iron law Mapping reveals which component's variables dominate the execution time:
+The performance of any ML task is governed by the distribution of work across the D·A·M axes. The iron law mapping reveals which component's variables dominate the execution time:
 $$ T = \underbrace{ \frac{D_{\text{vol}}}{\text{BW}} }_{\text{Data (D)}} + \underbrace{ \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} }_{\text{Algorithm (A) / Machine (M)}} + \underbrace{ L_{\text{lat}} }_{\text{Overhead}} $$
 
-Note that Algorithm and Machine share the compute term; they are separated by which variable you control. Reducing the total operations ($O$) is an **Algorithm** lever, while improving the hardware's peak throughput ($R_{\text{peak}}$) or utilization ($\eta_{\text{hw}}$) is a **Machine** lever.
+Algorithm and Machine share the compute term, separated by which variable the engineer controls. Reducing the total operations ($O$) is an **Algorithm** lever, while improving the hardware's peak throughput ($R_{\text{peak}}$) or utilization ($\eta_{\text{hw}}$) is a **Machine** lever.
 
 This equation transforms performance debugging from a qualitative guessing game into a quantitative engineering problem. Every bottleneck hides in one of these terms. If your system is slow, it is because you are moving too much data ($D_{\text{vol}}$), lacking bandwidth ($\text{BW}$), executing too many operations ($O$), or failing to use your hardware's peak capability ($\eta_{\text{hw}}$). The levers below map specific optimizations to the variable they improve.
 
@@ -199,7 +199,7 @@ Overlap only helps when the D·A·M axes are reasonably balanced. If one term do
 The latency term $L_{\text{lat}}$ (kernel launch, synchronization barriers, Python dispatch) typically cannot be overlapped—it represents serialization points where all components must wait. This is why **kernel fusion** is so powerful: it eliminates $L_{\text{lat}}$ by combining operations, not just by speeding up any single component.
 :::
 
-The iron law tells you *how much* time each axis consumes. But it leaves one critical question unanswered: when the bottleneck sits at the boundary between Data and Machine, how do you tell which side you are on? The answer lies in a single ratio.
+The iron law tells the engineer *how much* time each axis consumes. One critical question remains: when the bottleneck sits at the boundary between Data and Machine, which side is binding? The answer lies in a single ratio.
 
 ## Arithmetic Intensity Boundary {#sec-dam-taxonomy-arithmetic-intensity-boundary-7f5e}
 
@@ -221,7 +221,7 @@ In the heat of a production outage, you rarely have time to solve the full iron 
 *   **If arithmetic intensity $<$ 100 FLOPs/byte**: The workload is likely memory bound (Data/Machine boundary). This threshold is approximate for current-generation accelerators; compute the hardware's specific ridge point ($R_{\text{peak}}/\text{BW}$) for a precise boundary.
 *   **If the system works in dev but fails in prod**: Suspect data drift (Data component).
 
-Common industry labels map to DAM components as follows: memory bound typically indicates a **Data** bottleneck (information cannot reach the accelerator fast enough), compute bound indicates a **Machine** bottleneck (the accelerator is fully saturated), and latency bound indicates an **Algorithm** bottleneck (serial operation depth or overhead dominates).
+Common industry labels map to D·A·M components as follows: memory bound typically indicates a **Data** bottleneck (information cannot reach the accelerator fast enough), compute bound indicates a **Machine** bottleneck (the accelerator is fully saturated), and latency bound indicates an **Algorithm** bottleneck (serial operation depth or overhead dominates).
 
 ### Bottleneck diagnostic {#sec-dam-taxonomy-bottleneck-diagnostic-3fc9}
 
@@ -255,11 +255,11 @@ Theoretical constraints often manifest as confusing symptoms in production. Thes
 
 #### Symptom {.unnumbered}
 
-You provision a massive A100 GPU instance to speed up training, but your training time hardly improves. `nvidia-smi` shows GPU utilization fluctuating between ten percent and 40 percent.
+A team provisions a large A100 GPU instance to speed up training, but training time hardly improves. `nvidia-smi` shows GPU utilization fluctuating between ten percent and 40 percent.
 
 #### Diagnosis {.unnumbered}
 
-The **Data** component cannot supply the **Machine** fast enough. You are I/O bound.
+The **Data** component cannot supply the **Machine** fast enough. The workload is I/O bound.
 
 #### The fix {.unnumbered}
 
@@ -329,7 +329,7 @@ The diagnostic matrix tells you *what* to suspect. The next question is *how* to
 
 ## Tooling Map {#sec-dam-taxonomy-tooling-map-e09b}
 
-Once you have a hypothesis (for example, "I suspect I am Machine Bound"), you need evidence to prove it. Abstract concepts must be measured with concrete utilities. @tbl-dam-tooling connects the theoretical components to the specific Linux and Python profiling tools you should reach for.
+Once a hypothesis exists (for example, "the workload appears Machine-bound"), evidence is needed to confirm it. Abstract concepts must be measured with concrete utilities. @tbl-dam-tooling connects the theoretical components to the specific Linux and Python profiling tools you should reach for.
 
 | **Axis**      | **Key Metric**                        | **Primary Tool**        | **Secondary Tool**             |
 |:--------------|:--------------------------------------|:------------------------|:-------------------------------|
@@ -363,7 +363,7 @@ Systems engineering requires distinguishing between *growth trajectories* and *f
 
 ### Scaling laws (the journey) {#sec-dam-taxonomy-scaling-laws-journey-4085}
 
-scaling laws[^fn-scaling-laws] are empirical power laws that predict *how fast* model performance improves as we increase resources. The two landmark results are Kaplan Scaling [@kaplan2020scaling], which showed that performance improves predictably with parameters ($N$), data ($D$), and compute ($C$), and Chinchilla Scaling [@hoffmann2022chinchilla], which refined this insight by defining the *optimal ratio* of these resources (for example, $D \approx 20N$ tokens per parameter).
+Scaling laws[^fn-scaling-laws] are empirical power laws that predict *how fast* model performance improves as we increase resources. The two landmark results are Kaplan Scaling [@kaplan2020scaling], which showed that performance improves predictably with parameters ($N$), data ($D$), and compute ($C$), and Chinchilla Scaling [@hoffmann2022chinchilla], which refined this insight by defining the *optimal ratio* of these resources (for example, $D \approx 20N$ tokens per parameter).
 
 [^fn-scaling-laws]: **Scaling Laws**: Empirical relationships, typically power laws of the form $L(x) \propto x^{-\alpha}$, that predict model loss as a function of dataset size, parameter count, or compute budget. First systematically studied by @kaplan2020scaling at OpenAI, then refined by @hoffmann2022chinchilla with the Chinchilla result. @sec-model-training discusses scaling laws in detail.
 
