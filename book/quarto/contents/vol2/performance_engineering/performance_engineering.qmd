@@ -309,7 +309,7 @@ $$
 # │       A100 FP16 (~153), H100 FP16 (~295), and H100 FP8 (~591) to explain why
 # │       each new generation makes more workloads memory-bound.
 # │ Show: ~153 FLOP/byte (A100), ~295 (H100 FP16), ~591 (H100 FP8)—inline prose.
-# │ How: Extract pre-computed ridge quantities from PerformanceSetup; convert to
+# │ How: Extract precomputed ridge quantities from PerformanceSetup; convert to
 # │       FLOP/byte using .m_as(flop/byte); guard ordering with check().
 # │
 # │ Imports: (none—values from perf-eng-setup cell), mlsysim.book (check)
@@ -595,13 +595,13 @@ The constraint is memory: each additional request in the batch requires its own 
 
 The continuous batching systems introduced in @sec-inference-scale manage batch size dynamically, adding and removing requests as they complete. Performance engineering's role is to maximize the effective batch size by minimizing the per-request memory footprint, primarily through KV cache compression and weight quantization.
 
-A critical enabler for large batch sizes is **paged KV cache management**[^fn-paged-attention-os], introduced by vLLM [@kwon2023]. Traditional KV cache implementations pre-allocate contiguous memory for each request's maximum possible sequence length.
+A critical enabler for large batch sizes is **paged KV cache management**[^fn-paged-attention-os], introduced by vLLM [@kwon2023]. Traditional KV cache implementations preallocate contiguous memory for each request's maximum possible sequence length.
 
-[^fn-paged-attention-os]: **PagedAttention**\index{PagedAttention}: Named by direct analogy to OS virtual memory paging, where the OS maps noncontiguous physical pages to contiguous virtual addresses. The insight, presented at SOSP 2023, was that the same mechanism eliminates internal fragmentation in KV caches, recovering the 60--80 percent of GPU memory wasted by worst-case pre-allocation. This single abstraction transformed LLM serving economics by enabling 2--4$\times$ larger batch sizes without any change to model weights or precision. \index{PagedAttention!memory management}
+[^fn-paged-attention-os]: **PagedAttention**\index{PagedAttention}: Named by direct analogy to OS virtual memory paging, where the OS maps noncontiguous physical pages to contiguous virtual addresses. The insight, presented at SOSP 2023, was that the same mechanism eliminates internal fragmentation in KV caches, recovering the 60--80 percent of GPU memory wasted by worst-case preallocation. This single abstraction transformed LLM serving economics by enabling 2--4$\times$ larger batch sizes without any change to model weights or precision. \index{PagedAttention!memory management}
 
 If the maximum is 4,096 tokens but the average is 500, approximately 88 percent of the allocated memory is wasted. PagedAttention divides the KV cache into fixed-size blocks (pages), allocated on demand as the sequence grows. This eliminates memory fragmentation and enables near-100 percent utilization of the KV cache memory budget. The performance impact is indirect but substantial: by reducing memory waste, PagedAttention enables 2--4$\times$ larger effective batch sizes, which in turn improve throughput and GPU utilization through the batch size mechanism described earlier.
 
-PagedAttention and KV cache quantization interact multiplicatively. PagedAttention reduces memory *waste* (from fragmentation), while quantization reduces memory *usage* (from precision). Together, they increase the effective batch size by 8--16$\times$ compared to a baseline system with pre-allocated FP16 KV caches, fundamentally changing the economics of LLM serving.
+PagedAttention and KV cache quantization interact multiplicatively. PagedAttention reduces memory *waste* (from fragmentation), while quantization reduces memory *usage* (from precision). Together, they increase the effective batch size by 8--16$\times$ compared to a baseline system with preallocated FP16 KV caches, fundamentally changing the economics of LLM serving.
 
 ### The prefill-decode decomposition {#sec-performance-engineering-prefill-decode}
 
@@ -722,11 +722,11 @@ GPU kernel fusion falls into three categories, each with different complexity an
 
 Element-wise fusion is the simplest form: consecutive element-wise operations (add, multiply, activation functions) combine into a single kernel. Because each output element depends on exactly one input element, this fusion is always legal and straightforward to implement. Every modern deep learning framework performs element-wise fusion automatically.
 
-Reduction fusion combines an element-wise operation with a subsequent reduction (such as summing elements for a loss function, or computing mean and variance for layer normalization). Reductions require inter-thread communication within the kernel, using warp-level shuffle instructions or shared memory to aggregate partial results across threads. Despite this complexity, the memory savings are substantial: the intermediate tensor before the reduction never materializes in HBM. For layer normalization specifically, reduction fusion avoids writing the large pre-normalization tensor to HBM and reading it back for the mean/variance computation.
+Reduction fusion combines an element-wise operation with a subsequent reduction (such as summing elements for a loss function, or computing mean and variance for layer normalization). Reductions require inter-thread communication within the kernel, using warp-level shuffle instructions or shared memory to aggregate partial results across threads. Despite this complexity, the memory savings are substantial: the intermediate tensor before the reduction never materializes in HBM. For layer normalization specifically, reduction fusion avoids writing the large prenormalization tensor to HBM and reading it back for the mean/variance computation.
 
 Operator-specific fusion is the most impactful and the most difficult category. These are custom kernels designed for a specific sequence of operations, such as fused attention or fused GEMM-bias-activation. The kernel architect must reason about data flow, shared memory allocation, and thread scheduling simultaneously. The payoff is substantial: FlashAttention, which we examine next, reduces attention memory traffic from quadratic to linear in sequence length.
 
-To appreciate the quantitative impact, consider each category applied to a single transformer layer with hidden dimension 4096 and batch size 2048 in FP16. Element-wise fusion of a bias-GELU-dropout chain eliminates two intermediate tensors of 16 MB each, saving 64 MB of HBM traffic (two writes plus two reads) per layer. Across 80 layers, this reclaims 5.1 GB of memory bandwidth per forward pass. Reduction fusion of LayerNorm avoids materializing the pre-normalization tensor (16 MB) and the intermediate mean/variance statistics, saving an additional 48 MB per layer. Operator-specific attention fusion (FlashAttention) provides the largest single gain: for a sequence length of 8192, it eliminates the 128 MB per-head attention score matrix, saving over 4 GB per layer across 32 heads. The cumulative effect of all three fusion categories can reduce total HBM traffic by 60--80 percent for a transformer forward pass, translating directly into proportional wall-clock speedup for memory-bound workloads.
+To appreciate the quantitative impact, consider each category applied to a single transformer layer with hidden dimension 4096 and batch size 2048 in FP16. Element-wise fusion of a bias-GELU-dropout chain eliminates two intermediate tensors of 16 MB each, saving 64 MB of HBM traffic (two writes plus two reads) per layer. Across 80 layers, this reclaims 5.1 GB of memory bandwidth per forward pass. Reduction fusion of LayerNorm avoids materializing the prenormalization tensor (16 MB) and the intermediate mean/variance statistics, saving an additional 48 MB per layer. Operator-specific attention fusion (FlashAttention) provides the largest single gain: for a sequence length of 8192, it eliminates the 128 MB per-head attention score matrix, saving over 4 GB per layer across 32 heads. The cumulative effect of all three fusion categories can reduce total HBM traffic by 60--80 percent for a transformer forward pass, translating directly into proportional wall-clock speedup for memory-bound workloads.
 
 ### CUDA graphs: Eliminating launch overhead {#sec-performance-engineering-cuda-graphs}
 
@@ -1228,7 +1228,7 @@ Graph compilation has reshaped the performance engineering workflow. Before `tor
 
 `torch.compile` supports multiple optimization levels that trade compilation time for runtime performance:
 
-The `default` mode applies standard optimizations: element-wise fusion, memory planning, and kernel selection from the pre-tuned library. Compilation is fast (seconds to minutes) and suitable for development iteration.
+The `default` mode applies standard optimizations: element-wise fusion, memory planning, and kernel selection from the pretuned library. Compilation is fast (seconds to minutes) and suitable for development iteration.
 
 The `reduce-overhead` mode additionally wraps the compiled graph in CUDA Graphs (discussed in @sec-performance-engineering-cuda-graphs), eliminating kernel launch overhead. The benefit is greatest for small models where launch overhead constitutes a significant fraction of execution time.
 
@@ -1774,9 +1774,9 @@ Communication bubbles appear as GPU idle periods coinciding with NCCL AllReduce 
 
 Load imbalance causes some GPUs to finish earlier and wait for stragglers. Uneven work distribution is the root cause. For MoE, adjusting auxiliary loss and capacity factors rebalances the load; for tensor parallelism, ensuring even dimension splitting eliminates the skew.
 
-Memory allocation thrashing shows repeated allocations and deallocations of large tensors, with peak memory far exceeding the steady-state usage. The framework is creating new tensors for each forward pass instead of reusing buffers. Enabling torch.compile's memory planning, using pre-allocated buffer pools, or applying activation checkpointing addresses this waste.
+Memory allocation thrashing shows repeated allocations and deallocations of large tensors, with peak memory far exceeding the steady-state usage. The framework is creating new tensors for each forward pass instead of reusing buffers. Enabling torch.compile's memory planning, using preallocated buffer pools, or applying activation checkpointing addresses this waste.
 
-CPU-bound data loading causes GPU utilization to drop periodically to zero while the CPU prepares the next batch. Data preprocessing or tokenization is not pipelined with GPU computation. Increasing the number of data loading workers, moving tokenization to a dedicated preprocessing service, or pre-tokenizing the dataset resolves this bottleneck. This pattern is more common in training than in inference but can occur in inference when input preprocessing (image resizing, text tokenization) is expensive.
+CPU-bound data loading causes GPU utilization to drop periodically to zero while the CPU prepares the next batch. Data preprocessing or tokenization is not pipelined with GPU computation. Increasing the number of data loading workers, moving tokenization to a dedicated preprocessing service, or pretokenizing the dataset resolves this bottleneck. This pattern is more common in training than in inference but can occur in inference when input preprocessing (image resizing, text tokenization) is expensive.
 
 ::: {.callout-notebook title="The profiler detective"}
 
@@ -2124,7 +2124,7 @@ ML system performance is nonstationary. GPU thermal throttling reduces clock spe
 
 **Pitfall**: *Optimizing for average case while ignoring tail latency.*
 
-A serving system may achieve excellent average inter-token latency (30 ms) while exhibiting P99 latency of 500 ms due to garbage collection pauses in the Python runtime, CUDA memory allocation stalls, or occasional AllReduce delays from network congestion. For interactive applications, the user experience is dominated by the worst case, not the average. Performance engineering for production systems must profile and optimize tail latency specifically, often through techniques orthogonal to the throughput optimizations in this chapter: pre-allocated memory pools, CUDA graph replay (which eliminates allocation variance), and priority scheduling for latency-sensitive requests.
+A serving system may achieve excellent average inter-token latency (30 ms) while exhibiting P99 latency of 500 ms due to garbage collection pauses in the Python runtime, CUDA memory allocation stalls, or occasional AllReduce delays from network congestion. For interactive applications, the user experience is dominated by the worst case, not the average. Performance engineering for production systems must profile and optimize tail latency specifically, often through techniques orthogonal to the throughput optimizations in this chapter: preallocated memory pools, CUDA graph replay (which eliminates allocation variance), and priority scheduling for latency-sensitive requests.
 
 Recognizing these pitfalls saves teams from wasting months optimizing the wrong layer of the stack.
 

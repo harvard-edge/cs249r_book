@@ -666,17 +666,17 @@ Autoregressive language models break this assumption. Each request generates a d
 
 [^fn-vllm-etymology]: **vLLM (Virtual LLM)**: The name signals its core design: applying OS-style virtual memory to KV cache management, decoupling logical sequence addresses from physical GPU memory. Developed at UC Berkeley (2023), vLLM achieved 2--4$\times$ throughput over FasterTransformer and up to 24$\times$ over HuggingFace Transformers by eliminating the 60--80 percent memory fragmentation that capped batch sizes in prior serving systems. \index{vLLM!etymology}
 
-Recommendation systems introduce a third pattern: feature-parallel batching. Because the bottleneck is distributed embedding lookup rather than dense matrix multiplication, these systems batch requests by feature type and shard the batch across embedding servers. The dense MLP computation that follows can then operate on pre-fetched, pre-batched feature vectors. The batching strategies section (@sec-inference-scale-batching-strategies-scale-6733) develops these approaches in full quantitative detail.
+Recommendation systems introduce a third pattern: feature-parallel batching. Because the bottleneck is distributed embedding lookup rather than dense matrix multiplication, these systems batch requests by feature type and shard the batch across embedding servers. The dense MLP computation that follows can then operate on prefetched, prebatched feature vectors. The batching strategies section (@sec-inference-scale-batching-strategies-scale-6733) develops these approaches in full quantitative detail.
 
-### Memory management: From pre-allocation to paging {#sec-inference-scale-framework-selection-criteria-6c20}
+### Memory management: From preallocation to paging {#sec-inference-scale-framework-selection-criteria-6c20}
 
 Serving systems differ fundamentally in how they manage accelerator memory, and this difference determines the maximum concurrent request capacity.
 
 Pre-allocated memory management reserves a fixed memory budget per request at admission time based on the maximum possible output length. For a model supporting 4,096-token outputs, every request reserves memory for 4,096 tokens regardless of whether it generates 50 or 4,000. This approach is simple and predictable but wastes memory proportional to the gap between maximum and actual output lengths. In practice, 60--80 percent of reserved KV cache memory goes unused.
 
-Paged memory management, inspired by operating system virtual memory, allocates memory in fixed-size blocks (pages) and maps logical sequence positions to physical memory locations through a block table. As a request generates tokens, new physical blocks are allocated on demand. When generation completes, blocks return to the free pool immediately. This approach, exemplified by PagedAttention (covered in @sec-inference-scale-pagedattention-3c94), achieves near-100 percent memory utilization by eliminating both internal fragmentation (partially filled pre-allocations) and external fragmentation (unusable gaps between allocations).
+Paged memory management, inspired by operating system virtual memory, allocates memory in fixed-size blocks (pages) and maps logical sequence positions to physical memory locations through a block table. As a request generates tokens, new physical blocks are allocated on demand. When generation completes, blocks return to the free pool immediately. This approach, exemplified by PagedAttention (covered in @sec-inference-scale-pagedattention-3c94), achieves near-100 percent memory utilization by eliminating both internal fragmentation (partially filled preallocations) and external fragmentation (unusable gaps between allocations).
 
-The memory management strategy directly determines batch capacity: paged systems can serve 2--4$\times$ more concurrent requests than pre-allocated systems on the same hardware, because they reclaim memory that pre-allocation wastes. For a service with a fixed GPU budget, this translates directly to 2--4$\times$ lower cost per request.
+The memory management strategy directly determines batch capacity: paged systems can serve 2--4$\times$ more concurrent requests than preallocated systems on the same hardware, because they reclaim memory that preallocation wastes. For a service with a fixed GPU budget, this translates directly to 2--4$\times$ lower cost per request.
 
 ### Scheduling policy: FCFS, preemptive, and priority-aware {#sec-inference-scale-vllm-architecture-9b84}
 
@@ -1093,7 +1093,7 @@ Performance at Different Batch Sizes
 # │
 # │ Goal: Summarize serving performance and verify consistency via Little's Law.
 # │ Show: Throughput, utilization, and queue lengths for various batch sizes.
-# │ How: Load pre-computed results into GPT3ServingResults class;
+# │ How: Load precomputed results into GPT3ServingResults class;
 # │      apply L = lambda * W to verify requests in system.
 # │
 # │ Imports: mlsysim.book (check)
@@ -1320,7 +1320,7 @@ The autoregressive bottleneck (Principle \ref{pri-autoregressive-bottleneck}) go
 
 1.  **Significance (quantitative)**: It maximizes the system throughput $(\eta_{\text{hw}})$ by eliminating the padding waste and head-of-line blocking inherent in static batching. It ensures the GPU remains saturated even when requests have widely varying sequence lengths.
 2.  **Distinction (durable)**: Unlike static or dynamic batching (which group requests at the *request* level), continuous batching operates at the **Iteration Level**\index{Iteration Level}, dynamically reshaping the compute tensor at each clock cycle.
-3.  **Common pitfall**: A frequent misconception is that continuous batching is "purely a scheduler change." In reality, it requires a **Dynamic Memory Manager** (like PagedAttention) because the KV caches for different requests grow and shrink at different rates, preventing static memory pre-allocation.
+3.  **Common pitfall**: A frequent misconception is that continuous batching is "purely a scheduler change." In reality, it requires a **Dynamic Memory Manager** (like PagedAttention) because the KV caches for different requests grow and shrink at different rates, preventing static memory preallocation.
 
 :::
 
@@ -2158,7 +2158,7 @@ $$ \text{Max Batch} = \lfloor \frac{480}{43} \rfloor = \mathbf{11} $$
 
 ### The fragmentation problem {#sec-inference-scale-fragmentation-problem-28be}
 
-Traditional memory allocation for KV cache pre-allocates contiguous memory for each sequence based on maximum expected length. This creates two forms of waste:
+Traditional memory allocation for KV cache preallocates contiguous memory for each sequence based on maximum expected length. This creates two forms of waste:
 
 Internal fragmentation wastes memory within each allocation. Sequences shorter than the maximum allocation leave the unused portion idle. If maximum length is 4,096 but average output is 100 tokens, 97.5 percent of allocated memory is wasted.
 
@@ -2188,7 +2188,7 @@ Production systems report 60--80 percent memory waste from fragmentation under r
 ***PagedAttention**\index{PagedAttention!block table}*\index{PagedAttention!definition} is a memory management technique that applies virtual memory principles to **KV Cache**\index{KV Cache!quantization} allocation, storing attention states in noncontiguous, fixed-size physical blocks.
 
 1.  **Significance (quantitative)**: It eliminates **Internal and External Fragmentation**\index{Internal and External Fragmentation}, which can waste up to 80 percent of GPU memory. By allowing sequences to grow dynamically, it enables 2--4$\times$ higher **Concurrent Throughput** $(\eta_{\text{hw}})$ on the same hardware.
-2.  **Distinction (durable)**: Unlike **Contiguous Allocation** (which requires pre-reserving the maximum context length), PagedAttention uses a **Block Table** to map logical sequence indices to physical memory pages, allocating only what is currently used.
+2.  **Distinction (durable)**: Unlike **Contiguous Allocation** (which requires prereserving the maximum context length), PagedAttention uses a **Block Table** to map logical sequence indices to physical memory pages, allocating only what is currently used.
 3.  **Common pitfall**: A frequent misconception is that PagedAttention speeds up individual token math. In reality, it is a **Capacity Optimization**\index{Optimization!capacity}: it improves *system-level* efficiency by allowing larger batch sizes, though it adds a small **Indirection Overhead** $(L_{\text{lat}})$ for the pointer lookups.
 
 :::
@@ -2207,11 +2207,11 @@ PagedAttention [@kwon2023], introduced in vLLM, applies virtual memory concepts 
 
 @fig-paged-attention illustrates the key concepts including page tables that map logical sequence positions to physical memory pages, block size that defines the number of tokens per page (typically 16 tokens), and physical blocks that provide fixed-size memory allocations\index{Memory Allocation!contiguous} assignable to any sequence.
 
-::: {#fig-paged-attention fig-env="figure" fig-pos="htb" fig-cap="**KV Cache Fragmentation and the PagedAttention Solution**: Top left: internal fragmentation wastes memory by pre-allocating for the maximum sequence length. Top right: external fragmentation leaves unusable memory gaps. Bottom: PagedAttention solves this by mapping contiguous logical pages of a sequence to noncontiguous physical memory blocks via a block table, allowing the system to fill fragmentation gaps with small blocks from any sequence." fig-alt="A three-part diagram on memory fragmentation. Top panels show internal and external fragmentation. The bottom panel shows the PagedAttention solution using a block table to map logical pages to scattered physical blocks, eliminating waste."}
+::: {#fig-paged-attention fig-env="figure" fig-pos="htb" fig-cap="**KV Cache Fragmentation and the PagedAttention Solution**: Top left: internal fragmentation wastes memory by preallocating for the maximum sequence length. Top right: external fragmentation leaves unusable memory gaps. Bottom: PagedAttention solves this by mapping contiguous logical pages of a sequence to noncontiguous physical memory blocks via a block table, allowing the system to fill fragmentation gaps with small blocks from any sequence." fig-alt="A three-part diagram on memory fragmentation. Top panels show internal and external fragmentation. The bottom panel shows the PagedAttention solution using a block table to map logical pages to scattered physical blocks, eliminating waste."}
 ![](images/svg/kv-cache-fragmentation.svg)
 :::
 
-PagedAttention provides several benefits. It eliminates internal fragmentation by allocating only the pages needed for actual tokens. It eliminates external fragmentation because any free page can be used by any sequence. It enables dynamic growth so sequences can grow without pre-allocation. It supports memory sharing so common prefixes can share physical pages.
+PagedAttention provides several benefits. It eliminates internal fragmentation by allocating only the pages needed for actual tokens. It eliminates external fragmentation because any free page can be used by any sequence. It enables dynamic growth so sequences can grow without preallocation. It supports memory sharing so common prefixes can share physical pages.
 
 ::: {.callout-example title="PagedAttention implementation details"}
 
@@ -4580,7 +4580,7 @@ Consider traffic spike from 1000 to 3000 QPS:
 
 **Target state**\index{Target State}: 30 replicas for 3000 QPS
 
-**Without pre-warming**\index{Without Pre-Warming}:
+**Without prewarming**\index{Without Pre-Warming}:
 
 - T=0: Spike detected, scale-up triggered
 - T=0 to T=5min: Cold start for 20 new replicas
@@ -4634,7 +4634,7 @@ def predict_demand(current_time, history):
 
 Event-driven scaling scales proactively for known events, as shown in @lst-event-driven-scaling.\index{Scaling!event-driven}
 
-::: {#lst-event-driven-scaling lst-cap="**Event-Driven Scaling**: Scheduled scaling rules that pre-provision capacity for product launches and recurring traffic spikes."}
+::: {#lst-event-driven-scaling lst-cap="**Event-Driven Scaling**: Scheduled scaling rules that preprovision capacity for product launches and recurring traffic spikes."}
 
 ```{.yaml}
 scheduled_scaling:
@@ -4734,7 +4734,7 @@ The cost savings above depend on anticipating traffic before it arrives. As @fig
 
 ### Warm pool management {#sec-inference-scale-warm-pool-management-a360}
 
-Maintaining a pool of pre-warmed replicas reduces effective cold start time:
+Maintaining a pool of prewarmed replicas reduces effective cold start time:
 
 Warm pool sizing
 
@@ -4767,7 +4767,7 @@ $$T_{\text{response}} = T_{\text{detect}} + T_{\text{decide}} + T_{\text{provisi
 | **Provisioning**         |    30s--5min | Warm pools              |
 | **Warmup**\index{Warmup} |       5--30s | Pre-compilation         |
 
-Each component offers distinct optimization opportunities. Detection speed improves by collecting metrics at 1-second intervals rather than 60-second intervals, at the cost of noisier signals and higher metric volume. Decision speed improves by pre-computing scaling plans for predicted scenarios so that when a trigger fires, the system executes a pre-computed plan rather than computing one from scratch. Provisioning speed improves most dramatically through warm pools, which eliminate the provisioning phase entirely for anticipated demand. Warmup speed improves through pre-compiled inference engines that skip JIT compilation, reducing the final phase from 30 seconds to under 5 seconds.
+Each component offers distinct optimization opportunities. Detection speed improves by collecting metrics at 1-second intervals rather than 60-second intervals, at the cost of noisier signals and higher metric volume. Decision speed improves by precomputing scaling plans for predicted scenarios so that when a trigger fires, the system executes a precomputed plan rather than computing one from scratch. Provisioning speed improves most dramatically through warm pools, which eliminate the provisioning phase entirely for anticipated demand. Warmup speed improves through precompiled inference engines that skip JIT compilation, reducing the final phase from 30 seconds to under 5 seconds.
 
 ### Spot and preemptible instances {#sec-inference-scale-spot-preemptible-instances-c969}
 
@@ -5156,7 +5156,7 @@ Deployment configurations
 
 Production serving frameworks integrate quantization with their batching and memory management systems.
 
-@lst-vllm-quantization shows how vLLM loads a pre-quantized AWQ model.\index{Quantization!vllm}
+@lst-vllm-quantization shows how vLLM loads a prequantized AWQ model.\index{Quantization!vllm}
 
 ::: {#lst-vllm-quantization lst-cap="**vLLM Quantization**: Loading an AWQ-quantized model with automatic kernel selection and KV cache management."}
 
@@ -5490,14 +5490,14 @@ Several key design decisions shape this system.
 
 TikTok separates user understanding (online) from content understanding (offline) through a two-tower architecture with caching[^fn-two-tower-serving]:
 
-[^fn-two-tower-serving]: **Two-Tower Architecture**: Encodes user features and item features through separate neural networks ("towers") into embeddings, then scores via dot product. The serving advantage: item embeddings can be pre-computed offline and cached, reducing online inference to the user tower forward pass plus a sub-millisecond vector similarity lookup. The trade-off is reduced model expressiveness from late interaction, since the towers cannot attend to each other's features during encoding. \index{Two-Tower Architecture!architecture, two-tower, serving}
+[^fn-two-tower-serving]: **Two-Tower Architecture**: Encodes user features and item features through separate neural networks ("towers") into embeddings, then scores via dot product. The serving advantage: item embeddings can be precomputed offline and cached, reducing online inference to the user tower forward pass plus a sub-millisecond vector similarity lookup. The trade-off is reduced model expressiveness from late interaction, since the towers cannot attend to each other's features during encoding. \index{Two-Tower Architecture!architecture, two-tower, serving}
 
 | **Tower**       | **Update Frequency** | **Latency** | **Compute**  |
 |:----------------|:---------------------|:------------|:-------------|
 | **User tower**  | Real-time            | 5 ms        | GPU (online) |
 | **Video tower** | Hourly               | N/A         | GPU (batch)  |
 
-Video embeddings are pre-computed and cached, eliminating vision inference from the critical path for most requests. Only new videos (uploaded within the hour) require online vision inference.
+Video embeddings are precomputed and cached, eliminating vision inference from the critical path for most requests. Only new videos (uploaded within the hour) require online vision inference.
 
 Like Meta, TikTok uses CPU for embedding operations and GPU for dense model computation:
 
