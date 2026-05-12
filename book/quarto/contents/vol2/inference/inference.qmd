@@ -29,7 +29,7 @@ Training a model is a one-time expense; serving it is perpetual. A model trained
 
 The serving cost dominance law\index{Serving Cost Dominance Law} (Principle \ref{pri-serving-cost-dominance}) captures this economic reality: over a successful model's lifetime, Inference OpEx exceeds Training CapEx by orders of magnitude. Optimization efforts should be disproportionately focused on the inference path, even if they increase training cost or complexity.
 
-Optimizations that shave milliseconds from inference latency or percentage points from GPU utilization compound across billions of requests into massive savings or costs. Performance Engineering (@sec-performance-engineering) developed the optimization toolkit: fusion, precision, compilation, speculative decoding. This chapter applies those tools to build serving systems that handle millions of requests under strict latency budgets. Reliability requirements intensify because downtime during serving means lost revenue and broken user experiences, not merely delayed experiments. The architecture that was optimal for training (large batches, high throughput, tolerance for latency variance) becomes the architecture that bankrupts operations or frustrates users at serving time. Inference at scale is where ML systems live or die economically.
+Optimizations that shave milliseconds from inference latency or percentage points from GPU utilization compound across billions of requests into substantial savings or costs. Performance Engineering (@sec-performance-engineering) developed the optimization toolkit: fusion, precision, compilation, speculative decoding. This chapter applies those tools to build serving systems that handle millions of requests under strict latency budgets. Reliability requirements intensify because downtime during serving means lost revenue and broken user experiences, not merely delayed experiments. The architecture that was optimal for training (large batches, high throughput, tolerance for latency variance) becomes financially unsustainable or user-hostile at serving time. Inference at scale is where ML systems succeed or fail economically.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -194,7 +194,7 @@ Failure handling diverges correspondingly. Training failures trigger checkpoint 
 
 Distributing inference across multiple machines introduces overhead absent from single-machine serving. This "serving tax" must be understood and budgeted within latency constraints.
 
-Network communication adds latency for every cross-machine interaction. Within a datacenter, network round-trip times range from 50–500 microseconds depending on topology and congestion. For model sharding that requires synchronization between GPUs on different machines, each synchronization point adds this overhead. A model sharded across 8 machines with 4 synchronization points per inference adds 200 microseconds to 2 milliseconds of network latency.
+Network communication adds latency for every cross-machine interaction. Within a data center, network round-trip times range from 50–500 microseconds depending on topology and congestion. For model sharding that requires synchronization between GPUs on different machines, each synchronization point adds this overhead. A model sharded across 8 machines with 4 synchronization points per inference adds 200 microseconds to 2 milliseconds of network latency.
 
 Serialization overhead compounds the problem by converting in-memory tensors to network-transmittable formats. While modern serialization libraries like FlatBuffers and Cap'n Proto[^fn-serialization-zerocopy] minimize this cost, large activation tensors still require meaningful time to serialize and deserialize. A 1 GB activation tensor takes approximately 100 milliseconds to serialize, even with optimized libraries.
 
@@ -235,7 +235,7 @@ class ServingCostSimple:
 
 ::: {.callout-notebook title="The serving cost multiplier"}
 
-**Problem**: You spent **\$2 Million** training a 70B parameter model. You serve it to 1 million daily active users (DAU), each making 50 requests/day. Is training or serving the dominant cost over 1 year?
+**Problem**: A team has spent **\$2 million** training a 70B parameter model and now serves it to 1 million daily active users (DAU), each making 50 requests/day. Is training or serving the dominant cost over 1 year?
 
 **Math**:
 
@@ -666,17 +666,17 @@ Autoregressive language models break this assumption. Each request generates a d
 
 [^fn-vllm-etymology]: **vLLM (Virtual LLM)**: The name signals its core design: applying OS-style virtual memory to KV cache management, decoupling logical sequence addresses from physical GPU memory. Developed at UC Berkeley (2023), vLLM achieved 2--4$\times$ throughput over FasterTransformer and up to 24$\times$ over HuggingFace Transformers by eliminating the 60--80 percent memory fragmentation that capped batch sizes in prior serving systems. \index{vLLM!etymology}
 
-Recommendation systems introduce a third pattern: feature-parallel batching. Because the bottleneck is distributed embedding lookup rather than dense matrix multiplication, these systems batch requests by feature type and shard the batch across embedding servers. The dense MLP computation that follows can then operate on pre-fetched, pre-batched feature vectors. The batching strategies section (@sec-inference-scale-batching-strategies-scale-6733) develops these approaches in full quantitative detail.
+Recommendation systems introduce a third pattern: feature-parallel batching. Because the bottleneck is distributed embedding lookup rather than dense matrix multiplication, these systems batch requests by feature type and shard the batch across embedding servers. The dense MLP computation that follows can then operate on prefetched, prebatched feature vectors. The batching strategies section (@sec-inference-scale-batching-strategies-scale-6733) develops these approaches in full quantitative detail.
 
-### Memory management: From pre-allocation to paging {#sec-inference-scale-framework-selection-criteria-6c20}
+### Memory management: From preallocation to paging {#sec-inference-scale-framework-selection-criteria-6c20}
 
 Serving systems differ fundamentally in how they manage accelerator memory, and this difference determines the maximum concurrent request capacity.
 
-Pre-allocated memory management reserves a fixed memory budget per request at admission time based on the maximum possible output length. For a model supporting 4,096-token outputs, every request reserves memory for 4,096 tokens regardless of whether it generates 50 or 4,000. This approach is simple and predictable but wastes memory proportional to the gap between maximum and actual output lengths. In practice, 60--80 percent of reserved KV cache memory goes unused.
+Preallocated memory management reserves a fixed memory budget per request at admission time based on the maximum possible output length. For a model supporting 4,096-token outputs, every request reserves memory for 4,096 tokens regardless of whether it generates 50 or 4,000. This approach is simple and predictable but wastes memory proportional to the gap between maximum and actual output lengths. In practice, 60--80 percent of reserved KV cache memory goes unused.
 
-Paged memory management, inspired by operating system virtual memory, allocates memory in fixed-size blocks (pages) and maps logical sequence positions to physical memory locations through a block table. As a request generates tokens, new physical blocks are allocated on demand. When generation completes, blocks return to the free pool immediately. This approach, exemplified by PagedAttention (covered in @sec-inference-scale-pagedattention-3c94), achieves near-100 percent memory utilization by eliminating both internal fragmentation (partially filled pre-allocations) and external fragmentation (unusable gaps between allocations).
+Paged memory management, inspired by operating system virtual memory, allocates memory in fixed-size blocks (pages) and maps logical sequence positions to physical memory locations through a block table. As a request generates tokens, new physical blocks are allocated on demand. When generation completes, blocks return to the free pool immediately. This approach, exemplified by PagedAttention (covered in @sec-inference-scale-pagedattention-3c94), achieves near-100 percent memory utilization by eliminating both internal fragmentation (partially filled preallocations) and external fragmentation (unusable gaps between allocations).
 
-The memory management strategy directly determines batch capacity: paged systems can serve 2--4$\times$ more concurrent requests than pre-allocated systems on the same hardware, because they reclaim memory that pre-allocation wastes. For a service with a fixed GPU budget, this translates directly to 2--4$\times$ lower cost per request.
+The memory management strategy directly determines batch capacity: paged systems can serve 2--4$\times$ more concurrent requests than preallocated systems on the same hardware, because they reclaim memory that preallocation wastes. For a service with a fixed GPU budget, this translates directly to 2--4$\times$ lower cost per request.
 
 ### Scheduling policy: FCFS, preemptive, and priority-aware {#sec-inference-scale-vllm-architecture-9b84}
 
@@ -715,7 +715,7 @@ The choice between stateless and stateful serving is not a framework feature but
 | **Dimension**                | **Vision/Embedding**            | **LLM (Autoregressive)**      | **Recommendation**                    |
 |:-----------------------------|:--------------------------------|:------------------------------|:--------------------------------------|
 | **Batching**\index{Batching} | Static/dynamic (uniform inputs) | Continuous (variable outputs) | Feature-parallel (sharded embeddings) |
-| **Memory**                   | Pre-allocated (predictable)     | Paged (variable KV cache)     | Distributed (embedding tables)        |
+| **Memory**                   | Preallocated (predictable)      | Paged (variable KV cache)     | Distributed (embedding tables)        |
 | **Scheduling**               | FCFS (uniform cost)             | Preemptive (high variance)    | Priority-aware (SLO tiers)            |
 | **Topology**                 | Single-GPU replicas             | Tensor/pipeline parallel      | Hybrid CPU-GPU sharding               |
 | **State**                    | Stateless                       | Stateful (KV cache)           | Stateless (feature store)             |
@@ -1048,9 +1048,7 @@ class Gpt3Scenario:
     gpt3_params_b = f"{params_b:.0f}"
 ```
 
-Consider serving a GPT-3 class model (`{python} Gpt3Scenario.gpt3_params_b`B parameters) with the following characteristics:
-
-System Parameters
+Consider serving a GPT-3 class model (`{python} Gpt3Scenario.gpt3_params_b`B parameters) under the following system parameters:
 
 - Arrival rate: $\lambda = 100$ requests/second
 - Hardware: 8$\times$ A100 GPUs with tensor parallelism
@@ -1059,15 +1057,11 @@ System Parameters
 - Average output length: 100 tokens per request
 - Target utilization: $\rho_{\text{target}} = 0.75$
 
-Service Time Model
-
 For the prefill phase (processing input prompt), service time follows @eq-service-time-batch:
 
 $$S(B) = 50 + 0.5 \cdot B \text{ ms}$$
 
-Optimal Batch Size Calculation
-
-Applying @eq-optimal-batch-approx:
+Applying @eq-optimal-batch-approx to compute the optimal batch size:
 
 $$B \approx \sqrt{\frac{2 \times 0.05 \times 100}{1 - 0.75}} = \sqrt{\frac{10}{0.25}} = \sqrt{40} \approx 6.3$$
 
@@ -1097,7 +1091,7 @@ Performance at Different Batch Sizes
 # │
 # │ Goal: Summarize serving performance and verify consistency via Little's Law.
 # │ Show: Throughput, utilization, and queue lengths for various batch sizes.
-# │ How: Load pre-computed results into GPT3ServingResults class;
+# │ How: Load precomputed results into GPT3ServingResults class;
 # │      apply L = lambda * W to verify requests in system.
 # │
 # │ Imports: mlsysim.book (check)
@@ -1150,7 +1144,7 @@ class LittlesLawVerify:
 
 Analysis
 
-1. **Batch sizes 1-4 are unstable**\index{Batching!batch, sizes 1-4 are unstable}: Utilization exceeds 100 percent, meaning the system cannot keep up with arrivals. Queues grow unboundedly.
+1. **Batch sizes 1--4 are unstable**\index{Batching!batch, sizes 1-4 are unstable}: Utilization exceeds 100 percent, meaning the system cannot keep up with arrivals. Queues grow unboundedly.
 
 2. **Batch size 8 achieves stability**\index{Batch Size!8 achieves stability}: At `{python} GPT3ServingResults.b8_util_pct` percent utilization, the system is stable but queuing delays contribute significantly to latency (`{python} GPT3ServingResults.b8_wait_ms` ms), as @fig-queuing-hockey-stick illustrates.
 
@@ -1324,7 +1318,7 @@ The autoregressive bottleneck (Principle \ref{pri-autoregressive-bottleneck}) go
 
 1.  **Significance (quantitative)**: It maximizes the system throughput $(\eta_{\text{hw}})$ by eliminating the padding waste and head-of-line blocking inherent in static batching. It ensures the GPU remains saturated even when requests have widely varying sequence lengths.
 2.  **Distinction (durable)**: Unlike static or dynamic batching (which group requests at the *request* level), continuous batching operates at the **Iteration Level**\index{Iteration Level}, dynamically reshaping the compute tensor at each clock cycle.
-3.  **Common pitfall**: A frequent misconception is that continuous batching is "purely a scheduler change." In reality, it requires a **Dynamic Memory Manager** (like PagedAttention) because the KV caches for different requests grow and shrink at different rates, preventing static memory pre-allocation.
+3.  **Common pitfall**: A frequent misconception is that continuous batching is "purely a scheduler change." In reality, it requires a **Dynamic Memory Manager** (like PagedAttention) because the KV caches for different requests grow and shrink at different rates, preventing static memory preallocation.
 
 :::
 
@@ -1983,7 +1977,7 @@ sequenceDiagram
 
 :::
 
-As @fig-inference-lifecycle shows, non-compute stages (serialization, queuing, routing) can consume a substantial fraction of the latency budget, meaning batching strategy selection must account for the full pipeline, not GPU execution time alone. The following decision framework guides strategy selection:
+As @fig-inference-lifecycle shows, noncompute stages (serialization, queuing, routing) can consume a substantial fraction of the latency budget, meaning batching strategy selection must account for the full pipeline, not GPU execution time alone. The following decision framework guides strategy selection:
 
 ```
 Is the model autoregressive (LLM, speech)?
@@ -2005,7 +1999,7 @@ Is the model autoregressive (LLM, speech)?
 
 : **Batching Strategy Parameters**: Each strategy has distinct parameters requiring tuning for the specific deployment. {#tbl-batching-parameters}
 
-Even with the most perfectly tuned continuous batching strategy, large language models will eventually grind to a halt due to a deeper, architecture-specific bottleneck. The context window of every active request must be stored in GPU memory, bringing us to the critical challenge of KV Cache management.
+Even a well-tuned continuous batching strategy cannot eliminate a deeper, architecture-specific bottleneck for large language models. The context window of every active request must be stored in GPU memory, making KV cache management the next binding constraint on serving throughput.
 
 ## KV Cache Management {#sec-inference-scale-kv-cache-management-04ed}
 
@@ -2033,7 +2027,7 @@ $$\text{KV cache size} = 2 \times n_{\text{layers}} \times d \times S \times B \
 
 ### The KV cache wall: Memory-bound capacity {#sec-inference-scale-kv-cache-wall}
 
-*Why* can we not simply increase the batch size to maximize throughput in LLM serving? We hit the KV cache wall. As @fig-kv-cache-wall shows, model weights represent a fixed "static tax" on GPU memory, while the KV cache grows linearly with both batch size and sequence length.
+Increasing the batch size to maximize throughput in LLM serving is bounded by the KV cache wall. As @fig-kv-cache-wall shows, model weights represent a fixed "static tax" on GPU memory, while the KV cache grows linearly with both batch size and sequence length.
 
 ::: {#fig-kv-cache-wall fig-env="figure" fig-pos="htb" fig-cap="**The KV Cache Wall**: Total GPU memory usage for a 4-bit quantized 70B model (35 GB weights) on an 80 GB H100. While the model fits easily at small context lengths, the KV cache (sloped lines) eventually consumes all remaining HBM. At 128K context, a batch size of 2 is physically impossible on a single GPU (35 GB + 82 GB > 80 GB), forcing the system to either reduce batch size (killing throughput) or shard the model." fig-alt="Memory usage plot. Horizontal dashed line at 80 GB shows capacity. Solid blue region at bottom is 35 GB weights. Sloped lines for Batch 1, 4, 8 show memory rising with sequence length. Batch 8 hits the 80 GB line very early (~16K tokens)."}
 
@@ -2162,11 +2156,11 @@ $$ \text{Max Batch} = \lfloor \frac{480}{43} \rfloor = \mathbf{11} $$
 
 ### The fragmentation problem {#sec-inference-scale-fragmentation-problem-28be}
 
-Traditional memory allocation for KV cache pre-allocates contiguous memory for each sequence based on maximum expected length. This creates two forms of waste:
+Traditional memory allocation for KV cache preallocates contiguous memory for each sequence based on maximum expected length. This creates two forms of waste:
 
 Internal fragmentation wastes memory within each allocation. Sequences shorter than the maximum allocation leave the unused portion idle. If maximum length is 4,096 but average output is 100 tokens, 97.5 percent of allocated memory is wasted.
 
-External fragmentation compounds this problem across allocations. As sequences complete and new ones start, memory becomes fragmented into non-contiguous free blocks. Even with sufficient total free memory, no single block may be large enough for a new maximum-length allocation.
+External fragmentation compounds this problem across allocations. As sequences complete and new ones start, memory becomes fragmented into noncontiguous free blocks. Even with sufficient total free memory, no single block may be large enough for a new maximum-length allocation.
 
 Consider a simplified example with 8 memory slots and maximum sequence length of 4:
 
@@ -2189,10 +2183,10 @@ Production systems report 60--80 percent memory waste from fragmentation under r
 
 ::: {.callout-definition title="PagedAttention"}
 
-***PagedAttention**\index{PagedAttention!block table}*\index{PagedAttention!definition} is a memory management technique that applies virtual memory principles to **KV Cache**\index{KV Cache!quantization} allocation, storing attention states in non-contiguous, fixed-size physical blocks.
+***PagedAttention**\index{PagedAttention!block table}*\index{PagedAttention!definition} is a memory management technique that applies virtual memory principles to **KV Cache**\index{KV Cache!quantization} allocation, storing attention states in noncontiguous, fixed-size physical blocks.
 
 1.  **Significance (quantitative)**: It eliminates **Internal and External Fragmentation**\index{Internal and External Fragmentation}, which can waste up to 80 percent of GPU memory. By allowing sequences to grow dynamically, it enables 2--4$\times$ higher **Concurrent Throughput** $(\eta_{\text{hw}})$ on the same hardware.
-2.  **Distinction (durable)**: Unlike **Contiguous Allocation** (which requires pre-reserving the maximum context length), PagedAttention uses a **Block Table** to map logical sequence indices to physical memory pages, allocating only what is currently used.
+2.  **Distinction (durable)**: Unlike **Contiguous Allocation** (which requires prereserving the maximum context length), PagedAttention uses a **Block Table** to map logical sequence indices to physical memory pages, allocating only what is currently used.
 3.  **Common pitfall**: A frequent misconception is that PagedAttention speeds up individual token math. In reality, it is a **Capacity Optimization**\index{Optimization!capacity}: it improves *system-level* efficiency by allowing larger batch sizes, though it adds a small **Indirection Overhead** $(L_{\text{lat}})$ for the pointer lookups.
 
 :::
@@ -2211,11 +2205,11 @@ PagedAttention [@kwon2023], introduced in vLLM, applies virtual memory concepts 
 
 @fig-paged-attention illustrates the key concepts including page tables that map logical sequence positions to physical memory pages, block size that defines the number of tokens per page (typically 16 tokens), and physical blocks that provide fixed-size memory allocations\index{Memory Allocation!contiguous} assignable to any sequence.
 
-::: {#fig-paged-attention fig-env="figure" fig-pos="htb" fig-cap="**KV Cache Fragmentation and the PagedAttention Solution**: Top left: internal fragmentation wastes memory by pre-allocating for the maximum sequence length. Top right: external fragmentation leaves unusable memory gaps. Bottom: PagedAttention solves this by mapping contiguous logical pages of a sequence to non-contiguous physical memory blocks via a block table, allowing the system to fill fragmentation gaps with small blocks from any sequence." fig-alt="A three-part diagram on memory fragmentation. Top panels show internal and external fragmentation. The bottom panel shows the PagedAttention solution using a block table to map logical pages to scattered physical blocks, eliminating waste."}
+::: {#fig-paged-attention fig-env="figure" fig-pos="htb" fig-cap="**KV Cache Fragmentation and the PagedAttention Solution**: Top left: internal fragmentation wastes memory by preallocating for the maximum sequence length. Top right: external fragmentation leaves unusable memory gaps. Bottom: PagedAttention solves this by mapping contiguous logical pages of a sequence to noncontiguous physical memory blocks via a block table, allowing the system to fill fragmentation gaps with small blocks from any sequence." fig-alt="A three-part diagram on memory fragmentation. Top panels show internal and external fragmentation. The bottom panel shows the PagedAttention solution using a block table to map logical pages to scattered physical blocks, eliminating waste."}
 ![](images/svg/kv-cache-fragmentation.svg)
 :::
 
-PagedAttention provides several benefits. It eliminates internal fragmentation by allocating only the pages needed for actual tokens. It eliminates external fragmentation because any free page can be used by any sequence. It enables dynamic growth so sequences can grow without pre-allocation. It supports memory sharing so common prefixes can share physical pages.
+PagedAttention provides several benefits. It eliminates internal fragmentation by allocating only the pages needed for actual tokens. It eliminates external fragmentation because any free page can be used by any sequence. It enables dynamic growth so sequences can grow without preallocation. It supports memory sharing so common prefixes can share physical pages.
 
 ::: {.callout-example title="PagedAttention implementation details"}
 
@@ -2250,7 +2244,7 @@ Standard attention: `output = softmax(Q @ K.T/sqrt(d)) @ V`
 PagedAttention:
 ```{.python}
 def paged_attention(Q, page_table, physical_blocks, block_size):
-    # Gather K, V from non-contiguous physical blocks
+    # Gather K, V from noncontiguous physical blocks
     for logical_idx in range(num_logical_blocks):
         physical_idx = page_table[logical_idx]
         K_block = physical_blocks[physical_idx].K
@@ -2290,7 +2284,7 @@ Prefix caching shares KV cache entries across requests with common prefixes. @fi
   \definecolor{BlockColor}{HTML}{F5F5F5}
 
   \tikzset{
-    block/.style={draw=black!60, fill=BlockColor, minimum width=0.8cm, minimum height=0.6cm, font=\scriptsize, inner sep=0pt},
+    block/.style={draw=black!60, fill=BlockColor, minimum width=0.8cm, minimum height=0.6cm, font=\scriptsize\usefont{T1}{phv}{m}{n}, inner sep=0pt},
     ptr/.style={->, >=stealth, thick}
   }
 
@@ -2305,7 +2299,7 @@ Prefix caching shares KV cache entries across requests with common prefixes. @fi
   \node[block, fill=SharedColor, right=0.1cm of pb3] (pb4) {B4};
   \node[block, fill=SharedColor, right=0.1cm of pb4] (pb5) {B5};
 
-  \node[right=0.2cm of pb5, font=\scriptsize] {(System Prompt)};
+  \node[right=0.2cm of pb5, font=\scriptsize\usefont{T1}{phv}{m}{n}] {(System Prompt)};
 
   % Unique Blocks for A
   \node[block, fill=UniqueColorA, below=0.4cm of pb0] (pb10) {B10};
@@ -2320,7 +2314,7 @@ Prefix caching shares KV cache entries across requests with common prefixes. @fi
   \node[anchor=east] (reqA_title) at (-1, 1) {\textbf{Request A}};
   \node[block, fill=SharedColor, right=0.2cm of reqA_title] (la0) {P0};
   \node[block, fill=SharedColor, right=0.1cm of la0] (la1) {P1};
-  \node[font=\scriptsize, right=0.1cm of la1] (la_dots) {...};
+  \node[font=\scriptsize\usefont{T1}{phv}{m}{n}, right=0.1cm of la1] (la_dots) {...};
   \node[block, fill=UniqueColorA, right=0.1cm of la_dots] (la6) {P6};
 
   \draw[ptr, SharedColor!70!black] (la0) -- (pb0);
@@ -2331,7 +2325,7 @@ Prefix caching shares KV cache entries across requests with common prefixes. @fi
   \node[anchor=east, below=0.5cm of reqA_title.east] (reqB_title) {\textbf{Request B}};
   \node[block, fill=SharedColor, right=0.2cm of reqB_title] (lb0) {P0};
   \node[block, fill=SharedColor, right=0.1cm of lb0] (lb1) {P1};
-  \node[font=\scriptsize, right=0.1cm of lb1] (lb_dots) {...};
+  \node[font=\scriptsize\usefont{T1}{phv}{m}{n}, right=0.1cm of lb1] (lb_dots) {...};
   \node[block, fill=UniqueColorB, right=0.1cm of lb_dots] (lb6) {P6};
 
   \draw[ptr, SharedColor!70!black] (lb0) to[in=220, out=45] (pb0);
@@ -2339,7 +2333,7 @@ Prefix caching shares KV cache entries across requests with common prefixes. @fi
   \draw[ptr, UniqueColorB!70!black] (lb6) -- (pb12);
 
   % Annotations
-  \node[align=left, font=\scriptsize, anchor=west, right=2cm of la6] {Both requests point\\to same physical blocks\\for blocks 0-5};
+  \node[align=left, font=\scriptsize\usefont{T1}{phv}{m}{n}, anchor=west, right=2cm of la6] {Both requests point\\to same physical blocks\\for blocks 0-5};
 
 \end{tikzpicture}
 ```
@@ -2571,7 +2565,7 @@ class PrecisionDividend:
 
 ::: {.callout-notebook title="The precision dividend"}
 
-**Problem**: You serve a 70B model on 4$\times$ H100 GPUs. Weights in FP16 consume 140 GB (35 GB/GPU). KV cache at FP16 consumes `{python} KVCacheCalc.kv_fp16_gb_str` GB per request. How does quantizing weights to INT4 and KV cache to INT8 change the maximum batch size?
+**Problem**: A team serves a 70B model on 4$\times$ H100 GPUs. Weights in FP16 consume 140 GB (35 GB/GPU). KV cache at FP16 consumes `{python} KVCacheCalc.kv_fp16_gb_str` GB per request. How does quantizing weights to INT4 and KV cache to INT8 change the maximum batch size?
 
 **Before optimization** (all FP16):
 
@@ -2631,7 +2625,7 @@ The speculative decoding algorithm proceeds in three phases:
   \definecolor{RejectColor}{HTML}{F5D2D5}
 
   \tikzset{
-     stepbox/.style={draw=black!50, rounded corners=2pt, minimum height=0.7cm, font=\scriptsize, align=center}
+     stepbox/.style={draw=black!50, rounded corners=2pt, minimum height=0.7cm, font=\scriptsize\usefont{T1}{phv}{m}{n}, align=center}
   }
 
   % Baseline
@@ -2649,11 +2643,11 @@ The speculative decoding algorithm proceeds in three phases:
 
   % Draft Step
   \node[stepbox, fill=DraftColor, minimum width=2.0cm] (draft) at (1.2, 1.0) {Draft Model\\Gen [T1..T4]};
-  \node[below, font=\tiny] at (draft.south) {Fast, Low latency};
+  \node[below, font=\tiny\usefont{T1}{phv}{m}{n}] at (draft.south) {Fast, Low latency};
 
   % Verify Step
   \node[stepbox, fill=VerifyColor, minimum width=2.0cm, right=0.3cm of draft] (verify) {Target Model\\Verify [T1..T4]};
-  \node[below, font=\tiny] at (verify.south) {Parallel Forward Pass};
+  \node[below, font=\tiny\usefont{T1}{phv}{m}{n}] at (verify.south) {Parallel Forward Pass};
 
   % Outcome
   \node[stepbox, fill=AcceptColor, minimum width=0.5cm] (t1) at (5.0, 1.8) {T1};
@@ -2664,11 +2658,11 @@ The speculative decoding algorithm proceeds in three phases:
   \draw[->, thick, black!50] (draft) -- (verify);
   \draw[->, thick, black!50] (verify) -- (t1.west |- verify.east);
 
-  \node[right=0.2cm of t4, font=\scriptsize, align=left] {Accept 3\\Reject 1};
+  \node[right=0.2cm of t4, font=\scriptsize\usefont{T1}{phv}{m}{n}, align=left] {Accept 3\\Reject 1};
 
   % Speedup annotation
-  \draw[decorate, decoration={brace, amplitude=5pt}] (0.2, 3.2) -- (6.6, 3.2) node[midway, below=0.2cm, font=\scriptsize] {Standard Time};
-  \draw[decorate, decoration={brace, amplitude=5pt}] (0.2, 0.5) -- (4.8, 0.5) node[midway, below=0.2cm, font=\scriptsize] {Speculative Time};
+  \draw[decorate, decoration={brace, amplitude=5pt}] (0.2, 3.2) -- (6.6, 3.2) node[midway, below=0.2cm, font=\scriptsize\usefont{T1}{phv}{m}{n}] {Standard Time};
+  \draw[decorate, decoration={brace, amplitude=5pt}] (0.2, 0.5) -- (4.8, 0.5) node[midway, below=0.2cm, font=\scriptsize\usefont{T1}{phv}{m}{n}] {Speculative Time};
 
 \end{tikzpicture}
 ```
@@ -2847,7 +2841,7 @@ async def swap_to_gpu(sequence_id):
 
 - GPU-only (no swapping): 50 concurrent sequences
 - GPU+CPU swapping: 500 concurrent sequences (10$\times$)
-- Average swap latency: 3 ms (acceptable for non-urgent requests)
+- Average swap latency: 3 ms (acceptable for nonurgent requests)
 
 :::
 
@@ -3031,10 +3025,10 @@ The communication pattern for tensor-parallel inference follows a two-phase sync
 
   % GPU Columns
   \node[gpu_bg] (gpu0_bg) at (-0.25, -0.5) {};
-  \node[above, font=\bfseries] at (gpu0_bg.north) {GPU 0};
+  \node[above, font=\bfseries\usefont{T1}{phv}{b}{n}] at (gpu0_bg.north) {GPU 0};
 
   \node[gpu_bg] (gpu1_bg) at (4.25, -0.5) {};
-  \node[above, font=\bfseries] at (gpu1_bg.north) {GPU 1};
+  \node[above, font=\bfseries\usefont{T1}{phv}{b}{n}] at (gpu1_bg.north) {GPU 1};
 
   % Attention Block
   \node[anchor=center] (att_title) at (2, 5.5) {\textbf{Attention Layer}};
@@ -3386,14 +3380,14 @@ Expert parallelism distributes experts across devices, with each device hosting 
   \node[expbox, below=0.5cm of exp3] (exp2) {Device 2\\Expert B};
 
   % Interconnect
-  \node[text=CommColor!80!black, font=\bfseries] at (2.5, 1.5) {All-to-All Dispatch};
+  \node[text=CommColor!80!black, font=\bfseries\usefont{T1}{phv}{b}{n}] at (2.5, 1.5) {All-to-All Dispatch};
   \draw[comm_arrow] (gating.east) -- (exp1.west);
   \draw[comm_arrow] (gating.east) -- (exp2.west);
 
   % Gather
   \node[box, rounded corners, right=1.5cm of exp3] (agg) {Weighted\\Sum};
 
-  \node[text=CommColor!80!black, font=\bfseries] at (6.5, 2.5) {All-to-All Gather};
+  \node[text=CommColor!80!black, font=\bfseries\usefont{T1}{phv}{b}{n}] at (6.5, 2.5) {All-to-All Gather};
   \draw[comm_arrow] (exp1.east) -- (agg.north west);
   \draw[comm_arrow] (exp2.east) -- (agg.south west);
 
@@ -3487,7 +3481,7 @@ The choice of embedding sharding strategy depends on lookup patterns and communi
   \definecolor{ShardColor}{HTML}{E6D4E5}
 
   % A. Row-Wise
-  \node[anchor=west, font=\bfseries] at (0, 4.5) {A. Row-Wise Sharding};
+  \node[anchor=west, font=\bfseries\usefont{T1}{phv}{b}{n}] at (0, 4.5) {A. Row-Wise Sharding};
 
   \draw[fill=TableColor] (0, 2.5) rectangle (1, 4);
   \node[rotate=90] at (-0.3, 3.25) {Users 0..N};
@@ -3496,16 +3490,16 @@ The choice of embedding sharding strategy depends on lookup patterns and communi
 
   % Server 1
   \draw[fill=ShardColor] (2.5, 3.5) rectangle (3.5, 4.0);
-  \node[right, font=\scriptsize] at (3.5, 3.75) {Svr 1: Users 0..K};
+  \node[right, font=\scriptsize\usefont{T1}{phv}{m}{n}] at (3.5, 3.75) {Svr 1: Users 0..K};
 
   % Server 2
   \draw[fill=ShardColor] (2.5, 2.5) rectangle (3.5, 3.0);
-  \node[right, font=\scriptsize] at (3.5, 2.75) {Svr 2: Users K..N};
+  \node[right, font=\scriptsize\usefont{T1}{phv}{m}{n}] at (3.5, 2.75) {Svr 2: Users K..N};
 
-  \node[font=\scriptsize, align=center] at (1.7, 2.0) {Partition by ID\\(Network Gather)};
+  \node[font=\scriptsize\usefont{T1}{phv}{m}{n}, align=center] at (1.7, 2.0) {Partition by ID\\(Network Gather)};
 
   % B. Column-Wise
-  \node[anchor=west, font=\bfseries] at (6, 4.5) {B. Column-Wise Sharding};
+  \node[anchor=west, font=\bfseries\usefont{T1}{phv}{b}{n}] at (6, 4.5) {B. Column-Wise Sharding};
 
   \draw[fill=TableColor] (6, 2.5) rectangle (7, 4);
   \node[rotate=90] at (5.7, 3.25) {Dims 0..D};
@@ -3514,27 +3508,27 @@ The choice of embedding sharding strategy depends on lookup patterns and communi
 
   % Server 1 (Col split)
   \draw[fill=ShardColor] (8.5, 2.5) rectangle (9.0, 4.0);
-  \node[above, font=\scriptsize] at (8.75, 4.0) {Svr 1};
+  \node[above, font=\scriptsize\usefont{T1}{phv}{m}{n}] at (8.75, 4.0) {Svr 1};
 
   % Server 2
   \draw[fill=ShardColor] (9.1, 2.5) rectangle (9.6, 4.0);
-  \node[above, font=\scriptsize] at (9.35, 4.0) {Svr 2};
+  \node[above, font=\scriptsize\usefont{T1}{phv}{m}{n}] at (9.35, 4.0) {Svr 2};
 
-  \node[font=\scriptsize, align=center] at (7.7, 2.0) {Partition Vector\\(AllGather)};
+  \node[font=\scriptsize\usefont{T1}{phv}{m}{n}, align=center] at (7.7, 2.0) {Partition Vector\\(AllGather)};
 
   % C. Hybrid
-  \node[anchor=west, font=\bfseries] at (0, 0.5) {C. Hybrid Sharding};
+  \node[anchor=west, font=\bfseries\usefont{T1}{phv}{b}{n}] at (0, 0.5) {C. Hybrid Sharding};
 
   \draw[fill=RedL] (0, -1.0) rectangle (1.5, 0);
-  \node[font=\scriptsize] at (0.75, -0.5) {Hot (Top 1\%)};
+  \node[font=\scriptsize\usefont{T1}{phv}{m}{n}] at (0.75, -0.5) {Hot (Top 1\%)};
 
   \draw[fill=BlueL] (0, -2.5) rectangle (1.5, -1.1);
-  \node[font=\scriptsize] at (0.75, -1.8) {Cold (Tail)};
+  \node[font=\scriptsize\usefont{T1}{phv}{m}{n}] at (0.75, -1.8) {Cold (Tail)};
 
   \draw[->, thick] (1.7, -1.25) -- (2.7, -1.25);
 
-  \node[draw, fill=RedL, font=\scriptsize] at (4, -0.5) {Replicated/Col-wise};
-  \node[draw, fill=BlueL, font=\scriptsize] at (4, -1.8) {Row-wise Sharded};
+  \node[draw, fill=RedL, font=\scriptsize\usefont{T1}{phv}{m}{n}] at (4, -0.5) {Replicated/Col-wise};
+  \node[draw, fill=BlueL, font=\scriptsize\usefont{T1}{phv}{m}{n}] at (4, -1.8) {Row-wise Sharded};
 
 \end{tikzpicture}
 ```
@@ -3747,7 +3741,7 @@ Production systems at Google, Meta, and AWS all use variants of power-of-two-cho
 
 :::
 
-Why does this work? Intuitively, random assignment occasionally makes poor choices (routing to an already-busy server), and these mistakes compound. With two choices, the algorithm almost never makes the worst choice, avoiding the tail behavior that creates long queues.
+The mechanism is intuitive: random assignment occasionally makes poor choices (routing to an already-busy server), and these mistakes compound. With two choices, the algorithm almost never makes the worst choice, avoiding the tail behavior that creates long queues.
 
 Mathematically, the key insight is that with random assignment, when $d$ servers have queue length $k$, the probability of queue length $k+1$ growing is proportional to $d/n$. With two choices, this probability drops to $(d/n)^2$, creating a super-exponential decay in queue length distribution.
 
@@ -4378,11 +4372,11 @@ The strongest form of bulkhead dedicates entire replicas to specific tenants or 
 
   % Isolation Barrier
   \draw[dashed, ultra thick, black!50] (-0.5, 1.8) -- (5.5, 1.8);
-  \node[fill=white, inner sep=2pt, font=\scriptsize, align=center] at (8.0, 1.8) {\textbf{Complete Isolation}\\No Shared Resources};
+  \node[fill=white, inner sep=2pt, font=\scriptsize\usefont{T1}{phv}{m}{n}, align=center] at (8.0, 1.8) {\textbf{Complete Isolation}\\No Shared Resources};
 
   % Impact Annotation
-  \node[align=left, font=\scriptsize, color=FailColor!80!black, right=0.5cm of r4] {Failure constrained\\to Shared Pool};
-  \node[align=left, font=\scriptsize, color=GoldColor!50!black, right=0.5cm of r1, yshift=-0.5cm] {Gold Tier\\unaffected};
+  \node[align=left, font=\scriptsize\usefont{T1}{phv}{m}{n}, color=FailColor!80!black, right=0.5cm of r4] {Failure constrained\\to Shared Pool};
+  \node[align=left, font=\scriptsize\usefont{T1}{phv}{m}{n}, color=GoldColor!50!black, right=0.5cm of r1, yshift=-0.5cm] {Gold Tier\\unaffected};
 
 \end{tikzpicture}
 ```
@@ -4407,7 +4401,7 @@ When multiple models run on shared infrastructure, isolation must span memory, c
 
 Compute isolation addresses the latency variance that GPU time-sharing introduces. MIG (Multi-Instance GPU)[^fn-mig-partitioning] provides the strongest guarantee by spatially partitioning the GPU into hardware-isolated instances, each with dedicated SMs, memory bandwidth, and L2 cache. Time-slicing offers a softer alternative with higher overhead, while dedicating entire GPUs per model trades utilization for complete isolation.
 
-[^fn-mig-partitioning]: **MIG (Multi-Instance GPU)**: Introduced with NVIDIA's A100 [@NVIDIA2020], MIG spatially partitions a single GPU into up to 7 isolated instances, each with dedicated compute SMs, memory bandwidth, and L2 cache. Unlike time-slicing, which shares resources and introduces latency variance of 2--5$\times$, MIG provides hardware-enforced isolation with predictable performance, making it the preferred mechanism for serving multiple small models on a single expensive datacenter GPU. \index{MIG!partitioning}
+[^fn-mig-partitioning]: **MIG (Multi-Instance GPU)**: Introduced with NVIDIA's A100 [@NVIDIA2020], MIG spatially partitions a single GPU into up to 7 isolated instances, each with dedicated compute SMs, memory bandwidth, and L2 cache. Unlike time-slicing, which shares resources and introduces latency variance of 2--5$\times$, MIG provides hardware-enforced isolation with predictable performance, making it the preferred mechanism for serving multiple small models on a single expensive data center GPU. \index{MIG!partitioning}
 
 Model loading presents a subtler isolation challenge: loading a new model should not evict a running model from GPU memory. @lst-model-loading-isolation demonstrates priority-aware eviction logic that enforces this constraint.\index{Model Loading!isolation}
 
@@ -4457,11 +4451,11 @@ When replica count is fixed, vertical scaling replaces existing GPUs with more p
 
 The fastest response comes from batch size scaling, which adjusts how many requests the system processes simultaneously. Increasing batch size trades higher per-request latency for greater throughput, with no provisioning delay. This makes batch size the first knob to turn during a traffic spike, buying time for horizontal scaling to take effect.
 
-| **Scaling Type**\index{Scaling!horizontal} | **Latency** | **Cost**   | **Speed**                |
-|:-------------------------------------------|:------------|:-----------|:-------------------------|
-| **Horizontal (add replicas)**              | Unchanged   | Linear     | Slow (minutes)           |
-| **Batch size**\index{Batch Size}           | Increases   | Unchanged  | Instant                  |
-| **Vertical (better GPU)**                  | Unchanged   | Non-linear | Very slow (redeployment) |
+| **Scaling Type**\index{Scaling!horizontal} | **Latency** | **Cost**  | **Speed**                |
+|:-------------------------------------------|:------------|:----------|:-------------------------|
+| **Horizontal (add replicas)**              | Unchanged   | Linear    | Slow (minutes)           |
+| **Batch size**\index{Batch Size}           | Increases   | Unchanged | Instant                  |
+| **Vertical (better GPU)**                  | Unchanged   | Nonlinear | Very slow (redeployment) |
 
 : **Scaling Dimension Tradeoffs**\index{Scaling!dimension tradeoffs}: Each scaling approach has different characteristics. {#tbl-scaling-dimensions}
 
@@ -4519,13 +4513,13 @@ Bringing up a new replica for Llama-70B on H100:
   \definecolor{WarmColor}{HTML}{F5D2D5}
 
   \tikzset{
-    bar/.style={draw=black!70, minimum height=0.8cm, font=\tiny, inner sep=0pt, anchor=west}
+    bar/.style={draw=black!70, minimum height=0.8cm, font=\tiny\usefont{T1}{phv}{m}{n}, inner sep=0pt, anchor=west}
   }
 
   % Axis
   \draw[->] (0, 0) -- (330, 0) node[right] {Seconds};
   \foreach \x/\label in {0/0s, 60/1m, 120/2m, 180/3m, 240/4m, 300/5m} {
-      \draw (\x, 0.1) -- (\x, -0.1) node[below, font=\scriptsize] {\label};
+      \draw (\x, 0.1) -- (\x, -0.1) node[below, font=\scriptsize\usefont{T1}{phv}{m}{n}] {\label};
   }
 
   % Bar Stack
@@ -4535,10 +4529,10 @@ Bringing up a new replica for Llama-70B on H100:
   \node[bar, fill=WarmColor, minimum width=0.625cm, right=0cm of load] (warm) {Warm};
 
   % Connect total
-  \draw[decorate, decoration={brace, amplitude=5pt, raise=5pt}] (prov.south west |- 0, 2) -- (warm.south east |- 0, 2) node[midway, above=10pt, font=\bfseries] {Total Cold Start: > 5 Minutes};
+  \draw[decorate, decoration={brace, amplitude=5pt, raise=5pt}] (prov.south west |- 0, 2) -- (warm.south east |- 0, 2) node[midway, above=10pt, font=\bfseries\usefont{T1}{phv}{b}{n}] {Total Cold Start: > 5 Minutes};
 
   % Legend
-  \node[anchor=west, font=\scriptsize] at (0, 3.5) {\textbf{Breakdown for 70B Model}};
+  \node[anchor=west, font=\scriptsize\usefont{T1}{phv}{m}{n}] at (0, 3.5) {\textbf{Breakdown for 70B Model}};
 
 \end{tikzpicture}
 ```
@@ -4584,7 +4578,7 @@ Consider traffic spike from 1000 to 3000 QPS:
 
 **Target state**\index{Target State}: 30 replicas for 3000 QPS
 
-**Without pre-warming**\index{Without Pre-Warming}:
+**Without prewarming**\index{Without Pre-Warming}:
 
 - T=0: Spike detected, scale-up triggered
 - T=0 to T=5min: Cold start for 20 new replicas
@@ -4638,7 +4632,7 @@ def predict_demand(current_time, history):
 
 Event-driven scaling scales proactively for known events, as shown in @lst-event-driven-scaling.\index{Scaling!event-driven}
 
-::: {#lst-event-driven-scaling lst-cap="**Event-Driven Scaling**: Scheduled scaling rules that pre-provision capacity for product launches and recurring traffic spikes."}
+::: {#lst-event-driven-scaling lst-cap="**Event-Driven Scaling**: Scheduled scaling rules that preprovision capacity for product launches and recurring traffic spikes."}
 
 ```{.yaml}
 scheduled_scaling:
@@ -4729,7 +4723,7 @@ The cost savings above depend on anticipating traffic before it arrives. As @fig
 
   % Deficit Area
   \fill[RedL, opacity=0.5] (5, 1.2) -- (5.2, 1.2) -- (5.2, 4.2) -- (5, 4.2) -- cycle;
-  \node[RedLine, font=\tiny, rotate=90] at (5.1, 2.7) {SLO VIOLATION};
+  \node[RedLine, font=\tiny\usefont{T1}{phv}{m}{n}, rotate=90] at (5.1, 2.7) {SLO VIOLATION};
 
 \end{tikzpicture}
 ```
@@ -4738,7 +4732,7 @@ The cost savings above depend on anticipating traffic before it arrives. As @fig
 
 ### Warm pool management {#sec-inference-scale-warm-pool-management-a360}
 
-Maintaining a pool of pre-warmed replicas reduces effective cold start time:
+Maintaining a pool of prewarmed replicas reduces effective cold start time:
 
 Warm pool sizing
 
@@ -4769,9 +4763,9 @@ $$T_{\text{response}} = T_{\text{detect}} + T_{\text{decide}} + T_{\text{provisi
 | **Detection**            |      10--60s | Reduce metrics interval |
 | **Decision**             |        1--5s | Faster autoscaler       |
 | **Provisioning**         |    30s--5min | Warm pools              |
-| **Warmup**\index{Warmup} |       5--30s | Pre-compilation         |
+| **Warmup**\index{Warmup} |       5--30s | Precompilation          |
 
-Each component offers distinct optimization opportunities. Detection speed improves by collecting metrics at 1-second intervals rather than 60-second intervals, at the cost of noisier signals and higher metric volume. Decision speed improves by pre-computing scaling plans for predicted scenarios so that when a trigger fires, the system executes a pre-computed plan rather than computing one from scratch. Provisioning speed improves most dramatically through warm pools, which eliminate the provisioning phase entirely for anticipated demand. Warmup speed improves through pre-compiled inference engines that skip JIT compilation, reducing the final phase from 30 seconds to under 5 seconds.
+Each component offers distinct optimization opportunities. Detection speed improves by collecting metrics at 1-second intervals rather than 60-second intervals, at the cost of noisier signals and higher metric volume. Decision speed improves by precomputing scaling plans for predicted scenarios so that when a trigger fires, the system executes a precomputed plan rather than computing one from scratch. Provisioning speed improves most dramatically through warm pools, which eliminate the provisioning phase entirely for anticipated demand. Warmup speed improves through precompiled inference engines that skip JIT compilation, reducing the final phase from 30 seconds to under 5 seconds.
 
 ### Spot and preemptible instances {#sec-inference-scale-spot-preemptible-instances-c969}
 
@@ -4911,7 +4905,7 @@ def route_request(user_region, request):
 Failover considerations for stateful LLM serving
 
 - **Session affinity loss**\index{Session Affinity!loss}: Users mid-conversation lose KV cache state. The fallback region must regenerate context from conversation history.
-- **Capacity spike**: The receiving region sees sudden traffic increase. Pre-provision headroom (typically 30--50 percent over steady-state) or accept degraded latency during failover.
+- **Capacity spike**: The receiving region sees sudden traffic increase. Preprovision headroom (typically 30--50 percent over steady-state) or accept degraded latency during failover.
 - **Gradual recovery**\index{Gradual Recovery}: When the failed region recovers, gradually shift traffic back to avoid oscillation.
 
 #### Global model deployment {#sec-inference-scale-global-model-deployment-11b3}
@@ -4959,7 +4953,7 @@ Scaling global infrastructure aggressively is highly effective, but it is also e
 
 ## Weight Quantization for Serving {#sec-inference-scale-weight-quantization-serving-097b}
 
-What if we could take a 140 GB language model that requires two A100 GPUs to serve, and crush it down to 35 GB so it runs blisteringly fast on a single GPU? Weight quantization for serving achieves this by brutally compressing the precision of the model's neural connections from 16-bit floats to 8-bit or 4-bit integers, trading a negligible fraction of accuracy for massive operational savings.
+Weight quantization for serving compresses a 140 GB FP16 language model that requires two A100 GPUs into a 35 GB INT4 representation that fits on a single GPU, by reducing the precision of model weights from 16-bit floats to 8-bit or 4-bit integers. The trade-off is a small accuracy loss in exchange for a 4$\times$ reduction in memory bandwidth and capacity demand.
 
 ::: {.callout-perspective title="Prior knowledge: Quantization"}
 
@@ -4967,13 +4961,13 @@ The section assumes familiarity with quantization fundamentals including **post-
 
 :::
 
-Quantization reduces numerical precision of model weights and activations, decreasing memory footprint by 2--4$\times$ while increasing decode throughput, which is memory-bandwidth limited rather than compute limited. While these quantization fundamentals are established techniques, serving at scale introduces distinct challenges: models must be quantized after training without access to training data, quality must be preserved across diverse inputs, and hardware deployment targets vary from datacenter GPUs to edge accelerators. The following discussion covers quantization techniques specifically designed for production inference.
+Quantization reduces numerical precision of model weights and activations, decreasing memory footprint by 2--4$\times$ while increasing decode throughput, which is memory-bandwidth limited rather than compute limited. While these quantization fundamentals are established techniques, serving at scale introduces distinct challenges: models must be quantized after training without access to training data, quality must be preserved across diverse inputs, and hardware deployment targets vary from data center GPUs to edge accelerators. The following discussion covers quantization techniques specifically designed for production inference.
 
 ### LLM-specific quantization challenges {#sec-inference-scale-llmspecific-quantization-challenges-b7a2}
 
 Large language models present unique quantization challenges distinct from vision or recommendation models. The outlier activation problem occurs because certain attention heads produce activation magnitudes orders of magnitude larger than typical values. Naive quantization clips these outliers, causing significant quality degradation.
 
-Consider a Llama-70B layer where most activations fall within [-10, 10][@touvron2023llama]  but specific channels reach magnitudes of 1000+. Symmetric INT8 quantization with range [-127, 127] must choose:
+Consider a Llama-70B layer where most activations fall within [-10, 10] [@touvron2023llama] but specific channels reach magnitudes of 1000+. Symmetric INT8 quantization with range [-127, 127] must choose:
 
 - **Wide range** [-1000, 1000]: Most values map to 0, losing information
 - **Narrow range** [-10, 10]: Outliers clip, causing large errors
@@ -5027,22 +5021,20 @@ GPTQ's strengths include fast quantization without retraining, minimal quality l
 
 The central observation is that not all weights are equally important. AWQ [@lin2025] recognizes that weights connected to channels with large activation magnitudes have disproportionate impact on outputs. Rather than protecting weights based on their own magnitude, AWQ protects weights based on the magnitude of activations they produce.
 
-Algorithm
+The AWQ algorithm proceeds in four steps:
 
 1. Run calibration samples to measure per-channel activation magnitudes
 2. Identify "salient" channels with large activations
 3. Scale weights for salient channels up before quantization
 4. Scale outputs down correspondingly (fused into subsequent layer)
 
-Scaling formulation
-
-For weight matrix $W$ and activation statistics $s$ (per-channel activation magnitudes):
+For weight matrix $W$ and activation statistics $s$ (per-channel activation magnitudes), the scaling rule is:
 
 $$W' = W \cdot \text{diag}(s^\alpha)$$
 
 where $\alpha \in [0.5, 1.0]$ controls scaling aggressiveness. This preserves salient channels while allowing aggressive quantization of less important weights.
 
-Comparison with GPTQ
+@tbl-awq-vs-gptq summarizes how AWQ compares to GPTQ across error compensation, calibration cost, quality, speed, and hardware compatibility.
 
 | **Aspect**                 | **GPTQ**\index{GPTQ}      | **AWQ**\index{AWQ}      |
 |:---------------------------|:--------------------------|:------------------------|
@@ -5052,13 +5044,15 @@ Comparison with GPTQ
 | **Speed**                  | Faster                    | Slightly slower         |
 | **Hardware compatibility** | Broad                     | Broad                   |
 
+: **AWQ vs. GPTQ**: AWQ scales salient channels rather than compensating residual error, achieves higher 4-bit quality at marginally slower calibration speed, and matches GPTQ on hardware compatibility. {#tbl-awq-vs-gptq}
+
 AWQ typically achieves 0.5-1 percent lower perplexity degradation than GPTQ at the same bit-width, making it preferred for production deployments where quality is paramount.
 
 ### SmoothQuant: Migrating quantization difficulty {#sec-inference-scale-smoothquant-migrating-quantization-difficulty-f37f}
 
 SmoothQuant [@xiao2023smoothquant] addresses the activation outlier problem by migrating quantization difficulty from activations to weights. Weights have predictable distributions; activations have unpredictable outliers. SmoothQuant transfers the outlier problem to weights where it can be handled with per-channel scaling.
 
-Core technique Insert smoothing operations that divide activations by per-channel scales while multiplying weights by the same scales:
+The core technique inserts smoothing operations that divide activations by per-channel scales while multiplying weights by the same scales:
 
 $$Y = X W = (X \cdot \text{diag}(s)^{-1}) \cdot (\text{diag}(s) \cdot W) = \hat{X} \hat{W}$$
 
@@ -5072,7 +5066,7 @@ $$s_j = \max(|X_j|)^\alpha / \max(|W_j|)^{1-\alpha}$$
 - $\alpha = 1$: Full migration, weights absorb all difficulty
 - $\alpha = 0.5$: Balanced (typical setting)
 
-W8A8 deployment SmoothQuant enables INT8 quantization for both weights and activations:
+In the W8A8 deployment regime, SmoothQuant enables INT8 quantization for both weights and activations:
 
 | **Configuration**        | **Memory** | **Prefill Speedup** | **Decode Speedup** | **Quality**          |
 |:-------------------------|-----------:|--------------------:|-------------------:|:---------------------|
@@ -5080,7 +5074,7 @@ W8A8 deployment SmoothQuant enables INT8 quantization for both weights and activ
 | **W8A16 (weights only)** |  2$\times$ |         1.3$\times$ |        1.8$\times$ | &lt;0.5 percent loss |
 | **W8A8 (SmoothQuant)**   |  2$\times$ |      1.8--2$\times$ |   1.3--1.5$\times$ | &lt;1 percent loss   |
 
-Critical distinction W8A8 provides near 2$\times$ speedup for compute-bound prefill (large batch processing initial prompt), but only 1.3--1.5$\times$ speedup for memory-bound decode (generating tokens one at a time). LLM serving is typically decode-heavy, so real-world throughput improvements from W8A8 are often 1.3--1.7$\times$ rather than the theoretical 2$\times$ compute throughput of INT8 Tensor Cores.
+The critical distinction is that W8A8 provides near 2$\times$ speedup for compute-bound prefill (large batch processing initial prompt) but only 1.3--1.5$\times$ speedup for memory-bound decode (generating tokens one at a time). LLM serving is typically decode-heavy, so real-world throughput improvements from W8A8 are often 1.3--1.7$\times$ rather than the theoretical 2$\times$ compute throughput of INT8 Tensor Cores.
 
 ### Rotation-based quantization {#sec-inference-scale-rotationbased-quantization-8bee}
 
@@ -5160,7 +5154,7 @@ Deployment configurations
 
 Production serving frameworks integrate quantization with their batching and memory management systems.
 
-@lst-vllm-quantization shows how vLLM loads a pre-quantized AWQ model.\index{Quantization!vllm}
+@lst-vllm-quantization shows how vLLM loads a prequantized AWQ model.\index{Quantization!vllm}
 
 ::: {#lst-vllm-quantization lst-cap="**vLLM Quantization**: Loading an AWQ-quantized model with automatic kernel selection and KV cache management."}
 
@@ -5238,11 +5232,11 @@ Quantization impact on serving cost
 
 Quantization can reduce serving costs by 2--4$\times$ while maintaining acceptable quality, making it essential for cost-effective LLM deployment.
 
-From continuous batching and PagedAttention to global load balancing and extreme quantization, we have covered an immense landscape of serving optimizations. To solidify how these techniques synthesize in reality, we will now examine case studies of production systems operating at global scale.
+These serving optimizations span continuous batching, PagedAttention, global load balancing, and extreme quantization. The case studies that follow show how production systems at global scale combine these techniques to meet specific cost and latency targets.
 
 ## Case Studies {#sec-inference-scale-case-studies-9689}
 
-How does OpenAI manage the colossal, unpredictable global traffic of ChatGPT? How does TikTok serve hyper-personalized video recommendations to a billion users with hard sub-100-millisecond latency caps? We will now examine how the world's most demanding production systems synthesize the batching, sharding, and caching techniques we have covered into unified, planetary-scale architectures.
+Production-scale serving systems test the batching, sharding, caching, and routing techniques developed above against real workload variance, latency budgets, and operational constraints. OpenAI's ChatGPT handles unpredictable global request volume; TikTok serves recommendations to billions of users at sub-100-millisecond latency. The case studies below show how each system combines the chapter's techniques to meet its specific cost and latency targets.
 
 ::: {.callout-war-story title="The continuous batching revolution"}
 
@@ -5256,14 +5250,14 @@ Each case study demonstrates how the principles of batching, sharding, load bala
 
 Meta's recommendation infrastructure serves predictions for feeds, ads, and content ranking across Facebook, Instagram, WhatsApp, and Messenger. This represents one of the largest production inference deployments in the world.
 
-Scale and requirements
+The system operates at the following scale:
 
 - Request volume: Billions of requests per day
 - Latency target: <10 ms P99
 - Model diversity: Hundreds of model variants
 - Feature cardinality: Trillions of unique entities
 
-Architecture overview
+The serving stack is organized as follows:
 
 ```
 User request → Feature collection → Embedding lookup → Model inference → Response
@@ -5274,7 +5268,7 @@ User request → Feature collection → Embedding lookup → Model inference →
              (CPU, DRAM)         (CPU + SSD, 1000s)     (GPU, 100s)
 ```
 
-Key design decisions
+Several key design decisions shape this system.
 
 Embedding tables total over 100 TB, requiring 1000+ shards. Meta uses a hybrid sharding strategy:
 
@@ -5294,7 +5288,7 @@ The resulting GPU-CPU hybrid architecture runs dense model computation (ranking 
 | **Feature processing** | CPU          |        1 ms |      10M ops/s |
 | **Dense ranking**      | GPU          |      1.5 ms |    100K infs/s |
 
-Lessons learned
+Three lessons emerge from this design:
 
 1. Embedding lookup, not model inference, often dominates latency for recommendation systems
 2. Feature-parallel batching achieves higher efficiency than request-level batching
@@ -5304,14 +5298,14 @@ Lessons learned
 
 OpenAI's API serves GPT-4, GPT-3.5-turbo, and other models to millions of developers. The infrastructure must handle highly variable request sizes (from 10 tokens to 128K tokens) while maintaining quality of service across diverse workloads.
 
-Scale and requirements
+The system operates at the following scale:
 
 - Request volume: Millions of requests per hour
 - Latency target: Time-to-first-token (TTFT) <2s, throughput varies by model
 - Model sizes: 7B to 175B+ parameters
 - Context lengths: Up to 128K tokens
 
-Architecture overview
+The serving stack is organized as follows:
 
 ```
 API Gateway → Rate Limiting → Request Router → Model Cluster → Response Streaming
@@ -5331,7 +5325,7 @@ API Gateway → Rate Limiting → Request Router → Model Cluster → Response 
                               └─────────────┘
 ```
 
-Key design decisions
+Several key design decisions shape this system.
 
 OpenAI was an early adopter of continuous batching (Orca-style) to maintain high GPU utilization despite variable output lengths. Chunked prefill bounds decode latency by processing long prompts in chunks that interleave with ongoing generation.
 
@@ -5362,7 +5356,7 @@ if gpt4_queue_depth > threshold:
     reallocate_cluster_capacity(from="gpt-3.5", to="gpt-4", fraction=0.2)
 ```
 
-Lessons learned
+Three lessons emerge from this design:
 
 1. Continuous batching is essential for LLM serving at scale
 2. Prefix caching provides 2--3$\times$ efficiency for conversational workloads
@@ -5372,14 +5366,14 @@ Lessons learned
 
 Google Search uses ensemble serving to combine multiple specialized models for query understanding, document relevance, and result ranking. This represents a different inference pattern: many smaller models coordinated for each request rather than one large model.
 
-Scale and requirements
+The system operates at the following scale:
 
 - Request volume: Billions of searches per day
 - Latency target: <200 ms end-to-end
 - Model count: Dozens of models per query
 - Result processing: Thousands of documents per query
 
-Architecture overview
+The serving stack is organized as follows:
 
 To meet this latency budget while evaluating thousands of documents, the system employs a *ranking cascade* (@fig-ranking-cascade) that progressively narrows the candidate set through increasingly expensive models.
 
@@ -5407,15 +5401,15 @@ To meet this latency budget while evaluating thousands of documents, the system 
   \draw[->, ultra thick, black!60] (L1) -- (L2);
   \draw[->, ultra thick, black!60] (L2) -- (L3);
 
-  \node[anchor=west, font=\scriptsize, text=red!80, right=0.2cm of L0] {Low Precision, High Recall};
-  \node[anchor=west, font=\scriptsize, text=green!60!black, right=0.2cm of L3] {High Precision, Low Recall};
+  \node[anchor=west, font=\scriptsize\usefont{T1}{phv}{m}{n}, text=red!80, right=0.2cm of L0] {Low Precision, High Recall};
+  \node[anchor=west, font=\scriptsize\usefont{T1}{phv}{m}{n}, text=green!60!black, right=0.2cm of L3] {High Precision, Low Recall};
 
 \end{tikzpicture}
 ```
 
 :::
 
-Key design decisions
+Several key design decisions shape this system.
 
 Rather than running one expensive model on all candidates, Google uses a ranking cascade:
 
@@ -5462,7 +5456,7 @@ If deadline will be missed:
   Return cached/default result rather than timing out
 ```
 
-Lessons learned
+Three lessons emerge from this design:
 
 1. Ranking cascades provide dramatic cost reduction for large candidate sets
 2. Deadline propagation and priority scheduling are essential for ensemble serving
@@ -5472,14 +5466,14 @@ Lessons learned
 
 TikTok's recommendation system combines video understanding (vision) with user modeling (recommendation) for personalized content ranking. This represents a multimodal inference challenge where different model types must coordinate.
 
-Scale and requirements
+The system operates at the following scale:
 
 - Request volume: Millions of video rankings per second
 - Latency target: <50 ms P99
 - Content volume: Millions of new videos daily
 - Modalities: Video, audio, text, user signals
 
-Architecture overview
+The serving stack is organized as follows:
 
 ```
 User request → User embedding → Candidate videos → Video understanding → Ranking
@@ -5490,18 +5484,18 @@ User request → User embedding → Candidate videos → Video understanding →
            (Transformer)        (Pre-computed)        (On-demand)
 ```
 
-Key design decisions
+Several key design decisions shape this system.
 
 TikTok separates user understanding (online) from content understanding (offline) through a two-tower architecture with caching[^fn-two-tower-serving]:
 
-[^fn-two-tower-serving]: **Two-Tower Architecture**: Encodes user features and item features through separate neural networks ("towers") into embeddings, then scores via dot product. The serving advantage: item embeddings can be pre-computed offline and cached, reducing online inference to the user tower forward pass plus a sub-millisecond vector similarity lookup. The trade-off is reduced model expressiveness from late interaction, since the towers cannot attend to each other's features during encoding. \index{Two-Tower Architecture!architecture, two-tower, serving}
+[^fn-two-tower-serving]: **Two-Tower Architecture**: Encodes user features and item features through separate neural networks ("towers") into embeddings, then scores via dot product. The serving advantage: item embeddings can be precomputed offline and cached, reducing online inference to the user tower forward pass plus a sub-millisecond vector similarity lookup. The trade-off is reduced model expressiveness from late interaction, since the towers cannot attend to each other's features during encoding. \index{Two-Tower Architecture!architecture, two-tower, serving}
 
 | **Tower**       | **Update Frequency** | **Latency** | **Compute**  |
 |:----------------|:---------------------|:------------|:-------------|
 | **User tower**  | Real-time            | 5 ms        | GPU (online) |
 | **Video tower** | Hourly               | N/A         | GPU (batch)  |
 
-Video embeddings are pre-computed and cached, eliminating vision inference from the critical path for most requests. Only new videos (uploaded within the hour) require online vision inference.
+Video embeddings are precomputed and cached, eliminating vision inference from the critical path for most requests. Only new videos (uploaded within the hour) require online vision inference.
 
 Like Meta, TikTok uses CPU for embedding operations and GPU for dense model computation:
 
@@ -5532,7 +5526,7 @@ Text embedding (256d)  ─┘
 
 Late fusion allows independent updates to each modality's model without retraining the full system.
 
-Lessons learned
+Three lessons emerge from this design:
 
 1. Separating online and offline components enables aggressive caching
 2. Two-tower architectures scale better than joint models for user-item systems
@@ -5542,15 +5536,11 @@ Lessons learned
 
 Several patterns emerge across these case studies. @tbl-case-studies-summary identifies the primary technique and key innovation from each system:
 
-Separation of concerns All systems separate embedding/retrieval from ranking/generation. This enables specialized optimization for each component.
-
-Hybrid architectures No system uses GPUs exclusively. CPU+GPU combinations match hardware to workload characteristics.
-
-Caching at multiple levels Embedding caching, result caching, and intermediate representation caching all appear. Caching reduces compute at the cost of staleness.
-
-Progressive refinement Cascades and early-exit strategies reduce average compute by quickly filtering unlikely candidates.
-
-Deadline awareness All systems propagate deadlines and make explicit tradeoffs between quality and latency when under pressure.
+- **Separation of concerns**: All systems separate embedding and retrieval from ranking and generation, enabling specialized optimization for each component.
+- **Hybrid architectures**: No system uses GPUs exclusively. CPU+GPU combinations match hardware to workload characteristics.
+- **Caching at multiple levels**: Embedding caching, result caching, and intermediate representation caching all appear. Caching reduces compute at the cost of staleness.
+- **Progressive refinement**: Cascades and early-exit strategies reduce average compute by quickly filtering unlikely candidates.
+- **Deadline awareness**: All systems propagate deadlines and make explicit trade-offs between quality and latency when under pressure.
 
 | **System** | **Primary Technique** | **Key Innovation**        |
 |:-----------|:----------------------|:--------------------------|
@@ -5569,7 +5559,7 @@ A DevOps team applies their standard web-server load balancing rules to a new fl
 
 **Fallacy**: *Inference at scale is synonymous with LLM serving.*
 
-The misconception, reinforced by current discourse, leads to over-focus on LLM-specific techniques while ignoring the broader inference landscape. By request volume, recommendation systems constitute 80–90 percent of production inference at major technology companies, with vision and other models comprising most of the remainder. LLMs currently represent 1-5 percent of requests, though this is growing. A practitioner who only understands continuous batching and KV cache management will be unprepared for the feature-parallel batching and embedding sharding that dominate production inference. Technique selection must match the actual workload.
+The misconception, reinforced by current discourse, leads to over-focus on LLM-specific techniques while ignoring the broader inference landscape. By request volume, recommendation systems constitute 80–90 percent of production inference at major technology companies, with vision and other models comprising most of the remainder. LLMs currently represent 1--5 percent of requests, though this is growing. A practitioner who only understands continuous batching and KV cache management will be unprepared for the feature-parallel batching and embedding sharding that dominate production inference. Technique selection must match the actual workload.
 
 **Pitfall**: *Using training infrastructure for production serving.*
 
@@ -5592,6 +5582,8 @@ Simple load balancing strategies like round-robin seem adequate until examined q
 Distributed inference introduces overhead absent from single-machine serving: network round-trips, serialization, load balancer decisions, and coordination for sharded models. This "serving tax" often consumes 10--30 percent of the latency budget. A team that achieves 70 ms model inference on a single GPU may be surprised when end-to-end latency reaches 100 ms in production due to these overheads. Latency budgets must explicitly account for distribution overhead, not just compute time.
 
 **Fallacy**: *More GPU memory always means more batch size and throughput.*
+
+Larger GPU memory enables larger batches only for models whose throughput is capacity-bound. The binding constraint in LLM decode is memory bandwidth, not capacity: once HBM bandwidth saturates, adding memory does not increase tokens per second. The summary section below makes the bottleneck hierarchy explicit.
 
 ### Summary: Resource bottleneck hierarchy {#sec-inference-scale-summary}
 
@@ -5638,7 +5630,7 @@ While larger GPU memory enables larger batches for models that fit in memory, th
 
 In development and staging, single-tenant deployments work well. In production, noisy neighbors cause sudden, unpredictable performance degradation that is difficult to diagnose and resolve. A tenant bursting to 5$\times$ normal traffic can degrade latency for all other tenants on shared infrastructure. As emphasized in @sec-inference-scale-multitenancy-isolation-688c, resource quotas, priority scheduling, and bulkhead isolation must be designed into the system from the start, not retrofitted after production incidents.
 
-Avoiding these pitfalls ensures our serving infrastructure remains robust, cost-effective, and fiercely responsive. We conclude by summarizing the core architectural principles required to successfully deploy and serve machine learning at scale.
+Avoiding these pitfalls keeps serving infrastructure resilient to traffic variance, cost-efficient under fixed SLOs, and consistently responsive across tenants. The remainder of this chapter consolidates the core architectural principles required to deploy and serve machine learning at scale.
 
 To distill the most important lessons from this chapter, here are the *three things to remember*.
 
@@ -5673,9 +5665,9 @@ Understanding inference at scale matters because serving cost, not training cost
 
 The engineer who internalizes the prefill/decode split, who understands why KV cache fragmentation destroys throughput, and who can reason about the interaction between batching strategy and tail latency holds the leverage to reduce serving costs by orders of magnitude. These are not incremental improvements. Choosing continuous batching over static batching can double GPU utilization; implementing PagedAttention can recover 60--80 percent of wasted memory; and disaggregating prefill from decode across specialized hardware pools can cut per-token cost in half. In aggregate, the techniques presented in this chapter represent the difference between inference infrastructure that scales economically and one that collapses under the weight of its own serving bill.
 
-::: {.callout-chapter-connection title="From datacenter to edge"}
+::: {.callout-chapter-connection title="From data center to edge"}
 
-The architectural foundations for inference at scale developed here, continuous batching, PagedAttention, model sharding, and load balancing, all assume datacenter-grade hardware: H100 GPUs, NVLink interconnects, terabytes of HBM. But many applications require inference closer to the user: on smartphones, IoT devices, or local gateways where power budgets are measured in milliwatts, memory in megabytes, and connectivity is intermittent. @sec-edge-intelligence examines how we push intelligence to the edge, adapting the serving principles developed here to operate under constraints that invert every datacenter assumption.
+The architectural foundations for inference at scale developed here, continuous batching, PagedAttention, model sharding, and load balancing, all assume data center-grade hardware: H100 GPUs, NVLink interconnects, terabytes of HBM. Many applications, however, require inference closer to the user: on smartphones, IoT devices, or local gateways where power budgets are measured in milliwatts, memory in megabytes, and connectivity is intermittent. @sec-edge-intelligence examines how we push intelligence to the edge, adapting the serving principles developed here to operate under constraints that invert every data center assumption.
 
 :::
 

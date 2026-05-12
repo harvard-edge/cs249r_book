@@ -25,7 +25,7 @@ engine: jupyter
 
 _Why does the linear logic of "more hardware = faster training" collapse at the bisection bandwidth wall?_
 
-Distributed training appears simple: split the work across machines and combine the results. But as the Machine Learning Fleet grows, a new physics emerges [@hazelwood2018]. Communication costs scale with the number of machines while computation per machine shrinks, until synchronization overhead dominates and adding hardware actively degrades performance. *When* you train on a single GPU, you optimize for arithmetic intensity; *when* you train on 10,000 GPUs, you optimize for communication intensity. The scaling ceiling is not a bug to be fixed but a fundamental property of the reliability gap and communication-computation ratio\index{Communication-Computation Ratio}: coordinating independent machines requires moving terabytes of state across networks that are orders of magnitude slower than on-chip memory. The art of distributed training is managing this tension—partitioning work to minimize the **coordination tax**\index{Coordination Tax}, overlapping communication with computation to hide latency, and choosing synchronization strategies that balance consistency against throughput. Without this understanding, organizations waste millions on hardware that sits idle waiting for gradients to arrive, or produce models that never converge because stale updates corrupted the optimization.
+Distributed training appears simple: split the work across machines and combine the results. As the Machine Learning Fleet grows, however, a new physics emerges [@hazelwood2018]. Communication costs scale with the number of machines while computation per machine shrinks, until synchronization overhead dominates and adding hardware actively degrades performance. *When* a job trains on a single GPU, the design optimizes for arithmetic intensity; *when* it trains on 10,000 GPUs, the design optimizes for communication intensity. The scaling ceiling is not a bug to be fixed but a fundamental property of the reliability gap and communication-computation ratio\index{Communication-Computation Ratio}: coordinating independent machines requires moving terabytes of state across networks that are orders of magnitude slower than on-chip memory. The art of distributed training is managing this tension—partitioning work to minimize the **coordination tax**\index{Coordination Tax}, overlapping communication with computation to hide latency, and choosing synchronization strategies that balance consistency against throughput. Without this understanding, organizations waste millions on hardware that sits idle waiting for gradients to arrive, or produce models that never converge because stale updates corrupted the optimization.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -157,7 +157,7 @@ Third, **dataset scale** exceeds single-machine storage when training data reach
 Distributed training introduces three primary complexity dimensions not present in single-machine scenarios:
 
 1.  **Communication Overhead**\index{Communication Overhead}: The cost of synchronizing gradients. For a model with $P$ parameters distributed across $N_{\text{dev}}$ devices, all-reduce operations must transfer approximately $2P(N_{\text{dev}}-1)/N_{\text{dev}}$ gradient values per step, multiplied by the bytes per gradient element. On commodity networks, this can dominate computation time.
-2.  **Fault Tolerance**\index{Fault Tolerance}: Requirements increase exponentially with cluster size. A 100-node cluster with 99.9 percent per-node reliability experiences failures every few hours.
+2.  **Fault Tolerance**\index{Fault Tolerance}: The expected number of failures per unit time grows linearly with cluster size, while the probability that the entire cluster survives an interval without any failure decays exponentially. A 100-node cluster with 99.9 percent per-node reliability experiences failures every few hours.
 3.  **Algorithmic Stability**\index{Algorithmic Stability}: Large batch sizes from data parallelism affect convergence behavior, requiring learning rate scaling and warmup strategies that single-machine training does not require [@goyal2017accurate].
 
 ### Single-machine to distributed transition {#sec-distributed-training-systems-systems-singlemachine-distributed-transition-1ee4}
@@ -188,7 +188,7 @@ The bandwidth requirements impose a hard constraint on hardware placement, a pri
 
 ::: {.callout-perspective title="The Jeff Dean test"}
 
-If you attempt tensor parallelism across server racks connected by standard Ethernet, your training will stall. The communication volume (proportional to Batch $\times$ Layers) requires the `{python} DistTrainConstants.nvlink_a100_str`-`{python} DistTrainConstants.nvlink_h100_str` GB/s bandwidth of NVLink. For cross-rack scaling, you *must* switch to **Pipeline** or **Data**\index{Data} parallelism to respect the physics of the network.
+Tensor parallelism across server racks connected by standard Ethernet will stall. The communication volume (proportional to Batch $\times$ Layers) requires the `{python} DistTrainConstants.nvlink_a100_str`--`{python} DistTrainConstants.nvlink_h100_str` GB/s bandwidth of NVLink. For cross-rack scaling, the design *must* switch to **Pipeline** or **Data**\index{Data} parallelism to respect the physics of the network.
 
 :::
 
@@ -216,22 +216,17 @@ The central challenge of distributed training is ensuring that 1,024 GPUs, opera
 
 :::
 
-A useful mental model frames these distributed strategies as *loop transformations*, the same conceptual toolkit that compilers use to optimize sequential code.
+A useful mental model frames these distributed strategies as *loop transformations*, the same conceptual toolkit that compilers use to optimize sequential code. If we view the training process as a massive loop over data and layers, distributed strategies are simply **loop transformations** applied by the cluster-level compiler, as @fig-loop-transforms illustrates.
 
-::: {.callout-perspective title="Training as loop transforms"}
+::: {#fig-loop-transforms fig-env="figure" fig-pos="htb" fig-cap="**Distributed Strategies as Loop Transformations**: The logical training loop nests over epochs, batches, and layers. Distributed strategies are loop transformations applied at cluster scale: Data Parallelism unrolls the batch loop across devices; Tensor Parallelism vectorizes the per-layer matrix operations across devices; Pipeline Parallelism pipelines the layer sequence across devices." fig-alt="Two-block flowchart. Left block shows the logical training loop nested over epochs, batches, and layers. Right block shows the three physical implementations: Data Parallelism unrolls the batch loop, Tensor Parallelism vectorizes layer operations, Pipeline Parallelism pipelines the layer sequence. A heavy arrow connects logical to physical."}
 
-If we view the training process as a massive loop over data and layers, distributed strategies are simply **Loop Transformations** applied by the cluster-level compiler:
-
-```{text}
-%%| label: fig-loop-transforms
-%%| fig-cap: "**Distributed Strategies as Loop Transformations**: Visualizing how
-     DP, TP, and PP map to standard compiler optimizations applied at cluster scale."
+```{mermaid}
 flowchart LR
     subgraph Logical[Logical Training Loop]
         direction TB
         L1[for epoch in epochs:] --> L2[for batch in data:]
         L2 --> L3[for layer in layers:]
-        L3 --> L4[Compute(layer, batch)]
+        L3 --> L4[Compute layer, batch]
     end
 
     subgraph Physical[Physical Implementation]
@@ -244,11 +239,11 @@ flowchart LR
     Logical ==> Physical
 ```
 
+:::
+
 *   **Data Parallelism = Parallel For Loop.** We unroll the outer loop (batch dimension) across devices. Each device runs the same code body on different data indices.
 *   **Tensor Parallelism = Vectorization (single instruction, multiple data (SIMD)).** We split the inner loops (matrix multiplication) across devices. This is "Cluster-Scale SIMD," where NVLink acts as the vector register file.
 *   **Pipeline Parallelism = Instruction Pipelining.** We split the sequential operations (layers) across devices. Just as a CPU pipeline stages fetch/decode/execute, the cluster stages Layer 1/Layer 2/Layer 3 to keep all ALUs busy.
-
-:::
 
 Optimizing locally before scaling horizontally ensures that distributed systems operate efficiently at each node while adding the coordination mechanisms necessary for multi-machine training. When model complexity and dataset sizes exceed the capacity of individual devices, distributed training[^fn-distbelief-distributed] spreads the workload across multiple machines that coordinate to train a single model.
 
@@ -258,19 +253,19 @@ Coordination relies on consensus protocols and synchronization primitives that k
 
 The progression from single-device to distributed training follows a systematic scaling path where each stage builds on the previous level's challenges. Single-GPU training requires only local memory management and straightforward forward/backward passes, establishing the baseline computational patterns. Scaling to multiple GPUs within a single node introduces high-bandwidth communication requirements, typically handled through NVLink[^fn-nvlink-intranode] or PCIe connections with NCCL[^fn-nccl-topology] optimization while preserving the single-machine simplicity of fault tolerance and scheduling.
 
-[^fn-nvlink-intranode]: **NVLink**: NVIDIA's point-to-point GPU interconnect delivers `{python} DistTrainConstants.nvlink_a100_str`--`{python} DistTrainConstants.nvlink_h100_str` GB/s bidirectional bandwidth, roughly 10$\times$ InfiniBand HDR. This bandwidth gap is why tensor parallelism -- which requires AllReduce on every layer -- is confined to intra-node communication, while pipeline and data parallelism tolerate the slower inter-node fabric. \index{NVLink!distributed training}
+[^fn-nvlink-intranode]: **NVLink**: NVIDIA's point-to-point GPU interconnect delivers `{python} DistTrainConstants.nvlink_a100_str`--`{python} DistTrainConstants.nvlink_h100_str` GB/s bidirectional bandwidth, roughly 10$\times$ InfiniBand HDR. This bandwidth gap is why tensor parallelism, which requires AllReduce on every layer, is confined to intra-node communication, while pipeline and data parallelism tolerate the slower inter-node fabric. \index{NVLink!distributed training}
 
-[^fn-nccl-topology]: **NCCL (NVIDIA Collective Communications Library)**: Released in 2015, NCCL automatically selects ring, tree, or hierarchical AllReduce algorithms based on detected hardware topology -- NVLink within nodes, InfiniBand across nodes. This topology-aware routing is critical because a naive single-ring AllReduce across 128 nodes would force all traffic through the slowest inter-node link, collapsing bandwidth utilization to under 30 percent. \index{NCCL!topology}
+[^fn-nccl-topology]: **NCCL (NVIDIA Collective Communications Library)**: Released in 2015, NCCL automatically selects ring, tree, or hierarchical AllReduce algorithms based on detected hardware topology: NVLink within nodes, InfiniBand across nodes. This topology-aware routing is critical because a naive single-ring AllReduce across 128 nodes would force all traffic through the slowest inter-node link, collapsing bandwidth utilization to under 30 percent. \index{NCCL!topology}
 
 The leap to multi-node distributed training introduces new complexity dimensions: network communication overhead, fault tolerance requirements, and cluster orchestration challenges. Each scaling stage compounds the previous challenges as communication bottlenecks intensify, synchronization overhead grows, and failure probability increases. Practitioners should therefore optimize single-GPU performance before scaling to ensure efficient resource utilization at each level.
 
 ::: {.callout-perspective title="Distributed training complexity"}
 
-Although modern frameworks abstract away much of the complexity through sharded data parallelism and communication libraries, implementing distributed training efficiently remains a significant engineering challenge. Production deployments require careful network configuration (InfiniBand tuning, topology-aware routing), infrastructure management through cluster schedulers, and debugging of non-local issues such as synchronization hangs and communication bottlenecks.
+Although modern frameworks abstract away much of the complexity through sharded data parallelism and communication libraries, implementing distributed training efficiently remains a significant engineering challenge. Production deployments require careful network configuration (InfiniBand tuning, topology-aware routing), infrastructure management through cluster schedulers, and debugging of nonlocal issues such as synchronization hangs and communication bottlenecks.
 
 :::
 
-The distributed training process itself involves splitting the dataset into non-overlapping subsets, assigning each subset to a different GPU, and performing forward and backward passes independently on each device. Once gradients are computed on each GPU, they are synchronized and aggregated before updating the model parameters, ensuring that all devices learn in a consistent manner. The coordinated flow of data splitting, computation, and gradient synchronization (@fig-distributed-training) forms the foundation of distributed training, with each GPU processing its batch independently before synchronization brings all gradients together.
+The distributed training process itself involves splitting the dataset into nonoverlapping subsets, assigning each subset to a different GPU, and performing forward and backward passes independently on each device. Once gradients are computed on each GPU, they are synchronized and aggregated before updating the model parameters, ensuring that all devices learn in a consistent manner. The coordinated flow of data splitting, computation, and gradient synchronization (@fig-distributed-training) forms the foundation of distributed training, with each GPU processing its batch independently before synchronization brings all gradients together.
 
 ::: {#fig-distributed-training fig-env="figure" fig-pos="htb" fig-cap="**Data Parallel Training Flow**: Distributed training partitions datasets across GPUs, computes gradients concurrently on each device's data subset, then aggregates gradients through AllReduce to update shared model parameters. Each GPU maintains an identical model copy and processes its portion of the batch independently, with synchronization occurring only during gradient aggregation. This approach achieves near-linear speedup when communication overhead remains below 30--40 percent of training time." fig-alt="Two parallel GPU workflows showing data parallel training. Each GPU processes a data chunk through forward pass, error computation, loss function, backward pass, then gradients merge at Calculate Global Gradients for parameter updates."}
 ![](images/svg/data-parallel-pipeline.svg)
@@ -568,7 +563,7 @@ The mathematical foundation above (gradient averaging preserves the statistical 
 
 The process of data parallelism can be broken into a series of distinct steps, each with its role in ensuring the system operates efficiently. Consider @fig-dist-train-data-parallelism: it traces the complete workflow from dataset splitting through gradient aggregation, showing how each GPU processes its assigned batch before synchronization brings all gradients together for parameter updates.
 
-::: {#fig-dist-train-data-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Data Parallelism Implementation Pipeline**: The five-stage workflow for data parallel training: (1) split input data into non-overlapping subsets, (2) assign batches to GPUs, (3) compute forward and backward passes independently, (4) synchronize gradients via AllReduce, and (5) update parameters uniformly across all devices. This approach contrasts with model parallelism, where the model itself is partitioned rather than replicated." fig-alt="Flowchart showing 5-stage data parallelism: Input Data splits into 4 batches assigned to GPUs 1-4, each performs forward and backward pass, gradients synchronize and aggregate, then model updates."}
+::: {#fig-dist-train-data-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Data Parallelism Implementation Pipeline**: The five-stage workflow for data parallel training: (1) split input data into nonoverlapping subsets, (2) assign batches to GPUs, (3) compute forward and backward passes independently, (4) synchronize gradients via AllReduce, and (5) update parameters uniformly across all devices. This approach contrasts with model parallelism, where the model itself is partitioned rather than replicated." fig-alt="Flowchart showing 5-stage data parallelism: Input Data splits into 4 batches assigned to GPUs 1-4, each performs forward and backward pass, gradients synchronize and aggregate, then model updates."}
 
 ![](images/svg/data-parallel-flow.svg)
 
@@ -578,7 +573,7 @@ As @fig-dist-train-data-parallelism shows, the critical synchronization point is
 
 #### Dataset splitting {#sec-distributed-training-systems-systems-dataset-splitting-1edf}
 
-The first step in data parallelism involves dividing the dataset into smaller, non-overlapping subsets. This ensures that each device processes a unique portion of the data, avoiding redundancy and enabling efficient utilization of available hardware. With a dataset of 100,000 training examples and 4 GPUs, each GPU receives 25,000 examples per epoch. The DistributedSampler must ensure no overlap between subsets to maintain gradient estimation validity: if two GPUs process the same example, the resulting gradient average would overweight that example, violating the unbiased gradient assumption that makes data parallelism mathematically equivalent to single-device training.
+The first step in data parallelism involves dividing the dataset into smaller, nonoverlapping subsets. This ensures that each device processes a unique portion of the data, avoiding redundancy and enabling efficient utilization of available hardware. With a dataset of 100,000 training examples and 4 GPUs, each GPU receives 25,000 examples per epoch. The DistributedSampler must ensure no overlap between subsets to maintain gradient estimation validity: if two GPUs process the same example, the resulting gradient average would overweight that example, violating the unbiased gradient assumption that makes data parallelism mathematically equivalent to single-device training.
 
 Modern distributed training frameworks handle this distribution automatically through a distributed sampler that implements prefetching and caching mechanisms to ensure data is readily available for processing. The sampler coordinates across workers using the process rank to deterministically partition indices, ensuring reproducibility when the same random seed is used. For a 1.2 million example dataset like ImageNet distributed across 32 GPUs, each GPU processes exactly 37,500 examples per epoch, with the sampler padding the final batch to maintain consistent batch sizes across all workers.
 
@@ -641,30 +636,30 @@ When synchronization performance deviates from theoretical expectations, the Fle
 
 ::: {.callout-perspective title="Debugging slow gradient synchronization"}
 
-**Problem statement**: An AllReduce operation takes 100 ms when the bandwidth calculation predicts 50 ms. The Fleet Stack framework provides a systematic debugging methodology by examining each layer:
+**Problem statement**: An AllReduce of a 3 GB gradient tensor across 128 nodes (1,024 GPUs) takes 100 ms, while a hierarchical-AllReduce model that exploits NVLink within nodes and InfiniBand between nodes predicts roughly 80 ms. The Fleet Stack framework provides a systematic debugging methodology by examining each layer:
 
 **Infrastructure Layer**:
 
 - **Topology**: 128 nodes, 8 GPUs per node
 - **Intra-node**: NVLink at `{python} DistTrainConstants.nvlink_a100_str` GB/s bidirectional between GPUs
 - **Inter-node**: InfiniBand HDR at 200 Gb/s (25 GB/s) per port
-- **Observation**: The 3 GB gradient tensor should take $3 \text{ GB} / 25 \text{ GB/s} = 120\text{ ms}$ for a naive transfer, but ring AllReduce should achieve $2(N-1)/N \times 3 \text{ GB} / 25 \text{ GB/s} \approx 240\text{ ms}$ across 128 nodes
+- **Naive single-stream baseline**: A flat 3 GB transfer over one InfiniBand link takes $3 \text{ GB} / 25 \text{ GB/s} = 120\text{ ms}$, and a flat ring across all 128 nodes pays $2(N-1)/N \times 3 \text{ GB} / 25 \text{ GB/s} \approx 240\text{ ms}$. A hierarchical AllReduce (intra-node ring over NVLink + inter-node ring over InfiniBand) brings the inter-node cost down to roughly 80 ms because each node only ships its 1/8 share over the slow link.
 
 **Distribution Layer**:
 
-- **Algorithm choice**: Single ring AllReduce across all 1024 GPUs
-- **Expected behavior**: Ring touches every GPU in sequence, dominated by the slowest link (inter-node InfiniBand)
-- **Diagnosis**: A single global ring *fails to exploit NVLink* within nodes
+- **Algorithm choice**: NCCL hierarchical AllReduce (intra-node NVLink ring + inter-node InfiniBand ring)
+- **Expected behavior**: Hierarchical decomposition isolates the slow link from the fast link, scaling with the inter-node share rather than the full tensor
+- **Diagnosis check**: A flat single ring over all 1,024 GPUs would have measured close to 240 ms, so the algorithm is already hierarchical
 
 **Serving Layer (Measurement)**:
 
-- **Observed latency**: 100 ms (better than naive calculation predicts)
+- **Observed latency**: 100 ms (well below the 240 ms flat-ring upper bound, but 20 ms above the hierarchical model)
 - **Bandwidth utilization**: Only 60 percent of theoretical InfiniBand throughput
 - **Network counters**: Show congestion on specific switch uplinks
 
-**Root Cause Diagnosis**: The mismatch between Infrastructure and Distribution layers reveals the problem. The single ring correctly identifies InfiniBand as the bottleneck, but the observed 100 ms (rather than 240 ms) suggests NCCL is already using a hierarchical algorithm internally. The *remaining* gap comes from switch congestion, not algorithm choice.
+**Root Cause Diagnosis**: NCCL is already using a hierarchical algorithm (100 ms vs. the 240 ms flat-ring prediction confirms this). The remaining 20 ms gap between observed and modeled latency comes from switch congestion on a handful of inter-node uplinks, not from a suboptimal algorithm.
 
-**Solution**: Monitor InfiniBand switch port utilization to identify hot spots. Consider rail-optimized topology (@sec-compute-infrastructure) or hierarchical AllReduce that explicitly partitions intra-node (NVLink) from inter-node (InfiniBand) communication. The 40 ms remaining gap likely represents achievable optimization through better network provisioning rather than algorithm changes.
+**Solution**: Monitor InfiniBand switch port utilization to identify hot spots. Consider the rail-optimized topology in @sec-network-fabrics-rail-optimized or further tuning of the hierarchical AllReduce hand-off so it explicitly partitions intra-node (NVLink) from inter-node (InfiniBand) communication. The residual 20 ms gap likely represents achievable optimization through better network provisioning rather than algorithm changes.
 
 The analysis demonstrates how the Fleet Stack layers interact: Physical constraints (bandwidth) bound Operational choices (algorithm), which manifest in Service metrics (latency). Debugging requires examining all three layers, not just tuning one in isolation.
 
@@ -686,7 +681,7 @@ Distributed training systems operate under explicit synchronization models that 
 
 The default model, Bulk Synchronous Parallel (BSP)[^fn-bsp] [@valiant1990], requires all workers to complete their local computation in forward and backward passes, synchronize gradients through a barrier with AllReduce, and then simultaneously update parameters.
 
-[^fn-bsp]: **Bulk Synchronous Parallel (BSP)**: Introduced by @valiant1990 as a "bridging model" between hardware and software for parallel computation. BSP divides work into supersteps -- compute, communicate, barrier -- guaranteeing mathematical equivalence to sequential execution. The cost: iteration time equals the slowest worker's time, and at 1,000 GPUs with 1 percent straggler probability per device, roughly 10 GPUs straggle every step, making the barrier increasingly expensive. \index{BSP!synchronization}
+[^fn-bsp]: **Bulk Synchronous Parallel (BSP)**: Introduced by @valiant1990 as a "bridging model" between hardware and software for parallel computation. BSP divides work into supersteps (compute, communicate, barrier), guaranteeing mathematical equivalence to sequential execution. The cost: iteration time equals the slowest worker's time, and at 1,000 GPUs with 1 percent straggler probability per device, roughly 10 GPUs straggle every step, making the barrier increasingly expensive. \index{BSP!synchronization}
 
 BSP provides strong guarantees where every worker sees identical parameter values at each step, ensuring mathematical equivalence to single-device training. The cost is that the slowest worker determines iteration time, creating the straggler\index{Straggler!synchronization delay} problem.
 
@@ -960,7 +955,7 @@ A better approach uses 8 GPUs with gradient accumulation to avoid the inter-node
 
 ::: {.callout-notebook title="Gradient accumulation speedup"}
 
-**Problem**: You are training GPT-2 on a commodity 10G network. A 32-GPU configuration was communication-bound, costing \$3,021 for a fixed number of samples. Can you achieve the same effective batch size on a single 8-GPU node using gradient accumulation more efficiently?
+**Problem**: A GPT-2 run on a commodity 10G network is communication-bound at 32 GPUs, costing \$3,021 for a fixed number of samples. Can a single 8-GPU node achieve the same effective batch size more efficiently using gradient accumulation?
 
 **Math**:
 
@@ -1041,7 +1036,7 @@ FSDP introduces communication on the critical path that DDP avoids:
 - **Forward pass**: AllGather to reconstruct parameters ($M$ bytes $\times$ 2 for each layer)
 - **Backward pass**: ReduceScatter for gradients ($M$ bytes $\times$ 2 for each layer)
 
-For a model with $N_{\text{layers}}$ layers, FSDP performs $2 N_{\text{layers}}$ collective operations per training step versus 1 AllReduce for DDP. However, FSDP enables overlapping: while layer $i$ computes, layer $i+1$ can prefetch parameters.
+For a model with $N_{\text{layers}}$ layers, FSDP performs $2 N_{\text{layers}}$ collective operations per training step vs. 1 AllReduce for DDP. However, FSDP enables overlapping: while layer $i$ computes, layer $i+1$ can prefetch parameters.
 
 Total FSDP communication volume: approximately $3M$ bytes (vs. $2M$ for DDP AllReduce), but spread across more operations with overlap opportunities.
 
@@ -1067,7 +1062,7 @@ AllReduce complexity depends on two components: latency $(\alpha)$ and bandwidth
 
 Interconnect selection determines whether large-scale deployments remain compute-bound or collapse into communication-bound regimes.
 
-The bandwidth requirements for efficient distributed training are substantial, particularly for transformer models. Efficient systems often require 100--400 GB/s aggregate bandwidth per node for transformer architectures. BERT-Base (110M parameters) requires approximately 440 MB of gradient synchronization per iteration in FP32, while BERT-Large (340M parameters) requires approximately 1.4 GB. Across 64 GPUs, these synchronization demands require 100-200 GB/s sustained bandwidth for sub-50 ms synchronization latency. For `{python} FrontierTrainingContext.frontier_params_b_str`B-parameter language models, exact bandwidth requirements depend on the 3D-parallel configuration, gradient accumulation, overlap, and interconnect topology rather than a single universal number.
+The bandwidth requirements for efficient distributed training are substantial, particularly for transformer models. Efficient systems often require 100--400 GB/s aggregate bandwidth per node for transformer architectures. BERT-Base (110M parameters) requires approximately 440 MB of gradient synchronization per iteration in FP32, while BERT-Large (340M parameters) requires approximately 1.4 GB. Across 64 GPUs, these synchronization demands require 100--200 GB/s sustained bandwidth for sub-50 ms synchronization latency. For `{python} FrontierTrainingContext.frontier_params_b_str`B-parameter language models, exact bandwidth requirements depend on the 3D-parallel configuration, gradient accumulation, overlap, and interconnect topology rather than a single universal number.
 
 Synchronization frequency presents a trade-off between communication efficiency and convergence behavior. Gradient accumulation reduces synchronization frequency but increases memory requirements and may impact convergence. Synchronizing every 4 steps reduces communication overhead by 60 percent while increasing memory usage by 3$\times$ for gradient storage. Asynchronous methods eliminate synchronization costs entirely but introduce staleness that degrades convergence by 15--30 percent for large learning rates.
 
@@ -1077,7 +1072,7 @@ Just as the Iron Law of Processor Performance governs single-thread execution, d
 
 @fig-scaling-tax visualizes this divergence from ideal linear scaling as the **Scaling Tax**\index{Scaling Tax!communication overhead}—a direct consequence of the scaling efficiency bound (Principle \ref{pri-scaling-efficiency}). It shows how communication overhead $(r)$ acts as a drag on performance, creating a communication wall where adding more GPUs yields diminishing returns.
 
-::: {#fig-scaling-tax fig-env="figure" fig-pos="htb" fig-cap="**The Scaling Tax**: Effective speedup vs. number of GPUs. While ideal scaling (dashed black) is linear, real-world systems pay a 'tax' for communication. Compute-bound models like ResNet (green) scale well because they have high arithmetic intensity. Bandwidth-bound models like GPT-3 (red) hit a communication wall where adding more GPUs yields diminishing returns (efficiency < 50 percent)." fig-alt="Line chart of Speedup vs GPU Count (log-log). Green line (Compute Bound) stays close to the ideal linear diagonal. Red line (Bandwidth Bound) flattens out, showing diminishing returns as GPUs are added."}
+::: {#fig-scaling-tax fig-env="figure" fig-pos="htb" fig-cap="**The Scaling Tax**: Effective speedup vs. number of GPUs. While ideal scaling (dashed black) is linear, real-world systems pay a 'tax' for communication. Compute-bound models like ResNet (green) scale well because they have high arithmetic intensity. Bandwidth-bound models like GPT-3 (red) hit a communication wall where adding more GPUs yields diminishing returns (efficiency < 50 percent)." fig-alt="Line chart of Speedup vs. GPU Count (log-log). Green line (Compute Bound) stays close to the ideal linear diagonal. Red line (Bandwidth Bound) flattens out, showing diminishing returns as GPUs are added."}
 
 ```{python}
 #| echo: false
@@ -1139,7 +1134,7 @@ ax.set_xlabel('Number of GPUs (N)')
 ax.set_ylabel('Effective Speedup')
 ax.legend(loc='upper left', fontsize=8)
 
-# --- Annotation ---
+#—Annotation ---
 ax.annotate(
     "Communication Wall",
     xy=(32, 32 / (1 + 31 * 0.47)),
@@ -1186,7 +1181,7 @@ At the scale of 10,000 GPUs, the energy tax of moving gradients becomes a multi-
 
 :::
 
-Scaling efficiency follows predictable patterns across different GPU counts. In the linear scaling regime of 2-32 GPUs, systems typically achieve 85--95 percent parallel efficiency because communication overhead remains minimal. The communication bound regime emerges at 64-256 GPUs, where efficiency drops to 60-80 percent even with optimal interconnects. Beyond 512 GPUs, coordination overhead becomes dominant and limits efficiency to 40-60 percent due to collective operation latency.
+Scaling efficiency follows predictable patterns across different GPU counts. In the linear scaling regime of 2--32 GPUs, systems typically achieve 85--95 percent parallel efficiency because communication overhead remains minimal. The communication bound regime emerges at 64--256 GPUs, where efficiency drops to 60--80 percent even with optimal interconnects. Beyond 512 GPUs, coordination overhead becomes dominant and limits efficiency to 40--60 percent due to collective operation latency.
 
 Hardware selection critically impacts these scaling characteristics. NVIDIA DGX A100 systems provide `{python} DistTrainConstants.nvlink_a100_str` GB/s of bidirectional NVLink bandwidth per GPU, with aggregate NVSwitch bandwidth at the system level, enabling high parallel efficiency up to 8 GPUs per node. Multi-node scaling requires InfiniBand networks, where EDR at 100 Gbps supports efficient training up to 64 nodes, while HDR at 200 Gbps enables scaling to 256+ nodes with greater than 70 percent efficiency.
 
@@ -1216,7 +1211,7 @@ The theorem reveals several important insights. First, the variance floor decrea
 
 However, the theorem assumes perfect synchronization (BSP). When workers proceed at different rates or use stale gradients, convergence guarantees degrade, as we examine next.
 
-### Staleness impact: BSP versus SSP versus ASP {#sec-distributed-training-systems-systems-staleness-impact-bsp-versus-ssp-versus-asp-e153}
+### Staleness impact: BSP vs. SSP vs. ASP {#sec-distributed-training-systems-systems-staleness-impact-bsp-vs.-ssp-vs.-asp-e153}
 
 Synchronization models fundamentally affect convergence behavior. The staleness parameter $\tau$ quantifies how many iterations behind a gradient may be when applied to parameters.
 
@@ -1274,7 +1269,7 @@ $$
 \eta_{\text{large}} = k \cdot \eta_{\text{base}}
 $$
 
-This rule is justified by approximating one large-batch step at learning rate $k\eta$ as $k$ consecutive small-batch steps each at learning rate $\eta$. With batch size $kB$, the gradient variance decreases by factor $k$, so the larger step is well-conditioned; the approximation holds when parameters do not move much during those $k$ small-batch steps. The linear scaling rule works well for moderate batch sizes (up to 8K-16K for ImageNet, up to 32K for BERT) and requires a **warmup period** where the learning rate gradually increases from a small value to the target over the first 5-10 percent of training.
+This rule is justified by approximating one large-batch step at learning rate $k\eta$ as $k$ consecutive small-batch steps each at learning rate $\eta$. With batch size $kB$, the gradient variance decreases by factor $k$, so the larger step is well-conditioned; the approximation holds when parameters do not move much during those $k$ small-batch steps. The linear scaling rule works well for moderate batch sizes (up to 8K--16K for ImageNet, up to 32K for BERT) and requires a **warmup period** where the learning rate gradually increases from a small value to the target over the first 5--10 percent of training.
 
 ::: {.callout-war-story title="Linear scaling warmup"}
 
@@ -1304,9 +1299,9 @@ $$
 
 Layer-wise scaling prevents layers with small weights from receiving disproportionately large updates. LAMB enabled BERT training with batch sizes up to 64K while maintaining convergence quality.
 
-### Critical batch size: When does parallelism hurt? {#sec-distributed-training-systems-systems-critical-batch-size-parallelism-hurt-4961}
+### Critical batch size and diminishing returns {#sec-distributed-training-systems-systems-critical-batch-size-parallelism-hurt-4961}
 
-A fundamental question in distributed training is: when does adding more workers stop helping? The critical batch size $B^{*}$ marks the transition point beyond which increasing batch size yields diminishing returns in convergence per sample seen.
+A fundamental property of distributed training is that adding more workers stops helping past a threshold. The critical batch size $B^{*}$ marks the transition point beyond which increasing batch size yields diminishing returns in convergence per sample seen.
 
 ::: {.callout-definition title="Critical batch size"}
 
@@ -1342,7 +1337,7 @@ The scaling law regime exhibits three distinct behaviors:
 
 @fig-critical-batch-size illustrates this relationship between batch size and training efficiency.
 
-::: {#fig-critical-batch-size fig-env="figure" fig-pos="htb" fig-cap="**Critical Batch Size and Scaling Regimes**: Below the critical batch size $B^{*}$, larger batches reduce noise and improve sample efficiency (linear scaling regime). Above $B^{*}$, larger batches provide diminishing returns: while throughput increases, total samples required also increases, reducing sample efficiency. The optimal operating point balances hardware utilization against convergence efficiency." fig-alt="Graph showing sample efficiency versus batch size. Efficiency is flat in the linear regime below B-star, then decreases in the diminishing returns regime above B-star. Vertical dashed line marks critical batch size."}
+::: {#fig-critical-batch-size fig-env="figure" fig-pos="htb" fig-cap="**Critical Batch Size and Scaling Regimes**: Below the critical batch size $B^{*}$, larger batches reduce noise and improve sample efficiency (linear scaling regime). Above $B^{*}$, larger batches provide diminishing returns: while throughput increases, total samples required also increases, reducing sample efficiency. The optimal operating point balances hardware utilization against convergence efficiency." fig-alt="Graph showing sample efficiency vs. batch size. Efficiency is flat in the linear regime below B-star, then decreases in the diminishing returns regime above B-star. Vertical dashed line marks critical batch size."}
 ![](images/svg/critical-batch-size.svg){width=100%}
 :::
 
@@ -1360,7 +1355,7 @@ Given a 7B parameter model distributed across a cluster of 64 A100 GPUs (80 GB H
 
 :::
 
-### Worked example: Convergence comparison for 8 versus 64 workers {#sec-distributed-training-systems-systems-worked-example-convergence-comparison-8-versus-64-workers-57ce}
+### Worked example: Convergence comparison for 8 vs. 64 workers {#sec-distributed-training-systems-systems-worked-example-convergence-comparison-8-vs.-64-workers-57ce}
 
 To illustrate these concepts concretely, consider *scaling from 8 to 64 workers* when training a transformer language model with baseline batch size $B = 32$ per worker.
 
@@ -1491,7 +1486,7 @@ Despite higher parallelism, 64-GPU training costs more per run due to communicat
 
 :::
 
-### Trade-off: Communication cost versus convergence speed {#sec-distributed-training-systems-systems-tradeoff-communication-cost-versus-convergence-speed-cb7c}
+### Trade-off: Communication cost vs. convergence speed {#sec-distributed-training-systems-systems-tradeoff-communication-cost-vs.-convergence-speed-cb7c}
 
 The fundamental trade-off in distributed training is between communication efficiency and convergence quality. @fig-comm-convergence-tradeoff visualizes this trade-off space.
 
@@ -1615,7 +1610,7 @@ Verify your understanding of model sharding:
 - [ ] Does Model Parallelism reduce the **memory footprint** per GPU for a given model?
 - [ ] In which phase—forward or backward—do sequential dependencies between model shards arise?
 - [ ] Why does pure Model Parallelism often lead to lower GPU utilization (the "Pipeline Bubble") compared to Data Parallelism?
-- [ ] Can you identify two ways to split a Transformer layer: **Layer-based** versus **Tensor-based**?
+- [ ] Can you identify two ways to split a Transformer layer: **Layer-based** vs. **Tensor-based**?
 
 :::
 
@@ -1760,7 +1755,7 @@ class PipelineBubble:
 
 ::: {.callout-notebook title="The cost of the pipeline bubble"}
 
-**Problem**: You are training a frontier model using pipeline parallelism across `{python} PipelineBubble.pb_stages_str` nodes. To hide the sequential delay, you split your batch into `{python} PipelineBubble.pb_microbatches_str` microbatches. What is your "bubble tax"—the fraction of GPU cycles lost to idle waiting?
+**Problem**: A frontier-model training run uses pipeline parallelism across `{python} PipelineBubble.pb_stages_str` nodes. To hide the sequential delay, the batch is split into `{python} PipelineBubble.pb_microbatches_str` microbatches. What is the "bubble tax"—the fraction of GPU cycles lost to idle waiting?
 
 **Math**:
 In a synchronous pipeline (1F1B), the bubble fraction is determined by the ratio of stages to microbatches.
@@ -1769,7 +1764,7 @@ In a synchronous pipeline (1F1B), the bubble fraction is determined by the ratio
 2. **Productive time**: GPUs compute for $m$ steps.
 3. **Bubble fraction**: $(p-1) / (p-1+m) = 7 / (7+32) \approx$ **`{python} PipelineBubble.pb_bubble_pct_str` percent**.
 
-**Systems insight**: Pipeline parallelism is a **Utilization-Memory Trade-off**. To reduce the bubble from 18 percent to 5 percent, you must increase the number of microbatches $(m)$, which consumes more **Activation Memory** on each GPU. In the Machine Learning Fleet, you do not scale depth for free—you pay a **`{python} PipelineBubble.pb_bubble_pct_str` percent** capacity tax just to keep the stages coordinated. This is why techniques like **Interleaved Pipelining** are essential: they chop the bubble into smaller pieces to recover that lost 18 percent of your fleet.
+**Systems insight**: Pipeline parallelism is a **Utilization-Memory Trade-off**. Reducing the bubble from 18 percent to 5 percent requires more microbatches $(m)$, which consume additional **Activation Memory** on each GPU. In the Machine Learning Fleet, depth does not scale for free; the cluster pays a **`{python} PipelineBubble.pb_bubble_pct_str` percent** capacity tax just to keep the stages coordinated. This is why techniques like **Interleaved Pipelining** are essential: they chop the bubble into smaller pieces to recover that lost 18 percent of fleet capacity.
 
 :::
 
@@ -1966,7 +1961,7 @@ The sparse communication pattern distinguishes recommendation and MoE workloads 
 *   **LLMs (Dense)**: Scale via Tensor/Pipeline Parallelism. Constraint: **Compute & Interconnect Bandwidth** (NVLink).
 *   **DLRMs (Sparse)**: Scale via Embedding Sharding (Parameter Servers). Constraint: **Memory Capacity & Interconnect Latency** (Random Access).
 
-The distinction dictates fundamentally different cluster designs: dense GPU pods for LLMs versus memory-rich CPU/GPU hybrids for RecSys.
+The distinction dictates fundamentally different cluster designs: dense GPU pods for LLMs vs. memory-rich CPU/GPU hybrids for RecSys.
 
 :::
 
@@ -2033,7 +2028,7 @@ Training a `{python} FrontierTrainingContext.frontier_params_b_str`B parameter m
 
 The training step begins at the Data Parallel level. Each of the 128 model replicas receives a distinct slice of the global batch. Within each replica, the model is split across 16 pipeline stages (nodes), with micro-batches flowing sequentially from the embedding layer on Node 0 to the loss calculation on Node 15. At the finest granularity, within each node, the 8 GPUs fuse into a single "super-accelerator" via TP. Every matrix multiplication in the forward pass is fractured across these 8 devices, which must exchange partial results via high-bandwidth NVLink after every operation. The resulting traffic is the highest-intensity in the system, approximately 12.6 GB per step, but latency remains negligible due to the `{python} DistTrainConstants.nvlink_a100_str`--`{python} FlashAttentionOverlapScenario.nvlink_h100` GB/s bandwidth between co-located chips.
 
-The backward pass inverts this flow and exposes the critical dependencies between parallelism dimensions. As gradients flow backward through the pipeline, nodes exchange activation gradients point-to-point. This traffic is relatively light—roughly 200 MB per stage boundary—allowing it to traverse slower inter-node InfiniBand links without stalling the pipeline. The true bottleneck emerges at the end of the step: the **Global AllReduce**. All 128 replicas must synchronize their gradients to update the weights, requiring the summation of 350 GB of gradient data across the entire cluster. By overlapping this communication with the computation of subsequent micro-batches through gradient bucketing, the system hides the latency of moving terabytes of data across the datacenter fabric.
+The backward pass inverts this flow and exposes the critical dependencies between parallelism dimensions. As gradients flow backward through the pipeline, nodes exchange activation gradients point-to-point. This traffic is relatively light—roughly 200 MB per stage boundary—allowing it to traverse slower inter-node InfiniBand links without stalling the pipeline. The true bottleneck emerges at the end of the step: the **Global AllReduce**. All 128 replicas must synchronize their gradients to update the weights, requiring the summation of 350 GB of gradient data across the entire cluster. By overlapping this communication with the computation of subsequent micro-batches through gradient bucketing, the system hides the latency of moving terabytes of data across the data center fabric.
 
 The architectural imperative is **bandwidth matching**: the communication volume of each algorithm must map inversely to the latency of the hardware interconnects. Chatty, blocking TP communication stays within the `{python} DistTrainConstants.nvlink_a100_str`+ GB/s NVLink domain. Serialized, point-to-point PP transfers traverse the cluster spine at InfiniBand speeds. The massive but infrequent DP synchronization amortizes across the full training step. Attempting to run TP across racks, or DP without gradient accumulation, would violate this hierarchy—causing the 16,000-GPU fleet to wait idly for data to traverse the wire. This bandwidth-matching principle is precisely the "Jeff Dean Test" introduced in @sec-distributed-training-systems-systems-engineering-tradeoffs-selecting-parallelism-strategy-b344.
 
@@ -2157,7 +2152,7 @@ class AutoParallelism:
 
 ::: {.callout-notebook title="Automated design space search (Tier 3 optimizer)"}
 
-**Problem**: You need to schedule **Archetype A** (a `{python} AutoParallelism.params_b_str`B parameter model) on a cluster of **`{python} AutoParallelism.gpu_count_str` H100 GPUs**. Manually searching the 3D-parallelism space (TP $\times$ PP $\times$ DP) is error-prone: a split that maximizes DP might exceed the 80 GB HBM capacity, while a split that maximizes TP might saturate the NVLink interconnect.
+**Problem**: An engineering team needs to schedule **Archetype A** (a `{python} AutoParallelism.params_b_str`B parameter model) on a cluster of **`{python} AutoParallelism.gpu_count_str` H100 GPUs**. Manually searching the 3D-parallelism space (TP $\times$ PP $\times$ DP) is error-prone: a split that maximizes DP might exceed the 80 GB HBM capacity, while a split that maximizes TP might saturate the NVLink interconnect.
 
 **Solution**: Instead of trial and error, we invoke a **Tier 3 Optimizer** (like the `ParallelismOptimizer` in our physics engine) to find the mathematically optimal split. We configure the optimizer with the workload and cluster constraints, setting the objective to maximize Model FLOPs Utilization (MFU).
 
@@ -2178,14 +2173,14 @@ Verify your understanding of how parallelism strategies combine:
 
 - [ ] In a **TP=8, PP=16, DP=128** configuration, which dimension is responsible for sharding layers *within* a single node?
 - [ ] How does moving from **PP=16** to **PP=8** affect the "Pipeline Bubble" fraction?
-- [ ] If you have a total budget of 1,024 GPUs, what is the trade-off between increasing **DP** (Data Parallelism) versus increasing **PP** (Pipeline Parallelism)?
+- [ ] If you have a total budget of 1,024 GPUs, what is the trade-off between increasing **DP** (Data Parallelism) vs. increasing **PP** (Pipeline Parallelism)?
 - [ ] Which dimension—TP, PP, or DP—is most sensitive to **inter-node latency**?
 
 :::
 
-The MFU values cited above raise a natural question: how did the field arrive at 50 percent utilization, and what trajectory brought it there? @fig-mfu-progression traces the evolution of Model FLOPs Utilization across published training systems from 2020 to 2024. The progression from GPT-3's 21 percent MFU to PaLM's 46 percent MFU reflects not improvements in raw hardware speed but advances in the parallelism strategies, communication overlap techniques, and scheduling optimizations discussed throughout this chapter. The plateau near 40-46 percent reveals that the theoretical ceiling imposed by communication overhead, pipeline bubbles, and memory management remains formidable even with the most advanced hybrid parallelism techniques available. Notably, Meta's Llama 3 training at 16,384 H100 GPUs achieved slightly lower MFU (41 percent) than the same model at 8,192 GPUs (43 percent), confirming that the scaling tax described in @sec-distributed-training-systems-systems-physics-scaling-amdahls-law-communication-4d7f is not merely theoretical but measurable in production.
+The MFU values cited above raise a natural question: how did the field arrive at 50 percent utilization, and what trajectory brought it there? @fig-mfu-progression traces the evolution of Model FLOPs Utilization across published training systems from 2020 to 2024. The progression from GPT-3's 21 percent MFU to PaLM's 46 percent MFU reflects not improvements in raw hardware speed but advances in the parallelism strategies, communication overlap techniques, and scheduling optimizations discussed throughout this chapter. The plateau near 40--46 percent reveals that the theoretical ceiling imposed by communication overhead, pipeline bubbles, and memory management remains formidable even with the most advanced hybrid parallelism techniques available. Notably, Meta's Llama 3 training at 16,384 H100 GPUs achieved slightly lower MFU (41 percent) than the same model at 8,192 GPUs (43 percent), confirming that the scaling tax described in @sec-distributed-training-systems-systems-physics-scaling-amdahls-law-communication-4d7f is not merely theoretical but measurable in production.
 
-::: {#fig-mfu-progression fig-env="figure" fig-pos="htb" fig-cap="**The MFU Progression**: Model FLOPs Utilization across published training systems, ordered chronologically. MFU doubled from 21 percent (GPT-3, 2020) to 46 percent (PaLM, 2022) through advances in hybrid parallelism and communication overlap, then plateaued near 40-45 percent for frontier-scale runs. The Llama 3 data points illustrate the scaling tax: MFU drops from 43 percent at 8,192 GPUs to 41 percent at 16,384 GPUs as communication overhead grows with cluster size. Data sources: @chowdhery2022palm, @dubey2024llama3." fig-alt="Horizontal bar chart of MFU percentages for six training systems from 2020 to 2024 showing progression from 21 percent to 46 percent with a plateau near 41 to 43 percent."}
+::: {#fig-mfu-progression fig-env="figure" fig-pos="htb" fig-cap="**The MFU Progression**: Model FLOPs Utilization across published training systems, ordered chronologically. MFU doubled from 21 percent (GPT-3, 2020) to 46 percent (PaLM, 2022) through advances in hybrid parallelism and communication overlap, then plateaued near 40--45 percent for frontier-scale runs. The Llama 3 data points illustrate the scaling tax: MFU drops from 43 percent at 8,192 GPUs to 41 percent at 16,384 GPUs as communication overhead grows with cluster size. Data sources: @chowdhery2022palm, @dubey2024llama3." fig-alt="Horizontal bar chart of MFU percentages for six training systems from 2020 to 2024 showing progression from 21 percent to 46 percent with a plateau near 41 to 43 percent."}
 
 ```{python}
 #| echo: false
@@ -2323,7 +2318,7 @@ Standard pretraining involves one model, one loss function, and one gradient str
 
 The aggregate memory demand of the four-model PPO system dwarfs standard pretraining. A naive co-location of a 70B policy, 70B reference, 13B reward, and 70B value model requires approximately 1,120 + 140 + 26 + 1,120 = 2,406 GB of accelerator memory, before accounting for the KV caches and intermediate activations generated during sequence generation. On H100 GPUs with `{python} DistTrainConstants.h100_mem_str` GB of HBM each, this system requires a minimum of $\lceil 2,406 / 80 \rceil = 31$ GPUs for parameter storage alone. Once generation-phase KV caches (which grow linearly with output sequence length) and training-phase activations are included, the practical minimum rises to 64--128 GPUs for a single RLHF training instance.
 
-### Infrastructure asymmetry: Training versus inference models {#sec-distributed-training-rlhf-asymmetry}
+### Infrastructure asymmetry: Training vs. inference models {#sec-distributed-training-rlhf-asymmetry}
 
 The defining infrastructure challenge of RLHF is not the total memory footprint but the *asymmetry* between the models' compute profiles. The policy and value models require full backward passes with gradient computation, activation checkpointing, and optimizer updates—compute-intensive operations that benefit from tensor parallelism and high arithmetic intensity. The reference and reward models, by contrast, perform only forward passes: they are inference workloads embedded within a training loop, with memory access patterns dominated by KV cache management rather than gradient accumulation.
 
@@ -2341,7 +2336,7 @@ The infrastructure implications are substantial. DPO reduces the multi-model sys
 
 The trade-off is capability. DPO operates on a static preference dataset, meaning the policy cannot explore new responses and receive feedback during training. PPO's online generation allows the policy to improve iteratively on its own outputs, potentially discovering better strategies that the static dataset does not contain. For deployment scenarios where the preference data comprehensively covers the target distribution, DPO's infrastructure simplification dominates. For scenarios requiring adaptive exploration (training models to solve novel reasoning tasks, for example), PPO's online feedback loop may justify the 2$\times$ infrastructure overhead.
 
-### Quantitative analysis: PPO versus DPO resource requirements {#sec-distributed-training-rlhf-quantitative}
+### Quantitative analysis: PPO vs. DPO resource requirements {#sec-distributed-training-rlhf-quantitative}
 
 To make the infrastructure trade-off concrete, consider aligning a 70B policy model on a cluster of 256 H100 GPUs (`{python} DistTrainConstants.h100_mem_str` GB HBM each).
 
@@ -2418,7 +2413,7 @@ class RLHFBudget:
     remaining_kv_str = f"{int(remaining_after_kv)}"
 ```
 
-::: {.callout-notebook title="RLHF infrastructure budget: PPO versus DPO"}
+::: {.callout-notebook title="RLHF infrastructure budget: PPO vs. DPO"}
 
 **Scenario**: Aligning a 70B parameter policy model. Reference model: 70B (frozen). Reward model (PPO only): 13B (frozen). Value model (PPO only): 13B (training).
 
@@ -2528,7 +2523,7 @@ Engineers assume more GPUs always accelerate training. In production, statistica
 
 **Pitfall**: *Choosing parallelism strategy based solely on memory constraints.*
 
-Engineers see that a 70B model exceeds `{python} A100CapacityContext.a100_mem` GB GPU memory and immediately choose tensor parallelism or pipeline parallelism to split weights. In production, the optimal strategy depends on the interaction between memory pressure, computation patterns, and communication topology. As @sec-distributed-training-systems-systems-parallelism-strategy-comparison-d92a explains, tensor parallelism splits each layer across devices with AllReduce synchronization per layer, achieving even memory distribution but placing communication on the critical path. Pipeline parallelism assigns complete layers to stages with point-to-point transfers between stages, reducing per-step communication but introducing pipeline bubble overhead that wastes 10-30 percent of cycles. For a `{python} FrontierTrainingContext.frontier_params_b_str`B model on 64 A100 GPUs where tensor parallelism degree-8 enables training, pipeline parallelism with 8 stages achieves 23 percent higher throughput due to reduced all-to-all communication despite similar memory footprints. The decision requires profiling communication patterns and bubble overhead, not just checking if weights fit in memory.
+Engineers see that a 70B model exceeds `{python} A100CapacityContext.a100_mem` GB GPU memory and immediately choose tensor parallelism or pipeline parallelism to split weights. In production, the optimal strategy depends on the interaction between memory pressure, computation patterns, and communication topology. As @sec-distributed-training-systems-systems-parallelism-strategy-comparison-d92a explains, tensor parallelism splits each layer across devices with AllReduce synchronization per layer, achieving even memory distribution but placing communication on the critical path. Pipeline parallelism assigns complete layers to stages with point-to-point transfers between stages, reducing per-step communication but introducing pipeline bubble overhead that wastes 10--30 percent of cycles. For a `{python} FrontierTrainingContext.frontier_params_b_str`B model on 64 A100 GPUs where tensor parallelism degree-8 enables training, pipeline parallelism with 8 stages achieves 23 percent higher throughput due to reduced all-to-all communication despite similar memory footprints. The decision requires profiling communication patterns and bubble overhead, not just checking if weights fit in memory.
 
 **Fallacy**: *FSDP and ZeRO always improve training efficiency.*
 
@@ -2536,7 +2531,7 @@ Engineers adopt FSDP (Fully Sharded Data Parallel) universally after reading tha
 
 **Fallacy**: *Parallelism overhead is roughly constant regardless of model size.*
 
-Engineers benchmark parallelism strategies on convenient small models then apply conclusions to large-scale training. In production, the ratio between computation and communication time changes dramatically with model size, inverting strategic decisions. AllReduce communication time depends primarily on gradient tensor size and network bandwidth, growing roughly linearly with parameter count, while forward and backward pass computation time grows superlinearly due to larger matrix operations. For a 1B parameter model where forward/backward pass takes 50 ms and AllReduce takes 25 ms, communication overhead consumes 33 percent of step time. For a 70B parameter model where forward/backward takes 2400 ms and AllReduce takes 180 ms, communication overhead drops to 7 percent despite the gradient size being 70$\times$ larger. Decisions made on small models ("pipeline parallelism's 15 percent bubble overhead makes it always slower than data parallelism") completely invert at scale where data parallelism's communication overhead reaches 25-40 percent. Reliable strategy selection requires either profiling at target scale or analytical models that account for how computation scales as $O(n^2)$ to $O(n^3)$ while communication scales as $O(n)$.
+Engineers benchmark parallelism strategies on convenient small models then apply conclusions to large-scale training. In production, the ratio between computation and communication time changes dramatically with model size, inverting strategic decisions. AllReduce communication time depends primarily on gradient tensor size and network bandwidth, growing roughly linearly with parameter count, while forward and backward pass computation time grows superlinearly due to larger matrix operations. For a 1B parameter model where forward/backward pass takes 50 ms and AllReduce takes 25 ms, communication overhead consumes 33 percent of step time. For a 70B parameter model where forward/backward takes 2400 ms and AllReduce takes 180 ms, communication overhead drops to 7 percent despite the gradient size being 70$\times$ larger. Decisions made on small models ("pipeline parallelism's 15 percent bubble overhead makes it always slower than data parallelism") completely invert at scale where data parallelism's communication overhead reaches 25--40 percent. Reliable strategy selection requires either profiling at target scale or analytical models that account for how computation scales as $O(n^2)$ to $O(n^3)$ while communication scales as $O(n)$.
 
 **Pitfall**: *Gradient accumulation is free.*
 
@@ -2615,23 +2610,18 @@ The chapter opened with a "scaling wall": the point where adding more GPUs event
 
 We explored the **3D Parallelism Cube** (@fig-3d-parallelism-cube-summary), the foundational framework for scaling frontier models. Data parallelism unrolls the outer loop of training to scale throughput; tensor parallelism vectorizes the inner loops of matrix multiplication to fit memory; and pipeline parallelism stages sequential layers to reduce communication frequency. Together, these strategies allow us to map models larger than any single memory bank onto a fleet of accelerators with finite bandwidth.
 
-::: {#fig-3d-parallelism-cube-summary fig-env="figure" fig-pos="htb" fig-cap="**3D Parallelism Strategy Space**: The three independent axes of distributed training parallelism. Data Parallelism (d) replicates models across workers. Pipeline Parallelism (p) partitions model layers vertically. Tensor Parallelism (t) splits individual operations horizontally. Real systems combine all three dimensions." fig-alt="Three-dimensional cube diagram with axes labeled Data Parallel, Pipeline Parallel, and Tensor Parallel. Colored planes show Model Replicas, Intra-layer partitioning, and pipeline stages."}
+::: {#fig-3d-parallelism-cube-summary fig-env="figure" fig-pos="htb" fig-cap="**3D Parallelism Strategy Space**: The three independent axes of distributed training parallelism. Data Parallelism ($d$) replicates models across workers. Pipeline Parallelism ($p$) partitions model layers vertically by depth (assigning layers to different stages). Tensor Parallelism ($t$) splits individual operations horizontally within each layer (assigning shards to different GPUs). A single training step coordinates $d \times p \times t$ GPUs, with tensor-parallel communication within layers, pipeline communication at microbatch stage boundaries, and data-parallel synchronization once per optimizer step. Archetype A occupies a coordinate $(d, t, p)$ in this cube to balance memory and bandwidth." fig-alt="Three-dimensional cube diagram with axes labeled Data Parallel, Pipeline Parallel, and Tensor Parallel. Colored planes show model replicas, intra-layer partitioning, and pipeline stages."}
 
 ![](images/svg/3d-parallelism.svg)
-**The 3D Parallelism Space**. Archetype A occupies a coordinate $(d, t, p)$ inside this cube to balance memory and bandwidth.
 
 :::
 
-Ultimately, the choice of parallelism is a **loop transformation** applied by the cluster-level compiler. By matching logical communication patterns to physical hardware hierarchies, we move from the "linear scaling regime" of small clusters to the "communication-bound" reality of the exascale supercomputer. @fig-3d-parallelism-sliced visualizes how a model is partitioned across the fleet.
-
-::: {#fig-3d-parallelism-sliced fig-env="figure" fig-pos="htb" fig-cap="**Anatomy of a Hybrid 3D Parallel Step**: Visualization of how a model is partitioned across the fleet. Pipeline parallelism ($p$) slices the model vertically by depth (assigning layers to different stages). Tensor parallelism $(t)$ slices the weight matrices horizontally within each layer (assigning shards to different GPUs). Data parallelism ($d$) replicates this sliced block $d$ times to process independent data samples. A single training step coordinates $d \times p \times t$ GPUs, with tensor-parallel communication occurring within layers, pipeline communication occurring at microbatch stage boundaries, and data-parallel synchronization occurring once per optimizer step." fig-alt="Diagram showing the hierarchical layout of 3D parallelism across 8 GPUs, with nested boxes for data replicas, pipeline stages, and tensor shards."}
-![](images/svg/3d-parallelism.svg)
-:::
+Ultimately, the choice of parallelism is a **loop transformation** applied by the cluster-level compiler. By matching logical communication patterns to physical hardware hierarchies, we move from the "linear scaling regime" of small clusters to the "communication-bound" reality of the exascale supercomputer.
 
 ::: {.callout-takeaways title="Parallelism is a loop transformation"}
 
 * **Communication-computation ratio is the ceiling**: Distributed training is governed by an extended Amdahl's Law. Speedup is limited by the sequential nature of synchronization (AllReduce) relative to the parallel work of computation.
-* **Data parallelism is the default, but hits the batch trap**: Scaling replicas improves throughput linearly until you hit the "critical batch size," beyond which larger batches yield diminishing returns in convergence.
+* **Data parallelism is the default, but hits the batch trap**: Scaling replicas improves throughput linearly until the "critical batch size" is reached, beyond which larger batches yield diminishing returns in convergence.
 * **Tensor parallelism is node-local**: Because it partitions matrix operations, it requires the `{python} DistTrainConstants.nvlink_a100_str`-`{python} FlashAttentionOverlapScenario.nvlink_h100` GB/s bandwidth of NVLink. Scaling it across racks on standard Ethernet will stall the fleet.
 * **Pipeline parallelism minimizes bandwidth, but adds "bubbles"**: Splitting depth across nodes allows for massive models, but efficiency depends on microbatching $(m \gg p)$ to minimize idle time during fill and drain phases.
 * **Memory-efficient DP (ZeRO/FSDP) scales linear memory**: By sharding optimizer states, gradients, and parameters, ZeRO-3 allows 100B+ models to fit on commodity hardware that would otherwise require complex model parallelism.
@@ -2657,7 +2647,7 @@ The parallelism strategies explored throughout this chapter (data, tensor, pipel
 
 ::: {.callout-chapter-connection title="From logic to traffic"}
 
-We have defined the *logical* traffic patterns of the Machine Learning Fleet—the "How" of splitting the math. These logical patterns, however, eventually hit the physical wires of the datacenter.
+We have defined the *logical* traffic patterns of the Machine Learning Fleet—the "How" of splitting the math. These logical patterns, however, eventually hit the physical wires of the data center.
 
 In **Communication** (@sec-collective-communication), we open the black box of the collective operations (AllReduce, AllToAll) that make this consistency possible. We move from the logic of *what* to send to the mechanics of *how* to route it through rings, trees, and rails.
 
