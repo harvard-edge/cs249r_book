@@ -115,13 +115,13 @@ In the Fleet Stack\index{Fleet Stack} (@sec-vol2-introduction), network fabrics 
 ![](images/svg/five-level-model.svg)
 :::
 
-This chapter wires those nodes together, because at scale, communication cost dominates computation cost. The **Law of Distributed Efficiency**\index{Law of Distributed Efficiency} (@eq-iron-law-scale) makes this explicit: the nonoverlapped communication term $T_{\text{comm}}(N) - T_{\text{overlap}}$ determines how much of each training step is exposed to the network fabric. The fabric constrains every layer above it in the stack: @sec-distributed-training-systems cannot overlap communication with computation unless the fabric provides sufficient bandwidth, @sec-collective-communication cannot choose optimal algorithms without knowing the topology, and @sec-fault-tolerance-reliability must account for network partitions alongside node failures.
+This chapter wires those nodes together, because at scale, communication cost dominates computation cost. The **Law of Distributed Efficiency**\index{Law of Distributed Efficiency} (@eq-iron-law-scale) makes this explicit: the nonoverlapped communication term $T_{\text{comm}}(N) - T_{\text{overlap}}$ determines how much of each training step is exposed to the network fabric. The fabric constrains every layer above it in the stack by determining whether communication can be overlapped, which collective algorithms are viable, and how network partitions interact with node failures.
 
 The physical network fabric exists to carry three fundamental collective communication patterns. An AllReduce\index{AllReduce}[^fn-allreduce-forward] sums gradients across thousands of GPUs so that every device holds the identical average, forming the heartbeat of synchronous training. An AllGather[^fn-collectives-forward] collects different model portions so that every GPU can reconstruct the full model state. An AllToAll, the most demanding pattern, requires every GPU to send unique data to every other GPU, a requirement critical to expert parallelism[^fn-moe-forward]. @sec-collective-communication covers the *algorithms* that orchestrate these patterns; this chapter covers the *physics* of the wires and switches that carry them. The distinction matters because the fabric's physical properties (bandwidth, latency, and topology) determine which patterns are efficient and which become bottlenecks.
 
 ::: {.callout-perspective title="The network as a gradient bus"}
 
-In a single machine, the memory bus moves data between the processor and memory. In a distributed training cluster, the network fabric serves the analogous role: it is the **Gradient Bus** that moves parameter updates between workers. Just as memory bus bandwidth determines single-device throughput (the memory wall from @sec-compute-infrastructure), network fabric bandwidth determines multi-device throughput (the communication wall\index{Communication Wall}). Every concept in this chapter, from protocols to topologies to congestion control, exists to make this Gradient Bus as fast and reliable as possible.
+In a single machine, the memory bus moves data between the processor and memory. In a distributed training cluster, the network fabric serves the analogous role: it is the **Gradient Bus** that moves parameter updates between workers. Just as the memory wall in @sec-compute-memory-wall limits single-device throughput, network fabric bandwidth determines multi-device throughput (the communication wall\index{Communication Wall}). Every concept in this chapter, from protocols to topologies to congestion control, exists to make this Gradient Bus as fast and reliable as possible.
 
 :::
 
@@ -337,7 +337,7 @@ To see *why* this ratio matters so viscerally, consider *what* happens during a 
 
 :::
 
-The 12.5 percentage-point utilization gap in @fig-bandwidth-cliff-gantt represents millions of dollars in wasted compute over a months-long training run. Network fabric design is therefore the central engineering challenge of distributed training, not an afterthought.
+The 12.5 percentage-point utilization gap represents millions of dollars in wasted compute over a months-long training run. Network fabric design is therefore the central engineering challenge of distributed training, not an afterthought.
 
 ## How ML Networking Inverts Data-Center Assumptions {#sec-network-workload-inversion}
 
@@ -839,7 +839,7 @@ As @fig-topology-bisection illustrates, these definitions shape every topology c
 
 :::
 
-As @fig-topology-bisection quantifies, fat-tree topologies achieve full bisection bandwidth at the cost of additional switch tiers, while rail-optimized and dragonfly designs sacrifice worst-case bisection bandwidth to reduce cabling complexity and cost. This trade-off between guaranteed bandwidth and economic scalability drives every topology decision in large-scale ML clusters.
+The comparison quantifies how fat-tree topologies achieve full bisection bandwidth at the cost of additional switch tiers, while rail-optimized and dragonfly designs sacrifice worst-case bisection bandwidth to reduce cabling complexity and cost. This trade-off between guaranteed bandwidth and economic scalability drives every topology decision in large-scale ML clusters.
 
 ### Top-of-rack (ToR) and the failure domain {#sec-network-fabrics-tor}
 
@@ -1346,7 +1346,7 @@ The final level of the stack is the **Cluster**\index{Cluster}, where wires, tra
 
 In a well-designed cluster, the network fabric acts as a scheduler-aware extension of the system bus, not a passive pipe. The intra-node (NVLink) bandwidth is ~`{python} NetworkFabricsContextScenario.nvlink_to_ib_ratio`$\times$ higher than inter-node (InfiniBand/RoCE) bandwidth, and the primary mechanism for hiding this cliff is **communication-computation overlap**\index{Communication-Computation Overlap}. During the backward pass, gradients for the final layers are computed first. Instead of waiting for the entire backward pass to finish, the system triggers an asynchronous AllReduce for these gradients immediately while the GPUs continue computing gradients for earlier layers. If the backward pass requires 500 ms of computation and the AllReduce takes 300 ms, perfect overlap masks the entire communication cost behind computation, reducing the effective overhead to $\max(0, 300 - 500) = 0$. In practice, dependency chains and resource contention limit this efficiency to 60–80 percent, leaving a **last-mile problem**\index{Last-Mile Problem}: the gradients for the very first layer (computed last) have no subsequent computation to hide behind, exposing their raw transfer time to the critical path.
 
-The bandwidth staircase shown in @fig-bandwidth-hierarchy dictates the parallelism strategy to mitigate this cliff. Tensor parallelism, requiring massive bandwidth for frequent activation exchanges, is confined to the NVLink domain within a node. Pipeline parallelism\index{Pipeline Parallelism}, involving point-to-point transfers of activations between pipeline stages, spans the InfiniBand links between nodes. Data parallelism\index{Data Parallelism}, tolerant of lower bandwidth through gradient accumulation and overlap, stretches across the full fabric.
+The bandwidth staircase dictates the parallelism strategy to mitigate this cliff. Tensor parallelism, requiring massive bandwidth for frequent activation exchanges, is confined to the NVLink domain within a node. Pipeline parallelism\index{Pipeline Parallelism}, involving point-to-point transfers of activations between pipeline stages, spans the InfiniBand links between nodes. Data parallelism\index{Data Parallelism}, tolerant of lower bandwidth through gradient accumulation and overlap, stretches across the full fabric.
 
 ### Case study: NVIDIA DGX SuperPOD {#sec-network-fabrics-dgx-superpod}
 
@@ -1614,7 +1614,7 @@ Standard benchmarks like `iperf` measure kernel-based TCP/IP performance. Becaus
 
 **Fallacy**: *Adaptive routing eliminates the need for topology-aware placement.*
 
-Adaptive routing distributes traffic across available paths, but it cannot create bandwidth that does not exist. If a scheduler places a 1,024-GPU job across two oversubscribed spine groups, adaptive routing will balance the traffic, but it will still be throttled by the group-to-group links. Topology-aware placement (@sec-fleet-orchestration) and adaptive routing are complementary: the former ensures bandwidth exists, while the latter ensures it is used efficiently.
+Adaptive routing distributes traffic across available paths, but it cannot create bandwidth that does not exist. If a scheduler places a 1,024-GPU job across two oversubscribed spine groups, adaptive routing will balance the traffic, but it will still be throttled by the group-to-group links. Topology-aware placement, discussed in @sec-fleet-orchestration-topology-aware, and adaptive routing are complementary: the former ensures bandwidth exists, while the latter ensures it is used efficiently.
 
 **Pitfall**: *Neglecting PFC and ECN counter monitoring in production.*
 
@@ -1622,7 +1622,7 @@ Network performance issues in ML clusters manifest as subtle training slowdowns 
 
 ## Summary {#sec-network-fabrics-summary}
 
-The **Five-Level Model** structures our analysis of high-bandwidth fabrics, ascending from the physics of signal transmission to the architecture of warehouse-scale clusters. The framework reveals that network performance is the product of interactions between physical reach, transport protocols, topology, and congestion control, not link speed in isolation. Level 1 (Wire) established that PAM4 encoding and FEC impose irreducible latency floors constraining cluster diameter. At Level 2 (Transport), InfiniBand's native credit-based flow control and RoCE's reliance on PFC yield different reliability guarantees, and the $\alpha$-$\beta$ model quantifies the bandwidth-latency trade-offs inherent in distributed collectives.
+The **Five-Level Model** shown in @fig-network-five-level-model structures our analysis of high-bandwidth fabrics, ascending from the physics of signal transmission to the architecture of warehouse-scale clusters. The framework reveals that network performance is the product of interactions between physical reach, transport protocols, topology, and congestion control, not link speed in isolation. Level 1 (Wire) established that PAM4 encoding and FEC impose irreducible latency floors constraining cluster diameter. At Level 2 (Transport), InfiniBand's native credit-based flow control and RoCE's reliance on PFC yield different reliability guarantees, and the $\alpha$-$\beta$ model quantifies the bandwidth-latency trade-offs inherent in distributed collectives.
 
 Level 3 (Topology) demonstrated how non-blocking fat-trees and rail-optimized designs provide the structural bisection bandwidth required by global AllReduce patterns. However, Level 4 (Behavior) showed that structure alone is insufficient: in the synchronous world of BSP training, tail latency is the dominant constraint, necessitating proactive congestion control mechanisms like DCQCN and HPCC to prevent incast-induced stalling. Level 5 (Cluster Design) integrated these layers into production architectures like the NVIDIA SuperPOD and Meta Grand Teton, illustrating how virtualization and multi-tenancy allow these massive instruments to be shared safely.
 
@@ -1631,9 +1631,9 @@ Looking forward, the physical limits of copper and the operational complexity of
 ::: {.callout-takeaways title="The network is the bottleneck"}
 
 * **Network as Computer**\index{Network As Computer}: At scale, the interconnect is a primary determinant of system performance. Bandwidth and topology constrain training speed as fundamentally as accelerator FLOPS.
-* **$\alpha$-$\beta$ Framework**: Guides topology selection and collective algorithm design by separating latency-dominated and bandwidth-dominated regimes.
+* **$\alpha$-$\beta$ Framework**: The performance model developed in @sec-network-fabrics-performance-model guides topology selection and collective algorithm design by separating latency-dominated and bandwidth-dominated regimes.
 * **Lossless is Non-Negotiable**\index{Lossless Is Non-Negotiable}: RDMA requires a lossless fabric. InfiniBand provides this natively; Ethernet must approximate it via PFC/ECN, adding operational complexity and tail-latency risk.
-* **Topology Choice is Workload-Dependent**\index{Topology Choice Is Workload-Dependent}: Fat-trees provide flexibility; rail-optimized networks accelerate same-rank data-parallel AllReduce; dragonflies reduce cabling costs for massive scale.
+* **Topology Choice is Workload-Dependent**\index{Topology Choice Is Workload-Dependent}: The topology comparison in @fig-network-topologies shows why fat-trees provide flexibility, rail-optimized networks accelerate same-rank data-parallel AllReduce, and dragonflies reduce cabling costs for massive scale.
 * **Monitor or Waste**\index{Monitor or Waste}: Systematic telemetry (PFC counters, bandwidth baselines) is the only way to detect subtle network-induced training slowdowns before they waste significant GPU-hours.
 
 :::

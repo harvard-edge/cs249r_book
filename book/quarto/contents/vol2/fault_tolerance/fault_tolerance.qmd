@@ -671,7 +671,7 @@ Byzantine failures are particularly dangerous in distributed training because th
 
 Detection of Byzantine failures requires redundant computation. Multiple workers computing gradients for the same data enable comparison of results. Statistical outlier detection can identify workers consistently producing anomalous gradients. These detection mechanisms add computational overhead and may not catch subtle corruption.
 
-Byzantine-resilient distributed training algorithms exist but impose significant overhead. Algorithms such as Krum [@blanchard2017machine] and coordinate-wise trimmed mean [@yin2018byzantine] compute aggregates that are robust to a bounded number of Byzantine workers, but they require more communication and computation than simple averaging. @sec-robust-ai examines hardware faults and Byzantine failures in greater depth, including detection mechanisms and algorithmic resilience strategies.[^fn-byzantine-ml-overhead]
+Byzantine-resilient distributed training algorithms exist but impose significant overhead. Algorithms such as Krum [@blanchard2017machine] and coordinate-wise trimmed mean [@yin2018byzantine] compute aggregates that are robust to a bounded number of Byzantine workers, but they require more communication and computation than simple averaging. The unified robustness framework in @sec-robust-ai-unified-framework-robust-ai-b25d shows how corrupted gradients become model-level robustness failures.[^fn-byzantine-ml-overhead]
 
 [^fn-byzantine-ml-overhead]: **Byzantine-Resilient ML**\index{Byzantine-Resilient ML}: Named after Lamport's 1982 "Byzantine Generals Problem," these algorithms (Krum\index{Krum}, trimmed mean\index{Trimmed Mean}, signSGD) tolerate a bounded fraction of corrupted workers, typically fewer than 50 percent. The trade-off is concrete: Krum requires $O(n^2)$ pairwise gradient comparisons per step, adding 10--30 percent communication overhead in clusters exceeding 100 workers, which directly competes with the throughput gains of data parallelism. \index{Byzantine Fault Tolerance!ML overhead}
 
@@ -794,7 +794,7 @@ Three foundational principles guide every design decision in this domain.
 ::: {.callout-perspective title="Three rules of failure at scale"}
 
 1. **At scale, failures are continuous, not exceptional.** A 10,000-GPU cluster experiences failures every few hours. Systems must be designed expecting failure as normal operation.
-2. **The optimal checkpoint interval is $\tau_{\text{opt}} = \sqrt{2 \times T_{\text{write}} \times \text{MTBF}}$.** The Young-Daly formula provides quantitative guidance for checkpoint frequency. This formula is derived in @sec-fault-tolerance-reliability-reliability-checkpoint-restart-fundamentals-0ac2.
+2. **The optimal checkpoint interval is $\tau_{\text{opt}} = \sqrt{2 \times T_{\text{write}} \times \text{MTBF}}$.** The Young-Daly formula provides quantitative guidance for checkpoint frequency. This formula is derived in @sec-fault-tolerance-young-daly.
 3. **Training and serving have fundamentally different fault tolerance requirements.** Training tolerates minutes of recovery time; serving requires milliseconds. This difference demands entirely different approaches.
 
 :::
@@ -813,7 +813,7 @@ A single bit-flip in a weight matrix illustrates the severity. If a critical wei
 
 [^fn-ieee754-vulnerability]: **IEEE 754 (1985)**: Standardized by William Kahan at Berkeley, this format uses 1 sign bit, 8 exponent bits, and 23 mantissa bits for FP32. The bit layout creates an asymmetric vulnerability for ML: a sign-bit flip inverts a weight entirely ($0.5 \to -0.5$), while a single exponent-bit flip can shift magnitude by $2^{64}\times$ or more, explaining why one bit-flip in a neural network weight can collapse accuracy from 76 percent to below 10 percent. \index{IEEE 754!bit-flip vulnerability}
 
-The reliability problem is worsening. As the ML fleet scales to sub-5nm process nodes (@sec-compute-infrastructure), the failures in time (FIT) rate for silent data corruption (SDC) rises: smaller nodes have lower critical charges, making bit-flips from cosmic rays and thermal noise more frequent, while chips with billions of transistors have higher statistical probabilities of manufacturing defects that manifest only under specific ML workloads [@ma2026challenges]. ML system architects must treat hardware as an **unreliable substrate**\index{Unreliable Substrate}, where algorithmic fault tolerance (gradient checksums, weight replication, periodic consistency checks in the MLOps pipeline (@sec-ops-scale)) is a mandatory requirement rather than an HPC specialty.
+The reliability problem is worsening. As the ML fleet scales to sub-5nm process nodes (@sec-compute-infrastructure), the failures in time (FIT) rate for silent data corruption (SDC) rises: smaller nodes have lower critical charges, making bit-flips from cosmic rays and thermal noise more frequent, while chips with billions of transistors have higher statistical probabilities of manufacturing defects that manifest only under specific ML workloads [@ma2026challenges]. ML system architects must treat hardware as an **unreliable substrate**\index{Unreliable Substrate}, where algorithmic fault tolerance (gradient checksums, weight replication, periodic production consistency checks) is a mandatory requirement rather than an HPC specialty.
 
 Hardware faults fall into three categories based on temporal characteristics, as @fig-fault-temporal-categories summarizes.
 
@@ -1055,7 +1055,7 @@ Built-in self-test (BIST) [@bushnell2002] incorporates additional circuitry for 
 
 [^fn-scan-chains-testing]: **Scan Chains**: Test infrastructure linking internal flip-flops into shift registers, developed in the 1970s for IC design-for-testability. The trade-off is concrete: 5--15 percent silicon area overhead buys 95 percent+ manufacturing fault coverage. For ML accelerators with billions of transistors in matrix-multiply units, scan-based testing during burn-in catches the stuck-at faults that would otherwise silently corrupt weight and gradient computations in production. \index{Scan Chains!manufacturing test}
 
-Error detection and correction codes[^fn-hamming-ecc-origin] [@hamming1950] add redundant bits to detect and correct bit errors. @fig-parity illustrates the simplest form: parity checks append an extra bit to each data word, enabling immediate detection when a bit flip occurs. More advanced codes such as cyclic redundancy checks (CRC)[^fn-crc-gradient-validation] compute checksums that detect over 99.9 percent of transmission errors, a capability critical for validating gradient payloads during distributed AllReduce operations.\index{Parity Bit Error Detection}
+Error detection and correction codes[^fn-hamming-ecc-origin] [@hamming1950] add redundant bits to detect and correct bit errors. @fig-parity illustrates the simplest form: parity checks append an extra bit to each data word, enabling immediate detection when a bit flip occurs. More advanced codes such as cyclic redundancy checks (CRC)[^fn-crc-gradient-validation] compute checksums that detect over 99.9 percent of transmission errors, a capability critical for validating gradient payloads during the distributed AllReduce operations covered in @sec-collective-communication.\index{Parity Bit Error Detection}
 
 ::: {#fig-parity fig-env="figure" fig-pos="htb" fig-cap="**Parity Bit Error Detection**: This figure provides a simple error detection scheme where an extra bit (the parity bit) ensures the total number of 1s in a data sequence is either even or odd. The second sequence includes a flipped bit, triggering the parity check and indicating a data corruption event during transmission or storage. Source: computer hope." fig-alt="Two 7-bit data sequences with an eighth even-parity bit. The top sequence is valid. The bottom shows a bit flip that causes a parity mismatch, detecting the error."}
 
@@ -1903,7 +1903,7 @@ To survive these inevitable hardware failures without catastrophic loss of compu
 
 ***Checkpointing***\index{Checkpointing!definition} is the periodic serialization of the complete training state (parameters, optimizer state, and data loader position) to persistent storage.
 
-1.  **Significance (quantitative)**: It minimizes the **Lost Work** after a system failure. Within the iron law\index{Iron Law}, checkpointing creates an **I/O Overhead** that reduces the total training throughput $(\eta_{\text{hw}})$, with the optimal interval $(\tau_{\text{opt}})$ governed by the **Young-Daly Formula** $(\tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}})$.
+1.  **Significance (quantitative)**: It minimizes the **Lost Work** after a system failure. Within the iron-law framework formalized in @sec-performance-engineering-efficiency-frontier, checkpointing creates an **I/O Overhead** that reduces the total training throughput $(\eta_{\text{hw}})$, with the optimal interval $(\tau_{\text{opt}})$ governed by the **Young-Daly Formula** $(\tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}})$.
 2.  **Distinction (durable)**: Unlike **Incremental Backups**\index{Incremental Backups}, Checkpointing must capture the **Exact Execution Context** (including random seeds and learning rate schedules) to ensure deterministic resumption of the optimization loop.
 3.  **Common pitfall**: A frequent misconception is that Checkpointing is "just writing to disk." In reality, for large models, it is a **Storage System Stress Test**\index{Storage!system stress test}: the simultaneous write from thousands of GPUs can trigger a **checkpoint storm**\index{Checkpoint Storm} that saturates the entire network fabric $(\text{BW})$.
 
@@ -2737,7 +2737,7 @@ Elasticity and checkpointing provide the necessary resilience for long-running b
 
 When a user asks a voice assistant to turn off the lights, they will not tolerate a five-minute pause while the inference server reloads from a checkpoint. Serving models presents a fundamentally different challenge: users expect millisecond-level responsiveness even when backend GPUs crash.
 
-Serving fault tolerance operates under constraints that training never faces. While @sec-inference-scale examines distributed serving architectures comprehensively, the focus here is specifically on fault tolerance and reliability mechanisms for real-time inference.
+Serving fault tolerance operates under constraints that training never faces. While @sec-inference-scale-health-checking-failover-070e examines serving health checks and failover in the broader inference architecture, the focus here is specifically on fault tolerance and reliability mechanisms for real-time inference.
 
 ### Stateless vs. stateful serving {#sec-fault-tolerance-reliability-reliability-stateless-vs-stateful-serving-0a60}
 
@@ -3031,7 +3031,7 @@ Circuit breakers operate in three states: closed (normal operation), open (faili
 
 :::
 
-The three-state cycle in @fig-circuit-breaker is what prevents a single failing dependency from consuming the entire system's connection pool: the open state fails fast, and the half-open state probes for recovery before restoring full traffic.
+The three-state cycle prevents a single failing dependency from consuming the entire system's connection pool: the open state fails fast, and the half-open state probes for recovery before restoring full traffic.
 
 #### Graceful degradation implementation {#sec-fault-tolerance-reliability-reliability-graceful-degradation-implementation-1aa5}
 
@@ -3344,7 +3344,7 @@ Investing heavily in hardware redundancy while neglecting software robustness (i
 
 **Pitfall**: *Setting checkpoint interval by intuition.*
 
-Organizations commonly set checkpoint intervals based on "feels right": "every hour seems reasonable" or "every 1000 steps." As @sec-fault-tolerance-reliability-reliability-checkpoint-restart-fundamentals-0ac2 explains, the Young-Daly formula reveals these intuitions are often wrong. For a 1000-GPU cluster with MTBF of 4 hours and checkpoint time of 5 minutes:
+Organizations commonly set checkpoint intervals based on "feels right": "every hour seems reasonable" or "every 1000 steps." The Young-Daly formula reveals these intuitions are often wrong. For a 1000-GPU cluster with MTBF of 4 hours and checkpoint time of 5 minutes:
 
 $$\tau_{\text{opt}} = \sqrt{2 \times 5 \times 240} = \sqrt{2400} \approx 49 \text{ minutes}$$
 
@@ -3409,7 +3409,7 @@ The cost of regular fault injection (some failed experiments, some minor outages
 
 **Fallacy**: *Elastic training eliminates the need for checkpointing.*
 
-Elastic training (@sec-fault-tolerance-reliability-reliability-elastic-training-4f87) adjusts parallelism degree when workers fail, continuing with reduced capacity, which appears to eliminate checkpoint-restart overhead. However, state consistency challenges remain: reducing from N to N-1 workers requires redistributing model shards, optimizer states, and data assignments consistently. Below some minimum viable size, training becomes infeasible (model does not fit, batch size too small), requiring checkpoint-restart regardless. Each removed worker reduces throughput; accumulated failures progressively degrade training speed until checkpoint-restart becomes preferable to continued degradation. If a failure was caused by a software bug triggered by specific data, the bug persists in remaining workers. Elastic training is complementary to checkpointing, not a replacement; the reduced checkpoint frequency still requires occasional checkpoints for catastrophic failures and training completion.
+Elastic training adjusts parallelism degree when workers fail, continuing with reduced capacity, which appears to eliminate checkpoint-restart overhead. However, state consistency challenges remain: reducing from N to N-1 workers requires redistributing model shards, optimizer states, and data assignments consistently. Below some minimum viable size, training becomes infeasible (model does not fit, batch size too small), requiring checkpoint-restart regardless. Each removed worker reduces throughput; accumulated failures progressively degrade training speed until checkpoint-restart becomes preferable to continued degradation. If a failure was caused by a software bug triggered by specific data, the bug persists in remaining workers. Elastic training is complementary to checkpointing, not a replacement; the reduced checkpoint frequency still requires occasional checkpoints for catastrophic failures and training completion.
 
 **Fallacy**: *Silent data corruption is rare in modern hardware.*
 
