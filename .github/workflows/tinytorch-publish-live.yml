@@ -62,6 +62,27 @@ on:
         description: 'Type "PUBLISH" to confirm (safety check) [required]'
         required: true
         default: ''
+  workflow_call:
+    inputs:
+      description:
+        type: string
+        required: false
+        default: 'Content updates and improvements'
+      site_only:
+        type: boolean
+        required: false
+        default: false
+      release_type:
+        type: string
+        required: false
+        default: 'patch'
+      explicit_version:
+        type: string
+        required: false
+        default: ''
+      confirm:
+        type: string
+        required: true
 
 permissions:
   contents: write
@@ -78,7 +99,7 @@ jobs:
   # green before someone clicked Publish, so we fail fast on stale dev.
   guard:
     name: '🛡️ Validate-Dev Green Gate'
-    if: github.event.inputs.confirm == 'PUBLISH'
+    if: inputs.confirm == 'PUBLISH'
     uses: ./.github/workflows/infra-publish-guard.yml
     with:
       validate_workflow: tinytorch-validate-dev.yml
@@ -88,7 +109,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [guard]
     timeout-minutes: 5
-    if: github.event.inputs.confirm == 'PUBLISH'
+    if: inputs.confirm == 'PUBLISH'
     outputs:
       new_version: ${{ steps.version.outputs.new_version }}
       previous_version: ${{ steps.version.outputs.previous_version }}
@@ -104,7 +125,7 @@ jobs:
       - name: 🔀 Determine deploy mode
         id: mode
         run: |
-          SITE_ONLY="${{ github.event.inputs.site_only }}"
+          SITE_ONLY="${{ inputs.site_only }}"
           echo "site_only=$SITE_ONLY" >> $GITHUB_OUTPUT
           if [ "$SITE_ONLY" = "true" ]; then
             echo "🌐 Mode: SITE-ONLY deploy (no version bump, no tag, no PDFs)"
@@ -116,7 +137,7 @@ jobs:
         id: version
         run: |
           # In site-only mode, just output the current version (no bump)
-          if [ "${{ github.event.inputs.site_only }}" = "true" ]; then
+          if [ "${{ inputs.site_only }}" = "true" ]; then
             LATEST_VERSION=$(git tag -l "tinytorch-v*" | sort -V | tail -n1)
             LATEST_VERSION=${LATEST_VERSION:-"tinytorch-v0.0.0"}
             echo "🌐 Site-only mode — keeping current version: $LATEST_VERSION"
@@ -132,7 +153,7 @@ jobs:
 
           # Explicit-version override: bypass major/minor/patch math.
           # Used for non-incremental jumps (e.g. 0.1.x → 0.10.0 alongside Vol II launch).
-          EXPLICIT="${{ github.event.inputs.explicit_version }}"
+          EXPLICIT="${{ inputs.explicit_version }}"
           if [ -n "$EXPLICIT" ]; then
             if ! echo "$EXPLICIT" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
               echo "❌ explicit_version '$EXPLICIT' is not a valid X.Y.Z semver triple."
@@ -144,13 +165,13 @@ jobs:
               echo "❌ Tag $NEW_VERSION already exists. Refusing to re-release."
               exit 1
             fi
-            echo "🎯 Explicit version override: $NEW_VERSION (bypassing ${{ github.event.inputs.release_type }} bump)"
+            echo "🎯 Explicit version override: $NEW_VERSION (bypassing ${{ inputs.release_type }} bump)"
             echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
             echo "previous_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          echo "🔄 Auto-calculating next ${{ github.event.inputs.release_type }} version..."
+          echo "🔄 Auto-calculating next ${{ inputs.release_type }} version..."
 
           # Remove 'tinytorch-v' prefix for calculation
           VERSION_NUM=${LATEST_VERSION#tinytorch-v}
@@ -164,7 +185,7 @@ jobs:
           echo "📊 Previous version: $MAJOR.$MINOR.$PATCH"
 
           # Calculate new version based on release type
-          case "${{ github.event.inputs.release_type }}" in
+          case "${{ inputs.release_type }}" in
             "major")
               NEW_MAJOR=$((MAJOR + 1))
               NEW_MINOR=0
@@ -183,14 +204,14 @@ jobs:
           esac
 
           NEW_VERSION="tinytorch-v$NEW_MAJOR.$NEW_MINOR.$NEW_PATCH"
-          echo "🎯 New version: $NEW_VERSION (${{ github.event.inputs.release_type }} release)"
+          echo "🎯 New version: $NEW_VERSION (${{ inputs.release_type }} release)"
 
           # Export for other steps
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
           echo "previous_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
 
       - name: 🛡️ No-downgrade guard
-        if: github.event.inputs.site_only != 'true'
+        if: inputs.site_only != 'true'
         run: |
           # ----------------------------------------------------------------
           # No-downgrade guard.
@@ -323,25 +344,19 @@ jobs:
           echo "✅ install.sh updated"
           grep "TINYTORCH_VERSION" tinytorch/quarto/install.sh
 
-      - name: 📢 Update Quarto announcement bar
-        run: |
-          echo "📢 Updating announcement in tinytorch/quarto/config/announcement.yml..."
-
-          VERSION_NUM="${{ needs.validate-inputs.outputs.new_version }}"
-          VERSION_NUM=${VERSION_NUM#tinytorch-v}
-
-          cat > tinytorch/quarto/config/announcement.yml << EOF
-          # TinyTorch announcement bar configuration
-          # Managed via Quarto's built-in announcement feature
-          website:
-            announcement:
-              content: "🎉 v${VERSION_NUM} released — ${{ github.event.inputs.description }} · <a href='https://github.com/harvard-edge/cs249r_book/releases/tag/tinytorch-v${VERSION_NUM}'>See release →</a>"
-              type: info
-              dismissable: true
-          EOF
-
-          echo "✅ announcement.yml updated"
-          cat tinytorch/quarto/config/announcement.yml
+      # NB: A previous version of this workflow rewrote
+      # tinytorch/quarto/config/announcement.yml on every publish with a
+      # release-only banner, silently replacing the 4-line ecosystem
+      # cross-link template the file is supposed to hold. The regression
+      # hit v0.1.10 (commit 0009f55a9, 2026-04-22) and again v0.1.11
+      # (2026-05-11). The version is already surfaced by:
+      #   - the footer release pill (rendered from release-manifest.json)
+      #   - the navbar version chip (templated from tinytorch/settings.ini)
+      # so the announcement bar doesn't need a third release-version
+      # surface. If a future release warrants a top-of-bar mention,
+      # prepend a transient `release_note` line to the existing content
+      # (ruamel.yaml round-trip on the same file) rather than rewriting
+      # the whole document. Until then this step is deliberately absent.
 
       - name: 📝 Update README badge
         run: |
@@ -365,7 +380,6 @@ jobs:
             tinytorch/pyproject.toml \
             tinytorch/settings.ini \
             tinytorch/quarto/install.sh \
-            tinytorch/quarto/config/announcement.yml \
             tinytorch/README.md
           git commit -m "chore(tinytorch): bump version to ${{ needs.validate-inputs.outputs.new_version }}" || echo "No changes to commit"
           git push origin dev
@@ -394,9 +408,9 @@ jobs:
 
           SITE_ONLY="${{ needs.validate-inputs.outputs.site_only }}"
           if [ "$SITE_ONLY" = "true" ]; then
-            MERGE_MSG="🌐 TinyTorch website update: ${{ github.event.inputs.description }}"
+            MERGE_MSG="🌐 TinyTorch website update: ${{ inputs.description }}"
           else
-            MERGE_MSG="🔥 TinyTorch ${{ needs.validate-inputs.outputs.new_version }}: ${{ github.event.inputs.description }}"
+            MERGE_MSG="🔥 TinyTorch ${{ needs.validate-inputs.outputs.new_version }}: ${{ inputs.description }}"
           fi
 
           echo "🔄 Merging dev into main..."
@@ -589,7 +603,7 @@ jobs:
           git push origin --delete "$TAG" 2>/dev/null || true
 
           # Create annotated tag on current HEAD (latest main)
-          git tag -a "$TAG" -m "TinyTorch $TAG: ${{ github.event.inputs.description }}"
+          git tag -a "$TAG" -m "TinyTorch $TAG: ${{ inputs.description }}"
           git push origin "$TAG"
 
           echo "✅ Tag $TAG created and pushed"
@@ -614,7 +628,7 @@ jobs:
           cat > /tmp/release-notes.md << NOTES_EOF
           ## TinyTorch v${VERSION_NUM}
 
-          ${{ github.event.inputs.description }}
+          ${{ inputs.description }}
 
           ${AUTO_NOTES}
 
@@ -625,7 +639,7 @@ jobs:
 
           # Create the release as draft
           gh release create "$TAG" \
-            --title "TinyTorch v${VERSION_NUM} - ${{ github.event.inputs.description }}" \
+            --title "TinyTorch v${VERSION_NUM} - ${{ inputs.description }}" \
             --notes-file /tmp/release-notes.md \
             --draft
 
@@ -648,7 +662,7 @@ jobs:
             echo "## 🌐 TinyTorch Website Deploy Complete" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "**Mode:** Website-only (no version bump)" >> $GITHUB_STEP_SUMMARY
-            echo "**Description:** ${{ github.event.inputs.description }}" >> $GITHUB_STEP_SUMMARY
+            echo "**Description:** ${{ inputs.description }}" >> $GITHUB_STEP_SUMMARY
             echo "**Deployed by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "### 🌐 Access:" >> $GITHUB_STEP_SUMMARY
@@ -658,8 +672,8 @@ jobs:
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "**Version:** ${{ needs.validate-inputs.outputs.new_version }}" >> $GITHUB_STEP_SUMMARY
             echo "**Previous:** ${{ needs.validate-inputs.outputs.previous_version }}" >> $GITHUB_STEP_SUMMARY
-            echo "**Release Type:** ${{ github.event.inputs.release_type }}" >> $GITHUB_STEP_SUMMARY
-            echo "**Description:** ${{ github.event.inputs.description }}" >> $GITHUB_STEP_SUMMARY
+            echo "**Release Type:** ${{ inputs.release_type }}" >> $GITHUB_STEP_SUMMARY
+            echo "**Description:** ${{ inputs.description }}" >> $GITHUB_STEP_SUMMARY
             echo "**Published by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "### 🌐 Access:" >> $GITHUB_STEP_SUMMARY
@@ -671,7 +685,7 @@ jobs:
     name: '❌ Validation Failed'
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    if: github.event.inputs.confirm != 'PUBLISH'
+    if: inputs.confirm != 'PUBLISH'
 
     steps:
       - name: ❌ Invalid confirmation
@@ -679,5 +693,5 @@ jobs:
           echo "## ❌ Publication Cancelled" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Reason:** You must type exactly 'PUBLISH' to confirm" >> $GITHUB_STEP_SUMMARY
-          echo "**Received:** ${{ github.event.inputs.confirm }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Received:** ${{ inputs.confirm }}" >> $GITHUB_STEP_SUMMARY
           exit 1

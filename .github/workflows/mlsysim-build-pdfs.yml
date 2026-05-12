@@ -101,7 +101,12 @@ jobs:
   build-slides:
     name: '📊 Build Tutorial Slide PDFs'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 20-min timeout was too tight: texlive-fonts-extra alone is 629 MB
+    # and the full apt install + tlmgr + xelatex compile of two decks
+    # eats most of it. The 2026-05-12 retries timed out mid-apt-install
+    # before the build could even start. 40 gives apt + tlmgr ~25 min of
+    # headroom and still bounds runaway jobs.
+    timeout-minutes: 40
 
     steps:
       - name: 📥 Checkout
@@ -109,19 +114,23 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.ref }}
 
-      # Mirrors the dependency set used by slides-build-pdfs.yml so the tutorial
-      # decks compile with the same toolchain as the textbook lecture decks.
+      # Minimal xelatex stack for the tutorial decks. Drops
+      # texlive-fonts-extra (629 MB), tex-gyre, fonts-liberation, and the
+      # post-install mktexlsr dance — all of those existed only to make
+      # the texgyreheros lookup work on Ubuntu, and the tutorial decks
+      # now use Latin Modern (in lmodern, already a hard Depends) which
+      # has no such packaging quirks. Drops `apt-get update` too: the
+      # GitHub Actions runner image's apt cache is current within ~1 week
+      # and the packages here are stable. Net effect: apt-install drops
+      # from ~10 min to ~2-3 min.
       - name: 🔧 Install TeX Live (xelatex)
         run: |
-          sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             texlive-xetex \
             texlive-fonts-recommended \
-            texlive-fonts-extra \
             texlive-latex-extra \
             texlive-latex-recommended \
-            lmodern \
-            fonts-liberation
+            lmodern
 
       - name: 🔧 Install Inkscape + Poppler
         run: |
