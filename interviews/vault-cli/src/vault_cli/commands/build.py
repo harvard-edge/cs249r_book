@@ -111,9 +111,32 @@ def register(app: typer.Typer) -> None:
         # to label the current release, so it must always reflect the
         # release_id passed on the command line.
         manifest_out = Path("interviews/staffml/src/data/vault-manifest.json")
-        published_count = sum(
-            1 for lq in loaded if lq.question.status == "published"
+        # questionCount must describe what the Next.js bundle actually
+        # ships — i.e., the committed corpus-summary.json — not the live
+        # vault. The smoke test asserts
+        # `manifest.questionCount == len(corpus-summary)`. If the vault
+        # YAMLs grew since the last corpus-summary.json refresh (e.g.
+        # 9525 in vault vs 9521 in bundled corpus), counting from loaded
+        # would break the smoke test. Read from the bundled artifact when
+        # it exists; fall back to loaded for fresh checkouts.
+        #
+        # chainCount stays computed from `loaded` — corpus-summary.json
+        # does not carry chain memberships (those live in vault.db and
+        # are served by the Worker), so reading it from corpus-summary
+        # would silently drop the field to 0. The slight semantic split
+        # (questionCount from bundled corpus, chainCount from live vault)
+        # is acceptable because the old behavior produced both from the
+        # same loaded set and chainCount has historically been "vault
+        # state at build time."
+        corpus_summary_path = Path(
+            "interviews/staffml/src/data/corpus-summary.json"
         )
+        if corpus_summary_path.exists():
+            published_count = len(json.loads(corpus_summary_path.read_text()))
+        else:
+            published_count = sum(
+                1 for lq in loaded if lq.question.status == "published"
+            )
         chains_seen: set[str] = set()
         for lq in loaded:
             if lq.question.status != "published":
