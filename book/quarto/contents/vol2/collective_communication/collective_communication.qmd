@@ -76,13 +76,13 @@ At frontier scale (hundreds of billions of parameters across thousands of GPUs),
 
 Before designing algorithms, we must understand the physical constraints governing data movement. Unlike software, which can be optimized almost indefinitely, communication is bound by the speed of light and the Shannon limit of channel capacity.
 
-The speed of light sets the latency floor for all communication. In a vacuum, light travels at $c \approx 300,000$ km/s. In optical fiber, the refractive index ($n \approx 1.5$)[^fn-speed-of-light-latency] slows this to $\approx 200,000$ km/s, or 5 microseconds per kilometer. A datacenter spanning 500 meters introduces a minimum 2.5 $\mu\text{s}$ one-way propagation delay (5.0 $\mu\text{s}$ round-trip). While negligible for human perception, this is thousands of clock cycles for a GPU operating at 1.5 GHz.
+The speed of light sets the latency floor for all communication. In a vacuum, light travels at $c \approx 300,000$ km/s. In optical fiber, the refractive index ($n \approx 1.5$)[^fn-speed-of-light-latency] slows this to $\approx 200,000$ km/s, or 5 microseconds per kilometer. A data center spanning 500 meters introduces a minimum 2.5 $\mu\text{s}$ one-way propagation delay (5.0 $\mu\text{s}$ round-trip). While negligible for human perception, this is thousands of clock cycles for a GPU operating at 1.5 GHz.
 
 Higher bandwidth demands more signaling energy per bit, creating a bandwidth-distance product constraint. Modern InfiniBand NDR operates at 100 Gbps per lane using PAM4 signaling (4 voltage levels per symbol), which requires more precise analog circuits than the simpler NRZ (2 levels) used by earlier generations. This precision comes at a cost: the maximum reach of a copper cable at NDR rates is approximately 2 meters before the signal degrades below recoverable levels. Longer distances require active optical cables (AOCs) or fiber transceivers that convert electrical signals to light and back, adding both cost (hundreds of dollars per link) and latency (nanoseconds per conversion). The bandwidth-distance product is a fundamental constraint: a link can have high bandwidth or long distance, but not both cheaply.
 
-Moving data also costs energy that scales with distance, as @fig-data-movement-hierarchy illustrates. Accessing data from local SRAM costs roughly 0.5 pJ/bit. Moving it across a PCB (NVLink) costs 5--10 pJ/bit. Moving it across a datacenter via InfiniBand optical links costs 20--50 pJ/bit.
+Moving data also costs energy that scales with distance, as @fig-data-movement-hierarchy illustrates. Accessing data from local SRAM costs roughly 0.5 pJ/bit. Moving it across a PCB (NVLink) costs 5--10 pJ/bit. Moving it across a data center via InfiniBand optical links costs 20--50 pJ/bit.
 
-::: {#fig-data-movement-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The Data Movement Energy Hierarchy**: The energy cost of moving a single bit increases by orders of magnitude as it traverses the system hierarchy, from local SRAM through HBM and intra-node NVLink to inter-node InfiniBand fabrics. This energy gradient makes data locality the primary driver of sustainable and efficient distributed ML system design." fig-alt="Horizontal bar chart showing increasing energy cost (pJ per bit) on a logarithmic scale from local SRAM up to remote datacenter nodes."}
+::: {#fig-data-movement-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The Data Movement Energy Hierarchy**: The energy cost of moving a single bit increases by orders of magnitude as it traverses the system hierarchy, from local SRAM through HBM and intra-node NVLink to inter-node InfiniBand fabrics. This energy gradient makes data locality the primary driver of sustainable and efficient distributed ML system design." fig-alt="Horizontal bar chart showing increasing energy cost (pJ per bit) on a logarithmic scale from local SRAM up to remote data center nodes."}
 ![](images/svg/data-movement-hierarchy.svg)
 :::
 
@@ -279,7 +279,7 @@ The journey begins at the moment the backward pass completes. On a single machin
 The specific "travel manifest" for this journey is dictated by the parallelism strategy chosen in @sec-distributed-training-systems. The choice of *how the math is split* determines *how the data moves*. For our **Lighthouse Archetypes** (@sec-vol2-introduction-archetypes), these manifests differ fundamentally:
 
 *   Archetype A (GPT-4/Llama-3): Our gradient is part of a massive, dense tensor. It needs to meet every other gradient in the fleet to compute a global average. Its primary vehicle is the AllReduce.
-*   Archetype B (DLRM at Scale)—the Deep Learning Recommendation Model (DLRM) workload[^fn-dlrm-embedding]: Our gradient (or activation) is sparse and targeted. It does not need to meet everyone; it needs to find one specific "Expert" GPU across the datacenter. Its vehicle is the AllToAll.
+*   Archetype B (DLRM at Scale)—the Deep Learning Recommendation Model (DLRM) workload[^fn-dlrm-embedding]: Our gradient (or activation) is sparse and targeted. It does not need to meet everyone; it needs to find one specific "Expert" GPU across the data center. Its vehicle is the AllToAll.
 
 Understanding this mapping is essential: the *what* of parallelism directly determines the *how* of communication. At frontier scale, these strategies are not mutually exclusive. A single training run for a large language model typically employs 3D parallelism (combining data, tensor, and pipeline parallelism simultaneously), which means multiple collective primitives execute concurrently on overlapping subsets of GPUs. Tensor parallelism drives AllReduce operations within each node (over NVLink), pipeline parallelism drives point-to-point sends between pipeline stages (often between nodes), and data parallelism drives AllReduce operations across groups of nodes (over InfiniBand). Each primitive operates on a different **process group**\index{Process Group}, a subset of the total GPU population that participates in that particular collective. The communication library must manage these overlapping process groups without creating contention between them, a challenge that requires careful allocation of network channels and bandwidth across the concurrent collectives [@thakur2005].
 
@@ -301,7 +301,7 @@ Expert Parallelism refers to the mixture-of-experts (MoE)[^fn-moe-sparsity] arch
 
 ## Mapping the Terrain: Network Performance Modeling {#sec-communication-collective-operations-collective-operations-network-performance-modeling-0d8e}
 
-A datacenter engineer cannot predict how long it takes to send ten megabytes across a cluster without knowing two distinct variables: the fixed startup tax and the per-byte transit fee. As the gradient begins its journey, it immediately encounters the physical reality of the datacenter network.
+A data center engineer cannot predict how long it takes to send ten megabytes across a cluster without knowing two distinct variables: the fixed startup tax and the per-byte transit fee. As the gradient begins its journey, it immediately encounters the physical reality of the data center network.
 
 ### The reality: When physics fights back {#sec-communication-collective-operations-collective-operations-alphabeta-model-f9b4}
 
@@ -334,7 +334,7 @@ The **critical message size**\index{Critical Message Size} $n^* = \alpha \cdot \
 | **PCIe Gen5 (GPU↔CPU)**      |                 2–5 μs |                 64 GB/s |                   ~200 KB |
 | **Ethernet 100 Gbps (RoCE)** |                5–10 μs |                 12 GB/s |                   ~100 KB |
 
-: **Interconnect Performance Parameters**\index{Interconnect Performance Parameters}: Typical latency and bandwidth values for modern datacenter interconnects. The critical size shows the crossover point where communication transitions from latency-bound to bandwidth-bound. {#tbl-interconnect-parameters}
+: **Interconnect Performance Parameters**\index{Interconnect Performance Parameters}: Typical latency and bandwidth values for modern data center interconnects. The critical size shows the crossover point where communication transitions from latency-bound to bandwidth-bound. {#tbl-interconnect-parameters}
 
 Applying the critical message size formula to a concrete workload reveals which optimization strategy matters most:
 
@@ -678,7 +678,7 @@ The contrast between AllToAll and AllReduce highlights a fundamental difference 
 
 While AllReduce scales efficiently because it can be pipelined in a ring (where each node only talks to its neighbor), AllToAll is fundamentally harder to scale.
 
-In an AllToAll, every process has a unique piece of data for every other process. This creates $O(N^2)$ logical connections. At the hardware level, this leads to **network contention**\index{Network Contention}: if 1024 GPUs all try to send data to different targets simultaneously, the "Fat-Tree" or "Spine" switches in the datacenter become the bottleneck.
+In an AllToAll, every process has a unique piece of data for every other process. This creates $O(N^2)$ logical connections. At the hardware level, this leads to **network contention**\index{Network Contention}: if 1024 GPUs all try to send data to different targets simultaneously, the "Fat-Tree" or "Spine" switches in the data center become the bottleneck.
 
 This is why **Expert Parallelism (MoE)** and large-scale **Recommendation Systems**\index{Recommendation Systems} often hit a "communication wall" much earlier than standard data-parallel models. The algorithm choice (AllReduce vs. AllToAll) determines the scaling ceiling.
 
@@ -1200,7 +1200,7 @@ Verify your understanding of Ring vs. Tree AllReduce trade-offs:
 
 ## Hierarchical Communication {#sec-communication-collective-operations-collective-operations-mapping-collectives-topology-3214}
 
-The algorithms above assume a flat network where every link has the same bandwidth. Real datacenters violate this assumption by an order of magnitude or more. Not all wires are created equal.
+The algorithms above assume a flat network where every link has the same bandwidth. Real data centers violate this assumption by an order of magnitude or more. Not all wires are created equal.
 
 ```{python}
 #| label: comm-infra-scenario
@@ -1580,9 +1580,9 @@ The hierarchical approach, combined with topology-aware routing, represents the 
 
 ## The Last Resort: Gradient Compression {#sec-communication-collective-operations-collective-operations-gradient-compression-7a5c}
 
-Even after perfectly tuning topology and selecting the optimal AllReduce algorithm, a system may remain fundamentally bottlenecked by the physical speed of light across the datacenter. The only remaining option is to send fewer bits. The previous section attacked the communication bottleneck from the algorithm side; now we look at payload compression.
+Even after perfectly tuning topology and selecting the optimal AllReduce algorithm, a system may remain fundamentally bottlenecked by the physical speed of light across the data center. The only remaining option is to send fewer bits. The previous section attacked the communication bottleneck from the algorithm side; now we look at payload compression.
 
-The bandwidth wall arises most acutely in two scenarios: training across datacenters connected by wide-area networks (where bandwidth is 10--100$\times$ lower than InfiniBand), and training on cloud instances with commodity Ethernet networking (where RDMA is unavailable and effective bandwidth is 10--25 GB/s). In these bandwidth-constrained settings, gradient compression techniques can reduce communication volume by 4--1000$\times$, at the cost of introducing noise into the optimization process. The central tension is between bandwidth reduction and the noise tolerance of the optimization process—how much compression the optimizer can absorb before convergence is compromised.
+The bandwidth wall arises most acutely in two scenarios: training across data centers connected by wide-area networks (where bandwidth is 10--100$\times$ lower than InfiniBand), and training on cloud instances with commodity Ethernet networking (where RDMA is unavailable and effective bandwidth is 10--25 GB/s). In these bandwidth-constrained settings, gradient compression techniques can reduce communication volume by 4--1000$\times$, at the cost of introducing noise into the optimization process. The central tension is between bandwidth reduction and the noise tolerance of the optimization process—how much compression the optimizer can absorb before convergence is compromised.
 
 ### Quantization: Reducing precision {#sec-communication-collective-operations-collective-operations-quantization-reducing-precision-815b}
 
@@ -1814,7 +1814,7 @@ Gradient compression is not free; it trades reduced communication for increased 
 |:--------------------------|----------------------:|--------------------------------:|:-------------------------------|
 | **FP16**                  |             2$\times$ |                      Negligible | Default for all training       |
 | **INT8 + Error FB**              |             4$\times$ |        Minor slowdown (~5--10 percent) | Bandwidth-constrained clusters |
-| **Top-k (1 percent) + Error FB** |           100$\times$ |    Moderate slowdown (~10--20 percent) | Cross-datacenter training      |
+| **Top-k (1 percent) + Error FB** |           100$\times$ |    Moderate slowdown (~10--20 percent) | Cross-data center training      |
 | **1-bit + Error FB**             |            32$\times$ | Significant slowdown (~20--30 percent) | Extreme bandwidth constraints  |
 
 #### When to use compression {#sec-collective-communication-use-compression-8519}
@@ -2145,7 +2145,7 @@ The "Travel Manifest" for a gradient depends on the system's objective function 
 | **Archetype B (DLRM at Scale)**       | AllToAll               | Latency ($\alpha$) & Contention | Topology-aware routing; token load-balancing |
 | **Archetype C (Federated MobileNet)** | P2P/Async            | Connectivity & Latency          | Aggressive quantization; Error Feedback      |
 
-The key insight is that Archetype A and Archetype B, despite both operating at datacenter scale, face fundamentally different bottlenecks. Archetype A (GPT-4/Llama-3) is bandwidth-bound and benefits from hierarchical AllReduce combined with communication-computation overlap. Archetype B (DLRM at Scale) is latency-bound and benefits from low-latency switches and topology-aware AllToAll routing. Applying the wrong optimization to the wrong archetype wastes engineering effort without improving performance.
+The key insight is that Archetype A and Archetype B, despite both operating at data center scale, face fundamentally different bottlenecks. Archetype A (GPT-4/Llama-3) is bandwidth-bound and benefits from hierarchical AllReduce combined with communication-computation overlap. Archetype B (DLRM at Scale) is latency-bound and benefits from low-latency switches and topology-aware AllToAll routing. Applying the wrong optimization to the wrong archetype wastes engineering effort without improving performance.
 
 :::
 
@@ -2165,7 +2165,7 @@ In fault tolerance (@sec-fault-tolerance-reliability), we examine how to maintai
 
 [^fn-zerocopy-rdma]: **Zero-Copy Communication**: RDMA (Remote Direct Memory Access) allows the NIC to transfer data directly from the application's memory on one node to the application's memory on another, bypassing the operating system's kernel buffers. For a 350 GB gradient exchange, zero-copy avoids moving 700 GB of data between the CPU and main memory, reclaiming significant memory bandwidth ($\text{BW}$). \index{Zero-Copy!RDMA}
 
-[^fn-speed-of-light-latency]: **The Speed of Light Constraint**: Light travels through optical fiber at approximately 200,000 km/s, or 200 meters per microsecond. In a massive datacenter where cables between racks span 100 meters, the "wire delay" alone contributes 500 ns to every message—a physical limit that no amount of better networking hardware can reduce. \index{Speed of Light!latency bound}
+[^fn-speed-of-light-latency]: **The Speed of Light Constraint**: Light travels through optical fiber at approximately 200,000 km/s, or 200 meters per microsecond. In a massive data center where cables between racks span 100 meters, the "wire delay" alone contributes 500 ns to every message—a physical limit that no amount of better networking hardware can reduce. \index{Speed of Light!latency bound}
 
 ::: { .quiz-end }
 :::
