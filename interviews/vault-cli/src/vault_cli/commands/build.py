@@ -103,35 +103,39 @@ def register(app: typer.Typer) -> None:
                 f"{visuals_result.get('deleted', 0)} pruned → "
                 f"{visuals_out}/question-visuals/[/dim]"
             )
-            # E.2: emit vault-manifest.json deterministically from the
-            # same loaded set that produced corpus.json. Eliminates the
-            # recurring stale-manifest pre-commit failure (the manifest
-            # was previously hand-maintained).
-            manifest_out = Path("interviews/staffml/src/data/vault-manifest.json")
-            # Count chains from the corpus.json we just wrote — chain shape
-            # there is the canonical published view.
-            chains_seen: set[str] = set()
-            for lq in loaded:
-                if lq.question.status != "published":
-                    continue
-                for ch in (lq.question.chains or []):
-                    chains_seen.add(ch.id)
-            manifest_result = emit_manifest(
-                loaded=loaded,
-                output=manifest_out,
-                release_id=str(result["release_id"]),
-                release_hash=str(result["release_hash"]),
-                schema_version="1",
-                policy_version=str(result["policy_version"]),
-                published_count=int(local_result["count"]),
-                chain_count=len(chains_seen),
-            )
-            result["manifest"] = manifest_result
-            console.print(
-                f"[dim]vault-manifest.json: {manifest_result['questionCount']} "
-                f"questions / {manifest_result['chainCount']} chains → "
-                f"{manifest_result['output']}[/dim]"
-            )
+
+        # Emit vault-manifest.json on every build (was previously gated
+        # behind --local-json, which caused CI publishes — which don't
+        # pass that flag — to ship a stale manifest with releaseId="dev"
+        # baked in from the committed file). The site reads this file
+        # to label the current release, so it must always reflect the
+        # release_id passed on the command line.
+        manifest_out = Path("interviews/staffml/src/data/vault-manifest.json")
+        published_count = sum(
+            1 for lq in loaded if lq.question.status == "published"
+        )
+        chains_seen: set[str] = set()
+        for lq in loaded:
+            if lq.question.status != "published":
+                continue
+            for ch in (lq.question.chains or []):
+                chains_seen.add(ch.id)
+        manifest_result = emit_manifest(
+            loaded=loaded,
+            output=manifest_out,
+            release_id=str(result["release_id"]),
+            release_hash=str(result["release_hash"]),
+            schema_version="1",
+            policy_version=str(result["policy_version"]),
+            published_count=published_count,
+            chain_count=len(chains_seen),
+        )
+        result["manifest"] = manifest_result
+        console.print(
+            f"[dim]vault-manifest.json: {manifest_result['questionCount']} "
+            f"questions / {manifest_result['chainCount']} chains → "
+            f"{manifest_result['output']}[/dim]"
+        )
 
         if as_json:
             print(json.dumps({
