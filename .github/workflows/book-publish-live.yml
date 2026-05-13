@@ -1080,7 +1080,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: merge-to-main
-    if: inputs.confirm == 'PUBLISH' && inputs.testing_mode != 'yes'
+    # always() guards against the skip cascade that happens when update-version
+    # is skipped (skip_version=yes) and merge-to-main runs under its own
+    # always() — without this, GitHub propagates the skip through the chain
+    # and the build never runs, leaving the gh-pages deploy stale.
+    if: |
+      always()
+      && inputs.confirm == 'PUBLISH'
+      && inputs.testing_mode != 'yes'
+      && needs.merge-to-main.result == 'success'
     outputs:
       commit_sha: ${{ steps.commit.outputs.commit_sha }}
 
@@ -1103,6 +1111,10 @@ jobs:
   call-production-build:
     name: '🚀 Call Production Build Matrix'
     needs: [merge-to-main, trigger-production-build]
+    if: |
+      always()
+      && needs.merge-to-main.result == 'success'
+      && needs.trigger-production-build.result == 'success'
     uses: ./.github/workflows/book-build-container.yml
     with:
       build_linux: true    # Production builds Linux only for now
@@ -1190,7 +1202,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [validate-inputs, call-production-build]
-    if: inputs.confirm == 'PUBLISH' && inputs.testing_mode != 'yes'
+    if: |
+      always()
+      && inputs.confirm == 'PUBLISH'
+      && inputs.testing_mode != 'yes'
+      && needs.validate-inputs.result == 'success'
+      && needs.call-production-build.result == 'success'
     concurrency:
       group: gh-pages-deploy
       cancel-in-progress: false
