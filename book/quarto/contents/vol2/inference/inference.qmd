@@ -144,7 +144,7 @@ The first signal is memory exhaustion, which occurs when model parameters, key-v
 
 Beyond memory constraints, throughput limitations emerge when request volume exceeds single-machine capacity even with optimal batching. Consider a recommendation system serving 100,000 queries per second with a 10 ms latency budget. If single-machine throughput peaks at 10,000 QPS, no amount of optimization on that machine can satisfy demand. Horizontal scaling across multiple replicas becomes mandatory.
 
-Finally, strict latency requirements drive distribution when model execution time exceeds latency budgets even at batch size one. Large language models generating responses token by token face this constraint acutely. A 70-billion parameter model requires approximately 140 GB of memory and achieves roughly 30 tokens per second on a single GPU due to memory bandwidth limitations. Sharding the model across multiple GPUs enables parallel computation that reduces time-to-first-token below acceptable thresholds.
+Finally, strict latency requirements drive distribution when model execution time exceeds latency budgets even at batch size one. Large language models generating responses token by token face this constraint acutely. A 70-billion parameter model requires approximately 140 GB of memory in FP16, exceeding a single 80 GB H100-class GPU before KV cache is considered. Even when quantization or larger-memory hardware makes a single-replica configuration possible, decode throughput is often limited by memory bandwidth. Sharding the model across multiple GPUs enables parallel computation that reduces time-to-first-token below acceptable thresholds.
 
 | **Constraint**                   | **Single-Machine Limit** | **Example Workload** | **Distribution Strategy**   |
 |:---------------------------------|:-------------------------|---------------------:|:----------------------------|
@@ -244,7 +244,7 @@ class ServingCostSimple:
 3.  **Cost per Request**\index{Serving Cost!cost per request}: Assume a 70B model on H100 costs $\approx \$0.001$ per request (input + output).
 4.  **Annual Serving Cost**\index{Serving Cost!annual serving cost}: $18 \times 10^9 \times \$0.001 = \mathbf{\$18{,}000{,}000}$.
 
-**Systems conclusion**: Serving costs **9$\times$** more than training in just the first year. A 10 percent optimization in inference latency saves **\$1.8M**—paying for the entire training run almost immediately.
+**Systems conclusion**: Serving costs **9$\times$** more than training in just the first year. A 10 percent serving-cost or latency-linked efficiency improvement saves about **\$1.8M** in the first year, nearly paying for the original training run.
 
 :::
 
@@ -623,9 +623,9 @@ The service level spans multiple replicas of the same model. Load balancing, req
 
 At the broadest scope, the platform level coordinates across multiple services and tenants. Resource allocation, multi-tenancy, scheduling, and cluster management drive overall resource efficiency while meeting diverse SLO requirements.
 
-The four levels form a *serving hierarchy* (@fig-serving-hierarchy), each building on the one below.
+The four conceptual levels form a *serving hierarchy*. A related deployment stack appears in @fig-serving-hierarchy, showing how requests pass through edge, routing, and model-serving infrastructure in production.
 
-::: {#fig-serving-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The Serving Hierarchy**: A three-tier serving stack with cumulative latency budget from top to bottom. Tier 1 (CDN/Edge Cache) handles geographic distribution and cached static responses (SLA <10 ms). Tier 2 (Gateway/Router) handles request routing, rate limiting, and authentication (SLA <50 ms). Tier 3 (Model Serving Cluster) runs GPU workers with autoscaling and continuous batching (SLA <2 s)." fig-alt="Three stacked tiers: Tier 1 CDN/Edge Cache with Edge PoPs (SLA <10 ms); Tier 2 Gateway/Router with Rate Limiter, Auth, and Router (SLA <50 ms); Tier 3 Model Serving Cluster with GPU workers and autoscaler (SLA <2 s)."}
+::: {#fig-serving-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**Serving Deployment Stack**: A three-tier serving stack with cumulative latency budget from top to bottom. Tier 1 (CDN/Edge Cache) handles geographic distribution and cached static responses (SLA <10 ms). Tier 2 (Gateway/Router) handles request routing, rate limiting, and authentication (SLA <50 ms). Tier 3 (Model Serving Cluster) runs GPU workers with autoscaling and continuous batching (SLA <2 s)." fig-alt="Three stacked tiers: Tier 1 CDN/Edge Cache with Edge PoPs (SLA <10 ms); Tier 2 Gateway/Router with Rate Limiter, Auth, and Router (SLA <50 ms); Tier 3 Model Serving Cluster with GPU workers and autoscaler (SLA <2 s)."}
 ![](images/svg/serving-hierarchy.svg)
 :::
 
@@ -838,7 +838,7 @@ The knee occurs where the variable compute cost $(B \times T_{\text{var}})$ star
 
 1. **Vision Model** $(T_{\text{fixed}} = 2\text{ ms}, T_{\text{var}} = 1\text{ ms})$:
    - Knee: $B \approx 2 ms/1 ms =$ **`{python} BatchingEfficiency.bec_vision_knee_str`**.
-   - *Result*: Vision models saturate at very small batches because the compute per sample is high.
+   - *Result*: This simplified latency model reaches its first overhead-amortization knee at a very small batch. Production CNNs often continue gaining throughput until batches of 32--64+ before hardware saturation.
 
 2. **LLM Decode** $(T_{\text{fixed}} = 40\text{ ms}, T_{\text{var}} = 0.5\text{ ms})$:
    - Knee: $B \approx 40 ms/0.5 ms =$ **`{python} BatchingEfficiency.bec_llm_knee_str`**.
@@ -850,7 +850,7 @@ The knee occurs where the variable compute cost $(B \times T_{\text{var}})$ star
 
 Translating these batch-level equations into system-wide capacity planning requires a classical result from queuing theory: **Little's Law**[^fn-littles-law], which relates concurrency, throughput, and latency in any stable system. @tbl-batching-by-model summarizes how these batching characteristics vary across model architectures.
 
-[^fn-littles-law]: **Little's Law**: From queuing theory $(N_{\text{req}} = \lambda T_{\text{lat}})$: Concurrency = Arrival Rate $\times$ Latency. For a serving fleet, this defines the **Capacity Envelope**: if a GPU can handle 32 concurrent requests and each takes 100 ms, the maximum arrival rate is 320 req/s. Beyond this, queues grow rapidly as utilization approaches 1, and tail latency $(L_{\text{lat}})$ collapses. \index{Little's Law!capacity planning}
+[^fn-littles-law]: **Little's Law**: From queuing theory $(N_{\text{req}} = \lambda T_{\text{lat}})$: Concurrency = Arrival Rate $\times$ Latency. For a serving fleet, this defines the **Capacity Envelope**: if a GPU can handle 32 concurrent requests and each takes 100 ms, the maximum arrival rate is 320 req/s. Beyond this, queues grow rapidly as utilization approaches 1, and tail latency $(L_{\text{lat}})$ explodes. \index{Little's Law!capacity planning}
 
 | **Model Type**    | **Batching Strategy** | **Typical Batch Size** | **Key Constraint** | **Throughput Scaling** |
 |:------------------|:----------------------|-----------------------:|:-------------------|:-----------------------|
@@ -1608,13 +1608,13 @@ The result, depicted in @fig-continuous-batching, is a **`{python} BatchingWorke
 
 #### When continuous batching provides maximum benefit {#sec-inference-scale-continuous-batching-provides-maximum-benefit-a406}
 
-The analysis above reveals that continuous batching's benefit scales with output length variance. We can formalize this relationship:
+The analysis above reveals that continuous batching's benefit scales with output length variance. A useful upper-bound intuition comes from comparing the longest sequence in a traditional batch with the average sequence length:
 
-Benefit formula Let $\text{CV} = \sigma / \mu$ be the coefficient of variation of output lengths. The throughput improvement from continuous batching over traditional batching is:
+Let $\text{CV} = \sigma / \mu$ be the coefficient of variation of output lengths. If the longest request in a batch is roughly $k$ standard deviations above the mean, then:
 
 $$\text{Improvement} \approx \frac{L_{\text{max}}}{\bar{L}} = \frac{\mu + k\sigma}{\mu} = 1 + k \cdot \text{CV}$$
 
-where $k$ is the number of standard deviations the maximum output exceeds the mean (typically 2-3 for realistic distributions).
+where $k$ is the number of standard deviations the maximum output exceeds the mean. Real systems realize less than this upper bound because scheduler overhead, KV-cache pressure, and refill gaps consume part of the theoretical gain. The table therefore reports effective waste and speedup, where $\text{speedup} \approx 1/(1 - W_{\text{effective}})$.
 
 @tbl-continuous-batching-benefit quantifies this relationship across different workload types, including Retrieval-Augmented Generation (RAG) [@lewis2020retrieval]:
 
@@ -1730,9 +1730,9 @@ The system runs on 4 A100-`{python} A100HardwareScenario.a100_mem_gb` GB GPUs co
 
 **Distribution Layer Analysis** (Algorithmic Behavior):
 
-Dynamic batching is configured with max batch size 32 and timeout 50 ms. Examining the batch size distribution reveals the problem: 90 percent of batches contain 4 to 8 requests (explaining good P50/P95), but 5 percent of batches reach the full 32 requests. These large batches occur during traffic bursts and experience head-of-line blocking\index{Head-of-Line Blocking}: short requests that would complete quickly must wait for long-sequence requests in the same batch to finish all their decode iterations.
+Dynamic request-level batching is configured with max batch size 32 and timeout 50 ms. Examining the batch size distribution reveals the problem: 90 percent of batches contain 4 to 8 requests (explaining good P50/P95), but 5 percent of batches reach the full 32 requests. These large batches occur during traffic bursts and experience head-of-line blocking\index{Head-of-Line Blocking}: short requests that would complete quickly must wait for long-sequence requests in the same batch to finish all their decode iterations.
 
-With continuous batching enabled, why does this occur? Further investigation reveals the scheduler uses FIFO ordering without preemption, meaning a burst of 32 simultaneous arrivals all enter the same batch and none can exit early because they all started at the same iteration.
+Why does this occur despite batching being enabled? Further investigation reveals that the scheduler uses FIFO request-level batching without iteration-level eviction. A burst of 32 simultaneous arrivals enters the same batch, and short requests are not released until the full request-level batch completes.
 
 **Diagnosis**\index{Diagnosis}:
 
@@ -1982,11 +1982,13 @@ sequenceDiagram
 As @fig-inference-lifecycle shows, noncompute stages (serialization, queuing, routing) can consume a substantial fraction of the latency budget, meaning batching strategy selection must account for the full pipeline, not GPU execution time alone. The following decision framework guides strategy selection:
 
 ```
-Is the model autoregressive (LLM, speech)?
-├─ Yes → Continuous batching with prefill chunking
-└─ No → Does the model have embedding lookups dominating latency?
-        ├─ Yes → Feature-parallel batching (RecSys)
-        └─ No → Dynamic batching with adaptive parameters
+Is it autoregressive text generation?
+├─ Yes → Continuous batching with chunked prefill
+└─ No → Is it real-time streaming speech/video/robotics?
+        ├─ Yes → Streaming pipeline with minimal or no batching
+        └─ No → Do embedding lookups dominate latency?
+                ├─ Yes → Feature-parallel batching (RecSys)
+                └─ No → Dynamic batching with adaptive parameters
 ```
 
 @tbl-batching-parameters summarizes the key tuning parameters for each strategy:
@@ -2164,19 +2166,24 @@ Internal fragmentation wastes memory within each allocation. Sequences shorter t
 
 External fragmentation compounds this problem across allocations. As sequences complete and new ones start, memory becomes fragmented into noncontiguous free blocks. Even with sufficient total free memory, no single block may be large enough for a new maximum-length allocation.
 
-Consider a simplified example with 8 memory slots and maximum sequence length of 4:
+Consider a simplified example with 8 memory slots and maximum sequence length of 4. Fixed-size reservations first create internal fragmentation:
 
 ```
 Time 0: Allocate Seq A (slots 0-3), Seq B (slots 4-7)
-        [A][A][A][A][B][B][B][B]
+        [A][A][a][a][B][B][B][b]
+        lowercase = reserved but unused
+```
 
-Time 1: Seq A completes (2 tokens), Seq B continues
-        [ ][ ][A][A][B][B][B][ ]  <- A only used 2 slots
+External fragmentation appears after sequences complete and new sequences start:
 
-Time 2: Try to allocate Seq C (needs 4 slots)
-        [ ][ ][A][A][B][B][B][ ]  <- No contiguous block of 4!
+```
+Time 1: Active Seq C and Seq D leave two 2-slot gaps
+        [ ][ ][C][C][ ][ ][D][D]
 
-Result: 4 free slots but cannot allocate new sequence
+Time 2: Try to allocate Seq E (needs 4 contiguous slots)
+        [ ][ ][C][C][ ][ ][D][D]  <- Total free slots = 4, largest block = 2
+
+Result: enough total free capacity exists, but no contiguous block is large enough.
 ```
 
 Production systems report 60--80 percent memory waste from fragmentation under realistic workloads, severely limiting batch sizes and throughput.
@@ -2793,7 +2800,7 @@ else:
     rebuild()
 ```
 
-For Llama-70B with 4K context, KV cache is ~80 MB per sequence. At 100 Gbps, transfer takes 6.4 ms vs. ~500 ms for prefill. Transfer is clearly better.
+For Llama-70B GQA with 4K context, KV cache is about 1.3 GB total per sequence, or about 168 MB per device under 8-way tensor parallelism. At 100 Gbps (12.5 GB/s), transferring one shard takes roughly 13 ms, while transferring the full cache would take about 100 ms. Both are often preferable to a ~500 ms prefill rebuild, so transfer remains the better default when bandwidth is available.
 
 ### Memory management best practices {#sec-inference-scale-memory-management-best-practices-67e2}
 
@@ -2871,10 +2878,10 @@ The prefill phase processes the entire input prompt in parallel. Computation sca
 
 The decode phase, by contrast, generates output tokens one at a time. Each token requires loading the entire model weights, making the memory access pattern bandwidth-bound with low arithmetic intensity.
 
-| **Phase**   |                                                                 **Computation** | **Memory Access**\index{Memory Access} | **Bottleneck** | **Optimal Batch** |
-|:------------|--------------------------------------------------------------------------------:|:---------------------------------------|:---------------|------------------:|
-| **Prefill** |                                                               O(prompt_length²) | Weight loading                         | Compute        |       Small (1–8) |
-| **Decode**  | O(1) dense weight work plus O(context length) attention over KV cache per token | Weight and KV-cache reads              | Bandwidth      |      Large (100s) |
+| **Phase**   |                                                                 **Computation** | **Memory Access**\index{Memory Access} | **Bottleneck** | **Optimal Batch**                         |
+|:------------|--------------------------------------------------------------------------------:|:---------------------------------------|:---------------|:------------------------------------------|
+| **Prefill** |                                                               O(prompt_length²) | Activation and attention tiles         | Compute        | Moderate request batches or large chunks  |
+| **Decode**  | O(1) dense weight work plus O(context length) attention over KV cache per token | Weight and KV-cache reads              | Bandwidth      | Large continuous batches of active tokens |
 
 : **Prefill vs. Decode Characteristics**: The two phases have opposite optimization requirements. {#tbl-prefill-decode}
 
@@ -2896,7 +2903,7 @@ With chunk size chosen to match decode iteration time, prefill and decode can sh
 
 Prefill-decode disaggregation takes this separation further by running prefill and decode on separate GPU pools:
 
-- **Prefill pool**\index{Prefill Pool}: Optimized for compute intensity (for example, H100 nodes with high TFLOPS) using large batch sizes to maximize throughput.
+- **Prefill pool**\index{Prefill Pool}: Optimized for compute intensity (for example, H100 nodes with high TFLOPS) using moderate request batches or large token chunks to maximize throughput without blocking decode.
 - **Decode pool**\index{Disaggregated Serving!decode pool}: Optimized for memory bandwidth (for example, nodes with maximum HBM capacity or specialized High Bandwidth Flash as discussed in @sec-data-storage) to handle thousands of concurrent autoregressive streams.
 
 Independent scaling follows directly: prefill capacity scales with input volume while decode capacity scales with output volume. Crucially, this architecture relies on the high-speed, RDMA-enabled networking fabric established in @sec-network-fabrics. When a prefill finishes, the resulting KV cache (often megabytes of data) must be migrated to a decode node within the inter-token latency budget, typically under 10 ms. InfiniBand's sub-microsecond latency and high bisection bandwidth are the physical enablers of this logical disaggregation.
@@ -3114,7 +3121,8 @@ $$\text{Memory}_{\text{70B}} = 70 \times 10^9 \times 2 = 140\text{ GB}$$
 # │   AllReduce ops vs linear scaling.
 # │ Show: tp_speedup_str="6.9"×, seq_total_ms_str="2,400" ms,
 # │   tp8_total_ms_str="348" ms—inline in the callout prose.
-# │ How: Divide per-layer compute times; multiply by n_layers for full-model timing.
+# │ How: Divide per-layer prefill-pass compute times; multiply by n_layers
+# │   for full-model timing. This is not decode TPOT.
 # │
 # │ Imports: (none—pure Python arithmetic, no pint quantities)
 # │ Exports: TpSpeedupCalc.tp_speedup_str, TpSpeedupCalc.tp_theoretical,
@@ -3135,7 +3143,7 @@ class TpSpeedupCalc:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     tp_speedup = seq_per_layer_ms/tp8_per_layer_ms
 
-    # Step 1: Full-model per-token timing
+    # Step 1: Full-model prefill-pass timing
     seq_total_ms = seq_per_layer_ms * n_layers
     tp8_total_ms = tp8_per_layer_ms * n_layers
     nvlink_h100_gbs = f"{nvlink_bw.m_as(GB/second):.0f}"
@@ -3160,17 +3168,17 @@ class TpSpeedupCalc:
 | **AllReduce (FF)**                         |                   0 ms |       0.3 ms | N/A             |
 | **Total per layer**                        |              **30 ms** |  **4.35 ms** | **6.9$\times$** |
 
-**For `{python} TpSpeedupCalc.n_layers` layers**:
+**For `{python} TpSpeedupCalc.n_layers` layers on the same prefill workload**:
 
-- Sequential: `{python} TpSpeedupCalc.seq_total_ms_str` ms per token
-- 8-way TP: `{python} TpSpeedupCalc.tp8_total_ms_str` ms per token
+- Sequential: `{python} TpSpeedupCalc.seq_total_ms_str` ms for the full prefill pass
+- 8-way TP: `{python} TpSpeedupCalc.tp8_total_ms_str` ms for the full prefill pass
 
 The `{python} TpSpeedupCalc.tp_speedup_str`$\times$ speedup (vs. theoretical `{python} TpSpeedupCalc.tp_theoretical`$\times$) reflects communication overhead. At `{python} TpSpeedupCalc.nvlink_h100_gbs` GB/s, moving an 8 MB activation payload would take only about 0.01 ms by raw bandwidth math; the 0.3 ms budget shown here includes collective launch, synchronization, ring protocol, and framework overheads.
 
 **Time-to-first-token** (1024-token prompt):
 
-- Prefill compute: ~50 ms (compute-bound, near-linear scaling)
-- Total TTFT: ~60 ms with preprocessing
+- Prefill compute: ~`{python} TpSpeedupCalc.tp8_total_ms_str` ms on 8-way TP (compute-bound, near-linear scaling minus communication overhead)
+- Total TTFT: ~400 ms with preprocessing and serving overhead
 
 :::
 
@@ -4588,12 +4596,12 @@ Consider traffic spike from 1000 to 3000 QPS:
 - Utilization: 210 percent (overloaded)
 - P99 latency: 500 ms+ (SLO violated)
 
-**With pool of warm spares (5 replicas)**:
+**With sufficient warm spares (20 replicas)**:
 
 - T=0: Spike detected, warm spares activated immediately
-- T=0: 15 replicas handle 3000 QPS (200 QPS each)
-- T=0 to T=5min: Scale up 15 more replicas
-- Utilization: 140 percent (elevated but manageable)
+- T=0: 30 replicas handle 3000 QPS (100 QPS each)
+- T=0 to T=5min: Replenish 20 warm spares in the background
+- Utilization: 70 percent (headroom preserved)
 - P99 latency: 80 ms (SLO maintained)
 
 Warm spares provide buffer during cold start period.
@@ -5196,7 +5204,7 @@ Quantization + PagedAttention Quantized models combine with PagedAttention for m
 
 $$\text{Max batch} = \frac{\text{GPU Memory} - \text{Quantized Weights}}{\text{KV Cache per Sequence}}$$
 
-A 70B model with 4-bit weights requires approximately 35 GB, leaving 45 GB on an `{python} A100HardwareScenario.a100_mem_gb` GB A100 for KV cache. With FP16 KV cache at 2.5 MB per 1K tokens per sequence, this supports ~18 concurrent 1K-token sequences vs. ~8 with FP16 weights.
+A 70B model with 4-bit weights requires approximately 35 GB, leaving 45 GB on an `{python} A100HardwareScenario.a100_mem_gb` GB A100 for KV cache. With FP16 KV cache at about 2.5 GB per 1K-token sequence for the MHA baseline, this supports ~18 concurrent 1K-token sequences. With FP16 weights, the same 70B model would not fit on one A100 at all, so weight-only quantization changes both feasibility and batch capacity.
 
 ### Quantization selection guidelines {#sec-inference-scale-quantization-selection-guidelines-24fb}
 
@@ -5331,11 +5339,11 @@ Several key design decisions shape this system.
 
 OpenAI was an early adopter of continuous batching (Orca-style) to maintain high GPU utilization despite variable output lengths. Chunked prefill bounds decode latency by processing long prompts in chunks that interleave with ongoing generation.
 
-| **Batching Strategy**    | **GPU Utilization** | **TTFT (128K prompt)** |
-|:-------------------------|--------------------:|-----------------------:|
-| **Static batching**      |          45 percent |          30s (blocked) |
-| **Continuous batching**  |          75 percent |          30s (blocked) |
-| **Continuous + chunked** |          85 percent |          3s (streamed) |
+| **Batching Strategy**    | **GPU Utilization** | **128K Prompt Behavior**                  |
+|:-------------------------|--------------------:|:------------------------------------------|
+| **Static batching**      |          45 percent | 30s TTFT; decode blocked                  |
+| **Continuous batching**  |          75 percent | 30s TTFT; decode still blocked by prefill |
+| **Continuous + chunked** |          85 percent | 30s TTFT; decode stalls bounded to ~3s    |
 
 GPT-4 class models require 8-way or greater tensor parallelism for memory capacity and latency:
 

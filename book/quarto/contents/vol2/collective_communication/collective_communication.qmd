@@ -1103,7 +1103,7 @@ $$ M_{\text{crossover}} \approx \frac{N \cdot \alpha \cdot \beta}{\log_2 N} $$
 For a rough upper-scale mental model, engineers sometimes drop the logarithmic factor:
 $$ \boxed{M_{\text{crossover}} \approx N \cdot \alpha \cdot \beta} $$
 
-The more direct crossover formula yields a useful intuition, not a hard selection rule:
+The log-aware crossover formula yields a useful intuition, not a hard selection rule:
 
 *   If message size $M > M_{\text{crossover}}$: Use **Ring** (Bandwidth limited).
 *   If message size $M < M_{\text{crossover}}$: Use **Tree** (Latency limited).
@@ -1135,13 +1135,13 @@ class RingVsTree:
     tree_bw_us = 2 * log2N * M_mb/beta_gbs * 1e3
     ring_total_us = ring_lat_us + ring_bw_us
     tree_total_us = tree_lat_us + tree_bw_us
-    crossover_mb = N * alpha_us * 1e-6 * beta_gbs * 1e9 / 1e6
+    crossover_mb = (N * alpha_us * 1e-6 * beta_gbs * 1e9 / 1e6) / log2N
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(ring_lat_us == 1260, f"Ring lat = {ring_lat_us}")
     check(tree_lat_us == 120, f"Tree lat = {tree_lat_us}")
     check(abs(ring_bw_us - 200) < 5, f"Ring bw = {ring_bw_us}")
     check(abs(tree_bw_us - 1200) < 1, f"Tree bw = {tree_bw_us}")
-    check(abs(crossover_mb - 6.4) < 0.01, f"Crossover = {crossover_mb}")
+    check(abs(crossover_mb - 1.1) < 0.05, f"Crossover = {crossover_mb}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     alpha_str = f"{alpha_us}"
     beta_str = f"{beta_gbs}"
@@ -1179,7 +1179,7 @@ class RingVsTree:
 
 **Tree wins**\index{Tree Wins}, but only by 10 percent. For this 1 MB message, we are near the crossover point.
 
-**Systems insight**: Ring's latency penalty (10$\times$ worse than Tree) nearly balances Tree's bandwidth penalty (6$\times$ worse than Ring). The crossover formula predicts: $M_{\text{crossover}} = N \cdot \alpha \cdot \beta = 64 \times 10\ \mu s \times 10\ \text{GB/s}$ = `{python} RingVsTree.crossover_str` MB. At 1 MB, we are below crossover, so Tree wins. At 10 MB, Ring would dominate.
+**Systems insight**: Ring's latency penalty (10$\times$ worse than Tree) nearly balances Tree's bandwidth penalty (6$\times$ worse than Ring). The log-aware crossover estimate predicts $M_{\text{crossover}} \approx N \alpha \beta / \log_2 N = 64 \times 10\ \mu s \times 10\ \text{GB/s} / 6 \approx$ `{python} RingVsTree.crossover_str` MB. At 1 MB, we are just below crossover, so Tree wins. At 10 MB, Ring would dominate.
 
 :::
 
@@ -1350,14 +1350,14 @@ class HierarchicalAllreduceCalc:
 **Hierarchical AllReduce (3-step decomposition)**:
 
 1. **Intra-node ReduceScatter**: Each GPU sends `{python} HierarchicalAllreduceCalc.intra_data_mb_str` MB at 900 GB/s → ~`{python} HierarchicalAllreduceCalc.intra_rs_ms_str` ms
-2. **Inter-Node AllReduce**\index{AllReduce!inter-node}: Each GPU sends $1\ \text{GB}/8$ = `{python} HierarchicalAllreduceCalc.inter_data_mb_str` MB at 50 GB/s → ~`{python} HierarchicalAllreduceCalc.inter_time_ms_str` ms
+2. **Inter-Node AllReduce**\index{AllReduce!inter-node}: Each GPU AllReduces a $1\ \text{GB}/8$ = `{python} HierarchicalAllreduceCalc.inter_data_mb_str` MB shard over InfiniBand; Ring moves roughly $2(N-1)/N$ times that payload, giving ~`{python} HierarchicalAllreduceCalc.inter_time_ms_str` ms at 50 GB/s
 
    *(Only 1/8 of the data crosses InfiniBand!)*
 
 3. **Intra-node AllGather**: Each GPU receives `{python} HierarchicalAllreduceCalc.intra_data_mb_str` MB at 900 GB/s → ~`{python} HierarchicalAllreduceCalc.intra_ag_ms_str` ms
 - **Total time**: $\approx$ `{python} HierarchicalAllreduceCalc.intra_rs_ms_str` + `{python} HierarchicalAllreduceCalc.inter_time_ms_str` + `{python} HierarchicalAllreduceCalc.intra_ag_ms_str` = `{python} HierarchicalAllreduceCalc.hier_total_ms_str` ms
 
-**Systems insight**: Hierarchical AllReduce achieves a **`{python} HierarchicalAllreduceCalc.speedup_str`$\times$ speedup** by reducing inter-node traffic from 1 GB to `{python} HierarchicalAllreduceCalc.inter_data_mb_str` MB per GPU. With 8 GPUs per node, we effectively get 8$\times$ the apparent inter-node bandwidth. This is why NVIDIA's NCCL and similar libraries default to hierarchical algorithms on multi-node clusters.
+**Systems insight**: Hierarchical AllReduce achieves a **`{python} HierarchicalAllreduceCalc.speedup_str`$\times$ speedup** by reducing the inter-node payload from 1 GB to `{python} HierarchicalAllreduceCalc.inter_data_mb_str` MB per GPU before the Ring traffic multiplier. With 8 GPUs per node, we effectively get 8$\times$ the apparent inter-node bandwidth. This is why NVIDIA's NCCL and similar libraries default to hierarchical algorithms on multi-node clusters.
 
 :::
 
@@ -1497,11 +1497,11 @@ class ThreeLevelNapkin:
 
 **Level 1 (Intra-Node, NVLink)**: ReduceScatter reduces each GPU's contribution by 8$\times$. Each GPU sends `{python} ThreeLevelNapkin.step1_payload_gb_str` GB at 900 GB/s = `{python} ThreeLevelNapkin.step1_time_ms_str` ms.
 
-**Level 2 (Intra-Rack, InfiniBand)**: Ring AllReduce among 4 nodes on the same rack. Each GPU sends `{python} ThreeLevelNapkin.step2_payload_gb_str` GB at 50 GB/s. Time: `{python} ThreeLevelNapkin.step2_ring_bw_ms_str` ms.
+**Level 2 (Intra-Rack, InfiniBand)**: Ring AllReduce among 4 nodes on the same rack. Each GPU AllReduces a `{python} ThreeLevelNapkin.step2_payload_gb_str` GB rack-level payload; Ring traffic is roughly $2(N-1)/N$ times that payload at 50 GB/s. Time: `{python} ThreeLevelNapkin.step2_ring_bw_ms_str` ms.
 
-**Level 3 (Cross-Rack, Spine)**: Ring AllReduce among 4 racks. Each GPU sends only `{python} ThreeLevelNapkin.step3_payload_gb_str` GB at 25 GB/s. Time: `{python} ThreeLevelNapkin.step3_ring_bw_ms_str` ms.
+**Level 3 (Cross-Rack, Spine)**: Ring AllReduce among 4 racks. Each GPU AllReduces only a `{python} ThreeLevelNapkin.step3_payload_gb_str` GB cross-rack payload; Ring traffic again applies the $2(N-1)/N$ multiplier at 25 GB/s. Time: `{python} ThreeLevelNapkin.step3_ring_bw_ms_str` ms.
 
-**Result**: Cross-rack traffic per GPU is reduced by `{python} ThreeLevelNapkin.reduction_factor_str`$\times$ compared to the original gradient. Total time: `{python} ThreeLevelNapkin.total_3l_ms_str` ms vs. `{python} ThreeLevelNapkin.flat_3l_ms_str` ms for flat AllReduce. The hierarchical decomposition concentrates traffic where bandwidth is abundant and minimizes traffic where bandwidth is scarce.
+**Result**: Cross-rack payload per GPU is reduced by `{python} ThreeLevelNapkin.reduction_factor_str`$\times$ compared to the original gradient before the Ring traffic multiplier is applied. Total time: `{python} ThreeLevelNapkin.total_3l_ms_str` ms vs. `{python} ThreeLevelNapkin.flat_3l_ms_str` ms for flat AllReduce. The hierarchical decomposition concentrates traffic where bandwidth is abundant and minimizes traffic where bandwidth is scarce.
 
 :::
 
@@ -1537,11 +1537,11 @@ The topology detection process begins with hardware enumeration. NCCL queries th
 
 Google's Tensor Processing Unit (TPU) pods use a 3D torus topology\index{Torus Topology} where each TPU connects directly to 6 neighbors $(\pm X, \pm Y, \pm Z)$, as @fig-torus-reduction depicts. Unlike the hierarchical fat-tree topology of InfiniBand clusters, the torus provides uniform, direct connectivity: every TPU chip has the same number of links (6) and the same per-link bandwidth, regardless of its position in the mesh. The optimal AllReduce strategy for this topology is **dimension-ordered reduction**\index{Dimension-Ordered Reduction}:
 
-1. Reduce along the X dimension (all TPUs in the same YZ plane)
-2. Reduce along the Y dimension (all TPUs in the same Z column)
-3. Reduce along the Z dimension (final global reduction)
+1. Reduce along X for each fixed $(Y,Z)$ line, producing partial sums over the X dimension
+2. Reduce those partials along Y for each fixed $(X,Z)$ line, producing partial sums over the $X \times Y$ plane
+3. Reduce those partials along Z for each fixed $(X,Y)$ line to complete the global result
 
-Each dimension-ordered reduction is itself a Ring AllReduce along that dimension's torus ring. For a pod with $X{\times}Y{\times}Z$ TPUs, the X-dimension ring has $X$ members, each of which already holds the partial sum from the $Y{\times}Z$ TPUs in its YZ plane after the first step. This cascading reduction achieves total bandwidth cost $2M/\beta$ (same as a single Ring) but with latency proportional to $2(X + Y + Z)$ rather than $2(X \times Y \times Z)$, because each dimension's ring is shorter than a global ring.
+Each dimension-ordered reduction is itself a Ring AllReduce along one axis-aligned torus ring. For a pod with $X{\times}Y{\times}Z$ TPUs, the first step runs independent X-dimension rings, one for each fixed $(Y,Z)$ coordinate, so each participant receives a partial sum over that X line. The second step runs Y-dimension rings to combine those X partials across Y, and the third step runs Z-dimension rings to complete the global reduction. This cascading reduction achieves total bandwidth cost $2M/\beta$ (same as a single Ring) but with latency proportional to $2(X + Y + Z)$ rather than $2(X \times Y \times Z)$, because each dimension's ring is shorter than a global ring.
 
 Dimension-ordered reduction minimizes network diameter and ensures each link carries traffic in only one direction at a time, avoiding congestion. The torus topology also provides natural fault tolerance through alternate routing paths: if one link in the X-dimension fails, traffic can detour through the Y or Z dimensions (at the cost of increased latency). Google's Accelerated Linear Algebra (XLA) compiler generates dimension-ordered collectives automatically when targeting TPU pods, abstracting the topology details from the user.
 
@@ -2124,7 +2124,7 @@ When even the fastest wires are not enough, gradient compression provides the fi
 ::: {.callout-takeaways title="Every byte has a travel cost"}
 
 * **The $\alpha$-$\beta$ model reveals the bottleneck**: The critical message size $n^* = \alpha \cdot \beta$ determines whether to optimize software latency (small messages) or hardware bandwidth (large payloads). In practice, NCCL's effective $\alpha$ is 5--10$\times$ higher than wire-level latency.
-* **Algorithm choice is scale-dependent**: Ring AllReduce is bandwidth-optimal but pays $O(N)$ latency; Tree AllReduce is latency-optimal ($O(\log N)$) but bandwidth-inefficient. Use the crossover formula $M_{\text{crossover}} \approx N \alpha \beta$ to choose.
+* **Algorithm choice is scale-dependent**: Ring AllReduce is bandwidth-optimal but pays $O(N)$ latency; Tree AllReduce is latency-optimal ($O(\log N)$) but bandwidth-inefficient. Use the log-aware crossover estimate $M_{\text{crossover}} \approx N \alpha \beta / \log_2 N$ to reason about the switch point, and treat $N\alpha\beta$ only as a coarse upper-scale heuristic.
 * **Hierarchical algorithms multiply bandwidth**: By performing local reductions over fast NVLink before crossing the slow InfiniBand bridge, hierarchical collectives effectively multiply inter-node bandwidth by the number of GPUs per node.
 * **AllToAll is the contention king**: Unlike AllReduce, AllToAll creates $O(N^2)$ logical connections. This makes Expert Parallelism (MoE) and Recommendation Systems fundamentally harder to scale than dense LLMs.
 * **Error feedback makes lossy compression safe**: Sparsification can discard 99 percent of gradients, provided the "error" is accumulated locally and added to the next step. This turns biased estimators into unbiased ones over time.

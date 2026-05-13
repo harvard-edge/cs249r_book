@@ -309,7 +309,7 @@ Every scheduling decision represents a trade-off between four fundamental and of
 
 Optimizing all four simultaneously is impossible; every scheduling policy represents a specific point in this four-dimensional trade-off space. The most direct conflict exists between throughput and latency, a tension analogous to the throughput-latency trade-off in computer architecture. A throughput-optimal scheduler prioritizes the largest, most parallelizable jobs because they use the hardware most efficiently. However, this policy is latency-catastrophic for small jobs: a researcher submitting a 10-minute debugging task might wait days for the large job to finish. Conversely, a latency-optimal scheduler minimizes average wait time but potentially starves large jobs indefinitely, reducing aggregate cluster throughput by leaving large blocks of resources idle while waiting for "just one more" small job to finish.
 
-Consider our 175B model training on 64 GPUs. From a throughput perspective, this is an ideal job: it runs for weeks with high arithmetic intensity and zero scheduling overhead once started. From a latency perspective, it is a boulder in the stream. To schedule it, the system might need to drain 64 GPUs of all other work, forcing hundreds of smaller jobs to wait. Once running, it occupies those resources immovably. If the scheduler prioritizes the 175B model (throughput), the P99 latency for small jobs explodes. If it prioritizes small jobs (latency) by allowing them to preempt or fragmentation-fill the cluster, the 175B model may never assemble the contiguous block it needs to start. This zero-sum game forces organizations to make explicit policy choices, often encoded in Quality of Service classes, about which objective wins when they collide.
+Consider a 64-GPU scheduling run for our 175B model. From a throughput perspective, this is an ideal job: it runs for weeks with high arithmetic intensity and zero scheduling overhead once started. From a latency perspective, it is a boulder in the stream. To schedule it, the system might need to drain 64 GPUs of all other work, forcing hundreds of smaller jobs to wait. Once running, it occupies those resources immovably. If the scheduler prioritizes the 175B model (throughput), the P99 latency for small jobs explodes. If it prioritizes small jobs (latency) by allowing them to preempt or fragmentation-fill the cluster, the 175B model may never assemble the contiguous block it needs to start. This zero-sum game forces organizations to make explicit policy choices, often encoded in Quality of Service classes, about which objective wins when they collide.
 
 ```{python}
 #| label: lego-queuing-theory
@@ -503,9 +503,9 @@ The accuracy of runtime estimates determines backfill effectiveness, and this cr
 The cost of poor scheduling compounds rapidly. Consider a `{python} ClusterEconomicsContext.cluster_size_str`-GPU cluster:
 
 - **Operating cost**\index{Operating Cost}: \$`{python} ClusterEconomicsContext.daily_cost_str`/day (\$`{python} ClusterEconomicsContext.annual_cost_str`M/year)
-- **At 60 percent utilization**\index{At 60 Percent Utilization}: 4,000 GPUs productive, 6,000 idle = \$288,000/day wasted
+- **At 60 percent utilization**\index{At 60 Percent Utilization}: 6,000 GPUs productive, 4,000 idle = \$192,000/day wasted
 - **At 80 percent utilization**\index{At 80 Percent Utilization}: 8,000 GPUs productive, 2,000 idle = \$96,000/day wasted
-- **Improvement value**\index{Improvement Value}: Moving from 60 percent to 80 percent saves \$192,000/day, or \$70M/year
+- **Improvement value**\index{Improvement Value}: Moving from 60 percent to 80 percent saves \$96,000/day, or about \$35M/year
 
 This savings exceeds the cost of a dedicated scheduling engineering team by orders of magnitude. Every percentage point of utilization improvement on a large cluster translates to millions of dollars annually.
 
@@ -592,9 +592,9 @@ Standard partitions and fair-share policies handle basic batch workloads, but op
 
 Job arrays transform the chaotic submission of thousands of experimental hyperparameter sweep trials into a coherent, schedulable unit. Instead of flooding the controller with individual `sbatch` requests, a user submits a single array job: `#SBATCH --array=0-99`. Slurm treats this as a single object for parsing and queuing overhead but schedules each element as an independent task, allowing the scheduler to backfill small holes in the cluster with individual trials. Each task receives a unique `SLURM_ARRAY_TASK_ID` environment variable, which the training script uses to index into a hyperparameter configuration file (for example, selecting learning rate $\eta = 10^{-4}$ for task 0 and $\eta = 3 \times 10^{-4}$ for task 1). This mechanism is the standard for large-scale ablation studies, enabling researchers to launch 1,000 experiments with a single command while preserving scheduler throughput.
 
-Heterogeneous job steps address the preprocessing bottleneck where expensive GPUs sit idle while CPUs prepare data. Traditional jobs allocate symmetric resources to every node, forcing users to reserve GPU nodes for the entire pipeline. Slurm's `--het-group` feature enables a single job to span disparate resource types, allocating CPU-only nodes for data ingestion and GPU nodes for training within the same allocation. Our 175B model's training job uses this pattern: it requests a heterogeneous allocation of 8 GPU nodes (64 A100s) for the model and 2 CPU-only nodes for on-the-fly data tokenization. The `srun --het-group=0` command launches the training process on the GPUs, while `srun --het-group=1` launches the data workers, allowing the expensive accelerators to focus purely on gradient computation while cheaper CPU nodes feed them data.
+Heterogeneous job steps address the preprocessing bottleneck where expensive GPUs sit idle while CPUs prepare data. Traditional jobs allocate symmetric resources to every node, forcing users to reserve GPU nodes for the entire pipeline. Slurm's `--het-group` feature enables a single job to span disparate resource types, allocating CPU-only nodes for data ingestion and GPU nodes for training within the same allocation. The 64-GPU Slurm run for our 175B model uses this pattern: it requests a heterogeneous allocation of 8 GPU nodes (64 A100s) for the model and 2 CPU-only nodes for on-the-fly data tokenization. The `srun --het-group=0` command launches the training process on the GPUs, while `srun --het-group=1` launches the data workers, allowing the expensive accelerators to focus purely on gradient computation while cheaper CPU nodes feed them data.
 
-Prolog and epilog scripts serve as the cluster's immune system, running administrative code before a job starts and after it finishes. In ML clusters, the standard prolog script performs a preflight check on allocated hardware: it validates NVLink topology (using `nvidia-smi topo -m`), checks ECC error counters, and verifies InfiniBand link width. If a node fails these checks, the prolog returns a nonzero exit code, causing Slurm to drain the node and requeue the job elsewhere, preventing a silent hardware fault from corrupting a week-long training run. The epilog script ensures hygiene by killing orphaned Python processes, clearing shared memory segments (`/dev/shm`), and logging final GPU utilization metrics to the accounting database. For our 175B model, the prolog script specifically validates that all 8 GPUs on each node have full P2P bandwidth access, preventing a single degraded NVLink lane from bottlenecking the entire 64-GPU tensor parallel group.
+Prolog and epilog scripts serve as the cluster's immune system, running administrative code before a job starts and after it finishes. In ML clusters, the standard prolog script performs a preflight check on allocated hardware: it validates NVLink topology (using `nvidia-smi topo -m`), checks ECC error counters, and verifies InfiniBand link width. If a node fails these checks, the prolog returns a nonzero exit code, causing Slurm to drain the node and requeue the job elsewhere, preventing a silent hardware fault from corrupting a week-long training run. The epilog script ensures hygiene by killing orphaned Python processes, clearing shared memory segments (`/dev/shm`), and logging final GPU utilization metrics to the accounting database. For the 64-GPU 175B run, the prolog script specifically validates that all 8 GPUs on each node have full P2P bandwidth access, preventing a single degraded NVLink lane from bottlenecking the entire tensor parallel group.
 
 Finally, **Trackable Resources (TRES)** extend Slurm's accounting beyond simple CPU/memory tracking to arbitrary assets like GPU-hours, license tokens, or power budget. Organizations use TRES to implement project billing for expensive resources. By defining a TRES type `billing=gpu`, administrators can charge different rates for A100s vs. V100s, or track the consumption of specific software licenses. This granular accounting enables the implementation of fair-share policies based on actual economic cost rather than just core counts, ensuring that a team using 100 older GPUs does not deplete its budget as fast as a team using 100 flagship H100s.
 
@@ -665,7 +665,7 @@ Storage integration addresses the "checkpoint storm" problem where thousands of 
 
 The **observability stack**\index{Observability Stack} for training clusters combines general-purpose cluster monitoring with specialized hardware telemetry. Prometheus and Grafana provide the collection and visualization layer, while the DCGM (Data Center GPU Manager) exporter exposes granular GPU metrics: utilization, memory bandwidth, temperature, and ECC errors. This stack enables the utilization dashboards essential for multi-tenant efficiency, allowing operators to distinguish between true compute saturation and I/O-bound idleness.
 
-Our 175B model training on Kubernetes uses this full stack. The workload is defined as a `PyTorchJob` with 128 worker pods, each requesting 8 GPUs. Host networking is enabled to allow direct InfiniBand access for the NVLink-connected nodes. A PVC backed by a high-throughput Lustre file system provides access to the 100 TB training dataset and absorbs periodic checkpoints. DCGM metrics stream to Prometheus, triggering alerts if any GPU reports uncorrectable ECC errors or if NVLink bandwidth drops below the expected baseline.
+The 1,024-GPU pretraining run for our 175B model uses this full Kubernetes stack. The workload is defined as a `PyTorchJob` with 128 worker pods, each requesting 8 GPUs. Host networking is enabled to allow direct InfiniBand access for the NVLink-connected nodes. A PVC backed by a high-throughput Lustre file system provides access to the 100 TB training dataset and absorbs periodic checkpoints. DCGM metrics stream to Prometheus, triggering alerts if any GPU reports uncorrectable ECC errors or if NVLink bandwidth drops below the expected baseline.
 
 ### Choosing between paradigms {#sec-fleet-orchestration-paradigm-choice}
 
@@ -864,9 +864,9 @@ class TopologyPlacement:
 
 ::: {.callout-notebook title="The topology placement impact"}
 
-The physical location of GPUs on the network switch fabric dramatically impacts collective performance. Consider an AllReduce operation across 8 GPUs: <!-- lego-ok: latencies are input assumptions -->
+The physical location of GPUs on the network switch fabric dramatically impacts collective performance. Consider an AllReduce operation across 64 GPUs: <!-- lego-ok: latencies are input assumptions -->
 
-*   **Random placement**: Spread across 8 different racks $\rightarrow$ Traffic traverses core switches $\rightarrow$ **120 ms** latency.
+*   **Random placement**: Spread across many racks $\rightarrow$ Traffic traverses core switches $\rightarrow$ **120 ms** latency.
 *   **Rack-aware**: Confined to a single rack (Top-of-Rack switch) $\rightarrow$ **85 ms**.
 *   **Rail-optimized**: Aligned to specialized "rails" (dedicated standard IB switches) $\rightarrow$ **40 ms**.
 *   **Topology-optimal**: All GPUs on the same leaf switch $\rightarrow$ **25 ms**.
@@ -938,7 +938,7 @@ The topology-awareness via **taints and tolerations**[^fn-taints-tolerations] di
 
 Consider what happens when a top-of-rack switch fails, taking out 8 GPUs from a 1,024-GPU training run. Under traditional rigid scheduling, the entire job crashes and must wait for 8 new GPUs to become available. Elastic training shatters this rigid contract, allowing the model to dynamically downscale to 1,016 GPUs and continue learning without interruption.
 
-When a node fails, the entire job must stop, synchronize all remaining workers, reload the most recent checkpoint, and restart with a new allocation that replaces the failed node. The restart overhead (checkpoint loading, optimizer state reconstruction, data pipeline warmup) wastes minutes to hours depending on model size and checkpoint storage bandwidth. During this time, all the surviving workers sit idle, waiting for the new allocation to be provisioned and the new worker to catch up. For a 1,024-GPU job where a single node (8 GPUs) fails, the remaining 1,016 GPUs are entirely unproductive during recovery.
+In the traditional non-elastic case, when a node fails, the entire job must stop, synchronize all remaining workers, reload the most recent checkpoint, and restart with a new allocation that replaces the failed node. The restart overhead (checkpoint loading, optimizer state reconstruction, data pipeline warmup) wastes minutes to hours depending on model size and checkpoint storage bandwidth. During this time, all the surviving workers sit idle, waiting for the new allocation to be provisioned and the new worker to catch up. For a 1,024-GPU job where a single node (8 GPUs) fails, the remaining 1,016 GPUs are entirely unproductive during recovery.
 
 When cluster demand fluctuates, rigid allocation creates a second category of waste. During off-peak hours, a job running on 256 GPUs cannot absorb idle resources to speed up training. During peak demand, the same job cannot release excess resources to accommodate higher-priority work without being fully preempted. The scheduler's only options are "let it keep all its resources" or "kill it entirely," with nothing in between.
 
@@ -1247,7 +1247,7 @@ plt.close()
 
 ### Spot instances and preemptible VMs {#sec-fleet-orchestration-spot-instances}
 
-Cloud providers offer **spot instances**[^fn-spot-instances-cloud] (AWS) or **preemptible VMs** (GCP) at 60 to 70 percent discounts compared to on-demand pricing, with the caveat that instances can be reclaimed with as little as 30 seconds to 2 minutes notice when the provider needs the capacity for on-demand customers. At \$`{python} FleetSetup.spot_price_str` per GPU-hour instead of \$`{python} f"{ClusterEconomicsContext.gpu_hour_cost_usd:.2f}"`, spot instances transform the economics of large-scale training, potentially reducing the cost of a multi-week pretraining run from hundreds of thousands of dollars to under one hundred thousand.
+Cloud providers offer **spot instances**[^fn-spot-instances-cloud] (AWS) or **preemptible VMs** (GCP) at 60 to 90 percent discounts compared to on-demand pricing, with the caveat that instances can be reclaimed with as little as 30 seconds to 2 minutes notice when the provider needs the capacity for on-demand customers. At \$`{python} FleetSetup.spot_price_str` per GPU-hour instead of \$`{python} f"{ClusterEconomicsContext.gpu_hour_cost_usd:.2f}"`, spot instances transform the economics of large-scale training, potentially reducing the cost of a multi-week pretraining run from hundreds of thousands of dollars to under one hundred thousand.
 
 [^fn-spot-instances-cloud]: **Spot Instances**: Named after commodity trading's "spot price" (the current market price for immediate delivery), spot instances sell spare cloud capacity at 60 to 90 percent discounts with the provider retaining reclamation rights. The critical asymmetry for ML training is the interruption notice window: AWS provides 2 minutes, GCP provides 30 seconds. A 175B-parameter model requires 3 to 5 minutes to checkpoint, so GCP's 30-second notice forces either continuous checkpointing overhead or acceptance of lost work on every interruption. \index{Spot Instances!cost optimization}
 
@@ -1767,7 +1767,7 @@ Three tiers of measurement expose this gap. Allocated capacity measures what the
 
 Attribution in a shared fleet presents a forensic challenge. A single "training" job might be a shared experiment between three teams, or a platform test run by an SRE. Without granular tagging at the job level, costs default to the "infrastructure" bucket, creating a tragedy of the commons where no one owns the bill. Kubernetes labels and Slurm accounts provide the mechanism for attribution, but the organizational discipline to apply them consistently is the harder problem. Mature organizations enforce "no tag, no schedule" policies, rejecting untagged jobs at the admission controller level.
 
-This data feeds the utilization dashboard, the cluster operator's primary instrument for fleet health. This view must synthesize per-team utilization against quotas, queue depth by priority class, and the **fragmentation index**\index{Fragmentation Index}, a measure of free GPUs that cannot be allocated due to topology constraints. Crucially, it must track the "cost of chaos": preemption rates, spot instance interruption frequencies, and the recovery overhead they induce. When these metrics are visible, they drive behavior. Our 175B training job consumes 64 GPUs for 34 days. Without proper accounting, this \$131,000 cost (64 GPUs $\times$ 816 hours $\times$ \$2.50/GPU-hour) is invisible to the team that requested it. With chargeback, the team must justify this expenditure against the model's expected business value.
+This data feeds the utilization dashboard, the cluster operator's primary instrument for fleet health. This view must synthesize per-team utilization against quotas, queue depth by priority class, and the **fragmentation index**\index{Fragmentation Index}, a measure of free GPUs that cannot be allocated due to topology constraints. Crucially, it must track the "cost of chaos": preemption rates, spot instance interruption frequencies, and the recovery overhead they induce. When these metrics are visible, they drive behavior. A 64-GPU 175B scheduling run that lasts 34 days consumes \$131,000 of capacity (64 GPUs $\times$ 816 hours $\times$ \$2.50/GPU-hour). Without proper accounting, this cost is invisible to the team that requested it. With chargeback, the team must justify this expenditure against the model's expected business value.
 
 Automated anomaly detection turns these metrics into actionable signals. A sudden spike in a team's consumption to 3$\times$ their historical norm might indicate a runaway script spawning infinite jobs. A queue that grows faster than it drains signals a capacity shortfall that auto-scaling must address. Conversely, a sudden drop in cluster-wide power consumption typically precedes a mass job failure event, often due to a shared dependency like a storage outage. These alerts allow operators to intervene before the budget is drained or the queue becomes unmanageable.
 
@@ -1793,9 +1793,9 @@ Security in multi-tenant environments extends beyond simple resource fairness. S
 
 When a high-priority job enters a saturated cluster, the scheduler must decide which running workloads to terminate to free up resources. This decision is rarely isolated. In tightly packed clusters, evicting a medium-priority job to accommodate a high-priority request often triggers a **preemption cascade**\index{Preemption Cascade}, where the evicted job immediately attempts to reschedule itself by displacing lower-priority workloads. Without dampening controls, a single urgent inference service deployment can ripple through the queue, destabilizing dozens of training jobs and forcing a storm of checkpoint reloads that saturate storage bandwidth.
 
-The engineering cost of preemption extends far beyond the scheduling latency. The **preemption tax**\index{Preemption Tax} is the sum of lost computation since the last checkpoint, the overhead of persisting state, and the cold-start penalty upon resumption. For large-scale distributed training, this tax is nonlinear. Consider our 175B parameter model training on 64 GPUs. If preempted, the job loses the work performed since the last snapshot (average 15 minutes). Upon restarting, it requires 20 minutes to reload the massive optimizer state from distributed storage and another 10 minutes of warmup time as data pipelines refill prefetch buffers, just-in-time (JIT) compilers re-optimize kernels, and GPU caches re-populate.
+The engineering cost of preemption extends far beyond the scheduling latency. The **preemption tax**\index{Preemption Tax} is the sum of lost computation since the last checkpoint, the overhead of persisting state, and the cold-start penalty upon resumption. For large-scale distributed training, this tax is nonlinear. Consider the 64-GPU run for our 175B parameter model. If preempted, the job loses the work performed since the last snapshot (average 15 minutes). Upon restarting, it requires 20 minutes to reload the massive optimizer state from distributed storage and another 10 minutes of warmup time as data pipelines refill prefetch buffers, just-in-time (JIT) compilers re-optimize kernels, and GPU caches re-populate.
 
-During this 45-minute recovery window, the GPUs are active but effectively unproductive. At \$2 per GPU-hour, a single preemption event costs \$96 in wasted compute capital. If the scheduler allows unlimited preemption, a cluster averaging 12 preemptions per day wastes 9 hours, or 37.5 percent of total capacity, on recovery overhead. To mitigate this, production systems enforce **preemption budgets**\index{Preemption Budgets}. These rate limits constrain disruption frequency, ensuring that a job cannot be preempted more than once per hour, or that total cluster preemption churn cannot exceed 5 percent of capacity in any 10-minute window. This forces the scheduler to wait for natural job completions rather than triggering a cascade, trading slightly higher pending times for significantly higher aggregate throughput.
+During this 45-minute recovery window, the GPUs are active but effectively unproductive. At \$2 per GPU-hour, a single preemption event costs \$96 in wasted compute capital. If the scheduler allows unlimited preemption, 12 preemptions per day waste 9 hours of that job's allocation, or 576 GPU-hours/day for this 64-GPU run. To mitigate this, production systems enforce **preemption budgets**\index{Preemption Budgets}. These rate limits constrain disruption frequency, ensuring that a job cannot be preempted more than once per hour, or that total cluster preemption churn cannot exceed 5 percent of capacity in any 10-minute window. This forces the scheduler to wait for natural job completions rather than triggering a cascade, trading slightly higher pending times for significantly higher aggregate throughput.
 
 ### Quota governance and organizational dynamics {#sec-fleet-orchestration-quota-governance}
 
@@ -1921,10 +1921,11 @@ fig = plt.gcf()
 # │
 # │ Goal: Quantify the annual dollar value recovered by fixing a 1,000-GPU
 # │       cluster from 60% to 84% effective utilization via policy changes.
-# │ Show: ~400 equivalent GPUs recovered; ~$7M/year in recovered value—
-# │       inline in the "Quantified Impact" paragraph after the results table.
-# │ How: recovered_gpus = cluster × (util_after − util_before) / util_before;
-# │      annual_value = recovered_gpus × $2/GPU-hr × 8,760 hr/yr.
+# │ Show: 240 fully utilized GPU-equivalents; ~400 equivalent raw GPUs
+# │       recovered at the old utilization; ~$7M/year in equivalent capacity value.
+# │ How: productive_gain = cluster × (util_after − util_before);
+# │      recovered_raw = productive_gain / util_before;
+# │      annual_value = recovered_raw × $2/GPU-hr × 8,760 hr/yr.
 # │
 # │ Imports: (uses ClusterEconomicsContext.gpu_hour_cost_usd from fleet-orchestration-setup)
 # │ Exports: debug_recovered_str, debug_annual_str
@@ -1941,14 +1942,17 @@ class DebugValueCalc:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     debug_improvement  = debug_util_after - debug_util_before
-    debug_recovered    = debug_cluster * debug_improvement/debug_util_before
+    debug_productive_gain = debug_cluster * debug_improvement
+    debug_recovered    = debug_productive_gain/debug_util_before
     debug_annual       = debug_recovered * _gpu_rate * 8760
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(debug_improvement > 0, "Utilization should improve in this scenario")
-    check(debug_recovered == 400, f"Expected 400 recovered GPUs, got {debug_recovered}")
+    check(abs(debug_productive_gain - 240) < 1e-9, f"Expected 240 productive GPUs, got {debug_productive_gain}")
+    check(abs(debug_recovered - 400) < 1e-9, f"Expected 400 recovered GPUs, got {debug_recovered}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    debug_productive_gain_str = f"{int(debug_productive_gain)}"
     debug_recovered_str = f"{int(debug_recovered)}"
     debug_annual_str    = f"{debug_annual / 1e6:.0f}"
 ```
@@ -2005,9 +2009,9 @@ The scheduler's allocation log shows A100-80 GB GPUs nearly saturated by a few r
 | **V100**         | 0 percent allocated                        | 71 percent allocated                       | +71 percent           |
 | **Cluster-wide** | **60 percent**                             | **84 percent**                             | **+40 percent**       |
 
-: **Utilization Recovery Results**\index{Utilization!recovery results}: The distinction between "allocated" and "effective" utilization captures the gang scheduling deadlock: before the fix, A100-80 GB GPUs showed high allocation in Slurm but low actual compute utilization because allocated jobs could not start. {#tbl-fleet-orchestration-debug-results}
+: **Utilization Recovery Results**\index{Utilization!recovery results}: The distinction between "allocated" and "effective" utilization captures the policy-induced utilization gap: before the fix, A100-80 GB GPUs showed high allocation in Slurm but lower actual compute utilization, while strict job templates stranded other capable hardware pools. {#tbl-fleet-orchestration-debug-results}
 
-As @tbl-fleet-orchestration-debug-results shows, this 40 percent improvement in effective cluster capacity equals approximately `{python} DebugValueCalc.debug_recovered_str` additional GPUs worth of productive work. At \$2 per GPU-hour, this represents approximately \$`{python} DebugValueCalc.debug_annual_str` million in annual recovered value, achieved through policy changes requiring zero additional hardware investment.
+As @tbl-fleet-orchestration-debug-results shows, this utilization gain adds approximately `{python} DebugValueCalc.debug_productive_gain_str` fully utilized GPUs of productive work. That is equivalent to buying `{python} DebugValueCalc.debug_recovered_str` additional raw GPUs if those GPUs ran at the old 60 percent utilization. At \$2 per GPU-hour, the equivalent raw capacity represents approximately \$`{python} DebugValueCalc.debug_annual_str` million in annual recovered value, achieved through policy changes requiring zero additional hardware investment.
 
 **The Fleet Stack lesson**: Surface-level diagnosis suggested a scheduling algorithm problem (Distribution Layer), perhaps requiring a more sophisticated scheduler like those discussed in @sec-fleet-orchestration-custom-schedulers. Management initially proposed evaluating Pollux or a custom scheduling solution, which would have required months of engineering effort and introduced operational risk. Deeper analysis revealed the root cause as a **mismatch between Infrastructure Layer heterogeneity and Distribution Layer policies designed for homogeneous infrastructure**. The scheduler algorithm was not the problem; the policies it implemented were the problem. The scheduler correctly implemented its configured policy; the policy itself created the utilization gap.
 
@@ -2017,17 +2021,17 @@ Effective debugging required examining both layers and their interaction, recogn
 
 A simple back-of-envelope calculation quantifies what that recovered capacity is actually worth.
 
-::: {.callout-notebook title="The value of a profiler"}
+::: {.callout-notebook title="The value of policy debugging"}
 
-**Problem**: A platform team manages a `{python} DebugValueCalc.debug_cluster`-GPU cluster. Initial monitoring shows 60 percent average utilization. After a week of systematic debugging (identifying stragglers, optimizing AllReduce buckets, and tuning data loaders), utilization increases to 84 percent. What is the financial value of that one week of engineering work?
+**Problem**: A platform team manages a `{python} DebugValueCalc.debug_cluster`-GPU cluster. Initial monitoring shows 60 percent average utilization. After a week of policy debugging (capability-based scheduling, topology-aware placement, backfill tuning, and workload-hardware guidance), utilization increases to 84 percent. What is the financial value of that one week of engineering work?
 
 **Math**:
 
-1. **Capacity Recovery**\index{Capacity Recovery}: (0.84 - 0.60)/0.60 = **40 percent increase in productive throughput**.
-2. **Recovered Hardware**\index{Recovered Hardware}: 40 percent of 1,000 GPUs = **`{python} DebugValueCalc.debug_recovered_str` GPUs**.
+1. **Productive Gain**\index{Productive Gain}: 1,000 GPUs $\times$ (0.84 - 0.60) = **`{python} DebugValueCalc.debug_productive_gain_str` fully utilized GPU-equivalents**.
+2. **Equivalent Raw Hardware**\index{Equivalent Raw Hardware}: `{python} DebugValueCalc.debug_productive_gain_str` GPU-equivalents $\div$ 0.60 old utilization = **`{python} DebugValueCalc.debug_recovered_str` raw GPUs**.
 3. **Annual Value**\index{Annual Value}: `{python} DebugValueCalc.debug_recovered_str` GPUs $\times$ \$2/hr $\times$ 8,760 hrs/year $\approx$ **\$`{python} DebugValueCalc.debug_annual_str` Million**.
 
-**Systems insight**: Debugging is not a "maintenance task"; it is a **Capacity Generator**. Increasing utilization from 60 percent to 84 percent has the same business impact as buying **400 new GPUs** (costing ~\$12 Million in CapEx). In the Machine Learning Fleet, performance engineering is often the most cost-effective way to scale: making existing GPUs 40 percent more productive costs less than buying 40 percent more hardware.
+**Systems insight**: Policy debugging is not a "maintenance task"; it is a **Capacity Generator**. Increasing utilization from 60 percent to 84 percent adds **`{python} DebugValueCalc.debug_productive_gain_str` fully utilized GPU-equivalents**, the same productive capacity that **`{python} DebugValueCalc.debug_recovered_str` new raw GPUs** would deliver if they ran at the old utilization (costing ~\$12 Million in CapEx). In the Machine Learning Fleet, policy and performance engineering are often the most cost-effective way to scale: making existing GPUs more productive costs less than buying more hardware.
 
 :::
 
@@ -2071,7 +2075,7 @@ Organizations commonly set team quotas to handle worst-case demand, reasoning th
 
 **Fallacy**: *Spot instances are always cheaper for training.*
 
-The 60 to 70 percent discount on spot instances creates the impression of automatic savings. The effective cost depends on interruption frequency, checkpoint overhead, and restart time. For a large model with 15-minute checkpoint times and 30-minute restart times, a spot interruption costs 45 minutes of productive time. If interruptions occur every 2 hours, the effective cost rises enough that the nominal 65 percent discount shrinks to about 52 percent savings. For 100B+ parameter models with slow checkpointing on clusters with frequent spot interruptions, on-demand instances can actually be cheaper when accounting for all overhead. The decision requires quantitative analysis of the specific workload and spot market conditions, not blanket assumptions about cost savings.
+The 60 to 90 percent discount on spot instances creates the impression of automatic savings. The effective cost depends on interruption frequency, checkpoint overhead, and restart time. For a large model with 15-minute checkpoint times and 30-minute restart times, a spot interruption costs 45 minutes of productive time. If interruptions occur every 2 hours, the effective cost rises enough that the nominal 65 percent discount shrinks to about 52 percent savings. For 100B+ parameter models with slow checkpointing on clusters with frequent spot interruptions, on-demand instances can actually be cheaper when accounting for all overhead. The decision requires quantitative analysis of the specific workload and spot market conditions, not blanket assumptions about cost savings.
 
 **Pitfall**: *Ignoring topology when scheduling distributed training.*
 
@@ -2126,7 +2130,7 @@ Mastery of fleet orchestration requires a shift from algorithm design to rigorou
 
 With the fleet built, compute nodes defined, networks connected, storage configured, fault tolerance in place, and schedulers running, the machine is ready. The infrastructure layers of the fleet stack are now complete: physical compute (@sec-compute-infrastructure), networking (@sec-network-fabrics), storage (@sec-data-storage), distributed algorithms (@sec-distributed-training-systems, @sec-collective-communication), reliability (@sec-fault-tolerance-reliability), and orchestration (this chapter). Together, these layers transform racks of individual servers into a coherent computing platform capable of training the largest models and serving them to millions of users.
 
-A training cluster, however, is only a means to an end: producing models that serve users. The transition from training infrastructure to serving infrastructure introduces entirely new challenges. Latency constraints replace throughput optimization as the primary objective. Unpredictable, bursty traffic from real users replaces the deterministic batch scheduling of training jobs. User-facing SLOs with contractual obligations replace the flexible timelines of research experiments. The autoscaling discussion in @sec-fleet-orchestration-autoscaling provided an introduction to these challenges; the next chapter examines them in depth.
+A training cluster, however, is only a means to an end: producing models that serve users. The transition from training infrastructure to deployment introduces new constraints: latency matters more, traffic becomes bursty, and user-facing SLOs replace flexible research timelines. The autoscaling discussion in @sec-fleet-orchestration-autoscaling introduced these serving constraints; the next chapter turns to performance engineering, the techniques that make allocated hardware deliver useful throughput.
 
 ::: {.callout-chapter-connection title="From orchestration to optimization"}
 

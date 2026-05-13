@@ -25,7 +25,7 @@ engine: jupyter
 
 _Why does scale transform hardware failure from rare exception to routine condition that systems must absorb continuously?_
 
-A single GPU fails perhaps once per year. A thousand GPUs experience failures daily. A ten-thousand GPU cluster sees failures every few hours. This arithmetic is inescapable: individual component reliability does not change, but aggregate system reliability degrades multiplicatively as components are added. At frontier scale, the question is not whether failures will occur during a training run but how many, and systems that cannot absorb failures without losing progress cannot operate at all. The same logic applies to serving: a globally distributed inference system experiences regional outages, network partitions, and capacity fluctuations as continuous background conditions rather than exceptional events. Fault tolerance at scale is not about preventing failures, because prevention is impossible. It is about designing systems where failures are expected, detected, isolated, and recovered from automatically, allowing useful work to continue despite the constant churn of components entering and leaving operational status.
+A single GPU can run for years between hardware failures. A thousand GPUs turn that same component risk into failures every couple of days. A ten-thousand-GPU cluster sees failures every few hours once host, power, and network domains are included. This arithmetic is inescapable: individual component reliability does not change, but aggregate system reliability degrades multiplicatively as components are added. At frontier scale, the question is not whether failures will occur during a training run but how many, and systems that cannot absorb failures without losing progress cannot operate at all. The same logic applies to serving: a globally distributed inference system experiences regional outages, network partitions, and capacity fluctuations as continuous background conditions rather than exceptional events. Fault tolerance at scale is not about preventing failures, because prevention is impossible. It is about designing systems where failures are expected, detected, isolated, and recovered from automatically, allowing useful work to continue despite the constant churn of components entering and leaving operational status.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -131,7 +131,7 @@ Imagine a 10,000-GPU cluster midway through a three-month training run for a new
 
 The distributed training systems examined in @sec-distributed-training-systems achieve massive throughput by coordinating thousands of devices, and the collective communication patterns from @sec-collective-communication—AllReduce, AllGather, AllToAll—sustain that coordination through rigidly synchronized exchanges. However, this tight synchronization creates fragility: a failure in any single device can stall the entire fleet. This chapter builds the resilience layer necessary to keep that fleet running.
 
-The transition from small-scale experimentation to large-scale production changes the relationship between systems and failures. A researcher training a model on a single GPU might experience hardware failure once per year. That same researcher scaling to a 1,000 GPU cluster will experience failures multiple times per day. This shift from rare exception to routine occurrence demands different engineering approaches. The mathematical analysis that follows makes this transition precise and quantitative.
+The transition from small-scale experimentation to large-scale production changes the relationship between systems and failures. A researcher training a model on a single GPU can go years without a hardware failure. That same workload on a 1,000-GPU cluster sees GPU-only failures every couple of days, and a production cluster fails more often once PCIe, power, storage, and network domains enter the failure budget. This shift from rare exception to routine occurrence demands different engineering approaches. The mathematical analysis that follows makes this transition precise and quantitative.
 
 Understanding failure at scale requires abandoning the mindset that treats failures as bugs to be fixed. Individual component failures cannot be eliminated; they can only be managed. Memory errors, network partitions, storage corruption, and software crashes will occur with statistical regularity that increases predictably with system size. The engineering challenge is not to prevent these failures but to build systems that continue making progress despite them.
 
@@ -143,9 +143,9 @@ The techniques developed in this chapter draw from decades of distributed system
 
 System reliability engineering provides the foundational framework for understanding failure at scale [@birolini2017]. Individual components exhibit failure rates characterized by the failure rate parameter $\lambda$,[^fn-failure-rate-fits] measured in failures per unit time. For a single component with constant failure rate $\lambda$, the probability of surviving without failure until time $t$ follows an exponential distribution[^fn-poisson-failure]:
 
-[^fn-poisson-failure]: **Poisson Process**: A statistical model for events occurring independently at a constant average rate. Reliability models assume hardware failures follow a Poisson distribution, leading to the exponential survival function $R(t) = e^{-\lambda t}$. This assumption simplifies fleet planning: the probability of at least one failure in a 10,000-node cluster is $1 - e^{-N \lambda t}$, making failure risk scale linearly with $N$ but exponentially with $t$. \index{Poisson Process!failure modeling}
+[^fn-poisson-failure]: **Poisson Process**: A statistical model for events occurring independently at a constant average rate. Reliability models assume hardware failures follow a Poisson distribution, leading to the exponential survival function $R(t) = e^{-\lambda t}$. This assumption simplifies fleet planning: the probability of at least one failure in a 10,000-component cluster is $1 - e^{-N \lambda t}$, making failure risk scale linearly with $N$ but exponentially with $t$. \index{Poisson Process!failure modeling}
 
-[^fn-failure-rate-fits]: **Failure Rate ($\lambda$)**: Expressed in FITs (Failures In Time), where 1 FIT equals one failure per billion device-hours. A data center GPU with 50,000-hour MTBF has $\lambda = 20,000$ FITs, which seems negligible for one device but becomes dominant at fleet scale: a 10,000-GPU cluster accumulates 200,000,000 FITs, translating to an expected failure every 5 hours. \index{Failure Rate!FITs}
+[^fn-failure-rate-fits]: **Failure Rate ($\lambda$)**: Expressed in FITs (Failures In Time), where 1 FIT equals one failure per billion device-hours. A data center GPU with 50,000-hour MTBF has $\lambda = 20,000$ FITs, which seems negligible for one device but becomes dominant at fleet scale: a 10,000-GPU cluster accumulates 200,000,000 FITs from GPUs alone, translating to an expected GPU failure every 5 hours. \index{Failure Rate!FITs}
 
 $$ R_{\text{single}}(t) = e^{-\lambda t} $$ {#eq-single-component-reliability}
 
@@ -306,7 +306,7 @@ The linear relationship between component count and failure rate has a direct im
 
 ::: {.callout-perspective title="Scale transforms failure"}
 
-A single GPU with MTBF of 50,000 hours (5.7 years) fails rarely enough that manual intervention suffices. A 10,000 GPU cluster with the same per-GPU reliability has system MTBF of 5 hours. Failures occur continuously, multiple times per day. Systems must be designed expecting failure, not hoping to avoid it.
+A single GPU with MTBF of 50,000 hours (5.7 years) fails rarely enough that manual intervention suffices. A 10,000-GPU cluster with the same per-GPU reliability has GPU-only system MTBF of 5 hours. Failures occur continuously, multiple times per day. Systems must be designed expecting failure, not hoping to avoid it.
 
 :::
 
@@ -375,7 +375,7 @@ $$ \text{MTBF}_{\text{cluster}} = \frac{1}{0.2708} = 3.69 \text{ hours} $$
 
 This result means the cluster experiences a failure approximately every 3.7 hours on average. Over a 24-hour period, the expected number of failures is 6.5. A training run lasting one week will experience approximately forty-five failures. Any training system operating at this scale must treat failure as a continuous condition, not an exceptional event.
 
-@tbl-cluster-mtbf-scaling generalizes this analysis across cluster sizes, demonstrating the mathematical inevitability of frequent failures at scale.
+@tbl-cluster-mtbf-scaling isolates the GPU-only baseline across cluster sizes. The full-system calculation above is lower once PCIe, power, and network failure domains are included.
 
 | **Cluster Size (GPUs)** | **Individual GPU MTBF** |     **Cluster MTBF** | **Expected Failures per Day** |
 |:------------------------|------------------------:|---------------------:|------------------------------:|
@@ -387,7 +387,7 @@ This result means the cluster experiences a failure approximately every 3.7 hour
 | 10,000                  |              50,000 hrs |                5 hrs |                           4.8 |
 | 25,000                  |              50,000 hrs |                2 hrs |                          12.0 |
 
-: **Cluster MTBF Scaling**\index{Cluster!mtbf scaling}: System-level mean time between failures decreases linearly with cluster size, transforming failures from rare events to continuous operating conditions at scale. A training cluster sized for modern large language model (LLM) development (10,000+ GPUs) experiences multiple failures daily. {#tbl-cluster-mtbf-scaling}
+: **Cluster MTBF Scaling**\index{Cluster!mtbf scaling}: GPU-only mean time between failures decreases linearly with cluster size, transforming failures from rare events to continuous operating conditions at scale. Additional host, power, storage, and network failure domains reduce system-level MTBF further. {#tbl-cluster-mtbf-scaling}
 
 The theoretical $1/N$ scaling in @tbl-cluster-mtbf-scaling is not merely a textbook exercise. @fig-published-failure-rates overlays published empirical measurements from Meta's production clusters against the theoretical curve, confirming that the mathematics accurately predict real-world failure rates. The @kokolis2025 study of Meta's Research SuperCluster measured MTTF values from 8-GPU allocations through 16,384-GPU jobs, and Meta's Llama 3 training report independently documented 419 failures across 54 days on 16,384 H100 GPUs. Both datasets converge on the same conclusion: at 16,384 GPUs, the cluster experiences a failure every 2 to 3 hours. This empirical validation transforms the theoretical argument from an abstract scaling law into a measured engineering constraint that determines checkpoint frequency, recovery architecture, and infrastructure investment.
 
@@ -747,17 +747,17 @@ The three phases in @fig-bathtub-curve have direct operational consequences: bur
 
 While the mathematics of failure rates apply universally, the cost of failure differs dramatically across model types. The impact of losing an hour of training depends on what that training costs, how much state must be recovered, and how long recovery takes. @tbl-failure-impact-by-model quantifies these factors across model architectures, revealing orders-of-magnitude variation from LLMs incurring millions of dollars in wasted compute to vision models losing modest amounts of progress.
 
-| **Model Type**                  | **Typical Training Duration** | **Checkpoint Size** | **State Sensitivity**           | **Failure Cost**             |
-|:--------------------------------|:------------------------------|--------------------:|:--------------------------------|:-----------------------------|
-| **Archetype A (GPT-4/Llama-3)** | 2–4 weeks                     |          350–700 GB | High (position in curriculum)   | \$2–5M compute per 24hr loss |
-| **Vision (ViT-Large)**          | 1–3 days                      |              1–2 GB | Medium (augmentation state)     | \$10–50K per day loss        |
-| **Archetype B (DLRM at Scale)** | Continuous                    | 2–4 TB (embeddings) | Very High (embedding freshness) | Revenue impact per hour      |
-| **Speech (Whisper-scale)**      | 3–7 days                      |             5–10 GB | Medium                          | \$50–200K per day loss       |
-| **Scientific (AlphaFold)**      | Days to weeks                 |            10–50 GB | High (exploration state)        | Research delay               |
+| **Model Type**                        | **Typical Training Duration** | **Checkpoint Size** | **State Sensitivity**           | **Failure Cost**             |
+|:--------------------------------------|:------------------------------|--------------------:|:--------------------------------|:-----------------------------|
+| **Archetype A (70B-class dense LLM)** | 2–4 weeks                     |          350–700 GB | High (position in curriculum)   | \$2–5M compute per 24hr loss |
+| **Vision (ViT-Large)**                | 1–3 days                      |              1–2 GB | Medium (augmentation state)     | \$10–50K per day loss        |
+| **Archetype B (DLRM at Scale)**       | Continuous                    | 2–4 TB (embeddings) | Very High (embedding freshness) | Revenue impact per hour      |
+| **Speech (Whisper-scale)**            | 3–7 days                      |             5–10 GB | Medium                          | \$50–200K per day loss       |
+| **Scientific (AlphaFold)**            | Days to weeks                 |            10–50 GB | High (exploration state)        | Research delay               |
 
 : **Failure Impact by Model Type**\index{Failure Impact by Model Type}: The cost of training failures varies dramatically by model type, driven by training duration, checkpoint overhead, and the value of accumulated training state. These differences demand model-specific fault tolerance strategies. {#tbl-failure-impact-by-model}
 
-Large Language Models experience the highest absolute failure costs due to their extended training durations and the computational expense of each training hour. A GPT-4 scale training run consuming 25,000 GPUs at approximately \$2 per GPU-hour incurs \$1.2M in compute costs per day. A failure that loses 24 hours of training progress costs \$1.2M in wasted compute plus schedule delay. The checkpoint overhead for models with hundreds of billions of parameters can itself become significant, with 700 GB checkpoints requiring several minutes to write even with fast distributed storage.
+Large Language Models experience the highest absolute failure costs due to their extended training durations and the computational expense of each training hour. A frontier-scale training run consuming 25,000 GPUs at approximately \$2 per GPU-hour incurs \$1.2M in compute costs per day. A failure that loses 24 hours of training progress costs \$1.2M in wasted compute plus schedule delay. The checkpoint overhead spans a wide range: 70B-class dense LLM checkpoints can reach hundreds of gigabytes, and the 175B-parameter running example used later in this chapter reaches `{python} FaultToleranceSetup.gpt3_ckpt_tb` TB once FP32 Adam optimizer state is included.
 
 Recommendation Systems present unique challenges because their training is often continuous rather than episodic. The value of a RecSys model derives partly from its freshness. Embeddings that capture recent user behavior outperform stale embeddings. A failure that loses hours of embedding updates may degrade recommendation quality in ways that directly impact revenue. Meta has documented that recommendation model freshness directly correlates with engagement metrics, making recovery time a business-critical metric.[^fn-recsys-freshness-cost]
 
@@ -1731,7 +1731,7 @@ class SDCCollective:
 
 ::: {.callout-notebook title="Napkin math: The SDC certainty"}
 
-**Problem**: Calculate the probability that at least one GPU in a 100,000-node cluster experiences a silent ALU error during a single 2-second training step.
+**Problem**: Calculate the probability that at least one GPU in a 100,000-GPU fleet experiences a silent ALU error during a single 2-second training step.
 
 1. **Fleet Size**\index{Fleet Size}: 100,000 accelerators.
 2. **Individual Risk**\index{Individual Risk}: $10^{-6}$ per hour (a conservative estimate for SDC).
@@ -2057,7 +2057,7 @@ plt.close()
 
 The U-shaped cost curve in @fig-young-daly visualizes this trade-off: checkpoint overhead decreases as intervals lengthen, while rework cost from failures increases linearly. The optimal point minimizes their sum.
 
-For our 10,000 GPU cluster with calculated system MTBF of 3.69 hours (from @sec-fault-tolerance-reliability-reliability-worked-example-cluster-mtbf-calculation-9255) and checkpoint time of 21 seconds (from `{python} FaultToleranceSetup.gpt3_ckpt_tb` TB checkpoint at 100 GB/s), the Young-Daly formula computes the optimal interval.
+For our 10,000-GPU cluster with calculated system MTBF of 3.69 hours (from @sec-fault-tolerance-reliability-reliability-worked-example-cluster-mtbf-calculation-9255) and checkpoint time of 21 seconds (from `{python} FaultToleranceSetup.gpt3_ckpt_tb` TB checkpoint at 100 GB/s), the Young-Daly formula computes the optimal interval.
 
 ```{python}
 #| label: young-daly-optimal-interval
@@ -2158,7 +2158,7 @@ where $T_{\text{pause}}$ represents any training pause beyond the checkpoint wri
 
 #### The "stop-the-world" cost {#sec-fault-tolerance-reliability-stoptheworld-cost-beaa}
 
-The financial impact of synchronous checkpointing at scale is severe. Consider a 10,000 GPU cluster training a frontier model.
+The financial impact of synchronous checkpointing at scale is severe. Consider a 10,000-GPU cluster training a frontier model.
 *   **Idle Resource**\index{Idle Resource}: 10,000 H100 GPUs.
 *   **Pause Duration**\index{Pause Duration}: 2 minutes (typical for multi-TB checkpoints on shared storage).
 *   **Wasted Compute**\index{Wasted Compute}: $10,000 \times \frac{2}{60} \approx 333$ GPU-hours.
@@ -2168,14 +2168,14 @@ If checkpoints occur hourly, the system wastes **\$24,000 per day** waiting for 
 
 @tbl-checkpoint-overhead-by-model reveals how checkpoint characteristics vary dramatically by model architecture: larger models require longer write times but also benefit from correspondingly longer optimal intervals.
 
-| **Model Type**                  | **Checkpoint Size** | **Write Time (100 GB/s)** | **Optimal Interval (5hr MTBF)** | **Overhead** |
-|:--------------------------------|--------------------:|--------------------------:|--------------------------------:|-------------:|
-| **Archetype A (GPT-4/Llama-3)** |              2.1 TB |                      21 s |                        14.5 min |  2.4 percent |
-| **GPT-3.5 (20B)**               |              240 GB |                     2.4 s |                         4.6 min |  0.9 percent |
-| **BERT-Large**                  |              1.3 GB |                   0.013 s |                            22 s | 0.06 percent |
-| **Archetype B (DLRM at Scale)** |                4 TB |                      40 s |                          20 min |  3.3 percent |
-| **ResNet-50**\index{ResNet-50}  |              100 MB |                   0.001 s |                             6 s | 0.02 percent |
-| **ViT-Large**                   |              1.2 GB |                   0.012 s |                            21 s | 0.06 percent |
+| **Model Type**                   | **Checkpoint Size** | **Write Time (100 GB/s)** | **Optimal Interval (5hr GPU-only MTBF)** | **Overhead** |
+|:---------------------------------|--------------------:|--------------------------:|-----------------------------------------:|-------------:|
+| **Archetype A (175B dense LLM)** |              2.1 TB |                      21 s |                                 14.5 min |  2.4 percent |
+| **GPT-3.5 (20B)**                |              240 GB |                     2.4 s |                                  4.6 min |  0.9 percent |
+| **BERT-Large**                   |              1.3 GB |                   0.013 s |                                     22 s | 0.06 percent |
+| **Archetype B (DLRM at Scale)**  |                4 TB |                      40 s |                                   20 min |  3.3 percent |
+| **ResNet-50**\index{ResNet-50}   |              100 MB |                   0.001 s |                                      6 s | 0.02 percent |
+| **ViT-Large**                    |              1.2 GB |                   0.012 s |                                     21 s | 0.06 percent |
 
 : **Checkpoint Overhead by Model Type**: Larger models with correspondingly larger checkpoints require longer save times but also benefit from longer optimal checkpoint intervals. The percentage overhead remains manageable (under 5 percent) for most configurations. {#tbl-checkpoint-overhead-by-model}
 
@@ -2183,7 +2183,7 @@ While the theoretical overhead of checkpointing appears manageable for individua
 
 ::: {.callout-war-story title="The checkpoint storm"}
 
-Imagine 10,000 GPUs, each holding a 10 GB shard of the model state, simultaneously opening connections to the parallel file system to save their checkpoints. The network fabric is instantly flooded with 100 terabytes of data, causing switch buffers to overflow and storage controllers to lock up. This "checkpoint storm" occurs when massive parallel writes overwhelm the cluster's I/O infrastructure.
+For the 2.1 TB Archetype A checkpoint above, 1,000 workers would each write roughly 2.1 GB of state. The same mechanism becomes catastrophic in embedding-heavy recommendation or trillion-parameter mixture-of-experts jobs. Imagine 10,000 GPUs, each holding a 10 GB shard of model or embedding state, simultaneously opening connections to the parallel file system to save their checkpoints. The network fabric is instantly flooded with 100 TB of data, causing switch buffers to overflow and storage controllers to lock up. This "checkpoint storm" occurs when massive parallel writes overwhelm the cluster's I/O infrastructure.
 
 :::
 
@@ -2505,7 +2505,7 @@ Consider our 175B parameter model training on 1,000 GPUs. The checkpoint size is
 
 **Total**\index{Total}: $T_{\text{recovery}} = T_{\text{detect}} + T_{\text{restart}} + T_{\text{load}} + T_{\text{warmup}} \approx$ **`{python} RecoveryBudget.t_total_str`** minutes per failure event.
 
-**Impact at scale**\index{Impact at Scale}: With a 1,000-GPU cluster MTBF of 50 hours (from @tbl-cluster-mtbf-scaling), we experience about 0.48 failures per day, losing about 3 minutes daily—a modest 0.2 percent overhead. However, at 10,000 GPUs with MTBF of 5 hours, we experience about 4.8 failures per day, losing about 31 minutes daily—a 2.1 percent overhead equivalent to wasting roughly 5,000 GPU-hours every day (31 min $\times$ 10,000 GPUs ÷ 60). This is why recovery time optimization matters more as clusters grow.
+**Impact at scale**\index{Impact at Scale}: With the GPU-only baseline from @tbl-cluster-mtbf-scaling, a 1,000-GPU cluster has MTBF of 50 hours and experiences about 0.48 failures per day, losing about 3 minutes daily—a modest 0.2 percent overhead. However, a 10,000-GPU cluster has GPU-only MTBF of 5 hours and experiences about 4.8 failures per day, losing about 31 minutes daily—a 2.1 percent overhead equivalent to wasting roughly 5,000 GPU-hours every day (31 min $\times$ 10,000 GPUs ÷ 60). This is why recovery time optimization matters more as clusters grow.
 
 :::
 
@@ -2925,7 +2925,7 @@ When full redundancy fails—such as when an edge device loses connectivity, or 
 
 ***Graceful Degradation***\index{Graceful Degradation!definition} is a fault tolerance strategy in which a system responds to resource exhaustion or component failure by deliberately reducing service quality—falling back to a smaller model, serving cached results, or returning partial outputs—rather than failing completely, maintaining measurable availability at reduced capability.
 
-1.  **Significance (quantitative)**: Graceful degradation converts total outage risk into a controlled quality reduction. A recommendation system that falls back from a 7B-parameter ranker to a collaborative-filtering model on GPU failure may reduce click-through rate by 8–15 percent but maintains 100 percent request availability vs. 0 percent during a hard failure. At \$1M/day in revenue dependent on recommendations, an 8 percent CTR reduction (\$80K/day degraded) is sharply preferable to a 10-minute outage (\$7K/minute lost).
+1.  **Significance (quantitative)**: Graceful degradation converts total outage risk into a controlled quality reduction. A recommendation system that falls back from a 7B-parameter ranker to a collaborative-filtering model on GPU failure may reduce click-through rate by 8–15 percent but maintains 100 percent request availability vs. 0 percent during a hard failure. At \$1M/day in revenue dependent on recommendations, an 8 percent CTR reduction sustained for 10 minutes costs about \$560, while a 10-minute hard outage costs about \$7K total.
 2.  **Distinction (durable)**: Unlike complete system failure (where the service returns errors to all requests), graceful degradation provides a managed transition through a predefined capability hierarchy—each fallback level has known accuracy, latency, and resource characteristics that allow the system to continue satisfying SLOs at reduced quality.
 3.  **Common pitfall**: A frequent misconception is that degradation is automatic in well-designed systems. Graceful degradation requires explicit preengineering: fallback models must be preloaded or precomputed, switchover logic must detect the failure condition and trigger the transition without human intervention, and each degradation level must have been validated to actually satisfy its reduced SLO before it is needed in production.
 
@@ -3291,7 +3291,7 @@ The following case studies show how failure detection, state preservation, and o
 
 ## Case Studies {#sec-fault-tolerance-reliability-reliability-case-studies-927f}
 
-The case studies that follow draw on published Meta OPT-175B training logbooks, Google TPU operational disclosures, Netflix engineering blog posts, and Microsoft DeepSpeed documentation. Specific operational numbers (failure counts, MFU achieved, MTTR figures, overhead percentages) reflect what those public sources have reported; treat them as representative magnitudes for the engineering pattern rather than precision benchmarks reproducible from this prose alone. Production deployments illustrate how leading organizations implement fault tolerance in ML systems, threading the principles developed throughout this chapter. Meta's OPT-175B training run on a 992-GPU cluster provides a well-documented study in handling dozens of hardware failures per week without aborting the run.
+The case studies that follow draw on published Meta OPT-175B training logbooks, Google TPU operational disclosures, Netflix engineering blog posts, and Microsoft DeepSpeed documentation. Specific operational numbers (failure counts, MFU achieved, MTTR figures, overhead percentages) reflect what those public sources have reported; treat them as representative magnitudes for the engineering pattern rather than precision benchmarks reproducible from this prose alone. Production deployments illustrate how leading organizations implement fault tolerance in ML systems, threading the principles developed throughout this chapter. Meta's OPT-175B training run on a 992-GPU cluster provides a well-documented study in handling dozens of hardware failures over the run without aborting training.
 
 ### Large-scale LLM training at Meta {#sec-fault-tolerance-reliability-reliability-largescale-llm-training-fault-tolerance-f4aa}
 
@@ -3323,7 +3323,7 @@ Microsoft's DeepSpeed library illustrates how fault tolerance must be architecte
 
 To mitigate this, DeepSpeed introduced a "redundant parameter server" concept within the ZeRO protocol. While the compute is sharded, critical optimizer states are periodically replicated or checkpointed to CPU memory or NVMe storage in a way that allows for "elastic" recovery. When a node failure is detected---typically via a rapid heartbeat mechanism with less than 2 percent computational overhead---the framework pauses. Instead of aborting, it triggers an elastic resizing event. The system queries the resource manager for a replacement node. If one is found, the missing state shards are reconstructed from the NVMe offload buffer. If no replacement is available, the framework automatically redistributes the state shards among the remaining $N-1$ nodes and adjusts the gradient accumulation steps to maintain the original effective global batch size, ensuring mathematical consistency is preserved.
 
-This elasticity is automated and transparent to the data scientist. Quantitative benchmarks show that the overhead of these fault tolerance features is minimal: the continuous heartbeat monitoring consumes less than 2 percent of GPU cycles, and the elastic checkpointing adds less than 5 percent overhead compared to unprotected training. In practice, this allows DeepSpeed jobs to run on low-priority "spot" instances in the cloud, where preemption is common. A job running on 100 GPUs can lose 10 nodes and continue training on 90 with only a momentary pause for state redistribution, rather than a full crash-and-restart cycle. Building elasticity into the memory management layer shifts resilience from the user's application code into the framework layer, reducing the need for bespoke recovery engineering and making large-model training feasible on unreliable commodity infrastructure.
+This elasticity is automated and transparent to the data scientist. Quantitative benchmarks show that the overhead of these fault tolerance features is minimal: the continuous heartbeat monitoring consumes less than 2 percent of GPU cycles, and the elastic checkpointing adds less than 5 percent overhead compared to unprotected training. In practice, this allows DeepSpeed jobs to run on low-priority "spot" instances in the cloud, where preemption is common. A job running on 100 GPUs can lose 10 GPUs and continue training on 90 GPUs with only a momentary pause for state redistribution, rather than a full crash-and-restart cycle. Building elasticity into the memory management layer shifts resilience from the user's application code into the framework layer, reducing the need for bespoke recovery engineering and making large-model training feasible on unreliable commodity infrastructure.
 
 ### Synthesis: Common themes {#sec-fault-tolerance-reliability-reliability-synthesis}
 
@@ -3364,7 +3364,7 @@ The reliability equation $\text{MTBF}_{\text{system}} = \text{MTBF}_{\text{compo
 - **Shared software**\index{Shared Software}: Bug triggered by specific input fails all replicas simultaneously
 - **Thermal correlation**\index{Thermal Correlation}: Cooling failure causes clustered GPU throttling
 
-Correlated failures reduce effective MTBF below the independent-failure calculation, sometimes dramatically. A cluster with 1000 "independent" GPUs each with 10,000-hour MTBF should have system MTBF of 10 hours. If failures correlate with factor 10 (10 GPUs fail together on average), effective MTBF drops to 1 hour.
+Correlated failures change two quantities that the simple MTBF equation hides: incident frequency and blast radius. A cluster with 1000 independent GPUs each with 10,000-hour MTBF has a first-GPU-failure MTBF of 10 hours. If a shared power, cooling, or software hazard adds an incident rate 10 times larger than that independent first-failure rate, the effective incident MTBF drops to about 1 hour. Separately, a correlated incident may take out 10 GPUs at once, increasing recovery cost even if the independent GPU failure rate itself has not changed.
 
 Reliability engineering must identify and mitigate correlation through diversity: different power feeds, different network paths, different software versions in canary deployments.
 
@@ -3426,7 +3426,7 @@ Recognizing these fallacies prevents engineers from optimizing for the wrong fai
 
 Fault tolerance transforms the statistical certainty of hardware failure from a project-ending catastrophe into a manageable operational routine. The mathematics are unforgiving: individual component reliability compounds multiplicatively across thousands of devices, driving system-level MTBF from years down to hours. At frontier scale, failure is not an exceptional event to be debugged but a continuous background condition that systems must absorb without losing forward progress. The engineering challenge, therefore, is not to prevent failures but to build systems where recovery is automatic, fast, and invisible to the training or serving workload.
 
-Checkpointing provides the foundational mechanism for preserving training progress across failures. Synchronous checkpointing offers simplicity but imposes I/O overhead that scales with model size, while asynchronous approaches overlap checkpoint writes with computation at the cost of additional consistency complexity. The Young-Daly formula, $\tau_{\text{opt}} = \sqrt{2 \times T_{\text{write}} \times \text{MTBF}}$, gives engineers a principled way to balance checkpoint frequency against overhead, typically yielding intervals of 20 to 30 minutes for large clusters. Beyond basic checkpointing, elastic training breaks the rigid assumption that worker count must remain fixed: when nodes fail, the system redistributes data and model shards across the surviving workers, adjusts batch size and learning rate, and resumes training with reduced throughput rather than halting entirely.
+Checkpointing provides the foundational mechanism for preserving training progress across failures. Synchronous checkpointing offers simplicity but imposes I/O overhead that scales with model size, while asynchronous approaches overlap checkpoint writes with computation at the cost of additional consistency complexity. The Young-Daly formula, $\tau_{\text{opt}} = \sqrt{2 \times T_{\text{write}} \times \text{MTBF}}$, gives engineers a principled way to balance checkpoint frequency against overhead; depending on checkpoint size and cluster MTBF, the optimum can range from seconds for small models to tens of minutes for frontier-scale jobs. Beyond basic checkpointing, elastic training breaks the rigid assumption that worker count must remain fixed: when nodes fail, the system redistributes data and model shards across the surviving workers, adjusts batch size and learning rate, and resumes training with reduced throughput rather than halting entirely.
 
 Serving fault tolerance presents a fundamentally different challenge from training. Training tolerates minutes of recovery latency and benefits from SGD's mathematical tolerance of approximate restarts, while serving demands millisecond-level responsiveness and must preserve per-session state such as KV caches and conversation histories. Stateless serving achieves fault tolerance through straightforward replica redundancy and load balancing, but stateful serving for LLMs requires active state replication, session-affine routing, and graceful degradation hierarchies that fall back to lighter models when primary systems are unavailable. The case studies examined in this chapter, from Meta's OPT-175B training through over 35 hardware failures to Netflix's chaos engineering for ML serving, demonstrate that these principles are not theoretical but operational necessities at production scale.
 
@@ -3434,7 +3434,7 @@ Serving fault tolerance presents a fundamentally different challenge from traini
 
 * **Scale guarantees failure**\index{Scale Guarantees Failure}: A 10,000-GPU cluster will encounter hardware failures every few hours; software must treat failure as a normal state.
 * **Checkpointing is the baseline**: Synchronous checkpointing is simple but incurs high overhead; asynchronous approaches hide I/O latency at the cost of consistency complexity.
-* **The Young-Daly formula governs checkpoint intervals**: The optimal checkpoint interval $\tau_{\text{opt}} = \sqrt{2 \times T_{\text{write}} \times \text{MTBF}}$ balances the cost of saving state against the cost of lost work, typically yielding intervals of 20 to 30 minutes for large-scale training clusters.
+* **The Young-Daly formula governs checkpoint intervals**: The optimal checkpoint interval $\tau_{\text{opt}} = \sqrt{2 \times T_{\text{write}} \times \text{MTBF}}$ balances the cost of saving state against the cost of lost work, often landing in the tens-of-minutes range for frontier-scale training while remaining much shorter for small checkpoints.
 * **Elasticity enables persistence**\index{Elasticity Enables Persistence}: Designing training jobs to be "elastic" (reconfiguring around lost or added nodes, as @fig-elastic-flow illustrates) is superior to simple restart-from-scratch strategies.
 * **Stateful serving is the frontier**\index{Stateful Serving Is the Frontier}: For LLMs, the KV cache represents a massive serving state that must be replicated or migrated to prevent high-latency session restarts, with strategies illustrated in @fig-serving-redundancy.
 * **Training and serving require different strategies**: Training fault tolerance is checkpoint-centric and tolerates minutes of recovery, while serving fault tolerance is state-migration-centric and demands sub-second failover.

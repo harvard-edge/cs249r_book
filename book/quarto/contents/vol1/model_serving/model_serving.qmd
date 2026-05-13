@@ -1703,7 +1703,7 @@ class DlrmLatencyCalc:
 
 **The scenario**: Serving a Deep Learning Recommendation Model (DLRM\index{DLRM!I/O-bound serving}) with a 10 ms P99 latency budget.
 
-**The contrast**: While ResNet-50 serving is limited by convolutional neural network (CNN) math, DLRM serving is strictly limited by I/O and memory capacity.
+**The contrast**: While ResNet-50's model stage is dominated by convolutional neural network (CNN) compute, DLRM's dominant model-stage cost is embedding-table memory access. End-to-end serving bottlenecks still require measuring the full path: preprocessing, inference, postprocessing, and data movement.
 
 ::: {tbl-colwidths="[28,28,22,22]"}
 
@@ -1718,7 +1718,7 @@ class DlrmLatencyCalc:
 :::
 
 **Key Systems Insight**:
-In DLRM, the "Inference" multilayer perceptron (MLP) stage is only ~15 percent of the latency. The majority of time is spent in embedding lookups, retrieving massive 128-dim vectors from terabyte-scale tables. This is an IO-bound workload where adding more GPUs does not help unless memory bandwidth and capacity also increase.
+In DLRM, the "Inference" multilayer perceptron (MLP) stage is only ~15 percent of the latency. The majority of time is spent in embedding lookups, retrieving massive 128-dim vectors from terabyte-scale tables. This is a memory-bandwidth and capacity-bound workload where adding more compute does not help unless the embedding tables can be served faster.
 
 :::
 
@@ -3349,7 +3349,8 @@ class PracticalConfigCalc:
 - Maximum batch size: `{python} PracticalConfigCalc.pc_mem_limit_batch_str` (memory limit)
 - Configuration: $T$ = `{python} PracticalConfigCalc.pc_config_window_ms_str` ms, $b_{\text{max}}$ = `{python} PracticalConfigCalc.pc_config_batch_str`
 - Predicted p99 latency: `{python} PracticalConfigCalc.pc_predicted_p99_ms_str` ms (within SLO)
-- Predicted throughput: `{python} PracticalConfigCalc.pc_predicted_throughput_str` img/s
+- Predicted peak capacity: `{python} PracticalConfigCalc.pc_predicted_throughput_str` img/s
+- Served throughput at stated traffic: `{python} PracticalConfigCalc.pc_qps_str` img/s (arrival-limited; batch-32 cap handles bursts)
 
 ### Continuous batching {#sec-model-serving-continuous-batching-8bb6}
 
@@ -3413,7 +3414,7 @@ $$E[\text{batch size}] = \lambda \cdot T$$ {#eq-poisson-batch}
 
 [^fn-poisson-serving]: **Poisson Process**: Named after French mathematician Simeon Denis Poisson (1781--1840), this stochastic model describes events occurring continuously and independently at a constant average rate. The key property for serving: variance equals the mean, so batch sizes fluctuate significantly at moderate traffic---with $\lambda=200$ req/s and a 10 ms window, expected batch size is two but roughly 14 percent of windows will be empty (wasted GPU cycles). This variance is why batching windows must be tuned probabilistically rather than set from average traffic alone.
 
-The variance equals the mean (a property of Poisson distributions), so batch sizes fluctuate significantly at moderate traffic. With $\lambda = 200$ requests/second and $T = 10$ ms, expected batch size is two, but 16 percent of windows will have zero requests (wasted compute cycles) while others may have four or more.
+The variance equals the mean (a property of Poisson distributions), so batch sizes fluctuate significantly at moderate traffic. With $\lambda = 200$ requests/second and $T = 10$ ms, expected batch size is two, but roughly 14 percent of windows will have zero requests (wasted compute cycles) while others may have four or more.
 
 A useful heuristic for the batching window balances waiting cost against throughput benefit. @eq-optimal-window expresses one such rule:
 $$T_{\text{window}} \approx \min\left(L_{\text{lat,SLO}} - S, \sqrt{\frac{S}{\lambda}}\right)$$ {#eq-optimal-window}
@@ -3556,7 +3557,7 @@ class MobileServingCalc:
 
 - **Energy per inference**: 3.0 mJ enables ~12 million inferences per 10 Wh battery (typical smartphone)
 - **Thermal budget**: At 3.0 mJ/45 ms = 67 mW sustained, indefinite operation without throttling
-- **NPU vs. CPU trade-off**: CPU fallback uses 4.2 mJ (1.4$\times$ energy) at 85 ms (1.9$\times$ latency)
+- **NPU vs. CPU trade-off**: CPU fallback replaces the 12 ms, 0.8 mJ NPU inference stage with a 45 ms, 4.2 mJ CPU stage; the full pipeline would rise from 45 ms and 3.0 mJ to about 78 ms and 6.4 mJ before additional system overhead.
 - **Memory footprint**: 150 MB peak (model + activations), competing with app memory
 
 **Critical insight**: Even at batch size one, the mobile NPU achieves 82 percent utilization because its compute capacity matches single-image workloads. This differs from data center GPUs, which achieve only 15 percent utilization at batch size one because their massive parallelism requires larger batches to saturate.
@@ -3567,7 +3568,7 @@ class MobileServingCalc:
 
 Unlike cloud serving where cost dominates, mobile serving faces three related constraints that shape optimization strategy:
 
-1. **Energy Budget**\index{Energy!budget, mobile inference}: Each inference depletes battery. A photo app running continuous inference at 22 FPS drains 240 mW, acceptable for active use but problematic for background processing. The optimization target shifts from throughput to energy-per-inference.
+1. **Energy Budget**\index{Energy!budget, mobile inference}: Each inference depletes battery. In the modeled pipeline, 3.0 mJ at 22 FPS is about 67 mW for the inference path alone; camera, display, ISP, and OS overhead add to that total in a full photo app. The optimization target shifts from throughput to energy-per-inference.
 
 2. **Thermal Throttling**\index{Thermal Throttling!mobile serving}: Sustained high-power operation triggers thermal management. When the SoC reaches thermal limits (typically 45°C junction), the OS reduces NPU frequency by 30–50 percent, degrading both latency and throughput. Bursty workloads that allow cooling between bursts outperform sustained maximum throughput.
 

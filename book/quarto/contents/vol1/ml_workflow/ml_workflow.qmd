@@ -788,10 +788,12 @@ The ML lifecycle is not a straight line; it is a spiral of continuous refinement
 
 The six lifecycle stages are not merely procedural steps; they are the engineering levers used to optimize the variables in the **iron law of ML systems** $(T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}})$:
 
+-   **Problem Definition**: Sets the target constraints: accuracy, latency, cost, privacy, and deployment paradigm. These targets determine which terms of the equation are allowed to grow and which must be bounded from the start.
 -   **Data Collection and Preparation**: Primarily determines the **Data $(D_{\text{vol}})$** term. High-quality curation reduces the volume of data needed to reach a target accuracy.
 -   **Model Development and Training**: Defines the **Operations $(O)$** term. Architectural choices (for example, transformers vs. convolutional neural networks (CNNs)) set the computational floor.
 -   **Evaluation and Validation**: Verifies whether the achieved **Efficiency $(\eta_{\text{hw}})$** and model accuracy jointly meet deployment requirements on the target hardware.
 -   **Deployment and Integration**: Focuses on minimizing the **Overhead $(L_{\text{lat}})$** tax through efficient serving infrastructure.
+-   **Monitoring and Maintenance**: Observes drift, latency, throughput, and cost after launch, then feeds violations back into earlier stages for re-optimization.
 
 Viewed this way, managing the workflow is mathematically equivalent to minimizing the total system latency and cost.
 
@@ -1690,12 +1692,14 @@ These requirements influence deployment strategies. The edge deployment decision
 # │
 # │ Goal: Contrast the total cost of ownership for Cloud vs. Edge.
 # │ Show: That Edge deployments achieve payback within 3 years due to lower OpEx.
-# │ How: Model CapEx and OpEx for 100 clinics over a 3-year period.
+# │ How: Model CapEx and OpEx for 500 clinics over a 3-year period.
 # │
 # │ Imports: mlsysim.book (fmt)
 # │ Exports: DeploymentEconomics.n_clinics_str,
 # │          DeploymentEconomics.patients_per_day_str,
+# │          DeploymentEconomics.billable_images_per_patient_str,
 # │          DeploymentEconomics.days_per_year_str,
+# │          DeploymentEconomics.monthly_images_str,
 # │          DeploymentEconomics.cloud_cost_per_image_str,
 # │          DeploymentEconomics.cloud_network_str,
 # │          DeploymentEconomics.edge_cost_per_unit_str,
@@ -1720,6 +1724,7 @@ class DeploymentEconomics:
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     n_clinics = 500
     patients_day = 50
+    billable_images_per_patient = 1
     days_year = 365
 
     # Cloud Costs
@@ -1735,7 +1740,7 @@ class DeploymentEconomics:
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Volume
-    total_images_year = n_clinics * patients_day * days_year
+    total_images_year = n_clinics * patients_day * billable_images_per_patient * days_year
 
     # Step 2: Cloud TCO (OpEx only)
     cloud_annual_inf = total_images_year * cloud_inf_cost
@@ -1759,7 +1764,9 @@ class DeploymentEconomics:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     n_clinics_str = f"{n_clinics:,}"
     patients_per_day_str = fmt(patients_day, precision=0, commas=False)
+    billable_images_per_patient_str = fmt(billable_images_per_patient, precision=0, commas=False)
     days_per_year_str = fmt(days_year, precision=0, commas=False)
+    monthly_images_str = f"{round(total_images_year / 12 / 1000) * 1000:,.0f}"
     cloud_cost_per_image_str = fmt(cloud_inf_cost, precision=2, commas=False)
     cloud_network_str = f"{cloud_network_cost:,}"
     edge_cost_per_unit_str = f"{edge_unit_cost:,}"
@@ -1779,13 +1786,13 @@ class DeploymentEconomics:
 
 ::: {.callout-notebook title="Cloud vs. edge deployment economics"}
 
-**Problem**: A production model processes about 760,000 images per month across 500 clinics. Should the deployment use Cloud inference (AWS Lambda) or Edge inference on an on-premise server?
+**Problem**: A production model processes about `{python} DeploymentEconomics.monthly_images_str` billable screening images per month across 500 clinics, assuming one processed image per patient after local selection and quality checks. Should the deployment use Cloud inference (AWS Lambda) or Edge inference on an on-premise server?
 
 **Option A: Cloud Inference**
 
 - Model runs on centralized GPU servers
 - Inference cost: ~USD `{python} DeploymentEconomics.cloud_cost_per_image_str` per image (cloud GPU time + API overhead)
-- Annual cost: `{python} DeploymentEconomics.n_clinics_str` clinics$\times$ `{python} DeploymentEconomics.patients_per_day_str` patients$\times$ `{python} DeploymentEconomics.days_per_year_str` days$\times$ USD `{python} DeploymentEconomics.cloud_cost_per_image_str` = **USD `{python} DeploymentEconomics.cloud_annual_str`/year**
+- Annual cost: `{python} DeploymentEconomics.n_clinics_str` clinics$\times$ `{python} DeploymentEconomics.patients_per_day_str` patients/day$\times$ `{python} DeploymentEconomics.billable_images_per_patient_str` billable image/patient$\times$ `{python} DeploymentEconomics.days_per_year_str` days$\times$ USD `{python} DeploymentEconomics.cloud_cost_per_image_str` = **USD `{python} DeploymentEconomics.cloud_annual_str`/year**
 - Plus: Network costs for uploading `{python} DeploymentEconomics.image_size_mb_str` MB images = ~USD `{python} DeploymentEconomics.cloud_network_str`/year
 - **Total: ~USD `{python} DeploymentEconomics.cloud_total_str`/year** operational cost
 - Risk: `{python} DeploymentEconomics.cloud_latency_risk_str` ms+ latency breaks clinical workflow; connectivity outages halt screening
@@ -1899,9 +1906,9 @@ The DR case study illustrated constraint propagation repeatedly: bandwidth limit
 
 ::: {.callout-definition title="The constraint propagation principle"}
 
-***The Constraint Propagation Principle***\index{Constraint Propagation Principle!definition} states that constraints discovered late in the lifecycle ($N$) incur an exponential cost relative to the stage where they should have been defined ($\text{Correction Cost} \approx 2^{(N-1)} \times \text{Base Effort}$).
+***The Constraint Propagation Principle***\index{Constraint Propagation Principle!definition} states that constraints discovered late in the lifecycle ($N$) incur an exponential cost relative to catching them during Stage 1 problem definition ($\text{Correction Cost} \approx 2^{(N-1)} \times \text{Base Effort}$).
 
-1.  **Significance (quantitative)**: It dictates that system design must proceed end-to-end. Within the iron law, a constraint on $R_{\text{peak}}$ at deployment (Stage 5) propagates backward to redefine the data volume $(D_{\text{vol}})$ and algorithm complexity $(O)$ required at Stage 1.
+1.  **Significance (quantitative)**: It dictates that system design must proceed end-to-end. Within the iron law, a constraint on $R_{\text{peak}}$ at deployment (Stage 5) propagates backward to redefine the Stage 1 requirements and the downstream data volume $(D_{\text{vol}})$ and algorithm complexity $(O)$ that those requirements permit.
 2.  **Distinction (durable)**: Unlike modular decomposition, which encourages isolation, this principle mandates global optimization: a "local maxima" in model accuracy may lead to a "global minima" in system feasibility.
 3.  **Common pitfall**: A frequent misconception is that deployment is "the last step." In reality, the deployment environment is the day-one constraint that defines the boundaries of every other decision.
 
@@ -1976,13 +1983,13 @@ Teams assume they can "figure out deployment later" and focus first on model acc
 
 This chapter established the ML lifecycle as the systematic framework for engineering machine learning systems, the mental roadmap organizing how data, models, and deployment infrastructure interconnect throughout development. Return to @fig-ml-lifecycle one final time: the two parallel pipelines now carry richer meaning. The data pipeline transforms raw inputs through collection, ingestion, analysis, labeling, validation, and preparation into ML-ready datasets. The model development pipeline takes these datasets through training, evaluation, validation, and deployment to create production systems. With the full chapter as context, the feedback arrows tell a deeper story—each one represents a lesson learned in production flowing back to strengthen earlier stages, creating the continuous improvement cycles that distinguish ML from traditional linear development.
 
-Understanding this framework explains why machine learning systems demand specialized approaches distinct from traditional software. ML workflows replace deterministic specifications with probabilistic optimization, static behavior with dynamic adaptation, and isolated development with continuous feedback loops. The iron law of workflow provides the quantitative backbone: each lifecycle stage maps to a specific term in the performance equation $(T = D_{\text{vol}}/\text{BW} + O/(R_{\text{peak}} \cdot \eta_{\text{hw}}) + L_{\text{lat}})$, making workflow management mathematically equivalent to system optimization. This systematic perspective recognizes that success emerges not from perfecting individual stages in isolation, but from understanding how data quality affects model performance, how deployment constraints shape training strategies, and how production insights inform each subsequent development iteration.
+Understanding this framework explains why machine learning systems demand specialized approaches distinct from traditional software. ML workflows replace deterministic specifications with probabilistic optimization, static behavior with dynamic adaptation, and isolated development with continuous feedback loops. The iron law of workflow provides the quantitative backbone: lifecycle stages set constraints, shape specific terms in the performance equation $(T = D_{\text{vol}}/\text{BW} + O/(R_{\text{peak}} \cdot \eta_{\text{hw}}) + L_{\text{lat}})$, and feed production violations back into re-optimization. This systematic perspective recognizes that success emerges not from perfecting individual stages in isolation, but from understanding how data quality affects model performance, how deployment constraints shape training strategies, and how production insights inform each subsequent development iteration.
 
-Three quantitative insights from this chapter guide engineering decisions:
+Three engineering insights from this chapter guide engineering decisions:
 
 1. **60--80 percent**: Practitioner surveys and production experience both show that data collection, cleaning, labeling, validation, and preparation often consume a large share of ML engineering effort. Model development, despite receiving the most attention, is only one part of the lifecycle. Plan accordingly.
 
-2. **4--8 iteration cycles**: Production-ready ML systems usually require repeated cycles across data, model, and infrastructure stages. Data quality issues are often the dominant source of rework, so investment in data engineering yields high leverage.
+2. **Repeated iteration cycles**: Production-ready ML systems usually require repeated cycles across data, model, and infrastructure stages. Data quality issues are often a major source of rework, so investment in data engineering yields high leverage.
 
 3. **$2^{N-1}$ cost escalation**: The constraint propagation principle: a constraint discovered at stage $N$ costs roughly $2^{N-1}$ times more to fix than if caught at stage 1. A deployment paradigm mismatch discovered at stage 5 triggers a `{python} ConstraintPropagation.cost_factor_str`$\times$ cost multiplier. Early validation pays exponential dividends.
 
@@ -1990,11 +1997,11 @@ Three quantitative insights from this chapter guide engineering decisions:
 
 * **Two pipelines, one system**: Data processing (collection → preparation) and model development (training → deployment) run in parallel, unified by continuous feedback loops.
 * **ML systems fail differently than traditional software**: They degrade silently through data drift rather than crashing through code errors, requiring continuous statistical monitoring rather than one-time testing.
-* **Iteration velocity compounds**: A model starting 5 percent behind but iterating 10$\times$ faster overtakes the leader, because each cycle improves data, architecture, and hyperparameters simultaneously (the iteration tax).
-* **Stage interfaces are contracts**: Explicit inputs, outputs, and quality invariants at each stage help prevent the 60–70 percent of ML project failures caused by integration problems.
+* **Iteration velocity compounds**: In the worked example, a lightweight model starting 5 percentage points behind reaches the 99 percent ceiling because rapid cycles create many more chances to improve data, architecture, and hyperparameters.
+* **Stage interfaces are contracts**: Explicit inputs, outputs, and quality invariants at each stage help prevent late integration failures and rework.
 * **Feedback loops span multiple timescales**: Real-time inference monitoring (seconds), batch retraining triggers (days), and strategic model updates (months) all require distinct automation.
 * **Constraint propagation is exponential across stages**: Deployment constraints (latency, memory) flow backward to model selection; data constraints (volume, quality) flow forward to architecture choices. A constraint discovered at stage $N$ costs $2^{N-1}$ times more to fix than if caught at stage 1.
-* **Each lifecycle stage maps to an iron law term**: Data collection determines $D_{\text{vol}}$, model development defines $O$, and deployment minimizes $L_{\text{lat}}$—making workflow management mathematically equivalent to system optimization.
+* **The lifecycle governs the iron law**: Problem definition sets the constraints, data collection determines $D_{\text{vol}}$, model development defines $O$, deployment minimizes $L_{\text{lat}}$, and monitoring feeds violations back into re-optimization.
 
 :::
 
