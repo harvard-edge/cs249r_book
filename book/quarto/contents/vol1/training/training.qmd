@@ -698,7 +698,7 @@ Our GPT-2 Lighthouse Model illustrates these trade-offs through its choice of th
 ::: {.callout-notebook title="GPT-2 GELU activation function"}
 
 \index{GELU!Gaussian Error Linear Unit}
-Beyond the foundational activation functions covered in @sec-neural-computation (Sigmoid, Tanh, ReLU), modern architectures increasingly adopt smoother alternatives. GPT-2 uses the GELU [@hendrycks2016gaussian], defined as:
+Beyond the foundational activation functions covered in @sec-neural-computation (Sigmoid, Tanh, ReLU), modern architectures increasingly adopt smoother alternatives. GPT-2 uses a GELU activation [@hendrycks2016gaussian], implemented in practice with the common tanh-based approximation. The exact mathematical definition is:
 $$
 \text{GELU}(x) = x \cdot \Phi(x) = x \cdot \frac{1}{2}\left[1 + \text{erf}\left(\frac{x}{\sqrt{2}}\right)\right]
 $$
@@ -4327,9 +4327,9 @@ Flash Attention decomposes this computation by partitioning queries into $B_q$ b
 2. For each key-value block $(K_j, V_j)$:
    - Load $Q_i$, $K_j$, $V_j$ into SRAM
    - Compute attention scores: $S_{ij} = Q_i K_j^T / \sqrt{d_k}$ (size $b{\times}b$, fits in SRAM)
-   - Compute probabilities: $P_{ij} = \text{softmax}(S_{ij})$ within SRAM
-   - Accumulate: Update $O_i$ and $l_i$ with $P_{ij} V_j$
-   - Discard $S_{ij}$ and $P_{ij}$ (no HBM storage)
+   - Update the running row-wise maximum $m_i$ and normalizer $l_i$ from $S_{ij}$ (online softmax statistics across all key blocks)
+   - Accumulate: Rescale the previous $O_i$ by the corrected normalizer and add the contribution from $\exp(S_{ij} - m_i) V_j$
+   - Discard $S_{ij}$ and the per-tile exponentials (no HBM storage)
 3. Write final $O_i$ to HBM
 
 No $n{\times}n$ matrix ever exists in HBM. The largest intermediate tensor is $b{\times}b$ (typically $b = 128$), requiring only 64 KB for a $128{\times}128$ FP32 matrix compared to 64 MB for the full $4096{\times}4096$ matrix.
@@ -4406,7 +4406,7 @@ For large sequence lengths, Flash Attention reduces HBM traffic by avoiding writ
 
 ##### Computational complexity {#sec-model-training-computational-complexity-7d3b}
 
-Both approaches require $O(n^2 d)$ FLOPs for attention computation. Flash Attention performs additional recomputation during backward pass (regenerating $S$ and $P$ from saved $Q, K, V$), adding roughly 20 percent more FLOPs. However, by converting the workload from bandwidth-bound to compute bound, Flash Attention achieves net speedups despite higher FLOP counts since modern GPUs have abundant compute capacity but limited memory bandwidth.
+Both approaches require the same $O(n^2 d)$ asymptotic FLOPs for attention computation. Flash Attention's backward pass recomputes attention activations from the saved $Q, K, V$ rather than storing the full $S$ and $P$ matrices, trading a small amount of recomputation for dramatically reduced HBM traffic. By converting the workload from bandwidth-bound to compute-bound, Flash Attention achieves net speedups since modern GPUs have abundant compute capacity but limited memory bandwidth.
 
 #### Implementation and hardware utilization {#sec-model-training-implementation-hardware-utilization-20a8}
 
