@@ -322,40 +322,55 @@ def fix_cross_references_in_extracted_epub(temp_dir):
 
 
 def declare_nav_mathml_property(temp_dir):
-    """Add `mathml` to the nav item's properties in the OPF manifest.
+    """Declare `mathml` on the nav item only when nav.xhtml contains MathML.
 
-    Quarto emits `<math>` elements into `nav.xhtml` (from the TOC entries of
-    sections whose titles contain math), but does not declare the `mathml`
-    property on the nav item. Epubcheck flags this as OPF-014. Fix: extend
-    the `properties=` attribute on the nav manifest entry from "nav" to
-    "nav mathml".
+    EPUBCheck reports OPF-014 when `nav.xhtml` contains `<math>` but the nav
+    manifest item lacks `mathml`. It reports OPF-015 when `mathml` is declared
+    on a nav item whose document does not contain MathML. The valid fix is
+    therefore conditional on the rendered nav content.
     """
     opf_path = temp_dir / "EPUB" / "content.opf"
-    if not opf_path.exists():
+    nav_path = temp_dir / "EPUB" / "nav.xhtml"
+    if not opf_path.exists() or not nav_path.exists():
         return 0
 
+    nav_has_mathml = "<math" in nav_path.read_text(encoding='utf-8')
     original = opf_path.read_text(encoding='utf-8')
 
-    # Only patch if the nav item exists and doesn't already declare mathml.
-    # The attribute form Quarto produces is `properties="nav"` on the item
-    # whose href ends with nav.xhtml.
     pattern = re.compile(
         r'(<item\b[^>]*href="[^"]*nav\.xhtml"[^>]*\bproperties=")([^"]*)(")'
     )
 
+    changed = False
+
     def patch(m):
+        nonlocal changed
         props = m.group(2).split()
-        if 'mathml' in props:
-            return m.group(0)
-        props.append('mathml')
+        has_mathml = 'mathml' in props
+
+        if nav_has_mathml and not has_mathml:
+            props.append('mathml')
+            changed = True
+        elif not nav_has_mathml and has_mathml:
+            props = [prop for prop in props if prop != 'mathml']
+            changed = True
+
         return f'{m.group(1)}{" ".join(props)}{m.group(3)}'
 
     modified = pattern.sub(patch, original)
 
-    if modified != original:
+    if changed and modified != original:
         opf_path.write_text(modified, encoding='utf-8')
-        print("      ✅ OPF nav item: added `mathml` property")
+        if nav_has_mathml:
+            print("      ✅ OPF nav item: added `mathml` property")
+        else:
+            print("      ✅ OPF nav item: removed stale `mathml` property")
         return 1
+
+    if nav_has_mathml:
+        print("      ✅ OPF nav item: `mathml` property already correct")
+    else:
+        print("      ✅ OPF nav item: no MathML declaration needed")
     return 0
 
 
@@ -431,8 +446,8 @@ def main():
         # issues #1014, #1052, #1148).
         sanitize_xml_for_epubcheck(temp_dir)
 
-        # Ensure OPF declares the mathml property on the nav item
-        # (issue: epubcheck OPF-014).
+        # Keep the OPF nav item's mathml property aligned with nav.xhtml
+        # content (EPUBCheck OPF-014 when missing, OPF-015 when stale).
         declare_nav_mathml_property(temp_dir)
 
         # Create a temporary output file
