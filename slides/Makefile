@@ -30,7 +30,11 @@ VOL1_CHAPTERS := $(sort $(notdir $(wildcard $(VOL1_SRC)/*_*)))
 VOL2_CHAPTERS := $(sort $(notdir $(wildcard $(VOL2_SRC)/*_*)))
 
 # LaTeX engine
-LATEX := xelatex
+# pdflatex with helvet (Helvetica) + courier — same engine + font choice
+# as mlsysim/paper, which has shipped without font issues for months.
+# Was xelatex+fontspec+texgyreheros, which silently fell back to
+# Liberation Sans on Ubuntu CI and produced blank-text PDFs (2026-05-12).
+LATEX := pdflatex
 LATEX_FLAGS := -interaction=nonstopmode -halt-on-error
 
 # SVG converter
