@@ -834,7 +834,7 @@ class ValidateCommand:
              "fix_cross_references.py handles this"),
             ("OPF-014",
              "Missing mathml / other OPF property",
-             "epub_postprocess declares mathml on nav"),
+             "epub_postprocess aligns nav mathml property"),
         ]
         for code, trigger, fix in rows:
             code_table.add_row(code, trigger, fix)

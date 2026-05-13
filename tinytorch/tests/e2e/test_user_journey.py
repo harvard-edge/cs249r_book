@@ -13,7 +13,7 @@ Run with:
 Categories:
     -k quick         # Fast CLI verification (~30s)
     -k module_flow   # Module workflow tests (~2min)
-    -k full_journey  # Complete journey test (~10min)
+    -k full_journey  # Complete journey: 20 modules + 6 milestones (~7-8min on CI)
 """
 
 import pytest

@@ -59,7 +59,7 @@ PyTorch TensorFlow JAX NumPy SciPy Pandas XGBoost ONNX TensorRT TVM MLIR LLVM Op
 AllReduce AllGather ReduceScatter AllToAll Broadcast Scatter Gather FlashAttention PagedAttention RoPE ALiBi MoE KV
 MLPerf MLCommons LAPACK LINPACK D·A·M DAM C³ C^3 CCC C3
 TinyML AutoML AutoAugment RandAugment NAS
-NVIDIA AMD Intel ARM Apple Google Amazon Microsoft Meta Facebook IBM Qualcomm TSMC Samsung Uber Tesla DeepSeek Anthropic Cerebras Groq Graphcore SambaNova Tenstorrent Oura
+NVIDIA AMD Intel ARM Apple Google Amazon Microsoft Meta Facebook IBM Qualcomm TSMC Samsung Uber Tesla DeepSeek Anthropic Cerebras Groq Graphcore SambaNova Tenstorrent Oura Jeep Cherokee Rényi Teton Slurm
 MIT Stanford Berkeley CMU UIUC EPFL ETH Caltech Harvard Princeton Yale Columbia
 Hennessy Patterson Amdahl Gustafson Turing Sutton Karpathy Kuhn Goodhart Horowitz Williams Waterman Knuth Tanenbaum Dean Chintala Huang LeCun Han Reddi Stoica Huyen Emer
 HIPAA GDPR COPPA CCPA FERPA SOX HITRUST ISO SOC NAND NOR SLC MLC TLC QLC NaN Inf
@@ -82,6 +82,8 @@ COMPOUND_NAMES = {
     ("Tensor", "Core"), ("Tensor", "Cores"),
     # Legislation shorthand
     ("EU", "Act"), ("AI", "Act"),
+    # Geographic and product proper-noun pairs
+    ("Grand", "Teton"), ("Jeep", "Cherokee"), ("Meta", "Grand"),
 }
 
 # Exact-match headings to skip entirely. For paper-title conventions that
