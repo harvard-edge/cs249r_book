@@ -23,7 +23,26 @@ ul.task-list li input[type="checkbox"] {
   margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
   vertical-align: middle;
 }
-</style>
+/* CSS for citations */
+div.csl-bib-body { }
+div.csl-entry {
+  clear: both;
+}
+.hanging-indent div.csl-entry {
+  margin-left:2em;
+  text-indent:-2em;
+}
+div.csl-left-margin {
+  min-width:2em;
+  float:left;
+}
+div.csl-right-inline {
+  margin-left:2em;
+  padding-left:1em;
+}
+div.csl-indent {
+  margin-left: 2em;
+}</style>
 
 
 <script src="../../../site_libs/quarto-nav/quarto-nav.js"></script>
@@ -46,9 +65,9 @@ ul.task-list li input[type="checkbox"] {
 <link href="../../../site_libs/quarto-html/quarto-syntax-highlighting-da245a98686d0485553d61919e8b3534.css" rel="stylesheet" class="quarto-color-scheme-extra" id="quarto-text-highlighting-styles">
 <script src="../../../site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="../../../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="../../../site_libs/bootstrap/bootstrap-e36f1d942665a707fab2dc030137fb99.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
-<link href="../../../site_libs/bootstrap/bootstrap-dark-6efc886ea860012187df06cd8b2b7ef6.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="light">
-<link href="../../../site_libs/bootstrap/bootstrap-e36f1d942665a707fab2dc030137fb99.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
+<link href="../../../site_libs/bootstrap/bootstrap-1bcc8a218617a504e220ca6b190c5f87.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
+<link href="../../../site_libs/bootstrap/bootstrap-dark-fb72c28dabfa9ffe96fa2eed602e9180.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="light">
+<link href="../../../site_libs/bootstrap/bootstrap-1bcc8a218617a504e220ca6b190c5f87.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
 <link href="../../../site_libs/quarto-contrib/foldbox/foldbox.css" rel="stylesheet">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
@@ -133,8 +152,31 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
     html.setAttribute('data-bs-theme', scheme);
     html.setAttribute('data-quarto-color-scheme', scheme);
     html.style.colorScheme = scheme;
+    // Bridge to legacy `.quarto-dark` body class — about.css,
+    // community.css, and newsletter.css key their dark-mode CSS
+    // variables off `.quarto-dark { ... }`. Quarto's own toggle adds
+    // that class on click, but the OS-pref / first-paint path never
+    // does. Mirror the scheme onto body so those CSS variables fire
+    // on every dark path, not just toggle clicks. body may not exist
+    // yet on the first call (this script runs in <head>); a
+    // MutationObserver below catches it as soon as it parses.
+    var body = document.body;
+    if (body) body.classList.toggle('quarto-dark', scheme === 'dark');
   }
   apply(preferredScheme());
+  // Catch the FOUC window between <head> apply() and DOMContentLoaded:
+  // <body> may not exist yet at first apply(), but as soon as the
+  // parser appends it we want the legacy class bridge in place so any
+  // CSS keyed on `.quarto-dark` paints correctly on first render.
+  if (!document.body) {
+    var earlyObserver = new MutationObserver(function () {
+      if (document.body) {
+        apply(preferredScheme());
+        earlyObserver.disconnect();
+      }
+    });
+    earlyObserver.observe(document.documentElement, { childList: true });
+  }
   // Quarto's toggle updates localStorage but not <html>, so wrap it to
   // mirror the new value onto data-bs-theme; otherwise clicking the toggle
   // leaves CSS keyed off [data-bs-theme="dark"] rendering against the wrong
@@ -156,6 +198,40 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
     document.addEventListener('DOMContentLoaded', function () { wrapToggle(); syncFromStorage(); });
   } else {
     wrapToggle(); syncFromStorage();
+  }
+  // Defend the legacy `.quarto-dark` body class against Quarto's own
+  // `toggleBodyColor(mode)`, which runs *after* this script and re-asserts
+  // the body class based on `mode` — and `mode` defaults to 'light' when
+  // there's no stored quarto-color-scheme value, even when the OS / first
+  // paint already resolved to dark via `data-bs-theme`. Without this
+  // observer, on every fresh visit Quarto would clobber our bridge and
+  // restore `.quarto-light`, leaving `.quarto-dark`-keyed CSS variables
+  // (about/community/newsletter pages) at their light-mode defaults
+  // against the dark `data-bs-theme="dark"` background.
+  function bridgeBody() {
+    var body = document.body;
+    if (!body) return;
+    var wantDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+    if (wantDark && !body.classList.contains('quarto-dark')) {
+      body.classList.add('quarto-dark');
+      body.classList.remove('quarto-light');
+    } else if (!wantDark && body.classList.contains('quarto-dark')) {
+      body.classList.remove('quarto-dark');
+      body.classList.add('quarto-light');
+    }
+  }
+  function watchBody() {
+    if (!document.body) return;
+    bridgeBody();
+    var bodyObs = new MutationObserver(bridgeBody);
+    bodyObs.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    var htmlObs = new MutationObserver(bridgeBody);
+    htmlObs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-bs-theme'] });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', watchBody);
+  } else {
+    watchBody();
   }
   window.addEventListener('storage', function (ev) {
     if (ev.key !== STORAGE_KEY) return;
@@ -199,31 +275,80 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
 <link rel="manifest" href="../../../site.webmanifest">
 <link rel="apple-touch-icon" href="../../../assets/images/icons/favicon.png">
 <meta name="theme-color" content="#A51C30">
+<!-- Release identity (rendered into the footer pill below).
+     The publish workflow drops release-manifest.json at
+     /vol1/release-manifest.json before deploy. -->
+<meta name="release-manifest" content="/vol1/release-manifest.json">
 <!-- SocratiQ bundle disabled pending quiz regeneration: -->
 <!-- <script type="module" src="/tools/scripts/socratiQ/bundle.js" defer></script> -->
 <script src="../../../assets/scripts/sidebar-auto-collapse.js" defer=""></script>
 <script src="../../../assets/scripts/version-link.js" defer=""></script>
 <script src="../../../assets/scripts/subscribe-modal.js" defer=""></script>
 <style>
-.callout-notebook {
-  --color1: #F2F7FF;
-  --color2: #2C5282;
-  --border-color: #2C5282;
-  --background-color: rgba(44, 82, 130, 0.04);
-  --title-background-color: rgba(44, 82, 130, 0.04);
-  --dark-background-color: rgba(44, 82, 130, 0.12);
-  --dark-title-background-color: rgba(44, 82, 130, 0.12);
+.callout-learning-objectives {
+  --color1: #E8F2EA;
+  --color2: #4A7C59;
+  --border-color: #4A7C59;
+  --background-color: rgba(74, 124, 89, 0.04);
+  --title-background-color: rgba(74, 124, 89, 0.04);
+  --dark-background-color: rgba(74, 124, 89, 0.12);
+  --dark-title-background-color: rgba(74, 124, 89, 0.12);
 }
-.callout-perspective {
-  --color1: #F7F8FA;
-  --color2: #4A5568;
-  --border-color: #4A5568;
-  --background-color: rgba(74, 85, 104, 0.04);
-  --title-background-color: rgba(74, 85, 104, 0.04);
-  --dark-background-color: rgba(74, 85, 104, 0.12);
-  --dark-title-background-color: rgba(74, 85, 104, 0.12);
+.callout-theorem {
+  --color1: #F5F0FA;
+  --color2: #6B46C1;
+  --border-color: #6B46C1;
+  --background-color: rgba(107, 70, 193, 0.04);
+  --title-background-color: rgba(107, 70, 193, 0.04);
+  --dark-background-color: rgba(107, 70, 193, 0.12);
+  --dark-title-background-color: rgba(107, 70, 193, 0.12);
 }
-.callout-resource-videos {
+.callout-lighthouse {
+  --color1: #FDF8E6;
+  --color2: #B8860B;
+  --border-color: #B8860B;
+  --background-color: rgba(184, 134, 11, 0.04);
+  --title-background-color: rgba(184, 134, 11, 0.04);
+  --dark-background-color: rgba(184, 134, 11, 0.12);
+  --dark-title-background-color: rgba(184, 134, 11, 0.12);
+}
+.callout-takeaways {
+  --color1: #FDF2F7;
+  --color2: #BE185D;
+  --border-color: #BE185D;
+  --background-color: rgba(190, 24, 93, 0.04);
+  --title-background-color: rgba(190, 24, 93, 0.04);
+  --dark-background-color: rgba(190, 24, 93, 0.12);
+  --dark-title-background-color: rgba(190, 24, 93, 0.12);
+}
+.callout-quiz-question {
+  --color1: #F0F0F8;
+  --color2: #5B4B8A;
+  --border-color: #5B4B8A;
+  --background-color: rgba(91, 75, 138, 0.04);
+  --title-background-color: rgba(91, 75, 138, 0.04);
+  --dark-background-color: rgba(91, 75, 138, 0.12);
+  --dark-title-background-color: rgba(91, 75, 138, 0.12);
+}
+.callout-checkpoint {
+  --color1: #FFF8E7;
+  --color2: #D97706;
+  --border-color: #D97706;
+  --background-color: rgba(217, 119, 6, 0.04);
+  --title-background-color: rgba(217, 119, 6, 0.04);
+  --dark-background-color: rgba(217, 119, 6, 0.12);
+  --dark-title-background-color: rgba(217, 119, 6, 0.12);
+}
+.callout-definition {
+  --color1: #F0F4F8;
+  --color2: #1B4F72;
+  --border-color: #1B4F72;
+  --background-color: rgba(27, 79, 114, 0.04);
+  --title-background-color: rgba(27, 79, 114, 0.04);
+  --dark-background-color: rgba(27, 79, 114, 0.12);
+  --dark-title-background-color: rgba(27, 79, 114, 0.12);
+}
+.callout-resource-slides {
   --color1: #E0F2F1;
   --color2: #20B2AA;
   --border-color: #20B2AA;
@@ -241,42 +366,6 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
   --dark-background-color: rgba(30, 58, 95, 0.12);
   --dark-title-background-color: rgba(30, 58, 95, 0.12);
 }
-.callout-example {
-  --color1: #F0F8F6;
-  --color2: #148F77;
-  --border-color: #148F77;
-  --background-color: rgba(20, 143, 119, 0.04);
-  --title-background-color: rgba(20, 143, 119, 0.04);
-  --dark-background-color: rgba(20, 143, 119, 0.12);
-  --dark-title-background-color: rgba(20, 143, 119, 0.12);
-}
-.callout-lighthouse {
-  --color1: #FDF8E6;
-  --color2: #B8860B;
-  --border-color: #B8860B;
-  --background-color: rgba(184, 134, 11, 0.04);
-  --title-background-color: rgba(184, 134, 11, 0.04);
-  --dark-background-color: rgba(184, 134, 11, 0.12);
-  --dark-title-background-color: rgba(184, 134, 11, 0.12);
-}
-.callout-checkpoint {
-  --color1: #FFF8E7;
-  --color2: #D97706;
-  --border-color: #D97706;
-  --background-color: rgba(217, 119, 6, 0.04);
-  --title-background-color: rgba(217, 119, 6, 0.04);
-  --dark-background-color: rgba(217, 119, 6, 0.12);
-  --dark-title-background-color: rgba(217, 119, 6, 0.12);
-}
-.callout-quiz-answer {
-  --color1: #E8F2EA;
-  --color2: #4A7C59;
-  --border-color: #4A7C59;
-  --background-color: rgba(74, 124, 89, 0.04);
-  --title-background-color: rgba(74, 124, 89, 0.04);
-  --dark-background-color: rgba(74, 124, 89, 0.12);
-  --dark-title-background-color: rgba(74, 124, 89, 0.12);
-}
 .callout-resource-exercises {
   --color1: #E0F2F1;
   --color2: #20B2AA;
@@ -285,60 +374,6 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
   --title-background-color: rgba(32, 178, 170, 0.04);
   --dark-background-color: rgba(32, 178, 170, 0.12);
   --dark-title-background-color: rgba(32, 178, 170, 0.12);
-}
-.callout-learning-objectives {
-  --color1: #E8F2EA;
-  --color2: #4A7C59;
-  --border-color: #4A7C59;
-  --background-color: rgba(74, 124, 89, 0.04);
-  --title-background-color: rgba(74, 124, 89, 0.04);
-  --dark-background-color: rgba(74, 124, 89, 0.12);
-  --dark-title-background-color: rgba(74, 124, 89, 0.12);
-}
-.callout-quiz-question {
-  --color1: #F0F0F8;
-  --color2: #5B4B8A;
-  --border-color: #5B4B8A;
-  --background-color: rgba(91, 75, 138, 0.04);
-  --title-background-color: rgba(91, 75, 138, 0.04);
-  --dark-background-color: rgba(91, 75, 138, 0.12);
-  --dark-title-background-color: rgba(91, 75, 138, 0.12);
-}
-.callout-resource-slides {
-  --color1: #E0F2F1;
-  --color2: #20B2AA;
-  --border-color: #20B2AA;
-  --background-color: rgba(32, 178, 170, 0.04);
-  --title-background-color: rgba(32, 178, 170, 0.04);
-  --dark-background-color: rgba(32, 178, 170, 0.12);
-  --dark-title-background-color: rgba(32, 178, 170, 0.12);
-}
-.callout-theorem {
-  --color1: #F5F0FA;
-  --color2: #6B46C1;
-  --border-color: #6B46C1;
-  --background-color: rgba(107, 70, 193, 0.04);
-  --title-background-color: rgba(107, 70, 193, 0.04);
-  --dark-background-color: rgba(107, 70, 193, 0.12);
-  --dark-title-background-color: rgba(107, 70, 193, 0.12);
-}
-.callout-code {
-  --color1: #F2F4F8;
-  --color2: #D1D7E0;
-  --border-color: #D1D7E0;
-  --background-color: rgba(209, 215, 224, 0.04);
-  --title-background-color: rgba(209, 215, 224, 0.04);
-  --dark-background-color: rgba(209, 215, 224, 0.12);
-  --dark-title-background-color: rgba(209, 215, 224, 0.12);
-}
-.callout-definition {
-  --color1: #F0F4F8;
-  --color2: #1B4F72;
-  --border-color: #1B4F72;
-  --background-color: rgba(27, 79, 114, 0.04);
-  --title-background-color: rgba(27, 79, 114, 0.04);
-  --dark-background-color: rgba(27, 79, 114, 0.12);
-  --dark-title-background-color: rgba(27, 79, 114, 0.12);
 }
 .callout-colab {
   --color1: #FFF5E6;
@@ -349,23 +384,32 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
   --dark-background-color: rgba(255, 107, 53, 0.12);
   --dark-title-background-color: rgba(255, 107, 53, 0.12);
 }
-.callout-takeaways {
-  --color1: #FDF2F7;
-  --color2: #BE185D;
-  --border-color: #BE185D;
-  --background-color: rgba(190, 24, 93, 0.04);
-  --title-background-color: rgba(190, 24, 93, 0.04);
-  --dark-background-color: rgba(190, 24, 93, 0.12);
-  --dark-title-background-color: rgba(190, 24, 93, 0.12);
+.callout-code {
+  --color1: #F2F4F8;
+  --color2: #D1D7E0;
+  --border-color: #D1D7E0;
+  --background-color: rgba(209, 215, 224, 0.04);
+  --title-background-color: rgba(209, 215, 224, 0.04);
+  --dark-background-color: rgba(209, 215, 224, 0.12);
+  --dark-title-background-color: rgba(209, 215, 224, 0.12);
 }
-.callout-principle {
-  --color1: #F3F2FA;
-  --color2: #3D3B8E;
-  --border-color: #3D3B8E;
-  --background-color: rgba(61, 59, 142, 0.04);
-  --title-background-color: rgba(61, 59, 142, 0.04);
-  --dark-background-color: rgba(61, 59, 142, 0.12);
-  --dark-title-background-color: rgba(61, 59, 142, 0.12);
+.callout-resource-videos {
+  --color1: #E0F2F1;
+  --color2: #20B2AA;
+  --border-color: #20B2AA;
+  --background-color: rgba(32, 178, 170, 0.04);
+  --title-background-color: rgba(32, 178, 170, 0.04);
+  --dark-background-color: rgba(32, 178, 170, 0.12);
+  --dark-title-background-color: rgba(32, 178, 170, 0.12);
+}
+.callout-example {
+  --color1: #F0F8F6;
+  --color2: #148F77;
+  --border-color: #148F77;
+  --background-color: rgba(20, 143, 119, 0.04);
+  --title-background-color: rgba(20, 143, 119, 0.04);
+  --dark-background-color: rgba(20, 143, 119, 0.12);
+  --dark-title-background-color: rgba(20, 143, 119, 0.12);
 }
 .callout-war-story {
   --color1: #FEF2F2;
@@ -376,135 +420,45 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
   --dark-background-color: rgba(197, 48, 48, 0.12);
   --dark-title-background-color: rgba(197, 48, 48, 0.12);
 }
+.callout-perspective {
+  --color1: #F7F8FA;
+  --color2: #4A5568;
+  --border-color: #4A5568;
+  --background-color: rgba(74, 85, 104, 0.04);
+  --title-background-color: rgba(74, 85, 104, 0.04);
+  --dark-background-color: rgba(74, 85, 104, 0.12);
+  --dark-title-background-color: rgba(74, 85, 104, 0.12);
+}
+.callout-principle {
+  --color1: #F3F2FA;
+  --color2: #3D3B8E;
+  --border-color: #3D3B8E;
+  --background-color: rgba(61, 59, 142, 0.04);
+  --title-background-color: rgba(61, 59, 142, 0.04);
+  --dark-background-color: rgba(61, 59, 142, 0.12);
+  --dark-title-background-color: rgba(61, 59, 142, 0.12);
+}
+.callout-quiz-answer {
+  --color1: #E8F2EA;
+  --color2: #4A7C59;
+  --border-color: #4A7C59;
+  --background-color: rgba(74, 124, 89, 0.04);
+  --title-background-color: rgba(74, 124, 89, 0.04);
+  --dark-background-color: rgba(74, 124, 89, 0.12);
+  --dark-title-background-color: rgba(74, 124, 89, 0.12);
+}
+.callout-notebook {
+  --color1: #F2F7FF;
+  --color2: #2C5282;
+  --border-color: #2C5282;
+  --background-color: rgba(44, 82, 130, 0.04);
+  --title-background-color: rgba(44, 82, 130, 0.04);
+  --dark-background-color: rgba(44, 82, 130, 0.12);
+  --dark-title-background-color: rgba(44, 82, 130, 0.12);
+}
 </style>
 <style>
 @media (prefers-color-scheme: dark) {
-  details.callout-notebook {
-    --text-color: #e6e6e6;
-    --background-color: rgba(44, 82, 130, 0.12);
-    --title-background-color: rgba(44, 82, 130, 0.12);
-    border-color: #2C5282;
-  }
-  details.callout-notebook summary,
-  details.callout-notebook summary strong,
-  details.callout-notebook > summary {
-    color: #f0f0f0 !important;
-  }
-  details.callout-notebook code {
-    color: #e6e6e6 !important;
-  }
-  details.callout-perspective {
-    --text-color: #e6e6e6;
-    --background-color: rgba(74, 85, 104, 0.12);
-    --title-background-color: rgba(74, 85, 104, 0.12);
-    border-color: #4A5568;
-  }
-  details.callout-perspective summary,
-  details.callout-perspective summary strong,
-  details.callout-perspective > summary {
-    color: #f0f0f0 !important;
-  }
-  details.callout-perspective code {
-    color: #e6e6e6 !important;
-  }
-  details.callout-resource-videos {
-    --text-color: #e6e6e6;
-    --background-color: rgba(32, 178, 170, 0.12);
-    --title-background-color: rgba(32, 178, 170, 0.12);
-    border-color: #20B2AA;
-  }
-  details.callout-resource-videos summary,
-  details.callout-resource-videos summary strong,
-  details.callout-resource-videos > summary {
-    color: #f0f0f0 !important;
-  }
-  details.callout-resource-videos code {
-    color: #e6e6e6 !important;
-  }
-  details.callout-chapter-connection {
-    --text-color: #e6e6e6;
-    --background-color: rgba(30, 58, 95, 0.12);
-    --title-background-color: rgba(30, 58, 95, 0.12);
-    border-color: #1E3A5F;
-  }
-  details.callout-chapter-connection summary,
-  details.callout-chapter-connection summary strong,
-  details.callout-chapter-connection > summary {
-    color: #f0f0f0 !important;
-  }
-  details.callout-chapter-connection code {
-    color: #e6e6e6 !important;
-  }
-  details.callout-example {
-    --text-color: #e6e6e6;
-    --background-color: rgba(20, 143, 119, 0.12);
-    --title-background-color: rgba(20, 143, 119, 0.12);
-    border-color: #148F77;
-  }
-  details.callout-example summary,
-  details.callout-example summary strong,
-  details.callout-example > summary {
-    color: #f0f0f0 !important;
-  }
-  details.callout-example code {
-    color: #e6e6e6 !important;
-  }
-  details.callout-lighthouse {
-    --text-color: #e6e6e6;
-    --background-color: rgba(184, 134, 11, 0.12);
-    --title-background-color: rgba(184, 134, 11, 0.12);
-    border-color: #B8860B;
-  }
-  details.callout-lighthouse summary,
-  details.callout-lighthouse summary strong,
-  details.callout-lighthouse > summary {
-    color: #f0f0f0 !important;
-  }
-  details.callout-lighthouse code {
-    color: #e6e6e6 !important;
-  }
-  details.callout-checkpoint {
-    --text-color: #e6e6e6;
-    --background-color: rgba(217, 119, 6, 0.12);
-    --title-background-color: rgba(217, 119, 6, 0.12);
-    border-color: #D97706;
-  }
-  details.callout-checkpoint summary,
-  details.callout-checkpoint summary strong,
-  details.callout-checkpoint > summary {
-    color: #f0f0f0 !important;
-  }
-  details.callout-checkpoint code {
-    color: #e6e6e6 !important;
-  }
-  details.callout-quiz-answer {
-    --text-color: #e6e6e6;
-    --background-color: rgba(74, 124, 89, 0.12);
-    --title-background-color: rgba(74, 124, 89, 0.12);
-    border-color: #4A7C59;
-  }
-  details.callout-quiz-answer summary,
-  details.callout-quiz-answer summary strong,
-  details.callout-quiz-answer > summary {
-    color: #f0f0f0 !important;
-  }
-  details.callout-quiz-answer code {
-    color: #e6e6e6 !important;
-  }
-  details.callout-resource-exercises {
-    --text-color: #e6e6e6;
-    --background-color: rgba(32, 178, 170, 0.12);
-    --title-background-color: rgba(32, 178, 170, 0.12);
-    border-color: #20B2AA;
-  }
-  details.callout-resource-exercises summary,
-  details.callout-resource-exercises summary strong,
-  details.callout-resource-exercises > summary {
-    color: #f0f0f0 !important;
-  }
-  details.callout-resource-exercises code {
-    color: #e6e6e6 !important;
-  }
   details.callout-learning-objectives {
     --text-color: #e6e6e6;
     --background-color: rgba(74, 124, 89, 0.12);
@@ -517,34 +471,6 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
     color: #f0f0f0 !important;
   }
   details.callout-learning-objectives code {
-    color: #e6e6e6 !important;
-  }
-  details.callout-quiz-question {
-    --text-color: #e6e6e6;
-    --background-color: rgba(91, 75, 138, 0.12);
-    --title-background-color: rgba(91, 75, 138, 0.12);
-    border-color: #5B4B8A;
-  }
-  details.callout-quiz-question summary,
-  details.callout-quiz-question summary strong,
-  details.callout-quiz-question > summary {
-    color: #f0f0f0 !important;
-  }
-  details.callout-quiz-question code {
-    color: #e6e6e6 !important;
-  }
-  details.callout-resource-slides {
-    --text-color: #e6e6e6;
-    --background-color: rgba(32, 178, 170, 0.12);
-    --title-background-color: rgba(32, 178, 170, 0.12);
-    border-color: #20B2AA;
-  }
-  details.callout-resource-slides summary,
-  details.callout-resource-slides summary strong,
-  details.callout-resource-slides > summary {
-    color: #f0f0f0 !important;
-  }
-  details.callout-resource-slides code {
     color: #e6e6e6 !important;
   }
   details.callout-theorem {
@@ -561,46 +487,18 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
   details.callout-theorem code {
     color: #e6e6e6 !important;
   }
-  details.callout-code {
+  details.callout-lighthouse {
     --text-color: #e6e6e6;
-    --background-color: rgba(209, 215, 224, 0.12);
-    --title-background-color: rgba(209, 215, 224, 0.12);
-    border-color: #D1D7E0;
+    --background-color: rgba(184, 134, 11, 0.12);
+    --title-background-color: rgba(184, 134, 11, 0.12);
+    border-color: #B8860B;
   }
-  details.callout-code summary,
-  details.callout-code summary strong,
-  details.callout-code > summary {
+  details.callout-lighthouse summary,
+  details.callout-lighthouse summary strong,
+  details.callout-lighthouse > summary {
     color: #f0f0f0 !important;
   }
-  details.callout-code code {
-    color: #e6e6e6 !important;
-  }
-  details.callout-definition {
-    --text-color: #e6e6e6;
-    --background-color: rgba(27, 79, 114, 0.12);
-    --title-background-color: rgba(27, 79, 114, 0.12);
-    border-color: #1B4F72;
-  }
-  details.callout-definition summary,
-  details.callout-definition summary strong,
-  details.callout-definition > summary {
-    color: #f0f0f0 !important;
-  }
-  details.callout-definition code {
-    color: #e6e6e6 !important;
-  }
-  details.callout-colab {
-    --text-color: #e6e6e6;
-    --background-color: rgba(255, 107, 53, 0.12);
-    --title-background-color: rgba(255, 107, 53, 0.12);
-    border-color: #FF6B35;
-  }
-  details.callout-colab summary,
-  details.callout-colab summary strong,
-  details.callout-colab > summary {
-    color: #f0f0f0 !important;
-  }
-  details.callout-colab code {
+  details.callout-lighthouse code {
     color: #e6e6e6 !important;
   }
   details.callout-takeaways {
@@ -617,18 +515,144 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
   details.callout-takeaways code {
     color: #e6e6e6 !important;
   }
-  details.callout-principle {
+  details.callout-quiz-question {
     --text-color: #e6e6e6;
-    --background-color: rgba(61, 59, 142, 0.12);
-    --title-background-color: rgba(61, 59, 142, 0.12);
-    border-color: #3D3B8E;
+    --background-color: rgba(91, 75, 138, 0.12);
+    --title-background-color: rgba(91, 75, 138, 0.12);
+    border-color: #5B4B8A;
   }
-  details.callout-principle summary,
-  details.callout-principle summary strong,
-  details.callout-principle > summary {
+  details.callout-quiz-question summary,
+  details.callout-quiz-question summary strong,
+  details.callout-quiz-question > summary {
     color: #f0f0f0 !important;
   }
-  details.callout-principle code {
+  details.callout-quiz-question code {
+    color: #e6e6e6 !important;
+  }
+  details.callout-checkpoint {
+    --text-color: #e6e6e6;
+    --background-color: rgba(217, 119, 6, 0.12);
+    --title-background-color: rgba(217, 119, 6, 0.12);
+    border-color: #D97706;
+  }
+  details.callout-checkpoint summary,
+  details.callout-checkpoint summary strong,
+  details.callout-checkpoint > summary {
+    color: #f0f0f0 !important;
+  }
+  details.callout-checkpoint code {
+    color: #e6e6e6 !important;
+  }
+  details.callout-definition {
+    --text-color: #e6e6e6;
+    --background-color: rgba(27, 79, 114, 0.12);
+    --title-background-color: rgba(27, 79, 114, 0.12);
+    border-color: #1B4F72;
+  }
+  details.callout-definition summary,
+  details.callout-definition summary strong,
+  details.callout-definition > summary {
+    color: #f0f0f0 !important;
+  }
+  details.callout-definition code {
+    color: #e6e6e6 !important;
+  }
+  details.callout-resource-slides {
+    --text-color: #e6e6e6;
+    --background-color: rgba(32, 178, 170, 0.12);
+    --title-background-color: rgba(32, 178, 170, 0.12);
+    border-color: #20B2AA;
+  }
+  details.callout-resource-slides summary,
+  details.callout-resource-slides summary strong,
+  details.callout-resource-slides > summary {
+    color: #f0f0f0 !important;
+  }
+  details.callout-resource-slides code {
+    color: #e6e6e6 !important;
+  }
+  details.callout-chapter-connection {
+    --text-color: #e6e6e6;
+    --background-color: rgba(30, 58, 95, 0.12);
+    --title-background-color: rgba(30, 58, 95, 0.12);
+    border-color: #1E3A5F;
+  }
+  details.callout-chapter-connection summary,
+  details.callout-chapter-connection summary strong,
+  details.callout-chapter-connection > summary {
+    color: #f0f0f0 !important;
+  }
+  details.callout-chapter-connection code {
+    color: #e6e6e6 !important;
+  }
+  details.callout-resource-exercises {
+    --text-color: #e6e6e6;
+    --background-color: rgba(32, 178, 170, 0.12);
+    --title-background-color: rgba(32, 178, 170, 0.12);
+    border-color: #20B2AA;
+  }
+  details.callout-resource-exercises summary,
+  details.callout-resource-exercises summary strong,
+  details.callout-resource-exercises > summary {
+    color: #f0f0f0 !important;
+  }
+  details.callout-resource-exercises code {
+    color: #e6e6e6 !important;
+  }
+  details.callout-colab {
+    --text-color: #e6e6e6;
+    --background-color: rgba(255, 107, 53, 0.12);
+    --title-background-color: rgba(255, 107, 53, 0.12);
+    border-color: #FF6B35;
+  }
+  details.callout-colab summary,
+  details.callout-colab summary strong,
+  details.callout-colab > summary {
+    color: #f0f0f0 !important;
+  }
+  details.callout-colab code {
+    color: #e6e6e6 !important;
+  }
+  details.callout-code {
+    --text-color: #e6e6e6;
+    --background-color: rgba(209, 215, 224, 0.12);
+    --title-background-color: rgba(209, 215, 224, 0.12);
+    border-color: #D1D7E0;
+  }
+  details.callout-code summary,
+  details.callout-code summary strong,
+  details.callout-code > summary {
+    color: #f0f0f0 !important;
+  }
+  details.callout-code code {
+    color: #e6e6e6 !important;
+  }
+  details.callout-resource-videos {
+    --text-color: #e6e6e6;
+    --background-color: rgba(32, 178, 170, 0.12);
+    --title-background-color: rgba(32, 178, 170, 0.12);
+    border-color: #20B2AA;
+  }
+  details.callout-resource-videos summary,
+  details.callout-resource-videos summary strong,
+  details.callout-resource-videos > summary {
+    color: #f0f0f0 !important;
+  }
+  details.callout-resource-videos code {
+    color: #e6e6e6 !important;
+  }
+  details.callout-example {
+    --text-color: #e6e6e6;
+    --background-color: rgba(20, 143, 119, 0.12);
+    --title-background-color: rgba(20, 143, 119, 0.12);
+    border-color: #148F77;
+  }
+  details.callout-example summary,
+  details.callout-example summary strong,
+  details.callout-example > summary {
+    color: #f0f0f0 !important;
+  }
+  details.callout-example code {
     color: #e6e6e6 !important;
   }
   details.callout-war-story {
@@ -645,65 +669,121 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
   details.callout-war-story code {
     color: #e6e6e6 !important;
   }
+  details.callout-perspective {
+    --text-color: #e6e6e6;
+    --background-color: rgba(74, 85, 104, 0.12);
+    --title-background-color: rgba(74, 85, 104, 0.12);
+    border-color: #4A5568;
+  }
+  details.callout-perspective summary,
+  details.callout-perspective summary strong,
+  details.callout-perspective > summary {
+    color: #f0f0f0 !important;
+  }
+  details.callout-perspective code {
+    color: #e6e6e6 !important;
+  }
+  details.callout-principle {
+    --text-color: #e6e6e6;
+    --background-color: rgba(61, 59, 142, 0.12);
+    --title-background-color: rgba(61, 59, 142, 0.12);
+    border-color: #3D3B8E;
+  }
+  details.callout-principle summary,
+  details.callout-principle summary strong,
+  details.callout-principle > summary {
+    color: #f0f0f0 !important;
+  }
+  details.callout-principle code {
+    color: #e6e6e6 !important;
+  }
+  details.callout-quiz-answer {
+    --text-color: #e6e6e6;
+    --background-color: rgba(74, 124, 89, 0.12);
+    --title-background-color: rgba(74, 124, 89, 0.12);
+    border-color: #4A7C59;
+  }
+  details.callout-quiz-answer summary,
+  details.callout-quiz-answer summary strong,
+  details.callout-quiz-answer > summary {
+    color: #f0f0f0 !important;
+  }
+  details.callout-quiz-answer code {
+    color: #e6e6e6 !important;
+  }
+  details.callout-notebook {
+    --text-color: #e6e6e6;
+    --background-color: rgba(44, 82, 130, 0.12);
+    --title-background-color: rgba(44, 82, 130, 0.12);
+    border-color: #2C5282;
+  }
+  details.callout-notebook summary,
+  details.callout-notebook summary strong,
+  details.callout-notebook > summary {
+    color: #f0f0f0 !important;
+  }
+  details.callout-notebook code {
+    color: #e6e6e6 !important;
+  }
 }
 </style>
 <style>
-details.callout-notebook > summary::before {
-  background-image: url("../../../assets/images/icons/callouts/icon_callout_notebook.png");
-}
-details.callout-perspective > summary::before {
-  background-image: url("../../../assets/images/icons/callouts/icon_callout_perspective.png");
-}
-details.callout-resource-videos > summary::before {
-  background-image: url("../../../assets/images/icons/callouts/icon_callout_resource_videos.png");
-}
-details.callout-chapter-connection > summary::before {
-  background-image: url("../../../assets/images/icons/callouts/icon_callout_chapter_connection.png");
-}
-details.callout-example > summary::before {
-  background-image: url("../../../assets/images/icons/callouts/icon_callout_example.png");
-}
-details.callout-lighthouse > summary::before {
-  background-image: url("../../../assets/images/icons/callouts/icon_callout_lighthouse.png");
-}
-details.callout-checkpoint > summary::before {
-  background-image: url("../../../assets/images/icons/callouts/icon_callout_checkpoint.png");
-}
-details.callout-quiz-answer > summary::before {
-  background-image: url("../../../assets/images/icons/callouts/icon_callout_quiz_answer.png");
-}
-details.callout-resource-exercises > summary::before {
-  background-image: url("../../../assets/images/icons/callouts/icon_callout_resource_exercises.png");
-}
 details.callout-learning-objectives > summary::before {
   background-image: url("../../../assets/images/icons/callouts/icon_callout_learning_objectives.png");
-}
-details.callout-quiz-question > summary::before {
-  background-image: url("../../../assets/images/icons/callouts/icon_callout_quiz_question.png");
-}
-details.callout-resource-slides > summary::before {
-  background-image: url("../../../assets/images/icons/callouts/icon_callout_resource_slides.png");
 }
 details.callout-theorem > summary::before {
   background-image: url("../../../assets/images/icons/callouts/icon_callout_theorem.png");
 }
-details.callout-code > summary::before {
-  background-image: url("../../../assets/images/icons/callouts/icon_callout_code.png");
-}
-details.callout-definition > summary::before {
-  background-image: url("../../../assets/images/icons/callouts/icon_callout_definition.png");
-}
-details.callout-colab > summary::before {
-  background-image: url("../../../assets/images/icons/callouts/icon_callout_colab.png");
+details.callout-lighthouse > summary::before {
+  background-image: url("../../../assets/images/icons/callouts/icon_callout_lighthouse.png");
 }
 details.callout-takeaways > summary::before {
   background-image: url("../../../assets/images/icons/callouts/icon_callout_takeaways.png");
 }
-details.callout-principle > summary::before {
-  background-image: url("../../../assets/images/icons/callouts/icon_callout_principle.png");
+details.callout-quiz-question > summary::before {
+  background-image: url("../../../assets/images/icons/callouts/icon_callout_quiz_question.png");
+}
+details.callout-checkpoint > summary::before {
+  background-image: url("../../../assets/images/icons/callouts/icon_callout_checkpoint.png");
+}
+details.callout-definition > summary::before {
+  background-image: url("../../../assets/images/icons/callouts/icon_callout_definition.png");
+}
+details.callout-resource-slides > summary::before {
+  background-image: url("../../../assets/images/icons/callouts/icon_callout_resource_slides.png");
+}
+details.callout-chapter-connection > summary::before {
+  background-image: url("../../../assets/images/icons/callouts/icon_callout_chapter_connection.png");
+}
+details.callout-resource-exercises > summary::before {
+  background-image: url("../../../assets/images/icons/callouts/icon_callout_resource_exercises.png");
+}
+details.callout-colab > summary::before {
+  background-image: url("../../../assets/images/icons/callouts/icon_callout_colab.png");
+}
+details.callout-code > summary::before {
+  background-image: url("../../../assets/images/icons/callouts/icon_callout_code.png");
+}
+details.callout-resource-videos > summary::before {
+  background-image: url("../../../assets/images/icons/callouts/icon_callout_resource_videos.png");
+}
+details.callout-example > summary::before {
+  background-image: url("../../../assets/images/icons/callouts/icon_callout_example.png");
 }
 details.callout-war-story > summary::before {
   background-image: url("../../../assets/images/icons/callouts/icon_callout_war_story.png");
+}
+details.callout-perspective > summary::before {
+  background-image: url("../../../assets/images/icons/callouts/icon_callout_perspective.png");
+}
+details.callout-principle > summary::before {
+  background-image: url("../../../assets/images/icons/callouts/icon_callout_principle.png");
+}
+details.callout-quiz-answer > summary::before {
+  background-image: url("../../../assets/images/icons/callouts/icon_callout_quiz_answer.png");
+}
+details.callout-notebook > summary::before {
+  background-image: url("../../../assets/images/icons/callouts/icon_callout_notebook.png");
 }
 </style>
 
@@ -746,7 +826,7 @@ window.Quarto = {
 <meta name="twitter:card" content="summary_large_image">
 </head>
 
-<body class="nav-sidebar floating nav-fixed quarto-light"><script id="quarto-html-before-body" type="application/javascript">
+<body class="nav-sidebar floating nav-fixed slimcontent quarto-light"><script id="quarto-html-before-body" type="application/javascript">
     const toggleBodyColorMode = (bsSheetEl) => {
       const mode = bsSheetEl.getAttribute("data-mode");
       const bodyEl = window.document.querySelector("body");
@@ -921,7 +1001,7 @@ window.Quarto = {
 
 <div id="quarto-search-results"></div>
   <header id="quarto-header" class="headroom fixed-top">
-    <nav class="navbar navbar-expand-lg " data-bs-theme="dark">
+    <nav class="navbar navbar-expand-xl " data-bs-theme="dark">
       <div class="navbar-container container-fluid">
       <div class="navbar-brand-container mx-auto">
     <a href="../../../index.html" class="navbar-brand navbar-brand-logo">
@@ -929,7 +1009,7 @@ window.Quarto = {
     <img src="../../../assets/images/icons/logo-seas-shield.png" alt="" class="navbar-logo dark-content">
     </a>
     <a class="navbar-brand" href="../../../index.html">
-    <span class="navbar-title">Introduction to Machine Learning Systems</span>
+    <span class="navbar-title">Machine Learning Systems</span>
     </a>
   </div>
             <div id="quarto-search" class="" title="Search"></div>
@@ -1087,7 +1167,7 @@ window.Quarto = {
     </a>
     <ul class="dropdown-menu" aria-labelledby="nav-menu-about">    
         <li>
-    <a class="dropdown-item" href="https://mlsysbook.ai/about/#mission"><i class="bi bi-bullseye" role="img">
+    <a class="dropdown-item" href="https://mlsysbook.ai/about/"><i class="bi bi-bullseye" role="img">
 </i> 
  <span class="dropdown-text">Mission</span></a>
   </li>  
@@ -1178,8 +1258,8 @@ window.Quarto = {
         </a>
     </div>
   </nav>
-  <div id="quarto-announcement" data-announcement-id="0570135b026c6062a1e92f030dbc6e0a" class="alert alert-primary hidden"><i class="bi bi-megaphone quarto-announcement-icon"></i><div class="quarto-announcement-content">
-<p>📘 <strong>Volume I: Foundations.</strong> Single-machine ML systems — data, algorithms, and machines. <a href="https://mlsysbook.ai/vol1/">Start reading →</a><br> 🚀 <strong>Ready for scale?</strong> <a href="https://mlsysbook.ai/vol2/">Volume II: At Scale</a> — distributed training, fleet operations, responsible deployment.<br> 🛠️ <strong>Alongside the book:</strong> <a href="https://mlsysbook.ai/tinytorch/">TinyTorch</a> (build) · <a href="https://mlsysbook.ai/kits/">Hardware Kits</a> (deploy) · <a href="https://mlsysbook.ai/mlsysim/">MLSys·im</a> (simulate)<br> 📬 <strong>Newsletter:</strong> ML Systems insights &amp; updates — <a href="https://mlsysbook.ai/newsletter/">Subscribe →</a></p>
+  <div id="quarto-announcement" data-announcement-id="56c90339a8ee2e96db7270fb2f3d1756" class="alert alert-primary hidden"><i class="bi bi-megaphone quarto-announcement-icon"></i><div class="quarto-announcement-content">
+<p>📘 <strong>Volume I: Foundations.</strong> Single-machine ML systems — data, algorithms, and machines. <a href="https://mlsysbook.ai/vol1/">Start reading →</a><br> 🚀 <strong>Ready for scale?</strong> <a href="https://mlsysbook.ai/vol2/">Volume II: At Scale</a> — distributed training, fleet operations, responsible deployment.<br> 🛠️ <strong>Alongside the book:</strong> <a href="https://mlsysbook.ai/tinytorch/">TinyTorch</a> (build) · <a href="https://mlsysbook.ai/kits/">Hardware Kits</a> (deploy) · <a href="https://mlsysbook.ai/mlsysim/">MLSys·im</a> (model) · <a href="https://mlsysbook.ai/labs/">Labs</a> (explore) · <a href="https://mlsysbook.ai/staffml/">StaffML</a> (practice)<br> 📬 <strong>Newsletter:</strong> ML Systems insights &amp; updates — <a href="https://mlsysbook.ai/newsletter/">Subscribe →</a></p>
 </div><i class="bi bi-x-lg quarto-announcement-action"></i></div>
 </header>
 <!-- content -->
@@ -1221,7 +1301,7 @@ window.Quarto = {
         <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="../../../contents/vol1/frontmatter/notation.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text">Notations</span></a>
+ <span class="menu-text">Notation and Conventions</span></a>
   </div>
 </li>
         <li class="px-0"><hr class="sidebar-divider hi "></li>
@@ -1468,38 +1548,27 @@ window.Quarto = {
 <section id="purpose" class="level2 unnumbered">
 <h2 class="unnumbered anchored" data-anchor-id="purpose">Purpose</h2>
 <p><em>What assumptions sit underneath the “napkin math” throughout the book?</em></p>
-<p>Every quantitative example in this book—from training-time estimates to energy-per-inference calculations—rests on a shared set of physical constants, hardware specifications, and economic assumptions. Rather than scatter these values across chapters (where they would inevitably diverge), we define them once in the book’s source code (<code>mlsys/constants.py</code>) and import them wherever a calculation needs them. This appendix exposes every constant in that file so you can audit, verify, or update the numbers that underpin the book’s reasoning.</p>
-<div id="callout-learning-objectives*-1.1" class="callout callout-learning-objectives">
-<details class="callout-learning-objectives fbx-simplebox fbx-default" open=""><summary><strong>Learning Objectives</strong></summary><div>
-<ul>
-<li><strong>Locate</strong> the hardware specification (peak <strong>FLOPS</strong>, memory bandwidth, memory capacity, <strong>TDP</strong>) for any accelerator generation referenced in the book</li>
-<li><strong>Trace</strong> any computed value in the book back to the specific constants and formulas that produced it</li>
-<li><strong>Apply</strong> these constants in back-of-the-envelope calculations for training time, memory requirements, and energy costs</li>
-<li><strong>Distinguish</strong> between peak (datasheet) values and achievable throughput, and explain why <strong>utilization gaps</strong> exist</li>
-<li><strong>Update</strong> a single constant and understand how the change propagates to every chapter that depends on it</li>
-</ul>
-</div></details>
-</div>
+<p>Every quantitative example in this book—from training-time estimates to energy-per-inference calculations—rests on a shared set of physical constants, hardware specifications, and economic assumptions. Rather than scatter these values across chapters (where they would inevitably diverge), we define them once in the book’s source code (<code>mlsysim/core/constants.py</code>) and import them wherever a calculation needs them. This appendix exposes every constant in that file so the numbers that underpin the book’s reasoning are open to audit, verification, and update.</p>
 </section>
 <section id="how-to-use-this-appendix" class="level2 unnumbered">
 <h2 class="unnumbered anchored" data-anchor-id="how-to-use-this-appendix">How to Use This Appendix</h2>
-<p>Use this appendix as a reference when you want to verify a napkin-math calculation, swap in an alternative assumption (for example, a different memory bandwidth or electricity price), or trace which constants a particular estimate depends on. Each constant name matches its Python identifier in <code>mlsys/constants.py</code>, so you can search for any name in the book’s source to find every chapter that uses it.</p>
-<p>The following tables are organized into thematic groups—accelerator specifications, model parameters, energy constants, interconnect bandwidths, and so on—so you can quickly locate related assumptions without scanning an alphabetical list. Conventions used here follow the book-wide notation (for example, we reserve <span class="math inline">\(B\)</span> for batch size and use <span class="math inline">\(\text{BW}\)</span> for bandwidth).</p>
-<p>Because hardware generations change faster than textbooks, these tables also serve as a change log of sorts: updating a single value in <code>mlsys/constants.py</code> propagates the change to every calculation in every chapter automatically. The following worked examples demonstrate how to combine these constants for quick back-of-the-envelope estimates.</p>
-<div id="callout-notebook-1.1" class="callout callout-notebook" title="Napkin Math with These Constants">
-<p></p><details class="callout-notebook fbx-simplebox fbx-default" open=""><summary><strong>Napkin Math 1.1: Napkin Math with These Constants</strong></summary><div>The constants in this appendix are not just for auditing—they are designed for quick calculations. Three examples illustrate the pattern.<p></p>
+<p>This appendix serves as a reference for verifying a napkin-math calculation, swapping in an alternative assumption (for example, a different memory bandwidth or electricity price), or tracing which constants a particular estimate depends on. Each constant name matches its Python identifier in <code>mlsysim/core/constants.py</code>, so searching for any name in the book’s source surfaces every chapter that uses it.</p>
+<p>The following tables are organized into thematic groups—accelerator specifications, model parameters, energy constants, interconnect bandwidths, and so on—so related assumptions surface quickly without scanning an alphabetical list. Conventions used here follow the book-wide notation (for example, we reserve <span class="math inline">\(B\)</span> for batch size and use <span class="math inline">\(\text{BW}\)</span> for bandwidth).</p>
+<p>Because hardware generations change faster than textbooks, these tables also serve as a change log of sorts: updating a single value in <code>mlsysim/core/constants.py</code> propagates the change to every calculation in every chapter automatically. The following worked examples demonstrate how to combine these constants for quick back-of-the-envelope estimates.</p>
+<div id="callout-notebook-1.1" class="callout callout-notebook" title="Napkin math with these constants">
+<p></p><details class="callout-notebook fbx-simplebox fbx-default" open=""><summary><strong>Napkin Math 1.1: Napkin math with these constants</strong></summary><div>The constants in this appendix are not just for auditing—they are designed for quick calculations. Three examples illustrate the pattern.<p></p>
 <p><strong>Is this workload compute bound or memory-bound?</strong> Divide peak FLOPS by memory bandwidth to get the <em>ridge point</em> (<strong><a href="appendix_machine.html#sec-machine-foundations-roofline-model-2529">The roofline model</a></strong>). For an H100: 989 TFLOPS / 3.35 TB/s <span class="math inline">\(\approx\)</span> 295 FLOP/byte. Any operation with arithmetic intensity above 295 FLOP/byte is compute bound; below it, memory bound. A large general matrix multiply (GEMM) with <span class="math inline">\(n=\)</span> 4,096 has intensity <span class="math inline">\(n/3 \approx\)</span> 1,365 FLOP/byte (compute bound). A single-token autoregressive decode has intensity <span class="math inline">\(\approx 1\)</span> FLOP/byte (deeply memory bound).</p>
-<p><strong>How much memory does training a 7B model require?</strong> Mixed-precision Adaptive Moment Estimation (Adam) stores 2 bytes (BF16 weights) + 2 bytes (gradients) + 12 bytes (FP32 master weights + momentum + variance) = 16 bytes per parameter. For 7B parameters: 7 <span class="math inline">\(\times 10^9 \times\)</span> 16 bytes = 112 GB. An A100 or H100 has 86 GB of HBM, so the model state alone exceeds a single accelerator—before accounting for activations.</p>
-<p><strong>How much energy does one GPT-3 training run cost?</strong> An A100 draws 400 W at TDP. GPT-3 training used roughly <span class="math inline">\(3.14 \times 10^{23}\)</span> FLOPS across ~25 accelerator-days. At $0.12/kWh: ~25 accelerator-days <span class="math inline">\(\times\)</span> 24 h/day <span class="math inline">\(\times\)</span> 0.4 kW <span class="math inline">\(\times\)</span> $0.12/kWh <span class="math inline">\(\approx\)</span> ~\\\\$29 in electricity alone—a small fraction of the total cost, which is dominated by accelerator amortization.</p>
+<p><strong>How much memory does training a 7B model require?</strong> Mixed-precision Adaptive Moment Estimation (Adam) stores 2 bytes (BF16 weights) + 2 bytes (gradients) + 12 bytes (FP32 master weights + momentum + variance) = 16 bytes per parameter. For 7B parameters: 7 <span class="math inline">\(\times 10^9 \times\)</span> 16 bytes = 112 GB. An H100 has 80 GB of HBM, so the model state alone exceeds a single accelerator—before accounting for activations.</p>
+<p><strong>How much energy would a GPT-3-scale training run cost on the reference cluster?</strong> An A100 draws 400 W at TDP. Using 1,024 A100s as a normalization for a run requiring roughly <span class="math inline">\(3.14 \times 10^{23}\)</span> FLOPs gives ~25 wall-clock days at the assumed utilization. At $0.12/kWh: ~25 wall-clock days <span class="math inline">\(\times\)</span> 1,024 A100s <span class="math inline">\(\times\)</span> 24 h/day <span class="math inline">\(\times\)</span> 0.4 kW <span class="math inline">\(\times\)</span> $0.12/kWh <span class="math inline">\(\approx\)</span> ~USD 29,491 in electricity alone—a small fraction of the total cost, which is dominated by accelerator amortization. The original GPT-3 run used V100-era infrastructure; this calculation is an A100-equivalent reference estimate.</p>
 </div></details>
 </div>
 </section>
-<section id="accelerator-specifications" class="level2 unnumbered page-columns page-full">
+<section id="accelerator-specifications" class="level2 unnumbered">
 <h2 class="unnumbered anchored" data-anchor-id="accelerator-specifications">Accelerator Specifications</h2>
 <p>The tables in this section capture the peak compute throughput, memory bandwidth, memory capacity, and thermal design power (TDP) for each accelerator generation referenced in the book. These are datasheet numbers—actual workloads rarely sustain peak rates—but they set the ceiling that roofline analysis and utilization calculations measure against. The accelerator tables progress chronologically from <a href="#tbl-assumptions-v100" class="quarto-xref">Table&nbsp;1</a> (Volta) and <a href="#tbl-assumptions-t4" class="quarto-xref">Table&nbsp;2</a> (Turing) through more recent generations.</p>
-<section id="nvidia-v100" class="level3 unnumbered page-columns page-full">
+<section id="nvidia-v100" class="level3 unnumbered">
 <h3 class="unnumbered anchored" data-anchor-id="nvidia-v100">NVIDIA V100</h3>
-<div id="tbl-assumptions-v100" class="column-page quarto-float quarto-figure quarto-figure-center anchored">
+<div id="tbl-assumptions-v100" class="quarto-float quarto-figure quarto-figure-center anchored" data-tbl-colwidths="[34,33,33]">
 <figure class="quarto-float quarto-float-tbl figure">
 <figcaption class="quarto-float-caption-top quarto-float-caption quarto-float-tbl" id="tbl-assumptions-v100-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
 Table&nbsp;1: <strong>NVIDIA V100 (Volta)</strong>: The V100 introduced Tensor Cores for mixed-precision training. These specs anchor the “baseline generation” comparisons used in several training-cost estimates.
@@ -1507,42 +1576,42 @@ Table&nbsp;1: <strong>NVIDIA V100 (Volta)</strong>: The V100 introduced Tensor C
 <div aria-describedby="tbl-assumptions-v100-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
 <table class="caption-top table">
 <colgroup>
-<col style="width: 22%">
-<col style="width: 38%">
-<col style="width: 39%">
+<col style="width: 34%">
+<col style="width: 33%">
+<col style="width: 33%">
 </colgroup>
 <thead>
 <tr class="header">
 <th style="text-align: left;"><strong>Constant</strong></th>
-<th style="text-align: right;"><strong>Value</strong></th>
-<th style="text-align: left;"><strong>Unit</strong></th>
+<th style="text-align: center;"><strong>Value</strong></th>
+<th style="text-align: center;"><strong>Unit</strong></th>
 </tr>
 </thead>
 <tbody>
 <tr class="odd">
-<td style="text-align: left;"><strong>V100_FLOPS_FP16_TENSOR</strong></td>
-<td style="text-align: right;">125</td>
-<td style="text-align: left;">TFLOPs/s</td>
+<td style="text-align: left;"><code>V100_FLOPS_FP16_TENSOR</code></td>
+<td style="text-align: center;">125</td>
+<td style="text-align: center;">TFLOPs/s</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>V100_FLOPS_FP32</strong></td>
-<td style="text-align: right;">15.7</td>
-<td style="text-align: left;">TFLOPs/s</td>
+<td style="text-align: left;"><code>V100_FLOPS_FP32</code></td>
+<td style="text-align: center;">15.7</td>
+<td style="text-align: center;">TFLOPs/s</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>V100_MEM_BW</strong></td>
-<td style="text-align: right;">900</td>
-<td style="text-align: left;">GB/s</td>
+<td style="text-align: left;"><code>V100_MEM_BW</code></td>
+<td style="text-align: center;">900</td>
+<td style="text-align: center;">GB/s</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>V100_MEM_CAPACITY</strong></td>
-<td style="text-align: right;">32</td>
-<td style="text-align: left;">GiB</td>
+<td style="text-align: left;"><code>V100_MEM_CAPACITY</code></td>
+<td style="text-align: center;">32</td>
+<td style="text-align: center;">GiB</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>V100_TDP</strong></td>
-<td style="text-align: right;">300</td>
-<td style="text-align: left;">W</td>
+<td style="text-align: left;"><code>V100_TDP</code></td>
+<td style="text-align: center;">300</td>
+<td style="text-align: center;">W</td>
 </tr>
 </tbody>
 </table>
@@ -1550,47 +1619,47 @@ Table&nbsp;1: <strong>NVIDIA V100 (Volta)</strong>: The V100 introduced Tensor C
 </figure>
 </div>
 </section>
-<section id="nvidia-t4" class="level3 unnumbered page-columns page-full">
+<section id="nvidia-t4" class="level3 unnumbered">
 <h3 class="unnumbered anchored" data-anchor-id="nvidia-t4">NVIDIA T4</h3>
-<div id="tbl-assumptions-t4" class="column-page quarto-float quarto-figure quarto-figure-center anchored">
+<div id="tbl-assumptions-t4" class="quarto-float quarto-figure quarto-figure-center anchored" data-tbl-colwidths="[34,33,33]">
 <figure class="quarto-float quarto-float-tbl figure">
 <figcaption class="quarto-float-caption-top quarto-float-caption quarto-float-tbl" id="tbl-assumptions-t4-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
-Table&nbsp;2: <strong>NVIDIA T4 (Turing)</strong>: A low-power inference accelerator widely deployed in cloud serving. Its 70 W TDP makes it the go-to comparison point for cost-per-inference calculations.
+Table&nbsp;2: <strong>NVIDIA T4 (Turing)</strong>: A low-power inference accelerator widely deployed in cloud serving. Its 70 W TDP makes it a canonical reference point for cost-per-inference calculations.
 </figcaption>
 <div aria-describedby="tbl-assumptions-t4-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
 <table class="caption-top table">
 <colgroup>
-<col style="width: 21%">
-<col style="width: 38%">
-<col style="width: 39%">
+<col style="width: 34%">
+<col style="width: 33%">
+<col style="width: 33%">
 </colgroup>
 <thead>
 <tr class="header">
 <th style="text-align: left;"><strong>Constant</strong></th>
-<th style="text-align: right;"><strong>Value</strong></th>
-<th style="text-align: left;"><strong>Unit</strong></th>
+<th style="text-align: center;"><strong>Value</strong></th>
+<th style="text-align: center;"><strong>Unit</strong></th>
 </tr>
 </thead>
 <tbody>
 <tr class="odd">
-<td style="text-align: left;"><strong>T4_FLOPS_FP16_TENSOR</strong></td>
-<td style="text-align: right;">65</td>
-<td style="text-align: left;">TFLOPs/s</td>
+<td style="text-align: left;"><code>T4_FLOPS_FP16_TENSOR</code></td>
+<td style="text-align: center;">65</td>
+<td style="text-align: center;">TFLOPs/s</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>T4_FLOPS_INT8</strong></td>
-<td style="text-align: right;">130</td>
-<td style="text-align: left;">TFLOPs/s</td>
+<td style="text-align: left;"><code>T4_FLOPS_INT8</code></td>
+<td style="text-align: center;">130</td>
+<td style="text-align: center;">TFLOPs/s</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>T4_MEM_BW</strong></td>
-<td style="text-align: right;">320</td>
-<td style="text-align: left;">GB/s</td>
+<td style="text-align: left;"><code>T4_MEM_BW</code></td>
+<td style="text-align: center;">320</td>
+<td style="text-align: center;">GB/s</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>T4_TDP</strong></td>
-<td style="text-align: right;">70</td>
-<td style="text-align: left;">W</td>
+<td style="text-align: left;"><code>T4_TDP</code></td>
+<td style="text-align: center;">70</td>
+<td style="text-align: center;">W</td>
 </tr>
 </tbody>
 </table>
@@ -1598,10 +1667,10 @@ Table&nbsp;2: <strong>NVIDIA T4 (Turing)</strong>: A low-power inference acceler
 </figure>
 </div>
 </section>
-<section id="nvidia-a100" class="level3 unnumbered page-columns page-full">
+<section id="nvidia-a100" class="level3 unnumbered">
 <h3 class="unnumbered anchored" data-anchor-id="nvidia-a100">NVIDIA A100</h3>
 <p><a href="#tbl-assumptions-a100" class="quarto-xref">Table&nbsp;3</a> lists the Ampere-generation specs that anchor most training examples in the book.</p>
-<div id="tbl-assumptions-a100" class="column-page quarto-float quarto-figure quarto-figure-center anchored">
+<div id="tbl-assumptions-a100" class="quarto-float quarto-figure quarto-figure-center anchored" data-tbl-colwidths="[50,20,30]">
 <figure class="quarto-float quarto-float-tbl figure">
 <figcaption class="quarto-float-caption-top quarto-float-caption quarto-float-tbl" id="tbl-assumptions-a100-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
 Table&nbsp;3: <strong>NVIDIA A100 (Ampere)</strong>: The A100 is the most commonly cited accelerator in the book’s training examples. Its 80 GB HBM2e capacity and TF32 Tensor Cores set the reference point for memory-capacity and compute-intensity calculations.
@@ -1609,52 +1678,52 @@ Table&nbsp;3: <strong>NVIDIA A100 (Ampere)</strong>: The A100 is the most common
 <div aria-describedby="tbl-assumptions-a100-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
 <table class="caption-top table">
 <colgroup>
-<col style="width: 22%">
-<col style="width: 38%">
-<col style="width: 39%">
+<col style="width: 50%">
+<col style="width: 20%">
+<col style="width: 30%">
 </colgroup>
 <thead>
 <tr class="header">
 <th style="text-align: left;"><strong>Constant</strong></th>
-<th style="text-align: right;"><strong>Value</strong></th>
-<th style="text-align: left;"><strong>Unit</strong></th>
+<th style="text-align: center;"><strong>Value</strong></th>
+<th style="text-align: center;"><strong>Unit</strong></th>
 </tr>
 </thead>
 <tbody>
 <tr class="odd">
-<td style="text-align: left;"><strong>A100_FLOPS_FP16_TENSOR</strong></td>
-<td style="text-align: right;">312</td>
-<td style="text-align: left;">TFLOPs/s</td>
+<td style="text-align: left;"><code>A100_FLOPS_FP16_TENSOR</code></td>
+<td style="text-align: center;">312</td>
+<td style="text-align: center;">TFLOPs/s</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>A100_FLOPS_FP32</strong></td>
-<td style="text-align: right;">19.5</td>
-<td style="text-align: left;">TFLOPs/s</td>
+<td style="text-align: left;"><code>A100_FLOPS_FP32</code></td>
+<td style="text-align: center;">19.5</td>
+<td style="text-align: center;">TFLOPs/s</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>A100_FLOPS_INT8</strong></td>
-<td style="text-align: right;">624</td>
-<td style="text-align: left;">TFLOPs/s</td>
+<td style="text-align: left;"><code>A100_FLOPS_INT8</code></td>
+<td style="text-align: center;">624</td>
+<td style="text-align: center;">TFLOPs/s</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>A100_FLOPS_TF32</strong></td>
-<td style="text-align: right;">156</td>
-<td style="text-align: left;">TFLOPs/s</td>
+<td style="text-align: left;"><code>A100_FLOPS_TF32</code></td>
+<td style="text-align: center;">156</td>
+<td style="text-align: center;">TFLOPs/s</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>A100_MEM_BW</strong></td>
-<td style="text-align: right;">2039</td>
-<td style="text-align: left;">GB/s</td>
+<td style="text-align: left;"><code>A100_MEM_BW</code></td>
+<td style="text-align: center;">2039</td>
+<td style="text-align: center;">GB/s</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>A100_MEM_CAPACITY</strong></td>
-<td style="text-align: right;">80</td>
-<td style="text-align: left;">GiB</td>
+<td style="text-align: left;"><code>A100_MEM_CAPACITY</code></td>
+<td style="text-align: center;">80</td>
+<td style="text-align: center;">GiB</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>A100_TDP</strong></td>
-<td style="text-align: right;">400</td>
-<td style="text-align: left;">W</td>
+<td style="text-align: left;"><code>A100_TDP</code></td>
+<td style="text-align: center;">400</td>
+<td style="text-align: center;">W</td>
 </tr>
 </tbody>
 </table>
@@ -1662,10 +1731,10 @@ Table&nbsp;3: <strong>NVIDIA A100 (Ampere)</strong>: The A100 is the most common
 </figure>
 </div>
 </section>
-<section id="nvidia-h100" class="level3 unnumbered page-columns page-full">
+<section id="nvidia-h100" class="level3 unnumbered">
 <h3 class="unnumbered anchored" data-anchor-id="nvidia-h100">NVIDIA H100</h3>
 <p><a href="#tbl-assumptions-h100" class="quarto-xref">Table&nbsp;4</a> adds Hopper-generation FP8 Tensor Cores and the Transformer Engine, driving “current generation” estimates.</p>
-<div id="tbl-assumptions-h100" class="column-page quarto-float quarto-figure quarto-figure-center anchored">
+<div id="tbl-assumptions-h100" class="quarto-float quarto-figure quarto-figure-center anchored" data-tbl-colwidths="[50,20,30]">
 <figure class="quarto-float quarto-float-tbl figure">
 <figcaption class="quarto-float-caption-top quarto-float-caption quarto-float-tbl" id="tbl-assumptions-h100-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
 Table&nbsp;4: <strong>NVIDIA H100 (Hopper)</strong>: The H100 adds FP8 Tensor Cores and the Transformer Engine. Its specs drive the “current generation” training and serving estimates.
@@ -1673,52 +1742,52 @@ Table&nbsp;4: <strong>NVIDIA H100 (Hopper)</strong>: The H100 adds FP8 Tensor Co
 <div aria-describedby="tbl-assumptions-h100-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
 <table class="caption-top table">
 <colgroup>
-<col style="width: 22%">
-<col style="width: 38%">
-<col style="width: 39%">
+<col style="width: 50%">
+<col style="width: 20%">
+<col style="width: 30%">
 </colgroup>
 <thead>
 <tr class="header">
 <th style="text-align: left;"><strong>Constant</strong></th>
-<th style="text-align: right;"><strong>Value</strong></th>
-<th style="text-align: left;"><strong>Unit</strong></th>
+<th style="text-align: center;"><strong>Value</strong></th>
+<th style="text-align: center;"><strong>Unit</strong></th>
 </tr>
 </thead>
 <tbody>
 <tr class="odd">
-<td style="text-align: left;"><strong>H100_FLOPS_FP16_TENSOR</strong></td>
-<td style="text-align: right;">989</td>
-<td style="text-align: left;">TFLOPs/s</td>
+<td style="text-align: left;"><code>H100_FLOPS_FP16_TENSOR</code></td>
+<td style="text-align: center;">989</td>
+<td style="text-align: center;">TFLOPs/s</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>H100_FLOPS_FP8_TENSOR</strong></td>
-<td style="text-align: right;">1979</td>
-<td style="text-align: left;">TFLOPs/s</td>
+<td style="text-align: left;"><code>H100_FLOPS_FP8_TENSOR</code></td>
+<td style="text-align: center;">1979</td>
+<td style="text-align: center;">TFLOPs/s</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>H100_FLOPS_INT8</strong></td>
-<td style="text-align: right;">1979</td>
-<td style="text-align: left;">TFLOPs/s</td>
+<td style="text-align: left;"><code>H100_FLOPS_INT8</code></td>
+<td style="text-align: center;">1979</td>
+<td style="text-align: center;">TFLOPs/s</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>H100_FLOPS_TF32</strong></td>
-<td style="text-align: right;">494</td>
-<td style="text-align: left;">TFLOPs/s</td>
+<td style="text-align: left;"><code>H100_FLOPS_TF32</code></td>
+<td style="text-align: center;">494</td>
+<td style="text-align: center;">TFLOPs/s</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>H100_MEM_BW</strong></td>
-<td style="text-align: right;">3.35</td>
-<td style="text-align: left;">TB/s</td>
+<td style="text-align: left;"><code>H100_MEM_BW</code></td>
+<td style="text-align: center;">3.35</td>
+<td style="text-align: center;">TB/s</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>H100_MEM_CAPACITY</strong></td>
-<td style="text-align: right;">80</td>
-<td style="text-align: left;">GiB</td>
+<td style="text-align: left;"><code>H100_MEM_CAPACITY</code></td>
+<td style="text-align: center;">80</td>
+<td style="text-align: center;">GiB</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>H100_TDP</strong></td>
-<td style="text-align: right;">700</td>
-<td style="text-align: left;">W</td>
+<td style="text-align: left;"><code>H100_TDP</code></td>
+<td style="text-align: center;">700</td>
+<td style="text-align: center;">W</td>
 </tr>
 </tbody>
 </table>
@@ -1726,10 +1795,10 @@ Table&nbsp;4: <strong>NVIDIA H100 (Hopper)</strong>: The H100 adds FP8 Tensor Co
 </figure>
 </div>
 </section>
-<section id="nvidia-b200" class="level3 unnumbered page-columns page-full">
+<section id="nvidia-b200" class="level3 unnumbered">
 <h3 class="unnumbered anchored" data-anchor-id="nvidia-b200">NVIDIA B200</h3>
 <p><a href="#tbl-assumptions-b200" class="quarto-xref">Table&nbsp;5</a> provides Blackwell-generation specs used in forward-looking capacity-planning examples.</p>
-<div id="tbl-assumptions-b200" class="column-page quarto-float quarto-figure quarto-figure-center anchored">
+<div id="tbl-assumptions-b200" class="quarto-float quarto-figure quarto-figure-center anchored" data-tbl-colwidths="[50,20,30]">
 <figure class="quarto-float quarto-float-tbl figure">
 <figcaption class="quarto-float-caption-top quarto-float-caption quarto-float-tbl" id="tbl-assumptions-b200-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
 Table&nbsp;5: <strong>NVIDIA B200 (Blackwell)</strong>: The B200 represents the next-generation reference point. Its HBM3e bandwidth and FP8 throughput appear in forward-looking capacity-planning examples.
@@ -1737,47 +1806,47 @@ Table&nbsp;5: <strong>NVIDIA B200 (Blackwell)</strong>: The B200 represents the 
 <div aria-describedby="tbl-assumptions-b200-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
 <table class="caption-top table">
 <colgroup>
-<col style="width: 22%">
-<col style="width: 38%">
-<col style="width: 39%">
+<col style="width: 50%">
+<col style="width: 20%">
+<col style="width: 30%">
 </colgroup>
 <thead>
 <tr class="header">
 <th style="text-align: left;"><strong>Constant</strong></th>
-<th style="text-align: right;"><strong>Value</strong></th>
-<th style="text-align: left;"><strong>Unit</strong></th>
+<th style="text-align: center;"><strong>Value</strong></th>
+<th style="text-align: center;"><strong>Unit</strong></th>
 </tr>
 </thead>
 <tbody>
 <tr class="odd">
-<td style="text-align: left;"><strong>B200_FLOPS_FP16_TENSOR</strong></td>
-<td style="text-align: right;">2250</td>
-<td style="text-align: left;">TFLOPs/s</td>
+<td style="text-align: left;"><code>B200_FLOPS_FP16_TENSOR</code></td>
+<td style="text-align: center;">2250</td>
+<td style="text-align: center;">TFLOPs/s</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>B200_FLOPS_FP8_TENSOR</strong></td>
-<td style="text-align: right;">4500</td>
-<td style="text-align: left;">TFLOPs/s</td>
+<td style="text-align: left;"><code>B200_FLOPS_FP8_TENSOR</code></td>
+<td style="text-align: center;">4500</td>
+<td style="text-align: center;">TFLOPs/s</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>B200_FLOPS_INT4</strong></td>
-<td style="text-align: right;">9000</td>
-<td style="text-align: left;">TFLOPs/s</td>
+<td style="text-align: left;"><code>B200_FLOPS_INT4</code></td>
+<td style="text-align: center;">9000</td>
+<td style="text-align: center;">TFLOPs/s</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>B200_MEM_BW</strong></td>
-<td style="text-align: right;">8</td>
-<td style="text-align: left;">TB/s</td>
+<td style="text-align: left;"><code>B200_MEM_BW</code></td>
+<td style="text-align: center;">8</td>
+<td style="text-align: center;">TB/s</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>B200_MEM_CAPACITY</strong></td>
-<td style="text-align: right;">192</td>
-<td style="text-align: left;">GiB</td>
+<td style="text-align: left;"><code>B200_MEM_CAPACITY</code></td>
+<td style="text-align: center;">192</td>
+<td style="text-align: center;">GiB</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>B200_TDP</strong></td>
-<td style="text-align: right;">1000</td>
-<td style="text-align: left;">W</td>
+<td style="text-align: left;"><code>B200_TDP</code></td>
+<td style="text-align: center;">1000</td>
+<td style="text-align: center;">W</td>
 </tr>
 </tbody>
 </table>
@@ -1785,48 +1854,48 @@ Table&nbsp;5: <strong>NVIDIA B200 (Blackwell)</strong>: The B200 represents the 
 </figure>
 </div>
 </section>
-<section id="amd-instinct-mi300x" class="level3 unnumbered page-columns page-full">
+<section id="amd-instinct-mi300x" class="level3 unnumbered">
 <h3 class="unnumbered anchored" data-anchor-id="amd-instinct-mi300x">AMD Instinct MI300X</h3>
 <p><a href="#tbl-assumptions-mi300x" class="quarto-xref">Table&nbsp;6</a> provides specifications for the MI300X, often used as the primary alternative to NVIDIA’s H100 in large-scale inference and training clusters.</p>
-<div id="tbl-assumptions-mi300x" class="column-page quarto-float quarto-figure quarto-figure-center anchored">
+<div id="tbl-assumptions-mi300x" class="quarto-float quarto-figure quarto-figure-center anchored" data-tbl-colwidths="[50,20,30]">
 <figure class="quarto-float quarto-float-tbl figure">
 <figcaption class="quarto-float-caption-top quarto-float-caption quarto-float-tbl" id="tbl-assumptions-mi300x-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
-Table&nbsp;6: <strong>AMD Instinct MI300X</strong>: The MI300X features high HBM capacity (192 GB) and bandwidth, making it a common baseline for comparing memory-bound workload performance across vendors.
+Table&nbsp;6: <strong>AMD Instinct MI300X</strong>: This accelerator features high HBM capacity (192 GB) and bandwidth, making it a common baseline for comparing memory-bound workload performance across vendors.
 </figcaption>
 <div aria-describedby="tbl-assumptions-mi300x-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
 <table class="caption-top table">
 <colgroup>
-<col style="width: 22%">
-<col style="width: 38%">
-<col style="width: 39%">
+<col style="width: 50%">
+<col style="width: 20%">
+<col style="width: 30%">
 </colgroup>
 <thead>
 <tr class="header">
 <th style="text-align: left;"><strong>Constant</strong></th>
-<th style="text-align: right;"><strong>Value</strong></th>
-<th style="text-align: left;"><strong>Unit</strong></th>
+<th style="text-align: center;"><strong>Value</strong></th>
+<th style="text-align: center;"><strong>Unit</strong></th>
 </tr>
 </thead>
 <tbody>
 <tr class="odd">
-<td style="text-align: left;"><strong>MI300X_FLOPS_FP16_TENSOR</strong></td>
-<td style="text-align: right;">1307</td>
-<td style="text-align: left;">TFLOPs/s</td>
+<td style="text-align: left;"><code>MI300X_FLOPS_FP16_TENSOR</code></td>
+<td style="text-align: center;">1307</td>
+<td style="text-align: center;">TFLOPs/s</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>MI300X_MEM_BW</strong></td>
-<td style="text-align: right;">5.3</td>
-<td style="text-align: left;">TB/s</td>
+<td style="text-align: left;"><code>MI300X_MEM_BW</code></td>
+<td style="text-align: center;">5.3</td>
+<td style="text-align: center;">TB/s</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>MI300X_MEM_CAPACITY</strong></td>
-<td style="text-align: right;">192</td>
-<td style="text-align: left;">GiB</td>
+<td style="text-align: left;"><code>MI300X_MEM_CAPACITY</code></td>
+<td style="text-align: center;">192</td>
+<td style="text-align: center;">GiB</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>MI300X_TDP</strong></td>
-<td style="text-align: right;">750</td>
-<td style="text-align: left;">W</td>
+<td style="text-align: left;"><code>MI300X_TDP</code></td>
+<td style="text-align: center;">750</td>
+<td style="text-align: center;">W</td>
 </tr>
 </tbody>
 </table>
@@ -1834,48 +1903,48 @@ Table&nbsp;6: <strong>AMD Instinct MI300X</strong>: The MI300X features high HBM
 </figure>
 </div>
 </section>
-<section id="google-tpu-v4" class="level3 unnumbered page-columns page-full">
+<section id="google-tpu-v4" class="level3 unnumbered">
 <h3 class="unnumbered anchored" data-anchor-id="google-tpu-v4">Google TPU v4</h3>
 <p><a href="#tbl-assumptions-tpuv4" class="quarto-xref">Table&nbsp;7</a> provides the ASIC-based alternative used when comparing training economics across accelerator families.</p>
-<div id="tbl-assumptions-tpuv4" class="column-page quarto-float quarto-figure quarto-figure-center anchored">
+<div id="tbl-assumptions-tpuv4" class="quarto-float quarto-figure quarto-figure-center anchored" data-tbl-colwidths="[50,20,30]">
 <figure class="quarto-float quarto-float-tbl figure">
 <figcaption class="quarto-float-caption-top quarto-float-caption quarto-float-tbl" id="tbl-assumptions-tpuv4-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
-Table&nbsp;7: <strong>Google TPU v4 and v6 (Trillium)</strong>: Tensor Processing Unit (TPU) specifications for comparing ASIC-based training economics across generations. TPU v6 (Trillium) represents a significant jump in compute density and bandwidth.
+Table&nbsp;7: <strong>Google TPU v4 and v6e (Trillium)</strong>: Tensor Processing Unit (TPU) specifications for comparing ASIC-based training economics across generations. TPU v6e (Trillium) represents a significant jump in compute density and bandwidth.
 </figcaption>
 <div aria-describedby="tbl-assumptions-tpuv4-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
 <table class="caption-top table">
 <colgroup>
+<col style="width: 50%">
 <col style="width: 20%">
-<col style="width: 39%">
-<col style="width: 40%">
+<col style="width: 30%">
 </colgroup>
 <thead>
 <tr class="header">
 <th style="text-align: left;"><strong>Constant</strong></th>
-<th style="text-align: right;"><strong>Value</strong></th>
-<th style="text-align: left;"><strong>Unit</strong></th>
+<th style="text-align: center;"><strong>Value</strong></th>
+<th style="text-align: center;"><strong>Unit</strong></th>
 </tr>
 </thead>
 <tbody>
 <tr class="odd">
-<td style="text-align: left;"><strong>TPUV4_FLOPS_BF16</strong></td>
-<td style="text-align: right;">275</td>
-<td style="text-align: left;">TFLOPs/s</td>
+<td style="text-align: left;"><code>TPUV4_FLOPS_BF16</code></td>
+<td style="text-align: center;">275</td>
+<td style="text-align: center;">TFLOPs/s</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>TPUV4_MEM_BW</strong></td>
-<td style="text-align: right;">1200</td>
-<td style="text-align: left;">GB/s</td>
+<td style="text-align: left;"><code>TPUV4_MEM_BW</code></td>
+<td style="text-align: center;">1200</td>
+<td style="text-align: center;">GB/s</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>TPUV6_FLOPS_BF16</strong></td>
-<td style="text-align: right;">2150</td>
-<td style="text-align: left;">TFLOPs/s</td>
+<td style="text-align: left;"><code>TPUV6_FLOPS_BF16</code></td>
+<td style="text-align: center;">918</td>
+<td style="text-align: center;">TFLOPs/s</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>TPUV6_MEM_BW</strong></td>
-<td style="text-align: right;">4.5</td>
-<td style="text-align: left;">TB/s</td>
+<td style="text-align: left;"><code>TPUV6_MEM_BW</code></td>
+<td style="text-align: center;">1600</td>
+<td style="text-align: center;">GB/s</td>
 </tr>
 </tbody>
 </table>
@@ -1883,10 +1952,10 @@ Table&nbsp;7: <strong>Google TPU v4 and v6 (Trillium)</strong>: Tensor Processin
 </figure>
 </div>
 </section>
-<section id="cpu-and-mobileedge-processors" class="level3 unnumbered page-columns page-full">
+<section id="cpu-and-mobileedge-processors" class="level3 unnumbered">
 <h3 class="unnumbered anchored" data-anchor-id="cpu-and-mobileedge-processors">CPU and mobile/edge processors</h3>
 <p><a href="#tbl-assumptions-cpu-mobile" class="quarto-xref">Table&nbsp;8</a> grounds the edge and mobile ML examples, where the contrast with data center accelerator throughput illustrates why deployment target shapes every design decision.</p>
-<div id="tbl-assumptions-cpu-mobile" class="column-page quarto-float quarto-figure quarto-figure-center anchored">
+<div id="tbl-assumptions-cpu-mobile" class="quarto-float quarto-figure quarto-figure-center anchored" data-tbl-colwidths="[50,20,30]">
 <figure class="quarto-float quarto-float-tbl figure">
 <figcaption class="quarto-float-caption-top quarto-float-caption quarto-float-tbl" id="tbl-assumptions-cpu-mobile-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
 Table&nbsp;8: <strong>CPU, Mobile NPU, and Edge Device Specs</strong>: These constants ground the edge and mobile ML examples. The contrast between mobile NPU throughput and data center accelerator throughput illustrates why deployment target shapes every design decision.
@@ -1894,52 +1963,52 @@ Table&nbsp;8: <strong>CPU, Mobile NPU, and Edge Device Specs</strong>: These con
 <div aria-describedby="tbl-assumptions-cpu-mobile-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
 <table class="caption-top table">
 <colgroup>
-<col style="width: 22%">
-<col style="width: 38%">
-<col style="width: 39%">
+<col style="width: 50%">
+<col style="width: 20%">
+<col style="width: 30%">
 </colgroup>
 <thead>
 <tr class="header">
 <th style="text-align: left;"><strong>Constant</strong></th>
-<th style="text-align: right;"><strong>Value</strong></th>
-<th style="text-align: left;"><strong>Unit</strong></th>
+<th style="text-align: center;"><strong>Value</strong></th>
+<th style="text-align: center;"><strong>Unit</strong></th>
 </tr>
 </thead>
 <tbody>
 <tr class="odd">
-<td style="text-align: left;"><strong>CPU_FLOPS_FP32</strong></td>
-<td style="text-align: right;">1</td>
-<td style="text-align: left;">TFLOPs/s</td>
+<td style="text-align: left;"><code>CPU_FLOPS_FP32</code></td>
+<td style="text-align: center;">1</td>
+<td style="text-align: center;">TFLOPs/s</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>SYSTEM_MEMORY_BW</strong></td>
-<td style="text-align: right;">50</td>
-<td style="text-align: left;">GB/s</td>
+<td style="text-align: left;"><code>SYSTEM_MEMORY_BW</code></td>
+<td style="text-align: center;">50</td>
+<td style="text-align: center;">GB/s</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>MOBILE_NPU_TOPS_INT8</strong></td>
-<td style="text-align: right;">50</td>
-<td style="text-align: left;">TFLOPs/s</td>
+<td style="text-align: left;"><code>MOBILE_NPU_TOPS_INT8</code></td>
+<td style="text-align: center;">50</td>
+<td style="text-align: center;">TFLOPs/s</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>MOBILE_NPU_MEM_BW</strong></td>
-<td style="text-align: right;">100</td>
-<td style="text-align: left;">GB/s</td>
+<td style="text-align: left;"><code>MOBILE_NPU_MEM_BW</code></td>
+<td style="text-align: center;">100</td>
+<td style="text-align: center;">GB/s</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>MOBILE_TDP_W</strong></td>
-<td style="text-align: right;">3</td>
-<td style="text-align: left;">W</td>
+<td style="text-align: left;"><code>MOBILE_TDP_W</code></td>
+<td style="text-align: center;">3</td>
+<td style="text-align: center;">W</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>OBJECT_DETECTOR_POWER_W</strong></td>
-<td style="text-align: right;">2</td>
-<td style="text-align: left;">W</td>
+<td style="text-align: left;"><code>OBJECT_DETECTOR_POWER_W</code></td>
+<td style="text-align: center;">2</td>
+<td style="text-align: center;">W</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>PHONE_BATTERY_WH</strong></td>
-<td style="text-align: right;">15</td>
-<td style="text-align: left;">h·W</td>
+<td style="text-align: left;"><code>PHONE_BATTERY_WH</code></td>
+<td style="text-align: center;">15</td>
+<td style="text-align: center;">h·W</td>
 </tr>
 </tbody>
 </table>
@@ -1947,190 +2016,192 @@ Table&nbsp;8: <strong>CPU, Mobile NPU, and Edge Device Specs</strong>: These con
 </figure>
 </div>
 <p>With hardware specifications established, the next question is: what workloads run on this hardware? <a href="#tbl-assumptions-models" class="quarto-xref">Table&nbsp;9</a> captures the model architectures whose parameter counts, FLOP budgets, and training costs appear in the book’s calculations.</p>
-</section>
-</section>
-<section id="model-specifications" class="level2 unnumbered page-columns page-full">
-<h2 class="unnumbered anchored" data-anchor-id="model-specifications">Model Specifications</h2>
-<p>These constants define the parameter counts, per-inference FLOP budgets, and (where applicable) training costs for the reference models used throughout the book. When a chapter estimates “how long to train GPT-3,” these are the numbers it plugs in.</p>
-<div id="tbl-assumptions-models" class="column-page quarto-float quarto-figure quarto-figure-center anchored">
+<div id="tbl-assumptions-models" class="quarto-float quarto-figure quarto-figure-center anchored" data-tbl-colwidths="[50,20,30]">
 <figure class="quarto-float quarto-float-tbl figure">
 <figcaption class="quarto-float-caption-top quarto-float-caption quarto-float-tbl" id="tbl-assumptions-models-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
-Table&nbsp;9: <strong>Reference Model Specifications</strong>: Parameter counts and FLOP budgets for the models used in worked examples. These span four orders of magnitude—from MobileNetV2 on a phone to GPT-4 across thousands of accelerators—illustrating how model scale drives every systems decision from memory planning to cluster sizing.
+Table&nbsp;9: <strong>Reference Model Specifications</strong>: Parameter counts and FLOP budgets for the models used in worked examples. Parameter counts alone span nearly five orders of magnitude—from MobileNetV2 on a phone to GPT-4 across thousands of accelerators—illustrating how model scale drives every systems decision from memory planning to cluster sizing.
 </figcaption>
 <div aria-describedby="tbl-assumptions-models-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
 <table class="caption-top table">
 <colgroup>
-<col style="width: 26%">
-<col style="width: 36%">
-<col style="width: 37%">
+<col style="width: 50%">
+<col style="width: 20%">
+<col style="width: 30%">
 </colgroup>
 <thead>
 <tr class="header">
 <th style="text-align: left;"><strong>Constant</strong></th>
-<th style="text-align: right;"><strong>Value</strong></th>
-<th style="text-align: left;"><strong>Unit</strong></th>
+<th style="text-align: center;"><strong>Value</strong></th>
+<th style="text-align: center;"><strong>Unit</strong></th>
 </tr>
 </thead>
 <tbody>
 <tr class="odd">
-<td style="text-align: left;"><strong>BERT_BASE_FLOPs</strong></td>
-<td style="text-align: right;">2.2e+10</td>
-<td style="text-align: left;">flop</td>
+<td style="text-align: left;"><code>BERT_BASE_FLOPs</code></td>
+<td style="text-align: center;">2.2e+10</td>
+<td style="text-align: center;">flop</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>BERT_BASE_PARAMS</strong></td>
-<td style="text-align: right;">1.1e+08</td>
-<td style="text-align: left;">param</td>
+<td style="text-align: left;"><code>BERT_BASE_PARAMS</code></td>
+<td style="text-align: center;">1.1e+08</td>
+<td style="text-align: center;">param</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>LLAMA3_8B_PARAMS</strong></td>
-<td style="text-align: right;">8.03e+09</td>
-<td style="text-align: left;">param</td>
+<td style="text-align: left;"><code>LLAMA3_8B_PARAMS</code></td>
+<td style="text-align: center;">8.03e+09</td>
+<td style="text-align: center;">param</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>GPT2_HIDDEN_DIM</strong></td>
-<td style="text-align: right;">1600</td>
-<td style="text-align: left;">-</td>
+<td style="text-align: left;"><code>GPT2_HIDDEN_DIM</code></td>
+<td style="text-align: center;">1600</td>
+<td style="text-align: center;">-</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>GPT2_LAYERS</strong></td>
-<td style="text-align: right;">48</td>
-<td style="text-align: left;">-</td>
+<td style="text-align: left;"><code>GPT2_LAYERS</code></td>
+<td style="text-align: center;">48</td>
+<td style="text-align: center;">-</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>GPT2_PARAMS</strong></td>
-<td style="text-align: right;">1.5e+09</td>
-<td style="text-align: left;">param</td>
+<td style="text-align: left;"><code>GPT2_PARAMS</code></td>
+<td style="text-align: center;">1.5e+09</td>
+<td style="text-align: center;">param</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>GPT3_PARAMS</strong></td>
-<td style="text-align: right;">1.75e+11</td>
-<td style="text-align: left;">param</td>
+<td style="text-align: left;"><code>GPT3_PARAMS</code></td>
+<td style="text-align: center;">1.75e+11</td>
+<td style="text-align: center;">param</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>GPT3_TRAINING_DAYS_REF</strong></td>
-<td style="text-align: right;">25</td>
-<td style="text-align: left;">d</td>
+<td style="text-align: left;"><code>GPT3_TRAINING_DAYS_REF</code></td>
+<td style="text-align: center;">25</td>
+<td style="text-align: center;">d</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>GPT3_TRAINING_OPS</strong></td>
-<td style="text-align: right;">3.14e+23</td>
-<td style="text-align: left;">flop</td>
+<td style="text-align: left;"><code>GPT3_TRAINING_OPS</code></td>
+<td style="text-align: center;">3.14e+23</td>
+<td style="text-align: center;">flop</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>GPT4_TRAINING_ACCELERATOR_DAYS</strong></td>
-<td style="text-align: right;">2.5e+06</td>
-<td style="text-align: left;">-</td>
+<td style="text-align: left;"><code>GPT4_TRAINING_GPU_DAYS</code></td>
+<td style="text-align: center;">2.5e+06</td>
+<td style="text-align: center;">-</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>RESNET50_FLOPs</strong></td>
-<td style="text-align: right;">4.1e+09</td>
-<td style="text-align: left;">flop</td>
+<td style="text-align: left;"><code>RESNET50_FLOPs</code></td>
+<td style="text-align: center;">4.1e+09</td>
+<td style="text-align: center;">flop</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>RESNET50_PARAMS</strong></td>
-<td style="text-align: right;">2.56e+07</td>
-<td style="text-align: left;">param</td>
+<td style="text-align: left;"><code>RESNET50_PARAMS</code></td>
+<td style="text-align: center;">2.56e+07</td>
+<td style="text-align: center;">param</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>MOBILENETV2_FLOPs</strong></td>
-<td style="text-align: right;">3e+08</td>
-<td style="text-align: left;">flop</td>
+<td style="text-align: left;"><code>MOBILENETV2_FLOPs</code></td>
+<td style="text-align: center;">3e+08</td>
+<td style="text-align: center;">flop</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>MOBILENETV2_PARAMS</strong></td>
-<td style="text-align: right;">3.5e+06</td>
-<td style="text-align: left;">param</td>
+<td style="text-align: left;"><code>MOBILENETV2_PARAMS</code></td>
+<td style="text-align: center;">3.5e+06</td>
+<td style="text-align: center;">param</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>YOLOV8_NANO_FLOPs</strong></td>
-<td style="text-align: right;">8.7e+09</td>
-<td style="text-align: left;">flop</td>
+<td style="text-align: left;"><code>YOLOV8_NANO_FLOPs</code></td>
+<td style="text-align: center;">8.7e+09</td>
+<td style="text-align: center;">flop</td>
 </tr>
 </tbody>
 </table>
 </div>
 </figure>
 </div>
+</section>
+</section>
+<section id="model-specifications" class="level2 unnumbered">
+<h2 class="unnumbered anchored" data-anchor-id="model-specifications">Model Specifications</h2>
+<p>These constants define the parameter counts, per-inference FLOP budgets, and (where applicable) training costs for the reference models used throughout the book. When a chapter estimates “how long to train GPT-3,” these are the numbers it plugs in.</p>
 <p>Knowing what hardware exists and what models run on it is necessary but not sufficient. The energy cost of computation—measured at the level of individual operations and memory accesses—determines whether a design is thermally viable and economically sustainable.</p>
 </section>
 <section id="energy-constants" class="level2 unnumbered page-columns page-full">
 <h2 class="unnumbered anchored" data-anchor-id="energy-constants">Energy Constants</h2>
-<p>Energy-per-operation and energy-per-access constants come from semiconductor process measurements (primarily 45 nm and 7 nm nodes) and are used in the book’s energy-efficiency and sustainability analyses. <a href="#tbl-assumptions-energy" class="quarto-xref">Table&nbsp;10</a> quantifies this hierarchy from register access through DRAM, illustrating why the memory wall is fundamentally an energy wall.</p>
-<div id="tbl-assumptions-energy" class="column-page quarto-float quarto-figure quarto-figure-center anchored">
+<p>Energy-per-operation and energy-per-access constants are illustrative reference values, primarily from Horowitz’s 45 nm energy table <span class="citation" data-cites="horowitz2014">(<a href="#ref-horowitz2014" role="doc-biblioref">Horowitz 2014</a>)</span>, and are used in the book’s energy-efficiency and sustainability analyses. <a href="#tbl-assumptions-energy" class="quarto-xref">Table&nbsp;10</a> quantifies this hierarchy from register access through DRAM, illustrating why the memory wall is fundamentally an energy wall.</p>
+<div class="no-row-height column-margin column-container"><div id="ref-horowitz2014" class="csl-entry" role="listitem">
+Horowitz, Mark. 2014. <span>“1.1 Computing’s Energy Problem (and What We Can Do about It).”</span> <em>2014 IEEE International Solid-State Circuits Conference Digest of Technical Papers (ISSCC)</em>, 10–14. <a href="https://doi.org/10.1109/isscc.2014.6757323">https://doi.org/10.1109/isscc.2014.6757323</a>.
+</div></div><div id="tbl-assumptions-energy" class="quarto-float quarto-figure quarto-figure-center anchored" data-tbl-colwidths="[50,20,30]">
 <figure class="quarto-float quarto-float-tbl figure">
 <figcaption class="quarto-float-caption-top quarto-float-caption quarto-float-tbl" id="tbl-assumptions-energy-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
-Table&nbsp;10: <strong>Energy per Operation and Access</strong>: These constants quantify the energy hierarchy from register file through DRAM and across precision formats. The 200<span class="math inline">\(\times\)</span> gap between a register read and a DRAM access explains why data reuse (tiling, fusion) dominates ML kernel optimization.
+Table&nbsp;10: <strong>Energy per Operation and Access</strong>: These constants quantify the energy hierarchy from register file through DRAM and across precision formats. The roughly 64,000<span class="math inline">\(\times\)</span> gap between a 0.01 pJ register access and a 640 pJ DRAM access explains why data reuse (tiling, fusion) dominates ML kernel optimization.
 </figcaption>
 <div aria-describedby="tbl-assumptions-energy-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
 <table class="caption-top table">
 <colgroup>
-<col style="width: 23%">
-<col style="width: 38%">
-<col style="width: 38%">
+<col style="width: 50%">
+<col style="width: 20%">
+<col style="width: 30%">
 </colgroup>
 <thead>
 <tr class="header">
 <th style="text-align: left;"><strong>Constant</strong></th>
-<th style="text-align: right;"><strong>Value</strong></th>
-<th style="text-align: left;"><strong>Unit</strong></th>
+<th style="text-align: center;"><strong>Value</strong></th>
+<th style="text-align: center;"><strong>Unit</strong></th>
 </tr>
 </thead>
 <tbody>
 <tr class="odd">
-<td style="text-align: left;"><strong>ENERGY_REG_PJ</strong></td>
-<td style="text-align: right;">0.01</td>
-<td style="text-align: left;">pJ</td>
+<td style="text-align: left;"><code>ENERGY_REG_PJ</code></td>
+<td style="text-align: center;">0.01</td>
+<td style="text-align: center;">pJ</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>ENERGY_SRAM_L1_PJ</strong></td>
-<td style="text-align: right;">0.5</td>
-<td style="text-align: left;">pJ</td>
+<td style="text-align: left;"><code>ENERGY_SRAM_L1_PJ</code></td>
+<td style="text-align: center;">0.5</td>
+<td style="text-align: center;">pJ</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>ENERGY_SRAM_L2_PJ</strong></td>
-<td style="text-align: right;">2</td>
-<td style="text-align: left;">pJ</td>
+<td style="text-align: left;"><code>ENERGY_SRAM_L2_PJ</code></td>
+<td style="text-align: center;">2</td>
+<td style="text-align: center;">pJ</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>ENERGY_DRAM_ACCESS_PJ</strong></td>
-<td style="text-align: right;">640</td>
-<td style="text-align: left;">pJ</td>
+<td style="text-align: left;"><code>ENERGY_DRAM_ACCESS_PJ</code></td>
+<td style="text-align: center;">640</td>
+<td style="text-align: center;">pJ</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>ENERGY_DRAM_PJ_PER_BYTE</strong></td>
-<td style="text-align: right;">160</td>
-<td style="text-align: left;">pJ/B</td>
+<td style="text-align: left;"><code>ENERGY_DRAM_PJ_PER_BYTE</code></td>
+<td style="text-align: center;">160</td>
+<td style="text-align: center;">pJ/B</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>ENERGY_FLOP_PJ</strong></td>
-<td style="text-align: right;">4.6</td>
-<td style="text-align: left;">pJ/flop</td>
+<td style="text-align: left;"><code>ENERGY_FLOP_PJ</code></td>
+<td style="text-align: center;">4.6</td>
+<td style="text-align: center;">pJ/flop</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>ENERGY_FLOP_FP16_PJ</strong></td>
-<td style="text-align: right;">1.1</td>
-<td style="text-align: left;">pJ/flop</td>
+<td style="text-align: left;"><code>ENERGY_FLOP_FP16_PJ</code></td>
+<td style="text-align: center;">1.1</td>
+<td style="text-align: center;">pJ/flop</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>ENERGY_FLOP_FP32_PJ</strong></td>
-<td style="text-align: right;">3.7</td>
-<td style="text-align: left;">pJ/flop</td>
+<td style="text-align: left;"><code>ENERGY_FLOP_FP32_PJ</code></td>
+<td style="text-align: center;">3.7</td>
+<td style="text-align: center;">pJ/flop</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>ENERGY_FLOP_INT8_PJ</strong></td>
-<td style="text-align: right;">0.2</td>
-<td style="text-align: left;">pJ/flop</td>
+<td style="text-align: left;"><code>ENERGY_FLOP_INT8_PJ</code></td>
+<td style="text-align: center;">0.2</td>
+<td style="text-align: center;">pJ/flop</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>ENERGY_MOBILENET_INF_MJ</strong></td>
-<td style="text-align: right;">0.1</td>
-<td style="text-align: left;">mJ</td>
+<td style="text-align: left;"><code>ENERGY_MOBILENET_INF_MJ</code></td>
+<td style="text-align: center;">0.1</td>
+<td style="text-align: center;">mJ</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>NETWORK_5G_ENERGY_PER_MB_MJ</strong></td>
-<td style="text-align: right;">100</td>
-<td style="text-align: left;">mJ/MB</td>
+<td style="text-align: left;"><code>NETWORK_5G_ENERGY_PER_MB_MJ</code></td>
+<td style="text-align: center;">100</td>
+<td style="text-align: center;">mJ/MB</td>
 </tr>
 </tbody>
 </table>
@@ -2139,10 +2210,11 @@ Table&nbsp;10: <strong>Energy per Operation and Access</strong>: These constants
 </div>
 <p>Energy costs operate at the chip level, but real ML systems also move data across interconnects—between accelerators, across racks, and over wide-area networks. The next table captures the bandwidth assumptions that determine communication overhead in distributed training and serving.</p>
 </section>
-<section id="interconnect-and-network-bandwidth" class="level2 unnumbered page-columns page-full">
+<section id="interconnect-and-network-bandwidth" class="level2 unnumbered">
 <h2 class="unnumbered anchored" data-anchor-id="interconnect-and-network-bandwidth">Interconnect and Network Bandwidth</h2>
 <p>Distributed training and multi-accelerator serving are bottlenecked by interconnect bandwidth as often as by compute. <a href="#tbl-assumptions-interconnect" class="quarto-xref">Table&nbsp;11</a> captures the bandwidths for accelerator-to-accelerator links (NVLink), cross-node fabrics (InfiniBand), host buses (PCIe), Non-Volatile Memory Express (NVMe) storage, data center Ethernet, and the speed-of-light floor that sets the minimum latency for any network hop.</p>
-<div id="tbl-assumptions-interconnect" class="column-page quarto-float quarto-figure quarto-figure-center anchored">
+<p>The bandwidth hierarchy—from NVLink within a node down to 10 GbE across a data center—shapes every distributed system design decision. However, bandwidth is only one dimension of cost. Building and operating ML infrastructure also requires reasoning about electricity prices and cloud service fees, which the next table quantifies.</p>
+<div id="tbl-assumptions-interconnect" class="quarto-float quarto-figure quarto-figure-center anchored" data-tbl-colwidths="[50,20,30]">
 <figure class="quarto-float quarto-float-tbl figure">
 <figcaption class="quarto-float-caption-top quarto-float-caption quarto-float-tbl" id="tbl-assumptions-interconnect-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
 Table&nbsp;11: <strong>Interconnect and Network Bandwidth</strong>: Ordered from fastest (intra-node NVLink) to slowest (data center Ethernet), these bandwidths determine gradient synchronization time, pipeline-parallel bubble overhead, and data-loading throughput. The speed of light in fiber sets the physical floor for cross-data center latency.
@@ -2150,122 +2222,121 @@ Table&nbsp;11: <strong>Interconnect and Network Bandwidth</strong>: Ordered from
 <div aria-describedby="tbl-assumptions-interconnect-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
 <table class="caption-top table">
 <colgroup>
-<col style="width: 22%">
-<col style="width: 38%">
-<col style="width: 38%">
+<col style="width: 50%">
+<col style="width: 20%">
+<col style="width: 30%">
 </colgroup>
 <thead>
 <tr class="header">
 <th style="text-align: left;"><strong>Constant</strong></th>
-<th style="text-align: right;"><strong>Value</strong></th>
-<th style="text-align: left;"><strong>Unit</strong></th>
+<th style="text-align: center;"><strong>Value</strong></th>
+<th style="text-align: center;"><strong>Unit</strong></th>
 </tr>
 </thead>
 <tbody>
 <tr class="odd">
-<td style="text-align: left;"><strong>NVLINK_V100_BW</strong></td>
-<td style="text-align: right;">300</td>
-<td style="text-align: left;">GB/s</td>
+<td style="text-align: left;"><code>NVLINK_V100_BW</code></td>
+<td style="text-align: center;">300</td>
+<td style="text-align: center;">GB/s</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>NVLINK_A100_BW</strong></td>
-<td style="text-align: right;">600</td>
-<td style="text-align: left;">GB/s</td>
+<td style="text-align: left;"><code>NVLINK_A100_BW</code></td>
+<td style="text-align: center;">600</td>
+<td style="text-align: center;">GB/s</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>NVLINK_H100_BW</strong></td>
-<td style="text-align: right;">900</td>
-<td style="text-align: left;">GB/s</td>
+<td style="text-align: left;"><code>NVLINK_H100_BW</code></td>
+<td style="text-align: center;">900</td>
+<td style="text-align: center;">GB/s</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>INFINIBAND_HDR_BW</strong></td>
-<td style="text-align: right;">200</td>
-<td style="text-align: left;">Gbps</td>
+<td style="text-align: left;"><code>INFINIBAND_HDR_BW</code></td>
+<td style="text-align: center;">200</td>
+<td style="text-align: center;">Gbps</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>INFINIBAND_NDR_BW</strong></td>
-<td style="text-align: right;">400</td>
-<td style="text-align: left;">Gbps</td>
+<td style="text-align: left;"><code>INFINIBAND_NDR_BW</code></td>
+<td style="text-align: center;">400</td>
+<td style="text-align: center;">Gbps</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>INFINIBAND_XDR_BW</strong></td>
-<td style="text-align: right;">800</td>
-<td style="text-align: left;">Gbps</td>
+<td style="text-align: left;"><code>INFINIBAND_XDR_BW</code></td>
+<td style="text-align: center;">800</td>
+<td style="text-align: center;">Gbps</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>INFINIBAND_GXDR_BW</strong></td>
-<td style="text-align: right;">1600</td>
-<td style="text-align: left;">Gbps</td>
+<td style="text-align: left;"><code>INFINIBAND_GXDR_BW</code></td>
+<td style="text-align: center;">1600</td>
+<td style="text-align: center;">Gbps</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>PCIE_GEN4_BW</strong></td>
-<td style="text-align: right;">32</td>
-<td style="text-align: left;">GB/s</td>
+<td style="text-align: left;"><code>PCIE_GEN4_BW</code></td>
+<td style="text-align: center;">32</td>
+<td style="text-align: center;">GB/s</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>PCIE_GEN5_BW</strong></td>
-<td style="text-align: right;">64</td>
-<td style="text-align: left;">GB/s</td>
+<td style="text-align: left;"><code>PCIE_GEN5_BW</code></td>
+<td style="text-align: center;">64</td>
+<td style="text-align: center;">GB/s</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>NVME_SEQUENTIAL_BW</strong></td>
-<td style="text-align: right;">7</td>
-<td style="text-align: left;">GB/s</td>
+<td style="text-align: left;"><code>NVME_SEQUENTIAL_BW</code></td>
+<td style="text-align: center;">7</td>
+<td style="text-align: center;">GB/s</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>NETWORK_10G_BW</strong></td>
-<td style="text-align: right;">10</td>
-<td style="text-align: left;">Gbps</td>
+<td style="text-align: left;"><code>NETWORK_10G_BW</code></td>
+<td style="text-align: center;">10</td>
+<td style="text-align: center;">Gbps</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>NETWORK_100G_BW</strong></td>
-<td style="text-align: right;">100</td>
-<td style="text-align: left;">Gbps</td>
+<td style="text-align: left;"><code>NETWORK_100G_BW</code></td>
+<td style="text-align: center;">100</td>
+<td style="text-align: center;">Gbps</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>SPEED_OF_LIGHT_FIBER_KM_S</strong></td>
-<td style="text-align: right;">200000</td>
-<td style="text-align: left;">km/s</td>
+<td style="text-align: left;"><code>SPEED_OF_LIGHT_FIBER_KM_S</code></td>
+<td style="text-align: center;">200000</td>
+<td style="text-align: center;">km/s</td>
 </tr>
 </tbody>
 </table>
 </div>
 </figure>
 </div>
-<p>The bandwidth hierarchy—from NVLink within a node down to ten GbE across a data center—shapes every distributed system design decision. But bandwidth is only one dimension of cost. Building and operating ML infrastructure also requires reasoning about electricity prices and cloud service fees, which the next table quantifies.</p>
 </section>
-<section id="economic-constants" class="level2 unnumbered page-columns page-full">
+<section id="economic-constants" class="level2 unnumbered">
 <h2 class="unnumbered anchored" data-anchor-id="economic-constants">Economic Constants</h2>
 <p>Cost estimates throughout the book depend on the electricity and cloud pricing assumptions in <a href="#tbl-assumptions-economic" class="quarto-xref">Table&nbsp;12</a>. These are order-of-magnitude reference values; actual prices vary by region, provider, and contract terms, but the ratios between them are more stable than the absolute numbers.</p>
-<div id="tbl-assumptions-economic" class="column-page quarto-float quarto-figure quarto-figure-center anchored">
+<div id="tbl-assumptions-economic" class="quarto-float quarto-figure quarto-figure-center anchored" data-tbl-colwidths="[50,20,30]">
 <figure class="quarto-float quarto-float-tbl figure">
 <figcaption class="quarto-float-caption-top quarto-float-caption quarto-float-tbl" id="tbl-assumptions-economic-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
-Table&nbsp;12: <strong>Economic Assumptions</strong>: Electricity and egress pricing used in total cost of ownership (TCO) calculations. These are representative cloud rates; on-premise costs differ but the relative magnitudes guide the same design decisions.
+Table&nbsp;12: <strong>Economic Assumptions</strong>: Electricity and egress pricing used in total cost of ownership (TCO) calculations. These are representative cloud rates; on-premises costs differ but the relative magnitudes guide the same design decisions.
 </figcaption>
 <div aria-describedby="tbl-assumptions-economic-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
 <table class="caption-top table">
 <colgroup>
-<col style="width: 22%">
-<col style="width: 38%">
-<col style="width: 38%">
+<col style="width: 50%">
+<col style="width: 20%">
+<col style="width: 30%">
 </colgroup>
 <thead>
 <tr class="header">
 <th style="text-align: left;"><strong>Constant</strong></th>
-<th style="text-align: right;"><strong>Value</strong></th>
-<th style="text-align: left;"><strong>Unit</strong></th>
+<th style="text-align: center;"><strong>Value</strong></th>
+<th style="text-align: center;"><strong>Unit</strong></th>
 </tr>
 </thead>
 <tbody>
 <tr class="odd">
-<td style="text-align: left;"><strong>CLOUD_ELECTRICITY_PER_KWH</strong></td>
-<td style="text-align: right;">0.12</td>
-<td style="text-align: left;">dollar/kWh</td>
+<td style="text-align: left;"><code>CLOUD_ELECTRICITY_PER_KWH</code></td>
+<td style="text-align: center;">0.12</td>
+<td style="text-align: center;">dollar/kWh</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>CLOUD_EGRESS_PER_GB</strong></td>
-<td style="text-align: right;">0.09</td>
-<td style="text-align: left;">dollar/GB</td>
+<td style="text-align: left;"><code>CLOUD_EGRESS_PER_GB</code></td>
+<td style="text-align: center;">0.09</td>
+<td style="text-align: center;">dollar/GB</td>
 </tr>
 </tbody>
 </table>
@@ -2274,10 +2345,10 @@ Table&nbsp;12: <strong>Economic Assumptions</strong>: Electricity and egress pri
 </div>
 <p>Economic constants set the price per unit of compute and data transfer, but they mean little without a sense of the volumes involved. Production ML systems handle millions to billions of requests per day—numbers large enough to be difficult to internalize without concrete reference points.</p>
 </section>
-<section id="scale-references" class="level2 unnumbered page-columns page-full">
+<section id="scale-references" class="level2 unnumbered">
 <h2 class="unnumbered anchored" data-anchor-id="scale-references">Scale References</h2>
 <p>When reasoning about production ML systems, it helps to have concrete scale anchors for “how much traffic does a large service actually handle?” <a href="#tbl-assumptions-scale" class="quarto-xref">Table&nbsp;13</a> provides order-of-magnitude reference points drawn from public disclosures.</p>
-<div id="tbl-assumptions-scale" class="column-page quarto-float quarto-figure quarto-figure-center anchored">
+<div id="tbl-assumptions-scale" class="quarto-float quarto-figure quarto-figure-center anchored" data-tbl-colwidths="[60,20,20]">
 <figure class="quarto-float quarto-float-tbl figure">
 <figcaption class="quarto-float-caption-top quarto-float-caption quarto-float-tbl" id="tbl-assumptions-scale-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
 Table&nbsp;13: <strong>Production Scale and Data Rate References</strong>: These anchors ground the “how big is big?” questions that arise in capacity planning. Waymo data rates illustrate sensor-fusion throughput requirements; Gmail and Google Search volumes calibrate serving-infrastructure estimates.
@@ -2285,57 +2356,57 @@ Table&nbsp;13: <strong>Production Scale and Data Rate References</strong>: These
 <div aria-describedby="tbl-assumptions-scale-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
 <table class="caption-top table">
 <colgroup>
-<col style="width: 22%">
-<col style="width: 38%">
-<col style="width: 38%">
+<col style="width: 60%">
+<col style="width: 20%">
+<col style="width: 20%">
 </colgroup>
 <thead>
 <tr class="header">
 <th style="text-align: left;"><strong>Constant</strong></th>
-<th style="text-align: right;"><strong>Value</strong></th>
-<th style="text-align: left;"><strong>Unit</strong></th>
+<th style="text-align: center;"><strong>Value</strong></th>
+<th style="text-align: center;"><strong>Unit</strong></th>
 </tr>
 </thead>
 <tbody>
 <tr class="odd">
-<td style="text-align: left;"><strong>GMAIL_EMAILS_PER_DAY</strong></td>
-<td style="text-align: right;">1.21e+11</td>
-<td style="text-align: left;">-</td>
+<td style="text-align: left;"><code>GMAIL_EMAILS_PER_DAY</code></td>
+<td style="text-align: center;">1.21e+11</td>
+<td style="text-align: center;">-</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>GOOGLE_SEARCHES_PER_DAY</strong></td>
-<td style="text-align: right;">8.5e+09</td>
-<td style="text-align: left;">-</td>
+<td style="text-align: left;"><code>GOOGLE_SEARCHES_PER_DAY</code></td>
+<td style="text-align: center;">8.5e+09</td>
+<td style="text-align: center;">-</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>WAYMO_DATA_PER_HOUR_LOW</strong></td>
-<td style="text-align: right;">1</td>
-<td style="text-align: left;">TB/h</td>
+<td style="text-align: left;"><code>WAYMO_DATA_PER_HOUR_LOW</code></td>
+<td style="text-align: center;">1</td>
+<td style="text-align: center;">TB/h</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>WAYMO_DATA_PER_HOUR_HIGH</strong></td>
-<td style="text-align: right;">19</td>
-<td style="text-align: left;">TB/h</td>
+<td style="text-align: left;"><code>WAYMO_DATA_PER_HOUR_HIGH</code></td>
+<td style="text-align: center;">19</td>
+<td style="text-align: center;">TB/h</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>VIDEO_1080P_WIDTH</strong></td>
-<td style="text-align: right;">1920</td>
-<td style="text-align: left;">-</td>
+<td style="text-align: left;"><code>VIDEO_1080P_WIDTH</code></td>
+<td style="text-align: center;">1920</td>
+<td style="text-align: center;">-</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>VIDEO_1080P_HEIGHT</strong></td>
-<td style="text-align: right;">1080</td>
-<td style="text-align: left;">-</td>
+<td style="text-align: left;"><code>VIDEO_1080P_HEIGHT</code></td>
+<td style="text-align: center;">1080</td>
+<td style="text-align: center;">-</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>VIDEO_BYTES_PER_PIXEL_RGB</strong></td>
-<td style="text-align: right;">3</td>
-<td style="text-align: left;">B</td>
+<td style="text-align: left;"><code>VIDEO_BYTES_PER_PIXEL_RGB</code></td>
+<td style="text-align: center;">3</td>
+<td style="text-align: center;">B</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>VIDEO_FPS_STANDARD</strong></td>
-<td style="text-align: right;">30</td>
-<td style="text-align: left;">Hz</td>
+<td style="text-align: left;"><code>VIDEO_FPS_STANDARD</code></td>
+<td style="text-align: center;">30</td>
+<td style="text-align: center;">Hz</td>
 </tr>
 </tbody>
 </table>
@@ -2344,10 +2415,10 @@ Table&nbsp;13: <strong>Production Scale and Data Rate References</strong>: These
 </div>
 <p>All the preceding constants—hardware specs, model parameters, energy costs, economic rates, and scale references—are expressed in specific units. For these values to combine correctly in calculations, every quantity must carry its units explicitly.</p>
 </section>
-<section id="unit-definitions" class="level2 unnumbered page-columns page-full">
+<section id="unit-definitions" class="level2 unnumbered">
 <h2 class="unnumbered anchored" data-anchor-id="unit-definitions">Unit Definitions</h2>
 <p>The constants file defines the base and derived units listed in <a href="#tbl-assumptions-units" class="quarto-xref">Table&nbsp;14</a> so that all dimensional analysis in the book uses a consistent unit system via the <code>pint</code> library. These are not assumptions per se, but they ensure that every computed value carries its units and that unit-conversion errors are caught automatically.</p>
-<div id="tbl-assumptions-units" class="column-page quarto-float quarto-figure quarto-figure-center anchored">
+<div id="tbl-assumptions-units" class="quarto-float quarto-figure quarto-figure-center anchored" data-tbl-colwidths="[33,34,33]">
 <figure class="quarto-float quarto-float-tbl figure">
 <figcaption class="quarto-float-caption-top quarto-float-caption quarto-float-tbl" id="tbl-assumptions-units-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
 Table&nbsp;14: <strong>Unit Definitions</strong>: Base and derived units used by the <code>pint</code> dimensional-analysis library throughout the book. Every computed value carries its units, so mixing incompatible quantities (for example, adding bytes to FLOP/s) raises an immediate error rather than producing a silent wrong answer.
@@ -2355,163 +2426,164 @@ Table&nbsp;14: <strong>Unit Definitions</strong>: Base and derived units used by
 <div aria-describedby="tbl-assumptions-units-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
 <table class="caption-top table">
 <colgroup>
-<col style="width: 17%">
-<col style="width: 40%">
-<col style="width: 41%">
+<col style="width: 33%">
+<col style="width: 34%">
+<col style="width: 33%">
 </colgroup>
 <thead>
 <tr class="header">
 <th style="text-align: left;"><strong>Constant</strong></th>
-<th style="text-align: right;"><strong>Value</strong></th>
-<th style="text-align: left;"><strong>Unit</strong></th>
+<th style="text-align: center;"><strong>Value</strong></th>
+<th style="text-align: center;"><strong>Unit</strong></th>
 </tr>
 </thead>
 <tbody>
 <tr class="odd">
-<td style="text-align: left;"><strong>byte</strong></td>
-<td style="text-align: right;">byte</td>
-<td style="text-align: left;">-</td>
+<td style="text-align: left;"><code>byte</code></td>
+<td style="text-align: center;">byte</td>
+<td style="text-align: center;">-</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>KB</strong></td>
-<td style="text-align: right;">KB</td>
-<td style="text-align: left;">-</td>
+<td style="text-align: left;"><code>KB</code></td>
+<td style="text-align: center;">KB</td>
+<td style="text-align: center;">-</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>MB</strong></td>
-<td style="text-align: right;">MB</td>
-<td style="text-align: left;">-</td>
+<td style="text-align: left;"><code>MB</code></td>
+<td style="text-align: center;">MB</td>
+<td style="text-align: center;">-</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>GB</strong></td>
-<td style="text-align: right;">GB</td>
-<td style="text-align: left;">-</td>
+<td style="text-align: left;"><code>GB</code></td>
+<td style="text-align: center;">GB</td>
+<td style="text-align: center;">-</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>TB</strong></td>
-<td style="text-align: right;">TB</td>
-<td style="text-align: left;">-</td>
+<td style="text-align: left;"><code>TB</code></td>
+<td style="text-align: center;">TB</td>
+<td style="text-align: center;">-</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>PB</strong></td>
-<td style="text-align: right;">PB</td>
-<td style="text-align: left;">-</td>
+<td style="text-align: left;"><code>PB</code></td>
+<td style="text-align: center;">PB</td>
+<td style="text-align: center;">-</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>flop</strong></td>
-<td style="text-align: right;">flop</td>
-<td style="text-align: left;">-</td>
+<td style="text-align: left;"><code>flop</code></td>
+<td style="text-align: center;">flop</td>
+<td style="text-align: center;">-</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>GFLOPs</strong></td>
-<td style="text-align: right;">GFLOPs</td>
-<td style="text-align: left;">-</td>
+<td style="text-align: left;"><code>GFLOPs</code></td>
+<td style="text-align: center;">GFLOPs</td>
+<td style="text-align: center;">-</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>TFLOPs</strong></td>
-<td style="text-align: right;">TFLOPs</td>
-<td style="text-align: left;">-</td>
+<td style="text-align: left;"><code>TFLOPs</code></td>
+<td style="text-align: center;">TFLOPs</td>
+<td style="text-align: center;">-</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>ZFLOPs</strong></td>
-<td style="text-align: right;">ZFLOPs</td>
-<td style="text-align: left;">-</td>
+<td style="text-align: left;"><code>ZFLOPs</code></td>
+<td style="text-align: center;">ZFLOPs</td>
+<td style="text-align: center;">-</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>param</strong></td>
-<td style="text-align: right;">param</td>
-<td style="text-align: left;">-</td>
+<td style="text-align: left;"><code>param</code></td>
+<td style="text-align: center;">param</td>
+<td style="text-align: center;">-</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>Mparam</strong></td>
-<td style="text-align: right;">Mparam</td>
-<td style="text-align: left;">-</td>
+<td style="text-align: left;"><code>Mparam</code></td>
+<td style="text-align: center;">Mparam</td>
+<td style="text-align: center;">-</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>Gbps</strong></td>
-<td style="text-align: right;">Gbps</td>
-<td style="text-align: left;">-</td>
+<td style="text-align: left;"><code>Gbps</code></td>
+<td style="text-align: center;">Gbps</td>
+<td style="text-align: center;">-</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>NS</strong></td>
-<td style="text-align: right;">NS</td>
-<td style="text-align: left;">-</td>
+<td style="text-align: left;"><code>NS</code></td>
+<td style="text-align: center;">NS</td>
+<td style="text-align: center;">-</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>US</strong></td>
-<td style="text-align: right;">US</td>
-<td style="text-align: left;">-</td>
+<td style="text-align: left;"><code>US</code></td>
+<td style="text-align: center;">US</td>
+<td style="text-align: center;">-</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>MS</strong></td>
-<td style="text-align: right;">MS</td>
-<td style="text-align: left;">-</td>
+<td style="text-align: left;"><code>MS</code></td>
+<td style="text-align: center;">MS</td>
+<td style="text-align: center;">-</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>second</strong></td>
-<td style="text-align: right;">second</td>
-<td style="text-align: left;">-</td>
+<td style="text-align: left;"><code>second</code></td>
+<td style="text-align: center;">second</td>
+<td style="text-align: center;">-</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>hour</strong></td>
-<td style="text-align: right;">hour</td>
-<td style="text-align: left;">-</td>
+<td style="text-align: left;"><code>hour</code></td>
+<td style="text-align: center;">hour</td>
+<td style="text-align: center;">-</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>day</strong></td>
-<td style="text-align: right;">day</td>
-<td style="text-align: left;">-</td>
+<td style="text-align: left;"><code>day</code></td>
+<td style="text-align: center;">day</td>
+<td style="text-align: center;">-</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>joule</strong></td>
-<td style="text-align: right;">joule</td>
-<td style="text-align: left;">-</td>
+<td style="text-align: left;"><code>joule</code></td>
+<td style="text-align: center;">joule</td>
+<td style="text-align: center;">-</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>watt</strong></td>
-<td style="text-align: right;">watt</td>
-<td style="text-align: left;">-</td>
+<td style="text-align: left;"><code>watt</code></td>
+<td style="text-align: center;">watt</td>
+<td style="text-align: center;">-</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>meter</strong></td>
-<td style="text-align: right;">meter</td>
-<td style="text-align: left;">-</td>
+<td style="text-align: left;"><code>meter</code></td>
+<td style="text-align: center;">meter</td>
+<td style="text-align: center;">-</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><strong>USD</strong></td>
-<td style="text-align: right;">dollar</td>
-<td style="text-align: left;">-</td>
+<td style="text-align: left;"><code>USD</code></td>
+<td style="text-align: center;">dollar</td>
+<td style="text-align: center;">-</td>
 </tr>
 </tbody>
 </table>
 </div>
 </figure>
 </div>
-<p>With all constants, units, and scale references in place, it is worth pausing to consider the most common mistakes practitioners make when applying these numbers to real-world estimates.</p>
+<p>With all constants, units, and scale references in place, the next concern is the most common mistakes practitioners make when applying these numbers to real-world estimates.</p>
 </section>
 <section id="fallacies-and-pitfalls" class="level2 unnumbered">
 <h2 class="unnumbered anchored" data-anchor-id="fallacies-and-pitfalls">Fallacies and Pitfalls</h2>
-<p><strong>Fallacy:</strong> <em>Peak FLOPS predict real-world training throughput.</em></p>
+<p><strong>Fallacy</strong>: <em>Peak FLOPS predict real-world training throughput.</em></p>
 <p>Datasheet FLOPS are measured under idealized conditions—perfectly aligned matrix dimensions, 100 percent occupancy, zero memory stalls. Real training workloads typically achieve 30–50 percent of peak (measured as Model FLOPS Utilization, or MFU). Using peak FLOPS to estimate training time without an MFU discount produces estimates that are 2–3<span class="math inline">\(\times\)</span> too optimistic, leading to missed deadlines and budget overruns.</p>
-<p><strong>Pitfall:</strong> <em>Using FP32 FLOPS when the workload runs in BF16 or FP8.</em></p>
-<p>Modern accelerators have separate datapaths for different precisions, and the peak throughput varies dramatically: the H100 delivers 990 TFLOPS in FP16 tensor operations but only sixty TFLOPS in FP32 non-tensor operations—a 16<span class="math inline">\(\times\)</span> difference. Quoting the wrong precision’s peak when computing utilization or estimating training time produces meaningless results. Always match the constant to the precision your workload actually uses.</p>
-<p><strong>Fallacy:</strong> <em>Hardware constants are stable enough to hardcode.</em></p>
-<p>Accelerator specifications, cloud pricing, and energy costs change with every hardware generation and contract renegotiation. Hardcoding “the A100 has 2 TB/s bandwidth” in a calculation means the estimate silently rots as hardware evolves. This is precisely why the book uses <code>mlsys/constants.py</code>—updating a single value propagates the correction everywhere.</p>
-<p><strong>Pitfall:</strong> <em>Treating TDP as actual power consumption.</em></p>
+<p><strong>Pitfall</strong>: <em>Using FP32 FLOPS when the workload runs in BF16 or FP8.</em></p>
+<p>Modern accelerators have separate datapaths for different precisions, and the peak throughput varies dramatically: the H100 delivers 990 TFLOPS in FP16 tensor operations but only 60 TFLOPS in FP32 nontensor operations—a 16<span class="math inline">\(\times\)</span> difference. Quoting the wrong precision’s peak when computing utilization or estimating training time produces meaningless results. Always match the constant to the precision the workload actually uses.</p>
+<p><strong>Fallacy</strong>: <em>Hardware constants are stable enough to hardcode.</em></p>
+<p>Accelerator specifications, cloud pricing, and energy costs change with every hardware generation and contract renegotiation. Hardcoding “the A100 has 2 TB/s bandwidth” in a calculation means the estimate silently rots as hardware evolves. This is precisely why the book uses <code>mlsysim/core/constants.py</code>—updating a single value propagates the correction everywhere.</p>
+<p><strong>Pitfall</strong>: <em>Treating TDP as actual power consumption.</em></p>
 <p>Thermal Design Power (TDP) is the maximum sustained power draw the cooling system must handle, not the power the accelerator actually consumes under a given workload. Real power consumption varies with utilization, memory access patterns, and clock frequency. Using TDP for energy calculations overestimates costs for inference workloads (which rarely sustain peak power) and may underestimate costs for sustained training workloads on newer hardware with dynamic boost.</p>
 </section>
 <section id="summary" class="level2 unnumbered">
 <h2 class="unnumbered anchored" data-anchor-id="summary">Summary</h2>
-<div id="callout-takeaways*-1.2" class="callout callout-takeaways" title="Auditing the Book's Constants">
-<details class="callout-takeaways fbx-simplebox fbx-default" open=""><summary><strong>Key Takeaways: Auditing the Book's Constants</strong></summary><div>
+<div id="callout-takeaways*-1.1" class="callout callout-takeaways" title="Auditing the Book's constants">
+<details class="callout-takeaways fbx-simplebox fbx-default" open=""><summary><strong>Key Takeaways: Auditing the Book's constants</strong></summary><div>
 <ul>
-<li>Every quantitative example in this book traces back to a specific constant in <code>mlsys/constants.py</code>. This appendix exposes all of those constants so you can audit, verify, or update the numbers that underpin the book’s reasoning.</li>
+<li>Every quantitative example in this book traces back to a specific constant in <code>mlsysim/core/constants.py</code>. This appendix exposes all of those constants so the numbers that underpin the book’s reasoning are open to audit, verification, and update.</li>
 <li>Hardware specs (peak FLOPS, memory bandwidth, TDP) set ceilings, not guarantees. Real utilization is typically 30–50 percent of peak for training workloads; using peak values without discounting produces dangerously optimistic estimates.</li>
-<li>The <em>ratios</em> between constants are often more stable and informative than the absolute values. The ridge point (FLOPS/bandwidth), the memory-per-parameter cost (16 bytes for mixed-precision Adam), and the energy hierarchy (200<span class="math inline">\(\times\)</span> between register and DRAM access) persist across hardware generations.</li>
+<li>The <em>ratios</em> between constants are often more stable and informative than the absolute values. The ridge point (FLOPS/bandwidth), the memory-per-parameter cost (16 bytes for mixed-precision Adam), and the order-of-magnitude energy hierarchy (tens of thousands of times between a register access and a DRAM access) persist across hardware generations.</li>
 <li>A single source of truth for constants eliminates the most common source of inconsistency in quantitative textbooks: the same number quoted differently in different chapters.</li>
 </ul>
 </div></details>
 </div>
+
 
 
 </section>
@@ -2922,8 +2994,149 @@ Table&nbsp;14: <strong>Unit Definitions</strong>: Base and derived units used by
     </div>
   </div>
 </footer>
+<!--
+  MLSysBook release-pill — shared footer snippet for Quarto + static sites.
+
+  Renders a small "v0.1.0 · Apr 26, 2026" pill from a deployed
+  release-manifest.json. The pill is best-effort chrome: silent on any
+  fetch failure (manifest missing, offline, CORS). Use at any site that
+  emits a manifest via scripts/version/release.py emit-manifest.
+
+  ── Per-project setup (one of two patterns) ──
+
+  Pattern A — Quarto, configured via _quarto.yml:
+
+      project:
+        resources:
+          - ../shared/release/release-pill.html
+      format:
+        html:
+          include-in-header:
+            - text: |
+                <meta name="release-manifest" content="/<project-base>/release-manifest.json">
+          include-after-body:
+            - file: ../shared/release/release-pill.html
+
+  The meta tag tells the snippet where to find the manifest. The
+  ``include-after-body`` injects the snippet into every rendered page.
+
+  Pattern B — Next.js / hand-rolled HTML:
+
+      <meta name="release-manifest" content="/release-manifest.json" />
+      // in footer:
+      <span data-release-pill></span>
+      <script src="/release-pill.js"></script>
+
+  (See shared/release/release-pill.js for the standalone JS form.)
+
+  NOTE: Do NOT use a nested `<!-- ... -->` HTML comment in this docstring
+  block. HTML disallows nested comments, so the inner `--&gt;` would
+  terminate the outer comment early and cause the example markup below
+  it (the `<span data-release-pill="">` and `<script src="…release-pill.js">`)
+  to leak into the rendered page — producing a 404 on every Quarto site
+  that includes this snippet via `include-after-body`. Use `//`-style
+  pseudo-comments inside the documentation block instead.
+
+  ── Manifest contract ──
+
+  The manifest is the JSON written by scripts/version/release.py
+  emit-manifest. Required keys: releaseId, releaseHash. Optional but
+  recommended: buildDate, project. Anything else is ignored.
+
+  ── Why runtime fetch instead of build-time templating ──
+
+  Build-time templating (Lua filter, Quarto partial with variable
+  interpolation) would be deterministic and faster but requires
+  per-project Lua/template machinery. Runtime fetch is project-agnostic
+  and works identically across Quarto, Next.js, and plain HTML. The
+  ~50ms fetch cost happens once per page-load and is invisible because
+  the pill is below the fold. If a future project needs the version
+  visible above the fold, it should bake at build time (StaffML does
+  this for its citation card).
+-->
+
+<span class="release-pill" data-release-pill aria-live="polite">
+  <noscript><a href="#">release</a></noscript>
+</span>
+
+<style>
+  .release-pill {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.25em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+    font-size: 0.75rem;
+    line-height: 1;
+    color: var(--bs-secondary, var(--release-pill-color, #6c757d));
+  }
+  .release-pill a {
+    color: inherit;
+    text-decoration: none;
+  }
+  .release-pill a:hover {
+    color: var(--bs-link-color, #0d6efd);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .release-pill-date {
+    opacity: 0.7;
+  }
+</style>
+
+<script>
+  (function () {
+    var el = document.querySelector('[data-release-pill]');
+    if (!el) return;
+
+    // Manifest URL resolution order:
+    //   1. data-manifest attribute on the pill (per-page override)
+    //   2. <meta name="release-manifest" content="..."> in <head>
+    //   3. './release-manifest.json' relative to current page (fallback)
+    var meta = document.querySelector('meta[name="release-manifest"]');
+    var manifestPath =
+      el.getAttribute('data-manifest') ||
+      (meta && meta.getAttribute('content')) ||
+      './release-manifest.json';
+
+    var linkHref = el.getAttribute('data-link') || '#release';
+
+    fetch(manifestPath, { cache: 'no-store' })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (m) {
+        if (!m || !m.releaseId || !m.releaseHash) return;
+        var date = m.buildDate
+          ? new Date(m.buildDate).toLocaleDateString('en-US',
+              { year: 'numeric', month: 'short', day: 'numeric' })
+          : '';
+        var shortHash = String(m.releaseHash).slice(0, 7);
+        var title =
+          (m.project ? m.project + ' ' : '') +
+          'v' + m.releaseId +
+          (date ? ' · built ' + date : '') +
+          ' · hash ' + shortHash;
+        var a = document.createElement('a');
+        a.href = linkHref;
+        a.title = title;
+        a.setAttribute('aria-label',
+          'Release v' + m.releaseId + (date ? ', built ' + date : ''));
+        var v = document.createElement('span');
+        v.className = 'release-pill-version';
+        v.textContent = 'v' + m.releaseId;
+        a.appendChild(v);
+        if (date) {
+          var d = document.createElement('span');
+          d.className = 'release-pill-date';
+          d.textContent = ' · ' + date;
+          a.appendChild(d);
+        }
+        el.innerHTML = '';
+        el.appendChild(a);
+      })
+      .catch(function () { /* silent: best-effort chrome */ });
+  })();
+</script>
 
 
 
 
-</body></html>
+</span></body></html>

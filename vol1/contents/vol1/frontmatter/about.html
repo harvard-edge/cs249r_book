@@ -23,7 +23,26 @@ ul.task-list li input[type="checkbox"] {
   margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
   vertical-align: middle;
 }
-</style>
+/* CSS for citations */
+div.csl-bib-body { }
+div.csl-entry {
+  clear: both;
+}
+.hanging-indent div.csl-entry {
+  margin-left:2em;
+  text-indent:-2em;
+}
+div.csl-left-margin {
+  min-width:2em;
+  float:left;
+}
+div.csl-right-inline {
+  margin-left:2em;
+  padding-left:1em;
+}
+div.csl-indent {
+  margin-left: 2em;
+}</style>
 
 
 <script src="../../../site_libs/quarto-nav/quarto-nav.js"></script>
@@ -46,9 +65,9 @@ ul.task-list li input[type="checkbox"] {
 <link href="../../../site_libs/quarto-html/quarto-syntax-highlighting-da245a98686d0485553d61919e8b3534.css" rel="stylesheet" class="quarto-color-scheme-extra" id="quarto-text-highlighting-styles">
 <script src="../../../site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="../../../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="../../../site_libs/bootstrap/bootstrap-e36f1d942665a707fab2dc030137fb99.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
-<link href="../../../site_libs/bootstrap/bootstrap-dark-6efc886ea860012187df06cd8b2b7ef6.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="light">
-<link href="../../../site_libs/bootstrap/bootstrap-e36f1d942665a707fab2dc030137fb99.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
+<link href="../../../site_libs/bootstrap/bootstrap-1bcc8a218617a504e220ca6b190c5f87.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
+<link href="../../../site_libs/bootstrap/bootstrap-dark-fb72c28dabfa9ffe96fa2eed602e9180.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="light">
+<link href="../../../site_libs/bootstrap/bootstrap-1bcc8a218617a504e220ca6b190c5f87.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
 <link href="../../../site_libs/quarto-contrib/foldbox/foldbox.css" rel="stylesheet">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
@@ -133,8 +152,31 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
     html.setAttribute('data-bs-theme', scheme);
     html.setAttribute('data-quarto-color-scheme', scheme);
     html.style.colorScheme = scheme;
+    // Bridge to legacy `.quarto-dark` body class — about.css,
+    // community.css, and newsletter.css key their dark-mode CSS
+    // variables off `.quarto-dark { ... }`. Quarto's own toggle adds
+    // that class on click, but the OS-pref / first-paint path never
+    // does. Mirror the scheme onto body so those CSS variables fire
+    // on every dark path, not just toggle clicks. body may not exist
+    // yet on the first call (this script runs in <head>); a
+    // MutationObserver below catches it as soon as it parses.
+    var body = document.body;
+    if (body) body.classList.toggle('quarto-dark', scheme === 'dark');
   }
   apply(preferredScheme());
+  // Catch the FOUC window between <head> apply() and DOMContentLoaded:
+  // <body> may not exist yet at first apply(), but as soon as the
+  // parser appends it we want the legacy class bridge in place so any
+  // CSS keyed on `.quarto-dark` paints correctly on first render.
+  if (!document.body) {
+    var earlyObserver = new MutationObserver(function () {
+      if (document.body) {
+        apply(preferredScheme());
+        earlyObserver.disconnect();
+      }
+    });
+    earlyObserver.observe(document.documentElement, { childList: true });
+  }
   // Quarto's toggle updates localStorage but not <html>, so wrap it to
   // mirror the new value onto data-bs-theme; otherwise clicking the toggle
   // leaves CSS keyed off [data-bs-theme="dark"] rendering against the wrong
@@ -156,6 +198,40 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
     document.addEventListener('DOMContentLoaded', function () { wrapToggle(); syncFromStorage(); });
   } else {
     wrapToggle(); syncFromStorage();
+  }
+  // Defend the legacy `.quarto-dark` body class against Quarto's own
+  // `toggleBodyColor(mode)`, which runs *after* this script and re-asserts
+  // the body class based on `mode` — and `mode` defaults to 'light' when
+  // there's no stored quarto-color-scheme value, even when the OS / first
+  // paint already resolved to dark via `data-bs-theme`. Without this
+  // observer, on every fresh visit Quarto would clobber our bridge and
+  // restore `.quarto-light`, leaving `.quarto-dark`-keyed CSS variables
+  // (about/community/newsletter pages) at their light-mode defaults
+  // against the dark `data-bs-theme="dark"` background.
+  function bridgeBody() {
+    var body = document.body;
+    if (!body) return;
+    var wantDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+    if (wantDark && !body.classList.contains('quarto-dark')) {
+      body.classList.add('quarto-dark');
+      body.classList.remove('quarto-light');
+    } else if (!wantDark && body.classList.contains('quarto-dark')) {
+      body.classList.remove('quarto-dark');
+      body.classList.add('quarto-light');
+    }
+  }
+  function watchBody() {
+    if (!document.body) return;
+    bridgeBody();
+    var bodyObs = new MutationObserver(bridgeBody);
+    bodyObs.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    var htmlObs = new MutationObserver(bridgeBody);
+    htmlObs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-bs-theme'] });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', watchBody);
+  } else {
+    watchBody();
   }
   window.addEventListener('storage', function (ev) {
     if (ev.key !== STORAGE_KEY) return;
@@ -199,20 +275,24 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
 <link rel="manifest" href="../../../site.webmanifest">
 <link rel="apple-touch-icon" href="../../../assets/images/icons/favicon.png">
 <meta name="theme-color" content="#A51C30">
+<!-- Release identity (rendered into the footer pill below).
+     The publish workflow drops release-manifest.json at
+     /vol1/release-manifest.json before deploy. -->
+<meta name="release-manifest" content="/vol1/release-manifest.json">
 <!-- SocratiQ bundle disabled pending quiz regeneration: -->
 <!-- <script type="module" src="/tools/scripts/socratiQ/bundle.js" defer></script> -->
 <script src="../../../assets/scripts/sidebar-auto-collapse.js" defer=""></script>
 <script src="../../../assets/scripts/version-link.js" defer=""></script>
 <script src="../../../assets/scripts/subscribe-modal.js" defer=""></script>
 <style>
-.callout-lighthouse {
-  --color1: #FDF8E6;
-  --color2: #B8860B;
-  --border-color: #B8860B;
-  --background-color: rgba(184, 134, 11, 0.04);
-  --title-background-color: rgba(184, 134, 11, 0.04);
-  --dark-background-color: rgba(184, 134, 11, 0.12);
-  --dark-title-background-color: rgba(184, 134, 11, 0.12);
+.callout-resource-videos {
+  --color1: #E0F2F1;
+  --color2: #20B2AA;
+  --border-color: #20B2AA;
+  --background-color: rgba(32, 178, 170, 0.04);
+  --title-background-color: rgba(32, 178, 170, 0.04);
+  --dark-background-color: rgba(32, 178, 170, 0.12);
+  --dark-title-background-color: rgba(32, 178, 170, 0.12);
 }
 .callout-example {
   --color1: #F0F8F6;
@@ -223,32 +303,14 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
   --dark-background-color: rgba(20, 143, 119, 0.12);
   --dark-title-background-color: rgba(20, 143, 119, 0.12);
 }
-.callout-checkpoint {
-  --color1: #FFF8E7;
-  --color2: #D97706;
-  --border-color: #D97706;
-  --background-color: rgba(217, 119, 6, 0.04);
-  --title-background-color: rgba(217, 119, 6, 0.04);
-  --dark-background-color: rgba(217, 119, 6, 0.12);
-  --dark-title-background-color: rgba(217, 119, 6, 0.12);
-}
-.callout-learning-objectives {
-  --color1: #E8F2EA;
-  --color2: #4A7C59;
-  --border-color: #4A7C59;
-  --background-color: rgba(74, 124, 89, 0.04);
-  --title-background-color: rgba(74, 124, 89, 0.04);
-  --dark-background-color: rgba(74, 124, 89, 0.12);
-  --dark-title-background-color: rgba(74, 124, 89, 0.12);
-}
-.callout-quiz-answer {
-  --color1: #E8F2EA;
-  --color2: #4A7C59;
-  --border-color: #4A7C59;
-  --background-color: rgba(74, 124, 89, 0.04);
-  --title-background-color: rgba(74, 124, 89, 0.04);
-  --dark-background-color: rgba(74, 124, 89, 0.12);
-  --dark-title-background-color: rgba(74, 124, 89, 0.12);
+.callout-definition {
+  --color1: #F0F4F8;
+  --color2: #1B4F72;
+  --border-color: #1B4F72;
+  --background-color: rgba(27, 79, 114, 0.04);
+  --title-background-color: rgba(27, 79, 114, 0.04);
+  --dark-background-color: rgba(27, 79, 114, 0.12);
+  --dark-title-background-color: rgba(27, 79, 114, 0.12);
 }
 .callout-colab {
   --color1: #FFF5E6;
@@ -259,23 +321,14 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
   --dark-background-color: rgba(255, 107, 53, 0.12);
   --dark-title-background-color: rgba(255, 107, 53, 0.12);
 }
-.callout-resource-slides {
-  --color1: #E0F2F1;
-  --color2: #20B2AA;
-  --border-color: #20B2AA;
-  --background-color: rgba(32, 178, 170, 0.04);
-  --title-background-color: rgba(32, 178, 170, 0.04);
-  --dark-background-color: rgba(32, 178, 170, 0.12);
-  --dark-title-background-color: rgba(32, 178, 170, 0.12);
-}
-.callout-resource-exercises {
-  --color1: #E0F2F1;
-  --color2: #20B2AA;
-  --border-color: #20B2AA;
-  --background-color: rgba(32, 178, 170, 0.04);
-  --title-background-color: rgba(32, 178, 170, 0.04);
-  --dark-background-color: rgba(32, 178, 170, 0.12);
-  --dark-title-background-color: rgba(32, 178, 170, 0.12);
+.callout-learning-objectives {
+  --color1: #E8F2EA;
+  --color2: #4A7C59;
+  --border-color: #4A7C59;
+  --background-color: rgba(74, 124, 89, 0.04);
+  --title-background-color: rgba(74, 124, 89, 0.04);
+  --dark-background-color: rgba(74, 124, 89, 0.12);
+  --dark-title-background-color: rgba(74, 124, 89, 0.12);
 }
 .callout-perspective {
   --color1: #F7F8FA;
@@ -286,6 +339,15 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
   --dark-background-color: rgba(74, 85, 104, 0.12);
   --dark-title-background-color: rgba(74, 85, 104, 0.12);
 }
+.callout-checkpoint {
+  --color1: #FFF8E7;
+  --color2: #D97706;
+  --border-color: #D97706;
+  --background-color: rgba(217, 119, 6, 0.04);
+  --title-background-color: rgba(217, 119, 6, 0.04);
+  --dark-background-color: rgba(217, 119, 6, 0.12);
+  --dark-title-background-color: rgba(217, 119, 6, 0.12);
+}
 .callout-theorem {
   --color1: #F5F0FA;
   --color2: #6B46C1;
@@ -294,15 +356,6 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
   --title-background-color: rgba(107, 70, 193, 0.04);
   --dark-background-color: rgba(107, 70, 193, 0.12);
   --dark-title-background-color: rgba(107, 70, 193, 0.12);
-}
-.callout-chapter-connection {
-  --color1: #EFF6FF;
-  --color2: #1E3A5F;
-  --border-color: #1E3A5F;
-  --background-color: rgba(30, 58, 95, 0.04);
-  --title-background-color: rgba(30, 58, 95, 0.04);
-  --dark-background-color: rgba(30, 58, 95, 0.12);
-  --dark-title-background-color: rgba(30, 58, 95, 0.12);
 }
 .callout-quiz-question {
   --color1: #F0F0F8;
@@ -313,6 +366,15 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
   --dark-background-color: rgba(91, 75, 138, 0.12);
   --dark-title-background-color: rgba(91, 75, 138, 0.12);
 }
+.callout-lighthouse {
+  --color1: #FDF8E6;
+  --color2: #B8860B;
+  --border-color: #B8860B;
+  --background-color: rgba(184, 134, 11, 0.04);
+  --title-background-color: rgba(184, 134, 11, 0.04);
+  --dark-background-color: rgba(184, 134, 11, 0.12);
+  --dark-title-background-color: rgba(184, 134, 11, 0.12);
+}
 .callout-notebook {
   --color1: #F2F7FF;
   --color2: #2C5282;
@@ -321,51 +383,6 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
   --title-background-color: rgba(44, 82, 130, 0.04);
   --dark-background-color: rgba(44, 82, 130, 0.12);
   --dark-title-background-color: rgba(44, 82, 130, 0.12);
-}
-.callout-code {
-  --color1: #F2F4F8;
-  --color2: #D1D7E0;
-  --border-color: #D1D7E0;
-  --background-color: rgba(209, 215, 224, 0.04);
-  --title-background-color: rgba(209, 215, 224, 0.04);
-  --dark-background-color: rgba(209, 215, 224, 0.12);
-  --dark-title-background-color: rgba(209, 215, 224, 0.12);
-}
-.callout-principle {
-  --color1: #F3F2FA;
-  --color2: #3D3B8E;
-  --border-color: #3D3B8E;
-  --background-color: rgba(61, 59, 142, 0.04);
-  --title-background-color: rgba(61, 59, 142, 0.04);
-  --dark-background-color: rgba(61, 59, 142, 0.12);
-  --dark-title-background-color: rgba(61, 59, 142, 0.12);
-}
-.callout-war-story {
-  --color1: #FEF2F2;
-  --color2: #C53030;
-  --border-color: #C53030;
-  --background-color: rgba(197, 48, 48, 0.04);
-  --title-background-color: rgba(197, 48, 48, 0.04);
-  --dark-background-color: rgba(197, 48, 48, 0.12);
-  --dark-title-background-color: rgba(197, 48, 48, 0.12);
-}
-.callout-resource-videos {
-  --color1: #E0F2F1;
-  --color2: #20B2AA;
-  --border-color: #20B2AA;
-  --background-color: rgba(32, 178, 170, 0.04);
-  --title-background-color: rgba(32, 178, 170, 0.04);
-  --dark-background-color: rgba(32, 178, 170, 0.12);
-  --dark-title-background-color: rgba(32, 178, 170, 0.12);
-}
-.callout-definition {
-  --color1: #F0F4F8;
-  --color2: #1B4F72;
-  --border-color: #1B4F72;
-  --background-color: rgba(27, 79, 114, 0.04);
-  --title-background-color: rgba(27, 79, 114, 0.04);
-  --dark-background-color: rgba(27, 79, 114, 0.12);
-  --dark-title-background-color: rgba(27, 79, 114, 0.12);
 }
 .callout-takeaways {
   --color1: #FDF2F7;
@@ -376,21 +393,84 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
   --dark-background-color: rgba(190, 24, 93, 0.12);
   --dark-title-background-color: rgba(190, 24, 93, 0.12);
 }
+.callout-chapter-connection {
+  --color1: #EFF6FF;
+  --color2: #1E3A5F;
+  --border-color: #1E3A5F;
+  --background-color: rgba(30, 58, 95, 0.04);
+  --title-background-color: rgba(30, 58, 95, 0.04);
+  --dark-background-color: rgba(30, 58, 95, 0.12);
+  --dark-title-background-color: rgba(30, 58, 95, 0.12);
+}
+.callout-resource-slides {
+  --color1: #E0F2F1;
+  --color2: #20B2AA;
+  --border-color: #20B2AA;
+  --background-color: rgba(32, 178, 170, 0.04);
+  --title-background-color: rgba(32, 178, 170, 0.04);
+  --dark-background-color: rgba(32, 178, 170, 0.12);
+  --dark-title-background-color: rgba(32, 178, 170, 0.12);
+}
+.callout-principle {
+  --color1: #F3F2FA;
+  --color2: #3D3B8E;
+  --border-color: #3D3B8E;
+  --background-color: rgba(61, 59, 142, 0.04);
+  --title-background-color: rgba(61, 59, 142, 0.04);
+  --dark-background-color: rgba(61, 59, 142, 0.12);
+  --dark-title-background-color: rgba(61, 59, 142, 0.12);
+}
+.callout-resource-exercises {
+  --color1: #E0F2F1;
+  --color2: #20B2AA;
+  --border-color: #20B2AA;
+  --background-color: rgba(32, 178, 170, 0.04);
+  --title-background-color: rgba(32, 178, 170, 0.04);
+  --dark-background-color: rgba(32, 178, 170, 0.12);
+  --dark-title-background-color: rgba(32, 178, 170, 0.12);
+}
+.callout-code {
+  --color1: #F2F4F8;
+  --color2: #D1D7E0;
+  --border-color: #D1D7E0;
+  --background-color: rgba(209, 215, 224, 0.04);
+  --title-background-color: rgba(209, 215, 224, 0.04);
+  --dark-background-color: rgba(209, 215, 224, 0.12);
+  --dark-title-background-color: rgba(209, 215, 224, 0.12);
+}
+.callout-war-story {
+  --color1: #FEF2F2;
+  --color2: #C53030;
+  --border-color: #C53030;
+  --background-color: rgba(197, 48, 48, 0.04);
+  --title-background-color: rgba(197, 48, 48, 0.04);
+  --dark-background-color: rgba(197, 48, 48, 0.12);
+  --dark-title-background-color: rgba(197, 48, 48, 0.12);
+}
+.callout-quiz-answer {
+  --color1: #E8F2EA;
+  --color2: #4A7C59;
+  --border-color: #4A7C59;
+  --background-color: rgba(74, 124, 89, 0.04);
+  --title-background-color: rgba(74, 124, 89, 0.04);
+  --dark-background-color: rgba(74, 124, 89, 0.12);
+  --dark-title-background-color: rgba(74, 124, 89, 0.12);
+}
 </style>
 <style>
 @media (prefers-color-scheme: dark) {
-  details.callout-lighthouse {
+  details.callout-resource-videos {
     --text-color: #e6e6e6;
-    --background-color: rgba(184, 134, 11, 0.12);
-    --title-background-color: rgba(184, 134, 11, 0.12);
-    border-color: #B8860B;
+    --background-color: rgba(32, 178, 170, 0.12);
+    --title-background-color: rgba(32, 178, 170, 0.12);
+    border-color: #20B2AA;
   }
-  details.callout-lighthouse summary,
-  details.callout-lighthouse summary strong,
-  details.callout-lighthouse > summary {
+  details.callout-resource-videos summary,
+  details.callout-resource-videos summary strong,
+  details.callout-resource-videos > summary {
     color: #f0f0f0 !important;
   }
-  details.callout-lighthouse code {
+  details.callout-resource-videos code {
     color: #e6e6e6 !important;
   }
   details.callout-example {
@@ -407,46 +487,18 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
   details.callout-example code {
     color: #e6e6e6 !important;
   }
-  details.callout-checkpoint {
+  details.callout-definition {
     --text-color: #e6e6e6;
-    --background-color: rgba(217, 119, 6, 0.12);
-    --title-background-color: rgba(217, 119, 6, 0.12);
-    border-color: #D97706;
+    --background-color: rgba(27, 79, 114, 0.12);
+    --title-background-color: rgba(27, 79, 114, 0.12);
+    border-color: #1B4F72;
   }
-  details.callout-checkpoint summary,
-  details.callout-checkpoint summary strong,
-  details.callout-checkpoint > summary {
+  details.callout-definition summary,
+  details.callout-definition summary strong,
+  details.callout-definition > summary {
     color: #f0f0f0 !important;
   }
-  details.callout-checkpoint code {
-    color: #e6e6e6 !important;
-  }
-  details.callout-learning-objectives {
-    --text-color: #e6e6e6;
-    --background-color: rgba(74, 124, 89, 0.12);
-    --title-background-color: rgba(74, 124, 89, 0.12);
-    border-color: #4A7C59;
-  }
-  details.callout-learning-objectives summary,
-  details.callout-learning-objectives summary strong,
-  details.callout-learning-objectives > summary {
-    color: #f0f0f0 !important;
-  }
-  details.callout-learning-objectives code {
-    color: #e6e6e6 !important;
-  }
-  details.callout-quiz-answer {
-    --text-color: #e6e6e6;
-    --background-color: rgba(74, 124, 89, 0.12);
-    --title-background-color: rgba(74, 124, 89, 0.12);
-    border-color: #4A7C59;
-  }
-  details.callout-quiz-answer summary,
-  details.callout-quiz-answer summary strong,
-  details.callout-quiz-answer > summary {
-    color: #f0f0f0 !important;
-  }
-  details.callout-quiz-answer code {
+  details.callout-definition code {
     color: #e6e6e6 !important;
   }
   details.callout-colab {
@@ -463,32 +515,18 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
   details.callout-colab code {
     color: #e6e6e6 !important;
   }
-  details.callout-resource-slides {
+  details.callout-learning-objectives {
     --text-color: #e6e6e6;
-    --background-color: rgba(32, 178, 170, 0.12);
-    --title-background-color: rgba(32, 178, 170, 0.12);
-    border-color: #20B2AA;
+    --background-color: rgba(74, 124, 89, 0.12);
+    --title-background-color: rgba(74, 124, 89, 0.12);
+    border-color: #4A7C59;
   }
-  details.callout-resource-slides summary,
-  details.callout-resource-slides summary strong,
-  details.callout-resource-slides > summary {
+  details.callout-learning-objectives summary,
+  details.callout-learning-objectives summary strong,
+  details.callout-learning-objectives > summary {
     color: #f0f0f0 !important;
   }
-  details.callout-resource-slides code {
-    color: #e6e6e6 !important;
-  }
-  details.callout-resource-exercises {
-    --text-color: #e6e6e6;
-    --background-color: rgba(32, 178, 170, 0.12);
-    --title-background-color: rgba(32, 178, 170, 0.12);
-    border-color: #20B2AA;
-  }
-  details.callout-resource-exercises summary,
-  details.callout-resource-exercises summary strong,
-  details.callout-resource-exercises > summary {
-    color: #f0f0f0 !important;
-  }
-  details.callout-resource-exercises code {
+  details.callout-learning-objectives code {
     color: #e6e6e6 !important;
   }
   details.callout-perspective {
@@ -505,6 +543,20 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
   details.callout-perspective code {
     color: #e6e6e6 !important;
   }
+  details.callout-checkpoint {
+    --text-color: #e6e6e6;
+    --background-color: rgba(217, 119, 6, 0.12);
+    --title-background-color: rgba(217, 119, 6, 0.12);
+    border-color: #D97706;
+  }
+  details.callout-checkpoint summary,
+  details.callout-checkpoint summary strong,
+  details.callout-checkpoint > summary {
+    color: #f0f0f0 !important;
+  }
+  details.callout-checkpoint code {
+    color: #e6e6e6 !important;
+  }
   details.callout-theorem {
     --text-color: #e6e6e6;
     --background-color: rgba(107, 70, 193, 0.12);
@@ -517,20 +569,6 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
     color: #f0f0f0 !important;
   }
   details.callout-theorem code {
-    color: #e6e6e6 !important;
-  }
-  details.callout-chapter-connection {
-    --text-color: #e6e6e6;
-    --background-color: rgba(30, 58, 95, 0.12);
-    --title-background-color: rgba(30, 58, 95, 0.12);
-    border-color: #1E3A5F;
-  }
-  details.callout-chapter-connection summary,
-  details.callout-chapter-connection summary strong,
-  details.callout-chapter-connection > summary {
-    color: #f0f0f0 !important;
-  }
-  details.callout-chapter-connection code {
     color: #e6e6e6 !important;
   }
   details.callout-quiz-question {
@@ -547,6 +585,20 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
   details.callout-quiz-question code {
     color: #e6e6e6 !important;
   }
+  details.callout-lighthouse {
+    --text-color: #e6e6e6;
+    --background-color: rgba(184, 134, 11, 0.12);
+    --title-background-color: rgba(184, 134, 11, 0.12);
+    border-color: #B8860B;
+  }
+  details.callout-lighthouse summary,
+  details.callout-lighthouse summary strong,
+  details.callout-lighthouse > summary {
+    color: #f0f0f0 !important;
+  }
+  details.callout-lighthouse code {
+    color: #e6e6e6 !important;
+  }
   details.callout-notebook {
     --text-color: #e6e6e6;
     --background-color: rgba(44, 82, 130, 0.12);
@@ -559,76 +611,6 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
     color: #f0f0f0 !important;
   }
   details.callout-notebook code {
-    color: #e6e6e6 !important;
-  }
-  details.callout-code {
-    --text-color: #e6e6e6;
-    --background-color: rgba(209, 215, 224, 0.12);
-    --title-background-color: rgba(209, 215, 224, 0.12);
-    border-color: #D1D7E0;
-  }
-  details.callout-code summary,
-  details.callout-code summary strong,
-  details.callout-code > summary {
-    color: #f0f0f0 !important;
-  }
-  details.callout-code code {
-    color: #e6e6e6 !important;
-  }
-  details.callout-principle {
-    --text-color: #e6e6e6;
-    --background-color: rgba(61, 59, 142, 0.12);
-    --title-background-color: rgba(61, 59, 142, 0.12);
-    border-color: #3D3B8E;
-  }
-  details.callout-principle summary,
-  details.callout-principle summary strong,
-  details.callout-principle > summary {
-    color: #f0f0f0 !important;
-  }
-  details.callout-principle code {
-    color: #e6e6e6 !important;
-  }
-  details.callout-war-story {
-    --text-color: #e6e6e6;
-    --background-color: rgba(197, 48, 48, 0.12);
-    --title-background-color: rgba(197, 48, 48, 0.12);
-    border-color: #C53030;
-  }
-  details.callout-war-story summary,
-  details.callout-war-story summary strong,
-  details.callout-war-story > summary {
-    color: #f0f0f0 !important;
-  }
-  details.callout-war-story code {
-    color: #e6e6e6 !important;
-  }
-  details.callout-resource-videos {
-    --text-color: #e6e6e6;
-    --background-color: rgba(32, 178, 170, 0.12);
-    --title-background-color: rgba(32, 178, 170, 0.12);
-    border-color: #20B2AA;
-  }
-  details.callout-resource-videos summary,
-  details.callout-resource-videos summary strong,
-  details.callout-resource-videos > summary {
-    color: #f0f0f0 !important;
-  }
-  details.callout-resource-videos code {
-    color: #e6e6e6 !important;
-  }
-  details.callout-definition {
-    --text-color: #e6e6e6;
-    --background-color: rgba(27, 79, 114, 0.12);
-    --title-background-color: rgba(27, 79, 114, 0.12);
-    border-color: #1B4F72;
-  }
-  details.callout-definition summary,
-  details.callout-definition summary strong,
-  details.callout-definition > summary {
-    color: #f0f0f0 !important;
-  }
-  details.callout-definition code {
     color: #e6e6e6 !important;
   }
   details.callout-takeaways {
@@ -645,65 +627,163 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
   details.callout-takeaways code {
     color: #e6e6e6 !important;
   }
+  details.callout-chapter-connection {
+    --text-color: #e6e6e6;
+    --background-color: rgba(30, 58, 95, 0.12);
+    --title-background-color: rgba(30, 58, 95, 0.12);
+    border-color: #1E3A5F;
+  }
+  details.callout-chapter-connection summary,
+  details.callout-chapter-connection summary strong,
+  details.callout-chapter-connection > summary {
+    color: #f0f0f0 !important;
+  }
+  details.callout-chapter-connection code {
+    color: #e6e6e6 !important;
+  }
+  details.callout-resource-slides {
+    --text-color: #e6e6e6;
+    --background-color: rgba(32, 178, 170, 0.12);
+    --title-background-color: rgba(32, 178, 170, 0.12);
+    border-color: #20B2AA;
+  }
+  details.callout-resource-slides summary,
+  details.callout-resource-slides summary strong,
+  details.callout-resource-slides > summary {
+    color: #f0f0f0 !important;
+  }
+  details.callout-resource-slides code {
+    color: #e6e6e6 !important;
+  }
+  details.callout-principle {
+    --text-color: #e6e6e6;
+    --background-color: rgba(61, 59, 142, 0.12);
+    --title-background-color: rgba(61, 59, 142, 0.12);
+    border-color: #3D3B8E;
+  }
+  details.callout-principle summary,
+  details.callout-principle summary strong,
+  details.callout-principle > summary {
+    color: #f0f0f0 !important;
+  }
+  details.callout-principle code {
+    color: #e6e6e6 !important;
+  }
+  details.callout-resource-exercises {
+    --text-color: #e6e6e6;
+    --background-color: rgba(32, 178, 170, 0.12);
+    --title-background-color: rgba(32, 178, 170, 0.12);
+    border-color: #20B2AA;
+  }
+  details.callout-resource-exercises summary,
+  details.callout-resource-exercises summary strong,
+  details.callout-resource-exercises > summary {
+    color: #f0f0f0 !important;
+  }
+  details.callout-resource-exercises code {
+    color: #e6e6e6 !important;
+  }
+  details.callout-code {
+    --text-color: #e6e6e6;
+    --background-color: rgba(209, 215, 224, 0.12);
+    --title-background-color: rgba(209, 215, 224, 0.12);
+    border-color: #D1D7E0;
+  }
+  details.callout-code summary,
+  details.callout-code summary strong,
+  details.callout-code > summary {
+    color: #f0f0f0 !important;
+  }
+  details.callout-code code {
+    color: #e6e6e6 !important;
+  }
+  details.callout-war-story {
+    --text-color: #e6e6e6;
+    --background-color: rgba(197, 48, 48, 0.12);
+    --title-background-color: rgba(197, 48, 48, 0.12);
+    border-color: #C53030;
+  }
+  details.callout-war-story summary,
+  details.callout-war-story summary strong,
+  details.callout-war-story > summary {
+    color: #f0f0f0 !important;
+  }
+  details.callout-war-story code {
+    color: #e6e6e6 !important;
+  }
+  details.callout-quiz-answer {
+    --text-color: #e6e6e6;
+    --background-color: rgba(74, 124, 89, 0.12);
+    --title-background-color: rgba(74, 124, 89, 0.12);
+    border-color: #4A7C59;
+  }
+  details.callout-quiz-answer summary,
+  details.callout-quiz-answer summary strong,
+  details.callout-quiz-answer > summary {
+    color: #f0f0f0 !important;
+  }
+  details.callout-quiz-answer code {
+    color: #e6e6e6 !important;
+  }
 }
 </style>
 <style>
-details.callout-lighthouse > summary::before {
-  background-image: url("../../../assets/images/icons/callouts/icon_callout_lighthouse.png");
+details.callout-resource-videos > summary::before {
+  background-image: url("../../../assets/images/icons/callouts/icon_callout_resource_videos.png");
 }
 details.callout-example > summary::before {
   background-image: url("../../../assets/images/icons/callouts/icon_callout_example.png");
 }
-details.callout-checkpoint > summary::before {
-  background-image: url("../../../assets/images/icons/callouts/icon_callout_checkpoint.png");
-}
-details.callout-learning-objectives > summary::before {
-  background-image: url("../../../assets/images/icons/callouts/icon_callout_learning_objectives.png");
-}
-details.callout-quiz-answer > summary::before {
-  background-image: url("../../../assets/images/icons/callouts/icon_callout_quiz_answer.png");
+details.callout-definition > summary::before {
+  background-image: url("../../../assets/images/icons/callouts/icon_callout_definition.png");
 }
 details.callout-colab > summary::before {
   background-image: url("../../../assets/images/icons/callouts/icon_callout_colab.png");
 }
-details.callout-resource-slides > summary::before {
-  background-image: url("../../../assets/images/icons/callouts/icon_callout_resource_slides.png");
-}
-details.callout-resource-exercises > summary::before {
-  background-image: url("../../../assets/images/icons/callouts/icon_callout_resource_exercises.png");
+details.callout-learning-objectives > summary::before {
+  background-image: url("../../../assets/images/icons/callouts/icon_callout_learning_objectives.png");
 }
 details.callout-perspective > summary::before {
   background-image: url("../../../assets/images/icons/callouts/icon_callout_perspective.png");
 }
+details.callout-checkpoint > summary::before {
+  background-image: url("../../../assets/images/icons/callouts/icon_callout_checkpoint.png");
+}
 details.callout-theorem > summary::before {
   background-image: url("../../../assets/images/icons/callouts/icon_callout_theorem.png");
-}
-details.callout-chapter-connection > summary::before {
-  background-image: url("../../../assets/images/icons/callouts/icon_callout_chapter_connection.png");
 }
 details.callout-quiz-question > summary::before {
   background-image: url("../../../assets/images/icons/callouts/icon_callout_quiz_question.png");
 }
+details.callout-lighthouse > summary::before {
+  background-image: url("../../../assets/images/icons/callouts/icon_callout_lighthouse.png");
+}
 details.callout-notebook > summary::before {
   background-image: url("../../../assets/images/icons/callouts/icon_callout_notebook.png");
 }
-details.callout-code > summary::before {
-  background-image: url("../../../assets/images/icons/callouts/icon_callout_code.png");
+details.callout-takeaways > summary::before {
+  background-image: url("../../../assets/images/icons/callouts/icon_callout_takeaways.png");
+}
+details.callout-chapter-connection > summary::before {
+  background-image: url("../../../assets/images/icons/callouts/icon_callout_chapter_connection.png");
+}
+details.callout-resource-slides > summary::before {
+  background-image: url("../../../assets/images/icons/callouts/icon_callout_resource_slides.png");
 }
 details.callout-principle > summary::before {
   background-image: url("../../../assets/images/icons/callouts/icon_callout_principle.png");
 }
+details.callout-resource-exercises > summary::before {
+  background-image: url("../../../assets/images/icons/callouts/icon_callout_resource_exercises.png");
+}
+details.callout-code > summary::before {
+  background-image: url("../../../assets/images/icons/callouts/icon_callout_code.png");
+}
 details.callout-war-story > summary::before {
   background-image: url("../../../assets/images/icons/callouts/icon_callout_war_story.png");
 }
-details.callout-resource-videos > summary::before {
-  background-image: url("../../../assets/images/icons/callouts/icon_callout_resource_videos.png");
-}
-details.callout-definition > summary::before {
-  background-image: url("../../../assets/images/icons/callouts/icon_callout_definition.png");
-}
-details.callout-takeaways > summary::before {
-  background-image: url("../../../assets/images/icons/callouts/icon_callout_takeaways.png");
+details.callout-quiz-answer > summary::before {
+  background-image: url("../../../assets/images/icons/callouts/icon_callout_quiz_answer.png");
 }
 </style>
 
@@ -746,7 +826,7 @@ window.Quarto = {
 <meta name="twitter:card" content="summary_large_image">
 </head>
 
-<body class="nav-sidebar floating nav-fixed quarto-light"><script id="quarto-html-before-body" type="application/javascript">
+<body class="nav-sidebar floating nav-fixed slimcontent quarto-light"><script id="quarto-html-before-body" type="application/javascript">
     const toggleBodyColorMode = (bsSheetEl) => {
       const mode = bsSheetEl.getAttribute("data-mode");
       const bodyEl = window.document.querySelector("body");
@@ -921,7 +1001,7 @@ window.Quarto = {
 
 <div id="quarto-search-results"></div>
   <header id="quarto-header" class="headroom fixed-top">
-    <nav class="navbar navbar-expand-lg " data-bs-theme="dark">
+    <nav class="navbar navbar-expand-xl " data-bs-theme="dark">
       <div class="navbar-container container-fluid">
       <div class="navbar-brand-container mx-auto">
     <a href="../../../index.html" class="navbar-brand navbar-brand-logo">
@@ -929,7 +1009,7 @@ window.Quarto = {
     <img src="../../../assets/images/icons/logo-seas-shield.png" alt="" class="navbar-logo dark-content">
     </a>
     <a class="navbar-brand" href="../../../index.html">
-    <span class="navbar-title">Introduction to Machine Learning Systems</span>
+    <span class="navbar-title">Machine Learning Systems</span>
     </a>
   </div>
             <div id="quarto-search" class="" title="Search"></div>
@@ -1087,7 +1167,7 @@ window.Quarto = {
     </a>
     <ul class="dropdown-menu" aria-labelledby="nav-menu-about">    
         <li>
-    <a class="dropdown-item" href="https://mlsysbook.ai/about/#mission"><i class="bi bi-bullseye" role="img">
+    <a class="dropdown-item" href="https://mlsysbook.ai/about/"><i class="bi bi-bullseye" role="img">
 </i> 
  <span class="dropdown-text">Mission</span></a>
   </li>  
@@ -1178,8 +1258,8 @@ window.Quarto = {
         </a>
     </div>
   </nav>
-  <div id="quarto-announcement" data-announcement-id="0570135b026c6062a1e92f030dbc6e0a" class="alert alert-primary hidden"><i class="bi bi-megaphone quarto-announcement-icon"></i><div class="quarto-announcement-content">
-<p>📘 <strong>Volume I: Foundations.</strong> Single-machine ML systems — data, algorithms, and machines. <a href="https://mlsysbook.ai/vol1/">Start reading →</a><br> 🚀 <strong>Ready for scale?</strong> <a href="https://mlsysbook.ai/vol2/">Volume II: At Scale</a> — distributed training, fleet operations, responsible deployment.<br> 🛠️ <strong>Alongside the book:</strong> <a href="https://mlsysbook.ai/tinytorch/">TinyTorch</a> (build) · <a href="https://mlsysbook.ai/kits/">Hardware Kits</a> (deploy) · <a href="https://mlsysbook.ai/mlsysim/">MLSys·im</a> (simulate)<br> 📬 <strong>Newsletter:</strong> ML Systems insights &amp; updates — <a href="https://mlsysbook.ai/newsletter/">Subscribe →</a></p>
+  <div id="quarto-announcement" data-announcement-id="56c90339a8ee2e96db7270fb2f3d1756" class="alert alert-primary hidden"><i class="bi bi-megaphone quarto-announcement-icon"></i><div class="quarto-announcement-content">
+<p>📘 <strong>Volume I: Foundations.</strong> Single-machine ML systems — data, algorithms, and machines. <a href="https://mlsysbook.ai/vol1/">Start reading →</a><br> 🚀 <strong>Ready for scale?</strong> <a href="https://mlsysbook.ai/vol2/">Volume II: At Scale</a> — distributed training, fleet operations, responsible deployment.<br> 🛠️ <strong>Alongside the book:</strong> <a href="https://mlsysbook.ai/tinytorch/">TinyTorch</a> (build) · <a href="https://mlsysbook.ai/kits/">Hardware Kits</a> (deploy) · <a href="https://mlsysbook.ai/mlsysim/">MLSys·im</a> (model) · <a href="https://mlsysbook.ai/labs/">Labs</a> (explore) · <a href="https://mlsysbook.ai/staffml/">StaffML</a> (practice)<br> 📬 <strong>Newsletter:</strong> ML Systems insights &amp; updates — <a href="https://mlsysbook.ai/newsletter/">Subscribe →</a></p>
 </div><i class="bi bi-x-lg quarto-announcement-action"></i></div>
 </header>
 <!-- content -->
@@ -1221,7 +1301,7 @@ window.Quarto = {
         <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="../../../contents/vol1/frontmatter/notation.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text">Notations</span></a>
+ <span class="menu-text">Notation and Conventions</span></a>
   </div>
 </li>
         <li class="px-0"><hr class="sidebar-divider hi "></li>
@@ -1446,57 +1526,63 @@ window.Quarto = {
 </nav>
     </div>
 <!-- main -->
-<main class="content" id="quarto-document-content"><header id="title-block-header" class="quarto-title-block"></header>
+<main class="content page-columns page-full" id="quarto-document-content"><header id="title-block-header" class="quarto-title-block"></header>
 
 
 
 
 
-<section id="sec-about" class="level1 unnumbered">
+<section id="sec-about" class="level1 unnumbered page-columns page-full">
 <h1 class="unnumbered">About This Book</h1>
 <section id="sec-book-book-74a2" class="level2">
 <h2 class="anchored" data-anchor-id="sec-book-book-74a2">Who This Book Is For</h2>
 <p>This book is for anyone who wants to understand <em>how</em> machine learning systems actually work, from the mathematics that define a neural network to the hardware that executes it and the engineering decisions that make it run efficiently.</p>
-<p>Most readers will not become ML hardware architects or compiler engineers. Yet every practitioner who builds, trains, optimizes, or deploys a model makes decisions that depend on understanding the system beneath the code. This book gives you that understanding. Whether you are an undergraduate encountering ML systems for the first time, a practicing engineer looking to strengthen your foundations, or a researcher who needs to reason about performance and deployment, this book provides the principled knowledge you need.</p>
+<p>Most readers will not become ML hardware architects or compiler engineers. Yet every practitioner who builds, trains, optimizes, or deploys a model makes decisions that depend on understanding the system beneath the code. This book provides that systems foundation for undergraduates encountering ML systems for the first time, practicing engineers strengthening their foundations, and researchers who need to reason about performance and deployment.</p>
 </section>
-<section id="sec-book-systems-textbook-76ff" class="level2">
+<section id="sec-book-systems-textbook-76ff" class="level2 page-columns page-full">
 <h2 class="anchored" data-anchor-id="sec-book-systems-textbook-76ff">Why a Systems Textbook</h2>
 <p>In 1968, a NATO conference in Garmisch, Germany, coined the term <em>software engineering</em> to address a crisis: software systems had grown too complex for ad hoc programming to manage. Building reliable software required its own discipline, with its own principles, methodologies, and rigor. Decades later, Hennessy and Patterson transformed computer architecture from an art into a quantitative science, giving engineers the tools to measure, predict, and optimize processor performance from first principles. In both cases, the practitioners already existed. The body of knowledge already existed. What was missing was the recognition that these activities constituted a discipline.</p>
 <p>Machine learning faces its own Garmisch moment.</p>
-<p>For the past decade, the field has been dominated by <em>model-centric</em> thinking—a focus on discovering new algorithms and architectures. But a model is not a system. A neural network that achieves state-of-the-art accuracy in a research notebook is useless if it cannot be served within latency constraints, if its data pipeline cannot scale to petabytes, or if its energy cost exceeds its economic value. The gap between a working model and a production system is not just a matter of “coding harder”; it is a gap in fundamental engineering principles.</p>
-<p>This book treats ML systems engineering not as a collection of tools — Kubernetes, PyTorch, CUDA — but as a discipline governed by physical invariants. Just as civil engineers cannot ignore gravity, AI engineers cannot ignore the constraints that govern every system they build:</p>
+<p>For the past decade, the field has been dominated by <em>model-centric</em> thinking: a focus on discovering new algorithms and architectures. However, a model is not a system. A neural network that performs well in a research notebook is useless if it cannot be served within latency constraints, if its data pipeline cannot scale to petabytes, or if its energy cost exceeds its economic value. The gap between a working model and a production system is not merely an implementation gap; it is a gap in fundamental engineering principles.</p>
+<p>This book treats ML systems engineering not as a collection of tools, such as Kubernetes, PyTorch, and CUDA, but as a discipline governed by physical invariants. Just as civil engineers cannot ignore gravity, AI engineers cannot ignore the constraints that govern every system they build:</p>
 <ul>
-<li><strong>The iron law</strong>: The immutable relationship between data movement, arithmetic intensity, and system performance.</li>
+<li><strong>The Iron Law of ML Systems</strong>: The immutable relationship between data movement, arithmetic intensity, and system performance.</li>
 <li><strong>Data Gravity</strong>: The physical cost of moving information at scale.</li>
 <li><strong>The Energy-Movement Invariant</strong>: Moving data costs orders of magnitude more energy than computing on it.</li>
-<li><strong>Amdahl’s Law</strong>: The serial fraction of your pipeline caps total system speedup.</li>
+<li><strong>Amdahl’s Law</strong>: The serial fraction of a pipeline caps total system speedup.</li>
 </ul>
-<p>If computer science asks “<em>what</em> is computable?” and ML research asks “<em>what</em> is learnable?”, then AI engineering asks “<em>what</em> is buildable, given the physics of real hardware and real data?”</p>
-<p>This book is the foundation for that discipline. We aim to do for AI systems what Hennessy and Patterson did for computer architecture: replace intuition with measurement, and art with engineering. The goal is to teach you to reason about the system <em>before</em> you build it, treating data, algorithms, and hardware not as separate silos but as a single, coupled optimization problem.</p>
-<p>Consider a box of LEGO bricks. The same interlocking pieces build a spaceship, a castle, or an entire city. The sets change; the bricks do not. ML systems work the same way. A convolutional network for image classification, a transformer for language generation, and a reinforcement learning agent for robotics are vastly different applications, but beneath them sit the same building blocks: computational graphs, memory hierarchies, data pipelines, optimization loops, and the trade-offs between latency, throughput, and energy. Master the building blocks and you can construct any system.</p>
+<p>Computer science studies what is computable. ML research studies what is learnable. AI engineering studies what is buildable, given the physics of real hardware and real data.</p>
+<p>This book is the foundation for that discipline. We aim to do for AI systems what <span class="citation" data-cites="Patterson2021">Patterson and Hennessy (<a href="#ref-Patterson2021" role="doc-biblioref">2021</a>)</span> did for computer architecture: replace intuition with measurement, and art with engineering. The goal is to teach system-level reasoning before implementation, treating data, algorithms, and hardware not as separate silos but as a single, coupled optimization problem.</p>
+<div class="no-row-height column-margin column-container"><div id="ref-Patterson2021" class="csl-entry" role="listitem">
+Patterson, David A., and John L. Hennessy. 2021. <em>Computer Organization and Design RISC-v Edition: The Hardware Software Interface</em>. 2nd ed. Morgan Kaufmann.
+</div></div><p>Consider a box of LEGO bricks. The same interlocking pieces build a spaceship, a castle, or an entire city. The sets change; the bricks do not. ML systems work the same way. A convolutional network for image classification, a transformer for language generation, and a reinforcement learning agent for robotics are vastly different applications, but beneath them sit the same building blocks: computational graphs, memory hierarchies, data pipelines, optimization loops, and the trade-offs between latency, throughput, and energy. Mastery of those building blocks makes unfamiliar systems legible.</p>
 <p>This is <em>why</em> the book teaches enduring principles rather than current tools. Dominant frameworks have shifted from Theano to TensorFlow to PyTorch in under a decade. Hardware has evolved from repurposed graphics processors to purpose-built tensor accelerators, with new architectures emerging every year. Any textbook that teaches today’s tools will be obsolete before its next edition. The building blocks endure.</p>
 <p>We follow a quantitative methodology throughout. Where possible, we replace qualitative advice (“use a smaller model”) with measurable reasoning (“reducing parameters by 4<span class="math inline">\(\times\)</span> decreases inference latency by 2.3<span class="math inline">\(\times\)</span> on this hardware, at a cost of 1.2 percent accuracy”). Engineering decisions should be grounded in measurement, not intuition.</p>
 </section>
 <section id="sec-book-book-covers-180b" class="level2">
 <h2 class="anchored" data-anchor-id="sec-book-book-covers-180b">What This Book Covers</h2>
 <p>This book focuses on the <em>single compute node</em>: one machine, one to eight accelerators, a shared memory space. This is the fundamental unit of ML computation, where mathematical models meet physical hardware. Mastering it is the prerequisite for everything else.</p>
-<p>The content is organized into four parts, each answering a core engineering question:</p>
-<p><strong>Part I: Foundations</strong> – <em>What is ML systems engineering, and how does development work?</em> Develops the vocabulary, mental models, and end-to-end workflow that guide every ML project, from the characteristics that distinguish ML systems from traditional software through data engineering pipelines that feed them.</p>
-<p><strong>Part II: Build</strong> – <em>How do we go from mathematical foundations to working systems?</em> Covers the mathematics of deep learning, the architectures built on those foundations, the frameworks that implement them, and the training procedures that produce working models.</p>
-<p><strong>Part III: Optimize</strong> – <em>How do we make systems efficient enough for the real world?</em> Addresses data efficiency, model compression, hardware acceleration, and the benchmarking methodology needed to measure progress rigorously.</p>
-<p><strong>Part IV: Deploy</strong> – <em>How do we operate ML systems reliably in production?</em> Covers serving infrastructure, operational practices, and responsible engineering for building systems that are fair, transparent, and trustworthy.</p>
-<p>These four parts trace a path through the <strong>ML Systems Stack</strong>, a layered abstraction modeled on the classical computer systems stack. Each layer provides an abstraction to the layer above and consumes the layer below—from hardware at the bottom through frameworks, models, training, and serving, up to operations and applications at the top. Data flows through all layers as a cross-cutting interconnect, much like a data bus in computer architecture.</p>
-<p>Throughout the book, a margin figure highlights which layers each chapter addresses, so you always know where you are in this stack:</p>
-<p>The data bar alongside the stack is not merely decorative. Its uniform shading reflects how central data is to each chapter’s concerns—a separate, orthogonal dimension from the layer intensities. The connecting wires between each layer and the data bar show which layers interact with data in that chapter’s context. Consider three chapters that illustrate how the lens shifts:</p>
-<p>In <strong><a href="../hw_acceleration/hw_acceleration.html#sec-hardware-acceleration">Hardware Acceleration</a></strong>, the layer intensity concentrates at the bottom of the stack while the data bar is faint—this chapter is about silicon, not data. In <strong><a href="../training/training.html#sec-model-training">Model Training</a></strong>, the middle layers glow and the data bar is moderately lit, reflecting that training consumes data but is fundamentally about optimization. In <strong><a href="../responsible_engr/responsible_engr.html#sec-responsible-engineering">Responsible Engineering</a></strong>, the top layers dominate and the data bar carries a moderate tint, because biased training data surfaces as biased applications even though several layers sit between them. The same stack, three different stories, with data as an independent dimension.</p>
+<p>The content is organized into four parts, each with a distinct role in the systems argument:</p>
+<ul>
+<li><strong>Part I: Foundations</strong> develops the vocabulary, mental models, and end-to-end workflow that guide every ML project, from the characteristics that distinguish ML systems from traditional software through the data engineering pipelines that feed them.</li>
+<li><strong>Part II: Build</strong> connects mathematical foundations to working systems through deep learning computation, neural architectures, frameworks, and training procedures.</li>
+<li><strong>Part III: Optimize</strong> addresses data efficiency, model compression, hardware acceleration, and the benchmarking methodology needed to measure progress rigorously.</li>
+<li><strong>Part IV: Deploy</strong> covers serving infrastructure, operational practices, and responsible engineering for systems that must be fair, transparent, and trustworthy in production.</li>
+</ul>
+<p>These four parts trace a path through the <strong>ML Systems Stack</strong>, a layered abstraction modeled on the classical computer systems stack. Each layer provides an abstraction to the layer above and consumes the layer below: from hardware at the bottom through frameworks, models, training, and serving, up to operations and applications at the top. Data flows through all layers as a cross-cutting interconnect, much like a data bus in computer architecture.</p>
+<p>Throughout the book, a margin figure highlights which layers each chapter addresses, providing a recurring map of the stack:</p>
+<p>The data bar alongside the stack is not merely decorative. Its uniform shading reflects how central data is to each chapter’s concerns, a separate dimension from the layer intensities. The connecting wires between each layer and the data bar show which layers interact with data in that chapter’s context. Three chapters illustrate how the lens shifts:</p>
+<p>In <strong><a href="../hw_acceleration/hw_acceleration.html#sec-hardware-acceleration">Hardware Acceleration</a></strong>, the layer intensity concentrates at the bottom of the stack while the data bar is faint: the chapter is about silicon, not data. In <strong><a href="../training/training.html#sec-model-training">Model Training</a></strong>, the middle layers glow and the data bar is moderately lit, reflecting that training consumes data but is fundamentally about optimization. In <strong><a href="../responsible_engr/responsible_engr.html#sec-responsible-engineering">Responsible Engineering</a></strong>, the top layers dominate and the data bar carries a moderate tint, because biased training data surfaces as biased applications even though several layers sit between them. The same stack tells three different stories, with data as an independent dimension.</p>
 <p>Each part builds on the previous one. We recommend reading sequentially, though the following reading paths offer alternatives for readers with specific goals.</p>
 </section>
 <section id="sec-book-suggested-reading-paths-773b" class="level2">
 <h2 class="anchored" data-anchor-id="sec-book-suggested-reading-paths-773b">Suggested Reading Paths</h2>
 <p>Readers with different backgrounds and goals may benefit from tailored paths:</p>
-<p><strong>The Complete Path</strong> (all chapters, in order). For undergraduates and readers new to ML systems. Start with Foundations, progress through Build, Optimize, and Deploy. This path develops every concept from first principles.</p>
-<p><strong>The ML Engineer’s Path</strong> (systems depth for practitioners). For engineers who already train and deploy models but want to understand the systems underneath. Skim Part I for vocabulary, then focus on <strong><a href="../frameworks/frameworks.html#sec-ml-frameworks">ML Frameworks</a></strong>, <strong><a href="../training/training.html#sec-model-training">Model Training</a></strong>, <strong><a href="../hw_acceleration/hw_acceleration.html#sec-hardware-acceleration">Hardware Acceleration</a></strong>, <strong><a href="../benchmarking/benchmarking.html#sec-benchmarking">Benchmarking</a></strong>, and <strong><a href="../model_serving/model_serving.html#sec-model-serving">Model Serving</a></strong>.</p>
-<p><strong>The Optimization Path</strong> (efficiency-focused). For engineers working on model efficiency, edge deployment, or resource-constrained systems. After Foundations, move directly to <strong><a href="../data_selection/data_selection.html#sec-data-selection">Data Selection</a></strong>, <strong><a href="../optimizations/model_compression.html#sec-model-compression">Model Compression</a></strong>, <strong><a href="../hw_acceleration/hw_acceleration.html#sec-hardware-acceleration">Hardware Acceleration</a></strong>, and <strong><a href="../benchmarking/benchmarking.html#sec-benchmarking">Benchmarking</a></strong>.</p>
+<ul>
+<li><strong>The Complete Path</strong> (all chapters, in order): For undergraduates and readers new to ML systems. Start with Foundations, progress through Build, Optimize, and Deploy. This path develops every concept from first principles.</li>
+<li><strong>The ML Engineer’s Path</strong> (systems depth for practitioners): For engineers who already train and deploy models but want to understand the systems underneath. Skim Part I for vocabulary, then focus on <strong><a href="../frameworks/frameworks.html#sec-ml-frameworks">ML Frameworks</a></strong>, <strong><a href="../training/training.html#sec-model-training">Model Training</a></strong>, <strong><a href="../hw_acceleration/hw_acceleration.html#sec-hardware-acceleration">Hardware Acceleration</a></strong>, <strong><a href="../benchmarking/benchmarking.html#sec-benchmarking">Benchmarking</a></strong>, and <strong><a href="../model_serving/model_serving.html#sec-model-serving">Model Serving</a></strong>.</li>
+<li><strong>The Optimization Path</strong> (efficiency-focused): For engineers working on model efficiency, edge deployment, or resource-constrained systems. After Foundations, move directly to <strong><a href="../data_selection/data_selection.html#sec-data-selection">Data Selection</a></strong>, <strong><a href="../optimizations/model_compression.html#sec-model-compression">Model Compression</a></strong>, <strong><a href="../hw_acceleration/hw_acceleration.html#sec-hardware-acceleration">Hardware Acceleration</a></strong>, and <strong><a href="../benchmarking/benchmarking.html#sec-benchmarking">Benchmarking</a></strong>.</li>
+</ul>
 </section>
 <section id="sec-about-platform" class="level2">
 <h2 class="anchored" data-anchor-id="sec-about-platform">A Learning Platform</h2>
@@ -1512,18 +1598,18 @@ window.Quarto = {
 <h2 class="anchored" data-anchor-id="sec-about-open-source">An Open-Source Textbook</h2>
 <p>This book is open source. The full text, figures, and build system are available on <a href="https://github.com/harvard-edge/cs249r_book">GitHub</a>, and every reader is invited to contribute.</p>
 <p>This is a deliberate choice. If AI engineering is to become a shared discipline rather than a collection of isolated practices, its foundational texts must be accessible to everyone. ML systems is a field shaped by practitioners across industry, academia, and the open-source community worldwide. A textbook covering this field should reflect that breadth and be available to all, regardless of geography or institutional affiliation.</p>
-<p>Contributions from readers, whether fixing an error, suggesting a clearer explanation, adding a worked example, or proposing new content, have materially improved every chapter. If you find something that could be better, open an issue or submit a pull request. This book improves because readers like you participate in building it.</p>
+<p>Contributions from readers, whether fixing an error, suggesting a clearer explanation, adding a worked example, or proposing new content, have materially improved every chapter. Issues and pull requests provide the mechanism for that collaboration. This book improves because its readers participate in building it.</p>
 </section>
 <section id="sec-book-prerequisites-1a4b" class="level2">
 <h2 class="anchored" data-anchor-id="sec-book-prerequisites-1a4b">Prerequisites</h2>
-<p><strong>Required:</strong></p>
+<p><strong>Required</strong>:</p>
 <ul>
 <li><strong>Programming</strong>: Fluency in Python, including functions, classes, and basic data manipulation with NumPy.</li>
 <li><strong>Mathematics</strong>: Comfort with linear algebra, basic calculus, and probability at the undergraduate level.</li>
 </ul>
-<p><strong>Helpful but not required:</strong></p>
+<p><strong>Helpful but not required</strong>:</p>
 <ul>
-<li><strong>Computer systems</strong>: Familiarity with memory hierarchies and basic computer architecture will deepen your understanding of the optimization and hardware chapters.</li>
+<li><strong>Computer systems</strong>: Familiarity with memory hierarchies and basic computer architecture deepens the optimization and hardware chapters.</li>
 <li><strong>Machine learning basics</strong>: Prior exposure to supervised learning concepts provides useful context, but Part II develops the necessary foundations from first principles.</li>
 </ul>
 </section>
@@ -1535,7 +1621,7 @@ window.Quarto = {
 </section>
 <section id="sec-book-using-book-course-f71c" class="level2">
 <h2 class="anchored" data-anchor-id="sec-book-using-book-course-f71c">Using This Book in a Course</h2>
-<p>This book grew out of CS249r at Harvard University and the TinyML edX professional certificate program. The TinyML course taught ML systems at the most constrained end of the spectrum — microcontrollers running on milliwatts with kilobytes of memory — and revealed a surprising lesson: the fundamental constraints that govern tiny devices (memory bandwidth, compute density, energy per operation) are the same constraints that govern data center GPUs. The physics scales; only the numbers change. That insight shaped this book. What began as a course on resource-constrained ML matured into a comprehensive treatment of ML systems engineering, grounded in the principle that mastering the fundamentals at any scale prepares you for every scale.</p>
+<p>This book grew out of CS249r at Harvard University and the TinyML edX professional certificate program. The TinyML course taught ML systems at the most constrained end of the spectrum: microcontrollers running on milliwatts with kilobytes of memory. It revealed a surprising lesson: the fundamental constraints that govern tiny devices (memory bandwidth, compute density, energy per operation) are the same constraints that govern data center GPUs. The physics scales; only the numbers change. That insight shaped this book. What began as a course on resource-constrained ML matured into a comprehensive treatment of ML systems engineering, grounded in the principle that mastery of the fundamentals at any scale prepares engineers for every scale.</p>
 <p>The book is designed to support a one-semester course covering the full ML systems stack. Instructors may also select individual parts for shorter modules:</p>
 <ul>
 <li><strong>Parts I–II</strong> (Foundations and Build) suit an introductory half-semester on ML development fundamentals.</li>
@@ -1547,6 +1633,7 @@ window.Quarto = {
 <section id="sec-book-copyright-licensing-2538" class="level2">
 <h2 class="anchored" data-anchor-id="sec-book-copyright-licensing-2538">Copyright and Licensing</h2>
 <p>This work is licensed under <a href="https://creativecommons.org/licenses/by-nc-sa/4.0">Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)</a>. The source is available on <a href="https://github.com/harvard-edge/cs249r_book">GitHub</a>.</p>
+
 
 
 </section>
@@ -1957,8 +2044,149 @@ window.Quarto = {
     </div>
   </div>
 </footer>
+<!--
+  MLSysBook release-pill — shared footer snippet for Quarto + static sites.
+
+  Renders a small "v0.1.0 · Apr 26, 2026" pill from a deployed
+  release-manifest.json. The pill is best-effort chrome: silent on any
+  fetch failure (manifest missing, offline, CORS). Use at any site that
+  emits a manifest via scripts/version/release.py emit-manifest.
+
+  ── Per-project setup (one of two patterns) ──
+
+  Pattern A — Quarto, configured via _quarto.yml:
+
+      project:
+        resources:
+          - ../shared/release/release-pill.html
+      format:
+        html:
+          include-in-header:
+            - text: |
+                <meta name="release-manifest" content="/<project-base>/release-manifest.json">
+          include-after-body:
+            - file: ../shared/release/release-pill.html
+
+  The meta tag tells the snippet where to find the manifest. The
+  ``include-after-body`` injects the snippet into every rendered page.
+
+  Pattern B — Next.js / hand-rolled HTML:
+
+      <meta name="release-manifest" content="/release-manifest.json" />
+      // in footer:
+      <span data-release-pill></span>
+      <script src="/release-pill.js"></script>
+
+  (See shared/release/release-pill.js for the standalone JS form.)
+
+  NOTE: Do NOT use a nested `<!-- ... -->` HTML comment in this docstring
+  block. HTML disallows nested comments, so the inner `--&gt;` would
+  terminate the outer comment early and cause the example markup below
+  it (the `<span data-release-pill="">` and `<script src="…release-pill.js">`)
+  to leak into the rendered page — producing a 404 on every Quarto site
+  that includes this snippet via `include-after-body`. Use `//`-style
+  pseudo-comments inside the documentation block instead.
+
+  ── Manifest contract ──
+
+  The manifest is the JSON written by scripts/version/release.py
+  emit-manifest. Required keys: releaseId, releaseHash. Optional but
+  recommended: buildDate, project. Anything else is ignored.
+
+  ── Why runtime fetch instead of build-time templating ──
+
+  Build-time templating (Lua filter, Quarto partial with variable
+  interpolation) would be deterministic and faster but requires
+  per-project Lua/template machinery. Runtime fetch is project-agnostic
+  and works identically across Quarto, Next.js, and plain HTML. The
+  ~50ms fetch cost happens once per page-load and is invisible because
+  the pill is below the fold. If a future project needs the version
+  visible above the fold, it should bake at build time (StaffML does
+  this for its citation card).
+-->
+
+<span class="release-pill" data-release-pill aria-live="polite">
+  <noscript><a href="#">release</a></noscript>
+</span>
+
+<style>
+  .release-pill {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.25em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+    font-size: 0.75rem;
+    line-height: 1;
+    color: var(--bs-secondary, var(--release-pill-color, #6c757d));
+  }
+  .release-pill a {
+    color: inherit;
+    text-decoration: none;
+  }
+  .release-pill a:hover {
+    color: var(--bs-link-color, #0d6efd);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .release-pill-date {
+    opacity: 0.7;
+  }
+</style>
+
+<script>
+  (function () {
+    var el = document.querySelector('[data-release-pill]');
+    if (!el) return;
+
+    // Manifest URL resolution order:
+    //   1. data-manifest attribute on the pill (per-page override)
+    //   2. <meta name="release-manifest" content="..."> in <head>
+    //   3. './release-manifest.json' relative to current page (fallback)
+    var meta = document.querySelector('meta[name="release-manifest"]');
+    var manifestPath =
+      el.getAttribute('data-manifest') ||
+      (meta && meta.getAttribute('content')) ||
+      './release-manifest.json';
+
+    var linkHref = el.getAttribute('data-link') || '#release';
+
+    fetch(manifestPath, { cache: 'no-store' })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (m) {
+        if (!m || !m.releaseId || !m.releaseHash) return;
+        var date = m.buildDate
+          ? new Date(m.buildDate).toLocaleDateString('en-US',
+              { year: 'numeric', month: 'short', day: 'numeric' })
+          : '';
+        var shortHash = String(m.releaseHash).slice(0, 7);
+        var title =
+          (m.project ? m.project + ' ' : '') +
+          'v' + m.releaseId +
+          (date ? ' · built ' + date : '') +
+          ' · hash ' + shortHash;
+        var a = document.createElement('a');
+        a.href = linkHref;
+        a.title = title;
+        a.setAttribute('aria-label',
+          'Release v' + m.releaseId + (date ? ', built ' + date : ''));
+        var v = document.createElement('span');
+        v.className = 'release-pill-version';
+        v.textContent = 'v' + m.releaseId;
+        a.appendChild(v);
+        if (date) {
+          var d = document.createElement('span');
+          d.className = 'release-pill-date';
+          d.textContent = ' · ' + date;
+          a.appendChild(d);
+        }
+        el.innerHTML = '';
+        el.appendChild(a);
+      })
+      .catch(function () { /* silent: best-effort chrome */ });
+  })();
+</script>
 
 
 
 
-</body></html>
+</span></body></html>
