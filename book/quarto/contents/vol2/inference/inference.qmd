@@ -966,11 +966,11 @@ $$E[B] = \min(B_{\text{max}}, \lambda \cdot T_{\text{max}})$$
 The batch accumulation delay depends on whether the batch fills by reaching $B_{\text{max}}$ or by timeout:
 
 $$E[S_{\text{batch}}] = \begin{cases}
-\frac{B_{\text{max}}}{\lambda} & \text{if } \lambda \cdot T_{\text{max}} \geq B_{\text{max}} \text{ (batch fills)} \\
+\frac{B_{\text{max}}}{2\lambda} & \text{if } \lambda \cdot T_{\text{max}} \geq B_{\text{max}} \text{ (batch fills)} \\
 \frac{T_{\text{max}}}{2} & \text{if } \lambda \cdot T_{\text{max}} < B_{\text{max}} \text{ (timeout triggers)}
 \end{cases}$$
 
-The factor of $1/2$ in the timeout case reflects the average wait for requests arriving uniformly throughout the batch window.
+The factor of $1/2$ in both cases reflects the average wait for requests arriving uniformly throughout the batch window.
 
 #### Optimal batch size derivation {#sec-inference-scale-optimal-batch-size-derivation-3a3c}
 
@@ -1724,7 +1724,7 @@ class A100HardwareScenario:
     pcie_gen4_gbs = f"{pcie_gen4_gbs_val:.0f}"
 ```
 
-The system runs on 4 A100-`{python} A100HardwareScenario.a100_mem_gb` GB GPUs connected via PCIe Gen4 (`{python} A100HardwareScenario.pcie_gen4_gbs` GB/s per GPU) rather than NVLink. The server has a dual-socket CPU with NUMA topology. Memory bandwidth per GPU is `{python} A100HardwareScenario.a100_mem_bw_tbs` TB/s (HBM2e), adequate for decode operations. However, PCIe bandwidth limits tensor parallelism communication to `{python} A100HardwareScenario.pcie_gen4_gbs` GB/s vs. NVLink's `{python} A100HardwareScenario.nvlink_a100_gbs` GB/s. For a batch requiring 100 MB activation transfers between GPUs, PCIe adds approximately 1.5 ms per synchronization point vs. 0.17 ms for NVLink.
+The system runs on 4 A100-`{python} A100HardwareScenario.a100_mem_gb` GB GPUs connected via PCIe Gen4 (`{python} A100HardwareScenario.pcie_gen4_gbs` GB/s per GPU) rather than NVLink. The server has a dual-socket CPU with NUMA topology. Memory bandwidth per GPU is `{python} A100HardwareScenario.a100_mem_bw_tbs` TB/s (HBM2e), adequate for decode operations. However, PCIe bandwidth limits tensor parallelism communication to `{python} A100HardwareScenario.pcie_gen4_gbs` GB/s vs. NVLink's `{python} A100HardwareScenario.nvlink_a100_gbs` GB/s. For a batch requiring 100 MB activation transfers between GPUs, PCIe adds approximately 3.1 ms per synchronization point vs. 0.17 ms for NVLink.
 
 **Distribution Layer Analysis** (Algorithmic Behavior):
 
@@ -2029,7 +2029,7 @@ $$\text{KV cache size} = 2 \times n_{\text{layers}} \times d \times S \times B \
 
 Increasing the batch size to maximize throughput in LLM serving is bounded by the KV cache wall. As @fig-kv-cache-wall shows, model weights represent a fixed "static tax" on GPU memory, while the KV cache grows linearly with both batch size and sequence length.
 
-::: {#fig-kv-cache-wall fig-env="figure" fig-pos="htb" fig-cap="**The KV Cache Wall**: Total GPU memory usage for a 4-bit quantized 70B model (35 GB weights) on an 80 GB H100. While the model fits easily at small context lengths, the KV cache (sloped lines) eventually consumes all remaining HBM. At 128K context, a batch size of 2 is physically impossible on a single GPU (35 GB + 82 GB > 80 GB), forcing the system to either reduce batch size (killing throughput) or shard the model." fig-alt="Memory usage plot. Horizontal dashed line at 80 GB shows capacity. Solid blue region at bottom is 35 GB weights. Sloped lines for Batch 1, 4, 8 show memory rising with sequence length. Batch 8 hits the 80 GB line very early (~16K tokens)."}
+::: {#fig-kv-cache-wall fig-env="figure" fig-pos="htb" fig-cap="**The KV Cache Wall**: Total GPU memory usage for a 4-bit quantized 70B model (35 GB weights) on an 80 GB H100. While the model fits easily at small context lengths, the KV cache (sloped lines) eventually consumes all remaining HBM. At 128K context, a batch size of 2 is physically impossible on a single GPU (35 GB + 82 GB > 80 GB), forcing the system to either reduce batch size (killing throughput) or shard the model." fig-alt="Memory usage plot. Horizontal dashed line at 80 GB shows capacity. Solid blue region at bottom is 35 GB weights. Sloped lines for Batch 1, 2, 4, and 8 show memory rising with sequence length. Batch 8 hits the 80 GB line very early (~16K tokens)."}
 
 ```{python}
 #| echo: false
@@ -3413,7 +3413,7 @@ Mixtral-8x7B uses 8 experts per MoE layer with top-2 routing:
 - Total parameters: 47B (but only ~13B active per token)
 - Experts per layer: 8
 - Active experts per token: 2 (top-$k$ = 2)
-- MoE layers: Every other feed-forward layer
+- MoE layers: Every feed-forward layer (each FFN replaced by an 8-expert MoE block)
 
 **Sharding strategy** (4-way expert parallelism):
 
