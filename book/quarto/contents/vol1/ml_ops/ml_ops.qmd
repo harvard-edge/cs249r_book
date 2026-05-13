@@ -901,7 +901,7 @@ Feature stores and versioning systems address the *data* side of consistency; CI
 
 A typical ML CI/CD pipeline consists of coordinated stages: checking out updated code, preprocessing input data, training a candidate model, validating performance, packaging the model, and deploying to a serving environment. In some cases, pipelines also include triggers for automatic retraining based on data drift or performance degradation. By codifying these steps, CI/CD pipelines[^fn-idempotency-ml] reduce manual intervention, enforce quality checks, and support continuous improvement of deployed systems.
 
-[^fn-idempotency-ml]: **Idempotency**: This property ensures that rerunning a pipeline stage yields an identical result, but the `training` stage violates this by default due to sources of randomness like weight initialization. Without idempotency, a pipeline rerun after a `validation` or `deploy` failure would produce a slightly different model, invalidating the original performance metrics and making debugging unreliable. Production systems therefore enforce determinism by fixing all random seeds, often to a single integer like `42`, to ensure bit-for-bit reproducibility. \index{Idempotency!ML pipelines}
+[^fn-idempotency-ml]: **Idempotency**: This property ensures that rerunning a pipeline stage yields an identical result, but the `training` stage violates this by default due to sources of randomness like weight initialization. Without idempotency, a pipeline rerun after a `validation` or `deploy` failure would produce a slightly different model, invalidating the original performance metrics and making debugging unreliable. Production systems therefore enforce determinism by fixing all random seeds, often to a single integer like `42`, as one of several controls (alongside deterministic kernels, fixed library versions, and controlled data ordering) needed for reproducibility. \index{Idempotency!ML pipelines}
 
 To support these complex workflows, a wide range of tools is available for implementing ML-focused CI/CD workflows. General-purpose CI/CD orchestrators such as Jenkins, @circleci, and GitHub Actions [@github_actions] manage version control events and execution logic. These tools integrate with domain-specific platforms such as Kubeflow [@kubeflow], Metaflow [@metaflow], and Prefect [@prefect], which offer higher-level abstractions for managing ML tasks and workflows.
 
@@ -1682,7 +1682,7 @@ A/B testing ML models introduces challenges absent from traditional software exp
 ###### Practical guidelines {.unnumbered}
 
 - **Preregister hypotheses**: Document expected effects before running tests to avoid p-hacking.
-- **Use sequential testing**: Methods like CUPED (Controlled-experiment Using Pre-Experiment Data) reduce variance and enable faster decisions.
+- **Use sequential testing and variance reduction**: Sequential testing methods enable valid interim decisions while controlling error rates; variance-reduction techniques like CUPED (Controlled-experiment Using Pre-Experiment Data) improve experiment sensitivity. Combining the two enables faster decisions.
 - **Archive all experiments**: Failed experiments provide valuable information for future model development.
 - **Automate analysis pipelines**: Manual analysis introduces errors and delays decisions.
 
@@ -1929,7 +1929,7 @@ Model serving performance depends critically on memory hierarchy utilization. Da
 |:-----------------------------|:-------------:|:---------------------|
 | **L2 Cache (40 MB on A100)** |    ~3 TB/s    | Hot weights          |
 | **HBM2e GPU Memory (80 GB)** |    ~2 TB/s    | Model                |
-| **PCIe/NVLink to CPU**       |    ~64 GB/s   | Activations          |
+| **PCIe Gen4 x16 to CPU**     |    ~32 GB/s   | Activations          |
 | **System RAM (512 GB)**      |   ~200 GB/s   | Batched inputs       |
 | **NVMe SSD**                 |    ~7 GB/s    | Model swap           |
 
@@ -2066,7 +2066,7 @@ Both forms of drift motivate a formal definition:
 
 ***Data drift***\index{Data Drift!definition} is the specific subtype of **distribution shift** (see @sec-responsible-engineering-silent-failure-modes-e219) in which the input distribution $P(X)$ changes while the decision boundary $P(Y|X)$ remains stable. The sibling concept is **concept drift**, in which $P(Y|X)$ itself shifts.
 
-1.  **Significance (quantitative)**: It represents a violation of the i.i.d. assumption (independent and identically distributed), causing accuracy to erode monotonically with the distributional divergence $(\mathcal{D}(P_t \lVert P_0))$, empirically modeled as $\text{Accuracy}(t) \approx \text{Accuracy}_0 - \lambda \cdot \mathcal{D}(P_t \lVert P_0)$ with $\lambda$ fit per deployment. Because $P(Y|X)$ is unchanged, retraining on fresh $P(X)$ data fully recovers performance, unlike concept drift, where the label relationship must also be re-learned.
+1.  **Significance (quantitative)**: It represents a violation of the i.i.d. assumption (independent and identically distributed), causing accuracy to erode monotonically with the distributional divergence $(\mathcal{D}(P_t \lVert P_0))$, empirically modeled as $\text{Accuracy}(t) \approx \text{Accuracy}_0 - \lambda \cdot \mathcal{D}(P_t \lVert P_0)$ with $\lambda$ fit per deployment. Because $P(Y|X)$ is unchanged, retraining on fresh $P(X)$ data can recover performance (when the new input distribution overlaps the original support), unlike concept drift, where the label relationship must also be re-learned.
 2.  **Distinction (durable)**: Unlike **model decay**\index{Model Decay!definition} (which implies internal failure, where the algorithm or code degraded), data drift is an **external force** (market shifts, sensor aging, user behavior change) that invalidates the model's learned mapping without any engineering error.
 3.  **Common pitfall**: A frequent misconception is that drift is detectable by monitoring model outputs. By the time output drift is visible, the system has often already been serving degraded predictions for weeks. Monitoring **Input Feature Statistics** ($\mathcal{D}(P_t \lVert P_0)$ via PSI or KL divergence) provides earlier warning because input shift precedes output shift by the length of the ground-truth feedback loop.
 
@@ -2267,7 +2267,7 @@ Schema validation catches structural corruption (missing columns, wrong types, n
 \index{Population Stability Index!drift quantification}Understanding *why* we use these thresholds requires looking at the math. The Population Stability Index (PSI)[^fn-psi-origin] quantifies distributional shift by comparing expected (training) vs. actual (serving) frequencies across bins (for the mathematical foundations of KL divergence, PSI, and information theory for systems monitoring, see @sec-data-foundations-measuring-drift-divergence-a6dd). @eq-psi formalizes this:
 $$ \text{PSI} = \sum_{i=1}^{n} (\text{actual}_i - \text{expected}_i) \times \ln\left(\frac{\text{actual}_i}{\text{expected}_i}\right) $$ {#eq-psi}
 
-[^fn-psi-origin]: **Population Stability Index (PSI)** (from credit risk scoring, coined by Lewis in 1994): Banking regulators needed to detect when a loan applicant population had shifted enough to invalidate the scorecard. The standard thresholds date from this era: below 0.1 indicates no significant shift, 0.1–0.2 warrants investigation, and above 0.2 triggers model review. ML operations adopted PSI because it is symmetric (unlike KL divergence), works on binned data for both categorical and continuous features, and provides interpretable thresholds calibrated through decades of production use in finance. \index{PSI!credit risk origin}
+[^fn-psi-origin]: **Population Stability Index (PSI)** (from credit risk scoring): Banking regulators needed to detect when a loan applicant population had shifted enough to invalidate the scorecard. The standard thresholds date from this era: below 0.1 indicates no significant shift, 0.1–0.2 warrants investigation, and above 0.2 triggers model review. ML operations adopted PSI because it is symmetric (unlike KL divergence), works on binned data for both categorical and continuous features, and provides interpretable thresholds calibrated through decades of production use in finance. \index{PSI!credit risk origin}
 
 For continuous distributions, Kullback-Leibler (KL) divergence\index{Kullback-Leibler Divergence!distribution comparison} offers a more sensitive alternative, though PSI's symmetric properties often make it preferred for drift alerting. @eq-kl-divergence defines KL divergence:
 $$ D_{\text{KL}}(P \parallel Q) = \sum_{x} P(x) \log\left(\frac{P(x)}{Q(x)}\right) $$ {#eq-kl-divergence}

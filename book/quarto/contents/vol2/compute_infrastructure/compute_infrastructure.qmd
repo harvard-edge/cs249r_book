@@ -1103,7 +1103,7 @@ The Roofline Model tells us *whether* a workload can reach peak compute. The nex
 
 A standard CPU floating-point unit performs one multiply-accumulate per cycle per lane. Even with wide SIMD units (AVX-512 provides 16 FP32 lanes), a CPU core performs at most 16 MACs per cycle. With 32 cores, a high-end server CPU achieves approximately 512 MACs per cycle, a respectable number for general-purpose computation but wholly inadequate for the demands of matrix multiplication at neural network scale.
 
-A Tensor Core, by contrast, performs a complete matrix-multiply-accumulate (MMA) of the form $D = A \times B + C$ on small tile matrices in a single cycle. On the H100, each Tensor Core computes a $16{\times}16{\times}16$ MMA per cycle, producing 4,096 multiply-accumulate results simultaneously. This is equivalent to 8$\times$ what an entire CPU can produce per cycle, concentrated in a single hardware unit that occupies a tiny fraction of the chip area.
+A Tensor Core, by contrast, performs a complete matrix-multiply-accumulate (MMA) of the form $D = A \times B + C$ on small tile matrices in a single cycle. On the H100, each Tensor Core computes a $16{\times}16{\times}16$ MMA per cycle, performing 4,096 multiply-accumulate operations to produce a $16{\times}16$ output tile (256 accumulated results). This is equivalent to 8$\times$ what an entire CPU can produce per cycle, concentrated in a single hardware unit that occupies a tiny fraction of the chip area.
 
 With 528 Tensor Cores across the chip (4 per SM, 132 SMs), the H100 can execute over 2 million MACs per cycle, which is the physical basis for its `{python} RooflineScenario.h100_tflops` TFLOPS peak throughput. This represents approximately 4,000$\times$ the throughput of a high-end server CPU, achieved through radical specialization of the arithmetic hardware.
 
@@ -1228,7 +1228,7 @@ For three decades, Dennard scaling allowed architects to increase transistor cou
 
 TDP is not merely a specification on a data sheet; it is a physical constraint that propagates through every level of the infrastructure stack. The power delivery chain, cooling system, rack design, and facility electrical infrastructure must all be designed to accommodate today's TDP and the projected TDP of hardware two or three generations into the future.
 
-Modern GPUs implement sophisticated power management to operate within their TDP envelope. When the workload does not fully use all SMs (for example, during the communication phase of a training step when the GPUs are waiting for AllReduce to complete), the GPU firmware reduces the clock frequency and voltage of idle SMs through a process called *clock gating\index{Clock Gating}*. This reduces instantaneous power consumption and allows the active SMs to run at a higher frequency. Conversely, during a large matrix multiplication that activates all SMs simultaneously, the firmware reduces the clock frequency to keep total power within TDP.
+Modern GPUs implement sophisticated power management to operate within their TDP envelope. When the workload does not fully use all SMs (for example, during the communication phase of a training step when the GPUs are waiting for AllReduce to complete), the GPU firmware can disable the clock signal to idle circuitry through *clock gating\index{Clock Gating}*, eliminating dynamic switching power and freeing thermal headroom for the active SMs. A separate mechanism, *dynamic voltage and frequency scaling* (DVFS), adjusts the chip's clock frequency and supply voltage to stay within power and thermal limits; during a large matrix multiplication that activates all SMs simultaneously, DVFS reduces the clock frequency to keep total power within TDP.
 
 Dynamic power management means that the actual power draw of a GPU varies continuously during training. A typical training step might see power swing from 400 W (during communication phases when most SMs are idle) to 700 W (during the forward and backward pass when all Tensor Cores are active) and back, with each transition occurring in microseconds. The VRMs on the baseboard must respond to these transitions fast enough to maintain a stable supply voltage despite the rapidly changing current draw.
 
@@ -1593,7 +1593,7 @@ class BandwidthHierarchyScenario:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     nvlink_gbs = nvlink.m_as(GB/second)
     pcie_gbs = pcie.m_as(GB/second)
-    ib_gbs = (ib / 8).m_as(GB/second)
+    ib_gbs = ib.m_as(GB/second)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     from mlsysim.fmt import check
@@ -1952,7 +1952,7 @@ class InterconnectCommMath:
     """Formatted math strings for NVLink vs InfiniBand gradient sync latency."""
 
     _nvlink_bw_val = NVLINK_H100_BW.m_as(GB/second)
-    _ib_bw_gbs_val = (INFINIBAND_NDR_BW / 8).m_as(GB/second)
+    _ib_bw_gbs_val = INFINIBAND_NDR_BW.m_as(GB/second)
 
     t_intra_math = md_math(f"T_{{\\text{{intra}}}} = 1\\text{{ GB}} / {_nvlink_bw_val:.0f}\\text{{ GB/s}} \\approx \\mathbf{{1.1 \\text{{ ms}}}}")
     t_inter_math = md_math(f"T_{{\\text{{inter}}}} = 1\\text{{ GB}} / {_ib_bw_gbs_val:.0f}\\text{{ GB/s}} \\approx \\mathbf{{20 \\text{{ ms}}}}")
@@ -2347,8 +2347,8 @@ The physical layout of the data center hall reflects these density constraints. 
 class PodTrainingMath:
     """Formatted math strings for 175B training time derivation."""
 
-    pod_flops_math = md_math(f"6 \\times {InfraSetup.gpt3_params_b} \\times 10^{{23}}")
-    total_flops_math = md_math(f"6 \\times {InfraSetup.gpt3_params_b} \\times 10^{{23}}")
+    pod_flops_math = md_math(f"6 \\times {InfraSetup.gpt3_params_b} \\times 300 \\times 10^{{18}}")
+    total_flops_math = md_math(f"3.15 \\times 10^{{23}}")
     n_params_math = md_math(f"P = {InfraSetup.gpt3_params_b} \\times 10^9")
     cluster_throughput_math = md_math(f"8{{,}}192 \\times {InfraSetup.h100_tflops} \\times 10^{{12}} \\times 0.45")
 ```
