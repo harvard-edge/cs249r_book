@@ -224,7 +224,7 @@ from mlsysim.fmt import check
 class GangSchedulingDeadlock:
     # ┌── 1. LOAD ──────────────────────────────────────────
     n_total_gpus = 1024
-    n_jobs = 4
+    n_jobs = 2
     gpus_per_job = 512 # Each job needs half the cluster
     # ┌── 2. EXECUTE ───────────────────────────────────────
     # If scheduler allocates partially (e.g. 256 to each), no job can run.
@@ -354,7 +354,7 @@ Here, $\rho = \lambda/\mu$ represents cluster utilization, $1/\mu$ is the averag
 
 In standard web serving, request service times are well approximated by an exponential distribution, yielding $C_s \approx 1$. In ML clusters, job durations follow a heavy-tailed distribution: a vast number of short debugging jobs (minutes) mixed with a few massive training runs (weeks). This extreme variance typically yields $C_s$ values between 3 and 5. The impact on wait times is multiplicative.
 
-At 80 percent utilization $(\rho = 0.8)$: with a uniform workload $(C_s = 1)$, $W_q =$ `{python} QueuingTheory.wq_uniform_str` $\times$ the average job duration. With a typical ML workload $(C_s = 3)$, $W_q =$ `{python} QueuingTheory.wq_ml_str` $\times$ the average job duration. This explains the "utilization wall" in ML infrastructure. A web server cluster feels responsive at 80 percent load, but an ML cluster at the same utilization feels broken, with jobs languishing in the queue for days. The heavy tail of the service distribution acts as a latency multiplier, forcing operators to run ML clusters at lower utilization (often 60 to 70 percent) to maintain acceptable responsiveness for interactive users.
+At 80 percent utilization $(\rho = 0.8)$: with an exponential workload $(C_s = 1)$, $W_q =$ `{python} QueuingTheory.wq_uniform_str` $\times$ the average job duration. With a typical ML workload $(C_s = 3)$, $W_q =$ `{python} QueuingTheory.wq_ml_str` $\times$ the average job duration. This explains the "utilization wall" in ML infrastructure. A web server cluster feels responsive at 80 percent load, but an ML cluster at the same utilization feels broken, with jobs languishing in the queue for days. The heavy tail of the service distribution acts as a latency multiplier, forcing operators to run ML clusters at lower utilization (often 60 to 70 percent) to maintain acceptable responsiveness for interactive users.
 
 :::
 
@@ -1551,7 +1551,7 @@ When multiple inference workloads share the same physical hardware, **noisy neig
 
 MIG provides hardware isolation that eliminates most interference channels; @tbl-fleet-orchestration-mig-profiles summarizes the fixed partition profiles that make this isolation possible. Each MIG instance has dedicated memory, cache, and compute resources, preventing cross-instance interference at the hardware level. However, MIG has limitations: it is available only on A100 and later GPUs, it requires preconfigured partition profiles that cannot change without draining all workloads from the GPU, and the fixed partition sizes may not match workload requirements (a workload that needs 15 GB of GPU memory wastes 5 GB on a 20 GB MIG instance or cannot fit on a 10 GB instance).
 
-Software approaches to isolation provide more flexibility at the cost of weaker guarantees. Efficiently sharing GPUs for inference requires navigating a hierarchy of isolation mechanisms, each trading performance for security. At the simplest level, **CUDA time-slicing**\index{CUDA Time-Slicing} allows multiple processes to share a GPU by context-switching the compute resources. While flexible, this incurs high latency penalties (often 10--20 ms) and offers no memory isolation. NVIDIA's **Multi-Process Service (MPS)**[^fn-mps-gpu-sharing] improves this by allowing kernels from different processes to run concurrently on the same GPU, improving throughput for small batch inference but still sharing the same memory address space. The gold standard for multi-tenancy is **Multi-Instance GPU (MIG)**, which physically partitions the GPU's compute units and memory into isolated instances.
+Software approaches to isolation provide more flexibility at the cost of weaker guarantees. Efficiently sharing GPUs for inference requires navigating a hierarchy of isolation mechanisms, each trading performance for security. At the simplest level, **CUDA time-slicing**\index{CUDA Time-Slicing} allows multiple processes to share a GPU by context-switching the compute resources. While flexible, this incurs high latency penalties (often 10--20 ms) and offers no memory isolation. NVIDIA's **Multi-Process Service (MPS)**[^fn-mps-gpu-sharing] improves this by allowing kernels from different processes to run concurrently on the same GPU, improving throughput for small batch inference while providing weaker isolation than MIG (Volta and newer give each client a separate GPU address space, but compute and memory bandwidth remain shared). The gold standard for multi-tenancy is **Multi-Instance GPU (MIG)**, which physically partitions the GPU's compute units and memory into isolated instances.
 
 GPU memory isolation prevents one model from consuming memory needed by another through explicit memory limits enforced by the container runtime. Without such limits, a memory leak, an unexpectedly large batch (triggered by a request with unusually long context), or a misbehaving custom kernel can consume all available GPU memory and crash colocated workloads. MPS improves utilization for small workloads by eliminating the context-switching overhead of time-slicing, but it adds latency overhead of approximately 5 to 10 microseconds per kernel launch and provides limited protection against memory bandwidth interference.
 
@@ -1719,7 +1719,7 @@ Consider a fleet of 1,000 GPUs managed under two regimes: <!-- lego-ok: fleet si
 
 **Scenario A -- Static Partitioning**\index{Scenario!a -- static partitioning}: The serving pool reserves 400 GPUs to handle peak demand, but average usage is only 150 GPUs (37.5 percent utilization). The training pool reserves 600 GPUs, and backlog ensures 100 percent utilization. Result: $150 + 600 =$ `{python} DiurnalGpuShift.ds_static_active_str` active GPUs. Fleet utilization: **`{python} DiurnalGpuShift.ds_static_util_str` percent**.
 
-**Scenario B -- Dynamic Sharing**\index{Scenario!b -- dynamic sharing}: Serving claims GPUs strictly as needed (average 150). Training reclaims unused serving GPUs (average 250), minus a safety buffer. The orchestrator shifts approximately `{python} DiurnalGpuShift.ds_reclaimed_str` GPUs between roles twice daily based on diurnal forecasts. Result: serving (150) + training \((600 + `{python} DiurnalGpuShift.ds_reclaimed_str`) = `{python} DiurnalGpuShift.ds_dynamic_active_str`\) active GPUs (the second training term is reclaimed serving capacity). Fleet utilization: **`{python} DiurnalGpuShift.ds_dynamic_util_str` percent**.
+**Scenario B -- Dynamic Sharing**\index{Scenario!b -- dynamic sharing}: Serving claims GPUs strictly as needed (average 150). Training reclaims unused serving GPUs (average 250), minus a 120-GPU safety buffer. The orchestrator shifts approximately `{python} DiurnalGpuShift.ds_reclaimed_str` GPUs between roles twice daily based on diurnal forecasts. Result: serving (150) + training \((600 + `{python} DiurnalGpuShift.ds_reclaimed_str`) = `{python} DiurnalGpuShift.ds_dynamic_active_str`\) active GPUs (the second training term is reclaimed serving capacity). Fleet utilization: **`{python} DiurnalGpuShift.ds_dynamic_util_str` percent**.
 
 Dynamic sharing recovers `{python} DiurnalGpuShift.ds_reclaimed_str` GPUs of effective capacity. At \$2 per GPU-hour, this creates approximately \$`{python} DiurnalGpuShift.ds_annual_str` million per year in value without purchasing a single additional accelerator.
 
@@ -1963,7 +1963,7 @@ The Fleet Stack framework in @fig-fleet-stack provides a structured approach: an
 |:---------------|----------:|:------------|:--------------------|:-------------------------|
 | **A100-80 GB** |       400 | 80 GB HBM2e | NVLink (600 GB/s)   | 50 nodes $\times$ 8 GPUs |
 | **A100-40 GB** |       400 | 40 GB HBM2e | NVLink (600 GB/s)   | 50 nodes $\times$ 8 GPUs |
-| **V100-32 GB** |       200 | 32 GB HBM2  | PCIe Gen3 (32 GB/s) | 50 nodes $\times$ 4 GPUs |
+| **V100-32 GB** |       200 | 32 GB HBM2  | PCIe Gen3 (16 GB/s) | 50 nodes $\times$ 4 GPUs |
 
 : **Cluster Hardware Inventory**\index{Cluster!hardware inventory}: Three procurement generations create distinct resource pools with different capabilities. A100 nodes support tensor parallelism via NVLink, while V100 nodes are limited to data parallelism. {#tbl-fleet-orchestration-debug-inventory}
 
