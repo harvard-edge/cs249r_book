@@ -142,7 +142,7 @@ A real-time chatbot prioritizes latency (time-to-first-token under 200 ms, inter
 
 To make this concrete, consider two deployment configurations for the same 70B large language model (LLM):
 
-Configuration A is latency-optimized: FP16 weights, batch size 1, speculative decoding enabled. Each H100 GPU serves approximately 80 tokens/second with 20 ms inter-token latency. Cost: 8 GPUs dedicated to a single user stream, approximately \$0.12 per 1,000 output tokens.
+Configuration A is latency-optimized: FP16 weights, batch size 1, speculative decoding enabled. The model replica produces approximately 50 tokens/second with 20 ms inter-token latency while occupying 8 H100 GPUs for a single user stream. Cost: approximately \$0.12 per 1,000 output tokens.
 
 Configuration B is throughput-optimized: INT4 weights (AWQ), batch size 64, no speculation. Each H100 serves approximately 4,000 tokens/second aggregate throughput across all batched requests, with 120 ms inter-token latency per request. Cost: 4 GPUs serving 64 concurrent users, approximately \$0.002 per 1,000 output tokens.
 
@@ -516,14 +516,14 @@ ML operations span three orders of magnitude in arithmetic intensity, and the po
 # │          WorkloadIntensityCalc.elem_intensity_str,
 # │          WorkloadIntensityCalc.decode_intensity_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import BYTES_FP16
+from mlsysim.core.constants import BYTES_FP16, byte
 from mlsysim.fmt import check
 
 class WorkloadIntensityCalc:
     """Arithmetic intensity for GEMM, GELU, and LLM decode operations."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    bytes_per_elem = BYTES_FP16
+    bytes_per_elem = BYTES_FP16.m_as(byte)
     # GEMM: C = A*B where A is MxK, B is KxN
     M, K, N = 4096, 4096, 4096
     # Element-wise (e.g., GELU): ~5 ops per element
@@ -626,41 +626,41 @@ class RooflineDiagnostic:
     """Roofline analysis for 70B LLM decode on 8× H100."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────
-    params_per_gpu_B = 17.5    # 70B model, TP across GPUs → 17.5B per shard
+    params_per_gpu_B = 70 / 8  # 70B model, TP across 8 GPUs -> 8.75B per shard
     bytes_fp16 = 2
     h100_bw_tbs = 3.35         # H100 HBM3 bandwidth (TB/s)
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    flops_B = 2 * params_per_gpu_B                         # 35 (×10^9 FLOP)
-    weight_gb = params_per_gpu_B * bytes_fp16              # 35 GB
+    flops_B = 2 * params_per_gpu_B                         # 17.5 (x10^9 FLOP)
+    weight_gb = params_per_gpu_B * bytes_fp16              # 17.5 GB
     arith_intensity = flops_B/weight_gb                   # 1.0 FLOP/byte
     decode_time_ms = weight_gb / (h100_bw_tbs * 1000) * 1000
     tokens_per_sec = 1000.0 / decode_time_ms
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(abs(arith_intensity - 1.0) < 0.01, f"AI should be 1.0, got {arith_intensity}")
-    check(9 < decode_time_ms < 12, f"Decode time should be ~10.4ms, got {decode_time_ms:.1f}")
-    check(90 < tokens_per_sec < 100, f"Token rate should be ~96, got {tokens_per_sec:.0f}")
+    check(5 < decode_time_ms < 6, f"Decode time should be ~5.2ms, got {decode_time_ms:.1f}")
+    check(180 < tokens_per_sec < 200, f"Token rate should be ~191, got {tokens_per_sec:.0f}")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    flops_B_str = f"{flops_B:.0f}"
-    weight_gb_str = f"{weight_gb:.0f}"
+    flops_B_str = f"{flops_B:.1f}"
+    weight_gb_str = f"{weight_gb:.1f}"
     ai_str = f"{arith_intensity:.1f}"
     decode_ms_str = f"{decode_time_ms:.1f}"
-    tps_str = f"{int(tokens_per_sec)}"
+    tps_str = f"{tokens_per_sec:.0f}"
 ```
 
 ::: {.callout-notebook title="The Roofline diagnostic"}
 
-**Problem**: A 70B parameter LLM is deployed on 8$\times$ H100 GPUs with tensor parallelism. At batch size 1, each GPU holds approximately 17.5B parameters in FP16 (35 GB of weights). Each decode step reads all weights to produce one token. What is the achieved arithmetic intensity, and what is the theoretical maximum token generation rate?
+**Problem**: A 70B parameter LLM is deployed on 8$\times$ H100 GPUs with tensor parallelism. At batch size 1, each GPU holds approximately 8.75B parameters in FP16 (17.5 GB of weights). Each decode step reads its weight shard to produce one token. What is the achieved arithmetic intensity, and what is the theoretical maximum token generation rate?
 
 **Math**:
 
 *Step 1: Arithmetic Intensity.*
-Each decode step per GPU: FLOPs $= 2 \times 17.5 \times 10^9 =$ `{python} RooflineDiagnostic.flops_B_str` $\times 10^9$ FLOP. Bytes loaded $= 17.5 \times 10^9 \times 2 =$ `{python} RooflineDiagnostic.weight_gb_str` $\times 10^9$ bytes $=$ `{python} RooflineDiagnostic.weight_gb_str` GB.
+Each decode step per GPU: FLOPs $= 2 \times 8.75 \times 10^9 =$ `{python} RooflineDiagnostic.flops_B_str` $\times 10^9$ FLOP. Bytes loaded $= 8.75 \times 10^9 \times 2 =$ `{python} RooflineDiagnostic.weight_gb_str` $\times 10^9$ bytes $=$ `{python} RooflineDiagnostic.weight_gb_str` GB.
 
 $$
-I = \frac{35 \times 10^9 \text{ FLOP}}{35 \times 10^9 \text{ bytes}} = 1.0 \text{ FLOP/byte}
+I = \frac{17.5 \times 10^9 \text{ FLOP}}{17.5 \times 10^9 \text{ bytes}} = 1.0 \text{ FLOP/byte}
 $$
 
 At `{python} RooflineDiagnostic.ai_str` FLOP/byte, the operation sits far below the H100 ridge point of ~295 FLOP/byte: deeply memory-bound.
@@ -669,10 +669,10 @@ At `{python} RooflineDiagnostic.ai_str` FLOP/byte, the operation sits far below 
 Since the operation is memory-bound, performance is limited by bandwidth, not compute:
 
 $$
-t_{\text{decode}} = \frac{35 \text{ GB}}{3.35 \text{ TB/s}} \approx 10.4 \text{ ms per token}
+t_{\text{decode}} = \frac{17.5 \text{ GB}}{3.35 \text{ TB/s}} \approx 5.2 \text{ ms per token}
 $$
 
-This yields approximately `{python} RooflineDiagnostic.tps_str` tokens/second per GPU, or about `{python} RooflineDiagnostic.tps_str` tokens/second for the model (since tensor parallelism does not multiply throughput for memory-bound decode). In practice, overheads from KV cache reads and NVLink synchronization reduce this to 40--70 tokens/second.
+This yields approximately `{python} RooflineDiagnostic.tps_str` tokens/second per GPU, or about `{python} RooflineDiagnostic.tps_str` tokens/second for the model (since tensor parallelism does not multiply throughput for memory-bound decode). In practice, overheads from KV cache reads and NVLink synchronization reduce this substantially below the ideal bandwidth-only limit.
 
 **Systems insight**: At batch size 1, fewer than 0.4 percent of the H100's FP16 FLOPS are in use. The only ways to improve are: (a) increase batch size to amortize weight reads, (b) reduce weight bytes via quantization, or (c) use speculative decoding to generate multiple tokens per weight read.
 
@@ -702,7 +702,7 @@ Each unfused kernel must also materialize its output in HBM. Consider a sequence
 2. **GELU kernel**\index{GELU!kernel}: Read $Z_1$ from HBM, compute $\text{GELU}(Z_1)$, write $Z_2$ to HBM.
 3. **LayerNorm kernel**\index{LayerNorm!kernel}: Read $Z_2$ from HBM, compute $\text{LayerNorm}(Z_2)$, write $Y$ to HBM.
 
-Intermediate tensors $Z_1$ and $Z_2$ each occupy the same memory as the output $Y$. For a hidden dimension of 4096 and batch size of 2048 in FP16, each intermediate tensor is $4096 \times 2048 \times 2 = 16$ MB. The unfused execution reads and writes 32 MB of intermediate data that a fused kernel avoids entirely by holding $Z_1$ and $Z_2$ in registers or shared memory (SRAM) within the SM.
+Intermediate tensors $Z_1$ and $Z_2$ each occupy the same memory as the output $Y$. For a hidden dimension of 4096 and batch size of 2048 in FP16, each intermediate tensor is $4096 \times 2048 \times 2 = 16$ MB. The unfused execution materializes 32 MB of intermediate tensors and performs 64 MB of intermediate HBM traffic, writing and then rereading each tensor. A fused kernel avoids that traffic entirely by holding $Z_1$ and $Z_2$ in registers or shared memory (SRAM) within the SM.
 
 @fig-fusion-before-after contrasts these two execution paths, making the HBM traffic savings visible.
 
@@ -767,7 +767,7 @@ Standard self-attention computes $\text{Softmax}(QK^T / \sqrt{d_k})V$, where $Q$
 # │          naive_head_traffic_mb_str, flash_head_traffic_mb_str,
 # │          flash_savings_factor_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import BYTES_FP16, MILLION, BILLION
+from mlsysim.core.constants import BYTES_FP16, MILLION, BILLION, byte
 from mlsysim.fmt import fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -778,7 +778,7 @@ class FlashAttentionSavings:
     seq_len = 8192
     head_dim = 128
     num_heads = 32
-    bytes_per_elem = BYTES_FP16
+    bytes_per_elem = BYTES_FP16.m_as(byte)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Step 1: Naive attention HBM traffic per head:
@@ -986,9 +986,9 @@ Applying uniform per-tensor INT8 quantization clips these outliers, destroying t
 
 ***Block-wise Quantization***\index{Quantization!block-wise, definition} is a quantization scheme that partitions a weight tensor into nonoverlapping groups of $B_{\text{block}}$ elements and computes a per-group scale $s_i = (x_{\max,i} - x_{\min,i}) / (2^b - 1)$, bounding worst-case quantization error within each group independently.
 
-1.  **Significance (quantitative)**: With block size $B_{\text{block}} = 64$ and $b = 4$ bits, weights compress from 16 bits to 4 bits—a 4$\times$ memory reduction—while per-group scale tensors add $1/B_{\text{block}}$ overhead in FP16, totaling $\approx 1.6\%$ metadata overhead. This yields an effective bit-width of $4 + 16/64 = 4.25$ bits per weight, compared to a pure 4-bit scheme at exactly 4 bits.
+1.  **Significance (quantitative)**: With block size $B_{\text{block}} = 64$ and $b = 4$ bits, weights compress from 16 bits to 4 bits—a 4$\times$ memory reduction—while each FP16 scale adds $16/64 = 0.25$ bits per weight. This yields an effective bit-width of $4.25$ bits per weight: 6.25 percent overhead relative to the INT4 payload, or about 1.6 percent of the original FP16 weight size.
 2.  **Distinction (durable)**: Unlike **Per-Tensor Quantization**\index{Quantization!per-tensor}, which applies a single scale across the entire weight matrix and forces that scale to accommodate outlier values at the cost of wasting precision on the majority of near-zero weights, Block-wise Quantization contains outlier damage within individual blocks, preventing a single extreme value from degrading quantization fidelity for the whole tensor.
-3.  **Common pitfall**: Treating block size as a free hyperparameter is wrong. Smaller blocks ($B_{\text{block}} = 32$) reduce quantization error but double the metadata overhead vs. $B_{\text{block}} = 64$. At $B_{\text{block}} = 16$, metadata overhead reaches $6.25\%$—eroding the memory savings that motivated quantization in the first place.
+3.  **Common pitfall**: Treating block size as a free hyperparameter is wrong. Smaller blocks ($B_{\text{block}} = 32$) reduce quantization error but double the metadata overhead vs. $B_{\text{block}} = 64$. At $B_{\text{block}} = 16$, the scale adds 1 bit per weight: 25 percent overhead relative to the INT4 payload, or 6.25 percent of the original FP16 weight size.
 
 :::
 
@@ -1045,7 +1045,8 @@ The choice depends on the operational regime. For memory-bound inference (small 
 # │
 # │ Goal: Compute KV cache memory per request for a 70B model (Llama-style GQA)
 # │       at FP16, then derive max batch sizes before/after quantization.
-# │ Show: kv_fp16_gb (~0.17 GB), max batch FP16 vs INT8, throughput ratio.
+# │ Show: total FP16 KV cache (~1.34 GB), sharded FP16 (~0.34 GB/GPU),
+# │       sharded INT8 (~0.17 GB/GPU), and max batch FP16 vs INT8.
 # │ How: 2 (K+V) * layers * kv_heads * head_dim * seq_len * bytes.
 # │
 # │ Imports: mlsysim.book (check)
@@ -1428,8 +1429,8 @@ The potential benefit of communication-computation overlap depends on the relati
 # │ Goal: Quantify training step speedup from overlapping ring-AllReduce with
 # │       backward pass for a 7B model on 8 H100 GPUs over NVLink (900 GB/s),
 # │       at 40% MFU, to show when overlap fully hides communication overhead.
-# │ Show: ~14 GB gradients; ~31 ms backward; ~31 ms AllReduce; step collapses from
-# │       ~93 ms (no overlap) to ~62 ms (with overlap) → ~1.50x speedup—inline.
+# │ Show: ~14 GB gradients; ~145 ms backward; ~31 ms AllReduce; step drops from
+# │       ~249 ms (no overlap) to ~217 ms (with overlap) -> ~1.14x speedup—inline.
 # │ How: AllReduce time = 2 * gradient_bytes/nvlink_bw; backward time =
 # │       backward_flops / (h100_tflops * MFU); overlap removes min(back, AR).
 # │
@@ -1503,9 +1504,9 @@ class OverlapCalc:
 
 Consider a 7B parameter model trained on 8 H100 GPUs within a single node connected by NVLink at 900 GB/s. The gradient tensor contains `{python} OverlapCalc.gradient_gb_str` GB of FP16 values. By the ring AllReduce analysis in @sec-collective-communication, synchronization transfers approximately $2 \times (N-1)/N \approx 2$ times this volume, taking approximately `{python} OverlapCalc.allreduce_ms_str` ms at NVLink bandwidth. The backward pass computation, at 40 percent Model FLOPs Utilization, takes approximately `{python} OverlapCalc.backward_ms_str` ms.
 
-Without overlap, the training step requires `{python} OverlapCalc.step_no_overlap_ms_str` ms (forward + backward + AllReduce). With overlap, the AllReduce is `{python} OverlapCalc.overlap_status` behind the backward pass, reducing the step time to `{python} OverlapCalc.step_overlap_ms_str` ms, a `{python} OverlapCalc.overlap_speedup_str`$\times$ improvement. This example illustrates a critical property: overlap is most effective when backward compute time exceeds AllReduce time. As @fig-overlap-budget shows, as cluster scale increases from 8 to 1024 GPUs, overlap efficiency degrades from ~90 percent to ~40 percent because communication overhead eventually exceeds the computation budget. For smaller models or slower interconnects (for example, PCIe at 64 GB/s instead of NVLink at 900 GB/s), the AllReduce would exceed the backward pass, and no amount of overlap can fully hide the communication.
+Without overlap, the training step requires `{python} OverlapCalc.step_no_overlap_ms_str` ms (forward + backward + AllReduce). With overlap, the AllReduce is `{python} OverlapCalc.overlap_status` behind the backward pass, reducing the step time to `{python} OverlapCalc.step_overlap_ms_str` ms, a `{python} OverlapCalc.overlap_speedup_str`$\times$ improvement. This example illustrates a critical property: overlap is most effective when backward compute time exceeds AllReduce time. As @fig-overlap-budget shows, as cluster scale increases from 8 to 1024 GPUs, overlap efficiency degrades from ~90 percent to ~18 percent because communication overhead eventually exceeds the computation budget. For smaller models or slower interconnects (for example, PCIe at 64 GB/s instead of NVLink at 900 GB/s), the AllReduce would exceed the backward pass, and no amount of overlap can fully hide the communication.
 
-::: {#fig-overlap-budget fig-env="figure" fig-pos="htb" fig-cap="**The Overlap Budget**: As cluster scale increases (8 to 1024 GPUs), the communication overhead grows, eventually exceeding the computation budget. The overlap efficiency (black line) represents the percentage of communication hidden behind computation, which degrades from ~90 percent to ~40 percent due to inter-node latency and bandwidth constraints on a 70B parameter model." fig-alt="Stacked bar chart of step time contribution vs. GPU count. Overlapped communication, pure computation, and exposed communication. Black line shows overlap efficiency degrading from 90 percent to 40 percent."}
+::: {#fig-overlap-budget fig-env="figure" fig-pos="htb" fig-cap="**The Overlap Budget**: As cluster scale increases (8 to 1024 GPUs), the communication overhead grows, eventually exceeding the computation budget. The overlap efficiency (black line) represents the percentage of communication hidden behind computation, which degrades from ~90 percent to ~18 percent due to inter-node latency and bandwidth constraints on a 70B parameter model." fig-alt="Stacked bar chart of step time contribution vs. GPU count. Overlapped communication, pure computation, and exposed communication. Black line shows overlap efficiency degrading from about 90 percent to about 18 percent."}
 
 ```{python}
 #| echo: false
@@ -1515,7 +1516,7 @@ Without overlap, the training step requires `{python} OverlapCalc.step_no_overla
 # │ Context: @fig-overlap-budget—communication-computation overlap
 # │
 # │ Goal: Plot compute budget, comm overhead, overlap efficiency vs GPU count;
-# │       show degradation from ~90% to ~40% at scale.
+# │       show degradation from ~90% to ~18% at scale.
 # │ Show: Bar/line chart; 8–1024 GPUs; overlap % curve.
 # │ How: comm_scale_factor; overlap = compute/(compute+comm); matplotlib.
 # │
@@ -1625,7 +1626,7 @@ torch.cuda.synchronize()  # Wait for both to complete
 
 The GPU hardware scheduler interleaves execution units from both streams, running the GEMM on the SMs while the NVLink engine handles the AllReduce data transfer. However, while streams provide logical concurrency, they contend for physical resources. The SMs must manage the data movement instructions for the communication kernel. On an H100 with 132 SMs, a heavy NCCL operation might occupy 4--8 SMs solely for protocol processing and memory copying, leading to **SM partitioning**\index{SM Partitioning}: the available compute throughput is reduced by 3--6 percent during communication. If the compute kernel is dense enough to saturate 100 percent of the SMs, enabling overlap can paradoxically slow down execution due to this resource contention, a phenomenon known as interference. In practice, the 3--6 percent compute throughput reduction is far smaller than the communication time that would otherwise be exposed, making the trade-off overwhelmingly favorable.
 
-In practice, achieving effective overlap requires attention to several details. The communication operation must be launched *before* the compute kernel it should overlap with, not after, because NCCL operations have their own launch overhead. Synchronization points (where one stream waits for another) must be minimized, as each synchronization serializes execution.
+In practice, achieving effective overlap requires attention to several details. The communication operation must be launched early enough to overlap with subsequent compute; in backward passes, DDP starts each bucket's AllReduce as soon as that bucket is ready so NCCL launch latency is hidden behind later gradient kernels. Synchronization points (where one stream waits for another) must be minimized, as each synchronization serializes execution.
 
 PyTorch's Distributed Data Parallel (DDP) module implements gradient overlap by registering backward hooks on each parameter. When a parameter's gradient is computed during the backward pass, the hook triggers an asynchronous AllReduce on a separate NCCL stream. The optimizer step includes an implicit synchronization point that waits for all AllReduce operations to complete. This design overlaps gradient communication with gradient computation automatically, without requiring user intervention.
 
@@ -1780,7 +1781,7 @@ CPU-bound data loading causes GPU utilization to drop periodically to zero while
 
 ::: {.callout-notebook title="The profiler detective"}
 
-**Problem**: A 7B parameter LLM runs on a single H100 and shows 45 tokens/second during autoregressive generation at batch size 1. The theoretical bandwidth-limited rate is approximately 96 tokens/second. Where is the remaining 53 percent of performance hiding?
+**Problem**: A 7B parameter LLM runs on a single H100 and shows 45 tokens/second during autoregressive generation at batch size 1. The pure FP16 weight-read roofline is higher, but after budgeting roughly 35 GB of total per-token traffic for weights, KV-cache reads, sampling, synchronization, and launch overhead, the bandwidth-limited full-decode ceiling is approximately 96 tokens/second. Where is the remaining 53 percent of realizable decode-step performance hiding?
 
 **Investigation**\index{Investigation}:
 
@@ -2033,7 +2034,7 @@ The roofline analysis confirms that decode is deeply memory-bound, with arithmet
 
 The first optimization targets the largest opportunity: reducing the bytes per weight read from HBM. Applying AWQ INT4 weight quantization reduces the per-GPU weight footprint from 17.5 GB to about 4.4 GB on an 8-GPU node. The raw weight-read traffic drops by 4$\times$, and the effective bandwidth for weight reads roughly doubles once on-the-fly dequantization to FP16 is included.
 
-Simultaneously, applying INT8 quantization to the KV cache reduces per-request cache size by 2$\times$. The combined effect on memory budget is dramatic: each GPU now has approximately 75.6 GB available for KV cache, up from 62.5 GB. At the reduced per-request KV cache size, the maximum batch size increases from 4 to approximately 32.
+Simultaneously, applying INT8 quantization to the KV cache reduces per-request cache size by 2$\times$. The combined effect on memory budget is dramatic: each GPU now has approximately 75.6 GB available for KV cache, up from 62.5 GB. Under the raw 4K GQA cache calculation from @sec-performance-engineering-kv-cache, this would permit much larger batches; in this deployment, the serving policy reserves memory for longer contexts, fragmentation headroom, and tail-latency protection. With that policy cap, the maximum admitted batch size increases from 4 to approximately 32.
 
 Postoptimization metrics at batch size 1:
 
@@ -2058,15 +2059,15 @@ Postoptimization metrics:
 
 #### Optimization round 3: Speculative decoding {#sec-performance-engineering-case-round3}
 
-With the throughput target met, the team focuses on further reducing ITL for the best user experience. Speculative decoding with a 1.5B draft model (AWQ INT4 quantized to 0.75 GB) is deployed on the same GPUs. The draft model generates 5 candidate tokens in 4 ms (benefiting from the INT4 quantization applied in Round 1). Verification takes approximately 8 ms.
+With the throughput target met, the team focuses on further reducing ITL for the best user experience. Speculative decoding with a 1.5B draft model (AWQ INT4 quantized to 0.75 GB) is deployed on the same GPUs. The draft model generates 5 candidate tokens in 4 ms (benefiting from the INT4 quantization applied in Round 1). The target model verifies the candidate block in approximately 32 ms, comparable to one optimized autoregressive decode step.
 
 At an average acceptance rate of 0.78, the expected tokens per round is approximately 3.5. The effective ITL becomes:
 
 $$
-\text{ITL}_{\text{effective}} = \frac{4 + 8}{3.5} \approx 3.4 \text{ ms per token}
+\text{ITL}_{\text{effective}} = \frac{4 + 32}{3.5} \approx 10.3 \text{ ms per token}
 $$
 
-The result is a 9.4$\times$ improvement over the Round 2 ITL of 32 ms.
+The result is a 3.1$\times$ improvement over the Round 2 ITL of 32 ms.
 
 However, speculative decoding interacts with batching. At batch size 32, the verification step is no longer "free" because the GPU is closer to compute saturation. The system therefore applies speculation only when the current batch size is below 16, falling back to standard autoregressive decoding at higher loads. This adaptive policy maintains both the latency benefit at low load and the throughput benefit at high load.
 
@@ -2164,7 +2165,7 @@ The unifying principle is that performance engineering is not about making hardw
 * **Operator Fusion** and **Tiling** (FlashAttention) eliminate redundant HBM traffic by keeping intermediate results in on-chip SRAM, reducing attention memory traffic from quadratic to linear in sequence length.
 * **Precision Engineering** doubles effective bandwidth by reducing numerical representation (FP8, INT4), but requires careful handling of outlier features (LLM.int8(), GPTQ, AWQ) and dynamic scaling for training stability.
 * **Graph Compilation**\index{Graph Compilation!graph capture}\index{Graph Compilation!memory planning}\index{Graph Compilation!kernel selection} (torch.compile, XLA, TensorRT) automates known optimizations across the entire model graph, but cannot discover algorithmic innovations like FlashAttention or speculative decoding.
-* **Speculative Decoding** is the only technique that reduces *latency* for memory-bound decode without changing precision or batch size, by trading abundant compute for scarce bandwidth through parallel verification of draft tokens.
+* **Speculative Decoding** reduces *latency* for memory-bound decode without changing precision or batch size by trading abundant compute for scarce bandwidth through parallel verification of draft tokens.
 * **Mixture of Experts** enables parameter scaling without proportional compute scaling, but introduces AllToAll communication patterns and load balancing challenges that require careful system engineering.
 * **Always profile before optimizing**\index{Always Profile Before Optimizing}: the dominant bottleneck is often not where intuition suggests, and applying the wrong optimization wastes engineering effort while leaving the actual bottleneck untouched.
 
