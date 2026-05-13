@@ -485,17 +485,16 @@ export default function EcosystemBar() {
           {/* Spacer */}
           <div style={{ flex: 1 }} />
 
-          {/* Right links + menus */}
+          {/* Right links + menus — order mirrors shared/config/navbar-common.yml:
+              Subscribe → Star → Support → GitHub (low-friction conversion first). */}
           <div style={{ display: 'flex', alignItems: 'center' }}>
             <a
-              href="https://opencollective.com/mlsysbook"
-              target="_blank"
-              rel="noopener noreferrer"
-              style={linkStyle('support')}
-              onMouseEnter={() => setHoveredLink('support')}
+              href="#subscribe"
+              style={linkStyle('subscribe')}
+              onMouseEnter={() => setHoveredLink('subscribe')}
               onMouseLeave={() => setHoveredLink(null)}
             >
-              <i className="bi bi-heart" /> <span className="hidden nav-xl:inline">Support</span>
+              <i className="bi bi-envelope" /> <span className="hidden nav-xl:inline">Subscribe</span>
             </a>
             <a
               href="https://github.com/harvard-edge/cs249r_book"
@@ -508,12 +507,14 @@ export default function EcosystemBar() {
               <i className="bi bi-star" /> <span className="hidden nav-xl:inline">Star</span>
             </a>
             <a
-              href="#subscribe"
-              style={linkStyle('subscribe')}
-              onMouseEnter={() => setHoveredLink('subscribe')}
+              href="https://opencollective.com/mlsysbook"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={linkStyle('support')}
+              onMouseEnter={() => setHoveredLink('support')}
               onMouseLeave={() => setHoveredLink(null)}
             >
-              <i className="bi bi-envelope" /> <span className="hidden nav-xl:inline">Subscribe</span>
+              <i className="bi bi-heart" /> <span className="hidden nav-xl:inline">Support</span>
             </a>
             {/* Dark mode toggle — matches Quarto navbar position */}
             <button
@@ -590,17 +591,19 @@ export default function EcosystemBar() {
             </div>
           ))}
           <div style={{ borderTop: '1px solid #dee2e6', paddingTop: 8, display: 'flex', gap: 16 }}>
-            <a href="https://opencollective.com/mlsysbook" target="_blank" rel="noopener noreferrer"
+            {/* Mobile order mirrors shared/config/navbar-common.yml:
+                Subscribe → Star → Support → GitHub */}
+            <a href="#subscribe"
               style={{ fontSize: 15, color: NAV_COLOR, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <i className="bi bi-heart" style={{ fontSize: 14 }} /> Support
+              <i className="bi bi-envelope" style={{ fontSize: 14 }} /> Subscribe
             </a>
             <a href="https://github.com/harvard-edge/cs249r_book" target="_blank" rel="noopener noreferrer"
               style={{ fontSize: 15, color: NAV_COLOR, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
               <i className="bi bi-star" style={{ fontSize: 14 }} /> Star
             </a>
-            <a href="#subscribe"
+            <a href="https://opencollective.com/mlsysbook" target="_blank" rel="noopener noreferrer"
               style={{ fontSize: 15, color: NAV_COLOR, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <i className="bi bi-envelope" style={{ fontSize: 14 }} /> Subscribe
+              <i className="bi bi-heart" style={{ fontSize: 14 }} /> Support
             </a>
             <a href="https://github.com/harvard-edge/cs249r_book" target="_blank" rel="noopener noreferrer"
               style={{ fontSize: 15, color: NAV_COLOR, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
