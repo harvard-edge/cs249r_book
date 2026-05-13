@@ -1690,7 +1690,7 @@ As @fig-pipeline-parallelism shows, each device, as represented by the rows in t
 
 ***Pipeline Parallelism***\index{Pipeline Parallelism!definition} is a model parallelism technique that partitions a neural network's layers into sequential stages assigned to different devices, passing activations forward and gradients backward between stages while overlapping computation across stages using micro-batches to maintain throughput.
 
-1.  **Significance (quantitative)**: Inter-stage communication transmits only the activation tensor at each stage boundary—for a hidden dimension of 8,192 at BF16 with micro-batch size 1, this is $8192 \times 2 = 16$ KB per boundary, compared to the gigabytes required for gradient AllReduce in data parallelism. This low communication volume makes pipeline parallelism the primary technique for scaling model depth across nodes connected by 50 GB/s InfiniBand. The pipeline bubble wastes approximately $(p-1)/(m+p-1)$ of total compute, where $p$ is the number of stages and $m$ is the number of micro-batches—with $p=8$ stages and $m=32$ micro-batches, bubble overhead is about 18 percent.
+1.  **Significance (quantitative)**: Inter-stage communication transmits only the activation tensor at each stage boundary, sized as $\text{microbatch} \times \text{seq\_len} \times \text{hidden} \times 2$ bytes at BF16. For a hidden dimension of 8,192 with micro-batch size 1 and a 2,048-token sequence, this is approximately $8{,}192 \times 2{,}048 \times 2 \approx 32$ MB per boundary, compared to the gigabytes required for gradient AllReduce in data parallelism. This low communication volume makes pipeline parallelism the primary technique for scaling model depth across nodes connected by 50 GB/s InfiniBand. The pipeline bubble wastes approximately $(p-1)/(m+p-1)$ of total compute, where $p$ is the number of stages and $m$ is the number of micro-batches—with $p=8$ stages and $m=32$ micro-batches, bubble overhead is about 18 percent.
 2.  **Distinction (durable)**: Unlike tensor parallelism, which shards individual matrix multiplications within a single layer and requires AllReduce on every layer's output (demanding NVLink-class bandwidth within each stage), pipeline parallelism shards at layer boundaries and requires only point-to-point activation transfers between stages—tolerating InfiniBand bandwidth between nodes.
 3.  **Common pitfall**: A frequent misconception is that adding more pipeline stages always improves throughput. The pipeline bubble fraction grows as $(p-1)/(m+p-1)$: with $p=16$ stages and $m=16$ micro-batches, 48 percent of compute is wasted idle—requiring large micro-batch counts ($m \gg p$) to keep the bubble below 10 percent, which in turn increases peak activation memory and the memory pressure on each stage.
 
@@ -1809,7 +1809,7 @@ Each GPU computes its partition independently. Outputs are concatenated (no comm
 
 :::
 
-The column-then-row arrangement shown in @fig-tensor-parallel-split is the key design insight: by pairing a column-parallel layer with a row-parallel layer, the intermediate activations flow directly between them without communication, confining the AllReduce cost to a single operation per transformer block.
+The column-then-row arrangement shown in @fig-tensor-parallel-split is the key design insight: by pairing a column-parallel layer with a row-parallel layer, the intermediate activations flow directly between them without communication, confining the AllReduce cost to a single operation per sublayer pair (one after the attention block and one after the MLP, for a total of two AllReduce operations per transformer block).
 
 Row-parallel linear layers split weights along rows. For $W = \begin{bmatrix} W_1 \\ W_2 \end{bmatrix}$:
 $$Y = XW = X_1 W_1 + X_2 W_2$$
@@ -1830,7 +1830,7 @@ The design places AllReduce operations strategically: one after attention, one a
 Communication volume per transformer layer depends on sequence length $S$, hidden dimension $d$, and batch size $B$:
 $$\text{Communication} = 2 \times B \times S \times d \times \text{sizeof(dtype)}$$
 
-With $S=2048$, $H=4096$, $B=4$, and FP16: $2 \times 4 \times 2048 \times 4096 \times 2 = 134$ MB per AllReduce per layer. For a 96-layer model with two AllReduce operations per layer, this totals approximately 25.7 GB per training step, requiring NVLink bandwidth to avoid becoming the bottleneck.
+With $S=2048$, $H=4096$, $B=4$, and FP16: $2 \times 4 \times 2048 \times 4096 \times 2 = 134$ MB per AllReduce per layer. For a 96-layer model with two AllReduce operations per layer, this totals approximately 25.7 GB per forward pass; including the symmetric backward AllReduces brings per-training-step communication to roughly 51 GB, requiring NVLink bandwidth to avoid becoming the bottleneck.
 
 Tensor parallelism scaling degrades rapidly beyond 8-way parallelism because:
 
