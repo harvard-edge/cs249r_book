@@ -275,13 +275,15 @@ These models serve as more than convenient examples; they form a set of *canonic
 
 ::: {.callout-lighthouse title="Canonical workloads"}
 
-In computer architecture, the *microprocessor without interlocked pipelined stages (MIPS)* processor is often used to teach pipelining, not because it is the fastest chip today, but because it is the clearest embodiment of reduced instruction set computer (RISC) principles. Similarly, this book uses *ResNet-50*, *GPT-2*, and *DLRM* as **canonical workloads**\index{Canonical Workloads}.
+In computer architecture, the *microprocessor without interlocked pipelined stages (MIPS)* processor is often used to teach pipelining, not because it is the fastest chip today, but because it is the clearest embodiment of reduced instruction set computer (RISC) principles. Similarly, this book uses *ResNet-50*, *GPT-2*, *DLRM*, *MobileNet*, and *KWS* as **canonical workloads**\index{Canonical Workloads}.
 
 We choose these specific models because they isolate distinct system bottlenecks:
 
 *   *ResNet-50* isolates **Compute** (Dense Matrix Math).
 *   *GPT-2* isolates **Memory Bandwidth** (Data Movement).
 *   *DLRM* isolates memory capacity (Random Access).
+*   *MobileNet* isolates edge latency (Efficient Convolution).
+*   *KWS* isolates always-on power (Tiny Inference).
 
 By studying these "Lighthouses," we learn engineering principles (roofline analysis, arithmetic intensity, memory hierarchies) that remain valid even as the specific "State of the Art" model architectures evolve.
 
@@ -523,7 +525,7 @@ The "Bottleneck" column in @tbl-lighthouse-comparison deserves particular attent
 \index{GPT-2!arithmetic intensity}
 Architecture selection is ultimately an engineering trade-off between **Math** $(O)$ and **Memory Movement** $(D_{\text{vol}})$. By comparing our Lighthouses, we can see how architectural choices shift a model's position on the intensity spectrum:
 
--   **ResNet-50 (Compute Bound)**: High intensity ($\approx 50\text{--}200+$ FLOPs/byte, varying by layer). Convolutional layers reuse each weight many times across the spatial dimensions of an image. Deep bottleneck layers achieve intensity above 200, while early layers are lower. Its performance is limited by how fast the hardware can do math.
+-   **ResNet-50 (Compute Bound)**: High intensity (roughly 40 FLOPs/byte at the whole-model level in @tbl-workload-signatures, with deeper bottleneck layers reaching 100--200+ FLOPs/byte). Convolutional layers reuse each weight many times across the spatial dimensions of an image. Its performance is limited by how fast the hardware can do math.
 -   **GPT-2 (Bandwidth Bound)**: Low intensity ($\approx 0.5$ FLOPs/byte). Each token produces only a matrix-vector multiplication rather than the matrix-matrix operations of batch processing, so the system must load massive weights from memory for a single token’s math. Its performance is limited by how fast memory can move bits.
 -   **MobileNet (Memory Bound on GPUs)**: Low intensity ($\approx 1\text{--}10$ FLOPs/byte, with depthwise layers at the low end). MobileNet reduces total $O$ through depthwise separable convolutions, but it moves more data relative to that work. It fits mobile hardware perfectly but often "starves" high-end GPUs optimized for dense math.
 
@@ -724,7 +726,7 @@ Consider classifying $28{\times}28$ MNIST digits (784 input pixels, 10 output cl
 - Sample Efficiency: CNN achieves better accuracy with the same training data
 - Systems Implications: CNN requires `{python} MLPvsCNN.param_ratio_str`$\times$ less memory, trains faster, and runs faster at inference
 
-Both architectures can *represent* the digit classification function (UAT guarantees this for MLPs; CNNs have similar or greater representational capacity). The difference is *learnability*: the CNN's inductive bias matches the spatial structure of images, enabling efficient learning with limited data and compute.
+For this task, both architectures can represent an effective digit classifier. The difference is *learnability*: the CNN's inductive bias matches the spatial structure of images, enabling efficient learning with limited data and compute while using a more constrained hypothesis space than an unconstrained MLP.
 
 :::
 
@@ -1158,7 +1160,7 @@ Convolutional[^fn-convolution-etymology] Neural Networks emerged as the solution
 
 \index{Convolution!etymology}
 
-[^fn-convolution-etymology]: **Convolution**: From Latin *convolvere* ("to roll together"), describing a filter that slides across an input, combining local elements at each position. This "rolling together" enforces a locality constraint that is the source of the operation's efficiency: a single $5{\times}5$ kernel reuses its 25 weights at every spatial position, reducing the parameters needed to process a 1-megapixel image by over 1,000,000$\times$ compared to a fully-connected layer. \index{Convolution!data reuse}
+[^fn-convolution-etymology]: **Convolution**: From Latin *convolvere* ("to roll together"), describing a filter that slides across an input, combining local elements at each position. This "rolling together" enforces a locality constraint that is the source of the operation's efficiency: a single $5{\times}5$ kernel reuses its 25 weights at every spatial position, reducing one feature detector for a 1-megapixel single-channel image from roughly 1,000,000 weights to 25, about 40,000$\times$ fewer parameters than a fully connected detector. \index{Convolution!data reuse}
 
 Spatial locality produces two key innovations that enhance efficiency for spatially structured data. Parameter sharing allows the same feature detector to be applied across different spatial positions, reducing parameters from millions to thousands while improving generalization. Local connectivity restricts connections to spatially adjacent regions, reflecting the insight that spatial proximity correlates with feature relevance. Together, these innovations define *convolutional neural networks* as an architectural family.
 
@@ -1933,7 +1935,7 @@ The limitation manifests concretely in domains such as natural language processi
 \index{Elman, Jeffrey}
 Recurrent[^fn-recurrent-etymology] Neural Networks address this architectural limitation [@elman1990; @hochreiter1997] by embodying a temporal inductive bias: they assume sequential dependence, where the order of information matters and the past influences the present.
 
-[^fn-recurrent-etymology]: **Recurrent**\index{Recurrent Neural Network!etymology}: From Latin *recurrere*, "to run back": information literally runs back through time via connections that loop output to input. The etymology explains the architecture's central systems constraint: the same looping structure that creates temporal memory also creates sequential dependencies. Each time step must wait for the previous one, preventing the parallel execution that GPUs demand and limiting hardware utilization to 30--50 percent on modern accelerators. \index{Recurrent Neural Network!parallelization constraint}
+[^fn-recurrent-etymology]: **Recurrent**\index{Recurrent Neural Network!etymology}: From Latin *recurrere*, "to run back": information literally runs back through time via connections that loop output to input. The etymology explains the architecture's central systems constraint: the same looping structure that creates temporal memory also creates sequential dependencies. Each time step must wait for the previous one, preventing parallel execution across the time dimension and limiting hardware utilization to 30--50 percent on modern accelerators. \index{Recurrent Neural Network!parallelization constraint}
 
 The assumption of sequential dependence guides the introduction of memory as a core component of the computational model. Rather than processing inputs in isolation, RNNs maintain an internal state that propagates information from previous time steps, allowing the network to condition its current output on historical context. This architecture embodies a distinctive trade-off: while CNNs sacrifice theoretical generality for spatial efficiency, recurrent neural networks introduce computational dependencies that challenge parallel execution in exchange for temporal processing capabilities.
 
@@ -1941,7 +1943,7 @@ The assumption of sequential dependence guides the introduction of memory as a c
 
 ***Recurrent Neural Networks (RNNs)***\index{RNN!definition} are sequence-processing architectures that maintain a hidden state $h_t = f(h_{t-1}, x_t)$ updated at each time step, encoding the assumption that the current output depends on all prior inputs through this fixed-size state vector.
 
-1.  **Significance (quantitative)**: The fixed-size state provides $O(1)$ inference memory regardless of sequence length—processing a 10,000-token sequence requires the same memory as a 10-token sequence—but the sequential update rule creates a sequential bottleneck where all $T$ steps must execute in order, directly contributing to the $L_{\text{lat}}$ term of the iron law and making RNNs unable to exploit GPU parallelism during training.
+1.  **Significance (quantitative)**: The fixed-size state provides $O(1)$ inference memory regardless of sequence length—processing a 10,000-token sequence requires the same memory as a 10-token sequence—but the sequential update rule creates a sequential bottleneck where all $T$ steps must execute in order, directly contributing to the $L_{\text{lat}}$ term of the iron law and making RNNs unable to exploit GPU parallelism across the time dimension during training.
 2.  **Distinction (durable)**: Unlike Attention Mechanisms, which access the entire token history simultaneously with $O(N^2)$ memory cost, RNNs compress history into a bottleneck state, meaning gradient signal must propagate back through all $T$ steps—causing $\partial \mathcal{L} / \partial h_0 \propto \prod_{t=1}^{T} \partial h_t / \partial h_{t-1}$, a product of $T$ Jacobians that vanishes or explodes exponentially with sequence length.
 3.  **Common pitfall**: A frequent misconception is that RNNs are obsolete. For streaming inference on resource-constrained hardware where $O(N^2)$ attention memory is prohibitive—such as keyword spotting on a microcontroller—an RNN's $O(1)$ state size remains the systems-justified choice.
 
@@ -2191,7 +2193,7 @@ Attention mechanisms[^fn-bahdanau-attention] address precisely this challenge [@
 ***Attention Mechanisms***\index{Attention Mechanism!definition} are neural network operations that compute a weighted sum of value vectors, where the weights are derived from learned similarity scores between a query vector and a set of key vectors, enabling dynamic, content-dependent information routing between any two positions in a sequence.
 
 1.  **Significance (quantitative)**: Attention connects any two tokens in $O(1)$ depth, but the similarity matrix requires $O(N^2)$ memory: for a 4,096-token sequence with 16-bit scores, the attention matrix alone consumes $4096^2 \times 2 \approx 32$ MB per layer per head—a direct contribution to the $D_{\text{vol}}$ and $\text{BW}$ terms of the iron law that ultimately caps practical context window length.
-2.  **Distinction (durable)**: Unlike RNNs, which compress all prior context into a single fixed-size state vector, attention mechanisms retain all $N$ prior token representations and compute relevance scores at inference time, trading RNN's $O(1)$ memory for $O(N^2)$ memory in exchange for eliminating the sequential bottleneck on long-range dependencies.
+2.  **Distinction (durable)**: Unlike RNNs, which compress all prior context into a single fixed-size state vector, attention mechanisms retain token representations and compute relevance scores directly. During training or full-sequence prefill, this creates $O(N^2)$ score interactions; during autoregressive serving, the stored KV cache grows as $O(Nd)$ while each new token attends over prior keys and values.
 3.  **Common pitfall**: A frequent misconception is that attention is a general-purpose weighting scheme that can be applied freely. The $O(N^2)$ memory growth is a hard physical constraint: doubling the context window quadruples the attention memory, which is why FlashAttention and sparse attention variants exist—they recompute rather than store the attention matrix to break this memory wall.
 
 :::
@@ -2219,9 +2221,9 @@ This requirement for dynamic processing extends well beyond language. In protein
 
 What unifies these domains is that the system must compute relationships between all pairs of elements, weigh those relationships based on content, and use the resulting weights to selectively combine information. Unlike architectures with fixed connectivity patterns, dynamic processing requires the flexibility to modify its computation graph based on the input itself. This capability defines the attention mechanism, the foundation of the transformer architecture.
 
-To see attention in action, consider @fig-transformer-attention-visualized. When processing the pronoun "they" in the sentence, the attention mechanism must determine what "they" refers to. The attention weights (indicated by line thickness) connect "they" most strongly to "student" and "finish": the model has learned to link pronouns with their referents across arbitrary distances, selectively weighting the most informative tokens in the sequence. This is precisely the kind of long-range dependency that RNNs struggle to capture.
+To see attention in action, consider @fig-transformer-attention-visualized. When processing the pronoun "they" in the sentence, the attention mechanism must determine what "they" refers to. The attention weights (indicated by line thickness) emphasize "student" and "finish": the model has learned to link pronouns with their referents and predicates across arbitrary distances, selectively weighting the most informative tokens in the sequence. This is precisely the kind of long-range dependency that RNNs struggle to capture.
 
-::: {#fig-transformer-attention-visualized fig-env="figure" fig-pos="htb" fig-cap="**Attention Weights Visualization**: An attention head from a transformer (layer 4, head 2) resolving the pronoun \"they.\" Line thickness indicates attention weight magnitude: the model attends most strongly to \"the,\" \"student,\" and \"finish,\" demonstrating that attention learns to link pronouns with their referents across arbitrary distances. This dynamic routing replaces RNN sequential processing with $O(1)$ information flow depth, enabling parallel computation across all positions simultaneously." fig-alt="Self-attention visualization labeled Layer 4 Head 2 for the sentence 'The student did not finish the homework because they were tired.' Tokens are listed vertically in two columns. Cyan attention lines connect the highlighted pronoun they on the right to all tokens on the left; thicker lines to The, student, and finish indicate high attention weights, demonstrating pronoun-referent linking across arbitrary distances."}
+::: {#fig-transformer-attention-visualized fig-env="figure" fig-pos="htb" fig-cap="**Attention Weights Visualization**: An attention head from a transformer (layer 4, head 2) resolving the pronoun \"they.\" Line thickness indicates attention weight magnitude: the model attends most strongly to \"student\" and \"finish,\" with weaker contextual links to nearby function words. This dynamic routing replaces RNN sequential processing with $O(1)$ information flow depth, enabling parallel computation across all positions simultaneously." fig-alt="Self-attention visualization labeled Layer 4 Head 2 for the sentence 'The student did not finish the homework because they were tired.' Tokens are listed vertically in two columns. Cyan attention lines connect the highlighted pronoun they on the right to all tokens on the left; thicker lines to student and finish indicate high attention weights, demonstrating pronoun-referent linking across arbitrary distances."}
 
 ```{.tikz}
 \scalebox{0.85}{%
@@ -2253,7 +2255,7 @@ To see attention in action, consider @fig-transformer-attention-visualized. When
 
 % Attention with "they"
 \draw[attention] (T10r.west) -- (T2l.east); % student
-\draw[attention] (T10r.west) -- (T1l.east); % The
+\draw[attention,line width=0.5pt, opacity=0.75] (T10r.west) -- (T1l.east); % The
 \draw[attention] (T10r.west) -- (T6l.east); % finish
 \draw[attention, opacity=0.75] (T10r.west) -- (T8l.east); % homework
 \foreach \i in {3,4,5,7,9,10,11,12}{
@@ -3013,7 +3015,7 @@ The preceding self-attention implementation shows how transformers process entir
 
 ::: {.callout-lighthouse title="GPT-2 XL (bandwidth lighthouse)"}
 
-**Why it matters**: GPT-2 XL exemplifies **memory-bandwidth-bound** workloads. During autoregressive inference, the model must load all `{python} LighthouseSpecs.gpt2_fp32_gb_str` GB of weights from HBM for *every generated token*, while performing only a single matrix-vector multiply per layer. The arithmetic intensity drops to $\approx 1$ Op/Byte, leaving compute cores idle while waiting for memory. This contrasts with ResNet-50 (compute bound, high weight reuse) and DLRM (capacity-bound, random access).
+**Why it matters**: GPT-2 XL exemplifies **memory-bandwidth-bound** workloads. During autoregressive inference, the model must load all `{python} LighthouseSpecs.gpt2_fp32_gb_str` GB of FP32 weights from HBM for *every generated token*, while performing only a single matrix-vector multiply per layer. The arithmetic intensity is about 0.5 FLOPs/byte with FP32 weights in @tbl-workload-signatures, or about 1 FLOP/byte with FP16 weights, leaving compute cores idle while waiting for memory. This contrasts with ResNet-50 (compute bound, high weight reuse) and DLRM (capacity-bound, random access).
 
 ::: {tbl-colwidths="[12,30,58]"}
 
@@ -3046,7 +3048,7 @@ Inference is autoregressive (generating one token at a time) and typically *memo
 3.  Read/Write the KV Cache\index{KV Cache}.
 
 \index{KV Cache!linear growth}
-The **KV Cache**[^fn-kv-cache-depth] grows linearly with sequence length ($O(N \cdot d)$, distinct from the $O(N^2)$ attention score matrix during training), storing the Key and Value vectors for all previous tokens to avoid recomputing them. For long contexts, this cache becomes massive (for example, 100+ GB), forcing the system to fetch the full cache from HBM for every generated token. As the GPT-2 Lighthouse quantified earlier, the arithmetic intensity drops to $\approx 1$ Op/Byte, explaining why serving LLMs requires massive HBM bandwidth (for example, H100's 3 TB/s) rather than raw FLOPS.
+The **KV Cache**[^fn-kv-cache-depth] grows linearly with sequence length ($O(N \cdot d)$, distinct from the $O(N^2)$ attention score matrix during training), storing the Key and Value vectors for all previous tokens to avoid recomputing them. For long contexts, this cache becomes massive (for example, 100+ GB), forcing the system to fetch the full cache from HBM for every generated token. As the GPT-2 Lighthouse quantified earlier, the arithmetic intensity is about 0.5 FLOPs/byte with FP32 weights or about 1 FLOP/byte with FP16 weights, explaining why serving LLMs requires massive HBM bandwidth (for example, H100's 3 TB/s) rather than raw FLOPS.
 
 [^fn-kv-cache-depth]: **KV Cache Memory Scaling**: For a 7B-parameter transformer in FP16, model weights consume ~14 GB. A single concurrent request's KV cache requires: 32 layers × 2 (K,V) × 32 heads × 2048 tokens × 128-dim head × 2 bytes ≈ 1.07 GB. At 8 concurrent users, KV cache alone (~8.6 GB) rivals the model weights—and grows linearly with both context length and concurrent users. Scaling serving throughput therefore requires grouped-query attention (fewer KV heads), shorter context windows, or KV offloading strategies. This is a memory systems constraint, not a model quality trade-off: the model is identical regardless of which memory strategy is chosen. \index{KV Cache!memory scaling}
 
@@ -3085,7 +3087,7 @@ fig, ax, COLORS, plt = viz.setup_plot(figsize=(10, 5))
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 data = [
     (2018, 512, "BERT"), (2019, 1024, "GPT-2"), (2020, 2048, "GPT-3"),
-    (2023.2, 32768, "GPT-4"), (2023.5, 100000, "Claude 2"), (2024.1, 1000000, "Gemini 1.5")
+    (2023.2, 128000, "GPT-4 Turbo"), (2023.5, 200000, "Claude 2.1"), (2024.1, 1000000, "Gemini 1.5")
 ]
 years = [d[0] for d in data]
 context = [d[1] for d in data]
@@ -3116,12 +3118,12 @@ label_styles = {
         "ha": "left",
         "va": "bottom",
     },
-    "GPT-4": {
+    "GPT-4 Turbo": {
         "xytext": (-7, -5),
         "ha": "right",
         "va": "bottom",
     },
-    "Claude 2": {
+    "Claude 2.1": {
         "xytext": (2, 6),
         "ha": "right",
         "va": "bottom",
@@ -3172,7 +3174,7 @@ ax.set_ylim(100, 5000000)
 ax.axhline(2000, linestyle='--', color=COLORS['grid'], alpha=0.5)
 ax.text(2017.8, 2600, "Standard Era (2k)", color=COLORS['grid'], fontsize=8, fontweight='semibold', bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.3))
 ax.axhline(100000, linestyle='--', color=COLORS['grid'], alpha=0.5)
-ax.text(2017.8, 130000, "RAG Era (100k)", color=COLORS['grid'], fontsize=8, fontweight='semibold', bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.3))
+ax.text(2017.8, 130000, "RAG Era (100k+)", color=COLORS['grid'], fontsize=8, fontweight='semibold', bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.3))
 plt.show()
 plt.close()
 ```
@@ -3655,7 +3657,7 @@ The portability of gating reinforces the central theme: the building blocks that
 
 ### Synthesis: How transformers recombine everything {#sec-network-architectures-modern-architectures-synthesis-unification-c816}
 
-The transformer is not a new invention so much as a masterful *recombination* of every building block discussed earlier. Tracing the components in any transformer block (@fig-example-skip-connection) reveals all four primitives working together:
+The transformer is not a new invention so much as a masterful *recombination* of every building block discussed earlier. A full transformer block combines the residual-path idea illustrated in @fig-example-skip-connection with dense projections, normalization, and attention gating:
 
 - **Dense operations (GEMM)**: MLP-style feedforward networks process features between attention layers
 - **Skip connections**: Residual paths wrap every sub-layer, enabling gradient flow through 100+ layer stacks
@@ -4211,7 +4213,7 @@ class EnergyConsumptionAnalysis:
     energy_dram_str = fmt(dram_pj, precision=0, commas=False)   # e.g. "26"
 ```
 
-Dense matrix operations in MLPs achieve excellent arithmetic intensity (computation per data movement) but consume significant absolute energy. Each multiply-accumulate operation consumes approximately `{python} EnergyConsumptionAnalysis.energy_mac_pj_str` pJ, while data movement from DRAM costs `{python} EnergyConsumptionAnalysis.energy_dram_str` pJ per 32-bit value [@horowitz2014]. Given this energy ratio, typical MLP inference spends the majority of its energy budget on data movement rather than computation, making memory bandwidth optimization critical for energy efficiency.
+Large batched GEMMs in MLPs can achieve excellent arithmetic intensity, but small-batch MLP inference often has low reuse and spends most of its energy on data movement. Each multiply-accumulate operation consumes approximately `{python} EnergyConsumptionAnalysis.energy_mac_pj_str` pJ, while data movement from DRAM costs `{python} EnergyConsumptionAnalysis.energy_dram_str` pJ per 32-bit value [@horowitz2014]. Given this energy ratio, typical MLP inference spends the majority of its energy budget on data movement rather than computation, making memory bandwidth optimization critical for energy efficiency.
 
 Convolutional operations reduce energy consumption through data reuse but exhibit variable efficiency depending on implementation. Im2col-based convolution implementations trade memory for simplicity, often doubling memory requirements and energy consumption. Direct convolution implementations can achieve substantially better energy efficiency by eliminating redundant data movement, particularly for larger kernel sizes where im2col duplication is most severe.
 
@@ -4235,11 +4237,11 @@ Successful architecture selection requires understanding principles rather than 
 
 ### Data-to-architecture mapping {#sec-network-architectures-datatoarchitecture-mapping-fddb}
 
-The first step in systematic architecture selection involves understanding how different data types align with architectural strengths. The architectural families introduced in @sec-network-architectures-architectural-principles-engineering-tradeoffs-362e provide the foundation: MLPs for tabular data with arbitrary relationships, CNNs for spatial data with local patterns, RNNs for sequential data with temporal dependencies, and transformers for complex relational data where any element might influence any other.
+The first step in systematic architecture selection involves understanding how different data types align with architectural strengths. The architectural families introduced in @sec-network-architectures-architectural-principles-engineering-tradeoffs-362e provide the foundation: MLPs for tabular data with arbitrary relationships, CNNs for spatial data with local patterns, RNNs for sequential data with temporal dependencies, transformers for complex relational data where any element might influence any other, and sparse embedding architectures such as DLRM for high-cardinality categorical recommendation data.
 
 This alignment is not coincidental; it reflects fundamental computational trade-offs. Architectures that match data characteristics can exploit natural structure for efficiency, while mismatched architectures must work against their design assumptions, leading to poor performance or excessive resource consumption.
 
-In practice, MLPs excel for financial modeling, medical measurements, and structured prediction where feature relationships are unknown a priori. CNNs dominate image recognition, 2D sensor processing, and signal analysis where spatial locality matters. RNNs remain useful for time-series forecasting and simple sequential tasks where memory across time is essential. Transformers have become the architecture of choice for language understanding, machine translation, and complex reasoning tasks [@wei2022cot] requiring long-range dependencies.
+In practice, MLPs excel for financial modeling, medical measurements, and structured prediction where feature relationships are unknown a priori. CNNs dominate image recognition, 2D sensor processing, and signal analysis where spatial locality matters. RNNs remain useful for time-series forecasting and simple sequential tasks where memory across time is essential. Transformers have become the architecture of choice for language understanding, machine translation, and complex reasoning tasks [@wei2022cot] requiring long-range dependencies. DLRM-style sparse architectures are the natural starting point for recommendation systems with user IDs, item IDs, and other high-cardinality categorical features whose embedding tables dominate memory capacity.
 
 Beyond data type matching, computational constraints often determine final feasibility. Understanding the scaling behavior of each architecture allows realistic resource planning and prevents costly architectural mismatches during deployment.
 
@@ -4322,9 +4324,9 @@ The complexity patterns detailed in each architecture's System Implications sect
 
 Effective architecture selection requires balancing multiple competing factors: data characteristics, computational resources, performance requirements, and deployment constraints. In practice, teams often make this choice based on familiarity ("we always use transformers") or trend-following ("the latest papers use X"), leading to architectures that are either overpowered for the problem (wasting resources) or underpowered (failing to meet requirements). While data patterns provide initial guidance and complexity analysis establishes feasibility bounds, final architectural choices often involve nuanced trade-offs demanding systematic evaluation.
 
-The decision flowchart in @fig-dnn-fm-framework proceeds from top to bottom: identify the data type, follow the branches to candidate architectures, then check each constraint diamond. If any check fails, the "No" path loops back for reconsideration. This iterative structure ensures consideration of all relevant factors while avoiding selection based on novelty or perceived sophistication.
+The decision flowchart in @fig-dnn-fm-framework proceeds from top to bottom: identify the data type, follow the branches to candidate dense architectures, then check each constraint diamond. For high-cardinality recommendation workloads, route first to the sparse embedding/DLRM family described earlier, then apply the same memory, compute, speed, accuracy, and deployment checks. If any check fails, the "No" path loops back for reconsideration. This iterative structure ensures consideration of all relevant factors while avoiding selection based on novelty or perceived sophistication.
 
-::: {#fig-dnn-fm-framework fig-env="figure" fig-pos="htb" fig-cap="**Architecture Selection Decision Framework**: A systematic flowchart for choosing neural network architectures based on data characteristics and deployment constraints. The process begins with data type identification (text/sequences/images/tabular) to select initial architecture candidates (Transformers/RNNs/CNNs/MLPs), then iteratively evaluates memory budget, computational cost, inference speed, accuracy targets, and hardware compatibility." fig-alt="Flowchart from Define Problem, branching by data type to Transformers, RNNs, CNNs, MLPs. Diamonds check memory, compute, speed, accuracy, deployment. Each 'No' loops back via Scale Down or Increase Capacity; each 'Yes' reaches Selected."}
+::: {#fig-dnn-fm-framework fig-env="figure" fig-pos="htb" fig-cap="**Architecture Selection Decision Framework**: A systematic flowchart for choosing dense neural network architectures based on data characteristics and deployment constraints. High-cardinality recommendation workloads route to sparse embedding architectures such as DLRM before applying the same constraint checks. The process begins with data type identification (text/sequences/images/tabular) to select initial architecture candidates (Transformers/RNNs/CNNs/MLPs), then iteratively evaluates memory budget, computational cost, inference speed, accuracy targets, and hardware compatibility." fig-alt="Flowchart from Define Problem, branching by data type to Transformers, RNNs, CNNs, MLPs. For high-cardinality recommendation data, use sparse embedding architectures such as DLRM before applying the same checks. Diamonds check memory, compute, speed, accuracy, deployment. Each No loops back via Scale Down or Increase Capacity; each Yes reaches Selected."}
 
 ```{.tikz}
 \scalebox{0.7}{\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
@@ -4601,7 +4603,7 @@ The input is spatial data (images from camera traps, typically $1920{\times}1080
 **Step 3**: Architecture evaluation using lighthouse benchmarks.
 Compare candidates against our Lighthouse models:
 
-- **ResNet-50** (`{python} LighthouseSpecs.resnet_params_m_str` M params, `{python} LighthouseSpecs.resnet_gflops_str` GFLOPs): Too large. At ~`{python} LighthouseSpecs.resnet_fp32_mb_str` MB FP32, leaves no room for OS and buffers. Power consumption would exceed budget.
+- **ResNet-50** (`{python} LighthouseSpecs.resnet_params_m_str` M params, `{python} LighthouseSpecs.resnet_gflops_str` GFLOPs): Too compute- and power-heavy for this device. At ~`{python} LighthouseSpecs.resnet_fp32_mb_str` MB FP32, it is also marginal against the ~100 MB model budget before quantization, activations, and runtime buffers. The main blockers are its GFLOP cost and power draw, not raw storage alone.
 - **MobileNetV1** (`{python} WildlifeModelSizing.mnv1_params_str` M params, `{python} WildlifeModelSizing.mnv1_flops_str` MFLOPs): Promising. ~`{python} WildlifeModelSizing.mnv1_fp32_str` MB at FP32, ~`{python} WildlifeModelSizing.mnv1_int8_str` MB quantized to INT8. Power-efficient depthwise separable convolutions.
 - **KWS DS-CNN** (`{python} WildlifeModelSizing.kws_example_params_str` K params, `{python} WildlifeModelSizing.kws_example_flops_str` MFLOPs): Too small. Designed for 12-class audio, insufficient capacity for 50 visual species.
 

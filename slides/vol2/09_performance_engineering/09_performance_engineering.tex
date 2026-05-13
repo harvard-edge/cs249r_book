@@ -1,5 +1,5 @@
 % =============================================================================
-% Chapter 10: Performance Engineering — ML Systems Lecture Slides (Vol II)
+% Chapter 9: Performance Engineering -- ML Systems Lecture Slides (Vol II)
 % =============================================================================
 % IMAGES NEEDED (generate SVGs, convert to PDF):
 %   - memory-wall.pdf          - roofline-model.pdf
@@ -13,29 +13,17 @@
 
 \mlsyssetup{
   volume       = {Volume II},
-  chapter      = {Chapter 10},
+  chapter      = {Chapter 9},
   logo         = {../../assets/img/logo-mlsysbook.png},
   instlogo     = {../../assets/img/logo-harvard.png},
   chaptertitle = {Performance Engineering},
 }
 
 % --- Fonts ---
-\usepackage{fontspec}
-\setsansfont{texgyreheros}[
-  Extension=.otf,
-  UprightFont=*-regular,
-  BoldFont=*-bold,
-  ItalicFont=*-italic,
-  BoldItalicFont=*-bolditalic,
-]
-\setmonofont{texgyrecursor}[
-  Extension=.otf,
-  UprightFont=*-regular,
-  BoldFont=*-bold,
-  ItalicFont=*-italic,
-  BoldItalicFont=*-bolditalic,
-  Scale=0.85,
-]
+\usepackage[T1]{fontenc}
+\usepackage[scaled=0.9]{helvet}
+\usepackage{courier}
+\renewcommand{\familydefault}{\sfdefault}
 
 % --- Packages ---
 \usepackage{booktabs}
@@ -81,9 +69,9 @@
 \begin{frame}{Learning Objectives}
 \note{
 % -- LINK: What prior concept connects to this slide
-Ch 9 built the serving system. This chapter makes every operation
-within it as fast as possible --- closing the gap between theoretical
-hardware peak and achieved throughput.
+Ch 8 orchestrated the fleet --- the right jobs on the right GPUs.
+This chapter makes each job use its assigned hardware efficiently,
+closing the gap between theoretical hardware peak and achieved throughput.
 
 % -- NARRATE: What to SAY while showing this slide
 Walk through objectives. Emphasize: ``Most GPUs run at 2--5\% of peak
@@ -208,7 +196,7 @@ The memory wall showed the bottleneck. This slide quantifies how it
 worsens with each GPU generation.
 
 % -- NARRATE: What to SAY while showing this slide
-Walk through the table: ``V100 to B200: 36x compute growth but only
+Walk through the table: ``V100 FP16 to B200 FP4: 36x headline tensor compute growth but only
 8.9x bandwidth growth. The ridge point --- where compute and bandwidth
 ceilings meet --- has grown from 139 to 563 FLOP/byte. Operations
 near 200 FLOP/byte were compute-bound on V100 but are memory-bound on
@@ -235,17 +223,20 @@ IF SHORT: Show only the table; skip the card.
 {\footnotesize
 \begin{tabular}{@{}lrrrr@{}}
   \toprule
-  \textbf{GPU} & \textbf{Year} & \textbf{FP16 (TFLOPS)} & \textbf{HBM BW (TB/s)} & \textbf{Ridge (FLOP/B)} \\
+  \textbf{GPU} & \textbf{Year} & \textbf{Tensor Peak} & \textbf{HBM BW (TB/s)} & \textbf{Ridge (FLOP/B)} \\
   \midrule
   V100 & 2017 & 125  & 0.9  & 139 \\
   A100 & 2020 & 312  & 2.0  & 156 \\
   H100 & 2022 & 989  & 3.35 & 295 \\
-  B200 & 2024 & 4,500 & 8.0  & 563 \\
+  B200 (FP4) & 2024 & 4,500 & 8.0  & 563 \\
   \bottomrule
 \end{tabular}
 }
 
-\vspace{0.2cm}
+\vspace{0.1cm}
+{\scriptsize\textcolor{midgray}{Peak values are precision-specific dense tensor-core examples; compare ridge points only after naming the precision used.}}
+
+\vspace{0.1cm}
 \begin{mlsyscard}{errorstroke}
 \textbf{36$\times$ compute growth} vs.\ \textbf{8.9$\times$ bandwidth growth} in 7 years.\\
 {\footnotesize More workloads become memory-bound with each generation. Fusion and precision engineering become \emph{more} important, not less.}
@@ -806,13 +797,13 @@ compilation. This exercise integrates them into a diagnostic workflow.
 ``A 70B LLM serves batch-1 decode on H100. AI = 2, ridge = 295.
 Achieved BW = 2.8 TB/s (84\% of peak). MFU = 2\%. Three questions:
 is it compute or memory bound? Name the top 3 optimizations in order.
-Would upgrading to B200 (2x FLOPS) help?'' Give 90 seconds.
+Would upgrading only compute help?'' Give 90 seconds.
 
 % -- ENGAGE: Specific question, prediction, or task for THIS slide
 Solution: Memory-bound (AI << ridge). Top 3: (1) INT4 quantization
 for 4x effective bandwidth, (2) FlashAttention for 65x attention
 HBM reduction, (3) torch.compile for 10--40\% from automated fusion.
-B200 has 2x FLOPS but the workload is BW-limited --- no help.
+More compute alone does not help because the workload is BW-limited.
 
 % -- WARN: What students will get wrong on THIS topic
 Students will suggest ``use larger batch size'' as first optimization.
@@ -841,7 +832,7 @@ IF SHORT: Give 45 seconds and reveal quickly.
     \vspace{0.05cm}
     \textbf{1.} Is this compute-bound or memory-bound?\\
     \textbf{2.} Name the top 3 optimizations \emph{in order}.\\
-    \textbf{3.} Would upgrading to B200 (2$\times$ FLOPS) help?
+    \textbf{3.} Would upgrading compute alone help?
 
     {\scriptsize\textcolor{midgray}{(90 seconds --- compare with a neighbor)}}
   \end{column}
@@ -853,7 +844,7 @@ IF SHORT: Give 45 seconds and reveal quickly.
     2. a) INT4 quant (4$\times$ BW)\\
     \quad b) FlashAttention (65$\times$)\\
     \quad c) torch.compile (10--40\%)\\[0.05cm]
-    3. B200 has $2\times$ FLOPS but workload is BW-limited. \textbf{No help.}
+    3. No. The workload is BW-limited, so extra FLOPS sit idle.
     }
     \end{mlsyscard}
   \end{column}
@@ -1237,7 +1228,7 @@ IF SHORT: Show the summary table and the 7.5x result.
 Students learned the roofline model and FlashAttention separately. This exercise connects them by showing how FlashAttention moves attention from memory-bound to compute-bound.
 
 % -- NARRATE: What to SAY while showing this slide
-Read the problem. Give 90 seconds. Solution: ``Naive attention: 2 reads of N-by-N matrix (Q*K and softmax*V) = 2 * 2048^2 * 2 bytes = 16 MB. Compute: 2 * 2048^2 * 128 FLOPs = 1.07 GFLOP. AI = 1.07G / 16M = 67 FLOP/byte --- memory-bound on H100 (ridge at 200). FlashAttention: tiles fit in SRAM, only reads Q, K, V once = 3 * 2048 * 128 * 2 = 1.5 MB. Same compute. AI = 1.07G / 1.5M = 713 FLOP/byte --- compute-bound. The same operation moved from below to above the ridge point.''
+Read the problem. Give 90 seconds. Solution: ``Naive attention: 2 reads of N-by-N matrix (Q*K and softmax*V) = 2 * 2048^2 * 2 bytes = 16 MB. Compute: 2 * 2048^2 * 128 FLOPs = 1.07 GFLOP. AI = 1.07G / 16M = 67 FLOP/byte --- memory-bound on H100 (ridge at 295). FlashAttention: tiles fit in SRAM, only reads Q, K, V once = 3 * 2048 * 128 * 2 = 1.5 MB. Same compute. AI = 1.07G / 1.5M = 713 FLOP/byte --- compute-bound. The same operation moved from below to above the ridge point.''
 
 % -- ENGAGE: Specific question, prediction, or task for THIS slide
 After revealing, ask: ``What happens to this analysis at sequence length 8192?'' Expected: naive AI stays similar (N^2 reads scale with N^2 compute), but FlashAttention AI grows linearly with N because reads scale as N while compute scales as N^2.
@@ -1261,7 +1252,7 @@ IF SHORT: Show the solution and emphasize the regime change.
     \begin{enumerate}
       \item \textbf{Naive:} HBM reads? Compute? AI?
       \item \textbf{FlashAttention:} HBM reads? AI?
-      \item H100 ridge point: $\sim$200 FLOP/byte.\\Which regime is each in?
+      \item H100 ridge point: $\sim$295 FLOP/byte.\\Which regime is each in?
     \end{enumerate}
 
     {\footnotesize\textcolor{midgray}{(90 seconds --- use the roofline model)}}
@@ -1453,16 +1444,16 @@ speculative decoding, DeepSeek for MoE at scale.''
 
 \end{frame}
 
-\begin{frame}{Next Lecture: Edge Intelligence}
+\begin{frame}{Next Lecture: Inference at Scale}
 \note{
 % -- NARRATE: What to SAY while showing this slide
-``Performance engineering optimizes within the datacenter. But what
-happens when the model must run on devices with 1,000x less memory and
-10,000x less compute? Edge Intelligence brings these constraints to
-the extreme. Every technique from today becomes a survival skill.''
+``Today we optimized individual operations and kernels. Next we put
+those optimized components into a production serving system, where
+request queues, batching, KV-cache memory, sharding, and tail latency
+decide whether the model is economically viable.''
 
 % -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] Forward hook plants the extreme-constraint question.
+[CORE] Forward hook connects kernel-level optimization to serving systems.
 }
 
 \footnotesize
@@ -1470,30 +1461,30 @@ the extreme. Every technique from today becomes a survival skill.''
   \begin{column}{0.30\textwidth}
     \centering
     \begin{mlsyscard}{computestroke}
-    {\large\bfseries Cloud}\\[0.1cm]
-    {\footnotesize 80 GB HBM\\989 TFLOPS\\700 W}
+    {\large\bfseries Cost}\\[0.1cm]
+    {\footnotesize Serving OpEx compounds\\over billions of requests}
     \end{mlsyscard}
   \end{column}
   \begin{column}{0.30\textwidth}
     \centering
     \begin{mlsyscard}{routingstroke}
-    {\large\bfseries Edge}\\[0.1cm]
-    {\footnotesize 32 GB LPDDR5\\100 TOPS\\15--40 W}
+    {\large\bfseries Batching}\\[0.1cm]
+    {\footnotesize Continuous admission\\under latency SLOs}
     \end{mlsyscard}
   \end{column}
   \begin{column}{0.30\textwidth}
     \centering
     \begin{mlsyscard}{errorstroke}
-    {\large\bfseries TinyML}\\[0.1cm]
-    {\footnotesize 384 KB SRAM\\0.5 GFLOPS\\100 mW}
+    {\large\bfseries KV Cache}\\[0.1cm]
+    {\footnotesize Memory pressure\\becomes the limiter}
     \end{mlsyscard}
   \end{column}
 \end{columns}
 
 \vspace{0.3cm}
 \centering
-{\normalsize When the model \emph{must} run where the data lives,}\\[0.1cm]
-{\small\textbf{every optimization technique from today becomes a survival skill.}}
+{\normalsize Kernel speed is necessary but not sufficient.}\\[0.1cm]
+{\small\textbf{Inference at Scale turns fast operations into a reliable service.}}
 
 \end{frame}
 
@@ -1526,7 +1517,7 @@ the extreme. Every technique from today becomes a survival skill.''
 \end{tabular}
 
 \vspace{0.1cm}
-{\footnotesize\textbf{H100 ridge point:} $\sim$200 FLOP/byte (FP16). Operations below this are memory-bound; optimizing compute will not help.}
+{\footnotesize\textbf{H100 ridge point:} $\sim$295 FLOP/byte (dense FP16). Operations below this are memory-bound; optimizing compute will not help.}
 
 \end{frame}
 

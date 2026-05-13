@@ -40,7 +40,7 @@ Bridging that gap requires a systematic discipline of *compression*: trading cap
 
 ::: {.callout-learning-objectives}
 
-- Explain the three-part optimization framework: model representation (pruning), numerical precision (quantization), and architectural efficiency (distillation and architecture search)
+- Explain the three-part optimization framework: model representation (pruning, distillation, architecture search), numerical precision (quantization), and architectural/hardware efficiency (fusion, sparsity exploitation, scheduling)
 - Compare quantization strategies in terms of memory reduction, energy consumption, and inference accuracy
 - Apply pruning techniques to reduce model parameters while quantifying the accuracy-sparsity trade-off
 - Implement knowledge distillation to transfer capabilities from large teacher models to efficient student architectures
@@ -141,7 +141,7 @@ Throughout this chapter, we ground each technique in concrete systems: ResNet-50
 ***Model Compression***\index{Model Compression!definition} is a family of techniques that reduce a trained model's computational cost and memory footprint by eliminating redundant parameters (pruning), reducing numerical precision (quantization), or transferring learned behavior into a smaller architecture (distillation), while preserving as much predictive accuracy as possible.
 
 1.  **Significance (quantitative)**: Compression directly reduces both iron law terms. INT8 quantization of a 175B-parameter large language model (LLM) cuts weight memory from 350 GB (FP16) to 175 GB—a 2$\times$ reduction in $D_{\text{vol}}$—while enabling Tensor Core INT8 paths that are 2$\times$ faster than FP16, yielding up to 4$\times$ combined throughput improvement. Unstructured pruning to 50 percent sparsity theoretically halves $O$, but hardware speedup only materializes when sparsity is structured (for example, 2:4 sparse) to match accelerator capabilities.
-2.  **Distinction (durable)**: Unlike neural architecture search, which discovers efficient architectures from scratch by exploring a design space, model compression starts from an existing trained model and reduces its cost post hoc—meaning the accuracy ceiling is bounded by the base model, and the compression ratio is constrained by the architecture's inherent redundancy.
+2.  **Distinction (durable)**: Unlike post-training compression methods such as pruning and quantization, neural architecture search discovers efficient architectures from scratch by exploring a design space. This chapter treats NAS as a related structural optimization technique: it changes the representation before training rather than compressing a finished model post hoc.
 3.  **Common pitfall**: A frequent misconception is that compression techniques compose without interference. In practice, applying quantization after pruning can amplify quantization error in near-zero weight regions that pruning left behind, causing accuracy degradation that neither technique produces alone.
 
 :::
@@ -2934,7 +2934,7 @@ class EnergyCosts:
 #### Energy costs {#sec-model-compression-energy-costs-d1d5}
 
 \index{DRAM!energy cost of access}
-Beyond computational and memory benefits, the energy costs associated with different numerical precisions reinforce the case for reduced precision. @fig-quantized-energy quantifies these energy differences: a 32-bit floating-point addition (FAdd) consumes approximately `{python} EnergyCosts.energy_add_fp32_str` pJ, whereas a 16-bit floating-point addition requires only `{python} EnergyCosts.energy_add_fp16_str` pJ. Similarly, a 32-bit integer addition costs `{python} EnergyCosts.energy_add_int32_str` pJ, while an 8-bit integer addition is just `{python} EnergyCosts.energy_add_int8_str` pJ. These savings compound across large-scale models operating over billions of operations, supporting both cost reduction and sustainability goals.
+Beyond computational and memory benefits, the energy costs associated with different numerical precisions reinforce the case for reduced precision. @fig-quantized-energy gives representative operation-level energy costs for integer arithmetic and SRAM reads: a 32-bit integer addition costs `{python} EnergyCosts.energy_add_int32_str` pJ, while an 8-bit integer addition is just `{python} EnergyCosts.energy_add_int8_str` pJ. Floating-point arithmetic follows the same direction: a 32-bit floating-point addition consumes approximately `{python} EnergyCosts.energy_add_fp32_str` pJ, whereas a 16-bit floating-point addition requires `{python} EnergyCosts.energy_add_fp16_str` pJ. These savings compound across large-scale models operating over billions of operations, supporting both cost reduction and sustainability goals.
 
 ```{python}
 #| label: energy-dividend-calc
@@ -2981,7 +2981,7 @@ class EnergyDividend:
     energy_dividend_str = f"{int(dividend)}"
 ```
 
-::: {#fig-quantized-energy fig-env="figure" fig-pos="htb" fig-cap="**Energy per Operation by Precision**: Bar chart comparing energy in picojoules for arithmetic operations (FP32 multiply: 3.7 pJ, INT8 add: 0.03 pJ) and SRAM memory accesses (5 to 50 pJ by cache size). Lower precision yields order-of-magnitude energy savings. Energy figures from [@horowitz2014]." fig-alt="Bar chart comparing energy consumption in picojoules for arithmetic operations and memory accesses. FP32 multiply uses 3.7 pJ, INT8 add uses 0.03 pJ. SRAM reads range from 5 to 50 pJ depending on cache size."}
+::: {#fig-quantized-energy fig-env="figure" fig-pos="htb" fig-cap="**Energy per Operation by Precision**: Bar chart comparing energy in picojoules for representative integer arithmetic operations (INT8 add: 0.03 pJ; INT32 multiply: 3.10 pJ) and SRAM memory accesses (5 to 50 pJ by cache size). Lower precision yields order-of-magnitude energy savings, while memory accesses can dominate arithmetic costs. Energy figures from [@horowitz2014]." fig-alt="Bar chart comparing energy consumption in picojoules for integer arithmetic operations and memory accesses. INT8 add uses 0.03 pJ, INT32 multiply uses 3.10 pJ, and SRAM reads range from 5 to 50 pJ depending on cache size."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
@@ -3105,7 +3105,7 @@ While DLRM operates at the terabyte scale, our Smart Doorbell Lighthouse faces t
 
 ::: {.callout-lighthouse title="The TinyML quantization imperative"}
 
-**The energy and storage constraint**: Our **Smart Doorbell Lighthouse** operates at the opposite extreme of the iron law from DLRM. While DLRM optimizes for terabyte-scale capacity, the Smart Doorbell's Keyword Spotting (KWS) model must operate within a 100 KB budget to run on a microcontroller with 256 KB RAM.
+**The energy and storage constraint**: Our **Smart Doorbell Lighthouse** operates at the opposite extreme of the iron law from DLRM. The deployment table used a roughly 512 KB TinyML capacity where the purpose-built 500 KB DS-CNN keyword spotter fits. A stricter smart-doorbell microcontroller with 256 KB SRAM leaves closer to 100 KB for model weights after runtime buffers, audio windows, and feature extraction state, motivating more aggressive INT4 or binary compression.
 
 In FP32, even the compact DS-CNN architecture consumes 4$\times$ more memory bandwidth and energy per inference than in INT8. For an always-on device running on a coin cell battery, this 4$\times$ energy difference translates directly to battery life: a device that lasts one month on FP32 might last four months on INT8. Here, quantization is the primary lever for the **Energy Term** $(O / (R_{\text{peak}} \cdot \eta_{\text{hw}}))$ of the iron law.
 
@@ -3894,7 +3894,7 @@ Binary/Ternary Networks Extreme Quantization};
 Post-training quantization\index{Post-Training Quantization!definition} (PTQ) reduces numerical precision after training, converting weights and activations from high-precision formats (FP32) to lower-precision representations (INT8\index{INT8!inference} or FP16\index{FP16!inference}) without retraining [@jacob2018]. This achieves smaller model sizes, faster computation, and reduced energy consumption, making it practical for resource-constrained environments such as mobile devices, edge AI systems, and cloud inference platforms [@wu2020integer].
 
 \index{Framework Toolkits!quantization support}
-PTQ's key advantage is low computational cost: it requires no retraining or access to training data. However, reducing precision introduces quantization error\index{Quantization!error} that can degrade accuracy, especially for tasks requiring fine-grained numerical precision. Machine learning frameworks such as TensorFlow Lite, Open Neural Network Exchange (ONNX) Runtime, and PyTorch provide built-in PTQ support.
+PTQ's key advantage is low computational cost: it requires no retraining and usually no labeled training set, although activation calibration typically needs a small representative calibration dataset. However, reducing precision introduces quantization error\index{Quantization!error} that can degrade accuracy, especially for tasks requiring fine-grained numerical precision. Machine learning frameworks such as TensorFlow Lite, Open Neural Network Exchange (ONNX) Runtime, and PyTorch provide built-in PTQ support.
 
 ##### PTQ functionality {#sec-model-compression-ptq-functionality-bd56}
 
@@ -4503,9 +4503,9 @@ With granularity determined, the next consideration is what to quantize. Neural 
 ##### Weights vs. activations {#sec-model-compression-weights-vs-activations-5efb}
 
 \index{Quantization!weight vs. activation}
-Weight Quantization\index{Quantization!weight} involves converting the continuous, high-precision weights of a model into lower-precision values, such as converting 32-bit floating-point (Float32) weights to 8-bit integer (INT8) weights. In @fig-weight-activations-quantization, focus on the second step (red squares) to see where weight quantization enters the multiply-accumulate pipeline. This process significantly reduces the model size, decreasing both the memory required to store the model and the computational resources needed for inference. For example, a weight matrix in a neural network layer with Float32 weights like $[0.215, -1.432, 0.902,\ldots]$ might be mapped to INT8 values such as $[27, -183, 115, \ldots]$, leading to a significant reduction in memory usage.
+Weight Quantization\index{Quantization!weight} involves converting the continuous, high-precision weights of a model into lower-precision values, such as converting 32-bit floating-point (Float32) weights to 8-bit integer (INT8) weights. In @fig-weight-activations-quantization, focus on the violet quantization boxes that feed INT8 operands into the matrix multiplication; the red boxes show accumulator and output tensors after the multiply-accumulate path. This process significantly reduces the model size, decreasing both the memory required to store the model and the computational resources needed for inference. For example, a weight matrix in a neural network layer with Float32 weights like $[0.215, -1.432, 0.902,\ldots]$ might be mapped with a max-absolute INT8 scale to values such as $[19, -127, 80,\ldots]$, leading to a significant reduction in memory usage.
 
-::: {#fig-weight-activations-quantization fig-env="figure" fig-pos="htb" fig-cap="**Quantization and Weight Precision**: Color-coded matrix multiplication diagram showing three steps: blue squares represent input activations, red squares represent quantized weights, and green squares represent output activations. Reducing precision from float32 to INT8 lowers model size and computational cost at the potential expense of accuracy. From the HarvardX TinyML course." fig-alt="Matrix multiplication diagram with three steps. Blue squares show input activations, red squares show quantized weights, and green squares show output activations. Arrows indicate computation flow through multiply-accumulate operations."}
+::: {#fig-weight-activations-quantization fig-env="figure" fig-pos="htb" fig-cap="**Quantization and Weight Precision**: Color-coded matrix multiplication pipeline. Violet boxes quantize floating-point operands to INT8 before the blue matrix multiplication block, red boxes show accumulator and output tensors, and the green block requantizes before activation. Reducing precision from float32 to INT8 lowers model size and computational cost at the potential expense of accuracy. From the HarvardX TinyML course." fig-alt="Matrix multiplication diagram. Violet boxes quantize floating-point inputs to INT8 before matrix multiplication, a blue block performs the multiplication, red boxes show intermediate and final output tensors, and a green block requantizes before activation."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
@@ -5703,7 +5703,7 @@ $$
 \begin{bmatrix} 2x_1 + x_4 \\ 3x_2 \\ 4x_1 + 5x_3 \\ 6x_4 \end{bmatrix}
 $$
 
-A third important technique for exploiting sparsity is low-rank approximation. In this approach, large, dense weight matrices are approximated by smaller, lower-rank matrices that capture the most important information while discarding redundant components. This reduces both the storage requirements and computational cost. For instance, a weight matrix of size $1000{\times}1000$ with one million parameters can be factorized into two smaller matrices, say $U$ (size $1000{\times}50$) and $V$ (size $50{\times}1000$), which results in only 100,000 parameters, much fewer than the original one million. This smaller representation retains the key features of the original matrix while significantly reducing the computational burden [@Denton2014].
+A related structured-compression technique is low-rank approximation. Unlike sparsity exploitation, which skips literal zero-valued weights, low-rank approximation replaces a dense matrix with two smaller dense factors that capture the most important information while discarding redundant components. This reduces both the storage requirements and computational cost. For instance, a weight matrix of size $1000{\times}1000$ with one million parameters can be factorized into two smaller matrices, say $U$ (size $1000{\times}50$) and $V$ (size $50{\times}1000$), which results in only 100,000 parameters, much fewer than the original one million. This smaller representation retains the key features of the original matrix while significantly reducing the computational burden [@Denton2014].
 
 Low-rank approximations, particularly Singular Value Decomposition, compress weight matrices in neural networks by discarding low-energy singular values. Recommendation systems and natural language processing models use these approximations extensively to reduce computational complexity and memory usage without significant performance loss [@joulin2017].
 
@@ -6855,13 +6855,13 @@ Understanding how system constraints map to optimization dimensions guides pract
 
 | **System Constraint**      | **Model Representation** | **Numerical Precision** | **Architectural Efficiency** |
 |:---------------------------|:------------------------:|:-----------------------:|:----------------------------:|
-| **Computational Cost**     |            ✗             |            ✓            |              ✓               |
+| **Computational Cost**     |            ✓             |            △            |              ✓               |
 | **Memory and Storage**     |            ✓             |            ✓            |              ✗               |
 | **Latency and Throughput** |            ✓             |            △            |              ✓               |
-| **Energy Efficiency**      |            ✗             |            ✓            |              ✓               |
+| **Energy Efficiency**      |            ✓             |            ✓            |              ✓               |
 | **Scalability**            |            ✓             |            ✗            |              ✓               |
 
-: **Optimization Dimensions**: System constraints drive optimization along three core dimensions: model representation, numerical precision, and architectural efficiency, each addressing different resource limitations and performance goals. The latency and throughput row marks numerical precision as △ (hardware-dependent): low-precision integer arithmetic delivers near-linear speedups on accelerators with INT8/INT4 tensor units (NVIDIA Tensor Cores from Turing onward, mobile NPUs), but not on hardware that lacks them, where dequantization overhead can erase the gain. {#tbl-constraint-opt-mapping}
+: **Optimization Dimensions**: System constraints drive optimization along three core dimensions: model representation, numerical precision, and architectural efficiency, each addressing different resource limitations and performance goals. △ marks hardware-dependent benefits: low-precision integer arithmetic delivers near-linear speedups on accelerators with INT8/INT4 tensor units (NVIDIA Tensor Cores from Turing onward, mobile NPUs), but not on hardware that lacks them, where dequantization overhead can erase the gain. {#tbl-constraint-opt-mapping}
 
 Although each system constraint primarily aligns with one or more optimization dimensions, the relationships are not strictly one-to-one. Many optimization techniques affect multiple constraints simultaneously. Structuring model optimization along these three dimensions allows practitioners to analyze trade-offs more effectively and select optimizations that best align with deployment requirements.
 
@@ -7090,7 +7090,7 @@ Sequencing critically impacts results, as the following example demonstrates.
 
 ::: {.callout-example title="BERT-Base mobile deployment pipeline"}
 
-Consider deploying BERT-Base on mobile devices through three stages. **Stage one** applies structured pruning, removing 30 percent of attention heads and 40 percent of intermediate FFN dimensions, resulting in 75 percent parameter reduction with accuracy dropping from 76.2 percent to 75.1 percent. **Stage two** uses knowledge distillation to recover accuracy to 75.9 percent. **Stage three** applies quantization-aware training with INT8 quantization, achieving 4$\times$ additional memory reduction with final accuracy of 75.6 percent. The combined impact: 16$\times$ memory reduction (440 MB to 28 MB), 12$\times$ inference speedup on mobile CPU, and only 0.6 percent final accuracy loss vs. 2.1 percent if quantization had been applied before pruning.
+Consider deploying BERT-Base on mobile devices through three stages. **Stage one** applies structured architectural pruning: removing 30 percent of attention heads, trimming 40 percent of intermediate FFN dimensions, and reducing depth and hidden width to a compact BERT variant. The full structural recipe yields a 75 percent parameter reduction, with accuracy dropping from 76.2 percent to 75.1 percent. **Stage two** uses knowledge distillation from the original teacher to recover accuracy to 75.9 percent. **Stage three** applies quantization-aware training with INT8 quantization, achieving 4$\times$ additional memory reduction with final accuracy of 75.6 percent. The combined impact: 16$\times$ memory reduction (440 MB to 28 MB), 12$\times$ inference speedup on mobile CPU, and only 0.6 percent final accuracy loss vs. 2.1 percent if quantization had been applied before pruning.
 
 :::
 
@@ -7900,7 +7900,7 @@ Teams apply post-training quantization (PTQ) to avoid retraining and achieve 96.
 
 **Pitfall**: *Assuming compression ratios translate directly into proportional deployment gains.*
 
-Teams achieve `{python} FallaciesAnalysis.int8_size_reduction_str`$\times$ model size reduction through INT8 quantization and expect `{python} FallaciesAnalysis.int8_size_reduction_str`$\times$ memory savings in deployment. In practice, runtime overhead erodes compression gains. Dequantization kernels add `{python} FallaciesAnalysis.dequant_overhead_str` percent latency overhead converting INT8 weights back to FP16. Pruned models with irregular sparsity achieve only 12 percent latency reduction despite `{python} FallaciesAnalysis.param_removal_str` percent parameter removal because hardware cannot skip zeroed weights efficiently. As @sec-model-compression-profiling-opportunity-analysis-477f demonstrates, a BERT model pruned to 50 percent sparsity and quantized to INT8 achieves `{python} FallaciesAnalysis.actual_speedup_str` percent end-to-end speedup rather than the expected `{python} FallaciesAnalysis.expected_speedup_str`$\times$, because unstructured sparsity creates irregular memory access. Production workflows must profile *deployed* latency on target hardware, not extrapolate from compression ratios.
+Teams achieve `{python} FallaciesAnalysis.int8_size_reduction_str`$\times$ model size reduction through INT8 quantization and expect `{python} FallaciesAnalysis.int8_size_reduction_str`$\times$ memory savings in deployment. In practice, runtime overhead erodes compression gains. Dequantization kernels add `{python} FallaciesAnalysis.dequant_overhead_str` percent latency overhead converting INT8 weights back to FP16. Pruned models with irregular sparsity achieve only 12 percent latency reduction despite `{python} FallaciesAnalysis.param_removal_str` percent parameter removal because hardware cannot skip zeroed weights efficiently. As @sec-model-compression-profiling-opportunity-analysis-477f demonstrates, a BERT model pruned to 50 percent sparsity and quantized to INT8 achieves only a `{python} FallaciesAnalysis.actual_speedup_str` percent end-to-end improvement, or about 1.28$\times$ throughput, rather than the expected `{python} FallaciesAnalysis.expected_speedup_str`$\times$ theoretical speedup, because unstructured sparsity creates irregular memory access. Production workflows must profile *deployed* latency on target hardware, not extrapolate from compression ratios.
 
 ## Summary {#sec-model-compression-summary-8229}
 

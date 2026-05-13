@@ -184,6 +184,14 @@ on:
           - 'vol1'
           - 'vol2'
         default: 'all'
+      skip_version:
+        description: 'Skip the version bump? When yes, the merge to main, full build (HTML/PDF/EPUB), and gh-pages deploy all run normally, but the doi rewrite, tag creation, release-notes generation, and GitHub Release creation are skipped. Use this for post-release content tweaks where the version should stay at its current value.'
+        required: false
+        type: choice
+        options:
+          - 'no'
+          - 'yes'
+        default: 'no'
   workflow_call:
     inputs:
       description:
@@ -225,6 +233,10 @@ on:
         type: string
         required: false
         default: 'all'
+      skip_version:
+        type: string
+        required: false
+        default: 'no'
 
 permissions:
   contents: write
@@ -581,6 +593,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: 🛡️ No-downgrade guard (per-volume)
+        if: inputs.skip_version != 'yes'
         env:
           # Step `run:` blocks don't inherit shell variables across steps;
           # surface the per-volume outputs as env so the guard can read them.
@@ -844,7 +857,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: [validate-inputs, pre-flight-checks]
-    if: inputs.confirm == 'PUBLISH' && inputs.testing_mode != 'yes'
+    if: inputs.confirm == 'PUBLISH' && inputs.testing_mode != 'yes' && inputs.skip_version != 'yes'
 
     steps:
       - name: 📥 Checkout repository
@@ -930,7 +943,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [validate-inputs, pre-flight-checks, update-version]
-    if: inputs.confirm == 'PUBLISH' && inputs.testing_mode != 'yes'
+    if: |
+      always()
+      && inputs.confirm == 'PUBLISH'
+      && inputs.testing_mode != 'yes'
+      && needs.validate-inputs.result == 'success'
+      && needs.pre-flight-checks.result == 'success'
+      && (needs.update-version.result == 'success' || needs.update-version.result == 'skipped')
 
     steps:
       - name: 📥 Checkout repository
@@ -1102,7 +1121,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: [validate-inputs, download-and-deploy-artifacts]
-    if: inputs.confirm == 'PUBLISH' && inputs.testing_mode != 'yes'
+    if: inputs.confirm == 'PUBLISH' && inputs.testing_mode != 'yes' && inputs.skip_version != 'yes'
 
     steps:
       - name: 📥 Checkout repository
@@ -1504,43 +1523,10 @@ jobs:
             fi
           fi
 
-          # =================================================================
-          # Deploy Landing Page to root (if target is all)
-          # =================================================================
-          if [[ "$DEPLOY_TARGET" == "all" ]]; then
-            LANDING_BUILD="${{ github.workspace }}/site/landing/_build"
-            if [ -f "$LANDING_BUILD/index.html" ]; then
-              echo "📦 Deploying rendered landing page to root..."
-              # Copy all landing page output (HTML, CSS, JS, covers, assets)
-              # but preserve existing subsite directories. The skip list
-              # includes both the new top-level volume paths and the legacy
-              # /book/ tree (the single-volume textbook stays untouched here;
-              # cutover to a chooser is a separate step post-release).
-              SKIP_DIRS_REGEX="^($VOL1_PATH|$VOL2_PATH|book|kits|tinytorch|labs|mlsysim|slides|instructors|interviews|about|community|newsletter)$"
-              for item in "$LANDING_BUILD"/*; do
-                basename="$(basename "$item")"
-                # Skip site_libs — the gh-pages root already has its own from the book
-                if [[ "$basename" == "site_libs" ]]; then continue; fi
-                # Skip files that would conflict with subsite directories
-                if [[ -d "$basename" ]] && [[ "$basename" =~ $SKIP_DIRS_REGEX ]]; then
-                  continue
-                fi
-                cp -r "$item" .
-              done
-              echo "✅ Landing page deployed to root"
-            else
-              echo "⚠️ Landing page build not found — creating redirect to /$VOL1_PATH/"
-              DOMAIN="${{ vars.PRODUCTION_DOMAIN || 'https://mlsysbook.ai' }}"
-              printf '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="0;url=/%s/"><link rel="canonical" href="%s/%s/"><title>Redirecting...</title></head><body><p>Redirecting to <a href="/%s/">ML Systems Volume I</a>...</p></body></html>\n' "$VOL1_PATH" "$DOMAIN" "$VOL1_PATH" "$VOL1_PATH" > index.html
-            fi
-          else
-            # For non-all deployments, keep existing root or create redirect
-            if [ ! -f "index.html" ]; then
-              echo "📦 Creating root redirect to /$VOL1_PATH/..."
-              DOMAIN="${{ vars.PRODUCTION_DOMAIN || 'https://mlsysbook.ai' }}"
-              printf '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="0;url=/%s/"><link rel="canonical" href="%s/%s/"><title>Redirecting...</title></head><body><p>Redirecting to <a href="/%s/">ML Systems Volume I</a>...</p></body></html>\n' "$VOL1_PATH" "$DOMAIN" "$VOL1_PATH" "$VOL1_PATH" > index.html
-            fi
-          fi
+          # Root landing page (mlsysbook.ai/) is owned by site-publish-live.yml.
+          # This workflow only deploys /$VOL1_PATH/ and /$VOL2_PATH/; it must
+          # not write a root index.html (doing so would clobber the landing
+          # page that site-publish-live.yml is responsible for).
 
           # Ensure CNAME file exists at root for custom domain
           if [ ! -f "CNAME" ]; then
@@ -1704,7 +1690,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [validate-inputs, download-and-deploy-artifacts]
-    if: inputs.confirm == 'PUBLISH' && inputs.testing_mode != 'yes'
+    if: inputs.confirm == 'PUBLISH' && inputs.testing_mode != 'yes' && inputs.skip_version != 'yes'
 
     steps:
       - name: 📥 Checkout repository
@@ -1985,7 +1971,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: [validate-inputs, generate-release-notes, create-tag]
-    if: inputs.confirm == 'PUBLISH' && inputs.testing_mode != 'yes'
+    if: inputs.confirm == 'PUBLISH' && inputs.testing_mode != 'yes' && inputs.skip_version != 'yes'
 
     steps:
       - name: 📥 Checkout repository
@@ -2129,7 +2115,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: [validate-inputs, create-release]
-    if: inputs.confirm == 'PUBLISH' && inputs.testing_mode != 'yes'
+    if: |
+      always()
+      && inputs.confirm == 'PUBLISH'
+      && inputs.testing_mode != 'yes'
+      && needs.validate-inputs.result == 'success'
+      && (needs.create-release.result == 'success' || needs.create-release.result == 'skipped')
 
     steps:
       - name: 📋 Publication Summary

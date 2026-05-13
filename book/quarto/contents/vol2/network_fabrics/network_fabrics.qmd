@@ -269,9 +269,9 @@ plt.close()
 
 @fig-bandwidth-hierarchy reveals that the NVLink-to-InfiniBand ratio has remained between 12$\times$ and 25$\times$ across four GPU generations, despite absolute bandwidth improvements at every tier. The persistent cliff reflects fundamental physics: on-package interconnects (NVLink) operate over millimeters of copper, while inter-node links (InfiniBand) span meters of cable and must traverse switches. The ratio determines which parallelism strategies are efficient. Tensor parallelism, which requires continuous high-bandwidth exchange of activations, is viable within a node but impractical across nodes. Pipeline and data parallelism, which tolerate lower inter-node bandwidth, must carry the burden of cross-node communication. Every topology and protocol decision in the remainder of this chapter attempts to minimize the impact of this hierarchy on collective communication performance.
 
-To see *why* this ratio matters so viscerally, consider *what* happens during a single training step. @fig-bandwidth-cliff-gantt contrasts the timeline for an 8-GPU job communicating within a node vs. a 64-GPU job communicating across nodes.
+To see *why* this ratio matters so viscerally, consider *what* happens during a single training step. @fig-bandwidth-cliff-gantt uses a normalized timeline: the compute phases are held fixed at 100 ms, and the AllReduce block represents a small gradient shard chosen to make the intra-node and inter-node contrast visible. It is not the full 175B-parameter gradient exchange; it isolates how crossing the node boundary changes utilization.
 
-::: {#fig-bandwidth-cliff-gantt fig-env="figure" fig-pos="htb" fig-cap="**The Bandwidth Cliff in a Training Step**: Two timelines for the same model: an 8-GPU intra-node job (top) using NVLink at 900 GB/s, and a 64-GPU inter-node job (bottom) using InfiniBand at 50 GB/s. The AllReduce phase (red) grows from a thin sliver to a dominant fraction of the step. Without communication--computation overlap, GPUs sit idle during the entire AllReduce, and the utilization gap between the two scenarios exceeds 10 percentage points." fig-alt="Two horizontal Gantt bars. Top bar shows forward pass, backward pass, and thin AllReduce sliver at 99.5 percent utilization. Bottom bar shows same compute phases but a wide AllReduce block dropping utilization to 87.8 percent."}
+::: {#fig-bandwidth-cliff-gantt fig-env="figure" fig-pos="htb" fig-cap="**The Bandwidth Cliff in a Training Step**: Illustrative normalized timelines for the same compute phases: an 8-GPU intra-node job (top) using NVLink at 900 GB/s, and a 64-GPU inter-node job (bottom) using InfiniBand at 50 GB/s. The AllReduce phase (red) grows from a thin sliver to a dominant fraction of the step. Without communication--computation overlap, GPUs sit idle during the entire AllReduce, and the utilization gap between the two scenarios exceeds 10 percentage points." fig-alt="Two illustrative horizontal Gantt bars. Top bar shows forward pass, backward pass, and thin AllReduce sliver at 99.5 percent utilization. Bottom bar shows the same compute phases but a wider AllReduce block dropping utilization to about 87 percent."}
 
 ```{.tikz}
 \usetikzlibrary{positioning, decorations.pathreplacing}
@@ -578,7 +578,7 @@ For NDR InfiniBand with $\alpha \approx$ `{python} NetworkAlphaBeta.ib_alpha_us_
 
 ::: {.callout-notebook title="The alpha-beta crossover"}
 
-**Problem**: A fabric designer is comparing InfiniBand NDR (`{python} NetworkAlphaBeta.ib_alpha_us_str` $\mu s$, `{python} NetworkAlphaBeta.ib_beta_gbs_str` GB/s) against a slower Ethernet baseline (5.0 $\mu s$, 12.5 GB/s). At what message size does the faster link's bandwidth advantage finally outweigh its higher cost?
+**Problem**: A fabric designer is comparing InfiniBand NDR (`{python} NetworkAlphaBeta.ib_alpha_us_str` $\mu s$, `{python} NetworkAlphaBeta.ib_beta_gbs_str` GB/s) against a slower Ethernet baseline (5.0 $\mu s$, 12.5 GB/s). For a 4 KB control message and a 100 MB gradient shard, which part of $T(n)=\alpha+n/\beta$ dominates, and why does the faster fabric help for different reasons in each regime?
 
 **Math**:
 Apply $T(n) = \alpha + n/\beta$ for a 4 KB control message and a 100 MB gradient shard.
@@ -738,7 +738,7 @@ class AllReduceBottleneck:
     flops_per_sample_base = 5e13 # Realistic per-GPU compute for ~100ms iteration
 
     alpha_s = 1.5e-6 # NDR InfiniBand hop latency
-    beta_gbs = (INFINIBAND_NDR_BW / 8).m_as(GB/second)
+    beta_gbs = INFINIBAND_NDR_BW.m_as(GB/second)
 
     params_small = 1e9
     params_large = 70e9
@@ -781,7 +781,7 @@ class AllReduceBottleneck:
 **Setup**\index{Setup}: A cluster of 1,024 H100 GPUs training a model with 1 billion parameters (4 GB of FP32 gradients). Each GPU computes at `{python} NetworkFabricsContextScenario.h100_tflops` TFLOPS. The network uses NDR InfiniBand (`{python} AllReduceBottleneck.alpha_math` and `{python} AllReduceBottleneck.beta_math` per link).
 
 **Step 1**: Compute time per iteration.
-Assume each GPU processes a microbatch requiring $2 \times 10^{18}$ FLOPs (a rough estimate for a forward plus backward pass on a large batch). At `{python} NetworkFabricsContextScenario.h100_tflops` TFLOPS with 50 percent utilization:
+Assume each GPU processes a synthetic microbatch requiring $5 \times 10^{13}$ FLOPs, chosen to produce an approximately 100 ms compute phase for this bottleneck example. At `{python} NetworkFabricsContextScenario.h100_tflops` TFLOPS with 50 percent utilization:
 
 `{python} AllReduceBottleneck.t_comp_display_math`
 
@@ -793,13 +793,13 @@ With $N = 1{,}024$ and $M = 4 \times 10^9$ bytes:
 **Step 3**: Communication fraction.
 `{python} AllReduceBottleneck.comm_frac_display_math`
 
-With overlap between communication and computation (possible because the backward pass produces gradients layer by layer), the effective overhead can be reduced further. The network is not the bottleneck for this configuration.
+With overlap between communication and computation (possible because the backward pass produces gradients layer by layer), the effective overhead can be reduced, but the network is already a major contributor to iteration time for this configuration.
 
 **When does it become the bottleneck?** If we scale to 70 billion parameters (280 GB of gradients) and the per-GPU computation stays similar (through batch size scaling), the bandwidth term alone becomes:
 
 `{python} AllReduceBottleneck.t_ring_70b_display_math`
 
-Now communication dominates computation by nearly 3$\times$. Our 175B model, at 2.5$\times$ this scale, would be even more severely bottlenecked by pure data parallelism. Models beyond a few billion parameters therefore require tensor and pipeline parallelism to partition the model, rather than relying solely on data parallelism, which must AllReduce the full gradient vector.
+Now communication dominates computation by more than 100$\times$ under pure data parallelism. Our 175B model, at 2.5$\times$ this scale, would be even more severely bottlenecked. Models beyond a few billion parameters therefore require tensor and pipeline parallelism to partition the model, rather than relying solely on data parallelism, which must AllReduce the full gradient vector.
 
 :::
 
@@ -951,7 +951,7 @@ class BisectionScaling:
 
 ::: {.callout-notebook title="Bisection bandwidth: The cost of oversubscription"}
 
-**Problem**: A cluster designer is choosing between a "Non-blocking" (1:1) fat-tree and a "Cost-optimized" (4:1) spine for a `{python} BisectionScaling.bbs_n_gpus_str`-GPU cluster. How much slower will a `{python} BisectionScaling.bbs_gradient_gb_str` GB AllReduce be on the cheaper network?
+**Problem**: A cluster designer is choosing between a "Non-blocking" (1:1) fat-tree and a "Cost-optimized" (4:1) spine for a `{python} BisectionScaling.bbs_n_gpus_str`-GPU cluster. How much slower will a `{python} BisectionScaling.bbs_gradient_gb_str` GB-per-GPU AllReduce be on the cheaper network?
 
 **Math**:
 Bisection bandwidth ($\text{BW}_{\text{bisect}}$) is the minimum pipe diameter between halves of the cluster.
@@ -996,7 +996,7 @@ As @fig-rail-optimized-cabling shows, in modern ML nodes GPUs are partitioned in
 
 The wiring pattern in @fig-rail-optimized-cabling ensures that same-rank inter-node communication between corresponding GPUs (GPU 0 to GPU 0, GPU 1 to GPU 1) travels over a dedicated rail switch rather than competing for shared ToR bandwidth. In standard 3D parallelism with tensor parallelism confined intra-node, this same-rank traffic is the data-parallel AllReduce path, eliminating cross-traffic congestion on the gradient-synchronization critical path.
 
-In distributed training, data parallelism\index{Data Parallelism} creates a deterministic and highly stratified communication pattern that standard topologies fail to exploit. Because large models partition individual matrix multiplications across GPUs, GPU 0 on one node must frequently exchange gradients with GPU 0 on other nodes, but rarely with GPU 1. A **rail-optimized topology** physically hardwires this logic by isolating these communication paths into dedicated networks. Instead of connecting all 8 GPUs in a node to a single ToR switch, the network connects all GPU 0s across the entire cluster to a dedicated "Rail 0" switch fabric, all GPU 1s to "Rail 1," and so on.
+In distributed training, data parallelism\index{Data Parallelism} creates a deterministic and highly stratified communication pattern that standard topologies fail to exploit. When tensor-parallel groups stay inside each node, the same local GPU rank in every replica owns the corresponding shard of the model. GPU 0 on one node therefore synchronizes that shard's gradients with GPU 0 on other nodes, but rarely with GPU 1. A **rail-optimized topology** physically hardwires this logic by isolating these same-rank communication paths into dedicated networks. Instead of connecting all 8 GPUs in a node to a single ToR switch, the network connects all GPU 0s across the entire cluster to a dedicated "Rail 0" switch fabric, all GPU 1s to "Rail 1," and so on.
 
 ```{python}
 #| label: rail-optimized-latency-notebook
@@ -1123,8 +1123,9 @@ class BisectionBottleneck:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    num_gpus = 1024
     num_nodes = 128
-    injection_bw_gbs = (INFINIBAND_NDR_BW / 8).m_as(GB/second)
+    injection_bw_gbs = INFINIBAND_NDR_BW.m_as(GB/second)
     gradient_size_gb = 100
     oversub_ratio_b = 4
     cluster_cost_m = 300
@@ -1132,12 +1133,12 @@ class BisectionBottleneck:
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Bisection bandwidth (aggregate across the cut)
-    total_bisec_bw_a = num_nodes * injection_bw_gbs
+    total_bisec_bw_a = num_gpus * injection_bw_gbs
     total_bisec_bw_b = total_bisec_bw_a/oversub_ratio_b
 
     # Step 2: Time = Data/Bandwidth
-    # In AllReduce, the total data crossing the bisection is num_nodes * gradient_size_gb
-    total_data_crossing_bisection = num_nodes * gradient_size_gb
+    # In this simplified model, each GPU contributes one gradient shard to the global exchange.
+    total_data_crossing_bisection = num_gpus * gradient_size_gb
     time_a_s = total_data_crossing_bisection/total_bisec_bw_a
     time_b_s = total_data_crossing_bisection/total_bisec_bw_b
 
@@ -1156,13 +1157,13 @@ class BisectionBottleneck:
     waste_m = f"{waste_val:.0f}"
 ```
 
-**Problem**: A cluster has 1,024 accelerators across 128 nodes. Each node has `{python} NetworkFabricsContextScenario.ib_ndr_gbps` Gb/s (`{python} NetworkFabricsContextScenario.ib_ndr_gbs` GB/s) injection bandwidth. An AllReduce job requires full bisection bandwidth.
+**Problem**: A cluster has 1,024 accelerators across 128 nodes. Each accelerator has `{python} NetworkFabricsContextScenario.ib_ndr_gbps` Gb/s (`{python} NetworkFabricsContextScenario.ib_ndr_gbs` GB/s) network injection bandwidth. An AllReduce job requires full bisection bandwidth.
 
-**Scenario A (non-blocking fat-tree)**: 1:1 oversubscription ratio. Bisection bandwidth = $128 \times 50 = 6{,}400$ GB/s = 6.4 TB/s.
+**Scenario A (non-blocking fat-tree)**: 1:1 oversubscription ratio. Bisection bandwidth = $1{,}024 \times 50 = 51{,}200$ GB/s = 51.2 TB/s.
 
-**Scenario B (cost-optimized)**: 4:1 oversubscription at the spine layer. Bisection bandwidth = $6{,}400/4 = 1{,}600$ GB/s = 1.6 TB/s.
+**Scenario B (cost-optimized)**: 4:1 oversubscription at the spine layer. Bisection bandwidth = $51{,}200/4 = 12{,}800$ GB/s = 12.8 TB/s.
 
-**Calculation**: Suppose the AllReduce must exchange 100 GB of gradient data (approximately 25 billion FP32 parameters).
+**Calculation**: Suppose the AllReduce must exchange 100 GB of gradient data per accelerator, or 102,400 GB across the cluster in this simplified bisection model.
 
 - Time on Scenario A: `{python} BisectionBottleneck.time_a_ms` ms
 - Time on Scenario B: `{python} BisectionBottleneck.time_b_ms` ms
@@ -1268,7 +1269,7 @@ class PfcStormRisk:
 
 :::
 
-A simple probability calculation shows that such incidents are not rare edge cases but daily operational realities at scale.
+A simple probability calculation shows that such incidents are not rare edge cases but recurring operational risks at scale.
 
 ::: {.callout-notebook title="The probability of a PFC storm"}
 
@@ -1281,7 +1282,7 @@ In a lossless Ethernet fabric, one bad link can pause its neighbor, which pauses
 2. **Probability of zero failures**\index{Probability of Zero Failures}: $P(\text{safe}) = (1 - 0.00001)^{12,288} \approx 0.88$.
 3. **Probability of at least one storm**\index{Probability of at Least One Storm}: $P(\text{storm}) = 1 - 0.88 = \mathbf{0.12}$ (12 percent).
 
-**Systems insight**: Even with "five-nines" reliable components, a large-scale RoCE cluster faces a **`{python} PfcStormRisk.pfc_storm_prob_str` percent daily risk** of a fabric-wide freeze. RoCE deployments therefore require aggressive **PFC Watchdogs** and hardware-level telemetry, because at scale, "rare" link degradations become daily operational realities that must be handled automatically.
+**Systems insight**: Even with "five-nines" reliable components, a large-scale RoCE cluster faces a **`{python} PfcStormRisk.pfc_storm_prob_str` percent daily risk** of a fabric-wide freeze. That is not guaranteed to happen every day, but it is frequent enough to be a weekly-scale operational concern. RoCE deployments therefore require aggressive **PFC Watchdogs** and hardware-level telemetry, because at scale, "rare" link degradations become recurring operational realities that must be handled automatically.
 
 :::
 
@@ -1322,7 +1323,7 @@ This mechanism becomes essential for Mixture-of-Experts (MoE) models. Unlike the
 
 ***Incast***\index{Incast!definition} is a many-to-one traffic pattern in which a large number of senders simultaneously transmit data to a single receiver port, concentrating line-rate traffic from multiple sources into a single switch queue and causing buffer overflow even when the rest of the fabric is uncongested.
 
-1.  **Significance (quantitative)**: In the reduce phase of AllReduce, every participating GPU simultaneously sends gradients toward the same aggregation points. With 256 senders each at 50 GB/s targeting one switch port, the instantaneous incast exceeds 12.8 TB/s—orders of magnitude above a 400 Gb/s port's absorption capacity. A 32 MB switch buffer absorbs approximately 640 μs at 400 Gb/s before overflowing, triggering either PFC cascade or packet drops that elevate $L_{\text{lat}}$ cluster-wide.
+1.  **Significance (quantitative)**: In the reduce phase of AllReduce, every participating GPU simultaneously sends gradients toward the same aggregation points. With 256 senders each at 50 GB/s targeting one switch port, the instantaneous incast exceeds 12.8 TB/s—orders of magnitude above a 400 Gb/s port's absorption capacity. A 32 MB switch buffer holds about 640 μs of one 400 Gb/s egress stream, but under 256-to-1 incast the net fill rate is roughly 12.75 TB/s after subtracting the single 50 GB/s egress port, so overflow arrives in about 2.5 μs. That sudden overflow triggers either PFC cascade or packet drops that elevate $L_{\text{lat}}$ cluster-wide.
 2.  **Distinction (durable)**: Unlike general congestion (which occurs on shared internal links when aggregate traffic exceeds link capacity), incast is an endpoint bottleneck: it occurs even if every internal spine and leaf link is completely uncongested, because the bottleneck is the single destination port, not the fabric interior.
 3.  **Common pitfall**: A frequent misconception is that incast is rare or unpredictable. Because ML training synchronizes all GPUs at each backward pass, incast is a deterministic event at the end of every layer's gradient computation—it occurs hundreds of times per training step and must be architecturally mitigated through layer-staggered AllReduce or tree-based collective algorithms, not treated as an edge case.
 
@@ -1459,7 +1460,7 @@ Virtualization solves the sharing problem but makes performance diagnosis harder
 
 \index{Monitoring!network}
 
-Network performance problems in ML clusters are insidious because they manifest as **silent waste** rather than explicit failures. A degraded transceiver causing a 10 percent reduction in effective bandwidth might slow each training iteration by only 2–3 percent, a drift easily masked by the natural variance of checkpointing or data loading. Over a 30-day training run on 1,000 GPUs, this invisible drag accumulates to over 72,000 wasted GPU-hours, burning nearly \$200,000 in cloud costs without triggering a single alarm. Traditional IT monitoring tools like SNMP or `ping` measure connectivity, not the sustained throughput required by RDMA. Effective observability requires a three-layer approach: **physical monitoring** (FEC errors, signal attenuation), **transport monitoring** (PFC pause frames, retransmission rates), and **application monitoring** (NCCL algorithmic bandwidth) [@jeaugey2017nccl]. Only by correlating signals across these layers can operators detect that a "slow training run" is actually caused by a single degraded cable in one rack.
+Network performance problems in ML clusters are insidious because they manifest as **silent waste** rather than explicit failures. A degraded transceiver causing a 10 percent reduction in effective bandwidth might slow each training iteration by only 2–3 percent, a drift easily masked by the natural variance of checkpointing or data loading. Over a 30-day training run on 1,000 GPUs, this invisible drag accumulates to roughly 14,000--22,000 wasted GPU-hours, burning about \$40,000--\$65,000 at \$3 per GPU-hour without triggering a single alarm. Traditional IT monitoring tools like SNMP or `ping` measure connectivity, not the sustained throughput required by RDMA. Effective observability requires a three-layer approach: **physical monitoring** (FEC errors, signal attenuation), **transport monitoring** (PFC pause frames, retransmission rates), and **application monitoring** (NCCL algorithmic bandwidth) [@jeaugey2017nccl]. Only by correlating signals across these layers can operators detect that a "slow training run" is actually caused by a single degraded cable in one rack.
 
 ### Link-level telemetry {#sec-network-fabrics-link-telemetry}
 
