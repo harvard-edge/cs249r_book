@@ -597,7 +597,7 @@ class FrontierTrainingContext:
 
 The defining feature of data parallelism is that the computation phase, both forward and backward, is **embarrassingly parallel**. Each GPU operates as an isolated island, executing an identical copy of the model on a unique micro-batch of data. For our `{python} FrontierTrainingContext.frontier_params_b_str`B parameter reference model, this isolation is critical: during the forward pass, each GPU independently computes activations for its local batch (micro-batch size 4, sequence length 2048). Without optimization, storing these activations for backpropagation would consume over 200 GB of HBM, exceeding the capacity of even an H100 GPU. **Activation checkpointing**\index{Activation Checkpointing!memory reduction}, which recomputes activations during the backward pass rather than storing them, is mandatory to suppress this footprint to a manageable ~50 GB.
 
-The backward pass mirrors this independence but introduces the system's primary bottleneck. As the GPU traverses the computation graph in reverse, it computes gradients for every parameter in the model. For a `{python} FrontierTrainingContext.frontier_params_b_str`B model in FP16, this generates a 350 GB gradient payload per GPU. The computation itself requires zero communication, yet the resulting gradients represent a fractured view of the true loss surface, valid only for the local micro-batch. Before the optimizer step can occur, these local gradients must be aggregated across all $N$ GPUs to form a valid global gradient. The transition from isolated, high-throughput compute to a massive, global synchronization event defines the rhythm of data parallel training: long periods of silent, intense arithmetic punctuated by bursts of heavy network traffic.
+The backward pass mirrors this independence but introduces the system's primary bottleneck. As the GPU traverses the computation graph in reverse, it computes gradients for every parameter in the model. For a `{python} FrontierTrainingContext.frontier_params_b_str`B model in FP16, this generates a 142 GB gradient payload per GPU. The computation itself requires zero communication, yet the resulting gradients represent a fractured view of the true loss surface, valid only for the local micro-batch. Before the optimizer step can occur, these local gradients must be aggregated across all $N$ GPUs to form a valid global gradient. The transition from isolated, high-throughput compute to a massive, global synchronization event defines the rhythm of data parallel training: long periods of silent, intense arithmetic punctuated by bursts of heavy network traffic.
 
 #### Gradient synchronization {#sec-distributed-training-systems-systems-gradient-synchronization-614b}
 
@@ -762,7 +762,7 @@ class Scaling8GPU:
     speedup_8gpu_val = gpus_per_node * (single_gpu_step_s / (total_8gpu_ms_val/1000))
     efficiency_8gpu_val = speedup_8gpu_val/gpus_per_node * 100
     training_hours_1gpu = 25
-    training_hours_8gpu_val = training_hours_1gpu / (speedup_8gpu_val/gpus_per_node)
+    training_hours_8gpu_val = training_hours_1gpu/speedup_8gpu_val
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(efficiency_8gpu_val > 95, f"Intra-node efficiency ({efficiency_8gpu_val:.1f}%) should be high")
@@ -825,7 +825,7 @@ class Scaling32GPU:
 
     speedup_32gpu_val = 32 * (single_gpu_step_s / (total_32gpu_ms_val/1000))
     efficiency_32gpu_val = speedup_32gpu_val/32 * 100
-    training_32gpu_hours_val = training_hours_1gpu / (speedup_32gpu_val/32)
+    training_32gpu_hours_val = training_hours_1gpu/speedup_32gpu_val
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(comm_pct_val > 50, f"Communication should dominate ({comm_pct_val:.1f}%) 32-GPU scenario")
@@ -906,7 +906,7 @@ Performance results:
 - Speedup (throughput): `{python} Scaling8GPU.speedup_8gpu_str`$\times$
 - Parallel efficiency: `{python} Scaling8GPU.efficiency_8gpu_str` percent
 
-Training time: 25 hours ÷ (`{python} Scaling8GPU.speedup_8gpu_str` / 8) = **`{python} Scaling8GPU.training_8gpu_str` hours**
+Training time: 25 hours ÷ `{python} Scaling8GPU.speedup_8gpu_str` = **`{python} Scaling8GPU.training_8gpu_str` hours**
 
 **32 GPUs: 4 Nodes with Commodity Network**
 
@@ -1830,7 +1830,7 @@ The design places AllReduce operations strategically: one after attention, one a
 Communication volume per transformer layer depends on sequence length $S$, hidden dimension $d$, and batch size $B$:
 $$\text{Communication} = 2 \times B \times S \times d \times \text{sizeof(dtype)}$$
 
-With $S=2048$, $H=4096$, $B=4$, and FP16: $2 \times 4 \times 2048 \times 4096 \times 2 = 134$ MB per layer. For a 96-layer model, this totals 12.6 GB per training step, requiring NVLink bandwidth to avoid becoming the bottleneck.
+With $S=2048$, $H=4096$, $B=4$, and FP16: $2 \times 4 \times 2048 \times 4096 \times 2 = 134$ MB per AllReduce per layer. For a 96-layer model with two AllReduce operations per layer, this totals approximately 25.7 GB per training step, requiring NVLink bandwidth to avoid becoming the bottleneck.
 
 Tensor parallelism scaling degrades rapidly beyond 8-way parallelism because:
 
@@ -2029,7 +2029,7 @@ The primary efficiency penalty in pipeline parallelism is the "bubble"—the per
 
 The transition to the **Blackwell** architecture (2024) introduces two architectural shifts that redefine the 3D parallelism trade-offs. First, **NVLink 5** provides 1.8 TB/s of bidirectional bandwidth per GPU, doubling the intra-node capacity of the Hopper generation. This allows for even larger tensor parallelism $(t)$ groups (e.g., $t=16$ or $t=32$ across multiple nodes) with lower latency overhead. Second, Blackwell adds **FP4 Tensor Core support**, improving low-precision throughput and memory efficiency for supported workloads; whether FP4 is used for training depends on the numerical recipe and software stack.
 
-For a 1-trillion parameter model, Blackwell enables a configuration of $t=16$ (spanning two 8-GPU nodes via NVLink Switch) and $p=32$, reducing the total number of pipeline stages and associated bubble overhead. The 10 TB/s die-to-die interconnect within the B200 package further collapses the distinction between intra-chip and intra-package communication, allowing the two dies to function as a single high-bandwidth tensor parallel unit. These advancements shift the bottleneck from intra-node communication to the inter-pod optical fabric, making rail-optimized topologies (@sec-network-fabrics-rail-optimized) and All-to-All optimization even more critical for the next generation of the Machine Learning Fleet.
+For a 1-trillion parameter model, Blackwell enables a configuration of $t=16$ (spanning two 8-GPU nodes via NVLink Switch) and $p=32$, reducing the total number of pipeline stages and associated bubble overhead. The 10 TB/s die-to-die interconnect within the Blackwell GPU further collapses the distinction between intra-chip and intra-package communication, allowing the two reticle-limited dies to function as a single high-bandwidth tensor parallel unit. These advancements shift the bottleneck from intra-node communication to the inter-pod optical fabric, making rail-optimized topologies (@sec-network-fabrics-rail-optimized) and All-to-All optimization even more critical for the next generation of the Machine Learning Fleet.
 
 ```{python}
 #| label: three-d-parallelism-config
