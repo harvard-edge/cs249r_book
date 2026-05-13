@@ -359,13 +359,15 @@ The connection between hardware reliability and ML performance demands concepts 
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ Context: @sec-robust-ai-hardware-reliability—SDC at scale
 # │
-# │ Goal: Quantify why massive scale makes silent errors effectively certain.
-# │ Show: ~10K GPUs at Meta rates (1e-4/hr) makes SDC probability near 1.0.
+# │ Goal: Quantify why massive scale makes silent errors operationally likely.
+# │ Show: 10K GPUs at Meta rates (1e-4/hr) gives P>0.6; ~30K gives P>0.95.
 # │ How: P(at least one) = 1 - (1-p)^N.
 # │
 # │ Imports: mlsysim.core.constants (THOUSAND, MILLION)
-# │ Exports: p_rate_meta_str, n_gpus_certain_str, p_total_certain_str
+# │ Exports: p_rate_meta_str, n_gpus_large_str, p_total_large_str,
+# │          n_gpus_certain_str
 # └─────────────────────────────────────────────────────────────────────────────
+from math import ceil, log
 from mlsysim.core.constants import THOUSAND, MILLION
 from mlsysim.fmt import fmt, check, md_math
 
@@ -380,16 +382,20 @@ class SilentErrorProbability:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Step 1: P(at least one) = 1 - (1-p)^N
     p_at_least_one_val = 1 - (1 - p_per_hr_meta) ** n_gpus_large
+    n_gpus_certain_val = ceil(log(0.05) / log(1 - p_per_hr_meta))
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(p_at_least_one_val > 0.6, f"Probability ({p_at_least_one_val:.2f}) should be high at 10K GPUs")
+    check(n_gpus_certain_val > n_gpus_large, "95% threshold should be above 10K GPUs")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    n_gpus_certain_str = fmt(n_gpus_large, precision=0)
+    n_gpus_large_str = fmt(n_gpus_large, precision=0)
+    p_total_large_str = fmt(p_at_least_one_val * 100, precision=0)
+    n_gpus_certain_str = fmt(n_gpus_certain_val, precision=0)
 ```
-The scale of modern GPU clusters transforms these per-device error rates into near-certainty at the system level. @fig-silent-error-probability illustrates this compounding effect: for a cluster of $N$ devices each with per-device silent data corruption probability $p$ per hour, the probability of at least one SDC event is $P(\geq 1) = 1 - (1 - p)^N$. At the rates reported by Meta, which found SDC rates "orders of magnitude higher than soft-error predictions" across hundreds of thousands of machines [@dixit2021silent], silent errors become effectively certain at cluster scales beyond `{python} SilentErrorProbability.n_gpus_certain_str` devices.
+The scale of modern GPU clusters transforms these per-device error rates into fleet-level events. @fig-silent-error-probability illustrates this compounding effect: for a cluster of $N$ devices each with per-device silent data corruption probability $p$ per hour, the probability of at least one SDC event is $P(\geq 1) = 1 - (1 - p)^N$. At the rates reported by Meta, which found SDC rates "orders of magnitude higher than soft-error predictions" across hundreds of thousands of machines [@dixit2021silent], a `{python} SilentErrorProbability.n_gpus_large_str`-device cluster is already more likely than not to see an hourly silent error (`{python} SilentErrorProbability.p_total_large_str` percent probability), and the probability crosses 95 percent at about `{python} SilentErrorProbability.n_gpus_certain_str` devices.
 
-::: {#fig-silent-error-probability fig-env="figure" fig-pos="htb" fig-cap="**Silent Error Probability at Scale**: Probability of at least one silent data corruption event per hour as a function of cluster size, for three per-device error rates. At the rates reported by Meta, which are orders of magnitude above traditional soft-error models, silent errors become effectively certain at cluster scales beyond a few thousand devices." fig-alt="Semilog plot showing three S-curves for per-device SDC rates of 1e-3, 1e-4, and 1e-5. All curves reach probability 1.0 as cluster size grows to 100000 GPUs."}
+::: {#fig-silent-error-probability fig-env="figure" fig-pos="htb" fig-cap="**Silent Error Probability at Scale**: Probability of at least one silent data corruption event per hour as a function of cluster size, for three per-device error rates. At Meta-scale rates, silent errors are more likely than not by 10,000 devices and effectively certain by a few tens of thousands." fig-alt="Semilog plot showing three S-curves for per-device SDC rates of 1e-3, 1e-4, and 1e-5. All curves reach probability 1.0 as cluster size grows to 100000 GPUs."}
 
 ```{python}
 #| echo: false
@@ -398,8 +404,7 @@ The scale of modern GPU clusters transforms these per-device error rates into ne
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @fig-silent-error-probability—SDC at cluster scale
 # │
-# │ Goal: Plot P≥1 SDC) = 1-(1-p)^N vs N for p=1e-3, 1e-4, 1e-5; show
-# │       "effectively certain" by ~10K GPUs at Meta rates.
+# │ Goal: Plot P≥1 SDC) = 1-(1-p)^N vs N for p=1e-3, 1e-4, 1e-5.
 # │ Show: Three S-curves; semilog x; shaded region; annotations.
 # │ How: N = logspace(0,5,500); P = 1-(1-p)^N; viz.setup_plot().
 # │
@@ -407,7 +412,7 @@ The scale of modern GPU clusters transforms these per-device error rates into ne
 # │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
-# │ Plot P≥1 SDC) = 1-(1-p)^N vs N for p=1e-3, 1e-4, 1e-5; show
+# │ Plot P≥1 SDC) = 1-(1-p)^N vs N for p=1e-3, 1e-4, 1e-5.
 import numpy as np
 import matplotlib.pyplot as plt
 from mlsysim import viz
@@ -624,7 +629,7 @@ Generating an adversarial example requires $K$ additional gradient steps per tra
 2. **Training Slowdown**\index{Training!slowdown}: **`{python} AdversarialPayback.ap_slowdown_str`$\times$ slower**.
 3. **Utility Cost**\index{Utility Cost}: Accuracy against the worst-case attack is **`{python} AdversarialPayback.ap_cert_acc_str`**, compared with 95 percent clean-data accuracy for the standard model.
 
-**Systems insight**: Robustness is an **Efficiency-Utility Trade-off**. Guaranteeing that a deployed model will not misclassify a stop sign with a few stickers on it requires paying **8$\times$ the training cost** and accepting a **25 percent drop in general performance**. In the Machine Learning Fleet, "Robustness" is not a setting that can be flipped on; it is a budget the team spends. This is why most fleets use **Detection** (cheaper) rather than **Certification** (robust training) for all but the most safety-critical components.
+**Systems insight**: Robustness is an **Efficiency-Utility Trade-off**. Guaranteeing that a deployed model will not misclassify a stop sign with a few stickers on it requires paying **8$\times$ the training cost** and accepting a **25 percentage-point drop in general performance**. In the Machine Learning Fleet, "Robustness" is not a setting that can be flipped on; it is a budget the team spends. This is why most fleets use **Detection** (cheaper) rather than **Certification** (robust training) for all but the most safety-critical components.
 
 :::
 
@@ -847,7 +852,7 @@ Bin selection significantly affects PSI sensitivity. For categorical features, e
 
 When a bin has zero observations in either distribution, adding a small smoothing constant (typically $\epsilon = 10^{-8}$) prevents undefined logarithms while minimally affecting the PSI value. As @fig-distribution-shift-detector shows, monitoring PSI over time reveals when a model drifts from stable (Green Zone) into warning (Orange) and critical (Red Zone) regions, triggering automated retraining.
 
-::: {#fig-distribution-shift-detector fig-env="figure" fig-pos="htb" fig-cap="**The Distribution Shift Detector**: Monitoring Population Stability Index (PSI) over a year. The model remains stable in the green zone until around week 28, drifts into the orange warning zone due to evolving user behavior, and breaches the red critical threshold at week 35. Automated retraining at week 40 restores model stability." fig-alt="Line plot of weekly PSI over 52 weeks with green, orange, and red zones. Drift detected at week 35, retraining at week 40 restores stability."}
+::: {#fig-distribution-shift-detector fig-env="figure" fig-pos="htb" fig-cap="**The Distribution Shift Detector**: Monitoring Population Stability Index (PSI) over a year. The model remains stable through week 25, enters the orange warning zone at week 26 as user behavior shifts, and breaches the red critical threshold at week 35. Automated retraining restores model stability at week 41." fig-alt="Line plot of weekly PSI over 52 weeks with green, orange, and red zones. Drift crosses the critical threshold at week 35, and retraining restores stability at week 41."}
 
 ```{python}
 #| echo: false
@@ -856,8 +861,8 @@ When a bin has zero observations in either distribution, adding a small smoothin
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @fig-distribution-shift-detector—PSI monitoring
 # │
-# │ Goal: Plot weekly PSI over 52 weeks; show Green/Orange/Red zones; drift at
-# │       week 35; retraining at week 40 restores stability.
+# │ Goal: Plot weekly PSI over 52 weeks; show Green/Orange/Red zones and mark
+# │       the generated critical-crossing and recovery weeks.
 # │ Show: Line plot; axhspan zones; threshold lines; annotations.
 # │ How: Synthetic psi_values; matplotlib.
 # │
@@ -865,7 +870,7 @@ When a bin has zero observations in either distribution, adding a small smoothin
 # │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
-# │ Plot weekly PSI over 52 weeks; show Green/Orange/Red zones; drift at
+# │ Plot weekly PSI over 52 weeks; show Green/Orange/Red zones.
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -904,7 +909,7 @@ ax.axhline(thresh_critical, color='red', linestyle='--', linewidth=1, alpha=0.7)
 
 ax.plot(weeks, psi_values, color='#333333', linewidth=2, marker='o', markersize=6, label='Weekly PSI')
 
-shift_idx = 35
+shift_idx = np.where(psi_values > thresh_critical)[0][0]
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
 ax.annotate('Major Shift Detected\n(PSI > 0.25)',
@@ -926,7 +931,7 @@ ax.annotate('Major Shift Detected\n(PSI > 0.25)',
     )
 )
 
-retrain_idx = 40
+retrain_idx = np.where((weeks > weeks[shift_idx]) & (psi_values < thresh_warning))[0][0]
 ax.annotate(
     'Retraining Triggered\n(Stability Restored)',
     xy=(weeks[retrain_idx], psi_values[retrain_idx]),
@@ -1923,7 +1928,7 @@ class RobustnessTaxAnalysis:
     acc_drop = clean_acc - robust_acc
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(acc_drop > 20, "Robustness tax should be significant (>20%)")
+    check(acc_drop > 20, "Robustness tax should be significant (>20 percentage points)")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     clean_acc_str = f"{clean_acc:.0f}"
@@ -1940,7 +1945,7 @@ class RobustnessTaxAnalysis:
 1.  **Standard ResNet-50**\index{ResNet-50!standard}: `{python} RobustnessTaxAnalysis.clean_acc_str` percent Top-1 Accuracy on ImageNet.
 2.  **Adversarially Trained ResNet-50** $(\epsilon=8/255)$: ~`{python} RobustnessTaxAnalysis.robust_acc_str` percent Top-1 Accuracy on Clean ImageNet.
 
-**Systems conclusion**: Gaining robustness against rare adversarial attacks sacrifices **`{python} RobustnessTaxAnalysis.acc_drop_str` percent accuracy** on normal inputs.
+**Systems conclusion**: Gaining robustness against rare adversarial attacks sacrifices **`{python} RobustnessTaxAnalysis.acc_drop_str` percentage points of accuracy** on normal inputs.
 
 *   **Why?** The model must learn to ignore "nonrobust features" (like high-frequency textures) that are predictive but brittle.
 *   **Implication**\index{Implication}: Robustness cannot simply be "turned on" for free. It is a fundamental trade-off between **Average-Case Performance** and **Worst-Case Reliability**.

@@ -516,14 +516,14 @@ ML operations span three orders of magnitude in arithmetic intensity, and the po
 # │          WorkloadIntensityCalc.elem_intensity_str,
 # │          WorkloadIntensityCalc.decode_intensity_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import BYTES_FP16
+from mlsysim.core.constants import BYTES_FP16, byte
 from mlsysim.fmt import check
 
 class WorkloadIntensityCalc:
     """Arithmetic intensity for GEMM, GELU, and LLM decode operations."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    bytes_per_elem = BYTES_FP16
+    bytes_per_elem = BYTES_FP16.m_as(byte)
     # GEMM: C = A*B where A is MxK, B is KxN
     M, K, N = 4096, 4096, 4096
     # Element-wise (e.g., GELU): ~5 ops per element
@@ -626,41 +626,41 @@ class RooflineDiagnostic:
     """Roofline analysis for 70B LLM decode on 8× H100."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────
-    params_per_gpu_B = 17.5    # 70B model, TP across GPUs → 17.5B per shard
+    params_per_gpu_B = 70 / 8  # 70B model, TP across 8 GPUs -> 8.75B per shard
     bytes_fp16 = 2
     h100_bw_tbs = 3.35         # H100 HBM3 bandwidth (TB/s)
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    flops_B = 2 * params_per_gpu_B                         # 35 (×10^9 FLOP)
-    weight_gb = params_per_gpu_B * bytes_fp16              # 35 GB
+    flops_B = 2 * params_per_gpu_B                         # 17.5 (x10^9 FLOP)
+    weight_gb = params_per_gpu_B * bytes_fp16              # 17.5 GB
     arith_intensity = flops_B/weight_gb                   # 1.0 FLOP/byte
     decode_time_ms = weight_gb / (h100_bw_tbs * 1000) * 1000
     tokens_per_sec = 1000.0 / decode_time_ms
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(abs(arith_intensity - 1.0) < 0.01, f"AI should be 1.0, got {arith_intensity}")
-    check(9 < decode_time_ms < 12, f"Decode time should be ~10.4ms, got {decode_time_ms:.1f}")
-    check(90 < tokens_per_sec < 100, f"Token rate should be ~96, got {tokens_per_sec:.0f}")
+    check(5 < decode_time_ms < 6, f"Decode time should be ~5.2ms, got {decode_time_ms:.1f}")
+    check(180 < tokens_per_sec < 200, f"Token rate should be ~191, got {tokens_per_sec:.0f}")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    flops_B_str = f"{flops_B:.0f}"
-    weight_gb_str = f"{weight_gb:.0f}"
+    flops_B_str = f"{flops_B:.1f}"
+    weight_gb_str = f"{weight_gb:.1f}"
     ai_str = f"{arith_intensity:.1f}"
     decode_ms_str = f"{decode_time_ms:.1f}"
-    tps_str = f"{int(tokens_per_sec)}"
+    tps_str = f"{tokens_per_sec:.0f}"
 ```
 
 ::: {.callout-notebook title="The Roofline diagnostic"}
 
-**Problem**: A 70B parameter LLM is deployed on 8$\times$ H100 GPUs with tensor parallelism. At batch size 1, each GPU holds approximately 17.5B parameters in FP16 (35 GB of weights). Each decode step reads all weights to produce one token. What is the achieved arithmetic intensity, and what is the theoretical maximum token generation rate?
+**Problem**: A 70B parameter LLM is deployed on 8$\times$ H100 GPUs with tensor parallelism. At batch size 1, each GPU holds approximately 8.75B parameters in FP16 (17.5 GB of weights). Each decode step reads its weight shard to produce one token. What is the achieved arithmetic intensity, and what is the theoretical maximum token generation rate?
 
 **Math**:
 
 *Step 1: Arithmetic Intensity.*
-Each decode step per GPU: FLOPs $= 2 \times 17.5 \times 10^9 =$ `{python} RooflineDiagnostic.flops_B_str` $\times 10^9$ FLOP. Bytes loaded $= 17.5 \times 10^9 \times 2 =$ `{python} RooflineDiagnostic.weight_gb_str` $\times 10^9$ bytes $=$ `{python} RooflineDiagnostic.weight_gb_str` GB.
+Each decode step per GPU: FLOPs $= 2 \times 8.75 \times 10^9 =$ `{python} RooflineDiagnostic.flops_B_str` $\times 10^9$ FLOP. Bytes loaded $= 8.75 \times 10^9 \times 2 =$ `{python} RooflineDiagnostic.weight_gb_str` $\times 10^9$ bytes $=$ `{python} RooflineDiagnostic.weight_gb_str` GB.
 
 $$
-I = \frac{35 \times 10^9 \text{ FLOP}}{35 \times 10^9 \text{ bytes}} = 1.0 \text{ FLOP/byte}
+I = \frac{17.5 \times 10^9 \text{ FLOP}}{17.5 \times 10^9 \text{ bytes}} = 1.0 \text{ FLOP/byte}
 $$
 
 At `{python} RooflineDiagnostic.ai_str` FLOP/byte, the operation sits far below the H100 ridge point of ~295 FLOP/byte: deeply memory-bound.
@@ -669,10 +669,10 @@ At `{python} RooflineDiagnostic.ai_str` FLOP/byte, the operation sits far below 
 Since the operation is memory-bound, performance is limited by bandwidth, not compute:
 
 $$
-t_{\text{decode}} = \frac{35 \text{ GB}}{3.35 \text{ TB/s}} \approx 10.4 \text{ ms per token}
+t_{\text{decode}} = \frac{17.5 \text{ GB}}{3.35 \text{ TB/s}} \approx 5.2 \text{ ms per token}
 $$
 
-This yields approximately `{python} RooflineDiagnostic.tps_str` tokens/second per GPU, or about `{python} RooflineDiagnostic.tps_str` tokens/second for the model (since tensor parallelism does not multiply throughput for memory-bound decode). In practice, overheads from KV cache reads and NVLink synchronization reduce this to 40--70 tokens/second.
+This yields approximately `{python} RooflineDiagnostic.tps_str` tokens/second per GPU, or about `{python} RooflineDiagnostic.tps_str` tokens/second for the model (since tensor parallelism does not multiply throughput for memory-bound decode). In practice, overheads from KV cache reads and NVLink synchronization reduce this substantially below the ideal bandwidth-only limit.
 
 **Systems insight**: At batch size 1, fewer than 0.4 percent of the H100's FP16 FLOPS are in use. The only ways to improve are: (a) increase batch size to amortize weight reads, (b) reduce weight bytes via quantization, or (c) use speculative decoding to generate multiple tokens per weight read.
 
@@ -767,7 +767,7 @@ Standard self-attention computes $\text{Softmax}(QK^T / \sqrt{d_k})V$, where $Q$
 # │          naive_head_traffic_mb_str, flash_head_traffic_mb_str,
 # │          flash_savings_factor_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import BYTES_FP16, MILLION, BILLION
+from mlsysim.core.constants import BYTES_FP16, MILLION, BILLION, byte
 from mlsysim.fmt import fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -778,7 +778,7 @@ class FlashAttentionSavings:
     seq_len = 8192
     head_dim = 128
     num_heads = 32
-    bytes_per_elem = BYTES_FP16
+    bytes_per_elem = BYTES_FP16.m_as(byte)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Step 1: Naive attention HBM traffic per head:
@@ -1045,7 +1045,8 @@ The choice depends on the operational regime. For memory-bound inference (small 
 # │
 # │ Goal: Compute KV cache memory per request for a 70B model (Llama-style GQA)
 # │       at FP16, then derive max batch sizes before/after quantization.
-# │ Show: kv_fp16_gb (~0.17 GB), max batch FP16 vs INT8, throughput ratio.
+# │ Show: total FP16 KV cache (~1.34 GB), sharded FP16 (~0.34 GB/GPU),
+# │       sharded INT8 (~0.17 GB/GPU), and max batch FP16 vs INT8.
 # │ How: 2 (K+V) * layers * kv_heads * head_dim * seq_len * bytes.
 # │
 # │ Imports: mlsysim.book (check)
@@ -1428,8 +1429,8 @@ The potential benefit of communication-computation overlap depends on the relati
 # │ Goal: Quantify training step speedup from overlapping ring-AllReduce with
 # │       backward pass for a 7B model on 8 H100 GPUs over NVLink (900 GB/s),
 # │       at 40% MFU, to show when overlap fully hides communication overhead.
-# │ Show: ~14 GB gradients; ~31 ms backward; ~31 ms AllReduce; step collapses from
-# │       ~93 ms (no overlap) to ~62 ms (with overlap) → ~1.50x speedup—inline.
+# │ Show: ~14 GB gradients; ~145 ms backward; ~31 ms AllReduce; step drops from
+# │       ~249 ms (no overlap) to ~217 ms (with overlap) -> ~1.14x speedup—inline.
 # │ How: AllReduce time = 2 * gradient_bytes/nvlink_bw; backward time =
 # │       backward_flops / (h100_tflops * MFU); overlap removes min(back, AR).
 # │
@@ -1503,9 +1504,9 @@ class OverlapCalc:
 
 Consider a 7B parameter model trained on 8 H100 GPUs within a single node connected by NVLink at 900 GB/s. The gradient tensor contains `{python} OverlapCalc.gradient_gb_str` GB of FP16 values. By the ring AllReduce analysis in @sec-collective-communication, synchronization transfers approximately $2 \times (N-1)/N \approx 2$ times this volume, taking approximately `{python} OverlapCalc.allreduce_ms_str` ms at NVLink bandwidth. The backward pass computation, at 40 percent Model FLOPs Utilization, takes approximately `{python} OverlapCalc.backward_ms_str` ms.
 
-Without overlap, the training step requires `{python} OverlapCalc.step_no_overlap_ms_str` ms (forward + backward + AllReduce). With overlap, the AllReduce is `{python} OverlapCalc.overlap_status` behind the backward pass, reducing the step time to `{python} OverlapCalc.step_overlap_ms_str` ms, a `{python} OverlapCalc.overlap_speedup_str`$\times$ improvement. This example illustrates a critical property: overlap is most effective when backward compute time exceeds AllReduce time. As @fig-overlap-budget shows, as cluster scale increases from 8 to 1024 GPUs, overlap efficiency degrades from ~90 percent to ~40 percent because communication overhead eventually exceeds the computation budget. For smaller models or slower interconnects (for example, PCIe at 64 GB/s instead of NVLink at 900 GB/s), the AllReduce would exceed the backward pass, and no amount of overlap can fully hide the communication.
+Without overlap, the training step requires `{python} OverlapCalc.step_no_overlap_ms_str` ms (forward + backward + AllReduce). With overlap, the AllReduce is `{python} OverlapCalc.overlap_status` behind the backward pass, reducing the step time to `{python} OverlapCalc.step_overlap_ms_str` ms, a `{python} OverlapCalc.overlap_speedup_str`$\times$ improvement. This example illustrates a critical property: overlap is most effective when backward compute time exceeds AllReduce time. As @fig-overlap-budget shows, as cluster scale increases from 8 to 1024 GPUs, overlap efficiency degrades from ~90 percent to ~18 percent because communication overhead eventually exceeds the computation budget. For smaller models or slower interconnects (for example, PCIe at 64 GB/s instead of NVLink at 900 GB/s), the AllReduce would exceed the backward pass, and no amount of overlap can fully hide the communication.
 
-::: {#fig-overlap-budget fig-env="figure" fig-pos="htb" fig-cap="**The Overlap Budget**: As cluster scale increases (8 to 1024 GPUs), the communication overhead grows, eventually exceeding the computation budget. The overlap efficiency (black line) represents the percentage of communication hidden behind computation, which degrades from ~90 percent to ~40 percent due to inter-node latency and bandwidth constraints on a 70B parameter model." fig-alt="Stacked bar chart of step time contribution vs. GPU count. Overlapped communication, pure computation, and exposed communication. Black line shows overlap efficiency degrading from 90 percent to 40 percent."}
+::: {#fig-overlap-budget fig-env="figure" fig-pos="htb" fig-cap="**The Overlap Budget**: As cluster scale increases (8 to 1024 GPUs), the communication overhead grows, eventually exceeding the computation budget. The overlap efficiency (black line) represents the percentage of communication hidden behind computation, which degrades from ~90 percent to ~18 percent due to inter-node latency and bandwidth constraints on a 70B parameter model." fig-alt="Stacked bar chart of step time contribution vs. GPU count. Overlapped communication, pure computation, and exposed communication. Black line shows overlap efficiency degrading from about 90 percent to about 18 percent."}
 
 ```{python}
 #| echo: false
@@ -1515,7 +1516,7 @@ Without overlap, the training step requires `{python} OverlapCalc.step_no_overla
 # │ Context: @fig-overlap-budget—communication-computation overlap
 # │
 # │ Goal: Plot compute budget, comm overhead, overlap efficiency vs GPU count;
-# │       show degradation from ~90% to ~40% at scale.
+# │       show degradation from ~90% to ~18% at scale.
 # │ Show: Bar/line chart; 8–1024 GPUs; overlap % curve.
 # │ How: comm_scale_factor; overlap = compute/(compute+comm); matplotlib.
 # │

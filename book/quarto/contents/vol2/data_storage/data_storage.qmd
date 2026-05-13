@@ -87,7 +87,7 @@ from mlsysim.fmt import fmt, sci, check, md
 # │ Goal:    Quantify the ~500x gap between HBM and NVMe, and the PB-scale
 # │          checkpoint volume for a 30-day 175B training run.
 # │ Show:    3.35 TB/s HBM, 7 GB/s NVMe, ~479x ratio, ~1,750 GB checkpoint,
-# │          ~4.5 PB total checkpoint writes.
+# │          ~7.6 PB total checkpoint writes.
 # │ How:     Read H100 HBM BW and NVMe BW from constants; compute checkpoint
 # │          size from GPT-3 params × bytes per param; derive fleet total.
 # │
@@ -170,7 +170,7 @@ ML workloads systematically invert these assumptions. Training data access is pr
 # │ Context: "The Thundering Herd: Shard Contention" .callout-notebook
 # │
 # │ Goal: Quantify the probability of multiple GPUs hitting the same storage shard.
-# │ Show: contention_prob_pct ≈ 63%—inline in notebook result.
+# │ Show: contention_prob_pct ≈ 40%—inline in notebook result.
 # │ How: P(at least one collision) = 1 - (Shards! / (Shards^Workers * (Shards-Workers)!)).
 # │
 # │ Imports: mlsysim.book (check)
@@ -213,7 +213,7 @@ This is a variant of the "Birthday Problem" in probability.
 
 ::: {.callout-perspective title="The widening I/O wall"}
 
-The I/O wall is not static: it is widening. Between 2018 and 2025, advertised accelerator Tensor Core throughput grew sharply, but exact ratios depend on whether the comparison holds precision fixed or follows each generation's lowest supported training/inference precision. Over the same period, NVMe sequential bandwidth grew far more slowly, from roughly 3.5 GB/s to 7 GB/s per drive. The compute-to-storage bandwidth ratio has therefore worsened substantially. If this trend continues, the storage hierarchy must add new tiers (persistent memory, CXL-attached storage) or fundamentally change the data pipeline architecture (compute-near-storage, in-storage processing) to prevent the I/O wall from becoming the dominant constraint on training throughput. The history of computing suggests that the gap will continue to widen, because the economic incentives favor investing in faster compute (which directly reduces training time) over faster storage (which only indirectly improves utilization).
+The I/O wall is not static: it is widening. Between 2016 and 2024, advertised accelerator Tensor Core throughput grew sharply, but exact ratios depend on whether the comparison holds precision fixed or follows each generation's lowest supported training/inference precision. Over the same period, NVMe sequential bandwidth grew far more slowly, from roughly 3.5 GB/s to 14 GB/s per drive. The compute-to-storage bandwidth ratio has therefore worsened substantially. If this trend continues, the storage hierarchy must add new tiers (persistent memory, CXL-attached storage) or fundamentally change the data pipeline architecture (compute-near-storage, in-storage processing) to prevent the I/O wall from becoming the dominant constraint on training throughput. The history of computing suggests that the gap will continue to widen, because the economic incentives favor investing in faster compute (which directly reduces training time) over faster storage (which only indirectly improves utilization).
 
 :::
 
@@ -652,7 +652,7 @@ At the NVMe tier, compression represents a critical trade-off between I/O bandwi
 
 :::
 
-The central challenge at this tier is the I/O wall: even the fastest NVMe RAID configuration is roughly 500$\times$ slower than HBM. Bridging this gap requires pipelining (overlap I/O with compute, detailed in @sec-storage-pipeline-equation) and, increasingly, GPU Direct Storage (detailed in @sec-storage-gds) to bypass CPU overhead entirely. The I/O wall at this tier is particularly insidious because NVMe performance is excellent by historical standards. A storage engineer accustomed to HDD-era throughput of 100 MB/s might view 14 GB/s as superabundant. Relative to the accelerator's appetite, however, 14 GB/s is a trickle. The only way to bridge the gap is to overlap storage reads with computation so thoroughly that the accelerator never perceives the storage delay.
+The central challenge at this tier is the I/O wall: a single NVMe drive is roughly 500$\times$ slower than HBM, and even a four-drive RAID-0 stripe remains roughly 120$\times$ slower. Bridging this gap requires pipelining (overlap I/O with compute, detailed in @sec-storage-pipeline-equation) and, increasingly, GPU Direct Storage (detailed in @sec-storage-gds) to bypass CPU overhead entirely. The I/O wall at this tier is particularly insidious because NVMe performance is excellent by historical standards. A storage engineer accustomed to HDD-era throughput of 100 MB/s might view 14 GB/s as superabundant. Relative to the accelerator's appetite, however, 14 GB/s is a trickle. The only way to bridge the gap is to overlap storage reads with computation so thoroughly that the accelerator never perceives the storage delay.
 
 Local NVMe is also the primary tier for **local checkpoint staging**. When saving a model checkpoint, the fastest strategy is to write to local NVMe at full bandwidth (minimizing the time the training pipeline is paused), then asynchronously replicate to shared storage for durability. For a `{python} StorageHierarchyAnalysis.gpt3_params_b`B parameter checkpoint of `{python} StorageHierarchyAnalysis.ckpt_total_gb_str` GB sharded across 256 nodes, each node's roughly 7 GB shard writes to local NVMe in approximately `{python} NVMeTierCalcs.ckpt_nvme_s_str` seconds, compared to `{python} NVMeTierCalcs.ckpt_pfs_s_str` seconds if the same per-node shard were written directly to a parallel file system where the node competes with hundreds of other writers. The optimal checkpoint *frequency* depends on cluster failure rates and is derived quantitatively in @sec-fault-tolerance-young-daly using the Young-Daly formula. From a storage perspective, the key design goal is minimizing $T_{\text{write}}$ through tiered staging: write to local NVMe at full bandwidth, then background-copy to shared storage.
 
@@ -962,7 +962,7 @@ The @tbl-data-formats comparison guides format selection for ML workloads.
 # │
 # │ Goal:    Derive the required storage bandwidth for 256-GPU ImageNet training
 # │          and show the 20% stall from a 250 ms I/O vs 200 ms compute overlap.
-# │ Show:    ~24.6 GB/s required; 20% stall; rendered display equation.
+# │ Show:    ~39.3 GB/s required; 20% stall; rendered display equation.
 # │ How:     BW = N_gpu × U × (batch × img_size) / T_step; stall = (max-comp)/max.
 # │
 # │ Imports: mlsysim.core.constants (BILLION, THOUSAND)

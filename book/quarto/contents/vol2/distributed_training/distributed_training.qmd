@@ -578,15 +578,14 @@ class FrontierTrainingContext:
     """GPT-3 scale reference for distributed training."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    mission = Applications.Frontier
-    model = mission.workload
+    model = Models.GPT3
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     params_b = model.parameters.m_as(param) / BILLION
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     from mlsysim.fmt import check
-    check(params_b > 60, "Frontier model should have >60B params")
+    check(170 <= params_b <= 180, f"GPT-3 reference should be ~175B params, got {params_b:.1f}B")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     frontier_params_b_str = fmt(params_b, precision=0)
@@ -597,7 +596,7 @@ class FrontierTrainingContext:
 
 The defining feature of data parallelism is that the computation phase, both forward and backward, is **embarrassingly parallel**. Each GPU operates as an isolated island, executing an identical copy of the model on a unique micro-batch of data. For our `{python} FrontierTrainingContext.frontier_params_b_str`B parameter reference model, this isolation is critical: during the forward pass, each GPU independently computes activations for its local batch (micro-batch size 4, sequence length 2048). Without optimization, storing these activations for backpropagation would consume over 200 GB of HBM, exceeding the capacity of even an H100 GPU. **Activation checkpointing**\index{Activation Checkpointing!memory reduction}, which recomputes activations during the backward pass rather than storing them, is mandatory to suppress this footprint to a manageable ~50 GB.
 
-The backward pass mirrors this independence but introduces the system's primary bottleneck. As the GPU traverses the computation graph in reverse, it computes gradients for every parameter in the model. For a `{python} FrontierTrainingContext.frontier_params_b_str`B model in FP16, this generates a 142 GB gradient payload per GPU. The computation itself requires zero communication, yet the resulting gradients represent a fractured view of the true loss surface, valid only for the local micro-batch. Before the optimizer step can occur, these local gradients must be aggregated across all $N$ GPUs to form a valid global gradient. The transition from isolated, high-throughput compute to a massive, global synchronization event defines the rhythm of data parallel training: long periods of silent, intense arithmetic punctuated by bursts of heavy network traffic.
+The backward pass mirrors this independence but introduces the system's primary bottleneck. As the GPU traverses the computation graph in reverse, it computes gradients for every parameter in the model. For a `{python} FrontierTrainingContext.frontier_params_b_str`B model in FP16, this generates a 350 GB gradient payload per GPU. The computation itself requires zero communication, yet the resulting gradients represent a fractured view of the true loss surface, valid only for the local micro-batch. Before the optimizer step can occur, these local gradients must be aggregated across all $N$ GPUs to form a valid global gradient. The transition from isolated, high-throughput compute to a massive, global synchronization event defines the rhythm of data parallel training: long periods of silent, intense arithmetic punctuated by bursts of heavy network traffic.
 
 #### Gradient synchronization {#sec-distributed-training-systems-systems-gradient-synchronization-614b}
 
@@ -857,6 +856,7 @@ class GradAccumScenario:
     comm_8gpu_ms = Scaling8GPU.comm_8gpu_ms_val
     training_hours_1gpu = 25
     hourly_rate = 128  # USD per hour for 8 GPUs
+    baseline_cost_val = 3021  # USD, measured 32-GPU commodity-network baseline
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     effective_batch_val = n_gpus_ga * batch_per_gpu * accum_steps
@@ -866,16 +866,19 @@ class GradAccumScenario:
     effective_speedup = n_gpus_ga * (1 - overhead_val/100)
     ga_training_hours_val = training_hours_1gpu/effective_speedup
     ga_cost_val = ga_training_hours_val * hourly_rate
-    ga_savings_val = Scaling32GPU.training_32gpu_hours_val * hourly_rate - ga_cost_val
-    ga_savings_pct_val = ga_savings_val / (Scaling32GPU.training_32gpu_hours_val * hourly_rate) * 100
+    ga_savings_val = baseline_cost_val - ga_cost_val
+    ga_savings_pct_val = ga_savings_val/baseline_cost_val * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(effective_batch_val == 512, f"Effective batch should be 512, got {effective_batch_val}")
+    check(ga_savings_val > 0, f"Gradient accumulation should save cost, got {ga_savings_val:.1f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     effective_batch_str = f"{effective_batch_val:,}"
+    comm_8gpu_ms_str = f"{comm_8gpu_ms:.1f}"
     comm_overhead_pct_str = f"{overhead_val:.2f}"
     ga_training_hours_str = f"{ga_training_hours_val:.1f}"
+    baseline_cost_str = f"{baseline_cost_val:,.0f}"
     ga_cost_str = f"{ga_cost_val:,.0f}"
     ga_savings_str = f"{ga_savings_val:,.0f}"
     ga_savings_pct_str = f"{ga_savings_pct_val:.0f}"
@@ -932,23 +935,23 @@ A better approach uses 8 GPUs with gradient accumulation to avoid the inter-node
 
 ::: {.callout-notebook title="Gradient accumulation speedup"}
 
-**Problem**: A GPT-2 run on a commodity 10G network is communication-bound at 32 GPUs, costing \$3,021 for a fixed number of samples. Can a single 8-GPU node achieve the same effective batch size more efficiently using gradient accumulation?
+**Problem**: A GPT-2 run on a commodity 10G network is communication-bound at 32 GPUs, costing \$`{python} GradAccumScenario.baseline_cost_str` for a fixed number of samples. Can a single 8-GPU node achieve the same effective batch size more efficiently using gradient accumulation?
 
 **Math**:
 
 1. **Effective batch size**: 8 GPUs $\times$ batch 16 $\times$ 4 accumulation steps = **`{python} GradAccumScenario.effective_batch_str`**.
 2. **Communication overhead**: With 4-step accumulation, we AllReduce once every 4 steps.
-   - Overhead = $5 \text{ ms} / (4 \times 1{,}800 \text{ ms}) \approx$ **`{python} GradAccumScenario.comm_overhead_pct_str` percent**.
-3. **Training duration**: Total time reduces to **`{python} GradAccumScenario.ga_training_hours_str` hours**.
+   - Overhead = `{python} GradAccumScenario.comm_8gpu_ms_str` ms / (4 $\times$ 1,800 ms) $\approx$ **`{python} GradAccumScenario.comm_overhead_pct_str` percent**.
+3. **Training duration**: Total time is **`{python} GradAccumScenario.ga_training_hours_str` hours**.
 4. **Total cost**: `{python} GradAccumScenario.ga_training_hours_str` hrs $\times$ \$128/hr = **\$`{python} GradAccumScenario.ga_cost_str`**.
 
 **Systems insight**: Gradient accumulation saves **\index{Gradient Accumulation!communication overhead}\$`{python} GradAccumScenario.ga_savings_str`** (`{python} GradAccumScenario.ga_savings_pct_str` percent) by concentrating computation where bandwidth is abundant (NVLink within the node) and minimizing the frequency of synchronization. When the network is slow, do not scale out—scale the batch size locally.
 
 :::
 
-The full configuration is: `{python} GradAccumScenario.n_gpus_ga` GPUs $\times$ batch `{python} GradAccumScenario.batch_per_gpu` $\times$ `{python} GradAccumScenario.accum_steps` accumulation steps = `{python} GradAccumScenario.effective_batch_str` effective batch, with communication overhead `{python} GradAccumScenario.comm_8gpu_ms` ms ÷ (`{python} GradAccumScenario.accum_steps` $\times$ `{python} GradAccumScenario.compute_8gpu_ms` ms) = `{python} GradAccumScenario.comm_overhead_pct_str` percent. Training time falls to `{python} GradAccumScenario.ga_training_hours_str` hours, costing USD `{python} GradAccumScenario.ga_cost_str` vs. USD 3,021 for 32 GPUs—a USD `{python} GradAccumScenario.ga_savings_str` savings (`{python} GradAccumScenario.ga_savings_pct_str` percent reduction) for only 1 hour longer training.
+The full configuration is: `{python} GradAccumScenario.n_gpus_ga` GPUs $\times$ batch `{python} GradAccumScenario.batch_per_gpu` $\times$ `{python} GradAccumScenario.accum_steps` accumulation steps = `{python} GradAccumScenario.effective_batch_str` effective batch, with communication overhead `{python} GradAccumScenario.comm_8gpu_ms_str` ms ÷ (`{python} GradAccumScenario.accum_steps` $\times$ `{python} GradAccumScenario.compute_8gpu_ms` ms) = `{python} GradAccumScenario.comm_overhead_pct_str` percent. Training time is `{python} GradAccumScenario.ga_training_hours_str` hours, costing USD `{python} GradAccumScenario.ga_cost_str` vs. USD `{python} GradAccumScenario.baseline_cost_str` for the 32-GPU commodity-network run—a USD `{python} GradAccumScenario.ga_savings_str` savings (`{python} GradAccumScenario.ga_savings_pct_str` percent reduction) at the cost of a modestly longer wall-clock run.
 
-Four insights emerge. NVLink enables efficient scaling within single nodes (97 percent efficiency), while inter-node communication kills efficiency (dropping to 13 percent). Gradient accumulation beats naive scaling for memory-bound models, so the sweet spot for GPT-2 is 8 GPUs per node with gradient accumulation, not naive scaling to 32+ GPUs. OpenAI's GPT-2 paper reports training on 32 V100s across 4 nodes using optimized communication (likely gradient accumulation combined with pipeline parallelism), not pure data parallelism.
+Four insights emerge. NVLink enables efficient scaling within single nodes (`{python} Scaling8GPU.efficiency_8gpu_str` percent efficiency), while inter-node communication kills efficiency (dropping to `{python} Scaling32GPU.efficiency_32gpu_str` percent). Gradient accumulation beats naive scaling for memory-bound models when the scale-out network is slow, so the sweet spot for this GPT-2 scenario is 8 GPUs per node with gradient accumulation, not naive scaling to 32+ GPUs. OpenAI's GPT-2 paper reports training on 32 V100s across 4 nodes using optimized communication (likely gradient accumulation combined with pipeline parallelism), not pure data parallelism.
 
 ### Memory-efficient data parallelism: ZeRO and FSDP {#sec-distributed-training-systems-systems-memoryefficient-data-parallelism-zero-fsdp-0e69}
 
@@ -2078,7 +2081,7 @@ class ThreeDParallelism:
 # │ Context: Callout "Automated Design Space Search"
 # │
 # │ Goal: Demonstrate the Tier 3 Optimizer finding the optimal 3D split.
-# │ Show: The optimizer automatically converges on TP=8, PP=8, DP=128 for 175B on 8K GPUs.
+# │ Show: The optimizer automatically converges on TP=8, PP=2, DP=512 for 175B on 8K GPUs.
 # │ How: Invoke mlsysim.ParallelismOptimizer on Archetype A and Frontier_8K.
 # │
 # │ Imports: mlsysim (ParallelismOptimizer, Models, Systems)
@@ -2104,8 +2107,8 @@ class AutoParallelism:
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     optimizer = ParallelismOptimizer()
 
-    # We constrain max_pp to 8 to ensure the model fits within 80 GB HBM limits while
-    # keeping the pipeline depth manageable.
+    # Bound the search to practical pipeline depths; the optimizer chooses the
+    # shallowest valid pipeline that preserves memory fit and avoids bubbles.
     res = optimizer.solve(model, fleet, batch_size=4096, max_pp=8)
 
     best_tp = res.best_config['tp']
@@ -2139,7 +2142,7 @@ class AutoParallelism:
 *   **Pipeline Parallelism (PP)**: `{python} AutoParallelism.opt_pp_str`
 *   **Data Parallelism (DP)**: `{python} AutoParallelism.opt_dp_str`
 
-**Systems insight**: The optimizer mathematically proves what engineers discover empirically: TP must match the intra-node GPU count (`{python} AutoParallelism.opt_tp_str`) to avoid traversing the slower inter-node fabric, and PP=8 is the minimal pipeline depth required to fit the remaining state in memory. This automated synthesis achieves a projected **`{python} AutoParallelism.opt_mfu_str` MFU**, demonstrating that empirical engineering heuristics are ultimately governed by structural mathematical laws.
+**Systems insight**: The optimizer mathematically proves what engineers discover empirically: TP must match the intra-node GPU count (`{python} AutoParallelism.opt_tp_str`) to avoid traversing the slower inter-node fabric, while the optimal pipeline depth is only PP=`{python} AutoParallelism.opt_pp_str` once tensor parallelism and sharded state make the memory budget fit. Deeper pipelines would reduce per-stage memory further, but they also increase the pipeline bubble and reduce MFU. This automated synthesis achieves a projected **`{python} AutoParallelism.opt_mfu_str` percent MFU**, demonstrating that empirical engineering heuristics are ultimately governed by structural mathematical laws.
 
 :::
 
@@ -2309,7 +2312,7 @@ Production RLHF systems address this asymmetry through temporal multiplexing. Du
 
 Direct Preference Optimization\index{Direct Preference Optimization!memory budget} (DPO) [@rafailov2023dpo] eliminates the reward model and value model entirely by reformulating the alignment objective as a classification loss over preference pairs. Instead of generating sequences, computing rewards, and estimating advantages, DPO directly optimizes the policy to assign higher log-probability to preferred responses over dispreferred ones, using the reference model only to compute a KL-divergence regularization term.
 
-The infrastructure implications are substantial. DPO reduces the multi-model system from four models to two: the policy model (training mode) and the reference model (inference mode). For our 70B example, the memory budget drops from 2,406 GB to 1,120 + 140 = 1,260 GB—a 48 percent reduction that cuts the minimum GPU count roughly in half. DPO also eliminates the autoregressive generation phase entirely. Training operates on a fixed dataset of (prompt, preferred response, dispreferred response) triples, restoring the standard pretraining data pipeline: fixed-length sequences, deterministic batching, and no sequential token-by-token generation. The training loop becomes a standard supervised learning step with a modified loss function, amenable to the same 3D parallelism, gradient accumulation, and communication overlap techniques used for pretraining.
+The infrastructure implications are substantial. DPO reduces the multi-model system from four models to two: the policy model (training mode) and the reference model (inference mode). For the 70B policy with 13B reward and value models quantified below, static parameter memory drops from about 1,494 GB to 1,260 GB, a 16 percent reduction. If the PPO value model is policy-sized, the reduction is much larger: about 2,406 GB to 1,260 GB, or roughly 48 percent. DPO also eliminates the autoregressive generation phase entirely. Training operates on a fixed dataset of (prompt, preferred response, dispreferred response) triples, restoring the standard pretraining data pipeline: fixed-length sequences, deterministic batching, and no sequential token-by-token generation. The training loop becomes a standard supervised learning step with a modified loss function, amenable to the same 3D parallelism, gradient accumulation, and communication overlap techniques used for pretraining.
 
 The trade-off is capability. DPO operates on a static preference dataset, meaning the policy cannot explore new responses and receive feedback during training. PPO's online generation allows the policy to improve iteratively on its own outputs, potentially discovering better strategies that the static dataset does not contain. For deployment scenarios where the preference data comprehensively covers the target distribution, DPO's infrastructure simplification dominates. For scenarios requiring adaptive exploration (training models to solve novel reasoning tasks, for example), PPO's online feedback loop may justify the 2$\times$ infrastructure overhead.
 
@@ -2337,7 +2340,7 @@ To make the infrastructure trade-off concrete, consider aligning a 70B policy mo
 # │          RLHFBudget.static_per_gpu_str, RLHFBudget.rlhf_remaining_str,
 # │          RLHFBudget.kv_per_gpu_str, RLHFBudget.rlhf_remaining_kv_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check
+from mlsysim.fmt import check, fmt_percent
 from mlsysim.core.constants import LLAMA2_70B_PARAMS, param
 
 class RLHFBudget:
@@ -2363,6 +2366,9 @@ class RLHFBudget:
     ref_per_gpu_sep = ref_mem/tp
     reward_mem = reward_b * bytes_infer
     value_mem = value_b * bytes_train
+    ppo_total_mem = policy_mem + ref_mem + reward_mem + value_mem
+    dpo_total_mem = policy_mem + ref_mem
+    dpo_reduction_pct = (ppo_total_mem - dpo_total_mem) / ppo_total_mem
     static_per_gpu = policy_per_gpu + ref_per_gpu
     remaining = h100_mem - static_per_gpu
     kv_per_gpu = kv_total_gb/n_gpus
@@ -2373,6 +2379,7 @@ class RLHFBudget:
     check(n_gpus == 32, f"GPU count ({n_gpus})")
     check(abs(policy_per_gpu - 35.0) < 0.5, f"policy per GPU ({policy_per_gpu})")
     check(value_mem == 208, f"value mem ({value_mem})")
+    check(abs(ppo_total_mem - 1494) < 20, f"PPO total memory ({ppo_total_mem})")
     check(abs(static_per_gpu - 39.4) < 0.4, f"static/GPU ({static_per_gpu:.1f})")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
@@ -2384,6 +2391,9 @@ class RLHFBudget:
     ref_per_gpu_sep_str = f"{ref_per_gpu_sep:.1f}"
     reward_mem_str = f"{reward_mem}"
     value_mem_str = f"{value_mem}"
+    ppo_total_mem_str = f"{ppo_total_mem:,.0f}"
+    dpo_total_mem_str = f"{dpo_total_mem:,.0f}"
+    dpo_reduction_pct_str = fmt_percent(dpo_reduction_pct, precision=0)
     static_per_gpu_str = f"{static_per_gpu:.1f}"
     remaining_str = f"{int(remaining)}"
     kv_per_gpu_str = f"{kv_per_gpu:.1f}"
@@ -2413,13 +2423,13 @@ PPO's two-phase design (generate then train) introduces a fundamental throughput
 | **Metric**                 | **PPO (70B policy)**           | **DPO (70B policy)**    |
 |:---------------------------|:-------------------------------|:------------------------|
 | **Models required**        | 4 (policy, ref, reward, value) | 2 (policy, reference)   |
-| **Total parameter memory** | $\sim$ 2,406 GB                | $\sim$ 1,260 GB         |
+| **Total parameter memory** | $\sim$ `{python} RLHFBudget.ppo_total_mem_str` GB | $\sim$ `{python} RLHFBudget.dpo_total_mem_str` GB |
 | **Minimum GPUs (memory)**  | 64--128                        | 32--64                  |
 | **Generation phase**       | Yes (sequential, BW-bound)     | None                    |
 | **Effective training MFU** | 15--25%                        | 40--55%                 |
 | **Data pipeline**          | Online generation              | Static preference pairs |
 
-**Systems Conclusion**: DPO halves the GPU requirement and doubles the effective compute utilization compared to PPO by eliminating two models and the autoregressive generation phase. The choice between them is not a modeling preference but an infrastructure constraint: organizations with limited GPU budgets adopt DPO because the alternative physically does not fit on their cluster.
+**Systems Conclusion**: In this 13B reward/value-model scenario, DPO reduces static parameter memory by `{python} RLHFBudget.dpo_reduction_pct_str` percent and doubles the effective compute utilization by eliminating the reward model, value model, and autoregressive generation phase. The choice between PPO and DPO is not only a modeling preference but an infrastructure constraint: organizations with limited GPU budgets often adopt DPO because it restores the workload to a standard fixed-data training loop. If the PPO value model is policy-sized rather than 13B, the memory reduction approaches the larger 2,406 GB to 1,260 GB comparison discussed above.
 
 :::
 
@@ -2531,7 +2541,8 @@ Engineers checkpoint distributed training "every hour" or "every 1000 steps" bas
 # │ How: Apply Young-Daly formula (sqrt(2*C*MTBF)) for a 1024-GPU cluster.
 # │
 # │ Imports: mlsysim.book (fmt, check)
-# │ Exports: YoungDaly.t_opt_min_str, YoungDaly.loss_pct_str,
+# │ Exports: YoungDaly.t_opt_min_str, YoungDaly.opt_overhead_pct_str,
+# │          YoungDaly.safe_loss_pct_str,
 # │          YoungDaly.daily_savings_str
 # └─────────────────────────────────────────────────────────────────────────────
 import math
@@ -2563,23 +2574,27 @@ class YoungDaly:
     rework_overhead = (t_opt_min_val/2) / mtbf_min
     total_overhead = ckpt_overhead + rework_overhead
 
-    # Daily dollar loss due to suboptimal (30 min) vs. optimal
+    # Daily dollar loss due to suboptimal (15 min) vs. optimal
     # (Context for the text argument)
     daily_cost = num_gpus * gpu_cost_hr * 24
-    loss_30min = ((c_min/30) + (30 / (2 * 60 * cluster_mtbf_hr))) * daily_cost
+    safe_interval_min = 15
+    safe_overhead = (c_min/safe_interval_min) + (safe_interval_min / (2 * 60 * cluster_mtbf_hr))
+    loss_safe = safe_overhead * daily_cost
     loss_opt = total_overhead * daily_cost
-    diff_daily = loss_30min - loss_opt
+    diff_daily = loss_safe - loss_opt
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(40 <= t_opt_min_val <= 60, f"Optimal interval ({t_opt_min_val:.1f}m) out of expected range.")
+    check(safe_overhead > total_overhead, "15-minute checkpointing should be costlier than optimal")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     t_opt_min_str = fmt(t_opt_min_val, precision=0)
-    loss_pct_str = fmt_percent(total_overhead, precision=1)
+    opt_overhead_pct_str = fmt_percent(total_overhead, precision=1)
+    safe_loss_pct_str = fmt_percent(safe_overhead, precision=1)
     daily_savings_str = fmt(diff_daily, precision=0, commas=True)
 ```
 
-The Young-Daly formula establishes the optimal checkpoint interval as $\tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}}$, where $T_{\text{write}}$ is checkpoint write time and $\text{MTBF}$ is mean time between failures. For a 1024-GPU cluster with 4-hour MTBF and 5-minute checkpoint time, the optimal interval is approximately **`{python} YoungDaly.t_opt_min_str` minutes**. Checkpointing every 15 minutes "to be safe" wastes `{python} YoungDaly.loss_pct_str` percent of compute time on unnecessary checkpoint overhead, while checkpointing every 2 hours risks losing significant work on failure. For larger models where checkpoint time increases to 15 minutes due to model size and storage bandwidth, the optimal interval shifts significantly. The cost of suboptimal checkpointing scales with cluster size: a 1024-GPU cluster loses approximately **USD `{python} YoungDaly.daily_savings_str` per day** to excessive checkpointing when using arbitrary intervals instead of the Young-Daly optimal.
+The Young-Daly formula establishes the optimal checkpoint interval as $\tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}}$, where $T_{\text{write}}$ is checkpoint write time and $\text{MTBF}$ is mean time between failures. For a 1024-GPU cluster with 4-hour MTBF and 5-minute checkpoint time, the optimal interval is approximately **`{python} YoungDaly.t_opt_min_str` minutes**, with an unavoidable checkpoint-plus-rework tax of `{python} YoungDaly.opt_overhead_pct_str` percent. Checkpointing every 15 minutes "to be safe" raises the total tax to `{python} YoungDaly.safe_loss_pct_str` percent, while checkpointing every 2 hours risks losing significant work on failure. For larger models where checkpoint time increases to 15 minutes due to model size and storage bandwidth, the optimal interval shifts significantly. The cost of suboptimal checkpointing scales with cluster size: a 1024-GPU cluster loses approximately **USD `{python} YoungDaly.daily_savings_str` per day** to excessive checkpointing when using a 15-minute interval instead of the Young-Daly optimum.
 
 ## Summary {#sec-distributed-training-systems-summary}
 

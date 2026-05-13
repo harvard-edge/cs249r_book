@@ -314,15 +314,15 @@ class InferenceEconomics:
     # through the markdown pipeline; otherwise the literal "$...$" bypasses
     # Pandoc's math parser and renders as raw text.
     if lifetime_queries_val >= 1e9:
-        exp = int(round(math.log10(lifetime_queries_val)))
+        exp = int(math.floor(math.log10(lifetime_queries_val)))
         mantissa = lifetime_queries_val / 10**exp
         lifetime_queries_latex_str = md_math(
             f"{mantissa:.2f} \\times 10^{{{exp}}}"
         )
     else:
         lifetime_queries_latex_str = md_math(f"{lifetime_queries_val:,.0f}")
-    serving_cost_total_str = fmt(serving_total_cost_val, precision=0)
-    training_cost_total_str = fmt(training_total_cost, precision=0)
+    serving_cost_total_str = f"USD {fmt(serving_total_cost_val, precision=0)}"
+    training_cost_total_str = f"USD {fmt(training_total_cost, precision=0)}"
     leverage_ratio_str = f"{leverage_ratio:.0f}"
     qps_str = f"{qps:,}"
     serve_duration_days_str = f"{serve_duration_days}"
@@ -375,7 +375,7 @@ The cost structure motivates the optimization techniques throughout this chapter
 
 @fig-serving-cost-curve illustrates why optimization matters: the gap between naive and optimized serving determines whether an inference service is profitable or hemorrhaging money.
 
-::: {#fig-serving-cost-curve fig-env="figure" fig-pos="htb" fig-cap="**The Serving Cost Curve**: Cost per 1000 tokens decreases with scale and optimization. Single-GPU serving never reaches profitability at typical pricing. Multi-GPU batching breaks even at moderate volume. Fully optimized serving (INT4, continuous batching, speculative decoding) achieves profitability at much lower volumes, fundamentally changing the economics of inference." fig-alt="Log-log plot of cost per 1000 tokens vs. daily volume for single-GPU, multi-GPU, and optimized serving with break-even line."}
+::: {#fig-serving-cost-curve fig-env="figure" fig-pos="htb" fig-cap="**The Serving Cost Curve**: Cost per 1000 tokens decreases with scale and optimization. Single-GPU serving reaches break-even only at very high volume. Multi-GPU batching breaks even at moderate volume. Fully optimized serving (INT4, continuous batching, speculative decoding) achieves profitability at much lower volumes, fundamentally changing the economics of inference." fig-alt="Log-log plot of cost per 1000 tokens vs. daily volume for single-GPU, multi-GPU, and optimized serving with break-even line."}
 
 ```{python}
 #| echo: false
@@ -451,9 +451,9 @@ plt.show()
 
 :::
 
-The cost ratios in @tbl-cost-ratios tell a static story, but the *dynamics* of cost accumulation reveal an even more striking pattern. @fig-serving-cost-crossover plots cumulative cost over a 36-month deployment window for three representative scenarios: a small model with low traffic, a 70B LLM serving one million daily active users, and a recommendation system serving 100 million users. The crossover point, where cumulative serving cost overtakes training cost, varies by orders of magnitude across these scenarios. For recommendation systems, serving dominates within days; for high-traffic LLMs, within roughly six weeks. Only small models with expensive training and low traffic see training cost dominate for extended periods. This temporal view reinforces why inference optimization yields the highest return on engineering investment for any model that reaches production scale [@patel2024].
+The cost ratios in @tbl-cost-ratios tell a static story, but the *dynamics* of cost accumulation reveal an even more striking pattern. @fig-serving-cost-crossover plots cumulative total deployment cost over a 36-month window for three representative scenarios: a small model with low traffic, a 70B LLM serving one million daily active users, and a recommendation system serving 100 million users. The vertical crossover markers show when cumulative serving spend equals the original training cost; because the plotted curves include both training and serving, the total-cost curve is at roughly twice the training baseline at that marker. For recommendation systems, serving dominates within days; for high-traffic LLMs, within roughly six weeks. Only small models with expensive training and low traffic see training cost dominate for extended periods. This temporal view reinforces why inference optimization yields the highest return on engineering investment for any model that reaches production scale [@patel2024].
 
-::: {#fig-serving-cost-crossover fig-env="figure" fig-pos="htb" fig-cap="**The Serving Cost Crossover**: Cumulative cost of training vs. serving for three deployment scenarios. For high-traffic LLMs, serving cost exceeds training cost within weeks. For recommendation systems at 100M daily active users, serving dominates within days. Only low-traffic, expensive-to-train models see training cost dominate for extended periods." fig-alt="Area chart showing cumulative cost over 36 months for three scenarios with crossover points marked"}
+::: {#fig-serving-cost-crossover fig-env="figure" fig-pos="htb" fig-cap="**The Serving Cost Crossover**: Cumulative total deployment cost (initial training plus ongoing serving) for three scenarios. Vertical markers indicate when the serving portion equals the one-time training cost. For high-traffic LLMs, serving cost matches training cost within weeks. For recommendation systems at 100M daily active users, serving dominates within days. Only low-traffic, expensive-to-train models see training cost dominate for extended periods." fig-alt="Area chart showing cumulative total deployment cost over 36 months for three scenarios with crossover points marked"}
 
 ```{python}
 #| echo: false
@@ -465,7 +465,8 @@ The cost ratios in @tbl-cost-ratios tell a static story, but the *dynamics* of c
 # │ Goal: Plot cumulative cost over 36 months for three scenarios; show
 # │       crossover where serving overtakes training.
 # │ Show: Three lines; fill_between; crossover markers.
-# │ How: cum_serve = train + serve_per_month*months; viz.setup_plot().
+# │ How: total_cost = train + serve_per_month*months; vertical markers show
+# │      where the serving portion equals the one-time training cost.
 # │
 # │ Imports: numpy (np), matplotlib.pyplot (plt), mlsysim.core.viz (viz)
 # │ Exports: (figure only, no prose variables)
@@ -793,7 +794,7 @@ The engineering goal is to find the maximum $B$ such that $L_{\text{lat}}(B) \le
 # │ Context: "Batching Efficiency Curve" .callout-notebook
 # │
 # │ Goal: Quantify throughput-latency trade-offs for vision vs LLM batching.
-# │ Show: LLM knee at B=128; Vision knee at B=32.
+# │ Show: LLM knee at B=80; Vision knee at B=2.
 # │ How: X(B) = B / (T_fixed + B * T_var).
 # │
 # │ Imports: mlsysim.book (check)
@@ -1137,6 +1138,7 @@ class LittlesLawVerify:
     check(7 < L < 8, f"L should be ~7.4, got {L:.2f}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     expected_total_str = f"{expected_total_ms}"
+    utilization_str = f"{utilization:.3f}"
     l_str = f"{L:.2f}"
     in_service_str = f"{in_service:.1f}"
     in_queue_str = f"{in_queue:.2f}"
@@ -1168,7 +1170,7 @@ $L = 100 \times$ `{python} LittlesLawVerify.expected_total_ms/1000` $=$ `{python
 
 With batch size `{python} LittlesLawVerify.batch_size` and utilization `{python} GPT3ServingResults.b16_util_pct` percent:
 
-- Expected requests in service: `{python} LittlesLawVerify.batch_size` $\times$ `{python} LittlesLawVerify.utilization` = `{python} LittlesLawVerify.in_service_str`
+- Expected requests in service: `{python} LittlesLawVerify.batch_size` $\times$ `{python} LittlesLawVerify.utilization_str` = `{python} LittlesLawVerify.in_service_str`
 - Expected requests in queue: `{python} LittlesLawVerify.l_str` - `{python} LittlesLawVerify.in_service_str` = `{python} LittlesLawVerify.in_queue_str`
 
 This matches our queue wait calculation: approximately 1-2 requests waiting on average.
@@ -2365,8 +2367,8 @@ All three requests reference the same physical blocks for the system prompt. Onl
 # │ Goal: Quantify KV cache memory savings from prefix caching for a 70B-class
 # │   LLM chatbot with 2000-token system prompt and 1000 concurrent users,
 # │   motivating why prefix caching enables order-of-magnitude concurrency gains.
-# │ Show: kv_tb_no_cache_str="~2.6" TB (without), kv_tb_cached_str="~0.66" TB
-# │   (with), memory_reduction_pct_str="75"%, concurrent_multiplier_str="4"—
+# │ Show: kv_tb_no_cache_str="~6.6" TB (without), kv_tb_cached_str="~1.3" TB
+# │   (with), memory_reduction_pct_str="80"%, concurrent_multiplier_str="5"—
 # │   inline in the "Prefix Caching at Scale" callout.
 # │ How: Multiply token count × KV pairs × layers × hidden_dim × bytes/element,
 # │   divide by 1e12 for TB; compare shared-prefix vs per-user-token totals.
@@ -3163,7 +3165,7 @@ class TpSpeedupCalc:
 - Sequential: `{python} TpSpeedupCalc.seq_total_ms_str` ms per token
 - 8-way TP: `{python} TpSpeedupCalc.tp8_total_ms_str` ms per token
 
-The `{python} TpSpeedupCalc.tp_speedup_str`$\times$ speedup (vs. theoretical `{python} TpSpeedupCalc.tp_theoretical`$\times$) reflects communication overhead. With `{python} TpSpeedupCalc.nvlink_h100_gbs` GB/s NVLink bandwidth, each 8 MB activation all-reduce takes ~0.3 ms.
+The `{python} TpSpeedupCalc.tp_speedup_str`$\times$ speedup (vs. theoretical `{python} TpSpeedupCalc.tp_theoretical`$\times$) reflects communication overhead. At `{python} TpSpeedupCalc.nvlink_h100_gbs` GB/s, moving an 8 MB activation payload would take only about 0.01 ms by raw bandwidth math; the 0.3 ms budget shown here includes collective launch, synchronization, ring protocol, and framework overheads.
 
 **Time-to-first-token** (1024-token prompt):
 

@@ -1598,7 +1598,7 @@ class LatencyTableCalc:
 # │ Context: Latency distribution narrative (key insight paragraph)
 # │
 # │ Goal: Demonstrate the shifting bottleneck from inference to preprocessing.
-# │ Show: That optimized inference (TensorRT) makes preprocessing 68% of total latency.
+# │ Show: That optimized inference (TensorRT) makes preprocessing 63% of total latency.
 # │ How: Compare phase durations before and after model acceleration.
 # │
 # │ Imports: mlsysim.book (fmt)
@@ -1841,7 +1841,7 @@ class ResolutionScalingCalc:
     measured_slowdown_str = f"{measured_slowdown_value:.1f}"
 ```
 
-Doubling resolution from `{python} ResolutionScalingCalc.r1_str` to `{python} ResolutionScalingCalc.r2_str` theoretically yields `{python} ResolutionScalingCalc.theoretical_str`$\times$ slowdown (measured: `{python} ResolutionScalingCalc.measured_slowdown_str`$\times$ due to fixed overhead amortization). However, at high resolutions, models transition from compute-bound to memory-bound as activation tensors exceed cache capacity. @tbl-resolution-bottleneck quantifies this transition for ResNet-50, showing how arithmetic intensity decreases with resolution:
+Doubling resolution from `{python} ResolutionScalingCalc.r1_str` to `{python} ResolutionScalingCalc.r2_str` theoretically yields `{python} ResolutionScalingCalc.theoretical_str`$\times$ slowdown (measured: `{python} ResolutionScalingCalc.measured_slowdown_str`$\times$ due to fixed overhead amortization). However, at high resolutions, models move toward memory-bandwidth sensitivity as activation tensors exceed cache capacity. @tbl-resolution-bottleneck quantifies this transition for ResNet-50, showing how arithmetic intensity decreases toward the roofline ridge point:
 
 ```{python}
 #| label: resolution-bottleneck-calc
@@ -1861,7 +1861,7 @@ Doubling resolution from `{python} ResolutionScalingCalc.r1_str` to `{python} Re
 from mlsysim.fmt import fmt
 
 class ResolutionBottleneckCalc:
-    """Shows that increasing resolution decreases arithmetic intensity, shifting from compute- to memory-bound."""
+    """Shows that increasing resolution decreases arithmetic intensity toward the roofline ridge point."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     act_224_mb_value = 12.5               # 224×224 activation size (MB)
@@ -1890,16 +1890,16 @@ class ResolutionBottleneckCalc:
     ridge_point_str = f"{ridge_point_value}"
 ```
 
-The resulting shift from compute-bound to memory-bound operation is evident in @tbl-resolution-bottleneck:
+The resulting shift toward memory-bandwidth sensitivity is evident in @tbl-resolution-bottleneck:
 
 | **Resolution**       |                  **Activation Size**                  |                    **Arith. Intensity**                   | **Bottleneck** |
 |:---------------------|:-----------------------------------------------------:|:---------------------------------------------------------:|:--------------:|
 | **$224{\times}224$** | `{python} ResolutionBottleneckCalc.act_224_mb_str` MB | `{python} ResolutionBottleneckCalc.ai_224_str` FLOPs/byte |    Compute     |
-| **$384{\times}384$** | `{python} ResolutionBottleneckCalc.act_384_mb_str` MB | `{python} ResolutionBottleneckCalc.ai_384_str` FLOPs/byte |  Transitional  |
-| **$512{\times}512$** | `{python} ResolutionBottleneckCalc.act_512_mb_str` MB | `{python} ResolutionBottleneckCalc.ai_512_str` FLOPs/byte |   Memory BW    |
-| **$640{\times}640$** | `{python} ResolutionBottleneckCalc.act_640_mb_str` MB | `{python} ResolutionBottleneckCalc.ai_640_str` FLOPs/byte |   Memory BW    |
+| **$384{\times}384$** | `{python} ResolutionBottleneckCalc.act_384_mb_str` MB | `{python} ResolutionBottleneckCalc.ai_384_str` FLOPs/byte |    Compute     |
+| **$512{\times}512$** | `{python} ResolutionBottleneckCalc.act_512_mb_str` MB | `{python} ResolutionBottleneckCalc.ai_512_str` FLOPs/byte |    Compute     |
+| **$640{\times}640$** | `{python} ResolutionBottleneckCalc.act_640_mb_str` MB | `{python} ResolutionBottleneckCalc.ai_640_str` FLOPs/byte |   Near ridge   |
 
-: **Resolution and Compute Bottleneck**: ResNet-50 arithmetic intensity decreases with resolution as activation sizes grow. For a V100 PCIe (14 TFLOPS FP32, 900 GB/s bandwidth), the ridge point is approximately 16 FLOPs/byte. At $224{\times}224$, compute dominates; by $512{\times}512$, memory bandwidth becomes the limiting factor. {#tbl-resolution-bottleneck tbl-colwidths="[25,25,25,25]"}
+: **Resolution and Compute Bottleneck**: ResNet-50 arithmetic intensity decreases with resolution as activation sizes grow. For a V100 PCIe (14 TFLOPS FP32, 900 GB/s bandwidth), the ridge point is approximately 16 FLOPs/byte. At $224{\times}224$, compute dominates; by $640{\times}640$, the model is close enough to the ridge that further resolution increases, lower-bandwidth hardware, or cache misses can make memory bandwidth the limiting factor. {#tbl-resolution-bottleneck tbl-colwidths="[25,25,25,25]"}
 
 #### Resolution strategies in production {#sec-model-serving-deploymentspecific-resolution-decisions-1d76}
 
@@ -3043,7 +3043,7 @@ $$ T = \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}} $$ {#eq
 
 **Deriving the sweet spot**:
 
-*   **Case 1 (batch 1)**: Overhead (`{python} BatchingAnalysisCalc.il_overhead_str` ms) ≈ Compute (`{python} BatchingAnalysisCalc.il_compute_b1_str` ms). Efficiency ≈ `{python} BatchingAnalysisCalc.il_eff_b1_str` percent. The GPU is mostly waiting.
+*   **Case 1 (batch 1)**: Overhead (`{python} BatchingAnalysisCalc.il_overhead_str` ms) ≫ Compute (`{python} BatchingAnalysisCalc.il_compute_b1_str` ms). Efficiency ≈ `{python} BatchingAnalysisCalc.il_eff_b1_str` percent. The GPU is mostly waiting.
 *   **Case 2 (batch 32)**: Overhead (`{python} BatchingAnalysisCalc.il_overhead_str` ms) ≪ Compute (`{python} BatchingAnalysisCalc.il_compute_b32_str` ms). Efficiency ≈ `{python} BatchingAnalysisCalc.il_eff_b32_str` percent. The GPU is crunching numbers.
 
 **Golden rule**: Increase batch size until the **Latency Term** becomes negligible (< `{python} BatchingAnalysisCalc.il_threshold_str` percent of total time). Beyond this point, additional batching yields minimal throughput but imposes a linear latency penalty.
@@ -3174,7 +3174,7 @@ The aggressive window achieves only `{python} BatchingOptimization.throughput_ga
 from mlsysim.fmt import fmt
 
 class SloViolationCalc:
-    """p99 latency is 2.2× the mean due to batch size variance from Poisson arrivals."""
+    """p99 latency is ~1.66× the mean due to batch size variance from Poisson arrivals."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     qps_value = 500
@@ -3328,7 +3328,7 @@ class PracticalConfigCalc:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     pc_batch_budget_ms_value = pc_slo_ms_value * pc_budget_pct_value
     pc_max_window_ms_value = pc_batch_budget_ms_value
-    pc_expected_batch_value = pc_qps_value * (pc_max_window_ms_value / 1000)
+    pc_expected_batch_value = pc_qps_value * (pc_config_window_ms_value / 1000)
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     pc_slo_ms_str = f"{pc_slo_ms_value}"
@@ -3704,7 +3704,7 @@ class GpuSpecs:
 # │ Context: Callout "The Carbon Cost of a Chat" - energy footprint of LLM serving
 # │
 # │ Goal: Quantify the energy cost per LLM token.
-# │ Show: That poor utilization causes 10× higher energy consumption per token.
+# │ Show: That poor utilization causes about 3× higher energy consumption per token.
 # │ How: Calculate Joules per token based on TDP and concurrent request volume.
 # │
 # │ Imports: mlsysim.core.constants (H100_TDP, energy comparisons)
@@ -3717,7 +3717,7 @@ from mlsysim.core.constants import H100_TDP, ENERGY_SMARTPHONE_CHARGE_J, ENERGY_
 from mlsysim.fmt import fmt
 
 class CarbonCostCalc:
-    """Energy cost per LLM token: poor utilization causes 10× higher Joules/token."""
+    """Energy cost per LLM token: poor utilization causes about 3× higher Joules/token."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     cc_concurrent_req_value = 114                     # concurrent requests per H100
@@ -4009,7 +4009,7 @@ class PrecisionTradeoffCalc:
 
 **Key observations**:
 
-- INT8 achieves `{python} PrecisionTradeoffCalc.pt_int8_speedup_str`$\times$ speedup but loses `{python} PrecisionTradeoffCalc.pt_int8_acc_loss_str` percent accuracy with post-training quantization (PTQ)
+- INT8 achieves `{python} PrecisionTradeoffCalc.pt_int8_speedup_str`$\times$ speedup but loses `{python} PrecisionTradeoffCalc.pt_int8_acc_loss_str` percentage points of accuracy with post-training quantization (PTQ)
 - Quantization-aware training (QAT) recovers most accuracy but requires retraining
 - FP16 provides `{python} PrecisionTradeoffCalc.pt_fp16_speedup_str`$\times$ speedup with no accuracy loss for most models
 

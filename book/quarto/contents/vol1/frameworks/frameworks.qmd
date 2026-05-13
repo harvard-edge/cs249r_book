@@ -886,7 +886,7 @@ class DispatchTax:
 
     # Kernel Durations (μs)
     small_kernel_us = 1.0     # e.g. ReLU on 1024 elements
-    large_kernel_us = 100.0   # e.g. MatMul 1024x1024
+    large_kernel_us = 100.0   # e.g. large matrix multiply
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Dispatch Tax = Overhead / (Overhead + Execution)
@@ -901,8 +901,8 @@ class DispatchTax:
     python_overhead_str = f"{int(python_overhead_us)}"
     small_kernel_str = f"{int(small_kernel_us)}"
     large_kernel_str = f"{int(large_kernel_us)}"
-    small_tax_pct_str = f"{int(small_tax_pct)}"
-    large_tax_pct_str = f"{int(large_tax_pct)}"
+    small_tax_pct_str = f"{small_tax_pct:.0f}"
+    large_tax_pct_str = f"{large_tax_pct:.0f}"
 ```
 
 ### The dispatch tax: Python overhead vs. GPU reality {#sec-ml-frameworks-dispatch-tax}
@@ -912,7 +912,7 @@ Eager execution's performance ceiling is driven by a fundamental systems mismatc
 Every operation in an eager framework (like standard PyTorch) must pay a fixed "Tax" of approximately **`{python} DispatchTax.python_overhead_str` $\mu$s** for Python to lookup the function, check tensor types, and launch the kernel.
 
 *   **For small operations** (for example, a ReLU on a small vector), the kernel might execute in only **`{python} DispatchTax.small_kernel_str` $\mu$s**. The dispatch tax is **`{python} DispatchTax.small_tax_pct_str` percent**, meaning the GPU spends the vast majority of its time waiting for the next command.
-*   **For large operations** (for example, a massive $4096{\times}4096$ matrix multiply), the kernel executes for **`{python} DispatchTax.large_kernel_str` $\mu$s**. The dispatch tax drops to **`{python} DispatchTax.large_tax_pct_str` percent**, and the system becomes compute bound.
+*   **For large operations** (for example, a large matrix multiply), the kernel executes for **`{python} DispatchTax.large_kernel_str` $\mu$s**. The dispatch tax drops to **`{python} DispatchTax.large_tax_pct_str` percent**, and the system becomes compute bound.
 
 The dispatch tax explains why models with many small layers run significantly slower than their raw FLOP count predicts. To reach the "Titan" standard of efficiency, frameworks must move from **Kernel-by-Kernel Dispatch** to **Graph-Level Execution**, where the dispatch tax is paid once for the entire graph rather than per operation. The hybrid JIT and compilation strategies in @sec-ml-frameworks-hybrid-approaches-jit-compilation-8954 exist precisely to address this overhead.
 
@@ -1459,11 +1459,13 @@ The compilation overhead in these examples (approximately 100 ms to compile the 
 # │ Show: A 2× speedup from eliminating redundant kernel launches and memory traffic.
 # │ How: Model dispatch and memory overhead for eager vs. fused Add+ReLU.
 # │
-# │ Imports: None (pure calculation)
+# │ Imports: mlsysim.book (check)
 # │ Exports: python_dispatch_us_str, kernel_launch_only_us_str, memory_access_us_str,
 # │          kernel_launch_us_str, eager_overhead_str, compiled_overhead_str,
 # │          overhead_speedup_str, bw_efficiency_str
 # └─────────────────────────────────────────────────────────────────────────────
+
+from mlsysim.fmt import check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class FusionSpeedup:
@@ -2770,9 +2772,9 @@ optimizer.step()
 # │          and Checkpointing subsection discussing Adam memory overhead
 # │
 # │ Goal: Quantify the memory overhead of Adam optimizer state for a 7B-param
-# │       model: FP16 weights (14 GB) + Adam state (56 GB) = ~98 GB total,
+# │       model: FP16 weights (14 GB) + Adam state (56 GB) = ~70 GB total,
 # │       showing that optimizer state dominates training memory.
-# │ Show: "~98 GB total (14 GB weights + 56 GB optimizer state)"—inline in
+# │ Show: "~70 GB total (14 GB weights + 56 GB optimizer state)"—inline in
 # │       Optimizer State prose; model_7b_fp16_gb_str reused later in nn.Module
 # │       serialization and Fallacies sections.
 # │ How: model_memory() for both BYTES_FP16 and BYTES_ADAM_STATE quantities.
@@ -2814,7 +2816,7 @@ class Model7B:
 # Note: Use Model7B.model_7b_total_gb_str directly.
 ```
 
-Resuming training after interruption requires restoring model weights and optimizer state together: momentum buffers, adaptive learning rates, and gradient statistics. For Adam, optimizer state typically quintuples the memory footprint beyond weights alone (since two FP32 states are stored for each FP16 parameter), meaning a 7B-parameter model requires approximately `{python} Model7B.model_7b_total_gb_str` GB total (`{python} Model7B.model_7b_fp16_gb_str` GB weights + `{python} Model7B.model_7b_adam_gb_str` GB optimizer state). Checkpoint size therefore bounds recovery speed after failure, connecting fault tolerance directly to the iron law's $D_{\text{vol}}$ term.
+Resuming training after interruption requires restoring model weights and optimizer state together: momentum buffers, adaptive learning rates, and gradient statistics. For Adam, optimizer state adds about 4$\times$ the FP16 weight memory (two FP32 states per parameter), so weights plus optimizer state require about 5$\times$ the FP16 weight footprint. A 7B-parameter model therefore requires approximately `{python} Model7B.model_7b_total_gb_str` GB total (`{python} Model7B.model_7b_fp16_gb_str` GB weights + `{python} Model7B.model_7b_adam_gb_str` GB optimizer state). Checkpoint size therefore bounds recovery speed after failure, connecting fault tolerance directly to the iron law's $D_{\text{vol}}$ term.
 
  @sec-model-training covers optimizer memory requirements and optimization strategies for large-scale training, where checkpoint size becomes a binding constraint. Frameworks provide the `state_dict()` interface to access optimizer state for serialization (@lst-state-dict-interface), and resuming training requires loading both model parameters and optimizer state (@lst-checkpoint-save-load).
 
@@ -3077,7 +3079,7 @@ The memory breakdown for ResNet-50 in @sec-ml-frameworks-principle-2-memorycompu
 
 1.  **Model weights**: `{python} AdminTax.admin_weights_gb_str` GB.
 2.  **Gradients**: `{python} AdminTax.admin_grads_gb_str` GB (same size as weights).
-3.  **Optimizer states (Adam)**: `{python} AdminTax.admin_opt_gb_str` GB ($2 \times \text{weights}$ for momentum and velocity in FP32).
+3.  **Optimizer states (Adam)**: `{python} AdminTax.admin_opt_gb_str` GB ($4 \times$ FP16 weight memory for momentum and velocity stored in FP32).
 4.  **Activations**: For a batch size of `{python} AdminTax.admin_batch_str` and a `{python} AdminTax.admin_layers_str`-layer network, the framework must store every intermediate layer output for the backward pass.
 
     $$ \text{Activations} \approx \text{Batch} \times \text{Layers} \times \text{Width}^{2} \times 2 \text{ bytes} $$
@@ -4876,7 +4878,7 @@ class CompilationOverheadCalc:
     compiled_total_str = fmt(compiled_total, precision=1, commas=False)        # e.g. "304.7"
 ```
 
-Engineers assume compilation overhead is a one-time cost that pays off quickly. @tbl-training-benchmark shows torch.compile achieves 48 percent higher ResNet-50 throughput but incurs fifteen to sixty seconds compilation overhead per graph change. For a `{python} CompilationOverheadCalc.n_images_str`-image experiment with `{python} CompilationOverheadCalc.n_recompilations_str` code changes: Eager completes in `{python} CompilationOverheadCalc.eager_total_str` seconds while Compiled requires `{python} CompilationOverheadCalc.compiled_total_str` seconds (including `{python} CompilationOverheadCalc.n_recompilations_str` $\times$ `{python} CompilationOverheadCalc.compilation_time_s_str` s recompilation overhead). Teams that enable compilation during rapid prototyping waste hours waiting for recompilations that negate any throughput gains.
+Engineers assume compilation overhead is a one-time cost that pays off quickly. @tbl-training-benchmark shows torch.compile achieves 48 percent higher ResNet-50 throughput but incurs fifteen to sixty seconds compilation overhead per graph change. For a `{python} CompilationOverheadCalc.n_images_str`-image experiment with `{python} CompilationOverheadCalc.n_recompilations_str` code changes: Eager completes in `{python} CompilationOverheadCalc.eager_total_str` seconds while Compiled requires `{python} CompilationOverheadCalc.compiled_total_str` seconds (including `{python} CompilationOverheadCalc.n_recompilations_str` $\times$ `{python} CompilationOverheadCalc.compilation_time_s_str` s recompilation overhead). Teams that enable compilation during rapid prototyping can waste minutes waiting for recompilations that negate any throughput gains.
 
 ## Summary {#sec-ml-frameworks-summary-07f0}
 

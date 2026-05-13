@@ -118,7 +118,7 @@ class InfraSetup:
     # Models
     m_gpt3 = Models.GPT3
     m_llama70b = Models.Language.Llama2_70B
-    m_frontier = Models.GPT4  # Representative Frontier model
+    m_frontier = Models.GPT3  # 175B running example used throughout the chapter
 
     # 1. Compute and Memory (H100)
     h100_tflops_val = h_h100.peak_flops.m_as(TFLOPs/second)
@@ -133,9 +133,9 @@ class InfraSetup:
     ib_bw_gbps_val = INFINIBAND_NDR_BW.m_as('Gbps')
 
     # 4. Token Latency (Llama-2-70B on H100)
-    weight_vol = m_llama70b.parameters * BYTES_FP16
+    weight_vol = m_llama70b.size_in_bytes(BYTES_FP16)
     t_mem_ms = (weight_vol/h_h100.memory_bw).to('millisecond').magnitude
-    t_comp_ms = (2 * m_llama70b.parameters/h_h100.peak_flops).to('millisecond').magnitude
+    t_comp_ms = (2 * m_llama70b.parameters.to("count").magnitude * flop/h_h100.peak_flops).to('millisecond').magnitude
     dominance = (t_mem_ms / (t_mem_ms + t_comp_ms)) * 100
 
     # OUTPUTS
@@ -145,7 +145,7 @@ class InfraSetup:
     gpt3_params_b = f"{gpt3_params_b_val:.0f}"
     frontier_params_b = f"{frontier_params_b_val:.0f}"
     ib_bw_str = f"{ib_bw_gbps_val:.0f}"
-    ddr_bw_str = "100"  # Approximate for DRAM
+    ddr_bw_str = "200"  # Approximate high-end DDR5 server bandwidth
     dominance_str = f"{dominance:.1f}"
 
     # Token latency math blocks (used in @nb-token-latency)
@@ -569,16 +569,16 @@ Verify your understanding of 3D-stacked memory:
 # │ Show: ~200 GB/s DDR; ~3.35 TB/s HBM3.
 # │ How: pulling constants from mlsysim.core.constants.
 # │
-# │ Imports: mlsysim.core.constants (SYSTEM_MEMORY_BW, H100_MEM_BW, GB, TB, second)
+# │ Imports: mlsysim.core.constants (H100_MEM_BW, GB, TB, second)
 # │ Exports: InfraSetup.ddr_bw_str, InfraSetup.h100_bw
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import SYSTEM_MEMORY_BW, H100_MEM_BW, GB, TB, second
+from mlsysim.core.constants import H100_MEM_BW, GB, TB, second
 
 class MemoryBandwidthScenario:
     """Memory bandwidth comparison reference."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    ddr_bw = SYSTEM_MEMORY_BW
+    ddr_bw = 200 * GB / second
     hbm_bw = H100_MEM_BW
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -598,7 +598,7 @@ class MemoryBandwidthScenario:
 |:-------------------------------|:---------------------------------------------------:|:----------------------------------------------------:|:-------------------------:|
 | **Mechanism**                  |                    2D PCB Traces                    |                 **3D Die Stacking**                  |             -             |
 | **Placement**                  |                    Socketed DIMMs                   |              **On-package (Substrate)**              |   **Physical Proximity**  |
-| **Bandwidth**\index{Bandwidth} | ~`{python} MemoryBandwidthScenario.ddr_bw_str` GB/s | **~`{python} MemoryBandwidthScenario.h100_bw` TB/s** |   **~50$\times$ Faster**  |
+| **Bandwidth**\index{Bandwidth} | ~`{python} MemoryBandwidthScenario.ddr_bw_str` GB/s | **~`{python} MemoryBandwidthScenario.h100_bw` TB/s** |   **~17$\times$ Faster**  |
 | **Interface Width**            |                        64-bit                       |                **1024-bit per stack**                |    **16$\times$ Wider**   |
 | **Energy**\index{Energy}       |                      ~20 pJ/bit                     |                    **~2 pJ/bit**                     | **10$\times$ Efficiency** |
 
@@ -651,7 +651,7 @@ The distinction between memory *capacity* (how many gigabytes the HBM can store)
 
 **Scenario**: Generating one token for Llama-3 70B (140 GB weights in FP16) on an NVIDIA H100.
 
-1. **Compute Time**\index{Compute!compute time}: Each token requires $2 \times 70\text{B} = 1.4 \times 10^{11}$ floating-point operations. At `{python} H100PerformanceScenario.h100_tflops` TFLOPS peak throughput, the arithmetic takes:
+1. **Compute Time**\index{Compute!compute time}: Each token requires $2 \times 70\text{B} = 1.4 \times 10^{11}$ floating-point operations. At `{python} InfraSetup.h100_tflops` TFLOPS FP16/BF16 peak throughput, the arithmetic takes:
    `{python} InfraSetup.t_comp_math`
 2. **Memory Time**\index{Memory!time}: Loading 140 GB of weights from HBM at 3.35 TB/s takes:
    `{python} InfraSetup.t_mem_math`
@@ -1304,14 +1304,14 @@ At fleet scale, DVFS also affects power planning. The data center's power delive
 # │
 # │ Imports: mlsysim.core.constants (V100_FLOPS_FP16_TENSOR, V100_TDP,
 # │          A100_FLOPS_FP16_TENSOR, A100_TDP, H100_FLOPS_FP8_TENSOR,
-# │          H100_TDP, B200_FLOPS_FP16_TENSOR, B200_TDP, TFLOPs, second, watt)
+# │          H100_TDP, B200_FLOPS_FP8_TENSOR, B200_TDP, TFLOPs, second, watt)
 # │ Exports: v100_ef, a100_ef, h100_ef, b200_ef
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.constants import (
     V100_FLOPS_FP16_TENSOR, V100_TDP,
     A100_FLOPS_FP16_TENSOR, A100_TDP,
     H100_FLOPS_FP8_TENSOR, H100_TDP,
-    B200_FLOPS_FP16_TENSOR, B200_TDP,
+    B200_FLOPS_FP8_TENSOR, B200_TDP,
     TFLOPs, second, watt
 )
 
@@ -1325,7 +1325,7 @@ class GpuEfficiencyScenario:
     a100_tdp = A100_TDP
     h100_f16 = H100_FLOPS_FP8_TENSOR
     h100_tdp = H100_TDP
-    b200_f16 = B200_FLOPS_FP16_TENSOR
+    b200_f16 = B200_FLOPS_FP8_TENSOR
     b200_tdp = B200_TDP
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -2350,12 +2350,12 @@ class PodTrainingMath:
     pod_flops_math = md_math(f"6 \\times {InfraSetup.gpt3_params_b} \\times 300 \\times 10^{{18}}")
     total_flops_math = md_math(f"3.15 \\times 10^{{23}}")
     n_params_math = md_math(f"P = {InfraSetup.gpt3_params_b} \\times 10^9")
-    cluster_throughput_math = md_math(f"8{{,}}192 \\times {InfraSetup.h100_tflops} \\times 10^{{12}} \\times 0.45")
+    cluster_throughput_math = md_math(f"8{{,}}192 \\times {H100PerformanceScenario.h100_tflops} \\times 10^{{12}} \\times 0.45")
 ```
 
-Training a `{python} InfraSetup.frontier_params_b`B model on this cluster requires `{python} PodTrainingMath.pod_flops_math` total floating-point operations (assuming 300 billion training tokens). At 45 percent MFU -- a strong but achievable figure for well-tuned large-model training -- the cluster sustains `{python} PodTrainingMath.cluster_throughput_math` EFLOPS, yielding a physics-limit training time of approximately 12 hours. This is the absolute floor: every GPU computing useful FLOPs at 45 percent of peak, with zero communication overhead, zero pipeline bubbles, and zero downtime.
+Training a `{python} InfraSetup.frontier_params_b`B model on this cluster requires `{python} PodTrainingMath.pod_flops_math` total floating-point operations (assuming 300 billion training tokens). At 45 percent MFU -- a strong but achievable figure for well-tuned large-model training -- the cluster sustains `{python} PodTrainingMath.cluster_throughput_math` EFLOPS, yielding a physics-limit training time of approximately 12 hours. This is the absolute floor: every GPU computing useful FLOPs at 45 percent of FP8 peak, with zero communication overhead, zero pipeline bubbles, and zero downtime.
 
-In practice, communication overhead, pipeline bubbles, checkpoint I/O, hardware failures, and maintenance windows compound to extend the actual wall-clock time to 2--4 weeks. The gap between the 12-hour physics limit and the practical 2--4 week schedule is a factor of 15--25$\times$ (as the callout below quantifies step by step), illustrating the central theme of this section: at pod scale, the infrastructure's imperfections dominate over the raw capability of the silicon. Recovering this lost factor is the central challenge of distributed systems engineering, and the solutions span hardware (better networks), software (overlapped communication), and operations (proactive maintenance to minimize downtime).
+In practice, communication overhead, pipeline bubbles, checkpoint I/O, hardware failures, and maintenance windows compound to extend the actual wall-clock time beyond the physics limit. The simplified multiplier chain below reaches an approximately 18-hour system minimum; production schedules can stretch to days or weeks once queueing, data readiness, debugging, reruns, and site-specific operational margins enter the plan. The central theme is unchanged: at pod scale, infrastructure imperfections dominate over the raw capability of the silicon. Recovering this lost time is the central challenge of distributed systems engineering, and the solutions span hardware (better networks), software (overlapped communication), and operations (proactive maintenance to minimize downtime).
 
 ```{python}
 #| label: training-time-175b-calc
@@ -2365,9 +2365,9 @@ In practice, communication overhead, pipeline bubbles, checkpoint I/O, hardware 
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @sec-compute-pod—Training Time for 175B callout
 # │
-# │ Goal: Derive the 2-4 week training schedule from first principles,
+# │ Goal: Derive the system-minimum training time from first principles,
 # │       starting from total FLOPs and aggregate cluster throughput.
-# │ Show: ~12h physics limit → ~18h system minimum → ~2 weeks operations.
+# │ Show: ~12h physics limit → ~18h system minimum before site-specific operations.
 # │ How: 6NP / (N_gpus * peak * util); apply overhead multipliers sequentially.
 # │
 # │ Imports: mlsysim.core.constants (GPT3_PARAMS, H100_FLOPS_FP8_TENSOR, ...)
@@ -2444,7 +2444,7 @@ We can derive the training time for our `{python} InfraSetup.frontier_params_b`B
    - Hardware failures and restarts ($\approx 10\%$ of wall time): $\times 1.10 \rightarrow$ **`{python} TrainingTime175B.t_fail_hr_str` hours**
    - Maintenance windows ($\approx 5\%$): $\times 1.05 \rightarrow$ **`{python} TrainingTime175B.t_maint_hr_str` hours**
 
-**Total**: ~18 hours (system minimum) $\rightarrow$ 2--3 days (typical operations) $\rightarrow$ **`{python} TrainingTime175B.t_total_week_str` weeks** (conservative schedule with operational margin). The gap between the 12-hour physics limit and the practical `{python} TrainingTime175B.t_total_week_str` week schedule is a factor of 15--25$\times$. Recovering this lost time is the domain of distributed systems engineering -- the subject of @sec-distributed-training-systems.
+**Total**: **`{python} TrainingTime175B.t_maint_hr_str` hours** in this simplified system-minimum chain, or **`{python} TrainingTime175B.t_total_week_str` weeks** when expressed in weeks. Real production calendars may still stretch to days or weeks after queueing, debugging, reruns, and site-specific operational margins are included. Recovering this lost time is the domain of distributed systems engineering -- the subject of @sec-distributed-training-systems.
 
 :::
 
@@ -2568,16 +2568,18 @@ class CommScalingMath:
     """Formatted math strings for scaling efficiency and communication overhead analysis."""
 
     _ib_gbs = BandwidthHierarchyScenario.ib_bw_gbs
+    _overlap_fraction = 0.75
 
     # ┌── GUARD (Invariants) ──────────────────────────────────────────
-    _time_s = (2 * 350) / float(_ib_gbs)
-    check(_time_s > 5.0, f"Narrative Violation: Communication is too fast ({_time_s:.1f}s)! The 'bottleneck' narrative is broken.")
+    _raw_time_s = (2 * 350) / float(_ib_gbs)
+    _effective_time_s = _raw_time_s * (1 - _overlap_fraction)
+    check(_raw_time_s > 5.0, f"Narrative Violation: Communication is too fast ({_raw_time_s:.1f}s)! The 'bottleneck' narrative is broken.")
 
     comm_time_formula_math = md_math(f"2 \\times (N-1)/N \\times 350 / {_ib_gbs}")
     comm_approx_math = md_math(f"2 \\times 350 / {_ib_gbs}")
     compute_per_step_math = md_math(f"C = 6 \\times {InfraSetup.gpt3_params_b} \\times 10^{{18}}")
     t_compute_math = md_math(f"T_{{\\text{{compute}}}} \\approx 2.1")
-    t_comm_math = md_math(f"T_{{\\text{{comm}}}} \\approx 3.5")
+    t_comm_math = md_math(f"T_{{\\text{{comm}}}} \\approx {_effective_time_s:.1f}")
 ```
 
 For data-parallel training of our `{python} InfraSetup.frontier_params_b`B model, the communication cost per step is dominated by the AllReduce of 350 GB of gradients. Using ring-AllReduce over InfiniBand at `{python} BandwidthHierarchyScenario.ib_bw_gbs` GB/s effective bandwidth, the communication time is approximately `{python} CommScalingMath.comm_time_formula_math`, which for large $N$ approaches `{python} CommScalingMath.comm_approx_math` seconds. If the compute time per step is 20 seconds, the total step time is 34 seconds, yielding a scaling efficiency of $20/34 \approx 0.59$. In practice, communication can be overlapped with the backward pass (sending gradients for early layers while computing gradients for later layers), which recovers much of this loss, achieving 70--90 percent scaling efficiency for well-optimized training systems.
@@ -2605,7 +2607,7 @@ However, even for large models, scaling does not continue indefinitely. There ex
   `{python} CommScalingMath.t_compute_math` seconds
 
 - **AllReduce time**\index{AllReduce}\index{AllReduce!ring algorithm} for 350 GB of gradients using ring-AllReduce with overlap:
-  `{python} CommScalingMath.t_comm_math` seconds (with 50 percent overlap)
+  `{python} CommScalingMath.t_comm_math` seconds (raw transfer is about 14 seconds; this example assumes 75 percent overlap with the backward pass)
 
 - **Scaling efficiency**: $\eta_{\text{scaling}} = T_{\text{compute}} / (T_{\text{compute}} + T_{\text{comm}}) = 2.1/5.6 \approx 0.375$
 
@@ -2802,7 +2804,7 @@ For our `{python} InfraSetup.frontier_params_b`B model, a minimum viable trainin
 
 The most consequential infrastructure decision is whether to build an on-premises cluster or rent capacity from a cloud provider. This decision depends primarily on one variable: sustained utilization, as @fig-tco-build-vs-buy makes visible by plotting cumulative cost over time for both options at varying utilization rates.
 
-::: {#fig-tco-build-vs-buy fig-env="figure" fig-pos="htb" fig-cap="**TCO: Build vs. Buy**: Cumulative cost over 30 months for a 1,000-GPU H100 cluster (125 nodes at 8 GPUs/node) at 80 percent sustained utilization. On-premises (CapEx plus OpEx) breaks even against cloud on-demand at about month 22--26; break-even requires 55--65 percent sustained utilization, and below 20 percent cloud wins regardless. Cloud grows linearly with no upfront cost." fig-alt="Cumulative cost vs. months plot. The cloud line rises linearly. The on-premises line starts with a large CapEx jump and has a shallower slope. The lines cross at a break-even point around month 22 to 26."}
+::: {#fig-tco-build-vs-buy fig-env="figure" fig-pos="htb" fig-cap="**TCO: Build vs. Buy**: Cumulative cost over 30 months for a 1,000-GPU H100 cluster (125 nodes at 8 GPUs/node) at 80 percent sustained utilization. On-premises (CapEx plus OpEx) breaks even against cloud on-demand at about month 22--26; this simplified per-node model gives a break-even point of roughly 43 percent sustained utilization, while full-cluster facility, network, and staffing assumptions can shift the threshold. Cloud grows linearly with no upfront cost." fig-alt="Cumulative cost vs. months plot. The cloud line rises linearly. The on-premises line starts with a large CapEx jump and has a shallower slope. The lines cross at a break-even point around month 22 to 26."}
 ![](images/svg/tco-build-vs-buy.svg)
 :::
 
@@ -3295,7 +3297,7 @@ The TCO analysis determines whether the entire enterprise makes financial sense.
 ::: {.callout-takeaways title="The data center is the computer"}
 
 - **The generality tax**: Accelerators achieve 10--100$\times$ higher throughput than CPUs by dedicating silicon area to matrix arithmetic rather than branch prediction and out-of-order execution. The trade-off is reduced flexibility. Each step along the spectrum from GPU to TPU to custom ASIC reclaims more die area for arithmetic.
-- **Memory wall dominance**\index{Memory Wall!dominance}: For single-request LLM inference, memory bandwidth determines latency because the arithmetic completes in microseconds while data transfer takes milliseconds. HBM costs 3--5$\times$ more per GB than DDR but provides 50$\times$ the bandwidth. The energy cost of moving data (20 pJ/byte) exceeds the energy cost of computing on it (1 pJ/MAC) by 20$\times$.
+- **Memory wall dominance**\index{Memory Wall!dominance}: For single-request LLM inference, memory bandwidth determines latency because the arithmetic completes in microseconds while data transfer takes milliseconds. HBM costs 3--5$\times$ more per GB than DDR but provides more than an order of magnitude higher bandwidth. The energy cost of moving data (20 pJ/byte) exceeds the energy cost of computing on it (1 pJ/MAC) by 20$\times$.
 - **Roofline model**: The ridge point ($I_{\text{ridge}}$ = peak FLOPS/memory BW) divides workloads into memory-bound and compute-bound regimes. LLM decode is deeply memory-bound ($I \approx 1$); LLM training is compute-bound ($I > 2{,}000$). Always diagnose before optimizing.
 - **Bandwidth hierarchy dictates parallelism**\index{Bandwidth Hierarchy!dictates parallelism}: The 18$\times$ bandwidth cliff between NVLink and InfiniBand confines tensor parallelism to within a node and data parallelism to across nodes. Pipeline parallelism spans nodes when model depth exceeds a single node's capacity.
 - **Peak vs. sustained**\index{Peak vs. Sustained}: Model FLOPS Utilization (MFU) of 40--50 percent is considered good for large-scale training. Capacity planning must use sustained throughput, not peak specifications.

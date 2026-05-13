@@ -119,7 +119,7 @@ class FleetSetup:
     nvlink_h100_val = NVLINK_H100_BW.m_as(GB/second)
     nvlink_a100_val = NVLINK_A100_BW.m_as(GB/second)
     ib_ndr_gbps_val = INFINIBAND_NDR_BW.m_as('Gbps')
-    ib_ndr_gbs_val = (INFINIBAND_NDR_BW / 8).m_as(GB/second)
+    ib_ndr_gbs_val = INFINIBAND_NDR_BW.m_as(GB/second)
 
     # OUTPUTS
     cluster_size_str = fmt(cluster_size, precision=0)
@@ -225,7 +225,7 @@ class GangSchedulingDeadlock:
     # ┌── 1. LOAD ──────────────────────────────────────────
     n_total_gpus = 1024
     n_jobs = 2
-    gpus_per_job = 512 # Each job needs half the cluster
+    gpus_per_job = 1024 # Each job needs the full cluster
     # ┌── 2. EXECUTE ───────────────────────────────────────
     # If scheduler allocates partially (e.g. 256 to each), no job can run.
     # Total idle waste per hour if deadlock occurs:
@@ -242,13 +242,13 @@ class GangSchedulingDeadlock:
 
 ::: {.callout-notebook title="The physics of deadlock"}
 
-**Problem**: A `{python} GangSchedulingDeadlock.gs_n_gpus_str`-GPU cluster receives two jobs from separate teams, each requiring 512 GPUs. A naive scheduler (nongang) allocates 256 GPUs to Team A and 256 to Team B, then waits for more GPUs to become available. What is the steady-state outcome?
+**Problem**: A `{python} GangSchedulingDeadlock.gs_n_gpus_str`-GPU cluster receives two frontier training jobs from separate teams, each requiring the full cluster. A naive scheduler (nongang) allocates 512 GPUs to Team A and 512 to Team B, then waits for more GPUs to become available. What is the steady-state outcome?
 
 **Math**:
 
-1. **Team A Status**\index{Team A Status}: Holds 256, Needs 512. Progress = **0 percent**.
-2. **Team B Status**\index{Team B Status}: Holds 256, Needs 512. Progress = **0 percent**.
-3. **Cluster Status**\index{Cluster!status}: 512 GPUs allocated, 0 samples processed.
+1. **Team A Status**\index{Team A Status}: Holds 512, Needs 1,024. Progress = **0 percent**.
+2. **Team B Status**\index{Team B Status}: Holds 512, Needs 1,024. Progress = **0 percent**.
+3. **Cluster Status**\index{Cluster!status}: 1,024 GPUs allocated, 0 samples processed.
 4. **Waste**\index{Waste}: `{python} GangSchedulingDeadlock.gs_waste_m_str` dollars per hour in idle electricity and capital.
 
 **Systems insight**: This is a **Circular Dependency**\index{Circular Dependency}: Team A is waiting for Team B's GPUs, and Team B is waiting for Team A's. Without **Gang Scheduling** (all-or-nothing allocation), cluster efficiency drops to zero. In a large fleet, even a 5-minute deadlock can cost thousands of dollars. Schedulers like Kubernetes (via Coscheduling plugins) and Slurm enforce atomicity to ensure that if a job cannot run in full, it does not run at all.
@@ -792,7 +792,7 @@ plt.style.use('seaborn-v0_8-whitegrid')
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 strategies = ['Random', 'Rack-Aware', 'Rail-Optimized', 'Topology-Optimal']
 times = [120, 85, 40, 25]
-bandwidths = [2.0 / (t / 1000.0) for t in times]
+bandwidths = [1.0 / (t / 1000.0) for t in times]
 
 colors = ['#d62728', '#ff7f0e', '#bcbd22', '#2ca02c']
 
@@ -1508,20 +1508,22 @@ class AutoscalingLag:
     traffic_end = 80
     ramp_sec = 60
     load_time_sec = 180
-    avg_excess_sec = 120
     # ┌── 2. EXECUTE ───────────────────────────────────────
     capacity = replicas * qps_per_replica
     detect_sec = int(ramp_sec * (capacity - traffic_start) / (traffic_end - traffic_start))
     ready_sec = detect_sec + load_time_sec
     excess_at_peak = traffic_end - capacity
-    slo_violations = int(excess_at_peak * avg_excess_sec)
+    ramp_overload_sec = ramp_sec - detect_sec
+    ramp_excess_requests = 0.5 * ramp_overload_sec * excess_at_peak
+    flat_excess_requests = max(0, ready_sec - ramp_sec) * excess_at_peak
+    slo_violations = int(ramp_excess_requests + flat_excess_requests)
     pred_trigger_sec = -load_time_sec
     pred_capacity = (replicas + replicas) * qps_per_replica
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(capacity == 50, f"Capacity: expected 50, got {capacity}")
     check(detect_sec == 15, f"Detection: expected 15s, got {detect_sec}")
     check(ready_sec == 195, f"Ready: expected 195s, got {ready_sec}")
-    check(slo_violations == 3600, f"Violations: expected 3600, got {slo_violations}")
+    check(slo_violations == 4725, f"Violations: expected 4725, got {slo_violations}")
     check(pred_capacity == 100, f"Pred capacity: expected 100, got {pred_capacity}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     as_capacity_str = fmt(capacity, precision=0)
@@ -1539,7 +1541,7 @@ Consider a serving fleet with 10 replicas, each capable of 5 queries per second 
 
 **Scenario**: Traffic ramps from 40 QPS to 80 QPS linearly over 60 seconds. Model load time: 3 minutes (180 seconds).
 
-**Reactive scaling**\index{Reactive Scaling}: HPA detects overload at $t =$ `{python} AutoscalingLag.as_detect_str` s (when traffic hits `{python} AutoscalingLag.as_capacity_str` QPS). It requests 10 new replicas. These replicas become ready at $t =$ `{python} AutoscalingLag.as_ready_str` s (`{python} AutoscalingLag.as_detect_str` + 180). From $t =$ `{python} AutoscalingLag.as_detect_str` s to $t =$ `{python} AutoscalingLag.as_ready_str` s (3 minutes), demand exceeds capacity. At peak (80 QPS), `{python} AutoscalingLag.as_excess_str` QPS are queued or dropped. Over this 3-minute window, approximately `{python} AutoscalingLag.as_violations_str` requests (`{python} AutoscalingLag.as_excess_str` QPS $\times$ 120 s average excess) violate the SLO.
+**Reactive scaling**\index{Reactive Scaling}: HPA detects overload at $t =$ `{python} AutoscalingLag.as_detect_str` s (when traffic hits `{python} AutoscalingLag.as_capacity_str` QPS). It requests 10 new replicas. These replicas become ready at $t =$ `{python} AutoscalingLag.as_ready_str` s (`{python} AutoscalingLag.as_detect_str` + 180). From $t =$ `{python} AutoscalingLag.as_detect_str` s to $t =$ `{python} AutoscalingLag.as_ready_str` s, demand exceeds capacity. During the ramp, excess demand grows linearly from 0 to `{python} AutoscalingLag.as_excess_str` QPS; after the ramp reaches 80 QPS, the full `{python} AutoscalingLag.as_excess_str` QPS overload persists until the new replicas are ready. The area above capacity is approximately `{python} AutoscalingLag.as_violations_str` requests, all of which are queued or dropped and violate the SLO.
 
 **Predictive scaling**: The scaler forecasts the ramp and triggers scale-up at $t =$ `{python} AutoscalingLag.as_pred_trigger_str` s. The 10 new replicas come online at $t = 0$ s, pushing capacity to `{python} AutoscalingLag.as_pred_capacity_str` QPS just as the ramp begins. Zero SLO violations.
 

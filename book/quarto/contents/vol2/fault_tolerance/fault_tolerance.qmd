@@ -290,15 +290,15 @@ class NinesReliability:
 
 ::: {.callout-notebook title="The 9s of reliability"}
 
-**Problem**: A cluster of **`{python} NinesReliability.n_gpus_str` GPUs** runs with each GPU at **`{python} NinesReliability.availability_str` percent** availability (only `{python} NinesReliability.downtime_min_str` minutes of downtime per year). What is the probability that the **entire cluster** is up for **1 hour**?
+**Problem**: A cluster of **`{python} NinesReliability.n_gpus_str` GPUs** runs with each GPU at **`{python} NinesReliability.availability_str` percent** availability (only `{python} NinesReliability.downtime_min_str` minutes of downtime per year). What is the probability that the **entire cluster** is up at the same instant?
 
 **Math**:
 
-1.  **Single GPU Success Probability** $(P_{\text{1h}})$: A GPU with `{python} NinesReliability.availability_str` percent availability has hourly survival probability $P_{\text{1h}} =$ `{python} NinesReliability.survival_str`.
-2.  **Cluster Success Probability** $(P_{\text{cluster}})$: $P_{\text{cluster}} = (P_{\text{1h}})^{N}$.
-3.  **Calculation**: $(P_{\text{1h}})^{N} \approx$ **`{python} NinesReliability.cluster_prob_str`**.
+1.  **Single GPU Availability Probability** $(P_{\text{up}})$: A GPU with `{python} NinesReliability.availability_str` percent availability has an all-up probability $P_{\text{up}} =$ `{python} NinesReliability.survival_str` at a randomly chosen instant.
+2.  **Cluster Availability Probability** $(P_{\text{cluster}})$: $P_{\text{cluster}} = (P_{\text{up}})^{N}$.
+3.  **Calculation**: $(P_{\text{up}})^{N} \approx$ **`{python} NinesReliability.cluster_prob_str`**.
 
-**Systems conclusion**: Even with `{python} NinesReliability.availability_str` percent reliable hardware, a `{python} NinesReliability.n_gpus_str`-GPU cluster has only a **`{python} NinesReliability.cluster_pct_str` percent chance** of surviving a single hour without a failure. Hardware reliability alone is insufficient; software must handle failures automatically.
+**Systems conclusion**: Even with `{python} NinesReliability.availability_str` percent reliable hardware, a `{python} NinesReliability.n_gpus_str`-GPU cluster has only a **`{python} NinesReliability.cluster_pct_str` percent chance** that every GPU is simultaneously available. Hardware reliability alone is insufficient; software must handle failures automatically.
 
 :::
 
@@ -1940,8 +1940,8 @@ $$
 
 **Result**\index{Result}: The optimal strategy is to checkpoint roughly every **27 minutes**.
 
-*   **Checkpointing every 10 mins**: Too much time spent writing to disk ($17\%$ overhead).
-*   **Checkpointing every 60 mins**: Too much work lost when the inevitable crash happens ($15\%$ overhead).
+*   **Checkpointing every 10 mins**: Too much time spent writing to disk (20.0% save overhead, 22.8% total overhead).
+*   **Checkpointing every 60 mins**: Too much work lost when the inevitable crash happens (16.7% expected rework, 20.0% total overhead).
 *   **At 27 mins**: The combined cost of overhead and recovery is minimized ($\sim$$15\%$ total overhead, with checkpoint cost and rework cost balanced at $\sim$$7.5\%$ each).
 
 :::
@@ -2087,13 +2087,17 @@ class YoungDalyOptimal:
     tau_opt_s = math.sqrt(2 * t_save_s * mtbf_s)
     tau_opt_min = tau_opt_s / 60
     overhead_pct = (t_save_s/tau_opt_s + tau_opt_s / (2 * mtbf_s)) * 100
+    hourly_interval_s = 3600
+    hourly_overhead_pct = (t_save_s/hourly_interval_s + hourly_interval_s / (2 * mtbf_s)) * 100
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(10 < tau_opt_min < 15, f"Interval {tau_opt_min:.1f}m outside expected range")
+    check(hourly_overhead_pct > overhead_pct, "Hourly checkpointing should waste more than optimal")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     t_save_s_str = f"{t_save_s:.0f}"
     mtbf_h_str = f"{mtbf_h:.2f}"
     tau_opt_min_str = f"{tau_opt_min:.1f}"
     overhead_pct_str = f"{overhead_pct:.1f}"
+    hourly_overhead_pct_str = f"{hourly_overhead_pct:.1f}"
 
 ```
 
@@ -2108,7 +2112,7 @@ Apply the Young-Daly formula: $\tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}
 2. **Calculate**: $\tau_{\text{opt}} = \sqrt{2 \cdot 21 \cdot 13,284} = \sqrt{557,928} \approx$ `{python} f"{math.sqrt(2 * 21 * 13284):,.0f}"` seconds.
 3. **Result**: $\tau_{\text{opt}} \approx$ **`{python} YoungDalyOptimal.tau_opt_min_str` minutes**.
 
-**Systems insight**: At this interval, the "checkpoint tax" (time spent saving + time spent re-computing) is minimized to approximately **`{python} YoungDalyOptimal.overhead_pct_str` percent**. Checkpointing every hour instead would increase failure risk, wasting nearly 10 percent of the cluster's capacity. As clusters scale, the optimal interval *must* shrink to keep up with the falling MTBF.
+**Systems insight**: At this interval, the "checkpoint tax" (time spent saving + time spent re-computing) is minimized to approximately **`{python} YoungDalyOptimal.overhead_pct_str` percent**. Checkpointing every hour instead would increase failure risk, wasting about `{python} YoungDalyOptimal.hourly_overhead_pct_str` percent of the cluster's capacity. As clusters scale, the optimal interval *must* shrink to keep up with the falling MTBF.
 
 :::
 
@@ -2196,9 +2200,9 @@ While @tbl-checkpoint-overhead-by-model suggests modest overhead percentages, re
 # │ Goal: Diagnose why a 70B model checkpoint takes 10 minutes instead of
 # │   2 minutes on an NFS-backed cluster, by computing theoretical bandwidth
 # │   limits and contention-induced effective throughput per node.
-# │ Show: total_ckpt_gb_str="420" GB, nfs_gbs_str="1.25" GB/s,
-# │   min_write_min_str="5.6" min, per_node_mbs_str="20" MB/s,
-# │   serialized_min_str="5,600" min—inline in the fleet stack diagnosis.
+# │ Show: total_ckpt_gb_str="700" GB, nfs_gbs_str="1.25" GB/s,
+# │   min_write_min_str="9.3" min, per_node_mbs_str="20" MB/s,
+# │   serialized_min_str="597" min—inline in the fleet stack diagnosis.
 # │ How: Compute weights + optimizer state size in GB; derive NFS bandwidth in
 # │   GB/s (10 Gbps / 8); calculate min write time and per-node bandwidth
 # │   under contention from 64 concurrent nodes.
@@ -2251,6 +2255,7 @@ class CheckpointDebug:
     nfs_gbs_str = f"{nfs_gbs_val:.2f}"
     min_write_s_str = f"{min_write_s_val:.0f}"
     min_write_min_str = f"{min_write_min_val:.1f}"
+    per_node_gbs_str = f"{per_node_gbs_val:.3f}"
     per_node_mbs_str = f"{per_node_mbs_val:.0f}"
     serialized_min_str = f"{serialized_min_val:,.0f}"
     extended_weeks_str = f"{extended_weeks_val:.1f}"
@@ -2284,7 +2289,7 @@ Moving to the middle layer, the checkpoint coordination is examined:
 - **Write pattern**\index{Write Pattern}: All 64 nodes writing simultaneously to shared NFS
 - **Observed behavior**\index{Observed Behavior}: 10-minute writes instead of the `{python} CheckpointDebug.min_write_min_str`-minute theoretical minimum
 
-The Distribution Layer reveals contention: 64 nodes competing for 10 Gbps creates severe congestion. Each node effectively receives only `{python} CheckpointDebug.per_node_mbs_str` MB/s (10 Gbps/64 nodes), extending checkpoint time to `{python} CheckpointDebug.total_ckpt_gb_str` GB/`{python} CheckpointDebug.per_node_gbs_val` GB/s ≈ `{python} CheckpointDebug.serialized_min_str` minutes per node if writes were serialized. The observed 10 minutes reflects partial parallelism with significant queuing delays.
+The Distribution Layer reveals contention: 64 nodes competing for 10 Gbps creates severe congestion. Each node effectively receives only `{python} CheckpointDebug.per_node_mbs_str` MB/s (10 Gbps/64 nodes), extending checkpoint time to `{python} CheckpointDebug.total_ckpt_gb_str` GB/`{python} CheckpointDebug.per_node_gbs_str` GB/s ≈ `{python} CheckpointDebug.serialized_min_str` minutes per node if writes were serialized. The observed 10 minutes reflects partial parallelism with significant queuing delays.
 
 **Governance Layer Analysis (Control Plane)**
 
