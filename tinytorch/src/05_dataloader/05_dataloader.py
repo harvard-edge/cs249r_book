@@ -141,9 +141,12 @@ The Dataset class provides a uniform interface for accessing data, regardless of
 ```
 Dataset Interface
 ┌─────────────────────────────────────┐
-│ __len__()     → "How many samples?" │ ← Enables for loops/iteration
-│ __getitem__(i) → "Give me sample i" │ ← Enables indexing dataset[index]
+│ __len__()     → "How many samples?" │
+│ __getitem__(i) → "Give me sample i" │
 └─────────────────────────────────────┘
+          ↑                ↑
+     Enables for     Enables indexing
+    loops/iteration   dataset[index]
 ```
 
 **Connection to systems**: This abstraction is crucial because it separates *how data is stored* from *how it's accessed*, enabling optimizations like caching, prefetching, and parallel loading.
