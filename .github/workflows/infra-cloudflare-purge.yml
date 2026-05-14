@@ -1,0 +1,151 @@
+name: '🔧 Infra · 🧹 Purge Cloudflare Cache'
+
+# =============================================================================
+# 🧹 Purge Cloudflare Cache — Bust the mlsysbook.ai edge cache after deploys
+# =============================================================================
+#
+# mlsysbook.ai sits behind Cloudflare, in front of GitHub Pages. After a
+# *-publish-live.yml workflow ships new content to the `gh-pages` branch,
+# Cloudflare's edge can keep serving stale HTML (and stale 404s for newly
+# added assets) until its TTL rolls over — typically minutes to hours,
+# depending on the path. This workflow purges the edge cache as soon as
+# any production deploy completes, so changes are visible immediately.
+#
+# Why chained off `workflow_run`, not `push: gh-pages`?
+#   GitHub Actions deliberately suppresses workflow triggers from commits
+#   pushed using the default GITHUB_TOKEN, to prevent recursion. All 9
+#   *-publish-live.yml workflows push to gh-pages with GITHUB_TOKEN, so
+#   `on: push: branches: [gh-pages]` would never fire from them. The
+#   `workflow_run` trigger sidesteps that restriction by chaining off
+#   the upstream workflow's completion event instead.
+#
+# Why purge the whole zone, not specific paths?
+#   Cloudflare's "purge by hostname" mode is Enterprise-only. The Pro/Free
+#   tiers support "purge everything" (zone-wide) or "purge by URL list"
+#   (up to 30 URLs per request). Maintaining a hand-curated URL list per
+#   product (9 of them) is more error-prone than the cost of re-warming
+#   the zone — most mlsysbook.ai content is static and re-caches on the
+#   next request. "Purge everything" is the simpler, more robust default.
+#
+# Flow:
+#   1. GATE       — Skip unless the upstream deploy ran on `main` (live)
+#                   and concluded successfully.
+#   2. RESOLVE    — Read the Cloudflare zone id from a repo variable
+#                   (vars.CLOUDFLARE_ZONE_ID, not a secret — zone ids
+#                   aren't sensitive).
+#   3. PURGE      — POST to Cloudflare's purge_cache API with
+#                   {"purge_everything": true}.
+#   4. REPORT     — Print the API response so failures show in the run log.
+#
+# Triggers:
+#   - workflow_run: completion of any *-publish-live.yml workflow
+#   - workflow_dispatch: manual purge (e.g., after a hand-fix to gh-pages)
+#
+# Required configuration:
+#   - secrets.CLOUDFLARE_API_TOKEN  — Token scoped to Zone.Cache Purge
+#                                     on the mlsysbook.ai zone. Already
+#                                     used by staffml-publish-live.yml
+#                                     for D1/Worker shipments.
+#   - vars.CLOUDFLARE_ZONE_ID       — Zone id for mlsysbook.ai. Set once
+#                                     in Settings → Secrets and variables
+#                                     → Variables. Not a secret.
+#
+# Related:
+#   - book-publish-live.yml         — Upstream deploy (book content)
+#   - kits-publish-live.yml         — Upstream deploy (hardware kits)
+#   - tinytorch-publish-live.yml    — Upstream deploy (TinyTorch site)
+#   - mlsysim-publish-live.yml      — Upstream deploy (MLSysIM docs)
+#   - labs-publish-live.yml         — Upstream deploy (Marimo labs)
+#   - staffml-publish-live.yml      — Upstream deploy (StaffML interview app)
+#   - slides-publish-live.yml       — Upstream deploy (slide decks)
+#   - site-publish-live.yml         — Upstream deploy (landing site)
+#   - instructors-publish-live.yml  — Upstream deploy (instructor materials)
+#
+# =============================================================================
+
+permissions:
+  contents: read
+
+concurrency:
+  # Serialize purges so a burst of back-to-back deploys collapses into a
+  # single trailing purge rather than racing the Cloudflare API.
+  group: cloudflare-purge
+  cancel-in-progress: false
+
+on:
+  workflow_run:
+    workflows:
+      - '📚 Book · 🚀 Publish (Live)'
+      - '📦 Kits · 🚀 Publish (Live)'
+      - '🔥 TinyTorch · 🚀 Publish (Live)'
+      - '🧮 MLSYSIM · 🚀 Publish (Live)'
+      - '🔮 Labs · 🚀 Publish (Live)'
+      - '🎯 StaffML · 🚀 Publish (Live)'
+      - '📊 Slides · 🚀 Publish (Live)'
+      - '🌐 Landing Site · 🚀 Publish (Live)'
+      - '🎓 Instructors · 🚀 Publish (Live)'
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Why is a manual purge needed? (logged in run summary)'
+        required: false
+        default: 'Manual cache flush'
+
+jobs:
+  purge:
+    name: '🧹 Purge mlsysbook.ai edge cache'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # On workflow_run, only purge if the upstream actually succeeded.
+    # `workflow_run` fires on ALL completions (success, failure, cancelled),
+    # so without this gate we'd uselessly purge after failed deploys too.
+    # Manual workflow_dispatch always runs (no upstream event to gate on).
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - name: '📝 Log purge trigger'
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            echo "Triggered by: ${{ github.event.workflow_run.name }} (#${{ github.event.workflow_run.run_number }})"
+            echo "Upstream conclusion: ${{ github.event.workflow_run.conclusion }}"
+            echo "Upstream run: ${{ github.event.workflow_run.html_url }}"
+          else
+            echo "Triggered manually."
+            echo "Reason: ${{ inputs.reason }}"
+          fi
+
+      - name: '✅ Verify required configuration'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
+        run: |
+          missing=0
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error::secrets.CLOUDFLARE_API_TOKEN is not set. Add it under Settings → Secrets and variables → Actions → Secrets."
+            missing=1
+          fi
+          if [ -z "$CLOUDFLARE_ZONE_ID" ]; then
+            echo "::error::vars.CLOUDFLARE_ZONE_ID is not set. Add the mlsysbook.ai zone id under Settings → Secrets and variables → Actions → Variables (this is NOT a secret — zone ids are public-by-design)."
+            missing=1
+          fi
+          exit $missing
+
+      - name: '🧹 Purge Cloudflare cache'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
+        run: |
+          set -euo pipefail
+          response=$(curl --silent --show-error --fail-with-body \
+            --request POST \
+            --url "https://api.cloudflare.com/client/v4/zones/${CLOUDFLARE_ZONE_ID}/purge_cache" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data '{"purge_everything": true}')
+          echo "$response" | python3 -m json.tool
+          # Cloudflare returns { "success": true, ... } on success; the curl
+          # --fail-with-body flag already catches HTTP non-2xx, but we double-
+          # check the JSON body in case the API returns 200 with success=false
+          # (rare but documented).
+          echo "$response" | python3 -c "import sys, json; data = json.load(sys.stdin); sys.exit(0 if data.get('success') else 1)"
