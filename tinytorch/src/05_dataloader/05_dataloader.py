@@ -130,7 +130,7 @@ Raw Data Storage          Dataset Interface         DataLoader Batching         
 
 **Batch Processing (DataLoader)**: GPUs are parallel machines - they're much faster processing 32 images simultaneously than 1 image 32 times.
 
-**Memory Efficiency**: Loading all 50,000 images into memory would require ~150GB. Instead, we load only the current batch (~150MB).
+**Memory Efficiency**: Loading all 50,000 images into memory would require \~150GB. Instead, we load only the current batch (\~150MB).
 
 **Training Variety**: Shuffling ensures the model sees different combinations each epoch, preventing memorization.
 
@@ -141,12 +141,9 @@ The Dataset class provides a uniform interface for accessing data, regardless of
 ```
 Dataset Interface
 ┌─────────────────────────────────────┐
-│ __len__()     → "How many samples?" │
-│ __getitem__(i) → "Give me sample i" │
+│ __len__()     → "How many samples?" │ ← Enables for loops/iteration
+│ __getitem__(i) → "Give me sample i" │ ← Enables indexing dataset[index]
 └─────────────────────────────────────┘
-          ↑                ↑
-     Enables for     Enables indexing
-    loops/iteration   dataset[index]
 ```
 
 **Connection to systems**: This abstraction is crucial because it separates *how data is stored* from *how it's accessed*, enabling optimizations like caching, prefetching, and parallel loading.
@@ -1738,8 +1735,8 @@ def analyze_memory_usage():
 
     print("\n💾 Memory Usage by Batch Configuration:")
 
-    feature_sizes = [784, 3072, 50176]  # MNIST, CIFAR-10, ImageNet-like
-    feature_names = ["MNIST (28×28)", "CIFAR-10 (32×32×3)", "ImageNet (224×224×1)"]
+    feature_sizes = [784, 3072, 150528]  # MNIST, CIFAR-10, ImageNet-like
+    feature_names = ["MNIST (28×28)", "CIFAR-10 (32×32×3)", "ImageNet (224×224×3)"]
     batch_sizes = [1, 32, 128, 512]
 
     for feature_size, name in zip(feature_sizes, feature_names):

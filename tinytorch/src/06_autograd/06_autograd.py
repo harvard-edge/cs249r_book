@@ -1142,8 +1142,9 @@ class PermuteBackward(Function):
         return (grad_x,)
         ### END SOLUTION
 
-#| export
 
+# %% nbgrader={"grade": false, "grade_id": "slice-backward", "solution": true}
+#| export
 class SliceBackward(Function):
     """
     Gradient computation for tensor slicing/indexing operations.

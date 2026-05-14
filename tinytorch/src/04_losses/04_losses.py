@@ -128,11 +128,11 @@ Loss Landscape for MSE:
      Loss
       ^
       |
-   4  |     *
-      |    / \
-   2  |   /   \
-      |  /     \
-   0  |_/_______\\____> Prediction Error
+   4  |  |       |
+      |   \     /
+   2  |    |   |
+      |     \ /
+   0  |______*______> Prediction Error
       0  -2  0  +2
 
 Quadratic growth: small errors → small penalty, large errors → huge penalty
