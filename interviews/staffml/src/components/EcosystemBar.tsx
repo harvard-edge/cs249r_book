@@ -590,9 +590,11 @@ export default function EcosystemBar() {
               ))}
             </div>
           ))}
-          <div style={{ borderTop: '1px solid #dee2e6', paddingTop: 8, display: 'flex', gap: 16 }}>
+          <div style={{ borderTop: '1px solid #dee2e6', paddingTop: 8, display: 'flex', gap: 16, flexWrap: 'wrap' as const }}>
             {/* Mobile order mirrors shared/config/navbar-common.yml:
-                Subscribe → Star → Support → GitHub */}
+                Subscribe → Star → Support → GitHub → Theme (theme toggle
+                collapses into the hamburger here, same as the Quarto
+                navbar JS in shared/config/site-head.html). */}
             <a href="#subscribe"
               style={{ fontSize: 15, color: NAV_COLOR, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
               <i className="bi bi-envelope" style={{ fontSize: 14 }} /> Subscribe
@@ -609,6 +611,14 @@ export default function EcosystemBar() {
               style={{ fontSize: 15, color: NAV_COLOR, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
               <i className="bi bi-github" style={{ fontSize: 14 }} /> GitHub
             </a>
+            <button
+              onClick={() => { toggleTheme(); setMobileOpen(false); }}
+              style={{ fontSize: 15, color: NAV_COLOR, background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+              aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+            >
+              <i className={`bi ${isDark ? 'bi-sun' : 'bi-moon-stars-fill'}`} style={{ fontSize: 14 }} />
+              {isDark ? 'Light mode' : 'Dark mode'}
+            </button>
           </div>
         </div>
       )}
