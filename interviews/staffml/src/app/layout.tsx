@@ -9,7 +9,7 @@ import VersionDriftToast from "@/components/VersionDriftToast";
 import { QUESTION_COUNT_DISPLAY } from "@/lib/corpus";
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://staffml.ai"),
+  metadataBase: new URL("https://mlsysbook.ai"),
   title: {
     default: "StaffML — ML Systems Interview Prep",
     template: "%s | StaffML",
@@ -23,13 +23,13 @@ export const metadata: Metadata = {
     description: `${QUESTION_COUNT_DISPLAY} physics-grounded ML systems questions with napkin math verification. Free, open source, no accounts, runs entirely in your browser.`,
     type: "website",
     siteName: "StaffML",
-    images: [{ url: "/og-image.svg", width: 1200, height: 630, alt: `StaffML — ${QUESTION_COUNT_DISPLAY} ML systems interview questions` }],
+    images: [{ url: `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/og-image.png`, width: 1200, height: 630, type: "image/png", alt: `StaffML — ${QUESTION_COUNT_DISPLAY} ML systems interview questions` }],
   },
   twitter: {
     card: "summary_large_image",
     title: "StaffML — ML Systems Interview Prep",
     description: `${QUESTION_COUNT_DISPLAY} physics-grounded ML systems questions with napkin math. Free, open source, no accounts.`,
-    images: ["/og-image.svg"],
+    images: [`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/og-image.png`],
   },
 };
 
