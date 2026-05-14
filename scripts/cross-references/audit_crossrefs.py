@@ -572,8 +572,7 @@ def summarize(
     lines.append("")
     lines.append(
         "Use this report to assign one chapter at a time. Mechanical findings should be "
-        "fixed before editorial additions. Cue lines should be reviewed by an editor or "
-        "agent using `agent-playbook.md`."
+        "fixed before editorial additions. Cue lines should be reviewed by an editor."
     )
     lines.append("")
     return "\n".join(lines)
