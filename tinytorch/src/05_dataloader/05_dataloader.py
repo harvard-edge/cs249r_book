@@ -130,7 +130,7 @@ Raw Data Storage          Dataset Interface         DataLoader Batching         
 
 **Batch Processing (DataLoader)**: GPUs are parallel machines - they're much faster processing 32 images simultaneously than 1 image 32 times.
 
-**Memory Efficiency**: Loading all 50,000 images into memory would require \~150GB. Instead, we load only the current batch (\~150MB).
+**Memory Efficiency**: Loading all 50,000 images into memory would require ~150GB. Instead, we load only the current batch (~150MB).
 
 **Training Variety**: Shuffling ensures the model sees different combinations each epoch, preventing memorization.
 
