@@ -1738,8 +1738,8 @@ def analyze_memory_usage():
 
     print("\n💾 Memory Usage by Batch Configuration:")
 
-    feature_sizes = [784, 3072, 50176]  # MNIST, CIFAR-10, ImageNet-like
-    feature_names = ["MNIST (28×28)", "CIFAR-10 (32×32×3)", "ImageNet (224×224×1)"]
+    feature_sizes = [784, 3072, 150528]  # MNIST, CIFAR-10, ImageNet-like
+    feature_names = ["MNIST (28×28)", "CIFAR-10 (32×32×3)", "ImageNet (224×224×3)"]
     batch_sizes = [1, 32, 128, 512]
 
     for feature_size, name in zip(feature_sizes, feature_names):
