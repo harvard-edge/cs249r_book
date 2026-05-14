@@ -1427,7 +1427,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <h2 class="anchored" data-anchor-id="gpu-compute-time-the-ceiling-you-think-you-have">2. GPU Compute Time: The Ceiling You Think You Have</h2>
 <p>We switch from LLM serving (Tutorials 2–3) to <strong>CNN training</strong> because the data pipeline bottleneck is most visible here. LLM training on tokenized text has a tiny data footprint (~8 MB/s as we will see in <a href="../tutorials/12_full_stack_audit.html">Tutorial 12</a>). Image training with JPEG decoding, resizing, and augmentation can demand 10–100× more CPU work per sample — this is where the GPU actually starves.</p>
 <p>First, establish how fast the A100 processes a ResNet-50 training step in isolation — no data loading, no preprocessing, just pure compute:</p>
-<div id="b3b66d06" class="cell" data-execution_count="2">
+<div id="5083982d" class="cell" data-execution_count="2">
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb2"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> mlsysim <span class="im">import</span> SingleNodeModel</span>
 <span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> mlsysim.core.constants <span class="im">import</span> Q_</span>
 <span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> mlsysim.show <span class="im">import</span> table, info</span>
@@ -1462,7 +1462,7 @@ Bottleneck:    Compute</code></pre>
 <section id="storage-io-check-can-the-disk-deliver" class="level2">
 <h2 class="anchored" data-anchor-id="storage-io-check-can-the-disk-deliver">3. Storage I/O Check: Can the Disk Deliver?</h2>
 <p>ImageNet images average ~500 KB each (JPEG compressed). At batch 256, the GPU demands a burst of data every step. Can the storage subsystem supply it?</p>
-<div id="78812d48" class="cell" data-execution_count="3">
+<div id="af253b30" class="cell" data-execution_count="3">
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb4"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> mlsysim <span class="im">import</span> DataModel</span>
 <span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>sample_size <span class="op">=</span> Q_(<span class="st">"500 KB"</span>)  <span class="co"># Average ImageNet JPEG</span></span>
@@ -1495,7 +1495,7 @@ Is stalled:      False</code></pre>
 <section id="the-reveal-cpu-preprocessing-is-the-wall" class="level2">
 <h2 class="anchored" data-anchor-id="the-reveal-cpu-preprocessing-is-the-wall">4. The Reveal: CPU Preprocessing Is the Wall</h2>
 <p>Even with fast storage, the CPU must decode JPEGs, apply random crops, color jitter, and normalization. A typical CPU worker processes ImageNet images at ~250 MB/s. With 8 workers, total CPU throughput is ~2 GB/s:</p>
-<div id="c2010256" class="cell" data-execution_count="4">
+<div id="ec9486e8" class="cell" data-execution_count="4">
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb6"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> mlsysim <span class="im">import</span> TransformationModel</span>
 <span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>transform_solver <span class="op">=</span> TransformationModel()</span>
@@ -1541,7 +1541,7 @@ Slowdown factor:     8.84x</code></pre>
 <section id="batch-size-sweep-finding-the-crossover" class="level2">
 <h2 class="anchored" data-anchor-id="batch-size-sweep-finding-the-crossover">5. Batch Size Sweep: Finding the Crossover</h2>
 <p>Let’s sweep batch sizes to find exactly where the CPU becomes the binding constraint. At small batches, the GPU is slower and data arrives in time. At large batches, the GPU becomes more efficient but the CPU falls behind:</p>
-<div id="6331fcc1" class="cell" data-execution_count="5">
+<div id="e89d51c1" class="cell" data-execution_count="5">
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb8"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a>rows <span class="op">=</span> []</span>
 <span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> bs <span class="kw">in</span> [<span class="dv">32</span>, <span class="dv">64</span>, <span class="dv">128</span>, <span class="dv">256</span>, <span class="dv">512</span>, <span class="dv">1024</span>]:</span>
 <span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a>    p <span class="op">=</span> solver.solve(model<span class="op">=</span>model, hardware<span class="op">=</span>hardware, batch_size<span class="op">=</span>bs, precision<span class="op">=</span><span class="st">"fp16"</span>)</span>
@@ -1580,7 +1580,7 @@ Slowdown factor:     8.84x</code></pre>
 <section id="the-fix-adding-cpu-workers" class="level2">
 <h2 class="anchored" data-anchor-id="the-fix-adding-cpu-workers">6. The Fix: Adding CPU Workers</h2>
 <p>The simplest fix for a CPU bottleneck is more workers. Let’s compare 8 vs.&nbsp;16 vs.&nbsp;32:</p>
-<div id="3ef2b19c" class="cell" data-execution_count="6">
+<div id="ecaa0389" class="cell" data-execution_count="6">
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb10"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a>rows <span class="op">=</span> []</span>
 <span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> n_workers <span class="kw">in</span> [<span class="dv">8</span>, <span class="dv">16</span>, <span class="dv">32</span>]:</span>
 <span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a>    cpu_tp <span class="op">=</span> Q_(<span class="ss">f"</span><span class="sc">{</span>n_workers <span class="op">*</span> <span class="dv">250</span><span class="sc">}</span><span class="ss"> MB/s"</span>)</span>
@@ -2145,13 +2145,14 @@ Slowdown factor:     8.84x</code></pre>
 
   (See shared/release/release-pill.js for the standalone JS form.)
 
-  NOTE: Do NOT use a nested `<!-- ... -->` HTML comment in this docstring
-  block. HTML disallows nested comments, so the inner `--&gt;` would
-  terminate the outer comment early and cause the example markup below
-  it (the `<span data-release-pill="">` and `<script src="…release-pill.js">`)
-  to leak into the rendered page — producing a 404 on every Quarto site
-  that includes this snippet via `include-after-body`. Use `//`-style
-  pseudo-comments inside the documentation block instead.
+  NOTE: This docstring must not contain literal HTML-comment delimiters
+  (open or close). HTML disallows nested comments, so an inner close
+  delimiter would terminate this outer comment early and leak the
+  example markup below it (the span and script tags) into the rendered
+  page — producing a 404 on every Quarto site that includes the snippet
+  via include-after-body. The earlier version of this note tripped that
+  exact bug; if you need to describe HTML-comment syntax, do it without
+  using the literal characters.
 
   ── Manifest contract ──
 
@@ -2171,7 +2172,7 @@ Slowdown factor:     8.84x</code></pre>
   this for its citation card).
 -->
 
-<span class="release-pill" data-release-pill aria-live="polite">
+<span class="release-pill" data-release-pill="" aria-live="polite">
   <noscript><a href="#">release</a></noscript>
 </span>
 
@@ -2256,5 +2257,5 @@ Slowdown factor:     8.84x</code></pre>
 
 
 
-</span><script src="../site_libs/quarto-html/zenscroll-min.js"></script>
+<script src="../site_libs/quarto-html/zenscroll-min.js"></script>
 </body></html>
