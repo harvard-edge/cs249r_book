@@ -2879,9 +2879,9 @@ class ValidateCommand:
     # ------------------------------------------------------------------
 
     _CAPTIONS_SKIP_PATH_PARTS = ("/frontmatter/", "/backmatter/")
-    _CALLOUT_OPEN_RE = re.compile(r"^:::+\s*\{[^}]*\.callout-")
-    _DIV_OPEN_RE = re.compile(r"^:::+\s*\{")
-    _DIV_CLOSE_RE = re.compile(r"^:::\s*$")
+    _CAPTIONS_CALLOUT_OPEN_RE = re.compile(r"^:::+\s*\{[^}]*\.callout-")
+    _CAPTIONS_DIV_OPEN_RE = re.compile(r"^:::+\s*\{")
+    _CAPTIONS_DIV_CLOSE_RE = re.compile(r"^:::\s*$")
     _PIPE_ROW_RE = re.compile(r"^\s*\|.+\|\s*$")
     _PIPE_SEP_RE = re.compile(r"^\s*\|[\s:|-]+\|\s*$")
     _TBL_CAP_ANY_RE = re.compile(r"^\s*:\s+\S")
@@ -2950,15 +2950,15 @@ class ValidateCommand:
             if in_code:
                 yield idx, line, ("callout" in div_stack), in_code, "code"
                 continue
-            if self._CALLOUT_OPEN_RE.match(stripped):
+            if self._CAPTIONS_CALLOUT_OPEN_RE.match(stripped):
                 div_stack.append("callout")
                 yield idx, line, True, False, "div-open"
                 continue
-            if self._DIV_OPEN_RE.match(stripped):
+            if self._CAPTIONS_DIV_OPEN_RE.match(stripped):
                 div_stack.append("other")
                 yield idx, line, ("callout" in div_stack), False, "div-open"
                 continue
-            if self._DIV_CLOSE_RE.match(stripped):
+            if self._CAPTIONS_DIV_CLOSE_RE.match(stripped):
                 if div_stack:
                     div_stack.pop()
                 yield idx, line, ("callout" in div_stack), False, "div-close"
@@ -3107,16 +3107,16 @@ class ValidateCommand:
                     continue
                 if in_code:
                     continue
-                if self._CALLOUT_OPEN_RE.match(stripped):
+                if self._CAPTIONS_CALLOUT_OPEN_RE.match(stripped):
                     div_stack.append("callout")
                     continue
                 if self._FIG_DIV_OPEN_RE.match(stripped):
                     div_stack.append("fig")
                     continue
-                if self._DIV_OPEN_RE.match(stripped):
+                if self._CAPTIONS_DIV_OPEN_RE.match(stripped):
                     div_stack.append("other")
                     continue
-                if self._DIV_CLOSE_RE.match(stripped):
+                if self._CAPTIONS_DIV_CLOSE_RE.match(stripped):
                     if div_stack:
                         div_stack.pop()
                     continue
