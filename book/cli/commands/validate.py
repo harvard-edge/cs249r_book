@@ -3002,17 +3002,33 @@ class ValidateCommand:
                     j = i + 2
                     while j < n and self._PIPE_ROW_RE.match(lines[j]):
                         j += 1
-                    # Look at next ~4 non-blank lines (excluding code) for a
-                    # caption line. Quarto allows up to 1 blank line between
-                    # the table and its caption; we widen slightly for slack.
-                    window: List[str] = []
+                    # Quarto pipe-table captions can sit on EITHER side of
+                    # the table: a `: caption {#tbl-X}` line up to ~3 non-
+                    # blank lines BEFORE the header row, or up to ~5 non-
+                    # blank lines AFTER the last data row. Look at both.
+                    after: List[str] = []
                     k = j
-                    while k < n and len(window) < 5:
+                    while k < n and len(after) < 5:
                         if lines[k].strip():
-                            window.append(lines[k])
+                            after.append(lines[k])
                         k += 1
-                    cap_text = "\n".join(window)
-                    if not self._TBL_CAP_ANY_RE.search(cap_text):
+                    before: List[str] = []
+                    k = i - 1
+                    while k >= 0 and len(before) < 3:
+                        s = lines[k].strip()
+                        if s:
+                            # Stop scanning upward once we hit something
+                            # that clearly isn't a caption (a heading, a
+                            # paragraph of prose, a fenced block).
+                            if s.startswith(("#", "```", ":::", "|")):
+                                if not s.startswith(":"):
+                                    break
+                            before.append(lines[k])
+                            if s.startswith(":") and not s.startswith("::"):
+                                break
+                        k -= 1
+                    cap_text = "\n".join(after + before)
+                    if not re.search(r"^\s*:\s+\S", cap_text, re.M):
                         raw_issues.append(ValidationIssue(
                             file=self._relative_file(file),
                             line=table_start,
