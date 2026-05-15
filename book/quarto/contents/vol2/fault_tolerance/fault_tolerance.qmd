@@ -2517,7 +2517,7 @@ A **warm restart**\index{Warm Restart} preserves the state of surviving workers.
 
 Warm restarts can reduce $T_{\text{load}}$ and $T_{\text{warmup}}$ to near-zero for 99.9 percent of the cluster, cutting total recovery time from minutes to seconds. For our 1,000-GPU example, a warm restart avoids reloading `{python} FaultToleranceSetup.gpt3_ckpt_tb` TB from storage, saving the 21-second $T_{\text{load}}$ and 2-minute $T_{\text{warmup}}$ for all but the replacement node.
 
-The trade-off is software complexity. Warm restarts require the application to handle dynamic membership changes without leaking CUDA memory, corrupting shared state, or deadlocking during communicator reconstruction. Frameworks like TorchElastic and DeepSpeed provide this capability, but the failure modes during warm restart itself—a crash during communicator rebuild, for instance—must be handled by falling back to cold restart. Production systems implement warm restart as the fast path with cold restart as the safety net.
+The trade-off is software complexity. Warm restarts require the application to handle dynamic membership changes without leaking CUDA memory, corrupting shared state, or deadlocking during communicator reconstruction. Frameworks like TorchElastic and DeepSpeed provide this capability, but the failure modes during warm restart itself—a crash during communicator rebuild, for instance—must be handled by falling back to cold restart. Production systems implement warm restart as the fast path with cold restart as the safety net. @tbl-cold-vs-warm-restart contrasts the two strategies:
 
 | **Aspect**                  | **Cold Restart**                 | **Warm Restart**                       |
 |:----------------------------|:---------------------------------|:---------------------------------------|
@@ -2526,6 +2526,8 @@ The trade-off is software complexity. Warm restarts require the application to h
 | **Implementation**          | Simple: kill all, reload all     | Complex: dynamic membership management |
 | **Failure during recovery** | Retry cold restart               | Fall back to cold restart              |
 | **Best for**                | Correlated failures, SDC events  | Single-node failures, GPU errors       |
+
+: **Cold vs. Warm Restart Trade-Offs**: Cold restart kills every process and reloads from disk; warm restart preserves surviving workers and replaces only the failed node. Warm restart cuts recovery from minutes to seconds for the typical single-node failure but introduces software complexity around dynamic membership management. Production deployments run warm restart as the fast path and cold restart as the safety net. {#tbl-cold-vs-warm-restart}
 
 #### Recovery automation pipeline {#sec-fault-tolerance-reliability-recovery-automation-pipeline}
 
@@ -2868,7 +2870,7 @@ Load balancers maintain session-to-replica mapping through sticky sessions. Impl
 
 State failover offers multiple options. State loss accepts degraded quality on failover by regenerating state from scratch. State checkpointing periodically saves session state for recovery. State replication copies state to standby replica. Distributed state stores session state in external stores like Redis or Memcached.
 
-The choice depends on state size, update frequency, and quality impact of state loss.
+The choice depends on state size, update frequency, and the quality impact of state loss; @tbl-stateful-failover summarizes the trade-offs across the four common approaches:
 
 | **Approach**                | **Recovery Latency** | **Consistency** | **Operational Complexity** |
 |:----------------------------|:---------------------|:----------------|:---------------------------|
@@ -2876,6 +2878,8 @@ The choice depends on state size, update frequency, and quality impact of state 
 | **Checkpointing**           | Medium               | Eventual        | Medium                     |
 | **Synchronous replication** | Fast                 | Strong          | High                       |
 | **Distributed state**       | Fast                 | Configurable    | Medium                     |
+
+: **Stateful Failover Approaches**: Four strategies for handling session state when a serving replica fails. State loss is fastest and simplest but discards quality on failover; checkpointing trades recovery latency for eventual consistency; synchronous replication offers strong consistency at the cost of operational complexity; distributed state stores split state management into a separate tier with configurable consistency. {#tbl-stateful-failover}
 
 ### Model-specific serving fault tolerance {#sec-fault-tolerance-reliability-reliability-modelspecific-serving-fault-tolerance-3245}
 
@@ -3001,7 +3005,7 @@ When defaults are insufficient, the system can compute approximate features from
 - Missing item attributes: Use text embedding from title/description
 - Missing contextual features: Use time-based defaults
 
-Prioritizing features by importance to prediction quality allows systems to degrade gracefully:
+Prioritizing features by importance to prediction quality allows systems to degrade gracefully, as @tbl-feature-degradation-tiers summarizes:
 
 | **Tier**      | **Example Features**          | **Missing Action** |          **Quality Impact** |
 |:--------------|:------------------------------|:-------------------|----------------------------:|
@@ -3009,6 +3013,8 @@ Prioritizing features by importance to prediction quality allows systems to degr
 | **Important** | User history, Item attributes | Use defaults       |   5–10 percent quality loss |
 | **Useful**    | Real-time context             | Use cached         |    2–5 percent quality loss |
 | **Optional**  | Secondary signals             | Omit               | &lt; 2 percent quality loss |
+
+: **Graceful Feature Degradation Tiers**: Features classified by importance to prediction quality, with the corresponding response when each tier is unavailable. Critical features block the request entirely; lower tiers allow the system to fall back to defaults, cached values, or omission with bounded quality impact. The tiers convert a binary "feature available or not" question into a four-step degradation ladder. {#tbl-feature-degradation-tiers}
 
 #### Load shedding {#sec-fault-tolerance-reliability-reliability-load-shedding-8476}
 

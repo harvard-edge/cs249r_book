@@ -79,6 +79,42 @@ jobs:
           quarto render
           touch _build/.nojekyll
 
+      - name: 📦 Emit dev release manifest
+        # The footer release-pill.js fetches /tinytorch/release-manifest.json
+        # at runtime. Preview-dev builds still need this file to exist or
+        # visual-smoke catches the 404 as a console error on every page.
+        # We stamp a dev manifest derived from the commit SHA so the pill
+        # renders without erroring; the publish-live workflow stamps the
+        # real release manifest on its own.
+        run: |
+          set -euo pipefail
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          RELEASE_ID="0.0.0-dev+${SHORT_SHA}"
+
+          RELEASE_HASH=$(python3 scripts/version/release.py compute-hash \
+            --paths tinytorch/modules tinytorch/quarto \
+                    tinytorch/pyproject.toml tinytorch/MANIFEST.in \
+            --exclude '_build' '__pycache__' '*.pyc' '.DS_Store' \
+                      '.ipynb_checkpoints' '*.egg-info')
+
+          python3 scripts/version/release.py emit-manifest \
+            --output ${{ vars.TINYTORCH_SITE }}/_build/release-manifest.json \
+            --project tinytorch \
+            --tier A \
+            --release-id "$RELEASE_ID" \
+            --release-hash "$RELEASE_HASH"
+
+          # Mirror at /tinytorch/release-manifest.json so visual-smoke, which
+          # serves _build/ at the root, can resolve the absolute path baked
+          # into the page meta tag. Live deploy mounts _build/ under
+          # /tinytorch/, so the file ends up in the right place either way.
+          mkdir -p ${{ vars.TINYTORCH_SITE }}/_build/tinytorch
+          cp ${{ vars.TINYTORCH_SITE }}/_build/release-manifest.json \
+             ${{ vars.TINYTORCH_SITE }}/_build/tinytorch/release-manifest.json
+
+          echo "✅ Dev manifest written"
+          cat ${{ vars.TINYTORCH_SITE }}/_build/release-manifest.json
+
       - name: 📥 Download PDF Guide
         uses: actions/download-artifact@v8
         continue-on-error: true

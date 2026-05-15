@@ -497,7 +497,7 @@ Because HBM capacity is so limited relative to both model size and dataset size,
 
 This batch-oriented consumption pattern creates a "spill" dynamic that cascades down the hierarchy. When a model's weights alone exceed HBM capacity, the system must partition the model across multiple accelerators (tensor parallelism) or page weights in and out of HBM during execution (offloading). Either strategy increases the bandwidth demand on lower tiers. For our 175B parameter model, the weights in FP16 occupy 350 GB, requiring at least five H100 accelerators just for weight storage, with no room for activations or optimizer state. The optimizer state (momentum and variance in FP32) adds another 1.4 TB, pushing the total memory footprint to roughly 1.75 TB. Distributed training strategies partition this footprint across the cluster, but every partition increases the coordination overhead at lower tiers. @sec-distributed-training-systems examines these parallelism strategies in depth; here, the key insight is that HBM scarcity is the root cause of the entire storage hierarchy's existence.
 
-The razor-thin margin is a defining feature of large model training. Consider the HBM memory budget for training our 175B parameter model on a single H100 GPU with 80 GB of HBM, assuming the model is partitioned across 8 GPUs using tensor parallelism within the node and ZeRO-3 across 256 nodes:
+The razor-thin margin is a defining feature of large model training. @tbl-hbm-memory-budget shows the HBM memory budget for training our 175B parameter model on a single H100 GPU with 80 GB of HBM, assuming the model is partitioned across 8 GPUs using tensor parallelism within the node and ZeRO-3 across 256 nodes:
 
 | **Component**                             | **Size per GPU** |
 |:------------------------------------------|-----------------:|
@@ -507,6 +507,8 @@ The razor-thin margin is a defining feature of large model training. Consider th
 | Gradient Buffers                          |           5.5 GB |
 | Communication Buffers (NCCL)              |           2–4 GB |
 | **Total Occupied**                        |     **67–79 GB** |
+
+: **HBM Memory Budget for 175B-Parameter Training**: Per-GPU allocation when partitioning a 175B model with 8-way tensor parallelism inside the node and ZeRO-3 across 256 nodes. The total occupies 85 to 98 percent of the 80 GB HBM, leaving only a few gigabytes of buffer for the incoming data pipeline. Any delay in fetching the next batch from host memory risks starving the accelerator. {#tbl-hbm-memory-budget}
 
 Even with aggressive partitioning, the total memory footprint consumes between 85 percent and 98 percent of the available HBM. This leaves less than 15 percent of the GPU's fastest memory, just a few gigabytes, to serve as a buffer for the incoming data pipeline. Any delay in fetching the next batch from host memory risks starving the accelerator, forcing it to sit idle while the most expensive resource in the system produces heat instead of gradients.
 
