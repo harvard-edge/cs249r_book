@@ -3056,12 +3056,22 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - start) * 1000),
         )
 
+    _FIG_DIV_OPEN_RE = re.compile(r"^:::+\s*\{[^}]*#fig-[\w-]+")
+    # Chapter-opener cover images are decorative and not cross-referenced
+    # by convention. They carry fig-alt for accessibility but no #fig-
+    # label. Skip them in the label-required check.
+    _COVER_IMAGE_RE = re.compile(r"!\[[^\]]*\]\s*\([^)]*/cover_[\w-]+\.(png|jpg|jpeg|svg|gif)")
+
     def _run_figure_label_required(self, root: Path) -> ValidationRunResult:
         """Flag `![](...)` markdown image figures with no `{#fig-X}` label.
 
-        Without a label, the figure cannot be cross-referenced with
-        `@fig-X` and silently floats unanchored. Skips callouts /
-        frontmatter / backmatter the same way table caption-required does.
+        A bare `![alt](path)` is fine when wrapped in a
+        `::: {#fig-X fig-cap=... fig-alt=...}` div (the conventional
+        pattern in this book), since the div carries the label. We flag
+        only images that are *neither* inline-labeled (`{#fig-X}` on the
+        same line) *nor* enclosed in a `#fig-` div. Skips callouts,
+        frontmatter, and backmatter the same way the other caption
+        scopes do.
         """
         start = time.time()
         files = self._qmd_files(root)
@@ -3070,22 +3080,46 @@ class ValidateCommand:
             if self._captions_skip_file(file):
                 continue
             lines = self._read_text(file).splitlines()
-            for idx, line, in_callout, in_code, kind in (
-                    self._captions_iter_body_lines(lines)):
-                if kind != "prose" or in_callout:
+            # Walk lines tracking div stack tagged by kind: "callout",
+            # "fig" (a #fig-X labeled div), or "other".
+            div_stack: List[str] = []
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.rstrip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                if self._CALLOUT_OPEN_RE.match(stripped):
+                    div_stack.append("callout")
+                    continue
+                if self._FIG_DIV_OPEN_RE.match(stripped):
+                    div_stack.append("fig")
+                    continue
+                if self._DIV_OPEN_RE.match(stripped):
+                    div_stack.append("other")
+                    continue
+                if self._DIV_CLOSE_RE.match(stripped):
+                    if div_stack:
+                        div_stack.pop()
+                    continue
+                if "callout" in div_stack or "fig" in div_stack:
                     continue
                 if not self._MD_IMAGE_ANY_RE.search(line):
                     continue
                 if self._MD_IMAGE_WITH_LABEL_RE.search(line):
+                    continue
+                if self._COVER_IMAGE_RE.search(line):
                     continue
                 raw_issues.append(ValidationIssue(
                     file=self._relative_file(file),
                     line=idx,
                     code="figure_missing_label",
                     message=(
-                        "Markdown image figure has no {#fig-X} label. "
-                        "Use a `::: {#fig-X fig-cap=... fig-alt=...}` "
-                        "div (preferred) so the figure can be "
+                        "Markdown image figure has no {#fig-X} label "
+                        "and is not enclosed in a `::: {#fig-X ...}` "
+                        "div. Wrap it so the figure can be "
                         "cross-referenced with `@fig-X` in prose."
                     ),
                     severity="error",
