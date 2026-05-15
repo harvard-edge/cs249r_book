@@ -1459,9 +1459,7 @@ where $\bar{L}$ is the mean output length. This reveals that waste depends entir
 
 #### Worked example: LLM serving with variable-length outputs {#sec-inference-scale-worked-example-llm-serving-variablelength-outputs-5e38}
 
-Consider a GPT-class model serving four concurrent requests with the following generation lengths (in tokens):
-
-Request characteristics
+Consider a GPT-class model serving four concurrent requests with the generation lengths shown in @tbl-batching-request-lengths (in tokens):
 
 | **Request** | **Prompt Length** | **Output Length** | **Total Tokens** |
 |:------------|------------------:|------------------:|-----------------:|
@@ -1469,6 +1467,8 @@ Request characteristics
 | **R2**      |                80 |               200 |              280 |
 | **R3**      |               120 |               100 |              220 |
 | **R4**      |                90 |               150 |              240 |
+
+: **Concurrent Request Generation Lengths**: Four concurrent requests on a GPT-class model with varying prompt and output lengths. The 4$\times$ spread in output length (50 to 200 tokens) drives the batching waste analyzed in this section: a static batch of four pads every request to the longest, wasting compute on the three shorter requests until the longest finishes generating. {#tbl-batching-request-lengths}
 
 ```{python}
 #| echo: false
@@ -4325,13 +4325,15 @@ When total demand exceeds capacity, max-min fairness allocates resources to maxi
 
 ### Priority scheduling {#sec-inference-scale-priority-scheduling-3e37}
 
-When tenants have different SLO requirements, priority scheduling ensures that high-priority requests receive resources first. Three priority classes organize this hierarchy:
+When tenants have different SLO requirements, priority scheduling ensures that high-priority requests receive resources first. @tbl-priority-scheduling-classes organizes the hierarchy into three priority classes:
 
 | **Class**       | **Use Case**       | **Preemption**          | **Resource Guarantee** |
 |:----------------|:-------------------|:------------------------|:-----------------------|
 | **Critical**    | Revenue-generating | Can preempt lower       | 100 percent reserved   |
 | **Standard**    | General traffic    | Can preempt best-effort | Weighted share         |
 | **Best-effort** | Background, batch  | Cannot preempt          | No guarantee           |
+
+: **Priority Scheduling Classes**: Three-tier priority hierarchy for multi-tenant inference. Critical traffic gets 100 percent reserved capacity and can preempt any lower class; standard traffic shares capacity proportionally and can preempt best-effort; best-effort runs on leftover capacity with no guarantees. {#tbl-priority-scheduling-classes}
 
 The scheduler sorts incoming requests by priority class, then by arrival time within each class. When a new critical request arrives, it jumps ahead of all standard and best-effort requests in the queue, ensuring that revenue-generating traffic never waits behind background batch jobs.
 
@@ -4481,13 +4483,15 @@ The provisioning phase ($T_{\text{provision}}$) acquires a GPU instance, which t
 
 [^fn-cold-start-gpu]: **Cold Start (GPU vs. Serverless)**: Serverless functions cold-start in 100 ms--1 s; GPU inference cold-starts in 1--10 minutes due to GPU allocation, model weight transfer, and CUDA context initialization. This 100$\times$ gap means reactive autoscaling alone cannot absorb traffic spikes, making predictive scaling and warm pools essential design requirements for any GPU serving fleet with latency SLOs. \index{Cold Start!GPU inference}
 
-Once the instance is available, model loading ($T_{\text{load}}$) transfers weights from storage to GPU memory. Loading time scales with model size and depends heavily on storage tier:
+Once the instance is available, model loading ($T_{\text{load}}$) transfers weights from storage to GPU memory. Loading time scales with model size and depends heavily on storage tier, as @tbl-model-load-time shows:
 
 | **Model Size**\index{Model Size} | **Load Time (SSD)** | **Load Time (S3)** |
 |:---------------------------------|--------------------:|-------------------:|
 | **7B (14 GB)**                   |                  5s |                30s |
 | **70B (140 GB)**                 |                 45s |               5min |
 | **175B (350 GB)**                |                2min |              12min |
+
+: **Model Load Time by Storage Tier**: Local SSD loads weights at roughly 6 GB/s; remote object storage (S3) loads at roughly 0.5 GB/s. The 10$\times$ gap matters most for the largest models: a 175B model takes 2 minutes from SSD vs. 12 minutes from S3, dominating the cold-start budget for any serving deployment that has to pull weights from object storage on each scale-up. {#tbl-model-load-time}
 
 Even after weights reside in GPU memory, the first inference runs slower than steady state because just-in-time (JIT) kernel compilation, CUDA context initialization, memory pool allocation, and cache population must complete. This warmup phase ($T_{\text{warmup}}$) typically requires 10--30 dummy inferences, adding 5--30 seconds. A detailed *cold start timeline for Llama-70B* shows how these phases accumulate in practice.
 
@@ -4752,13 +4756,15 @@ For example, if max spike is 2$\times$ normal and headroom factor is 1.5:
 
 $$\text{Warm pool} = 2 \times 1.5 = 3 \times \text{minimum pool capacity}$$
 
-The cost of maintaining warm replicas is $\text{Pool size} \times \text{GPU cost/hour} \times \text{Idle fraction}$, creating a direct trade-off between response speed and idle-capacity expense. Tiered warm pools resolve this trade-off by maintaining replicas at different readiness levels, each with different activation latency and cost:
+The cost of maintaining warm replicas is $\text{Pool size} \times \text{GPU cost/hour} \times \text{Idle fraction}$, creating a direct trade-off between response speed and idle-capacity expense. Tiered warm pools, summarized in @tbl-warm-pool-tiers, resolve this trade-off by maintaining replicas at different readiness levels, each with different activation latency and cost:
 
 | **Tier** | **State**                   | **Response Time** | **Cost (relative)** |
 |:---------|:----------------------------|:------------------|--------------------:|
 | **Hot**  | GPU loaded, running         | Instant           |         100 percent |
 | **Warm** | GPU allocated, model loaded | 30s               |          60 percent |
 | **Cold** | GPU not allocated           | 5+ min            |           0 percent |
+
+: **Tiered Warm Pool Readiness Levels**: Three readiness tiers trade activation latency against idle-capacity cost. Hot replicas absorb bursts instantly at full cost; warm replicas activate in 30 seconds at 60 percent cost; cold replicas cost nothing but take five minutes to come online. Production deployments combine a small hot pool, a larger warm pool, and unlimited cold capacity. {#tbl-warm-pool-tiers}
 
 When a traffic spike hits, the scaling sequence activates hot replicas immediately, promotes warm replicas within 30 seconds, and cold-starts new instances only if demand persists beyond the warm pool's capacity. A typical configuration maintains 2 hot replicas for instant burst absorption and 5 warm replicas for sustained spikes, with unlimited cold capacity available from the cloud provider.
 
@@ -4768,12 +4774,16 @@ The total time to respond to a scaling event is given by @eq-scaling-response:
 
 $$T_{\text{response}} = T_{\text{detect}} + T_{\text{decide}} + T_{\text{provision}} + T_{\text{warmup}}$$ {#eq-scaling-response}
 
+@tbl-scaling-response-components decomposes each term and identifies its primary optimization path:
+
 | **Component**            | **Duration** | **Optimization**        |
 |:-------------------------|-------------:|:------------------------|
 | **Detection**            |      10--60s | Reduce metrics interval |
 | **Decision**             |        1--5s | Faster autoscaler       |
 | **Provisioning**         |    30s--5min | Warm pools              |
 | **Warmup**\index{Warmup} |       5--30s | Precompilation          |
+
+: **Scaling Response Time Components**: The four phases of a scaling event with typical durations and their primary optimization lever. Provisioning dominates the budget by an order of magnitude, which is why warm pools are the highest-leverage optimization for any latency-sensitive serving fleet. {#tbl-scaling-response-components}
 
 Each component offers distinct optimization opportunities. Detection speed improves by collecting metrics at 1-second intervals rather than 60-second intervals, at the cost of noisier signals and higher metric volume. Decision speed improves by precomputing scaling plans for predicted scenarios so that when a trigger fires, the system executes a precomputed plan rather than computing one from scratch. Provisioning speed improves most dramatically through warm pools, which eliminate the provisioning phase entirely for anticipated demand. Warmup speed improves through precompiled inference engines that skip JIT compilation, reducing the final phase from 30 seconds to under 5 seconds.
 
@@ -4783,11 +4793,15 @@ Cloud providers offer discounted GPU instances[^fn-spot-inference] that can be r
 
 [^fn-spot-inference]: **Spot Instance Economics**\index{Spot Instance Economics}: Cloud providers sell unused GPU capacity at 60--90 percent discounts with 30-second to 2-minute termination notice. For inference, termination destroys in-flight requests and KV cache state, requiring graceful drain logic and rapid request re-routing. The 60--90 percent savings justify this complexity for burst and best-effort traffic tiers but are unsuitable for SLO-critical paths where termination would violate latency guarantees. \index{Spot Instances!inference}
 
+@tbl-gpu-instance-types lays out the three GPU instance classes and the workloads each suits best:
+
 | **Instance Type**    |   **Discount** | **Interruption Notice** | **Use Case**    |
 |:---------------------|---------------:|:------------------------|:----------------|
 | **On-demand**        |      0 percent | Never                   | SLO-critical    |
 | **Reserved**         |  30-60 percent | Never                   | Steady baseline |
 | **Spot/Preemptible** | 60--90 percent | 30s--2min               | Burst capacity  |
+
+: **GPU Instance Types by Pricing and Reliability**: Three GPU instance classes trade discount against interruption risk. On-demand is the reference price with no interruption; reserved instances trade upfront commitment for moderate discount; spot instances trade preemption risk for 60--90 percent savings. Production fleets typically run a baseline of reserved + on-demand instances and burst into spot capacity for best-effort traffic. {#tbl-gpu-instance-types}
 
 @lst-spot-termination illustrates graceful handling of spot termination within the two-minute warning window.\index{Spot Termination Handling}
 
@@ -4830,7 +4844,7 @@ Production inference systems serving global user bases must operate across multi
 
 #### Why multi-region matters {#sec-inference-scale-multiregion-matters-d7d3}
 
-Single-region deployment creates three fundamental limitations. The most immediate is the latency floor imposed by network round-trip time (RTT) to distant users:
+Single-region deployment creates three fundamental limitations. The most immediate is the latency floor imposed by network round-trip time (RTT) to distant users, quantified in @tbl-rtt-by-user-location:
 
 | **User Location** | **RTT to US-East** | **RTT to Local Region** |
 |:------------------|-------------------:|------------------------:|
@@ -4838,6 +4852,8 @@ Single-region deployment creates three fundamental limitations. The most immedia
 | **London**        |              75 ms |                   10 ms |
 | **Tokyo**         |             150 ms |                   10 ms |
 | **Sydney**        |             200 ms |                   10 ms |
+
+: **Network RTT by User Location**: A single US-East deployment imposes a 75 to 200 ms RTT on European, Asian, and Australian users—an order of magnitude above the local-region floor. For interactive workloads where each request makes several model calls, this latency floor compounds quickly, motivating multi-region deployment for any globally distributed user base. {#tbl-rtt-by-user-location}
 
 For interactive applications (chatbots, autocomplete), these delays compound across multiple model calls per request. Beyond latency, single-region deployment creates a single point of failure: cloud region outages, while rare, affect all users simultaneously. Regulatory constraints add a third dimension, as data residency requirements—the General Data Protection Regulation (GDPR) and data sovereignty laws—may require processing user data within specific geographic boundaries.
 
@@ -4872,7 +4888,7 @@ For models too large to replicate globally, caching responses at the edge elimin
 
 :::
 
-The two paths in @fig-edge-cache-routing highlight the order-of-magnitude latency difference: cache hits return in under 10 ms, while cache misses incur the full backend round-trip. Effectiveness depends on request repeatability, as the following table quantifies:
+The two paths in @fig-edge-cache-routing highlight the order-of-magnitude latency difference: cache hits return in under 10 ms, while cache misses incur the full backend round-trip. Effectiveness depends on request repeatability, as @tbl-edge-cache-hit-rates quantifies:
 
 | **Workload**                               | **Cache Hit Rate** | **Suitability** |
 |:-------------------------------------------|-------------------:|:----------------|
@@ -4880,6 +4896,8 @@ The two paths in @fig-edge-cache-routing highlight the order-of-magnitude latenc
 | **FAQ chatbot**                            |      40-60 percent | Good            |
 | **Open-ended chat**                        |       5-15 percent | Poor            |
 | **Code generation**\index{Code Generation} |     20--40 percent | Moderate        |
+
+: **Edge Cache Hit Rates by Workload**: Cache effectiveness depends almost entirely on request repeatability. Autocomplete and FAQ workloads have high prefix overlap and benefit dramatically; open-ended chat has near-unique inputs and barely benefits. The hit-rate range determines whether edge caching is worth the operational complexity for a given workload. {#tbl-edge-cache-hit-rates}
 
 Semantic caching[^fn-semantic-cache-tradeoff] (caching based on embedding similarity rather than exact match) can improve hit rates for open-ended workloads.
 
@@ -4922,7 +4940,7 @@ Failover considerations for stateful LLM serving
 
 Deploying model updates across regions requires careful coordination. A phased rollout begins with a canary deployment to a single region (typically 1 percent of traffic), monitors for 1--4 hours, then progressively expands to additional regions. Each expansion point is a gate: if error rates exceed 0.1 percent or P99 latency exceeds the target, the rollout halts. Rollback switches the affected region back to the previous model version while preserving the new version for debugging. The key invariant is that no region proceeds to a new version until the prior region has demonstrated healthy metrics for a sufficient monitoring window.
 
-Global deployment health requires monitoring four metrics both per-region and globally:
+Global deployment health requires monitoring four metrics both per-region and globally, as @tbl-global-deployment-health-metrics specifies:
 
 | **Metric**        | **Per-Region**   | **Global**                   |
 |:------------------|:-----------------|:-----------------------------|
@@ -4931,15 +4949,19 @@ Global deployment health requires monitoring four metrics both per-region and gl
 | **Throughput**    | Stable           | Stable                       |
 | **Model quality** | Within bounds    | Consistent across regions    |
 
+: **Global Deployment Health Metrics**: Four metrics monitored at both per-region and global granularity during phased rollouts. Per-region thresholds catch localized regressions; global thresholds catch cross-region effects (such as a P99 inflation greater than 2$\times$ the single-region target) that no per-region check would surface. {#tbl-global-deployment-health-metrics}
+
 #### Cost optimization across regions {#sec-inference-scale-cost-optimization-across-regions-c1c2}
 
-GPU pricing varies by region. Optimize placement for cost while meeting latency requirements:
+GPU pricing varies by region. @tbl-gpu-region-pricing shows representative H100 prices so placement can balance cost against latency requirements:
 
 | **Region**  | **H100 Spot Price** | **On-Demand** | **Latency to US Users** |
 |:------------|--------------------:|--------------:|------------------------:|
 | **US-East** |           \$2.50/hr |     \$4.00/hr |               10--50 ms |
 | **US-West** |           \$2.30/hr |     \$3.80/hr |               30--70 ms |
 | **EU-West** |           \$2.80/hr |     \$4.20/hr |              75--100 ms |
+
+: **H100 Pricing and Latency by Region**: Representative spot and on-demand H100 prices alongside RTT to US users. The 20 percent price spread across regions is modest compared to the latency spread, so cost-aware routing typically sends only latency-tolerant workloads (batch inference, background processing) to the cheapest region while keeping interactive traffic local. {#tbl-gpu-region-pricing}
 
 Cost-aware routing directs latency-tolerant workloads (batch inference, background processing) to the cheapest available region, as shown in @lst-cost-aware-routing.\index{Cost-Aware Routing}
 
@@ -5017,13 +5039,15 @@ $$w_q = \text{round}\left(\frac{w}{\Delta}\right) \cdot \Delta$$
 
 where $\Delta$ is the quantization step size. GPTQ uses per-group quantization with group sizes of 128 weights, enabling finer-grained scaling that reduces quantization error for outlier channels.
 
-Performance characteristics
+@tbl-gptq-performance summarizes GPTQ performance across Llama model sizes:
 
 | **Model**     | **Bits** | **Perplexity Increase** | **Memory Reduction** | **Quantization Time** |
 |:--------------|---------:|------------------------:|---------------------:|----------------------:|
 | **Llama-7B**  |        4 |                    +0.3 |            4$\times$ |                15 min |
 | **Llama-13B** |        4 |                    +0.2 |            4$\times$ |                30 min |
 | **Llama-70B** |        4 |                   +0.15 |            4$\times$ |               3 hours |
+
+: **GPTQ Performance Across Llama Sizes**: Quantization quality holds remarkably steady as model size scales: the 70B model loses less perplexity than the 7B model despite the same 4-bit target. Memory reduction is uniformly 4$\times$. Quantization time scales near-linearly with model size, dominated by the per-layer second-order updates. {#tbl-gptq-performance}
 
 GPTQ's strengths include fast quantization without retraining, minimal quality loss for 4-bit weights, and broad hardware compatibility. Its limitations include requiring calibration data, sensitivity to calibration set selection, and per-layer processing that cannot use cross-layer information.
 
@@ -5076,13 +5100,15 @@ $$s_j = \max(|X_j|)^\alpha / \max(|W_j|)^{1-\alpha}$$
 - $\alpha = 1$: Full migration, weights absorb all difficulty
 - $\alpha = 0.5$: Balanced (typical setting)
 
-In the W8A8 deployment regime, SmoothQuant enables INT8 quantization for both weights and activations:
+In the W8A8 deployment regime, SmoothQuant enables INT8 quantization for both weights and activations. @tbl-smoothquant-w8a8 shows how W8A8 compares to FP16 baseline and weight-only quantization:
 
 | **Configuration**        | **Memory** | **Prefill Speedup** | **Decode Speedup** | **Quality**          |
 |:-------------------------|-----------:|--------------------:|-------------------:|:---------------------|
 | **FP16 (baseline)**      |  1$\times$ |           1$\times$ |          1$\times$ | Baseline             |
 | **W8A16 (weights only)** |  2$\times$ |         1.3$\times$ |        1.8$\times$ | &lt;0.5 percent loss |
 | **W8A8 (SmoothQuant)**   |  2$\times$ |      1.8--2$\times$ |   1.3--1.5$\times$ | &lt;1 percent loss   |
+
+: **W8A8 SmoothQuant vs. Weight-Only Quantization**: W8A8 quantizes both weights and activations to INT8, doubling memory savings and unlocking compute-bound prefill speedup, but its decode speedup is lower than W8A16's because decode is memory-bound and W8A8's smaller weights are already captured by the simpler weight-only scheme. {#tbl-smoothquant-w8a8}
 
 The critical distinction is that W8A8 provides near 2$\times$ speedup for compute-bound prefill (large batch processing initial prompt) but only 1.3--1.5$\times$ speedup for memory-bound decode (generating tokens one at a time). LLM serving is typically decode-heavy, so real-world throughput improvements from W8A8 are often 1.3--1.7$\times$ rather than the theoretical 2$\times$ compute throughput of INT8 Tensor Cores.
 
@@ -5109,7 +5135,7 @@ Hadamard:  [252, 250, 250, 250] # Uniform distribution
 
 After transformation, no single value dominates, enabling uniform quantization.
 
-Advantages over migration-based methods
+@tbl-quarot-vs-smoothquant contrasts QuaRot's rotation-based approach with SmoothQuant's migration:
 
 | **Aspect**            | **SmoothQuant**\index{SmoothQuant} | **QuaRot**\index{QuaRot}         |
 |:----------------------|:-----------------------------------|:---------------------------------|
@@ -5118,7 +5144,9 @@ Advantages over migration-based methods
 | **Runtime overhead**  | ~0 percent                         | ~3 percent (Hadamard transforms) |
 | **Outlier handling**  | Migration                          | Elimination                      |
 
-Performance comparison
+: **QuaRot vs. SmoothQuant**: SmoothQuant migrates outliers from activations into weights and runs at zero runtime overhead but requires calibration data and stops at W8A8. QuaRot eliminates outliers through Hadamard rotation, runs data-free, reaches W4A4, and pays a ~3 percent runtime cost for the inline transforms. {#tbl-quarot-vs-smoothquant}
+
+@tbl-quarot-perplexity compares perplexity across quantization methods on LLaMA-2-70B:
 
 | **Method**      | **Precision**\index{Precision} | **LLaMA-2-70B Perplexity** | **vs. Baseline** |
 |:----------------|-------------------------------:|---------------------------:|-----------------:|
@@ -5126,6 +5154,8 @@ Performance comparison
 | **SmoothQuant** |                           W8A8 |                       3.18 |            +0.06 |
 | **GPTQ**        |                          W4A16 |                       3.24 |            +0.12 |
 | **QuaRot**      |                           W4A4 |                       3.31 |            +0.19 |
+
+: **Quantization Perplexity on LLaMA-2-70B**: Perplexity degradation across four quantization methods on a 70B model. QuaRot's W4A4 lands within 0.2 perplexity of FP16 baseline while delivering roughly 8$\times$ memory reduction, demonstrating that rotation-based methods make 4-bit activation quantization viable for production inference. {#tbl-quarot-perplexity}
 
 QuaRot achieves 4-bit weights AND 4-bit activations with quality competitive to GPTQ's 4-bit weights only. This enables approximately 8$\times$ memory reduction vs. FP16.
 
@@ -5135,7 +5165,7 @@ SpinQuant An extension of QuaRot that learns optimal rotation matrices during a 
 
 Quantization strategies must match target hardware capabilities. Different accelerators support different precisions with varying performance multipliers.
 
-NVIDIA Tensor Core Support
+@tbl-tensor-core-precision-support summarizes NVIDIA Tensor Core precision support across Ampere and Hopper:
 
 | **Format**           | **Ampere (A100)**                       | **Hopper (H100)**                                                       | **Speedup vs. FP16** |
 |:---------------------|:----------------------------------------|:------------------------------------------------------------------------|---------------------:|
@@ -5145,13 +5175,15 @@ NVIDIA Tensor Core Support
 | **FP8 (E4M3)**       | No                                      | Yes                                                                     |            2$\times$ |
 | **INT4**\index{INT4} | Software/CUTLASS or framework-dependent | Software/framework-dependent on H100; native FP4 is a Blackwell feature |   workload-dependent |
 
+: **Tensor Core Precision Support and Speedup**: Native precision support across NVIDIA Ampere and Hopper Tensor Cores. The 2$\times$ speedup at INT8 and FP8 reflects the doubled throughput of those native paths; INT4 remains framework-dependent on Ampere and Hopper, with native FP4 first appearing in Blackwell. {#tbl-tensor-core-precision-support}
+
 Memory bandwidth dominance For autoregressive LLM decode, memory bandwidth limits throughput since each token reads the entire model:
 
 $$\text{Decode throughput} \propto \frac{\text{Memory bandwidth}}{\text{Model size in bytes}}$$
 
 4-bit quantization delivers 4$\times$ throughput improvement for memory-bound decode, making it highly valuable despite modest compute gains.
 
-Deployment configurations
+@tbl-quantization-deployment-configurations summarizes how the major quantization configurations map to deployment targets and framework support:
 
 | **Quantization**\index{Quantization}\index{Quantization!quantization-aware training}\index{Quantization!rotation-based} | **Best For**                       | **Framework Support**         |
 |:------------------------------------------------------------------------------------------------------------------------|:-----------------------------------|:------------------------------|
@@ -5159,6 +5191,8 @@ Deployment configurations
 | **W8A8 (SmoothQuant)**                                                                                                  | INT8 accelerators, high throughput | TensorRT-LLM, ONNX Runtime    |
 | **FP8**                                                                                                                 | H100/H200 deployments              | TensorRT-LLM                  |
 | **W4A4**                                                                                                                | Research, extreme compression      | Limited                       |
+
+: **Quantization Deployment Configurations**: Mapping from quantization scheme to deployment target and supporting frameworks. W4A16 dominates consumer and memory-constrained deployments; W8A8 unlocks INT8 Tensor Core throughput; FP8 is the H100/H200 native path; W4A4 remains research territory with limited framework support. {#tbl-quantization-deployment-configurations}
 
 ### Framework integration {#sec-inference-scale-framework-integration-945c}
 
@@ -5232,13 +5266,15 @@ Decision framework
    - Memory-bound (decode): W4A16 provides 4x memory bandwidth
 ```
 
-Quantization impact on serving cost
+@tbl-quantization-serving-cost shows how quantization reshapes serving cost per million tokens:
 
 | **Configuration**               | **Cost per 1M tokens (estimated)** |
 |:--------------------------------|-----------------------------------:|
 | **FP16 on 8$\times$ A100**      |                             \$2.40 |
 | **AWQ 4-bit on 4$\times$ A100** |                             \$1.20 |
 | **AWQ 4-bit on 2$\times$ A100** |                             \$0.60 |
+
+: **Quantization Impact on Serving Cost**: Estimated cost per million tokens at three configurations. Halving the GPU count via 4-bit quantization halves the cost; halving it again brings the per-million-token cost to one quarter of the FP16 baseline. The cost savings come almost entirely from fewer GPUs rather than from per-GPU throughput gains. {#tbl-quantization-serving-cost}
 
 Quantization can reduce serving costs by 2--4$\times$ while maintaining acceptable quality, making it essential for cost-effective LLM deployment.
 
@@ -5290,13 +5326,15 @@ Hybrid sharding reduces embedding lookup latency from 50 ms (naive) to 2 ms thro
 
 Instead of batching entire requests, Meta batches at the feature level. Each inference request triggers 5,000+ embedding lookups, but these lookups are batched across requests within a 1 ms window. This achieves 90 percent+ memory bandwidth utilization on embedding servers.
 
-The resulting GPU-CPU hybrid architecture runs dense model computation (ranking towers) on GPUs, while sparse embedding lookups run on CPU servers with large memory and SSD storage. This matches hardware to workload characteristics:
+The resulting GPU-CPU hybrid architecture runs dense model computation (ranking towers) on GPUs, while sparse embedding lookups run on CPU servers with large memory and SSD storage. @tbl-meta-dlrm-hybrid-hardware matches hardware to workload characteristics:
 
 | **Component**          | **Hardware** | **Latency** | **Throughput** |
 |:-----------------------|:-------------|------------:|---------------:|
 | **Embedding lookup**   | CPU + SSD    |        2 ms |  50M lookups/s |
 | **Feature processing** | CPU          |        1 ms |      10M ops/s |
 | **Dense ranking**      | GPU          |      1.5 ms |    100K infs/s |
+
+: **Meta DLRM Hybrid CPU/GPU Architecture**: Hardware-workload mapping for Meta's recommendation serving stack. CPU + SSD handles the bandwidth-bound sparse path; CPU handles low-arithmetic-intensity feature processing; GPU handles the compute-dense ranking forward pass. The three latency budgets sum to ~5 ms, well within typical recommendation SLOs. {#tbl-meta-dlrm-hybrid-hardware}
 
 Three lessons emerge from this design:
 
@@ -5337,13 +5375,15 @@ API Gateway → Rate Limiting → Request Router → Model Cluster → Response 
 
 Several key design decisions shape this system.
 
-OpenAI was an early adopter of continuous batching (Orca-style) to maintain high GPU utilization despite variable output lengths. Chunked prefill bounds decode latency by processing long prompts in chunks that interleave with ongoing generation.
+OpenAI was an early adopter of continuous batching (Orca-style) to maintain high GPU utilization despite variable output lengths. Chunked prefill bounds decode latency by processing long prompts in chunks that interleave with ongoing generation. @tbl-batching-strategies-comparison contrasts the three approaches:
 
 | **Batching Strategy**    | **GPU Utilization** | **128K Prompt Behavior**                  |
 |:-------------------------|--------------------:|:------------------------------------------|
 | **Static batching**      |          45 percent | 30s TTFT; decode blocked                  |
 | **Continuous batching**  |          75 percent | 30s TTFT; decode still blocked by prefill |
 | **Continuous + chunked** |          85 percent | 30s TTFT; decode stalls bounded to ~3s    |
+
+: **Batching Strategy Comparison**: Three batching approaches with the resulting GPU utilization and 128K-prompt behavior. Static batching lets the longest request idle the whole batch; continuous batching lifts utilization to 75 percent but still stalls decode behind long prefills; chunked prefill interleaves prefill chunks with decode, capping decode stalls at a few seconds while reaching 85 percent utilization. {#tbl-batching-strategies-comparison}
 
 GPT-4 class models require 8-way or greater tensor parallelism for memory capacity and latency:
 
@@ -5421,7 +5461,7 @@ To meet this latency budget while evaluating thousands of documents, the system 
 
 Several key design decisions shape this system.
 
-Rather than running one expensive model on all candidates, Google uses a ranking cascade:
+Rather than running one expensive model on all candidates, Google uses a ranking cascade summarized in @tbl-google-ranking-cascade:
 
 | **Stage**            | **Model Complexity** |     **Candidates** | **Latency Budget** |
 |:---------------------|:---------------------|-------------------:|-------------------:|
@@ -5429,6 +5469,8 @@ Rather than running one expensive model on all candidates, Google uses a ranking
 | **L1 (First pass)**  | Linear model         |     10,000 → 1,000 |              20 ms |
 | **L2 (Second pass)** | Small transformer    |        1,000 → 100 |              50 ms |
 | **L3 (Final rank)**  | Large ensemble       |           100 → 10 |             100 ms |
+
+: **Google Ranking Cascade**: Four-stage cascade that filters a million candidates down to ten while spending compute proportional to depth. Each stage uses a more expensive model on fewer candidates, so total cost is dominated by the cheap early stages rather than the expensive final ensemble. {#tbl-google-ranking-cascade}
 
 The cascade achieves 100$\times$ cost reduction compared to running L3 on all candidates.
 
@@ -5496,7 +5538,7 @@ User request → User embedding → Candidate videos → Video understanding →
 
 Several key design decisions shape this system.
 
-TikTok separates user understanding (online) from content understanding (offline) through a two-tower architecture with caching[^fn-two-tower-serving]:
+TikTok separates user understanding (online) from content understanding (offline) through a two-tower architecture with caching[^fn-two-tower-serving]. @tbl-tiktok-two-tower-updates contrasts the online and offline tower update cadences:
 
 [^fn-two-tower-serving]: **Two-Tower Architecture**: Encodes user features and item features through separate neural networks ("towers") into embeddings, then scores via dot product. The serving advantage: item embeddings can be precomputed offline and cached, reducing online inference to the user tower forward pass plus a sub-millisecond vector similarity lookup. The trade-off is reduced model expressiveness from late interaction, since the towers cannot attend to each other's features during encoding. \index{Two-Tower Architecture!architecture, two-tower, serving}
 
@@ -5504,6 +5546,8 @@ TikTok separates user understanding (online) from content understanding (offline
 |:----------------|:---------------------|:------------|:-------------|
 | **User tower**  | Real-time            | 5 ms        | GPU (online) |
 | **Video tower** | Hourly               | N/A         | GPU (batch)  |
+
+: **TikTok Two-Tower Update Cadence**: User and video towers run on different cadences: user features change second-to-second and must inference online; video features change much more slowly and are precomputed in hourly batches. This asymmetric scheduling is the design that takes vision inference out of the critical path for almost every request. {#tbl-tiktok-two-tower-updates}
 
 Video embeddings are precomputed and cached, eliminating vision inference from the critical path for most requests. Only new videos (uploaded within the hour) require online vision inference.
 
@@ -5516,13 +5560,15 @@ User features → CPU preprocessing (1 ms)
              → Response formatting (1 ms)
 ```
 
-New video content is processed with different priorities:
+New video content is processed with different priorities, as @tbl-tiktok-video-priorities shows:
 
 | **Priority**   | **SLA**\index{SLA} | **Use Case**                 |
 |:---------------|-------------------:|:-----------------------------|
 | **Critical**   |              5 min | Creator with large following |
 | **Standard**   |             30 min | Normal uploads               |
 | **Background** |            2 hours | Bulk/imported content        |
+
+: **TikTok Video Ingestion Priority Tiers**: Three-tier SLA for video ingestion. High-follower-count creators get a five-minute SLA to maximize content freshness for their audience; standard uploads get 30 minutes; bulk imports get two hours of slack so the system can absorb them during quiet periods. {#tbl-tiktok-video-priorities}
 
 The priority scheme ensures popular creators' content reaches recommendations quickly while managing compute costs.
 

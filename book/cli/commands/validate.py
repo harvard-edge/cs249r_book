@@ -127,6 +127,16 @@ LABEL_REF_PATTERN = re.compile(r"@((?:fig|tbl|sec|eq|lst)-[\w-]+)")
 
 EXCLUDED_CITATION_PREFIXES = ("fig-", "tbl-", "sec-", "eq-", "lst-", "ch-", "nb-")
 
+# Captionless float baseline: per-file counts of pre-existing violations
+# grandfathered when the caption-required / label-required scopes landed.
+# A commit that increases any per-file count fails the check; a commit that
+# *decreases* a count is fine (debt going down). Regenerate with:
+#   ./book/binder check tables --scope caption-required --update-baseline
+CAPTIONS_BASELINE_PATH = (
+    Path(__file__).resolve().parent.parent.parent
+    / "tools" / "audit" / "baselines" / "captions_baseline.json"
+)
+
 
 @dataclass(frozen=True)
 class Scope:
@@ -275,6 +285,8 @@ class ValidateCommand:
             Scope("caption-heads", "_run_caption_head_style",
                   note="fig-cap/tbl-cap/lst-cap use **Bold Title**: Explanation"),
             Scope("div-syntax", "_run_figure_div_syntax"),
+            Scope("label-required", "_run_figure_label_required",
+                  note="![](...) markdown images in body prose need {#fig-X}"),
             # flow: deferred to copyeditor's PDF layout pass (2026-05-03).
             # The "near first reference" heuristic conflicts with the
             # repositioning the copyeditor does to balance pages in print.
@@ -378,6 +390,15 @@ class ValidateCommand:
                   note="prefer pipe tables"),
             Scope("content", "_run_table_content",
                   note="bare pipes, fracs, HTML entities"),
+            Scope("caption-required", "_run_table_caption_required",
+                  note="body-prose pipe tables need : caption {#tbl-X}"),
+        ],
+        "listings": [
+            # Listings in this book always use ::: {#lst-X lst-cap="..."} divs.
+            # caption-required enforces that any #lst- label carries an
+            # lst-cap (matching the figure/table caption-head convention).
+            Scope("caption-required", "_run_listing_caption_required",
+                  note="any #lst- listing must carry lst-cap=..."),
         ],
         "index": [
             Scope("placement", "_run_indexes",
@@ -704,7 +725,8 @@ class ValidateCommand:
             "math": "\\times spacing, attribute-string LaTeX leaks, optional render audit",
             "structure": "Heading levels, parts, Purpose-unnumbered",
             "code": "Python code blocks (echo: false, _str/_math export hygiene)",
-            "tables": "Grid tables → pipe, table content hygiene",
+            "tables": "Grid tables → pipe, table content hygiene, caption-required",
+            "listings": "Code listings carry lst-cap when labeled",
             "index": "Index placement (\\index{} outside headings/callouts)",
             "images": "Image file formats, external URLs",
             "json": "JSON file syntax validation",
@@ -2844,6 +2866,344 @@ class ValidateCommand:
         return ValidationRunResult(
             name="figures",
             description="Check figures have captions and alt-text",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Captionless floats: pipe tables, markdown-image figures, and #lst-
+    # listings that lack the required caption/label/lst-cap. Baseline
+    # at book/tools/audit/baselines/captions_baseline.json grandfathers
+    # pre-existing violations; new ones block the commit.
+    # ------------------------------------------------------------------
+
+    _CAPTIONS_SKIP_PATH_PARTS = ("/frontmatter/", "/backmatter/")
+    _CAPTIONS_CALLOUT_OPEN_RE = re.compile(r"^:::+\s*\{[^}]*\.callout-")
+    _CAPTIONS_DIV_OPEN_RE = re.compile(r"^:::+\s*\{")
+    _CAPTIONS_DIV_CLOSE_RE = re.compile(r"^:::\s*$")
+    _PIPE_ROW_RE = re.compile(r"^\s*\|.+\|\s*$")
+    _PIPE_SEP_RE = re.compile(r"^\s*\|[\s:|-]+\|\s*$")
+    _TBL_CAP_ANY_RE = re.compile(r"^\s*:\s+\S")
+    _TBL_CAP_LABELED_RE = re.compile(r"^\s*:\s+.+\{#tbl-[\w-]+")
+    _MD_IMAGE_ANY_RE = re.compile(r"!\[[^\]]*\]\s*\([^)]+\)")
+    _MD_IMAGE_WITH_LABEL_RE = re.compile(r"!\[[^\]]*\]\s*\([^)]+\)\s*\{[^}]*#fig-")
+    _LST_DIV_OPEN_RE = re.compile(r"^:::+\s*\{[^}]*#(lst-[\w-]+)")
+    _LST_CAP_ATTR_RE = re.compile(r'lst-cap\s*=\s*"')
+
+    def _captions_skip_file(self, file: Path) -> bool:
+        rel = str(file).replace("\\", "/")
+        return any(p in rel for p in self._CAPTIONS_SKIP_PATH_PARTS)
+
+    def _load_captions_baseline(self) -> Dict[str, Dict[str, int]]:
+        """Load per-file violation counts. Missing file → empty (no grandfather)."""
+        try:
+            data = json.loads(CAPTIONS_BASELINE_PATH.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {}
+        except json.JSONDecodeError:
+            return {}
+        return data.get("counts", {})
+
+    def _apply_captions_baseline(
+        self,
+        issues: List[ValidationIssue],
+        code: str,
+    ) -> List[ValidationIssue]:
+        """Drop up to N issues per file where N is the baseline budget.
+
+        Same semantics as bib_lint_baseline.json: grandfathered violations
+        are filtered out entirely so the check passes; only NEW violations
+        (i.e., counts that *exceed* the per-file budget) surface as errors.
+        Shrink the baseline as the corpus debt gets cleaned up.
+        """
+        baseline = self._load_captions_baseline().get(code, {})
+        grouped: Dict[str, List[ValidationIssue]] = {}
+        for issue in issues:
+            grouped.setdefault(issue.file, []).append(issue)
+        out: List[ValidationIssue] = []
+        for file, group in grouped.items():
+            budget = baseline.get(file, 0)
+            for i, issue in enumerate(group):
+                if i < budget:
+                    continue
+                out.append(issue)
+        return out
+
+    def _captions_iter_body_lines(
+        self,
+        lines: List[str],
+    ):
+        """Yield (idx, line, in_callout) for lines outside code fences.
+
+        Tracks div nesting; flags whether the current line sits inside any
+        open ::: {.callout-*} block.
+        """
+        in_code = False
+        div_stack: List[str] = []
+        for idx, line in enumerate(lines, 1):
+            stripped = line.rstrip()
+            if stripped.startswith("```"):
+                in_code = not in_code
+                yield idx, line, ("callout" in div_stack), in_code, "code-toggle"
+                continue
+            if in_code:
+                yield idx, line, ("callout" in div_stack), in_code, "code"
+                continue
+            if self._CAPTIONS_CALLOUT_OPEN_RE.match(stripped):
+                div_stack.append("callout")
+                yield idx, line, True, False, "div-open"
+                continue
+            if self._CAPTIONS_DIV_OPEN_RE.match(stripped):
+                div_stack.append("other")
+                yield idx, line, ("callout" in div_stack), False, "div-open"
+                continue
+            if self._CAPTIONS_DIV_CLOSE_RE.match(stripped):
+                if div_stack:
+                    div_stack.pop()
+                yield idx, line, ("callout" in div_stack), False, "div-close"
+                continue
+            yield idx, line, ("callout" in div_stack), False, "prose"
+
+    def _run_table_caption_required(self, root: Path) -> ValidationRunResult:
+        """Flag pipe tables in body prose that lack `: caption {#tbl-X}`.
+
+        Skips tables inside `::: {.callout-*}` divs (the callout title acts
+        as the contextual heading) and files under frontmatter/ or
+        backmatter/. Pre-existing violations are grandfathered via the
+        captions baseline; new ones error.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        raw_issues: List[ValidationIssue] = []
+        for file in files:
+            if self._captions_skip_file(file):
+                continue
+            lines = self._read_text(file).splitlines()
+            state = list(self._captions_iter_body_lines(lines))
+            # Cache (idx-1 → in_callout, kind)
+            meta = {idx: (cal, kind) for idx, _, cal, _, kind in state}
+            i = 0
+            n = len(lines)
+            while i < n:
+                idx = i + 1
+                line = lines[i]
+                cal, kind = meta.get(idx, (False, "prose"))
+                if kind != "prose":
+                    i += 1
+                    continue
+                if cal:
+                    i += 1
+                    continue
+                if (self._PIPE_ROW_RE.match(line)
+                        and i + 1 < n
+                        and self._PIPE_SEP_RE.match(lines[i + 1])):
+                    table_start = idx
+                    j = i + 2
+                    while j < n and self._PIPE_ROW_RE.match(lines[j]):
+                        j += 1
+                    # Quarto pipe-table captions can sit on EITHER side of
+                    # the table: a `: caption {#tbl-X}` line up to ~3 non-
+                    # blank lines BEFORE the header row, or up to ~5 non-
+                    # blank lines AFTER the last data row. Look at both.
+                    after: List[str] = []
+                    k = j
+                    while k < n and len(after) < 5:
+                        if lines[k].strip():
+                            after.append(lines[k])
+                        k += 1
+                    before: List[str] = []
+                    k = i - 1
+                    while k >= 0 and len(before) < 3:
+                        s = lines[k].strip()
+                        if s:
+                            # Stop scanning upward once we hit something
+                            # that clearly isn't a caption (a heading, a
+                            # paragraph of prose, a fenced block).
+                            if s.startswith(("#", "```", ":::", "|")):
+                                if not s.startswith(":"):
+                                    break
+                            before.append(lines[k])
+                            if s.startswith(":") and not s.startswith("::"):
+                                break
+                        k -= 1
+                    cap_text = "\n".join(after + before)
+                    if not re.search(r"^\s*:\s+\S", cap_text, re.M):
+                        raw_issues.append(ValidationIssue(
+                            file=self._relative_file(file),
+                            line=table_start,
+                            code="table_missing_caption",
+                            message=(
+                                "Pipe table in body prose has no caption "
+                                "line. Add: `: **Title**: explanation. "
+                                "{#tbl-X}` after the table, then "
+                                "reference it with `@tbl-X` in prose."
+                            ),
+                            severity="error",
+                            context=line.strip()[:120],
+                        ))
+                    elif not re.search(
+                            r"^\s*:\s+.+\{#tbl-[\w-]+", cap_text, re.M):
+                        raw_issues.append(ValidationIssue(
+                            file=self._relative_file(file),
+                            line=table_start,
+                            code="table_caption_missing_label",
+                            message=(
+                                "Pipe table caption is missing a "
+                                "{#tbl-X} label, so the table cannot be "
+                                "cross-referenced. Add the label."
+                            ),
+                            severity="error",
+                            context=line.strip()[:120],
+                        ))
+                    i = j
+                else:
+                    i += 1
+
+        issues = self._apply_captions_baseline(raw_issues, "table_caption_required")
+        return ValidationRunResult(
+            name="table-caption-required",
+            description=(
+                "Body-prose pipe tables must carry a caption + #tbl- label "
+                "(skipping callouts, frontmatter, backmatter)"
+            ),
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    _FIG_DIV_OPEN_RE = re.compile(r"^:::+\s*\{[^}]*#fig-[\w-]+")
+    # Chapter-opener cover images are decorative and not cross-referenced
+    # by convention. They carry fig-alt for accessibility but no #fig-
+    # label. Skip them in the label-required check.
+    _COVER_IMAGE_RE = re.compile(r"!\[[^\]]*\]\s*\([^)]*/cover_[\w-]+\.(png|jpg|jpeg|svg|gif)")
+
+    def _run_figure_label_required(self, root: Path) -> ValidationRunResult:
+        """Flag `![](...)` markdown image figures with no `{#fig-X}` label.
+
+        A bare `![alt](path)` is fine when wrapped in a
+        `::: {#fig-X fig-cap=... fig-alt=...}` div (the conventional
+        pattern in this book), since the div carries the label. We flag
+        only images that are *neither* inline-labeled (`{#fig-X}` on the
+        same line) *nor* enclosed in a `#fig-` div. Skips callouts,
+        frontmatter, and backmatter the same way the other caption
+        scopes do.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        raw_issues: List[ValidationIssue] = []
+        for file in files:
+            if self._captions_skip_file(file):
+                continue
+            lines = self._read_text(file).splitlines()
+            # Walk lines tracking div stack tagged by kind: "callout",
+            # "fig" (a #fig-X labeled div), or "other".
+            div_stack: List[str] = []
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.rstrip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                if self._CAPTIONS_CALLOUT_OPEN_RE.match(stripped):
+                    div_stack.append("callout")
+                    continue
+                if self._FIG_DIV_OPEN_RE.match(stripped):
+                    div_stack.append("fig")
+                    continue
+                if self._CAPTIONS_DIV_OPEN_RE.match(stripped):
+                    div_stack.append("other")
+                    continue
+                if self._CAPTIONS_DIV_CLOSE_RE.match(stripped):
+                    if div_stack:
+                        div_stack.pop()
+                    continue
+                if "callout" in div_stack or "fig" in div_stack:
+                    continue
+                if not self._MD_IMAGE_ANY_RE.search(line):
+                    continue
+                if self._MD_IMAGE_WITH_LABEL_RE.search(line):
+                    continue
+                if self._COVER_IMAGE_RE.search(line):
+                    continue
+                raw_issues.append(ValidationIssue(
+                    file=self._relative_file(file),
+                    line=idx,
+                    code="figure_missing_label",
+                    message=(
+                        "Markdown image figure has no {#fig-X} label "
+                        "and is not enclosed in a `::: {#fig-X ...}` "
+                        "div. Wrap it so the figure can be "
+                        "cross-referenced with `@fig-X` in prose."
+                    ),
+                    severity="error",
+                    context=line.strip()[:120],
+                ))
+
+        issues = self._apply_captions_baseline(raw_issues, "figure_label_required")
+        return ValidationRunResult(
+            name="figure-label-required",
+            description=(
+                "Markdown-image figures in body prose must carry a "
+                "{#fig-X} label so they can be cross-referenced"
+            ),
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_listing_caption_required(self, root: Path) -> ValidationRunResult:
+        """Flag `::: {#lst-X ...}` listing divs missing `lst-cap="..."`.
+
+        Listings are floating elements that must carry a caption so they
+        can be cross-referenced like figures and tables. A `#lst-` label
+        without an `lst-cap` is a malformed listing.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        raw_issues: List[ValidationIssue] = []
+        for file in files:
+            if self._captions_skip_file(file):
+                continue
+            lines = self._read_text(file).splitlines()
+            for idx, line in enumerate(lines, 1):
+                m = self._LST_DIV_OPEN_RE.search(line)
+                if not m:
+                    continue
+                # The opening div may carry attrs across continuation
+                # lines, but in practice the lst-cap=" lives on the same
+                # line. Look on the same line; widen to next 2 lines as a
+                # cheap fallback for unusual line-wrapping.
+                lookahead = line
+                if idx < len(lines):
+                    lookahead += "\n" + lines[idx]
+                if idx + 1 < len(lines):
+                    lookahead += "\n" + lines[idx + 1]
+                if self._LST_CAP_ATTR_RE.search(lookahead):
+                    continue
+                raw_issues.append(ValidationIssue(
+                    file=self._relative_file(file),
+                    line=idx,
+                    code="listing_missing_caption",
+                    message=(
+                        f"Listing {m.group(1)} has no lst-cap=\"...\" "
+                        f"attribute. Add a bold caption so the listing "
+                        f"can be cross-referenced with `@{m.group(1)}` "
+                        f"in prose."
+                    ),
+                    severity="error",
+                    context=line.strip()[:120],
+                ))
+
+        issues = self._apply_captions_baseline(raw_issues, "listing_caption_required")
+        return ValidationRunResult(
+            name="listing-caption-required",
+            description=(
+                "#lst- listing divs must carry lst-cap=\"...\" so the "
+                "listing can be captioned and cross-referenced"
+            ),
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
