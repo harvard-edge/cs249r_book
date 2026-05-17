@@ -2077,7 +2077,40 @@ class ValidateCommand:
 
         for file in files:
             lines = self._read_text(file).splitlines()
+            in_code_block = False
+            in_html_comment = False
             for idx, line in enumerate(lines, 1):
+                # Skip three forms of non-rendered content:
+                #   1. Fenced code blocks (```...```). `@xref` mentions in
+                #      Python cell box-comment headers (`# │ Context: @sec-foo`)
+                #      are documentation that never renders. Counting them as
+                #      references produces false-positive unresolved-reference
+                #      errors for refs that target intentional documentation.
+                #   2. HTML comments (`<!-- ... -->`). Commented-out tikz
+                #      examples often contain ``` fence-looking lines, which
+                #      desynchronize the naive in_code_block toggle if not
+                #      tracked separately. Track comment state explicitly.
+                #   3. Labels themselves are never defined inside fences or
+                #      HTML comments, so skipping the whole region is safe.
+                stripped = line.lstrip()
+
+                # Update HTML-comment state first — comment markers may sit
+                # on the same line as content (rare) or span many lines.
+                if not in_code_block:
+                    if "<!--" in line and "-->" not in line[line.index("<!--"):]:
+                        in_html_comment = True
+                        continue
+                    if in_html_comment:
+                        if "-->" in line:
+                            in_html_comment = False
+                        continue
+
+                if stripped.startswith("```"):
+                    in_code_block = not in_code_block
+                    continue
+                if in_code_block:
+                    continue
+
                 for label_type, patterns in label_types.items():
                     for pattern in patterns:
                         for match in pattern.finditer(line):

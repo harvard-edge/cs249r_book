@@ -20,6 +20,7 @@ from fix_cross_references import (
     build_epub_section_mapping,
     process_html_file
 )
+from verify_rendered_xrefs import scan_build_dir, _format_report
 
 
 # Matches C0 control chars that are illegal in XML 1.0 attribute values.
@@ -440,6 +441,21 @@ def main():
 
         # Fix cross-references
         fixes = fix_cross_references_in_extracted_epub(temp_dir)
+
+        # Render-truth backstop: assert no `?@xxx-yyy` literals survived
+        # the fix pass. Mirrors the verify hook on the HTML build so EPUB
+        # readers never see an unresolved-crossref marker.
+        findings = scan_build_dir(temp_dir / "EPUB" / "text")
+        if findings:
+            print(_format_report(temp_dir / "EPUB" / "text", findings),
+                  file=sys.stderr)
+            total = sum(len(v) for v in findings.values())
+            print(
+                f"  → {total} unresolved reference(s) across "
+                f"{len(findings)} distinct label(s) in EPUB output.",
+                file=sys.stderr,
+            )
+            return 1
 
         # Sanitize XHTML/SVG for strict XML validity (unblocks Kindle
         # rejection + ClearView / Tolino load failures reported in
