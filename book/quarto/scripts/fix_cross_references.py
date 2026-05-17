@@ -44,6 +44,26 @@ from pathlib import Path
 
 
 # ---------------------------------------------------------------------------
+# Crossref prefixes that we resolve at post-render time.
+#
+# Quarto book projects resolve cross-chapter refs natively, but vol1/vol2 build
+# as `project.type: website` (see config/_quarto-html-vol*.yml), so any ref
+# pointing into a sibling chapter ships as a literal `?@xxx-yyy` in the HTML.
+# This script patches those refs by maintaining its own label registry.
+#
+# Prefixes covered: Quarto's built-ins (sec/fig/tbl/eq/lst/thm-family) plus the
+# book's custom prefixes (pri for callout-principle, nb for notebook callouts).
+# When adding a new prefix elsewhere in the codebase, add it here too.
+# ---------------------------------------------------------------------------
+
+CROSSREF_PREFIXES_LIST = [
+    "sec", "pri", "fig", "tbl", "eq", "lst", "nb",
+    "thm", "lem", "cor", "prp", "cnj", "def", "exm", "exr", "rem", "sol",
+]
+CROSSREF_PREFIXES = "(?:" + "|".join(CROSSREF_PREFIXES_LIST) + ")"
+
+
+# ---------------------------------------------------------------------------
 # Dynamic mapping: built by scanning QMD sources at runtime
 # ---------------------------------------------------------------------------
 
@@ -54,6 +74,46 @@ def _extract_heading_text(line: str) -> str:
     # Remove {#id ...} block (Quarto heading attribute)
     text = re.sub(r'\{[^}]*\}', '', text)
     return text.strip()
+
+
+# Pull the **Bold Title** slice out of a caption line, fig-cap, or tbl-cap.
+# Captions in this book follow the convention `**Bold Title**: Explanation.`
+# (book-prose.md §6 Figure Captions & Alt-Text). The bold title is the
+# reader-facing name of the figure/table — exactly the right link text for a
+# cross-chapter reference.
+_BOLD_TITLE_RE = re.compile(r'\*\*([^*]+?)\*\*')
+
+
+def _extract_bold_title(text: str) -> str | None:
+    m = _BOLD_TITLE_RE.search(text)
+    if not m:
+        return None
+    title = m.group(1)
+    # Defensive: strip any \index{...} that might have slipped inside the bold span.
+    title = re.sub(r'\\index\{[^}]*\}', '', title).strip()
+    return title or None
+
+
+def _fallback_label(ref_id: str) -> str:
+    """Human-readable fallback when a label has no caption or title attribute."""
+    prefix = ref_id.split("-", 1)[0]
+    return {
+        "eq": "Equation",
+        "lst": "Listing",
+        "fig": "Figure",
+        "tbl": "Table",
+        "nb": "Notebook",
+        "thm": "Theorem",
+        "lem": "Lemma",
+        "cor": "Corollary",
+        "prp": "Proposition",
+        "cnj": "Conjecture",
+        "def": "Definition",
+        "exm": "Example",
+        "exr": "Exercise",
+        "rem": "Remark",
+        "sol": "Solution",
+    }.get(prefix, ref_id)
 
 
 def build_qmd_mapping(qmd_roots: list[Path]) -> tuple[dict, dict]:
@@ -89,6 +149,23 @@ def build_qmd_mapping(qmd_roots: list[Path]) -> tuple[dict, dict]:
     div_id_re = re.compile(r'^\s*:{2,}\s*\{([^}]*)\}')
     id_attr_re = re.compile(r'#([\w-]+)')
     title_attr_re = re.compile(r'title="([^"]*)"')
+    # fig-cap / tbl-cap / lst-cap on figure/table/listing divs.
+    cap_attr_re = re.compile(r'(?:fig|tbl|lst)-cap="([^"]*)"')
+
+    # Caption-attribute label syntax (Quarto table & listing captions).
+    # Example:  : **Bold Title**: explanation. {#tbl-foo tbl-colwidths="..."}
+    # Captures (caption_text, label_id) where label_id starts with tbl-/lst-/fig-.
+    # We also accept any other prefix in case a future caption-attribute form
+    # appears for another type; the prefix filter in CROSSREF_PREFIXES gates the
+    # patching pass anyway.
+    caption_id_re = re.compile(r'^:\s+(.+?)\s*\{[^}]*#([\w-]+)[^}]*\}')
+
+    # Equation label syntax:  $$ ... $$ {#eq-foo}
+    # Single-line equations always have the {#eq-id} on the same line as the
+    # closing $$. For multi-line equations Pandoc accepts the label on a line
+    # immediately after the closing $$ as well — both cases land here because
+    # we walk every line and match the {#eq-id} fragment anywhere.
+    equation_id_re = re.compile(r'\{[^}]*#(eq-[\w-]+)[^}]*\}')
 
     # Normalise qmd_roots: accept plain Path (scan from project root)
     # We need paths relative to the *project* root, not the contents/ subdir
@@ -136,11 +213,46 @@ def build_qmd_mapping(qmd_roots: list[Path]) -> tuple[dict, dict]:
                     if not im:
                         continue
                     sec_id = im.group(1)
+                    # Prefer explicit title=, then bold-title from fig-cap/tbl-cap/lst-cap,
+                    # then a human fallback ("Figure", "Equation", ...), then the bare ID.
                     tm = title_attr_re.search(attrs)
-                    title = tm.group(1) if tm else sec_id  # fallback to ID
+                    if tm:
+                        title = tm.group(1)
+                    else:
+                        title = None
+                        cm = cap_attr_re.search(attrs)
+                        if cm:
+                            title = _extract_bold_title(cm.group(1))
+                        if not title:
+                            title = _fallback_label(sec_id)
                     if sec_id not in chapter_mapping:
                         chapter_mapping[sec_id] = f"{html_path_str}#{sec_id}"
                         chapter_titles[sec_id] = title
+                    continue
+
+                # Caption-attribute label syntax (table & listing captions).
+                # Form: `: **Bold Title**: explanation. {#tbl-foo ...}`
+                m = caption_id_re.match(line)
+                if m:
+                    caption_text, sec_id = m.group(1), m.group(2)
+                    if sec_id not in chapter_mapping:
+                        title = _extract_bold_title(caption_text) or _fallback_label(sec_id)
+                        chapter_mapping[sec_id] = f"{html_path_str}#{sec_id}"
+                        chapter_titles[sec_id] = title
+                    continue
+
+                # Equation label syntax: $$ ... $$ {#eq-foo}.
+                # We match the {#eq-id} fragment anywhere on the line so both the
+                # single-line and trailing-attribute multi-line forms register.
+                # Skip lines starting with `:` (already handled above as caption)
+                # or `#` (already handled as heading) to avoid double-registration.
+                if not line.lstrip().startswith((":", "#")):
+                    m = equation_id_re.search(line)
+                    if m:
+                        sec_id = m.group(1)
+                        if sec_id not in chapter_mapping:
+                            chapter_mapping[sec_id] = f"{html_path_str}#{sec_id}"
+                            chapter_titles[sec_id] = _fallback_label(sec_id)
 
     return chapter_mapping, chapter_titles
 
@@ -321,14 +433,16 @@ def fix_cross_references(
     """
     chapter_mapping, chapter_titles = get_mappings()
 
-    # Pattern 1: Quarto full unresolved cross-reference links
-    pattern1 = r'<a href="#(sec-[a-zA-Z0-9-]+)" class="quarto-xref"><span class="quarto-unresolved-ref">[^<]*</span></a>'
-
-    # Pattern 2: Simple unresolved references (?@sec-xxx or ?@pri-xxx)
-    pattern2 = r'<strong>\?\@(sec-[a-zA-Z0-9-]+|pri-[a-zA-Z0-9-]+)</strong>'
-
-    # Pattern 3: EPUB-specific unresolved references
-    pattern3 = r'<a href="@(sec-[a-zA-Z0-9-]+)"([^>]*)>([^<]*)</a>'
+    # All three patterns cover the full set of crossref prefixes (CROSSREF_PREFIXES)
+    # — sec, pri, fig, tbl, eq, lst, nb, plus Quarto's theorem family. Quarto emits
+    # unresolved refs in three shapes:
+    #   1. Full xref link with a quarto-unresolved-ref span (rare in our build).
+    #   2. Bare `?@xxx-yyy` wrapped in <strong> (common — every cross-chapter ref
+    #      ships as this when the project is `type: website`).
+    #   3. EPUB-specific `<a href="@xxx-yyy">…</a>`.
+    pattern1 = rf'<a href="#({CROSSREF_PREFIXES}-[a-zA-Z0-9-]+)" class="quarto-xref"><span class="quarto-unresolved-ref">[^<]*</span></a>'
+    pattern2 = rf'<strong>\?\@({CROSSREF_PREFIXES}-[a-zA-Z0-9-]+)</strong>'
+    pattern3 = rf'<a href="@({CROSSREF_PREFIXES}-[a-zA-Z0-9-]+)"([^>]*)>([^<]*)</a>'
 
     matches1 = re.findall(pattern1, html_content)
     matches2 = re.findall(pattern2, html_content)
