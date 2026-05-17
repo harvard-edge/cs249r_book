@@ -215,6 +215,73 @@ class TestServingModel:
         int8_size = result_int8.model_weights_size.to("GB").magnitude
         assert int8_size == pytest.approx(fp16_size / 2, rel=0.01)
 
+    def test_prefill_chunking_is_optional(self):
+        """Default serving analysis should remain unchunked."""
+        llama = Models.Llama3_8B
+        h100 = Hardware.H100
+        result = ServingModel().solve(llama, h100, seq_len=2048, batch_size=1)
+        assert result.prefill_chunks == 1
+        assert result.prefill_chunk_time is None
+        assert result.decode_stall_bound is None
+
+    def test_prefill_chunking_bounds_decode_stall(self):
+        """Chunked prefills reduce the largest prefill stall while preserving total work."""
+        llama = Models.Llama3_8B
+        h100 = Hardware.H100
+        solver = ServingModel()
+
+        single_chunk = solver.solve(llama, h100, seq_len=4096, batch_size=1, prefill_chunk_tokens=4096)
+        chunked = solver.solve(llama, h100, seq_len=4096, batch_size=1, prefill_chunk_tokens=512)
+
+        assert single_chunk.prefill_chunks == 1
+        assert chunked.prefill_chunks == 8
+        assert chunked.prefill_chunk_time is not None
+        assert single_chunk.prefill_chunk_time is not None
+        assert chunked.decode_stall_bound == chunked.prefill_chunk_time
+        assert chunked.prefill_chunk_time < single_chunk.prefill_chunk_time
+        assert chunked.ttft >= single_chunk.ttft
+
+    def test_prefill_chunking_reports_slowest_chunk_not_average(self):
+        """For a partial final chunk, the stall bound should be the slowest full chunk."""
+        llama = Models.Llama3_8B
+        h100 = Hardware.H100
+        baseline = ServingModel().solve(llama, h100, seq_len=4097, batch_size=1)
+        chunked = ServingModel().solve(llama, h100, seq_len=4097, batch_size=1, prefill_chunk_tokens=512)
+
+        average_chunk_time = ((baseline.ttft - h100.dispatch_tax) / chunked.prefill_chunks) + h100.dispatch_tax
+        assert chunked.prefill_chunks == 9
+        assert chunked.prefill_chunk_time is not None
+        assert chunked.prefill_chunk_time > average_chunk_time
+
+    def test_prefill_chunking_rejects_non_positive_size(self):
+        """Chunk sizes must be positive."""
+        llama = Models.Llama3_8B
+        h100 = Hardware.H100
+        with pytest.raises(ValueError, match="prefill_chunk_tokens"):
+            ServingModel().solve(llama, h100, seq_len=2048, batch_size=1, prefill_chunk_tokens=0)
+
+    @pytest.mark.parametrize(
+        "kwargs, message",
+        [
+            ({"seq_len": 0}, "seq_len"),
+            ({"batch_size": 0}, "batch_size"),
+            ({"efficiency": 0.0}, "efficiency"),
+            ({"efficiency": 1.5}, "efficiency"),
+            ({"cached_prefix_len": -1}, "cached_prefix_len"),
+            ({"draft_acceptance_rate": 1.5}, "draft_acceptance_rate"),
+            ({"precision": "float7"}, "precision"),
+            ({"network_bandwidth": Q_("0 GB/s")}, "network_bandwidth"),
+        ],
+    )
+    def test_serving_rejects_invalid_inputs(self, kwargs, message):
+        """Serving inputs should fail early with clear validation errors."""
+        llama = Models.Llama3_8B
+        h100 = Hardware.H100
+        params = {"seq_len": 2048, "batch_size": 1}
+        params.update(kwargs)
+        with pytest.raises(ValueError, match=message):
+            ServingModel().solve(llama, h100, **params)
+
 
 # ======================================================================
 # 3. SustainabilityModel

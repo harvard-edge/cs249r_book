@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 from typing import Optional, Any, List
 import yaml
 from pathlib import Path
@@ -76,15 +76,23 @@ class EvalNodeSchema(BaseModel):
     precision: str = Field(default="fp16")
     efficiency: float = Field(default=0.5, gt=0.0, le=1.0)
     
-    # Hidden resolved objects populated during validation
-    model_obj: Optional[Any] = None
-    hardware_obj: Optional[Any] = None
+    # Resolved objects are runtime-only and must not appear in public schemas.
+    _model_obj: Any = PrivateAttr(default=None)
+    _hardware_obj: Any = PrivateAttr(default=None)
+
+    @property
+    def model_obj(self) -> Any:
+        return self._model_obj
+
+    @property
+    def hardware_obj(self) -> Any:
+        return self._hardware_obj
 
     @model_validator(mode='after')
     def resolve_and_validate(self) -> 'EvalNodeSchema':
         """Gate 2: Registry Resolution."""
-        self.model_obj = _resolve_model(self.model_name)
-        self.hardware_obj = _resolve_hardware(self.hardware_name)
+        self._model_obj = _resolve_model(self.model_name)
+        self._hardware_obj = _resolve_hardware(self.hardware_name)
         return self
 
 
@@ -119,14 +127,27 @@ class MlsysPlanSchema(BaseModel):
     ops: Optional[OpsConfig] = None
     constraints: Optional[ConstraintsConfig] = None
     
-    model_obj: Optional[Any] = None
-    hardware_obj: Optional[Any] = None
-    fleet_obj: Optional[Any] = None
+    # Resolved objects are runtime-only and must not appear in public schemas.
+    _model_obj: Any = PrivateAttr(default=None)
+    _hardware_obj: Any = PrivateAttr(default=None)
+    _fleet_obj: Any = PrivateAttr(default=None)
+
+    @property
+    def model_obj(self) -> Any:
+        return self._model_obj
+
+    @property
+    def hardware_obj(self) -> Any:
+        return self._hardware_obj
+
+    @property
+    def fleet_obj(self) -> Any:
+        return self._fleet_obj
     
     @model_validator(mode='after')
     def resolve_and_validate(self) -> 'MlsysPlanSchema':
-        self.model_obj = _resolve_model(self.workload.name)
-        self.hardware_obj = _resolve_hardware(self.hardware.name)
+        self._model_obj = _resolve_model(self.workload.name)
+        self._hardware_obj = _resolve_hardware(self.hardware.name)
         
         # 3. Resolve Fleet if nodes > 1
         if self.hardware.nodes > 1:
@@ -135,11 +156,11 @@ class MlsysPlanSchema(BaseModel):
             
             # Simple automatic fleet construction for now
             # In a full implementation, fabric would be configurable in the YAML
-            self.fleet_obj = Fleet(
+            self._fleet_obj = Fleet(
                 name=f"{self.hardware.name} Fleet",
                 node=Node(
                     name=f"{self.hardware.name} Node",
-                    accelerator=self.hardware_obj,
+                    accelerator=self._hardware_obj,
                     accelerators_per_node=8,
                     intra_node_bw=Q_("900 GB/s")
                 ),
@@ -148,5 +169,4 @@ class MlsysPlanSchema(BaseModel):
             )
             
         return self
-
 

@@ -78,6 +78,9 @@ class ServingResult(SolverResult):
     total_memory_required: Quantity
     memory_utilization: float
     prompt_cache_hit_ratio: float = 0.0
+    prefill_chunks: int = 1
+    prefill_chunk_time: Optional[Quantity] = None
+    decode_stall_bound: Optional[Quantity] = None
 
 
 class ContinuousBatchingResult(SolverResult):

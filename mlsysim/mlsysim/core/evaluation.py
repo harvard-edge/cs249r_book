@@ -45,9 +45,7 @@ class SystemEvaluation(BaseModel):
         ]
         
         for idx, (name, level) in enumerate(levels):
-            status_emoji = "✅" if level.status == "PASS" else "❌" if level.status == "FAIL" else "⚠️"
-            
-            lines.append(f"║ Level {idx+1}: {name} [{level.status}] {status_emoji}")
+            lines.append(f"║ Level {idx+1}: {name} [{level.status}]")
             lines.append(f"║ ↳ {level.summary}")
             
             if idx < 2:

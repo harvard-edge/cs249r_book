@@ -121,8 +121,9 @@ SERVING = Wall(
     constraint="LLM inference has two distinct regimes: compute-bound prefill and memory-bound decode.",
     equation="TTFT = OPs_prefill / Peak; ITL = |W| / BW_HBM",
     sources=[
-        "Pope et al. (2023), LLM Inference",
-        "Yu et al. (2022), ORCA",
+        "Pope et al. (2023), Efficiently Scaling Transformer Inference",
+        "Agrawal et al. (2024), Sarathi-Serve",
+        "Zhong et al. (2024), DistServe",
     ],
 )
 
@@ -390,4 +391,3 @@ def taxonomy() -> str:
             lines.append(f"             {w.constraint}")
         lines.append("")
     return "\n".join(lines)
-

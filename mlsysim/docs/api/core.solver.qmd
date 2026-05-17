@@ -174,16 +174,16 @@ LLM inference is not a single mathematical operation; it is a stateful
 process with two distinct physical regimes:
 
 1. **Pre-fill Phase**: The initial processing of the input prompt. This
-   is a 'Compute Beast' phase where all prompt tokens are processed
-   in parallel, saturating the GPU's arithmetic units.
-2. **Decoding Phase**: The token-by-token generation. This is a
-   'Bandwidth Hog' phase. Because the model must read all parameters
-   from memory just to generate a single token, it is limited entirely
-   by HBM bandwidth.
+   is a compute-heavy phase where prompt tokens are processed in parallel.
+2. **Decoding Phase**: The token-by-token generation. This phase is usually
+   memory-bandwidth dominated because each step reads the model weights and
+   accumulated KV-cache while producing only one token per request.
 
 This solver also models the **KV-Cache**, the memory required to store
 previous token states, which grows linearly with sequence length and
-batch size, eventually hitting the 'Memory Wall'.
+batch size, eventually hitting the 'Memory Wall'. Modern serving options
+include prompt caching, speculative decoding, phase splitting, and optional
+chunked-prefill stall proxies.
 
 #### Methods
 
@@ -201,6 +201,12 @@ core.solver.ServingModel.solve(
     batch_size=1,
     precision='fp16',
     efficiency=0.5,
+    decode_hardware=None,
+    network_bandwidth='100 GB/s',
+    draft_model=None,
+    draft_acceptance_rate=0.7,
+    cached_prefix_len=0,
+    prefill_chunk_tokens=None,
 )
 ```
 
@@ -208,20 +214,26 @@ Solves for LLM serving performance.
 
 ###### Parameters {.doc-section .doc-section-parameters}
 
-| Name       | Type                | Description                                                                                              | Default    |
-|------------|---------------------|----------------------------------------------------------------------------------------------------------|------------|
-| model      | TransformerWorkload | The LLM model architecture.                                                                              | _required_ |
-| hardware   | HardwareNode        | The target hardware for inference.                                                                       | _required_ |
-| seq_len    | int                 | The total context window (prompt + generated tokens).                                                    | _required_ |
-| batch_size | int                 | Number of concurrent user requests.                                                                      | `1`        |
-| precision  | str                 | Numerical format. Lower precision (INT8/INT4) reduces  memory pressure and speeds up the Decoding phase. | `'fp16'`   |
-| efficiency | float               | Compute utilization efficiency, primarily affecting the Pre-fill phase.                                  | `0.5`      |
+| Name | Type | Description | Default |
+|------|------|-------------|---------|
+| model | TransformerWorkload | The LLM model architecture. | _required_ |
+| hardware | HardwareNode | The target hardware for inference, or the prefill node in disaggregated serving. | _required_ |
+| seq_len | int | The total context window (prompt + generated tokens). | _required_ |
+| batch_size | int | Number of concurrent user requests. | `1` |
+| precision | str | Numerical format. Lower precision reduces memory pressure and speeds up the decode phase. | `'fp16'` |
+| efficiency | float | Compute utilization efficiency, primarily affecting the prefill phase. | `0.5` |
+| decode_hardware | HardwareNode | Optional decode node for phase-split serving with KV-cache transfer. | `None` |
+| network_bandwidth | Quantity | Bandwidth between prefill and decode nodes. | `100 GB/s` |
+| draft_model | TransformerWorkload | Optional draft model for speculative decoding. | `None` |
+| draft_acceptance_rate | float | Expected draft token acceptance rate. | `0.7` |
+| cached_prefix_len | int | Prefix tokens already covered by prompt-cache KV entries. | `0` |
+| prefill_chunk_tokens | int | Optional prefill chunk budget for estimating a decode-stall proxy. | `None` |
 
 ###### Returns {.doc-section .doc-section-returns}
 
-| Name   | Type             | Description                                                                                                       |
-|--------|------------------|-------------------------------------------------------------------------------------------------------------------|
-|        | Dict\[str, Any\] | Inference metrics including Time-To-First-Token (TTFT),  Inter-Token Latency (ITL), and total KV-cache footprint. |
+| Name   | Type          | Description                                                                                                                          |
+|--------|---------------|--------------------------------------------------------------------------------------------------------------------------------------|
+|        | ServingResult | Inference metrics including TTFT, ITL, KV-cache footprint, memory feasibility, prompt-cache hit ratio, and chunked-prefill metadata. |
 
 ### SingleNodeModel { #mlsysim.core.solver.SingleNodeModel }
 

@@ -15,8 +15,8 @@ def command_header(title: str, subtitle: str, persona_name: str, scale: str, con
     badges_html = ""
     for label, is_met in constraints.items():
         color = "#008f45" if is_met else "#cb202d"
-        icon = "✅" if is_met else "❌"
-        badges_html += f'<span style="background-color: {color}; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.8em; margin-right: 10px; font-weight: bold;">{icon} {label}</span>'
+        status = "PASS" if is_met else "FAIL"
+        badges_html += f'<span style="background-color: {color}; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.8em; margin-right: 10px; font-weight: bold;">{status}: {label}</span>'
 
     return mo.md(
         f"""
@@ -28,8 +28,8 @@ def command_header(title: str, subtitle: str, persona_name: str, scale: str, con
                     <div style="display: flex; flex-wrap: wrap;">{badges_html}</div>
                 </div>
                 <div style="text-align: right; border-left: 2px solid rgba(255,255,255,0.1); padding-left: 20px;">
-                    <div style="font-weight: bold; font-size: 1.2em; color: #63b3ed;">👤 {persona_name}</div>
-                    <div style="font-size: 0.9em; color: #cbd5e0; margin-top: 5px;">📊 Scale: {scale}</div>
+                    <div style="font-weight: bold; font-size: 1.2em; color: #63b3ed;">{persona_name}</div>
+                    <div style="font-size: 0.9em; color: #cbd5e0; margin-top: 5px;">Scale: {scale}</div>
                 </div>
             </div>
         </div>

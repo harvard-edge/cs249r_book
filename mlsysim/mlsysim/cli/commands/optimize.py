@@ -1,6 +1,8 @@
 import typer
 from pathlib import Path
+from typing import Optional
 import yaml
+from mlsysim.cli.context import OUTPUT_FORMAT_HELP, resolve_output_format
 from mlsysim.cli.schemas import MlsysPlanSchema
 from mlsysim.cli.exceptions import ExitCode, exit_with_code, error_shield
 from mlsysim.cli.renderers import render_optimization
@@ -12,24 +14,35 @@ optimize_app = typer.Typer(
     rich_markup_mode="markdown"
 )
 
+
+def _load_plan_schema(config_file: Path) -> MlsysPlanSchema:
+    if not config_file.exists():
+        raise ValueError(f"File not found: {config_file}")
+
+    with open(config_file, "r") as f:
+        raw_data = yaml.safe_load(f)
+
+    if not isinstance(raw_data, dict):
+        raise ValueError(f"Configuration file must contain a YAML mapping: {config_file}")
+
+    return MlsysPlanSchema.model_validate(raw_data)
+
+
 @optimize_app.command("parallelism")
 def optimize_parallelism(
     ctx: typer.Context,
-    config_file: Path = typer.Argument(..., help="Path to the mlsys.yaml configuration file")
+    config_file: Path = typer.Argument(..., help="Path to the mlsys.yaml configuration file"),
+    output: Optional[str] = typer.Option(None, "--output", "-o", help=OUTPUT_FORMAT_HELP),
 ):
     """Find the optimal (TP, PP, DP) split to maximize MFU."""
-    output_format = ctx.obj.get("output_format", "text") if ctx.obj else "text"
+    output_format = resolve_output_format(ctx, output, supported={"text", "json", "markdown", "html"})
     
     with error_shield(output_format=output_format):
-        if not config_file.exists():
-            raise ValueError(f"File not found: {config_file}")
-            
-        with open(config_file, "r") as f:
-            raw_data = yaml.safe_load(f)
-            
-        schema = MlsysPlanSchema(**raw_data)
+        schema = _load_plan_schema(config_file)
         
-        if not schema.fleet_obj:
+        if schema.model_obj is None:
+            raise ValueError("Parallelism optimization requires a resolved workload.")
+        if schema.fleet_obj is None:
             raise ValueError("Parallelism optimization requires a fleet with nodes > 1.")
             
         optimizer = ParallelismOptimizer()
@@ -50,19 +63,16 @@ def optimize_batching(
     ctx: typer.Context,
     config_file: Path = typer.Argument(..., help="Path to the mlsys.yaml configuration file"),
     sla_ms: float = typer.Option(..., "--sla-ms", help="P99 Latency SLA in milliseconds"),
-    qps: float = typer.Option(..., "--qps", help="Arrival rate in Queries Per Second")
+    qps: float = typer.Option(..., "--qps", help="Arrival rate in Queries Per Second"),
+    output: Optional[str] = typer.Option(None, "--output", "-o", help=OUTPUT_FORMAT_HELP),
 ):
     """Find the maximum safe batch size for a given latency SLA."""
-    output_format = ctx.obj.get("output_format", "text") if ctx.obj else "text"
+    output_format = resolve_output_format(ctx, output, supported={"text", "json", "markdown", "html"})
     
     with error_shield(output_format=output_format):
-        if not config_file.exists():
-            raise ValueError(f"File not found: {config_file}")
-            
-        with open(config_file, "r") as f:
-            raw_data = yaml.safe_load(f)
-            
-        schema = MlsysPlanSchema(**raw_data)
+        schema = _load_plan_schema(config_file)
+        if schema.model_obj is None or schema.hardware_obj is None:
+            raise ValueError("Batching optimization requires resolved workload and hardware.")
         
         optimizer = BatchingOptimizer()
         result = optimizer.solve(
@@ -84,21 +94,16 @@ def optimize_batching(
 def optimize_placement(
     ctx: typer.Context,
     config_file: Path = typer.Argument(..., help="Path to the mlsys.yaml configuration file"),
-    carbon_tax: float = typer.Option(100.0, "--carbon-tax", help="Carbon tax penalty in $/ton")
+    carbon_tax: float = typer.Option(100.0, "--carbon-tax", help="Carbon tax penalty in $/ton"),
+    output: Optional[str] = typer.Option(None, "--output", "-o", help=OUTPUT_FORMAT_HELP),
 ):
     """Find the optimal datacenter region to minimize TCO and carbon footprint."""
-    output_format = ctx.obj.get("output_format", "text") if ctx.obj else "text"
+    output_format = resolve_output_format(ctx, output, supported={"text", "json", "markdown", "html"})
     
     with error_shield(output_format=output_format):
-        if not config_file.exists():
-            raise ValueError(f"File not found: {config_file}")
-            
-        with open(config_file, "r") as f:
-            raw_data = yaml.safe_load(f)
-            
-        schema = MlsysPlanSchema(**raw_data)
+        schema = _load_plan_schema(config_file)
         
-        if not schema.fleet_obj:
+        if schema.fleet_obj is None:
             raise ValueError("Placement optimization requires a fleet with nodes > 1.")
             
         duration = schema.ops.duration_days if schema.ops else 30.0

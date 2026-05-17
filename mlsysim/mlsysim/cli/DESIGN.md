@@ -1,28 +1,30 @@
 # MLSys·im CLI Design Guidelines
 
-This document establishes the unbreakable design rules for the `mlsysim` CLI.
+This document establishes the design rules for the `mlsysim` CLI.
 
-If this project succeeds, it will not just be a textbook companion, but the industry standard for AI infrastructure planning (akin to Terraform or kubectl). To achieve this, the CLI must be built for **automation, extensibility, and AI agents**.
+The CLI is both a textbook companion and a public interface for reproducible
+ML infrastructure analysis. It must be predictable for humans, scripts, CI
+jobs, and other tooling that consumes structured output.
 
-All code merged into `mlsysim/cli/` must strictly adhere to the following five rules.
+All code merged into `mlsysim/cli/` must adhere to the following five rules.
 
 ---
 
 ### Rule 1: Schema is Law (Pre-Computation Validation)
 
 The core physics engine (`mlsysim.core.solver`) must never receive bad data.
-*   **The Design:** The CLI acts as an impenetrable shield. Every input (CLI flags, YAML files, JSON strings) must be parsed and validated by a strict Pydantic schema (e.g., `EvalNodeSchema`) *before* any core mathematical logic is invoked.
+*   **The Design:** Every input (CLI flags, YAML files, JSON strings) must be parsed and validated by a strict Pydantic schema (e.g., `EvalNodeSchema`) *before* any core mathematical logic is invoked.
 *   **The Rationale:** If a user specifies an H100 GPU but sets the bandwidth to 100 GB/s (which is physically wrong for that chip), the schema validator rejects it immediately. This guarantees that the analytical engine only ever processes mathematically and physically valid states.
 
 ### Rule 2: Strict I/O Purity (The `stdout` vs `stderr` Rule)
 
-A modern CLI must serve two masters equally well: the human at the keyboard, and the machine/agent in the pipeline.
+A modern CLI must serve two callers equally well: the human at the keyboard, and the automated process in the pipeline.
 *   **The Design:** Standard Output (`stdout`) is *exclusively* for the final payload. Standard Error (`stderr`) is for logs, warnings, errors, and progress bars.
 *   **The Rationale:** If a user runs `mlsysim --output json eval Llama3_8B H100 > result.json`, they must end up with a perfectly valid JSON file. If a progress spinner (`[⠋] Calculating...`) leaks into `stdout`, it corrupts the JSON and breaks CI/CD pipelines.
 
-### Rule 3: Semantic Exit Codes (Agent-Ready State)
+### Rule 3: Semantic Exit Codes (Automation-Friendly State)
 
-In the agentic era, scripts shouldn't have to parse text to know what went wrong.
+Scripts should not have to parse prose to know what went wrong.
 *   **The Design:** The CLI uses a rigid taxonomy of POSIX exit codes, defined in `exceptions.py`.
     *   `Exit 0`: **Success / Feasible.** The system runs and meets all SLAs.
     *   `Exit 1`: **Bad Input.** Syntax Error, Typo, Validation Failure.
@@ -42,13 +44,13 @@ The CLI UX must accurately reflect the architectural rigor of the underlying eng
 ### Rule 5: Presentation is a Translation Layer, Not Logic
 
 The CLI should not do any math. It only formats the math.
-*   **The Design:** The core `mlsysim.core.solver` modules return strictly typed Pydantic objects. The CLI's only job (via `renderers.py`) is to translate that object into a `rich.Table` (for humans) or a `JSON` string (for machines/agents).
+*   **The Design:** The core `mlsysim.core.solver` modules return strictly typed Pydantic objects. The CLI's only job (via `renderers.py`) is to translate that object into a `rich.Table` for humans or a JSON object for machines.
 *   **The Rationale:** We can completely rewrite the terminal UI in the future (e.g., adding Textual dashboards or WebAssembly interfaces) without touching a single equation.
 
 ---
 
-## Future Vision: Infrastructure as Code
+## Future Direction: Infrastructure as Code
 
-The ultimate goal of this CLI is to support **Infrastructure as Code (IaC)**.
+The long-term goal of this CLI is to support **Infrastructure as Code (IaC)**.
 
 The `eval` command handles both quick terminal checks and full infrastructure evaluation. When you pass `mlsysim eval my_cluster.yaml`, it acts like a compiler for infrastructure, taking a declarative YAML specification of *Demand*, *Supply*, and *Ops Context*, and verifying it against all 22 system constraints simultaneously.

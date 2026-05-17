@@ -33,7 +33,7 @@ from .constants import (
     CLOUD_ELECTRICITY_PER_KWH,
 )
 from .defaults import (
-    GPU_UNIT_COST_H100, ANNUAL_MAINTENANCE_RATIO,
+    ANNUAL_MAINTENANCE_RATIO,
     MFU_TRAINING_LOW, MFU_TRAINING_HIGH, QUANT_ACCURACY_DELTA_INT4, QUANT_ACCURACY_DELTA_FP8,
     PRUNING_ACCURACY_THRESHOLD, PRUNING_MILD_DELTA, PRUNING_STEEP_COEFFICIENT, PRUNING_STEEP_EXPONENT,
     NIC_MTTF_HOURS, PSU_MTTF_HOURS,
@@ -729,12 +729,10 @@ class ServingModel(BaseModel):
     Memory-bound Decoding).
 
     Literature Source:
-    1. Pope et al. (2023), "LLM.int8(): 8-bit Matrix Multiplication for 
-       Transformers at Scale" (Inference Bottlenecks)
-    2. Aminabadi et al. (2022), "DeepSpeed-Inference: Enabling Efficient 
-       Inference of Transformer Models at Unprecedented Scale."
-    3. Yu et al. (2022), "ORCA: A Distributed Serving System for 
-       Transformer-Based Generative Models."
+    1. Pope et al. (2023), "Efficiently Scaling Transformer Inference."
+    2. Agrawal et al. (2024), "Sarathi-Serve" (chunked prefill scheduling).
+    3. Patel et al. (2024), "Splitwise" and Zhong et al. (2024),
+       "DistServe" (prefill/decode disaggregation).
     """
     requires = ("workload", "hardware")
     produces = ServingResult
@@ -742,7 +740,7 @@ class ServingModel(BaseModel):
     def solve(self, model: TransformerWorkload, hardware: HardwareNode, seq_len: int, batch_size: int = 1, precision: str = "fp16", efficiency: float = 0.5,
               decode_hardware: Optional[HardwareNode] = None, network_bandwidth: Quantity = Q_("100 GB/s"),
               draft_model: Optional[TransformerWorkload] = None, draft_acceptance_rate: float = 0.7,
-              cached_prefix_len: int = 0) -> ServingResult:
+              cached_prefix_len: int = 0, prefill_chunk_tokens: Optional[int] = None) -> ServingResult:
         """
         Solves for LLM serving performance.
 
@@ -774,6 +772,12 @@ class ServingModel(BaseModel):
             When > 0, the prefill phase only processes (seq_len - cached_prefix_len) new
             tokens, reducing TTFT proportionally. The full KV-cache (including cached prefix)
             still occupies memory. Must be < seq_len.
+        prefill_chunk_tokens : int, optional
+            If provided, split new prefill tokens into chunks of at most this size. This estimates
+            a Sarathi-Serve-style chunked-prefill stall proxy: total TTFT keeps the same compute
+            work plus one dispatch tax per chunk, while decode_stall_bound reports the slowest
+            single chunk that can interfere with ongoing decode iterations. It is not a full
+            scheduler simulation.
 
         Returns
         -------
@@ -781,11 +785,28 @@ class ServingModel(BaseModel):
             Serving performance metrics.
         """
         prec_map = PRECISION_MAP
-        bpp = prec_map.get(precision, BYTES_FP16)
+        if precision not in prec_map:
+            supported = ", ".join(sorted(prec_map))
+            raise ValueError(f"precision '{precision}' is not supported. Supported precision values: {supported}")
+        bpp = prec_map[precision]
 
         # 0. Input validation
+        if seq_len < 1:
+            raise ValueError(f"seq_len ({seq_len}) must be >= 1")
+        if batch_size < 1:
+            raise ValueError(f"batch_size ({batch_size}) must be >= 1")
+        if efficiency <= 0.0 or efficiency > 1.0:
+            raise ValueError(f"efficiency ({efficiency}) must be > 0 and <= 1")
+        if cached_prefix_len < 0:
+            raise ValueError(f"cached_prefix_len ({cached_prefix_len}) must be >= 0")
         if cached_prefix_len >= seq_len:
             raise ValueError(f"cached_prefix_len ({cached_prefix_len}) must be < seq_len ({seq_len})")
+        if draft_acceptance_rate < 0.0 or draft_acceptance_rate > 1.0:
+            raise ValueError(f"draft_acceptance_rate ({draft_acceptance_rate}) must be between 0 and 1")
+        if prefill_chunk_tokens is not None and prefill_chunk_tokens <= 0:
+            raise ValueError(f"prefill_chunk_tokens ({prefill_chunk_tokens}) must be positive")
+        if network_bandwidth.to("B/s").magnitude <= 0:
+            raise ValueError(f"network_bandwidth ({network_bandwidth:~P}) must be positive")
 
         # 1. Pre-fill Phase (with optional prompt caching)
         peak_flops_prefill = hardware.compute.precision_flops.get(precision, hardware.compute.peak_flops)
@@ -798,11 +819,29 @@ class ServingModel(BaseModel):
         n_layers = getattr(model, 'layers', 1) or 1
         n_heads = getattr(model, 'heads', 32) or 32
         head_dim = (getattr(model, 'hidden_dim', 4096) or 4096) // n_heads
-        # New tokens attend to ALL tokens (cached + new), not just each other.
+        # Upper-bound approximation: each new token attends over the final context.
         # When cached_prefix_len=0, new_tokens == seq_len so this simplifies to S^2.
         attention_flops = 4 * n_layers * n_heads * head_dim * new_tokens * seq_len * batch_size
         prefill_ops = (linear_flops + attention_flops) * ureg.flop
-        t_prefill = (prefill_ops / (peak_flops_prefill * efficiency)).to("ms") + hardware.dispatch_tax
+        t_prefill_compute = (prefill_ops / (peak_flops_prefill * efficiency)).to("ms")
+        prefill_chunks = 1
+        prefill_chunk_time: Optional[Quantity] = None
+        decode_stall_bound: Optional[Quantity] = None
+        if prefill_chunk_tokens is not None:
+            prefill_chunks = max(1, math.ceil(new_tokens / prefill_chunk_tokens))
+            chunk_times = []
+            tokens_remaining = new_tokens
+            while tokens_remaining > 0:
+                chunk_tokens = min(prefill_chunk_tokens, tokens_remaining)
+                chunk_linear = 2 * model.parameters.to(ureg.count).magnitude * chunk_tokens * batch_size
+                chunk_attention = 4 * n_layers * n_heads * head_dim * chunk_tokens * seq_len * batch_size
+                chunk_ops = (chunk_linear + chunk_attention) * ureg.flop
+                chunk_time = (chunk_ops / (peak_flops_prefill * efficiency)).to("ms") + hardware.dispatch_tax
+                chunk_times.append(chunk_time)
+                tokens_remaining -= chunk_tokens
+            prefill_chunk_time = max(chunk_times, key=lambda t: t.to("ms").magnitude)
+            decode_stall_bound = prefill_chunk_time
+        t_prefill = t_prefill_compute + (hardware.dispatch_tax * prefill_chunks)
 
         # KV-cache covers the full sequence (cached prefix + new tokens)
         kv_cache_bytes = model.get_kv_cache_size(seq_len=seq_len, batch_size=batch_size, precision=bpp)
@@ -863,6 +902,11 @@ class ServingModel(BaseModel):
             constraint_trace.append(f"Memory Wall: Passed. Required {total_memory_required.to('GB'):~P} (Weights: {model_weights_bytes.to('GB'):~P}, KV Cache: {kv_cache_bytes.to('GB'):~P}) <= Available {decode_hw.memory.capacity.to('GB'):~P} on {decode_hw.name}.")
         else:
             constraint_trace.append(f"Memory Wall: FAILED. Required {total_memory_required.to('GB'):~P} (Weights: {model_weights_bytes.to('GB'):~P}, KV Cache: {kv_cache_bytes.to('GB'):~P}) > Available {decode_hw.memory.capacity.to('GB'):~P} on {decode_hw.name}.")
+        if prefill_chunk_tokens is not None and decode_stall_bound is not None:
+            constraint_trace.append(
+                f"Serving Wall: Chunked prefill uses {prefill_chunks} chunks of up to {prefill_chunk_tokens} tokens; "
+                f"decode interference is bounded by {decode_stall_bound.to('ms'):~P} per prefill chunk."
+            )
 
         cache_hit_ratio = cached_prefix_len / seq_len if seq_len > 0 else 0.0
 
@@ -876,6 +920,9 @@ class ServingModel(BaseModel):
             total_memory_required=total_memory_required.to("GB"),
             memory_utilization=(total_memory_required / decode_hw.memory.capacity).to_base_units().magnitude,
             prompt_cache_hit_ratio=cache_hit_ratio,
+            prefill_chunks=prefill_chunks,
+            prefill_chunk_time=prefill_chunk_time,
+            decode_stall_bound=decode_stall_bound,
         )
 
 

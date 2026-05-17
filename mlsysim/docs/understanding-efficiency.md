@@ -20,8 +20,8 @@ When you write:
 Engine.solve(model=llama70b, hardware=h100, batch_size=32, precision="fp16", efficiency=0.45)
 ```
 
-you are telling the simulator: "assume this workload achieves 45% of the H100's
-peak FP16 throughput." The simulator uses this to convert theoretical compute
+you are telling the model: "assume this workload achieves 45% of the H100's
+peak FP16 throughput." The framework uses this to convert theoretical compute
 time into realistic wall-clock time:
 
 ```
@@ -92,7 +92,7 @@ on one processor and CPI = 0.8 on another, mlsysim users learn to reason about
 *why* Megatron-LM training achieves eta = 0.50 while eager-mode PyTorch on a small
 model achieves eta = 0.10.
 
-The value of the simulator is not in predicting eta. It is in answering: **"Given
+The value of the framework is not in predicting eta. It is in answering: **"Given
 this eta, what happens when I change the hardware, the model, or the batch size?"**
 
 ---
@@ -119,7 +119,7 @@ they are informed defaults.
 ## How to Calibrate Efficiency for Your Workload
 
 If you have access to real hardware, you can measure eta directly. This is the
-gold standard -- it turns the simulator from an estimation tool into a
+gold standard -- it turns the analytical model from an estimation tool into a
 calibrated prediction tool.
 
 ### Step 1: Run Your Workload

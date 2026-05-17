@@ -12,26 +12,83 @@ Release body. Omit any section that has no entries for a given release.
 
     [Narrative opening — 1–3 sentences describing the release.]
 
-    ### ✨ Highlights
+    ### Highlights
     [Optional; 2–4 bullets for feature+ releases.]
 
-    ### 🔬 Solvers, Models & Taxonomy
-    ### 🏭 Hardware Registry
-    ### 🧠 Workload & Model Registry
-    ### 🖥️ CLI
-    ### 🐍 Python API
-    ### 📚 Documentation
-    ### 🏗️ Packaging & Dependencies
-    ### 🐛 Bug Fixes
-    ### 🔧 Internal
+    ### Solvers, Models & Taxonomy
+    ### Hardware Registry
+    ### Workload & Model Registry
+    ### CLI
+    ### Python API
+    ### Documentation
+    ### Packaging & Dependencies
+    ### Bug Fixes
+    ### Internal
 
-    ### ⚠️ Breaking Changes    (only if present)
-    ### 🔒 Security            (only if present)
+    ### Breaking Changes    (only if present)
+    ### Security            (only if present)
     ### Deprecations           (only if present)
 
     ### Contributors
     - @profvjreddi
 -->
+
+## v0.1.2 (2026-05-17) — CLI & Website Release Polish
+
+Patch release focused on first-run usability for students, instructors, and
+automation, plus a backward-compatible serving-model extension for current
+LLM inference scheduling practice.
+
+### Solvers, Models & Taxonomy
+
+- `ServingModel.solve()` now accepts optional `prefill_chunk_tokens` to estimate
+  a chunked-prefill stall proxy. The default remains unchunked and preserves
+  existing TTFT/ITL behavior.
+- `ServingResult` now reports `prefill_chunks`, `prefill_chunk_time`, and
+  `decode_stall_bound` so users can reason about Sarathi-Serve-style decode
+  stall bounds without replacing the two-phase serving model or implementing a
+  full scheduler.
+
+### CLI
+
+- `-o/--output` now works both globally and after subcommands, so documented
+  examples such as `mlsysim eval Llama3_8B H100 -o json` and
+  `mlsysim zoo hardware -o json` are executable as written.
+- `mlsysim serve` now exposes `--prefill-chunk-tokens` and includes chunked
+  prefill metrics in JSON/text output when the option is provided.
+- `mlsysim audit -o json` now emits a single JSON object instead of mixing
+  human-readable banners into stdout.
+- `mlsysim schema -o json` is accepted for consistency; schema output remains
+  JSON by design.
+
+### Documentation
+
+- Clarified CLI output-flag placement in the CLI reference.
+- Added website math documentation for chunked prefill and prefill/decode
+  interference, grounded in Sarathi-Serve, Splitwise, and DistServe.
+- Updated website citation snippets and instructor version-pinning guidance for
+  the 0.1.2 release.
+- Removed experimental AI/agent-facing docs from the public site so the release
+  documentation stays focused on student and community workflows.
+- Updated MLSysBook browser wheel references to `mlsysim-0.1.2-py3-none-any.whl`.
+
+### Packaging & Dependencies
+
+- Version bumped to `0.1.2` across `pyproject.toml`, `mlsysim/__init__.py`,
+  and `CITATION.cff`; `date-released` updated to `2026-05-17`.
+
+### Internal
+
+- Added CLI contract tests for command-local output flags and audit JSON purity.
+- Added solver tests for optional chunked prefill behavior and validation.
+- Removed an unused solver import so `ruff check .` is clean.
+- Verified `quarto render docs` completes for the full MLSys·im website.
+- Verified package tests, website render, paper build, and book unit tests
+  against the updated wheel/version references.
+
+### Contributors
+
+- @profvjreddi
 
 ## v0.1.1 (2026-04-24) — Paper Title Correction
 
@@ -39,7 +96,7 @@ Metadata-only patch release. No code or API changes; safe drop-in
 replacement for 0.1.0. Corrects the paper title cited in three places
 to match the actual title of the companion paper.
 
-### 📚 Documentation
+### Documentation
 
 - **Paper title corrected** across `CITATION.cff`, the BibTeX snippet in
   `README.md`, and the reference docstring in `mlsysim/core/walls.py`.
@@ -47,7 +104,7 @@ to match the actual title of the companion paper.
   Now: *"MLSys·im: First-Principles Infrastructure Modeling for Machine
   Learning Systems."*
 
-### 🏗️ Packaging & Dependencies
+### Packaging & Dependencies
 
 - Version bumped to `0.1.1` across `pyproject.toml`, `mlsysim/__init__.py`,
   and `CITATION.cff`; `date-released` updated to `2026-04-24`.
@@ -73,7 +130,7 @@ to match the actual title of the companion paper.
 - 15+ accelerators: V100, A100, H100, H200, B200, GB200 NVL72, MI300X, TPUv5p, T4, Cerebras CS-3, Jetson Orin NX, ESP32-S3, nRF52840, Himax WE-I Plus, DGX Spark, MacBook M3 Max, iPhone 15 Pro, Pixel 8
 - Full precision support: FP32, TF32, BF16, FP16, FP8, INT8, INT4
 - Multi-level memory hierarchy: HBM + SRAM + Flash (TinyML)
-- All specs verified against manufacturer datasheets
+- Hardware specs include manufacturer datasheet references where available
 
 ### Model Registry
 - GPT-2/3/4, LLaMA-2/3 (7B/8B/70B), BERT Base/Large, ResNet-50, MobileNetV2, AlexNet, Mamba, Stable Diffusion v1.5, DS-CNN, WakeVision
