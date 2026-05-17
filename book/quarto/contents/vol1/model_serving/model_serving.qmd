@@ -1654,6 +1654,8 @@ A typical serving request for our ResNet-50 classifier shows the following laten
 | **Postprocessing** | Softmax + top-5                                                                              |    `{python} LatencyTableCalc.l_post_str`   |   `{python} LatencyTableCalc.p_post_str`   |
 | **Total**          |                                                                                              | **`{python} LatencyTableCalc.l_total_str`** |              **100 percent**               |
 
+: **ResNet-50 Latency Budget**: Per-phase breakdown of a single serving request, showing that preprocessing and data transfer together rival the cost of the ResNet-50 forward pass itself. The percentages expose where engineering effort actually pays off, which is rarely in the model. {#tbl-model-serving-resnet50-latency-budget}
+
 :::
 
 Key insight: preprocessing consumes `{python} LatencyBudgetCalc.preprocess_pct_str` percent of latency despite model inference being the computationally intensive phase. With TensorRT optimization reducing inference to `{python} LatencyBudgetCalc.tensorrt_inference_ms_str` ms, preprocessing would dominate at `{python} LatencyBudgetCalc.tensorrt_preprocess_pct_str` percent.
@@ -1714,6 +1716,8 @@ class DlrmLatencyCalc:
 | **Inference**      | MLP forward pass             |    `{python} DlrmLatencyCalc.dlrm_mlp_str`    |    Compute     |
 | **Postprocessing** | Ranking & Filtering          |    `{python} DlrmLatencyCalc.dlrm_post_str`   |      CPU       |
 | **Total**          |                              | **`{python} DlrmLatencyCalc.dlrm_total_str`** |                |
+
+: **DLRM Serving Latency**: Per-phase breakdown of a recommendation request under a 10 ms p99 budget, contrasting DLRM's memory-bandwidth-bound embedding lookups against ResNet-50's compute-bound forward pass. Adding compute to the inference stage does not help once embedding-table bandwidth is the binding constraint. {#tbl-model-serving-dlrm-latency-budget}
 
 :::
 
@@ -1994,8 +1998,8 @@ Pipelining is enabled by **Asynchronous I/O** and **Concurrency Models**. Instea
 
 #### The systems metric: Hardware duty cycle {#sec-model-serving-systems-metric-hardware-duty-cycle-7530}
 
-In the "Quantitative Approach" to ML systems, we define the efficiency of a serving system by its ability to saturate the bottleneck resource. For most ML systems, this is the GPU's compute cores or memory bandwidth. We quantify this in @eq-system-efficiency:
-$$\text{System Efficiency\index{System Efficiency!hardware duty cycle}} = \frac{\sum T_{\text{compute}}}{\text{Wall Clock Time} \times \text{Resource Count}}$$ {#eq-system-efficiency}
+In the "Quantitative Approach" to ML systems, we define **System Efficiency**\index{System Efficiency!hardware duty cycle} as the ability of a serving system to saturate the bottleneck resource. For most ML systems, this is the GPU's compute cores or memory bandwidth. We quantify this in @eq-system-efficiency:
+$$\text{System Efficiency} = \frac{\sum T_{\text{compute}}}{\text{Wall Clock Time} \times \text{Resource Count}}$$ {#eq-system-efficiency}
 
 If a ResNet-50 request takes 10 ms total (5 ms GPU, 5 ms CPU), a serial system achieves only 50 percent efficiency. By pipelining just two requests, efficiency approaches 100 percent (assuming the CPU can keep up with the GPU). If the CPU is too slow to feed the GPU, the system becomes CPU-bound, and further model optimization provides zero throughput gain. This is Amdahl's Law from @sec-machine-foundations-amdahls-law-gustafsons-law-b741 applied to serving: if preprocessing consumes 50 percent of latency, maximum speedup is 2$\times$ regardless of how fast the model runs.
 
@@ -2716,6 +2720,8 @@ The throughput-latency trade-off for ResNet-50 on a V100 GPU illustrates the pow
 |       8        |        9.1 ms       |         1.1 ms        |   879 img/s    |   65 percent  |
 |       16       |       14.0 ms       |         0.9 ms        |  1,143 img/s   |   85 percent  |
 |       32       |       25.0 ms       |         0.8 ms        |  1,280 img/s   |   95 percent  |
+
+: **ResNet-50 Batching Sweep**: Per-image compute, throughput, and GPU utilization across batch sizes one through thirty-two on a V100. Throughput grows 6.4$\times$ from batch one to batch thirty-two as GPU utilization climbs from 15 to 95 percent, while pure inference time stretches from 5 ms to 25 ms. {#tbl-model-serving-batching-throughput-tradeoff}
 
 ```{=latex}
 \endgroup
@@ -3454,6 +3460,8 @@ Consider a vehicle with six cameras capturing at 30 FPS, requiring spatial fusio
 | $T = 25$ ms | Inference complete                |
 | $T = 32$ ms | Result ready for planning module  |
 
+: **Multi-Camera Frame Timeline**: Event-by-event timeline for one synchronized frame set across six cameras at 30 FPS, illustrating the synchronization budget (12 ms of the 33 ms hard deadline) consumed by sensor jitter before batch inference can begin. {#tbl-model-serving-multicamera-timeline}
+
 ```{=latex}
 \endgroup
 ```
@@ -3546,6 +3554,8 @@ class MobileServingCalc:
 | **NPU inference**      |    `{python} MobileServingCalc.m_npu_ms_str`    |    `{python} MobileServingCalc.m_npu_mj_str`    | 82 percent utilization |
 | **Postprocess + UI**   |     `{python} MobileServingCalc.m_ui_ms_str`    |     `{python} MobileServingCalc.m_ui_mj_str`    | Result rendering       |
 | **Total**              | **`{python} MobileServingCalc.m_total_ms_str`** | **`{python} MobileServingCalc.m_total_mj_str`** | 22 FPS sustained       |
+
+: **Mobile ResNet-50 Pipeline**: Per-phase latency and energy for a single-user mobile vision inference, showing that JPEG decode on the CPU dominates the energy budget even though the NPU inference stage carries the model's compute. Optimization targets shift from throughput to energy-per-inference at the edge. {#tbl-model-serving-mobile-pipeline-breakdown}
 
 :::
 
@@ -3895,6 +3905,8 @@ Performance comparison for ResNet-50 inference on V100 GPU (batch size 1):
 | TensorRT FP16   |   `{python} RuntimeComparisonCalc.rt_trt_fp16_ms_str` ms  |   `{python} RuntimeComparisonCalc.rt_trt_fp16_speedup_str`$\times$  | Tensor Core acceleration  |
 | TensorRT INT8   |   `{python} RuntimeComparisonCalc.rt_trt_int8_ms_str` ms  |   `{python} RuntimeComparisonCalc.rt_trt_int8_speedup_str`$\times$  | Requires calibration      |
 
+: **Inference Runtime Comparison**: Latency and speedup for ResNet-50 (batch size one) across PyTorch eager, TorchScript, ONNX Runtime, and TensorRT in three precisions on a V100. Each step down the table trades portability for raw speed, exposing the optimization-compatibility trade-off that defines runtime selection. {#tbl-model-serving-runtime-comparison}
+
 :::
 
 ```{=latex}
@@ -4001,6 +4013,8 @@ class PrecisionTradeoffCalc:
 | **FP16**       | `{python} PrecisionTradeoffCalc.pt_fp16_ms_str` ms | `{python} PrecisionTradeoffCalc.pt_fp16_mem_mb_str` MB |   `{python} PrecisionTradeoffCalc.pt_fp16_acc_str`%   | `{python} PrecisionTradeoffCalc.pt_fp16_util_str`% | None            |
 | **INT8 (PTQ)** | `{python} PrecisionTradeoffCalc.pt_int8_ms_str` ms | `{python} PrecisionTradeoffCalc.pt_int8_mem_mb_str` MB | `{python} PrecisionTradeoffCalc.pt_int8_ptq_acc_str`% | `{python} PrecisionTradeoffCalc.pt_int8_util_str`% | 1,000 samples   |
 | **INT8 (QAT)** | `{python} PrecisionTradeoffCalc.pt_int8_ms_str` ms | `{python} PrecisionTradeoffCalc.pt_int8_mem_mb_str` MB | `{python} PrecisionTradeoffCalc.pt_int8_qat_acc_str`% | `{python} PrecisionTradeoffCalc.pt_int8_util_str`% | Full retraining |
+
+: **Precision Trade-offs on V100**: Latency, memory footprint, accuracy, and Tensor Core utilization for ResNet-50 in FP32, FP16, and INT8 (PTQ and QAT). FP16 is a near-free 2$\times$ speedup, while INT8 buys an additional 3$\times$ at the cost of calibration data and a fraction of a percentage point in accuracy. {#tbl-model-serving-precision-tradeoffs}
 
 :::
 

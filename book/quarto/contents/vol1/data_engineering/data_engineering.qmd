@@ -356,7 +356,7 @@ Underlying these physical properties is a fundamental constraint we call the *en
 
 ::: {.callout-perspective title="The energy-movement invariant"}
 
-The iron law in @sec-introduction-iron-law-ml-systems-c32a and the memory-wall analysis in @sec-hardware-acceleration-understanding-ai-memory-wall-3ea9 imply a data-engineering invariant: **moving a bit costs 100--10,000$\times$ more energy than computing on it.** While @sec-model-compression examines the energy cost inside the processor, we must also consider the cost of the information flow from the external world. The following table quantifies just how dramatic these differences are:
+The iron law in @sec-introduction-iron-law-ml-systems-c32a and the memory-wall analysis in @sec-hardware-acceleration-understanding-ai-memory-wall-3ea9 imply a data-engineering invariant: **moving a bit costs anywhere from a hundred to nearly a million times more energy than computing on it**, with the multiplier rising as the data leaves the chip. While @sec-model-compression examines the energy cost inside the processor, we must also consider the cost of the information flow from the external world. The following table quantifies just how dramatic these differences are:
 
 ::: {tbl-colwidths="[34,33,33]"}
 
@@ -367,7 +367,11 @@ The iron law in @sec-introduction-iron-law-ml-systems-c32a and the memory-wall a
 | **Local SSD Access (per bit)**     |                        ~10,000 pJ                       | `{python} DataEngineeringSetup.local_ssd_multiplier_str`$\times$ |
 | **Network Transfer (Data Center)** |                        ~50,000 pJ                       |  `{python} DataEngineeringSetup.network_multiplier_str`$\times$  |
 
+: **Energy Cost of Moving versus Computing on a Bit**\index{Energy-Movement Invariant!quantitative table}: Approximate energy per operation at each stage of the data-movement hierarchy, with multipliers normalized to a single 32-bit MAC on a per-bit basis. The first two rows list energy per 32-bit access; the last two list energy per bit transferred. Moving a bit costs hundreds of times more energy than computing on it for DRAM-resident data, rising to hundreds of thousands of times more when the data must traverse a data-center network. {#tbl-energy-movement-cost}
+
 :::
+
+The cost gradient quantified in @tbl-energy-movement-cost explains why locality is the dominant lever in systems engineering: every step the data does *not* take is the largest energy savings available.
 
 Data has physical mass. Pruning 50 percent of training data through deduplication does more than save disk space; it eliminates the most energy-intensive stages of the training lifecycle. This is *why* data selection is the highest-leverage tool in the systems engineer's toolkit: it addresses the problem at the most expensive source.
 
@@ -882,6 +886,8 @@ Even reliable, high-quality pipelines face a third constraint: they must keep pa
 | **Constraint** | Memory Capacity      | Tables exceed single-GPU memory; requires sharding.       |
 | **Bottleneck** | Sparse Access        | Random lookups stress memory bandwidth more than compute. |
 
+: **DLRM Scalability Profile**: Recommendation models like DLRM stress data engineering along memory capacity and sparse-access bandwidth rather than compute, distinguishing them from compute-bound vision models or bandwidth-bound language models and motivating embedding-table sharding as a first-class system concern. {#tbl-data-engineering-dlrm-scalability}
+
 Unlike ResNet (compute bound) or GPT-2 (bandwidth bound), DLRM is limited by memory capacity and the sheer logistics of storing and accessing massive lookup tables efficiently.
 
 :::
@@ -1122,6 +1128,8 @@ Options from design space:
 | **Inference**         | Local, 8-bit quantized   | Memory-constrained                                        |
 | **Augmentation**      | Heavy synthetic          | 10$\times$ cost efficiency                                |
 
+: **KWS Final Configuration**: Budget-optimized data engineering choices that satisfy the four-pillar constraints derived in @tbl-kws-design-space, trading higher sampling and synthetic augmentation against fixed memory and labeling budgets to reach the 97--99 percent accuracy target. {#tbl-data-engineering-kws-configuration}
+
 **Projected Outcome**: 97–99 percent estimated accuracy (meeting target), \$145K spend (under budget), 48 KB model (under limit).
 
 **Engineering lesson**: Systematic design space analysis transformed intuition ("we need more data") into quantified decisions ("750K real + 2M synthetic maximizes accuracy per dollar given memory constraints").
@@ -1156,6 +1164,8 @@ Just as systems engineers memorize latency numbers, ML engineers should internal
 | **GPU training hour (A100)** |                                                             \$2–4                                                              | Cloud spot pricing     |
 | **Human review hour**        |                                                            \$15–50                                                             | Depending on expertise |
 
+: **Data Engineering Cost Constants (2024)**: Per-unit costs that ML engineers should memorize in the same way systems engineers memorize latency numbers. Labeling dominates the budget by two to three orders of magnitude over storage and compute, which is why the 1000$\times$ rule below holds. {#tbl-data-engineering-cost-constants}
+
 :::
 
 **Time Constants**
@@ -1167,6 +1177,8 @@ Just as systems engineers memorize latency numbers, ML engineers should internal
 | **Label 1M images (crowdsourced)** |  2–4 weeks   | Annotation throughput               |
 | **Train ResNet-50 on ImageNet**    |  4–6 hours   | Compute (8$\times$ A100, optimized) |
 | **Feature store lookup**           |   1–10 ms    | Network + cache                     |
+
+: **Data Engineering Time Constants**: Characteristic durations for labeling, training, and serving operations span eight orders of magnitude. Human labeling sets the wall-clock floor for new datasets, making it the dominant scheduling constraint in production ML systems. {#tbl-data-engineering-time-constants}
 
 :::
 
@@ -1806,7 +1818,7 @@ The diversity of sources (crowdsourced audio, synthetic waveforms, web-scraped c
 
 Orient yourself with @fig-pipeline-flow, which maps the end-to-end pipeline across its distinct layers: data sources, ingestion, processing, labeling, storage, and ML training.
 
-::: {#fig-pipeline-flow fig-env="figure" fig-pos="htb" fig-cap="**Three-Stage Pipeline Flow**: Raw data sources and APIs feed into batch and stream ingestion at the middle layer, then flow to data warehouse and storage destinations at the bottom. Each stage scales independently, enabling modular quality control across the pipeline." fig-alt="Three-tier flow diagram with raw data sources and APIs at top, batch and stream ingestion in middle layer, and data warehouse and storage destinations at bottom connected by arrows."}
+::: {#fig-pipeline-flow fig-env="figure" fig-pos="htb" fig-cap="**End-to-End Data Pipeline**: Raw data sources flow through ingestion, a storage layer, and a processing layer into ML training, with a data-governance band spanning the full pipeline. Each layer scales independently, enabling modular quality control from raw data to training data." fig-alt="Layered flow diagram with sources at top, then ingestion, storage, and processing layers in the middle, ML training at the bottom, and a data-governance band spanning the full pipeline."}
 
 ```{.tikz}
 \resizebox{.7\textwidth}{!}{%
@@ -2729,13 +2741,13 @@ Applying these processing concepts to our KWS system: the audio recordings flowi
 
 Quality assessment for KWS extends the general principles with audio-specific metrics. Beyond checking for null values or schema conformance, our system tracks background noise levels (signal-to-noise ratio above `{python} DataEngineeringSetup.kws_snr_threshold_db_str` decibels), audio clarity scores (frequency spectrum analysis), and speaking rate consistency (wake word duration within `{python} DataEngineeringSetup.kws_sample_duration_ms_low_str`--`{python} DataEngineeringSetup.kws_sample_duration_ms_high_str` ms). The quality assessment pipeline automatically flags recordings where background noise would prevent accurate detection, where wake words are spoken too quickly or unclearly for the model to distinguish them, or where clipping or distortion has corrupted the audio signal. This automated filtering ensures only high-quality samples reach model development. Recall how @fig-cascades demonstrated the compounding effects of early data quality failures; this filtering prevents precisely those cascade failures by catching issues at the source.
 
-Transforming audio data for KWS involves converting raw waveforms into formats suitable for ML models while maintaining training-serving consistency. Raw audio waveforms (sequences of amplitude values sampled thousands of times per second) are high-dimensional and difficult for neural networks to process directly. Instead, we transform them into compact representations that emphasize the frequencies and temporal patterns most relevant to speech. To understand what this transformation produces, study @fig-spectrogram-example: notice how the raw waveform (left) becomes a 2D image-like representation (right) where the horizontal axis is time, the vertical axis is frequency, and color intensity shows energy. These standardized feature representations, typically Mel-frequency cepstral coefficients (MFCCs)\index{MFCC!(mel-frequency cepstral coefficients)}[^fn-mfcc-dimensionality] or spectrograms,\index{Spectrogram!audio features}[^fn-spectrogram-cnn] emphasize speech-relevant characteristics while reducing noise and variability across different recording conditions.
+Transforming audio data for KWS involves converting raw waveforms into formats suitable for ML models while maintaining training-serving consistency. Raw audio waveforms (sequences of amplitude values sampled thousands of times per second) are high-dimensional and difficult for neural networks to process directly. Instead, we transform them into compact representations that emphasize the frequencies and temporal patterns most relevant to speech. To understand what this transformation produces, study @fig-spectrogram-example: notice how the raw waveform (top) becomes a 2D image-like representation (middle, the spectrogram, where the horizontal axis is time, the vertical axis is frequency, and color intensity shows energy) and a further-reduced MFCC representation (bottom) that distills the same energy into a handful of speech-relevant coefficients. These standardized feature representations, typically Mel-frequency cepstral coefficients (MFCCs)\index{MFCC!(mel-frequency cepstral coefficients)}[^fn-mfcc-dimensionality] or spectrograms,\index{Spectrogram!audio features}[^fn-spectrogram-cnn] emphasize speech-relevant characteristics while reducing noise and variability across different recording conditions.
 
 [^fn-mfcc-dimensionality]: **MFCC (Mel-Frequency Cepstral Coefficients)**: This transformation achieves its compactness and noise resistance by applying mel-scale filtering, which selectively emphasizes the frequencies humans use to distinguish speech. This process reduces thousands of raw audio samples from a small time window (for example, 25 ms) into just 13–39 coefficients, the aggressive dimensionality reduction required for always-on, kilobyte-scale hardware. Any mismatch in the parameters governing this transformation between training and serving will create feature skew, degrading the model's accuracy. \index{MFCC!dimensionality reduction}
 
 [^fn-spectrogram-cnn]: **Spectrogram**: The Short-Time Fourier Transform (STFT) computes this 2D representation, architecturally repurposing standard image-based convolutional neural networks (CNNs) for audio processing by converting the 1D waveform into a visual format. This repurposing creates a rigid dependency: any mismatch in STFT parameters (for example, a 25 ms vs. 30 ms window) between training and serving invalidates the learned patterns, causing performance to collapse. \index{Spectrogram!CNN bridge}
 
-::: {#fig-spectrogram-example fig-env="figure" fig-pos="t!" fig-cap="**Audio Feature Transformation**: A raw audio waveform (left) is converted into a spectrogram (right), a two-dimensional representation where the horizontal axis is time, the vertical axis is frequency, and color intensity indicates signal power. This transformation creates an image-like feature suitable for ML models." fig-alt="Two plots side-by-side: a raw audio waveform (amplitude vs. time) on the left, and its corresponding spectrogram (frequency vs. time with power in dB as color) on the right."}
+::: {#fig-spectrogram-example fig-env="figure" fig-pos="t!" fig-cap="**Audio Feature Transformation**: A raw audio waveform (top) is converted into a spectrogram (middle), a two-dimensional representation where the horizontal axis is time, the vertical axis is frequency, and color intensity indicates signal power, and finally into an MFCC approximation (bottom) that compresses the same energy into a small set of speech-relevant coefficients. This pipeline creates image-like features suitable for ML models." fig-alt="Three stacked plots: a raw audio waveform (amplitude vs. time) at top, its spectrogram (frequency vs. time with power in dB as color) in the middle, and an MFCC approximation at bottom."}
 
 ![](images/png/kws_spectrogram.png)
 
@@ -2843,13 +2855,13 @@ Bounding boxes\index{Bounding Box!definition}\index{Bounding Box!bounding box an
 
 Segmentation maps\index{Semantic Segmentation!pixel-level labels} provide the most comprehensive information by classifying objects at the pixel level, highlighting each object in a distinct color. For our traffic monitoring system, this might mean precisely outlining each vehicle, pedestrian, and road sign. These detailed annotations significantly increase our storage and processing requirements. A segmentation mask for a $1920{\times}1080$ image requires about two million labels (one per pixel), compared to perhaps ten bounding boxes or a single classification label. If each box stores four coordinates, that is roughly 50,000$\times$ more scalar label entries than ten boxes before accounting for per-value encoding, and the hours required per image for manual segmentation make this approach suitable only when pixel-level precision is essential.
 
-::: {#fig-labels fig-env="figure" fig-pos="htb" fig-cap="**Data Annotation Granularity**: Four label types applied to the same image of a dog on a blanket: a classification label, a bounding box, a segmentation mask, and a free-text transcription. Each type progressively increases labeling cost and storage requirements while providing a richer training signal." fig-alt="Four-row table showing label types for a dog on a blanket: classification (Dog, Blanket, No cat), a bounding box around the dog, a segmentation mask on the dog, and a text transcription."}
+::: {#fig-labels fig-env="figure" fig-pos="htb" fig-cap="**Data Annotation Granularity**: Five label types applied to the same image of a dog on a blanket: a classification label, a bounding box, a segmentation mask, a free-text caption, and an audio transcription. Each type progressively increases labeling cost and storage requirements while providing a richer training signal." fig-alt="Five-row figure showing label types for a dog on a blanket: classification (Dog, Blanket, No cat), a bounding box around the dog, a segmentation mask on the dog, a free-text caption, and a transcription."}
 
 ![](images/png/cs249r_labels_new.png)
 
 :::
 
-Compare the four label types in @fig-labels. The choice depends on system requirements and resource constraints [@johnson-roberson2017]: classification suffices for traffic counting, but autonomous vehicles need segmentation maps for precise navigation. Production systems often maintain hybrid annotations: a single camera frame might carry classification labels (scene type), bounding boxes (obstacle detection), and segmentation masks (path planning), with each label type serving distinct downstream models.
+Compare the five label types in @fig-labels. The choice depends on system requirements and resource constraints [@johnson-roberson2017]: classification suffices for traffic counting, but autonomous vehicles need segmentation maps for precise navigation. Production systems often maintain hybrid annotations: a single camera frame might carry classification labels (scene type), bounding boxes (obstacle detection), and segmentation masks (path planning), with each label type serving distinct downstream models.
 
 Beyond these geometric labels, production systems must also manage rich metadata essential for quality control and debugging. The Common Voice dataset [@ardila2020common] exemplifies this in speech recognition: tracking speaker demographics for fairness, recording quality metrics for filtering, and language information for multilingual support. If our traffic monitoring system fails in rainy conditions, weather metadata captured during collection pinpoints the coverage gap. This metadata requirement demonstrates how label type choice cascades through entire system design: the infrastructure must optimize storage for the chosen format, implement appropriate retrieval patterns, and track which model versions used which label versions to correlate quality improvements with performance gains.
 

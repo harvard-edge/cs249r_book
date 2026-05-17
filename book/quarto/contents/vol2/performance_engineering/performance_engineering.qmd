@@ -118,7 +118,7 @@ Verify your understanding of system-level performance diagnosis:
 
 :::
 
-::: {#fig-iron-law-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Iron Law Diagnostic Flowchart**: The optimization process begins with profiling to determine which term in @eq-iron-law-perf dominates. If the workload is compute-bound, precision engineering or algorithmic changes reduce the numerator. If memory-bound, operator fusion and tiling reduce HBM traffic. If overhead-bound, graph compilation and communication overlap attack the residual term. Applying the wrong technique yields zero improvement." fig-alt="Flowchart starting with Profile Workload, branching to Compute Bound, Memory Bound, or Overhead Bound, each leading to specific optimization techniques."}
+::: {#fig-iron-law-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Iron Law Diagnostic Flowchart**: A training-slow-down troubleshooting flow that starts from observed symptoms (slow training, low GPU utilization), branches through I/O, CPU, and communication-overhead checks, and classifies the workload as compute-bound or memory-bound at the leaves. Compute-bound paths point to precision engineering and algorithmic change; memory-bound paths point to operator fusion and tiling. Overhead-bound symptoms (graph dispatch, communication) are surfaced earlier in the flow and addressed before the final compute/memory classification." fig-alt="Troubleshooting flowchart starting from 'Training is slow', branching through GPU-utilization, I/O, CPU, and communication checks, with two terminal labels: Compute Bound and Memory Bound."}
 
 ![](images/svg/diagnostic-flow.svg)
 
@@ -247,7 +247,7 @@ The memory wall is not static; it grows wider with each hardware generation. Com
 | **GPU**\index{GPU} | **Year** | **Peak FP16 (TFLOPS)** | **HBM BW (TB/s)** | **Ridge Point (FLOP/byte)** |
 |:-------------------|:---------|:-----------------------|:------------------|:----------------------------|
 | **V100**           | 2017     | 125                    | 0.9               | 139                         |
-| **A100**           | 2020     | 312                    | 2.0               | 156                         |
+| **A100**           | 2020     | 312                    | 2.04              | 153                         |
 | **H100**           | 2022     | 989                    | 3.35              | 295                         |
 | **B200**           | 2024     | 2,250                  | 8.0               | 281                         |
 
@@ -287,7 +287,7 @@ $$ {#eq-ridge-point}
 
 Workloads with $I < I_{\text{ridge}}$ are memory-bound: their performance is limited by how fast data can be loaded, not how fast it can be processed. Workloads with $I > I_{\text{ridge}}$ are compute-bound: the arithmetic units are the bottleneck. @fig-roofline-model illustrates this relationship graphically.
 
-::: {#fig-roofline-model fig-env="figure" fig-pos="htb" fig-cap="**The Roofline Model**: Achievable performance (y-axis) as a function of arithmetic intensity (x-axis) on a log-log plot. The sloped line represents the memory bandwidth ceiling; the flat line represents the compute ceiling. Their intersection is the ridge point. Most transformer inference operations fall in the memory-bound region (left of the ridge point), while large batched GEMMs fall in the compute-bound region (right)." fig-alt="Log-log plot showing roofline model with memory bandwidth ceiling as diagonal line and compute ceiling as horizontal line, meeting at ridge point. Workload types are marked: LLM decode and element-wise ops on the left (memory-bound), large GEMM on the right (compute-bound)."}
+::: {#fig-roofline-model fig-env="figure" fig-pos="htb" fig-cap="**The Roofline Model**: Achievable performance (y-axis) as a function of arithmetic intensity (x-axis) on a log-log plot. The sloped line represents the memory bandwidth ceiling; the flat line represents the compute ceiling at the labeled precision (FP8 tensor-core throughput on H100, approximately 2,000 TFLOPS); their intersection is the ridge point at roughly 600 FLOPs/byte for FP8. Most transformer inference operations fall in the memory-bound region (left of the ridge point), while large batched GEMMs fall in the compute-bound region (right). The corresponding FP16 ridge point is roughly 295 FLOPs/byte (989 TFLOPS / 3.35 TB/s)." fig-alt="Log-log roofline plot with diagonal memory-bandwidth ceiling and horizontal compute ceiling labeled at FP8 throughput around 2,000 TFLOPS. Ridge point around 600 FLOPs per byte. Workload markers: LLM decode and element-wise ops on the left (memory-bound), large GEMM on the right (compute-bound)."}
 ![](images/svg/roofline-model.svg)
 :::
 
@@ -706,13 +706,13 @@ Intermediate tensors $Z_1$ and $Z_2$ each occupy the same memory as the output $
 
 @fig-fusion-before-after contrasts these two execution paths, making the HBM traffic savings visible.
 
-::: {#fig-fusion-before-after fig-env="figure" fig-pos="htb" fig-cap="**Operator Fusion: Before and After**: Left: three separate kernels each read from and write to HBM, materializing intermediate tensors $Z_1$ and $Z_2$ (seven HBM transfers totaling 88 MB of memory traffic). Right: a single fused kernel reads $X$ and $W$ once, performs all three operations with intermediates held in SRAM, and writes only the final output $Y$ (three HBM transfers totaling 24 MB). The fused path eliminates 64 MB of redundant HBM traffic per layer." fig-alt="Two side-by-side dataflow diagrams. Left unfused path shows seven HBM-transfer arrows totaling 88 MB. Right fused path shows three arrows totaling 24 MB, with intermediates staying in SRAM."}
+::: {#fig-fusion-before-after fig-env="figure" fig-pos="htb" fig-cap="**Operator Fusion: Before and After**: Top: three separate kernels each read from and write to HBM, materializing intermediates $Z_1$ and $Z_2$, with six HBM round-trips along the unfused path. Bottom: a single fused kernel reads inputs once, holds intermediates in SRAM, and writes only the final output, leaving just two HBM round-trips. The fused path delivers roughly a 3$\times$ reduction in HBM traffic per layer." fig-alt="Two stacked dataflow panels. Top unfused path: six HBM round-trip arrows. Bottom fused path: two HBM round-trip arrows, intermediates staying in SRAM. The fused path is labeled as a 3 times reduction."}
 
 ![](images/svg/operator-fusion.svg)
 
 :::
 
-As @fig-fusion-before-after makes concrete, fusion reduces HBM transfers from seven to three per layer, eliminating 64 MB of redundant intermediate traffic that the unfused path forces through off-chip memory.
+As @fig-fusion-before-after makes concrete, fusion reduces HBM round-trips from six to two per layer, a roughly 3$\times$ reduction in off-chip memory traffic for this layer block.
 
 In a naive implementation without operator fusion, executing one transformer layer requires roughly 50 separate kernel launches. If each launch incurs a 10-microsecond overhead, the system spends 500 microseconds purely on dispatch latency. If the actual arithmetic execution of the layer takes only 2 milliseconds, the launch overhead consumes 20 percent of the total wall-clock time, leaving the GPU compute units idle for one-fifth of the inference cycle. This "launch-bound" regime limits the benefits of faster hardware; doubling the GPU's FLOPS does nothing to reduce the 500-microsecond fixed cost. Operator fusion addresses this by compiling these 50 discrete operations into a small handful of fused kernels, often reducing the count to 5--10 launches, thereby reclaiming the lost cycles and shifting the workload back toward a compute-bound profile.
 

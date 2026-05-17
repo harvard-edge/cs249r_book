@@ -80,9 +80,9 @@ The speed of light sets the latency floor for all communication. In a vacuum, li
 
 Higher bandwidth demands more signaling energy per bit, creating a bandwidth-distance product constraint. Modern InfiniBand NDR operates at 100 Gbps per lane using PAM4 signaling (4 voltage levels per symbol), which requires more precise analog circuits than the simpler NRZ (2 levels) used by earlier generations. This precision comes at a cost: the maximum reach of a copper cable at NDR rates is approximately 2 meters before the signal degrades below recoverable levels. Longer distances require active optical cables (AOCs) or fiber transceivers that convert electrical signals to light and back, adding both cost (hundreds of dollars per link) and latency (nanoseconds per conversion). The bandwidth-distance product is a fundamental constraint: a link can have high bandwidth or long distance, but not both cheaply.
 
-Moving data also costs energy that scales with distance, as @fig-data-movement-hierarchy illustrates. Accessing data from local SRAM costs roughly 0.5 pJ/bit. Moving it across a PCB (NVLink) costs 5--10 pJ/bit. Moving it across a data center via InfiniBand optical links costs 20--50 pJ/bit.
+Moving data also costs energy that scales with distance, as @fig-data-movement-hierarchy illustrates. Concrete reference values are: local SRAM at roughly 0.5 pJ/bit, NVLink (on-package PCB) at the tens of pJ/bit, and inter-node InfiniBand at the hundreds-to-thousand-plus pJ/bit. The figure uses the higher published estimates that include link-, switch-, and transceiver-side power; chapter prose elsewhere uses the lower bound of each range. Both views agree on the central point: the energy cost climbs by two-to-three orders of magnitude between SRAM and inter-node fabric.
 
-::: {#fig-data-movement-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The Data Movement Energy Hierarchy**: The energy cost of moving a single bit increases by orders of magnitude as it traverses the system hierarchy, from local SRAM through HBM and intra-node NVLink to inter-node InfiniBand fabrics. This energy gradient makes data locality the primary driver of sustainable and efficient distributed ML system design." fig-alt="Horizontal bar chart showing increasing energy cost (pJ per bit) on a logarithmic scale from local SRAM up to remote data center nodes."}
+::: {#fig-data-movement-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The Data Movement Energy Hierarchy**: The energy cost of moving a single bit climbs by orders of magnitude across the system hierarchy — from SRAM through HBM to intra-node NVLink to inter-node InfiniBand. The figure plots higher-bound published estimates (NVLink in the tens of pJ/bit, InfiniBand near 1{,}000 pJ/bit) that include switch and transceiver overheads. The chapter prose elsewhere uses the lower-bound estimates for back-of-the-envelope calculations. Either way, the gradient makes data locality the primary driver of sustainable and efficient distributed ML system design." fig-alt="Horizontal bar chart showing increasing energy cost (pJ per bit) on a logarithmic scale from local SRAM through HBM, NVLink, and InfiniBand to remote data center nodes."}
 ![](images/svg/data-movement-hierarchy.svg)
 :::
 
@@ -618,7 +618,7 @@ This reality gap has practical consequences for algorithm selection. The crossov
 
 ## Choosing the Vehicle: Collective Operation Primitives {#sec-communication-collective-operations-collective-operations-collective-operation-vocabulary-fdc7}
 
-If a GPU simply opens a socket and sends a massive gradient to another GPU, the entire cluster will rapidly collapse into an unmanageable web of deadlocks and congestion. With the terrain mapped, the gradient must now choose its vehicle: strictly choreographed group exchanges known as collective operations. @fig-collective-primitives-overview provides a visual overview of the six core primitives that form this vocabulary.
+If a GPU simply opens a socket and sends a massive gradient to another GPU, the entire cluster will rapidly collapse into an unmanageable web of deadlocks and congestion. With the terrain mapped, the gradient must now choose its vehicle: strictly choreographed group exchanges known as collective operations. @fig-collective-primitives-overview illustrates four of the central primitives in this vocabulary: AllReduce, AllGather, ReduceScatter, and AllToAll. Two further primitives—Broadcast (rank 0 sends to all) and Reduce (all aggregate to rank 0)—are foundational building blocks defined in the prose below and used implicitly in the figure's compound patterns.
 
 ::: {.callout-definition title="Collective operation"}
 
@@ -630,7 +630,7 @@ If a GPU simply opens a socket and sends a massive gradient to another GPU, the 
 
 :::
 
-::: {#fig-collective-primitives-overview fig-env="figure" fig-pos="htb" fig-cap="**The Six Core Collective Primitives**: Standardized patterns for group communication in distributed systems. (1) Broadcast: rank 0 sends to all. (2) Reduce: all aggregate to rank 0. (3) AllReduce: all aggregate and all receive result. (4) AllGather: all send to all and concatenate. (5) ReduceScatter: all aggregate and results are distributed in shards. (6) AllToAll: every process sends unique data to every other process." fig-alt="Grid of 6 diagrams illustrating Broadcast, Reduce, AllReduce, AllGather, ReduceScatter, and AllToAll patterns across a process group."}
+::: {#fig-collective-primitives-overview fig-env="figure" fig-pos="htb" fig-cap="**Four Central Collective Primitives**: Standardized patterns for group communication in distributed systems. (1) AllReduce: all aggregate and all receive the result. (2) AllGather: all send to all and concatenate. (3) ReduceScatter: all aggregate and results are distributed in shards. (4) AllToAll: every process sends unique data to every other process. The two foundational primitives Broadcast (rank 0 sends to all) and Reduce (all aggregate to rank 0) compose the patterns shown here and are defined in the surrounding prose." fig-alt="Grid of 4 diagrams illustrating AllReduce, AllGather, ReduceScatter, and AllToAll communication patterns across a process group."}
 ![](images/svg/collective-primitives-overview.svg)
 :::
 
@@ -828,7 +828,7 @@ The algorithm splits the vector of size $M$ into $N$ chunks and proceeds in two 
 
 The data flow during Step 1 is illustrated in @fig-ring-allreduce.
 
-::: {#fig-ring-allreduce fig-env="figure" fig-pos="htb" fig-cap="**Ring AllReduce Data Flow**: Nodes arranged in a logical ring exchange chunks in two phases: a Scatter-Reduce phase (each node accumulates one chunk's partial sum) followed by an AllGather phase (complete sums circulate to all nodes). Every link is used simultaneously, achieving bandwidth optimality." fig-alt="Circular diagram of N GPUs connected in a ring. Arrows show clockwise data flow. Each GPU holds color-coded chunks representing partial gradient sums."}
+::: {#fig-ring-allreduce fig-env="figure" fig-pos="htb" fig-cap="**Ring AllReduce Data Flow**: Nodes arranged in a logical ring exchange chunks in two phases: a Scatter-Reduce phase (each node accumulates one chunk's partial sum) followed by an AllGather phase (complete sums circulate to all nodes). The figure shows the ring laid out horizontally with a wrap-around bus closing the loop; every link is used simultaneously, achieving bandwidth optimality." fig-alt="Horizontal linear layout of N GPUs forming a logical ring, with an orthogonal wrap-around bus closing the loop. Arrows show data flow along the ring; color-coded chunks at each GPU represent partial gradient sums."}
 
 ![](images/svg/ring-allreduce.svg)
 
@@ -882,6 +882,7 @@ Each GPU sends its "owned" chunk to its right neighbor, which adds the received 
 | 1        | chunk A $(1) \to$ GPU 1  | chunk B $(6) \to$ GPU 2  | chunk C $(5) \to$ GPU 3  | chunk D $(10) \to$ GPU 0 | GPU 0: D=$17$, GPU 1: A=$3$, GPU 2: B=$13$, GPU 3: C=$11$                                      |
 | 2        | chunk D $(17) \to$ GPU 1 | chunk A $(3) \to$ GPU 2  | chunk B $(13) \to$ GPU 3 | chunk C $(11) \to$ GPU 0 | GPU 0: C=$14$, GPU 1: D=$25$, GPU 2: A=$6$, GPU 3: B=$21$                                      |
 | 3        | chunk C $(14) \to$ GPU 1 | chunk D $(25) \to$ GPU 2 | chunk A $(6) \to$ GPU 3  | chunk B $(21) \to$ GPU 0 | GPU 0: B=$\mathbf{26}$, GPU 1: C=$\mathbf{18}$, GPU 2: D=$\mathbf{34}$, GPU 3: A=$\mathbf{10}$ |
+: **Ring AllReduce Scatter-Reduce trace**: Three sequential steps across 4 GPUs. Each row shows the chunk and value every GPU forwards to its right neighbor and the resulting partial sums after the receive-and-add. By step 3, each GPU owns the complete sum of one chunk. {#tbl-collective-communication-ring-scatter-reduce-trace}
 
 After Phase 1, each GPU holds the *complete sum* for exactly one chunk: GPU 0 has the global sum for element B (26), GPU 1 for C (18), GPU 2 for D (34), GPU 3 for A (10).
 
@@ -894,6 +895,7 @@ Each GPU sends its fully reduced chunk around the ring so all GPUs receive all r
 | 4        | Each sends its complete chunk to right neighbor | Each GPU now has 2 of 4 final chunks |
 | 5        | Continue forwarding                             | Each GPU now has 3 of 4 final chunks |
 | 6        | Final forwarding                                | All GPUs hold $[10, 26, 18, 34]$     |
+: **Ring AllReduce AllGather trace**: Three sequential steps in which each GPU forwards its fully-reduced chunk around the ring. After step 6 every GPU holds the same final vector $[10, 26, 18, 34]$. {#tbl-collective-communication-ring-allgather-trace}
 
 **Total data movement per GPU**\index{Total Data Movement Per GPU}: In each of the $2(N-1)$ = `{python} RingTrace.steps_str` steps, each GPU sends exactly $M/N$ = `{python} RingTrace.elem_str` element. Total per GPU: `{python} RingTrace.steps_str` $\times$ `{python} RingTrace.elem_str` = `{python} RingTrace.total_str` elements sent, `{python} RingTrace.total_str` received.
 
@@ -1176,6 +1178,7 @@ class RingVsTree:
 |:--------------|--------------------------------------:|-------------------------------------:|--------------------------------------------:|
 | **Ring**      | `{python} RingVsTree.ring_lat_str` μs | `{python} RingVsTree.ring_bw_str` μs | **`{python} RingVsTree.ring_total_str` μs** |
 | **Tree**      | `{python} RingVsTree.tree_lat_str` μs | `{python} RingVsTree.tree_bw_str` μs | **`{python} RingVsTree.tree_total_str` μs** |
+: **Ring vs. tree AllReduce timing for a 1 MB buffer on 64 GPUs**: Latency, bandwidth, and total-time terms with $\alpha = 10\ \mu$s and $\beta = 10$ GB/s. Tree wins by roughly 10 percent because the message sits just below the log-aware crossover point $M_{\text{crossover}} \approx N \alpha \beta / \log_2 N$. {#tbl-collective-communication-ring-vs-tree-1mb-64gpu}
 
 **Tree wins**\index{Tree Wins}, but only by 10 percent. For this 1 MB message, we are near the crossover point.
 
@@ -1254,7 +1257,7 @@ The algorithms above (Ring, Tree, Butterfly, Double Binary Tree) all assume a **
 
 A naive flat Ring AllReduce ignores this structure, potentially routing data across InfiniBand when NVLink would suffice and wasting the scarce inter-node bandwidth. **Hierarchical AllReduce** decomposes the global operation into three phases that respect the bandwidth hierarchy, as shown in @fig-hierarchical-allreduce.
 
-::: {#fig-hierarchical-allreduce fig-env="figure" fig-pos="htb" fig-cap="**Hierarchical AllReduce**: Three-phase decomposition that exploits the intra-node/inter-node bandwidth gap. Phase 1 performs a ReduceScatter within each node over NVLink, reducing inter-node traffic by a factor of $G$ (GPUs per node). Phase 2 runs an AllReduce across corresponding GPUs using InfiniBand. Phase 3 completes an AllGather within each node over NVLink." fig-alt="Diagram showing two server nodes, each with multiple GPUs. Intra-node NVLink arrows for ReduceScatter and AllGather phases. Inter-node InfiniBand arrows for the cross-node AllReduce phase."}
+::: {#fig-hierarchical-allreduce fig-env="figure" fig-pos="htb" fig-cap="**Hierarchical AllReduce**: Three-phase decomposition that exploits the intra-node/inter-node bandwidth gap. Phase 1 performs intra-node aggregation over NVLink (an NVLink ring acting as a ReduceScatter that leaves each GPU holding a node-shard partial sum), reducing inter-node traffic by a factor of $G$ (GPUs per node). Phase 2 runs an AllReduce across corresponding GPUs using InfiniBand. Phase 3 completes intra-node distribution over NVLink (the AllGather that returns each GPU to the full result). The figure labels these phases by their NVLink/IB mechanics; the corresponding collective-primitive names appear in the subsection headings below." fig-alt="Two-node diagram with multiple GPUs per node. Intra-node NVLink arrows show Phase 1 (ring/ReduceScatter) and Phase 3 (ring/AllGather). Inter-node InfiniBand arrows show Phase 2 (cross-node AllReduce on the node shards)."}
 
 ![](images/svg/hierarchical-allreduce.svg)
 
@@ -1507,7 +1510,7 @@ class ThreeLevelNapkin:
 
 ### In-network reduction: SHARP and beyond {#sec-communication-sharp}
 
-::: {#fig-sharp-innetwork fig-env="figure" fig-pos="htb" fig-cap="**In-Network Reduction (SHARP)**: Traditional tree AllReduce performs reduction at intermediate GPUs, incurring multiple store-and-forward delays. SHARP offloads the reduction to the network switch ASIC, allowing partial sums to be aggregated at line rate as packets traverse the switch. This eliminates GPU memory traffic and store-and-forward latency, significantly accelerating small-to-medium message collectives." fig-alt="Two-panel comparison. Top: Software Tree AllReduce with data flowing through GPUs. Bottom: In-Network SHARP with data aggregated at the switch."}
+::: {#fig-sharp-innetwork fig-env="figure" fig-pos="htb" fig-cap="**In-Network Reduction (SHARP)**: Side-by-side comparison split by a vertical divider. The left side shows a traditional tree AllReduce performing reduction at intermediate GPUs, incurring multiple store-and-forward delays. The right side shows SHARP offloading the reduction to the network switch ASIC, allowing partial sums to be aggregated at line rate as packets traverse the switch. This eliminates GPU memory traffic and store-and-forward latency, significantly accelerating small-to-medium message collectives." fig-alt="Left/right side-by-side comparison split by a vertical divider. Left side: Software Tree AllReduce with data flowing through GPUs. Right side: In-Network SHARP with data aggregated inside the switch."}
 ![](images/svg/sharp-innetwork.svg){width=100%}
 :::
 

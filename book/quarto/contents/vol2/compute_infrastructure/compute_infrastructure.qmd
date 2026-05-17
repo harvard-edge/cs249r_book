@@ -155,7 +155,7 @@ class InfraSetup:
 
 Four physical constraints recur at different levels of the infrastructure stack: the memory wall, the power wall, the communication wall, and the reliability wall. @fig-three-walls-grid maps *how* these constraints cascade from the accelerator die to the warehouse-scale pod.
 
-::: {#fig-three-walls-grid fig-env="figure" fig-pos="htb" fig-cap="**The Four Infrastructure Walls**: Four dominant constraints arranged across a Scaling Journey: power wall (data center delivery limits, ~40 MW facility), memory wall (HBM bandwidth gap, 3.35 TB/s HBM3 vs. ~2K TFLOPS), communication wall (network bisection limit, 400 Gb/s NDR IB per port), and reliability wall (MTBF ~4.4 hours at 25K GPUs). Each wall becomes the dominant constraint at a different scale, from a single GPU through 8-GPU nodes and 1K-GPU clusters to 25K+ GPU fleets." fig-alt="Four walls laid out horizontally: Power, Memory, Comm., and Reliability, each with a quantitative constraint and a mitigation. Below, a Scaling Journey marks Single Node, 8-GPU Node, Multi-Node Cluster, and 10K+ GPU Fleet."}
+::: {#fig-three-walls-grid fig-env="figure" fig-pos="htb" fig-cap="**The Four Infrastructure Walls**: Four dominant constraints arranged across a Scaling Journey: power wall (data center delivery limits, ~40 MW facility), memory wall (HBM bandwidth gap, 3.35 TB/s HBM3 vs. ~2K TFLOPS), communication wall (network bisection limit, 400 Gb/s NDR IB per port), and reliability wall (MTBF ~2 hours at 25K GPUs). Each wall becomes the dominant constraint at a different scale, from a single GPU through 8-GPU nodes and 1K-GPU clusters to 25K+ GPU fleets." fig-alt="Four walls laid out horizontally: Power, Memory, Comm., and Reliability, each with a quantitative constraint and a mitigation. Below, a Scaling Journey marks Single Node, 8-GPU Node, Multi-Node Cluster, and 10K+ GPU Fleet."}
 
 ![](images/svg/infra-walls.svg)
 
@@ -1115,11 +1115,63 @@ XLA compilation for TPUs must decompose the computation into sequences of matrix
 
 The hardware dictates the software abstraction, which in turn shapes what architectures are practical to experiment with. This coupling between hardware and software is a defining characteristic of ML infrastructure and explains why hardware selection has downstream effects on research velocity and model design flexibility.
 
+```{python}
+#| label: tensor-core-h100-specs
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TENSOR CORE H100 SPECS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Tensor Core callout-definition immediately below — pulls H100
+# │          FP16/FP8 tensor-core peaks from mlsysim/core/constants.py so the
+# │          callout's headline numbers stay in sync with the single source
+# │          of truth.
+# │
+# │ Goal:   Export 989 / 1979 TFLOPS as inline-Python strings.
+# │ Note:   `h100_fp32_cuda_tflops` is pinned manually to the NVIDIA H100
+# │         spec-sheet figure (~67 TFLOPS for FP32 on CUDA cores). There is
+# │         no canonical `H100_FLOPS_FP32_CUDA` constant in mlsysim today;
+# │         adding one would let this number flow from constants as well.
+# │         TODO: add H100_FLOPS_FP32_CUDA to mlsysim/core/constants.py and
+# │         replace the manual pin with the inline-Python form.
+# │
+# │ Imports: mlsysim.core.constants (H100_FLOPS_FP16_TENSOR,
+# │                                  H100_FLOPS_FP8_TENSOR, TFLOPs, second)
+# │ Exports: h100_fp16_tc_str, h100_fp8_tc_str, h100_fp32_cuda_str,
+# │          tc_vs_cuda_ratio_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import (
+    H100_FLOPS_FP16_TENSOR, H100_FLOPS_FP8_TENSOR, TFLOPs, second,
+)
+from mlsysim.fmt import fmt, check
+
+class TensorCoreH100Specs:
+    """H100 Tensor Core throughput vs. CUDA cores for the Tensor Core callout."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    fp16_tc_tflops = H100_FLOPS_FP16_TENSOR.m_as(TFLOPs / second)
+    fp8_tc_tflops = H100_FLOPS_FP8_TENSOR.m_as(TFLOPs / second)
+    # Manual pin pending H100_FLOPS_FP32_CUDA constant; NVIDIA H100 spec
+    # sheet quotes ~67 TFLOPS FP32 on CUDA cores.
+    fp32_cuda_tflops = 67.0
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    ratio = fp16_tc_tflops / fp32_cuda_tflops  # ≈ 15× (989 / 67)
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(14 < ratio < 16, "TC-vs-CUDA ratio should be ~15x for H100")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    h100_fp16_tc_str = fmt(fp16_tc_tflops, precision=0, commas=False)
+    h100_fp8_tc_str = fmt(fp8_tc_tflops, precision=0, commas=True)
+    h100_fp32_cuda_str = fmt(fp32_cuda_tflops, precision=0, commas=False)
+    tc_vs_cuda_ratio_str = fmt(ratio, precision=0, commas=False)
+```
+
 ::: {.callout-definition title="Tensor core"}
 
 ***Tensor Core***\index{Tensor Core!definition} is a specialized mixed-precision hardware unit that performs a fused matrix-multiply-accumulate (MMA) operation $D = A \times B + C$ on small tiles (for example, $16{\times}8{\times}16$ in BF16) within a single clock cycle, delivering dramatically higher throughput than general-purpose CUDA cores by trading programmability for fixed-function matrix arithmetic.
 
-1.  **Significance (quantitative)**: Tensor Cores provide the bulk of the H100's 312 TFLOPS BF16 peak—roughly 8$\times$ the ~40 TFLOPS delivered by CUDA (vector) cores alone. However, this peak is only achievable for operations that decompose into tiled matrix multiplications. Layer normalization and softmax, which involve reductions and element-wise operations rather than matrix multiplications, run at approximately 3–8 percent of peak throughput on the same hardware.
+1.  **Significance (quantitative)**: Tensor Cores provide the bulk of the H100's `{python} TensorCoreH100Specs.h100_fp16_tc_str` TFLOPS FP16/BF16 peak (and ~`{python} TensorCoreH100Specs.h100_fp8_tc_str` TFLOPS at FP8)—roughly `{python} TensorCoreH100Specs.tc_vs_cuda_ratio_str`$\times$ the ~`{python} TensorCoreH100Specs.h100_fp32_cuda_str` TFLOPS delivered by CUDA (vector) cores alone. However, this peak is only achievable for operations that decompose into tiled matrix multiplications. Layer normalization and softmax, which involve reductions and element-wise operations rather than matrix multiplications, run at approximately 3–8 percent of peak throughput on the same hardware.
 2.  **Distinction (durable)**: Unlike general-purpose CUDA cores (which execute one floating-point operation per clock per lane in a SIMT pipeline), Tensor Cores execute 512 multiply-accumulate operations per clock per warp on matrix tiles—trading the arbitrary per-element programmability of CUDA cores for the specific throughput of matrix arithmetic.
 3.  **Common pitfall**: A frequent misconception is that all GPU operations benefit from Tensor Cores. Only operations that map to the $D = A \times B + C$ tile computation—dense linear layers, attention score computation, convolutions—engage Tensor Cores; element-wise activations, layer norm, and embedding lookups fall back to CUDA cores and can run 10--30$\times$ slower per FLOP than Tensor Core operations.
 
@@ -1173,7 +1225,7 @@ For capacity planning, the sustained throughput rate, not the peak rate, should 
 
 ***Model FLOPs Utilization (MFU)***\index{Model FLOPs Utilization!definition} is the ratio of a model's theoretical FLOP count per training step—calculated from architecture parameters alone—to the product of hardware peak throughput and elapsed wall-clock time, measuring what fraction of the hardware's theoretical capacity is doing useful model computation rather than overhead.
 
-1.  **Significance (quantitative)**: $\text{MFU} = C_{\text{model}} / (R_{\text{peak}} \cdot T_{\text{step}})$, where $C_{\text{model}} \approx 6P$ FLOPs for a $P$-parameter transformer. For a 7B-parameter model on H100 ($R_{\text{peak}} = 312$ TFLOPS) with a step time of 0.4 seconds: $\text{MFU} = 6 \times 7 \times 10^9 / (312 \times 10^{12} \times 0.4) \approx 34\%$. A practical ceiling of 55–65 percent applies even in highly optimized implementations; the gap represents inescapable memory stalls ($\text{BW}$ bottleneck), AllReduce overhead $(L_{\text{lat}})$, and pipeline bubbles.
+1.  **Significance (quantitative)**: $\text{MFU} = C_{\text{model}} / (R_{\text{peak}} \cdot T_{\text{step}})$, where $C_{\text{model}} \approx 6P$ FLOPs for a $P$-parameter transformer. For a 7B-parameter model on H100 ($R_{\text{peak}} = 989$ TFLOPS FP16) with a step time of 0.13 seconds: $\text{MFU} = 6 \times 7 \times 10^9 / (989 \times 10^{12} \times 0.13) \approx 33\%$. A practical ceiling of 55–65 percent applies even in highly optimized implementations; the gap represents inescapable memory stalls ($\text{BW}$ bottleneck), AllReduce overhead $(L_{\text{lat}})$, and pipeline bubbles.
 2.  **Distinction (durable)**: Unlike hardware utilization (the fraction of clock cycles during which the GPU reports being "busy"), MFU counts only cycles spent on useful forward- or backward-pass arithmetic—not recomputed activations, padding computation, or gradient buffer copies that consume cycles but do not advance model training.
 3.  **Common pitfall**: A frequent misconception is that high hardware utilization implies high MFU. Engineers optimizing for GPU utilization metrics can find the GPU reports 95 percent busy while MFU is below 20 percent, because cycles spent on gradient recomputation, speculative computation, or excessive kernel launches are visible to utilization counters but not to MFU.
 
@@ -1204,7 +1256,7 @@ This is the thermodynamic limit (Principle \ref{pri-thermodynamic-limit}) in act
 
 ***Thermal Design Power (TDP)***\index{Thermal Design Power!definition} is the maximum sustained thermal load in watts that a chip's cooling system must continuously remove for the processor to operate at its rated clock frequency—defining both the cooling infrastructure requirement and the performance ceiling for the accelerator.
 
-1.  **Significance (quantitative)**: The H100 SXM5 operates at 700 W TDP. When a liquid cooling system can only sustain 500 W of heat removal (inadequate cooling), the GPU firmware reduces clock frequency via thermal throttling—dropping $R_{\text{peak}}$ from 312 to roughly 220 TFLOPS, a 28 percent reduction in training throughput that propagates directly into longer wall-clock training time and higher cost per model.
+1.  **Significance (quantitative)**: The H100 SXM5 operates at 700 W TDP. When a liquid cooling system can only sustain 500 W of heat removal (inadequate cooling), the GPU firmware reduces clock frequency via thermal throttling—dropping $R_{\text{peak}}$ from 989 to roughly 712 TFLOPS FP16, a 28 percent reduction in training throughput that propagates directly into longer wall-clock training time and higher cost per model.
 2.  **Distinction (durable)**: Unlike peak power consumption (the instantaneous maximum during a single-instruction burst), TDP specifies the steady-state thermal budget—the long-term average that determines whether training can run continuously at rated performance or must throttle.
 3.  **Common pitfall**: A frequent misconception is that TDP is a power limit for the software. TDP is a cooling requirement: the processor exceeds its rated speed only if the cooling system removes heat at least as fast as the chip generates it; insufficient cooling causes hardware throttling silently—no error is raised, training simply slows down and MFU drops without obvious cause.
 
@@ -2459,11 +2511,62 @@ We can derive the training time for our `{python} InfraSetup.frontier_params_b`B
 
 :::
 
+```{python}
+#| label: wsc-aggregate-throughput
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ WSC AGGREGATE THROUGHPUT (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: WSC callout in @sec-compute-fleet-monitoring — aggregate FP16/FP8
+# │          peak throughput for a 10,000-H100 cluster.
+# │
+# │ Goal: Compute aggregate ExaFLOP/s from canonical H100 per-GPU constants.
+# │ Show: ~9.89 EFLOP/s FP16; ~19.8 EFLOP/s FP8 at N = 10,000 GPUs.
+# │ How: N × H100 FP16/FP8 tensor-core throughput, expressed in EFLOP/s.
+# │
+# │ Imports: mlsysim.core.constants (H100_FLOPS_FP16_TENSOR,
+# │                                  H100_FLOPS_FP8_TENSOR,
+# │                                  TFLOPs, second)
+# │ Exports: wsc_fp16_eflops_str, wsc_fp8_eflops_str, wsc_inject_tbs_str,
+# │          wsc_oversub_tbs_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import (
+    H100_FLOPS_FP16_TENSOR, H100_FLOPS_FP8_TENSOR, TFLOPs, second,
+)
+from mlsysim.fmt import fmt, check
+
+class WscThroughput:
+    """Aggregate FP16/FP8 throughput + injection bandwidth for a 10,000-H100 WSC."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    n_gpus = 10_000
+    per_gpu_inject_gbs = 50            # InfiniBand NDR 400 Gbps = 50 GB/s
+    oversub_factor = 4                 # 4:1 fabric oversubscription scenario
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    h100_fp16_tflops = H100_FLOPS_FP16_TENSOR.m_as(TFLOPs / second)
+    h100_fp8_tflops = H100_FLOPS_FP8_TENSOR.m_as(TFLOPs / second)
+    wsc_fp16_eflops = n_gpus * h100_fp16_tflops / 1e6     # TFLOPS → EFLOPS
+    wsc_fp8_eflops = n_gpus * h100_fp8_tflops / 1e6
+    wsc_inject_tbs = n_gpus * per_gpu_inject_gbs / 1000   # GB/s → TB/s
+    wsc_oversub_tbs = wsc_inject_tbs / oversub_factor
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(9 < wsc_fp16_eflops < 11, "WSC FP16 EFLOPS should be ~9.89")
+    check(wsc_fp8_eflops > wsc_fp16_eflops, "FP8 throughput must exceed FP16")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    wsc_fp16_eflops_str = fmt(wsc_fp16_eflops, precision=2, commas=False)
+    wsc_fp8_eflops_str = fmt(wsc_fp8_eflops, precision=1, commas=False)
+    wsc_inject_tbs_str = fmt(wsc_inject_tbs, precision=0, commas=False)
+    wsc_oversub_tbs_str = fmt(wsc_oversub_tbs, precision=0, commas=False)
+```
+
 ::: {.callout-definition title="Warehouse-scale computer (WSC)"}
 
 ***Warehouse-Scale Computer (WSC)**\index{WSC!data center scale}*\index{Warehouse-Scale Computer!definition} is a building-scale computing system in which thousands of servers are operated as a single coherent machine—with the network fabric serving as the system bus, distributed storage as the disk subsystem, and a cluster orchestrator as the operating system—enabling training workloads that would be physically impossible on any single machine.
 
-1.  **Significance (quantitative)**: A WSC of 10,000 H100 GPUs delivers approximately 3.12 ExaFLOP/s BF16 peak—enabling frontier model training at scales impossible on a single node. However, the system is only as fast as its bisection bandwidth: non-blocking InfiniBand at 50 GB/s per GPU provides 250 TB/s aggregate injection bandwidth; if the fabric is 4:1 oversubscribed, effective bisection bandwidth drops to 62.5 TB/s, potentially bottlenecking AllReduce and dropping training throughput by 30–60 percent.
+1.  **Significance (quantitative)**: A WSC of `{python} WscThroughput.n_gpus` H100 GPUs delivers approximately `{python} WscThroughput.wsc_fp16_eflops_str` ExaFLOP/s FP16 peak (and ~`{python} WscThroughput.wsc_fp8_eflops_str` EFLOP/s at FP8)—enabling frontier model training at scales impossible on a single node. However, the system is only as fast as its bisection bandwidth: non-blocking InfiniBand at 50 GB/s per GPU provides `{python} WscThroughput.wsc_inject_tbs_str` TB/s aggregate injection bandwidth; if the fabric is 4:1 oversubscribed, effective bisection bandwidth drops to `{python} WscThroughput.wsc_oversub_tbs_str` TB/s, potentially bottlenecking AllReduce and dropping training throughput by 30–60 percent.
 2.  **Distinction (durable)**: Unlike a general-purpose compute cluster (which runs many independent jobs on separate nodes with no requirement for tight coupling), a WSC training cluster operates as a single synchronous instrument—every node must participate in every AllReduce, making the failure or slowdown of a single node a cluster-wide performance event.
 3.  **Common pitfall**: A frequent misconception is that WSC design is primarily software engineering or IT operations. WSC design is building-level computer architecture: the physical layout (rack placement to minimize inter-rack hops), power delivery chain (PUE targets, liquid cooling manifolds), and network topology must be co-designed as a unified system—a mistake at any layer propagates through all layers.
 
@@ -2489,7 +2592,7 @@ The fraction of time spent on communication (as opposed to computation) is the s
 
 @sec-network-fabrics examines the network engineering in detail; here we focus on how the physical topology of the pod determines what communication patterns are efficient.
 
-The second principle is that **failure is routine, not exceptional**. A cluster of 10,000 GPUs, each with a mean time between failures (MTBF) of approximately 10,000 hours, will experience a GPU failure roughly once per hour on average.
+The second principle is that **failure is routine, not exceptional**. A cluster of 10,000 GPUs, each with a mean time between failures (MTBF) of approximately 50,000 hours (the canonical `GPU_MTTF_HOURS` figure used in @sec-fault-tolerance), will experience a GPU failure roughly once every five hours on average.
 
 \index{MTBF}
 
@@ -2685,7 +2788,7 @@ Fleet operators have learned, often through costly experience, that proactive ma
 
 In multi-tenant clusters where multiple training jobs share the same physical infrastructure, the **noisy neighbor** problem introduces a performance hazard that is invisible to individual job metrics. While containerization strictly limits CPU and memory usage, the network fabric is often a shared resource susceptible to interference. If Job A initiates a massive AllReduce operation across the spine switches just as Job B attempts to fetch training data from networked storage, the resulting micro-bursts of packet contention can throttle Job B's throughput by 30--40 percent. This interference is particularly pernicious in RDMA-enabled clusters where traffic bypasses the host CPU, rendering standard OS-level packet scheduling ineffective. Modern orchestration mitigates this via **static rail alignment**\index{Static Rail Alignment} -- physically dedicating specific InfiniBand subnets to specific jobs -- or by deploying congestion notification protocols that throttle aggressive flows at the switch hardware level. For organizations running our `{python} InfraSetup.frontier_params_b`B model training alongside smaller research experiments, the safest approach is to physically partition the cluster into isolated "islands" with dedicated network fabrics, accepting the utilization penalty of fragmentation in exchange for performance predictability.
 
-The reliability challenge is formalized by the **checkpoint-compute trade-off**\index{Checkpoint-Compute Trade-Off}, which balances the time lost to saving state against the time lost to recomputing work after a failure. The **Young/Daly formula** defines the optimal checkpoint interval $\tau_{\text{opt}}$ as $\sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}}$, where $T_{\text{write}}$ is the time to write a checkpoint and $\text{MTBF}$ is the Mean Time Between Failures. For our `{python} InfraSetup.frontier_params_b`B model, the full training state -- weights, optimizer moments, and gradients -- approaches 2 TB. Even with a high-performance parallel filesystem capable of 100 GB/s write throughput, committing this state to persistent storage takes approximately $T_{\text{write}} \approx 20$ seconds. In a cluster of 10,000 GPUs where the system-wide MTBF is approximately 1 hour, the formula yields an optimal checkpoint interval of roughly 8.5 minutes. This creates a relentless cadence: every 8.5 minutes, the entire cluster pauses for 20 seconds to serialize its state to disk, introducing a sustained training overhead of approximately 4 percent. If the interval is too long, the cost of recomputing lost work after a failure exceeds the savings from fewer checkpoints; if too short, the I/O overhead dominates the training budget. @sec-fault-tolerance-young-daly examines checkpointing strategies, including asynchronous checkpointing and incremental state saving, that reduce this overhead.
+The reliability challenge is formalized by the **checkpoint-compute trade-off**\index{Checkpoint-Compute Trade-Off}, which balances the time lost to saving state against the time lost to recomputing work after a failure. The **Young/Daly formula** defines the optimal checkpoint interval $\tau_{\text{opt}}$ as $\sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}}$, where $T_{\text{write}}$ is the time to write a checkpoint and $\text{MTBF}$ is the Mean Time Between Failures. For our `{python} InfraSetup.frontier_params_b`B model, the full training state -- weights, optimizer moments, and gradients -- approaches 2 TB. Even with a high-performance parallel filesystem capable of 100 GB/s write throughput, committing this state to persistent storage takes approximately $T_{\text{write}} \approx 20$ seconds. In a cluster of 10,000 GPUs where the system-wide MTBF is approximately 5 hours, the formula yields an optimal checkpoint interval of roughly 19 minutes. This creates a steady cadence: every 19 minutes, the entire cluster pauses for 20 seconds to serialize its state to disk, introducing a sustained training overhead of approximately 1.8 percent. If the interval is too long, the cost of recomputing lost work after a failure exceeds the savings from fewer checkpoints; if too short, the I/O overhead dominates the training budget. @sec-fault-tolerance-young-daly examines checkpointing strategies, including asynchronous checkpointing and incremental state saving, that reduce this overhead.
 
 The choice of network topology is a direct reflection of the dominant communication patterns in the distributed training workload. A fat-tree topology offers full bisection bandwidth and non-blocking any-to-any communication, making it theoretically ideal for algorithms like AllReduce and AllToAll. However, the cost of the upper-tier spine switches makes it expensive at scale. A torus or mesh topology provides excellent nearest-neighbor bandwidth at a fraction of the switch cost but suffers severe congestion penalties for global traffic patterns. A rail-optimized topology physically wires the network so that each GPU rank connects to a dedicated leaf switch, maximizing the efficiency of structured AllReduce within parallelism groups. For our `{python} InfraSetup.frontier_params_b`B model configured with TP-8, PP-4, and DP-32, the rail-optimized topology is the natural match: the bandwidth-heavy tensor parallelism traffic is entirely contained within the NVLink domain of a single node, the pipeline parallelism traffic flows between adjacent nodes requiring only moderate point-to-point bandwidth, and the data-parallel gradient reduction happens across the full fleet but with reduced volume (each DP group synchronizes only 1/32 of the total gradients). The rail-optimized design physically matches this communication structure, placing the nodes that communicate most frequently on the same switch.
 
@@ -2815,7 +2918,7 @@ For our `{python} InfraSetup.frontier_params_b`B model, a minimum viable trainin
 
 The most consequential infrastructure decision is whether to build an on-premises cluster or rent capacity from a cloud provider. This decision depends primarily on one variable: sustained utilization, as @fig-tco-build-vs-buy makes visible by plotting cumulative cost over time for both options at varying utilization rates.
 
-::: {#fig-tco-build-vs-buy fig-env="figure" fig-pos="htb" fig-cap="**TCO: Build vs. Buy**: Cumulative cost over 30 months for a 1,000-GPU H100 cluster (125 nodes at 8 GPUs/node) at 80 percent sustained utilization. On-premises (CapEx plus OpEx) breaks even against cloud on-demand at about month 22--26; this simplified per-node model gives a break-even point of roughly 43 percent sustained utilization, while full-cluster facility, network, and staffing assumptions can shift the threshold. Cloud grows linearly with no upfront cost." fig-alt="Cumulative cost vs. months plot. The cloud line rises linearly. The on-premises line starts with a large CapEx jump and has a shallower slope. The lines cross at a break-even point around month 22 to 26."}
+::: {#fig-tco-build-vs-buy fig-env="figure" fig-pos="htb" fig-cap="**TCO: Build vs. Buy**: Cumulative cost over 30 months at 80 percent sustained utilization. The figure plots an 8,000-GPU H100 reference cluster (1,000 nodes at 8 GPUs/node) using \\$4/GPU-hr cloud pricing, with the on-prem CapEx step and OpEx slope drawn explicitly. The break-even shape is what matters here, not the absolute scale; the surrounding analysis applies the same shape at 1,000-GPU and 8,000-GPU regimes. On-premises (CapEx plus OpEx) breaks even against cloud on-demand at about month 22--26 in this configuration; this simplified per-node model gives a break-even point of roughly 43 percent sustained utilization, while full-cluster facility, network, and staffing assumptions can shift the threshold. Cloud grows linearly with no upfront cost." fig-alt="Cumulative cost vs. months plot for an 8,000-GPU reference cluster. The cloud line rises linearly. The on-premises line starts with a large CapEx jump and has a shallower slope. The lines cross at a break-even point around month 22 to 26."}
 ![](images/svg/tco-build-vs-buy.svg)
 :::
 
@@ -2901,7 +3004,7 @@ For our `{python} InfraSetup.frontier_params_b`B model, the build-vs.-buy decisi
 
 The TCO analysis often understates the operational complexity of running an on-premises ML cluster. Unlike traditional server infrastructure, which can be managed with general-purpose IT skills, ML clusters require specialized expertise in several areas.
 
-Hardware maintenance for ML clusters involves diagnosing and replacing failed GPUs, NVLink cables, InfiniBand HCAs, and cooling components. A 10,000-GPU cluster experiencing one GPU failure per hour (as predicted by MTBF analysis) requires a hardware team that can diagnose, isolate, and replace the failed component within hours, not days. This requires maintaining an inventory of spare parts on site, including spare GPUs (\$20,000--30,000 each), NVLink cables, InfiniBand switches, and cooling components.
+Hardware maintenance for ML clusters involves diagnosing and replacing failed GPUs, NVLink cables, InfiniBand HCAs, and cooling components. A 10,000-GPU cluster experiencing one GPU failure every five hours (as predicted by MTBF analysis at the canonical 50,000-hour per-GPU MTBF) requires a hardware team that can diagnose, isolate, and replace the failed component within hours, not days. This requires maintaining an inventory of spare parts on site, including spare GPUs (\$20,000--30,000 each), NVLink cables, InfiniBand switches, and cooling components.
 
 Software stack management encompasses the CUDA toolkit, GPU drivers, InfiniBand drivers, container runtime (typically Docker or Enroot), job scheduler (Slurm, Kubernetes, or a custom scheduler), monitoring and alerting systems, and the training frameworks themselves. These components interact in complex ways, and version incompatibilities between the GPU driver and the CUDA toolkit, for example, can silently degrade performance or cause intermittent failures. A typical large-scale training cluster employs 5--15 infrastructure engineers per 10,000 GPUs to manage these systems.
 
@@ -2983,12 +3086,12 @@ For our `{python} InfraSetup.frontier_params_b`B model, the depreciation calculu
 
 The trajectory of power efficiency across accelerator generations provides a quantitative framework for making cluster refresh decisions. Replacing an older cluster with a newer generation can pay for itself through electricity savings alone, particularly at scale.
 
-| **Generation**  | **TFLOPS (FP16)** | **TDP (W)** |                 **TFLOPS/W**                 | **Relative Efficiency** |
-|:----------------|------------------:|------------:|:--------------------------------------------:|:-----------------------:|
-| **V100 (2017)** |               125 |         300 | `{python} GpuEfficiencyScenario.v100_ef_str` |       1.0$\times$       |
-| **A100 (2020)** |               312 |         400 | `{python} GpuEfficiencyScenario.a100_ef_str` |       1.9$\times$       |
-| **H100 (2022)** |              1979 |         700 | `{python} GpuEfficiencyScenario.h100_ef_str` |       6.8$\times$       |
-| **B200 (2024)** |              4500 |        1000 | `{python} GpuEfficiencyScenario.b200_ef_str` |       10.8$\times$      |
+| **Generation**  | **Peak TFLOPS (best precision)** | **TDP (W)** |                 **TFLOPS/W**                 | **Relative Efficiency** |
+|:----------------|---------------------------------:|------------:|:--------------------------------------------:|:-----------------------:|
+| **V100 (2017)** |                       125 (FP16) |         300 | `{python} GpuEfficiencyScenario.v100_ef_str` |       1.0$\times$       |
+| **A100 (2020)** |                       312 (FP16) |         400 | `{python} GpuEfficiencyScenario.a100_ef_str` |       1.9$\times$       |
+| **H100 (2022)** |                       1979 (FP8) |         700 | `{python} GpuEfficiencyScenario.h100_ef_str` |       6.8$\times$       |
+| **B200 (2024)** |                       4500 (FP8) |        1000 | `{python} GpuEfficiencyScenario.b200_ef_str` |       10.8$\times$      |
 
 : **Power Efficiency Across GPU Generations**: Each generation delivers substantially more computation per watt, meaning that for a fixed power budget, newer hardware provides multiplicatively more throughput. A facility that draws 10 MW can train models roughly 10$\times$ faster with B200s than with V100s, without any increase in electricity cost. {#tbl-power-efficiency}
 

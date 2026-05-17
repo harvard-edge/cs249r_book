@@ -550,7 +550,7 @@ Line/.style={line width=1.0pt,black!50,text=black},
 
 Despite their apparent simplicity, rule-based limitations surface quickly with complex real-world tasks. Recognizing human activities illustrates the challenge. Classifying movement below 6 km/h as walking seems straightforward until real-world complexity intrudes. Speed variations, transitions between activities, and boundary cases each demand additional rules, creating unwieldy decision trees (@fig-activity-rules). Computer vision tasks compound these difficulties. Detecting cats requires rules about ears, whiskers, and body shapes while accounting for viewing angles, lighting, occlusions, and natural variations. Early systems achieved success only in controlled environments with well-defined constraints.
 
-::: {#fig-activity-rules fig-env="figure" fig-pos="htb" fig-cap="**Activity Classification Decision Tree**: A rule-based decision tree classifies human activity by branching on speed thresholds, with values below 6 km/h mapped to walking, 6 to 20 km/h to running, and above 20 km/h to biking. Real-world edge cases and transitions between activities demand increasingly complex branching logic." fig-alt="Decision tree flowchart for activity classification. Branches split on conditions like speed less than 4 mph leading to walking, 4 – 15 mph to running, greater than 15 mph to biking. Additional branches handle edge cases and transitions."}
+::: {#fig-activity-rules fig-env="figure" fig-pos="htb" fig-cap="**Activity Classification Decision Tree**: A rule-based decision tree classifies human activity by branching on speed thresholds, with values below 6 km/h mapped to walking, 6 to 20 km/h to running, and above 20 km/h to biking. Real-world edge cases and transitions between activities demand increasingly complex branching logic." fig-alt="Decision tree flowchart for activity classification. Branches split on speed thresholds: below 6 km/h leads to walking, 6 to 20 km/h to running, greater than 20 km/h to biking. Additional branches handle edge cases and transitions."}
 
 ![](images/png/activities.png)
 
@@ -3059,7 +3059,9 @@ class MNISTMemory:
 
     total_mops = total_flops/MILLION
     kops_per_image = (total_flops/batch_size) / THOUSAND
-    arith_intensity = total_flops / (inference_total_kb * KIB_TO_BYTES) # FLOPs/Byte (Model Size)
+    # Per-image arithmetic intensity: divide FLOPs by batch_size so numerator and
+    # denominator are both per-image (inference_total_kb is per-image memory).
+    arith_intensity = (total_flops / batch_size) / (inference_total_kb * KIB_TO_BYTES) # FLOPs/Byte (per-image)
 
     # ┌── 3. INVARIANTS ────────────────────────────────────────────────────────
     check(training_total_kb >= inference_total_kb * 2, "Training memory must be >2x Inference.")
@@ -3266,6 +3268,9 @@ class MnistTrainingMemoryCalc:
 | **Total**           |                                                  |                               | **`{python} MNISTMemory.total_params_str`** |
 
 :::
+
+: **MNIST Parameter Memory by Layer**: Weight and bias counts for the 784-128-64-10 network. Layer 1 (Input -> Hidden1) dominates the parameter budget because it multiplies the 784-dimensional input by 128 hidden units; deeper layers shrink rapidly as the representation compresses toward the 10-class output. {#tbl-nn-computation-mnist-params}
+
 :::
 
 ::: {.content-visible when-format="pdf"}
@@ -3300,6 +3305,9 @@ class MnistTrainingMemoryCalc:
 | **Total**   |                      | `{python} MnistTrainingMemoryCalc.total_act_count_str` | **`{python} MnistTrainingMemoryCalc.total_act_kib_str` KB** |
 
 :::
+
+: **MNIST Activation Memory at Batch Size 32**: Per-layer activation tensor shapes, value counts, and 32-bit float memory cost during a single forward pass. Input activations dominate at 98 KB; the total activation footprint exceeds the parameter footprint, motivating the activation-checkpointing techniques covered in later training chapters. {#tbl-nn-computation-mnist-activations}
+
 :::
 
 ::: {.content-visible when-format="pdf"}
@@ -3698,6 +3706,8 @@ This composition reveals that forward propagation is, at its core, a chain of ma
 | **Matrix Mul $(N{\times}N)$** |        $2N^3$        |         $3N^2$         |   $\approx 2N/3$ (High)    |   **GPU/TPU**    |
 | **Element-wise (ReLU)**       |        $N^2$         |         $2N^2$         |        $0.5$ (Low)         |  **CPU/Vector**  |
 
+: **Arithmetic Intensity of Matrix Multiply vs. Element-Wise ReLU**: Dense $N{\times}N$ matrix multiplication performs $2N^3$ operations while moving only $3N^2$ bytes, yielding intensity that grows linearly with $N$ and saturates GPU/TPU compute. Element-wise activations stay at intensity 0.5 regardless of size, leaving accelerators starved for arithmetic and explaining why GEMM-heavy layers dominate modern architectures. {#tbl-nn-computation-arith-intensity-gap}
+
 :::
 
 Modern AI accelerators (GPUs) have massive compute arrays but limited memory bandwidth. They only achieve peak performance on **High Intensity** operations like Matrix Multiplication where data is reused many times. This is why "fully connected" and "convolutional" layers are preferred over complex, custom element-wise logic.
@@ -3855,6 +3865,8 @@ class MnistFlopsCalc:
 | **Layer 3** | MatMul         |  ($32{\times}64$)$\times$ ($64{\times}10$)   |  2$\times$ 32$\times$ $64{\times}10$ = `{python} MnistFlopsCalc.l3_mm_str`  |
 | **Layer 3** | Bias + Softmax |                $32{\times}10$                |             ~`{python} MnistFlopsCalc.l3_bias_str` (simplified)             |
 | **Total**   |                |                                              |               **~`{python} MNISTMemory.total_mops_str` MOps**               |
+
+: **MNIST Forward Pass Operation Count by Layer**: FLOP breakdown for a single forward pass through the 784-128-64-10 network at batch size 32. Layer 1's matrix multiply dominates because it multiplies the 784-dimensional input against the widest weight matrix; bias and activation operations contribute under one percent of the total. {#tbl-nn-computation-mnist-flops}
 
 :::
 
@@ -4684,7 +4696,7 @@ The complexity of this task becomes evident: a ZIP code recognition system must 
 
 \index{OCR!optical character recognition}
 
-::: {#fig-usps-digit-examples fig-env="figure" fig-pos="htb" fig-cap="**Handwritten Address Variability**: Real-world USPS mail samples, including handwritten city names (Pasadena, Burbank, Buffalo variants, TULSA, Galveston, Allentown) and five-digit ZIP codes, exhibit significant variations in stroke width, slant, and character formation. These examples demonstrate the need for effective feature extraction and model generalization to achieve high accuracy in optical character recognition (OCR) tasks." fig-alt="Grid of USPS mail samples: handwritten city names (Pasadena, Burbank, Buffalo variants, Tulsa, Galveston, Allentown) and five-digit ZIP codes (14240, 85202, 50350, 47304, and others), showing variation in stroke width, slant, and character formation."}
+::: {#fig-usps-digit-examples fig-env="figure" fig-pos="htb" fig-cap="**Handwritten Address Variability**: Real-world USPS mail samples, including handwritten city names (Pasadena, BurBank, Buffalo variants, TULSA, Galveston, Allentown) and five-digit ZIP codes, exhibit significant variations in stroke width, slant, and character formation. These examples demonstrate the need for effective feature extraction and model generalization to achieve high accuracy in optical character recognition (OCR) tasks." fig-alt="Grid of USPS mail samples: handwritten city names (Pasadena, BurBank, Buffalo variants, Tulsa, Galveston, Allentown) and five-digit ZIP codes (14240, 85202, 50350, 47304, and others), showing variation in stroke width, slant, and character formation."}
 
 ![](images/jpg/usps_examples_new.jpg){width="75%"}
 

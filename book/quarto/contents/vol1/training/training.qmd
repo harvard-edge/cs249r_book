@@ -306,6 +306,8 @@ GPT-2 (1.5B) serves as our primary case study for **large-scale training** becau
 | **Dataset**      | OpenWebText (`{python} GPT2LighthouseSpecs.gpt2_dataset_size_gb_str` GB) | I/O throughput must match high-speed accelerator compute.                                                                                                            |
 | **Compute**      |     ~ `{python} TrainingScenarios.gpt2_total_flops_str` FLOPs total      | Training takes days/weeks; demands parallelization.                                                                                                                  |
 
+: **GPT-2 (1.5B) lighthouse model specifications**: Parameter count, architecture depth, dataset size, and total training compute mapped to their systems implications. Each row pairs a model property with the engineering constraint it creates — memory footprint for weights, activation pressure from pipeline depth, I/O throughput requirements, and parallelization demand. {#tbl-training-gpt2-lighthouse-specs}
+
 :::
 
 **Key systems challenge**:
@@ -1693,7 +1695,7 @@ class AcceleratorSpecs:
     a100_tflops_fp16_str = fmt(a100_tflops_fp16, precision=0, commas=False)
     a100_tflops_fp32_str = fmt(a100_tflops_fp32, precision=1, commas=False)
     a100_bw_gbs_str      = fmt(a100_bw_gbs, precision=0, commas=True)
-    a100_bw_tbs_str      = fmt(a100_bw_tbs, precision=1, commas=False)
+    a100_bw_tbs_str      = fmt(a100_bw_tbs, precision=2, commas=False)
     a100_ridge_str        = fmt(a100_ridge, precision=0, commas=False)
     a100_tdp_str          = fmt(a100_tdp, precision=0, commas=False)
 
@@ -2714,6 +2716,8 @@ A common mistake in ML systems is treating batch size as a continuous variable. 
 | `{python} TrainingDimensions.wave_batch_64_str` |        2         |                      100 percent                       |                       1.0$\times$                       |
 | `{python} TrainingDimensions.wave_batch_65_str` |        3         | `{python} TrainingDimensions.wave_util_65_str` percent | ~`{python} TrainingDimensions.wave_time_65_str`$\times$ |
 
+: **Wave quantization tax on NVIDIA GPUs**: Batch sizes that straddle the 32-thread warp boundary launch additional partially-filled warps, dropping utilization sharply while leaving step time nearly unchanged. A batch of 33 launches the same two warps as a batch of 64 but uses only half the hardware; the next quantum boundary repeats at 65. This is why batch sizes should be multiples of 32 or 64, not values that look "close enough." {#tbl-training-wave-quantization}
+
 :::
 
 **Engineering Rule**: Always choose batch sizes and hidden dimensions that are powers of two or multiples of 8/32/64 to avoid this "quantization tax." A batch of 32 is often faster than 33, and a batch of 64 is often just as fast as 33.
@@ -2956,7 +2960,7 @@ The optimizer memory hierarchy established in @tbl-optimizer-properties manifest
 
 At billion-parameter scale, optimizer state dominates the memory budget. As quantified in the GPT-2 worked example (@sec-model-training-optimization-algorithm-system-implications-f9f2), a `{python} TrainingModels.gpt2_params_b_str`B parameter model requires `{python} TrainingModels.gpt2_adam_gb_str` GB for Adam optimizer state alone in FP32, in addition to parameters and gradients, before accounting for activations. This challenge has motivated memory-efficient optimizer variants. Compare the memory bars in @fig-galore-llm-memory-breakdown to see how GaLoRE attacks this constraint: by computing updates in a compressed space [@zhao2024galorememoryefficientllmtraining], the technique reduces the memory footprint dominated by optimizer states to a fraction of its original size, enabling training of larger models on fixed hardware.
 
-::: {#fig-galore-llm-memory-breakdown fig-env="figure" fig-pos="htb" fig-cap="**Memory Footprint Breakdown**: Memory usage of LLaMA-7B across four optimizer configurations, decomposed into weights, activations, optimizer state, weight gradients, and other components. The dashed red line marks the RTX 4090 24 GB memory limit, illustrating how standard Adam exceeds single-GPU capacity while GaLoRE compression reduces optimizer state enough to fit within this budget." fig-alt="Stacked horizontal bar chart comparing memory usage across four optimizers for LLaMA-7B. Shows components: others, weight gradient, optimization, activation, and weight. Dashed red line marks RTX 4090 memory limit at 24 GB."}
+::: {#fig-galore-llm-memory-breakdown fig-env="figure" fig-pos="htb" fig-cap="**Memory Footprint Breakdown**: Memory usage of LLaMA-7B across four memory-efficient optimizer configurations (BF16 Adam, Adafactor, 8-bit Adam, and 8-bit GaLoRE), decomposed into weights, activations, optimizer state, weight gradients, and other components. The dashed red line marks the RTX 4090 24 GB memory limit. Standard FP32 Adam (omitted from the bars; it requires well above 70 GB for this model) does not fit on a single 24 GB GPU; the bars compare the techniques that bring training back within budget, with 8-bit GaLoRE shrinking optimizer state most aggressively." fig-alt="Stacked horizontal bar chart comparing memory usage across four memory-efficient optimizer configurations for LLaMA-7B. Components: others, weight gradient, optimizer state, activation, and weight. Dashed red line marks RTX 4090 memory limit at 24 GB."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
@@ -3023,7 +3027,7 @@ The batch size--utilization relationship established in @sec-model-training-mini
 
 Doubling the batch size halves the number of updates per epoch. If the learning rate remains constant, the model effectively travels "half the distance" in weight space, causing underfitting. @fig-linear-scaling-failure reveals this failure, which contrasts the **generalization gap** against the correction from the **linear scaling rule** ($\text{LR}_{\text{new}} = k \times \text{LR}_{\text{base}}$); the loss curves are normalized for intuition.
 
-::: {#fig-linear-scaling-failure fig-env="figure" fig-pos="htb" fig-cap="**Linear Scaling Failure**: Training loss vs. epochs (arbitrary units). Curve A (blue) represents a standard baseline batch size. Curve B (gray) shows what happens when batch size is increased 8× without tuning: convergence slows dramatically because weight updates are too infrequent per epoch. Curve C (green) restores convergence by scaling the learning rate linearly (8× LR), allowing the model to take larger steps to compensate for fewer updates." fig-alt="Line chart of loss vs. steps. Blue line (baseline) converges fast. Gray line (large batch naive) converges slow. Green line (scaled LR) matches the baseline."}
+::: {#fig-linear-scaling-failure fig-env="figure" fig-pos="htb" fig-cap="**Linear Scaling Failure**: Training loss vs. epochs (arbitrary units). The blue curve (Batch 32) is the standard baseline batch size. The gray curve (Batch 256, fixed LR) shows what happens when batch size is increased 8$\times$ without tuning: convergence slows dramatically because weight updates are too infrequent per epoch. The green curve (Batch 256, scaled LR) restores convergence by scaling the learning rate linearly (8$\times$ LR), allowing the model to take larger steps to compensate for fewer updates." fig-alt="Line chart of loss vs. epochs. Blue line (Batch 32 baseline) converges fast. Gray line (Batch 256, fixed LR) converges slowly. Green line (Batch 256, scaled LR) matches the baseline."}
 
 ```{python}
 #| echo: false
@@ -3112,7 +3116,7 @@ from mlsysim.core.constants import (
     BILLION, TRILLION, MILLION, THOUSAND,
     TFLOPs, TRILLION, SEC_PER_DAY, SEC_PER_YEAR_LEAP, HOURS_PER_DAY
 )
-from mlsysim.fmt import fmt_percent, fmt, check
+from mlsysim.fmt import fmt_percent, fmt, md_math, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class LlamaTraining:
@@ -3189,6 +3193,16 @@ class LlamaTraining:
     ub_time_s_mantissa_str = time_mantissa
     ub_time_s_exp_str = f"{time_exp}"
 
+    # Pre-composed math expressions (avoids Pandoc \(...\) + {python} parsing failure)
+    ub_compute_math = md_math(
+        f"6 \\times {ub_params_b_str} \\times 10^9 \\times {ub_tokens_t_str} \\times 10^{{12}}"
+        f" \\approx {flops_mantissa} \\times 10^{{{flops_exp}}}"
+    )
+    ub_time_math = md_math(
+        f"{flops_mantissa} \\times 10^{{{flops_exp}}} / ({ub_effective_tflops_str} \\times 10^{{12}})"
+        f" \\approx {time_mantissa} \\times 10^{{{time_exp}}}"
+    )
+
 # Note: Use LlamaTraining.ub_rental_str directly.
 ```
 
@@ -3199,9 +3213,9 @@ class LlamaTraining:
 **Math**:
 
 1.  **Workload**: Llama-2-70B (`{python} LlamaTraining.ub_params_b_str` B params, `{python} LlamaTraining.ub_tokens_t_str` T tokens).
-2.  **Compute required**: \(6 \times `{python} LlamaTraining.ub_params_b_str` \times 10^9 \times `{python} LlamaTraining.ub_tokens_t_str` \times 10^{12} \approx `{python} LlamaTraining.ub_flops_mantissa_str` \times 10^{`{python} LlamaTraining.ub_flops_exp_str`}\) FLOPs.
+2.  **Compute required**: `{python} LlamaTraining.ub_compute_math` FLOPs.
 3.  **Hardware**: NVIDIA H100 (Peak: `{python} LlamaTraining.ub_peak_tflops_str` TFLOPS FP16). Assumed Utilization: `{python} LlamaTraining.ub_utilization_pct_str` percent (`{python} LlamaTraining.ub_effective_tflops_str` TFLOPS).
-4.  **Time**: \(`{python} LlamaTraining.ub_flops_mantissa_str` \times 10^{`{python} LlamaTraining.ub_flops_exp_str`} / (`{python} LlamaTraining.ub_effective_tflops_str` \times 10^{12}) \approx `{python} LlamaTraining.ub_time_s_mantissa_str` \times 10^{`{python} LlamaTraining.ub_time_s_exp_str`}\) seconds ≈ **`{python} LlamaTraining.ub_years_str` years** (on one GPU).
+4.  **Time**: `{python} LlamaTraining.ub_time_math` seconds ≈ **`{python} LlamaTraining.ub_years_str` years** (on one GPU).
 5.  **Cluster**: On `{python} LlamaTraining.ub_num_gpus_str` GPUs → `{python} LlamaTraining.ub_cluster_days_str` days.
 
 **The economics**:
