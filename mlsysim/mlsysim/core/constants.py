@@ -10,6 +10,14 @@
 from .units import *  # noqa: F401,F403 — re-export full unit registry
 
 # --- Hardware Specifications (The Silicon Contract) ---
+#
+# Capacity constants below use binary GiB per the physical HBM/DRAM stack spec.
+# The field's branded vocabulary (e.g. "V100 32 GB HBM2", "A100 80 GB HBM2e",
+# "ESP32-S3 512 KB RAM") rounds these to decimal-labeled names; book prose
+# displays the branded form in table cells and chip-identification labels per
+# the §7 branded-label carve-out (see .claude/rules/book-prose.md). All
+# *calculations* (memory budgets, roofline math, throughput estimates) use the
+# precise values defined here.
 
 # NVIDIA V100 (Volta, 2017) — Source: NVIDIA V100 Data Sheet
 V100_FLOPS_FP16_TENSOR = 125 * TFLOPs / second
