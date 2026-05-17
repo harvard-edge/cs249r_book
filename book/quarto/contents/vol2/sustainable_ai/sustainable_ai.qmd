@@ -121,7 +121,7 @@ The numbers become visceral when translated into familiar physical quantities. T
 # │
 # │ Goal: Quantify carbon emissions for GPT-3 training and compare to flights.
 # │ Show: ~552,000 kg CO2 (~552 flights) at US avg grid intensity.
-# │ How: Energy * Grid_Intensity; Flight_equiv = Emissions / 1000.
+# │ How: Energy * Grid_Intensity; Flight_equiv = Emissions / kg_per_flight.
 # │
 # │ Imports: mlsysim.book (fmt, check)
 # │ Exports: training_mwh_gpt3, grid_ci_us_kg, total_emissions_gpt3_kg_str,
@@ -139,7 +139,7 @@ class CarbonCostGPT3:
     kg_per_flight = 1000 # NY to London round trip
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    energy_kwh = energy_mwh * 1000
+    energy_kwh = energy_mwh * THOUSAND  # MWh → kWh (mlsysim does not export kilowatt_hour)
     total_emissions_kg = energy_kwh * grid_ci_us_kg
     flight_ratio = total_emissions_kg/kg_per_flight
 
@@ -204,9 +204,10 @@ class CarbonFrontier:
     intensity_quebec = 20 # gCO2/kWh (Hydro)
     intensity_poland = 800 # gCO2/kWh (Coal)
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    energy_kwh = energy_mwh * 1000
-    quebec_tonnes = (energy_kwh * intensity_quebec) / 1e6
-    poland_tonnes = (energy_kwh * intensity_poland) / 1e6
+    energy_kwh = energy_mwh * THOUSAND  # MWh → kWh
+    # g CO2 → tonnes (mlsysim does not export mass pint units yet; use MILLION = g/tonne).
+    quebec_tonnes = (energy_kwh * intensity_quebec) / MILLION
+    poland_tonnes = (energy_kwh * intensity_poland) / MILLION
     ratio = intensity_poland/intensity_quebec
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(ratio == 40, f"Ratio {ratio} unexpected")
@@ -259,7 +260,7 @@ class AutoPlacement:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     best_region = res.best_region
-    total_tco_str = fmt(res.objective_value / 1e6, precision=2)
+    total_tco_str = fmt(res.objective_value / MILLION, precision=2)  # USD → millions of USD (display)
     carbon_tax_str = f"{carbon_tax:.0f}"
     energy_mwh_str = fmt(energy_mwh, precision=0)
 
@@ -1115,6 +1116,8 @@ Intel's Running Average Power Limit (RAPL) interface exposes power measurements 
 import subprocess
 import time
 
+from mlsysim.core.constants import ureg
+
 
 def read_rapl_energy():
     """Read current RAPL energy counters.
@@ -1143,7 +1146,7 @@ for epoch in range(num_epochs):
 end_energy = read_rapl_energy()
 end_time = time.time()
 
-energy_joules = (end_energy - start_energy) / 1e6
+energy_joules = ((end_energy - start_energy) * ureg.microjoule).m_as(ureg.joule)
 avg_power_watts = energy_joules / (end_time - start_time)
 print(
     f"Training energy: {energy_joules:.2f} J, Average power: {avg_power_watts:.2f} W"
@@ -1165,6 +1168,8 @@ import pynvml
 import torch
 import time
 
+from mlsysim.core.constants import milliwatt, watt
+
 pynvml.nvmlInit()
 handle = pynvml.nvmlDeviceGetHandleByIndex(0)  # First GPU
 
@@ -1180,9 +1185,9 @@ def measure_inference_power(model, input_data, num_iterations=100):
             _ = model(input_data)
             torch.cuda.synchronize()
 
-            # Sample power (milliwatts)
+            # Sample power and convert mW → W via pint.
             power_mw = pynvml.nvmlDeviceGetPowerUsage(handle)
-            power_readings.append(power_mw / 1000)  # Convert to watts
+            power_readings.append((power_mw * milliwatt).m_as(watt))
 
     avg_power = sum(power_readings) / len(power_readings)
     return avg_power
@@ -1282,7 +1287,7 @@ where $E_{\text{total}}$ is the **facility-level** energy from @eq-total-energy 
 # │ Show: ~8,602 kWh GPU energy → ~10,322 kWh facility (PUE 1.2) → ~4,428 kg CO2.
 # │ How: GPU energy = n_gpus * A100_TDP * hours; facility = GPU * PUE.
 # │
-# │ Imports: mlsysim.core.constants (A100_TDP, watt)
+# │ Imports: mlsysim.core.constants (A100_TDP, watt, hour, ureg, THOUSAND — module-wide)
 # │ Exports: training_hours_str, gpu_energy_wh_str, gpu_energy_kwh_str,
 # │          facility_energy_kwh_str, emissions_kg_str, emissions_tons_str,
 # │          quebec_emissions_kg_str, emissions_ratio_str, a100_tdp_w
@@ -1303,11 +1308,12 @@ class TrainingEmissions:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     gpu_energy_wh = n_gpus * gpu_power_w * training_hours
-    gpu_energy_kwh = gpu_energy_wh / 1000
+    gpu_energy_kwh = (gpu_energy_wh * watt * hour).m_as(ureg.kilowatt_hour)
     facility_energy_kwh = gpu_energy_kwh * pue
-    emissions_kg = facility_energy_kwh * grid_ci_g_per_kwh / 1000
-    emissions_tons = emissions_kg / 1000
-    quebec_emissions_kg = facility_energy_kwh * quebec_ci / 1000
+    # g CO2 → kg, then kg → metric tons. mlsysim does not export mass pint units yet.
+    emissions_kg = facility_energy_kwh * grid_ci_g_per_kwh / THOUSAND
+    emissions_tons = emissions_kg / THOUSAND
+    quebec_emissions_kg = facility_energy_kwh * quebec_ci / THOUSAND
     emissions_ratio = emissions_kg/quebec_emissions_kg
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
@@ -1470,10 +1476,10 @@ class EmbodiedCarbonAmort:
 # │ Show: ~0.7 kW H100 power consumption.
 # │ How: pulling H100_TDP from mlsysim.core.constants and converting to kW.
 # │
-# │ Imports: mlsysim.core.constants (H100_TDP, watt)
+# │ Imports: mlsysim.core.constants (H100_TDP, kilowatt)
 # │ Exports: h100_tdp_kw
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import H100_TDP, watt
+from mlsysim.core.constants import H100_TDP, kilowatt
 
 class H100KwScenario:
     """H100 operational footprint reference in kW."""
@@ -1482,7 +1488,7 @@ class H100KwScenario:
     h100_tdp = H100_TDP
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    h100_tdp_kw_val = h100_tdp.m_as(watt) / 1000
+    h100_tdp_kw_val = h100_tdp.m_as(kilowatt)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     from mlsysim.fmt import check
@@ -1556,6 +1562,9 @@ The US Energy Information Administration (EIA) publishes historical grid emissio
 ::: {#lst-carbon-calculation lst-cap="**Lifecycle Carbon Calculation**\index{Lifecycle Carbon Calculation}: Computing total carbon footprint including operational and embodied emissions."}
 
 ```{.python}
+from mlsysim.core.constants import THOUSAND, hour, ureg, watt
+
+
 def calculate_carbon_footprint(
     gpu_power_watts: float,
     num_gpus: int,
@@ -1568,10 +1577,12 @@ def calculate_carbon_footprint(
     """Calculate lifecycle carbon footprint for a training run."""
 
     # Operational emissions
-    energy_kwh = (gpu_power_watts * num_gpus * training_hours) / 1000
+    energy_wh = gpu_power_watts * num_gpus * training_hours
+    energy_kwh = (energy_wh * watt * hour).m_as(ureg.kilowatt_hour)
     facility_energy_kwh = energy_kwh * pue
+    # g CO2 → kg (mlsysim does not export mass pint units yet).
     operational_kg = (
-        facility_energy_kwh * grid_intensity_gco2_kwh / 1000
+        facility_energy_kwh * grid_intensity_gco2_kwh / THOUSAND
     )
 
     # Embodied emissions (amortized)

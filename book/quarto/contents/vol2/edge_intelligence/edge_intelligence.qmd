@@ -1000,6 +1000,7 @@ Personalizing a billion-parameter model on a smartwatch with 500 MB of total sys
 # │ Imports: mlsysim.book (check)
 # │ Exports: ls_full_mb_str, ls_adapter_kb_str, ls_savings_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import byte, KB, MB, MILLION
 from mlsysim.fmt import check
 
 class StorageWall:
@@ -1008,9 +1009,11 @@ class StorageWall:
     bytes_per_param = 4 # FP32 for training/fine-tuning
     adapter_params = 50000 # Rank-64 adapter
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    size_full_mb = (model_params_m * 1e6 * bytes_per_param) / 1e6
-    size_adapter_kb = (adapter_params * bytes_per_param) / 1e3
-    per_context_savings = (size_full_mb * 1000) / size_adapter_kb
+    size_full = model_params_m * MILLION * bytes_per_param * byte
+    size_adapter = adapter_params * bytes_per_param * byte
+    size_full_mb = size_full.m_as(MB)
+    size_adapter_kb = size_adapter.m_as(KB)
+    per_context_savings = float(size_full / size_adapter)
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(per_context_savings == 200, f"Ratio {per_context_savings} unexpected")
     # ┌── 4. OUTPUT ────────────────────────────────────────
@@ -1786,12 +1789,13 @@ Federated learning addresses these coordination constraints through privacy-pres
 # │ Context: "Model Updates vs Raw Data" .callout-notebook
 # │
 # │ Goal: Quantify the bandwidth savings of federated learning for a wearable.
-# │ Show: bandwidth_reduction ≈ 78x—inline in notebook result.
+# │ Show: bandwidth_reduction ≈ 80x—inline in notebook result.
 # │ How: Ratio = Data_Raw/Data_Model_Updates.
 # │
 # │ Imports: mlsysim.book (check)
 # │ Exports: fs_raw_data_mb_str, fs_update_mb_str, fs_reduction_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import byte, KB, MB, MILLION
 from mlsysim.fmt import check
 
 class FederatedSavings:
@@ -1800,10 +1804,11 @@ class FederatedSavings:
     img_size_kb = 200 # Compressed JPEG
     model_params_m = 5
     compression_ratio = 10 # Quantized updates (e.g. 4-bit)
+    bits_per_update_param = 4 # 4-bit quantized updates
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    raw_data_mb = (n_images * img_size_kb) / 1024
-    # Update size: 5M params * 4 bits = 2.5 MB
-    update_mb = (model_params_m * 4) / 8
+    raw_data_mb = (n_images * img_size_kb * KB).m_as(MB)
+    # Update size: 5M params * 4 bits / 8 bits-per-byte = 2.5 MB
+    update_mb = (model_params_m * MILLION * bits_per_update_param / 8 * byte).m_as(MB)
     reduction = raw_data_mb/update_mb
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(70 < reduction < 90, f"Reduction {reduction:.1f}x unexpected")
@@ -1823,7 +1828,7 @@ Bandwidth efficiency is the ratio of raw data volume to model update size.
 
 1. **Raw Data Upload**\index{Raw Data Upload}: **`{python} FederatedSavings.fs_raw_data_mb_str` MB/week**.
 2. **Federated Update**\index{Federated Update}: A compressed model update (5M params) is only **`{python} FederatedSavings.fs_update_mb_str` MB**.
-3. **Bandwidth Reduction**\index{Bandwidth!reduction}: 195 MB/2.5 MB = **`{python} FederatedSavings.fs_reduction_str`$\times$ savings**.
+3. **Bandwidth Reduction**\index{Bandwidth!reduction}: `{python} FederatedSavings.fs_raw_data_mb_str` MB/`{python} FederatedSavings.fs_update_mb_str` MB = **`{python} FederatedSavings.fs_reduction_str`$\times$ savings**.
 
 **Systems insight**: Federated learning is a **Network Multiplier**. For a user on a limited cellular plan, uploading 200 MB of raw data is expensive and slow. Uploading a **`{python} FederatedSavings.fs_update_mb_str` MB update** is nearly invisible. Shifting the "Compute to the Data" reduces network load by **`{python} FederatedSavings.fs_reduction_str`$\times$**, enabling continuous learning even in bandwidth-constrained environments. In the Machine Learning Fleet, this is how systems scale to billions of users without bankrupting the networking budget or violating user privacy.
 

@@ -107,11 +107,12 @@ These three constraints interact multiplicatively. Latency sets the floor for ev
 # │ How: $\alpha$-$\beta$ model: $T = 2(N-1)\alpha + 2(N-1)/N \times n/\beta$; bare arithmetic (no pint)
 # │      because this is a step-by-step pedagogical trace.
 # │
-# │ Imports: mlsysim.book (check)
+# │ Imports: mlsysim.book (check), mlsysim.core.constants (MS_PER_SEC)
 # │ Exports: gradient_size_gb_str, ring_bw_time_ms_str, ring_lat_time_ms_str,
 # │          ring_total_ms_str, n_gpus_napkin_str, ring_bw_factor_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check
+from mlsysim.core.constants import MS_PER_SEC
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AllReduceCost:
@@ -135,7 +136,7 @@ class AllReduceCost:
     ring_bw_time_ms = (ring_bw_factor * gradient_size_gb/ib_bw_gbs) * 1000
 
     # Step 2: Ring AllReduce latency term: 2*(N-1)*\alpha
-    ring_lat_time_ms = (2 * (n_gpus - 1) * alpha_us) / 1000
+    ring_lat_time_ms = (2 * (n_gpus - 1) * alpha_us) / MS_PER_SEC
 
     # Step 3: Total
     ring_total_ms = ring_bw_time_ms + ring_lat_time_ms
@@ -342,6 +343,7 @@ Applying the critical message size formula to a concrete workload reveals which 
 #| label: critical-msg-size-calc
 #| echo: false
 from mlsysim.fmt import check
+from mlsysim.core.constants import byte, KB
 
 class CriticalMsgSize:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -349,7 +351,7 @@ class CriticalMsgSize:
     beta_gbs = 50
     # ┌── 2. EXECUTE ───────────────────────────────────────
     n_star_bytes = alpha_us * 1e-6 * beta_gbs * 1e9
-    n_star_kb = round(n_star_bytes / 1e3)
+    n_star_kb = round((n_star_bytes * byte).m_as(KB))
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(n_star_kb == 100, f"n* = {n_star_kb} KB, expected 100")
     # ┌── 4. OUTPUT ────────────────────────────────────────
@@ -381,6 +383,7 @@ A direct comparison of two message sizes illustrates how the bottleneck shifts b
 #| label: latency-vs-bw-calc
 #| echo: false
 from mlsysim.fmt import check
+from mlsysim.core.constants import MS_PER_SEC
 
 class LatencyVsBw:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -393,7 +396,7 @@ class LatencyVsBw:
     total_a_us = bw_a_us + alpha_us
     lat_pct_a = alpha_us/total_a_us * 100
     bw_b_us = msg_b_bytes / (beta_gbs * 1e9) * 1e6
-    bw_b_ms = bw_b_us / 1000
+    bw_b_ms = bw_b_us / MS_PER_SEC
     total_b_us = bw_b_us + alpha_us
     lat_pct_b = alpha_us/total_b_us * 100
     # ┌── 3. GUARD ─────────────────────────────────────────
@@ -526,12 +529,13 @@ The alpha-beta model becomes most valuable when applied to real training configu
 # │ How: α-β model applied per tier: NVLink ReduceScatter → IB Ring → NVLink
 # │      AllGather; comm-to-compute ratio computed for both strategies.
 # │
-# │ Imports: (none from mlsys—bare arithmetic for pedagogical clarity)
+# │ Imports: mlsysim.core.constants (MS_PER_SEC)
 # │ Exports: gradient_bf16_gb_str, intra_rs_time_ms_str, inter_payload_gb_str,
 # │          inter_ring_bw_time_ms_str, inter_ring_lat_time_ms_str,
 # │          intra_ag_time_ms_str, hier_total_llama_ms_str, flat_total_ms_str,
 # │          ccr_hier_str, ccr_flat_str, n_gpus_llama_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import MS_PER_SEC
 
 class LlamaBudgetCalc:
     """Hierarchical vs. flat Ring AllReduce timing budget for a 70B model on 128 GPUs."""
@@ -556,7 +560,7 @@ class LlamaBudgetCalc:
     # Step 2: Inter-node AllReduce (reduced payload)
     inter_payload_gb          = gradient_bf16_gb/gpus_per_node_llama
     inter_ring_bw_time_ms     = 2 * (n_nodes_llama - 1) / n_nodes_llama * inter_payload_gb/ib_bw * 1000
-    inter_ring_lat_time_ms    = 2 * (n_nodes_llama - 1) * ib_alpha / 1000
+    inter_ring_lat_time_ms    = 2 * (n_nodes_llama - 1) * ib_alpha / MS_PER_SEC
 
     # Step 3: Intra-node AllGather (symmetric)
     intra_ag_time_ms = intra_rs_time_ms
@@ -565,7 +569,7 @@ class LlamaBudgetCalc:
 
     # Flat Ring AllReduce (BF16)
     flat_ring_bw_ms = 2 * (n_gpus_llama - 1) / n_gpus_llama * gradient_bf16_gb/ib_bw * 1000
-    flat_ring_lat_ms = 2 * (n_gpus_llama - 1) * ib_alpha / 1000
+    flat_ring_lat_ms = 2 * (n_gpus_llama - 1) * ib_alpha / MS_PER_SEC
     flat_total_ms   = flat_ring_bw_ms + flat_ring_lat_ms
 
     ccr_hier = hier_total_llama_ms/compute_per_step_ms
@@ -690,6 +694,7 @@ To make the AllToAll pattern concrete, consider a Mixture of Experts model with 
 #| label: moe-alltoall-calc
 #| echo: false
 from mlsysim.fmt import check
+from mlsysim.core.constants import KB, MB
 
 class MoeAllToAll:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -710,7 +715,7 @@ class MoeAllToAll:
     remote_gpus = n_gpus - 1
     data_per_transfer_kb = tokens_per_transfer * kb_per_token
     total_sent_kb = remote_gpus * data_per_transfer_kb
-    total_sent_mb = total_sent_kb / 1000
+    total_sent_mb = (total_sent_kb * KB).m_as(MB)
     bw_time_us = data_per_transfer_kb * 1e3 / (beta_gbs * 1e9) * 1e6
     bw_time_us_approx = round(bw_time_us)
     per_transfer_us = alpha_us + bw_time_us_approx
@@ -1121,6 +1126,7 @@ Nevertheless, the crossover formula remains the essential mental model for under
 #| label: ring-vs-tree-calc
 #| echo: false
 from mlsysim.fmt import check
+from mlsysim.core.constants import microsecond, second, GB, MB
 import math
 
 class RingVsTree:
@@ -1137,7 +1143,7 @@ class RingVsTree:
     tree_bw_us = 2 * log2N * M_mb/beta_gbs * 1e3
     ring_total_us = ring_lat_us + ring_bw_us
     tree_total_us = tree_lat_us + tree_bw_us
-    crossover_mb = (N * alpha_us * 1e-6 * beta_gbs * 1e9 / 1e6) / log2N
+    crossover_mb = (N * (alpha_us * microsecond) * (beta_gbs * GB / second) / log2N).m_as(MB)
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(ring_lat_us == 1260, f"Ring lat = {ring_lat_us}")
     check(tree_lat_us == 120, f"Tree lat = {tree_lat_us}")
@@ -1294,11 +1300,12 @@ The net effect: inter-node traffic is reduced by a factor of $G$ (GPUs per node)
 # │ How: Flat: T = 2M/β_IB; Hierarchical: T = T_rs + T_inter + T_ag with
 # │      NVLink for intra-node phases and IB for inter-node phase.
 # │
-# │ Imports: (none from mlsys—bare arithmetic for pedagogical clarity)
+# │ Imports: mlsysim.core.constants (MB, GB, second, ms)
 # │ Exports: flat_time_ms_str, intra_data_mb_str, intra_rs_ms_str,
 # │          inter_data_mb_str, inter_time_ms_str, intra_ag_ms_str,
 # │          hier_total_ms_str, speedup_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import MB, GB, second, ms
 
 class HierarchicalAllreduceCalc:
     """Flat vs. 3-step hierarchical AllReduce timing for a 1 GB gradient on 64 GPUs."""
@@ -1314,7 +1321,7 @@ class HierarchicalAllreduceCalc:
     flat_time_ms  = flat_data_gb/ib_bw_gbs * 1000
 
     intra_data_mb = int(gradient_gb * 1000 * (gpus_per_node - 1) / gpus_per_node)  # ~875 MB
-    intra_rs_ms   = intra_data_mb / 1000 / nvlink_bw_gbs * 1000
+    intra_rs_ms   = ((intra_data_mb * MB) / (nvlink_bw_gbs * GB / second)).m_as(ms)
 
     inter_data_mb = int(gradient_gb * 1000 / gpus_per_node)  # 125 MB
     inter_time_ms = 5  # approximate with ring overhead for the example

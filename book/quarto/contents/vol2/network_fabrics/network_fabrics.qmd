@@ -534,7 +534,7 @@ Consider a 2,048-GPU training cluster that will run both large language model tr
 # │          NetworkAlphaBeta.ib_alpha_us_str,
 # │          NetworkAlphaBeta.ib_beta_gbs_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import INFINIBAND_NDR_BW, Gbps, MILLION, TRILLION, MICROSECOND
+from mlsysim.core.constants import INFINIBAND_NDR_BW, Gbps, MILLION, TRILLION, MICROSECOND, byte, KB, GB, second
 from mlsysim.fmt import fmt, check
 
 class NetworkAlphaBeta:
@@ -561,12 +561,12 @@ class NetworkAlphaBeta:
     check(small_bw_term_pct < 10, f"Small msg should be latency-bound, got {small_bw_term_pct:.1f}% BW share")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    n_cross_ib_kb_str = f"{n_cross_ib/1000:.0f}"
+    n_cross_ib_kb_str = f"{(n_cross_ib * byte).m_as(KB):.0f}"
     t_small_ib_us_str = f"{t_small_ib * 1e6:.2f}"
     small_bw_pct_str = f"{small_bw_term_pct:.0f}"
     t_large_ib_ms_str = f"{t_large_ib * 1e3:.1f}"
     ib_alpha_us_str = f"{alpha_ib * 1e6:.1f}"
-    ib_beta_gbs_str = f"{beta_ib / 1e9:.0f}"
+    ib_beta_gbs_str = f"{(beta_ib * byte / second).m_as(GB / second):.0f}"
 ```
 
 The model reveals two regimes:
@@ -626,7 +626,7 @@ The second message is a 350 MB gradient shard for one layer's AllReduce. Now: $T
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import numpy as np
-from mlsysim.core.constants import INFINIBAND_NDR_BW, NETWORK_100G_BW
+from mlsysim.core.constants import INFINIBAND_NDR_BW, NETWORK_100G_BW, byte, KB, GB, second
 
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
@@ -648,8 +648,10 @@ fig, ax = plt.subplots(figsize=(9, 5))
 
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-ax.plot(n, t_ib, label=f'InfiniBand NDR ({alpha_ib*1e6:.1f}us, {beta_ib/1e9:.0f} GB/s)', color='#006395', linewidth=2.5)
-ax.plot(n, t_eth, label=f'Ethernet RoCE ({alpha_eth*1e6:.1f}us, {beta_eth/1e9:.1f} GB/s)', color='#CB202D', linewidth=2.5, linestyle='--')
+beta_ib_gbs = (beta_ib * byte / second).m_as(GB / second)
+beta_eth_gbs = (beta_eth * byte / second).m_as(GB / second)
+ax.plot(n, t_ib, label=f'InfiniBand NDR ({alpha_ib*1e6:.1f}us, {beta_ib_gbs:.0f} GB/s)', color='#006395', linewidth=2.5)
+ax.plot(n, t_eth, label=f'Ethernet RoCE ({alpha_eth*1e6:.1f}us, {beta_eth_gbs:.1f} GB/s)', color='#CB202D', linewidth=2.5, linestyle='--')
 
 ax.scatter([n_cross_ib], [t_cross_ib], color='#006395', s=80, zorder=5, edgecolors='white')
 ax.scatter([n_cross_eth], [t_cross_eth], color='#CB202D', s=80, zorder=5, edgecolors='white')
@@ -658,7 +660,7 @@ ax.scatter([n_cross_eth], [t_cross_eth], color='#CB202D', s=80, zorder=5, edgeco
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
 #blue
 ax.annotate(
-    f'Crossover\n~{n_cross_ib/1e3:.0f} KB',
+    f'Crossover\n~{(n_cross_ib * byte).m_as(KB):.0f} KB',
     xy=(n_cross_ib*1.2, t_cross_ib*0.9),
     xytext=(n_cross_ib*40, t_cross_ib/1.5),
     arrowprops=dict(arrowstyle='->', color='#006395'),
@@ -670,7 +672,7 @@ ax.annotate(
 
 #red
 ax.annotate(
-    f'Crossover\n~{n_cross_eth/1e3:.0f} KB',
+    f'Crossover\n~{(n_cross_eth * byte).m_as(KB):.0f} KB',
     xy=(n_cross_eth*0.9, t_cross_eth*1.03),
     xytext=(n_cross_eth/40, t_cross_eth*5),
     arrowprops=dict(arrowstyle='->', color='#CB202D'),
@@ -1376,6 +1378,7 @@ The power consumption of pluggable transceivers is becoming unsustainable at sca
 ```{python}
 #| label: optical-dividend-calc
 #| echo: false
+from mlsysim.core.constants import kilowatt
 from mlsysim.fmt import check
 
 class OpticalDividend:
@@ -1385,8 +1388,8 @@ class OpticalDividend:
     p_pluggable_w = OPTICS_POWER_PLUGGABLE_400G_W.m_as(watt)
     p_cpo_w = OPTICS_POWER_CPO_400G_W.m_as(watt)
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    total_pluggable_kw = (n_ports * p_pluggable_w) / 1000
-    total_cpo_kw = (n_ports * p_cpo_w) / 1000
+    total_pluggable_kw = (n_ports * p_pluggable_w * watt).m_as(kilowatt)
+    total_cpo_kw = (n_ports * p_cpo_w * watt).m_as(kilowatt)
     savings_kw = total_pluggable_kw - total_cpo_kw
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(savings_kw == 1.28, f"Savings {savings_kw:.2f}kW unexpected")
@@ -1554,6 +1557,7 @@ Engineers assume upgrading from HDR (`{python} IbHdrReference.ib_hdr_gbps` Gbps)
 # │          InfiniBandSpeedupScenario.t_ndr_us,
 # │          InfiniBandSpeedupScenario.speedup_pct
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import byte, KB, GB, second, microsecond
 from mlsysim.fmt import fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -1570,15 +1574,16 @@ class BandwidthFallacy:
     msg_size_kb = 10
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Step 1: Link rates in GB/s
+    # Link rates in GB/s (decimal). Gbps / 8 = GB/s when using decimal SI.
     hdr_gbs = hdr_gbps / 8
     ndr_gbs = ndr_gbps / 8
 
-    # Step 2: T = alpha + m/beta
-    t_hdr = alpha_us + (msg_size_kb / (hdr_gbs * 1024 * 1024 / 1000)) # Simplified us
-    # Step 3: Actually m/beta in us: (size_bytes) / (GB/s)
-    t_hdr = alpha_us + (msg_size_kb * 1024) / (hdr_gbs * 1e3)
-    t_ndr = alpha_us + (msg_size_kb * 1024) / (ndr_gbs * 1e3)
+    # T = alpha + m/beta, computed via pint to keep units explicit.
+    msg = msg_size_kb * KB
+    hdr_bw = hdr_gbs * GB / second
+    ndr_bw = ndr_gbs * GB / second
+    t_hdr = alpha_us + (msg / hdr_bw).m_as(microsecond)
+    t_ndr = alpha_us + (msg / ndr_bw).m_as(microsecond)
 
     speedup_pct = (1 - (t_ndr/t_hdr)) * 100
 
