@@ -1014,7 +1014,7 @@ These requirements create a multi-dimensional design space where data engineerin
 | **Local vs. cloud inference**       | −2 percent accuracy (quant) |      10 ms vs. 100 ms     |   \$0 vs. \$0.001/query   |   16 KB vs. unlimited    |
 | **Synthetic vs. real augmentation** | +3–5 percent robustness     |          Minimal          |     10$\times$ cheaper    |         Minimal          |
 
-: **KWS Data Engineering Design Space**: Each design choice creates quantifiable trade-offs across the four pillars. Higher sampling rates improve quality but double storage and processing (scalability impact). More training data improves accuracy but multiplies labeling costs (governance/cost impact). Local inference eliminates latency but requires aggressive quantization (quality/reliability trade-off). This design space analysis guides systematic optimization rather than intuition-based decisions. {#tbl-kws-design-space tbl-colwidths="[24,30,15,15,16]"}
+: **KWS Data Engineering Design Space**: Each design choice creates quantifiable trade-offs across the four pillars. Higher sampling rates improve quality but double storage and processing (scalability impact). More training data improves accuracy but multiplies labeling costs (governance/cost impact). Local inference eliminates latency but requires aggressive quantization (quality/reliability trade-off). This design space analysis guides systematic optimization rather than intuition-based decisions. {#tbl-kws-design-space tbl-colwidths="[26,26,15,17,16]"}
 
 The following worked example demonstrates how to apply this design space analysis to a concrete engineering scenario.
 
@@ -1113,6 +1113,8 @@ Options from design space:
 
 **Step 4**: Final configuration.
 
+::: {tbl-colwidths="[26,26,48]"}
+
 | **Choice**            | **Selection**            | **Rationale**                                             |
 |:----------------------|:-------------------------|:----------------------------------------------------------|
 | **Sampling rate**     | 16 kHz                   | +3 percent accuracy worth 2$\times$ storage within budget |
@@ -1121,6 +1123,8 @@ Options from design space:
 | **Data diversity**    | Noisy + clean mix        | Critical for real-world deployment                        |
 | **Inference**         | Local, 8-bit quantized   | Memory-constrained                                        |
 | **Augmentation**      | Heavy synthetic          | 10$\times$ cost efficiency                                |
+
+:::
 
 **Projected Outcome**: 97–99 percent estimated accuracy (meeting target), \$145K spend (under budget), 48 KB model (under limit).
 
@@ -1144,7 +1148,7 @@ Just as systems engineers memorize latency numbers, ML engineers should internal
 
 **Costs (2024 estimates)**
 
-::: {tbl-colwidths="[43,24,43]"}
+::: {tbl-colwidths="[43,30,37]"}
 
 | **Operation**                |                                                            **Cost**                                                            | **Notes**              |
 |:-----------------------------|:------------------------------------------------------------------------------------------------------------------------------:|:-----------------------|
@@ -1160,7 +1164,7 @@ Just as systems engineers memorize latency numbers, ML engineers should internal
 
 **Time Constants**
 
-::: {tbl-colwidths="[40,30,40]"}
+::: {tbl-colwidths="[40,34,36]"}
 
 | **Operation**                      | **Duration** | **Bottleneck**                      |
 |:-----------------------------------|:------------:|:------------------------------------|
@@ -1920,6 +1924,12 @@ These monitoring dimensions become particularly important when considering end-t
 
 Quality monitoring extends beyond simple schema validation to statistical properties\index{Data Quality!statistical monitoring} that capture whether serving data resembles training data. Rather than just checking that values fall within valid ranges, production systems track rolling statistics over 24-hour windows. For numerical features like transaction_amount or session_duration, the system computes means and standard deviations continuously, then applies statistical tests like the Kolmogorov-Smirnov test[^fn-ks-test-drift] to compare serving distributions against training distributions.
 
+[^fn-ks-test-drift]: **Kolmogorov-Smirnov (K-S) Test**: A nonparametric test measuring the maximum distance between two cumulative distribution functions, requiring no assumptions about underlying distributions. In ML pipelines, the K-S test serves as the primary continuous-feature drift detector: comparing serving distributions against training baselines, with p-values below 0.05 triggering investigation. Its distribution-free nature makes it robust across feature types, but it applies only to univariate continuous features -- categorical drift requires PSI or chi-squared tests instead. \index{K-S Test!drift detection}
+
+The K-S test is one tool for detecting drift in continuous features; @sec-data-engineering-detecting-responding-data-drift-509a provides the complete taxonomy of distribution shifts (covariate, label, concept, and label-quality drift) along with Population Stability Index (PSI) and KL divergence metrics for operationalizing the degradation equation.
+
+Categorical features require different statistical approaches. Instead of comparing means and variances, monitoring systems track category frequency distributions. When new categories appear that never existed in training data, or when existing categories shift substantially in relative frequency, the system flags potential data quality issues or genuine distribution shifts; for example, the proportion of "mobile" vs. "desktop" traffic might change by more than 20 percent. This statistical vigilance catches subtle problems that simple schema validation misses entirely: age values may remain in the valid range of 18–95, while the distribution shifts from primarily 25–45 year olds to primarily 65+ year olds, indicating the data source has changed in ways that will affect model performance.
+
 ```{python}
 #| label: ks-test-calc
 #| echo: false
@@ -1985,12 +1995,6 @@ class KSTest:
 
 :::
 
-[^fn-ks-test-drift]: **Kolmogorov-Smirnov (K-S) Test**: A nonparametric test measuring the maximum distance between two cumulative distribution functions, requiring no assumptions about underlying distributions. In ML pipelines, the K-S test serves as the primary continuous-feature drift detector: comparing serving distributions against training baselines, with p-values below 0.05 triggering investigation. Its distribution-free nature makes it robust across feature types, but it applies only to univariate continuous features -- categorical drift requires PSI or chi-squared tests instead. \index{K-S Test!drift detection}
-
-The K-S test is one tool for detecting drift in continuous features; @sec-data-engineering-detecting-responding-data-drift-509a provides the complete taxonomy of distribution shifts (covariate, label, concept, and label-quality drift) along with Population Stability Index (PSI) and KL divergence metrics for operationalizing the degradation equation.
-
-Categorical features require different statistical approaches. Instead of comparing means and variances, monitoring systems track category frequency distributions. When new categories appear that never existed in training data, or when existing categories shift substantially in relative frequency, the system flags potential data quality issues or genuine distribution shifts; for example, the proportion of "mobile" vs. "desktop" traffic might change by more than 20 percent. This statistical vigilance catches subtle problems that simple schema validation misses entirely: age values may remain in the valid range of 18–95, while the distribution shifts from primarily 25–45 year olds to primarily 65+ year olds, indicating the data source has changed in ways that will affect model performance.
-
 Validation at the pipeline level encompasses multiple strategies working together. Schema validation executes synchronously as data enters the pipeline, rejecting malformed records immediately before they can propagate downstream. Modern tools like TensorFlow Data Validation\index{TensorFlow Data Validation} (TFDV) [@breck2019data] automatically infer schemas from training data, capturing expected data types, value ranges, and presence requirements.
 
 This synchronous validation remains simple and fast, checking properties that can be evaluated on individual records in microseconds. More sophisticated validation that requires comparing serving data against training data distributions or aggregating statistics across many records must run asynchronously to avoid blocking the ingestion pipeline. Statistical validation\index{Statistical Validation!sampling strategies} systems typically sample 1-10 percent of serving traffic, enough to detect meaningful shifts while avoiding the computational cost of analyzing every record. These samples accumulate in rolling windows, commonly one hour, 24 hours, and seven days, with different windows revealing different patterns. Hourly windows detect sudden shifts like a data source failing over to a backup with different characteristics, while weekly windows reveal gradual drift in user populations or behavior.
@@ -2002,23 +2006,6 @@ The most insidious validation challenge arises from training-serving skew\index{
 ### Data quality as code {#sec-data-engineering-data-quality-code-1cca}
 
 Just as unit tests protect software systems, data expectation tests\index{Data Expectation!data expectation tests} protect ML pipelines. Using libraries like Great Expectations\index{Great Expectations!data validation} or Pandera,\index{Pandera!schema validation} teams codify quality expectations as executable assertions (@lst-data-expectations) that run on every pipeline execution.
-
-::: {.callout-perspective title="Mechanical vs. semantic quality"}
-
-**Why data validation feels different from unit testing**:
-
-In traditional software, quality is **Mechanical**. A null pointer is always a bug. An integer overflow is always a crash. These are binary, deterministic failures.
-
-In ML systems, data quality has a second, softer dimension: **Semantic Quality**\index{Data Quality!mechanical vs. semantic}.
-
-*   **Mechanical check**: "Is `age` an integer?" (Yes/No).
-*   **Semantic check**: "Is the `age` distribution shifting?" (Probabilistic).
-
-A dataset can be mechanically perfect (no nulls, correct types) but semantically broken (for example, all users are suddenly 25 years old due to a default value change). Robust ML systems must validate both the **Container** (Mechanical) and the **Content** (Semantic).
-
-:::
-
-The following listing demonstrates how these mechanical expectations translate to executable assertions using the Great Expectations library.
 
 ::: {#lst-data-expectations lst-cap="**Data Quality Assertions**: Executable data contracts catch schema violations, missing values, and invalid entries before training begins. Production systems using this pattern detect approximately 60 percent of data issues at pipeline execution time, preventing cascading failures that would otherwise propagate to model training."}
 
@@ -2075,6 +2062,23 @@ if not results.success:
 ```
 
 :::
+
+::: {.callout-perspective title="Mechanical vs. semantic quality"}
+
+**Why data validation feels different from unit testing**:
+
+In traditional software, quality is **Mechanical**. A null pointer is always a bug. An integer overflow is always a crash. These are binary, deterministic failures.
+
+In ML systems, data quality has a second, softer dimension: **Semantic Quality**\index{Data Quality!mechanical vs. semantic}.
+
+*   **Mechanical check**: "Is `age` an integer?" (Yes/No).
+*   **Semantic check**: "Is the `age` distribution shifting?" (Probabilistic).
+
+A dataset can be mechanically perfect (no nulls, correct types) but semantically broken (for example, all users are suddenly 25 years old due to a default value change). Robust ML systems must validate both the **Container** (Mechanical) and the **Content** (Semantic).
+
+:::
+
+The following listing demonstrates how these mechanical expectations translate to executable assertions using the Great Expectations library.
 
 CI/CD integration runs expectations in the deployment pipeline. Expectation violations fail deployments before bad data reaches training. A pipeline structured as data ingestion followed by data validation followed by training blocks deployment when validation detects anomalies like age values of 150, triggering alerts for investigation.
 
@@ -3260,15 +3264,32 @@ To saturate a *single* A100, storage must deliver **`{python} StorageBandwidth.r
 
 The `{python} StorageBandwidth.sata_bw_mbs_str` MB/s figure represents SATA III sequential read throughput (the interface maximum is 600 MB/s). Real-world random read performance with small files can be significantly lower.
 
+::: {.content-visible when-format="html"}
+
 This calculation illustrates the general principle governing data pipelines, as formalized in @eq-training-throughput and @eq-data-supply:
 $$\text{Training Throughput} = \min(\text{Compute Capacity}, \text{Data Supply Rate})$$ {#eq-training-throughput}
 \index{Throughput!training, compute vs. data}
 $$\text{Data Supply Rate} = \text{Storage Bandwidth} \times (1 - \text{Overhead})$$ {#eq-data-supply}
 \index{Data Supply Rate!bandwidth constraint}
 
+:::
+
+::: {.content-visible when-format="pdf"}
+This calculation illustrates the general principle governing data pipelines, as formalized in Equation \ref{eq:training-throughput} and Equation \ref{eq:data-supply}.
+\begin{gather}
+\text{Training Throughput} = \min(\text{Compute Capacity}, \text{Data Supply Rate})
+\label{eq:training-throughput}
+\\[1ex]
+\text{Data Supply Rate} = \text{Storage Bandwidth} \times (1 - \text{Overhead})
+\label{eq:data-supply}
+\end{gather}
+\index{Throughput!training, compute vs. data}
+\index{Data Supply Rate!bandwidth constraint}
+:::
+
 When storage bandwidth becomes the limiting factor, teams must either improve storage performance through faster media, parallelization, or caching, or reduce data movement requirements through compression, quantization, or architectural changes. Large language model training may require processing hundreds of gigabytes of text per hour, while computer vision models processing high-resolution imagery can demand sustained data rates exceeding 50 gigabytes per second across distributed clusters. These requirements explain the rise of specialized ML storage systems optimizing data loading pipelines: PyTorch DataLoader with multiple worker processes parallelizing I/O, TensorFlow tf.data API with prefetching and caching, and frameworks like NVIDIA DALI\index{NVIDIA DALI} (Data Loading Library) that offload data augmentation to GPUs rather than loading preaugmented data from storage.
 
-File format selection dramatically impacts the **Data Term** $(\frac{D_{\text{vol}}}{\text{BW}})$ of the iron law. We can quantify this impact as *format efficiency* $(\eta_{\text{format}})$, which acts as a multiplier on effective bandwidth.
+File format selection dramatically impacts the **Data Term** $\left(\frac{D_{\text{vol}}}{\text{BW}}\right)$ of the iron law. We can quantify this impact as *format efficiency* $(\eta_{\text{format}})$, which acts as a multiplier on effective bandwidth.
 
 ```{python}
 #| label: format-efficiency-calc
