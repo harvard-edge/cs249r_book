@@ -295,7 +295,7 @@ from mlsysim.core.constants import (
     H100_FLOPS_FP16_TENSOR, H100_MEM_BW, H100_TDP,
     NVLINK_V100_BW, NVLINK_A100_BW, NVLINK_H100_BW,
     V100_UNIT_COST, A100_UNIT_COST,
-    TFLOPs, GB, second, watt, USD,
+    TFLOPs, GB, TB, second, watt, USD,
 )
 from mlsysim.fmt import fmt, check
 
@@ -341,6 +341,7 @@ class A100Specs:
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
     flops_fp16_tflops = flops_fp16_tc.m_as(TFLOPs / second)
     mem_bw_gbs = mem_bw.m_as(GB / second)
+    mem_bw_tbs = mem_bw.m_as(TB / second)
     tdp_w = tdp.m_as(watt)
     nvlink_gbs = nvlink.m_as(GB / second)
     unit_cost_usd = unit_cost.m_as(USD)
@@ -352,6 +353,7 @@ class A100Specs:
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
     flops_fp16_str = fmt(flops_fp16_tflops, precision=0, commas=False)
     mem_bw_str = fmt(mem_bw_gbs, precision=0, commas=False)
+    mem_bw_tbs_str = fmt(mem_bw_tbs, precision=2, commas=False)
     tdp_str = fmt(tdp_w, precision=0, commas=False)
     nvlink_str = fmt(nvlink_gbs, precision=0, commas=False)
 
@@ -747,7 +749,7 @@ As @tbl-hbm-evolution shows, the transition from HBM3 to HBM3e is particularly s
 
 However, the capacity story changes significantly when quantization is applied. The same `{python} InfraSetup.frontier_params_b`B model quantized to INT8 requires only 175 GB, fitting in 3 H100 GPUs or a single B200. Quantized to INT4, it requires only 87.5 GB, fitting in two H100 GPUs. The capacity constraints that drive the need for multi-accelerator nodes for training (where FP16 or BF16 precision is typically required) are substantially relaxed for inference (where INT8 or INT4 quantization is often acceptable). This is another reason *why* training and inference infrastructure have different optimal configurations.
 
-The bandwidth improvement matters independently of capacity. Each generation of HBM produces a nearly proportional reduction in per-token latency during autoregressive inference once the capacity problem has been handled by sharding or quantization. A 70B FP16 model has 140 GB of weights, so a bandwidth-floor calculation gives roughly 140 GB/2.0 TB/s = 70 ms per token at A100-class bandwidth, 140 GB/3.35 TB/s = 41.8 ms at H100-class bandwidth, and 140 GB/8 TB/s = 17.5 ms at B200-class bandwidth. The A100 and H100 cases do not imply that the full FP16 model fits on one device; they isolate the latency floor imposed by a single accelerator-equivalent HBM path. For interactive applications (chatbots, code assistants, real-time translation), where users perceive delays above 50 ms as "slow," these bandwidth improvements translate directly into better user experience and into the ability to serve larger models within latency budgets.
+The bandwidth improvement matters independently of capacity. Each generation of HBM produces a nearly proportional reduction in per-token latency during autoregressive inference once the capacity problem has been handled by sharding or quantization. A 70B FP16 model has 140 GB of weights, so a bandwidth-floor calculation gives roughly 140 GB/`{python} A100Specs.mem_bw_tbs_str` TB/s = 68.6 ms per token at A100-class bandwidth, 140 GB/3.35 TB/s = 41.8 ms at H100-class bandwidth, and 140 GB/8 TB/s = 17.5 ms at B200-class bandwidth. The A100 and H100 cases do not imply that the full FP16 model fits on one device; they isolate the latency floor imposed by a single accelerator-equivalent HBM path. For interactive applications (chatbots, code assistants, real-time translation), where users perceive delays above 50 ms as "slow," these bandwidth improvements translate directly into better user experience and into the ability to serve larger models within latency budgets.
 
 The forward-looking jump to HBM4 doubles the interface width from 1024 bits to 2048 bits for the first time since HBM's introduction. This signals that per-pin signaling rate increases alone can no longer sustain the required bandwidth growth, and the industry must widen the bus. The doubling of interface width requires a correspondingly larger interposer area for routing, which is one reason that next-generation accelerator packages are expected to grow even larger.
 
@@ -3435,7 +3437,7 @@ Accelerator power draw varies dynamically between communication phases (lower po
 
 **Fallacy**: *HBM capacity is the only memory metric that matters for model selection.*
 
-Procurement teams sometimes focus exclusively on whether a model's weights "fit" in the available HBM, neglecting the bandwidth dimension. A model that fits in HBM but cannot be served at acceptable latency due to insufficient bandwidth is just as unusable as a model that does not fit. Consider two scenarios for serving a 70B model: (a) an accelerator with 192 GB of HBM2e at 2.0 TB/s bandwidth, and (b) an accelerator with 80 GB of HBM3 at `{python} MemoryBandwidthScenario.h100_bw` TB/s bandwidth. Option (a) has more than enough capacity (the model requires only 140 GB in FP16) but delivers tokens at 140 GB/2.0 TB/s = 70 ms per token. Option (b) requires careful quantization to fit (140 GB in FP16 would not fit in 80 GB, but 70 GB in INT8 does) but delivers tokens at 70 GB/`{python} MemoryBandwidthScenario.h100_bw` TB/s = 21 ms per token, which is 3.3$\times$ faster. For latency-sensitive serving, option (b) is clearly superior despite its smaller capacity. The right accelerator is the one whose bandwidth and capacity *jointly* satisfy the workload's requirements.
+Procurement teams sometimes focus exclusively on whether a model's weights "fit" in the available HBM, neglecting the bandwidth dimension. A model that fits in HBM but cannot be served at acceptable latency due to insufficient bandwidth is just as unusable as a model that does not fit. Consider two scenarios for serving a 70B model: (a) an accelerator with 192 GB of HBM2e at `{python} A100Specs.mem_bw_tbs_str` TB/s bandwidth, and (b) an accelerator with 80 GB of HBM3 at `{python} MemoryBandwidthScenario.h100_bw` TB/s bandwidth. Option (a) has more than enough capacity (the model requires only 140 GB in FP16) but delivers tokens at 140 GB/`{python} A100Specs.mem_bw_tbs_str` TB/s = 68.6 ms per token. Option (b) requires careful quantization to fit (140 GB in FP16 would not fit in 80 GB, but 70 GB in INT8 does) but delivers tokens at 70 GB/`{python} MemoryBandwidthScenario.h100_bw` TB/s = 21 ms per token, which is 3.3$\times$ faster. For latency-sensitive serving, option (b) is clearly superior despite its smaller capacity. The right accelerator is the one whose bandwidth and capacity *jointly* satisfy the workload's requirements.
 
 **Pitfall**: *Neglecting the data loading pipeline until after deployment.*
 
@@ -3443,7 +3445,7 @@ Teams that focus all their predeployment optimization on GPU kernel performance 
 
 **Fallacy**: *Homogeneous clusters are always better than heterogeneous ones.*
 
-The intuition that uniform hardware simplifies scheduling and reduces stragglers often leads organizations to retire capable older generations prematurely. For our `{python} InfraSetup.frontier_params_b`B model, the cost-optimal strategy frequently involves a mixed-generation fleet. While training requires the raw FLOPS and interconnect bandwidth of H100s to minimize synchronization overhead, inference serving is memory-bandwidth-bound rather than compute-bound. An A100 offers 2.0 TB/s of bandwidth at a significantly lower capital expenditure than the H100's 3.35 TB/s. By dedicating H100 nodes to training and A100 nodes to inference, an organization can reduce TCO by 15--25 percent compared to an all-H100 fleet. The fallacy lies in conflating *job-level* homogeneity -- which is critical to prevent stragglers within a single distributed training run -- with *cluster-level* homogeneity. A sophisticated scheduler can effectively manage a heterogeneous fleet, routing bandwidth-intensive inference jobs to older hardware where the bandwidth-per-dollar ratio is competitive, while reserving peak compute nodes for training throughput.
+The intuition that uniform hardware simplifies scheduling and reduces stragglers often leads organizations to retire capable older generations prematurely. For our `{python} InfraSetup.frontier_params_b`B model, the cost-optimal strategy frequently involves a mixed-generation fleet. While training requires the raw FLOPS and interconnect bandwidth of H100s to minimize synchronization overhead, inference serving is memory-bandwidth-bound rather than compute-bound. An A100 offers `{python} A100Specs.mem_bw_tbs_str` TB/s of bandwidth at a significantly lower capital expenditure than the H100's 3.35 TB/s. By dedicating H100 nodes to training and A100 nodes to inference, an organization can reduce TCO by 15--25 percent compared to an all-H100 fleet. The fallacy lies in conflating *job-level* homogeneity -- which is critical to prevent stragglers within a single distributed training run -- with *cluster-level* homogeneity. A sophisticated scheduler can effectively manage a heterogeneous fleet, routing bandwidth-intensive inference jobs to older hardware where the bandwidth-per-dollar ratio is competitive, while reserving peak compute nodes for training throughput.
 
 **Pitfall**: *Underestimating the time and cost of the "last mile" -- installation, burn-in, and commissioning.*
 
