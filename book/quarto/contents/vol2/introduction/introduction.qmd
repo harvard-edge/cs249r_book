@@ -59,8 +59,9 @@ Large-scale systems also have a societal property that small models do not: thei
 # │ Goal: Provide scale constants (cluster sizes, communication volumes) for
 # │       this introduction to anchor the "why distributed?" argument
 # │       quantitatively—computing GPT-3 gradient transfer size
-# │       (GPT3_PARAMS × 4 bytes), cluster MTBF for 25 k A100s at 8% annual
-# │       failure rate, and accelerator peak throughput (A100_FLOPS_FP16_TENSOR,
+# │       (GPT3_PARAMS × 4 bytes), cluster MTBF for 25 k A100s at the canonical
+# │       50,000-hour per-GPU MTTF (GPU_MTTF_HOURS),
+# │       and accelerator peak throughput (A100_FLOPS_FP16_TENSOR,
 # │       H100_FLOPS_FP8_TENSOR, TPUV4_FLOPS_BF16) to show scale forces
 # │       distribution.
 # │ Show: "312" TFLOPs A100, "2,039" GB/s memory bandwidth, "700" GB gradient
@@ -113,14 +114,16 @@ Between 2012 and the mid-2020s, public and third-party estimates place frontier 
 # │ Context: @sec-vol2-introduction-scale-moment
 # │
 # │ Goal: Quantify GPT-4 training scale and failure frequency.
-# │ Show: illustrative ~25k-GPU, 90-day scenario; ~1 failure every 4.4 hours.
-# │ How: GPU_Count * Fail_Rate_Annual / 365 = Fails_Per_Day.
+# │ Show: illustrative ~25k-GPU, 90-day scenario; ~1 failure every 2 hours.
+# │ How: cluster_MTBF = GPU_MTTF / N; fails_per_day = 24 / cluster_MTBF.
 # │
 # │ Imports: mlsysim.book (fmt, check)
 # │ Exports: Gpt4TrainingScenario.gpt4_gpus_str,
 # │          Gpt4TrainingScenario.gpt4_days_str,
 # │          Gpt4TrainingScenario.cluster_fail_day_str,
-# │          Gpt4TrainingScenario.mtbf_hours_str
+# │          Gpt4TrainingScenario.mtbf_hours_str,
+# │          Gpt4TrainingScenario.gpu_mttf_str,
+# │          Gpt4TrainingScenario.annual_fails_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Applications, Systems
 from mlsysim.core.constants import GPU_MTTF_HOURS, hour, day
@@ -133,23 +136,27 @@ class Gpt4TrainingScenario:
     mission = Applications.Frontier
     num_gpus = 25000 # Specific fleet size for this mission
     gpu_days = 90    # Illustrative frontier-class training window
+    hours_per_year = 8760
 
-    # Convert an 8% annual failure rate into component MTTF.
-    # MTBF_cluster = MTTF_gpu/N
-    node_mttf = 109_500 * hour
+    # Per-GPU MTTF is the canonical reliability constant for the book
+    # (datacenter-grade GPU, steady-state). MTBF_cluster = MTTF_gpu / N.
+    gpu_mttf_hours = GPU_MTTF_HOURS
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    cluster_mtbf_hours = node_mttf/num_gpus
+    cluster_mtbf_hours = gpu_mttf_hours / num_gpus
     cluster_failures_per_day = 24 / cluster_mtbf_hours
+    annual_failures = num_gpus * (hours_per_year / gpu_mttf_hours)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(cluster_mtbf_hours < 5 * hour, f"MTBF should be < 5 hours for 25k GPUs, got {cluster_mtbf_hours:.1f}")
+    check(cluster_mtbf_hours < 3, f"MTBF should be < 3 hours for 25k GPUs, got {cluster_mtbf_hours:.1f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     gpt4_gpus_str = fmt(num_gpus, precision=0)
     gpt4_days_str = fmt(gpu_days, precision=0)
-    cluster_fail_day_str = fmt(cluster_failures_per_day, precision=1)
-    mtbf_hours_str = fmt(cluster_mtbf_hours, precision=1)
+    cluster_fail_day_str = fmt(cluster_failures_per_day, precision=0)
+    mtbf_hours_str = fmt(cluster_mtbf_hours, precision=0)
+    gpu_mttf_str = fmt(gpu_mttf_hours, precision=0)
+    annual_fails_str = fmt(annual_failures, precision=0)
     hw_name = "A100-class"
 ```
 
@@ -157,13 +164,13 @@ Consider a GPT-4-class training scenario using a hypothetical **`{python} Gpt4Tr
 
 ::: {.callout-notebook title="Scale and reliability"}
 
-**Problem**: A training run for a GPT-4 class model uses `{python} Gpt4TrainingScenario.gpt4_gpus_str` GPUs. If each individual GPU has an annual failure rate of 8 percent, *how* often will the training job be interrupted by hardware failure?
+**Problem**: A training run for a GPT-4 class model uses `{python} Gpt4TrainingScenario.gpt4_gpus_str` GPUs. If each individual GPU has a Mean Time To Failure (MTTF) of `{python} Gpt4TrainingScenario.gpu_mttf_str` hours (the canonical datacenter-grade figure used throughout this volume), *how* often will the training job be interrupted by hardware failure?
 
 **Math**:
 
-1. **Total annual failures**\index{Total Annual Failures}: `{python} Gpt4TrainingScenario.gpt4_gpus_str` $\times 0.08 = 2,000$ failures per year.
-2. **Daily failure rate**\index{Daily Failure Rate}: $2,000/365 \approx$ **`{python} Gpt4TrainingScenario.cluster_fail_day_str` failures per day**.
-3. **Mean time between failures (MTBF)**: $24 \text{ hours} /$ `{python} Gpt4TrainingScenario.cluster_fail_day_str` $\approx$ **`{python} Gpt4TrainingScenario.mtbf_hours_str` hours**.
+1. **Cluster MTBF**\index{MTBF!cluster}: For $N$ independent GPUs, $\text{MTBF}_{\text{cluster}} = \text{MTTF}_{\text{GPU}} / N =$ `{python} Gpt4TrainingScenario.gpu_mttf_str` $/$ `{python} Gpt4TrainingScenario.gpt4_gpus_str` $\approx$ **`{python} Gpt4TrainingScenario.mtbf_hours_str` hours**.
+2. **Daily failure rate**\index{Daily Failure Rate}: $24 \text{ hours} /$ `{python} Gpt4TrainingScenario.mtbf_hours_str` $\text{ hours} \approx$ **`{python} Gpt4TrainingScenario.cluster_fail_day_str` failures per day**.
+3. **Total annual failures**\index{Total Annual Failures}: `{python} Gpt4TrainingScenario.gpt4_gpus_str` GPUs $\times$ (8{,}760 hours $/$ `{python} Gpt4TrainingScenario.gpu_mttf_str` hours) $\approx$ **`{python} Gpt4TrainingScenario.annual_fails_str` failures per year**.
 
 **Systems insight**: In this regime, the system is always in a state of partial failure. Traditional software recovery (manual restart) collapses; the system must be architected for fault tolerance as a first-class citizen. Hardware can no longer be treated as a reliable abstraction; it is a probabilistic resource that requires constant, automated state preservation (checkpointing).
 
@@ -749,7 +756,7 @@ scalefac=0.26,drawcolor=black,filllcolor=OrangeLine!90}};
 scalefac=0.2,drawcolor=black,filllcolor=OrangeLine!60}};
 %Hardware
 \node[Box1,draw=none,below=of B3](B4){};
-\node[above=-1pt of B4.north,Text1]{HBM/NVLink (900 GB/s)};
+\node[above=-1pt of B4.north,Text1]{NVLink (900 GB/s)};
 \node[Box2,draw=RedLine](BB4)at($(B4.south west)+(-3mm,0)$){Hardware};
 \draw[ALineA](B4.west)--(BB4.north);
 \pic[shift={(0,0)}] at  (B4){cpu={scalefac=0.49,picname=1,filllcolor=GreenLine, Linewidth=0.7pt}};
@@ -799,7 +806,7 @@ drawcolor=black,filllcolor=cyan!15!,Linewidth=0.57pt,Linewidth=1pt}};
 
 :::
 
-The stack architecture in @fig-vol2-system-scaling-regimes does not change when we scale: every ML system still has hardware, a system envelope, a workload, and a mission. *What* changes is the physics at each layer. Read the figure from bottom to top. At the bottom row, **Hardware** (HBM and NVLink at `{python} InfiniBandScenario.nvlink_h100_gbs` GB/s within one node) becomes **Infrastructure** (InfiniBand RDMA fabric spanning racks at `{python} InfiniBandScenario.ib_ndr_gbps` Gb/s per link), and the bottleneck shifts from the memory wall to the bisection bandwidth wall. One row up, **System Software** (a single CUDA runtime managing PCIe DMA) becomes **Distribution** (NCCL and RDMA libraries coordinating thousands of processes across the fabric).
+The stack architecture in @fig-vol2-system-scaling-regimes does not change when we scale: every ML system still has hardware, a system envelope, a workload, and a mission. *What* changes is the physics at each layer. Read the figure from bottom to top. At the bottom row, **Hardware** (NVLink at `{python} InfiniBandScenario.nvlink_h100_gbs` GB/s within one node) becomes **Infrastructure** (InfiniBand RDMA fabric spanning racks at `{python} InfiniBandScenario.ib_ndr_gbps` Gb/s per link), and the bottleneck shifts from the memory wall to the bisection bandwidth wall. One row up, **System Software** (a single CUDA runtime managing PCIe DMA) becomes **Distribution** (NCCL and RDMA libraries coordinating thousands of processes across the fabric).
 
 The upper two layers undergo an equally profound transformation. **ML Framework**\index{ML Framework} (PyTorch or JAX executing a training loop on one node) becomes **Serving/Ops** (orchestration and CI/CD pipelines that schedule distributed jobs and manage rolling deployments). At the top, **Application** (a single training script or inference service) becomes **Governance** (responsible AI policy, security auditing, and multi-tenant access control), because fleet-scale deployment introduces organizational concerns absent from a single machine. The four layers of the Engineering Crux at fleet scale are:
 

@@ -894,13 +894,43 @@ cell/.style={draw=BrownLine,line width=0.5pt, minimum size=\cellsize,
 
 Transient faults encompass several distinct categories: Single Event Upsets (SEUs) from cosmic rays and ionizing radiation, voltage fluctuations [@reddi2013] from power supply instability, electromagnetic interference (EMI), electrostatic discharge (ESD), crosstalk, ground bounce, timing violations, and soft errors in combinational logic [@mukherjee2005].
 
+```{python}
+#| echo: false
+#| label: v100-spec
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ V100 SPEC (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: §Quantitative fault rates (this section); fn-gpu-fault-rates-training
+# │   footnote quotes V100 HBM2 bandwidth in load-bearing prose.
+# │
+# │ Goal: Plumb V100 HBM2 memory bandwidth from constants so the quoted spec
+# │   tracks mlsysim's single source of truth.
+# │ Show: v100_mem_bw_str="900" GB/s—inline in fn-gpu-fault-rates-training.
+# │ How: V100_MEM_BW.m_as(GB/second), format with fmt.
+# │
+# │ Imports: mlsysim.core.constants (V100_MEM_BW, GB, second), mlsysim.fmt (fmt)
+# │ Exports: V100Spec.v100_mem_bw_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import V100_MEM_BW, GB, second
+from mlsysim.fmt import fmt
+
+class V100Spec:
+    """V100 hardware spec plumbed from constants."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    mem_bw_gbs = V100_MEM_BW.m_as(GB/second)
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    v100_mem_bw_str = fmt(mem_bw_gbs, precision=0)
+```
+
 #### Quantitative fault rates {#sec-ft-fault-analysis-performance-impact-fa37}
 
 Advanced semiconductor processes exhibit dramatically higher soft error rates. Modern 7 nm processes experience approximately 1000$\times$ higher soft error rates compared to 65 nm nodes due to reduced node capacitance and charge collection efficiency [@baumann2005], translating to base error rates of approximately 1 error per $10^{14}$ operations. GPUs[^fn-gpu-fault-rates-training] exhibit 10--1000$\times$ higher transient error rates than CPUs, driven by thousands of simpler cores operating at aggressive voltage/frequency points with minimal per-core error protection. These fault rates translate into MTBF[^fn-mtbf-checkpoint] values that differ substantially across deployment contexts: cloud AI accelerators (V100, A100) achieve 50,000--100,000 hours under controlled data center conditions, while edge AI processors achieve 20,000--40,000 hours. In distributed training, these values compound: a cluster of 1,000 accelerators with individual MTBF of 50,000 hours experiences an expected failure every 50 hours, necessitating robust checkpointing.
 
 [^fn-mtbf-checkpoint]: **MTBF (Mean Time Between Failures)**: Formalized by the U.S. military in MIL-HDBK-217 (1965), MTBF assumes exponential failure distributions during the useful-life period. For ML training, MTBF feeds directly into the Young-Daly formula: a cluster with 50,000-hour per-device MTBF and 1,000 devices has a system MTBF of 50 hours, demanding checkpoints every 1--2 hours to keep wasted compute below 1 percent of total training time. \index{MTBF!checkpoint frequency}
 
-[^fn-gpu-fault-rates-training]: **GPU Fault Rates**\index{GPU!fault rates}: GPUs exhibit 10--1,000$\times$ higher transient error rates than CPUs, driven by 5,000+ simpler cores (vs. 24--48 CPU cores) operating at aggressive voltage/frequency points with minimal per-core error protection. HBM2 memory in a V100 sustains 900 GB/s bandwidth with narrower ECC coverage than server DRAM, creating a larger silent corruption surface for the gradient and weight data that dominates ML workloads. \index{GPU!fault rate}
+[^fn-gpu-fault-rates-training]: **GPU Fault Rates**\index{GPU!fault rates}: GPUs exhibit 10--1,000$\times$ higher transient error rates than CPUs, driven by 5,000+ simpler cores (vs. 24--48 CPU cores) operating at aggressive voltage/frequency points with minimal per-core error protection. HBM2 memory in a V100 sustains `{python} V100Spec.v100_mem_bw_str` GB/s bandwidth with narrower ECC coverage than server DRAM, creating a larger silent corruption surface for the gradient and weight data that dominates ML workloads. \index{GPU!fault rate}
 
 Memory subsystems are the most vulnerability-prone components, and fault tolerance mechanisms impose a direct bandwidth tax. @tbl-memory-bandwidth-protection quantifies this cost across memory technologies:
 
@@ -3372,7 +3402,7 @@ The reliability equation $\text{MTBF}_{\text{system}} = \text{MTBF}_{\text{compo
 - **Shared software**\index{Shared Software}: Bug triggered by specific input fails all replicas simultaneously
 - **Thermal correlation**\index{Thermal Correlation}: Cooling failure causes clustered GPU throttling
 
-Correlated failures change two quantities that the simple MTBF equation hides: incident frequency and blast radius. A cluster with 1000 independent GPUs each with 10,000-hour MTBF has a first-GPU-failure MTBF of 10 hours. If a shared power, cooling, or software hazard adds an incident rate 10 times larger than that independent first-failure rate, the effective incident MTBF drops to about 1 hour. Separately, a correlated incident may take out 10 GPUs at once, increasing recovery cost even if the independent GPU failure rate itself has not changed.
+Correlated failures change two quantities that the simple MTBF equation hides: incident frequency and blast radius. A cluster with 1000 independent GPUs each with 50,000-hour MTBF has a first-GPU-failure MTBF of 50 hours. If a shared power, cooling, or software hazard adds an incident rate 10 times larger than that independent first-failure rate, the effective incident MTBF drops to about 5 hours. Separately, a correlated incident may take out 10 GPUs at once, increasing recovery cost even if the independent GPU failure rate itself has not changed.
 
 Reliability engineering must identify and mitigate correlation through diversity: different power feeds, different network paths, different software versions in canary deployments.
 

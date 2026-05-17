@@ -1337,7 +1337,7 @@ The critical batch size has important implications for distributed training syst
 
 ::: {.callout-checkpoint title="Scaling decisions"}
 
-Given a 7B parameter model distributed across a cluster of 64 A100 GPUs (80 GB HBM each), what is the maximum useful batch size? To answer this, you must calculate the critical batch size $(B_{\text{crit}})$—the point where the gradient noise scale equals the batch size. Beyond this point, doubling the batch size yields diminishing returns in convergence speed (perfect scaling stops). Using the Gradient Noise Scale metric ($\mathcal{B} \approx \frac{\text{tr}(\Sigma)}{\|\mu\|^2}$), determine if your proposed batch size keeps scaling efficiency above 80 percent, or if you are simply wasting compute cycles for marginal gains.
+Given a 7B parameter model distributed across a cluster of 64 A100 GPUs (80 GB HBM2e each), what is the maximum useful batch size? To answer this, you must calculate the critical batch size $(B_{\text{crit}})$—the point where the gradient noise scale equals the batch size. Beyond this point, doubling the batch size yields diminishing returns in convergence speed (perfect scaling stops). Using the Gradient Noise Scale metric ($\mathcal{B} \approx \frac{\text{tr}(\Sigma)}{\|\mu\|^2}$), determine if your proposed batch size keeps scaling efficiency above 80 percent, or if you are simply wasting compute cycles for marginal gains.
 
 :::
 
@@ -2546,26 +2546,37 @@ Engineers checkpoint distributed training "every hour" or "every 1000 steps" bas
 # │ Goal: Quantify the optimal trade-off between checkpoint overhead and rework.
 # │ Show: That frequent checkpointing wastes compute while rare ones risk work.
 # │ How: Apply Young-Daly formula (sqrt(2*C*MTBF)) for a 1024-GPU cluster.
+# │       Cluster MTBF is derived from canonical per-GPU GPU_MTTF_HOURS so the
+# │       worked example tracks the book's single source of truth.
 # │
-# │ Imports: mlsysim.book (fmt, check)
+# │ Imports: mlsysim.core.constants (GPU_MTTF_HOURS), mlsysim.book (fmt, check)
 # │ Exports: YoungDaly.t_opt_min_str, YoungDaly.opt_overhead_pct_str,
 # │          YoungDaly.safe_loss_pct_str,
-# │          YoungDaly.daily_savings_str
+# │          YoungDaly.daily_savings_str,
+# │          YoungDaly.cluster_mtbf_hr_str,
+# │          YoungDaly.t_opt_hr_str,
+# │          YoungDaly.sparse_interval_hr_str
 # └─────────────────────────────────────────────────────────────────────────────
 import math
+from mlsysim.core.constants import GPU_MTTF_HOURS
 
 # ┌── LEGO ───────────────────────────────────────────────
 class YoungDaly:
     """
     Namespace for Young-Daly Checkpoint Optimization.
-    Scenario: 1024-GPU cluster with 4-hour MTBF and 5-minute checkpoint time.
+    Scenario: 1024-GPU cluster at canonical per-GPU MTTF (50,000 hr) with a
+    5-minute checkpoint time.
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     t_save_min = 5.0
-    cluster_mtbf_hr = 4.0
     num_gpus = 1024
     gpu_cost_hr = 2.0
+    # Cluster MTBF derived from canonical per-GPU MTTF: MTBF_cluster = MTTF/N.
+    cluster_mtbf_hr = GPU_MTTF_HOURS / num_gpus  # ~48.8 hours
+    # "Safe" (over-frequent) and "sparse" (under-frequent) comparison intervals.
+    safe_interval_min = 15
+    sparse_interval_hr_val = 8
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # T_opt = sqrt(2 * C * MTBF)
@@ -2574,6 +2585,7 @@ class YoungDaly:
     mtbf_min = cluster_mtbf_hr * 60
 
     t_opt_min_val = math.sqrt(2 * c_min * mtbf_min)
+    t_opt_hr_val = t_opt_min_val / 60
 
     # Overhead: (C/T_opt) + (T_opt / 2 * MTBF)
     # (Simplified Young-Daly first-order approximation)
@@ -2584,24 +2596,26 @@ class YoungDaly:
     # Daily dollar loss due to suboptimal (15 min) vs. optimal
     # (Context for the text argument)
     daily_cost = num_gpus * gpu_cost_hr * 24
-    safe_interval_min = 15
     safe_overhead = (c_min/safe_interval_min) + (safe_interval_min / (2 * 60 * cluster_mtbf_hr))
     loss_safe = safe_overhead * daily_cost
     loss_opt = total_overhead * daily_cost
     diff_daily = loss_safe - loss_opt
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(40 <= t_opt_min_val <= 60, f"Optimal interval ({t_opt_min_val:.1f}m) out of expected range.")
+    check(150 <= t_opt_min_val <= 200, f"Optimal interval ({t_opt_min_val:.1f}m) out of expected range.")
     check(safe_overhead > total_overhead, "15-minute checkpointing should be costlier than optimal")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     t_opt_min_str = fmt(t_opt_min_val, precision=0)
+    t_opt_hr_str = fmt(t_opt_hr_val, precision=1)
     opt_overhead_pct_str = fmt_percent(total_overhead, precision=1)
     safe_loss_pct_str = fmt_percent(safe_overhead, precision=1)
     daily_savings_str = fmt(diff_daily, precision=0, commas=True)
+    cluster_mtbf_hr_str = fmt(cluster_mtbf_hr, precision=0)
+    sparse_interval_hr_str = fmt(sparse_interval_hr_val, precision=0)
 ```
 
-The Young-Daly formula establishes the optimal checkpoint interval as $\tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}}$, where $T_{\text{write}}$ is checkpoint write time and $\text{MTBF}$ is mean time between failures. For a 1024-GPU cluster with 4-hour MTBF and 5-minute checkpoint time, the optimal interval is approximately **`{python} YoungDaly.t_opt_min_str` minutes**, with an unavoidable checkpoint-plus-rework tax of `{python} YoungDaly.opt_overhead_pct_str` percent. Checkpointing every 15 minutes "to be safe" raises the total tax to `{python} YoungDaly.safe_loss_pct_str` percent, while checkpointing every 2 hours risks losing significant work on failure. For larger models where checkpoint time increases to 15 minutes due to model size and storage bandwidth, the optimal interval shifts significantly. The cost of suboptimal checkpointing scales with cluster size: a 1024-GPU cluster loses approximately **USD `{python} YoungDaly.daily_savings_str` per day** to excessive checkpointing when using a 15-minute interval instead of the Young-Daly optimum.
+The Young-Daly formula establishes the optimal checkpoint interval as $\tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}}$, where $T_{\text{write}}$ is checkpoint write time and $\text{MTBF}$ is mean time between failures. For a 1024-GPU cluster at the canonical 50,000-hour per-GPU MTTF, the cluster-level MTBF is `{python} YoungDaly.cluster_mtbf_hr_str` hours ($\text{MTTF}_{\text{GPU}}/N$); with a 5-minute checkpoint time, the optimal interval is approximately **`{python} YoungDaly.t_opt_min_str` minutes** (~`{python} YoungDaly.t_opt_hr_str` hours), with an unavoidable checkpoint-plus-rework tax of `{python} YoungDaly.opt_overhead_pct_str` percent. Checkpointing every 15 minutes "to be safe" raises the total tax to `{python} YoungDaly.safe_loss_pct_str` percent, while checkpointing every `{python} YoungDaly.sparse_interval_hr_str` hours risks losing significant work on failure. For larger models where checkpoint time increases to 15 minutes due to model size and storage bandwidth, the optimal interval shifts significantly. The cost of suboptimal checkpointing scales with cluster size: a 1024-GPU cluster loses approximately **USD `{python} YoungDaly.daily_savings_str` per day** to excessive checkpointing when using a 15-minute interval instead of the Young-Daly optimum.
 
 ## Summary {#sec-distributed-training-systems-summary}
 
