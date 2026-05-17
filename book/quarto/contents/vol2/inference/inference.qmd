@@ -2470,6 +2470,8 @@ Consider a chatbot service with a 2000-token system prompt and 1000 concurrent u
 | **Document QA (same doc)**       |       80-90 percent |      50-70 percent |
 | **General API (diverse)**        |      20--40 percent |     10--30 percent |
 
+: **Prefix Caching Effectiveness by Workload**: Typical prefix hit rates and resulting KV-cache memory savings for chatbot, document-QA, and general API workloads, showing where prefix caching pays off and where it does not. {#tbl-inference-prefix-caching-workloads}
+
 :::
 
 ### KV cache compression and architectural optimization {#sec-inference-scale-kv-cache-compression-943a}
@@ -3181,6 +3183,8 @@ class TpSpeedupCalc:
 | **AllReduce (FF)**                         |                   0 ms |       0.3 ms | N/A             |
 | **Total per layer**                        |              **30 ms** |  **4.35 ms** | **6.9$\times$** |
 
+: **8-Way Tensor Parallelism Per-Layer Breakdown**: Sequential vs. 8-way tensor-parallel timings for attention, feed-forward, and AllReduce phases of one Llama-70B transformer layer, decomposing the realized 6.9$\times$ speedup into compute scaling and communication tax. {#tbl-inference-tp8-layer-breakdown}
+
 **For `{python} TpSpeedupCalc.n_layers` layers on the same prefill workload**:
 
 - Sequential: `{python} TpSpeedupCalc.seq_total_ms_str` ms for the full prefill pass
@@ -3589,6 +3593,8 @@ Each inference request requires approximately 5,000 embedding lookups. Without o
 | **Lookup latency**      |                    50 ms |                  2 ms |
 | **Network bandwidth**   |                  10 Gbps |       40 Gbps (burst) |
 
+: **Meta Embedding Sharding Lookup Performance**: Network round-trip, lookup-latency, and bandwidth measurements for the recommendation lookup path before and after batching plus shard-aware dispatch, showing the order-of-magnitude effect of these optimizations. {#tbl-inference-meta-embedding-perf}
+
 :::
 
 ### Hybrid sharding strategies {#sec-inference-scale-hybrid-sharding-strategies-e605}
@@ -3659,6 +3665,8 @@ Communication overhead depends heavily on the interconnect technology:
 | **InfiniBand HDR** |             200 Gb/s (25 GB/s) |                             1μs | Inter-node             |
 | **Ethernet 100G**  |           100 Gb/s (12.5 GB/s) |                            10μs | Inter-node (commodity) |
 
+: **Datacenter Interconnect Specs**: Bandwidth, latency, and intended scope for NVLink, PCIe Gen5, InfiniBand HDR, and 100G Ethernet, establishing the physical limits that bound achievable sharding speedups. {#tbl-inference-interconnect-specs}
+
 NVLink provides the highest bandwidth for intra-node communication.
 
 **Example: 8-Way tensor parallelism communication.** Activation size: 8 MB per all-reduce (batch=1, hidden=8192)
@@ -3668,6 +3676,8 @@ NVLink provides the highest bandwidth for intra-node communication.
 | **NVLink**                       |            0.02 ms |         0.07 percent |
 | **InfiniBand**\index{InfiniBand} |             0.7 ms |          2.3 percent |
 | **100G Ethernet**                |             1.5 ms |            5 percent |
+
+: **AllReduce Cost by Interconnect**: AllReduce time for an 8 MB activation across NVLink, InfiniBand, and 100G Ethernet, with each as a fraction of a 30 ms transformer-layer budget, showing why intra-node TP requires NVLink-class bandwidth. {#tbl-inference-allreduce-interconnect}
 
 NVLink enables efficient tensor parallelism within a node. Cross-node tensor parallelism requires InfiniBand for acceptable overhead.
 
@@ -3953,6 +3963,8 @@ With least-connections:
 | **Least-connections** |             28s |      0.8 requests |
 | **Two-choices + LC**  |             26s |      0.5 requests |
 
+: **LLM Routing Algorithm Comparison**: Observed p99 latency and load variance under round-robin, least-connections, and least-connections-plus-two-choices routing for highly variable LLM workloads, quantifying how routing choices reshape tail latency. {#tbl-inference-llm-routing-comparison}
+
 Least-connections reduces P99 by 38 percent; combining with two-choices provides additional improvement.
 
 :::
@@ -4136,6 +4148,8 @@ async def startup():
 | **Readiness**   |           5s |          3s |            2 failures |
 | **Deep health** |          30s |         10s |             1 failure |
 
+: **GPU Inference Health-Check Cadences**: Liveness, readiness, and deep-health probe intervals, timeouts, and failure thresholds for GPU inference servers, balancing fast outage detection against the cost of GPU-resident probes. {#tbl-inference-health-check-cadences}
+
 Deep health checks run less frequently because they consume GPU resources.
 
 :::
@@ -4229,6 +4243,8 @@ Consider a scenario where one server becomes slow (thermal throttling):
 | **Open duration**              |                60s | GPU recovery takes time               |
 | **Half-open requests**         |                  5 | Careful testing before full reopening |
 
+: **Circuit-Breaker Settings for GPU Inference**: Error and latency thresholds, open duration, and half-open probe count chosen so that a single throttling GPU is isolated quickly without prematurely failing healthy nodes. {#tbl-inference-circuit-breaker-gpu}
+
 :::
 
 Efficient routing assumes that our inference servers own the underlying hardware. In enterprise environments, however, our critical production models are often running on the exact same physical clusters as experimental models and developer endpoints. To prevent a rogue developer query from crashing our flagship service, we must enforce strict multi-tenancy and resource isolation.
@@ -4287,6 +4303,8 @@ Consider an inference platform serving 10 tenants on shared H100 GPUs:
 | **Tenant 3**     |      500 |           45 ms | Violated       |
 | **Tenants 4-10** | 100 each |        22-30 ms | Violated       |
 
+: **Noisy Neighbor Without Isolation**: Per-tenant QPS, p99 latency, and SLO status when tenant 3 bursts to 500 QPS on a shared GPU pool with no resource quotas. Latencies for every tenant exceed the 10 ms SLO, demonstrating how a single offending tenant cascades into a multi-tenant outage. {#tbl-inference-noisy-neighbor-no-isolation}
+
 Without isolation, one tenant's burst causes cascade failures for all tenants.
 
 **With isolation** (per-tenant resource quotas):
@@ -4297,6 +4315,8 @@ Without isolation, one tenant's burst causes cascade failures for all tenants.
 | **Tenant 2**     |              100 |           11 ms | Met                      |
 | **Tenant 3**     |  120 (throttled) |           50 ms | Violated (only for them) |
 | **Tenants 4-10** |         100 each |           11 ms | Met                      |
+
+: **Noisy Neighbor With Per-Tenant Quotas**: Per-tenant QPS, p99 latency, and SLO status after enabling per-tenant resource quotas in the same workload. Tenant 3 is throttled to 120 QPS and absorbs the latency penalty alone, while the other nine tenants stay within their 11 ms SLO. {#tbl-inference-noisy-neighbor-quotas}
 
 Isolation contains the impact to the offending tenant.
 
@@ -4698,6 +4718,8 @@ A chatbot service shows predictable daily patterns:
 | 17:00-20:00    |            2000 |      20 (ramp down) |
 | 20:00-00:00    |            1000 |                  10 |
 
+: **Daily Traffic Pattern for a Chatbot Service**: Hourly QPS bands and the number of replicas required to absorb each band for a chatbot with predictable diurnal traffic. The 6$\times$ swing from off-peak (500 QPS, 5 replicas) to peak (3,000 QPS, 30 replicas) is the input signal a predictive autoscaler uses to schedule capacity ahead of demand. {#tbl-inference-chatbot-daily-traffic}
+
 **Predictive schedule** (accounting for cold start):
 
 | **Time** | **Action**   | **Replicas Active** | **Replicas Starting** |
@@ -4709,6 +4731,8 @@ A chatbot service shows predictable daily patterns:
 | 17:00    | Scale down   |                  20 |       -10 terminating |
 | 20:00    | Scale down   |                  10 |       -10 terminating |
 | 00:00    | Scale down   |                   5 |        -5 terminating |
+
+: **Predictive Scaling Schedule**: Per-time-bucket scaling actions, active replicas, and replicas in cold-start warming for the same chatbot service. Warming replicas 30 minutes before each ramp absorbs the cold-start delay so peak capacity is online when traffic arrives, avoiding the over-provisioning that purely reactive autoscaling demands. {#tbl-inference-chatbot-predictive-schedule}
 
 **Cost comparison**:
 
