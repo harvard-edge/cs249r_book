@@ -706,7 +706,6 @@ The engineering lesson is clear from this trajectory: the era of "free" performa
 from mlsysim.core.constants import (
     A100_FLOPS_FP16_TENSOR, A100_FLOPS_TF32,
     MOBILE_NPU_TOPS_INT8, TFLOPs, second,
-    KIB_TO_BYTES, MIB_TO_BYTES
 )
 from mlsysim.fmt import fmt_percent, fmt
 
@@ -2257,7 +2256,7 @@ class InterconnectBandwidth:
     # Invariant: HBM > NVLink > PCIe > Network
     check(hbm_bw > nvlink_bw > pcie_bw > net_bw, "Bandwidth taper violated!")
 
-    hbm_bw_str = f"{hbm_bw/1000:.1f} TB/s"
+    hbm_bw_str = f"{h_h100.memory_bw.m_as(TB/second):.1f} TB/s"
     nvlink_bw_str = f"{int(nvlink_bw)} GB/s"
     pcie_bw_str = f"{int(pcie_bw)} GB/s"
     net_bw_str = f"{int(net_bw)} GB/s"
@@ -2801,7 +2800,7 @@ from mlsysim.fmt import fmt_percent, fmt
 from mlsysim.core.constants import (
     BYTES_FP16, ENERGY_DRAM_PJ_PER_BYTE,
     LATENCY_HBM3, LATENCY_L2_CACHE, LATENCY_L1_REGISTER,
-    A100_FLOPS_FP16_TENSOR, TFLOPs, second,
+    A100_FLOPS_FP16_TENSOR, TFLOPs, second, KB,
 )
 
 class TensorLifecycleCalc:
@@ -2812,7 +2811,7 @@ class TensorLifecycleCalc:
     kws_bytes_fp16_value = BYTES_FP16.m_as('B')
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    kws_tensor_kb_value      = kws_samples_value * kws_bytes_fp16_value/KIB_TO_BYTES
+    kws_tensor_kb_value      = (kws_samples_value * BYTES_FP16).m_as(KB)
     dram_energy_pj_bit_value = ENERGY_DRAM_PJ_PER_BYTE.m_as('pJ/B') / 8
     a100_fp16_tflops_value   = A100_FLOPS_FP16_TENSOR.m_as(TFLOPs/second)
 
@@ -3785,7 +3784,7 @@ However, not all layers in a neural network exhibit this favorable profile. The 
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_percent, fmt
 from mlsysim.core.constants import (
-    BYTES_FP16, byte, MB, KiB, flop, MFLOPs, GFLOPs, TFLOPs,
+    BYTES_FP16, byte, KB, MB, flop, MFLOPs, GFLOPs, TFLOPs,
     A100_MEM_BW, A100_FLOPS_FP16_TENSOR, GB, second,
 )
 
@@ -3800,10 +3799,10 @@ class DenseLayerAnalysisCalc:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     dense_total_mflops = (2 * dense_batch * dense_in * dense_out * flop).m_as(MFLOPs)
 
-    dense_input_kb   = dense_batch * dense_in * 2 / KIB_TO_BYTES
+    dense_input_kb   = (dense_batch * dense_in * 2 * byte).m_as(KB)
     dense_weights_mb = (dense_in * dense_out * 2 * byte).m_as(MB)
-    dense_output_kb  = dense_batch * dense_out * 2 / KIB_TO_BYTES
-    dense_total_mb   = (dense_input_kb * KiB + dense_weights_mb * MB + dense_output_kb * KiB).m_as(MB)
+    dense_output_kb  = (dense_batch * dense_out * 2 * byte).m_as(KB)
+    dense_total_mb   = (dense_input_kb * KB + dense_weights_mb * MB + dense_output_kb * KB).m_as(MB)
 
     dense_ai = dense_total_mflops/dense_total_mb
 
@@ -3879,7 +3878,7 @@ The situation becomes even more extreme for element-wise operations like normali
 # │          LayernormAnalysisCalc.a100_bw_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_percent, fmt
-from mlsysim.core.constants import byte, MB, A100_MEM_BW, GB, GFLOPs, TFLOPs, second
+from mlsysim.core.constants import byte, KB, MB, A100_MEM_BW, GB, GFLOPs, TFLOPs, second
 
 class LayernormAnalysisCalc:
     """Roofline analysis for LayerNorm showing severely memory-bound behaviour."""
@@ -3896,9 +3895,9 @@ class LayernormAnalysisCalc:
     ln_total_mflops = ln_elements_m * ln_flops_per
 
     ln_input_mb  = (ln_elements * 2 * byte).m_as(MB)
-    ln_params_kb = ln_hidden * 2 * 2 / KIB_TO_BYTES
+    ln_params_kb = (ln_hidden * 2 * 2 * byte).m_as(KB)
     ln_output_mb = (ln_elements * 2 * byte).m_as(MB)
-    ln_total_mb  = ln_input_mb + ln_output_mb + ln_params_kb/KIB_TO_BYTES
+    ln_total_mb  = (ln_input_mb * MB + ln_output_mb * MB + ln_params_kb * KB).m_as(MB)
 
     ln_ai = ln_total_mflops/ln_total_mb
 
@@ -4585,7 +4584,7 @@ Each operation produces an intermediate tensor that must be written to memory an
 # │ Exports: MemoryFootprintCalc.tensor_mb_str, MemoryFootprintCalc.total_mb_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_percent, fmt
-from mlsysim.core.constants import BYTES_FP32
+from mlsysim.core.constants import BYTES_FP32, byte, MB
 
 class MemoryFootprintTableCalc:
     """Integer-rounded memory values for @tbl-memory-footprint caption."""
@@ -4597,7 +4596,7 @@ class MemoryFootprintTableCalc:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     tensor_bytes = tensor_dim * tensor_dim * bytes_per_float
-    tensor_mb    = tensor_bytes/MIB_TO_BYTES
+    tensor_mb    = (tensor_bytes * byte).m_as(MB)
     total_mb     = tensor_mb * total_tensors
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
@@ -4644,7 +4643,7 @@ $$
 # │ Exports: FusionBenefitsCalc.naive_mb_str,
 # │          FusionBenefitsCalc.fused_mb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import BYTES_FP32
+from mlsysim.core.constants import BYTES_FP32, byte, MB
 
 class FusionBenefitsCalc:
     """Memory savings from fusing ReLU-BatchNorm-scale into a single kernel."""
@@ -4654,15 +4653,15 @@ class FusionBenefitsCalc:
     bytes_per_float = BYTES_FP32.m_as('B')
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    tensor_mb = tensor_dim * tensor_dim * bytes_per_float/MIB_TO_BYTES
+    tensor_mb = (tensor_dim * tensor_dim * bytes_per_float * byte).m_as(MB)
     total_mb  = tensor_mb * 4
 
-    naive_mb = total_mb   # 16 MB with all intermediates stored
-    fused_mb = tensor_mb  # 4 MB with only final result Y stored
+    naive_mb = total_mb   # ~16.8 MB with all four intermediates stored
+    fused_mb = tensor_mb  # ~4.2 MB with only final result Y stored
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    naive_mb_str = f"{naive_mb:.0f} MB"
-    fused_mb_str = f"{fused_mb:.0f} MB"
+    naive_mb_str = f"{naive_mb:.1f} MB"
+    fused_mb_str = f"{fused_mb:.1f} MB"
 ```
 
 @tbl-fusion-benefits highlights the impact of operation fusion on memory efficiency. By keeping intermediate results in registers or local memory rather than writing them to main memory, fusion significantly reduces memory traffic. This optimization is especially beneficial on highly parallel architectures like GPUs and TPUs, where minimizing memory accesses translates directly into improved execution throughput. Compared to the naïve execution model, fused execution eliminates the need for storing intermediate tensors, dramatically lowering the total memory footprint and improving overall efficiency.
@@ -4672,7 +4671,7 @@ class FusionBenefitsCalc:
 | **Naïve Execution** |             X', X''             | `{python} FusionBenefitsCalc.naive_mb_str` |
 | **Fused Execution** |               None              | `{python} FusionBenefitsCalc.fused_mb_str` |
 
-: **Operation Fusion Benefits**: Fused execution reduces memory usage by eliminating the need to store intermediate tensors, directly improving efficiency on memory-bound hardware like GPUs and TPUs. Memory consumption drops from 16 MB in naive execution to 4 MB with fused operations. {#tbl-fusion-benefits}
+: **Operation Fusion Benefits**: Fused execution reduces memory usage by eliminating the need to store intermediate tensors, directly improving efficiency on memory-bound hardware like GPUs and TPUs. Memory consumption drops from `{python} FusionBenefitsCalc.naive_mb_str` in naive execution to `{python} FusionBenefitsCalc.fused_mb_str` with fused operations, a 4$\times$ reduction. {#tbl-fusion-benefits}
 
 ##### Performance benefits and constraints {#sec-hardware-acceleration-performance-benefits-constraints-1b74}
 
@@ -5440,7 +5439,7 @@ class FpMemoryEnergyCalc:
     energy_ratio     = int(dram_pj/sram_pj)
     fp_ridge_example = peak_tflops/peak_bw_tbs
 
-    layernorm_tflops = layernorm_ai * 2000 / 1000
+    layernorm_tflops = layernorm_ai * peak_bw_tbs   # AI [FLOP/byte] × BW [TB/s] = TFLOPS
     layernorm_util   = layernorm_tflops/peak_tflops * 100
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
@@ -5522,7 +5521,7 @@ Vendors advertise peak FLOPS as the definitive measure of accelerator capability
 # │          FpSmallBatchCalc.fp_t4_bw_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_percent, fmt
-from mlsysim.core.constants import T4_FLOPS_FP16_TENSOR, T4_MEM_BW, A100_MEM_BW, TFLOPs, second, GB
+from mlsysim.core.constants import T4_FLOPS_FP16_TENSOR, T4_MEM_BW, A100_MEM_BW, TFLOPs, second, GB, TB
 
 class FpSmallBatchCalc:
     """Small-batch arithmetic intensity and T4 ridge point for inference economics."""
@@ -5544,12 +5543,14 @@ class FpSmallBatchCalc:
     ai_b256     = flops_b256 / bytes_b256
 
     # T4 ridge point
-    t4_flops = T4_FLOPS_FP16_TENSOR.m_as(TFLOPs/second)
-    t4_bw    = T4_MEM_BW.m_as(GB/second)
-    a100_bw  = A100_MEM_BW.m_as(GB/second)
-    t4_ridge = t4_flops * 1000 / t4_bw
-    a100_roof_b1 = a100_bw * ai_b1 / 1000
-    t4_roof_b1 = t4_bw * ai_b1 / 1000
+    t4_flops     = T4_FLOPS_FP16_TENSOR.m_as(TFLOPs/second)
+    t4_bw        = T4_MEM_BW.m_as(GB/second)             # for "GB/s" prose display
+    a100_bw      = A100_MEM_BW.m_as(GB/second)
+    t4_bw_tbs    = T4_MEM_BW.m_as(TB/second)             # for dimensional roofline math
+    a100_bw_tbs  = A100_MEM_BW.m_as(TB/second)
+    t4_ridge     = t4_flops / t4_bw_tbs                  # TFLOPS / (TB/s) = FLOP/byte
+    a100_roof_b1 = a100_bw_tbs * ai_b1                   # (TB/s) × (FLOP/byte) = TFLOPS
+    t4_roof_b1   = t4_bw_tbs * ai_b1                     # same
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     fp_ai_b1_str   = fmt(ai_b1, precision=0, commas=False)
@@ -5690,7 +5691,10 @@ Beyond raw performance, we must evaluate hardware through the lens of *silicon s
 # │          CarbonRoiCalc.carbon_intensity_str, CarbonRoiCalc.co2_saved_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_percent, fmt, check
-from mlsysim.core.constants import DAYS_PER_YEAR
+from mlsysim.core.constants import (
+    DAYS_PER_YEAR, HOURS_PER_DAY, THOUSAND, BILLION,
+    watt, kilowatt,
+)
 
 class CarbonRoiCalc:
     """Carbon ROI of specialized NPU silicon vs generic CPU inference fleets."""
@@ -5702,10 +5706,10 @@ class CarbonRoiCalc:
     npu_power_w        = 5      # Watts per NPU chip
     npu_tflops         = 10     # Peak TFLOPS for NPU inference
     npu_chips          = 100    # Same throughput class as 1000 CPUs
-    inferences_per_day = 1e9    # 1 billion inferences/day
+    inferences_per_day = 1 * BILLION    # 1 billion inferences/day
     carbon_kg_per_kwh  = 0.4    # Approximate global grid average (kg CO2/kWh)
-    cpu_energy_kwh_day = cpu_servers * cpu_power_w * 24 / 1000
-    npu_energy_kwh_day = npu_chips * npu_power_w * 24 / 1000
+    cpu_energy_kwh_day = (cpu_servers * cpu_power_w * watt).m_as(kilowatt) * HOURS_PER_DAY
+    npu_energy_kwh_day = (npu_chips * npu_power_w * watt).m_as(kilowatt) * HOURS_PER_DAY
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     cpu_eff = cpu_tflops/cpu_power_w
@@ -5714,7 +5718,7 @@ class CarbonRoiCalc:
 
     energy_savings_kwh_day = cpu_energy_kwh_day - npu_energy_kwh_day
     co2_saved_kg_year      = energy_savings_kwh_day * DAYS_PER_YEAR * carbon_kg_per_kwh
-    co2_saved_metric_tons  = co2_saved_kg_year / 1000
+    co2_saved_metric_tons  = co2_saved_kg_year / THOUSAND   # kg → metric ton (1 t = 1000 kg)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(eff_gap == 200, f"Efficiency gap should be 200×, got {eff_gap}×")
@@ -5730,7 +5734,7 @@ class CarbonRoiCalc:
     cpu_eff_str        = fmt(cpu_eff, precision=2)
     npu_eff_str        = fmt(npu_eff, precision=1)
     eff_gap_str        = fmt(eff_gap, precision=0)
-    workload_str       = fmt(inferences_per_day / 1e9, precision=0)
+    workload_str       = fmt(inferences_per_day / BILLION, precision=0)
     cpu_energy_day_str = fmt(cpu_energy_kwh_day, precision=0)
     npu_energy_day_str = fmt(npu_energy_kwh_day, precision=0)
     carbon_intensity_str = fmt(carbon_kg_per_kwh, precision=1)
