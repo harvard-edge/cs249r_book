@@ -230,7 +230,7 @@ ENERGY_FLOP_PJ = 4.6 * ureg.picojoule / flop         # Generic (legacy alias)
 ENERGY_SRAM_L1_PJ = 0.5 * ureg.picojoule             # L1 cache access
 ENERGY_SRAM_L2_PJ = 2.0 * ureg.picojoule             # L2 cache access
 ENERGY_REG_PJ = 0.01 * ureg.picojoule                # Register file access
-ENERGY_MOBILENET_INF_MJ = 0.1 * ureg.millijoule
+ENERGY_MOBILENET_INF_MJ = 0.1 * ureg.millijoule  # millijoule (not megajoule); matches the ENERGY_*_PJ = picojoule convention used in this block
 
 # Addition energy (Horowitz 2014, 45nm process)
 ENERGY_ADD_FP32_PJ = 0.9 * ureg.picojoule
