@@ -2032,7 +2032,7 @@ These three components form a tightly coupled system where throughput depends on
 # │ How:  Hardware constants from Digital Twins; hard-coded benchmark times.
 # │
 # │ Imports: mlsysim.core.constants (NVME_SEQUENTIAL_BW, SYSTEM_MEMORY_BW,
-# │          NVLINK_H100_BW, GB, second, GIB_TO_BYTES)
+# │          NVLINK_H100_BW, GB, second, byte)
 # │ Exports: StorageBandwidth.{nvme,system_mem,nvlink}_*_str;
 # │          PreprocessingScenarios.{crop,jitter,norm,total_preprocess,
 # │          num_workers,prefetch,buffer}_*_str
@@ -2067,7 +2067,7 @@ class PreprocessingScenarios:
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────────
     total_preprocess_ms = crop_time_ms + jitter_time_ms + norm_time_ms
-    buffer_mem_gb = (buffer_batch_size * buffer_image_res**2 * 3 * 4) / GIB_TO_BYTES
+    buffer_mem_gb = ((buffer_batch_size * buffer_image_res**2 * 3 * 4) * byte).m_as(GB)
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────────
     check(total_preprocess_ms == 30, f"Preprocessing time mismatch: {total_preprocess_ms} != 30ms")
@@ -2391,13 +2391,13 @@ Applying this throughput analysis to our GPT-2 Lighthouse Model reveals where th
 # │ Show: That tokenization can become a CPU bottleneck for language models.
 # │ How: Calculate latency for tokenization and PCIe transfer phases.
 # │
-# │ Imports: mlsysim.core.constants (PCIE_GEN3_BW, GB, second),
-# │          mlsysim.book (fmt)
+# │ Imports: mlsysim.core.constants (PCIE_GEN3_BW, GB, KB, byte, second,
+# │          THOUSAND, BILLION), mlsysim.book (fmt)
 # │ Exports: tokens_per_batch_str, tokenization_ms_str, batch_kb_str,
 # │          pcie_gen3_str, transfer_ms_str, n_cpu_workers_str,
 # │          parallel_tokenization_ms_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import PCIE_GEN3_BW, GB, second
+from mlsysim.core.constants import PCIE_GEN3_BW, GB, KB, byte, second, THOUSAND, BILLION
 from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2420,14 +2420,14 @@ class GPT2DataPipeline:
     tokenization_ms = (tokens_per_batch/token_rate) * 1000
 
     batch_bytes = tokens_per_batch * 8 # int64
-    batch_kb = batch_bytes/KIB_TO_BYTES
+    batch_kb = (batch_bytes * byte).m_as(KB)
 
     transfer_ms = (batch_bytes/BILLION) / pcie_bw * 1000 # GB/GB/s * 1000
 
     parallel_token_ms = tokenization_ms/workers
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    tokens_per_batch_str = f"{tokens_per_batch // 1000}K"
+    tokens_per_batch_str = f"{int(tokens_per_batch // THOUSAND)}K"
     tokenization_ms_str = fmt(tokenization_ms, precision=0, commas=False)
     batch_kb_str = fmt(batch_kb, precision=0, commas=False)
     pcie_gen3_str = f"{pcie_bw}"
@@ -2749,14 +2749,14 @@ These hardware utilization patterns reinforce the batch-size--utilization relati
 # │ Show: That model state alone can exceed consumer GPU capacity.
 # │ How: Sum weights, gradients, optimizer states, and activations for a 7B model.
 # │
-# │ Imports: mlsysim.core.constants (BYTES_FP16, BYTES_FP32, BYTES_ADAM_STATE, byte),
-# │          mlsysim.book (fmt)
+# │ Imports: mlsysim.core.constants (BYTES_FP16, BYTES_FP32, BYTES_ADAM_STATE,
+# │          byte, GB), mlsysim.book (fmt)
 # │ Exports: vram_params_b_str, vram_gpu_capacity_str, vram_fp16_bytes_str,
 # │          vram_adam_bytes_str, vram_weights_gb_str, vram_gradients_gb_str,
 # │          vram_optimizer_gb_str, vram_subtotal_gb_str, vram_seq_str,
 # │          vram_hidden_str, vram_layers_str, vram_activations_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import BYTES_FP16, BYTES_FP32, BYTES_ADAM_STATE, byte
+from mlsysim.core.constants import BYTES_FP16, BYTES_FP32, BYTES_ADAM_STATE, byte, GB
 from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2780,7 +2780,7 @@ class VRAMRequirements:
     hidden = 4096
     layers = 32
     activation_factor = 4
-    activations_gb = batch * seq * hidden * layers * bytes_fp16 * activation_factor / 1e9
+    activations_gb = (batch * seq * hidden * layers * bytes_fp16 * activation_factor * byte).m_as(GB)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     weights_gb = params_b * bytes_fp16
@@ -4787,12 +4787,13 @@ Returning to our GPT-2 Lighthouse Model, *gradient accumulation* is essential fo
 # │ Show: The significant dollar savings achieved by reducing cluster size.
 # │ How: Calculate costs for naive large clusters vs. small clusters with accumulation.
 # │
-# │ Imports: mlsysim.book (fmt)
+# │ Imports: mlsysim.core.constants (THOUSAND), mlsysim.book (fmt)
 # │ Exports: gpus_naive_str, batch_per_gpu_str, naive_hourly_str,
 # │          accum_hourly_str, savings_hourly_str, savings_pct_str,
 # │          accum_2wk_str, naive_2wk_str, comm_reduction_pct_str,
 # │          accum_steps_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import THOUSAND
 from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -4821,8 +4822,8 @@ class GradientAccumulation:
     savings_pct = savings_hourly/naive_hourly * 100
 
     # 2-week training cost
-    accum_2wk = gpus_accum * gpu_hourly_rate * training_hours / 1000  # $K
-    naive_2wk = gpus_naive * gpu_hourly_rate * training_hours / 1000  # $K
+    accum_2wk = gpus_accum * gpu_hourly_rate * training_hours / THOUSAND  # $K
+    naive_2wk = gpus_naive * gpu_hourly_rate * training_hours / THOUSAND  # $K
 
     # Communication reduction
     comm_reduction_pct = (1 - 1 / accum_steps) * 100
