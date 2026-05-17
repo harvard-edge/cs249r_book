@@ -2966,12 +2966,17 @@ class ValidateCommand:
             yield idx, line, ("callout" in div_stack), False, "prose"
 
     def _run_table_caption_required(self, root: Path) -> ValidationRunResult:
-        """Flag pipe tables in body prose that lack `: caption {#tbl-X}`.
+        """Flag pipe tables (body prose AND inside callouts) lacking `: caption {#tbl-X}`.
 
-        Skips tables inside `::: {.callout-*}` divs (the callout title acts
-        as the contextual heading) and files under frontmatter/ or
-        backmatter/. Pre-existing violations are grandfathered via the
-        captions baseline; new ones error.
+        Per the policy codified after the 2026-05 release pass: every pipe
+        table that carries quantitative content needs a caption + ID,
+        regardless of whether it sits in body prose, inside a callout, or
+        inside a `{tbl-colwidths=...}` div. The MIT Press / H&P / CS:APP
+        convention is universal captioning.
+
+        Skips files under frontmatter/. Pre-existing violations (including
+        the ~93 captionless tables surfaced when this rule was extended)
+        are grandfathered via the captions baseline; new ones error.
         """
         start = time.time()
         files = self._qmd_files(root)
@@ -2992,9 +2997,11 @@ class ValidateCommand:
                 if kind != "prose":
                     i += 1
                     continue
-                if cal:
-                    i += 1
-                    continue
+                # NOTE: We used to skip tables inside ::: {.callout-*} divs
+                # ("the callout title acts as the contextual heading"). That
+                # exception was retired after the 2026-05 release pass — the
+                # callout title is not a citable reference, and tables that
+                # carry quantitative content need IDs in any context.
                 if (self._PIPE_ROW_RE.match(line)
                         and i + 1 < n
                         and self._PIPE_SEP_RE.match(lines[i + 1])):
