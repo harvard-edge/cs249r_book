@@ -572,7 +572,7 @@ As @tbl-fleet-orchestration-slurm-partitions shows, GPU allocation strategies si
 
 The interaction between GPU allocation and node selection creates subtleties that affect both performance and utilization. A job requesting `--gpus=16 --gpus-per-node=8` will always receive exactly 2 complete nodes, ensuring all 8 GPUs within each node communicate via NVLink. The same job requesting `--gpus=16` without the per-node constraint might receive GPUs spread across 3 or 4 partially occupied nodes, degrading intra-node communication performance. For training jobs using tensor parallelism, the per-node constraint is essential; for data-parallel jobs that communicate only through AllReduce, the flexibility of unconstrained placement improves the scheduler's ability to find valid allocations and reduces fragmentation.
 
-The **fair-share scheduling** mechanism prevents any single user or project from monopolizing resources over time. The core insight is that past usage should affect future priority: heavy users should yield to lighter users when the cluster is contended. As an illustrative heuristic capturing this insight, an effective priority can be written as:
+The **fair-share scheduling** mechanism prevents any single user or project from monopolizing resources over time. The core insight is that past usage should affect future priority: heavy users should yield to lighter users when the cluster is contended. @eq-fleet-orchestration-fair-share captures this heuristic as an effective priority:
 
 $$\text{Priority}_{\text{effective}} = \text{Priority}_{\text{base}} \times \frac{F_{\text{target}}}{F_{\text{actual}} + \epsilon}$$ {#eq-fleet-orchestration-fair-share}
 
@@ -608,7 +608,7 @@ Kubernetes' control loop architecture is built on the **controller pattern**[^fn
 
 [^fn-controller-k8s]: **Controller Pattern (Reconciliation Loop)**: A "level-triggered" design where the controller continuously compares desired state to actual state, as opposed to "edge-triggered" systems that react to individual events. The distinction matters for ML clusters: if a controller crashes and restarts, it re-reads current state and self-heals without needing an event log. The trade-off is that emergent interactions between multiple independent controllers can create unexpected scheduling behaviors that are difficult to debug sequentially. \index{Controller Pattern!Kubernetes}
 
-Native Kubernetes lacks ML-aware scheduling, but a growing ecosystem of extensions addresses this gap. GPU scheduling relies on **device plugins**\index{Device Plugins} that expose accelerators as schedulable extended resources. The NVIDIA device plugin registers GPUs with the kubelet (the node-level agent), enabling pod specifications that request GPU resources declaratively through the standard Kubernetes resource model.
+Native Kubernetes lacks ML-aware scheduling, but a growing ecosystem of extensions addresses this gap. GPU scheduling relies on **device plugins**\index{Device Plugins} that expose accelerators as schedulable extended resources. The NVIDIA device plugin registers GPUs with the kubelet (the node-level agent), enabling pod specifications that request GPU resources declaratively through the standard Kubernetes resource model. @lst-fleet-orchestration-k8s-gpu shows the resulting pod fragment:
 
 ::: {#lst-fleet-orchestration-k8s-gpu lst-cap="**Kubernetes GPU Allocation**\index{Kubernetes!gpu allocation}: Pod resource specification requesting GPUs through the NVIDIA device plugin. The `nvidia.com/gpu` resource name follows Kubernetes extended resource conventions, where the domain prefix identifies the device plugin vendor. This declarative syntax enables portable GPU workload definitions across any Kubernetes cluster with the NVIDIA device plugin installed."}
 
@@ -756,7 +756,7 @@ The bandwidth gap shown in @fig-topology-placement-paths is the key constraint: 
 
 ### Placement algorithms {#sec-fleet-orchestration-placement-algorithms}
 
-Topology-aware placement algorithms assign jobs to nodes that minimize communication cost, transforming the abstract bin packing problem into a graph optimization problem on the cluster's physical topology. The simplest approach uses a **locality score**\index{Locality Score} that penalizes allocations spanning multiple topology domains:
+Topology-aware placement algorithms assign jobs to nodes that minimize communication cost, transforming the abstract bin packing problem into a graph optimization problem on the cluster's physical topology. The simplest approach uses a **locality score**\index{Locality Score}, defined in @eq-fleet-orchestration-locality-score, that penalizes allocations spanning multiple topology domains:
 
 $$ S_{\text{locality}} = \sum_{i < j} w(d(g_i, g_j)) $$ {#eq-fleet-orchestration-locality-score}
 
@@ -962,7 +962,7 @@ The alternative, adaptive batch size scaling, keeps $B_{\text{per\_worker}}$ con
 
 ### Framework support {#sec-fleet-orchestration-elastic-frameworks}
 
-TorchElastic (torchelastic), integrated into PyTorch's `torch.distributed.elastic` module, provides the runtime infrastructure for elastic training. Jobs specify minimum and maximum worker counts, and TorchElastic manages worker lifecycle:
+TorchElastic (torchelastic), integrated into PyTorch's `torch.distributed.elastic` module, provides the runtime infrastructure for elastic training. Jobs specify minimum and maximum worker counts, and TorchElastic manages worker lifecycle, as @lst-fleet-orchestration-torchelastic illustrates:
 
 ::: {#lst-fleet-orchestration-torchelastic lst-cap="**TorchElastic Launch Configuration**\index{TorchElastic Launch Configuration}: Elastic training specification allowing a job to run with between 32 and 128 GPUs. The rendezvous backend coordinates worker group membership changes, while the framework handles gradient synchronization group reconstruction when workers join or leave."}
 
@@ -1251,7 +1251,7 @@ Cloud providers offer **spot instances**[^fn-spot-instances-cloud] (AWS) or **pr
 
 [^fn-spot-instances-cloud]: **Spot Instances**: Named after commodity trading's "spot price" (the current market price for immediate delivery), spot instances sell spare cloud capacity at 60 to 90 percent discounts with the provider retaining reclamation rights. The critical asymmetry for ML training is the interruption notice window: AWS provides 2 minutes, GCP provides 30 seconds. A 175B-parameter model requires 3 to 5 minutes to checkpoint, so GCP's 30-second notice forces either continuous checkpointing overhead or acceptance of lost work on every interruption. \index{Spot Instances!cost optimization}
 
-The viability of spot instances for ML training depends on two factors that determine whether the discount translates into actual savings: the cost of each interruption (checkpoint overhead plus restart time plus lost work since the last checkpoint) and the frequency of interruption (which varies by instance type, region, time of day, and overall cloud demand). The **effective cost** of spot training is:
+The viability of spot instances for ML training depends on two factors that determine whether the discount translates into actual savings: the cost of each interruption (checkpoint overhead plus restart time plus lost work since the last checkpoint) and the frequency of interruption (which varies by instance type, region, time of day, and overall cloud demand). @eq-fleet-orchestration-spot-cost gives the **effective cost** of spot training:
 
 $$ C_{\text{effective}} = C_{\text{spot}} \times \frac{T_{\text{total}}}{T_{\text{productive}}} $$ {#eq-fleet-orchestration-spot-cost}
 
@@ -1325,7 +1325,7 @@ Technical optimization must be paired with financial accountability through **ML
 
 Optimizing for spot instance availability or scheduling density addresses only the visible tip of the infrastructure iceberg. The Total Cost of Ownership (TCO) for a machine learning fleet extends far beyond simple GPU-hours. In high-performance clusters, the compute silicon typically accounts for only 40 to 60 percent of the total system cost. The remainder is consumed by the supporting infrastructure required to keep that silicon fed and cool: high-bandwidth networking (InfiniBand switches, optics, and cabling), parallel file systems for checkpointing, and specialized power and cooling delivery. A single rack of H100 nodes can draw upwards of 40 kW, ten times the density of a standard web server rack, forcing facilities to deploy liquid cooling or rear-door heat exchangers that radically alter the facility's capital requirements.
 
-For an organization deciding between building a private cluster or renting cloud capacity, the decision hinges on the **amortization equation**\index{Amortization Equation}. The TCO of an on-premise cluster over a typical three-year hardware lifecycle is the sum of Capital Expenditure $(C_{\text{cap}})$, Operational Expenditure $(C_{\text{ops}})$, and the often-overlooked Opportunity Cost $(C_{\text{opp}})$ of tying up capital in depreciating assets:
+For an organization deciding between building a private cluster or renting cloud capacity, the decision hinges on the **amortization equation**\index{Amortization Equation}. @eq-fleet-orchestration-tco expresses the TCO of an on-premise cluster over a typical three-year hardware lifecycle as the sum of Capital Expenditure $(C_{\text{cap}})$, Operational Expenditure $(C_{\text{ops}})$, and the often-overlooked Opportunity Cost $(C_{\text{opp}})$ of tying up capital in depreciating assets:
 
 $$ \text{TCO}_{3\text{yr}} = C_{\text{cap}} + 3 \times C_{\text{ops}} + C_{\text{opp}} $$ {#eq-fleet-orchestration-tco}
 
@@ -1739,7 +1739,7 @@ Without explicit resource management policies, resource allocation degrades to a
 
 GPU quota allocation typically operates at the namespace or project level, defining how much of the cluster each team is entitled to use. The simplest approach allocates fixed GPU counts per team: Team A gets 500 GPUs, Team B gets 300 GPUs, Team C gets 200 GPUs. This approach is easy to understand and implement but leads to systematic underutilization when teams have variable workloads. If Team A's 500-GPU allocation sits 50 percent idle during a quiet period while Team B's queue overflows with urgent work, the cluster wastes 250 GPUs of capacity that rigid quotas forbid Team B from using. The alternative, allocating less quota to each team, creates a different problem: teams are blocked from running legitimate work during peak periods even when the cluster has overall spare capacity.
 
-Hierarchical quotas resolve this tension by enabling departmental limits with sub-team flexibility and cross-team borrowing. The effective quota for any team is bounded by both its own allocation and the remaining capacity within its parent organization:
+Hierarchical quotas resolve this tension by enabling departmental limits with sub-team flexibility and cross-team borrowing. @eq-fleet-orchestration-quota bounds the effective quota for any team by both its own allocation and the remaining capacity within its parent organization:
 
 $$ Q_{\text{effective}} = \min\left(Q_{\text{team}},\ Q_{\text{department}} - \sum_{\text{other teams}} U_{\text{allocated}}\right) $$ {#eq-fleet-orchestration-quota}
 
