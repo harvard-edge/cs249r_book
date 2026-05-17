@@ -118,6 +118,10 @@ class TrainingScenarios:
     fp16_max_val_str            = fmt(fp16_max_val, precision=0, commas=True)
     gpt3_gpu_years_str          = fmt(gpt3_gpu_years, precision=0, commas=True)
     gpt3_compute_cost_str       = fmt(gpt3_cost/MILLION, precision=1, commas=False)
+
+    # Hardware specs used in the staged-pipeline narrative and MFU callout
+    nvlink_h100_gbs_str         = fmt(NVLINK_H100_BW.m_as(GB/second), precision=0, commas=False)
+    a100_tflops_fp16_str        = fmt(A100_FLOPS_FP16_TENSOR.m_as(TFLOPs/second), precision=0, commas=False)
 ```
 
 ## Training Systems Fundamentals {#sec-model-training-training-systems-fundamentals-05d2}
@@ -153,7 +157,7 @@ A training system is not a single loop; it is a **staged system pipeline**\index
 1.  **Data Loading & Preprocessing** (CPU/Storage): Fetching raw bits from Non-Volatile Memory Express (NVMe), decoding, and augmenting on CPU cores.
 2.  **Host-to-Device Transfer** (PCIe): Moving the processed batch over the **PCIe bus** into GPU memory via DMA.
 3.  **Forward/Backward Pass** (Accelerator): Propagating activations and gradients through layers on the GPU.
-4.  **Parameter Synchronization** (NVLink): Exchanging gradients between GPUs over **NVLink (900 GB/s)** in multi-GPU configurations to update weights.
+4.  **Parameter Synchronization** (NVLink): Exchanging gradients between GPUs over **NVLink (`{python} TrainingScenarios.nvlink_h100_gbs_str` GB/s)** in multi-GPU configurations to update weights.
 
 Any mismatch in the throughput of these stages creates **accelerator bubbles**\index{Accelerator!bubbles, pipeline idleness}—intervals of idle silicon where the "Machine" axis of the AI Triad sits at 0 percent utilization while waiting for the "Data" axis to catch up. A systems engineer's primary task during training is to eliminate these bubbles through **asynchronous prefetching** and **pipeline overlapping**, ensuring that the next batch is ready on the PCIe bus before the current backward pass completes. We develop the quantitative tools for measuring and fixing these bubbles in @sec-model-training-identifying-bottlenecks-f57f.
 
@@ -2373,7 +2377,7 @@ Preprocessed data must then transfer to the accelerator before computation can b
 $$R_{\text{training}} =\min(R_{\text{preprocessing}}, \text{BW}_{\text{GPU\_transfer}}, \text{BW}_{\text{GPU\_compute}})$$ {#eq-training-bottleneck}
 
 \index{Training Bottleneck!min-of-three relationship}
-This min-of-three relationship is the governing principle of training pipeline design: the system's throughput equals its bottleneck's throughput. An accelerator with 312 TFLOPS of compute capacity delivers zero useful work while waiting for data. Conversely, a perfectly optimized data pipeline provides no benefit if the accelerator is already compute-saturated. Balanced pipeline design aligns preprocessing capacity, transfer bandwidth, and compute throughput so that no single stage dominates iteration time.
+This min-of-three relationship is the governing principle of training pipeline design: the system's throughput equals its bottleneck's throughput. An accelerator with `{python} TrainingScenarios.a100_tflops_fp16_str` TFLOPS of compute capacity delivers zero useful work while waiting for data. Conversely, a perfectly optimized data pipeline provides no benefit if the accelerator is already compute-saturated. Balanced pipeline design aligns preprocessing capacity, transfer bandwidth, and compute throughput so that no single stage dominates iteration time.
 
 Applying this throughput analysis to our GPT-2 Lighthouse Model reveals where the *data pipeline bottleneck* lies for language model training.
 
@@ -3238,7 +3242,7 @@ Production systems typically achieve 30–50 percent MFU[^fn-mfu]; values below 
 
 ***Model FLOPs Utilization (MFU)***\index{Model FLOPS Utilization!definition} is the efficiency metric $\text{MFU} = C_{\text{model}} / (R_{\text{peak}} \cdot T_{\text{step}})$, where $C_{\text{model}}$ is the useful per-step model FLOP count (forward plus backward, excluding rematerialization) and $T_{\text{step}}$ is the measured wall-clock time per training step, expressing what fraction of peak hardware throughput is doing useful model computation.
 
-1.  **Significance (quantitative)**: MFU is the $\eta_{\text{hw}}$ term in the iron law made concrete. For a 7B-parameter transformer processing 1,024 tokens per step on an A100 (312 TFLOPS BF16), a 1.2-second step yields $\text{MFU} = 7\text{B} \times 6 \text{ FLOPs/param/token} \times 1024 / (312\text{e}12 \times 1.2) \approx 0.11$ (11 percent), meaning 89 percent of peak compute is lost to memory stalls, communication, and scheduling overhead. Production systems typically reach 30–50 percent MFU; values below 30 percent indicate a specific addressable bottleneck.
+1.  **Significance (quantitative)**: MFU is the $\eta_{\text{hw}}$ term in the iron law made concrete. For a 7B-parameter transformer processing 1,024 tokens per step on an A100 (`{python} TrainingScenarios.a100_tflops_fp16_str` TFLOPS BF16), a 1.2-second step yields $\text{MFU} = 7\text{B} \times 6 \text{ FLOPs/param/token} \times 1024 / (`{python} TrainingScenarios.a100_tflops_fp16_str`\text{e}12 \times 1.2) \approx 0.11$ (11 percent), meaning 89 percent of peak compute is lost to memory stalls, communication, and scheduling overhead. Production systems typically reach 30–50 percent MFU; values below 30 percent indicate a specific addressable bottleneck.
 2.  **Distinction (durable)**: Unlike hardware utilization reported by profilers (which counts all cycles where the compute units are active, including gradient checkpointing recomputation and padding FLOPs), MFU counts only the FLOPs that directly advance the model toward convergence—providing a hardware-agnostic efficiency score that is comparable across different accelerator generations.
 3.  **Common pitfall**: A frequent misconception is that 100 percent MFU is achievable. Memory bandwidth is always a finite resource: even a perfectly compute-bound kernel must load weights from DRAM, and the resulting stalls impose a ceiling well below 100 percent. The practical upper bound for most transformer training runs is 55–65 percent MFU, achievable only with FlashAttention and carefully tuned batch sizes.
 

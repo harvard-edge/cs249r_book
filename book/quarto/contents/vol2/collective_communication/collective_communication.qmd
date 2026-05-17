@@ -529,13 +529,15 @@ The alpha-beta model becomes most valuable when applied to real training configu
 # │ How: α-β model applied per tier: NVLink ReduceScatter → IB Ring → NVLink
 # │      AllGather; comm-to-compute ratio computed for both strategies.
 # │
-# │ Imports: mlsysim.core.constants (MS_PER_SEC)
+# │ Imports: mlsysim.core.constants (MS_PER_SEC, NVLINK_H100_BW,
+# │          INFINIBAND_NDR_BW, GB, second)
 # │ Exports: gradient_bf16_gb_str, intra_rs_time_ms_str, inter_payload_gb_str,
 # │          inter_ring_bw_time_ms_str, inter_ring_lat_time_ms_str,
 # │          intra_ag_time_ms_str, hier_total_llama_ms_str, flat_total_ms_str,
-# │          ccr_hier_str, ccr_flat_str, n_gpus_llama_str
+# │          ccr_hier_str, ccr_flat_str, n_gpus_llama_str,
+# │          nvlink_bw_str, ib_bw_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import MS_PER_SEC
+from mlsysim.core.constants import MS_PER_SEC, NVLINK_H100_BW, INFINIBAND_NDR_BW, GB, second
 
 class LlamaBudgetCalc:
     """Hierarchical vs. flat Ring AllReduce timing budget for a 70B model on 128 GPUs."""
@@ -546,10 +548,10 @@ class LlamaBudgetCalc:
     param_count_b       = 70
     gradient_bf16_gb    = param_count_b * 2   # 140 GB in BF16
 
-    nvlink_bw   = 900    # GB/s
-    nvlink_alpha = 1.5   # us
-    ib_bw        = 50    # GB/s per port
-    ib_alpha     = 3     # us
+    nvlink_bw   = NVLINK_H100_BW.m_as(GB/second)         # GB/s (H100 NVLink 4.0)
+    nvlink_alpha = 1.5                                    # us
+    ib_bw        = (INFINIBAND_NDR_BW / 8).m_as(GB/second)  # GB/s per port (NDR 400 Gbps)
+    ib_alpha     = 3                                      # us
     compute_per_step_ms = 200  # approximate for illustration
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -591,12 +593,14 @@ class LlamaBudgetCalc:
     ccr_hier_str               = f"{ccr_hier:.1f}"
     ccr_flat_str               = f"{ccr_flat:.1f}"
     n_gpus_llama_str           = f"{n_gpus_llama}"
+    nvlink_bw_str              = f"{nvlink_bw:.0f}"
+    ib_bw_str                  = f"{ib_bw:.0f}"
 ```
 
 Using BF16 gradients (a standard practice that halves communication volume to `{python} LlamaBudgetCalc.gradient_bf16_gb_str` GB), the hierarchical AllReduce decomposes as follows:
 
-1. **Intra-Node ReduceScatter** (NVLink at 900 GB/s): Each GPU exchanges 7/8 of the gradient locally. Time: `{python} LlamaBudgetCalc.intra_rs_time_ms_str` ms.
-2. **Inter-Node Ring AllReduce** (InfiniBand NDR at 50 GB/s): Each GPU synchronizes only `{python} LlamaBudgetCalc.inter_payload_gb_str` GB across 16 nodes. Bandwidth time: `{python} LlamaBudgetCalc.inter_ring_bw_time_ms_str` ms. Latency time: `{python} LlamaBudgetCalc.inter_ring_lat_time_ms_str` ms.
+1. **Intra-Node ReduceScatter** (NVLink at `{python} LlamaBudgetCalc.nvlink_bw_str` GB/s): Each GPU exchanges 7/8 of the gradient locally. Time: `{python} LlamaBudgetCalc.intra_rs_time_ms_str` ms.
+2. **Inter-Node Ring AllReduce** (InfiniBand NDR at `{python} LlamaBudgetCalc.ib_bw_str` GB/s): Each GPU synchronizes only `{python} LlamaBudgetCalc.inter_payload_gb_str` GB across 16 nodes. Bandwidth time: `{python} LlamaBudgetCalc.inter_ring_bw_time_ms_str` ms. Latency time: `{python} LlamaBudgetCalc.inter_ring_lat_time_ms_str` ms.
 3. **Intra-Node AllGather** (NVLink): Distributes the final result locally. Time: `{python} LlamaBudgetCalc.intra_ag_time_ms_str` ms.
 
 The total hierarchical AllReduce takes approximately `{python} LlamaBudgetCalc.hier_total_llama_ms_str` ms, compared to `{python} LlamaBudgetCalc.flat_total_ms_str` ms for a flat Ring AllReduce that ignores the bandwidth hierarchy. This difference is not marginal; it determines whether communication can be hidden behind computation or whether it becomes the critical path.
@@ -1300,12 +1304,13 @@ The net effect: inter-node traffic is reduced by a factor of $G$ (GPUs per node)
 # │ How: Flat: T = 2M/β_IB; Hierarchical: T = T_rs + T_inter + T_ag with
 # │      NVLink for intra-node phases and IB for inter-node phase.
 # │
-# │ Imports: mlsysim.core.constants (MB, GB, second, ms)
+# │ Imports: mlsysim.core.constants (MB, GB, second, ms, NVLINK_H100_BW,
+# │          INFINIBAND_NDR_BW)
 # │ Exports: flat_time_ms_str, intra_data_mb_str, intra_rs_ms_str,
 # │          inter_data_mb_str, inter_time_ms_str, intra_ag_ms_str,
-# │          hier_total_ms_str, speedup_str
+# │          hier_total_ms_str, speedup_str, ib_bw_gbs_str, nvlink_bw_gbs_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import MB, GB, second, ms
+from mlsysim.core.constants import MB, GB, second, ms, NVLINK_H100_BW, INFINIBAND_NDR_BW
 
 class HierarchicalAllreduceCalc:
     """Flat vs. 3-step hierarchical AllReduce timing for a 1 GB gradient on 64 GPUs."""
@@ -1313,8 +1318,8 @@ class HierarchicalAllreduceCalc:
     n_nodes_har    = 8
     gpus_per_node  = 8
     gradient_gb    = 1       # 1 GB gradient buffer
-    ib_bw_gbs      = 50      # InfiniBand GB/s
-    nvlink_bw_gbs  = 900     # NVLink GB/s
+    ib_bw_gbs      = (INFINIBAND_NDR_BW / 8).m_as(GB/second)  # InfiniBand NDR 400 Gbps per port
+    nvlink_bw_gbs  = NVLINK_H100_BW.m_as(GB/second)            # NVLink 4.0 (H100)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     flat_data_gb  = 2 * gradient_gb   # bandwidth-optimal Ring sends ~2×
@@ -1343,6 +1348,8 @@ class HierarchicalAllreduceCalc:
     inter_time_ms_str = f"{inter_time_ms:.0f}"
     intra_ag_ms_str   = f"{intra_ag_ms:.0f}"
     hier_total_ms_str = f"{hier_total_ms:.0f}"
+    ib_bw_gbs_str     = f"{ib_bw_gbs:.0f}"
+    nvlink_bw_gbs_str = f"{nvlink_bw_gbs:.0f}"
     speedup_str       = f"{speedup:.1f}"
 ```
 
@@ -1354,17 +1361,17 @@ class HierarchicalAllreduceCalc:
 
 - Each GPU sends ~2 GB total (the bandwidth-optimal Ring AllReduce formula).
 - The ring crosses node boundaries multiple times.
-- **Effective bandwidth**\index{Bandwidth!effective}: Limited by the slowest link = 50 GB/s (InfiniBand).
+- **Effective bandwidth**\index{Bandwidth!effective}: Limited by the slowest link = `{python} HierarchicalAllreduceCalc.ib_bw_gbs_str` GB/s (InfiniBand).
 - **Time**: $\approx 2 \times 1\ \text{GB} / 50\ \text{GB/s}$ = `{python} HierarchicalAllreduceCalc.flat_time_ms_str` ms (bandwidth term dominates).
 
 **Hierarchical AllReduce (3-step decomposition)**:
 
-1. **Intra-node ReduceScatter**: Each GPU sends `{python} HierarchicalAllreduceCalc.intra_data_mb_str` MB at 900 GB/s → ~`{python} HierarchicalAllreduceCalc.intra_rs_ms_str` ms
-2. **Inter-Node AllReduce**\index{AllReduce!inter-node}: Each GPU AllReduces a $1\ \text{GB}/8$ = `{python} HierarchicalAllreduceCalc.inter_data_mb_str` MB shard over InfiniBand; Ring moves roughly $2(N-1)/N$ times that payload, giving ~`{python} HierarchicalAllreduceCalc.inter_time_ms_str` ms at 50 GB/s
+1. **Intra-node ReduceScatter**: Each GPU sends `{python} HierarchicalAllreduceCalc.intra_data_mb_str` MB at `{python} HierarchicalAllreduceCalc.nvlink_bw_gbs_str` GB/s → ~`{python} HierarchicalAllreduceCalc.intra_rs_ms_str` ms
+2. **Inter-Node AllReduce**\index{AllReduce!inter-node}: Each GPU AllReduces a $1\ \text{GB}/8$ = `{python} HierarchicalAllreduceCalc.inter_data_mb_str` MB shard over InfiniBand; Ring moves roughly $2(N-1)/N$ times that payload, giving ~`{python} HierarchicalAllreduceCalc.inter_time_ms_str` ms at `{python} HierarchicalAllreduceCalc.ib_bw_gbs_str` GB/s
 
    *(Only 1/8 of the data crosses InfiniBand!)*
 
-3. **Intra-node AllGather**: Each GPU receives `{python} HierarchicalAllreduceCalc.intra_data_mb_str` MB at 900 GB/s → ~`{python} HierarchicalAllreduceCalc.intra_ag_ms_str` ms
+3. **Intra-node AllGather**: Each GPU receives `{python} HierarchicalAllreduceCalc.intra_data_mb_str` MB at `{python} HierarchicalAllreduceCalc.nvlink_bw_gbs_str` GB/s → ~`{python} HierarchicalAllreduceCalc.intra_ag_ms_str` ms
 - **Total time**: $\approx$ `{python} HierarchicalAllreduceCalc.intra_rs_ms_str` + `{python} HierarchicalAllreduceCalc.inter_time_ms_str` + `{python} HierarchicalAllreduceCalc.intra_ag_ms_str` = `{python} HierarchicalAllreduceCalc.hier_total_ms_str` ms
 
 **Systems insight**: Hierarchical AllReduce achieves a **`{python} HierarchicalAllreduceCalc.speedup_str`$\times$ speedup** by reducing the inter-node payload from 1 GB to `{python} HierarchicalAllreduceCalc.inter_data_mb_str` MB per GPU before the Ring traffic multiplier. With 8 GPUs per node, we effectively get 8$\times$ the apparent inter-node bandwidth. This is why NVIDIA's NCCL and similar libraries default to hierarchical algorithms on multi-node clusters.
@@ -1460,10 +1467,11 @@ class ThreeLevelNapkin:
     gpus_per_node_3l = 8
     total_gpus_3l  = n_racks * nodes_per_rack * gpus_per_node_3l
 
+    from mlsysim.core.constants import NVLINK_H100_BW, INFINIBAND_NDR_BW, GB, second as _sec_3l
     gradient_3l_gb = 2    # 2 GB gradient (BF16 for a ~250B model)
-    nvlink_bw_3l   = 900  # GB/s
-    ib_bw_3l       = 50   # GB/s per port
-    cross_rack_bw  = 25   # GB/s effective (50/2 oversubscription)
+    nvlink_bw_3l   = NVLINK_H100_BW.m_as(GB/_sec_3l)            # H100 NVLink 4.0
+    ib_bw_3l       = (INFINIBAND_NDR_BW / 8).m_as(GB/_sec_3l)   # InfiniBand NDR 400 Gbps per port
+    cross_rack_bw  = ib_bw_3l / 2                                # 2:1 oversubscription
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Level 1: NVLink (intra-node)
@@ -1499,17 +1507,20 @@ class ThreeLevelNapkin:
     total_3l_ms_str      = f"{total_3l_ms:.1f}"
     flat_3l_ms_str       = f"{flat_3l_ms:.0f}"
     reduction_factor_str = f"{reduction_factor:.0f}"
+    nvlink_bw_3l_str     = f"{nvlink_bw_3l:.0f}"
+    ib_bw_3l_str         = f"{ib_bw_3l:.0f}"
+    cross_rack_bw_str    = f"{cross_rack_bw:.0f}"
 ```
 
 ::: {.callout-notebook title="Three-level hierarchical bandwidth budget"}
 
 **Problem**: A `{python} ThreeLevelNapkin.total_gpus_3l_str`-GPU cluster is arranged as 4 racks of 4 nodes of 8 GPUs. Cross-rack bandwidth is oversubscribed 2:1 (effective 25 GB/s). How much does 3-level hierarchical AllReduce reduce cross-rack traffic for a `{python} ThreeLevelNapkin.gradient_3l_gb_str` GB gradient?
 
-**Level 1 (Intra-Node, NVLink)**: ReduceScatter reduces each GPU's contribution by 8$\times$. Each GPU sends `{python} ThreeLevelNapkin.step1_payload_gb_str` GB at 900 GB/s = `{python} ThreeLevelNapkin.step1_time_ms_str` ms.
+**Level 1 (Intra-Node, NVLink)**: ReduceScatter reduces each GPU's contribution by 8$\times$. Each GPU sends `{python} ThreeLevelNapkin.step1_payload_gb_str` GB at `{python} ThreeLevelNapkin.nvlink_bw_3l_str` GB/s = `{python} ThreeLevelNapkin.step1_time_ms_str` ms.
 
-**Level 2 (Intra-Rack, InfiniBand)**: Ring AllReduce among 4 nodes on the same rack. Each GPU AllReduces a `{python} ThreeLevelNapkin.step2_payload_gb_str` GB rack-level payload; Ring traffic is roughly $2(N-1)/N$ times that payload at 50 GB/s. Time: `{python} ThreeLevelNapkin.step2_ring_bw_ms_str` ms.
+**Level 2 (Intra-Rack, InfiniBand)**: Ring AllReduce among 4 nodes on the same rack. Each GPU AllReduces a `{python} ThreeLevelNapkin.step2_payload_gb_str` GB rack-level payload; Ring traffic is roughly $2(N-1)/N$ times that payload at `{python} ThreeLevelNapkin.ib_bw_3l_str` GB/s. Time: `{python} ThreeLevelNapkin.step2_ring_bw_ms_str` ms.
 
-**Level 3 (Cross-Rack, Spine)**: Ring AllReduce among 4 racks. Each GPU AllReduces only a `{python} ThreeLevelNapkin.step3_payload_gb_str` GB cross-rack payload; Ring traffic again applies the $2(N-1)/N$ multiplier at 25 GB/s. Time: `{python} ThreeLevelNapkin.step3_ring_bw_ms_str` ms.
+**Level 3 (Cross-Rack, Spine)**: Ring AllReduce among 4 racks. Each GPU AllReduces only a `{python} ThreeLevelNapkin.step3_payload_gb_str` GB cross-rack payload; Ring traffic again applies the $2(N-1)/N$ multiplier at `{python} ThreeLevelNapkin.cross_rack_bw_str` GB/s. Time: `{python} ThreeLevelNapkin.step3_ring_bw_ms_str` ms.
 
 **Result**: Cross-rack payload per GPU is reduced by `{python} ThreeLevelNapkin.reduction_factor_str`$\times$ compared to the original gradient before the Ring traffic multiplier is applied. Total time: `{python} ThreeLevelNapkin.total_3l_ms_str` ms vs. `{python} ThreeLevelNapkin.flat_3l_ms_str` ms for flat AllReduce. The hierarchical decomposition concentrates traffic where bandwidth is abundant and minimizes traffic where bandwidth is scarce.
 
@@ -2054,9 +2065,10 @@ from mlsysim.fmt import check
 
 class NapkinOverlap:
     # ┌── 1. LOAD ──────────────────────────────────────────
+    from mlsysim.core.constants import NVLINK_H100_BW, GB, second as _sec_no
     params_b = 70
     bytes_per_param = 2       # FP16
-    nvlink_bw_gbs = 900
+    nvlink_bw_gbs = NVLINK_H100_BW.m_as(GB/_sec_no)
     compute_s = 2.1
     # ┌── 2. EXECUTE ───────────────────────────────────────
     gradient_gb = params_b * bytes_per_param
@@ -2115,7 +2127,7 @@ Networks are not perfect. A bad cable can flip bits. Unlike TCP (which checksums
 
 **Fallacy**: *Flat AllReduce is good enough for multi-node training.*
 
-A flat Ring AllReduce treats all links as equal, routing data across 50 GB/s InfiniBand when 900 GB/s NVLink is available within the node. For an 8-node cluster with 8 GPUs per node, hierarchical AllReduce reduces inter-node traffic by 8$\times$ compared to flat Ring, achieving 5--6$\times$ speedup. Ignoring the bandwidth hierarchy leaves the majority of intra-node bandwidth unused while overloading the scarce inter-node bandwidth.
+A flat Ring AllReduce treats all links as equal, routing data across `{python} CommInfraScenario.ib_ndr_bw_gbs` GB/s InfiniBand when `{python} CommInfraScenario.nvlink_h100_bw_gbs` GB/s NVLink is available within the node. For an 8-node cluster with 8 GPUs per node, hierarchical AllReduce reduces inter-node traffic by 8$\times$ compared to flat Ring, achieving 5--6$\times$ speedup. Ignoring the bandwidth hierarchy leaves the majority of intra-node bandwidth unused while overloading the scarce inter-node bandwidth.
 
 **Pitfall**: *Ignoring rank-to-GPU mapping for topology-aware routing.*
 

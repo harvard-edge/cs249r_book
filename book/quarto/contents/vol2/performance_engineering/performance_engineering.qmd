@@ -167,16 +167,16 @@ The efficiency frontier establishes what we are optimizing *toward*. The physics
 # │ How: pulling constants from mlsysim.core.constants.
 # │
 # │ Imports: mlsysim.core.constants (H100_FLOPS_FP8_TENSOR, H100_MEM_BW,
-# │          H100_MEM_CAPACITY, ENERGY_DRAM_ACCESS_PJ, ENERGY_SRAM_L1_PJ,
-# │          TFLOPs, TB, GiB, second, flop, byte)
+# │          H100_MEM_CAPACITY, H100_TDP, ENERGY_DRAM_ACCESS_PJ, ENERGY_SRAM_L1_PJ,
+# │          TFLOPs, TB, GiB, second, flop, byte, watt)
 # │ Exports: MemoryWallScenario.h100_fp8_str, MemoryWallScenario.h100_hbm_bw_str,
 # │          MemoryWallScenario.h100_ridge_fp8_str, MemoryWallScenario.energy_ratio_str,
-# │          MemoryWallScenario.h100_mem_str
+# │          MemoryWallScenario.h100_mem_str, MemoryWallScenario.h100_tdp_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.constants import (
-    H100_FLOPS_FP8_TENSOR, H100_MEM_BW, H100_MEM_CAPACITY,
+    H100_FLOPS_FP8_TENSOR, H100_MEM_BW, H100_MEM_CAPACITY, H100_TDP,
     ENERGY_DRAM_ACCESS_PJ, ENERGY_SRAM_L1_PJ,
-    TFLOPs, TB, GiB, second, flop, byte
+    TFLOPs, TB, GiB, second, flop, byte, watt
 )
 
 class MemoryWallScenario:
@@ -186,6 +186,7 @@ class MemoryWallScenario:
     flops_fp8 = H100_FLOPS_FP8_TENSOR
     bw = H100_MEM_BW
     mem = H100_MEM_CAPACITY
+    tdp = H100_TDP
     energy_dram = ENERGY_DRAM_ACCESS_PJ
     energy_sram = ENERGY_SRAM_L1_PJ
 
@@ -203,6 +204,7 @@ class MemoryWallScenario:
     h100_ridge_fp8_str = f"{ridge_fp8:.0f}"
     energy_ratio_str = f"{energy_ratio.m_as(''):.0f}"
     h100_mem_str = f"{mem.m_as(GiB):.0f}"
+    h100_tdp_str = f"{tdp.m_as(watt):.0f}"
 ```
 
 An NVIDIA H100 delivers `{python} MemoryWallScenario.h100_fp8_str` TFLOPS of FP8 compute but only `{python} MemoryWallScenario.h100_hbm_bw_str` TB/s of memory bandwidth. If every byte loaded from memory does fewer than `{python} MemoryWallScenario.h100_ridge_fp8_str` arithmetic operations, the compute units sit idle, starved for data. This gap between compute capability and memory delivery rate is the memory wall, and it defines the landscape within which all performance engineering operates.
@@ -223,7 +225,7 @@ The L2 cache sits between the SMs and HBM, providing a 50 MB on-chip buffer on t
 
 High Bandwidth Memory (HBM) is the main off-chip memory, providing `{python} MemoryWallScenario.h100_mem_str` GB of capacity at `{python} MemoryWallScenario.h100_hbm_bw_str` TB/s bandwidth. HBM access latency is approximately 300 ns, and each access costs roughly 640 pJ of energy. Despite the "high bandwidth" designation, the bandwidth-to-capacity ratio means that reading the full `{python} MemoryWallScenario.h100_mem_str` GB of HBM takes approximately 24 ms, far longer than the sub-millisecond latency targets of real-time inference.
 
-The energy cost of data movement has a direct economic consequence at data center scale. Consider a training cluster of 1,000 H100 GPUs, each performing approximately $10^{12}$ memory accesses per second during a memory-bound workload. If each access reads from HBM at 640 pJ, the memory subsystem alone consumes approximately 640 W per GPU, a significant fraction of the H100's 700 W TDP. If operator fusion moves half of those accesses from HBM to SRAM (at 0.5 pJ each), the per-GPU memory power drops by approximately 320 W. Across 1,000 GPUs, this saves 320 kW, equivalent to powering roughly 250 homes. This is not a secondary consideration; at cloud electricity prices, the annual cost difference is substantial, and it scales linearly with cluster size. The physics of data movement is not merely a performance constraint; it is an economic one.
+The energy cost of data movement has a direct economic consequence at data center scale. Consider a training cluster of 1,000 H100 GPUs, each performing approximately $10^{12}$ memory accesses per second during a memory-bound workload. If each access reads from HBM at 640 pJ, the memory subsystem alone consumes approximately 640 W per GPU, a significant fraction of the H100's `{python} MemoryWallScenario.h100_tdp_str` W TDP. If operator fusion moves half of those accesses from HBM to SRAM (at 0.5 pJ each), the per-GPU memory power drops by approximately 320 W. Across 1,000 GPUs, this saves 320 kW, equivalent to powering roughly 250 homes. This is not a secondary consideration; at cloud electricity prices, the annual cost difference is substantial, and it scales linearly with cluster size. The physics of data movement is not merely a performance constraint; it is an economic one.
 
 The performance engineering challenge reduces to a data placement problem: keep the data that the compute units need in the fastest memory that can hold it. When a kernel reads a tensor from HBM, processes it, and writes the result back to HBM, the HBM round-trip dominates execution time for any operation with low arithmetic intensity. Every technique in this chapter shares the same goal: keeping data closer to compute for longer.
 
@@ -1411,7 +1413,41 @@ A standard MoE transformer layer replaces the feed-forward network (FFN) with mu
 
 ## Communication-Computation Overlap {#sec-performance-engineering-overlap}
 
-Consider a concrete example: a 70B model with tensor parallelism across 8 H100 GPUs. Each transformer layer requires two AllReduce\index{AllReduce} operations (one after attention, one after FFN). Each AllReduce transfers approximately $2 \times d \times \text{batch} \times 2$ bytes at FP16 (where $d = 8192$ for a 70B model). At batch size 1, the data volume is $2 \times 8192 \times 1 \times 2 = 32$ KB per AllReduce. At 900 GB/s NVLink bandwidth, this transfer takes approximately 36 ns. However, the AllReduce launch overhead (approximately 5 $\mu$s) dominates the actual data transfer time by 100$\times$. At batch size 1, the AllReduce overhead is dominated by software launch latency, not bandwidth, and overlap provides limited benefit because there is insufficient compute to hide behind.
+```{python}
+#| echo: false
+#| label: nvlink-h100-bw
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ H100 NVLINK BANDWIDTH (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-performance-engineering-overlap—70B TP AllReduce example
+# │
+# │ Goal: Provide H100 NVLink 4.0 bandwidth for the AllReduce data-volume example.
+# │ Show: ~900 GB/s NVLink bandwidth.
+# │ How: pulling NVLINK_H100_BW from mlsysim.core.constants.
+# │
+# │ Imports: mlsysim.core.constants (NVLINK_H100_BW, GB, second)
+# │ Exports: NvlinkH100.bw_gbps_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import NVLINK_H100_BW, GB, second
+
+class NvlinkH100:
+    """H100 NVLink 4.0 bandwidth reference."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    bw = NVLINK_H100_BW
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    bw_gbps = bw.m_as(GB/second)
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    from mlsysim.fmt import check
+    check(bw_gbps > 500, "H100 NVLink bandwidth should exceed 500 GB/s")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    bw_gbps_str = f"{bw_gbps:.0f}"
+```
+
+Consider a concrete example: a 70B model with tensor parallelism across 8 H100 GPUs. Each transformer layer requires two AllReduce\index{AllReduce} operations (one after attention, one after FFN). Each AllReduce transfers approximately $2 \times d \times \text{batch} \times 2$ bytes at FP16 (where $d = 8192$ for a 70B model). At batch size 1, the data volume is $2 \times 8192 \times 1 \times 2 = 32$ KB per AllReduce. At `{python} NvlinkH100.bw_gbps_str` GB/s NVLink bandwidth, this transfer takes approximately 36 ns. However, the AllReduce launch overhead (approximately 5 $\mu$s) dominates the actual data transfer time by 100$\times$. At batch size 1, the AllReduce overhead is dominated by software launch latency, not bandwidth, and overlap provides limited benefit because there is insufficient compute to hide behind.
 
 At batch size 64, the data volume per AllReduce grows to $2 \times 8192 \times 64 \times 2 = 2$ MB, taking approximately 2.2 $\mu$s at NVLink bandwidth. The compute path over a shard is now a bundle of kernels, not a single GEMM: the attention and FFN work together take on the order of 20 $\mu$s for this configuration, while the communication remains around 2.2 $\mu$s. Here, the compute time exceeds the communication time by about 9$\times$, and overlap becomes highly effective. This illustrates why batch size is the universal control knob: it simultaneously improves arithmetic intensity, GPU utilization, and communication overlap effectiveness.
 
@@ -1681,7 +1717,7 @@ The roofline model from @sec-performance-engineering-roofline becomes a diagnost
 
 A kernel that falls far below both the compute ceiling and the bandwidth ceiling has an implementation problem: launch overhead, poor memory access patterns, or low occupancy. A kernel that reaches the bandwidth ceiling but falls below the compute ceiling is memory-bound, and further optimization requires reducing memory traffic (fusion, precision) rather than improving compute efficiency. A kernel at the compute ceiling is compute-bound and can only be improved by algorithmic changes (reducing FLOPs) or faster hardware.
 
-Consider a concrete example: a LayerNorm kernel profiled on an H100 reports 15 TFLOPS of achieved compute and 2.8 TB/s of achieved memory bandwidth. Its arithmetic intensity is $15 \text{ TFLOPS} / 2.8 \text{ TB/s} \approx 5.4$ FLOP/byte. The H100's ridge point is approximately 295 FLOP/byte at FP16. Since 5.4 is far below 295, the kernel is strictly memory-bound. Its achieved 2.8 TB/s (84 percent of the H100's 3.35 TB/s peak bandwidth) confirms it is operating near the physical limit of the memory subsystem. The diagnosis is clear: further FLOP-level optimizations will yield zero gain; performance can only be improved by reducing data movement, either through fusion (eliminating the HBM round-trip) or precision reduction (halving the bytes per element).
+Consider a concrete example: a LayerNorm kernel profiled on an H100 reports 15 TFLOPS of achieved compute and 2.8 TB/s of achieved memory bandwidth. Its arithmetic intensity is $15 \text{ TFLOPS} / 2.8 \text{ TB/s} \approx 5.4$ FLOP/byte. The H100's ridge point is approximately `{python} RooflineRidgeCalc.h100_fp16_ridge_str` FLOP/byte at FP16. Since 5.4 is far below `{python} RooflineRidgeCalc.h100_fp16_ridge_str`, the kernel is strictly memory-bound. Its achieved 2.8 TB/s (84 percent of the H100's `{python} MemoryWallScenario.h100_hbm_bw_str` TB/s peak bandwidth) confirms it is operating near the physical limit of the memory subsystem. The diagnosis is clear: further FLOP-level optimizations will yield zero gain; performance can only be improved by reducing data movement, either through fusion (eliminating the HBM round-trip) or precision reduction (halving the bytes per element).
 
 ### PyTorch profiler workflow {#sec-performance-engineering-pytorch-profiler}
 
@@ -1786,7 +1822,7 @@ CPU-bound data loading causes GPU utilization to drop periodically to zero while
 
 **Investigation**\index{Investigation}:
 
-*Step 1: Kernel-level analysis.* Run Nsight Compute on the dominant GEMM kernel. Result: achieves 2.8 TB/s effective bandwidth out of the H100's 3.35 TB/s peak. Efficiency: 84 percent. This kernel is performing well.
+*Step 1: Kernel-level analysis.* Run Nsight Compute on the dominant GEMM kernel. Result: achieves 2.8 TB/s effective bandwidth out of the H100's `{python} MemoryWallScenario.h100_hbm_bw_str` TB/s peak. Efficiency: 84 percent. This kernel is performing well.
 
 *Step 2: Trace-level analysis.* Run Nsight Systems on a full decode step. Result: 42 percent of step time is spent in GEMM kernels. The remaining 58 percent is split between:
 

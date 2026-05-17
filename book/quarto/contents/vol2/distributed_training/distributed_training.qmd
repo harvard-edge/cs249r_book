@@ -92,6 +92,7 @@ from mlsysim.fmt import fmt_percent, fmt, sci, check
 from mlsysim.core.constants import (
     A100_MEM_CAPACITY, H100_MEM_CAPACITY,
     NVLINK_A100_BW, NVLINK_H100_BW, H100_MEM_BW,
+    INFINIBAND_NDR_BW,
     GPT3_PARAMS, GPT4_EST_PARAMS,
     GB, GiB, second, Mparam, Tparam, THOUSAND,
     SEC_PER_HOUR, SEC_PER_DAY, MILLION, TRILLION, BITS_PER_BYTE, TB
@@ -104,6 +105,7 @@ class DistTrainConstants:
     h100_mem_gb = H100_MEM_CAPACITY.m_as(GiB)
     nvlink_a100_gbs = NVLINK_A100_BW.m_as(GB/second)
     nvlink_h100_gbs = NVLINK_H100_BW.m_as(GB/second)
+    ib_ndr_gbs = (INFINIBAND_NDR_BW / 8).m_as(GB/second)  # 400 Gbps -> 50 GB/s per port
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────
     # (direct unit conversions only)
@@ -111,12 +113,14 @@ class DistTrainConstants:
     # ┌── 3. GUARD (Invariants) ────────────────────────────
     check(a100_mem_gb > 0, "A100 memory must be positive")
     check(nvlink_h100_gbs > nvlink_a100_gbs, "H100 NVLink faster than A100")
+    check(ib_ndr_gbs < nvlink_h100_gbs, "InfiniBand NDR slower than H100 NVLink")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
     a100_mem_str = f"{a100_mem_gb:.0f}"
     h100_mem_str = f"{h100_mem_gb:.0f}"
     nvlink_a100_str = f"{nvlink_a100_gbs:.0f}"
     nvlink_h100_str = f"{nvlink_h100_gbs:.0f}"
+    ib_ndr_str = f"{ib_ndr_gbs:.0f}"
     gpt4_mem_tb_str = f"{(GPT4_EST_PARAMS.m_as('param') * 2 / 1e12):.1f}"
     dlrm_mem_tb_str = "10"
 ```
@@ -1781,9 +1785,9 @@ Tensor parallelism takes a fundamentally different approach: instead of assignin
 
 ***Tensor Parallelism***\index{Tensor Parallelism!definition} is a model parallelism technique that partitions individual tensor operations—primarily matrix multiplications—across multiple devices using column-parallel or row-parallel weight splits, typically requiring two AllReduce operations per transformer layer in Megatron-style transformer blocks to sum partial results from all participating devices.
 
-1.  **Significance (quantitative)**: Megatron-LM style tensor parallelism places two AllReduce operations per transformer block—one after attention and one after the MLP—with each collective reducing an activation tensor of size $\text{batch} \times \text{seq\_len} \times \text{hidden\_dim} \times 2$ bytes in BF16. A ring AllReduce moves roughly $2(t-1)/t$ times that payload per GPU. At degree $t=8$ on NVLink with 900 GB/s bandwidth, each AllReduce takes approximately 0.1–0.5 ms. The same operation over InfiniBand (50 GB/s) takes 2–10 ms per layer—with 96 transformer blocks, this adds 200–960 ms of pure synchronization overhead per step, collapsing MFU to single digits.
+1.  **Significance (quantitative)**: Megatron-LM style tensor parallelism places two AllReduce operations per transformer block—one after attention and one after the MLP—with each collective reducing an activation tensor of size $\text{batch} \times \text{seq\_len} \times \text{hidden\_dim} \times 2$ bytes in BF16. A ring AllReduce moves roughly $2(t-1)/t$ times that payload per GPU. At degree $t=8$ on NVLink with `{python} DistTrainConstants.nvlink_h100_str` GB/s bandwidth, each AllReduce takes approximately 0.1–0.5 ms. The same operation over InfiniBand (`{python} DistTrainConstants.ib_ndr_str` GB/s) takes 2–10 ms per layer—with 96 transformer blocks, this adds 200–960 ms of pure synchronization overhead per step, collapsing MFU to single digits.
 2.  **Distinction (durable)**: Unlike pipeline parallelism, which communicates only at layer boundaries and transfers small activation slices, tensor parallelism synchronizes within every layer via AllReduce, making it sensitive to the per-operation latency of the interconnect and restricting it to within-node NVLink fabrics in practice.
-3.  **Common pitfall**: A frequent misconception is that tensor parallelism can simply be scaled across nodes over InfiniBand. NVLink delivers approximately 900 GB/s bidirectional bandwidth; InfiniBand NDR delivers 50 GB/s—an 18$\times$ gap. Running tensor parallelism across InfiniBand typically collapses MFU to single-digit percentages, making the communication overhead larger than the compute benefit of distributing the matrix multiplication.
+3.  **Common pitfall**: A frequent misconception is that tensor parallelism can simply be scaled across nodes over InfiniBand. NVLink delivers approximately `{python} DistTrainConstants.nvlink_h100_str` GB/s bidirectional bandwidth; InfiniBand NDR delivers `{python} DistTrainConstants.ib_ndr_str` GB/s—an 18$\times$ gap. Running tensor parallelism across InfiniBand typically collapses MFU to single-digit percentages, making the communication overhead larger than the compute benefit of distributing the matrix multiplication.
 
 :::
 
@@ -1793,7 +1797,7 @@ The distinction is critical for hardware planning: tensor parallelism demands NV
 
 Both strategies split the model, but they split at different granularities and impose different network requirements:
 
-Tensor parallelism (intra-layer) splits individual operations (matrix multiplies, attention heads) across devices. Every forward pass requires a synchronization within each layer, so inter-GPU bandwidth must be NVLink-class (~900 GB/s) to avoid stalling on communication.
+Tensor parallelism (intra-layer) splits individual operations (matrix multiplies, attention heads) across devices. Every forward pass requires a synchronization within each layer, so inter-GPU bandwidth must be NVLink-class (~`{python} DistTrainConstants.nvlink_h100_str` GB/s) to avoid stalling on communication.
 
 **Pipeline Parallelism** (inter-layer) assigns complete layers to different devices, communicating only at stage boundaries. These boundary activations are much smaller than gradient tensors, so InfiniBand-class bandwidth (~25–50 GB/s) is sufficient between nodes.
 

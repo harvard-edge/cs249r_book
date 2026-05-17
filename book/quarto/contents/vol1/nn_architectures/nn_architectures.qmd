@@ -403,7 +403,7 @@ This table provides the quantitative justification for architecture selection: o
 
 from mlsysim import Hardware, Models
 from mlsysim.core.constants import (
-    A100_MEM_CAPACITY, BYTES_FP32, BYTES_FP16, param, Mparam, Bparam, Kparam, GFLOPs, MFLOPs, MB, GB, KB, GiB
+    A100_MEM_CAPACITY, H100_MEM_BW, BYTES_FP32, BYTES_FP16, param, Mparam, Bparam, Kparam, GFLOPs, MFLOPs, MB, GB, KB, GiB, TB, second
 )
 from mlsysim.fmt import fmt, check
 from mlsysim.core.formulas import model_memory
@@ -455,6 +455,7 @@ class LighthouseSpecs:
 
     # Step 7: Reference Hardware
     a100_mem_gib = hw_a100.memory_capacity.m_as(GiB)
+    h100_bw_tbs = H100_MEM_BW.m_as(TB/second)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     # Ensure numbers match the book's narrative
@@ -488,6 +489,7 @@ class LighthouseSpecs:
     kws_fp32_kb_str = fmt(kws_mem_kb, precision=0)
 
     a100_mem_str = fmt(a100_mem_gib, precision=0)
+    h100_bw_tbs_str = fmt(h100_bw_tbs, precision=2)
 
 class TransformerScaling:
     """
@@ -3021,7 +3023,7 @@ The preceding self-attention implementation shows how transformers process entir
 | **Parameters** | `{python} LighthouseSpecs.gpt2_params_b_str` Billion              | Weight loading dominates inference latency.                         |
 | **Model Size** | `{python} LighthouseSpecs.gpt2_fp32_gb_str` GB (FP32)             | Fits on one GPU but saturates HBM bandwidth.                        |
 | **Compute**    | `{python} LighthouseSpecs.gpt2_gflops_per_token_str` GFLOPs/token | Low per-token compute; bottleneck is data movement, not math.       |
-| **Constraint** | Memory Bandwidth                                                  | Tokens/sec $\propto$ HBM bandwidth (for example, H100's 3.35 TB/s). |
+| **Constraint** | Memory Bandwidth                                                  | Tokens/sec $\propto$ HBM bandwidth (for example, H100's `{python} LighthouseSpecs.h100_bw_tbs_str` TB/s). |
 | **Profile**    | Bandwidth-Bound (inference)                                       | Training is compute bound; inference is bandwidth bound.            |
 
 : **GPT-2 XL Systems Profile**: Quantitative properties of the bandwidth lighthouse and their system consequences. Autoregressive decoding reloads the full weight set per token at roughly 0.5--1 FLOP per byte, so generation throughput tracks HBM bandwidth almost linearly while compute units sit underutilized. {#tbl-nn-architectures-gpt2-profile tbl-colwidths="[12,30,58]"}
@@ -3045,7 +3047,7 @@ Inference is autoregressive (generating one token at a time) and typically *memo
 3.  Read/Write the KV Cache\index{KV Cache}.
 
 \index{KV Cache!linear growth}
-The **KV Cache**[^fn-kv-cache-depth] grows linearly with sequence length ($O(N \cdot d)$, distinct from the $O(N^2)$ attention score matrix during training), storing the Key and Value vectors for all previous tokens to avoid recomputing them. For long contexts, this cache becomes massive (for example, 100+ GB), forcing the system to fetch the full cache from HBM for every generated token. As the GPT-2 Lighthouse quantified earlier, the arithmetic intensity is about 0.5 FLOPs/byte with FP32 weights or about 1 FLOP/byte with FP16 weights, explaining why serving LLMs requires massive HBM bandwidth (for example, H100's 3.35 TB/s) rather than raw FLOPS.
+The **KV Cache**[^fn-kv-cache-depth] grows linearly with sequence length ($O(N \cdot d)$, distinct from the $O(N^2)$ attention score matrix during training), storing the Key and Value vectors for all previous tokens to avoid recomputing them. For long contexts, this cache becomes massive (for example, 100+ GB), forcing the system to fetch the full cache from HBM for every generated token. As the GPT-2 Lighthouse quantified earlier, the arithmetic intensity is about 0.5 FLOPs/byte with FP32 weights or about 1 FLOP/byte with FP16 weights, explaining why serving LLMs requires massive HBM bandwidth (for example, H100's `{python} LighthouseSpecs.h100_bw_tbs_str` TB/s) rather than raw FLOPS.
 
 [^fn-kv-cache-depth]: **KV Cache Memory Scaling**: For a 7B-parameter transformer in FP16, model weights consume ~14 GB. A single concurrent request's KV cache requires: 32 layers × 2 (K,V) × 32 heads × 2048 tokens × 128-dim head × 2 bytes ≈ 1.07 GB. At 8 concurrent users, KV cache alone (~8.6 GB) rivals the model weights—and grows linearly with both context length and concurrent users. Scaling serving throughput therefore requires grouped-query attention (fewer KV heads), shorter context windows, or KV offloading strategies. This is a memory systems constraint, not a model quality trade-off: the model is identical regardless of which memory strategy is chosen. \index{KV Cache!memory scaling}
 
