@@ -188,7 +188,7 @@ Some projects are intentionally earlier-stage than the main curriculum:
 
 - [Socratiq](socratiq/README.md) explores AI-guided reading, contextual quizzes, and spaced repetition for static learning sites.
 - [MLPerf EDU](mlperf-edu/README.md) is an under-construction pedagogical benchmark suite aligned with MLCommons MLPerf.
-- [Periodic Table of ML Systems](periodic-table/README.md) is a compact concept map for organizing recurring systems ideas.
+- [ML Systems Design Grammar](design-grammar/README.md) is an experimental framework for reasoning from stable primitives, constraints, and rewrite rules.
 
 ---
 
@@ -788,16 +788,16 @@ Thanks goes to these wonderful people who have contributed to making this resour
 
 ---
 
-### ⚗️ Periodic Table of ML Systems Contributors
+### ML Systems Design Grammar Contributors
 
-<!-- PERIODICTABLE-CONTRIBUTORS-START -->
+<!-- DESIGNGRAMMAR-CONTRIBUTORS-START -->
 <!-- prettier-ignore-start -->
 <!-- markdownlint-disable -->
 <p><em>Coming soon!</em></p>
 
 <!-- markdownlint-restore -->
 <!-- prettier-ignore-end -->
-<!-- PERIODICTABLE-CONTRIBUTORS-END -->
+<!-- DESIGNGRAMMAR-CONTRIBUTORS-END -->
 ---
 
 <div align="center">

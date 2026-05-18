@@ -12,7 +12,7 @@ refs --scope citations` does NOT cover:
    This is the "cross-volume leak" class — silent under a pooled check
    that just asks "is the key defined somewhere?"
 3. **Out-of-tree qmd files** — `interviews/**/*.qmd`, `tinytorch/**/*.qmd`,
-   `mlsysim/**/*.qmd`, `periodic-table/**/*.qmd` are skipped by the
+   `mlsysim/**/*.qmd`, `design-grammar/**/*.qmd` are skipped by the
    per-volume check entirely.
 4. **Orphan bib entries** — keys defined in any `references.bib` but
    not cited by any `.qmd` anywhere. These are wasted maintenance
@@ -97,9 +97,9 @@ SCOPES = [
         "bibs":  ["mlsysim/paper/references.bib", "mlsysim/docs/references.bib"],
     },
     {
-        "name": "periodic-table",
-        "paths": ["periodic-table/"],
-        "bibs":  ["periodic-table/paper/references.bib"],
+        "name": "design-grammar",
+        "paths": ["design-grammar/"],
+        "bibs":  ["design-grammar/paper/references.bib"],
     },
 ]
 
@@ -114,7 +114,7 @@ QMD_ROOTS = [
     "interviews",
     "tinytorch",
     "mlsysim",
-    "periodic-table",
+    "design-grammar",
 ]
 
 # Companion paper LaTeX sources. Each falls inside the scope of its
@@ -123,7 +123,7 @@ TEX_FILES = [
     "interviews/paper/paper.tex",
     "tinytorch/paper/paper.tex",
     "mlsysim/paper/paper.tex",
-    "periodic-table/paper/paper.tex",
+    "design-grammar/paper/paper.tex",
 ]
 
 # Excluded path tokens (build artifacts, deps, etc.)
