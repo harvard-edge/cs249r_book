@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * One-shot migration: extract the live data from periodic-table/index.html
- * and emit periodic-table/table.yml as the new source of truth.
+ * One-shot migration: extract the live data from design-grammar/index.html
+ * and emit design-grammar/grammar.yml as the new source of truth.
  *
  * Usage:
- *   node periodic-table/scripts/migrate-html-to-yaml.mjs
+ *   node design-grammar/scripts/migrate-html-to-yaml.mjs
  *
  * After this runs, the YAML is canonical. Re-running the migrator is safe
  * but will overwrite the YAML — only do that if you're recovering from a
@@ -18,122 +18,120 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(__dirname, "..", "..");
-const HTML_PATH = path.join(REPO, "periodic-table", "index.html");
-const YAML_PATH = path.join(REPO, "periodic-table", "table.yml");
+const HTML_PATH = path.join(REPO, "design-grammar", "index.html");
+const YAML_PATH = path.join(REPO, "design-grammar", "grammar.yml");
 
-// ── 1. Extract `blocks`, `rowLabels`, `elements` from the script tag ──
+// ── 1. Extract `roles`, `layerLabels`, `primitives` from the script tag ──
 const html = fs.readFileSync(HTML_PATH, "utf8");
 // Case-insensitive, permissive </script ...> close (HTML5 tokenization); avoid
 // naive /<script>/ which misses <SCRIPT> and odd close tags.
 const scriptMatch = html.match(/<script\b[^>]*>([\s\S]*?)<\/script\b[^>]*>/i);
-if (!scriptMatch) throw new Error("No <script> block found in index.html");
+if (!scriptMatch) throw new Error("No <script> tag found in index.html");
 const scriptText = scriptMatch[1];
 
 // Take only the data declarations (not the render code, which references DOM)
-const dataMatch = scriptText.match(/^const blocks[\s\S]*?^\];$/m);
-if (!dataMatch) throw new Error("Could not locate `const blocks ... const elements [...]` block");
+const dataMatch = scriptText.match(/^const roles[\s\S]*?^\];$/m);
+if (!dataMatch) throw new Error("Could not locate `const roles ... const primitives [...]` data");
 
 const ctx = vm.createContext({});
 vm.runInContext(
-  dataMatch[0] + "\nthis.blocks = blocks; this.rowLabels = rowLabels; this.elements = elements;",
+  dataMatch[0] + "\nthis.roles = roles; this.layerLabels = layerLabels; this.primitives = primitives;",
   ctx,
 );
-const blocksRaw = ctx.blocks;
-const rowLabelsRaw = ctx.rowLabels;
-const elementsRaw = ctx.elements;
+const rolesRaw = ctx.roles;
+const layerLabelsRaw = ctx.layerLabels;
+const primitivesRaw = ctx.primitives;
 
-console.log(`Extracted: ${elementsRaw.length} elements, ${Object.keys(blocksRaw).length} blocks, ${rowLabelsRaw.length} row labels`);
+console.log(`Extracted: ${primitivesRaw.length} primitives, ${Object.keys(rolesRaw).length} roles, ${layerLabelsRaw.length} layer labels`);
 
 // ── 2. Translate the JS literals into YAML-friendly typed structures ──
 
-// Block-key order should match the visual left-to-right order, which the
+// Role-key order should match the visual left-to-right order, which the
 // original `cols` arrays imply. Sort by min(cols).
-const blockKeyOrder = Object.entries(blocksRaw)
+const roleKeyOrder = Object.entries(rolesRaw)
   .sort((a, b) => Math.min(...a[1].cols) - Math.min(...b[1].cols))
   .map(([k]) => k);
 
-const blocks = blockKeyOrder.map((k) => ({
+const roles = roleKeyOrder.map((k) => ({
   key: k,
-  name: blocksRaw[k].name,
-  sub: blocksRaw[k].sub,
-  color: blocksRaw[k].color,
-  cols: blocksRaw[k].cols,
+  name: rolesRaw[k].name,
+  sub: rolesRaw[k].sub,
+  color: rolesRaw[k].color,
+  cols: rolesRaw[k].cols,
 }));
 
-// Convert the row labels from a flat string array into objects with index/key.
+// Convert the layer labels from a flat string array into objects with index/key.
 // `key` is a slug derived from the name.
-const rows = rowLabelsRaw.map((name, i) => ({
+const layers = layerLabelsRaw.map((name, i) => ({
   index: i + 1,
   key: name.toLowerCase().replace(/[^a-z]/g, "_"),
   name,
 }));
 
-// Each tuple is [num, sym, name, block, row, col, year, desc, bonds, why]
-const elements = elementsRaw.map((tuple) => {
-  const [id, sym, name, block, row, col, year, desc, bonds, why] = tuple;
+// Each tuple is [num, sym, name, role, layer, col, year, description, links, rationale]
+const primitives = primitivesRaw.map((tuple) => {
+  const [id, sym, name, role, layer, col, year, description, composition_links, rationale] = tuple;
   return {
     id,
     sym,
     name,
-    block,
-    row,
+    role,
+    layer,
     col,
     year: year === "—" || year === "" ? null : year,
-    desc,
-    bonds: bonds || [],
-    why,
+    description,
+    composition_links: composition_links || [],
+    rationale,
   };
 });
 
-// Sort elements: by row, then col, then id (stable for ties).
-elements.sort((a, b) => a.row - b.row || a.col - b.col || a.id - b.id);
+// Sort primitives: by layer, then col, then id (stable for ties).
+primitives.sort((a, b) => a.layer - b.layer || a.col - b.col || a.id - b.id);
 
-// ── 3. Extract compounds from the .c-card markup ──
+// ── 3. Extract assemblies from the .assembly-card markup ──
 // The structure is:
 //   <h3>Section Name <span class="isomer-hint">hint text</span></h3>
-//   <div class="compound-grid">
-//     <div class="c-card">
-//       <div class="c-name">CompoundName</div>
-//       <div class="c-formula"><span>Sym</span><sub>sub</sub> ... </div>
+//   <div class="assembly-grid">
+//     <div class="assembly-card">
+//       <div class="assembly-name">AssemblyName</div>
+//       <div class="assembly-expression"><span>Sym</span><sub>sub</sub> ... </div>
 //     </div>
 //     ...
 //   </div>
 
-// Pull the entire compounds container so we can walk it section by section.
-const compoundsBlockMatch = html.match(/<h2>Molecular ML[\s\S]*?<\/div>\s*<\/div>\s*\n*<div class="overlay"/);
-if (!compoundsBlockMatch) throw new Error("Could not locate the Molecular ML compounds block");
-const compoundsBlock = compoundsBlockMatch[0];
+// Pull the entire assemblies container so we can walk it section by section.
+const assembliesBlockMatch = html.match(/<h2>System Assemblies<\/h2>[\s\S]*?<\/div>\s*<\/div>\s*\n*<div class="overlay"/);
+if (!assembliesBlockMatch) throw new Error("Could not locate the system assemblies block");
+const assembliesBlock = assembliesBlockMatch[0];
 
 // Walk h3 by h3 to identify sections
 const sectionRegex = /<h3>([^<]+?)(?:\s*<span class="isomer-hint">([^<]+)<\/span>)?\s*<\/h3>([\s\S]*?)(?=<h3>|<\/div>\s*<\/div>\s*\n*<div class="overlay")/g;
-const compounds = [];
+const assemblies = [];
 let m;
-while ((m = sectionRegex.exec(compoundsBlock)) !== null) {
+while ((m = sectionRegex.exec(assembliesBlock)) !== null) {
   const sectionName = m[1].trim();
   const hint = m[2] ? m[2].trim() : undefined;
   const sectionBody = m[3];
 
-  // Now find each c-card inside the section body
-  const cardRegex = /<div class="c-card">([\s\S]*?)<\/div>\s*<\/div>/g;
-  // Actually the structure has nested divs. Easier: match c-name + c-formula pairs.
-  const itemRegex = /<div class="c-name">([\s\S]*?)<\/div>\s*<div class="c-formula">([\s\S]*?)<\/div>/g;
+  // Match assembly-name + assembly-expression pairs.
+  const itemRegex = /<div class="assembly-name">([\s\S]*?)<\/div>\s*<div class="assembly-expression">([\s\S]*?)<\/div>/g;
   const items = [];
   let im;
   while ((im = itemRegex.exec(sectionBody)) !== null) {
     const name = stripHtml(im[1]).trim();
-    const formula = formulaMarkupToString(im[2]);
-    items.push({ name, formula });
+    const expression = expressionMarkupToString(im[2]);
+    items.push({ name, expression });
   }
   if (items.length > 0) {
-    compounds.push({ section: sectionName, ...(hint ? { hint } : {}), items });
+    assemblies.push({ section: sectionName, ...(hint ? { hint } : {}), items });
   }
 }
 
-console.log(`Extracted: ${compounds.length} compound sections, ${compounds.reduce((n, s) => n + s.items.length, 0)} compounds total`);
+console.log(`Extracted: ${assemblies.length} assembly sections, ${assemblies.reduce((n, s) => n + s.items.length, 0)} assemblies total`);
 
-// ── 4. Identify symbol collisions for the known_collisions block ──
+// ── 4. Identify symbol collisions for the known_collisions role ──
 const symGroups = {};
-for (const e of elements) {
+for (const e of primitives) {
   (symGroups[e.sym] ||= []).push(e);
 }
 const knownCollisions = Object.entries(symGroups)
@@ -141,7 +139,7 @@ const knownCollisions = Object.entries(symGroups)
   .map(([sym, list]) => ({
     sym,
     ids: list.map((e) => e.id).sort((a, b) => a - b),
-    note: list.map((e) => `${e.name} (#${e.id}, row ${e.row} col ${e.col}, ${e.block})`).join(" + "),
+    note: list.map((e) => `${e.name} (#${e.id}, layer ${e.layer} col ${e.col}, ${e.role})`).join(" + "),
   }));
 
 console.log(`Documented ${knownCollisions.length} intentional symbol collisions`);
@@ -151,8 +149,8 @@ const issues = [];
 
 // Cell collisions (should be zero given the current data)
 const cellGroups = {};
-for (const e of elements) {
-  const key = `${e.row},${e.col}`;
+for (const e of primitives) {
+  const key = `${e.layer},${e.col}`;
   (cellGroups[key] ||= []).push(e);
 }
 for (const [key, list] of Object.entries(cellGroups)) {
@@ -161,22 +159,22 @@ for (const [key, list] of Object.entries(cellGroups)) {
   }
 }
 
-// Bond resolution
-const knownSyms = new Set(elements.map((e) => e.sym));
-for (const e of elements) {
-  for (const b of e.bonds) {
-    if (!knownSyms.has(b)) issues.push(`Element #${e.id} ${e.sym}: unresolved bond '${b}'`);
+// Composition-link resolution
+const knownSyms = new Set(primitives.map((e) => e.sym));
+for (const e of primitives) {
+  for (const b of e.composition_links) {
+    if (!knownSyms.has(b)) issues.push(`Primitive #${e.id} ${e.sym}: unresolved composition link '${b}'`);
   }
 }
 
-// Formula resolution — every two-letter [A-Z][a-z] substring in a formula
-// must reference a known element symbol.
-for (const section of compounds) {
+// Expression resolution: every two-letter [A-Z][a-z] substring in a expression
+// must reference a known primitive symbol.
+for (const section of assemblies) {
   for (const item of section.items) {
-    const refs = extractFormulaSymbols(item.formula);
+    const refs = extractExpressionSymbols(item.expression);
     for (const ref of refs) {
       if (!knownSyms.has(ref)) {
-        issues.push(`Compound "${item.name}" references unknown symbol '${ref}' in formula: ${item.formula}`);
+        issues.push(`Assembly "${item.name}" references unknown symbol '${ref}' in expression: ${item.expression}`);
       }
     }
   }
@@ -187,24 +185,24 @@ if (issues.length > 0) {
   issues.forEach((i) => console.error("  " + i));
   process.exit(1);
 }
-console.log("Validation passed (cells, bonds, formula references)");
+console.log("Validation passed (cells, composition links, assembly references)");
 
 // ── 6. Emit YAML by hand ──
 const out = emitYaml({
   version: "0.2",
-  title: "The Periodic Table of Machine Learning Systems",
-  subtitle: "Two fundamental axes — abstraction layer and information-processing role — organize ML concepts the way electron shells and valence organize chemistry.",
-  blocks,
-  rows,
-  elements,
-  compounds,
+  title: "ML Systems Design Grammar",
+  subtitle: "Stable primitives, physical constraints, and reusable rewrite rules for deriving ML systems from first principles.",
+  roles,
+  layers,
+  primitives,
+  assemblies,
   known_collisions: knownCollisions,
 });
 
 fs.writeFileSync(YAML_PATH, out);
 console.log(`\nWrote ${YAML_PATH}`);
-console.log(`  ${elements.length} elements`);
-console.log(`  ${compounds.reduce((n, s) => n + s.items.length, 0)} compounds across ${compounds.length} sections`);
+console.log(`  ${primitives.length} primitives`);
+console.log(`  ${assemblies.reduce((n, s) => n + s.items.length, 0)} assemblies across ${assemblies.length} sections`);
 console.log(`  ${knownCollisions.length} documented symbol collisions`);
 
 // ════════════════════════════════════════════════════════════════════════
@@ -226,8 +224,8 @@ function stripTagsUntilStable(s) {
 }
 
 /**
- * Convert a .c-formula's inner HTML back into the string form used in
- * table.yml. Examples:
+ * Convert an .assembly-expression's inner HTML back into the string form used in
+ * grammar.yml. Examples:
  *
  *   "<span>Eb</span> → [(<span>At</span> ∥ <span>Mk</span>) → ..."
  *   →  "Eb → [(At ∥ Mk) → ..."
@@ -242,7 +240,7 @@ function stripTagsUntilStable(s) {
  * emit X. When we see <sub>...</sub> immediately after a <span>, emit
  * "_<sub-content>". Otherwise emit literal characters.
  */
-function formulaMarkupToString(markup) {
+function expressionMarkupToString(markup) {
   // Normalize whitespace inside the markup but preserve significant spaces
   let s = markup.replace(/\s+/g, " ").trim();
   // Replace <span>X</span> -> X
@@ -258,16 +256,16 @@ function formulaMarkupToString(markup) {
 
 /**
  * Inverse of the parser used downstream — extract every symbol reference
- * from a formula string. A symbol is a two-letter token of the form
+ * from a expression string. A symbol is a two-letter token of the form
  * `[A-Z][a-z]` that's not immediately preceded or followed by another
  * letter (so we don't mis-tokenize words inside subscripts).
  */
-function extractFormulaSymbols(formula) {
+function extractExpressionSymbols(expression) {
   const out = [];
   // Strip subscripts first: `Tk_patch` → keep `Tk`, drop `_patch`
   // We do this by splitting on `_`: anything after an underscore until
   // the next non-word char is subscript text.
-  const cleaned = formula.replace(/_[A-Za-z]+/g, "");
+  const cleaned = expression.replace(/_[A-Za-z]+/g, "");
   const re = /(?<![A-Za-z])([A-Z][a-z])(?![A-Za-z])/g;
   let m;
   while ((m = re.exec(cleaned)) !== null) out.push(m[1]);
@@ -280,17 +278,17 @@ function extractFormulaSymbols(formula) {
 
 function emitYaml(doc) {
   let out = "";
-  out += `# Periodic Table of ML Systems — single source of truth.\n`;
-  out += `# Generated from periodic-table/index.html by scripts/migrate-html-to-yaml.mjs\n`;
-  out += `# Edit this file directly. Run \`make all\` (in periodic-table/) to regenerate\n`;
+  out += `# ML Systems Design Grammar -- single source of truth.\n`;
+  out += `# Generated from design-grammar/index.html by scripts/migrate-html-to-yaml.mjs\n`;
+  out += `# Edit this file directly. Run \`make all\` (in design-grammar/) to regenerate\n`;
   out += `# index.html and the StaffML React data file from this YAML.\n\n`;
   out += `version: ${quote(doc.version)}\n`;
   out += `title: ${quote(doc.title)}\n`;
   out += `subtitle: ${quote(doc.subtitle)}\n\n`;
 
-  out += "# ─── Blocks (information-processing roles, columns) ───────────\n";
-  out += "blocks:\n";
-  for (const b of doc.blocks) {
+  out += "# ─── Roles (information-processing roles, columns) ───────────\n";
+  out += "roles:\n";
+  for (const b of doc.roles) {
     out += `  - key: ${b.key}\n`;
     out += `    name: ${quote(b.name)}\n`;
     out += `    sub: ${quote(b.sub)}\n`;
@@ -299,54 +297,54 @@ function emitYaml(doc) {
   }
   out += "\n";
 
-  out += "# ─── Rows (abstraction layers) ────────────────────────────────\n";
-  out += "rows:\n";
-  for (const r of doc.rows) {
+  out += "# ─── Layers (abstraction layers) ────────────────────────────────\n";
+  out += "layers:\n";
+  for (const r of doc.layers) {
     out += `  - index: ${r.index}\n`;
     out += `    key: ${quote(r.key)}\n`;
     out += `    name: ${quote(r.name)}\n`;
   }
   out += "\n";
 
-  out += `# ─── Elements (${doc.elements.length} total) ─────────────────────────────\n`;
-  out += "elements:\n";
-  for (const e of doc.elements) {
+  out += `# ─── Primitives (${doc.primitives.length} total; schema key: primitives) ─────────────────────────────\n`;
+  out += "primitives:\n";
+  for (const e of doc.primitives) {
     out += `  - id: ${e.id}\n`;
     out += `    sym: ${quote(e.sym)}\n`;
     out += `    name: ${quote(e.name)}\n`;
-    out += `    block: ${e.block}\n`;
-    out += `    row: ${e.row}\n`;
+    out += `    role: ${e.role}\n`;
+    out += `    layer: ${e.layer}\n`;
     out += `    col: ${e.col}\n`;
     out += `    year: ${e.year === null ? "null" : quote(e.year)}\n`;
-    out += `    desc: ${quote(e.desc)}\n`;
-    if (e.bonds.length === 0) {
-      out += `    bonds: []\n`;
+    out += `    description: ${quote(e.description)}\n`;
+    if (e.composition_links.length === 0) {
+      out += `    composition_links: []\n`;
     } else {
-      out += `    bonds: [${e.bonds.map(quote).join(", ")}]\n`;
+      out += `    composition_links: [${e.composition_links.map(quote).join(", ")}]\n`;
     }
-    out += `    why: ${quote(e.why)}\n`;
+    out += `    rationale: ${quote(e.rationale)}\n`;
   }
   out += "\n";
 
-  const compoundCount = doc.compounds.reduce((n, s) => n + s.items.length, 0);
-  out += `# ─── Compounds (${compoundCount} total across ${doc.compounds.length} sections) ──────────────\n`;
-  out += "# Formulas are written in the same notation as the paper:\n";
-  out += "#   Sym -> two-letter element reference (resolves to elements[*].sym)\n";
+  const assemblyCount = doc.assemblies.reduce((n, s) => n + s.items.length, 0);
+  out += `# ─── Assemblies (${assemblyCount} total across ${doc.assemblies.length} sections; schema key: assemblies) ──────────────\n`;
+  out += "# Expressions are written in the same notation as the paper:\n";
+  out += "#   Sym -> two-letter primitive reference (resolves to primitives[*].sym)\n";
   out += "#   _xxx -> subscript on the preceding token (e.g. Tk_patch, ]ᴺ_enc)\n";
   out += "#   ->   sequential composition\n";
   out += "#   ‖    parallel\n";
   out += "#   ?    conditional\n";
   out += "#   ⇌    adversarial\n";
   out += "#   ↺    feedback loop\n";
-  out += "#   [...]ᴺ  repeated block\n";
-  out += "compounds:\n";
-  for (const section of doc.compounds) {
+  out += "#   [...]ᴺ  repeated role\n";
+  out += "assemblies:\n";
+  for (const section of doc.assemblies) {
     out += `  - section: ${quote(section.section)}\n`;
     if (section.hint) out += `    hint: ${quote(section.hint)}\n`;
     out += `    items:\n`;
     for (const item of section.items) {
       out += `      - name: ${quote(item.name)}\n`;
-      out += `        formula: ${quote(item.formula)}\n`;
+      out += `        expression: ${quote(item.expression)}\n`;
     }
   }
   out += "\n";
@@ -354,7 +352,7 @@ function emitYaml(doc) {
   if (doc.known_collisions.length > 0) {
     out += "# ─── Documented intentional symbol collisions ─────────────────\n";
     out += "# Lookup behavior is last-wins; consumers may disambiguate by id\n";
-    out += "# or by (row, col). The validator allows only collisions listed here.\n";
+    out += "# or by (layer, col). The validator allows only collisions listed here.\n";
     out += "known_collisions:\n";
     for (const c of doc.known_collisions) {
       out += `  - sym: ${quote(c.sym)}\n`;

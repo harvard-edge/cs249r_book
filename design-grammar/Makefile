@@ -1,20 +1,20 @@
-# Periodic Table of ML Systems — build orchestration.
+# ML Systems Design Grammar — build orchestration.
 #
-# table.yml is the single source of truth. Both index.html (the standalone
+# grammar.yml is the single source of truth. Both index.html (the standalone
 # shareable artifact) and the StaffML React data file are generated from it.
 #
 # Usage:
 #   make           — same as `make all`
 #   make all       — validate the YAML, regenerate index.html, sync the React TS file
-#   make html      — regenerate periodic-table/index.html from table.yml
-#   make sync      — regenerate interviews/staffml/src/data/periodicTable.ts from table.yml
-#   make validate  — schema-check table.yml + run cross-reference invariants
+#   make html      — regenerate design-grammar/index.html from grammar.yml
+#   make sync      — regenerate interviews/staffml/src/data/designGrammar.ts from grammar.yml
+#   make validate  — schema-check grammar.yml + run cross-reference invariants
 #   make clean     — remove generated files (DESTRUCTIVE — only run after committing)
 
 REPO := $(shell cd .. && pwd)
-YAML := table.yml
+YAML := grammar.yml
 HTML := index.html
-TS   := $(REPO)/interviews/staffml/src/data/periodicTable.ts
+TS   := $(REPO)/interviews/staffml/src/data/designGrammar.ts
 
 NODE := node
 
@@ -27,7 +27,7 @@ html:
 	@$(NODE) scripts/build-html.mjs
 
 sync:
-	@$(NODE) $(REPO)/interviews/staffml/scripts/sync-periodic-table.mjs
+	@$(NODE) $(REPO)/interviews/staffml/scripts/sync-design-grammar.mjs
 
 validate:
 	@$(NODE) scripts/validate.mjs

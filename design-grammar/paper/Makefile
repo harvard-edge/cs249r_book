@@ -1,20 +1,21 @@
-.PHONY: all paper svgs hero clean distclean
+.PHONY: all paper svgs catalog clean distclean
 
 # ── Default: convert SVGs → compile paper ────────────────────
 all: paper
 
-# ── Generate the periodic-table hero SVG from the YAML source of truth ──
+# ── Generate the primitive-catalog SVG from the YAML source of truth ──
 # Re-runs whenever the YAML or the generator script changes.
-figures/periodic_table_hero.svg: ../table.yml scripts/generate_periodic_svg.py
-	python3 scripts/generate_periodic_svg.py
+figures/primitive_catalog.svg: ../grammar.yml scripts/generate_primitive_catalog.py
+	python3 scripts/generate_primitive_catalog.py
 
-hero: figures/periodic_table_hero.svg
+catalog: figures/primitive_catalog.svg
 
 # ── Convert SVG figures to PDF ───────────────────────────────
-# Include the generated hero SVG explicitly so it's part of SVG_SOURCES
+# Include the generated primitive catalog SVG explicitly so it's part of SVG_SOURCES
 # even before the wildcard sees it.
-SVG_SOURCES = $(sort $(wildcard figures/*.svg) figures/periodic_table_hero.svg)
+SVG_SOURCES = $(sort $(wildcard figures/*.svg) figures/primitive_catalog.svg)
 SVG_PDFS    = $(SVG_SOURCES:.svg=.pdf)
+TEX_SOURCES = paper.tex predict_paper.tex appendix-primitives.tex appendix-proofs.tex nomenclature.tex
 
 svgs: $(SVG_PDFS)
 
@@ -24,7 +25,7 @@ figures/%.pdf: figures/%.svg
 # ── Compile paper ────────────────────────────────────────────
 paper: paper.pdf
 
-paper.pdf: paper.tex references.bib $(SVG_PDFS)
+paper.pdf: $(TEX_SOURCES) references.bib $(SVG_PDFS)
 	pdflatex -interaction=nonstopmode paper.tex
 	bibtex paper
 	pdflatex -interaction=nonstopmode paper.tex

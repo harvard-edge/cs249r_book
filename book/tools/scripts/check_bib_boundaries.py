@@ -34,9 +34,9 @@ SCOPES = {
             "mlsysim/docs/references.bib"
         ]
     },
-    "PeriodicTable": {
-        "sources": ["periodic-table"],
-        "bibs": ["periodic-table/paper/references.bib"]
+    "DesignGrammar": {
+        "sources": ["design-grammar"],
+        "bibs": ["design-grammar/paper/references.bib"]
     }
 }
 

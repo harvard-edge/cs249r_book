@@ -20,15 +20,15 @@ const fs = require('fs');
       container.style.gridTemplateColumns = '1fr';
       container.style.gap = '0';
     }
-    const compounds = document.querySelector('.compounds');
-    if (compounds) compounds.style.display = 'none';
+    const assemblies = document.querySelector('.assemblies');
+    if (assemblies) assemblies.style.display = 'none';
     const h3s = document.querySelectorAll('h3');
     h3s.forEach(h => h.style.display = 'none');
   });
 
   const element = await page.$('.container');
   if (!fs.existsSync('figures')) fs.mkdirSync('figures');
-  await element.screenshot({ path: 'figures/periodic_table_hero.png', omitBackground: true });
+  await element.screenshot({ path: 'figures/primitive_catalog.png', omitBackground: true });
   
   await browser.close();
 })();

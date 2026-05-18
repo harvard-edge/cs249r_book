@@ -52,8 +52,8 @@ NEXT_PUBLIC_VAULT_FALLBACK=
 
 `npm run dev` runs (in this order):
 
-1. **`scripts/sync-periodic-table.mjs`** — regenerates
-   `src/data/periodicTable.ts` from `periodic-table/table.yml`.
+1. **`scripts/sync-design-grammar.mjs`** — regenerates
+   `src/data/designGrammar.ts` from `design-grammar/grammar.yml`.
 2. **`scripts/build-local-corpus.mjs`** — runs `vault build --local`
    from the repo root, which:
    - compiles every YAML under `interviews/vault/questions/` to
