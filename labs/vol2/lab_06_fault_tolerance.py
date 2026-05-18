@@ -624,12 +624,12 @@ def _(
     - 175B parameters x 14 bytes (FP16 weights + FP32 Adam m1 + m2 + master) = **2.45 TB** per checkpoint
     - At NFS 1 GB/s aggregate write: 2,450 seconds = **~41 minutes**
 
-    With MTBF of ~5 hours (1,000 GPUs), the Young-Daly optimal interval is:
-    tau_opt = sqrt(2 * 2450 * 18,000) = sqrt(88,200,000) = ~9,393s = ~2.6 hours
+    With MTBF of ~50 hours (1,000 GPUs, MTTF=50,000 hrs each), the Young-Daly optimal interval is:
+    tau_opt = sqrt(2 * 2450 * 180,000) = sqrt(882,000,000) = ~29,700s = ~8.2 hours
 
-    But wait -- at 1 GB/s NFS, checkpoint write time (41 min) is already a significant
-    fraction of the optimal interval (2.6 hours). With faster storage (100 GB/s NVMe RAID),
-    the same checkpoint takes only 24.5 seconds.
+    At 1 GB/s NFS, checkpoint write time (41 min) is a manageable fraction of the 8.2 hour
+    optimal interval. With faster storage (100 GB/s NVMe RAID), the same checkpoint takes only
+    24.5 seconds.
 
     What happens at a larger cluster (10,000 GPUs) where MTBF drops to ~5 hours?
     """))
@@ -768,9 +768,9 @@ def _(
             items.append(mo.callout(mo.md(
                 "**Correct.** 175B x 14 bytes = 2.45 TB per checkpoint. At 1 GB/s NFS, that is "
                 "2,450 seconds = ~41 minutes. With MTBF of ~50 hours for a 1,000-GPU cluster, "
-                "the Young-Daly optimal interval is ~2.6 hours, so 41 minutes is within budget. "
-                "But at 10,000 GPUs (MTBF ~5 hours), optimal interval drops to ~27 minutes "
-                "-- now the write time *exceeds* the optimal interval. Checkpoint storm."
+                "the Young-Daly optimal interval is ~8.2 hours, so 41 minutes is well within budget. "
+                "But at 10,000 GPUs (MTBF ~5 hours), optimal interval drops to ~2.6 hours "
+                "-- now the write time (41 min) is a large fraction of the optimal interval."
             ), kind="success"))
         elif partB_prediction.value == "A":
             items.append(mo.callout(mo.md(
