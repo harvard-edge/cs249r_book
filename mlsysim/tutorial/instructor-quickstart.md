@@ -115,7 +115,7 @@ Every concept in your course maps to one term in this equation. Every homework
 problem is about understanding which term is the bottleneck and how to improve it.
 The 22-wall taxonomy provides the vocabulary; the Iron Law provides the structure.
 
-See [laws-explained.md](../docs/laws-explained.md) for plain-English explanations
+See [laws-explained.qmd](../docs/laws-explained.qmd) for plain-English explanations
 of all 22 constraints.
 
 ## Getting Help

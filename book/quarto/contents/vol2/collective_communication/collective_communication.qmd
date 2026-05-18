@@ -1380,60 +1380,6 @@ class HierarchicalAllreduceCalc:
 
 These three phases confine most traffic within each node before crossing the slower inter-node fabric.
 
-<!--
-  % Node 0
-  \node[nodebox] (n0) at (0,0) {};
-  \node[font=\footnotesize\bfseries] at (0, -1.8) {Node 0};
-  \node[gpu] (g00) at (-1.2, 0.6) {GPU0};
-  \node[gpu] (g01) at (1.2, 0.6) {GPU1};
-  \node[gpu] (g02) at (-1.2, -0.6) {GPU2};
-  \node[gpu] (g03) at (1.2, -0.6) {GPU3};
-
-  % NVLink mesh Node 0
-  \draw[nv_link] (g00) -- (g01);
-  \draw[nv_link] (g02) -- (g03);
-  \draw[nv_link] (g00) -- (g02);
-  \draw[nv_link] (g01) -- (g03);
-  \draw[nv_link] (g00) -- (g03);
-  \draw[nv_link] (g01) -- (g02);
-
-  % Node 1
-  \node[nodebox] (n1) at (7,0) {};
-  \node[font=\footnotesize\bfseries] at (7, -1.8) {Node 1};
-  \node[gpu] (g10) at (5.8, 0.6) {GPU0};
-  \node[gpu] (g11) at (8.2, 0.6) {GPU1};
-  \node[gpu] (g12) at (5.8, -0.6) {GPU2};
-  \node[gpu] (g13) at (8.2, -0.6) {GPU3};
-
-  % NVLink mesh Node 1
-  \draw[nv_link] (g10) -- (g11);
-  \draw[nv_link] (g12) -- (g13);
-  \draw[nv_link] (g10) -- (g12);
-  \draw[nv_link] (g11) -- (g13);
-  \draw[nv_link] (g10) -- (g13);
-  \draw[nv_link] (g11) -- (g12);
-
-  % Inter-node InfiniBand links (rail-aligned: GPU0↔GPU0, GPU1↔GPU1, etc.)
-  \draw[ib_link] (g00.east) -- node[midway, above, font=\tiny\usefont{T1}{phv}{m}{n}, text=IBColor] {IB} (g10.west);
-  \draw[ib_link] (g01.east) -- (g11.west);
-  \draw[ib_link] (g02.east) -- (g12.west);
-  \draw[ib_link] (g03.east) -- (g13.west);
-
-  % Phase labels
-  \node[phase_label, fill=NVColor!20, text=NVColor!80!black] at (-2.8, 0) {\begin{tabular}{c}Step 1\\ReduceScatter\\(NVLink)\end{tabular}};
-  \node[phase_label, fill=IBColor!20, text=IBColor!80!black] at (3.5, 1.8) {\begin{tabular}{c}Step 2: Inter-Node AllReduce (InfiniBand)\\GPU$_i$ ↔ GPU$_i$ only\end{tabular}};
-  \node[phase_label, fill=NVColor!20, text=NVColor!80!black] at (9.8, 0) {\begin{tabular}{c}Step 3\\AllGather\\(NVLink)\end{tabular}};
-
-  % Bandwidth annotations
-  \node[font=\tiny\usefont{T1}{phv}{m}{n}, text=NVColor] at (0, -2.4) {900 GB/s};
-  \node[font=\tiny\usefont{T1}{phv}{m}{n}, text=IBColor] at (3.5, 0.4) {50 GB/s};
-  \node[font=\tiny\usefont{T1}{phv}{m}{n}, text=NVColor] at (7, -2.4) {900 GB/s};
-
-\end{tikzpicture}
-```
-:::
--->
-
 The hierarchical approach generalizes beyond two levels. Large clusters with multiple racks connected through spine switches introduce a third bandwidth tier (rack-to-rack at reduced bisection bandwidth). The following exercise extends the two-level analysis to quantify the impact of this additional hierarchy.
 
 ```{python}
@@ -1730,6 +1676,8 @@ class ErrorFeedbackTrace:
 | 4        |                     0.4 |                     0 |                          0 |                 1.3 |
 | 5        |                     0.3 |                     0 |                      **0** |             **1.6** |
 
+: **Naive Compression Trace (No Error Feedback)**: Five-step worked trace showing how a greedy 1-bit quantizer transmits zero whenever individual gradients fall below the threshold. The true cumulative gradient grows to 1.6, but every transmitted value is zero, so the parameter never moves. {#tbl-error-feedback-naive}
+
 **Result**: After 5 steps, the system has transmitted **`{python} ErrorFeedbackTrace.naive_str`** but the true cumulative gradient is **`{python} ErrorFeedbackTrace.true_str`**. The parameter never updates, and **100 percent of gradient information is lost**.
 
 **With Error Feedback**:
@@ -1741,6 +1689,8 @@ class ErrorFeedbackTrace:
 | 3        |       0.2 |      −0.3 |            −0.1 |         0 |                              −0.1 |                  1 |
 | 4        |       0.4 |      −0.1 |             0.3 |         0 |                               0.3 |                  1 |
 | 5        |       0.3 |       0.3 |             0.6 |         1 |                              −0.4 |              **2** |
+
+: **Error-Feedback Compression Trace**: Same five-step sequence under error-feedback compression. Each step's quantization residual $e_t$ is added back to the next gradient, so the transmitted signal $v$ converges toward the true cumulative gradient. Transmitted + residual error conserves the full signal. {#tbl-error-feedback}
 
 **Result**: After 5 steps, the system has transmitted **`{python} ErrorFeedbackTrace.cum_str`** with a remaining error of **`{python} ErrorFeedbackTrace.error_str`**. The true cumulative is **`{python} ErrorFeedbackTrace.true_str`**, so transmitted $+$ error = `{python} ErrorFeedbackTrace.conservation_str` = `{python} ErrorFeedbackTrace.true_str` ✓
 
@@ -1831,12 +1781,14 @@ Verify your understanding of when and how to apply gradient compression:
 
 Gradient compression is not free; it trades reduced communication for increased variance in the optimization process.
 
-| **Method**                | **Compression Ratio** |          **Convergence Impact** | **Best Use Case**              |
-|:--------------------------|----------------------:|--------------------------------:|:-------------------------------|
-| **FP16**                  |             2$\times$ |                      Negligible | Default for all training       |
+| **Method**                       | **Compression Ratio** |                 **Convergence Impact** | **Best Use Case**              |
+|:---------------------------------|----------------------:|---------------------------------------:|:-------------------------------|
+| **FP16**                         |             2$\times$ |                             Negligible | Default for all training       |
 | **INT8 + Error FB**              |             4$\times$ |        Minor slowdown (~5--10 percent) | Bandwidth-constrained clusters |
-| **Top-k (1 percent) + Error FB** |           100$\times$ |    Moderate slowdown (~10--20 percent) | Cross-data center training      |
+| **Top-k (1 percent) + Error FB** |           100$\times$ |    Moderate slowdown (~10--20 percent) | Cross-data center training     |
 | **1-bit + Error FB**             |            32$\times$ | Significant slowdown (~20--30 percent) | Extreme bandwidth constraints  |
+
+: **Gradient Compression Methods**: Compression-ratio versus convergence-impact trade-off for the four canonical gradient compressors. The right choice depends on whether bandwidth or convergence speed is the binding constraint; aggressive compressors only pay off once communication dominates iteration time. {#tbl-gradient-compression-methods}
 
 #### When to use compression {#sec-collective-communication-use-compression-8519}
 
@@ -2165,7 +2117,9 @@ The "Travel Manifest" for a gradient depends on the system's objective function 
 |:--------------------------------------|:-----------------------|:--------------------------------|:---------------------------------------------|
 | **Archetype A (GPT-4/Llama-3)**       | AllReduce              | Bandwidth ($\beta$)             | Hierarchical AllReduce; Rail-optimization    |
 | **Archetype B (DLRM at Scale)**       | AllToAll               | Latency ($\alpha$) & Contention | Topology-aware routing; token load-balancing |
-| **Archetype C (Federated MobileNet)** | P2P/Async            | Connectivity & Latency          | Aggressive quantization; Error Feedback      |
+| **Archetype C (Federated MobileNet)** | P2P/Async              | Connectivity & Latency          | Aggressive quantization; Error Feedback      |
+
+: **Archetype-to-Collective Mapping**: Each lighthouse archetype's communication pattern is determined by its dominant bottleneck. Dense transformer training is bandwidth-bound and benefits from hierarchical AllReduce; recommender systems are latency-bound and benefit from topology-aware AllToAll; federated learning is connectivity-bound and benefits from aggressive compression with error feedback. {#tbl-archetype-collective-mapping}
 
 The key insight is that Archetype A and Archetype B, despite both operating at data center scale, face fundamentally different bottlenecks. Archetype A (GPT-4/Llama-3) is bandwidth-bound and benefits from hierarchical AllReduce combined with communication-computation overlap. Archetype B (DLRM at Scale) is latency-bound and benefits from low-latency switches and topology-aware AllToAll routing. Applying the wrong optimization to the wrong archetype wastes engineering effort without improving performance.
 
