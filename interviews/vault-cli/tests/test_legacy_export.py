@@ -5,7 +5,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from vault_cli.legacy_export import emit_legacy_corpus
+import pytest
+
+from vault_cli.legacy_export import (
+    emit_corpus_summary,
+    emit_legacy_corpus,
+    emit_manifest,
+    select_release_items,
+)
 from vault_cli.loader import LoadedQuestion
 from vault_cli.models import (
     ChainRef,
@@ -19,12 +26,15 @@ def _make_lq(
     chains: list[ChainRef] | None = None,
     topic: str = "kv-cache-management",
     competency_area: str = "memory",
+    track: str = "cloud",
+    level: str = "L4",
+    status: str = "published",
 ) -> LoadedQuestion:
     return LoadedQuestion(
         question=Question(
             id=id,
-            track="cloud",
-            level="L4",
+            track=track,
+            level=level,
             zone="diagnosis",
             topic=topic,
             competency_area=competency_area,
@@ -32,7 +42,7 @@ def _make_lq(
             title=f"T-{id}",
             scenario="plaintext scenario that is long enough to be useful.",
             details=Details(realistic_solution="answer."),
-            status="published",
+            status=status,
             provenance="human",
             chains=chains,
         ),
@@ -135,6 +145,81 @@ def test_competency_area_preserved(tmp_path: Path) -> None:
     data = json.loads(out.read_text())
     assert data[0]["topic"] == "kv-cache-management"
     assert data[0]["competency_area"] == "memory"
+
+
+def test_summary_export_does_not_require_full_corpus(tmp_path: Path) -> None:
+    """Production only needs the summary artifact bundled by the site."""
+    policy = tmp_path / "release-policy.yaml"
+    policy.write_text("policy_version: 1\ninclude: {status: [published], require_validated: false}\n")
+    out = tmp_path / "corpus-summary.json"
+
+    result = emit_corpus_summary(
+        tmp_path,
+        [_make_lq("published"), _make_lq("draft", status="draft")],
+        out,
+    )
+
+    data = json.loads(out.read_text())
+    assert result["count"] == 1
+    assert [q["id"] for q in data] == ["published"]
+    assert data[0]["scenario"] == ""
+    assert data[0]["details"]["realistic_solution"] == ""
+    assert not (tmp_path / "corpus.json").exists()
+
+
+def test_manifest_distributions_use_release_items(tmp_path: Path) -> None:
+    """Manifest count and distributions must share the same release filter."""
+    policy = tmp_path / "release-policy.yaml"
+    policy.write_text(
+        "\n".join([
+            "policy_version: 1",
+            "include: {status: [published], require_validated: false}",
+            "exclude_ids: [excluded]",
+        ])
+        + "\n"
+    )
+    loaded = [
+        _make_lq("included", track="cloud", level="L3"),
+        _make_lq("excluded", track="edge", level="L4"),
+        _make_lq("draft", track="mobile", level="L5", status="draft"),
+    ]
+    release_items = select_release_items(tmp_path, loaded)
+    out = tmp_path / "vault-manifest.json"
+
+    emit_manifest(
+        loaded=loaded,
+        output=out,
+        release_id="dev",
+        release_hash="a" * 64,
+        schema_version="1",
+        policy_version="1",
+        published_count=len(release_items),
+        chain_count=0,
+        release_items=release_items,
+    )
+
+    manifest = json.loads(out.read_text())
+    assert manifest["questionCount"] == 1
+    assert manifest["trackDistribution"] == {"cloud": 1}
+    assert manifest["levelDistribution"] == {"L3": 1}
+
+
+def test_manifest_rejects_count_drift(tmp_path: Path) -> None:
+    out = tmp_path / "vault-manifest.json"
+    release_items = [_make_lq("included")]
+
+    with pytest.raises(ValueError, match="published_count does not match"):
+        emit_manifest(
+            loaded=release_items,
+            output=out,
+            release_id="dev",
+            release_hash="a" * 64,
+            schema_version="1",
+            policy_version="1",
+            published_count=2,
+            chain_count=0,
+            release_items=release_items,
+        )
 
 
 def test_multi_chain_membership(tmp_path: Path) -> None:

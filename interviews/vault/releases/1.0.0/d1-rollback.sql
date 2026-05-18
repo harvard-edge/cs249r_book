@@ -1,1 +1,0 @@
--- rollback for 1.0.0 (embeds prior-row bodies)
