@@ -166,37 +166,47 @@ insertPreamble = function(doc, classDefs, fmt)
     return(result)
   end
 
-  -- Generate dark mode CSS overrides from YAML colors
-  -- This covers BOTH @media (prefers-color-scheme: dark) AND manual toggle
+  -- Generate dark mode CSS overrides from YAML colors.
+  -- Emits two parallel rule-sets so dark styling works regardless of how dark
+  -- mode is activated:
+  --   1. @media (prefers-color-scheme: dark) -- OS-level system preference
+  --   2. body.quarto-dark selector          -- Quarto's manual toggle button
   local generateDarkModeCSS = function ()
     local darkCSS = {}
     if classDefs == nil then return "" end
 
-    -- 1. @media query block for system-level dark mode (detected by OS)
-    table.insert(darkCSS, "<style>\n@media (prefers-color-scheme: dark) {\n")
-    for cls, options in pairs(classDefs) do
-      if options.colors and options.colors[2] then
-        local borderHex = options.colors[2]
-        local r, g, b = hexToRGB(borderHex)
-        table.insert(darkCSS, "  details."..cls.." {\n")
-        table.insert(darkCSS, "    --text-color: #e6e6e6;\n")
-        table.insert(darkCSS, "    --background-color: rgba("..r..", "..g..", "..b..", "..DARK_BG_OPACITY..");\n")
-        table.insert(darkCSS, "    --title-background-color: rgba("..r..", "..g..", "..b..", "..DARK_BG_OPACITY..");\n")
-        table.insert(darkCSS, "    border-color: #"..borderHex..";\n")
-        table.insert(darkCSS, "  }\n")
-        -- Bright summary text
-        table.insert(darkCSS, "  details."..cls.." summary,\n")
-        table.insert(darkCSS, "  details."..cls.." summary strong,\n")
-        table.insert(darkCSS, "  details."..cls.." > summary {\n")
-        table.insert(darkCSS, "    color: #f0f0f0 !important;\n")
-        table.insert(darkCSS, "  }\n")
-        -- Code elements
-        table.insert(darkCSS, "  details."..cls.." code {\n")
-        table.insert(darkCSS, "    color: #e6e6e6 !important;\n")
-        table.insert(darkCSS, "  }\n")
+    -- Helper: emit per-callout rules for one selector context
+    local function emitCalloutRules(prefix)
+      for cls, options in pairs(classDefs) do
+        if options.colors and options.colors[2] then
+          local borderHex = options.colors[2]
+          local r, g, b = hexToRGB(borderHex)
+          table.insert(darkCSS, prefix.."details."..cls.." {\n")
+          table.insert(darkCSS, "    --text-color: #e6e6e6;\n")
+          table.insert(darkCSS, "    --background-color: rgba("..r..", "..g..", "..b..", "..DARK_BG_OPACITY..");\n")
+          table.insert(darkCSS, "    --title-background-color: rgba("..r..", "..g..", "..b..", "..DARK_BG_OPACITY..");\n")
+          table.insert(darkCSS, "    border-color: #"..borderHex..";\n")
+          table.insert(darkCSS, "  }\n")
+          table.insert(darkCSS, prefix.."details."..cls.." summary,\n")
+          table.insert(darkCSS, prefix.."details."..cls.." summary strong,\n")
+          table.insert(darkCSS, prefix.."details."..cls.." > summary {\n")
+          table.insert(darkCSS, "    color: #f0f0f0 !important;\n")
+          table.insert(darkCSS, "  }\n")
+          table.insert(darkCSS, prefix.."details."..cls.." code {\n")
+          table.insert(darkCSS, "    color: #e6e6e6 !important;\n")
+          table.insert(darkCSS, "  }\n")
+        end
       end
     end
-    table.insert(darkCSS, "}\n</style>\n")
+
+    -- 1. OS-level dark mode via @media query
+    table.insert(darkCSS, "<style>\n@media (prefers-color-scheme: dark) {\n")
+    emitCalloutRules("  ")
+    table.insert(darkCSS, "}\n")
+
+    -- 2. Quarto manual toggle button via body.quarto-dark class
+    emitCalloutRules("body.quarto-dark ")
+    table.insert(darkCSS, "</style>\n")
 
     return pandoc.utils.stringify(darkCSS)
   end
