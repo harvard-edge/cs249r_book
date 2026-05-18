@@ -966,21 +966,25 @@ class MatmulBackward(Function):
 
         # Gradient for first input: grad_output @ b.T
         if isinstance(a, Tensor) and a.requires_grad:
-            # For batched tensors, transpose only last two dims
             if b.data.ndim >= 2:
+                # Batched: transpose only the last two dims
                 b_T = np.swapaxes(b.data, -2, -1)
+                grad_a = np.matmul(grad_output, b_T)
             else:
-                b_T = b.data.T
-            grad_a = np.matmul(grad_output, b_T)
+                # 1D b: A(m,k) @ b(k,) -> out(m,)
+                # grad_A = outer(grad_output, b): (m,) x (k,) -> (m, k)
+                grad_a = np.outer(grad_output, b.data)
 
         # Gradient for second input: a.T @ grad_output
         if isinstance(b, Tensor) and b.requires_grad:
-            # For batched tensors, transpose only last two dims
             if a.data.ndim >= 2:
+                # Batched: transpose only the last two dims
                 a_T = np.swapaxes(a.data, -2, -1)
+                grad_b = np.matmul(a_T, grad_output)
             else:
-                a_T = a.data.T
-            grad_b = np.matmul(a_T, grad_output)
+                # 1D a: a(k,) @ B(k,n) -> out(n,)
+                # grad_B = outer(a, grad_output): (k,) x (n,) -> (k, n)
+                grad_b = np.outer(a.data, grad_output)
 
         return grad_a, grad_b
         ### END SOLUTION
