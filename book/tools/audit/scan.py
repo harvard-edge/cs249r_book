@@ -57,6 +57,15 @@ CHECK_REGISTRY: list[tuple[str, str]] = [
     ("audit.checks.alt_text_style", "alt-text-style"),
     ("audit.checks.bibliography_hygiene", "bibliography-hygiene"),
     ("audit.checks.notation_consistency", "notation-consistency"),
+    # Wave 7 — release-gate defect catalog (binder check release)
+    ("audit.checks.bare_attribution", "bare-attribution"),
+    ("audit.checks.duplicate_citation", "duplicate-citation"),
+    ("audit.checks.math_notation_render", "math-notation-render"),
+    ("audit.checks.unresolved_xref", "unresolved-xref"),
+    ("audit.checks.longtable_continuity", "longtable-candidate"),
+    ("audit.checks.sec_slug_placement", "sec-slug-end-of-paragraph"),
+    ("audit.checks.footnote_numbering", "footnote-numbering"),
+    ("audit.checks.layout_proxies", "layout-proxy"),
 ]
 
 
