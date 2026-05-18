@@ -1354,8 +1354,9 @@ class GPT:
     def _create_causal_mask(self, seq_len):
         """Create causal mask to prevent attending to future positions."""
         ### BEGIN SOLUTION
-        # Upper triangular matrix filled with -inf
-        mask = np.triu(np.ones((seq_len, seq_len)) * -np.inf, k=1)
+        # Lower triangular binary mask: 1=allow (past/present), 0=block (future)
+        # _apply_mask in module 12 expects this convention: adder = (1-mask)*MASK_VALUE
+        mask = np.tril(np.ones((seq_len, seq_len)))
         return Tensor(mask)
         ### END SOLUTION
 
