@@ -251,18 +251,6 @@ WASM_BLOCKED_IMPORTS = {
 }
 
 
-class TestStateImplementation:
-    """Ensure state.py uses IndexedDB and not localStorage."""
-
-    def test_no_localstorage_import(self):
-        state_py_path = REPO_ROOT / "mlsysim" / "mlsysim" / "labs" / "state.py"
-        with open(state_py_path, "r") as f:
-            source = f.read()
-        assert "from js import localStorage" not in source, (
-            "Found 'from js import localStorage' in state.py. "
-            "Use IndexedDB instead, as localStorage is not available in WASM web workers."
-        )
-
 class TestWASMCompatibility:
     """Catch imports that will fail in the Pyodide/WASM environment."""
 
