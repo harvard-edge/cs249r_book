@@ -4,86 +4,86 @@ import { useMemo, useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { ArrowLeft, Search, X } from "lucide-react";
 import {
-  blocks,
-  rowLabels,
-  elements,
-  elMap,
-  compounds,
-  type Block,
-  type BlockKey,
-  type Element,
-  type Compound,
-  type FormulaToken,
-} from "@/data/periodicTable";
-import styles from "./PeriodicTable.module.css";
+  roles,
+  layerLabels,
+  primitives,
+  primitiveMap,
+  assemblies,
+  type Role,
+  type RoleKey,
+  type Primitive,
+  type Assembly,
+  type ExpressionToken,
+} from "@/data/designGrammar";
+import styles from "./DesignGrammar.module.css";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
-const blockEntries = Object.entries(blocks) as Array<[BlockKey, Block]>;
+const roleEntries = Object.entries(roles) as Array<[RoleKey, Role]>;
 
-function compoundSyms(compound: Compound): Set<string> {
+function assemblySyms(assembly: Assembly): Set<string> {
   const set = new Set<string>();
-  compound.formula.forEach((t) => {
-    if (t.kind === "sym" && elMap[t.sym]) set.add(t.sym);
+  assembly.expression.forEach((t) => {
+    if (t.kind === "sym" && primitiveMap[t.sym]) set.add(t.sym);
   });
   return set;
 }
 
-// Pre-compute compound ↔ symbol maps once.
-const compoundSymCache: Map<Compound, Set<string>> = new Map();
-const symToCompounds: Record<string, Compound[]> = {};
-let TOTAL_COMPOUNDS = 0;
-compounds.forEach((section) =>
-  section.items.forEach((c) => {
-    TOTAL_COMPOUNDS += 1;
-    const syms = compoundSyms(c);
-    compoundSymCache.set(c, syms);
+// Pre-compute assembly ↔ symbol maps once.
+const assemblySymCache: Map<Assembly, Set<string>> = new Map();
+const symToAssemblies: Record<string, Assembly[]> = {};
+let TOTAL_ASSEMBLIES = 0;
+assemblies.forEach((section) =>
+  section.items.forEach((assembly) => {
+    TOTAL_ASSEMBLIES += 1;
+    const syms = assemblySyms(assembly);
+    assemblySymCache.set(assembly, syms);
     syms.forEach((sym) => {
-      if (!symToCompounds[sym]) symToCompounds[sym] = [];
-      symToCompounds[sym].push(c);
+      if (!symToAssemblies[sym]) symToAssemblies[sym] = [];
+      symToAssemblies[sym].push(assembly);
     });
   }),
 );
 
 // ── Page ─────────────────────────────────────────────────────────────────
 export default function FrameworkPage() {
-  const [activeBlock, setActiveBlock] = useState<BlockKey | null>(null);
+  const [activeRole, setActiveRole] = useState<RoleKey | null>(null);
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<Element | null>(null);
-  // Cross-ref state: clicking element highlights its compounds; clicking
-  // a compound highlights its elements.
-  const [highlightedCompounds, setHighlightedCompounds] = useState<Set<Compound> | null>(null);
+  const [selected, setSelected] = useState<Primitive | null>(null);
+  // Cross-ref state: clicking a primitive highlights its assemblies; clicking
+  // an assembly highlights its primitives.
+  const [highlightedAssemblies, setHighlightedAssemblies] = useState<Set<Assembly> | null>(null);
   const [highlightedSyms, setHighlightedSyms] = useState<Set<string> | null>(null);
 
   const dimmedSet = useMemo(() => {
     const q = query.toLowerCase().trim();
     const dimmed = new Set<string>();
-    elements.forEach((e) => {
-      const blockMatch = !activeBlock || e.block === activeBlock;
+    primitives.forEach((e) => {
+      const roleMatch = !activeRole || e.role === activeRole;
       const searchMatch =
         !q || e.name.toLowerCase().includes(q) || e.sym.toLowerCase().includes(q);
-      if (!(blockMatch && searchMatch)) dimmed.add(e.sym);
+      if (!(roleMatch && searchMatch)) dimmed.add(e.sym);
     });
     return dimmed;
-  }, [activeBlock, query]);
+  }, [activeRole, query]);
 
   const clearXref = useCallback(() => {
-    setHighlightedCompounds(null);
+    setHighlightedAssemblies(null);
     setHighlightedSyms(null);
   }, []);
 
-  const handleElementClick = useCallback((e: Element) => {
-    // Match the original: highlight matching compound cards AND scroll the
+  const handlePrimitiveClick = useCallback((e: Primitive) => {
+    // Match the original: highlight matching assembly cards AND scroll the
     // first match into view (scroll happens behind the modal so the page is
     // already positioned correctly when the user closes the panel).
-    const cards = symToCompounds[e.sym] || [];
+    const cards = symToAssemblies[e.sym] || [];
     if (cards.length > 0) {
-      setHighlightedCompounds(new Set(cards));
+      setHighlightedAssemblies(new Set(cards));
       setHighlightedSyms(null);
       const firstName = cards[0].name;
       requestAnimationFrame(() => {
         try {
           document
-            .querySelector<HTMLElement>(`[data-pt-compound="${CSS.escape(firstName)}"]`)
+            .querySelector<HTMLElement>(`[data-dg-assembly="${CSS.escape(firstName)}"]`)
             ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
         } catch {
           /* scroll is best-effort */
@@ -93,11 +93,11 @@ export default function FrameworkPage() {
     setSelected(e);
   }, []);
 
-  const handleCompoundClick = useCallback(
-    (c: Compound) => {
-      const syms = compoundSymCache.get(c);
+  const handleAssemblyClick = useCallback(
+    (c: Assembly) => {
+      const syms = assemblySymCache.get(c);
       if (!syms || syms.size === 0) return;
-      setHighlightedCompounds(new Set([c]));
+      setHighlightedAssemblies(new Set([c]));
       setHighlightedSyms(syms);
       requestAnimationFrame(() => {
         document.getElementById("table-anchor")?.scrollIntoView({
@@ -121,17 +121,17 @@ export default function FrameworkPage() {
     return () => window.removeEventListener("keydown", handler);
   }, [clearXref]);
 
-  // Click anywhere outside an element / compound card / panel clears the
+  // Click anywhere outside a primitive / assembly card / panel clears the
   // cross-reference highlight, matching the original page's behavior.
-  const xrefIsActive = highlightedCompounds !== null || highlightedSyms !== null;
+  const xrefIsActive = highlightedAssemblies !== null || highlightedSyms !== null;
   useEffect(() => {
     if (!xrefIsActive) return;
     const handler = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
       if (!target) return;
-      if (target.closest("[data-pt-element]")) return;
-      if (target.closest("[data-pt-compound]")) return;
-      if (target.closest("[data-pt-panel]")) return;
+      if (target.closest("[data-dg-primitive]")) return;
+      if (target.closest("[data-dg-assembly]")) return;
+      if (target.closest("[data-dg-panel]")) return;
       clearXref();
     };
     document.addEventListener("click", handler);
@@ -152,14 +152,14 @@ export default function FrameworkPage() {
         {/* Hero */}
         <div className="text-center mb-10">
           <span className="inline-block text-[10px] uppercase tracking-[0.14em] font-semibold text-accentBlue px-2.5 py-1 rounded-full border border-accentBlue/30 bg-accentBlue/5 mb-4">
-            v0.1 · {elements.length} Elements · {TOTAL_COMPOUNDS} Compounds
+            v0.2 · {primitives.length} Primitives · {TOTAL_ASSEMBLIES} Assemblies
           </span>
           <h1 className="text-3xl sm:text-4xl font-extrabold text-textPrimary tracking-tight mb-3">
-            The <span className="text-accentBlue italic">Periodic Table</span> of Machine Learning Systems
+            The <span className="text-accentBlue italic">ML Systems Design Grammar</span>
           </h1>
           <p className="text-[15px] text-textSecondary leading-relaxed max-w-2xl mx-auto">
-            Two fundamental axes — abstraction layer and information-processing role — organize ML
-            concepts the way electron shells and valence organize chemistry.
+            Stable primitives, physical constraints, and reusable rewrite rules for deriving ML
+            systems from first principles.
           </p>
         </div>
 
@@ -172,11 +172,11 @@ export default function FrameworkPage() {
                 <span className="text-accentBlue">↓</span> Rows: Abstraction Layer
               </h3>
               <p className="text-[12.5px] text-textSecondary mb-2 leading-relaxed">
-                Like electron shells, each layer <strong className="text-textPrimary">builds on and contains</strong> the
-                ones above. You can&apos;t have optimization without a model, or deployment without hardware.
+                Each layer <strong className="text-textPrimary">adds a different kind of system constraint</strong>.
+                The primitive catalog is the parts list; the design grammar explains how those parts compose.
               </p>
               <ol className="text-[11.5px] text-textTertiary leading-relaxed space-y-0.5">
-                {rowLabels.map((label, i) => (
+                {layerLabels.map((label, i) => (
                   <li key={label}>
                     <span className="text-textPrimary font-semibold">
                       {i + 1}. {label}
@@ -194,7 +194,7 @@ export default function FrameworkPage() {
                 <strong className="text-textPrimary">any</strong> information-processing system.
               </p>
               <ul className="text-[11.5px] text-textTertiary leading-relaxed space-y-0.5">
-                {blockEntries.map(([key, b]) => (
+                {roleEntries.map(([key, b]) => (
                   <li key={key}>
                     <span className="font-semibold" style={{ color: b.color }}>
                       {b.name}
@@ -214,11 +214,11 @@ export default function FrameworkPage() {
             same column genuinely behave alike.
           </p>
           {([
-            ["Represent", blocks.R.color, "Tensor, Probability, Parameter, Embedding, Topology, Hidden State, Optimizer State, Caching, Checkpointing, SRAM, DRAM, Artifact Store — all hold and structure information across all 8 layers."],
-            ["Compute", blocks.C.color, "Operator, Activation, Dense Dot, Convolution, Pooling, Attention, Routing, Quantization, Fusion, Tiling, Compilation — all transform inputs to outputs."],
-            ["Communicate", blocks.X.color, "Chain Rule, Backprop, Tokenization, Skip/Res, Distillation, Weight Averaging, Pipelining, Sync, Prefetching, Interconnect, RPC Protocol — all move information between components without deciding what to do with it."],
-            ["Control", blocks.K.color, "Objective, Constraint, Grad Descent, Search, Initialization, Masking, Scheduling, Regularization, Allocation, Arbiter, Load Balancer, Telemetry — all make decisions that govern system behavior."],
-            ["Measure", blocks.M.color, "Entropy, Loss Function, Receptive Field, Info Density, Throughput, Energy, Latency — all observe without changing. Noble gases."],
+            ["Represent", roles.R.color, "Tensor, Probability, Parameter, Embedding, Topology, Hidden State, Optimizer State, Caching, Checkpointing, SRAM, DRAM, Artifact Store — all hold and structure information across all 8 layers."],
+            ["Compute", roles.C.color, "Operator, Activation, Dense Dot, Convolution, Pooling, Attention, Routing, Quantization, Fusion, Tiling, Compilation — all transform inputs to outputs."],
+            ["Communicate", roles.X.color, "Chain Rule, Backprop, Tokenization, Skip/Res, Distillation, Weight Averaging, Pipelining, Sync, Prefetching, Interconnect, RPC Protocol — all move information between components without deciding what to do with it."],
+            ["Control", roles.K.color, "Objective, Constraint, Grad Descent, Search, Initialization, Masking, Scheduling, Regularization, Allocation, Arbiter, Load Balancer, Telemetry — all make decisions that govern system behavior."],
+            ["Measure", roles.M.color, "Entropy, Loss Function, Receptive Field, Info Density, Throughput, Energy, Latency — all observe without changing system state."],
           ] as const).map(([label, color, text]) => (
             <p key={label} className="text-[12px] text-textSecondary mb-1 last:mb-0 leading-relaxed">
               <strong style={{ color }}>{label}: </strong>
@@ -233,7 +233,7 @@ export default function FrameworkPage() {
             <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-textTertiary pointer-events-none" />
             <input
               type="text"
-              placeholder="Search elements…"
+              placeholder="Search primitives…"
               value={query}
               onChange={(ev) => setQuery(ev.target.value)}
               className="w-full pl-8 pr-3 py-2 text-[13px] bg-surface border border-border rounded-lg text-textPrimary placeholder:text-textTertiary focus:outline-none focus:border-accentBlue transition-colors"
@@ -241,12 +241,12 @@ export default function FrameworkPage() {
           </div>
 
           <div className="flex flex-wrap justify-center gap-1.5">
-            {blockEntries.map(([key, b]) => {
-              const isActive = activeBlock === key;
+            {roleEntries.map(([key, b]) => {
+              const isActive = activeRole === key;
               return (
                 <button
                   key={key}
-                  onClick={() => setActiveBlock(isActive ? null : key)}
+                  onClick={() => setActiveRole(isActive ? null : key)}
                   className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors border ${
                     isActive
                       ? "border-borderHighlight bg-surfaceHover text-textPrimary"
@@ -262,10 +262,10 @@ export default function FrameworkPage() {
                 </button>
               );
             })}
-            {(activeBlock || query) && (
+            {(activeRole || query) && (
               <button
                 onClick={() => {
-                  setActiveBlock(null);
+                  setActiveRole(null);
                   setQuery("");
                 }}
                 className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium text-textTertiary hover:text-textPrimary transition-colors"
@@ -276,30 +276,30 @@ export default function FrameworkPage() {
           </div>
         </div>
 
-        {/* Periodic grid — framed in a card so the empty cells feel intentional */}
+        {/* Primitive grid framed so empty cells feel intentional */}
         <div className="rounded-2xl border border-borderSubtle bg-surface/40 px-2 sm:px-4 py-5 mb-2 overflow-x-auto">
-          <PeriodicGrid
+          <PrimitiveGrid
             dimmed={dimmedSet}
             highlightedSyms={highlightedSyms}
-            onElementClick={handleElementClick}
+            onPrimitiveClick={handlePrimitiveClick}
           />
         </div>
         <p className="text-center text-[11px] text-textTertiary mt-2">
-          Click any element for details · click a compound below to highlight its primitives
+          Click any primitive for details · click an assembly below to highlight its primitives
         </p>
 
-        {/* Compounds */}
-        <section id="compounds-anchor" className="mt-12">
-          <h2 className="text-base font-bold text-textPrimary mb-2">Molecular ML (Compounds)</h2>
+        {/* Assemblies */}
+        <section id="assemblies-anchor" className="mt-12">
+          <h2 className="text-base font-bold text-textPrimary mb-2">System Assemblies</h2>
           <p className="text-[13px] text-textSecondary mb-4 leading-relaxed">
-            Just as H₂O = hydrogen + oxygen, every ML system decomposes into primitives from the
-            table above. Read each formula left to right — symbols are element codes, operators
-            show how they bond.
+            Every ML system can be decomposed into primitives from the catalog above. Read each
+            assembly expression left to right: symbols name primitives, and operators show
+            sequencing, parallelism, choices, loops, and repeated structure.
           </p>
 
-          <CompoundLegend />
+          <AssemblyLegend />
 
-          {compounds.map((section) => (
+          {assemblies.map((section) => (
             <div key={section.title} className="mt-6">
               <h3 className="text-[11px] uppercase tracking-[0.08em] font-bold text-textTertiary border-b border-borderSubtle pb-1.5 mb-3">
                 {section.title}
@@ -311,13 +311,13 @@ export default function FrameworkPage() {
               </h3>
               <div className="grid gap-2.5 grid-cols-[repeat(auto-fill,minmax(280px,1fr))]">
                 {section.items.map((c) => {
-                  const isHighlighted = highlightedCompounds?.has(c);
-                  const isDimmed = highlightedCompounds && !isHighlighted;
+                  const isHighlighted = highlightedAssemblies?.has(c);
+                  const isDimmed = highlightedAssemblies && !isHighlighted;
                   return (
                     <button
                       key={c.name}
-                      data-pt-compound={c.name}
-                      onClick={() => handleCompoundClick(c)}
+                      data-dg-assembly={c.name}
+                      onClick={() => handleAssemblyClick(c)}
                       className={`text-left rounded-xl border bg-surface/60 p-3 transition-all ${
                         isHighlighted
                           ? "border-accentBlue shadow-[0_0_14px_color-mix(in_srgb,var(--accent-blue)_25%,transparent)]"
@@ -325,7 +325,7 @@ export default function FrameworkPage() {
                       } ${isDimmed ? "opacity-20" : ""}`}
                     >
                       <div className="text-[13px] font-bold text-accentBlue mb-1.5">{c.name}</div>
-                      <FormulaRender tokens={c.formula} />
+                      <ExpressionRender tokens={c.expression} />
                     </button>
                   );
                 })}
@@ -345,8 +345,8 @@ export default function FrameworkPage() {
 
       {/* Detail overlay */}
       {selected && (
-        <ElementDetail element={selected} onClose={() => setSelected(null)} onBondClick={(sym) => {
-          const target = elMap[sym];
+        <PrimitiveDetail primitive={selected} onClose={() => setSelected(null)} onLinkClick={(sym) => {
+          const target = primitiveMap[sym];
           if (target) setSelected(target);
         }} />
       )}
@@ -354,22 +354,22 @@ export default function FrameworkPage() {
   );
 }
 
-// ── Periodic grid ────────────────────────────────────────────────────────
-function PeriodicGrid({
+// ── Primitive grid ────────────────────────────────────────────────────────
+function PrimitiveGrid({
   dimmed,
   highlightedSyms,
-  onElementClick,
+  onPrimitiveClick,
 }: {
   dimmed: Set<string>;
   highlightedSyms: Set<string> | null;
-  onElementClick: (e: Element) => void;
+  onPrimitiveClick: (e: Primitive) => void;
 }) {
   return (
     <div className={styles.tableWrap}>
       <div className={styles.tableOuter}>
         {/* Y-axis labels */}
         <div className={styles.yLabels}>
-          {rowLabels.map((label, i) => (
+          {layerLabels.map((label, i) => (
             <div key={label} className={styles.yLbl}>
               {i + 1}. {label}
             </div>
@@ -377,9 +377,9 @@ function PeriodicGrid({
         </div>
 
         <div>
-          {/* Block headers */}
-          <div className={styles.blockHeaders}>
-            {blockEntries.map(([key, b]) => {
+          {/* Role headers */}
+          <div className={styles.roleHeaders}>
+            {roleEntries.map(([key, b]) => {
               const widthPx = b.cols.length * 58 + (b.cols.length - 1) * 3;
               return (
                 <div
@@ -399,27 +399,27 @@ function PeriodicGrid({
 
           {/* Grid */}
           <div className={styles.grid}>
-            {elements.map((e) => {
-              const block = blocks[e.block];
+            {primitives.map((e) => {
+              const role = roles[e.role];
               const isDimmed = dimmed.has(e.sym);
               const isXref = highlightedSyms?.has(e.sym);
               return (
                 <button
-                  key={`${e.row}-${e.col}-${e.sym}`}
+                  key={`${e.layer}-${e.col}-${e.sym}`}
                   type="button"
-                  data-pt-element=""
+                  data-dg-primitive=""
                   className={`${styles.el} ${isDimmed ? styles.dimmed : ""} ${
                     isXref ? styles.xref : ""
                   }`}
                   style={
                     {
-                      "--el-c": block.color,
-                      gridRow: e.row,
+                      "--el-c": role.color,
+                      gridRow: e.layer,
                       gridColumn: e.col,
                     } as React.CSSProperties
                   }
-                  onClick={() => onElementClick(e)}
-                  title={`${e.name} — ${block.name}`}
+                  onClick={() => onPrimitiveClick(e)}
+                  title={`${e.name} — ${role.name}`}
                 >
                   <span className={styles.elNum}>{e.num}</span>
                   <span className={styles.elSym}>{e.sym}</span>
@@ -434,15 +434,15 @@ function PeriodicGrid({
   );
 }
 
-// ── Compound legend ──────────────────────────────────────────────────────
-function CompoundLegend() {
+// ── Assembly legend ──────────────────────────────────────────────────────
+function AssemblyLegend() {
   const items = [
     ["→", "Sequential"],
     ["∥", "Parallel"],
     ["?", "Conditional"],
     ["⇌", "Adversarial"],
     ["↺", "Feedback Loop"],
-    ["[ ]ᴺ", "Repeated Block"],
+    ["[ ]ᴺ", "Repeated Group"],
   ];
   return (
     <div className="flex flex-wrap justify-center gap-x-5 gap-y-1.5 px-3 py-2 rounded-lg border border-borderSubtle bg-surface/40">
@@ -456,14 +456,14 @@ function CompoundLegend() {
   );
 }
 
-// ── Formula renderer ─────────────────────────────────────────────────────
-function FormulaRender({ tokens }: { tokens: FormulaToken[] }) {
+// ── Expression renderer ─────────────────────────────────────────────────────
+function ExpressionRender({ tokens }: { tokens: ExpressionToken[] }) {
   return (
     <div className="text-[12px] font-mono leading-relaxed bg-background/60 px-2.5 py-2 rounded-md text-textTertiary break-words">
       {tokens.map((t, i) => {
         if (t.kind === "op") return <span key={i}>{t.text}</span>;
-        const el = elMap[t.sym];
-        const color = el ? blocks[el.block].color : undefined;
+        const el = primitiveMap[t.sym];
+        const color = el ? roles[el.role].color : undefined;
         return (
           <span key={i} className={`relative inline-block group/sym ${el ? "cursor-help" : ""}`}>
             <span
@@ -490,22 +490,22 @@ function FormulaRender({ tokens }: { tokens: FormulaToken[] }) {
   );
 }
 
-// ── Element detail overlay ───────────────────────────────────────────────
-// Pixel-port of the original .panel CSS from periodic-table/index.html.
+// ── Primitive detail overlay ───────────────────────────────────────────────
+// Pixel-port of the original .panel CSS from design-grammar/index.html.
 // Sizes use arbitrary Tailwind values to match the original's rems/px
 // exactly rather than rounding to nearest preset.
-function ElementDetail({
-  element,
+function PrimitiveDetail({
+  primitive,
   onClose,
-  onBondClick,
+  onLinkClick,
 }: {
-  element: Element;
+  primitive: Primitive;
   onClose: () => void;
-  onBondClick: (sym: string) => void;
+  onLinkClick: (sym: string) => void;
 }) {
-  const block = blocks[element.block];
-  const color = block.color;
-  const layerName = rowLabels[element.row - 1];
+  const role = roles[primitive.role];
+  const color = role.color;
+  const layerName = layerLabels[primitive.layer - 1];
 
   return (
     <div
@@ -519,7 +519,7 @@ function ElementDetail({
         - Inner panel (scrollable, max-h-[100dvh-2rem]) wraps the actual
           content so long detail panels never bleed off the viewport on
           landscape phones / short screens.
-        Without this split, the close button and bottom rows became
+        Without this split, the close button and bottom content became
         unreachable on small/landscape viewports.
       */}
       <div
@@ -534,7 +534,7 @@ function ElementDetail({
           ×
         </button>
         <div
-          data-pt-panel=""
+          data-dg-panel=""
           className="bg-surface border border-border rounded-[14px] p-[1.8rem] max-h-[calc(100dvh-2rem)] overflow-y-auto"
           style={{ animation: "ptPop 0.2s ease" }}
         >
@@ -545,55 +545,55 @@ function ElementDetail({
             className="w-[70px] h-[70px] rounded-[9px] flex flex-col items-center justify-center shrink-0 bg-background border-2"
             style={{ borderColor: color }}
           >
-            <span className="text-[0.6rem] text-textTertiary">#{element.num}</span>
+            <span className="text-[0.6rem] text-textTertiary">#{primitive.num}</span>
             <span className="text-[1.7rem] font-bold leading-none" style={{ color }}>
-              {element.sym}
+              {primitive.sym}
             </span>
           </div>
           <div className="min-w-0">
             <div className="text-[1.15rem] font-bold text-textPrimary leading-tight">
-              {element.name}
+              {primitive.name}
             </div>
             <div
               className="text-[0.65rem] uppercase tracking-[0.08em] font-semibold mt-1"
               style={{ color }}
             >
-              {block.name} · {layerName}
+              {role.name} · {layerName}
             </div>
           </div>
         </div>
 
         {/* Meta */}
         <div className="grid grid-cols-3 gap-[0.5rem] mb-[0.9rem]">
-          <MetaCell label="Introduced" value={element.year} />
-          <MetaCell label="Role" value={block.name} valueColor={color} />
+          <MetaCell label="Introduced" value={primitive.year} />
+          <MetaCell label="Role" value={role.name} valueColor={color} />
           <MetaCell label="Layer" value={layerName} />
         </div>
 
         {/* Description */}
         <p className="text-[0.8rem] leading-[1.6] text-textTertiary mb-[0.9rem]">
-          {element.desc}
+          {primitive.description}
         </p>
 
         {/* Why here */}
         <div className="bg-background rounded-[7px] px-[0.8rem] py-[0.6rem] text-[0.73rem] leading-[1.5] text-textTertiary mb-[0.9rem]">
           <strong className="text-textPrimary font-bold">Why this position: </strong>
-          {element.whyHere}
+          {primitive.rationale}
         </div>
 
-        {/* Bonds */}
-        {element.bonds.length > 0 && (
+        {/* Composition links */}
+        {primitive.composition_links.length > 0 && (
           <div>
             <h4 className="text-[0.6rem] uppercase tracking-[0.07em] font-semibold text-textMuted mb-[0.3rem]">
-              Bonds With
+              Composition Links
             </h4>
             <div className="flex flex-wrap gap-[0.3rem]">
-              {element.bonds.map((sym) => {
-                const target = elMap[sym];
+              {primitive.composition_links.map((sym) => {
+                const target = primitiveMap[sym];
                 return (
                   <button
                     key={sym}
-                    onClick={() => target && onBondClick(sym)}
+                    onClick={() => target && onLinkClick(sym)}
                     disabled={!target}
                     className="bg-background border border-border rounded-[4px] px-[0.4rem] py-[0.12rem] text-[0.67rem] text-textSecondary hover:border-accentBlue hover:text-accentBlue transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >

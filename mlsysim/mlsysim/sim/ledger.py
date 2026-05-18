@@ -13,7 +13,7 @@ from ..core.constants import Q_
 
 @dataclass(frozen=True)
 class PerformanceMetrics:
-    """🚀 Performance: Speed and Utilization metrics."""
+    """Performance: speed and utilization metrics."""
     latency: Q_
     throughput: Q_
     mfu: float
@@ -22,7 +22,7 @@ class PerformanceMetrics:
 
 @dataclass(frozen=True)
 class SustainabilityMetrics:
-    """🌍 Sustainability: Environmental impact and resource efficiency."""
+    """Sustainability: environmental impact and resource efficiency."""
     energy: Q_
     carbon_kg: float
     pue: float
@@ -30,7 +30,7 @@ class SustainabilityMetrics:
 
 @dataclass(frozen=True)
 class EconomicMetrics:
-    """💰 Economics: Total Cost of Ownership (TCO) and unit economics."""
+    """Economics: total cost of ownership (TCO) and unit economics."""
     capex: float
     opex: float
     tco: float
@@ -38,7 +38,7 @@ class EconomicMetrics:
 
 @dataclass(frozen=True)
 class ReliabilityMetrics:
-    """🛡️ Reliability: Resilience, uptime, and recovery metrics."""
+    """Reliability: resilience, uptime, and recovery metrics."""
     mttf: Q_
     goodput: float
     recovery_time: Q_
@@ -46,7 +46,7 @@ class ReliabilityMetrics:
 @dataclass(frozen=True)
 class SystemLedger:
     """
-    The Universal Scorecard for all MLSys simulation results.
+    The universal scorecard for all MLSys analytical results.
     Binds the four dimensions into a single immutable result object.
     """
     performance: PerformanceMetrics

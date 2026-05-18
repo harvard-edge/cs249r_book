@@ -156,21 +156,7 @@ def emit_legacy_corpus(
     publish_only: bool = True,
 ) -> dict[str, Any]:
     """Emit legacy-shape corpus.json from YAML source + chains.json sidecar."""
-    if publish_only:
-        policy = load_policy(vault_dir / "release-policy.yaml")
-        published_dicts = filter_questions(
-            (lq.question.model_dump(mode="json") for lq in loaded),
-            policy,
-        )
-        published_ids = {q["id"] for q in published_dicts}
-        items = [lq for lq in loaded if lq.id in published_ids]
-    else:
-        items = loaded
-
-    chain_index = _build_chain_index(vault_dir)
-    chain_tier_index = _build_chain_tier_index(vault_dir)
-    items_sorted = sorted(items, key=lambda lq: lq.id)
-    legacy_items = [_adapt(lq, chain_index, chain_tier_index) for lq in items_sorted]
+    legacy_items = _build_legacy_items(vault_dir, loaded, publish_only=publish_only)
 
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
@@ -184,15 +170,72 @@ def emit_legacy_corpus(
     # and details are fetched on demand from the worker via
     # useFullQuestion() / getQuestionFullDetail().
     summary_output = output.with_name(output.stem + "-summary" + output.suffix)
-    summary_items = [_to_summary(item) for item in legacy_items]
-    summary_output.write_text(
-        json.dumps(summary_items, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    _write_corpus_summary(legacy_items, summary_output)
 
     return {
         "output": str(output),
         "summary_output": str(summary_output),
+        "count": len(legacy_items),
+        "mode": "published-only" if publish_only else "all-states",
+    }
+
+
+def _build_legacy_items(
+    vault_dir: Path,
+    loaded: list[LoadedQuestion],
+    *,
+    publish_only: bool,
+) -> list[dict[str, Any]]:
+    """Return frontend-shaped corpus items from YAML source + chains.json."""
+    items = select_release_items(vault_dir, loaded, publish_only=publish_only)
+
+    chain_index = _build_chain_index(vault_dir)
+    chain_tier_index = _build_chain_tier_index(vault_dir)
+    items_sorted = sorted(items, key=lambda lq: lq.id)
+    return [_adapt(lq, chain_index, chain_tier_index) for lq in items_sorted]
+
+
+def select_release_items(
+    vault_dir: Path,
+    loaded: list[LoadedQuestion],
+    *,
+    publish_only: bool = True,
+) -> list[LoadedQuestion]:
+    """Return loaded questions that belong in the current release policy."""
+    if publish_only:
+        policy = load_policy(vault_dir / "release-policy.yaml")
+        published_dicts = filter_questions(
+            (lq.question.model_dump(mode="json") for lq in loaded),
+            policy,
+        )
+        published_ids = {q["id"] for q in published_dicts}
+        items = [lq for lq in loaded if lq.id in published_ids]
+    else:
+        items = loaded
+    return items
+
+
+def _write_corpus_summary(legacy_items: list[dict[str, Any]], output: Path) -> None:
+    summary_items = [_to_summary(item) for item in legacy_items]
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        json.dumps(summary_items, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+
+def emit_corpus_summary(
+    vault_dir: Path,
+    loaded: list[LoadedQuestion],
+    output: Path,
+    *,
+    publish_only: bool = True,
+) -> dict[str, Any]:
+    """Emit only the summary corpus bundled by the production StaffML site."""
+    legacy_items = _build_legacy_items(vault_dir, loaded, publish_only=publish_only)
+    _write_corpus_summary(legacy_items, output)
+    return {
+        "output": str(output),
         "count": len(legacy_items),
         "mode": "published-only" if publish_only else "all-states",
     }
@@ -280,6 +323,7 @@ def emit_manifest(
     policy_version: str,
     published_count: int,
     chain_count: int,
+    release_items: list[LoadedQuestion] | None = None,
     concept_count: int = 87,
     area_count: int = 13,
     taxonomy_version: str = "87-topics",
@@ -304,11 +348,16 @@ def emit_manifest(
         raise ValueError("emit_manifest: release_id is required")
     if not release_hash or len(release_hash) < 16:
         raise ValueError("emit_manifest: release_hash must be the full hex digest")
+    if release_items is None:
+        release_items = [lq for lq in loaded if lq.question.status == "published"]
+    if published_count != len(release_items):
+        raise ValueError(
+            "emit_manifest: published_count does not match release_items "
+            f"({published_count} != {len(release_items)})"
+        )
 
-    track_dist = Counter(lq.question.track for lq in loaded
-                         if lq.question.status == "published")
-    level_dist = Counter(lq.question.level for lq in loaded
-                         if lq.question.status == "published")
+    track_dist = Counter(lq.question.track for lq in release_items)
+    level_dist = Counter(lq.question.level for lq in release_items)
 
     manifest = {
         "releaseId": release_id,
@@ -338,4 +387,10 @@ def emit_manifest(
     }
 
 
-__all__ = ["emit_legacy_corpus", "emit_manifest", "copy_visual_assets"]
+__all__ = [
+    "emit_corpus_summary",
+    "emit_legacy_corpus",
+    "emit_manifest",
+    "select_release_items",
+    "copy_visual_assets",
+]

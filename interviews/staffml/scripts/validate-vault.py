@@ -79,15 +79,30 @@ def main() -> int:
     if isinstance(td, dict) and td:
         s = sum(int(v) for v in td.values() if isinstance(v, int))
         if s != qc:
-            warn(
+            error(
                 f"trackDistribution sum ({s}) != questionCount ({qc}) — check manifest"
             )
         else:
             ok("trackDistribution sums to questionCount")
 
-    ver = manifest.get("version", "?")
-    h = manifest.get("contentHash", "?")
-    ok(f"Vault v{ver} — hash {h}")
+    ld = manifest.get("levelDistribution") or {}
+    if isinstance(ld, dict) and ld:
+        s = sum(int(v) for v in ld.values() if isinstance(v, int))
+        if s != qc:
+            error(
+                f"levelDistribution sum ({s}) != questionCount ({qc}) — check manifest"
+            )
+        else:
+            ok("levelDistribution sums to questionCount")
+
+    release_id = manifest.get("releaseId")
+    release_hash = manifest.get("releaseHash")
+    if not isinstance(release_id, str) or not release_id:
+        error("manifest.releaseId missing or invalid")
+    elif not isinstance(release_hash, str) or len(release_hash) < 16:
+        error("manifest.releaseHash missing or truncated")
+    else:
+        ok(f"Vault v{release_id} — hash {release_hash}")
 
     print(f"\n{'=' * 50}")
     print(f"  Errors:   {len(errors)}")

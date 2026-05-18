@@ -2,7 +2,7 @@
 > [!NOTE]
 > **📌 Early release (2026)**
 >
-> MLSys·im shipped with the **2026** MLSysBook refresh. The modeling platform, APIs, and lab integrations are **actively iterated** as we harden the simulator and teaching workflows.
+> MLSys·im shipped with the **2026** MLSysBook refresh. The analytical modeling framework, APIs, and lab integrations are **actively iterated** as we harden the package and teaching workflows.
 >
 > **Feedback** — [GitHub issues](https://github.com/harvard-edge/cs249r_book/issues) or pull requests.
 >
@@ -10,10 +10,10 @@
 <!-- EARLY-RELEASE-CALLOUT:END -->
 
 <div align="center">
-  <h1>🚀 MLSys·im: The Modeling Platform</h1>
+  <h1>MLSys·im: The Modeling Platform</h1>
   <blockquote>
-    <b>The physics-grounded analytical simulator powering the Machine Learning Systems ecosystem.</b><br>
-    Provides a unified "Single Source of Truth" (SSoT) for modeling systems from sub-watt microcontrollers to exaflop-scale global fleets.
+    <b>A first-principles analytical modeling framework for ML systems.</b><br>
+    Designed for education and early design-space reasoning before empirical benchmarking.
   </blockquote>
 </div>
 
@@ -62,11 +62,11 @@
 
 ---
 
-## 🚀 Quick Usage: The Agent-Ready CLI
+## Quick Usage: Automation-Friendly CLI
 
-`mlsysim` is a **first-principles analytical calculator** for ML systems. It provides a terminal UI for humans and a strict JSON API for CI/CD pipelines and AI agents.
+`mlsysim` is a **first-principles analytical modeling framework** for ML systems. It provides a terminal UI for humans and strict JSON output for scripts, CI/CD pipelines, and validation tooling.
 
-> **Accuracy note:** mlsysim predictions are typically within 2–5× of measured performance for well-characterized workloads. For production capacity planning, always validate with benchmarks. This tool formalizes the back-of-envelope math that senior engineers do intuitively — it is not a substitute for profiling or load testing.
+> **Accuracy note:** Trust mlsysim for bottleneck classification and relative comparisons. Absolute latency is workload-dependent; well-calibrated cases are often within ±15–30%, while production serving can be 1.5–2× slower than idealized roofline bounds. For production capacity planning, validate with benchmarks.
 
 ### 1. Explore the Registry (The Zoo)
 Discover built-in hardware, models, and infrastructure without reading source code:
@@ -77,7 +77,7 @@ Discover built-in hardware, models, and infrastructure without reading source co
 Evaluate the physics of a workload on a specific hardware node instantly:
 <kbd>mlsysim eval Llama3_8B H100 --batch-size 32</kbd>
 
-### 3. Deep Simulation (Infrastructure as Code)
+### 3. Full-Stack Analytical Run (Infrastructure as Code)
 Define your entire cluster and SLA constraints in a declarative `mlsys.yaml` file:
 
 ```yaml
@@ -102,10 +102,10 @@ constraints:
 Then compile and evaluate the 3-lens scorecard (Feasibility, Performance, Macro):
 <kbd>mlsysim eval example_cluster.yaml</kbd>
 
-### 4. CI/CD & Agentic Automation
+### 4. CI/CD & Automation
 Every command supports strict, schema-validated JSON output. If an `assert` constraint is violated, the CLI returns a semantic `Exit Code 3`.
 ```bash
-# Export the JSON Schema for your IDE or AI Agent
+# Export the JSON Schema for your IDE or validation tooling
 mlsysim schema > schema.json
 
 # Run an evaluation in a CI pipeline
@@ -119,12 +119,18 @@ Use the Tier 3 Engineering Engine to automatically find the optimal configuratio
 
 ---
 
-## 🛡 Stability & Integrity
-Because this core powers a printed textbook, we enforce strict **Invariant Verification**. Every physical constant is traceable to a primary source (datasheet or paper), and dimensional integrity is enforced via `pint`.
+## Stability & Integrity
+Because this core powers a printed textbook, we enforce strict **Invariant Verification**. Registry constants are traceable to primary sources where available, and dimensional integrity is enforced via `pint`.
 
-## ⚠️ What This Tool Does Not Model
+## Release-Facing Modeling Workflows
 
-MLSysim is an **analytical hardware calculator**, not a production deployment simulator.
+- `TrainingMemoryModel`: weights, gradients, optimizer state, activations, and communication buffers per accelerator.
+- `ServingCapacityModel`: first-pass replica sizing from QPS, target P99 latency, generated length, batching capacity, and queueing.
+- `MoERoutingModel`: MoE active-parameter and expert-parallel traffic sensitivity under hot-expert imbalance.
+
+## What This Tool Does Not Model
+
+MLSys·im is an **analytical modeling framework** for first-pass reasoning, not a production serving or orchestration system.
 The 22 walls model physical and economic constraints that bound ML system performance.
 Several critical production concerns are deliberately **out of scope**:
 
@@ -151,7 +157,7 @@ Several critical production concerns are deliberately **out of scope**:
 Students using this tool should understand that infrastructure physics (what mlsysim models)
 is one dimension of a multi-dimensional engineering challenge.
 
-## 📖 How to Cite
+## How to Cite
 
 If you use mlsysim in your research or teaching, please cite:
 
@@ -161,12 +167,12 @@ If you use mlsysim in your research or teaching, please cite:
   title        = {{MLSys$\cdot$im}: First-Principles Infrastructure Modeling for Machine Learning Systems},
   year         = {2026},
   url          = {https://mlsysbook.ai/mlsysim},
-  version      = {0.1.1},
+  version      = {0.1.2},
   institution  = {Harvard University}
 }
 ```
 
-## 🛠 Installation
+## Installation
 
 MLSys·im is designed to be highly modular. Install only what you need:
 
@@ -178,13 +184,13 @@ pip install mlsysim
 # The [cli] extra is retained as a backward-compatible no-op.
 pip install "mlsysim[cli]"
 
-# Install with dependencies for interactive labs (Marimo, Plotly)
-pip install "mlsysim[labs]"
+# Install plotting dependencies
+pip install "mlsysim[viz]"
 ```
 
-## 🐍 Python API Usage
+## Python API Usage
 
-The framework is just as powerful inside a Python script or Jupyter Notebook. The `SystemEvaluator` provides a clean, unified entry point for full-stack analysis:
+The framework is just as useful inside a Python script or Jupyter Notebook. The `SystemEvaluator` provides a clean, unified entry point for full-stack analysis:
 
 ```python
 import mlsysim
@@ -203,7 +209,7 @@ evaluation = mlsysim.SystemEvaluator.evaluate(
     efficiency=0.45
 )
 
-# 3. View the beautifully formatted scorecard
+# 3. View the formatted scorecard
 print(evaluation.scorecard())
 ```
 
@@ -235,7 +241,7 @@ The `efficiency` parameter (0.0–1.0) captures the gap between peak hardware pe
 
 Thanks to these wonderful people for helping improve MLSys·im!
 
-**Legend:** 🪲 Bug Hunter · ⚡ Code Warrior · 📚 Documentation Hero · 🎨 Design Artist · 🧠 Idea Generator · 🔎 Code Reviewer · 🧪 Test Engineer · 🛠️ Tool Builder
+**Legend:** Bug Hunter · Code Contributor · Documentation Contributor · Design Contributor · Idea Contributor · Code Reviewer · Test Engineer · Tool Builder
 
 <!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
 <!-- prettier-ignore-start -->

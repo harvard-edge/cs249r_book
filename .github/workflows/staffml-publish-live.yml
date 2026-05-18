@@ -107,13 +107,8 @@ jobs:
     with:
       validate_workflow: staffml-validate-vault.yml
 
-  # Compute the new release_id from previous tag + release_type. The shared
-  # workflow validates confirm == "PUBLISH" and refuses to re-tag an
-  # existing release. This is what closes the "manifest drifted to
-  # 0.1.2-dev while releases/0.1.0 said 0.1.0" gap that motivated the
-  # whole single-source-of-truth refactor — every publish now passes a
-  # real, deliberate release_id to `vault build` instead of the
-  # constant-string `--release-id publish-live`.
+  # Compute the release_id from the latest staffml-v* tag plus release_type.
+  # The build job stamps that id into the StaffML artifacts before deploying.
   prepare:
     name: '🏷️ Prepare release'
     uses: ./.github/workflows/_release-prepare.yml
@@ -153,6 +148,10 @@ jobs:
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 🔧 Setup Node.js
         uses: actions/setup-node@v6
@@ -173,19 +172,12 @@ jobs:
       - name: 🛠️ Install vault-cli
         run: pip install -e "$VAULT_CLI_DIR/"
 
-      - name: 🔄 Regenerate manifest + summary from YAMLs (vault build)
-        # Ships $STAFFML_ROOT/src/data/vault-manifest.json +
-        # corpus-summary.json (bundled by the site) straight from the
-        # committed YAMLs. The site always deploys with current YAML state,
-        # even if the committed JSON artifacts drifted on the last commit.
-        # PR #1598 retired the legacy corpus.json static fallback in prod
-        # (no --local-json here); the Worker is the sole catalog source.
-        # --release-id is the deliberately-bumped version from the prepare
-        # job — the manifest emit_manifest() writes will carry it, and
-        # everything downstream (footer pill, citation card, X-Vault-Release
-        # header) inherits it from the manifest. Closes the long-running
-        # "publish-live constant string overwrites releases/<id>" bug.
-        run: vault build --vault-dir "$VAULT_DIR" --release-id "${{ needs.prepare.outputs.new_release_id }}"
+      - name: 🔄 Regenerate StaffML site bundle from YAMLs
+        # Builds the lightweight artifacts the static site actually serves:
+        # vault-manifest.json, corpus-summary.json, and question visual assets.
+        # Full question detail stays in the Worker; production does not emit
+        # or bundle the local-dev corpus.json fallback.
+        run: vault build --vault-dir "$VAULT_DIR" --release-id "${{ needs.prepare.outputs.new_release_id }}" --site-bundle
 
       - name: 🔍 Type check
         working-directory: ${{ env.STAFFML_ROOT }}
@@ -206,11 +198,8 @@ jobs:
           # site so no CORS preflight is required on /ask calls from the
           # AskInterviewer panel.
           NEXT_PUBLIC_INTERVIEWER_ENDPOINT: ${{ vars.PRODUCTION_DOMAIN || 'https://mlsysbook.ai' }}/api/staffml-interviewer
-          # Vault cutover (PRs #1433, #1434): site reads live data from the
-          # Cloudflare Worker in production. PR #1598 retired the static
-          # rollback in prod — corpus.json is neither emitted nor bundled.
-          # If the Worker is unreachable, the UI surfaces a "details
-          # unavailable" banner.
+          # Production reads full question detail from the Cloudflare Worker.
+          # corpus.json is a local-dev fallback and is not emitted here.
           NEXT_PUBLIC_VAULT_API: ${{ vars.STAFFML_VAULT_WORKER_URL || 'https://staffml-vault.mlsysbook-ai-account.workers.dev' }}
           # NEXT_PUBLIC_VAULT_RELEASE is intentionally unset — the site reads
           # RELEASE_ID from src/lib/stats.ts (which derives from the manifest
@@ -303,18 +292,19 @@ jobs:
         run: python3 "$STAFFML_ROOT/scripts/validate-vault.py"
 
       - name: 🧪 Smoke tests
-        # Reads the bundled corpus-summary.json (committed) — the prod build
-        # ships this as the synchronous catalog. Heavy fields (scenario,
-        # details prose) live on the Worker and are not re-validated here;
-        # `vault check --strict` covers per-question YAML validation in the
+        # Reads the regenerated corpus-summary.json — the prod build ships
+        # this as the synchronous catalog. Heavy fields (scenario, details
+        # prose) live on the Worker and are not re-validated here; `vault
+        # check --strict` covers per-question YAML validation in the
         # validate-vault workflow.
         run: |
           python3 - <<'PY'
           import json
+          from pathlib import Path
 
-          ROOT = "interviews/staffml"
+          ROOT = Path("interviews/staffml")
 
-          with open(f"{ROOT}/src/data/corpus-summary.json") as f:
+          with open(ROOT / "src/data/corpus-summary.json") as f:
               corpus = json.load(f)
           assert len(corpus) >= 4000, f"Corpus too small: {len(corpus)}"
           print(f"OK corpus: {len(corpus)} questions")
@@ -338,18 +328,39 @@ jobs:
           assert len(zones) == 11, f"Expected 11 zones, got {len(zones)}"
           print(f"OK zones: {len(zones)}")
 
-          with open(f"{ROOT}/src/data/taxonomy.json") as f:
+          with open(ROOT / "src/data/taxonomy.json") as f:
               taxonomy = json.load(f)
           assert len(taxonomy.get("concepts", [])) >= 70
           print(f"OK taxonomy: {len(taxonomy['concepts'])} topics")
 
-          with open(f"{ROOT}/src/data/vault-manifest.json") as f:
+          with open(ROOT / "src/data/vault-manifest.json") as f:
               manifest = json.load(f)
           assert manifest["questionCount"] == len(corpus)
           assert "releaseId" in manifest, "Manifest missing releaseId"
           assert "releaseHash" in manifest and len(manifest["releaseHash"]) >= 16, \
               "Manifest missing or truncated releaseHash"
+          track_total = sum(manifest.get("trackDistribution", {}).values())
+          level_total = sum(manifest.get("levelDistribution", {}).values())
+          assert track_total == len(corpus), \
+              f"trackDistribution sum {track_total} != corpus size {len(corpus)}"
+          assert level_total == len(corpus), \
+              f"levelDistribution sum {level_total} != corpus size {len(corpus)}"
           print(f"OK manifest: v{manifest['releaseId']} (hash {manifest['releaseHash'][:7]})")
+
+          visuals = [
+              (q["id"], q["track"], q["visual"]["path"])
+              for q in corpus
+              if isinstance(q.get("visual"), dict) and q["visual"].get("path")
+          ]
+          assert visuals, "Expected visual questions in corpus"
+          asset_root = ROOT / "out/question-visuals"
+          missing = [
+              f"{qid}: {track}/{path}"
+              for qid, track, path in visuals
+              if not (asset_root / track / path).exists()
+          ]
+          assert not missing, "Missing visual assets: " + ", ".join(missing[:10])
+          print(f"OK visual assets: {len(visuals)} referenced files")
 
           print("All smoke tests passed")
           PY
@@ -422,6 +433,28 @@ jobs:
           npm ci
           npx wrangler deploy
 
+      - name: 📝 Commit StaffML release artifacts
+        if: inputs.site_only != true
+        env:
+          NEW_RELEASE_ID: ${{ needs.prepare.outputs.new_release_id }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add \
+            "$STAFFML_ROOT/src/data/corpus-summary.json" \
+            "$STAFFML_ROOT/src/data/vault-manifest.json"
+
+          if git diff --cached --quiet; then
+            echo "✅ StaffML release artifacts already match v${NEW_RELEASE_ID}."
+            exit 0
+          fi
+
+          git commit -m "chore(staffml): bump vault release to ${NEW_RELEASE_ID}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          echo "✅ StaffML release artifact commit pushed to ${GITHUB_REF_NAME}."
+
   # Tag the release and create a draft GitHub Release. Skipped on
   # site-only redeploys (which intentionally reuse the previous release_id
   # — re-tagging would violate citation integrity).
@@ -436,6 +469,7 @@ jobs:
       - name: 📥 Checkout
         uses: actions/checkout@v6
         with:
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -448,6 +482,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+          git pull --ff-only origin "${GITHUB_REF_NAME}"
           echo "🏷️ Creating tag: $NEW_TAG on $(git rev-parse --short HEAD)"
           git tag -a "$NEW_TAG" -m "StaffML $NEW_TAG: $DESCRIPTION"
           git push origin "$NEW_TAG"

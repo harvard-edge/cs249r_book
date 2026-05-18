@@ -11,7 +11,13 @@ from rich.table import Table
 
 from vault_cli.compiler import build as compile_build
 from vault_cli.exit_codes import ExitCode
-from vault_cli.legacy_export import copy_visual_assets, emit_legacy_corpus, emit_manifest
+from vault_cli.legacy_export import (
+    copy_visual_assets,
+    emit_corpus_summary,
+    emit_legacy_corpus,
+    emit_manifest,
+    select_release_items,
+)
 from vault_cli.loader import load_all
 
 console = Console()
@@ -46,6 +52,13 @@ def register(app: typer.Typer) -> None:
                  "either file; this is dev-only. The shorter --local alias "
                  "is preferred.",
         ),
+        site_bundle: bool = typer.Option(
+            False,
+            "--site-bundle",
+            help="Materialize only the production StaffML bundle artifacts: "
+                 "src/data/corpus-summary.json and public/question-visuals/. "
+                 "Does not emit the heavy local-dev corpus.json.",
+        ),
     ) -> None:
         """Compile all YAML questions under vault/questions/ to a SQLite file.
 
@@ -68,11 +81,14 @@ def register(app: typer.Typer) -> None:
             output=output,
             release_id=release_id,
         )
+        release_items = select_release_items(vault_dir, loaded)
 
+        site_bundle_count: int | None = None
         if local_json:
             local_out = Path("interviews/staffml/src/data/corpus.json")
             local_result = emit_legacy_corpus(vault_dir, loaded, local_out)
             result["local_json"] = local_result
+            site_bundle_count = int(local_result["count"])
             console.print(
                 f"[dim]local corpus.json: {local_result['count']} questions → "
                 f"{local_result['output']}[/dim]"
@@ -103,44 +119,44 @@ def register(app: typer.Typer) -> None:
                 f"{visuals_result.get('deleted', 0)} pruned → "
                 f"{visuals_out}/question-visuals/[/dim]"
             )
-
-        # Emit vault-manifest.json on every build (was previously gated
-        # behind --local-json, which caused CI publishes — which don't
-        # pass that flag — to ship a stale manifest with releaseId="dev"
-        # baked in from the committed file). The site reads this file
-        # to label the current release, so it must always reflect the
-        # release_id passed on the command line.
-        manifest_out = Path("interviews/staffml/src/data/vault-manifest.json")
-        # questionCount must describe what the Next.js bundle actually
-        # ships — i.e., the committed corpus-summary.json — not the live
-        # vault. The smoke test asserts
-        # `manifest.questionCount == len(corpus-summary)`. If the vault
-        # YAMLs grew since the last corpus-summary.json refresh (e.g.
-        # 9525 in vault vs 9521 in bundled corpus), counting from loaded
-        # would break the smoke test. Read from the bundled artifact when
-        # it exists; fall back to loaded for fresh checkouts.
-        #
-        # chainCount stays computed from `loaded` — corpus-summary.json
-        # does not carry chain memberships (those live in vault.db and
-        # are served by the Worker), so reading it from corpus-summary
-        # would silently drop the field to 0. The slight semantic split
-        # (questionCount from bundled corpus, chainCount from live vault)
-        # is acceptable because the old behavior produced both from the
-        # same loaded set and chainCount has historically been "vault
-        # state at build time."
-        corpus_summary_path = Path(
-            "interviews/staffml/src/data/corpus-summary.json"
-        )
-        if corpus_summary_path.exists():
-            published_count = len(json.loads(corpus_summary_path.read_text()))
-        else:
-            published_count = sum(
-                1 for lq in loaded if lq.question.status == "published"
+        elif site_bundle:
+            summary_out = Path("interviews/staffml/src/data/corpus-summary.json")
+            summary_result = emit_corpus_summary(vault_dir, loaded, summary_out)
+            result["site_bundle"] = summary_result
+            site_bundle_count = int(summary_result["count"])
+            console.print(
+                f"[dim]corpus-summary.json: {summary_result['count']} questions → "
+                f"{summary_result['output']}[/dim]"
             )
+            visuals_out = Path("interviews/staffml/public")
+            visuals_result = copy_visual_assets(vault_dir, visuals_out)
+            result["visual_assets"] = visuals_result
+            console.print(
+                f"[dim]visual assets: {visuals_result.get('total_assets', 0)} total, "
+                f"{visuals_result.get('copied', 0)} copied, "
+                f"{visuals_result.get('deleted', 0)} pruned → "
+                f"{visuals_out}/question-visuals/[/dim]"
+            )
+
+        # The site imports this manifest at build time for release labels and
+        # corpus counts, so every build stamps it from the current release id.
+        manifest_out = Path("interviews/staffml/src/data/vault-manifest.json")
+        # questionCount must match the policy-filtered release set. When this
+        # command writes frontend artifacts, verify their count before stamping
+        # the manifest so bundle drift cannot be hidden by a later smoke test.
+        published_count = (
+            site_bundle_count
+            if site_bundle_count is not None
+            else int(result["published_count"])
+        )
+        if published_count != len(release_items):
+            console.print(
+                "[red]error[/red]: generated site bundle count does not match "
+                f"release policy ({published_count} != {len(release_items)})"
+            )
+            raise typer.Exit(code=ExitCode.VALIDATION_FAILURE)
         chains_seen: set[str] = set()
-        for lq in loaded:
-            if lq.question.status != "published":
-                continue
+        for lq in release_items:
             for ch in (lq.question.chains or []):
                 chains_seen.add(ch.id)
         manifest_result = emit_manifest(
@@ -152,6 +168,7 @@ def register(app: typer.Typer) -> None:
             policy_version=str(result["policy_version"]),
             published_count=published_count,
             chain_count=len(chains_seen),
+            release_items=release_items,
         )
         result["manifest"] = manifest_result
         console.print(

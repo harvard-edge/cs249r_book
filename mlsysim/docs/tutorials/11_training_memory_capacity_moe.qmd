@@ -1,0 +1,187 @@
+---
+title: "Training Memory, Serving Capacity, and MoE"
+subtitle: "Three first-order models for questions students ask after roofline analysis."
+description: "Use MLSys·im to explain training memory pressure, size a serving deployment, and model MoE routing imbalance without leaving the analytical framework."
+categories: ["analysis", "advanced"]
+---
+
+## The Question
+
+You know how to run a roofline analysis. Now you want to answer three follow-up
+questions that appear in real design reviews:
+
+- Why does training need much more memory than inference?
+- How many replicas do I need for a QPS and P99 target?
+- How much does MoE hot-expert imbalance change the communication cost?
+
+These questions are not separate systems. They are different views of the same
+demand--supply framework: tensors consume memory, requests consume serving
+capacity, and routed tokens consume network bandwidth.
+
+::: {.callout-note}
+## What You Will Learn
+
+- Break training memory into weights, gradients, optimizer state, activations,
+  and communication buffers.
+- Turn a serving target into a first-pass replica count.
+- Sweep a simple MoE routing imbalance factor and read the all-to-all cost.
+- Decide which numbers are direct byte counts and which require calibration.
+:::
+
+---
+
+## 1. Training Memory Is Not Inference Memory
+
+Inference mainly stores model weights and KV cache. Training also stores
+gradients, optimizer state, activations, and communication buffers. That is why a
+model that fits for inference can fail during training.
+
+```{python}
+from mlsysim import Hardware, Models, TrainingMemoryModel
+from mlsysim.show import table
+
+memory = TrainingMemoryModel().solve(
+    model=Models.Language.Llama3_8B,
+    hardware=Hardware.Cloud.H100,
+    batch_size=8,
+    seq_len=2048,
+    dp_size=8,
+    zero_stage=2,
+)
+
+rows = [
+    ["Weights", memory.weights],
+    ["Gradients", memory.gradients],
+    ["Optimizer", memory.optimizer_state],
+    ["Activations", memory.activations],
+    ["Buffers", memory.communication_buffers],
+    ["Total", memory.total_memory],
+]
+
+table(["Component", "Per-GPU Memory"], rows)
+print(f"Fits on H100: {memory.feasible}")
+```
+
+The first three terms are direct byte counts. Activation memory is the term most
+sensitive to framework behavior because checkpointing changes what the backward
+pass must store versus recompute.
+
+### Exercise
+
+Change `zero_stage` from `0` to `3`. Which components shrink? Why do activations
+not shrink from ZeRO alone?
+
+---
+
+## 2. Serving Capacity Combines Three Walls
+
+A serving deployment is not sized by TTFT alone. You need base request latency,
+per-replica token capacity, and queueing pressure under load.
+
+```{python}
+from mlsysim import ServingCapacityModel
+
+capacity = ServingCapacityModel().solve(
+    model=Models.Language.Llama3_8B,
+    hardware=Hardware.Cloud.H100,
+    qps=20,
+    target_p99_latency_ms=2000,
+    seq_len=1024,
+    output_tokens=64,
+    max_batch_size=16,
+    efficiency=0.35,
+)
+
+print(f"Required replicas: {capacity.required_replicas}")
+print(f"Capacity:          {capacity.qps_capacity:.1f} QPS")
+print(f"Utilization:       {capacity.utilization:.1%}")
+print(f"Estimated P99:     {capacity.estimated_p99_latency:~.1f}")
+print(f"Bottleneck:        {capacity.bottleneck}")
+```
+
+The `efficiency` parameter is exposed because the compute-bound part of serving
+depends on implementation quality. Use the default for quick comparisons; use a
+measured efficiency value before making a production SLA commitment.
+
+### Exercise
+
+Double `output_tokens` from 64 to 128. Does the replica count change by exactly
+2x? Explain the difference between base latency and queueing latency.
+
+---
+
+## 3. MoE Routing Imbalance
+
+Mixture-of-Experts models reduce compute by activating only a subset of experts,
+but routed tokens create expert-parallel all-to-all traffic. Perfectly balanced
+routing is an idealization; hot experts increase the effective active work and
+the routed payload.
+
+```{python}
+from mlsysim import MoERoutingModel, SparseTransformerWorkload, Systems, ureg
+
+moe = SparseTransformerWorkload(
+    name="Toy-MoE-64B",
+    architecture="Sparse Transformer",
+    parameters=64e9 * ureg.count,
+    active_parameters=8e9 * ureg.count,
+    experts=8,
+    active_experts_per_token=2,
+    layers=32,
+    hidden_dim=4096,
+    heads=32,
+)
+
+rows = []
+for gamma in [1.0, 1.25, 1.5, 2.0]:
+    routing = MoERoutingModel().solve(
+        model=moe,
+        batch_size=4,
+        seq_len=2048,
+        ep_size=8,
+        routing_imbalance_factor=gamma,
+        fleet=Systems.Clusters.Research_256,
+    )
+    rows.append([
+        gamma,
+        f"{routing.effective_active_experts:.2f}",
+        routing.token_dispatch_bytes,
+        routing.all_to_all_latency,
+    ])
+
+table(["Imbalance", "Effective Experts", "Routed Bytes", "All-to-All"], rows)
+```
+
+This model does not simulate a router. It gives you a clean sensitivity knob:
+if measured routing logs show a 25% hot-expert effect, set
+`routing_imbalance_factor=1.25` and see how the communication wall moves.
+
+---
+
+## 4. What Counts as Validation?
+
+For these models, validation means matching the level of the approximation:
+
+| Output | How to validate |
+|:---|:---|
+| Weight, gradient, optimizer, KV-cache bytes | Compare against direct tensor counts. |
+| Activation memory | Compare against framework memory traces for one model/config. |
+| Serving replica count | Benchmark one deployment point, calibrate `efficiency`, then sweep. |
+| MoE routing imbalance | Measure tokens per expert and feed the observed imbalance into the model. |
+
+MLSYSIM should be used to identify the binding constraint and compare design
+options before benchmarking. It should not replace empirical measurement for a
+final production SLA.
+
+---
+
+## Next Step
+
+Use these models inside a larger analysis:
+
+- `TrainingMemoryModel` before `DistributedModel` to rule out impossible training
+  configurations.
+- `ServingCapacityModel` before `EconomicsModel` to convert traffic targets into
+  fleet size and cost.
+- `MoERoutingModel` with `DistributedModel(..., moe_routing_imbalance_factor=...)`
+  to see whether expert parallelism is limited by bandwidth.

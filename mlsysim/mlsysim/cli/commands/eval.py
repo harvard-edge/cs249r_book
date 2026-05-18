@@ -1,7 +1,8 @@
 import typer
 from pathlib import Path
 import yaml
-from typing import Optional
+from typing import Any, Optional
+from mlsysim.cli.context import OUTPUT_FORMAT_HELP, resolve_output_format
 from mlsysim.cli.schemas import EvalNodeSchema, MlsysPlanSchema
 from mlsysim.cli.exceptions import ExitCode, exit_with_code, error_shield
 from mlsysim.cli.renderers import render_scorecard, print_warning, print_error
@@ -13,7 +14,8 @@ def evaluate_main(
     hardware: Optional[str] = typer.Argument(None, help="Hardware name (e.g. `H100`) - Required if target is not a YAML file"),
     batch_size: int = typer.Option(1, "--batch-size", "-b", help="Batch size (for single node evaluation)"),
     precision: str = typer.Option("fp16", "--precision", "-p", help="Numerical precision (`fp32`, `fp16`, `fp8`, `int8`, `int4`)"),
-    efficiency: float = typer.Option(0.5, "--efficiency", "-e", help="Target Model FLOPs Utilization (`0.0` to `1.0`)")
+    efficiency: float = typer.Option(0.5, "--efficiency", "-e", help="Target Model FLOPs Utilization (`0.0` to `1.0`)"),
+    output: Optional[str] = typer.Option(None, "--output", "-o", help=OUTPUT_FORMAT_HELP),
 ):
     """
     **[Tier 1] Evaluate the analytical physics of an ML system.**
@@ -34,18 +36,21 @@ def evaluate_main(
     """
     
     # Context should be initialized by main.py
-    output_format = ctx.obj.get("output_format", "text") if ctx.obj else "text"
+    output_format = resolve_output_format(ctx, output, supported={"text", "json", "markdown", "html"})
 
     with error_shield(output_format=output_format):
         # Determine if target is a Cluster YAML or a Workload (Model) YAML/String
         is_cluster_yaml = False
-        raw_data = None
+        raw_data: dict[str, Any] | None = None
         if target.endswith(".yaml") or target.endswith(".yml"):
             config_file = Path(target)
             if not config_file.exists():
                 raise ValueError(f"File not found: {config_file}")
             with open(config_file, "r") as f:
-                raw_data = yaml.safe_load(f)
+                loaded = yaml.safe_load(f)
+            if not isinstance(loaded, dict):
+                raise ValueError(f"Configuration file must contain a YAML mapping: {config_file}")
+            raw_data = loaded
             # A full cluster definition must have a hardware block
             if raw_data and "hardware" in raw_data and "workload" in raw_data:
                 is_cluster_yaml = True
@@ -53,7 +58,8 @@ def evaluate_main(
         # Branch 1: Deep Evaluation (YAML / IaC Cluster Plan)
         if is_cluster_yaml:
             # Gate 1 & 2: Schema Validation
-            schema = MlsysPlanSchema(**raw_data)
+            assert raw_data is not None
+            schema = MlsysPlanSchema.model_validate(raw_data)
             
             # Use SystemEvaluator to decouple orchestration from CLI
             eval_obj = SystemEvaluator.evaluate(
@@ -101,7 +107,7 @@ def evaluate_main(
                         assertion_failures.append(f"{assertion.metric} ({metric_val}) is below min ({assertion.min})")
             
             if assertion_failures:
-                msg = "\n".join([f"❌ {f}" for f in assertion_failures])
+                msg = "\n".join([f"FAIL: {f}" for f in assertion_failures])
                 if output_format == "json":
                     import json
                     payload = eval_obj.to_dict()

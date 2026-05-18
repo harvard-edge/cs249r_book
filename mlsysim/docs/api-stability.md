@@ -4,7 +4,7 @@
 
 This document defines which parts of the mlsysim API are stable, which are
 experimental, and what guarantees you can rely on when building on top of the
-simulator.
+framework.
 
 ---
 
@@ -124,6 +124,11 @@ The solver class hierarchy, their constructors, and their method signatures
 may change. The `Engine.solve()` facade insulates you from these changes --
 prefer it over direct solver instantiation.
 
+Top-level convenience imports such as `from mlsysim import ServingModel` are
+kept working throughout the 0.1.x series because the tutorials use them. For
+library code, prefer `mlsysim.solvers` so the import path makes the dependency
+on solver-specific behavior explicit.
+
 ### Training Mode Parameter
 
 ```python
@@ -163,34 +168,8 @@ They may be renamed, reorganized, or moved to nested objects.
 These interfaces still work in v0.1.x but emit deprecation warnings and will
 be removed in the next minor release.
 
-### `mlsysim.BaseModel` Alias
-
-```python
-# Deprecated:
-from mlsysim import BaseModel
-
-# Use instead:
-from mlsysim.core.solver import ForwardModel
-```
-
-The top-level `BaseModel` name was ambiguous (conflicts with Pydantic's
-`BaseModel` in many codebases). It is now an alias that emits a
-`DeprecationWarning`.
-
-### Direct Solver Imports from Top-Level
-
-```python
-# Deprecated:
-from mlsysim import ForwardModel, DistributedModel
-
-# Use instead:
-from mlsysim.solvers import DistributedModel
-from mlsysim.core.solver import ForwardModel
-```
-
-Solver classes should be imported from `mlsysim.solvers` when available, not
-from the `mlsysim` top-level namespace. Base hierarchy types such as
-`ForwardModel` live in `mlsysim.core.solver`.
+No public import path is deprecated in `0.1.2`. Deprecations will be listed here
+and in the changelog before the next minor release.
 
 ---
 
@@ -198,6 +177,6 @@ from the `mlsysim` top-level namespace. Base hierarchy types such as
 
 1. **Pin your dependency:** `mlsysim ~= 0.1.0` (allows 0.1.x patches, blocks 0.2.0).
 2. **Use `Engine.solve()` as your primary interface.** It is the most stable entry point.
-3. **Avoid importing from `mlsysim.solvers` unless you need solver-specific features.** The engine facade covers most use cases.
+3. **Use `mlsysim.solvers` only when you need solver-specific features.** The engine facade covers most use cases.
 4. **Run with warnings enabled** (`python3 -W default`) to catch deprecation notices early.
 5. **Read the changelog** before any minor version upgrade.
