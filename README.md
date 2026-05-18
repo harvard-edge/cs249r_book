@@ -788,7 +788,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 
 ---
 
-### ML Systems Design Grammar Contributors
+### ⚗️ ML Systems Design Grammar Contributors
 
 <!-- DESIGNGRAMMAR-CONTRIBUTORS-START -->
 <!-- prettier-ignore-start -->
