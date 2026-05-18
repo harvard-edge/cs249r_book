@@ -390,22 +390,52 @@ class ModuleWorkflowCommand(BaseCommand):
         return self._open_jupyter(module_name)
 
     def _create_module_from_src(self, module_name: str) -> bool:
-        """Create a module in modules/ by converting from src/.
+        """Create a student-facing module notebook in modules/ from src/.
 
-        Uses the same conversion logic as 'tito src export' but only creates
-        the student-facing notebook, without exporting to the tinytorch package.
-        Full `src/` (including `### BEGIN SOLUTION` ... `### END SOLUTION` blocks) is
-        passed through to jupytext so notebooks match the source-of-truth and exports
-        remain consistent for `tito module complete` and CI user-journey.
+        Strips ### BEGIN SOLUTION ... ### END SOLUTION blocks so students
+        receive blank stubs, not implemented answers.
         """
+        import tempfile
+        import shutil
         from ..export_utils import convert_py_to_notebook
 
         src_path = self.config.project_root / "src" / module_name
         if not src_path.exists():
             return False
 
-        # Convert src/*.py to modules/*.ipynb using jupytext
-        return convert_py_to_notebook(src_path, self.venv_path, self.console)
+        src_file = src_path / f"{module_name}.py"
+        if not src_file.exists():
+            return False
+
+        # Strip solution blocks from source before generating notebook
+        lines = src_file.read_text(encoding="utf-8").splitlines(keepends=True)
+        stripped = []
+        in_solution = False
+        for line in lines:
+            if line.strip() == "### BEGIN SOLUTION":
+                in_solution = True
+                continue
+            if line.strip() == "### END SOLUTION":
+                in_solution = False
+                continue
+            if not in_solution:
+                stripped.append(line)
+
+        # Write stripped source to a temp dir so jupytext converts it
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_module_dir = Path(tmp) / module_name
+            tmp_module_dir.mkdir()
+            tmp_src = tmp_module_dir / f"{module_name}.py"
+            tmp_src.write_text("".join(stripped), encoding="utf-8")
+            # Copy any companion files (yaml, assets) the module needs
+            for companion in src_path.iterdir():
+                if companion.name != f"{module_name}.py":
+                    dest = tmp_module_dir / companion.name
+                    if companion.is_dir():
+                        shutil.copytree(companion, dest)
+                    else:
+                        shutil.copy2(companion, dest)
+            return convert_py_to_notebook(tmp_module_dir, self.venv_path, self.console)
 
     def _get_milestone_for_module(self, module_num: int) -> Optional[tuple]:
         """Get the milestone this module contributes to."""
