@@ -37,7 +37,7 @@ Release body. Omit any section that has no entries for a given release.
 
 Patch release focused on first-run usability for students, instructors, and
 automation, plus a backward-compatible serving-model extension for current
-LLM inference scheduling practice.
+LLM inference scheduling practice and three small first-order modeling additions.
 
 ### Solvers, Models & Taxonomy
 
@@ -48,6 +48,13 @@ LLM inference scheduling practice.
   `decode_stall_bound` so users can reason about Sarathi-Serve-style decode
   stall bounds without replacing the two-phase serving model or implementing a
   full scheduler.
+- Added `TrainingMemoryModel` for per-accelerator training memory breakdowns:
+  weights, gradients, optimizer state, activations, and communication buffers.
+- Added `ServingCapacityModel` to compose serving latency, continuous-batching
+  capacity, and tail-latency queueing into a first-pass replica estimate.
+- Added `MoERoutingModel` and `DistributedModel.solve(...,
+  moe_routing_imbalance_factor=...)` for first-order MoE hot-expert routing
+  sensitivity.
 
 ### CLI
 
@@ -68,7 +75,11 @@ LLM inference scheduling practice.
   interference, grounded in Sarathi-Serve, Splitwise, and DistServe.
 - Updated website citation snippets and instructor version-pinning guidance for
   the 0.1.2 release.
-- Removed experimental AI/agent-facing docs from the public site so the release
+- Added tutorial-style documentation for training memory, serving capacity, MoE
+  routing imbalance, validation boundaries, and efficiency calibration.
+- Updated the paper text and math documentation so all new modeling additions
+  are documented with verified references.
+- Removed experimental internal automation docs from the public site so the release
   documentation stays focused on student and community workflows.
 - Updated MLSysBook browser wheel references to `mlsysim-0.1.2-py3-none-any.whl`.
 
@@ -81,6 +92,8 @@ LLM inference scheduling practice.
 
 - Added CLI contract tests for command-local output flags and audit JSON purity.
 - Added solver tests for optional chunked prefill behavior and validation.
+- Added solver tests for training memory accounting, serving capacity planning,
+  and MoE routing imbalance.
 - Removed an unused solver import so `ruff check .` is clean.
 - Verified `quarto render docs` completes for the full MLSys·im website.
 - Verified package tests, website render, paper build, and book unit tests

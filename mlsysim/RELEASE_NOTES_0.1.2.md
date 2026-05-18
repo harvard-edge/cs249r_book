@@ -2,9 +2,10 @@
 
 **Release date:** 2026-05-17
 
-This patch release improves first-run CLI usability, release readiness, and
-serving-model coverage. Existing serving predictions remain unchanged unless
-the new optional chunked-prefill parameter is used.
+This patch release improves first-run CLI usability, release readiness,
+serving-model coverage, and a small set of first-order modeling workflows.
+Existing serving predictions remain unchanged unless optional chunked-prefill
+or new capacity-planning parameters are used.
 
 ## Install
 
@@ -36,6 +37,14 @@ mlsysim eval Llama3_8B H100 --batch-size 32
   print(result.decode_stall_bound)
   ```
 
+- `TrainingMemoryModel` decomposes per-accelerator training memory into weights,
+  gradients, optimizer state, activations, and communication buffers.
+- `ServingCapacityModel` turns a QPS and P99 target into a first-pass replica
+  count by composing serving latency, batching capacity, and queueing.
+- `MoERoutingModel` exposes a `routing_imbalance_factor` for MoE hot-expert
+  sensitivity; `DistributedModel` accepts `moe_routing_imbalance_factor` for the
+  same first-order expert-parallel traffic effect.
+
 - `mlsysim serve` exposes the same analytical control from the CLI:
 
   ```bash
@@ -55,6 +64,11 @@ mlsysim eval Llama3_8B H100 --batch-size 32
   remains JSON by design.
 - The website citation snippets, CLI reference, and instructor version-pinning
   guidance now match the current release state.
+- The website now includes a tutorial for training memory, serving capacity, and
+  MoE routing, plus clearer accuracy and efficiency-calibration guidance.
+- `paper.tex` documents the new first-order models and references the grounding
+  literature for ZeRO, activation recomputation, GShard, and Switch-style MoE
+  routing.
 - MLSysBook browser wheel references now point to
   `mlsysim-0.1.2-py3-none-any.whl`, and the wheel is present under `wheels/`
   for hosted Pyodide execution.

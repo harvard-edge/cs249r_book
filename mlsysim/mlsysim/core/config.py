@@ -5,7 +5,7 @@ from ..hardware.registry import Hardware
 
 class SimulationConfig(BaseModel):
     """
-    Standard schema for an ML Systems Simulation.
+    Standard schema for an ML systems analytical modeling run.
     Can be loaded from YAML, JSON, or Python Dicts.
     """
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -30,7 +30,7 @@ class SimulationConfig(BaseModel):
     @model_validator(mode='after')
     def validate_physical_feasibility(self) -> 'SimulationConfig':
         """
-        Runs a pre-simulation check to ensure the configuration isn't 
+        Runs a pre-solve check to ensure the configuration isn't
         physically impossible (e.g., OOM on start).
         """
         # 1. Resolve registry items
@@ -51,5 +51,5 @@ class SimulationConfig(BaseModel):
         return self
 
 def load_config(data: Dict[str, Any]) -> SimulationConfig:
-    """Helper to parse a dictionary into a validated simulation configuration."""
+    """Helper to parse a dictionary into a validated analytical configuration."""
     return SimulationConfig.model_validate(data)

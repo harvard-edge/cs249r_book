@@ -182,6 +182,18 @@ $$
 
 where $N$ is the EP degree. Compared to AllReduce, All-to-All creates $O(N^2)$ point-to-point connections, making it **latency-sensitive** — a 4 KB token routing message is latency-bound, while a 140 GB gradient sync is bandwidth-bound.
 
+MoE routing is rarely perfectly balanced. MLSys·im exposes a single routing-imbalance factor $\gamma \ge 1$:
+
+$$
+E_{\text{active,eff}} = \min(E_{\text{total}}, \gamma \cdot E_{\text{top-k}})
+$$
+
+$$
+P_{\text{active,eff}} = P_{\text{active}} \cdot \frac{E_{\text{active,eff}}}{E_{\text{top-k}}}
+$$
+
+`MoERoutingModel` reports the effective active experts, effective active parameters, routed bytes, and optional expert-parallel all-to-all latency. This is a first-order hot-expert proxy, not a router simulation; it is intended to capture the load-balancing concern surfaced by sparsely-gated MoE, GShard, and Switch-style systems [@shazeer2017outrageously; @lepikhin2020gshard; @fedus2022switch].
+
 ---
 
 ## 3. Training Scaling Laws {#sec-scaling}
@@ -217,6 +229,28 @@ GPT-3 175B trained on 300B tokens:
 
 The actual training took ~34 days, consistent with scaling efficiency losses at 1,024 GPUs (~60%).
 :::
+
+### 3.1 Training Memory Accounting {#sec-training-memory}
+
+*Implemented in [`mlsysim.core.solver.TrainingMemoryModel`](api/core.solver.TrainingMemoryModel.qmd).*
+
+Inference memory is mostly weights plus KV cache. Training memory adds gradients, optimizer state, saved activations, and communication buffers:
+
+$$
+M_{\text{train}} =
+M_{\text{weights}} + M_{\text{grad}} + M_{\text{opt}} +
+M_{\text{act}} + M_{\text{comm}}
+$$
+
+For mixed-precision Adam training, the default per-parameter state is:
+
+| Component | Default bytes / parameter | ZeRO sharding |
+|:----------|--------------------------:|:--------------|
+| Weights | 2 | Stage 3 |
+| Gradients | 2 | Stage 2+ |
+| Adam optimizer state | 12 | Stage 1+ |
+
+Tensor, pipeline, and expert parallelism first shard the model states across model-parallel ranks. ZeRO then shards data-parallel states [@rajbhandari2020]. Activation memory scales with local microbatch size, sequence length, hidden dimension, and the chosen activation-checkpointing strategy [@korthikanti2023].
 
 ---
 
@@ -327,7 +361,32 @@ Here $T_{\text{chunk},i}$ is the compute time for chunk $i$ plus one dispatch ta
 
 This estimates a coarse scheduling proxy used by chunked-prefill systems: smaller chunks do not reduce total prefill compute, but they reduce the largest decode stall caused by a co-scheduled prefill. MLSYSIM does not implement Sarathi-Serve's full scheduler. Disaggregated systems such as Splitwise and DistServe mitigate prefill/decode interference by assigning the phases to separate resources, trading scheduler interference for KV-cache transfer and resource-partitioning costs [@agrawal2025; @patel2024; @zhong2024distserve].
 
-### 4.5 Serving Cost Dominance
+### 4.5 Serving Capacity Planning {#sec-serving-capacity}
+
+*Implemented in [`mlsysim.core.solver.ServingCapacityModel`](api/core.solver.ServingCapacityModel.qmd).*
+
+Capacity planning composes three first-order quantities:
+
+1. base request latency from `ServingModel`;
+2. per-replica token throughput from `ContinuousBatchingModel`;
+3. queueing delay from `TailLatencyModel`.
+
+For an average response length $G$ tokens and per-replica decode throughput $R_{\text{tok}}$, the first-order request capacity is:
+
+$$
+Q_{\text{replica}} = \frac{R_{\text{tok}}}{G}
+$$
+
+The required replica count is the smallest $c$ such that utilization remains stable and:
+
+$$
+P99_{\text{request}} \approx T_{\text{base}} + P99_{\text{queue}}(Q, Q_{\text{replica}}, c)
+\le T_{\text{target}}
+$$
+
+This is deliberately a capacity model. It does not simulate request arrivals, preemption, or scheduler internals.
+
+### 4.6 Serving Cost Dominance
 
 At production scale, serving costs dominate training:
 
@@ -520,7 +579,11 @@ The equations above are grounded in the following peer-reviewed sources:
 4. **Shoeybi et al. (2019).** "Megatron-LM: Training Multi-Billion Parameter Language Models Using Model Parallelism." *arXiv:1909.08053.* → [Section 2](#sec-distributed)
 5. **Patarasuk & Yuan (2009).** "Bandwidth Optimal All-Reduce Algorithms for Clusters of Workstations." *Journal of Parallel and Distributed Computing.* → [Section 2.3](#sec-allreduce)
 6. **Shazeer et al. (2017).** "Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer." *ICLR.* → [Section 2.5](#sec-moe)
-7. **Young (1974).** "A First-Order Approximation to the Optimum Checkpoint Interval." *Information Processing Letters.* → [Section 7](#sec-reliability)
-8. **Daly (2006).** "A Higher Order Estimate of the Optimum Checkpoint Interval for Restart Dumps." *Future Generation Computer Systems.* → [Section 7](#sec-reliability)
-9. **Patterson et al. (2021).** "Carbon Emissions and Large Neural Network Training." *arXiv:2104.10350.* → [Section 5](#sec-sustainability)
-10. **Barroso, Clidaras & Hölzle (2018).** "The Datacenter as a Computer." *Synthesis Lectures on Computer Architecture.* → [Section 6](#sec-tco)
+7. **Rajbhandari et al. (2020).** "ZeRO: Memory Optimizations Toward Training Trillion Parameter Models." *SC.* → [Section 3.1](#sec-training-memory)
+8. **Korthikanti et al. (2023).** "Reducing Activation Recomputation in Large Transformer Models." *MLSys.* → [Section 3.1](#sec-training-memory)
+9. **Fedus, Zoph & Shazeer (2022).** "Switch Transformers: Scaling to Trillion Parameter Models with Simple and Efficient Sparsity." *JMLR.* → [Section 2.5](#sec-moe)
+10. **Lepikhin et al. (2020).** "GShard: Scaling Giant Models with Conditional Computation and Automatic Sharding." *arXiv:2006.16668.* → [Section 2.5](#sec-moe)
+11. **Young (1974).** "A First-Order Approximation to the Optimum Checkpoint Interval." *Information Processing Letters.* → [Section 7](#sec-reliability)
+12. **Daly (2006).** "A Higher Order Estimate of the Optimum Checkpoint Interval for Restart Dumps." *Future Generation Computer Systems.* → [Section 7](#sec-reliability)
+13. **Patterson et al. (2021).** "Carbon Emissions and Large Neural Network Training." *arXiv:2104.10350.* → [Section 5](#sec-sustainability)
+14. **Barroso, Clidaras & Hölzle (2018).** "The Datacenter as a Computer." *Synthesis Lectures on Computer Architecture.* → [Section 6](#sec-tco)

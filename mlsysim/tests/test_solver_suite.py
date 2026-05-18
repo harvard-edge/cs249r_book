@@ -19,6 +19,9 @@ from mlsysim.infra.registry import Infra, Grids
 from mlsysim.core.solver import (
     SingleNodeModel,
     ServingModel,
+    TrainingMemoryModel,
+    ServingCapacityModel,
+    MoERoutingModel,
     SustainabilityModel,
     DataModel,
     ScalingModel,
@@ -40,6 +43,7 @@ from mlsysim.core.solver import (
     WeightStreamingModel,
     TailLatencyModel,
 )
+from mlsysim.models.types import SparseTransformerWorkload
 from mlsysim.core.formulas import calc_pipeline_bubble
 from mlsysim.systems.types import NetworkFabric
 from mlsysim.core.engine import Engine, PerformanceProfile
@@ -281,6 +285,174 @@ class TestServingModel:
         params.update(kwargs)
         with pytest.raises(ValueError, match=message):
             ServingModel().solve(llama, h100, **params)
+
+
+class TestTrainingMemoryModel:
+    """Tests for per-accelerator training memory accounting."""
+
+    def test_training_memory_breakdown_sums_to_total(self):
+        llama = Models.Llama3_8B
+        h100 = Hardware.H100
+        result = TrainingMemoryModel().solve(llama, h100, batch_size=8, seq_len=1024)
+
+        total = (
+            result.weights
+            + result.gradients
+            + result.optimizer_state
+            + result.activations
+            + result.communication_buffers
+        )
+        assert result.total_memory.to("GB").magnitude == pytest.approx(total.to("GB").magnitude)
+        assert result.weights.to("GB").magnitude > 0
+        assert result.optimizer_state.to("GB").magnitude > result.gradients.to("GB").magnitude
+
+    def test_zero_stage_reduces_model_state_memory(self):
+        llama = Models.Llama3_8B
+        h100 = Hardware.H100
+        baseline = TrainingMemoryModel().solve(llama, h100, batch_size=8, seq_len=1024, dp_size=8, zero_stage=0)
+        zero3 = TrainingMemoryModel().solve(llama, h100, batch_size=8, seq_len=1024, dp_size=8, zero_stage=3)
+
+        assert zero3.weights < baseline.weights
+        assert zero3.gradients < baseline.gradients
+        assert zero3.optimizer_state < baseline.optimizer_state
+        assert zero3.total_memory < baseline.total_memory
+
+    def test_activation_checkpointing_reduces_activations(self):
+        llama = Models.Llama3_8B
+        h100 = Hardware.H100
+        none = TrainingMemoryModel().solve(
+            llama, h100, batch_size=8, seq_len=2048, activation_checkpointing="none"
+        )
+        full = TrainingMemoryModel().solve(
+            llama, h100, batch_size=8, seq_len=2048, activation_checkpointing="full"
+        )
+
+        assert full.activations < none.activations
+        assert full.total_memory < none.total_memory
+
+    def test_training_memory_rejects_invalid_options(self):
+        llama = Models.Llama3_8B
+        h100 = Hardware.H100
+        with pytest.raises(ValueError, match="zero_stage"):
+            TrainingMemoryModel().solve(llama, h100, batch_size=8, zero_stage=4)
+        with pytest.raises(ValueError, match="optimizer"):
+            TrainingMemoryModel().solve(llama, h100, batch_size=8, optimizer="mystery")
+
+
+class TestServingCapacityModel:
+    """Tests for serving capacity planning."""
+
+    def test_capacity_planner_finds_required_replicas(self):
+        llama = Models.Llama3_8B
+        h100 = Hardware.H100
+        result = ServingCapacityModel().solve(
+            llama,
+            h100,
+            qps=5.0,
+            target_p99_latency_ms=2_000,
+            seq_len=512,
+            output_tokens=32,
+            max_batch_size=8,
+            max_replicas=64,
+        )
+
+        assert result.feasible is True
+        assert result.required_replicas >= 1
+        assert result.qps_capacity >= result.qps_target
+        assert result.estimated_p99_latency <= result.target_p99_latency
+
+    def test_capacity_replicas_increase_with_qps(self):
+        llama = Models.Llama3_8B
+        h100 = Hardware.H100
+        low = ServingCapacityModel().solve(
+            llama, h100, qps=1.0, target_p99_latency_ms=2_000, seq_len=512, output_tokens=32, max_replicas=64
+        )
+        high = ServingCapacityModel().solve(
+            llama, h100, qps=20.0, target_p99_latency_ms=2_000, seq_len=512, output_tokens=32, max_replicas=64
+        )
+
+        assert high.required_replicas >= low.required_replicas
+        assert high.qps_capacity >= high.qps_target
+
+    def test_capacity_planner_reports_infeasible_model(self):
+        gpt3 = Models.GPT3
+        h100 = Hardware.H100
+        result = ServingCapacityModel().solve(
+            gpt3,
+            h100,
+            qps=1.0,
+            target_p99_latency_ms=10_000,
+            seq_len=512,
+            output_tokens=16,
+            max_batch_size=1,
+            max_replicas=4,
+        )
+
+        assert result.feasible is False
+        assert result.bottleneck == "Memory"
+
+
+class TestMoERoutingModel:
+    """Tests for MoE routing imbalance modeling."""
+
+    def _toy_moe(self):
+        return SparseTransformerWorkload(
+            name="Toy MoE",
+            architecture="Sparse Transformer",
+            parameters=64e9 * ureg.count,
+            active_parameters=8e9 * ureg.count,
+            experts=8,
+            active_experts_per_token=2,
+            layers=32,
+            hidden_dim=4096,
+            heads=32,
+        )
+
+    def test_moe_imbalance_increases_effective_active_parameters(self):
+        moe = self._toy_moe()
+        balanced = MoERoutingModel().solve(moe, batch_size=4, seq_len=1024)
+        imbalanced = MoERoutingModel().solve(
+            moe, batch_size=4, seq_len=1024, routing_imbalance_factor=1.5
+        )
+
+        assert imbalanced.effective_active_experts > balanced.effective_active_experts
+        assert imbalanced.effective_active_parameters > balanced.effective_active_parameters
+        assert imbalanced.token_dispatch_bytes.to("MB").magnitude == pytest.approx(0.0)
+
+    def test_moe_routing_reports_ep_all_to_all_latency(self):
+        moe = self._toy_moe()
+        result = MoERoutingModel().solve(
+            moe,
+            batch_size=4,
+            seq_len=1024,
+            ep_size=8,
+            routing_imbalance_factor=1.25,
+            fleet=Systems.Clusters.Research_256,
+        )
+
+        assert result.all_to_all_latency is not None
+        assert result.all_to_all_latency.to("ms").magnitude > 0
+        assert result.token_dispatch_bytes.to("MB").magnitude > 0
+
+    def test_distributed_model_accounts_for_moe_imbalance(self):
+        moe = self._toy_moe()
+        fleet = Systems.Clusters.Research_256
+        balanced = DistributedModel().solve(
+            moe, fleet, batch_size=64, seq_len=512, tp_size=1, pp_size=1, ep_size=8
+        )
+        imbalanced = DistributedModel().solve(
+            moe,
+            fleet,
+            batch_size=64,
+            seq_len=512,
+            tp_size=1,
+            pp_size=1,
+            ep_size=8,
+            moe_routing_imbalance_factor=1.5,
+        )
+
+        assert imbalanced.ep_communication_latency > balanced.ep_communication_latency
+        assert imbalanced.step_latency_total > balanced.step_latency_total
 
 
 # ======================================================================

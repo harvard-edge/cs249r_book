@@ -17,9 +17,21 @@ MLSys·im provides specialized analytical resolvers for different classes of ML 
 : Use the [**ServingModel**](api/core.solver.ServingModel.qmd). It models the two distinct phases of autoregressive inference: the compute-bound prefill (TTFT) and the memory-bound decode (ITL), plus KV-cache memory pressure, phase splitting, prompt caching, speculative decode, and an optional chunked-prefill stall proxy.
 : *Lecture slides:* [Model Serving](https://mlsysbook.ai/slides/vol1.html) (Vol I, Ch 13) · [Inference at Scale](https://mlsysbook.ai/slides/vol2.html) (Vol II, Ch 10)
 
+**"How much memory do I need for training?"**
+: Use the [**TrainingMemoryModel**](api/core.solver.TrainingMemoryModel.qmd). It separates weights, gradients, optimizer state, activations, and communication buffers so training memory is not confused with inference memory.
+: *Lecture slides:* [Training](https://mlsysbook.ai/slides/vol1.html) (Vol I, Ch 8) · [Distributed Training](https://mlsysbook.ai/slides/vol2.html) (Vol II, Ch 5)
+
+**"How many serving replicas do I need for this SLA?"**
+: Use the [**ServingCapacityModel**](api/core.solver.ServingCapacityModel.qmd). It composes serving latency, continuous-batching capacity, and queueing pressure into a replica-count estimate.
+: *Lecture slides:* [Model Serving](https://mlsysbook.ai/slides/vol1.html) (Vol I, Ch 13) · [Inference at Scale](https://mlsysbook.ai/slides/vol2.html) (Vol II, Ch 10)
+
 **"How does performance scale across multiple GPUs?"**
 : Use the [**DistributedModel**](api/core.solver.DistributedModel.qmd). It decomposes workloads using 3D/4D parallelism (DP, TP, PP, EP) and calculates communication overhead, pipeline bubbles, and scaling efficiency.
 : *Lecture slides:* [Distributed Training](https://mlsysbook.ai/slides/vol2.html) (Vol II, Ch 5) · [Collective Communication](https://mlsysbook.ai/slides/vol2.html) (Vol II, Ch 6) · [Network Fabrics](https://mlsysbook.ai/slides/vol2.html) (Vol II, Ch 3)
+
+**"How much does MoE routing imbalance hurt?"**
+: Use the [**MoERoutingModel**](api/core.solver.MoERoutingModel.qmd). It keeps MoE modeling first-order: total parameters set memory, active parameters set compute, and a routing-imbalance factor inflates expert-parallel all-to-all traffic.
+: *Lecture slides:* [Distributed Training](https://mlsysbook.ai/slides/vol2.html) (Vol II, Ch 5) · [Inference at Scale](https://mlsysbook.ai/slides/vol2.html) (Vol II, Ch 10)
 
 **"How much will this cost to run?"**
 : Use the [**EconomicsModel**](api/core.solver.EconomicsModel.qmd). It calculates Total Cost of Ownership: CapEx (hardware purchase), OpEx (energy + maintenance), and total TCO over a specified duration.
@@ -41,7 +53,10 @@ MLSys·im provides specialized analytical resolvers for different classes of ML 
 |:-------|:-----------|:------------|:---------|
 | [**SingleNodeModel**](api/core.solver.SingleNodeModel.qmd) | `model`, `hardware`, `batch_size`, `precision` | latency, throughput, bottleneck, MFU | "Is my model memory-bound?" |
 | [**ServingModel**](api/core.solver.ServingModel.qmd) | `model`, `hardware`, `seq_len`, `batch_size` | TTFT, ITL, KV-cache size, decode stall proxy, feasibility | "Can I serve this LLM on this GPU?" |
+| [**TrainingMemoryModel**](api/core.solver.TrainingMemoryModel.qmd) | `model`, `hardware`, `batch_size`, `seq_len` | memory breakdown, feasibility | "Why does training not fit?" |
+| [**ServingCapacityModel**](api/core.solver.ServingCapacityModel.qmd) | `model`, `hardware`, `qps`, `target_p99_latency_ms` | replicas, QPS capacity, queue wait | "How many replicas do I need?" |
 | [**DistributedModel**](api/core.solver.DistributedModel.qmd) | `model`, `fleet`, `tp_size`, `pp_size`, `ep_size` | scaling efficiency, communication overhead | "How many GPUs do I actually need?" |
+| [**MoERoutingModel**](api/core.solver.MoERoutingModel.qmd) | sparse `model`, `batch_size`, `seq_len`, `ep_size` | active experts, routed bytes, all-to-all latency | "What is the MoE routing tax?" |
 | [**EconomicsModel**](api/core.solver.EconomicsModel.qmd) | `fleet`, `duration_days`, `kwh_price` | CapEx, OpEx, total TCO | "What will this cost over 3 years?" |
 | [**SustainabilityModel**](api/core.solver.SustainabilityModel.qmd) | `fleet`, `duration_days`, `datacenter` | energy (kWh), carbon (kg CO₂e), water (L) | "Where should I train to minimize carbon?" |
 | [**ReliabilityModel**](api/core.solver.ReliabilityModel.qmd) | `fleet`, `job_duration_hours`, `checkpoint_time_s` | MTBF, failure probability, checkpoint interval | "Will my training job complete?" |
@@ -91,6 +106,76 @@ print(f"KV:   {result.kv_cache_size:~.2f}")
 print(f"Fits: {result.feasible}")
 ```
 
+### Training memory breakdown
+
+```python
+import mlsysim
+from mlsysim import TrainingMemoryModel
+
+memory = TrainingMemoryModel().solve(
+    model=mlsysim.Models.Language.Llama3_8B,
+    hardware=mlsysim.Hardware.Cloud.H100,
+    batch_size=8,
+    seq_len=2048,
+    zero_stage=2,
+    dp_size=8
+)
+print(f"Total:       {memory.total_memory:~.2f}")
+print(f"Weights:     {memory.weights:~.2f}")
+print(f"Optimizer:   {memory.optimizer_state:~.2f}")
+print(f"Activations: {memory.activations:~.2f}")
+print(f"Fits:        {memory.feasible}")
+```
+
+### Serving capacity planning
+
+```python
+import mlsysim
+from mlsysim import ServingCapacityModel
+
+capacity = ServingCapacityModel().solve(
+    model=mlsysim.Models.Language.Llama3_8B,
+    hardware=mlsysim.Hardware.Cloud.H100,
+    qps=20,
+    target_p99_latency_ms=2000,
+    seq_len=1024,
+    output_tokens=64
+)
+print(f"Replicas: {capacity.required_replicas}")
+print(f"P99:      {capacity.estimated_p99_latency:~.1f}")
+print(f"Util:     {capacity.utilization:.1%}")
+```
+
+### MoE routing imbalance
+
+```python
+from mlsysim import MoERoutingModel, SparseTransformerWorkload, Systems, ureg
+
+moe = SparseTransformerWorkload(
+    name="Toy-MoE-64B",
+    architecture="Sparse Transformer",
+    parameters=64e9 * ureg.count,
+    active_parameters=8e9 * ureg.count,
+    experts=8,
+    active_experts_per_token=2,
+    layers=32,
+    hidden_dim=4096,
+    heads=32,
+)
+
+routing = MoERoutingModel().solve(
+    model=moe,
+    batch_size=4,
+    seq_len=2048,
+    ep_size=8,
+    routing_imbalance_factor=1.25,
+    fleet=Systems.Clusters.Research_256,
+)
+print(f"Active experts: {routing.effective_active_experts:.2f}")
+print(f"Routed bytes:   {routing.token_dispatch_bytes:~.2f}")
+print(f"All-to-all:     {routing.all_to_all_latency:~.2f}")
+```
+
 ### Distributed training at scale
 
 ```python
@@ -137,6 +222,14 @@ for hw in targets:
 ## Composing Solvers
 
 Real-world questions often require **chaining** multiple solvers. The output of one solver feeds naturally into the next because all solvers share typed inputs and `pint.Quantity`-valued outputs.
+
+## How to Validate a Result
+
+Use MLSys·im results in three passes:
+
+1. **Check feasibility first.** Memory, KV cache, and checkpoint sizes are direct byte counts. If these say the configuration cannot fit, a benchmark will not make it fit.
+2. **Check the binding constraint.** If the result is memory-bound, compare bandwidth-oriented alternatives; if it is compute-bound, compare FLOP/s and efficiency.
+3. **Calibrate before production commitments.** For latency and throughput, measure one representative configuration, back-calculate `efficiency`, then reuse that calibrated value for sweeps. The default `efficiency=0.5` is an informed starting point, not a universal constant.
 
 ### "Can I serve Llama-70B on 4 H100s within budget?"
 

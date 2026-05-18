@@ -83,6 +83,52 @@ class ServingResult(SolverResult):
     decode_stall_bound: Optional[Quantity] = None
 
 
+class TrainingMemoryResult(SolverResult):
+    """Result from TrainingMemoryModel: per-accelerator training memory accounting."""
+    feasible: bool
+    total_memory: Quantity
+    available_memory: Quantity
+    memory_utilization: float
+    weights: Quantity
+    gradients: Quantity
+    optimizer_state: Quantity
+    activations: Quantity
+    communication_buffers: Quantity
+    precision: str
+    optimizer: str
+    activation_checkpointing: str
+    parallelism: Dict[str, int]
+
+
+class ServingCapacityResult(SolverResult):
+    """Result from ServingCapacityModel: replica count for an inference SLA."""
+    feasible: bool
+    required_replicas: int
+    qps_target: float
+    qps_capacity: float
+    per_replica_qps_capacity: float
+    utilization: float
+    target_p99_latency: Quantity
+    estimated_p99_latency: Quantity
+    base_request_latency: Quantity
+    queue_wait_p99: Quantity
+    active_batch_size: int
+    ttft: Quantity
+    itl: Quantity
+    bottleneck: str
+
+
+class MoERoutingResult(SolverResult):
+    """Result from MoERoutingModel: MoE routing imbalance and all-to-all cost."""
+    effective_active_experts: float
+    effective_active_parameters: Quantity
+    active_parameter_multiplier: float
+    routing_imbalance_factor: float
+    token_dispatch_bytes: Quantity
+    all_to_all_latency: Optional[Quantity] = None
+    ep_size: int = 1
+
+
 class ContinuousBatchingResult(SolverResult):
     """Result from ContinuousBatchingModel: production LLM serving with PagedAttention."""
     feasible: bool

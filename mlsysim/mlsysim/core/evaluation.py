@@ -10,7 +10,7 @@ class EvaluationLevel(BaseModel):
 
 class SystemEvaluation(BaseModel):
     """
-    The multi-level 'Scorecard' for a System Simulation.
+    The multi-level scorecard for an analytical system evaluation.
     Organizes results into the three analytical lenses by composing 
     analytical models and analysis solvers.
     """

@@ -349,6 +349,12 @@ _BY_RESOLVER = {}
 for w in ALL_WALLS:
     _BY_RESOLVER.setdefault(w.resolver_name, []).append(w)
 
+# Composite/secondary resolvers map onto existing walls without changing the
+# canonical 22-wall taxonomy.
+_BY_RESOLVER["TrainingMemoryModel"] = [MEMORY]
+_BY_RESOLVER["ServingCapacityModel"] = [SERVING, BATCHING, TAIL_LATENCY]
+_BY_RESOLVER["MoERoutingModel"] = [COMMUNICATION]
+
 
 def wall(number: int) -> Wall:
     """Look up a wall by its canonical number."""

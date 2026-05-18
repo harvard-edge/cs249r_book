@@ -8,7 +8,11 @@
 ## What Is Efficiency?
 
 The efficiency parameter, written as **eta** in equations and `efficiency` in code,
-is the ratio of achieved FLOPS to peak FLOPS:
+is the ratio of achieved FLOPS to peak FLOPS. MLSys·im exposes it on every
+solver where the compute term depends on achieved FLOP/s, including
+`Engine.solve()`, `SingleNodeModel`, `ServingModel`, `DistributedModel`,
+`ContinuousBatchingModel`, `ServingCapacityModel`, and the optimizers that call
+those models.
 
 ```
 eta = Achieved_FLOPS / Peak_FLOPS
@@ -112,7 +116,9 @@ Use these empirically-grounded ranges as starting points:
 
 These ranges come from published benchmarks (MLPerf, PaLM training reports,
 Megatron-LM papers) and our own measurements. They are not universal truths --
-they are informed defaults.
+they are informed defaults. If a solver exposes `efficiency=0.5`, read that as a
+documented starting point for a well-optimized datacenter workload, not a hidden
+claim that every workload reaches 50% of peak.
 
 ---
 

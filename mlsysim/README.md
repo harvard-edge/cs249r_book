@@ -77,7 +77,7 @@ Discover built-in hardware, models, and infrastructure without reading source co
 Evaluate the physics of a workload on a specific hardware node instantly:
 <kbd>mlsysim eval Llama3_8B H100 --batch-size 32</kbd>
 
-### 3. Deep Simulation (Infrastructure as Code)
+### 3. Full-Stack Analytical Run (Infrastructure as Code)
 Define your entire cluster and SLA constraints in a declarative `mlsys.yaml` file:
 
 ```yaml
@@ -122,9 +122,15 @@ Use the Tier 3 Engineering Engine to automatically find the optimal configuratio
 ## Stability & Integrity
 Because this core powers a printed textbook, we enforce strict **Invariant Verification**. Registry constants are traceable to primary sources where available, and dimensional integrity is enforced via `pint`.
 
+## Release-Facing Modeling Workflows
+
+- `TrainingMemoryModel`: weights, gradients, optimizer state, activations, and communication buffers per accelerator.
+- `ServingCapacityModel`: first-pass replica sizing from QPS, target P99 latency, generated length, batching capacity, and queueing.
+- `MoERoutingModel`: MoE active-parameter and expert-parallel traffic sensitivity under hot-expert imbalance.
+
 ## What This Tool Does Not Model
 
-MLSysim is an **analytical modeling framework**, not a production deployment simulator.
+MLSys·im is an **analytical modeling framework** for first-pass reasoning, not a production serving or orchestration system.
 The 22 walls model physical and economic constraints that bound ML system performance.
 Several critical production concerns are deliberately **out of scope**:
 
@@ -178,8 +184,8 @@ pip install mlsysim
 # The [cli] extra is retained as a backward-compatible no-op.
 pip install "mlsysim[cli]"
 
-# Install with dependencies for interactive labs (Marimo, Plotly)
-pip install "mlsysim[labs]"
+# Install plotting dependencies
+pip install "mlsysim[viz]"
 ```
 
 ## Python API Usage

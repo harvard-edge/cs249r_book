@@ -46,7 +46,7 @@ class ReliabilityMetrics:
 @dataclass(frozen=True)
 class SystemLedger:
     """
-    The Universal Scorecard for all MLSys simulation results.
+    The universal scorecard for all MLSys analytical results.
     Binds the four dimensions into a single immutable result object.
     """
     performance: PerformanceMetrics
