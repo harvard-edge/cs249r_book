@@ -54,10 +54,10 @@ H200_MEM_CAPACITY = 131 * GiB              # 141 GB (NVIDIA spec) converted to G
 H200_TDP = 700 * watt                       # Same as H100 SXM
 
 # NVIDIA B100/B200 (Blackwell, 2024) — Source: NVIDIA Blackwell Architecture
-B200_FLOPS_FP16_TENSOR = 2250 * TFLOPs / second  # Dense. Sparse is 4500.
-B200_FLOPS_FP16_SPARSE = 4500 * TFLOPs / second
-B200_FLOPS_FP8_TENSOR = 4500 * TFLOPs / second   # Dense. Sparse is 9000.
-B200_FLOPS_INT4 = 9000 * TFLOPs / second         # Dense. Sparse is 18 PFLOPS.
+B200_FLOPS_FP16_TENSOR = 4500 * TFLOPs / second  # Dense. Sparse is 9000.
+B200_FLOPS_FP16_SPARSE = 9000 * TFLOPs / second
+B200_FLOPS_FP8_TENSOR = 9000 * TFLOPs / second   # Dense. Sparse is 18000.
+B200_FLOPS_INT4 = 18000 * TFLOPs / second        # Dense. Sparse is 36 PFLOPS.
 B200_MEM_BW = 8 * TB / second             # HBM3e
 B200_MEM_CAPACITY = 192 * GiB
 B200_TDP = 1000 * watt
@@ -66,9 +66,9 @@ B200_TDP = 1000 * watt
 # This is a full rack containing 72 Blackwell GPUs and 36 Grace CPUs.
 # We model the aggregate resources of the rack for macro-scale simulation.
 NVL72_GPUs = 72 * count
-NVL72_FLOPS_FP16_TENSOR = 162 * PFLOPs / second  # 72 * 2.25 PFLOPS FP16 dense
-NVL72_FLOPS_FP4_TENSOR = 720 * PFLOPs / second  # 72 * 10 PFLOPS FP4 dense (NVIDIA marketing headline)
-NVL72_FLOPS_FP8_TENSOR = 324 * PFLOPs / second  # 72 * 4.5 PFLOPS FP8 dense
+NVL72_FLOPS_FP16_TENSOR = 324 * PFLOPs / second  # 72 * 4.5 PFLOPS FP16 dense
+NVL72_FLOPS_FP4_TENSOR = 1440 * PFLOPs / second  # 72 * 20 PFLOPS FP4 dense (NVIDIA marketing headline)
+NVL72_FLOPS_FP8_TENSOR = 648 * PFLOPs / second  # 72 * 9 PFLOPS FP8 dense
 NVL72_MEM_CAPACITY = 13.8 * TB                  # 72 * 192 GB
 NVL72_MEM_BW = 576 * TB / second                # 72 * 8 TB/s
 NVL72_NVLINK_BW = 130 * TB / second             # Full bisection (bidirectional)
