@@ -60,7 +60,7 @@ Accelerators can compute faster than storage can feed them. A modern GPU process
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.constants import (
     GB, TB, PB, Gbps, byte, second, MB,
-    BILLION, TRILLION, SEC_PER_HOUR, SEC_PER_DAY, BITS_PER_BYTE, KIB_TO_BYTES,
+    BILLION, TRILLION, SEC_PER_HOUR, SEC_PER_DAY, BITS_PER_BYTE,
     A100_MEM_CAPACITY, H100_MEM_CAPACITY, H100_MEM_BW,
     H100_FLOPS_FP8_TENSOR, H100_FLOPS_FP16_TENSOR, H100_TDP,
     GPT3_PARAMS, RESNET50_PARAMS, NVME_SEQUENTIAL_BW,
@@ -99,7 +99,7 @@ from mlsysim.fmt import fmt, sci, check, md
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.constants import (
     H100_MEM_BW, NVME_SEQUENTIAL_BW, GPT3_PARAMS,
-    BYTES_FP16, BYTES_FP32, GB, TB, second, byte, BILLION
+    BYTES_FP16, BYTES_FP32, GB, TB, PB, second, byte, BILLION
 )
 from mlsysim.fmt import fmt, check, md
 
@@ -113,7 +113,7 @@ class StorageHierarchyAnalysis:
     bw_ratio_val        = h100_bw.m_as(GB/second) / nvme_bw_raw.m_as(GB/second)
     bytes_per_param_ckpt = BYTES_FP16.m_as(byte) + (2 * BYTES_FP32.m_as(byte))
     ckpt_total_gb_val   = (gpt3_params * bytes_per_param_ckpt) / BILLION
-    ckpt_fleet_total_pb_val = (ckpt_total_gb_val * 4320) / 1e6
+    ckpt_fleet_total_pb_val = (ckpt_total_gb_val * 4320 * GB).m_as(PB)
 
     # ┌── 3. GUARD ────────────────────────────────────────
     check(ckpt_total_gb_val > 1000, "175B checkpoint must be > 1 TB")
@@ -445,7 +445,7 @@ The storage hierarchy principle (Principle \ref{pri-storage-hierarchy}) governs 
 
 @fig-storage-pyramid maps these six tiers into a spatial hierarchy, showing how bandwidth decreases and capacity increases at each step away from the accelerator.
 
-::: {#fig-storage-pyramid fig-env="figure" fig-pos="htb" fig-cap="**ML Storage Hierarchy**: Six tiers grouped into Hot, Warm, and Cold bands, from GPU HBM (terabytes per second, gigabytes of capacity) down to tape archive (sub-gigabyte-per-second bandwidth, effectively unlimited capacity), with cost per gigabyte changing inversely. See @tbl-storage-hierarchy-merged for the per-tier bandwidth, latency, capacity, and cost values used throughout this chapter." fig-alt="Six storage tiers from GPU HBM (fastest) down to Tape Archive (slowest). Columns show bandwidth, capacity, and cost per GB. A left-hand ribbon groups them into Hot, Warm, and Cold bands."}
+::: {#fig-storage-pyramid fig-env="figure" fig-pos="htb" fig-cap="**ML Storage Hierarchy**: Storage tiers grouped into Hot, Warm, and Cold bands, from GPU HBM (terabytes per second, gigabytes of capacity) down to tape archive (sub-gigabyte-per-second bandwidth, effectively unlimited capacity), with cost per gigabyte changing inversely. The figure uses illustrative values to make the bandwidth-vs.-capacity trade-off visible at a glance; the canonical per-tier numbers used throughout this chapter come from @tbl-storage-hierarchy-merged, which is the source of truth where the figure and the table disagree." fig-alt="Storage tiers from GPU HBM (fastest) down to Tape Archive (slowest), with illustrative bandwidth, capacity, and cost-per-GB values. A left-hand ribbon groups them into Hot, Warm, and Cold bands."}
 
 ![](images/svg/storage-hierarchy.svg)
 
@@ -642,7 +642,7 @@ At the NVMe tier, compression represents a critical trade-off between I/O bandwi
 
 ::: {.callout-notebook title="The ImageNet bottleneck analysis"}
 
-\index{ImageNet!bottleneck analysis}**Problem**: A ResNet-50 training job on ImageNet (1.28M images, ~150 KB average) targets 1,000 images/second. The question is whether to use individual JPEG files on an HDD or NVMe.
+**Problem**\index{ImageNet!bottleneck analysis}: A ResNet-50 training job on ImageNet (1.28M images, ~150 KB average) targets 1,000 images/second. The question is whether to use individual JPEG files on an HDD or NVMe.
 
 **Math**:
 
@@ -725,7 +725,7 @@ Local NVMe provides high bandwidth and low latency within a single node, but dis
 
 ***Parallel File System (PFS)***\index{Parallel File System!definition} is a distributed storage architecture that stripes data across many storage servers to provide aggregate throughput exceeding the capacity of any single device.
 
-1.  **Significance (quantitative)**: A PFS aggregates $\text{BW}_{\text{io}}$ linearly with the number of storage servers (Object Storage Servers). A Lustre cluster with 20 OSS nodes each delivering 10 GB/s provides 200 GB/s aggregate, versus a single NAS server capped at 10 GB/s, enabling a training job to load a 10 GB striped shard in about 50 ms rather than 1 second. This aggregate bandwidth directly reduces the $D_{\text{vol}}/\text{BW}$ term in the iron law.
+1.  **Significance (quantitative)**: A PFS aggregates $\text{BW}_{\text{io}}$ linearly with the number of storage servers (Object Storage Servers). A Lustre cluster with 20 OSS nodes each delivering 10 GB/s provides 200 GB/s aggregate, vs. a single NAS server capped at 10 GB/s, enabling a training job to load a 10 GB striped shard in about 50 ms rather than 1 second. This aggregate bandwidth directly reduces the $D_{\text{vol}}/\text{BW}$ term in the iron law.
 2.  **Distinction (durable)**: Unlike Network Attached Storage (NAS), where every I/O request routes through a single server, a PFS client receives stripe location metadata from a dedicated Metadata Server (MDS) and then reads data directly from multiple OSS nodes in parallel—the MDS and OSS paths are architecturally separated, so data bandwidth scales with OSS count while metadata operations scale with MDS count.
 3.  **Common pitfall**: A frequent misconception is that a PFS has unlimited throughput if enough OSS nodes are added. In reality, a Lustre MDS handles roughly 100,000–300,000 metadata operations per second; at 10,000 workers each opening one small file, the MDS saturates in under 1 second and becomes the serialization point that idles the entire cluster regardless of how many OSS nodes are present.
 
@@ -973,7 +973,7 @@ The @tbl-data-formats comparison guides format selection for ML workloads.
 # │          PipelineCalcs.t_comp_stall_str, PipelineCalcs.t_io_stall_str,
 # │          PipelineCalcs.stall_pct_display_math
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import BILLION, THOUSAND
+from mlsysim.core.constants import BILLION, THOUSAND, ms, second
 from mlsysim.fmt import check, md
 import math
 
@@ -988,7 +988,7 @@ class PipelineCalcs:
     t_io_val      = 250
 
     # ┌── 2. EXECUTE ──────────────────────────────────────
-    t_step_s             = t_step_ms / 1000
+    t_step_s             = (t_step_ms * ms).m_as(second)
     req_bw_imagenet_val  = (n_gpus_image * util_target * (batch_img_gpu * img_size)) / t_step_s
     req_bw_imagenet_gbs  = req_bw_imagenet_val/BILLION
     stall_max_t          = max(t_comp_val, t_io_val)
@@ -1024,7 +1024,7 @@ The equation reveals four levers for controlling storage demand. Reducing $N_{\t
 
 As a separate image-training example, consider 256 GPUs training with ImageNet-scale images, 200 ms iterations, and 80 percent target utilization. This configuration requires **`{python} PipelineCalcs.req_bw_imagenet_str` GB/s** of aggregate storage throughput. The bandwidth must be sustained continuously for the duration of training, which may last days or weeks. If at any point the storage system delivers less than `{python} PipelineCalcs.req_bw_imagenet_str` GB/s, accelerators begin to idle. For the chapter's 175B language-model running example, tokenized text has a much lower per-batch bandwidth demand, but the total data volume and checkpoint traffic over the run are much larger, shifting the bottleneck from peak training-data bandwidth to sustained throughput and checkpoint movement over weeks.
 
-The consequences of falling short are captured by the **data stall ratio**, which measures the fraction of each training step where the accelerator waits for data:
+The consequences of falling short are captured by the **data stall ratio**, defined in @eq-data-stall as the fraction of each training step where the accelerator waits for data:
 
 $$\text{Data Stall \%} = \frac{T_{\text{step}} - T_{\text{compute}}}{T_{\text{step}}} \times 100$$ {#eq-data-stall}
 
@@ -1032,7 +1032,7 @@ where $T_{\text{step}} = \max(T_{\text{compute}}, T_{\text{I/O}})$ when I/O and 
 
 ::: {.callout-notebook title="The data stall ratio"}
 
-\index{Data!stall ratio, gpu utilization}**Scenario**: A GPU processes a batch in `{python} PipelineCalcs.t_comp_stall_str` ms, but storage takes `{python} PipelineCalcs.t_io_stall_str` ms to deliver the next batch.
+**Scenario**\index{Data!stall ratio, gpu utilization}: A GPU processes a batch in `{python} PipelineCalcs.t_comp_stall_str` ms, but storage takes `{python} PipelineCalcs.t_io_stall_str` ms to deliver the next batch.
 
 **Without pipelining** (sequential I/O then compute):
 
@@ -1295,7 +1295,7 @@ Knowing where data lives is only half the story; at scale we must also pin *whic
 
 ::: {.callout-lighthouse title="Archetype B (DLRM at Scale): Feature store latency"}
 
-While **Archetype A (GPT-4)** deals with static, versioned datasets of trillions of tokens, **Archetype B (DLRM at Scale)**—the Deep Learning Recommendation Model (DLRM) workload—deals with dynamic, high-velocity feature streams. For a recommendation system, the "ground truth" changes every second as users click and interact. This forces a move from simple file-based storage to a feature store\index{Feature Store} architecture that must solve the point-in-time correctness problem: ensuring that the features retrieved for training exactly match what the model would have seen at the moment of inference, without "leaking" future information.
+While **Archetype A (GPT-4)** deals with static, versioned datasets of trillions of tokens, **Archetype B (DLRM at Scale)**, the Deep Learning Recommendation Model (DLRM) workload, deals with dynamic, high-velocity feature streams. For a recommendation system, the "ground truth" changes every second as users click and interact. This forces a move from simple file-based storage to a feature store\index{Feature Store} architecture that must solve the point-in-time correctness problem: ensuring that the features retrieved for training exactly match what the model would have seen at the moment of inference, without "leaking" future information.
 
 :::
 
@@ -1310,7 +1310,7 @@ At the 10,000-GPU scale, the dataset is no longer a static collection of files b
 [^fn-hash-cost]: **Hash Cost (SHA-256)**: Verifying the integrity of a 100 TB dataset using SHA-256 consumes approximately 1,500 CPU-core hours. For a 30-day foundation model training run, this metadata validation step must be pipelined or performed during ingestion to avoid stalling the fleet's startup phase. \index{Cryptographic Hash!validation cost}
  This level of rigor is essential for audit trails and for debugging the subtle "loss spikes" that characterize large-scale training, where we must be able to replay the exact batch that caused a divergence to determine if the cause was a corrupted data sample or a numerical instability in the optimizer.
 
-Pipeline orchestration at petabyte scale treats data movement as a Directed Acyclic Graph (DAG) of immutable transformations. Each node in the DAG represents a processing stage—cleaning, tokenization, or sharding—and each edge is governed by a data contract. These contracts define the expected schema, statistical invariants, and versioning constraints for the data flowing between stages. When the training orchestrator (@sec-fleet-orchestration) schedules a job across the cluster, it uses these versioned contracts to ensure that every worker node pulls the identical data snapshot. The orchestrator coordinates with distributed training systems (@sec-distributed-training-systems) to verify that the local NVMe caches (@sec-storage-data-locality) are synchronized with the correct version before the first gradient step. By treating the data pipeline as an orchestrated system of versioned artifacts rather than a simple file transfer, we eliminate the silent data drift that is the primary source of failure in foundation model training.
+Pipeline orchestration at petabyte scale treats data movement as a Directed Acyclic Graph (DAG) of immutable transformations. Each node in the DAG represents a processing stage (cleaning, tokenization, or sharding) and each edge is governed by a data contract. These contracts define the expected schema, statistical invariants, and versioning constraints for the data flowing between stages. When the training orchestrator (@sec-fleet-orchestration) schedules a job across the cluster, it uses these versioned contracts to ensure that every worker node pulls the identical data snapshot. The orchestrator coordinates with distributed training systems (@sec-distributed-training-systems) to verify that the local NVMe caches (@sec-storage-data-locality) are synchronized with the correct version before the first gradient step. By treating the data pipeline as an orchestrated system of versioned artifacts rather than a simple file transfer, we eliminate the silent data drift that is the primary source of failure in foundation model training.
 
 Beyond pipeline orchestration, a hardware optimization eliminates one of the most common bottlenecks: the CPU's role as intermediary between storage and accelerator.
 
@@ -1384,7 +1384,7 @@ As @fig-gds-path illustrates, the throughput improvement from GDS is most pronou
 
 ::: {.callout-notebook title="The CPU bypass dividend"}
 
-\index{GPU Direct Storage!CPU bypass}**Problem**: A training node with 8 GPUs loads 150 KB images at 8,000 images/second per GPU (64,000 images/second total). Compare the CPU load under traditional I/O vs. GDS.
+**Problem**\index{GPU Direct Storage!CPU bypass}: A training node with 8 GPUs loads 150 KB images at 8,000 images/second per GPU (64,000 images/second total). Compare the CPU load under traditional I/O vs. GDS.
 
 **Traditional path**\index{Traditional Path}: Each image requires a DMA from NVMe to DRAM, a `memcpy` from kernel to user space, and a PCIe transfer to GPU. At 64,000 images/second with `{python} GDSLatency.gds_trad_us_str` μs of CPU time per image, the CPU spends 7.68 seconds of CPU time per wall-clock second, consuming roughly 8 cores worth of processing just for data movement.
 
@@ -1572,7 +1572,7 @@ A `{python} StorageHierarchyAnalysis.gpt3_params_b`B parameter model with Adam o
 ***Checkpoint Storm***\index{Checkpoint Storm!definition} is a burst of synchronized network and storage traffic that occurs when all nodes in a training fleet save model state simultaneously.
 
 1.  **Significance (quantitative)**: The storm magnitude scales as $T_{\text{write}} = N \times \text{per-node-shard} / \text{BW}_{\text{fabric}}$. For a 70B-parameter model in FP16 (140 GB of weights) trained across 1,000 nodes with vanilla data parallelism (every node holding its own complete copy), a naive checkpoint generates 140 TB of simultaneous writes; at 100 GB/s fabric bandwidth, $T_{\text{write}} \approx 1{,}400$ seconds, over 23 minutes of training stall per checkpoint event. ZeRO-3 sharding collapses this to roughly 1.1 TB total (140 GB weights + 140 GB gradients + 840 GB optimizer state, split across 1,000 nodes), bringing $T_{\text{write}}$ down to roughly 11 seconds. This stall adds directly to the $L_{\text{lat}}$ term and can dwarf the compute time between checkpoints when the sharding optimization is omitted.
-2.  **Distinction (durable)**: Unlike general I/O contention (which is stochastic and unpredictable), a Checkpoint Storm is synchronous and periodic—every node writes at the same moment because the training orchestrator triggers checkpoint after a fixed step count. Its predictability makes it both more damaging (all nodes compete simultaneously) and more tractable (it can be prevented by design through staggered scheduling or asynchronous serialization).
+2.  **Distinction (durable)**: Unlike general I/O contention (which is stochastic and unpredictable), a Checkpoint Storm is synchronous and periodic: every node writes at the same moment because the training orchestrator triggers checkpoint after a fixed step count. Its predictability makes it both more damaging (all nodes compete simultaneously) and more tractable (it can be prevented by design through staggered scheduling or asynchronous serialization).
 3.  **Common pitfall**: A frequent misconception is that checkpointing every 100 steps is "low overhead." At 70B scale, this assumption is catastrophically wrong: if each training step takes 10 seconds and a checkpoint storm takes 1,400 seconds, checkpointing every 100 steps means spending $1400/(100 \times 10) = 140\%$ of compute time on checkpointing—more time saving state than doing useful training.
 
 :::
@@ -1632,7 +1632,7 @@ Before closing with storage fallacies, one adjacent workload deserves a brief de
 
 ## Retrieval Infrastructure: Vector Indexes and Hybrid Search {#sec-data-storage-retrieval-infrastructure}
 
-While model training relies heavily on streaming sequential blobs via formats like TFRecord or Parquet, modern inference architectures—particularly those using Retrieval-Augmented Generation (RAG)—introduce a fundamentally different storage profile. Machine learning data in this context is not just sequential bytes, but rather high-dimensional vector graphs representing semantic embeddings.
+While model training relies heavily on streaming sequential blobs via formats like TFRecord or Parquet, modern inference architectures, particularly those using Retrieval-Augmented Generation (RAG), introduce a fundamentally different storage profile. Machine learning data in this context is not just sequential bytes, but rather high-dimensional vector graphs representing semantic embeddings.
 
 ::: {.callout-perspective title="The IOPS bottleneck in high-dimensional search"}
 This architectural pattern shifts the primary storage bottleneck from **sequential read bandwidth** to **random access memory IOPS**. Vector databases must traverse high-dimensional graphs (such as HNSW) to find approximate nearest neighbors across billions of embeddings. The performance is governed by a strict physical constraint: the **Recall vs. Latency vs. Capacity** trade-off. Maximizing recall requires traversing a larger portion of the index, driving up IOPS and latency. Sustaining sub-100 ms latency at scale demands keeping the upper routing layers of the vector index pinned in host DRAM, while aggressively paging payload data from NVMe, treating the storage tier as a massive, low-latency key-value store rather than a sequential pipe [@chang2008].
@@ -1680,7 +1680,7 @@ This is only true if the pipeline is I/O-bound. Compression reduces I/O volume b
 
 ::: {.callout-notebook title="The 175B model's storage footprint"}
 
-The complete storage picture for our running example, a 30-day training run of a 175B-parameter model on 256 nodes:
+@tbl-data-storage-175b-footprint assembles the complete storage picture for our running example, a 30-day training run of a 175B-parameter model on 256 nodes:
 
 | **Category**                               |                                                 **Volume** | **Primary Tier**                                           |
 |:-------------------------------------------|-----------------------------------------------------------:|:-----------------------------------------------------------|
@@ -1692,13 +1692,15 @@ The complete storage picture for our running example, a 30-day training run of a
 | All checkpoints (30 days, 10-min interval) | `{python} StorageHierarchyAnalysis.ckpt_fleet_total_pb` PB | NVMe (transient) $\to$ PFS (recent) $\to$ Object (archive) |
 | Archive (retained checkpoints + dataset)   |                                                     ~50 TB | Glacier                                                    |
 
+: **175B-Parameter Training Storage Footprint**: Volume and primary storage tier for each data category in a 30-day, 256-node training run. Checkpoint data dominates the footprint and drives the design of the NVMe-to-PFS-to-Object tiered hierarchy. {#tbl-data-storage-175b-footprint}
+
 **Total data moved through the hierarchy**\index{Total Data Moved Through the Hierarchy}: approximately `{python} StorageHierarchyAnalysis.ckpt_fleet_total_pb` PB of checkpoint data plus 3 TB$\times$ epochs of training data reads. For a single-epoch language model training run, checkpoint I/O dominates data loading I/O by a factor of over 1,000.
 
 :::
 
 ## The Synthetic Fuel Line {#sec-storage-synthetic-fuel}
 
-As the fleet consumes the sum of human-generated text, it encounters the **data wall**\index{Data Wall}: the point where new high-quality training samples can only be generated by the fleet itself. This shift from *collecting* data to *synthesizing* data fundamentally changes the storage architecture. A "synthetic fuel line" does not just stream data; it must store the **provenance chain**\index{Provenance Chain} of every sample to prevent "model collapse\index{Model Collapse}" (where a model degrades by training on its own unverified errors).
+As the fleet consumes the sum of human-generated text, it encounters the **Data Wall**\index{Data Wall}: the point where new high-quality training samples can only be generated by the fleet itself. This shift from *collecting* data to *synthesizing* data fundamentally changes the storage architecture. A "synthetic fuel line" does not just stream data; it must store the **provenance chain**\index{Provenance Chain} of every sample to prevent "model collapse\index{Model Collapse}" (where a model degrades by training on its own unverified errors).
 
 ```{python}
 #| label: synthetic-amplification-calc

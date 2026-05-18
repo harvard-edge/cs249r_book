@@ -64,7 +64,7 @@ The structural assumptions that each architecture encodes are known as inductive
 ***Inductive Bias***\index{Inductive Bias!definition} is a structural constraint built into a model architecture that restricts the hypothesis space, enabling generalization from finite data by encoding domain-specific assumptions (such as spatial locality or sequential ordering) directly into the computational graph.
 
 1.  **Significance (quantitative)**: Inductive bias directly reduces the data volume $(D_{\text{vol}})$ required for generalization. A CNN's spatial locality bias reduces the hypothesis space from $O(P^2)$ (fully connected) to $O(P \cdot K^2)$ (local filters), where $K \ll P$: for a $224{\times}224$ image, a $3{\times}3$ CNN kernel needs roughly 1,000$\times$ fewer parameters than an equivalent MLP, cutting both the memory footprint and the data required to avoid overfitting by the same factor.
-2.  **Distinction (durable)**: Unlike **Regularization** (which penalizes hypothesis complexity at training time via L1/L2 terms), Inductive Bias eliminates entire hypothesis classes at architecture design time—a CNN cannot represent arbitrary nonlocal functions regardless of training data, while regularization merely discourages them.
+2.  **Distinction (durable)**: Unlike **Regularization** (which penalizes hypothesis complexity at training time via L1/L2 terms), Inductive Bias eliminates entire hypothesis classes at architecture design time: a CNN cannot represent arbitrary nonlocal functions regardless of training data, while regularization merely discourages them.
 3.  **Common pitfall**: A frequent misconception is that stronger inductive bias is always better. A strong locality bias (CNN) excels on spatial data but fails to represent long-range dependencies in language, where a transformer's lack of spatial bias—at the cost of $O(N^2)$ memory scaling—is necessary to achieve state-of-the-art performance.
 
 :::
@@ -403,7 +403,7 @@ This table provides the quantitative justification for architecture selection: o
 
 from mlsysim import Hardware, Models
 from mlsysim.core.constants import (
-    A100_MEM_CAPACITY, BYTES_FP32, BYTES_FP16, param, Mparam, Bparam, Kparam, GFLOPs, MFLOPs, MB, GB, KB, GiB
+    A100_MEM_CAPACITY, H100_MEM_BW, BYTES_FP32, BYTES_FP16, param, Mparam, Bparam, Kparam, GFLOPs, MFLOPs, MB, GB, KB, GiB, TB, second
 )
 from mlsysim.fmt import fmt, check
 from mlsysim.core.formulas import model_memory
@@ -455,6 +455,7 @@ class LighthouseSpecs:
 
     # Step 7: Reference Hardware
     a100_mem_gib = hw_a100.memory_capacity.m_as(GiB)
+    h100_bw_tbs = H100_MEM_BW.m_as(TB/second)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     # Ensure numbers match the book's narrative
@@ -488,6 +489,7 @@ class LighthouseSpecs:
     kws_fp32_kb_str = fmt(kws_mem_kb, precision=0)
 
     a100_mem_str = fmt(a100_mem_gib, precision=0)
+    h100_bw_tbs_str = fmt(h100_bw_tbs, precision=2)
 
 class TransformerScaling:
     """
@@ -583,7 +585,7 @@ In practice, the UAT explains *why* MLPs succeed across diverse tasks while reve
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ MLP DIMENSIONALITY EXAMPLES
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Learnability gap\index{Learnability Gap} section illustrating sample complexity
+# │ Context: Learnability gap section illustrating sample complexity
 # │
 # │ Goal: Demonstrate the scalability limits of dense connections on image data.
 # │ Show: How input dimension explodes from 784 (MNIST) to 65K (256 × 256).
@@ -631,7 +633,7 @@ The UAT sounds definitive, yet a fundamental gap separates what MLPs can represe
 
 This distinction resolves what appears to be a paradox: if MLPs are universal approximators, *why* has architectural innovation (ResNets, transformers) driven deep learning progress? Specialized architectures improve learnability by embedding inductive biases that match data structure, even when doing so restricts representational capacity.
 
-Three factors create the learnability gap:
+Three factors create the *learnability gap*\index{Learnability Gap}:
 
 1. **Sample complexity**\index{Sample Complexity}: The UAT provides no bounds on training examples needed. For $28{\times}28$ images, an MLP treats `{python} MLPDim.mlp_28_dim_str` pixels independently, requiring exponentially many samples to learn spatial correlations. A CNN embeds locality bias, drastically reducing sample requirements. Mathematically, sample complexity can scale as $O(\exp(d))$ for MLPs but $O(\text{poly}(d))$ for architectures matching data structure.
 
@@ -1083,7 +1085,7 @@ class A100Specs:
 
 [^fn-dnn-blas]: **BLAS (Basic Linear Algebra Subprograms)**: This standard API for matrix operations enables the use of highly optimized libraries (for example, cuBLAS) to accelerate the 784 multiply-accumulates per neuron. These libraries are tuned for large, square matrices and hit an "efficiency cliff" with the $784{\times}100$ matrix of the MNIST example. This nonstandard shape fails to saturate the hardware's parallel compute units, yielding utilization far below the 80–95 percent of peak throughput achieved in larger transformer layers. \index{BLAS!neural networks}\index{BLAS!utilization}
 
-[^fn-tensor-cores]: **Tensor Cores**\index{Tensor Core!mixed precision}: Specialized units in NVIDIA GPUs that accelerate the thousands of multiply-accumulate operations described by fusing them into single, highly parallelized matrix instructions. Tensor Cores are most efficient when matrix dimensions meet datatype- and architecture-specific alignment multiples; modern cuBLAS/cuDNN can still use Tensor Cores for many nonaligned cases, often with lower efficiency or internal padding. On an A100 GPU, this creates a greater than 9$\times$ performance gap between the `{python} A100Specs.a100_tflops_fp16_str` TFLOPS from Tensor Cores and the `{python} A100Specs.a100_tflops_fp32_str` from standard CUDA cores. \index{Tensor Core!dimension constraints}
+[^fn-tensor-cores]: **Tensor Cores**\index{Tensor Core!mixed precision}: Specialized units in NVIDIA GPUs that accelerate the thousands of multiply-accumulate operations described by fusing them into single, highly parallelized matrix instructions. Tensor Cores are most efficient when matrix dimensions meet datatype- and architecture-specific alignment multiples; modern cuBLAS/cuDNN can still use Tensor Cores for many nonaligned cases, often with lower efficiency or internal padding. On an A100 GPU, this creates roughly a 16$\times$ performance gap between the `{python} A100Specs.a100_tflops_fp16_str` TFLOPS from Tensor Cores and the `{python} A100Specs.a100_tflops_fp32_str` from standard CUDA cores. \index{Tensor Core!dimension constraints}
 
 ### System implications {#sec-network-architectures-system-implications-0550}
 
@@ -1188,7 +1190,7 @@ Focusing on image processing to illustrate these principles, if we want to detec
 
 \index{AlexNet!ImageNet revolution}
 
-[^fn-imagenet-scale-nn]: **ImageNet**\index{ImageNet!scale}: The dataset that validated these two spatial processing requirements at scale. AlexNet's 2012 ILSVRC victory reduced top-5 error from 26.2 percent to 15.3 percent on the 1000-class ImageNet challenge with roughly 1.2 million training images; the broader ImageNet database contained more than 14 million images across over 20,000 synsets. The enduring systems lesson: every subsequent accuracy gain (VGG, ResNet, vision transformer (ViT)) required proportionally larger datasets and compute budgets, establishing the scaling relationship between architectural inductive bias and infrastructure cost. \index{ImageNet!systems consequence}
+[^fn-imagenet-scale-nn]: **ImageNet**\index{ImageNet!scale}: The dataset that validated these two spatial processing requirements at scale. AlexNet's 2012 victory in the ImageNet Large Scale Visual Recognition Challenge (ILSVRC) reduced top-5 error from 26.2 percent to 15.3 percent on the 1000-class ImageNet challenge with roughly 1.2 million training images; the broader ImageNet database contained more than 14 million images across over 20,000 synsets. The enduring systems lesson: every subsequent accuracy gain (VGG, ResNet, vision transformer (ViT)) required proportionally larger datasets and compute budgets, establishing the scaling relationship between architectural inductive bias and infrastructure cost. \index{ImageNet!systems consequence}
 
 ::: {#fig-cnn-spatial-processing fig-env="figure" fig-pos="htb" fig-cap="**Spatial Feature Extraction**: Convolutional neural networks identify patterns independent of their location in an image by applying learnable filters across the input, enabling robust object recognition. These filters detect local features, and their repeated application across the image creates translation equivariance, preserving spatial relationships between detected patterns regardless of position." fig-alt="Hierarchical CNN feature extraction pipeline. Left: zebra image with a red kernel box highlighting a local receptive field. Center: stacked feature-map channels growing in depth from three to eleven across successive convolutional stages. Right: three columns of violet circles representing fully-connected layers. Illustrates compositional pattern detection from local features to global object recognition."}
 
@@ -1644,9 +1646,7 @@ The preceding architectural properties make CNNs highly amenable to systems-leve
 
 ::: {.callout-lighthouse title="ResNet-50 (vision lighthouse)"}
 
-**Why it matters**: ResNet-50 is the gold standard benchmark for compute-bound vision workloads. Its architecture consists almost entirely of dense convolutional layers, making it highly regular and efficient on GPUs. Unlike MobileNet (latency-bound) or transformers (memory bound), ResNet-50's performance is typically limited by raw floating-point throughput (FLOPs), making it the ideal lighthouse for explaining data parallelism, quantization, and batching strategies.
-
-::: {tbl-colwidths="[17,30,53]"}
+**Why it matters**: ResNet-50 is the gold standard benchmark for compute-bound vision workloads. Its architecture consists almost entirely of dense convolutional layers, making it highly regular and efficient on GPUs. Unlike MobileNet (latency-bound) or transformers (memory bound), ResNet-50's performance is typically limited by raw floating-point throughput (FLOPs), making it the ideal lighthouse for explaining data parallelism, quantization, and batching strategies. @tbl-nn-architectures-resnet50-profile summarizes the quantitative properties and their system consequences:
 
 | **Property**    | **Value**                                                              | **System Implication**                                                                               |
 |:----------------|:-----------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------|
@@ -1656,7 +1656,8 @@ The preceding architectural properties make CNNs highly amenable to systems-leve
 | **Bottleneck**  | FP Throughput                                                          | Benefits maximally from specialized Matrix Units (Tensor Cores).                                     |
 | **Profile**     | High Arithmetic Intensity                                              | High ratio of math-to-memory operations (~100 FLOPs/byte).                                           |
 
-:::
+: **ResNet-50 Systems Profile**: Quantitative properties of the vision lighthouse and their system consequences. High arithmetic intensity (about 100 FLOPs/byte) places ResNet-50 firmly in the compute-bound regime, where raw FP throughput on Tensor Cores -- not memory bandwidth -- sets the ceiling. {#tbl-nn-architectures-resnet50-profile tbl-colwidths="[17,30,53]"}
+
 :::
 
 ResNet-50's compute-bound profile assumes abundant hardware resources, yet the deployment target may be a smartphone rather than a data center GPU. At the opposite end of the efficiency spectrum, MobileNet demonstrates that architectural innovation can achieve similar accuracy with a fraction of the computational cost.
@@ -1665,9 +1666,7 @@ ResNet-50's compute-bound profile assumes abundant hardware resources, yet the d
 
 ::: {.callout-lighthouse title="MobileNet (efficiency lighthouse)"}
 
-**Why it matters**: MobileNet represents **latency-constrained** edge workloads. Its depthwise separable convolutions trade channel mixing capacity for speed, making it the standard baseline for mobile apps, embedded vision, and neural architecture search (NAS).
-
-::: {tbl-colwidths="[17,30,53]"}
+**Why it matters**: MobileNet represents **latency-constrained** edge workloads. Its depthwise separable convolutions trade channel mixing capacity for speed, making it the standard baseline for mobile apps, embedded vision, and neural architecture search (NAS). @tbl-nn-architectures-mobilenet-profile summarizes the efficiency lighthouse's quantitative properties:
 
 | **Property**    | **Value**                                                 | **System Implication**                                                                                                                           |
 |:----------------|:----------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1677,7 +1676,7 @@ ResNet-50's compute-bound profile assumes abundant hardware resources, yet the d
 | **Bottleneck**  | Overhead/Serial Ops                                       | Kernel launch overhead often dominates actual compute.                                                                                           |
 | **Profile**     | Low Arithmetic Intensity                                  | Memory access and control logic matter more than raw FLOPs.                                                                                      |
 
-:::
+: **MobileNet Systems Profile**: Quantitative properties of the efficiency lighthouse and their system consequences. Roughly an order of magnitude smaller than ResNet-50 in both parameters and FLOPs, MobileNet's low arithmetic intensity makes single-image latency -- driven by kernel-launch overhead and memory access -- the binding constraint on mobile CPUs. {#tbl-nn-architectures-mobilenet-profile tbl-colwidths="[17,30,53]"}
 
 :::
 
@@ -1845,11 +1844,11 @@ The sliding window and im2col transformations described earlier reveal *how* CNN
 # │ Show: 576 weights (3×3×1×64), 3.2M activations (224×224×64), 50,176 positions.
 # │ How:  Direct multiplication of kernel, channel, and spatial dimensions.
 # │
-# │ Imports: mlsysim.core.constants (IMAGE_DIM_RESNET), mlsysim.book (fmt, check)
+# │ Imports: mlsysim.core.constants (IMAGE_DIM_RESNET, MILLION), mlsysim.book (fmt, check)
 # │ Exports: cnn_weights_single_ch_str, cnn_spatial_positions_str, cnn_activations_m_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.core.constants import IMAGE_DIM_RESNET
+from mlsysim.core.constants import IMAGE_DIM_RESNET, MILLION
 from mlsysim.fmt import fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -1886,7 +1885,7 @@ class CNNSysImpl:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     weights_single_ch_str = fmt(weights_single_ch, precision=0, commas=True)
     spatial_positions_str = fmt(spatial_positions, precision=0, commas=True)
-    activations_str = fmt(activations / 1e6, precision=1)       # "3.2" (millions)
+    activations_str = fmt(activations / MILLION, precision=1)   # "3.2" (millions)
 ```
 
 #### Memory requirements {#sec-network-architectures-memory-requirements-a1a1}
@@ -1945,9 +1944,9 @@ The assumption of sequential dependence guides the introduction of memory as a c
 
 ***Recurrent Neural Networks (RNNs)***\index{RNN!definition} are sequence-processing architectures that maintain a hidden state $h_t = f(h_{t-1}, x_t)$ updated at each time step, encoding the assumption that the current output depends on all prior inputs through this fixed-size state vector.
 
-1.  **Significance (quantitative)**: The fixed-size state provides $O(1)$ inference memory regardless of sequence length—processing a 10,000-token sequence requires the same memory as a 10-token sequence—but the sequential update rule creates a sequential bottleneck where all $T$ steps must execute in order, directly contributing to the $L_{\text{lat}}$ term of the iron law and making RNNs unable to exploit GPU parallelism across the time dimension during training.
+1.  **Significance (quantitative)**: The fixed-size state provides $O(1)$ inference memory regardless of sequence length (processing a 10,000-token sequence requires the same memory as a 10-token sequence), but the sequential update rule creates a sequential bottleneck where all $T$ steps must execute in order, directly contributing to the $L_{\text{lat}}$ term of the iron law and making RNNs unable to exploit GPU parallelism across the time dimension during training.
 2.  **Distinction (durable)**: Unlike Attention Mechanisms, which access the entire token history simultaneously with $O(N^2)$ memory cost, RNNs compress history into a bottleneck state, meaning gradient signal must propagate back through all $T$ steps—causing $\partial \mathcal{L} / \partial h_0 \propto \prod_{t=1}^{T} \partial h_t / \partial h_{t-1}$, a product of $T$ Jacobians that vanishes or explodes exponentially with sequence length.
-3.  **Common pitfall**: A frequent misconception is that RNNs are obsolete. For streaming inference on resource-constrained hardware where $O(N^2)$ attention memory is prohibitive—such as keyword spotting on a microcontroller—an RNN's $O(1)$ state size remains the systems-justified choice.
+3.  **Common pitfall**: A frequent misconception is that RNNs are obsolete. For streaming inference on resource-constrained hardware where $O(N^2)$ attention memory is prohibitive, such as keyword spotting on a microcontroller, an RNN's $O(1)$ state size remains the systems-justified choice.
 
 :::
 
@@ -1967,7 +1966,7 @@ $$
 $$ {#eq-rnn}
 where $\mathbf{h}_t$ denotes the hidden state at time $t$, $\mathbf{x}_t$ denotes the input at time $t$, $\mathbf{W}_{\text{hh}}$ contains the recurrent weights, and $\mathbf{W}_{\text{hx}}$ contains the input weights. Compare the left and right panels of @fig-rnn: the left panel shows the compact recurrent loop, while the right panel unfolds it across time steps, making explicit the temporal dependencies that this recurrence creates.
 
-::: {#fig-rnn fig-env="figure" fig-pos="htb" fig-cap="**Recurrent Neural Network Unfolding**: Left panel shows the compact recurrent loop; right panel unfolds this across time steps. Three weight matrices are shared across all steps: $W_{\text{xh}}$ (input-to-hidden), $W_{\text{hh}}$ (hidden-to-hidden), and $W_{\text{hy}}$ (hidden-to-output). This weight sharing keeps parameter count constant at $O(h^2)$ regardless of sequence length. For a 128-dimensional hidden state, each time step requires 16,384 MACs for recurrent connections plus 12,800 for input projection." fig-alt="Left: single green hidden node with self-loop labeled W_hh. Right: unfolded across 3 time steps showing purple inputs x_t, green hidden states h_t, and orange outputs y_t. Arrows labeled W_hx, W_hh, W_yh show shared weights across all steps."}
+::: {#fig-rnn fig-env="figure" fig-pos="htb" fig-cap="**Recurrent Neural Network Unfolding**: Left panel shows the compact recurrent loop; right panel unfolds this across time steps. Three weight matrices are shared across all steps: $W_{\text{hx}}$ (input-to-hidden), $W_{\text{hh}}$ (hidden-to-hidden), and $W_{\text{yh}}$ (hidden-to-output). This weight sharing keeps parameter count constant at $O(h^2)$ regardless of sequence length. For a 128-dimensional hidden state, each time step requires 16,384 MACs for recurrent connections plus 12,800 for input projection." fig-alt="Left: single green hidden node with self-loop labeled W_hh. Right: unfolded across 3 time steps showing purple inputs x_t, green hidden states h_t, and orange outputs y_t. Arrows labeled W_hx, W_hh, W_yh show shared weights across all steps."}
 
 ```{.tikz}
  \begin{tikzpicture}[line join=round,font=\large\usefont{T1}{phv}{m}{n}]
@@ -2051,7 +2050,7 @@ This recurrent structure fulfills sequential processing requirements through con
 RNNs implement a recursive algorithm where each time step's function call depends on the result of the previous call. Analogous to recursive functions that maintain state through the call stack, RNNs maintain state through their hidden vectors. The mathematical formula $\mathbf{h}_t = f(\mathbf{h}_{t-1}, \mathbf{x}_t)$ directly parallels recursive function definitions where `f(n) = g(f(n-1), input(n))`. This correspondence explains RNN capacity to handle variable-length sequences: just as recursive algorithms process lists of arbitrary length by applying the same function recursively, RNNs process sequences of any length by applying the same recurrent computation.
 
 \index{Backpropagation!through time (bptt)}
-Sequential processing creates computational bottlenecks but produces unique efficiency characteristics for memory usage. RNNs' $O(h)$ inference memory overhead—analyzed in detail in the following System Implications section—creates a distinctive advantage over transformers' $O(N^2)$ scaling, allowing processing of sequences thousands of steps long on modest hardware. During training with backpropagation through time (BPTT), however, RNNs must store activations for all time steps, requiring $O(S \cdot h)$ memory.
+Sequential processing creates computational bottlenecks but produces unique efficiency characteristics for memory usage. RNNs' $O(h)$ inference memory overhead (analyzed in detail in the following System Implications section) creates a distinctive advantage over transformers' $O(N^2)$ scaling, allowing processing of sequences thousands of steps long on modest hardware. During training with backpropagation through time (BPTT), however, RNNs must store activations for all time steps, requiring $O(S \cdot h)$ memory.
 
 The recurrent weight matrix often contains connections with minimal contribution to temporal dependencies, allowing significant compression through methods covered in @sec-model-compression.
 
@@ -2194,7 +2193,7 @@ Attention mechanisms[^fn-bahdanau-attention] address precisely this challenge [@
 
 ***Attention Mechanisms***\index{Attention Mechanism!definition} are neural network operations that compute a weighted sum of value vectors, where the weights are derived from learned similarity scores between a query vector and a set of key vectors, enabling dynamic, content-dependent information routing between any two positions in a sequence.
 
-1.  **Significance (quantitative)**: Attention connects any two tokens in $O(1)$ depth, but the similarity matrix requires $O(N^2)$ memory: for a 4,096-token sequence with 16-bit scores, the attention matrix alone consumes $4096^2 \times 2 \approx 32$ MB per layer per head—a direct contribution to the $D_{\text{vol}}$ and $\text{BW}$ terms of the iron law that ultimately caps practical context window length.
+1.  **Significance (quantitative)**: Attention connects any two tokens in $O(1)$ depth, but the similarity matrix requires $O(N^2)$ memory: for a 4,096-token sequence with 16-bit scores, the attention matrix alone consumes $4096^2 \times 2 \approx 32$ MB per layer per head, a direct contribution to the $D_{\text{vol}}$ and $\text{BW}$ terms of the iron law that ultimately caps practical context window length.
 2.  **Distinction (durable)**: Unlike RNNs, which compress all prior context into a single fixed-size state vector, attention mechanisms retain token representations and compute relevance scores directly. During training or full-sequence prefill, this creates $O(N^2)$ score interactions; during autoregressive serving, the stored KV cache grows as $O(Nd)$ while each new token attends over prior keys and values.
 3.  **Common pitfall**: A frequent misconception is that attention is a general-purpose weighting scheme that can be applied freely. The $O(N^2)$ memory growth is a hard physical constraint: doubling the context window quadruples the attention memory, which is why FlashAttention and sparse attention variants exist—they recompute rather than store the attention matrix to break this memory wall.
 
@@ -2713,7 +2712,7 @@ class AttentionMemory:
     # Step 2: Memory
     single_layer_bytes = elements * bytes_per_element
     # Step 3: We want GB (10^9) not GiB (2^30) for "standard" model size quotes
-    single_layer_gb = (single_layer_bytes / 1e9)
+    single_layer_gb = (single_layer_bytes * byte).m_as(GB)
     total_gb = single_layer_gb * num_layers
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -2735,7 +2734,7 @@ class AttentionMemory:
 
 ::: {.callout-notebook title="The quadratic bottleneck"}
 
-**Problem**: How much memory does the attention matrix\index{Attention Mechanism!quadratic bottleneck ($O(N^2)$)} of a single layer require at sequence length N = `{python} AttentionMemory.seq_len_str` (context window)?
+**Problem**: How much memory does the attention matrix\index{Attention Mechanism!quadratic bottleneck} of a single layer require at sequence length N = `{python} AttentionMemory.seq_len_str` (context window)?
 
 **Math**:
 
@@ -2746,8 +2745,8 @@ class AttentionMemory:
 **Systems conclusion**: A single layer's attention matrix consumes **`{python} AttentionMemory.single_layer_gb_str` GB** of HBM. A `{python} AttentionMemory.num_layers_str`-layer model would require **`{python} AttentionMemory.total_gb_str` GB** just for transient attention scores, far exceeding any single GPU's capacity.
 This AI memory wall, introduced in @sec-hardware-acceleration-understanding-ai-memory-wall-3ea9, forces the use of:
 
-*   **FlashAttention** (tiling to avoid materializing the full matrix).\index{FlashAttention!tiling strategy}
-*   **Sparse Attention** (computing only a subset of scores).\index{Attention!sparse}
+*   **FlashAttention**\index{FlashAttention!tiling strategy} (tiling to avoid materializing the full matrix).
+*   **Sparse Attention**\index{Attention!sparse} (computing only a subset of scores).
 
 :::
 
@@ -3017,19 +3016,17 @@ The preceding self-attention implementation shows how transformers process entir
 
 ::: {.callout-lighthouse title="GPT-2 XL (bandwidth lighthouse)"}
 
-**Why it matters**: GPT-2 XL exemplifies **memory-bandwidth-bound** workloads. During autoregressive inference, the model must load all `{python} LighthouseSpecs.gpt2_fp32_gb_str` GB of FP32 weights from HBM for *every generated token*, while performing only a single matrix-vector multiply per layer. The arithmetic intensity is about 0.5 FLOPs/byte with FP32 weights in @tbl-workload-signatures, or about 1 FLOP/byte with FP16 weights, leaving compute cores idle while waiting for memory. This contrasts with ResNet-50 (compute bound, high weight reuse) and DLRM (capacity-bound, random access).
+**Why it matters**: GPT-2 XL exemplifies **memory-bandwidth-bound** workloads. During autoregressive inference, the model must load all `{python} LighthouseSpecs.gpt2_fp32_gb_str` GB of FP32 weights from HBM for *every generated token*, while performing only a single matrix-vector multiply per layer. The arithmetic intensity is about 0.5 FLOPs/byte with FP32 weights in @tbl-workload-signatures, or about 1 FLOP/byte with FP16 weights, leaving compute cores idle while waiting for memory. This contrasts with ResNet-50 (compute bound, high weight reuse) and DLRM (capacity-bound, random access). @tbl-nn-architectures-gpt2-profile summarizes the bandwidth lighthouse's quantitative properties:
 
-::: {tbl-colwidths="[12,30,58]"}
+| **Property**   | **Value**                                                         | **System Implication**                                                                                    |
+|:---------------|:------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------|
+| **Parameters** | `{python} LighthouseSpecs.gpt2_params_b_str` Billion              | Weight loading dominates inference latency.                                                               |
+| **Model Size** | `{python} LighthouseSpecs.gpt2_fp32_gb_str` GB (FP32)             | Fits on one GPU but saturates HBM bandwidth.                                                              |
+| **Compute**    | `{python} LighthouseSpecs.gpt2_gflops_per_token_str` GFLOPs/token | Low per-token compute; bottleneck is data movement, not math.                                             |
+| **Constraint** | Memory Bandwidth                                                  | Tokens/sec $\propto$ HBM bandwidth (for example, H100's `{python} LighthouseSpecs.h100_bw_tbs_str` TB/s). |
+| **Profile**    | Bandwidth-Bound (inference)                                       | Training is compute bound; inference is bandwidth bound.                                                  |
 
-| **Property**   | **Value**                                                         | **System Implication**                                           |
-|:---------------|:------------------------------------------------------------------|:-----------------------------------------------------------------|
-| **Parameters** | `{python} LighthouseSpecs.gpt2_params_b_str` Billion              | Weight loading dominates inference latency.                      |
-| **Model Size** | `{python} LighthouseSpecs.gpt2_fp32_gb_str` GB (FP32)             | Fits on one GPU but saturates HBM bandwidth.                     |
-| **Compute**    | `{python} LighthouseSpecs.gpt2_gflops_per_token_str` GFLOPs/token | Low per-token compute; bottleneck is data movement, not math.    |
-| **Constraint** | Memory Bandwidth                                                  | Tokens/sec $\propto$ HBM bandwidth (for example, H100's 3 TB/s). |
-| **Profile**    | Bandwidth-Bound (inference)                                       | Training is compute bound; inference is bandwidth bound.         |
-
-:::
+: **GPT-2 XL Systems Profile**: Quantitative properties of the bandwidth lighthouse and their system consequences. Autoregressive decoding reloads the full weight set per token at roughly 0.5--1 FLOP per byte, so generation throughput tracks HBM bandwidth almost linearly while compute units sit underutilized. {#tbl-nn-architectures-gpt2-profile tbl-colwidths="[12,30,58]"}
 
 :::
 
@@ -3050,7 +3047,7 @@ Inference is autoregressive (generating one token at a time) and typically *memo
 3.  Read/Write the KV Cache\index{KV Cache}.
 
 \index{KV Cache!linear growth}
-The **KV Cache**[^fn-kv-cache-depth] grows linearly with sequence length ($O(N \cdot d)$, distinct from the $O(N^2)$ attention score matrix during training), storing the Key and Value vectors for all previous tokens to avoid recomputing them. For long contexts, this cache becomes massive (for example, 100+ GB), forcing the system to fetch the full cache from HBM for every generated token. As the GPT-2 Lighthouse quantified earlier, the arithmetic intensity is about 0.5 FLOPs/byte with FP32 weights or about 1 FLOP/byte with FP16 weights, explaining why serving LLMs requires massive HBM bandwidth (for example, H100's 3 TB/s) rather than raw FLOPS.
+The **KV Cache**[^fn-kv-cache-depth] grows linearly with sequence length ($O(N \cdot d)$, distinct from the $O(N^2)$ attention score matrix during training), storing the Key and Value vectors for all previous tokens to avoid recomputing them. For long contexts, this cache becomes massive (for example, 100+ GB), forcing the system to fetch the full cache from HBM for every generated token. As the GPT-2 Lighthouse quantified earlier, the arithmetic intensity is about 0.5 FLOPs/byte with FP32 weights or about 1 FLOP/byte with FP16 weights, explaining why serving LLMs requires massive HBM bandwidth (for example, H100's `{python} LighthouseSpecs.h100_bw_tbs_str` TB/s) rather than raw FLOPS.
 
 [^fn-kv-cache-depth]: **KV Cache Memory Scaling**: For a 7B-parameter transformer in FP16, model weights consume ~14 GB. A single concurrent request's KV cache requires: 32 layers × 2 (K,V) × 32 heads × 2048 tokens × 128-dim head × 2 bytes ≈ 1.07 GB. At 8 concurrent users, KV cache alone (~8.6 GB) rivals the model weights—and grows linearly with both context length and concurrent users. Scaling serving throughput therefore requires grouped-query attention (fewer KV heads), shorter context windows, or KV offloading strategies. This is a memory systems constraint, not a model quality trade-off: the model is identical regardless of which memory strategy is chosen. \index{KV Cache!memory scaling}
 
@@ -3072,13 +3069,14 @@ Despite these computational costs, the effectiveness of attention has driven sus
 # │ Show: Step plot; log-scale y; model annotations; era labels.
 # │ How: Hardcoded (year, tokens, model) data; ax.step; viz.setup_plot().
 # │
-# │ Imports: numpy (np), mlsysim.core.viz (viz)
+# │ Imports: numpy (np), mlsysim.core.viz (viz), mlsysim.core.constants (THOUSAND)
 # │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
 # │ Plot context window growth from BERT (512) to Gemini 1.5 (1M+);
 import numpy as np
 from mlsysim import viz
+from mlsysim.core.constants import THOUSAND
 
 fig, ax, COLORS, plt = viz.setup_plot(figsize=(10, 5))
 
@@ -3151,7 +3149,7 @@ for y, c, l in zip(years, context, labels):
     style = default_label_style.copy()
     style.update(label_styles.get(l, {}))
 
-    c_label = f"{int(c/1000)}k" if c >= 1000 else f"{c/1000:.1f}k"
+    c_label = f"{int(c/THOUSAND)}k" if c >= THOUSAND else f"{c/THOUSAND:.1f}k"
 
     ax.annotate(
         f"{l} ({c_label})",
@@ -3254,7 +3252,7 @@ class DLRMEmbedding:
 # Note: Use DLRMEmbedding.embed_table_gb_str directly.
 ```
 
-2.  **Sparse Features (Embedding Tables)**\index{Embedding!table}**:** Categorical features (User ID, Item ID) are looked up in massive embedding tables. A table for one billion users with 128-dimensional vectors requires $10^9 \times 128 \times 4$ bytes ≈ `{python} DLRMEmbedding.embed_table_gb_str` GB of memory. This component is memory-intensive but compute-light (a single memory copy).
+2.  **Sparse Features (Embedding Tables)**\index{Embedding!table}: Categorical features (User ID, Item ID) are looked up in massive embedding tables. A table for one billion users with 128-dimensional vectors requires $10^9 \times 128 \times 4$ bytes ≈ `{python} DLRMEmbedding.embed_table_gb_str` GB of memory. This component is memory-intensive but compute-light (a single memory copy).
 \index{DLRM!interaction layer}
 3.  **Interaction layer**: The dense vectors from the MLP and the sparse vectors from embeddings are combined (typically via dot products) to capture interactions between user and item features.
 4.  **Top MLP**: The combined features are processed by another MLP to produce a final probability (for example, click-through rate).
@@ -3263,9 +3261,7 @@ This combination of dense and sparse computation makes *DLRM* the chapter's *rec
 
 ::: {.callout-lighthouse title="DLRM (recommendation lighthouse)"}
 
-**Why it matters**: DLRM exemplifies **memory-capacity-bound** workloads. Its massive embedding tables often exceed the memory of a single GPU, forcing **model parallelism** (sharding tables across devices). The interaction layer requires **all-to-all communication**, stressing network bandwidth. This contrasts sharply with CNNs (compute bound) and transformers (memory-bandwidth bound), requiring different hardware optimizations.
-
-::: {tbl-colwidths="[18,24,58]"}
+**Why it matters**: DLRM exemplifies **memory-capacity-bound** workloads. Its massive embedding tables often exceed the memory of a single GPU, forcing **model parallelism** (sharding tables across devices). The interaction layer requires **all-to-all communication**, stressing network bandwidth. This contrasts sharply with CNNs (compute bound) and transformers (memory-bandwidth bound), requiring different hardware optimizations. @tbl-nn-architectures-dlrm-profile summarizes the recommendation lighthouse's quantitative properties:
 
 | **Property**         | **Value**                                                   | **System Implication**                                                     |
 |:---------------------|:------------------------------------------------------------|:---------------------------------------------------------------------------|
@@ -3275,7 +3271,7 @@ This combination of dense and sparse computation makes *DLRM* the chapter's *rec
 | **Bottleneck**       | Network Bandwidth                                           | "All-to-All" communication required to gather embeddings.                  |
 | **Profile**          | Mixed (Sparse/Dense)                                        | Combines memory-heavy lookups with compute-heavy MLPs.                     |
 
-:::
+: **DLRM Systems Profile**: Quantitative properties of the recommendation lighthouse and their system consequences. Billion-entry embedding tables push the model past single-GPU memory, forcing embedding sharding and all-to-all communication -- a capacity- and network-bound regime the iron law does not directly address. {#tbl-nn-architectures-dlrm-profile tbl-colwidths="[18,24,58]"}
 
 :::
 
@@ -3373,7 +3369,7 @@ Recommendation systems stress a different part of the machine than CNNs or trans
 
 :::
 
-The five architecture families examined earlier (MLPs, CNNs, RNNs, transformers, DLRMs) appear to differ fundamentally, yet they share a striking convergence: many modern deep variants reuse a small set of primitives such as dense projections, normalization, skip connections, and gating. Every transformer block contains a feedforward MLP, and gating, invented for RNNs, reappears in mixture-of-experts routing. These building blocks are portable: they originated in one architecture family but migrated broadly because the problems they solve—gradient flow, activation stability, signal routing—recur across data types and inductive biases. For systems engineers, this portability is critical because it reveals which hardware optimizations transfer across workloads and which remain architecture-specific.
+The five architecture families examined earlier (MLPs, CNNs, RNNs, transformers, DLRMs) appear to differ fundamentally, yet they share a striking convergence: many modern deep variants reuse a small set of primitives such as dense projections, normalization, skip connections, and gating. Every transformer block contains a feedforward MLP, and gating, invented for RNNs, reappears in mixture-of-experts routing. These building blocks are portable: they originated in one architecture family but migrated broadly because the problems they solve (gradient flow, activation stability, signal routing) recur across data types and inductive biases. For systems engineers, this portability is critical because it reveals which hardware optimizations transfer across workloads and which remain architecture-specific.
 
 \index{Gating Mechanism}
 \index{MoE}
@@ -4326,9 +4322,9 @@ The complexity patterns detailed in each architecture's System Implications sect
 
 Effective architecture selection requires balancing multiple competing factors: data characteristics, computational resources, performance requirements, and deployment constraints. In practice, teams often make this choice based on familiarity ("we always use transformers") or trend-following ("the latest papers use X"), leading to architectures that are either overpowered for the problem (wasting resources) or underpowered (failing to meet requirements). While data patterns provide initial guidance and complexity analysis establishes feasibility bounds, final architectural choices often involve nuanced trade-offs demanding systematic evaluation.
 
-The decision flowchart in @fig-dnn-fm-framework proceeds from top to bottom: identify the data type, follow the branches to candidate dense architectures, then check each constraint diamond. For high-cardinality recommendation workloads, route first to the sparse embedding/DLRM family described earlier, then apply the same memory, compute, speed, accuracy, and deployment checks. If any check fails, the "No" path loops back for reconsideration. This iterative structure ensures consideration of all relevant factors while avoiding selection based on novelty or perceived sophistication.
+The decision flowchart in @fig-dnn-fm-framework proceeds from top to bottom: identify the data type, follow the branches to candidate dense architectures (Transformers, RNNs, CNNs, or MLPs), then check each constraint diamond. High-cardinality recommendation workloads sit outside this flowchart: route them to the sparse embedding/DLRM family described earlier, then apply the same memory, compute, speed, accuracy, and deployment checks. If any check fails, the "No" path loops back for reconsideration. This iterative structure ensures consideration of all relevant factors while avoiding selection based on novelty or perceived sophistication.
 
-::: {#fig-dnn-fm-framework fig-env="figure" fig-pos="htb" fig-cap="**Architecture Selection Decision Framework**: A systematic flowchart for choosing dense neural network architectures based on data characteristics and deployment constraints. High-cardinality recommendation workloads route to sparse embedding architectures such as DLRM before applying the same constraint checks. The process begins with data type identification (text/sequences/images/tabular) to select initial architecture candidates (Transformers/RNNs/CNNs/MLPs), then iteratively evaluates memory budget, computational cost, inference speed, accuracy targets, and hardware compatibility." fig-alt="Flowchart from Define Problem, branching by data type to Transformers, RNNs, CNNs, MLPs. For high-cardinality recommendation data, use sparse embedding architectures such as DLRM before applying the same checks. Diamonds check memory, compute, speed, accuracy, deployment. Each No loops back via Scale Down or Increase Capacity; each Yes reaches Selected."}
+::: {#fig-dnn-fm-framework fig-env="figure" fig-pos="htb" fig-cap="**Architecture Selection Decision Framework**: A systematic flowchart for choosing dense neural network architectures based on data characteristics and deployment constraints. The process begins with data type identification (text/sequences/images/tabular) to select initial architecture candidates (Transformers/RNNs/CNNs/MLPs), then iteratively evaluates memory budget, computational cost, inference speed, accuracy targets, and hardware compatibility. High-cardinality recommendation workloads are handled separately by the sparse-embedding family (DLRM) discussed earlier in the chapter, then re-enter the same constraint checks." fig-alt="Flowchart from Define Problem, branching by data type to Transformers, RNNs, CNNs, MLPs. Diamonds check memory, compute, speed, accuracy, deployment. Each No loops back via Scale Down or Increase Capacity; each Yes reaches Selected."}
 
 ```{.tikz}
 \scalebox{0.7}{\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
@@ -4572,7 +4568,7 @@ The input is spatial data (images from camera traps, typically $1920{\times}1080
 
 **Initial architecture candidate**: CNN (matches spatial locality and translation invariance)
 
-**Step 2**: Constraint analysis.
+**Step 2**: Constraint analysis. @tbl-nn-architectures-wildlife-constraints catalogs the five deployment constraints and the architectural choices each forces:
 
 ::: {.content-visible when-format="html"}
 | **Constraint**   | **Requirement**                | **Implication**                                    |
@@ -4582,6 +4578,8 @@ The input is spatial data (images from camera traps, typically $1920{\times}1080
 | **Latency**      | <500 ms per detection          | Allows batch size 1, no real-time streaming        |
 | **Memory**       | 512 MB RAM, 2 GB storage       | Model must fit in ~100 MB after quantization       |
 | **Accuracy**     | 90 percent+ on 50 species      | Requires sufficient model capacity                 |
+
+: **Wildlife Monitoring Constraints**: Five deployment constraints and the architectural choices they force for the camera-trap scenario. Each row eliminates a class of solutions: no connectivity rules out the cloud, the 2 W power envelope rules out GPUs, and the 100 MB memory budget forces aggressive quantization before any model search begins. {#tbl-nn-architectures-wildlife-constraints tbl-colwidths="[20,35,45]"}
 
 :::
 
@@ -4633,14 +4631,16 @@ $$\frac{150 \text{ MOPs}}{2 \text{ GOPS}} = 75 \text{ ms latency} \ll 500 \text{
 Estimated inference power: ~200 mW for 75 ms = `{python} WildlifeModelSizing.energy_mj_str` mJ per inference
 At 100 inferences/day: `{python} WildlifeModelSizing.energy_j_str` J/day → negligible vs. sleep power budget $\checkmark$
 
-**Step 5**: Risk assessment.
+**Step 5**: Risk assessment. @tbl-nn-architectures-wildlife-risks pairs the top accuracy, thermal, and species-coverage risks with the engineering mitigation chosen for each:
 
 ::: {.content-visible when-format="html"}
 | **Risk**                             | **Mitigation**                                                                   |
 |:-------------------------------------|:---------------------------------------------------------------------------------|
 | **90 percent accuracy not achieved** | Train on augmented dataset; consider EfficientNet-Lite if MobileNet insufficient |
 | **Thermal throttling in enclosure**  | Add passive heatsink; reduce inference frequency in high-temperature conditions  |
-| **New species added postdeployment** | Reserve 10 percent model capacity; plan for OTA update mechanism                 |
+| **New species added postdeployment** | Reserve 10 percent model capacity; plan for over-the-air (OTA) update mechanism  |
+
+: **Wildlife Camera Deployment Risks**: Top accuracy, thermal, and species-coverage risks for the MobileNetV2 deployment, paired with the engineering mitigation chosen for each. {#tbl-nn-architectures-wildlife-risks}
 
 :::
 
@@ -4653,7 +4653,7 @@ At 100 inferences/day: `{python} WildlifeModelSizing.energy_j_str` J/day → neg
 \midrule
 \textbf{90 percent accuracy not achieved} & Train on augmented dataset; consider EfficientNet-Lite if MobileNet insufficient \\
 \textbf{Thermal throttling in enclosure} & Add passive heatsink; reduce inference frequency in high-temperature conditions \\
-\textbf{New species added postdeployment} & Reserve 10 percent model capacity; plan for OTA update mechanism \\
+\textbf{New species added postdeployment} & Reserve 10 percent model capacity; plan for over-the-air (OTA) update mechanism \\
 \bottomrule
 \end{tabular}
 \end{center}

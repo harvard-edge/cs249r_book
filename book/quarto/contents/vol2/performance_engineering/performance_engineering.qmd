@@ -118,7 +118,7 @@ Verify your understanding of system-level performance diagnosis:
 
 :::
 
-::: {#fig-iron-law-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Iron Law Diagnostic Flowchart**: The optimization process begins with profiling to determine which term in @eq-iron-law-perf dominates. If the workload is compute-bound, precision engineering or algorithmic changes reduce the numerator. If memory-bound, operator fusion and tiling reduce HBM traffic. If overhead-bound, graph compilation and communication overlap attack the residual term. Applying the wrong technique yields zero improvement." fig-alt="Flowchart starting with Profile Workload, branching to Compute Bound, Memory Bound, or Overhead Bound, each leading to specific optimization techniques."}
+::: {#fig-iron-law-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Iron Law Diagnostic Flowchart**: A training-slow-down troubleshooting flow that starts from observed symptoms (slow training, low GPU utilization), branches through I/O, CPU, and communication-overhead checks, and classifies the workload as compute-bound or memory-bound at the leaves. Compute-bound paths point to precision engineering and algorithmic change; memory-bound paths point to operator fusion and tiling. Overhead-bound symptoms (graph dispatch, communication) are surfaced earlier in the flow and addressed before the final compute/memory classification." fig-alt="Troubleshooting flowchart starting from 'Training is slow', branching through GPU-utilization, I/O, CPU, and communication checks, with two terminal labels: Compute Bound and Memory Bound."}
 
 ![](images/svg/diagnostic-flow.svg)
 
@@ -167,16 +167,16 @@ The efficiency frontier establishes what we are optimizing *toward*. The physics
 # │ How: pulling constants from mlsysim.core.constants.
 # │
 # │ Imports: mlsysim.core.constants (H100_FLOPS_FP8_TENSOR, H100_MEM_BW,
-# │          H100_MEM_CAPACITY, ENERGY_DRAM_ACCESS_PJ, ENERGY_SRAM_L1_PJ,
-# │          TFLOPs, TB, GiB, second, flop, byte)
+# │          H100_MEM_CAPACITY, H100_TDP, ENERGY_DRAM_ACCESS_PJ, ENERGY_SRAM_L1_PJ,
+# │          TFLOPs, TB, GiB, second, flop, byte, watt)
 # │ Exports: MemoryWallScenario.h100_fp8_str, MemoryWallScenario.h100_hbm_bw_str,
 # │          MemoryWallScenario.h100_ridge_fp8_str, MemoryWallScenario.energy_ratio_str,
-# │          MemoryWallScenario.h100_mem_str
+# │          MemoryWallScenario.h100_mem_str, MemoryWallScenario.h100_tdp_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.constants import (
-    H100_FLOPS_FP8_TENSOR, H100_MEM_BW, H100_MEM_CAPACITY,
+    H100_FLOPS_FP8_TENSOR, H100_MEM_BW, H100_MEM_CAPACITY, H100_TDP,
     ENERGY_DRAM_ACCESS_PJ, ENERGY_SRAM_L1_PJ,
-    TFLOPs, TB, GiB, second, flop, byte
+    TFLOPs, TB, GiB, second, flop, byte, watt
 )
 
 class MemoryWallScenario:
@@ -186,6 +186,7 @@ class MemoryWallScenario:
     flops_fp8 = H100_FLOPS_FP8_TENSOR
     bw = H100_MEM_BW
     mem = H100_MEM_CAPACITY
+    tdp = H100_TDP
     energy_dram = ENERGY_DRAM_ACCESS_PJ
     energy_sram = ENERGY_SRAM_L1_PJ
 
@@ -203,6 +204,7 @@ class MemoryWallScenario:
     h100_ridge_fp8_str = f"{ridge_fp8:.0f}"
     energy_ratio_str = f"{energy_ratio.m_as(''):.0f}"
     h100_mem_str = f"{mem.m_as(GiB):.0f}"
+    h100_tdp_str = f"{tdp.m_as(watt):.0f}"
 ```
 
 An NVIDIA H100 delivers `{python} MemoryWallScenario.h100_fp8_str` TFLOPS of FP8 compute but only `{python} MemoryWallScenario.h100_hbm_bw_str` TB/s of memory bandwidth. If every byte loaded from memory does fewer than `{python} MemoryWallScenario.h100_ridge_fp8_str` arithmetic operations, the compute units sit idle, starved for data. This gap between compute capability and memory delivery rate is the memory wall, and it defines the landscape within which all performance engineering operates.
@@ -223,7 +225,7 @@ The L2 cache sits between the SMs and HBM, providing a 50 MB on-chip buffer on t
 
 High Bandwidth Memory (HBM) is the main off-chip memory, providing `{python} MemoryWallScenario.h100_mem_str` GB of capacity at `{python} MemoryWallScenario.h100_hbm_bw_str` TB/s bandwidth. HBM access latency is approximately 300 ns, and each access costs roughly 640 pJ of energy. Despite the "high bandwidth" designation, the bandwidth-to-capacity ratio means that reading the full `{python} MemoryWallScenario.h100_mem_str` GB of HBM takes approximately 24 ms, far longer than the sub-millisecond latency targets of real-time inference.
 
-The energy cost of data movement has a direct economic consequence at data center scale. Consider a training cluster of 1,000 H100 GPUs, each performing approximately $10^{12}$ memory accesses per second during a memory-bound workload. If each access reads from HBM at 640 pJ, the memory subsystem alone consumes approximately 640 W per GPU, a significant fraction of the H100's 700 W TDP. If operator fusion moves half of those accesses from HBM to SRAM (at 0.5 pJ each), the per-GPU memory power drops by approximately 320 W. Across 1,000 GPUs, this saves 320 kW, equivalent to powering roughly 250 homes. This is not a secondary consideration; at cloud electricity prices, the annual cost difference is substantial, and it scales linearly with cluster size. The physics of data movement is not merely a performance constraint; it is an economic one.
+The energy cost of data movement has a direct economic consequence at data center scale. Consider a training cluster of 1,000 H100 GPUs, each performing approximately $10^{12}$ memory accesses per second during a memory-bound workload. If each access reads from HBM at 640 pJ, the memory subsystem alone consumes approximately 640 W per GPU, a significant fraction of the H100's `{python} MemoryWallScenario.h100_tdp_str` W TDP. If operator fusion moves half of those accesses from HBM to SRAM (at 0.5 pJ each), the per-GPU memory power drops by approximately 320 W. Across 1,000 GPUs, this saves 320 kW, equivalent to powering roughly 250 homes. This is not a secondary consideration; at cloud electricity prices, the annual cost difference is substantial, and it scales linearly with cluster size. The physics of data movement is not merely a performance constraint; it is an economic one.
 
 The performance engineering challenge reduces to a data placement problem: keep the data that the compute units need in the fastest memory that can hold it. When a kernel reads a tensor from HBM, processes it, and writes the result back to HBM, the HBM round-trip dominates execution time for any operation with low arithmetic intensity. Every technique in this chapter shares the same goal: keeping data closer to compute for longer.
 
@@ -247,7 +249,7 @@ The memory wall is not static; it grows wider with each hardware generation. Com
 | **GPU**\index{GPU} | **Year** | **Peak FP16 (TFLOPS)** | **HBM BW (TB/s)** | **Ridge Point (FLOP/byte)** |
 |:-------------------|:---------|:-----------------------|:------------------|:----------------------------|
 | **V100**           | 2017     | 125                    | 0.9               | 139                         |
-| **A100**           | 2020     | 312                    | 2.0               | 156                         |
+| **A100**           | 2020     | 312                    | 2.04              | 153                         |
 | **H100**           | 2022     | 989                    | 3.35              | 295                         |
 | **B200**           | 2024     | 2,250                  | 8.0               | 281                         |
 
@@ -273,13 +275,13 @@ The Roofline Model[^fn-roofline-origin] provides a quantitative framework for di
 
 :::
 
-For a given accelerator with peak compute $R_{\text{peak}}$ (in FLOP/s) and peak memory bandwidth $\text{BW}$ (in bytes/second), the achievable performance of a workload with arithmetic intensity $I$ (in FLOP/byte) is:
+For a given accelerator with peak compute $R_{\text{peak}}$ (in FLOP/s) and peak memory bandwidth $\text{BW}$ (in bytes/second), @eq-performance-roofline gives the achievable performance of a workload with arithmetic intensity $I$ (in FLOP/byte):
 
 $$
 \text{Achievable FLOPS} = \min(R_{\text{peak}}, \; \text{BW} \times I)
 $$ {#eq-performance-roofline}
 
-The transition point where these two limits intersect is the ridge point:
+@eq-ridge-point locates the ridge point where these two limits intersect:
 
 $$
 I_{\text{ridge}} = \frac{R_{\text{peak}}}{\text{BW}}
@@ -287,7 +289,7 @@ $$ {#eq-ridge-point}
 
 Workloads with $I < I_{\text{ridge}}$ are memory-bound: their performance is limited by how fast data can be loaded, not how fast it can be processed. Workloads with $I > I_{\text{ridge}}$ are compute-bound: the arithmetic units are the bottleneck. @fig-roofline-model illustrates this relationship graphically.
 
-::: {#fig-roofline-model fig-env="figure" fig-pos="htb" fig-cap="**The Roofline Model**: Achievable performance (y-axis) as a function of arithmetic intensity (x-axis) on a log-log plot. The sloped line represents the memory bandwidth ceiling; the flat line represents the compute ceiling. Their intersection is the ridge point. Most transformer inference operations fall in the memory-bound region (left of the ridge point), while large batched GEMMs fall in the compute-bound region (right)." fig-alt="Log-log plot showing roofline model with memory bandwidth ceiling as diagonal line and compute ceiling as horizontal line, meeting at ridge point. Workload types are marked: LLM decode and element-wise ops on the left (memory-bound), large GEMM on the right (compute-bound)."}
+::: {#fig-roofline-model fig-env="figure" fig-pos="htb" fig-cap="**The Roofline Model**: Achievable performance (y-axis) as a function of arithmetic intensity (x-axis) on a log-log plot. The sloped line represents the memory bandwidth ceiling; the flat line represents the compute ceiling at the labeled precision (FP8 tensor-core throughput on H100, approximately 2,000 TFLOPS); their intersection is the ridge point at roughly 600 FLOPs/byte for FP8. Most transformer inference operations fall in the memory-bound region (left of the ridge point), while large batched GEMMs fall in the compute-bound region (right). The corresponding FP16 ridge point is roughly 295 FLOPs/byte (989 TFLOPS/3.35 TB/s)." fig-alt="Log-log roofline plot with diagonal memory-bandwidth ceiling and horizontal compute ceiling labeled at FP8 throughput around 2,000 TFLOPS. Ridge point around 600 FLOPs per byte. Workload markers: LLM decode and element-wise ops on the left (memory-bound), large GEMM on the right (compute-bound)."}
 ![](images/svg/roofline-model.svg)
 :::
 
@@ -621,6 +623,7 @@ The performance characteristics of each phase determine which optimization techn
 #| label: roofline-diagnostic
 #| echo: false
 from mlsysim.fmt import fmt, check
+from mlsysim.core.constants import H100_MEM_BW, TB, second
 
 class RooflineDiagnostic:
     """Roofline analysis for 70B LLM decode on 8× H100."""
@@ -628,7 +631,7 @@ class RooflineDiagnostic:
     # ┌── 1. LOAD ──────────────────────────────────────────
     params_per_gpu_B = 70 / 8  # 70B model, TP across 8 GPUs -> 8.75B per shard
     bytes_fp16 = 2
-    h100_bw_tbs = 3.35         # H100 HBM3 bandwidth (TB/s)
+    h100_bw_tbs = H100_MEM_BW.m_as(TB/second)  # H100 HBM3 bandwidth (TB/s)
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
     flops_B = 2 * params_per_gpu_B                         # 17.5 (x10^9 FLOP)
@@ -706,13 +709,13 @@ Intermediate tensors $Z_1$ and $Z_2$ each occupy the same memory as the output $
 
 @fig-fusion-before-after contrasts these two execution paths, making the HBM traffic savings visible.
 
-::: {#fig-fusion-before-after fig-env="figure" fig-pos="htb" fig-cap="**Operator Fusion: Before and After**: Left: three separate kernels each read from and write to HBM, materializing intermediate tensors $Z_1$ and $Z_2$ (seven HBM transfers totaling 88 MB of memory traffic). Right: a single fused kernel reads $X$ and $W$ once, performs all three operations with intermediates held in SRAM, and writes only the final output $Y$ (three HBM transfers totaling 24 MB). The fused path eliminates 64 MB of redundant HBM traffic per layer." fig-alt="Two side-by-side dataflow diagrams. Left unfused path shows seven HBM-transfer arrows totaling 88 MB. Right fused path shows three arrows totaling 24 MB, with intermediates staying in SRAM."}
+::: {#fig-fusion-before-after fig-env="figure" fig-pos="htb" fig-cap="**Operator Fusion: Before and After**: Top: three separate kernels each read from and write to HBM, materializing intermediates $Z_1$ and $Z_2$, with six HBM round-trips along the unfused path. Bottom: a single fused kernel reads inputs once, holds intermediates in SRAM, and writes only the final output, leaving just two HBM round-trips. The fused path delivers roughly a 3$\times$ reduction in HBM traffic per layer." fig-alt="Two stacked dataflow panels. Top unfused path: six HBM round-trip arrows. Bottom fused path: two HBM round-trip arrows, intermediates staying in SRAM. The fused path is labeled as a 3 times reduction."}
 
 ![](images/svg/operator-fusion.svg)
 
 :::
 
-As @fig-fusion-before-after makes concrete, fusion reduces HBM transfers from seven to three per layer, eliminating 64 MB of redundant intermediate traffic that the unfused path forces through off-chip memory.
+As @fig-fusion-before-after makes concrete, fusion reduces HBM round-trips from six to two per layer, a roughly 3$\times$ reduction in off-chip memory traffic for this layer block.
 
 In a naive implementation without operator fusion, executing one transformer layer requires roughly 50 separate kernel launches. If each launch incurs a 10-microsecond overhead, the system spends 500 microseconds purely on dispatch latency. If the actual arithmetic execution of the layer takes only 2 milliseconds, the launch overhead consumes 20 percent of the total wall-clock time, leaving the GPU compute units idle for one-fifth of the inference cycle. This "launch-bound" regime limits the benefits of faster hardware; doubling the GPU's FLOPS does nothing to reduce the 500-microsecond fixed cost. Operator fusion addresses this by compiling these 50 discrete operations into a small handful of fused kernels, often reducing the count to 5--10 launches, thereby reclaiming the lost cycles and shifting the workload back toward a compute-bound profile.
 
@@ -726,7 +729,7 @@ Reduction fusion combines an element-wise operation with a subsequent reduction 
 
 Operator-specific fusion is the most impactful and the most difficult category. These are custom kernels designed for a specific sequence of operations, such as fused attention or fused GEMM-bias-activation. The kernel architect must reason about data flow, shared memory allocation, and thread scheduling simultaneously. The payoff is substantial: FlashAttention, which we examine next, reduces attention memory traffic from quadratic to linear in sequence length.
 
-To appreciate the quantitative impact, consider each category applied to a single transformer layer with hidden dimension 4096 and batch size 2048 in FP16. Element-wise fusion of a bias-GELU-dropout chain eliminates two intermediate tensors of 16 MB each, saving 64 MB of HBM traffic (two writes plus two reads) per layer. Across 80 layers, this reclaims 5.1 GB of memory bandwidth per forward pass. Reduction fusion of LayerNorm avoids materializing the prenormalization tensor (16 MB) and the intermediate mean/variance statistics, saving an additional 48 MB per layer. Operator-specific attention fusion (FlashAttention) provides the largest single gain: for a sequence length of 8192, it eliminates the 128 MB per-head attention score matrix, saving over 4 GB per layer across 32 heads. The cumulative effect of all three fusion categories can reduce total HBM traffic by 60--80 percent for a transformer forward pass, translating directly into proportional wall-clock speedup for memory-bound workloads.
+To appreciate the quantitative impact, consider each category applied to a single transformer layer with hidden dimension 4096 and batch size 2048 in FP16. Element-wise fusion of a bias-GELU-dropout chain eliminates two intermediate tensors of 16 MB each, saving 64 MB of HBM traffic (two writes plus two reads) per layer. Across 80 layers, this reclaims 5.1 GB of memory bandwidth per forward pass. Reduction fusion of LayerNorm avoids materializing the prenormalization tensor (16 MB) and the intermediate mean/variance statistics, saving an additional 48 MB per layer. Operator-specific attention fusion (FlashAttention) provides the largest single gain: for a sequence length of 8192, it eliminates the 134 MB per-head attention score matrix, saving over 4 GB per layer across 32 heads. The cumulative effect of all three fusion categories can reduce total HBM traffic by 60--80 percent for a transformer forward pass, translating directly into proportional wall-clock speedup for memory-bound workloads.
 
 ### CUDA graphs: Eliminating launch overhead {#sec-performance-engineering-cuda-graphs}
 
@@ -746,7 +749,7 @@ The combination of operator fusion (reducing the number of kernels) and CUDA Gra
 
 ### FlashAttention: Tiled attention as a system primitive {#sec-performance-engineering-flashattention}
 
-Standard self-attention computes $\text{Softmax}(QK^T / \sqrt{d_k})V$, where $Q$, $K$, and $V$ are matrices of shape $[\text{sequence length}{\times}\text{head dimension}]$. The na\"ive implementation materializes the full $N{\times}N$ attention matrix $S = QK^T$ in HBM, where $N$ is the sequence length. For $N = 8192$ and FP16 precision, this matrix alone consumes $8192 \times 8192 \times 2 = 128$ MB per attention head. At 32 heads, the materialized attention matrices require 4 GB per layer, dominating memory traffic for the entire forward pass.
+Standard self-attention computes $\text{Softmax}(QK^T / \sqrt{d_k})V$, where $Q$, $K$, and $V$ are matrices of shape $[\text{sequence length}{\times}\text{head dimension}]$. The na\"ive implementation materializes the full $N{\times}N$ attention matrix $S = QK^T$ in HBM, where $N$ is the sequence length. For $N = 8192$ and FP16 precision, this matrix alone consumes $8192 \times 8192 \times 2 \approx 134$ MB per attention head. At 32 heads, the materialized attention matrices require approximately 4.3 GB per layer, dominating memory traffic for the entire forward pass.
 
 ```{python}
 #| label: flash-attention-savings-refactor
@@ -754,20 +757,20 @@ Standard self-attention computes $\text{Softmax}(QK^T / \sqrt{d_k})V$, where $Q$
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ FLASHATTENTION MEMORY SAVINGS (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-performance-engineering-operator-fusion FlashAttention prose
+# │ Context: @sec-performance-engineering-flashattention FlashAttention prose
 # │
 # │ Goal: Quantify HBM traffic reduction from tiling attention for a 32-head,
 # │       seq_len=8192, head_dim=128, FP16 configuration.
 # │ Show: ~65x reduction in HBM traffic by avoiding NxN materialization.
 # │ How: Naive = (4*N^2 + 4*N*d) * h; Flash = 4*N*d * h. (bytes)
 # │
-# │ Imports: mlsysim.core.constants (BYTES_FP16, MILLION, BILLION)
+# │ Imports: mlsysim.core.constants (BYTES_FP16, MB, byte)
 # │ Exports: naive_mb_str, flash_mb_str, savings_str,
 # │          head_n_str, head_d_str, head_bytes_str,
 # │          naive_head_traffic_mb_str, flash_head_traffic_mb_str,
 # │          flash_savings_factor_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import BYTES_FP16, MILLION, BILLION, byte
+from mlsysim.core.constants import BYTES_FP16, MB, byte
 from mlsysim.fmt import fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -804,16 +807,15 @@ class FlashAttentionSavings:
           f"FlashAttention should save >10x HBM traffic, got {savings_ratio:.1f}x")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    mebi = 1024 * 1024
-    naive_mb_str = f"{naive_attn_bytes_total/mebi:.0f}"
-    flash_mb_str = f"{flash_attn_bytes_total/mebi:.0f}"
+    naive_mb_str = f"{(naive_attn_bytes_total * byte).m_as(MB):.0f}"
+    flash_mb_str = f"{(flash_attn_bytes_total * byte).m_as(MB):.0f}"
     savings_str = f"{savings_ratio:.0f}"
 
     head_n_str = f"{seq_len}"
     head_d_str = f"{head_dim}"
-    head_bytes_str = f"{head_dim * bytes_per_elem/mebi * seq_len:.0f}"
-    naive_head_traffic_mb_str = f"{naive_attn_bytes_per_head/mebi:.0f}"
-    flash_head_traffic_mb_str = f"{flash_attn_bytes_per_head/mebi:.0f}"
+    head_bytes_str = f"{(seq_len * head_dim * bytes_per_elem * byte).m_as(MB):.0f}"
+    naive_head_traffic_mb_str = f"{(naive_attn_bytes_per_head * byte).m_as(MB):.0f}"
+    flash_head_traffic_mb_str = f"{(flash_attn_bytes_per_head * byte).m_as(MB):.0f}"
     flash_savings_factor_str = f"{savings_ratio:.0f}"
 ```
 
@@ -840,9 +842,9 @@ The cost of this tiling is additional arithmetic: the rescaling operations in st
 
 A concrete numerical example clarifies the memory savings. Consider one attention head with sequence length $N = 8192$ and head dimension $d = 128$. The $Q$, $K$, $V$ matrices are each $8192{\times}128$ in FP16, occupying $8192 \times 128 \times 2 = 2$ MB each (6 MB total for one head). The output matrix $O$ is the same size (2 MB). The total input/output data is therefore 8 MB per head.
 
-The na\"ive algorithm computes $S = QK^T$, a matrix of shape $8192{\times}8192$. In FP16, this score matrix occupies $8192 \times 8192 \times 2 = 128$ MB per head. After applying softmax, the result $P = \text{softmax}(S)$ is also $128$ MB. Computing $PV$ requires reading $P$ again. In total, the na\"ive algorithm reads $Q$, $K$, $V$ from HBM (6 MB), writes $S$ (128 MB), reads $S$ for softmax (128 MB), writes $P$ (128 MB), reads $P$ for the final multiply (128 MB), and writes $O$ (2 MB). The total HBM traffic is approximately 520 MB per head, dominated by the quadratic intermediates.
+The na\"ive algorithm computes $S = QK^T$, a matrix of shape $8192{\times}8192$. In FP16, this score matrix occupies $8192 \times 8192 \times 2 \approx 134$ MB per head. After applying softmax, the result $P = \text{softmax}(S)$ is also $134$ MB. Computing $PV$ requires reading $P$ again. In total, the na\"ive algorithm reads $Q$, $K$, $V$ from HBM (6 MB), writes $S$ (134 MB), reads $S$ for softmax (134 MB), writes $P$ (134 MB), reads $P$ for the final multiply (134 MB), and writes $O$ (2 MB). The total HBM traffic is approximately 545 MB per head, dominated by the quadratic intermediates.
 
-FlashAttention processes the computation in tiles of size $B_r{\times}B_c$ (typically $128{\times}128$ on H100). For one tile, the algorithm loads a block of $Q$ ($128 \times 128 \times 2 = 32$ KB), a block of $K$ ($128 \times 128 \times 2 = 32$ KB), and a block of $V$ (32 KB), totaling 96 KB. This fits comfortably in the H100's 228 KB of shared memory per SM. The tile score $S_{\text{tile}} = Q_{\text{tile}} K_{\text{tile}}^T$ is computed and consumed entirely within SRAM; it is never written to HBM. The algorithm iterates over $8192/128 = 64$ column tiles for each of $64$ row tiles, but the total HBM traffic is just the cost of reading $Q$, $K$, $V$ once (6 MB) and writing $O$ once (2 MB), totaling 8 MB per head. This is 65$\times$ less HBM traffic than the na\"ive algorithm, and the ratio grows quadratically with sequence length.
+FlashAttention processes the computation in tiles of size $B_r{\times}B_c$ (typically $128{\times}128$ on H100). For one tile, the algorithm loads a block of $Q$ ($128 \times 128 \times 2 \approx 33$ KB), a block of $K$ ($128 \times 128 \times 2 \approx 33$ KB), and a block of $V$ (33 KB), totaling approximately 98 KB. This fits comfortably in the H100's 228 KB of shared memory per SM. The tile score $S_{\text{tile}} = Q_{\text{tile}} K_{\text{tile}}^T$ is computed and consumed entirely within SRAM; it is never written to HBM. The algorithm iterates over $8192/128 = 64$ column tiles for each of $64$ row tiles, but the total HBM traffic is just the cost of reading $Q$, $K$, $V$ once (6 MB) and writing $O$ once (2 MB), totaling 8 MB per head. This is 65$\times$ less HBM traffic than the na\"ive algorithm, and the ratio grows quadratically with sequence length.
 
 FlashAttention-2 [@dao2023flashattention2] further optimizes the algorithm for modern GPU architectures by restructuring the parallelism pattern. The original FlashAttention parallelizes over batch and head dimensions, meaning each thread block handles one (batch, head) pair and iterates over the full sequence. FlashAttention-2 additionally parallelizes over the sequence dimension of the query matrix, distributing work across thread blocks more efficiently and achieving better occupancy on GPUs with many streaming multiprocessors. It also reduces the number of non-GEMM FLOPs by restructuring the rescaling operations and exploiting the asymmetry between the Q loop (outer) and K/V loop (inner).
 
@@ -881,13 +883,14 @@ Verify your understanding of memory-aware attention:
 # │ Show: Two curves on log scale; shaded savings region.
 # │ How: N = logspace(512, 131072); bytes = 2*N^2 vs 2*N*...; matplotlib.
 # │
-# │ Imports: numpy (np), matplotlib.pyplot (plt)
+# │ Imports: numpy (np), matplotlib.pyplot (plt), mlsysim.core.constants (byte, GB)
 # │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
 # │ Plot standard attention (N²) vs FlashAttention (N) memory vs seq len;
 import numpy as np
 import matplotlib.pyplot as plt
+from mlsysim.core.constants import byte, GB
 
 plt.style.use('seaborn-v0_8-whitegrid')
 plt.figure(figsize=(10, 6))
@@ -900,8 +903,8 @@ bytes_per_element_fp16 = 2
 num_heads = 32
 batch_size = 1
 
-mem_standard = (N**2 * bytes_per_element_fp16 * num_heads * batch_size) / 1e9
-mem_flash = (N * 4 * num_heads * batch_size) / 1e9
+mem_standard = (N**2 * bytes_per_element_fp16 * num_heads * batch_size * byte).m_as(GB)
+mem_flash = (N * 4 * num_heads * batch_size * byte).m_as(GB)
 
 plt.plot(N, mem_standard, label='Standard Attention O(N²)', color='#CC5500', linewidth=2)
 plt.plot(N, mem_flash, label='FlashAttention O(N)', color='#006395', linewidth=2)
@@ -938,7 +941,7 @@ plt.text(69000, plt.ylim()[0]*1.5, ' Long context (65K)', rotation=90,
 
 def annotate_ratio(n_val):
     ratio = n_val / 2
-    mem_val = (n_val**2 * bytes_per_element_fp16 * num_heads) / 1e9
+    mem_val = (n_val**2 * bytes_per_element_fp16 * num_heads * byte).m_as(GB)
     plt.annotate(f'{int(ratio):,}x Savings',
                  xy=(n_val, mem_val),
                  xytext=(n_val, mem_val * 0.25),
@@ -986,7 +989,7 @@ Applying uniform per-tensor INT8 quantization clips these outliers, destroying t
 
 ***Block-wise Quantization***\index{Quantization!block-wise, definition} is a quantization scheme that partitions a weight tensor into nonoverlapping groups of $B_{\text{block}}$ elements and computes a per-group scale $s_i = (x_{\max,i} - x_{\min,i}) / (2^b - 1)$, bounding worst-case quantization error within each group independently.
 
-1.  **Significance (quantitative)**: With block size $B_{\text{block}} = 64$ and $b = 4$ bits, weights compress from 16 bits to 4 bits—a 4$\times$ memory reduction—while each FP16 scale adds $16/64 = 0.25$ bits per weight. This yields an effective bit-width of $4.25$ bits per weight: 6.25 percent overhead relative to the INT4 payload, or about 1.6 percent of the original FP16 weight size.
+1.  **Significance (quantitative)**: With block size $B_{\text{block}} = 64$ and $b = 4$ bits, weights compress from 16 bits to 4 bits (a 4$\times$ memory reduction) while each FP16 scale adds $16/64 = 0.25$ bits per weight. This yields an effective bit-width of $4.25$ bits per weight: 6.25 percent overhead relative to the INT4 payload, or about 1.6 percent of the original FP16 weight size.
 2.  **Distinction (durable)**: Unlike **Per-Tensor Quantization**\index{Quantization!per-tensor}, which applies a single scale across the entire weight matrix and forces that scale to accommodate outlier values at the cost of wasting precision on the majority of near-zero weights, Block-wise Quantization contains outlier damage within individual blocks, preventing a single extreme value from degrading quantization fidelity for the whole tensor.
 3.  **Common pitfall**: Treating block size as a free hyperparameter is wrong. Smaller blocks ($B_{\text{block}} = 32$) reduce quantization error but double the metadata overhead vs. $B_{\text{block}} = 64$. At $B_{\text{block}} = 16$, the scale adds 1 bit per weight: 25 percent overhead relative to the INT4 payload, or 6.25 percent of the original FP16 weight size.
 
@@ -1049,10 +1052,11 @@ The choice depends on the operational regime. For memory-bound inference (small 
 # │       sharded INT8 (~0.17 GB/GPU), and max batch FP16 vs INT8.
 # │ How: 2 (K+V) * layers * kv_heads * head_dim * seq_len * bytes.
 # │
-# │ Imports: mlsysim.book (check)
+# │ Imports: mlsysim.fmt (check), mlsysim.core.constants (byte, GB)
 # │ Exports: kv_fp16_gb_str, max_batch_fp16_str, max_batch_int8_str,
 # │          batch_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import byte, GB
 
 # ┌── LEGO ───────────────────────────────────────────────
 class KVCacheAnalysis:
@@ -1074,7 +1078,7 @@ class KVCacheAnalysis:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Step 1: Base size in GB per request
     kv_cache_bytes = 2 * num_layers * num_kv_heads * head_dim * seq_len * bytes_fp16
-    kv_fp16_gb_val = kv_cache_bytes / 1e9
+    kv_fp16_gb_val = (kv_cache_bytes * byte).m_as(GB)
 
     # Max batch calculations
     # Step 2: FP16 case: 45 GB available for KV
@@ -1410,7 +1414,41 @@ A standard MoE transformer layer replaces the feed-forward network (FFN) with mu
 
 ## Communication-Computation Overlap {#sec-performance-engineering-overlap}
 
-Consider a concrete example: a 70B model with tensor parallelism across 8 H100 GPUs. Each transformer layer requires two AllReduce\index{AllReduce} operations (one after attention, one after FFN). Each AllReduce transfers approximately $2 \times d \times \text{batch} \times 2$ bytes at FP16 (where $d = 8192$ for a 70B model). At batch size 1, the data volume is $2 \times 8192 \times 1 \times 2 = 32$ KB per AllReduce. At 900 GB/s NVLink bandwidth, this transfer takes approximately 36 ns. However, the AllReduce launch overhead (approximately 5 $\mu$s) dominates the actual data transfer time by 100$\times$. At batch size 1, the AllReduce overhead is dominated by software launch latency, not bandwidth, and overlap provides limited benefit because there is insufficient compute to hide behind.
+```{python}
+#| echo: false
+#| label: nvlink-h100-bw
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ H100 NVLINK BANDWIDTH (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-performance-engineering-overlap—70B TP AllReduce example
+# │
+# │ Goal: Provide H100 NVLink 4.0 bandwidth for the AllReduce data-volume example.
+# │ Show: ~900 GB/s NVLink bandwidth.
+# │ How: pulling NVLINK_H100_BW from mlsysim.core.constants.
+# │
+# │ Imports: mlsysim.core.constants (NVLINK_H100_BW, GB, second)
+# │ Exports: NvlinkH100.bw_gbps_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import NVLINK_H100_BW, GB, second
+
+class NvlinkH100:
+    """H100 NVLink 4.0 bandwidth reference."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    bw = NVLINK_H100_BW
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    bw_gbps = bw.m_as(GB/second)
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    from mlsysim.fmt import check
+    check(bw_gbps > 500, "H100 NVLink bandwidth should exceed 500 GB/s")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    bw_gbps_str = f"{bw_gbps:.0f}"
+```
+
+Consider a concrete example: a 70B model with tensor parallelism across 8 H100 GPUs. Each transformer layer requires two AllReduce\index{AllReduce} operations (one after attention, one after FFN). Each AllReduce transfers approximately $2 \times d \times \text{batch} \times 2$ bytes at FP16 (where $d = 8192$ for a 70B model). At batch size 1, the data volume is $2 \times 8192 \times 1 \times 2 = 32$ KB per AllReduce. At `{python} NvlinkH100.bw_gbps_str` GB/s NVLink bandwidth, this transfer takes approximately 36 ns. However, the AllReduce launch overhead (approximately 5 $\mu$s) dominates the actual data transfer time by 100$\times$. At batch size 1, the AllReduce overhead is dominated by software launch latency, not bandwidth, and overlap provides limited benefit because there is insufficient compute to hide behind.
 
 At batch size 64, the data volume per AllReduce grows to $2 \times 8192 \times 64 \times 2 = 2$ MB, taking approximately 2.2 $\mu$s at NVLink bandwidth. The compute path over a shard is now a bundle of kernels, not a single GEMM: the attention and FFN work together take on the order of 20 $\mu$s for this configuration, while the communication remains around 2.2 $\mu$s. Here, the compute time exceeds the communication time by about 9$\times$, and overlap becomes highly effective. This illustrates why batch size is the universal control knob: it simultaneously improves arithmetic intensity, GPU utilization, and communication overlap effectiveness.
 
@@ -1424,7 +1462,7 @@ The potential benefit of communication-computation overlap depends on the relati
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ COMMUNICATION-COMPUTATION OVERLAP ANALYSIS
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-performance-engineering-comm-comp-overlap overlap analysis prose
+# │ Context: @sec-performance-engineering-overlap-quantify overlap analysis prose
 # │
 # │ Goal: Quantify training step speedup from overlapping ring-AllReduce with
 # │       backward pass for a 7B model on 8 H100 GPUs over NVLink (900 GB/s),
@@ -1493,7 +1531,7 @@ class OverlapCalc:
           f"Overlap should provide speedup, got {overlap_speedup:.2f}x")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    gradient_gb_str = f"{gradient_bytes / 1e9:.0f}"
+    gradient_gb_str = f"{(gradient_bytes * byte).m_as(GB):.0f}"
     allreduce_ms_str = f"{allreduce_time_s * 1000:.1f}"
     backward_ms_str = f"{backward_time_s * 1000:.1f}"
     step_no_overlap_ms_str = f"{step_no_overlap * 1000:.1f}"
@@ -1637,7 +1675,7 @@ The techniques covered so far -- fusion, precision, compilation, speculative dec
 An engineer spends two weeks rewriting a PyTorch module into a custom CUDA kernel to make it 5$\times$ faster, only to discover the overall model latency did not budge because the system was entirely I/O bound. Performance engineering without measurement is expensive guesswork. System profiling provides the surgical diagnostics required to identify exactly where the GPU is waiting, allowing us to apply our optimizations with precision.
 
 ::: {.callout-perspective title="The physics of profiling (the Heisenberg effect)"}
-Observing a distributed ML system fundamentally alters its behavior. Gathering high-resolution telemetry—such as tracking every CUDA kernel launch or memory allocation—consumes PCIe bandwidth, CPU cycles, and memory capacity. In heavily optimized serving pipelines, the overhead of profiling can artificially induce the very latency spikes the engineer is trying to diagnose. This "Heisenberg Effect" requires a deliberate strategy: deploying low-overhead, sampling-based telemetry for continuous production monitoring, and only enabling high-fidelity, synchronous tracing in isolated diagnostic environments.
+Observing a distributed ML system fundamentally alters its behavior. Gathering high-resolution telemetry (such as tracking every CUDA kernel launch or memory allocation) consumes PCIe bandwidth, CPU cycles, and memory capacity. In heavily optimized serving pipelines, the overhead of profiling can artificially induce the very latency spikes the engineer is trying to diagnose. This "Heisenberg Effect" requires a deliberate strategy: deploying low-overhead, sampling-based telemetry for continuous production monitoring, and only enabling high-fidelity, synchronous tracing in isolated diagnostic environments.
 :::
 
 ### The profiling hierarchy {#sec-performance-engineering-profiling-hierarchy}
@@ -1680,7 +1718,7 @@ The roofline model from @sec-performance-engineering-roofline becomes a diagnost
 
 A kernel that falls far below both the compute ceiling and the bandwidth ceiling has an implementation problem: launch overhead, poor memory access patterns, or low occupancy. A kernel that reaches the bandwidth ceiling but falls below the compute ceiling is memory-bound, and further optimization requires reducing memory traffic (fusion, precision) rather than improving compute efficiency. A kernel at the compute ceiling is compute-bound and can only be improved by algorithmic changes (reducing FLOPs) or faster hardware.
 
-Consider a concrete example: a LayerNorm kernel profiled on an H100 reports 15 TFLOPS of achieved compute and 2.8 TB/s of achieved memory bandwidth. Its arithmetic intensity is $15 \text{ TFLOPS} / 2.8 \text{ TB/s} \approx 5.4$ FLOP/byte. The H100's ridge point is approximately 295 FLOP/byte at FP16. Since 5.4 is far below 295, the kernel is strictly memory-bound. Its achieved 2.8 TB/s (84 percent of the H100's 3.35 TB/s peak bandwidth) confirms it is operating near the physical limit of the memory subsystem. The diagnosis is clear: further FLOP-level optimizations will yield zero gain; performance can only be improved by reducing data movement, either through fusion (eliminating the HBM round-trip) or precision reduction (halving the bytes per element).
+Consider a concrete example: a LayerNorm kernel profiled on an H100 reports 15 TFLOPS of achieved compute and 2.8 TB/s of achieved memory bandwidth. Its arithmetic intensity is $15 \text{ TFLOPS} / 2.8 \text{ TB/s} \approx 5.4$ FLOP/byte. The H100's ridge point is approximately `{python} RooflineRidgeCalc.h100_fp16_ridge_str` FLOP/byte at FP16. Since 5.4 is far below `{python} RooflineRidgeCalc.h100_fp16_ridge_str`, the kernel is strictly memory-bound. Its achieved 2.8 TB/s (84 percent of the H100's `{python} MemoryWallScenario.h100_hbm_bw_str` TB/s peak bandwidth) confirms it is operating near the physical limit of the memory subsystem. The diagnosis is clear: further FLOP-level optimizations will yield zero gain; performance can only be improved by reducing data movement, either through fusion (eliminating the HBM round-trip) or precision reduction (halving the bytes per element).
 
 ### PyTorch profiler workflow {#sec-performance-engineering-pytorch-profiler}
 
@@ -1785,7 +1823,7 @@ CPU-bound data loading causes GPU utilization to drop periodically to zero while
 
 **Investigation**\index{Investigation}:
 
-*Step 1: Kernel-level analysis.* Run Nsight Compute on the dominant GEMM kernel. Result: achieves 2.8 TB/s effective bandwidth out of the H100's 3.35 TB/s peak. Efficiency: 84 percent. This kernel is performing well.
+*Step 1: Kernel-level analysis.* Run Nsight Compute on the dominant GEMM kernel. Result: achieves 2.8 TB/s effective bandwidth out of the H100's `{python} MemoryWallScenario.h100_hbm_bw_str` TB/s peak. Efficiency: 84 percent. This kernel is performing well.
 
 *Step 2: Trace-level analysis.* Run Nsight Systems on a full decode step. Result: 42 percent of step time is spent in GEMM kernels. The remaining 58 percent is split between:
 
@@ -1858,7 +1896,7 @@ While Hardware Utilization reports how often GPUs are busy, it fails to distingu
 # │ Exports: fleet_params_b_str, fleet_nodes_str, fleet_t_step_ms_str,
 # │          fleet_local_mfu_str, fleet_global_mfu_str, fleet_scaling_tax_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import BILLION, TRILLION, H100_FLOPS_FP16_TENSOR, LLAMA2_70B_PARAMS, second, TFLOPs, param
+from mlsysim.core.constants import BILLION, TRILLION, H100_FLOPS_FP16_TENSOR, LLAMA2_70B_PARAMS, second, ms, TFLOPs, param
 from mlsysim.fmt import fmt, check
 
 class FleetEfficiencyCalc:
@@ -1881,8 +1919,8 @@ class FleetEfficiencyCalc:
     fleet_flops_per_step = 6 * p_params * fleet_tokens_per_step
 
     # Step 2: MFU = useful_flops / (n_gpus * r_peak * time)
-    local_mfu = local_flops_per_step / (8 * r_peak_per_gpu * (t_local_step_ms / 1000))
-    global_mfu = fleet_flops_per_step / (n_gpus * r_peak_per_gpu * (t_fleet_step_ms / 1000))
+    local_mfu = local_flops_per_step / (8 * r_peak_per_gpu * (t_local_step_ms * ms).m_as(second))
+    global_mfu = fleet_flops_per_step / (n_gpus * r_peak_per_gpu * (t_fleet_step_ms * ms).m_as(second))
 
     scaling_tax = (1 - (global_mfu/local_mfu)) * 100
 
@@ -2157,7 +2195,7 @@ Together, these techniques compose a coherent optimization stack. Precision engi
 
 The case study in @sec-performance-engineering-case-study demonstrated how these techniques compound in practice: INT4 quantization freed memory for larger batches, which changed the arithmetic intensity, which determined whether further bandwidth or compute optimizations were profitable. Each optimization shifted the bottleneck, requiring reprofiling and a new optimization decision. This iterative, measurement-driven process is the discipline of performance engineering.
 
-The unifying principle is that performance engineering is not about making hardware faster; it is about making software match the physics of the hardware it runs on. The memory wall is a physical constraint that grows wider with each hardware generation. The techniques in this chapter are the engineer's response: not fighting the physics but working within it, keeping data close to compute, reducing precision to the minimum that preserves quality, and restructuring algorithms to avoid unnecessary work. As models grow larger and hardware grows faster but not more bandwidth-rich, these skills become not just valuable but essential.
+The unifying principle is that performance engineering is not about making hardware faster; it is about making software match the physics of the hardware it runs on. The memory wall is a physical constraint that grows wider with each hardware generation. The techniques in this chapter are the engineer's response: not fighting the physics but working within it, keeping data close to compute, reducing precision to the minimum that preserves quality, and restructuring algorithms to avoid unnecessary work. As models grow larger and hardware grows faster but not more bandwidth-rich, these skills become essential.
 
 ::: {.callout-takeaways title="Match the software to the silicon"}
 

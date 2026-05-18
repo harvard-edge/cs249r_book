@@ -18,10 +18,11 @@ __all__ = [
     "BYTES_FP32", "BYTES_INT32", "BYTES_FP16", "BYTES_INT8", "BYTES_INT4", "BYTES_ADAM_STATE",
     # Time units
     "MS", "US", "NS", "ms", "MILLISECOND", "MICROSECOND", "NANOSECOND",
+    "microsecond", "millisecond", "nanosecond",
     # Time scalars
     "SECONDS_PER_MINUTE", "MINUTES_PER_HOUR", "SEC_PER_HOUR", "HOURS_PER_DAY",
     "SEC_PER_DAY", "DAYS_PER_MONTH", "DAYS_PER_YEAR", "SEC_PER_YEAR", "SEC_PER_YEAR_LEAP",
-    "HOURS_PER_YEAR", "MS_PER_SEC",
+    "HOURS_PER_YEAR", "MS_PER_SEC", "US_PER_MS", "NS_PER_US", "NS_PER_MS", "NS_PER_SEC",
     # Data size scalars
     "BITS_PER_BYTE", "KIB_TO_BYTES", "MIB_TO_BYTES", "GIB_TO_BYTES",
     # FLOPs units
@@ -103,6 +104,10 @@ NS = ureg.NS
 MILLISECOND = MS
 MICROSECOND = US
 NANOSECOND = NS
+# SI lowercase aliases (consumed by several chapter LEGO cells)
+microsecond = ureg.microsecond
+millisecond = ureg.millisecond
+nanosecond = ureg.nanosecond
 
 # Common time conversions (unitless scalars)
 SECONDS_PER_MINUTE = 60
@@ -124,6 +129,10 @@ GIB_TO_BYTES = 1024 * 1024 * 1024
 
 # Time scalars
 MS_PER_SEC = 1000
+US_PER_MS = 1000
+NS_PER_US = 1000
+NS_PER_MS = NS_PER_US * US_PER_MS
+NS_PER_SEC = NS_PER_MS * MS_PER_SEC
 
 # --- FLOPs (dimensionless "operations") ---
 ureg.define('flop = 1 * count')

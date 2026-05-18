@@ -47,7 +47,7 @@ from mlsysim.core.constants import (
     NVLINK_H100_BW, PCIE_GEN5_BW,
     LATENCY_NVLINK, LATENCY_PCIE_GEN5, LATENCY_INFINIBAND,
     ALLREDUCE_FACTOR, GPUS_PER_HOST,
-    GB, second, NS, BILLION, MILLION, THOUSAND,
+    GB, KB, byte, second, NS, BILLION, MILLION, THOUSAND,
     BYTES_FP32, BYTES_FP16, MICROSECOND,
     ureg,
 )
@@ -92,15 +92,15 @@ class CommFoundations:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Step 1: Level 4: Ratios & Efficiency
-    ib_ndr_alpha_s = ib_ndr_alpha_us * 1e-6
-    ib_ndr_beta_bs = ib_ndr_beta_gbs * 1e9
-    crossover_kb_val = (ib_ndr_alpha_s * ib_ndr_beta_bs) / 1e3
+    ib_ndr_alpha_s = (ib_ndr_alpha_us * MICROSECOND).m_as(second)
+    ib_ndr_beta_bs = (ib_ndr_beta_gbs * GB / second).m_as(byte / second)
+    crossover_kb_val = (ib_ndr_alpha_s * ib_ndr_beta_bs * byte).m_as(KB)
 
     # Step 2: AllReduce Comparison (formulas return Quantity; use magnitude for scalar ms)
     ring_time_s = calc_ring_allreduce_time(ring_msg_bytes, ring_n_gpus, ib_ndr_beta_bs, ib_ndr_alpha_s)
     tree_time_s = calc_tree_allreduce_time(ring_msg_bytes, ring_n_gpus, ib_ndr_beta_bs, ib_ndr_alpha_s)
-    ring_time_ms = ring_time_s.m_as(ureg.second) * 1000
-    tree_time_ms = tree_time_s.m_as(ureg.second) * 1000
+    ring_time_ms = ring_time_s.m_as(ureg.ms)
+    tree_time_ms = tree_time_s.m_as(ureg.ms)
 
     # Step 3: Bubbles
     bubble_std = calc_pipeline_bubble(p_stages, m_microbatches)
@@ -140,7 +140,7 @@ class CommFoundations:
     ring_n_str = f"{ring_n_gpus}"
     ring_time_ms_str = fmt(ring_time_ms, precision=1, commas=False)
     tree_time_ms_str = fmt(tree_time_ms, precision=1, commas=False)
-    ring_msg_gb_str = f"{ring_msg_bytes/BILLION:.0f}"
+    ring_msg_gb_str = f"{(ring_msg_bytes * byte).m_as(GB):.0f}"
 
     bubble_std_pct = f"{bubble_std * 100:.1f}"
     bubble_interleaved_pct = f"{bubble_interleaved * 100:.1f}"
@@ -172,7 +172,7 @@ Estimating *how* long a gradient synchronization will take across `{python} CF.r
 
 Every point-to-point transfer on a network follows the same fundamental pattern: the sender pays a fixed startup cost to initiate the message, then transmits the payload at a rate determined by the link's bandwidth. This two-parameter model captures the essential physics of network communication.
 
-The **$\alpha$-$\beta$ model** predicts the time to transfer a message of $M$ bytes:
+The **$\alpha$-$\beta$ model**, given by @eq-alpha-beta, predicts the time to transfer a message of $M$ bytes:
 
 $$ T(M) = \alpha + \frac{M}{\beta} $$ {#eq-alpha-beta}
 
@@ -257,7 +257,7 @@ $$ T_{\text{ring}} = 2 \cdot \frac{N - 1}{N} \cdot \frac{M}{\beta} + 2(N - 1) \c
 
 The factor $2(N-1)/N$ in the bandwidth term approaches 2 as $N$ grows---each byte effectively traverses the ring twice (once for reduce-scatter, once for all-gather). The latency term grows linearly with $N$, which makes the ring algorithm expensive in latency for large GPU counts.
 
-Tree AllReduce
+Tree AllReduce, expressed in @eq-tree-allreduce:
 
 $$ T_{\text{tree}} = 2 \log_2 N \cdot \frac{M}{\beta} + 2 \log_2 N \cdot \alpha $$ {#eq-tree-allreduce}
 
@@ -287,7 +287,7 @@ $T_{\text{tree}} \approx$ **`{python} CF.tree_time_ms_str` ms**
 
 AllGather is the complement of ReduceScatter: each GPU starts with a $M/N$-sized shard and ends with the complete $M$-byte tensor. It is the core communication primitive in Fully Sharded Data Parallelism (FSDP) for reconstructing parameters before each forward pass, and in tensor parallelism for reassembling split activations.
 
-Ring AllGather
+Ring AllGather, given by @eq-allgather:
 
 $$ T_{\text{allgather}} = \frac{N - 1}{N} \cdot \frac{M}{\beta} + (N - 1) \cdot \alpha $$ {#eq-allgather}
 
@@ -297,7 +297,7 @@ AllGather is exactly half the cost of AllReduce (one ring pass instead of two) b
 
 ReduceScatter is the dual of AllGather: each GPU starts with a full $M$-byte tensor and ends with a $M/N$-sized shard that contains the globally reduced values for that shard. It is the gradient synchronization primitive in FSDP and ZeRO, replacing the full AllReduce with a cheaper operation when each GPU only needs its own parameter shard's gradient.
 
-Ring ReduceScatter
+Ring ReduceScatter, given by @eq-reducescatter:
 
 $$ T_{\text{reducescatter}} = \frac{N - 1}{N} \cdot \frac{M}{\beta} + (N - 1) \cdot \alpha $$ {#eq-reducescatter}
 
@@ -307,7 +307,7 @@ The symmetry is not a coincidence: ring AllReduce decomposes into one ReduceScat
 
 AllToAll is the most general collective: each GPU sends a distinct $M/N$-sized chunk to every other GPU, and receives a distinct chunk from each. It is the routing primitive for Mixture-of-Experts (MoE) architectures, where tokens must be dispatched to the correct expert and the results gathered back.
 
-Ring AllToAll
+Ring AllToAll, given by @eq-alltoall:
 
 $$ T_{\text{alltoall}} = \frac{N - 1}{N} \cdot \frac{M}{\beta} + (N - 1) \cdot \alpha $$ {#eq-alltoall}
 
@@ -317,7 +317,7 @@ Although the formula matches AllGather and ReduceScatter in form, the communicat
 
 Broadcast sends a single $M$-byte tensor from one root GPU to all $N - 1$ others. It is used for distributing initial model weights, updated learning rates, and configuration changes during training.
 
-Tree Broadcast
+Tree Broadcast, given by @eq-broadcast:
 
 $$ T_{\text{broadcast}} = \log_2 N \left(\alpha + \frac{M}{\beta}\right) $$ {#eq-broadcast}
 
@@ -408,7 +408,7 @@ Rule of thumb: Keeping bubble overhead below 20 percent requires $M \geq 4(P - 1
 
 ### Interleaved scheduling {#sec-comm-foundations-interleaved}
 
-Interleaved scheduling (used in Megatron-LM) assigns $V$ **virtual stages** to each physical GPU instead of one. Each GPU processes $V$ nonconsecutive chunks of the model, which means the pipeline has $P \times V$ virtual stages but the bubble overhead uses the original $P$:
+Interleaved scheduling (used in Megatron-LM) assigns $V$ **virtual stages** to each physical GPU instead of one. Each GPU processes $V$ nonconsecutive chunks of the model, which means the pipeline has $P \times V$ virtual stages but the bubble overhead uses the original $P$, as @eq-interleaved-bubble shows:
 
 $$ b_{\text{interleaved}} = \frac{P - 1}{P - 1 + M \times V} $$ {#eq-interleaved-bubble}
 
@@ -424,11 +424,11 @@ Gradient compression promises to reduce communication volume by 10--1000$\times$
 
 ### The compression equation {#sec-comm-foundations-compression-equation}
 
-Gradient compression replaces the original $M$-byte gradient with a compressed representation of size $M/C$, where $C$ is the compression ratio. The total time with compression is:
+Gradient compression replaces the original $M$-byte gradient with a compressed representation of size $M/C$, where $C$ is the compression ratio. @eq-compression-total expresses the total time with compression:
 
 $$ T_{\text{compressed}} = T_{\text{encode}} + T_{\text{comm}}\!\left(\frac{M}{C}\right) + T_{\text{decode}} $$ {#eq-compression-total}
 
-Compression is beneficial when $T_{\text{compressed}} < T_{\text{comm}}(M)$, which yields the break-even condition:
+Compression is beneficial when $T_{\text{compressed}} < T_{\text{comm}}(M)$. Rearranging this inequality yields the break-even condition in @eq-compression-breakeven:
 
 $$ T_{\text{encode}} + T_{\text{decode}} < T_{\text{comm}}(M) - T_{\text{comm}}\!\left(\frac{M}{C}\right) $$ {#eq-compression-breakeven}
 

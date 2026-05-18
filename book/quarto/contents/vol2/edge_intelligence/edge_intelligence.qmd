@@ -444,7 +444,7 @@ Verify your understanding of how training amplifies edge constraints:
 
 @fig-ondevice-pretraining illustrates how the complete training pipeline combines offline pretraining with online adaptive learning on resource-constrained IoT devices. The system first undergoes meta-training with generic data. During deployment, device-specific constraints such as data availability, compute, and memory shape the adaptation strategy by ranking and selecting layers and channels to update. This allows efficient on-device learning within limited resource envelopes.\index{On-Device Pre-Training and Selective Fine-Tuning}
 
-::: {#fig-ondevice-pretraining fig-env="figure" fig-pos="htb" fig-cap="**On-Device Pre-Training and Selective Fine-Tuning**: A two-stage pipeline for IoT adaptation. Left: offline meta-training of the full neural network on generic cloud data. Center: on-device constraints (data availability, compute, memory) feed an importance-ranking step that chooses which layers and channels to update. Right: only the selected layers (highlighted) are fine-tuned on-device, keeping the rest of the network frozen." fig-alt="Two-stage pipeline. Left: offline pretraining with full neural network. Center: device constraints (data, compute, memory) feed into importance ranking. Right: selected layers highlighted in green for on-device training."}
+::: {#fig-ondevice-pretraining fig-env="figure" fig-pos="htb" fig-cap="**On-Device Pretraining and Selective Fine-Tuning**: A two-stage pipeline for IoT adaptation. Left: offline meta-training of the full neural network on generic cloud data. Center: on-device constraints (data availability, compute, memory) feed an importance-ranking step that chooses which layers and channels to update. Right: only the selected layers (highlighted) are fine-tuned on-device, keeping the rest of the network frozen." fig-alt="Two-stage pipeline. Left: offline pretraining with full neural network. Center: device constraints (data, compute, memory) feed into importance ranking. Right: selected layers highlighted in green for on-device training."}
 
 ```{.tikz}
 \begin{tikzpicture}[line join=round,font=\usefont{T1}{phv}{m}{n}\small]
@@ -969,12 +969,13 @@ The coordination challenges, such as device heterogeneity, intermittent connecti
 
 @tbl-constraint-solution-mapping reveals how this constraint-to-solution mapping creates a systematic engineering framework: Model Adaptation addresses memory and compute limits through selective parameter updates, Data Efficiency maximizes learning from scarce private samples, and Federated Coordination enables privacy-preserving collaboration. Rather than viewing these as independent techniques, successful systems orchestrate all three approaches to create coherent adaptive systems that operate effectively within edge constraints.
 
-| **Constraint Category**    | **Key Challenges**                                                                         | **Solution Approach**                                                                                            |
-|:---------------------------|:-------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------|
-| **Resource Amplification** | • Training workloads (4--12$\times$ memory)<br>• Memory limitations<br>• Power constraints | **Model Adaptation**<br>• Parameter-efficient updates<br>• Selective layer fine-tuning<br>• Low-rank adaptations |
-| **Information Scarcity**   | • Limited local datasets<br>• Non-IID distributions                                        | **Data Efficiency**\index{Data Efficiency!edge constraints}                                                      |
-|                            | • Privacy restrictions                                                                     | • Few-shot learning                                                                                              |
-|                            |                                                                                            | • Meta-learning<br>• Transfer learning                                                                           |
+| **Constraint Category**     | **Key Challenges**                                                                                                         | **Solution Approach**                                                                                                                                                                                                          |
+|:----------------------------|:---------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Resource Amplification**  | • Training workloads (4--12$\times$ memory)<br>• Memory limitations<br>• Power constraints                                 | **Model Adaptation**<br>• Parameter-efficient updates<br>• Selective layer fine-tuning<br>• Low-rank adaptations                                                                                                               |
+| **Information Scarcity**    | • Limited local datasets<br>• Non-IID distributions                                                                        | **Data Efficiency**\index{Data Efficiency!edge constraints}                                                                                                                                                                    |
+|                             | • Privacy restrictions                                                                                                     | • Few-shot learning                                                                                                                                                                                                            |
+|                             |                                                                                                                            | • Meta-learning<br>• Transfer learning                                                                                                                                                                                         |
+| **Coordination Challenges** | • Device heterogeneity<br>• Intermittent connectivity<br>• Distributed validation complexity<br>• Scalability requirements | **Federated Coordination**\index{Federated Coordination!edge constraints}<br>• Federated averaging and asynchronous aggregation<br>• Secure aggregation and differential privacy<br>• Client selection and stragglers handling |
 
 : **Constraint-Solution Mapping**\index{Mapping!constraint-solution}: The three fundamental constraint categories in on-device learning each drive corresponding solution approaches through direct necessity. {#tbl-constraint-solution-mapping}
 
@@ -999,6 +1000,7 @@ Personalizing a billion-parameter model on a smartwatch with 500 MB of total sys
 # │ Imports: mlsysim.book (check)
 # │ Exports: ls_full_mb_str, ls_adapter_kb_str, ls_savings_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import byte, KB, MB, MILLION
 from mlsysim.fmt import check
 
 class StorageWall:
@@ -1007,9 +1009,11 @@ class StorageWall:
     bytes_per_param = 4 # FP32 for training/fine-tuning
     adapter_params = 50000 # Rank-64 adapter
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    size_full_mb = (model_params_m * 1e6 * bytes_per_param) / 1e6
-    size_adapter_kb = (adapter_params * bytes_per_param) / 1e3
-    per_context_savings = (size_full_mb * 1000) / size_adapter_kb
+    size_full = model_params_m * MILLION * bytes_per_param * byte
+    size_adapter = adapter_params * bytes_per_param * byte
+    size_full_mb = size_full.m_as(MB)
+    size_adapter_kb = size_adapter.m_as(KB)
+    per_context_savings = float(size_full / size_adapter)
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(per_context_savings == 200, f"Ratio {per_context_savings} unexpected")
     # ┌── 4. OUTPUT ────────────────────────────────────────
@@ -1430,7 +1434,7 @@ $$
 $$
 where $U \in \mathbb{R}^{m \times r}$ and $V \in \mathbb{R}^{n \times r}$, with $r \ll \min(m,n)$. This reduces the number of trainable parameters from $mn$ to $r(m + n)$.
 
-The mathematical intuition behind this decomposition connects to fundamental linear algebra principles: any matrix can be expressed as a sum of rank-one matrices through singular value decomposition. By constraining our updates to low rank (typically $r = 4$ to $16$), we capture the most significant modes of variation while reducing parameters. For a typical transformer layer with dimensions $768{\times}768$, full fine-tuning requires updating 589,824 parameters. With rank-4 decomposition, we update only $768{\times}4{\times}2 = 6,144$ parameters, a 96 percent reduction, while empirically retaining 85--90 percent of the adaptation quality.
+The mathematical intuition behind this decomposition connects to fundamental linear algebra principles: any matrix can be expressed as a sum of rank-one matrices through singular value decomposition. By constraining our updates to low rank (typically $r = 4$ to $16$), we capture the most significant modes of variation while reducing parameters. For a typical transformer layer with dimensions $768{\times}768$, full fine-tuning requires updating 589,824 parameters. With rank-4 decomposition, we update only $768{\times}4{\times}2 = 6,144$ parameters, a 99 percent reduction, while empirically retaining 85--90 percent of the adaptation quality.
 
 During adaptation, the new weight is computed as:
 $$
@@ -1785,12 +1789,13 @@ Federated learning addresses these coordination constraints through privacy-pres
 # │ Context: "Model Updates vs Raw Data" .callout-notebook
 # │
 # │ Goal: Quantify the bandwidth savings of federated learning for a wearable.
-# │ Show: bandwidth_reduction ≈ 78x—inline in notebook result.
+# │ Show: bandwidth_reduction ≈ 80x—inline in notebook result.
 # │ How: Ratio = Data_Raw/Data_Model_Updates.
 # │
 # │ Imports: mlsysim.book (check)
 # │ Exports: fs_raw_data_mb_str, fs_update_mb_str, fs_reduction_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import byte, KB, MB, MILLION
 from mlsysim.fmt import check
 
 class FederatedSavings:
@@ -1799,10 +1804,11 @@ class FederatedSavings:
     img_size_kb = 200 # Compressed JPEG
     model_params_m = 5
     compression_ratio = 10 # Quantized updates (e.g. 4-bit)
+    bits_per_update_param = 4 # 4-bit quantized updates
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    raw_data_mb = (n_images * img_size_kb) / 1024
-    # Update size: 5M params * 4 bits = 2.5 MB
-    update_mb = (model_params_m * 4) / 8
+    raw_data_mb = (n_images * img_size_kb * KB).m_as(MB)
+    # Update size: 5M params * 4 bits / 8 bits-per-byte = 2.5 MB
+    update_mb = (model_params_m * MILLION * bits_per_update_param / 8 * byte).m_as(MB)
     reduction = raw_data_mb/update_mb
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(70 < reduction < 90, f"Reduction {reduction:.1f}x unexpected")
@@ -1822,7 +1828,7 @@ Bandwidth efficiency is the ratio of raw data volume to model update size.
 
 1. **Raw Data Upload**\index{Raw Data Upload}: **`{python} FederatedSavings.fs_raw_data_mb_str` MB/week**.
 2. **Federated Update**\index{Federated Update}: A compressed model update (5M params) is only **`{python} FederatedSavings.fs_update_mb_str` MB**.
-3. **Bandwidth Reduction**\index{Bandwidth!reduction}: 195 MB/2.5 MB = **`{python} FederatedSavings.fs_reduction_str`$\times$ savings**.
+3. **Bandwidth Reduction**\index{Bandwidth!reduction}: `{python} FederatedSavings.fs_raw_data_mb_str` MB/`{python} FederatedSavings.fs_update_mb_str` MB = **`{python} FederatedSavings.fs_reduction_str`$\times$ savings**.
 
 **Systems insight**: Federated learning is a **Network Multiplier**. For a user on a limited cellular plan, uploading 200 MB of raw data is expensive and slow. Uploading a **`{python} FederatedSavings.fs_update_mb_str` MB update** is nearly invisible. Shifting the "Compute to the Data" reduces network load by **`{python} FederatedSavings.fs_reduction_str`$\times$**, enabling continuous learning even in bandwidth-constrained environments. In the Machine Learning Fleet, this is how systems scale to billions of users without bankrupting the networking budget or violating user privacy.
 
@@ -2609,7 +2615,7 @@ Each of these strategies reflects a different point in the trade-off space. Exam
 | **Clustered FL**                                         | Group clients by data similarity, train per group | Moderate to High      | Medium (group metadata)      | Medium                  |
 | **Meta-Learning**                                        | Train for fast adaptation across tasks/devices    | High (meta-objective) | High                         | Very Fast (few-shot)    |
 
-: **Personalization Trade-Offs**\index{Personalization Trade-Offs}: Federated learning strategies balance personalization with system costs, impacting compute overhead, privacy preservation, and adaptation speed for diverse client populations. This table summarizes how local finetuning, clustered learning, and meta-learning each navigate this trade-off space, enabling tailored models while considering practical deployment constraints. {#tbl-personalization-strategies}
+: **Personalization Trade-Offs**\index{Personalization Trade-Offs}: Federated learning strategies balance personalization with system costs, impacting compute overhead, privacy preservation, and adaptation speed for diverse client populations. This table summarizes how local finetuning, personalization layers, clustered learning, and meta-learning each navigate this trade-off space, enabling tailored models while considering practical deployment constraints. {#tbl-personalization-strategies}
 
 Selecting the appropriate personalization method depends on deployment constraints, data characteristics, and the desired balance between accuracy, privacy, and computational efficiency. @fig-personalization-arch contrasts three architectural approaches: full fine-tuning offers maximum expressivity at high compute cost, head-only adaptation provides low-cost but limited adaptation, and adapter-based methods (PEFT) balance efficiency with deep representation adaptation through small trainable modules.
 
@@ -2988,7 +2994,7 @@ The most direct constraint is compute availability. Training involves additional
 
 Energy consumption compounds this problem. Adaptation typically involves sustained computation over multiple input samples, which taxes battery-powered systems and may lead to rapid energy depletion. For instance, performing a single epoch of adaptation on a microcontroller-class device can consume several millijoules[^fn-mcu-power-budget], an appreciable fraction of the energy budget for a duty-cycled system operating on harvested power. This necessitates careful scheduling, such that learning occurs only during idle periods, when energy reserves are high and user latency constraints are relaxed.
 
-[^fn-mcu-power-budget]: **Microcontroller Power Budget**\index{Microcontroller!power budget}: At 10 mW during training, a microcontroller exhausts a 1000 mAh battery in 2.8 hours, and indoor energy harvesting provides only 10--100 $\mu$W continuously. Real deployments duty-cycle: train for 10 seconds every hour, consuming approximately 1 joule total and limiting adaptation to 100--1000 gradient steps. This energy ceiling, not compute throughput, is the binding constraint that determines which algorithms are feasible on harvested-power devices. \index{Microcontroller!power budget}
+[^fn-mcu-power-budget]: **Microcontroller Power Budget**\index{Microcontroller!power budget}: A microcontroller drawing 10 mW during training consumes 36 J per hour, so a small 200 mAh coin-cell battery (about 2,200 J of usable energy at 3 V) sustains roughly 60 hours of continuous compute. Indoor energy harvesting provides only 10--100 $\mu$W continuously, two to three orders of magnitude below the training draw, so real deployments duty-cycle: training 10 seconds per hour consumes only about 0.1 J per session and limits adaptation to a few hundred gradient steps per session. This energy ceiling, not compute throughput, is the binding constraint that determines which algorithms are feasible on harvested-power devices. \index{Microcontroller!power budget}
 
 From a memory perspective, training incurs higher peak usage than inference, due to the need to cache intermediate activations[^fn-activation-caching-memory], gradients, and optimizer state [@lin2020mcunet].
 
@@ -3106,7 +3112,7 @@ We established a three-pillar framework for navigating these constraints: **Mode
 
 ::: {.callout-takeaways title="Physics sets the budget"}
 
-* **The mobile memory wall**\index{Mobile Memory Wall}: While NPUs provide raw compute (TOPS), on-device LLMs are strictly bandwidth-bound. The 30--50$\times$ gap between mobile RAM and data center HBM makes quantization a mandatory "bandwidth survival strategy" for interactive decode speeds.
+* **The Mobile Memory Wall**\index{Mobile Memory Wall}: While NPUs provide raw compute (TOPS), on-device LLMs are strictly bandwidth-bound. The 30--50$\times$ gap between mobile RAM and data center HBM makes quantization a mandatory "bandwidth survival strategy" for interactive decode speeds.
 * **Training is not inference**: On-device learning amplifies resource needs by 4--12$\times$ compared to inference-only deployment, due to activation caching, gradient storage, optimizer state, and bidirectional memory traffic.
 * **The three pillars**: Resource-constrained learning depends on Model Adaptation (bias-only/sparse updates), Data Efficiency (few-shot/experience replay), and Federated Coordination (privacy-preserving aggregation).
 * **Heterogeneity is the default**\index{Heterogeneity Is the Default}: Unlike uniform data center racks, the edge is a fragmented ecosystem of microcontrollers and SoCs. Federated learning must account for "stragglers" and participation bias generated by these physical disparities.

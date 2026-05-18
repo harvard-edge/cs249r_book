@@ -10,6 +10,14 @@
 from .units import *  # noqa: F401,F403 — re-export full unit registry
 
 # --- Hardware Specifications (The Silicon Contract) ---
+#
+# Capacity constants below use binary GiB per the physical HBM/DRAM stack spec.
+# The field's branded vocabulary (e.g. "V100 32 GB HBM2", "A100 80 GB HBM2e",
+# "ESP32-S3 512 KB RAM") rounds these to decimal-labeled names; book prose
+# displays the branded form in table cells and chip-identification labels per
+# the §7 branded-label carve-out (see .claude/rules/book-prose.md). All
+# *calculations* (memory budgets, roofline math, throughput estimates) use the
+# precise values defined here.
 
 # NVIDIA V100 (Volta, 2017) — Source: NVIDIA V100 Data Sheet
 V100_FLOPS_FP16_TENSOR = 125 * TFLOPs / second
@@ -33,6 +41,7 @@ A100_TDP = 400 * watt                     # SXM variant
 H100_FLOPS_FP16_TENSOR = 989 * TFLOPs / second
 H100_FLOPS_FP8_TENSOR = 1979 * TFLOPs / second
 H100_FLOPS_TF32 = 494 * TFLOPs / second
+H100_FLOPS_FP32_CUDA = 67 * TFLOPs / second  # FP32 on CUDA (vector) cores, no Tensor Core
 H100_FLOPS_INT8 = 1979 * TFLOPs / second  # Dense. Sparse is 3958.
 H100_MEM_BW = 3.35 * TB / second          # HBM3
 H100_MEM_CAPACITY = 80 * GiB
@@ -222,7 +231,7 @@ ENERGY_FLOP_PJ = 4.6 * ureg.picojoule / flop         # Generic (legacy alias)
 ENERGY_SRAM_L1_PJ = 0.5 * ureg.picojoule             # L1 cache access
 ENERGY_SRAM_L2_PJ = 2.0 * ureg.picojoule             # L2 cache access
 ENERGY_REG_PJ = 0.01 * ureg.picojoule                # Register file access
-ENERGY_MOBILENET_INF_MJ = 0.1 * ureg.millijoule
+ENERGY_MOBILENET_INF_MJ = 0.1 * ureg.millijoule  # millijoule (not megajoule); matches the ENERGY_*_PJ = picojoule convention used in this block
 
 # Addition energy (Horowitz 2014, 45nm process)
 ENERGY_ADD_FP32_PJ = 0.9 * ureg.picojoule

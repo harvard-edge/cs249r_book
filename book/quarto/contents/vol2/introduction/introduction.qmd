@@ -59,8 +59,9 @@ Large-scale systems also have a societal property that small models do not: thei
 # │ Goal: Provide scale constants (cluster sizes, communication volumes) for
 # │       this introduction to anchor the "why distributed?" argument
 # │       quantitatively—computing GPT-3 gradient transfer size
-# │       (GPT3_PARAMS × 4 bytes), cluster MTBF for 25 k A100s at 8% annual
-# │       failure rate, and accelerator peak throughput (A100_FLOPS_FP16_TENSOR,
+# │       (GPT3_PARAMS × 4 bytes), cluster MTBF for 25 k A100s at the canonical
+# │       50,000-hour per-GPU MTTF (GPU_MTTF_HOURS),
+# │       and accelerator peak throughput (A100_FLOPS_FP16_TENSOR,
 # │       H100_FLOPS_FP8_TENSOR, TPUV4_FLOPS_BF16) to show scale forces
 # │       distribution.
 # │ Show: "312" TFLOPs A100, "2,039" GB/s memory bandwidth, "700" GB gradient
@@ -113,14 +114,16 @@ Between 2012 and the mid-2020s, public and third-party estimates place frontier 
 # │ Context: @sec-vol2-introduction-scale-moment
 # │
 # │ Goal: Quantify GPT-4 training scale and failure frequency.
-# │ Show: illustrative ~25k-GPU, 90-day scenario; ~1 failure every 4.4 hours.
-# │ How: GPU_Count * Fail_Rate_Annual / 365 = Fails_Per_Day.
+# │ Show: illustrative ~25k-GPU, 90-day scenario; ~1 failure every 2 hours.
+# │ How: cluster_MTBF = GPU_MTTF / N; fails_per_day = 24 / cluster_MTBF.
 # │
 # │ Imports: mlsysim.book (fmt, check)
 # │ Exports: Gpt4TrainingScenario.gpt4_gpus_str,
 # │          Gpt4TrainingScenario.gpt4_days_str,
 # │          Gpt4TrainingScenario.cluster_fail_day_str,
-# │          Gpt4TrainingScenario.mtbf_hours_str
+# │          Gpt4TrainingScenario.mtbf_hours_str,
+# │          Gpt4TrainingScenario.gpu_mttf_str,
+# │          Gpt4TrainingScenario.annual_fails_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Applications, Systems
 from mlsysim.core.constants import GPU_MTTF_HOURS, hour, day
@@ -133,23 +136,27 @@ class Gpt4TrainingScenario:
     mission = Applications.Frontier
     num_gpus = 25000 # Specific fleet size for this mission
     gpu_days = 90    # Illustrative frontier-class training window
+    hours_per_year = 8760
 
-    # Convert an 8% annual failure rate into component MTTF.
-    # MTBF_cluster = MTTF_gpu/N
-    node_mttf = 109_500 * hour
+    # Per-GPU MTTF is the canonical reliability constant for the book
+    # (datacenter-grade GPU, steady-state). MTBF_cluster = MTTF_gpu / N.
+    gpu_mttf_hours = GPU_MTTF_HOURS
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    cluster_mtbf_hours = node_mttf/num_gpus
+    cluster_mtbf_hours = gpu_mttf_hours / num_gpus
     cluster_failures_per_day = 24 / cluster_mtbf_hours
+    annual_failures = num_gpus * (hours_per_year / gpu_mttf_hours)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(cluster_mtbf_hours < 5 * hour, f"MTBF should be < 5 hours for 25k GPUs, got {cluster_mtbf_hours:.1f}")
+    check(cluster_mtbf_hours < 3, f"MTBF should be < 3 hours for 25k GPUs, got {cluster_mtbf_hours:.1f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     gpt4_gpus_str = fmt(num_gpus, precision=0)
     gpt4_days_str = fmt(gpu_days, precision=0)
-    cluster_fail_day_str = fmt(cluster_failures_per_day, precision=1)
-    mtbf_hours_str = fmt(cluster_mtbf_hours, precision=1)
+    cluster_fail_day_str = fmt(cluster_failures_per_day, precision=0)
+    mtbf_hours_str = fmt(cluster_mtbf_hours, precision=0)
+    gpu_mttf_str = fmt(gpu_mttf_hours, precision=0)
+    annual_fails_str = fmt(annual_failures, precision=0)
     hw_name = "A100-class"
 ```
 
@@ -157,13 +164,13 @@ Consider a GPT-4-class training scenario using a hypothetical **`{python} Gpt4Tr
 
 ::: {.callout-notebook title="Scale and reliability"}
 
-**Problem**: A training run for a GPT-4 class model uses `{python} Gpt4TrainingScenario.gpt4_gpus_str` GPUs. If each individual GPU has an annual failure rate of 8 percent, *how* often will the training job be interrupted by hardware failure?
+**Problem**: A training run for a GPT-4 class model uses `{python} Gpt4TrainingScenario.gpt4_gpus_str` GPUs. If each individual GPU has a Mean Time To Failure (MTTF) of `{python} Gpt4TrainingScenario.gpu_mttf_str` hours (the canonical datacenter-grade figure used throughout this volume), *how* often will the training job be interrupted by hardware failure?
 
 **Math**:
 
-1. **Total annual failures**\index{Total Annual Failures}: `{python} Gpt4TrainingScenario.gpt4_gpus_str` $\times 0.08 = 2,000$ failures per year.
-2. **Daily failure rate**\index{Daily Failure Rate}: $2,000/365 \approx$ **`{python} Gpt4TrainingScenario.cluster_fail_day_str` failures per day**.
-3. **Mean time between failures (MTBF)**: $24 \text{ hours} /$ `{python} Gpt4TrainingScenario.cluster_fail_day_str` $\approx$ **`{python} Gpt4TrainingScenario.mtbf_hours_str` hours**.
+1. **Cluster MTBF**\index{MTBF!cluster}: For $N$ independent GPUs, $\text{MTBF}_{\text{cluster}} = \text{MTTF}_{\text{GPU}} / N =$ `{python} Gpt4TrainingScenario.gpu_mttf_str` $/$ `{python} Gpt4TrainingScenario.gpt4_gpus_str` $\approx$ **`{python} Gpt4TrainingScenario.mtbf_hours_str` hours**.
+2. **Daily failure rate**\index{Daily Failure Rate}: $24 \text{ hours} /$ `{python} Gpt4TrainingScenario.mtbf_hours_str` $\text{ hours} \approx$ **`{python} Gpt4TrainingScenario.cluster_fail_day_str` failures per day**.
+3. **Total annual failures**\index{Total Annual Failures}: `{python} Gpt4TrainingScenario.gpt4_gpus_str` GPUs $\times$ (8{,}760 hours $/$ `{python} Gpt4TrainingScenario.gpu_mttf_str` hours) $\approx$ **`{python} Gpt4TrainingScenario.annual_fails_str` failures per year**.
 
 **Systems insight**: In this regime, the system is always in a state of partial failure. Traditional software recovery (manual restart) collapses; the system must be architected for fault tolerance as a first-class citizen. Hardware can no longer be treated as a reliable abstraction; it is a probabilistic resource that requires constant, automated state preservation (checkpointing).
 
@@ -187,11 +194,11 @@ Compute requirements have grown exponentially. AlexNet trained on two GTX 580 GP
 # │ Show: ~175B parameters; ~3.14e23 FLOPs.
 # │ How: pulling constants from mlsysim.core.constants.
 # │
-# │ Imports: mlsysim.core.constants (GPT3_PARAMS, GPT3_TRAINING_OPS, param, BILLION),
-# │          mlsysim.book (sci, check)
+# │ Imports: mlsysim.core.constants (GPT3_PARAMS, GPT3_TRAINING_OPS, GB,
+# │          param, BILLION, BYTES_FP32), mlsysim.book (sci, check)
 # │ Exports: gpt3_params_b, gpt3_training_ops_sci, gpt3_gradient_gb
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import GPT3_PARAMS, GPT3_TRAINING_OPS, param, BILLION
+from mlsysim.core.constants import GPT3_PARAMS, GPT3_TRAINING_OPS, GB, param, BILLION, BYTES_FP32
 from mlsysim.fmt import sci, check
 
 class Gpt3TrainingScenario:
@@ -203,7 +210,7 @@ class Gpt3TrainingScenario:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     params_b = params/BILLION
-    gradient_gb = (params * 4) / BILLION # FP32 gradients
+    gradient_gb = (params * BYTES_FP32).m_as(GB) # FP32 gradients
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(params_b == 175, f"GPT-3 should be 175B params, got {params_b}")
@@ -232,7 +239,7 @@ GPT-3 consumed an estimated `{python} Gpt3TrainingScenario.gpt3_training_ops_sci
 
 @tbl-training-compute-evolution captures the growth in training compute, but an equally important dimension is the growth in *cluster size* itself. @fig-cluster-size-explosion traces this trajectory by plotting the number of accelerators used to train landmark models over the past decade.
 
-::: {#fig-cluster-size-explosion fig-env="figure" fig-pos="htb" fig-cap="**The Cluster Size Explosion**: Number of accelerators used to train landmark models, 2012--2024. Verified counts from published papers are shown as filled circles; the GPT-3 estimate (hollow marker) reflects approximate cluster size from Microsoft infrastructure announcements rather than a precise published count. The dashed trend line indicates approximately 2$\times$ annual growth in cluster size, a rate that outpaces Moore's Law and drives every infrastructure challenge in this volume." fig-alt="Scatter plot with log-scale y-axis showing accelerator count vs. year from 2012 to 2025. Points rise from 2 GPUs for AlexNet in 2012 to 16384 for Llama 3 in 2024."}
+::: {#fig-cluster-size-explosion fig-env="figure" fig-pos="htb" fig-cap="**The Cluster Size Explosion**: Number of accelerators used to train landmark models, 2012--2024. Verified counts from published papers are shown as filled circles; the GPT-3 estimate (hollow marker) reflects approximate cluster size from Microsoft infrastructure announcements rather than a precise published count. The dashed trend line indicates approximately 2× annual growth in cluster size, a rate that outpaces Moore's Law and drives every infrastructure challenge in this volume." fig-alt="Scatter plot with log-scale y-axis showing accelerator count vs. year from 2012 to 2025. Points rise from 2 GPUs for AlexNet in 2012 to 16384 for Llama 3 in 2024."}
 
 ```{python}
 #| echo: false
@@ -387,20 +394,22 @@ On a single GPU, training proceeds deterministically: the same code, data, and r
 # │          Gbps, BITS_PER_BYTE)
 # │ Exports: ib_hdr_gbps, ib_ndr_gbps, ib_hdr_gbs, ib_ndr_gbs
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import INFINIBAND_HDR_BW, INFINIBAND_NDR_BW, Gbps, BITS_PER_BYTE
+from mlsysim.core.constants import INFINIBAND_HDR_BW, INFINIBAND_NDR_BW, NVLINK_H100_BW, Gbps, GB, second, BITS_PER_BYTE
 
 class InfiniBandScenario:
-    """InfiniBand networking bandwidth reference."""
+    """InfiniBand and NVLink bandwidth reference."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     hdr = INFINIBAND_HDR_BW
     ndr = INFINIBAND_NDR_BW
+    nvlink_h100 = NVLINK_H100_BW
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     hdr_gbps = hdr.m_as(Gbps)
     ndr_gbps = ndr.m_as(Gbps)
     hdr_gbs = hdr_gbps/BITS_PER_BYTE
     ndr_gbs = ndr_gbps/BITS_PER_BYTE
+    nvlink_h100_gbs_val = nvlink_h100.m_as(GB/second)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     from mlsysim.fmt import check
@@ -411,6 +420,7 @@ class InfiniBandScenario:
     ib_ndr_gbps = f"{ndr_gbps:.0f}"
     ib_hdr_gbs = f"{hdr_gbs:.0f}"
     ib_ndr_gbs = f"{ndr_gbs:.0f}"
+    nvlink_h100_gbs = f"{nvlink_h100_gbs_val:.0f}"
 ```
 
 These scale-induced challenges drive infrastructure investment by the largest AI organizations. Meta's Research SuperCluster (RSC) contains 16,000 NVIDIA A100 GPUs connected by `{python} InfiniBandScenario.ib_hdr_gbps` Gb/s InfiniBand[^fn-infiniband-rdma-v2] networking [@meta2022rsc]. Google's TPU v4 pods contain 4,096 chips with 1.1 exaFLOPS of aggregate compute capacity. Microsoft's Azure AI infrastructure spans multiple data centers with tens of thousands of GPUs dedicated to AI workloads. The scale of the models dictates the scale of the infrastructure.
@@ -746,7 +756,7 @@ scalefac=0.26,drawcolor=black,filllcolor=OrangeLine!90}};
 scalefac=0.2,drawcolor=black,filllcolor=OrangeLine!60}};
 %Hardware
 \node[Box1,draw=none,below=of B3](B4){};
-\node[above=-1pt of B4.north,Text1]{HBM/NVLink (900 GB/s)};
+\node[above=-1pt of B4.north,Text1]{NVLink (900 GB/s)};
 \node[Box2,draw=RedLine](BB4)at($(B4.south west)+(-3mm,0)$){Hardware};
 \draw[ALineA](B4.west)--(BB4.north);
 \pic[shift={(0,0)}] at  (B4){cpu={scalefac=0.49,picname=1,filllcolor=GreenLine, Linewidth=0.7pt}};
@@ -796,14 +806,14 @@ drawcolor=black,filllcolor=cyan!15!,Linewidth=0.57pt,Linewidth=1pt}};
 
 :::
 
-The stack architecture in @fig-vol2-system-scaling-regimes does not change when we scale: every ML system still has hardware, a system envelope, a workload, and a mission. *What* changes is the physics at each layer. Read the figure from bottom to top. At the bottom row, **Hardware** (HBM and NVLink at 900 GB/s within one node) becomes **Infrastructure** (InfiniBand RDMA fabric spanning racks at 400 Gb/s per link), and the bottleneck shifts from the memory wall to the bisection bandwidth wall. One row up, **System Software** (a single CUDA runtime managing PCIe DMA) becomes **Distribution** (NCCL and RDMA libraries coordinating thousands of processes across the fabric).
+The stack architecture in @fig-vol2-system-scaling-regimes does not change when we scale: every ML system still has hardware, a system envelope, a workload, and a mission. *What* changes is the physics at each layer. Read the figure from bottom to top. At the bottom row, **Hardware** (NVLink at `{python} InfiniBandScenario.nvlink_h100_gbs` GB/s within one node) becomes **Infrastructure** (InfiniBand RDMA fabric spanning racks at `{python} InfiniBandScenario.ib_ndr_gbps` Gb/s per link), and the bottleneck shifts from the memory wall to the bisection bandwidth wall. One row up, **System Software** (a single CUDA runtime managing PCIe DMA) becomes **Distribution** (NCCL and RDMA libraries coordinating thousands of processes across the fabric).
 
 The upper two layers undergo an equally profound transformation. **ML Framework**\index{ML Framework} (PyTorch or JAX executing a training loop on one node) becomes **Serving/Ops** (orchestration and CI/CD pipelines that schedule distributed jobs and manage rolling deployments). At the top, **Application** (a single training script or inference service) becomes **Governance** (responsible AI policy, security auditing, and multi-tenant access control), because fleet-scale deployment introduces organizational concerns absent from a single machine. The four layers of the Engineering Crux at fleet scale are:
 
-1.  **Infrastructure** (Hardware—The Engine): The physical foundation. This layer defines the fleet's raw capabilities: per-node $R_{\text{peak}}$ and $\text{BW}$, interconnected by InfiniBand RDMA fabric. Our primary "Hardware Twins" are the **NVIDIA H100** and **B200**.
-2.  **Distribution** (Systems—The Car): The communication substrate. This layer defines the cluster envelope: NCCL and RDMA collectives that coordinate thousands of accelerators, along with bisection bandwidth, power usage effectiveness (PUE), and failure rates (MTBF).
-3.  **Serving/Ops** (Workloads—The Route): The orchestration layer. This layer manages the mathematical workload sharded across the cluster $(O, D_{\text{vol}}, \text{CI})$ through CI/CD pipelines and scheduling. We use **Lighthouse Workloads** like **GPT-4** and **DLRM**.
-4.  **Governance** (Missions—The Destination): The mission context. This is the top of the stack, where responsible AI policy, security, and multi-tenant access control shape fleet-wide behavior. A **Mission** (such as **Frontier Model Training**) introduces high-level requirements (for example, "99.99 percent service availability") that dictate the configuration of every layer below.
+1.  **Infrastructure** (Hardware, the Engine): The physical foundation. This layer defines the fleet's raw capabilities: per-node $R_{\text{peak}}$ and $\text{BW}$, interconnected by InfiniBand RDMA fabric. Our primary "Hardware Twins" are the **NVIDIA H100** and **B200**.
+2.  **Distribution** (Systems, the Car): The communication substrate. This layer defines the cluster envelope: NCCL and RDMA collectives that coordinate thousands of accelerators, along with bisection bandwidth, power usage effectiveness (PUE), and failure rates (MTBF).
+3.  **Serving/Ops** (Workloads, the Route): The orchestration layer. This layer manages the mathematical workload sharded across the cluster $(O, D_{\text{vol}}, \text{CI})$ through CI/CD pipelines and scheduling. We use **Lighthouse Workloads** like **GPT-4** and **DLRM**.
+4.  **Governance** (Missions, the Destination): The mission context. This is the top of the stack, where responsible AI policy, security, and multi-tenant access control shape fleet-wide behavior. A **Mission** (such as **Frontier Model Training**) introduces high-level requirements (for example, "99.99 percent service availability") that dictate the configuration of every layer below.
 
 This hierarchy ensures that every distributed engineering decision is grounded in its "Mission Context." For example, the **Frontier Training** mission instantiates **Archetype A (GPT-4/Llama-3)**\index{Archetype!A (GPT-4/Llama-3)} from the volume's canonical roster (@sec-vol2-introduction-archetypes), and operates on a cluster of **H100** hardware. By standardizing these protagonists, we ensure that the "Physics of Scale" remains traceable across every chapter.
 
@@ -832,7 +842,7 @@ The barrier synchronization pattern in @fig-traditional-vs-ml-fleet explains *wh
 Verify your understanding of *how* ML fleets differ from traditional clusters:
 
 - [ ] *Why* does a single slow worker (straggler) have a disproportionate impact on a synchronous ML training job compared to a MapReduce job?
-- [ ] In which type of system—traditional web serving or ML training—is bisection bandwidth more likely to be the primary performance bottleneck?
+- [ ] In which type of system, traditional web serving or ML training, is bisection bandwidth more likely to be the primary performance bottleneck?
 - [ ] Can you explain the concept of **Synchronous Tight Coupling**? *How* does it relate to the global barrier at the end of each training step?
 - [ ] True or False: Adding more GPUs to a training job always results in a linear speedup of the training process.
 
@@ -868,10 +878,10 @@ At small scale, **computation dominates**. Training a model on a single GPU spen
 # │ Show: ~175B parameters; ~700 GB gradient (FP32).
 # │ How: pulling constants from mlsysim.core.constants.
 # │
-# │ Imports: mlsysim.core.constants (GPT3_PARAMS, param, BILLION)
+# │ Imports: mlsysim.core.constants (GPT3_PARAMS, GB, param, BILLION, BYTES_FP32)
 # │ Exports: Gpt3TrainingScenario.gpt3_params_b, Gpt3TrainingScenario.gpt3_gradient_gb
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import GPT3_PARAMS, param, BILLION
+from mlsysim.core.constants import GPT3_PARAMS, GB, param, BILLION, BYTES_FP32
 
 class Gpt3CommunicationScenario:
     """GPT-3 gradient sync statistics."""
@@ -881,7 +891,7 @@ class Gpt3CommunicationScenario:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     params_b = params/BILLION
-    gradient_gb = (params * 4) / BILLION # FP32 gradients
+    gradient_gb = (params * BYTES_FP32).m_as(GB) # FP32 gradients
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     from mlsysim.fmt import check
@@ -1356,9 +1366,9 @@ The Machine Learning Fleet operates under three categories of irreducible constr
 ### The reliability gap {#sec-vol2-introduction-reliability-gap}
 
 \index{Reliability Gap}
-Machine learning systems already face the **verification gap**\index{Verification Gap}: the impossibility of testing a high-dimensional model against every possible input. At fleet scale, a more physical challenge emerges: the **reliability gap**\index{Reliability Gap!definition}.
+Machine learning systems already face the **Verification Gap**\index{Verification Gap}: the impossibility of testing a high-dimensional model against every possible input. At fleet scale, a more physical challenge emerges: the **reliability gap**\index{Reliability Gap!definition}.
 
-In traditional software, we treat hardware as a reliable abstraction. A single server typically has an **availability** of "four nines" (99.99 percent), meaning it fails for roughly 53 minutes a year. The Machine Learning Fleet, however, operates at a scale where this abstraction collapses. *When* a fleet coordinates 25,000 GPUs, the probability that the entire system is healthy ($R_{\text{fleet}}$) is the product of the individual probabilities:
+In traditional software, we treat hardware as a reliable abstraction. A single server typically has an **availability** of "four nines" (99.99 percent), meaning it fails for roughly 53 minutes a year. The Machine Learning Fleet, however, operates at a scale where this abstraction collapses. *When* a fleet coordinates 25,000 GPUs, @eq-reliability-gap multiplies the individual node probabilities to give the probability that the entire system is healthy ($R_{\text{fleet}}$):
 
 $$ R_{\text{fleet}} = (R_{\text{node}})^N $$ {#eq-reliability-gap}
 
@@ -1416,7 +1426,7 @@ The exponential decay in @fig-reliability-gap-collapse makes the architectural c
 \index{Communication Intensity}
 If the iron law\index{Iron Law} governs *how* a system executes, the **communication-computation ratio**\index{CI Ratio} governs *where* it stalls. On a single accelerator, the roofline model\index{Roofline Model} determines whether a kernel is compute-bound or memory-bound. At fleet scale, this analysis elevates to the network.
 
-We define **communication intensity** $(\text{CI})$ as the ratio of data moved across the network to the operations performed locally:
+@eq-ci-ratio defines **communication intensity** $(\text{CI})$ as the ratio of data moved across the network to the operations performed locally:
 
 $$\text{CI} = \frac{\text{Bytes Transferred (Network)}}{\text{FLOPs Executed (Local)}}$$ {#eq-ci-ratio}
 
@@ -1479,11 +1489,11 @@ Beyond legal compliance, the Machine Learning Fleet carries ethical obligations.
 2.  **Algorithm**: The mathematical logic being executed. Performance is **Compute-bound** when the processor's arithmetic units are the limiting factor.
 3.  **Machine**\index{Machine}: The physical hardware substrate. Performance is **Memory-bound** when the memory bandwidth or capacity limits throughput.
 
-Scaling from one machine to a fleet introduces three new fundamental resources that compete for wall-clock time. The **C$^3$ Taxonomy**\index{C-Cube Taxonomy} extends the D·A·M lens to the fleet, identifying the physical and logical boundaries of the Machine Learning Fleet. Every engineering decision in this volume revolves around balancing these three anchor points:
+Scaling from one machine to a fleet introduces three new fundamental resources that compete for wall-clock time. The **C$^3$ Taxonomy**\index{C³ Taxonomy} extends the D·A·M lens to the fleet, identifying the physical and logical boundaries of the Machine Learning Fleet. Every engineering decision in this volume revolves around balancing these three anchor points:
 
-1.  **Computation ($C_1$ - The Math)**\index{C$^3$ Taxonomy!computation}: The local execution of matrix operations on individual accelerators. This is the domain of TFLOPS, memory bandwidth, and arithmetic intensity. At scale, the goal is to keep the math engine running at peak utilization.
-2.  **Communication ($C_2$ - The Wire)**\index{C$^3$ Taxonomy!communication}: The movement of data across the network fabric. This is governed by bisection bandwidth and the speed of light. At scale, communication becomes the primary system bottleneck, often taking more time than the math itself.
-3.  **Coordination ($C_3$ - The Logic)**\index{C$^3$ Taxonomy!coordination}: The synchronous management of state across thousands of nodes. This is the domain of collective algorithms (All-Reduce), fault tolerance, and distributed consensus. Coordination is the "Software Tax" that determines how efficiently $N$ independent nodes can act as a single computer.
+1.  **Computation ($C_1$ - The Math)**\index{C³ Taxonomy!computation}: The local execution of matrix operations on individual accelerators. This is the domain of TFLOPS, memory bandwidth, and arithmetic intensity. At scale, the goal is to keep the math engine running at peak utilization.
+2.  **Communication ($C_2$ - The Wire)**\index{C³ Taxonomy!communication}: The movement of data across the network fabric. This is governed by bisection bandwidth and the speed of light. At scale, communication becomes the primary system bottleneck, often taking more time than the math itself.
+3.  **Coordination ($C_3$ - The Logic)**\index{C³ Taxonomy!coordination}: The synchronous management of state across thousands of nodes. This is the domain of collective algorithms (All-Reduce), fault tolerance, and distributed consensus. Coordination is the "Software Tax" that determines how efficiently $N$ independent nodes can act as a single computer.
 
 These three dimensions form the **Triad of Distributed Efficiency**\index{Triad of Distributed Efficiency}. If the fleet spends too much time on *Communication* or *Coordination*, the expensive *Computation* capacity sits idle. The central challenge is engineering the fleet to minimize the C$^3$ Gap: the difference between theoretical hardware peak and actual distributed throughput.
 
@@ -1501,11 +1511,11 @@ The intersection of these two taxonomies defines the entire design space of flee
 
 ### The fleet law {#sec-vol2-introduction-fleet-law}
 
-The C$^3$ taxonomy yields a diagnostic equation for every distributed training step. On a single machine, execution time decomposes into data movement, computation, and overhead. At fleet scale, a parallel decomposition emerges. The **Fleet Law**\index{Fleet Law} decomposes distributed execution into its three irreducible components:
+The C$^3$ taxonomy yields a diagnostic equation for every distributed training step. On a single machine, execution time decomposes into data movement, computation, and overhead. At fleet scale, a parallel decomposition emerges. @eq-fleet-law states the **Fleet Law**\index{Fleet Law}, which decomposes distributed execution into its three irreducible components:
 
 $$ T_{\text{step}} = T_{\text{compute}} + T_{\text{comm}} + T_{\text{sync}} $$ {#eq-fleet-law}
 
-where $T_{\text{compute}}$ is the time spent on useful arithmetic (forward and backward passes), $T_{\text{comm}}$ is the time moving data across the network (gradient synchronization, parameter broadcasts), and $T_{\text{sync}}$ is time consumed by synchronization logic (barriers, scheduling decisions, fault recovery). The fleet's efficiency, defined as the fraction of wall-clock time spent on useful math, follows directly:
+where $T_{\text{compute}}$ is the time spent on useful arithmetic (forward and backward passes), $T_{\text{comm}}$ is the time moving data across the network (gradient synchronization, parameter broadcasts), and $T_{\text{sync}}$ is time consumed by synchronization logic (barriers, scheduling decisions, fault recovery). @eq-fleet-efficiency rewrites this decomposition as the fleet's efficiency, defined as the fraction of wall-clock time spent on useful math:
 
 $$ \eta_{\text{fleet}} = \frac{T_{\text{compute}}}{T_{\text{compute}} + T_{\text{comm}} + T_{\text{sync}}} $$ {#eq-fleet-efficiency}
 
@@ -1513,9 +1523,9 @@ This decomposition is a diagnostic instrument. When $\eta_{\text{fleet}}$ drops 
 
 Google's **ML Productivity Goodput**\index{Goodput!program}\index{Goodput!runtime}\index{Goodput!scheduling} metric provides the production-scale instantiation of this framework. Goodput decomposes end-to-end training productivity into three multiplicative factors: **Program Goodput** ($\eta_P$), measuring how efficiently code uses hardware (Compute); **Runtime Goodput** ($\eta_R$), capturing losses from communication stalls and failures (Communication); and **Scheduling Goodput** ($\eta_S$), capturing wasted time from preemptions and reconfigurations (Coordination). The C$^3$ taxonomy is the theoretical framework; Goodput is how production teams measure it.
 
-@fig-c3-taxonomy visualizes the C$^3$ framework. The three vertices represent the fundamental resources of the fleet, the edges represent the trade-offs that arise *when* optimizing any one dimension, and the center embodies the conservation of overhead: the unavoidable consequence of distributing computation across independent machines.
+@fig-c3-taxonomy visualizes the C$^3$ framework as a three-column layout, with Compute, Communication, and Coordination each occupying their own column of subtopics and the inter-column gaps highlighting the bottlenecks that arise where the dimensions meet. The same framework can be drawn as a triangle in which the vertices are the three resources, the edges are the trade-offs, and the center embodies the conservation of overhead—the unavoidable consequence of distributing computation across independent machines.
 
-::: {#fig-c3-taxonomy fig-env="figure" fig-pos="htb" fig-cap="**The C$^3$ Taxonomy**: Every distributed ML system partitions wall-clock time among three irreducible dimensions: Compute (the useful math), Communication (data movement across the network), and Coordination (synchronization logic). The edges identify the trade-off that emerges when optimizing between any two dimensions. The center principle—conservation of overhead—asserts that overhead cannot be eliminated, only redistributed. This triangle is the diagnostic lens for every performance analysis in this book." fig-alt="Triangle diagram with three rectangular nodes at vertices labeled Compute, Communication, and Coordination. Double-headed arrows connect all three. Center shows conservation of overhead in a dashed circle. Edge labels show trade-offs: Bandwidth Bound, Synchronization Cost, Pipeline Bubbles."}
+::: {#fig-c3-taxonomy fig-env="figure" fig-pos="htb" fig-cap="**The C$^3$ Taxonomy**: Every distributed ML system partitions wall-clock time among three irreducible dimensions: Compute (the useful math), Communication (data movement across the network), and Coordination (synchronization logic). The figure lays out each dimension as a column of subtopics, with the bottlenecks that arise between adjacent dimensions called out in the inter-column gaps. The framework's underlying claim—conservation of overhead—asserts that overhead cannot be eliminated, only redistributed; this is the diagnostic lens for every performance analysis in this book." fig-alt="Three-column layout with Compute, Communication, and Coordination as column headers; each column lists the subtopics it covers. Bottleneck labels sit in the gaps between adjacent columns."}
 ![](images/svg/c3-taxonomy.svg)
 :::
 
@@ -1536,7 +1546,7 @@ where:
 
 ### The energy-scale invariant {#sec-introduction-energyscale-invariant-a0d6}
 
-While the iron law of scale governs time, the **Energy-Scale Invariant**\index{Energy-Scale Invariant} governs the sustainability and economic viability of the fleet. At scale, every training step is a thermodynamic event. We define the **Fleet Energy Efficiency** ($\eta_{p}$) as the ratio of useful work to total energy consumed:
+While the iron law of scale governs time, the **Energy-Scale Invariant**\index{Energy-Scale Invariant} governs the sustainability and economic viability of the fleet. At scale, every training step is a thermodynamic event. @eq-energy-scale-invariant defines the **Fleet Energy Efficiency** ($\eta_{p}$) as the ratio of useful work to total energy consumed:
 
 $$ \eta_{p} = \frac{\text{Work (FLOPs)}}{E_{\text{Compute}} + E_{\text{Cooling}} + E_{\text{Network}}} $$ {#eq-energy-scale-invariant}
 
@@ -1569,14 +1579,14 @@ The following notebook applies this law to a real-world cluster to calculate the
 # │ How: sync_size = 2 × params × 2 bytes; energy = sync_bits * Energy_per_bit.
 # │
 # │ Imports: mlsysim.core.constants (GPT3_PARAMS, INFINIBAND_HDR_BW, Gbps,
-# │           BILLION, BITS_PER_BYTE)
+# │           GB, byte, BITS_PER_BYTE)
 # │ Exports: GPT3SyncTax.ib_efficiency_pct_str,
 # │          GPT3SyncTax.eth_efficiency_pct_str,
 # │          GPT3SyncTax.sync_size_gb_str,
 # │          GPT3SyncTax.sync_energy_j_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.constants import (
-    GPT3_PARAMS, INFINIBAND_HDR_BW, Gbps, BILLION, BITS_PER_BYTE
+    GPT3_PARAMS, INFINIBAND_HDR_BW, Gbps, GB, byte, BITS_PER_BYTE
 )
 from mlsysim.fmt import fmt, check
 
@@ -1619,7 +1629,7 @@ class GPT3SyncTax:
     check(sync_energy_joules > 0.1, "Sync energy should be significant (multi-joule)")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    sync_size_gb_str = fmt(sync_size_bytes/BILLION, precision=0)
+    sync_size_gb_str = fmt((sync_size_bytes * byte).m_as(GB), precision=0)
     ib_efficiency_pct_str = fmt(eff_ib, precision=0)
     eth_efficiency_pct_str = fmt(eff_eth, precision=0)
     # Formatting energy in Joules (J) for scale impact
@@ -1878,7 +1888,7 @@ Abstract frameworks become concrete through specific workloads. This volume trac
 
 #### Archetype A (GPT-4/Llama-3) {#sec-introduction-archetype-gpt4llama3-b02f}
 
-GPT-4 and Llama-3 are large language models (LLMs)—autoregressive transformer architectures that generate text one token at a time. At single-accelerator scale, autoregressive language models are memory-bandwidth probes; at the scale of hundreds of billions of parameters, and in some proprietary frontier systems potentially more, these models define the **throughput-bound** regime: training demands ExaFLOPS of sustained compute distributed across thousands to tens of thousands of accelerators, while serving requires memory bandwidth sufficient to load billions of weights for every generated token. The fleet challenge is partitioning very large models across accelerator fleets using 3D Parallelism (data, tensor, and pipeline) without the network fabric becoming the binding bottleneck. In the C$^3$ taxonomy, Archetype A is dominated by **Communication**—gradient synchronization and activation transfers across the cluster consume more wall-clock time than the arithmetic itself.
+GPT-4 and Llama-3 are large language models (LLMs): autoregressive transformer architectures that generate text one token at a time. At single-accelerator scale, autoregressive language models are memory-bandwidth probes; at the scale of hundreds of billions of parameters, and in some proprietary frontier systems potentially more, these models define the **throughput-bound** regime: training demands ExaFLOPS of sustained compute distributed across thousands to tens of thousands of accelerators, while serving requires memory bandwidth sufficient to load billions of weights for every generated token. The fleet challenge is partitioning very large models across accelerator fleets using 3D Parallelism (data, tensor, and pipeline) without the network fabric becoming the binding bottleneck. In the C$^3$ taxonomy, Archetype A is dominated by **Communication**—gradient synchronization and activation transfers across the cluster consume more wall-clock time than the arithmetic itself.
 
 #### Archetype B (DLRM at scale) {#sec-introduction-archetype-b-dlrm-scale-fa6d}
 
@@ -1886,7 +1896,7 @@ DLRM (Deep Learning Recommendation Model)\index{DLRM} is Meta's production archi
 
 #### Archetype C (federated MobileNet) {#sec-introduction-archetype-c-federated-mobilenet-65a3}
 
-MobileNet is a family of efficient convolutional neural networks designed for on-device inference under tight power and memory budgets. In the **Federated Learning**\index{Federated Learning!introduction} setting, MobileNet instances train locally on millions of heterogeneous edge devices—smartphones, IoT sensors, medical wearables—without raw data ever leaving the device. The constraint regime is qualitatively different from the data-center archetypes: compute budgets are measured in milliwatts rather than megawatts, and privacy regulations prohibit centralized data aggregation. In the C$^3$ taxonomy, Archetype C is dominated by **compute** at the per-device level: each local training step is bound by the milliwatt-scale silicon envelope of the edge device, not by fleet-level network bandwidth or coordination protocols. The fleet challenge is coordinating model updates across millions of such compute-constrained, unreliable devices using Federated Averaging while maintaining convergence guarantees despite non-i.i.d. (not independent and identically distributed) data distributions and intermittent connectivity.
+MobileNet is a family of efficient convolutional neural networks designed for on-device inference under tight power and memory budgets. In the **Federated Learning**\index{Federated Learning!introduction} setting, MobileNet instances train locally on millions of heterogeneous edge devices (smartphones, IoT sensors, medical wearables) without raw data ever leaving the device. The constraint regime is qualitatively different from the data-center archetypes: compute budgets are measured in milliwatts rather than megawatts, and privacy regulations prohibit centralized data aggregation. In the C$^3$ taxonomy, Archetype C is dominated by **compute** at the per-device level: each local training step is bound by the milliwatt-scale silicon envelope of the edge device, not by fleet-level network bandwidth or coordination protocols. The fleet challenge is coordinating model updates across millions of such compute-constrained, unreliable devices using Federated Averaging while maintaining convergence guarantees despite non-i.i.d. (not independent and identically distributed) data distributions and intermittent connectivity.
 
 @tbl-vol2-lighthouse-archetypes summarizes the three canonical workloads tracked throughout this volume.
 

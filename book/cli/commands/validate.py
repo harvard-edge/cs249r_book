@@ -412,6 +412,12 @@ class ValidateCommand:
             # Migrated 2026-05-06: was book/tools/audit/index/check_xref_resolves.py
             Scope("xref-resolves", "_run_index_xref_resolves",
                   note="every |see / |seealso target resolves to a real main entry"),
+            # Added 2026-05-17: catches \index{} inside Python code fences,
+            # $..$ / $$..$$ math, and fig-cap/fig-alt/tbl-cap/lst-cap/title=
+            # attribute strings. Complements `placement` (which checks
+            # heading/div/footnote adjacency).
+            Scope("forbidden-contexts", "_run_index_placement_contexts",
+                  note='\\index{} not inside code / math / attribute strings'),
         ],
 
         "images": [
@@ -2999,12 +3005,17 @@ class ValidateCommand:
             yield idx, line, ("callout" in div_stack), False, "prose"
 
     def _run_table_caption_required(self, root: Path) -> ValidationRunResult:
-        """Flag pipe tables in body prose that lack `: caption {#tbl-X}`.
+        """Flag pipe tables (body prose AND inside callouts) lacking `: caption {#tbl-X}`.
 
-        Skips tables inside `::: {.callout-*}` divs (the callout title acts
-        as the contextual heading) and files under frontmatter/ or
-        backmatter/. Pre-existing violations are grandfathered via the
-        captions baseline; new ones error.
+        Per the policy codified after the 2026-05 release pass: every pipe
+        table that carries quantitative content needs a caption + ID,
+        regardless of whether it sits in body prose, inside a callout, or
+        inside a `{tbl-colwidths=...}` div. The MIT Press / H&P / CS:APP
+        convention is universal captioning.
+
+        Skips files under frontmatter/. Pre-existing violations (including
+        the ~93 captionless tables surfaced when this rule was extended)
+        are grandfathered via the captions baseline; new ones error.
         """
         start = time.time()
         files = self._qmd_files(root)
@@ -3025,9 +3036,11 @@ class ValidateCommand:
                 if kind != "prose":
                     i += 1
                     continue
-                if cal:
-                    i += 1
-                    continue
+                # NOTE: We used to skip tables inside ::: {.callout-*} divs
+                # ("the callout title acts as the contextual heading"). That
+                # exception was retired after the 2026-05 release pass — the
+                # callout title is not a citable reference, and tables that
+                # carry quantitative content need IDs in any context.
                 if (self._PIPE_ROW_RE.match(line)
                         and i + 1 < n
                         and self._PIPE_SEP_RE.match(lines[i + 1])):
@@ -7616,6 +7629,28 @@ class ValidateCommand:
             / "tools" / "audit" / "index" / "check_xref_resolves.py"
         )
         return self._delegate_script(script, [], "index-xref-resolves")
+
+    def _run_index_placement_contexts(self, root: Path) -> ValidationRunResult:
+        """index --scope forbidden-contexts: \\index{} in code / math / attribute strings.
+
+        Catches anti-patterns from index.md §1 + book-prose.md §7:
+
+          - \\index{} inside ```{python} ... ``` fences (LaTeX never indexes
+            code; leaks as literal text in displayed code).
+          - \\index{} inside $..$ or $$..$$ math (corrupts makeindex key
+            parsing; anti-pattern #4 'Math in key').
+          - \\index{} inside fig-cap=, fig-alt=, tbl-cap=, tbl-alt=,
+            lst-cap=, title= attribute strings (Quarto extracts as plain
+            text for HTML tooltips / PDF bookmarks / EPUB metadata; leaks
+            as literal text).
+
+        Wraps the native audit check at book/tools/audit/checks/index_placement.py.
+        """
+        return self._run_audit_check(
+            root, "audit.checks.index_placement",
+            "index-placement-contexts",
+            "\\index{} forbidden contexts (code / math / attribute strings)",
+        )
 
     def _run_lego_dead_code(self, root: Path) -> ValidationRunResult:
         """code --scope lego-dead-code: LEGO variables defined but never used.

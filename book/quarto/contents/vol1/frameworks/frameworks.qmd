@@ -252,9 +252,9 @@ Consider two engineers writing the same neural network. The first debugs interac
 # │ Context: @sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8—
 # │          opening paragraph of "Why Execution Strategy Matters: The Memory Wall"
 # │
-# │ Goal: Quantify the compute-vs-bandwidth gap on the A100 (312 TFLOPS vs 2 TB/s
-# │       = 156 ops/byte ridge point) to show why element-wise ops hit <1% utilization.
-# │ Show: "312 TFLOPS … 2.0 TB/s"—inline in Memory Wall opening paragraph;
+# │ Goal: Quantify the compute-vs-bandwidth gap on the A100 (312 TFLOPS vs 2.04 TB/s
+# │       = 153 ops/byte ridge point) to show why element-wise ops hit <1% utilization.
+# │ Show: "312 TFLOPS … 2.04 TB/s"—inline in Memory Wall opening paragraph;
 # │       a100_bw_tbs_str also reused in Device Bandwidth Hierarchy (line ~2615).
 # │ How: Hardware.Cloud.A100 attributes → m_as(TFLOPs/second) and m_as(TB/second);
 # │      ridge_point() → m_as(flop/byte) for the invariant check.
@@ -291,13 +291,13 @@ class MemoryWallSpecs:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     a100_tflops_fp16_str = fmt(flops_fp16, precision=0, commas=False)
-    a100_bw_tbs_str = fmt(bw_tbs, precision=1, commas=False)
+    a100_bw_tbs_str = fmt(bw_tbs, precision=2, commas=False)
 
 # Note: Use MemoryWallSpecs.a100_tflops_fp16_str directly.
 ```
 
 \index{Memory Wall!execution strategy impact}
-To understand why execution strategy matters so much, consider the memory wall developed in @sec-hardware-acceleration-understanding-ai-memory-wall-3ea9, the growing gap between processor computational speed and memory bandwidth. Modern GPUs can perform arithmetic far faster than they can fetch data. On an A100 GPU with `{python} A100BLAS.dense_tflops_str` TFLOPS of compute and `{python} MemoryWallSpecs.a100_bw_tbs_str` TB/s of memory bandwidth, element-wise operations like ReLU achieve less than 1 percent of peak compute capacity, not because the hardware is slow, but because they spend nearly all their time waiting for data. The Roofline Model (@sec-machine-foundations-roofline-model-2529) formalizes this trade-off, showing exactly when operations are memory bound vs. compute bound.\index{Memory Wall!definition}
+To understand why execution strategy matters so much, consider the memory wall\index{Memory Wall!definition} developed in @sec-hardware-acceleration-understanding-ai-memory-wall-3ea9, the growing gap between processor computational speed and memory bandwidth. Modern GPUs can perform arithmetic far faster than they can fetch data. On an A100 GPU with `{python} A100BLAS.dense_tflops_str` TFLOPS of compute and `{python} MemoryWallSpecs.a100_bw_tbs_str` TB/s of memory bandwidth, element-wise operations like ReLU achieve less than 1 percent of peak compute capacity, not because the hardware is slow, but because they spend nearly all their time waiting for data. The Roofline Model (@sec-machine-foundations-roofline-model-2529) formalizes this trade-off, showing exactly when operations are memory bound vs. compute bound.
 
 The memory wall creates a critical classification: operations are either **compute-bound**\index{Compute-bound operations} (limited by arithmetic throughput, like large matrix multiplications) or **memory-bound**\index{Memory-bound operations} (limited by data movement, like activation functions and normalization). Most individual neural network operation types (activations, normalizations, element-wise operations) are memory bound, though the large matrix multiplications that dominate total compute time can be compute bound.
 
@@ -1999,7 +1999,6 @@ From the case study in @sec-ml-frameworks-putting-together-anatomy-training-step
 # │          dispatch_compilation_speedup_str, gpt3_hw_time_us_value, gpt3_sw_time_us_value,
 # │          dispatch_ratio_large_str, t_sw_md
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import KIB_TO_BYTES
 from mlsysim.fmt import fmt, check, md_math
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2094,7 +2093,7 @@ This cumulative latency creates what is effectively *a dispatch tax* on executio
 # │
 # │ Note: PERSISTENT—GPT3Context.gpt3_params_b_str reused at line ~1634
 # │       (Reverse Mode section), line ~1703 (Memory Management Strategies),
-# │       line ~2905 and ~2922 (Parameter Structures / 3D Parallelism\index{3D Parallelism!scaling strategy} paragraphs).
+# │       line ~2905 and ~2922 (Parameter Structures / 3D Parallelism paragraphs).
 # │
 # │ Imports: mlsysim.core.constants (Bparam), mlsysim.book (fmt, check)
 # │ Exports: GPT3Context.gpt3_params_b_str
@@ -2529,7 +2528,8 @@ class ResNetMemory:
     fp32_mb = model.size_in_bytes(BYTES_FP32).m_as(MB)
     adam_mb = model.size_in_bytes(BYTES_ADAM_STATE).m_as(MB)
 
-    training_ratio = (training_min_gb * KIB_TO_BYTES) / fp32_mb
+    # Decimal GB → MB is ×1000 (book-prose §1: decimal units in prose).
+    training_ratio = (training_min_gb * 1000) / fp32_mb
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     resnet_params_m_str = fmt(params_m, precision=1, commas=False)
@@ -2733,7 +2733,7 @@ model = MyModel().cuda()
 optimizer = torch.optim.Adam(model.parameters())
 scaler = GradScaler("cuda")
 
-for inputs, targets in dataloader\index{DataLoader!throughput optimization}:
+for inputs, targets in dataloader:
     inputs, targets = inputs.cuda(), targets.cuda()
     optimizer.zero_grad()
 
@@ -3149,7 +3149,7 @@ minimum width=18,minimum height=18](3R){0};
 
 This rank hierarchy maps directly onto ML data. A color image is a rank-3 tensor: height by width by three channels (red, green, blue). @fig-tensor-data-structure-b breaks this apart, stacking the three color channels illustrating how a single photograph becomes a three-layer numerical grid. Stacking a batch of $N$ images adds a fourth dimension. In PyTorch's channel-first convention this produces a rank-4 tensor of shape $[N, 3, H, W]$; in channel-last layouts the same batch is $[N, H, W, 3]$. Every convolutional layer in a vision model consumes and produces rank-4 image tensors, which is why the tensor abstraction is so central to framework design.
 
-::: {#fig-tensor-data-structure-b fig-env="figure" fig-pos="htb" fig-cap="**Image as RGB Tensor**: Three stacked grids representing the red, green, and blue color channels of an image, with dimension labels showing width, height, and channel depth forming a rank-3 tensor. *Credit: Niklas Lang [https://towardsdatascience.com/what-are-tensors-in-machine-learning-5671814646ff](https://towardsdatascience.com/what-are-tensors-in-machine-learning-5671814646ff)*." fig-alt="Three stacked 5x5 grids in red, green, and blue representing RGB channels. Dimension labels show width five pixels, height five pixels, and three color channels, forming a rank-3 tensor for image data."}
+::: {#fig-tensor-data-structure-b fig-env="figure" fig-pos="htb" fig-cap="**Image as RGB Tensor**: Three stacked grids representing the red, green, and blue color channels of an image, with dimension labels showing width, height, and channel depth forming a rank-3 tensor. *Credit: Niklas Lang.*" fig-alt="Three stacked 5x5 grids in red, green, and blue representing RGB channels. Dimension labels show width five pixels, height five pixels, and three color channels, forming a rank-3 tensor for image data."}
 
 ```{.tikz}
 \scalebox{0.7}{%
@@ -3328,7 +3328,7 @@ class DeviceBandwidthHierarchy:
     pcie4_bidir_gbs_str = fmt(pcie4_gbs * 2, precision=0, commas=False)
     nvlink_a100_gbs_str = fmt(nvlink_a100_gbs, precision=0, commas=False)
     a100_bw_gbs_str = fmt(a100_bw_gbs, precision=0, commas=False)
-    a100_bw_tbs_str = fmt(a100_bw_tbs, precision=1, commas=False)
+    a100_bw_tbs_str = fmt(a100_bw_tbs, precision=2, commas=False)
     a100_tflops_fp16_str = fmt(a100_tflops_fp16, precision=0, commas=False)
     a100_mem_str = fmt(a100_mem, precision=0, commas=False)
     pcie4_4mb_ms_str = fmt(pcie4_4mb_ms, precision=3, commas=False)
@@ -3551,7 +3551,7 @@ class DataloaderThroughput:
 \index{Data Pipeline!throughput optimization}
 Streams and events address the second question---*where does data live, and how does it move?*---by overlapping transfers with computation so that the GPU rarely stalls on a single tensor. Scheduling alone, however, cannot help if data arrives too slowly in the first place. The third question concerns *how data arrives fast enough* to sustain throughput. The core systems principle is straightforward: the data pipeline must sustain the accelerator's consumption rate. A GPU processing 1,000 images per second at `{python} DataloaderThroughput.img_res` by `{python} DataloaderThroughput.img_res` resolution requires approximately `{python} DataloaderThroughput.dataloader_mbs_str` MB/s of sustained data throughput. If the pipeline cannot maintain this rate, the accelerator idles and the effective utilization term in the iron law drops below 1.
 
-Frameworks address this throughput requirement through three mechanisms. The first is *parallel worker processes*: the DataLoader spawns multiple CPU processes, each independently loading and preprocessing samples. Because data loading involves disk I/O and CPU-bound transformations (decoding, augmentation, normalization), a single process cannot saturate a modern GPU. Multiple workers overlap I/O wait times with preprocessing computation, collectively sustaining throughput that no single process could achieve. When `num_workers > 0`, the DataLoader distributes sample indices across workers through a shared queue, and workers push completed samples to a data queue that the main process assembles into batches.
+Frameworks address this throughput requirement through three mechanisms. The first is *parallel worker processes*: the DataLoader\index{DataLoader!throughput optimization} spawns multiple CPU processes, each independently loading and preprocessing samples. Because data loading involves disk I/O and CPU-bound transformations (decoding, augmentation, normalization), a single process cannot saturate a modern GPU. Multiple workers overlap I/O wait times with preprocessing computation, collectively sustaining throughput that no single process could achieve. When `num_workers > 0`, the DataLoader distributes sample indices across workers through a shared queue, and workers push completed samples to a data queue that the main process assembles into batches.
 
 The second mechanism is *prefetching*. The `prefetch_factor` parameter (default 2) controls how many batches each worker prepares in advance. With four workers and `prefetch_factor=2`, the pipeline maintains eight batches in flight, ensuring the GPU never stalls waiting for data. While the model processes batch $N$ on the GPU, workers simultaneously load and preprocess batch $N+1$ through $N+8$ on CPUs, effectively hiding data loading latency behind computation. The cost is memory consumption proportional to batch size times prefetch depth.
 
@@ -3653,7 +3653,7 @@ We introduce these concepts here because they shape framework API design even fo
 
 \index{Data Parallelism!definition}
 \index{Pipeline Parallelism!definition}
-When models exceed single-device memory, frameworks combine multiple parallelism strategies simultaneously. A GPT-3 scale model, for instance, cannot fit on a single GPU---its `{python} GPT3Context.gpt3_params_b_str` B parameters alone require `{python} GPT3ParameterStructures.gpt3_fp16_gb_str` GB in FP16, far exceeding any GPU's memory. Practitioners train such models by distributing computation across multiple devices using three complementary strategies. @fig-3d-parallelism lays out how large-scale training distributes computation across three orthogonal dimensions to overcome this constraint. In the figure, look for how each dimension addresses a different scaling need: **Pipeline Parallelism**\index{Pipeline Parallelism!layer splitting} runs horizontally across columns, distributing a single model's depth across stages; **ZeRO/Data Parallelism**\index{Data Parallelism!model replication} runs vertically across rows, scaling throughput and sharding replicated training state; and **Model Parallelism**\index{Model Parallelism!tensor sharding} shards tensors within each cluster for layers that are too large for one device. This "3D" approach allows frameworks to scale beyond the memory limits of any single device. @sec-model-training examines these parallelism strategies in depth, including their implementation trade-offs and communication patterns.
+When models exceed single-device memory, frameworks combine multiple parallelism strategies simultaneously. A GPT-3 scale model, for instance, cannot fit on a single GPU---its `{python} GPT3Context.gpt3_params_b_str` B parameters alone require `{python} GPT3ParameterStructures.gpt3_fp16_gb_str` GB in FP16, far exceeding any GPU's memory. Practitioners train such models by distributing computation across multiple devices using three complementary strategies. @fig-3d-parallelism lays out how large-scale training distributes computation across three orthogonal dimensions to overcome this constraint. In the figure, look for how each dimension addresses a different scaling need: **Pipeline Parallelism**\index{Pipeline Parallelism!layer splitting} runs horizontally across columns, distributing a single model's depth across stages; **ZeRO/Data Parallelism**\index{Data Parallelism!model replication} runs vertically across rows, scaling throughput and sharding replicated training state; and **Model Parallelism**\index{Model Parallelism!tensor sharding} shards tensors within each cluster for layers that are too large for one device. This "3D" approach\index{3D Parallelism!scaling strategy} allows frameworks to scale beyond the memory limits of any single device. @sec-model-training examines these parallelism strategies in depth, including their implementation trade-offs and communication patterns.
 
 ::: {#fig-3d-parallelism fig-env="figure" fig-pos="htb" fig-cap="**3D Parallelism**: A grid of eight accelerator clusters arranged in two rows and four columns, each containing stacked computational units. Distinct labels encode the three parallelism dimensions: pipeline parallelism across columns, ZeRO/data parallelism across rows, and model parallelism within each cluster." fig-alt="Grid of 8 GPU clusters in two rows and four columns. A horizontal brace labels pipeline parallelism across columns, a vertical brace labels ZeRO data parallelism across rows, and a depth brace labels model parallelism within each cluster."}
 
@@ -3840,7 +3840,7 @@ The hardware abstraction layer isolates framework code from platform-specific de
 ##### Compute kernel management {.unnumbered}
 
 \index{Kernel Dispatch!hardware selection}
-The kernel manager dispatches each operation to the fastest available implementation for the current hardware. When a framework encounters a matrix multiplication, it selects among AVX-512 vector instructions on modern CPUs, [cuBLAS\index{cuBLAS!kernel selection}](https://developer.nvidia.com/cublas) on NVIDIA GPUs, or dedicated tensor processing instructions on AI accelerators. The dispatch decision depends on input dimensions, data layout, and hardware capabilities. A $4096{\times}4096$ GEMM on an A100 GPU routes to cuBLAS Tensor Core kernels that sustain up to `{python} A100BLAS.dense_tflops_str` TFLOPS in FP16, while the same operation on a CPU falls back to an AVX-512 path at roughly 2 TFLOPS. When no specialized kernel exists, the manager falls back to a generic implementation rather than failing.
+The kernel manager dispatches each operation to the fastest available implementation for the current hardware. When a framework encounters a matrix multiplication, it selects among AVX-512 vector instructions on modern CPUs, cuBLAS\index{cuBLAS!kernel selection} [@nvidia_cublas] on NVIDIA GPUs, or dedicated tensor processing instructions on AI accelerators. The dispatch decision depends on input dimensions, data layout, and hardware capabilities. A $4096{\times}4096$ GEMM on an A100 GPU routes to cuBLAS Tensor Core kernels that sustain up to `{python} A100BLAS.dense_tflops_str` TFLOPS in FP16, while the same operation on a CPU falls back to an AVX-512 path at roughly 2 TFLOPS. When no specialized kernel exists, the manager falls back to a generic implementation rather than failing.
 
 ##### Memory system abstraction {.unnumbered}
 
@@ -3972,7 +3972,7 @@ The distinction between *parameters* and *buffers* illustrates a subtlety of the
 
 ::: {.callout-perspective title="Cross-framework parameter discovery" collapse="true"}
 
-The same principle manifests differently across frameworks:
+@tbl-frameworks-parameter-discovery-apis shows how the same principle manifests differently across frameworks:
 
 | **Framework**                                       | **Parameter Access**          | **Nontrainable State**           |
 |:----------------------------------------------------|:------------------------------|:---------------------------------|
@@ -3980,6 +3980,8 @@ The same principle manifests differently across frameworks:
 | **Keras**                                           | `layer.trainable_weights`     | `layer.non_trainable_weights`    |
 | **JAX/Flax**\index{Flax!JAX neural network library} | `params = model.init(key, x)` | Separate `state` dict            |
 | **TensorFlow**                                      | `module.trainable_variables`  | `module.non_trainable_variables` |
+
+: **Parameter Discovery APIs Across Frameworks**: Each framework exposes a different surface for distinguishing trainable parameters from nontrainable buffers, but all four solve the same underlying problem of letting optimizers find weights to update while preserving state (running statistics, frozen tensors) across forward passes. {#tbl-frameworks-parameter-discovery-apis}
 
 Despite syntactic differences, all frameworks solve the same problem: enabling optimizers to discover and update trainable parameters while preserving nontrainable state across forward passes.
 
@@ -4140,7 +4142,7 @@ TensorFlow's architecture reflects a comprehensive solution to the Abstraction P
 
 The graph-first approach prioritizes the **Deployment Spectrum**: because the framework sees the entire graph, it can perform aggressive optimizations like constant folding, operator fusion, and memory layout optimization before the first byte of data is processed. TensorFlow's dominance in complex production ecosystems traces directly to this ahead-of-time optimization capability. @fig-tensorflow-architecture maps the full training-to-deployment pipeline---trace how a model flows from data preprocessing through distributed training on the left, then fans out to serving, mobile (TF Lite), browser (TF.js), and language bindings on the right.
 
-::: {#fig-tensorflow-architecture fig-env="figure" fig-pos="htb" fig-cap="**TensorFlow Training-to-Deployment Pipeline**: Two-column diagram showing the training path (left) from data preprocessing through tf.keras and distribution strategy across CPU, GPU, and TPU, and the deployment path (right) from SavedModel export to TensorFlow Serving, Lite, JS, and language bindings. Source: [TensorFlow.](https://blog.tensorflow.org/2019/01/whats-coming-in-tensorflow-2-0.html)." fig-alt="Two-column diagram. Training: data preprocessing, tf.keras, TensorFlow Hub, Premade Estimators, Distribution Strategy across CPU/GPU/TPU. Deployment via SavedModel to TensorFlow Serving, Lite, JS, and language bindings."}
+::: {#fig-tensorflow-architecture fig-env="figure" fig-pos="htb" fig-cap="**TensorFlow Training-to-Deployment Pipeline**: Two-column diagram showing the training path (left) from data preprocessing through tf.keras and distribution strategy across CPU, GPU, and TPU, and the deployment path (right) from SavedModel export to TensorFlow Serving, Lite, JS, and language bindings. Source: TensorFlow." fig-alt="Two-column diagram. Training: data preprocessing, tf.keras, TensorFlow Hub, Premade Estimators, Distribution Strategy across CPU/GPU/TPU. Deployment via SavedModel to TensorFlow Serving, Lite, JS, and language bindings."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\usefont{T1}{phv}{m}{n}\small]
@@ -4568,7 +4570,7 @@ When `h = torch.relu(x @ W1 + b1)` executes, PyTorch's eager execution triggers 
 
 1. **Python Dispatch**\index{Python Dispatch!overhead} (~1μs): Python interpreter calls `torch.matmul`, which routes through PyTorch's dispatcher to select the CUDA backend.
 
-2. **Kernel Selection**\index{BLAS Library!kernel selection} (~0.5μs): cuBLAS selects an optimized GEMM kernel based on matrix dimensions (`{python} TrainingStepDims.train_batch` $\times$ `{python} TrainingStepDims.train_input` $\times$ `{python} TrainingStepDims.train_input` $\times$ `{python} TrainingStepDims.train_hidden`). For these dimensions, it might choose a tiled algorithm optimized for L2 cache.
+2. **Kernel Selection**\index{BLAS Library!kernel selection} (~0.5μs): cuBLAS selects an optimized GEMM kernel based on matrix dimensions (`{python} TrainingStepDims.train_batch` $\times$ `{python} TrainingStepDims.train_input` $\times$ `{python} TrainingStepDims.train_hidden`). For these dimensions, it might choose a tiled algorithm optimized for L2 cache.
 
 3. **Kernel Launch** (~5μs): The selected kernel is queued to the GPU's command buffer. The CPU continues immediately (asynchronous execution).
 
@@ -4692,7 +4694,7 @@ class TrainingStepCalc:
 | **Cross-entropy**                |                     ~`{python} TrainingStepCalc.train_ce_flops_str`                     |  `{python} TrainingStepCalc.train_ce_mem_str`  |  `{python} TrainingStepCalc.train_ce_ai_str`  |
 | **Backward (2$\times$ forward)** |                     ~`{python} TrainingStepCalc.train_bwd_flops_str`                    | `{python} TrainingStepCalc.train_bwd_mem_str`  |  `{python} TrainingStepCalc.train_bwd_ai_str` |
 
-: **Per-Operation Roofline Analysis**: FLOPs, memory traffic, and arithmetic intensity for each operation in a two-layer MLP training step. MatMul operations have much higher arithmetic intensity than element-wise operations, while ReLU and cross-entropy are clearly memory-bound; on high-end GPUs, small MatMuls may still fall below the ridge point, which is why this training step remains overhead- and memory-sensitive. {#tbl-training-step-roofline tbl-colwidths="[29,29,20,22]"}
+: **Per-Operation Roofline Analysis**: FLOPs, memory traffic, and arithmetic intensity for each operation in a two-layer MLP training step. MatMul operations have much higher arithmetic intensity than element-wise operations, while ReLU and cross-entropy are memory-bound; on high-end GPUs, small MatMuls may still fall below the ridge point, which is why this training step remains overhead- and memory-sensitive. {#tbl-training-step-roofline tbl-colwidths="[29,29,20,22]"}
 
 ```{python}
 #| label: mnist-training-step-calc

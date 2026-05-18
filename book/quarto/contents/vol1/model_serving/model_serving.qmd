@@ -27,7 +27,7 @@ engine: jupyter
 
 _Why does serving invert every optimization priority that made training successful?_
 
-Training and serving demand opposite physics. Training maximizes throughput ($X$, in samples per second): large batches and long epochs where latency spikes get absorbed invisibly. Serving minimizes latency ($L_{\text{lat}}$, in milliseconds per request): individual requests answered fast enough that a single slow response is a *broken product*. Training amortizes hardware costs across billions of examples; serving pays a tax on every request, where small inefficiencies compound into operational debt. This inversion is why models that train beautifully often serve poorly: the batch-heavy architectures and memory-intensive optimizations designed to saturate accelerators during training are fundamentally ill-suited for the bursty, latency-critical, cost-sensitive reality of production traffic. Serving, however, is more than a latency problem. A serving system must handle traffic that varies by orders of magnitude between peak and trough, route requests across model versions during progressive rollouts, degrade gracefully when upstream dependencies fail, and do all of this continuously—not for the duration of a training run but for the lifetime of the product. Every model that proved its value during training and survived compression and benchmarking eventually arrives at the serving layer—the deployment and integration stage of the ML lifecycle—where the question shifts from "does it work?" to "does it work *reliably, at scale, under production conditions, every second of every day*?" The serving infrastructure is where ML systems finally meet users, and the engineering that sustains that meeting is qualitatively different from the engineering that created the model.
+Training and serving demand opposite physics. Training maximizes throughput ($X$, in samples per second): large batches and long epochs where latency spikes get absorbed invisibly. Serving minimizes latency ($L_{\text{lat}}$, in milliseconds per request): individual requests answered fast enough that a single slow response is a *broken product*. Training amortizes hardware costs across billions of examples; serving pays a tax on every request, where small inefficiencies compound into operational debt. This inversion is why models that train beautifully often serve poorly: the batch-heavy architectures and memory-intensive optimizations designed to saturate accelerators during training are fundamentally ill-suited for the bursty, latency-critical, cost-sensitive reality of production traffic. Serving, however, is more than a latency problem. A serving system must handle traffic that varies by orders of magnitude between peak and trough, route requests across model versions during progressive rollouts, degrade gracefully when upstream dependencies fail, and do all of this continuously, not for the duration of a training run but for the lifetime of the product. Every model that proved its value during training and survived compression and benchmarking eventually arrives at the serving layer—the deployment and integration stage of the ML lifecycle—where the question shifts from "does it work?" to "does it work *reliably, at scale, under production conditions, every second of every day*?" The serving infrastructure is where ML systems finally meet users, and the engineering that sustains that meeting is qualitatively different from the engineering that created the model.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -104,7 +104,7 @@ class BlackFridayCalc:
 
 **The event**: On Black Friday, traffic spikes\index{Traffic Spike!nonlinear failure mode} `{python} BlackFridayCalc.bf_spike_factor_str`$\times$ to `{python} BlackFridayCalc.bf_qps_spike_str` QPS.
 
-**Failure**: The system does not slow down `{python} BlackFridayCalc.bf_spike_factor_str`$\times$. It **collapses**. Latency hits `{python} BlackFridayCalc.bf_collapse_latency_s_str` seconds, then requests start timing out. The servers are 100 percent utilized, but *useful* throughput drops to near zero because most completed requests have already timed out from the client's perspective.
+**Failure**: The system does not slow down `{python} BlackFridayCalc.bf_spike_factor_str`$\times$. It **collapses**. Latency hits `{python} BlackFridayCalc.bf_collapse_latency_s_str` seconds, then requests start timing out. The servers are 100 percent loaded, but *useful* throughput drops to near zero because most completed requests have already timed out from the client's perspective.
 
 **Physics**: This is Little's Law and queueing theory in action. As utilization approaches 100 percent, queue lengths diverge nonlinearly rather than linearly. The system spends more time managing the queue (context switching, thrashing) than doing useful work.
 
@@ -199,7 +199,7 @@ Beyond the technical limits of latency, the economics of serving have undergone 
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ INTELLIGENCE DEFLATION\index{Intelligence Deflation!inference cost} FIGURE
+# │ INTELLIGENCE DEFLATION FIGURE
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @fig-intelligence-deflation—log-scale scatter plot of representative
 # │          public API input-token prices from 2020 to 2025, annotated with model names
@@ -731,10 +731,11 @@ Dynamic inference\index{Dynamic Inference!real-time prediction} (also called onl
 # │ Show: That static precomputation is superior for predictable inputs.
 # │ How: Compare total batch time to per-request latency for photo classification.
 # │
-# │ Imports: mlsysim.book (fmt)
+# │ Imports: mlsysim.core.constants (ms, second), mlsysim.book (fmt)
 # │ Exports: n_photos_str, inference_ms_str, batch_total_s_str,
 # │          dynamic_latency_budget_ms_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import ms, second
 from mlsysim.fmt import fmt
 
 class StaticBatchCalc:
@@ -746,7 +747,7 @@ class StaticBatchCalc:
     dynamic_latency_budget_ms_value = 100 # real-time latency budget (ms)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    batch_total_s_value = n_photos_value * inference_ms_value / 1000
+    batch_total_s_value = (n_photos_value * inference_ms_value * ms).m_as(second)
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     n_photos_str = f"{n_photos_value:,}"                                   # e.g. "10,000" photos
@@ -1032,7 +1033,7 @@ While load balancers distribute requests across replicas, achieving predictable 
 
 ### Deterministic latency and resource isolation {#sec-model-serving-deterministic-latency-resource-isolation-4d1c}
 
-An inference server does not operate in isolation. On a single machine, the operating system manages multiple competing processes (logging agents, monitoring tools, and system interrupts) that can intermittently steal CPU cycles from the inference pipeline. These "noisy neighbors" are a primary source of **latency jitter**\index{Latency Jitter!resource contention}, where the time required to process identical requests varies significantly, causing the 99th percentile (P99) latency to spike even when the hardware is under-utilized. The tail latency explosion from @fig-tail-latency-explosion illustrates the same spike, but here the trigger is resource contention rather than queuing.
+An inference server does not operate in isolation. On a single machine, the operating system manages multiple competing processes (logging agents, monitoring tools, and system interrupts) that can intermittently steal CPU cycles from the inference pipeline. These "noisy neighbors" are a primary source of **latency jitter**\index{Latency Jitter!resource contention}, where the time required to process identical requests varies significantly, causing the 99th percentile (P99) latency to spike even when the hardware is underused. The tail latency explosion from @fig-tail-latency-explosion illustrates the same spike, but here the trigger is resource contention rather than queuing.
 
 Achieving deterministic performance\index{Latency!deterministic}\index{Resource Isolation!serving} on a single node requires isolating the inference process from the operating system's normal resource-sharing behavior. The most impactful technique is CPU affinity (pinning)\index{CPU Affinity!latency reduction}, which restricts the inference server's threads to specific physical cores. Without pinning, the OS freely migrates threads between cores, evicting warm cache lines and introducing 10–50 μs context-switch penalties that appear as latency jitter. Pinning eliminates this migration, ensuring that preprocessing always has immediate access to computational resources and that the CPU cache remains warm between requests [@gujarati2020].
 
@@ -1640,7 +1641,7 @@ class LatencyBudgetCalc:
 
 ::: {.callout-notebook title="ResNet-50: Latency budget breakdown"}
 
-A typical serving request for our ResNet-50 classifier shows the following latency distribution:
+@tbl-model-serving-resnet50-latency-budget breaks a typical ResNet-50 serving request down per phase:
 
 ::: {tbl-colwidths="[28,28,22,22]"}
 
@@ -1653,6 +1654,8 @@ A typical serving request for our ResNet-50 classifier shows the following laten
 | **Inference**      | **ResNet-50 forward pass**\index{ResNet-50!serving spectrum}\index{ResNet-50!latency budget} |  **`{python} LatencyTableCalc.l_inf_str`**  | **`{python} LatencyTableCalc.p_inf_str`**  |
 | **Postprocessing** | Softmax + top-5                                                                              |    `{python} LatencyTableCalc.l_post_str`   |   `{python} LatencyTableCalc.p_post_str`   |
 | **Total**          |                                                                                              | **`{python} LatencyTableCalc.l_total_str`** |              **100 percent**               |
+
+: **ResNet-50 Latency Budget**: Per-phase breakdown of a single serving request, showing that preprocessing and data transfer together rival the cost of the ResNet-50 forward pass itself. The percentages expose where engineering effort actually pays off, which is rarely in the model. {#tbl-model-serving-resnet50-latency-budget}
 
 :::
 
@@ -1703,7 +1706,7 @@ class DlrmLatencyCalc:
 
 **The scenario**: Serving a Deep Learning Recommendation Model (DLRM\index{DLRM!I/O-bound serving}) with a 10 ms P99 latency budget.
 
-**The contrast**: While ResNet-50's model stage is dominated by convolutional neural network (CNN) compute, DLRM's dominant model-stage cost is embedding-table memory access. End-to-end serving bottlenecks still require measuring the full path: preprocessing, inference, postprocessing, and data movement.
+**The contrast**: While ResNet-50's model stage is dominated by convolutional neural network (CNN) compute, DLRM's dominant model-stage cost is embedding-table memory access. End-to-end serving bottlenecks still require measuring the full path: preprocessing, inference, postprocessing, and data movement. @tbl-model-serving-dlrm-latency-budget breaks the recommendation request down by phase:
 
 ::: {tbl-colwidths="[28,28,22,22]"}
 
@@ -1714,6 +1717,8 @@ class DlrmLatencyCalc:
 | **Inference**      | MLP forward pass             |    `{python} DlrmLatencyCalc.dlrm_mlp_str`    |    Compute     |
 | **Postprocessing** | Ranking & Filtering          |    `{python} DlrmLatencyCalc.dlrm_post_str`   |      CPU       |
 | **Total**          |                              | **`{python} DlrmLatencyCalc.dlrm_total_str`** |                |
+
+: **DLRM Serving Latency**: Per-phase breakdown of a recommendation request under a 10 ms p99 budget, contrasting DLRM's memory-bandwidth-bound embedding lookups against ResNet-50's compute-bound forward pass. Adding compute to the inference stage does not help once embedding-table bandwidth is the binding constraint. {#tbl-model-serving-dlrm-latency-budget}
 
 :::
 
@@ -1899,7 +1904,7 @@ The resulting shift toward memory-bandwidth sensitivity is evident in @tbl-resol
 | **$512{\times}512$** | `{python} ResolutionBottleneckCalc.act_512_mb_str` MB | `{python} ResolutionBottleneckCalc.ai_512_str` FLOPs/byte |    Compute     |
 | **$640{\times}640$** | `{python} ResolutionBottleneckCalc.act_640_mb_str` MB | `{python} ResolutionBottleneckCalc.ai_640_str` FLOPs/byte |   Near ridge   |
 
-: **Resolution and Compute Bottleneck**: ResNet-50 arithmetic intensity decreases with resolution as activation sizes grow. For a V100 PCIe (14 TFLOPS FP32, 900 GB/s bandwidth), the ridge point is approximately 16 FLOPs/byte. At $224{\times}224$, compute dominates; by $640{\times}640$, the model is close enough to the ridge that further resolution increases, lower-bandwidth hardware, or cache misses can make memory bandwidth the limiting factor. {#tbl-resolution-bottleneck tbl-colwidths="[25,25,25,25]"}
+: **Resolution and Compute Bottleneck**: ResNet-50 arithmetic intensity decreases with resolution as activation sizes grow. For a V100 PCIe (14 TFLOPS FP32; the SXM2 variant runs 15.7 TFLOPS FP32) with 900 GB/s of HBM2 memory bandwidth, the ridge point is approximately 16 FLOPs/byte. At $224{\times}224$, compute dominates; by $640{\times}640$, the model is close enough to the ridge that further resolution increases, lower-bandwidth hardware, or cache misses can make memory bandwidth the limiting factor. {#tbl-resolution-bottleneck tbl-colwidths="[25,25,25,25]"}
 
 #### Resolution strategies in production {#sec-model-serving-deploymentspecific-resolution-decisions-1d76}
 
@@ -1994,8 +1999,8 @@ Pipelining is enabled by **Asynchronous I/O** and **Concurrency Models**. Instea
 
 #### The systems metric: Hardware duty cycle {#sec-model-serving-systems-metric-hardware-duty-cycle-7530}
 
-In the "Quantitative Approach" to ML systems, we define the efficiency of a serving system by its ability to saturate the bottleneck resource. For most ML systems, this is the GPU's compute cores or memory bandwidth. We quantify this in @eq-system-efficiency:
-$$\text{System Efficiency\index{System Efficiency!hardware duty cycle}} = \frac{\sum T_{\text{compute}}}{\text{Wall Clock Time} \times \text{Resource Count}}$$ {#eq-system-efficiency}
+In the "Quantitative Approach" to ML systems, we define **System Efficiency**\index{System Efficiency!hardware duty cycle} as the ability of a serving system to saturate the bottleneck resource. For most ML systems, this is the GPU's compute cores or memory bandwidth. We quantify this in @eq-system-efficiency:
+$$\text{System Efficiency} = \frac{\sum T_{\text{compute}}}{\text{Wall Clock Time} \times \text{Resource Count}}$$ {#eq-system-efficiency}
 
 If a ResNet-50 request takes 10 ms total (5 ms GPU, 5 ms CPU), a serial system achieves only 50 percent efficiency. By pipelining just two requests, efficiency approaches 100 percent (assuming the CPU can keep up with the GPU). If the CPU is too slow to feed the GPU, the system becomes CPU-bound, and further model optimization provides zero throughput gain. This is Amdahl's Law from @sec-machine-foundations-amdahls-law-gustafsons-law-b741 applied to serving: if preprocessing consumes 50 percent of latency, maximum speedup is 2$\times$ regardless of how fast the model runs.
 
@@ -2075,7 +2080,7 @@ Serving engineers routinely face a concrete question: given a latency SLO\index{
 # │ Imports: mlsysim.core.constants, mlsysim.book
 # │ Exports: littles_lambda_str, littles_w_ms_str, littles_w_str, littles_l_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import MS_PER_SEC
+from mlsysim.core.constants import MS_PER_SEC, ms, second
 from mlsysim.fmt import fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2085,7 +2090,7 @@ class CapacityPlanningAnchor:
     """
     qps_target = 1000
     slo_ms = 50
-    concurrency_slots = int(qps_target * (slo_ms / 1000))
+    concurrency_slots = int(qps_target * (slo_ms * ms).m_as(second))
 
     qps_str = f"{qps_target}"
     slo_str = f"{slo_ms}ms"
@@ -2120,7 +2125,7 @@ Serving engineers need a tool that connects observable metrics to capacity requi
 $$N_{\text{req}} = \lambda \cdot T_{\text{lat}}$$ {#eq-littles-law}
 where $N_{\text{req}}$ is the average number of requests in the system, $\lambda$ is the arrival rate (requests per second), and $T_{\text{lat}}$ is the average time each request spends in the system.
 
-[^fn-littles-law-serving]: **Little's Law**: John D.C. Little proved in 1961 that $N_{\text{req}} = \lambda T_{\text{lat}}$ holds for *any* stable system regardless of arrival distribution, service distribution, or scheduling discipline. This universality is why it anchors ML capacity planning: the formula requires no assumptions about whether requests arrive in bursts, whether inference times vary, or whether the scheduler batches aggressively. The only requirement is stability $(\lambda < \mu)$, and when that condition breaks, no amount of optimization prevents queue divergence. \index{Little's Law!capacity planning}
+[^fn-littles-law-serving]: **Little's Law**: John D. C. Little proved in 1961 that $N_{\text{req}} = \lambda T_{\text{lat}}$ holds for *any* stable system regardless of arrival distribution, service distribution, or scheduling discipline. This universality is why it anchors ML capacity planning: the formula requires no assumptions about whether requests arrive in bursts, whether inference times vary, or whether the scheduler batches aggressively. The only requirement is stability $(\lambda < \mu)$, and when that condition breaks, no amount of optimization prevents queue divergence. \index{Little's Law!capacity planning}
 
 ::: {.callout-perspective title="Notation alert: L vs. latency"}
 
@@ -2163,9 +2168,10 @@ $N_{\text{req}}$ = `{python} CapacityPlanning.littles_lambda_str` $\times$ `{pyt
 # │ Show: That batch-32 adds significant wait time compared to batch-1.
 # │ How: Calculate formation delay given arrival rate and batch size.
 # │
-# │ Imports: mlsysim.book (fmt)
+# │ Imports: mlsysim.core.constants (second, ms), mlsysim.book (fmt)
 # │ Exports: wait_time_b1_ms_str, wait_time_b32_ms_str, lat_b1_ms_str, lat_b32_ms_str, penalty_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import second, ms
 from mlsysim.fmt import fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2184,12 +2190,12 @@ class BatchingTax:
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Batch 1
-    w_form_b1 = (1-1) / (2 * lambda_qps) * 1000 # 0 ms
+    w_form_b1 = ((1-1) / (2 * lambda_qps) * second).m_as(ms) # 0 ms
     lat_b1 = w_form_b1 + t_inf_b1
 
     # Batch 32
     # Step 2: Formation Delay ~ (B-1) / (2 * lambda)
-    w_form_b32 = (32-1) / (2 * lambda_qps) * 1000 # ~31 ms
+    w_form_b32 = ((32-1) / (2 * lambda_qps) * second).m_as(ms) # ~31 ms
     lat_b32 = w_form_b32 + t_inf_b32
 
     penalty_ratio = lat_b32 / lat_b1
@@ -2531,6 +2537,8 @@ class ColdStartCalc:
 
 ::: {.callout-notebook title="ResNet-50: Cold start timeline"}
 
+@tbl-model-serving-resnet-coldstart traces the per-phase duration of a ResNet-50 cold start:
+
 ::: {tbl-colwidths="[30,12,48]"}
 
 | **Phase**                       |                **Duration**               | **Notes**                                        |
@@ -2542,6 +2550,8 @@ class ColdStartCalc:
 | **Warmup (10 inferences)**      |   `{python} ColdStartCalc.cs_warmup_str`  | Triggers remaining lazy initialization           |
 | **Total (local, optimized)**    | **`{python} ColdStartCalc.cs_local_str`** | With precompiled TensorRT engine, warm container |
 | **Total (cloud, first deploy)** | **`{python} ColdStartCalc.cs_cloud_str`** | Including compilation from cold state            |
+
+: **ResNet-50 Cold Start Timeline**: Per-phase durations for weight loading, CUDA context creation, TensorRT compilation, and warmup, with totals for the optimized local case and the first-deploy cloud case showing where the dominant cost lives. {#tbl-model-serving-resnet-coldstart}
 
 :::
 
@@ -2608,8 +2618,8 @@ When the aggregate size of all models exceeds GPU memory capacity, the serving s
 # │ Imports: mlsysim.core.constants (PCIE_GEN4_BW), mlsysim.book (fmt)
 # │ Exports: model_size_gb_str, pcie_bw_gbs_str, model_swap_ms_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import PCIE_GEN4_BW, GB, second
-from mlsysim.fmt import fmt
+from mlsysim.core.constants import PCIE_GEN4_BW, GB, second, ms
+from mlsysim.fmt import fmt, md_math
 
 class ModelSwapCalc:
     """Quantifies the latency cost of swapping a 10 GB model over PCIe Gen4."""
@@ -2619,16 +2629,21 @@ class ModelSwapCalc:
     pcie_bw_gbs_value = PCIE_GEN4_BW.m_as(GB/second)  # PCIe Gen4 x16 bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    model_swap_ms_value = model_size_gb_value/pcie_bw_gbs_value * 1000
+    model_swap_ms_value = (model_size_gb_value / pcie_bw_gbs_value * second).m_as(ms)
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     model_size_gb_str = f"{model_size_gb_value}"
     pcie_bw_gbs_str = fmt(pcie_bw_gbs_value, precision=0, commas=False)
     model_swap_ms_str = fmt(model_swap_ms_value, precision=0, commas=False)
+    swap_calc_math = md_math(
+        f"T_{{\\text{{load}}}} = {model_size_gb_str} \\text{{ GB}} "
+        f"/ {pcie_bw_gbs_str} \\text{{ GB/s}} "
+        f"\\approx {model_swap_ms_str} \\text{{ ms}}"
+    )
 ```
 
 For a `{python} ModelSwapCalc.model_size_gb_str` GB model on PCIe Gen4 x16 (`{python} ModelSwapCalc.pcie_bw_gbs_str` GB/s theoretical bandwidth), loading takes at least:
-\(T_{\text{load}} = `{python} ModelSwapCalc.model_size_gb_str` \text{ GB} / `{python} ModelSwapCalc.pcie_bw_gbs_str` \text{ GB/s} \approx `{python} ModelSwapCalc.model_swap_ms_str` \text{ ms}\)
+`{python} ModelSwapCalc.swap_calc_math`
 
 To mitigate this, systems use *pinned memory*\index{Pinned Memory!DMA transfer} (page-locked host memory). By default, the operating system can move ("page") any memory region to disk when RAM is under pressure. This creates a problem for GPU transfers: if the GPU's DMA (Direct Memory Access) engine begins reading a memory region that gets paged out mid-transfer, the transfer fails or stalls. To avoid this, the CPU must first copy data to a temporary pinned buffer before the GPU can safely read it, adding both latency and CPU overhead.
 
@@ -2702,7 +2717,7 @@ class BatchThroughputCalc:
 
 ::: {.callout-notebook title="ResNet-50 batching efficiency"}
 
-The throughput-latency trade-off for ResNet-50 on a V100 GPU illustrates the power of batching:
+@tbl-model-serving-batching-throughput-tradeoff illustrates the throughput-latency trade-off for ResNet-50 on a V100 GPU across batch sizes one through thirty-two:
 
 ```{=latex}
 \begingroup
@@ -2716,6 +2731,8 @@ The throughput-latency trade-off for ResNet-50 on a V100 GPU illustrates the pow
 |       8        |        9.1 ms       |         1.1 ms        |   879 img/s    |   65 percent  |
 |       16       |       14.0 ms       |         0.9 ms        |  1,143 img/s   |   85 percent  |
 |       32       |       25.0 ms       |         0.8 ms        |  1,280 img/s   |   95 percent  |
+
+: **ResNet-50 Batching Sweep**: Per-image compute, throughput, and GPU utilization across batch sizes one through thirty-two on a V100. Throughput grows 6.4$\times$ from batch one to batch thirty-two as GPU utilization climbs from 15 to 95 percent, while pure inference time stretches from 5 ms to 25 ms. {#tbl-model-serving-batching-throughput-tradeoff}
 
 ```{=latex}
 \endgroup
@@ -2741,9 +2758,10 @@ The table reveals the throughput-latency trade-off in stark terms: larger batche
 # │ Show: That batch-8 yields 3× throughput gain while remaining within typical SLOs.
 # │ How: Model throughput and latency for small batches (1 to 8).
 # │
-# │ Imports: mlsysim.book (fmt)
+# │ Imports: mlsysim.core.constants (ms, second), mlsysim.book (fmt)
 # │ Exports: batch1_ms_str, batch1_imgs_str, batch8_* strings, latency_increase_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import ms, second
 from mlsysim.fmt import fmt
 
 class BatchingSweetspotCalc:
@@ -2757,7 +2775,7 @@ class BatchingSweetspotCalc:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     batch8_user_latency_ms_value = batch8_wait_ms_value + batch8_inference_ms_value
-    batch8_throughput_value = 8 / (batch8_user_latency_ms_value / 1000)
+    batch8_throughput_value = 8 / (batch8_user_latency_ms_value * ms).m_as(second)
     latency_increase_value = batch8_user_latency_ms_value/batch1_ms_value
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
@@ -2936,12 +2954,12 @@ $$P(\text{batch size} = k) = \frac{(\lambda T)^k e^{-\lambda T}}{k!}$$ {#eq-batc
 
 @tbl-batch-variability quantifies this variability, showing how batch size fluctuates for different traffic levels with a fixed 10 ms window:
 
-| **Arrival Rate** | **Mean Batch** | **Std Dev** | $P(\text{batch}=0)$ | $P(\text{batch} \ge 2\times \text{mean})$ |
-|:----------------:|:--------------:|:-----------:|:-------------------:|:-----------------------------------------:|
-|    **50 QPS**    |      0.5       |     0.7     |      61 percent     |                 39 percent                |
-|   **200 QPS**    |      2.0       |     1.4     |      14 percent     |                 14 percent                |
-|   **500 QPS**    |      5.0       |     2.2     |     0.7 percent     |                 3 percent                 |
-|   **1000 QPS**   |      10.0      |     3.2     |    0.005 percent    |                0.3 percent                |
+| **Arrival Rate** | **Mean Batch** | **Std Dev** | $P(\text{batch}=0)$ | $P(\text{batch} \ge 2 \times \text{mean})$ |
+|:----------------:|:--------------:|:-----------:|:-------------------:|:------------------------------------------:|
+|    **50 QPS**    |      0.5       |     0.7     |      61 percent     |                 39 percent                 |
+|   **200 QPS**    |      2.0       |     1.4     |      14 percent     |                 14 percent                 |
+|   **500 QPS**    |      5.0       |     2.2     |     0.7 percent     |                 3 percent                  |
+|   **1000 QPS**   |      10.0      |     3.2     |    0.005 percent    |                0.3 percent                 |
 
 : **Batch Size Variability**: At low traffic, batching windows frequently contain zero requests (wasted GPU cycles). At moderate traffic, batch sizes fluctuate significantly around the mean. High traffic provides more stable batching, and the probability of batches exceeding twice the mean size decreases as traffic grows (from 39 percent at 50 QPS to 0.3 percent at 1000 QPS), reflecting the law of large numbers. {#tbl-batch-variability}
 
@@ -2966,10 +2984,11 @@ For ResNet-50 on a V100 GPU, service time approximately scales as $S(B) = 5 \tex
 # │ Show: That batch-32 improves utilization from 11% to 79% over batch-1.
 # │ How: Contrast throughput and latency while applying Iron Law efficiency terms.
 # │
-# │ Imports: mlsysim.book (fmt)
+# │ Imports: mlsysim.core.constants (ms, second), mlsysim.book (fmt)
 # │ Exports: throughput_*, b1_*, b32_*, il_*, T_window_str
 # │          service_time_value (function, used by slo-violation-calc)
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import ms, second
 from mlsysim.fmt import fmt
 
 # Helper functions at module scope (used by class body and slo-violation-calc)
@@ -2980,7 +2999,7 @@ def total_latency_value(b, _T=10.0, _fixed=5.0, _per_image=0.6):
     return _T + _fixed + _per_image * b
 
 def throughput_value(b, _T=10.0, _fixed=5.0, _per_image=0.6):
-    return b / ((_T + _fixed + _per_image * b) / 1000)
+    return b / ((_T + _fixed + _per_image * b) * ms).m_as(second)
 
 class BatchingAnalysisCalc:
     """Quantifies batching efficiency: batch-32 achieves 14.6× throughput gain over batch-1."""
@@ -3166,11 +3185,13 @@ The aggressive window achieves only `{python} BatchingOptimization.throughput_ga
 # │ Show: That p99 latency can be ~1.66× higher than the mean due to batch size variance.
 # │ How: Model request arrival and batch assembly to compare mean vs. tail response times.
 # │
-# │ Imports: mlsysim.book (fmt); service_time_value from batching-analysis-calc
+# │ Imports: mlsysim.core.constants (ms, second), mlsysim.book (fmt);
+# │          service_time_value from batching-analysis-calc
 # │ Exports: qps_str, T_slo_str, mean_wait_str, mean_batch_str,
 # │          mean_service_str, mean_latency_str, p99_service_str,
 # │          p99_latency_str, p99_ratio_str, p99_batch_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import ms, second
 from mlsysim.fmt import fmt
 
 class SloViolationCalc:
@@ -3183,7 +3204,7 @@ class SloViolationCalc:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # service_time_value is a module-level function from batching-analysis-calc
-    mean_batch_value = qps_value * (T_slo_value / 1000)
+    mean_batch_value = qps_value * (T_slo_value * ms).m_as(second)
     mean_wait_value = T_slo_value / 2
     mean_service_value = service_time_value(int(mean_batch_value))
     mean_latency_value = mean_wait_value + mean_service_value
@@ -3303,13 +3324,14 @@ For ResNet-50 with 50 ms SLO and 500 QPS traffic:
 # │ Show: How allocating 30% of the SLO budget to batching yields a safe 12 ms window.
 # │ How: Calculate expected batch size from QPS and cap by memory limits.
 # │
-# │ Imports: mlsysim.book (fmt)
+# │ Imports: mlsysim.core.constants (ms, second), mlsysim.book (fmt)
 # │ Exports: pc_slo_ms_str, pc_qps_str, pc_batch_budget_ms_str,
 # │          pc_max_window_ms_str, pc_expected_batch_str,
 # │          pc_mem_limit_batch_str, pc_config_window_ms_str,
 # │          pc_config_batch_str, pc_predicted_p99_ms_str,
 # │          pc_predicted_throughput_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import ms, second
 from mlsysim.fmt import fmt
 
 class PracticalConfigCalc:
@@ -3328,7 +3350,7 @@ class PracticalConfigCalc:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     pc_batch_budget_ms_value = pc_slo_ms_value * pc_budget_pct_value
     pc_max_window_ms_value = pc_batch_budget_ms_value
-    pc_expected_batch_value = pc_qps_value * (pc_config_window_ms_value / 1000)
+    pc_expected_batch_value = pc_qps_value * (pc_config_window_ms_value * ms).m_as(second)
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     pc_slo_ms_str = f"{pc_slo_ms_value}"
@@ -3435,9 +3457,7 @@ Autonomous vehicles\index{Streaming Traffic!sensor synchronization}, video analy
 
 ::: {.callout-notebook title="Multi-camera autonomous vehicle serving"}
 
-Consider a vehicle with six cameras capturing at 30 FPS, requiring spatial fusion:
-
-**Timeline for processing frame set N**:
+Consider a vehicle with six cameras capturing at 30 FPS, requiring spatial fusion. @tbl-model-serving-multicamera-timeline traces the per-event timeline for one synchronized frame set:
 
 ```{=latex}
 \begingroup
@@ -3453,6 +3473,8 @@ Consider a vehicle with six cameras capturing at 30 FPS, requiring spatial fusio
 | $T = 15$ ms | Batch inference begins (6 images) |
 | $T = 25$ ms | Inference complete                |
 | $T = 32$ ms | Result ready for planning module  |
+
+: **Multi-Camera Frame Timeline**: Event-by-event timeline for one synchronized frame set across six cameras at 30 FPS, illustrating the synchronization budget (12 ms of the 33 ms hard deadline) consumed by sensor jitter before batch inference can begin. {#tbl-model-serving-multicamera-timeline}
 
 ```{=latex}
 \endgroup
@@ -3531,6 +3553,8 @@ class MobileServingCalc:
 
 ::: {.callout-notebook title="ResNet-50: Mobile serving"}
 
+@tbl-model-serving-mobile-pipeline-breakdown decomposes per-phase latency and energy for a single-user mobile vision inference:
+
 ```{=latex}
 \begingroup
 \renewcommand{\arraystretch}{1.25} % default is 1,
@@ -3546,6 +3570,8 @@ class MobileServingCalc:
 | **NPU inference**      |    `{python} MobileServingCalc.m_npu_ms_str`    |    `{python} MobileServingCalc.m_npu_mj_str`    | 82 percent utilization |
 | **Postprocess + UI**   |     `{python} MobileServingCalc.m_ui_ms_str`    |     `{python} MobileServingCalc.m_ui_mj_str`    | Result rendering       |
 | **Total**              | **`{python} MobileServingCalc.m_total_ms_str`** | **`{python} MobileServingCalc.m_total_mj_str`** | 22 FPS sustained       |
+
+: **Mobile ResNet-50 Pipeline**: Per-phase latency and energy for a single-user mobile vision inference, showing that JPEG decode on the CPU dominates the energy budget even though the NPU inference stage carries the model's compute. Optimization targets shift from throughput to energy-per-inference at the edge. {#tbl-model-serving-mobile-pipeline-breakdown}
 
 :::
 
@@ -3877,7 +3903,7 @@ class RuntimeComparisonCalc:
 
 ::: {.callout-notebook title="ResNet-50: Runtime comparison"}
 
-Performance comparison for ResNet-50 inference on V100 GPU (batch size 1):
+@tbl-model-serving-runtime-comparison compares ResNet-50 inference latency and speedup across runtimes on a V100 GPU at batch size one:
 
 ```{=latex}
 \begingroup
@@ -3894,6 +3920,8 @@ Performance comparison for ResNet-50 inference on V100 GPU (batch size 1):
 | TensorRT FP32   |   `{python} RuntimeComparisonCalc.rt_trt_fp32_ms_str` ms  |   `{python} RuntimeComparisonCalc.rt_trt_fp32_speedup_str`$\times$  | NVIDIA-specific           |
 | TensorRT FP16   |   `{python} RuntimeComparisonCalc.rt_trt_fp16_ms_str` ms  |   `{python} RuntimeComparisonCalc.rt_trt_fp16_speedup_str`$\times$  | Tensor Core acceleration  |
 | TensorRT INT8   |   `{python} RuntimeComparisonCalc.rt_trt_int8_ms_str` ms  |   `{python} RuntimeComparisonCalc.rt_trt_int8_speedup_str`$\times$  | Requires calibration      |
+
+: **Inference Runtime Comparison**: Latency and speedup for ResNet-50 (batch size one) across PyTorch eager, TorchScript, ONNX Runtime, and TensorRT in three precisions on a V100. Each step down the table trades portability for raw speed, exposing the optimization-compatibility trade-off that defines runtime selection. {#tbl-model-serving-runtime-comparison}
 
 :::
 
@@ -3988,6 +4016,8 @@ class PrecisionTradeoffCalc:
 
 ::: {.callout-notebook title="ResNet-50: Precision trade-offs on V100"}
 
+@tbl-model-serving-precision-tradeoffs compares latency, memory, accuracy, and Tensor Core utilization across FP32, FP16, and two INT8 paths for ResNet-50:
+
 ```{=latex}
 \begingroup
 \renewcommand{\arraystretch}{1.3} % default is 1,
@@ -4001,6 +4031,8 @@ class PrecisionTradeoffCalc:
 | **FP16**       | `{python} PrecisionTradeoffCalc.pt_fp16_ms_str` ms | `{python} PrecisionTradeoffCalc.pt_fp16_mem_mb_str` MB |   `{python} PrecisionTradeoffCalc.pt_fp16_acc_str`%   | `{python} PrecisionTradeoffCalc.pt_fp16_util_str`% | None            |
 | **INT8 (PTQ)** | `{python} PrecisionTradeoffCalc.pt_int8_ms_str` ms | `{python} PrecisionTradeoffCalc.pt_int8_mem_mb_str` MB | `{python} PrecisionTradeoffCalc.pt_int8_ptq_acc_str`% | `{python} PrecisionTradeoffCalc.pt_int8_util_str`% | 1,000 samples   |
 | **INT8 (QAT)** | `{python} PrecisionTradeoffCalc.pt_int8_ms_str` ms | `{python} PrecisionTradeoffCalc.pt_int8_mem_mb_str` MB | `{python} PrecisionTradeoffCalc.pt_int8_qat_acc_str`% | `{python} PrecisionTradeoffCalc.pt_int8_util_str`% | Full retraining |
+
+: **Precision Trade-offs on V100**: Latency, memory footprint, accuracy, and Tensor Core utilization for ResNet-50 in FP32, FP16, and INT8 (PTQ and QAT). FP16 is a near-free 2$\times$ speedup, while INT8 buys an additional 3$\times$ at the cost of calibration data and a fraction of a percentage point in accuracy. {#tbl-model-serving-precision-tradeoffs}
 
 :::
 
@@ -4161,7 +4193,7 @@ The optimization techniques examined so far (batching, runtime selection, precis
 
 ## Economics and Planning {#sec-model-serving-economics-capacity-planning-3e7e}
 
-Every optimization technique examined so far (batching, precision tuning, operator fusion, graph compilation) reduces a single number: the cost of one inference on one machine. Production deployment, however, requires answering a different question: how many machines, of what type, at what total cost. A team that achieves 1,200 images/second on a V100 still needs to know whether 8 V100s at \$3/hour each or 24 T4s at \$0.53/hour each yields lower total cost of ownership for their 5,000 QPS target. Serving costs\index{Serving!economics, infrastructure costs}\index{Serving!costs, request volume scaling} scale with request volume, unlike training costs that scale with dataset size and model complexity [@zhang2019mark]. The intelligence deflation trend shown in @fig-intelligence-deflation intensifies this pressure: as per-token prices collapse by orders of magnitude, the margin on each inference shrinks, making infrastructure efficiency the primary lever for economic viability.
+Every optimization technique examined so far (batching, precision tuning, operator fusion, graph compilation) reduces a single number: the cost of one inference on one machine. Production deployment, however, requires answering a different question: how many machines, of what type, at what total cost. A team that achieves 1,200 images/second on a V100 still needs to know whether 8 V100s at \$3/hour each or 24 T4s at \$0.53/hour each yields lower total cost of ownership for their 5,000 QPS target. Serving costs\index{Serving!economics, infrastructure costs}\index{Serving!costs, request volume scaling} scale with request volume, unlike training costs that scale with dataset size and model complexity [@zhang2019mark]. The intelligence deflation\index{Intelligence Deflation!inference cost} trend shown in @fig-intelligence-deflation intensifies this pressure: as per-token prices collapse by orders of magnitude, the margin on each inference shrinks, making infrastructure efficiency the primary lever for economic viability.
 
 ### Cost per inference {#sec-model-serving-cost-per-inference-27fc}
 
@@ -4220,7 +4252,7 @@ class CostAnalysisCalc:
 
 ::: {.callout-notebook title="ResNet-50: Cost analysis"}
 
-Consider serving ResNet-50 on AWS infrastructure (US-East region, on-demand pricing in 2026):
+@tbl-model-serving-resnet-cloud-cost compares hourly cost, throughput, and per-million-image cost for serving ResNet-50 on AWS (US-East, on-demand pricing in 2026):
 
 ::: {tbl-colwidths="[31,22,22,25]"}
 
@@ -4229,6 +4261,8 @@ Consider serving ResNet-50 on AWS infrastructure (US-East region, on-demand pric
 | **c5.xlarge (CPU)**       | \$`{python} CostAnalysisCalc.ca_cpu_cost_str`  | `{python} CostAnalysisCalc.ca_cpu_throughput_str` img/s  |  \$`{python} CostAnalysisCalc.ca_cpu_cpm_str` |
 | **g4dn.xlarge (T4 GPU)**  |  \$`{python} CostAnalysisCalc.ca_t4_cost_str`  |  `{python} CostAnalysisCalc.ca_t4_throughput_str` img/s  |  \$`{python} CostAnalysisCalc.ca_t4_cpm_str`  |
 | **p3.2xlarge (V100 GPU)** | \$`{python} CostAnalysisCalc.ca_v100_cost_str` | `{python} CostAnalysisCalc.ca_v100_throughput_str` img/s | \$`{python} CostAnalysisCalc.ca_v100_cpm_str` |
+
+: **ResNet-50 Cloud Inference Cost Comparison**: AWS hourly cost, sustained throughput, and resulting cost per one million images for CPU, T4, and V100 instances, showing the T4 as the cost-per-inference winner despite its higher hourly rate. {#tbl-model-serving-resnet-cloud-cost}
 
 :::
 
@@ -4254,7 +4288,7 @@ The worked example in @sec-model-serving-queuing-theory-tail-latency-29a6 demons
 
 ### Production case study: Serving Llama-3-8B {#sec-model-serving-production-case-study-serving-llama38b-0499}
 
-To synthesize the principles of latency budgeting, memory management, and hardware efficiency, this case study analyzes a complete production profile for a modern LLM serving workload\index{LLM Serving!8B parameter case study}\index{LLM Serving!production case study}. The Llama-3-8B numbers in the rest of this section are computed for the 8B architecture; @fig-kv-cache-growth below is a separate 70B-class contrast that motivates why KV-cache memory is the dominant cost at any LLM scale before the 8B-specific analysis begins.
+To synthesize the principles of latency budgeting, memory management, and hardware efficiency, this case study analyzes a complete production profile for a modern LLM serving workload\index{LLM Serving!8B parameter case study}\index{LLM Serving!production case study}. The Llama-3-8B\index{Llama-3-8B!serving case study} numbers in the rest of this section are computed for the 8B architecture; @fig-kv-cache-growth below is a separate 70B-class contrast that motivates why KV-cache memory is the dominant cost at any LLM scale before the 8B-specific analysis begins.
 
 The bottleneck that dominates LLM serving costs is KV cache memory. The memory curves in @fig-kv-cache-growth climb steeply for larger batch sizes, illustrating *why* long-context serving is memory bound even on H100s; the figure uses 70B-class assumptions to amplify the effect, and the 8B-specific numbers follow.
 
@@ -4354,7 +4388,7 @@ The linear growth of the KV cache with sequence length forces a hard trade-off: 
 # │          "Physics of Token Generation" callout (~50 lines below:
 # │          LlmCaseStudyHwSpecs.a100_bw_tbs)
 # │
-# │ Goal: Provide H100 memory capacity and A100 bandwidth for the Llama-3-8B\index{Llama-3-8B!serving case study}
+# │ Goal: Provide H100 memory capacity and A100 bandwidth for the Llama-3-8B
 # │       case study's workload profile and token generation analysis.
 # │ Show: The memory ceiling and bandwidth of H100 and A100 GPUs.
 # │ How: Retrieve constants from Hardware Digital Twins; extend GpuSpecs class.
@@ -4377,7 +4411,7 @@ class LlmCaseStudyHwSpecs:
     h100_mem_value = h_h100.memory_capacity.m_as(GiB)
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    a100_bw_tbs = f"{a100_bw_tbs_value:.1f}"                               # e.g. "2.0" TB/s
+    a100_bw_tbs = f"{a100_bw_tbs_value:.2f}"                               # e.g. "2.04" TB/s
     h100_mem = f"{h100_mem_value:.0f}"                                     # e.g. "80" GB
 ```
 
@@ -4435,7 +4469,7 @@ Every token generation pays a massive "energy tax" to move the model's logic fro
 # │          req_time_s_str, hourly_cost_str, tokens_per_hour_m_str,
 # │          cost_per_m_tokens_str, remaining_vram_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import H100_MEM_BW, TB, second, SEC_PER_HOUR, MILLION
+from mlsysim.core.constants import H100_MEM_BW, TB, GB, MB, second, ms, SEC_PER_HOUR, MILLION
 from mlsysim.fmt import fmt
 
 class LlmServingCalc:
@@ -4453,11 +4487,12 @@ class LlmServingCalc:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     _h100_bw_tb = H100_MEM_BW.m_as(TB/second)
-    token_time_theoretical_ms_value = model_weight_gb_value / (_h100_bw_tb * 1000) * 1000
-    total_decode_s_value = decode_tokens_value * realized_tpot_ms_value / 1000
-    kv_capacity_tokens_value = int(kv_cache_gb_value * 1000 / kv_per_token_mb_value)
+    _h100_bw_gbs = H100_MEM_BW.m_as(GB/second)
+    token_time_theoretical_ms_value = (model_weight_gb_value / _h100_bw_gbs * second).m_as(ms)
+    total_decode_s_value = (decode_tokens_value * realized_tpot_ms_value * ms).m_as(second)
+    kv_capacity_tokens_value = int((kv_cache_gb_value * GB).m_as(MB) / kv_per_token_mb_value)
     concurrent_batch_value = int(kv_capacity_tokens_value/tokens_per_req_value)
-    req_time_s_value = ttft_s_value + decode_tokens_value * realized_tpot_ms_value / 1000
+    req_time_s_value = ttft_s_value + (decode_tokens_value * realized_tpot_ms_value * ms).m_as(second)
     tokens_per_hour_value = concurrent_batch_value * (SEC_PER_HOUR/req_time_s_value) * tokens_per_req_value
     cost_per_m_tokens_value = hourly_cost_value / (tokens_per_hour_value/MILLION)
     remaining_vram_gb_value = int(80 - model_weight_gb_value)

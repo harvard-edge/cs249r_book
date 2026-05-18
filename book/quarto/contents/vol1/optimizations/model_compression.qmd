@@ -140,8 +140,8 @@ Throughout this chapter, we ground each technique in concrete systems: ResNet-50
 
 ***Model Compression***\index{Model Compression!definition} is a family of techniques that reduce a trained model's computational cost and memory footprint by eliminating redundant parameters (pruning), reducing numerical precision (quantization), or transferring learned behavior into a smaller architecture (distillation), while preserving as much predictive accuracy as possible.
 
-1.  **Significance (quantitative)**: Compression directly reduces both iron law terms. INT8 quantization of a 175B-parameter large language model (LLM) cuts weight memory from 350 GB (FP16) to 175 GB—a 2$\times$ reduction in $D_{\text{vol}}$—while enabling Tensor Core INT8 paths that are 2$\times$ faster than FP16, yielding up to 4$\times$ combined throughput improvement. Unstructured pruning to 50 percent sparsity theoretically halves $O$, but hardware speedup only materializes when sparsity is structured (for example, 2:4 sparse) to match accelerator capabilities.
-2.  **Distinction (durable)**: Unlike post-training compression methods such as pruning and quantization, neural architecture search discovers efficient architectures from scratch by exploring a design space. This chapter treats NAS as a related structural optimization technique: it changes the representation before training rather than compressing a finished model post hoc.
+1.  **Significance (quantitative)**: Compression directly reduces both iron law terms. INT8 quantization of a 175B-parameter large language model (LLM) cuts weight memory from 350 GB (FP16) to 175 GB (a 2$\times$ reduction in $D_{\text{vol}}$) while enabling Tensor Core INT8 paths that are 2$\times$ faster than FP16, yielding up to 4$\times$ combined throughput improvement. Unstructured pruning to 50 percent sparsity theoretically halves $O$, but hardware speedup only materializes when sparsity is structured (for example, 2:4 sparse) to match accelerator capabilities.
+2.  **Distinction (durable)**: Unlike posttraining compression methods such as pruning and quantization, neural architecture search discovers efficient architectures from scratch by exploring a design space. This chapter treats NAS as a related structural optimization technique: it changes the representation before training rather than compressing a finished model post hoc.
 3.  **Common pitfall**: A frequent misconception is that compression techniques compose without interference. In practice, applying quantization after pruning can amplify quantization error in near-zero weight regions that pruning left behind, causing accuracy degradation that neither technique produces alone.
 
 :::
@@ -199,6 +199,8 @@ According to the iron law $(T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\
 1.  **Memory energy $(D_{\text{vol}})$**: Fetching a 32-bit float from DRAM costs ≈ **`{python} CompressionSetup.energy_dram_str` pJ**. Fetching an 8-bit integer costs ≈ **`{python} CompressionSetup.energy_dram_per_byte_str` pJ**.
 2.  **Compute energy (O)**: A 32-bit FLOP costs ≈ **`{python} CompressionSetup.energy_flop_fp32_str` pJ**. An 8-bit integer OP costs ≈ **`{python} CompressionSetup.energy_flop_int8_str` pJ**.
 
+@tbl-model-compression-energy-hierarchy normalizes these costs against an 8-bit integer add to expose the four-order-of-magnitude gap between arithmetic and DRAM access:
+
 ```{=latex}
 \vspace{-9pt}
 ```
@@ -207,6 +209,8 @@ According to the iron law $(T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\
 | **Integer Add** |         8-bit |           1$\times$ |
 | **Float Add**   |        32-bit |          30$\times$ |
 | **DRAM Read**   |        64-bit |  **40,000$\times$** |
+
+: **The Energy Hierarchy**: Relative energy cost of representative arithmetic and memory operations, normalized to an 8-bit integer add. A 32-bit float add costs 30$\times$ more than its 8-bit integer counterpart, but a single 64-bit DRAM read costs 40,000$\times$ more—four orders of magnitude above on-chip compute. This gap is why bit-width reductions that shrink data movement dominate the energy budget of inference far more than the arithmetic savings alone would suggest. {#tbl-model-compression-energy-hierarchy}
 
 For inference workloads, moving from FP32 to INT8 saves 4$\times$ memory and can reduce the energy per inference by up to `{python} CompressionSetup.int8_energy_reduction_str`$\times$ on hardware with dedicated INT8 units, depending on the compute-to-memory ratio of the workload. The practical impact: a battery lasting one hour or 20 hours.
 
@@ -301,7 +305,6 @@ These physics-level savings translate directly into deployment capabilities. A m
 # │          int4_toks_str, speedup_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check
-from mlsysim.core.constants import KIB_TO_BYTES
 from mlsysim.core.constants import BYTES_FP16, BYTES_INT4, byte, MS_PER_SEC
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -464,13 +467,13 @@ class ModelDeviceComparison:
     mobile_mem = MOBILE_MEM_GIB
     tiny_mem = TINY_MEM_KIB
 
-    # Model sizes
+    # Model sizes (decimal — match the underlying byte-count math)
     dlrm_mem = DLRM_MODEL_SIZE_FP32
-    gpt2_mem = 6 * GiB
-    resnet_mem = 100 * MiB
-    mobilenet_mem = 14 * MiB
-    mobilenet_int8_mem = 3.5 * MiB
-    dscnn_mem = 500 * KiB
+    gpt2_mem = 6 * GB                # 1.5B params × 4 bytes = 6 GB
+    resnet_mem = 100 * MB            # ~25M params × 4 bytes
+    mobilenet_mem = 14 * MB
+    mobilenet_int8_mem = 3.5 * MB
+    dscnn_mem = 500 * KB
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     dlrm_mobile = _get_ratio(dlrm_mem, mobile_mem)
@@ -487,11 +490,11 @@ class ModelDeviceComparison:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     dlrm_str = f"{dlrm_mem.m_as(GB):.0f} GB"
-    gpt2_str = f"{gpt2_mem.m_as(GiB):.0f} GB"
-    resnet_str = f"{resnet_mem.m_as(MiB):.0f} MB"
-    mobilenet_str = f"{mobilenet_mem.m_as(MiB):.0f} MB"
-    mobilenet_int8_str = f"{mobilenet_int8_mem.m_as(MiB):.1f} MB"
-    dscnn_str = f"{dscnn_mem.m_as(KiB):.0f} KB"
+    gpt2_str = f"{gpt2_mem.m_as(GB):.0f} GB"
+    resnet_str = f"{resnet_mem.m_as(MB):.0f} MB"
+    mobilenet_str = f"{mobilenet_mem.m_as(MB):.0f} MB"
+    mobilenet_int8_str = f"{mobilenet_int8_mem.m_as(MB):.1f} MB"
+    dscnn_str = f"{dscnn_mem.m_as(KB):.0f} KB"
     cloud_cap_str = f"~{cloud_mem.m_as(GiB):.0f} GB"
     mobile_cap_str = f"~{mobile_mem.m_as(GiB):.0f} GB"
     tiny_cap_str = f"~{tiny_mem.m_as(KiB):.0f} KB"
@@ -2194,7 +2197,7 @@ The factor $T^2$ ensures that gradient scales remain consistent when $T$ is chan
 
 ##### Efficiency gains and trade-offs {#sec-model-compression-efficiency-gains-tradeoffs-fb5b}
 
-Distillation's primary advantage over pruning is that it produces a *dense* model, not a sparse one. A distilled student runs efficiently on commodity hardware—GPUs, TPUs, edge AI chips—without requiring specialized sparse execution kernels. Models such as DistilBERT\index{DistilBERT}\index{Knowledge Distillation!DistilBERT}[^fn-distilbert-deployment] retain up to 97 percent of the teacher's accuracy with 40 percent fewer parameters and 60 percent faster inference, a compression level difficult to achieve through pruning alone [@sanh2019distilbert]. The same dense-student principle applies in computer vision, where compact architectures such as MobileNet [@howard2017mobilenets] can be trained under teacher supervision rather than relying on sparse execution support. The student also inherits the teacher's generalization properties\index{Knowledge Distillation!memory efficiency}: large models trained on extensive datasets are less sensitive to noise and data shifts, and well-trained students inherit this robustness—particularly valuable in low-data regimes where training a small model from scratch leads to poor generalization.
+Distillation's primary advantage over pruning is that it produces a *dense* model, not a sparse one. A distilled student runs efficiently on commodity hardware (GPUs, TPUs, edge AI chips) without requiring specialized sparse execution kernels. Models such as DistilBERT\index{DistilBERT}\index{Knowledge Distillation!DistilBERT}[^fn-distilbert-deployment] retain up to 97 percent of the teacher's accuracy with 40 percent fewer parameters and 60 percent faster inference, a compression level difficult to achieve through pruning alone [@sanh2019distilbert]. The same dense-student principle applies in computer vision, where compact architectures such as MobileNet [@howard2017mobilenets] can be trained under teacher supervision rather than relying on sparse execution support. The student also inherits the teacher's generalization properties\index{Knowledge Distillation!memory efficiency}: large models trained on extensive datasets are less sensitive to noise and data shifts, and well-trained students inherit this robustness—particularly valuable in low-data regimes where training a small model from scratch leads to poor generalization.
 
 [^fn-distilbert-deployment]: **DistilBERT**: Achieves 97 percent of BERT-Base performance with 40 percent fewer parameters (66M vs. 110M) and 60 percent faster inference. The concrete deployment impact: memory drops from 1.35 GB to 0.81 GB (proportional to the 60 percent parameter scale) and latency from 85 ms to 34 ms, crossing the threshold for real-time NLP on mobile devices where BERT-Base cannot fit alongside the operating system. \index{DistilBERT!deployment metrics}
 
@@ -2240,8 +2243,7 @@ Rather than eliminating parameters through pruning or transferring knowledge thr
 # │          mat_dim_str, rank_k_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check
-from mlsysim.core.constants import KIB_TO_BYTES
-from mlsysim.core.constants import MIB_TO_BYTES
+from mlsysim.core.constants import byte, MB
 
 # ┌── LEGO ───────────────────────────────────────────────
 class LowRankFactorization:
@@ -2258,11 +2260,11 @@ class LowRankFactorization:
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Full Matrix: N x N
     full_params = mat_dim * mat_dim
-    full_mb = (full_params * bytes_per_param) / MIB_TO_BYTES
+    full_mb = (full_params * bytes_per_param * byte).m_as(MB)
 
     # Step 2: Factored: 2 x N x K
     factored_params = 2 * mat_dim * rank_k
-    factored_mb = (factored_params * bytes_per_param) / MIB_TO_BYTES
+    factored_mb = (factored_params * bytes_per_param * byte).m_as(MB)
 
     data_reduction = full_mb/factored_mb
 
@@ -3227,7 +3229,6 @@ To make these gains concrete, consider the *quantization savings* when deploying
 # │          fp16_size_gb_str, int4_size_gb_str, compression_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check
-from mlsysim.core.constants import KIB_TO_BYTES
 from mlsysim.core.constants import BYTES_FP16, BYTES_INT4, byte, GB
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -3300,7 +3301,6 @@ Beyond storage savings, quantization also accelerates computation through hardwa
 # │          simd_register_bits_str, simd_fp32_bits_str, simd_int8_bits_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check
-from mlsysim.core.constants import KIB_TO_BYTES
 from mlsysim.core.constants import SIMD_REGISTER_BITS, FP32_BITS, INT8_BITS
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -4869,7 +4869,7 @@ Designing for hardware efficiency requires structuring architectures to account 
 
 The principles in @tbl-hardware-efficient-design work synergistically: scaling optimization sizes models appropriately for available resources, computation reduction eliminates redundant operations through techniques like depthwise separable convolutions[^fn-depthwise-separable-mobile], memory optimization aligns access patterns with hardware hierarchies, and hardware-aware design ensures architectural decisions match platform capabilities. Together, these principles enable models that balance accuracy with efficiency while maintaining consistent behavior across deployment environments.
 
-[^fn-depthwise-separable-mobile]: **Depthwise Separable Convolutions**: This technique directly reduces computation by factorizing a standard convolution into separate depthwise (per-channel) and pointwise $(1\times1)$ operations. This factorization underpins the core trade-off for on-device vision, allowing a model like MobileNetV2 to accept a 4-point accuracy drop on ImageNet in exchange for a $13.7\times$ reduction in operations vs. a ResNet-50. \index{Depthwise Separable Convolution!mobile efficiency}
+[^fn-depthwise-separable-mobile]: **Depthwise Separable Convolutions**: This technique directly reduces computation by factorizing a standard convolution into separate depthwise (per-channel) and pointwise $(1{\times}1)$ operations. This factorization underpins the core trade-off for on-device vision, allowing a model like MobileNetV2 to accept a 4-point accuracy drop on ImageNet in exchange for a $13.7\times$ reduction in operations vs. a ResNet-50. \index{Depthwise Separable Convolution!mobile efficiency}
 
 The following subsections examine each principle in detail, beginning with how to scale model dimensions effectively.
 
@@ -5000,7 +5000,7 @@ class V100Specs:
 # │          kernels_fused_str, saved_latency_ms_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check
-from mlsysim.core.constants import KIB_TO_BYTES, MILLION
+from mlsysim.core.constants import THOUSAND, MILLION
 
 class FusionCalc:
     """Quantify latency and bandwidth benefits of Conv-BN-ReLU operator fusion on ResNet-50."""
@@ -5030,11 +5030,11 @@ class FusionCalc:
 
     # Step 2: Conv-BN-ReLU intermediate (2 feature maps written: conv→BN boundary)
     conv_bn_relu_intermediate_mb = (
-        2 * conv_channels * conv_spatial * conv_spatial * bytes_per_element / (1024**2)
+        2 * conv_channels * conv_spatial * conv_spatial * bytes_per_element / MILLION
     )
 
     # Step 3: GEMM intermediate
-    gemm_intermediate_mb = gemm_hidden * gemm_seq * bytes_per_element / (1024**2)
+    gemm_intermediate_mb = gemm_hidden * gemm_seq * bytes_per_element / MILLION
 
     # Step 4: Unfused bandwidth: Conv (feat*2 + weights) + BN (feat*2 + bn) + ReLU (feat*2)
     unfused_conv_mb = feat_map_mb * 2 + weights_mb
@@ -5048,11 +5048,11 @@ class FusionCalc:
 
     # Step 6: Kernel launch savings
     saved_latency_us = (kernels_unfused - kernels_fused) * latency_per_kernel_us
-    saved_latency_ms = saved_latency_us / 1000
+    saved_latency_ms = saved_latency_us / THOUSAND   # μs → ms
 
-    # Step 7: V100 timing (memory-bound): MB / (GB/s) * 1000 = µs
-    unfused_time_us = total_unfused_mb/V100Specs.v100_bw_gbs * 1000
-    fused_time_us = total_fused_mb/V100Specs.v100_bw_gbs * 1000
+    # Step 7: V100 timing (memory-bound): MB / (GB/s) * THOUSAND = µs
+    unfused_time_us = total_unfused_mb/V100Specs.v100_bw_gbs * THOUSAND
+    fused_time_us = total_fused_mb/V100Specs.v100_bw_gbs * THOUSAND
     fusion_speedup = unfused_time_us/fused_time_us
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
@@ -5062,9 +5062,9 @@ class FusionCalc:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     conv_bn_relu_intermediate_mb_str = fmt(conv_bn_relu_intermediate_mb, precision=1, commas=False)
     gemm_intermediate_mb_str = fmt(gemm_intermediate_mb, precision=1, commas=False)
-    feat_map_kb_str = fmt(feat_map_mb * 1000, precision=0, commas=False)
+    feat_map_kb_str = fmt(feat_map_mb * THOUSAND, precision=0, commas=False)   # MB → KB
     weights_mb_str = fmt(weights_mb, precision=1, commas=False)
-    bn_params_kb_str = fmt(bn_params_mb * KIB_TO_BYTES, precision=0, commas=False)
+    bn_params_kb_str = fmt(bn_params_mb * THOUSAND, precision=0, commas=False)  # MB → KB (was wrongly using KIB_TO_BYTES = 1024)
     unfused_conv_mb_str = fmt(unfused_conv_mb, precision=1, commas=False)
     unfused_bn_mb_str = fmt(unfused_bn_mb, precision=1, commas=False)
     unfused_relu_mb_str = fmt(unfused_relu_mb, precision=1, commas=False)
@@ -6892,9 +6892,9 @@ Knowledge distillation integrates effectively with quantization by mitigating ac
 
 Neural architecture search enables co-design approaches that optimize model structures specifically for quantization constraints, identifying architectures that maintain accuracy under low-precision operations. This co-design produces models inherently suited for subsequent optimization, improving the effectiveness of both quantization and pruning techniques.
 
-With pruning, distillation, and quantization each operating at a different level of the model stack, the critical engineering question is which combinations yield the greatest compression ratio with the least accuracy degradation. The answer depends on whether the techniques target orthogonal resources, because complementary techniques compound their benefits while redundant ones produce diminishing returns. @fig-compression-methods compares how different compression strategies exhibit varying trade-offs between model size and accuracy loss. Pruning combined with quantization (red circles) achieves high compression ratios with minimal accuracy loss, while quantization alone (yellow squares) provides a reasonable balance. In contrast, SVD (green diamonds) requires a larger model size to maintain accuracy, illustrating how different techniques impact compression effectiveness.
+With pruning, distillation, and quantization each operating at a different level of the model stack, the critical engineering question is which combinations yield the greatest compression ratio with the least accuracy degradation. The answer depends on whether the techniques target orthogonal resources, because complementary techniques compound their benefits while redundant ones produce diminishing returns. @fig-compression-methods compares how different compression strategies exhibit varying trade-offs between model size and accuracy loss. Pruning combined with quantization (blue circles) achieves high compression ratios with minimal accuracy loss, while quantization alone (orange squares) provides a reasonable balance. In contrast, SVD (red diamonds) requires a larger model size to maintain accuracy, illustrating how different techniques impact compression effectiveness.
 
-::: {#fig-compression-methods fig-env="figure" fig-pos="htb" fig-cap="**Combined Compression Effectiveness**: Pruning combined with quantization (red circles) achieves the highest compression ratio at near-zero accuracy loss, followed by pruning alone and quantization alone, while SVD (green diamonds) requires the largest model size to maintain accuracy. Source: [@han2016deep]." fig-alt="Line graph of accuracy loss vs. model size ratio. Four curves show pruning plus quantization achieving smallest size at near-zero loss, followed by pruning only, quantization only, and SVD requiring largest size to maintain accuracy."}
+::: {#fig-compression-methods fig-env="figure" fig-pos="htb" fig-cap="**Combined Compression Effectiveness**: Pruning combined with quantization (blue circles) achieves the highest compression ratio at near-zero accuracy loss, followed by pruning alone (green triangles) and quantization alone (orange squares), while SVD (red diamonds) requires the largest model size to maintain accuracy. Source: [@han2016deep]." fig-alt="Line graph of accuracy loss vs. model size ratio with four series. Blue circles (pruning plus quantization) achieve the smallest size at near-zero loss, followed by green triangles (pruning only) and orange squares (quantization only). Red diamonds (SVD) require the largest size to maintain accuracy."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
@@ -7837,7 +7837,6 @@ The numerical claims that follow (specific BERT GLUE retention rates, ResNet-50 
 # │          expected_speedup_str, actual_speedup_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check
-from mlsysim.core.constants import KIB_TO_BYTES
 
 # ┌── LEGO ───────────────────────────────────────────────
 class FallaciesAnalysis:
@@ -7896,7 +7895,7 @@ Engineers assume quantization scales uniformly: if INT8 loses 1 percent, then IN
 
 **Pitfall**: *Using posttraining optimization without considering training-aware alternatives.*
 
-Teams apply post-training quantization (PTQ) to avoid retraining and achieve 96.8 percent of baseline BERT performance. However, quantization-aware training (QAT) retains 99.1 percent, recovering the 2.3-point gap through learned quantization parameters. Post-training pruning of ResNet-50 to `{python} FallaciesAnalysis.pruning_target_str` percent parameters drops accuracy to 73.8 percent, while gradual magnitude pruning during training maintains 75.6 percent at the same sparsity. Knowledge distillation during student training achieves 97 percent of teacher performance vs. 92–94 percent when distilling post-hoc. As detailed in @sec-model-compression-precision-reduction-strategies-db83, the 2–4 percent accuracy improvements from training-aware methods often determine whether models meet production thresholds.
+Teams apply post-training quantization (PTQ) to avoid retraining and achieve 96.8 percent of baseline BERT performance. However, quantization-aware training (QAT) retains 99.1 percent, recovering the 2.3-point gap through learned quantization parameters. Posttraining pruning of ResNet-50 to `{python} FallaciesAnalysis.pruning_target_str` percent parameters drops accuracy to 73.8 percent, while gradual magnitude pruning during training maintains 75.6 percent at the same sparsity. Knowledge distillation during student training achieves 97 percent of teacher performance vs. 92–94 percent when distilling post-hoc. As detailed in @sec-model-compression-precision-reduction-strategies-db83, the 2–4 percent accuracy improvements from training-aware methods often determine whether models meet production thresholds.
 
 **Pitfall**: *Assuming compression ratios translate directly into proportional deployment gains.*
 
