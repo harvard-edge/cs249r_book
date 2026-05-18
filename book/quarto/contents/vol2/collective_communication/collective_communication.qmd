@@ -62,7 +62,7 @@ The gap between that assumption and reality reveals a fundamental asymmetry in *
 
 :::
 
-The requirement for gradient synchronization is not a design choice; it is a mathematical necessity for convergence. If different GPUs apply different gradient updates to their local copies of the model, the copies diverge. After enough steps, the models on different GPUs represent entirely different functions, and the training process no longer approximates stochastic gradient descent on the global loss. Synchronization ensures that all copies remain identical (within floating-point precision) at every step, preserving the theoretical convergence guarantees of the optimization algorithm via the **AllReduce**[^fn-allreduce-etymology] primitive.[^fn-ps-bottleneck]
+The requirement for gradient synchronization is not a design choice; it is a mathematical necessity for convergence. If different GPUs apply different gradient updates to their local copies of the model, the copies diverge. After enough steps, the models on different GPUs represent entirely different functions, and the training process no longer approximates stochastic gradient descent on the global loss. Synchronization ensures that all copies remain identical (within floating-point precision) at every step, preserving the theoretical convergence guarantees of the optimization algorithm via the AllReduce[^fn-allreduce-etymology] primitive.[^fn-ps-bottleneck]
 
 [^fn-ps-bottleneck]: **Parameter Server (PS)**: Google's DistBelief (2012) used a star topology where all workers sent gradients to a central server whose bandwidth had to match the aggregate bandwidth of all workers. As clusters scaled from 10 to 1,000 nodes, the central server's NIC saturated, making per-step communication cost grow as $O(N)$ and forcing the transition to peer-to-peer collectives where per-node cost is constant. \index{Parameter Server!bottleneck}
 
@@ -277,7 +277,7 @@ plt.close()
 
 The journey begins at the moment the backward pass completes. On a single machine, that was the end of the story: the weights were updated, and the neuron learned. At production scale, however, the gradient is born into isolation. It exists on one GPU, while the "truth" of the model is distributed across thousands. To achieve global convergence, the gradient must find its peers.
 
-The specific "travel manifest" for this journey is dictated by the parallelism strategy chosen in @sec-distributed-training-systems. The choice of *how the math is split* determines *how the data moves*. For our **Lighthouse Archetypes** (@sec-vol2-introduction-archetypes), these manifests differ fundamentally:
+The specific "travel manifest" for this journey is dictated by the parallelism strategy chosen in @sec-distributed-training-systems. The choice of *how the math is split* determines *how the data moves*. For our Lighthouse Archetypes (@sec-vol2-introduction-archetypes), these manifests differ fundamentally:
 
 *   Archetype A (GPT-4/Llama-3): Our gradient is part of a massive, dense tensor. It needs to meet every other gradient in the fleet to compute a global average. Its primary vehicle is the AllReduce.
 *   Archetype B (DLRM at Scale)—the Deep Learning Recommendation Model (DLRM) workload[^fn-dlrm-embedding]: Our gradient (or activation) is sparse and targeted. It does not need to meet everyone; it needs to find one specific "Expert" GPU across the data center. Its vehicle is the AllToAll.
@@ -655,24 +655,24 @@ Different model architectures stress different operations, and selecting the wro
     *   *Complexity*: $O(\log N)$ latency with tree algorithms; bandwidth cost $O(M)$ total.
 
 3.  **AllReduce**: Data from all workers is aggregated, and the *result* is distributed to all workers.
-    *   *Use Case*: **Data Parallelism**. In the data-parallel training strategy from @sec-distributed-training-systems-systems-data-parallelism-6132, AllReduce synchronizes gradients so every GPU computes the same weight update.
+    *   *Use Case*: Data Parallelism. In the data-parallel training strategy from @sec-distributed-training-systems-systems-data-parallelism-6132, AllReduce synchronizes gradients so every GPU computes the same weight update.
     *   *Semantics*: $y_i = \sum_{j=0}^{N-1} x_j$ for all $i$.
     *   *Complexity*: Ring achieves bandwidth-optimal $2\frac{N-1}{N}\frac{M}{\beta}$ but $O(N)$ latency; Tree achieves $O(\log N)$ latency but suboptimal bandwidth.
 
 4.  **AllGather**: Every worker sends its data to every other worker. The result is a concatenation of all inputs.
-    *   *Use Case*: **Sharded Data Parallelism (FSDP[^fn-fsdp-memory]/ZeRO)**. Collecting sharded parameters before a forward/backward pass.
+    *   *Use Case*: Sharded Data Parallelism (FSDP[^fn-fsdp-memory]/ZeRO). Collecting sharded parameters before a forward/backward pass.
     *   *Semantics*: Worker $i$ starts with $x_i$, ends with $[x_0, x_1, \dots, x_{N-1}]$.
     *   *Complexity*: Ring achieves $\frac{N-1}{N}\frac{M}{\beta}$ bandwidth cost; total data grows to $N \times M$ per worker.
 
-5.  **ReduceScatter**\index{ReduceScatter}: Data is reduced (summed), but the result is scattered such that each worker receives only a distinct chunk of the result.
-    *   *Use Case*: **Sharded Data Parallelism**. Reducing gradients but keeping them sharded to save memory. Also used in **Sequence Parallelism** to distribute activations.
+5.  ReduceScatter\index{ReduceScatter}: Data is reduced (summed), but the result is scattered such that each worker receives only a distinct chunk of the result.
+    *   *Use Case*: Sharded Data Parallelism. Reducing gradients but keeping them sharded to save memory. Also used in Sequence Parallelism to distribute activations.
     *   *Semantics*: Worker $i$ receives the $i$-th block of $\sum x_j$.
     *   *Complexity*: Ring achieves $\frac{N-1}{N}\frac{M}{\beta}$; functionally the inverse of AllGather.
 
 A key insight is that AllReduce can be decomposed into ReduceScatter followed by AllGather. This is not merely a mathematical equivalence; it is precisely how Ring AllReduce works internally (the Scatter-Reduce phase is a ReduceScatter, the AllGather phase is an AllGather). FSDP exploits this decomposition by AllGathering parameter shards before a module needs them and ReduceScattering gradients after backward so each rank retains only its shard for the optimizer step. This shards parameters, gradients, and optimizer state across workers, reducing persistent model-state memory roughly by $N \times$, while temporary full-parameter buffers and prefetching determine peak memory.
 
 6.  **AllToAll**: The most general pattern. Worker $i$ sends a distinct chunk of data to worker $j$. This is effectively a matrix transpose of distributed data.
-    *   *Use Case*: **Mixture of Experts (MoE)** routing tokens to experts; **DLRM**[^fn-dlrm-embedding] exchanging embedding lookups across workers.
+    *   *Use Case*: Mixture of Experts (MoE) routing tokens to experts; DLRM[^fn-dlrm-embedding] exchanging embedding lookups across workers.
     *   *Semantics*: Worker $i$ sends $x_{i \to j}$ to worker $j$ and receives $x_{j \to i}$ from worker $j$, for all $j$.
     *   *Complexity*: $O(N^2)$ logical connections create potential for network congestion; bandwidth cost is $\frac{N-1}{N}M$ per worker, but contention makes this the hardest primitive to scale.
 
@@ -770,7 +770,7 @@ If serialized: 7 $\times$ `{python} MoeAllToAll.per_transfer_us_str` $\mu\text{s
 
 In practice, MoE routing is rarely perfectly uniform. Popular experts receive more tokens than unpopular ones, creating load imbalance that translates to communication imbalance. If one expert receives 3$\times$ more tokens than average, the GPU hosting that expert receives 3$\times$ more incoming data, creating a hotspot that can stall the entire collective (since AllToAll is a barrier operation). Production MoE systems address this through **auxiliary load-balancing losses** that penalize the gating network for routing too many tokens to any single expert, and through **capacity factors** that cap the maximum number of tokens an expert can accept (dropping overflow tokens). These techniques trade a small amount of model quality for communication balance, which is the right trade-off at scale.
 
-@tbl-collective-selection maps these primitives to the parallelism strategies introduced in @sec-distributed-training-systems and the **Lighthouse** architectures defined in the Introduction.
+@tbl-collective-selection maps these primitives to the parallelism strategies introduced in @sec-distributed-training-systems and the Lighthouse architectures defined in the Introduction.
 
 | **Training Strategy**    | **Primary Collective**     | **Bottleneck Characteristic**         |
 |:-------------------------|:---------------------------|:--------------------------------------|
@@ -792,7 +792,7 @@ The memory optimization transforms the communication pattern. Before each layer'
 
 The consequence is a trade-off between memory and communication frequency. Standard data parallelism communicates once per training step (a single AllReduce of the full gradient). FSDP communicates twice per layer per step (AllGather in forward, ReduceScatter in backward), but each communication is smaller (only $1/N$ of the layer's parameters per GPU). For a model with $L_{\text{layers}}$ layers, FSDP issues $2L_{\text{layers}}$ collective operations per step instead of 1, but each operation transfers approximately the same total bytes as the single AllReduce would. The total communication volume is comparable, but the communication is spread across more, smaller operations.
 
-The higher operation count makes FSDP more sensitive to latency ($\alpha$) than standard data parallelism. If each of the $2L_{\text{layers}}$ collectives pays the full NCCL startup overhead (25--50 $\mu$s per operation from @tbl-nccl-vs-theory), the aggregate overhead for a 100-layer model is 5--10 ms, which can represent a meaningful fraction of step time. FSDP implementations mitigate this through **prefetching**\index{Prefetching} (launching the next layer's AllGather while the current layer is computing) and **communication stream pipelining** (using dedicated CUDA streams for communication that overlap with compute streams).
+The higher operation count makes FSDP more sensitive to latency ($\alpha$) than standard data parallelism. If each of the $2L_{\text{layers}}$ collectives pays the full NCCL startup overhead (25--50 $\mu$s per operation from @tbl-nccl-vs-theory), the aggregate overhead for a 100-layer model is 5--10 ms, which can represent a meaningful fraction of step time. FSDP implementations mitigate this through prefetching\index{Prefetching} (launching the next layer's AllGather while the current layer is computing) and **communication stream pipelining** (using dedicated CUDA streams for communication that overlap with compute streams).
 
 Selecting the right collective algorithm at each invocation requires understanding these asymmetric patterns. The AllGather operations in FSDP are medium-sized (one layer's parameters, typically 10--100 MB for transformer models) and latency-sensitive (because computation blocks until the full parameters are available). The ReduceScatter operations are of similar size but can overlap with the next layer's backward computation. This asymmetry means the AllGather operations benefit more from low-latency algorithms (Tree or hybrid) while the ReduceScatter operations can use bandwidth-optimal algorithms (Ring) because their latency is hidden behind computation.
 
@@ -804,7 +804,7 @@ Imagine 1,000 GPUs, each holding a 1 GB gradient, all needing the exact sum of t
 
 ### Naive approaches vs. the bandwidth bottleneck {#sec-communication-collective-operations-naive-vs-optimal}
 
-Consider a naive implementation using a **Parameter Server** (Star topology). All $N$ workers send their gradients to rank 0; rank 0 sums them and sends the result back.
+Consider a naive implementation using a Parameter Server (Star topology). All $N$ workers send their gradients to rank 0; rank 0 sums them and sends the result back.
 
 *   **Bottleneck**\index{Bottleneck}: Rank 0's bandwidth. It must receive $N \times M$ bytes and send $N \times M$ bytes.
 *   **Time**\index{Time}: $T \propto N \times M / \beta$.
@@ -1575,7 +1575,7 @@ For a gradient vector of dimension $d$ quantized to INT8 with block size $B_{\te
 
 Block quantization is the default approach in DeepSpeed's communication compression and is supported by NCCL's custom reduction interface for fused quantize-reduce operations.
 
-Each reduction in bit-width introduces quantization noise. This noise acts as a biased perturbation to the true gradient direction. For aggressive quantization (INT8 and especially 1-bit), the systematic bias can prevent convergence unless corrected by **Error Feedback** (discussed later).
+Each reduction in bit-width introduces quantization noise. This noise acts as a biased perturbation to the true gradient direction. For aggressive quantization (INT8 and especially 1-bit), the systematic bias can prevent convergence unless corrected by Error Feedback (discussed later).
 
 ### Sparsification: Transmitting only important gradients {#sec-communication-collective-operations-collective-operations-sparsification-transmitting-important-gradients-2cd2}
 
@@ -2059,7 +2059,7 @@ For small messages (pipeline parallelism activations, MoE tokens), latency ($\al
 
 **Pitfall**: *Assuming AllReduce works for everything.*
 
-AllReduce creates a global barrier and assumes all participants contribute identical data shapes. In **Expert Parallelism (MoE)** and **Recommendation Systems**, where each worker needs to send distinct data to every other worker, AllReduce is fundamentally wrong. These workloads require AllToAll, which has $O(N^2)$ logical connections and hits network contention limits at much smaller cluster sizes.
+AllReduce creates a global barrier and assumes all participants contribute identical data shapes. In Expert Parallelism (MoE) and Recommendation Systems, where each worker needs to send distinct data to every other worker, AllReduce is fundamentally wrong. These workloads require AllToAll, which has $O(N^2)$ logical connections and hits network contention limits at much smaller cluster sizes.
 
 **Fallacy**: *Ring AllReduce is always optimal.*
 
@@ -2089,11 +2089,11 @@ If the job scheduler assigns ranks to GPUs without considering the physical topo
 
 Communication is the friction of scale. Computation is local, but learning is global, and the **$\alpha$-$\beta$ and LogP models** transform communication bottleneck analysis from guesswork into quantitative engineering. The critical message size $n^* = \alpha \cdot \beta$ separates latency-bound from bandwidth-bound regimes, and the gap between theoretical predictions and measured NCCL performance reveals that software stack overhead inflates small-message latency by 5--10$\times$, shifting algorithm crossover points in practice.
 
-The **Collective Primitives** (AllReduce, AllGather/ReduceScatter, AllToAll) map directly to parallelism strategies, and each primitive determines a distinct scaling ceiling. AllReduce workloads are bandwidth-bound and scale gracefully, while AllToAll workloads are contention-bound and hit practical limits at smaller cluster sizes.
+The Collective Primitives (AllReduce, AllGather/ReduceScatter, AllToAll) map directly to parallelism strategies, and each primitive determines a distinct scaling ceiling. AllReduce workloads are bandwidth-bound and scale gracefully, while AllToAll workloads are contention-bound and hit practical limits at smaller cluster sizes.
 
-The **Ring** and **Tree AllReduce**\index{Tree AllReduce} algorithms occupy opposite ends of the latency-bandwidth trade-off, with the crossover formula $M_{\text{crossover}} \approx N \cdot \alpha \cdot \beta$ determining which is optimal for a given configuration. **Hierarchical AllReduce** and **Rail-Optimized Routing** exploit the bandwidth hierarchy of modern GPU clusters to multiply effective inter-node bandwidth, while **in-network reduction (SHARP)** eliminates round-trips entirely by performing aggregation inside network switches.
+The Ring and Tree AllReduce\index{Tree AllReduce} algorithms occupy opposite ends of the latency-bandwidth trade-off, with the crossover formula $M_{\text{crossover}} \approx N \cdot \alpha \cdot \beta$ determining which is optimal for a given configuration. Hierarchical AllReduce and Rail-Optimized Routing exploit the bandwidth hierarchy of modern GPU clusters to multiply effective inter-node bandwidth, while in-network reduction (SHARP) eliminates round-trips entirely by performing aggregation inside network switches.
 
-When even the fastest wires are not enough, gradient compression provides the final squeeze. Quantization, sparsification, and compression-aware optimizers like **1-bit Adam** reduce communication volume by 4--1000$\times$. **Error Feedback** ensures that while the journey may be compressed or delayed, no vital information is permanently lost, preserving the mathematical truth of the model's convergence. Finally, communication-computation overlap through layer-by-layer pipelining and bucket fusion\index{Bucket Fusion} hides the remaining communication time behind useful computation, reducing the effective communication overhead to 5--15 percent of total step time in well-configured systems.
+When even the fastest wires are not enough, gradient compression provides the final squeeze. Quantization, sparsification, and compression-aware optimizers like 1-bit Adam reduce communication volume by 4--1000$\times$. Error Feedback ensures that while the journey may be compressed or delayed, no vital information is permanently lost, preserving the mathematical truth of the model's convergence. Finally, communication-computation overlap through layer-by-layer pipelining and bucket fusion\index{Bucket Fusion} hides the remaining communication time behind useful computation, reducing the effective communication overhead to 5--15 percent of total step time in well-configured systems.
 
 ::: {.callout-takeaways title="Every byte has a travel cost"}
 
@@ -2137,7 +2137,7 @@ In fault tolerance (@sec-fault-tolerance-reliability), we examine how to maintai
 
 :::
 
-[^fn-allreduce-etymology]: **AllReduce**: A compound term from MPI (Message Passing Interface) indicating a **Reduce** operation (summing data from all nodes to one) followed by a **Broadcast** (sending the sum to all nodes). Ring-based AllReduce optimizes this by performing both phases simultaneously in $2(N-1)$ steps, ensuring that every GPU ends with the global sum without any single node becoming a bottleneck. \index{AllReduce!etymology}
+[^fn-allreduce-etymology]: **AllReduce**: A compound term from MPI (Message Passing Interface) indicating a Reduce operation (summing data from all nodes to one) followed by a Broadcast (sending the sum to all nodes). Ring-based AllReduce optimizes this by performing both phases simultaneously in $2(N-1)$ steps, ensuring that every GPU ends with the global sum without any single node becoming a bottleneck. \index{AllReduce!etymology}
 
 [^fn-zerocopy-rdma]: **Zero-Copy Communication**: RDMA (Remote Direct Memory Access) allows the NIC to transfer data directly from the application's memory on one node to the application's memory on another, bypassing the operating system's kernel buffers. For a 350 GB gradient exchange, zero-copy avoids moving 700 GB of data between the CPU and main memory, reclaiming significant memory bandwidth ($\text{BW}$). \index{Zero-Copy!RDMA}
 
