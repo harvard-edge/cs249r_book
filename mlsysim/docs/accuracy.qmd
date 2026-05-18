@@ -7,7 +7,7 @@ MLSYSIM is a **first-order analytical model**. It predicts performance from clos
 ::: {.callout-note}
 ## What "first-order" means
 
-A first-order model captures the **dominant** system behavior without modeling second-order effects such as cache hierarchy dynamics, memory fragmentation, NIC DMA contention, or driver overhead. Expect predictions within **15--30%** of measured throughput for well-optimized workloads on modern hardware. Use MLSYSIM to reason about bottlenecks and compare configurations, not to produce production SLA estimates.
+A first-order model captures the **dominant** system behavior without modeling second-order effects such as cache hierarchy dynamics, memory fragmentation, NIC DMA contention, or driver overhead. Trust MLSYSIM for bottleneck classification and relative comparisons. Absolute latency is workload-dependent; well-calibrated cases are often within **15--30%**, while production serving can be 1.5--2× slower than idealized roofline bounds. Use MLSYSIM to reason about bottlenecks and compare configurations, not to produce production SLA estimates.
 
 For the formal treatment of roofline modeling and arithmetic intensity, see the [Hardware Acceleration slides (Vol I, Ch 11)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/vol1_11_hw_acceleration.pdf){target="_blank"}.
 :::
@@ -30,10 +30,12 @@ Not all MLSYSIM predictions are created equal. The table below ranks prediction 
 |:---|:---:|:---|
 | **KV-cache sizing** | Exact | Definitional formula, not approximated |
 | **Checkpoint sizing** | Exact | Direct calculation: $N \times \text{bytes\_per\_param}$ |
+| **Training memory components** | Exact for state tensors; approximate for activations | Weights, gradients, and optimizer states are direct byte counts; activation memory follows checkpointing coefficients |
 | **Bottleneck classification** (compute vs. memory) | >95% correct | The roofline ridge point is a structural property of the hardware |
 | **Relative configuration ranking** (which config is faster?) | >90% correct | Errors cancel when comparing two configurations on the same hardware |
 | **Scaling efficiency direction** (how does MFU change with DP/TP/PP?) | ±10% on MFU | Communication models are bandwidth-optimal lower bounds |
 | **Single-node throughput** (absolute latency) | ±15--30% | Sensitive to the efficiency parameter η |
+| **Serving replica count** | Directionally useful | Composes roofline, batching capacity, and M/M/c queueing; validate final SLAs empirically |
 | **TCO and carbon estimates** | ±20% | Dominated by PUE and grid carbon intensity assumptions |
 | **ITL in production serving** | −25% to −50% | Missing KV-cache paging, batch scheduling, and quantization kernel overhead |
 
@@ -92,9 +94,21 @@ See the [Distributed Training slides (Vol II, Ch 5)](https://github.com/harvard-
 
 The KV-cache formula ($\text{KV} = 2 \times L \times H_{\text{kv}} \times d_{\text{head}} \times S \times B \times \text{bpe}$) is **definitional**, not approximated. It computes the exact number of bytes the K and V tensors occupy. Similarly, checkpoint sizing ($N \times \text{bytes\_per\_param}$) is a direct count. Memory feasibility checks (`feasible: True/False`) are accurate because they compare against the same HBM capacity reported in manufacturer datasheets.
 
+### Training memory breakdown
+
+`TrainingMemoryModel` separates weights, gradients, optimizer state, activations, and communication buffers. The first three terms are direct byte counts from the model size, precision, optimizer, and ZeRO stage. Activations are the approximate term: they depend on the selected checkpointing strategy and use coefficients from transformer activation-recomputation analysis [@korthikanti2023]. Treat the model as a memory feasibility and attribution tool: it tells you which term is responsible for pressure, then empirical framework profiling can refine the activation term for a specific implementation.
+
+### Serving capacity planning
+
+`ServingCapacityModel` is a composition model. It uses `ServingModel` for TTFT/ITL, `ContinuousBatchingModel` for per-replica token capacity, and `TailLatencyModel` for queueing pressure. This is useful for first-pass sizing and sensitivity sweeps: if QPS doubles, or generated length doubles, you can see how many replicas are implied. Do not use the result as a production SLA guarantee. Production serving must still be validated with the target scheduler, traffic mix, batching policy, and percentile measurement.
+
+### MoE routing imbalance
+
+`MoERoutingModel` captures a single effect: hot experts make a top-k MoE behave as though more experts are active, increasing effective active parameters and expert-parallel all-to-all traffic. The `routing_imbalance_factor` is intentionally exposed. Use `1.0` for balanced routing, then sweep higher values to understand sensitivity. A real router's load distribution should be measured from token counts per expert and fed back into this parameter.
+
 ### Carbon and TCO estimates
 
-Sustainability and economics predictions are accurate to within 20% for standard cloud deployments. The main source of error is the assumed PUE (power usage effectiveness), which varies from ~1.1 (hyperscaler) to ~1.6 (enterprise). The carbon accounting methodology aligns with the lifecycle framework in the [Sustainable AI slides (Vol II, Ch 15)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/vol2_15_sustainable_ai.pdf){target="_blank"}.
+Sustainability and economics estimates are usually dominated by a few explicit assumptions: PUE, energy price, regional carbon intensity, utilization, and amortization period. The main source of error is often the assumed PUE (power usage effectiveness), which varies from ~1.1 (hyperscaler) to ~1.6 (enterprise). The carbon accounting methodology aligns with the lifecycle framework in the [Sustainable AI slides (Vol II, Ch 15)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/vol2_15_sustainable_ai.pdf){target="_blank"}.
 
 ---
 
@@ -124,7 +138,7 @@ MLSYSIM uses `efficiency` (η, default 0.5) as a single scalar representing hard
 
 : {tbl-colwidths="[35,20,45]"}
 
-When you use the default `efficiency=0.5`, you are modeling a well-optimized training job on datacenter hardware. For inference, pass `efficiency=0.35` for more conservative estimates. For edge devices, use `efficiency=0.2`.
+When you use the default `efficiency=0.5`, you are modeling a well-optimized training job on datacenter hardware. For inference, pass `efficiency=0.35` for more conservative estimates. For edge devices, use `efficiency=0.2`. All solvers whose compute term depends on η expose it as a parameter; defaults are starting points from the literature and benchmarks, not hidden constants.
 
 For a rigorous treatment of precision engineering and its impact on performance, see the [Performance Engineering slides (Vol II, Ch 9)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/vol2_09_performance_engineering.pdf){target="_blank"}.
 

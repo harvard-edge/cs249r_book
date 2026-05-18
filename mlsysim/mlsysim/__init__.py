@@ -3,7 +3,7 @@
 mlsysim: Machine Learning Systems Infrastructure and Modeling Platform
 """
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 from . import core
 from . import hardware
@@ -22,7 +22,7 @@ from .systems.registry import Tiers
 
 # Export primary API objects for convenience
 from .hardware.types import HardwareNode
-from .models.types import Workload, TransformerWorkload, CNNWorkload
+from .models.types import Workload, TransformerWorkload, SparseTransformerWorkload, CNNWorkload
 from .systems.types import Fleet, Node, NetworkFabric, DeploymentTier
 from .core.evaluation import SystemEvaluator, SystemEvaluation
 from .core.scenarios import Scenario
@@ -38,6 +38,9 @@ from .core.solver import (
     SustainabilityModel,
     EconomicsModel,
     ServingModel,
+    TrainingMemoryModel,
+    ServingCapacityModel,
+    MoERoutingModel,
     ContinuousBatchingModel,
     WeightStreamingModel,
     TailLatencyModel,
@@ -90,7 +93,7 @@ __all__ = [
     # Core API (the 5-line happy path)
     "Engine", "Hardware", "Models", "Scenarios", "ureg", "Q_",
     # Types (for type annotations and custom workloads)
-    "HardwareNode", "Workload", "TransformerWorkload", "CNNWorkload",
+    "HardwareNode", "Workload", "TransformerWorkload", "SparseTransformerWorkload", "CNNWorkload",
     "Fleet", "Node", "NetworkFabric", "PerformanceProfile",
     # Evaluation
     "SystemEvaluator", "SystemEvaluation", "SimulationConfig", "load_config",
@@ -99,7 +102,8 @@ __all__ = [
     "Systems", "Tiers", "Infra", "constants",
     # Solvers
     "SingleNodeModel", "DistributedModel", "ReliabilityModel", "SustainabilityModel",
-    "EconomicsModel", "ServingModel", "ContinuousBatchingModel", "WeightStreamingModel",
+    "EconomicsModel", "ServingModel", "TrainingMemoryModel", "ServingCapacityModel",
+    "MoERoutingModel", "ContinuousBatchingModel", "WeightStreamingModel",
     "TailLatencyModel", "CheckpointModel", "DataModel", "ScalingModel",
     "OrchestrationModel", "CompressionModel", "EfficiencyModel", "TransformationModel",
     "TopologyModel", "InferenceScalingModel", "SensitivitySolver", "SynthesisSolver",

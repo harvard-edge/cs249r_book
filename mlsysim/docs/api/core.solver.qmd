@@ -10,10 +10,13 @@
 | --- | --- |
 | [SingleNodeModel](#mlsysim.core.solver.SingleNodeModel) | Resolves single-node hardware Roofline bounds and feasibility. |
 | [ServingModel](#mlsysim.core.solver.ServingModel) | Analyzes the two-phase LLM serving lifecycle: Pre-fill vs. Decoding. |
+| [TrainingMemoryModel](core.solver.TrainingMemoryModel.qmd) | Decomposes per-accelerator training memory into teachable components. |
+| [ServingCapacityModel](core.solver.ServingCapacityModel.qmd) | Sizes an LLM serving deployment from a QPS and tail-latency target. |
 | [ContinuousBatchingModel](core.solver.ContinuousBatchingModel.qmd) | Analyzes production LLM serving with Continuous Batching and PagedAttention. |
 | [WeightStreamingModel](core.solver.WeightStreamingModel.qmd) | Analyzes Wafer-Scale inference (e.g., Cerebras CS-3) using Weight Streaming. |
 | [TailLatencyModel](core.solver.TailLatencyModel.qmd) | Analyzes queueing delays and P99 tail latency for deployed inference (M/M/c). |
 | [DistributedModel](#mlsysim.core.solver.DistributedModel) | Resolves fleet-wide communication, synchronization, and pipelining constraints. |
+| [MoERoutingModel](core.solver.MoERoutingModel.qmd) | Models first-order MoE routing imbalance and expert-parallel all-to-all cost. |
 | [ReliabilityModel](#mlsysim.core.solver.ReliabilityModel) | Calculates Mean Time Between Failures (MTBF) and optimal checkpointing intervals. |
 | [CheckpointModel](core.solver.CheckpointModel.qmd) | Analyzes checkpoint I/O burst penalties and MFU impact. |
 | [EconomicsModel](#mlsysim.core.solver.EconomicsModel) | Calculates Total Cost of Ownership (TCO) including Capex and Opex. |
@@ -27,8 +30,8 @@ core.solver.DistributedModel()
 
 Resolves fleet-wide communication, synchronization, and pipelining constraints.
 
-This solver models the constraints of distributed scale for distributed training. It
-decomposes a workload across a cluster using 3D Parallelism (DP, TP, PP)
+This solver analyzes the constraints of distributed scale for distributed training. It
+decomposes a workload across a cluster using 3D/4D Parallelism (DP, TP, PP, EP)
 and calculates the resulting communication overheads and idle times
 (bubbles) that determine the Model FLOPs Utilization (MFU).
 
@@ -36,7 +39,7 @@ and calculates the resulting communication overheads and idle times
 
 | Name | Description |
 | --- | --- |
-| [solve](#mlsysim.core.solver.DistributedModel.solve) | Calculates distributed training performance using the 3D Parallelism model. |
+| [solve](#mlsysim.core.solver.DistributedModel.solve) | Calculates distributed training performance using the 3D/4D Parallelism model. |
 
 ##### solve { #mlsysim.core.solver.DistributedModel.solve }
 
@@ -49,32 +52,56 @@ core.solver.DistributedModel.solve(
     efficiency=0.5,
     tp_size=1,
     pp_size=1,
+    ep_size=1,
+    v_stages=1,
     microbatch_count=1,
     topology_override=None,
+    zero_stage=0,
+    is_lora=False,
+    activation_recomputation=False,
+    overlap_comm=False,
+    overlap_efficiency=0.85,
+    congestion_factor=1.0,
+    straggler_factor=1.0,
+    moe_routing_imbalance_factor=1.0,
+    gradient_accumulation_steps=1,
+    seq_len=2048,
 )
 ```
 
-Calculates distributed training performance using the 3D Parallelism model.
+Calculates distributed training performance using the 3D/4D Parallelism model.
 
 ###### Parameters {.doc-section .doc-section-parameters}
 
 | Name              | Type     | Description                                                                                                                  | Default    |
 |-------------------|----------|------------------------------------------------------------------------------------------------------------------------------|------------|
-| model             | Workload | The model architecture to simulate.                                                                                          | _required_ |
+| model             | Workload | The model architecture to analyze.                                                                                           | _required_ |
 | fleet             | Fleet    | The hardware cluster and network topology.                                                                                   | _required_ |
 | batch_size        | int      | Global batch size.                                                                                                           | `1`        |
 | precision         | str      | Numerical precision (fp16, fp32, int8).                                                                                      | `'fp16'`   |
 | efficiency        | float    | Achieved compute efficiency (0.0 to 1.0).                                                                                    | `0.5`      |
 | tp_size           | int      | Tensor Parallelism degree. Splits individual layers across GPUs,  usually within a single node over high-speed NVLink.       | `1`        |
 | pp_size           | int      | Pipeline Parallelism degree. Chains model layers across multiple  nodes, introducing 'pipeline bubbles' while saving memory. | `1`        |
+| ep_size           | int      | Expert Parallelism degree for MoE models. Introduces All-to-All communication overhead across nodes.                         | `1`        |
+| v_stages          | int      | Number of virtual stages for interleaved pipeline schedules.                                                                 | `1`        |
 | microbatch_count  | int      | Number of microbatches (M). Increasing M reduces the pipeline  bubble but increases synchronization overhead.                | `1`        |
 | topology_override | str      | Force a specific topology (ring, tree).                                                                                      | `None`     |
+| zero_stage | int | ZeRO optimization stage (0--3). | `0` |
+| is_lora | bool | Whether to approximate LoRA-style reduced gradient communication. | `False` |
+| activation_recomputation | bool | Whether to trade extra compute for activation memory savings. | `False` |
+| overlap_comm | bool | Whether to hide DP communication behind backward compute. | `False` |
+| overlap_efficiency | float | Fraction of DP communication hidden when overlap is enabled. | `0.85` |
+| congestion_factor | float | Multiplier for network congestion or oversubscription beyond fabric metadata. | `1.0` |
+| straggler_factor | float | Multiplier for bulk-synchronous slow-worker effects. | `1.0` |
+| moe_routing_imbalance_factor | float | Multiplier on MoE routed-token traffic, where `1.0` is balanced. | `1.0` |
+| gradient_accumulation_steps | int | Microsteps over which DP communication is amortized. | `1` |
+| seq_len | int | Sequence length for activation and routing-volume estimates. | `2048` |
 
 ###### Returns {.doc-section .doc-section-returns}
 
 | Name   | Type             | Description                                                                                      |
 |--------|------------------|--------------------------------------------------------------------------------------------------|
-|        | Dict\[str, Any\] | Metrics including DP/TP latency, the Pipeline Bubble penalty,  and the final Scaling Efficiency. |
+|        | DistributedResult | Metrics including DP/TP/EP latency, pipeline bubble penalty, scaling efficiency, and parallelism. |
 
 ### EconomicsModel { #mlsysim.core.solver.EconomicsModel }
 
@@ -174,16 +201,16 @@ LLM inference is not a single mathematical operation; it is a stateful
 process with two distinct physical regimes:
 
 1. **Pre-fill Phase**: The initial processing of the input prompt. This
-   is a 'Compute Beast' phase where all prompt tokens are processed
-   in parallel, saturating the GPU's arithmetic units.
-2. **Decoding Phase**: The token-by-token generation. This is a
-   'Bandwidth Hog' phase. Because the model must read all parameters
-   from memory just to generate a single token, it is limited entirely
-   by HBM bandwidth.
+   is a compute-heavy phase where prompt tokens are processed in parallel.
+2. **Decoding Phase**: The token-by-token generation. This phase is usually
+   memory-bandwidth dominated because each step reads the model weights and
+   accumulated KV-cache while producing only one token per request.
 
 This solver also models the **KV-Cache**, the memory required to store
 previous token states, which grows linearly with sequence length and
-batch size, eventually hitting the 'Memory Wall'.
+batch size, eventually hitting the 'Memory Wall'. Modern serving options
+include prompt caching, speculative decoding, phase splitting, and optional
+chunked-prefill stall proxies.
 
 #### Methods
 
@@ -201,6 +228,12 @@ core.solver.ServingModel.solve(
     batch_size=1,
     precision='fp16',
     efficiency=0.5,
+    decode_hardware=None,
+    network_bandwidth='100 GB/s',
+    draft_model=None,
+    draft_acceptance_rate=0.7,
+    cached_prefix_len=0,
+    prefill_chunk_tokens=None,
 )
 ```
 
@@ -208,20 +241,26 @@ Solves for LLM serving performance.
 
 ###### Parameters {.doc-section .doc-section-parameters}
 
-| Name       | Type                | Description                                                                                              | Default    |
-|------------|---------------------|----------------------------------------------------------------------------------------------------------|------------|
-| model      | TransformerWorkload | The LLM model architecture.                                                                              | _required_ |
-| hardware   | HardwareNode        | The target hardware for inference.                                                                       | _required_ |
-| seq_len    | int                 | The total context window (prompt + generated tokens).                                                    | _required_ |
-| batch_size | int                 | Number of concurrent user requests.                                                                      | `1`        |
-| precision  | str                 | Numerical format. Lower precision (INT8/INT4) reduces  memory pressure and speeds up the Decoding phase. | `'fp16'`   |
-| efficiency | float               | Compute utilization efficiency, primarily affecting the Pre-fill phase.                                  | `0.5`      |
+| Name | Type | Description | Default |
+|------|------|-------------|---------|
+| model | TransformerWorkload | The LLM model architecture. | _required_ |
+| hardware | HardwareNode | The target hardware for inference, or the prefill node in disaggregated serving. | _required_ |
+| seq_len | int | The total context window (prompt + generated tokens). | _required_ |
+| batch_size | int | Number of concurrent user requests. | `1` |
+| precision | str | Numerical format. Lower precision reduces memory pressure and speeds up the decode phase. | `'fp16'` |
+| efficiency | float | Compute utilization efficiency, primarily affecting the prefill phase. | `0.5` |
+| decode_hardware | HardwareNode | Optional decode node for phase-split serving with KV-cache transfer. | `None` |
+| network_bandwidth | Quantity | Bandwidth between prefill and decode nodes. | `100 GB/s` |
+| draft_model | TransformerWorkload | Optional draft model for speculative decoding. | `None` |
+| draft_acceptance_rate | float | Expected draft token acceptance rate. | `0.7` |
+| cached_prefix_len | int | Prefix tokens already covered by prompt-cache KV entries. | `0` |
+| prefill_chunk_tokens | int | Optional prefill chunk budget for estimating a decode-stall proxy. | `None` |
 
 ###### Returns {.doc-section .doc-section-returns}
 
-| Name   | Type             | Description                                                                                                       |
-|--------|------------------|-------------------------------------------------------------------------------------------------------------------|
-|        | Dict\[str, Any\] | Inference metrics including Time-To-First-Token (TTFT),  Inter-Token Latency (ITL), and total KV-cache footprint. |
+| Name   | Type          | Description                                                                                                                          |
+|--------|---------------|--------------------------------------------------------------------------------------------------------------------------------------|
+|        | ServingResult | Inference metrics including TTFT, ITL, KV-cache footprint, memory feasibility, prompt-cache hit ratio, and chunked-prefill metadata. |
 
 ### SingleNodeModel { #mlsysim.core.solver.SingleNodeModel }
 

@@ -5,7 +5,8 @@ from .engine import Engine, PerformanceProfile
 from .results import (
     SolverResult,
     DistributedResult, ReliabilityResult, CheckpointResult, SustainabilityResult,
-    ServingResult, ContinuousBatchingResult, WeightStreamingResult, TailLatencyResult, 
+    ServingResult, TrainingMemoryResult, ServingCapacityResult, MoERoutingResult,
+    ContinuousBatchingResult, WeightStreamingResult, TailLatencyResult,
     EconomicsResult, DataResult, TopologyResult,
     EfficiencyResult, TransformationResult, ScalingResult,
     CompressionResult, SynthesisResult, OrchestrationResult,
@@ -33,7 +34,7 @@ from .constants import (
     CLOUD_ELECTRICITY_PER_KWH,
 )
 from .defaults import (
-    GPU_UNIT_COST_H100, ANNUAL_MAINTENANCE_RATIO,
+    ANNUAL_MAINTENANCE_RATIO,
     MFU_TRAINING_LOW, MFU_TRAINING_HIGH, QUANT_ACCURACY_DELTA_INT4, QUANT_ACCURACY_DELTA_FP8,
     PRUNING_ACCURACY_THRESHOLD, PRUNING_MILD_DELTA, PRUNING_STEEP_COEFFICIENT, PRUNING_STEEP_EXPONENT,
     NIC_MTTF_HOURS, PSU_MTTF_HOURS,
@@ -41,7 +42,7 @@ from .defaults import (
     TOKENS_PER_REASONING_STEP, REFERENCE_MFU_SUSTAINED, DP_SGD_SLOWDOWN_COEFFICIENT,
 )
 from .types import Quantity
-from ..models.types import Workload, TransformerWorkload
+from ..models.types import Workload, TransformerWorkload, SparseTransformerWorkload
 from ..hardware.types import HardwareNode
 from ..systems.types import Fleet, NetworkFabric
 from ..infra.types import Datacenter
@@ -139,7 +140,7 @@ class DistributedModel(BaseModel):
     """
     Resolves fleet-wide communication, synchronization, and pipelining constraints.
     
-    This model simulates the constraints of distributed scale for distributed training. It
+    This model analyzes the constraints of distributed scale for distributed training. It
     decomposes a workload across a cluster using 3D Parallelism (DP, TP, PP) 
     and calculates the resulting communication overheads and idle times 
     (bubbles) that determine the Model FLOPs Utilization (MFU).
@@ -179,6 +180,7 @@ class DistributedModel(BaseModel):
               overlap_efficiency: float = 0.85,
               congestion_factor: float = 1.0,
               straggler_factor: float = 1.0,
+              moe_routing_imbalance_factor: float = 1.0,
               gradient_accumulation_steps: int = 1,
               seq_len: int = 2048) -> DistributedResult:
         """
@@ -187,7 +189,7 @@ class DistributedModel(BaseModel):
         Parameters
         ----------
         model : Workload
-            The model architecture to simulate.
+            The model architecture to analyze.
         fleet : Fleet
             The hardware cluster and network topology.
         batch_size : int
@@ -227,6 +229,9 @@ class DistributedModel(BaseModel):
             Multiplicative factor on communication time to account for
             network congestion (1.0 = ideal, 1.5-2.0 = shared fabric,
             2.0-3.0 = oversubscribed multi-tenant).
+        moe_routing_imbalance_factor : float
+            Multiplier on routed MoE token traffic. A value of 1.0 is perfectly
+            balanced routing; values above 1.0 approximate hot experts.
         seq_len : int
             Sequence length for memory calculation.
 
@@ -245,6 +250,7 @@ class DistributedModel(BaseModel):
         validate_at_least(gradient_accumulation_steps, 1, "gradient_accumulation_steps")
         validate_range(efficiency, 1e-9, 1.0, "efficiency")
         validate_range(overlap_efficiency, 0.0, 1.0, "overlap_efficiency")
+        validate_at_least(moe_routing_imbalance_factor, 1.0, "moe_routing_imbalance_factor")
 
         # 1. 3D/4D Parallelism Decomposition
         n_accelerators = fleet.total_accelerators
@@ -341,9 +347,18 @@ class DistributedModel(BaseModel):
         if ep_size > 1:
             bpp = PRECISION_MAP.get(precision, BYTES_FP16)
             hidden_dim = getattr(model, 'hidden_dim', 4096) or 4096
+            top_k = getattr(model, 'active_experts_per_token', 1) or 1
             # Each token sends hidden_dim activations to its assigned expert(s)
             # Approximate: each GPU sends (ep_size-1)/ep_size of its tokens to others
-            token_volume = local_batch * seq_len * hidden_dim * bpp.magnitude * ureg.byte
+            token_volume = (
+                local_batch
+                * seq_len
+                * hidden_dim
+                * bpp.magnitude
+                * top_k
+                * moe_routing_imbalance_factor
+                * ureg.byte
+            )
             t_comm_ep = calc_all_to_all_time(
                 message_bytes=token_volume,
                 n_gpus=ep_size,
@@ -389,8 +404,19 @@ class DistributedModel(BaseModel):
 
         scaling_efficiency = (node_perf.latency / step_latency_total).magnitude
 
-        
+        constraint_trace = [
+            (
+                f"Distributed Wall: dp={dp_size}, tp={tp_size}, pp={pp_size}, ep={ep_size}; "
+                f"step latency {step_latency_total.to('ms'):~P}."
+            )
+        ]
+        if ep_size > 1 and moe_routing_imbalance_factor > 1.0:
+            constraint_trace.append(
+                f"MoE Routing: expert-parallel traffic inflated by {moe_routing_imbalance_factor:.2f}x for hot-expert imbalance."
+            )
+
         return DistributedResult(
+            constraint_trace=constraint_trace,
             node_profile=node_perf,
             dp_communication_latency=t_comm_dp,
             tp_communication_latency=t_comm_tp,
@@ -729,12 +755,10 @@ class ServingModel(BaseModel):
     Memory-bound Decoding).
 
     Literature Source:
-    1. Pope et al. (2023), "LLM.int8(): 8-bit Matrix Multiplication for 
-       Transformers at Scale" (Inference Bottlenecks)
-    2. Aminabadi et al. (2022), "DeepSpeed-Inference: Enabling Efficient 
-       Inference of Transformer Models at Unprecedented Scale."
-    3. Yu et al. (2022), "ORCA: A Distributed Serving System for 
-       Transformer-Based Generative Models."
+    1. Pope et al. (2023), "Efficiently Scaling Transformer Inference."
+    2. Agrawal et al. (2024), "Sarathi-Serve" (chunked prefill scheduling).
+    3. Patel et al. (2024), "Splitwise" and Zhong et al. (2024),
+       "DistServe" (prefill/decode disaggregation).
     """
     requires = ("workload", "hardware")
     produces = ServingResult
@@ -742,7 +766,7 @@ class ServingModel(BaseModel):
     def solve(self, model: TransformerWorkload, hardware: HardwareNode, seq_len: int, batch_size: int = 1, precision: str = "fp16", efficiency: float = 0.5,
               decode_hardware: Optional[HardwareNode] = None, network_bandwidth: Quantity = Q_("100 GB/s"),
               draft_model: Optional[TransformerWorkload] = None, draft_acceptance_rate: float = 0.7,
-              cached_prefix_len: int = 0) -> ServingResult:
+              cached_prefix_len: int = 0, prefill_chunk_tokens: Optional[int] = None) -> ServingResult:
         """
         Solves for LLM serving performance.
 
@@ -774,6 +798,12 @@ class ServingModel(BaseModel):
             When > 0, the prefill phase only processes (seq_len - cached_prefix_len) new
             tokens, reducing TTFT proportionally. The full KV-cache (including cached prefix)
             still occupies memory. Must be < seq_len.
+        prefill_chunk_tokens : int, optional
+            If provided, split new prefill tokens into chunks of at most this size. This estimates
+            a Sarathi-Serve-style chunked-prefill stall proxy: total TTFT keeps the same compute
+            work plus one dispatch tax per chunk, while decode_stall_bound reports the slowest
+            single chunk that can interfere with ongoing decode iterations. It is not a full
+            scheduler simulation.
 
         Returns
         -------
@@ -781,11 +811,28 @@ class ServingModel(BaseModel):
             Serving performance metrics.
         """
         prec_map = PRECISION_MAP
-        bpp = prec_map.get(precision, BYTES_FP16)
+        if precision not in prec_map:
+            supported = ", ".join(sorted(prec_map))
+            raise ValueError(f"precision '{precision}' is not supported. Supported precision values: {supported}")
+        bpp = prec_map[precision]
 
         # 0. Input validation
+        if seq_len < 1:
+            raise ValueError(f"seq_len ({seq_len}) must be >= 1")
+        if batch_size < 1:
+            raise ValueError(f"batch_size ({batch_size}) must be >= 1")
+        if efficiency <= 0.0 or efficiency > 1.0:
+            raise ValueError(f"efficiency ({efficiency}) must be > 0 and <= 1")
+        if cached_prefix_len < 0:
+            raise ValueError(f"cached_prefix_len ({cached_prefix_len}) must be >= 0")
         if cached_prefix_len >= seq_len:
             raise ValueError(f"cached_prefix_len ({cached_prefix_len}) must be < seq_len ({seq_len})")
+        if draft_acceptance_rate < 0.0 or draft_acceptance_rate > 1.0:
+            raise ValueError(f"draft_acceptance_rate ({draft_acceptance_rate}) must be between 0 and 1")
+        if prefill_chunk_tokens is not None and prefill_chunk_tokens <= 0:
+            raise ValueError(f"prefill_chunk_tokens ({prefill_chunk_tokens}) must be positive")
+        if network_bandwidth.to("B/s").magnitude <= 0:
+            raise ValueError(f"network_bandwidth ({network_bandwidth:~P}) must be positive")
 
         # 1. Pre-fill Phase (with optional prompt caching)
         peak_flops_prefill = hardware.compute.precision_flops.get(precision, hardware.compute.peak_flops)
@@ -798,11 +845,29 @@ class ServingModel(BaseModel):
         n_layers = getattr(model, 'layers', 1) or 1
         n_heads = getattr(model, 'heads', 32) or 32
         head_dim = (getattr(model, 'hidden_dim', 4096) or 4096) // n_heads
-        # New tokens attend to ALL tokens (cached + new), not just each other.
+        # Upper-bound approximation: each new token attends over the final context.
         # When cached_prefix_len=0, new_tokens == seq_len so this simplifies to S^2.
         attention_flops = 4 * n_layers * n_heads * head_dim * new_tokens * seq_len * batch_size
         prefill_ops = (linear_flops + attention_flops) * ureg.flop
-        t_prefill = (prefill_ops / (peak_flops_prefill * efficiency)).to("ms") + hardware.dispatch_tax
+        t_prefill_compute = (prefill_ops / (peak_flops_prefill * efficiency)).to("ms")
+        prefill_chunks = 1
+        prefill_chunk_time: Optional[Quantity] = None
+        decode_stall_bound: Optional[Quantity] = None
+        if prefill_chunk_tokens is not None:
+            prefill_chunks = max(1, math.ceil(new_tokens / prefill_chunk_tokens))
+            chunk_times = []
+            tokens_remaining = new_tokens
+            while tokens_remaining > 0:
+                chunk_tokens = min(prefill_chunk_tokens, tokens_remaining)
+                chunk_linear = 2 * model.parameters.to(ureg.count).magnitude * chunk_tokens * batch_size
+                chunk_attention = 4 * n_layers * n_heads * head_dim * chunk_tokens * seq_len * batch_size
+                chunk_ops = (chunk_linear + chunk_attention) * ureg.flop
+                chunk_time = (chunk_ops / (peak_flops_prefill * efficiency)).to("ms") + hardware.dispatch_tax
+                chunk_times.append(chunk_time)
+                tokens_remaining -= chunk_tokens
+            prefill_chunk_time = max(chunk_times, key=lambda t: t.to("ms").magnitude)
+            decode_stall_bound = prefill_chunk_time
+        t_prefill = t_prefill_compute + (hardware.dispatch_tax * prefill_chunks)
 
         # KV-cache covers the full sequence (cached prefix + new tokens)
         kv_cache_bytes = model.get_kv_cache_size(seq_len=seq_len, batch_size=batch_size, precision=bpp)
@@ -863,6 +928,11 @@ class ServingModel(BaseModel):
             constraint_trace.append(f"Memory Wall: Passed. Required {total_memory_required.to('GB'):~P} (Weights: {model_weights_bytes.to('GB'):~P}, KV Cache: {kv_cache_bytes.to('GB'):~P}) <= Available {decode_hw.memory.capacity.to('GB'):~P} on {decode_hw.name}.")
         else:
             constraint_trace.append(f"Memory Wall: FAILED. Required {total_memory_required.to('GB'):~P} (Weights: {model_weights_bytes.to('GB'):~P}, KV Cache: {kv_cache_bytes.to('GB'):~P}) > Available {decode_hw.memory.capacity.to('GB'):~P} on {decode_hw.name}.")
+        if prefill_chunk_tokens is not None and decode_stall_bound is not None:
+            constraint_trace.append(
+                f"Serving Wall: Chunked prefill uses {prefill_chunks} chunks of up to {prefill_chunk_tokens} tokens; "
+                f"decode interference is bounded by {decode_stall_bound.to('ms'):~P} per prefill chunk."
+            )
 
         cache_hit_ratio = cached_prefix_len / seq_len if seq_len > 0 else 0.0
 
@@ -876,6 +946,374 @@ class ServingModel(BaseModel):
             total_memory_required=total_memory_required.to("GB"),
             memory_utilization=(total_memory_required / decode_hw.memory.capacity).to_base_units().magnitude,
             prompt_cache_hit_ratio=cache_hit_ratio,
+            prefill_chunks=prefill_chunks,
+            prefill_chunk_time=prefill_chunk_time,
+            decode_stall_bound=decode_stall_bound,
+        )
+
+
+class TrainingMemoryModel(BaseModel):
+    """
+    Decomposes per-accelerator training memory into teachable components.
+
+    This model answers a different question than ``SingleNodeModel``. Roofline
+    feasibility asks whether a workload's inference weights fit; training
+    feasibility must also account for gradients, optimizer state, activations,
+    and communication buffers. The accounting follows the common mixed-precision
+    state breakdown used by Megatron-LM and ZeRO.
+
+    Literature Source:
+    1. Shoeybi et al. (2019), "Megatron-LM" (tensor/pipeline parallel state).
+    2. Rajbhandari et al. (2020), "ZeRO" (data-parallel state sharding).
+    3. Korthikanti et al. (2023), activation recomputation accounting.
+    """
+    requires = ("workload", "hardware")
+    produces = TrainingMemoryResult
+
+    OPTIMIZER_STATE_BYTES = {
+        "adam": 12.0,   # FP32 master weights + first and second moments
+        "adamw": 12.0,
+        "sgd": 4.0,     # FP32 master weights
+        "none": 0.0,
+    }
+
+    def solve(
+        self,
+        model: TransformerWorkload,
+        hardware: HardwareNode,
+        batch_size: int,
+        seq_len: int = 2048,
+        precision: str = "fp16",
+        optimizer: str = "adam",
+        activation_checkpointing: str = "selective",
+        tp_size: int = 1,
+        pp_size: int = 1,
+        dp_size: int = 1,
+        ep_size: int = 1,
+        zero_stage: int = 0,
+        gradient_accumulation_steps: int = 1,
+        trainable_fraction: float = 1.0,
+        communication_buffer_fraction: float = 0.05,
+    ) -> TrainingMemoryResult:
+        """Estimate per-accelerator training memory.
+
+        ``batch_size`` is the global batch. The activation term uses the local
+        microbatch implied by data parallelism and gradient accumulation. Model
+        states are sharded by tensor, pipeline, and expert parallelism first;
+        ZeRO then shards optimizer, gradient, and parameter states across the
+        data-parallel group according to its stage.
+        """
+        from ._validation import validate_at_least, validate_range
+        from .formulas import calc_activation_memory
+
+        if precision not in PRECISION_MAP:
+            supported = ", ".join(sorted(PRECISION_MAP))
+            raise ValueError(f"precision '{precision}' is not supported. Supported precision values: {supported}")
+        optimizer_key = optimizer.lower()
+        if optimizer_key not in self.OPTIMIZER_STATE_BYTES:
+            supported = ", ".join(sorted(self.OPTIMIZER_STATE_BYTES))
+            raise ValueError(f"optimizer '{optimizer}' is not supported. Supported optimizers: {supported}")
+        if activation_checkpointing not in {"none", "selective", "full"}:
+            raise ValueError("activation_checkpointing must be 'none', 'selective', or 'full'")
+        validate_at_least(batch_size, 1, "batch_size")
+        validate_at_least(seq_len, 1, "seq_len")
+        validate_at_least(tp_size, 1, "tp_size")
+        validate_at_least(pp_size, 1, "pp_size")
+        validate_at_least(dp_size, 1, "dp_size")
+        validate_at_least(ep_size, 1, "ep_size")
+        validate_at_least(gradient_accumulation_steps, 1, "gradient_accumulation_steps")
+        validate_range(trainable_fraction, 0.0, 1.0, "trainable_fraction")
+        validate_range(communication_buffer_fraction, 0.0, 1.0, "communication_buffer_fraction")
+        if zero_stage not in {0, 1, 2, 3}:
+            raise ValueError("zero_stage must be 0, 1, 2, or 3")
+
+        bpp = PRECISION_MAP[precision].to(ureg.byte).magnitude
+        total_params = model.parameters.to(ureg.count).magnitude
+        model_parallel_shards = tp_size * pp_size * ep_size
+        params_per_rank = total_params / model_parallel_shards
+        trainable_params_per_rank = params_per_rank * trainable_fraction
+
+        weights = params_per_rank * bpp * ureg.byte
+        gradients = trainable_params_per_rank * bpp * ureg.byte
+        optimizer_state = trainable_params_per_rank * self.OPTIMIZER_STATE_BYTES[optimizer_key] * ureg.byte
+
+        if zero_stage >= 1:
+            optimizer_state = optimizer_state / dp_size
+        if zero_stage >= 2:
+            gradients = gradients / dp_size
+        if zero_stage >= 3:
+            weights = weights / dp_size
+
+        local_microbatch = max(1, math.ceil(batch_size / (dp_size * gradient_accumulation_steps)))
+        layers_per_stage = max(1, math.ceil(model.layers / pp_size))
+        hidden_dim = model.hidden_dim or 4096
+        activation_precision_scale = bpp / BYTES_FP16.to(ureg.byte).magnitude
+        activations = calc_activation_memory(
+            n_layers=layers_per_stage,
+            seq_len=seq_len,
+            batch_size=local_microbatch,
+            hidden_dim=hidden_dim,
+            precision_bytes=activation_precision_scale,
+            strategy=activation_checkpointing,
+        )
+
+        grad_bucket = gradients * communication_buffer_fraction
+        pipeline_buffer = Q_("0 byte")
+        if pp_size > 1:
+            pipeline_buffer = 2 * local_microbatch * seq_len * hidden_dim * bpp * ureg.byte
+        communication_buffers = grad_bucket + pipeline_buffer
+
+        total_memory = (weights + gradients + optimizer_state + activations + communication_buffers).to("GB")
+        available_memory = hardware.memory.capacity.to("GB")
+        memory_utilization = (total_memory / available_memory).to_base_units().magnitude if available_memory.magnitude > 0 else float("inf")
+        feasible = total_memory <= available_memory
+
+        trace = [
+            (
+                "Training Memory: "
+                f"weights={weights.to('GB'):~P}, gradients={gradients.to('GB'):~P}, "
+                f"optimizer={optimizer_state.to('GB'):~P}, activations={activations.to('GB'):~P}, "
+                f"buffers={communication_buffers.to('GB'):~P}."
+            )
+        ]
+        if zero_stage > 0:
+            trace.append(f"ZeRO-{zero_stage}: data-parallel state sharding applied across {dp_size} ranks.")
+        if isinstance(model, SparseTransformerWorkload) and ep_size > 1:
+            trace.append(
+                "MoE memory approximation: total expert parameters are evenly sharded by expert parallelism; "
+                "routing imbalance is modeled separately by MoERoutingModel."
+            )
+
+        return TrainingMemoryResult(
+            feasible=feasible,
+            constraint_trace=trace,
+            total_memory=total_memory,
+            available_memory=available_memory,
+            memory_utilization=memory_utilization,
+            weights=weights.to("GB"),
+            gradients=gradients.to("GB"),
+            optimizer_state=optimizer_state.to("GB"),
+            activations=activations.to("GB"),
+            communication_buffers=communication_buffers.to("GB"),
+            precision=precision,
+            optimizer=optimizer_key,
+            activation_checkpointing=activation_checkpointing,
+            parallelism={"dp": dp_size, "tp": tp_size, "pp": pp_size, "ep": ep_size},
+        )
+
+
+class ServingCapacityModel(BaseModel):
+    """
+    Sizes an LLM serving deployment from a QPS and tail-latency target.
+
+    The model deliberately composes existing first-order pieces: ``ServingModel``
+    for TTFT/ITL, ``ContinuousBatchingModel`` for per-replica token capacity,
+    and ``TailLatencyModel`` for queueing pressure. It is a capacity planner,
+    not a request-level scheduler.
+    """
+    requires = ("workload", "hardware")
+    produces = ServingCapacityResult
+
+    def solve(
+        self,
+        model: TransformerWorkload,
+        hardware: HardwareNode,
+        qps: float,
+        target_p99_latency_ms: float,
+        seq_len: int = 2048,
+        output_tokens: int = 128,
+        max_batch_size: int = 32,
+        precision: str = "fp16",
+        efficiency: float = 0.5,
+        max_replicas: int = 1024,
+        service_time_cv: float = 1.0,
+    ) -> ServingCapacityResult:
+        """Return the minimum replica count that satisfies the target P99."""
+        from ._validation import validate_at_least, validate_nonnegative, validate_positive, validate_range
+
+        validate_positive(qps, "qps")
+        validate_positive(target_p99_latency_ms, "target_p99_latency_ms")
+        validate_at_least(seq_len, 1, "seq_len")
+        validate_at_least(output_tokens, 1, "output_tokens")
+        validate_at_least(max_batch_size, 1, "max_batch_size")
+        validate_at_least(max_replicas, 1, "max_replicas")
+        validate_range(efficiency, 1e-9, 1.0, "efficiency")
+        validate_nonnegative(service_time_cv, "service_time_cv")
+
+        batching = ContinuousBatchingModel().solve(
+            model=model,
+            hardware=hardware,
+            seq_len=seq_len,
+            max_batch_size=max_batch_size,
+            precision=precision,
+            efficiency=efficiency,
+        )
+        active_batch = max(1, batching.max_active_requests)
+        serving = ServingModel().solve(
+            model=model,
+            hardware=hardware,
+            seq_len=seq_len,
+            batch_size=active_batch,
+            precision=precision,
+            efficiency=efficiency,
+        )
+        per_replica_qps = batching.throughput_tokens_per_sec / output_tokens if output_tokens > 0 else 0.0
+        base_request_latency = (serving.ttft + serving.itl * output_tokens).to("ms")
+
+        if not serving.feasible or not batching.feasible or per_replica_qps <= 0:
+            bottleneck = "Memory" if not serving.feasible or not batching.feasible else "Capacity"
+            return ServingCapacityResult(
+                feasible=False,
+                constraint_trace=[
+                    "Serving Capacity: infeasible before queueing because the model does not fit or has no token capacity."
+                ],
+                required_replicas=max_replicas,
+                qps_target=qps,
+                qps_capacity=0.0,
+                per_replica_qps_capacity=0.0,
+                utilization=float("inf"),
+                target_p99_latency=Q_(target_p99_latency_ms, "ms"),
+                estimated_p99_latency=Q_(float("inf"), "ms"),
+                base_request_latency=base_request_latency,
+                queue_wait_p99=Q_(float("inf"), "ms"),
+                active_batch_size=active_batch,
+                ttft=serving.ttft,
+                itl=serving.itl,
+                bottleneck=bottleneck,
+            )
+
+        capacity_service_ms = 1000.0 / per_replica_qps
+        best_tail: Optional[TailLatencyResult] = None
+        best_queue_wait = Q_(float("inf"), "ms")
+        best_p99 = Q_(float("inf"), "ms")
+        required_replicas = max_replicas
+        feasible = False
+
+        for replicas in range(1, max_replicas + 1):
+            tail = TailLatencyModel().solve(
+                arrival_rate_qps=qps,
+                service_latency_ms=capacity_service_ms,
+                num_replicas=replicas,
+                service_time_cv=service_time_cv,
+            )
+            queue_wait = max(0.0, tail.p99_latency.to("ms").magnitude - capacity_service_ms) * ureg.ms
+            estimated_p99 = (base_request_latency + queue_wait).to("ms")
+            best_tail = tail
+            best_queue_wait = queue_wait
+            best_p99 = estimated_p99
+            if tail.is_stable and estimated_p99.magnitude <= target_p99_latency_ms:
+                required_replicas = replicas
+                feasible = True
+                break
+
+        qps_capacity = required_replicas * per_replica_qps
+        utilization = qps / qps_capacity if qps_capacity > 0 else float("inf")
+        if not feasible:
+            bottleneck = "Tail Latency" if best_tail and best_tail.is_stable else "Capacity"
+        elif base_request_latency.magnitude > target_p99_latency_ms:
+            bottleneck = "Base Latency"
+        else:
+            bottleneck = "Feasible"
+
+        return ServingCapacityResult(
+            feasible=feasible,
+            constraint_trace=[
+                (
+                    f"Serving Capacity: {required_replicas} replicas provide {qps_capacity:.2f} QPS "
+                    f"for target {qps:.2f} QPS at utilization {utilization:.2%}."
+                ),
+                (
+                    f"Tail Latency: base request latency {base_request_latency:~P}; "
+                    f"estimated P99 {best_p99:~P} vs target {Q_(target_p99_latency_ms, 'ms'):~P}."
+                ),
+            ],
+            required_replicas=required_replicas,
+            qps_target=qps,
+            qps_capacity=qps_capacity,
+            per_replica_qps_capacity=per_replica_qps,
+            utilization=utilization,
+            target_p99_latency=Q_(target_p99_latency_ms, "ms"),
+            estimated_p99_latency=best_p99,
+            base_request_latency=base_request_latency,
+            queue_wait_p99=best_queue_wait,
+            active_batch_size=active_batch,
+            ttft=serving.ttft,
+            itl=serving.itl,
+            bottleneck=bottleneck,
+        )
+
+
+class MoERoutingModel(BaseModel):
+    """
+    Models first-order MoE routing imbalance and expert-parallel all-to-all cost.
+
+    Sparse models decouple memory from compute, but routing is rarely perfectly
+    balanced. This model keeps the abstraction small: a single imbalance factor
+    inflates the effective active experts and the routed-token communication
+    volume. It does not simulate a router or token dispatcher.
+    """
+    requires = ("workload",)
+    produces = MoERoutingResult
+
+    def solve(
+        self,
+        model: SparseTransformerWorkload,
+        batch_size: int,
+        seq_len: int,
+        precision: str = "fp16",
+        ep_size: int = 1,
+        routing_imbalance_factor: float = 1.0,
+        fleet: Optional[Fleet] = None,
+    ) -> MoERoutingResult:
+        """Estimate effective active parameters and optional EP all-to-all latency."""
+        from ._validation import validate_at_least, validate_range
+
+        if precision not in PRECISION_MAP:
+            supported = ", ".join(sorted(PRECISION_MAP))
+            raise ValueError(f"precision '{precision}' is not supported. Supported precision values: {supported}")
+        validate_at_least(batch_size, 1, "batch_size")
+        validate_at_least(seq_len, 1, "seq_len")
+        validate_at_least(ep_size, 1, "ep_size")
+        validate_range(routing_imbalance_factor, 1.0, float("inf"), "routing_imbalance_factor")
+
+        top_k = max(1, model.active_experts_per_token)
+        effective_active_experts = min(float(model.experts), top_k * routing_imbalance_factor)
+        active_parameter_multiplier = effective_active_experts / top_k
+        effective_active_parameters = model.active_parameters * active_parameter_multiplier
+
+        bpp = PRECISION_MAP[precision].to(ureg.byte).magnitude
+        hidden_dim = model.hidden_dim or 4096
+        routed_fraction = (ep_size - 1) / ep_size if ep_size > 1 else 0.0
+        routing_payload_bytes = batch_size * seq_len * hidden_dim * bpp * top_k * active_parameter_multiplier * ureg.byte
+        token_dispatch_bytes = routing_payload_bytes * routed_fraction
+
+        all_to_all_latency = None
+        if fleet is not None and ep_size > 1:
+            all_to_all_latency = calc_all_to_all_time(
+                message_bytes=routing_payload_bytes,
+                n_gpus=ep_size,
+                bandwidth_bytes_s=fleet.fabric.bandwidth / fleet.fabric.oversubscription_ratio,
+                latency_s=fleet.fabric.latency or LATENCY_INFINIBAND,
+            )
+
+        trace = [
+            (
+                f"MoE Routing: top-{top_k} routing with imbalance {routing_imbalance_factor:.2f} "
+                f"acts like {effective_active_experts:.2f} active experts per token."
+            )
+        ]
+        if all_to_all_latency is not None:
+            trace.append(f"Expert Parallelism: all-to-all latency is {all_to_all_latency.to('ms'):~P}.")
+
+        return MoERoutingResult(
+            constraint_trace=trace,
+            effective_active_experts=effective_active_experts,
+            effective_active_parameters=effective_active_parameters.to(ureg.count),
+            active_parameter_multiplier=active_parameter_multiplier,
+            routing_imbalance_factor=routing_imbalance_factor,
+            token_dispatch_bytes=token_dispatch_bytes.to("MB"),
+            all_to_all_latency=all_to_all_latency.to("ms") if all_to_all_latency is not None else None,
+            ep_size=ep_size,
         )
 
 

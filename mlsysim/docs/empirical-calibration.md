@@ -1,7 +1,7 @@
 # Empirical Calibration: mlsysim vs. Published Benchmarks
 
 This document compares mlsysim analytical predictions against published benchmark
-results for common ML workloads. The goal is to validate that the simulator's
+results for common ML workloads. The goal is to validate that the framework's
 first-principles models produce results in the correct physical range, and to
 characterize the accuracy envelope that users should expect.
 

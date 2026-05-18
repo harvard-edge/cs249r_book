@@ -121,8 +121,9 @@ SERVING = Wall(
     constraint="LLM inference has two distinct regimes: compute-bound prefill and memory-bound decode.",
     equation="TTFT = OPs_prefill / Peak; ITL = |W| / BW_HBM",
     sources=[
-        "Pope et al. (2023), LLM Inference",
-        "Yu et al. (2022), ORCA",
+        "Pope et al. (2023), Efficiently Scaling Transformer Inference",
+        "Agrawal et al. (2024), Sarathi-Serve",
+        "Zhong et al. (2024), DistServe",
     ],
 )
 
@@ -348,6 +349,12 @@ _BY_RESOLVER = {}
 for w in ALL_WALLS:
     _BY_RESOLVER.setdefault(w.resolver_name, []).append(w)
 
+# Composite/secondary resolvers map onto existing walls without changing the
+# canonical 22-wall taxonomy.
+_BY_RESOLVER["TrainingMemoryModel"] = [MEMORY]
+_BY_RESOLVER["ServingCapacityModel"] = [SERVING, BATCHING, TAIL_LATENCY]
+_BY_RESOLVER["MoERoutingModel"] = [COMMUNICATION]
+
 
 def wall(number: int) -> Wall:
     """Look up a wall by its canonical number."""
@@ -390,4 +397,3 @@ def taxonomy() -> str:
             lines.append(f"             {w.constraint}")
         lines.append("")
     return "\n".join(lines)
-

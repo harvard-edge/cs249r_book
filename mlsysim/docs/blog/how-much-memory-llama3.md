@@ -98,5 +98,5 @@ mlsysim serve Llama3_70B H100 --seq-len 4096 --batch-size 1
 ---
 
 *This analysis was computed with [mlsysim](https://mlsysbook.ai/mlsysim),
-a first-principles analytical calculator for ML systems.
+a first-principles analytical modeling framework for ML systems.
 All constants are traceable to hardware datasheets.*
