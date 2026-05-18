@@ -41,6 +41,7 @@ A100_TDP = 400 * watt                     # SXM variant
 H100_FLOPS_FP16_TENSOR = 989 * TFLOPs / second
 H100_FLOPS_FP8_TENSOR = 1979 * TFLOPs / second
 H100_FLOPS_TF32 = 494 * TFLOPs / second
+H100_FLOPS_FP32_CUDA = 67 * TFLOPs / second  # FP32 on CUDA (vector) cores, no Tensor Core
 H100_FLOPS_INT8 = 1979 * TFLOPs / second  # Dense. Sparse is 3958.
 H100_MEM_BW = 3.35 * TB / second          # HBM3
 H100_MEM_CAPACITY = 80 * GiB
