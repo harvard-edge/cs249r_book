@@ -18,6 +18,7 @@ __all__ = [
     "BYTES_FP32", "BYTES_INT32", "BYTES_FP16", "BYTES_INT8", "BYTES_INT4", "BYTES_ADAM_STATE",
     # Time units
     "MS", "US", "NS", "ms", "MILLISECOND", "MICROSECOND", "NANOSECOND",
+    "microsecond", "millisecond", "nanosecond",
     # Time scalars
     "SECONDS_PER_MINUTE", "MINUTES_PER_HOUR", "SEC_PER_HOUR", "HOURS_PER_DAY",
     "SEC_PER_DAY", "DAYS_PER_MONTH", "DAYS_PER_YEAR", "SEC_PER_YEAR", "SEC_PER_YEAR_LEAP",
@@ -103,6 +104,10 @@ NS = ureg.NS
 MILLISECOND = MS
 MICROSECOND = US
 NANOSECOND = NS
+# SI lowercase aliases (consumed by several chapter LEGO cells)
+microsecond = ureg.microsecond
+millisecond = ureg.millisecond
+nanosecond = ureg.nanosecond
 
 # Common time conversions (unitless scalars)
 SECONDS_PER_MINUTE = 60
