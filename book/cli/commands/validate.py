@@ -412,6 +412,12 @@ class ValidateCommand:
             # Migrated 2026-05-06: was book/tools/audit/index/check_xref_resolves.py
             Scope("xref-resolves", "_run_index_xref_resolves",
                   note="every |see / |seealso target resolves to a real main entry"),
+            # Added 2026-05-17: catches \index{} inside Python code fences,
+            # $..$ / $$..$$ math, and fig-cap/fig-alt/tbl-cap/lst-cap/title=
+            # attribute strings. Complements `placement` (which checks
+            # heading/div/footnote adjacency).
+            Scope("forbidden-contexts", "_run_index_placement_contexts",
+                  note='\\index{} not inside code / math / attribute strings'),
         ],
 
         "images": [
@@ -7623,6 +7629,28 @@ class ValidateCommand:
             / "tools" / "audit" / "index" / "check_xref_resolves.py"
         )
         return self._delegate_script(script, [], "index-xref-resolves")
+
+    def _run_index_placement_contexts(self, root: Path) -> ValidationRunResult:
+        """index --scope forbidden-contexts: \\index{} in code / math / attribute strings.
+
+        Catches anti-patterns from index.md §1 + book-prose.md §7:
+
+          - \\index{} inside ```{python} ... ``` fences (LaTeX never indexes
+            code; leaks as literal text in displayed code).
+          - \\index{} inside $..$ or $$..$$ math (corrupts makeindex key
+            parsing; anti-pattern #4 'Math in key').
+          - \\index{} inside fig-cap=, fig-alt=, tbl-cap=, tbl-alt=,
+            lst-cap=, title= attribute strings (Quarto extracts as plain
+            text for HTML tooltips / PDF bookmarks / EPUB metadata; leaks
+            as literal text).
+
+        Wraps the native audit check at book/tools/audit/checks/index_placement.py.
+        """
+        return self._run_audit_check(
+            root, "audit.checks.index_placement",
+            "index-placement-contexts",
+            "\\index{} forbidden contexts (code / math / attribute strings)",
+        )
 
     def _run_lego_dead_code(self, root: Path) -> ValidationRunResult:
         """code --scope lego-dead-code: LEGO variables defined but never used.

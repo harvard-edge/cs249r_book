@@ -57,6 +57,7 @@ CHECK_REGISTRY: list[tuple[str, str]] = [
     ("audit.checks.alt_text_style", "alt-text-style"),
     ("audit.checks.bibliography_hygiene", "bibliography-hygiene"),
     ("audit.checks.notation_consistency", "notation-consistency"),
+    ("audit.checks.index_placement", "index-placement"),
     # Wave 7 — release-gate defect catalog (binder check release)
     ("audit.checks.bare_attribution", "bare-attribution"),
     ("audit.checks.duplicate_citation", "duplicate-citation"),
@@ -354,6 +355,15 @@ def main() -> int:
             "itself or to reproduce pre-Pass-16 scanner behavior."
         ),
     )
+    parser.add_argument(
+        "--fail-on-open",
+        action="store_true",
+        help=(
+            "Exit with code 1 if any issue has status='open' after the "
+            "accept-list is applied. For pre-commit hook integration: "
+            "lets `--categories X` act as a hard gate that blocks commits."
+        ),
+    )
     args = parser.parse_args()
 
     categories = (
@@ -375,6 +385,16 @@ def main() -> int:
     print(f"\nLedger written to {output}", file=sys.stderr)
 
     print_summary(ledger)
+
+    if args.fail_on_open:
+        open_count = sum(1 for i in ledger.issues if getattr(i, "status", "open") == "open")
+        if open_count:
+            print(
+                f"\n❌ --fail-on-open: {open_count} open issue(s) — see ledger above.",
+                file=sys.stderr,
+            )
+            return 1
+
     return 0
 
 
