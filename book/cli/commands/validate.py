@@ -392,6 +392,8 @@ class ValidateCommand:
                   note="bare pipes, fracs, HTML entities"),
             Scope("caption-required", "_run_table_caption_required",
                   note="body-prose pipe tables need : caption {#tbl-X}"),
+            Scope("caption-orphan", "_run_table_caption_orphan",
+                  note="caption between two `:::` closes breaks EPUB"),
         ],
         "listings": [
             # Listings in this book always use ::: {#lst-X lst-cap="..."} divs.
@@ -3115,6 +3117,103 @@ class ValidateCommand:
             ),
             files_checked=len(files),
             issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    _CAPTION_ORPHAN_RE = re.compile(r"^\s*:\s+.*\{#tbl-[A-Za-z0-9_-]+[\s}]")
+    _CAPTION_CLOSE_FENCE_RE = re.compile(r"^\s*:{3,}\s*$")
+
+    def _run_table_caption_orphan(self, root: Path) -> ValidationRunResult:
+        """Flag `: caption {#tbl-...}` lines sandwiched between two `:::` close fences.
+
+        The pattern that broke vol1 EPUB on 2026-05-18 (commit 54ca22d7d7):
+
+            ::: {.content-visible when-format="html"}
+            ::: {tbl-colwidths="..."}
+
+            | row | row |
+
+            :::                              ← inner close
+
+            : **Caption**: ... {#tbl-foo}    ← orphan caption
+
+            :::                              ← outer close
+
+        Pandoc's EPUB writer cannot bind a caption across the inner-close
+        fence; the label never registers, `@tbl-` xrefs go unresolved, and
+        epubcheck reports ERRORs. PDF is unaffected because the PDF block
+        uses raw LaTeX `tabular`.
+
+        Safe form: move `tbl-colwidths` onto the caption attribute and drop
+        the inner nested div.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        raw_issues: List[ValidationIssue] = []
+        in_code = False
+        in_raw = False
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            in_raw = False
+            n = len(lines)
+            for i, line in enumerate(lines):
+                # Toggle code-fence state.
+                if re.match(r"^\s*(```+|~~~+)", line):
+                    if re.match(r"^\s*```\s*\{\.?tikz|^\s*```\s*\{=latex\}", line):
+                        in_raw = not in_raw
+                    else:
+                        in_code = not in_code
+                    continue
+                if in_code or in_raw:
+                    continue
+                if not self._CAPTION_ORPHAN_RE.match(line):
+                    continue
+                # Walk backward to closest non-blank.
+                prev_idx = None
+                j = i - 1
+                while j >= 0:
+                    if lines[j].strip():
+                        prev_idx = j
+                        break
+                    j -= 1
+                # Walk forward to closest non-blank.
+                next_idx = None
+                k = i + 1
+                while k < n:
+                    if lines[k].strip():
+                        next_idx = k
+                        break
+                    k += 1
+                if prev_idx is None or next_idx is None:
+                    continue
+                prev_is_close = self._CAPTION_CLOSE_FENCE_RE.match(lines[prev_idx]) is not None
+                next_is_close = self._CAPTION_CLOSE_FENCE_RE.match(lines[next_idx]) is not None
+                if prev_is_close and next_is_close:
+                    raw_issues.append(ValidationIssue(
+                        file=self._relative_file(file),
+                        line=i + 1,
+                        code="table_caption_orphan",
+                        message=(
+                            "Caption is sandwiched between two `:::` close "
+                            f"fences (prev close at line {prev_idx + 1}, "
+                            f"next close at line {next_idx + 1}). Pandoc's "
+                            "EPUB writer will orphan the caption and "
+                            "@tbl- refs will go unresolved. Move "
+                            "`tbl-colwidths` onto the caption attribute "
+                            "and drop the inner nested div."
+                        ),
+                        severity="error",
+                        context=line.strip()[:120],
+                    ))
+        return ValidationRunResult(
+            name="table-caption-orphan",
+            description=(
+                "Captions must not sit between two `:::` close fences "
+                "(EPUB build integrity)"
+            ),
+            files_checked=len(files),
+            issues=raw_issues,
             elapsed_ms=int((time.time() - start) * 1000),
         )
 
