@@ -22,7 +22,7 @@ app = marimo.App(width="full")
 #             Staged rollout observation windows depend on traffic and canary %.
 #
 #   Part E — The Alert Fatigue Wall (10 min)
-#             3-sigma alerting on 1000 metrics produces 864 false alerts/day.
+#             3-sigma alerting on 1000 metrics produces 778 false alerts/day.
 #
 # Design Ledger: chapter="v2_11"
 # ─────────────────────────────────────────────────────────────────────────────
@@ -155,7 +155,7 @@ def _(LAB_CSS, mo):
             <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px;">
                 <span class="badge badge-fail">$1.08M/day silent failure</span>
                 <span class="badge badge-warn">Capacity crossed at 50 models</span>
-                <span class="badge badge-info">864 false alerts/day at 3-sigma</span>
+                <span class="badge badge-info">778 false alerts/day at 3-sigma</span>
             </div>
         </div>
         """),
@@ -1017,7 +1017,7 @@ samples takes exactly 1 hour -- far longer than most engineers expect.
             <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
                         line-height: 1.55; max-width: 700px;">
                 With 3-sigma alerting on 1,000 metrics checked every 5 minutes, the fleet
-                produces ~864 false alerts per day. Per-metric raw alerting is mathematically
+                produces ~778 false alerts per day. Per-metric raw alerting is mathematically
                 useless at fleet scale. Hierarchical monitoring is the only viable solution.
             </div>
         </div>
@@ -1125,7 +1125,7 @@ the ~50/day human processing capacity.
                 "complexity_crossover": 50,
                 "silent_failure_24h_cost": 1_080_000,
                 "platform_breakeven": 20,
-                "alert_fatigue_threshold": 864,
+                "alert_fatigue_threshold": 778,
             })
 
         return mo.vstack([
@@ -1149,8 +1149,8 @@ the ~50/day human processing capacity.
                     </div>
                     <div>
                         <strong>3. Raw alerting is mathematically useless at fleet scale.</strong>
-                        3-sigma alerting on 1,000 metrics produces 864 false alerts/day. Hierarchical
-                        monitoring reduces this to ~86/day. The solution mirrors hierarchical AllReduce
+                        3-sigma alerting on 1,000 metrics produces 778 false alerts/day. Hierarchical
+                        monitoring reduces this to ~78/day. The solution mirrors hierarchical AllReduce
                         from collective communication: aggregate before alerting.
                     </div>
                 </div>
@@ -1184,7 +1184,7 @@ the ~50/day human processing capacity.
                 "Self-Assessment: Can you answer these?": mo.md("""
 1. At what model count does operational load exceed team capacity, and why?
 2. Why does a 0.5% CTR drop cost $1.08M when undetected for 24 hours?
-3. How does hierarchical monitoring reduce false alerts from 864/day to ~86/day?
+3. How does hierarchical monitoring reduce false alerts from 778/day to ~78/day?
 
 *If you cannot answer all three from memory, revisit Parts A, B, and E.*
 """)

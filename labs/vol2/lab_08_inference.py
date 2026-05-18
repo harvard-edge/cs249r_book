@@ -16,7 +16,7 @@ app = marimo.App(width="full")
 #
 # Tabbed Structure (35-40 minutes):
 #   Part A — The Serving Cost Inversion (12-15 min)
-#             Serving cost > training cost within ~6 weeks at 100 QPS.
+#             Serving cost > training cost within ~3-4 weeks at 100 QPS.
 #             Batching trades latency for throughput along a hockey stick.
 #
 #   Part B — The KV Cache Wall + Fleet Design Challenge (20-25 min)
@@ -201,7 +201,7 @@ def _(mo):
         options={
             "A) 6 months -- training dominates for a long time": "A",
             "B) 3 months -- serving catches up gradually": "B",
-            "C) ~6 weeks -- serving cost grows fast": "C",
+            "C) ~3-4 weeks -- serving cost grows fast": "C",
             "D) Never -- training is always more expensive": "D",
         },
         label="You spent $2M training a 70B LLM. At 100 QPS and $0.01/query, when does cumulative serving cost exceed training cost?",
