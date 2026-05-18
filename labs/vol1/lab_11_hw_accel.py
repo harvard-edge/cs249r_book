@@ -981,7 +981,7 @@ $$
 - **$d$**: head dimension
 - **$M$**: SRAM size (on-chip memory per SM)
 
-Speedup $\\approx M / d$, which is 2-4x at typical dimensions. Tiling keeps Q, K, V blocks in SRAM, avoiding the $N^2$ materialization in HBM.
+Speedup $\\approx N / B$ (where $B$ is tile size), reaching **~10x at seq\_len=4096, tile=256**. Tiling keeps Q, K, V blocks in SRAM, avoiding the $N^2$ materialization in HBM.
 """)
         }))
         return mo.vstack(items)
