@@ -79,6 +79,9 @@ def check(
     start_counter: int = 0,
 ) -> tuple[list[Issue], int]:
     """Scan for markdown pipe tables that lack a caption line."""
+    if "/frontmatter/" in file_path.as_posix():
+        return [], start_counter
+
     issues: list[Issue] = []
     counter = start_counter
 
