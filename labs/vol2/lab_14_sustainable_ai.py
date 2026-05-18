@@ -8,7 +8,7 @@ app = marimo.App(width="full")
 #
 # Volume II, Chapter 14 — Sustainable AI
 #
-# Core Invariant: AI compute demand outpaces hardware efficiency by 195,000x.
+# Core Invariant: AI compute demand outpaces hardware efficiency by 2,400,000x.
 #   Geography is a 40x carbon lever. Embodied carbon dominates on clean grids.
 #   The Jevons Paradox means efficiency gains can INCREASE total consumption.
 #   Only absolute caps guarantee net reduction.
@@ -150,7 +150,7 @@ def _(mo, LAB_CSS, COLORS):
                 </span>
             </div>
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <span class="badge badge-fail">195,000x Energy Deficit</span>
+                <span class="badge badge-fail">2,400,000x Energy Deficit</span>
                 <span class="badge badge-warn">40x Geography Gap</span>
                 <span class="badge badge-info">Embodied Carbon Dominates on Clean Grids</span>
                 <span class="badge badge-ok">Jevons Paradox: Efficiency Backfires</span>
@@ -177,7 +177,7 @@ def _(mo, COLORS):
                 Learning Objectives
             </div>
             <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Quantify the energy deficit</strong>: calculate the 195,000&times; gap between AI compute demand growth (~3.4-month doubling) and hardware efficiency growth (~24-month doubling) over 7 years.</div>
+                <div style="margin-bottom: 3px;">1. <strong>Quantify the energy deficit</strong>: calculate the 2,400,000&times; gap between AI compute demand growth (~3.4-month doubling) and hardware efficiency growth (~24-month doubling) over 7 years.</div>
                 <div style="margin-bottom: 3px;">2. <strong>Apply the Jevons Paradox equation</strong> to show that 2&times; efficiency with elasticity 2.0 produces a 100% <em>increase</em> in total energy, and identify the elasticity threshold where efficiency gains guarantee net reduction.</div>
                 <div style="margin-bottom: 3px;">3. <strong>Design a carbon-aware fleet strategy</strong> combining geographic optimization (40&times; lever), lifecycle management (embodied carbon), temporal scheduling, and absolute carbon caps to achieve a 50% emission reduction target.</div>
             </div>
@@ -383,7 +383,7 @@ def _(
 
         You expect hardware efficiency to keep pace with AI compute demand &mdash; Moore's
         Law has always delivered. But AI demand doubles every 3.4 months while efficiency
-        doubles every 24 months. Over 7 years, the gap is not 10x. It is 195,000x.
+        doubles every 24 months. Over 7 years, the gap is not 10x. It is 2,400,000x.
         """))
 
         items.append(partA_pred)
@@ -473,9 +473,9 @@ def _(
 
         # Prediction reveal
         _correct = partA_pred.value == "100000"
-        _msg = ("You correctly identified the ~100,000x+ exponential chasm."
+        _msg = ("You correctly identified the exponential chasm. The gap is ~2,400,000x over 7 years."
                 if _correct else
-                "The gap over 7 years is ~195,000x. Students intuitively expect hardware to 'keep up' "
+                "The gap over 7 years is ~2,400,000x. Students intuitively expect hardware to 'keep up' "
                 "because Moore's Law worked for decades. But AI demand grows 7x faster than efficiency.")
         items.append(mo.callout(mo.md(f"**{_msg}**"), kind="success" if _correct else "warn"))
 
@@ -494,7 +494,7 @@ $$
 
 **At $t = 84$ months (7 years):**
 $$
-\\text{Gap} = 2^{84 \\times (1/3.4 - 1/24)} = 2^{84 \\times 0.253} = 2^{21.2} \\approx 195{,}000\\times
+\\text{Gap} = 2^{84 \\times (1/3.4 - 1/24)} = 2^{84 \\times 0.253} = 2^{21.2} \\approx 2{,}400{,}000\\times
 $$
 
 Demand grows ~7x faster than efficiency. No amount of hardware improvement
@@ -1168,7 +1168,7 @@ achieves 50%+ reduction targets.
             <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
                 <div style="margin-bottom: 10px;">
                     <strong>1. The energy wall is real and growing.</strong>
-                    AI compute demand has outpaced hardware efficiency by ~195,000&times; over 7 years.
+                    AI compute demand has outpaced hardware efficiency by ~2,400,000&times; over 7 years.
                     You cannot outrun this deficit with better chips alone.
                 </div>
                 <div style="margin-bottom: 10px;">
