@@ -1677,6 +1677,10 @@ The equivariant layers preserve where features occur, enabling the network to le
 
 ::: {#exmp-nn-architectures-equivariance-feature-detection .callout-example title="Equivariance: Feature detection"}
 
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.15}
+```
 Consider a $7{\times}7$ image with a vertical edge at column 3:
 $$
 \mathbf{x} = \begin{bmatrix}
@@ -1737,6 +1741,10 @@ f(T_2 \mathbf{x}) = \begin{bmatrix}
 $$
 
 The feature activation shifts by the same amount as the input, demonstrating equivariance. The network knows the edge is at column 5 in the shifted image, not just that an edge exists somewhere.
+
+```{=latex}
+\endgroup
+```
 
 :::
 
@@ -1867,6 +1875,11 @@ ResNet-50's compute-bound profile assumes abundant hardware resources, yet the d
 
 **Why it matters**: MobileNet represents **latency-constrained** edge workloads. Its depthwise separable convolutions trade channel mixing capacity for speed, making it the standard baseline for mobile apps, embedded vision, and neural architecture search (NAS). @tbl-nn-architectures-mobilenet-profile summarizes the efficiency lighthouse's quantitative properties:
 
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
+
 | **Property**    | **Value**                                                      | **System Implication**                                                                                                                                     |
 |:----------------|:---------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **Parameters**  | `{python} CNNLighthouseProfile.mobilenet_params_m_str` million | `{python} CNNLighthouseProfile.mobilenet_fp32_mb_str` MB at FP32; `{python} CNNLighthouseProfile.mobilenet_size_ratio_str`$\times$ smaller than ResNet-50. |
@@ -1877,6 +1890,9 @@ ResNet-50's compute-bound profile assumes abundant hardware resources, yet the d
 
 : **MobileNet Systems Profile**: Quantitative properties of the efficiency lighthouse and their system consequences. Roughly an order of magnitude smaller than ResNet-50 in both parameters and FLOPs, MobileNet's low arithmetic intensity makes single-image latency -- driven by kernel-launch overhead and memory access -- the binding constraint on mobile CPUs. {#tbl-nn-architectures-mobilenet-profile tbl-colwidths="[16,27,57]"}
 
+```{=latex}
+\endgroup
+``` 
 :::
 
 The contrast between ResNet-50 and MobileNet highlights a counterintuitive lesson that trips up many practitioners.
@@ -1969,6 +1985,8 @@ Convolution operations create computational patterns distinct from MLP dense mat
 
 The most common transformation is **im2col** (image-to-column), which rearranges the input image patches into columns of a large matrix, allowing the convolution to be executed as a single General Matrix Multiplication (GEMM). (The im2col transformation is illustrated later in this chapter when we discuss computational primitives.)
 
+The bridge between the logical model and physical execution becomes critical for understanding CNN system requirements. While @lst-conv_layer_spatial shows the framework-level abstraction as a simple function call, the hardware must orchestrate complex data movement patterns and exploit spatial locality for efficiency.
+
 ::: {#lst-conv_layer_spatial lst-cap="**Convolutional Layer Abstraction**: Framework-level convolution operations hide the complexity of sliding window computations, typically dispatching to cuDNN or MKL which internally handle im2col transformations or direct convolution algorithms."}
 
 ```{.python}
@@ -1985,8 +2003,6 @@ def conv_layer_spatial(input, kernel, bias):
 ```
 
 :::
-
-The bridge between the logical model and physical execution becomes critical for understanding CNN system requirements. While @lst-conv_layer_spatial shows the framework-level abstraction as a simple function call, the hardware must orchestrate complex data movement patterns and exploit spatial locality for efficiency.
 
 @lst-conv_layer_compute reveals the logical computational pattern: seven nested loops that process each spatial position. While functionally correct, this naive implementation is rarely used in practice due to poor memory locality. Instead, the im2col approach trades memory (duplicating overlapping input pixels) for computational regularity, converting the messy nested loops into a streamlined matrix multiplication that saturates hardware FP units.
 
@@ -2257,6 +2273,7 @@ The recurrent weight matrix often contains connections with minimal contribution
 
 RNN sequential processing creates computational patterns different from both MLPs and CNNs, extending the architectural diversity discussed in @sec-network-architectures-architectural-principles-engineering-tradeoffs-362e. This implementation approach shows temporal dependencies translating into specific computational requirements.
 
+
 ```{python}
 #| label: rnn-computation-costs
 #| echo: false
@@ -2305,7 +2322,6 @@ class RNNCompute:
     total_str = fmt(macs_total, precision=0, commas=True)
 ```
 
-@lst-rnn_layer_step demonstrates the operation using high-level matrix operations found in deep learning frameworks. The function handles a single time step, taking the current input `x_t` and previous hidden state `h_prev`, along with two weight matrices: `W_hh` for hidden-to-hidden connections and `W_xh` for input-to-hidden connections. Through matrix multiplication operations (`matmul`), it merges the previous state and current input to generate the next hidden state.
 
 ::: {#lst-rnn_layer_step lst-cap="**RNN Layer Abstraction**: Framework-level implementation combining two matrix multiplications (h_prev x W_hh and x_t x W_xh) per time step. For 128-dimensional hidden state and 100-dimensional input, each step requires `{python} RNNCompute.recurrent_str` + `{python} RNNCompute.input_str` = `{python} RNNCompute.total_str` MACs, but sequential dependencies prevent parallelization across time."}
 
@@ -2320,6 +2336,8 @@ def rnn_layer_step(x_t, h_prev, W_hh, W_xh, b):
 ```
 
 :::
+
+@lst-rnn_layer_step demonstrates the operation using high-level matrix operations found in deep learning frameworks. The function handles a single time step, taking the current input `x_t` and previous hidden state `h_prev`, along with two weight matrices: `W_hh` for hidden-to-hidden connections and `W_xh` for input-to-hidden connections. Through matrix multiplication operations (`matmul`), it merges the previous state and current input to generate the next hidden state.
 
 The simple recurrence $\mathbf{h}_t = \tanh(\mathbf{W}_{\text{hh}} \mathbf{h}_{t-1} + \mathbf{W}_{\text{hx}} \mathbf{x}_t + \mathbf{b})$ conceals a computational structure with unique challenges: sequential dependencies that prevent parallelization, memory access patterns that differ from feedforward networks, and state management requirements that affect system design.
 
@@ -4394,6 +4412,10 @@ Where:
 
 @tbl-arch-complexity captures *where* data lives and how access patterns scale. The complementary @tbl-computational-complexity that follows captures *how much* computation each architecture demands, including forward-pass FLOPs, parallelization potential, and the resulting bottleneck. Together they answer the two questions a systems engineer asks: "how much work?" and "how does the memory system handle it?"
 
+Together, these two tables provide a comprehensive view of each architecture's resource profile, informing system-level design decisions such as choosing memory hierarchy configurations and developing memory optimization strategies.
+
+The impact of these patterns becomes clear when we consider data reuse opportunities. In CNNs, each input pixel participates in multiple convolution windows (typically nine times for a $3{\times}3$ filter), making effective data reuse necessary for performance. Modern GPUs provide multi-level cache hierarchies (L1, L2, shared memory) to capture this reuse, while software techniques like loop tiling ensure data remains in cache once loaded.
+
 | **Architecture** | **Parameters**                                                                                        | **Forward Pass**                                                      | **Memory**                                                    | **Parallelization**                     | **Bottleneck**                                                         |
 |:-----------------|:------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------|:--------------------------------------------------------------|:----------------------------------------|:-----------------------------------------------------------------------|
 | **MLPs**         | $O(d_{\text{in}} \times d_{\text{out}})$ per layer                                                    | $O(d_{\text{in}} \times d_{\text{out}})$ per layer                    | $O(d^2)$ weights $O(d \times B)$ activations                  | Excellent Matrix ops parallel           | Memory bandwidth                                                       |
@@ -4403,9 +4425,6 @@ Where:
 
 : **Computational Complexity Comparison**: Scaling behaviors and resource requirements for major neural network architectures. Variables: $d$ = dimension, $h$ = hidden size, $k$ = kernel size, $c$ = channels, $H,W$ = spatial dimensions, $S$ = sequence length (time steps), $n$ = sequence length, $B$ = batch size. The bottleneck column identifies the primary performance-limiting factor in typical deployments. {#tbl-computational-complexity tbl-colwidths="[12,18,16,20,18,16]"}
 
-Together, these two tables provide a comprehensive view of each architecture's resource profile, informing system-level design decisions such as choosing memory hierarchy configurations and developing memory optimization strategies.
-
-The impact of these patterns becomes clear when we consider data reuse opportunities. In CNNs, each input pixel participates in multiple convolution windows (typically nine times for a $3{\times}3$ filter), making effective data reuse necessary for performance. Modern GPUs provide multi-level cache hierarchies (L1, L2, shared memory) to capture this reuse, while software techniques like loop tiling ensure data remains in cache once loaded.
 
 Working set size\index{Working Set Size}, the amount of data needed simultaneously for computation, varies dramatically across architectures. An MLP layer might need only a few hundred KB (weights plus activations), while a transformer processing long sequences can require several MB just for storing attention patterns. These differences directly influence hardware design choices, like the balance between compute units and on-chip memory, and software optimizations like activation checkpointing or attention approximation techniques.
 
@@ -4833,7 +4852,7 @@ The decision flowchart in @fig-dnn-fm-framework proceeds from top to bottom: ide
 ::: {#fig-dnn-fm-framework fig-env="figure" fig-pos="htb" fig-cap="**Architecture Selection Decision Framework**: A systematic flowchart for choosing dense neural network architectures based on data characteristics and deployment constraints. The process begins with data type identification (text/sequences/images/tabular) to select initial architecture candidates (Transformers/RNNs/CNNs/MLPs), then iteratively evaluates memory budget, computational cost, inference speed, accuracy targets, and hardware compatibility. High-cardinality recommendation workloads are handled separately by the sparse-embedding family (DLRM) discussed earlier in the chapter, then re-enter the same constraint checks." fig-alt="Flowchart from Define Problem, branching by data type to Transformers, RNNs, CNNs, MLPs. Diamonds check memory, compute, speed, accuracy, deployment. Each No loops back via Scale Down or Increase Capacity; each Yes reaches Selected."}
 
 ```{.tikz}
-\scalebox{0.73}{\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+\scalebox{1}{\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
 \tikzset{%
 Line/.style={line width=1.0pt,black!50,text=black},
 LineA/.style={BrownLine!80, line width=1.0pt,{-{Triangle[width=0.7*6pt,length=1.40*6pt]}},text=black},
@@ -5118,33 +5137,10 @@ The input is spatial data (images from camera traps, typically $1920{\times}1080
 | **Memory**       | 512 MB RAM, 2 GB storage       | Model must fit in ~100 MB after quantization       |
 | **Accuracy**     | 90 percent+ on 50 species      | Requires sufficient model capacity                 |
 
-: **Wildlife Monitoring Constraints**: Five deployment constraints and the architectural choices they force for the camera-trap scenario. Each row eliminates a class of solutions: no connectivity rules out the cloud, the 2 W power envelope rules out GPUs, and the 100 MB memory budget forces aggressive quantization before any model search begins. {#tbl-nn-architectures-wildlife-constraints tbl-colwidths="[20,35,45]"}
+: **Wildlife Monitoring Constraints**: Five deployment constraints and the architectural choices they force for the camera-trap scenario. Each row eliminates a class of solutions: no connectivity rules out the cloud, the 2 W power envelope rules out GPUs, and the 100 MB memory budget forces aggressive quantization before any model search begins. {#tbl-nn-architectures-wildlife-constraints tbl-colwidths="[16,33,51]"}
 
 :::
 
-::: {.content-visible when-format="pdf"}
-\begingroup
-\renewcommand{\arraystretch}{1.3}
-\begin{center}
-\footnotesize
-\begin{tabular}{lll}
-\toprule
-\textbf{Constraint} & \textbf{Requirement} & \textbf{Implication} \\
-\midrule
-\textbf{Connectivity} & None (offline) & All inference must run on-device \\
-\textbf{Power} & \textasciitilde2 W average & Rules out GPUs \\
-\textbf{Latency} & <500 ms per detection & Allows batch size 1 \\
-\textbf{Memory} & 512 MB RAM, 2 GB storage & Model must fit in ~100 MB after quantization \\
-\textbf{Accuracy} & 90 percent+ on 50 species & Requires sufficient model capacity \\
-\bottomrule
-\end{tabular}
-\end{center}
-\endgroup
-:::
-
-```{=latex}
-\tcbbreak
-```
 
 **Step 3**: Architecture evaluation using lighthouse benchmarks.
 Compare candidates against our Lighthouse models:
@@ -5162,10 +5158,14 @@ Compare candidates against our Lighthouse models:
 **Step 4**: Systems validation.
 
 **Memory check**:
-`{python} WildlifeModelSizing.memory_check_math`
+$$
+\text{`{python} WildlifeModelSizing.memory_check_math`}
+$$
 
-**Compute check**: Target device: ARM Cortex-A53 @ 1.2 GHz with NEON SIMD (~`{python} WildlifeModelSizing.edge_int8_gops_str` GOPS INT8)
+**Compute check**: Target device: 
+ARM Cortex-A53 @ 1.2 GHz with NEON SIMD (~`{python} WildlifeModelSizing.edge_int8_gops_str` GOPS INT8)
 `{python} WildlifeModelSizing.compute_check_math`
+
 
 **Power check**:
 Estimated inference power: ~`{python} WildlifeModelSizing.inference_power_mw_str` mW for `{python} WildlifeModelSizing.compute_latency_ms_str` ms = `{python} WildlifeModelSizing.energy_mj_str` mJ per inference
@@ -5180,21 +5180,6 @@ At `{python} WildlifeModelSizing.inferences_per_day_str` inferences/day: `{pytho
 | **New species added postdeployment** | Reserve 10 percent model capacity; plan for over-the-air (OTA) update mechanism  |
 
 : **Wildlife Camera Deployment Risks**: Top accuracy, thermal, and species-coverage risks for the MobileNetV2 deployment, paired with the engineering mitigation chosen for each. {#tbl-nn-architectures-wildlife-risks}
-
-::: {.content-visible when-format="pdf"}
-\begin{center}
-\scriptsize
-\begin{tabular}{@{}p{0.29\linewidth}p{0.61\linewidth}@{}}
-\toprule
-\textbf{Risk} & \textbf{Mitigation} \\
-\midrule
-\textbf{90 percent accuracy not achieved} & Train on augmented dataset; consider EfficientNet-Lite if MobileNet insufficient \\
-\textbf{Thermal throttling in enclosure} & Add passive heatsink; reduce inference frequency in high-temperature conditions \\
-\textbf{New species added postdeployment} & Reserve 10 percent model capacity; plan for over-the-air (OTA) update mechanism \\
-\bottomrule
-\end{tabular}
-\end{center}
-:::
 
 **Final decision**: MobileNetV2 (0.75$\times$ width) with INT8 quantization, deployed on Cortex-A53 system on chip (SoC) with 512 MB RAM.
 
