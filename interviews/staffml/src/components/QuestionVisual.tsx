@@ -39,6 +39,11 @@ export interface QuestionVisualProps {
 
 export default function QuestionVisual({ track, visual }: QuestionVisualProps) {
   const [failed, setFailed] = useState(false);
+  const [prevPath, setPrevPath] = useState(visual.path);
+  if (visual.path !== prevPath) {
+    setPrevPath(visual.path);
+    setFailed(false);
+  }
 
   if (visual.kind !== "svg") return null;
 
