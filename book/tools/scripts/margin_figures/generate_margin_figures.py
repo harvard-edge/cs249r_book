@@ -94,6 +94,45 @@ def make_knee(chapter, name, *, knee_frac=0.72, style="shaded", pct_label=None):
     write(fig, chapter, name)
 
 
+def make_labeled_knee(
+    chapter,
+    name,
+    *,
+    knee_frac=0.72,
+    style="shaded",
+    pct_label=None,
+    word_label="threshold",
+):
+    fig, ax = new_fig("scale-anchor")
+    knee(ax, knee_frac=knee_frac, style=style, pct_label=pct_label)
+    if style == "twotone":
+        ax.text(18, 4.0, "safe", ha="center", va="center", color=DATA, fontsize=5.2)
+        ax.text(
+            82,
+            19.5,
+            word_label,
+            ha="center",
+            va="center",
+            color=RED,
+            fontsize=5.2,
+            fontweight="bold",
+        )
+    elif style == "dashed":
+        ax.text(knee_frac * 100 + 4, 23.5, word_label, ha="left", va="center", color=RED, fontsize=5.0)
+    else:
+        ax.text(
+            min(knee_frac * 100 + 14, 90),
+            23.5,
+            word_label,
+            ha="center",
+            va="center",
+            color=RED,
+            fontsize=5.1,
+            fontweight="bold",
+        )
+    write(fig, chapter, name)
+
+
 def make_sparkline(chapter, name, *, threat=True, style="gap", steep=1.8, saturating=False, endpoints=None):
     fig, ax = new_fig("sparkline-trend")
     sparkline(ax, threat=threat, style=style, steep=steep, saturating=saturating, endpoints=endpoints)
@@ -103,6 +142,66 @@ def make_sparkline(chapter, name, *, threat=True, style="gap", steep=1.8, satura
 def make_roofline(chapter, name, *, ridge=60.0, dot_ai=6.0):
     fig, ax = new_fig("thumbnail-roofline")
     roofline(ax, ridge=ridge, dot_ai=dot_ai)
+    write(fig, chapter, name)
+
+
+def make_roofline_points(chapter, name, *, ridge=60.0, points=None, arrow=False):
+    """Draw a margin roofline with one or more labeled operating points."""
+    points = points or [("workload", 6.0, INK)]
+    fig, ax = new_fig("thumbnail-roofline")
+    ais = [p[1] for p in points]
+    lo, hi = min([ridge] + ais), max([ridge] + ais)
+    xmin, xmax = lo / 5.0, hi * 5.0
+    x = np.logspace(np.log10(xmin), np.log10(xmax), 240)
+    y = np.minimum(x / ridge, 1.0)
+    m = x < ridge
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.plot(x[m], y[m], color=MEM, lw=1.8)
+    ax.plot(x[~m], y[~m], color=COMP, lw=1.8)
+    ax.axvline(ridge, color=GRID, ls="--", lw=0.8)
+    ax.text(
+        xmin * 1.15,
+        0.36,
+        "memory",
+        color=MEM,
+        fontsize=5.0,
+        rotation=27,
+        ha="left",
+        va="center",
+    )
+    ax.text(xmax / 1.35, 0.82, "compute", color=COMP, fontsize=5.0, ha="right", va="center")
+    ax.text(ridge, 0.022, "ridge", color="#777777", fontsize=4.8, ha="center", va="bottom")
+    yvals = [min(ai / ridge, 1.0) for ai in ais]
+    if arrow and len(points) >= 2:
+        ax.annotate(
+            "",
+            xy=(ais[-1], yvals[-1]),
+            xytext=(ais[0], yvals[0]),
+            arrowprops=dict(arrowstyle="->", color="#777777", lw=0.8),
+        )
+    for label, ai, color in points:
+        yy = min(ai / ridge, 1.0)
+        ax.plot(ai, yy, "o", color=color, ms=4.0, zorder=4)
+        above = yy < 0.78
+        yoff = 1.38 if above else 0.54
+        ax.text(
+            ai,
+            yy * yoff,
+            label,
+            ha="center",
+            va="center",
+            color=color,
+            fontsize=5.0,
+            fontweight="bold",
+        )
+    ymin = max(min(yvals + [xmin / ridge]) / 3.0, 1e-4)
+    ax.set_xlim(xmin, xmax)
+    ax.set_ylim(ymin, 2.0)
+    clean(ax)
+    ax.spines["bottom"].set_visible(True)
+    ax.spines["left"].set_visible(True)
+    ax.tick_params(axis="both", which="both", length=0)
     write(fig, chapter, name)
 
 
@@ -429,15 +528,52 @@ def _generic_ladder(candidate):
 def _generic_knee(candidate):
     labels = _labels(candidate)
     text = " ".join(labels + [candidate.get("purpose", "")])
+    lower = text.lower()
+    if "throttle" in lower:
+        word_label = "throttle"
+    elif "slo" in lower or "latency" in lower:
+        word_label = "SLO"
+    elif "accept" in lower:
+        word_label = "accept"
+    elif "rho" in lower or "communication" in lower:
+        word_label = "rho=1"
+    elif "capacity" in lower or "memory" in lower:
+        word_label = "capacity"
+    elif "spars" in lower:
+        word_label = "payoff"
+    elif "risk" in lower or "false" in lower:
+        word_label = "failure"
+    elif "tile" in lower or "fringe" in lower:
+        word_label = "fringe"
+    else:
+        word_label = "threshold"
     pct = re.search(r"(\d{1,3})\s*%", text)
     if pct:
         value = max(0.15, min(float(pct.group(1)) / 100.0, 0.9))
-        make_knee(candidate["chapter"], curated_asset_name(candidate["id"]), knee_frac=value, style="dashed", pct_label=f"{pct.group(1)}%")
+        make_labeled_knee(
+            candidate["chapter"],
+            curated_asset_name(candidate["id"]),
+            knee_frac=value,
+            style="dashed",
+            pct_label=f"{pct.group(1)}%",
+            word_label=word_label,
+        )
         return
-    if any(tok in text.lower() for tok in ("safe", "danger", "throttle", "wall", "cliff", "limit")):
-        make_knee(candidate["chapter"], curated_asset_name(candidate["id"]), knee_frac=0.70, style="twotone")
+    if any(tok in lower for tok in ("safe", "danger", "throttle", "wall", "cliff", "limit")):
+        make_labeled_knee(
+            candidate["chapter"],
+            curated_asset_name(candidate["id"]),
+            knee_frac=0.70,
+            style="twotone",
+            word_label=word_label,
+        )
     else:
-        make_knee(candidate["chapter"], curated_asset_name(candidate["id"]), knee_frac=0.70)
+        make_labeled_knee(
+            candidate["chapter"],
+            curated_asset_name(candidate["id"]),
+            knee_frac=0.70,
+            word_label=word_label,
+        )
 
 
 def _generic_sparkline(candidate):
@@ -457,9 +593,44 @@ def _generic_sparkline(candidate):
 
 def _generic_roofline(candidate):
     text = " ".join(_labels(candidate) + [candidate.get("purpose", "")]).lower()
-    dot = 2.0 if any(tok in text for tok in ("batch=1", "decode", "tpot", "memory-bound", "mnist")) else 16.0
-    ridge = 80.0 if any(tok in text for tok in ("h100", "bert", "batch", "b=256")) else 60.0
-    make_roofline(candidate["chapter"], curated_asset_name(candidate["id"]), ridge=ridge, dot_ai=dot)
+    name = curated_asset_name(candidate["id"])
+    if "ttft" in text and "tpot" in text:
+        make_roofline_points(
+            candidate["chapter"],
+            name,
+            ridge=60.0,
+            points=[("TPOT", 3.0, MEM), ("TTFT", 110.0, COMP)],
+            arrow=False,
+        )
+    elif "batch" in text and ("compute-bound" in text or "ridge" in text or "plateau" in text):
+        make_roofline_points(
+            candidate["chapter"],
+            name,
+            ridge=8.0,
+            points=[("B=1", 2.0, MEM), ("B=32", 24.0, COMP)],
+            arrow=True,
+        )
+    elif "speculative" in text or "acceptance" in text:
+        make_roofline_points(
+            candidate["chapter"],
+            name,
+            ridge=8.0,
+            points=[("draft", 14.0, COMP)],
+        )
+    else:
+        label = "decode" if "decode" in text or "tpot" in text else "work"
+        dot = (
+            2.0
+            if any(tok in text for tok in ("batch=1", "decode", "tpot", "memory-bound", "mnist"))
+            else 16.0
+        )
+        ridge = 80.0 if any(tok in text for tok in ("h100", "bert", "b=256")) else 60.0
+        make_roofline_points(
+            candidate["chapter"],
+            name,
+            ridge=ridge,
+            points=[(label, dot, MEM if dot < ridge else COMP)],
+        )
 
 
 def _generic_ironbar(candidate):
