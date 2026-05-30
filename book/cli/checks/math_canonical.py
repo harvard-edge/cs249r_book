@@ -2,7 +2,7 @@
 """
 Math canonical check — fmt-family and suffix discipline for LEGO cells.
 
-Enforces the canonical math-rendering convention (see ``.claude/rules/math.md``):
+Enforces the canonical math-rendering convention (see the project math rules):
 
   1. Every ``*_str`` / ``*_math`` / ``*_eq`` / ``*_frac`` assignment in a
      ``{python}`` cell must use ``mlsysim.fmt`` helpers or ``MarkdownStr``.

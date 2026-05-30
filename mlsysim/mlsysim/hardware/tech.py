@@ -4,7 +4,7 @@ Technology-CLASS properties — access latency, per-operation/per-byte energy, a
 component bandwidth — that are ~constant across parts of a generation. This is the
 counterpart to the per-instance specs on the Hardware.Cloud/Edge/Mobile/Tiny nodes
 (capacity, bandwidth, TDP, price), which genuinely vary part-to-part.
-See .claude/rules/mlsysim.md -> Canonical organization (the instance-vs-tech-class split).
+See the project MLSysIM rules -> Canonical organization (the instance-vs-tech-class split).
 
 The tier *data* lives as YAML under ``hardware/data/tech/<category>.yaml`` (loaded +
 validated against the tier schemas below); the tier *types*, the ``Tech`` namespace, and

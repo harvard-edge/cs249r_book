@@ -15,7 +15,7 @@ Two encodings are handled before pydantic validation:
   ``Hardware.Tech`` and instances point at it rather than copying it. The loader
   resolves these against ``tech_root`` into the live Quantity object.
 
-See ``.claude/rules/mlsysim.md`` → *Storage format*.
+See the project MLSysIM rules → *Storage format*.
 """
 from __future__ import annotations
 

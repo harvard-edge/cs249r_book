@@ -138,22 +138,28 @@ def resolve_scope(scope: str) -> list[Path]:
 
 
 def get_rule_file_sha() -> str:
-    """Get the git SHA of book-prose-merged.md so the ledger is reproducible."""
-    rule_file = (
-        Path.home()
-        / "GitHub"
-        / "AIConfigs"
-        / "projects"
-        / "MLSysBook"
-        / ".claude"
-        / "rules"
-        / "book-prose-merged.md"
-    )
+    """Get the git SHA of the merged prose-rule file so the ledger is reproducible.
+
+    Resolves the rule file relative to the repository root (via the project's
+    rules directory), so the scanner is portable across machines and checkouts.
+    """
+    try:
+        repo_root = Path(
+            subprocess.check_output(
+                ["git", "rev-parse", "--show-toplevel"],
+                cwd=Path(__file__).resolve().parent,
+                text=True,
+            ).strip()
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+        return "unknown"
+
+    rule_file = repo_root / ".claude" / "rules" / "book-prose-merged.md"
     if not rule_file.exists():
         return "unknown"
     try:
         result = subprocess.run(
-            ["git", "-C", str(rule_file.parent.parent.parent.parent.parent),
+            ["git", "-C", str(rule_file.parent),
              "log", "-n", "1", "--pretty=format:%H", "--", str(rule_file)],
             capture_output=True, text=True, timeout=5,
         )

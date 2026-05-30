@@ -416,7 +416,7 @@ $n^* = \alpha \cdot \beta = 2 \times 10^{-6}$ s $\times 50 \times 10^9$ B/s $=$ 
 The critical message size separates two distinct operating regimes:
 
 1.  **Latency-Bound** $(n < n^*)$: For small messages (for example, MoE routing tokens, scalar reductions), time is dominated by $\alpha$. Optimization focuses on fusion (batching small messages), topology (reducing hop count), and software stack tuning (kernel bypass via RDMA).
-2.  **Bandwidth-Bound** $(n \gg n^*)$: For large messages (for example, LLM gradients, optimizer states), time is dominated by $n/\beta$. Optimization focuses on **compression** \index{Gradient Compression} (FP8, Top-k sparsity), **algorithm choice** (Ring vs. Tree), and **link aggregation** (multi-rail NICs).
+2.  **Bandwidth-Bound** $(n \gg n^*)$: For large messages (for example, LLM gradients, optimizer states), time is dominated by $n/\beta$. Optimization focuses on **compression** \index{Gradient Compression} (FP8, Top-k sparsity), **algorithm choice** (Ring vs. Tree), and **link aggregation**\index{Link Aggregation} (multi-rail NICs).
 
 The distinction between latency-bound and bandwidth-bound communication is the diagnostic skill to practice.
 
@@ -436,8 +436,8 @@ Verify your understanding of network performance regimes:
 The α-β model assumes the processor is idle during communication. For **pipelined systems** where we overlap communication with computation, this assumption fails. The **LogP**\index{LogP Model} model [@culler1993] extends α-β with two additional parameters:
 
 *   **$L_{\text{lat}}$ (Latency)**: The time for a message to traverse the network (similar to $\alpha$).
-*   **$o$ (Overhead)**\index{LogP Model!processor overhead}: The CPU/GPU time spent initiating or receiving a transfer. During this time, the processor **cannot compute**, making this the nonoverlappable cost.
-*   **$g$ (Gap)**: The minimum time interval between consecutive message injections (inverse of message rate). This models **link contention**.
+*   **$o$ (Overhead)**\index{LogP Model!processor overhead}: The CPU/GPU time spent initiating or receiving a transfer. During this time, the processor cannot compute, making this the nonoverlappable cost.
+*   **$g$ (Gap)**: The minimum time interval between consecutive message injections (inverse of message rate). This models link contention\index{Link Contention}.
 *   **$N$ (Processors)**: The number of processors in the system.
 
 LogP distinguishes **network latency** ($L_{\text{lat}}$, which can be hidden) from **processor overhead** ($o$, which *cannot*). A system can overlap communication with computation only if the compute kernel runs longer than the overhead. A small overlap calculation makes this distinction concrete:
@@ -633,7 +633,7 @@ Different model architectures stress different operations, and selecting the wro
 ### The six core primitives {#sec-collective-communication-six-core-primitives-8a66}
 
 1.  **Broadcast**\index{Broadcast}: One sender transmits data to all receivers.
-    *   Use case: Distributing initial model weights from rank 0 to all workers at startup. Used across **all parallelism strategies** during initialization.
+    *   Use case: Distributing initial model weights from rank 0 to all workers at startup. Used across all parallelism strategies during initialization.
     *   Complexity: $\mathcal{O}(\log N)$ latency with tree algorithms; bandwidth cost $\mathcal{O}(M)$ as data traverses tree levels.
 
 2.  **Reduce**\index{Reduce}: Data from all workers is aggregated (sum, min, max) to a single root worker.
@@ -750,7 +750,7 @@ Each GPU holds `{python} MoeAllToAll.tokens_per_gpu_str` tokens that need to rea
 *   Total data sent per GPU: 7 $\times$ `{python} MoeAllToAll.data_per_transfer_kb_str` = `{python} MoeAllToAll.total_sent_mb_str`
 *   Total data received per GPU: `{python} MoeAllToAll.total_sent_mb_str` (symmetric)
 
-**Latency Analysis (InfiniBand NDR, $\alpha =$ `{python} MoeAllToAll.alpha_str` $\mu\text{s}$, $\beta =$ `{python} MoeAllToAll.beta_str`)**:
+**Latency Analysis** (InfiniBand NDR, $\alpha =$ `{python} MoeAllToAll.alpha_str` $\mu\text{s}$, $\beta =$ `{python} MoeAllToAll.beta_str`):
 
 Each of the 7 transfers is a `{python} MoeAllToAll.data_per_transfer_kb_str` message. From the $\alpha$-$\beta$ model: $T_{\text{transfer}}$ = 3 + `{python} MoeAllToAll.bw_time_approx_str` = `{python} MoeAllToAll.per_transfer_us_str` $\mu\text{s}$ per transfer.
 
@@ -824,7 +824,7 @@ The minimum total transfer per GPU is therefore $2 \cdot M \cdot (N-1)/N$ bytes 
 
 $$T_{\text{bandwidth}}^{\text{min}} = \frac{2(N-1)}{N} \cdot \frac{M}{\beta}$$
 
-As $N$ grows large, this approaches $2M/\beta$, which is independent of $N$. An algorithm that achieves this bound is called **bandwidth-optimal**. Ring AllReduce achieves this bound exactly. Tree AllReduce does not. This distinction has practical consequences: on a 64-GPU cluster synchronizing a 1 GB gradient, the bandwidth difference between an optimal and a merely logarithmic algorithm amounts to several milliseconds per step, which accumulates to hours over a multi-day training run.
+As $N$ grows large, this approaches $2M/\beta$, which is independent of $N$. An algorithm that achieves this bound is called **bandwidth-optimal**\index{Bandwidth-Optimal}. Ring AllReduce achieves this bound exactly. Tree AllReduce does not. This distinction has practical consequences: on a 64-GPU cluster synchronizing a 1 GB gradient, the bandwidth difference between an optimal and a merely logarithmic algorithm amounts to several milliseconds per step, which accumulates to hours over a multi-day training run.
 
 ### Ring AllReduce {#sec-communication-collective-operations-collective-operations-ring-allreduce-ffce}
 
@@ -1197,7 +1197,7 @@ class RingVsTree:
 | **Tree**      | `{python} RingVsTree.tree_lat_str` μs | `{python} RingVsTree.tree_bw_str` μs | `{python} RingVsTree.tree_total_str` μs |
 : **Ring vs. tree AllReduce timing for a 1 MB buffer on 64 GPUs**: Latency, bandwidth, and total-time terms with $\alpha = 10\ \mu\text{s}$ and $\beta = 10\ \text{GB/s}$. {#tbl-collective-communication-ring-vs-tree-1mb-64gpu}
 
-**Tree wins**, but only by `{python} RingVsTree.tree_win_margin_pct_str`. For this `{python} RingVsTree.M_mb_str` message, we are near the crossover point.
+Tree wins, but only by `{python} RingVsTree.tree_win_margin_pct_str`. For this `{python} RingVsTree.M_mb_str` message, we are near the crossover point.
 
 **Systems insight**: Ring's latency penalty (10$\times$ worse than Tree) nearly balances Tree's bandwidth penalty (6$\times$ worse than Ring). The log-aware crossover estimate predicts $M_{\text{crossover}} \approx N \alpha \beta / \log_2 N = 64 \times 10\ \mu\text{s} \times 10\ \text{GB/s} / 6 \approx$ `{python} RingVsTree.crossover_str`. At 1 MB, we are just below crossover, so Tree wins. At 10 MB, Ring would dominate.
 
@@ -1263,7 +1263,7 @@ A GPU node delivers an order of magnitude more intra-node bandwidth (NVLink at `
 
 ### Hierarchical AllReduce {#sec-communication-collective-operations-collective-operations-hierarchical-allreduce-1338}
 
-The algorithms above (Ring, Tree, Butterfly, Double Binary Tree) all assume a **flat** network where every link has the same bandwidth. This assumption holds within a single node (where all GPUs are connected by NVLink at equal bandwidth) but fails by 18$\times$ in multi-node clusters. Real clusters are **hierarchical**, with fundamentally different bandwidths at each tier, as @tbl-bandwidth-hierarchy quantifies:
+The algorithms above (Ring, Tree, Butterfly, Double Binary Tree) all assume a **flat**\index{Flat Network} network where every link has the same bandwidth. This assumption holds within a single node (where all GPUs are connected by NVLink at equal bandwidth) but fails by 18$\times$ in multi-node clusters. Real clusters are **hierarchical**\index{Hierarchical Network}, with fundamentally different bandwidths at each tier, as @tbl-bandwidth-hierarchy quantifies:
 
 | **Tier**       |    **Interconnect** | **Bandwidth** |   **Relative Speed** |
 |:---------------|--------------------:|--------------:|---------------------:|
@@ -1294,7 +1294,7 @@ GPUs at the same position across nodes (for example, all GPU-0s) perform an AllR
 
 Each node performs a local AllGather to distribute the final result to all $G$ GPUs. Again, this uses only NVLink, leaving inter-node bandwidth untouched.
 
-The net effect: inter-node traffic is reduced by a factor of $G$ (GPUs per node), effectively **multiplying the apparent inter-node bandwidth by $G$**. A simple 8-node budget makes this bandwidth multiplication concrete:
+The net effect: inter-node traffic is reduced by a factor of $G$ (GPUs per node), effectively multiplying the apparent inter-node bandwidth by $G$. A simple 8-node budget makes this bandwidth multiplication concrete:
 
 ```{python}
 #| echo: false
@@ -1485,11 +1485,11 @@ Most gradients are computed in FP32 (32-bit floating point) or BF16 (16-bit brai
 
 The progression from mild to aggressive quantization illustrates the trade-off between compression ratio and gradient fidelity:
 
-1. **FP16 (16-bit)**: The baseline for modern training. Half the bits of FP32, with minimal impact on convergence for most models. Provides **2$\times$ compression** over FP32.
+1. **FP16 (16-bit)**: The baseline for modern training. Half the bits of FP32, with minimal impact on convergence for most models. Provides 2$\times$ compression over FP32.
 
-2. **INT8 (8-bit)**: Quantize each gradient vector to 256 discrete levels. This requires computing a **scaling factor** per tensor: $g_{\text{int8}} = \text{round}(g/s)$ where $s = \max(|g|) / 127$. The receiver reconstructs $\hat{g} = g_{\text{int8}} \times s$. Provides **4$\times$ compression** over FP32 but introduces quantization noise proportional to the gradient magnitude.
+2. **INT8 (8-bit)**: Quantize each gradient vector to 256 discrete levels. This requires computing a **scaling factor** per tensor: $g_{\text{int8}} = \text{round}(g/s)$ where $s = \max(|g|) / 127$. The receiver reconstructs $\hat{g} = g_{\text{int8}} \times s$. Provides 4$\times$ compression over FP32 but introduces quantization noise proportional to the gradient magnitude.
 
-3. **1-bit SGD**\index{1-bit SGD}: The extreme case: transmit only the **sign** of each gradient element (+1 or -1). The receiver reconstructs using a learned or adaptive scaling factor. This achieves **32$\times$ compression** over FP32 but introduces substantial noise that typically degrades convergence without additional mechanisms.
+3. **1-bit SGD**\index{1-bit SGD}: The extreme case: transmit only the **sign** of each gradient element (+1 or -1). The receiver reconstructs using a learned or adaptive scaling factor. This achieves 32$\times$ compression over FP32 but introduces substantial noise that typically degrades convergence without additional mechanisms.
 
 #### Block quantization for gradient communication {#sec-collective-communication-block-quantization-gradient-communication-c883}
 
@@ -1533,7 +1533,7 @@ The problem is not merely practical; it is a fundamental mathematical obstacle. 
 
 ### Error feedback: The memory of the journey {#sec-communication-collective-operations-error-feedback}
 
-We solve the conflict between compression and convergence with **Error Feedback**. The system applies the compressor immediately to recover bandwidth, then stores the discarded residual in a local accumulator and re-injects it into the next gradient. *The error is deferred, not destroyed.* We maintain a local error accumulator $e_t$ that stores the compression residual.
+We solve the conflict between compression and convergence with error feedback. The system applies the compressor immediately to recover bandwidth, then stores the discarded residual in a local accumulator and re-injects it into the next gradient. *The error is deferred, not destroyed.* We maintain a local error accumulator $e_t$ that stores the compression residual.
 
 ::: {#dfn-collective-communication-error-feedback-mechanism .callout-definition title="Error feedback mechanism"}
 
@@ -2014,7 +2014,7 @@ If the job scheduler assigns ranks to GPUs without considering the physical topo
 
 ## Summary {#sec-communication-collective-operations-summary}
 
-Communication is the friction of scale. Computation is local, but learning is global, and the **$\alpha$-$\beta$ and LogP models** transform communication bottleneck analysis from guesswork into quantitative engineering. The critical message size $n^* = \alpha \cdot \beta$ separates latency-bound from bandwidth-bound regimes, and the gap between theoretical predictions and measured NCCL performance reveals that software stack overhead inflates small-message latency by 5--10$\times$, shifting algorithm crossover points in practice.
+Communication is the friction of scale. Computation is local, but learning is global, and the $\alpha$-$\beta$ and LogP models transform communication bottleneck analysis from guesswork into quantitative engineering. The critical message size $n^* = \alpha \cdot \beta$ separates latency-bound from bandwidth-bound regimes, and the gap between theoretical predictions and measured NCCL performance reveals that software stack overhead inflates small-message latency by 5--10$\times$, shifting algorithm crossover points in practice.
 
 The Collective Primitives (AllReduce, AllGather/ReduceScatter, AllToAll) map directly to parallelism strategies, and each primitive determines a distinct scaling ceiling. AllReduce workloads are bandwidth-bound and scale gracefully, while AllToAll workloads are contention-bound and hit practical limits at smaller cluster sizes.
 
