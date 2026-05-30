@@ -34,15 +34,43 @@ def _get_markdown():
     return MarkdownStr
 
 
+def _require_finite(val, what="value"):
+    """Reject non-finite inputs (``inf``/``nan``) with a clear message.
+
+    A divide-by-zero (``x / 0``) yields ``inf``; an indeterminate ``0 / 0``
+    yields ``nan``. Without this guard those silently render as the literal
+    text ``"inf"``/``"nan"`` (or trip an incidental ``OverflowError`` deep in
+    ``round()``). This is the formatter's last-line-of-defense against an
+    upstream divide-by-zero leaking into prose. Returns ``val`` unchanged when
+    finite so it composes inline.
+    """
+    import math
+
+    if isinstance(val, float) and not math.isfinite(val):
+        kind = "nan (0/0 or undefined)" if math.isnan(val) else "infinite (divide-by-zero)"
+        raise ValueError(
+            f"Non-finite {what}: {val} is {kind}. The formatter refuses to "
+            f"render it — this almost always means a divide-by-zero or an "
+            f"undefined 0/0 upstream in the compute. Fix the calculation (or "
+            f"guard the denominator) rather than formatting a non-finite value."
+        )
+    return val
+
+
 def _numeric_magnitude(quantity):
-    """Return a plain float magnitude for fmt safety checks."""
+    """Return a plain float magnitude for fmt safety checks.
+
+    All numeric formatters funnel their value extraction through here, so the
+    finite guard applied at this chokepoint protects every helper that takes a
+    number or Quantity.
+    """
     from .core.provenance import Sourced, scalar_value
 
     if isinstance(quantity, ureg.Quantity):
-        return float(quantity.magnitude)
+        return _require_finite(float(quantity.magnitude), "quantity magnitude")
     if isinstance(quantity, Sourced):
-        return scalar_value(quantity)
-    return float(quantity)
+        return _require_finite(float(scalar_value(quantity)), "value")
+    return _require_finite(float(quantity), "value")
 
 
 def _parse_formatted_number(result):
@@ -236,6 +264,7 @@ def fmt_val(quantity, default="-"):
         val = quantity
     if val is None:
         return MarkdownStr(default)
+    _require_finite(float(val), "table value")
     out = MarkdownStr(f"{val:g}")
     assert isinstance(out, MarkdownStr), "fmt_val() must return MarkdownStr"
     return out
@@ -268,24 +297,172 @@ def fmt_unit(quantity, default="-"):
     return out
 
 
-def fmt_percent(ratio, precision=1, commas=False, suffix=""):
+def fmt_percent(ratio, precision=1, commas=False, style="number",
+                max_ratio=1.5):
     """
-    Format a ratio (0.0 to 1.0) as a percentage string for display.
+    Format a 0-1 **ratio** as a percentage. The single canonical domain for
+    percentages: the input is always a fraction in ``[0, 1]`` (``0.85`` →
+    ``85``), never an already-scaled ``0-100`` value.
 
-    Use this for compound fractions (e.g. effective utilization) to avoid
-    display bugs from Quantity or wrong scaling.
-    Accepts Pint Quantity (uses magnitude) or plain float.
+    This one-domain rule is the structural fix for the "no 10,000%" guarantee.
+    A value outside ``[0, max_ratio]`` is almost always an already-scaled value
+    passed by mistake (``0.85`` accidentally typed/derived as ``85``), so it
+    raises instead of silently rendering ``8500``. Legitimate values above
+    ``max_ratio`` (e.g. >150% growth) must pass ``max_ratio=`` explicitly,
+    making the intent visible at the call site.
 
-    suffix=" percent" for body prose (MIT Press: spell out "percent").
-    suffix="%" for tables, equations, and constrained captions.
-    No suffix (default) when the prose context carries the meaning
-    (e.g., "50 MFU", "85 goodput").
+    The formatter owns the trailing glyph via ``style`` so authors never type
+    ``%`` or "percent" in prose (where a stray ``%`` could leak into math mode
+    and where MIT Press style — spell out "percent" in body, "%" in tables —
+    is otherwise unenforceable):
+
+        style="prose"   →  "85 percent"   (MIT Press body style)
+        style="symbol"  →  "85%"          (tables, equations, captions)
+        style="number"  →  "85"           (default; prose carries the meaning,
+                                            e.g. "85 MFU", "85 goodput")
+
+    Accepts a Pint Quantity (dimensionless magnitude) or plain float.
     """
     if isinstance(ratio, ureg.Quantity):
-        ratio = float(ratio.m_as(''))
+        r = float(ratio.m_as(''))
     else:
-        ratio = float(ratio)
-    return fmt(ratio * 100, precision=precision, commas=commas, suffix=suffix)
+        r = float(ratio)
+    _require_finite(r, "percent ratio")
+
+    if not (0.0 <= r <= max_ratio):
+        raise ValueError(
+            f"fmt_percent expects a 0-1 ratio, got {r}. If this is an "
+            f"already-scaled 0-100 value, divide by 100 at the source so the "
+            f"value flows through fmt_percent as a ratio. If a value above "
+            f"{max_ratio * 100:.0f}% is genuinely intended (e.g. growth), pass "
+            f"max_ratio= explicitly. This guard prevents silent 100x errors "
+            f"such as 0.85 -> '8500 percent'."
+        )
+
+    if style not in {"number", "prose", "symbol"}:
+        raise ValueError(
+            f"fmt_percent style must be 'number', 'prose', or 'symbol', "
+            f"got {style!r}."
+        )
+    glyph = {"number": "", "prose": " percent", "symbol": "%"}[style]
+    return fmt(r * 100, precision=precision, commas=commas, suffix=glyph)
+
+
+def fmt_pp(points, precision=1, commas=False, style="prose"):
+    """
+    Format a difference of two percentages as **percentage points**.
+
+    Distinct from ``fmt_percent``: the input is already on the ``0-100`` point
+    scale (it is a difference, not a ratio), so it is NOT multiplied by 100.
+    Using a dedicated helper keeps "5 percentage points" (an additive gap)
+    from being confused with "5 percent" (a multiplicative share).
+
+        style="prose"   →  "7 percentage points"  (default)
+        style="symbol"  →  "7 pp"
+    """
+    if isinstance(points, ureg.Quantity):
+        v = float(points.m_as(''))
+    else:
+        v = float(points)
+    _require_finite(v, "percentage points")
+    if style not in {"prose", "symbol"}:
+        raise ValueError(
+            f"fmt_pp style must be 'prose' or 'symbol', got {style!r}."
+        )
+    glyph = " percentage points" if style == "prose" else " pp"
+    return fmt(v, precision=precision, commas=commas, suffix=glyph)
+
+
+def fmt_multiple(factor, precision=1, commas=False):
+    """
+    Format a multiplier / speedup / scaling factor as a **number only**.
+
+    The multiplier glyph belongs in prose as LaTeX ``$\\times$``, never inside
+    the computed string (see .claude/rules/math.md §6 #14). This helper exists
+    so the value-kind is explicit at the source while keeping the glyph out of
+    the string:
+
+        speedup_str = fmt_multiple(3.2)            # "3.2"
+        # prose: `{python} speedup_str`$\\times$ faster
+
+    Guard: a multiplier is non-negative.
+    """
+    v = _numeric_magnitude(factor)
+    if v < 0:
+        raise ValueError(
+            f"fmt_multiple expects a non-negative factor, got {v}. A negative "
+            f"multiplier almost always signals a sign or ordering bug."
+        )
+    return fmt(v, precision=precision, commas=commas)
+
+
+_COUNT_SCALES = {"K": 1e3, "M": 1e6, "B": 1e9, "T": 1e12}
+
+
+def fmt_count(value, scale=None, precision=0, commas=True, suffix=""):
+    """
+    Format a **count** (a dimensionless tally of things), optionally with a
+    magnitude scale glyph.
+
+    Replaces the ``fmt(value / MILLION, suffix="M")`` idiom, where the scale
+    division and the glyph were two disconnected facts a reader had to keep in
+    sync. Here the scale is declared once and applied for you:
+
+        fmt_count(5_300_000, scale="M")              # "5M"
+        fmt_count(5_300_000, scale="M", precision=1) # "5.3M"
+        fmt_count(70e9, scale="B")                   # "70B"   (e.g. params)
+        fmt_count(8192)                              # "8,192" (no scale)
+        fmt_count(1024, suffix=" GPUs")              # "1,024 GPUs"
+
+    Guard: counts are non-negative.
+
+    For a currency amount use ``fmt_usd``; for a physical quantity use
+    ``fmt_qty``. ``fmt_count`` is for pure tallies only.
+    """
+    v = _numeric_magnitude(value)
+    if v < 0:
+        raise ValueError(
+            f"fmt_count expects a non-negative count, got {v}."
+        )
+    glyph = ""
+    if scale is not None:
+        if scale not in _COUNT_SCALES:
+            raise ValueError(
+                f"fmt_count scale must be one of {sorted(_COUNT_SCALES)} or "
+                f"None, got {scale!r}."
+            )
+        v = v / _COUNT_SCALES[scale]
+        glyph = scale
+    return fmt(v, precision=precision, commas=commas, suffix=glyph + suffix)
+
+
+def fmt_ratio(value, precision=1, commas=False, allow_negative=False):
+    """
+    Format a **dimensionless ratio** as a bare number (no unit, no glyph).
+
+    For quantities that are conceptually a quotient of like things —
+    arithmetic intensity (FLOP/byte), compression ratio, overcommit ratio,
+    speedup expressed as a plain ratio rather than a "×" multiplier. Naming
+    the kind at the call site makes intent explicit and, unlike ``fmt()``,
+    ``fmt_ratio`` accepts **no** ``prefix=``/``suffix=`` — a ratio is unitless
+    by definition, so decoration is a sign the wrong helper was chosen
+    (use ``fmt_qty`` for a dimensioned value, ``fmt_multiple`` for a "×"
+    factor, ``fmt_percent`` for a share).
+
+        intensity_str = fmt_ratio(5.0, precision=0)     # "5"    (FLOP/byte)
+        compression_str = fmt_ratio(3.2)                # "3.2"
+
+    Guards: finite (inherited) and non-negative by default — a negative ratio
+    of magnitudes usually signals a sign bug; pass ``allow_negative=True`` for
+    the rare signed ratio.
+    """
+    v = _numeric_magnitude(value)
+    if v < 0 and not allow_negative:
+        raise ValueError(
+            f"fmt_ratio expects a non-negative ratio, got {v}. Pass "
+            f"allow_negative=True if a signed ratio is genuinely intended."
+        )
+    return fmt(v, precision=precision, commas=commas)
 
 
 def fmt_sci(val, precision=2):
@@ -301,6 +478,7 @@ def fmt_sci(val, precision=2):
 
     if isinstance(val, ureg.Quantity):
         val = val.magnitude
+    _require_finite(float(val), "scientific value")
     s = f"{val:.{precision}e}"
     base, exp = s.split("e")
     exp_int = int(exp)
@@ -315,6 +493,7 @@ def sci_latex(val, precision=2):
     """
     if isinstance(val, ureg.Quantity):
         val = val.magnitude
+    _require_finite(float(val), "scientific value")
     s = f"{val:.{precision}e}"
     base, exp = s.split('e')
     exp_int = int(exp)

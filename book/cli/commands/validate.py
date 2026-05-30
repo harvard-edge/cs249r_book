@@ -404,6 +404,13 @@ class ValidateCommand:
             Scope("multiplier-style", "_run_math_multiplier_style",
                   note="body-prose multiplier suffixes, Unicode ×, product spacing",
                   default=False),
+            # Typed-formatter migration gate: value-kind (percent/multiplier/
+            # percentage-points/count-scale) must be a typed formatter, not a
+            # free-text suffix= on fmt()/fmt_int(). default=False until the
+            # corpus migration completes; flip to gate on pre-commit.
+            Scope("suffix-semantics", "_run_fmt_semantic_suffix",
+                  note="value-kind in suffix= must be a typed formatter",
+                  default=False),
             # render-audit builds every chapter (~10 min). Manual stage only;
             # default=False ensures `binder check math` stays under 1s.
             Scope("render-audit", "_run_math_render_audit", default=False),
@@ -5523,6 +5530,42 @@ class ValidateCommand:
         return ValidationRunResult(
             name="math-multiplier-style",
             description="Multiplier suffixes, Unicode times, and product spacing",
+            files_checked=len(qmd_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_fmt_semantic_suffix(self, root: Path) -> ValidationRunResult:
+        """math --scope suffix-semantics: value-kind must be a typed formatter."""
+        from cli.checks.fmt_semantic_suffix import audit
+
+        start = time.time()
+        qmd_files = self._qmd_files(root)
+        violations = audit([root])
+
+        issues: List[ValidationIssue] = []
+        for violation in violations:
+            file_path = Path(violation.file)
+            try:
+                rel = str(file_path.resolve().relative_to(self.config_manager.book_dir))
+            except ValueError:
+                try:
+                    rel = str(file_path.resolve().relative_to(self.config_manager.root_dir))
+                except ValueError:
+                    rel = violation.file
+            issues.append(ValidationIssue(
+                file=rel,
+                line=violation.line,
+                code=violation.code,
+                message=violation.message,
+                severity="error",
+                context=violation.context,
+                suggestion=violation.suggestion,
+            ))
+
+        return ValidationRunResult(
+            name="fmt-semantic-suffix",
+            description="Value-kind (percent/multiplier/pp/scale) must be a typed formatter",
             files_checked=len(qmd_files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),

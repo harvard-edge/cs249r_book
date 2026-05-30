@@ -578,10 +578,10 @@ def _audit_missing_fmt_imports(qmd_path: Path) -> list[Violation]:
 def _audit_fmt_percent_suffix(qmd_path: Path) -> list[Violation]:
     """Flag ``fmt_percent(..., suffix=...)`` calls.
 
-    ``fmt_percent()`` does not accept a ``suffix=`` keyword argument — it
-    returns the bare percentage number.  Passing ``suffix=`` raises
-    ``TypeError`` at render time.  Use ``fmt(x * 100, precision=N,
-    suffix=...)`` instead.
+    ``fmt_percent()`` does not accept a ``suffix=`` keyword argument.  The
+    percent glyph is owned by the formatter via ``style=`` (``'prose'`` →
+    "85 percent", ``'symbol'`` → "85%", ``'number'`` → "85").  Passing
+    ``suffix=`` raises ``TypeError`` at render time.
     """
     out: list[Violation] = []
     lines = qmd_path.read_text(encoding="utf-8").splitlines()
@@ -603,8 +603,10 @@ def _audit_fmt_percent_suffix(qmd_path: Path) -> list[Violation]:
                     line=i,
                     code="fmt_percent_suffix",
                     message=(
-                        "fmt_percent() does not accept suffix=; "
-                        "use fmt(x * 100, precision=N, suffix=...) instead"
+                        "fmt_percent() does not accept suffix=. The percent "
+                        "glyph is owned by the formatter: pass style='prose' "
+                        "(\"85 percent\") or style='symbol' (\"85%\") instead "
+                        "of a suffix."
                     ),
                     context=line.strip()[:160],
                 )

@@ -4,7 +4,22 @@ import pytest
 
 from mlsysim.core.constants import ureg
 from mlsysim.core.units import USD
-from mlsysim.fmt import MarkdownStr, fmt, fmt_int, fmt_percent, fmt_qty, fmt_usd
+import math
+
+from mlsysim.fmt import (
+    MarkdownStr,
+    fmt,
+    fmt_count,
+    fmt_int,
+    fmt_multiple,
+    fmt_percent,
+    fmt_pp,
+    fmt_qty,
+    fmt_ratio,
+    fmt_sci,
+    fmt_usd,
+    fmt_val,
+)
 
 
 class TestFmtPrecisionGuards:
@@ -118,3 +133,147 @@ class TestFmtPercentGuards:
     def test_precision_zero_rejects_fractional_percentages(self):
         with pytest.raises(ValueError, match="not integer-like"):
             fmt_percent(0.456, precision=0, commas=False)
+
+    def test_default_style_is_bare_number_backward_compatible(self):
+        # The 11 pre-existing call sites rely on the bare-number default.
+        assert fmt_percent(0.85, precision=0) == "85"
+        assert fmt_percent(0.123, precision=1) == "12.3"
+
+    def test_prose_style_owns_the_word_percent(self):
+        assert fmt_percent(0.85, precision=0, style="prose") == "85 percent"
+
+    def test_symbol_style_owns_the_glyph(self):
+        assert fmt_percent(0.85, precision=0, style="symbol") == "85%"
+
+    def test_rejects_already_scaled_value_the_10000_percent_bug(self):
+        with pytest.raises(ValueError, match="0-1 ratio"):
+            fmt_percent(85)
+        with pytest.raises(ValueError, match="0-1 ratio"):
+            fmt_percent(45, precision=0)
+
+    def test_allows_over_100_percent_only_with_explicit_max_ratio(self):
+        with pytest.raises(ValueError, match="0-1 ratio"):
+            fmt_percent(2.0, precision=0)
+        assert fmt_percent(2.0, precision=0, max_ratio=3) == "200"
+
+    def test_rejects_unknown_style(self):
+        with pytest.raises(ValueError, match="style must be"):
+            fmt_percent(0.5, style="pct")
+
+    def test_returns_markdown_str(self):
+        assert isinstance(fmt_percent(0.5, precision=0, style="prose"), MarkdownStr)
+
+
+class TestFmtPp:
+    def test_prose_default(self):
+        assert fmt_pp(7.0, precision=0) == "7 percentage points"
+
+    def test_symbol_style(self):
+        assert fmt_pp(7.0, precision=0, style="symbol") == "7 pp"
+
+    def test_not_multiplied_by_100(self):
+        # pp is already on the 0-100 point scale; 7 stays 7, not 700.
+        assert fmt_pp(7.0, precision=0).startswith("7 ")
+
+    def test_returns_markdown_str(self):
+        assert isinstance(fmt_pp(3.0, precision=0), MarkdownStr)
+
+
+class TestFmtMultiple:
+    def test_number_only_no_glyph(self):
+        assert fmt_multiple(3.2) == "3.2"
+        assert fmt_multiple(10, precision=0) == "10"
+
+    def test_inherits_fmt_precision_guard(self):
+        # An integer-like factor at precision=1 would render "2.0" — the
+        # shared fmt() guard rejects that; the caller picks precision=0.
+        with pytest.raises(ValueError, match="spurious trailing zeros"):
+            fmt_multiple(2.0, precision=1)
+        assert fmt_multiple(2.0, precision=0) == "2"
+
+    def test_rejects_negative_factor(self):
+        with pytest.raises(ValueError, match="non-negative factor"):
+            fmt_multiple(-3)
+
+    def test_returns_markdown_str(self):
+        assert isinstance(fmt_multiple(2.5), MarkdownStr)
+
+
+class TestFiniteGuard:
+    """The divide-by-zero / non-finite last line of defense, on every helper."""
+
+    INF = float("inf")
+    NAN = float("nan")
+
+    def test_fmt_rejects_inf_and_nan(self):
+        with pytest.raises(ValueError, match="Non-finite"):
+            fmt(self.INF, precision=1)
+        with pytest.raises(ValueError, match="Non-finite"):
+            fmt(self.NAN, precision=1)
+
+    def test_message_names_divide_by_zero(self):
+        with pytest.raises(ValueError, match="divide-by-zero"):
+            fmt(self.INF, precision=0)
+
+    def test_guard_on_every_numeric_helper(self):
+        for call in (
+            lambda: fmt_int(self.INF),
+            lambda: fmt_usd(self.INF),
+            lambda: fmt_percent(self.NAN),
+            lambda: fmt_multiple(self.INF),
+            lambda: fmt_count(self.INF),
+            lambda: fmt_ratio(self.INF),
+            lambda: fmt_val(self.NAN),
+            lambda: fmt_sci(self.INF),
+            lambda: fmt_qty(self.INF * ureg.millisecond, ureg.millisecond),
+        ):
+            with pytest.raises(ValueError, match="Non-finite"):
+                call()
+
+    def test_finite_values_pass(self):
+        assert fmt(3.0, precision=0) == "3"
+        assert fmt_ratio(5.3, precision=1) == "5.3"
+
+
+class TestFmtRatio:
+    def test_bare_number_no_decoration(self):
+        assert fmt_ratio(5.3, precision=1) == "5.3"
+        assert fmt_ratio(3.2) == "3.2"
+        assert fmt_ratio(5.0, precision=0) == "5"
+
+    def test_rejects_negative_by_default(self):
+        with pytest.raises(ValueError, match="non-negative ratio"):
+            fmt_ratio(-2.0)
+
+    def test_allows_signed_ratio_with_flag(self):
+        assert fmt_ratio(-2.0, precision=0, allow_negative=True) == "-2"
+
+    def test_returns_markdown_str(self):
+        assert isinstance(fmt_ratio(1.5), MarkdownStr)
+
+
+class TestFmtCount:
+    def test_no_scale_uses_commas(self):
+        assert fmt_count(8192) == "8,192"
+        assert fmt_count(1024, suffix=" GPUs") == "1,024 GPUs"
+
+    def test_scale_glyphs(self):
+        assert fmt_count(5_000_000, scale="M") == "5M"
+        assert fmt_count(5_300_000, scale="M", precision=1) == "5.3M"
+        assert fmt_count(70e9, scale="B") == "70B"
+
+    def test_scale_inherits_precision_guard(self):
+        # 5.3M at precision=0 would silently hide the .3 — guard refuses.
+        with pytest.raises(ValueError, match="not integer-like"):
+            fmt_count(5_300_000, scale="M", precision=0)
+
+    def test_rejects_negative_count(self):
+        with pytest.raises(ValueError, match="non-negative count"):
+            fmt_count(-5)
+
+    def test_rejects_unknown_scale(self):
+        with pytest.raises(ValueError, match="scale must be"):
+            fmt_count(1000, scale="G")
+
+    def test_returns_markdown_str(self):
+        assert isinstance(fmt_count(1000, scale="K"), MarkdownStr)
