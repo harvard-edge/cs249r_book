@@ -22,7 +22,7 @@ from .units import *  # noqa: F401,F403 — re-export full unit registry
 # (Chip-specific numbers live in mlsysim/hardware/registry.py)
 
 # --- Latency Hierarchy --- (tech-class access latency -> Hardware.Tech)
-# register/L1/L2/HBM3 -> Hardware.Tech.Memory.*.latency
+# register/L1/L2/DRAM -> Hardware.Tech.Memory.*.latency
 # NVLink/PCIe-Gen5    -> Hardware.Tech.Interconnect.*.latency
 # NVMe SSD            -> Hardware.Tech.Storage.NvmeGen4.latency
 # InfiniBand (fabric) -> Systems.Fabrics.InfiniBand_NDR.latency
@@ -39,7 +39,7 @@ from .units import *  # noqa: F401,F403 — re-export full unit registry
 
 # --- Energy --- (per-op / per-byte energy is a tech-class fact -> Hardware.Tech)
 # FLOP/ADD/INT8 op energy   -> Hardware.Tech.Op.*.energy        (Horowitz 2014, 45 nm)
-# DRAM access / per-byte    -> Hardware.Tech.Memory.HBM3.energy_per_access / energy_per_byte
+# DRAM access / per-byte    -> Hardware.Tech.Memory.DRAM.energy_per_access / energy_per_byte
 # SRAM L1/L2, register file  -> Hardware.Tech.Memory.{L1,L2,Register}.energy_per_access
 # Architecture-class efficiency + per-byte movement hierarchy -> Literature.Energy.*
 # MobileNet inference energy -> Models.Vision.MobileNetV2.inference_energy

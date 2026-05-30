@@ -128,6 +128,12 @@ The distributed training systems examined in @sec-distributed-training-systems a
 
 The transition from small-scale experimentation to large-scale production changes the relationship between systems and failures. A researcher training a model on a single GPU can go years without a hardware failure. That same workload on a 1,000-GPU cluster sees GPU-only failures every couple of days, and a production cluster fails more often once PCIe, power, storage, and network domains enter the failure budget. This shift from *rare exception* to *routine occurrence* demands different engineering approaches. The mathematical analysis that follows makes this transition precise and quantitative.
 
+::: {.column-margin}
+![](images/svg/fault_tolerance_mtbf_ladder.svg){width="100%" fig-alt="Ladder of three blue bars showing system mean time between failures collapsing as fleet size grows: 1 GPU at 50,000 hours, 1,000 GPUs at 50 hours, 10,000 GPUs at 5 hours."}
+
+*System MTBF collapses as the fleet grows: 50,000 h to 5 h.*
+:::
+
 Understanding failure at scale requires abandoning the mindset that treats failures as bugs to be fixed. Individual component failures *cannot* be eliminated; they can only be managed. Memory errors, network partitions, storage corruption, and software crashes will occur with statistical regularity that increases predictably with system size. The engineering challenge is not to prevent these failures but to build systems that continue making progress despite them.
 
 The implications for system design are profound. Fault-tolerant systems cannot assume that any operation will succeed; they must verify completion and handle failure as a normal code path. Recovery mechanisms cannot be afterthoughts tested occasionally; they must be exercised continuously to ensure they work when needed. Coordination protocols must account for partial failures where some components succeed while others fail, leaving the system in states that naive error handling would not anticipate.
@@ -758,6 +764,12 @@ The reliability calculations in @sec-fault-tolerance-reliability-reliability-mat
 - **Cooling system failure**\index{Cooling!system failure}: Thermal shutdown affects multiple racks
 - **Software bugs**\index{Software Bugs}: A bug in the CUDA driver crashes all processes using that driver version
 - **Operator error**\index{Operator Error}: Misconfiguration affects entire cluster
+
+::: {.column-margin}
+![](images/svg/fault_tolerance_blast.svg){width="100%" fig-alt="A single red fault source on the left with arrows fanning out to five blue nodes on the right, showing one shared dependency taking down all the components that depend on it."}
+
+*One shared dependency fails and takes every node with it.*
+:::
 
 Correlated failures violate the independence assumption underlying @eq-system-reliability-n-components. When failures are correlated, the actual system reliability is lower than the formula predicts. Correlated failures can also defeat redundancy strategies. Three replicas of a model provide no availability benefit if all three run on the same power domain and a power failure takes out all three simultaneously.
 
@@ -1859,6 +1871,12 @@ These software practices catch implementation faults that surface through tests 
 
 As clusters scale to 100,000+ GPUs, the probability of a "Silent Data Corruption" (SDC) event (in which an ALU or HBM bit flip occurs without triggering ECC or hardware alerts) approaches certainty during large collective operations. Standard AllReduce algorithms assume that if a node is *alive*, its data is *correct*. In the machine learning fleet, we must transition to a Byzantine fault tolerance mindset: "Trust, but verify."
 
+::: {.column-margin}
+![](images/svg/vol2_fault_tolerance_margin_001.svg){width="100%" fig-alt="Margin illustration showing Cumulative silent-data-corruption risk over training steps."}
+
+*Silent data corruption accumulates until it becomes routine.*
+:::
+
 A quick estimate makes the exposure concrete.
 
 ```{python}
@@ -2062,6 +2080,12 @@ To survive these inevitable hardware failures without catastrophic loss of compu
 :::
 
 A training cluster that loses power without state preservation loses millions of dollars worth of gradient updates computed over the preceding weeks. The defense is to periodically write the model state to durable storage. Checkpointing captures sufficient state to resume training from a recorded point: model parameters, optimizer state,[^fn-adam-state-memory] training progress indicators, and random state for reproducibility.
+
+::: {.column-margin}
+![](images/svg/vol2_fault_tolerance_margin_002.svg){width="100%" fig-alt="Margin illustration showing Checkpoint payload composition dominated by Adam state."}
+
+*Optimizer state, not weights, dominates checkpoint size.*
+:::
 
 ```{python}
 #| echo: false
@@ -2758,6 +2782,12 @@ Each component presents distinct optimization opportunities, and the dominant te
 
 ### Failure detection mechanisms {#sec-fault-tolerance-reliability-reliability-failure-detection-mechanisms-efed}
 
+::: {.column-margin}
+![](images/svg/fault_tolerance_detection_ladder.svg){width="100%" fig-alt="A staircase ladder of detection latency on a log scale, ordered by how hard a failure is to see: a process crash at about 30 seconds, a GPU hang at 120 seconds, a network partition at 180 seconds, and silent data corruption at roughly two hours. The span climbs across two to three orders of magnitude."}
+
+*Detection latency climbs from seconds (crash) to hours (silent corruption).*
+:::
+
 Detection is the first line of defense, governed by a fundamental trade-off between speed and false positive rate. A timeout that is *too aggressive* mistakes temporary network jitter for a node failure, triggering an unnecessary and expensive restart. A timeout that is *too conservative* allows the entire cluster to sit idle while a dead node holds up synchronization.
 
 Heartbeat monitoring is the standard mechanism: each worker periodically sends "I am alive" signals to a central coordinator or monitoring service. Missing heartbeats trigger failure classification. The heartbeat interval $H$ and timeout $T_{\text{timeout}}$ control the trade-off. In high-scale clusters, heartbeat arrival times often follow a heavy-tailed distribution due to network congestion, necessitating adaptive timeouts rather than static thresholds. Production systems typically use $T_{\text{timeout}} = H + k\sigma_d$ where $k$ ranges from 3 to 5 and $\sigma_d$ is the observed network delay variance.
@@ -3003,6 +3033,12 @@ class StragglerTax:
 
 Consider our `{python} StragglerTax.n_gpus_str`-GPU cluster where a normal training iteration takes `{python} StragglerTax.normal_step_str`. A single GPU enters a thermally throttled state, clocking down to `{python} StragglerTax.throttle_pct_str` speed, and now takes `{python} StragglerTax.straggler_step_str` to complete its computation.
 
+::: {.column-margin}
+![](images/svg/vol2_fault_tolerance_margin_003.svg){width="100%" fig-alt="Margin illustration showing One slow rank blocking healthy ranks at synchronization barrier."}
+
+*A single straggler idles every healthy accelerator.*
+:::
+
 Because AllReduce cannot complete until every rank has submitted its gradients, the other `{python} StragglerTax.healthy_gpus_str` healthy GPUs sit idle waiting for the straggler.
 
 **Impact**:
@@ -3216,6 +3252,12 @@ $$ A_{\text{system}} = 1 - (1 - A_{\text{single}})^k $$ {#eq-availability-redund
 where $k$ is the number of replicas. For a service whose single replica is available 99 percent of the time, redundancy compounds as follows.
 
 Single replica availability: $A_{\text{single}} = 99\%$ (3.65 days of downtime per year)
+
+::: {.column-margin}
+![](images/svg/vol2_fault_tolerance_margin_004.svg){width="100%" fig-alt="Margin illustration showing Yearly downtime drops from one replica to multiple replicas."}
+
+*Redundancy turns days of downtime into seconds.*
+:::
 
 With two replicas: $A = 1 - (0.01)^2 = 99.99\%$ (52.6 minutes downtime per year)
 

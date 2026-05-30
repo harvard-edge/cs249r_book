@@ -1033,6 +1033,12 @@ While load balancers distribute requests *across replicas*, achieving predictabl
 
 ### Deterministic latency and resource isolation {#sec-model-serving-deterministic-latency-resource-isolation-4d1c}
 
+::: {.column-margin}
+![](images/svg/model_serving_blast_radius.svg){width="100%" fig-alt="Schematic of one red source node on the left fanning out through four arrows to four identical blue consumer nodes on the right, showing one-to-many propagation from a single source."}
+
+*One noisy neighbor perturbs every workload sharing the node.*
+:::
+
 An inference server does not operate in isolation. On a single machine, the operating system manages multiple competing processes (logging agents, monitoring tools, and system interrupts) that can intermittently steal CPU cycles from the inference pipeline. These "noisy neighbors" are a primary source of **latency jitter**\index{Latency Jitter!resource contention}, where the time required to process identical requests varies significantly, causing the 99th percentile (P99) latency to spike even when the hardware is underused. The tail latency explosion from @fig-tail-latency-explosion illustrates the same spike, but here the trigger is resource contention rather than queuing.
 
 Achieving deterministic performance\index{Latency!deterministic}\index{Resource Isolation!serving} on a single node requires reducing interference from the operating system's normal resource-sharing behavior. Predictable serving systems such as Clockwork show that DNN inference can meet tight request-level SLOs when scheduling and execution are controlled carefully [@gujarati2020]. CPU affinity (pinning)\index{CPU Affinity!latency reduction} is one local isolation tool: it restricts the inference server's threads to specific physical cores so latency-sensitive work is less exposed to thread migration and cache-locality loss. Pinning can reduce one source of latency jitter, but it is part of a broader resource-isolation strategy rather than a complete solution.
@@ -1523,6 +1529,12 @@ Consider these foundational questions:
 :::
 
 Every serving request decomposes into three phases that each consume part of the latency budget. Preprocessing\index{Preprocessing!latency impact} transforms raw input such as image bytes or text strings into model-ready tensors. Inference\index{Inference!pipeline phase} executes the model computation. Postprocessing\index{Postprocessing!response formatting} transforms model outputs into user-facing responses.
+
+::: {.column-margin}
+![](images/svg/model_serving_latency_budget_bar.svg){width="100%" fig-alt="Horizontal stacked bar of the request latency budget: a gray preprocessing segment on the left, an orange inference segment of about the same width in the middle, and a thin gray trailing segment on the right. Inference is one slice among equals rather than the whole budget."}
+
+*Inference is one slice of the latency budget; preprocessing rivals it.*
+:::
 
 Faster hardware does not automatically mean faster serving\index{Amdahl's Law!preprocessing bottleneck}. In practice, preprocessing and postprocessing can dominate total latency when inference runs on optimized accelerators. Optimizing exclusively the inference phase yields diminishing returns if the surrounding pipeline remains bottlenecked by CPU operations.
 
@@ -2709,6 +2721,12 @@ class ModelSwapCalc:
 For a `{python} ModelSwapCalc.model_size_gb_str` model on PCIe Gen4 x16 (`{python} ModelSwapCalc.pcie_bw_gbs_str` theoretical bandwidth), loading takes at least:
 `{python} ModelSwapCalc.swap_calc_math`
 
+::: {.column-margin}
+![](images/svg/vol1_model_serving_margin_001.svg){width="100%" fig-alt="A low flat curve that bends sharply upward past a marked knee; a dashed 50 ms threshold line sits far below where the model-load latency lands, with the region above shaded red."}
+
+*Model loading lands far outside a tight serving SLO.*
+:::
+
 To mitigate this, systems use *pinned memory*\index{Pinned Memory!DMA transfer} (page-locked host memory). By default, the operating system can move ("page") any memory region to disk when RAM is under pressure. This creates a problem for GPU transfers: if the GPU's DMA (Direct Memory Access) engine begins reading a memory region that gets paged out mid-transfer, the transfer fails or stalls. To avoid this, the CPU must first copy data to a temporary pinned buffer before the GPU can safely read it, adding both latency and CPU overhead.
 
 Pinning memory instructs the OS to keep that region permanently in physical RAM. The GPU's DMA engine can then transfer data directly from the pinned region at full PCIe bandwidth without CPU involvement. The trade-off is that pinned memory reduces the RAM available for other processes and cannot be reclaimed under memory pressure. For model serving, the performance gain (2--3$\times$ faster transfers) typically justifies pinning model weights and frequently-used input buffers, while leaving less critical memory pageable.
@@ -3446,6 +3464,12 @@ Memory management adds complexity to continuous batching. As sequences enter and
 
 PagedAttention\index{Continuous Batching!iteration-level}\index{PagedAttention!memory fragmentation solution},[^fn-pagedattention-serving] introduced in vLLM, solves this fragmentation problem by applying operating system virtual memory concepts to GPU memory [@kwon2023]. Instead of allocating one contiguous block per sequence, PagedAttention divides the KV cache into fixed-size *pages* (typically 16 tokens each). A sequence's cache consists of pointers to noncontiguous pages scattered across GPU memory. When a sequence completes, its pages return to a free list and can be reused by any new sequence, regardless of length. This approach achieves near-zero fragmentation: vLLM reports memory utilization above 95 percent compared to 50–60 percent for contiguous allocation schemes. The overhead is modest (one pointer lookup per page during attention computation), making PagedAttention the standard for production LLM serving.
 
+::: {.column-margin}
+![](images/svg/vol1_model_serving_margin_002.svg){width="100%" fig-alt="Two horizontal bars: the contiguous-allocation bar carries a wide red wasted segment; the paged-allocation bar below shows only a thin red sliver, the rest used."}
+
+*PagedAttention recovers the KV-cache waste of contiguous allocation.*
+:::
+
 [^fn-pagedattention-serving]: **PagedAttention**: The name directly references OS virtual memory paging, first implemented on the Atlas computer at Manchester (1962) to solve the same problem---programs needed more memory than physically available, and contiguous allocation wasted space. Introduced at SOSP 2023, PagedAttention applies this six-decade-old abstraction to GPU memory: before it, LLM serving systems wasted 60--80 percent of KV cache memory due to fragmentation and over-reservation. PagedAttention reduces waste to under 4 percent, enabling 2--4$\times$ higher throughput on the same hardware. \index{PagedAttention!memory efficiency}
 
 The batching and memory techniques covered here establish the foundation for LLM serving, but several advanced topics warrant additional study:
@@ -3491,6 +3515,12 @@ The variance equals the mean (a property of Poisson distributions), so batch siz
 A useful heuristic for the batching window balances waiting cost against throughput benefit. @Eq-optimal-window expresses one such rule:
 $$T_{\text{window}} \approx \min\left(L_{\text{lat,SLO}} - T_{\text{service}}, \sqrt{\frac{T_{\text{service}}}{\lambda}}\right)$$ {#eq-optimal-window}
 where $L_{\text{lat,SLO}}$ is the latency SLO, $T_{\text{service}}$ is the service time (in seconds), and $\lambda$ is the arrival rate (in requests per second), making the second term dimensionally consistent in seconds. The square-root form follows the same scaling law as classical economic batch sizing, where the optimal batch interval grows as $\sqrt{\text{fixed cost}/\text{arrival rate}}$; see [@harchol-balter2013] for the underlying queueing analysis. The expression is a tuning heuristic rather than a closed-form optimum for ML serving specifically; production systems calibrate the window empirically against observed traffic. A counterintuitive result emerges from this equation: as traffic increases, the optimal window decreases while achieved batch sizes still grow. @Tbl-traffic-adaptive demonstrates this phenomenon across four traffic levels.
+
+::: {.column-margin}
+![](images/svg/vol1_model_serving_margin_003.svg){width="100%" fig-alt="Two diverging strokes against rising QPS: a stroke for batch size climbing upward while a second stroke for the batching window falls, the gap between them shaded."}
+
+*As QPS rises, the batching window shrinks while batch size grows.*
+:::
 
 ```{python}
 #| echo: false
@@ -3775,6 +3805,12 @@ Large language models\index{LLM Serving!token generation} introduce three proper
 ### Performance metrics: TTFT and TPOT {#sec-model-serving-performance-metrics-ttft-tpot-b009}
 
 Generative models produce a stream of tokens rather than a single output tensor. This streaming nature requires dedicated *LLM performance metrics* that reflect the internal state transition from "prefill" (processing input) to "decode" (generating output). The two key measures are **Time to First Token (TTFT)**\index{Time to First Token!definition} and **Time Per Output Token (TPOT)**\index{Time Per Output Token!definition}, which capture responsiveness and fluidity respectively.
+
+::: {.column-margin}
+![](images/svg/vol1_model_serving_margin_004.svg){width="100%" fig-alt="A roofline silhouette: a blue memory-bound slope rising to a dashed ridge, then a flat orange compute-bound ceiling. A TTFT dot sits on the orange ceiling; a TPOT dot sits on the blue slope."}
+
+*TTFT and TPOT live in different bottleneck regimes.*
+:::
 
 ::: {#dfn-model-serving-llm-performance-metrics .callout-definition title="LLM performance metrics"}
 
