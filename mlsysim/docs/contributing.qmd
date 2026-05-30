@@ -29,9 +29,9 @@ is a good starting point.
 | Add hardware to the Silicon Zoo | Intermediate | High -- expands coverage | `mlsysim/hardware/` |
 | Add a model to the Model Zoo | Intermediate | Medium -- new workloads | `mlsysim/models/` |
 | Add a fleet or fabric | Intermediate | Medium -- new topologies | `mlsysim/systems/` |
-| Add a grid or rack profile | Intermediate | Medium -- new infra | `mlsysim/infra/` |
+| Add a grid or rack profile | Intermediate | Medium -- new infra | `mlsysim/infrastructure/` |
 | Write a tutorial | Intermediate | High -- improves learning | `docs/tutorials/` |
-| Add or improve a solver | Advanced | High -- new analysis capabilities | `core/solver.py` |
+| Add or improve a solver | Advanced | High -- new analysis capabilities | `engine/solver.py` |
 
 ---
 
@@ -65,47 +65,47 @@ The [Hardware Acceleration](../../slides/vol1/11_hw_acceleration/) and
 the accelerator landscape and datasheet specs that feed into MLSYSIM's hardware registry.
 :::
 
-### Step 1: Register the node in `hardware/registry.py`
+### Step 1: Add a YAML spec under `hardware/data/`
 
 Chip and board specs live in the **Silicon Zoo** — not in `core/constants.py`
-(that file is physics/units only). Define pint quantities inline in the registry entry
-(or as local `_A100_*` helpers at the top of `registry.py` if shared across variants).
+(that file is physics/units only). Add one YAML file under the right tier, for
+example `mlsysim/hardware/data/cloud/MyAccelerator.yaml`. The loader validates
+the file against `HardwareNode` at import time and exposes it through the same
+Python API (`Hardware.Cloud.MyAccelerator`).
 
-```python
-# In mlsysim/hardware/registry.py
-_A100_PEAK_FP16 = Q_(312, "TFLOP/s")   # Tensor Core, sparsity OFF — SXM4 datasheet
-
-A100 = HardwareNode(
-    name="NVIDIA A100",
-    release_year=2020,
-    compute=ComputeCore(
-        peak_flops=_A100_PEAK_FP16,
-        precision_flops={
-            "fp32": Q_(19.5, "TFLOP/s"),
-            "tf32": Q_(156, "TFLOP/s"),
-            "int8": Q_(624, "TOPS"),
-        },
-    ),
-    memory=MemoryHierarchy(
-        capacity=Q_(80, "GB"),
-        bandwidth=Q_(2039, "GB/s"),
-    ),
-    tdp=Q_(400, "W"),
-    dispatch_tax=0.015 * ureg.ms,
-    metadata={
-        "provenance": Provenance(
-            kind=ProvenanceKind.DATASHEET,
-            ref="NVIDIA A100 datasheet",
-            url="https://...",           # REQUIRED for datasheet kind
-            verified="2025-03-06",
-        ),
-    },
-)
+```yaml
+__key__: MyAccelerator
+name: Example Accelerator
+release_year: 2026
+compute:
+  peak_flops: 312 TFLOPs / s
+  precision_flops:
+    fp32: 19.5 TFLOPs / s
+    int8: 624 TOPS
+memory:
+  capacity: 80 GiB
+  bandwidth: 2039 GB / s
+interconnect:
+  name: PCIe Gen4 x16
+  bandwidth: 32 GB / s
+tdp: 400 W
+metadata:
+  provenance:
+    kind: datasheet
+    ref: Example accelerator datasheet
+    url: https://...
+    verified: "2026-05-30"
 ```
 
 Reuse shared records from `mlsysim/core/provenance_catalog.py` when several entries
 share one source. See `mlsysim/PROVENANCE.md` and run
 `python -m mlsysim.tools.audit_provenance --scope all --strict` before opening a PR.
+
+The YAML data layer is intentionally strict: duplicate YAML keys, duplicate
+`__key__` values, missing data directories, and unknown schema fields fail
+loading. If the value is a technology-class reference, use `@tech:` rather than
+copying a shared fact into many devices, for example
+`latency: "@tech:Interconnect.NVLink.latency"`.
 
 ### Step 2: Verify with registry parity tests
 
@@ -146,9 +146,11 @@ Registry operands come from zoos; derived values from `mlsysim.physics.calc_*` o
 
 ## 3. Adding Models to the Model Zoo {#sec-models}
 
-Models live in one of four families: `LanguageModels`, `VisionModels`, `TinyModels`, or
-`RecommendationModels`. Transformer-based models use `TransformerWorkload`; CNNs use
-`CNNWorkload`.
+Models live in category YAML files under `mlsysim/models/data/`: `language.yaml`,
+`vision.yaml`, `tiny.yaml`, `recommendation.yaml`, `statespace.yaml`, and
+`generativevision.yaml`. Each entry includes a `__type__` tag selecting the
+validated workload class (`TransformerWorkload`, `CNNWorkload`, `SSMWorkload`,
+`DiffusionWorkload`, `SparseTransformerWorkload`, or plain `Workload`).
 
 ::: {.callout-tip}
 ## Background reading
@@ -159,18 +161,17 @@ architectural parameters (layers, heads, hidden dimensions) that define each wor
 
 ### Transformer workloads
 
-```python
-# In mlsysim/models/registry.py
-Llama3_8B = TransformerWorkload(
-    name="Llama-3.1-8B",
-    architecture="Transformer",
-    parameters=8e9 * param,
-    layers=32,
-    hidden_dim=4096,
-    heads=32,
-    kv_heads=8,
-    inference_flops=2 * 8e9 * flop,
-)
+```yaml
+Llama3_8B:
+  __type__: TransformerWorkload
+  name: Llama-3.1-8B
+  architecture: Transformer
+  parameters: 8030000000 param
+  inference_flops: 16060000000 flop
+  layers: 32
+  hidden_dim: 4096
+  heads: 32
+  kv_heads: 8
 ```
 
 For `inference_flops`, the standard approximation is $2P$ FLOPs per token for transformer
@@ -179,14 +180,14 @@ is available from the paper, use it and note the source in a comment.
 
 ### CNN workloads
 
-```python
-ResNet50 = CNNWorkload(
-    name="ResNet-50",
-    architecture="CNN",
-    parameters=25.6e6 * param,
-    layers=50,
-    inference_flops=4.1e9 * flop,
-)
+```yaml
+ResNet50:
+  __type__: CNNWorkload
+  name: ResNet-50
+  architecture: CNN
+  parameters: 25600000 param
+  inference_flops: 4100000000 flop
+  layers: 50
 ```
 
 ---
@@ -225,27 +226,20 @@ Training_2K = Fleet(
 )
 ```
 
-### Adding a grid profile (`infra/registry.py`)
+### Adding a grid profile (`infrastructure/data/grids.yaml`)
 
 Grid profiles capture the carbon intensity, cooling efficiency (PUE), and water usage
 (WUE) of a datacenter region.
 
-```python
-Iceland = GridProfile(
-    name="Iceland (Geothermal)",
-    carbon_intensity_g_kwh=28,            # gCO2/kWh
-    pue=PUE_LIQUID_COOLED,
-    wue=WUE_LIQUID,
-    primary_source="geothermal",
-    metadata=Metadata(
-        provenance=Provenance(
-            kind=ProvenanceKind.INDUSTRY_REPORT,
-            ref="National Energy Authority grid mix report",
-            url="https://...",
-            verified="2025-06-01",
-        ),
-    ),
-)
+```yaml
+Iceland:
+  name: Iceland (Geothermal)
+  carbon_intensity_g_kwh: 28
+  pue: 1.06
+  wue: 0.0
+  primary_source: geothermal
+  metadata:
+    provenance: "@prov:IEA_WEO_2023"
 ```
 
 ::: {.callout-tip}
@@ -437,21 +431,19 @@ Understanding the module layout helps you find the right file to edit.
 mlsysim/
   core/
     constants.py    # Physics, units, and cross-cutting laws only (CI allowlist)
-    calibration.py  # Solver/engine default parameters
-    literature/     # Cited appendix scalars (Literature.*)
-    ops/              # MLOps thresholds (Ops.Monitoring.*)
-    infra/pricing.py  # Cloud, storage, labeling, fleet economics
-    solver.py       # Analytical solvers (BaseSolver subclasses)
-    engine.py       # Roofline engine (Engine.solve())
-    scenarios.py    # Scenario bundles + 3-tier evaluation
-    evaluation.py   # Feasibility / Performance / Macro scorecard
-    registry.py     # Base Registry pattern
+    loader.py       # YAML loading, duplicate-key checks, registry generation
+    provenance.py   # Sourced values and provenance helpers
+    registry/       # Base Registry pattern
+    types.py        # Shared schema types
+    units.py        # Unit registry and exported Pint units
+  engine/           # Solvers, scenario evaluation, calibration, explainers
   physics/          # Canonical calc_* implementations (roofline, all-reduce, TCO, …)
-  hardware/registry.py   # Hardware.* zoo
-  models/registry.py     # Models.* zoo
-  datasets/registry.py   # Datasets.* zoo
+  hardware/data/    # Hardware.* YAML zoo
+  models/data/      # Models.* YAML zoo
+  datasets/data/    # Datasets.* YAML zoo
   systems/registry.py    # Systems.Nodes / Fabrics / Clusters / Pods
-  infra/registry.py      # Infrastructure.* zoo
+  infrastructure/   # Infrastructure.* grids and pricing
+  scenarios/        # Book-facing Scenarios.* anchors
   platforms/registry.py  # Platforms.* zoo
   tests/            # pytest suite (includes registry migration gates)
   examples/         # Standalone scripts

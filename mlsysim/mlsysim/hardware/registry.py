@@ -42,6 +42,8 @@ TinyHardware = load_registry(
 
 class Hardware(Registry):
     """Registry namespace for Hardware."""
+    __registry_list_exclude__ = frozenset({"Tech"})
+
     Cloud = CloudHardware
     Workstation = WorkstationHardware
     Mobile = MobileHardware

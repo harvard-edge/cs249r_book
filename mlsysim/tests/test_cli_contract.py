@@ -56,6 +56,17 @@ def test_zoo_accepts_command_local_output_option():
     assert payload["hardware"]
 
 
+def test_zoo_models_accepts_polymorphic_workloads():
+    result = runner.invoke(app, ["zoo", "models", "-o", "json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert "models" in payload
+    assert any(row["name"] == "Stable Diffusion v1.5" for row in payload["models"])
+    dlrm = next(row for row in payload["models"] if row["name"] == "DLRM")
+    assert dlrm["parameters"] is None
+
+
 def test_audit_json_is_single_json_object():
     result = runner.invoke(app, ["audit", "-o", "json"])
 

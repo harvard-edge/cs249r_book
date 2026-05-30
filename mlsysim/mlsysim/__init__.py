@@ -17,7 +17,7 @@ from . import physics
 
 # AUTHORITATIVE API ENTRY POINTS
 from .engine.engine import Engine
-from .engine.scenarios import Scenario, Scenarios, Applications
+from .engine.scenarios import Scenario, Scenarios as ScenarioBundles, Applications
 from .hardware.registry import Hardware
 from .models.registry import Models
 from .platforms.registry import Platforms
@@ -25,6 +25,7 @@ from .platforms.registry import Platforms
 from .systems.registry import Systems
 from .infrastructure.registry import Infrastructure
 from .literature.registry import Literature
+# Book-facing scenario anchors: Scenarios.Workloads, Scenarios.MobilePower, etc.
 from .scenarios.registry import Scenarios
 from .ops import Ops, Monitoring
 from .engine import calibration

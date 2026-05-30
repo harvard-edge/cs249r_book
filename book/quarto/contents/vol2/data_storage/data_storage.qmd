@@ -408,10 +408,10 @@ class StorageAccessPatternFacts:
     gpt3_params_b_str = fmt(gpt3_params.m_as(param) / BILLION, precision=0, commas=False)
     tokenized_text_tb_str = fmt_int(round(tokenized_text_tb_val), commas=False, suffix=' TB')
     compressed_text_tb_str = fmt(compressed_text_tb_val, precision=0, commas=False, suffix=' TB')
-    ckpt_total_gb_str = fmt_int(round(ckpt_total.m_as(GB)), commas=False, suffix=' GB')
+    ckpt_total_gb_str = fmt_int(round(ckpt_total.m_as(GB)), suffix=' GB')
     checkpoint_interval_min_str = fmt(checkpoint_interval_min, precision=0, commas=False, suffix=' minutes')
     ckpt_node_count_str = fmt(ckpt_node_count, precision=0, commas=True, suffix=' nodes')
-    ckpt_shard_gb_str = fmt_qty(ckpt_shard, GB, precision=1, commas=False)
+    ckpt_shard_gb_str = fmt_int(round(ckpt_shard.m_as(GB)), commas=False, suffix=' GB')
     ckpt_burst_tb_str = fmt_qty(ckpt_burst, TB, precision=1, commas=False)
 ```
 The second inversion is **working set size**. Traditional applications exhibit locality: a web server repeatedly accesses popular pages, and a cache holding the top 10 percent of content serves 90 percent of requests. ML training datasets are accessed uniformly. Our `{python} StorageAccessPatternFacts.tokenized_text_tb_str` serialized corpus has no "popular" tokens; each is consumed once per epoch. A cache of any practical size holds only a tiny fraction of the dataset, and every sample is effectively "cold" when accessed. This lack of temporal locality renders traditional caching strategies ineffective. Even an LRU[^fn-lru-ml-failure] (Least Recently Used) cache, the workhorse of database systems, achieves a 0 percent hit rate on uniformly accessed data, because by the time a sample is accessed again in the next epoch, it has long been evicted to make room for other samples.
@@ -662,7 +662,7 @@ class HbmTierBandwidth:
 # │ Goal: Pin the weights/optimizer footprint to the canonical GPT-3 parameter
 # │       count and dtype byte widths so they cannot drift.
 # │ Show: FP16 weight footprint (GB) and the Adam-state derivation.
-# │ How:  weights = N x BYTES_FP16; Adam = N x BYTES_ADAM_STATE (= FP32 x 2 states).
+# │ How:  weights = N * BYTES_FP16; Adam = N * BYTES_ADAM_STATE (= FP32 * 2 states).
 # │
 # │ Imports: mlsysim (Models), mlsysim.core.constants (BYTES_FP16, BYTES_FP32,
 # │          BYTES_ADAM_STATE), mlsysim.fmt (fmt, fmt_math, check)
@@ -685,7 +685,7 @@ class HbmModelBudget:
     adam_gb = params * adam_bytes / 1e9
 
     # ┌── 3. GUARD (Invariants) ────────────────────
-    check(abs(adam_bytes - bytes_fp32 * adam_states) < 1e-9, "Adam state bytes must equal FP32 x 2 states")
+    check(abs(adam_bytes - bytes_fp32 * adam_states) < 1e-9, "Adam state bytes must equal FP32 * 2 states")
     check(adam_gb > weights_fp16_gb > 0, "Adam footprint must exceed FP16 weights, both positive")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────
@@ -1406,7 +1406,7 @@ $$T_{\text{step}} = \max(200, 250) = 250 \text{ ms}$$
 
 The data stall ratio provides a diagnostic metric that storage engineers can use to identify whether a training job is compute-bound or I/O-bound. A stall ratio below 2 percent indicates that the storage pipeline is healthy: the accelerator spends virtually all its time computing. A stall ratio between 2 percent and 10 percent suggests that the pipeline is marginally adequate but will degrade if the training configuration changes (more GPUs, smaller batches, faster model). A stall ratio above 10 percent indicates a clear storage bottleneck that wastes significant compute budget. @Sec-appdx-c3-taxonomy-traffic-light maps these same green, yellow, and red bands onto the broader fleet diagnosis, so a storage engineer can read a high stall ratio as a red-light signal that computation is sitting idle and place storage alongside the other axes that starve an accelerator. Profiling tools like PyTorch's DataLoader profiler and NVIDIA Nsight Systems can measure data stall ratio directly by comparing the time the accelerator spends waiting for data vs. computing.
 
-A storage system cannot be a "fire-and-forget" component; it requires continuous monitoring to prevent silent bottlenecks from eroding training efficiency. Key metrics to track in real time include per-tier bandwidth utilization (NVMe, network, object storage), prefetch buffer depth (how many batches are queued and ready), the data stall ratio per GPU, the parallel file system's metadata operation rate, and NVMe drive health indicators (wear level, temperature, error counts). Alert thresholds should trigger before stalls become visible in training loss curves. An undetected 5 percent increase in data stall ratio across a 1,000-GPU cluster for just one week wastes over \$16,800 in idle compute (1,000 GPUs$\times$ \$2/GPU-hour$\times$ 168 hours$\times$ 5 percent), making comprehensive storage monitoring a first-order economic concern rather than an operational nicety.
+A storage system cannot be a "fire-and-forget" component; it requires continuous monitoring to prevent silent bottlenecks from eroding training efficiency. Key metrics to track in real time include per-tier bandwidth utilization (NVMe, network, object storage), prefetch buffer depth (how many batches are queued and ready), the data stall ratio per GPU, the parallel file system's metadata operation rate, and NVMe drive health indicators (wear level, temperature, error counts). Alert thresholds should trigger before stalls become visible in training loss curves. An undetected 5 percent increase in data stall ratio across a 1,000-GPU cluster for just one week wastes over \$16,800 in idle compute (1,000 GPUs $\times$ \$2/GPU-hour $\times$ 168 hours $\times$ 5 percent), making comprehensive storage monitoring a first-order economic concern rather than an operational nicety.
 
 This high-level monitoring must be complemented by fine-grained profiling to pinpoint the exact source of a bottleneck. Profiling occurs at three levels. At the application level, NVIDIA Nsight Systems provides a timeline view that shows exactly when and for how long the accelerator is idle waiting for data, with microsecond precision. At the pipeline level, PyTorch's built-in `DataLoader` profiler reports per-worker throughput, batch processing times, and data queue depth, identifying slow workers or insufficient prefetching. At the device level, `iostat` and `nvme-cli` provide raw hardware bandwidth and latency metrics. For parallel file systems, Lustre's `lctl get_param` and GPFS's `mmpmon` give real-time statistics on storage server utilization, metadata operation rates, and client-side cache hit ratios. The most effective debugging approach combines all three levels: correlating an application-level accelerator stall with a specific pipeline worker and a saturated underlying storage device identifies the bottleneck tier and guides optimization effort to where it will have the greatest impact.
 
@@ -1984,15 +1984,15 @@ The cost iceberg reveals that raw storage capacity accounts for less than half o
 
 **Option A: Stream from S3**
 
-- Storage: 50 TB$\times$ \$0.023/GB/month$\times$ 12 months = \$13,800/year
-- Egress: 50 TB$\times$ 20 epochs$\times$ \$0.09/GB = \$90,000 per training run
+- Storage: 50 TB $\times$ \$0.023/GB/month $\times$ 12 months = \$13,800/year
+- Egress: 50 TB $\times$ 20 epochs $\times$ \$0.09/GB = \$90,000 per training run
 - Total for 4 training runs/year: \$13,800 + \$360,000 = **\$373,800/year**
 
 **Option B: Stage to local NVMe**
 
 - Storage (S3 source of truth): \$13,800/year
-- NVMe capacity (50 TB across cluster): 50 TB$\times$ \$0.10/GB/month$\times$ 12 = \$60,000/year
-- Egress (stage once per training run): 50 TB$\times$ 4 runs$\times$ \$0.09/GB = \$18,000/year
+- NVMe capacity (50 TB across cluster): 50 TB $\times$ \$0.10/GB/month $\times$ 12 = \$60,000/year
+- Egress (stage once per training run): 50 TB $\times$ 4 runs $\times$ \$0.09/GB = \$18,000/year
 - Total: \$13,800 + \$60,000 + \$18,000 = **\$91,800/year**
 
 **Systems insight**: Local NVMe caching saves \$282,000/year at 20 epochs per run, enough to fund 3 additional H100 GPUs. Including the \$60,000/year provisioned NVMe cost and the once-per-run staging egress, the break-even point is just over 4 epochs per run; by the fifth epoch, local caching is cheaper than streaming from S3 every epoch.
@@ -2314,7 +2314,7 @@ class CheckpointTotalGbRecap:
 **Problem**: A `{python} CheckpointStormCalc.nodes_str`-node cluster saves a 175B-parameter checkpoint every `{python} CheckpointStormCalc.checkpoint_interval_min_str`. Each checkpoint totals `{python} CheckpointTotalGbRecap.ckpt_total_gb_str`. With ZeRO-3, each node saves roughly `{python} CheckpointStormCalc.per_node_shard_gb_str`.
 
 1. **Per-node write to local NVMe** (`{python} CheckpointStormCalc.local_drive_count_str` drives at `{python} CheckpointStormCalc.local_drive_bw_gbs_str` each = `{python} CheckpointStormCalc.local_bw_gbs_str`): `{python} CheckpointStormCalc.per_node_shard_gb_str` $\div$ `{python} CheckpointStormCalc.local_bw_gbs_str` $\approx$ `{python} CheckpointStormCalc.local_write_s_str`.
-2. **Async copy to PFS**\index{Checkpointing!async PFS copy}: `{python} CheckpointStormCalc.nodes_str`$\times$ `{python} CheckpointStormCalc.per_node_shard_gb_str` $\approx$ `{python} CheckpointStormCalc.total_pfs_tb_str` total. If the PFS provides `{python} CheckpointStormCalc.pfs_aggregate_bw_tbs_str` aggregate, the storm completes in roughly `{python} CheckpointStormCalc.pfs_copy_s_str`.
+2. **Async copy to PFS**\index{Checkpointing!async PFS copy}: `{python} CheckpointStormCalc.nodes_str` $\times$ `{python} CheckpointStormCalc.per_node_shard_gb_str` $\approx$ `{python} CheckpointStormCalc.total_pfs_tb_str` total. If the PFS provides `{python} CheckpointStormCalc.pfs_aggregate_bw_tbs_str` aggregate, the storm completes in roughly `{python} CheckpointStormCalc.pfs_copy_s_str`.
 3. **Per-node PFS bandwidth**\index{Bandwidth!per-node pfs}: If all `{python} CheckpointStormCalc.nodes_str` write simultaneously, each gets `{python} CheckpointStormCalc.pfs_aggregate_bw_gbs_str` $\div$ `{python} CheckpointStormCalc.nodes_str` = `{python} CheckpointStormCalc.per_node_pfs_bw_gbs_str`.
 4. **Training pause**\index{Checkpointing!training pause}: only about `{python} CheckpointStormCalc.local_write_s_str` (the local NVMe write). The PFS copy overlaps with the next training iteration.
 5. **Overhead**\index{Checkpointing!overhead}: `{python} CheckpointStormCalc.local_write_s_str` s pause every `{python} CheckpointStormCalc.checkpoint_interval_s_str` s $\approx$ `{python} CheckpointStormCalc.overhead_pct_str` training time lost to checkpointing.
@@ -2537,7 +2537,7 @@ class StorageFootprintTable:
 
 : **175B-Parameter Training Storage Footprint**: Volume and primary storage tier for each data category in a 30-day, 256-node training run. {#tbl-data-storage-175b-footprint}
 
-**Total data moved through the hierarchy**\index{Storage!total data movement}: approximately `{python} StorageFootprintTable.ckpt_fleet_total_pb_str` PB of checkpoint data plus `{python} StorageFootprintTable.tokenized_text_tb_str`$\times$ `{python} StorageFootprintTable.epochs_str` epochs of training data reads. For a single-epoch language model training run, checkpoint I/O dominates data loading I/O by a factor of over `{python} StorageFootprintTable.ckpt_io_dominance_factor_str`.
+**Total data moved through the hierarchy**\index{Storage!total data movement}: approximately `{python} StorageFootprintTable.ckpt_fleet_total_pb_str` PB of checkpoint data plus `{python} StorageFootprintTable.tokenized_text_tb_str` $\times$ `{python} StorageFootprintTable.epochs_str` epochs of training data reads. For a single-epoch language model training run, checkpoint I/O dominates data loading I/O by a factor of over `{python} StorageFootprintTable.ckpt_io_dominance_factor_str`.
 
 :::
 

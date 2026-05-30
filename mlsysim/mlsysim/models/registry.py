@@ -47,3 +47,6 @@ class Models(Registry):
     Recommendation = RecommendationModels
     StateSpace = StateSpaceModels
     GenerativeVision = GenerativeVisionModels
+
+    # Backward-compatible short aliases retained for older book/tests/user code.
+    GPT3 = LanguageModels.GPT3
