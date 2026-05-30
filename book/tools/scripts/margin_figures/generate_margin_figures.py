@@ -446,23 +446,38 @@ def _short_label(text: str, max_len: int = 18) -> str:
     return out or text[: max_len - 1]
 
 
+# Unit -> scale toward a per-dimension base (one ladder shares a dimension, so
+# relative ORDERING stays honest). Case-sensitive power (mW != MW) is handled first.
+_POWER_SCALE = {"uW": 1e-3, "\u00b5W": 1e-3, "mW": 1.0, "W": 1e3, "kW": 1e6, "MW": 1e9, "GW": 1e12}
+_UNIT_SCALE = {
+    "kb/s": 1e-3, "mb/s": 1.0, "gb/s": 1e3, "tb/s": 1e6,                  # bandwidth (base MB/s)
+    "ns": 1e-6, "us": 1e-3, "\u00b5s": 1e-3, "ms": 1.0, "s": 1e3, "sec": 1e3,  # time (base ms)
+    "min": 6e4, "h": 3.6e6, "hr": 3.6e6, "hour": 3.6e6, "day": 8.64e7, "week": 6.048e8,
+    "fj": 1e-3, "pj": 1.0, "nj": 1e3, "uj": 1e6, "\u00b5j": 1e6, "mj": 1e9, "j": 1e12,  # energy (base pJ)
+    "kb": 1e3, "mb": 1e6, "gb": 1e9, "tb": 1e12, "pb": 1e15,             # capacity (base B)
+}
+
+
 def _parse_number(text: str, fallback: float) -> float:
+    """Magnitude a label encodes, normalized by its UNIT so bar length reads honestly.
+    Unit-aware (ms vs s, MB/s vs GB/s, pJ vs nJ): e.g. 'P99 2s' -> 2000 ms correctly
+    outranks 'mean 50ms' -> 50. A bare k/M/B/T suffix still scales raw counts. PREFER an
+    explicit SSOT value over parsing a label; this is the heuristic fallback."""
     s = str(text).replace(",", "")
-    match = re.search(r"([-+]?\d*\.?\d+)\s*([kKmMbBtT]?)", s)
+    match = re.search(r"([-+]?\d*\.?\d+)\s*([A-Za-z\u00b5/]*)", s)
     if not match:
         return fallback
     value = float(match.group(1))
-    suffix = match.group(2).lower()
-    if suffix == "k":
-        value *= 1_000
-    elif suffix == "m":
-        value *= 1_000_000
-    elif suffix == "b":
-        value *= 1_000_000_000
-    elif suffix == "t":
-        value *= 1_000_000_000_000
     if value <= 0:
         return fallback
+    unit = match.group(2)
+    if unit in _POWER_SCALE:                       # case-sensitive: mW vs MW
+        return value * _POWER_SCALE[unit]
+    u = unit.lower()
+    if u in _UNIT_SCALE:
+        return value * _UNIT_SCALE[u]
+    if len(u) == 1:                                # bare count multiplier (175B, 2k, 3M)
+        return value * {"k": 1e3, "m": 1e6, "b": 1e9, "t": 1e12}.get(u, 1.0)
     return value
 
 
@@ -641,7 +656,8 @@ def _generic_ironbar(candidate):
     total = sum(parsed)
     segs = []
     for label, value in zip(labels, parsed):
-        segs.append((_short_label(label, 5), max(value / total, 0.04), _color_for_label(label)))
+        # keep labels whole: a 5-char cap chopped "serial"->"seri", "overlap"->"over"
+        segs.append((_short_label(label, 16), max(value / total, 0.04), _color_for_label(label)))
     dom = max(range(len(segs)), key=lambda i: segs[i][1])
     make_ironbar(candidate["chapter"], curated_asset_name(candidate["id"]), segs, dom=dom)
 
