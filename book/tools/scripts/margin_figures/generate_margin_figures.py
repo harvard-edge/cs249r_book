@@ -13,6 +13,7 @@ Usage:
 from __future__ import annotations
 
 import math
+import re
 import sys
 from pathlib import Path
 
@@ -24,6 +25,8 @@ import matplotlib  # noqa: E402
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+import yaml  # noqa: E402
 from matplotlib.patches import Rectangle  # noqa: E402
 
 from margin_devices import (  # noqa: E402
@@ -36,6 +39,7 @@ from margin_devices import (  # noqa: E402
     NET,
     RED,
     REDFILL,
+    TIME,
     blast,
     dam,
     ironbar,
@@ -49,6 +53,9 @@ from margin_devices import (  # noqa: E402
 )
 
 CONTENTS = ROOT / "book/quarto/contents"
+AUDIT_DIR = ROOT / "book/tools/audit"
+OPPORTUNITIES = AUDIT_DIR / "margin_figure_opportunities.yml"
+DECISIONS = AUDIT_DIR / "margin_figure_decisions.yml"
 
 
 def target(chapter: str, name: str) -> str:
@@ -58,6 +65,10 @@ def target(chapter: str, name: str) -> str:
 
 def write(fig, chapter: str, name: str) -> None:
     save(fig, target(chapter, name))
+
+
+def curated_asset_name(candidate_id: str) -> str:
+    return candidate_id.replace("-", "_")
 
 
 def rect(ax, x, y, w, h, color, ec="white", lw=0.5, alpha=1.0):
@@ -285,6 +296,341 @@ def precision_dotcells():
     write(fig, "vol2/compute_infrastructure", "compute_infrastructure_precision_dotcells")
 
 
+def _short_label(text: str, max_len: int = 18) -> str:
+    text = str(text)
+    replacements = {
+        "approximately": "~",
+        "about ": "~",
+        "communication": "comm",
+        "Communication": "Comm",
+        "computation": "comp",
+        "Computation": "Comp",
+        "infrastructure": "infra",
+        "Infrastructure": "Infra",
+        "orchestration": "orch",
+        "Orchestration": "Orch",
+        "optimization": "opt",
+        "Optimization": "Opt",
+        "throughput": "tput",
+        "Throughput": "Tput",
+        "sensitivity": "sens",
+        "Sensitivity": "Sens",
+        "acceptance": "accept",
+        "Acceptance": "Accept",
+        "training": "train",
+        "Training": "Train",
+        "inference": "infer",
+        "Inference": "Infer",
+        "gradient": "grad",
+        "Gradient": "Grad",
+        "optimizer": "opt",
+        "Optimizer": "Opt",
+        "bandwidth": "BW",
+        "Bandwidth": "BW",
+        "latency": "lat",
+        "Latency": "Lat",
+        "memory": "mem",
+        "Memory": "Mem",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) <= max_len:
+        return text
+    parts = text.split()
+    out = ""
+    for part in parts:
+        trial = (out + " " + part).strip()
+        if len(trial) > max_len:
+            break
+        out = trial
+    return out or text[: max_len - 1]
+
+
+def _parse_number(text: str, fallback: float) -> float:
+    s = str(text).replace(",", "")
+    match = re.search(r"([-+]?\d*\.?\d+)\s*([kKmMbBtT]?)", s)
+    if not match:
+        return fallback
+    value = float(match.group(1))
+    suffix = match.group(2).lower()
+    if suffix == "k":
+        value *= 1_000
+    elif suffix == "m":
+        value *= 1_000_000
+    elif suffix == "b":
+        value *= 1_000_000_000
+    elif suffix == "t":
+        value *= 1_000_000_000_000
+    if value <= 0:
+        return fallback
+    return value
+
+
+def _domain(text: str) -> str:
+    low = text.lower()
+    if any(tok in low for tok in ("gb/s", "tb/s", "bandwidth", "link", "nvlink", "pcie", "infiniband", "network", "10g")):
+        return "bandwidth"
+    if any(tok in low for tok in ("pj", "watt", " watts", "kw", "mw", "power", "energy", "carbon", "co2", "emission", "flop", "mac", "transistor")):
+        return "energy"
+    if any(tok in low for tok in ("ms", "us", "ns", "second", "minute", "hour", "day", "week", "latency", "p99", "ttft", "tpot", "freshness")):
+        return "time"
+    if any(tok in low for tok in ("gb", "mb", "kb", "hbm", "dram", "sram", "ram", "cache", "weights", "state", "model", "token", "epc", "storage")):
+        return "memory"
+    return "memory"
+
+
+def _color_for_label(label: str):
+    domain = _domain(label)
+    if domain == "bandwidth":
+        return NET
+    if domain == "energy":
+        return COMP
+    if domain == "time":
+        return TIME
+    if any(tok in label.lower() for tok in ("compute", "comp", "infer", "train", "model", "algorithm", "active")):
+        return COMP
+    if any(tok in label.lower() for tok in ("data", "raw", "clean", "stream")):
+        return DATA
+    return MEM
+
+
+def _load_curated_candidates():
+    opportunities = yaml.safe_load(OPPORTUNITIES.read_text(encoding="utf-8"))["recommendations"]
+    decisions = yaml.safe_load(DECISIONS.read_text(encoding="utf-8"))["decisions"]
+    opp_by_id = {row["id"]: row for row in opportunities}
+    for decision in decisions:
+        if decision["decision"] not in {"must_add", "should_add", "revise_then_add"}:
+            continue
+        opp = opp_by_id[decision["id"]]
+        yield {**opp, **decision, "opportunity": opp}
+
+
+def _labels(candidate):
+    labels = list(candidate.get("opportunity", {}).get("labels") or [])
+    if labels:
+        return labels
+    purpose = candidate.get("purpose", "")
+    chunks = re.split(r":|;|,| and | versus | vs\.? ", purpose)
+    return [chunk.strip() for chunk in chunks if chunk.strip()][:4] or [candidate["id"]]
+
+
+def _generic_ladder(candidate):
+    labels = _labels(candidate)[:6]
+    values = []
+    for i, label in enumerate(labels):
+        values.append((_short_label(label), _parse_number(label, 10 ** (len(labels) - i - 1))))
+    if len(values) == 1:
+        values.append(("baseline", max(values[0][1] / 10, 1)))
+    domain = _domain(" ".join(labels + [candidate.get("purpose", "")]))
+    make_ladder(candidate["chapter"], curated_asset_name(candidate["id"]), values, domain=domain, wall=False)
+
+
+def _generic_knee(candidate):
+    labels = _labels(candidate)
+    text = " ".join(labels + [candidate.get("purpose", "")])
+    pct = re.search(r"(\d{1,3})\s*%", text)
+    if pct:
+        value = max(0.15, min(float(pct.group(1)) / 100.0, 0.9))
+        make_knee(candidate["chapter"], curated_asset_name(candidate["id"]), knee_frac=value, style="dashed", pct_label=f"{pct.group(1)}%")
+        return
+    if any(tok in text.lower() for tok in ("safe", "danger", "throttle", "wall", "cliff", "limit")):
+        make_knee(candidate["chapter"], curated_asset_name(candidate["id"]), knee_frac=0.70, style="twotone")
+    else:
+        make_knee(candidate["chapter"], curated_asset_name(candidate["id"]), knee_frac=0.70)
+
+
+def _generic_sparkline(candidate):
+    text = (candidate.get("purpose", "") + " " + " ".join(_labels(candidate))).lower()
+    falling = any(tok in text for tok in ("decay", "drop", "drops", "fall", "falls", "degrad", "collapse", "lower"))
+    saturating = any(tok in text for tok in ("saturat", "plateau", "diminishing"))
+    positive = any(tok in text for tok in ("feedback", "throughput", "iteration", "payback", "accuracy rises", "capacity", "streaming"))
+    if "rises while" in text or "paired with" in text or "gain" in text and ("decay" in text or "falls" in text):
+        make_sparkline(candidate["chapter"], curated_asset_name(candidate["id"]), style="enddots", threat=True, endpoints=[(0.18, 0.82), (0.72, 0.30)])
+    elif falling:
+        make_sparkline(candidate["chapter"], curated_asset_name(candidate["id"]), style="enddots", threat=True, endpoints=[(0.84, 0.32), (0.28, 0.28)])
+    elif saturating:
+        make_sparkline(candidate["chapter"], curated_asset_name(candidate["id"]), style="inflection", threat=False, saturating=True)
+    else:
+        make_sparkline(candidate["chapter"], curated_asset_name(candidate["id"]), threat=not positive, steep=2.0)
+
+
+def _generic_roofline(candidate):
+    text = " ".join(_labels(candidate) + [candidate.get("purpose", "")]).lower()
+    dot = 2.0 if any(tok in text for tok in ("batch=1", "decode", "tpot", "memory-bound", "mnist")) else 16.0
+    ridge = 80.0 if any(tok in text for tok in ("h100", "bert", "batch", "b=256")) else 60.0
+    make_roofline(candidate["chapter"], curated_asset_name(candidate["id"]), ridge=ridge, dot_ai=dot)
+
+
+def _generic_ironbar(candidate):
+    labels = _labels(candidate)[:4]
+    parsed = [_parse_number(label, 0.0) for label in labels]
+    if sum(parsed) <= 0:
+        parsed = [1.0 for _ in labels]
+    total = sum(parsed)
+    segs = []
+    for label, value in zip(labels, parsed):
+        segs.append((_short_label(label, 5), max(value / total, 0.04), _color_for_label(label)))
+    dom = max(range(len(segs)), key=lambda i: segs[i][1])
+    make_ironbar(candidate["chapter"], curated_asset_name(candidate["id"]), segs, dom=dom)
+
+
+def _generic_dam(candidate):
+    text = " ".join(_labels(candidate) + [candidate.get("purpose", "")]).lower()
+    focus = "all"
+    if "data" in text:
+        focus = 0
+    elif "algorithm" in text or "model" in text:
+        focus = 1
+    elif "machine" in text or "infra" in text:
+        focus = 2
+    vol = "vol2" if candidate["chapter"].startswith("vol2/") else "vol1"
+    make_dam(candidate["chapter"], curated_asset_name(candidate["id"]), focus=focus, vol=vol)
+
+
+def _generic_taxonomy(candidate):
+    labels = [_short_label(label, 13) for label in _labels(candidate)[:5]]
+    colors = [DATA, COMP, NET, RED, GRID]
+    list_dots(candidate["chapter"], curated_asset_name(candidate["id"]), list(zip(labels, colors)))
+
+
+def _generic_blast(candidate):
+    text = (candidate.get("purpose", "") + " " + candidate.get("idea", "")).lower()
+    style = "tree" if any(tok in text for tok in ("cascade", "chain", "barrier", "dependency", "pipeline")) else "fan"
+    make_blast(candidate["chapter"], curated_asset_name(candidate["id"]), n=5, style=style)
+
+
+def _nested_ml_system(candidate):
+    fig, ax = margin_axes("other-new", figsize=(1.20, 0.92))
+    rect(ax, 0.08, 0.14, 0.84, 0.66, "#E8ECEF", ec=GRID, lw=0.8)
+    rect(ax, 0.39, 0.39, 0.22, 0.16, COMP, ec="white", lw=0.8)
+    ax.text(0.50, 0.47, "ML\ncode", ha="center", va="center", color="white", fontsize=5.1, fontweight="bold")
+    ax.text(0.50, 0.72, "support 95%", ha="center", va="center", color=INK, fontsize=5.2)
+    write(fig, candidate["chapter"], curated_asset_name(candidate["id"]))
+
+
+def _all_to_all(candidate):
+    fig, ax = margin_axes("other-new", figsize=(1.15, 0.98))
+    pts = [(0.25, 0.72), (0.75, 0.72), (0.25, 0.28), (0.75, 0.28)]
+    for i, (x0, y0) in enumerate(pts):
+        for j, (x1, y1) in enumerate(pts):
+            if i < j:
+                ax.plot([x0, x1], [y0, y1], color=NET, lw=0.7, alpha=0.55)
+    for i, (x, y) in enumerate(pts, 1):
+        ax.plot(x, y, "s", color=MEM, ms=10)
+        ax.text(x, y, str(i), ha="center", va="center", color="white", fontsize=5.0, fontweight="bold")
+    ax.text(0.50, 0.08, "all-to-all", ha="center", va="center", color=INK, fontsize=5.4)
+    write(fig, candidate["chapter"], curated_asset_name(candidate["id"]))
+
+
+def _pareto(candidate):
+    fig, ax = margin_axes("other-new", figsize=(1.15, 0.92))
+    x = np.array([0.12, 0.33, 0.55, 0.82])
+    y = np.array([0.22, 0.46, 0.65, 0.76])
+    ax.plot(x, y, color=DATA, lw=1.4)
+    ax.scatter(x, y, s=12, color=DATA)
+    ax.scatter([0.50], [0.33], s=20, color=RED)
+    ax.text(0.50, 0.22, "dominated", ha="center", va="center", color=RED, fontsize=4.7)
+    ax.plot([0.10, 0.10, 0.90], [0.15, 0.82, 0.15], color=GRID, lw=0.8)
+    write(fig, candidate["chapter"], curated_asset_name(candidate["id"]))
+
+
+def _error_feedback(candidate):
+    fig, ax = margin_axes("other-new", figsize=(1.15, 0.95))
+    nodes = [("g+e", 0.22, 0.64), ("compress", 0.70, 0.64), ("e next", 0.46, 0.25)]
+    for label, x, y in nodes:
+        rect(ax, x - 0.16, y - 0.08, 0.32, 0.16, "#EEEEEE", ec=GRID, lw=0.8)
+        ax.text(x, y, label, ha="center", va="center", color=INK, fontsize=4.8, fontweight="bold")
+    arrows = [((0.38, 0.64), (0.54, 0.64)), ((0.70, 0.55), (0.53, 0.33)), ((0.38, 0.30), (0.22, 0.55))]
+    for start, end in arrows:
+        ax.annotate("", xy=end, xytext=start, arrowprops=dict(arrowstyle="->", color=NET, lw=1.0))
+    write(fig, candidate["chapter"], curated_asset_name(candidate["id"]))
+
+
+def _epsilon_budget(candidate):
+    fig, ax = margin_axes("other-new", figsize=(1.20, 0.52))
+    x, y, w, h = 0.08, 0.42, 0.84, 0.18
+    for i in range(10):
+        rect(ax, x + i * w / 10, y, w / 10 - 0.004, h, RED if i < 7 else "#E5E5E5", ec="white", lw=0.2)
+    ax.text(0.08, 0.23, "epsilon budget", ha="left", va="center", color=INK, fontsize=5.1)
+    ax.text(0.92, 0.23, "spent", ha="right", va="center", color=RED, fontsize=5.1)
+    write(fig, candidate["chapter"], curated_asset_name(candidate["id"]))
+
+
+def _causal_chain(candidate):
+    fig, ax = margin_axes("other-new", figsize=(1.20, 0.55))
+    labels = ["arch", "INT8", "P99", "drift"]
+    xs = np.linspace(0.13, 0.87, len(labels))
+    for i, (x, label) in enumerate(zip(xs, labels)):
+        ax.plot(x, 0.55, "o", color=COMP if i < 2 else RED, ms=8)
+        ax.text(x, 0.30, label, ha="center", va="center", color=INK, fontsize=4.9)
+        if i < len(labels) - 1:
+            ax.annotate("", xy=(xs[i + 1] - 0.06, 0.55), xytext=(x + 0.06, 0.55),
+                        arrowprops=dict(arrowstyle="->", color=GRID, lw=0.8))
+    write(fig, candidate["chapter"], curated_asset_name(candidate["id"]))
+
+
+def _codesign(candidate):
+    fig, ax = margin_axes("other-new", figsize=(1.18, 0.62))
+    rect(ax, 0.14, 0.58, 0.72, 0.12, NET, ec="white")
+    rect(ax, 0.14, 0.30, 0.72, 0.12, MEM, ec="white")
+    ax.text(0.50, 0.64, "comm cap", ha="center", va="center", color="white", fontsize=5.0)
+    ax.text(0.50, 0.36, "storage BW", ha="center", va="center", color="white", fontsize=5.0)
+    ax.text(0.50, 0.12, "matched rates", ha="center", va="center", color=DATA, fontsize=5.0, fontweight="bold")
+    write(fig, candidate["chapter"], curated_asset_name(candidate["id"]))
+
+
+def _other_new(candidate):
+    cid = candidate["id"]
+    if cid == "vol1-introduction-margin-001":
+        _nested_ml_system(candidate)
+    elif cid == "vol1-nn-architectures-margin-003":
+        _all_to_all(candidate)
+    elif cid == "vol1-benchmarking-margin-004":
+        _pareto(candidate)
+    elif cid == "vol2-collective-communication-margin-004":
+        _error_feedback(candidate)
+    elif cid == "vol2-security-privacy-margin-003":
+        _epsilon_budget(candidate)
+    elif cid == "vol1-conclusion-margin-001":
+        _causal_chain(candidate)
+    elif cid == "vol2-conclusion-margin-002":
+        _codesign(candidate)
+    else:
+        _generic_taxonomy(candidate)
+
+
+def generate_curated_margin_figures() -> None:
+    """Generate one SVG for every curated margin opportunity.
+
+    These are intentionally simple first-pass visuals driven by the pedagogical
+    decision file. Each image can be refined later without touching the QMD
+    placement because the asset name is stable.
+    """
+    for candidate in _load_curated_candidates():
+        device = candidate.get("device") or candidate.get("opportunity", {}).get("device")
+        if device == "new-matplotlib":
+            device = "other-new"
+        if device == "hierarchy-ladder":
+            _generic_ladder(candidate)
+        elif device == "scale-anchor":
+            _generic_knee(candidate)
+        elif device == "sparkline-trend":
+            _generic_sparkline(candidate)
+        elif device == "thumbnail-roofline":
+            _generic_roofline(candidate)
+        elif device == "iron-law-bar":
+            _generic_ironbar(candidate)
+        elif device == "dam-locator":
+            _generic_dam(candidate)
+        elif device == "taxonomy-mini":
+            _generic_taxonomy(candidate)
+        elif device == "blast-radius":
+            _generic_blast(candidate)
+        else:
+            _other_new(candidate)
+
+
 def coordination_tax():
     fig, ax = margin_axes("iron-law-bar", figsize=(1.25, 0.34))
     x, y, w, h = 0.05, 0.38, 0.90, 0.26
@@ -421,6 +767,7 @@ def generate() -> None:
     energy_per_byte()
     make_sparkline("vol2/sustainable_ai", "sustainable_ai_inference_crossover", threat=True, steep=1.9)
     make_knee("vol2/sustainable_ai", "sustainable_ai_thermal_throttle_knee", knee_frac=0.70, style="twotone")
+    generate_curated_margin_figures()
 
 
 if __name__ == "__main__":

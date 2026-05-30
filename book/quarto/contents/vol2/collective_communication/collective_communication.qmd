@@ -686,6 +686,12 @@ While AllReduce scales efficiently because it can be pipelined in a ring (where 
 
 In an AllToAll, every process has a unique piece of data for every other process. This creates $\mathcal{O}(N^2)$ logical connections. At the hardware level, this leads to **network contention**\index{Network Contention}: if 1024 GPUs all try to send data to different targets simultaneously, the "Fat-Tree" or "Spine" switches in the data center become the bottleneck.
 
+::: {.column-margin}
+![](images/svg/vol2_collective_communication_margin_001.svg){width="100%" fig-alt="Margin illustration showing AllToAll quadratic connection growth versus AllReduce curve."}
+
+*Shows AllToAll scaling pressure compared with AllReduce.*
+:::
+
 This is why Expert Parallelism (MoE) and large-scale recommendation systems\index{Recommendation Systems} often hit a "communication wall" much earlier than standard data-parallel models. The algorithm choice (AllReduce vs. AllToAll) determines the scaling ceiling.
 
 :::
@@ -795,6 +801,12 @@ The FSDP/ZeRO strategy deserves special attention because its communication patt
 Because each GPU now holds only $1/N$ of the parameters, it must reconstruct the full tensor before it can use a layer, and that reconstruction is what transforms the communication pattern. Before each layer's forward pass, the GPU calls AllGather to collect the shards from all other GPUs. After the backward pass, the gradients are reduced and redistributed via ReduceScatter, so each GPU holds gradients only for its own parameter shard. The sharded parameters can then be discarded (freed from memory) until the next forward pass needs them.
 
 The consequence is a trade-off between memory and communication frequency. Standard data parallelism communicates once per training step (a single AllReduce of the full gradient). FSDP communicates twice per layer per step (AllGather in forward, ReduceScatter in backward), but each communication is smaller (only that layer's parameters, sharded across ranks). For a model with $N_L$ layers, FSDP issues $2N_L$ collective operations per step instead of 1; across all those operations, the total communication volume can be comparable to the single full-gradient AllReduce, but it is spread across many smaller operations.
+
+::: {.column-margin}
+![](images/svg/vol2_collective_communication_margin_002.svg){width="100%" fig-alt="Margin illustration showing FSDP per-layer loop: AllGather, layer compute, ReduceScatter."}
+
+*Shows the FSDP per-layer loop: gather, compute, reduce-scatter.*
+:::
 
 The higher operation count makes FSDP more sensitive to latency ($\alpha$) than standard data parallelism. If each of the $2N_L$ collectives pays the full NCCL startup overhead (25--50 $\mu\text{s}$ per operation from @tbl-nccl-vs-theory), the aggregate overhead for a 100-layer model is 5--10 ms, which can represent a meaningful fraction of step time. FSDP implementations mitigate this through prefetching\index{Prefetching} (launching the next layer's AllGather while the current layer is computing) and **communication stream pipelining** (using dedicated CUDA streams for communication that overlap with compute streams).
 
@@ -1418,6 +1430,12 @@ These three phases confine most traffic within each node before crossing the slo
 
 The hierarchical approach generalizes beyond two levels. Large clusters with multiple racks connected through spine switches introduce a third bandwidth tier (rack-to-rack at reduced bisection bandwidth). At 128 GPUs arranged as 4 racks of 4 nodes of 8 GPUs with 2:1 cross-rack oversubscription, applying the same decomposition at each tier shrinks the cross-rack payload per GPU by 32$\times$ compared to the original gradient—roughly 15 ms total versus 160 ms for flat AllReduce. The hierarchical decomposition concentrates traffic where bandwidth is abundant and minimizes traffic where bandwidth is scarce.
 
+::: {.column-margin}
+![](images/svg/vol2_collective_communication_margin_003.svg){width="100%" fig-alt="Margin illustration showing Payload shrink across hierarchy levels."}
+
+*Shows hierarchical collectives shrinking payload before traffic crosses slower tiers.*
+:::
+
 ### In-network reduction: SHARP and beyond {#sec-communication-sharp}
 
 ::: {#fig-sharp-innetwork fig-env="figure" fig-pos="htb" fig-cap="**In-Network Reduction (SHARP)**: Side-by-side comparison split by a vertical divider. The left side shows a traditional tree AllReduce performing reduction at intermediate GPUs, incurring multiple store-and-forward delays. The right side shows SHARP offloading the reduction to the network switch ASIC, allowing partial sums to be aggregated at line rate as packets traverse the switch. This eliminates GPU memory traffic and store-and-forward latency, significantly accelerating small-to-medium message collectives." fig-alt="Left/right side-by-side comparison split by a vertical divider. Left side: Software Tree AllReduce with data flowing through GPUs. Right side: In-Network SHARP with data aggregated inside the switch."}
@@ -1552,6 +1570,12 @@ The problem is not merely practical; it is a fundamental mathematical obstacle. 
 ### Error feedback: The memory of the journey {#sec-communication-collective-operations-error-feedback}
 
 We solve the conflict between compression and convergence with **Error Feedback**. The system applies the compressor immediately to recover bandwidth, then stores the discarded residual in a local accumulator and re-injects it into the next gradient. *The error is deferred, not destroyed.* We maintain a local error accumulator $e_t$ that stores the compression residual.
+
+::: {.column-margin}
+![](images/svg/vol2_collective_communication_margin_004.svg){width="100%" fig-alt="Margin illustration showing Error-feedback loop with residual carried into next step."}
+
+*Shows error feedback as residual memory carried into the next compressed gradient step.*
+:::
 
 ::: {#dfn-collective-communication-error-feedback-mechanism .callout-definition title="Error feedback mechanism"}
 

@@ -238,6 +238,12 @@ These four challenges connect directly to the **consistency, availability, parti
 
 At scale, failure is normal operation, not exceptional. This principle, established in the reliability analysis of @sec-fault-tolerance-reliability, has direct consequences for scheduling: the scheduler must not merely tolerate failure but actively plan for it in every allocation decision. Component reliability does not change with cluster size, but aggregate system reliability degrades multiplicatively. With 99.9 percent annual GPU reliability (typical for data center hardware), a 4,096-GPU cluster experiences:
 
+::: {.column-margin}
+![](images/svg/vol2_fleet_orchestration_margin_001.svg){width="100%" fig-alt="Margin illustration showing Fleet failure rate rises from single GPU to 10,000 GPUs."}
+
+*Shows fleet failures emerging from normal component failure rates.*
+:::
+
 $$ \text{Expected failures per day} = 4096 \times \frac{0.001}{365} \approx 0.01 \text{ GPU failures/day} $$
 
 This calculation captures only GPU hardware failures. More realistically, including software failures (driver crashes, CUDA context corruption), thermal events (throttling, emergency shutdowns), network interface failures, host OS issues, and container runtime errors, production clusters see 1 to 4 failures per day per 1,000 GPUs. A `{python} ClusterEconomicsContext.cluster_size_str`-GPU cluster thus experiences 10 to 40 component failures daily. A multi-week training run on 4,096 GPUs will encounter multiple failures with near certainty. @Sec-appdx-reliability-foundations-component-rates tabulates the FIT rates and MTTF figures behind the 99.9 percent annual reliability assumption, letting an operator substitute their own measured hardware rates and confirm whether the empirical 1-to-4 failures-per-day band still holds.
@@ -1091,6 +1097,12 @@ The trade-off for all of these benefits is complexity. Elastic training requires
 
 Adding resources to a running job does not always accelerate time-to-convergence. The naive assumption that throughput scales linearly with worker count collapses under the weight of communication overhead, requiring the scheduler to enforce elastic scaling policies based on empirical efficiency curves rather than resource availability alone. A job's scaling efficiency\index{Scaling Efficiency} $\eta_{\text{scaling}}(k)$, defined as the ratio of observed throughput at $k$ workers to the ideal linear speedup, typically exhibits three distinct phases: a linear phase where computation dominates communication, a sublinear phase where gradient synchronization latency begins to mask compute, and a saturation phase where the AllReduce ring becomes the bottleneck. A scheduler that blindly assigns available GPUs to a job in the saturation phase wastes cluster capacity that could have cleared the queue; conversely, running a job below its **minimum viable scale** forces it to hold onto memory and network leases for disproportionately low progress.
 
+::: {.column-margin}
+![](images/svg/vol2_fleet_orchestration_margin_002.svg){width="100%" fig-alt="Margin illustration showing Elastic scaling curve with linear, sublinear, and saturation phases."}
+
+*Shows elastic scaling moving from linear benefit to saturation.*
+:::
+
 The decision to scale is therefore a function of marginal utility, not vacancy alone. For our 175B parameter model, the efficiency curve is derived from profiling: it scales linearly from 64 to 512 GPUs, becomes sublinear between 512 and 1,024, and hits diminishing returns beyond 1,024. Consequently, the scheduler enforces an elastic range of $[256, 1024]$. If the cluster has free resources but the job is already at 1,024 GPUs, the scheduler withholds the extra nodes, predicting that the 5 percent marginal throughput gain does not justify the re-sharding overhead or the opportunity cost of starving a pending job. Similarly, if only 128 GPUs are available, the scheduler may choose to queue the job rather than run it, as the training intensity per GPU would be too low to hide the communication latency.
 
 This logic extends to the temporal dimension, where the scheduler must weigh the immediate progress of a smaller allocation against the deferred gratification of waiting for a larger one. If a 512-GPU job can start immediately with 128 GPUs, or wait two hours for the full request, the optimal choice depends on the integration of throughput over time. The preemption overhead (the cost of stopping, checkpointing, and restarting to resize) must be amortized over the subsequent run duration. A policy of "opportunistic scaling" that resizes a job every time a single node becomes free often yields net negative progress due to the constant thrashing of the distributed process group.
@@ -1646,6 +1658,12 @@ Production systems address cold start through several complementary strategies. 
 
 Reactive autoscaling (like Kubernetes HPA) is inherently backward-looking: it observes a metric breach (for example, GPU utilization exceeding 80 percent), waits for a stabilization window, and then triggers a scale-up event. For a container that starts in milliseconds, this lag is negligible. For a 175B parameter model that takes 3 minutes to load weights from disk to GPU memory, this lag is fatal to SLOs. If traffic doubles in 30 seconds, a realistic scenario during a product launch or viral event, the reactive scaler will provision new replicas only *after* the surge has already saturated the existing fleet, causing a 3-minute window of degraded latency and dropped requests.
 
+::: {.column-margin}
+![](images/svg/vol2_fleet_orchestration_margin_003.svg){width="100%" fig-alt="Margin illustration showing Demand exceeds capacity until delayed scale-up closes the gap."}
+
+*Shows reactive autoscaling leaving an SLO gap during cold-start delay.*
+:::
+
 Predictive autoscaling decouples scaling actions from current load. By analyzing historical traffic patterns (diurnal cycles, day-of-week seasonality) and incorporating real-time leading indicators (for example, a surge in login requests often precedes a surge in inference queries), the scheduler can preprovision capacity *before* the demand arrives. Serving our 175B model with a 500 ms P99 SLO requires this anticipation. If the model takes 3 minutes to become ready, the predictive scaler must issue the scale-up command at least 4 minutes before the expected traffic ramp. This transforms the scaling problem from a *control theory problem* (reacting to error) to a *forecasting problem* (predicting the future).
 
 Effective scaling policies must be **SLO-driven** rather than utilization-driven. Targeting a fixed utilization (for example, "keep GPU at 70 percent") is a proxy that often fails: a model might hit its latency SLO at 60 percent utilization due to memory bandwidth contention, or it might safely run at 90 percent utilization if the requests are compute-bound and uniform. An SLO-driven policy explicitly targets the metric that matters: "Scale up when P99 latency exceeds 400 ms (80 percent of the 500 ms target)." This approach automatically adapts to changes in workload characteristics. If a new model version is less efficient, the latency metric will rise faster, and the scaler will provision more replicas to maintain the SLO, without requiring manual tuning of utilization thresholds.
@@ -1975,6 +1993,12 @@ The appropriate over-commitment ratio depends on workload characteristics and re
 The 64 GPUs that sat idle for a weekend because a researcher forgot to cancel a reservation represent invisible waste in a multi-tenant cloud fleet. In a dedicated cluster, such waste is at least visible: the lights are on, but the fans are quiet. In a shared environment, the cost is hidden and compounds across thousands of jobs. Effective governance requires moving beyond simple "allocation" metrics to a tiered accounting model that distinguishes between what was requested, what was used, and what was useful.
 
 Three tiers of measurement expose this gap. Allocated capacity measures what the scheduler has reserved for a job: the resources that are unavailable to others. Compute utilization measures the percentage of time the GPU kernels are active. Productive utilization measures the fraction of time the GPU is advancing the model state, excluding data loading pauses, communication overhead, and checkpointing. The distinction is financial, not merely technical. A team might be "allocated" 500 GPUs but only using 350 (70 percent compute utilization) and only "productively using" 280 (56 percent of allocation). If the organization pays for allocation but measures success by training progress, this 44 percent gap represents pure burn.
+
+::: {.column-margin}
+![](images/svg/vol2_fleet_orchestration_margin_004.svg){width="100%" fig-alt="Margin illustration showing Allocated, compute-active, and productive GPUs."}
+
+*Shows the gap between allocated, compute-active, and productive utilization.*
+:::
 
 Attribution in a shared fleet presents a forensic challenge. A single "training" job might be a shared experiment between three teams, or a platform test run by an SRE. Without granular tagging at the job level, costs default to the "infrastructure" bucket, creating a tragedy of the commons where no one owns the bill. Kubernetes labels and Slurm accounts provide the mechanism for attribution, but the organizational discipline to apply them consistently is the harder problem. Mature organizations enforce "no tag, no schedule" policies, rejecting untagged jobs at the admission controller level.
 

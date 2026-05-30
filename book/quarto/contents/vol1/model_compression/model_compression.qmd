@@ -88,6 +88,12 @@ Recall the silicon contract (Principle \ref{pri-silicon-contract}) (@sec-introdu
 
 The scale of this renegotiation makes model optimization an engineering discipline, not a collection of ad hoc tricks. A `{python} CompressionDeploymentScale.llm_175b_str` billion parameter model consumes over `{python} CompressionDeploymentScale.llm_175b_mem_str` in FP16 representation alone, yet a smartphone provides `{python} CompressionDeploymentScale.smartphone_ram_str` of RAM and a microcontroller offers `{python} CompressionDeploymentScale.mcu_ram_str`. Bridging six orders of magnitude requires systematic methods with predictable trade-offs, not trial and error. Every optimization technique removes something from the model (redundant parameters, numerical precision, or architectural complexity), and the engineer must understand exactly what is lost, what is preserved, and how these losses compose when techniques are combined.
 
+::: {.column-margin}
+![](images/svg/vol1_model_compression_margin_001.svg){width="100%" fig-alt="Margin illustration showing 175B FP16 weights, phone RAM, and MCU RAM."}
+
+*Shows why frontier model weights cannot fit on phones or microcontrollers without compression.*
+:::
+
 \index{Operator Fusion!framework introduction}
 This chapter organizes these techniques along three complementary dimensions. *Structural optimization* removes redundancy from the model itself: pruning eliminates parameters that contribute little to output quality, knowledge distillation transfers a large model's learned behavior into a smaller architecture, and neural architecture search discovers designs that are inherently efficient. *Precision optimization* reduces the numerical bit-width of weights and activations, for example converting 32-bit floating point values to 8-bit integers (exploiting Tensor Cores discussed in @sec-hardware-acceleration-tensor-cores-771f), which shrinks memory footprint and accelerates arithmetic on hardware that supports lower-precision operations. *Hardware-level optimization* ensures that the resulting model executes efficiently on the target processor by fusing operations to reduce memory traffic and exploiting sparsity patterns that the hardware can accelerate. These dimensions are not alternatives but layers in an optimization stack. A practitioner deploying ResNet-50 to a mobile device might prune 50 percent of its filters, quantize the remaining weights to INT8, and fuse batch normalization into convolution, with each technique compounding the gains of the others.
 
@@ -5215,6 +5221,12 @@ class ConvFusionCalc:
 
 The arithmetic operations remain identical, but memory traffic drops from 6 transfers to 2 transfers (`{python} ConvFusionCalc.transfer_reduction_str`$\times$ reduction). For a ResNet-50 layer with 256 channels and spatial size $28{\times}28$, this eliminates `{python} ConvFusionCalc.conv_bn_relu_mem_math` of intermediate memory traffic per layer.
 
+::: {.column-margin}
+![](images/svg/vol1_model_compression_margin_002.svg){width="100%" fig-alt="Margin illustration showing Unfused versus fused memory-transfer count."}
+
+*Shows operator fusion reducing memory transfers while leaving arithmetic unchanged.*
+:::
+
 \index{Operator Fusion!attention (FlashAttention)}
 The same principle extends beyond CNNs. General matrix multiply (GEMM) bias-activation fusion eliminates intermediate writes in transformer linear layers by computing element-wise operations in registers immediately after each matrix multiplication output element. Attention tiling, as in FlashAttention[^fn-flashattention-fusion], reduces HBM traffic from $\mathcal{O}(S^2)$ to $\mathcal{O}(S)$ for long-context transformers by processing attention in SRAM-sized tiles rather than materializing the full $S{\times}S$ attention matrix, as detailed in @sec-model-training-flash-attention-ioaware-attention-optimization-3da0.
 
@@ -6928,6 +6940,12 @@ While sparsity offers significant efficiency advantages, several challenges limi
 \index{Compressed Sparse Row!storage format}
 The central challenge is the gap between theoretical and practical speedups. Unstructured pruning removes individual weights based on importance, creating irregular patterns that hardware accelerators struggle to exploit. Most GPUs and TPUs optimize for structured data; without regular patterns, they cannot skip zero elements efficiently. Pruning algorithms themselves introduce overhead, as determining which weights to prune requires sophisticated importance estimation that can be computationally expensive for large models. Even when sparsity is achieved, sparse matrix storage formats add indexing overhead that can offset computational savings. @Sec-appdx-algorithm-foundations-sparse-matrix-formats-0bd0 details the Compressed Sparse Row layout and quantifies how its per-nonzero metadata makes the memory payoff density-dependent, which is why a rule of thumb holds that sparsity typically must exceed 90–95 percent to be worthwhile for performance.
 
+::: {.column-margin}
+![](images/svg/vol1_model_compression_margin_003.svg){width="100%" fig-alt="Margin illustration showing Unstructured sparsity payoff threshold near 90 to 95 percent."}
+
+*Shows that unstructured sparsity needs a high enough zero fraction before overhead pays off.*
+:::
+
 The accuracy-efficiency trade-off requires careful calibration. Aggressive sparsity can degrade accuracy beyond acceptable thresholds, and the relationship is often nonlinear, as models may tolerate 70 percent sparsity with minimal impact but collapse at 80 percent. Finding the optimal operating point requires extensive experimentation.
 
 Energy efficiency is not guaranteed. While sparse operations reduce arithmetic operations, the overhead of sparse indexing and irregular memory access can increase power consumption on hardware not optimized for sparse patterns. On edge devices with tight power budgets, these overheads may outweigh the benefits.
@@ -7264,6 +7282,12 @@ A critical caveat applies when translating profiling metrics into optimization e
 ::: {.callout-warning title="FLOPs reduction ≠ proportional speedup"}
 
 Reducing a model's FLOPs by 50 percent does not guarantee 50 percent latency reduction. Memory-bound operations (common in LLM inference and normalization layers) see minimal benefit from compute reduction because they are bottlenecked by data movement, not arithmetic. Critically, Amdahl's Law\index{Amdahl's Law!model compression} (@sec-appdx-machine-foundations-amdahls-law-gustafsons-law-b741) applies at the system level: if model inference accounts for only `{python} AmdahlCompression.model_fraction_pct_str` of end-to-end latency (with the remaining `{python} AmdahlCompression.non_model_pct_str` spent on data loading, preprocessing, and postprocessing), then even perfect model optimization yields at most `{python} AmdahlCompression.max_speedup_str`$\times$ overall speedup. Always profile on target hardware before estimating optimization benefits.
+
+::: {.column-margin}
+![](images/svg/vol1_model_compression_margin_004.svg){width="100%" fig-alt="Margin illustration showing Model inference as 20 percent and other pipeline work as 80 percent."}
+
+*Shows model compression hitting an end-to-end ceiling when non-model work dominates.*
+:::
 
 :::
 
