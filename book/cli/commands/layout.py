@@ -60,6 +60,21 @@ class PageReport:
     action: str = ""              # recommended action (try-move-up / accept-…)
 
 
+@dataclass
+class MarginFinding:
+    """A margin figure/note overflowing below the page's usable bottom."""
+    sheet: int                    # 1-indexed PDF sheet number
+    label: str                    # printed page number
+    chapter: str                  # enclosing chapter title
+    signal: str                   # "image", "caption/text", or both
+    over_pts: float               # how far past the footer line (pts); + = below
+    off_page: bool                # content extends beyond the physical page edge
+    snippet: str = ""             # lowest margin-line text (for grepping source)
+    source_file: str = ""         # QMD chapter file, relative to repo root
+    source_line: int = 0          # 1-indexed line of the matching caption
+    section: str = ""             # nearest preceding H2/H3 header
+
+
 class LayoutCommand:
     """Diagnose PDF page-break whitespace issues."""
 
@@ -122,6 +137,32 @@ class LayoutCommand:
                  "pts,culprit,detail,size_hint,fix_hint,is_frontmatter.",
         )
 
+        margins = sub.add_parser(
+            "margins",
+            help="Scan PDF for margin figures/notes overflowing off the page "
+                 "(exits non-zero when any overflow is found).",
+        )
+        margins.add_argument("pdf", help="Path to PDF file to scan.")
+        margins.add_argument(
+            "--tol",
+            type=float,
+            default=2.0,
+            help="Points of slack below the footer line before margin "
+                 "content counts as overflow (default 2.0).",
+        )
+        margins.add_argument(
+            "--limit",
+            type=int,
+            default=0,
+            help="Only scan the first N pages (0 = all). For quick iteration.",
+        )
+        margins.add_argument(
+            "--csv",
+            action="store_true",
+            help="Emit one CSV row per overflow: chapter,sheet,label,signal,"
+                 "over_pts,off_page,source_file,source_line,section,snippet.",
+        )
+
         if not args:
             parser.print_help()
             return False
@@ -129,6 +170,10 @@ class LayoutCommand:
         opts = parser.parse_args(args)
         if opts.subcommand == "collisions":
             return self._collisions(Path(opts.pdf))
+        if opts.subcommand == "margins":
+            return self._margins(
+                Path(opts.pdf), tol=opts.tol, limit=opts.limit, csv=opts.csv
+            )
         if opts.subcommand == "check":
             only = (
                 set(s.strip() for s in opts.only.split(",") if s.strip())
@@ -350,6 +395,229 @@ class LayoutCommand:
     def _line_text(line_chars: list) -> str:
         line_chars = sorted(line_chars, key=lambda c: c["x0"])
         return "".join(c.get("text", "") for c in line_chars).strip()[:60]
+
+    # ------------------------------------------------------------------
+    # margins — margin figure / note overflow off the page bottom
+    # ------------------------------------------------------------------
+
+    def _margins(
+        self,
+        pdf_path: Path,
+        tol: float = 2.0,
+        limit: int = 0,
+        csv: bool = False,
+    ) -> bool:
+        """Flag margin-column content (figures, captions, notes) that runs
+        below the page's usable bottom — the documented ``figure-margin.md``
+        §7.2 failure mode where a margin figure anchored near a page break has
+        nowhere to float and clips off the page.
+
+        Returns True when clean, False when any overflow is found, so
+        ``binder layout margins`` exits non-zero as an explicit gate.
+        """
+        if not pdf_path.exists():
+            console.print(f"[red]PDF not found:[/red] {pdf_path}")
+            return False
+        try:
+            import pdfplumber  # type: ignore  # noqa: F401
+        except ImportError:
+            console.print(
+                "[red]pdfplumber not installed.[/red] "
+                "Run: [cyan]pip install pdfplumber[/cyan]"
+            )
+            return False
+
+        console.print(
+            f"[bold blue]Scanning margins[/bold blue] {pdf_path.name} "
+            f"[dim](margin col >{int(MAIN_COL_RIGHT_FRAC*100)}% width, "
+            f"overflow = below {int((1-FOOTER_FRAC)*100)}% page height "
+            f"+ {tol:.0f}pt)[/dim]"
+        )
+        findings, scanned = self._collect_margin_findings(pdf_path, tol, limit)
+        if csv:
+            self._render_margins_csv(findings)
+        else:
+            self._render_margins(findings, scanned, pdf_path)
+        return not findings
+
+    @staticmethod
+    def _page_overflow(pw, ph, chars, images, tol):
+        """Pure geometry: margin-column chars/images whose bottom runs below
+        the usable bottom (footer band top + tol). Returns (over_chars,
+        over_imgs). Coordinates follow pdfplumber: x0 from left, bottom from
+        page top (increasing downward). Unit-tested with dict fixtures.
+        """
+        margin_x = pw * MAIN_COL_RIGHT_FRAC
+        usable_bottom = ph * (1.0 - FOOTER_FRAC) + tol
+        over_chars = [
+            c for c in chars
+            if c["x0"] > margin_x and c["bottom"] > usable_bottom
+        ]
+        over_imgs = [
+            im for im in images
+            if im["x0"] > margin_x and im["bottom"] > usable_bottom
+        ]
+        return over_chars, over_imgs
+
+    def _collect_margin_findings(
+        self, pdf_path: Path, tol: float = 2.0, limit: int = 0
+    ) -> Tuple[List["MarginFinding"], int]:
+        """Detection core (no console output). Returns (findings, pages_scanned).
+
+        Shared by the ``binder layout margins`` gate and the warn-only build
+        postflight (via the module-level ``scan_margin_overflow`` helper).
+        """
+        import pdfplumber  # type: ignore
+
+        chapter_starts, labels = self._load_chapter_map(pdf_path)
+        source_map = self._build_source_map(pdf_path)
+
+        # Resolve repo root once for source-line lookups.
+        cur = pdf_path.resolve().parent
+        repo_root: Optional[Path] = None
+        for _ in range(8):
+            if (cur / "book" / "quarto" / "contents").is_dir():
+                repo_root = cur
+                break
+            if cur.parent == cur:
+                break
+            cur = cur.parent
+
+        findings: List[MarginFinding] = []
+        with pdfplumber.open(str(pdf_path)) as pdf:
+            n_pages = len(pdf.pages)
+            n_scan = n_pages if limit <= 0 else min(limit, n_pages)
+            for i in range(n_scan):
+                page = pdf.pages[i]
+                sheet = i + 1
+                pw, ph = page.width, page.height
+                margin_x = pw * MAIN_COL_RIGHT_FRAC
+                footer_top = ph * (1.0 - FOOTER_FRAC)
+
+                over_chars, over_imgs = self._page_overflow(
+                    pw, ph, page.chars, page.images, tol
+                )
+                if not over_chars and not over_imgs:
+                    continue
+
+                bottoms = (
+                    [c["bottom"] for c in over_chars]
+                    + [im["bottom"] for im in over_imgs]
+                )
+                max_bottom = max(bottoms)
+                over_pts = max_bottom - footer_top
+                off_page = max_bottom > ph
+                sig = []
+                if over_imgs:
+                    sig.append("image")
+                if over_chars:
+                    sig.append("caption/text")
+                signal = "+".join(sig)
+
+                # Lowest margin-column text line → best grep target for source.
+                mlines: Dict[float, list] = {}
+                for c in page.chars:
+                    if c["x0"] <= margin_x:
+                        continue
+                    placed = False
+                    for ly in list(mlines.keys()):
+                        if abs(c["top"] - ly) < 2.0:
+                            mlines[ly].append(c)
+                            placed = True
+                            break
+                    if not placed:
+                        mlines[c["top"]] = [c]
+                line_texts = [self._line_text(mlines[ly]) for ly in sorted(mlines)]
+                line_texts = [t for t in line_texts if t]
+                snippet = line_texts[-1] if line_texts else ""  # lowest line
+
+                chapter = self._chapter_for(sheet, chapter_starts)
+                label = labels[i] if i < len(labels) else str(sheet)
+
+                src_file, src_line, section = "", 0, ""
+                qmd = source_map.get(chapter)
+                if qmd is not None:
+                    src_file = str(qmd)
+                    if repo_root is not None and line_texts:
+                        abs_path = repo_root / qmd
+                        # Try the longest margin lines first — the caption text
+                        # matches the source line more reliably than a short
+                        # wrapped fragment.
+                        for cand in sorted(line_texts, key=len, reverse=True):
+                            src_line = self._find_source_line(abs_path, cand)
+                            if src_line > 0:
+                                break
+                        if src_line > 0:
+                            section = self._find_section(abs_path, src_line)
+
+                findings.append(MarginFinding(
+                    sheet=sheet, label=label, chapter=chapter, signal=signal,
+                    over_pts=over_pts, off_page=off_page, snippet=snippet,
+                    source_file=src_file, source_line=src_line, section=section,
+                ))
+
+        return findings, n_scan
+
+    def _render_margins(
+        self, findings: List[MarginFinding], scanned: int, pdf_path: Path
+    ) -> None:
+        if not findings:
+            console.print(Panel(
+                f"No margin overflow across {scanned} pages — every margin "
+                f"figure/note sits on-page.",
+                title="✅ Margin check clean",
+                border_style="green",
+            ))
+            return
+        console.print()
+        console.print(
+            f"[bold red]✗ {len(findings)} margin overflow"
+            f"{'s' if len(findings) != 1 else ''}[/bold red] "
+            f"[dim](margin content running off the page bottom)[/dim]"
+        )
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("page", justify="right")
+        table.add_column("chapter")
+        table.add_column("signal")
+        table.add_column("over", justify="right")
+        table.add_column("source", overflow="fold")
+        for f in sorted(findings, key=lambda r: -r.over_pts):
+            over = f"{f.over_pts:.0f}pt"
+            if f.off_page:
+                over += " ⎋"  # off the physical page edge
+            src = f.source_file
+            if f.source_line:
+                src += f":{f.source_line}"
+            if f.section:
+                src += f"  [{f.section}]"
+            table.add_row(
+                f"{f.label} (sheet {f.sheet})",
+                f.chapter,
+                f.signal,
+                over,
+                src or "[dim]?[/dim]",
+            )
+        console.print(table)
+        console.print(
+            "[dim]⎋ = past the physical page edge. Fix per figure-margin.md "
+            "§7: reposition the .column-margin block to a footnote-sparse, "
+            "mid-page anchor, shorten the caption, or cut it (§0 gate).[/dim]"
+        )
+
+    def _render_margins_csv(self, findings: List[MarginFinding]) -> None:
+        import csv as _csv
+        import sys
+        writer = _csv.writer(sys.stdout)
+        writer.writerow([
+            "chapter", "sheet", "label", "signal", "over_pts", "off_page",
+            "source_file", "source_line", "section", "snippet",
+        ])
+        for f in findings:
+            writer.writerow([
+                f.chapter, f.sheet, f.label, f.signal, f"{f.over_pts:.1f}",
+                int(f.off_page), f.source_file, f.source_line, f.section,
+                f.snippet,
+            ])
 
     # ------------------------------------------------------------------
     # CSV output
@@ -953,3 +1221,22 @@ class LayoutCommand:
             f"(frontmatter/backmatter — usually intentional). "
             f"Use --skip-frontmatter to hide.[/dim]"
         )
+
+
+def scan_margin_overflow(pdf_path: Path, tol: float = 2.0, limit: int = 0):
+    """Module-level entry point for warn-only margin-overflow detection.
+
+    Returns the list of MarginFinding objects (empty when clean), or None when
+    detection cannot run (missing PDF or pdfplumber). Used by the PDF build
+    postflight to surface margin overflow as a non-blocking warning; the
+    blocking gate is ``binder layout margins`` (LayoutCommand._margins).
+    """
+    if not Path(pdf_path).exists():
+        return None
+    try:
+        import pdfplumber  # type: ignore  # noqa: F401
+    except ImportError:
+        return None
+    cmd = LayoutCommand(None, None)
+    findings, _ = cmd._collect_margin_findings(Path(pdf_path), tol=tol, limit=limit)
+    return findings
