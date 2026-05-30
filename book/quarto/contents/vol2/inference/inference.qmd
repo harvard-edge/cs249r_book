@@ -1309,9 +1309,7 @@ The result, depicted in @fig-continuous-batching, is a `{python} BatchingWorkedE
 
 #### When continuous batching provides maximum benefit {#sec-inference-scale-continuous-batching-provides-maximum-benefit-a406}
 
-The analysis above reveals that continuous batching's benefit scales with output length variance. A useful upper-bound intuition comes from comparing the longest sequence in a traditional batch with the average sequence length:
-
-Let $\text{CV} = \sigma / \mu$ be the coefficient of variation of output lengths. If the longest request in a batch is roughly $k$ standard deviations above the mean, then:
+The continuous-batching analysis reveals that benefit scales with output length variance. A useful upper-bound intuition comes from comparing the longest sequence in a traditional batch with the average sequence length. Let $\text{CV} = \sigma / \mu$ be the coefficient of variation of output lengths. If the longest request in a batch is roughly $k$ standard deviations above the mean, then:
 
 $$\text{Improvement} \approx \frac{S_{\text{max}}}{\bar{S}} = \frac{\mu + k\sigma}{\mu} = 1 + k \cdot \text{CV}$$
 
@@ -1743,9 +1741,7 @@ elif P99_latency < 0.5 * SLO:
     increase T_window by 10%
 ```
 
-The feedback loop maintains latency headroom while maximizing throughput during normal operation.
-
-Request-aware batching adds a third dimension by considering request characteristics when forming batches. For LLMs:
+The feedback loop maintains latency headroom while maximizing throughput during normal operation. Request-aware batching adds a third dimension by considering request characteristics when forming batches. For LLMs:
 
 - Group requests by expected output length (inferred from prompt type)
 - Group requests by prompt length to minimize padding
@@ -3460,11 +3456,7 @@ Column-wise sharding partitions each embedding vector across devices:
 
 $$e_j = [e_j^{(0)}, e_j^{(1)}, ..., e_j^{(N_{\text{shards}}-1)}]$$
 
-Each device stores a slice of every embedding.
-
-Hybrid sharding combines both approaches: frequently accessed embeddings are column-sharded for faster access, while the long tail uses row sharding.
-
-The choice of embedding sharding strategy depends on lookup patterns and communication overhead. @Tbl-embedding-sharding compares row-wise, column-wise, and hybrid approaches:
+Each device stores a slice of every embedding. Hybrid sharding combines both approaches: frequently accessed embeddings are column-sharded for faster access, while the long tail uses row sharding. The choice of embedding sharding strategy depends on lookup patterns and communication overhead. @Tbl-embedding-sharding compares row-wise, column-wise, and hybrid approaches:
 
 | **Sharding Strategy** | **Lookup Pattern**       | **Communication** | **Best For**            |
 |:----------------------|:-------------------------|:------------------|:------------------------|
@@ -3676,9 +3668,7 @@ where $N$ is the number of devices, $M$ is the collective payload size, $\alpha$
 
 $$T_{\text{p2p}}(n) = \alpha + \frac{n}{\beta}$$ {#eq-p2p-time}
 
-where $n$ is the point-to-point payload size, $\alpha$ is the network latency, and $n/\beta$ is the transfer time.
-
-@Eq-alltoall-time captures the more complex AllToAll communication\index{AllToAll!communication} for expert parallelism, where each device exchanges distinct data with every other device.
+where $n$ is the point-to-point payload size, $\alpha$ is the network latency, and $n/\beta$ is the transfer time. @Eq-alltoall-time captures the more complex AllToAll communication\index{AllToAll!communication} for expert parallelism, where each device exchanges distinct data with every other device.
 
 $$T_{\text{alltoall}} = (N-1) \times \left(\alpha + \frac{M/N}{\beta}\right)$$ {#eq-alltoall-time}
 
@@ -3820,13 +3810,7 @@ If ten model replicas are actively serving traffic, and a new request arrives as
 
 ### Load balancing principles {#sec-inference-scale-load-balancing-principles-63ec}
 
-Load balancing serves two primary goals that sometimes conflict:
-
-The first goal is latency minimization: route requests to replicas that can serve them fastest, considering current queue depth and processing time.
-
-The second goal is utilization maximization: spread load evenly to avoid both idle replicas and overloaded replicas.
-
-The tension arises because latency-optimal routing may concentrate load on fast replicas, reducing their performance and leaving other replicas underutilized.
+Load balancing serves two primary goals that sometimes conflict: latency minimization and utilization maximization. Latency minimization routes requests to the replicas that can serve them fastest, considering current queue depth and processing time; utilization maximization spreads load evenly to avoid both idle replicas and overloaded replicas. The tension arises because latency-optimal routing may concentrate load on fast replicas, reducing their performance and leaving other replicas underutilized.
 
 Load balancing evaluation uses several key metrics. Maximum queue length measures the longest queue across all replicas and determines worst-case latency. Load variance captures the standard deviation of queue lengths and measures balance. Utilization spread represents the difference between most- and least-loaded replicas. Decision overhead quantifies the time required to make routing decisions.
 
@@ -4039,9 +4023,7 @@ An alternative to random selection is routing to the server with the fewest acti
 2. Route each new request to the server with the minimum count
 3. Increment count on dispatch, decrement on completion
 
-For long-running requests (common in LLM serving), least-connections significantly outperforms round-robin because it accounts for current load rather than just historical assignments.
-
-The challenge is maintaining accurate connection counts in a distributed system. Options include:
+For long-running requests (common in LLM serving), least-connections significantly outperforms round-robin because it accounts for current load rather than just historical assignments. The challenge is maintaining accurate connection counts in a distributed system. Options include:
 
 - **Centralized counter**: Single source of truth, potential bottleneck
 - **Distributed counters with gossip**\index{Distributed Counters with Gossip}: Eventually consistent, may route to stale information
@@ -4160,9 +4142,7 @@ The same stateful routing machinery becomes a correctness boundary when cached s
 
 ### Request routing for sharded models {#sec-inference-scale-request-routing-sharded-models-6432}
 
-The sharding strategies examined in @sec-inference-scale-model-sharding-inference-82b3 introduce routing complexity: a single inference request may require computation on multiple devices, necessitating coordination.
-
-The routing pattern depends on the sharding strategy.
+The sharding strategies examined in @sec-inference-scale-model-sharding-inference-82b3 introduce routing complexity: a single inference request may require computation on multiple devices, necessitating coordination. The routing pattern depends on the sharding strategy.
 
 Under tensor parallelism, each request is broadcast to all devices in the shard group. Each device processes its portion of each layer, and results are synchronized via AllReduce. @Fig-tensor-parallel-routing shows this fan-out, compute, and gather pattern.
 
@@ -5565,9 +5545,7 @@ User request → Feature collection → Embedding lookup → Model inference →
              (CPU, DRAM)         (CPU + SSD, 1000s)     (GPU, 100s)
 ```
 
-Several key design decisions shape this system.
-
-Embedding tables total over 100 TB, requiring 1000+ shards. Meta uses a hybrid sharding strategy:
+In Meta's architecture, the binding design constraint is embedding scale: tables total over 100 TB, requiring 1,000+ shards. Meta uses a hybrid sharding strategy:
 
 - Hot embeddings (top 1 percent): Replicated across memory on all inference servers
 - Warm embeddings (next 10 percent): Column-sharded with 8-way parallelism
@@ -5841,9 +5819,7 @@ User request → User embedding → Candidate videos → Video understanding →
            (Transformer)        (Pre-computed)        (On-demand)
 ```
 
-Several key design decisions shape this system.
-
-TikTok separates user understanding (online) from content understanding (offline) through a two-tower architecture with caching[^fn-two-tower-serving]. @Tbl-tiktok-two-tower-updates contrasts the online and offline tower update cadences:
+TikTok's architecture separates user understanding (online) from content understanding (offline) through a two-tower architecture with caching[^fn-two-tower-serving]. @Tbl-tiktok-two-tower-updates contrasts the online and offline tower update cadences:
 
 [^fn-two-tower-serving]: **Two-Tower Architecture**: Encodes user features and item features through separate neural networks ("towers") into embeddings, then scores via dot product. The serving advantage: item embeddings can be precomputed offline and cached, reducing online inference to the user tower forward pass plus a sub-millisecond vector similarity lookup. The trade-off is reduced model expressiveness from late interaction, since the towers cannot attend to each other's features during encoding. \index{Two-Tower Architecture!serving}
 
