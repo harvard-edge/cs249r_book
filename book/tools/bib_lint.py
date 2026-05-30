@@ -2,7 +2,7 @@
 """BibTeX linter, validator, and formatter for the MLSysBook project.
 
 Enforces the canonical schema and formatting rules documented in
-`.claude/rules/book-prose.md` §5 Bibliography Hygiene.
+the project prose style guide §5 Bibliography Hygiene.
 
 Usage:
     python3 book/tools/bib_lint.py <file.bib> [--check|--fix|--report]
@@ -49,7 +49,7 @@ Integration points:
       no regex, no brace-counting bugs.
 
 Canonical rule source:
-    `.claude/rules/book-prose.md` §5 "Bibliography Hygiene" (see also
+    the project prose style guide §5 "Bibliography Hygiene" (see also
     `book-prose-merged.md` if present).
 """
 from __future__ import annotations
@@ -455,7 +455,7 @@ def _split_at_top_level_commas(body: str) -> list[str]:
     return parts
 
 
-# ─── §5 heuristics (see `.claude/rules/book-prose.md` Bibliography Hygiene) ──
+# ─── §5 heuristics (see the project prose style guide Bibliography Hygiene) ──
 
 
 def _arxiv_or_preprint_journal(value: str) -> bool:

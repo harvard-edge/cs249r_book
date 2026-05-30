@@ -1,7 +1,7 @@
 # Cross-Reference Review Tooling
 
 This folder contains the reusable cross-reference workflow for Volume 1 and Volume 2.
-The canonical editorial policy lives in `.claude/rules/cross-references.md`. Keep policy
+The canonical editorial policy lives in the project cross-reference rules. Keep policy
 changes there; keep reusable scripts and command-level workflow notes here.
 
 Generated inventories, packets, reports, and merged decision queues default to
@@ -10,7 +10,7 @@ Generated inventories, packets, reports, and merged decision queues default to
 
 ## Policy Source
 
-Before changing cross-references, read `.claude/rules/cross-references.md`. This script
+Before changing cross-references, read the project cross-reference rules. This script
 folder implements that policy mechanically; it does not define the standard.
 
 ## Automation Strategy

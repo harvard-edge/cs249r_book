@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Quiz regeneration runner for Vol1 and Vol2 of the ML Systems textbook.
 
-Reads the canonical spec at ``.claude/docs/shared/quiz-generation.md``, reads a
+Reads the canonical quiz-generation spec from the project rules directory, reads a
 chapter's prose, and produces ``{chapter}_quizzes.json.new`` at the
 canonical path. Every decision about taxonomy, format, quality bar, and
 schema lives in the spec — this script is plumbing.
@@ -136,7 +136,7 @@ def load_spec() -> str:
     if not SPEC_PATH.is_file():
         sys.exit(
             f"error: canonical spec not found at {SPEC_PATH}\n"
-            f"       sync it from AIConfigs/projects/MLSysBook/.claude/rules/"
+            f"       ensure the project rules directory is present in this checkout"
         )
     return SPEC_PATH.read_text(encoding="utf-8")
 

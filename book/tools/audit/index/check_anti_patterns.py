@@ -3,7 +3,7 @@ r"""
 book-index-anti-patterns hook.
 
 Fails (exit 1) if the corpus contains any \index{} anti-pattern from
-.claude/rules/index.md §9. Run from repo root.
+the project index rules §9. Run from repo root.
 
 Anti-patterns checked:
   - Sub-subentries (A!B!C)
@@ -115,7 +115,7 @@ def main():
             print(f"  {name}: {len(samples)} sample(s):")
             for s in samples:
                 print(f"    {s}")
-        print("\nSee .claude/rules/index.md §9 for the full anti-pattern list.")
+        print("\nSee the project index rules §9 for the full anti-pattern list.")
         return 1
 
     print(f"Index anti-pattern audit PASSED ({len(keys)} unique keys, {len(heads)} headwords)")

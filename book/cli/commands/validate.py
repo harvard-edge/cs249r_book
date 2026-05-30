@@ -112,7 +112,7 @@ LATEX_INLINE_PATTERN = re.compile(
 # Quarto's auto-escape silently corrupting commas and decimals inside $..$ math
 # mode — a bug class that no longer exists now that fmt() returns a Markdown-
 # rendering string that bypasses the escape. See mlsysim/mlsysim/fmt.py and
-# .claude/rules/math.md.
+# the project math rules.
 
 CITATION_REF_PATTERN = re.compile(r"@([A-Za-z0-9_:\-.]+)")
 CITATION_BRACKET_PATTERN = re.compile(r"\[-?@[A-Za-z0-9_:\-.]+(?:;\s*-?@[A-Za-z0-9_:\-.]+)*\]")
@@ -327,7 +327,7 @@ class ValidateCommand:
         # (markup patterns, prose style, punctuation, numbers, math, etc.),
         # not by where-the-rule-came-from. A rule's provenance belongs in
         # a comment, not a command name — hence no `mitpress-` prefix on
-        # scopes. See .claude/rules/book-prose.md for style provenance.
+        # scopes. See the project prose style guide for style provenance.
         # ------------------------------------------------------------------
         "markup": [
             Scope("patterns", "_run_rendering",
@@ -460,7 +460,7 @@ class ValidateCommand:
                   note='\\index{} not inline with headings/callouts'),
             # Migrated 2026-05-06: was book/tools/audit/index/check_anti_patterns.py
             Scope("anti-patterns", "_run_index_anti_patterns",
-                  note="anti-patterns from .claude/rules/index.md §9"),
+                  note="anti-patterns from the project index rules §9"),
             # Migrated 2026-05-06: was book/tools/audit/index/check_tag_placement.py
             Scope("tag-placement", "_run_index_tag_placement",
                   note='\\index{} not inside **bold**, *italic*, `code`, or headings'),
@@ -4954,7 +4954,7 @@ class ValidateCommand:
     # bookmarks, screen readers, PDF outline). Any LaTeX inside them either
     # renders as literal `\command` / `^{N}` / `$..$` or, in the lightbox
     # case, leaks raw LaTeX into the hover tooltip. See the audit retrospective
-    # in `.claude/rules/book-prose.md` ("Anti-pattern: LaTeX inside attribute
+    # in the project prose style guide ("Anti-pattern: LaTeX inside attribute
     # strings"). Fix by switching to Unicode (×, ³, α, β, ρ, ≤, ≥, →, ∞, …).
     #
     # FAILURE MODES CAUGHT
@@ -5199,7 +5199,7 @@ class ValidateCommand:
     #     suffix tells the next reader "this is a Markdown-wrapped LaTeX
     #     object, not a plain string."
     #   - Or compute and emit the value as plain text / Unicode.
-    # See `.claude/rules/book-prose.md` ("Anti-pattern: bare LaTeX inside a
+    # See the project prose style guide ("Anti-pattern: bare LaTeX inside a
     # `_str` export").
 
     # `_str` assignments inside Python code blocks. Capture the variable name
@@ -6216,7 +6216,7 @@ class ValidateCommand:
         - **S1/S5** ``**Term**: `` — standard definitional head (incl. biography)
 
         Bare ``@sec-`` openers and plain prose (no bold head) are rejected.
-        Reference: ``.claude/rules/book-prose.md`` *Canonical definition-line shapes*.
+        Reference: the project prose style guide *Canonical definition-line shapes*.
         """
         start = time.time()
         files = self._qmd_files(root)
