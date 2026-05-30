@@ -278,11 +278,11 @@ class NinesReliability:
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
     n_gpus_str = fmt(n_gpus, precision=0)
-    availability_str = fmt(availability_pct, precision=2, commas=False)
-    downtime_min_str = fmt(downtime_min_year, precision=1, commas=False)
-    survival_str = fmt(single_gpu_success, precision=5, commas=False)
+    availability_str = fmt(availability_pct, precision=2, commas=False, suffix=' percent')
+    downtime_min_str = fmt(downtime_min_year, precision=1, commas=False, suffix=' minutes')
+    survival_str = fmt(single_gpu_success, precision=4, commas=False)
     cluster_prob_str = fmt(cluster_prob, precision=2, commas=False)
-    cluster_pct_str = fmt_int(round(cluster_prob * 100), commas=False)
+    cluster_pct_str = fmt_int(round(cluster_prob * 100), commas=False, suffix=' percent')
 ```
 
 ::: {#nbk-fault-tolerance-9s-reliability .callout-notebook title="The 9s of reliability"}
@@ -2608,7 +2608,7 @@ The middle layer shifts the diagnosis from raw bandwidth to checkpoint coordinat
 
 - **Checkpoint mode**: Synchronous, all `{python} CheckpointDebug.n_gpus_str` pause and wait
 - **Write pattern**\index{Write Pattern}: All `{python} CheckpointDebug.n_nodes_str` writing simultaneously to shared NFS
-- **Observed behavior**\index{Observed Behavior}: `{python} CheckpointDebug.observed_write_min_str`-minute writes instead of the `{python} CheckpointDebug.min_write_min_str`-minute theoretical minimum
+- **Observed behavior**\index{Observed Behavior}: writes that take `{python} CheckpointDebug.observed_write_min_str` instead of the `{python} CheckpointDebug.min_write_min_str` theoretical minimum
 
 The Distribution Layer reveals the shared-storage bottleneck. With `{python} CheckpointDebug.n_nodes_str` competing for 10 Gbps, each node effectively receives only `{python} CheckpointDebug.per_node_mbs_str` (10 Gbps / `{python} CheckpointDebug.n_nodes_str`). If the checkpoint is sharded evenly, each node writes about `{python} CheckpointDebug.per_node_shard_gb_str`, so the write still lands near `{python} CheckpointDebug.per_node_write_min_str`. The observed `{python} CheckpointDebug.observed_write_min_str` is therefore close to the bandwidth floor, not something more simultaneous NFS writers can solve.
 
@@ -3786,7 +3786,35 @@ Reliability engineering must identify and mitigate correlation through diversity
 
 **Fallacy**: *Component MTTF values predict individual failure timing.*
 
-Engineers read a GPU MTTF of `{python} FleetReliabilityRates.gpu_mttf_str` hours and plan around a five-year replacement cadence per device. MTTF is a statistical property of a population, not a prediction for any single component. A GPU with MTTF `{python} FleetReliabilityRates.gpu_mttf_str` hours might fail at 200 hours or last 100,000; the distribution is broad. What MTTF reliably predicts is the aggregate failure rate: in a fleet of `{python} FleetReliabilityRates.fleet_gpus_str` GPUs, the steady-state failure rate is approximately `{python} FleetReliabilityRates.fleet_rate_eq_math` failures per hour, or roughly one failure every `{python} FleetReliabilityRates.hours_between_str` hours. Fleet-scale reliability engineering relies on this statistical regularity to size automated recovery, spare-pool depth, and on-call rotations. Trying to predict which individual GPU will fail next is a category error and a waste of monitoring effort.
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: Fallacy — component MTTF values predict individual failure timing.
+# │ Exports: FleetReliabilityFallacyRates.gpu_mttf_str,
+# │          FleetReliabilityFallacyRates.fleet_gpus_str,
+# │          FleetReliabilityFallacyRates.fleet_rate_eq_math,
+# │          FleetReliabilityFallacyRates.hours_between_str
+from mlsysim import Systems
+from mlsysim.fmt import fmt, fmt_math, check
+
+class FleetReliabilityFallacyRates:
+    gpu_mttf_h = float(Systems.Reliability.Gpu.mttf_hours)
+    fleet_gpus = Systems.Clusters.Training_10K.total_accelerators
+    fleet_rate_per_h = fleet_gpus / gpu_mttf_h
+    hours_between = 1 / fleet_rate_per_h
+
+    check(abs(hours_between * fleet_rate_per_h - 1) < 1e-9,
+          "interval must be reciprocal of fleet rate")
+
+    _fleet_tex = fmt(fleet_gpus, precision=0).replace(",", "{,}")
+    _mttf_tex = fmt(gpu_mttf_h, precision=0).replace(",", "{,}")
+    gpu_mttf_str = fmt(gpu_mttf_h, precision=0)
+    fleet_gpus_str = fmt(fleet_gpus, precision=0)
+    fleet_rate_eq_math = fmt_math(f"{_fleet_tex}/{_mttf_tex} = {fmt(fleet_rate_per_h, precision=1, commas=False)}")
+    hours_between_str = fmt(hours_between, precision=0, commas=False)
+```
+
+Engineers read a GPU MTTF of `{python} FleetReliabilityFallacyRates.gpu_mttf_str` hours and plan around a five-year replacement cadence per device. MTTF is a statistical property of a population, not a prediction for any single component. A GPU with MTTF `{python} FleetReliabilityFallacyRates.gpu_mttf_str` hours might fail at 200 hours or last 100,000; the distribution is broad. What MTTF reliably predicts is the aggregate failure rate: in a fleet of `{python} FleetReliabilityFallacyRates.fleet_gpus_str` GPUs, the steady-state failure rate is approximately `{python} FleetReliabilityFallacyRates.fleet_rate_eq_math` failures per hour, or roughly one failure every `{python} FleetReliabilityFallacyRates.hours_between_str` hours. Fleet-scale reliability engineering relies on this statistical regularity to size automated recovery, spare-pool depth, and on-call rotations. Trying to predict which individual GPU will fail next is a category error and a waste of monitoring effort.
 
 **Pitfall**: *Ignoring restart overhead in checkpoint planning.*
 

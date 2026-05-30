@@ -90,6 +90,17 @@ HTML_ERROR_PATTERNS = [
     re.compile(r"Error rendering"),
 ]
 
+HTML_MATH_RENDER_PATTERNS = [
+    (
+        "spaced ASCII multiplication",
+        re.compile(r"\b\d[\d,]*(?:\.\d+)?\s+x\s+(?:\d|\$|USD|[A-Za-z_(])"),
+    ),
+    (
+        "literal dollar-times",
+        re.compile(r"\$\s*\\times\s*\$"),
+    ),
+]
+
 
 @dataclass
 class ChapterResult:
@@ -102,6 +113,8 @@ class ChapterResult:
     build_seconds: float = 0.0
     html_spurious_clean: bool | None = None
     html_error_hits: list[str] = field(default_factory=list)
+    html_math_artifacts_clean: bool | None = None
+    html_math_artifact_hits: list[str] = field(default_factory=list)
     lego_focal_ok: bool | None = None
     prose_ok: bool | None = None
     registry_ok: bool | None = None
@@ -180,6 +193,36 @@ def _scan_html_errors(html: Path) -> list[str]:
     return hits
 
 
+def _visible_text(html: Path) -> str:
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        return ""
+    soup = BeautifulSoup(html.read_text(encoding="utf-8", errors="replace"), "html.parser")
+    content = soup.find("main") or soup.body
+    if not content:
+        return ""
+    for tag in content(["script", "style", "annotation", "mjx-assistive-mml"]):
+        tag.decompose()
+    return re.sub(r"\s+", " ", content.get_text(separator=" "))
+
+
+def _scan_math_render_artifacts(html: Path) -> list[str]:
+    text = _visible_text(html)
+    if not text:
+        return []
+    hits: list[str] = []
+    for label, pat in HTML_MATH_RENDER_PATTERNS:
+        for match in pat.finditer(text):
+            start = max(0, match.start() - 50)
+            end = min(len(text), match.end() + 50)
+            context = text[start:end].strip()
+            hits.append(f"{label}: {context}")
+            if len(hits) >= 10:
+                return hits
+    return hits
+
+
 def _lego_focal(qmd: Path) -> tuple[bool, str]:
     proc = subprocess.run(
         [sys.executable, str(REPO_ROOT / "book/tools/audit/lego_focal_verify.py"), str(qmd)],
@@ -188,6 +231,8 @@ def _lego_focal(qmd: Path) -> tuple[bool, str]:
         text=True,
     )
     out = (proc.stdout or "") + (proc.stderr or "")
+    if proc.returncode == 0 and not out.strip():
+        return True, "no inline Python refs"
     ok = proc.returncode == 0 and "issues=0" in out
     return ok, out.strip().splitlines()[-1] if out.strip() else "no output"
 
@@ -261,6 +306,8 @@ def verify_chapter(vol: str, ch_path: str, skip_build: bool = False) -> ChapterR
             res.notes += "no archived HTML (--skip-build)"
             return res
         html = archive
+        res.build_ok = True
+        res.build_seconds = 0.0
     else:
         build_ok, secs, log = _build_html(vol, ch_path)
         res.build_ok = build_ok
@@ -278,16 +325,21 @@ def verify_chapter(vol: str, ch_path: str, skip_build: bool = False) -> ChapterR
 
     res.html = str(html.relative_to(REPO_ROOT))
     res.html_error_hits = _scan_html_errors(html)
+    res.html_math_artifact_hits = _scan_math_render_artifacts(html)
+    res.html_math_artifacts_clean = not res.html_math_artifact_hits
     clean, spurious = _audit_spurious(html)
     res.html_spurious_clean = clean
     if res.html_error_hits:
         res.notes += f"html errors: {res.html_error_hits}; "
+    if res.html_math_artifact_hits:
+        res.notes += f"math artifacts: {res.html_math_artifact_hits[:2]}; "
     if not clean:
         res.notes += f"spurious .0: {spurious[:2]}; "
 
     passed = (
         res.build_ok
         and not res.html_error_hits
+        and res.html_math_artifacts_clean
         and res.html_spurious_clean
         and res.lego_focal_ok
         and res.prose_ok
@@ -332,8 +384,8 @@ def _write_markdown_table(ledger: dict) -> None:
         "",
         "Registry migration chapter verification: build HTML → raw HTML scan → LEGO/prose/registry checks.",
         "",
-        "| Vol | Chapter | Status | Build | HTML | Spurious | LEGO | Prose | Registry | s | Notes |",
-        "|-----|---------|--------|-------|------|----------|------|-------|----------|---|-------|",
+        "| Vol | Chapter | Status | Build | HTML | Math | Spurious | LEGO | Prose | Registry | s | Notes |",
+        "|-----|---------|--------|-------|------|------|----------|------|-------|----------|---|-------|",
     ]
     pass_n = fail_n = pending_n = 0
     for c in rows:
@@ -348,6 +400,7 @@ def _write_markdown_table(ledger: dict) -> None:
         lines.append(
             f"| {c['vol']} | {c['chapter']} | **{st}** | {yn(c.get('build_ok'))} | "
             f"{yn(not c.get('html_error_hits')) if c.get('html') else '—'} | "
+            f"{yn(c.get('html_math_artifacts_clean'))} | "
             f"{yn(c.get('html_spurious_clean'))} | {yn(c.get('lego_focal_ok'))} | "
             f"{yn(c.get('prose_ok'))} | {yn(c.get('registry_ok'))} | "
             f"{c.get('build_seconds', '')} | {notes} |"

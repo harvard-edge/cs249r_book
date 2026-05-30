@@ -4252,47 +4252,6 @@ These benefits compound: a practitioner might simultaneously double batch size (
 
 ```{python}
 #| echo: false
-#| label: mixed-precision-speedup-calc
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ MIXED PRECISION SPEEDUP CALCULATION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Mixed Precision Training callout—computational speedup section
-# │
-# │ Goal: Contrast throughput between full and mixed precision formats.
-# │ Show: The 3× speedup gained from hardware tensor cores in mixed precision mode.
-# │ How: Compare benchmarked samples per second on V100 hardware.
-# │
-# │ Imports: mlsysim.book (fmt)
-# │ Exports: v100_mp_speedup_str
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, check
-
-# ┌── LEGO ───────────────────────────────────────────────
-class MixedPrecisionSpeedup:
-    """
-    Namespace for Mixed Precision Speedup.
-    Scenario: V100 throughput (samples/sec) FP32 vs FP16.
-    """
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    throughput_fp32 = 90.0
-    throughput_fp16 = 220.0
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    speedup = throughput_fp16 / throughput_fp32
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(speedup >= 2.0, f"Speedup ({speedup:.1f}x) is too small to justify mixed precision complexity.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    v100_mp_speedup_str = fmt(speedup, precision=1, commas=False, suffix='×')
-    throughput_fp32_str = fmt(throughput_fp32, precision=0, commas=False)
-    throughput_fp16_str = fmt(throughput_fp16, precision=0, commas=False)
-```
-
-```{python}
-#| echo: false
 from mlsysim import Hardware, Models
 #| label: gpt2-mixed-precision-calc
 # ┌── LEGO ───────────────────────────────────────────────
@@ -4428,6 +4387,44 @@ Three implementation details make mixed precision viable. *Loss scaling* multipl
 
 With these stability mechanisms in place, the gains from mixed precision are measurable in throughput and dollars.
 
+```{python}
+#| echo: false
+#| label: mixed-precision-speedup-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MIXED PRECISION SPEEDUP CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Mixed Precision Training callout—computational speedup section
+# │
+# │ Goal: Contrast throughput between full and mixed precision formats.
+# │ Show: The 3x speedup gained from hardware tensor cores in mixed precision mode.
+# │ How: Compare benchmarked samples per second on V100 hardware.
+# │
+# │ Imports: mlsysim.fmt.fmt, check
+# │ Exports: MixedPrecisionSpeedup.v100_mp_speedup_str,
+# │          MixedPrecisionSpeedup.throughput_fp32_str,
+# │          MixedPrecisionSpeedup.throughput_fp16_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, check
+
+class MixedPrecisionSpeedup:
+    """V100 throughput comparison for FP32 vs FP16 mixed precision."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    throughput_fp32 = 90.0
+    throughput_fp16 = 220.0
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    speedup = throughput_fp16 / throughput_fp32
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(speedup >= 2.0, f"Speedup ({speedup:.1f}x) is too small to justify mixed precision complexity.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    v100_mp_speedup_str = fmt(speedup, precision=1, commas=False)
+    throughput_fp32_str = fmt(throughput_fp32, precision=0, commas=False)
+    throughput_fp16_str = fmt(throughput_fp16, precision=0, commas=False)
+```
+
 ::: {#nbk-training-gpt-2-mixed-precision-throughput-cost .callout-notebook title="GPT-2 mixed precision throughput and cost"}
 
 **Problem**: For the same GPT-2 XL training job on V100 Tensor Cores, how much faster and how much cheaper does mixed precision make training compared to FP32?
@@ -4436,7 +4433,7 @@ With these stability mechanisms in place, the gains from mixed precision are mea
 
 - FP32 throughput: ~`{python} MixedPrecisionSpeedup.throughput_fp32_str` samples/sec
 - FP16 throughput: ~`{python} MixedPrecisionSpeedup.throughput_fp16_str` samples/sec
-- Speedup: `{python} MixedPrecisionSpeedup.v100_mp_speedup_str` faster training
+- Speedup: `{python} MixedPrecisionSpeedup.v100_mp_speedup_str`$\times$ faster training
 
 **Cost impact** on a `{python} MixedPrecisionLossScaling.n_v100_gpus_str` cluster:
 
@@ -4836,18 +4833,18 @@ import torch
 import torch.nn.functional as F
 
 
-# Standard attention (materializes n$\times$ n matrix)
+# Standard attention (materializes n-by-n matrix)
 def standard_attention(q, k, v):
     # q, k, v: [batch, heads, seq_len, head_dim]
     scores = torch.matmul(q, k.transpose(-2, -1)) / (
         q.size(-1) ** 0.5
     )
-    attn = F.softmax(scores, dim=-1)  # n$\times$ n matrix in HBM
+    attn = F.softmax(scores, dim=-1)  # n-by-n matrix in HBM
     output = torch.matmul(attn, v)
     return output
 
 
-# Flash Attention (no n$\times$ n materialization)
+# Flash Attention (no n-by-n materialization)
 def flash_attention(q, k, v):
     # Automatically uses Flash Attention if available
     output = F.scaled_dot_product_attention(q, k, v)
@@ -5515,7 +5512,7 @@ class GPT2WalkthroughCalc:
 
 **Steps 1--3: Solve the memory problem.**
 
-This walkthrough uses batch size 4 (a memory-constrained setting); the mixed-precision callout earlier uses batch 32 and reports a `{python} MixedPrecisionMemory.fp32_t_str` FP32 baseline. The memory analysis from @sec-model-training-mixedprecision-training-9218 applies directly. At batch size 4 (see initial configuration above), baseline FP32 requires `{python} GPT2WalkthroughCalc.total_fp32_str`, an immediate OOM on a `{python} GPT2WalkthroughCalc.v100_mem_str` V100 (Machine constraint in D·A·M terms). @Tbl-gpt2-summary reports the batch-32 equivalents (`{python} GPT2WalkthroughCalc.summary_b_total_mem_str` baseline, `{python} GPT2WalkthroughCalc.summary_o_total_mem_str` optimized). Applying mixed precision (AMP) reduces this to `{python} GPT2WalkthroughCalc.total_amp_str` (`{python} GPT2WalkthroughCalc.amp_reduction_str` memory reduction), but still exceeds `{python} GPT2WalkthroughCalc.v100_mem_str`. Adding gradient checkpointing (every four layers) reduces activations by `{python} GPT2WalkthroughCalc.checkpoint_factor_str`, bringing the total to `{python} GPT2WalkthroughCalc.total_ckpt_str`. It fits, at the cost of `{python} GPT2WalkthroughCalc.recompute_overhead_str` more compute for activation recomputation.
+This walkthrough uses batch size 4 (a memory-constrained setting); the mixed-precision callout earlier uses batch 32, and @Tbl-gpt2-summary reports the batch-32 equivalents (`{python} GPT2WalkthroughCalc.summary_b_total_mem_str` FP32 baseline, `{python} GPT2WalkthroughCalc.summary_o_total_mem_str` optimized). The memory analysis from @sec-model-training-mixedprecision-training-9218 applies directly. At batch size 4 (see initial configuration above), baseline FP32 requires `{python} GPT2WalkthroughCalc.total_fp32_str`, an immediate OOM on a `{python} GPT2WalkthroughCalc.v100_mem_str` V100 (Machine constraint in D·A·M terms). Applying mixed precision (AMP) reduces this to `{python} GPT2WalkthroughCalc.total_amp_str` (`{python} GPT2WalkthroughCalc.amp_reduction_str` memory reduction), but still exceeds `{python} GPT2WalkthroughCalc.v100_mem_str`. Adding gradient checkpointing (every four layers) reduces activations by `{python} GPT2WalkthroughCalc.checkpoint_factor_str`, bringing the total to `{python} GPT2WalkthroughCalc.total_ckpt_str`. It fits, at the cost of `{python} GPT2WalkthroughCalc.recompute_overhead_str` more compute for activation recomputation.
 
 With memory solved, the next step is determining whether throughput is acceptable.
 
@@ -5663,9 +5660,9 @@ class GPT2SummaryCalc:
     o_time_str = f"{fmt(o_time, precision=1, commas=False)} days"
     o_energy_str = f"{fmt_int(round(o_energy), commas=True)} kWh"
     o_cost_str = f"${fmt(o_cost, precision=1, commas=True)}"
-    o_carbon_str = f"~{fmt(o_carbon, precision=1, commas=False)} tons CO~2~"
+    o_carbon_str = f"~{fmt_int(round(o_carbon), commas=False)} tons CO~2~"
     energy_reduction_pct_str = fmt(energy_reduction_pct, precision=0, commas=False, suffix='%')
-    grid_kg_kwh_str = fmt(grid_kg_co2_per_kwh, precision=2, commas=False, suffix=' kWh')
+    grid_kg_kwh_str = fmt(grid_kg_co2_per_kwh, precision=2, commas=False)
 ```
 
 @Tbl-gpt2-summary compiles the cluster-level impact of applying mixed-precision training, gradient checkpointing, and the data-pipeline utilization gains from the walkthrough to GPT-2.

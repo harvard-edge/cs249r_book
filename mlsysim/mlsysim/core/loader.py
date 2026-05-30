@@ -19,6 +19,7 @@ See ``.claude/rules/mlsysim.md`` → *Storage format*.
 """
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 from typing import Any
 import yaml
@@ -27,6 +28,43 @@ from .registry import Registry
 
 _TECH_PREFIX = "@tech:"
 _PROV_PREFIX = "@prov:"
+
+
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """Safe YAML loader that rejects duplicate mapping keys."""
+
+
+def _construct_unique_mapping(loader: _UniqueKeyLoader, node, deep: bool = False):
+    loader.flatten_mapping(node)
+    mapping = {}
+    source = getattr(getattr(loader, "stream", None), "name", "<yaml>")
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            raise ValueError(f"duplicate YAML key {key!r} in {source}")
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+_UniqueKeyLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    _construct_unique_mapping,
+)
+
+
+def _caller_module(default: str = __name__) -> str:
+    frame = inspect.currentframe()
+    caller = frame.f_back.f_back if frame and frame.f_back and frame.f_back.f_back else None
+    return caller.f_globals.get("__name__", default) if caller else default
+
+
+def _load_mapping(yaml_file) -> dict[str, Any]:
+    path = Path(yaml_file)
+    with path.open(encoding="utf-8") as fh:
+        raw = yaml.load(fh, Loader=_UniqueKeyLoader)
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path} must contain a YAML mapping")
+    return raw
 
 
 def _resolve(node: Any, tech_root: Any) -> Any:
@@ -75,15 +113,16 @@ def _instantiate(raw: dict, *, model_cls, type_map, tech_root):
     return cls(**_resolve(raw, tech_root))
 
 
-def _build(entries: dict, *, name: str, doc: str, model_cls, type_map, tech_root) -> type:
-    attrs: dict[str, Any] = {"__doc__": doc}
+def _build(entries: dict, *, name: str, doc: str, model_cls, type_map, tech_root, module: str) -> type:
+    attrs: dict[str, Any] = {"__doc__": doc, "__module__": module}
     for key, raw in entries.items():
         attrs[key] = _instantiate(raw, model_cls=model_cls, type_map=type_map, tech_root=tech_root)
     return type(name, (Registry,), attrs)
 
 
 def load_registry(data_dir, model_cls=None, *, name: str, doc: str = "",
-                  tech_root: Any = None, type_map: dict | None = None) -> type:
+                  tech_root: Any = None, type_map: dict | None = None,
+                  module: str | None = None) -> type:
     """Build a ``Registry`` subclass from one-entry-per-file YAML in ``data_dir``.
 
     Each ``*.yaml`` becomes one validated instance, exposed as a class attribute
@@ -93,14 +132,27 @@ def load_registry(data_dir, model_cls=None, *, name: str, doc: str = "",
     per-chip hardware data.
     """
     data_dir = Path(data_dir)
+    if not data_dir.is_dir():
+        raise FileNotFoundError(f"registry data directory not found: {data_dir}")
     entries: dict[str, Any] = {}
-    for yaml_file in sorted(data_dir.glob("*.yaml")):
-        raw = yaml.safe_load(yaml_file.read_text(encoding="utf-8"))
-        entries[raw.pop("__key__", yaml_file.stem)] = raw
-    return _build(entries, name=name, doc=doc, model_cls=model_cls, type_map=type_map, tech_root=tech_root)
+    seen_files: dict[str, Path] = {}
+    yaml_files = sorted(data_dir.glob("*.yaml"))
+    if not yaml_files:
+        raise ValueError(f"registry data directory has no YAML files: {data_dir}")
+    for yaml_file in yaml_files:
+        raw = _load_mapping(yaml_file)
+        key = raw.pop("__key__", yaml_file.stem)
+        if key in entries:
+            raise ValueError(f"duplicate registry key {key!r} in {yaml_file} and {seen_files[key]}")
+        entries[key] = raw
+        seen_files[key] = yaml_file
+    return _build(
+        entries, name=name, doc=doc, model_cls=model_cls, type_map=type_map,
+        tech_root=tech_root, module=module or _caller_module(),
+    )
 
 
-def load_sourced_registry(yaml_file, *, name: str, doc: str = "") -> type:
+def load_sourced_registry(yaml_file, *, name: str, doc: str = "", module: str | None = None) -> type:
     """Build a ``Registry`` of provenance-carrying scalars from a YAML file.
 
     For literature/anchor registries whose entries are ``sourced(value, prov, …)``
@@ -114,8 +166,8 @@ def load_sourced_registry(yaml_file, *, name: str, doc: str = "") -> type:
     from .provenance import sourced
     from . import provenance_catalog as pc
 
-    raw = yaml.safe_load(Path(yaml_file).read_text(encoding="utf-8"))
-    attrs: dict[str, Any] = {"__doc__": doc}
+    raw = _load_mapping(yaml_file)
+    attrs: dict[str, Any] = {"__doc__": doc, "__module__": module or _caller_module()}
     for key, v in raw.items():
         if isinstance(v, dict) and "provenance" in v:
             attrs[key] = sourced(
@@ -128,7 +180,8 @@ def load_sourced_registry(yaml_file, *, name: str, doc: str = "") -> type:
 
 
 def load_collection(yaml_file, model_cls=None, *, name: str, doc: str = "",
-                    tech_root: Any = None, type_map: dict | None = None) -> type:
+                    tech_root: Any = None, type_map: dict | None = None,
+                    module: str | None = None) -> type:
     """Build a ``Registry`` subclass from a single per-category YAML file.
 
     The file is a mapping ``{attr_name: entry_dict}``; each entry validates into
@@ -136,5 +189,8 @@ def load_collection(yaml_file, model_cls=None, *, name: str, doc: str = "",
     schemas). Used for per-category model data, where the cohesive set is more
     useful read together than split across files.
     """
-    raw = yaml.safe_load(Path(yaml_file).read_text(encoding="utf-8"))
-    return _build(raw, name=name, doc=doc, model_cls=model_cls, type_map=type_map, tech_root=tech_root)
+    raw = _load_mapping(yaml_file)
+    return _build(
+        raw, name=name, doc=doc, model_cls=model_cls, type_map=type_map,
+        tech_root=tech_root, module=module or _caller_module(),
+    )

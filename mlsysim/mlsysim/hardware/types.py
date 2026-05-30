@@ -10,7 +10,7 @@ class ComputeCore(BaseModel):
     Contains the theoretical peak throughput capabilities of the silicon,
     differentiated by numerical precision.
     """
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
     peak_flops: Quantity
     precision_flops: Dict[str, Quantity] = Field(default_factory=dict)
     # Streaming-multiprocessor count. Present for GPUs; absent (None) for device
@@ -25,7 +25,7 @@ class MemoryHierarchy(BaseModel):
     Captures capacity and bandwidth across different levels of the memory
     hierarchy, from primary HBM/DRAM down to on-chip SRAM or Flash storage.
     """
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
     capacity: Quantity           # Primary memory (HBM for GPUs, SRAM for MCUs)
     bandwidth: Quantity          # Primary memory bandwidth
     # On-chip SRAM (optional — for modeling FlashAttention tiling on GPUs,
@@ -48,7 +48,7 @@ class StorageHierarchy(BaseModel):
     Crucial for analyzing checkpointing overheads and the Data Wall (data
     ingestion rates for training).
     """
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
     capacity: Quantity
     bandwidth: Quantity
     latency: Optional[Quantity] = None
@@ -60,7 +60,7 @@ class IOInterconnect(BaseModel):
     Used to model PCIe links (host to device) or NVLink/ICI connections
     (device to device within a node).
     """
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
     name: str # e.g., "PCIe Gen4 x16"
     bandwidth: Quantity
     latency: Optional[Quantity] = None
@@ -73,7 +73,7 @@ class HardwareNode(BaseModel):
     the compute, memory, IO, and power constraints of a single physical device 
     (e.g., an NVIDIA H100 GPU or a Jetson Orin Nano).
     """
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
     name: str
     release_year: int
     compute: ComputeCore

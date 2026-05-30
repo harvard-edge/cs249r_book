@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Optional, Union
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Scalar = Union[int, float]
 
@@ -23,6 +23,8 @@ class ProvenanceKind(str, Enum):
 
 class Provenance(BaseModel):
     """How we know a numeric value (package audit trail; not BibTeX)."""
+
+    model_config = ConfigDict(extra="forbid")
 
     kind: ProvenanceKind
     ref: str = Field(min_length=1)

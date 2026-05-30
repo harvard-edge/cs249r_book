@@ -22,7 +22,7 @@ def analyze(path: Path) -> dict:
         return {"path": str(path), "skipped": True}
 
     lines = content.splitlines()
-    cells: list[tuple[int, str, str | None]] = []
+    cells: list[tuple[int, int, str, str | None]] = []
     i = 0
     while i < len(lines):
         if CELL_START.match(lines[i]):
@@ -32,16 +32,17 @@ def analyze(path: Path) -> dict:
                 j += 1
             block = "\n".join(lines[i : j + 1])
             m = CLASS.search(block)
-            cells.append((i + 1, block, m.group(1) if m else None))
+            cells.append((i + 1, j + 1, block, m.group(1) if m else None))
             i = j + 1
         else:
             i += 1
 
-    class_cell = {cls: start for start, _, cls in cells if cls}
-    class_block = {cls: block for start, block, cls in cells if cls}
+    class_cell = {cls: start for start, _, _, cls in cells if cls}
+    class_cell_end = {cls: end for _, end, _, cls in cells if cls}
+    class_block = {cls: block for _, _, block, cls in cells if cls}
 
     cross: dict[str, list[str]] = defaultdict(list)
-    for _, block, cls in cells:
+    for _, _, block, cls in cells:
         if not cls:
             continue
         for other in class_cell:
@@ -70,7 +71,7 @@ def analyze(path: Path) -> dict:
             continue
         span = ref_lines[-1] - ref_lines[0]
         sections = {section_at(ln) for ln in ref_lines}
-        gap = ref_lines[0] - cell_line
+        gap = ref_lines[0] - class_cell_end[cls]
         flags = []
         if cross.get(cls):
             flags.append(f"cross_cell:{','.join(cross[cls])}")

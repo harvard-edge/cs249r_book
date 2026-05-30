@@ -5,7 +5,7 @@ from ..core.types import Metadata, Quantity
 
 
 class DatasetProfile(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
     name: str
     training_examples: Optional[Quantity] = None
     test_examples: Optional[Quantity] = None
