@@ -108,6 +108,10 @@ class RenderCommand:
     # ------------------------------------------------------------------
 
     def run(self, args: List[str]) -> bool:
+        if args == ["help"]:
+            self._print_help()
+            return True
+
         parser = argparse.ArgumentParser(
             prog="binder render",
             description="Render generated figures to a browsable gallery",

@@ -1,8 +1,13 @@
 # scripts/
 
-Utility scripts for auditing and maintaining the ML Systems textbook.
+Utility scripts that sit outside the Binder CLI.
 
-## Active scripts
+Binder is the public command surface for book build/check/fix/format workflows.
+If a task is part of routine book automation or pre-commit, prefer
+`./book/binder ...`. Keep this directory for one-off audit helpers and
+cross-workflow utilities that do not belong to the book CLI.
+
+## Standalone audit helpers
 
 | Script | Purpose |
 |--------|---------|
@@ -10,8 +15,8 @@ Utility scripts for auditing and maintaining the ML Systems textbook.
 | `exec_analysis.py` | Execution analysis helper for mlsysim scenarios. |
 | `exec_single.py` | Single-scenario execution runner. |
 | `audit_blocks.py` | Audits code block structure across chapters. |
-| `check_lego_vars.py` | Validates LEGO cell variable exports match inline refs. |
 | `cross-references/` | Cross-reference audit tooling (see `cross-references/README.md`). |
+| `version/` | Shared release hash/manifest helpers used by site workflows. |
 
 ## Prerequisites
 
@@ -24,6 +29,5 @@ Run from the repository root:
 
 ```bash
 python3 scripts/figure_audit.py
-python3 scripts/check_lego_vars.py
 python3 scripts/cross-references/audit_crossrefs.py
 ```

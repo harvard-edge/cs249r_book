@@ -414,6 +414,10 @@ class HeadingsCommand:
     # ------------------------------------------------------------------
 
     def run(self, args: List[str]) -> bool:
+        if args == ["help"]:
+            self._print_help()
+            return True
+
         parser = argparse.ArgumentParser(
             prog="binder headings",
             description="Heading-case enforcement (MIT Press §10.3.1)",

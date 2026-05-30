@@ -9,6 +9,7 @@ and managing the Machine Learning Systems textbook.
 import sys
 from pathlib import Path
 from rich.console import Console
+from rich.markup import escape as _rich_escape
 from rich.table import Table
 from rich.panel import Panel
 from rich.text import Text
@@ -34,8 +35,14 @@ from cli.commands.newsletter import NewsletterCommand
 from cli.commands.headings import HeadingsCommand
 from cli.commands.layout import LayoutCommand
 from cli.commands.audit import AuditCommand
+from cli.commands.reset import ResetCommand
 
 console = Console()
+
+
+def _cmd(text: str) -> str:
+    """Escape command examples before rendering in Rich tables."""
+    return _rich_escape(text)
 
 
 class MLSysBookCLI:
@@ -72,6 +79,7 @@ class MLSysBookCLI:
         self.headings_command = HeadingsCommand(self.config_manager, self.chapter_discovery)
         self.layout_command = LayoutCommand(self.config_manager, self.chapter_discovery)
         self.audit_command = AuditCommand(self.config_manager, self.chapter_discovery)
+        self.reset_command = ResetCommand(self.build_command)
 
     def show_banner(self):
         """Display the CLI banner."""
@@ -92,9 +100,8 @@ class MLSysBookCLI:
         fast_table.add_column("Description", style="white", width=30)
         fast_table.add_column("Example", style="dim", width=30)
 
-        fast_table.add_row("build [fmt] [chapter[,ch2,...]]", "Build HTML/PDF/EPUB by format", "./binder build pdf intro")
-        fast_table.add_row("preview [chapter[,ch2,...]]", "Start live dev server with hot reload", "./binder preview intro")
-        fast_table.add_row("pdf|epub|html reset [--vol1|--vol2]", "Reset commented files in config", "./binder pdf reset --vol1")
+        fast_table.add_row(_cmd("build [fmt] [chapter[,ch2,...]]"), "Build HTML/PDF/EPUB by format", _cmd("./binder build pdf intro"))
+        fast_table.add_row(_cmd("preview [chapter[,ch2,...]]"), "Start live dev server with hot reload", _cmd("./binder preview intro"))
 
         # Volume Commands
         vol_table = Table(show_header=True, header_style="bold magenta", box=None)
@@ -102,14 +109,14 @@ class MLSysBookCLI:
         vol_table.add_column("Description", style="white", width=30)
         vol_table.add_column("Example", style="dim", width=30)
 
-        vol_table.add_row("build html --vol1", "Build Volume I website", "./binder build html --vol1")
-        vol_table.add_row("build html --vol2", "Build Volume II website", "./binder build html --vol2")
-        vol_table.add_row("build pdf --vol1", "Build Volume I as PDF", "./binder build pdf --vol1")
-        vol_table.add_row("build pdf --vol2", "Build Volume II as PDF", "./binder build pdf --vol2")
-        vol_table.add_row("build epub --vol1", "Build Volume I as EPUB", "./binder build epub --vol1")
-        vol_table.add_row("build epub --vol2", "Build Volume II as EPUB", "./binder build epub --vol2")
-        vol_table.add_row("list --vol1", "List Volume I chapters", "./binder list --vol1")
-        vol_table.add_row("list --vol2", "List Volume II chapters", "./binder list --vol2")
+        vol_table.add_row(_cmd("build html --vol1"), "Build Volume I website", _cmd("./binder build html --vol1"))
+        vol_table.add_row(_cmd("build html --vol2"), "Build Volume II website", _cmd("./binder build html --vol2"))
+        vol_table.add_row(_cmd("build pdf --vol1"), "Build Volume I as PDF", _cmd("./binder build pdf --vol1"))
+        vol_table.add_row(_cmd("build pdf --vol2"), "Build Volume II as PDF", _cmd("./binder build pdf --vol2"))
+        vol_table.add_row(_cmd("build epub --vol1"), "Build Volume I as EPUB", _cmd("./binder build epub --vol1"))
+        vol_table.add_row(_cmd("build epub --vol2"), "Build Volume II as EPUB", _cmd("./binder build epub --vol2"))
+        vol_table.add_row(_cmd("list --vol1"), "List Volume I chapters", _cmd("./binder list --vol1"))
+        vol_table.add_row(_cmd("list --vol2"), "List Volume II chapters", _cmd("./binder list --vol2"))
 
         # Full Book Commands
         full_table = Table(show_header=True, header_style="bold blue", box=None)
@@ -117,11 +124,11 @@ class MLSysBookCLI:
         full_table.add_column("Description", style="white", width=30)
         full_table.add_column("Example", style="dim", width=30)
 
-        full_table.add_row("build", "Build entire book as static HTML", "./binder build")
-        full_table.add_row("build html --all", "Build ALL chapters using HTML config", "./binder build html --all")
-        full_table.add_row("preview", "Start live dev server for entire book", "./binder preview")
-        full_table.add_row("build pdf --all", "Build full book (both volumes)", "./binder build pdf --all")
-        full_table.add_row("build epub --all", "Build full book (both volumes)", "./binder build epub --all")
+        full_table.add_row(_cmd("build"), "Build entire book as static HTML", _cmd("./binder build"))
+        full_table.add_row(_cmd("build html --all"), "Build ALL chapters using HTML config", _cmd("./binder build html --all"))
+        full_table.add_row(_cmd("preview"), "Start live dev server for entire book", _cmd("./binder preview"))
+        full_table.add_row(_cmd("build pdf --all"), "Build full book (both volumes)", _cmd("./binder build pdf --all"))
+        full_table.add_row(_cmd("build epub --all"), "Build full book (both volumes)", _cmd("./binder build epub --all"))
 
         # Quality Commands
         quality_table = Table(show_header=True, header_style="bold yellow", box=None)
@@ -129,20 +136,20 @@ class MLSysBookCLI:
         quality_table.add_column("Description", style="white", width=30)
         quality_table.add_column("Example", style="dim", width=28)
 
-        quality_table.add_row("check <group> [--scope ...]", "Run validation checks", "./binder check refs")
-        quality_table.add_row("check all", "Run all validation checks", "./binder check all --vol1")
-        quality_table.add_row("check spelling", "Spell check prose and TikZ", "./binder check spelling")
-        quality_table.add_row("check pdf --vol1|--vol2", "Verify built PDF cross-refs", "./binder check pdf --vol1")
-        quality_table.add_row("check registry", "Registry migration gates", "./binder check registry")
-        quality_table.add_row("audit chapter-pdf|html", "Per-chapter build audit ledger", "./binder audit chapter-pdf --vol1 training")
-        quality_table.add_row("fix <topic> <action>", "Fix/manage content", "./binder fix headers add")
-        quality_table.add_row("format <target>", "Auto-format content", "./binder format tables")
-        quality_table.add_row("info stats [--by-chapter]", "Book statistics (words, figs, ...)", "./binder info stats --vol1")
-        quality_table.add_row("info figures [--format csv]", "Extract figure list", "./binder info figures --vol1")
-        quality_table.add_row("info concepts|headers|acronyms", "Extract concepts, headers, acronyms", "./binder info concepts --vol1")
-        quality_table.add_row("bib list|clean|update|sync", "Bibliography management", "./binder bib sync --vol1")
-        quality_table.add_row("render plots [--vol1|chapter]", "Render matplotlib plots to PNG gallery", "./binder render plots --vol1")
-        quality_table.add_row("layout check <pdf> [--threshold]", "Flag PDF pages with excessive bottom whitespace", "./binder layout check book.pdf")
+        quality_table.add_row(_cmd("check <group> [--scope ...]"), "Run validation checks", _cmd("./binder check refs"))
+        quality_table.add_row(_cmd("check all"), "Run all validation checks", _cmd("./binder check all --vol1"))
+        quality_table.add_row(_cmd("check spelling"), "Spell check prose and TikZ", _cmd("./binder check spelling"))
+        quality_table.add_row(_cmd("check pdf --vol1|--vol2"), "Verify built PDF cross-refs", _cmd("./binder check pdf --vol1"))
+        quality_table.add_row(_cmd("check registry"), "Registry migration gates", _cmd("./binder check registry"))
+        quality_table.add_row(_cmd("audit chapter-pdf|html"), "Per-chapter build audit ledger", _cmd("./binder audit chapter-pdf --vol1 training"))
+        quality_table.add_row(_cmd("fix <topic> <action>"), "Fix/manage content", _cmd("./binder fix headers add"))
+        quality_table.add_row(_cmd("format <target>"), "Auto-format content", _cmd("./binder format tables"))
+        quality_table.add_row(_cmd("info stats [--by-chapter]"), "Book statistics (words, figs, ...)", _cmd("./binder info stats --vol1"))
+        quality_table.add_row(_cmd("info figures [--format csv]"), "Extract figure list", _cmd("./binder info figures --vol1"))
+        quality_table.add_row(_cmd("info concepts|headers|acronyms"), "Extract concepts, headers, acronyms", _cmd("./binder info concepts --vol1"))
+        quality_table.add_row(_cmd("bib mechanical|normalize|sync"), "Bibliography management", _cmd("./binder bib sync --vol1"))
+        quality_table.add_row(_cmd("render plots [--vol1|chapter]"), "Render matplotlib plots to PNG gallery", _cmd("./binder render plots --vol1"))
+        quality_table.add_row(_cmd("layout check <pdf> [--threshold]"), "Flag PDF pages with excessive bottom whitespace", _cmd("./binder layout check book.pdf"))
 
         # Newsletter Commands
         nl_table = Table(show_header=True, header_style="bold magenta", box=None)
@@ -150,12 +157,12 @@ class MLSysBookCLI:
         nl_table.add_column("Description", style="white", width=30)
         nl_table.add_column("Example", style="dim", width=28)
 
-        nl_table.add_row("newsletter new <title>", "Create a new draft", './binder newsletter new "Vol2 Update"')
-        nl_table.add_row("newsletter list", "List drafts and sent", "./binder newsletter list")
-        nl_table.add_row("newsletter preview <slug>", "Preview a draft", "./binder newsletter preview vol2")
-        nl_table.add_row("newsletter publish <slug>", "Push draft to Buttondown", "./binder newsletter publish vol2")
-        nl_table.add_row("newsletter fetch", "Pull sent emails for website", "./binder newsletter fetch")
-        nl_table.add_row("newsletter status", "Subscriber count & recent", "./binder newsletter status")
+        nl_table.add_row(_cmd("newsletter new <title>"), "Create a new draft", _cmd('./binder newsletter new "Vol2 Update"'))
+        nl_table.add_row(_cmd("newsletter list"), "List drafts and sent", _cmd("./binder newsletter list"))
+        nl_table.add_row(_cmd("newsletter preview <slug>"), "Preview a draft", _cmd("./binder newsletter preview vol2"))
+        nl_table.add_row(_cmd("newsletter publish <slug>"), "Push draft to Buttondown", _cmd("./binder newsletter publish vol2"))
+        nl_table.add_row(_cmd("newsletter fetch"), "Pull sent emails for website", _cmd("./binder newsletter fetch"))
+        nl_table.add_row(_cmd("newsletter status"), "Subscriber count & recent", _cmd("./binder newsletter status"))
 
         # Management Commands
         mgmt_table = Table(show_header=True, header_style="bold blue", box=None)
@@ -163,14 +170,15 @@ class MLSysBookCLI:
         mgmt_table.add_column("Description", style="white", width=30)
         mgmt_table.add_column("Example", style="dim", width=28)
 
-        mgmt_table.add_row("debug <fmt> --vol1|--vol2", "Find failing chapter + section", "./binder debug pdf --vol1")
-        mgmt_table.add_row("clean", "Clean build artifacts", "./binder clean")
-        mgmt_table.add_row("switch <format>", "Switch active config", "./binder switch pdf")
-        mgmt_table.add_row("list", "List available chapters", "./binder list")
-        mgmt_table.add_row("status", "Show current config status", "./binder status")
-        mgmt_table.add_row("doctor", "Run comprehensive health check", "./binder doctor")
-        mgmt_table.add_row("setup", "Setup development environment", "./binder setup")
-        mgmt_table.add_row("help", "Show this help", "./binder help")
+        mgmt_table.add_row(_cmd("debug <fmt> --vol1|--vol2"), "Find failing chapter + section", _cmd("./binder debug pdf --vol1"))
+        mgmt_table.add_row(_cmd("reset <fmt|all> [--vol1|--vol2]"), "Reset build YAML configs", _cmd("./binder reset pdf --vol1"))
+        mgmt_table.add_row(_cmd("clean [html|pdf|epub|artifacts]"), "Clean generated artifacts", _cmd("./binder clean artifacts"))
+        mgmt_table.add_row(_cmd("switch <format>"), "Switch active config", _cmd("./binder switch pdf"))
+        mgmt_table.add_row(_cmd("list"), "List available chapters", _cmd("./binder list"))
+        mgmt_table.add_row(_cmd("status"), "Show current config status", _cmd("./binder status"))
+        mgmt_table.add_row(_cmd("doctor"), "Run comprehensive health check", _cmd("./binder doctor"))
+        mgmt_table.add_row(_cmd("setup"), "Setup development environment", _cmd("./binder setup"))
+        mgmt_table.add_row(_cmd("help"), "Show this help", _cmd("./binder help"))
 
         # Display tables
         console.print(Panel(fast_table, title="⚡ Fast Chapter Commands", border_style="green"))
@@ -257,6 +265,11 @@ class MLSysBookCLI:
             ./binder build epub --vol2
             ./binder build html intro,frameworks
         """
+        if args and args[0].lower() == "reset":
+            console.print("[red]`binder build reset` was removed.[/red]")
+            console.print("[yellow]Use: ./binder reset <html|pdf|epub|all> [--vol1|--vol2][/yellow]")
+            return False
+
         if "-h" in args or "--help" in args:
             console.print("Usage: ./binder build [html|pdf|epub] [chapters] [--vol1|--vol2|--all] [--skip-hygiene] [--skip-validate]", markup=False)
             console.print("[dim]Examples:[/dim]")
@@ -306,28 +319,15 @@ class MLSysBookCLI:
             return self.build_command.build_full("html")
         return self.build_command.build_full(format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
 
-    def handle_format_reset_command(self, format_type: str, args) -> bool:
-        """Handle shorthand reset command, e.g. ./binder pdf reset --vol1."""
-        if not args:
-            console.print(f"[red]❌ Usage: ./binder {format_type} reset [--vol1|--vol2][/red]")
-            return False
-
-        action = args[0].lower()
-        if action != "reset":
-            console.print(f"[red]❌ Unknown {format_type} subcommand: {action}[/red]")
-            console.print(f"[yellow]💡 Supported: ./binder {format_type} reset [--vol1|--vol2][/yellow]")
-            return False
-
-        volume = None
-        if "--vol1" in args[1:]:
-            volume = "vol1"
-        elif "--vol2" in args[1:]:
-            volume = "vol2"
-
-        return self.build_command.reset_build_config(format_type, volume)
-
     def handle_preview_command(self, args):
         """Handle preview command."""
+        if args and args[0].lower() in ("help", "-h", "--help"):
+            console.print("Usage: ./binder preview [chapter]", markup=False)
+            console.print("[dim]Examples:[/dim]")
+            console.print("[dim]  ./binder preview[/dim]")
+            console.print("[dim]  ./binder preview vol1/training[/dim]")
+            return True
+
         self.config_manager.show_symlink_status()
 
         if len(args) < 1:
@@ -347,10 +347,17 @@ class MLSysBookCLI:
 
     def handle_doctor_command(self, args):
         """Handle doctor/health check command."""
+        if args and args[0].lower() in ("help", "-h", "--help"):
+            console.print("Usage: ./binder doctor", markup=False)
+            console.print("[dim]Run comprehensive local tooling and repository health checks.[/dim]")
+            return True
         return self.doctor_command.run_health_check()
 
     def handle_clean_command(self, args):
         """Handle clean command."""
+        if args and args[0].lower() in ("help", "-h", "--help"):
+            self.clean_command.print_help()
+            return True
         if len(args) > 0:
             target = args[0].lower()
             if target in ["html", "pdf", "epub"]:
@@ -367,6 +374,9 @@ class MLSysBookCLI:
 
     def handle_switch_command(self, args):
         """Handle switch command."""
+        if args and args[0].lower() in ("help", "-h", "--help"):
+            console.print("Usage: ./binder switch <html|pdf|epub>", markup=False)
+            return True
         if len(args) < 1:
             console.print("[red]❌ Usage: ./binder switch <format>[/red]")
             console.print("[yellow]💡 Available formats: html, pdf, epub[/yellow]")
@@ -377,6 +387,10 @@ class MLSysBookCLI:
 
     def handle_setup_command(self, args):
         """Handle setup command."""
+        if args and args[0].lower() in ("help", "-h", "--help"):
+            console.print("Usage: ./binder setup", markup=False)
+            console.print("[dim]Install/setup local development dependencies and pre-commit hooks.[/dim]")
+            return True
         return self.maintenance_command.setup_environment()
 
     def handle_hello_command(self, args):
@@ -427,6 +441,10 @@ class MLSysBookCLI:
         """Handle layout command group (check)."""
         return self.layout_command.run(args)
 
+    def handle_reset_command(self, args):
+        """Handle reset command group."""
+        return self.reset_command.run(args)
+
 
     def handle_debug_command(self, args):
         """Handle debug command.
@@ -435,6 +453,13 @@ class MLSysBookCLI:
             ./binder debug pdf --vol1
             ./binder debug html --vol2 --chapter training
         """
+        if args and args[0].lower() in ("help", "-h", "--help"):
+            console.print("Usage: ./binder debug <pdf|html|epub> --vol1|--vol2 [--chapter <name>]", markup=False)
+            console.print("[dim]Examples:[/dim]")
+            console.print("[dim]  ./binder debug pdf --vol1[/dim]")
+            console.print("[dim]  ./binder debug html --vol2 --chapter training[/dim]")
+            return True
+
         # Parse args: first positional is format, then flags
         format_type = None
         volume = None
@@ -472,6 +497,9 @@ class MLSysBookCLI:
 
     def handle_list_command(self, args):
         """Handle list chapters command."""
+        if args and args[0].lower() in ("help", "-h", "--help"):
+            console.print("Usage: ./binder list [--vol1|--vol2]", markup=False)
+            return True
         volume = None
         if len(args) > 0:
             if args[0] == "--vol1":
@@ -484,6 +512,9 @@ class MLSysBookCLI:
 
     def handle_status_command(self, args):
         """Handle status command."""
+        if args and args[0].lower() in ("help", "-h", "--help"):
+            console.print("Usage: ./binder status", markup=False)
+            return True
         console.print("[bold blue]📊 MLSysBook CLI Status[/bold blue]")
         console.print(f"[dim]Root directory: {self.root_dir}[/dim]")
         console.print(f"[dim]Book directory: {self.config_manager.book_dir}[/dim]")
@@ -506,6 +537,13 @@ class MLSysBookCLI:
         command = args[0].lower()
         command_args = args[1:]
 
+        rich_help_commands = {
+            "audit", "bib", "clean", "fix", "format", "headings", "info",
+            "maintain", "newsletter", "render", "reset",
+        }
+        if command != "check" and command not in rich_help_commands and command_args == ["help"]:
+            command_args = ["--help"]
+
         # Command mapping
         commands = {
             "build": self.handle_build_command,
@@ -525,6 +563,7 @@ class MLSysBookCLI:
             "headings": self.handle_headings_command,
             "layout": self.handle_layout_command,
             "render": self.handle_render_command,
+            "reset": self.handle_reset_command,
             "newsletter": self.handle_newsletter_command,
             "setup": self.handle_setup_command,
             "hello": self.handle_hello_command,
@@ -552,7 +591,10 @@ class MLSysBookCLI:
             return False
 
         if command in ("html", "pdf", "epub"):
-            return self.handle_format_reset_command(command, command_args)
+            console.print(f"[red]Top-level '{command}' commands were removed.[/red]")
+            console.print(f"[yellow]Build with: ./binder build {command} ...[/yellow]")
+            console.print(f"[yellow]Reset YAML with: ./binder reset {command} [--vol1|--vol2][/yellow]")
+            return False
 
         if command in commands:
             try:

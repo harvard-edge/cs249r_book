@@ -18,10 +18,10 @@ All scripts are designed to run from the **repo root**.
 ## Quick start
 
 ```bash
-# HTML audit across the whole book (~10 minutes)
-python3 tools/audit/audit_math_rendering.py
+# HTML audit across the whole book (~10 minutes; Binder public API)
+./book/binder check math --scope render-audit
 
-# Targeted audit
+# Targeted script-level audit, useful while developing the audit itself
 python3 tools/audit/audit_math_rendering.py vol1/introduction vol2/inference
 
 # Just re-scan an existing build without rebuilding

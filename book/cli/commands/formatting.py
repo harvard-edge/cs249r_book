@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from rich.console import Console
+from rich.markup import escape as _rich_escape
 from rich.panel import Panel
 from rich.table import Table
 
@@ -46,7 +47,7 @@ class FormatCommand:
 
     def run(self, args: List[str]) -> bool:
         """Entry point — parse args and dispatch."""
-        if not args or args[0] in ("-h", "--help"):
+        if not args or args[0] in ("help", "-h", "--help"):
             self._print_help()
             return True
 
@@ -124,7 +125,11 @@ class FormatCommand:
         table.add_row("prettify", "Prettify pipe tables (align columns)")
         table.add_row("all", "Run all formatters")
 
-        console.print(Panel(table, title="binder format <target> [files...] [--check]", border_style="cyan"))
+        console.print(Panel(
+            table,
+            title=_rich_escape("binder format <target> [files...] [--check]"),
+            border_style="cyan",
+        ))
         console.print("[dim]Examples:[/dim]")
         console.print("  [cyan]./binder format blanks[/cyan]                [dim]# fix all files[/dim]")
         console.print("  [cyan]./binder format tables --check[/cyan]        [dim]# check only, no writes[/dim]")
@@ -144,6 +149,7 @@ class FormatCommand:
                 "lists": self._run_lists,
                 "divs": self._run_divs,
                 "tables": self._run_tables,
+                "prettify": self._run_prettify,
             }
             ok = dispatch[target](files, check_only)
             results.append((target, ok))

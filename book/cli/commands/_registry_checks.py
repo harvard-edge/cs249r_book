@@ -168,6 +168,7 @@ def run_registry_pytest(root: Path) -> list[RegistryIssue]:
         "tests/test_no_legacy_constant_refs.py",
         "tests/test_appendix_constants.py",
         "tests/test_registry_no_duplicate_specs.py",
+        "tests/test_provenance_audit.py",
     ]
     proc = subprocess.run(
         [sys.executable, "-m", "pytest", *tests, "-q"],

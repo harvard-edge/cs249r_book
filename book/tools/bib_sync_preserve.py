@@ -39,6 +39,7 @@ BOOK = REPO / "book"
 if str(BOOK) not in sys.path:
     sys.path.insert(0, str(BOOK))
 
+from cli.core.bib_mechanical import apply_mechanical_fixes_to_file  # noqa: E402
 from tools.bib_lint import parse_bib  # noqa: E402
 from tools.bib_lint import format_entry  # noqa: E402
 from tools.bib_lint import validate_entry  # noqa: E402
@@ -564,14 +565,10 @@ def _rewrite_companions(root: Path, renames: Sequence[Rename]) -> list[Path]:
     return touched
 
 
-def _run_bib_mechanical_fix(bib_path: Path) -> subprocess.CompletedProcess[str]:
-    script = REPO / "book" / "tools" / "bib_apply_mechanical_fixes.py"
-    return subprocess.run(
-        [sys.executable, str(script), str(bib_path)],
-        cwd=REPO,
-        capture_output=True,
-        text=True,
-    )
+def _run_bib_mechanical_fix(bib_path: Path) -> None:
+    result = apply_mechanical_fixes_to_file(bib_path)
+    if result.error:
+        raise RuntimeError(result.error)
 
 
 def _run_bib_lint_check(bib_path: Path) -> subprocess.CompletedProcess[str]:
@@ -679,12 +676,7 @@ def sync_one(bib_path: Path, dry_run: bool = False) -> bool:
         merged += _render_entries(merged_entries).rstrip() + "\n"
         if merged != original:
             bib_path.write_text(merged, encoding="utf-8")
-        fixed = _run_bib_mechanical_fix(bib_path)
-        if fixed.returncode != 0:
-            raise RuntimeError(
-                "bib mechanical fix failed:\n"
-                + (fixed.stderr.strip() or fixed.stdout.strip() or "(no output)")
-            )
+        _run_bib_mechanical_fix(bib_path)
         touched = _rewrite_companions(root, renames)
         if touched:
             print(f"  updated {len(touched)} companion file(s)")

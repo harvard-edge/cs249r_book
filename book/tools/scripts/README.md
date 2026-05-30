@@ -1,6 +1,6 @@
 # Scripts directory
 
-Python and shell automation used by the **Machine Learning Systems** textbook tooling. Most behavior is exposed through the **Book Binder** CLI; this tree is the implementation layer.
+Python and shell automation used by the **Machine Learning Systems** textbook tooling. Routine book build/check/fix/format behavior is exposed through the **Book Binder** CLI; this tree is for maintenance scripts, release tools, Quarto-adjacent helpers, and tooling that has not been migrated yet.
 
 ## Use Binder first
 
@@ -16,7 +16,7 @@ If your shell is already in **`book/`**, use `./binder` instead of `./book/binde
 
 Command reference and pre-commit mapping: **[`book/docs/BINDER.md`](../../docs/BINDER.md)**. Implementation details: **[`book/cli/README.md`](../../cli/README.md)**.
 
-Direct `python3 book/tools/scripts/...` use is for maintenance or cases not wired into Binder yet. Prefer `./book/binder` when a subcommand exists.
+Direct `python3 book/tools/scripts/...` use is for maintenance or cases not wired into Binder yet. Prefer `./book/binder` when a subcommand exists, and do not make Binder depend on scripts here for core checks.
 
 ## Subfolder docs
 

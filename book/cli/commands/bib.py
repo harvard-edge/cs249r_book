@@ -3,6 +3,7 @@
 
 Subcommands:
     list     — Show all .bib files with entry counts
+    mechanical — Apply safe §5 field-level fixes (pre-commit first step)
     clean    — Remove unused entries from .bib files
     update   — Run betterbib sync-preserve on .bib files (fetch metadata, keep citekeys stable)
     sync     — Clean then update (full pipeline)
@@ -22,6 +23,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from cli.core.bib_mechanical import run_mechanical_fixes
+
 console = Console()
 
 
@@ -37,6 +40,10 @@ class BibCommand:
     # ------------------------------------------------------------------
 
     def run(self, args: List[str]) -> bool:
+        if args == ["help"]:
+            self._print_help()
+            return True
+
         parser = argparse.ArgumentParser(
             prog="binder bib",
             description="Bibliography management",
@@ -44,9 +51,10 @@ class BibCommand:
         parser.add_argument(
             "subcommand",
             nargs="?",
-            choices=["list", "clean", "update", "sync", "normalize"],
+            choices=["list", "mechanical", "clean", "update", "sync", "normalize"],
             help="Subcommand to run",
         )
+        parser.add_argument("files", nargs="*", help=".bib file(s) for mechanical fixes")
         parser.add_argument("--path", default=None, help="File or directory")
         parser.add_argument("--vol1", action="store_true", help="Volume I only")
         parser.add_argument("--vol2", action="store_true", help="Volume II only")
@@ -54,6 +62,11 @@ class BibCommand:
             "--dry-run",
             action="store_true",
             help="Show what would change without modifying files",
+        )
+        parser.add_argument(
+            "--pre-commit",
+            action="store_true",
+            help="Mechanical fixes: exit 1 if a file was modified",
         )
 
         try:
@@ -64,6 +77,13 @@ class BibCommand:
         if not ns.subcommand:
             self._print_help()
             return True
+
+        if ns.subcommand == "mechanical":
+            return self._run_mechanical(
+                ns.files,
+                dry_run=ns.dry_run,
+                pre_commit=ns.pre_commit,
+            )
 
         root = self._resolve_path(ns.path, ns.vol1, ns.vol2)
         if ns.subcommand == "normalize":
@@ -98,6 +118,7 @@ class BibCommand:
         table.add_column("Subcommand", style="cyan", width=14)
         table.add_column("Description", style="white", width=50)
         table.add_row("list", "Show all .bib files with entry counts")
+        table.add_row("mechanical", "Apply safe §5 field-level fixes")
         table.add_row("clean", "Remove unused entries from .bib files")
         table.add_row(
             "update",
@@ -111,6 +132,7 @@ class BibCommand:
         console.print(Panel(table, title="binder bib <subcommand>", border_style="cyan"))
         console.print("[dim]Examples:[/dim]")
         console.print("  [cyan]./binder bib list --vol1[/cyan]")
+        console.print("  [cyan]./binder bib mechanical refs.bib[/cyan]")
         console.print("  [cyan]./binder bib clean --vol1 --dry-run[/cyan]")
         console.print("  [cyan]./binder bib update --vol1[/cyan]")
         console.print("  [cyan]./binder bib sync --vol1[/cyan]")
@@ -201,6 +223,29 @@ class BibCommand:
             return str(path.relative_to(self.config_manager.book_dir))
         except ValueError:
             return str(path)
+
+    # ------------------------------------------------------------------
+    # Mechanical fixes
+    # ------------------------------------------------------------------
+
+    def _run_mechanical(
+        self,
+        files: List[str],
+        *,
+        dry_run: bool = False,
+        pre_commit: bool = False,
+    ) -> bool:
+        """Apply safe section 5 mechanical fixes through Binder-native code."""
+        repo = self.config_manager.root_dir
+        return (
+            run_mechanical_fixes(
+                repo,
+                files,
+                dry_run=dry_run,
+                pre_commit=pre_commit,
+            )
+            == 0
+        )
 
     # ------------------------------------------------------------------
     # List
@@ -353,26 +398,21 @@ class BibCommand:
     def _run_normalize(self, scoped: bool, root: Path) -> bool:
         """Run the same pipeline needed for consistent .bib with pre-commit."""
         repo = self.config_manager.root_dir
-        script = repo / "book" / "tools" / "bib_apply_mechanical_fixes.py"
-        if not script.is_file():
-            console.print(f"[red]Missing {script}[/red]")
-            return False
 
         if scoped:
             bibs = self._find_bib_files(root)
             if not bibs:
                 console.print("[yellow]No .bib files in scope.[/yellow]")
                 return True
-            cmd = [sys.executable, str(script)] + [str(p) for p in bibs]
+            mechanical_files = [str(path) for path in bibs]
         else:
-            cmd = [sys.executable, str(script)]
+            mechanical_files = None
 
         console.print(
             "[bold]Step 1/3:[/bold] "
-            "Mechanical §5 fixes ([cyan]book/tools/bib_apply_mechanical_fixes.py[/cyan])…\n"
+            "Mechanical section 5 fixes ([cyan]binder bib mechanical[/cyan])...\n"
         )
-        r = subprocess.run(cmd, cwd=str(repo))
-        if r.returncode != 0:
+        if run_mechanical_fixes(repo, mechanical_files) != 0:
             return False
 
         if not shutil.which("pre-commit"):
