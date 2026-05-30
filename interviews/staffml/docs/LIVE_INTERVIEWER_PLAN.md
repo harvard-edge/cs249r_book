@@ -247,7 +247,7 @@ The end-of-interview report should tell the candidate:
 
 ### 1. Question selection (the conductor function)
 
-The AI does not see all 10,711 questions. The client pre-selects a pool
+The AI does not see all 10,711 questions. The client preselects a pool
 of questions and chains matching the session config. The AI navigates
 chains for depth and switches chains for breadth.
 

@@ -561,8 +561,8 @@ class EnergyTransmission:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     data_size = 1.0 * MB       # 1 sec audio
-    tx_energy_per_mb = NETWORK_5G_ENERGY_PER_MB_MJ
-    local_energy_op = ENERGY_MOBILENET_INF_MJ
+    tx_energy_per_mb = Systems.NetworkEnergy.Per5gMb
+    local_energy_op = Models.Vision.MobileNetV2.inference_energy
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     cloud_energy_total = (data_size * tx_energy_per_mb).to(ureg.millijoule)
@@ -920,7 +920,7 @@ These latencies, organized by category in @tbl-latency-numbers, span eight order
 | **GPT-4 first token**            |    `{python} LatencyConstants.lat_gpt4_str`    | User notices delay                 |
 | **ResNet-50 training step**      |   `{python} LatencyConstants.lat_train_str`    | Throughput-optimized               |
 
-: **Latency Numbers for ML System Design**\index{Latency!numbers, deployment constraints}\index{Memory Hierarchy!latency comparison}: Order-of-magnitude latencies across compute, memory, network, and ML operations that determine deployment feasibility. Spanning eight orders of magnitude, from nanosecond compute operations to hundreds of milliseconds for cross-region network calls, these physical constraints shape architectural decisions. For a comprehensive quick-reference including energy ratios and scaling rules, see @sec-machine-foundations-numbers-know-b531. {#tbl-latency-numbers}
+: **Latency Numbers for ML System Design**\index{Latency!numbers, deployment constraints}\index{Memory Hierarchy!latency comparison}: Order-of-magnitude latencies across compute, memory, network, and ML operations that determine deployment feasibility. Spanning eight orders of magnitude, from nanosecond compute operations to hundreds of milliseconds for cross-region network calls, these physical constraints shape architectural decisions. For a comprehensive quick-reference including energy ratios and scaling rules, see @sec-appdx-machine-foundations-numbers-know-b531. {#tbl-latency-numbers}
 
 The four deployment paradigms gain precision when grounded in concrete hardware. While @tbl-deployment-paradigms-overview defined the paradigms conceptually, @tbl-representative-systems (which appears later in this section, after the System Balance discussion) provides specific devices, processors, and quantitative thresholds that practitioners use to select deployment targets.[^fn-cost-spectrum-ml][^fn-pue-efficiency] The nine-order-of-magnitude range in power (MW cloud facilities vs. mW TinyML devices) and the wide cost spread (\$millions vs. \$10) determine which paradigm can serve a given workload economically.
 
@@ -931,7 +931,7 @@ These hardware differences translate directly into performance bottlenecks. To u
 \index{System Bottlenecks!dominant constraints}The pipelined form of the iron law of ML systems from @sec-introduction-iron-law-ml-systems-c32a states that execution time is bounded by the slowest resource, as @eq-iron-law-extended formalizes:
 $$T = \max\left( \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}}, \frac{D_{\text{vol}}}{\text{BW}}, \frac{D_{\text{vol}}}{\text{BW}_{\text{IO}}} \right) + L_{\text{lat}}$$ {#eq-iron-law-extended}
 
-Here, $O$ represents total operations, $R_{\text{peak}}$ is peak compute rate, $\eta_{\text{hw}}$ is hardware utilization efficiency, $D_{\text{vol}}$ is data volume, $\text{BW}$ is memory bandwidth, $\text{BW}_{\text{IO}}$ is I/O bandwidth (storage or network), and $L_{\text{lat}}$ is fixed overhead. The equation identifies which resource (compute, memory, or I/O) limits performance. The dominant term varies by paradigm (see @tbl-ml-systems-paradigm-bottlenecks), shifting the optimization strategy entirely. For a systematic diagnostic guide to identifying these bottlenecks, consult the D·A·M taxonomy\index{D·A·M Taxonomy!bottleneck diagnosis} (@sec-dam-taxonomy).
+Here, $O$ represents total operations, $R_{\text{peak}}$ is peak compute rate, $\eta_{\text{hw}}$ is hardware utilization efficiency, $D_{\text{vol}}$ is data volume, $\text{BW}$ is memory bandwidth, $\text{BW}_{\text{IO}}$ is I/O bandwidth (storage or network), and $L_{\text{lat}}$ is fixed overhead. The equation identifies which resource (compute, memory, or I/O) limits performance. The dominant term varies by paradigm (see @tbl-ml-systems-paradigm-bottlenecks), shifting the optimization strategy entirely. @Sec-appdx-dam-taxonomy-bottleneck-diagnostic-3fc9\index{D·A·M Taxonomy!bottleneck diagnosis} maps each dominant term to the optimizations that work and the ones that are wasted, turning this diagnosis into an action plan.
 
 :::
 
@@ -945,7 +945,7 @@ Here, $O$ represents total operations, $R_{\text{peak}}$ is peak compute rate, $
 
 : **Dominant Bottleneck by Paradigm**: Which iron-law term limits performance in each deployment paradigm, the physical reason it dominates, and the resulting optimization focus. The dominant term shifts the optimization strategy entirely: cloud training maximizes compute utilization, while LLM inference must attack memory bandwidth. {#tbl-ml-systems-paradigm-bottlenecks tbl-colwidths="[18,26,30,26]"}
 
-Roofline analysis classifies bottlenecks by comparing a workload's arithmetic intensity against the machine balance point [@williams2009]. In that framing, the same ResNet-50 model can shift from *compute-bound*\index{Compute-Bound vs. Memory-Bound!training vs. inference}\index{Roofline Model!bottleneck analysis} training behavior at high batch sizes to more memory-sensitive single-image inference at batch=1. Deployment paradigm selection must account for this shift.
+Roofline analysis classifies bottlenecks by comparing a workload's arithmetic intensity against the machine balance point [@williams2009]. We use this framing informally here; @sec-appdx-machine-foundations-roofline-model-2529 derives the model in full, defining arithmetic intensity formally and deriving the ridge point that separates the memory-bound and compute-bound regimes. In that framing, the same ResNet-50 model can shift from *compute-bound*\index{Compute-Bound vs. Memory-Bound!training vs. inference}\index{Roofline Model!bottleneck analysis} training behavior at high batch sizes to more memory-sensitive single-image inference at batch=1. Deployment paradigm selection must account for this shift.
 
 This shift between training and inference is critical to understand. Recall the D·A·M taxonomy from @tbl-dam-taxonomy: every ML system comprises Data, Algorithm, and Machine. @Tbl-dam-phase shows how each component behaves differently depending on whether the system is training (learning patterns) or serving (applying them).
 
@@ -1139,7 +1139,7 @@ ResNet-50 becomes compute bound when batching and data reuse raise arithmetic in
 
 :::
 
-As systems transition from Cloud to Edge to TinyML, available resources decrease dramatically. @Tbl-representative-systems quantifies this progression with concrete hardware examples: memory drops from 131 TB (cloud) to 520 KB (TinyML), a 250 million-fold reduction, while power budgets span nine orders of magnitude from megawatts to milliwatts[^fn-cost-spectrum-ml]. This resource disparity is most acute on microcontrollers, the primary hardware platform for TinyML, where memory and storage capacities are insufficient for conventional ML models.
+Compression matters more, not less, as the hardware budget tightens. As systems transition from Cloud to Edge to TinyML, available resources decrease dramatically. @Tbl-representative-systems quantifies this progression with concrete hardware examples: memory drops from 131 TB (cloud) to 520 KB (TinyML), a 250 million-fold reduction, while power budgets span nine orders of magnitude from megawatts to milliwatts[^fn-cost-spectrum-ml]. This resource disparity is most acute on microcontrollers, the primary hardware platform for TinyML, where memory and storage capacities are insufficient for conventional ML models.
 
 [^fn-cost-spectrum-ml]: **ML Hardware Cost Spectrum**: AI infrastructure spans six orders of magnitude in cost, from \$10 microcontrollers to multi-million-dollar GPU clusters. This million-fold range means deployment paradigm selection is simultaneously a physics decision and an economics decision. Even within individual-device choices, the same accuracy target may be achievable on a \$2 microcontroller (via aggressive quantization) or a \$30,000 GPU (at full precision), with fundamentally different latency, power, and operational cost profiles. \index{Hardware Cost!deployment spectrum}
 
@@ -1246,8 +1246,6 @@ class RepresentativeSystemsMobileRow:
 ```
 
 \index{Hardware Spectrum!resource progression}
-@tbl-representative-systems grounds these paradigms in concrete hardware platforms and price points.
-
 These deployment paradigms emerged from decades of hardware evolution, from floating-point coprocessors in the 1980s through graphics processors in the 2000s to today's domain-specific AI accelerators. @Sec-hardware-acceleration traces this historical progression and the architectural principles that drove it. Here, we focus on the consequences of this evolution: the deployment spectrum that results from having qualitatively different hardware available at different points in the infrastructure.
 
 | **Category**  |  **Example Device** |                              **Processor**                              |                           **Memory**                           |                            **Storage**                             |                                                       **Power**                                                        |                                             **Price Range**                                              |
@@ -1487,14 +1485,14 @@ above=1of $(B2.north east)!0.5!(B3.north west)$](B0){Cloud ML};
 # │ How: Apply calc_network_latency_ms() using SPEED_OF_LIGHT_FIBER_KM_S;
 # │      subtract RTT from budget to get deficit.
 # │
-# │ Imports: mlsysim.core.constants (SPEED_OF_LIGHT_FIBER_KM_S),
+# │ Imports: mlsysim.physics (SPEED_OF_LIGHT_FIBER_KM_S),
 # │          mlsysim.physics (calc_network_latency_ms), mlsysim.book (fmt, check)
 # │ Exports: DistancePenalty.sol_kms_str, DistancePenalty.rtt_formatted_str,
 # │          DistancePenalty.deficit_str, DistancePenalty.distance_km_str,
 # │          DistancePenalty.safety_budget_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.physics import calc_network_latency_ms
+from mlsysim.physics import calc_network_latency_ms, SPEED_OF_LIGHT_FIBER_KM_S
 from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -1549,7 +1547,7 @@ Cloud ML excels at processing massive data volumes through parallelized architec
 
 Beyond raw computation, cloud infrastructure creates deployment flexibility through cloud APIs, making trained models accessible worldwide across mobile, web, and IoT platforms. Shared infrastructure enables multiple teams to collaborate simultaneously with integrated version control, while pay-as-you-go pricing models[^fn-cloud-elastic-cost] eliminate upfront capital expenditure and scale elastically with demand.
 
-A common misconception holds that cloud ML's vast computational resources make it universally superior. Exceptional computational power and storage do not automatically translate to optimal solutions for all applications. The Data Gravity Invariant\index{Data Gravity Invariant!cloud limitations} in @sec-data-foundations-napkin-math-physics-data-gravity-9ae0 explains why: as data volume scales, the cost of moving it to compute $(C_{\text{move}}(D_{\text{vol}}) \gg C_{\text{move}}(\text{Compute}))$ eventually dominates. The trade-offs listed in the preceding definition become concrete when we consider where edge and embedded deployments excel: real-time response with sub-10 ms decision-making in autonomous control loops, strict data privacy for medical devices processing patient data, predictable costs through one-time hardware investment vs. recurring cloud fees, or operation in disconnected environments such as industrial equipment in remote locations. The optimal deployment paradigm depends on specific application requirements rather than raw computational capability.
+A common misconception holds that cloud ML's vast computational resources make it universally superior. Exceptional computational power and storage do not automatically translate to optimal solutions for all applications. The Data Gravity Invariant\index{Data Gravity Invariant!cloud limitations} in @sec-appdx-data-foundations-napkin-math-physics-data-gravity-9ae0 explains why: as data volume scales, the cost of moving it to compute $(C_{\text{move}}(D_{\text{vol}}) \gg C_{\text{move}}(\text{Compute}))$ eventually dominates. The trade-offs listed in the preceding definition become concrete when we consider where edge and embedded deployments excel: real-time response with sub-10 ms decision-making in autonomous control loops, strict data privacy for medical devices processing patient data, predictable costs through one-time hardware investment vs. recurring cloud fees, or operation in disconnected environments such as industrial equipment in remote locations. The optimal deployment paradigm depends on specific application requirements rather than raw computational capability.
 
 [^fn-cloud-elastic-cost]: **Pay-as-You-Go Pricing**: A cloud economic model where users pay for accelerator-hours consumed rather than hardware owned. Elastic pricing converts the fixed cost of idle $R_{\text{peak}}$ into a variable cost proportional to actual utilization, but the inverse also holds: sustained 24/7 workloads (continuous inference serving) often cost 2--3$\times$ more on cloud than equivalent on-premises hardware amortized over three years, a crossover that drives the total cost of ownership (TCO) analysis later in this section. \index{Cloud Economics!elastic pricing}
 
@@ -1747,8 +1745,6 @@ Cloud ML's\index{Cloud ML!consumer-scale applications} computational advantages 
 
 Economics drive this architecture as much as latency. Attempting to process voice interactions for billions of devices entirely in the cloud runs into both an economic and an infrastructure ceiling. Quantifying the voice assistant wall shows both limits at once.
 
-The voice assistant pipeline illustrates a core systems principle: deployment decisions are constrained by performance requirements, economic realities, and infrastructure physics. The hybrid approach reduces end-to-end latency relative to pure cloud processing while maintaining the computational power needed for complex language understanding, all within sustainable cost boundaries.
-
 ```{python}
 #| echo: false
 #| label: voice-assistant-wall-calc
@@ -1878,6 +1874,8 @@ The *economic* argument is compelling, but the *physics* argument is decisive:
 **Systems insight**: Cloud-only voice processing is not merely expensive; it is *physically impossible* at global scale. Local wake-word detection is an infrastructure necessity, not an optimization.
 
 :::
+
+The voice assistant pipeline illustrates a core systems principle: deployment decisions are constrained by performance requirements, economic realities, and infrastructure physics. The hybrid approach reduces end-to-end latency relative to pure cloud processing while maintaining the computational power needed for complex language understanding, all within sustainable cost boundaries.
 
 Recommendation engines deployed by Netflix and Amazon demonstrate another compelling application of cloud resources. These systems process massive datasets using collaborative filtering\index{Collaborative Filtering!recommendation systems} and deep learning architectures like the Deep Learning Recommendation Model (DLRM)[^fn-dlrm-memory-bound] to uncover patterns in user preferences. DLRM exemplifies a memory-capacity-bound workload: its massive embedding tables, representing millions of users and items, can exceed terabytes in size, requiring distributed memory across many servers just to store the model parameters. Cloud computational resources enable continuous updates and refinements as user data grows, with Netflix processing over 100 billion data points daily to deliver personalized content suggestions that directly enhance user engagement.
 
@@ -2107,8 +2105,8 @@ class EdgeEnergyTransmissionRecap:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     data_size = 1.0 * MB
-    tx_energy_per_mb = NETWORK_5G_ENERGY_PER_MB_MJ
-    local_energy_op = ENERGY_MOBILENET_INF_MJ
+    tx_energy_per_mb = Systems.NetworkEnergy.Per5gMb
+    local_energy_op = Models.Vision.MobileNetV2.inference_energy
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     cloud_energy_total = (data_size * tx_energy_per_mb).to(ureg.millijoule)
@@ -2674,7 +2672,7 @@ The battery life and resource constraints listed earlier translate directly into
 # │ Show: That a 2 W detector depletes a standard phone battery in under 8 hours.
 # │ How: Calculate runtime from power draw and battery capacity (Wh).
 # │
-# │ Imports: mlsysim.core.constants (PHONE_BATTERY_WH, OBJECT_DETECTOR_POWER_W)
+# │ Imports: Scenarios.MobilePower.ObjectDetector (+ MobileNpuTypical), mlsysim.core.constants
 # │ Exports: BatteryTax.pwr_w_str, BatteryTax.batt_wh_str,
 # │          BatteryTax.runtime_str, BatteryTax.budget_pct_str,
 # │          BatteryTax.runtime_frac
@@ -2691,7 +2689,7 @@ class BatteryTax:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     phone = Hardware.Mobile.iPhone15Pro
-    power_draw = OBJECT_DETECTOR_POWER_W
+    power_draw = Scenarios.MobilePower.ObjectDetector
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     battery_wh = phone.battery_capacity.to(ureg.Wh)
@@ -2759,7 +2757,7 @@ class ThermalQuantCalc:
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     baseline_power_w_value = 12                                                      # W, unoptimized LLM power
     quant_reduction_value = 4                                                        # FP32→INT8 power reduction
-    mobile_tdp_w_value = MOBILE_TDP_W.m_as(watt)
+    mobile_tdp_w_value = Scenarios.MobilePower.MobileNpuTypical.m_as(watt)
     temp_rise_c_per_s_value = 1
     trip_time_s_value = 60
     trip_temp_c_value = 80
@@ -3035,7 +3033,7 @@ TinyML's milliwatt-scale power consumption represents a six-order-of-magnitude r
 # │ How: Apply the mlsysim Engine to solve for energy-per-inference across targets.
 # │
 # │ Imports: mlsysim (Models, Hardware, Engine), mlsysim.core.constants
-# │          (BATTERY_ENERGY_J, ureg, BILLION)
+# │          (Scenarios.PhoneBattery.{EnergyJ,CapacityMah,VoltageV}, ureg, BILLION)
 # │ Exports: EnergyInference.e_gpt4_str, EnergyInference.e_resnet_cloud_str,
 # │          EnergyInference.e_resnet_edge_str, EnergyInference.e_mobilenet_str,
 # │          EnergyInference.e_kws_str, EnergyInference.q_gpt4_str,
@@ -3054,7 +3052,7 @@ class EnergyInference:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    batt_energy_j = BATTERY_ENERGY_J
+    batt_energy_j = Scenarios.PhoneBattery.EnergyJ
 
     # Use Engine.solve() to derive vetted energy bounds for lighthouse models
     # Note: Cloud LLM (GPT-4) estimate includes system-level overhead (approx 1 kJ)
@@ -3094,8 +3092,8 @@ class EnergyInference:
     q_mobilenet_str = fmt_int(batt_energy_j.m_as("J") / (e_mobilenet_mj * 1e-3), commas=True, suffix=" queries")
     q_kws_str = fmt(q_kws.m_as('') / MILLION, precision=0, commas=False, suffix=" million queries")
 
-    batt_cap_mah_str = fmt(BATTERY_CAPACITY_MAH.m_as('mAh'), precision=0, commas=False, suffix=" mAh")
-    batt_volt_str = fmt(BATTERY_VOLTAGE_V.m_as('V'), precision=1, commas=False, suffix=" V")
+    batt_cap_mah_str = fmt(Scenarios.PhoneBattery.CapacityMah.m_as('mAh'), precision=0, commas=False, suffix=" mAh")
+    batt_volt_str = fmt(Scenarios.PhoneBattery.VoltageV.m_as('V'), precision=1, commas=False, suffix=" V")
 ```
 
 ::: {#nbk-ml-systems-energy-per-inference .callout-notebook title="Energy per inference"}
@@ -4322,7 +4320,7 @@ class MobilePowerFallacyCalc:
     battery_wh_value = h_phone.battery_capacity.m_as('Wh') if h_phone.battery_capacity else 15
     low_power_w_value = 1                                                           # W, light inference
     high_power_w_value = 5                                                          # W, heavy on-device model
-    mobile_tdp_w_value = MOBILE_TDP_W.m_as(watt)
+    mobile_tdp_w_value = Scenarios.MobilePower.MobileNpuTypical.m_as(watt)
     quant_reduction_value = 4                                                       # FP32 to INT8 power reduction
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -4485,7 +4483,7 @@ class AmdahlCameraCalc:
 
 **Fallacy**: *Model optimization translates linearly to system speedup.*
 
-Amdahl's Law[^fn-amdahls-law-pipeline], formalized in @sec-machine-foundations-amdahls-law-gustafsons-law-b741,\index{Amdahl's Law!speedup limits}\index{Optimization!Amdahl's Law} establishes hard limits that the Bottleneck Principle (@sec-ml-systems-bottleneck-principle-3514) makes operational: $\text{Speedup}_{\text{overall}} = \frac{1}{(1-p) + \frac{p}{s}}$ where $p$ is the fraction of work that can be improved and $s$ is the speedup of that fraction. Consider tapping the shutter on a smartphone camera. The image passes through `{python} AmdahlCameraCalc.cam_isp_str` of signal processing (auto-exposure, white balance), `{python} AmdahlCameraCalc.cam_ml_str` of ML scene classification, and `{python} AmdahlCameraCalc.cam_post_str` of postprocessing (tone mapping, HDR merge)---`{python} AmdahlCameraCalc.cam_total_str` total. Optimizing the ML classifier to run 10$\times$ faster (`{python} AmdahlCameraCalc.cam_ml_opt_str` instead of `{python} AmdahlCameraCalc.cam_ml_str`) drops total time from `{python} AmdahlCameraCalc.cam_total_str` to `{python} AmdahlCameraCalc.cam_total_opt_str`---only `{python} AmdahlCameraCalc.cam_speedup_10x_str`$\times$ overall, not 10$\times$. Even eliminating ML entirely $(s = \infty)$ achieves only `{python} AmdahlCameraCalc.cam_speedup_inf_str`$\times$ speedup, because the remaining `{python} AmdahlCameraCalc.cam_non_ml_pct_str` of the pipeline is untouched. Effective optimization requires profiling the entire pipeline and addressing bottlenecks systematically, because system performance depends on the slowest unoptimized stage.
+Amdahl's Law[^fn-amdahls-law-pipeline]\index{Amdahl's Law!speedup limits}\index{Optimization!Amdahl's Law} establishes hard limits that the Bottleneck Principle (@sec-ml-systems-bottleneck-principle-3514) makes operational, where @sec-appdx-machine-foundations-strong-scaling-amdahls-law-c6c2 derives the strong-scaling form and works a speedup example at eight processors: $\text{Speedup}_{\text{overall}} = \frac{1}{(1-p) + \frac{p}{s}}$ where $p$ is the fraction of work that can be improved and $s$ is the speedup of that fraction. Consider tapping the shutter on a smartphone camera. The image passes through `{python} AmdahlCameraCalc.cam_isp_str` of signal processing (auto-exposure, white balance), `{python} AmdahlCameraCalc.cam_ml_str` of ML scene classification, and `{python} AmdahlCameraCalc.cam_post_str` of postprocessing (tone mapping, HDR merge)---`{python} AmdahlCameraCalc.cam_total_str` total. Optimizing the ML classifier to run 10$\times$ faster (`{python} AmdahlCameraCalc.cam_ml_opt_str` instead of `{python} AmdahlCameraCalc.cam_ml_str`) drops total time from `{python} AmdahlCameraCalc.cam_total_str` to `{python} AmdahlCameraCalc.cam_total_opt_str`---only `{python} AmdahlCameraCalc.cam_speedup_10x_str`$\times$ overall, not 10$\times$. Even eliminating ML entirely $(s = \infty)$ achieves only `{python} AmdahlCameraCalc.cam_speedup_inf_str`$\times$ speedup, because the remaining `{python} AmdahlCameraCalc.cam_non_ml_pct_str` of the pipeline is untouched. Effective optimization requires profiling the entire pipeline and addressing bottlenecks systematically, because system performance depends on the slowest unoptimized stage.
 
 [^fn-amdahls-law-pipeline]: **Amdahl's Law**: Formalized by @amdahl1967 for multiprocessor scaling, this principle applies directly to ML deployment pipelines where the model is only one stage among many. The camera example illustrates the general pattern: ML inference rarely exceeds 30--50 percent of total pipeline time in production systems, meaning even a 100$\times$ model speedup yields only about `{python} AmdahlCameraCalc.range_speedup_low_str`--`{python} AmdahlCameraCalc.range_speedup_high_str`$\times$ end-to-end improvement. Teams that benchmark model latency in isolation systematically overestimate deployment gains. \index{Amdahl's Law!pipeline bottleneck}
 

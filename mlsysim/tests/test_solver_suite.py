@@ -15,8 +15,8 @@ pytestmark = pytest.mark.solver
 from mlsysim.hardware.registry import Hardware
 from mlsysim.models.registry import Models
 from mlsysim.systems.registry import Systems
-from mlsysim.infra.registry import Infrastructure, Grids
-from mlsysim.core.solver import (
+from mlsysim.infrastructure.registry import Infrastructure, Grids
+from mlsysim.engine.solver import (
     SingleNodeModel,
     ServingModel,
     TrainingMemoryModel,
@@ -46,7 +46,7 @@ from mlsysim.core.solver import (
 from mlsysim.models.types import SparseTransformerWorkload
 from mlsysim.physics import calc_pipeline_bubble
 from mlsysim.systems.types import NetworkFabric
-from mlsysim.core.engine import Engine, PerformanceProfile
+from mlsysim.engine.engine import Engine, PerformanceProfile
 from mlsysim.core.constants import ureg, Q_
 from mlsysim.core.exceptions import OOMError
 
@@ -1209,7 +1209,7 @@ class TestInferenceScalingModel:
     def test_tokens_generated_correct(self):
         """tokens_generated should equal reasoning_steps * tokens_per_step."""
         solver = InferenceScalingModel()
-        from mlsysim.core import calibration
+        from mlsysim.engine import calibration
 
         TOKENS_PER_REASONING_STEP = calibration.TOKENS_PER_REASONING_STEP
         llama = Models.Language.Llama3_8B

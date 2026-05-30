@@ -1,11 +1,8 @@
 from .types import Node, Fleet, NetworkFabric, PodEnvelope
 from .reliability import Reliability
 from .orchestration import Orchestration
-from ..core.units import ureg, Q_, Gbps, TB
-from ..core.constants import (
-    NETWORK_10G_BW, NETWORK_100G_BW, ETHERNET_400G_BW, ETHERNET_800G_BW,
-)
-from ..core.provenance import sourced
+from ..core.units import ureg, Q_, Gbps, TB, watt, MB
+from ..core.provenance import sourced, sourced_qty
 from ..hardware.registry import Hardware
 from ..core.registry import Registry
 from ..core.types import Metadata
@@ -61,23 +58,27 @@ class Nodes(Registry):
 class Fabrics(Registry):
     """Vetted network fabrics (canonical bandwidth + latency)."""
     Ethernet_10G = NetworkFabric(
-        name="10GbE", bandwidth=NETWORK_10G_BW, latency=Q_(TCP_LATENCY_US, "us"),
+        name="10GbE", bandwidth=10 * Gbps, latency=Q_(TCP_LATENCY_US, "us"),
         metadata=Metadata(provenance=pc.BOOK_FABRIC_LATENCY),
     )
     Ethernet_100G = NetworkFabric(
-        name="100GbE", bandwidth=NETWORK_100G_BW, latency=Q_(TCP_LATENCY_US, "us"),
+        name="100GbE", bandwidth=100 * Gbps, latency=Q_(TCP_LATENCY_US, "us"),
         metadata=Metadata(provenance=pc.BOOK_FABRIC_LATENCY),
     )
     Ethernet_400G = NetworkFabric(
-        name="400GbE", bandwidth=ETHERNET_400G_BW, latency=Q_(TCP_LATENCY_US, "us"),
+        name="400GbE", bandwidth=400 * Gbps, latency=Q_(TCP_LATENCY_US, "us"),
         metadata=Metadata(provenance=_FABRIC_PROV["eth400"]),
     )
     Ethernet_800G = NetworkFabric(
-        name="800GbE", bandwidth=ETHERNET_800G_BW, latency=Q_(TCP_LATENCY_US, "us"),
+        name="800GbE", bandwidth=800 * Gbps, latency=Q_(TCP_LATENCY_US, "us"),
+        metadata=Metadata(provenance=_FABRIC_PROV["eth800"]),
+    )
+    Ethernet_1P6T = NetworkFabric(
+        name="1.6TbE", bandwidth=1600 * Gbps, latency=Q_(TCP_LATENCY_US, "us"),
         metadata=Metadata(provenance=_FABRIC_PROV["eth800"]),
     )
     RoCE_100G = NetworkFabric(
-        name="100GbE RoCE", bandwidth=NETWORK_100G_BW, latency=Q_(ROCE_LATENCY_US, "us"),
+        name="100GbE RoCE", bandwidth=100 * Gbps, latency=Q_(ROCE_LATENCY_US, "us"),
         metadata=Metadata(provenance=_FABRIC_PROV["roce"]),
     )
     InfiniBand_HDR = NetworkFabric(
@@ -162,11 +163,50 @@ class Pods(Registry):
 
 
 
+class SwitchFabric(Registry):
+    """Switch-ASIC capacity, 400G optics power, and α-β / FEC / hop latency reference
+    figures for the network-fabrics worked examples (Volume II)."""
+
+    SwitchAsic51T2 = sourced_qty(51_200 * Gbps, pc.BOOK_SWITCH_OPTICS,
+        name="Switch ASIC 51.2T", description="Single-ASIC switch capacity (51.2 Tb/s class).")
+    SwitchAsic102T4 = sourced_qty(102_400 * Gbps, pc.BOOK_SWITCH_OPTICS,
+        name="Switch ASIC 102.4T", description="Single-ASIC switch capacity (102.4 Tb/s class).")
+    OpticsPluggable400G = sourced_qty(20 * watt, pc.BOOK_SWITCH_OPTICS,
+        name="400G pluggable optics power", description="Per-module power for a 400G pluggable transceiver.")
+    OpticsCpo400G = sourced_qty(10 * watt, pc.BOOK_SWITCH_OPTICS,
+        name="400G co-packaged optics power", description="Per-port power for 400G co-packaged optics.")
+    # α-β model latency anchors. NOTE: AlphaNdr (1.5 µs) is the per-message base latency used in
+    # the ring-allreduce worked example; it is DISTINCT from the end-to-end
+    # Fabrics.InfiniBand_NDR.latency (5 µs). Both values are preserved as-is here — reconciling
+    # which is canonical is a separate editorial decision, not a taxonomy move.
+    AlphaNdr = sourced_qty(1.5 * ureg.microsecond, pc.BOOK_FABRIC_LATENCY,
+        name="α (NDR base latency)", description="Per-message base latency for the NDR α-β model worked example.")
+    AlphaRoce = sourced_qty(5.0 * ureg.microsecond, pc.BOOK_FABRIC_LATENCY,
+        name="α (RoCE base latency)", description="Per-message base latency for the RoCE α-β model worked example.")
+    HopLatency = sourced_qty(0.6 * ureg.microsecond, pc.BOOK_FABRIC_LATENCY,
+        name="Per-hop switch latency", description="Approximate per-hop store-and-forward switch latency.")
+    FecLatencyLow = sourced_qty(100 * ureg.nanosecond, pc.BOOK_FABRIC_LATENCY,
+        name="FEC latency (low)", description="Lower-bound forward-error-correction added latency.")
+    FecLatencyHigh = sourced_qty(200 * ureg.nanosecond, pc.BOOK_FABRIC_LATENCY,
+        name="FEC latency (high)", description="Upper-bound forward-error-correction added latency.")
+
+
+class NetworkEnergy(Registry):
+    """Network data-transfer energy anchors (order-of-magnitude intuition)."""
+
+    Per5gMb = sourced_qty(100 * ureg.millijoule / MB, pc.BOOK_NETWORK_ENERGY,
+        name="5G transfer energy per MB", description="Approximate radio-access energy to move 1 MB over 5G.")
+    Per1Kb = sourced_qty(1_000_000 * ureg.picojoule, pc.BOOK_NETWORK_ENERGY,
+        name="Network energy per KB", description="Approximate energy to move 1 KB across a datacenter network (~1 µJ).")
+
+
 class Systems(Registry):
     """Registry namespace for Systems."""
     Nodes = Nodes
     Clusters = Clusters
     Fabrics = Fabrics
+    SwitchFabric = SwitchFabric
+    NetworkEnergy = NetworkEnergy
     Pods = Pods
     Reliability = Reliability
     Orchestration = Orchestration()

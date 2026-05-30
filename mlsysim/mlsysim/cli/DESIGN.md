@@ -12,7 +12,7 @@ All code merged into `mlsysim/cli/` must adhere to the following five rules.
 
 ### Rule 1: Schema is Law (Pre-Computation Validation)
 
-The core physics engine (`mlsysim.core.solver`) must never receive bad data.
+The core physics engine (`mlsysim.engine.solver`) must never receive bad data.
 *   **The Design:** Every input (CLI flags, YAML files, JSON strings) must be parsed and validated by a strict Pydantic schema (e.g., `EvalNodeSchema`) *before* any core mathematical logic is invoked.
 *   **The Rationale:** If a user specifies an H100 GPU but sets the bandwidth to 100 GB/s (which is physically wrong for that chip), the schema validator rejects it immediately. This guarantees that the analytical engine only ever processes mathematically and physically valid states.
 
@@ -44,7 +44,7 @@ The CLI UX must accurately reflect the architectural rigor of the underlying eng
 ### Rule 5: Presentation is a Translation Layer, Not Logic
 
 The CLI should not do any math. It only formats the math.
-*   **The Design:** The core `mlsysim.core.solver` modules return strictly typed Pydantic objects. The CLI's only job (via `renderers.py`) is to translate that object into a `rich.Table` for humans or a JSON object for machines.
+*   **The Design:** The core `mlsysim.engine.solver` modules return strictly typed Pydantic objects. The CLI's only job (via `renderers.py`) is to translate that object into a `rich.Table` for humans or a JSON object for machines.
 *   **The Rationale:** We can completely rewrite the terminal UI in the future (e.g., adding Textual dashboards or WebAssembly interfaces) without touching a single equation.
 
 ---

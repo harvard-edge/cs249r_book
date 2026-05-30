@@ -15,7 +15,7 @@ should source values after migration.
 | Cited appendix scalars | `mlsysim/literature/registry.py` → `Literature.*` |
 | Reliability / orchestration | `mlsysim/systems/` → `Systems.Reliability.*`, `Systems.Orchestration` |
 | MLOps thresholds | `mlsysim/ops/` → `Ops.Monitoring.*` |
-| Solver/engine defaults | `mlsysim/core/calibration.py` → `mlsysim.core.calibration.*` |
+| Solver/engine defaults | `mlsysim/core/calibration.py` → `mlsysim.engine.calibration.*` |
 | Economics | `mlsysim/infra/pricing.py` → `Infrastructure.Pricing.*` |
 | Physics / units only | `mlsysim/core/constants.py`, `mlsysim/physics/` |
 | Symbol → replacement map | `book/tools/audit/migrate_constants_to_registry.py` |

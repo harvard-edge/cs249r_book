@@ -94,6 +94,46 @@ BOOK_CLUSTER_TIERS = _conv(
     "MLSysBook editorial cluster tiers (256 / 2k / 8k / 100k GPUs)",
 )
 
+# --- Real-world case-study / workload scale anchors (Scenarios registry) ---
+BOOK_WORKLOAD_SCALE = Provenance(
+    id="prov:book-workload-scale",
+    kind=ProvenanceKind.ILLUSTRATIVE,
+    ref="Illustrative real-world scale anchors (Gmail volume, Google searches, Waymo sensor rate) for order-of-magnitude intuition",
+    verified="2025-03-06",
+)
+BOOK_ANOMALY_CASE = Provenance(
+    id="prov:book-anomaly-tinyml-case",
+    kind=ProvenanceKind.ILLUSTRATIVE,
+    ref="TinyML anomaly-detection case study (latency / AUC / energy) used as a benchmarking example",
+    verified="2025-03-06",
+)
+BOOK_ENERGY_ANCHORS = Provenance(
+    id="prov:book-energy-anchors",
+    kind=ProvenanceKind.ILLUSTRATIVE,
+    ref="Everyday energy-scale comparison anchors (smartphone charge ~40 kJ, boiling 1 L water ~100 kJ) for order-of-magnitude intuition about ML energy",
+    verified="2025-03-06",
+)
+BOOK_DEVICE_ANCHORS = Provenance(
+    id="prov:book-device-anchors",
+    kind=ProvenanceKind.ILLUSTRATIVE,
+    ref="Mobile/edge device reference figures (flagship phone battery ~15 Wh / 3000 mAh @ 3.7 V, mobile NPU power 3-4 W, object-detector ~2 W) for on-device ML intuition",
+    verified="2025-03-06",
+)
+
+# --- Hardware technology-class facts (Hardware.Tech) ---
+HOROWITZ_ENERGY = _lit(
+    "prov:horowitz-2014",
+    "Horowitz (2014), \"Computing's Energy Problem (and what we can do about it)\", ISSCC — 45 nm per-operation/per-byte energies",
+)
+BOOK_LATENCY_HIERARCHY = _conv(
+    "prov:book-latency-hierarchy",
+    "MLSysBook memory/interconnect access-latency hierarchy (order-of-magnitude class figures)",
+)
+BOOK_STORAGE_TIERS = _conv(
+    "prov:book-storage-tiers",
+    "Generic storage/memory bandwidth tiers (NVMe Gen3/4/5, DDR, host DRAM) from vendor datasheet ranges",
+)
+
 RELIABILITY_MTTF_LITERATURE = _lit(
     "prov:reliability-mttf-literature",
     "Kokolis et al. (2025, HPCA); Zu et al. (2024, NSDI); Barroso et al. (2019) — order-of-magnitude steady-state MTTF",
@@ -452,6 +492,18 @@ BOOK_FABRIC_LATENCY = _conv(
     "prov:book-fabric-latency-assumptions",
     "MLSysBook α-model one-way latency anchors (InfiniBand NDR/HDR, RoCE, TCP)",
     notes="Order-of-magnitude μs values for napkin math; not vendor QoS guarantees.",
+)
+
+BOOK_SWITCH_OPTICS = _conv(
+    "prov:book-switch-optics",
+    "MLSysBook switch-ASIC capacity (51.2T/102.4T) and 400G optics power (pluggable/CPO) reference figures",
+    notes="2025-26 datacenter-switching reference points for the network-fabrics worked examples.",
+)
+
+BOOK_NETWORK_ENERGY = _conv(
+    "prov:book-network-energy",
+    "MLSysBook network data-transfer energy anchors (5G per-MB, generic per-KB)",
+    notes="Order-of-magnitude transfer-energy figures for intuition; not measured device values.",
 )
 
 BOOK_RECOVERY_ASSUMPTIONS = _conv(

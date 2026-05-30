@@ -2,7 +2,7 @@
 engine: jupyter
 ---
 
-# Data Foundations {#sec-data-foundations}
+# Data Foundations {#sec-appdx-data-foundations}
 
 ## Purpose {.unnumbered}
 
@@ -18,11 +18,11 @@ This appendix is designed as a *reference*. Reach for it when debugging “slow 
 
 Conventions used here follow the book-wide notation (for example, we reserve $B$ for batch size and use $\text{BW}$ for bandwidth).
 
-- **When data will not move**: Start with @tbl-data-gravity and the transfer-time equation in @sec-data-foundations-data-engineering-foundations-0c20.
-- **When the accelerator is starving**: Use @tbl-serialization-cost and the layout discussion in @sec-data-foundations-row-vs-columnar-formats-bca2.
-- **When pipelines explode in cost**: Use the primitives in @sec-data-foundations-algebra-data-9792, especially join-induced shuffles.
-- **When “average looks fine” but users complain**: Use @sec-data-foundations-distributions-long-tail-901f and session-level tail probability.
-- **When accuracy drifts silently**: Use @sec-data-foundations-measuring-drift-divergence-a6dd to compare full distributions.
+- **When data will not move**: Start with @tbl-data-gravity and the transfer-time equation in @sec-appdx-data-foundations-data-engineering-foundations-0c20.
+- **When the accelerator is starving**: Use @tbl-serialization-cost and the layout discussion in @sec-appdx-data-foundations-row-vs-columnar-formats-bca2.
+- **When pipelines explode in cost**: Use the primitives in @sec-appdx-data-foundations-algebra-data-9792, especially join-induced shuffles.
+- **When “average looks fine” but users complain**: Use @sec-appdx-data-foundations-distributions-long-tail-901f and session-level tail probability.
+- **When accuracy drifts silently**: Use @sec-appdx-data-foundations-measuring-drift-divergence-a6dd to compare full distributions.
 
 ```{python}
 #| echo: false
@@ -40,24 +40,24 @@ from mlsysim.core.constants import *
 # │ How:     T = Volume/Bandwidth, formatted via helper.
 # │
 # │ Imports: mlsysim.core.constants (TB, PB, Gbps, byte, BITS_PER_BYTE,
-# │          NETWORK_10G_BW, NETWORK_100G_BW, time constants)
+# │          Systems.Fabrics.Ethernet_{10G,100G}.bandwidth, time constants)
 # │ Exports: t_1tb_1g … t_1pb_100g (9 formatted time strings)
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.constants import (
     TB, PB, Gbps, byte,
-    NETWORK_10G_BW, NETWORK_100G_BW,
     BITS_PER_BYTE, SECONDS_PER_MINUTE, SEC_PER_HOUR, SEC_PER_DAY,
     DAYS_PER_MONTH
 )
 from mlsysim.fmt import check, MarkdownStr
+from mlsysim import Systems  # Ethernet fabric bandwidths
 
 class DataGravity:
     # ┌── 1. LOAD (Constants) ──────────────────────────────
     tb_bytes = (1 * TB).m_as(byte)
     pb_bytes = (1 * PB).m_as(byte)
     bw_1g = (1 * Gbps).m_as('bit/second')
-    bw_10g = NETWORK_10G_BW.m_as('bit/second')
-    bw_100g = NETWORK_100G_BW.m_as('bit/second')
+    bw_10g = Systems.Fabrics.Ethernet_10G.bandwidth.m_as('bit/second')
+    bw_100g = Systems.Fabrics.Ethernet_100G.bandwidth.m_as('bit/second')
     truck_load_hours = 8
     truck_transit_hours = 32
     truck_unload_hours = 8
@@ -114,17 +114,17 @@ class DataGravity:
 
 With those reference points in place, the appendix begins with the physical constraints of data engineering and then moves to the statistical monitoring that keeps ML systems healthy. From storage formats that determine I/O throughput to drift metrics that detect silent failures, these foundations connect directly to the data pipelines in @sec-data-engineering and the operational monitoring in @sec-ml-operations.
 
-## Data Engineering Foundations {#sec-data-foundations-data-engineering-foundations-0c20}
+## Data Engineering Foundations {#sec-appdx-data-foundations-data-engineering-foundations-0c20}
 
 Understanding hardware constraints is only half the battle; we must also shape our data to fit them. Data engineering applies the principles of the memory hierarchy to storage formats and pipeline design, ensuring that the accelerator never starves. This process begins with recognizing that data is physical—it has volume, it takes time to move, and it requires energy to parse.
 
-### Napkin math: The physics of data gravity {#sec-data-foundations-napkin-math-physics-data-gravity-9ae0}
+### Napkin math: The physics of data gravity {#sec-appdx-data-foundations-napkin-math-physics-data-gravity-9ae0}
 
 Data gravity[^fn-data-gravity] is not a metaphor; it is a calculation of transfer time. Unlike compute, which gets faster every year, the speed of light is fixed and network bandwidth is a finite resource. When datasets grow large enough, they effectively become stationary—moving them costs more time and energy than moving the computation to where the data already lives.
 
 [^fn-data-gravity]: **Data Gravity**: Coined by Dave McCrory in 2010 to describe how large datasets attract services and applications toward them, much as massive bodies attract smaller ones in physics. The analogy is apt: the "escape velocity" required to move a petabyte-scale dataset is often measured in weeks.
 
-The transfer time for moving a dataset is simply $T = D_{\text{vol}} / \text{BW}$ (for the large volumes here, latency is negligible; the full equation appears in @sec-machine-foundations-bandwidth-vs-latency-5320). @Tbl-data-gravity illustrates the sobering reality:
+The transfer time for moving a dataset is simply $T = D_{\text{vol}} / \text{BW}$ (for the large volumes here, latency is negligible; the full equation appears in @sec-appdx-machine-foundations-bandwidth-vs-latency-5320). @Tbl-data-gravity illustrates the sobering reality:
 
 | **Data Volume** |        **1 Gbps (Standard WAN)**        |        **10 Gbps (High-End WAN)**        |      **100 Gbps (Direct Connect)**      |         **Truck (Illustrative)**         |
 |:----------------|:---------------------------------------:|:----------------------------------------:|:---------------------------------------:|:----------------------------------------:|
@@ -134,7 +134,7 @@ The transfer time for moving a dataset is simply $T = D_{\text{vol}} / \text{BW}
 
 : **The Cost of Inertia**: Why we "ship compute to data" rather than "ship data to compute." The truck entry is an illustrative elapsed-time model for 1 PB: 8 hours to load, 32 hours in transit, and 8 hours to unload, excluding scheduling and provisioning overhead. At 1 PB, the network is often not a viable option. {#tbl-data-gravity tbl-colwidths="[23,20,20,20,17]"}
 
-### The cost of serialization {#sec-data-foundations-cost-serialization-b921}
+### The cost of serialization {#sec-appdx-data-foundations-cost-serialization-b921}
 
 ```{python}
 #| echo: false
@@ -191,7 +191,7 @@ Even after data arrives at the machine, we face one final hurdle: the serializat
 
 : **Serialization Overhead**: Zero-copy formats like Arrow are at least 10$\times$ faster than row-based text formats in this representative comparison because they align directly with internal memory structures. {#tbl-serialization-cost tbl-colwidths="[25,25,25,25]"}
 
-### Row vs. columnar formats {#sec-data-foundations-row-vs-columnar-formats-bca2}
+### Row vs. columnar formats {#sec-appdx-data-foundations-row-vs-columnar-formats-bca2}
 
 The choice of file format determines the "physics" of how the data is read.
 
@@ -312,7 +312,7 @@ The choice of file format determines whether a system is I/O bound or compute bo
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ DATA ALGEBRA COST EXAMPLES
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-data-foundations-algebra-data-9792—projection waste, join cost
+# │ Context: @sec-appdx-data-foundations-algebra-data-9792—projection waste, join cost
 # │
 # │ Goal:    Quantify the I/O waste of row-format projection and join cost.
 # │ Show:    Waste percentage and network traffic for joins.
@@ -348,7 +348,7 @@ class DataAlgebra:
     join_network_tb_str = fmt(join_network_tb, precision=0, commas=False, prefix="~", suffix=' TB')
 ```
 
-### The algebra of data {#sec-data-foundations-algebra-data-9792}
+### The algebra of data {#sec-appdx-data-foundations-algebra-data-9792}
 
 Feature engineering is built on three Structured Query Language (SQL) primitives. Understanding their computational cost prevents pipeline bottlenecks.
 
@@ -366,7 +366,7 @@ Feature engineering is built on three Structured Query Language (SQL) primitives
 
 Understanding data formats, serialization costs, and algebraic primitives tells us how to *move* data efficiently. Even a perfectly engineered pipeline, however, can silently fail if the data it carries changes character over time. Detecting that change—and quantifying how much it matters—requires a different set of tools: probability and statistics.
 
-## Probability and Statistics {#sec-data-foundations-probability-statistics-3934}
+## Probability and Statistics {#sec-appdx-data-foundations-probability-statistics-3934}
 
 Once data is flowing through our pipelines, we need mathematical tools to ensure its quality and consistency. Probability and statistics provide the language for monitoring system health, detecting the silent failures of data drift, and managing uncertainty.
 
@@ -382,7 +382,7 @@ Your monitoring dashboard says average latency is fine, but users are complainin
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ LONG-TAIL SCALE IMPACT
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-data-foundations-distributions-long-tail-901f—P99 at scale
+# │ Context: @sec-appdx-data-foundations-distributions-long-tail-901f—P99 at scale
 # │
 # │ Goal:    Show how many users hit the P99 tail at production scale.
 # │ Show:    1% of 1M users = 10,000 unhappy people.
@@ -410,7 +410,7 @@ class LongTailScale:
     n_unhappy_str = fmt(n_unhappy, precision=0)
 ```
 
-### Distributions and the long tail {#sec-data-foundations-distributions-long-tail-901f}
+### Distributions and the long tail {#sec-appdx-data-foundations-distributions-long-tail-901f}
 
 In systems, the mean is often misleading. Latency distributions are almost always long-tailed (log-normal or power law). A "P99" (99th percentile) latency of 500 ms means 1 percent of requests experience that tail latency; with many requests per session, the fraction of users who see at least one slow request can be much higher. At scale (`{python} LongTailScale.n_users_str` users), even a 1 percent affected-user rate would be `{python} LongTailScale.n_unhappy_str` unhappy people.
 
@@ -462,7 +462,7 @@ For a heavy user ($N_{\text{req}}$ is large), the "tail" latency becomes their *
 
 :::
 
-### Measuring drift (divergence) {#sec-data-foundations-measuring-drift-divergence-a6dd}
+### Measuring drift (divergence) {#sec-appdx-data-foundations-measuring-drift-divergence-a6dd}
 
 Because distributions have long tails where the most dangerous failures hide, simple metrics like "mean shift" are insufficient. We need tools that compare the *entire shape* of the distribution.
 
@@ -478,7 +478,7 @@ $$ \mathcal{D}_{\text{KL}}(P_t \lVert P_0) = \sum_x P_t(x) \log \frac{P_t(x)}{P_
 # │ KL DIVERGENCE DRIFT DETECTION
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: Callout "Worked Example: KL Divergence for Drift Detection",
-# │          @sec-data-foundations-measuring-drift-divergence-a6dd narrative.
+# │          @sec-appdx-data-foundations-measuring-drift-divergence-a6dd narrative.
 # │
 # │ Goal:    Compute KL(P_0 lVert P_t), KL(P_t lVert P_0), and PSI for a worked drift example.
 # │ Show:    Step-by-step formulas, intermediate terms, and final values.
@@ -629,9 +629,9 @@ Because KL divergence is asymmetric ($\mathcal{D}_{\text{KL}}(P_0 \lVert P_t) \n
 
 Both KL divergence and PSI are grounded in a deeper framework—information theory—which provides the units and bounds that make these metrics principled rather than ad hoc.
 
-### Information theory for systems {#sec-data-foundations-information-theory-systems-c033}
+### Information theory for systems {#sec-appdx-data-foundations-information-theory-systems-c033}
 
-In the information roofline model (@sec-dam-taxonomy), we treat data quality as a physical constraint similar to bandwidth. Information theory provides the units for this constraint. Three concepts are central:
+In the information roofline model (@sec-appdx-dam-taxonomy), we treat data quality as a physical constraint similar to bandwidth. Information theory provides the units for this constraint. Three concepts are central:
 
 **Entropy ($H$)**[^fn-entropy] is the average information content (uncertainty) in a distribution, defined as $H(X) = -\sum p(x) \log p(x)$. The log base sets the unit: natural logs give nats, while $\log_2$ gives bits. A uniform distribution has maximum entropy (maximum uncertainty). This connects directly to KL divergence above: $\mathcal{D}_{\text{KL}}$ measures excess information needed when using the wrong distribution.
 
@@ -641,13 +641,13 @@ In the information roofline model (@sec-dam-taxonomy), we treat data quality as 
 
 [^fn-entropy]: **Entropy**: From Greek *entropia* (transformation). Shannon borrowed the term from thermodynamics in 1948 to quantify information content. In systems terms, entropy quantifies the theoretical minimum code length needed to encode a message from a source, measured in bits when using $\log_2$ and nats when using natural logs, directly relevant to compression ratios and data pipeline sizing.
 
-### Logits and numerical stability {#sec-data-foundations-logits-numerical-stability-13e2}
+### Logits and numerical stability {#sec-appdx-data-foundations-logits-numerical-stability-13e2}
 
 ```{python}
 #| echo: false
 #| label: logit-overflow-example
 # ┌── LEGO ───────────────────────────────────────────────
-# │ Context: @sec-data-foundations-logits-numerical-stability-13e2
+# │ Context: @sec-appdx-data-foundations-logits-numerical-stability-13e2
 # │ Goal: Example logit value that overflows naive softmax
 # │ Exports: LogitOverflowExample.logit_val_str
 from mlsysim.fmt import fmt
@@ -679,7 +679,7 @@ A small softmax calculation shows why this trick matters in practice, even for l
 # │ LOG-SUM-EXP NUMERICAL STABILITY
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: Callout "Worked Example: Log-Sum-Exp in Action",
-# │          @sec-data-foundations-logits-numerical-stability-13e2 narrative.
+# │          @sec-appdx-data-foundations-logits-numerical-stability-13e2 narrative.
 # │
 # │ Goal:    Demonstrate naive vs stable softmax via the Log-Sum-Exp trick.
 # │ Show:    Naive overflow risk, shifted exponentials, stable softmax values.
@@ -812,7 +812,7 @@ These worked examples now give us enough machinery to check the full chain, from
 
 The tools in this section—tail-aware metrics, drift divergences, information-theoretic bounds, and numerical stability tricks—give us the vocabulary to diagnose data-related failures quantitatively rather than anecdotally.
 
-## Summary {#sec-data-foundations-summary-3c72}
+## Summary {#sec-appdx-data-foundations-summary-3c72}
 
 ::: {.callout-takeaways title="Data as a physical constraint"}
 

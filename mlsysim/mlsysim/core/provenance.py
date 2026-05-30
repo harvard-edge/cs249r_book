@@ -117,6 +117,17 @@ def sourced(
     return Sourced(value, provenance, name=name, description=description)
 
 
+def sourced_qty(quantity, provenance: Provenance, *, name: str = "", description: str = ""):
+    """Attach provenance to a unit-bearing pint Quantity (the Quantity analogue of
+    ``sourced``). The Quantity is returned unchanged for arithmetic/``.m_as`` use, with
+    ``.provenance``/``.name``/``.description`` attached for the audit trail. Use for
+    registry reference values that carry units (e.g. data rates, latencies, energies)."""
+    quantity.provenance = provenance
+    quantity.name = name
+    quantity.description = description
+    return quantity
+
+
 def scalar_value(x: Scalar | Sourced) -> float:
     """Plain float for arithmetic and Quarto ``{python}`` cells."""
     if isinstance(x, Sourced):

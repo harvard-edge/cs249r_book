@@ -1,6 +1,6 @@
 import unittest
 
-from mlsysim.core.appendix_lineage import (
+from mlsysim.tools.appendix_lineage import (
     audit_appendix_defaults,
     audit_appendix_literature,
     audit_appendix_pricing,

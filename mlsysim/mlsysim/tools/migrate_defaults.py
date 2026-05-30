@@ -96,7 +96,7 @@ def migrate_file(path: Path) -> bool:
         target = _import_remap(sym)
         if target.startswith("calibration."):
             return (
-                f"from mlsysim.core import calibration\n"
+                f"from mlsysim.engine import calibration\n"
                 f"{sym} = calibration.{target.split('.', 1)[1]}"
             )
         if target.startswith("Monitoring."):

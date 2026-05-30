@@ -11,11 +11,11 @@ from typing import Dict, Any
 from ..core.constants import Q_
 from .ledger import SystemLedger, PerformanceMetrics, SustainabilityMetrics, EconomicMetrics, ReliabilityMetrics
 from .personas import Persona
-from ..core.scenarios import Scenario
-from ..core.engine import Engine
-from ..core.solver import SustainabilityModel, EconomicsModel, ReliabilityModel
+from ..engine.scenarios import Scenario
+from ..engine.engine import Engine
+from ..engine.solver import SustainabilityModel, EconomicsModel, ReliabilityModel
 from ..systems.types import Fleet
-from ..infra.registry import Infrastructure
+from ..infrastructure.registry import Infrastructure
 
 @dataclass
 class SimulationResult:

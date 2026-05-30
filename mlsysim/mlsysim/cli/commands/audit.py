@@ -9,7 +9,7 @@ from mlsysim.cli.schemas import _resolve_model
 from mlsysim.cli.renderers import print_json
 from mlsysim.show import info, banner
 from mlsysim.hardware import Hardware
-from mlsysim.core.evaluation import SystemEvaluator
+from mlsysim.engine.evaluation import SystemEvaluator
 
 def _get_gpu_info():
     """Attempt to detect local GPU specifications."""

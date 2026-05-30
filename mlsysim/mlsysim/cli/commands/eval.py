@@ -6,7 +6,7 @@ from mlsysim.cli.context import OUTPUT_FORMAT_HELP, resolve_output_format
 from mlsysim.cli.schemas import EvalNodeSchema, MlsysPlanSchema
 from mlsysim.cli.exceptions import ExitCode, exit_with_code, error_shield
 from mlsysim.cli.renderers import render_scorecard, print_warning, print_error
-from mlsysim.core.evaluation import SystemEvaluator
+from mlsysim.engine.evaluation import SystemEvaluator
 
 def evaluate_main(
     ctx: typer.Context,

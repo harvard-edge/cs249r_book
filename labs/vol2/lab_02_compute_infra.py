@@ -30,7 +30,7 @@ async def _():
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysim import Hardware, Models, Systems, Literature, Infrastructure, Engine
-    from mlsysim import ureg, NVME_SEQUENTIAL_BW
+    from mlsysim import ureg
 
     GPU_MTTF_HOURS = Systems.Reliability.Gpu.mttf_hours
     INFINIBAND_NDR_BW_GBS = Systems.Fabrics.InfiniBand_NDR.bandwidth.m_as("GB/s")
@@ -68,7 +68,7 @@ async def _():
     NVLINK_GBS = _H100_REG.nvlink.bandwidth.m_as("GB/s")
     PCIE_GBS = _H100_REG.interconnect.bandwidth.m_as("GB/s")
     IB_NDR_GBS = INFINIBAND_NDR_BW_GBS
-    NVME_GBS = NVME_SEQUENTIAL_BW.m_as("GB/s")
+    NVME_GBS = Hardware.Tech.Storage.NvmeGen4.bandwidth.m_as("GB/s")
 
     # ── Model registry ────────────────────────────────────────────────────────
     GPT2 = Models.Language.GPT2

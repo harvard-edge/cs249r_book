@@ -30,7 +30,6 @@ async def _():
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysim import Hardware, Models, calc_kv_cache_size
-    from mlsysim.core.constants import NVME_SEQUENTIAL_BW
 
     H100 = Hardware.Cloud.H100
     A100 = Hardware.Cloud.A100
@@ -50,7 +49,7 @@ async def _():
 
     PCIE_GEN5_GBS = H100.interconnect.bandwidth.m_as("GB/s")
     PCIE_GEN4_GBS = A100.interconnect.bandwidth.m_as("GB/s")
-    NVME_SEQ_GBS  = NVME_SEQUENTIAL_BW.m_as("GB/s")
+    NVME_SEQ_GBS  = Hardware.Tech.Storage.NvmeGen4.bandwidth.m_as("GB/s")
     NET_FS_GBS    = 1.25
 
     RESNET50_PARAMS = RESNET50.parameters.m_as("count")

@@ -2,7 +2,7 @@ import unittest
 
 from mlsysim.core.provenance import ProvenanceKind, Sourced
 from mlsysim.hardware.registry import Hardware
-from mlsysim.infra.registry import Infrastructure
+from mlsysim.infrastructure.registry import Infrastructure
 from mlsysim.systems.reliability import Reliability
 
 class TestProvenance(unittest.TestCase):

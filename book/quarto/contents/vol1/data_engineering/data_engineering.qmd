@@ -145,7 +145,7 @@ class DataGravity:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     dataset_pb = 1
-    network_bw = NETWORK_100G_BW
+    network_bw = Systems.Fabrics.Ethernet_100G.bandwidth
     egress_cost_gb = Infrastructure.Pricing.Cloud.EgressPerGB.rate.m_as(USD/GB)
     tpu_hourly_cost = Infrastructure.Pricing.Cloud.TpuV4PerHour.rate.m_as(USD/hour)
 
@@ -227,11 +227,12 @@ class FeedingProblem:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    from mlsysim import Models, Hardware, Engine
+    from mlsysim import Models, Hardware, Engine, Datasets
     m = Models.Vision.ResNet50
     h = Hardware.Cloud.A100
 
     # Image: 224x224x3 @ FP32
+    IMAGE_DIM_RESNET = Datasets.ImageNet.image_width
     img_size_bytes = IMAGE_DIM_RESNET * IMAGE_DIM_RESNET * IMAGE_CHANNELS_RGB * 4 # FP32
 
     # Standard Cloud Disk (e.g. AWS gp3 baseline)
@@ -265,7 +266,7 @@ class FeedingProblem:
 
 Data gravity establishes the cost of moving the entire mass; **The Feeding Problem**\index{Feeding Problem!data pipeline throughput} establishes the cost of delivering it. In the Hennessy & Patterson tradition, we analyze this as a **Flow Rate**\index{Flow Rate!data pipeline} problem: the struggle to saturate a high-throughput "Machine" from a low-bandwidth "Data" source.
 
-According to the iron law, the system is only as fast as its slowest term. If a modern accelerator can process `{python} FeedingProblem.img_per_sec_str`, but the storage pipeline delivers only `{python} FeedingProblem.disk_bw_mbs_str`, the expensive silicon sits idle. We quantify this as **The Feeding Tax**\index{Feeding Tax!I/O wait cost}: the wall-clock time lost to I/O wait, which directly reduces the system efficiency $(\eta_{\text{hw}})$\index{System Efficiency!feeding tax} term. For a standard cloud volume, the feeding tax can exceed `{python} FeedingProblem.feeding_tax_pct_str`, meaning the GPU spends the majority of its time waiting for bits. This tax transforms the Data Pipeline from a simple storage concern into the primary regulator of the system's Duty Cycle. To saturate a 300 TFLOP/s processor, the pipeline must often sustain `{python} FeedingProblem.req_bw_gbs_str` transfer rates—a requirement that forces the shift from traditional file systems to the specialized storage architectures we examine in @sec-data-engineering-ml-storage-systems-architecture-options-67fa.
+According to the iron law, the system is only as fast as its slowest term. If a modern accelerator running ResNet-50 can process `{python} FeedingProblem.img_per_sec_str`, but the storage pipeline delivers only `{python} FeedingProblem.disk_bw_mbs_str`, the expensive silicon sits idle. We quantify this as **The Feeding Tax**\index{Feeding Tax!I/O wait cost}: the wall-clock time lost to I/O wait, which directly reduces the system efficiency $(\eta_{\text{hw}})$\index{System Efficiency!feeding tax} term. For a standard cloud volume, the feeding tax can exceed `{python} FeedingProblem.feeding_tax_pct_str`, meaning the GPU spends the majority of its time waiting for bits. This tax transforms the Data Pipeline from a simple storage concern into the primary regulator of the system's Duty Cycle. To saturate a 300 TFLOP/s processor, the pipeline must often sustain `{python} FeedingProblem.req_bw_gbs_str` transfer rates—a requirement that forces the shift from traditional file systems to the specialized storage architectures we examine in @sec-data-engineering-ml-storage-systems-architecture-options-67fa.
 
 These physical properties also carry an energy cost: as data moves farther from the processor, movement increasingly dominates the budget.
 
@@ -281,7 +282,8 @@ These physical properties also carry an energy cost: as data moves farther from 
 # │ Show: DRAM, SSD, and network access multipliers vs. a 32-bit MAC.
 # │ How: Format per-operation energies and per-bit multipliers.
 # │
-# │ Imports: mlsysim.core.constants (ENERGY_*), mlsysim.fmt (fmt, fmt_int, check)
+# │ Imports: mlsysim Hardware.Tech.Memory.HBM3.energy_per_access, Hardware.Tech.Op.FlopFp32.energy;
+# │          mlsysim.fmt (fmt, fmt_int, check)
 # │ Exports: EnergyAccessCosts.energy_flop_fp32_str, EnergyAccessCosts.energy_dram_str,
 # │          EnergyAccessCosts.dram_multiplier_str, EnergyAccessCosts.local_ssd_multiplier_str,
 # │          EnergyAccessCosts.network_multiplier_str
@@ -293,6 +295,8 @@ class EnergyAccessCosts:
     """Energy-movement hierarchy for @tbl-energy-movement-cost."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    ENERGY_DRAM_ACCESS_PJ = Hardware.Tech.Memory.HBM3.energy_per_access
+    ENERGY_FLOP_FP32_PJ   = Hardware.Tech.Op.FlopFp32.energy
     energy_dram_pj = ENERGY_DRAM_ACCESS_PJ.m_as(ureg.picojoule)
     energy_flop_fp32_pj = ENERGY_FLOP_FP32_PJ.m_as(ureg.picojoule/ureg.count)
     energy_local_ssd_pj = 10_000
@@ -335,7 +339,7 @@ Data has physical mass. Pruning `{python} EnergyAccessCosts.prune_pct_str` of tr
 
 :::
 
-Effective data engineering maximizes the Data Selection Gain defined in @eq-data-selection-gain. "Data Cleaning"\index{Data Cleaning!signal-to-noise engineering} is not just hygiene; it is **Signal-to-Noise Engineering**.\index{Signal-to-Noise Engineering} Deduplication removes mass without reducing entropy, directly increasing the ratio. Active learning adds high-entropy examples (edge cases) while ignoring low-entropy ones (common cases), again maximizing information per byte. We optimize this ratio to ensure our storage and compute budgets are spent on signal, not noise.
+The energy argument and the entropy ratio point to the same lever from two directions: effective data engineering maximizes the Data Selection Gain defined in @eq-data-selection-gain. "Data Cleaning"\index{Data Cleaning!signal-to-noise engineering} is not just hygiene; it is **Signal-to-Noise Engineering**.\index{Signal-to-Noise Engineering} Deduplication removes mass without reducing entropy, directly increasing the ratio. Active learning adds high-entropy examples (edge cases) while ignoring low-entropy ones (common cases), again maximizing information per byte. We optimize this ratio to ensure our storage and compute budgets are spent on signal, not noise.
 
 These principles operate at the level of individual files and batches. At datacenter scale, the cost of moving data compounds into a constraint that makes large datasets so expensive to transfer that compute must relocate to the data rather than the reverse. Transferring a petabyte dataset between data centers puts a dollar figure on the constraint.
 
@@ -775,7 +779,7 @@ Unlike ResNet (compute bound) or GPT-2 (bandwidth bound), DLRM is limited by mem
 
 :::
 
-Governance provides the framework within which quality, reliability, and scalability operate. A perfectly scalable, reliable, high-quality pipeline that violates the General Data Protection Regulation (GDPR) or perpetuates demographic biases creates liability rather than value. Data governance ensures systems operate within legal, ethical, and business constraints: privacy protection, regulatory compliance, and clear data ownership. Dataset documentation practices such as data statements make part of that governance visible by recording provenance, intended use, collection conditions, and coverage needed for bias analysis and scientific comparison [@bender2018]. Governance also maintains the transparency and accountability necessary to demonstrate compliance when audited.
+DLRM shows where the scalability pillar bites hardest: the wall is memory capacity, and sharding the embedding table across machines becomes a first-class design concern rather than an afterthought. Governance provides the framework within which quality, reliability, and scalability operate. A perfectly scalable, reliable, high-quality pipeline that violates the General Data Protection Regulation (GDPR) or perpetuates demographic biases creates liability rather than value. Data governance ensures systems operate within legal, ethical, and business constraints: privacy protection, regulatory compliance, and clear data ownership. Dataset documentation practices such as data statements make part of that governance visible by recording provenance, intended use, collection conditions, and coverage needed for bias analysis and scientific comparison [@bender2018]. Governance also maintains the transparency and accountability necessary to demonstrate compliance when audited.
 
 When ML systems exhibit failures, the four pillars provide a diagnostic lens for identifying root causes. Model accuracy that degrades gradually, not through *sudden breakage* but through *a slow downward trend*, almost always traces to the quality pillar: data drift has shifted the serving distribution away from training, or label quality has degraded as annotator pools change. Pipeline failures that appear intermittent, succeeding most runs but crashing unpredictably, point to the reliability pillar, suggesting inadequate error handling, missing retry logic, or resource exhaustion under peak load. Training that takes too long despite adequate hardware implicates scalability: somewhere in the pipeline a bottleneck (a single-threaded transformation, an unpartitioned shuffle, a storage tier too slow for the data volume) prevents parallel resources from being used. Compliance gaps discovered during audits indicate governance debt: lineage tracking is incomplete, access controls are stale, or data retention policies have not kept pace with regulatory changes.
 
@@ -1363,7 +1367,7 @@ Our KWS system illustrates these interconnected requirements. Achieving 98 perce
 
 ### Data source evaluation and selection {#sec-data-engineering-data-source-evaluation-selection-cd87}
 
-The choice\index{Data Acquisition!source evaluation} between curated datasets, expert crowdsourcing, and controlled web scraping depends on accuracy targets, domain expertise needed, and benchmark requirements. Achieving quality requires understanding whether data accurately represents the deployment environment and provides sufficient coverage of edge cases that might cause failures.
+The choice\index{Data Acquisition!source evaluation} among curated datasets, expert crowdsourcing, and controlled web scraping turns on a single question: which source best covers the deployment distribution at acceptable cost and domain expertise?
 
 \index{Fei-Fei Li!ImageNet creation}
 Preexisting datasets from repositories such as Kaggle, UCI [@uci_repo], and ImageNet\index{ImageNet!benchmark dataset}[^fn-imagenet-data-scale] [@imagenet_website] offer cost-efficient starting points with established benchmarks for consistent performance comparison.
@@ -2104,7 +2108,7 @@ Quality represents the foundation of reliable ML systems, and this example illus
 
 Production teams implement monitoring at scale through severity-based alerting systems where different failure types trigger different response protocols. The most critical alerts indicate complete system failure: the pipeline has stopped processing entirely, showing zero throughput for more than five minutes, or a primary data source has become unavailable. These situations demand immediate attention because they halt all downstream model training or serving. More subtle degradation patterns require different detection strategies. When throughput drops to 80 percent of baseline levels, error rates climb above 5 percent, or quality metrics drift more than two standard deviations from training data characteristics, the system signals degradation requiring urgent but not immediate attention. These gradual failures often prove more dangerous than complete outages because they persist undetected for hours or days, silently corrupting model inputs and degrading prediction quality.
 
-Consider how these principles apply to a recommendation system processing user interaction events. With a baseline throughput of 50,000 records per second, the monitoring system tracks several interdependent signals. Instantaneous throughput alerts fire if processing drops below 40,000 records per second for more than 10 minutes, accounting for normal traffic variation while catching genuine capacity or processing problems. Each feature in the data stream has its own quality profile: if a feature like user_age shows null values in more than 5 percent of records when the training data contained less than 1 percent nulls, something has likely broken in the upstream data source. Duplicate detection runs on sampled data, watching for the same event appearing multiple times—a pattern that might indicate retry logic gone wrong or a database query accidentally returning the same records repeatedly.
+A recommendation system processing user interaction events at 50,000 records per second makes these severity tiers concrete. Its monitoring system tracks several interdependent signals. Instantaneous throughput alerts fire if processing drops below 40,000 records per second for more than 10 minutes, accounting for normal traffic variation while catching genuine capacity or processing problems. Each feature in the data stream has its own quality profile: if a feature like user_age shows null values in more than 5 percent of records when the training data contained less than 1 percent nulls, something has likely broken in the upstream data source. Duplicate detection runs on sampled data, watching for the same event appearing multiple times—a pattern that might indicate retry logic gone wrong or a database query accidentally returning the same records repeatedly.
 
 These monitoring dimensions become particularly important when considering end-to-end latency. The system must track both whether data arrives and how long it takes to flow through the entire pipeline from the moment an event occurs to when the resulting features become available for model inference. When 95th percentile latency exceeds 30 seconds in a system with a 10-second service level agreement, the monitoring system needs to pinpoint which pipeline stage introduced the delay: ingestion, transformation, validation, or storage.
 
@@ -2276,7 +2280,7 @@ if not results.success:
 
 :::
 
-The degradation equation in @eq-degradation, introduced in @sec-introduction-ml-vs-traditional-software-e19a, now becomes actionable through the divergence metrics formalized in @sec-data-foundations-measuring-drift-divergence-a6dd: the divergence term $\mathcal{D}(P_t \lVert P_0)$ is exactly what PSI and KL divergence measure. Two key metrics operationalize this measurement: the **Population Stability Index (PSI)**\index{Population Stability Index!definition}, which quantifies how much a categorical or binned feature distribution has shifted (values above 0.2 indicate significant drift), and **Kullback-Leibler (KL) Divergence**\index{KL Divergence!definition}, which measures the information-theoretic distance between continuous distributions. When PSI exceeds 0.2 or KL divergence crosses a threshold, the system signals that $\mathcal{D}(P_t \lVert P_0)$ has grown large enough to materially impact $\text{Accuracy}(t)$.
+The degradation equation in @eq-degradation, introduced in @sec-introduction-ml-vs-traditional-software-e19a, now becomes actionable through the divergence metrics formalized in @sec-appdx-data-foundations-measuring-drift-divergence-a6dd: the divergence term $\mathcal{D}(P_t \lVert P_0)$ is exactly what PSI and KL divergence measure. Two key metrics operationalize this measurement: the **Population Stability Index (PSI)**\index{Population Stability Index!definition}, which quantifies how much a categorical or binned feature distribution has shifted (values above 0.2 indicate significant drift), and **Kullback-Leibler (KL) Divergence**\index{KL Divergence!definition}, which measures the information-theoretic distance between continuous distributions. When PSI exceeds 0.2 or KL divergence crosses a threshold, the system signals that $\mathcal{D}(P_t \lVert P_0)$ has grown large enough to materially impact $\text{Accuracy}(t)$.
 
 Understanding the three core types of drift enables targeted detection and response strategies. Each type manifests differently in production systems and requires distinct monitoring approaches.
 
@@ -3134,7 +3138,7 @@ Single-machine processing\index{Single-Machine Processing!scalability} suffices 
 
 [^fn-parquet-columnar-io]: **Parquet**: A columnar storage format that organizes data by column, not by row. For the single-machine optimizations described, this is critical; instead of wastefully reading an entire CSV row to access a few columns, a Parquet reader loads only the specific data needed for a computation. This selective I/O can reduce data movement from disk by 5--10$\times$ for typical feature-selection workloads, enabling terabyte-scale analysis on a single machine. \index{Parquet!I/O reduction}
 
-Distributed processing frameworks become necessary when data volumes or computational requirements exceed single-machine capacity, but the speedup achievable through parallelization faces inherent limits described by Amdahl's Law.[^fn-amdahls-law-data] @sec-machine-foundations-amdahls-law-gustafsons-law-b741 derives the law; here, let $f_{\text{serial}}$ be the serial fraction, $f_{\text{parallel}}$ the parallelizable fraction, and $N_{\text{workers}}$ the number of workers. @Eq-amdahl-data gives the data-pipeline bound:
+Distributed processing frameworks become necessary when data volumes or computational requirements exceed single-machine capacity, but the speedup achievable through parallelization faces inherent limits described by Amdahl's Law.[^fn-amdahls-law-data] @sec-appdx-machine-foundations-amdahls-law-gustafsons-law-b741 derives the law; here, let $f_{\text{serial}}$ be the serial fraction, $f_{\text{parallel}}$ the parallelizable fraction, and $N_{\text{workers}}$ the number of workers. @Eq-amdahl-data gives the data-pipeline bound:
 
 $$\text{Speedup} \leq \frac{1}{f_{\text{serial}} + \frac{f_{\text{parallel}}}{N_{\text{workers}}}}$$ {#eq-amdahl-data}
 where $f_{\text{serial}}$ represents the serial fraction of work that cannot parallelize, $f_{\text{parallel}}$ the parallel fraction (with $f_{\text{serial}} + f_{\text{parallel}} = 1$), and $N_{\text{workers}}$ the number of processors. This explains why distributing our KWS feature extraction across 64 cores achieves only a 64$\times$ speedup when the work is embarrassingly parallel $(f_{\text{serial}} \approx 0)$, but coordination-heavy operations like computing global normalization statistics might achieve only 10$\times$ speedup even with 64 cores due to the serial aggregation phase. Understanding this relationship guides architectural decisions: operations with high serial fractions should run on fewer, faster cores rather than many slower cores, while highly parallel workloads benefit from maximum distribution. @Sec-model-training examines distributed training architectures that apply these principles at cluster scale.
@@ -3594,7 +3598,7 @@ ML storage requirements diverge from those of transactional systems. Rather than
 
 ### Storage system options {#sec-data-engineering-ml-storage-systems-architecture-options-67fa}
 
-\index{IOPS!storage performance}\index{Throughput!storage bandwidth}Storage system selection extends beyond capacity planning. The goal is minimizing the **Data Term** $(\frac{D_{\text{vol}}}{\text{BW}})$ in the iron law of ML systems. Every storage medium imposes physical constraints on bandwidth that determine the maximum speed of the training and serving pipelines.
+\index{IOPS!storage performance}\index{Throughput!storage bandwidth}Batch training scans millions of examples sequentially; real-time serving fetches one feature vector at a time. These opposing access patterns pull storage in two directions, and selecting a system means minimizing the **Data Term** $(\frac{D_{\text{vol}}}{\text{BW}})$ of the iron law of ML systems for whichever pattern dominates. Every storage medium imposes physical constraints on bandwidth that determine the maximum speed of the training and serving pipelines.
 
 Optimizing this term requires understanding two core storage performance metrics:
 
@@ -3712,7 +3716,7 @@ class KWSStorageEconomics:
 | **In-Memory Cache (Redis, Memcached)**   |       \$500–1000       |             20–50 GB/s             |           1–10 μs           | Online feature serving, real-time inference   |
 | **Archival Storage (Glacier, Nearline)** |         \$1–4          |   10–50 MB/s  (after retrieval)    |      Hours (retrieval)      | Historical retention, compliance archives     |
 
-: **Storage Cost-Performance Trade-Offs**: Different storage tiers provide distinct cost-performance characteristics that determine their suitability for specific ML workloads. Training data loading requires high-throughput sequential access, an I/O pattern that must align with the memory hierarchy in @sec-machine-foundations-memory-hierarchy-2278. Online serving needs low-latency random reads, while archival storage prioritizes cost over access speed for compliance and historical data. {#tbl-storage-performance tbl-colwidths="[26,15,19,19,21]"}
+: **Storage Cost-Performance Trade-Offs**: Different storage tiers provide distinct cost-performance characteristics that determine their suitability for specific ML workloads. Training data loading requires high-throughput sequential access, an I/O pattern that must align with the memory hierarchy in @sec-appdx-machine-foundations-memory-hierarchy-2278. Online serving needs low-latency random reads, while archival storage prioritizes cost over access speed for compliance and historical data. {#tbl-storage-performance tbl-colwidths="[26,15,19,19,21]"}
 
 [^fn-nvme-gpu-utilization]: **NVMe (Non-Volatile Memory Express)**: A storage protocol connecting directly to the PCIe bus with 64K command queues, delivering 5--7 GB/s sequential throughput and microsecond-scale latency. The contrast with SATA SSD (500 MB/s, single queue) is a 10$\times$ bandwidth gap that directly determines GPU utilization: at SATA speeds, a training pipeline reading 100 GB datasets spends more time waiting for storage than computing gradients, converting a \$15,000 accelerator into an expensive space heater. \index{NVMe!GPU utilization}
 
@@ -3785,7 +3789,7 @@ To build engineering judgment, practitioners must internalize the orders of magn
 | **Object Store (S3)**    |    20,000,000    |      1 year     | Archival access              |
 | **Internet (CA to VA)**  |   100,000,000    |     6 years     | Global user experience       |
 
-: **Latency Numbers Every ML Systems Engineer Should Know**: Understanding the quantitative disparities in the storage hierarchy is essential for diagnosing bottlenecks. If a CPU cycle were one second, fetching data from local SSD would be like waiting two days, while a cross-country network request would take six years. Source: Adapted from Jeff Dean's *Numbers Every Programmer Should Know* (full hardware reference with bandwidth and energy ratios in @sec-machine-foundations-numbers-know-b531). {#tbl-ml-latencies tbl-colwidths="[30,20,20,30]"}
+: **Latency Numbers Every ML Systems Engineer Should Know**: Understanding the quantitative disparities in the storage hierarchy is essential for diagnosing bottlenecks. If a CPU cycle were one second, fetching data from local SSD would be like waiting two days, while a cross-country network request would take six years. Source: Adapted from Jeff Dean's *Numbers Every Programmer Should Know* (full hardware reference with bandwidth and energy ratios in @sec-appdx-machine-foundations-numbers-know-b531). {#tbl-ml-latencies tbl-colwidths="[30,20,20,30]"}
 
 ```{=latex}
 \endgroup
@@ -4028,7 +4032,7 @@ $$ \text{Effective Bandwidth} = \text{Physical Bandwidth} \times \eta_{\text{for
     - $\eta_{\text{format}}$ ≈ `{python} FormatEfficiency.eta_parquet_str` (ignoring metadata overhead).
     - **Parquet outcome**: The pipeline gets `{python} FormatEfficiency.throughput_ratio_str` higher effective throughput.
 
-**Systems insight**: Switching from CSV to Parquet is not just a file change; it is mathematically equivalent to buying a `{python} FormatEfficiency.throughput_ratio_str` faster hard drive. @Tbl-serialization-cost quantifies the serialization overhead of different formats. For a deeper treatment of row vs. columnar storage layouts and the algebra of data operations (selection, projection, join), see @sec-data-foundations-row-vs-columnar-formats-bca2.
+**Systems insight**: Switching from CSV to Parquet is not just a file change; it is mathematically equivalent to buying a `{python} FormatEfficiency.throughput_ratio_str` faster hard drive. @Tbl-serialization-cost quantifies the serialization overhead of different formats. For a deeper treatment of row vs. columnar storage layouts and the algebra of data operations (selection, projection, join), see @sec-appdx-data-foundations-row-vs-columnar-formats-bca2.
 
 :::
 

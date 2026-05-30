@@ -88,7 +88,7 @@ Flat aliases at the registry root (for example bare `H100` or `ResNet50` leaf na
 The CLI still resolves short names (`mlsysim eval Llama3_8B H100`) for convenience.
 
 Solvers not listed in `mlsysim.__init__` (for example `CompressionModel`, `MoERoutingModel`)
-import from `mlsysim.core.solver`. Workload types import from `mlsysim.models.types`.
+import from `mlsysim.engine.solver`. Workload types import from `mlsysim.models.types`.
 
 ### Scenario Registry
 

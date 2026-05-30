@@ -133,7 +133,7 @@ The dividend is the ratio of general-purpose to specialized efficiency.
 1. **Latency Speedup**\index{Latency!speedup}: `{python} EdgeNpuSpeedup.npu_cpu_lat_ms_str`/`{python} EdgeNpuSpeedup.npu_lat_ms_str` = `{python} EdgeNpuSpeedup.npu_speedup_str`$\times$.
 2. **Energy Efficiency**\index{Energy Efficiency}: `{python} EdgeNpuSpeedup.npu_cpu_energy_j_str` J (CPU)/`{python} EdgeNpuSpeedup.npu_energy_j_str` J (NPU) = `{python} EdgeNpuSpeedup.npu_energy_gain_str`$\times$.
 
-**Systems insight**: Specialized hardware does not just make the model faster; it makes it *feasible*. A `{python} EdgeNpuSpeedup.npu_energy_gain_str`$\times$ energy gain translates into `{python} EdgeNpuSpeedup.npu_energy_gain_str` times more inferences on the same battery charge. On the edge, the CPU is for coordination, but the NPU is for survival. Missing the NPU target and falling back to the CPU does not merely cost performance; it typically renders the application unusable through rapid battery drain and thermal throttling.
+**Systems insight**: Specialized hardware makes the model *feasible*, not merely faster. A `{python} EdgeNpuSpeedup.npu_energy_gain_str`$\times$ energy gain translates into `{python} EdgeNpuSpeedup.npu_energy_gain_str` times more inferences on the same battery charge. On the edge, the CPU is for coordination, but the NPU is for survival. Falling back to the CPU when the NPU target is missed does more than cost performance: it typically renders the application unusable through rapid battery drain and thermal throttling.
 
 :::
 
@@ -964,12 +964,13 @@ Energy and thermal management represent the most challenging aspects of on-devic
 # │ Exports: battery_power_w_str, battery_duration_min_str, battery_drain_pct_str, battery_total_wh_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, check, fmt
+from mlsysim import Scenarios
 
 class EdgeBattery:
     # ┌── 1. LOAD ──────────────────────────────────────────
     p_train_w = 4.5  # Typical sustained SoC power during training
     t_train_min = 30 # 30 minute adaptation job
-    battery_wh = PHONE_BATTERY_WH.m_as(watt * hour)  # Modern flagship smartphone battery
+    battery_wh = Scenarios.PhoneBattery.EnergyWh.m_as(watt * hour)  # Modern flagship smartphone battery
     # ┌── 2. EXECUTE ───────────────────────────────────────
     t_train_h = t_train_min / MINUTES_PER_HOUR
     energy_wh = p_train_w * t_train_h
@@ -1491,7 +1492,7 @@ TinyTL reduces on-device training costs by freezing convolutional weights and ba
 
 :::
 
-In contrast, the TinyTL architecture freezes all weights and updates only the bias terms inserted after convolutional layers. These bias modules are lightweight and require minimal memory, enabling efficient training with a drastically reduced memory footprint. The frozen convolutional layers act as a fixed feature extractor, and only the trainable bias components are involved in adaptation. By avoiding storage of full activation maps and limiting the number of updated parameters, TinyTL allows on-device training under severe resource constraints.
+The freeze drastically reduces the memory footprint: by avoiding storage of full activation maps and updating only the lightweight bias parameters, TinyTL allows on-device training under severe resource constraints.
 
 Because the base model remains unchanged, TinyTL assumes that the pretrained features are sufficiently expressive for downstream tasks. The bias terms allow for minor but meaningful shifts in model behavior, particularly for personalization tasks. When domain shift is more significant, TinyTL can optionally incorporate small residual adapters to improve expressivity, all while preserving the system's tight memory and energy profile.
 
@@ -2381,7 +2382,7 @@ This basic structure introduces a number of design choices and tradeoffs. The nu
 
 #### Federated learning convergence analysis {#sec-edge-intelligence-federated-learning-convergence-analysis-c1fc}
 
-Whether federated learning converges and how fast it reaches acceptable accuracy are essential questions for system design. Unlike centralized training where convergence depends primarily on learning rate and batch size, federated learning convergence depends on the interplay between communication rounds, local computation, client participation, and data heterogeneity. These factors determine whether a federated deployment will reach target accuracy in hours, days, or never.
+Whether federated learning converges and how fast it reaches acceptable accuracy are essential questions for system design. Unlike centralized training where convergence depends primarily on learning rate and batch size, federated learning convergence depends on the interplay between communication rounds, local computation, client participation, and data heterogeneity. These factors determine whether a federated deployment will reach target accuracy in hours, days, or never. @Sec-appdx-fleet-foundations-weak-scaling-fleet develops the weak-scaling argument for why adding more participating devices grows total work faster than it shrinks wall-clock time, which sets the diminishing return that bounds how much client participation can accelerate convergence here.
 
 ##### Convergence rate fundamentals {#sec-edge-intelligence-convergence-rate-fundamentals-bfef}
 
@@ -2616,7 +2617,7 @@ These scheduling decisions directly impact convergence rate, model generalizatio
 
 ::: {#chk-edge-intelligence-federated-system-design .callout-checkpoint title="Federated system design"}
 
-You are architecting a federated learning system for a fleet of 10 million mobile devices. The data is highly non-IID (users have distinct, clustered typing patterns), and the network environment is constrained (1-10 Mbps).
+You are architecting a federated learning system for a fleet of 10 million mobile devices. The data is highly non-IID (users have distinct, clustered typing patterns), and the network environment is constrained (1-10 Mbps). Before choosing optimizations, use @sec-appdx-c3-taxonomy-bottleneck-table to diagnose whether the constrained bandwidth makes this a communication-bound system or whether the non-IID heterogeneity makes it coordination-bound, since the table shows which mitigations pay off for each axis and which are wasted effort.
 **Design decision**:
 
 1.  **Aggregation**: Do you choose FedAvg for simplicity or FedProx to handle the system heterogeneity and drift?
@@ -2643,14 +2644,9 @@ Selective update sharing further reduces communication by transmitting only subs
 
 Split models and architectural partitioning divide the model into a shared global component and a private local component. Clients train and maintain their private modules independently while synchronizing only the shared parts with the server. This allows for user-specific personalization with minimal communication and privacy leakage.
 
-All of these approaches operate within the context of a federated aggregation protocol. A standard baseline for aggregation is Federated Averaging (FedAvg), in which the server updates the global model by computing a weighted average of the client updates received in a given round. Let $\mathcal{K}_t$ denote the set of participating clients in round $t$, and let $\theta_k^t$ represent the locally updated model parameters from client $k$. The server computes the new global model $\theta^{t+1}$ as:
-$$
-\theta^{t+1} = \sum_{k \in \mathcal{K}_t} \frac{n_k}{n_{\mathcal{K}_t}} \theta_k^t
-$$
+All of these approaches operate within the FedAvg aggregation protocol established earlier (@sec-edge-intelligence-federated-aggregation-protocols-5d37): compression changes what each client transmits, not how the server combines updates.
 
-Here, $n_k$ is the number of local training examples at client $k$, and $n_{\mathcal{K}_t} = \sum_{k \in \mathcal{K}_t} n_k$ is the total number of training examples across all participating clients. This data-weighted aggregation ensures that clients with more training data exert a proportionally larger influence on the global model, while also accounting for partial participation and heterogeneous data volumes.
-
-While @fig-fl-communication-computation illustrates the fundamental tradeoff between local computation and network bandwidth, other communication-efficient updates introduce their own tradeoffs. Compression may degrade gradient fidelity, selective updates can limit model capacity, and split architectures may complicate coordination. As a result, effective federated learning requires careful balancing of bandwidth constraints, privacy concerns, and convergence dynamics, a balance that depends heavily on the capabilities and variability of the client population.
+While @fig-fl-communication-computation illustrates the fundamental tradeoff between local computation and network bandwidth, other communication-efficient updates introduce their own tradeoffs. Compression may degrade gradient fidelity, selective updates can limit model capacity, and split architectures may complicate coordination. As a result, effective federated learning requires careful balancing of bandwidth constraints, privacy concerns, and convergence dynamics, a balance that depends heavily on the capabilities and variability of the client population. @Sec-appdx-comm-foundations-compression works the compression break-even threshold through a worked example, quantifying when the bandwidth saved by a given compression ratio outweighs the accuracy lost to reduced gradient fidelity.
 
 ::: {#fig-fl-communication-computation fig-env="figure" fig-pos="htb" fig-cap="**The Communication-Computation Trade-Off in Federated Learning**: As network bandwidth decreases (Fast to Slow), the optimal number of local epochs shifts rightward to amortize the high cost of communication over more computation. However, excessive local computation eventually increases total time due to model drift (requiring more global rounds to converge)." fig-alt="Three curves of total training time vs. local epochs for Fast, Medium, and Slow networks. Optimal points shift right as bandwidth decreases."}
 

@@ -471,7 +471,7 @@ class WorkloadSignatures:
 
 ### Workload signatures: The arithmetic intensity table {#sec-network-architectures-workload-signatures}
 
-These bottlenecks are not accidental; they are the "signatures" of the underlying math. We quantify these signatures using arithmetic intensity $(I)$\index{Arithmetic Intensity!lighthouse signatures}, defined as FLOP/byte: floating-point work divided by bytes moved from main memory.
+These bottlenecks are not accidental; they are the "signatures" of the underlying math. We quantify these signatures using arithmetic intensity $(I)$\index{Arithmetic Intensity!lighthouse signatures}, defined as FLOP/byte: floating-point work divided by bytes moved from main memory. @Sec-appdx-algorithm-foundations-computational-complexity-cheat-sheet-0c6c gives the per-operation FLOP and parameter formulas that supply the numerator of this ratio, so the intensity of any layer can be estimated before hardware is provisioned.
 
 @Tbl-workload-signatures compares the signatures of our three primary Lighthouses, exposing the roughly `{python} WorkloadSignatures.resnet_to_gpt2_ratio_str`$\times$ gap between ResNet and GPT-2:
 
@@ -610,7 +610,7 @@ Architecture selection is ultimately an engineering trade-off between math $(O)$
 -   **GPT-2 (Bandwidth Bound)**: Low intensity ($\approx 0.5$ FLOP/byte). Each token produces only a matrix-vector multiplication rather than the matrix-matrix operations of batch processing, so the system must load massive weights from memory for a single token’s math. Its performance is limited by how fast memory can move bits.
 -   **MobileNet (Memory Bound on GPUs)**: Moderate whole-model intensity (~`{python} WorkloadSignatures.mobilenet_intensity_str` FLOP/byte in @tbl-workload-signatures), with individual depthwise layers falling lower once activation traffic is included. MobileNet reduces total $O$ through depthwise separable convolutions, but it moves more data relative to that work. It fits mobile hardware perfectly but often "starves" high-end GPUs optimized for dense math.
 
-This spectrum determines whether the system needs a faster processor or faster memory to improve performance. The Roofline Model (@sec-machine-foundations-roofline-model-2529) provides the analytical framework for quantifying these limits on specific hardware, with applied examples in @sec-hardware-acceleration.
+This spectrum determines whether the system needs a faster processor or faster memory to improve performance. The Roofline Model (@sec-appdx-machine-foundations-roofline-model-2529) provides the analytical framework for quantifying these limits on specific hardware, with applied examples in @sec-hardware-acceleration. @Sec-appdx-machine-foundations-concrete-example-a100-analysis-5b30 works this intensity-to-bottleneck classification through a real accelerator specification, computing the ridge point of an A100 and showing how the same operation falls on either side of it.
 
 ::: {#chk-nn-architectures-arithmetic-intensity-architecture .callout-checkpoint title="Arithmetic intensity and architecture"}
 
@@ -622,7 +622,7 @@ Match the architectural choice to its systems implication:
 
 :::
 
-The preceding quantitative reference points set the stage for a detailed examination of each architectural family, starting with the foundational multilayer perceptron, the architecture that established the computational patterns underlying all modern neural networks. From there, we progress through increasingly specialized designs: CNNs that exploit spatial structure, recurrent neural networks (RNNs) that capture temporal dependencies, attention mechanisms that enable dynamic relevance weighting, transformers that build entire architectures from attention, and finally DLRM that handles massive categorical features. Each architecture represents a different answer to the same fundamental question: *how* should we structure computation to match the patterns in our data?
+The preceding quantitative reference points set the stage for a detailed examination of each architectural family, starting with the foundational multilayer perceptron, the architecture that established the computational patterns underlying all modern neural networks. From there, we progress through increasingly specialized designs: CNNs that exploit spatial structure, recurrent neural networks (RNNs) that capture temporal dependencies, attention mechanisms that enable dynamic relevance weighting, transformers that build entire architectures from attention, and finally DLRM that handles massive categorical features. Each architecture represents a different answer to one fundamental question: how to structure computation to match the patterns in the data.
 
 For each family, we follow a consistent analysis: what data patterns the architecture targets (pattern processing needs), how it computes (algorithmic structure), how those computations map to hardware (computational mapping), and what system bottlenecks emerge (system implications). This four-part lens ensures that every architecture is evaluated for what it costs to run, not only for what it learns.
 
@@ -2036,7 +2036,7 @@ The sliding window and im2col transformations described earlier reveal *how* CNN
 # │ Show: 576 weights (3×3×1×64), 3.2M activations (224×224×64), 50,176 positions.
 # │ How:  Direct multiplication of kernel, channel, and spatial dimensions.
 # │
-# │ Imports: mlsysim.core.constants (IMAGE_DIM_RESNET, MILLION), mlsysim.book (fmt, check)
+# │ Imports: mlsysim (Datasets), mlsysim.core.constants (MILLION), mlsysim.book (fmt, check)
 # │ Exports: cnn_weights_single_ch_str, cnn_spatial_positions_str, cnn_activations_m_str
 # └─────────────────────────────────────────────────────────────────────────────
 
@@ -2050,6 +2050,7 @@ class CNNSysImpl:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    IMAGE_DIM_RESNET = Datasets.ImageNet.image_width
     img_dim = IMAGE_DIM_RESNET          # 224
     kernel_size = 3
     c_out = 64                          # output channels
@@ -2503,7 +2504,7 @@ $$
 \left(\frac{\mathbf{Q}\mathbf{K}^T}{\sqrt{d_k}}\right)\mathbf{V}
 $$
 
-This equation shows scaled dot-product attention. $\mathbf{Q}$ (queries) and $\mathbf{K}$ (keys) are matrix-multiplied to compute similarity scores, using the dot product as a similarity measure formalized in @sec-algorithm-foundations-dot-product-similarity-7957. The scores are divided by $\sqrt{d_k}$ (key dimension) for numerical stability, then normalized with softmax[^fn-softmax] to produce attention weights. These weights are applied to $\mathbf{V}$ (values) to produce the output. The result is a weighted combination where each position receives information from all relevant positions based on content similarity.
+This equation shows scaled dot-product attention. $\mathbf{Q}$ (queries) and $\mathbf{K}$ (keys) are matrix-multiplied to compute similarity scores, using the dot product as a similarity measure formalized in @sec-appdx-algorithm-foundations-dot-product-similarity-7957. The scores are divided by $\sqrt{d_k}$ (key dimension) for numerical stability, then normalized with softmax[^fn-softmax] to produce attention weights. These weights are applied to $\mathbf{V}$ (values) to produce the output. The result is a weighted combination where each position receives information from all relevant positions based on content similarity.
 
 [^fn-softmax]: **Softmax**\index{Softmax Function!systems}: Named as a "soft" (differentiable) version of the argmax function, with mathematical roots in Boltzmann's 1868 statistical mechanics. In transformer attention, softmax is a systems bottleneck: it requires a full pass over all $S$ scores to compute the normalizing denominator, preventing streaming computation and forcing the entire $S{\times}S$ attention matrix to be materialized (or carefully tiled, as FlashAttention does). This normalization dependency is the fundamental reason attention memory scales quadratically. \index{Softmax Function!quadratic bottleneck}
 
@@ -4700,7 +4701,7 @@ Energy consumption patterns vary dramatically across neural network architecture
 # │ Show: That DRAM access consumes over 100× more energy than an FP MAC.
 # │ How: Compare Picojoules per MAC vs. DRAM read from mlsysim constants.
 # │
-# │ Imports: mlsysim.core.constants (ENERGY_FLOP_FP32_PJ, ENERGY_DRAM_ACCESS_PJ)
+# │ Imports: mlsysim Hardware.Tech.Op.FlopFp32.energy, Hardware.Tech.Memory.HBM3.energy_per_access
 # │ Exports: energy_mac_pj_str, energy_dram_str, energy_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
 
@@ -4710,6 +4711,8 @@ class EnergyConsumptionAnalysis:
     """Contrast energy cost of compute vs. data movement using Horowitz-style anchors."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    ENERGY_FLOP_FP32_PJ   = Hardware.Tech.Op.FlopFp32.energy
+    ENERGY_DRAM_ACCESS_PJ = Hardware.Tech.Memory.HBM3.energy_per_access
     mac_pj = ENERGY_FLOP_FP32_PJ.m_as(ureg.picojoule / ureg.flop)    # pJ per FP MAC
     dram_pj = ENERGY_DRAM_ACCESS_PJ.m_as(ureg.picojoule)       # pJ per 32-bit access
 
@@ -4765,7 +4768,7 @@ The preceding sections analyzed each architecture through the four-part lens of 
 
 #### Scalability and production considerations {#sec-network-architectures-scalability-production-considerations-68dd}
 
-Production deployment introduces constraints beyond algorithmic performance, including latency requirements, memory limitations, energy budgets, and fault tolerance needs. Each architecture exhibits distinct production characteristics that determine real-world feasibility.
+Production deployment introduces constraints beyond algorithmic performance: latency requirements, memory limitations, energy budgets, and fault tolerance needs. These are not four independent scorecards. Each family's production behavior traces back to the single structural property that defined it: dense connectivity, spatial locality, sequential dependence, or all-to-all attention. The same property that set a family's accuracy also governs how it parallelizes, how its latency scales, and how much memory it consumes.
 
 Parallelization characteristics diverge sharply across families. MLPs and CNNs scale well across multiple devices through data parallelism, achieving near-linear speedups with proper batch size scaling. RNNs face parallelization challenges due to sequential dependencies, requiring pipeline parallelism or other specialized techniques. Transformers achieve excellent parallelization across sequence positions but face the quadratic memory bottleneck (@sec-network-architectures-system-implications-05a3) that limits batch sizes and effective utilization. The distributed training strategies that implement these parallelization approaches (data, model, pipeline, and expert parallelism) are detailed in @sec-model-training.
 
@@ -5014,11 +5017,11 @@ The throughput ceiling converts an abstract compute requirement into a concrete 
 # │ Show: MobileNetV2 fits the memory and latency budget while KWS is too small.
 # │ How: Compare local candidate specs, runtime memory, compute, and energy.
 # │
-# │ Imports: mlsysim Models/constants, mlsysim.fmt (fmt, fmt_math)
+# │ Imports: mlsysim Models/Datasets/constants, mlsysim.fmt (fmt, fmt_math)
 # │ Exports: resnet_*, mnv1_*, mnv2_*, kws_example_*, memory/compute/energy strings
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim import Models
+from mlsysim import Models, Datasets
 from mlsysim.fmt import fmt_int, fmt, check, fmt_math
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -5036,6 +5039,7 @@ class WildlifeModelSizing:
     inferences_per_day = 100                                     # trigger-based
     edge_ram_mb = 512
     os_buffers_mb = 50
+    IMAGE_DIM_RESNET = Datasets.ImageNet.image_width
     image_dim = IMAGE_DIM_RESNET
     activation_channels = 64
     activation_bytes = 4

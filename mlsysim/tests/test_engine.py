@@ -5,10 +5,10 @@
 # This file tests Engine-specific behavior not covered there.
 
 import pytest
-from mlsysim.core.engine import Engine
+from mlsysim.engine.engine import Engine
 from mlsysim.hardware.registry import Hardware
 from mlsysim.models.registry import Models
-from mlsysim.core import calibration as cal
+from mlsysim.engine import calibration as cal
 
 
 def test_engine_energy_proportional():

@@ -21,7 +21,7 @@ tutorials should prefer zoos + `mlsysim.physics.*` + explicit operands.
 - **`Literature.*`** — cited appendix scalars (MFU bands, Chinchilla, scaling η, overheads).
 - **`Systems.Reliability` / `Orchestration`** — MTTF, recovery, scheduling assumptions.
 - **`Ops.Monitoring`** — PSI, KS, drift thresholds (MLOps chapters).
-- **`mlsysim.core.calibration`** — solver/engine default kwargs (not appendix tables).
+- **`mlsysim.engine.calibration`** — solver/engine default kwargs (not appendix tables).
 - **`Infrastructure.Pricing`** — cloud, storage, labeling, fleet economics (`PricePoint.rate`).
 - **Regional carbon / PUE / fleet / fabrics** — `Infrastructure.Grids`, `FacilityCooling`, `Systems.Clusters`, `Systems.Fabrics`.
 - **`mlsysim.physics.*`** — formulas (roofline, training memory, serving, etc.).

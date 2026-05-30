@@ -347,7 +347,7 @@ A data center engineer cannot predict how long it takes to send ten megabytes ac
 
 ### The reality: When physics fights back {#sec-communication-collective-operations-collective-operations-alphabeta-model-f9b4}
 
-Every step our gradient takes is governed by the linear cost model $T(n) = \alpha + n/\beta$. This is not merely a formula; it is the "Physics of Failure" for distributed systems.
+Every message our gradient sends obeys the linear cost model $T(n) = \alpha + n/\beta$—a fixed startup tax plus a per-byte transit fee. Those two terms decide every algorithm choice in this chapter.
 
 ::: {#dfn-collective-communication-model-hockney-model .callout-definition title="α-β model (Hockney Model)"}
 
@@ -364,7 +364,7 @@ The two parameters have distinct physical meanings:
 *   **Latency ($\alpha$)**: The fixed start-up cost to send a message, regardless of size. This includes software overhead (kernel launch, NCCL initialization), PCIe traversal, and network switching time.
 *   **Bandwidth ($\beta$)**: The sustained data transfer rate (bytes per second).
 
-The **critical message size**\index{Critical Message Size} $n^* = \alpha \cdot \beta$ marks the crossover point: messages smaller than $n^*$ are latency-bound; messages larger are bandwidth-bound.
+The **critical message size**\index{Critical Message Size} $n^* = \alpha \cdot \beta$ marks the crossover point: messages smaller than $n^*$ are latency-bound; messages larger are bandwidth-bound. @Sec-appdx-comm-foundations-alpha-beta works this model through concrete message-size regimes and roofline analysis, so a reader who wants the full derivation behind the crossover can follow it there; here we establish the parameters and apply them directly.
 
 @Tbl-interconnect-parameters shows typical values for modern interconnects:
 
@@ -616,7 +616,7 @@ This reality gap has practical consequences for algorithm selection. The crossov
 
 ## Choosing the Vehicle: Collective Operation Primitives {#sec-communication-collective-operations-collective-operations-collective-operation-vocabulary-fdc7}
 
-If a GPU simply opens a socket and sends a massive gradient to another GPU, the entire cluster will rapidly collapse into an unmanageable web of deadlocks and congestion. With the terrain mapped, the gradient must now choose its vehicle: strictly choreographed group exchanges known as collective operations. @Fig-collective-primitives-overview illustrates four of the central primitives in this vocabulary: AllReduce, AllGather, ReduceScatter, and AllToAll. Two further primitives, Broadcast (rank 0 sends to all) and Reduce (all aggregate to rank 0), are foundational building blocks defined in the prose below and used implicitly in the figure's compound patterns.
+If a GPU simply opens a socket and sends a massive gradient to another GPU, the entire cluster will rapidly collapse into an unmanageable web of deadlocks and congestion. With the terrain mapped, the gradient must now choose its vehicle: strictly choreographed group exchanges known as collective operations. @Fig-collective-primitives-overview illustrates four of the central primitives in this vocabulary: AllReduce, AllGather, ReduceScatter, and AllToAll. Two further primitives, Broadcast (rank 0 sends to all) and Reduce (all aggregate to rank 0), are foundational building blocks defined in the prose below and used implicitly in the figure's compound patterns. @Sec-appdx-comm-foundations-collective-complexity formalizes the semantics and latency and bandwidth complexity of each primitive; the prose here introduces them through their workload use cases, and the reader who wants the formal complexity bounds before proceeding can establish them there first.
 
 ::: {#dfn-collective-communication-collective-operation .callout-definition title="Collective operation"}
 
@@ -647,7 +647,7 @@ Different model architectures stress different operations, and selecting the wro
 3.  **AllReduce**: Data from all workers is aggregated, and the result is distributed to all workers.
     *   Use case: Data Parallelism. In the data-parallel training strategy from @sec-distributed-training-systems-systems-data-parallelism-6132, AllReduce synchronizes gradients so every GPU computes the same weight update.
     *   Semantics: $y_i = \sum_{j=0}^{N-1} x_j$ for all $i$.
-    *   Complexity: Ring achieves bandwidth-optimal $2\frac{N-1}{N}\frac{M}{\beta}$ but $\mathcal{O}(N)$ latency; Tree achieves $\mathcal{O}(\log N)$ latency but suboptimal bandwidth.
+    *   Complexity: Ring achieves bandwidth-optimal $2\frac{N-1}{N}\frac{M}{\beta}$ but $\mathcal{O}(N)$ latency; Tree achieves $\mathcal{O}(\log N)$ latency but suboptimal bandwidth. @Sec-appdx-comm-foundations-allreduce develops the formal definition and a worked example comparing Ring and tree complexity, so a reader who wants that derivation can take the full treatment there before the chapter applies these costs to algorithm selection.
 
 4.  **AllGather**: Every worker sends its data to every other worker. The result is a concatenation of all inputs.
     *   Use case: Sharded Data Parallelism (FSDP[^fn-fsdp-memory]/ZeRO). Collecting sharded parameters before a forward/backward pass.
@@ -784,7 +784,7 @@ In practice, MoE routing is rarely perfectly uniform. Popular experts receive mo
 
 The FSDP/ZeRO strategy deserves special attention because its communication pattern differs fundamentally from standard data parallelism. In standard data parallelism, each GPU holds a complete copy of the model, computes gradients locally, and synchronizes via a single AllReduce at the end of the backward pass. FSDP eliminates this redundancy by sharding the model parameters across GPUs, so each GPU holds only $1/N$ of the model.
 
-The memory optimization transforms the communication pattern. Before each layer's forward pass, the GPU must reconstruct the full parameter tensor by calling AllGather to collect the shards from all other GPUs. After the backward pass, the gradients are reduced and redistributed via ReduceScatter, so each GPU holds gradients only for its own parameter shard. The sharded parameters can then be discarded (freed from memory) until the next forward pass needs them.
+Because each GPU now holds only $1/N$ of the parameters, it must reconstruct the full tensor before it can use a layer, and that reconstruction is what transforms the communication pattern. Before each layer's forward pass, the GPU calls AllGather to collect the shards from all other GPUs. After the backward pass, the gradients are reduced and redistributed via ReduceScatter, so each GPU holds gradients only for its own parameter shard. The sharded parameters can then be discarded (freed from memory) until the next forward pass needs them.
 
 The consequence is a trade-off between memory and communication frequency. Standard data parallelism communicates once per training step (a single AllReduce of the full gradient). FSDP communicates twice per layer per step (AllGather in forward, ReduceScatter in backward), but each communication is smaller (only that layer's parameters, sharded across ranks). For a model with $N_L$ layers, FSDP issues $2N_L$ collective operations per step instead of 1; across all those operations, the total communication volume can be comparable to the single full-gradient AllReduce, but it is spread across many smaller operations.
 
@@ -796,7 +796,7 @@ The collective primitives catalog above defines *what* must be communicated; the
 
 ## Engineering the Flow: AllReduce Algorithms {#sec-communication-collective-operations-collective-operations-allreduce-algorithms-7545}
 
-Imagine 1,000 GPUs, each holding a 1 GB gradient, all needing the exact sum of those 1,000 gradients simultaneously. If they all send their data to a central server, that server's network card will instantly saturate and stall the entire cluster. The AllReduce is the heartbeat of the fleet, and its algorithmic design dictates our scaling limits.
+A correct AllReduce must give all 1,000 GPUs the exact sum of all 1,000 one-gigabyte gradients, and the algorithm that delivers it sets the cluster's scaling ceiling. The naive answer—every GPU sends to one central server, whose network card instantly saturates—fails first, which makes it the right place to start.
 
 ### Naive approaches vs. the bandwidth bottleneck {#sec-communication-collective-operations-naive-vs-optimal}
 
@@ -849,7 +849,7 @@ The data flow during Step 1 is illustrated in @fig-ring-allreduce.
 
 :::
 
-The key property visible in @fig-ring-allreduce is that every link carries data simultaneously in every step, leaving no link idle. This uniform link utilization is what makes Ring AllReduce bandwidth-optimal: each node sends exactly $2(N-1)/N \cdot M$ bytes total across both phases, matching the information-theoretic lower bound.
+The key property visible in @fig-ring-allreduce is that every link carries data simultaneously in every step, leaving no link idle. This uniform link utilization is what makes Ring AllReduce bandwidth-optimal: each node sends exactly $2(N-1)/N \cdot M$ bytes total across both phases, matching the information-theoretic lower bound. @Sec-appdx-comm-foundations-ring-vs-tree works through side-by-side examples that compare Ring, tree, and recursive halving-doubling and show how the best algorithm shifts with message size, giving the reader concrete crossover numbers to weigh against the per-algorithm derivations developed here.
 
 To make the ring algorithm concrete, consider a step-by-step trace with 4 GPUs reducing a vector of 4 elements by summation. Each GPU $i$ starts with a local gradient vector $g_i = [a_i, b_i, c_i, d_i]$. The vector is split into 4 chunks (one per GPU), and the algorithm proceeds through two phases.
 
@@ -1519,7 +1519,7 @@ The most common method is **Top-k compression**\index{Top-k Sparsification}: for
 
 $$\text{TopK}(g) = g \odot \mathbf{1}_{|g| \geq |g|_{(K_{\text{top}})}}$$
 
-where $|g|_{(K_{\text{top}})}$ is the $K_{\text{top}}$-th largest element by magnitude. With $K_{\text{top}} = 0.001 \times d_{\text{grad}}$ (keeping only 0.1 percent of elements), this achieves THOUSAND$\times$ compression.
+where $|g|_{(K_{\text{top}})}$ is the $K_{\text{top}}$-th largest element by magnitude. With $K_{\text{top}} = 0.001 \times d_{\text{grad}}$ (keeping only 0.1 percent of elements), this achieves 1000$\times$ compression.
 
 #### Encoding sparse gradients {#sec-collective-communication-encoding-sparse-gradients-ddee}
 

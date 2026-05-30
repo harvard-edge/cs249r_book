@@ -7,7 +7,7 @@ Pytest discovers this file automatically — no imports needed in test files.
 import pytest
 
 from mlsysim.core.constants import Q_
-from mlsysim.core.solver import (
+from mlsysim.engine.solver import (
     CheckpointModel,
     ContinuousBatchingModel,
     CompressionModel,
@@ -31,7 +31,7 @@ from mlsysim.core.solver import (
     WeightStreamingModel,
 )
 from mlsysim.hardware.registry import Hardware
-from mlsysim.infra.registry import Grids, Infrastructure
+from mlsysim.infrastructure.registry import Grids, Infrastructure
 from mlsysim.models.registry import Models
 from mlsysim.models.types import TransformerWorkload
 from mlsysim.systems.registry import Systems

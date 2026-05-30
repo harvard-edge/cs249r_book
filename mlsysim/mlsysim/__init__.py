@@ -6,29 +6,31 @@ mlsysim: Machine Learning Systems Infrastructure and Modeling Platform
 __version__ = "0.1.2"
 
 from . import core
+from . import engine
 from . import hardware
 from . import models
 from . import platforms
-from . import infra
+from . import infrastructure
 from . import systems
 from . import sim
 from . import physics
 
 # AUTHORITATIVE API ENTRY POINTS
-from .core.engine import Engine
-from .core.scenarios import Scenario, Scenarios, Applications
+from .engine.engine import Engine
+from .engine.scenarios import Scenario, Scenarios, Applications
 from .hardware.registry import Hardware
 from .models.registry import Models
 from .platforms.registry import Platforms
 # Datasets loaded lazily via __getattr__ below.
 from .systems.registry import Systems
-from .infra.registry import Infrastructure
+from .infrastructure.registry import Infrastructure
 from .literature.registry import Literature
+from .scenarios.registry import Scenarios
 from .ops import Ops, Monitoring
-from .core import calibration
+from .engine import calibration
 
 # AUTHORITATIVE SOLVERS
-from .core.solver import (
+from .engine.solver import (
     SingleNodeModel,
     DistributedModel,
     ReliabilityModel,

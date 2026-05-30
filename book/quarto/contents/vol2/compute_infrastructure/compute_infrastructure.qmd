@@ -41,7 +41,7 @@ Machine learning systems have a physical reality that transcends code. While the
 - Apply the Roofline Model to diagnose whether a cluster is throttled by arithmetic units or memory bandwidth
 - Analyze the bandwidth hierarchy from HBM to NVLink to InfiniBand and its impact on parallel strategy selection
 - Evaluate Cooling Architectures (Air vs. Liquid) and calculate data center power requirements using PUE
-- Perform a Total Cost of Ownership (TCO) analysis to determine the break-even point for build-vs.-buy decisions
+- Compare accelerators by cost per useful TFLOP-hour rather than cost per GPU-hour, given the efficiency gains across hardware generations
 
 :::
 
@@ -575,7 +575,7 @@ The TPU v2 (2017) and TPU v3 (2018) transitioned to training, introducing bfloat
 
 The TPU v4 (2021) introduced an optical circuit switch (OCS) in the pod-scale network, allowing the physical topology of the pod to be reconfigured for different workloads. This generation also brought significant per-chip improvements, delivering 275 TFLOP/s of BF16 compute.
 
-The TPU v5p\index{TPU!v5p} (2023) represents Google's high-end training accelerator generation before Trillium. It features 459 TFLOP/s of BF16 compute, 95 GB of HBM2e with 2,765 GB/s memory bandwidth, and 1,200 GB/s bidirectional ICI bandwidth per chip, optimized for the massive AllReduce operations required by billion-parameter models.
+The TPU v5p\index{TPU!v5p} (2023) represents Google's high-end training accelerator generation before Trillium. It features 459 TFLOP/s of BF16 compute, 95 GB of HBM2e with 2,765 GB/s memory bandwidth, and 1,200 GB/s bidirectional ICI bandwidth per chip, optimized for the massive AllReduce operations required by billion-parameter models. @Sec-appdx-comm-foundations-allreduce develops the collective communication complexity model and the algorithm choices behind AllReduce, which explain why inter-chip bandwidth, not per-chip arithmetic, sets the ceiling on training throughput as model size grows.
 
 | **Generation** | **Year** | **Key Innovation**         | **Peak BF16** | **HBM** | **ICI BW** |
 |:---------------|:--------:|:---------------------------|:-------------:|:-------:|:----------:|
@@ -595,7 +595,7 @@ The accelerator's arithmetic engine is now extraordinarily powerful, capable of 
 
 \index{Memory Wall}
 
-With the accelerator's arithmetic engine selected, we confront a paradox: the faster we make our logic, the more it idles waiting for data. This diverging trajectory between processor throughput and data access speed is formally known as the **Memory Wall**. While transistor scaling has driven logic performance up by orders of magnitude, the physical interconnects that feed data to these cores have failed to keep pace. This bottleneck is existential for machine learning: unlike traditional software that benefits heavily from caching and data reuse, neural networks must stream billions of weights from memory for every inference pass, often making bandwidth -- not compute -- the governing constraint on performance.
+With the accelerator's arithmetic engine selected, we confront a paradox: the faster we make our logic, the more it idles waiting for data. This diverging trajectory between processor throughput and data access speed is formally known as the **Memory Wall**. While transistor scaling has driven logic performance up by orders of magnitude, the physical interconnects that feed data to these cores have failed to keep pace. This bottleneck is existential for machine learning: unlike traditional software that benefits heavily from caching and data reuse, neural networks must stream billions of weights from memory for every inference pass, often making bandwidth -- not compute -- the governing constraint on performance. @Sec-appdx-c3-taxonomy-diagnostic-summary develops the diagnostic framework that classifies this memory-bound condition alongside the other bottleneck patterns a fleet encounters, so that a measured symptom maps to a named constraint rather than a guess.
 
 ```{python}
 #| echo: false
@@ -653,9 +653,7 @@ class MemoryBandwidthCacheRecap:
     h100_bw_str = fmt(Hardware.Cloud.H100.memory.bandwidth.m_as(TB/second), precision=2, commas=False, suffix=" TB/s")
 ```
 
-Further down is the `{python} MemoryBandwidthCacheRecap.h100_l2_str` L2 cache (~12 TB/s), and
-
-finally the `{python} MemoryBandwidthCacheRecap.h100_mem_str` of HBM3 at `{python} MemoryBandwidthCacheRecap.h100_bw_str`.
+Further down is the `{python} MemoryBandwidthCacheRecap.h100_l2_str` L2 cache (~12 TB/s), and finally the `{python} MemoryBandwidthCacheRecap.h100_mem_str` of HBM3 at `{python} MemoryBandwidthCacheRecap.h100_bw_str`.
 
 ::: {#lhs-compute-infrastructure-archetype-b-dlrm-at-scale-capacity-wall .callout-lighthouse title="Archetype B (DLRM at Scale): The capacity wall"}
 
@@ -725,7 +723,7 @@ class MemoryBandwidthPitfallRecap:
 # │ Exports: MemoryBandwidthDdrRecap.ddr_bw_str
 class MemoryBandwidthDdrRecap:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    ddr_bw_str = fmt(HOST_DRAM_BW.m_as(GB/second), precision=0, commas=False, suffix=" GB/s")
+    ddr_bw_str = fmt(Hardware.Tech.Storage.HostDram.bandwidth.m_as(GB/second), precision=0, commas=False, suffix=" GB/s")
 ```
 
 Traditional DDR memory connects to the processor through pins on the edge of a printed circuit board (PCB). Each DIMM communicates over a 64-bit bus, and even with multiple channels (8 channels is typical for a high-end server CPU), a modern server tops out at roughly `{python} MemoryBandwidthDdrRecap.ddr_bw_str` of aggregate memory bandwidth.
@@ -886,15 +884,13 @@ class MemoryBandwidthHbmRecap:
     h100_bw_str = fmt(Hardware.Cloud.H100.memory.bandwidth.m_as(TB/second), precision=2, commas=False, suffix=" TB/s")
 ```
 
-An important architectural consideration is the number of HBM stacks per accelerator and how they connect to the processor. The H100 has 5 HBM3 stacks, each providing approximately 670 GB/s,
+An important architectural consideration is the number of HBM stacks per accelerator and how they connect to the processor. The H100 has 5 HBM3 stacks, each providing approximately 670 GB/s, for a total of `{python} MemoryBandwidthHbmRecap.h100_bw_str` aggregate bandwidth. A B200-class Blackwell GPU package uses 8 HBM3e stacks for an aggregate of about 8 TB/s. The number of stacks is constrained by the interposer area available for HBM placement: each HBM stack occupies approximately 100 mm$^2$ of interposer area, and the total interposer must accommodate both the processor die(s) and all HBM stacks. Larger interposers allow more HBM stacks (and therefore higher bandwidth and capacity) but are more expensive and harder to manufacture.
 
-for a total of `{python} MemoryBandwidthHbmRecap.h100_bw_str` aggregate bandwidth. A B200-class Blackwell GPU package uses 8 HBM3e stacks for an aggregate of about 8 TB/s. The number of stacks is constrained by the interposer area available for HBM placement: each HBM stack occupies approximately 100 mm$^2$ of interposer area, and the total interposer must accommodate both the processor die(s) and all HBM stacks. Larger interposers allow more HBM stacks (and therefore higher bandwidth and capacity) but are more expensive and harder to manufacture.
-
-The interposer area constraint creates a concrete design tension. Making the processor die larger (more Tensor Cores, more SMs) leaves less interposer area for HBM stacks, potentially reducing bandwidth. Making the processor die smaller (fewer Tensor Cores) frees interposer area for more HBM but reduces peak compute throughput. The optimal balance depends on the target workload's position on the Roofline plot: compute-bound workloads benefit from a larger processor die (more Tensor Cores), while bandwidth-bound workloads benefit from more HBM stacks.
+The interposer area constraint creates a concrete design tension. Making the processor die larger (more Tensor Cores, more SMs) leaves less interposer area for HBM stacks, potentially reducing bandwidth. Making the processor die smaller (fewer Tensor Cores) frees interposer area for more HBM but reduces peak compute throughput. The optimal balance depends on the target workload's position on the Roofline plot: compute-bound workloads benefit from a larger processor die (more Tensor Cores), while bandwidth-bound workloads benefit from more HBM stacks. @Sec-appdx-fleet-foundations-roofline derives the ridge point that separates these two regimes, expressing it through @eq-fleet-arithmetic-intensity and @eq-fleet-ridge-point so that a workload's arithmetic intensity predicts which side of the balance it falls on before any silicon is committed.
 
 #### Memory bandwidth and token latency {#sec-compute-infrastructure-memory-bandwidth-token-latency-1b38}
 
-The distinction between memory *capacity* (how many gigabytes the HBM can store) and memory *bandwidth* (how many terabytes per second it can deliver) is one of the most practically important concepts in ML infrastructure. Capacity determines whether a model's weights *fit*. Bandwidth determines how fast the model can *run*. For autoregressive text generation, where each token requires a full pass through the model's weights, bandwidth is almost always the binding constraint.
+The distinction between memory *capacity* (how many gigabytes the HBM can store) and memory *bandwidth* (how many terabytes per second it can deliver) is one of the most practically important concepts in ML infrastructure. Capacity determines whether a model's weights *fit*. Bandwidth determines how fast the model can *run*. For autoregressive text generation, where each token requires a full pass through the model's weights, bandwidth is almost always the binding constraint. @Sec-appdx-comm-foundations-alpha-beta formalizes the same latency-versus-bandwidth decomposition for data movement across the network, giving the reader a single algebraic model that applies equally to the memory system here and to inter-node transfers later.
 
 ```{python}
 #| echo: false
@@ -1006,7 +1002,7 @@ Memory-boundedness is a quantitative expression of the memory wall: the gap betw
 
 The practical implication is that accelerator selection for inference workloads should prioritize bandwidth-per-dollar over FLOP/s-per-dollar. An older-generation GPU with high memory bandwidth but moderate compute throughput may deliver better inference performance per dollar than a latest-generation GPU with extreme compute but insufficient bandwidth improvement.
 
-@Fig-compute-memory-divergence makes this divergence visible across four GPU generations. While peak Tensor throughput has grown 36$\times$ from V100 to B200 when following each generation's advertised low-precision mode, memory bandwidth has grown only 9$\times$ over the same period. *The widening gap between these two curves is the memory wall*: each generation of accelerator becomes more powerful in arithmetic but proportionally more starved for data.
+@Fig-compute-memory-divergence makes this divergence visible across four GPU generations. While peak Tensor throughput has grown 36$\times$ from V100 to B200 when following each generation's advertised low-precision mode, memory bandwidth has grown only 9$\times$ over the same period. *The widening gap between compute growth and bandwidth growth is the memory wall*: each generation of accelerator becomes more powerful in arithmetic but proportionally more starved for data.
 
 ::: {#fig-compute-memory-divergence fig-env="figure" fig-pos="htb" fig-cap="**The Compute-Memory Divergence**: GPU peak Tensor throughput has grown approximately 36x from V100 to B200 when following each generation's advertised low-precision Tensor Core mode, while HBM bandwidth has grown only 9x over the same period. The widening gap between these curves is the memory wall: each generation of accelerator becomes proportionally more starved for data." fig-alt="Dual-axis log-scale plot showing GPU compute growth at 36x vs. memory bandwidth growth at 9x from 2017 to 2024, with diverging slopes illustrating the memory wall."}
 
@@ -2030,9 +2026,7 @@ class H100TdpServingRecap:
     tdp_str = fmt(Hardware.Cloud.H100.tdp.m_as(watt), precision=0, commas=False, suffix=" W")
 ```
 
-The implication is that optimal serving infrastructure often uses different hardware, different software, and different facility designs than the training infrastructure. Some organizations use previous-generation GPUs (A100s) for serving because the memory bandwidth per dollar is competitive with current-generation GPUs, and
-
-the lower TDP (`{python} A100ServingTdpRecap.tdp_str` vs. `{python} H100TdpServingRecap.tdp_str`) allows higher rack density and lower cooling costs.
+The implication is that optimal serving infrastructure often uses different hardware, different software, and different facility designs than the training infrastructure. Some organizations use previous-generation GPUs (A100s) for serving because the memory bandwidth per dollar is competitive with current-generation GPUs, and the lower TDP (`{python} A100ServingTdpRecap.tdp_str` vs. `{python} H100TdpServingRecap.tdp_str`) allows higher rack density and lower cooling costs.
 
 ```{python}
 #| echo: false
@@ -2391,9 +2385,7 @@ class BandwidthHierarchyNvlinkRecap:
     nvlink_bw_str = fmt(Hardware.Cloud.H100.nvlink.bandwidth.m_as(GB/second), precision=0, commas=False, suffix=" GB/s")
 ```
 
-Consider the NVIDIA DGX H100 architecture. Eight H100 GPUs sit on a single baseboard, each connected to four NVSwitch chips via 18 NVLink 4.0 lanes. The NVSwitch chips form a non-blocking crossbar[^fn-crossbar-nvswitch]:
-
-any GPU can communicate with any other GPU at the full `{python} BandwidthHierarchyNvlinkRecap.nvlink_bw_str` bidirectional bandwidth simultaneously, without contention. This is the equivalent of giving every pair of GPUs their own private highway, rather than forcing them to share a single road.
+Consider the NVIDIA DGX H100 architecture. Eight H100 GPUs sit on a single baseboard, each connected to four NVSwitch chips via 18 NVLink 4.0 lanes. The NVSwitch chips form a non-blocking crossbar[^fn-crossbar-nvswitch]: any GPU can communicate with any other GPU at the full `{python} BandwidthHierarchyNvlinkRecap.nvlink_bw_str` bidirectional bandwidth simultaneously, without contention. This is the equivalent of giving every pair of GPUs their own private highway, rather than forcing them to share a single road.
 
 [^fn-crossbar-nvswitch]: **Crossbar Switch**: A topology providing a dedicated path between every input-output pair simultaneously. An $N{\times}N$ crossbar has $N^2$ crosspoints, achieving full bisection bandwidth. NVSwitch implements a 3-stage crossbar using four switch chips (each with 64 NVLink ports), consuming ~800 W total -- more than an entire V100 GPU -- but this power cost is justified because it enables all-to-all tensor parallelism within a node, the communication pattern that would otherwise dominate training time. \index{Crossbar Switch!NVSwitch}
 
@@ -3153,7 +3145,7 @@ Environmental monitoring includes:
 - **Vibration sensors** on the building structure and rack frames, detecting seismic events or mechanical vibrations from construction activity that could damage disk drives or loosen cable connections.
 - **Humidity control** maintaining relative humidity between 40--60 percent to prevent both static discharge (low humidity) and condensation (high humidity).
 
-These environmental controls are not afterthoughts but integral parts of the infrastructure design that affect reliability and uptime. A water leak that reaches a DGX H100 baseboard can cause millions of dollars in damage and weeks of downtime. A fire in a single rack can shut down an entire data center hall for days while the fire suppression system is recharged and the affected area is decontaminated.
+These environmental controls are not afterthoughts but integral parts of the infrastructure design that affect reliability and uptime. A water leak that reaches a DGX H100 baseboard can cause millions of dollars in damage and weeks of downtime. A fire in a single rack can shut down an entire data center hall for days while the fire suppression system is recharged and the affected area is decontaminated. The 2021 OVHcloud fire in Strasbourg shows how a single-building incident, absent the right compartmentalization, escalates into a site-wide failure domain.
 
 ::: {#ws-compute-infrastructure-ovh-strasbourg-fire .callout-war-story title="The data center that became the failure domain"}
 
@@ -3484,7 +3476,7 @@ The fraction of time spent on communication (as opposed to computation) is the s
 
 @Sec-network-fabrics examines the network engineering in detail; here we focus on how the physical topology of the pod determines what communication patterns are efficient.
 
-The second principle is that failure is routine, not exceptional. A cluster of 10,000 GPUs, each with a mean time between failures (MTBF) of approximately 50,000 hours (the canonical GPU MTTF anchor `Systems.Reliability.Gpu.mttf_hours` used in @sec-fault-tolerance-reliability), will experience a GPU failure roughly once every five hours on average.
+The second principle is that failure is routine, not exceptional. A cluster of 10,000 GPUs, each with a mean time between failures (MTBF) of approximately 50,000 hours (the canonical GPU MTTF anchor `Systems.Reliability.Gpu.mttf_hours` used in @sec-fault-tolerance-reliability), will experience a GPU failure roughly once every five hours on average. @Sec-appdx-reliability-foundations-mtbf-cascade derives why this cluster-level rate follows from the per-component lifetimes: reliability degrades linearly with component count at each level, so a node MTBF divided by node count yields the fleet-level interval between failures.
 
 \index{MTBF}
 
@@ -3922,7 +3914,7 @@ class InfraFrontierStragglerRecap22:
     frontier_params_b_str = fmt(Models.Language.GPT3.parameters.m_as(param) / BILLION, precision=0, commas=False)
 ```
 
-Each of the technologies below targets the physical barriers that have governed this chapter. Compute Express Link (CXL) attacks the memory wall by decoupling capacity from individual accelerators, while Wafer-Scale Integration attacks the memory, communication, and power walls simultaneously by eliminating the off-chip boundary entirely. For our `{python} InfraFrontierStragglerRecap22.frontier_params_b_str`B model, these technologies would progressively relax the constraints that currently force complex multi-node parallelism: if CXL memory pooling provides terabyte-scale capacity accessible from any accelerator, the memory-capacity constraint would decouple from the per-node HBM budget. (Advances in optical interconnects and disaggregated networking, which attack the communication wall, are covered in @sec-network-fabrics).
+The next generation of hardware confronts head-on the three walls that have governed this chapter: memory, communication, and power. Compute Express Link (CXL) attacks the memory wall by decoupling capacity from individual accelerators, while Wafer-Scale Integration attacks the memory, communication, and power walls simultaneously by eliminating the off-chip boundary entirely. For our `{python} InfraFrontierStragglerRecap22.frontier_params_b_str`B model, these technologies would progressively relax the constraints that currently force complex multi-node parallelism: if CXL memory pooling provides terabyte-scale capacity accessible from any accelerator, the memory-capacity constraint would decouple from the per-node HBM budget. (Advances in optical interconnects and disaggregated networking, which attack the communication wall, are covered in @sec-network-fabrics).
 
 ### Compute express link (CXL) {#sec-compute-cxl}
 
@@ -4072,7 +4064,7 @@ Beyond the direct electricity savings, liquid cooling enables higher rack densit
 
 **Pitfall**: *Treating all GPU-hours as equivalent in TCO analysis.*
 
-A common error in cost comparisons is to treat one GPU-hour on an H100 as interchangeable with one GPU-hour on an A100 or V100. In reality, the effective cost per unit of useful computation varies enormously across GPU generations because of the efficiency differences documented in @tbl-power-efficiency. An H100 GPU-hour delivers 6.3$\times$ the TFLOP/s of an A100 GPU-hour and 15.8$\times$ the TFLOP/s of a V100 GPU-hour. A training run that takes 10,000 V100 GPU-hours would require only approximately 630 H100 GPU-hours to complete the same amount of computation. The relevant metric is not cost per GPU-hour but cost per useful TFLOP-hour, which accounts for both the price per hour and the effective throughput delivered. Organizations that benchmark cloud options by GPU-hour cost alone systematically overestimate the expense of newer, more efficient hardware.
+A common error in cost comparisons is to treat one GPU-hour on an H100 as interchangeable with one GPU-hour on an A100 or V100. In reality, the effective cost per unit of useful computation varies enormously across GPU generations: newer accelerators deliver far more useful throughput per dollar. An H100 GPU-hour delivers 6.3$\times$ the TFLOP/s of an A100 GPU-hour and 15.8$\times$ the TFLOP/s of a V100 GPU-hour. A training run that takes 10,000 V100 GPU-hours would require only approximately 630 H100 GPU-hours to complete the same amount of computation. The relevant metric is not cost per GPU-hour but cost per useful TFLOP-hour, which accounts for both the price per hour and the effective throughput delivered. Organizations that benchmark cloud options by GPU-hour cost alone systematically overestimate the expense of newer, more efficient hardware.
 
 **Fallacy**: *A faster network always improves training throughput.*
 
@@ -4298,7 +4290,7 @@ class TcoSummaryBreakevenRecap:
     breakeven_util_str = fmt((dgx_h100_price / amortization_years) / denominator * 100, precision=1, commas=False, suffix=" percent")
 ```
 
-* **TCO, not CapEx**: The total cost of ownership includes electricity, facility construction, networking, and staffing. Under the simplified per-node hardware-plus-electricity model, on-premises infrastructure becomes favorable above approximately `{python} TcoSummaryBreakevenRecap.breakeven_util_str` sustained utilization; in the full 10,000-GPU TCO example including facility, network, and staffing costs, the threshold is roughly 54 percent.
+* **TCO, not CapEx**: The total cost of ownership includes electricity, facility construction, networking, and staffing, not just the purchase price. Under a simplified per-node hardware-plus-electricity model, owning becomes favorable above approximately `{python} TcoSummaryBreakevenRecap.breakeven_util_str` sustained utilization; adding facility, network, and staffing costs to a full fleet TCO raises that threshold further.
 
 :::
 

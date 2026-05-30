@@ -143,7 +143,7 @@ from INT4 quantization, and understand the accuracy trade-off.
 
 ```python
 from mlsysim import Engine, Hardware, Models
-from mlsysim.core.solver import CompressionModel
+from mlsysim.engine.solver import CompressionModel
 
 compress = CompressionModel()
 model    = Models.Language.Llama3_8B
@@ -218,7 +218,7 @@ What is the optimal compression point?
 
 ```python
 from mlsysim import Models, Systems
-from mlsysim.core.solver import ParallelismOptimizer
+from mlsysim.engine.solver import ParallelismOptimizer
 
 optimizer = ParallelismOptimizer()
 model     = Models.Language.Llama3_70B
@@ -582,7 +582,7 @@ from mlsysim import (
     ServingModel, EconomicsModel, SustainabilityModel,
     Hardware, Models, Infrastructure
 )
-from mlsysim.core.solver import CompressionModel
+from mlsysim.engine.solver import CompressionModel
 from mlsysim.systems.types import Fleet
 from mlsysim.systems.registry import Nodes, Fabrics
 

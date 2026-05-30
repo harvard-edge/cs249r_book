@@ -84,7 +84,7 @@ Part II established the distributed logic of the fleet: partitioning workloads, 
 
 ### The iron law of ML performance {#sec-performance-engineering-efficiency-frontier}
 
-Performance engineering operates within a constrained optimization space defined by the iron law of ML system performance\index{Iron Law}:
+The memory wall is one term in a larger budget. The iron law of ML system performance\index{Iron Law} decomposes execution time into three competing costs:
 
 $$
 T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}}
@@ -133,7 +133,7 @@ The same diagnostic process can be codified as a decision flowchart, mapping eac
 
 :::
 
-The central lesson of @fig-iron-law-flowchart is that profiling must precede optimization: applying operator fusion to a compute-bound workload, or precision engineering to an overhead-bound one, yields zero improvement regardless of implementation quality.
+The central lesson of @fig-iron-law-flowchart is that profiling must precede optimization: applying operator fusion to a compute-bound workload, or precision engineering to an overhead-bound one, yields zero improvement regardless of implementation quality. Misdiagnosis is not only wasted effort; a performance change shipped blind can become an outage.
 
 ::: {#ws-performance-engineering-cloudflare-regex-outage .callout-war-story title="The regex that saturated the edge"}
 
@@ -147,7 +147,7 @@ The central lesson of @fig-iron-law-flowchart is that profiling must precede opt
 
 :::
 
-The **efficiency frontier**\index{Efficiency Frontier!definition}\index{Efficiency!frontier} is the Pareto-optimal curve of model quality vs. system throughput. A model on the frontier cannot improve throughput without sacrificing quality, or vice versa. @thompson2021 show why this frontier matters for deep learning: quality improvements have required rapidly increasing compute, making efficiency gains central to continued progress. The techniques in this chapter push the frontier outward by making each quality level achievable at higher throughput, or equivalently, by making each throughput level achievable at higher quality. An organization's goal is not merely to reach the frontier but to find the point on it that best matches their latency, throughput, cost, and quality requirements.
+That discipline of bounding the worst case before a global rollout is the operational complement to the throughput-vs-quality tuning the rest of this chapter pursues. The **efficiency frontier**\index{Efficiency Frontier!definition}\index{Efficiency!frontier} is the Pareto-optimal curve of model quality vs. system throughput. A model on the frontier cannot improve throughput without sacrificing quality, or vice versa. @thompson2021 show why this frontier matters for deep learning: quality improvements have required rapidly increasing compute, making efficiency gains central to continued progress. The techniques in this chapter push the frontier outward by making each quality level achievable at higher throughput, or equivalently, by making each throughput level achievable at higher quality. An organization's goal is not merely to reach the frontier but to find the point on it that best matches their latency, throughput, cost, and quality requirements.
 
 The multi-dimensional nature of this frontier makes optimization challenging. The relevant dimensions include:
 
@@ -190,7 +190,7 @@ The efficiency frontier establishes what we are optimizing toward. The physics o
 # │ Imports: mlsysim.core.constants (Hardware.Cloud.H100.compute.precision_flops["fp8"], Hardware.Cloud.H100.compute.sm_count,
 # │          Hardware.Cloud.H100.memory.bandwidth, Hardware.Cloud.H100.memory.capacity, Hardware.Cloud.H100.memory.l2_cache,
 # │          Hardware.Cloud.H100.memory.register_file_per_sm, Hardware.Cloud.H100.memory.shared_memory_per_sm,
-# │          Hardware.Cloud.H100.tdp, ENERGY_DRAM_ACCESS_PJ, ENERGY_SRAM_L1_PJ, LATENCY_HBM3,
+# │          Hardware.Cloud.H100.tdp, Hardware.Tech.Memory.HBM3.energy_per_access, Hardware.Tech.Memory.L1.energy_per_access, Hardware.Tech.Memory.HBM3.latency,
 # │          TFLOPs, TB, GiB, second, flop, byte, watt)
 # │ Exports: MemoryWallScenario.h100_fp8_str, MemoryWallScenario.h100_hbm_bw_str,
 # │          MemoryWallScenario.h100_ridge_fp8_str, MemoryWallScenario.energy_ratio_str,
@@ -214,9 +214,10 @@ class MemoryWallScenario:
     reg_per_sm = Hardware.Cloud.H100.memory.register_file_per_sm
     shared_per_sm = Hardware.Cloud.H100.memory.shared_memory_per_sm
     tdp = Hardware.Cloud.H100.tdp
-    energy_dram = ENERGY_DRAM_ACCESS_PJ
-    energy_sram = ENERGY_SRAM_L1_PJ
-    hbm_latency = LATENCY_HBM3
+    # Energy figures sourced from Hardware.Tech (taxonomy refactor; energy-as-property).
+    energy_dram = Hardware.Tech.Memory.HBM3.energy_per_access
+    energy_sram = Hardware.Tech.Memory.L1.energy_per_access
+    hbm_latency = Hardware.Tech.Memory.HBM3.latency
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     ridge_fp8 = (flops_fp8 / bw).m_as(flop/byte)
@@ -402,7 +403,7 @@ class RooflineRidgeCalc:
 
 Any operation performing fewer than `{python} RooflineRidgeCalc.h100_fp16_ridge_str` floating-point operations per byte loaded is memory-bound on the H100 at FP16. At FP8 precision, where compute doubles to `{python} RooflineRidgeCalc.h100_fp8_str` and bandwidth remains `{python} RooflineRidgeCalc.h100_hbm_bw_str`, the ridge point rises to approximately `{python} RooflineRidgeCalc.h100_fp8_ridge_str` FLOP/byte. The A100, with `{python} RooflineRidgeCalc.a100_fp16_str` and `{python} RooflineRidgeCalc.a100_hbm_bw_str`, has a lower ridge point of approximately `{python} RooflineRidgeCalc.a100_ridge_str` FLOP/byte at FP16. Each hardware generation increases compute faster than bandwidth, pushing the ridge point higher and making more workloads memory-bound.
 
-@Fig-shifting-roofline overlays the roofline models for four GPU generations on a single log-log plot, making the generational shift visible at a glance. For FP16/BF16 arithmetic, the ridge point has grown from 139 FLOP/byte on the V100 to 281 FLOP/byte on the B200, about a 2$\times$ increase in seven years. An operation like naive self-attention, with an arithmetic intensity near 10 FLOP/byte, is memory-bound on every generation and falls progressively further below the ridge with each new chip. More critically, operations near 200 FLOP/byte, such as some matrix multiplications and fused blocks, can change regime as hardware changes. The same kernel can change performance regime across hardware generations, a fact that demands re-profiling whenever hardware is upgraded.
+@Fig-shifting-roofline overlays the roofline models for four GPU generations on a single log-log plot, making the generational ridge-point shift tabulated earlier visible at a glance. An operation like naive self-attention, with an arithmetic intensity near 10 FLOP/byte, is memory-bound on every generation and falls progressively further below the ridge with each new chip. More critically, operations near 200 FLOP/byte, such as some matrix multiplications and fused blocks, can change regime as hardware changes. The same kernel can change performance regime across hardware generations, a fact that demands re-profiling whenever hardware is upgraded.
 
 ::: {#fig-shifting-roofline fig-env="figure" fig-pos="htb" fig-cap="**The Shifting Roofline Across GPU Generations**: Overlaid FP16/BF16 roofline models for V100 through B200 show the ridge point growing from 139 to 281 FLOP/byte. Operations near 200 FLOP/byte can change regime as the roofline shifts. The same kernel can change performance regime across hardware generations." fig-alt="Log-log roofline plot for V100, A100, H100, B200 with ridge points and example ML operations marked"}
 
@@ -948,7 +949,7 @@ FlashAttention-2 [@dao2023flashattention2] further optimizes the algorithm for m
 
 FlashAttention-3 targets the H100's new hardware features: FP8 Tensor Cores and the Tensor Memory Accelerator (TMA). By computing attention in FP8 with selective FP16 accumulation, FlashAttention-3 achieves near-peak FP8 utilization for the attention operation, further closing the gap between achieved and theoretical performance.
 
-The original breakthrough was a change in how engineers understood the bottleneck: attention was not just a matrix multiplication problem, but a memory hierarchy problem.
+The original breakthrough was a change in how engineers understood the bottleneck: the constraint on attention was the memory hierarchy, not the matrix multiplication.
 
 ::: {#exmp-performance-engineering-flashattention-breakthrough .callout-example title="The FlashAttention breakthrough"}
 
@@ -1806,7 +1807,7 @@ Time-to-first-token (TTFT)\index{TTFT} measures the latency from when a request 
 
 Inter-token latency (ITL)\index{ITL} measures the time between consecutive output tokens during the decode phase. ITL directly determines the perceived generation speed. For a comfortable reading experience, ITL should be below 50 ms (20 tokens/second); for real-time speech synthesis, ITL below 25 ms may be required.
 
-Throughput (tokens/second for the system, or tokens/second/GPU for per-device efficiency) measures aggregate production capacity. Throughput is maximized by large batch sizes and high utilization, often at the expense of increased per-request latency. The fundamental trade-off between throughput and latency is captured by queuing theory, as explored in @sec-inference-scale-queuing-theory-batched-inference-bbf0.
+Throughput (tokens/second for the system, or tokens/second/GPU for per-device efficiency) measures aggregate production capacity. Throughput is maximized by large batch sizes and high utilization, often at the expense of increased per-request latency. The fundamental trade-off between throughput and latency is captured by queuing theory, as explored in @sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0.
 
 While MFU is the standard metric for training efficiency, it is often misleading for inference. Inference is predominantly memory-bound, meaning the Tensor Cores spend most cycles waiting for data. For these workloads, **Model Bandwidth Utilization (MBU)**\index{Model Bandwidth Utilization} is the more informative metric: the ratio of achieved memory bandwidth to the hardware's peak bandwidth. A decoding step on an H100 might show a dismal 2 percent MFU (using a fraction of the compute capability) but achieve 85 percent MBU (saturating the HBM3 memory bandwidth). In this context, 85 percent MBU indicates a highly optimized system; no amount of code optimization can squeeze more tokens per second without faster memory hardware. The choice of primary metric, MFU for *training* and MBU for *inference*, reflects the fundamental bottleneck shift between these two regimes.
 
@@ -2003,7 +2004,7 @@ class ProfilerDetective:
 
 ::: {#nbk-performance-engineering-profiler-detective .callout-notebook title="The profiler detective"}
 
-**Problem**: A 7B parameter LLM runs on a single H100 and shows `{python} ProfilerDetective.observed_tps_str` econd during autoregressive generation at batch size 1. The pure FP16 weight-read roofline is higher, but after budgeting roughly `{python} ProfilerDetective.decode_traffic_gb_str` of total per-token traffic for weights, KV-cache reads, sampling, synchronization, and launch overhead, the bandwidth-limited full-decode ceiling is approximately `{python} ProfilerDetective.ceiling_tps_str` econd. Where is the remaining `{python} ProfilerDetective.hidden_performance_pct_str` of realizable decode-step performance hiding?
+**Problem**: A 7B parameter LLM runs on a single H100 and shows `{python} ProfilerDetective.observed_tps_str` during autoregressive generation at batch size 1. The pure FP16 weight-read roofline is higher, but after budgeting roughly `{python} ProfilerDetective.decode_traffic_gb_str` of total per-token traffic for weights, KV-cache reads, sampling, synchronization, and launch overhead, the bandwidth-limited full-decode ceiling is approximately `{python} ProfilerDetective.ceiling_tps_str`. Where is the remaining `{python} ProfilerDetective.hidden_performance_pct_str` of realizable decode-step performance hiding?
 
 **Investigation**:
 

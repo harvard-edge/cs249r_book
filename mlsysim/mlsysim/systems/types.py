@@ -1,7 +1,7 @@
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional
 from ..hardware.types import HardwareNode
-from ..infra.types import Datacenter, GridProfile
+from ..infrastructure.types import Datacenter, GridProfile
 from ..core.types import Quantity, Metadata
 
 class DeploymentTier(BaseModel):
@@ -92,5 +92,5 @@ class Fleet(BaseModel):
             return self.datacenter.pue
         if self.region:
             return self.region.pue
-        from ..infra.registry import FacilityCooling
+        from ..infrastructure.registry import FacilityCooling
         return float(FacilityCooling.BestAir.pue)

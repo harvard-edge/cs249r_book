@@ -123,7 +123,7 @@ CONSTANTS_PHYSICS_ALLOWLIST = frozenset(
         "BYTES_FP16", "BYTES_FP32", "BYTES_FP8", "BYTES_ADAM_STATE", "BYTES_FP32",
         "GB", "GiB", "TB", "MB", "KB", "KiB", "byte", "second", "watt", "USD",
         "TFLOPs", "PFLOPs", "Gbps", "Gparam", "Bparam", "param", "count",
-        "ureg", "kilowatt", "NVME_SEQUENTIAL_BW",
+        "ureg", "kilowatt",
     }
 )
 

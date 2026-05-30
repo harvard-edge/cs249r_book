@@ -6,7 +6,7 @@ by comparing the same GPU fleet across different regional grids.
 """
 
 import mlsysim
-from mlsysim.infra.types import Datacenter
+from mlsysim.infrastructure.types import Datacenter
 
 def main():
     print("Scenario: Training Llama-3-70B on 512 H100 GPUs for 30 days\n")

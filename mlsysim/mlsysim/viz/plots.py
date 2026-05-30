@@ -211,7 +211,7 @@ def plot_roofline(hardware_node, workloads=None):
 
     # Plot workloads
     if workloads:
-        from ..core.solver import SingleNodeModel
+        from ..engine.solver import SingleNodeModel
 
         workload_colors = [
             colors["crimson"],

@@ -98,7 +98,7 @@ def _scan_file(path: Path) -> list[str]:
             if bad:
                 hits.append(
                     f"{rel}:{lineno}: import {', '.join(bad)} from mlsysim "
-                    f"(use mlsysim.core.solver or mlsysim.models.types)\n  {line.strip()}"
+                    f"(use mlsysim.engine.solver or mlsysim.models.types)\n  {line.strip()}"
                 )
 
     # Multiline `from mlsysim import (` blocks in markdown/python fences
@@ -119,7 +119,7 @@ def _scan_file(path: Path) -> list[str]:
         if bad:
             hits.append(
                 f"{rel}:{node.lineno}: import {', '.join(bad)} from mlsysim "
-                f"(use mlsysim.core.solver or mlsysim.models.types)"
+                f"(use mlsysim.engine.solver or mlsysim.models.types)"
             )
     return hits
 

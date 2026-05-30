@@ -6,7 +6,7 @@ distributed training performance + economics.
 from mlsysim.systems.types import Fleet, Node, NetworkFabric
 from mlsysim.hardware.registry import Hardware
 from mlsysim.models.registry import Models
-from mlsysim.core.solver import DistributedModel, EconomicsModel
+from mlsysim.engine.solver import DistributedModel, EconomicsModel
 from mlsysim.core.constants import Q_
 
 # 1. Define the Workload

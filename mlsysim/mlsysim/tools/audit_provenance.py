@@ -7,7 +7,7 @@ import argparse
 import sys
 from typing import Any, Iterable
 
-from mlsysim.core.appendix_lineage import (
+from mlsysim.tools.appendix_lineage import (
     audit_appendix_defaults,
     audit_appendix_literature,
     audit_appendix_pricing,
@@ -21,9 +21,9 @@ from mlsysim.hardware.registry import (
     TinyHardware,
     WorkstationHardware,
 )
-from mlsysim.infra.registry import Grids
-from mlsysim.infra.pricing import Cloud, Storage, Labeling, Fleet, Capital, OnPremises
-from mlsysim.infra.capacity import Capacity
+from mlsysim.infrastructure.registry import Grids
+from mlsysim.infrastructure.pricing import Cloud, Storage, Labeling, Fleet, Capital, OnPremises
+from mlsysim.infrastructure.capacity import Capacity
 from mlsysim.literature.registry import Training, Scaling, Overheads, Chinchilla, Communication
 from mlsysim.models.registry import (
     GenerativeVisionModels,
@@ -147,7 +147,7 @@ def audit_literature_sourced() -> list[str]:
 
 def audit_calibration_sourced() -> list[str]:
     issues: list[str] = []
-    from mlsysim.core import calibration as cal
+    from mlsysim.engine import calibration as cal
 
     for name in dir(cal):
         if name.startswith("_"):
@@ -155,7 +155,7 @@ def audit_calibration_sourced() -> list[str]:
         val = getattr(cal, name)
         if isinstance(val, Sourced):
             issues.extend(
-                _validate_provenance_record(f"core.calibration.{name}", val.provenance)
+                _validate_provenance_record(f"engine.calibration.{name}", val.provenance)
             )
     return issues
 

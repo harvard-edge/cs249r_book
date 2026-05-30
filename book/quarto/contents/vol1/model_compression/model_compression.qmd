@@ -208,6 +208,14 @@ To understand *why* numerics matter so deeply, move from the algorithm to silico
 from mlsysim.fmt import fmt, check
 
 class QuantizationEnergyPhysics:
+    # Energy values sourced from the mlsysim registry (Hardware.Tech).
+    ENERGY_DRAM_ACCESS_PJ = Hardware.Tech.Memory.HBM3.energy_per_access
+    ENERGY_DRAM_PJ_PER_BYTE = Hardware.Tech.Memory.HBM3.energy_per_byte
+    ENERGY_FLOP_FP32_PJ = Hardware.Tech.Op.FlopFp32.energy
+    ENERGY_OP_INT8_PJ = Hardware.Tech.Op.OpInt8.energy
+    ENERGY_ADD_FP32_PJ = Hardware.Tech.Op.AddFp32.energy
+    ENERGY_ADD_INT8_PJ = Hardware.Tech.Op.AddInt8.energy
+
     int8_energy_reduction = 20
     bytes_fp32 = BYTES_FP32.m_as(byte)
     bytes_int8 = BYTES_INT8.m_as(byte)
@@ -245,7 +253,7 @@ class QuantizationEnergyPhysics:
 
 ::: {#nbk-model-compression-physics-quantization .callout-notebook title="The physics of quantization"}
 
-The energy-movement invariant $(E_{\text{move}} \gg E_{\text{compute}})$ means that in the physics of silicon, **bits represent energy** (see @tbl-energy-ratios-ref for the energy gap between arithmetic and data movement, and @sec-machine-foundations-numerical-representations-c889 for numerical format trade-offs).
+The energy-movement invariant $(E_{\text{move}} \gg E_{\text{compute}})$ means that in the physics of silicon, **bits represent energy** (see @tbl-energy-ratios-ref for the energy gap between arithmetic and data movement, and @sec-appdx-machine-foundations-numerical-representations-c889 for numerical format trade-offs).
 
 According to the iron law $(T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}})$, which decomposes execution time into data volume moved, operations performed, and fixed latency, reducing the bit-width of a weight has a roughly proportional effect on efficiency:
 
@@ -254,7 +262,7 @@ According to the iron law $(T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\
 
 @Tbl-model-compression-energy-hierarchy normalizes these costs against an 8-bit integer add to expose the four-order-of-magnitude gap between arithmetic and DRAM access.
 
-For inference workloads, moving from FP32 to INT8 saves `{python} QuantizationEnergyPhysics.mem_reduction_ratio_str`$\times$ memory and can reduce the energy per inference by up to `{python} QuantizationEnergyPhysics.int8_energy_reduction_str`$\times$ on hardware with dedicated INT8 units, depending on the compute-to-memory ratio of the workload. The practical impact: a battery lasting `{python} QuantizationEnergyPhysics.baseline_battery_hours_str` or `{python} QuantizationEnergyPhysics.int8_battery_hours_str`.
+For inference workloads, moving from FP32 to INT8 saves `{python} QuantizationEnergyPhysics.mem_reduction_ratio_str`$\times$ memory and can reduce the energy per inference by up to `{python} QuantizationEnergyPhysics.int8_energy_reduction_str`$\times$ on hardware with dedicated INT8 units, depending on the compute-to-memory ratio of the workload. @Sec-appdx-machine-foundations-physics-computing-c77f frames that dependence through the roofline model, whose arithmetic-intensity axis explains why shrinking data movement dominates the achievable speedup for memory-bound workloads while arithmetic savings alone help only once a workload is compute-bound. The practical impact: a battery lasting `{python} QuantizationEnergyPhysics.baseline_battery_hours_str` or `{python} QuantizationEnergyPhysics.int8_battery_hours_str`.
 
 These same physics apply at data center scale: distributed training systems use reduced precision to cut gradient communication overhead, a topic covered in @sec-model-training-mixedprecision-training-9218. For a deeper treatment of how silicon architectures exploit these energy differences, see @sec-hardware-acceleration.
 
@@ -370,7 +378,7 @@ class QuantizationSpeedup:
     bytes_int4 = BYTES_INT4.m_as(byte)
 
     device_ram_gb = 16
-    mem_bw_gbs = SYSTEM_MEMORY_BW.m_as(GB / second)
+    mem_bw_gbs = Hardware.Tech.Storage.SystemMemory.bandwidth.m_as(GB / second)
     kv_cache_gb = 1.0
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
@@ -625,7 +633,7 @@ Optimization is a search for the Pareto frontier.
 
 : **The Optimization Trade-Offs**: Region 1 = Free Lunch, Region 2 = Efficient Trade, Region 3 = Danger Zone. Batch size affects training dynamics rather than model quality directly. These ranges are empirical guidelines from published benchmarks [@jacob2018; @han2015deep; @hinton2015distilling]; actual results vary with architecture, task, and implementation quality. {#tbl-optimization-tradeoffs tbl-colwidths="[22,27,17,25,9]"}
 
-The table reveals a pattern: techniques that preserve model structure (fusion, precision reduction) tend to be "free" or cheap, while techniques that alter structure (pruning, distillation) extract more savings but require careful tuning. Before examining each technique in depth, it is useful to check that intuition against these trade-offs.
+The table reveals a pattern: techniques that preserve model structure (fusion, precision reduction) tend to be "free" or cheap, while techniques that alter structure (pruning, distillation) extract more savings but require careful tuning.
 
 Each deployment context imposes a binding constraint: memory capacity on mobile devices, latency on real-time systems, energy on battery-powered sensors. The optimization techniques that follow address these constraints at three successive levels of the stack. We begin with structural methods that modify *what* computations occur, reducing the model's parameter count and operation count to fit tighter memory and compute budgets. We then turn to precision techniques that reduce how many bits represent each value, directly shrinking memory footprint and accelerating arithmetic. Finally, we address architectural approaches that improve how efficiently the remaining operations execute on physical hardware, closing the gap between theoretical savings and measured performance.
 
@@ -658,7 +666,7 @@ Structural optimization addresses the first dimension of our framework, **Effici
 \index{Conservation of Complexity!structural optimization}
 Every technique in this chapter is governed by a single meta-law, analogous to conservation of energy in thermodynamics: the conservation of complexity. Just as a physical system *cannot* destroy energy but only convert it between forms, an ML system *cannot* destroy complexity but only relocate it between data, algorithm, and machine. This principle constrains all possible optimizations and explains why no compression technique achieves a free lunch. The engineer's task is to move complexity to where the cost is lowest given deployment constraints.
 
-The challenge is removing that surplus without removing what matters, a direct manifestation of this law. Complexity *cannot* be destroyed, only moved. Pruning moves complexity from parameters to the hardware's ability to exploit sparse patterns: the model becomes simpler, but the system must now handle irregular memory access. Knowledge distillation moves complexity from inference compute to training compute: a smaller model at deployment, but a larger training budget to produce it. Neural architecture search moves complexity from human design effort to automated exploration: a more efficient architecture, but at the cost of a large search budget. Understanding where complexity should reside for a given deployment target[^fn-pareto-frontier-compression] is the central question of structural optimization.
+The challenge is removing that surplus without removing what matters. Each technique relocates complexity to a different place: pruning moves it from parameters to the hardware's ability to exploit sparse patterns: the model becomes simpler, but the system must now handle irregular memory access. Knowledge distillation moves complexity from inference compute to training compute: a smaller model at deployment, but a larger training budget to produce it. Neural architecture search moves complexity from human design effort to automated exploration: a more efficient architecture, but at the cost of a large search budget. Understanding where complexity should reside for a given deployment target[^fn-pareto-frontier-compression] is the central question of structural optimization.
 
 [^fn-pareto-frontier-compression]: **Pareto Frontier**: Named after Italian economist Vilfredo Pareto (1848--1923), who observed that 80 percent of Italy's land was owned by 20 percent of the population. In multi-objective optimization, the Pareto frontier is the set of solutions where improving one objective (for example, speed) necessarily sacrifices another (for example, accuracy). EfficientNet traces this frontier concretely: B0 (77.1 percent accuracy, 390 million FLOPs) to B7 (84.4 percent, 37 billion FLOPs)—a 95$\times$ compute increase for 7.3 percentage points of accuracy, quantifying exactly how steep the trade-off becomes at the frontier's edge. \index{Pareto Frontier!compression trade-off}
 
@@ -2934,7 +2942,7 @@ Test your understanding of the structural optimization techniques covered so far
 
 This brings us to the second dimension of our optimization framework: the precision at which those computations are performed. Numerical precision directly determines memory footprint and arithmetic cost, two resources that structural optimization cannot touch. A 32-bit floating-point number uses 4 bytes of memory and requires expensive floating-point arithmetic; an 8-bit integer uses 1 byte and enables fast integer math. For many models, this 4$\times$ reduction in precision translates directly to 4$\times$ reduction in memory bandwidth, and since LLM inference is bandwidth bound, this means 4$\times$ faster token generation. The accuracy cost is often less than 1 percent.
 
-Quantization is the single most impactful optimization technique for deployment, especially for large language models. It requires no architectural changes, applies posttraining in many cases, and delivers immediate, hardware-agnostic benefits. Before turning to precision techniques in detail, it is useful to check the structural methods covered so far.
+Quantization is the single most impactful optimization technique for deployment, especially for large language models. It requires no architectural changes, applies posttraining in many cases, and delivers immediate, hardware-agnostic benefits.
 
 ## Quantization and Precision {#sec-model-compression-quantization-precision-cd46}
 \index{Model Compression!precision optimization}
@@ -3019,8 +3027,8 @@ Efficient numerical representations reduce storage requirements, computation lat
 # │ Show:    Energy per add for FP32, FP16, INT32, INT8 (Horowitz 2014).
 # │ How:     Retrieve constants from mlsysim.core.constants and format for prose.
 # │
-# │ Imports: mlsysim.core.constants (ENERGY_ADD_FP32_PJ, ENERGY_ADD_FP16_PJ,
-# │          ENERGY_ADD_INT32_PJ, ENERGY_ADD_INT8_PJ)
+# │ Imports: mlsysim Hardware.Tech.Op (AddFp32.energy, AddFp16.energy,
+# │          AddInt32.energy, AddInt8.energy)
 # │ Exports: EnergyCosts.energy_add_fp32_str, .energy_add_fp16_str,
 # │          .energy_add_int32_str, .energy_add_int8_str
 # └─────────────────────────────────────────────────────────────────────────────
@@ -3029,6 +3037,12 @@ class EnergyCosts:
     """Energy per addition operation across numerical precisions (Horowitz 2014)."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    # Energy values sourced from the mlsysim registry (Hardware.Tech.Op).
+    ENERGY_ADD_FP32_PJ = Hardware.Tech.Op.AddFp32.energy
+    ENERGY_ADD_FP16_PJ = Hardware.Tech.Op.AddFp16.energy
+    ENERGY_ADD_INT32_PJ = Hardware.Tech.Op.AddInt32.energy
+    ENERGY_ADD_INT8_PJ = Hardware.Tech.Op.AddInt8.energy
+
     energy_add_fp32_pj = ENERGY_ADD_FP32_PJ.m_as(ureg.picojoule)
     energy_add_fp16_pj = ENERGY_ADD_FP16_PJ.m_as(ureg.picojoule)
     energy_add_int32_pj = ENERGY_ADD_INT32_PJ.m_as(ureg.picojoule)
@@ -3160,6 +3174,13 @@ Beyond computational and memory benefits, the energy costs associated with diffe
 from mlsysim.fmt import fmt_int, fmt, check
 
 class EnergyDividend:
+    # Energy values sourced from the mlsysim registry (Hardware.Tech).
+    ENERGY_ADD_FP32_PJ = Hardware.Tech.Op.AddFp32.energy
+    ENERGY_ADD_INT8_PJ = Hardware.Tech.Op.AddInt8.energy
+    ENERGY_DRAM_ACCESS_PJ = Hardware.Tech.Memory.HBM3.energy_per_access
+    ENERGY_DRAM_PJ_PER_BYTE = Hardware.Tech.Memory.HBM3.energy_per_byte
+    ENERGY_OP_INT8_PJ = Hardware.Tech.Op.OpInt8.energy
+
     e_add_fp32 = ENERGY_ADD_FP32_PJ.m_as('pJ')
     e_add_int8 = ENERGY_ADD_INT8_PJ.m_as('pJ')
     e_dram = ENERGY_DRAM_ACCESS_PJ.m_as(ureg.picojoule)
@@ -3193,6 +3214,11 @@ In the tradition of quantitative architecture, we compare the energy per operati
 *   **FP32 Addition**: Requires `{python} EnergyDividend.energy_add_fp32_str` pJ.
 *   **INT8 Addition**: Requires `{python} EnergyDividend.energy_add_int8_str` pJ.
 
+The resulting efficiency gain is **`{python} EnergyDividend.energy_dividend_str`$\times$**. We call this the "Dividend" because the system pays a 4$\times$ "price" in bits but receives a 30$\times$ "return" in energy efficiency. For a battery-powered edge device or a megawatt-scale data center, this means that even if a model could fit in memory at higher precision, quantization is often mandatory to stay within the power envelope. This disparity reinforces why the "Machine" axis of the AI Triad has moved toward specialized INT8 and INT4 integer units rather than general-purpose floating-point hardware.
+
+\index{DLRM!embedding quantization}
+These energy savings take on a different character for models where memory capacity, not compute, is the binding constraint.
+
 ::: {#lhs-model-compression-dlrm-embedding-quantization .callout-lighthouse title="DLRM and embedding quantization"}
 
 **The memory capacity constraint**: Our **DLRM Lighthouse** (@sec-network-architectures-sparse-architectures-recommendation-systems-5d19) presents a unique compression challenge. Unlike ResNet or GPT, which are constrained by compute or bandwidth, DLRM is constrained by memory capacity. Its embedding tables can reach terabytes in size, far exceeding GPU memory.
@@ -3201,17 +3227,12 @@ For DLRM, quantization is not about faster math; it is about **storage density**
 
 :::
 
-The resulting efficiency gain is **`{python} EnergyDividend.energy_dividend_str`$\times$**. We call this the "Dividend" because the system pays a 4$\times$ "price" in bits but receives a 30$\times$ "return" in energy efficiency. For a battery-powered edge device or a megawatt-scale data center, this means that even if a model could fit in memory at higher precision, quantization is often mandatory to stay within the power envelope. This disparity reinforces why the "Machine" axis of the AI Triad has moved toward specialized INT8 and INT4 integer units rather than general-purpose floating-point hardware.
-
-\index{DLRM!embedding quantization}
-These energy savings take on a different character for models where memory capacity, not compute, is the binding constraint. In recommendation systems such as DLRM, the pressure comes from embedding tables that can outgrow accelerator memory.
-
 \index{Keyword Spotting!quantization imperative}
 While DLRM operates at the terabyte scale, our Smart Doorbell Lighthouse faces the opposite extreme: a TinyML device where compression becomes an existential requirement.
 
 ::: {#lhs-model-compression-tinyml-quantization-imperative .callout-lighthouse title="The TinyML quantization imperative"}
 
-**The energy and storage constraint**: Our **Smart Doorbell Lighthouse** operates at the opposite extreme of the iron law from DLRM. The deployment table used a roughly 512 KB TinyML capacity where the purpose-built 500 KB DS-CNN keyword spotter fits. A stricter smart-doorbell microcontroller with 256 KB SRAM leaves closer to 100 KB for model weights after runtime buffers, audio windows, and feature extraction state, motivating more aggressive INT4 or binary compression.
+**The energy and storage constraint**: Our **Smart Doorbell Lighthouse** operates at the opposite extreme of the iron law from DLRM. A typical TinyML budget is roughly 512 KB, where the purpose-built 500 KB DS-CNN keyword spotter fits. A stricter smart-doorbell microcontroller with 256 KB SRAM leaves closer to 100 KB for model weights after runtime buffers, audio windows, and feature extraction state, motivating more aggressive INT4 or binary compression.
 
 In FP32, even the compact DS-CNN architecture consumes 4$\times$ more memory bandwidth and energy per inference than in INT8. For an always-on device running on a coin cell battery, this 4$\times$ energy difference translates directly to battery life: a device that lasts one month on FP32 might last four months on INT8. Here, quantization reduces both the data-movement term and the **Compute Term** $(O / (R_{\text{peak}} \cdot \eta_{\text{hw}}))$ of the iron law.
 
@@ -3758,8 +3779,8 @@ Binary and ternary networks\index{Quantization!binary networks}\index{Quantizati
 # │ Show:    That INT8 MACs use ~20x less energy than FP32 MACs.
 # │ How:     Sum multiply + add energies for each precision; divide.
 # │
-# │ Imports: mlsysim.core.constants (ENERGY_FLOP_FP32_PJ, ENERGY_OP_INT8_PJ,
-# │          ENERGY_ADD_FP32_PJ, ENERGY_ADD_INT8_PJ)
+# │ Imports: mlsysim Hardware.Tech.Op (FlopFp32.energy, OpInt8.energy,
+# │          AddFp32.energy, AddInt8.energy)
 # │ Exports: EnergyRatio.int8_fp32_energy_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check
@@ -3768,6 +3789,12 @@ class EnergyRatio:
     """INT8 vs FP32 MAC energy ratio (multiply + add)."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    # Energy values sourced from the mlsysim registry (Hardware.Tech.Op).
+    ENERGY_FLOP_FP32_PJ = Hardware.Tech.Op.FlopFp32.energy
+    ENERGY_OP_INT8_PJ = Hardware.Tech.Op.OpInt8.energy
+    ENERGY_ADD_FP32_PJ = Hardware.Tech.Op.AddFp32.energy
+    ENERGY_ADD_INT8_PJ = Hardware.Tech.Op.AddInt8.energy
+
     energy_mul_fp32_pj = ENERGY_FLOP_FP32_PJ.m_as(ureg.picojoule/ureg.count)
     energy_add_fp32_pj = ENERGY_ADD_FP32_PJ.m_as(ureg.picojoule)
     energy_op_int8_pj = ENERGY_OP_INT8_PJ.m_as(ureg.picojoule/ureg.count)
@@ -6897,7 +6924,7 @@ While sparsity offers significant efficiency advantages, several challenges limi
 : **Sparsity Optimization Challenges**: Unstructured sparsity, while reducing model size, hinders hardware acceleration due to irregular memory access patterns, limiting potential computational savings and requiring specialized hardware or software to realize efficiency gains. {#tbl-sparsity-optimization tbl-colwidths="[21,45,34]"}
 
 \index{Compressed Sparse Row!storage format}
-The central challenge is the gap between theoretical and practical speedups. Unstructured pruning removes individual weights based on importance, creating irregular patterns that hardware accelerators struggle to exploit. Most GPUs and TPUs optimize for structured data; without regular patterns, they cannot skip zero elements efficiently. Pruning algorithms themselves introduce overhead, as determining which weights to prune requires sophisticated importance estimation that can be computationally expensive for large models. Even when sparsity is achieved, sparse matrix storage formats (such as Compressed Sparse Row; see @sec-algorithm-foundations-sparse-matrix-formats-0bd0) add indexing overhead that can offset computational savings—a rule of thumb is that sparsity typically must exceed 90–95 percent to be worthwhile for performance.
+The central challenge is the gap between theoretical and practical speedups. Unstructured pruning removes individual weights based on importance, creating irregular patterns that hardware accelerators struggle to exploit. Most GPUs and TPUs optimize for structured data; without regular patterns, they cannot skip zero elements efficiently. Pruning algorithms themselves introduce overhead, as determining which weights to prune requires sophisticated importance estimation that can be computationally expensive for large models. Even when sparsity is achieved, sparse matrix storage formats add indexing overhead that can offset computational savings. @Sec-appdx-algorithm-foundations-sparse-matrix-formats-0bd0 details the Compressed Sparse Row layout and quantifies how its per-nonzero metadata makes the memory payoff density-dependent, which is why a rule of thumb holds that sparsity typically must exceed 90–95 percent to be worthwhile for performance.
 
 The accuracy-efficiency trade-off requires careful calibration. Aggressive sparsity can degrade accuracy beyond acceptable thresholds, and the relationship is often nonlinear, as models may tolerate 70 percent sparsity with minimal impact but collapse at 80 percent. Finding the optimal operating point requires extensive experimentation.
 
@@ -7234,7 +7261,7 @@ A critical caveat applies when translating profiling metrics into optimization e
 
 ::: {.callout-warning title="FLOPs reduction ≠ proportional speedup"}
 
-Reducing a model's FLOPs by 50 percent does not guarantee 50 percent latency reduction. Memory-bound operations (common in LLM inference and normalization layers) see minimal benefit from compute reduction because they are bottlenecked by data movement, not arithmetic. Critically, Amdahl's Law\index{Amdahl's Law!model compression} (@sec-machine-foundations-amdahls-law-gustafsons-law-b741) applies at the system level: if model inference accounts for only `{python} AmdahlCompression.model_fraction_pct_str` of end-to-end latency (with the remaining `{python} AmdahlCompression.non_model_pct_str` spent on data loading, preprocessing, and postprocessing), then even perfect model optimization yields at most `{python} AmdahlCompression.max_speedup_str`$\times$ overall speedup. Always profile on target hardware before estimating optimization benefits.
+Reducing a model's FLOPs by 50 percent does not guarantee 50 percent latency reduction. Memory-bound operations (common in LLM inference and normalization layers) see minimal benefit from compute reduction because they are bottlenecked by data movement, not arithmetic. Critically, Amdahl's Law\index{Amdahl's Law!model compression} (@sec-appdx-machine-foundations-amdahls-law-gustafsons-law-b741) applies at the system level: if model inference accounts for only `{python} AmdahlCompression.model_fraction_pct_str` of end-to-end latency (with the remaining `{python} AmdahlCompression.non_model_pct_str` spent on data loading, preprocessing, and postprocessing), then even perfect model optimization yields at most `{python} AmdahlCompression.max_speedup_str`$\times$ overall speedup. Always profile on target hardware before estimating optimization benefits.
 
 :::
 

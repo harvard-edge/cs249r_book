@@ -10,7 +10,7 @@
 
 import pytest
 from mlsysim.core.constants import Q_, ureg
-from mlsysim.core.solver import SingleNodeModel, DistributedModel, ServingModel
+from mlsysim.engine.solver import SingleNodeModel, DistributedModel, ServingModel
 from mlsysim.hardware.registry import Hardware
 from mlsysim.models.registry import Models
 from mlsysim.systems.types import Fleet, NetworkFabric, Node

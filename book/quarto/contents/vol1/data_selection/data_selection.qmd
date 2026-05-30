@@ -285,7 +285,7 @@ The gap between what compute can process and what quality data exists continues 
 
 The compute-data asymmetry inverts the optimization priority. When *data* was abundant and *compute* was scarce, the right strategy was algorithmic efficiency: squeeze more accuracy from limited GPU cycles. Now that *compute* is abundant and *quality data* is scarce, the winning strategy is data selection: squeeze more learning from each sample. Data selection operates upstream of all other optimizations. By pruning redundancy and selecting high-value samples, we reduce the workload before it ever enters the model or hits the hardware, directly shrinking the total operations $(O)$ term in the iron law. A later iron-law analysis makes this upstream leverage explicit. For companies training frontier models, the bottleneck has shifted from GPU access to the quality and diversity of their training corpora.
 
-The engineering toolkit for intelligent data selection follows Part III's D·A·M taxonomy in @sec-dam-taxonomy, which establishes a deliberate optimization ordering: Data first, then Algorithm, then Machine. Data selection puts the "highest leverage first" principle into practice by addressing whether work is necessary before asking how to simplify or accelerate it. A three-stage optimization pipeline structures the practical response to the data wall:\index{D·A·M Taxonomy!optimization ordering}
+The engineering toolkit for intelligent data selection follows Part III's D·A·M taxonomy in @sec-appdx-dam-taxonomy, which establishes a deliberate optimization ordering: Data first, then Algorithm, then Machine. Data selection puts the "highest leverage first" principle into practice by addressing whether work is necessary before asking how to simplify or accelerate it. A three-stage optimization pipeline structures the practical response to the data wall:\index{D·A·M Taxonomy!optimization ordering}
 
 1. **Static pruning**\index{Static Pruning!definition}: Removing low-value samples before training begins (coresets, deduplication).
 2. **Dynamic selection**\index{Dynamic Selection!definition}: Selecting high-value samples during training (curriculum learning, active learning).
@@ -312,7 +312,7 @@ To make this concrete, consider training a model in the GPT-2/Llama Lighthouse f
 #| label: gpt-llama-calc
 
 import mlsysim.core.constants as c
-from mlsysim.core import calibration
+from mlsysim.engine import calibration
 from mlsysim.fmt import check, fmt, fmt_percent
 
 class ComputeDataGap:
@@ -710,6 +710,8 @@ scale=0.6, every node/.append style={transform shape}]
 We can formalize this as the ICR, where $I$ denotes information content:
 $$\text{ICR} = \frac{\Delta I}{\Delta \text{FLOPs}}$$
 
+A higher ICR means each FLOP of training buys more learning; pushing it up is the goal of every technique in this chapter.
+
 ### The ICR frontier: When data becomes a tax {#sec-data-selection-icr-frontier}
 
 ::: {.column-margin}
@@ -1029,7 +1031,7 @@ class IcrCoresetComparison:
 
 ::: {#nbk-data-selection-computing-icr-coresets .callout-notebook title="Computing ICR: Coresets"}
 
-**Problem**: Training the ResNet-50 Lighthouse model from @sec-network-architectures-lighthouse-roster-model-biographies-a763 on ImageNet for one epoch costs `{python} IcrCoresetComparison.full_epoch_flops_str`. If an EL2N-based coreset (EL2N, or Error L2-Norm, scores each sample by how uncertain the model's prediction is; defined formally in @sec-data-selection-coreset-selection-algorithms-2c74) retains only `{python} IcrCoresetComparison.coreset_pct_str` of the data, how much does the information-compute ratio improve over random selection? ResNet-50's compute-bound nature (high arithmetic intensity; see @sec-machine-foundations-roofline-model-2529) makes it an ideal candidate: reducing dataset size directly reduces training FLOPs with minimal I/O impact.
+**Problem**: Training the ResNet-50 Lighthouse model from @sec-network-architectures-lighthouse-roster-model-biographies-a763 on ImageNet for one epoch costs `{python} IcrCoresetComparison.full_epoch_flops_str`. If an EL2N-based coreset (EL2N, or Error L2-Norm, scores each sample by how uncertain the model's prediction is; defined formally in @sec-data-selection-coreset-selection-algorithms-2c74) retains only `{python} IcrCoresetComparison.coreset_pct_str` of the data, how much does the information-compute ratio improve over random selection? ResNet-50's compute-bound nature (high arithmetic intensity; see @sec-appdx-machine-foundations-roofline-model-2529) makes it an ideal candidate: reducing dataset size directly reduces training FLOPs with minimal I/O impact.
 
 **Setup**:
 
@@ -1956,7 +1958,7 @@ plt.close()
 
 :::
 
-The figure confirms the quantitative intuition: active learning reaches the 90 percent accuracy threshold with roughly 4$\times$ fewer labeled samples than random selection. That efficiency gap compounds across training iterations, because every epoch processes a smaller, higher-information dataset. The cost savings computed in the notebook above are therefore a lower bound; the real advantage grows as the model iterates and the selection oracle focuses labeling effort on the decision boundary.
+The figure tracks a different axis from the cost notebook above: active learning reaches the 90 percent accuracy threshold with roughly 4$\times$ fewer labeled *samples* than random selection, a separate gain from the labeling *dollars* the notebook saved. That efficiency gap compounds across training iterations, because every epoch processes a smaller, higher-information dataset. The cost savings computed in the notebook above are therefore a lower bound; the real advantage grows as the model iterates and the selection oracle focuses labeling effort on the decision boundary.
 
 Active learning yields more than cost savings: it directs the model toward precisely the examples that matter most. The Smart Doorbell Lighthouse illustrates this principle in the context of hard negative mining.
 
@@ -2165,7 +2167,7 @@ class FixmatchLabelEfficiency:
 
 **FixMatch** [@sohn2020fixmatch] combines pseudo-labeling with consistency regularization to achieve high label efficiency (@tbl-fixmatch-cifar10). With only `{python} FixmatchLabelEfficiency.cifar10_fixmatch_250_labels_str` labeled samples (`{python} FixmatchLabelEfficiency.labels_per_class_250_str` per class), FixMatch achieves `{python} FixmatchLabelEfficiency.cifar10_fixmatch_250_acc_str` accuracy, within `{python} FixmatchLabelEfficiency.acc_loss_str` points of full supervision using `{python} FixmatchLabelEfficiency.cifar10_fixmatch_250_eff_str`$\times$ fewer labels. The technique works by generating pseudo-labels on weakly augmented unlabeled images (only when model confidence exceeds 0.95), then training to predict these labels on strongly augmented versions of the same images.
 
-**Systems insight**: Semi-supervised learning trades labeled data for unlabeled data and compute. On CIFAR-10, training FixMatch requires ~`{python} FixmatchLabelEfficiency.fixmatch_compute_multiplier_str`$\times$ more compute than supervised training (processing 50K unlabeled samples per epoch). The 250-label result in @tbl-fixmatch-cifar10 shows 200$\times$ fewer labels than full supervision; the ROI calculation below uses a separate 4,000-label supervised baseline, so it demonstrates 16$\times$ fewer purchased labels and the resulting total-cost trade-off when labels cost \$1 each and GPU hours cost \$0.50:
+**Systems insight**: Semi-supervised learning trades labeled data for unlabeled data and compute. On CIFAR-10, training FixMatch requires ~`{python} FixmatchLabelEfficiency.fixmatch_compute_multiplier_str`$\times$ more compute than supervised training (processing 50K unlabeled samples per epoch). Two baselines are in play. Against full supervision, the 250-label result in @tbl-fixmatch-cifar10 shows 200$\times$ fewer labels. The ROI calculation below instead compares against a 4,000-label supervised baseline, where FixMatch uses 16$\times$ fewer purchased labels; the resulting total-cost trade-off assumes labels cost \$1 each and GPU hours cost \$0.50:
 
 - Supervised (`{python} FixmatchLabelEfficiency.cifar10_fixmatch_4k_labels_str` labels): `{python} FixmatchLabelEfficiency.supervised_label_cost_str` labeling + `{python} FixmatchLabelEfficiency.supervised_compute_cost_str` compute = `{python} FixmatchLabelEfficiency.supervised_total_str`
 - FixMatch (`{python} FixmatchLabelEfficiency.cifar10_fixmatch_250_labels_str` labels): `{python} FixmatchLabelEfficiency.fixmatch_label_cost_str` labeling + `{python} FixmatchLabelEfficiency.fixmatch_compute_cost_str` compute = `{python} FixmatchLabelEfficiency.fixmatch_total_str`
@@ -4112,7 +4114,7 @@ drawcolor=black,filllcolor=cyan!10!, Linewidth=0.75pt,filllcirclecolor=red}};
 
 :::
 
-The pipeline in @fig-optimization-stack reveals why data selection occupies a strategic position: it sits at the head of the optimization stack, following the D·A·M taxonomy formalized in @sec-dam-taxonomy: Data first, then Algorithm, then Machine. Reducing the dataset by 50 percent through intelligent selection does not just halve data processing time; it halves the training compute, which in turn produces a model that may require less aggressive compression, which then demands less from hardware acceleration. Each downstream stage inherits the efficiency gains (or quality losses) from upstream decisions.
+The pipeline in @fig-optimization-stack reveals why data selection occupies a strategic position: it sits at the head of the optimization stack, following the D·A·M taxonomy formalized in @sec-appdx-dam-taxonomy: Data first, then Algorithm, then Machine. Reducing the dataset by 50 percent through intelligent selection does not just halve data processing time; it halves the training compute, which in turn produces a model that may require less aggressive compression, which then demands less from hardware acceleration. Each downstream stage inherits the efficiency gains (or quality losses) from upstream decisions.
 
 The multiplicative effect means that *every FLOP saved in data processing is a FLOP that never needs to be executed, compressed, or accelerated.* Conversely, poor data selection that degrades model quality forces downstream stages to compensate, whether through longer training, less aggressive compression, or over-provisioned hardware.
 
@@ -4160,7 +4162,7 @@ A DCR of 5$\times$ means the coreset achieves target accuracy with 20 percent of
 
 The preceding metrics measure individual techniques, but a higher-level diagnostic is also needed: whether the overall training strategy is data-limited or compute-limited. Scaling laws provide the answer.
 
-Research on neural scaling laws [@kaplan2020scaling; @hoffmann2022chinchilla] established that model performance follows predictable power laws with respect to compute, data, and model size. These laws provide more than theoretical interest: they offer a diagnostic framework for understanding whether training is limited by data quality or compute budget. For the relationship between scaling laws and the information roofline (the theoretical ceiling on what can be learned from any dataset), see @sec-dam-taxonomy.
+Research on neural scaling laws [@kaplan2020scaling; @hoffmann2022chinchilla] established that model performance follows predictable power laws with respect to compute, data, and model size. These laws provide more than theoretical interest: they offer a diagnostic framework for understanding whether training is limited by data quality or compute budget. For the relationship between scaling laws and the information roofline (the theoretical ceiling on what can be learned from any dataset), see @sec-appdx-dam-taxonomy.
 
 \index{Chinchilla!compute-optimal training}
 The Chinchilla study[^fn-chinchilla-scaling] [@hoffmann2022chinchilla] revealed a key insight: for any fixed compute budget, there exists an optimal balance between model size and training data. Training on too little data relative to model size wastes compute on an undertrained model; training on too much data with too small a model wastes data on a model that cannot absorb it.
@@ -4406,7 +4408,7 @@ plt.close()
 
 The practical question for practitioners is at what point to stop collecting data and start curating it, and when adding more samples wastes compute rather than improves accuracy. These questions require rigorous metrics that quantify diminishing returns, compare selection strategies, and evaluate the cost-effectiveness of different data sources.
 
-Data selection techniques all make implicit claims about the value of different samples, and validating that a curated dataset actually preserves model quality requires systematic benchmarking across three dimensions. Coverage metrics validate that coreset selection preserved representation across classes and demographic groups. Distribution alignment metrics (such as KL divergence and PSI; see @sec-data-foundations-measuring-drift-divergence-a6dd) detect whether the curated training set drifted from the deployment distribution. Label quality metrics (inter-annotator agreement, confident learning) validate that active learning did not introduce systematic labeling errors. A 50 percent dataset reduction is only valuable if benchmarking confirms the model maintains target accuracy, calibration, and robustness.
+Data selection techniques all make implicit claims about the value of different samples, and validating that a curated dataset actually preserves model quality requires systematic benchmarking across three dimensions. Coverage metrics validate that coreset selection preserved representation across classes and demographic groups. Distribution alignment metrics (such as KL divergence and PSI; see @sec-appdx-data-foundations-measuring-drift-divergence-a6dd) detect whether the curated training set drifted from the deployment distribution. Label quality metrics (inter-annotator agreement, confident learning) validate that active learning did not introduce systematic labeling errors. A 50 percent dataset reduction is only valuable if benchmarking confirms the model maintains target accuracy, calibration, and robustness.
 
 For a comprehensive treatment of data selection metrics and benchmarking methodologies, including DataPerf-style evaluation protocols, see @sec-benchmarking-model-data-benchmarking-e0ca.
 

@@ -44,7 +44,7 @@
     </tr>
     <tr>
       <td align="center"><b>Layer C</b></td>
-      <td><b>Infrastructure</b><br><code>mlsysim.infra</code></td>
+      <td><b>Infrastructure</b><br><code>mlsysim.infrastructure</code></td>
       <td>Grid profiles and datacenter sustainability.<br><i>e.g., PUE, Carbon Intensity, WUE</i></td>
     </tr>
     <tr>
@@ -54,7 +54,7 @@
     </tr>
     <tr>
       <td align="center"><b>Layer E</b></td>
-      <td><b>Execution & Resolvers</b><br><code>mlsysim.core.solver</code></td>
+      <td><b>Execution & Resolvers</b><br><code>mlsysim.engine.solver</code></td>
       <td>The 3-tier math engine: Models, Solvers, and Optimizers (Design space search).</td>
     </tr>
   </tbody>

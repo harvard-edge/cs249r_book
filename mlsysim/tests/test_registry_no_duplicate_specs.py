@@ -30,24 +30,21 @@ def test_nodes_intra_node_bw_matches_accelerator_nvlink() -> None:
 
 
 def test_fabrics_bandwidth_matches_canonical_constants() -> None:
-    from mlsysim.core.constants import (
-        ETHERNET_400G_BW,
-        ETHERNET_800G_BW,
-        NETWORK_10G_BW,
-        NETWORK_100G_BW,
-    )
-
+    # Ethernet bandwidth now lives ON the fabric: Systems.Fabrics is the source of
+    # truth (the old NETWORK_*/ETHERNET_* constants were retired in the taxonomy
+    # refactor). Guard the canonical Gbps figures against accidental drift.
     pairs = (
-        (Systems.Fabrics.Ethernet_10G, NETWORK_10G_BW),
-        (Systems.Fabrics.Ethernet_100G, NETWORK_100G_BW),
-        (Systems.Fabrics.Ethernet_400G, ETHERNET_400G_BW),
-        (Systems.Fabrics.Ethernet_800G, ETHERNET_800G_BW),
+        (Systems.Fabrics.Ethernet_10G, 10),
+        (Systems.Fabrics.Ethernet_100G, 100),
+        (Systems.Fabrics.Ethernet_400G, 400),
+        (Systems.Fabrics.Ethernet_800G, 800),
+        (Systems.Fabrics.Ethernet_1P6T, 1600),
     )
     violations: list[str] = []
-    for fabric, expected in pairs:
-        actual = fabric.bandwidth
-        if abs(actual.m_as("gigabit/second") - expected.m_as("gigabit/second")) > 1e-6:
-            violations.append(f"{fabric.name}: {actual:~P} != canonical {expected:~P}")
-    assert not violations, "Fabrics must use canonical bandwidth constants:\n  " + "\n  ".join(
+    for fabric, expected_gbps in pairs:
+        actual = fabric.bandwidth.m_as("gigabit/second")
+        if abs(actual - expected_gbps) > 1e-6:
+            violations.append(f"{fabric.name}: {actual} Gbps != canonical {expected_gbps} Gbps")
+    assert not violations, "Fabrics bandwidth drifted from canonical Gbps figures:\n  " + "\n  ".join(
         violations
     )

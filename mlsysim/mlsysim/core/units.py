@@ -16,6 +16,10 @@ __all__ = [
     "KB", "MB", "GB", "TB", "PB", "KiB", "MiB", "GiB", "TiB",
     # Precision sizes
     "BYTES_FP32", "BYTES_INT32", "BYTES_FP16", "BYTES_INT8", "BYTES_INT4", "BYTES_ADAM_STATE",
+    # Bit widths, precision map, encoding/format facts
+    "FP32_BITS", "INT8_BITS", "SIMD_REGISTER_BITS", "PRECISION_MAP",
+    "COLOR_DEPTH_8BIT", "IMAGE_CHANNELS_RGB", "VIDEO_BYTES_PER_PIXEL_RGB",
+    "VIDEO_1080P_WIDTH", "VIDEO_1080P_HEIGHT", "VIDEO_FPS_STANDARD",
     # Time units
     "MS", "US", "NS", "ms", "MILLISECOND", "MICROSECOND", "NANOSECOND",
     "microsecond", "millisecond", "nanosecond",
@@ -82,6 +86,30 @@ BYTES_FP16 = 2 * byte
 BYTES_INT8 = 1 * byte
 BYTES_INT4 = 0.5 * byte
 BYTES_ADAM_STATE = 8 * byte
+
+# Bit widths (companion to the byte widths above)
+FP32_BITS = 32
+INT8_BITS = 8
+SIMD_REGISTER_BITS = 512
+
+# Precision string -> byte width. Shared by Engine, ServingModel, SynthesisSolver.
+PRECISION_MAP = {
+    "fp32": BYTES_FP32,   # 4 bytes
+    "tf32": BYTES_FP32,   # 4 bytes storage, TF32 compute
+    "bf16": BYTES_FP16,   # 2 bytes
+    "fp16": BYTES_FP16,   # 2 bytes
+    "fp8":  BYTES_INT8,   # 1 byte
+    "int8": BYTES_INT8,   # 1 byte
+    "int4": BYTES_INT4,   # 0.5 bytes
+}
+
+# Color / image / video encoding + format facts
+COLOR_DEPTH_8BIT = 256
+IMAGE_CHANNELS_RGB = 3
+VIDEO_BYTES_PER_PIXEL_RGB = 3 * byte
+VIDEO_1080P_WIDTH = 1920
+VIDEO_1080P_HEIGHT = 1080
+VIDEO_FPS_STANDARD = Q_(30, 'Hz')
 
 # Binary units (pint has kibibyte etc. built-in, register short aliases)
 ureg.define('KiB = 1024 * byte')

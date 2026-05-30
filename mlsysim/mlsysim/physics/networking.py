@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from mlsysim.core.constants import ureg, SPEED_OF_LIGHT_FIBER_KM_S
+from mlsysim.core.units import ureg
+from .constants import SPEED_OF_LIGHT_FIBER_KM_S
 
 from ._units import _ensure_unit
 

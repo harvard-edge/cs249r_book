@@ -1,13 +1,13 @@
 """
-Unit tests for mlsysim.core.pipeline — the Pipeline composer.
+Unit tests for mlsysim.engine.pipeline — the Pipeline composer.
 
 Tests construction, validation, explain(), run(), and repr.
 """
 
 import pytest
 
-from mlsysim.core.pipeline import Pipeline, CompositionError
-from mlsysim.core.solver import SingleNodeModel
+from mlsysim.engine.pipeline import Pipeline, CompositionError
+from mlsysim.engine.solver import SingleNodeModel
 from mlsysim.hardware.registry import Hardware
 from mlsysim.models.registry import Models
 

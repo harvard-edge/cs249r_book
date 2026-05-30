@@ -61,7 +61,7 @@ But at 32K context? KV cache is 1.28 GB per request → only **35 requests**.
 ## The Full Picture
 
 ```python
-from mlsysim.core.solver import ServingModel
+from mlsysim.engine.solver import ServingModel
 
 result = ServingModel().solve(
     mlsysim.Models.Language.Llama3_70B,

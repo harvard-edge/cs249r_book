@@ -30,7 +30,7 @@ async def _():
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysim import Hardware, Models, Systems
-    from mlsysim import ureg, NVME_SEQUENTIAL_BW
+    from mlsysim import ureg
     from mlsysim.physics import calc_young_daly_interval, calc_mtbf_cluster
 
     GPU_MTTF_HOURS = Systems.Reliability.Gpu.mttf_hours
@@ -48,7 +48,7 @@ async def _():
     A100_TFLOPS = _A100_REG.compute.peak_flops.m_as("TFLOPs/s")
     B200_TFLOPS = _B200_REG.compute.peak_flops.m_as("TFLOPs/s")
     V100_TFLOPS = _V100_REG.compute.peak_flops.m_as("TFLOPs/s")
-    NVME_GBS = NVME_SEQUENTIAL_BW.m_as("GB/s")
+    NVME_GBS = Hardware.Tech.Storage.NvmeGen4.bandwidth.m_as("GB/s")
 
     H100_RAM_GB = _H100_REG.memory.capacity.m_as("GB")
     T4_RAM_GB = _T4_REG.memory.capacity.m_as("GB")

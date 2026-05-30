@@ -35,7 +35,7 @@ sys.path.insert(0, _book_dir)
 from mlsysim.core.constants import *
 from mlsysim.physics import *
 from mlsysim.fmt import fmt, fmt_sci, fmt_unit
-from mlsysim import Hardware, Models, Systems
+from mlsysim import Hardware, Models, Systems, Literature, Scenarios
 
 # Legacy aliases for unit tests (hardware/model specs live in registries).
 _a100 = Hardware.Cloud.A100
@@ -114,7 +114,7 @@ INFINIBAND_HDR_BW = Systems.Fabrics.InfiniBand_HDR.bandwidth
 INFINIBAND_NDR_BW = Systems.Fabrics.InfiniBand_NDR.bandwidth
 
 GPT3_TRAINING_OPS = (
-    TRANSFORMER_TRAINING_FLOPS_PER_PARAM_TOKEN * _gpt3.parameters * _gpt3.training_tokens
+    Literature.Chinchilla.ComputeConstant * _gpt3.parameters * _gpt3.training_tokens
 )
 
 FAILURES = []
@@ -220,8 +220,8 @@ def test_param_units():
 def test_network_units():
     """Verify network-scale conversions."""
     ok = True
-    ok &= check("10 Gbps -> Gbps", NETWORK_10G_BW.to(Gbps).magnitude, 10.0)
-    ok &= check("10 Gbps -> GB/s", NETWORK_10G_BW.to(GB / second).magnitude, 1.25)
+    ok &= check("10 Gbps -> Gbps", Systems.Fabrics.Ethernet_10G.bandwidth.to(Gbps).magnitude, 10.0)
+    ok &= check("10 Gbps -> GB/s", Systems.Fabrics.Ethernet_10G.bandwidth.to(GB / second).magnitude, 1.25)
     return ok
 
 
@@ -260,8 +260,8 @@ def test_derived_values():
     ok &= check("GPT-3 training ~25 days", days, 25.0, tol=0.1)
 
     # Waymo data rates
-    ok &= check("Waymo low 1 TB/hr", WAYMO_DATA_PER_HOUR_LOW.to(TB / hour).magnitude, 1.0)
-    ok &= check("Waymo high 19 TB/hr", WAYMO_DATA_PER_HOUR_HIGH.to(TB / hour).magnitude, 19.0)
+    ok &= check("Waymo low 1 TB/hr", Scenarios.Workloads.WaymoDataPerHourLow.to(TB / hour).magnitude, 1.0)
+    ok &= check("Waymo high 19 TB/hr", Scenarios.Workloads.WaymoDataPerHourHigh.to(TB / hour).magnitude, 19.0)
 
     # ResNet model sizes (params * bytes_per_param)
     fp32_bytes = RESNET50_PARAMS.magnitude * 4 * byte
@@ -296,11 +296,11 @@ def test_no_large_raw_magnitudes():
         ("A100 GB/s", A100_MEM_BW.to(GB / second).magnitude, 1e4),
         ("H100 GB/s", H100_MEM_BW.to(GB / second).magnitude, 1e4),
         ("H100 TB/s", H100_MEM_BW.to(TB / second).magnitude, 100),
-        ("Waymo TB/hr", WAYMO_DATA_PER_HOUR_HIGH.to(TB / hour).magnitude, 100),
+        ("Waymo TB/hr", Scenarios.Workloads.WaymoDataPerHourHigh.to(TB / hour).magnitude, 100),
         ("ResNet GFLOPs", RESNET50_FLOPs.to(GFLOPs).magnitude, 1e4),
         ("ResNet Mparam", RESNET50_PARAMS.to(Mparam).magnitude, 1e4),
         ("A100 GiB", A100_MEM_CAPACITY.to(GiB).magnitude, 1e4),
-        ("10G Gbps", NETWORK_10G_BW.to(Gbps).magnitude, 100),
+        ("10G Gbps", Systems.Fabrics.Ethernet_10G.bandwidth.to(Gbps).magnitude, 100),
     ]
     for label, value, threshold in conversions:
         if abs(value) > threshold:
@@ -380,8 +380,8 @@ def test_interconnect_specs():
     ok &= check("PCIe Gen5", PCIE_GEN5_BW.to(GB / second).magnitude, 64.0)
     ok &= check("IB HDR", INFINIBAND_HDR_BW.to(Gbps).magnitude, 200.0)
     ok &= check("IB NDR", INFINIBAND_NDR_BW.to(Gbps).magnitude, 400.0)
-    ok &= check("100G net", NETWORK_100G_BW.to(Gbps).magnitude, 100.0)
-    ok &= check("100G -> GB/s", NETWORK_100G_BW.to(GB / second).magnitude, 12.5)
+    ok &= check("100G net", Systems.Fabrics.Ethernet_100G.bandwidth.to(Gbps).magnitude, 100.0)
+    ok &= check("100G -> GB/s", Systems.Fabrics.Ethernet_100G.bandwidth.to(GB / second).magnitude, 12.5)
     return ok
 
 
@@ -390,16 +390,19 @@ def test_interconnect_specs():
 def test_energy_specs():
     """Verify energy constants are consistent."""
     ok = True
+    # Op/memory energy is a tech-class fact (Hardware.Tech), not a flat constant.
+    op = Hardware.Tech.Op
+    mem = Hardware.Tech.Memory
     # FP32 > FP16 > INT8 (energy ordering)
-    fp32 = ENERGY_FLOP_FP32_PJ.magnitude
-    fp16 = ENERGY_FLOP_FP16_PJ.magnitude
-    int8 = ENERGY_OP_INT8_PJ.m_as(ureg.picojoule / count)
+    fp32 = op.FlopFp32.energy.magnitude
+    fp16 = op.FlopFp16.energy.magnitude
+    int8 = op.OpInt8.energy.m_as(ureg.picojoule / count)
     if not (fp32 > fp16 > int8):
         FAILURES.append(f"  ✗ Energy ordering: FP32={fp32} > FP16={fp16} > INT8={int8}")
         ok = False
-    ok &= check("DRAM >> compute", ENERGY_DRAM_ACCESS_PJ.magnitude / ENERGY_FLOP_FP32_PJ.magnitude, 173.0, tol=0.05)
+    ok &= check("DRAM >> compute", mem.HBM3.energy_per_access.magnitude / op.FlopFp32.energy.magnitude, 173.0, tol=0.05)
     ok &= check("L2 > L1 > reg",
-                 ENERGY_SRAM_L2_PJ.magnitude / ENERGY_SRAM_L1_PJ.magnitude, 4.0)
+                 mem.L2.energy_per_access.magnitude / mem.L1.energy_per_access.magnitude, 4.0)
     return ok
 
 

@@ -133,7 +133,7 @@ The remainder of this chapter develops the principles and techniques for buildin
 
 Three distinct signals indicate when distributed inference becomes necessary rather than merely optional. @Tbl-distribution-triggers categorizes these triggers by constraint type and corresponding strategy.
 
-The first signal is memory exhaustion, which occurs when model parameters, key-value caches, or embedding tables exceed single-device capacity. A single NVIDIA H100 GPU provides `{python} InferenceSetup.h100_mem_gb_str` of HBM3[^fn-hbm3-bandwidth] memory. GPT-4 class models with hundreds of billions of parameters require 200–400 GB just for weights in FP16 precision, forcing distribution across multiple GPUs regardless of throughput requirements. Recommendation systems with trillion-parameter embedding tables face similar constraints: Meta's Deep Learning Recommendation Model (DLRM)[^fn-dlrm-scale] model stores embedding tables that require multiple terabytes of memory.
+The first signal is memory exhaustion, which occurs when model parameters, key-value caches, or embedding tables exceed single-device capacity. A single NVIDIA H100 GPU provides `{python} InferenceSetup.h100_mem_gb_str` of HBM3[^fn-hbm3-bandwidth] memory; @sec-appdx-fleet-assumption-provenance records the provenance of this capacity figure and the other canonical hardware constants used throughout the analysis that follows. GPT-4 class models with hundreds of billions of parameters require 200–400 GB just for weights in FP16 precision, forcing distribution across multiple GPUs regardless of throughput requirements. Recommendation systems with trillion-parameter embedding tables face similar constraints: Meta's Deep Learning Recommendation Model (DLRM)[^fn-dlrm-scale] model stores embedding tables that require multiple terabytes of memory.
 
 [^fn-hbm3-bandwidth]: **HBM3 (High Bandwidth Memory 3)**: 3D-stacked DRAM delivering `{python} InferenceSetup.h100_mem_bw_tbs_str` on the H100 vs. `{python} InferenceSetup.a100_mem_bw_tbs_str` for HBM2e on the A100. Because large language model (LLM) decode is memory-bandwidth-bound, this improvement translates directly into higher tokens-per-second and larger feasible batch sizes, making HBM generation the single most consequential variable in inference cost-per-token. \index{HBM3!bandwidth}
 
@@ -191,7 +191,7 @@ Failure handling diverges correspondingly. Training failures trigger checkpoint 
 
 Distributing inference across multiple machines introduces overhead absent from single-machine serving. This "serving tax"\index{Inference!distribution tax} must be understood and budgeted within latency constraints.
 
-Network communication adds latency for every cross-machine interaction. Within a data center, network round-trip times range from 50–500 microseconds depending on topology and congestion. For model sharding that requires synchronization between GPUs on different machines, each synchronization point adds this overhead. A model sharded across 8 machines with 4 synchronization points per inference adds 200 microseconds to 2 milliseconds of network latency.
+Network communication adds latency for every cross-machine interaction. Within a data center, network round-trip times range from 50–500 microseconds depending on topology and congestion. For model sharding that requires synchronization between GPUs on different machines, each synchronization point adds this overhead. A model sharded across 8 machines with 4 synchronization points per inference adds 200 microseconds to 2 milliseconds of network latency. @Sec-appdx-comm-foundations-alpha-beta develops the $\alpha$-$\beta$ model that decomposes each such transfer into a fixed startup latency plus a bandwidth-dependent term, giving the quantitative framework for budgeting these synchronization costs against a latency SLO.
 
 Serialization overhead compounds the problem by converting in-memory tensors to network-transmittable formats. Traditional serializers like Protocol Buffers, JSON, and Python's `pickle` perform a parse-allocate-copy cycle on every transfer, and a 1 GB activation tensor takes approximately 100 milliseconds to serialize and deserialize through such formats. Zero-copy alternatives like FlatBuffers and Cap'n Proto[^fn-serialization-zerocopy] sidestep most of this cost by accessing wire-format data in place, but they impose stricter schema layout requirements that not every production stack adopts.
 
@@ -894,10 +894,7 @@ If a single GPU replica handles batch size 8 with 80 ms latency:
 2. Replicas Needed = 1000 divided by `{python} LittlesLawExample.replica_throughput_str` = `{python} LittlesLawExample.replicas_needed_str` replicas
 
 **Verification**:
-Total system concurrency $=$ `{python} LittlesLawExample.replicas_needed_str` replicas $\times$ 8 batch $=$ `{python} LittlesLawExample.total_concurrency_str`.
-Wait! We needed `{python} LittlesLawExample.required_concurrency_str`.
-**Correction**: We must account for queue depth. With `{python} LittlesLawExample.replicas_needed_str` replicas active processing `{python} LittlesLawExample.total_concurrency_str` reqs, 20 reqs are in queues.
-Queue wait time added to latency must not violate SLO.
+Total system concurrency $=$ `{python} LittlesLawExample.replicas_needed_str` replicas $\times$ 8 batch $=$ `{python} LittlesLawExample.total_concurrency_str`, short of the `{python} LittlesLawExample.required_concurrency_str` required. The shortfall is the queue: with `{python} LittlesLawExample.replicas_needed_str` replicas actively processing `{python} LittlesLawExample.total_concurrency_str` requests, the remaining 20 wait in queues, and that queue wait must fit inside the SLO.
 
 :::
 
@@ -905,9 +902,9 @@ The 20-request queue depth and the unresolved question of whether queue wait tim
 
 ### Review: Single-node queuing dynamics {#sec-inference-scale-queuing-review-callout}
 
-::: {#tip-inference-scale-queuing-review .callout-tip title="Foundational review: Queuing theory"}
+::: {.callout-tip title="Foundational review: Queuing theory"}
 
-At the single-node level, inference behaves as an M/D/1 or M/M/1 queue. Little's Law ($L = \lambda W$) dictates that the number of requests in the system equals the arrival rate times the processing time. For a rigorous mathematical review of single-node queuing dynamics and utilization curves, see @sec-inference-scale-queuing-theory-batched-inference-bbf0.
+At the single-node level, inference behaves as an M/D/1 or M/M/1 queue. Little's Law ($L = \lambda W$) dictates that the number of requests in the system equals the arrival rate times the processing time. For a rigorous mathematical review of single-node queuing dynamics and utilization curves, see @sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0. @Sec-appdx-appendix-inference-serving works the M/D/1 queue analysis through from first principles, deriving the wait-time distribution that determines whether queue delay fits inside a serving SLO.
 
 :::
 
@@ -1065,6 +1062,7 @@ from mlsysim.fmt import fmt_int, check, fmt
 class LogicScaling:
     """The latency tax of test-time reasoning."""
     # ┌── 1. LOAD ──────────────────────────────────────────
+    LOGIC_WALL_REASONING_STEPS_EXAMPLE = 128     # pedagogical reasoning-steps example
     t_std_ms = 100 # standard 1-token decode
     reasoning_steps = LOGIC_WALL_REASONING_STEPS_EXAMPLE # tokens of 'thought' before the answer
     # ┌── 2. EXECUTE ───────────────────────────────────────
@@ -1338,8 +1336,7 @@ where $k$ is the number of standard deviations the maximum output exceeds the me
 # │ How: Treat 1 + k * CV as a theoretical ceiling; compute effective waste from
 # │      the assumed realized speedup via W = 1 - 1 / speedup.
 # │
-# │ Imports: mlsysim.core.constants (GB, Systems.Fabrics.InfiniBand_HDR.bandwidth, NETWORK_100G_BW,
-# │          Hardware.Cloud.H100.nvlink.bandwidth, second), mlsysim.fmt (check, fmt)
+# │ Imports: mlsysim.fmt (fmt_int, check, fmt)
 # │ Exports: ContinuousBatchingBenefit.*_cv_str, *_k_str,
 # │          *_waste_pct_str, *_speedup_str
 # └─────────────────────────────────────────────────────────────────────────────
@@ -1860,7 +1857,7 @@ The memory management techniques that enable efficient LLM serving at scale incl
 
 ***KV Cache***\index{KV Cache!definition} is a per-request memory buffer that stores the Key and Value attention tensors of all previously generated tokens so the next token can be produced without recomputing the full attention over the prefix.
 
-1.  **Significance (quantitative)**: It reduces per-token attention compute from $O(n^2)$ to $O(n)$ in the sequence length, but its footprint grows linearly with both context length and batch size, often consuming more HBM than the model weights themselves and becoming the binding constraint on serving capacity. The fundamental sizing math is derived in @sec-inference-scale-kv-cache-fundamentals-2ccd.
+1.  **Significance (quantitative)**: It reduces per-token attention compute from $O(n^2)$ to $O(n)$ in the sequence length, but its footprint grows linearly with both context length and batch size, often consuming more HBM than the model weights themselves and becoming the binding constraint on serving capacity. The fundamental sizing math is derived in @sec-appdx-inference-scale-kv-cache-fundamentals-2ccd.
 2.  **Distinction (durable)**: Unlike model weights (which are shared across all requests and statically allocated), the KV cache is request-private and dynamically sized; each concurrent user pays a separate, sequence-length-proportional memory tax that the scheduler must budget for.
 3.  **Common pitfall**: A frequent misconception is that reducing model size proportionally reduces serving memory. In practice, the KV cache dominates HBM at long contexts, so a quantized 70B model can still be capacity-bound at batch sizes the weights alone would easily admit.
 
@@ -2276,7 +2273,7 @@ Request B page table: [0, 1, 2, 3, 4, 5, 12, 13, 14]  <- shares prefix blocks
 Request C page table: [0, 1, 2, 3, 4, 5, 15]  <- shares prefix blocks
 ```
 
-All three requests reference the same physical blocks for the system prompt. Only when generating unique tokens do they allocate new blocks. The savings can be substantial when many concurrent requests share the same system prompt.
+All three requests reference the same physical blocks for the system prompt. Only when generating unique tokens do they allocate new blocks. The savings can be substantial when many concurrent requests share the same system prompt; the following example quantifies them for a typical chatbot deployment.
 
 ```{python}
 #| echo: false
@@ -2676,7 +2673,7 @@ class SpeculativeSpeedup:
     """Speculative decoding latency speedup across acceptance rates."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    from mlsysim.core.solver import ServingModel
+    from mlsysim.engine.solver import ServingModel
     from mlsysim import Models, Hardware
 
     alpha_high = 0.9    # acceptance rate for "easy" text
@@ -2842,7 +2839,7 @@ The prefill phase processes the entire input prompt in parallel. Computation sca
 
 [^fn-arithmetic-intensity-serving]: **Arithmetic Intensity (Prefill vs. Decode)**: Measured in FLOP/byte of memory accessed, this ratio determines whether a workload is compute-bound or bandwidth-bound. Prefill achieves 100+ FLOP/byte (compute-bound); decode achieves 1--10 FLOP/byte (bandwidth-bound). This 10--100$\times$ gap is why mixing the two phases in a single batch wastes either compute or bandwidth, motivating disaggregated serving architectures. \index{Arithmetic Intensity!serving}
 
-The decode phase, by contrast, generates output tokens one at a time. Each token requires loading the entire model weights, making the memory access pattern bandwidth-bound with low arithmetic intensity.
+The decode phase, by contrast, generates output tokens one at a time. Each token requires loading the entire model weights, making the memory access pattern bandwidth-bound with low arithmetic intensity. @Sec-appdx-fleet-foundations-roofline places these two phases on the roofline: decode sits far below the ridge point of @eq-fleet-ridge-point, where throughput is set by HBM bandwidth rather than peak FLOP/s, while prefill's high arithmetic intensity (@eq-fleet-arithmetic-intensity) pushes it past the ridge into the compute-bound regime.
 
 | **Phase**   |                                                                                                **Computation** | **Memory Access**\index{Memory Access} | **Bottleneck** | **Optimal Batch**                         |
 |:------------|---------------------------------------------------------------------------------------------------------------:|:---------------------------------------|:---------------|:------------------------------------------|
@@ -2850,6 +2847,8 @@ The decode phase, by contrast, generates output tokens one at a time. Each token
 | **Decode**  | $\mathcal{O}(1)$ dense weight work plus $\mathcal{O}(\text{context length})$ attention over KV cache per token | Weight and KV-cache reads              | Bandwidth      | Large continuous batches of active tokens |
 
 : **Prefill vs. Decode Characteristics**: The two phases have opposite optimization requirements. {#tbl-prefill-decode}
+
+Because decode is bandwidth-bound, hardware that shrinks the bytes moved per token attacks that phase's binding constraint directly.
 
 ::: {#lhs-inference-blackwell-fp4-inference-frontier .callout-lighthouse title="Blackwell: The FP4 inference frontier"}
 
@@ -3679,7 +3678,7 @@ The practical speedup from sharding depends critically on communication efficien
 
 $$T_{\text{allreduce}} \approx 2(N-1)\alpha + \frac{2(N-1)}{N} \times \frac{M}{\beta}$$ {#eq-allreduce-time}
 
-where $N$ is the number of devices, $M$ is the collective payload size, $\alpha$ is startup latency, and $\beta$ is the interconnect bandwidth. The factor of 2 accounts for the reduce-scatter and all-gather phases.
+where $N$ is the number of devices, $M$ is the collective payload size, $\alpha$ is startup latency, and $\beta$ is the interconnect bandwidth. The factor of 2 accounts for the reduce-scatter and all-gather phases. @Sec-appdx-comm-foundations-allreduce derives this ring-AllReduce cost and its bandwidth-optimal $2(N-1)/N$ scaling, establishing why the per-layer communication tax stays bounded as the tensor-parallel degree grows.
 
 @Eq-p2p-time expresses the simpler point-to-point communication for pipeline parallelism, where data flows from one device to the next.
 
@@ -3706,7 +3705,9 @@ Both equations make clear that the achievable bandwidth $\beta$ and latency $\al
 # │ Show: ~0.02 ms NVLink, ~0.56 ms InfiniBand HDR, ~1.12 ms 100G Ethernet.
 # │ How: Use the alpha-beta AllReduce estimate for N=8 devices.
 # │
-# │ Imports: mlsysim.core.constants (Systems.Nodes.DGX_H100.accelerators_per_node), mlsysim.fmt (check, fmt)
+# │ Imports: mlsysim.core.constants (Systems.Nodes.DGX_H100.accelerators_per_node,
+# │          Systems.Fabrics.Ethernet_100G.bandwidth, Systems.Fabrics.InfiniBand_HDR.bandwidth),
+# │          mlsysim.fmt (check, fmt)
 # │ Exports: AllReduceInterconnect.nvlink_ms_str,
 # │          AllReduceInterconnect.ib_ms_str,
 # │          AllReduceInterconnect.eth_ms_str,
@@ -3721,6 +3722,7 @@ class AllReduceInterconnect:
     """Raw AllReduce timing for an 8 MB activation payload."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    NETWORK_100G_BW = Systems.Fabrics.Ethernet_100G.bandwidth
     n_devices = Systems.Nodes.DGX_H100.accelerators_per_node
     message_mb = 8
     layer_budget_ms = 30

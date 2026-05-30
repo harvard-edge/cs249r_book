@@ -18,7 +18,7 @@ sys.path.insert(0, str(project_root))
 
 import mlsysim  # noqa: E402
 from mlsysim.core.constants import Q_  # noqa: E402
-from mlsysim.core.solver import (  # noqa: E402
+from mlsysim.engine.solver import (  # noqa: E402
     DistributedModel,
     ScalingModel,
     ParallelismOptimizer,

@@ -7,6 +7,7 @@ Domain modules:
 """
 
 from ._units import _ensure_unit
+from .constants import SPEED_OF_LIGHT_FIBER_KM_S
 from .networking import calc_network_latency_ms
 from .performance import (
     dTime,

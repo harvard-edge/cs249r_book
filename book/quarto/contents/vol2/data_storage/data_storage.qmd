@@ -142,7 +142,7 @@ The problem is deceptive because storage technology has improved substantially. 
 
 The storage problem is fundamentally one of physics meeting economics. Physics dictates that data closer to the accelerator (in both physical distance and interconnect hops) can be delivered faster but in smaller quantities. Economics dictates that cheaper storage can hold more data but at greater distance. The engineering art is constructing a pipeline that bridges these constraints, keeping the expensive top tier full by drawing from cheaper lower tiers fast enough that the accelerator never perceives the delay. This chapter shows *how* to reason quantitatively about each tier in the hierarchy, *how* to size the pipeline that connects them, and *how* to make the economic tradeoffs that determine which data lives *where*.
 
-The canonical training-data footprint for this example is roughly `{python} StorageFuelLineContext.baseline_training_tb_str` across the hierarchy: `{python} StorageFuelLineContext.compressed_text_tb_str` for the compressed source corpus plus `{python} StorageFuelLineContext.tokenized_text_tb_str` for the tokenized training shards. Additional shuffled or packed variants can raise the staging footprint, but the per-epoch training read over 4-byte token IDs is `{python} StorageFuelLineContext.tokenized_text_tb_str`. The model generates roughly 1.75 TB checkpoints (`{python} StorageFuelLineContext.ckpt_total_gb_str` total: 350 GB of weights plus 1.4 TB of Adam optimizer state) every 10 minutes. Over a 30-day training run on 256 nodes, the storage system must deliver `{python} StorageFuelLineContext.tokenized_text_tb_str` of tokenized training data per epoch, absorb `{python} StorageFuelLineContext.ckpt_fleet_total_pb_str` of checkpoint writes, and stage model weights for evaluation runs. These numbers thread through every section of this chapter, grounding abstract principles in concrete engineering constraints.
+The canonical training-data footprint for this example is roughly `{python} StorageFuelLineContext.baseline_training_tb_str` across the hierarchy, combining the compressed corpus and tokenized shards introduced above. Additional shuffled or packed variants can raise the staging footprint, but the per-epoch training read over 4-byte token IDs is `{python} StorageFuelLineContext.tokenized_text_tb_str`. The model generates roughly 1.75 TB checkpoints (`{python} StorageFuelLineContext.ckpt_total_gb_str` total: 350 GB of weights plus 1.4 TB of Adam optimizer state) every 10 minutes. Over a 30-day training run on 256 nodes, the storage system must deliver `{python} StorageFuelLineContext.tokenized_text_tb_str` of tokenized training data per epoch, absorb `{python} StorageFuelLineContext.ckpt_fleet_total_pb_str` of checkpoint writes, and stage model weights for evaluation runs. These numbers thread through every section of this chapter, grounding abstract principles in concrete engineering constraints.
 
 The chapter proceeds through three layers of increasing distance from the accelerator. We begin with *how* ML workloads differ from traditional storage workloads, then trace the six-tier storage hierarchy from HBM to cold archive, examining the physics and economics at each level. We then turn to the data pipeline equation that governs required bandwidth, the GPU Direct Storage technology that eliminates CPU bottlenecks, and the economics that determine which tier houses which data. We conclude with common fallacies that trap even experienced engineers.
 
@@ -158,7 +158,7 @@ Traditional storage systems evolved to serve transactional databases, workloads 
 
 [^fn-raid0-immutable]: **RAID 0 Risk**\index{RAID 0!risk}: RAID 0 provides no redundancy; if one drive in a 4-drive array fails, all data on that node's cache is lost. This is acceptable for immutable training data (re-stage from PFS) or model weights (re-load from Object), but it is a catastrophic choice for the model's only copy of un-checkpointed gradients or local logs. \index{RAID 0!data safety}
 
-ML workloads systematically invert these assumptions. Training data access is predominantly sequential, streaming through datasets that span hundreds of terabytes. Individual accesses are large (megabytes rather than kilobytes) because models consume batches of images or text sequences. Consistency requirements are relaxed, since slightly stale features rarely affect model quality. Bandwidth demands, however, are extreme: hundreds of gigabytes per second, sustained for days or weeks. The mismatch between what storage was optimized for and what ML actually needs creates what we call the I/O wall\index{I/O Wall} (Principle \ref{pri-io-wall}): when storage throughput cannot deliver training data as fast as accelerators consume it, GPUs idle regardless of their computational power. A storage system that was adequate for 8 GPUs becomes the bottleneck at 64, making the *data pipeline*, not the *model*, the limiting factor.
+ML workloads systematically invert these assumptions. Training data access is predominantly sequential, streaming through datasets that span hundreds of terabytes. Individual accesses are large (megabytes rather than kilobytes) because models consume batches of images or text sequences. Consistency requirements are relaxed, since slightly stale features rarely affect model quality. Bandwidth demands, however, are extreme: hundreds of gigabytes per second, sustained for days or weeks. The mismatch between what storage was optimized for and what ML actually needs creates what we call the I/O wall\index{I/O Wall} (Principle \ref{pri-io-wall}): when storage throughput cannot deliver training data as fast as accelerators consume it, GPUs idle regardless of their computational power. A storage system that was adequate for 8 GPUs becomes the bottleneck at 64, making the *data pipeline*, not the *model*, the limiting factor. @Sec-appdx-c3-taxonomy-bottleneck-table classifies this wall as a constraint that lives at the intersection of communication and computation in the fleet-scale diagnostic framework, so a storage engineer can confirm that the cure is more bandwidth rather than faster accelerators.
 
 A simple shard-assignment calculation shows how this bottleneck can emerge even when aggregate storage capacity looks ample.
 
@@ -255,11 +255,11 @@ gpu_labels    = ["P100", "V100","A100","H100", "B200"]
 
 years_storage = [2016,  2017,  2020, 2022, 2024]
 storage_gbs   = [
-    NVME_GEN3_SEQUENTIAL_BW.m_as(GB/second),
-    NVME_GEN3_SEQUENTIAL_BW.m_as(GB/second),
-    NVME_SEQUENTIAL_BW.m_as(GB/second),
-    NVME_SEQUENTIAL_BW.m_as(GB/second),
-    NVME_GEN5_SEQUENTIAL_BW.m_as(GB/second),
+    Hardware.Tech.Storage.NvmeGen3.bandwidth.m_as(GB/second),
+    Hardware.Tech.Storage.NvmeGen3.bandwidth.m_as(GB/second),
+    Hardware.Tech.Storage.NvmeGen4.bandwidth.m_as(GB/second),
+    Hardware.Tech.Storage.NvmeGen4.bandwidth.m_as(GB/second),
+    Hardware.Tech.Storage.NvmeGen5.bandwidth.m_as(GB/second),
 ]
 stor_labels   = ["Gen3","Gen3","Gen4","Gen4","Gen5"]
 
@@ -390,7 +390,7 @@ from mlsysim import Models, Hardware
 from mlsysim.fmt import fmt, check, fmt_qty, fmt_int
 
 class StorageAccessPatternFacts:
-    from mlsysim.core.solver import TrainingMemoryModel
+    from mlsysim.engine.solver import TrainingMemoryModel
     gpt3 = Models.Language.GPT3
     gpt3_params = gpt3.parameters
     training_tokens = 1.5 * TRILLION
@@ -642,7 +642,7 @@ from mlsysim.fmt import fmt, check, fmt_qty
 
 class HbmTierBandwidth:
     h100_bw = Hardware.Cloud.H100.memory.bandwidth
-    host_dram_bw = HOST_DRAM_BW
+    host_dram_bw = Hardware.Tech.Storage.HostDram.bandwidth
     hbm_host_dram_ratio_val = h100_bw / host_dram_bw
     check(hbm_host_dram_ratio_val.m_as(ureg.dimensionless) > 10, "HBM should be much faster than host DRAM")
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
@@ -841,7 +841,7 @@ The gap between host DRAM bandwidth and HBM bandwidth is the first major cliff i
 # │ How:     BW = images/s × size; HDD ratio = images/s/IOPS; ckpt time =
 # │          shard_GB/drive_BW.
 # │
-# │ Imports: mlsysim.core.constants (NVME_SEQUENTIAL_BW, GB, second, BILLION, THOUSAND,
+# │ Imports: mlsysim.core.constants (Hardware.Tech.Storage.NvmeGen4.bandwidth, GB, second, BILLION, THOUSAND,
 # │          MILLION)
 # │ Exports: NVMeTierCalcs.raw_bw_str, .hdd_slowdown_factor_str,
 # │          .hdd_util_ceiling_pct_str, .ckpt_nvme_s_str, .ckpt_pfs_s_str
@@ -850,7 +850,7 @@ from mlsysim.fmt import check, fmt
 
 class NVMeTierCalcs:
     # ┌── 1. LOAD ─────────────────────────────────────────
-    nvme_bw_raw    = NVME_SEQUENTIAL_BW
+    nvme_bw_raw    = Hardware.Tech.Storage.NvmeGen4.bandwidth
     pfs_node_bw    = 4.0 * GB/second
     images_per_sec = 1000
     img_size       = 150 * THOUSAND
@@ -892,15 +892,16 @@ class NVMeTierCalcs:
 # │ Context: @sec-storage-tier2-nvme
 # │ Exports: NvmeTierContext.*
 from mlsysim import Hardware, Models
-from mlsysim.core.solver import TrainingMemoryModel
+from mlsysim.engine.solver import TrainingMemoryModel
 from mlsysim.fmt import fmt, check, fmt_qty, fmt_int
 
 class NvmeTierContext:
+    LOCAL_NVME_DRIVES_PER_NODE_REF = 4 * count   # pedagogical: NVMe drives per node
     gpt3_params = Models.Language.GPT3.parameters
     training_tokens = 1.5 * TRILLION
     token_id_bytes = BYTES_INT32.m_as(byte)
     tokenized_shard_gb_val = 3
-    nvme_per_drive_bw = NVME_SEQUENTIAL_BW
+    nvme_per_drive_bw = Hardware.Tech.Storage.NvmeGen4.bandwidth
     nvme_drive_capacity = 7.68 * TB
     tokenized_text_tb_val = (training_tokens * token_id_bytes * byte).m_as(TB)
     tokenized_shard_count_val = round(tokenized_text_tb_val * THOUSAND / tokenized_shard_gb_val)
@@ -1403,7 +1404,7 @@ $$T_{\text{step}} = \max(200, 250) = 250 \text{ ms}$$
 
 :::
 
-The data stall ratio provides a diagnostic metric that storage engineers can use to identify whether a training job is compute-bound or I/O-bound. A stall ratio below 2 percent indicates that the storage pipeline is healthy: the accelerator spends virtually all its time computing. A stall ratio between 2 percent and 10 percent suggests that the pipeline is marginally adequate but will degrade if the training configuration changes (more GPUs, smaller batches, faster model). A stall ratio above 10 percent indicates a clear storage bottleneck that wastes significant compute budget. Profiling tools like PyTorch's DataLoader profiler and NVIDIA Nsight Systems can measure data stall ratio directly by comparing the time the accelerator spends waiting for data vs. computing.
+The data stall ratio provides a diagnostic metric that storage engineers can use to identify whether a training job is compute-bound or I/O-bound. A stall ratio below 2 percent indicates that the storage pipeline is healthy: the accelerator spends virtually all its time computing. A stall ratio between 2 percent and 10 percent suggests that the pipeline is marginally adequate but will degrade if the training configuration changes (more GPUs, smaller batches, faster model). A stall ratio above 10 percent indicates a clear storage bottleneck that wastes significant compute budget. @Sec-appdx-c3-taxonomy-traffic-light maps these same green, yellow, and red bands onto the broader fleet diagnosis, so a storage engineer can read a high stall ratio as a red-light signal that computation is sitting idle and place storage alongside the other axes that starve an accelerator. Profiling tools like PyTorch's DataLoader profiler and NVIDIA Nsight Systems can measure data stall ratio directly by comparing the time the accelerator spends waiting for data vs. computing.
 
 A storage system cannot be a "fire-and-forget" component; it requires continuous monitoring to prevent silent bottlenecks from eroding training efficiency. Key metrics to track in real time include per-tier bandwidth utilization (NVMe, network, object storage), prefetch buffer depth (how many batches are queued and ready), the data stall ratio per GPU, the parallel file system's metadata operation rate, and NVMe drive health indicators (wear level, temperature, error counts). Alert thresholds should trigger before stalls become visible in training loss curves. An undetected 5 percent increase in data stall ratio across a 1,000-GPU cluster for just one week wastes over \$16,800 in idle compute (1,000 GPUs$\times$ \$2/GPU-hour$\times$ 168 hours$\times$ 5 percent), making comprehensive storage monitoring a first-order economic concern rather than an operational nicety.
 
@@ -1473,7 +1474,7 @@ plt.text(20, 65, 'Compute\nSaturated',
 points = [
     ('HDD', 0.5),
     ('Network FS', 2.0),
-    ('NVMe', NVME_SEQUENTIAL_BW.m_as(GB/second)),
+    ('NVMe', Hardware.Tech.Storage.NvmeGen4.bandwidth.m_as(GB/second)),
     ('NVMe RAID', 25.0),
 ]
 
@@ -2125,11 +2126,11 @@ The **streaming** pattern never stages data locally, instead reading from the pa
 
 While the six-tier hierarchy represents the current state of production systems, new memory and storage technologies are filling the bandwidth gaps between existing tiers, potentially reshaping the optimal storage architecture for large-scale ML.
 
-The most immediate candidate is Compute Express Link (CXL)\index{Compute Express Link}, an open standard interconnect that allows CPUs, accelerators, and memory devices to share memory with cache-coherent semantics. CXL-attached memory provides bandwidth between that of local DRAM and NVMe (roughly 30–60 GB/s) at latencies that are also intermediate (200–500 ns). For ML workloads, CXL memory could serve as a "Tier 1.5" between host DRAM and local NVMe, creating a massive capacity pool for embedding tables and prefetch buffers without the latency penalty of NVMe. For our running example, CXL-attached memory could expand the effective host memory tier from 512 GB to over 4 TB per node, large enough to hold the compressed source corpus or a large local shard cache, though still short of the full `{python} StorageEconomicsCorpus.tokenized_text_tb_str` serialized training copy on one node.
+The widest unfilled gap in the hierarchy sits between host DRAM and local NVMe. Compute Express Link (CXL)\index{Compute Express Link}, an open standard interconnect that allows CPUs, accelerators, and memory devices to share memory with cache-coherent semantics, targets exactly this gap. CXL-attached memory provides bandwidth between that of local DRAM and NVMe (roughly 30–60 GB/s) at latencies that are also intermediate (200–500 ns). For ML workloads, CXL memory could serve as a "Tier 1.5" between host DRAM and local NVMe, creating a massive capacity pool for embedding tables and prefetch buffers without the latency penalty of NVMe. For our running example, CXL-attached memory could expand the effective host memory tier from 512 GB to over 4 TB per node, large enough to hold the compressed source corpus or a large local shard cache, though still short of the full `{python} StorageEconomicsCorpus.tokenized_text_tb_str` serialized training copy on one node.
 
-A complementary approach is the **Computational Storage Drive (CSD)**\index{Computational Storage Drive}, which embeds processing elements (FPGAs or simple CPU cores) directly on the SSD controller, enabling decompression, filtering, or format conversion to happen at the storage device rather than consuming host CPU cycles. For ML pipelines where CPU-side decoding is the bottleneck, computational storage could eliminate the CPU from the data path entirely, complementing GDS by offloading work that direct DMA cannot address.
+A different bottleneck appears when CPU-side decoding, not storage bandwidth, throttles the pipeline. The **Computational Storage Drive (CSD)**\index{Computational Storage Drive} closes that gap by embedding processing elements (FPGAs or simple CPU cores) directly on the SSD controller, enabling decompression, filtering, or format conversion to happen at the storage device rather than consuming host CPU cycles. For ML pipelines where CPU-side decoding is the bottleneck, computational storage could eliminate the CPU from the data path entirely, complementing GDS by offloading work that direct DMA cannot address.
 
-The concept of **persistent memory**\index{Memory!persistent}, though facing market shifts with the discontinuation of Intel Optane, continues in CXL-attached persistent memory modules. Byte-addressable non-volatile memory that sits between DRAM and NVMe in both latency and capacity could transform checkpoint storage: the durability of an SSD with write latencies approaching DRAM would reduce $T_{\text{write}}$ from milliseconds to microseconds, making frequent, low-overhead checkpointing a practical reality rather than an engineering aspiration.
+Checkpoint writes remain throttled by SSD write latency, the $T_{\text{write}}$ term the Young-Daly formula penalizes. **Persistent memory**\index{Memory!persistent}, though facing market shifts with the discontinuation of Intel Optane, continues in CXL-attached persistent memory modules and attacks that term directly. Byte-addressable non-volatile memory that sits between DRAM and NVMe in both latency and capacity could transform checkpoint storage: the durability of an SSD with write latencies approaching DRAM would reduce $T_{\text{write}}$ from milliseconds to microseconds, making frequent, low-overhead checkpointing a practical reality rather than an engineering aspiration.
 
 These technologies are not yet deployed at the scale of production ML clusters, but they represent the direction of the storage hierarchy's evolution. The fundamental principle remains unchanged: faster, more expensive storage closer to the accelerator, with slower, cheaper storage at the periphery. What changes is the *granularity* of the tiers and the *size of the gaps* between them.
 
@@ -2252,9 +2253,10 @@ class CheckpointStormCalc:
     """Tiered checkpoint staging timings for the 175B example."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    LOCAL_NVME_DRIVES_PER_NODE_REF = 4 * count   # pedagogical: NVMe drives per node
     nodes = 256
     local_drive_count = LOCAL_NVME_DRIVES_PER_NODE_REF.m_as("count")
-    local_drive_bw_gbs = NVME_SEQUENTIAL_BW.m_as(GB/second)
+    local_drive_bw_gbs = Hardware.Tech.Storage.NvmeGen4.bandwidth.m_as(GB/second)
     pfs_aggregate_bw_gbs = 1000
     checkpoint_interval_s = 600
     checkpoint_interval_min = checkpoint_interval_s // 60
@@ -2351,7 +2353,7 @@ The total storage consumed by checkpoints over the life of a training run is sub
 
 Incremental checkpointing offers a further optimization for reducing $T_{\text{write}}$. Rather than saving the entire model state every checkpoint, an incremental checkpoint saves only the parameters that changed since the last full checkpoint. For models where a large fraction of parameters are frozen (such as fine-tuning scenarios where only the last few layers are updated), incremental checkpoints can be orders of magnitude smaller than full checkpoints. The trade-off is recovery complexity: restoring from an incremental checkpoint requires applying a chain of incremental updates to a base checkpoint, which extends recovery time. Most production systems use a hybrid approach, saving incremental checkpoints frequently and full checkpoints periodically (every 10th to 100th increment).
 
-The checkpoint storage challenge interacts directly with the fault tolerance strategy examined in @sec-fault-tolerance-reliability. From the storage perspective, the design goal is to minimize $T_{\text{write}}$ (the time the training pipeline pauses) while ensuring that at least one durable copy of the checkpoint exists before the next failure window opens. The Young-Daly formula (@sec-fault-tolerance-young-daly) formalizes this trade-off by deriving the optimal checkpoint interval from the cluster's mean time between failures and the checkpoint write time. The storage engineer's contribution to this equation is reducing $T_{\text{write}}$ through tiered staging.
+The checkpoint storage challenge interacts directly with the fault tolerance strategy examined in @sec-fault-tolerance-reliability. From the storage perspective, the design goal is to minimize $T_{\text{write}}$ (the time the training pipeline pauses) while ensuring that at least one durable copy of the checkpoint exists before the next failure window opens. The Young-Daly formula (@sec-fault-tolerance-young-daly) formalizes this trade-off by deriving the optimal checkpoint interval from the cluster's mean time between failures and the checkpoint write time. The storage engineer's contribution to this equation is reducing $T_{\text{write}}$ through tiered staging. Minimizing $T_{\text{write}}$, however, only matters if the checkpoint can actually be read back; the costlier failure is a checkpoint that was written but never verified as restorable.
 
 ::: {#ws-data-storage-gitlab-database-incident .callout-war-story title="The backup that had not been restored"}
 **Context**: On January 31, 2017, around 17:20 UTC, a GitLab.com site reliability engineer working a database replication incident wiped what they believed was the secondary PostgreSQL data directory but had switched terminals to the production primary [@gitlab2017postmortem].
@@ -2553,6 +2555,8 @@ from mlsysim.fmt import check, fmt
 class SyntheticStorage:
     """The systems tax of the Synthetic Fuel Line."""
     # ┌── 1. LOAD ──────────────────────────────────────────
+    SYNTHETIC_PROVENANCE_OVERHEAD = 0.4          # pedagogical synthetic-data provenance overhead
+    SYNTHETIC_VERIFICATION_PASSES = 3            # pedagogical synthetic-data verification passes
     data_size_tb = 1
     provenance_metadata_overhead = SYNTHETIC_PROVENANCE_OVERHEAD
     verification_passes = SYNTHETIC_VERIFICATION_PASSES

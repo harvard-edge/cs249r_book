@@ -13,7 +13,7 @@ single "best" design — you have a frontier of feasible operating points,
 and the SLA chooses one of them.
 """
 import mlsysim
-from mlsysim.core.solver import ServingModel, TailLatencyModel
+from mlsysim.engine.solver import ServingModel, TailLatencyModel
 
 
 def main():

@@ -30,7 +30,7 @@ async def _():
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysim import Hardware, Models, Systems
-    from mlsysim.core import calibration
+    from mlsysim.engine import calibration
     from mlsysim import ureg
     from mlsysim.physics import (
         calc_ring_allreduce_time,

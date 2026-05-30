@@ -2,7 +2,7 @@
 engine: jupyter
 ---
 
-# Communication Foundations {#sec-communication-foundations}
+# Communication Foundations {#sec-appdx-communication-foundations}
 
 ## Purpose {.unnumbered}
 
@@ -10,7 +10,7 @@ _***What* communication primitives bind the fleet together, and *how* do we pred
 
 Distributed ML training spends a surprising fraction of wall time not computing, but communicating. A large distributed training run may dedicate a substantial fraction of every iteration to synchronizing gradients, redistributing activations, or shuffling expert tokens. When that communication overhead is the bottleneck, no amount of faster arithmetic will help. The question shifts from "how many FLOPs?" to "how many bytes, across what topology, at what latency?"
 
-This appendix collects the communication cost models that answer those questions quantitatively. It starts with the foundational $\alpha$-$\beta$ model---the "Roofline for networks"---then derives the cost of every collective operation used in distributed training, analyzes pipeline bubble overhead, and closes with the economics of gradient compression. These models support the distributed strategies in @sec-distributed-training-systems, the collective algorithms in @sec-collective-communication, the fault tolerance mechanisms in @sec-fault-tolerance-reliability, and the performance analysis in @sec-performance-engineering. Within the C$^3$ taxonomy (@sec-c3-taxonomy), this appendix develops the Communication ($C_2$) axis.
+This appendix collects the communication cost models that answer those questions quantitatively. It starts with the foundational $\alpha$-$\beta$ model---the "Roofline for networks"---then derives the cost of every collective operation used in distributed training, analyzes pipeline bubble overhead, and closes with the economics of gradient compression. These models support the distributed strategies in @sec-distributed-training-systems, the collective algorithms in @sec-collective-communication, the fault tolerance mechanisms in @sec-fault-tolerance-reliability, and the performance analysis in @sec-performance-engineering. Within the C$^3$ taxonomy (@sec-appdx-c3-taxonomy), this appendix develops the Communication ($C_2$) axis.
 
 ## How to Use This Appendix {.unnumbered}
 
@@ -18,12 +18,12 @@ This appendix is designed as a reference. Reach for it when translating a distri
 
 Conventions used here follow the book-wide notation. We use $\alpha$ for per-message startup latency, $\beta$ for link bandwidth in bytes per second, $n$ for point-to-point message size, $n^*$ for the $\alpha$-$\beta$ crossover point, $N$ for the number of participating GPUs, and $M$ for collective payload size in bytes.
 
-- **When AllReduce is slow**: Use @sec-comm-foundations-collective-complexity to compute the expected time and compare ring vs. tree costs.
-- **When choosing ring vs. tree**: Use @sec-comm-foundations-algorithm-selection and the crossover analysis to match algorithm to message size.
-- **When pipeline bubbles dominate**: Use @sec-comm-foundations-pipeline-arithmetic to compute bubble fraction and determine the required microbatch count.
-- **When gradient compression is proposed**: Use @sec-comm-foundations-compression to run the break-even calculation before committing engineering effort.
+- **When AllReduce is slow**: Use @sec-appdx-comm-foundations-collective-complexity to compute the expected time and compare ring vs. tree costs.
+- **When choosing ring vs. tree**: Use @sec-appdx-comm-foundations-algorithm-selection and the crossover analysis to match algorithm to message size.
+- **When pipeline bubbles dominate**: Use @sec-appdx-comm-foundations-pipeline-arithmetic to compute bubble fraction and determine the required microbatch count.
+- **When gradient compression is proposed**: Use @sec-appdx-comm-foundations-compression to run the break-even calculation before committing engineering effort.
 
-## The $\alpha$-$\beta$ Communication Model {#sec-comm-foundations-alpha-beta}
+## The $\alpha$-$\beta$ Communication Model {#sec-appdx-comm-foundations-alpha-beta}
 
 ```{python}
 #| echo: false
@@ -38,7 +38,6 @@ from mlsysim.core.constants import *
 from mlsysim.fmt import fmt_int, fmt, check, MarkdownStr
 
 from mlsysim.core.constants import (
-    LATENCY_NVLINK, LATENCY_PCIE_GEN5,
     GB, KB, NS, ureg,
 )
 
@@ -57,8 +56,8 @@ class CommAlphaBeta:
     tcp_alpha_us = Systems.Fabrics.Ethernet_100G.latency_us
     nvlink_h100_bw_gbs = int(Hardware.Cloud.H100.nvlink.bandwidth.m_as(GB/second))
     pcie_gen5_bw_gbs = int(Hardware.Cloud.H100.interconnect.bandwidth.m_as(GB/second))
-    nvlink_latency_ns = int(LATENCY_NVLINK.m_as(NS))
-    pcie_latency_ns = int(LATENCY_PCIE_GEN5.m_as(NS))
+    nvlink_latency_ns = int(Hardware.Tech.Interconnect.NVLink.latency.m_as(NS))
+    pcie_latency_ns = int(Hardware.Tech.Interconnect.PCIeGen5.latency.m_as(NS))
     ring_n_gpus = 256
     grad_layer_mb_min = 10
     grad_layer_mb_max = 100
@@ -102,7 +101,7 @@ where:
 - $\beta$ is the **link bandwidth** (bytes/s)---the sustained data rate after startup
 - $n$ is the **message size** (bytes)
 
-The model decomposes every transfer into exactly two costs: a per-message tax ($\alpha$) paid regardless of size, and a per-byte tax ($n/\beta$) that scales linearly with the payload. This decomposition drives all the algorithm selection decisions in @sec-comm-foundations-algorithm-selection.
+The model decomposes every transfer into exactly two costs: a per-message tax ($\alpha$) paid regardless of size, and a per-byte tax ($n/\beta$) that scales linearly with the payload. This decomposition drives all the algorithm selection decisions in @sec-appdx-comm-foundations-algorithm-selection.
 
 @Tbl-alpha-beta-params lists the $\alpha$ and $\beta$ values for interconnects commonly found in ML training clusters. These numbers are the starting point for every communication cost estimate in this appendix.
 
@@ -117,7 +116,7 @@ The model decomposes every transfer into exactly two costs: a per-message tax ($
 
 : **$\alpha$-$\beta$ Parameters by Interconnect**: Startup latency and sustained bandwidth for interconnects used in ML clusters. NVLink and PCIe operate within a node; InfiniBand and RoCE operate between nodes. TCP latency is dominated by kernel software stack overhead. {#tbl-alpha-beta-params}
 
-### Latency-dominated vs. bandwidth-dominated regimes {#sec-comm-foundations-regimes}
+### Latency-dominated vs. bandwidth-dominated regimes {#sec-appdx-comm-foundations-regimes}
 
 The $\alpha$-$\beta$ model reveals two distinct operating regimes. For small messages, the startup latency $\alpha$ dominates---the link spends most of its time *starting* transfers, not *sustaining* them. For large messages, the bandwidth term $n/\beta$ dominates, and the startup cost becomes negligible.
 
@@ -143,7 +142,7 @@ $n^* = \alpha \times \beta =$ `{python} CommAlphaBeta.ib_ndr_alpha_us_str` $\tim
 
 :::
 
-### The LogGP model extension {#sec-comm-foundations-loggp}
+### The LogGP model extension {#sec-appdx-comm-foundations-loggp}
 
 The $\alpha$-$\beta$ model assumes a message is a single, atomic transfer. In practice, networks pipeline messages: a sender can inject a new packet before the previous one has been fully received. The **LogGP model** [@alexandrov1995] extends LogP with a long-message gap parameter:
 
@@ -159,7 +158,7 @@ In most ML training scenarios, the $\alpha$-$\beta$ model is sufficient because 
 
 The $\alpha$-$\beta$ model describes point-to-point transfers. Collective operations---where all GPUs participate---compose multiple point-to-point transfers, and their cost formulas derive directly from the model above.
 
-## Collective Operation Complexity {#sec-comm-foundations-collective-complexity}
+## Collective Operation Complexity {#sec-appdx-comm-foundations-collective-complexity}
 
 ::: {#psp-appendix-communication-collective-complexity-matters .callout-perspective title="Why this matters"}
 
@@ -167,9 +166,9 @@ Every distributed training step ends with a collective synchronization. The cost
 
 :::
 
-Collective operations move data between all $N$ GPUs simultaneously. Each collective has a characteristic bandwidth term (how much data flows) and latency term (how many sequential message steps are required). The formulas below use the **bandwidth-optimal ring algorithm** unless otherwise noted; @sec-comm-foundations-algorithm-selection discusses when other algorithms are preferable.
+Collective operations move data between all $N$ GPUs simultaneously. Each collective has a characteristic bandwidth term (how much data flows) and latency term (how many sequential message steps are required). The formulas below use the **bandwidth-optimal ring algorithm** unless otherwise noted; @sec-appdx-comm-foundations-algorithm-selection discusses when other algorithms are preferable.
 
-### AllReduce {#sec-comm-foundations-allreduce}
+### AllReduce {#sec-appdx-comm-foundations-allreduce}
 
 AllReduce is the workhorse of data-parallel training: every GPU starts with a local gradient tensor of size $M$ bytes and ends with the globally reduced (summed) result. The ring algorithm decomposes AllReduce into a ReduceScatter phase followed by an AllGather phase. Ring AllReduce time is given by @eq-ring-allreduce:
 
@@ -248,7 +247,7 @@ $T_{\text{tree}} \approx$ **`{python} CommCollectives.tree_time_ms_str`**
 
 :::
 
-### AllGather {#sec-comm-foundations-allgather}
+### AllGather {#sec-appdx-comm-foundations-allgather}
 
 AllGather is the complement of ReduceScatter: each GPU starts with a $M/N$-sized shard and ends with the complete $M$-byte tensor. It is the core communication primitive in Fully Sharded Data Parallelism (FSDP) for reconstructing parameters before each forward pass, and in tensor parallelism for reassembling split activations.
 
@@ -258,7 +257,7 @@ $$ T_{\text{allgather}} = \frac{N - 1}{N} \cdot \frac{M}{\beta} + (N - 1) \cdot 
 
 AllGather is exactly half the cost of AllReduce (one ring pass instead of two) because it does not include a reduction step.
 
-### ReduceScatter {#sec-comm-foundations-reducescatter}
+### ReduceScatter {#sec-appdx-comm-foundations-reducescatter}
 
 ReduceScatter is the dual of AllGather: each GPU starts with a full $M$-byte tensor and ends with a $M/N$-sized shard that contains the globally reduced values for that shard. It is the gradient synchronization primitive in FSDP and ZeRO, replacing the full AllReduce with a cheaper operation when each GPU only needs its own parameter shard's gradient.
 
@@ -268,7 +267,7 @@ $$ T_{\text{reducescatter}} = \frac{N - 1}{N} \cdot \frac{M}{\beta} + (N - 1) \c
 
 The symmetry is not a coincidence: ring AllReduce decomposes into one ReduceScatter followed by one AllGather, and the costs add up exactly to @eq-ring-allreduce.
 
-### AllToAll {#sec-comm-foundations-alltoall}
+### AllToAll {#sec-appdx-comm-foundations-alltoall}
 
 AllToAll is the most general collective: each GPU sends a distinct $M/N$-sized chunk to every other GPU, and receives a distinct chunk from each. It is the routing primitive for Mixture-of-Experts (MoE) architectures, where tokens must be dispatched to the correct expert and the results gathered back.
 
@@ -278,7 +277,7 @@ $$ T_{\text{alltoall}} = \frac{N - 1}{N} \cdot \frac{M}{\beta} + (N - 1) \cdot \
 
 Although the formula matches AllGather and ReduceScatter in form, the communication pattern is fundamentally different: AllToAll is a *personalized* exchange (each GPU sends different data to each peer), which makes it harder to overlap with computation and more sensitive to network congestion.
 
-### Broadcast {#sec-comm-foundations-broadcast}
+### Broadcast {#sec-appdx-comm-foundations-broadcast}
 
 Broadcast sends a single $M$-byte tensor from one root GPU to all $N - 1$ others. It is used for distributing initial model weights, updated learning rates, and configuration changes during training.
 
@@ -305,7 +304,7 @@ With the individual formulas in place, @tbl-collective-summary provides a compac
 
 Two patterns emerge from this table. First, bandwidth-optimal ring algorithms all share the $(N-1)/N$ factor, which approaches 1 for large $N$. Per-rank communication therefore approaches a constant multiple of $M$: about $2M$ for AllReduce and about $M$ for AllGather, ReduceScatter, or AllToAll. Aggregate traffic still scales with the number of ranks. Second, the latency term grows linearly with $N$ for ring algorithms but logarithmically for tree algorithms, creating the algorithm selection trade-off analyzed next.
 
-## Algorithm Selection {#sec-comm-foundations-algorithm-selection}
+## Algorithm Selection {#sec-appdx-comm-foundations-algorithm-selection}
 
 ::: {#psp-appendix-communication-algorithm-selection-matters .callout-perspective title="Why this matters"}
 
@@ -313,7 +312,7 @@ NCCL automatically selects a collective algorithm based on message size and GPU 
 
 :::
 
-### Ring vs. tree vs. recursive halving-doubling {#sec-comm-foundations-ring-vs-tree}
+### Ring vs. tree vs. recursive halving-doubling {#sec-appdx-comm-foundations-ring-vs-tree}
 
 The ring algorithm minimizes bandwidth usage but pays a latency cost that grows linearly with $N$. The tree algorithm minimizes latency but wastes bandwidth because it sends the full message at each level. **Recursive halving-doubling** splits the difference: it uses halving (like a tree) for the reduce phase and doubling for the gather phase, achieving near-optimal bandwidth with $\mathcal{O}(\log N)$ latency steps.
 
@@ -334,7 +333,7 @@ The decision boundary between ring and tree depends on message size:
 
 : **Algorithm Selection Guide**: Strengths and weaknesses of ring, tree, and recursive halving-doubling for different message sizes and GPU counts. $n^* = \alpha \times \beta$ is the crossover message size from @eq-crossover. {#tbl-algorithm-selection}
 
-### Hierarchical AllReduce {#sec-comm-foundations-hierarchical}
+### Hierarchical AllReduce {#sec-appdx-comm-foundations-hierarchical}
 
 ```{python}
 #| echo: false
@@ -372,7 +371,7 @@ The hierarchical approach reduces the inter-node ring size from all GPUs to one 
 
 Understanding the cost structure of collectives enables reasoning about data-parallel overhead. Pipeline parallelism, however, introduces a different kind of overhead: idle time caused by the sequential dependency between pipeline stages. The next section quantifies that cost.
 
-## Pipeline Arithmetic {#sec-comm-foundations-pipeline-arithmetic}
+## Pipeline Arithmetic {#sec-appdx-comm-foundations-pipeline-arithmetic}
 
 ::: {#psp-appendix-communication-pipeline-arithmetic-matters .callout-perspective title="Why this matters"}
 
@@ -380,7 +379,7 @@ Pipeline parallelism splits a model across multiple GPUs so that each GPU holds 
 
 :::
 
-### Bubble fraction {#sec-comm-foundations-bubble-fraction}
+### Bubble fraction {#sec-appdx-comm-foundations-bubble-fraction}
 
 In a pipeline with $p$ stages and $m$ microbatches, the **bubble fraction** is the proportion of total GPU-time spent idle:
 
@@ -444,7 +443,7 @@ class CommPipeline:
 
 : **Pipeline Bubble Fraction**: Percentage of GPU-time lost to pipeline bubbles for various stage counts and microbatch counts. Values below 20 percent (the typical target) require $m \geq 4p$. {#tbl-pipeline-bubble}
 
-### Interleaved scheduling {#sec-comm-foundations-interleaved}
+### Interleaved scheduling {#sec-appdx-comm-foundations-interleaved}
 
 Interleaved scheduling (used in Megatron-LM) assigns $V$ **virtual stages** to each physical GPU instead of one. Each GPU processes $V$ nonconsecutive chunks of the model, which means the pipeline has $p \times V$ virtual stages but the bubble overhead uses the original $p$, as @eq-interleaved-bubble shows:
 
@@ -454,7 +453,7 @@ The microbatch term in the denominator is multiplied by $V$ compared to @eq-pipe
 
 Interleaved scheduling highlights a recurring theme in distributed ML: communication granularity is a tunable knob. Smaller, more frequent transfers improve overlap and reduce idle time, but increase the aggregate latency overhead. The same trade-off appears in gradient compression, which is the final cost model in this appendix.
 
-## Compression Economics {#sec-comm-foundations-compression}
+## Compression Economics {#sec-appdx-comm-foundations-compression}
 
 ::: {#psp-appendix-communication-compression-economics-matters .callout-perspective title="Why this matters"}
 
@@ -462,7 +461,7 @@ Gradient compression promises to reduce communication volume by 10--1000$\times$
 
 :::
 
-### The compression equation {#sec-comm-foundations-compression-equation}
+### The compression equation {#sec-appdx-comm-foundations-compression-equation}
 
 Gradient compression replaces the original $M$-byte gradient with a compressed representation of size $M/C$, where $C$ is the compression ratio. @Eq-compression-total expresses the total time with compression:
 

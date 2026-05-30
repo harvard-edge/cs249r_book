@@ -6,7 +6,7 @@ from mlsysim.cli.context import OUTPUT_FORMAT_HELP, resolve_output_format
 from mlsysim.cli.schemas import MlsysPlanSchema
 from mlsysim.cli.exceptions import ExitCode, exit_with_code, error_shield
 from mlsysim.cli.renderers import render_optimization
-from mlsysim.core.solver import ParallelismOptimizer, BatchingOptimizer, PlacementOptimizer
+from mlsysim.engine.solver import ParallelismOptimizer, BatchingOptimizer, PlacementOptimizer
 
 optimize_app = typer.Typer(
     help="[Tier 3] Search the design space for optimal configurations.", 

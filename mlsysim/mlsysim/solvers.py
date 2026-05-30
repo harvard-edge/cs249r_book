@@ -5,7 +5,7 @@ Usage:
     from mlsysim.solvers import ServingModel, TailLatencyModel, ...
 """
 
-from .core.solver import (
+from .engine.solver import (
     ForwardModel,
     SingleNodeModel,
     DistributedModel,

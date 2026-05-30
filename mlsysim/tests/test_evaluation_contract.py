@@ -2,7 +2,7 @@ import pytest
 import subprocess
 import sys
 from pathlib import Path
-from mlsysim.core.evaluation import SystemEvaluator
+from mlsysim.engine.evaluation import SystemEvaluator
 from mlsysim.hardware.registry import Hardware
 from mlsysim.models.registry import Models
 from mlsysim import Applications, Q_, plot_evaluation_scorecard
