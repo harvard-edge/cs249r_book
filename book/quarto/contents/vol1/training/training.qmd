@@ -322,8 +322,8 @@ GPT-2's `{python} GPT2LighthouseSpecs.gpt2_dataset_size_gb_str` WebText corpus s
 
 ::: {#psp-training-10-gb-10-tb-scale-factor .callout-perspective title="The 10 GB to 10 TB scale factor"}
 
--   **At 10 GB**: The entire dataset often fits in system RAM. Data loading is a one-time "startup cost," and the disk bandwidth $(\text{BW})$ does not matter after the first few seconds.
--   **At 10 TB**: Data becomes a continuous, high-pressure stream. The system can no longer "load" the data; it must orchestrate its movement. The $D_{\text{vol}}$ term shifts from a storage bottleneck to a networking and I/O bottleneck, requiring zero-copy paths and multi-worker prefetching just to keep the accelerator from starving.
+-   **Memory-resident regime** (10 GB): The entire dataset often fits in system RAM. Data loading is a one-time "startup cost," and the disk bandwidth $(\text{BW})$ does not matter after the first few seconds.
+-   **Streaming regime** (10 TB): Data becomes a continuous, high-pressure stream. The system can no longer "load" the data; it must orchestrate its movement. The $D_{\text{vol}}$ term shifts from a storage bottleneck to a networking and I/O bottleneck, requiring zero-copy paths and multi-worker prefetching just to keep the accelerator from starving.
 
 Scale is not just "more data"; it is a transformation of the system's physics.
 
@@ -831,7 +831,7 @@ Traditional gradient descent processes the entire dataset before each parameter 
 $$ \text{Peak Activation Memory} \propto B_{\text{micro}} \times \text{Activation Memory per Example} $$ {#eq-gd-memory}
 $$ T_{\text{step}} \propto D \times T_{\text{forward+backward per example}} $$ {#eq-gd-time}
 
-This memory breakdown is formalized in the **Algorithm Foundations** appendix, which derives the full training memory equation including optimizer state overhead. Full-batch training does not require storing every example's activations simultaneously if the dataset is streamed or microbatched; peak memory is governed by the examples held in memory at once. The systems problem is still severe: processing $D=1{,}000{,}000$ examples before each update creates million-example iteration times, reducing the rate at which the model can learn from the data.
+This memory breakdown is formalized in the Algorithm Foundations appendix, which derives the full training memory equation including optimizer state overhead. Full-batch training does not require storing every example's activations simultaneously if the dataset is streamed or microbatched; peak memory is governed by the examples held in memory at once. The systems problem is still severe: processing $D=1{,}000{,}000$ examples before each update creates million-example iteration times, reducing the rate at which the model can learn from the data.
 
 \index{Stochastic Gradient Descent!gradient estimation}\index{Stochastic Gradient Descent!etymology}\index{Stochastic Gradient Descent!Robbins and Monro}
 These system constraints led to the development of variants that better align with hardware capabilities. The key insight was that exact gradient computation, while mathematically appealing, is not necessary for effective learning. SGD[^fn-sgd-training] represents a pivotal shift in optimization strategy, estimating gradients using individual training examples rather than the entire dataset. This approach drastically reduces memory requirements since only one example's activations and gradients need storage at any time.
@@ -1794,7 +1794,7 @@ Accelerators have characteristic hardware ridge points where operations transiti
 
 ::: {#psp-training-peak-flops-vs-sustained-performance .callout-perspective title="Peak FLOP/s vs. sustained performance"}
 
-Hardware vendors often market "Peak TFLOP/s," but for a systems engineer, this number is often a theoretical limit that is rarely reached. The intensity gap reveals that most neural network operations, especially in the backward pass, have arithmetic intensities well below the hardware's ridge point. When an operation is memory bound (like LayerNorm or Softmax), doubling the hardware's peak TFLOP/s does nothing for performance. This is why **Mixed-Precision (FP16/BF16)** is so effective: beyond enabling faster arithmetic, it halves the bytes moved per operation, effectively doubling the "Data Supply Rate" and allowing the system to reach a much higher percentage of its peak computational capability. Successful optimization is the art of increasing arithmetic intensity through kernel fusion and reducing data movement through precision management.
+Hardware vendors often market "Peak TFLOP/s," but for a systems engineer, this number is often a theoretical limit that is rarely reached. The intensity gap reveals that most neural network operations, especially in the backward pass, have arithmetic intensities well below the hardware's ridge point. When an operation is memory bound (like LayerNorm or Softmax), doubling the hardware's peak TFLOP/s does nothing for performance. This is why **Mixed-Precision (FP16/BF16)**\index{Mixed precision!FP16/BF16} is so effective: beyond enabling faster arithmetic, it halves the bytes moved per operation, effectively doubling the "Data Supply Rate" and allowing the system to reach a much higher percentage of its peak computational capability. Successful optimization is the art of increasing arithmetic intensity through kernel fusion and reducing data movement through precision management.
 
 :::
 
@@ -4437,7 +4437,7 @@ class MixedPrecisionSpeedup:
 - FP16 throughput: ~`{python} MixedPrecisionSpeedup.throughput_fp16_str` samples/sec
 - Speedup: `{python} MixedPrecisionSpeedup.v100_mp_speedup_str`$\times$ faster training
 
-**Cost impact** on a `{python} MixedPrecisionLossScaling.n_v100_gpus_str` cluster:
+Cost impact on a `{python} MixedPrecisionLossScaling.n_v100_gpus_str` cluster:
 
 - FP32: ~\$`{python} MixedPrecisionLossScaling.fp32_cost_str` for `{python} MixedPrecisionLossScaling.fp32_weeks_str`
 - FP16: ~\$`{python} MixedPrecisionLossScaling.fp16_cost_str` for `{python} MixedPrecisionLossScaling.fp16_weeks_str`
@@ -4949,7 +4949,7 @@ The integration is typically a single-line change---swapping a manual attention 
 #### Systems implications and broader principles {#sec-model-training-systems-implications-broader-principles-c4f0}
 
 \index{I/O-Aware Design!algorithm optimization}\index{Memory Bandwidth!bottleneck mitigation}\index{Tiling!algorithms, matrix computation}
-Flash Attention exemplifies a fundamental systems engineering principle: **IO-aware algorithm design**. The core insight recognizes that modern accelerators are increasingly compute-abundant but bandwidth-constrained. *An algorithm's runtime is determined not by FLOP count but by memory traffic.*
+Flash Attention exemplifies a fundamental systems engineering principle: **IO-aware algorithm design**\index{IO-aware algorithm design}. The core insight recognizes that modern accelerators are increasingly compute-abundant but bandwidth-constrained. *An algorithm's runtime is determined not by FLOP count but by memory traffic.*
 
 This principle extends beyond attention. In IO-aware matrix multiplication, tiling algorithms like those in CUTLASS minimize DRAM traffic by maximizing data reuse in fast caches. A naive $m{\times}m$ matrix multiply performs $\mathcal{O}(m^3)$ FLOPs with $\mathcal{O}(m^2)$ memory traffic, while blocked algorithms maintain $\mathcal{O}(m^3)$ FLOPs but reduce cache misses through locality optimization.
 
@@ -4957,8 +4957,8 @@ The same logic applies to communication-efficient distributed training: gradient
 
 Flash Attention transforms practical model training capabilities. By eliminating the $\mathcal{O}(S^2)$ memory bottleneck, it enables:
 
-- **4$\times$ longer sequences** on the same hardware (2K → 8K context for GPT-2 on A100)
-- **2$\times$ larger batch sizes** through freed memory (faster convergence)
+- **Longer sequences**: 4$\times$ on the same hardware (2K → 8K context for GPT-2 on A100)
+- **Larger batch sizes**: 2$\times$ through freed memory (faster convergence)
 - **Deeper models** by reducing activation memory (more layers fit in same budget)
 
 For a 7-billion-parameter model training on A100 GPUs, Flash Attention transforms training from infeasible (OOM at 2K context) to practical (8K context with room for batch size 32), representing the difference between a model that cannot be trained and one deployed in production.
@@ -5148,9 +5148,7 @@ The synergy between gradient accumulation and checkpointing enables training of 
 
 #### Optimal checkpoint placement strategy {#sec-model-training-optimal-checkpoint-placement-strategy-4a0d}
 
-For a network with $N_L$ layers, each storing $A$ bytes of activations, @tbl-checkpoint-tradeoffs quantifies how the number and placement of checkpoints determines the memory-compute trade-off.
-
-Sub-linear checkpointing strategies can reduce memory consumption from $\mathcal{O}(N_L)$ to $\mathcal{O}(\sqrt{N_L})$ with only a fractional increase in total compute time, enabling the training of much deeper models on existing hardware.
+For a network with $N_L$ layers, each storing $A$ bytes of activations, @tbl-checkpoint-tradeoffs quantifies how the number and placement of checkpoints determines the memory-compute trade-off. Sub-linear checkpointing strategies can reduce memory consumption from $\mathcal{O}(N_L)$ to $\mathcal{O}(\sqrt{N_L})$ with only a fractional increase in total compute time, enabling the training of much deeper models on existing hardware.
 
 Setting the derivative of total memory cost $(k \times A + (N_L/k) \times A)$ to zero yields $k_{\text{optimal}} = \sqrt{N_L}$. In the common $\sqrt{N_L}$ checkpointing scheme, this gives roughly one-third extra forward compute in exchange for the minimum memory footprint under this simplified model. For GPT-2 with forty-eight transformer layers, the contrast is stark: without checkpointing, memory equals $48 \times A$ (full activation storage). Optimal checkpointing ($\sqrt{48}$ approximately equals seven checkpoints) requires memory of $7 \times A + (48/7) \times A$ approximately equals $14 \times A$, achieving 71 percent memory savings with approximately 33 percent compute overhead.
 
@@ -5172,9 +5170,7 @@ Gradient accumulation[^fn-gradient-accumulation-training] simulates larger batch
 
 Activation checkpointing significantly reduces the memory footprint of intermediate activations during the forward pass, allowing training of deeper models. By discarding and recomputing activations as needed, checkpointing frees up memory for larger models, additional layers, or higher resolution data. This is especially important in advanced architectures like transformers that require substantial memory for intermediate computations.
 
-Both techniques enhance scalability and cost efficiency by reducing hardware requirements, lowering development costs for organizations working within tight budgets.
-
-Returning to our GPT-2 Lighthouse Model, gradient accumulation is essential for achieving the target batch size within V100 memory constraints.
+Both techniques enhance scalability and cost efficiency by reducing hardware requirements, lowering development costs for organizations working within tight budgets. Returning to our GPT-2 Lighthouse Model, gradient accumulation is essential for achieving the target batch size within V100 memory constraints.
 
 ```{python}
 #| echo: false
@@ -6497,21 +6493,21 @@ Within a single node, GPUs communicate via high-bandwidth interconnects like NVL
 **Data parallelism (split the batch)**
 
 *   **Compute $(O)$**: Split by $N_{\text{GPU}}$ (each GPU does $1/N_{\text{GPU}}$ of the batch).
-*   **Memory footprint**: **Replicated**. Every GPU must hold the full model weights $\theta$ ($P$ parameters).
-*   **Communication**: **Gradients**. Size $\propto P$. Occurs at end of backward pass.
+*   **Memory footprint**: Replicated. Every GPU must hold the full model weights $\theta$ ($P$ parameters).
+*   **Communication**: Gradients. Size $\propto P$. Occurs at end of backward pass.
 *   **Bottleneck**: When Model Size $P >$ GPU Memory.
 
 **Model parallelism (split the weights)**
 
 *   **Compute $(O)$**: Split by $N_{\text{GPU}}$ (each accelerator computes part of the layer).
-*   **Memory footprint**: **Split**. Each GPU holds a shard of $\theta$ containing approximately $P/N_{\text{GPU}}$ parameters.
-*   **Communication**: **Activations**. Size $\propto B \times d$. Occurs at every layer boundary.
+*   **Memory footprint**: Split. Each GPU holds a shard of $\theta$ containing approximately $P/N_{\text{GPU}}$ parameters.
+*   **Communication**: Activations. Size $\propto B \times d$. Occurs at every layer boundary.
 *   **Bottleneck**: When Activation Size is large (high communication frequency).
 
 **Systems insight**:
 
-*   Use **data parallel** when the model fits in memory but training is too slow.
-*   Use **model parallel** when the model is too big to fit in a single GPU's memory.
+*   Use data parallelism\index{Data Parallelism!selection rule} when the model fits in memory but training is too slow.
+*   Use model parallelism\index{Model Parallelism!selection rule} when the model is too big to fit in a single GPU's memory.
 
 :::
 

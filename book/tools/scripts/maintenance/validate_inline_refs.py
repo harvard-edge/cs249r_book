@@ -63,7 +63,7 @@ EXPORTS_SECTION = re.compile(r'#\s*.\s*[Ee]xports?:\s*(.*)')
 # were retired alongside mlsysim.fmt's MarkdownStr migration. They guarded against
 # Quarto's auto-escape silently corrupting commas and decimals inside $..$ math
 # mode — a bug class that no longer exists now that fmt() returns a string that
-# renders verbatim. See mlsysim/mlsysim/fmt.py and .claude/rules/math.md.
+# renders verbatim. See mlsysim/mlsysim/fmt.py and the project math rules.
 
 # Grid table row separator (indicates grid table format)
 GRID_TABLE_SEP = re.compile(r'^\+[-:=+]+\+$')

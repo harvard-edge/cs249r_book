@@ -145,7 +145,7 @@ def fmt(quantity, unit=None, precision=1, commas=True,
     assert isinstance(out, MarkdownStr), (
         "fmt() must return MarkdownStr — this guard exists so a future refactor "
         "of this module cannot silently break Quarto's _repr_markdown_ detection. "
-        "See .claude/rules/math.md."
+        "See the project math rules."
     )
     return out
 
