@@ -71,7 +71,7 @@ Adopting instructors who want a different look can create their own variant by c
 
 ## Contributing
 
-Agent instructions and production guidelines live in `.claude/docs/slides/`.
+Agent instructions and production guidelines live in the project slides docs.
 
 ## Contributors
 

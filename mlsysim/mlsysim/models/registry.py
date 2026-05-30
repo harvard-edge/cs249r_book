@@ -4,7 +4,7 @@ Per-category data (params, FLOPs, training figures) lives as YAML under
 ``models/data/<category>.yaml`` and is loaded + validated against the
 ``Workload`` family at import (see ``core/loader.py``). Each entry carries a
 ``__type__`` selecting the concrete workload class (Transformer / CNN / SSM /
-Diffusion / sparse-MoE / plain). See ``.claude/rules/mlsysim.md`` →
+Diffusion / sparse-MoE / plain). See the project MLSysIM rules →
 *Canonical organization* / *Storage format*.
 """
 from pathlib import Path
@@ -47,3 +47,6 @@ class Models(Registry):
     Recommendation = RecommendationModels
     StateSpace = StateSpaceModels
     GenerativeVision = GenerativeVisionModels
+
+    # Backward-compatible short aliases retained for older book/tests/user code.
+    GPT3 = LanguageModels.GPT3

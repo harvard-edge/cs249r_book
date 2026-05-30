@@ -3,7 +3,7 @@
 Per-instance specs (capacity, bandwidth, TDP, price, counts) live as YAML data
 under ``hardware/data/<tier>/<Chip>.yaml`` and are loaded + validated against the
 ``HardwareNode`` schema at import (see ``core/loader.py`` and
-``.claude/rules/mlsysim.md`` → *Canonical organization* / *Storage format*).
+the project MLSysIM rules → *Canonical organization* / *Storage format*).
 Technology-class facts that are ~constant across a generation (access latency,
 per-op/byte energy, generic bandwidth) live in ``hardware/tech.py`` and are
 exposed as ``Hardware.Tech``; instances reference them via ``@tech:`` markers in
@@ -42,6 +42,8 @@ TinyHardware = load_registry(
 
 class Hardware(Registry):
     """Registry namespace for Hardware."""
+    __registry_list_exclude__ = frozenset({"Tech"})
+
     Cloud = CloudHardware
     Workstation = WorkstationHardware
     Mobile = MobileHardware

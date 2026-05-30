@@ -4,7 +4,7 @@ This directory regenerates `{chapter}_quizzes.json` from chapter prose for
 every chapter in Vol1 and Vol2. It is the **plumbing** half of the
 spec-plus-runner pattern. The **spec** — what "good" looks like — lives at:
 
-    .claude/docs/shared/quiz-generation.md
+    the project quiz-generation spec
 
 Every decision about taxonomy, per-type answer formats, quality bar,
 anti-patterns, schema, and difficulty progression is in the spec. When
@@ -67,11 +67,11 @@ derivative artifacts in the book: **spec + lean runner + validator +
 human gate**. When you need to regenerate glossaries, concepts, index
 entries, or similar derived content from prose, follow the same shape:
 
-- Put the canonical rules in `.claude/rules/{artifact}-generation.md`.
+- Put the canonical rules in the project generation rules.
 - Write a lean runner in `book/tools/scripts/{artifact}/generate.py`.
 - Put the validator beside it.
 - Optionally add an interactive persona at
-  `.claude/agents/{artifact}-refresh-agent.md`.
+  the project refresh-agent doc.
 
 The runner and the validator are small enough to audit. The rules file
 is the IP.

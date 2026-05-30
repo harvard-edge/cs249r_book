@@ -75,6 +75,10 @@ class InfoCommand:
     # ------------------------------------------------------------------
 
     def run(self, args: List[str]) -> bool:
+        if args == ["help"]:
+            self._print_help()
+            return True
+
         parser = argparse.ArgumentParser(
             prog="binder info",
             description="Book statistics and figure extraction",

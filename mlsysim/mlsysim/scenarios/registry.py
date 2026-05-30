@@ -68,6 +68,18 @@ class MobilePower(Registry):
         name="Mobile NPU peak power", description="Higher-bound mobile inference power envelope.")
     ObjectDetector = sourced_qty(2 * ureg.watt, pc.BOOK_DEVICE_ANCHORS,
         name="Object-detector power", description="Reference power draw of an always-on object-detection workload.")
+    MobileMlSustainedLow = sourced_qty(2 * ureg.watt, pc.BOOK_DEVICE_ANCHORS,
+        name="Mobile ML sustained power (low)", description="Lower bound for sustained smartphone ML processing.")
+    MobileMlSustainedHigh = sourced_qty(3 * ureg.watt, pc.BOOK_DEVICE_ANCHORS,
+        name="Mobile ML sustained power (high)", description="Upper bound for sustained smartphone ML processing.")
+    MobileMlBurstLow = sourced_qty(5 * ureg.watt, pc.BOOK_DEVICE_ANCHORS,
+        name="Mobile ML burst power (low)", description="Lower bound for brief smartphone ML burst processing.")
+    MobileMlBurstHigh = sourced_qty(10 * ureg.watt, pc.BOOK_DEVICE_ANCHORS,
+        name="Mobile ML burst power (high)", description="Upper bound for brief smartphone ML burst processing.")
+    BackgroundAdaptationLow = sourced_qty(500 * ureg.milliwatt, pc.BOOK_DEVICE_ANCHORS,
+        name="Background adaptation power budget (low)", description="Lower bound for background on-device adaptation power.")
+    BackgroundAdaptationHigh = sourced_qty(1000 * ureg.milliwatt, pc.BOOK_DEVICE_ANCHORS,
+        name="Background adaptation power budget (high)", description="Upper bound for background on-device adaptation power.")
 
 
 class PhoneBattery(Registry):

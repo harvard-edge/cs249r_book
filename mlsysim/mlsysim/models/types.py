@@ -11,7 +11,7 @@ class ComputationGraph(BaseModel):
     It strips away high-level architectural details (like "Transformer" or 
     "CNN") and reduces the workload to pure math: Operations and Bytes.
     """
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
     
     name: str
     total_ops: Quantity
@@ -33,7 +33,7 @@ class Workload(BaseModel):
     knowledge of the hardware it will run on. It must implement `lower()` 
     to project its architectural definition down into a `ComputationGraph`.
     """
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
     name: str
     architecture: str
     metadata: Metadata = Field(default_factory=Metadata)

@@ -1,5 +1,5 @@
 from typing import Any, Annotated, Optional
-from pydantic import AfterValidator, PlainSerializer, BaseModel
+from pydantic import AfterValidator, PlainSerializer, BaseModel, ConfigDict
 from .constants import Q_
 from .provenance import Provenance
 
@@ -25,6 +25,8 @@ Quantity = Annotated[
 
 class Metadata(BaseModel):
     """Provenance for registry entries (hardware, models, fabrics)."""
+
+    model_config = ConfigDict(extra="forbid")
 
     provenance: Optional[Provenance] = None
     description: Optional[str] = None

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Index audit — produces 4 reports per .claude/rules/index.md plan.
+Index audit — produces 4 reports per the project index rules plan.
 
 Run from a MLSysBook worktree root:
     python3 .claude/_reviews/index_audit_2026-05-02/audit.py

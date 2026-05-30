@@ -1799,8 +1799,9 @@ class BuildCommand:
     def reset_build_config(self, format_type: str, volume: Optional[str] = None) -> bool:
         """Reset build config by uncommenting all chapter entries.
 
-        For PDF/EPUB this restores commented chapter lists.
-        For HTML this also removes temporary `render:` sections used for fast builds.
+        Restores YAML manifests that may have been partially commented by a
+        chapter-selective build. PDF/EPUB use chapters:/appendices: lists;
+        HTML uses render: lists where needed.
 
         Args:
             format_type: Format to reset ('html', 'pdf', 'epub')
@@ -1850,7 +1851,11 @@ class BuildCommand:
                     backup_file.unlink()
 
                 reset_count += 1
-                console.print(f"[green]✓[/green] Reset config: {cfg.name}")
+                try:
+                    rel = cfg.relative_to(self.config_manager.book_dir)
+                except ValueError:
+                    rel = cfg
+                console.print(f"[green]✓[/green] Reset config: {rel}")
             except Exception as e:
                 console.print(f"[red]❌ Failed to reset {cfg.name}: {e}[/red]")
 

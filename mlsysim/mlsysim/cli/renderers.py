@@ -52,8 +52,10 @@ def render_zoo_table(registry_name: str, items: list, output_format: str):
                 row["flops"] = str(item.compute.peak_flops)
                 row["bandwidth"] = str(item.memory.bandwidth)
             elif hasattr(item, "parameters"):
-                row["parameters"] = str(item.parameters)
-                row["layers"] = item.layers
+                params = getattr(item, "parameters", None)
+                row["architecture"] = getattr(item, "architecture", None)
+                row["parameters"] = str(params) if params is not None else None
+                row["layers"] = getattr(item, "layers", None)
             data.append(row)
         print_json({registry_name: data})
         return
@@ -69,7 +71,10 @@ def render_zoo_table(registry_name: str, items: list, output_format: str):
             print("| Model Name | Architecture | Parameters | Layers |")
             print("|---|---|---|---|")
             for item in items:
-                print(f"| {item.name} | {item.architecture} | {item.parameters:~P} | {item.layers} |")
+                layers_str = str(getattr(item, "layers", "-") or "-")
+                params = getattr(item, "parameters", None)
+                params_str = f"{params:~P}" if hasattr(params, "magnitude") else (str(params) if params is not None else "-")
+                print(f"| {item.name} | {item.architecture} | {params_str} | {layers_str} |")
         return
 
     table = Table(title=f"The MLSys {registry_name.title()} Zoo", box=None, padding=(0, 2))

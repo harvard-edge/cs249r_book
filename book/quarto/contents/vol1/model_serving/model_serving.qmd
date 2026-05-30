@@ -821,7 +821,7 @@ class CostLatencyCalc:
     latency_b_ms_str = fmt(latency_b_ms_value, precision=0, commas=False, suffix=" ms")
     throughput_b_rps_str = fmt(throughput_b_rps_value, precision=0, commas=False, suffix=" req/s")
     cost_a_str = fmt(cost_per_million_a_value, precision=2, commas=False, prefix="$")
-    cost_b_str = fmt(cost_per_million_b_value, precision=4, commas=False, prefix="$")
+    cost_b_str = fmt(cost_per_million_b_value, precision=2, commas=False, prefix="$")
     cost_increase_str = fmt(cost_increase_pct_value, precision=0, commas=False, suffix="%")
     cost_ratio_str = fmt(cost_ratio_value, precision=0, commas=False, suffix="×")
 ```
@@ -1361,9 +1361,7 @@ This architecture serves three functions. First, concurrency management: servers
 
 [^fn-nchw-nhwc-serving]: **NCHW and NHWC (Tensor Memory Layouts)**: These acronyms encode the memory layout order of 4D image tensors: N (batch), C (channels), H (height), W (width). NCHW places all values for one channel contiguously, enabling vectorized convolution on GPUs; NHWC interleaves channels at each spatial position, aligning better with CPU single instruction, multiple data (SIMD) instructions. A format mismatch between client and server can produce incorrect tensors even when the shape appears valid, so serving code should make layout conversions explicit. \index{NCHW!tensor layout}
 
-Third, model management: inference servers manage the lifecycle of models, including loading weights into VRAM, managing versioning, and ensuring that warmup inferences are completed before exposing the model to live traffic.
-
-Of these components, the scheduler deserves special attention because it embodies the core serving trade-off between throughput and latency.
+Third, model management: inference servers manage the lifecycle of models, including loading weights into VRAM, managing versioning, and completing warmup inferences before exposing the model to live traffic. Among these components, the scheduler deserves special attention because it embodies the core serving trade-off between throughput and latency.
 
 ### The scheduler: Where throughput meets latency {#sec-model-serving-scheduler-throughput-meets-latency-d022}
 
@@ -1785,9 +1783,7 @@ class AmdahlServingCalc:
 
 :::
 
-Moving preprocessing closer to the accelerator\index{Preprocessing!gpu, accelerated pipelines} can reduce avoidable CPU-GPU transfers, but the end-to-end gain is pipeline-specific.
-
-Effective optimization targets the largest time consumers first.
+Moving preprocessing closer to the accelerator\index{Preprocessing!gpu, accelerated pipelines} can reduce avoidable CPU-GPU transfers, but the end-to-end gain is pipeline-specific. Effective optimization targets the largest time consumers first.
 
 #### The serving tax bill {#sec-model-serving-serving-tax-bill-dc6c}
 
@@ -2143,6 +2139,7 @@ class CapacityPlanningAnchor:
     slo_ms = 50
     concurrency_slots = int(qps_target * (slo_ms * ms).m_as(second))
 
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     qps_str = fmt(qps_target, precision=0, commas=False, suffix=" QPS")
     qps_display_str = fmt(qps_target, precision=0, commas=True, suffix=" QPS")
     slo_str = fmt(slo_ms, precision=0, commas=False, suffix=" ms")
@@ -2557,7 +2554,7 @@ For ResNet-50 serving, common sources of skew include:
 
 ### Cold start and initialization dynamics {#sec-model-serving-model-loading-initialization-cc5a}
 
-With preprocessing pipelines designed to avoid training-serving skew, the next challenge is getting models ready to serve. Before processing any request, models must load from storage into memory and prepare for inference [@romero2021infaas]. This initialization latency, known as **cold start**\index{Cold Start!scaling events}, affects system responsiveness during deployments, scaling events, and recovery from failures.
+With preprocessing pipelines designed to avoid training-serving skew, the next challenge is getting models ready to serve. Before processing any request, models must load from storage into memory and prepare for inference [@romero2021infaas]. This initialization latency, known as cold start\index{Cold Start!scaling events}, affects system responsiveness during deployments, scaling events, and recovery from failures.
 
 ::: {#dfn-model-serving-cold-start .callout-definition title="Cold start"}
 
@@ -3137,7 +3134,7 @@ Consider a 50 ms p95 latency SLO for ResNet-50 serving (using this mean-based ap
 # │
 # │ Imports: mlsysim.book (fmt)
 # │ Exports: s1_window_ms_str, s1_wait_ms_str, s1_budget_ms_str,
-# │          s1_max_batch_str, s1_batch_str, s1_throughput_str,
+# │          s1_batch_str, s1_throughput_str,
 # │          s2_window_ms_str, s2_wait_ms_str, s2_budget_ms_str,
 # │          s2_batch_str, s2_throughput_str,
 # │          throughput_gain_pct_str, latency_avg_increase_ms_str,
@@ -3186,7 +3183,6 @@ class BatchingOptimization:
     s1_window_ms_str = fmt_int(s1_window, commas=False, suffix=" ms")
     s1_wait_ms_str = fmt(s1_wait, precision=1, commas=False, suffix=" ms")
     s1_budget_ms_str = fmt(s1_budget, precision=1, commas=False, suffix=" ms")
-    s1_max_batch_str = MarkdownStr("70") # Theoretical ceiling
     s1_batch_str = fmt(s1_batch, precision=0, commas=False, suffix=" images")
     s1_expected_batch_str = fmt(s1_expected_batch_value, precision=1, commas=False)
     s1_throughput_str = fmt_int(s1_tput, suffix=" img/s")
@@ -3204,14 +3200,14 @@ class BatchingOptimization:
     latency_p99_increase_ms_str = fmt_int(s2_window - s1_window, commas=False, suffix=" ms")
 ```
 
-**Scenario one: Conservative window ($T_{\text{window}}$ = `{python} BatchingOptimization.s1_window_ms_str`)**
+**Scenario one: Conservative window** ($T_{\text{window}}$ = `{python} BatchingOptimization.s1_window_ms_str`)
 
 - Average wait: `{python} BatchingOptimization.s1_wait_ms_str` (maximum wait = `{python} BatchingOptimization.s1_window_ms_str` for the first request in a window)
 - Latency budget for inference: `{python} BatchingOptimization.s1_budget_ms_str` (mean-latency planning; tail SLOs should budget the full window)
 - Memory cap: `{python} BatchingOptimization.s1_batch_str` (typical batch ≈ `{python} BatchingOptimization.s1_expected_batch_str` at this throughput)
 - Achieved throughput: ~`{python} BatchingOptimization.s1_throughput_str`
 
-**Scenario two: Aggressive window ($T_{\text{window}}$ = `{python} BatchingOptimization.s2_window_ms_str`)**
+**Scenario two: Aggressive window** ($T_{\text{window}}$ = `{python} BatchingOptimization.s2_window_ms_str`)
 
 - Average wait: `{python} BatchingOptimization.s2_wait_ms_str`
 - Latency budget for inference: `{python} BatchingOptimization.s2_budget_ms_str`
@@ -4757,7 +4753,7 @@ Every token generation pays a massive "energy tax" to move the model's logic fro
 # │
 # │ Imports: mlsysim.core.constants (Hardware.Cloud.H100.memory.bandwidth, TB, second, SEC_PER_HOUR, MILLION),
 # │          mlsysim.book (fmt, check)
-# │ Exports: model_weight_gb_str, h100_bw_tb_str,
+# │ Exports: model_weight_gb_str,
 # │          token_time_theoretical_ms_str, realized_tpot_ms_str,
 # │          decode_tokens_str, total_decode_s_str, kv_cache_gb_str,
 # │          kv_per_token_mb_str, kv_capacity_tokens_str,
@@ -4799,7 +4795,6 @@ class LlmServingCalc:
     realized_tpot = res.itl
     realized_tpot_ms_value = realized_tpot.m_as(ms)
 
-    _h100_bw_tb = h.memory.bandwidth.m_as(TB/second)
     _h100_bw_gbs = h.memory.bandwidth.m_as(GB/second)
 
     # Theoretical floor (100% BW efficiency)
@@ -4842,14 +4837,13 @@ class LlmServingCalc:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     model_weight_gb_str = fmt_qty(res.total_memory_required, GB, precision=1, commas=False)
-    h100_bw_tb_str = fmt(_h100_bw_tb, precision=1, commas=False, suffix=" TB/s")
     token_time_theoretical_ms_str = fmt(token_time_theoretical_ms_value, precision=1, commas=False, suffix=" ms")
     realized_tpot_ms_str = fmt_qty(realized_tpot, ms, precision=2, commas=False)
     decode_tokens_str = fmt(decode_tokens_value, precision=0, commas=False, suffix=" tokens")
     total_decode_s_str = fmt_qty(total_decode_s, second, precision=2, commas=False)
     kv_cache_gb_str = fmt_qty(kv_cache_reserved, GB, precision=0, commas=False)
-    kv_per_token_mb_str = fmt_qty(kv_per_token, MB, precision=5, commas=False)
-    kv_capacity_tokens_str = fmt_int(kv_capacity_tokens_value, commas=True, suffix=" tokens")
+    kv_per_token_mb_str = fmt_qty(kv_per_token, MB, precision=3, commas=False)
+    kv_capacity_tokens_str = fmt(kv_capacity_tokens_value/MILLION, precision=1, commas=False, suffix=" million tokens")
     tokens_per_req_str = fmt(total_tokens, precision=0, suffix=" tokens")
     concurrent_batch_str = fmt(concurrent_batch_value, precision=0, commas=False, suffix=" requests")
     req_time_s_str = fmt_qty(req_time_s, second, precision=2, commas=False)

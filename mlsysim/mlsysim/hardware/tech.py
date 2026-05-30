@@ -4,7 +4,7 @@ Technology-CLASS properties — access latency, per-operation/per-byte energy, a
 component bandwidth — that are ~constant across parts of a generation. This is the
 counterpart to the per-instance specs on the Hardware.Cloud/Edge/Mobile/Tiny nodes
 (capacity, bandwidth, TDP, price), which genuinely vary part-to-part.
-See .claude/rules/mlsysim.md -> Canonical organization (the instance-vs-tech-class split).
+See the project MLSysIM rules -> Canonical organization (the instance-vs-tech-class split).
 
 The tier *data* lives as YAML under ``hardware/data/tech/<category>.yaml`` (loaded +
 validated against the tier schemas below); the tier *types*, the ``Tech`` namespace, and
@@ -27,7 +27,7 @@ from ..core.loader import load_collection
 class MemoryTier(BaseModel):
     """On-chip / off-chip memory technology tier: access latency + access energy."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
     name: str
     latency: Optional[Quantity] = None            # access latency
     energy_per_access: Optional[Quantity] = None  # pJ per access
@@ -38,7 +38,7 @@ class MemoryTier(BaseModel):
 class StorageTier(BaseModel):
     """Generic storage/memory bandwidth tier (sequential bandwidth + optional latency)."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
     name: str
     bandwidth: Quantity
     latency: Optional[Quantity] = None
@@ -52,7 +52,7 @@ class InterconnectTier(BaseModel):
     part-to-part); the access *latency* floor is a property of the interconnect
     generation, ~constant across parts, so it lives here."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
     name: str
     latency: Optional[Quantity] = None
     metadata: Metadata = Field(default_factory=Metadata)
@@ -61,7 +61,7 @@ class InterconnectTier(BaseModel):
 class OpEnergy(BaseModel):
     """Per-operation energy for an arithmetic op (technology/process-class)."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
     name: str
     energy: Quantity
     metadata: Metadata = Field(default_factory=Metadata)

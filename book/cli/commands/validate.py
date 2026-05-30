@@ -53,9 +53,10 @@ class ValidationIssue:
     message: str
     severity: str = "error"
     context: str = ""
+    suggestion: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        payload = {
             "file": self.file,
             "line": self.line,
             "code": self.code,
@@ -63,6 +64,9 @@ class ValidationIssue:
             "severity": self.severity,
             "context": self.context,
         }
+        if self.suggestion:
+            payload["suggestion"] = self.suggestion
+        return payload
 
 
 @dataclass
@@ -108,7 +112,7 @@ LATEX_INLINE_PATTERN = re.compile(
 # Quarto's auto-escape silently corrupting commas and decimals inside $..$ math
 # mode — a bug class that no longer exists now that fmt() returns a Markdown-
 # rendering string that bypasses the escape. See mlsysim/mlsysim/fmt.py and
-# .claude/rules/math.md.
+# the project math rules.
 
 CITATION_REF_PATTERN = re.compile(r"@([A-Za-z0-9_:\-.]+)")
 CITATION_BRACKET_PATTERN = re.compile(r"\[-?@[A-Za-z0-9_:\-.]+(?:;\s*-?@[A-Za-z0-9_:\-.]+)*\]")
@@ -197,6 +201,7 @@ class ValidateCommand:
     and picks up the new scope automatically once it is `default=True`.
 
     Group catalogue:
+        cli        — public Binder command contract (help/error shape)
         refs       — refs / citations / cross-refs hygiene
         labels     — duplicate labels, orphaned/unreferenced labels
         headers    — section header IDs and headline-case policy
@@ -232,6 +237,10 @@ class ValidateCommand:
     # labels.orphans). default=False scopes are listed alongside their kin
     # so the file reads as a complete map of what *could* run.
     GROUPS: Dict[str, List[Scope]] = {
+        "cli": [
+            Scope("contract", "_run_cli_contract",
+                  note="public Binder command contract"),
+        ],
         "refs": [
             # python-syntax: passes on dev but never wired to pre-commit historically;
             # leaving default=False to preserve current coverage exactly. Flip later
@@ -318,7 +327,7 @@ class ValidateCommand:
         # (markup patterns, prose style, punctuation, numbers, math, etc.),
         # not by where-the-rule-came-from. A rule's provenance belongs in
         # a comment, not a command name — hence no `mitpress-` prefix on
-        # scopes. See .claude/rules/book-prose.md for style provenance.
+        # scopes. See the project prose style guide for style provenance.
         # ------------------------------------------------------------------
         "markup": [
             Scope("patterns", "_run_rendering",
@@ -387,6 +396,9 @@ class ValidateCommand:
             # calls (wrong unit conventions like TFLOPS, Gbps, etc.).
             Scope("suffix-consistency", "_run_suffix_consistency",
                   note='banned suffix= values (TFLOPS, Gbps, etc.)'),
+            Scope("multiplier-style", "_run_math_multiplier_style",
+                  note="body-prose multiplier suffixes, Unicode ×, product spacing",
+                  default=False),
             # render-audit builds every chapter (~10 min). Manual stage only;
             # default=False ensures `binder check math` stays under 1s.
             Scope("render-audit", "_run_math_render_audit", default=False),
@@ -404,7 +416,6 @@ class ValidateCommand:
                   note="echo: false on python blocks"),
             Scope("str-latex-leak", "_run_str_latex_leak",
                   note="*_str exports must not contain raw LaTeX"),
-            # Migrated 2026-05-06: was scripts/check_lego_vars.py
             Scope("lego-dead-code", "_run_lego_dead_code",
                   note="LEGO variables defined but never referenced"),
             Scope("lego-prose-literals", "_run_lego_prose_literals",
@@ -449,7 +460,7 @@ class ValidateCommand:
                   note='\\index{} not inline with headings/callouts'),
             # Migrated 2026-05-06: was book/tools/audit/index/check_anti_patterns.py
             Scope("anti-patterns", "_run_index_anti_patterns",
-                  note="anti-patterns from .claude/rules/index.md §9"),
+                  note="anti-patterns from the project index rules §9"),
             # Migrated 2026-05-06: was book/tools/audit/index/check_tag_placement.py
             Scope("tag-placement", "_run_index_tag_placement",
                   note='\\index{} not inside **bold**, *italic*, `code`, or headings'),
@@ -542,6 +553,10 @@ class ValidateCommand:
         self.chapter_discovery = chapter_discovery
 
     def run(self, args: List[str]) -> bool:
+        if args == ["help"]:
+            self._print_check_help()
+            return True
+
         # Per-group help: `./binder check <group> help` prints a
         # dedicated help panel for that group, including concrete
         # error codes. This lives above argparse because `help` is
@@ -564,7 +579,7 @@ class ValidateCommand:
             "subcommand",
             nargs="?",
             choices=all_group_names,
-            help="Check group to run (refs, labels, headers, footnotes, figures, markup, references, content, all)",
+            help="Check group to run; use `binder check` to see the live catalogue",
         )
         parser.add_argument(
             "files",
@@ -652,7 +667,7 @@ class ValidateCommand:
 
         if not ns.subcommand:
             self._print_check_help()
-            return False
+            return True
 
         root_path = self._resolve_path(ns.path, ns.vol1, ns.vol2)
         if not root_path.exists():
@@ -684,7 +699,7 @@ class ValidateCommand:
         }
 
         if ns.json:
-            print(json.dumps(summary, indent=2))
+            print(json.dumps(summary, indent=2, ensure_ascii=False))
         else:
             verbose = not getattr(ns, "quiet", False)
             self._print_human_summary(summary, verbose=verbose)
@@ -790,6 +805,7 @@ class ValidateCommand:
 
         descriptions = {
             "refs": "References, citations, inline Python, self-ref",
+            "cli": "Public Binder command contract (help, reset, removed aliases)",
             "labels": "Duplicate labels, orphans, fig-label underscores",
             "headers": "Section header IDs ({#sec-...}), H1-H5 case policy (MIT Press §10.3.1)",
             "bib": "Bibliography hygiene — schema + canonical forms (§5)",
@@ -799,7 +815,7 @@ class ValidateCommand:
             "prose": "Prose style (contractions, dup words, ASCII, above/below, Acknowledgments)",
             "punctuation": "Em-dash, slash, vs. period, e.g./i.e. comma, en-dash ranges",
             "numbers": "Units + percent spacing, binary units, percent-in-captions",
-            "math": "\\times spacing, attr-leaks, fmt/suffix discipline (LEGO), optional render audit",
+            "math": "\\times spacing, attr-leaks, fmt/suffix discipline (LEGO), multiplier prose, optional render audit",
             "structure": "Heading levels, parts, Purpose-unnumbered",
             "code": "Python code blocks (echo: false, _str/_math export hygiene)",
             "tables": "Grid tables → pipe, table content hygiene, caption-required",
@@ -996,6 +1012,11 @@ class ValidateCommand:
             p for p in root.rglob("*.qmd") if "_shelved" not in p.name
         )
 
+    def _bib_files(self, root: Path) -> List[Path]:
+        if root.is_file():
+            return [root] if root.suffix == ".bib" else []
+        return sorted(root.rglob("*.bib"))
+
     def _read_text(self, path: Path) -> str:
         try:
             return path.read_text(encoding="utf-8")
@@ -1007,6 +1028,33 @@ class ValidateCommand:
             return str(path.relative_to(self.config_manager.book_dir))
         except ValueError:
             return str(path)
+
+    def _run_cli_contract(self, root: Path) -> ValidationRunResult:
+        """Run read-only command-surface contract checks for Binder itself."""
+        start = time.time()
+        from cli.checks import cli_contract
+
+        repo_root = Path(__file__).resolve().parents[3]
+        violations = cli_contract.run_contract(repo_root)
+        issues = [
+            ValidationIssue(
+                file=violation.file,
+                line=violation.line,
+                code=violation.code,
+                message=violation.message,
+                severity="error",
+                context=violation.context,
+                suggestion=violation.suggestion,
+            )
+            for violation in violations
+        ]
+        return ValidationRunResult(
+            name="cli-contract",
+            description="Public Binder CLI command contract",
+            files_checked=len(cli_contract.CASES),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
 
     def _run_python_syntax(self, root: Path) -> ValidationRunResult:
         """Compile every ```{python} code block to catch syntax errors."""
@@ -4911,7 +4959,7 @@ class ValidateCommand:
     # bookmarks, screen readers, PDF outline). Any LaTeX inside them either
     # renders as literal `\command` / `^{N}` / `$..$` or, in the lightbox
     # case, leaks raw LaTeX into the hover tooltip. See the audit retrospective
-    # in `.claude/rules/book-prose.md` ("Anti-pattern: LaTeX inside attribute
+    # in the project prose style guide ("Anti-pattern: LaTeX inside attribute
     # strings"). Fix by switching to Unicode (×, ³, α, β, ρ, ≤, ≥, →, ∞, …).
     #
     # FAILURE MODES CAUGHT
@@ -5156,7 +5204,7 @@ class ValidateCommand:
     #     suffix tells the next reader "this is a Markdown-wrapped LaTeX
     #     object, not a plain string."
     #   - Or compute and emit the value as plain text / Unicode.
-    # See `.claude/rules/book-prose.md` ("Anti-pattern: bare LaTeX inside a
+    # See the project prose style guide ("Anti-pattern: bare LaTeX inside a
     # `_str` export").
 
     # `_str` assignments inside Python code blocks. Capture the variable name
@@ -5347,6 +5395,42 @@ class ValidateCommand:
             name="math-canonical",
             description="fmt-family + _str/_math/_eq/_frac suffix discipline",
             files_checked=len(qmd_files) if qmd_files else len({v.file for v in violations}),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_math_multiplier_style(self, root: Path) -> ValidationRunResult:
+        """math --scope multiplier-style: multiplier and times typography."""
+        from cli.checks.math_multiplier_style import audit
+
+        start = time.time()
+        qmd_files = self._qmd_files(root)
+        violations = audit([root])
+
+        issues: List[ValidationIssue] = []
+        for violation in violations:
+            file_path = Path(violation.file)
+            try:
+                rel = str(file_path.resolve().relative_to(self.config_manager.book_dir))
+            except ValueError:
+                try:
+                    rel = str(file_path.resolve().relative_to(self.config_manager.root_dir))
+                except ValueError:
+                    rel = violation.file
+            issues.append(ValidationIssue(
+                file=rel,
+                line=violation.line,
+                code=violation.code,
+                message=violation.message,
+                severity="error",
+                context=violation.context,
+                suggestion=violation.suggestion,
+            ))
+
+        return ValidationRunResult(
+            name="math-multiplier-style",
+            description="Multiplier suffixes, Unicode times, and product spacing",
+            files_checked=len(qmd_files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
         )
@@ -6137,7 +6221,7 @@ class ValidateCommand:
         - **S1/S5** ``**Term**: `` — standard definitional head (incl. biography)
 
         Bare ``@sec-`` openers and plain prose (no bold head) are rejected.
-        Reference: ``.claude/rules/book-prose.md`` *Canonical definition-line shapes*.
+        Reference: the project prose style guide *Canonical definition-line shapes*.
         """
         start = time.time()
         files = self._qmd_files(root)
@@ -6753,7 +6837,8 @@ class ValidateCommand:
 
         t0 = time.time()
         repo = repo_root_from_here()
-        raw = check_registry_sources(repo)
+        qmd_files = self._qmd_files(root)
+        raw = check_registry_sources(repo, paths=qmd_files)
         issues = [
             ValidationIssue(
                 file=i.file, line=i.line, code=i.code,
@@ -6761,11 +6846,10 @@ class ValidateCommand:
             )
             for i in raw
         ]
-        qmd_count = len(list((repo / "book" / "quarto" / "contents").rglob("*.qmd")))
         return ValidationRunResult(
             name="registry-sources",
-            description=f"QMD registry source scan ({qmd_count} files)",
-            files_checked=qmd_count,
+            description=f"QMD registry source scan ({len(qmd_files)} files)",
+            files_checked=len(qmd_files),
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
         )
@@ -6782,7 +6866,7 @@ class ValidateCommand:
         return ValidationRunResult(
             name="registry-tests",
             description="mlsysim registry pytest gates",
-            files_checked=4,
+            files_checked=5,
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
         )
@@ -7057,11 +7141,18 @@ class ValidateCommand:
                 line = issue["line"]
                 file = issue["file"]
                 msg = issue["message"]
+                code = issue.get("code", "")
                 sev = issue["severity"]
-                sev_icon = "❌" if sev == "error" else "⚠️"
-                console.print(f"  {sev_icon} {file}:{line} {msg}")
+                sev_label = "ERROR" if sev == "error" else "WARN"
+                sev_style = "red" if sev == "error" else "yellow"
+                safe_file = _rich_escape(str(file))
+                safe_msg = _rich_escape(str(msg))
+                code_label = f" {_rich_escape(f'[{code}]')}" if code else ""
+                console.print(f"  [{sev_style}]{sev_label}[/{sev_style}] {safe_file}:{line}{code_label} {safe_msg}")
                 if verbose and issue.get("context"):
-                    console.print(f"     [dim]{issue['context']}[/dim]")
+                    console.print(f"     [dim]source: {_rich_escape(str(issue['context']))}[/dim]")
+                if verbose and issue.get("suggestion"):
+                    console.print(f"     [dim]fix: {_rich_escape(str(issue['suggestion']))}[/dim]")
             if run["issue_count"] > 30:
                 console.print(f"  [dim]... {run['issue_count'] - 30} more[/dim]")
             console.print()
@@ -7072,11 +7163,11 @@ class ValidateCommand:
         if total_warnings:
             parts.append(f"{total_warnings} warning(s)")
         label = " and ".join(parts)
-        console.print(f"[red]❌ Validation failed with {label}.[/red]")
+        console.print(f"[red]Validation failed with {label}.[/red]")
 
     def _emit(self, as_json: bool, payload: Dict[str, Any], failed: bool) -> None:
         if as_json:
-            print(json.dumps(payload, indent=2))
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
             return
         if failed:
             console.print(f"[red]{payload.get('message', 'Operation failed')}[/red]")
@@ -7248,7 +7339,7 @@ class ValidateCommand:
             spec.loader.exec_module(mod)
 
         t0 = time.time()
-        bib_files = sorted(root.rglob("*.bib"))
+        bib_files = self._bib_files(root)
         if not bib_files:
             return ValidationRunResult(
                 name="bib-hygiene", description="bib-hygiene",
@@ -7282,8 +7373,7 @@ class ValidateCommand:
             try:
                 entries, _ = mod.parse_bib(text)
             except ValueError as exc:
-                rel = (str(bib_path.relative_to(root))
-                       if bib_path.is_relative_to(root) else str(bib_path))
+                rel = self._relative_file(bib_path)
                 issues.append(ValidationIssue(
                     file=rel, line=0, code="parse-error",
                     message=f"PARSE ERROR: {exc}", severity="error",
@@ -7291,10 +7381,7 @@ class ValidateCommand:
                 continue
 
             fp_key = _baseline_key_path(bib_path)
-            try:
-                rel = str(bib_path.relative_to(root))
-            except ValueError:
-                rel = str(bib_path)
+            rel = self._relative_file(bib_path)
 
             for entry in entries:
                 for v in mod.validate_entry(entry):
@@ -7413,7 +7500,7 @@ class ValidateCommand:
             return surnames
 
         t0 = time.time()
-        bib_files = sorted(root.rglob("*.bib"))
+        bib_files = self._bib_files(root)
         issues: List[ValidationIssue] = []
 
         entry_header_re = re.compile(r"^@(\w+)\s*\{\s*([\w:_-]+)\s*,", re.M)
@@ -7432,7 +7519,7 @@ class ValidateCommand:
             except (OSError, UnicodeDecodeError):
                 continue
             try:
-                rel = str(bib_path.relative_to(root))
+                rel = self._relative_file(bib_path)
             except ValueError:
                 rel = str(bib_path)
 
@@ -8193,13 +8280,41 @@ class ValidateCommand:
     def _run_lego_dead_code(self, root: Path) -> ValidationRunResult:
         """code --scope lego-dead-code: LEGO variables defined but never used.
 
-        Wraps scripts/check_lego_vars.py.
+        Native implementation backed by cli.checks.lego_dead_code.
         """
-        script = (
-            Path(__file__).resolve().parent.parent.parent.parent
-            / "scripts" / "check_lego_vars.py"
+        from cli.checks.lego_dead_code import audit_paths, qmd_files
+
+        t0 = time.time()
+        paths = [root]
+        files = qmd_files(paths)
+        violations = audit_paths(paths)
+        issues = []
+        for violation in violations:
+            file_path = Path(violation.file)
+            try:
+                rel = str(file_path.resolve().relative_to(self.config_manager.root_dir))
+            except ValueError:
+                try:
+                    rel = str(file_path.resolve().relative_to(root.resolve()))
+                except ValueError:
+                    rel = violation.file
+            issues.append(
+                ValidationIssue(
+                    file=rel,
+                    line=violation.line,
+                    code=violation.code,
+                    message=violation.message,
+                    severity="error",
+                    context=violation.context,
+                )
+            )
+        return ValidationRunResult(
+            name="lego-dead-code",
+            description="LEGO variables defined but never referenced",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
         )
-        return self._delegate_script(script, [], "lego-dead-code")
 
     def _run_lego_prose_literals(self, root: Path) -> ValidationRunResult:
         """code --scope lego-prose-literals: walkthrough prose must not hardcode computed operands."""

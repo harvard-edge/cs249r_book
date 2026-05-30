@@ -12,7 +12,7 @@ class GridProfile(BaseModel):
     specifically its carbon intensity and energy mix. This is essential for 
     the SustainabilityModel to calculate the exact kg CO2e footprint of a job.
     """
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
     name: str
     carbon_intensity_g_kwh: float
     pue: float
@@ -42,7 +42,7 @@ class CoolingProfile(BaseModel):
     Used to model different cooling strategies (Air, Direct-to-Chip Liquid, 
     Evaporative) independent of location.
     """
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
     name: str
     pue: float
     wue: float  # L/kWh
@@ -55,7 +55,7 @@ class RackProfile(BaseModel):
     Crucial for analyzing power density (kW/rack) limits, where high-density 
     AI deployments force transitions from air to liquid cooling.
     """
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
     name: str
     power_kw: float
     cooling_type: str
@@ -64,7 +64,7 @@ class RackProfile(BaseModel):
 class PricePoint(BaseModel):
     """Named rate (pint quantity) with provenance for economics tables."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
     name: str
     rate: Any
     metadata: Metadata = Field(default_factory=Metadata)
@@ -76,6 +76,8 @@ class Datacenter(BaseModel):
     Allows overriding the regional grid's average PUE with the facility's 
     specific highly-optimized PUE.
     """
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+
     name: str
     grid: GridProfile
     pue_override: Optional[float] = None
