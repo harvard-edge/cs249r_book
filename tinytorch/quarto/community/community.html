@@ -289,11 +289,7 @@
 
     <div class="legend-row">
       <span class="legend-dot"></span>
-      <span id="member-count">0 Members on Map</span>
-    </div>
-    <div class="legend-row">
-      <span class="legend-dot" style="background-color: #2ecc71; border-color: #27ae60;"></span>
-      <span id="no-location-count">0 without Location (Lost at Sea)</span>
+      <span id="member-count">0 Total Members</span>
     </div>
     <div class="legend-row">
       <span class="legend-dot-institution"></span>
@@ -406,61 +402,109 @@
         fetchProfiles();
       });
 
-    // API Fetch Logic
-    async function fetchProfiles(query = "") {
-        try {
+    const PAGE_SIZE = 1000;
+
+    function classifyProfiles(data) {
+        const mapUsers = [];
+        const tempLostUsers = [];
+
+        data.forEach(p => {
+            const lat = parseFloat(p.latitude);
+            const lng = parseFloat(p.longitude);
+            const isLostLabel = p.location === "Lost at Sea 🌊";
+            const hasNoLocation = !p.location || p.location === "unknown";
+            const hasNoCoords = isNaN(lat) || isNaN(lng) || (Math.abs(lat) < 0.001 && Math.abs(lng) < 0.001);
+
+            const displayName = (p.display_name && p.display_name.trim())
+                ? p.display_name.trim()
+                : (p.username ? p.username.split('@')[0].trim() : 'Anonymous');
+
+            const userObj = {
+                user: p.username || p.id,
+                displayName: displayName,
+                completed: "Member",
+                institution: Array.isArray(p.institution) ? p.institution.join(", ") : (p.institution || "Independent"),
+                location: p.location || null
+            };
+
+            if (isLostLabel || (hasNoLocation && hasNoCoords)) {
+                tempLostUsers.push(userObj);
+            } else if (!hasNoCoords) {
+                mapUsers.push({
+                    ...userObj,
+                    latitude: lat + (crypto.getRandomValues(new Uint32Array(1))[0] / 0x100000000 - 0.5) * 0.2,
+                    longitude: lng + (crypto.getRandomValues(new Uint32Array(1))[0] / 0x100000000 - 0.5) * 0.2
+                });
+            } else {
+                tempLostUsers.push(userObj);
+            }
+        });
+
+        return { mapUsers, tempLostUsers };
+    }
+
+    async function fetchAllProfiles(query = "") {
+        const all = [];
+        let page = 0;
+        let total = 0;
+
+        while (page < 50) {
             const response = await fetch(API_URL, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ query: query, page: 0, limit: 1000 }) 
+                body: JSON.stringify({ query, page, limit: PAGE_SIZE, envelope: true })
             });
 
             if (!response.ok) throw new Error("API Error");
-            const data = await response.json();
+            const payload = await response.json();
 
-            if (Array.isArray(data) && data.length > 0) {
-                totalMemberCount = data.length;
-                let mapUsers = [];
-                let tempLostUsers = [];
+            // Backward compat: legacy raw array response
+            if (Array.isArray(payload)) {
+                all.push(...payload);
+                total = payload.length;
+                break;
+            }
 
-                data.forEach(p => {
-                    const lat = parseFloat(p.latitude);
-                    const lng = parseFloat(p.longitude);
-                    const isLostLabel = p.location === "Lost at Sea 🌊";
-                    const hasNoLocation = !p.location || p.location === "unknown";
-                    const hasNoCoords = isNaN(lat) || isNaN(lng) || (Math.abs(lat) < 0.001 && Math.abs(lng) < 0.001);
+            const batch = Array.isArray(payload.data) ? payload.data : [];
+            if (page === 0 && typeof payload.total === 'number') {
+                total = payload.total;
+            }
 
-                    const displayName = (p.display_name && p.display_name.trim()) ? p.display_name.trim() : (p.username ? p.username.split('@')[0].trim() : 'Anonymous');
-                    
-                    const userObj = {
-                        user: p.username,
-                        displayName: displayName,
-                        completed: "Member",
-                        institution: Array.isArray(p.institution) ? p.institution.join(", ") : (p.institution || "Independent"),
-                        location: p.location || null
-                    };
+            all.push(...batch);
 
-                    if (isLostLabel || (hasNoLocation && hasNoCoords)) {
-                        tempLostUsers.push(userObj);
-                    } else if (!hasNoCoords) {
-                         mapUsers.push({
-                             ...userObj, 
-                             latitude: lat + (crypto.getRandomValues(new Uint32Array(1))[0] / 0x100000000 - 0.5) * 0.2,
-                             longitude: lng + (crypto.getRandomValues(new Uint32Array(1))[0] / 0x100000000 - 0.5) * 0.2
-                         });
-                    } else {
-                        tempLostUsers.push(userObj);
-                    }
-                });
+            const hasMore = payload.hasMore === true
+                || (batch.length === PAGE_SIZE && all.length < (payload.total ?? all.length));
 
+            if (!hasMore || batch.length === 0) break;
+            page++;
+        }
+
+        if (!total) total = all.length;
+        return { profiles: all, total };
+    }
+
+    function updateMemberCount() {
+        document.getElementById('member-count').textContent = `${totalMemberCount} Total Members`;
+    }
+
+    // API Fetch Logic
+    async function fetchProfiles(query = "") {
+        try {
+            const { profiles, total } = await fetchAllProfiles(query);
+
+            if (profiles.length > 0 || total > 0) {
+                totalMemberCount = total;
+                const { mapUsers, tempLostUsers } = classifyProfiles(profiles);
                 locations = mapUsers;
                 lostUsers = tempLostUsers;
 
                 renderMarkers();
                 renderInstitutions();
                 renderLostStation();
-            } else {
-               if (query) { locations = []; lostUsers = []; totalMemberCount = 0; }
+            } else if (query) {
+                locations = [];
+                lostUsers = [];
+                totalMemberCount = 0;
             }
         } catch (e) {
             locations = [];
@@ -497,8 +541,7 @@
         .style('opacity', 0)
         .transition().duration(300).style('opacity', 1);
 
-      document.getElementById('member-count').textContent = `${locations.length} Members on Map`;
-      document.getElementById('no-location-count').textContent = `${lostUsers.length} without Location (Lost at Sea)`;
+      updateMemberCount();
       updateMarkerPositions();
     }
 
