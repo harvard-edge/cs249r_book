@@ -955,22 +955,22 @@ class H200Comparison:
     res_h200 = serving_model.solve(model, h200, seq_len=2048, batch_size=1)
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    bw_gain_str = fmt((h200.memory.bandwidth/h_h100.memory.bandwidth).to_base_units().magnitude, precision=1) + "x"
-    cap_gain_str = fmt((h200.memory.capacity/h_h100.memory.capacity).to_base_units().magnitude, precision=1) + "x"
+    bw_gain_str = fmt((h200.memory.bandwidth/h_h100.memory.bandwidth).to_base_units().magnitude, precision=1)
+    cap_gain_str = fmt((h200.memory.capacity/h_h100.memory.capacity).to_base_units().magnitude, precision=1)
 
     itl_h100 = res_h100.itl
     itl_h200 = res_h200.itl
     speedup = (itl_h100 / itl_h200).to_base_units().magnitude
-    speedup_str = fmt(speedup, precision=1) + "x"
+    speedup_str = fmt(speedup, precision=1)
 ```
 
 That bandwidth floor also gives us a clean way to compare adjacent hardware generations: if compute stays fixed while HBM capacity and bandwidth improve, decode latency should move with the memory system rather than the arithmetic units.
 
 ::: {#nbk-compute-infrastructure-memory-wall-h_h100-vs-h200 .callout-notebook title="The memory wall: H100 vs. H200"}
 
-To understand *why* the "memory wall" is the primary constraint for modern large language models (LLMs)\index{LLM!inference, memory bottleneck}, we compare the NVIDIA H100 against its successor, the H200\index{NVIDIA!H200, memory wall}. While both chips share the same compute cores (same peak TFLOP/s), the H200 provides `{python} H200Comparison.bw_gain_str` higher memory bandwidth and `{python} H200Comparison.cap_gain_str` more HBM capacity.
+To understand *why* the "memory wall" is the primary constraint for modern large language models (LLMs)\index{LLM!inference, memory bottleneck}, we compare the NVIDIA H100 against its successor, the H200\index{NVIDIA!H200, memory wall}. While both chips share the same compute cores (same peak TFLOP/s), the H200 provides `{python} H200Comparison.bw_gain_str`$\times$ higher memory bandwidth and `{python} H200Comparison.cap_gain_str`$\times$ more HBM capacity.
 
-**Systems insight**: For LLM decoding, the H200 is `{python} H200Comparison.speedup_str` faster than the H100 despite having identical compute power. This proves that for large-scale autoregressive models, the "Wall" is the memory interface, not the arithmetic logic.
+**Systems insight**: For LLM decoding, the H200 is `{python} H200Comparison.speedup_str`$\times$ faster than the H100 despite having identical compute power. This proves that for large-scale autoregressive models, the "Wall" is the memory interface, not the arithmetic logic.
 
 :::
 
@@ -2135,7 +2135,7 @@ class H100NvlinkNodeRecap:
 ***Node***\index{Node!definition} is a physical server chassis that aggregates multiple accelerators (typically 8) through a high-speed intra-node interconnect (NVLink or ICI), creating the fundamental boundary between high-bandwidth local communication and the order-of-magnitude slower inter-node network fabric.
 
 1.  **Significance (quantitative)**: The NVLink bandwidth within a DGX H100 node reaches `{python} H100NvlinkNodeRecap.nvlink_str` bidirectional, while inter-node InfiniBand NDR provides 50 GB/s, an 18$\times$ gap that constrains where each parallelism strategy can run. Tensor parallelism, which AllReduces every layer's output, must stay within the node; pipeline parallelism, which transfers only stage-boundary activations, can span nodes over InfiniBand. The node is also the primary failure domain: a single node failure in a BSP training job idles the entire cluster until recovery.
-2.  **Distinction (durable)**: Unlike a single accelerator (which provides fast HBM bandwidth but limited capacity), a node aggregates 8$\times$ the HBM capacity and 8$\times$ the compute of a single chip -- enough to place large FP16 weight shards (8 × 80 GB = 640 GB on DGX H100), but not enough to keep the full Adam training state in HBM.
+2.  **Distinction (durable)**: Unlike a single accelerator (which provides fast HBM bandwidth but limited capacity), a node aggregates 8$\times$ the HBM capacity and 8$\times$ the compute of a single chip -- enough to place large FP16 weight shards (8 $\times$ 80 GB = 640 GB on DGX H100), but not enough to keep the full Adam training state in HBM.
 3.  **Common pitfall**: A frequent misconception is that nodes in a distributed training job operate independently. In BSP training, all nodes are synchronously coupled at every step barrier: a performance degradation on one node (from thermal throttling, a faulty NIC, or a slow storage read) stalls the entire cluster and drops overall MFU for the duration of that step.
 
 :::
@@ -3788,7 +3788,7 @@ Google's TPU pods take a fundamentally different approach to scaling. Instead of
 
 The architectural bet is clear: Google optimizes for the predictable, nearest-neighbor communication patterns that dominate Transformer training, accepting reduced flexibility for irregular patterns like AllToAll (used by Mixture-of-Experts models). This trade-off between topology specialization and workload generality mirrors the accelerator spectrum's trade-off between efficiency and flexibility, applied at the network level rather than the silicon level.
 
-A TPU v5p pod can scale to 8,960 chips in a single torus, providing an aggregate of approximately 4.1 ExaFLOP/s of BF16 throughput (8,960 chips × ~459 TFLOP/s each). The torus topology's key advantage is constant local degree: adding more chips extends the mesh without requiring each chip to add more links or requiring expensive upper-tier switches. This property makes the torus economically attractive at scales beyond 4,000 chips, where the switch cost of a fat-tree becomes a significant fraction of total system cost. The trade-off is that aggregate bisection bandwidth grows sublinearly with pod size, and nonlocal communication patterns must traverse many hops across the torus. Google's XLA compiler therefore includes topology-aware placement algorithms that map the model's communication graph onto the physical torus to minimize hop count for the most bandwidth-intensive operations.
+A TPU v5p pod can scale to 8,960 chips in a single torus, providing an aggregate of approximately 4.1 ExaFLOP/s of BF16 throughput (8,960 chips $\times$ ~459 TFLOP/s each). The torus topology's key advantage is constant local degree: adding more chips extends the mesh without requiring each chip to add more links or requiring expensive upper-tier switches. This property makes the torus economically attractive at scales beyond 4,000 chips, where the switch cost of a fat-tree becomes a significant fraction of total system cost. The trade-off is that aggregate bisection bandwidth grows sublinearly with pod size, and nonlocal communication patterns must traverse many hops across the torus. Google's XLA compiler therefore includes topology-aware placement algorithms that map the model's communication graph onto the physical torus to minimize hop count for the most bandwidth-intensive operations.
 
 | **System**                                  | **NVIDIA SuperPOD**\index{SuperPOD} | **Google TPU Pod**    | **Meta Grand Teton**      |
 |:--------------------------------------------|:------------------------------------|:----------------------|:--------------------------|
@@ -4303,12 +4303,12 @@ The TCO analysis determines whether the entire enterprise makes financial sense.
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Exports: TcoSummaryBreakevenRecap.breakeven_util_str
 class TcoSummaryBreakevenRecap:
-    cloud_h100_hourly = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.m_as(USD / hour)
+    cloud_h100_hourly = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.m_as("dollar / hour")
     gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
-    dgx_h100_price = Infrastructure.Pricing.Capital.DgxH100NodeUsd.rate.m_as(USD)
+    dgx_h100_price = Infrastructure.Pricing.Capital.DgxH100NodeUsd.rate.m_as("dollar")
     amortization_years = 3
     facility_pue = Infrastructure.FacilityCooling.StateOfArt.pue
-    onprem_elec = Infrastructure.Pricing.OnPremises.ElectricityPerKwh.rate.m_as(USD / ureg.kilowatt_hour)
+    onprem_elec = Infrastructure.Pricing.OnPremises.ElectricityPerKwh.rate.m_as("dollar / kilowatt_hour")
     node_power_kw = (Hardware.Cloud.H100.tdp * Systems.Nodes.DGX_H100.accelerators_per_node).m_as(kilowatt) * 1.2
     denominator = (
         cloud_h100_hourly * gpus_per_node * HOURS_PER_YEAR

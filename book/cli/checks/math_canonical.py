@@ -8,6 +8,8 @@ Enforces the canonical math-rendering convention (see the project math rules):
      ``{python}`` cell must use ``mlsysim.fmt`` helpers or ``MarkdownStr``.
   2. Every inline ``{python} X`` reference must use a name ending in one of
      those suffixes.
+  3. ``fmt()``/``fmt_int()`` outputs must use helper-level
+     ``prefix=``/``suffix=`` instead of manual string concatenation.
 
 Invoked by::
 
@@ -44,7 +46,7 @@ PLAIN_ASSIGN = re.compile(r"^\s*([A-Za-z_]\w*)\s*=\s*([^=].*)$")
 
 # Pattern: matches calls to canonical formatter helpers on the RHS.
 CANONICAL_STR_CALL = re.compile(
-    r"\b(fmt|fmt_qty|fmt_int|fmt_percent|fmt_val|fmt_unit|fmt_sci|MarkdownStr)\s*\("
+    r"\b(fmt|fmt_qty|fmt_int|fmt_usd|fmt_percent|fmt_val|fmt_unit|fmt_sci|MarkdownStr)\s*\("
 )
 CANONICAL_MATH_CALL = re.compile(
     r"\b(fmt_math|MarkdownStr)\s*\("
@@ -70,7 +72,7 @@ CELL_END = re.compile(r"^```\s*$")
 #   fmt(MarkdownStr(label), precision=0)                        # MarkdownStr
 #   fmt(gpt3_params_b_str, precision=0, suffix=" billion")      # MarkdownStr
 DOUBLE_WRAP_CALL = re.compile(
-    r"\b(?:fmt|fmt_percent|fmt_sci|fmt_val|fmt_unit)\(\s*(?:"
+    r"\b(?:fmt|fmt_usd|fmt_percent|fmt_sci|fmt_val|fmt_unit)\(\s*(?:"
     r"fmt[a-z_]*\(|"          # fmt(fmt_*(...))
     r"sci_latex\(|"           # fmt(sci_latex(...))
     r"MarkdownStr\(|"         # fmt(MarkdownStr(...))
@@ -108,7 +110,7 @@ IMPLICIT_INT_CAST_FMT = re.compile(
 # Pattern: fmt-family helper names used as calls in a cell body. Any of these
 # requires a matching `from mlsysim.fmt import ...` line in the file.
 FMT_FAMILY_USE = re.compile(
-    r"\b(fmt|fmt_qty|fmt_int|fmt_math|fmt_percent|fmt_val|fmt_unit|fmt_sci|fmt_frac|sci_latex|MarkdownStr|check)\s*\("
+    r"\b(fmt|fmt_qty|fmt_int|fmt_usd|fmt_math|fmt_percent|fmt_val|fmt_unit|fmt_sci|fmt_frac|sci_latex|MarkdownStr|check)\s*\("
 )
 
 # Pattern: `from mlsysim.fmt import ...` block (possibly multi-line in parens
@@ -121,14 +123,29 @@ MLSYSIM_STAR_IMPORT = re.compile(r"\bfrom\s+mlsysim\s+import\s+\*")
 
 # Names exported by `from mlsysim import *` that belong to the fmt family.
 MLSYSIM_STAR_FMT_NAMES = frozenset({
-    "fmt", "fmt_qty", "fmt_int", "fmt_percent", "fmt_val", "fmt_unit", "fmt_sci",
-    "fmt_frac", "fmt_math", "MarkdownStr", "check", "sci_latex",
+    "fmt", "fmt_qty", "fmt_int", "fmt_usd", "fmt_percent", "fmt_val", "fmt_unit",
+    "fmt_sci", "fmt_frac", "fmt_math", "MarkdownStr", "check", "sci_latex",
 })
 
 # Pattern: fmt_percent(..., suffix=...) — fmt_percent does not accept suffix=.
 # This would raise a TypeError at render time.
 FMT_PERCENT_SUFFIX = re.compile(
     r"\bfmt_percent\([^)]*\bsuffix\s*="
+)
+
+# Pattern: manual string assembly around formatter helpers that already support
+# prefix=/suffix=. These are line-local on purpose; the `str(fmt(...))` branch
+# catches the multi-line bug class where a separate line does
+# `"\\$" + str(fmt(...))`.
+DECORATABLE_FMT_CALL = r"(?:fmt|fmt_int)"
+MANUAL_FMT_STR_WRAP = re.compile(
+    rf"\bstr\s*\(\s*{DECORATABLE_FMT_CALL}\s*\("
+)
+MANUAL_FMT_SUFFIX_CONCAT = re.compile(
+    rf"\b{DECORATABLE_FMT_CALL}\s*\([^#\n]*\)\s*\+\s*(?:[rRuUbBfF]*)?[\"']"
+)
+MANUAL_FMT_PREFIX_CONCAT = re.compile(
+    rf"(?:[rRuUbBfF]*)?[\"'][^#\n]*[\"']\s*\+\s*(?:str\s*\(\s*)?{DECORATABLE_FMT_CALL}\s*\("
 )
 
 
@@ -595,6 +612,55 @@ def _audit_fmt_percent_suffix(qmd_path: Path) -> list[Violation]:
     return out
 
 
+def _audit_manual_fmt_string_assembly(qmd_path: Path) -> list[Violation]:
+    """Flag manual prefix/suffix assembly around fmt-family outputs.
+
+    `fmt()` and `fmt_int()` return MarkdownStr and already support
+    `prefix=`/`suffix=`. Manually wrapping them with `str(...)` or
+    concatenating literal strings recreates the old escape-hatch style and is
+    easy to break in Quarto math/prose contexts.
+    """
+    out: list[Violation] = []
+    lines = qmd_path.read_text(encoding="utf-8").splitlines()
+    rel = str(qmd_path)
+    in_cell = False
+    for i, line in enumerate(lines, 1):
+        if CELL_START.match(line):
+            in_cell = True
+            continue
+        if in_cell and CELL_END.match(line):
+            in_cell = False
+            continue
+        if not in_cell:
+            continue
+        if line.strip().startswith("#"):
+            continue
+
+        if MANUAL_FMT_STR_WRAP.search(line):
+            reason = "str(fmt(...))"
+        elif MANUAL_FMT_SUFFIX_CONCAT.search(line):
+            reason = "fmt(...) + literal"
+        elif MANUAL_FMT_PREFIX_CONCAT.search(line):
+            reason = "literal + fmt(...)"
+        else:
+            continue
+
+        out.append(
+            Violation(
+                file=rel,
+                line=i,
+                code="manual_fmt_string_assembly",
+                message=(
+                    f"Manual formatter string assembly detected ({reason}). "
+                    "Use `prefix=` and/or `suffix=` on fmt()/fmt_int() "
+                    "instead of concatenating or coercing the formatter output."
+                ),
+                context=line.strip()[:160],
+            )
+        )
+    return out
+
+
 def audit(paths: list[Path]) -> list[Violation]:
     all_violations: list[Violation] = []
     for p in paths:
@@ -611,6 +677,7 @@ def audit(paths: list[Path]) -> list[Violation]:
             all_violations.extend(_audit_implicit_int_cast_precision_zero(f))
             all_violations.extend(_audit_missing_fmt_imports(f))
             all_violations.extend(_audit_fmt_percent_suffix(f))
+            all_violations.extend(_audit_manual_fmt_string_assembly(f))
     return all_violations
 
 

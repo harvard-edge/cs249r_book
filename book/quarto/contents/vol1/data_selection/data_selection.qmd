@@ -118,25 +118,25 @@ class ScalingAsymmetry:
     check(gap_ratio >= 1.5, f"GPU growth ({gpu_annual:.2f}x/yr) is not fast enough vs. Data ({web_annual:.2f}x/yr). Gap: {gap_ratio:.2f}x")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    gpu_growth_str = fmt(gpu_growth_factor, precision=0, commas=False) + "×"
-    # Custom "years" suffix → MarkdownStr per recipe Rule 1 escape-hatch
+    gpu_growth_str = fmt(gpu_growth_factor, precision=0, commas=False)
+    # Custom "years" suffix uses fmt_int() suffix discipline.
     gpu_period_str = fmt_int(gpu_period_years, commas=False, suffix=" years")
 
-    web_data_growth_str = fmt(web_growth_factor, precision=0, commas=False) + "×"
+    web_data_growth_str = fmt(web_growth_factor, precision=0, commas=False)
     web_data_period_str = fmt_int(web_period_years, commas=False, suffix=" years")
 
-    label_data_growth_str = fmt(label_growth_factor, precision=1, commas=False) + "×"
+    label_data_growth_str = fmt(label_growth_factor, precision=1, commas=False)
     label_data_period_str = fmt_int(label_period_years, commas=False, suffix=" years")
 ```
 
 @Tbl-scaling-asymmetry quantifies the growth rates underlying this data-compute imbalance:
 
-| **Resource**            |                                                                                        **Growth Rate** | **Implication**                                       |
-|:------------------------|-------------------------------------------------------------------------------------------------------:|:------------------------------------------------------|
-| **GPU Compute**         |               ~`{python} ScalingAsymmetry.gpu_growth_str` / `{python} ScalingAsymmetry.gpu_period_str` | Hardware vendors deliver reliable exponential gains   |
-| **Training Data (Web)** |     ~`{python} ScalingAsymmetry.web_data_growth_str` / `{python} ScalingAsymmetry.web_data_period_str` | High-quality web text is finite; much already scraped |
-| **Labeled Data**        | ~`{python} ScalingAsymmetry.label_data_growth_str` / `{python} ScalingAsymmetry.label_data_period_str` | Human annotation throughput is inherently bounded     |
-| **Synthetic Data**      |                                                                                              Unbounded | Bounded by generator quality (risk of model collapse) |
+| **Resource**            |                                                                                                **Growth Rate** | **Implication**                                       |
+|:------------------------|---------------------------------------------------------------------------------------------------------------:|:------------------------------------------------------|
+| **GPU Compute**         |               ~`{python} ScalingAsymmetry.gpu_growth_str`$\times$ / `{python} ScalingAsymmetry.gpu_period_str` | Hardware vendors deliver reliable exponential gains   |
+| **Training Data (Web)** |     ~`{python} ScalingAsymmetry.web_data_growth_str`$\times$ / `{python} ScalingAsymmetry.web_data_period_str` | High-quality web text is finite; much already scraped |
+| **Labeled Data**        | ~`{python} ScalingAsymmetry.label_data_growth_str`$\times$ / `{python} ScalingAsymmetry.label_data_period_str` | Human annotation throughput is inherently bounded     |
+| **Synthetic Data**      |                                                                                                      Unbounded | Bounded by generator quality (risk of model collapse) |
 
 : **Scaling Asymmetry in ML Resources**: Compute grows exponentially while high-quality data grows linearly or sub-linearly, creating an increasing compute-to-data imbalance that makes data selection essential. {#tbl-scaling-asymmetry .striped .hover tbl-colwidths="[20,20,60]"}
 
@@ -319,7 +319,7 @@ To make this concrete, consider training a model in the GPT-2/Llama Lighthouse f
 
 import mlsysim.core.constants as c
 from mlsysim.engine import calibration
-from mlsysim.fmt import check, fmt, fmt_percent
+from mlsysim.fmt import check, fmt, fmt_usd, fmt_percent
 
 class ComputeDataGap:
     # LOAD
@@ -345,7 +345,7 @@ class ComputeDataGap:
         * months
         * c.DAYS_PER_MONTH
         * c.HOURS_PER_DAY
-        * Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.m_as(c.USD / c.hour)
+        * Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.m_as("dollar / hour")
     )
 
     # GUARD
@@ -354,16 +354,16 @@ class ComputeDataGap:
 
     # OUTPUT
     h100_count_str = fmt(h100_count, precision=0, commas=True)
-    tokens_capacity_str = fmt(tokens_capacity/c.TRILLION, precision=1, commas=False) + "T"
-    filtered_corpus_tokens_str = fmt(filtered_corpus_tokens/c.TRILLION, precision=0, commas=False) + "T"
-    public_text_stock_str = fmt(public_text_stock/c.TRILLION, precision=0, commas=False) + "T"
+    tokens_capacity_str = fmt(tokens_capacity/c.TRILLION, precision=1, commas=False, suffix="T")
+    filtered_corpus_tokens_str = fmt(filtered_corpus_tokens/c.TRILLION, precision=0, commas=False, suffix="T")
+    public_text_stock_str = fmt(public_text_stock/c.TRILLION, precision=0, commas=False, suffix="T")
     corpus_reuse_ratio_str = fmt(corpus_reuse_ratio, precision=1, commas=False)
     training_months_str = fmt(months, precision=0, commas=False)
     sustained_mfu_pct_str = fmt_percent(sustained_mfu, precision=0, commas=False)
-    cluster_cost_m_str = fmt(cluster_cost/c.MILLION, precision=1, commas=False)
+    cluster_cost_m_str = fmt_usd(cluster_cost/c.MILLION, precision=1, commas=False, suffix="M")
 ```
 
-The compute budget (`{python} ComputeDataGap.h100_count_str` H100 GPUs for `{python} ComputeDataGap.training_months_str`) represents roughly USD `{python} ComputeDataGap.cluster_cost_m_str` M at the chapter's cloud-training price anchor and can process about `{python} ComputeDataGap.tokens_capacity_str` at `{python} ComputeDataGap.sustained_mfu_pct_str` sustained MFU. Estimates of quality- and repetition-adjusted public human-generated text are on the order of `{python} ComputeDataGap.public_text_stock_str`, far larger than a single curated web corpus. The practical bottleneck is narrower: how much of that stock is accessible, legally usable, high quality, deduplicated, and useful for the target distribution. If a team has only a `{python} ComputeDataGap.filtered_corpus_tokens_str` filtered corpus ready for use, the compute budget can already process it roughly `{python} ComputeDataGap.corpus_reuse_ratio_str`$\times$ over. The team faces three options: train on the same data for multiple epochs (diminishing returns after epochs 2--3), lower quality thresholds to include more data (which can degrade model quality), or invest in data selection through better filtering, curriculum design, and synthetic augmentation to extract more learning from each token. The third option is increasingly the dominant approach.
+The compute budget (`{python} ComputeDataGap.h100_count_str` H100 GPUs for `{python} ComputeDataGap.training_months_str`) represents roughly `{python} ComputeDataGap.cluster_cost_m_str` at the chapter's cloud-training price anchor and can process about `{python} ComputeDataGap.tokens_capacity_str` at `{python} ComputeDataGap.sustained_mfu_pct_str` sustained MFU. Estimates of quality- and repetition-adjusted public human-generated text are on the order of `{python} ComputeDataGap.public_text_stock_str`, far larger than a single curated web corpus. The practical bottleneck is narrower: how much of that stock is accessible, legally usable, high quality, deduplicated, and useful for the target distribution. If a team has only a `{python} ComputeDataGap.filtered_corpus_tokens_str` filtered corpus ready for use, the compute budget can already process it roughly `{python} ComputeDataGap.corpus_reuse_ratio_str`$\times$ over. The team faces three options: train on the same data for multiple epochs (diminishing returns after epochs 2--3), lower quality thresholds to include more data (which can degrade model quality), or invest in data selection through better filtering, curriculum design, and synthetic augmentation to extract more learning from each token. The third option is increasingly the dominant approach.
 
 The data selection imperative applies across model architectures, though the bottlenecks differ. Unlike our compute-bound ResNet-50 Lighthouse, GPT-2/Llama models are memory bandwidth-bound during inference (though often compute-bound during training as well) and still benefit enormously from data selection during training. Each token processed requires the same forward/backward pass cost regardless of model bottleneck, so fewer tokens means fewer FLOPs. Because data selection benefits every architecture regardless of its dominant bottleneck, the appropriate framing is systemic rather than purely statistical.
 
@@ -401,7 +401,7 @@ The systems framing reveals optimization opportunities invisible to the ML frami
 # │ Imports: mlsysim.book (fmt)
 # │ Exports: training_cost_m_str, dataset_reduction_pct_str, combined_factor_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_percent, fmt, check
+from mlsysim.fmt import fmt_percent, fmt, fmt_usd, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class IronLawSavings:
@@ -433,9 +433,9 @@ class IronLawSavings:
     check(total_speedup > additive_sum, f"Multiplicative speedup ({total_speedup}x) should exceed additive sum ({additive_sum}).")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    training_cost_m_str = fmt(budget_m, precision=0, commas=False)
+    training_cost_m_str = fmt_usd(budget_m, precision=0, commas=False, suffix="M")
     dataset_reduction_pct_str = fmt(data_pruning_pct, precision=0, commas=False, suffix=" percent")
-    compute_savings_m_str = fmt(compute_savings_m, precision=0, commas=False)
+    compute_savings_m_str = fmt_usd(compute_savings_m, precision=0, commas=False, suffix="M")
     combined_factor_str = fmt(total_speedup, precision=0, commas=False)
 ```
 
@@ -452,7 +452,7 @@ This makes data selection multiplicatively valuable: when all three optimization
 
 :::
 
-Consider training cost reduction: a `{python} IronLawSavings.dataset_reduction_pct_str` reduction in dataset size does not merely improve sample efficiency; it directly halves the number of forward passes, backward passes, and gradient updates. For a USD `{python} IronLawSavings.training_cost_m_str` M training run, this translates to USD `{python} IronLawSavings.compute_savings_m_str` M in compute savings. The relationship is linear and immediate.
+Consider training cost reduction: a `{python} IronLawSavings.dataset_reduction_pct_str` reduction in dataset size does not merely improve sample efficiency; it directly halves the number of forward passes, backward passes, and gradient updates. For a `{python} IronLawSavings.training_cost_m_str` training run, this translates to `{python} IronLawSavings.compute_savings_m_str` in compute savings. The relationship is linear and immediate.
 
 \index{Deduplication!storage and I/O cost reduction}
 \index{Active Learning!labeling cost reduction}
@@ -1024,8 +1024,8 @@ class IcrCoresetComparison:
     resnet50_fwdbwd_gflops_str = fmt((m_resnet.inference_flops * 3).to(GFLOPs), precision=1)
     full_epoch_flops_str = MarkdownStr(str(fmt_sci(full_epoch_flops_value, precision=2)) + " FLOPs")
     icr_random_str = fmt_sci(icr_random_value, precision=1)
-    imagenet_size_str = fmt(imagenet_size_value/MILLION, precision=2) + "M"
-    # Custom "K" suffix on a divided count → MarkdownStr escape-hatch
+    imagenet_size_str = fmt(imagenet_size_value/MILLION, precision=2, suffix="M")
+    # Custom "K" suffix on a divided count uses fmt() suffix discipline.
     coreset_size_str = fmt(coreset_size_value / THOUSAND, precision=1, commas=False, suffix="K")
     coreset_flops_str = MarkdownStr(str(fmt_sci(coreset_flops_value, precision=1)) + " FLOPs")
     icr_coreset_str = fmt_sci(icr_coreset_value, precision=1)
@@ -1329,7 +1329,7 @@ class CoresetPractice:
     check(coreset_fraction_value < 1.0, "Coreset fraction must be less than 1.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    n_train_images_str = fmt(n_train_images_value/MILLION, precision=0) + " million"
+    n_train_images_str = fmt(n_train_images_value/MILLION, precision=0, suffix=" million")
     coreset_fraction_pct_str = fmt(coreset_fraction_value * 100, precision=0, commas=False, suffix=" percent")
     n_coreset_str = fmt(n_coreset_value, precision=0, commas=True)
     n_epochs_proxy_str = fmt(n_epochs_proxy_value, precision=0, commas=False)
@@ -1874,7 +1874,7 @@ class ActiveLearningRoi:
     check(speedup_value > 1.0, "Active learning must require fewer labels than naive labeling.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    n_unlabeled_str = fmt(n_unlabeled_value/MILLION, precision=0) + " Million"
+    n_unlabeled_str = fmt(n_unlabeled_value/MILLION, precision=0, suffix=" Million")
     cost_per_label_str = fmt(cost_per_label_value, precision=0, commas=False)
     budget_str = fmt(budget_value, precision=0, commas=True)
     cost_all_str = fmt(cost_all_value, precision=0, commas=True)
@@ -1884,7 +1884,7 @@ class ActiveLearningRoi:
     cost_active_str = fmt(cost_active_value, precision=0, commas=True)
     cost_active_pct_str = fmt(cost_active_pct_value, precision=0, commas=False, suffix=" percent")
     speedup_str = fmt(speedup_value, precision=0, commas=False)
-    cost_saving_str = fmt(cost_saving_value/MILLION, precision=2) + " Million"
+    cost_saving_str = fmt(cost_saving_value/MILLION, precision=2, suffix=" Million")
     over_budget_ratio_str = fmt(over_budget_ratio_value, precision=0, commas=False)
     deadline_months_str = fmt(deadline_months_value, precision=0, commas=False, suffix=" month")
 ```
@@ -2102,7 +2102,7 @@ The systems trade-off in semi-supervised learning is straightforward: it typical
 # │ Imports: mlsysim.core.constants (Datasets.CIFAR10), mlsysim.book (fmt)
 # │ Exports: cifar10_fixmatch_*_str, acc_loss_str, cost_reduction_str, etc.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_percent, fmt, check
+from mlsysim.fmt import fmt_percent, fmt, fmt_usd, check
 
 class FixmatchLabelEfficiency:
     """FixMatch CIFAR-10: 200× label reduction for ~8× total cost savings."""
@@ -2152,10 +2152,10 @@ class FixmatchLabelEfficiency:
     check(labels_per_class_250 == 25, f"250 CIFAR-10 labels should be 25 per class, got {labels_per_class_250}.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    supervised_label_cost_str = fmt(supervised_label_cost, precision=0, commas=True, prefix="$")
-    supervised_total_str = fmt(supervised_total, precision=0, commas=True, prefix="$")
-    fixmatch_label_cost_str = fmt(fixmatch_label_cost, precision=0, commas=True, prefix="$")
-    fixmatch_total_str = fmt(fixmatch_total, precision=0, commas=True, prefix="$")
+    supervised_label_cost_str = fmt_usd(supervised_label_cost, precision=0, commas=True)
+    supervised_total_str = fmt_usd(supervised_total, precision=0, commas=True)
+    fixmatch_label_cost_str = fmt_usd(fixmatch_label_cost, precision=0, commas=True)
+    fixmatch_total_str = fmt_usd(fixmatch_total, precision=0, commas=True)
     cost_reduction_str = fmt(cost_reduction, precision=1, commas=False)
     acc_loss_str = fmt(acc_loss, precision=1, commas=False)
     fixmatch_compute_multiplier_str = fmt(fixmatch_compute_multiplier_value, precision=0, commas=False)
@@ -2173,8 +2173,8 @@ class FixmatchLabelEfficiency:
     cifar10_fixmatch_4k_eff_str = fmt(cifar10_fixmatch_4k_eff, precision=1, commas=False)
     cifar10_fixmatch_250_eff_str = fmt(cifar10_fixmatch_250_eff, precision=0, commas=False)
     cifar10_fixmatch_40_eff_str = fmt(cifar10_fixmatch_40_eff, precision=0, commas=False)
-    supervised_compute_cost_str = fmt(supervised_compute_cost, precision=0, commas=False, prefix="$")
-    fixmatch_compute_cost_str = fmt(fixmatch_compute_cost, precision=0, commas=False, prefix="$")
+    supervised_compute_cost_str = fmt_usd(supervised_compute_cost, precision=0, commas=False)
+    fixmatch_compute_cost_str = fmt_usd(fixmatch_compute_cost, precision=0, commas=False)
 ```
 
 ::: {#exmp-data-selection-fixmatch-cifar-10 .callout-example title="FixMatch on CIFAR-10"}
@@ -2258,7 +2258,7 @@ Understanding *why* self-supervised learning dominates modern ML practice requir
 # │ Imports: mlsysim.book (fmt), mlsysim.core.constants (MILLION, THOUSAND)
 # │ Exports: label_cost_drop_str, marginal_compute_reduction_str, etc.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_percent, fmt, check, MarkdownStr
+from mlsysim.fmt import fmt_percent, fmt, fmt_usd, check, MarkdownStr
 
 class FoundationCostAmortization:
     """Foundation model amortization: 10 tasks, 100× label reduction, 20× marginal compute drop."""
@@ -2290,20 +2290,20 @@ class FoundationCostAmortization:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     n_tasks_str = fmt(n_tasks_value, precision=0, commas=False)
-    cost_per_label_str = fmt(cost_per_label, precision=0, prefix="$", commas=False)
+    cost_per_label_str = fmt_usd(cost_per_label, precision=0, commas=False)
     labels_per_task_scratch_str = fmt(labels_per_task_scratch, precision=0, commas=True)
-    # Currency prefix + M/K suffix → MarkdownStr per recipe Rule 1 escape-hatch
-    label_cost_scratch_total_str = fmt(label_cost_scratch_total / MILLION, precision=0, commas=False, prefix="$", suffix="M")
+    # Currency prefix + M/K suffixes use fmt() prefix/suffix discipline.
+    label_cost_scratch_total_str = fmt_usd(label_cost_scratch_total / MILLION, precision=0, commas=False, suffix="M")
     cost_scratch_per_task_str = fmt(cost_scratch_per_task_value, precision=0, commas=True, suffix=" GPU-hours")
     cost_scratch_total_str = fmt(cost_scratch_total_value, precision=0, commas=True, suffix=" GPU-hours")
     cost_foundation_total_str = fmt(cost_foundation_total_value, precision=0, commas=True, suffix=" GPU-hours")
     labels_per_task_finetune_str = fmt(labels_per_task_finetune, precision=0, commas=True)
-    label_cost_finetune_total_str = fmt(label_cost_finetune_total / THOUSAND, precision=0, commas=False, prefix="$", suffix="K")
+    label_cost_finetune_total_str = fmt_usd(label_cost_finetune_total / THOUSAND, precision=0, commas=False, suffix="K")
     cost_finetune_value_str = fmt(cost_finetune_value, precision=0, commas=True, suffix=" GPU-hours")
     cost_pretrain_value_str = fmt(cost_pretrain_value, precision=0, commas=True, suffix=" GPU-hours")
-    marginal_compute_reduction_str = fmt(marginal_compute_reduction, precision=0, commas=False, suffix="×")
+    marginal_compute_reduction_str = fmt(marginal_compute_reduction, precision=0, commas=False)
     crossover_tasks_str = fmt(crossover_tasks_value, precision=1, commas=False)
-    label_cost_drop_str = fmt(label_cost_reduction, precision=0, commas=True, suffix="×")
+    label_cost_drop_str = fmt(label_cost_reduction, precision=0, commas=True)
 ```
 
 To illustrate this economic transformation, consider a company building `{python} FoundationCostAmortization.n_tasks_str` specialized classifiers for tasks such as fraud detection, content moderation, and medical diagnosis.
@@ -2312,13 +2312,13 @@ Training each classifier from scratch would require substantial investment in bo
 
 The fine-tuning approach restructures these costs. Pretraining requires a one-time investment of `{python} FoundationCostAmortization.cost_pretrain_value_str` on unlabeled data, but this cost is paid only once. Fine-tuning each task then requires just `{python} FoundationCostAmortization.labels_per_task_finetune_str` labels (`{python} FoundationCostAmortization.label_cost_finetune_total_str` total across all `{python} FoundationCostAmortization.n_tasks_str` tasks) and only `{python} FoundationCostAmortization.cost_finetune_value_str` of compute. Each task reaches deployment in 1–2 weeks after pretraining completes.
 
-The return on investment is substantial for labeling, marginal per-task compute, and time to deployment: labeling costs drop by `{python} FoundationCostAmortization.label_cost_drop_str` (from `{python} FoundationCostAmortization.label_cost_scratch_total_str` to `{python} FoundationCostAmortization.label_cost_finetune_total_str`), per-task marginal compute decreases by `{python} FoundationCostAmortization.marginal_compute_reduction_str`, and time to deployment accelerates by 20--50× per task. Total compute becomes favorable only after the pretraining cost is amortized across enough downstream tasks.
+The return on investment is substantial for labeling, marginal per-task compute, and time to deployment: labeling costs drop by `{python} FoundationCostAmortization.label_cost_drop_str`$\times$ overall (from `{python} FoundationCostAmortization.label_cost_scratch_total_str` to `{python} FoundationCostAmortization.label_cost_finetune_total_str`), per-task marginal compute decreases by `{python} FoundationCostAmortization.marginal_compute_reduction_str`$\times$, and time to deployment accelerates by 20--50$\times$ per task. Total compute becomes favorable only after the pretraining cost is amortized across enough downstream tasks.
 
 The cost structure explains *why* the fine-tuning paradigm dominates production ML. The pretraining cost is high but amortized across many downstream applications, while fine-tuning cost remains low on a per-task basis.
 
 Contrast the two bar charts in @fig-amortization-comparison to see this cost structure in action. Training from scratch (left) incurs the full cost for each task independently. The foundation model approach (right) pays a large upfront pretraining cost but then fine-tunes each task at a fraction of the per-task cost.
 
-::: {#fig-amortization-comparison fig-env="figure" fig-pos="htb" fig-cap="**Cost Amortization in Foundation Models**: Training from scratch (left) requires `{python} FoundationCostAmortization.cost_scratch_per_task_str` per task (`{python} FoundationCostAmortization.cost_scratch_total_str` total for `{python} FoundationCostAmortization.n_tasks_str` tasks). The foundation model approach (right) pays `{python} FoundationCostAmortization.cost_pretrain_value_str` upfront for pretraining but reduces each subsequent task to just `{python} FoundationCostAmortization.cost_finetune_value_str`. At `{python} FoundationCostAmortization.n_tasks_str` tasks the totals are comparable (`{python} FoundationCostAmortization.cost_scratch_total_str` vs. `{python} FoundationCostAmortization.cost_foundation_total_str`), but the per-task marginal cost drops by `{python} FoundationCostAmortization.marginal_compute_reduction_str`, and the crossover favoring the foundation model occurs around `{python} FoundationCostAmortization.crossover_tasks_str` tasks." fig-alt="Two bar charts side by side. Left (train from scratch) shows equal per-task GPU-hour bars totaling the scratch-training cost. Right (foundation model) shows one tall pretraining bar followed by short fine-tuning bars per task."}
+::: {#fig-amortization-comparison fig-env="figure" fig-pos="htb" fig-cap="**Cost Amortization in Foundation Models**: Training from scratch (left) requires `{python} FoundationCostAmortization.cost_scratch_per_task_str` per task (`{python} FoundationCostAmortization.cost_scratch_total_str` total for `{python} FoundationCostAmortization.n_tasks_str` tasks). The foundation model approach (right) pays `{python} FoundationCostAmortization.cost_pretrain_value_str` upfront for pretraining but reduces each subsequent task to just `{python} FoundationCostAmortization.cost_finetune_value_str`. At `{python} FoundationCostAmortization.n_tasks_str` tasks the totals are comparable (`{python} FoundationCostAmortization.cost_scratch_total_str` vs. `{python} FoundationCostAmortization.cost_foundation_total_str`), but the per-task marginal cost drops by `{python} FoundationCostAmortization.marginal_compute_reduction_str`$\times$, and the crossover favoring the foundation model occurs around `{python} FoundationCostAmortization.crossover_tasks_str` tasks." fig-alt="Two bar charts side by side. Left (train from scratch) shows equal per-task GPU-hour bars totaling the scratch-training cost. Right (foundation model) shows one tall pretraining bar followed by short fine-tuning bars per task."}
 
 ```{python}
 #| echo: false
@@ -3101,12 +3101,12 @@ class RandomAccessPenalty:
     hdd_penalty_str = fmt_int(hdd_penalty, -2, commas=False)
 
     sata_seq_mb_s_str = fmt(sata_seq_mb_s, precision=0, commas=False, suffix=" MB")
-    sata_iops_str = fmt(sata_iops / THOUSAND, precision=0, commas=False) + "k"
+    sata_iops_str = fmt(sata_iops / THOUSAND, precision=0, commas=False, suffix="k")
     sata_random_mb_s_str = fmt(sata_random_mb_s, precision=0, commas=False, suffix=" MB")
     sata_penalty_str = fmt(sata_penalty, precision=1, commas=False)
 
     nvme_seq_mb_s_str = fmt(nvme_seq_mb_s, precision=0, commas=True, suffix=" MB")
-    nvme_iops_str = fmt(nvme_iops / THOUSAND, precision=0, commas=False) + "k"
+    nvme_iops_str = fmt(nvme_iops / THOUSAND, precision=0, commas=False, suffix="k")
     nvme_random_mb_s_str = fmt(nvme_random_mb_s, precision=0, commas=True, suffix=" MB")
     nvme_penalty_str = fmt(nvme_penalty, precision=2, commas=False)
 ```
@@ -3291,7 +3291,7 @@ For a concrete example, consider training a vision model:
 # │ Imports: mlsysim.book (fmt)
 # │ Exports: c_raw_str, c_label_str, c_total_str, p_data_str, p_compute_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_percent, fmt, check, MarkdownStr
+from mlsysim.fmt import fmt_percent, fmt, fmt_usd, check, MarkdownStr
 
 class CostBreakdown:
     """ImageNet-scale training cost breakdown: data costs (~81%) dominate compute (~19%)."""
@@ -3321,15 +3321,15 @@ class CostBreakdown:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     # Currency prefix and % suffix → MarkdownStr per recipe Rule 1 escape-hatch
-    c_raw_str = fmt(c_raw_value, precision=0, prefix="$")
-    c_label_str = fmt(c_label_value, precision=0, prefix="$")
-    c_store_str = fmt(c_store_value, precision=0, commas=False, prefix="$")
-    c_train_str = fmt(c_train_value, precision=0, prefix="$")
-    c_total_str = fmt(c_total_value, precision=0, prefix="$")
+    c_raw_str = fmt_usd(c_raw_value, precision=0)
+    c_label_str = fmt_usd(c_label_value, precision=0)
+    c_store_str = fmt_usd(c_store_value, precision=0, commas=False)
+    c_train_str = fmt_usd(c_train_value, precision=0)
+    c_total_str = fmt_usd(c_total_value, precision=0)
     p_data_str = fmt(p_data_value, precision=1, commas=False, suffix="%")
     p_compute_str = fmt(p_compute_value, precision=1, commas=False, suffix="%")
-    n_labels_str = fmt(n_labels_value/MILLION, precision=1) + "M"
-    cb_cost_per_label_str = fmt(cost_per_label_value, precision=2, commas=False)
+    n_labels_str = fmt(n_labels_value/MILLION, precision=1, suffix="M")
+    cb_cost_per_label_str = fmt_usd(cost_per_label_value, precision=2, commas=False)
     # Mixed prose + math symbol (×) → MarkdownStr escape-hatch
     storage_str = MarkdownStr(f"{storage_gb} GB × {storage_months} months")
     train_desc_str = MarkdownStr(f"{train_epochs} epochs × {train_gpus} A100s × {train_hours} h")
@@ -3341,14 +3341,14 @@ class CostBreakdown:
 
 :::
 
-| **Cost Component**                                                                                             | **Calculation**  |                                          **Amount**                                          |
-|:---------------------------------------------------------------------------------------------------------------|:-----------------|:--------------------------------------------------------------------------------------------:|
-| **Raw data (`{python} CostBreakdown.n_labels_str`)**                                                           | Licensed dataset |                              `{python} CostBreakdown.c_raw_str`                              |
-| **Labels (`{python} CostBreakdown.n_labels_str` $\times$ USD `{python} CostBreakdown.cb_cost_per_label_str`)** | Crowd annotation |                             `{python} CostBreakdown.c_label_str`                             |
-| **Storage (`{python} CostBreakdown.storage_str`)**                                                             | Cloud storage    |                             `{python} CostBreakdown.c_store_str`                             |
-| **Training (`{python} CostBreakdown.train_desc_str`)**                                                         | GPU compute      |                             `{python} CostBreakdown.c_train_str`                             |
-| **Total**                                                                                                      |                  |                           **`{python} CostBreakdown.c_total_str`**                           |
-| **Data vs. Compute ratio**                                                                                     |                  | **`{python} CostBreakdown.p_data_str` data, `{python} CostBreakdown.p_compute_str` compute** |
+| **Cost Component**                                                                                         | **Calculation**  |                                          **Amount**                                          |
+|:-----------------------------------------------------------------------------------------------------------|:-----------------|:--------------------------------------------------------------------------------------------:|
+| **Raw data (`{python} CostBreakdown.n_labels_str`)**                                                       | Licensed dataset |                              `{python} CostBreakdown.c_raw_str`                              |
+| **Labels (`{python} CostBreakdown.n_labels_str` $\times$ `{python} CostBreakdown.cb_cost_per_label_str`)** | Crowd annotation |                             `{python} CostBreakdown.c_label_str`                             |
+| **Storage (`{python} CostBreakdown.storage_str`)**                                                         | Cloud storage    |                             `{python} CostBreakdown.c_store_str`                             |
+| **Training (`{python} CostBreakdown.train_desc_str`)**                                                     | GPU compute      |                             `{python} CostBreakdown.c_train_str`                             |
+| **Total**                                                                                                  |                  |                           **`{python} CostBreakdown.c_total_str`**                           |
+| **Data vs. Compute ratio**                                                                                 |                  | **`{python} CostBreakdown.p_data_str` data, `{python} CostBreakdown.p_compute_str` compute** |
 
 : **ImageNet-Scale Training Cost Breakdown**: Itemized acquisition, labeling, storage, and compute costs for an ImageNet-scale supervised training run, showing that data costs dominate compute by a wide margin in this regime. {#tbl-data-selection-imagenet-cost-breakdown tbl-colwidths="[40,20,30]"}
 
@@ -4513,11 +4513,11 @@ class FpFallacyCalc:
     check(synthetic_acc_drop_value > 0, "Model collapse must degrade accuracy.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    data_1m_str = fmt(data_1m_value / MILLION, precision=0) + "M"
-    data_10m_str = fmt(data_10m_value / MILLION, precision=0) + "M"
+    data_1m_str = fmt(data_1m_value / MILLION, precision=0, suffix="M")
+    data_10m_str = fmt(data_10m_value / MILLION, precision=0, suffix="M")
     acc_gain_10x_str = fmt(acc_gain_10x_value, precision=0, commas=False, suffix=" percentage points")
-    curated_size_str = fmt(curated_size_value / THOUSAND, precision=0) + "K"
-    raw_size_str = fmt(raw_size_value / MILLION, precision=0) + "M"
+    curated_size_str = fmt(curated_size_value / THOUSAND, precision=0, suffix="K")
+    raw_size_str = fmt(raw_size_value / MILLION, precision=0, suffix="M")
     curated_accuracy_str = fmt(curated_accuracy_value, precision=0, commas=False, suffix=" percent")
     raw_accuracy_str = fmt(raw_accuracy_value, precision=0, commas=False, suffix=" percent")
     curated_cost_ratio_str = fmt(curated_cost_ratio_value, precision=0, commas=False)
@@ -4525,9 +4525,9 @@ class FpFallacyCalc:
     synthetic_gen5_acc_str = fmt(synthetic_gen5_acc_value, precision=0, commas=False, suffix=" percent")
     synthetic_acc_drop_str = fmt(synthetic_acc_drop_value, precision=0, commas=False)
     optimal_synthetic_mix_str = MarkdownStr(f"{optimal_synthetic_mix_min_value}–{optimal_synthetic_mix_max_value} percent")
-    training_run_cost_str = fmt(training_run_cost_value / MILLION, precision=0) + "M"
+    training_run_cost_str = fmt(training_run_cost_value / MILLION, precision=0, suffix="M")
     efficiency_gain_pct_str = fmt(efficiency_gain_pct_value, precision=0, commas=False, suffix=" percent")
-    savings_str = fmt(savings_value / MILLION, precision=0) + "M"
+    savings_str = fmt(savings_value / MILLION, precision=0, suffix="M")
     cifar10_coreset_pct_str = fmt(cifar10_coreset_pct_value, precision=0, commas=False, suffix=" percent")
     cifar10_acc_retained_str = fmt(cifar10_acc_retained_value, precision=0, commas=False, suffix=" percent")
     imagenet_acc_retained_str = fmt(imagenet_acc_retained_value, precision=0, commas=False, suffix=" percent")
@@ -4614,7 +4614,7 @@ class FpPitfallCalc:
     selection_overhead_ratio_str = fmt(selection_overhead_ratio_value, precision=0, commas=False)
     selection_time_good_str = fmt(selection_time_good_value * 60, precision=0, commas=False, suffix=" minutes")
     selection_overhead_good_pct_str = fmt(selection_overhead_good_pct_value, precision=1, commas=False, suffix=" percent")
-    total_samples_str = fmt(total_samples_value / MILLION, precision=0) + "M"
+    total_samples_str = fmt(total_samples_value / MILLION, precision=0, suffix="M")
     rare_class_pct_str = fmt(rare_class_pct_value, precision=1, commas=False, suffix=" percent")
     rare_class_count_str = fmt(rare_class_count_value, precision=0, commas=True)
     fp_coreset_pct_str = fmt(coreset_pct_value, precision=0, commas=False, suffix=" percent")

@@ -207,6 +207,11 @@ ureg.define('Gbps = 1e9 * bit / second')
 Gbps = ureg.Gbps
 
 # --- Currency (dimensionless, for cost modeling) ---
+# `dollar` is the base currency unit; `USD`/`EUR` are aliases. Extract a
+# magnitude for computation with `.m_as("dollar")` (or USD/EUR). For DISPLAY in
+# prose/tables, never format dollars by hand — always use `fmt_usd()`, which
+# owns the Pandoc-safe escaped `\$` and never emits the literal "USD". The
+# string "USD" is reader-visible exactly once: the currency notation entry.
 ureg.define('dollar = 1 * count')
 ureg.define('USD = dollar')
 ureg.define('EUR = dollar')
