@@ -442,20 +442,50 @@ class LayoutCommand:
 
     @staticmethod
     def _page_overflow(pw, ph, chars, images, tol):
-        """Pure geometry: margin-column chars/images whose bottom runs below
-        the usable bottom (footer band top + tol). Returns (over_chars,
+        """Pure geometry: true margin-column chars/images whose bottom runs
+        below the usable bottom (footer band top + tol). Returns (over_chars,
         over_imgs). Coordinates follow pdfplumber: x0 from left, bottom from
         page top (increasing downward). Unit-tested with dict fixtures.
+
+        A char counts as margin content only when its whole text line sits in
+        the margin — i.e. the line's leftmost char also starts past the margin
+        boundary. This excludes full-width code listings, wide tables, and
+        figure legends whose right portion crosses the 55% line but which are
+        main-column content, not margin notes (the dominant false positive).
+        Likewise an image must start in the margin AND be narrow enough to be a
+        margin figure, not a full-text-block figure straddling the boundary.
         """
         margin_x = pw * MAIN_COL_RIGHT_FRAC
         usable_bottom = ph * (1.0 - FOOTER_FRAC) + tol
-        over_chars = [
-            c for c in chars
-            if c["x0"] > margin_x and c["bottom"] > usable_bottom
-        ]
+
+        # Cluster chars into baselines (2pt tolerance), keep margin-only lines.
+        lines: Dict[float, list] = {}
+        for c in chars:
+            for ly in lines:
+                if abs(c["top"] - ly) < 2.0:
+                    lines[ly].append(c)
+                    break
+            else:
+                lines[c["top"]] = [c]
+        # Text overflow is bounded to the page: a real margin caption clips at
+        # the page edge (dips into the footer band, still on-page). Text flung
+        # far BELOW the page edge (bottom > ph) is figure-internal label text
+        # mispositioned off-canvas, not a margin caption — exclude it. Images
+        # (below) stay uncapped: a tall margin figure legitimately runs off.
+        over_chars = []
+        for lchars in lines.values():
+            if min(c["x0"] for c in lchars) <= margin_x:
+                continue  # full-width / main-column line — not a margin note
+            over_chars.extend(
+                c for c in lchars if usable_bottom < c["bottom"] <= ph
+            )
+
+        margin_w = pw - margin_x  # width of the margin band
         over_imgs = [
             im for im in images
-            if im["x0"] > margin_x and im["bottom"] > usable_bottom
+            if im["x0"] > margin_x
+            and (im["x1"] - im["x0"]) <= margin_w * 1.5
+            and im["bottom"] > usable_bottom
         ]
         return over_chars, over_imgs
 
@@ -514,20 +544,24 @@ class LayoutCommand:
                     sig.append("caption/text")
                 signal = "+".join(sig)
 
-                # Lowest margin-column text line → best grep target for source.
-                mlines: Dict[float, list] = {}
+                # Reconstruct margin-only text lines (same rule as
+                # _page_overflow) for source matching: cluster chars into
+                # baselines, keep only lines whose leftmost char is in the
+                # margin (excludes full-width code/table/figure lines).
+                all_lines: Dict[float, list] = {}
                 for c in page.chars:
-                    if c["x0"] <= margin_x:
-                        continue
-                    placed = False
-                    for ly in list(mlines.keys()):
+                    for ly in all_lines:
                         if abs(c["top"] - ly) < 2.0:
-                            mlines[ly].append(c)
-                            placed = True
+                            all_lines[ly].append(c)
                             break
-                    if not placed:
-                        mlines[c["top"]] = [c]
-                line_texts = [self._line_text(mlines[ly]) for ly in sorted(mlines)]
+                    else:
+                        all_lines[c["top"]] = [c]
+                margin_lines = {
+                    ly: lc for ly, lc in all_lines.items()
+                    if min(ch["x0"] for ch in lc) > margin_x
+                }
+                line_texts = [self._line_text(margin_lines[ly])
+                              for ly in sorted(margin_lines)]
                 line_texts = [t for t in line_texts if t]
                 snippet = line_texts[-1] if line_texts else ""  # lowest line
 

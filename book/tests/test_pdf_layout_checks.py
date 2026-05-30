@@ -120,7 +120,8 @@ def _char(x0, bottom):
 
 
 def _img(x0, bottom):
-    return {"x0": x0, "bottom": bottom, "top": bottom - 40}
+    # Narrow margin figure (~1.25in = 90pt wide).
+    return {"x0": x0, "x1": x0 + 90, "bottom": bottom, "top": bottom - 40}
 
 
 def test_margin_image_past_footer_is_flagged():
@@ -155,6 +156,48 @@ def test_tolerance_respected():
     )
     assert len(over_tight) == 1   # 755 > 752+2
     assert len(over_loose) == 0   # 755 < 752+10
+
+
+def test_full_width_line_is_not_margin_overflow():
+    # A code-listing / wide-table line: leftmost char in the main column,
+    # rightmost char crosses past the 55% margin line. The right fragment must
+    # NOT be flagged — it is main-column content, not a margin note. (This was
+    # the dominant false positive: full-width listings dipping low.)
+    chars = [_char(100, 775), _char(400, 775)]  # same baseline
+    over_c, _ = LayoutCommand._page_overflow(PW, PH, chars=chars, images=[], tol=2.0)
+    assert not over_c
+
+
+def test_full_width_image_straddling_margin_is_not_flagged():
+    # A figure spanning the text block (x0 left of the margin, wide) is main
+    # content even if it dips low; only narrow margin figures count.
+    wide = {"x0": 80, "x1": 520, "bottom": 775, "top": 600}
+    _, over_i = LayoutCommand._page_overflow(PW, PH, chars=[], images=[wide], tol=2.0)
+    assert not over_i
+
+
+def test_narrow_margin_figure_past_footer_still_flagged():
+    # A genuine margin figure: starts in the margin, ~1.25in (90pt) wide.
+    fig = {"x0": 400, "x1": 490, "bottom": 775, "top": 660}
+    _, over_i = LayoutCommand._page_overflow(PW, PH, chars=[], images=[fig], tol=2.0)
+    assert len(over_i) == 1
+
+
+def test_text_flung_below_page_edge_is_excluded():
+    # Figure-internal label placed off-canvas (bottom well past page height) is
+    # not a margin caption clipping at the edge — exclude from the text signal.
+    over_c, _ = LayoutCommand._page_overflow(
+        PW, PH, chars=[_char(400, PH + 120)], images=[], tol=2.0
+    )
+    assert not over_c
+
+
+def test_caption_clipping_at_page_edge_is_flagged():
+    # A margin caption dipping into the footer band but still on-page → flagged.
+    over_c, _ = LayoutCommand._page_overflow(
+        PW, PH, chars=[_char(400, PH - 5)], images=[], tol=2.0
+    )
+    assert len(over_c) == 1
 
 
 def test_scan_margin_overflow_missing_file_returns_none():
