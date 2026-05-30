@@ -4,6 +4,10 @@ Created: 2026-05-30
 
 Scope: the 127 curated margin illustrations inserted on `feat/margin-elements`, generated from `book/tools/audit/margin_figure_decisions.yml`.
 
+Terminology: `D-A-M` is the Volume I Data-Algorithm-Machine framing. `D-A-I` is the Volume II specialization of the same triad: Data-Algorithm-Infrastructure. It is not a separate framework.
+
+Distribution rule: do not tune the mix of figure types to hit a target histogram. The distribution is a diagnostic. If one device dominates, check whether the local prose really contains that many relationships of that type; change the device only when the paragraph's teaching job changes.
+
 ## Current Device Use
 
 | Device | Count | Current variants in use | Editorial read |
@@ -17,6 +21,31 @@ Scope: the 127 curated margin illustrations inserted on `feat/margin-elements`, 
 | `blast-radius` | 8 | fan 4, tree 4 | Good for correlated failure and cascades. Rings remain unused. |
 | `other-new` | 5 | nested system box, all-to-all topology, Pareto frontier, feedback loop, epsilon budget | Useful exceptions, but should remain rare. Prefer canonical devices when honest. |
 | `dam-locator` | 1 | triangle | Underused relative to the book's D-A-M/D-A-I spine. Add more only where the prose explicitly invokes the framework axis/coupling. |
+
+## Device Selection Method
+
+Pick the device by the paragraph's one teaching job:
+
+| Local teaching job | Use this device | Do not use it when... |
+|---|---|---|
+| Span or scale gap | `hierarchy-ladder` | the prose is about a turning point, not magnitude. |
+| Threshold, cliff, knee, limit, SLO boundary | `scale-anchor` | the curve shape is not actually accelerating or thresholded. |
+| Change over time/scale, divergence, decay, saturation | `sparkline-trend` | the point is a static comparison. |
+| Compute-bound vs memory-bound placement | `thumbnail-roofline` | there is no roofline/regime claim in the prose. |
+| Which Iron Law term dominates | `iron-law-bar` | the terms are not Data/Compute/Latency-style components. |
+| Which Data-Algorithm-Machine or Data-Algorithm-Infrastructure axis is active | `dam-locator` | the paragraph does not explicitly use that framework or axis shift. |
+| Classification, status set, two-axis taxonomy | `taxonomy-mini` | the items are a sequence, magnitude, or causal chain. |
+| One fault/source affects many downstream nodes | `blast-radius` | the relationship is not propagation or shared-fate failure. |
+| A simple concept does not honestly fit the kit | `other-new` | a canonical device can express the same idea without distortion. |
+
+For new figures, the desired workflow is: read the local paragraph, name the teaching job, choose the matching device, choose the simplest variant, then check redundancy and margin space. A global device-count target should never override that local decision.
+
+Use the current distribution as a prompt for targeted review:
+
+- Many ladders are acceptable if the prose repeatedly asks students to compare orders of magnitude.
+- More D-A-M/D-A-I locators are worth adding only at genuine framework-return moments.
+- More taxonomy quadrants/dot-cells are worth adding only where the local prose has true axes or state cells.
+- More iron-law trio/columns are worth adding only where separate Data/Compute/Latency terms are directly compared.
 
 ## Variants Not Yet Used In The Curated Set
 
