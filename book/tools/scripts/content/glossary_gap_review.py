@@ -253,7 +253,7 @@ def write_packet(path: Path, chapter: str, candidates: list[ConceptCandidate]) -
     missing = [candidate for candidate in candidates if candidate.glossary_status == "missing"]
     body = f"""# Glossary Review Packet: {chapter}
 
-Read `.claude/rules/glossary.md` before classifying candidates.
+Read the project glossary rules before classifying candidates.
 
 Source chapter: `{source_file}`
 Concept map: `{concept_file}`
