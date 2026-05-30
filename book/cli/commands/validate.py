@@ -3381,13 +3381,18 @@ class ValidateCommand:
                     div_stack.append("fig")
                     continue
                 if self._CAPTIONS_DIV_OPEN_RE.match(stripped):
-                    div_stack.append("other")
+                    # Unnumbered margin illustrations live in `.column-margin`
+                    # divs and are intentionally label-free marginalia
+                    # (figure-margin.md §1/§8): no `{#fig-X}`, never referenced
+                    # via `@fig-`. Tag them so their images are not flagged.
+                    kind = "margin" if ".column-margin" in stripped else "other"
+                    div_stack.append(kind)
                     continue
                 if self._CAPTIONS_DIV_CLOSE_RE.match(stripped):
                     if div_stack:
                         div_stack.pop()
                     continue
-                if "callout" in div_stack or "fig" in div_stack:
+                if "callout" in div_stack or "fig" in div_stack or "margin" in div_stack:
                     continue
                 if not self._MD_IMAGE_ANY_RE.search(line):
                     continue
