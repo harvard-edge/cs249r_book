@@ -3,7 +3,7 @@
 These are genuine constants of nature / physical media — not hardware specs,
 model specs, or tunable knobs — so they live with the laws in ``physics/``
 rather than in ``core/constants.py`` (which is now units-only). See
-.claude/rules/mlsysim.md -> Canonical organization (decision step 2).
+the project MLSysIM rules -> Canonical organization (decision step 2).
 """
 from ..core.units import ureg, second
 

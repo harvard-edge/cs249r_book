@@ -2,7 +2,7 @@
 
 Three scripts for catching LaTeX leakage in rendered HTML and PDF output.
 Built during the April 2026 math-rendering audit (see
-`.claude/rules/book-prose.md` for the underlying conventions these tools
+the project prose style guide for the underlying conventions these tools
 enforce).
 
 All scripts are designed to run from the **repo root**.

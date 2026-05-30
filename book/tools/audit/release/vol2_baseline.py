@@ -107,7 +107,7 @@ def main() -> None:
         },
         "verification_status": (
             "Figure caption verification is being run separately by the "
-            "author. See .claude/_reviews/figure_audit/FIX_LIST_BY_CHAPTER.md "
+            "author. See the project figure-audit fix list "
             "in the primary worktree (note: file may not exist in audit "
             "worktree because _reviews is gitignored)."
         ),

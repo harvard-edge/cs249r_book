@@ -3,7 +3,7 @@
 Leaf reference data (example counts, image dimensions, class counts) lives as
 YAML under ``datasets/data/<Dataset>.yaml`` and is loaded + validated against
 the ``DatasetProfile`` schema at import (see ``core/loader.py`` and
-``.claude/rules/mlsysim.md`` → *Storage format*).
+the project MLSysIM rules → *Storage format*).
 """
 from pathlib import Path
 

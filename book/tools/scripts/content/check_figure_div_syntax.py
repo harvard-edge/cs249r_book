@@ -101,7 +101,7 @@ def main() -> int:
     print("       <content: ![](path) or code block>", file=sys.stderr)
     print("  :::", file=sys.stderr)
     print("  Do NOT use: ![Caption](path){#fig-...} or #| fig-cap= / #| fig-alt=", file=sys.stderr)
-    print("  See .claude/rules/book-prose.md Section 6 (Visuals & Assets).", file=sys.stderr)
+    print("  See the project prose style guide Section 6 (Visuals & Assets).", file=sys.stderr)
     print(file=sys.stderr)
     for qmd, violations in all_violations:
         try:

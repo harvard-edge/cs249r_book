@@ -5,8 +5,8 @@ MIT Press round 1 style rules, applies safe fixes under strict safety
 gates, and verifies the result.
 
 **Status:** Phase A complete (infrastructure + 7 check categories).
-**Plan:** `/Users/VJ/Desktop/MIT_Press_Feedback/15_audit_loop/PLAN.md`
-**Rules:** `/Users/VJ/GitHub/AIConfigs/projects/MLSysBook/.claude/rules/book-prose-merged.md`
+
+The editorial rules this pipeline enforces are maintained outside this repository (the project's prose style guide).
 
 **Fmt / notation audit** (inline `{python}` numbers, spurious `.0`): see
 [`fmt/README.md`](fmt/README.md).

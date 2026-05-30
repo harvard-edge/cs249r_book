@@ -2,7 +2,7 @@
 ``binder headings`` — Heading-case enforcement for MIT Press style.
 
 Enforces the H1/H2 headline-case + H3+ sentence-case policy documented in
-`.claude/rules/book-prose.md` §10.3.1. Preserves ten documented exceptions:
+the project prose style guide §10.3.1. Preserves ten documented exceptions:
 acronyms, hyphenated-acronym compounds, digit-letter models (70B, 3D),
 single-letter labels (Archetype A, N-models, S-curve), slash acronyms
 (I/O, A/B, M/G/c/K), CamelCase product names (ResNet, FlashAttention),
@@ -468,7 +468,7 @@ class HeadingsCommand:
         console.print("  [cyan]./binder headings dry-run[/cyan]")
         console.print("  [cyan]./binder headings apply[/cyan]")
         console.print()
-        console.print("[dim]Rule reference: .claude/rules/book-prose.md §10.3.1[/dim]")
+        console.print("[dim]Rule reference: the project prose style guide §10.3.1[/dim]")
         console.print()
 
     # ------------------------------------------------------------------
@@ -515,7 +515,7 @@ class HeadingsCommand:
             "   The MIT Press style requires: H1/H2 headline case; H3+ sentence case."
         )
         console.print(
-            "   See [cyan].claude/rules/book-prose.md §10.3.1[/cyan] for the rule + exceptions.\n"
+            "   See [cyan]the project prose style guide §10.3.1[/cyan] for the rule + exceptions.\n"
         )
         for fpath, viols in by_file.items():
             short = fpath.replace("book/quarto/contents/", "")
