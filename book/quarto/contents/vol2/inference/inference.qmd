@@ -209,6 +209,12 @@ Minimizing this tax requires co-locating communicating components, using high-ba
 
 ### Serving cost dominates training cost {#sec-inference-scale-serving-cost-dominates-training-cost-576a}
 
+::: {.column-margin}
+![](images/svg/inference_serving_cost_dominance.svg){width="100%" fig-alt="Two horizontal bars comparing lifetime cost terms. The serving OpEx bar is wide and shaded orange, dominating; the training CapEx bar is a narrow gray sliver."}
+
+*Lifetime serving cost dwarfs one-time training.*
+:::
+
 The serving tax quantified above consumes a fraction of the latency budget per request. The true economic impact of inference emerges when we consider cost over a model's entire operational lifetime. Serving cost typically dominates training cost by orders of magnitude because training is a *one-time capital expenditure* (CapEx) while serving is a *continuous operational expenditure* (OpEx) that scales with user growth. A quick cost calculation makes the multiplier concrete.
 
 ```{python}
@@ -762,6 +768,12 @@ The resulting curve is the **Batching Efficiency Curve**\index{Batching!efficien
 2.  **Large $B$**: As $B \to \infty$, the $T_{\text{fixed}}$ term becomes negligible. Throughput asymptotically approaches the hardware limit $1/T_{\text{variable}}$. The system becomes compute-bound\index{Compute-Bound} (or bandwidth-bound for LLMs).
 3.  **The knee**: The optimal batch size is the point where throughput gains diminish while latency continues to grow linearly.
 
+::: {.column-margin}
+![](images/svg/inference_batching_knee.svg){width="100%" fig-alt="A throughput curve that rises steeply then plateaus, with a knee dot marking the optimal batch size. A red wash shades the region past the knee, where larger batches add latency without gaining throughput."}
+
+*Throughput saturates at the batch size where latency hits the SLO.*
+:::
+
 The engineering goal is to find the maximum $B$ such that $T_{\text{lat}}(B) \le \text{SLO}$. This formulation explains why vision models (high $T_{\text{variable}}$) saturate at smaller batches than LLMs (high $T_{\text{fixed}}$ due to weight loading), requiring different tuning strategies.
 
 ```{python}
@@ -1047,6 +1059,12 @@ As @tbl-inference-continuous-batching-throughput shows, the 3$\times$ throughput
 :::
 
 ## The Logic Wall: Test-Time Compute Scaling {#sec-inference-logic-wall}
+
+::: {.column-margin}
+![](images/svg/inference_logic_wall_ladder.svg){width="100%" fig-alt="A two-rung magnitude ladder on a log scale, in slate. The reasoning response rung is about 12.8 seconds; the fast pattern-match rung is about 0.1 seconds. The gap is roughly 128 times."}
+
+*Reasoning expands latency about 128 times over fast pattern-matching.*
+:::
 
 Large-model capability work describes emergent behaviors [@wei2022emergent], while later analysis cautions that some apparent emergence can be an artifact of metric choice [@schaeffer2023mirage]. From a serving-systems perspective, models that transition from "Fast Thinking" (instant pattern matching) to "Slow Thinking" (deliberative reasoning) shift pressure from HBM Bandwidth toward **Test-Time Compute**\index{Test-Time Compute}. This is the **Logic Wall**\index{Logic Wall}: the realization that for complex problems, the fleet must scale compute per request proportional to the difficulty of the task, often through search or "Chain-of-Thought" (CoT) unrolling.
 
@@ -1944,6 +1962,12 @@ plt.show()
 
 The visualization reveals why the Distribution Layer must sometimes shard models that would otherwise fit on a single GPU. Sharding provides the memory headroom needed to maintain high batch sizes for long-context requests. Without sharding, a 128K context request effectively "evicts" all other users from the GPU.
 
+::: {.column-margin}
+![](images/svg/inference_kv_cache_ladder.svg){width="100%" fig-alt="Three stacked blue bars on a log scale spanning six orders of magnitude. A single token uses 0.33 MB, a 128K request uses 43 GB, and HBM capacity is 480 GB."}
+
+*The KV cache fills HBM, capping concurrent requests.*
+:::
+
 The same formula can be turned into an explicit batch-size limit for production hardware.
 
 ```{python}
@@ -2566,6 +2590,12 @@ Autoregressive generation is inherently sequential: each token depends on previo
 
 [^fn-speculative-cpu-analogy]: **Speculative Execution (CPU to LLM)**: Borrows from CPU branch prediction, where processors execute instructions ahead of confirmation and roll back on misprediction. The critical difference: CPU speculation is invisible to software, while LLM speculation requires explicit draft-verify logic and adds a second model's memory footprint to the serving budget. The trade-off is extra compute and memory for 2--3$\times$ latency reduction, but only when draft acceptance rates exceed roughly 70 percent. \index{Speculative Decoding!CPU analogy}
 
+::: {.column-margin}
+![](images/svg/inference_decode_roofline.svg){width="100%" fig-alt="A roofline silhouette: a blue memory-bound slope rising to a dashed ridge line, then an orange compute-bound ceiling. A workload dot sits deep on the memory-bound slope, the regime batch-1 decode occupies before parallel verification raises its arithmetic intensity toward the ridge."}
+
+*Decode is memory-bound; batching is the only lever toward the ridge.*
+:::
+
 The speculative decoding algorithm proceeds in three phases:
 
 1.  **Draft phase**\index{Speculative Decoding!draft phase}: A small, fast model (the "draft model") generates $K$ candidate tokens autoregressively. Because the draft model is much smaller (for example, 1B parameters vs. 70B for the target), each draft step is fast. Generating $K$ draft tokens typically takes roughly the time of one or two target model decode steps.
@@ -2631,6 +2661,12 @@ The mathematical guarantee is crucial: speculative decoding is *provably lossles
 #### Speedup analysis {#sec-inference-scale-speculative-speedup}
 
 The speedup depends on the **acceptance rate** $\alpha_{\text{acc}}$ (probability that the draft token matches the target model's distribution) and the **draft length** $K$. The expected number of emitted tokens per round, including the target model's correction token, is approximately $\sum_{i=0}^{K} \alpha_{\text{acc}}^i = \frac{1 - \alpha_{\text{acc}}^{K+1}}{1 - \alpha_{\text{acc}}}$.
+
+::: {.column-margin}
+![](images/svg/vol2_inference_margin_001.svg){width="100%" fig-alt="Margin illustration showing Speculative decoding speedup threshold around 70 percent acceptance."}
+
+*Speculative decoding's speedup hinges on the acceptance rate.*
+:::
 
 ```{python}
 #| echo: false
@@ -3253,6 +3289,12 @@ class MoEEconomics:
 
 The performance advantages are striking. During autoregressive decode at batch size 1, the dominant cost is reading weights from HBM. A dense 400B model in FP16 reads `{python} MoEEconomics.dense_mem_str` per step. DeepSeek-V3, despite having more total parameters, reads only the 37B active parameters per step (approximately 74 GB in FP16), a `{python} MoEEconomics.bw_ratio_str`$\times$ reduction in per-token bandwidth. The compute savings are proportional: `{python} MoEEconomics.compute_ratio_str`$\times$ fewer FLOPs per token.
 
+::: {.column-margin}
+![](images/svg/vol2_inference_margin_002.svg){width="100%" fig-alt="Margin illustration showing MoE resident memory, dense resident memory, and MoE active read."}
+
+*MoE keeps every expert resident but activates few per token.*
+:::
+
 The trade-off is memory capacity: all experts must reside in memory even though only a fraction are active at any time. DeepSeek-V3's full model in FP16 requires approximately `{python} MoEEconomics.moe_mem_str`, necessitating distribution across many GPUs.
 
 ```{python}
@@ -3851,6 +3893,12 @@ For 1,000 servers:
 
 The improvement is exponential: two choices with 1,000 servers achieves better balance than random with just 10 servers.
 
+::: {.column-margin}
+![](images/svg/vol2_inference_margin_003.svg){width="100%" fig-alt="Margin illustration showing Random-assignment tail curve versus two-choices curve."}
+
+*Two-choice routing flattens the tail imbalance of random placement.*
+:::
+
 ::: {.callout-important title="Exponential gain from one change"}
 
 The power-of-two-choices result is one of the most impactful findings in distributed systems theory. By examining just one additional server, maximum queue length improves from $\mathcal{O}(\log R / \log \log R)$ to $\mathcal{O}(\log \log R)$, an exponential improvement.
@@ -4383,6 +4431,12 @@ However, sharing introduces risks. @Tbl-tenancy-comparison weighs utilization ga
 ### Noisy neighbor problems {#sec-inference-scale-noisy-neighbor-problems-1b87}
 
 The noisy neighbor problem occurs when one tenant's workload degrades performance for others sharing the same infrastructure. The interference manifests across three resource dimensions simultaneously.
+
+::: {.column-margin}
+![](images/svg/vol2_inference_margin_004.svg){width="100%" fig-alt="Margin illustration showing One bursting tenant propagates SLO impact through a shared pool."}
+
+*One tenant's burst eats shared KV cache and starves the rest.*
+:::
 
 GPU memory contention is the most severe: a tenant with unexpectedly long sequences can consume a disproportionate share of the KV cache pool. Consider three tenants sharing a 60 GB KV cache pool with equal 20 GB allocations. When one tenant begins issuing long-context requests, its allocation can swell to 45 GB, forcing evictions that reduce the other tenants from 200 concurrent sequences each to 75 -- a 62 percent batch size reduction that directly degrades their throughput. Network bandwidth saturation compounds this effect when a tenant streaming many large responses consumes the available egress capacity. GPU time-sharing between tenants introduces context-switching overhead and unpredictable latency variance. Measuring noisy-neighbor impact requires capturing all three interference dimensions simultaneously.
 

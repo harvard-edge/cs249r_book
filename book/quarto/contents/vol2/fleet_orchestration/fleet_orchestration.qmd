@@ -238,6 +238,12 @@ These four challenges connect directly to the **consistency, availability, parti
 
 At scale, failure is normal operation, not exceptional. This principle, established in the reliability analysis of @sec-fault-tolerance-reliability, has direct consequences for scheduling: the scheduler must not merely tolerate failure but actively plan for it in every allocation decision. Component reliability does not change with cluster size, but aggregate system reliability degrades multiplicatively. With 99.9 percent annual GPU reliability (typical for data center hardware), a 4,096-GPU cluster experiences:
 
+::: {.column-margin}
+![](images/svg/vol2_fleet_orchestration_margin_001.svg){width="100%" fig-alt="Margin illustration showing Fleet failure rate rises from single GPU to 10,000 GPUs."}
+
+*Normal component failure rates guarantee constant fleet failures.*
+:::
+
 $$ \text{Expected failures per day} = 4096 \times \frac{0.001}{365} \approx 0.01 \text{ GPU failures/day} $$
 
 This calculation captures only GPU hardware failures. More realistically, including software failures (driver crashes, CUDA context corruption), thermal events (throttling, emergency shutdowns), network interface failures, host OS issues, and container runtime errors, production clusters see 1 to 4 failures per day per 1,000 GPUs. A `{python} ClusterEconomicsContext.cluster_size_str`-GPU cluster thus experiences 10 to 40 component failures daily. A multi-week training run on 4,096 GPUs will encounter multiple failures with near certainty. @Sec-appdx-reliability-foundations-component-rates tabulates the FIT rates and MTTF figures behind the 99.9 percent annual reliability assumption, letting an operator substitute their own measured hardware rates and confirm whether the empirical 1-to-4 failures-per-day band still holds.
@@ -291,6 +297,12 @@ class QueuingTheory:
     wq_ml_str = fmt(wq_ml, precision=0)
     rho_pct_str = fmt(rho * 100, precision=0, commas=False)
 ```
+
+::: {.column-margin}
+![](images/svg/fleet_orchestration_util_knee.svg){width="100%" fig-alt="A wait-time curve that stays flat at low utilization then turns sharply upward toward the right, with a marked knee and a shaded danger zone past it."}
+
+*Past about 70 percent utilization, queue wait time explodes.*
+:::
 
 ::: {#nbk-fleet-orchestration-queuing-theory-gpu-clusters .callout-notebook title="The queuing theory of GPU clusters"}
 
@@ -532,6 +544,12 @@ These scheduling strategies improve utilization, but they do not eliminate all f
 Gang scheduling eliminates the hold-and-wait condition, one of the four formal Coffman conditions for deadlock, but it does not immunize the cluster against all forms of resource contention. Deadlocks can still emerge from the interaction of priority rules, preemption policies, and auxiliary resource dependencies. In a cluster with thousands of GPUs and petabytes of state, these edge cases transition from theoretical curiosities to daily operational incidents.
 
 The most pernicious of these is priority inversion, a scenario borrowed from real-time systems where a high-priority job is indefinitely blocked by a low-priority job. Consider a 175B parameter training run (high priority) requesting a gang of 64 GPUs. The scheduler has reserved 60 available GPUs, but the remaining 4 are held by a low-priority data processing job. Normally, the scheduler would preempt the low-priority job to satisfy the high-priority request. However, if a stream of medium-priority development jobs saturates the cluster's CPU or network bandwidth, starving the low-priority job of the resources it needs to checkpoint and exit, the low-priority job stalls. It cannot release the GPUs because it cannot complete its exit sequence. The high-priority job waits for the low-priority job, which is effectively blocked by the medium-priority jobs. The result is a 60-GPU idle block that persists until an operator manually intervenes.
+
+::: {.column-margin}
+![](images/svg/fleet_orchestration_dependency_cascade.svg){width="100%" fig-alt="A tree rooted at one red square fanning out to three middle nodes, each splitting into two leaf nodes, showing one fault cascading through a dependency chain from one to a few to many."}
+
+*One root failure cascades through the dependency tree.*
+:::
 
 ::: {#dfn-fleet-orchestration-priority-inversion .callout-definition title="Priority inversion"}
 
@@ -800,6 +818,12 @@ class FleetTopologyInterconnect:
 ```
 
 Modern GPU clusters exhibit a multi-level communication hierarchy, where bandwidth decreases and latency increases at each level. This hierarchy is not an implementation detail that the scheduler can ignore; it is a physical constraint that directly determines training throughput for communication-intensive workloads. Understanding the hierarchy is essential for making placement decisions that translate allocated resources into useful work.
+
+::: {.column-margin}
+![](images/svg/fleet_orchestration_bw_hierarchy.svg){width="100%" fig-alt="A staircase ladder of interconnect bandwidth on a log scale, in violet: NVLink at 900 GB/s within a node, InfiniBand at 50 GB/s within a rack, and the spine at about 12 GB/s across racks. Each boundary is an order-of-magnitude bandwidth cliff."}
+
+*Bandwidth cliffs from NVLink to spine across the fabric.*
+:::
 
 Within a single node, GPUs communicate via **NVLink**\index{NVLink}, providing `{python} FleetTopologyInterconnect.nvlink_a100_str` per GPU on A100 systems and `{python} FleetTopologyInterconnect.nvlink_h100_str` on H100 systems. This high-bandwidth, low-latency interconnect enables efficient tensor parallelism, where matrix operations are split across GPUs that must exchange intermediate results (activations and gradients) at every transformer layer. The NVLink bandwidth is sufficient to overlap communication with computation for most model architectures, meaning tensor parallel operations can proceed at near-ideal throughput when confined to a single node.
 
@@ -1073,6 +1097,12 @@ The trade-off for all of these benefits is complexity. Elastic training requires
 ### Elastic scaling policies {#sec-fleet-orchestration-elastic-policies}
 
 Adding resources to a running job does not always accelerate time-to-convergence. The naive assumption that throughput scales linearly with worker count collapses under the weight of communication overhead, requiring the scheduler to enforce elastic scaling policies based on empirical efficiency curves rather than resource availability alone. A job's scaling efficiency\index{Scaling Efficiency} $\eta_{\text{scaling}}(k)$, defined as the ratio of observed throughput at $k$ workers to the ideal linear speedup, typically exhibits three distinct phases: a linear phase where computation dominates communication, a sublinear phase where gradient synchronization latency begins to mask compute, and a saturation phase where the AllReduce ring becomes the bottleneck. A scheduler that blindly assigns available GPUs to a job in the saturation phase wastes cluster capacity that could have cleared the queue; conversely, running a job below its **minimum viable scale** forces it to hold onto memory and network leases for disproportionately low progress.
+
+::: {.column-margin}
+![](images/svg/vol2_fleet_orchestration_margin_002.svg){width="100%" fig-alt="Margin illustration showing Elastic scaling curve with linear, sublinear, and saturation phases."}
+
+*Elastic scaling's benefit flattens into saturation.*
+:::
 
 The decision to scale is therefore a function of marginal utility, not vacancy alone. For our 175B parameter model, the efficiency curve is derived from profiling: it scales linearly from 64 to 512 GPUs, becomes sublinear between 512 and 1,024, and hits diminishing returns beyond 1,024. Consequently, the scheduler enforces an elastic range of $[256, 1024]$. If the cluster has free resources but the job is already at 1,024 GPUs, the scheduler withholds the extra nodes, predicting that the 5 percent marginal throughput gain does not justify the re-sharding overhead or the opportunity cost of starving a pending job. Similarly, if only 128 GPUs are available, the scheduler may choose to queue the job rather than run it, as the training intensity per GPU would be too low to hide the communication latency.
 
@@ -1630,6 +1660,12 @@ Production systems address cold start through several complementary strategies. 
 
 Reactive autoscaling (like Kubernetes HPA) is inherently backward-looking: it observes a metric breach (for example, GPU utilization exceeding 80 percent), waits for a stabilization window, and then triggers a scale-up event. For a container that starts in milliseconds, this lag is negligible. For a 175B parameter model that takes 3 minutes to load weights from disk to GPU memory, this lag is fatal to SLOs. If traffic doubles in 30 seconds, a realistic scenario during a product launch or viral event, the reactive scaler will provision new replicas only *after* the surge has already saturated the existing fleet, causing a 3-minute window of degraded latency and dropped requests.
 
+::: {.column-margin}
+![](images/svg/vol2_fleet_orchestration_margin_003.svg){width="100%" fig-alt="Margin illustration showing Demand exceeds capacity until delayed scale-up closes the gap."}
+
+*Reactive autoscaling opens an SLO gap during cold start.*
+:::
+
 Predictive autoscaling decouples scaling actions from current load. By analyzing historical traffic patterns (diurnal cycles, day-of-week seasonality) and incorporating real-time leading indicators (for example, a surge in login requests often precedes a surge in inference queries), the scheduler can preprovision capacity *before* the demand arrives. Serving our 175B model with a 500 ms P99 SLO requires this anticipation. If the model takes 3 minutes to become ready, the predictive scaler must issue the scale-up command at least 4 minutes before the expected traffic ramp. This transforms the scaling problem from a *control theory problem* (reacting to error) to a *forecasting problem* (predicting the future).
 
 Effective scaling policies must be **SLO-driven**\index{SLO-Driven Scaling} rather than utilization-driven. Targeting a fixed utilization (for example, "keep GPU at 70 percent") is a proxy that often fails: a model might hit its latency SLO at 60 percent utilization due to memory bandwidth contention, or it might safely run at 90 percent utilization if the requests are compute-bound and uniform. An SLO-driven policy explicitly targets the metric that matters: "Scale up when P99 latency exceeds 400 ms (80 percent of the 500 ms target)." This approach automatically adapts to changes in workload characteristics. If a new model version is less efficient, the latency metric will rise faster, and the scaler will provision more replicas to maintain the SLO, without requiring manual tuning of utilization thresholds.
@@ -1734,6 +1770,12 @@ The isolation techniques discussed here represent a spectrum from strong (MIG, h
 ### GPU sharing economics {#sec-fleet-orchestration-gpu-sharing}
 
 The decision to co-locate multiple models on a single GPU defines the efficiency frontier of an inference fleet. This choice operates on a spectrum: at one end, **exclusive access**\index{Exclusive Access} guarantees isolation but strands capacity; at the other, **aggressive sharing**\index{Aggressive Sharing} (via MPS or time-slicing) maximizes utilization but risks latency interference. The physics of this trade-off are dictated by memory fragmentation and compute contention.
+
+::: {.column-margin}
+![](images/svg/fleet_orchestration_sharing_fill.svg){width="100%" fig-alt="Two stacked bars of an 80 GB GPU's memory. Exclusive hosting: a 26 GB blue used segment and a wide gray dark segment. Shared hosting: a 52 GB blue used segment and a narrow gray dark segment. Sharing reclaims the dark capacity."}
+
+*Sharing packs two tenants, cutting wasted memory from 67 percent to 35 percent.*
+:::
 
 Consider an 80 GB A100 GPU serving a 7B parameter model. The model weights in FP16 consume approximately 14 GB. With a typical KV cache and activation overhead, the total runtime footprint is roughly 26 GB. Under an exclusive access policy, this single model leaves 54 GB (67 percent) of the GPU's high-bandwidth memory dark, a waste of silicon capital. Partitioning the GPU with MIG (for example, a `3g.40gb` profile) tightens the container, reducing the waste to roughly 35 percent within the partition, but still leaves the remainder of the GPU strictly segmented. Enabling MPS to pack two such models onto the same 80 GB device consumes 52 GB, dropping the aggregate memory waste to just 35 percent. For fleets running hundreds of small models, shifting from exclusive to shared hosting can reduce the required GPU count by a factor of 2--3$\times$.
 
@@ -1953,6 +1995,12 @@ The 64 GPUs that sat idle for a weekend because a researcher forgot to cancel a 
 
 Three tiers of measurement expose this gap. Allocated capacity measures what the scheduler has reserved for a job: the resources that are unavailable to others. Compute utilization measures the percentage of time the GPU kernels are active. Productive utilization measures the fraction of time the GPU is advancing the model state, excluding data loading pauses, communication overhead, and checkpointing. The distinction is financial, not merely technical. A team might be "allocated" 500 GPUs but only using 350 (70 percent compute utilization) and only "productively using" 280 (56 percent of allocation). If the organization pays for allocation but measures success by training progress, this 44 percent gap represents pure burn.
 
+::: {.column-margin}
+![](images/svg/vol2_fleet_orchestration_margin_004.svg){width="100%" fig-alt="Margin illustration showing Allocated, compute-active, and productive GPUs."}
+
+*Allocated, active, and productive utilization drift far apart.*
+:::
+
 Attribution in a shared fleet presents a forensic challenge. A single "training" job might be a shared experiment between three teams, or a platform test run by an SRE. Without granular tagging at the job level, costs default to the "infrastructure" bucket, creating a tragedy of the commons where no one owns the bill. Kubernetes labels and Slurm accounts provide the mechanism for attribution, but the organizational discipline to apply them consistently is the harder problem. Mature organizations enforce "no tag, no schedule" policies, rejecting untagged jobs at the admission controller level.
 
 ```{python}
@@ -2011,6 +2059,12 @@ GPU virtualization options represent a spectrum of isolation strength vs. resour
 Security in multi-tenant environments extends beyond simple resource fairness. Side-channel attacks on shared GPUs are a documented vulnerability; by monitoring contention on shared caches or memory controllers, a malicious tenant can infer the architecture or even data properties of a co-resident model. In highly sensitive environments, hardware isolation mechanisms like MIG or strictly dedicating entire GPU nodes to single tenants become mandatory requirements.
 
 ### Priority preemption cascades {#sec-fleet-orchestration-preemption-cascades}
+
+::: {.column-margin}
+![](images/svg/fleet_orchestration_preempt_cascade.svg){width="100%" fig-alt="One red source node on the left with arrows fanning out to five separate downstream nodes on the right, showing one event displacing many."}
+
+*One eviction ripples to many: the preemption cascade.*
+:::
 
 When a high-priority job enters a saturated cluster, the scheduler must decide which running workloads to terminate to free up resources. This decision is rarely isolated. In tightly packed clusters, evicting a medium-priority job to accommodate a high-priority request often triggers a **preemption cascade**\index{Preemption Cascade}, where the evicted job immediately attempts to reschedule itself by displacing lower-priority workloads. Without dampening controls, a single urgent inference service deployment can ripple through the queue, destabilizing dozens of training jobs and forcing a storm of checkpoint reloads that saturate storage bandwidth.
 

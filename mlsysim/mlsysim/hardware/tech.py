@@ -98,6 +98,6 @@ class Tech(Registry):
 
 def resolve_latency(instance_latency, tech_default):
     """Invariant #1 fallback: use the instance's own measured value when set, else the
-    technology-class default. e.g. ``resolve_latency(node.memory.latency, Tech.Memory.HBM3.latency)``.
+    technology-class default. e.g. ``resolve_latency(node.memory.latency, Tech.Memory.DRAM.latency)``.
     Lets a specific chip override a class fact without forcing per-instance values everywhere."""
     return instance_latency if instance_latency is not None else tech_default

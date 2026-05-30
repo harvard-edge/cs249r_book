@@ -142,6 +142,12 @@ $$ T_{\text{step}}(N) = \frac{T_{\text{compute}}}{N} + T_{\text{comm}}(N) + T_{\
 
 The critical term is the communication-computation ratio $\rho = T_{\text{comm}}(N)/(T_{\text{compute}}/N)$. This ratio determines whether a cluster behaves as a supercomputer or a collection of idling heaters.
 
+::: {.column-margin}
+![](images/svg/vol2_distributed_training_margin_001.svg){width="100%" fig-alt="Margin illustration showing Communication-computation ratio threshold at rho = 1."}
+
+*Past a communication-to-compute threshold, scaling stops being ideal.*
+:::
+
 *   **Compute-bound (low ratio)**: $T_{\text{compute}}/N \gg T_{\text{comm}}(N)$. The GPUs spend most of their time multiplying matrices. This is the ideal state, typical for large batch sizes on dense models (like ResNet).
 *   **Communication-bound (high ratio)**: $T_{\text{comm}}(N) \approx T_{\text{compute}}/N$. The GPUs spend significant time waiting for gradients or activations to arrive. This is the common state for large language models (LLMs) and deep learning recommendation models (DLRMs), where parameter synchronization saturates the network.
 
@@ -543,6 +549,12 @@ The choice of synchronization model directly affects both system throughput and 
 AllReduce operations implement implicit barriers where no worker can proceed until all workers have contributed their gradients. This coupling creates failure modes absent from single-device training.
 
 Worker failures during AllReduce cause all other workers to block indefinitely while waiting for the missing contribution. Without timeout mechanisms, the entire training job hangs rather than failing cleanly. Production systems implement watchdog timers typically set to 5--10 minutes to detect and terminate stuck jobs.
+
+::: {.column-margin}
+![](images/svg/vol2_distributed_training_margin_002.svg){width="100%" fig-alt="Margin illustration showing Missing worker blocks peers at all-reduce barrier."}
+
+*One missing worker stalls the entire AllReduce barrier.*
+:::
 
 Gradient mismatches occur when workers disagree on which tensors to synchronize due to conditional computation paths or dynamic batching. AllReduce operations may block waiting for tensors that some workers never send. This commonly occurs with variable-length sequences in NLP models, dynamic computation graphs, and mixture-of-experts with different routing decisions.
 
@@ -1247,6 +1259,12 @@ $$ \eta_{\text{scaling}} = \frac{T_{\text{compute}}}{N \times T_{\text{step}}(N)
 
 The equation reveals the **Scaling Wall**: as $N$ increases, the compute term $(T_{\text{compute}}/N)$ shrinks, but the communication and synchronization terms can remain constant or grow. Eventually, the denominator is dominated by overhead, driving efficiency toward zero. Beyond wall-clock time, this communication overhead imposes an energy tax\index{Energy Tax!communication overhead} that scales with physical distance between devices.
 
+::: {.column-margin}
+![](images/svg/vol2_distributed_training_margin_003.svg){width="100%" fig-alt="Margin illustration showing HBM, NVLink, and InfiniBand energy per bit."}
+
+*Communication energy climbs from HBM out to the network.*
+:::
+
 ::: {#psp-distributed-training-energy-tax-scale .callout-perspective title="The energy tax of scale"}
 
 Distributed training is a race against energy as much as against time. In a single GPU, moving a byte from HBM to the cores costs roughly 1–2 pJ/bit. Moving that same byte across an NVLink interconnect costs 5–10 pJ/bit. Moving it across an InfiniBand network through switches costs 20–50 pJ/bit.
@@ -1688,6 +1706,12 @@ class FrontierModelParallelRecap:
     frontier_params_b_str = fmt(params_b, precision=0)
 ```
 
+::: {.column-margin}
+![](images/svg/distributed_training_memory_budget.svg){width="100%" fig-alt="Ladder of three memory rungs for a 175B-parameter mixed-precision Adam training state: optimizer state 2,100 GB (longest), gradients 350 GB, and weights 350 GB. The optimizer rung is about six times the others."}
+
+*Optimizer state, not weights, dominates the per-replica training budget.*
+:::
+
 Even with ZeRO-3 fully deployed, sharding optimizer states, gradients, and parameters across workers, some architectures remain intractable. Tensor parallelism, illustrated in @fig-model-parallel-flow, addresses this by partitioning individual weight matrices across devices; pipeline parallelism partitions layers across stages and is introduced later in @sec-distributed-training-systems-systems-pipeline-parallelism-8748. For a `{python} FrontierModelParallelRecap.frontier_params_b_str`B parameter model, weights alone occupy `{python} ModelParallelMemoryFacts.weight_gb_str`, or about `{python} ModelParallelMemoryFacts.weight_per_gpu_str` per GPU across 64 GPUs. Full mixed-precision Adam training state is much larger: `{python} ModelParallelMemoryFacts.full_state_gb_str` globally, or roughly `{python} ModelParallelMemoryFacts.full_state_per_gpu_str` per GPU before activations. This distinction matters because optimizer sharding reduces static state, but it does not eliminate the activation and per-layer capacity constraints that force model parallelism.
 
 ::: {#fig-model-parallel-flow fig-env="figure" fig-pos="htb" fig-cap="**Tensor Parallelism Data Flow**: Tensor parallelism column-splits a single weight matrix ($W_0\ldots W_3$) across four GPUs, with each GPU computing a partial output that is recombined through an AllGather. The companion strategy, pipeline parallelism, partitions layers vertically across stages and is shown separately in the layer-block figure. The two strategies are often combined in hybrid 3D parallelism for frontier models." fig-alt="Single panel showing tensor parallelism: a weight matrix column-split as W0, W1, W2, W3 across four GPUs, with partial outputs combined via AllGather."}
@@ -2019,6 +2043,12 @@ class TensorParallelBandwidth:
 :::
 
 The interconnect topology dictates which form of model parallelism is viable at each level of the cluster hierarchy. Tensor parallelism's per-layer synchronization demands NVLink-class bandwidth; pipeline parallelism's boundary-only communication tolerates InfiniBand. This bandwidth pattern creates the design pressure for a hybrid: use tensor parallelism for bandwidth-intensive intra-layer splits and pipeline parallelism for coarser inter-layer splits.
+
+::: {.column-margin}
+![](images/svg/vol2_distributed_training_margin_004.svg){width="100%" fig-alt="Margin illustration showing NVLink bandwidth versus NDR InfiniBand bandwidth."}
+
+*Tensor parallelism needs NVLink bandwidth; pipeline parallelism tolerates slower fabric.*
+:::
 
 Megatron-style tensor parallelism[^fn-megatron] [@shoeybi2019megatron] partitions matrix multiplications in two ways. Examine @fig-tensor-parallel-split: column-parallel splitting divides weight matrices along columns for QKV projections, allowing independent computation across GPUs, while row-parallel splitting divides along rows for output layers, requiring AllReduce to combine partial sums at the end of each block.
 
