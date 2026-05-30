@@ -88,6 +88,12 @@ Recall the silicon contract (Principle \ref{pri-silicon-contract}) (@sec-introdu
 
 The scale of this renegotiation makes model optimization an engineering discipline, not a collection of ad hoc tricks. A `{python} CompressionDeploymentScale.llm_175b_str` billion parameter model consumes over `{python} CompressionDeploymentScale.llm_175b_mem_str` in FP16 representation alone, yet a smartphone provides `{python} CompressionDeploymentScale.smartphone_ram_str` of RAM and a microcontroller offers `{python} CompressionDeploymentScale.mcu_ram_str`. Bridging six orders of magnitude requires systematic methods with predictable trade-offs, not trial and error. Every optimization technique removes something from the model (redundant parameters, numerical precision, or architectural complexity), and the engineer must understand exactly what is lost, what is preserved, and how these losses compose when techniques are combined.
 
+::: {.column-margin}
+![](images/svg/vol1_model_compression_margin_001.svg){width="100%" fig-alt="Vertical log-scale ladder of blue bars: a 175B FP16 weight footprint at top towers over a phone RAM bar, which towers over a tiny microcontroller RAM bar at the bottom."}
+
+*Frontier weights dwarf phone and microcontroller memory; compression bridges the gap.*
+:::
+
 \index{Operator Fusion!framework introduction}
 This chapter organizes these techniques along three complementary dimensions. *Structural optimization* removes redundancy from the model itself: pruning eliminates parameters that contribute little to output quality, knowledge distillation transfers a large model's learned behavior into a smaller architecture, and neural architecture search discovers designs that are inherently efficient. *Precision optimization* reduces the numerical bit-width of weights and activations, for example converting 32-bit floating point values to 8-bit integers (exploiting Tensor Cores discussed in @sec-hardware-acceleration-tensor-cores-771f), which shrinks memory footprint and accelerates arithmetic on hardware that supports lower-precision operations. *Hardware-level optimization* ensures that the resulting model executes efficiently on the target processor by fusing operations to reduce memory traffic and exploiting sparsity patterns that the hardware can accelerate. These dimensions are not alternatives but layers in an optimization stack. A practitioner deploying ResNet-50 to a mobile device might prune 50 percent of its filters, quantize the remaining weights to INT8, and fuse batch normalization into convolution, with each technique compounding the gains of the others.
 
@@ -209,8 +215,8 @@ from mlsysim.fmt import fmt, check
 
 class QuantizationEnergyPhysics:
     # Energy values sourced from the mlsysim registry (Hardware.Tech).
-    ENERGY_DRAM_ACCESS_PJ = Hardware.Tech.Memory.HBM3.energy_per_access
-    ENERGY_DRAM_PJ_PER_BYTE = Hardware.Tech.Memory.HBM3.energy_per_byte
+    ENERGY_DRAM_ACCESS_PJ = Hardware.Tech.Memory.DRAM.energy_per_access
+    ENERGY_DRAM_PJ_PER_BYTE = Hardware.Tech.Memory.DRAM.energy_per_byte
     ENERGY_FLOP_FP32_PJ = Hardware.Tech.Op.FlopFp32.energy
     ENERGY_OP_INT8_PJ = Hardware.Tech.Op.OpInt8.energy
     ENERGY_ADD_FP32_PJ = Hardware.Tech.Op.AddFp32.energy
@@ -635,6 +641,12 @@ Optimization is a search for the Pareto frontier.
 : **The Optimization Trade-Offs**: Region 1 = Free Lunch, Region 2 = Efficient Trade, Region 3 = Danger Zone. Batch size affects training dynamics rather than model quality directly. These ranges are empirical guidelines from published benchmarks [@jacob2018; @han2015deep; @hinton2015distilling]; actual results vary with architecture, task, and implementation quality. {#tbl-optimization-tradeoffs tbl-colwidths="[22,27,17,25,9]"}
 
 The table reveals a pattern: techniques that preserve model structure (fusion, precision reduction) tend to be "free" or cheap, while techniques that alter structure (pruning, distillation) extract more savings but require careful tuning.
+
+::: {.column-margin}
+![](images/svg/model_compression_dam_locator.svg){width="100%" fig-alt="Triangle with three labeled nodes, D at top, A at lower left, M at lower right, connected by violet edges. All three nodes are filled in distinct colors, signaling three coupled axes with no single dominant one."}
+
+*Compression couples Data, Algorithm, and Machine; no free lunch.*
+:::
 
 Each deployment context imposes a binding constraint: memory capacity on mobile devices, latency on real-time systems, energy on battery-powered sensors. The optimization techniques that follow address these constraints at three successive levels of the stack. We begin with structural methods that modify *what* computations occur, reducing the model's parameter count and operation count to fit tighter memory and compute budgets. We then turn to precision techniques that reduce how many bits represent each value, directly shrinking memory footprint and accelerating arithmetic. Finally, we address architectural approaches that improve how efficiently the remaining operations execute on physical hardware, closing the gap between theoretical savings and measured performance.
 
@@ -3174,8 +3186,8 @@ class EnergyDividend:
     # Energy values sourced from the mlsysim registry (Hardware.Tech).
     ENERGY_ADD_FP32_PJ = Hardware.Tech.Op.AddFp32.energy
     ENERGY_ADD_INT8_PJ = Hardware.Tech.Op.AddInt8.energy
-    ENERGY_DRAM_ACCESS_PJ = Hardware.Tech.Memory.HBM3.energy_per_access
-    ENERGY_DRAM_PJ_PER_BYTE = Hardware.Tech.Memory.HBM3.energy_per_byte
+    ENERGY_DRAM_ACCESS_PJ = Hardware.Tech.Memory.DRAM.energy_per_access
+    ENERGY_DRAM_PJ_PER_BYTE = Hardware.Tech.Memory.DRAM.energy_per_byte
     ENERGY_OP_INT8_PJ = Hardware.Tech.Op.OpInt8.energy
 
     e_add_fp32 = ENERGY_ADD_FP32_PJ.m_as('pJ')
@@ -5210,6 +5222,12 @@ class ConvFusionCalc:
 
 The arithmetic operations remain identical, but memory traffic drops from 6 transfers to 2 transfers (`{python} ConvFusionCalc.transfer_reduction_str`$\times$ reduction). For a ResNet-50 layer with 256 channels and spatial size $28{\times}28$, this eliminates `{python} ConvFusionCalc.conv_bn_relu_mem_math` of intermediate memory traffic per layer.
 
+::: {.column-margin}
+![](images/svg/vol1_model_compression_margin_002.svg){width="100%" fig-alt="Two bars: a tall unfused bar with many memory transfers beside a much shorter fused bar with few, while a separate arithmetic bar stays the same height in both."}
+
+*Operator fusion cuts memory transfers while arithmetic stays unchanged.*
+:::
+
 \index{Operator Fusion!attention (FlashAttention)}
 The same principle extends beyond CNNs. General matrix multiply (GEMM) bias-activation fusion eliminates intermediate writes in transformer linear layers by computing element-wise operations in registers immediately after each matrix multiplication output element. Attention tiling, as in FlashAttention[^fn-flashattention-fusion], reduces HBM traffic from $\mathcal{O}(S^2)$ to $\mathcal{O}(S)$ for long-context transformers by processing attention in SRAM-sized tiles rather than materializing the full $S{\times}S$ attention matrix, as detailed in @sec-model-training-flash-attention-ioaware-attention-optimization-3da0.
 
@@ -6922,6 +6940,12 @@ While sparsity offers significant efficiency advantages, several challenges limi
 \index{Compressed Sparse Row!storage format}
 The central challenge is the gap between theoretical and practical speedups. Unstructured pruning removes individual weights based on importance, creating irregular patterns that hardware accelerators struggle to exploit. Most GPUs and TPUs optimize for structured data; without regular patterns, they cannot skip zero elements efficiently. Pruning algorithms themselves introduce overhead, as determining which weights to prune requires sophisticated importance estimation that can be computationally expensive for large models. Even when sparsity is achieved, sparse matrix storage formats add indexing overhead that can offset computational savings. @Sec-appdx-algorithm-foundations-sparse-matrix-formats-0bd0 details the Compressed Sparse Row layout and quantifies how its per-nonzero metadata makes the memory payoff density-dependent, which is why a rule of thumb holds that sparsity typically must exceed 90–95 percent to be worthwhile for performance.
 
+::: {.column-margin}
+![](images/svg/vol1_model_compression_margin_003.svg){width="100%" fig-alt="A speedup curve that stays flat and below the break-even line until a marked knee near 90 to 95 percent zeros, then climbs; the low-payoff region left of the knee is shaded red."}
+
+*Unstructured sparsity pays off only past a 90 to 95 percent zero fraction.*
+:::
+
 The accuracy-efficiency trade-off requires careful calibration. Aggressive sparsity can degrade accuracy beyond acceptable thresholds, and the relationship is often nonlinear, as models may tolerate 70 percent sparsity with minimal impact but collapse at 80 percent. Finding the optimal operating point requires extensive experimentation.
 
 Energy efficiency is not guaranteed. While sparse operations reduce arithmetic operations, the overhead of sparse indexing and irregular memory access can increase power consumption on hardware not optimized for sparse patterns. On edge devices with tight power budgets, these overheads may outweigh the benefits.
@@ -7259,6 +7283,12 @@ A critical caveat applies when translating profiling metrics into optimization e
 
 Reducing a model's FLOPs by 50 percent does not guarantee 50 percent latency reduction. Memory-bound operations (common in LLM inference and normalization layers) see minimal benefit from compute reduction because they are bottlenecked by data movement, not arithmetic. Critically, Amdahl's Law\index{Amdahl's Law!model compression} (@sec-appdx-machine-foundations-amdahls-law-gustafsons-law-b741) applies at the system level: if model inference accounts for only `{python} AmdahlCompression.model_fraction_pct_str` of end-to-end latency (with the remaining `{python} AmdahlCompression.non_model_pct_str` spent on data loading, preprocessing, and postprocessing), then even perfect model optimization yields at most `{python} AmdahlCompression.max_speedup_str`$\times$ overall speedup. Always profile on target hardware before estimating optimization benefits.
 
+::: {.column-margin}
+![](images/svg/vol1_model_compression_margin_004.svg){width="100%" fig-alt="A horizontal stacked bar: a small 20 percent segment labeled model inference shaded blue, and a wide 80 percent segment labeled other pipeline work in gray."}
+
+*Compression hits an end-to-end ceiling once non-model work dominates the pipeline.*
+:::
+
 :::
 
 Consider profiling a Vision Transformer (ViT) for edge deployment. Using PyTorch Profiler reveals three key findings: attention layers consume 65 percent of total FLOPs (highly amenable to structured pruning), layer normalization consumes 8 percent of latency despite only 2 percent of FLOPs (a memory-bound operation), and the final classification head consumes 1 percent of computation but 15 percent of parameter memory. This profile suggests a clear priority ordering: first, apply magnitude-based pruning to attention layers for high FLOP reduction; second, quantize the classification head to INT8 for large memory savings with minimal accuracy impact; third, fuse layer normalization operations to reduce the memory bandwidth bottleneck.
@@ -7365,6 +7395,12 @@ class ResNet50Int8Metrics:
 ```
 
 When quantizing ResNet-50 from FP32 to INT8, baseline metrics show Top-1 accuracy of `{python} ResNet50Int8Metrics.fp32_top1_str`, inference latency on V100 of `{python} ResNet50Int8Metrics.fp32_latency_ms_str`, model size of `{python} ResNet50Int8Metrics.fp32_size_mb_str`, and energy per inference of `{python} ResNet50Int8Metrics.fp32_energy_j_str`. Postquantization metrics reveal Top-1 accuracy of `{python} ResNet50Int8Metrics.int8_top1_str` (`{python} ResNet50Int8Metrics.top1_drop_str` percentage-point degradation), inference latency of `{python} ResNet50Int8Metrics.int8_latency_ms_str` (`{python} ResNet50Int8Metrics.latency_speedup_str`$\times$ speedup), model size of `{python} ResNet50Int8Metrics.int8_size_mb_str` (`{python} ResNet50Int8Metrics.size_reduction_str`$\times$ reduction), and energy per inference of `{python} ResNet50Int8Metrics.int8_energy_j_str` (`{python} ResNet50Int8Metrics.energy_improvement_str`$\times$ improvement). Additional analysis shows per-class accuracy degradation ranging from `{python} ResNet50Int8Metrics.per_class_min_drop_str` to `{python} ResNet50Int8Metrics.per_class_max_drop_str` percentage points with highest impact on fine-grained categories, calibration error increasing from `{python} ResNet50Int8Metrics.calibration_error_fp32_str` to `{python} ResNet50Int8Metrics.calibration_error_int8_str`, and INT8 quantization providing `{python} ResNet50Int8Metrics.latency_speedup_str`$\times$ speedup on GPU but only `{python} ResNet50Int8Metrics.cpu_speedup_str`$\times$ on CPU, demonstrating hardware-dependent gains.
+
+::: {.column-margin}
+![](images/svg/model_compression_int8_beforeafter.svg){width="100%" fig-alt="Two strokes from FP32 to INT8, each ending in a dot. The model-size stroke falls steeply to about a quarter of its start (4x smaller). The accuracy stroke stays flat near the top. Quantization shrinks the model 4 times while accuracy barely moves."}
+
+*INT8 quantization: size collapses about 4 times, accuracy holds.*
+:::
 
 With these comprehensive baselines in place, the measurement framework must track optimization impact systematically. Rather than evaluating techniques in isolation, applying our three-dimensional framework requires understanding how different approaches interact when combined. Sequential application can lead to compounding benefits or unexpected interactions that diminish overall effectiveness. @Sec-benchmarking-compression-validation-efficiencyquality-frontier-e9c4 provides additional structured evaluation methods for comprehensive performance assessment.
 

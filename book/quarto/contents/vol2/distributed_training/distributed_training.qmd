@@ -142,6 +142,12 @@ $$ T_{\text{step}}(N) = \frac{T_{\text{compute}}}{N} + T_{\text{comm}}(N) + T_{\
 
 The critical term is the communication-computation ratio $\rho = T_{\text{comm}}(N)/(T_{\text{compute}}/N)$. This ratio determines whether a cluster behaves as a supercomputer or a collection of idling heaters.
 
+::: {.column-margin}
+![](images/svg/vol2_distributed_training_margin_001.svg){width="100%" fig-alt="Margin illustration showing Communication-computation ratio threshold at rho = 1."}
+
+*Past a communication-to-compute threshold, scaling stops being ideal.*
+:::
+
 *   **Compute-bound (low ratio)**: $T_{\text{compute}}/N \gg T_{\text{comm}}(N)$. The GPUs spend most of their time multiplying matrices. This is the ideal state, typical for large batch sizes on dense models (like ResNet).
 *   **Communication-bound (high ratio)**: $T_{\text{comm}}(N) \approx T_{\text{compute}}/N$. The GPUs spend significant time waiting for gradients or activations to arrive. This is the common state for large language models (LLMs) and deep learning recommendation models (DLRMs), where parameter synchronization saturates the network.
 
@@ -544,6 +550,12 @@ AllReduce operations implement implicit barriers where no worker can proceed unt
 
 Worker failures during AllReduce cause all other workers to block indefinitely while waiting for the missing contribution. Without timeout mechanisms, the entire training job hangs rather than failing cleanly. Production systems implement watchdog timers typically set to 5--10 minutes to detect and terminate stuck jobs.
 
+::: {.column-margin}
+![](images/svg/vol2_distributed_training_margin_002.svg){width="100%" fig-alt="Margin illustration showing Missing worker blocks peers at all-reduce barrier."}
+
+*One missing worker stalls the entire AllReduce barrier.*
+:::
+
 Gradient mismatches occur when workers disagree on which tensors to synchronize due to conditional computation paths or dynamic batching. AllReduce operations may block waiting for tensors that some workers never send. This commonly occurs with variable-length sequences in NLP models, dynamic computation graphs, and mixture-of-experts with different routing decisions.
 
 Straggler-induced delays arise because iteration time equals the slowest worker's time plus synchronization overhead. A single slow worker, whether due to thermal throttling, network congestion, or OS jitter, delays all workers and reduces cluster utilization. At 1000 GPUs with 1 percent probability of straggler per GPU per step, approximately 10 GPUs straggle every iteration.
@@ -722,7 +734,7 @@ Gradient accumulation offers a direct remedy by keeping all communication within
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt, check, fmt_int, MarkdownStr
+from mlsysim.fmt import fmt, check, fmt_int, fmt_usd, MarkdownStr
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GradAccumScenario:
@@ -748,20 +760,20 @@ class GradAccumScenario:
     comm_8gpu_ms_str = fmt(comm_8gpu_ms, precision=1, commas=False, suffix=" ms")
     comm_overhead_pct_str = fmt(overhead_val, precision=3, commas=False, suffix=" percent")
     ga_training_hours_str = fmt(ga_training_hours_val, precision=1, commas=False, suffix=" hours")
-    baseline_cost_str = fmt(baseline_cost_val, precision=0)
-    ga_cost_str = fmt_int(round(ga_cost_val))
-    ga_savings_str = fmt_int(round(ga_savings_val))
+    baseline_cost_str = fmt_usd(baseline_cost_val, precision=0)
+    ga_cost_str = fmt_usd(round(ga_cost_val))
+    ga_savings_str = fmt_usd(round(ga_savings_val))
     ga_savings_pct_str = fmt(ga_savings_pct_val, precision=1, commas=False, suffix=" percent")
     n_gpus_ga_str = fmt(n_gpus_ga, precision=0, commas=False, suffix=" GPUs")
     batch_per_gpu_str = fmt(batch_per_gpu, precision=0, commas=False)
     accum_steps_str = fmt(accum_steps, precision=0, commas=False)
     compute_8gpu_ms_str = fmt(compute_8gpu_ms, precision=0, commas=False, suffix=" ms")
-    hourly_rate_str = fmt(hourly_rate, precision=0, commas=False)
+    hourly_rate_str = fmt_usd(hourly_rate, precision=0, commas=False, suffix="/hr")
     n_gpus_32_str = fmt(32, precision=0, commas=False, suffix=" GPUs")
     network_label_str = MarkdownStr("10G")
 ```
 
-**Problem**: A GPT-2 run on a commodity `{python} GradAccumScenario.network_label_str` network is communication-bound at `{python} GradAccumScenario.n_gpus_32_str`, costing \$`{python} GradAccumScenario.baseline_cost_str` for a fixed number of samples. Can a single 8-GPU node achieve the same effective batch size more efficiently using gradient accumulation?
+**Problem**: A GPT-2 run on a commodity `{python} GradAccumScenario.network_label_str` network is communication-bound at `{python} GradAccumScenario.n_gpus_32_str`, costing `{python} GradAccumScenario.baseline_cost_str` for a fixed number of samples. Can a single 8-GPU node achieve the same effective batch size more efficiently using gradient accumulation?
 
 **Math**:
 
@@ -769,13 +781,13 @@ class GradAccumScenario:
 2. **Communication overhead**: With `{python} GradAccumScenario.accum_steps_str`-step accumulation, we AllReduce once every `{python} GradAccumScenario.accum_steps_str` steps.
    - Overhead = `{python} GradAccumScenario.comm_8gpu_ms_str` / (`{python} GradAccumScenario.accum_steps_str` $\times$ `{python} GradAccumScenario.compute_8gpu_ms_str`) $\approx$ `{python} GradAccumScenario.comm_overhead_pct_str`.
 3. **Training duration**: Total time is `{python} GradAccumScenario.ga_training_hours_str`.
-4. **Total cost**: `{python} GradAccumScenario.ga_training_hours_str` $\times$ USD `{python} GradAccumScenario.hourly_rate_str`/hr = USD `{python} GradAccumScenario.ga_cost_str`.
+4. **Total cost**: `{python} GradAccumScenario.ga_training_hours_str` $\times$ `{python} GradAccumScenario.hourly_rate_str` = `{python} GradAccumScenario.ga_cost_str`.
 
-**Systems insight**: Gradient accumulation\index{Gradient Accumulation!communication overhead} saves \$`{python} GradAccumScenario.ga_savings_str` (`{python} GradAccumScenario.ga_savings_pct_str`) by concentrating computation where bandwidth is abundant (NVLink within the node) and minimizing the frequency of synchronization. When the network is slow, do not scale out—scale the batch size locally.
+**Systems insight**: Gradient accumulation\index{Gradient Accumulation!communication overhead} saves `{python} GradAccumScenario.ga_savings_str` (`{python} GradAccumScenario.ga_savings_pct_str`) by concentrating computation where bandwidth is abundant (NVLink within the node) and minimizing the frequency of synchronization. When the network is slow, do not scale out—scale the batch size locally.
 
 :::
 
-The full configuration is: `{python} GradAccumScenario.n_gpus_ga_str` $\times$ batch `{python} GradAccumScenario.batch_per_gpu_str` $\times$ `{python} GradAccumScenario.accum_steps_str` accumulation steps = `{python} GradAccumScenario.effective_batch_str` effective batch, with communication overhead `{python} GradAccumScenario.comm_8gpu_ms_str` ÷ (`{python} GradAccumScenario.accum_steps_str` $\times$ `{python} GradAccumScenario.compute_8gpu_ms_str`) = `{python} GradAccumScenario.comm_overhead_pct_str`. Training time is `{python} GradAccumScenario.ga_training_hours_str`, costing USD `{python} GradAccumScenario.ga_cost_str` vs. USD `{python} GradAccumScenario.baseline_cost_str` for the 32-GPU commodity-network run—a USD `{python} GradAccumScenario.ga_savings_str` savings (`{python} GradAccumScenario.ga_savings_pct_str` reduction) at the cost of a modestly longer wall-clock run.
+The full configuration is: `{python} GradAccumScenario.n_gpus_ga_str` $\times$ batch `{python} GradAccumScenario.batch_per_gpu_str` $\times$ `{python} GradAccumScenario.accum_steps_str` accumulation steps = `{python} GradAccumScenario.effective_batch_str` effective batch, with communication overhead `{python} GradAccumScenario.comm_8gpu_ms_str` ÷ (`{python} GradAccumScenario.accum_steps_str` $\times$ `{python} GradAccumScenario.compute_8gpu_ms_str`) = `{python} GradAccumScenario.comm_overhead_pct_str`. Training time is `{python} GradAccumScenario.ga_training_hours_str`, costing `{python} GradAccumScenario.ga_cost_str` vs. `{python} GradAccumScenario.baseline_cost_str` for the 32-GPU commodity-network run, a `{python} GradAccumScenario.ga_savings_str` savings (`{python} GradAccumScenario.ga_savings_pct_str` reduction) at the cost of a modestly longer wall-clock run.
 
 Four insights emerge. NVLink enables efficient scaling within single nodes (`{python} Scaling8GPU.efficiency_8gpu_str` efficiency), while inter-node communication kills efficiency (dropping to `{python} Scaling32GPU.efficiency_32gpu_str`). Gradient accumulation beats naive scale-out for communication-bound runs when the scale-out network is slow, so the sweet spot for this GPT-2 scenario is 8 GPUs per node with gradient accumulation, not naive scaling to 32+ GPUs. OpenAI's GPT-2 paper reports training on 32 V100s across 4 nodes using optimized communication (likely gradient accumulation combined with pipeline parallelism), not pure data parallelism.
 
@@ -1247,6 +1259,12 @@ $$ \eta_{\text{scaling}} = \frac{T_{\text{compute}}}{N \times T_{\text{step}}(N)
 
 The equation reveals the **Scaling Wall**: as $N$ increases, the compute term $(T_{\text{compute}}/N)$ shrinks, but the communication and synchronization terms can remain constant or grow. Eventually, the denominator is dominated by overhead, driving efficiency toward zero. Beyond wall-clock time, this communication overhead imposes an energy tax\index{Energy Tax!communication overhead} that scales with physical distance between devices.
 
+::: {.column-margin}
+![](images/svg/vol2_distributed_training_margin_003.svg){width="100%" fig-alt="Margin illustration showing HBM, NVLink, and InfiniBand energy per bit."}
+
+*Communication energy climbs from HBM out to the network.*
+:::
+
 ::: {#psp-distributed-training-energy-tax-scale .callout-perspective title="The energy tax of scale"}
 
 Distributed training is a race against energy as much as against time. In a single GPU, moving a byte from HBM to the cores costs roughly 1–2 pJ/bit. Moving that same byte across an NVLink interconnect costs 5–10 pJ/bit. Moving it across an InfiniBand network through switches costs 20–50 pJ/bit.
@@ -1688,6 +1706,12 @@ class FrontierModelParallelRecap:
     frontier_params_b_str = fmt(params_b, precision=0)
 ```
 
+::: {.column-margin}
+![](images/svg/distributed_training_memory_budget.svg){width="100%" fig-alt="Ladder of three memory rungs for a 175B-parameter mixed-precision Adam training state: optimizer state 2,100 GB (longest), gradients 350 GB, and weights 350 GB. The optimizer rung is about six times the others."}
+
+*Optimizer state, not weights, dominates the per-replica training budget.*
+:::
+
 Even with ZeRO-3 fully deployed, sharding optimizer states, gradients, and parameters across workers, some architectures remain intractable. Tensor parallelism, illustrated in @fig-model-parallel-flow, addresses this by partitioning individual weight matrices across devices; pipeline parallelism partitions layers across stages and is introduced later in @sec-distributed-training-systems-systems-pipeline-parallelism-8748. For a `{python} FrontierModelParallelRecap.frontier_params_b_str`B parameter model, weights alone occupy `{python} ModelParallelMemoryFacts.weight_gb_str`, or about `{python} ModelParallelMemoryFacts.weight_per_gpu_str` per GPU across 64 GPUs. Full mixed-precision Adam training state is much larger: `{python} ModelParallelMemoryFacts.full_state_gb_str` globally, or roughly `{python} ModelParallelMemoryFacts.full_state_per_gpu_str` per GPU before activations. This distinction matters because optimizer sharding reduces static state, but it does not eliminate the activation and per-layer capacity constraints that force model parallelism.
 
 ::: {#fig-model-parallel-flow fig-env="figure" fig-pos="htb" fig-cap="**Tensor Parallelism Data Flow**: Tensor parallelism column-splits a single weight matrix ($W_0\ldots W_3$) across four GPUs, with each GPU computing a partial output that is recombined through an AllGather. The companion strategy, pipeline parallelism, partitions layers vertically across stages and is shown separately in the layer-block figure. The two strategies are often combined in hybrid 3D parallelism for frontier models." fig-alt="Single panel showing tensor parallelism: a weight matrix column-split as W0, W1, W2, W3 across four GPUs, with partial outputs combined via AllGather."}
@@ -2019,6 +2043,12 @@ class TensorParallelBandwidth:
 :::
 
 The interconnect topology dictates which form of model parallelism is viable at each level of the cluster hierarchy. Tensor parallelism's per-layer synchronization demands NVLink-class bandwidth; pipeline parallelism's boundary-only communication tolerates InfiniBand. This bandwidth pattern creates the design pressure for a hybrid: use tensor parallelism for bandwidth-intensive intra-layer splits and pipeline parallelism for coarser inter-layer splits.
+
+::: {.column-margin}
+![](images/svg/vol2_distributed_training_margin_004.svg){width="100%" fig-alt="Margin illustration showing NVLink bandwidth versus NDR InfiniBand bandwidth."}
+
+*Tensor parallelism needs NVLink bandwidth; pipeline parallelism tolerates slower fabric.*
+:::
 
 Megatron-style tensor parallelism[^fn-megatron] [@shoeybi2019megatron] partitions matrix multiplications in two ways. Examine @fig-tensor-parallel-split: column-parallel splitting divides weight matrices along columns for QKV projections, allowing independent computation across GPUs, while row-parallel splitting divides along rows for output layers, requiring AllReduce to combine partial sums at the end of each block.
 
@@ -3110,7 +3140,7 @@ class YoungDaly:
     t_opt_hr_str = fmt(t_opt_hr_val, precision=1, suffix=" hours")
     opt_overhead_pct_str = fmt(total_overhead * 100, precision=1, commas=False, suffix=" percent")
     safe_loss_pct_str = fmt(safe_overhead * 100, precision=1, commas=False, suffix=" percent")
-    daily_savings_str = fmt_int(round(diff_daily), commas=True)
+    daily_savings_str = fmt_usd(round(diff_daily), commas=True)
     cluster_mtbf_hr_str = fmt(cluster_mtbf_hr, precision=1, suffix=" hours")
     sparse_interval_hr_str = fmt(sparse_interval_hr_val, precision=0, suffix=" hours")
     num_gpus_str = fmt(num_gpus, precision=0, commas=False)
@@ -3119,7 +3149,7 @@ class YoungDaly:
     t_write_min_str = fmt(t_write_min, precision=0, commas=False, suffix="-minute")
 ```
 
-The Young-Daly formula establishes the optimal checkpoint interval as $\tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}_{\text{system}}}$, where $T_{\text{write}}$ is checkpoint write time and $\text{MTBF}_{\text{system}}$ is mean time between system failures. For a `{python} YoungDaly.num_gpus_str`-GPU cluster at the canonical `{python} YoungDaly.gpu_mttf_hours_str` per-GPU MTBF, the cluster-level $\text{MTBF}_{\text{system}}$ is `{python} YoungDaly.cluster_mtbf_hr_str` ($\text{MTBF}_{\text{GPU}}/N$); with a `{python} YoungDaly.t_write_min_str` checkpoint time, the optimal interval is approximately `{python} YoungDaly.t_opt_min_str` (~`{python} YoungDaly.t_opt_hr_str`), with an unavoidable checkpoint-plus-rework tax of `{python} YoungDaly.opt_overhead_pct_str`. Checkpointing every `{python} YoungDaly.safe_interval_min_str` "to be safe" raises the total tax to `{python} YoungDaly.safe_loss_pct_str`, while checkpointing every `{python} YoungDaly.sparse_interval_hr_str` risks losing significant work on failure. For larger models where checkpoint time increases to 15 minutes due to model size and storage bandwidth, the optimal interval shifts significantly. The cost of suboptimal checkpointing scales with cluster size: a 1024-GPU cluster loses approximately USD `{python} YoungDaly.daily_savings_str` per day to excessive checkpointing when using a 15-minute interval instead of the Young-Daly optimum.
+The Young-Daly formula establishes the optimal checkpoint interval as $\tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}_{\text{system}}}$, where $T_{\text{write}}$ is checkpoint write time and $\text{MTBF}_{\text{system}}$ is mean time between system failures. For a `{python} YoungDaly.num_gpus_str`-GPU cluster at the canonical `{python} YoungDaly.gpu_mttf_hours_str` per-GPU MTBF, the cluster-level $\text{MTBF}_{\text{system}}$ is `{python} YoungDaly.cluster_mtbf_hr_str` ($\text{MTBF}_{\text{GPU}}/N$); with a `{python} YoungDaly.t_write_min_str` checkpoint time, the optimal interval is approximately `{python} YoungDaly.t_opt_min_str` (~`{python} YoungDaly.t_opt_hr_str`), with an unavoidable checkpoint-plus-rework tax of `{python} YoungDaly.opt_overhead_pct_str`. Checkpointing every `{python} YoungDaly.safe_interval_min_str` "to be safe" raises the total tax to `{python} YoungDaly.safe_loss_pct_str`, while checkpointing every `{python} YoungDaly.sparse_interval_hr_str` risks losing significant work on failure. For larger models where checkpoint time increases to 15 minutes due to model size and storage bandwidth, the optimal interval shifts significantly. The cost of suboptimal checkpointing scales with cluster size: a 1024-GPU cluster loses approximately `{python} YoungDaly.daily_savings_str` per day to excessive checkpointing when using a 15-minute interval instead of the Young-Daly optimum.
 
 ## Summary {#sec-distributed-training-systems-summary}
 

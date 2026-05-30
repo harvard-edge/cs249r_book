@@ -119,6 +119,12 @@ class TrainingScenarios:
 
 ## Training Systems Fundamentals {#sec-model-training-training-systems-fundamentals-05d2}
 
+::: {.column-margin}
+![](images/svg/training_cost_asymmetry.svg){width="100%" fig-alt="A cost curve that stays nearly flat across model scale, then rises almost vertically at the right, with a marked knee point and a shaded danger zone past it. Training cost explodes at frontier scale."}
+
+*Training cost stays flat across scale, then explodes past the frontier knee.*
+:::
+
 The frameworks examined in @sec-ml-frameworks provided the execution substrate: computational graphs that schedule operations, automatic differentiation that computes gradients, and hardware abstractions that target diverse accelerators. Those tools make a single training step possible. This chapter confronts what happens when that step must execute billions of times, and what systems engineering is required to do so within practical time and budget constraints.
 
 \index{Training!cost asymmetry}\index{Training!inference vs. training}
@@ -214,6 +220,12 @@ The simplification is valid when the pipeline is correctly staged: at training s
 2.  **Distinction (durable)**: Unlike the general iron law, which models all three cost terms $(D_{\text{vol}}/\text{BW}, O/(R_{\text{peak}} \cdot \eta_{\text{hw}}), L_{\text{lat}})$, this simplified form assumes data movement and communication are not the binding constraint, an assumption that breaks for small-batch workloads or bandwidth-limited deployments.
 3.  **Common pitfall**: A frequent misconception is that $\eta_{\text{hw}}$ is fixed by hardware. System efficiency is a pipeline property: memory bandwidth saturation, kernel launch overhead, and synchronization barriers each reduce $\eta_{\text{hw}}$ independently, and diagnosing which factor dominates requires profiling rather than reading hardware specs.
 
+:::
+
+::: {.column-margin}
+![](images/svg/training_iron_law_bars.svg){width="100%" fig-alt="A horizontal bar split into three segments labeled D, C, and L for data, compute, and latency. The middle compute segment is the widest and shaded orange; the data and latency segments are narrow and gray, showing compute dominates training time."}
+
+*Training is compute-dominated: data and latency overlap away.*
 :::
 
 @Eq-training-iron-law reveals three levers for improvement: reduce total operations through algorithmic innovation, increase peak throughput through hardware utilization, or improve utilization through better pipeline orchestration. Each optimization technique in this chapter pulls one or more of these levers, as summarized in @tbl-iron-law-mapping.
@@ -1113,6 +1125,12 @@ class GPT2Optimizer:
 # Note: Use GPT2Optimizer.param_fp32_str directly.
 ```
 
+::: {.column-margin}
+![](images/svg/training_optimizer_memory.svg){width="100%" fig-alt="A single stacked memory bar split into three segments, Params, Grads, and Adam optimizer state in a 1 to 1 to 2 ratio, with the optimizer-state segment highlighted as the largest single piece, half the total."}
+
+*Adam state is the largest piece: 2$\times$ the weights, half of training memory.*
+:::
+
 ::: {#nbk-gpt2-optimizer .callout-notebook title="GPT-2 optimizer memory requirements"}
 
 A representative GPT-2 XL training configuration uses the Adam optimizer with the following hyperparameters:
@@ -1436,6 +1454,12 @@ class GPT2ActivationMemory:
 ```
 
 A simple three-layer network processing MNIST requires kilobytes of activation storage. GPT-2 processing a single batch requires over `{python} GPT2ActivationMemory.total_act_str`, more than most accelerators can hold. That gap defines the engineering challenge this chapter addresses. For the mathematical foundations of how backpropagation drives these memory costs, including the full training memory equation ($M_{\text{total}} = M_{\text{weights}} + M_{\text{gradients}} + M_{\text{optimizer}} + M_{\text{activations}}$), see @sec-appdx-algorithm-foundations-true-cost-training-memory-e54e. Modern training systems use autodifferentiation (see @sec-ml-frameworks) to handle gradient computations automatically, but the underlying memory and computation patterns remain the systems engineer's responsibility to manage.
+
+::: {.column-margin}
+![](images/svg/vol1_training_margin_001.svg){width="100%" fig-alt="Margin illustration showing MNIST activation memory, GPT-2 activations, and V100 HBM ceiling."}
+
+*Activation memory spans MNIST toys to GPT-scale training.*
+:::
 
 #### Activation memory requirements {#sec-model-training-activation-memory-requirements-f44c}
 
@@ -2649,6 +2673,12 @@ A ResNet-50 model on modern accelerator hardware can process 1,000 images per se
 Training data traverses three memory tiers on its way from disk to accelerator, and the bandwidth gap between these tiers, spanning three orders of magnitude, is the central challenge of data pipeline design. The effective transfer rate through the hierarchy is bounded by its slowest link, as @eq-memory-hierarchy-bandwidth shows:
 $$R_{\text{memory}} =\min(\text{BW}_{\text{storage}}, \text{BW}_{\text{system}}, \text{BW}_{\text{accelerator}})$$ {#eq-memory-hierarchy-bandwidth}
 
+::: {.column-margin}
+![](images/svg/vol1_training_margin_002.svg){width="100%" fig-alt="Margin illustration showing Storage, DRAM, and HBM bandwidth ladder for training data path."}
+
+*Bandwidth steps up the storage to DRAM to HBM hierarchy.*
+:::
+
 ```{python}
 #| echo: false
 #| label: memory-hierarchy-bandwidth-recap
@@ -3323,7 +3353,7 @@ Every batch-size and precision decision so far has aimed at wall-clock time; at 
 # │          ub_compute_math, ub_time_math
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware
-from mlsysim.fmt import fmt, fmt_math, check
+from mlsysim.fmt import fmt, fmt_usd, fmt_math, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class LlamaTraining:
@@ -3344,8 +3374,8 @@ class LlamaTraining:
     num_gpus = Systems.Clusters.Training_1K.total_accelerators
 
     # Economics
-    rental_rate = Infrastructure.Pricing.Cloud.GpuTrainingUtilityScenarioPerHour.rate.m_as(USD / hour)
-    purchase_price = Infrastructure.Pricing.Capital.H100GpuPurchaseUsd.rate.m_as(USD)
+    rental_rate = Infrastructure.Pricing.Cloud.GpuTrainingUtilityScenarioPerHour.rate.m_as("dollar / hour")
+    purchase_price = Infrastructure.Pricing.Capital.H100GpuPurchaseUsd.rate.m_as("dollar")
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Compute Logic
@@ -3382,8 +3412,8 @@ class LlamaTraining:
     # Formatted strings
     ub_years_str = fmt(time_years, precision=1, commas=False, suffix=' years')
     ub_cluster_days_str = fmt(cluster_days, precision=1, commas=False, suffix=' days')
-    ub_rental_str = fmt(rental_cost/MILLION, precision=2, commas=False)
-    ub_purchase_str = fmt(purchase_cost/MILLION, precision=1, commas=False)
+    ub_rental_str = fmt_usd(rental_cost/MILLION, precision=2, commas=False, suffix="M")
+    ub_purchase_str = fmt_usd(purchase_cost/MILLION, precision=1, commas=False, suffix="M")
     ub_breakeven_str = fmt(breakeven_runs, precision=1, commas=False)
 
     ub_params_b_str = fmt(model.parameters.m_as(Bparam), precision=0, commas=False, suffix=" B")
@@ -3392,8 +3422,8 @@ class LlamaTraining:
     ub_utilization_pct_str = fmt(utilization * 100, precision=0, commas=False, suffix="%")
     ub_effective_tflops_str = fmt(effective_tflops, precision=1, commas=False, suffix=' TFLOP/s')
     ub_num_gpus_str = fmt(num_gpus, precision=0, suffix=' GPUs')
-    ub_rental_rate_str = fmt(rental_rate, precision=0, commas=False)
-    ub_purchase_price_str = fmt(purchase_price, precision=0, commas=True)
+    ub_rental_rate_str = fmt_usd(rental_rate, precision=0, commas=False, suffix="/hr")
+    ub_purchase_price_str = fmt_usd(purchase_price, precision=0, commas=True)
 
     # Pre-composed math expressions (avoids Pandoc \(...\) + {python} parsing failure)
     ub_compute_math = fmt_math(
@@ -3422,8 +3452,8 @@ class LlamaTraining:
 
 **The economics**:
 
-*   **Rental** (USD `{python} LlamaTraining.ub_rental_rate_str`/hr): `{python} LlamaTraining.ub_num_gpus_str` $\times$ 24 hrs $\times$ `{python} LlamaTraining.ub_cluster_days_str` $\times$ USD `{python} LlamaTraining.ub_rental_rate_str` ≈ USD `{python} LlamaTraining.ub_rental_str` Million.
-*   **Purchase** (USD `{python} LlamaTraining.ub_purchase_price_str` per GPU): `{python} LlamaTraining.ub_num_gpus_str` $\times$ USD `{python} LlamaTraining.ub_purchase_price_str` = USD `{python} LlamaTraining.ub_purchase_str` Million.
+*   **Rental (`{python} LlamaTraining.ub_rental_rate_str`)**: `{python} LlamaTraining.ub_num_gpus_str` $\times$ 24 hrs $\times$ `{python} LlamaTraining.ub_cluster_days_str` $\times$ `{python} LlamaTraining.ub_rental_rate_str` ≈ `{python} LlamaTraining.ub_rental_str`.
+*   **Purchase (`{python} LlamaTraining.ub_purchase_price_str` per GPU)**: `{python} LlamaTraining.ub_num_gpus_str` $\times$ `{python} LlamaTraining.ub_purchase_price_str` = `{python} LlamaTraining.ub_purchase_str`.
 
 **Systems insight**: A team must train `{python} LlamaTraining.ub_breakeven_str` models before buying becomes cheaper than renting. Cloud economics favors bursty workloads like training; on-premise favors steady-state workloads like inference.
 
@@ -4751,6 +4781,12 @@ Flash Attention decomposes this computation by partitioning queries into tiles a
 
 No $S{\times}S$ matrix ever exists in HBM. The largest intermediate tensor is $b{\times}b$ (typically $b = 128$), requiring only 64 KB for a $128{\times}128$ FP32 matrix compared to 64 MB for the full $4096{\times}4096$ matrix.
 
+::: {.column-margin}
+![](images/svg/vol1_training_margin_003.svg){width="100%" fig-alt="Margin illustration showing Full attention matrix versus SRAM tile."}
+
+*FlashAttention swaps the full attention matrix for small SRAM tiles.*
+:::
+
 The online softmax algorithm enables this decomposition. Traditional softmax requires knowing all inputs before computing any output: $\text{softmax}(x)_i = e^{x_i} / \sum_j e^{x_j}$. Flash Attention uses an incremental formulation that updates softmax statistics as new blocks arrive, tracking the running maximum $m$ (for numerical stability) and denominator $l$ as each block is processed, then rescaling accumulated outputs accordingly.
 
 #### Memory and IO complexity analysis {#sec-model-training-memory-io-complexity-analysis-5da5}
@@ -5192,7 +5228,7 @@ Both techniques enhance scalability and cost efficiency by reducing hardware req
 # │          accum_2wk_str, naive_2wk_str, comm_reduction_pct_str,
 # │          accum_steps_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, check, MarkdownStr
+from mlsysim.fmt import fmt_int, fmt_usd, fmt, check, MarkdownStr
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GradientAccumulation:
@@ -5237,12 +5273,13 @@ class GradientAccumulation:
     micro_batch_str = fmt(micro_batch, precision=0, commas=False)
     effective_batch_str = fmt(effective_batch, precision=0, commas=False)
     gpus_accum_str = fmt(gpus_accum, precision=0, commas=False, suffix=' GPUs')
-    naive_hourly_str = fmt(naive_hourly, precision=0, commas=False, suffix=' USD/hour')
-    accum_hourly_str = fmt(accum_hourly, precision=0, commas=False, suffix=' USD/hour')
-    savings_hourly_str = fmt(savings_hourly, precision=0, commas=False, suffix=' USD/hour')
+    gpu_hourly_rate_str = fmt_usd(gpu_hourly_rate, precision=0, commas=False, suffix="/hour")
+    naive_hourly_str = fmt_usd(naive_hourly, precision=0, commas=False, suffix="/hour")
+    accum_hourly_str = fmt_usd(accum_hourly, precision=0, commas=False, suffix="/hour")
+    savings_hourly_str = fmt_usd(savings_hourly, precision=0, commas=False, suffix="/hour")
     savings_pct_str = fmt(savings_pct, precision=0, commas=False, suffix='%')
-    accum_2wk_str = fmt_int(round(accum_2wk), commas=False, suffix=' K')
-    naive_2wk_str = fmt_int(round(naive_2wk), commas=False, suffix=' K')
+    accum_2wk_str = fmt_usd(round(accum_2wk), commas=False, suffix="K")
+    naive_2wk_str = fmt_usd(round(naive_2wk), commas=False, suffix="K")
     comm_reduction_pct_str = fmt(comm_reduction_pct, precision=0, commas=False, suffix='%')
     accum_steps_str = fmt(accum_steps, precision=0, commas=False, suffix=' steps')
     v100_mem_str = fmt(v100_mem_gb, precision=0, commas=False, suffix=' GiB')
@@ -5289,13 +5326,13 @@ Without Accumulation (naive approach):
 
 - `{python} GradientAccumulation.gpus_naive_str` $\times$ batch size $B=$ `{python} GradientAccumulation.micro_batch_str` = `{python} GradientAccumulation.effective_batch_str` effective batch
 - Gradient sync: `{python} GradientAccumulation.gpus_naive_str` → high communication overhead
-- Cost: USD 16/hour $\times$ `{python} GradientAccumulation.gpus_naive_str` = `{python} GradientAccumulation.naive_hourly_str`
+- Cost: `{python} GradientAccumulation.gpu_hourly_rate_str` $\times$ `{python} GradientAccumulation.gpus_naive_str` = `{python} GradientAccumulation.naive_hourly_str`
 
 With Accumulation (actual GPT-2 approach):
 
 - `{python} GradientAccumulation.gpus_accum_str` $\times$ (`{python} GradientAccumulation.micro_batch_str` $\times$ `{python} GradientAccumulation.accum_steps_str` accumulation) = `{python} GradientAccumulation.effective_batch_str` effective batch
 - Gradient sync: Only every `{python} GradientAccumulation.accum_steps_str` steps, only `{python} GradientAccumulation.gpus_accum_str`
-- Cost: USD 16/hour $\times$ `{python} GradientAccumulation.gpus_accum_str` = `{python} GradientAccumulation.accum_hourly_str`
+- Cost: `{python} GradientAccumulation.gpu_hourly_rate_str` $\times$ `{python} GradientAccumulation.gpus_accum_str` = `{python} GradientAccumulation.accum_hourly_str`
 - Savings: `{python} GradientAccumulation.savings_hourly_str` = `{python} GradientAccumulation.savings_pct_str` cost reduction
 
 **Trade-off Analysis**
@@ -5303,7 +5340,7 @@ With Accumulation (actual GPT-2 approach):
 - Wall-clock overhead: 4 serialized micro-batches per update = ~8 percent slower (pipeline overlap hides some overhead)
 - Memory overhead: Gradient accumulation buffer = negligible (gradients already needed)
 - Communication benefit: Sync frequency reduced by `{python} GradientAccumulation.accum_steps_str`$\times$ → communication time drops by `{python} GradientAccumulation.comm_reduction_pct_str`
-- Cost benefit: Training two weeks on `{python} GradientAccumulation.gpus_accum_str` = USD `{python} GradientAccumulation.accum_2wk_str` K vs. `{python} GradientAccumulation.gpus_naive_str` = USD `{python} GradientAccumulation.naive_2wk_str` K
+- Cost benefit: Training two weeks on `{python} GradientAccumulation.gpus_accum_str` = `{python} GradientAccumulation.accum_2wk_str` vs. `{python} GradientAccumulation.gpus_naive_str` = `{python} GradientAccumulation.naive_2wk_str`
 
 **Convergence Quality**
 
@@ -5584,7 +5621,7 @@ The GPT-2 case study demonstrates how targeted techniques compose to transform i
 # │ Imports: mlsysim.constants, mlsysim.book (fmt/check)
 # │ Exports: b_param_str..b_carbon_str, o_param_str..o_carbon_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, check
+from mlsysim.fmt import fmt_int, fmt_usd, fmt, check
 from mlsysim.physics import calc_activation_memory, model_memory
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -5646,7 +5683,7 @@ class GPT2SummaryCalc:
     b_total_mem_str = f"{fmt(b_total_mem, precision=1, commas=False)} GB"
     b_time_str = f"{fmt(b_time, precision=0, commas=False)} days"
     b_energy_str = f"{fmt_int(round(b_energy), commas=True)} kWh"
-    b_cost_str = f"${fmt(b_cost, precision=1, commas=True)}"
+    b_cost_str = fmt_usd(b_cost, precision=1, commas=True)
     b_carbon_str = f"~{fmt(b_carbon, precision=1, commas=False)} tons CO~2~"
 
     o_param_str = f"{fmt(o_param, precision=0, commas=False)} GB"
@@ -5657,26 +5694,27 @@ class GPT2SummaryCalc:
     o_total_mem_str = f"{fmt(o_total_mem, precision=1, commas=False)} GB"
     o_time_str = f"{fmt(o_time, precision=1, commas=False)} days"
     o_energy_str = f"{fmt_int(round(o_energy), commas=True)} kWh"
-    o_cost_str = f"${fmt(o_cost, precision=1, commas=True)}"
+    o_cost_str = fmt_usd(o_cost, precision=1, commas=True)
     o_carbon_str = f"~{fmt_int(round(o_carbon), commas=False)} tons CO~2~"
     energy_reduction_pct_str = fmt(energy_reduction_pct, precision=0, commas=False, suffix='%')
     grid_kg_kwh_str = fmt(grid_kg_co2_per_kwh, precision=2, commas=False)
+    electricity_rate_str = fmt_usd(electricity_usd_per_kwh, precision=2, commas=False, suffix="/kWh")
 ```
 
 @Tbl-gpt2-summary compiles the cluster-level impact of applying mixed-precision training, gradient checkpointing, and the data-pipeline utilization gains from the walkthrough to GPT-2.
 
-| **Metric**                                                   |               **FP32 Baseline**                |                 **Optimized**                  | **Technique Applied**                                                     |
-|:-------------------------------------------------------------|:----------------------------------------------:|:----------------------------------------------:|:--------------------------------------------------------------------------|
-| **Parameters**                                               |     `{python} GPT2SummaryCalc.b_param_str`     |     `{python} GPT2SummaryCalc.o_param_str`     | Mixed precision (FP16)                                                    |
-| **Gradients**                                                |     `{python} GPT2SummaryCalc.b_grad_str`      |     `{python} GPT2SummaryCalc.o_grad_str`      | Mixed precision (FP16)                                                    |
-| **Master Weights**                                           |    `{python} GPT2SummaryCalc.b_master_str`     |    `{python} GPT2SummaryCalc.o_master_str`     | AMP Overhead                                                              |
-| **Optimizer State (Adam)**                                   |      `{python} GPT2SummaryCalc.b_opt_str`      |      `{python} GPT2SummaryCalc.o_opt_str`      | Unchanged (FP32 moments)                                                  |
-| **Activations (batch=32)**                                   |      `{python} GPT2SummaryCalc.b_act_str`      |      `{python} GPT2SummaryCalc.o_act_str`      | Gradient checkpointing + FP16                                             |
-| **Total Memory**                                             | **`{python} GPT2SummaryCalc.b_total_mem_str`** | **`{python} GPT2SummaryCalc.o_total_mem_str`** | —                                                                         |
-| **Training Time (32 V100s)**                                 |     `{python} GPT2SummaryCalc.b_time_str`      |     `{python} GPT2SummaryCalc.o_time_str`      | Data prefetching + utilization                                            |
-| **Energy Consumption**                                       |    `{python} GPT2SummaryCalc.b_energy_str`     |    `{python} GPT2SummaryCalc.o_energy_str`     | Reduced time + improved efficiency                                        |
-| **Electricity Cost (USD 0.10/kWh)**                          |     `{python} GPT2SummaryCalc.b_cost_str`      |     `{python} GPT2SummaryCalc.o_cost_str`      | —                                                                         |
-| **Carbon Footprint**\index{Carbon Footprint!training impact} |    `{python} GPT2SummaryCalc.b_carbon_str`     |    `{python} GPT2SummaryCalc.o_carbon_str`     | Regional grid average (`{python} GPT2SummaryCalc.grid_kg_kwh_str` kg/kWh) |
+| **Metric**                                                             |               **FP32 Baseline**                |                 **Optimized**                  | **Technique Applied**                                                     |
+|:-----------------------------------------------------------------------|:----------------------------------------------:|:----------------------------------------------:|:--------------------------------------------------------------------------|
+| **Parameters**                                                         |     `{python} GPT2SummaryCalc.b_param_str`     |     `{python} GPT2SummaryCalc.o_param_str`     | Mixed precision (FP16)                                                    |
+| **Gradients**                                                          |     `{python} GPT2SummaryCalc.b_grad_str`      |     `{python} GPT2SummaryCalc.o_grad_str`      | Mixed precision (FP16)                                                    |
+| **Master Weights**                                                     |    `{python} GPT2SummaryCalc.b_master_str`     |    `{python} GPT2SummaryCalc.o_master_str`     | AMP Overhead                                                              |
+| **Optimizer State (Adam)**                                             |      `{python} GPT2SummaryCalc.b_opt_str`      |      `{python} GPT2SummaryCalc.o_opt_str`      | Unchanged (FP32 moments)                                                  |
+| **Activations (batch=32)**                                             |      `{python} GPT2SummaryCalc.b_act_str`      |      `{python} GPT2SummaryCalc.o_act_str`      | Gradient checkpointing + FP16                                             |
+| **Total Memory**                                                       | **`{python} GPT2SummaryCalc.b_total_mem_str`** | **`{python} GPT2SummaryCalc.o_total_mem_str`** | —                                                                         |
+| **Training Time (32 V100s)**                                           |     `{python} GPT2SummaryCalc.b_time_str`      |     `{python} GPT2SummaryCalc.o_time_str`      | Data prefetching + utilization                                            |
+| **Energy Consumption**                                                 |    `{python} GPT2SummaryCalc.b_energy_str`     |    `{python} GPT2SummaryCalc.o_energy_str`     | Reduced time + improved efficiency                                        |
+| **Electricity Cost (`{python} GPT2SummaryCalc.electricity_rate_str`)** |     `{python} GPT2SummaryCalc.b_cost_str`      |     `{python} GPT2SummaryCalc.o_cost_str`      | —                                                                         |
+| **Carbon Footprint**\index{Carbon Footprint!training impact}           |    `{python} GPT2SummaryCalc.b_carbon_str`     |    `{python} GPT2SummaryCalc.o_carbon_str`     | Regional grid average (`{python} GPT2SummaryCalc.grid_kg_kwh_str` kg/kWh) |
 
 : **GPT-2 Training Optimization Summary**: Applying mixed-precision training and gradient checkpointing reduces memory from `{python} GPT2SummaryCalc.b_total_mem_str` to `{python} GPT2SummaryCalc.o_total_mem_str`; the data-pipeline utilization gains in the walkthrough reduce training time by 40 percent, energy consumption by `{python} GPT2SummaryCalc.energy_reduction_pct_str`, and carbon footprint proportionally. {#tbl-gpt2-summary tbl-colwidths="[30,18,18,34]"}
 
@@ -5793,6 +5831,12 @@ class GPT2SummaryScalingRecap:
 
 \index{Training!scaling strategies}\index{Scaling!single-device limitations}\index{Conservation of Complexity!distributed training}
 The optimization toolkit developed in the previous section (mixed precision, Flash Attention, gradient checkpointing, and data prefetching) can transform an infeasible training configuration into a practical one on a single machine. The GPT-2 walkthrough demonstrated reducing memory from `{python} GPT2SummaryScalingRecap.b_total_mem_str` to `{python} GPT2SummaryScalingRecap.o_total_mem_str`, bringing a 1.5-billion-parameter model within reach of a single V100 GPU (`{python} GPT2SummaryScalingRecap.v100_mem_str`). However, some models simply will not fit, no matter how aggressively these techniques are applied. A 70-billion-parameter model requires about 140 GB for FP16 weights alone, which exceeds the 80 GB configurations of A100 and H100 SXM accelerators and leaves little or no room even on higher-capacity variants like the H100 NVL (94 GB) and H200 (141 GB) once gradients, optimizer state, and activations are included. Even when a model does fit, training on a single device may take years rather than weeks.
+
+::: {.column-margin}
+![](images/svg/vol1_training_margin_004.svg){width="100%" fig-alt="Margin illustration showing 80 GB GPU capacity threshold with 70B FP16 weights above it."}
+
+*Some models exceed single-GPU memory before anything else matters.*
+:::
 
 When single-machine optimization has been exhausted, the only remaining option is to spread computation across multiple devices. Multi-device training provides three capabilities unavailable to a single GPU: aggregate memory capacity, aggregate compute throughput, and aggregate storage bandwidth. Scaling beyond a single device begins with multi-GPU configurations inside one machine, then reaches the threshold where distributed systems become necessary. The key parallelism strategies and their trade-offs are introduced here; the implementation details of multi-node distributed training (collective communication primitives, fault tolerance, and elastic scheduling) are beyond our current scope.
 

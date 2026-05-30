@@ -136,11 +136,23 @@ In the Fleet Stack shown in @fig-fleet-stack, **Data Storage**\index{Data Storag
 
 :::
 
+::: {.column-margin}
+![](images/svg/data_storage_dai_locator.svg){width="100%" fig-alt="Three side-by-side pills labeled D, A, and I. The I pill is filled blue and the D and A pills are gray, marking the Infrastructure axis as this chapter's focus."}
+
+*Storage is the Infrastructure axis of the fleet stack.*
+:::
+
 Consider the running example that will thread through this chapter. A 175-billion parameter language model trains on 1.5 trillion tokens of text: roughly `{python} StorageFuelLineContext.compressed_text_tb_str` in compressed source form, or `{python} StorageFuelLineContext.tokenized_text_tb_str` once represented as 4-byte token IDs. Each training epoch reads every token once, in a shuffled order determined by the random seed. There is no "hot" subset of data that dominates access; every byte is consumed exactly once per pass. Meanwhile, each accelerator processes its local batch in roughly 200 ms, then waits for the next. If storage cannot deliver data within that 200 ms window, the accelerator sits idle, and the organization pays for silicon that produces heat instead of gradients.
 
 The problem is deceptive because storage technology has improved substantially. NVMe drives achieve `{python} StorageFuelLineContext.nvme_bw_str` of sequential throughput, a figure that would have seemed out of reach a decade ago. The accelerators, however, improved faster. An H100 GPU consumes data from its HBM at `{python} StorageFuelLineContext.h100_bw_tbs_str`, roughly `{python} StorageFuelLineContext.bw_ratio_str`$\times$ faster than a single NVMe drive can feed it. The gap between storage delivery and accelerator consumption is the central tension of this chapter, and it cannot be solved by any single technology. Instead, it requires a hierarchy of storage tiers, each carefully matched to a specific phase of the ML lifecycle, connected by pipelines that hide latency through prefetching and pipelining.
 
 The storage problem is fundamentally one of physics meeting economics. Physics dictates that data closer to the accelerator (in both physical distance and interconnect hops) can be delivered faster but in smaller quantities. Economics dictates that cheaper storage can hold more data but at greater distance. The engineering art is constructing a pipeline that bridges these constraints, keeping the expensive top tier full by drawing from cheaper lower tiers fast enough that the accelerator never perceives the delay. This chapter shows *how* to reason quantitatively about each tier in the hierarchy, *how* to size the pipeline that connects them, and *how* to make the economic tradeoffs that determine which data lives *where*.
+
+::: {.column-margin}
+![](images/svg/data_storage_checkpoint_dominance.svg){width="100%" fig-alt="A two-rung ladder on a log scale: a tall blue rung for checkpoint writes at 7.56 PB towering over a tiny rung for per-epoch training data at 6 TB, showing checkpoints move over a thousand times more bytes than the dataset."}
+
+*Checkpoint writes dwarf training-data reads by about 1,000 times.*
+:::
 
 The canonical training-data footprint for this example is roughly `{python} StorageFuelLineContext.baseline_training_tb_str` across the hierarchy, combining the compressed corpus and tokenized shards introduced above. Additional shuffled or packed variants can raise the staging footprint, but the per-epoch training read over 4-byte token IDs is `{python} StorageFuelLineContext.tokenized_text_tb_str`. The model generates roughly 1.75 TB checkpoints (`{python} StorageFuelLineContext.ckpt_total_gb_str` total: 350 GB of weights plus 1.4 TB of Adam optimizer state) every 10 minutes. Over a 30-day training run on 256 nodes, the storage system must deliver `{python} StorageFuelLineContext.tokenized_text_tb_str` of tokenized training data per epoch, absorb `{python} StorageFuelLineContext.ckpt_fleet_total_pb_str` of checkpoint writes, and stage model weights for evaluation runs. These numbers thread through every section of this chapter, grounding abstract principles in concrete engineering constraints.
 
@@ -471,6 +483,12 @@ With these inversions established, we can trace the storage hierarchy that ML sy
 
 A system architect must organize storage to serve workloads that simultaneously demand terabytes-per-second bandwidth (for computation), petabyte-scale capacity (for datasets), and eleven-nines durability (for checkpoints). No single technology satisfies all three requirements. HBM provides bandwidth but not capacity. Object storage provides capacity and durability but not bandwidth. The resolution is a multi-tier hierarchy that places small amounts of fast, expensive storage close to the accelerator and large amounts of slow, cheap storage at the periphery. Each tier exists because it resolves a specific tension between physics (bandwidth and latency are governed by distance from the accelerator) and economics (cost per bit decreases as capacity increases). The hierarchy extends the classic processor memory hierarchy (registers, L1/L2 cache, DRAM) that students encounter in computer architecture courses, adding tiers below DRAM that are unique to large-scale data systems. @Tbl-storage-hierarchy-merged reveals the extreme bandwidth disparities that ML systems must navigate.
 
+::: {.column-margin}
+![](images/svg/data_storage_bandwidth_cliff.svg){width="100%" fig-alt="Three stacked horizontal bars on a log scale, longest at top: HBM at 3.35 TB/s, host DRAM at 200 GB/s, and NVMe at 7 GB/s, showing bandwidth dropping sharply across the top three storage tiers."}
+
+*Bandwidth drops roughly 479$\times$ across the top three tiers, from HBM to local NVMe.*
+:::
+
 ```{python}
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
@@ -611,6 +629,12 @@ class TextImageBandwidth:
 ::: {#nbk-data-storage-text-vs-image-bandwidth .callout-notebook title="Text vs. image bandwidth"}
 
 The bandwidth demand of a `{python} TextImageBandwidth.n_gpus_str`-GPU cluster depends entirely on the data modality.
+
+::: {.column-margin}
+![](images/svg/vol2_data_storage_margin_001.svg){width="100%" fig-alt="Margin illustration showing Text training bandwidth versus image training bandwidth."}
+
+*Storage bandwidth demand swings wildly with data modality.*
+:::
 
 For **text training**\index{Training!text}, the demand is surprisingly low. With a typical batch size of `{python} TextImageBandwidth.text_tokens_per_gpu_str` per GPU and a `{python} TextImageBandwidth.step_ms_str` step time, the aggregate bandwidth is:
 
@@ -877,7 +901,7 @@ class NVMeTierCalcs:
     raw_bw_str             = fmt(raw_bw_val, precision=0, commas=False, suffix=' MB/s')
     images_per_sec_str     = fmt(images_per_sec, precision=0, commas=False, suffix=' images/s')
     img_size_kb_str        = fmt(img_size / THOUSAND, precision=0, commas=False, suffix=' KB')
-    imagenet_images_m_str  = fmt(imagenet_images / MILLION, precision=2, commas=False) + "M"
+    imagenet_images_m_str  = fmt(imagenet_images / MILLION, precision=2, commas=False, suffix="M")
     imagenet_avg_kb_str    = fmt(img_size / THOUSAND, precision=0, commas=False, suffix=' KB')
     hdd_iops_str           = fmt(hdd_iops, precision=0, commas=False)
     hdd_slowdown_factor_str = fmt(hdd_slowdown_val, precision=0, commas=False, suffix='×')
@@ -1164,7 +1188,7 @@ class ObjectStorageCost:
     # ┌── 1. LOAD ─────────────────────────────────────────
     dataset_size_tb  = 100
     cost_s3_gb_mo    = 0.02
-    cost_nvme_gb_mo  = Infrastructure.Pricing.Storage.NvmeLowPerTbMonth.rate.m_as("USD / GB / month")
+    cost_nvme_gb_mo  = Infrastructure.Pricing.Storage.NvmeLowPerTbMonth.rate.m_as("dollar / GB / month")
 
     # ┌── 2. EXECUTE ──────────────────────────────────────
     s3_annual_val   = dataset_size_tb * THOUSAND * cost_s3_gb_mo * 12
@@ -1611,6 +1635,12 @@ The prefetch depth equation in @eq-prefetch-depth tells us how many batches must
 
 If I/O at the 99th percentile takes 500 ms and compute takes 200 ms, then $Q_{\text{prefetch,min}} = 3$ batches, with a safety margin of 5. In practice, data loaders like PyTorch's `DataLoader` use `prefetch_factor` and `num_workers` parameters to control this depth. Setting `prefetch_factor=2` with 4 workers creates a buffer of 8 batches, which is typically sufficient for NVMe-backed pipelines but may be inadequate for object-storage-backed pipelines where P99 latency can exceed 500 ms.
 
+::: {.column-margin}
+![](images/svg/vol2_data_storage_margin_002.svg){width="100%" fig-alt="Margin illustration showing 500 ms P99 I/O delay spanning three 200 ms compute windows."}
+
+*P99 I/O latency sets the required prefetch depth.*
+:::
+
 \index{Prefetch Buffer!depth calculation}To illustrate the memory cost, consider a large-batch text pipeline where each GPU processes a packed token batch in roughly 200 ms and the collated batch occupies about 40 MB per GPU. Reading from local NVMe, the P99 I/O latency for that batch is approximately 50 ms. The minimum prefetch depth is $\lceil 50/200 \rceil = 1$ batch, and a safety margin of 2 is adequate. Reading from a parallel file system, the P99 I/O latency rises to roughly 200 ms due to network jitter and contention, requiring a minimum depth of $\lceil 200/200 \rceil = 1$, with a safety margin of 3 to account for occasional multi-hundred-millisecond outliers. Reading from object storage, the P99 latency can exceed 500 ms, requiring a depth of at least 3, with a safety margin of 5 or more. These numbers translate directly into host DRAM consumption: at 40 MB per batch, a depth-5 prefetch buffer per GPU consumes 200 MB, and 8 GPUs per node consume 1.6 GB. At 40 MB per batch with a depth of 1, the same node needs only 320 MB. The storage tier directly determines the memory cost of the prefetch buffer.
 
 The cost of deep prefetching is memory: each buffered batch occupies host DRAM. A batch of 256 images at $224{\times}224{\times}3$ bytes (after decoding) occupies roughly 37 MB. A prefetch buffer of 8 such batches consumes 300 MB, which is negligible for a node with 512 GB of DRAM. For large-batch language model training where each batch contains millions of tokens, however, the prefetch buffer can grow to several gigabytes, competing with embedding tables and other DRAM consumers.
@@ -1908,9 +1938,9 @@ The physical data path dictates where bytes move; the remaining question is what
 # └─────────────────────────────────────────────────────────────────────────────
 class EconRatios:
     # ┌── 1. LOAD ─────────────────────────────────────────
-    cost_nvme_gb_mo = Infrastructure.Pricing.Storage.NvmeLowPerTbMonth.rate.m_as("USD / GB / month")
+    cost_nvme_gb_mo = Infrastructure.Pricing.Storage.NvmeLowPerTbMonth.rate.m_as("dollar / GB / month")
     cost_s3_gb_mo   = 0.02
-    cost_egress_gb  = Infrastructure.Pricing.Cloud.EgressPerGB.rate.m_as("USD / GB")
+    cost_egress_gb  = Infrastructure.Pricing.Cloud.EgressPerGB.rate.m_as("dollar / GB")
     dataset_size_tb = 100
 
     # ┌── 2. EXECUTE ──────────────────────────────────────
@@ -1937,7 +1967,7 @@ from mlsysim.fmt import fmt
 class ObjectStorageCostRecap:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     s3_annual_str = fmt(100 * THOUSAND * 0.02 * 12, precision=0)
-    nvme_annual_str = fmt(100 * THOUSAND * Infrastructure.Pricing.Storage.NvmeLowPerTbMonth.rate.m_as("USD / GB / month") * 12, precision=0)
+    nvme_annual_str = fmt(100 * THOUSAND * Infrastructure.Pricing.Storage.NvmeLowPerTbMonth.rate.m_as("dollar / GB / month") * 12, precision=0)
 ```
 Consider storing a 100 TB training dataset. The annual storage cost varies enormously by tier:
 
@@ -1960,6 +1990,12 @@ class GlacierCostRecap:
 The `{python} EconRatios.tier_cost_ratio_str`$\times$ cost difference between local NVMe and object storage (with the full HBM-to-archive span exceeding 3,000$\times$) explains why the hierarchy exists: data must live at the cheapest tier possible, migrating upward only when needed and returning downward when done. This cost gradient reflects the underlying physics. Faster storage requires more expensive materials (HBM uses 3D-stacked silicon with through-silicon vias), more energy per bit accessed, and more physical proximity to the accelerator (which limits the amount that can be provisioned per node). Cheaper storage uses commodity components (standard hard drives for archive), consumes minimal energy when idle, and can be located anywhere with network connectivity.
 
 Storage cost, however, is only part of the equation. **Data transfer costs**\index{Data Transfer Cost} can dominate, especially in cloud environments. Reading the 100 TB dataset from S3 to compute instances incurs an egress charge of \$`{python} EconRatios.egress_100tb_str`. For multi-epoch training that reads the dataset 10 times, the egress cost alone exceeds \$90,000, more than the annual storage cost. This inversion, where *reading* data costs more than *storing* it, drives the architecture decision to cache data on local NVMe rather than streaming from object storage each epoch.
+
+::: {.column-margin}
+![](images/svg/vol2_data_storage_margin_003.svg){width="100%" fig-alt="Margin illustration showing Cloud storage cost bar dominated by repeated egress."}
+
+*Repeated egress, not storage, dominates cloud cost.*
+:::
 
 The economic analysis changes further when accounting for the opportunity cost of accelerator idle time. A 1,000-GPU cluster at \$2/GPU/hour costs \$48,000 per day. If an undersized storage system reduces accelerator utilization from 90 percent to 70 percent, the organization loses \$9,600 per day in wasted compute. Over a 30-day training run, this amounts to \$288,000 of lost compute value, an amount that would easily fund a parallel file system upgrade or additional NVMe capacity. The economically rational approach treats storage investment not as an expense but as an enabler of compute utilization: every dollar spent improving storage throughput returns several dollars of increased accelerator productivity.
 
@@ -2041,12 +2077,12 @@ class StorageEconomicsCorpus:
 # └─────────────────────────────────────────────────────────────────────────────
 class BuildVsBuyStorageEconomics:
     # ┌── 1. LOAD ─────────────────────────────────────────
-    from mlsysim.fmt import check, fmt, MarkdownStr
+    from mlsysim.fmt import check, fmt, fmt_usd, MarkdownStr
     capex_low = 3_000_000
     capex_high = 5_000_000
     annual_ops = 500_000
     cloud_cost_gb_month = 0.02
-    cloud_egress_gb = Infrastructure.Pricing.Cloud.EgressPerGB.rate.m_as("USD / GB")
+    cloud_egress_gb = Infrastructure.Pricing.Cloud.EgressPerGB.rate.m_as("dollar / GB")
     dataset_pb = 1
     reads_per_year = 10
 
@@ -2072,7 +2108,7 @@ class BuildVsBuyStorageEconomics:
     annual_ops_str = fmt(annual_ops, precision=0)
     net_annual_savings_str = fmt(net_annual_savings, precision=0)
     reads_per_year_str = fmt(reads_per_year, precision=0, commas=False)
-    cloud_cost_gb_month_str = fmt(cloud_cost_gb_month, precision=2, prefix="$", commas=False)
+    cloud_cost_gb_month_str = fmt_usd(cloud_cost_gb_month, precision=2, commas=False)
     breakeven_low_years_str = fmt(breakeven_low_years, precision=1, commas=False, suffix=' years')
     breakeven_high_years_str = fmt(breakeven_high_years, precision=1, commas=False, suffix=' years')
     breakeven_range_str = MarkdownStr(f"{breakeven_low_years_str}--{breakeven_high_years_str}")
@@ -2115,6 +2151,12 @@ The economic benefit of automated tiering compounds over time. An organization r
 #### Data staging patterns {.unnumbered}
 
 The mechanics of staging data between tiers deserve careful attention because they often become the bottleneck that delays job start time. Three common patterns address different tradeoffs between start time and steady-state performance.
+
+::: {.column-margin}
+![](images/svg/vol2_data_storage_margin_004.svg){width="100%" fig-alt="Margin illustration showing Prestage, on-demand, and streaming staging patterns."}
+
+*Prestage, on-demand, and streaming each trade latency against cost.*
+:::
 
 The **prestaging**\index{Prestaging} pattern copies the entire dataset from object storage to local NVMe before the first training iteration begins. This approach provides the best steady-state performance (all reads are local) but the worst job start time. Staging a 10 TB dataset across 256 nodes, where each node copies its assigned shards at 500 MB/s from the parallel file system, takes roughly 80 seconds per node. If the parallel file system bandwidth is shared across all 256 nodes staging simultaneously, the effective per-node bandwidth drops and staging can take several minutes. For time-critical training jobs, this startup delay is acceptable; for interactive development or hyperparameter sweeps that run many short jobs, it is prohibitive.
 
@@ -2631,7 +2673,7 @@ class GDSLatencyRecap:
 from mlsysim.fmt import fmt
 class EconRatiosRecap:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    tier_cost_ratio_str = fmt(Infrastructure.Pricing.Storage.NvmeLowPerTbMonth.rate.m_as("USD / GB / month") / 0.02, precision=0, commas=False)
+    tier_cost_ratio_str = fmt(Infrastructure.Pricing.Storage.NvmeLowPerTbMonth.rate.m_as("dollar / GB / month") / 0.02, precision=0, commas=False)
 ```
 * **ML workloads invert storage assumptions**: Traditional caching, IOPS optimization, and small-write durability patterns\index{ML Storage!inverted assumptions} all produce the wrong answer for ML training. Throughput (GB/s) matters more than IOPS. Small files are the enemy; aggregated shards are the solution.
 * **The pipeline equation governs design**: Required bandwidth scales linearly with GPU count and inversely with iteration time. Use $\text{BW}_{\text{required}} = N_{\text{GPU}} \times U_{\text{target}} \times D_{\text{vol,batch}} / T_{\text{iteration}}$ to size every tier.

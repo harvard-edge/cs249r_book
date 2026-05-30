@@ -211,7 +211,7 @@ class ValidateCommand:
         markup     — low-level markup (patterns, div fences, dropcaps)
         prose      — prose style (contractions, dup words, ASCII, ...)
         punctuation — em-dash, slash, vs., e.g./i.e., en-dash ranges
-        numbers    — units / percent / binary units
+        numbers    — units / percent / binary units / currency notation
         math       — \\times spacing, attr-leaks, render-audit (manual)
         structure  — heading levels, parts, Purpose-unnumbered
         code       — python-echo, _str/_math LaTeX leak, LEGO dead code
@@ -382,6 +382,11 @@ class ValidateCommand:
                   note="no space before %"),
             Scope("percent-in-captions", "_run_mitpress_percent_in_captions",
                   note="spell out 'percent' in captions"),
+            Scope("currency", "_run_currency_style",
+                  note="use $ in content; USD defined once in notation"),
+            Scope("rendered-currency", "_run_rendered_currency_style",
+                  note="post-render USD/$$/raw-LaTeX currency artifacts",
+                  default=False),
         ],
         "math": [
             Scope("times-spacing", "_run_times_spacing",
@@ -814,7 +819,7 @@ class ValidateCommand:
             "markup": "Low-level markup (patterns, div-fences, dropcaps)",
             "prose": "Prose style (contractions, dup words, ASCII, above/below, Acknowledgments)",
             "punctuation": "Em-dash, slash, vs. period, e.g./i.e. comma, en-dash ranges",
-            "numbers": "Units + percent spacing, binary units, percent-in-captions",
+            "numbers": "Units + percent spacing, binary units, percent-in-captions, currency",
             "math": "\\times spacing, attr-leaks, fmt/suffix discipline (LEGO), multiplier prose, optional render audit",
             "structure": "Heading levels, parts, Purpose-unnumbered",
             "code": "Python code blocks (echo: false, _str/_math export hygiene)",
@@ -3429,13 +3434,18 @@ class ValidateCommand:
                     div_stack.append("fig")
                     continue
                 if self._CAPTIONS_DIV_OPEN_RE.match(stripped):
-                    div_stack.append("other")
+                    # Unnumbered margin illustrations live in `.column-margin`
+                    # divs and are intentionally label-free marginalia
+                    # (figure-margin.md §1/§8): no `{#fig-X}`, never referenced
+                    # via `@fig-`. Tag them so their images are not flagged.
+                    kind = "margin" if ".column-margin" in stripped else "other"
+                    div_stack.append(kind)
                     continue
                 if self._CAPTIONS_DIV_CLOSE_RE.match(stripped):
                     if div_stack:
                         div_stack.pop()
                     continue
-                if "callout" in div_stack or "fig" in div_stack:
+                if "callout" in div_stack or "fig" in div_stack or "margin" in div_stack:
                     continue
                 if not self._MD_IMAGE_ANY_RE.search(line):
                     continue
@@ -4737,6 +4747,94 @@ class ValidateCommand:
             name="binary-units",
             description="No GiB/TiB in prose — use GB/TB",
             files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_currency_style(self, root: Path) -> ValidationRunResult:
+        """Flag literal USD outside the single notation definition."""
+        from cli.checks.currency_style import audit, iter_target_files
+
+        start = time.time()
+        target_files = iter_target_files([root])
+        violations = audit([root])
+
+        issues: List[ValidationIssue] = []
+        for violation in violations:
+            file_path = Path(violation.file)
+            try:
+                rel = str(file_path.resolve().relative_to(self.config_manager.book_dir))
+            except ValueError:
+                try:
+                    rel = str(file_path.resolve().relative_to(self.config_manager.root_dir))
+                except ValueError:
+                    rel = violation.file
+            issues.append(
+                ValidationIssue(
+                    file=rel,
+                    line=violation.line,
+                    code=violation.code,
+                    message=violation.message,
+                    severity="error",
+                    context=violation.context,
+                    suggestion=violation.suggestion,
+                )
+            )
+
+        return ValidationRunResult(
+            name="currency",
+            description="Use $ in content; define USD once in notation",
+            files_checked=len(target_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_rendered_currency_style(self, root: Path) -> ValidationRunResult:
+        """Scan cached rendered HTML for visible currency/math artifacts."""
+        from cli.checks.currency_style import audit_rendered_html, iter_html_files
+
+        start = time.time()
+        repo_root = self.config_manager.root_dir
+        html_root = root
+        if not root.is_file() and not list(iter_html_files([root])):
+            html_root = repo_root / "book" / "quarto" / "_build" / "html-audit"
+
+        issues: List[ValidationIssue] = []
+        if not html_root.exists():
+            return ValidationRunResult(
+                name="rendered-currency",
+                description=(
+                    "Skip rendered currency audit; no cached HTML audit "
+                    f"directory at {html_root.relative_to(repo_root)}"
+                ),
+                files_checked=0,
+                issues=issues,
+                elapsed_ms=int((time.time() - start) * 1000),
+            )
+
+        html_files = iter_html_files([html_root])
+        for violation in audit_rendered_html([html_root]):
+            file_path = Path(violation.file)
+            try:
+                rel = str(file_path.resolve().relative_to(repo_root))
+            except ValueError:
+                rel = violation.file
+            issues.append(
+                ValidationIssue(
+                    file=rel,
+                    line=violation.line,
+                    code=violation.code,
+                    message=violation.message,
+                    severity="error",
+                    context=violation.context,
+                    suggestion=violation.suggestion,
+                )
+            )
+
+        return ValidationRunResult(
+            name="rendered-currency",
+            description="Scan rendered HTML for USD/$$/raw-LaTeX currency artifacts",
+            files_checked=len(html_files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
         )

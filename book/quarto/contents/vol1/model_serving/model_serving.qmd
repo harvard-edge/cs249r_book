@@ -209,7 +209,7 @@ Beyond the technical limits of latency, the economics of serving have undergone 
 
 The same serving-economics pressure appears in public API prices. To grasp the speed of this cost collapse, examine the log-scale price trajectory in @fig-intelligence-deflation, which tracks public API list prices as a market proxy. Each order-of-magnitude drop changes which applications are feasible.
 
-::: {#fig-intelligence-deflation fig-env="figure" fig-pos="htb" fig-cap="**Intelligence Deflation**: Representative public API input-token list prices per 1M tokens (USD) over time (Log Scale). Prices are model-version snapshots collected from the public pricing pages of OpenAI, Anthropic, Google, and DeepSeek between 2020 and 2025 and are intended as a market trend indicator, not a controlled or current-price comparison. API token-processing prices have collapsed by multiple orders of magnitude, transforming the economics of automated AI workflows." fig-alt="Line plot showing representative public API input-token pricing collapsing from USD 20 per million tokens in 2020 to under USD 0.10 per million tokens in 2025. Log scale highlights the deflationary trend with models from OpenAI, Anthropic, Google, and DeepSeek."}
+::: {#fig-intelligence-deflation fig-env="figure" fig-pos="htb" fig-cap="**Intelligence Deflation**: Representative public API input-token list prices per 1M tokens ($) over time (Log Scale). Prices are model-version snapshots collected from the public pricing pages of OpenAI, Anthropic, Google, and DeepSeek between 2020 and 2025 and are intended as a market trend indicator, not a controlled or current-price comparison. API token-processing prices have collapsed by multiple orders of magnitude, transforming the economics of automated AI workflows." fig-alt="Line plot showing representative public API input-token pricing collapsing from 20 dollars per million tokens in 2020 to under 0.10 dollars per million tokens in 2025. Log scale highlights the deflationary trend with models from OpenAI, Anthropic, Google, and DeepSeek."}
 
 ```{python}
 #| echo: false
@@ -365,7 +365,7 @@ ax.set_yscale('log')
 ax.set_yticks([100, 10, 1, 0.1, 0.01])
 ax.set_yticklabels(['$100', '$10', '$1', '$0.10', '$0.01'])
 ax.set_xlabel('Year')
-ax.set_ylabel('Price per 1M Tokens (USD)')
+ax.set_ylabel('Price per 1M Tokens ($)')
 ax.set_ylim(0.01, 500)
 ax.set_xlim(2020, 2025.5)
 ax.text(2021, 0.05, "Trend: ~5.8× Cheaper\nEvery 18 Months", color=COLORS['grid'],
@@ -791,7 +791,7 @@ The choice between static and dynamic serving has direct economic implications. 
 # │          latency_b_ms_str, throughput_b_rps_str, cost_a_str, cost_b_str,
 # │          cost_increase_str, cost_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt
+from mlsysim.fmt import check, fmt, fmt_usd
 
 class CostLatencyCalc:
     """Quantifies the economic trade-off between latency and hardware cost per million queries."""
@@ -815,13 +815,13 @@ class CostLatencyCalc:
     check(cost_ratio_value > 1, "Scenario A (low latency) must cost more per query than Scenario B.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    gpu_cost_per_hour_str = fmt(gpu_cost_per_hour_value, precision=0, commas=False, prefix="$")
+    gpu_cost_per_hour_str = fmt_usd(gpu_cost_per_hour_value, precision=0, commas=False)
     latency_a_ms_str = fmt(latency_a_ms_value, precision=0, commas=False, suffix=" ms")
     throughput_a_rps_str = fmt(throughput_a_rps_value, precision=0, commas=False, suffix=" req/s")
     latency_b_ms_str = fmt(latency_b_ms_value, precision=0, commas=False, suffix=" ms")
     throughput_b_rps_str = fmt(throughput_b_rps_value, precision=0, commas=False, suffix=" req/s")
-    cost_a_str = fmt(cost_per_million_a_value, precision=2, commas=False, prefix="$")
-    cost_b_str = fmt(cost_per_million_b_value, precision=2, commas=False, prefix="$")
+    cost_a_str = fmt_usd(cost_per_million_a_value, precision=2, commas=False)
+    cost_b_str = fmt_usd(cost_per_million_b_value, precision=2, commas=False)
     cost_increase_str = fmt(cost_increase_pct_value, precision=0, commas=False, suffix="%")
     cost_ratio_str = fmt(cost_ratio_value, precision=0, commas=False, suffix="×")
 ```
@@ -1032,6 +1032,12 @@ When capacity planning considers "the server" in this chapter, it means the sing
 While load balancers distribute requests *across replicas*, achieving predictable latency also requires controlling what happens *within each machine*. The operating system environment introduces its own sources of variability.
 
 ### Deterministic latency and resource isolation {#sec-model-serving-deterministic-latency-resource-isolation-4d1c}
+
+::: {.column-margin}
+![](images/svg/model_serving_blast_radius.svg){width="100%" fig-alt="Schematic of one red source node on the left fanning out through four arrows to four identical blue consumer nodes on the right, showing one-to-many propagation from a single source."}
+
+*One noisy neighbor perturbs every workload sharing the node.*
+:::
 
 An inference server does not operate in isolation. On a single machine, the operating system manages multiple competing processes (logging agents, monitoring tools, and system interrupts) that can intermittently steal CPU cycles from the inference pipeline. These "noisy neighbors" are a primary source of **latency jitter**\index{Latency Jitter!resource contention}, where the time required to process identical requests varies significantly, causing the 99th percentile (P99) latency to spike even when the hardware is underused. The tail latency explosion from @fig-tail-latency-explosion illustrates the same spike, but here the trigger is resource contention rather than queuing.
 
@@ -1523,6 +1529,12 @@ Consider these foundational questions:
 :::
 
 Every serving request decomposes into three phases that each consume part of the latency budget. Preprocessing\index{Preprocessing!latency impact} transforms raw input such as image bytes or text strings into model-ready tensors. Inference\index{Inference!pipeline phase} executes the model computation. Postprocessing\index{Postprocessing!response formatting} transforms model outputs into user-facing responses.
+
+::: {.column-margin}
+![](images/svg/model_serving_latency_budget_bar.svg){width="100%" fig-alt="Horizontal stacked bar of the request latency budget: a gray preprocessing segment on the left, an orange inference segment of about the same width in the middle, and a thin gray trailing segment on the right. Inference is one slice among equals rather than the whole budget."}
+
+*Inference is one slice of the latency budget; preprocessing rivals it.*
+:::
 
 Faster hardware does not automatically mean faster serving\index{Amdahl's Law!preprocessing bottleneck}. In practice, preprocessing and postprocessing can dominate total latency when inference runs on optimized accelerators. Optimizing exclusively the inference phase yields diminishing returns if the surrounding pipeline remains bottlenecked by CPU operations.
 
@@ -2709,6 +2721,12 @@ class ModelSwapCalc:
 For a `{python} ModelSwapCalc.model_size_gb_str` model on PCIe Gen4 x16 (`{python} ModelSwapCalc.pcie_bw_gbs_str` theoretical bandwidth), loading takes at least:
 `{python} ModelSwapCalc.swap_calc_math`
 
+::: {.column-margin}
+![](images/svg/vol1_model_serving_margin_001.svg){width="100%" fig-alt="A low flat curve that bends sharply upward past a marked knee; a dashed 50 ms threshold line sits far below where the model-load latency lands, with the region above shaded red."}
+
+*Model loading lands far outside a tight serving SLO.*
+:::
+
 To mitigate this, systems use *pinned memory*\index{Pinned Memory!DMA transfer} (page-locked host memory). By default, the operating system can move ("page") any memory region to disk when RAM is under pressure. This creates a problem for GPU transfers: if the GPU's DMA (Direct Memory Access) engine begins reading a memory region that gets paged out mid-transfer, the transfer fails or stalls. To avoid this, the CPU must first copy data to a temporary pinned buffer before the GPU can safely read it, adding both latency and CPU overhead.
 
 Pinning memory instructs the OS to keep that region permanently in physical RAM. The GPU's DMA engine can then transfer data directly from the pinned region at full PCIe bandwidth without CPU involvement. The trade-off is that pinned memory reduces the RAM available for other processes and cannot be reclaimed under memory pressure. For model serving, the performance gain (2--3$\times$ faster transfers) typically justifies pinning model weights and frequently-used input buffers, while leaving less critical memory pageable.
@@ -3446,6 +3464,12 @@ Memory management adds complexity to continuous batching. As sequences enter and
 
 PagedAttention\index{Continuous Batching!iteration-level}\index{PagedAttention!memory fragmentation solution},[^fn-pagedattention-serving] introduced in vLLM, solves this fragmentation problem by applying operating system virtual memory concepts to GPU memory [@kwon2023]. Instead of allocating one contiguous block per sequence, PagedAttention divides the KV cache into fixed-size *pages* (typically 16 tokens each). A sequence's cache consists of pointers to noncontiguous pages scattered across GPU memory. When a sequence completes, its pages return to a free list and can be reused by any new sequence, regardless of length. This approach achieves near-zero fragmentation: vLLM reports memory utilization above 95 percent compared to 50–60 percent for contiguous allocation schemes. The overhead is modest (one pointer lookup per page during attention computation), making PagedAttention the standard for production LLM serving.
 
+::: {.column-margin}
+![](images/svg/vol1_model_serving_margin_002.svg){width="100%" fig-alt="Two horizontal bars: the contiguous-allocation bar carries a wide red wasted segment; the paged-allocation bar below shows only a thin red sliver, the rest used."}
+
+*PagedAttention recovers the KV-cache waste of contiguous allocation.*
+:::
+
 [^fn-pagedattention-serving]: **PagedAttention**: The name directly references OS virtual memory paging, first implemented on the Atlas computer at Manchester (1962) to solve the same problem---programs needed more memory than physically available, and contiguous allocation wasted space. Introduced at SOSP 2023, PagedAttention applies this six-decade-old abstraction to GPU memory: before it, LLM serving systems wasted 60--80 percent of KV cache memory due to fragmentation and over-reservation. PagedAttention reduces waste to under 4 percent, enabling 2--4$\times$ higher throughput on the same hardware. \index{PagedAttention!memory efficiency}
 
 The batching and memory techniques covered here establish the foundation for LLM serving, but several advanced topics warrant additional study:
@@ -3491,6 +3515,12 @@ The variance equals the mean (a property of Poisson distributions), so batch siz
 A useful heuristic for the batching window balances waiting cost against throughput benefit. @Eq-optimal-window expresses one such rule:
 $$T_{\text{window}} \approx \min\left(L_{\text{lat,SLO}} - T_{\text{service}}, \sqrt{\frac{T_{\text{service}}}{\lambda}}\right)$$ {#eq-optimal-window}
 where $L_{\text{lat,SLO}}$ is the latency SLO, $T_{\text{service}}$ is the service time (in seconds), and $\lambda$ is the arrival rate (in requests per second), making the second term dimensionally consistent in seconds. The square-root form follows the same scaling law as classical economic batch sizing, where the optimal batch interval grows as $\sqrt{\text{fixed cost}/\text{arrival rate}}$; see [@harchol-balter2013] for the underlying queueing analysis. The expression is a tuning heuristic rather than a closed-form optimum for ML serving specifically; production systems calibrate the window empirically against observed traffic. A counterintuitive result emerges from this equation: as traffic increases, the optimal window decreases while achieved batch sizes still grow. @Tbl-traffic-adaptive demonstrates this phenomenon across four traffic levels.
+
+::: {.column-margin}
+![](images/svg/vol1_model_serving_margin_003.svg){width="100%" fig-alt="Two diverging strokes against rising QPS: a stroke for batch size climbing upward while a second stroke for the batching window falls, the gap between them shaded."}
+
+*As QPS rises, the batching window shrinks while batch size grows.*
+:::
 
 ```{python}
 #| echo: false
@@ -3775,6 +3805,12 @@ Large language models\index{LLM Serving!token generation} introduce three proper
 ### Performance metrics: TTFT and TPOT {#sec-model-serving-performance-metrics-ttft-tpot-b009}
 
 Generative models produce a stream of tokens rather than a single output tensor. This streaming nature requires dedicated *LLM performance metrics* that reflect the internal state transition from "prefill" (processing input) to "decode" (generating output). The two key measures are **Time to First Token (TTFT)**\index{Time to First Token!definition} and **Time Per Output Token (TPOT)**\index{Time Per Output Token!definition}, which capture responsiveness and fluidity respectively.
+
+::: {.column-margin}
+![](images/svg/vol1_model_serving_margin_004.svg){width="100%" fig-alt="A roofline silhouette: a blue memory-bound slope rising to a dashed ridge, then a flat orange compute-bound ceiling. A TTFT dot sits on the orange ceiling; a TPOT dot sits on the blue slope."}
+
+*TTFT and TPOT live in different bottleneck regimes.*
+:::
 
 ::: {#dfn-model-serving-llm-performance-metrics .callout-definition title="LLM performance metrics"}
 
@@ -4727,7 +4763,7 @@ Every token generation pays a massive "energy tax" to move the model's logic fro
 # │          hourly_cost_str, tokens_per_hour_m_str,
 # │          cost_per_m_tokens_str, remaining_vram_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, check, fmt, fmt_qty
+from mlsysim.fmt import fmt_int, fmt_usd, check, fmt, fmt_qty
 
 # ┌── LEGO ───────────────────────────────────────────────
 class LlmServingCalc:
@@ -4816,9 +4852,9 @@ class LlmServingCalc:
     prefill_tokens_per_s_str = fmt(prefill_tokens_per_s_value, precision=0, suffix=" tokens/s")
     prefill_req_per_s_str = fmt(prefill_req_per_s_value, precision=0, commas=False, suffix=" req/s")
     decode_req_capacity_str = fmt_int(round(decode_req_capacity_value), commas=False, suffix=" req/s")
-    hourly_cost_str = fmt(hourly_cost_value, precision=0, commas=False, prefix="$")
+    hourly_cost_str = fmt_usd(hourly_cost_value, precision=0, commas=False)
     tokens_per_hour_m_str = fmt(tokens_per_hour_value/MILLION, precision=1, commas=False, suffix=" million tokens/hour")
-    cost_per_m_tokens_str = fmt(cost_per_m_tokens_value, precision=3, commas=False, prefix="$")
+    cost_per_m_tokens_str = fmt_usd(cost_per_m_tokens_value, precision=3, commas=False)
     remaining_vram_gb_str = fmt_int(remaining_vram_gb_value, commas=False, suffix=" GB")
 ```
 
@@ -4837,7 +4873,7 @@ With 4-bit weights occupying `{python} LlmServingCalc.model_weight_gb_str`, the 
 
 #### Unit economics {#sec-model-serving-unit-economics-b685}
 
-For an H100 SXM5 instance at approximately `{python} LlmServingCalc.hourly_cost_str` per hour (specialized cloud providers; major hyperscaler on-demand rates were in the USD 2--13 per hour range in 2026):
+For an H100 SXM5 instance at approximately `{python} LlmServingCalc.hourly_cost_str` per hour (specialized cloud providers; major hyperscaler on-demand rates were in the \$2--\$13 per hour range in 2026):
 
 *   Prefill-limited admissions: `{python} LlmServingCalc.prefill_tokens_per_s_str` divided by `{python} LlmServingCalc.prompt_tokens_str` = `{python} LlmServingCalc.prefill_req_per_s_str`. This is below the KV-residency limit of `{python} LlmServingCalc.concurrent_batch_str` / `{python} LlmServingCalc.req_time_s_str` ≈ `{python} LlmServingCalc.decode_req_capacity_str`, so full-request throughput is `{python} LlmServingCalc.prefill_req_per_s_str` $\times$ `{python} LlmServingCalc.sec_per_hr_str` $\times$ `{python} LlmServingCalc.tokens_per_req_str` ≈ `{python} LlmServingCalc.tokens_per_hour_m_str`.
 *   **Cost per million tokens**: `{python} LlmServingCalc.hourly_cost_str` / `{python} LlmServingCalc.tokens_per_hour_m_str` ≈ `{python} LlmServingCalc.cost_per_m_tokens_str` per million tokens.

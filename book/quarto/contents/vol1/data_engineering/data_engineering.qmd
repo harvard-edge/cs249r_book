@@ -124,7 +124,7 @@ Before any of these pipeline stages can be designed well, however, we need to un
 # │ How: Calculate transfer time and cost based on network bandwidth and cloud egress rates.
 # │
 # │ Imports: mlsysim.core.constants (NETWORK_100G_BW, Infrastructure.Pricing.Cloud.EgressPerGB.rate,
-# │              Infrastructure.Pricing.Cloud.TpuV4PerHour.rate, Gbps, GB, USD, hour, second, MILLION,
+# │              Infrastructure.Pricing.Cloud.TpuV4PerHour.rate, Gbps, GB, dollar, hour, second, MILLION,
 # │              SEC_PER_HOUR, SEC_PER_DAY, BITS_PER_BYTE),
 # │          mlsysim.fmt (fmt, fmt_math, check)
 # │ Exports: DataGravity.transfer_seconds_str, DataGravity.transfer_hours_str,
@@ -134,7 +134,7 @@ Before any of these pipeline stages can be designed well, however, we need to un
 # │          DataGravity.egress_cost_per_gb_str, DataGravity.tpu_cost_per_hour_str,
 # │          DataGravity.transfer_time_10g_math
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int,  fmt, check, fmt_math
+from mlsysim.fmt import fmt_int, fmt_usd, fmt, check, fmt_math
 
 # ┌── LEGO ───────────────────────────────────────────────
 class DataGravity:
@@ -146,8 +146,8 @@ class DataGravity:
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     dataset_pb = 1
     network_bw = Systems.Fabrics.Ethernet_100G.bandwidth
-    egress_cost_gb = Infrastructure.Pricing.Cloud.EgressPerGB.rate.m_as(USD/GB)
-    tpu_hourly_cost = Infrastructure.Pricing.Cloud.TpuV4PerHour.rate.m_as(USD/hour)
+    egress_cost_gb = Infrastructure.Pricing.Cloud.EgressPerGB.rate.m_as("dollar / GB")
+    tpu_hourly_cost = Infrastructure.Pricing.Cloud.TpuV4PerHour.rate.m_as("dollar / hour")
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     dataset_gb = dataset_pb * MILLION
@@ -177,13 +177,13 @@ class DataGravity:
     transfer_time_10g_math = fmt_math(
         f"T = D_{{\\text{{vol}}}}/\\text{{BW}} \\approx {transfer_days_10g:.1f} \\text{{ days}}"
     )
-    transfer_cost_str = fmt(transfer_cost, precision=0, commas=True, prefix="$")
+    transfer_cost_str = fmt_usd(transfer_cost, precision=0, commas=True)
     tpu_hours_str = fmt(equiv_tpu_hours, precision=0, commas=True, suffix=" TPUv4-hours")
     network_gbs_str = fmt(network_bw.m_as(GB/second), precision=1, commas=False, suffix=" GB/s")
     dataset_gb_str = fmt(dataset_gb, precision=0, suffix=" GB")
     network_gbps_str = fmt(network_bw.m_as(Gbps), precision=0, commas=False, suffix=" Gb/s")
-    egress_cost_per_gb_str = fmt(egress_cost_gb, precision=2, commas=False, prefix="$", suffix="/GB")
-    tpu_cost_per_hour_str = fmt(tpu_hourly_cost, precision=0, commas=False, prefix="$", suffix="/hour")
+    egress_cost_per_gb_str = fmt_usd(egress_cost_gb, precision=2, commas=False, suffix="/GB")
+    tpu_cost_per_hour_str = fmt_usd(tpu_hourly_cost, precision=0, commas=False, suffix="/hour")
 ```
 
 **Data gravity**\index{Data Gravity!physics of} is the cost of movement. It is a function of volume $(D_{\text{vol}})$ and network bandwidth $(\text{BW})$. The time to move a petabyte dataset across a 10 Gbps link is fixed by physics (`{python} DataGravity.transfer_time_10g_math`); even a 100 Gbps dedicated link leaves transfer time and egress cost large enough to shape the architecture. This gravity dictates architecture: because moving 1 PB to the compute is slow and expensive, the compute often must move to the data. This explains the rise of "Data Lakehouse" architectures[^fn-lakehouse-gravity]\index{Data Lakehouse!architecture} [@zaharia2021lakehouse] where processing engines (Spark, Presto) run directly on storage nodes. In contrast, **Data Mesh**\index{Data Mesh!decentralized ownership} [@dehghani2022datamesh] proposes decentralizing ownership to manage this scale organizationally, treating data as a product owned by domain teams.
@@ -191,6 +191,12 @@ class DataGravity:
 [^fn-lakehouse-gravity]: **Data Lakehouse**: Combines data lake storage (cheap, schema-less) with warehouse query semantics (ACID transactions, schema enforcement) using open table formats like Delta Lake and Apache Iceberg. For ML workloads, the lakehouse eliminates the extract, transform, load (ETL) copy between lake and warehouse, enabling direct feature computation on the storage layer where data already resides -- a direct response to data gravity, since moving petabytes to a separate warehouse doubles the $D_{\text{vol}}/\text{BW}$ cost [@armbrust2020]. \index{Data Lakehouse!data gravity}
 
 ### Information entropy {#sec-data-engineering-information-entropy-5622}
+
+::: {.column-margin}
+![](images/svg/data_engineering_data_gravity_entropy.svg){width="100%" fig-alt="A 2-by-2 quadrant. The horizontal axis is data gravity (movement cost), the vertical axis is information entropy (signal density). The top-left cell, low gravity and high entropy, is highlighted and labeled high gain; the other three cells are neutral gray."}
+
+*Selection gain is highest where entropy is high and data gravity low.*
+:::
 
 **Information entropy**\index{Information Entropy!data density} is the density of signal. A dataset of 1 million identical images has high gravity (TB of storage) but zero entropy (one image worth of information). A dataset of 10,000 diverse edge cases has low gravity but high entropy. Let Information Entropy measure signal density (bits of information per byte) and data gravity capture movement cost (data volume/bandwidth, that is, transfer time). The ratio of the two quantities captures a dataset's return on movement cost, which @eq-data-selection-gain formalizes as the data selection gain:
 
@@ -278,7 +284,7 @@ These physical properties also carry an energy cost: as data moves farther from 
 # │ Show: DRAM, SSD, and network access multipliers vs. a 32-bit MAC.
 # │ How: Format per-operation energies and per-bit multipliers.
 # │
-# │ Imports: mlsysim Hardware.Tech.Memory.HBM3.energy_per_access, Hardware.Tech.Op.FlopFp32.energy;
+# │ Imports: mlsysim Hardware.Tech.Memory.DRAM.energy_per_access, Hardware.Tech.Op.FlopFp32.energy;
 # │          mlsysim.fmt (fmt, fmt_int, check)
 # │ Exports: EnergyAccessCosts.energy_flop_fp32_str, EnergyAccessCosts.energy_dram_str,
 # │          EnergyAccessCosts.dram_multiplier_str, EnergyAccessCosts.local_ssd_multiplier_str,
@@ -291,7 +297,7 @@ class EnergyAccessCosts:
     """Energy-movement hierarchy for @tbl-energy-movement-cost."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    ENERGY_DRAM_ACCESS_PJ = Hardware.Tech.Memory.HBM3.energy_per_access
+    ENERGY_DRAM_ACCESS_PJ = Hardware.Tech.Memory.DRAM.energy_per_access
     ENERGY_FLOP_FP32_PJ   = Hardware.Tech.Op.FlopFp32.energy
     energy_dram_pj = ENERGY_DRAM_ACCESS_PJ.m_as(ureg.picojoule)
     energy_flop_fp32_pj = ENERGY_FLOP_FP32_PJ.m_as(ureg.picojoule/ureg.count)
@@ -837,6 +843,12 @@ Success metrics for KWS extend beyond simple accuracy to include true positive r
 
 Of these metrics, the false positive rate deserves particular attention for always-on systems. Because KWS listens continuously, every second of every day, even a seemingly negligible false positive rate compounds across millions of evaluation windows. A quick calculation shows how strict that requirement becomes.
 
+::: {.column-margin}
+![](images/svg/vol1_data_engineering_margin_001.svg){width="100%" fig-alt="A curve of monthly false wakes that stays low then bends sharply upward as the per-window false-positive rate rises; the steep region past the knee is shaded red."}
+
+*Small per-window false-positive rates compound into operational failure.*
+:::
+
 ```{python}
 #| echo: false
 #| label: false-positive-calc
@@ -957,7 +969,7 @@ A concrete budget scenario shows how to apply this design space analysis.
 # │          BudgetAllocation.governance_k_str, BudgetAllocation.effective_cost_str,
 # │          BudgetAllocation.labeled_k_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, fmt_usd, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class BudgetAllocation:
@@ -985,12 +997,12 @@ class BudgetAllocation:
     check(labeled_examples < 1_000 * THOUSAND, "Real-label budget should remain below the 1M design-space anchor.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    cost_per_label_str = fmt(cost_per_label, precision=2, commas=False, prefix="$", suffix="/label")
+    cost_per_label_str = fmt_usd(cost_per_label, precision=2, commas=False, suffix="/label")
     review_overhead_pct_str = fmt(review_overhead_pct, precision=0, commas=False, suffix="%")
-    labeling_k_str = fmt(labeling_budget/THOUSAND, precision=0, commas=False, prefix="$", suffix="K")
-    storage_k_str = fmt(storage_budget/THOUSAND, precision=1, commas=False, prefix="$", suffix="K")
-    governance_k_str = fmt(governance_budget/THOUSAND, precision=1, commas=False, prefix="$", suffix="K")
-    effective_cost_str = fmt(effective_cost, precision=2, commas=False, prefix="$", suffix="/label")
+    labeling_k_str = fmt_usd(labeling_budget/THOUSAND, precision=0, commas=False, suffix="K")
+    storage_k_str = fmt_usd(storage_budget/THOUSAND, precision=1, commas=False, suffix="K")
+    governance_k_str = fmt_usd(governance_budget/THOUSAND, precision=1, commas=False, suffix="K")
+    effective_cost_str = fmt_usd(effective_cost, precision=2, commas=False, suffix="/label")
     labeled_k_str = fmt(labeled_examples/THOUSAND, precision=0, commas=False, suffix="K")
     labeling_pct_str = fmt(labeling_pct * 100, precision=0, commas=False, suffix="%")
     storage_pct_str = fmt(storage_pct * 100, precision=0, commas=False, suffix="%")
@@ -1006,7 +1018,7 @@ class BudgetAllocation:
 # │ Context: KWS design-space callout and configuration table
 # │
 # │ Goal: Summarize the four-pillar KWS budget and deployment constraints.
-# │ Show: 98 percent accuracy, \$150K budget, 64 KB model, 6-month timeline.
+# │ Show: 98 percent accuracy, $150K budget, 64 KB model, 6-month timeline.
 # │ How: Format canonical KWS design-space constants.
 # │
 # │ Imports: mlsysim.core.constants (THOUSAND), mlsysim.fmt (fmt, check)
@@ -1016,7 +1028,7 @@ class BudgetAllocation:
 # │          KWSDesignConstraints.kws_memory_limit_design_kb_str,
 # │          KWSDesignConstraints.kws_timeline_months_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, fmt_usd, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class KWSDesignConstraints:
@@ -1037,7 +1049,7 @@ class KWSDesignConstraints:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     kws_accuracy_target_str = fmt(kws_accuracy_target, precision=0, commas=False, suffix="%")
     kws_false_wake_month_str = fmt(kws_false_wake_month, precision=0, commas=False)
-    kws_budget_str = fmt(kws_budget/THOUSAND, precision=0, commas=False, prefix="$", suffix="K")
+    kws_budget_str = fmt_usd(kws_budget/THOUSAND, precision=0, commas=False, suffix="K")
     kws_memory_limit_design_kb_str = fmt(kws_memory_limit_design_kb, precision=0, commas=False, suffix=" KB")
     kws_timeline_months_str = fmt(kws_timeline_months, precision=0, commas=False, suffix=" months")
     kws_base_model_acc_str = fmt(kws_base_model_acc, precision=0, commas=False, suffix="%")
@@ -1133,7 +1145,7 @@ These complementary strategies, each with distinct trade-offs across quality, co
 # │ Show: Crowd, box, and medical labeling tiers plus S3 hot storage.
 # │ How: Format canonical cost constants from mlsysim.
 # │
-# │ Imports: mlsysim.core.constants (LABELING_COST_*, Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate, USD),
+# │ Imports: mlsysim.core.constants (LABELING_COST_*, Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate, dollar),
 # │          mlsysim.fmt (fmt, check)
 # │ Exports: DataEngineeringCostConstants.labeling_cost_*_str,
 # │          DataEngineeringCostConstants.storage_cost_s3_str,
@@ -1146,14 +1158,14 @@ class DataEngineeringCostConstants:
     """Per-unit labeling and storage costs for @tbl-data-engineering-cost-constants."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    labeling_cost_crowd_low = Infrastructure.Pricing.Labeling.CrowdLow.rate.m_as(USD)
-    labeling_cost_crowd_high = Infrastructure.Pricing.Labeling.CrowdHigh.rate.m_as(USD)
-    labeling_cost_box_low = Infrastructure.Pricing.Labeling.BoxLow.rate.m_as(USD)
-    labeling_cost_box_high = Infrastructure.Pricing.Labeling.BoxHigh.rate.m_as(USD)
-    labeling_cost_medical_low = Infrastructure.Pricing.Labeling.MedicalLow.rate.m_as(USD)
-    labeling_cost_medical_high = Infrastructure.Pricing.Labeling.MedicalHigh.rate.m_as(USD)
-    storage_cost_s3 = Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate.m_as(USD/TB/ureg.month)
-    retrieval_cost_glacier = Infrastructure.Pricing.Storage.GlacierRetrievalPerGB.rate.m_as(USD/GB)
+    labeling_cost_crowd_low = Infrastructure.Pricing.Labeling.CrowdLow.rate.m_as("dollar")
+    labeling_cost_crowd_high = Infrastructure.Pricing.Labeling.CrowdHigh.rate.m_as("dollar")
+    labeling_cost_box_low = Infrastructure.Pricing.Labeling.BoxLow.rate.m_as("dollar")
+    labeling_cost_box_high = Infrastructure.Pricing.Labeling.BoxHigh.rate.m_as("dollar")
+    labeling_cost_medical_low = Infrastructure.Pricing.Labeling.MedicalLow.rate.m_as("dollar")
+    labeling_cost_medical_high = Infrastructure.Pricing.Labeling.MedicalHigh.rate.m_as("dollar")
+    storage_cost_s3 = Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate.m_as("dollar / TB / month")
+    retrieval_cost_glacier = Infrastructure.Pricing.Storage.GlacierRetrievalPerGB.rate.m_as("dollar / GB")
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(storage_cost_s3 > 0 and retrieval_cost_glacier > 0, "Storage and retrieval costs must be positive.")
@@ -1247,7 +1259,7 @@ class DataEngineeringTimeConstants:
 # │ How: Compare a fixed labeling budget against the cost of one 8x A100 training
 # │      run at the cloud GPU hourly rate.
 # │
-# │ Imports: mlsysim.core.constants (Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate, THOUSAND, USD,
+# │ Imports: mlsysim.core.constants (Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate, THOUSAND, dollar,
 # │          hour), mlsysim.book (fmt, check)
 # │ Exports: LabelingComputeRatio.labeling_budget_str,
 # │          LabelingComputeRatio.train_cost_low_str,
@@ -1255,7 +1267,7 @@ class DataEngineeringTimeConstants:
 # │          LabelingComputeRatio.ratio_low_str,
 # │          LabelingComputeRatio.ratio_high_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, fmt_usd, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class LabelingComputeRatio:
@@ -1264,8 +1276,8 @@ class LabelingComputeRatio:
     a100_count = 8
     train_hours_low = 4
     train_hours_high = 6
-    gpu_hour_cost_low = Infrastructure.Pricing.Fleet.GpuHourRef.rate.m_as(USD/hour)
-    gpu_hour_cost_high = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.m_as(USD/hour)
+    gpu_hour_cost_low = Infrastructure.Pricing.Fleet.GpuHourRef.rate.m_as("dollar / hour")
+    gpu_hour_cost_high = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.m_as("dollar / hour")
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     train_cost_low = a100_count * train_hours_low * gpu_hour_cost_low
@@ -1279,9 +1291,9 @@ class LabelingComputeRatio:
     check(ratio_high > 1000, f"High-end labeling/compute ratio should exceed 1000x, got {ratio_high:.0f}x.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    labeling_budget_str = fmt(labeling_budget/THOUSAND, precision=0, commas=False, prefix="$", suffix="K")
-    train_cost_low_str = fmt(train_cost_low, precision=0, commas=False, prefix="$")
-    train_cost_high_str = fmt(train_cost_high, precision=0, commas=False, prefix="$")
+    labeling_budget_str = fmt_usd(labeling_budget/THOUSAND, precision=0, commas=False, suffix="K")
+    train_cost_low_str = fmt_usd(train_cost_low, precision=0, commas=False)
+    train_cost_high_str = fmt_usd(train_cost_high, precision=0, commas=False)
     ratio_low_str = fmt(ratio_low, precision=1, commas=True, suffix="×")
     ratio_high_str = fmt(ratio_high, precision=1, commas=True, suffix="×")
     effort_majority_pct = 80
@@ -1307,19 +1319,19 @@ All cost figures reflect approximate 2024 cloud provider rates and are intended 
 # │ Show: Expedited retrieval costs 3× standard per GB.
 # │ How: Derive expedited price and ratio from canonical retrieval cost.
 # │
-# │ Imports: mlsysim.core.constants (Infrastructure.Pricing.Storage.GlacierRetrievalPerGB.rate, USD), mlsysim.fmt (fmt, check)
+# │ Imports: mlsysim.core.constants (Infrastructure.Pricing.Storage.GlacierRetrievalPerGB.rate, dollar), mlsysim.fmt (fmt, check)
 # │ Exports: GlacierRetrievalPricing.retrieval_cost_glacier_str,
 # │          GlacierRetrievalPricing.retrieval_cost_glacier_expedited_str,
 # │          GlacierRetrievalPricing.retrieval_ratio_expedited_standard_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, fmt_usd, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GlacierRetrievalPricing:
     """Glacier retrieval tier pricing for the cost-ratio footnote."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    retrieval_cost_glacier = Infrastructure.Pricing.Storage.GlacierRetrievalPerGB.rate.m_as(USD/GB)
+    retrieval_cost_glacier = Infrastructure.Pricing.Storage.GlacierRetrievalPerGB.rate.m_as("dollar / GB")
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     retrieval_cost_glacier_expedited = retrieval_cost_glacier * 3
@@ -1329,8 +1341,8 @@ class GlacierRetrievalPricing:
     check(retrieval_ratio_expedited_standard == 3, "Expedited retrieval should be 3x standard retrieval.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    retrieval_cost_glacier_str = fmt(retrieval_cost_glacier, precision=2, commas=False, prefix="$", suffix="/GB")
-    retrieval_cost_glacier_expedited_str = fmt(retrieval_cost_glacier_expedited, precision=2, commas=False, prefix="$", suffix="/GB")
+    retrieval_cost_glacier_str = fmt_usd(retrieval_cost_glacier, precision=2, commas=False, suffix="/GB")
+    retrieval_cost_glacier_expedited_str = fmt_usd(retrieval_cost_glacier_expedited, precision=2, commas=False, suffix="/GB")
     retrieval_ratio_expedited_standard_str = fmt(retrieval_ratio_expedited_standard, precision=0, commas=False, suffix="×")
 ```
 
@@ -2280,6 +2292,12 @@ The degradation equation in @eq-degradation, introduced in @sec-introduction-ml-
 
 Understanding the three core types of drift enables targeted detection and response strategies. Each type manifests differently in production systems and requires distinct monitoring approaches.
 
+::: {.column-margin}
+![](images/svg/vol1_data_engineering_margin_002.svg){width="100%" fig-alt="A three-node locator with vertices labeled p(x), p(y), and p(y|x) for the distribution components; one vertex is filled to mark which component has drifted, the others gray."}
+
+*Each drift type traces to the distribution component that shifted.*
+:::
+
 #### Covariate shift {#sec-data-engineering-covariate-shift-b3d9}
 
 **Covariate shift**\index{Covariate Shift!definition} occurs when input feature distributions change while the relationship between features and labels remains constant: $p(x)$ changes but $p(y \mid x)$ stays the same. A medical imaging system trained on one camera model might see production data from a different camera manufacturer. The disease-image relationship remains unchanged (same pathologies produce same visual indicators), but pixel value distributions shift due to different sensor characteristics, color calibration, or image processing pipelines. Detection focuses on monitoring feature distributions using statistical metrics like PSI or KL divergence applied to input features.
@@ -2524,7 +2542,7 @@ Production systems must balance cost vs. latency trade-offs when selecting patte
 # │          RealtimeCost.stream_hours_str, RealtimeCost.stream_cost_per_hr_str,
 # │          RealtimeCost.batch_core_hours_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int,  fmt, check
+from mlsysim.fmt import fmt_int, fmt_usd, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class RealtimeCost:
@@ -2556,14 +2574,14 @@ class RealtimeCost:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     throughput_str = fmt(throughput_gbs, precision=0, commas=False, suffix=" GB/s")
     hourly_tb_str = fmt_int(hourly_data_tb, commas=False, suffix=" TB")
-    stream_cost_str = fmt(stream_cost_day, precision=0, commas=False, prefix="$", suffix="/day")
-    batch_cost_str = fmt(batch_cost_day, precision=0, commas=False, prefix="$", suffix="/day")
+    stream_cost_str = fmt_usd(stream_cost_day, precision=0, commas=False, suffix="/day")
+    batch_cost_str = fmt_usd(batch_cost_day, precision=0, commas=False, suffix="/day")
     cost_ratio_str = fmt(cost_ratio, precision=0, commas=False, suffix="×")
     events_per_sec_str = fmt(events_per_sec/MILLION, precision=0, commas=False, suffix="M")
     event_size_kb_str = fmt(event_size_kb, precision=0, commas=False, suffix=" KB")
     stream_cores_str = fmt(stream_cores, precision=0, commas=False)
     stream_hours_str = fmt(stream_hours, precision=0, commas=False, suffix=" hours/day")
-    stream_cost_per_hr_str = fmt(stream_cost_per_hr, precision=2, commas=False, prefix="$", suffix="/hr")
+    stream_cost_per_hr_str = fmt_usd(stream_cost_per_hr, precision=2, commas=False, suffix="/hr")
     batch_cores_str = fmt(batch_cores, precision=0, commas=False)
     batch_window_min_str = fmt(batch_window_min, precision=0, commas=False, suffix=" minutes")
     batch_core_hours_str = fmt(batch_core_hours, precision=0, commas=False)
@@ -2852,7 +2870,7 @@ storage_savings_mo = elt_storage_mo - etl_storage_mo
 # │          EtlEltCost.etl_spark_monthly_str, EtlEltCost.etl_total_str,
 # │          EtlEltCost.elt_total_str, EtlEltCost.total_savings_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, fmt_usd, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class EtlEltCost:
@@ -2892,24 +2910,24 @@ class EtlEltCost:
     check(schema_change_ratio == 8, f"4 hours vs 30 minutes should be 8x, got {schema_change_ratio:.1f}x.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    etl_spark_str = fmt(etl_spark_daily, precision=0, commas=False, prefix="$", suffix="/day")
-    etl_storage_str = fmt(etl_storage_mo, precision=0, commas=False, prefix="$", suffix="/month")
+    etl_spark_str = fmt_usd(etl_spark_daily, precision=0, commas=False, suffix="/day")
+    etl_storage_str = fmt_usd(etl_storage_mo, precision=0, commas=False, suffix="/month")
     elt_storage_tb_str = fmt(elt_storage_tb, precision=0, commas=False, suffix=" TB")
-    elt_storage_str = fmt(elt_storage_mo, precision=0, prefix="$", suffix="/month")
-    elt_query_str = fmt(elt_query_mo, precision=0, commas=False, prefix="$", suffix="/month")
-    savings_str = fmt(storage_savings_mo, precision=0, prefix="$", suffix="/month")
-    etl_spark_monthly_str = fmt(etl_spark_monthly, precision=0, prefix="$", suffix="/month")
-    etl_total_str = fmt(etl_total_mo, precision=0, prefix="$", suffix="/month")
-    elt_total_str = fmt(elt_total_mo, precision=0, prefix="$", suffix="/month")
-    total_savings_str = fmt(total_savings_mo, precision=0, prefix="$", suffix="/month")
+    elt_storage_str = fmt_usd(elt_storage_mo, precision=0, suffix="/month")
+    elt_query_str = fmt_usd(elt_query_mo, precision=0, commas=False, suffix="/month")
+    savings_str = fmt_usd(storage_savings_mo, precision=0, suffix="/month")
+    etl_spark_monthly_str = fmt_usd(etl_spark_monthly, precision=0, suffix="/month")
+    etl_total_str = fmt_usd(etl_total_mo, precision=0, suffix="/month")
+    elt_total_str = fmt_usd(elt_total_mo, precision=0, suffix="/month")
+    total_savings_str = fmt_usd(total_savings_mo, precision=0, suffix="/month")
     daily_raw_tb_str = fmt(daily_raw_tb, precision=0, commas=False, suffix=" TB")
-    spark_per_tb_str = fmt(spark_per_tb, precision=0, commas=False, prefix="$", suffix="/TB")
+    spark_per_tb_str = fmt_usd(spark_per_tb, precision=0, commas=False, suffix="/TB")
     etl_datasets_str = fmt(etl_datasets, precision=0, commas=False)
     etl_tb_each_str = fmt(etl_tb_each, precision=0, commas=False, suffix=" TB")
     etl_total_storage_tb_str = fmt(etl_storage_tb, precision=0, commas=False, suffix=" TB")
-    s3_per_tb_mo_str = fmt(s3_per_tb_mo, precision=0, commas=False, prefix="$", suffix="/TB/month")
+    s3_per_tb_mo_str = fmt_usd(s3_per_tb_mo, precision=0, commas=False, suffix="/TB/month")
     retention_days_str = fmt(retention_days, precision=0, commas=False, suffix=" days")
-    query_cost_per_str = fmt(query_cost_per, precision=0, commas=False, prefix="$", suffix="/query")
+    query_cost_per_str = fmt_usd(query_cost_per, precision=0, commas=False, suffix="/query")
     n_models_str = fmt(n_models, precision=0, commas=False)
     schema_change_ratio_str = fmt(schema_change_ratio, precision=0, commas=False, suffix="×")
     schema_change_etl_hours_str = fmt(schema_change_etl_hours, precision=0, commas=False, suffix=" hours")
@@ -3107,6 +3125,12 @@ To address these scaling bottlenecks, data must be partitioned across multiple c
 
 Data locality becomes critical at this scale. At 10 GB/s peak throughput, transferring one terabyte of training data across a network takes on the order of 100 seconds; reading the same amount from a 5 GB/s SSD takes on the order of 200 seconds. These are the same order of magnitude, which drives ML system design toward compute-follows-data architectures.[^fn-mapreduce-origin] When processing nodes access local data at RAM speeds (50–200 GB/s) but must coordinate over networks limited to 1–10 GB/s, the bandwidth mismatch creates severe bottlenecks. Geographic distribution amplifies these challenges: cross-data center coordination must handle network latency (50–200 ms between regions), partial failures, and regulatory constraints preventing data from crossing borders. Understanding which operations parallelize easily vs. those requiring expensive coordination determines system architecture and performance characteristics. This overhead constitutes a **coordination tax**\index{Coordination Tax!definition} that limits distributed data processing. The size of this tax, and whether centralizing or aggregating is faster, depends on the ratio between network round-trip and local compute time—quantified in the following 100-node mean-normalization comparison.
 
+::: {.column-margin}
+![](images/svg/vol1_data_engineering_margin_003.svg){width="100%" fig-alt="Margin illustration showing Gather-all normalization versus local aggregation time ladder."}
+
+*Local aggregation beats gather-all when network latency dominates.*
+:::
+
 [^fn-mapreduce-origin]: **MapReduce**: Designed by @dean2004mapreduce at Google to process the company's multi-petabyte web index across thousands of commodity machines. The key design decision was making data locality the scheduling primitive: the scheduler assigns map tasks to nodes that already hold the input data, eliminating network transfers that would otherwise dominate wall-clock time. This compute-follows-data architecture became the template for Hadoop, Spark, and every subsequent distributed data processing framework. \index{MapReduce!data locality}
 
 ::: {#nbk-data-engineering-coordination-tax .callout-notebook title="The coordination tax"}
@@ -3271,6 +3295,12 @@ class SegmentationLabelScale:
 
 Segmentation maps\index{Semantic Segmentation!pixel-level labels} provide the most comprehensive information by classifying objects at the pixel level, highlighting each object in a distinct color. For our traffic monitoring system, this might mean precisely outlining each vehicle, pedestrian, and road sign. These detailed annotations significantly increase our storage and processing requirements. A segmentation mask for a $1920{\times}1080$ image requires about `{python} SegmentationLabelScale.pixel_labels_m_str` million labels (one per pixel), compared to perhaps `{python} SegmentationLabelScale.box_count_str` bounding boxes or a single classification label. If each box stores `{python} SegmentationLabelScale.box_coords_str` coordinates, that is roughly `{python} SegmentationLabelScale.label_entry_ratio_str`$\times$ more scalar label entries than `{python} SegmentationLabelScale.box_count_str` boxes before accounting for per-value encoding, and the hours required per image for manual segmentation make this approach suitable only when pixel-level precision is essential.
 
+::: {.column-margin}
+![](images/svg/vol1_data_engineering_margin_004.svg){width="100%" fig-alt="Margin illustration showing Segmentation mask scalar labels versus bounding-box coordinates."}
+
+*Finer annotation granularity multiplies storage and processing scale.*
+:::
+
 Compare the five label types in @fig-labels. The choice depends on system requirements and resource constraints [@johnson-roberson2017]: classification suffices for traffic counting, but autonomous vehicles need segmentation maps for precise navigation. Production systems often maintain hybrid annotations: a single camera frame might carry classification labels (scene type), bounding boxes (obstacle detection), and segmentation masks (path planning), with each label type serving distinct downstream models.
 
 ::: {#fig-labels fig-env="figure" fig-pos="htb" fig-cap="**Data Annotation Granularity**: Five label types applied to the same image of a dog on a blanket: a classification label, a bounding box, a segmentation mask, a free-text caption, and an audio transcription. Each type progressively increases labeling cost and storage requirements while providing a richer training signal." fig-alt="Five-row figure showing label types for a dog on a blanket: classification (Dog, Blanket, No cat), a bounding box around the dog, a segmentation mask on the dog, a free-text caption, and a transcription."}
@@ -3424,7 +3454,7 @@ Large Language Models (LLMs)\index{LLM!labeling assistance} have further transfo
 # │ Imports: mlsysim.core.constants (THOUSAND, MILLION), mlsysim.fmt (fmt, check)
 # │ Exports: ActiveLearningBudget.*_str values for callout prose.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, fmt_usd, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ActiveLearningBudget:
@@ -3461,20 +3491,20 @@ class ActiveLearningBudget:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     dataset_images_str = fmt(dataset_images / MILLION, precision=0, commas=False, suffix="M")
-    label_budget_str = fmt(label_budget / THOUSAND, precision=0, commas=False, prefix="$", suffix="K")
-    label_cost_str = fmt(label_cost, precision=2, commas=False, prefix="$", suffix="/label")
-    inference_cost_str = fmt(inference_cost_per_image, precision=2, commas=False, prefix="$", suffix="/image")
+    label_budget_str = fmt_usd(label_budget / THOUSAND, precision=0, commas=False, suffix="K")
+    label_cost_str = fmt_usd(label_cost, precision=2, commas=False, suffix="/label")
+    inference_cost_str = fmt_usd(inference_cost_per_image, precision=2, commas=False, suffix="/image")
     random_labels_str = fmt(random_labels_needed / MILLION, precision=0, commas=False, suffix="M")
-    random_label_cost_str = fmt(random_label_cost / THOUSAND, precision=0, commas=False, prefix="$", suffix="K")
+    random_label_cost_str = fmt_usd(random_label_cost / THOUSAND, precision=0, commas=False, suffix="K")
     active_labels_low_str = fmt(active_labels_low / THOUSAND, precision=0, commas=False, suffix="K")
     active_labels_high_str = fmt(active_labels_high / THOUSAND, precision=0, commas=False, suffix="K")
-    active_label_cost_low_str = fmt(active_label_cost_low / THOUSAND, precision=0, commas=False, prefix="$", suffix="K")
-    active_label_cost_high_str = fmt(active_label_cost_high / THOUSAND, precision=0, commas=False, prefix="$", suffix="K")
-    full_pool_inference_cost_str = fmt(full_pool_inference_cost / THOUSAND, precision=0, commas=False, prefix="$", suffix="K")
-    active_total_low_str = fmt(active_total_low / THOUSAND, precision=0, commas=False, prefix="$", suffix="K")
-    active_total_high_str = fmt(active_total_high / THOUSAND, precision=0, commas=False, prefix="$", suffix="K")
+    active_label_cost_low_str = fmt_usd(active_label_cost_low / THOUSAND, precision=0, commas=False, suffix="K")
+    active_label_cost_high_str = fmt_usd(active_label_cost_high / THOUSAND, precision=0, commas=False, suffix="K")
+    full_pool_inference_cost_str = fmt_usd(full_pool_inference_cost / THOUSAND, precision=0, commas=False, suffix="K")
+    active_total_low_str = fmt_usd(active_total_low / THOUSAND, precision=0, commas=False, suffix="K")
+    active_total_high_str = fmt_usd(active_total_high / THOUSAND, precision=0, commas=False, suffix="K")
     compute_budget_pct_str = fmt(compute_budget_fraction * 100, precision=0, commas=False, suffix="%")
-    compute_budget_str = fmt(compute_budget / THOUSAND, precision=0, commas=False, prefix="$", suffix="K")
+    compute_budget_str = fmt_usd(compute_budget / THOUSAND, precision=0, commas=False, suffix="K")
     candidate_pool_str = fmt(candidate_pool_images / THOUSAND, precision=0, commas=False, suffix="K")
     affordable_labels_str = fmt(affordable_labels_after_compute / THOUSAND, precision=0, commas=False, suffix="K")
     baseline_acc_str = fmt(baseline_acc, precision=0, commas=False, suffix="%")
@@ -3654,7 +3684,7 @@ Beyond the functional differences between storage systems, cost and performance 
 # │ Show: Object storage is cheaper, while NVMe buys a 50× loading advantage.
 # │ How: Compute rounded KWS raw-audio size, then compare storage costs and bandwidth.
 # │
-# │ Imports: Infrastructure.Pricing.Storage.*, mlsysim.core.constants (GB, TB, USD, ureg, byte, MILLION),
+# │ Imports: Infrastructure.Pricing.Storage.*, mlsysim.core.constants (GB, TB, dollar, ureg, byte, MILLION),
 # │          mlsysim.book (fmt, check)
 # │ Exports: KWSStorageEconomics.dataset_size_gb_str,
 # │          KWSStorageEconomics.storage_s3_cost_str,
@@ -3662,7 +3692,7 @@ Beyond the functional differences between storage systems, cost and performance 
 # │          KWSStorageEconomics.storage_nvme_high_cost_str,
 # │          KWSStorageEconomics.load_speedup_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, fmt_usd, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class KWSStorageEconomics:
@@ -3673,9 +3703,9 @@ class KWSStorageEconomics:
     sample_duration_s = 1
     sample_rate_hz = 16_000
     bytes_per_sample = 2
-    storage_cost_s3 = Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate.m_as(USD/TB/ureg.month)
-    storage_cost_nvme_low = Infrastructure.Pricing.Storage.NvmeLowPerTbMonth.rate.m_as(USD/TB/ureg.month)
-    storage_cost_nvme_high = Infrastructure.Pricing.Storage.NvmeHighPerTbMonth.rate.m_as(USD/TB/ureg.month)
+    storage_cost_s3 = Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate.m_as("dollar / TB / month")
+    storage_cost_nvme_low = Infrastructure.Pricing.Storage.NvmeLowPerTbMonth.rate.m_as("dollar / TB / month")
+    storage_cost_nvme_high = Infrastructure.Pricing.Storage.NvmeHighPerTbMonth.rate.m_as("dollar / TB / month")
     nvme_bw_gbs = 5
     obj_bw_gbs = 0.1
 
@@ -3696,9 +3726,9 @@ class KWSStorageEconomics:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     dataset_size_gb_str = fmt(dataset_size_gb, precision=0, commas=False, suffix=" GB")
-    storage_s3_cost_str = fmt(storage_s3_cost, precision=1, commas=False, prefix="$", suffix="/month")
-    storage_nvme_low_cost_str = fmt(storage_nvme_low_cost, precision=1, commas=False, prefix="$", suffix="/month")
-    storage_nvme_high_cost_str = fmt(storage_nvme_high_cost, precision=1, commas=False, prefix="$", suffix="/month")
+    storage_s3_cost_str = fmt_usd(storage_s3_cost, precision=1, commas=False, suffix="/month")
+    storage_nvme_low_cost_str = fmt_usd(storage_nvme_low_cost, precision=1, commas=False, suffix="/month")
+    storage_nvme_high_cost_str = fmt_usd(storage_nvme_high_cost, precision=1, commas=False, suffix="/month")
     load_speedup_str = fmt(load_speedup, precision=0, commas=False, suffix="×")
 ```
 
@@ -3766,6 +3796,12 @@ class StorageLoading:
 ```
 
 The performance difference directly impacts iteration velocity. Training that loads data at `{python} StorageLoading.nvme_bw_gbs_str` completes dataset loading in `{python} StorageLoading.nvme_load_str`, compared to `{python} StorageLoading.obj_load_str` at typical object storage speeds. This `{python} StorageLoading.load_speedup_str` difference determines whether teams can iterate multiple times daily or must wait hours between experiments.
+
+::: {.column-margin}
+![](images/svg/data_engineering_storage_latency_hierarchy.svg){width="100%" fig-alt="Vertical log-scale ladder of storage-access latencies as slate bars, fastest at bottom to slowest at top: L1 0.5 ns, DRAM 100 ns, SSD 100 µs, network 500 µs, internet 100 ms. A red ceiling caps the slowest tier; the span covers about eight orders of magnitude."}
+
+*Access latency spans eight orders of magnitude, cache to internet.*
+:::
 
 To build engineering judgment, practitioners must internalize the orders of magnitude separating these tiers. @Tbl-ml-latencies translates these disparities into human-scale analogies that build intuition for system design: if a CPU cycle were one second, fetching from local SSD would take two days, while a cross-country network request would span six years. Internalizing these ratios (three orders of magnitude between L1 cache and DRAM, another three between DRAM and SSD) explains why seemingly small architectural choices cascade into large performance differences.
 
@@ -3953,7 +3989,7 @@ To saturate a single A100, storage must deliver `{python} StorageBandwidth.requi
 *   **SATA SSD**: ~`{python} StorageBandwidth.sata_bw_mbs_str` sequential. Totally insufficient (bottleneck).
 *   **NVMe SSD**\index{NVMe SSD!data pipeline}: approximately `{python} StorageBandwidth.nvme_bw_low_gbs_str`–`{python} StorageBandwidth.nvme_bw_high_gbs_str`. Required.
 
-**Systems insight**: With SATA SSDs, maximum throughput is capped at `{python} StorageBandwidth.sata_bw_mbs_str` / `{python} StorageBandwidth.image_size_kb_str` per image ≈ `{python} StorageBandwidth.sata_max_img_sec_str`. The USD 15,000 GPU will run at `{python} StorageBandwidth.sata_utilization_pct_str` utilization (`{python} StorageBandwidth.sata_max_img_sec_str` / `{python} StorageBandwidth.max_img_per_sec_str`). Storage physics dictates training speed.
+**Systems insight**: With SATA SSDs, maximum throughput is capped at `{python} StorageBandwidth.sata_bw_mbs_str` / `{python} StorageBandwidth.image_size_kb_str` per image ≈ `{python} StorageBandwidth.sata_max_img_sec_str`. The \$15,000 GPU will run at `{python} StorageBandwidth.sata_utilization_pct_str` utilization (`{python} StorageBandwidth.sata_max_img_sec_str` / `{python} StorageBandwidth.max_img_per_sec_str`). Storage physics dictates training speed.
 
 :::
 
@@ -4611,7 +4647,7 @@ The technical architecture of data systems demonstrates how engineering decision
 # │ How: Recompute the reference training cost ratio and format KWS scale values.
 # │
 # │ Imports: mlsysim.core.constants (Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate, MILLION,
-# │          USD, hour), mlsysim.book (fmt, check)
+# │          dollar, hour), mlsysim.book (fmt, check)
 # │ Exports: DataEngineeringSummaryRecap.ratio_low_str,
 # │          DataEngineeringSummaryRecap.ratio_high_str,
 # │          DataEngineeringSummaryRecap.kws_dataset_size_m_round_str,
@@ -4629,7 +4665,7 @@ class DataEngineeringSummaryRecap:
     train_hours_low = 4
     train_hours_high = 6
     gpu_hour_cost_low = 2.0
-    gpu_hour_cost_high = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.m_as(USD/hour)
+    gpu_hour_cost_high = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.m_as("dollar / hour")
     kws_dataset_size_m = 23.4
     rounded_sample_count_m = 23
     sample_duration_s = 1

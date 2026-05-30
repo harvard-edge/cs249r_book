@@ -71,6 +71,12 @@ The volume of data that must be synchronized is proportional to the model size. 
 
 [^fn-ring-allreduce-origin]: **Ring AllReduce**: The algorithm dates to the 1990s HPC community (Patarasuk and Yuan formalized it in 2009), but Baidu's Andrew Gibiansky popularized it for ML in February 2017, demonstrating 31$\times$ speedup scaling to 40 GPUs. Uber's Horovod library (2017) and NVIDIA's NCCL subsequently made it the default for distributed training, because its $\mathcal{O}(1)$-per-node bandwidth cost broke the $\mathcal{O}(N)$ bottleneck of parameter servers. \index{Ring AllReduce!origin}
 
+::: {.column-margin}
+![](images/svg/collective_communication_comm_dominance.svg){width="100%" fig-alt="Two horizontal bars comparing the step's iron-law terms at frontier scale. The communication bar is wide and shaded violet, dominating; the compute bar is a narrow gray sliver."}
+
+*Gradient synchronization devours 30 to 70 percent of each step at scale.*
+:::
+
 At frontier scale (hundreds of billions of parameters across thousands of GPUs), gradient synchronization dominates the training step time, consuming 30--70 percent of wall-clock time unless aggressive optimization techniques are applied. The remainder of this chapter develops those techniques systematically.
 
 ### The physics of data movement {#sec-communication-collective-operations-physics-data-movement}
@@ -413,6 +419,12 @@ $n^* = \alpha \cdot \beta = 2 \times 10^{-6}$ s $\times 50 \times 10^9$ B/s $=$ 
 
 :::
 
+::: {.column-margin}
+![](images/svg/collective_communication_alpha_beta_dominance.svg){width="100%" fig-alt="Two horizontal bars. Top (large message): a wide blue bandwidth segment labeled n over beta, plus a thin gray latency sliver. Bottom (small message): a wide violet latency segment labeled alpha, plus a thin gray sliver. The dominant term flips."}
+
+*Small messages are latency-bound, large ones bandwidth-bound; the cost reverses.*
+:::
+
 The critical message size separates two distinct operating regimes:
 
 1.  **Latency-Bound** $(n < n^*)$: For small messages (for example, MoE routing tokens, scalar reductions), time is dominated by $\alpha$. Optimization focuses on fusion (batching small messages), topology (reducing hop count), and software stack tuning (kernel bypass via RDMA).
@@ -674,6 +686,12 @@ While AllReduce scales efficiently because it can be pipelined in a ring (where 
 
 In an AllToAll, every process has a unique piece of data for every other process. This creates $\mathcal{O}(N^2)$ logical connections. At the hardware level, this leads to **network contention**\index{Network Contention}: if 1024 GPUs all try to send data to different targets simultaneously, the "Fat-Tree" or "Spine" switches in the data center become the bottleneck.
 
+::: {.column-margin}
+![](images/svg/vol2_collective_communication_margin_001.svg){width="100%" fig-alt="Margin illustration showing AllToAll quadratic connection growth versus AllReduce curve."}
+
+*AllToAll traffic scales worse than AllReduce.*
+:::
+
 This is why Expert Parallelism (MoE) and large-scale recommendation systems\index{Recommendation Systems} often hit a "communication wall" much earlier than standard data-parallel models. The algorithm choice (AllReduce vs. AllToAll) determines the scaling ceiling.
 
 :::
@@ -783,6 +801,12 @@ The FSDP/ZeRO strategy deserves special attention because its communication patt
 Because each GPU now holds only $1/N$ of the parameters, it must reconstruct the full tensor before it can use a layer, and that reconstruction is what transforms the communication pattern. Before each layer's forward pass, the GPU calls AllGather to collect the shards from all other GPUs. After the backward pass, the gradients are reduced and redistributed via ReduceScatter, so each GPU holds gradients only for its own parameter shard. The sharded parameters can then be discarded (freed from memory) until the next forward pass needs them.
 
 The consequence is a trade-off between memory and communication frequency. Standard data parallelism communicates once per training step (a single AllReduce of the full gradient). FSDP communicates twice per layer per step (AllGather in forward, ReduceScatter in backward), but each communication is smaller (only that layer's parameters, sharded across ranks). For a model with $N_L$ layers, FSDP issues $2N_L$ collective operations per step instead of 1; across all those operations, the total communication volume can be comparable to the single full-gradient AllReduce, but it is spread across many smaller operations.
+
+::: {.column-margin}
+![](images/svg/vol2_collective_communication_margin_002.svg){width="100%" fig-alt="Margin illustration showing FSDP per-layer loop: AllGather, layer compute, ReduceScatter."}
+
+*FSDP repeats per layer: gather, compute, reduce-scatter.*
+:::
 
 The higher operation count makes FSDP more sensitive to latency ($\alpha$) than standard data parallelism. If each of the $2N_L$ collectives pays the full NCCL startup overhead (25--50 $\mu\text{s}$ per operation from @tbl-nccl-vs-theory), the aggregate overhead for a 100-layer model is 5--10 ms, which can represent a meaningful fraction of step time. FSDP implementations mitigate this through prefetching\index{Prefetching} (launching the next layer's AllGather while the current layer is computing) and **communication stream pipelining** (using dedicated CUDA streams for communication that overlap with compute streams).
 
@@ -926,6 +950,12 @@ Verify your understanding of bandwidth-optimal reduction:
 :::
 
 The trace above illustrates the key property of Ring AllReduce: at every step, every link in the ring is active, with data flowing in the same direction. No GPU ever sits idle, and no link is underutilized. This uniform link utilization is what makes Ring bandwidth-optimal.
+
+::: {.column-margin}
+![](images/svg/collective_communication_ring_tree_divergence.svg){width="100%" fig-alt="Two trend strokes from a shared origin. A steep red stroke (Ring, latency growing linearly with node count) pulls away above a near-flat blue stroke (Tree, latency growing logarithmically) as the cluster grows."}
+
+*Ring latency grows with N; tree stays logarithmic.*
+:::
 
 The performance follows directly from the algorithm structure. Each node sends and receives $\frac{M}{N}$ bytes in each of the $2(N-1)$ steps.
 $$
@@ -1400,6 +1430,12 @@ These three phases confine most traffic within each node before crossing the slo
 
 The hierarchical approach generalizes beyond two levels. Large clusters with multiple racks connected through spine switches introduce a third bandwidth tier (rack-to-rack at reduced bisection bandwidth). At 128 GPUs arranged as 4 racks of 4 nodes of 8 GPUs with 2:1 cross-rack oversubscription, applying the same decomposition at each tier shrinks the cross-rack payload per GPU by 32$\times$ compared to the original gradient—roughly 15 ms total versus 160 ms for flat AllReduce. The hierarchical decomposition concentrates traffic where bandwidth is abundant and minimizes traffic where bandwidth is scarce.
 
+::: {.column-margin}
+![](images/svg/vol2_collective_communication_margin_003.svg){width="100%" fig-alt="Margin illustration showing Payload shrink across hierarchy levels."}
+
+*Hierarchical collectives shrink payload before it crosses slow tiers.*
+:::
+
 ### In-network reduction: SHARP and beyond {#sec-communication-sharp}
 
 ::: {#fig-sharp-innetwork fig-env="figure" fig-pos="htb" fig-cap="**In-Network Reduction (SHARP)**: Side-by-side comparison split by a vertical divider. The left side shows a traditional tree AllReduce performing reduction at intermediate GPUs, incurring multiple store-and-forward delays. The right side shows SHARP offloading the reduction to the network switch ASIC, allowing partial sums to be aggregated at line rate as packets traverse the switch. This eliminates GPU memory traffic and store-and-forward latency, significantly accelerating small-to-medium message collectives." fig-alt="Left/right side-by-side comparison split by a vertical divider. Left side: Software Tree AllReduce with data flowing through GPUs. Right side: In-Network SHARP with data aggregated inside the switch."}
@@ -1534,6 +1570,12 @@ The problem is not merely practical; it is a fundamental mathematical obstacle. 
 ### Error feedback: The memory of the journey {#sec-communication-collective-operations-error-feedback}
 
 We solve the conflict between compression and convergence with error feedback. The system applies the compressor immediately to recover bandwidth, then stores the discarded residual in a local accumulator and re-injects it into the next gradient. *The error is deferred, not destroyed.* We maintain a local error accumulator $e_t$ that stores the compression residual.
+
+::: {.column-margin}
+![](images/svg/vol2_collective_communication_margin_004.svg){width="100%" fig-alt="Margin illustration showing Error-feedback loop with residual carried into next step."}
+
+*Error feedback carries the residual into the next compressed step.*
+:::
 
 ::: {#dfn-collective-communication-error-feedback-mechanism .callout-definition title="Error feedback mechanism"}
 
