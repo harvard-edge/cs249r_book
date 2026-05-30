@@ -274,6 +274,31 @@ class BuildCommand:
         result = verify_volume_pdf(quarto_dir, volume, log_path=log_path)
         console.print(format_checklist(result))
 
+        # Warn-only geometric margin-overflow scan. Non-blocking: a margin
+        # figure/note running off the page is layout polish, surfaced here but
+        # not failing the build. The blocking gate is `binder layout margins`.
+        try:
+            from cli.commands.layout import scan_margin_overflow
+            margin_findings = scan_margin_overflow(result.pdf_path)
+        except Exception:
+            margin_findings = None
+        if margin_findings:
+            console.print()
+            console.print(
+                f"  [yellow]⚠ margin overflow[/yellow] [dim]({len(margin_findings)} "
+                f"margin figure/note(s) run off the page — non-blocking)[/dim]"
+            )
+            for mf in sorted(margin_findings, key=lambda r: -r.over_pts)[:10]:
+                loc = mf.source_file + (f":{mf.source_line}" if mf.source_line else "")
+                console.print(
+                    f"    [dim]p.{mf.label} {mf.chapter}: {mf.over_pts:.0f}pt "
+                    f"({mf.signal}) {loc}[/dim]"
+                )
+            console.print(
+                f"    [dim]→ `binder layout margins {result.pdf_path}` to gate; "
+                f"fix per figure-margin.md §7.[/dim]"
+            )
+
         if not result.ok:
             console.print()
             console.print(

@@ -34,6 +34,12 @@ QUARTO_XREF_WARN = re.compile(
 OVERFULL_HBOX = re.compile(
     r"Overfull \\hbox \((\d+(?:\.\d+)?)pt too wide\)"
 )
+# Vertical overflow: content (tall table/callout, or an overrunning margin note)
+# exceeded the available vertical space. LuaLaTeX emits these during \output, so
+# they carry a shipped-out page number "[N]" rather than a source "lines N--M".
+OVERFULL_VBOX = re.compile(
+    r"Overfull \\vbox \((\d+(?:\.\d+)?)pt too high\)[^\n\[]*(?:\[(\d+)\])?"
+)
 
 
 @dataclass(frozen=True)
@@ -41,6 +47,9 @@ class PdfIssue:
     code: str
     message: str
     count: int = 1
+    # "error" issues fail the build; "warning" issues print but do not (layout
+    # polish — e.g. vertical/margin overflow — should surface without blocking).
+    severity: str = "error"
 
 
 @dataclass
@@ -50,6 +59,8 @@ class PdfCheckItem:
     passed: bool
     skipped: bool = False
     detail: str = ""
+    # A warning-level check shows ⚠ when it fails but does NOT flip result.ok.
+    is_warning: bool = False
 
 
 @dataclass
@@ -61,7 +72,9 @@ class PdfValidationResult:
 
     @property
     def ok(self) -> bool:
-        return not self.issues and all(c.passed or c.skipped for c in self.checks)
+        no_errors = not any(i.severity == "error" for i in self.issues)
+        checks_ok = all(c.passed or c.skipped or c.is_warning for c in self.checks)
+        return no_errors and checks_ok
 
 
 def default_pdf_path(quarto_dir: Path, volume: str) -> Path:
@@ -206,6 +219,33 @@ def scan_build_log(log_path: Path | None) -> list[PdfIssue]:
             )
         )
 
+    # Overfull vbox: vertical overflow — a tall table/callout, or (the case this
+    # was added for) a margin note/figure that overran its column and pushed off
+    # the page. Warning-level: surfaced in the build but non-blocking. Keyed by
+    # shipped-out page number rather than source line.
+    vbox_items: list[tuple[float, str]] = []
+    for m in OVERFULL_VBOX.finditer(text):
+        pts = float(m.group(1))
+        if pts >= SEVERE_THRESHOLD_PT:
+            vbox_items.append((pts, m.group(2) or "?"))
+
+    if vbox_items:
+        worst = max(pts for pts, _ in vbox_items)
+        pages = sorted({p for _, p in vbox_items if p != "?"}, key=int)
+        page_note = f" pages: {', '.join(pages)}." if pages else ""
+        issues.append(
+            PdfIssue(
+                code="overfull-vbox",
+                message=(
+                    f"{len(vbox_items)} overfull \\vbox >= {SEVERE_THRESHOLD_PT:.0f}pt "
+                    f"(worst: {worst:.0f}pt).{page_note} "
+                    f"Run `binder layout margins <pdf>` to localize margin overflow."
+                ),
+                count=len(vbox_items),
+                severity="warning",
+            )
+        )
+
     return issues
 
 
@@ -276,6 +316,13 @@ def verify_volume_pdf(
             not any(i.code == "overfull-hbox" for i in issues),
             skipped=log_path is None,
         ),
+        PdfCheckItem(
+            "overfull-vbox",
+            "No vertical/margin overflow (Overfull vbox >= 20pt)",
+            not any(i.code == "overfull-vbox" for i in issues),
+            skipped=log_path is None,
+            is_warning=True,
+        ),
     ]
 
     return PdfValidationResult(
@@ -292,22 +339,30 @@ def format_checklist(result: PdfValidationResult) -> str:
     lines = [f"PDF validation ({vol_label}): {result.pdf_path.name}", ""]
     for item in result.checks:
         if item.skipped:
-            mark = "ⓘ"
-            status = "skipped"
+            mark, status = "ⓘ", "skipped"
         elif item.passed:
-            mark = "✓"
-            status = "pass"
+            mark, status = "✓", "pass"
+        elif item.is_warning:
+            mark, status = "⚠", "warn"
         else:
-            mark = "✗"
-            status = "fail"
+            mark, status = "✗", "fail"
         detail = f" — {item.detail}" if item.detail else ""
         lines.append(f"  [{mark}] {item.label} ({status}){detail}")
 
-    if result.issues:
+    errors = [i for i in result.issues if i.severity != "warning"]
+    warnings = [i for i in result.issues if i.severity == "warning"]
+
+    if errors:
         lines.extend(["", "Issues:"])
-        for idx, issue in enumerate(result.issues, start=1):
+        for idx, issue in enumerate(errors, start=1):
             suffix = f" ({issue.count} occurrence(s))" if issue.count > 1 else ""
             lines.append(f"  {idx}. [{issue.code}] {issue.message}{suffix}")
+
+    if warnings:
+        lines.extend(["", "Warnings (non-blocking):"])
+        for idx, issue in enumerate(warnings, start=1):
+            suffix = f" ({issue.count} occurrence(s))" if issue.count > 1 else ""
+            lines.append(f"  {idx}. ⚠ [{issue.code}] {issue.message}{suffix}")
     return "\n".join(lines)
 
 
