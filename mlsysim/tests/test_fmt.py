@@ -3,7 +3,8 @@
 import pytest
 
 from mlsysim.core.constants import ureg
-from mlsysim.fmt import MarkdownStr, fmt, fmt_int, fmt_percent, fmt_qty
+from mlsysim.core.units import USD
+from mlsysim.fmt import MarkdownStr, fmt, fmt_int, fmt_percent, fmt_qty, fmt_usd
 
 
 class TestFmtPrecisionGuards:
@@ -69,17 +70,45 @@ class TestFmtQty:
         out = fmt_qty(mem, ureg.GB, precision=0, commas=False)
         assert out == "140 GB"
 
-    def test_usd_prefix(self):
-        from mlsysim.core.units import USD
-
+    def test_currency_is_refused(self):
+        # Currency must go through fmt_usd, not fmt_qty: fmt_qty cannot emit the
+        # Pandoc-safe escaped "\\$" and would leak a literal " USD" suffix.
         price = 2.5 * USD
-        out = fmt_qty(price, USD, precision=2, commas=False, prefix="$")
-        assert out == "$2.50 USD"
+        with pytest.raises(ValueError, match="fmt_usd"):
+            fmt_qty(price, USD, precision=2, commas=False)
 
     def test_returns_markdown_str(self):
         out = fmt_qty(5 * ureg.millisecond, ureg.millisecond, precision=0, commas=False)
         assert isinstance(out, MarkdownStr)
         assert out == "5 ms"
+
+
+class TestFmtUsd:
+    def test_basic_dollar_is_escaped(self):
+        # The escaped "\\$" is mandatory so prose never enters math mode.
+        assert fmt_usd(15000) == "\\$15,000"
+        assert fmt_usd(10, commas=False) == "\\$10"
+
+    def test_rounds_to_whole_dollars_at_precision_zero(self):
+        assert fmt_usd(12345.6) == "\\$12,346"
+        assert fmt_usd(999.4) == "\\$999"
+
+    def test_precision_preserves_cents(self):
+        assert fmt_usd(0.09, precision=2, commas=False, suffix="/GB") == "\\$0.09/GB"
+        assert fmt_usd(4.6, precision=1, suffix="M") == "\\$4.6M"
+
+    def test_approx_prepends_tilde(self):
+        assert fmt_usd(1234.7, approx=True, suffix="/year") == "~\\$1,235/year"
+
+    def test_accepts_pure_dollar_quantity(self):
+        assert fmt_usd(2500 * USD) == "\\$2,500"
+
+    def test_never_emits_literal_usd(self):
+        for out in (fmt_usd(5), fmt_usd(5 * USD, suffix="/hr"), fmt_usd(5, approx=True)):
+            assert "USD" not in out
+
+    def test_returns_markdown_str(self):
+        assert isinstance(fmt_usd(100), MarkdownStr)
 
 
 class TestFmtPercentGuards:

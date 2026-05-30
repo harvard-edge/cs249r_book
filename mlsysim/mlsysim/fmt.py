@@ -117,10 +117,10 @@ def fmt(quantity, unit=None, precision=1, commas=True,
     The prefix and suffix arguments collapse the old MarkdownStr(f"...")
     escape-hatch idiom into a single canonical helper. Common uses:
 
-        fmt(price, precision=0, prefix="$")         # "$1,000"
+        fmt(price, precision=0, prefix="\\$")      # "$1,000" in QMD prose
         fmt(rate * 100, precision=1, commas=False, suffix="%")  # "12.4%"
         fmt(bw_mb_s, precision=1, commas=False, suffix=" MB/s")  # "2.4 MB/s"
-        fmt(speedup, precision=0, commas=False, suffix="x")     # "8x"
+        fmt(speedup, precision=0, commas=False)     # prose adds "$\\times$"
 
     Safety: Raises ValueError if formatting would hide meaningful magnitude:
     non-zero values displayed as ``0``, non-integers displayed with
@@ -163,6 +163,58 @@ def fmt_int(quantity, unit=None, commas=True, prefix="", suffix=""):
             quantity = quantity.to(unit)
     val = _numeric_magnitude(quantity)
     return fmt(round(val), precision=0, commas=commas, prefix=prefix, suffix=suffix)
+
+
+def fmt_usd(amount, *, precision=0, commas=True, approx=False, suffix=""):
+    """
+    Canonical currency formatter — the single, blessed way to render any
+    dollar amount in QMD prose, tables, or callouts.
+
+    This is the currency member of the ``fmt_*`` family (cf. ``fmt_percent``
+    for percentages). It exists so the Pandoc/LaTeX escaping detail of a prose
+    dollar sign lives in exactly one place: a bare ``$`` in body prose opens a
+    math span and silently swallows downstream tokens, so currency must render
+    as the escaped ``\\$`` (see ``.claude/rules/numbers-and-math-in-prose.md``
+    §4). Authors never type a dollar sign and never type ``prefix=``; they call
+    ``fmt_usd(...)`` and the escaping, the optional ``~`` approximation marker,
+    and integer rounding are all handled here.
+
+    The literal string ``USD`` is never emitted; the currency code is defined
+    once in ``vol1/frontmatter/_notation_body.qmd``.
+
+        fmt_usd(15000)                       # "\\$15,000"
+        fmt_usd(c_total, approx=True,
+                suffix="/year")              # "~\\$1,234/year"
+        fmt_usd(gpt3_cost_m, precision=1,
+                suffix="M")                  # "\\$4.6M"
+        fmt_usd(rate_per_gb, precision=2,
+                commas=False, suffix="/GB")  # "\\$0.09/GB"
+
+    Args:
+        amount: A plain number or a pure-dollar Pint ``Quantity`` (converted
+            via the ``USD`` unit). For rate values (e.g. dollars per GB), pass
+            the already-extracted magnitude and describe the denominator with
+            ``suffix`` (e.g. ``suffix="/GB"``).
+        precision: Decimal places. ``precision=0`` rounds to whole dollars
+            (``fmt_int`` semantics); ``precision>=1`` uses ``fmt`` semantics
+            with its spurious-zero guard.
+        commas: Thousands separators (default ``True`` — currency usually
+            groups: ``\\$15,000``). Pass ``False`` for small rates.
+        approx: When ``True``, prepend ``~`` before the dollar sign.
+        suffix: Scale glyph (``"K"``/``"M"``/``"B"``) or rate denominator
+            (``"/hr"``, ``"/GB/month"``, ``"/year"``). Must not contain a
+            currency code; the checker forbids literal ``USD`` here.
+    """
+    from .core.units import USD
+
+    if isinstance(amount, ureg.Quantity):
+        amount = amount.m_as(USD)
+
+    prefix = "~\\$" if approx else "\\$"
+
+    if precision == 0:
+        return fmt_int(amount, commas=commas, prefix=prefix, suffix=suffix)
+    return fmt(amount, precision=precision, commas=commas, prefix=prefix, suffix=suffix)
 
 
 def fmt_val(quantity, default="-"):
@@ -286,10 +338,16 @@ def fmt_frac(numerator, denominator, result=None, unit=None):
 
 def _compact_unit_suffix(display_unit) -> str:
     """Derive a leading-space compact unit label from a pint display unit."""
-    from .core.units import USD
-
-    if display_unit is USD:
-        return " USD"
+    # Currency is not a fmt_qty value-kind. It must go through fmt_usd(), which
+    # owns the Pandoc-safe escaped "\$" and never emits the literal "USD".
+    # Routing dollars through fmt_qty here would print a bare " USD" suffix that
+    # the source currency checker cannot see (it is generated at render time).
+    if str(display_unit) in {"dollar", "USD", "EUR"}:
+        raise ValueError(
+            "fmt_qty() does not format currency. Use fmt_usd(amount, ...) so the "
+            "dollar sign is escaped for prose and no literal 'USD' is emitted. "
+            "See .claude/rules/numbers-and-math-in-prose.md §4."
+        )
     try:
         one = 1 * display_unit
         formatted = f"{one:~P}"
