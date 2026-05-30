@@ -293,7 +293,9 @@ class QueuingTheory:
 ```
 
 ::: {.column-margin}
-![](images/png/fleet_orchestration_util_knee.png){width="100%" fig-alt="A wait-time curve that stays flat at low utilization then turns sharply upward toward the right, with a marked knee and a shaded danger zone past it."}
+![](images/svg/fleet_orchestration_util_knee.svg){width="100%" fig-alt="A wait-time curve that stays flat at low utilization then turns sharply upward toward the right, with a marked knee and a shaded danger zone past it."}
+
+*Past about 70 percent utilization, queue wait time explodes.*
 :::
 
 ::: {#nbk-fleet-orchestration-queuing-theory-gpu-clusters .callout-notebook title="The queuing theory of GPU clusters"}
@@ -535,6 +537,12 @@ These scheduling strategies improve utilization, but they do not eliminate all f
 Gang scheduling eliminates the hold-and-wait condition, one of the four formal Coffman conditions for deadlock, but it does not immunize the cluster against all forms of resource contention. Deadlocks can still emerge from the interaction of priority rules, preemption policies, and auxiliary resource dependencies. In a cluster with thousands of GPUs and petabytes of state, these edge cases transition from theoretical curiosities to daily operational incidents.
 
 The most pernicious of these is **priority inversion**, a scenario borrowed from real-time systems where a high-priority job is indefinitely blocked by a low-priority job. Consider a 175B parameter training run (high priority) requesting a gang of 64 GPUs. The scheduler has reserved 60 available GPUs, but the remaining 4 are held by a low-priority data processing job. Normally, the scheduler would preempt the low-priority job to satisfy the high-priority request. However, if a stream of medium-priority development jobs saturates the cluster's CPU or network bandwidth, starving the low-priority job of the resources it needs to checkpoint and exit, the low-priority job stalls. It cannot release the GPUs because it cannot complete its exit sequence. The high-priority job waits for the low-priority job, which is effectively blocked by the medium-priority jobs. The result is a 60-GPU idle block that persists until an operator manually intervenes.
+
+::: {.column-margin}
+![](images/svg/fleet_orchestration_dependency_cascade.svg){width="100%" fig-alt="A tree rooted at one red square fanning out to three middle nodes, each splitting into two leaf nodes, showing one fault cascading through a dependency chain from one to a few to many."}
+
+*One root failure cascades through the dependency tree.*
+:::
 
 ::: {#dfn-fleet-orchestration-priority-inversion .callout-definition title="Priority inversion"}
 
@@ -803,6 +811,12 @@ class FleetTopologyInterconnect:
 ```
 
 Modern GPU clusters exhibit a multi-level communication hierarchy, where bandwidth decreases and latency increases at each level. This hierarchy is not an implementation detail that the scheduler can ignore; it is a physical constraint that directly determines training throughput for communication-intensive workloads. Understanding the hierarchy is essential for making placement decisions that translate allocated resources into useful work.
+
+::: {.column-margin}
+![](images/svg/fleet_orchestration_bw_hierarchy.svg){width="100%" fig-alt="A staircase ladder of interconnect bandwidth on a log scale, in violet: NVLink at 900 GB/s within a node, InfiniBand at 50 GB/s within a rack, and the spine at about 12 GB/s across racks. Each boundary is an order-of-magnitude bandwidth cliff."}
+
+*Bandwidth cliffs from NVLink to spine across the fabric.*
+:::
 
 Within a single node, GPUs communicate via **NVLink**\index{NVLink}, providing `{python} FleetTopologyInterconnect.nvlink_a100_str` per GPU on A100 systems and `{python} FleetTopologyInterconnect.nvlink_h100_str` on H100 systems. This high-bandwidth, low-latency interconnect enables efficient tensor parallelism, where matrix operations are split across GPUs that must exchange intermediate results (activations and gradients) at every transformer layer. The NVLink bandwidth is sufficient to overlap communication with computation for most model architectures, meaning tensor parallel operations can proceed at near-ideal throughput when confined to a single node.
 
@@ -1737,6 +1751,12 @@ The isolation techniques discussed here represent a spectrum from strong (MIG, h
 
 The decision to co-locate multiple models on a single GPU defines the efficiency frontier of an inference fleet. This choice operates on a spectrum: at one end, **exclusive access** guarantees isolation but strands capacity; at the other, **aggressive sharing** (via MPS or time-slicing) maximizes utilization but risks latency interference. The physics of this trade-off are dictated by memory fragmentation and compute contention.
 
+::: {.column-margin}
+![](images/svg/fleet_orchestration_sharing_fill.svg){width="100%" fig-alt="Two stacked bars of an 80 GB GPU's memory. Exclusive hosting: a 26 GB blue used segment and a wide gray dark segment. Shared hosting: a 52 GB blue used segment and a narrow gray dark segment. Sharing reclaims the dark capacity."}
+
+*Sharing packs two tenants, cutting wasted memory from 67 percent to 35 percent.*
+:::
+
 Consider an 80 GB A100 GPU serving a 7B parameter model. The model weights in FP16 consume approximately 14 GB. With a typical KV cache and activation overhead, the total runtime footprint is roughly 26 GB. Under an exclusive access policy, this single model leaves 54 GB (67 percent) of the GPU's high-bandwidth memory dark, a waste of silicon capital. Partitioning the GPU with MIG (for example, a `3g.40gb` profile) tightens the container, reducing the waste to roughly 35 percent within the partition, but still leaves the remainder of the GPU strictly segmented. Enabling MPS to pack two such models onto the same 80 GB device consumes 52 GB, dropping the aggregate memory waste to just 35 percent. For fleets running hundreds of small models, shifting from exclusive to shared hosting can reduce the required GPU count by a factor of 2--3$\times$.
 
 This density comes at the cost of **interference**. When two workloads share a GPU via MPS, they compete for Streaming Multiprocessors (SMs) and memory bandwidth. The degradation is workload-dependent: two compute-bound models (for example, large batch processing) fighting for ALUs often see 15 to 20 percent throughput degradation each. However, a compute-bound model co-located with a memory-bound model (for example, decoding-heavy generation) often coexist peacefully, seeing only 5 percent degradation because they bottleneck on different hardware resources. The scheduler's job thus becomes a multi-dimensional bin packing problem: finding complementary workloads that maximize density while respecting latency SLOs.
@@ -2016,7 +2036,7 @@ Security in multi-tenant environments extends beyond simple resource fairness. S
 ### Priority preemption cascades {#sec-fleet-orchestration-preemption-cascades}
 
 ::: {.column-margin}
-![](images/png/fleet_orchestration_preempt_cascade.png){width="100%" fig-alt="One red source node on the left with arrows fanning out to five separate downstream nodes on the right, showing one event displacing many."}
+![](images/svg/fleet_orchestration_preempt_cascade.svg){width="100%" fig-alt="One red source node on the left with arrows fanning out to five separate downstream nodes on the right, showing one event displacing many."}
 
 *One eviction ripples to many: the preemption cascade.*
 :::

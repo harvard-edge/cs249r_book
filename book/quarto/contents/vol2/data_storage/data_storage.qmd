@@ -136,11 +136,23 @@ In the Fleet Stack shown in @fig-fleet-stack, **Data Storage**\index{Data Storag
 
 :::
 
+::: {.column-margin}
+![](images/svg/data_storage_dai_locator.svg){width="100%" fig-alt="Three side-by-side pills labeled D, A, and I. The I pill is filled blue and the D and A pills are gray, marking the Infrastructure axis as this chapter's focus."}
+
+*Storage is the Infrastructure axis of the fleet stack.*
+:::
+
 Consider the running example that will thread through this chapter. A 175-billion parameter language model trains on 1.5 trillion tokens of text: roughly `{python} StorageFuelLineContext.compressed_text_tb_str` in compressed source form, or `{python} StorageFuelLineContext.tokenized_text_tb_str` once represented as 4-byte token IDs. Each training epoch reads every token once, in a shuffled order determined by the random seed. There is no "hot" subset of data that dominates access; every byte is consumed exactly once per pass. Meanwhile, each accelerator processes its local batch in roughly 200 ms, then waits for the next. If storage cannot deliver data within that 200 ms window, the accelerator sits idle, and the organization pays for silicon that produces heat instead of gradients.
 
 The problem is deceptive because storage technology has improved substantially. NVMe drives achieve `{python} StorageFuelLineContext.nvme_bw_str` of sequential throughput, a figure that would have seemed out of reach a decade ago. The accelerators, however, improved faster. An H100 GPU consumes data from its HBM at `{python} StorageFuelLineContext.h100_bw_tbs_str`, roughly `{python} StorageFuelLineContext.bw_ratio_str`$\times$ faster than a single NVMe drive can feed it. The gap between storage delivery and accelerator consumption is the central tension of this chapter, and it cannot be solved by any single technology. Instead, it requires a hierarchy of storage tiers, each carefully matched to a specific phase of the ML lifecycle, connected by pipelines that hide latency through prefetching and pipelining.
 
 The storage problem is fundamentally one of physics meeting economics. Physics dictates that data closer to the accelerator (in both physical distance and interconnect hops) can be delivered faster but in smaller quantities. Economics dictates that cheaper storage can hold more data but at greater distance. The engineering art is constructing a pipeline that bridges these constraints, keeping the expensive top tier full by drawing from cheaper lower tiers fast enough that the accelerator never perceives the delay. This chapter shows *how* to reason quantitatively about each tier in the hierarchy, *how* to size the pipeline that connects them, and *how* to make the economic tradeoffs that determine which data lives *where*.
+
+::: {.column-margin}
+![](images/svg/data_storage_checkpoint_dominance.svg){width="100%" fig-alt="A two-rung ladder on a log scale: a tall blue rung for checkpoint writes at 7.56 PB towering over a tiny rung for per-epoch training data at 6 TB, showing checkpoints move over a thousand times more bytes than the dataset."}
+
+*Checkpoint writes dwarf training-data reads by about 1,000 times.*
+:::
 
 The canonical training-data footprint for this example is roughly `{python} StorageFuelLineContext.baseline_training_tb_str` across the hierarchy, combining the compressed corpus and tokenized shards introduced above. Additional shuffled or packed variants can raise the staging footprint, but the per-epoch training read over 4-byte token IDs is `{python} StorageFuelLineContext.tokenized_text_tb_str`. The model generates roughly 1.75 TB checkpoints (`{python} StorageFuelLineContext.ckpt_total_gb_str` total: 350 GB of weights plus 1.4 TB of Adam optimizer state) every 10 minutes. Over a 30-day training run on 256 nodes, the storage system must deliver `{python} StorageFuelLineContext.tokenized_text_tb_str` of tokenized training data per epoch, absorb `{python} StorageFuelLineContext.ckpt_fleet_total_pb_str` of checkpoint writes, and stage model weights for evaluation runs. These numbers thread through every section of this chapter, grounding abstract principles in concrete engineering constraints.
 
@@ -472,7 +484,7 @@ With these inversions established, we can trace the storage hierarchy that ML sy
 A system architect must organize storage to serve workloads that simultaneously demand terabytes-per-second bandwidth (for computation), petabyte-scale capacity (for datasets), and eleven-nines durability (for checkpoints). No single technology satisfies all three requirements. HBM provides bandwidth but not capacity. Object storage provides capacity and durability but not bandwidth. The resolution is a multi-tier hierarchy that places small amounts of fast, expensive storage close to the accelerator and large amounts of slow, cheap storage at the periphery. Each tier exists because it resolves a specific tension between physics (bandwidth and latency are governed by distance from the accelerator) and economics (cost per bit decreases as capacity increases). The hierarchy extends the classic processor memory hierarchy (registers, L1/L2 cache, DRAM) that students encounter in computer architecture courses, adding tiers below DRAM that are unique to large-scale data systems. @Tbl-storage-hierarchy-merged reveals the extreme bandwidth disparities that ML systems must navigate.
 
 ::: {.column-margin}
-![](images/png/data_storage_bandwidth_cliff.png){width="100%" fig-alt="Three stacked horizontal bars on a log scale, longest at top: HBM at 3.35 TB/s, host DRAM at 200 GB/s, and NVMe at 7 GB/s, showing bandwidth dropping sharply across the top three storage tiers."}
+![](images/svg/data_storage_bandwidth_cliff.svg){width="100%" fig-alt="Three stacked horizontal bars on a log scale, longest at top: HBM at 3.35 TB/s, host DRAM at 200 GB/s, and NVMe at 7 GB/s, showing bandwidth dropping sharply across the top three storage tiers."}
 
 *Bandwidth drops roughly 479$\times$ across the top three tiers, from HBM to local NVMe.*
 :::

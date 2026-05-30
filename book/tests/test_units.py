@@ -400,7 +400,7 @@ def test_energy_specs():
     if not (fp32 > fp16 > int8):
         FAILURES.append(f"  ✗ Energy ordering: FP32={fp32} > FP16={fp16} > INT8={int8}")
         ok = False
-    ok &= check("DRAM >> compute", mem.HBM3.energy_per_access.magnitude / op.FlopFp32.energy.magnitude, 173.0, tol=0.05)
+    ok &= check("DRAM >> compute", mem.DRAM.energy_per_access.magnitude / op.FlopFp32.energy.magnitude, 173.0, tol=0.05)
     ok &= check("L2 > L1 > reg",
                  mem.L2.energy_per_access.magnitude / mem.L1.energy_per_access.magnitude, 4.0)
     return ok

@@ -339,7 +339,7 @@ def canonical_svg_hash(svg_src: str) -> str:
 # PHASE 1: Batched review prompt
 # ---------------------------------------------------------------------------
 RULES_SUMMARY = """
-ML SYSTEMS TEXTBOOK SVG STYLE RULES (condensed — full rules in .claude/rules/svg-style.md):
+ML SYSTEMS TEXTBOOK SVG STYLE RULES (condensed — full rules in .claude/rules/figure-svg.md):
 
 SEMANTIC PALETTE (any colour outside this is a defect unless domain-justified):
   Compute blue    fill=#cfe2f3 stroke=#4a90c4   — GPU, forward/backward, inference
