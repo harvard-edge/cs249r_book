@@ -169,6 +169,15 @@ class DistributedModel(BaseModel):
        Training Large Models." (1F1B Pipeline Bubble Model)
     3. Patarasuk & Mueller (2009), "Bandwidth-Optimal All-Reduce Algorithms 
        for Clusters of Workstations." (Ring All-Reduce)
+
+    Formula contract:
+    - split total accelerators into TP * PP * EP model-parallel groups and DP
+      replicas; the split must be exact.
+    - local step time comes from Engine.solve on the per-DP local batch.
+    - exposed communication = DP gradient collective + TP activation collective
+      + EP token all-to-all, optionally reduced by overlap.
+    - total step latency = local compute + exposed communication + pipeline
+      bubble, adjusted by explicit congestion and straggler multipliers.
     """
     requires = ("workload", "fleet")
     produces = DistributedResult
@@ -699,6 +708,12 @@ class SustainabilityModel(BaseModel):
     2. Belkhir & Elmeligi (2018), "Assessing ICT Global Emissions Footprint."
     3. Wu et al. (2022), "Sustainable AI: Environmental Implications, 
        Challenges and Opportunities."
+
+    Formula contract:
+    - per-device power = idle_fraction * TDP + dynamic_fraction * TDP * MFU.
+    - IT energy = device power * accelerator count * duration.
+    - facility energy applies PUE; operational carbon applies grid carbon
+      intensity to facility energy; water applies WUE to facility energy.
     """
     requires = ("fleet",)
     produces = SustainabilityResult
@@ -786,6 +801,14 @@ class ServingModel(BaseModel):
     2. Agrawal et al. (2024), "Sarathi-Serve" (chunked prefill scheduling).
     3. Patel et al. (2024), "Splitwise" and Zhong et al. (2024),
        "DistServe" (prefill/decode disaggregation).
+
+    Formula contract:
+    - TTFT is prefill compute over new prompt tokens plus dispatch overhead and,
+      for disaggregated serving, KV-transfer time.
+    - ITL is the decode lower bound: model weights plus KV cache streamed from
+      decode memory bandwidth, plus the configured framework layer tax.
+    - KV memory always covers the full sequence, even when prompt caching skips
+      part of the prefill computation.
     """
     requires = ("workload", "hardware")
     produces = ServingResult
@@ -989,6 +1012,13 @@ class TrainingMemoryModel(BaseModel):
     1. Shoeybi et al. (2019), "Megatron-LM" (tensor/pipeline parallel state).
     2. Rajbhandari et al. (2020), "ZeRO" (data-parallel state sharding).
     3. Korthikanti et al. (2023), activation recomputation accounting.
+
+    Formula contract:
+    - parameter states are sharded by TP * PP * EP before ZeRO sharding.
+    - ZeRO-1 shards optimizer state, ZeRO-2 also shards gradients, and ZeRO-3
+      also shards weights across DP.
+    - activation memory is based on local microbatch, layers per pipeline stage,
+      hidden dimension, and the actual bytes per element for the precision.
     """
     requires = ("workload", "hardware")
     produces = TrainingMemoryResult
@@ -1655,6 +1685,13 @@ class EconomicsModel(BaseModel):
        to the Design of Warehouse-Scale Machines."
     2. Patterson (2004), "Latent Bugs in Common-Case Software." (TCO Foundations)
     3. Meta (2024), "Sustainable AI Infrastructure at Meta Scale."
+
+    Formula contract:
+    - energy OpEx delegates to SustainabilityModel so cost, carbon, and water
+      share the same PUE and grid assumptions.
+    - hardware CapEx = unit cost * accelerator count * infrastructure multiplier.
+    - period CapEx and maintenance are prorated by duration over the
+      amortization window.
     """
     requires = ("fleet",)
     produces = EconomicsResult
