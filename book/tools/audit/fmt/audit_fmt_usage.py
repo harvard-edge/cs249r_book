@@ -104,7 +104,7 @@ def classify_suffix(suffix: str):
         return "service_rate"
     if s.strip() in {"K", "M", "B", "T"}:
         return "scale_glyph"
-    if s.strip() in {"million", "billion", "thousand"}:
+    if s.strip() in {"million", "billion", "thousand", "trillion"}:
         return "scale_word"
     if s.strip() in {"GPUs", "GPU", "nodes", "tokens", "layers", "queries",
                      "images", "img", "QPS", "ops", "operations"}:

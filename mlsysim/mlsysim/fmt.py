@@ -617,6 +617,12 @@ def fmt_multiple(factor, precision=1, commas=False):
 
 
 _COUNT_SCALES = {"K": 1e3, "M": 1e6, "B": 1e9, "T": 1e12}
+_COUNT_SCALE_WORDS = {
+    "K": "thousand",
+    "M": "million",
+    "B": "billion",
+    "T": "trillion",
+}
 
 
 def fmt_count(
@@ -630,6 +636,7 @@ def fmt_count(
     approx=False,
     lower_bound=False,
     allow_fractional=False,
+    scale_style="symbol",
 ):
     """
     Format a **count** (a dimensionless tally of things), optionally with a
@@ -641,6 +648,8 @@ def fmt_count(
 
         fmt_count(5_300_000, scale="M")              # "5M"
         fmt_count(5_300_000, scale="M", precision=1) # "5.3M"
+        fmt_count(5_300_000, scale="M",
+                  scale_style="word", precision=1)   # "5.3 million"
         fmt_count(70e9, scale="B")                   # "70B"   (e.g. params)
         fmt_count(8192)                              # "8,192" (no scale)
         fmt_count(1024, label="GPU")                 # "1,024 GPUs"
@@ -666,6 +675,13 @@ def fmt_count(
     )
     if suffix and (label is not None or plural_label is not None):
         raise ValueError("Use suffix= or structured label=, not both.")
+    if scale_style not in {"symbol", "word"}:
+        raise ValueError(
+            "fmt_count scale_style must be 'symbol' or 'word', "
+            f"got {scale_style!r}."
+        )
+    if scale is None and scale_style != "symbol":
+        raise ValueError("fmt_count scale_style='word' requires scale=.")
     v = raw_v
     glyph = ""
     if scale is not None:
@@ -675,7 +691,10 @@ def fmt_count(
                 f"None, got {scale!r}."
             )
         v = v / _COUNT_SCALES[scale]
-        glyph = scale
+        if scale_style == "word":
+            glyph = f" {_COUNT_SCALE_WORDS[scale]}"
+        else:
+            glyph = scale
     suffix = suffix or _label_suffix(raw_v, label, plural_label)
     return fmt(
         v,

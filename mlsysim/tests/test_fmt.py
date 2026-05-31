@@ -438,6 +438,29 @@ class TestFmtCount:
         assert fmt_count(70e9, scale="B") == "70B"
         assert fmt_count(70e9, scale="B", label="parameter") == "70B parameters"
 
+    def test_scale_words(self):
+        assert fmt_count(1_000_000, scale="M", scale_style="word") == "1 million"
+        assert (
+            fmt_count(
+                60_000_000,
+                scale="M",
+                scale_style="word",
+                label="parameter",
+            )
+            == "60 million parameters"
+        )
+        assert (
+            fmt_count(
+                70_000_000_000,
+                scale="B",
+                scale_style="word",
+                precision=0,
+                commas=False,
+                label="parameter",
+            )
+            == "70 billion parameters"
+        )
+
     def test_scale_inherits_precision_guard(self):
         # 5.3M at precision=0 would silently hide the .3 — guard refuses.
         with pytest.raises(ValueError, match="not integer-like"):
@@ -458,6 +481,12 @@ class TestFmtCount:
     def test_rejects_unknown_scale(self):
         with pytest.raises(ValueError, match="scale must be"):
             fmt_count(1000, scale="G")
+
+    def test_rejects_unknown_scale_style(self):
+        with pytest.raises(ValueError, match="scale_style"):
+            fmt_count(1000, scale="K", scale_style="long")
+        with pytest.raises(ValueError, match="requires scale"):
+            fmt_count(1000, scale_style="word")
 
     def test_rejects_label_suffix_conflicts_and_unit_like_labels(self):
         with pytest.raises(ValueError, match="structured label"):

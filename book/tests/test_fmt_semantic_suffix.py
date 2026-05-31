@@ -51,6 +51,15 @@ def test_flags_scale_glyph_on_fmt(tmp_path):
     assert codes.count("scale_glyph_in_suffix") == 1
 
 
+def test_flags_scale_word_on_fmt(tmp_path):
+    chapter = _write(
+        tmp_path,
+        "q_str = fmt(queries / MILLION, precision=0, commas=False, suffix=' million')\n",
+    )
+    codes = [v.code for v in audit([chapter])]
+    assert codes.count("scale_word_in_suffix") == 1
+
+
 def test_flags_service_rate_suffix(tmp_path):
     chapter = _write(
         tmp_path,

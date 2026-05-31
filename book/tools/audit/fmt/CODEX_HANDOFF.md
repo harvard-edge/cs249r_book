@@ -353,6 +353,24 @@ pytest suite PASS (174 tests); `fmt_prose_contract.py` 0; `codemod_fmt.py
 queue` `by kind: {}`; `./book/binder check math` PASS;
 `audit_prose_semantics.py` CLEAN across 81 files.
 
+**A27 — Exact scale-word suffix lane: DONE, API naming still open.**
+Added `fmt_count(..., scale_style="word")` and migrated the 8 exact
+`suffix=" million"` / `suffix=" billion"` QMD sites to typed count formatting:
+`data_selection` (1), `introduction` (2), `ml_ops` (1), `training` (1),
+`network_fabrics` (2), and `sustainable_ai` (1). `assess_equiv.py` confirmed
+byte-identical exported values and substituted prose for all six touched
+chapters. `audit_fmt_usage.py` now reports no `scale_word` suffix bucket,
+`fmt_count` calls at 213, and `physical_unit` suffixes at 1,216. The semantic
+suffix gate now flags future exact scale-word suffixes as
+`scale_word_in_suffix`. The LEGO dead-code checker was also hardened to ignore
+wrapped keyword arguments, after pre-commit exposed the false positive on
+`scale_style="word"`. Verification: `git diff --check` PASS; py_compile PASS;
+focused pytest suite PASS (176 tests); `fmt_prose_contract.py` 0;
+`codemod_fmt.py queue` `by kind: {}`; `./book/binder check math` PASS;
+`audit_prose_semantics.py` CLEAN across 81 files. User flagged
+`scale="B", scale_style="word"` as unclear; discuss a clearer public spelling
+such as `scale="billion"` before final API lock.
+
 ### B. WS4 — unit-suffix lane (~2,393 sites: `GB`/`ms`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.

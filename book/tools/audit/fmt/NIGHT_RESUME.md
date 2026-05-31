@@ -37,13 +37,13 @@ python3 -m pytest mlsysim/tests/test_fmt.py book/tests/test_codemod_fmt.py book/
 
 ## NOW / NEXT  (update before every commit)
 
-**STATUS: Time-unit suffix migration complete; remaining suffix work is WS4 physical units, scale-word design, MarkdownStr review, render/PDF audit, and final lock.**
+**STATUS: Time-unit suffix migration and exact scale-word suffix migration complete; remaining suffix work is WS4 physical units, compound scale/rate/ops design, MarkdownStr review, render/PDF audit, API clarity, and final lock.**
 
 **State:** multiplier + percent + scale 100% migrated; pp → typed fmt_pp (14
 byte-identical sites + grammar fixes, plus the user-approved A2 benchmarking
 edits); 4 dangerous glyph stragglers killed; NEW semantic scanner gate (+ unit-dup
 bug fixes). 81/81 chapters exec clean; prose-contract 0; semantic scanner 0;
-codemod queue empty; 157 focused tests pass. User ruled for no-space scaled
+codemod queue empty; 176 focused tests pass. User ruled for no-space scaled
 counts, so `run_scale_style_lane.py` migrated the 44 queued scale sites to
 `fmt_count` and one manual `fmt(...) + "B"` blind spot. User also approved A2, so
 `benchmarking` now renders `0.9 percentage-point drop`, `below 1
@@ -75,11 +75,18 @@ HTML-render-verified for `benchmarking`. The time-unit lane is now complete:
 `run_time_lane.py` migrated the remaining 522 exact `time_unit` suffix sites to
 `fmt_time(...)`, QMD `fmt_time` calls now use full unit-name strings in source,
 and `audit_fmt_usage.py` reports no remaining `time_unit` suffix bucket.
+The exact scale-word lane is also complete: `fmt_count` now supports word-scale
+output, the 8 exact `suffix=" million"` / `suffix=" billion"` QMD sites were
+migrated byte-identically, and `audit_fmt_usage.py` reports no `scale_word`
+suffix bucket. User flagged `fmt_count(..., scale="B", scale_style="word")` as
+unclear source spelling; `PLAN_OF_RECORD.md` records the API-clarity follow-up
+to discuss a cleaner spelling such as `scale="billion"` before final lock.
 Remaining: the rest of WS4/WS3 and later PDF/lock phases. Nothing is half-done
 or broken.
 
 **If continuing:** Continue with semantic lanes in `PLAN_OF_RECORD.md`. Good next
-targets are physical-unit suffixes, then scale-word design and MarkdownStr sites.
+targets are physical-unit suffixes, compound scale/rate/ops suffixes, then
+MarkdownStr sites and the API-clarity pass.
 For physical Quantity-backed sites, continue WS4 with
 `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/run_unit_lane.py --write <qmd>`
 one chapter at a time. The latest all-chapter run migrated the remaining

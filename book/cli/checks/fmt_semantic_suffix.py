@@ -47,6 +47,12 @@ PP_VALUES = {
     "percentage points", "percentage point", "pp",
 }
 SCALE_VALUES = {"K", "M", "B", "T"}
+SCALE_WORD_VALUES = {
+    "thousand": "K",
+    "million": "M",
+    "billion": "B",
+    "trillion": "T",
+}
 RATE_VALUES = {
     "QPS", "FPS", "tokens/s", "img/s", "images/s", "req/s", "samples/s",
 }
@@ -114,6 +120,13 @@ def _classify(suffix: str):
             "scale_glyph_in_suffix",
             f"Use fmt_count(value, scale='{stripped}') so the magnitude scale "
             "and glyph are declared together. (Currency uses fmt_usd.)",
+        )
+    if stripped in SCALE_WORD_VALUES:
+        return (
+            "scale_word_in_suffix",
+            "Use fmt_count(value, "
+            f"scale='{SCALE_WORD_VALUES[stripped]}', scale_style='word') so the "
+            "magnitude scale and word are declared together.",
         )
     if stripped in RATE_VALUES:
         return (

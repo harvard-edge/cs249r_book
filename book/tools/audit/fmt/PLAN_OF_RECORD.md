@@ -93,6 +93,13 @@ Recommended implementation:
 - add tests for word-scale output, label pluralization, rate denominators,
   FLOP handling, and checker coverage for exact and compound scale suffixes.
 
+Status: the exact `scale_word` bucket (`suffix=" million"` /
+`suffix=" billion"`) is migrated through `fmt_count(..., scale_style="word")`.
+Before the final API lock, revisit the source readability of that spelling.
+The user flagged calls such as `scale="B", scale_style="word"` as unclear; the
+candidate cleaner API is to let `scale="billion"` render the word form, while
+`scale="B"` keeps the compact glyph form.
+
 ## 4. Formatter defaults
 
 Semantic formatters should own the default display policy for their value kind.

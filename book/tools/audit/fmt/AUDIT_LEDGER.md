@@ -164,6 +164,41 @@ Validation details:
   `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
   0 findings across 81 files.
 
+## 2026-05-31 — Exact scale-word suffix relocation
+
+Change type: byte-identical formatter relocation. Added
+`fmt_count(..., scale_style="word")` and migrated the exact `suffix=" million"`
+and `suffix=" billion"` sites to a typed count formatter. The semantic suffix
+gate now flags future exact scale-word suffixes on generic `fmt`/`fmt_int`.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol1/data_selection/data_selection.qmd` | 1 | 250 | 128 | identical values + prose |
+| `vol1/introduction/introduction.qmd` | 2 | 91 | 45 | identical values + prose |
+| `vol1/ml_ops/ml_ops.qmd` | 1 | 132 | 75 | identical values + prose |
+| `vol1/training/training.qmd` | 1 | 453 | 214 | identical values + prose |
+| `vol2/network_fabrics/network_fabrics.qmd` | 2 | 106 | 62 | identical values + prose |
+| `vol2/sustainable_ai/sustainable_ai.qmd` | 1 | 197 | 120 | identical values + prose |
+
+Validation details:
+
+- Before/after snapshots were generated with `assess_equiv.py baseline --ref HEAD`
+  and `assess_equiv.py snapshot` under `/tmp/fmt_scale_word_*`.
+- `assess_equiv.py diff` reported `IDENTICAL values` and `IDENTICAL prose` for
+  every touched chapter.
+- `audit_fmt_usage.py` reports no remaining `scale_word` suffix bucket;
+  `fmt_count` calls increased to 213 and physical-unit suffixes remain 1,216.
+- Verification: `python3 -m py_compile mlsysim/mlsysim/fmt.py book/cli/checks/fmt_semantic_suffix.py book/tools/audit/fmt/audit_fmt_usage.py book/cli/checks/lego_dead_code.py` PASS;
+  `git diff --check` PASS; `./book/binder check math` PASS; focused pytest
+  suite PASS, 176 tests; `fmt_prose_contract.py` PASS, 0 violations;
+  `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
+  0 findings across 81 files.
+- Open API note: the user flagged `scale="B", scale_style="word"` as unclear.
+  Before final API lock, discuss a clearer spelling such as `scale="billion"`
+  for word-scale output while keeping `scale="B"` for compact glyph output.
+
 ## 2026-05-31 — Benchmarking millisecond time suffixes
 
 Change type: byte-identical formatter relocation. Replaced 25
