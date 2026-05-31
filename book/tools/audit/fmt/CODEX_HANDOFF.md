@@ -1,0 +1,194 @@
+# FMT migration — handoff plan for Codex (finish the remaining work)
+
+> **You are continuing a corpus-wide migration to a typed `fmt_*` formatter
+> family.** The dangerous, error-prone part (percent / multiplier / scale-division
+> / percentage-points) is **already done and verified**. Your job is the remaining
+> lower-risk lanes + two user-decision items + the later render/lock phases.
+> Work the same way the previous agent did: small commits, keep the gates green,
+> never guess on the user's prose.
+
+Worktree: `/Users/VJ/GitHub/MLSysBook-fmt-fix` · branch `fmt-fix` (off `dev`).
+Run ALL fmt tooling from the repo root with `PYTHONPATH=mlsysim`.
+
+---
+
+## 0. Read these first (orientation, in order)
+1. `.claude/rules/fmt.md` — **the contract**: which formatter for which value-kind,
+   the OUTPUT-block recipe, the prose rules, the per-kind guards. This is the law.
+2. `book/tools/audit/fmt/NIGHT_RESUME.md` — current state + the two deferred
+   user-decision items spelled out (scale house-style, 4 pp editorial sites).
+3. `book/tools/audit/fmt/MIGRATION.md` — rollout board, workstreams, render phases.
+4. `book/tools/audit/fmt/ASSESSMENT.md` — the equivalence regimes (byte-identical
+   vs glyph-relocation) and the verification gauntlet.
+
+---
+
+## 1. Invariants — do NOT break these
+- **Every source edit must keep the chapter executing headlessly** and keep all
+  three gates (§2) green. Run them after every batch.
+- **Pure formatter relocations must stay byte-identical** (rendered value AND
+  visible prose). Verify with `assess_equiv` / by dumping the `_str` value before
+  and after. A value-changing edit is allowed ONLY when it is a deliberate,
+  documented correctness fix — then you must re-render and read the sentence.
+- **Never invent a value-kind glyph in a `suffix=`.** `%`, `×`, `$`, and scale
+  letters K/M/B/T are forbidden in `suffix=`; use the typed formatter. A physical
+  unit label (`" GB"`, `" ms"`, `" W"`) in `suffix=` is the WS4 target (§4B).
+- **Git:** small commits with clear messages; let pre-commit run; do NOT
+  `--amend`, do NOT force-push, do NOT skip hooks. The `prettify-tables` hook may
+  re-touch a table AFTER staging and abort the commit — just `git add -A` and
+  re-commit (this is normal, not an error; it happened repeatedly last session).
+- **Do not change the user's prose grammar/wording on a judgment call.** If a fix
+  requires rewording a sentence, splitting an export, or a style ruling, STOP and
+  add it to a "needs user decision" list instead of guessing.
+- **Imports:** chapters either do a document-level `from mlsysim import *` (then a
+  new formatter is available everywhere via the shared kernel) OR use per-cell
+  `from mlsysim.fmt import …` selective imports (then you must add the new
+  formatter name to each using-cell's import line). Check which the chapter uses.
+
+---
+
+## 2. The three gates (must be green after every batch)
+```
+# from repo root, PYTHONPATH=mlsysim
+python3 book/tools/audit/fmt/fmt_prose_contract.py   --root book/quarto/contents   # expect: 0 violations
+python3 book/tools/audit/fmt/audit_prose_semantics.py --root book/quarto/contents  # expect: 0 findings ... CLEAN
+python3 book/tools/audit/fmt/codemod_fmt.py queue     --root book/quarto/contents   # expect: only {'scale': 44} until you do §3A
+```
+Plus the test suite (keep at 100%):
+```
+python3 -m pytest mlsysim/tests/test_fmt.py book/tests/test_codemod_fmt.py \
+  book/tests/test_fmt_prose_contract.py book/tests/test_audit_prose_semantics.py \
+  book/tests/test_visible_text.py -q -o addopts=''
+```
+Gate 1 = glyph ownership (static AST). Gate 2 = rendered-composite semantics
+(executes chapters, substitutes values, flags dup unit/glyph, percent-vs-points,
+mult-direction "0.5× faster", currency-as-percent, unresolved refs). Gate 3 =
+remaining dangerous suffixes by kind. All three already pass right now.
+
+---
+
+## 3. Work items — priority order
+
+### A. User-decision items (do FIRST, but ONLY after the user has answered)
+These are written up in `NIGHT_RESUME.md` ("Editorial decisions" + "Scale queue").
+
+**A1 — Scale queue (44 sites, `codemod_fmt queue` kind=scale).**
+Blocked on ONE ruling: *do scaled counts render `70K` (no space, what `fmt_count`
+emits) or `70 K` (current, with space)?*
+- If **no-space**: migrate all 44 to `fmt_count(raw, scale=…)`. The raw count
+  comes from `.m_as("param")` (pint) where the source uses a Quantity, or
+  `value * FACTOR` where the variable is a pre-scaled literal (`model_params_b=7`
+  → `fmt_count(model_params_b * BILLION, scale="B")`). Output changes "70 K"→"70K";
+  that's the accepted style change. Verify each value before/after; gate; commit.
+- If **keep the space**: these stay as `fmt(x, suffix=" K")`. Then teach
+  `fmt_count`/the contract that this is acceptable, OR just leave them and mark the
+  scale lane closed-as-wontfix in MIGRATION.md. (Low risk either way — a scale
+  glyph cannot cause a silent 100× error.)
+
+**A2 — Four entangled percentage-point sites.** Recommendations already worked out
+in `NIGHT_RESUME.md` ("Editorial decisions left for the user"):
+- `benchmarking.qmd` `mv2_acc_drop_str` → `fmt_pp(acc_drop, precision=1,
+  attributive=True)` AND hyphenate the adjacent hardcoded "1 percentage point
+  threshold" → "1 percentage-point threshold".
+- `benchmarking.qmd` `mv2_edge_drop_str` → make it the plural NOUN
+  `fmt_pp(edge_drop, precision=1)` and reword the table cell "(… drop)" → "(drop
+  of …)" so the noun reads correctly in both places (or split into two exports).
+Apply only after the user confirms the wording. Then render-verify benchmarking.
+
+### B. WS4 — unit-suffix lane (~2,393 sites: `GB`/`ms`/`W`/`GB/s`/…)  ← the big one
+**Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
+and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.
+`weights_gb`), not Pint Quantities, and `fmt_qty` requires a Pint Quantity to
+generate the unit. So this is per-site, judgment-bearing source work. Method:
+
+1. **Inventory & bucket** (don't brute-force):
+   ```
+   python3 book/tools/audit/fmt/audit_fmt_usage.py --root book/quarto/contents --json > /tmp/fmt_usage.json
+   ```
+   Group by suffix unit and by whether the argument is already a Pint Quantity.
+2. **Quantity-backed sites → `fmt_qty`** (the clean, preferred case):
+   `bw_str = fmt(bw.m_as(GB/second), suffix=" GB/s")` → `bw_str = fmt_qty(bw, GB/second)`.
+   `fmt_qty` generates the suffix from the unit (always canonical), dimension-checks,
+   and refuses currency. Then DROP any duplicate unit the prose was adding.
+3. **Plain-float sites** (`fmt(weights_gb, suffix=" GB")` with no Quantity in scope):
+   prefer refactoring the source to carry a Quantity and use `fmt_qty`; if that's a
+   large refactor, it is acceptable to LEAVE these for now — they are honest unit
+   labels, low risk. Do NOT fabricate a Quantity just to satisfy the rule.
+4. Go **one chapter at a time**, byte-identical, gate after each, commit per chapter.
+   There is no `run_unit_lane.py` yet — if you find a byte-identical sub-pattern
+   that recurs (e.g. `fmt(q.m_as(UNIT), suffix=" <unit>")`), consider extending
+   `codemod_fmt.py` with a `unit` scan + a `run_unit_lane.py` mirroring
+   `run_scale_lane.py` (which reuses `lane_process` from `run_percent_lane.py`).
+5. **Watch the prose:** after a `fmt_qty` migration the unit lives in the string, so
+   any unit the prose used to add ("… GB", "… ms") must be deleted. Gate 2
+   (`audit_prose_semantics`) will catch the resulting "5 GB GB"-style dups —
+   trust it, and extend its `_UNIT` list if you introduce a unit it doesn't know.
+
+### C. WS3 — `MarkdownStr` survivors (~328 sites)  ← medium effort, judgment-heavy
+`MarkdownStr` is the escape hatch for genuinely non-numeric labels, sequences, and
+compound expressions (see fmt.md §5). Many current uses are legitimate; some hide a
+single numeric value that should be typed. Method:
+1. Enumerate `MarkdownStr(` sites; classify: **range** (`"5–20 ms"`) → `fmt_range`;
+   **single numeric value** wrapped in an f-string → the matching typed formatter;
+   **legitimate label/sequence/equation** → leave.
+2. Migrate ranges to `fmt_range(lo, hi, kind=…, unit=…)` (owns the en-dash, MIT
+   style). Byte-identical-verify (the en-dash + spacing must match). Gate; commit.
+3. Leave and briefly justify the genuine escape-hatch survivors.
+
+### D. Phase 3B — PDF / `.tex` render verification (after the lanes above)
+HTML render verification is already DONE for all previously-changed chapters. For
+any chapter YOU change, do HTML (`./book/binder build html --volN volN/<ch>
+--skip-hygiene --skip-validate`, then grep the value in the built HTML under
+`book/quarto/_build/html-volN/contents/volN/<ch>/<ch>.html`). Then PDF:
+```
+python3 book/tools/audit/chapter_pdf_verify.py --vol1 <chapter>   # keeps the .tex
+```
+Read the kept `.tex`: confirm no literal `%`/`×`/`\$` leaks where a glyph should be,
+no "??"/unresolved refs, no overfull-box explosions around changed lines. (Known
+benign quirk: `$\times$` inside a figure caption renders fine in the visible
+caption but appears as raw `\times` in the HTML `title=` tooltip — this is
+pre-existing book-wide Quarto behavior, not a regression.)
+
+### E. Phase 4 — lock it shut (final, once B/C are at an acceptable stopping point)
+Flip the opt-in static gate to a global pre-commit blocker so regressions can't
+return: `fmt_semantic_suffix` (a.k.a. `./book/binder check math --scope
+suffix-semantics`) — set its default to enabled and wire it into pre-commit.
+Then run a full-book `audit_lego_html.py` sweep (needs archived HTML via
+`book/tools/audit/fmt/render_html.sh vol1` / `vol2`).
+
+---
+
+## 4. The per-change loop (apply to EVERY edit)
+1. Read the cell + the prose that references its `_str` exports.
+2. Make the typed-formatter edit; add the formatter to the cell's import if the
+   chapter uses selective imports.
+3. If a unit/glyph moved into the string, delete the now-duplicate unit/glyph from
+   the prose.
+4. Verify the rendered `_str` value (dump it via `assess_equiv.snapshot_file`):
+   byte-identical for relocations; for a deliberate fix, confirm the new value +
+   read the surrounding sentence.
+5. Run the three gates (§2). Fix anything they flag.
+6. Commit (chapter-sized batches). Keep `NIGHT_RESUME.md` current if you want clean
+   resumability.
+
+## 5. Definition of done (for the whole migration)
+- `codemod_fmt queue` empty (or only documented wontfix items).
+- Gates 1+2 = 0 across 81 chapters; test suite 100%.
+- Every changed chapter HTML- and PDF-verified.
+- `fmt_semantic_suffix` flipped to a global blocker (Phase 4).
+- WS4/WS3 either migrated or each survivor has a one-line justification.
+
+## 6. Landmines learned last session (save yourself the pain)
+- `fmt()` has a **precision guard**: an integer-like value at `precision=1` raises
+  "spurious .0", and a non-integer at `precision=0` raises "not integer-like".
+  Match the original precision exactly when relocating.
+- `fmt_percent` guards ratios to `[0, 1.5]`. For legitimate >150% or signed values
+  pass `max_ratio=` / `allow_negative=True` explicitly (don't widen silently).
+- `fmt_pp` now has `attributive=True` (hyphenated "N percentage-point") and
+  auto singular/plural agreement on the rendered number. Use attributive ONLY when
+  the value directly modifies a following noun ("a 5 percentage-point gap").
+- The exact-match lanes only matched bare suffixes; **compound suffixes**
+  (`"% annually"`, `"×/year"`) and `fmt(...)` calls inside `row.append(...)` (not a
+  `_str =` assignment) slip past them — grep for these by hand.
+- Class-qualified names matter: two classes can export the same bare `_str` name;
+  the contract checker is class-aware, so keep prose refs fully qualified.
