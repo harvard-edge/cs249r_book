@@ -144,6 +144,16 @@ class TestBottleneck:
         result = calc_bottleneck(ops, model_bytes, device_flops, device_bw)
         assert result["bottleneck"] == "Memory"
 
+    def test_intensity_normalizes_scaled_units(self):
+        # 1 TFLOP / 1 GB = 1000 FLOP/byte, not 1 by raw Pint magnitude.
+        result = calc_bottleneck(
+            Q_("1 TFLOP"),
+            Q_("1 GB"),
+            Q_("1 TFLOP/s"),
+            Q_("1 GB/s"),
+        )
+        assert result["intensity"] == pytest.approx(1000.0)
+
 # ======================================================================
 # model_memory
 # ======================================================================

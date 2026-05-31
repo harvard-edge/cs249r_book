@@ -26,8 +26,7 @@ from ..physics import (
     calc_pipeline_bubble
 )
 from ..core.constants import (
-    ureg, Q_, PRECISION_MAP,
-    BYTES_FP16,
+    ureg, Q_, resolve_precision,
 )
 from ..infrastructure.registry import Infrastructure
 from ..literature.registry import Literature
@@ -272,10 +271,16 @@ class DistributedModel(BaseModel):
 
         # 1. 3D/4D Parallelism Decomposition
         n_accelerators = fleet.total_accelerators
-        dp_size = n_accelerators // (tp_size * pp_size * ep_size)
+        parallel_group_size = tp_size * pp_size * ep_size
         
-        if dp_size < 1:
+        if parallel_group_size > n_accelerators:
             raise ValueError(f"Infeasible 4D Parallelism: TP({tp_size}) * PP({pp_size}) * EP({ep_size}) > Total({n_accelerators})")
+        if n_accelerators % parallel_group_size != 0:
+            raise ValueError(
+                f"Infeasible 4D Parallelism: TP({tp_size}) * PP({pp_size}) * EP({ep_size}) "
+                f"must divide total accelerators ({n_accelerators}) exactly."
+            )
+        dp_size = n_accelerators // parallel_group_size
 
         # 2. Single Node Performance (Computation)
         # Global batch is divided by DP size (TP/PP/EP split the model, not the batch).
@@ -299,7 +304,7 @@ class DistributedModel(BaseModel):
         # DP AllReduce exchanges gradients, which equal model size in the active precision.
         # With TP, each rank holds 1/tp_size of the model, so gradient buffer is smaller.
         # With ZeRO-1/2, AllReduce is replaced by Reduce-Scatter and All-Gather (same total volume but different patterns).
-        precision_bytes = PRECISION_MAP.get(precision, BYTES_FP16)
+        precision, precision_bytes = resolve_precision(precision)
         gradient_size = model.size_in_bytes(precision_bytes) / tp_size
         if is_lora:
             gradient_size = gradient_size * 0.01
@@ -336,7 +341,7 @@ class DistributedModel(BaseModel):
         # a conservative upper bound. In practice, modern frameworks overlap this
         # communication with the next layer's computation to reduce exposed latency.
         if tp_size > 1:
-            bpp = PRECISION_MAP.get(precision, BYTES_FP16)
+            _, bpp = resolve_precision(precision)
             hidden_dim = getattr(model, 'hidden_dim', 4096) or 4096
             n_layers = getattr(model, 'layers', 1) or 1
             activation_bytes_per_allreduce = local_batch * seq_len * hidden_dim * bpp.magnitude
@@ -363,7 +368,7 @@ class DistributedModel(BaseModel):
         # batch_size, seq_len, hidden_dim, and routing factor (top_k / num_experts).
         # Source: Fedus et al. (2022), "Switch Transformers"
         if ep_size > 1:
-            bpp = PRECISION_MAP.get(precision, BYTES_FP16)
+            _, bpp = resolve_precision(precision)
             hidden_dim = getattr(model, 'hidden_dim', 4096) or 4096
             top_k = getattr(model, 'active_experts_per_token', 1) or 1
             # Each token sends hidden_dim activations to its assigned expert(s)
@@ -488,7 +493,7 @@ class NetworkRooflineModel(BaseModel):
         # To normalize per-step, we use 1 sample.
         # But CI is better defined as Total Ops / Total Sync Bytes.
         # For Data Parallel sync: Bytes = 2 * Parameters * Precision_Bytes
-        prec_bytes = PRECISION_MAP.get(precision, BYTES_FP16)
+        precision, prec_bytes = resolve_precision(precision)
         sync_bytes = (2 * model.parameters.to(ureg.count).magnitude * prec_bytes.to(ureg.byte).magnitude) * ureg.byte
         
         # Total OPS for one training step (approx 6 * P FLOPs per sample)
@@ -828,11 +833,7 @@ class ServingModel(BaseModel):
         ServingResult
             Serving performance metrics.
         """
-        prec_map = PRECISION_MAP
-        if precision not in prec_map:
-            supported = ", ".join(sorted(prec_map))
-            raise ValueError(f"precision '{precision}' is not supported. Supported precision values: {supported}")
-        bpp = prec_map[precision]
+        precision, bpp = resolve_precision(precision)
 
         # 0. Input validation
         if seq_len < 1:
@@ -1047,9 +1048,7 @@ class TrainingMemoryModel(BaseModel):
         from ..core._validation import validate_at_least, validate_range
         from ..physics import calc_activation_memory
 
-        if precision not in PRECISION_MAP:
-            supported = ", ".join(sorted(PRECISION_MAP))
-            raise ValueError(f"precision '{precision}' is not supported. Supported precision values: {supported}")
+        precision, precision_bytes = resolve_precision(precision)
         optimizer_key = optimizer.lower()
         opt_bytes = self._get_optimizer_bytes(optimizer_key)
         
@@ -1067,7 +1066,7 @@ class TrainingMemoryModel(BaseModel):
         if zero_stage not in {0, 1, 2, 3}:
             raise ValueError("zero_stage must be 0, 1, 2, or 3")
 
-        bpp = PRECISION_MAP[precision].to(ureg.byte).magnitude
+        bpp = precision_bytes.to(ureg.byte).magnitude
         total_params = model.parameters.to(ureg.count).magnitude
         model_parallel_shards = tp_size * pp_size * ep_size
         params_per_rank = total_params / model_parallel_shards
@@ -1087,13 +1086,12 @@ class TrainingMemoryModel(BaseModel):
         local_microbatch = max(1, math.ceil(batch_size / (dp_size * gradient_accumulation_steps)))
         layers_per_stage = max(1, math.ceil(model.layers / pp_size))
         hidden_dim = model.hidden_dim or 4096
-        activation_precision_scale = bpp / BYTES_FP16.to(ureg.byte).magnitude
         activations = calc_activation_memory(
             n_layers=layers_per_stage,
             seq_len=seq_len,
             batch_size=local_microbatch,
             hidden_dim=hidden_dim,
-            precision_bytes=activation_precision_scale,
+            precision_bytes=bpp,
             strategy=activation_checkpointing,
         )
 
@@ -1308,9 +1306,7 @@ class MoERoutingModel(BaseModel):
         """Estimate effective active parameters and optional EP all-to-all latency."""
         from ..core._validation import validate_at_least, validate_range
 
-        if precision not in PRECISION_MAP:
-            supported = ", ".join(sorted(PRECISION_MAP))
-            raise ValueError(f"precision '{precision}' is not supported. Supported precision values: {supported}")
+        precision, precision_bytes = resolve_precision(precision)
         validate_at_least(batch_size, 1, "batch_size")
         validate_at_least(seq_len, 1, "seq_len")
         validate_at_least(ep_size, 1, "ep_size")
@@ -1321,7 +1317,7 @@ class MoERoutingModel(BaseModel):
         active_parameter_multiplier = effective_active_experts / top_k
         effective_active_parameters = model.active_parameters * active_parameter_multiplier
 
-        bpp = PRECISION_MAP[precision].to(ureg.byte).magnitude
+        bpp = precision_bytes.to(ureg.byte).magnitude
         hidden_dim = model.hidden_dim or 4096
         routed_fraction = (ep_size - 1) / ep_size if ep_size > 1 else 0.0
         routing_payload_bytes = batch_size * seq_len * hidden_dim * bpp * top_k * active_parameter_multiplier * ureg.byte
@@ -1376,8 +1372,7 @@ class ContinuousBatchingModel(BaseModel):
 
     def solve(self, model: TransformerWorkload, hardware: HardwareNode, seq_len: int, max_batch_size: int = 1, page_size: int = 16, precision: str = "fp16", efficiency: float = 0.5) -> ContinuousBatchingResult:
         """Calculates continuous batching throughput and PagedAttention memory."""
-        prec_map = PRECISION_MAP
-        bpp = prec_map.get(precision, BYTES_FP16)
+        precision, bpp = resolve_precision(precision)
         peak_flops = hardware.compute.precision_flops.get(precision, hardware.compute.peak_flops)
         
         # Base latency metrics (including attention O(S²) term)
@@ -1485,7 +1480,7 @@ class WeightStreamingModel(BaseModel):
             - prefill: processes all S tokens in parallel (compute-heavy, O(S^2) attention)
             - decode: processes one token at a time per request (memory-bound)
         """
-        bpp = PRECISION_MAP.get(precision, BYTES_FP16)
+        precision, bpp = resolve_precision(precision)
         peak_flops = hardware.compute.precision_flops.get(precision, hardware.compute.peak_flops)
 
         # 1. SRAM Capacity Constraint
@@ -2439,8 +2434,7 @@ class SynthesisSolver(BaseSolver):
         """
         Synthesizes hardware requirements from an SLA target.
         """
-        prec_map = PRECISION_MAP
-        bpp = prec_map.get(precision, BYTES_FP16)
+        precision, bpp = resolve_precision(precision)
         weight_bytes = model.size_in_bytes(bpp)
         graph = model.lower(bpp)
         total_ops = graph.total_ops

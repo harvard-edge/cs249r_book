@@ -1,7 +1,7 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional, Dict
-from ..core.constants import Q_
-from ..core.types import Quantity, Metadata
+from ..core.constants import Q_, ureg
+from ..core.types import Quantity, Metadata, require_dimensionality, require_unit_family
 
 class ComputeCore(BaseModel):
     """
@@ -17,6 +17,19 @@ class ComputeCore(BaseModel):
     # classes that have no SM concept (MCUs, TPUs). Pairs with the per-SM memory
     # fields below to derive chip-level totals (e.g. register file across the die).
     sm_count: Optional[int] = None
+
+    @field_validator("peak_flops", mode="after")
+    @classmethod
+    def _validate_peak_flops(cls, v):
+        return require_unit_family(v, ureg.count / ureg.second, "peak_flops", "operation")
+
+    @field_validator("precision_flops", mode="after")
+    @classmethod
+    def _validate_precision_flops(cls, v):
+        return {
+            key: require_unit_family(val, ureg.count / ureg.second, f"precision_flops[{key!r}]", "operation")
+            for key, val in v.items()
+        }
 
 class MemoryHierarchy(BaseModel):
     """
@@ -41,6 +54,16 @@ class MemoryHierarchy(BaseModel):
     register_file_per_sm: Optional[Quantity] = None
     shared_memory_per_sm: Optional[Quantity] = None
 
+    @field_validator("capacity", "sram_capacity", "flash_capacity", "l2_cache", "register_file_per_sm", "shared_memory_per_sm", mode="after")
+    @classmethod
+    def _validate_capacity_fields(cls, v, info):
+        return require_unit_family(v, ureg.byte, info.field_name, "data")
+
+    @field_validator("bandwidth", "sram_bandwidth", "flash_bandwidth", mode="after")
+    @classmethod
+    def _validate_bandwidth_fields(cls, v, info):
+        return require_unit_family(v, ureg.byte / ureg.second, info.field_name, "data")
+
 class StorageHierarchy(BaseModel):
     """
     Represents the persistent storage subsystem connected to the hardware.
@@ -53,6 +76,21 @@ class StorageHierarchy(BaseModel):
     bandwidth: Quantity
     latency: Optional[Quantity] = None
 
+    @field_validator("capacity", mode="after")
+    @classmethod
+    def _validate_capacity(cls, v):
+        return require_unit_family(v, ureg.byte, "capacity", "data")
+
+    @field_validator("bandwidth", mode="after")
+    @classmethod
+    def _validate_bandwidth(cls, v):
+        return require_unit_family(v, ureg.byte / ureg.second, "bandwidth", "data")
+
+    @field_validator("latency", mode="after")
+    @classmethod
+    def _validate_latency(cls, v):
+        return require_dimensionality(v, ureg.second, "latency")
+
 class IOInterconnect(BaseModel):
     """
     Represents a point-to-point interconnect link.
@@ -64,6 +102,16 @@ class IOInterconnect(BaseModel):
     name: str # e.g., "PCIe Gen4 x16"
     bandwidth: Quantity
     latency: Optional[Quantity] = None
+
+    @field_validator("bandwidth", mode="after")
+    @classmethod
+    def _validate_bandwidth(cls, v):
+        return require_unit_family(v, ureg.bit / ureg.second, "bandwidth", "data")
+
+    @field_validator("latency", mode="after")
+    @classmethod
+    def _validate_latency(cls, v):
+        return require_dimensionality(v, ureg.second, "latency")
 
 class HardwareNode(BaseModel):
     """
@@ -94,6 +142,26 @@ class HardwareNode(BaseModel):
     )
     dispatch_tax: Quantity = Field(default_factory=lambda: Q_("0.01 ms"))
     metadata: Metadata = Field(default_factory=Metadata)
+
+    @field_validator("tdp", "tdp_min", "tdp_max", mode="after")
+    @classmethod
+    def _validate_power_fields(cls, v, info):
+        return require_dimensionality(v, ureg.watt, info.field_name)
+
+    @field_validator("battery_capacity", mode="after")
+    @classmethod
+    def _validate_battery_capacity(cls, v):
+        return require_dimensionality(v, ureg.joule, "battery_capacity")
+
+    @field_validator("unit_cost", "unit_cost_max", mode="after")
+    @classmethod
+    def _validate_cost_fields(cls, v, info):
+        return require_unit_family(v, ureg.dollar, info.field_name, "currency")
+
+    @field_validator("dispatch_tax", mode="after")
+    @classmethod
+    def _validate_dispatch_tax(cls, v):
+        return require_dimensionality(v, ureg.second, "dispatch_tax")
 
     def ridge_point(self, precision: Optional[str] = None) -> Quantity:
         """

@@ -44,7 +44,7 @@ from mlsysim.engine.solver import (
     TailLatencyModel,
 )
 from mlsysim.models.types import SparseTransformerWorkload
-from mlsysim.physics import calc_pipeline_bubble
+from mlsysim.physics import calc_activation_memory, calc_pipeline_bubble
 from mlsysim.systems.types import NetworkFabric
 from mlsysim.engine.engine import Engine, PerformanceProfile
 from mlsysim.core.constants import ureg, Q_
@@ -303,6 +303,28 @@ class TestTrainingMemoryModel:
         assert result.weights.to("GB").magnitude > 0
         assert result.optimizer_state.to("GB").magnitude > result.gradients.to("GB").magnitude
 
+    def test_training_memory_activation_uses_precision_bytes(self):
+        llama = Models.Language.Llama3_8B
+        h100 = Hardware.Cloud.H100
+        result = TrainingMemoryModel().solve(
+            llama,
+            h100,
+            batch_size=8,
+            seq_len=1024,
+            precision="fp16",
+            activation_checkpointing="selective",
+        )
+        expected = calc_activation_memory(
+            n_layers=llama.layers,
+            seq_len=1024,
+            batch_size=8,
+            hidden_dim=llama.hidden_dim,
+            precision_bytes=2,
+            strategy="selective",
+        ).to("GB")
+
+        assert result.activations.to("GB").magnitude == pytest.approx(expected.magnitude)
+
     def test_zero_stage_reduces_model_state_memory(self):
         llama = Models.Language.Llama3_8B
         h100 = Hardware.Cloud.H100
@@ -334,6 +356,8 @@ class TestTrainingMemoryModel:
             TrainingMemoryModel().solve(llama, h100, batch_size=8, zero_stage=4)
         with pytest.raises(ValueError, match="optimizer"):
             TrainingMemoryModel().solve(llama, h100, batch_size=8, optimizer="mystery")
+        with pytest.raises(ValueError, match="precision"):
+            TrainingMemoryModel().solve(llama, h100, batch_size=8, precision="fp6")
 
 class TestServingCapacityModel:
     """Tests for serving capacity planning."""
@@ -896,6 +920,12 @@ class TestDistributedModel:
         result = solver.solve(gpt3, cluster, batch_size=32, pp_size=1)
         assert result.pipeline_bubble_latency.magnitude == 0
         assert result.bubble_fraction == 0
+
+    def test_parallelism_must_divide_total_accelerators(self):
+        solver = DistributedModel()
+        cluster = Systems.Clusters.Research_256
+        with pytest.raises(ValueError, match="divide total accelerators"):
+            solver.solve(Models.Language.Llama3_8B, cluster, batch_size=32, tp_size=3)
 
 # ======================================================================
 # 11. NetworkRooflineModel

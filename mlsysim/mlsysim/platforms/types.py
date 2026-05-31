@@ -1,12 +1,13 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
-from ..core.types import Quantity
+from ..core.constants import ureg
+from ..core.types import Quantity, require_dimensionality, require_unit_family
 
 
 class PlatformEnvelope(BaseModel):
     """Abstract deployment envelope (RAM, storage, latency budget)."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
     name: str
     ram: Quantity
     storage: Quantity
@@ -15,3 +16,13 @@ class PlatformEnvelope(BaseModel):
     ram_range: str | None = None
     storage_range: str | None = None
     tdp_range_w: str | None = None
+
+    @field_validator("ram", "storage", mode="after")
+    @classmethod
+    def _validate_capacity_fields(cls, v, info):
+        return require_unit_family(v, ureg.byte, info.field_name, "data")
+
+    @field_validator("typical_latency_budget", mode="after")
+    @classmethod
+    def _validate_latency_budget(cls, v):
+        return require_dimensionality(v, ureg.second, "typical_latency_budget")

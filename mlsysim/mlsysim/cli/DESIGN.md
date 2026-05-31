@@ -16,6 +16,13 @@ The core physics engine (`mlsysim.engine.solver`) must never receive bad data.
 *   **The Design:** Every input (CLI flags, YAML files, JSON strings) must be parsed and validated by a strict Pydantic schema (e.g., `EvalNodeSchema`) *before* any core mathematical logic is invoked.
 *   **The Rationale:** If a user specifies an H100 GPU but sets the bandwidth to 100 GB/s (which is physically wrong for that chip), the schema validator rejects it immediately. This guarantees that the analytical engine only ever processes mathematically and physically valid states.
 
+Cluster YAML follows the same rule. `hardware.nodes` is interpreted as the
+total accelerator count in historical plans; when `accelerators_per_node` is
+present, it must divide that count exactly. The CLI may infer intra-node
+bandwidth from the resolved hardware when available, but it must not invent a
+topology by silently flooring node counts or assuming an H100-like 8-GPU node
+for every accelerator.
+
 ### Rule 2: Strict I/O Purity (The `stdout` vs `stderr` Rule)
 
 A modern CLI must serve two callers equally well: the human at the keyboard, and the automated process in the pipeline.
