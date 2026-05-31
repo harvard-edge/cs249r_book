@@ -157,6 +157,23 @@ class TestFmtPercentGuards:
             fmt_percent(2.0, precision=0)
         assert fmt_percent(2.0, precision=0, max_ratio=3) == "200"
 
+    def test_rejects_negative_ratio_by_default(self):
+        # a bounded proportion (accuracy, utilization) is never negative
+        with pytest.raises(ValueError, match="0-1 ratio"):
+            fmt_percent(-0.05, precision=0)
+
+    def test_allow_negative_widens_domain_for_signed_change(self):
+        # ROI / cost-delta: signed, may exceed 100% -> opt in explicitly
+        assert fmt_percent(-0.818, precision=1, style="symbol",
+                           allow_negative=True) == "-81.8%"
+        assert fmt_percent(8.089, precision=1, style="symbol",
+                           allow_negative=True, max_ratio=9) == "808.9%"
+
+    def test_allow_negative_still_bounds_magnitude(self):
+        # the guard still catches a true 100x blunder even when signed
+        with pytest.raises(ValueError, match="0-1 ratio"):
+            fmt_percent(-85, allow_negative=True)
+
     def test_rejects_unknown_style(self):
         with pytest.raises(ValueError, match="style must be"):
             fmt_percent(0.5, style="pct")

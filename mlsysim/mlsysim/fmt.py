@@ -298,7 +298,7 @@ def fmt_unit(quantity, default="-"):
 
 
 def fmt_percent(ratio, precision=1, commas=False, style="number",
-                max_ratio=1.5):
+                max_ratio=1.5, allow_negative=False):
     """
     Format a 0-1 **ratio** as a percentage. The single canonical domain for
     percentages: the input is always a fraction in ``[0, 1]`` (``0.85`` →
@@ -307,9 +307,13 @@ def fmt_percent(ratio, precision=1, commas=False, style="number",
     This one-domain rule is the structural fix for the "no 10,000%" guarantee.
     A value outside ``[0, max_ratio]`` is almost always an already-scaled value
     passed by mistake (``0.85`` accidentally typed/derived as ``85``), so it
-    raises instead of silently rendering ``8500``. Legitimate values above
+    raises instead of silently rendering ``8500``.     Legitimate values above
     ``max_ratio`` (e.g. >150% growth) must pass ``max_ratio=`` explicitly,
-    making the intent visible at the call site.
+    making the intent visible at the call site. Likewise a percentage that can
+    be **negative** — a signed rate of change such as ROI or cost delta, as
+    opposed to a bounded proportion like accuracy — must pass
+    ``allow_negative=True`` (which widens the domain to ``[-max_ratio, max_ratio]``).
+    The default refusal of negatives keeps the common proportion case strict.
 
     The formatter owns the trailing glyph via ``style`` so authors never type
     ``%`` or "percent" in prose (where a stray ``%`` could leak into math mode
@@ -329,14 +333,16 @@ def fmt_percent(ratio, precision=1, commas=False, style="number",
         r = float(ratio)
     _require_finite(r, "percent ratio")
 
-    if not (0.0 <= r <= max_ratio):
+    lo = -max_ratio if allow_negative else 0.0
+    if not (lo <= r <= max_ratio):
         raise ValueError(
             f"fmt_percent expects a 0-1 ratio, got {r}. If this is an "
             f"already-scaled 0-100 value, divide by 100 at the source so the "
             f"value flows through fmt_percent as a ratio. If a value above "
             f"{max_ratio * 100:.0f}% is genuinely intended (e.g. growth), pass "
-            f"max_ratio= explicitly. This guard prevents silent 100x errors "
-            f"such as 0.85 -> '8500 percent'."
+            f"max_ratio= explicitly; if it can be negative (e.g. ROI, a signed "
+            f"change), pass allow_negative=True. This guard prevents silent 100x "
+            f"errors such as 0.85 -> '8500 percent'."
         )
 
     if style not in {"number", "prose", "symbol"}:
