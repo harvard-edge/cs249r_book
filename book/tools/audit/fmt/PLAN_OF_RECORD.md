@@ -66,6 +66,25 @@ temporary positional compatibility, missing-unit and both-unit errors,
 time-unit validation through `unit=`, rate allowlist validation through
 `unit=`, and range endpoint checks through keyword units.
 
+### Formatter output contract backlog
+
+Every value that is exported from a LEGO OUTPUT block for inline prose should be
+either produced by a typed formatter or explicitly wrapped as a `MarkdownStr`.
+The typed formatters already return `MarkdownStr`; the open design work is a
+static/prose gate that flags prose-bound plain strings or f-strings unless they
+are intentional labels/sequences. This should reduce Quarto escaping surprises
+without banning legitimate non-numeric `MarkdownStr` escape-hatch uses.
+
+### Unit-label registry backlog
+
+`fmt_qty(..., unit_label=...)` is useful during migration, but repeated labels
+such as `unit_label="Gb/s"` are a smell. Add a central unit display-label
+registry so stock units (`Gbps`, `GB/second`, `TB/second`, `TFLOP/second`,
+etc.) render the book's house style automatically. Then migrate call sites like
+`fmt_qty(link_bw, Gbps, unit_label="Gb/s")` to plain `fmt_qty(link_bw, Gbps)`,
+and reserve `unit_label=` for one-off editorial labels that truly are not stock
+units.
+
 For current `fmt_time(...)` migrations, the positional argument is still a unit,
 not a label. Prefer full unit-name strings in source (`"millisecond"`,
 `"second"`, `"hour"`) and let `style="symbol"` or `style="word"` decide whether

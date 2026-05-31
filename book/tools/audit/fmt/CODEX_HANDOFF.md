@@ -524,7 +524,27 @@ PASS (182 tests); `fmt_prose_contract.py` 0; `codemod_fmt.py queue`
 `by kind: {}`; `./book/binder check math` PASS; `./book/binder check code
 --scope lego-dead-code` PASS; `audit_prose_semantics.py` CLEAN across 81 files.
 
-### B. WS4 — unit-suffix lane (remaining 1,110 physical-unit suffixes: `GB`/`MB`/`W`/`GB/s`/…)  ← the big one
+**A39 — Network `Gb/s` suffix lane: DONE.**
+Migrated all 20 `suffix=" Gb/s"` sites to `fmt_qty(..., Gbps,
+unit_label="Gb/s")`, byte-identically across seven chapters:
+`appendix_machine`, `data_engineering`, `hw_acceleration`,
+`compute_infrastructure`, `distributed_training`, `fleet_orchestration`, and
+`network_fabrics`. `audit_fmt_usage.py` now reports no remaining `Gb/s` suffix
+sites and physical-unit suffixes down to 1,090. The repeated
+`unit_label="Gb/s"` calls should later be replaced by a stock unit display-label
+registry so `fmt_qty(..., Gbps)` owns the house style automatically.
+Verification: `git diff --check` PASS; py_compile PASS; focused pytest suite
+PASS (182 tests); `fmt_prose_contract.py` 0; `codemod_fmt.py queue`
+`by kind: {}`; `./book/binder check math` PASS; `./book/binder check code
+--scope lego-dead-code` PASS; `audit_prose_semantics.py` CLEAN across 81 files.
+
+**Backlog note — prose-bound output contract.**
+The user raised whether every OUTPUT value consumed by prose should effectively
+be a `MarkdownStr`. Typed formatters already return `MarkdownStr`; add a later
+gate/design pass to flag prose-bound plain strings or f-strings unless they are
+intentional labels/sequences.
+
+### B. WS4 — unit-suffix lane (remaining 1,090 physical-unit suffixes: `GB`/`MB`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.
 `weights_gb`), not Pint Quantities, and `fmt_qty` requires a Pint Quantity to

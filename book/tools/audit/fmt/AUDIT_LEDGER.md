@@ -108,6 +108,36 @@ Validation details:
   `./book/binder check code --scope lego-dead-code` PASS;
   `audit_prose_semantics.py` PASS, 0 findings across 81 files.
 
+## 2026-05-31 — Network `Gb/s` suffix lane
+
+Change type: byte-identical formatter relocation. Replaced all 20
+`suffix=" Gb/s"` sites with `fmt_qty(..., Gbps, unit_label="Gb/s")`, preserving
+the book's visible `Gb/s` spelling while carrying Pint units into the formatter.
+
+Touched chapters and equivalence:
+
+| Chapter file | Values/prose checked | Result |
+|---|---:|---|
+| `vol1/backmatter/appendix_machine.qmd` | 111 values / 70 prose lines | identical |
+| `vol1/data_engineering/data_engineering.qmd` | 203 / 99 | identical |
+| `vol1/hw_acceleration/hw_acceleration.qmd` | 255 / 140 | identical |
+| `vol2/compute_infrastructure/compute_infrastructure.qmd` | 320 / 183 | identical |
+| `vol2/distributed_training/distributed_training.qmd` | 261 / 142 | identical |
+| `vol2/fleet_orchestration/fleet_orchestration.qmd` | 160 / 60 | identical |
+| `vol2/network_fabrics/network_fabrics.qmd` | 106 / 62 | identical |
+
+Validation details:
+
+- `audit_fmt_usage.py` reports no remaining `suffix=" Gb/s"` sites; physical
+  unit suffix count dropped from 1,110 to 1,090.
+- Follow-up TODO: replace repeated `unit_label="Gb/s"` with a central stock unit
+  display-label registry so `fmt_qty(..., Gbps)` renders `Gb/s` automatically.
+- Verification: `git diff --check` PASS; py_compile PASS; focused pytest suite
+  PASS, 182 tests; `fmt_prose_contract.py` PASS, 0 violations;
+  `codemod_fmt.py queue` PASS, `by kind: {}`; `./book/binder check math` PASS;
+  `./book/binder check code --scope lego-dead-code` PASS;
+  `audit_prose_semantics.py` PASS, 0 findings across 81 files.
+
 ## 2026-05-31 — Currency denominator relocation
 
 Change type: byte-identical formatter relocation. Replaced 91

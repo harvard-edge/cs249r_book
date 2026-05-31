@@ -118,9 +118,17 @@ and `fmt_qty(unit_label=...)` cleared all 14 sites. Intentional visible fixes:
 for the exact 32,768-token batch.
 The appendix bandwidth denominator lane then moved 16 split `GB`/`TB` + prose
 `/s` values to full `fmt_qty(..., GB/second|TB/second)` strings while keeping
-substituted prose byte-identical. Remaining suffix bucket is only 1,110
+substituted prose byte-identical. The network `Gb/s` lane then migrated all 20
+`suffix=" Gb/s"` sites to `fmt_qty(..., Gbps, unit_label="Gb/s")`
+byte-identically across seven chapters. Remaining suffix bucket is only 1,090
 `physical_unit` suffixes. Remaining: the rest of WS4/WS3 and later PDF/lock
 phases. Nothing is half-done or broken.
+
+**New TODOs from user discussion:** add a prose-bound output contract/gate so
+computed OUTPUT values consumed by inline prose are typed formatter results or
+intentional `MarkdownStr`; add a stock unit display-label registry so common
+units like `Gbps` render as `Gb/s` without repeating `unit_label="Gb/s"` at every
+call site.
 
 **If continuing:** Continue with semantic lanes in `PLAN_OF_RECORD.md`. Good next
 targets are physical-unit suffixes, MarkdownStr sites, and the API-cleanup pass.
@@ -525,6 +533,11 @@ drop. The adjacent prose/table text was updated to `1 percentage-point threshold
 and `(drop of 6.8 percentage points)`. No user-decision items remain open.
 
 ## Session commit log (newest first)
+- Codex network `Gb/s` lane: migrated all 20 `suffix=" Gb/s"` sites to
+  `fmt_qty(..., Gbps, unit_label="Gb/s")`, byte-identical across 7 chapters.
+  No `Gb/s` suffix sites remain; physical-unit suffixes dropped 1,110 → 1,090.
+  Follow-up TODO: central stock unit label registry so the label is not
+  repeated at every call site.
 - Codex appendix bandwidth denominator lane: migrated 16 split bandwidth values
   in `appendix_assumptions` and `appendix_fleet` to
   `fmt_qty(..., GB/second|TB/second)` and removed external prose/table `/s`.
