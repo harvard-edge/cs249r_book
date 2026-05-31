@@ -318,6 +318,39 @@ Validation details:
   `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
   0 findings across 81 files.
 
+## 2026-05-31 — Unit-rate/denominator suffix relocation
+
+Change type: small formatter API addition plus byte-identical relocation. Added
+checked `fmt_qty(..., unit_label=...)` for house-style unit labels where Pint's
+compact label would not be byte-identical, then migrated all 16
+`unit_rate_or_denominator` suffix sites.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol1/hw_acceleration/hw_acceleration.qmd` | 3 | 255 | 140 | identical values + prose |
+| `vol1/introduction/introduction.qmd` | 3 | 91 | 45 | identical values + prose |
+| `vol1/ml_systems/ml_systems.qmd` | 2 | 296 | 143 | identical values + prose |
+| `vol1/ml_workflow/ml_workflow.qmd` | 3 | 77 | 36 | identical values + prose |
+| `vol1/nn_computation/nn_computation.qmd` | 1 | 200 | 107 | identical values + prose |
+| `vol1/training/training.qmd` | 3 | 453 | 214 | identical values + prose |
+| `vol2/edge_intelligence/edge_intelligence.qmd` | 1 | 75 | 39 | identical values + prose |
+
+Validation details:
+
+- Before/after snapshots were generated with `assess_equiv.py baseline --ref HEAD`
+  and `assess_equiv.py snapshot` under `/tmp/fmt_den_*`.
+- `assess_equiv.py diff` reported `IDENTICAL values` and `IDENTICAL prose` for
+  every touched chapter.
+- `audit_fmt_usage.py` reports no remaining `unit_rate_or_denominator` suffix
+  bucket and `fmt_qty` calls increased to 291.
+- Verification: `python3 -m py_compile mlsysim/mlsysim/fmt.py book/tools/audit/fmt/audit_fmt_usage.py` PASS;
+  `git diff --check` PASS; `./book/binder check math` PASS; focused pytest
+  suite PASS, 181 tests; `fmt_prose_contract.py` PASS, 0 violations;
+  `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
+  0 findings across 81 files.
+
 ## 2026-05-31 — Remaining suffix bucket split and epoch label
 
 Change type: audit improvement plus byte-identical formatter relocation.

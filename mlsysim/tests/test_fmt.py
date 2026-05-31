@@ -137,6 +137,19 @@ class TestFmtQty:
         )
         assert out == "0.1 mJ/inference"
 
+    def test_unit_label_preserves_dimension_check(self):
+        q = 5 * ureg.flop / ureg.byte
+        assert (
+            fmt_qty(q, ureg.flop / ureg.byte, precision=0, unit_label="FLOP/byte")
+            == "5 FLOP/byte"
+        )
+        with pytest.raises(Exception):
+            fmt_qty(5 * ureg.second, ureg.flop / ureg.byte, unit_label="FLOP/byte")
+
+    def test_unit_label_rejects_value_kind_glyphs(self):
+        with pytest.raises(ValueError, match="currency, percent, or multiplier"):
+            fmt_qty(5 * ureg.GB, ureg.GB, unit_label="GB%")
+
     def test_rejects_legacy_and_structured_denominator_mix(self):
         with pytest.raises(ValueError, match="extra_suffix="):
             fmt_qty(

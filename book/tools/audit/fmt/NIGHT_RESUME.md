@@ -110,14 +110,15 @@ provides the unit check; word-scale FLOP phrases (`billion FLOPs`, `trillion
 FLOPs`) remain in `compound_scale` pending wording/API decisions.
 The four `time_compound` suffixes are gone too: `ms latency` / `ms round-trip`
 now keep the unit in `fmt_time(...)`, and `ms+` uses checked
-`fmt_time(..., marker="+")`. Remaining small suffix buckets are
-`unit_rate_or_denominator` (16) and `compound_scale` (14), plus 1,126
-`physical_unit` suffixes. Remaining: the rest of WS4/WS3 and later PDF/lock
-phases. Nothing is half-done or broken.
+`fmt_time(..., marker="+")`. The 16 `unit_rate_or_denominator` suffixes are now
+also migrated through `fmt_qty(...)`, using checked `unit_label=` where Pint's
+compact label did not match visible house style. Remaining small suffix bucket
+is `compound_scale` (14), plus 1,126 `physical_unit` suffixes. Remaining: the
+rest of WS4/WS3 and later PDF/lock phases. Nothing is half-done or broken.
 
 **If continuing:** Continue with semantic lanes in `PLAN_OF_RECORD.md`. Good next
-targets are unit-rate/denominator suffixes, compound scale suffixes, then
-physical-unit suffixes, MarkdownStr sites, and the API-clarity pass.
+targets are compound scale suffixes, then physical-unit suffixes, MarkdownStr
+sites, and the API-clarity pass.
 For physical Quantity-backed sites, continue WS4 with
 `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/run_unit_lane.py --write <qmd>`
 one chapter at a time. The latest all-chapter run migrated the remaining
@@ -519,6 +520,12 @@ drop. The adjacent prose/table text was updated to `1 percentage-point threshold
 and `(drop of 6.8 percentage points)`. No user-decision items remain open.
 
 ## Session commit log (newest first)
+- Codex unit-rate/denominator lane: added checked `fmt_qty(unit_label=...)` and
+  migrated all 16 `TFLOP/s per W`, `kg/kWh`, `MWh/household-year`,
+  `FLOP/byte`, `GB/day`, `GB per day`, `MB/photo`, `KB/patient`, `MWh/year`,
+  and `kJ per hour` suffix sites byte-identically across 7 chapters; no
+  `unit_rate_or_denominator` suffix bucket remains; contract 0, semantic 0,
+  queue empty, targeted suite 181 passing.
 - Codex time-compound lane: cleared the 4 remaining `ms latency`,
   `ms round-trip`, and `ms+` suffixes using `fmt_time(...)` plus checked
   `marker="+"`; byte-identical across 3 chapters; no `time_compound` suffix

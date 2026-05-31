@@ -1083,6 +1083,7 @@ def fmt_qty(
     commas=False,
     prefix="",
     extra_suffix="",
+    unit_label=None,
     per=None,
     approx=False,
     lower_bound=False,
@@ -1104,8 +1105,11 @@ def fmt_qty(
     display_unit = _coerce_unit(display_unit)
     q = quantity.to(display_unit)
     val = q.magnitude
+    unit_suffix = _compact_unit_suffix(display_unit)
+    if unit_label is not None:
+        unit_suffix = f" {_clean_text_atom(unit_label, what='fmt_qty unit_label')}"
     suffix = (
-        _compact_unit_suffix(display_unit)
+        unit_suffix
         + _denominator_suffix(per, what="per")
         + extra_suffix
     )

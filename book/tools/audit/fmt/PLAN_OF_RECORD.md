@@ -173,6 +173,12 @@ Word-scale phrases such as `billion FLOPs` and `trillion FLOPs` are a separate
 compound-scale/prose decision because converting them to `GFLOPs`/`TFLOPs`
 changes visible wording.
 
+When Pint's compact label does not match the book's house style, use
+`fmt_qty(..., unit_label="...")` rather than falling back to `suffix=`. The
+value is still converted through `display_unit`, so dimensional mistakes are
+caught while preserving labels such as `FLOP/byte`, `TFLOP/s per W`, or
+`GB per day`.
+
 ## 7. Migration lanes
 
 Work by semantic bucket, not by string replacement:

@@ -481,6 +481,22 @@ focused pytest suite PASS (179 tests); `fmt_prose_contract.py` 0;
 `codemod_fmt.py queue` `by kind: {}`; `./book/binder check math` PASS;
 `audit_prose_semantics.py` CLEAN across 81 files.
 
+**A36 — Unit-rate/denominator suffix lane: DONE.**
+Added checked `fmt_qty(..., unit_label=...)` for house-style unit labels that
+Pint cannot print byte-identically, while preserving dimension conversion
+through `display_unit`. Migrated all 16 `unit_rate_or_denominator` suffix sites:
+`TFLOP/s per W`, `kg/kWh`, `MWh/household-year`, `FLOP/byte`, `GB/day`,
+`GB per day`, `MB/photo`, `KB/patient`, `MWh/year`, and `kJ per hour`.
+Values and substituted prose were byte-identical across `hw_acceleration`,
+`introduction`, `ml_systems`, `ml_workflow`, `nn_computation`, `training`, and
+`edge_intelligence`. `audit_fmt_usage.py` now reports no
+`unit_rate_or_denominator` suffix bucket and `fmt_qty` at 291. Remaining suffix
+buckets: `physical_unit` 1,126 and `compound_scale` 14. Verification: `git diff
+--check` PASS; py_compile PASS; focused pytest suite PASS (181 tests);
+`fmt_prose_contract.py` 0; `codemod_fmt.py queue` `by kind: {}`;
+`./book/binder check math` PASS; `audit_prose_semantics.py` CLEAN across 81
+files.
+
 ### B. WS4 — unit-suffix lane (~2,393 sites: `GB`/`ms`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.
