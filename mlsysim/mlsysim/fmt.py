@@ -1147,6 +1147,9 @@ _TIME_WORDS = {
 }
 
 
+_TIME_MARKERS = {"+": "trailing plus marker"}
+
+
 def _time_word_suffix(value, display_unit, per=None) -> str:
     """Return a leading-space time-unit word suffix with plural agreement."""
     key = str(display_unit)
@@ -1179,6 +1182,7 @@ def fmt_time(
     style="symbol",
     attributive=False,
     per=None,
+    marker="",
     approx=False,
     lower_bound=False,
     allow_negative=False,
@@ -1195,6 +1199,8 @@ def fmt_time(
     as ``1 second`` and ``2 seconds``.
     ``attributive=True`` with ``style="word"`` renders a hyphenated singular
     noun modifier such as ``10-minute`` or ``100,000-hour``.
+    ``marker="+"`` appends a checked trailing plus to compact values such as
+    ``100 ms+``.
 
     Plain numbers are accepted only because the display unit is explicit:
     ``fmt_time(35, second)`` means "35 seconds" and still validates that
@@ -1214,6 +1220,14 @@ def fmt_time(
         raise ValueError("fmt_time attributive=True requires style='word'.")
     if attributive and per is not None:
         raise ValueError("fmt_time attributive=True cannot be combined with per=.")
+    if marker and marker not in _TIME_MARKERS:
+        raise ValueError(
+            f"fmt_time marker must be one of {sorted(_TIME_MARKERS)}, got {marker!r}."
+        )
+    if marker and style != "symbol":
+        raise ValueError("fmt_time marker= is only supported with style='symbol'.")
+    if marker and (attributive or per is not None):
+        raise ValueError("fmt_time marker= cannot be combined with attributive=True or per=.")
     q = duration if isinstance(duration, ureg.Quantity) else duration * display_unit
     val = _numeric_magnitude(q.to(display_unit))
     if val < 0 and not allow_negative:
@@ -1245,6 +1259,7 @@ def fmt_time(
         precision=precision,
         commas=commas,
         per=per,
+        extra_suffix=marker,
         approx=approx,
         lower_bound=lower_bound,
     )

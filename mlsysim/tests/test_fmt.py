@@ -267,6 +267,15 @@ class TestFmtTime:
                 per="day",
             )
 
+    def test_checked_symbol_marker(self):
+        assert fmt_time(100, "millisecond", precision=0, marker="+") == "100 ms+"
+        with pytest.raises(ValueError, match="marker"):
+            fmt_time(100, "millisecond", precision=0, marker="ish")
+        with pytest.raises(ValueError, match="symbol"):
+            fmt_time(100, "millisecond", precision=0, style="word", marker="+")
+        with pytest.raises(ValueError, match="cannot be combined"):
+            fmt_time(100, "millisecond", precision=0, per="step", marker="+")
+
     def test_rejects_non_time_unit(self):
         with pytest.raises(ValueError, match="time unit"):
             fmt_time(5, ureg.GB)

@@ -290,6 +290,34 @@ Validation details:
   `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
   0 findings across 81 files.
 
+## 2026-05-31 — Time-compound suffix relocation
+
+Change type: small formatter API addition plus byte-identical relocation.
+Added checked `fmt_time(..., marker="+")` for compact trailing-plus time
+notation and replaced the four remaining `time_compound` suffix sites.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol1/introduction/introduction.qmd` | 2 | 91 | 45 | identical values + prose |
+| `vol1/ml_systems/ml_systems.qmd` | 1 | 296 | 143 | identical values + prose |
+| `vol1/ml_workflow/ml_workflow.qmd` | 1 | 77 | 36 | identical values + prose |
+
+Validation details:
+
+- Before/after snapshots were generated with `assess_equiv.py baseline --ref HEAD`
+  and `assess_equiv.py snapshot` under `/tmp/fmt_time_compound_*`.
+- `assess_equiv.py diff` reported `IDENTICAL values` and `IDENTICAL prose` for
+  every touched chapter.
+- `audit_fmt_usage.py` reports no remaining `time_compound` suffix bucket and
+  `fmt_time` calls increased to 665.
+- Verification: `python3 -m py_compile mlsysim/mlsysim/fmt.py book/tools/audit/fmt/audit_fmt_usage.py` PASS;
+  `git diff --check` PASS; `./book/binder check math` PASS; focused pytest
+  suite PASS, 179 tests; `fmt_prose_contract.py` PASS, 0 violations;
+  `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
+  0 findings across 81 files.
+
 ## 2026-05-31 — Remaining suffix bucket split and epoch label
 
 Change type: audit improvement plus byte-identical formatter relocation.

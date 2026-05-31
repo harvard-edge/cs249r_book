@@ -468,6 +468,19 @@ focused pytest suite PASS (178 tests); `fmt_prose_contract.py` 0;
 `codemod_fmt.py queue` `by kind: {}`; `./book/binder check math` PASS;
 `audit_prose_semantics.py` CLEAN across 81 files.
 
+**A35 — Time-compound suffix lane: DONE.**
+Cleared the four remaining time-compound suffixes. `ms latency` and
+`ms round-trip` now use `fmt_time(...)` for the time value and keep the
+descriptive word outside the formatter suffix; the `ms+` site now uses checked
+`fmt_time(..., marker="+")`. Values and substituted prose were byte-identical
+across `introduction`, `ml_systems`, and `ml_workflow`. `audit_fmt_usage.py` now
+reports no `time_compound` suffix bucket and `fmt_time` at 665. Remaining suffix
+buckets: `physical_unit` 1,126, `unit_rate_or_denominator` 16, and
+`compound_scale` 14. Verification: `git diff --check` PASS; py_compile PASS;
+focused pytest suite PASS (179 tests); `fmt_prose_contract.py` 0;
+`codemod_fmt.py queue` `by kind: {}`; `./book/binder check math` PASS;
+`audit_prose_semantics.py` CLEAN across 81 files.
+
 ### B. WS4 — unit-suffix lane (~2,393 sites: `GB`/`ms`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.

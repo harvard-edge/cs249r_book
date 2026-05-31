@@ -77,6 +77,9 @@ Hyphenated time noun modifiers use `fmt_time(..., style="word",
 attributive=True)`, which renders a singular unit (`1-hour`, `24-hour`,
 `15-minute`) and rejects `per=`. This is distinct from ordinary prose word style
 (`1 hour`, `24 hours`) and from resource-time count labels such as `GPU-hour`.
+For compact lower-bound notation that is intentionally written as a trailing
+plus, use checked `fmt_time(..., marker="+")` so the plus cannot become an
+unvalidated suffix.
 
 ### Scale-word and compound-scale backlog
 
