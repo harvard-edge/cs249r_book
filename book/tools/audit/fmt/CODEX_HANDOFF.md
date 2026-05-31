@@ -258,6 +258,16 @@ FLOP-count prose. Then update `audit_fmt_usage.py` and `fmt_semantic_suffix` so
 compound scale suffixes do not fall through as `physical_unit`; add tests for
 word-scale output and checker coverage.
 
+**A20 — ML ops time suffixes: DONE.**
+All 19 `time_unit` suffix sites in `vol1/ml_ops/ml_ops.qmd` moved to
+`fmt_time(...)`, byte-identical across 132 value exports and 75 prose lines.
+Old `fmt_int` duration sites keep intentional integer display through
+`precision=0`. `audit_fmt_usage.py` now reports `fmt_time` calls at 96 and the
+`time_unit` suffix bucket down to 552; `ml_ops.qmd` has no remaining
+`time_unit` suffixes. Verification: py_compile PASS, `git diff --check` PASS,
+`./book/binder check math` PASS, focused pytest suite PASS (167 tests),
+prose-contract 0, semantic audit 0 findings, codemod queue empty.
+
 ### B. WS4 — unit-suffix lane (~2,393 sites: `GB`/`ms`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.

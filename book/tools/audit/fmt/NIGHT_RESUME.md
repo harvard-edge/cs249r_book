@@ -274,6 +274,16 @@ structured counted-rate support, and a decision on FLOP prose (`fmt_qty` vs.
 thin `fmt_ops`), then extend the suffix checker/audit tests to catch compound
 scale suffixes.
 
+**NOW done:** `vol1/ml_ops` time suffixes — migrated all 19 `time_unit` suffix
+sites to `fmt_time(...)`, finishing that chapter's time suffix bucket. Symbol
+units use compact style; prose labels use `style="word"`. `assess_equiv` stayed
+byte-identical across 132 value exports and 75 substituted prose lines.
+`audit_fmt_usage.py` now reports 96 `fmt_time` calls and the `time_unit` suffix
+bucket down to 552. Verification: py_compile PASS; `git diff --check` PASS;
+`./book/binder check math` PASS; focused pytest suite PASS (167 tests);
+`fmt_prose_contract` 0; `codemod_fmt queue` empty; substituted prose semantic
+audit CLEAN across 81 files.
+
 **NEXT:**
 1. Add a formatter-default cleanup pass after the semantic lanes: each
    formatter should own comma defaults by value kind, and explicit `commas=`
