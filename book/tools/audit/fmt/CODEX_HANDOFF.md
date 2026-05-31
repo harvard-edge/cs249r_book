@@ -743,7 +743,19 @@ class reference. `audit_fmt_usage.py` now reports physical-unit suffixes down to
 `./book/binder check math` PASS; `./book/binder check code --scope
 lego-dead-code` PASS; `audit_prose_semantics.py` CLEAN across 81 files.
 
-### B. WS4 — unit-suffix lane (remaining 870 physical-unit suffixes: `GB`/`MB`/`W`/`GB/s`/…)  ← the big one
+**A54 — `vol1/responsible_engr` physical-unit cleanup: DONE.**
+Migrated all 14 remaining physical-unit suffix sites in `responsible_engr` to
+typed quantity formatters, leaving the file with 0 `suffix=` calls. The lane
+covered GPU power, training/inference carbon mass, metric-ton carbon summaries,
+and GPT-3-scale training energy in MWh/kWh. `audit_fmt_usage.py` now reports
+physical-unit suffixes down to 856, `fmt_qty` at 532, and `fmt_qty_int` at 31.
+Verification: `assess_equiv.py` values/prose identical for `responsible_engr`;
+`git diff --check` PASS; py_compile PASS; focused pytest suite PASS (190
+tests); `fmt_prose_contract.py` 0; `codemod_fmt.py queue` `by kind: {}`;
+`./book/binder check math` PASS; `./book/binder check code --scope
+lego-dead-code` PASS; `audit_prose_semantics.py` CLEAN across 81 files.
+
+### B. WS4 — unit-suffix lane (remaining 856 physical-unit suffixes: `GB`/`MB`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.
 `weights_gb`), not Pint Quantities, and `fmt_qty` requires a Pint Quantity to
