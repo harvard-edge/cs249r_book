@@ -77,6 +77,13 @@ Gates to keep green (run all three):
 - codemod_fmt.py queue --root book/quarto/contents → only known-deferred
 
 ## Session commit log (newest first)
+- Pass3c: migrated 14 percentage-point sites to fmt_pp BYTE-IDENTICALLY (10 noun,
+  4 attributive across 6 chapters: benchmarking, introduction, ml_workflow,
+  responsible_engr, model_serving, data_selection). All 14 rendered values proven
+  unchanged; contract + semantic + suffix grep clean. responsible_engr got fmt_pp
+  added to its 3 using-cells (it uses per-cell selective imports, no star).
+  4 pp sites DEFERRED (would change rendered grammar) — see "Editorial decisions".
+- Pass3b: extended fmt_pp (singular/plural agreement + attributive hyphen mode) + 6 tests.
 - Pass3a: fixed 4 dangerous glyph-in-suffix stragglers (compound suffixes missed
   by exact-match lanes): "% annually", "×/year", 2× row.append("%"). Visible-identical.
 - Pass2: numeric semantic checks (mult-direction, currency-as-percent) + 7 regression
