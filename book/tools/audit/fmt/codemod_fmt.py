@@ -224,6 +224,101 @@ def scan_percent(path: Path):
     return edits, queue
 
 
+# scale glyph -> magnitude, and the named/literal divisors that match each.
+_SCALE_FACTOR = {"K": 1e3, "M": 1e6, "B": 1e9, "T": 1e12}
+_NAMED_DIVISOR = {"THOUSAND": 1e3, "MILLION": 1e6, "BILLION": 1e9, "TRILLION": 1e12}
+
+
+def _divisor_factor(node) -> float | None:
+    """Magnitude of a divisor node if it's a recognised scale constant."""
+    if isinstance(node, ast.Name):
+        return _NAMED_DIVISOR.get(node.id)
+    if isinstance(node, ast.Attribute):
+        return _NAMED_DIVISOR.get(node.attr)
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) \
+            and not isinstance(node.value, bool):
+        v = float(node.value)
+        return v if v in set(_SCALE_FACTOR.values()) else None
+    return None
+
+
+def _rewrite_scale(call, src: str) -> str | None:
+    """fmt(x / MILLION, …, suffix='M') -> fmt_count(x, scale='M', …).
+
+    Only the clean, byte-identical case: the argument is ``<x> / <divisor>``
+    where the divisor's magnitude matches the (exact, uppercase) glyph, so
+    stripping the division and declaring scale= reproduces the rendered value
+    exactly (fmt_count divides by the same factor). Pre-scaled values (no
+    division), lowercase 'k', space-padded glyphs, fmt_int and prefix= are NOT
+    handled here — they are queued for a source-level decision.
+    """
+    seg = ast.get_source_segment(src, call) or ""
+    if "prefix=" in seg or not call.args:
+        return None
+    suffix = None
+    for kw in call.keywords:
+        if kw.arg == "suffix":
+            suffix = _const_str(kw.value)
+    if suffix not in _SCALE_FACTOR:  # exact uppercase glyph, no spaces
+        return None
+    arg = call.args[0]
+    if not (isinstance(arg, ast.BinOp) and isinstance(arg.op, ast.Div)):
+        return None
+    if _divisor_factor(arg.right) != _SCALE_FACTOR[suffix]:
+        return None  # divisor must match the glyph (else a latent bug — leave it)
+    raw = ast.get_source_segment(src, arg.left)
+    if raw is None or "\n" in raw:
+        return None
+    precision = "1"  # fmt default; fmt_count default is 0, so always emit it
+    commas = None
+    for kw in call.keywords:
+        if kw.arg == "precision":
+            precision = ast.get_source_segment(src, kw.value)
+        elif kw.arg == "commas":
+            commas = ast.get_source_segment(src, kw.value)
+    tail = f", commas={commas}" if commas is not None else ""
+    return f"fmt_count({raw}, scale='{suffix}', precision={precision}{tail})"
+
+
+def scan_scale(path: Path):
+    """Return (scale_edits, queue) for the byte-identical scale lane."""
+    text = path.read_text(encoding="utf-8", errors="replace")
+    edits: list[MultEdit] = []
+    queue: list[QueueItem] = []
+    for fence_line, src in extract_python_cells(text):
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Call):
+                continue
+            call = node.value
+            fn = call.func
+            fname = fn.id if isinstance(fn, ast.Name) else (fn.attr if isinstance(fn, ast.Attribute) else None)
+            if fname not in ("fmt", "fmt_int"):
+                continue
+            suffix = None
+            for kw in call.keywords:
+                if kw.arg == "suffix":
+                    suffix = _const_str(kw.value)
+            if suffix is None or suffix.strip() not in {"K", "M", "B", "T", "k", "G"}:
+                continue
+            var = _assign_target(node)
+            seg = ast.get_source_segment(src, call) or ""
+            file_line = fence_line + call.lineno
+            new = _rewrite_scale(call, src) if fname == "fmt" else None
+            if new and var and "\n" not in seg:
+                edits.append(MultEdit(file_line, var, seg, new))
+            else:
+                queue.append(QueueItem(str(path), file_line, var, fname, suffix,
+                    "scale", seg.replace("\n", " ⏎ "),
+                    "pre-scaled value / lowercase 'k' / spaced glyph / fmt_int / "
+                    "multiline: keep the RAW count at the source and use "
+                    "fmt_count(raw, scale='K'|'M'|'B'|'T'); decide by hand."))
+    return edits, queue
+
+
 def _rewrite_fmt_int_multiplier(call, src: str) -> str | None:
     """fmt_int(arg, …, suffix='×') → fmt_multiple(round(arg), precision=0, commas=…).
 

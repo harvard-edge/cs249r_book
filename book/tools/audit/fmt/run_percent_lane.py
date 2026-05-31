@@ -50,12 +50,12 @@ def _revert(path: Path):
     subprocess.run(["git", "checkout", "--", str(path)], check=False)
 
 
-def _ensure_percent_import(text: str, edit_lines: set[int]) -> str:
-    """Make fmt_percent resolvable in every cell that received a percent edit.
+def _ensure_import(text: str, edit_lines: set[int], fn_name: str) -> str:
+    """Make `fn_name` resolvable in every cell that received an edit.
 
     Cells share one namespace (a top ``from mlsysim import *`` covers all), but
-    chapters built purely from per-cell selective imports need fmt_percent added
-    to the cells we touched. We append it to the cell's ``from mlsysim.fmt
+    chapters built purely from per-cell selective imports need the formatter
+    added to the cells we touched. We append it to the cell's ``from mlsysim.fmt
     import`` list, or insert a fresh import after the cell header if there is
     none. Cells are processed bottom-to-top so inserts never shift the line
     numbers of cells still to be examined.
@@ -70,19 +70,19 @@ def _ensure_percent_import(text: str, edit_lines: set[int]) -> str:
             cells.append((start, i))
             start = None
 
+    name_re = re.compile(r"\b" + re.escape(fn_name) + r"\b")
     for s, e in reversed(cells):
         if not any(s + 1 <= el <= e + 1 for el in edit_lines):
             continue
         body = lines[s:e + 1]
         if any(re.search(r"import \*", b) for b in body):
-            continue  # star import already brings fmt_percent into scope
+            continue  # star import already brings the formatter into scope
         import_idx = None
         for j in range(s, e + 1):
             m = _FMT_IMPORT.match(lines[j])
             if not m:
                 continue
-            names = m.group(2)
-            if re.search(r"\bfmt_percent\b", names):
+            if name_re.search(m.group(2)):
                 import_idx = -1  # already imported here
                 break
             import_idx = j
@@ -90,24 +90,24 @@ def _ensure_percent_import(text: str, edit_lines: set[int]) -> str:
             continue
         if import_idx is not None:
             lines[import_idx] = lines[import_idx].rstrip()
-            sep = " fmt_percent" if lines[import_idx].endswith(",") else ", fmt_percent"
+            sep = f" {fn_name}" if lines[import_idx].endswith(",") else f", {fn_name}"
             lines[import_idx] += sep
         else:
             ins = s + 1
             while ins <= e and (lines[ins].lstrip().startswith("#|") or lines[ins].strip() == ""):
                 ins += 1
-            lines.insert(ins, "from mlsysim.fmt import fmt_percent")
+            lines.insert(ins, f"from mlsysim.fmt import {fn_name}")
     return "\n".join(lines)
 
 
-def _identical(path: Path, edits, before_vals, before_prose) -> tuple[bool, str]:
+def _identical(path: Path, edits, before_vals, before_prose, fn_name) -> tuple[bool, str]:
     """Apply `edits` to the clean tree, write, and report whether the rendered
     values AND visible prose are byte-identical. Leaves the file written."""
     text = path.read_text(encoding="utf-8")
     new_text = _apply_cell_edits(text, edits)
     if new_text == text:
         return False, "no-op (stale offsets)"
-    new_text = _ensure_percent_import(new_text, {e.line for e in edits})
+    new_text = _ensure_import(new_text, {e.line for e in edits}, fn_name)
     path.write_text(new_text, encoding="utf-8")
     av, ap, fail = snapshot_file(path)
     if fail:
@@ -122,63 +122,65 @@ def _identical(path: Path, edits, before_vals, before_prose) -> tuple[bool, str]
     return True, "byte-identical"
 
 
-QUEUE_OUT = HERE / "percent_adjudication_queue.txt"
-
-
-def _queue_bad(path: Path, bad: list[tuple]) -> None:
+def _queue_bad(queue_out: Path, path: Path, bad: list[tuple]) -> None:
     rel = str(path).split("contents/")[-1]
-    with QUEUE_OUT.open("a", encoding="utf-8") as fh:
+    with queue_out.open("a", encoding="utf-8") as fh:
         for e, why in bad:
             fh.write(f"{rel}\tL{e.line}\t{e.var}\t{why}\t{e.old}\n")
 
 
-def process(path: Path) -> tuple[str, str]:
-    """Return (verdict, detail). verdict in {PASS, PART, SKIP, FAIL, NOOP}.
+def lane_process(path: Path, scan_fn, fn_name: str, dup_codes, queue_out: Path) -> tuple[str, str]:
+    """Generic byte-identical migration engine with a per-edit bisect fallback.
 
-    Fast path: apply all edits, accept iff byte-identical. If that fails, bisect
-    to the per-edit granularity — keep every edit that is *individually*
-    byte-identical, queue the rest (guard trips: negative / >max_ratio percents
-    that need a human to add max_ratio= or reclassify). This means one stubborn
-    site no longer blocks a chapter's other (provably safe) percent migrations.
+    Fast path: apply all edits, accept iff byte-identical. On failure, bisect to
+    per-edit granularity — keep every edit that is *individually* byte-identical,
+    queue the rest (guard trips that need a human). One stubborn site no longer
+    blocks a chapter's other provably-safe migrations.
     """
-    edits, _queue = scan_percent(path)
+    edits, _queue = scan_fn(path)
     if not edits:
-        return "NOOP", "no auto-rewritable percent sites"
+        return "NOOP", "no auto-rewritable sites for this lane"
 
     before_vals, before_prose, fail = snapshot_file(path)
     if fail:
         return "SKIP", f"chapter does not execute headlessly: {fail[0][:80]}"
 
-    ok, why = _identical(path, edits, before_vals, before_prose)
+    ok, why = _identical(path, edits, before_vals, before_prose, fn_name)
     if ok:
-        pct_viol = [v for v in check_file(path) if v.code in PCT_CODES]
-        if pct_viol:
+        viol = [v for v in check_file(path) if v.code in dup_codes]
+        if viol:
             _revert(path)
-            return "FAIL", f"G-contract: {len(pct_viol)} percent dup violation(s): {pct_viol[0].ref}"
-        return "PASS", f"{len(edits)} cell rewrites -> fmt_percent, output byte-identical"
+            return "FAIL", f"G-contract: {len(viol)} dup violation(s): {viol[0].ref}"
+        return "PASS", f"{len(edits)} cell rewrites -> {fn_name}, output byte-identical"
 
-    # bisect: test each edit on its own against the clean tree
     _revert(path)
     good, bad = [], []
     for e in edits:
-        ind_ok, ind_why = _identical(path, [e], before_vals, before_prose)
+        ind_ok, ind_why = _identical(path, [e], before_vals, before_prose, fn_name)
         _revert(path)
         (good if ind_ok else bad).append(e if ind_ok else (e, ind_why))
 
     if not good:
-        _queue_bad(path, bad)
-        return "FAIL", f"all {len(edits)} sites tripped the guard ({why}); queued for adjudication"
+        _queue_bad(queue_out, path, bad)
+        return "FAIL", f"all {len(edits)} sites failed the gate ({why}); queued for adjudication"
 
-    ok2, why2 = _identical(path, good, before_vals, before_prose)
+    ok2, why2 = _identical(path, good, before_vals, before_prose, fn_name)
     if not ok2:
         _revert(path)
         return "FAIL", f"combined good-set not byte-identical ({why2}); needs manual review"
-    pct_viol = [v for v in check_file(path) if v.code in PCT_CODES]
-    if pct_viol:
+    viol = [v for v in check_file(path) if v.code in dup_codes]
+    if viol:
         _revert(path)
-        return "FAIL", f"G-contract: {pct_viol[0].ref}"
-    _queue_bad(path, bad)
-    return "PART", f"{len(good)}/{len(edits)} migrated byte-identical; {len(bad)} queued (guard trips)"
+        return "FAIL", f"G-contract: {viol[0].ref}"
+    _queue_bad(queue_out, path, bad)
+    return "PART", f"{len(good)}/{len(edits)} migrated byte-identical; {len(bad)} queued"
+
+
+QUEUE_OUT = HERE / "percent_adjudication_queue.txt"
+
+
+def process(path: Path) -> tuple[str, str]:
+    return lane_process(path, scan_percent, "fmt_percent", PCT_CODES, QUEUE_OUT)
 
 
 def main() -> int:

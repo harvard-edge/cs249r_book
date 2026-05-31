@@ -8,6 +8,7 @@ import ast  # noqa: E402
 from codemod_fmt import (  # noqa: E402
     _rewrite_call_to_multiple, _patch_prose, scan_file,
     _rewrite_percent, scan_percent,
+    _rewrite_scale, scan_scale,
 )
 
 
@@ -15,6 +16,11 @@ def _percent(expr: str):
     """Parse a single fmt(...) expression and run the percent rewriter on it."""
     call = ast.parse(expr, mode="eval").body
     return _rewrite_percent(call, expr)
+
+
+def _scale(expr: str):
+    call = ast.parse(expr, mode="eval").body
+    return _rewrite_scale(call, expr)
 
 
 # --- the provable cell rewrite -------------------------------------------------
@@ -193,6 +199,42 @@ def test_scan_percent_migrates_fmt_int_exact_queues_variants(tmp_path):
     # the spacing variant ' %' still goes to the adjudication queue
     assert [q.var for q in queue] == ["sp_str"]
     assert queue[0].kind == "percent"
+
+
+def test_scale_strips_named_divisor_matching_glyph():
+    assert _scale("fmt(x / MILLION, suffix='M')") == \
+        "fmt_count(x, scale='M', precision=1)"
+    assert _scale("fmt(toks / c.TRILLION, precision=1, commas=False, suffix='T')") == \
+        "fmt_count(toks, scale='T', precision=1, commas=False)"
+
+
+def test_scale_strips_numeric_literal_divisor():
+    assert _scale("fmt(n / 1e9, precision=2, suffix='B')") == \
+        "fmt_count(n, scale='B', precision=2)"
+
+
+def test_scale_declines_when_divisor_does_not_match_glyph():
+    # divisor magnitude (1e3) != glyph 'M' (1e6): a latent bug, leave it
+    assert _scale("fmt(x / THOUSAND, suffix='M')") is None
+
+
+def test_scale_declines_prescaled_and_prefix_and_lowercase():
+    assert _scale("fmt(params_b, suffix='B')") is None        # no division
+    assert _scale("fmt(x / THOUSAND, suffix='k')") is None     # lowercase glyph
+    assert _scale("fmt(x / MILLION, prefix='~', suffix='M')") is None
+
+
+def test_scan_scale_queues_prescaled_migrates_division(tmp_path):
+    p = tmp_path / "c.qmd"
+    p.write_text(CELL.format(
+        assigns=("a_str = fmt(toks / MILLION, suffix='M')\n"
+                 "    b_str = fmt(params_b, suffix='B')\n"
+                 "    c_str = fmt_int(n / THOUSAND, suffix='K')"),
+        prose="x"), encoding="utf-8")
+    edits, queue = scan_scale(p)
+    assert [e.var for e in edits] == ["a_str"]            # only the clean division
+    assert sorted(q.var for q in queue) == ["b_str", "c_str"]
+    assert all(q.kind == "scale" for q in queue)
 
 
 def test_scan_percent_queues_multiline_calls_not_silently_dropped(tmp_path):
