@@ -43,14 +43,18 @@ from mlsysim.core.constants import *
 # │          napkin_gpt3_ops_str, napkin_gpt3_days_str, napkin_elec_rate_str,
 # │          napkin_a100_kw_str, napkin_elec_cost_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt_usd, fmt, check, sci_latex, fmt_math, MarkdownStr
+from mlsysim.fmt import fmt_int, fmt_usd, fmt, check, sci_latex, fmt_math, MarkdownStr, fmt_count, fmt_qty
 
 class NapkinMath:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    h100_tflops = Hardware.Cloud.H100.compute.peak_flops.m_as(TFLOPs/second)
-    h100_bw_tbs = Hardware.Cloud.H100.memory.bandwidth.m_as(TB/second)
-    h100_mem_gb = Hardware.Cloud.H100.memory.capacity.m_as(GB)
-    a100_tdp_w = Hardware.Cloud.A100.tdp.m_as(watt)
+    h100_flops_q = Hardware.Cloud.H100.compute.peak_flops
+    h100_bw_q = Hardware.Cloud.H100.memory.bandwidth
+    h100_mem_q = Hardware.Cloud.H100.memory.capacity
+    a100_tdp_q = Hardware.Cloud.A100.tdp
+    h100_tflops = h100_flops_q.m_as(TFLOPs/second)
+    h100_bw_tbs = h100_bw_q.m_as(TB/second)
+    h100_mem_gb = h100_mem_q.m_as(GB)
+    a100_tdp_w = a100_tdp_q.m_as(watt)
     gpt3_ops = Models.Language.GPT3.training_ops.magnitude
     gpt3_days = Models.Language.GPT3.training_days_ref.magnitude
     gpt3_accelerators = Models.Language.GPT3.training_accelerators_ref.m_as(count)
@@ -58,18 +62,20 @@ class NapkinMath:
 
     gemm_n = 4096
     model_params_b = 7
-    bytes_per_param = (
-        BYTES_FP16.m_as(byte)      # BF16 weights
-        + BYTES_FP16.m_as(byte)    # BF16 gradients
-        + 3 * BYTES_FP32.m_as(byte)  # FP32 master weights + momentum + variance
+    bytes_per_param_q = (
+        BYTES_FP16      # BF16 weights
+        + BYTES_FP16    # BF16 gradients
+        + 3 * BYTES_FP32  # FP32 master weights + momentum + variance
     )
+    bytes_per_param = bytes_per_param_q.m_as(byte)
     hours_per_day = HOURS_PER_DAY
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
     ridge = h100_tflops/h100_bw_tbs
     gemm_intensity = gemm_n / 3
-    train_mem_gb = (model_params_b * BILLION * bytes_per_param * byte).m_as(GB)
-    a100_tdp_kw = Hardware.Cloud.A100.tdp.m_as(kilowatt)
+    train_mem_q = model_params_b * BILLION * bytes_per_param_q
+    train_mem_gb = train_mem_q.m_as(GB)
+    a100_tdp_kw = a100_tdp_q.m_as(kilowatt)
     elec_cost = gpt3_days * gpt3_accelerators * hours_per_day * a100_tdp_kw * elec_per_kwh
 
     # ┌── 3. GUARD ─────────────────────────────────────────
@@ -77,21 +83,21 @@ class NapkinMath:
     check(train_mem_gb > h100_mem_gb, "7B model state should exceed single GPU")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    h100_tflops_str = fmt(h100_tflops, precision=0, commas=False, suffix=' TFLOP/s')
-    h100_bw_str = fmt(h100_bw_tbs, precision=2, commas=False, suffix=' TB/s')
+    h100_tflops_str = fmt_qty(h100_flops_q, TFLOPs/second, precision=0, commas=False, unit_label='TFLOP/s')
+    h100_bw_str = fmt_qty(h100_bw_q, TB/second, precision=2, commas=False)
     ridge_str = fmt_int(round(ridge), commas=False)
     gemm_n_str = fmt(gemm_n, precision=0)
     gemm_intensity_str = fmt(gemm_intensity, precision=1, commas=True)
     model_b_str = fmt_count(model_params_b * BILLION, scale='B', precision=0, commas=False)
     bytes_per_param_str = fmt(bytes_per_param, precision=0, commas=False)
-    train_mem_gb_str = fmt(train_mem_gb, precision=0, commas=False, suffix=' GB')
-    accel_mem_str = fmt(h100_mem_gb, precision=1, commas=False, suffix=' GB')
+    train_mem_gb_str = fmt_qty(train_mem_q, GB, precision=0, commas=False)
+    accel_mem_str = fmt_qty(h100_mem_q, GB, precision=1, commas=False)
     a100_tdp_str = fmt(a100_tdp_w, precision=0, commas=False)
     gpt3_ops_math = fmt_math(sci_latex(gpt3_ops, precision=2))
     gpt3_days_str = fmt(gpt3_days, precision=0, approx=True)
     gpt3_accelerators_str = fmt(gpt3_accelerators, precision=0)
     elec_rate_str = fmt(elec_per_kwh, precision=2, commas=False)
-    a100_kw_str = fmt(a100_tdp_kw, precision=1, commas=False, suffix=' kW')
+    a100_kw_str = fmt_qty(a100_tdp_q, kilowatt, precision=1, commas=False)
     elec_cost_str = fmt_usd(elec_cost, precision=1, approx=True)
     napkin_model_b_digit_str = fmt(model_params_b, precision=0, commas=False)
 ```

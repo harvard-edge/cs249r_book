@@ -143,9 +143,12 @@ tail then migrated 7 sites across `appendix_c3`, `robust_ai`, `conclusion`, and
 `appendix_reliability`, byte-identically, leaving all four files with zero
 `suffix=` calls. The small chapter physical-unit cleanup then migrated 17 sites
 across `ml_ops`, `appendix_data`, and `security_privacy`, byte-identically,
-leaving all three files with zero `suffix=` calls. Remaining suffix bucket is
-only 915 `physical_unit` suffixes. Remaining: the rest of WS4/WS3 and later
-PDF/lock phases. Nothing is half-done or broken.
+leaving all three files with zero `suffix=` calls. The assumptions appendix
+physical-unit cleanup then migrated 10 sites across the Vol1 and Vol2
+`appendix_assumptions` files, byte-identically, leaving both files with zero
+`suffix=` calls. Remaining suffix bucket is only 905 `physical_unit` suffixes.
+Remaining: the rest of WS4/WS3 and later PDF/lock phases. Nothing is half-done
+or broken.
 
 **New TODOs from user discussion:** add a prose-bound output contract/gate so
 computed OUTPUT values consumed by inline prose are typed formatter results or
@@ -561,6 +564,10 @@ drop. The adjacent prose/table text was updated to `1 percentage-point threshold
 and `(drop of 6.8 percentage points)`. No user-decision items remain open.
 
 ## Session commit log (newest first)
+- Codex assumptions appendix physical-unit cleanup: migrated 10 physical-unit
+  suffix sites across the Vol1 and Vol2 `appendix_assumptions` files to typed
+  quantity formatters, byte-identically. Both touched files now have 0
+  `suffix=` calls; physical-unit suffixes dropped 915 -> 905.
 - Codex small chapter physical-unit cleanup: migrated 17 physical-unit suffix
   sites across `ml_ops`, `appendix_data`, and `security_privacy` to typed
   quantity formatters, byte-identically. All three touched files now have 0

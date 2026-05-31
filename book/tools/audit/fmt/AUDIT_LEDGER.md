@@ -53,6 +53,42 @@ Status:
 - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/codemod_fmt.py queue --root book/quarto/contents` PASS, `by kind: {}`
 - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_prose_semantics.py --root book/quarto/contents` PASS, 0 findings
 
+## 2026-05-31 — Assumptions appendix physical-unit cleanup
+
+Change type: byte-identical formatter relocation. Replaced 10 remaining
+physical-unit suffix sites with typed quantity formatters across the Vol1 and
+Vol2 assumptions appendices.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol1/backmatter/appendix_assumptions.qmd` | 5 | 257 | 124 | identical values + prose |
+| `vol2/backmatter/appendix_assumptions.qmd` | 5 | 275 | 122 | identical values + prose |
+
+Validation details:
+
+- Migrated H100 peak FLOP/s, memory bandwidth, training memory, H100 memory
+  capacity, A100 TDP, Llama gradient size, facility power, WUE example power,
+  and AI rack power displays.
+- `fmt_qty(..., unit_label="TFLOP/s")` preserves the established singular FLOP
+  display instead of Pint's default `TFLOPs/s`.
+- `assess_equiv.py` baseline/snapshot/diff reported `IDENTICAL values` and
+  `IDENTICAL prose` for both touched files.
+- Both touched files now have zero `suffix=` calls.
+- `audit_fmt_usage.py` reports `physical_unit` suffixes dropped 915 -> 905,
+  `fmt_qty` at 483, and `fmt_qty_int` at 31.
+- Verification: `git diff --check` PASS; py_compile PASS for formatter,
+  math-canonical, and fmt audit modules; focused pytest suite PASS, 190 tests;
+  `fmt_prose_contract.py` PASS, 0 violations; `codemod_fmt.py queue` PASS,
+  `by kind: {}`; `./book/binder check math` PASS;
+  `./book/binder check code --scope lego-dead-code` PASS;
+  `audit_prose_semantics.py` PASS, 0 findings across 81 files.
+- HTML/PDF render evidence: not run yet. Full rendering is intentionally
+  deferred for the separate render/prose audit checkpoint.
+
+Status: non-render verified; render audit pending.
+
 ## 2026-05-31 — Small chapter physical-unit cleanup
 
 Change type: byte-identical formatter relocation. Replaced 17 remaining
