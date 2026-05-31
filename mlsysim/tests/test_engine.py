@@ -54,6 +54,9 @@ def test_engine_input_validation():
     with pytest.raises(ValueError, match="batch_size"):
         Engine.solve(resnet, a100, batch_size=0)
 
+    with pytest.raises(ValueError, match="precision"):
+        Engine.solve(resnet, a100, precision="fp6")
+
 
 def test_engine_handles_model_size_only_workloads():
     """Registry workloads with model_size but no parameter count should still lower."""

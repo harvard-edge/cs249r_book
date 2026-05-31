@@ -13,14 +13,6 @@ docs = {
         '_validate_provenance_record': 'Validates that a Provenance record meets the required traceability constraints.',
         '_check_node': 'Inspects an AST node to verify its provenance lineage.'
     },
-    'mlsysim/tools/migrate_defaults.py': {
-        '_symbol_replacements': 'Returns a mapping of legacy symbols to their new registry locations.',
-        '_import_remap': 'Remaps legacy import statements to their new registry paths.',
-        '_replace_symbol_import': 'Performs AST replacement for migrated symbols.'
-    },
-    'mlsysim/core/appendix_lineage.py': {
-        '_appendix_text': 'Reads the content of an appendix .qmd file with caching to prevent redundant disk I/O.'
-    },
     'mlsysim/core/optimization/registry.py': {
         '_load_scipy_backend': 'Lazy-loads the SciPy optimization backend.',
         '_load_ortools_backend': 'Lazy-loads the Google OR-Tools optimization backend.',

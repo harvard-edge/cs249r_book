@@ -1,3 +1,3 @@
-from .registry import Scenarios
+from .registry import ReferenceStats
 
-__all__ = ["Scenarios"]
+__all__ = ["ReferenceStats"]

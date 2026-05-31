@@ -14,8 +14,8 @@ install: ## Install the package in editable mode with all dev and cli dependenci
 test: ## Run the full test suite
 	python3 -m pytest tests/ -v
 
-audit: ## Run the book registry audit to verify provenance and LEGO cell wiring
-	python3 ../book/tools/audit/run_registry_audit.py
+audit: ## Run the package provenance audit
+	python3 -m mlsysim.tools.audit_provenance --scope all --strict
 
 format: ## Format the code using ruff
 	ruff format .

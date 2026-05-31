@@ -81,6 +81,7 @@ class Datacenter(BaseModel):
     name: str
     grid: GridProfile
     pue_override: Optional[float] = None
+    metadata: Metadata = Field(default_factory=Metadata)
     
     @property
     def pue(self) -> float:

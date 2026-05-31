@@ -6,7 +6,8 @@
 #   make svgs         Convert all SVGs to PDFs
 #   make slides       Build slides only (assumes SVGs already converted)
 #   make clean        Remove build artifacts
-#   make check        Verify all SVG source files exist
+#   make check        Build slides and fail on layout warnings
+#   make check-tools  Verify SVG source files and local tools
 #
 # Prerequisites:
 #   - xelatex (TeX Live or MacTeX)
@@ -47,7 +48,7 @@ SVG2PDF := $(shell command -v inkscape >/dev/null 2>&1 && echo "inkscape --expor
 # TARGETS
 # =============================================================================
 
-.PHONY: all slides svgs clean check help
+.PHONY: all slides svgs clean check check-tools help
 
 all: svgs slides  ## Build everything (SVGs → PDFs → slide deck)
 
@@ -115,7 +116,17 @@ $(BUILD_DIR):
 	@mkdir -p $@
 
 # --- Utilities ---
-check:  ## Verify SVG sources and dependencies
+check: slides  ## Build slides and fail on layout warnings
+	@echo "Checking slide logs for layout warnings..."
+	@logs="$(SLIDES_DIR)/$(BUILD_DIR)/tutorial_module*.log"; \
+	if grep -E 'Overfull \\[hv]box|Underfull \\[hv]box|Frame text is shrunk' $$logs; then \
+		echo ""; \
+		echo "ERROR: slide layout warnings found."; \
+		exit 1; \
+	fi; \
+	echo "  ✓ No overfull, underfull, or shrink warnings"
+
+check-tools:  ## Verify SVG sources and dependencies
 	@echo "SVG figures found: $(words $(SVGS))"
 	@for svg in $(SVGS); do echo "  ✓ $$svg"; done
 	@echo ""
@@ -129,6 +140,7 @@ check:  ## Verify SVG sources and dependencies
 
 clean:  ## Remove all build artifacts
 	@rm -rf $(BUILD_DIR)
+	@rm -rf $(SLIDES_DIR)/$(BUILD_DIR)
 	@rm -f $(PDF_IMG_DIR)/*.pdf
 	@rm -f $(SLIDES_DIR)/*.aux $(SLIDES_DIR)/*.log $(SLIDES_DIR)/*.nav
 	@rm -f $(SLIDES_DIR)/*.out $(SLIDES_DIR)/*.snm $(SLIDES_DIR)/*.toc

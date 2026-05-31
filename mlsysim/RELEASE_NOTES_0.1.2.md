@@ -26,7 +26,8 @@ mlsysim eval Llama3_8B H100 --batch-size 32
   Sarathi-Serve-style chunked-prefill stall proxy:
 
   ```python
-  from mlsysim import Hardware, Models, ServingModel
+  from mlsysim import Hardware, Models
+  from mlsysim.solvers import ServingModel
 
   result = ServingModel().solve(
       Models.Language.Llama3_8B,
@@ -79,7 +80,7 @@ Before release, this tree was checked with:
 
 ```bash
 python3 -m pytest tests -q
-PYTHONPATH=mlsysim python3 -m pytest book/tests -q --no-cov
+python3 -m mlsysim.tools.audit_provenance --scope all --strict
 python3 -m ruff check .
 PYTHONPATH=. quarto render docs
 python3 -m build --sdist --wheel

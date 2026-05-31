@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List
-from ..core.constants import ureg, Q_, BYTES_FP16, PRECISION_MAP
+from ..core.constants import ureg, Q_, resolve_precision
 from . import calibration as cal
 from ..physics import calc_bottleneck
 from ..core.exceptions import OOMError
@@ -132,8 +132,9 @@ class Engine:
         validate_range(efficiency, 1e-9, 1.0, "efficiency")  # >0 to prevent division by zero
         validate_at_least(batch_size, 1, "batch_size")
 
-        # 1. Map precision to bytes per parameter
-        bpp = PRECISION_MAP.get(precision, BYTES_FP16)
+        # 1. Canonicalize precision and map it to bytes per parameter. Unknown
+        # precision names fail here instead of falling back to FP16 storage.
+        precision, bpp = resolve_precision(precision)
 
         # 2. Resolve peak FLOPS for the requested precision
         if precision in hardware.compute.precision_flops:

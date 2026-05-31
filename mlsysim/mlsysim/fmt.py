@@ -1,6 +1,6 @@
 """
 fmt.py
-Formatting + presentation helpers for QMD output.
+Formatting + presentation helpers for Markdown/Quarto output.
 Keep science in mlsysim/physics/; keep display here.
 """
 
@@ -117,7 +117,7 @@ def fmt(quantity, unit=None, precision=1, commas=True,
     The prefix and suffix arguments collapse the old MarkdownStr(f"...")
     escape-hatch idiom into a single canonical helper. Common uses:
 
-        fmt(price, precision=0, prefix="\\$")      # "$1,000" in QMD prose
+        fmt(price, precision=0, prefix="\\$")      # "$1,000" in prose
         fmt(rate * 100, precision=1, commas=False, suffix="%")  # "12.4%"
         fmt(bw_mb_s, precision=1, commas=False, suffix=" MB/s")  # "2.4 MB/s"
         fmt(speedup, precision=0, commas=False)     # prose adds "$\\times$"
@@ -168,7 +168,7 @@ def fmt_int(quantity, unit=None, commas=True, prefix="", suffix=""):
 def fmt_usd(amount, *, precision=0, commas=True, approx=False, suffix=""):
     """
     Canonical currency formatter — the single, blessed way to render any
-    dollar amount in QMD prose, tables, or callouts.
+    dollar amount in prose, tables, or callouts.
 
     This is the currency member of the ``fmt_*`` family (cf. ``fmt_percent``
     for percentages). It exists so the Pandoc/LaTeX escaping detail of a prose
@@ -370,7 +370,7 @@ def fmt_qty(
 ):
     """Format a pint Quantity in ``display_unit`` with a canonical unit suffix.
 
-    Required OUTPUT path for physical quantities in LEGO cells.
+    Required output path for physical quantities in generated examples.
     """
     if isinstance(quantity, ureg.Quantity):
         q = quantity.to(display_unit)
@@ -384,7 +384,7 @@ def fmt_qty(
 def check(condition, message):
     """
     Invariant guard for narrative logic.
-    Ensures that the calculated values support the textbook's claims.
+    Ensures that calculated values support the surrounding analytical claims.
     """
     if not condition:
         raise ValueError(f"Narrative broken: {message}")

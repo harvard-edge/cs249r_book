@@ -50,7 +50,7 @@
     <tr>
       <td align="center"><b>Layer D</b></td>
       <td><b>Systems & Topology</b><br><code>mlsysim.systems</code></td>
-      <td>Fleet configurations and network fabrics.<br><i>e.g., Doorbell, AutoDrive Scenarios</i></td>
+      <td>Fleet configurations and network fabrics.<br><i>e.g., <code>Systems.Clusters.Frontier_8K</code>, <code>Systems.Fabrics.InfiniBand_NDR</code></i></td>
     </tr>
     <tr>
       <td align="center"><b>Layer E</b></td>
@@ -59,6 +59,12 @@
     </tr>
   </tbody>
 </table>
+
+`Scenarios.*` sits above the stack as the runnable composition layer: it pairs a
+`Models.*` workload with a `Hardware.*` or `Systems.*` target and local
+constraints such as latency or power. Non-executable real-world anchors live in
+`ReferenceStats.*`. There are no compatibility aliases between these namespaces:
+new and existing code should use the canonical path directly.
 
 ---
 
@@ -89,7 +95,7 @@ workload:
   batch_size: 4096
 hardware:
   name: "H100"
-  nodes: 64
+  accelerators: 64
 ops:
   region: "Quebec"
   duration_days: 14.0
@@ -194,13 +200,14 @@ The framework is just as useful inside a Python script or Jupyter Notebook. The 
 
 ```python
 import mlsysim
+from mlsysim.engine.evaluation import SystemEvaluator
 
 # 1. Define the scenario
 model = mlsysim.Models.Language.Llama3_8B
 hardware = mlsysim.Hardware.Cloud.H100
 
 # 2. Run the evaluation
-evaluation = mlsysim.SystemEvaluator.evaluate(
+evaluation = SystemEvaluator.evaluate(
     scenario_name="Llama-3 8B on H100",
     model_obj=model,
     hardware_obj=hardware,

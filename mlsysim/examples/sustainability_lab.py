@@ -7,6 +7,7 @@ by comparing the same GPU fleet across different regional grids.
 
 import mlsysim
 from mlsysim.infrastructure.types import Datacenter
+from mlsysim.solvers import SustainabilityModel
 
 def main():
     print("Scenario: Training Llama-3-70B on 512 H100 GPUs for 30 days\n")
@@ -29,7 +30,7 @@ def main():
     print(f"{'Region':<25} | {'PUE':<6} | {'Energy (MWh)':<12} | {'Carbon (Tonnes)':<12}")
     print("-" * 65)
     
-    solver = mlsysim.SustainabilityModel()
+    solver = SustainabilityModel()
     
     for exp in experiments:
         # We'll assume a liquid-cooled profile override

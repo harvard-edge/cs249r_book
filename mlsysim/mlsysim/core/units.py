@@ -18,6 +18,7 @@ __all__ = [
     "BYTES_FP32", "BYTES_INT32", "BYTES_FP16", "BYTES_INT8", "BYTES_INT4", "BYTES_ADAM_STATE",
     # Bit widths, precision map, encoding/format facts
     "FP32_BITS", "INT8_BITS", "SIMD_REGISTER_BITS", "PRECISION_MAP",
+    "normalize_precision", "resolve_precision",
     "COLOR_DEPTH_8BIT", "IMAGE_CHANNELS_RGB", "VIDEO_BYTES_PER_PIXEL_RGB",
     "VIDEO_1080P_WIDTH", "VIDEO_1080P_HEIGHT", "VIDEO_FPS_STANDARD",
     # Time units
@@ -103,6 +104,23 @@ PRECISION_MAP = {
     "int4": BYTES_INT4,   # 0.5 bytes
 }
 
+
+def normalize_precision(precision: str) -> str:
+    """Return the canonical precision key or raise for unsupported formats."""
+    if not isinstance(precision, str):
+        raise TypeError(f"precision must be a string, got {type(precision).__name__}")
+    key = precision.lower()
+    if key not in PRECISION_MAP:
+        supported = ", ".join(sorted(PRECISION_MAP))
+        raise ValueError(f"precision '{precision}' is not supported. Supported precision values: {supported}")
+    return key
+
+
+def resolve_precision(precision: str):
+    """Return ``(canonical_key, bytes_per_element)`` for a supported precision."""
+    key = normalize_precision(precision)
+    return key, PRECISION_MAP[key]
+
 # Color / image / video encoding + format facts
 COLOR_DEPTH_8BIT = 256
 IMAGE_CHANNELS_RGB = 3
@@ -134,7 +152,7 @@ NS = ureg.NS
 MILLISECOND = MS
 MICROSECOND = US
 NANOSECOND = NS
-# SI lowercase aliases (consumed by several chapter LEGO cells)
+# SI lowercase aliases (consumed by interactive examples and notebooks)
 microsecond = ureg.microsecond
 millisecond = ureg.millisecond
 nanosecond = ureg.nanosecond

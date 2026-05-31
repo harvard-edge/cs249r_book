@@ -1,7 +1,7 @@
 """The 22 ML Systems Walls — canonical taxonomy.
 
 This module is the single source of truth for the wall classification
-used throughout mlsysim, the paper, and the textbook.  Every wall
+used throughout MLSysIM analyses, papers, and notebooks. Every wall
 represents a physical or logical constraint that bounds system
 performance; each is resolved by a dedicated solver.
 
@@ -326,10 +326,6 @@ SYNTHESIS = Wall(
     equation="BW_req = |W| / T_target",
     sources=["Williams et al. (2009), Roofline"],
 )
-
-# Backward compatibility alias
-ETHICS = SAFETY
-
 
 # ── Wall Registry ────────────────────────────────────────────────
 

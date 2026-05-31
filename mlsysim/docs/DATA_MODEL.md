@@ -1,8 +1,7 @@
 # MLSysSim Data Model
 
-Six **zoos** (typed registries) plus support layers. Book LEGO cells and
-tutorials should prefer zoos + `mlsysim.physics.*` + explicit operands.
-`constants.py` holds physics, units, and cross-cutting numeric laws only.
+Six **zoos** (typed registries) plus support layers. Downstream consumers should
+prefer zoos + `mlsysim.physics.*` + explicit operands.
 
 ## Zoos
 
@@ -17,14 +16,35 @@ tutorials should prefer zoos + `mlsysim.physics.*` + explicit operands.
 
 ## Support (not zoos)
 
-- **`mlsysim.core.constants`** — pint units, energy/latency laws, precision map, dimensionless teaching examples.
+- **`mlsysim.core.units` / `mlsysim.core.constants`** — pint units, precision map, and small compatibility helpers.
 - **`Literature.*`** — cited appendix scalars (MFU bands, Chinchilla, scaling η, overheads).
+- **`Scenarios.*`** — executable workload + system + constraint bundles, suitable for `Scenario.evaluate()`.
+- **`ReferenceStats.*`** — non-executable sourced anchors for real-world scenario and case-study statistics.
 - **`Systems.Reliability` / `Orchestration`** — MTTF, recovery, scheduling assumptions.
 - **`Ops.Monitoring`** — PSI, KS, drift thresholds (MLOps chapters).
 - **`mlsysim.engine.calibration`** — solver/engine default kwargs (not appendix tables).
 - **`Infrastructure.Pricing`** — cloud, storage, labeling, fleet economics (`PricePoint.rate`).
 - **Regional carbon / PUE / fleet / fabrics** — `Infrastructure.Grids`, `FacilityCooling`, `Systems.Clusters`, `Systems.Fabrics`.
 - **`mlsysim.physics.*`** — formulas (roofline, training memory, serving, etc.).
+
+## Validation invariants
+
+MLSysIM is used to generate textbook calculations, so registry and CLI data are
+validated before they reach solver equations.
+
+- **Explicit units are required for physical quantities.** A capacity must be
+  written as `80 GB` or `80 GiB`, not `80`. A model size must be bytes, a power
+  value must be watts, and a latency value must be time.
+- **Dimensionless aliases are still semantically distinct.** Pint models bytes,
+  FLOPs, counts, parameters, and dollars as dimensionless units. MLSysIM adds
+  unit-family checks so `900 GB/s` cannot be accepted as compute throughput and
+  `1 TFLOP/s` cannot be accepted as memory bandwidth.
+- **Precision names are closed vocabulary.** Use the precision names in
+  `core.units.PRECISION_MAP`; unsupported values fail instead of silently using
+  FP16 storage.
+- **Distributed topology must divide exactly.** Tensor, pipeline, and expert
+  parallel groups must divide total accelerators without flooring. CLI fleet
+  plans must likewise specify topology that divides cleanly.
 
 ## Relationships
 
@@ -41,7 +61,9 @@ flowchart TB
   subgraph support [Support]
     constants[constants.py]
     literature[Literature.*]
-    calibration[core/calibration.py]
+    scenarios[Scenarios.*]
+    referenceStats[ReferenceStats.*]
+    calibration[engine/calibration.py]
     physics[physics.*]
   end
   Hardware --> Systems
@@ -53,18 +75,24 @@ flowchart TB
   literature --> physics
   calibration --> physics
   Systems --> physics
+  Models --> scenarios
+  Hardware --> scenarios
+  Systems --> scenarios
+  referenceStats --> scenarios
 ```
 
 - **Fleet ≠ datacenter:** `Systems.Clusters.*` (Fleet) references optional `Infrastructure.Datacenters.*` / grid for carbon and PUE.
 - **NVL72** is `Hardware.Cloud.GB200_NVL72`, not an Infrastructure rack entry.
 - **Networks/fabrics:** interconnect specs on Hardware; topology instances under `Systems.Fabrics`.
+- **Scenario ≠ model or hardware:** a scenario composes existing model and system facts with local constraints. It does not redefine GPT-4, H100, or a fleet.
+- **Reference statistics are not scenarios:** `ReferenceStats.MobilePower.*` and `ReferenceStats.Workloads.*` are sourced anchors for book calculations, not runnable bundles.
 
-## Book LEGO conventions
+## Consumer Conventions
 
-1. One class per `{python}` cell (already enforced).
-2. Import `from mlsysim import *` or explicit zoo paths — not `from mlsysim.core.constants import *`.
-3. Use `mlsysim.physics.*` for derived quantities; registries for operands.
-4. `Scenario.evaluate()` reserved for labs; capstone book cells only (≤5–10 total).
+1. Use explicit zoo paths for registry operands.
+2. Use `mlsysim.physics.*` for derived quantities; registries for operands.
+3. Use `Scenario.evaluate()` when a runnable workload + system + constraint bundle is needed.
+4. Use `ReferenceStats.*` for non-executable anchors. Do not route reference statistics through `Scenarios.*`.
 
 ## Migration tiers (QMD)
 
@@ -86,6 +114,6 @@ Do not keep `Hardware.H100`, `Infrastructure.Quebec`, or `Systems.Cloud = …` s
 - L1: pytest, exec affected QMD cells, `lego_focal_verify.py`
 - L2: `test_registry_parity.py` for deleted symbols
 - L3–L5: fmt, HTML build, `audit_lego_html.py` when QMD touched
-- L6: chapter sign-off before QMD commits
+- L6: downstream content sign-off before rendered-content commits
 
-See `book/docs/LEGO_CELLS.md` and `book/tools/audit/artifacts/registry_migration_manifest.json`.
+See `PROVENANCE.md` and `docs/contributing.qmd` for package-side provenance rules.

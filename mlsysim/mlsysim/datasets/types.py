@@ -1,7 +1,8 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional
 
-from ..core.types import Metadata, Quantity
+from ..core.constants import ureg
+from ..core.types import Metadata, Quantity, require_unit_family
 
 
 class DatasetProfile(BaseModel):
@@ -14,3 +15,8 @@ class DatasetProfile(BaseModel):
     image_height: Optional[int] = None
     image_channels: Optional[int] = None
     metadata: Metadata = Field(default_factory=Metadata)
+
+    @field_validator("training_examples", "test_examples", mode="after")
+    @classmethod
+    def _validate_example_counts(cls, v, info):
+        return require_unit_family(v, ureg.count, info.field_name, "count")

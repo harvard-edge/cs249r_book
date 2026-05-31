@@ -80,7 +80,8 @@ GPU memory, accounting for both model weights and KV-cache.
 ### Setup
 
 ```python
-from mlsysim import ServingModel, Hardware, Models
+from mlsysim import Hardware, Models
+from mlsysim.solvers import ServingModel
 
 serving = ServingModel()
 model   = Models.Language.Llama3_8B
@@ -143,7 +144,7 @@ from INT4 quantization, and understand the accuracy trade-off.
 
 ```python
 from mlsysim import Engine, Hardware, Models
-from mlsysim.engine.solver import CompressionModel
+from mlsysim.solvers import CompressionModel
 
 compress = CompressionModel()
 model    = Models.Language.Llama3_8B
@@ -218,7 +219,7 @@ What is the optimal compression point?
 
 ```python
 from mlsysim import Models, Systems
-from mlsysim.engine.solver import ParallelismOptimizer
+from mlsysim.solvers import ParallelismOptimizer
 
 optimizer = ParallelismOptimizer()
 model     = Models.Language.Llama3_70B
@@ -306,7 +307,8 @@ carbon footprint of a long training run.
 ### Setup
 
 ```python
-from mlsysim import SustainabilityModel, Infrastructure, Systems
+from mlsysim import Infrastructure, Systems
+from mlsysim.solvers import SustainabilityModel
 
 sustain = SustainabilityModel()
 fleet   = Systems.Clusters.Research_256  # 256 H100s
@@ -582,7 +584,7 @@ from mlsysim import (
     ServingModel, EconomicsModel, SustainabilityModel,
     Hardware, Models, Infrastructure
 )
-from mlsysim.engine.solver import CompressionModel
+from mlsysim.solvers import CompressionModel
 from mlsysim.systems.types import Fleet
 from mlsysim.systems.registry import Nodes, Fabrics
 

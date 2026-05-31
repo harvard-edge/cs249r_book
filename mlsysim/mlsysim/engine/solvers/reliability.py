@@ -1,0 +1,140 @@
+"""Reliability and checkpoint-interval solvers.
+
+These implementations live outside ``engine.solver`` so the public import
+module can stay small while domain logic remains easier to review.
+"""
+
+# ruff: noqa: F401
+from __future__ import annotations
+
+import math
+from typing import Any, Dict, List, Optional, Type
+
+from ..engine import Engine, PerformanceProfile
+from ..results import (
+    SolverResult,
+    DistributedResult,
+    ReliabilityResult,
+    CheckpointResult,
+    SustainabilityResult,
+    ServingResult,
+    TrainingMemoryResult,
+    ServingCapacityResult,
+    MoERoutingResult,
+    ContinuousBatchingResult,
+    WeightStreamingResult,
+    TailLatencyResult,
+    EconomicsResult,
+    DataResult,
+    TopologyResult,
+    EfficiencyResult,
+    TransformationResult,
+    ScalingResult,
+    CompressionResult,
+    SynthesisResult,
+    OrchestrationResult,
+    InferenceScalingResult,
+    SensitivityResult,
+    ResponsibleEngineeringResult,
+    ParallelismOptimizerResult,
+    BatchingOptimizerResult,
+    PlacementOptimizerResult,
+)
+from ...physics import (
+    calc_ring_allreduce_time,
+    calc_hierarchical_allreduce_time,
+    calc_all_to_all_time,
+    calc_bottleneck,
+    calc_mtbf_cluster,
+    calc_mtbf_node,
+    calc_young_daly_interval,
+    calc_failure_probability,
+    calc_pipeline_bubble,
+)
+from ...core.constants import ureg, Q_, resolve_precision
+from ...infrastructure.registry import Infrastructure
+from ...literature.registry import Literature
+from ...systems.reliability import Reliability
+from .. import calibration as cal
+from ...core.types import Quantity
+from ...models.types import Workload, TransformerWorkload, SparseTransformerWorkload
+from ...hardware.types import HardwareNode
+from ...systems.types import Fleet, NetworkFabric, Node
+from ...infrastructure.types import Datacenter
+from .base import BaseOptimizer, BaseResolver, BaseSolver, ForwardModel
+from .utils import _inter_node_latency, _intra_node_latency
+
+class ReliabilityModel(ForwardModel):
+    """
+    Calculates Mean Time Between Failures (MTBF) and optimal checkpointing intervals.
+
+    This model handles the reliability modeling of massive clusters, helping
+    determine the 'Goodput' of long-running training jobs. It identifies
+    the probability of a job failure before completion and calculates the
+    Young-Daly optimal interval to minimize wasted compute time.
+
+    Literature Source:
+    1. Young (1974), "A First-Order Approximation to the Optimum Checkpoint
+       Interval."
+    2. Daly (2006), "A Higher Order Estimate of the Optimum Checkpoint
+       Interval for Restart-Dump Strategy."
+    """
+    requires = ("fleet",)
+    produces = ReliabilityResult
+
+    def solve(self, fleet: Fleet, job_duration_hours: float, checkpoint_time_s: float = 60.0,
+              avg_recovery_time_s: float = 300.0) -> ReliabilityResult:
+        """
+        Calculates reliability and checkpointing metrics for a fleet.
+
+        Parameters
+        ----------
+        fleet : Fleet
+            The hardware cluster configuration.
+        job_duration_hours : float
+            Total job duration in hours.
+        checkpoint_time_s : float
+            Time to write one checkpoint in seconds (default 60s).
+        avg_recovery_time_s : float
+            Average time to recover from a failure in seconds (default 300s).
+            Includes checkpoint reload, process restart, and re-warmup.
+        """
+        # Use compound node MTBF accounting for GPUs, NICs, and PSUs
+        node_mtbf = calc_mtbf_node(
+            gpu_mtbf_h=Reliability.Gpu.mttf_hours, n_gpus=fleet.node.accelerators_per_node,
+            nic_mtbf_h=Reliability.Nic.mttf_hours, n_nics=fleet.node.nics_per_node,
+            psu_mtbf_h=Reliability.Psu.mttf_hours, n_psus=fleet.node.psus_per_node,
+        )
+        fleet_mtbf = calc_mtbf_cluster(node_mtbf, fleet.count)
+
+        job_dur_q = Q_(job_duration_hours, "hour")
+        prob_fail = calc_failure_probability(fleet_mtbf, job_dur_q)
+
+        ckpt_time_q = Q_(checkpoint_time_s, "second")
+        optimal_interval = calc_young_daly_interval(ckpt_time_q, fleet_mtbf.to("second"))
+
+        # Goodput ratio: fraction of rawput that produces useful training progress.
+        # Lost compute = P(failure) * (avg_recovery_time / checkpoint_interval)
+        # Steady-state goodput: fraction of time spent on useful training.
+        # Overhead = checkpoint_write_time / interval + recovery_time / MTBF
+        # Source: Daly (2006), Young (1974)
+        interval_s = optimal_interval.m_as(ureg.second)
+        cluster_mtbf_s = fleet_mtbf.m_as(ureg.second)
+        if interval_s > 0 and cluster_mtbf_s > 0:
+            checkpoint_overhead = ckpt_time_q.m_as(ureg.second) / interval_s
+            recovery_overhead = avg_recovery_time_s / cluster_mtbf_s
+            goodput_ratio = max(0.0, 1.0 - checkpoint_overhead - recovery_overhead)
+        else:
+            goodput_ratio = 0.0
+
+        return ReliabilityResult(
+            fleet_mtbf=fleet_mtbf,
+            failure_probability=prob_fail,
+            optimal_checkpoint_interval=optimal_interval,
+            expected_failures=(job_dur_q / fleet_mtbf).magnitude,
+            goodput_ratio=goodput_ratio,
+        )
+
+__all__ = [
+    "ReliabilityModel",
+]

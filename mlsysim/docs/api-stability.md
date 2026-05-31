@@ -88,16 +88,23 @@ Flat aliases at the registry root (for example bare `H100` or `ResNet50` leaf na
 The CLI still resolves short names (`mlsysim eval Llama3_8B H100`) for convenience.
 
 Solvers not listed in `mlsysim.__init__` (for example `CompressionModel`, `MoERoutingModel`)
-import from `mlsysim.engine.solver`. Workload types import from `mlsysim.models.types`.
+import from `mlsysim.solvers`. Workload types import from `mlsysim.models.types`.
 
 ### Scenario Registry
 
 ```python
-from mlsysim import Scenarios
+from mlsysim import ReferenceStats, Scenarios
 ```
 
-All scenarios shipping in 0.1.0 are stable. Their names, parameters, and
-behavior are fixed for the 0.1.x series.
+`Scenarios.*` is the executable scenario registry: each entry composes an
+existing `Models.*` workload, a `Hardware.*` or `Systems.*` target, and
+scenario-local constraints such as latency or power budget. `ReferenceStats.*`
+holds non-executable sourced anchors, such as mobile power envelopes, Waymo
+data-rate ranges, and TinyML case-study measurements.
+
+There are no compatibility aliases between these namespaces. Use
+`Scenarios.SmartDoorbell` for an executable case and
+`ReferenceStats.MobilePower` for sourced non-executable anchors.
 
 ### PerformanceProfile Fields
 
@@ -140,10 +147,10 @@ The solver class hierarchy, their constructors, and their method signatures
 may change. The `Engine.solve()` facade insulates you from these changes --
 prefer it over direct solver instantiation.
 
-Top-level convenience imports such as `from mlsysim import ServingModel` are
-kept working throughout the 0.1.x series because the tutorials use them. For
-library code, prefer `mlsysim.solvers` so the import path makes the dependency
-on solver-specific behavior explicit.
+Solver classes are exported from `mlsysim.solvers`, not the package root. Use
+`from mlsysim.solvers import ServingModel` so solver-specific dependencies stay
+explicit and the root namespace remains reserved for registries, units, and
+formatting helpers.
 
 ### Training Mode Parameter
 
