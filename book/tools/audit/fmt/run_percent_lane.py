@@ -29,6 +29,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -40,10 +41,63 @@ from fmt_prose_contract import check_file  # noqa: E402
 from codemod_fmt import scan_percent, _apply_cell_edits  # noqa: E402
 
 PCT_CODES = ("percent_dup", "pp_dup")
+_CELL_HEAD = re.compile(r"^```\{python\}")
+_CELL_END = re.compile(r"^```\s*$")
+_FMT_IMPORT = re.compile(r"^(\s*from mlsysim\.fmt import )([^\n(]+)$")
 
 
 def _revert(path: Path):
     subprocess.run(["git", "checkout", "--", str(path)], check=False)
+
+
+def _ensure_percent_import(text: str, edit_lines: set[int]) -> str:
+    """Make fmt_percent resolvable in every cell that received a percent edit.
+
+    Cells share one namespace (a top ``from mlsysim import *`` covers all), but
+    chapters built purely from per-cell selective imports need fmt_percent added
+    to the cells we touched. We append it to the cell's ``from mlsysim.fmt
+    import`` list, or insert a fresh import after the cell header if there is
+    none. Cells are processed bottom-to-top so inserts never shift the line
+    numbers of cells still to be examined.
+    """
+    lines = text.split("\n")
+    cells: list[tuple[int, int]] = []
+    start = None
+    for i, ln in enumerate(lines):
+        if _CELL_HEAD.match(ln):
+            start = i
+        elif start is not None and _CELL_END.match(ln):
+            cells.append((start, i))
+            start = None
+
+    for s, e in reversed(cells):
+        if not any(s + 1 <= el <= e + 1 for el in edit_lines):
+            continue
+        body = lines[s:e + 1]
+        if any(re.search(r"import \*", b) for b in body):
+            continue  # star import already brings fmt_percent into scope
+        import_idx = None
+        for j in range(s, e + 1):
+            m = _FMT_IMPORT.match(lines[j])
+            if not m:
+                continue
+            names = m.group(2)
+            if re.search(r"\bfmt_percent\b", names):
+                import_idx = -1  # already imported here
+                break
+            import_idx = j
+        if import_idx == -1:
+            continue
+        if import_idx is not None:
+            lines[import_idx] = lines[import_idx].rstrip()
+            sep = " fmt_percent" if lines[import_idx].endswith(",") else ", fmt_percent"
+            lines[import_idx] += sep
+        else:
+            ins = s + 1
+            while ins <= e and (lines[ins].lstrip().startswith("#|") or lines[ins].strip() == ""):
+                ins += 1
+            lines.insert(ins, "from mlsysim.fmt import fmt_percent")
+    return "\n".join(lines)
 
 
 def process(path: Path) -> tuple[str, str]:
@@ -60,6 +114,7 @@ def process(path: Path) -> tuple[str, str]:
     new_text = _apply_cell_edits(text, edits)
     if new_text == text:
         return "NOOP", "edits did not match source lines (stale offsets?)"
+    new_text = _ensure_percent_import(new_text, {e.line for e in edits})
     path.write_text(new_text, encoding="utf-8")
 
     after_vals, after_prose, fail2 = snapshot_file(path)
