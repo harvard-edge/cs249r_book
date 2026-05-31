@@ -512,7 +512,19 @@ py_compile PASS; focused pytest suite PASS (182 tests); `fmt_prose_contract.py`
 0; `codemod_fmt.py queue` `by kind: {}`; `./book/binder check math` PASS;
 `audit_prose_semantics.py` CLEAN across 81 files.
 
-### B. WS4 — unit-suffix lane (remaining 1,126 physical-unit suffixes: `GB`/`MB`/`W`/`GB/s`/…)  ← the big one
+**A38 — Appendix bandwidth denominator relocation: DONE.**
+Moved 16 appendix bandwidth values from split string/prose units to full
+`fmt_qty(..., GB/second|TB/second)` values: 3 in
+`appendix_assumptions.qmd` and 13 in `appendix_fleet.qmd`. The rendered prose
+and table cells stayed byte-identical because the external `/s` text was
+removed wherever the formatter now emits `GB/s` or `TB/s`. `audit_fmt_usage.py`
+now reports `fmt_qty` at 309 and physical-unit suffixes down to 1,110.
+Verification: `git diff --check` PASS; py_compile PASS; focused pytest suite
+PASS (182 tests); `fmt_prose_contract.py` 0; `codemod_fmt.py queue`
+`by kind: {}`; `./book/binder check math` PASS; `./book/binder check code
+--scope lego-dead-code` PASS; `audit_prose_semantics.py` CLEAN across 81 files.
+
+### B. WS4 — unit-suffix lane (remaining 1,110 physical-unit suffixes: `GB`/`MB`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.
 `weights_gb`), not Pint Quantities, and `fmt_qty` requires a Pint Quantity to

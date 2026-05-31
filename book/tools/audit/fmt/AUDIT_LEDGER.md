@@ -86,6 +86,28 @@ Validation details:
   violations; `codemod_fmt.py queue` PASS, `by kind: {}`; `./book/binder check
   math` PASS; `audit_prose_semantics.py` PASS, 0 findings across 81 files.
 
+## 2026-05-31 — Appendix bandwidth denominator relocation
+
+Change type: substituted-prose-identical unit relocation. Moved bandwidth `/s`
+denominators from prose/table literals into `fmt_qty(...)` so the formatter owns
+the full Pint unit (`GB/second` or `TB/second`).
+
+Touched chapters and equivalence:
+
+| Chapter file | Result |
+|---|---|
+| `vol2/backmatter/appendix_assumptions.qmd` | `FleetQuickCalc.ib_bw_str`, `H100Recap.bw_tb_str`, and `UnitConstants.ib_ndr_gbs_from_gbps_str` values changed from `GB`/`TB` strings to `GB/s`/`TB/s`; external `/s` text was removed, and substituted prose stayed byte-identical across 122 inline-ref lines. |
+| `vol2/backmatter/appendix_fleet.qmd` | 13 bandwidth strings moved to `fmt_qty(..., GB/second|TB/second)`; table `/s` text was removed. Substituted prose stayed byte-identical across 99 inline-ref lines, including comma-preserved `1,200 GB/s` and `1,800 GB/s`. |
+
+Validation details:
+
+- `audit_fmt_usage.py` physical-unit suffix count dropped from 1,126 to 1,110.
+- Verification: `git diff --check` PASS; py_compile PASS; focused pytest suite
+  PASS, 182 tests; `fmt_prose_contract.py` PASS, 0 violations;
+  `codemod_fmt.py queue` PASS, `by kind: {}`; `./book/binder check math` PASS;
+  `./book/binder check code --scope lego-dead-code` PASS;
+  `audit_prose_semantics.py` PASS, 0 findings across 81 files.
+
 ## 2026-05-31 — Currency denominator relocation
 
 Change type: byte-identical formatter relocation. Replaced 91

@@ -115,7 +115,10 @@ compact label did not match visible house style. Compound-scale suffixes are now
 gone too: direct word scales, checked scaled rates, attributive count modifiers,
 and `fmt_qty(unit_label=...)` cleared all 14 sites. Intentional visible fixes:
 `200 K parameters`→`200K parameters` and floored `32K tokens`→`32.8K tokens`
-for the exact 32,768-token batch. Remaining suffix bucket is only 1,126
+for the exact 32,768-token batch.
+The appendix bandwidth denominator lane then moved 16 split `GB`/`TB` + prose
+`/s` values to full `fmt_qty(..., GB/second|TB/second)` strings while keeping
+substituted prose byte-identical. Remaining suffix bucket is only 1,110
 `physical_unit` suffixes. Remaining: the rest of WS4/WS3 and later PDF/lock
 phases. Nothing is half-done or broken.
 
@@ -522,6 +525,12 @@ drop. The adjacent prose/table text was updated to `1 percentage-point threshold
 and `(drop of 6.8 percentage points)`. No user-decision items remain open.
 
 ## Session commit log (newest first)
+- Codex appendix bandwidth denominator lane: migrated 16 split bandwidth values
+  in `appendix_assumptions` and `appendix_fleet` to
+  `fmt_qty(..., GB/second|TB/second)` and removed external prose/table `/s`.
+  Substituted prose stayed byte-identical; physical-unit suffixes dropped
+  1,126 → 1,110; contract 0, semantic 0, queue empty, targeted suite 182
+  passing.
 - Codex compound-scale lane: cleared all 14 `compound_scale` suffix sites by
   adding direct word-scale support (`scale="million"` / `"billion"`),
   checked scaled `fmt_rate(..., scale=...)`, and `fmt_count(...,
