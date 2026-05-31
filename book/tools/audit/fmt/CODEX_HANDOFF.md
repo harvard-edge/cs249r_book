@@ -15,10 +15,14 @@ Run ALL fmt tooling from the repo root with `PYTHONPATH=mlsysim`.
 ## 0. Read these first (orientation, in order)
 1. `.claude/rules/fmt.md` — **the contract**: which formatter for which value-kind,
    the OUTPUT-block recipe, the prose rules, the per-kind guards. This is the law.
-2. `book/tools/audit/fmt/NIGHT_RESUME.md` — current state + the remaining
+2. `book/tools/audit/fmt/PLAN_OF_RECORD.md` — current agreed plan: formatter
+   taxonomy, migration lanes, and the separate render/prose audit.
+3. `book/tools/audit/fmt/AUDIT_LEDGER.md` — running validation notes. Add every
+   touched LEGO cell here as migration work continues.
+4. `book/tools/audit/fmt/NIGHT_RESUME.md` — current state + the remaining
    WS4/WS3/render work.
-3. `book/tools/audit/fmt/MIGRATION.md` — rollout board, workstreams, render phases.
-4. `book/tools/audit/fmt/ASSESSMENT.md` — the equivalence regimes (byte-identical
+5. `book/tools/audit/fmt/MIGRATION.md` — rollout board, workstreams, render phases.
+6. `book/tools/audit/fmt/ASSESSMENT.md` — the equivalence regimes (byte-identical
    vs glyph-relocation) and the verification gauntlet.
 
 ---
@@ -99,6 +103,17 @@ migrated byte-identically to named `approx=True` / `lower_bound=True` flags.
 `fmt`, `fmt_int`, `fmt_qty`, and `fmt_count` now expose those markers, so future
 approximate quantities/counts do not need raw string prefixes. The corpus has
 zero QMD `prefix=` call sites.
+
+**A4 — Plan-of-record + structured API batch: DONE.**
+`PLAN_OF_RECORD.md` and `AUDIT_LEDGER.md` now record the agreed strategy:
+semantic formatter APIs plus a separate touched-cell and whole-book inline
+render/prose audit. The formatter API now includes structured currency
+`scale=`/`per=`, strict count labels/plural overrides, `fmt_rate`, `fmt_time`
+with symbol/word style, and typed range helpers (`fmt_qty_range`,
+`fmt_time_range`, `fmt_count_range`, `fmt_usd_range`). This batch touched no QMD
+LEGO cells. Verification: py_compile PASS, `git diff --check` PASS, focused
+pytest suite PASS (157 tests), prose-contract 0, semantic audit 0 findings,
+codemod queue empty.
 
 ### B. WS4 — unit-suffix lane (~2,393 sites: `GB`/`ms`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**

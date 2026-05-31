@@ -10,15 +10,21 @@ from mlsysim.fmt import (
     MarkdownStr,
     fmt,
     fmt_count,
+    fmt_count_range,
     fmt_int,
     fmt_multiple,
     fmt_percent,
     fmt_pp,
     fmt_qty,
+    fmt_qty_range,
     fmt_range,
+    fmt_rate,
     fmt_ratio,
     fmt_sci,
+    fmt_time,
+    fmt_time_range,
     fmt_usd,
+    fmt_usd_range,
     fmt_val,
 )
 
@@ -120,6 +126,27 @@ class TestFmtQty:
         assert isinstance(out, MarkdownStr)
         assert out == "5 ms"
 
+    def test_structured_denominator(self):
+        energy = 0.1 * ureg.millijoule
+        out = fmt_qty(
+            energy,
+            ureg.millijoule,
+            precision=1,
+            commas=False,
+            per="inference",
+        )
+        assert out == "0.1 mJ/inference"
+
+    def test_rejects_legacy_and_structured_denominator_mix(self):
+        with pytest.raises(ValueError, match="extra_suffix="):
+            fmt_qty(
+                1 * ureg.millijoule,
+                ureg.millijoule,
+                precision=0,
+                extra_suffix="/token",
+                per="inference",
+            )
+
 
 class TestFmtUsd:
     def test_basic_dollar_is_escaped(self):
@@ -135,6 +162,21 @@ class TestFmtUsd:
         assert fmt_usd(0.09, precision=2, commas=False, suffix="/GB") == "\\$0.09/GB"
         assert fmt_usd(4.6, precision=1, suffix="M") == "\\$4.6M"
 
+    def test_structured_scale_and_denominator(self):
+        assert fmt_usd(4_600_000, precision=1, commas=False, scale="M") == "\\$4.6M"
+        assert fmt_usd(0.09, precision=2, commas=False, per="GB") == "\\$0.09/GB"
+        assert fmt_usd(12_000, commas=False, scale="K", per="year") == "\\$12K/year"
+
+    def test_rejects_legacy_suffix_with_structured_parts(self):
+        with pytest.raises(ValueError, match="suffix="):
+            fmt_usd(1000, scale="K", suffix="K")
+
+    def test_rejects_bad_denominator(self):
+        with pytest.raises(ValueError, match="omit the leading"):
+            fmt_usd(0.09, precision=2, per="/GB")
+        with pytest.raises(ValueError, match="fmt_usd per must be"):
+            fmt_usd(0.09, precision=2, per="widgets")
+
     def test_approx_prepends_tilde(self):
         assert fmt_usd(1234.7, approx=True, suffix="/year") == "~\\$1,235/year"
 
@@ -149,9 +191,50 @@ class TestFmtUsd:
         assert isinstance(fmt_usd(100), MarkdownStr)
 
 
-class TestFmtCount:
+class TestFmtCountLegacy:
     def test_accepts_named_marker(self):
         assert fmt_count(1024, suffix=" GPUs", approx=True) == "~1,024 GPUs"
+
+
+class TestFmtRate:
+    def test_formats_allowlisted_service_rates(self):
+        assert fmt_rate(2500, "QPS") == "2500 QPS"
+        assert fmt_rate(1200, "tokens/s") == "1200 tokens/s"
+        assert fmt_rate(60, "FPS") == "60 FPS"
+
+    def test_rejects_unknown_rate_unit(self):
+        with pytest.raises(ValueError, match="fmt_rate unit must be"):
+            fmt_rate(10, "GB/s")
+
+    def test_rejects_negative_by_default(self):
+        with pytest.raises(ValueError, match="non-negative rate"):
+            fmt_rate(-1, "QPS")
+        assert fmt_rate(-1, "QPS", allow_negative=True) == "-1 QPS"
+
+    def test_returns_markdown_str(self):
+        assert isinstance(fmt_rate(1, "QPS"), MarkdownStr)
+
+
+class TestFmtTime:
+    def test_symbol_style_accepts_quantities_and_plain_numbers(self):
+        assert fmt_time(1500 * ureg.millisecond, ureg.second) == "1.5 s"
+        assert fmt_time(35, ureg.second, precision=0) == "35 s"
+
+    def test_word_style_pluralizes(self):
+        assert fmt_time(1, ureg.second, precision=0, style="word") == "1 second"
+        assert fmt_time(2, ureg.second, precision=0, style="word") == "2 seconds"
+
+    def test_rejects_non_time_unit(self):
+        with pytest.raises(ValueError, match="time unit"):
+            fmt_time(5, ureg.GB)
+
+    def test_rejects_negative_by_default(self):
+        with pytest.raises(ValueError, match="non-negative duration"):
+            fmt_time(-1, ureg.second, precision=0)
+        assert fmt_time(-1, ureg.second, precision=0, allow_negative=True) == "-1 s"
+
+    def test_returns_markdown_str(self):
+        assert isinstance(fmt_time(1, ureg.second, precision=0), MarkdownStr)
 
 
 class TestFmtPercentGuards:
@@ -293,6 +376,8 @@ class TestFiniteGuard:
             lambda: fmt_val(self.NAN),
             lambda: fmt_sci(self.INF),
             lambda: fmt_qty(self.INF * ureg.millisecond, ureg.millisecond),
+            lambda: fmt_time(self.INF, ureg.second),
+            lambda: fmt_rate(self.INF, "QPS"),
         ):
             with pytest.raises(ValueError, match="Non-finite"):
                 call()
@@ -324,10 +409,18 @@ class TestFmtCount:
         assert fmt_count(8192) == "8,192"
         assert fmt_count(1024, suffix=" GPUs") == "1,024 GPUs"
 
+    def test_structured_label_pluralizes_from_raw_count(self):
+        assert fmt_count(1, label="GPU") == "1 GPU"
+        assert fmt_count(2, label="GPU") == "2 GPUs"
+        assert fmt_count(1024, label="GPU") == "1,024 GPUs"
+        assert fmt_count(2, label="query") == "2 queries"
+        assert fmt_count(2, label="batch", plural_label="batches") == "2 batches"
+
     def test_scale_glyphs(self):
         assert fmt_count(5_000_000, scale="M") == "5M"
         assert fmt_count(5_300_000, scale="M", precision=1) == "5.3M"
         assert fmt_count(70e9, scale="B") == "70B"
+        assert fmt_count(70e9, scale="B", label="parameter") == "70B parameters"
 
     def test_scale_inherits_precision_guard(self):
         # 5.3M at precision=0 would silently hide the .3 — guard refuses.
@@ -338,9 +431,23 @@ class TestFmtCount:
         with pytest.raises(ValueError, match="non-negative count"):
             fmt_count(-5)
 
+    def test_rejects_fractional_count_by_default(self):
+        with pytest.raises(ValueError, match="whole-number count"):
+            fmt_count(1.5, label="GPU", precision=1)
+        assert (
+            fmt_count(1.5, label="GPU", precision=1, allow_fractional=True)
+            == "1.5 GPUs"
+        )
+
     def test_rejects_unknown_scale(self):
         with pytest.raises(ValueError, match="scale must be"):
             fmt_count(1000, scale="G")
+
+    def test_rejects_label_suffix_conflicts_and_unit_like_labels(self):
+        with pytest.raises(ValueError, match="structured label"):
+            fmt_count(2, label="GPU", suffix=" GPUs")
+        with pytest.raises(ValueError, match="looks like a unit"):
+            fmt_count(2, label="QPS")
 
     def test_returns_markdown_str(self):
         assert isinstance(fmt_count(1000, scale="K"), MarkdownStr)
@@ -377,3 +484,57 @@ class TestFmtRange:
 
     def test_returns_markdown_str(self):
         assert isinstance(fmt_range(5, 10, precision=0), MarkdownStr)
+
+
+class TestTypedRanges:
+    def test_quantity_range_appends_unit_once(self):
+        out = fmt_qty_range(
+            1 * ureg.GB,
+            2 * ureg.GB,
+            ureg.GB,
+            precision=0,
+            commas=False,
+        )
+        assert out == "1\u20132 GB"
+
+    def test_time_range_symbol_and_word_styles(self):
+        assert (
+            fmt_time_range(5, 20, ureg.millisecond, precision=0, commas=False)
+            == "5\u201320 ms"
+        )
+        assert (
+            fmt_time_range(1, 2, ureg.second, precision=0, style="word",
+                           commas=False)
+            == "1\u20132 seconds"
+        )
+
+    def test_count_range_pluralizes_from_raw_count(self):
+        assert fmt_count_range(1, 2, label="GPU", commas=False) == "1\u20132 GPUs"
+        assert (
+            fmt_count_range(
+                1_000_000,
+                2_000_000,
+                scale="M",
+                label="parameter",
+                commas=False,
+            )
+            == "1M\u20132M parameters"
+        )
+
+    def test_usd_range_supports_scale_and_denominator(self):
+        assert (
+            fmt_usd_range(10_000, 30_000, scale="K", commas=False)
+            == "\\$10K\u2013\\$30K"
+        )
+        assert (
+            fmt_usd_range(0.10, 0.50, precision=2, commas=False, per="GB")
+            == "\\$0.10\u2013\\$0.50/GB"
+        )
+
+    def test_ranges_reject_inverted_endpoints(self):
+        with pytest.raises(ValueError, match="hi >= lo"):
+            fmt_qty_range(2 * ureg.GB, 1 * ureg.GB, ureg.GB, precision=0)
+        with pytest.raises(ValueError, match="hi >= lo"):
+            fmt_count_range(2, 1)
+        with pytest.raises(ValueError, match="hi >= lo"):
+            fmt_usd_range(2, 1)

@@ -37,7 +37,7 @@ python3 -m pytest mlsysim/tests/test_fmt.py book/tests/test_codemod_fmt.py book/
 
 ## NOW / NEXT  (update before every commit)
 
-**STATUS: Codex WS4 `distributed_training` partial unit batch complete and verified. Safe to continue.**
+**STATUS: Structured formatter API batch complete and verified. Safe to continue with migration lanes.**
 
 **State:** multiplier + percent + scale 100% migrated; pp → typed fmt_pp (14
 byte-identical sites + grammar fixes, plus the user-approved A2 benchmarking
@@ -74,7 +74,9 @@ also HTML-render-verified for all 13 source-changed chapters. A2 is
 HTML-render-verified for `benchmarking`. Remaining: the rest of WS4/WS3 and later
 PDF/lock phases. Nothing is half-done or broken.
 
-**If continuing:** Continue WS4 with
+**If continuing:** Continue with semantic lanes in `PLAN_OF_RECORD.md`. Good next
+targets are currency scale/per oddities, count labels/rates, then time values.
+For physical Quantity-backed sites, continue WS4 with
 `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/run_unit_lane.py --write <qmd>`
 one chapter at a time. Current dry-run reports 132 remaining clean unit candidates
 across 19 chapters; many more suffix sites are plain floats and should stay queued
@@ -135,12 +137,25 @@ fixed a pre-existing rendered prose bug, `600 GB/s+ GB/s NVLink domain`, to
 for this `unit+ unit` shape. Corpus audit moved `fmt_qty` calls 149 → 164 and
 physical-unit suffixes 1,385 → 1,370.
 
+**NOW done:** Plan-of-record + structured formatter API batch — added
+`PLAN_OF_RECORD.md` and `AUDIT_LEDGER.md` so future work records both per-cell
+validation and the final whole-book inline render/prose audit. Finished the
+structured API layer: `fmt_usd(scale=..., per=...)`, `fmt_count(label=...,
+plural_label=...)`, `fmt_rate`, `fmt_time(style="symbol"|"word")`, and typed
+range helpers. No QMD LEGO cells were touched in this batch. Verification:
+py_compile PASS; `git diff --check` PASS; focused pytest suite PASS
+(157 tests); `fmt_prose_contract` 0; `codemod_fmt queue` empty; substituted
+prose semantic audit CLEAN across 81 files.
+
 **NEXT:**
-1. Continue WS4 with `run_unit_lane.py` chapter-sized batches. Highest remaining
+1. Migrate the semantic non-Quantity lanes first: currency scale/per, count
+   labels, non-physical rates, and time values. Add entries to
+   `AUDIT_LEDGER.md` for every touched LEGO cell.
+2. Continue WS4 with `run_unit_lane.py` chapter-sized batches. Highest remaining
    clean counts: `vol2/backmatter/appendix_fleet` (14), `vol2/ops_scale` (14),
    `vol1/hw_acceleration` (11), `vol1/introduction` (11),
    `vol2/network_fabrics` (11), `vol2/performance_engineering` (11).
-2. Render-verify any new WS4-changed chapters before Phase 3B/PDF sign-off.
+3. Render-verify any newly changed chapters before Phase 3B/PDF sign-off.
 
 Gates to keep green (run all three):
 - fmt_prose_contract.py --root book/quarto/contents  → 0
