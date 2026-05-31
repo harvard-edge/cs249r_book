@@ -1,7 +1,7 @@
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..core.constants import ureg
-from ..core.types import Quantity, require_dimensionality, require_unit_family
+from ..core.types import Metadata, Quantity, require_dimensionality, require_unit_family
 
 
 class PlatformEnvelope(BaseModel):
@@ -16,6 +16,7 @@ class PlatformEnvelope(BaseModel):
     ram_range: str | None = None
     storage_range: str | None = None
     tdp_range_w: str | None = None
+    metadata: Metadata = Field(default_factory=Metadata)
 
     @field_validator("ram", "storage", mode="after")
     @classmethod

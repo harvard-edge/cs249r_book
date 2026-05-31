@@ -31,7 +31,7 @@ benchmark numbers single-sourced inside MLSysIM.
 | 3 | Llama-3-8B H100 bs=1 decode ITL (eta=0.50) | 5.2 ms | `Literature.Benchmarks.Llama3_8B_H100_ITLLower/Upper` | TensorRT-LLM benchmarks (FP16, H100-80GB) | within range |
 | 4 | Llama-3-8B H100 bs=32 decode ITL (eta=0.50) | 7.7 ms | `Literature.Benchmarks.Llama3_8B_H100_ITLLower/Upper` | vLLM / TensorRT-LLM batched benchmarks | within range |
 | 5 | Llama-3-8B H100 bs=1 prefill TTFT (eta=0.50) | 66.5 ms | `Literature.Benchmarks.Llama3_8B_H100_ITLLower/Upper` | TensorRT-LLM benchmarks (seq=2048) | within range |
-| 6 | GPT-3 175B training FLOPs (6PD rule) | 3.15e23 | `Literature.Benchmarks.GPT3TrainingFlops` | Brown et al. (2020), Table D.1 | +0.3% |
+| 6 | GPT-3 175B training FLOPs (6PD rule) | 3.15e23 | `Models.Language.GPT3.training_ops` | Brown et al. (2020), Table D.1 | +0.3% |
 
 ---
 
@@ -96,7 +96,7 @@ values minimize error against published benchmarks:
 | ResNet-50 H100 bs=256 training | 0.065 | 5,070 img/s | `Literature.Benchmarks.ResNet50H100TrainThroughput` | within band |
 | Llama-3-8B H100 bs=1 decode | any (memory-bound) | 5.2 ms | `Literature.Benchmarks.Llama3_8B_H100_ITLLower/Upper` | within range |
 | Llama-3-8B H100 bs=32 decode | any (memory-bound) | 7.7 ms | `Literature.Benchmarks.Llama3_8B_H100_ITLLower/Upper` | within range |
-| GPT-3 training FLOPs | N/A (closed-form) | 3.15e23 | `Literature.Benchmarks.GPT3TrainingFlops` | within band |
+| GPT-3 training FLOPs | N/A (closed-form) | 3.15e23 | `Models.Language.GPT3.training_ops` | within band |
 
 ---
 
@@ -119,7 +119,7 @@ values minimize error against published benchmarks:
      latency with PagedAttention.
    - **Brown et al. (2020)**: "Language Models are Few-Shot Learners."
      GPT-3's benchmark target is exposed as
-     `Literature.Benchmarks.GPT3TrainingFlops`.
+     `Models.Language.GPT3.training_ops`.
 
 3. **Decode ITL is efficiency-insensitive.** The serving model correctly
    identifies decode as memory-bandwidth-bound. The ITL formula is:
@@ -175,7 +175,7 @@ print(f"Llama-3-8B bs=32 ITL: {r4.itl.m_as('ms'):.1f} ms")
 
 # Config 6: GPT-3 training FLOPs
 gpt3 = mlsysim.Models.Language.GPT3
-target = mlsysim.Literature.Benchmarks.GPT3TrainingFlops
+target = mlsysim.Models.Language.GPT3.training_ops
 flops = calc_transformer_training_flops(gpt3.parameters, gpt3.training_tokens)
 print(f"GPT-3 FLOPs: {flops.to('flop').magnitude:.2e}")
 print(f"GPT-3 target: {float(target):.2e}")

@@ -1,6 +1,6 @@
 """LLM serving, batching, tail-latency, and inference-scaling solvers.
 
-These implementations live outside ``engine.solver`` so the public compatibility
+These implementations live outside ``engine.solver`` so the public import
 module can stay small while domain logic remains easier to review.
 """
 
@@ -61,10 +61,10 @@ from ...models.types import Workload, TransformerWorkload, SparseTransformerWork
 from ...hardware.types import HardwareNode
 from ...systems.types import Fleet, NetworkFabric, Node
 from ...infrastructure.types import Datacenter
-from .base import BaseModel, BaseOptimizer, BaseResolver, BaseSolver, ForwardModel
+from .base import BaseOptimizer, BaseResolver, BaseSolver, ForwardModel
 from .utils import _inter_node_latency, _intra_node_latency
 
-class ServingModel(BaseModel):
+class ServingModel(ForwardModel):
     """
     Analyzes the two-phase LLM serving lifecycle: Pre-fill vs. Decoding.
 
@@ -273,7 +273,7 @@ class ServingModel(BaseModel):
             decode_stall_bound=decode_stall_bound,
         )
 
-class ServingCapacityModel(BaseModel):
+class ServingCapacityModel(ForwardModel):
     """
     Sizes an LLM serving deployment from a QPS and tail-latency target.
 
@@ -413,7 +413,7 @@ class ServingCapacityModel(BaseModel):
             bottleneck=bottleneck,
         )
 
-class ContinuousBatchingModel(BaseModel):
+class ContinuousBatchingModel(ForwardModel):
     """
     Analyzes production LLM serving with Continuous Batching and PagedAttention.
 
@@ -510,7 +510,7 @@ class ContinuousBatchingModel(BaseModel):
             speedup_vs_static=speedup
         )
 
-class WeightStreamingModel(BaseModel):
+class WeightStreamingModel(ForwardModel):
     """
     Analyzes Wafer-Scale inference (e.g., Cerebras CS-3) using Weight Streaming.
 
@@ -627,7 +627,7 @@ class WeightStreamingModel(BaseModel):
             wafer_memory_utilization=min(utilization, 1.0) if feasible else utilization,
         )
 
-class TailLatencyModel(BaseModel):
+class TailLatencyModel(ForwardModel):
     """
     Analyzes queueing delays and P99 tail latency for deployed inference models.
 
@@ -691,10 +691,9 @@ class TailLatencyModel(BaseModel):
             queue_utilization=rho,
             is_stable=is_stable,
             slo_headroom_ratio=slo_headroom_ratio,
-            slo_violation_probability=slo_headroom_ratio  # legacy alias; semantically a ratio
         )
 
-class InferenceScalingModel(BaseModel):
+class InferenceScalingModel(ForwardModel):
     """
     Models inference-time compute scaling (Wall 12: Reasoning/CoT Cost).
 
@@ -823,7 +822,7 @@ class BatchingOptimizer(BaseOptimizer):
                 best_batch_size=0,
                 max_throughput=0.0,
                 p99_latency=Q_("0 ms"),
-                slo_violation_probability=0.0,
+                slo_headroom_ratio=0.0,
                 is_feasible=False,
                 total_searched=max_search_batch
             )
@@ -842,7 +841,7 @@ class BatchingOptimizer(BaseOptimizer):
             best_batch_size=best_b,
             max_throughput=max_tps,
             p99_latency=tail_res.p99_latency,
-            slo_violation_probability=tail_res.slo_violation_probability,
+            slo_headroom_ratio=tail_res.slo_headroom_ratio,
             is_feasible=True,
             total_searched=max_search_batch
         )

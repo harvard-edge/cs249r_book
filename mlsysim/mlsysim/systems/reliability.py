@@ -50,7 +50,12 @@ class Reliability(Registry):
         name="HBM",
         mttf_hours=fleet_mttf_hours(200_000, component="HBM", failure_mode="bit-flip accumulation, TSV"),
     )
-    SdcRatePerGpuHr = 1e-6
+    SdcRatePerGpuHr = sourced(
+        1e-6,
+        pc.MEMORY_SOFT_ERROR_RATE,
+        name="Silent data corruption rate per GPU-hour",
+        description="Order-of-magnitude SDC rate used for fleet reliability examples.",
+    )
     Recovery = RecoveryProfile(
         heartbeat_timeout_s=sourced(30, pc.BOOK_RECOVERY_ASSUMPTIONS, name="Heartbeat timeout", description="Failure detection latency before reschedule."),
         reschedule_time_s=sourced(60, pc.BOOK_RECOVERY_ASSUMPTIONS, name="Reschedule time", description="Time to allocate a replacement node after failure detection."),

@@ -89,7 +89,7 @@ CANONICAL = [
     ("llama2_70b_hidden",   8192, 0.02, "Models.Language.Llama2_70B.hidden_dim"),
     ("llama2_70b_heads",    64, 0.05, "Models.Language.Llama2_70B.heads"),
     ("llama2_70b_kv_heads", 8,  0.05, "Models.Language.Llama2_70B.kv_heads"),
-    ("gpt2_params_m",       1500, 0.05, "Models.GPT2.parameters (in M)"),
+    ("gpt2_params_m",       1500, 0.05, "Models.Language.GPT2.parameters (in M)"),
 
     # GPT-3 training (energy + ops)
     ("gpt3_train_energy_mwh", 1287, 0.05, "Models.Language.GPT3.training_energy_mwh"),

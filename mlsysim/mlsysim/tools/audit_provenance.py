@@ -8,13 +8,8 @@ import sys
 from datetime import date
 from typing import Any, Iterable
 
-from mlsysim.tools.appendix_lineage import (
-    audit_appendix_defaults,
-    audit_appendix_literature,
-    audit_appendix_pricing,
-    audit_appendix_reliability,
-)
 from mlsysim.core.provenance import Provenance, ProvenanceKind, Sourced
+from mlsysim.datasets.registry import Datasets
 from mlsysim.hardware.registry import (
     CloudHardware,
     EdgeHardware,
@@ -23,10 +18,19 @@ from mlsysim.hardware.registry import (
     WorkstationHardware,
 )
 from mlsysim.hardware.tech import Interconnect, Memory, Op, Storage as TechStorage
-from mlsysim.infrastructure.registry import Grids
+from mlsysim.infrastructure.registry import Datacenters, FacilityCooling, Grids, Racks
 from mlsysim.infrastructure.pricing import Cloud, Storage, Labeling, Fleet, Capital, OnPremises
 from mlsysim.infrastructure.capacity import Capacity
-from mlsysim.literature.registry import Benchmarks, Training, Scaling, Overheads, Chinchilla, Communication
+from mlsysim.literature.registry import (
+    BatchSize,
+    Benchmarks,
+    Chinchilla,
+    Communication,
+    Energy,
+    Overheads,
+    Scaling,
+    Training,
+)
 from mlsysim.models.registry import (
     GenerativeVisionModels,
     LanguageModels,
@@ -35,7 +39,12 @@ from mlsysim.models.registry import (
     TinyModels,
     VisionModels,
 )
-from mlsysim.systems.registry import Clusters, Fabrics, Nodes, Pods
+from mlsysim.ops.monitoring import Monitoring
+from mlsysim.platforms.registry import Platforms
+from mlsysim.scenarios.registry import ReferenceStats
+from mlsysim.systems.registry import Clusters, Fabrics, NetworkEnergy, Nodes, Pods, SwitchFabric
+
+
 def _registry_nodes(registry_cls: type) -> Iterable[Any]:
     """Yields all Sourced AST nodes found in the target registry file."""
     if not hasattr(registry_cls, "list"):
@@ -75,6 +84,8 @@ def _check_node(path: str, node: Any) -> list[str]:
         return _validate_provenance_record(path, getattr(meta, "provenance", None))
     if isinstance(node, Sourced):
         return _validate_provenance_record(path, node.provenance)
+    if hasattr(node, "provenance"):
+        return _validate_provenance_record(path, getattr(node, "provenance", None))
     if hasattr(node, "mttf_hours"):
         return _validate_provenance_record(path, getattr(node.mttf_hours, "provenance", None))
     if hasattr(node, "rate"):
@@ -108,6 +119,22 @@ def audit_registries(*, scope_cloud: bool = False) -> list[str]:
     return issues
 
 
+def audit_datasets() -> list[str]:
+    issues: list[str] = []
+    for dataset in _registry_nodes(Datasets):
+        name = getattr(dataset, "name", type(dataset).__name__)
+        issues.extend(_check_node(f"Datasets.{name}", dataset))
+    return issues
+
+
+def audit_platforms() -> list[str]:
+    issues: list[str] = []
+    for platform in _registry_nodes(Platforms):
+        name = getattr(platform, "name", type(platform).__name__)
+        issues.extend(_check_node(f"Platforms.{name}", platform))
+    return issues
+
+
 def audit_hardware_tech() -> list[str]:
     issues: list[str] = []
     for prefix, reg in (
@@ -136,11 +163,36 @@ def audit_systems_topology() -> list[str]:
     return issues
 
 
+def audit_systems_reference_values() -> list[str]:
+    issues: list[str] = []
+    for prefix, reg in (
+        ("Systems.SwitchFabric", SwitchFabric),
+        ("Systems.NetworkEnergy", NetworkEnergy),
+    ):
+        for node in _registry_nodes(reg):
+            name = getattr(node, "name", type(node).__name__)
+            issues.extend(_check_node(f"{prefix}.{name}", node))
+    return issues
+
+
 def audit_infra_grids() -> list[str]:
     issues: list[str] = []
     for grid in _registry_nodes(Grids):
         name = getattr(grid, "name", type(grid).__name__)
         issues.extend(_check_node(f"Infrastructure.Grids.{name}", grid))
+    return issues
+
+
+def audit_infra_facilities() -> list[str]:
+    issues: list[str] = []
+    for prefix, reg in (
+        ("Infrastructure.Datacenters", Datacenters),
+        ("Infrastructure.Racks", Racks),
+        ("Infrastructure.FacilityCooling", FacilityCooling),
+    ):
+        for node in _registry_nodes(reg):
+            name = getattr(node, "name", type(node).__name__)
+            issues.extend(_check_node(f"{prefix}.{name}", node))
     return issues
 
 
@@ -177,10 +229,28 @@ def audit_literature_sourced() -> list[str]:
         ("Literature.Overheads", Overheads),
         ("Literature.Chinchilla", Chinchilla),
         ("Literature.Communication", Communication),
+        ("Literature.BatchSize", BatchSize),
+        ("Literature.Energy", Energy),
     ):
         for item in _registry_nodes(reg):
             if isinstance(item, Sourced):
                 issues.extend(_validate_provenance_record(f"{prefix}", item.provenance))
+    return issues
+
+
+def audit_reference_stats() -> list[str]:
+    issues: list[str] = []
+    for item in _registry_nodes(ReferenceStats):
+        name = getattr(item, "name", type(item).__name__)
+        issues.extend(_check_node(f"ReferenceStats.{name}", item))
+    return issues
+
+
+def audit_ops_monitoring() -> list[str]:
+    issues: list[str] = []
+    for item in _registry_nodes(Monitoring):
+        name = getattr(item, "name", type(item).__name__)
+        issues.extend(_check_node(f"Ops.Monitoring.{name}", item))
     return issues
 
 
@@ -220,8 +290,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--scope",
-        choices=("cloud", "all", "textbook"),
-        default="textbook",
+        choices=("cloud", "all"),
+        default="all",
         help="What to scan",
     )
     parser.add_argument(
@@ -234,21 +304,22 @@ def main(argv: list[str] | None = None) -> int:
     issues: list[str] = []
     if args.scope == "cloud":
         issues.extend(audit_registries(scope_cloud=True))
-    if args.scope in ("all", "textbook"):
+    if args.scope == "all":
         issues.extend(audit_registries(scope_cloud=False))
+        issues.extend(audit_datasets())
+        issues.extend(audit_platforms())
         issues.extend(audit_hardware_tech())
         issues.extend(audit_systems_topology())
+        issues.extend(audit_systems_reference_values())
         issues.extend(audit_infra_grids())
+        issues.extend(audit_infra_facilities())
         issues.extend(audit_infra_pricing())
         issues.extend(audit_infra_capacity())
         issues.extend(audit_literature_sourced())
+        issues.extend(audit_reference_stats())
+        issues.extend(audit_ops_monitoring())
         issues.extend(audit_systems_reliability())
         issues.extend(audit_calibration_sourced())
-    if args.scope == "textbook":
-        issues.extend(audit_appendix_defaults())
-        issues.extend(audit_appendix_pricing())
-        issues.extend(audit_appendix_reliability())
-        issues.extend(audit_appendix_literature())
 
     if issues:
         print(f"Provenance audit ({args.scope}): {len(issues)} issue(s)")

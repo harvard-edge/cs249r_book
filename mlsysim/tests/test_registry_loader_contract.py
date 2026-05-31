@@ -79,9 +79,20 @@ def test_generated_registry_classes_are_picklable_by_public_module():
 def test_package_scenarios_export_names_executable_bundles():
     assert hasattr(mlsysim.Scenarios, "ChatbotServing")
     assert hasattr(mlsysim.Scenarios, "SmartDoorbell")
-    assert mlsysim.ScenarioBundles is mlsysim.Scenarios
-    assert mlsysim.Applications is mlsysim.Scenarios
     assert hasattr(mlsysim.ReferenceStats, "MobilePower")
+    assert not hasattr(mlsysim, "ScenarioBundles")
+    assert not hasattr(mlsysim, "Applications")
+    assert not hasattr(mlsysim.Scenarios, "Models")
+    assert not hasattr(mlsysim.Scenarios, "Hardware")
+    assert not hasattr(mlsysim.Scenarios, "Clusters")
+    assert not hasattr(mlsysim.Scenarios, "Nodes")
+
+
+def test_scenario_reuses_reference_stats_for_waymo_data_rate():
+    assert (
+        mlsysim.Scenarios.AutonomousVehicle_Waymo.workload.data_rate
+        is mlsysim.ReferenceStats.Workloads.WaymoDataPerHourHigh
+    )
 
 
 def test_mobile_power_scenario_ranges_remain_available():
@@ -93,8 +104,8 @@ def test_mobile_power_scenario_ranges_remain_available():
     assert mobile_power.MobileMlBurstHigh.m_as("watt") == 10
     assert mobile_power.BackgroundAdaptationLow.m_as("milliwatt") == 500
     assert mobile_power.BackgroundAdaptationHigh.m_as("milliwatt") == 1000
-    assert mlsysim.Scenarios.MobilePower is mobile_power
 
 
-def test_models_short_alias_remains_available_for_legacy_book_code():
-    assert Models.GPT3 is Models.Language.GPT3
+def test_models_have_no_flat_leaf_aliases():
+    assert not hasattr(mlsysim.Models, "GPT3")
+    assert not hasattr(mlsysim.Models, "ResNet50")

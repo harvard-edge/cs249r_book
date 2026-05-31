@@ -1,6 +1,6 @@
 """Training memory, checkpointing, and scaling-law solvers.
 
-These implementations live outside ``engine.solver`` so the public compatibility
+These implementations live outside ``engine.solver`` so the public import
 module can stay small while domain logic remains easier to review.
 """
 
@@ -61,10 +61,10 @@ from ...models.types import Workload, TransformerWorkload, SparseTransformerWork
 from ...hardware.types import HardwareNode
 from ...systems.types import Fleet, NetworkFabric, Node
 from ...infrastructure.types import Datacenter
-from .base import BaseModel, BaseOptimizer, BaseResolver, BaseSolver, ForwardModel
+from .base import BaseOptimizer, BaseResolver, BaseSolver, ForwardModel
 from .utils import _inter_node_latency, _intra_node_latency
 
-class CheckpointModel(BaseModel):
+class CheckpointModel(ForwardModel):
     """
     Analyzes the storage constraints and I/O burst penalties of saving model states.
 
@@ -131,7 +131,7 @@ class CheckpointModel(BaseModel):
             mfu_penalty_pct=penalty_pct
         )
 
-class TrainingMemoryModel(BaseModel):
+class TrainingMemoryModel(ForwardModel):
     """
     Decomposes per-accelerator training memory into teachable components.
 
@@ -310,7 +310,7 @@ class TrainingMemoryModel(BaseModel):
             parallelism={"dp": dp_size, "tp": tp_size, "pp": pp_size, "ep": ep_size},
         )
 
-class ScalingModel(BaseModel):
+class ScalingModel(ForwardModel):
     """
     Analyzes the 'Scaling Physics' of model training (Chinchilla Laws).
 

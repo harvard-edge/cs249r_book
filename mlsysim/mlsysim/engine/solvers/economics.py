@@ -1,6 +1,6 @@
 """Sustainability, economics, responsible-engineering, and placement solvers.
 
-These implementations live outside ``engine.solver`` so the public compatibility
+These implementations live outside ``engine.solver`` so the public import
 module can stay small while domain logic remains easier to review.
 """
 
@@ -61,10 +61,10 @@ from ...models.types import Workload, TransformerWorkload, SparseTransformerWork
 from ...hardware.types import HardwareNode
 from ...systems.types import Fleet, NetworkFabric, Node
 from ...infrastructure.types import Datacenter
-from .base import BaseModel, BaseOptimizer, BaseResolver, BaseSolver, ForwardModel
+from .base import BaseOptimizer, BaseResolver, BaseSolver, ForwardModel
 from .utils import _inter_node_latency, _intra_node_latency
 
-class SustainabilityModel(BaseModel):
+class SustainabilityModel(ForwardModel):
     """
     Calculates Datacenter-scale Sustainability metrics.
 
@@ -159,7 +159,7 @@ class SustainabilityModel(BaseModel):
             embodied_carbon_kg=embodied_kg,
         )
 
-class EconomicsModel(BaseModel):
+class EconomicsModel(ForwardModel):
     """
     Calculates Total Cost of Ownership (TCO) including Capex and Opex.
 
@@ -254,7 +254,7 @@ class EconomicsModel(BaseModel):
             region_name=energy_result.region_name,
         )
 
-class ResponsibleEngineeringModel(BaseModel):
+class ResponsibleEngineeringModel(ForwardModel):
     """
     Models the computational cost of responsible AI practices (Wall 20: Safety).
 

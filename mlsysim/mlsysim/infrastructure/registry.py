@@ -42,13 +42,41 @@ Grids = load_collection(
 
 class Datacenters(Registry):
     """Registry namespace for Datacenters."""
-    Quebec_Hydro = Datacenter(name="Quebec Hydro Campus", grid=Grids.Quebec)
-    Norway_Hydro = Datacenter(name="Norway Hydro Campus", grid=Grids.Norway)
-    US_Hyperscale = Datacenter(name="US Hyperscale Region", grid=Grids.US_Avg)
-    EU_Average = Datacenter(name="EU Average Region", grid=Grids.EU_Avg)
-    France_Nuclear = Datacenter(name="France Nuclear Region", grid=Grids.France)
-    Iowa_Reference = Datacenter(name="Iowa Reference Site", grid=Grids.Iowa)
-    Poland_Coal = Datacenter(name="Poland Coal Region", grid=Grids.Poland)
+    Quebec_Hydro = Datacenter(
+        name="Quebec Hydro Campus",
+        grid=Grids.Quebec,
+        metadata=Metadata(provenance=Grids.Quebec.metadata.provenance),
+    )
+    Norway_Hydro = Datacenter(
+        name="Norway Hydro Campus",
+        grid=Grids.Norway,
+        metadata=Metadata(provenance=Grids.Norway.metadata.provenance),
+    )
+    US_Hyperscale = Datacenter(
+        name="US Hyperscale Region",
+        grid=Grids.US_Avg,
+        metadata=Metadata(provenance=Grids.US_Avg.metadata.provenance),
+    )
+    EU_Average = Datacenter(
+        name="EU Average Region",
+        grid=Grids.EU_Avg,
+        metadata=Metadata(provenance=Grids.EU_Avg.metadata.provenance),
+    )
+    France_Nuclear = Datacenter(
+        name="France Nuclear Region",
+        grid=Grids.France,
+        metadata=Metadata(provenance=Grids.France.metadata.provenance),
+    )
+    Iowa_Reference = Datacenter(
+        name="Iowa Reference Site",
+        grid=Grids.Iowa,
+        metadata=Metadata(provenance=Grids.Iowa.metadata.provenance),
+    )
+    Poland_Coal = Datacenter(
+        name="Poland Coal Region",
+        grid=Grids.Poland,
+        metadata=Metadata(provenance=Grids.Poland.metadata.provenance),
+    )
 
 
 class Racks(Registry):

@@ -1,6 +1,6 @@
 from .types import Node, Fleet, NetworkFabric, PodEnvelope
 from .reliability import Reliability
-from .orchestration import Orchestration
+from .orchestration import Orchestration as OrchestrationProfile
 from ..core.units import ureg, Q_, Gbps, TB, watt, MB
 from ..core.provenance import sourced, sourced_qty
 from ..hardware.registry import Hardware
@@ -211,4 +211,6 @@ class Systems(Registry):
     NetworkEnergy = NetworkEnergy
     Pods = Pods
     Reliability = Reliability
-    Orchestration = Orchestration()
+    Orchestration = OrchestrationProfile(
+        metadata=Metadata(provenance=pc.ORCHESTRATION_ASSUMPTIONS)
+    )

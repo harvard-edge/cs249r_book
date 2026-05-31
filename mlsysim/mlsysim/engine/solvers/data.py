@@ -1,6 +1,6 @@
 """Data-ingestion and preprocessing pipeline solvers.
 
-These implementations live outside ``engine.solver`` so the public compatibility
+These implementations live outside ``engine.solver`` so the public import
 module can stay small while domain logic remains easier to review.
 """
 
@@ -61,10 +61,10 @@ from ...models.types import Workload, TransformerWorkload, SparseTransformerWork
 from ...hardware.types import HardwareNode
 from ...systems.types import Fleet, NetworkFabric, Node
 from ...infrastructure.types import Datacenter
-from .base import BaseModel, BaseOptimizer, BaseResolver, BaseSolver, ForwardModel
+from .base import BaseOptimizer, BaseResolver, BaseSolver, ForwardModel
 from .utils import _inter_node_latency, _intra_node_latency
 
-class DataModel(BaseModel):
+class DataModel(ForwardModel):
     """
     Analyzes the 'Data Wall' — the throughput bottleneck between storage and compute.
 
@@ -127,7 +127,7 @@ class DataModel(BaseModel):
             margin=(supply_bw - demand_bw).to("GB/s"),
         )
 
-class TransformationModel(BaseModel):
+class TransformationModel(ForwardModel):
     """
     Quantifies the CPU preprocessing bottleneck (Wall 9: Transformation).
 

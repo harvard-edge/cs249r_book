@@ -1,4 +1,4 @@
-"""Lineage gates for numbers that appear in assumption appendices."""
+"""Book-side lineage gates for numbers that appear in assumption appendices."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from ..core.provenance import Provenance, Sourced
+from mlsysim.core.provenance import Provenance, Sourced
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 APPENDIX_ASSUMPTIONS_QMD = (
@@ -62,7 +62,7 @@ def audit_appendix_defaults() -> list[str]:
 
 
 def audit_appendix_pricing() -> list[str]:
-    from ..infrastructure.registry import Infrastructure
+    from mlsysim.infrastructure.registry import Infrastructure
 
     issues: list[str] = []
     section_map = {
@@ -85,7 +85,7 @@ def audit_appendix_pricing() -> list[str]:
 
 
 def audit_appendix_reliability() -> list[str]:
-    from ..systems.reliability import Reliability
+    from mlsysim.systems.reliability import Reliability
 
     issues: list[str] = []
     text = _appendix_text()
@@ -103,7 +103,7 @@ def audit_appendix_reliability() -> list[str]:
 
 
 def audit_appendix_literature() -> list[str]:
-    from ..literature.registry import Literature
+    from mlsysim.literature.registry import Literature
 
     issues: list[str] = []
     section_map = {

@@ -35,7 +35,7 @@ sys.path.insert(0, _book_dir)
 from mlsysim.core.constants import *
 from mlsysim.physics import *
 from mlsysim.fmt import fmt, fmt_sci, fmt_unit
-from mlsysim import Hardware, Models, Systems, Literature, Scenarios
+from mlsysim import Hardware, Models, Systems, Literature, ReferenceStats
 
 # Legacy aliases for unit tests (hardware/model specs live in registries).
 _a100 = Hardware.Cloud.A100
@@ -260,8 +260,8 @@ def test_derived_values():
     ok &= check("GPT-3 training ~25 days", days, 25.0, tol=0.1)
 
     # Waymo data rates
-    ok &= check("Waymo low 1 TB/hr", Scenarios.Workloads.WaymoDataPerHourLow.to(TB / hour).magnitude, 1.0)
-    ok &= check("Waymo high 19 TB/hr", Scenarios.Workloads.WaymoDataPerHourHigh.to(TB / hour).magnitude, 19.0)
+    ok &= check("Waymo low 1 TB/hr", ReferenceStats.Workloads.WaymoDataPerHourLow.to(TB / hour).magnitude, 1.0)
+    ok &= check("Waymo high 19 TB/hr", ReferenceStats.Workloads.WaymoDataPerHourHigh.to(TB / hour).magnitude, 19.0)
 
     # ResNet model sizes (params * bytes_per_param)
     fp32_bytes = RESNET50_PARAMS.magnitude * 4 * byte
@@ -296,7 +296,7 @@ def test_no_large_raw_magnitudes():
         ("A100 GB/s", A100_MEM_BW.to(GB / second).magnitude, 1e4),
         ("H100 GB/s", H100_MEM_BW.to(GB / second).magnitude, 1e4),
         ("H100 TB/s", H100_MEM_BW.to(TB / second).magnitude, 100),
-        ("Waymo TB/hr", Scenarios.Workloads.WaymoDataPerHourHigh.to(TB / hour).magnitude, 100),
+        ("Waymo TB/hr", ReferenceStats.Workloads.WaymoDataPerHourHigh.to(TB / hour).magnitude, 100),
         ("ResNet GFLOPs", RESNET50_FLOPs.to(GFLOPs).magnitude, 1e4),
         ("ResNet Mparam", RESNET50_PARAMS.to(Mparam).magnitude, 1e4),
         ("A100 GiB", A100_MEM_CAPACITY.to(GiB).magnitude, 1e4),

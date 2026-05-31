@@ -1619,7 +1619,6 @@ class TestTailLatencyModel:
         solver = TailLatencyModel()
         result = solver.solve(arrival_rate_qps=50.0, service_latency_ms=10.0, num_replicas=1)
         assert result.slo_headroom_ratio >= 0.0
-        assert result.slo_violation_probability == result.slo_headroom_ratio
 
     @pytest.mark.parametrize("replicas", [1, 2, 4, 8, 16])
     def test_utilization_decreases_with_replicas(self, replicas):

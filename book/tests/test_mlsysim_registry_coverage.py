@@ -27,6 +27,7 @@ REGISTRY_ROOTS = (
     "Datasets",
     "Literature",
     "Scenarios",
+    "ReferenceStats",
     "Ops",
 )
 REGISTRY_PATH_RE = re.compile(
@@ -124,20 +125,21 @@ def test_scenarios_are_executable_model_system_constraint_bundles() -> None:
 
 
 def test_reference_stats_are_separate_from_executable_scenarios() -> None:
-    """Sourced anchors stay under ReferenceStats, with legacy scenario aliases."""
+    """Sourced anchors stay under ReferenceStats, not executable Scenarios."""
 
-    assert mlsysim.Scenarios.ReferenceStats is mlsysim.ReferenceStats
-    assert mlsysim.Scenarios.Workloads is mlsysim.ReferenceStats.Workloads
-    assert mlsysim.Scenarios.MobilePower is mlsysim.ReferenceStats.MobilePower
-    assert mlsysim.Scenarios.PhoneBattery is mlsysim.ReferenceStats.PhoneBattery
+    assert hasattr(mlsysim.ReferenceStats, "Workloads")
+    assert hasattr(mlsysim.ReferenceStats, "MobilePower")
+    assert hasattr(mlsysim.ReferenceStats, "PhoneBattery")
+    assert not hasattr(mlsysim.Scenarios, "ReferenceStats")
+    assert not hasattr(mlsysim.Scenarios, "Workloads")
+    assert not hasattr(mlsysim.Scenarios, "MobilePower")
 
 
-def test_legacy_application_names_alias_executable_scenarios() -> None:
-    """Applications remains an alias so existing book cells are not broken."""
+def test_no_legacy_scenario_aliases_remain() -> None:
+    """Scenarios and reference statistics should have one public path each."""
 
-    assert mlsysim.Applications is mlsysim.Scenarios
-    assert mlsysim.ScenarioBundles is mlsysim.Scenarios
-    assert mlsysim.Applications.Frontier is mlsysim.Scenarios.FrontierTraining
-    assert mlsysim.Applications.AutoDrive is mlsysim.Scenarios.AutonomousVehicle
-    assert mlsysim.Applications.Mobile is mlsysim.Scenarios.MobileAssistant
-    assert mlsysim.Applications.Doorbell is mlsysim.Scenarios.SmartDoorbell
+    assert not hasattr(mlsysim, "Applications")
+    assert not hasattr(mlsysim, "ScenarioBundles")
+    assert not hasattr(mlsysim.Scenarios, "Doorbell")
+    assert not hasattr(mlsysim.Scenarios, "AutoDrive")
+    assert not hasattr(mlsysim.Scenarios, "Frontier")

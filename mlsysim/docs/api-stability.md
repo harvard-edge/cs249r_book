@@ -102,10 +102,9 @@ scenario-local constraints such as latency or power budget. `ReferenceStats.*`
 holds non-executable sourced anchors used by the book, such as mobile power
 envelopes, Waymo data-rate ranges, and TinyML case-study measurements.
 
-`Applications` and `ScenarioBundles` are compatibility aliases for `Scenarios`.
-`Scenarios.MobilePower`-style direct reference-stat aliases remain available so
-existing book cells render, but new code should prefer
-`ReferenceStats.MobilePower` or `Scenarios.ReferenceStats.MobilePower`.
+There are no compatibility aliases between these namespaces. Use
+`Scenarios.SmartDoorbell` for an executable case and
+`ReferenceStats.MobilePower` for sourced non-executable anchors.
 
 ### PerformanceProfile Fields
 

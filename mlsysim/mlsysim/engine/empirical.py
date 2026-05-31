@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..core.provenance import Sourced
+from ..core.provenance import sourced
 from ..hardware.registry import Hardware
 from ..literature.registry import Literature
 from ..models.registry import Models
@@ -56,6 +57,16 @@ class EmpiricalAnchor:
             for value in values
             if value is not None and value.provenance.id is not None
         )
+
+
+def _quantity_target(quantity: Any, *, provenance: Any, name: str, description: str) -> Sourced:
+    """Use an existing registry quantity as a scalar empirical target.
+
+    This keeps validation anchors from duplicating model or hardware values in
+    ``Literature.Benchmarks`` when the measured value already belongs to a typed
+    registry entry.
+    """
+    return sourced(quantity.m_as("flop"), provenance, name=name, description=description)
 
 
 RESNET50_A100_TRAIN_BS256 = EmpiricalAnchor(
@@ -123,9 +134,14 @@ GPT3_175B_TRAINING_FLOPS = EmpiricalAnchor(
     metric="training_flops",
     units="flop",
     configuration="175B parameters, 300B training tokens, 6PD transformer training rule",
-    registry_paths=("Models.Language.GPT3", "Literature.Benchmarks.GPT3TrainingFlops"),
+    registry_paths=("Models.Language.GPT3",),
     workload=Models.Language.GPT3,
-    target=Literature.Benchmarks.GPT3TrainingFlops,
+    target=_quantity_target(
+        Models.Language.GPT3.training_ops,
+        provenance=Models.Language.GPT3.metadata.provenance,
+        name="GPT-3 175B training FLOPs",
+        description="Reported GPT-3 training FLOP anchor from the model registry.",
+    ),
     rel_tolerance=0.01,
     review_notes=(
         "The tight band is appropriate here because the comparison is formula-level "

@@ -52,5 +52,20 @@ class TestProvenance(unittest.TestCase):
                 f"remove package-root alias {name}; use Systems/Literature registries",
             )
 
+    def test_no_flat_model_aliases(self):
+        from mlsysim import Models
+
+        for name in ("GPT3", "ResNet50", "MobileNetV2"):
+            self.assertFalse(
+                hasattr(Models, name),
+                f"remove Models.{name}; use the category namespace",
+            )
+
+    def test_gpt3_training_flops_owned_by_model_registry(self):
+        from mlsysim import Literature, Models
+
+        self.assertFalse(hasattr(Literature.Benchmarks, "GPT3TrainingFlops"))
+        self.assertIsNotNone(Models.Language.GPT3.training_ops)
+
 if __name__ == "__main__":
     unittest.main()

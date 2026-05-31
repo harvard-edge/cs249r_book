@@ -17,7 +17,7 @@ from . import physics
 
 # AUTHORITATIVE API ENTRY POINTS
 from .engine.engine import Engine
-from .engine.scenarios import Scenario, Scenarios, ScenarioBundles, Applications
+from .engine.scenarios import Scenario, Scenarios
 from .hardware.registry import Hardware
 from .models.registry import Models
 from .platforms.registry import Platforms
@@ -25,7 +25,7 @@ from .platforms.registry import Platforms
 from .systems.registry import Systems
 from .infrastructure.registry import Infrastructure
 from .literature.registry import Literature
-# Non-executable sourced anchors used by scenarios and book calculations.
+# Non-executable sourced anchors used by examples and external analyses.
 from .scenarios.registry import ReferenceStats
 from .ops import Ops, Monitoring
 from .engine import calibration

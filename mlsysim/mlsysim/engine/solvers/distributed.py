@@ -1,6 +1,6 @@
 """Distributed training, routing, topology, and parallelism search solvers.
 
-These implementations live outside ``engine.solver`` so the public compatibility
+These implementations live outside ``engine.solver`` so the public import
 module can stay small while domain logic remains easier to review.
 """
 
@@ -61,10 +61,10 @@ from ...models.types import Workload, TransformerWorkload, SparseTransformerWork
 from ...hardware.types import HardwareNode
 from ...systems.types import Fleet, NetworkFabric, Node
 from ...infrastructure.types import Datacenter
-from .base import BaseModel, BaseOptimizer, BaseResolver, BaseSolver, ForwardModel
+from .base import BaseOptimizer, BaseResolver, BaseSolver, ForwardModel
 from .utils import _inter_node_latency, _intra_node_latency
 
-class DistributedModel(BaseModel):
+class DistributedModel(ForwardModel):
     """
     Resolves fleet-wide communication, synchronization, and pipelining constraints.
 
@@ -377,7 +377,7 @@ class DistributedModel(BaseModel):
             parallelism={"dp": dp_size, "tp": tp_size, "pp": pp_size, "ep": ep_size},
         )
 
-class MoERoutingModel(BaseModel):
+class MoERoutingModel(ForwardModel):
     """
     Models first-order MoE routing imbalance and expert-parallel all-to-all cost.
 
@@ -448,7 +448,7 @@ class MoERoutingModel(BaseModel):
             ep_size=ep_size,
         )
 
-class TopologyModel(BaseModel):
+class TopologyModel(ForwardModel):
     """
     Models bisection bandwidth for different network topologies (Wall 10).
 

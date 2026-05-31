@@ -111,9 +111,3 @@ class ReferenceStats(Registry):
     EnergyAnchors = EnergyAnchors
     MobilePower = MobilePower
     PhoneBattery = PhoneBattery
-
-
-# Backward-compatible module-level alias for older imports from
-# ``mlsysim.scenarios.registry``. The public top-level ``mlsysim.Scenarios`` now
-# names executable scenarios; new code should import ``ReferenceStats``.
-Scenarios = ReferenceStats

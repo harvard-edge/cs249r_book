@@ -1,4 +1,4 @@
-"""Provenance types for registry entries and book-facing sourced scalars."""
+"""Provenance types for registry entries and public sourced scalars."""
 
 from __future__ import annotations
 
@@ -40,8 +40,8 @@ class Provenance(BaseModel):
         Enforces validation rules based on the ProvenanceKind.
         
         Requires source URLs and verification dates for evidence-backed records,
-        and notes for estimates and derived values. This keeps textbook-facing
-        numbers traceable and makes intentionally illustrative numbers explicit.
+        and notes for estimates and derived values. This keeps public numbers
+        traceable and makes intentionally illustrative numbers explicit.
         """
         if not self.verified:
             raise ValueError(f"provenance requires verified date: {self.ref!r}")
@@ -63,8 +63,8 @@ class Provenance(BaseModel):
 
 class Sourced(float):
     """
-    Scalar with mandatory ``Provenance``. Subclasses ``float`` so appendix
-    LEGO cells can divide and format values without extra coercion.
+    Scalar with mandatory ``Provenance``. Subclasses ``float`` so notebooks and
+    generated calculations can divide and format values without extra coercion.
     """
 
     def __new__(
@@ -126,7 +126,7 @@ def sourced(
     name: str = "",
     description: str = "",
 ) -> Sourced:
-    """Attach provenance to a scalar used in registries or appendices."""
+    """Attach provenance to a scalar used in registries or analyses."""
     return Sourced(value, provenance, name=name, description=description)
 
 
@@ -142,7 +142,7 @@ def sourced_qty(quantity, provenance: Provenance, *, name: str = "", description
 
 
 def scalar_value(x: Scalar | Sourced) -> float:
-    """Plain float for arithmetic and Quarto ``{python}`` cells."""
+    """Plain float for arithmetic in generated calculations."""
     if isinstance(x, Sourced):
         return float(x)
     return float(x)
@@ -154,7 +154,7 @@ def fleet_mttf_hours(
     component: str,
     failure_mode: str = "",
 ) -> Sourced:
-    """MTTF anchor aligned with appendix_reliability @tbl-component-fit."""
+    """MTTF anchor for reliability registry entries."""
     from .provenance_catalog import RELIABILITY_MTTF_LITERATURE
 
     desc = f"Steady-state MTTF for {component} in continuous datacenter operation."

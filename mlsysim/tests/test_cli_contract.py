@@ -70,7 +70,7 @@ def test_plan_builds_fleet_from_explicit_topology():
             "workload": {"name": "Llama3_8B", "batch_size": 16},
             "hardware": {
                 "name": "H100",
-                "nodes": 16,
+                "accelerators": 16,
                 "accelerators_per_node": 4,
                 "intra_node_bw": "400 GB/s",
                 "fabric_bandwidth": "200 Gbit/s",
@@ -105,17 +105,16 @@ def test_plan_builds_fleet_from_node_count_topology():
     assert schema.fleet_obj.total_accelerators == 16
 
 
-def test_plan_rejects_conflicting_topology_aliases():
-    with pytest.raises(ValidationError, match="legacy alias"):
+def test_plan_rejects_legacy_nodes_field():
+    with pytest.raises(ValidationError, match="Extra inputs"):
         MlsysPlanSchema.model_validate(
             {
                 "version": "1.0",
-                "name": "Bad alias topology",
+                "name": "Legacy nodes topology",
                 "workload": {"name": "Llama3_8B"},
                 "hardware": {
                     "name": "H100",
                     "nodes": 16,
-                    "accelerators": 8,
                 },
             }
         )
@@ -127,13 +126,13 @@ def test_plan_rejects_non_divisible_topology():
             {
                 "version": "1.0",
                 "name": "Bad topology",
-                "workload": {"name": "Llama3_8B"},
-                "hardware": {
-                    "name": "H100",
-                    "nodes": 10,
-                    "accelerators_per_node": 4,
-                },
-            }
+            "workload": {"name": "Llama3_8B"},
+            "hardware": {
+                "name": "H100",
+                "accelerators": 10,
+                "accelerators_per_node": 4,
+            },
+        }
         )
 
 

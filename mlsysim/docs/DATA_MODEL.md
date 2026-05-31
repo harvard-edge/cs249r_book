@@ -1,8 +1,7 @@
 # MLSysSim Data Model
 
-Six **zoos** (typed registries) plus support layers. Book LEGO cells and
-tutorials should prefer zoos + `mlsysim.physics.*` + explicit operands.
-`constants.py` holds physics, units, and cross-cutting numeric laws only.
+Six **zoos** (typed registries) plus support layers. Downstream consumers should
+prefer zoos + `mlsysim.physics.*` + explicit operands.
 
 ## Zoos
 
@@ -17,7 +16,7 @@ tutorials should prefer zoos + `mlsysim.physics.*` + explicit operands.
 
 ## Support (not zoos)
 
-- **`mlsysim.core.constants`** — pint units, energy/latency laws, precision map, dimensionless teaching examples.
+- **`mlsysim.core.units` / `mlsysim.core.constants`** — pint units, precision map, and small compatibility helpers.
 - **`Literature.*`** — cited appendix scalars (MFU bands, Chinchilla, scaling η, overheads).
 - **`Scenarios.*`** — executable workload + system + constraint bundles, suitable for `Scenario.evaluate()`.
 - **`ReferenceStats.*`** — non-executable sourced anchors for real-world scenario and case-study statistics.
@@ -64,7 +63,7 @@ flowchart TB
     literature[Literature.*]
     scenarios[Scenarios.*]
     referenceStats[ReferenceStats.*]
-    calibration[core/calibration.py]
+    calibration[engine/calibration.py]
     physics[physics.*]
   end
   Hardware --> Systems
@@ -88,13 +87,12 @@ flowchart TB
 - **Scenario ≠ model or hardware:** a scenario composes existing model and system facts with local constraints. It does not redefine GPT-4, H100, or a fleet.
 - **Reference statistics are not scenarios:** `ReferenceStats.MobilePower.*` and `ReferenceStats.Workloads.*` are sourced anchors for book calculations, not runnable bundles.
 
-## Book LEGO conventions
+## Consumer Conventions
 
-1. One class per `{python}` cell (already enforced).
-2. Import `from mlsysim import *` or explicit zoo paths — not `from mlsysim.core.constants import *`.
-3. Use `mlsysim.physics.*` for derived quantities; registries for operands.
-4. `Scenario.evaluate()` reserved for labs; capstone book cells only (≤5–10 total).
-5. Prefer `ReferenceStats.*` for non-executable anchors. Legacy `Scenarios.MobilePower` aliases remain only so existing book cells render until a QMD migration pass.
+1. Use explicit zoo paths for registry operands.
+2. Use `mlsysim.physics.*` for derived quantities; registries for operands.
+3. Use `Scenario.evaluate()` when a runnable workload + system + constraint bundle is needed.
+4. Use `ReferenceStats.*` for non-executable anchors. Do not route reference statistics through `Scenarios.*`.
 
 ## Migration tiers (QMD)
 
@@ -116,6 +114,6 @@ Do not keep `Hardware.H100`, `Infrastructure.Quebec`, or `Systems.Cloud = …` s
 - L1: pytest, exec affected QMD cells, `lego_focal_verify.py`
 - L2: `test_registry_parity.py` for deleted symbols
 - L3–L5: fmt, HTML build, `audit_lego_html.py` when QMD touched
-- L6: chapter sign-off before QMD commits
+- L6: downstream content sign-off before rendered-content commits
 
-See `book/docs/LEGO_CELLS.md` and `book/tools/audit/artifacts/registry_migration_manifest.json`.
+See `PROVENANCE.md` and `docs/contributing.qmd` for package-side provenance rules.

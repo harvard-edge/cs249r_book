@@ -1,6 +1,6 @@
 """Domain-oriented MLSysIM solver implementations."""
 
-from .base import BaseModel, BaseOptimizer, BaseResolver, BaseSolver, ForwardModel
+from .base import BaseOptimizer, BaseResolver, BaseSolver, ForwardModel
 from .compression import CompressionModel
 from .data import DataModel, TransformationModel
 from .distributed import DistributedModel, MoERoutingModel, ParallelismOptimizer, TopologyModel
@@ -22,7 +22,6 @@ from .training import CheckpointModel, ScalingModel, TrainingMemoryModel
 __all__ = [
     "BaseResolver",
     "ForwardModel",
-    "BaseModel",
     "BaseSolver",
     "BaseOptimizer",
     "SingleNodeModel",

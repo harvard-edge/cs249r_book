@@ -390,6 +390,55 @@ BROWN_GPT3_2020 = _lit(
     url="https://arxiv.org/abs/2005.14165",
 )
 
+IMAGENET_DATASET = _lit(
+    "prov:imagenet-ilsvrc-2015",
+    "Russakovsky et al. (2015), ImageNet Large Scale Visual Recognition Challenge",
+    url="https://arxiv.org/abs/1409.0575",
+)
+
+CIFAR10_DATASET = _lit(
+    "prov:cifar10-2009",
+    "Krizhevsky (2009), Learning Multiple Layers of Features from Tiny Images",
+    url="https://www.cs.toronto.edu/~kriz/learning-features-2009-TR.pdf",
+)
+
+MNIST_DATASET = _lit(
+    "prov:mnist-1998",
+    "LeCun et al. (1998), Gradient-Based Learning Applied to Document Recognition",
+    url="http://yann.lecun.com/exdb/publis/pdf/lecun-98.pdf",
+)
+
+DEPLOYMENT_ENVELOPES = _est(
+    "prov:mlsysim-deployment-envelopes",
+    "MLSysIM deployment envelope defaults for cloud, edge, mobile, and TinyML systems",
+    notes="Pedagogical order-of-magnitude envelopes used for first-pass deployment reasoning; not vendor SLA targets.",
+)
+
+MLOPS_DRIFT_THRESHOLDS = _conv(
+    "prov:mlops-drift-threshold-conventions",
+    "Common PSI and two-sample Kolmogorov-Smirnov drift-threshold conventions",
+    notes="PSI bands and KS coefficient are common monitoring defaults; production thresholds should be calibrated per application.",
+)
+
+MEMORY_SOFT_ERROR_RATE = _est(
+    "prov:memory-soft-error-rate-estimate",
+    "Order-of-magnitude memory soft-error bit rate for reliability and monitoring examples",
+    notes="Used as a teaching-scale sanity anchor rather than a device-specific FIT rate.",
+)
+
+ORCHESTRATION_ASSUMPTIONS = _est(
+    "prov:mlsysim-orchestration-assumptions",
+    "MLSysIM cluster orchestration defaults for utilization, queue discipline, and job duration",
+    notes="First-pass scheduler assumptions for analytical examples; production clusters should calibrate from trace data.",
+)
+
+CRITICAL_BATCH_SIZE_ESTIMATES = _lit(
+    "prov:mccandlish-critical-batch-2018",
+    "McCandlish et al. (2018), An Empirical Model of Large-Batch Training",
+    url="https://arxiv.org/abs/1812.06162",
+    notes="Order-of-magnitude critical batch size anchors; model-specific entries are rounded for analytical examples.",
+)
+
 WAKE_VISION = _ds(
     "prov:wake-vision-dataset",
     "Wake Vision / doorbell-classifier TinyML reference",

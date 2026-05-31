@@ -1,14 +1,13 @@
-"""Backward-compatible import surface for MLSysIM solvers.
+"""Public import surface for MLSysIM solvers.
 
 The implementations live in ``mlsysim.engine.solvers`` by domain. This module
-keeps existing textbook examples and downstream imports working while making the
-solver codebase reviewable in smaller files.
+keeps solver imports stable while the implementation remains split into small,
+domain-oriented files.
 """
 
 from .solvers import (
     BaseResolver,
     ForwardModel,
-    BaseModel,
     BaseSolver,
     BaseOptimizer,
     SingleNodeModel,
@@ -44,7 +43,6 @@ from .solvers import (
 __all__ = [
     "BaseResolver",
     "ForwardModel",
-    "BaseModel",
     "BaseSolver",
     "BaseOptimizer",
     "SingleNodeModel",

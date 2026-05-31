@@ -64,9 +64,6 @@ class ForwardModel(BaseResolver):
     """Forward-evaluating mechanistic engine (Y = f(X))."""
     pass
 
-# Backward-compatible alias (avoid Pydantic BaseModel name collision)
-BaseModel = ForwardModel
-
 class BaseSolver(BaseResolver):
     """Inverse-design or diagnostic engine (X = f^-1(Y) or grad f)."""
     pass
@@ -75,4 +72,4 @@ class BaseOptimizer(BaseResolver):
     """Design-space search engine (max f(X) s.t. g(X) < c)."""
     pass
 
-__all__ = ["BaseResolver", "ForwardModel", "BaseModel", "BaseSolver", "BaseOptimizer"]
+__all__ = ["BaseResolver", "ForwardModel", "BaseSolver", "BaseOptimizer"]

@@ -115,9 +115,6 @@ class HardwareConfig(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
 
     name: str
-    # Legacy field: historical YAML plans used "nodes" for total accelerators.
-    # New plans should prefer "accelerators" or "node_count" + accelerators_per_node.
-    nodes: Optional[int] = Field(default=None, gt=0)
     accelerators: Optional[int] = Field(default=None, gt=0)
     node_count: Optional[int] = Field(default=None, gt=0)
     accelerators_per_node: Optional[int] = Field(default=None, gt=0)
@@ -142,12 +139,10 @@ class HardwareConfig(BaseModel):
             return self.node_count * self.accelerators_per_node
         if self.accelerators is not None:
             return self.accelerators
-        if self.nodes is not None:
-            return self.nodes
         return 1
 
     @model_validator(mode="after")
-    def _validate_topology_aliases(self) -> "HardwareConfig":
+    def _validate_topology_consistency(self) -> "HardwareConfig":
         if self.node_count is not None and self.accelerators_per_node is None:
             raise ValueError("hardware.node_count requires hardware.accelerators_per_node")
 
@@ -156,13 +151,8 @@ class HardwareConfig(BaseModel):
             derived_total = self.node_count * self.accelerators_per_node
 
         explicit_total = self.accelerators
-        legacy_total = self.nodes
-        if explicit_total is not None and legacy_total is not None and explicit_total != legacy_total:
-            raise ValueError("hardware.nodes is a legacy alias for hardware.accelerators; values must match")
         if derived_total is not None and explicit_total is not None and derived_total != explicit_total:
             raise ValueError("hardware.node_count * hardware.accelerators_per_node must equal hardware.accelerators")
-        if derived_total is not None and legacy_total is not None and derived_total != legacy_total:
-            raise ValueError("hardware.node_count * hardware.accelerators_per_node must equal legacy hardware.nodes")
         return self
 
 class OpsConfig(BaseModel):

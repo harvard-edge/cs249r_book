@@ -1,6 +1,6 @@
 """Single-node, network-roofline, efficiency, and inverse-design solvers.
 
-These implementations live outside ``engine.solver`` so the public compatibility
+These implementations live outside ``engine.solver`` so the public import
 module can stay small while domain logic remains easier to review.
 """
 
@@ -61,10 +61,10 @@ from ...models.types import Workload, TransformerWorkload, SparseTransformerWork
 from ...hardware.types import HardwareNode
 from ...systems.types import Fleet, NetworkFabric, Node
 from ...infrastructure.types import Datacenter
-from .base import BaseModel, BaseOptimizer, BaseResolver, BaseSolver, ForwardModel
+from .base import BaseOptimizer, BaseResolver, BaseSolver, ForwardModel
 from .utils import _inter_node_latency, _intra_node_latency
 
-class SingleNodeModel(BaseModel):
+class SingleNodeModel(ForwardModel):
     """
     Resolves single-node hardware Roofline bounds and feasibility.
 
@@ -89,7 +89,7 @@ class SingleNodeModel(BaseModel):
         """
         return Engine.solve(model, hardware, batch_size=batch_size, precision=precision, efficiency=efficiency, raise_errors=raise_errors, **kwargs)
 
-class NetworkRooflineModel(BaseModel):
+class NetworkRooflineModel(ForwardModel):
     """
     Analyzes the Distributed Performance Bounds (The Network Wall).
 
@@ -178,7 +178,7 @@ class NetworkRooflineModel(BaseModel):
             ],
         )
 
-class EfficiencyModel(BaseModel):
+class EfficiencyModel(ForwardModel):
     """
     Models the gap between peak and achieved FLOPS (Wall 3: Software Efficiency).
 

@@ -327,10 +327,6 @@ SYNTHESIS = Wall(
     sources=["Williams et al. (2009), Roofline"],
 )
 
-# Backward compatibility alias
-ETHICS = SAFETY
-
-
 # ── Wall Registry ────────────────────────────────────────────────
 
 ALL_WALLS = [
