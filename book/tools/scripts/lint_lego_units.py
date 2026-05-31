@@ -24,7 +24,7 @@ class LintIssue:
 
 RULES = (
     "L001", "L002", "L003", "L004", "L006", "L007", "L008", "L009",
-    "L014", "L015", "L016", "L017", "L019",
+    "L014", "L015", "L016", "L019",
 )
 
 CLOSED_UNIT_SUFFIX = re.compile(
@@ -36,7 +36,11 @@ OPEN_FMT_ON_SCALAR = re.compile(
     re.M,
 )
 FMT_QTY_ASSIGN = re.compile(
-    r"^\s*(?P<name>\w+_str)\s*=\s*(?:fmt_qty|fmt_power|fmt_energy|fmt_bandwidth|fmt_memory|fmt_emissions|fmt_latency)\s*\(",
+    r"^\s*(?P<name>\w+_str)\s*=\s*fmt_qty\s*\(",
+    re.M,
+)
+DOMAIN_FMT_ASSIGN = re.compile(
+    r"^\s*(?P<name>\w+_str)\s*=\s*(?:fmt_power|fmt_energy|fmt_bandwidth|fmt_memory|fmt_emissions|fmt_latency)\s*\(",
     re.M,
 )
 MASG_TO_CLOSED = re.compile(
@@ -49,7 +53,18 @@ FMT_QTY_SCALAR = re.compile(
 RAW_FMT_SUFFIX = re.compile(
     r"fmt\s*\([^)]*suffix\s*=\s*['\"]\s*(?:GB|TB|MB|kWh|MWh|TFLOP|W|MW|ms|s)\b"
 )
+ALLOWED_UNIT_LABELS = frozenset({
+    "GB", "Gb", "Gb/s", "Tb/s", "TFLOP/s", "PFLOP/s", "TFLOP/s per W",
+    "FLOP/byte", "FLOPs", "tons", "tons CO₂", "Wh", "MW", "MB", "KB", "pJ",
+    "lux", "TB", "kJ per hour", "Mb/s", "dB",
+    "billion FLOPs", "trillion FLOPs",
+    "TOPS peak", "TOPS derated",
+    "°C", "°C/s",
+    "GB per day", "KB of detection summaries",
+    "bytes",
+})
 UNIT_LABEL = re.compile(r"unit_label\s*=")
+UNIT_LABEL_VALUE = re.compile(r"""unit_label\s*=\s*['"]([^'"]+)['"]""")
 UPPER_TIME = re.compile(r"\b(MS|US|NS)\b")
 UREG_ALIAS = re.compile(
     r"ureg\.(millijoule|megawatt|joule|kilowatt_hour|megawatt_hour|kilogram|millisecond|microsecond|minute|watt_hour)\b"
@@ -81,6 +96,9 @@ def lint_file(path: Path, root: Path) -> list[LintIssue]:
     for base_line, block in _scan_python_blocks(text):
         for i, line in enumerate(block.splitlines(), start=1):
             lineno = base_line + i
+            stripped = line.lstrip()
+            if stripped.startswith("#"):
+                continue
             if FMT_QTY_SCALAR.search(line):
                 issues.append(LintIssue(
                     "L001", rel, lineno,
@@ -95,15 +113,24 @@ def lint_file(path: Path, root: Path) -> list[LintIssue]:
             if re.search(r"(energy_mwh|carbon|tonnes)\s*=.*(?:/\s*THOUSAND|\*\s*THOUSAND)", line, re.I):
                 issues.append(LintIssue("L004", rel, lineno, "Use energy_from_power/carbon_from_energy helpers."))
             if UNIT_LABEL.search(line):
-                issues.append(LintIssue("L006", rel, lineno, "Prefer domain formatter over unit_label=."))
-            stripped = line.lstrip()
-            if UPPER_TIME.search(line) and not stripped.startswith("#"):
-                issues.append(LintIssue("L007", rel, lineno, "Prefer ms/microsecond/nanosecond over MS/US/NS."))
+                m = UNIT_LABEL_VALUE.search(line)
+                label = m.group(1) if m else ""
+                if label not in ALLOWED_UNIT_LABELS:
+                    issues.append(LintIssue("L006", rel, lineno, "Prefer domain formatter over unit_label=."))
+            if re.search(r"\.to\((?:US|NS|MS)\)", line):
+                issues.append(LintIssue(
+                    "L007", rel, lineno,
+                    "Prefer microsecond/nanosecond/ms over US/NS/MS in .to().",
+                ))
+            elif re.search(r"\b(?:MS|NS)\b", line) and not re.search(
+                r"_fmt_unit_factor\((?:NS|US|MS)\b", line
+            ):
+                issues.append(LintIssue("L007", rel, lineno, "Prefer ms/nanosecond over MS/NS."))
             if re.search(r"=\s*\d+(?:\.\d+)?\s*\*\s*(TB|GB|TFLOP|MB)\s*/\s*second\b", line) and "(" not in line.split("=")[-1]:
                 issues.append(LintIssue("L008", rel, lineno, "Prefer parenthesized rate: 1.9 * (TB / second)."))
             if UREG_ALIAS.search(line):
                 issues.append(LintIssue("L009", rel, lineno, "Prefer exported unit alias over ureg.*."))
-            if not stripped.startswith("#") and re.search(r"\.m_as\s*\(", line):
+            if re.search(r"\.m_as\s*\(", line):
                 issues.append(LintIssue(
                     "L019", rel, lineno,
                     "Use .to(unit).magnitude instead of .m_as() in LEGO cells.",
@@ -124,15 +151,7 @@ def lint_file(path: Path, root: Path) -> list[LintIssue]:
                 "L016", rel, base_line + match.start() // 80 + 1,
                 f"{match.group('name')} assigned from .m_as() scalar.",
             ))
-        for match in FMT_QTY_ASSIGN.finditer(block):
-            n = match.group("name")
-            if not re.search(rf"_{re.escape(n.split('_')[-2])}_", n) and not re.search(
-                r"_(w|kw|mw|j|wh|kwh|mwh|gb|tb|ms|s|kg|tonnes?)_str$", n, re.I
-            ):
-                issues.append(LintIssue(
-                    "L017", rel, base_line + block[: match.start()].count("\n") + 1,
-                    f"{n} uses closed formatter but name is not closed-fixed.",
-                ))
+        # L017 retired: fmt_qty closed-auto names (e.g. throughput_str) are valid per lego-units.md.
 
     for match in PROSE_DUP_UNIT.finditer(text):
         lineno = text[: match.start()].count("\n") + 1

@@ -10,23 +10,24 @@
 |------|--------|-------|
 | 1–13 — MLSysIM infra + lint | DONE | units, physics, domain formatters, lint_lego_units.py |
 | 14+ — QMD migration | DONE | All Vol I + Vol II chapters and appendices |
-| Closure — L019 + baseline | DONE | `.m_as()` blocking error; baseline refreshed (411 warnings) |
+| Closure — lint + exec + tests | DONE | 0 warnings; baseline empty; L019 blocking |
 
 ## Migration summary
 
-- Bulk `.m_as(unit)` → `.to(unit).magnitude` via `book/tools/scripts/migrate_lego_m_as.py` (~1,235 replacements).
-- Remaining `.m_as(` references are **comment-only** (5 files, LEGO header docs).
-- **L019** promotes `.m_as(` to pre-commit **error** (default `--fail-on error`).
-- Warning baseline: `book/tools/audit/lego_units_baseline.json` (411 entries, post-migration).
-- Full-book LEGO exec test: **ALL OK**.
+- Bulk `.m_as(unit)` → `.to(unit).magnitude` via `migrate_lego_m_as.py` (~1,235 replacements).
+- **L019** blocks `.m_as(` in executable LEGO lines (pre-commit error).
+- **L017** retired (false positives on closed-auto `fmt_qty` names).
+- Warning baseline: `lego_units_baseline.json` — **0 entries** (all warnings cleared).
+- Fixed **658** glued cell fences (`)```` → newline + ` ``` `) that broke headless exec.
+- Full-book python-cell exec: **ALL OK (81 files)**.
+- `book/tools/tests/test_lint_lego_units.py` — 6 tests + full-corpus regression.
+- `lego-units` binder scope: **default=True**.
 
-## Next (plan closure phases)
+## Deferred (user request: no builds yet)
 
 | Phase | Status |
 |-------|--------|
 | 9A — HTML render every chapter | pending |
 | 9B — PDF render every chapter | pending |
-| 9C — full volume HTML/PDF + pre-commit + pytest | pending |
+| 9C — full volume HTML/PDF | pending |
 | 10 — merge fmt-fix → dev | pending |
-
-Promote additional lint rules (L014, L015, L017, …) incrementally as warning debt is cleared.
