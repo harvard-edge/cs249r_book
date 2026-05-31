@@ -13,7 +13,9 @@ from mlsysim.fmt import (
     fmt_count_range,
     fmt_int,
     fmt_multiple,
+    fmt_multiple_range,
     fmt_percent,
+    fmt_percent_range,
     fmt_pp,
     fmt_qty,
     fmt_qty_int,
@@ -22,6 +24,7 @@ from mlsysim.fmt import (
     fmt_rate,
     fmt_ratio,
     fmt_sci,
+    fmt_sci_qty,
     fmt_time,
     fmt_time_range,
     fmt_usd,
@@ -447,10 +450,12 @@ class TestFmtMultiple:
 
     def test_inherits_fmt_precision_guard(self):
         # An integer-like factor at precision=1 would render "2.0" — the
-        # shared fmt() guard rejects that; the caller picks precision=0.
+        # shared fmt() guard rejects that; explicit precision=1 still errors.
         with pytest.raises(ValueError, match="spurious trailing zeros"):
             fmt_multiple(2.0, precision=1)
         assert fmt_multiple(2.0, precision=0) == "2"
+        assert fmt_multiple(2) == "2"
+        assert fmt_multiple(2.0) == "2"
 
     def test_rejects_negative_factor(self):
         with pytest.raises(ValueError, match="non-negative factor"):
@@ -658,6 +663,45 @@ class TestTypedRanges:
         )
         assert out == "1\u20132 GB"
 
+    def test_quantity_range_accepts_checked_display_label(self):
+        out = fmt_qty_range(
+            1 * ureg.kilojoule,
+            2 * ureg.kilojoule,
+            ureg.kilojoule,
+            precision=0,
+            commas=False,
+            unit_label="kJ per hour",
+        )
+        assert out == "1\u20132 kJ per hour"
+
+    def test_percent_range_uses_ratio_domain_and_one_suffix(self):
+        assert (
+            fmt_percent_range(
+                0.846,
+                0.88,
+                precision=(1, 0),
+                commas=False,
+                style="prose",
+            )
+            == "84.6\u201388 percent"
+        )
+        assert (
+            fmt_percent_range(0.90, 0.95, precision=0, commas=False, style="symbol")
+            == "90\u201395%"
+        )
+        with pytest.raises(ValueError, match="0-1 ratio"):
+            fmt_percent_range(84.6, 88, precision=1)
+
+    def test_multiple_range_is_bare_and_checked(self):
+        assert (
+            fmt_multiple_range(3, 7.8, precision=(0, 1), commas=False)
+            == "3\u20137.8"
+        )
+        with pytest.raises(ValueError, match="non-negative"):
+            fmt_multiple_range(-1, 2)
+        with pytest.raises(ValueError, match="hi >= lo"):
+            fmt_multiple_range(3, 2)
+
     def test_time_range_symbol_and_word_styles(self):
         assert (
             fmt_time_range(5, 20, ureg.millisecond, precision=0, commas=False)
@@ -713,3 +757,64 @@ class TestTypedRanges:
             fmt_count_range(2, 1)
         with pytest.raises(ValueError, match="hi >= lo"):
             fmt_usd_range(2, 1)
+
+
+class TestFmtSciQty:
+    def test_scientific_quantity_appends_checked_unit(self):
+        out = fmt_sci_qty(
+            4.1e17 * ureg.flop,
+            ureg.flop,
+            precision=2,
+            unit_label="FLOPs",
+        )
+        assert out == "4.10 × 10¹⁷ FLOPs"
+        assert isinstance(out, MarkdownStr)
+
+    def test_scientific_quantity_converts_before_formatting(self):
+        out = fmt_sci_qty(
+            4.1e8 * ureg.GFLOPs,
+            ureg.flop,
+            precision=2,
+            unit_label="FLOPs",
+        )
+        assert out == "4.10 × 10¹⁷ FLOPs"
+
+    def test_scientific_quantity_requires_quantity(self):
+        with pytest.raises(TypeError, match="requires a Pint Quantity"):
+            fmt_sci_qty(4.1e17, ureg.flop)
+
+
+class TestDomainFormatters:
+    def test_fmt_power_scales_to_mw(self):
+        from mlsysim.fmt import fmt_power
+        from mlsysim.core.units import MW, watt
+
+        out = fmt_power(17.5e6 * watt, precision=1, commas=False)
+        assert out == "17.5 MW"
+
+    def test_fmt_energy_scales_to_kwh(self):
+        from mlsysim.fmt import fmt_energy
+        from mlsysim.core.units import kWh, watt, hour
+
+        out = fmt_energy(700 * watt * hour, precision=0, commas=False)
+        assert out == "700 Wh"
+
+    def test_fmt_bandwidth_scales(self):
+        from mlsysim.fmt import fmt_bandwidth
+        from mlsysim.core.units import GB, TB, second
+
+        out = fmt_bandwidth(3.35 * TB / second, precision=2, commas=False)
+        assert out == "3.35 TB/s"
+
+    def test_fmt_memory_scales(self):
+        from mlsysim.fmt import fmt_memory
+        from mlsysim.core.units import GB, byte
+
+        out = fmt_memory(14 * GB, precision=0, commas=False)
+        assert out == "14 GB"
+
+    def test_usd_range_repeat_symbol_false_with_scale(self):
+        assert (
+            fmt_usd_range(10_000, 30_000, scale="K", commas=False, repeat_symbol=False)
+            == "\\$10K\u201330K"
+        )

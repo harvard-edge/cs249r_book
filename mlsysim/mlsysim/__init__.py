@@ -53,8 +53,11 @@ from .physics import *  # noqa: F401,F403
 # AUTHORITATIVE FORMATTING
 from .fmt import (
     fmt, fmt_int, fmt_qty, fmt_usd, fmt_percent, fmt_pp, fmt_multiple,
-    fmt_time, fmt_rate, fmt_count, fmt_ratio, fmt_range, fmt_qty_range,
-    fmt_time_range, fmt_count_range, fmt_usd_range, check, MarkdownStr,
+    fmt_multiple_range, fmt_time, fmt_rate, fmt_count, fmt_ratio, fmt_range,
+    fmt_qty_range, fmt_time_range, fmt_count_range, fmt_usd_range,
+    fmt_percent_range, fmt_sci_qty,
+    fmt_power, fmt_energy, fmt_bandwidth, fmt_memory, fmt_emissions, fmt_latency,
+    assert_qty_close, check, MarkdownStr,
 )
 
 
