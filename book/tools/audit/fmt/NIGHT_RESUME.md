@@ -37,7 +37,7 @@ python3 -m pytest mlsysim/tests/test_fmt.py book/tests/test_codemod_fmt.py book/
 
 ## NOW / NEXT  (update before every commit)
 
-**STATUS: Currency formatter suffix migration complete and verified. Safe to continue with remaining migration lanes.**
+**STATUS: Time-unit suffix migration complete; remaining suffix work is WS4 physical units, scale-word design, MarkdownStr review, render/PDF audit, and final lock.**
 
 **State:** multiplier + percent + scale 100% migrated; pp → typed fmt_pp (14
 byte-identical sites + grammar fixes, plus the user-approved A2 benchmarking
@@ -71,14 +71,18 @@ byte-identically; 5 were correctly queued because canonical Pint labels would
 change visible text (`80 GB`→`80 GiB`). Corpus `fmt_qty` calls are now 164 and
 physical-unit suffix calls are now 1,370. The A1 scale-style pass is
 also HTML-render-verified for all 13 source-changed chapters. A2 is
-HTML-render-verified for `benchmarking`. Remaining: the rest of WS4/WS3 and later
-PDF/lock phases. Nothing is half-done or broken.
+HTML-render-verified for `benchmarking`. The time-unit lane is now complete:
+`run_time_lane.py` migrated the remaining 522 exact `time_unit` suffix sites to
+`fmt_time(...)`, QMD `fmt_time` calls now use full unit-name strings in source,
+and `audit_fmt_usage.py` reports no remaining `time_unit` suffix bucket.
+Remaining: the rest of WS4/WS3 and later PDF/lock phases. Nothing is half-done
+or broken.
 
 **If continuing:** Continue with semantic lanes in `PLAN_OF_RECORD.md`. Good next
-targets are currency scale/per oddities, count labels/rates, then time values.
+targets are physical-unit suffixes, then scale-word design and MarkdownStr sites.
 For physical Quantity-backed sites, continue WS4 with
 `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/run_unit_lane.py --write <qmd>`
-one chapter at a time. Current dry-run reports 132 remaining clean unit candidates
+one chapter at a time. Current dry-run reports 119 remaining clean unit candidates
 across 19 chapters; many more suffix sites are plain floats and should stay queued
 unless the source is refactored to carry a Pint Quantity.
 
@@ -302,6 +306,19 @@ and the `time_unit` suffix bucket down to 522. Verification: py_compile PASS;
 `git diff --check` PASS; `./book/binder check math` PASS; focused pytest suite
 PASS (167 tests); `fmt_prose_contract` 0; `codemod_fmt queue` empty;
 substituted prose semantic audit CLEAN across 81 files.
+
+**NOW done:** corpus time-unit suffix lane — added `run_time_lane.py` and
+migrated the remaining 522 exact `time_unit` suffix sites across 34 chapters to
+`fmt_time(...)`. The lane keeps full unit names in source (`"millisecond"`,
+`"second"`, `"hour"`, etc.) while `style` controls symbol vs word rendering.
+The only auto-queue was the `μs` vs `µs` glyph distinction; `fmt_time` now owns
+the book's microsecond output as `μs`, and those sites then passed the
+byte-identical gate. A follow-up source-only pass normalized earlier
+`fmt_time(..., "ms"/"s"/"h")` calls to full unit-name strings. Final audit:
+`fmt_time` calls 650; `time_unit` suffix bucket gone. Verification: `git diff
+--check` PASS; py_compile PASS; focused pytest suite PASS (171 tests);
+`fmt_prose_contract` 0; `codemod_fmt queue` empty; `./book/binder check math`
+PASS; substituted prose semantic audit CLEAN across 81 files.
 
 **NEXT:**
 1. Add a formatter-default cleanup pass after the semantic lanes: each

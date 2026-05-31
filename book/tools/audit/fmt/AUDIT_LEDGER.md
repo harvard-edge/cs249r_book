@@ -434,6 +434,47 @@ Validation details:
   `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
   0 findings across 81 files.
 
+## 2026-05-31 — Corpus time-unit suffix lane
+
+Change type: byte-identical formatter relocation plus formatter/source
+normalization. Added `run_time_lane.py` for exact time suffixes and migrated the
+remaining 522 `time_unit` suffix sites to `fmt_time(...)`. The lane uses full
+unit-name strings in source (`"millisecond"`, `"second"`, `"hour"`,
+`"microsecond"`, etc.) and keeps `style="word"` only for prose unit labels.
+Old `fmt_int(..., suffix=...)` duration sites now round explicitly before
+`fmt_time(..., precision=0)`.
+
+Touched chapters and equivalence:
+
+| Result | Chapter files | Calls | Equivalence |
+|---|---|---:|---|
+| pass | 30 chapters | 505 | byte-identical values + prose by `run_time_lane.py` |
+| pass after microsecond formatter normalization | `vol1/frameworks`, `vol1/model_serving`, `vol2/data_storage`, `vol2/network_fabrics` | 17 | byte-identical values + prose by `run_time_lane.py` |
+
+Validation details:
+
+- Initial lane pass migrated 505/522 sites; the 17 queued sites differed only by
+  `μs` (Greek mu, dominant in book source) vs Pint's `µs` micro sign.
+- `fmt_time`/`fmt_qty` compact unit rendering now normalizes microsecond output
+  to `μs`, centralizing that display decision in the formatter instead of
+  encoding glyph variants at call sites.
+- After that formatter normalization, the 17 queued microsecond sites migrated
+  byte-identically.
+- A source-only cleanup converted earlier QMD `fmt_time(..., "ms"/"s"/"h")`
+  calls to full unit-name strings. Rendering remains controlled by `style` and
+  is unchanged.
+- Targeted equivalence check for `vol1/introduction/introduction.qmd` found the
+  only intentional visible diff from formatter-owned microsecond normalization:
+  `13.1 µs`/`27.6 µs` now render as `13.1 μs`/`27.6 μs`. The surrounding
+  sentence was read and remains semantically correct.
+- `audit_fmt_usage.py` now reports `fmt_time` calls at 650 and no remaining
+  `time_unit` suffix bucket.
+- Verification: `git diff --check` PASS; py_compile PASS for `fmt.py`,
+  `codemod_fmt.py`, `run_time_lane.py`, audit and binder check modules;
+  focused pytest suite PASS, 171 tests; `fmt_prose_contract.py` PASS, 0
+  violations; `codemod_fmt.py queue` PASS, `by kind: {}`; `./book/binder check
+  math` PASS; `audit_prose_semantics.py` PASS, 0 findings across 81 files.
+
 ## 2026-05-31 — Remaining direct count labels
 
 Change type: byte-identical formatter relocation. Replaced 40 hard-coded direct

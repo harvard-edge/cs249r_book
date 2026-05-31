@@ -11,6 +11,7 @@ from codemod_fmt import (  # noqa: E402
     _rewrite_scale, scan_scale,
     _rewrite_scale_style, scan_scale_style,
     _rewrite_unit, scan_unit,
+    _rewrite_time, scan_time,
 )
 
 
@@ -33,6 +34,11 @@ def _scale_style(expr: str):
 def _unit(expr: str):
     call = ast.parse(expr, mode="eval").body
     return _rewrite_unit(call, expr)
+
+
+def _time(expr: str):
+    call = ast.parse(expr, mode="eval").body
+    return _rewrite_time(call, expr)
 
 
 # --- the provable cell rewrite -------------------------------------------------
@@ -327,3 +333,34 @@ def test_scan_unit_migrates_quantity_backed_and_queues_plain_float(tmp_path):
     assert edits[0].new == "fmt_qty(mem, GB, precision=0, commas=False)"
     assert [q.var for q in queue] == ["float_str"]
     assert queue[0].kind == "unit"
+
+
+def test_time_rewrite_uses_full_unit_names_for_symbol_style():
+    assert _time("fmt(latency_ms, precision=0, commas=False, suffix=' ms')") == \
+        "fmt_time(latency_ms, 'millisecond', precision=0, commas=False)"
+    assert _time("fmt(duration_s, precision=1, suffix=' s')") == \
+        "fmt_time(duration_s, 'second', precision=1, commas=True)"
+
+
+def test_time_rewrite_word_style_and_fmt_int_rounding():
+    assert _time("fmt(elapsed, precision=0, commas=False, suffix=' seconds')") == \
+        "fmt_time(elapsed, 'second', precision=0, commas=False, style='word')"
+    assert _time("fmt_int(hours, commas=False, suffix=' hours')") == \
+        "fmt_time(round(hours), 'hour', precision=0, commas=False, style='word')"
+
+
+def test_time_rewrite_preserves_markers():
+    assert _time("fmt(duration, precision=0, commas=False, approx=True, suffix=' s')") == \
+        "fmt_time(duration, 'second', precision=0, commas=False, approx=True)"
+
+
+def test_scan_time_migrates_exact_time_suffixes(tmp_path):
+    p = tmp_path / "c.qmd"
+    p.write_text(CELL.format(
+        assigns=("latency_str = fmt(latency, precision=0, commas=False, suffix=' ms')\n"
+                 "    duration_str = fmt_int(duration, commas=True, suffix=' seconds')\n"
+                 "    other_str = fmt(size, precision=0, suffix=' GB')"),
+        prose="x"), encoding="utf-8")
+    edits, queue = scan_time(p)
+    assert [e.var for e in edits] == ["latency_str", "duration_str"]
+    assert queue == []

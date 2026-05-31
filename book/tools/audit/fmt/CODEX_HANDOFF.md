@@ -172,6 +172,16 @@ intentional overrides. Expected defaults: currency/count/rate helpers group
 large numbers; compact physical/time quantities, percentages, percentage
 points, ratios, and multipliers default to no grouping unless overridden.
 
+**A10b — Unit keyword/source spelling cleanup: TODO.**
+User raised that time/quantity/rate helpers should expose the argument as
+`unit=`, not as an ambiguous positional string. The plan of record now keeps
+`label=` only for count nouns (`fmt_count(label="GPU")`) and treats
+`fmt_time(..., "second")` as a unit argument. During current time migrations,
+prefer full unit-name strings (`"millisecond"`, `"second"`, `"hour"`) and let
+`style="symbol"` or `style="word"` control the rendered suffix. A later API
+ergonomics pass should add keyword aliases such as `fmt_time(t, unit="second")`
+and lint against new positional unit arguments.
+
 **A11 — Benchmarking millisecond time suffixes: DONE.**
 25 `suffix=" ms"` sites in `vol1/benchmarking/benchmarking.qmd` moved to
 `fmt_time(..., "ms")`, byte-identical values and inline prose. Explicit
@@ -285,6 +295,22 @@ suffix bucket down to 522; `ml_workflow.qmd` has no remaining `time_unit`
 suffixes. Verification: py_compile PASS, `git diff --check` PASS,
 `./book/binder check math` PASS, focused pytest suite PASS (167 tests),
 prose-contract 0, semantic audit 0 findings, codemod queue empty.
+
+**A23 — Corpus time suffix lane: DONE.**
+Added `run_time_lane.py` and migrated the remaining 522 exact `time_unit`
+suffix sites to `fmt_time(...)`. The lane uses full unit-name strings in QMD
+source (`"millisecond"`, `"second"`, `"hour"`, etc.) and accepts a chapter only
+when exported values and substituted prose are byte-identical. The only
+temporary queue was the Greek-mu vs micro-sign distinction for `μs`; the
+formatter now centralizes microsecond output as `μs`, matching the dominant
+book source style, and the queued sites then migrated byte-identically. A
+source-normalization pass also converted earlier `fmt_time(..., "ms"/"s"/"h")`
+calls to full unit names. `audit_fmt_usage.py` now reports `fmt_time` calls at
+650 and no remaining `time_unit` suffix bucket. Verification: `git diff
+--check` PASS; py_compile PASS; focused pytest suite PASS (171 tests);
+`fmt_prose_contract.py` 0; `codemod_fmt.py queue` `by kind: {}`;
+`./book/binder check math` PASS; `audit_prose_semantics.py` CLEAN across 81
+files.
 
 ### B. WS4 — unit-suffix lane (~2,393 sites: `GB`/`ms`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**

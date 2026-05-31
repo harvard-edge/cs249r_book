@@ -1051,7 +1051,8 @@ def _compact_unit_suffix(display_unit) -> str:
         return f" {display_unit}"
     parts = formatted.split(None, 1)
     if len(parts) == 2:
-        return f" {parts[1]}"
+        label = parts[1].replace("µs", "μs")
+        return f" {label}"
     return f" {display_unit}"
 
 

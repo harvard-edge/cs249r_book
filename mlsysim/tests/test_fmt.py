@@ -227,6 +227,13 @@ class TestFmtTime:
     def test_symbol_style_accepts_quantities_and_plain_numbers(self):
         assert fmt_time(1500 * ureg.millisecond, ureg.second) == "1.5 s"
         assert fmt_time(35, ureg.second, precision=0) == "35 s"
+        assert fmt_time(35, "second", precision=0) == "35 s"
+        assert fmt_time(35, "s", precision=0) == "35 s"
+        assert fmt_time(12, "millisecond", precision=0) == "12 ms"
+        assert fmt_time(12, "ms", precision=0) == "12 ms"
+        assert fmt_time(5, "microsecond", precision=0) == "5 μs"
+        assert fmt_time(5, "µs", precision=0) == "5 μs"
+        assert fmt_time(5, "μs", precision=0) == "5 μs"
 
     def test_word_style_pluralizes(self):
         assert fmt_time(1, ureg.second, precision=0, style="word") == "1 second"

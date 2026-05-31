@@ -40,7 +40,7 @@ The migration target is not "better suffixes." It is structured formatter
 arguments:
 
 - `fmt_qty(bw, GB / second)`, not `fmt(bw.m_as(GB / second), suffix=" GB/s")`.
-- `fmt_time(t, second, style="symbol")`, not `fmt(t, suffix=" s")`.
+- `fmt_time(t, "second", style="symbol")`, not `fmt(t, suffix=" s")`.
 - `fmt_count(n, label="GPU")`, not `fmt(n, suffix=" GPUs")`.
 - `fmt_rate(qps, "QPS")`, not `fmt(qps, suffix=" QPS")`.
 - `fmt_usd(cost, scale="M", per="month")`, not `fmt_usd(cost / MILLION, suffix="M/month")`.
@@ -65,6 +65,13 @@ arguments for semantic helpers. Required tests for that pass: keyword and
 temporary positional compatibility, missing-unit and both-unit errors,
 time-unit validation through `unit=`, rate allowlist validation through
 `unit=`, and range endpoint checks through keyword units.
+
+For current `fmt_time(...)` migrations, the positional argument is still a unit,
+not a label. Prefer full unit-name strings in source (`"millisecond"`,
+`"second"`, `"hour"`) and let `style="symbol"` or `style="word"` decide whether
+the rendered text is `ms`/`s`/`h` or `milliseconds`/`seconds`/`hours`. Short
+spellings remain accepted for compatibility, but new QMD edits should not add
+more mixed `"ms"`/`"second"` source style.
 
 ### Scale-word and compound-scale backlog
 
