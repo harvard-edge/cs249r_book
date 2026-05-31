@@ -967,7 +967,22 @@ PASS; py_compile PASS; focused pytest suite PASS (190 tests);
 `./book/binder check math` PASS; `./book/binder check code --scope
 lego-dead-code` PASS; `audit_prose_semantics.py` CLEAN across 81 files.
 
-### B. WS4 — unit-suffix lane (remaining 461 physical-unit suffixes: `GB`/`MB`/`W`/`GB/s`/…)  ← the big one
+**A69 — `vol1/nn_architectures` physical-unit cleanup: DONE.**
+Migrated all 50 remaining physical-unit suffix sites in `nn_architectures` to
+typed quantity formatters, leaving the file with 0 `suffix=` calls. The lane
+covered model memory footprints, bandwidth and TFLOP/s anchors, MLP/attention
+memory examples, KV-cache sizes, capacity-wall examples, edge sizing, and
+cluster-vs-edge memory comparisons. TFLOP/s displays use `TFLOP / second`; the
+old rounded runtime-memory total remains explicit through
+`fmt_qty_int(round(...), MB)`. `audit_fmt_usage.py` now reports physical-unit
+suffixes down to 411, `fmt_qty` at 892, and `fmt_qty_int` at 116. Verification:
+`assess_equiv.py` values/prose identical for `nn_architectures`; `git diff
+--check` PASS; py_compile PASS; focused pytest suite PASS (190 tests);
+`fmt_prose_contract.py` 0; `codemod_fmt.py queue` `by kind: {}`;
+`./book/binder check math` PASS; `./book/binder check code --scope
+lego-dead-code` PASS; `audit_prose_semantics.py` CLEAN across 81 files.
+
+### B. WS4 — unit-suffix lane (remaining 411 physical-unit suffixes: `GB`/`MB`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.
 `weights_gb`), not Pint Quantities, and `fmt_qty` requires a Pint Quantity to
