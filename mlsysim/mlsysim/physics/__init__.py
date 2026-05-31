@@ -47,6 +47,15 @@ from .statistics import (
     calc_constraint_propagation_factor,
 )
 
+from .quantities import (
+    transfer_time,
+    compute_time,
+    energy_from_power,
+    carbon_from_energy,
+    memory_from_params,
+    token_throughput,
+)
+
 __all__ = [
     "calc_network_latency_ms",
     "dTime",
@@ -78,4 +87,10 @@ __all__ = [
     "calc_population_stability_index",
     "calc_two_proportion_sample_size",
     "calc_constraint_propagation_factor",
+    "transfer_time",
+    "compute_time",
+    "energy_from_power",
+    "carbon_from_energy",
+    "memory_from_params",
+    "token_throughput",
 ]
