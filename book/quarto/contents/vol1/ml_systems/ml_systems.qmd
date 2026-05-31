@@ -3015,7 +3015,8 @@ Health monitoring and augmented reality push mobile ML to its sustained-performa
 # │ Exports: MobileResnetPitfallRecap.resnet_fp32_mb_str,
 # │          MobileResnetPitfallRecap.resnet_gflops_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, fmt_qty
+from mlsysim.fmt import fmt, check, fmt_qty, fmt_count
+from mlsysim.core.units import byte, MB, GFLOPs, param
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MobileResnetPitfallRecap:
@@ -3026,17 +3027,17 @@ class MobileResnetPitfallRecap:
     resnet_flops = Models.Vision.ResNet50.inference_flops
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    resnet_fp32_bytes_value = resnet_params.m_as('param') * 4 * byte
-    resnet_gflops_value = resnet_flops.m_as(GFLOPs)
-    resnet_fp32_mb_value = resnet_fp32_bytes_value.m_as(MB)
+    resnet_fp32_bytes = resnet_params * 4 * byte / param
+    resnet_gflops = resnet_flops.to(GFLOPs).magnitude
+    resnet_fp32_mb = resnet_fp32_bytes.to(MB).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(resnet_fp32_mb_value >= 90, f"ResNet-50 FP32 size should be near 100 MB; got {resnet_fp32_mb_value:.0f} MB.")
-    check(resnet_gflops_value >= 4, f"ResNet-50 compute should be about 4 GFLOPs; got {resnet_gflops_value:.1f}.")
+    check(resnet_fp32_mb >= 90, f"ResNet-50 FP32 size should be near 100 MB; got {resnet_fp32_mb:.0f} MB.")
+    check(resnet_gflops >= 4, f"ResNet-50 compute should be about 4 GFLOPs; got {resnet_gflops:.1f}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    resnet_fp32_mb_str = fmt_qty(resnet_fp32_bytes_value, MB, precision=1, commas=False)
-    resnet_gflops_str = fmt(resnet_gflops_value, precision=1, commas=False)
+    resnet_fp32_mb_str = fmt_qty(resnet_fp32_bytes, MB, precision=1, commas=False)
+    resnet_gflops_str = fmt(resnet_gflops, precision=1, commas=False)
 ```
 
 These successes can create a misleading sense of ease. A common pitfall involves attempting to deploy desktop-trained models directly to mobile or edge devices without architecture modifications. Models developed on powerful workstations often fail when deployed to resource-constrained devices. A desktop ResNet-50 pipeline may require gigabytes once activations, batches, preprocessing buffers, and runtime overhead are included, even though the FP32 weights alone are about `{python} MobileResnetPitfallRecap.resnet_fp32_mb_str`. Such a pipeline, with `{python} MobileResnetPitfallRecap.resnet_gflops_str` billion FLOPs per inference, cannot run unchanged on a device with 512 MB of RAM and a 1 GFLOP/s processor. Beyond simple resource violations, desktop-optimized models may use operations unsupported by mobile hardware (specialized mathematical operations), assume floating-point precision unavailable on embedded systems, or require batch processing incompatible with single-sample inference. Successful deployment demands architecture-aware design from the beginning, including specialized architectural techniques for mobile devices such as MobileNet's depthwise separable convolutions [@howard2017mobilenets] (detailed in @sec-network-architectures), integer-only operations for microcontrollers, and optimization strategies that maintain accuracy while reducing computation.
@@ -3109,6 +3110,7 @@ TinyML's milliwatt-scale power consumption represents a six-order-of-magnitude r
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Hardware, Engine
 from mlsysim.fmt import fmt_int, fmt, check, MarkdownStr, fmt_count, fmt_qty
+from mlsysim.core.units import joule, mJ, uJ, ureg
 
 # ┌── LEGO ───────────────────────────────────────────────
 class EnergyInference:
@@ -3128,35 +3130,31 @@ class EnergyInference:
     p_kws = Engine.solve(Models.Tiny.DS_CNN, Hardware.Tiny.ESP32_S3, batch_size=1)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    e_gpt4_j = 1000 * ureg.joule  # ~1 kJ cloud LLM query (empirical anchor)
+    e_gpt4_j = 1000 * joule  # ~1 kJ cloud LLM query (empirical anchor)
     e_resnet_cloud_j = p_resnet_cloud.energy
     e_resnet_edge_j = p_resnet_edge.energy
     e_mobilenet_j = p_mobilenet.energy
-    e_kws_j = 10 * ureg.microjoule  # representative always-on KWS inference anchor
+    e_kws_j = 10 * uJ  # representative always-on KWS inference anchor
 
     # Queries per full battery charge
-    q_gpt4 = batt_energy_j / e_gpt4_j
-    q_resnet_cloud = batt_energy_j / e_resnet_cloud_j
-    q_resnet_edge = batt_energy_j / e_resnet_edge_j
-    q_mobilenet = batt_energy_j / e_mobilenet_j
-    q_kws = batt_energy_j / e_kws_j
+    q_gpt4 = (batt_energy_j / e_gpt4_j).to("").magnitude
+    q_resnet_cloud = (batt_energy_j / e_resnet_cloud_j).to("").magnitude
+    q_resnet_edge = (batt_energy_j / e_resnet_edge_j).to("").magnitude
+    q_mobilenet = (batt_energy_j / e_mobilenet_j).to("").magnitude
+    q_kws = (batt_energy_j / e_kws_j).to("").magnitude
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     e_gpt4_str = MarkdownStr("~1 kJ")
-    e_resnet_cloud_mj = round(e_resnet_cloud_j.m_as("mJ"), 1)
-    e_resnet_edge_mj = round(e_resnet_edge_j.m_as("mJ"), 1)
-    e_mobilenet_mj = round(e_mobilenet_j.m_as("mJ"), 2)
-    e_kws_uj = round(e_kws_j.m_as("uJ"), 0)
-    e_resnet_cloud_str = fmt_qty(e_resnet_cloud_mj * ureg.mJ, ureg.mJ, precision=1)
-    e_resnet_edge_str = fmt_qty(e_resnet_edge_mj * ureg.mJ, ureg.mJ, precision=1)
-    e_mobilenet_str = fmt_qty(e_mobilenet_mj * ureg.mJ, ureg.mJ, precision=2)
-    e_kws_str = fmt_qty(e_kws_uj * ureg.microjoule, ureg.microjoule, precision=0, commas=False)
+    e_resnet_cloud_str = fmt_qty(e_resnet_cloud_j, mJ, precision=1)
+    e_resnet_edge_str = fmt_qty(e_resnet_edge_j, mJ, precision=1)
+    e_mobilenet_str = fmt_qty(e_mobilenet_j, mJ, precision=2)
+    e_kws_str = fmt_qty(e_kws_j, uJ, precision=0, commas=False)
 
-    q_gpt4_str = fmt_count(round(q_gpt4.m_as('')), commas=True, label="query")
-    q_resnet_cloud_str = fmt_count(round(batt_energy_j.m_as("J") / (e_resnet_cloud_mj * 1e-3)), commas=True, label="query")
-    q_resnet_edge_str = fmt_count(round(batt_energy_j.m_as("J") / (e_resnet_edge_mj * 1e-3)), commas=True, label="query")
-    q_mobilenet_str = fmt_count(round(batt_energy_j.m_as("J") / (e_mobilenet_mj * 1e-3)), commas=True, label="query")
-    q_kws_str = fmt_count(round(q_kws.m_as('') / MILLION) * MILLION, scale="million", precision=0, commas=False, label="query")
+    q_gpt4_str = fmt_count(round(q_gpt4), commas=True, label="query")
+    q_resnet_cloud_str = fmt_count(round(q_resnet_cloud), commas=True, label="query")
+    q_resnet_edge_str = fmt_count(round(q_resnet_edge), commas=True, label="query")
+    q_mobilenet_str = fmt_count(round(q_mobilenet), commas=True, label="query")
+    q_kws_str = fmt_count(round(q_kws / MILLION) * MILLION, scale="million", precision=0, commas=False, label="query")
 
     batt_cap_mah_str = fmt_qty(Scenarios.PhoneBattery.CapacityMah, ureg.mAh, precision=0, commas=False)
     batt_volt_str = fmt_qty(Scenarios.PhoneBattery.VoltageV, ureg.V, precision=1, commas=False)
