@@ -340,6 +340,19 @@ PASS (174 tests); `fmt_prose_contract.py` 0; `codemod_fmt.py queue`
 `by kind: {}`; `./book/binder check math` PASS; `audit_prose_semantics.py`
 CLEAN across 81 files.
 
+**A26 — Compound GPU-day count: DONE.**
+The last `count_label` suffix site moved to
+`fmt_count(..., label="GPU-day", plural_label="GPU-days")`, and the matching
+GPU-hour compound moved to `fmt_count(..., label="GPU-hour",
+plural_label="GPU-hours")`. `NASCostCalc.gpu_days_str` intentionally changed
+from `22,400 GPU` to `22,400 GPU-days`, while the surrounding footnote dropped
+the literal `-days`; `assess_equiv.py` confirmed the substituted prose stayed
+byte-identical. `audit_fmt_usage.py` now has no `count_label` bucket.
+Verification after A25/A26: `git diff --check` PASS; py_compile PASS; focused
+pytest suite PASS (174 tests); `fmt_prose_contract.py` 0; `codemod_fmt.py
+queue` `by kind: {}`; `./book/binder check math` PASS;
+`audit_prose_semantics.py` CLEAN across 81 files.
+
 ### B. WS4 — unit-suffix lane (~2,393 sites: `GB`/`ms`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.

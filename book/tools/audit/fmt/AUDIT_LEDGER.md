@@ -556,6 +556,28 @@ Validation details:
   PASS, `by kind: {}`; `./book/binder check math` PASS;
   `audit_prose_semantics.py` PASS, 0 findings across 81 files.
 
+## 2026-05-31 — Compound GPU-day count
+
+Change type: formatter relocation with visible prose preserved. Replaced the
+last split count-label construction in `vol1/model_compression/model_compression.qmd`:
+`gpu_days_str` no longer renders `22,400 GPU` with prose appending `-days`;
+it renders `22,400 GPU-days` directly via `fmt_count(..., label="GPU-day",
+plural_label="GPU-days")`. The matching GPU-hour compound now also uses
+`fmt_count(..., label="GPU-hour", plural_label="GPU-hours")`.
+
+Validation details:
+
+- `assess_equiv.py` reported the expected value diff for
+  `NASCostCalc.gpu_days_str`: `22,400 GPU` → `22,400 GPU-days`.
+- `assess_equiv.py` reported identical substituted prose for the footnote after
+  dropping the literal `-days` outside the inline reference.
+- `audit_fmt_usage.py` now reports no `count_label` suffix bucket.
+- Verification after the service-rate and GPU-day count batch: `git diff
+  --check` PASS; py_compile PASS; focused pytest suite PASS, 174 tests;
+  `fmt_prose_contract.py` PASS, 0 violations; `codemod_fmt.py queue` PASS,
+  `by kind: {}`; `./book/binder check math` PASS; `audit_prose_semantics.py`
+  PASS, 0 findings across 81 files.
+
 ## 2026-05-31 — Remaining direct count labels
 
 Change type: byte-identical formatter relocation. Replaced 40 hard-coded direct

@@ -345,6 +345,15 @@ pytest suite PASS (174 tests); `fmt_prose_contract` 0; `codemod_fmt queue`
 empty; `./book/binder check math` PASS; substituted prose semantic audit CLEAN
 across 81 files.
 
+**NOW done:** compound GPU-day count — migrated the last `count_label` suffix
+site to `fmt_count(..., label="GPU-day", plural_label="GPU-days")`, with the
+footnote prose adjusted so visible output stays identical. The matching
+GPU-hour compound also uses `fmt_count`. `audit_fmt_usage.py` now has no
+`count_label` bucket. Verification after the service-rate and GPU-day count
+batch: `git diff --check` PASS; py_compile PASS; focused pytest suite PASS (174
+tests); `fmt_prose_contract` 0; `codemod_fmt queue` empty; `./book/binder check
+math` PASS; substituted prose semantic audit CLEAN across 81 files.
+
 **NEXT:**
 1. Add a formatter-default cleanup pass after the semantic lanes: each
    formatter should own comma defaults by value kind, and explicit `commas=`
