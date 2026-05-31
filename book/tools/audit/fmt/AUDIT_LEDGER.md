@@ -50,8 +50,41 @@ Status:
   - `git diff --check` PASS
   - `PYTHONPATH=mlsysim python3 -m pytest mlsysim/tests/test_fmt.py book/tests/test_codemod_fmt.py book/tests/test_fmt_prose_contract.py book/tests/test_audit_prose_semantics.py book/tests/test_visible_text.py -q -o addopts=''` PASS, 157 tests
   - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/fmt_prose_contract.py --root book/quarto/contents` PASS, 0 violations
-  - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/codemod_fmt.py queue --root book/quarto/contents` PASS, `by kind: {}`
-  - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_prose_semantics.py --root book/quarto/contents` PASS, 0 findings
+- `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/codemod_fmt.py queue --root book/quarto/contents` PASS, `by kind: {}`
+- `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_prose_semantics.py --root book/quarto/contents` PASS, 0 findings
+
+## 2026-05-31 — Compound-scale suffix lane
+
+Change type: typed formatter relocation with three deliberate adjudicated
+visible/value changes. Cleared all 14 `compound_scale` suffix sites:
+word-scale counts moved to direct `fmt_count(..., scale="million"|"billion")`,
+scaled count rates moved to `fmt_rate(..., scale=...)`, the `7-billion`
+modifier moved to `fmt_count(..., attributive=True)`, and word-scale FLOP prose
+now uses `fmt_qty(..., unit_label="billion FLOPs")` / `"trillion FLOPs"` so Pint
+still validates the value.
+
+Touched chapters and equivalence:
+
+| Chapter file | Result |
+|---|---|
+| `vol1/data_selection/data_selection.qmd` | `ActiveLearningRoi.cost_saving_str` value changed from `4.75 Million` to `\$4.75 Million`; substituted prose stayed identical because the external `\$` moved into `fmt_usd`. |
+| `vol1/ml_systems/ml_systems.qmd` | Word-scale parameter/query values stayed identical except the user-approved compact scale style changed `200 K parameters` to `200K parameters`; surrounding sentence was read and remains correct. |
+| `vol1/model_serving/model_serving.qmd` | `2.2 million tokens` and `45.2 million tokens/hour` stayed byte-identical. |
+| `vol1/nn_computation/nn_computation.qmd` | `7-billion` stayed byte-identical through `fmt_count(..., attributive=True)`. |
+| `vol1/training/training.qmd` | FLOP phrases stayed byte-identical; `32K tokens` changed to `32.8K tokens` because the exact batch count is 32,768 and `fmt_count` correctly refused to hide that at precision 0. |
+
+Validation details:
+
+- `audit_fmt_usage.py` reports no remaining `compound_scale` suffix bucket;
+  remaining suffix bucket is `physical_unit` 1,126.
+- `assess_equiv.py baseline --ref HEAD` / `snapshot` checked touched chapters:
+  `data_selection` 250 values + 128 prose lines; `ml_systems` 296 + 143;
+  `model_serving` 365 + 172; `nn_computation` 200 + 107; `training` 453 + 214.
+- Verification: `git diff --check` PASS; `python3 -m py_compile
+  mlsysim/mlsysim/fmt.py book/tools/audit/fmt/audit_fmt_usage.py` PASS;
+  focused pytest suite PASS, 182 tests; `fmt_prose_contract.py` PASS, 0
+  violations; `codemod_fmt.py queue` PASS, `by kind: {}`; `./book/binder check
+  math` PASS; `audit_prose_semantics.py` PASS, 0 findings across 81 files.
 
 ## 2026-05-31 — Currency denominator relocation
 

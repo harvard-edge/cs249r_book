@@ -177,6 +177,14 @@ class TestFmtUsd:
 
     def test_structured_scale_and_denominator(self):
         assert fmt_usd(4_600_000, precision=1, commas=False, scale="M") == "\\$4.6M"
+        assert (
+            fmt_usd(4_750_000, precision=2, commas=False, scale="million")
+            == "\\$4.75 million"
+        )
+        assert (
+            fmt_usd(4_750_000, precision=2, commas=False, scale="Million")
+            == "\\$4.75 Million"
+        )
         assert fmt_usd(0.09, precision=2, commas=False, per="GB") == "\\$0.09/GB"
         assert fmt_usd(12_000, commas=False, scale="K", per="year") == "\\$12K/year"
         assert fmt_usd(8000, approx=True, marker="*") == "~\\$8,000*"
@@ -220,6 +228,20 @@ class TestFmtRate:
     def test_formats_allowlisted_service_rates(self):
         assert fmt_rate(2500, "QPS") == "2,500 QPS"
         assert fmt_rate(1200, "tokens/s") == "1,200 tokens/s"
+        assert (
+            fmt_rate(500_000, "tokens/s", scale="K", commas=False)
+            == "500K tokens/s"
+        )
+        assert (
+            fmt_rate(
+                45_200_000,
+                "tokens/hour",
+                scale="million",
+                precision=1,
+                commas=False,
+            )
+            == "45.2 million tokens/hour"
+        )
         assert fmt_rate(2500, "QPS", commas=False) == "2500 QPS"
         assert fmt_rate(60, "FPS") == "60 FPS"
 
@@ -489,11 +511,12 @@ class TestFmtCount:
 
     def test_scale_words(self):
         assert fmt_count(1_000_000, scale="M", scale_style="word") == "1 million"
+        assert fmt_count(1_000_000, scale="million") == "1 million"
+        assert fmt_count(1_000_000, scale="Million") == "1 Million"
         assert (
             fmt_count(
                 60_000_000,
-                scale="M",
-                scale_style="word",
+                scale="million",
                 label="parameter",
             )
             == "60 million parameters"
@@ -501,14 +524,34 @@ class TestFmtCount:
         assert (
             fmt_count(
                 70_000_000_000,
-                scale="B",
-                scale_style="word",
+                scale="billion",
                 precision=0,
                 commas=False,
                 label="parameter",
             )
             == "70 billion parameters"
         )
+
+    def test_scale_word_attributive_modifier(self):
+        assert (
+            fmt_count(
+                7_000_000_000,
+                scale="billion",
+                precision=0,
+                commas=False,
+                attributive=True,
+            )
+            == "7-billion"
+        )
+        with pytest.raises(ValueError, match="requires scale"):
+            fmt_count(7, attributive=True)
+        with pytest.raises(ValueError, match="only the scaled modifier"):
+            fmt_count(
+                7_000_000_000,
+                scale="billion",
+                label="parameter",
+                attributive=True,
+            )
 
     def test_scale_inherits_precision_guard(self):
         # 5.3M at precision=0 would silently hide the .3 — guard refuses.
@@ -613,6 +656,16 @@ class TestTypedRanges:
                 commas=False,
             )
             == "1M\u20132M parameters"
+        )
+        assert (
+            fmt_count_range(
+                1_000_000,
+                2_000_000,
+                scale="million",
+                label="parameter",
+                commas=False,
+            )
+            == "1 million\u20132 million parameters"
         )
 
     def test_usd_range_supports_scale_and_denominator(self):

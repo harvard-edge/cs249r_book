@@ -37,13 +37,13 @@ python3 -m pytest mlsysim/tests/test_fmt.py book/tests/test_codemod_fmt.py book/
 
 ## NOW / NEXT  (update before every commit)
 
-**STATUS: Time-unit suffix migration and exact scale-word suffix migration complete; remaining suffix work is WS4 physical units, compound scale/rate/ops design, MarkdownStr review, render/PDF audit, API clarity, and final lock.**
+**STATUS: Compound-scale suffix migration complete; remaining suffix work is WS4 physical units, MarkdownStr review, render/PDF audit, API cleanup, and final lock.**
 
 **State:** multiplier + percent + scale 100% migrated; pp → typed fmt_pp (14
 byte-identical sites + grammar fixes, plus the user-approved A2 benchmarking
 edits); 4 dangerous glyph stragglers killed; NEW semantic scanner gate (+ unit-dup
 bug fixes). 81/81 chapters exec clean; prose-contract 0; semantic scanner 0;
-codemod queue empty; 176 focused tests pass. User ruled for no-space scaled
+codemod queue empty; 182 focused tests pass. User ruled for no-space scaled
 counts, so `run_scale_style_lane.py` migrated the 44 queued scale sites to
 `fmt_count` and one manual `fmt(...) + "B"` blind spot. User also approved A2, so
 `benchmarking` now renders `0.9 percentage-point drop`, `below 1
@@ -75,12 +75,11 @@ HTML-render-verified for `benchmarking`. The time-unit lane is now complete:
 `run_time_lane.py` migrated the remaining 522 exact `time_unit` suffix sites to
 `fmt_time(...)`, QMD `fmt_time` calls now use full unit-name strings in source,
 and `audit_fmt_usage.py` reports no remaining `time_unit` suffix bucket.
-The exact scale-word lane is also complete: `fmt_count` now supports word-scale
-output, the 8 exact `suffix=" million"` / `suffix=" billion"` QMD sites were
-migrated byte-identically, and `audit_fmt_usage.py` reports no `scale_word`
-suffix bucket. User flagged `fmt_count(..., scale="B", scale_style="word")` as
-unclear source spelling; `PLAN_OF_RECORD.md` records the API-clarity follow-up
-to discuss a cleaner spelling such as `scale="billion"` before final lock.
+The exact scale-word lane is also complete, and the later compound-scale lane
+resolved the API spelling: compact scales use `scale="B"` / `scale="M"` while
+word scales use `scale="billion"` / `scale="million"`. The older
+`scale_style="word"` form remains compatible but should not be added in new
+QMD edits.
 Residual plain count labels are also reduced: 17 suffixes such as `errors`,
 `steps`, `photos`, `requests`, `servers`, `workers`, `stages`, `V100s`, and
 `link tiers` now use `fmt_count(..., label=...)`, byte-identical across 9
@@ -88,7 +87,7 @@ chapters.
 The time codemod now also recognizes word-form `microseconds` and
 `milliseconds`; the three remaining exact word-form time suffixes moved to
 `fmt_time(..., style="word")` byte-identically.
-`audit_fmt_usage.py` now splits the remaining suffix inventory into actionable
+`audit_fmt_usage.py` split the remaining suffix inventory into actionable
 sub-buckets: physical units (1,126), resource-time labels (19), unit
 rates/denominators (16), compound scale (14), operation counts (12), and
 time compounds (8). One more plain count label (`epochs`) was moved to
@@ -107,18 +106,21 @@ Exact FLOP-count suffixes are also migrated: 12 `GFLOPs`/`MFLOPs`/`KFLOPs`/
 `PFLOPs` sites now use `fmt_qty(...)` with Pint FLOP units, byte-identical
 across 5 chapters. No separate `fmt_ops` wrapper was added because Pint already
 provides the unit check; word-scale FLOP phrases (`billion FLOPs`, `trillion
-FLOPs`) remain in `compound_scale` pending wording/API decisions.
+FLOPs`) now use `fmt_qty(..., unit_label=...)` so visible wording stays intact.
 The four `time_compound` suffixes are gone too: `ms latency` / `ms round-trip`
 now keep the unit in `fmt_time(...)`, and `ms+` uses checked
 `fmt_time(..., marker="+")`. The 16 `unit_rate_or_denominator` suffixes are now
 also migrated through `fmt_qty(...)`, using checked `unit_label=` where Pint's
-compact label did not match visible house style. Remaining small suffix bucket
-is `compound_scale` (14), plus 1,126 `physical_unit` suffixes. Remaining: the
-rest of WS4/WS3 and later PDF/lock phases. Nothing is half-done or broken.
+compact label did not match visible house style. Compound-scale suffixes are now
+gone too: direct word scales, checked scaled rates, attributive count modifiers,
+and `fmt_qty(unit_label=...)` cleared all 14 sites. Intentional visible fixes:
+`200 K parameters`→`200K parameters` and floored `32K tokens`→`32.8K tokens`
+for the exact 32,768-token batch. Remaining suffix bucket is only 1,126
+`physical_unit` suffixes. Remaining: the rest of WS4/WS3 and later PDF/lock
+phases. Nothing is half-done or broken.
 
 **If continuing:** Continue with semantic lanes in `PLAN_OF_RECORD.md`. Good next
-targets are compound scale suffixes, then physical-unit suffixes, MarkdownStr
-sites, and the API-clarity pass.
+targets are physical-unit suffixes, MarkdownStr sites, and the API-cleanup pass.
 For physical Quantity-backed sites, continue WS4 with
 `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/run_unit_lane.py --write <qmd>`
 one chapter at a time. The latest all-chapter run migrated the remaining
@@ -520,6 +522,16 @@ drop. The adjacent prose/table text was updated to `1 percentage-point threshold
 and `(drop of 6.8 percentage points)`. No user-decision items remain open.
 
 ## Session commit log (newest first)
+- Codex compound-scale lane: cleared all 14 `compound_scale` suffix sites by
+  adding direct word-scale support (`scale="million"` / `"billion"`),
+  checked scaled `fmt_rate(..., scale=...)`, and `fmt_count(...,
+  attributive=True)` for `7-billion` modifiers; word-scale FLOP phrases use
+  `fmt_qty(..., unit_label=...)`. Intentional adjudicated changes:
+  `200 K parameters`→`200K parameters`, `32K tokens`→`32.8K tokens`, and
+  `cost_saving_str` now owns `\$` through `fmt_usd` while substituted prose is
+  unchanged. No `compound_scale` suffix bucket remains; remaining suffix bucket
+  is only `physical_unit` 1,126; contract 0, semantic 0, queue empty, targeted
+  suite 182 passing.
 - Codex unit-rate/denominator lane: added checked `fmt_qty(unit_label=...)` and
   migrated all 16 `TFLOP/s per W`, `kg/kWh`, `MWh/household-year`,
   `FLOP/byte`, `GB/day`, `GB per day`, `MB/photo`, `KB/patient`, `MWh/year`,

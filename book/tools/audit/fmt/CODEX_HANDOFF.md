@@ -258,16 +258,14 @@ across 132 value exports and 75 prose lines. `fmt_semantic_suffix` and its test
 now flag `suffix=" pp"` as `pp_in_suffix`; `audit_fmt_usage.py` now classifies
 percentage-point suffixes separately and reports `fmt_pp` calls at 21.
 
-**A19 — Scale-word and compound-scale formatter design: TODO.**
-Audit still reports 8 exact `scale_word` suffixes and grep finds compound
-suffixes such as `"million parameters"`, `"million queries"`,
-`"million tokens/hour"`, and `"billion FLOPs"`. Do not blindly convert these
-to `M`/`B` glyph style because word-scale prose may be intentional. Recommended
-next design: add a word-scale mode to `fmt_count`, a structured counted-rate
-path for tokens/hour, and either `fmt_qty`/Pint or a thin `fmt_ops` wrapper for
-FLOP-count prose. Then update `audit_fmt_usage.py` and `fmt_semantic_suffix` so
-compound scale suffixes do not fall through as `physical_unit`; add tests for
-word-scale output and checker coverage.
+**A19 — Scale-word and compound-scale formatter design: DONE.**
+`fmt_count` now accepts direct word scales such as `scale="million"` /
+`scale="billion"` while preserving compact glyph scales such as `scale="M"` /
+`scale="B"`. `fmt_rate` now accepts the same checked scale argument for
+counted rates such as `tokens/hour`, and word-scale FLOP prose uses
+`fmt_qty(..., unit_label="billion FLOPs")` to preserve visible wording while
+still converting through Pint. `fmt_count(..., scale_style="word")` remains for
+compatibility, but new QMD should prefer the clearer direct word-scale spelling.
 
 **A20 — ML ops time suffixes: DONE.**
 All 19 `time_unit` suffix sites in `vol1/ml_ops/ml_ops.qmd` moved to
@@ -357,7 +355,7 @@ pytest suite PASS (174 tests); `fmt_prose_contract.py` 0; `codemod_fmt.py
 queue` `by kind: {}`; `./book/binder check math` PASS;
 `audit_prose_semantics.py` CLEAN across 81 files.
 
-**A27 — Exact scale-word suffix lane: DONE, API naming still open.**
+**A27 — Exact scale-word suffix lane: DONE.**
 Added `fmt_count(..., scale_style="word")` and migrated the 8 exact
 `suffix=" million"` / `suffix=" billion"` QMD sites to typed count formatting:
 `data_selection` (1), `introduction` (2), `ml_ops` (1), `training` (1),
@@ -371,9 +369,9 @@ wrapped keyword arguments, after pre-commit exposed the false positive on
 `scale_style="word"`. Verification: `git diff --check` PASS; py_compile PASS;
 focused pytest suite PASS (176 tests); `fmt_prose_contract.py` 0;
 `codemod_fmt.py queue` `by kind: {}`; `./book/binder check math` PASS;
-`audit_prose_semantics.py` CLEAN across 81 files. User flagged
-`scale="B", scale_style="word"` as unclear; discuss a clearer public spelling
-such as `scale="billion"` before final API lock.
+`audit_prose_semantics.py` CLEAN across 81 files. The later compound-scale lane
+resolved the source spelling concern: new word-scale QMD should use
+`scale="billion"` rather than `scale="B", scale_style="word"`.
 
 **A28 — Residual plain count-label suffix lane: DONE.**
 Migrated 17 remaining plain count-noun suffixes (`errors`, `steps`, `photos`,
@@ -491,13 +489,30 @@ Values and substituted prose were byte-identical across `hw_acceleration`,
 `introduction`, `ml_systems`, `ml_workflow`, `nn_computation`, `training`, and
 `edge_intelligence`. `audit_fmt_usage.py` now reports no
 `unit_rate_or_denominator` suffix bucket and `fmt_qty` at 291. Remaining suffix
-buckets: `physical_unit` 1,126 and `compound_scale` 14. Verification: `git diff
+buckets before A37: `physical_unit` 1,126 and `compound_scale` 14. Verification: `git diff
 --check` PASS; py_compile PASS; focused pytest suite PASS (181 tests);
 `fmt_prose_contract.py` 0; `codemod_fmt.py queue` `by kind: {}`;
 `./book/binder check math` PASS; `audit_prose_semantics.py` CLEAN across 81
 files.
 
-### B. WS4 — unit-suffix lane (~2,393 sites: `GB`/`ms`/`W`/`GB/s`/…)  ← the big one
+**A37 — Compound-scale suffix lane: DONE.**
+Cleared all 14 `compound_scale` suffix sites. `fmt_count` now supports direct
+word scales (`scale="million"`, `scale="billion"`) plus
+`attributive=True` for `7-billion` noun modifiers; `fmt_rate` supports checked
+scaled count rates including `tokens/hour`; and word-scale FLOP phrases moved
+to `fmt_qty(..., unit_label="billion FLOPs")` / `"trillion FLOPs"` so Pint still
+dimension-checks the value. Most values were byte-identical. Intentional
+adjudicated changes: `cost_saving_str` now owns the escaped dollar sign through
+`fmt_usd` while substituted prose stayed identical; `200 K parameters` became
+the user-approved compact `200K parameters`; and the old floored
+`32K tokens` display for 32,768 tokens now renders as `32.8K tokens`.
+`audit_fmt_usage.py` now reports no `compound_scale` suffix bucket. Remaining
+suffix bucket: `physical_unit` 1,126. Verification: `git diff --check` PASS;
+py_compile PASS; focused pytest suite PASS (182 tests); `fmt_prose_contract.py`
+0; `codemod_fmt.py queue` `by kind: {}`; `./book/binder check math` PASS;
+`audit_prose_semantics.py` CLEAN across 81 files.
+
+### B. WS4 — unit-suffix lane (remaining 1,126 physical-unit suffixes: `GB`/`MB`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.
 `weights_gb`), not Pint Quantities, and `fmt_qty` requires a Pint Quantity to

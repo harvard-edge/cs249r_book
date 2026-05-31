@@ -81,32 +81,26 @@ For compact lower-bound notation that is intentionally written as a trailing
 plus, use checked `fmt_time(..., marker="+")` so the plus cannot become an
 unvalidated suffix.
 
-### Scale-word and compound-scale backlog
+### Scale-word and compound-scale status
 
-The audit still has a small `scale_word` bucket plus compound suffix blind
-spots such as `"million parameters"`, `"million queries"`, `"million tokens/hour"`,
-and `"billion FLOPs"`. Do not blindly convert these to `M`/`B` glyph style:
-phrases like "60 million parameters" may be intentional prose.
+The exact `scale_word` and `compound_scale` suffix buckets are migrated. The
+public spelling is now direct:
 
-Recommended implementation:
+- `fmt_count(n, scale="B")` renders compact glyph style, e.g. `70B`.
+- `fmt_count(n, scale="billion", label="parameter")` renders word style, e.g.
+  `70 billion parameters`.
+- `fmt_count(n, scale="billion", attributive=True)` renders hyphenated noun
+  modifiers, e.g. `7-billion`.
+- `fmt_rate(tokens_per_hour, "tokens/hour", scale="million")` renders checked
+  counted rates such as `45.2 million tokens/hour`.
+- Word-scale FLOP prose keeps Pint validation through
+  `fmt_qty(flops * flop, GFLOPs, unit_label="billion FLOPs")`.
 
-- extend `fmt_count` with a word-scale mode, e.g.
-  `fmt_count(n, scale="M", scale_style="word", label="parameter")` renders
-  `60 million parameters`;
-- add a structured rate form for word-scale counted rates such as tokens/hour;
-- decide whether FLOP-count prose should be `fmt_qty` with Pint FLOP units or a
-  thin `fmt_ops` wrapper;
-- teach `audit_fmt_usage.py` and `fmt_semantic_suffix` to classify compound
-  scale suffixes instead of falling through to `physical_unit`;
-- add tests for word-scale output, label pluralization, rate denominators,
-  FLOP handling, and checker coverage for exact and compound scale suffixes.
-
-Status: the exact `scale_word` bucket (`suffix=" million"` /
-`suffix=" billion"`) is migrated through `fmt_count(..., scale_style="word")`.
-Before the final API lock, revisit the source readability of that spelling.
-The user flagged calls such as `scale="B", scale_style="word"` as unclear; the
-candidate cleaner API is to let `scale="billion"` render the word form, while
-`scale="B"` keeps the compact glyph form.
+The old `fmt_count(..., scale="B", scale_style="word")` compatibility path
+still works, but new QMD should prefer `scale="billion"` because it is clearer
+at the call site. The compound migration also found one correctness fix:
+`32K tokens` from `32 * 1024` hid 768 tokens, so it now renders as
+`32.8K tokens`.
 
 ## 4. Formatter defaults
 
@@ -169,9 +163,9 @@ FLOP counts are already Pint quantities in this repo (`flop`, `KFLOPs`,
 `MFLOPs`, `GFLOPs`, `PFLOPs`, ...), so exact FLOP-count suffixes should use
 `fmt_qty(quantity, FLOP_unit)`. Do not add a separate `fmt_ops` wrapper unless a
 later audit shows repeated call-site mistakes that the wrapper would prevent.
-Word-scale phrases such as `billion FLOPs` and `trillion FLOPs` are a separate
-compound-scale/prose decision because converting them to `GFLOPs`/`TFLOPs`
-changes visible wording.
+Word-scale phrases such as `billion FLOPs` and `trillion FLOPs` keep their
+visible wording with `fmt_qty(..., unit_label="billion FLOPs")` after converting
+through the corresponding Pint FLOP unit.
 
 When Pint's compact label does not match the book's house style, use
 `fmt_qty(..., unit_label="...")` rather than falling back to `suffix=`. The

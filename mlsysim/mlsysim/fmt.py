@@ -169,9 +169,55 @@ _COUNT_LABEL_DENYLIST = {
     "GB/s", "MB/s", "TB/s", "Gb/s", "TFLOP/s", "PFLOP/s",
     "W", "kW", "MW", "J", "mJ", "Wh", "kWh", "MWh",
     "ms", "s", "min", "h", "ns", "us", "µs", "μs",
-    "QPS", "FPS", "tokens/s", "img/s", "images/s", "req/s", "samples/s",
+    "QPS", "FPS", "tokens/s", "tokens/hour", "img/s", "images/s", "req/s",
+    "samples/s",
     "percent", "percentage point", "percentage points",
 }
+
+
+_DECIMAL_SCALE_FACTORS = {"K": 1e3, "M": 1e6, "B": 1e9, "T": 1e12}
+_DECIMAL_SCALE_WORDS = {
+    "K": "thousand",
+    "M": "million",
+    "B": "billion",
+    "T": "trillion",
+}
+_DECIMAL_SCALE_SYMBOL_BY_WORD = {
+    word: symbol for symbol, word in _DECIMAL_SCALE_WORDS.items()
+}
+
+
+def _resolve_decimal_scale(scale, *, what, style="symbol", attributive=False):
+    """Return ``(divisor, suffix)`` for checked K/M/B/T decimal scales."""
+    if style not in {"symbol", "word"}:
+        raise ValueError(
+            f"{what} style must be 'symbol' or 'word', got {style!r}."
+        )
+    if scale is None:
+        if attributive:
+            raise ValueError(f"{what} attributive=True requires scale=.")
+        return 1, ""
+    if not isinstance(scale, str):
+        raise TypeError(
+            f"{what} must be a string or None, got {type(scale).__name__}."
+        )
+    if scale in _DECIMAL_SCALE_FACTORS:
+        if attributive and style != "word":
+            raise ValueError(
+                f"{what} attributive=True requires a word scale, got {scale!r}."
+            )
+        divisor = _DECIMAL_SCALE_FACTORS[scale]
+        if style == "word":
+            joiner = "-" if attributive else " "
+            return divisor, f"{joiner}{_DECIMAL_SCALE_WORDS[scale]}"
+        return divisor, scale
+    word_key = scale.lower()
+    if word_key in _DECIMAL_SCALE_SYMBOL_BY_WORD:
+        symbol = _DECIMAL_SCALE_SYMBOL_BY_WORD[word_key]
+        joiner = "-" if attributive else " "
+        return _DECIMAL_SCALE_FACTORS[symbol], f"{joiner}{scale}"
+    allowed = sorted(_DECIMAL_SCALE_FACTORS) + sorted(_DECIMAL_SCALE_SYMBOL_BY_WORD)
+    raise ValueError(f"{what} must be one of {allowed}, got {scale!r}.")
 
 
 def _validate_count_label(label, *, what="label") -> str:
@@ -342,7 +388,6 @@ def fmt_int(
     )
 
 
-_USD_SCALES = {"K": 1e3, "M": 1e6, "B": 1e9, "T": 1e12}
 _USD_MARKERS = {"*"}
 
 
@@ -378,6 +423,8 @@ def fmt_usd(
                 per="year")                  # "~\\$1,234/year"
         fmt_usd(gpt3_cost, precision=1,
                 scale="M")                   # "\\$4.6M"
+        fmt_usd(4_750_000, precision=2,
+                scale="million")             # "\\$4.75 million"
         fmt_usd(rate_per_gb, precision=2,
                 commas=False, per="GB")      # "\\$0.09/GB"
 
@@ -392,9 +439,10 @@ def fmt_usd(
         commas: Thousands separators (default ``True`` — currency usually
             groups: ``\\$15,000``). Pass ``False`` for small rates.
         approx: When ``True``, prepend ``~`` before the dollar sign.
-        scale: Optional currency scale glyph (``"K"``, ``"M"``, ``"B"``,
-            ``"T"``). The raw dollar amount is divided by the scale here, so
-            the magnitude and display glyph cannot drift apart.
+        scale: Optional currency scale (``"K"``, ``"M"``, ``"B"``, ``"T"`` or
+            word forms such as ``"million"``). The raw dollar amount is divided
+            by the scale here, so the magnitude and display suffix cannot drift
+            apart.
         per: Optional rate denominator (``"month"``, ``"GB"``, ``"kWh"``, or a
             Pint unit such as ``GB``). Pass without a leading slash.
         marker: Optional checked table marker appended after the currency value.
@@ -417,13 +465,12 @@ def fmt_usd(
         raise ValueError("Use suffix= or structured scale=/per=/marker=, not both.")
     structured_suffix = ""
     if scale is not None:
-        if scale not in _USD_SCALES:
-            raise ValueError(
-                f"fmt_usd scale must be one of {sorted(_USD_SCALES)}, "
-                f"got {scale!r}."
-            )
-        amount = amount / _USD_SCALES[scale]
-        structured_suffix += scale
+        divisor, scale_suffix = _resolve_decimal_scale(
+            scale,
+            what="fmt_usd scale",
+        )
+        amount = amount / divisor
+        structured_suffix += scale_suffix
     structured_suffix += _denominator_suffix(
         per,
         what="fmt_usd per",
@@ -616,15 +663,6 @@ def fmt_multiple(factor, precision=1, commas=False):
     return fmt(v, precision=precision, commas=commas)
 
 
-_COUNT_SCALES = {"K": 1e3, "M": 1e6, "B": 1e9, "T": 1e12}
-_COUNT_SCALE_WORDS = {
-    "K": "thousand",
-    "M": "million",
-    "B": "billion",
-    "T": "trillion",
-}
-
-
 def fmt_count(
     value,
     scale=None,
@@ -637,6 +675,7 @@ def fmt_count(
     lower_bound=False,
     allow_fractional=False,
     scale_style="symbol",
+    attributive=False,
 ):
     """
     Format a **count** (a dimensionless tally of things), optionally with a
@@ -650,7 +689,11 @@ def fmt_count(
         fmt_count(5_300_000, scale="M", precision=1) # "5.3M"
         fmt_count(5_300_000, scale="M",
                   scale_style="word", precision=1)   # "5.3 million"
+        fmt_count(5_300_000, scale="million",
+                  precision=1)                       # "5.3 million"
         fmt_count(70e9, scale="B")                   # "70B"   (e.g. params)
+        fmt_count(7e9, scale="billion",
+                  attributive=True)                  # "7-billion"
         fmt_count(8192)                              # "8,192" (no scale)
         fmt_count(1024, label="GPU")                 # "1,024 GPUs"
         fmt_count(1024, label="GPU", approx=True)    # "~1,024 GPUs"
@@ -667,7 +710,7 @@ def fmt_count(
     ``fmt_qty``. ``fmt_count`` is for pure tallies only.
     """
     raw_v = _numeric_magnitude(value)
-    require_integer = label is not None or plural_label is not None
+    require_integer = label is not None or plural_label is not None or attributive
     _validate_count_value(
         raw_v,
         allow_fractional=allow_fractional,
@@ -675,6 +718,11 @@ def fmt_count(
     )
     if suffix and (label is not None or plural_label is not None):
         raise ValueError("Use suffix= or structured label=, not both.")
+    if attributive and (suffix or label is not None or plural_label is not None):
+        raise ValueError(
+            "fmt_count attributive=True formats only the scaled modifier; "
+            "put the count noun in prose."
+        )
     if scale_style not in {"symbol", "word"}:
         raise ValueError(
             "fmt_count scale_style must be 'symbol' or 'word', "
@@ -682,19 +730,18 @@ def fmt_count(
         )
     if scale is None and scale_style != "symbol":
         raise ValueError("fmt_count scale_style='word' requires scale=.")
+    if scale is None and attributive:
+        raise ValueError("fmt_count attributive=True requires scale=.")
     v = raw_v
     glyph = ""
     if scale is not None:
-        if scale not in _COUNT_SCALES:
-            raise ValueError(
-                f"fmt_count scale must be one of {sorted(_COUNT_SCALES)} or "
-                f"None, got {scale!r}."
-            )
-        v = v / _COUNT_SCALES[scale]
-        if scale_style == "word":
-            glyph = f" {_COUNT_SCALE_WORDS[scale]}"
-        else:
-            glyph = scale
+        divisor, glyph = _resolve_decimal_scale(
+            scale,
+            what="fmt_count scale",
+            style=scale_style,
+            attributive=attributive,
+        )
+        v = v / divisor
     suffix = suffix or _label_suffix(raw_v, label, plural_label)
     return fmt(
         v,
@@ -707,7 +754,8 @@ def fmt_count(
 
 
 _RATE_UNITS = {
-    "QPS", "FPS", "tokens/s", "img/s", "images/s", "req/s", "samples/s",
+    "QPS", "FPS", "tokens/s", "tokens/hour", "img/s", "images/s", "req/s",
+    "samples/s",
 }
 
 
@@ -717,6 +765,7 @@ def fmt_rate(
     *,
     precision=0,
     commas=True,
+    scale=None,
     approx=False,
     lower_bound=False,
     allow_negative=False,
@@ -725,7 +774,8 @@ def fmt_rate(
 
     Physical rates (``GB/s``, ``TFLOP/s``, ``W``) remain ``fmt_qty`` values.
     This helper is for named service/data rates whose numerator is a counted
-    event rather than a Pint physical unit.
+    event rather than a Pint physical unit. ``scale=`` accepts the same checked
+    decimal scales as ``fmt_count``.
     """
     unit = _clean_text_atom(unit, what="rate unit")
     if unit not in _RATE_UNITS:
@@ -738,11 +788,18 @@ def fmt_rate(
             f"fmt_rate expects a non-negative rate, got {v}. Pass "
             f"allow_negative=True if a signed rate is genuinely intended."
         )
+    scale_suffix = ""
+    if scale is not None:
+        divisor, scale_suffix = _resolve_decimal_scale(
+            scale,
+            what="fmt_rate scale",
+        )
+        v = v / divisor
     return fmt(
         v,
         precision=precision,
         commas=commas,
-        suffix=f" {unit}",
+        suffix=f"{scale_suffix} {unit}",
         approx=approx,
         lower_bound=lower_bound,
     )
@@ -920,14 +977,12 @@ def fmt_count_range(
     hi_count = hi_raw
     glyph = ""
     if scale is not None:
-        if scale not in _COUNT_SCALES:
-            raise ValueError(
-                f"fmt_count_range scale must be one of {sorted(_COUNT_SCALES)} "
-                f"or None, got {scale!r}."
-            )
-        lo_raw = lo_raw / _COUNT_SCALES[scale]
-        hi_raw = hi_raw / _COUNT_SCALES[scale]
-        glyph = scale
+        divisor, glyph = _resolve_decimal_scale(
+            scale,
+            what="fmt_count_range scale",
+        )
+        lo_raw = lo_raw / divisor
+        hi_raw = hi_raw / divisor
     a = fmt(lo_raw, precision=precision, commas=commas)
     b = fmt(hi_raw, precision=precision, commas=commas)
     suffix = ""
