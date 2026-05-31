@@ -1161,7 +1161,7 @@ The plotted reference uses `{python} BuildVsBuyFigureScenario.gpus_str` H100 GPU
 # │ Exports: cloud_cost_display, annual_elec_display, onprem_display,
 # │          util_pct_str, breakeven_util
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_usd, check
+from mlsysim.fmt import fmt, fmt_qty, fmt_usd, check
 
 class TcoScenario:
     """Namespace for build-vs-buy economics."""
@@ -1297,7 +1297,8 @@ class TenKGpuClusterTco:
     cloud_gpu_hour_usd = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.m_as("dollar / hour")
     utilization = 0.80
     lifecycle_years = 3
-    gpu_tdp_w = Hardware.Cloud.H100.tdp.m_as(watt)
+    gpu_tdp = Hardware.Cloud.H100.tdp
+    gpu_tdp_w = gpu_tdp.m_as(watt)
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
     nodes = gpus // gpus_per_node
@@ -1332,7 +1333,7 @@ class TenKGpuClusterTco:
     breakeven_util_str = fmt_percent(breakeven_utilization, precision=1, commas=False, style='prose')
     gpus_str = fmt_count(gpus, commas=True, label="GPU")
     node_price_str = fmt_usd(node_price_usd, precision=0, commas=True)
-    gpu_tdp_str = fmt(gpu_tdp_w, precision=0, commas=False, suffix=" W")
+    gpu_tdp_str = fmt_qty(gpu_tdp, watt, precision=0, commas=False)
     pue_str = fmt(pue, precision=1, commas=False)
     hours_per_year_str = fmt(HOURS_PER_YEAR, precision=0, commas=True)
     electricity_rate_str = fmt_usd(electricity_rate, precision=2, commas=False, per="kWh")
@@ -1423,10 +1424,10 @@ from mlsysim.fmt import fmt_qty
 class GpuEfficiencyTableRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    v100_ef_str = fmt(Hardware.Cloud.V100.compute.peak_flops.m_as(TFLOPs/second)/Hardware.Cloud.V100.tdp.m_as(watt), precision=2, commas=False, suffix=" TFLOP/s")
-    a100_ef_str = fmt(Hardware.Cloud.A100.compute.peak_flops.m_as(TFLOPs/second)/Hardware.Cloud.A100.tdp.m_as(watt), precision=2, commas=False, suffix=" TFLOP/s")
-    h100_ef_str = fmt(Hardware.Cloud.H100.compute.precision_flops['fp8'].m_as(TFLOPs/second)/Hardware.Cloud.H100.tdp.m_as(watt), precision=2, commas=False, suffix=" TFLOP/s")
-    b200_ef_str = fmt(Hardware.Cloud.B200.compute.precision_flops['fp8'].m_as(TFLOPs/second)/Hardware.Cloud.B200.tdp.m_as(watt), precision=2, commas=False, suffix=" TFLOP/s")
+    v100_ef_str = fmt_qty(Hardware.Cloud.V100.compute.peak_flops / Hardware.Cloud.V100.tdp, TFLOPs/second/watt, precision=2, commas=False, unit_label="TFLOP/s")
+    a100_ef_str = fmt_qty(Hardware.Cloud.A100.compute.peak_flops / Hardware.Cloud.A100.tdp, TFLOPs/second/watt, precision=2, commas=False, unit_label="TFLOP/s")
+    h100_ef_str = fmt_qty(Hardware.Cloud.H100.compute.precision_flops['fp8'] / Hardware.Cloud.H100.tdp, TFLOPs/second/watt, precision=2, commas=False, unit_label="TFLOP/s")
+    b200_ef_str = fmt_qty(Hardware.Cloud.B200.compute.precision_flops['fp8'] / Hardware.Cloud.B200.tdp, TFLOPs/second/watt, precision=2, commas=False, unit_label="TFLOP/s")
     b200_fp8_tflops_str = fmt_qty(Hardware.Cloud.B200.compute.precision_flops['fp8'], TFLOP/second, precision=0, commas=False)
     b200_tdp_w_str = fmt_qty(Hardware.Cloud.B200.tdp, watt, precision=0, commas=False)
 ```
@@ -1695,7 +1696,7 @@ class InfraFrontierTcoNodeRecap:
 # │ How: Compute total training FLOPs and sustained cluster throughput.
 # │ Exports: PlanningThroughputScenario.*_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int,  fmt, fmt_sci, check
+from mlsysim.fmt import fmt_int, fmt_qty, fmt, fmt_sci, check
 
 class PlanningThroughputScenario:
     """Conservative BF16/FP16 planning basis for the 175B training run."""
@@ -1706,12 +1707,15 @@ class PlanningThroughputScenario:
     training_flops_per_token_param = Literature.Chinchilla.ComputeConstant
     mfu = Literature.Training.MfuHigh * 0.9
     gpus = 1_024
-    h100_peak_tflops = Hardware.Cloud.H100.compute.peak_flops.m_as(TFLOPs / second)
+    h100_peak_flops = Hardware.Cloud.H100.compute.peak_flops
+    h100_peak_tflops = h100_peak_flops.m_as(TFLOPs / second)
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
     total_flops = training_flops_per_token_param * params * tokens
     per_gpu_sustained_tflops = h100_peak_tflops * mfu
-    cluster_sustained_pflops = (per_gpu_sustained_tflops * gpus) / THOUSAND
+    per_gpu_sustained_flops = h100_peak_flops * mfu
+    cluster_sustained_flops = per_gpu_sustained_flops * gpus
+    cluster_sustained_pflops = cluster_sustained_flops.m_as(PFLOPs / second)
     ideal_seconds = total_flops / (cluster_sustained_pflops * (THOUSAND * TRILLION))
     ideal_days = ideal_seconds / SEC_PER_DAY
 
@@ -1723,10 +1727,10 @@ class PlanningThroughputScenario:
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
     total_flops_str = fmt_sci(total_flops, precision=2)
     mfu_pct_str = fmt_percent(mfu, precision=0, commas=False, style='prose')
-    h100_peak_tflops_str = fmt(h100_peak_tflops, precision=0, commas=False, suffix=" TFLOP/s")
-    per_gpu_sustained_tflops_str = fmt(per_gpu_sustained_tflops, precision=1, commas=False, suffix=" TFLOP/s")
+    h100_peak_tflops_str = fmt_qty(h100_peak_flops, TFLOPs / second, precision=0, commas=False, unit_label="TFLOP/s")
+    per_gpu_sustained_tflops_str = fmt_qty(per_gpu_sustained_flops, TFLOPs / second, precision=1, commas=False, unit_label="TFLOP/s")
     gpus_str = fmt_count(gpus, label="GPU")
-    cluster_sustained_pflops_str = fmt(cluster_sustained_pflops, precision=1, commas=False, suffix=" PFLOP/s")
+    cluster_sustained_pflops_str = fmt_qty(cluster_sustained_flops, PFLOPs / second, precision=1, commas=False, unit_label="PFLOP/s")
     ideal_days_str = fmt_int(round(ideal_days), commas=False)
 ```
 
@@ -1744,10 +1748,15 @@ class InfraFrontierTcoPlanningRecap:
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Exports: RackPowerPlanningRecap.rack_power_str
+from mlsysim.fmt import fmt_qty
+
 class RackPowerPlanningRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    rack_power_str = fmt((Hardware.Cloud.H100.tdp*Systems.Nodes.DGX_H100.accelerators_per_node).m_as(kilowatt)*4+10.3, precision=1, commas=False, suffix=" kW")
+    rack_gpu_power = Hardware.Cloud.H100.tdp * Systems.Nodes.DGX_H100.accelerators_per_node * 4
+    rack_overhead_power = 10.3 * kilowatt
+    rack_power = rack_gpu_power + rack_overhead_power
+    rack_power_str = fmt_qty(rack_power, kilowatt, precision=1, commas=False)
 ```
 
 To illustrate this methodology concretely, consider planning the infrastructure for training our `{python} InfraFrontierTcoPlanningRecap.frontier_params_b_str`B model. The training workload at large batch sizes is compute-bound, so the design optimizes for TFLOP/s per dollar and selects the H100 as the highest available TFLOP/s at reasonable cost. The 2.2 TB training state requires tensor parallelism within each node plus optimizer sharding, activation checkpointing, and offload across the wider data-parallel group, yielding a DGX H100 configuration. Sizing the cluster follows from the compute budget: at 6 FLOPs per parameter-token over 175 billion parameters and 300 billion tokens, the run requires `{python} PlanningThroughputScenario.total_flops_str` FLOPs. Using a conservative BF16/FP16 planning basis rather than the FP8 headline peak, each H100 delivers `{python} PlanningThroughputScenario.h100_peak_tflops_str` peak and `{python} PlanningThroughputScenario.per_gpu_sustained_tflops_str` sustained at `{python} PlanningThroughputScenario.mfu_pct_str` MFU; with `{python} PlanningThroughputScenario.gpus_str`, the cluster reaches roughly `{python} PlanningThroughputScenario.cluster_sustained_pflops_str` sustained and completes the run in about `{python} PlanningThroughputScenario.ideal_days_str` days of idealized compute time, or 2--4 weeks with operational overhead. The TP-8, PP-4, DP-32 configuration generates structured AllReduce traffic suited to a rail-optimized InfiniBand fabric.
@@ -1758,7 +1767,7 @@ The 128 nodes draw `{python} RackPowerPlanningRecap.rack_power_str` per 4-node r
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt_time
+from mlsysim.fmt import fmt_qty, fmt_time
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Exports: InfraPlanningExercise.params_b_str,
 # │          InfraPlanningExercise.tokens_t_str,
@@ -1774,7 +1783,8 @@ class InfraPlanningExercise:
     params_b = round(_plan_model.parameters.m_as(Bparam))
     tokens_t = 1
     weeks = 4
-    power_mw = 2
+    power = 2 * ureg.megawatt
+    power_mw = power.m_as(ureg.megawatt)
     mfu_pct = round(Literature.Training.MfuHigh * 0.9 * 100)
     pue = Infrastructure.FacilityCooling.StateOfArt.pue
     non_gpu_overhead_pct = 50
@@ -1785,7 +1795,7 @@ class InfraPlanningExercise:
     params_b_str = fmt(params_b, precision=0, commas=False)
     tokens_t_str = fmt(tokens_t, precision=0, commas=False)
     weeks_str = fmt_time(weeks, 'week', precision=0, commas=False, style='word')
-    power_mw_str = fmt(power_mw, precision=0, commas=False, suffix=" MW")
+    power_mw_str = fmt_qty(power, ureg.megawatt, precision=0, commas=False, unit_label="MW")
     mfu_pct_str = fmt_percent(mfu_pct/100, precision=0, commas=False, style='prose')
     pue_str = fmt(pue, precision=1, commas=False)
     non_gpu_overhead_pct_str = fmt_percent(non_gpu_overhead_pct/100, precision=0, commas=False, style='prose')
@@ -3087,7 +3097,7 @@ In multi-tenant clusters where multiple training jobs share the same physical in
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt_int, fmt_time
+from mlsysim.fmt import fmt_int, fmt_qty, fmt_qty_int, fmt_time
 #| label: checkpoint-compute-tradeoff
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Exports: CheckpointComputeTradeoff.frontier_params_b_str,
@@ -3104,15 +3114,17 @@ import math
 class CheckpointComputeTradeoff:
     # ┌── 1. LOAD ──────────────────────────────────────────
     params = Models.Language.GPT3.parameters.m_as(param)
-    write_bw_gbs = 100
+    write_bw = 100 * GB / second
+    write_bw_gbs = write_bw.m_as(GB / second)
     num_gpus = Systems.Clusters.Training_10K.total_accelerators
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    weights_gb = (params * BYTES_FP16.m_as(byte) * byte).m_as(GB)
-    gradients_gb = weights_gb
-    optimizer_gb = (params * BYTES_FP32.m_as(byte) * 2 * byte).m_as(GB)
-    training_state_tb = (weights_gb + gradients_gb + optimizer_gb) / THOUSAND
-    t_write_s = training_state_tb * THOUSAND / write_bw_gbs
+    weights = params * BYTES_FP16
+    gradients = weights
+    optimizer = params * BYTES_FP32 * 2
+    training_state = weights + gradients + optimizer
+    training_state_tb = training_state.m_as(TB)
+    t_write_s = (training_state / write_bw).m_as(second)
     mtbf_system_s = Systems.Reliability.Gpu.mttf_hours * SEC_PER_HOUR / num_gpus
     mtbf_system_hr = mtbf_system_s / SEC_PER_HOUR
     tau_opt_s = math.sqrt(2 * t_write_s * mtbf_system_s)
@@ -3124,8 +3136,8 @@ class CheckpointComputeTradeoff:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     frontier_params_b_str = fmt(params / BILLION, precision=0, commas=False)
-    training_state_tb_str = fmt_int(training_state_tb, commas=False, suffix=" TB")
-    write_bw_gbs_str = fmt(write_bw_gbs, precision=0, commas=False, suffix=" GB/s")
+    training_state_tb_str = fmt_qty_int(training_state, TB, commas=False)
+    write_bw_gbs_str = fmt_qty(write_bw, GB / second, precision=0, commas=False)
     t_write_s_str = fmt_time(t_write_s, 'second', precision=0, commas=False, style='word')
     num_gpus_str = fmt(num_gpus, precision=0, commas=True)
     mtbf_system_s_str = fmt(mtbf_system_s, precision=0, commas=True)

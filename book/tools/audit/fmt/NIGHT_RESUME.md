@@ -159,7 +159,10 @@ byte-identically, leaving the file with zero `suffix=` calls. Remaining suffix
 bucket is only 870 `physical_unit` suffixes. The `responsible_engr`
 physical-unit cleanup then migrated all 14 remaining sites in that chapter,
 byte-identically, leaving the file with zero `suffix=` calls. Remaining suffix
-bucket is only 856 `physical_unit` suffixes. Remaining: the rest of WS4/WS3 and
+bucket is only 856 `physical_unit` suffixes. The `vol2/ops_scale`
+physical-unit cleanup then migrated all 12 remaining sites in that chapter,
+byte-identically, leaving the file with zero `suffix=` calls. Remaining suffix
+bucket is only 844 `physical_unit` suffixes. Remaining: the rest of WS4/WS3 and
 later PDF/lock phases. Nothing is half-done or broken.
 
 **New TODOs from user discussion:** add a prose-bound output contract/gate so
@@ -576,6 +579,10 @@ drop. The adjacent prose/table text was updated to `1 percentage-point threshold
 and `(drop of 6.8 percentage points)`. No user-decision items remain open.
 
 ## Session commit log (newest first)
+- Codex `vol2/ops_scale` physical-unit cleanup: migrated all 12 remaining
+  physical-unit suffix sites in the chapter to typed quantity formatters,
+  byte-identically. `ops_scale` now has 0 `suffix=` calls; physical-unit
+  suffixes dropped 856 -> 844.
 - Codex `vol1/responsible_engr` physical-unit cleanup: migrated all 14
   remaining physical-unit suffix sites in the chapter to typed quantity
   formatters, byte-identically. `responsible_engr` now has 0 `suffix=` calls;

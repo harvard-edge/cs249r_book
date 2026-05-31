@@ -53,6 +53,43 @@ Status:
 - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/codemod_fmt.py queue --root book/quarto/contents` PASS, `by kind: {}`
 - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_prose_semantics.py --root book/quarto/contents` PASS, 0 findings
 
+## 2026-05-31 — `vol2/ops_scale` physical-unit cleanup
+
+Change type: byte-identical formatter relocation. Replaced all 12 remaining
+physical-unit suffix sites in `ops_scale` with typed quantity formatters.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol2/ops_scale/ops_scale.qmd` | 12 | 195 | 95 | identical values + prose |
+
+Validation details:
+
+- Migrated GPU TDP, per-watt TFLOP/s efficiency displays, planning throughput
+  in TFLOP/s and PFLOP/s, rack and facility power in kW/MW, and checkpoint
+  state/bandwidth in TB and GB/s.
+- Per-watt efficiency strings now keep quantity type as
+  `TFLOPs/second/watt`, while `unit_label="TFLOP/s"` preserves the existing
+  table display because the column/prose owns "per watt".
+- Checkpoint state now keeps weights, gradients, optimizer state, and write
+  bandwidth as Pint quantities until `fmt_qty_int` / `fmt_qty`.
+- `assess_equiv.py` baseline/snapshot/diff reported `IDENTICAL values` and
+  `IDENTICAL prose`.
+- `ops_scale` now has zero `suffix=` calls.
+- `audit_fmt_usage.py` reports `physical_unit` suffixes dropped 856 -> 844,
+  `fmt_qty` at 543, and `fmt_qty_int` at 32.
+- Verification: `git diff --check` PASS; py_compile PASS for formatter,
+  math-canonical, and fmt audit modules; focused pytest suite PASS, 190 tests;
+  `fmt_prose_contract.py` PASS, 0 violations; `codemod_fmt.py queue` PASS,
+  `by kind: {}`; `./book/binder check math` PASS;
+  `./book/binder check code --scope lego-dead-code` PASS;
+  `audit_prose_semantics.py` PASS, 0 findings across 81 files.
+- HTML/PDF render evidence: not run yet. Full rendering is intentionally
+  deferred for the separate render/prose audit checkpoint.
+
+Status: non-render verified; render audit pending.
+
 ## 2026-05-31 — `vol1/responsible_engr` physical-unit cleanup
 
 Change type: byte-identical formatter relocation. Replaced all 14 remaining
