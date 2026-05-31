@@ -196,6 +196,28 @@ class TestFmtPp:
     def test_returns_markdown_str(self):
         assert isinstance(fmt_pp(3.0, precision=0), MarkdownStr)
 
+    def test_singular_when_value_is_one(self):
+        assert fmt_pp(1.0, precision=0) == "1 percentage point"
+
+    def test_plural_for_fractional_near_one(self):
+        assert fmt_pp(0.9, precision=1) == "0.9 percentage points"
+        assert fmt_pp(1.5, precision=1) == "1.5 percentage points"
+
+    def test_pluralization_follows_rendered_number(self):
+        # any integer != 1 is plural
+        assert fmt_pp(2.0, precision=0) == "2 percentage points"
+        # a fractional value is always plural, even just below 1
+        assert fmt_pp(0.5, precision=1) == "0.5 percentage points"
+
+    def test_attributive_is_hyphenated_singular_word(self):
+        assert fmt_pp(5.0, precision=0, attributive=True) == "5 percentage-point"
+        # attributive stays singular/hyphenated regardless of magnitude
+        assert fmt_pp(12.0, precision=0, attributive=True) == "12 percentage-point"
+
+    def test_attributive_rejected_for_symbol_style(self):
+        with pytest.raises(ValueError, match="attributive"):
+            fmt_pp(5.0, style="symbol", attributive=True)
+
 
 class TestFmtMultiple:
     def test_number_only_no_glyph(self):

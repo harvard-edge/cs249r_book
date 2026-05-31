@@ -354,7 +354,7 @@ def fmt_percent(ratio, precision=1, commas=False, style="number",
     return fmt(r * 100, precision=precision, commas=commas, suffix=glyph)
 
 
-def fmt_pp(points, precision=1, commas=False, style="prose"):
+def fmt_pp(points, precision=1, commas=False, style="prose", attributive=False):
     """
     Format a difference of two percentages as **percentage points**.
 
@@ -363,8 +363,18 @@ def fmt_pp(points, precision=1, commas=False, style="prose"):
     Using a dedicated helper keeps "5 percentage points" (an additive gap)
     from being confused with "5 percent" (a multiplicative share).
 
-        style="prose"   →  "7 percentage points"  (default)
-        style="symbol"  →  "7 pp"
+        style="prose"               →  "7 percentage points"  (plural noun)
+        style="prose", value == 1   →  "1 percentage point"    (singular noun)
+        style="prose", attributive  →  "7 percentage-point"    (hyphenated
+                                        compound adjective, e.g. "a 7
+                                        percentage-point gap" — always hyphenated
+                                        and singular, per standard English)
+        style="symbol"              →  "7 pp"
+
+    The noun form agrees in number with the **rendered** value, so a value that
+    rounds to 1 reads "1 percentage point" while 0.9 / 1.5 read "...points".
+    Use ``attributive=True`` only when the value directly modifies a following
+    noun; use the default noun form everywhere else.
     """
     if isinstance(points, ureg.Quantity):
         v = float(points.m_as(''))
@@ -375,8 +385,18 @@ def fmt_pp(points, precision=1, commas=False, style="prose"):
         raise ValueError(
             f"fmt_pp style must be 'prose' or 'symbol', got {style!r}."
         )
-    glyph = " percentage points" if style == "prose" else " pp"
-    return fmt(v, precision=precision, commas=commas, suffix=glyph)
+    if attributive and style != "prose":
+        raise ValueError(
+            "fmt_pp(attributive=True) applies only to style='prose' (the "
+            "hyphenated adjective form), not style='symbol'."
+        )
+    num = str(fmt(v, precision=precision, commas=commas))
+    if style == "symbol":
+        return MarkdownStr(f"{num} pp")
+    if attributive:
+        return MarkdownStr(f"{num} percentage-point")
+    word = "percentage point" if num == "1" else "percentage points"
+    return MarkdownStr(f"{num} {word}")
 
 
 def fmt_multiple(factor, precision=1, commas=False):
