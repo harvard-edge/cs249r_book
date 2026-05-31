@@ -49,6 +49,7 @@ CANONICAL_STR_CALL = re.compile(
     r"\b(fmt|fmt_qty|fmt_qty_int|fmt_int|fmt_usd|fmt_percent|fmt_pp|fmt_multiple|fmt_count"
     r"|fmt_ratio|fmt_range|fmt_qty_range|fmt_time_range|fmt_count_range"
     r"|fmt_usd_range|fmt_time|fmt_rate|fmt_val|fmt_unit|fmt_sci"
+    r"|fmt_power|fmt_energy|fmt_emissions|fmt_bandwidth|fmt_memory|fmt_latency"
     r"|MarkdownStr)\s*\("
 )
 CANONICAL_MATH_CALL = re.compile(
@@ -116,6 +117,7 @@ FMT_FAMILY_USE = re.compile(
     r"\b(fmt|fmt_qty|fmt_qty_int|fmt_int|fmt_usd|fmt_math|fmt_percent|fmt_pp|fmt_multiple"
     r"|fmt_count|fmt_ratio|fmt_range|fmt_qty_range|fmt_time_range"
     r"|fmt_count_range|fmt_usd_range|fmt_time|fmt_rate|fmt_val|fmt_unit"
+    r"|fmt_power|fmt_energy|fmt_emissions|fmt_bandwidth|fmt_memory|fmt_latency"
     r"|fmt_sci|fmt_frac|sci_latex|MarkdownStr|check)\s*\("
 )
 
@@ -134,6 +136,8 @@ MLSYSIM_STAR_FMT_NAMES = frozenset({
     "fmt_count_range", "fmt_usd_range", "fmt_time", "fmt_rate", "fmt_val",
     "fmt_unit", "fmt_sci", "fmt_frac", "fmt_math", "MarkdownStr", "check",
     "sci_latex",
+    "fmt_power", "fmt_energy", "fmt_emissions", "fmt_bandwidth", "fmt_memory",
+    "fmt_latency",
 })
 
 # Pattern: fmt_percent(..., suffix=...) — fmt_percent does not accept suffix=.

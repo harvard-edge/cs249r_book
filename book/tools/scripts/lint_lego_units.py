@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -127,15 +129,41 @@ def lint_file(path: Path, root: Path) -> list[LintIssue]:
     return issues
 
 
+def _staged_qmd_paths(root: Path) -> list[Path]:
+    """Return staged .qmd paths relative to repo root (pre-commit scope)."""
+    proc = subprocess.run(
+        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    paths: list[Path] = []
+    for rel in proc.stdout.splitlines():
+        if rel.endswith(".qmd"):
+            p = (root / rel).resolve()
+            if p.exists():
+                paths.append(p)
+    return paths
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Lint LEGO unit discipline in QMD files.")
     parser.add_argument("paths", nargs="*", help="QMD files or directories")
     parser.add_argument("--fail-on", choices=("error", "warning"), default="error")
     parser.add_argument("--format", choices=("text", "json"), default="text")
     parser.add_argument("--baseline", type=Path, help="JSON baseline of allowed warnings")
+    parser.add_argument(
+        "--staged-only",
+        action="store_true",
+        help="Lint only git-staged .qmd files (pre-commit default when PRE_COMMIT=1).",
+    )
     args = parser.parse_args(argv)
 
     root = Path(__file__).resolve().parents[3]
+    staged_only = args.staged_only or (
+        os.environ.get("PRE_COMMIT") == "1" and not args.paths
+    )
     qmd_paths: list[Path] = []
     if args.paths:
         for p in args.paths:
@@ -144,22 +172,35 @@ def main(argv: list[str] | None = None) -> int:
                 qmd_paths.extend(sorted(path.rglob("*.qmd")))
             elif path.suffix == ".qmd" and path.exists():
                 qmd_paths.append(path)
+    elif staged_only:
+        qmd_paths = _staged_qmd_paths(root)
+        if not qmd_paths:
+            return 0
     else:
         contents = root / "book" / "quarto" / "contents"
         qmd_paths = sorted(contents.rglob("*.qmd"))
+
+    staged_rels: set[str] = set()
+    if staged_only:
+        staged_rels = {str(p.relative_to(root)) for p in qmd_paths}
 
     issues: list[LintIssue] = []
     for path in qmd_paths:
         issues.extend(lint_file(path, root))
 
-    allowed: set[tuple[str, str, int, str]] = set()
+    allowed: set[tuple[str, str, str]] = set()
     if args.baseline and args.baseline.exists():
         for entry in json.loads(args.baseline.read_text(encoding="utf-8")):
-            allowed.add((entry["rule"], entry["file"], entry["line"], entry["message"]))
+            key = (entry["rule"], entry["file"], entry["message"])
+            if staged_only:
+                if entry["file"] in staged_rels:
+                    allowed.add(key)
+            else:
+                allowed.add(key)
 
     failures: list[LintIssue] = []
     for issue in issues:
-        key = (issue.rule, issue.file, issue.line, issue.message)
+        key = (issue.rule, issue.file, issue.message)
         if key in allowed:
             continue
         if args.fail_on == "warning" or issue.severity == "error":
