@@ -207,6 +207,18 @@ cleanup pass. `audit_fmt_usage.py` now reports 25 `fmt_time` calls and the
 PASS (161 tests); `fmt_prose_contract` 0; `codemod_fmt queue` empty;
 substituted prose semantic audit CLEAN across 81 files.
 
+**NOW done:** Benchmarking remaining time suffixes — migrated the final 7
+time-label suffix sites in `vol1/benchmarking/benchmarking.qmd` to
+`fmt_time(...)`, finishing that chapter's `time_unit` suffix bucket.
+`style="word"` now owns pluralization for `hours`, `seconds`, and `minutes`;
+compact seconds use symbol style. `assess_equiv` stayed byte-identical across
+240 value exports and 102 substituted prose lines. `audit_fmt_usage.py` now
+reports 32 `fmt_time` calls and the `time_unit` suffix bucket down to 616.
+Verification: py_compile PASS; `git diff --check` PASS; `./book/binder check
+math` PASS; focused pytest suite PASS (161 tests); `fmt_prose_contract` 0;
+`codemod_fmt queue` empty; substituted prose semantic audit CLEAN across 81
+files.
+
 **NEXT:**
 1. Add a formatter-default cleanup pass after the semantic lanes: each
    formatter should own comma defaults by value kind, and explicit `commas=`

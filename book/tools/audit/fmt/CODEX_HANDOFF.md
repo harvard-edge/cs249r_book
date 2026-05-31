@@ -182,6 +182,17 @@ to A10. `audit_fmt_usage.py` now reports `fmt_time` calls at 25 and the
 PASS (161 tests), prose-contract 0, semantic audit 0 findings, codemod queue
 empty.
 
+**A12 — Benchmarking remaining time suffixes: DONE.**
+The 7 remaining `benchmarking.qmd` time-label suffixes moved to `fmt_time(...)`:
+compact seconds use symbol style, and prose words (`hours`, `seconds`,
+`minutes`) use `style="word"` for formatter-owned plural checks. This finished
+all `time_unit` suffixes in `vol1/benchmarking/benchmarking.qmd`. Values and
+inline prose stayed byte-identical across 240 exports and 102 prose lines.
+`audit_fmt_usage.py` now reports `fmt_time` calls at 32 and the `time_unit`
+suffix bucket down to 616. Verification: py_compile PASS, `git diff --check`
+PASS, `./book/binder check math` PASS, focused pytest suite PASS (161 tests),
+prose-contract 0, semantic audit 0 findings, codemod queue empty.
+
 ### B. WS4 — unit-suffix lane (~2,393 sites: `GB`/`ms`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.

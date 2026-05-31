@@ -190,6 +190,36 @@ Validation details:
   `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
   0 findings across 81 files.
 
+## 2026-05-31 — Benchmarking remaining time suffixes
+
+Change type: byte-identical formatter relocation. Replaced the 7 remaining
+time-label suffix sites in `vol1/benchmarking/benchmarking.qmd` with
+`fmt_time(...)`: compact seconds use symbol style, and prose labels
+(`hours`, `seconds`, `minutes`) use `style="word"` so singular/plural agreement
+is checked in the formatter. Explicit `commas=False` was preserved for the
+migration; redundant comma overrides are deferred to the formatter-default
+cleanup pass.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol1/benchmarking/benchmarking.qmd` | 7 | 240 | 102 | identical values + prose |
+
+Validation details:
+
+- Before/after snapshots were generated with `assess_equiv.py baseline --ref HEAD`
+  and `assess_equiv.py snapshot` under `/tmp/fmt_time_benchmarking_remaining`.
+- `assess_equiv.py diff` reported `IDENTICAL values` and `IDENTICAL prose`.
+- `audit_fmt_usage.py` now reports 32 `fmt_time` calls and the `time_unit`
+  suffix bucket dropped from 623 to 616. `benchmarking.qmd` has no remaining
+  `time_unit` suffix sites.
+- Verification: `python3 -m py_compile mlsysim/mlsysim/fmt.py book/cli/checks/math_canonical.py` PASS;
+  `git diff --check` PASS; `./book/binder check math` PASS; focused pytest
+  suite PASS, 161 tests; `fmt_prose_contract.py` PASS, 0 violations;
+  `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
+  0 findings across 81 files.
+
 ## 2026-05-31 — Remaining direct count labels
 
 Change type: byte-identical formatter relocation. Replaced 40 hard-coded direct
