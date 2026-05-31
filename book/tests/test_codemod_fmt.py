@@ -9,6 +9,7 @@ from codemod_fmt import (  # noqa: E402
     _rewrite_call_to_multiple, _patch_prose, scan_file,
     _rewrite_percent, scan_percent,
     _rewrite_scale, scan_scale,
+    _rewrite_unit, scan_unit,
 )
 
 
@@ -21,6 +22,11 @@ def _percent(expr: str):
 def _scale(expr: str):
     call = ast.parse(expr, mode="eval").body
     return _rewrite_scale(call, expr)
+
+
+def _unit(expr: str):
+    call = ast.parse(expr, mode="eval").body
+    return _rewrite_unit(call, expr)
 
 
 # --- the provable cell rewrite -------------------------------------------------
@@ -249,3 +255,37 @@ def test_scan_percent_queues_multiline_calls_not_silently_dropped(tmp_path):
     edits, queue = scan_percent(p)
     assert edits == []
     assert len(queue) == 1 and queue[0].kind == "percent"
+
+
+def test_unit_rewrite_quantity_m_as_to_fmt_qty():
+    assert _unit("fmt(d_vol.m_as('GB'), precision=0, commas=False, suffix=' GB')") == \
+        "fmt_qty(d_vol, GB, precision=0, commas=False)"
+    assert _unit("fmt(bw.m_as(TB/second), precision=2, commas=False, suffix=' TB/s')") == \
+        "fmt_qty(bw, TB/second, precision=2, commas=False)"
+
+
+def test_unit_rewrite_singularizes_flop_rate_suffix():
+    assert _unit("fmt(gpu.compute.peak_flops.m_as('TFLOPs/s'), precision=0, commas=False, suffix=' TFLOP/s')") == \
+        "fmt_qty(gpu.compute.peak_flops, TFLOP/second, precision=0, commas=False)"
+
+
+def test_unit_rewrite_pins_default_commas():
+    assert _unit("fmt(mem.m_as(GB), suffix=' GB')") == "fmt_qty(mem, GB, commas=True)"
+
+
+def test_unit_rewrite_declines_plain_float_and_noncanonical_words():
+    assert _unit("fmt(weights_gb, precision=1, suffix=' GB')") is None
+    assert _unit("fmt(cluster_mtbf.m_as(ureg.hour), precision=1, suffix=' hours')") is None
+
+
+def test_scan_unit_migrates_quantity_backed_and_queues_plain_float(tmp_path):
+    p = tmp_path / "c.qmd"
+    p.write_text(CELL.format(
+        assigns=("ok_str = fmt(mem.m_as(GB), precision=0, commas=False, suffix=' GB')\n"
+                 "    float_str = fmt(mem_gb, precision=0, suffix=' GB')"),
+        prose="x"), encoding="utf-8")
+    edits, queue = scan_unit(p)
+    assert [e.var for e in edits] == ["ok_str"]
+    assert edits[0].new == "fmt_qty(mem, GB, precision=0, commas=False)"
+    assert [q.var for q in queue] == ["float_str"]
+    assert queue[0].kind == "unit"

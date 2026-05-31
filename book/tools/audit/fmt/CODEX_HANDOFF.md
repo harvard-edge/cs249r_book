@@ -115,10 +115,11 @@ generate the unit. So this is per-site, judgment-bearing source work. Method:
    large refactor, it is acceptable to LEAVE these for now — they are honest unit
    labels, low risk. Do NOT fabricate a Quantity just to satisfy the rule.
 4. Go **one chapter at a time**, byte-identical, gate after each, commit per chapter.
-   There is no `run_unit_lane.py` yet — if you find a byte-identical sub-pattern
-   that recurs (e.g. `fmt(q.m_as(UNIT), suffix=" <unit>")`), consider extending
-   `codemod_fmt.py` with a `unit` scan + a `run_unit_lane.py` mirroring
-   `run_scale_lane.py` (which reuses `lane_process` from `run_percent_lane.py`).
+   `run_unit_lane.py` now exists for the recurring clean sub-pattern
+   `fmt(q.m_as(UNIT), suffix=" <unit>")` → `fmt_qty(q, UNIT)`. It reuses
+   `lane_process` from `run_percent_lane.py` and queues plain-float suffix sites.
+   Use it for the mechanical Quantity-backed lane, then inspect/refactor any
+   queued sites by hand.
 5. **Watch the prose:** after a `fmt_qty` migration the unit lives in the string, so
    any unit the prose used to add ("… GB", "… ms") must be deleted. Gate 2
    (`audit_prose_semantics`) will catch the resulting "5 GB GB"-style dups —

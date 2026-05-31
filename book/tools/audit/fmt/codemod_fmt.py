@@ -319,6 +319,185 @@ def scan_scale(path: Path):
     return edits, queue
 
 
+_UNIT_BASE_SUFFIXES = (
+    " GB/s", " MB/s", " KB/s", " TB/s",
+    " TFLOP/s", " GFLOP/s", " PFLOP/s", " EFLOP/s", " ZFLOP/s",
+    " GB", " MB", " KB", " TB", " PB", " KiB", " MiB", " GiB", " TiB",
+    " GFLOP", " TFLOP", " PFLOP", " EFLOP", " ZFLOP", " TOPS",
+    " W", " mW", " kW", " Wh", " kWh",
+    " ms", " µs", " ns", " min", " h",
+    " mJ", " J", " mJ/MB",
+)
+
+
+def _unit_suffix_parts(suffix: str) -> tuple[str, str] | None:
+    """Split a physical-unit suffix into (canonical base, extra suffix).
+
+    The base must be a unit label that ``fmt_qty`` can own. A trailing
+    ``/token``-style qualifier is carried as ``extra_suffix``; arbitrary words
+    such as ``" hours"`` are deliberately excluded because canonical
+    abbreviation would change rendered prose.
+    """
+    for base in sorted(_UNIT_BASE_SUFFIXES, key=len, reverse=True):
+        if suffix == base:
+            return base, ""
+        if suffix.startswith(base + "/"):
+            return base, suffix[len(base):]
+    return None
+
+
+def _singular_flop_unit(unit_src: str, base_suffix: str) -> str:
+    """Prefer singular FLOP unit aliases when the visible suffix is singular."""
+    if "FLOP" not in base_suffix:
+        return unit_src
+    return (unit_src
+            .replace("ZFLOPs", "ZFLOP")
+            .replace("EFLOPs", "EFLOP")
+            .replace("PFLOPs", "PFLOP")
+            .replace("TFLOPs", "TFLOP")
+            .replace("GFLOPs", "GFLOP")
+            .replace("MFLOPs", "MFLOP")
+            .replace("KFLOPs", "KFLOP"))
+
+
+_UNIT_LITERAL_EXPR = {
+    "KB": "KB", "MB": "MB", "GB": "GB", "TB": "TB", "PB": "PB",
+    "KiB": "KiB", "MiB": "MiB", "GiB": "GiB", "TiB": "TiB",
+    "GFLOP": "GFLOP", "GFLOPs": "GFLOP",
+    "TFLOP": "TFLOP", "TFLOPs": "TFLOP",
+    "PFLOP": "PFLOP", "PFLOPs": "PFLOP",
+    "EFLOP": "EFLOP", "EFLOPs": "EFLOP",
+    "ZFLOP": "ZFLOP", "ZFLOPs": "ZFLOP",
+    "TOPS": "TOPS",
+    "W": "watt", "watt": "watt",
+    "mW": "milliwatt", "kW": "kilowatt",
+    "ms": "ms", "millisecond": "ms",
+    "us": "microsecond", "µs": "microsecond", "microsecond": "microsecond",
+    "ns": "nanosecond", "nanosecond": "nanosecond",
+    "mJ": "ureg.millijoule", "J": "joule", "joule": "joule",
+    "Wh": "ureg.Wh", "kWh": "ureg.kWh",
+}
+
+
+def _unit_literal_expr(literal: str) -> str | None:
+    if literal in _UNIT_LITERAL_EXPR:
+        return _UNIT_LITERAL_EXPR[literal]
+    for sep in ("/s", "/second"):
+        if literal.endswith(sep):
+            num = literal[:-len(sep)]
+            if num in _UNIT_LITERAL_EXPR:
+                return f"{_UNIT_LITERAL_EXPR[num]}/second"
+    return None
+
+
+def _m_as_quantity_parts(arg: ast.AST, src: str, base_suffix: str) -> tuple[str, str] | None:
+    """Return (quantity_expr, display_unit_expr) for ``q.m_as(unit)``."""
+    if not isinstance(arg, ast.Call):
+        return None
+    func = arg.func
+    if not (isinstance(func, ast.Attribute) and func.attr == "m_as"):
+        return None
+    if len(arg.args) != 1 or arg.keywords:
+        return None
+    quantity = ast.get_source_segment(src, func.value)
+    unit_node = arg.args[0]
+    unit = ast.get_source_segment(src, unit_node)
+    if not quantity or not unit or "\n" in quantity or "\n" in unit:
+        return None
+    unit_lit = _const_str(unit_node)
+    if unit_lit is not None:
+        unit = _unit_literal_expr(unit_lit) or unit
+    unit = _singular_flop_unit(unit, base_suffix)
+    return quantity, unit
+
+
+def _rewrite_unit(call: ast.Call, src: str) -> str | None:
+    """fmt(q.m_as(unit), ..., suffix=" unit") -> fmt_qty(q, unit, ...).
+
+    This covers only the clean Quantity-backed shape. The acceptance gate still
+    proves byte identity, so mismatched labels such as ``GiB`` displayed as
+    ``GB`` are rejected automatically.
+    """
+    seg = ast.get_source_segment(src, call) or ""
+    if not call.args or "\n" in seg:
+        return None
+
+    suffix = None
+    allowed_kwargs = {"precision", "commas", "prefix", "suffix"}
+    kw_src: dict[str, str] = {}
+    for kw in call.keywords:
+        if kw.arg not in allowed_kwargs:
+            return None
+        if kw.arg == "suffix":
+            suffix = _const_str(kw.value)
+        elif kw.arg:
+            val = ast.get_source_segment(src, kw.value)
+            if val is None or "\n" in val:
+                return None
+            kw_src[kw.arg] = val
+    if suffix is None:
+        return None
+
+    parts = _unit_suffix_parts(suffix)
+    if parts is None:
+        return None
+    base_suffix, extra_suffix = parts
+
+    qparts = _m_as_quantity_parts(call.args[0], src, base_suffix)
+    if qparts is None:
+        return None
+    quantity, unit = qparts
+
+    tail = ""
+    if "precision" in kw_src:
+        tail += f", precision={kw_src['precision']}"
+    # fmt() defaults commas=True, while fmt_qty() defaults commas=False.
+    tail += f", commas={kw_src.get('commas', 'True')}"
+    if "prefix" in kw_src:
+        tail += f", prefix={kw_src['prefix']}"
+    if extra_suffix:
+        tail += f", extra_suffix={extra_suffix!r}"
+    return f"fmt_qty({quantity}, {unit}{tail})"
+
+
+def scan_unit(path: Path):
+    """Return (unit_edits, queue) for clean Quantity-backed unit suffixes."""
+    text = path.read_text(encoding="utf-8", errors="replace")
+    edits: list[MultEdit] = []
+    queue: list[QueueItem] = []
+    for fence_line, src in extract_python_cells(text):
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Call):
+                continue
+            call = node.value
+            fn = call.func
+            fname = fn.id if isinstance(fn, ast.Name) else (fn.attr if isinstance(fn, ast.Attribute) else None)
+            if fname != "fmt":
+                continue
+            suffix = None
+            for kw in call.keywords:
+                if kw.arg == "suffix":
+                    suffix = _const_str(kw.value)
+            if suffix is None or _unit_suffix_parts(suffix) is None:
+                continue
+            var = _assign_target(node)
+            seg = ast.get_source_segment(src, call) or ""
+            file_line = fence_line + call.lineno
+            new = _rewrite_unit(call, src)
+            if new and var:
+                edits.append(MultEdit(file_line, var, seg, new))
+            else:
+                queue.append(QueueItem(str(path), file_line, var, fname, suffix,
+                    "unit", seg.replace("\n", " ⏎ "),
+                    "unit suffix is not the clean q.m_as(unit) shape; keep as-is "
+                    "or refactor the source to carry a Pint Quantity before using fmt_qty."))
+    return edits, queue
+
+
 def _rewrite_fmt_int_multiplier(call, src: str) -> str | None:
     """fmt_int(arg, …, suffix='×') → fmt_multiple(round(arg), precision=0, commas=…).
 

@@ -115,12 +115,15 @@ scale 44 queued (deferred — house-style call, see NIGHT_RESUME); `pytest` 119 
   `\times` note (pre-existing book-wide Quarto behavior; visible caption correct).
 - Resume checkpoint: `book/tools/audit/fmt/NIGHT_RESUME.md`.
 
-### NOT yet started (next lanes, by priority)
+### Active / next lanes, by priority
 - **WS3 — MarkdownStr (337):** ranges → `fmt_range`; justify/replace the rest. *Judgment-heavy.*
-- **WS4 — unit suffixes (~2,299):** `GB`/`ms`/`W`/… → `fmt_qty`/`fmt_unit`. **NOT byte-identically
-  auto-migratable** — 1,938/2,299 args are plain floats (e.g. `weights_gb`), not Pint quantities,
-  so `fmt_qty` (needs a Pint quantity + `_compact_unit_suffix`) requires per-site source refactor.
-  Low semantic-error risk (a label, no 0–1/0–100 ambiguity). Defer / do with care, not brute force.
+- **WS4 — unit suffixes (~2,299): IN PROGRESS.** Added `run_unit_lane.py` for the
+  clean Quantity-backed sub-pattern `fmt(q.m_as(UNIT), suffix=" UNIT")` →
+  `fmt_qty(q, UNIT)`, accepted only by the existing byte-identical value+prose
+  gate. First batch migrated 26 sites across 6 chapters; current dry-run reports
+  235 remaining clean candidates across 20 chapters. The larger plain-float set
+  (e.g. `weights_gb`) is still not mechanically migratable and should be left or
+  refactored source-first.
 - **WS2 — precision / spurious-`.0` re-sweep** (`audit_html.py`).
 - **WS5 — prose-reference integrity** (`audit_lego_html.py`, ground truth vs rendered HTML).
 - **WS6 — per-chapter semantic coherence** (incl. resolving the scale queue).

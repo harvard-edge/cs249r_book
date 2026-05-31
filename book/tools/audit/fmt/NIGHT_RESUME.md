@@ -37,18 +37,27 @@ python3 -m pytest mlsysim/tests/test_fmt.py book/tests/test_codemod_fmt.py book/
 
 ## NOW / NEXT  (update before every commit)
 
-**STATUS: overnight work complete and verified. Safe to review.**
+**STATUS: Codex WS4 unit-lane batch complete and verified. Safe to continue.**
 
 **State:** multiplier + percent 100% migrated; scale-division done (41 sites);
 pp → typed fmt_pp (14 sites + grammar fixes); 4 dangerous glyph stragglers killed;
 NEW semantic scanner gate (+ unit-dup bug fixes). 81/81 chapters exec clean;
-prose-contract 0; semantic scanner 0; 119 tests pass; ALL changed chapters
-HTML-render-verified. Remaining: scale queue (44, deferred — style call) and
-4 pp editorial sites (documented below). Nothing is half-done or broken.
+prose-contract 0; semantic scanner 0; 124 tests pass. WS4 unit suffixes are now
+started: `run_unit_lane.py` migrates clean `fmt(q.m_as(UNIT), suffix=" UNIT")`
+sites through the same byte-identical gate as the percent/scale lanes. First
+batch migrated 26 Quantity-backed unit sites to `fmt_qty` across:
+`vol1/benchmarking` (1), `vol1/conclusion` (5), `vol1/responsible_engr` (17),
+`vol2/backmatter/appendix_reliability` (1),
+`vol2/collective_communication` (1), and `vol2/introduction` (1).
+All six newly changed chapters are HTML-render-verified. Remaining: scale queue
+(44, deferred — style call), 4 pp editorial sites (documented below), and the
+rest of WS4/WS3. Nothing is half-done or broken.
 
-**If continuing:** the only open items are user-judgment calls (scale house-style,
-4 pp editorial sites) and the optional later phases (PDF/.tex verification, full
-audit_lego_html sweep, flip fmt_semantic_suffix to a global blocker at Phase 4).
+**If continuing:** A1/A2 still need user decisions. Otherwise continue WS4 with
+`PYTHONPATH=mlsysim python3 book/tools/audit/fmt/run_unit_lane.py --write <qmd>`
+one chapter at a time. Current dry-run reports 235 remaining clean unit candidates
+across 20 chapters; many more suffix sites are plain floats and should stay queued
+unless the source is refactored to carry a Pint Quantity.
 
 **NEW TOOL:** `audit_prose_semantics.py` — executes each chapter, substitutes
 LEGO values into prose, normalizes LaTeX→visible, flags duplicated glyph/unit,
@@ -73,11 +82,19 @@ Corpus CLEAN for all checks. Regression test `book/tests/test_audit_prose_semant
   would change grammar ("5 percentage-point gap" → "5 percentage points gap").
   DECISION PENDING (see NEXT). Low correctness risk (word spelled out, no 100x).
 
+**NOW done:** WS4 first pass — `run_unit_lane.py` added; tests added to
+`book/tests/test_codemod_fmt.py`; 26 clean unit sites migrated byte-identically.
+`audit_fmt_usage.py` moved `fmt_qty` calls 35 → 61, physical-unit suffixes
+1491 → 1476, and time-unit suffixes 659 → 648.
+
 **NEXT:**
-1. fmt_pp consistency: inspect each pp-site's prose context; migrate the clean
-   plural-noun ones byte-identically; for singular/attributive, either extend
-   fmt_pp with a grammatical mode or leave + document. (id: pp-consistency)
-2. Pass 4 scale adjudication queue (44 items). 3. Pass 5 render verify (HTML).
+1. Continue WS4 with `run_unit_lane.py` chapter-sized batches. Highest remaining
+   clean counts: `vol2/compute_infrastructure` (64), `vol1/ml_systems` (28),
+   `vol2/distributed_training` (20), `vol2/backmatter/appendix_fleet` (14),
+   `vol2/ops_scale` (14).
+2. User-decision items: scale house-style (44 queued) and the 4 benchmarking pp
+   editorial sites remain deferred.
+3. Render-verify any new WS4-changed chapters before Phase 3B/PDF sign-off.
 
 Gates to keep green (run all three):
 - fmt_prose_contract.py --root book/quarto/contents  → 0
@@ -95,6 +112,17 @@ the migrated value. ALL PASS:
   percentage points"; data_selection "0.5/4.5/5/4 percentage points".
 - data_storage "7.6 PB" x8, ZERO "PB PB"/"PB petabytes"; network_fabrics
   "consume 2.56 MW just to move light"; appendix_reliability % cells render.
+
+Codex WS4 unit batch HTML verification is DONE for the six newly changed
+chapters. Built the changed chapters together by volume with Quarto/Deno caches
+under `/private/tmp` and grepped rendered HTML:
+- `benchmarking`: "700 W" H100 TDP claim.
+- `conclusion`: "140 GB", "3.35 TB/s", "989 TFLOP/s", "41.8 ms", "0.14 ms".
+- `responsible_engr`: edge deployment power/latency values including "5 W",
+  "100 ms", "100 mW", "1.2 W", "50 mW", "200 ms", plus "400 W" and "10 ms".
+- `appendix_reliability`: "~7.1 min" recovery replay table cell.
+- `collective_communication`: "50 GB/s" InfiniBand bandwidth.
+- `introduction` (vol2): "700 GB" GPT-3 synchronization size.
 
 FINDING (sustainable_ai fig-cap): the visible <figcaption> renders `$\times$`
 correctly as a math span ("6.2×/year"), but Quarto copies the caption into the
@@ -146,6 +174,10 @@ human editorial call — left as `fmt(..., suffix=" percentage point")` for now:
    noun form reads correctly there too; or split into two exports.
 
 ## Session commit log (newest first)
+- Codex WS4 batch: added `run_unit_lane.py` + tests; migrated 26 clean
+  Quantity-backed unit suffixes to `fmt_qty` across 6 chapters; contract 0,
+  semantic 0, queue still only `{'scale': 44}`, targeted suite 124 passing;
+  all 6 changed chapters HTML-render-verified.
 - Final: corpus gates green (contract 0, semantic 0, 81/81 exec, 119 tests); all
   changed chapters HTML-render-verified; MIGRATION.md + NIGHT_RESUME updated.
 - Pass3d: fixed 2 isolated attributive pp grammar bugs (model_serving fs/fc:
