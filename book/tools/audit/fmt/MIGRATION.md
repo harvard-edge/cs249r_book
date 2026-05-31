@@ -68,9 +68,57 @@ The 612-vs-10 gap is the project. Regenerate with:
 - [x] Re-audit → true baseline (above)
 - [x] This ledger (you are here)
 - [ ] Keep `fmt_semantic_suffix` **opt-in** during migration (run per-chapter in step 5); flip to a **global pre-commit blocker only at the end** (Phase 2) once the board is all DONE — flipping early would block every chapter commit.
-- [ ] **Production AST codemod** — auto-rewrites only *provable* cases; queues ambiguous ones
-- [ ] **`fmt_range`** typed/guarded helper + tests
-- [ ] **Prose-unit duplication checker** — flags a unit/glyph typed after a ref that already owns it
+- [x] **Production AST codemod** (`codemod_fmt.py`) — auto-rewrites only *provable* cases; queues ambiguous ones. Lanes: multiplier, percent (`%`/` percent`/`fmt_int`), scale-division.
+- [x] **`fmt_range`** typed/guarded helper + tests
+- [x] **Prose-unit duplication checker** (`fmt_prose_contract.py`, class-aware) — flags a unit/glyph typed after a ref that already owns it
+- [x] **Byte-identical lane drivers** with per-edit bisect + auto-revert gate (`run_multiplier_lane.py`, `run_percent_lane.py`→generic `lane_process`, `run_scale_lane.py`)
+
+---
+
+## Progress — live state (DANGEROUS-870 lane)
+
+> **The dangerous-semantic suffixes are migrated corpus-wide.** Every change was
+> accepted only by a **byte-identical gate** (rendered values AND visible-prose
+> previews identical before/after, via `assess_equiv.snapshot_file`) or, for the
+> few glyph-relocations, a transformation-aware gate; anything else was reverted
+> and adjudicated. Re-verify any time with the sweeps in "How to re-verify" below.
+
+| Value-kind | Status | How |
+|---|---|---|
+| **multiplier** (`×`/`x`/spaced/`fmt_int`) | **100% done** | `run_multiplier_lane.py` (byte-identical + `--variants` transform gate); glyph relocated to prose `$\times$` |
+| **percent** (`%`/` percent`/`fmt_int`) | **100% done** | `run_percent_lane.py`; `fmt(x,'%')`→`fmt_percent(ratio, style=…)`, strips `*100`, `round(x)/100` for `fmt_int`. 5 signed/>100% sites adjudicated via `fmt_percent(allow_negative=, max_ratio=)` |
+| **scale** (`K/M/B/T`, division form) | **clean cases done** (41 sites, 10 ch) | `run_scale_lane.py`; `fmt(x/MILLION,'M')`→`fmt_count(x, scale='M')` |
+| scale (pre-scaled / lowercase `k` / spaced / `fmt_int`) | **queued** | `scale_adjudication_queue.txt` — need source refactor to keep the RAW count, then `fmt_count(raw, scale=…)` |
+
+**Real bug caught & fixed by the audit:** `vol2/robust_ai` `acc_drop` (76−50 = 26
+percentage *points*) rendered "26 percent" while prose appended "percentage points"
+→ "26 percent percentage points". Fixed to a bare number. (commit `bc3729c676`)
+
+**Verification status (whole corpus):** 81/81 chapters execute headlessly; `fmt_prose_contract`
+**0 violations**; `scan_percent` 0 auto + 0 queued; `pytest` fmt suite 107 passing.
+
+### NOT yet started (next lanes, by priority)
+- **WS3 — MarkdownStr (337):** ranges → `fmt_range`; justify/replace the rest. *Judgment-heavy.*
+- **WS4 — unit suffixes (~2,299):** `GB`/`ms`/`W`/… → `fmt_qty`/`fmt_unit`. **NOT byte-identically
+  auto-migratable** — 1,938/2,299 args are plain floats (e.g. `weights_gb`), not Pint quantities,
+  so `fmt_qty` (needs a Pint quantity + `_compact_unit_suffix`) requires per-site source refactor.
+  Low semantic-error risk (a label, no 0–1/0–100 ambiguity). Defer / do with care, not brute force.
+- **WS2 — precision / spurious-`.0` re-sweep** (`audit_html.py`).
+- **WS5 — prose-reference integrity** (`audit_lego_html.py`, ground truth vs rendered HTML).
+- **WS6 — per-chapter semantic coherence** (incl. resolving the scale queue).
+- **Phase 3A/3B render verification**, then **Phase 4 lock** (flip `fmt_semantic_suffix` to a blocker).
+
+### How to re-verify (any agent, from repo root, `PYTHONPATH=mlsysim`)
+```
+# every chapter still executes + values intact
+python3 -c "import sys;sys.path.insert(0,'book/tools/audit/fmt');from pathlib import Path;from assess_equiv import snapshot_file;[print('FAIL',f) for f in Path('book/quarto/contents').rglob('*.qmd') if snapshot_file(f)[2]]"
+# glyph-ownership contract (expect no output)
+python3 book/tools/audit/fmt/fmt_prose_contract.py --root book/quarto/contents
+# remaining dangerous suffixes by kind
+python3 book/tools/audit/fmt/codemod_fmt.py queue --root book/quarto/contents
+# dry-run any lane to see what's left
+python3 book/tools/audit/fmt/run_scale_lane.py --all
+```
 
 ### Phase 1 — Dangerous-870 rollout (per-chapter SOURCE loop, hardest first)
 Walk the board top-down: `training → data_selection → model_serving → benchmarking → …`.
