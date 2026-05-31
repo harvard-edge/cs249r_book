@@ -251,6 +251,35 @@ Validation details:
   `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
   0 findings across 81 files.
 
+## 2026-05-31 — Introduction time suffixes
+
+Change type: byte-identical formatter relocation. Replaced all 15 `time_unit`
+suffix sites in `vol1/introduction/introduction.qmd` with `fmt_time(...)`.
+Old `fmt_int(..., suffix=" days"/" months")` sites now round explicitly before
+calling `fmt_time`, preserving the rendered integer wording while keeping the
+precision guard intact. Millisecond sites use compact symbol style; prose
+`days` and `months` labels use `style="word"`.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol1/introduction/introduction.qmd` | 15 | 91 | 45 | identical values + prose |
+
+Validation details:
+
+- Before/after snapshots were generated with `assess_equiv.py baseline --ref HEAD`
+  and `assess_equiv.py snapshot` under `/tmp/fmt_time_introduction`.
+- `assess_equiv.py diff` reported `IDENTICAL values` and `IDENTICAL prose`.
+- `audit_fmt_usage.py` now reports 71 `fmt_time` calls and the `time_unit`
+  suffix bucket dropped from 592 to 577. `introduction.qmd` has no remaining
+  `time_unit` suffix sites.
+- Verification: `python3 -m py_compile mlsysim/mlsysim/fmt.py book/cli/checks/math_canonical.py` PASS;
+  `git diff --check` PASS; `./book/binder check math` PASS; focused pytest
+  suite PASS, 161 tests; `fmt_prose_contract.py` PASS, 0 violations;
+  `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
+  0 findings across 81 files.
+
 ## 2026-05-31 — Remaining direct count labels
 
 Change type: byte-identical formatter relocation. Replaced 40 hard-coded direct
