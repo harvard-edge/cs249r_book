@@ -53,6 +53,42 @@ Status:
 - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/codemod_fmt.py queue --root book/quarto/contents` PASS, `by kind: {}`
 - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_prose_semantics.py --root book/quarto/contents` PASS, 0 findings
 
+## 2026-05-31 — Tiny Vol2 physical-unit tail
+
+Change type: byte-identical formatter relocation. Replaced 7 remaining
+physical-unit suffix sites with typed quantity formatters across four small Vol2
+files.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol2/backmatter/appendix_c3.qmd` | 1 | 46 | 20 | identical values + prose |
+| `vol2/robust_ai/robust_ai.qmd` | 1 | 36 | 19 | identical values + prose |
+| `vol2/conclusion/conclusion.qmd` | 2 | 19 | 18 | identical values + prose |
+| `vol2/backmatter/appendix_reliability.qmd` | 3 | 51 | 25 | identical values + prose |
+
+Validation details:
+
+- Migrated aggregate PFLOP/s, V100 memory bandwidth, machine power, H100
+  TFLOP/s, checkpoint size, and checkpoint write bandwidth displays.
+- `assess_equiv.py` baseline/snapshot/diff reported `IDENTICAL values` and
+  `IDENTICAL prose` for all four touched files after preserving comma behavior
+  on the two comma-sensitive displays.
+- All four touched files now have zero `suffix=` calls.
+- `audit_fmt_usage.py` reports `physical_unit` suffixes dropped 939 -> 932,
+  `fmt_qty` at 456, and `fmt_qty_int` at 31.
+- Verification: `git diff --check` PASS; py_compile PASS for formatter,
+  math-canonical, and fmt audit modules; focused pytest suite PASS, 190 tests;
+  `fmt_prose_contract.py` PASS, 0 violations; `codemod_fmt.py queue` PASS,
+  `by kind: {}`; `./book/binder check math` PASS;
+  `./book/binder check code --scope lego-dead-code` PASS;
+  `audit_prose_semantics.py` PASS, 0 findings across 81 files.
+- HTML/PDF render evidence: not run yet. Full rendering is intentionally
+  deferred for the separate render/prose audit checkpoint.
+
+Status: non-render verified; render audit pending.
+
 ## 2026-05-31 — Compound-scale suffix lane
 
 Change type: typed formatter relocation with three deliberate adjudicated

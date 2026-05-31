@@ -138,9 +138,12 @@ physical-unit suffixes in that chapter, byte-identically, leaving
 `fault_tolerance` with zero `suffix=` calls. The
 `vol2/backmatter/appendix_communication` chapter lane then migrated all 9
 remaining physical-unit suffixes in that chapter, byte-identically, leaving
-`appendix_communication` with zero `suffix=` calls. Remaining suffix bucket is
-only 939 `physical_unit` suffixes. Remaining: the rest of WS4/WS3 and later
-PDF/lock phases. Nothing is half-done or broken.
+`appendix_communication` with zero `suffix=` calls. The tiny Vol2 physical-unit
+tail then migrated 7 sites across `appendix_c3`, `robust_ai`, `conclusion`, and
+`appendix_reliability`, byte-identically, leaving all four files with zero
+`suffix=` calls. Remaining suffix bucket is only 932 `physical_unit` suffixes.
+Remaining: the rest of WS4/WS3 and later PDF/lock phases. Nothing is half-done
+or broken.
 
 **New TODOs from user discussion:** add a prose-bound output contract/gate so
 computed OUTPUT values consumed by inline prose are typed formatter results or
@@ -556,6 +559,10 @@ drop. The adjacent prose/table text was updated to `1 percentage-point threshold
 and `(drop of 6.8 percentage points)`. No user-decision items remain open.
 
 ## Session commit log (newest first)
+- Codex tiny Vol2 physical-unit tail: migrated 7 physical-unit suffix sites
+  across `appendix_c3`, `robust_ai`, `conclusion`, and `appendix_reliability`
+  to typed quantity formatters, byte-identically. All four touched files now
+  have 0 `suffix=` calls; physical-unit suffixes dropped 939 -> 932.
 - Codex `vol2/backmatter/appendix_communication` physical-unit lane: migrated
   all 9 remaining physical-unit suffix sites in the chapter to typed quantity
   formatters, byte-identically. `appendix_communication` now has 0 `suffix=`
