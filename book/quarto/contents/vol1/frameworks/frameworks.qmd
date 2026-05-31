@@ -1929,7 +1929,7 @@ class CompilationBenchmark:
     tensorrt_speedup_max_str = fmt(max(tensorrt_speedups), precision=1, commas=False)
 
     resnet_compile_speedup_pct_str = fmt(resnet_compile_speedup_pct, precision=1, commas=False, suffix="%")
-    resnet_tensorrt_speedup_str = fmt(resnet_tensorrt_speedup, precision=1, commas=False, suffix="×")
+    resnet_tensorrt_speedup_str = fmt_multiple(resnet_tensorrt_speedup, precision=1, commas=False)
     compile_time_ref_s_str = fmt(compile_time_ref_s, precision=0, commas=False, suffix=" s")
     resnet_breakeven_images_str = fmt(resnet_breakeven_images_rounded, precision=0, commas=True, suffix=" images")
 ```
@@ -1960,7 +1960,7 @@ The optimal framework execution strategy depends on which iron law term dominate
 
 : **Framework Execution Strategy by Workload**: Recommended execution strategy for each workload archetype, aligned to the dominant iron law term. {#tbl-framework-archetype-strategy tbl-colwidths="[17,28,22,33]"}
 
-**Systems insight**: Compilation benefits scale with how much of the workload is optimizable. Compute Beasts (@tbl-training-benchmark: ResNet-50 sees `{python} CompilationBenchmark.resnet_tensorrt_speedup_str` speedup from TensorRT) benefit most. Sparse Scatter workloads gain little because their bottleneck (embedding lookups) is inherently irregular.
+**Systems insight**: Compilation benefits scale with how much of the workload is optimizable. Compute Beasts (@tbl-training-benchmark: ResNet-50 sees `{python} CompilationBenchmark.resnet_tensorrt_speedup_str`$\times$ speedup from TensorRT) benefit most. Sparse Scatter workloads gain little because their bottleneck (embedding lookups) is inherently irregular.
 
 :::
 
@@ -2122,7 +2122,7 @@ class DispatchTaxSmallLarge:
     dispatch_sw_time_str = fmt(small_sw_total, precision=0, commas=False, suffix=" μs")
     dispatch_ratio_small_str = fmt(small_overhead_ratio, precision=1, commas=False)
     dispatch_overhead_pct_str = fmt_int(round(small_overhead_pct), commas=False, suffix="%")
-    dispatch_compilation_speedup_str = fmt(small_speedup_limit, precision=1, commas=False, suffix="×")
+    dispatch_compilation_speedup_str = fmt_multiple(small_speedup_limit, precision=1, commas=False)
 
     gpt3_hw_time_us_str = fmt(large_hw_us, precision=0, commas=False, suffix=" μs")
     gpt3_sw_time_us_str = fmt(large_dispatch_us, precision=0, commas=False, suffix=" μs")
@@ -2142,7 +2142,7 @@ This cumulative latency acts as a per-call tax on execution. Whether that tax do
 *   **Hardware time**: $T_{\text{hw}} \approx$ `{python} DispatchTaxSmallLarge.dispatch_hw_time_us_str` (mostly memory latency).
 *   **Software overhead**: $T_{\text{sw}} \approx$ `{python} DispatchTaxSmallLarge.dispatch_n_ops_str` ops $\times$ `{python} DispatchTaxSmallLarge.dispatch_us_per_op_str` = `{python} DispatchTaxSmallLarge.dispatch_sw_time_str`.
 *   **Ratio**: `{python} DispatchTaxSmallLarge.dispatch_sw_time_str`/`{python} DispatchTaxSmallLarge.dispatch_hw_time_us_str` ≈ `{python} DispatchTaxSmallLarge.dispatch_ratio_small_str`.
-*   **Small-model outcome**: The system spends `{python} DispatchTaxSmallLarge.dispatch_overhead_pct_str` of time in host-side dispatch and kernel-launch overhead. Compilation yields `{python} DispatchTaxSmallLarge.dispatch_compilation_speedup_str` speedup.
+*   **Small-model outcome**: The system spends `{python} DispatchTaxSmallLarge.dispatch_overhead_pct_str` of time in host-side dispatch and kernel-launch overhead. Compilation yields `{python} DispatchTaxSmallLarge.dispatch_compilation_speedup_str`$\times$ speedup.
 
 **Scenario two: GPT-3 Layer (Compute Bound)**
 
@@ -3504,7 +3504,7 @@ class DeviceBandwidthHierarchy:
     hbm_4mb_ms_str = fmt(hbm_4mb_ms, precision=3, commas=False, suffix=" ms")
     pcie4_1gb_ms_str = fmt(pcie4_1gb_ms, precision=1, commas=False, suffix=" ms")
     pcie4_1gb_equiv_ops_str = fmt((pcie4_1gb_equiv_ops * flop).m_as(TFLOPs), precision=1, commas=False, suffix=" TFLOP")
-    pcie_to_hbm_gap_str = fmt(pcie_to_hbm_gap, precision=1, commas=False, suffix="×")
+    pcie_to_hbm_gap_str = fmt_multiple(pcie_to_hbm_gap, precision=1, commas=False)
 ```
 
 \index{Device Management!CPU-GPU transfers}
@@ -3517,7 +3517,7 @@ While the high-level API focuses on math, the framework's backend functions as t
 
 The CUDA Runtime\index{CUDA!runtime, OS layer} serves as this OS layer, providing the low-level primitives for launching kernels and managing device memory. The framework coordinates with this runtime to implement **Direct Memory Access (DMA)**\index{DMA!PCIe data movement interface} over the PCIe bus. As established in @sec-hardware-acceleration, the bandwidth gap between the host (CPU) and device (GPU) is the primary "Data Loading Bottleneck." @Sec-appdx-machine-foundations-bandwidth-vs-latency-5320 separates the two transfer constraints, $T = L_{\text{lat}} + D_{\text{vol}}/\text{BW}$, that determine whether a given data-loading strategy is limited by per-transfer latency or by sustained bandwidth. Frameworks mitigate this through **pinned memory**\index{Pinned Memory!definition} (page-locked memory) that allows the GPU to read directly from CPU RAM via DMA without interrupting the processor. This "HW/OS" interface is what makes high-throughput training loops possible on a single machine.
 
-Every tensor resides on a specific device, and cross-device operations incur transfer costs that can dominate execution time. PCIe 4.0 delivers `{python} DeviceBandwidthHierarchy.pcie4_gbs_str` between CPU and GPU, while HBM2e provides `{python} DeviceBandwidthHierarchy.a100_bw_tbs_str` within the GPU. This `{python} DeviceBandwidthHierarchy.pcie_to_hbm_gap_str` bandwidth gap means a single misplaced tensor transfer can erase the entire speedup from GPU acceleration.
+Every tensor resides on a specific device, and cross-device operations incur transfer costs that can dominate execution time. PCIe 4.0 delivers `{python} DeviceBandwidthHierarchy.pcie4_gbs_str` between CPU and GPU, while HBM2e provides `{python} DeviceBandwidthHierarchy.a100_bw_tbs_str` within the GPU. This `{python} DeviceBandwidthHierarchy.pcie_to_hbm_gap_str`$\times$ bandwidth gap means a single misplaced tensor transfer can erase the entire speedup from GPU acceleration.
 
 ::: {.column-margin}
 ![](images/svg/frameworks_bandwidth_hierarchy.svg){width="100%" fig-alt="Vertical bandwidth ladder on a log axis: HBM at 2,039 GB/s sits far above NVLink at 600 GB/s, which sits far above PCIe at 32 GB/s, spanning roughly 64 times from slowest to fastest interconnect."}
@@ -5262,10 +5262,10 @@ class CompilationOverheadCalc:
     compilation_time_s_str = fmt(compilation_time_s, precision=0, commas=False, suffix=" s")  # e.g. "30 s"
     eager_total_str = fmt(eager_total, precision=1, commas=False, suffix=" s")              # e.g. "6.9 s"
     compiled_total_str = fmt(compiled_total, precision=1, commas=False, suffix=" s")        # e.g. "304.7 s"
-    compiled_slowdown_str = fmt(compiled_slowdown, precision=1, commas=False, suffix="×")  # e.g. "44×"
+    compiled_slowdown_str = fmt_multiple(compiled_slowdown, precision=1, commas=False)  # e.g. "44×"
 ```
 
-Engineers assume compilation overhead is a one-time cost that pays off quickly. @Tbl-training-benchmark shows torch.compile achieves `{python} CompilationOverheadCalc.resnet_compile_speedup_pct_str` higher ResNet-50 throughput, but the same table also assigns ResNet-50 a compile window of `{python} CompilationOverheadCalc.compile_min_s_str` to `{python} CompilationOverheadCalc.compile_max_s_str` per graph change. For a `{python} CompilationOverheadCalc.n_images_str`-image experiment with `{python} CompilationOverheadCalc.n_recompilations_str` code changes: Eager completes in `{python} CompilationOverheadCalc.eager_total_str`, whereas Compiled requires `{python} CompilationOverheadCalc.compiled_total_str` (including `{python} CompilationOverheadCalc.n_recompilations_str` $\times$ `{python} CompilationOverheadCalc.compilation_time_s_str` recompilation overhead), making the compiled workflow about `{python} CompilationOverheadCalc.compiled_slowdown_str` slower in this rapid-prototyping scenario. Teams that enable compilation during rapid prototyping can waste minutes waiting for recompilations that negate any throughput gains.
+Engineers assume compilation overhead is a one-time cost that pays off quickly. @Tbl-training-benchmark shows torch.compile achieves `{python} CompilationOverheadCalc.resnet_compile_speedup_pct_str` higher ResNet-50 throughput, but the same table also assigns ResNet-50 a compile window of `{python} CompilationOverheadCalc.compile_min_s_str` to `{python} CompilationOverheadCalc.compile_max_s_str` per graph change. For a `{python} CompilationOverheadCalc.n_images_str`-image experiment with `{python} CompilationOverheadCalc.n_recompilations_str` code changes: Eager completes in `{python} CompilationOverheadCalc.eager_total_str`, whereas Compiled requires `{python} CompilationOverheadCalc.compiled_total_str` (including `{python} CompilationOverheadCalc.n_recompilations_str` $\times$ `{python} CompilationOverheadCalc.compilation_time_s_str` recompilation overhead), making the compiled workflow about `{python} CompilationOverheadCalc.compiled_slowdown_str`$\times$ slower in this rapid-prototyping scenario. Teams that enable compilation during rapid prototyping can waste minutes waiting for recompilations that negate any throughput gains.
 
 ## Summary {#sec-ml-frameworks-summary-07f0}
 
