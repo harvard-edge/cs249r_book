@@ -72,25 +72,76 @@ The 612-vs-10 gap is the project. Regenerate with:
 - [ ] **`fmt_range`** typed/guarded helper + tests
 - [ ] **Prose-unit duplication checker** — flags a unit/glyph typed after a ref that already owns it
 
-### Phase 1 — Dangerous-811 rollout (per-chapter loop, hardest first)
-Walk the board top-down: `training → data_selection → model_serving → benchmarking → …`
+### Phase 1 — Dangerous-870 rollout (per-chapter SOURCE loop, hardest first)
+Walk the board top-down: `training → data_selection → model_serving → benchmarking → …`.
+This phase changes **source only** and verifies with the **no-build** gates
+(`assess_equiv diff`, `audit_prose`, `fmt_semantic_suffix`). No rendering yet.
 
-### Phase 2 — Unit-suffix purity + final sweep
-Codemod 2,412 unit suffixes → `fmt_qty`/`fmt_unit`; full-book render; corpus guard sweep;
-**flip `fmt_semantic_suffix` to a global pre-commit blocker** (the regression lock).
+### Phase 2 — Unit-suffix purity
+Codemod 2,412 unit suffixes → `fmt_qty`/`fmt_unit` (source only, low risk).
+
+### Phase 3 — Render verification (AFTER migration; the "build it and look" phase)
+> **Principle: never assume. Build it, open it, read it.** A green source diff is
+> necessary but not sufficient — only the rendered artifact proves what ships. Done
+> **one chapter at a time**, HTML first (fast, inspectable), then PDF (authoritative
+> typeset). This phase runs once a chapter's source migration is complete.
+
+**Stage A — HTML build + look**
+1. Build the single chapter:
+   `./book/binder build html --vol1 vol1/training --skip-hygiene --skip-validate`
+   then archive: `book/quarto/_build/html-audit/vol1/training.html`
+   (or batch via `render_html.sh vol1`).
+2. **Automated:** `audit_html.py <html>` (spurious `.0`) **and**
+   `audit_lego_html.py` (**ground truth** — every `{python}` ref value present in HTML).
+3. **Look (mandatory, not optional):** open the HTML in the browser (cursor-ide-browser
+   MCP), screenshot each migrated LEGO callout/section, and confirm by eye:
+   body percents read "**X percent**", tables read "X%", multipliers show "6×" via
+   `$\times$`, **no** doubled glyphs, **no** raw `` `{python}` ``, **no** leaked LaTeX,
+   and the numbers tell a coherent story.
+4. Gate: HTML scans green **and** the screenshots look right → proceed to Stage B.
+
+**Stage B — PDF / TeX build + screenshots**
+1. `python3 book/tools/audit/chapter_pdf_verify.py --vol1 training`
+   → `binder build pdf --vol1 training`, **keeps `.tex`**, archives PDF + `.tex` under
+   `book/quarto/_build/pdf-audit/`, updates `chapter_pdf_audit.{json,md}`.
+2. **Read the `.tex`:** grep the changed refs in the keep-tex — confirm no literal `%`
+   leaked into math mode, `$\times$` is intact, ranges use en-dash, no broken macros.
+3. **Defect scan:** `binder check pdf` / `pdf_build_verify.py --vol1` (+ scan the Quarto
+   render log for overfull boxes / warnings).
+4. **Screenshot + look:** `pdftoppm -png -r 150 -f <pg> -l <pg> <pdf> /tmp/pg` on the
+   pages with migrated values; open the PNGs and confirm typeset correctness (margins,
+   spelled-out percent, `×`, tables, no overflow).
+5. Sign off the chapter's PDF ledger row.
+
+**Order across the book:** finish Stage A for a chapter before Stage B; finish the
+high-risk chapters (board top) before the tail. The book is shippable only when every
+chapter is HTML-verified, PDF-verified, and signed off.
+
+### Phase 4 — Final lock
+Full-book `audit_lego_html` sweep + corpus guard sweep; **flip `fmt_semantic_suffix` to a
+global pre-commit blocker** (the regression lock).
 
 ---
 
-## The per-chapter loop (run identically for every chapter)
+## The per-chapter SOURCE loop (Phase 1/2 — no Quarto build needed)
 
-1. **Baseline render** the chapter to HTML; capture rendered numbers as the "before" truth.
-2. **Codemod provable sites** (`x*100, suffix=' percent'` → `fmt_percent(x)`; `×`→`fmt_multiple`; `K/M/B`→`fmt_count`). Ambiguous percent sites are **flagged, never auto-touched**.
-3. **Human-resolve the queue** — read each ambiguous cell's compute; normalize the value **to a 0–1 ratio at the source** so `fmt_percent` owns the ×100. *(Only judgment step; where wrong numbers hide.)*
-4. **Fix the prose** — for each rewritten cell, find its `` {python} *_str `` refs and strip now-duplicated glyphs/units; fix wording.
-5. **Gates green** — `binder check math` (canonical + suffix-semantics), `fmt_semantic_suffix`, dead-LEGO, prose-unit checker.
-6. **Re-render** the chapter.
-7. **Render-diff** before↔after — the *only* allowed visible change is glyph/format, **never a magnitude**. A changed number = stop & investigate.
-8. **Sign off** in the board below; commit that one chapter.
+1. **Baseline values** — `assess_equiv.py baseline --ref HEAD` captures the chapter's
+   453-odd `*_str` exports + prose previews on real data (exec, not render).
+2. **Codemod provable sites** (`x*100, suffix=' percent'` → `fmt_percent(x, style=…)`;
+   `×`→`fmt_multiple`+prose `$\times$`; `K/M/B`→`fmt_count`). Ambiguous percent sites are
+   **flagged, never auto-touched**.
+3. **Human-resolve the queue** — read each ambiguous cell's compute; normalize **to a 0–1
+   ratio at the source** so `fmt_percent` owns the ×100. *(Only judgment step.)*
+4. **Fix the prose** — paired with each rewrite: strip now-duplicated glyphs/units; add
+   `$\times$` for multipliers; choose percent `style` by context (body=prose, table=symbol).
+5. **Value/prose equivalence** — `assess_equiv.py diff` (values **and** prose preview).
+   Regime 1 must be byte-identical; Regime 2 identical after visible-text normalization;
+   any other change is **adjudicated** (ASSESSMENT §5), never silent.
+6. **Static gates green** — `binder check math` (canonical), `fmt_semantic_suffix`,
+   `lego-dead-code`, prose-contract checker. (No build.)
+7. **Commit** that one chapter's source; mark board status `source-done`.
+
+→ Rendering and visual confirmation happen in **Phase 3** (build it and look), not here.
 
 ## Auditability (working back from "we caught the error")
 1. **Source guards** — `fmt_percent` throws on out-of-range ratio at render time.
@@ -102,7 +153,7 @@ Codemod 2,412 unit suffixes → `fmt_qty`/`fmt_unit`; full-book render; corpus g
 
 ## Per-chapter board
 
-Status legend: `pending` → `codemod` → `queue-resolved` → `prose-fixed` → `gated` → `rendered` → `diff-clean` → **`DONE`**
+Status legend: `pending` → `source-done` (Phase 1/2: edits + `assess_equiv` clean + static gates) → `html-verified` (Phase 3A: built, scanned, screenshot-checked) → `pdf-verified` (Phase 3B: `.tex` read + PDF screenshots) → **`DONE`** (signed off)
 
 Columns from baseline audit: **DGR** = dangerous suffixes (pct+mult+scale), **unit** = unit suffixes (Phase 2), **mds** = raw MarkdownStr.
 

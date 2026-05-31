@@ -124,6 +124,13 @@ registry twins; units consistent (FLOPs vs FLOP/s). Rubric in ASSESSMENT §5;
 | **WS5** Prose-reference integrity | all refs | med | `audit_lego_html` + new prose-contract |
 | **WS6** Semantic coherence | computational callouts | high (logic) | manual/LLM, per chapter |
 
-**Definition of done (per chapter):** L0–L3 green · `assess_equiv diff` clean or adjudicated ·
-prose-contract clean · `prose_read ✅`. **Book done:** all chapters done + `fmt_semantic_suffix`
-flipped to a global pre-commit blocker.
+**Definition of done (per chapter):** *source* — `assess_equiv diff` clean or adjudicated ·
+static gates green · prose-contract clean; *render* (MIGRATION Phase 3, **build-and-look**) —
+HTML built + `audit_lego_html` green + screenshots eyeballed; PDF built + `.tex` read +
+page screenshots eyeballed; `prose_read ✅`. **Book done:** all chapters `DONE` +
+`fmt_semantic_suffix` flipped to a global pre-commit blocker.
+
+> **Render verification is never assumed.** Source equivalence (no-build) proves the
+> *value* didn't change; only building the HTML and PDF and *looking* at them proves what
+> the reader sees. Both are required. See MIGRATION.md Phase 3 for the exact commands
+> (`binder build html/pdf`, `audit_lego_html.py`, `chapter_pdf_verify.py`, `pdftoppm`).
