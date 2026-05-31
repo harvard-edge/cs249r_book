@@ -183,6 +183,9 @@ file with zero `suffix=` calls. Remaining suffix bucket is only 727
 `physical_unit` suffixes. The `nn_computation` physical-unit cleanup then
 migrated all 30 remaining sites in that chapter, byte-identically, leaving the
 file with zero `suffix=` calls. Remaining suffix bucket is only 697
+`physical_unit` suffixes. The `data_engineering` physical-unit cleanup then
+migrated all 36 remaining sites in that chapter, byte-identically, leaving the
+file with zero `suffix=` calls. Remaining suffix bucket is only 661
 `physical_unit` suffixes. Remaining: the rest of WS4/WS3 and
 later PDF/lock phases. Nothing is half-done or broken.
 
@@ -599,6 +602,10 @@ drop. The adjacent prose/table text was updated to `1 percentage-point threshold
 and `(drop of 6.8 percentage points)`. No user-decision items remain open.
 
 ## Session commit log (newest first)
+- Codex `vol1/data_engineering` physical-unit cleanup: migrated all 36
+  remaining physical-unit suffix sites in the chapter to typed quantity
+  formatters, byte-identically. `data_engineering` now has 0 `suffix=` calls;
+  physical-unit suffixes dropped 697 -> 661.
 - Codex `vol1/nn_computation` physical-unit cleanup: migrated all 30 remaining
   physical-unit suffix sites in the chapter to typed quantity formatters,
   byte-identically. `nn_computation` now has 0 `suffix=` calls; physical-unit

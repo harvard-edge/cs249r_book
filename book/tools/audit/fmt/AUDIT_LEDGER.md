@@ -53,6 +53,40 @@ Status:
 - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/codemod_fmt.py queue --root book/quarto/contents` PASS, `by kind: {}`
 - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_prose_semantics.py --root book/quarto/contents` PASS, 0 findings
 
+## 2026-05-31 — `vol1/data_engineering` physical-unit cleanup
+
+Change type: byte-identical formatter relocation. Replaced all 36 remaining
+physical-unit suffix sites in `data_engineering` with typed quantity formatters.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol1/data_engineering/data_engineering.qmd` | 36 | 203 | 99 | identical values + prose |
+
+Validation details:
+
+- Migrated dataset sizes, storage throughput rates, pJ energy examples, KWS
+  memory limits, streaming/ETL storage values, SNR in dB, GPT-3 model storage,
+  compression/decompression rates, lifecycle bandwidth, and summary recaps.
+- The SNR display uses `ureg.Quantity(..., ureg.decibel)` because decibel is a
+  logarithmic/offset unit and direct multiplication is ambiguous in Pint.
+- `assess_equiv.py` baseline/snapshot/diff reported `IDENTICAL values` and
+  `IDENTICAL prose`.
+- `data_engineering` now has zero `suffix=` calls.
+- `audit_fmt_usage.py` reports `physical_unit` suffixes dropped 697 -> 661,
+  `fmt_qty` at 684, and `fmt_qty_int` at 74.
+- Verification: `git diff --check` PASS; py_compile PASS for formatter,
+  math-canonical, and fmt audit modules; focused pytest suite PASS, 190 tests;
+  `fmt_prose_contract.py` PASS, 0 violations; `codemod_fmt.py queue` PASS,
+  `by kind: {}`; `./book/binder check math` PASS;
+  `./book/binder check code --scope lego-dead-code` PASS;
+  `audit_prose_semantics.py` PASS, 0 findings across 81 files.
+- HTML/PDF render evidence: not run yet. Full rendering is intentionally
+  deferred for the separate render/prose audit checkpoint.
+
+Status: non-render verified; render audit pending.
+
 ## 2026-05-31 — `vol1/nn_computation` physical-unit cleanup
 
 Change type: byte-identical formatter relocation. Replaced all 30 remaining
