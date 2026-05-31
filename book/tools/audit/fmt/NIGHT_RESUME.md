@@ -176,6 +176,16 @@ touched chapters. Verification: py_compile PASS; `git diff --check` PASS;
 `fmt_prose_contract` 0; `codemod_fmt queue` empty; substituted prose semantic
 audit CLEAN across 81 files.
 
+**NOW done:** GPU count labels — migrated 77 `suffix=" GPUs"` sites to
+`fmt_count(..., label="GPU")`. The one singular `suffix=" GPU"` site remains
+intentionally because it renders `GPU-days`, not a standalone count noun.
+`assess_equiv` proved byte-identical values and substituted prose across all 20
+touched chapters. `audit_fmt_usage.py` now reports `fmt_count` calls at 163 and
+the `count_label` suffix bucket down to 41. Verification: py_compile PASS;
+`git diff --check` PASS; `./book/binder check math` PASS; focused pytest suite
+PASS (161 tests); `fmt_prose_contract` 0; `codemod_fmt queue` empty;
+substituted prose semantic audit CLEAN across 81 files.
+
 **NEXT:**
 1. Continue the semantic non-Quantity lanes: count labels, any remaining
    non-physical rates, and time values. Add entries to `AUDIT_LEDGER.md` for

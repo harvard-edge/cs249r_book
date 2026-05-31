@@ -143,6 +143,16 @@ and inline prose for all 5 touched chapters. Verification: py_compile PASS,
 PASS (161 tests), prose-contract 0, semantic audit 0 findings, codemod queue
 empty.
 
+**A8 — GPU count labels: DONE.**
+77 `suffix=" GPUs"` sites moved to `fmt_count(..., label="GPU")` with
+byte-identical values and inline prose across all 20 touched chapters. The one
+singular `suffix=" GPU"` site remains intentionally because it forms
+`GPU-days`, not a standalone count noun. `audit_fmt_usage.py` now reports
+`fmt_count` calls at 163 and the `count_label` suffix bucket at 41. Verification:
+py_compile PASS, `git diff --check` PASS, `./book/binder check math` PASS,
+focused pytest suite PASS (161 tests), prose-contract 0, semantic audit 0
+findings, codemod queue empty.
+
 ### B. WS4 — unit-suffix lane (~2,393 sites: `GB`/`ms`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.

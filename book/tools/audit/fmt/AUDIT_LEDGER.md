@@ -163,3 +163,49 @@ Validation details:
   suite PASS, 161 tests; `fmt_prose_contract.py` PASS, 0 violations;
   `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
   0 findings across 81 files.
+
+## 2026-05-31 — GPU count label relocation
+
+Change type: byte-identical formatter relocation. Replaced 77 hard-coded
+`suffix=" GPUs"` sites with `fmt_count(..., label="GPU")`. The singular
+`suffix=" GPU"` site in `model_compression.qmd` was intentionally left alone
+because it renders the compound `GPU-days`, not a standalone GPU count.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol1/benchmarking/benchmarking.qmd` | 2 | 240 | 102 | identical values + prose |
+| `vol1/introduction/introduction.qmd` | 1 | 91 | 45 | identical values + prose |
+| `vol1/ml_systems/ml_systems.qmd` | 1 | 296 | 143 | identical values + prose |
+| `vol1/responsible_engr/responsible_engr.qmd` | 1 | 168 | 79 | identical values + prose |
+| `vol1/training/training.qmd` | 8 | 453 | 214 | identical values + prose |
+| `vol2/backmatter/appendix_assumptions.qmd` | 3 | 275 | 122 | identical values + prose |
+| `vol2/backmatter/appendix_c3.qmd` | 1 | 46 | 20 | identical values + prose |
+| `vol2/backmatter/appendix_communication.qmd` | 1 | 56 | 33 | identical values + prose |
+| `vol2/collective_communication/collective_communication.qmd` | 3 | 104 | 60 | identical values + prose |
+| `vol2/compute_infrastructure/compute_infrastructure.qmd` | 1 | 320 | 183 | identical values + prose |
+| `vol2/data_storage/data_storage.qmd` | 1 | 180 | 99 | identical values + prose |
+| `vol2/distributed_training/distributed_training.qmd` | 14 | 261 | 142 | identical values + prose |
+| `vol2/fault_tolerance/fault_tolerance.qmd` | 2 | 129 | 70 | identical values + prose |
+| `vol2/fleet_orchestration/fleet_orchestration.qmd` | 18 | 160 | 60 | identical values + prose |
+| `vol2/inference/inference.qmd` | 1 | 208 | 119 | identical values + prose |
+| `vol2/introduction/introduction.qmd` | 1 | 37 | 20 | identical values + prose |
+| `vol2/network_fabrics/network_fabrics.qmd` | 11 | 106 | 62 | identical values + prose |
+| `vol2/ops_scale/ops_scale.qmd` | 4 | 195 | 95 | identical values + prose |
+| `vol2/performance_engineering/performance_engineering.qmd` | 1 | 109 | 58 | identical values + prose |
+| `vol2/sustainable_ai/sustainable_ai.qmd` | 2 | 197 | 120 | identical values + prose |
+
+Validation details:
+
+- Before/after snapshots were generated with `assess_equiv.py baseline --ref HEAD`
+  and `assess_equiv.py snapshot` under `/tmp/fmt_gpu_count_assess`.
+- `assess_equiv.py diff` reported `IDENTICAL values` and `IDENTICAL prose` for
+  every touched chapter.
+- `audit_fmt_usage.py` reports `fmt_count` calls increased to 163 and the
+  `count_label` suffix bucket dropped from 118 to 41.
+- Verification: `python3 -m py_compile mlsysim/mlsysim/fmt.py book/cli/checks/math_canonical.py` PASS;
+  `git diff --check` PASS; `./book/binder check math` PASS; focused pytest
+  suite PASS, 161 tests; `fmt_prose_contract.py` PASS, 0 violations;
+  `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
+  0 findings across 81 files.
