@@ -854,7 +854,8 @@ from mlsysim.fmt import fmt_int, fmt_qty, fmt_qty_int
 
 # ┌── LEGO ───────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, fmt, fmt_power, fmt_energy, check
-from mlsysim.core.units import kilowatt, kWh
+from mlsysim.core.units import gram, kilogram, kilowatt, kWh, metric_ton
+from mlsysim.physics import carbon_from_energy
 
 class LifecycleCarbonEstimate:
     """Worked lifecycle carbon estimate for a 70B training run."""
@@ -888,8 +889,13 @@ class LifecycleCarbonEstimate:
         mfu=1.0 # Peak training
     )
 
-    operational_tonnes = res.total_energy_kwh.magnitude * baseline_grid.carbon_intensity_g_kwh / MILLION
-    embodied_tonnes = n_gpus * embodied_kg_per_gpu / amortization_months / THOUSAND
+    operational_tonnes = carbon_from_energy(
+        res.total_energy_kwh,
+        baseline_grid.carbon_intensity_g_kwh * (gram / kWh),
+    ).to(metric_ton).magnitude
+    embodied_tonnes = (
+        n_gpus * embodied_kg_per_gpu * kilogram / amortization_months
+    ).to(metric_ton).magnitude
     total_tonnes = operational_tonnes + embodied_tonnes
     accelerator_power = n_gpus * h_h100.tdp
     facility_power = accelerator_power * DummyFleet.effective_pue
@@ -1436,7 +1442,11 @@ for epoch in range(num_epochs):
 end_energy = read_rapl_energy()
 end_time = time.time()
 
-energy_joules = ((end_energy - start_energy) * ureg.microjoule).to(ureg.joule).magnitude
+energy_joules = (
+    ((end_energy - start_energy) * ureg.microjoule)
+    .to(ureg.joule)
+    .magnitude
+)
 avg_power_watts = energy_joules / (end_time - start_time)
 print(
     f"Training energy: {energy_joules:.2f} J, Average power: {avg_power_watts:.2f} W"
@@ -1475,7 +1485,9 @@ def measure_inference_power(model, input_data, num_iterations=100):
 
             # Sample power and convert mW → W via pint.
             power_mw = pynvml.nvmlDeviceGetPowerUsage(handle)
-            power_readings.append((power_mw * milliwatt).to(watt).magnitude)
+            power_readings.append(
+                (power_mw * milliwatt).to(watt).magnitude
+            )
 
     avg_power = sum(power_readings) / len(power_readings)
     return avg_power
@@ -1835,13 +1847,13 @@ class TrainingEmbodiedRecap:
 
 For an accelerator with `{python} TrainingEmbodiedRecap.embodied_kg_per_accelerator_str` kg embodied carbon (per NVIDIA's product carbon footprint) and a `{python} TrainingEmbodiedRecap.embodied_lifetime_years_str`-year data center lifetime:
 
-The daily amortized embodied carbon is `{python} TrainingEmbodiedRecap.embodied_kg_per_accelerator_str` kg / (`{python} TrainingEmbodiedRecap.embodied_lifetime_years_str` $\times$ `{python} TrainingEmbodiedRecap.days_per_year_str`) $\approx$ `{python} TrainingEmbodiedRecap.embodied_daily_kg_str` kg/day.
+The daily amortized embodied carbon is `{python} TrainingEmbodiedRecap.embodied_kg_per_accelerator_str` kg / (`{python} TrainingEmbodiedRecap.embodied_lifetime_years_str` $\times$ `{python} TrainingEmbodiedRecap.days_per_year_str`) $\approx$ `{python} TrainingEmbodiedRecap.embodied_daily_kg_str`/day.
 
 Over a `{python} TrainingEmbodiedRecap.training_days_str`-day training run using `{python} TrainingEmbodiedRecap.n_gpus_str` accelerators:
 
-The job's amortized embodied carbon is `{python} TrainingEmbodiedRecap.n_gpus_str` $\times$ `{python} TrainingEmbodiedRecap.training_days_str` $\times$ `{python} TrainingEmbodiedRecap.embodied_daily_kg_str` $\approx$ `{python} TrainingEmbodiedRecap.embodied_training_kg_str` kg CO~2~.
+The job's amortized embodied carbon is `{python} TrainingEmbodiedRecap.n_gpus_str` $\times$ `{python} TrainingEmbodiedRecap.training_days_str` $\times$ `{python} TrainingEmbodiedRecap.embodied_daily_kg_str` $\approx$ `{python} TrainingEmbodiedRecap.embodied_training_kg_str` CO~2~.
 
-The embodied contribution of `{python} TrainingEmbodiedRecap.embodied_training_kg_str` kg represents approximately `{python} TrainingEmbodiedRecap.embodied_us_ratio_pct_str` of the operational emissions (`{python} TrainingEmbodiedRecap.emissions_kg_str` kg) calculated above for the US average grid. If training occurred in Quebec's low-carbon grid, where the same run produced `{python} TrainingEmbodiedRecap.quebec_emissions_kg_str` kg of operational emissions, the embodied contribution would be about `{python} TrainingEmbodiedRecap.embodied_quebec_total_share_pct_str` of total emissions.
+The embodied contribution of `{python} TrainingEmbodiedRecap.embodied_training_kg_str` represents approximately `{python} TrainingEmbodiedRecap.embodied_us_ratio_pct_str` of the operational emissions (`{python} TrainingEmbodiedRecap.emissions_kg_str`) calculated above for the US average grid. If training occurred in Quebec's low-carbon grid, where the same run produced `{python} TrainingEmbodiedRecap.quebec_emissions_kg_str` of operational emissions, the embodied contribution would be about `{python} TrainingEmbodiedRecap.embodied_quebec_total_share_pct_str` of total emissions.
 
 #### Lifecycle carbon accounting {#sec-sustainable-ai-lifecycle-carbon-accounting-99a1}
 
@@ -2536,15 +2548,15 @@ class RackPowerBudget:
     cooling_pct_str = fmt_percent(cooling_pct/100, precision=0, commas=False, style='prose')
 ```
 
-| **Component**                                                                                                 |                **Power (kW)**                |              **% of Rack Total**              |
-|:--------------------------------------------------------------------------------------------------------------|:--------------------------------------------:|:---------------------------------------------:|
+| **Component**                                                                                               |                **Power (kW)**                |              **% of Rack Total**              |
+|:------------------------------------------------------------------------------------------------------------|:--------------------------------------------:|:---------------------------------------------:|
 | **GPU compute ($`{python} RackPowerBudget.num_gpus_str` \times `{python} RackPowerBudget.gpu_tdp_w_str`$)** |    `{python} RackPowerBudget.gpu_kw_str`     |     `{python} RackPowerBudget.gpu_pct_str`    |
-| **Host CPUs and DRAM**                                                                                        |    `{python} RackPowerBudget.host_kw_str`    |    `{python} RackPowerBudget.host_pct_str`    |
-| **NVSwitch fabric**                                                                                           |  `{python} RackPowerBudget.nvswitch_kw_str`  |  `{python} RackPowerBudget.nvswitch_pct_str`  |
-| **InfiniBand HCAs**                                                                                           |     `{python} RackPowerBudget.ib_kw_str`     |     `{python} RackPowerBudget.ib_pct_str`     |
-| **Power conversion losses**                                                                                   | `{python} RackPowerBudget.conversion_kw_str` | `{python} RackPowerBudget.conversion_pct_str` |
-| **Cooling overhead (PUE 1.1)**                                                                                |  `{python} RackPowerBudget.cooling_kw_str`   |   `{python} RackPowerBudget.cooling_pct_str`  |
-| **Total**                                                                                                     | **`{python} RackPowerBudget.total_kw_str`**  |                **100 percent**                |
+| **Host CPUs and DRAM**                                                                                      |    `{python} RackPowerBudget.host_kw_str`    |    `{python} RackPowerBudget.host_pct_str`    |
+| **NVSwitch fabric**                                                                                         |  `{python} RackPowerBudget.nvswitch_kw_str`  |  `{python} RackPowerBudget.nvswitch_pct_str`  |
+| **InfiniBand HCAs**                                                                                         |     `{python} RackPowerBudget.ib_kw_str`     |     `{python} RackPowerBudget.ib_pct_str`     |
+| **Power conversion losses**                                                                                 | `{python} RackPowerBudget.conversion_kw_str` | `{python} RackPowerBudget.conversion_pct_str` |
+| **Cooling overhead (PUE 1.1)**                                                                              |  `{python} RackPowerBudget.cooling_kw_str`   |   `{python} RackPowerBudget.cooling_pct_str`  |
+| **Total**                                                                                                   | **`{python} RackPowerBudget.total_kw_str`**  |                **100 percent**                |
 
 : **Power Budget for a Four-Node DGX H100 Rack**: GPUs consume two thirds of total rack power, but the remaining one third (host systems, networking, power conversion, and cooling) cannot be eliminated and must be budgeted for when sizing the facility's electrical infrastructure. The power conversion losses (8 percent) represent the cumulative inefficiency of the five-stage delivery chain. {#tbl-rack-power}
 
@@ -2574,7 +2586,7 @@ Battery-backed UPS systems with fast inverter response (under 10 ms switching ti
 
 Dedicated electrical substations with custom transformer designs serve the largest installations. These transformers are rated for the high di/dt (rate of current change) characteristic of ML workloads, with custom winding configurations that can handle rapid load swings without voltage distortion. Standard utility transformers are designed for slowly varying loads and can experience magnetic saturation when subjected to the rapid load changes that ML training creates.
 
-To appreciate the magnitude of these transients, consider a `{python} H100TdpRackRecap.cluster_gpus_str`-GPU cluster transitioning from communication phase (`{python} H100TdpRackRecap.comm_phase_w_str` W per GPU average) to matrix multiplication phase (`{python} H100TdpRackRecap.tdp_str` per GPU). The power delta is `{python} H100TdpRackRecap.power_delta_w_str` W $\times$ `{python} H100TdpRackRecap.cluster_gpus_str` = `{python} H100TdpRackRecap.power_delta_kw_str`, and this transition occurs in approximately `{python} H100TdpRackRecap.transition_us_str` microseconds. The rate of power change is therefore `{python} H100TdpRackRecap.power_delta_kw_str`/`{python} H100TdpRackRecap.transition_us_str` $\mu$s = `{python} H100TdpRackRecap.power_rate_gws_str`. No passive electrical component can respond at this rate; only energy storage devices (supercapacitors) positioned physically close to the load can absorb the transient before it propagates into the building's electrical distribution.
+To appreciate the magnitude of these transients, consider a `{python} H100TdpRackRecap.cluster_gpus_str`-GPU cluster transitioning from communication phase (`{python} H100TdpRackRecap.comm_phase_w_str` per GPU average) to matrix multiplication phase (`{python} H100TdpRackRecap.tdp_str` per GPU). The power delta is `{python} H100TdpRackRecap.power_delta_w_str` $\times$ `{python} H100TdpRackRecap.cluster_gpus_str` = `{python} H100TdpRackRecap.power_delta_kw_str`, and this transition occurs in approximately `{python} H100TdpRackRecap.transition_us_str` microseconds. The rate of power change is therefore `{python} H100TdpRackRecap.power_delta_kw_str`/`{python} H100TdpRackRecap.transition_us_str` $\mu$s = `{python} H100TdpRackRecap.power_rate_gws_str`. No passive electrical component can respond at this rate; only energy storage devices (supercapacitors) positioned physically close to the load can absorb the transient before it propagates into the building's electrical distribution.
 
 ::: {.column-margin}
 ![](images/svg/vol2_sustainable_ai_margin_003.svg){width="100%" fig-alt="Margin illustration showing Smooth web-serving load versus microsecond training power shock."}

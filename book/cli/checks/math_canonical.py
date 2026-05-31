@@ -48,7 +48,8 @@ PLAIN_ASSIGN = re.compile(r"^\s*([A-Za-z_]\w*)\s*=\s*([^=].*)$")
 CANONICAL_STR_CALL = re.compile(
     r"\b(fmt|fmt_qty|fmt_qty_int|fmt_int|fmt_usd|fmt_percent|fmt_pp|fmt_multiple|fmt_count"
     r"|fmt_ratio|fmt_range|fmt_qty_range|fmt_time_range|fmt_count_range"
-    r"|fmt_usd_range|fmt_time|fmt_rate|fmt_val|fmt_unit|fmt_sci"
+    r"|fmt_usd_range|fmt_time|fmt_rate|fmt_val|fmt_unit|fmt_sci|fmt_sci_qty"
+    r"|fmt_percent_range|fmt_multiple_range"
     r"|fmt_power|fmt_energy|fmt_emissions|fmt_bandwidth|fmt_memory|fmt_latency"
     r"|MarkdownStr)\s*\("
 )
@@ -134,7 +135,8 @@ MLSYSIM_STAR_FMT_NAMES = frozenset({
     "fmt", "fmt_qty", "fmt_qty_int", "fmt_int", "fmt_usd", "fmt_percent", "fmt_pp", "fmt_multiple",
     "fmt_count", "fmt_ratio", "fmt_range", "fmt_qty_range", "fmt_time_range",
     "fmt_count_range", "fmt_usd_range", "fmt_time", "fmt_rate", "fmt_val",
-    "fmt_unit", "fmt_sci", "fmt_frac", "fmt_math", "MarkdownStr", "check",
+    "fmt_unit", "fmt_sci", "fmt_sci_qty", "fmt_frac", "fmt_math", "MarkdownStr", "check",
+    "fmt_percent_range", "fmt_multiple_range",
     "sci_latex",
     "fmt_power", "fmt_energy", "fmt_emissions", "fmt_bandwidth", "fmt_memory",
     "fmt_latency",
@@ -212,7 +214,7 @@ def _audit_python_cells(qmd_path: Path) -> list[Violation]:
 
         # Skip when RHS itself is a function call to a canonical helper.
         if suffix == "_str":
-            if CANONICAL_STR_CALL.search(rhs):
+            if CANONICAL_STR_CALL.search(rhs) or CANONICAL_MATH_CALL.search(rhs):
                 continue
         elif suffix in ("_math", "_eq"):
             if CANONICAL_MATH_CALL.search(rhs):
