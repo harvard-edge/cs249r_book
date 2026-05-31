@@ -42,11 +42,22 @@ def _revert(path: Path):
     subprocess.run(["git", "checkout", "--", str(path)], check=False)
 
 
-def process(path: Path) -> tuple[str, str]:
-    """Return (verdict, detail). verdict in {PASS, SKIP, FAIL, NOOP}."""
-    edits, mult_vars, _ = scan_file(path)
+# every glyph form a multiplier string might have carried
+GLYPH_FORMS = ("×", "x", "X", " ×", "× ", " x")
+
+
+def process(path: Path, variants: bool = False) -> tuple[str, str]:
+    """Return (verdict, detail). verdict in {PASS, SKIP, FAIL, NOOP}.
+
+    variants=False: byte-identical gate (glyph was in the string, moves to prose
+      unchanged). variants=True: transformation-aware gate — the glyph may
+      NORMALIZE (x->×, fmt_int rounding made explicit), so we prove the only
+      change is: each affected value loses its glyph form, and the visible prose
+      equals the original with every old value string rewritten to new+'×'.
+    """
+    edits, mult_vars, _ = scan_file(path, variants=variants)
     if not edits:
-        return "NOOP", "no provable multiplier sites"
+        return "NOOP", "no multiplier sites for this lane"
 
     before_vals, before_prose, fail = snapshot_file(path)
     if fail:
@@ -62,30 +73,46 @@ def process(path: Path) -> tuple[str, str]:
         _revert(path)
         return "FAIL", f"G-exec: broke execution after rewrite: {fail2[0][:80]}"
 
-    # G-value: only multiplier *_str changed, and only by losing the '×' glyph
     if set(before_vals) != set(after_vals):
         _revert(path)
-        added = set(after_vals) - set(before_vals)
-        removed = set(before_vals) - set(after_vals)
-        return "FAIL", f"G-value: export set changed (+{len(added)} -{len(removed)})"
+        return "FAIL", "G-value: export set changed"
+
+    # G-value: every changed value differs ONLY by a trailing glyph form
+    changed: dict[str, tuple[str, str]] = {}
     bad = []
     for k, ov in before_vals.items():
         nv = after_vals[k]
         if ov == nv:
             continue
-        if not (ov == nv + GLYPH):
+        changed[k] = (ov, nv)
+        if not any(ov == nv + g for g in GLYPH_FORMS):
             bad.append(f"{k}: {ov!r} -> {nv!r}")
     if bad:
         _revert(path)
         return "FAIL", "G-value: unexpected value change(s): " + "; ".join(bad[:3])
 
-    # G-prose: visible prose byte-identical
-    if before_prose != after_prose:
-        diffs = [k for k in before_prose if before_prose.get(k) != after_prose.get(k)]
-        _revert(path)
-        return "FAIL", f"G-prose: visible prose changed at {len(diffs)} site(s): {diffs[:2]}"
+    # G-prose
+    if variants:
+        # expected after = before with each old value string rewritten to new+'×'
+        expected = {}
+        for key, bp in before_prose.items():
+            s = bp
+            for ov, nv in changed.values():
+                if ov and ov in s:
+                    s = s.replace(ov, nv + "×")
+            expected[key] = s
+        mism = [k for k in expected if expected[k] != after_prose.get(k)]
+        if mism:
+            _revert(path)
+            ex = expected[mism[0]]
+            got = after_prose.get(mism[0], "")
+            return "FAIL", f"G-prose-transform mismatch at {len(mism)} site(s): expected {ex[:60]!r} got {got[:60]!r}"
+    else:
+        if before_prose != after_prose:
+            diffs = [k for k in before_prose if before_prose.get(k) != after_prose.get(k)]
+            _revert(path)
+            return "FAIL", f"G-prose: visible prose changed at {len(diffs)} site(s): {diffs[:2]}"
 
-    # G-contract: no multiplier contract violations remain
     mult_viol = [v for v in check_file(path) if v.code in ("mult_missing_glyph", "mult_literal_x")]
     if mult_viol:
         _revert(path)
@@ -99,6 +126,8 @@ def main() -> int:
     ap.add_argument("qmd", nargs="*")
     ap.add_argument("--all", action="store_true", help="all chapters under contents/")
     ap.add_argument("--write", action="store_true", help="required to actually apply (else lists targets)")
+    ap.add_argument("--variants", action="store_true",
+                    help="also convert literal-'x'/' ×'/fmt_int multipliers (transformation-gated)")
     args = ap.parse_args()
 
     files = [Path(p) for p in args.qmd]
@@ -110,7 +139,7 @@ def main() -> int:
     if not args.write:
         print("DRY: would process (use --write):")
         for f in files:
-            edits, _, _ = scan_file(f)
+            edits, _, _ = scan_file(f, variants=args.variants)
             if edits:
                 print(f"  {len(edits):3d}  {str(f).split('contents/')[-1]}")
         return 0
@@ -119,7 +148,7 @@ def main() -> int:
     for f in files:
         if not f.is_file():
             continue
-        verdict, detail = process(f)
+        verdict, detail = process(f, variants=args.variants)
         results[verdict].append(str(f).split("contents/")[-1])
         if verdict != "NOOP":
             print(f"[{verdict}] {str(f).split('contents/')[-1]}\n    {detail}")

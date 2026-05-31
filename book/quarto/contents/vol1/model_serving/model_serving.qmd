@@ -2275,7 +2275,7 @@ class BatchingTax:
     wait_time_b32_ms_str = fmt_int(w_form_b32, commas=False, suffix=" ms")
     lat_b1_ms_str = fmt(lat_b1, precision=0, commas=False, suffix=" ms")
     lat_b32_ms_str = fmt(lat_b32, precision=0, commas=False, suffix=" ms")
-    penalty_ratio_str = fmt_int(penalty_ratio, commas=False, suffix="×")
+    penalty_ratio_str = fmt_multiple(round(penalty_ratio), precision=0, commas=False)
 ```
 
 ### The batching tax: The latency-throughput frontier {#sec-model-serving-batching-tax}
@@ -2290,7 +2290,7 @@ When an inference server batches requests, it introduces two distinct sources of
 The resulting latency-throughput Pareto frontier\index{Pareto Frontier!serving trade-offs} is the set of configurations where one cannot improve throughput without paying a "tax" in increased latency. We can quantify the total batched-request latency for a batch size $B$ and arrival rate $\lambda$ as @eq-batching-tax:
 $$ L_{\text{lat,total}} \approx \underbrace{ \frac{B-1}{2\lambda} }_{\text{Formation delay}} + \underbrace{ T_{\text{inf}}(B) }_{\text{Inference time}} $$ {#eq-batching-tax}
 
-This equation reveals the "cost of throughput." Increasing $B$ to saturate the GPU amortizes the hardware cost, but inflates the per-request latency. Concretely, at 500 QPS, moving from batch-1 to batch-32 increases wait-time from `{python} BatchingTax.wait_time_b1_ms_str` to `{python} BatchingTax.wait_time_b32_ms_str`, contributing to a `{python} BatchingTax.penalty_ratio_str` total latency penalty (`{python} BatchingTax.lat_b1_ms_str` → `{python} BatchingTax.lat_b32_ms_str`). For a systems engineer, this tax is the primary regulator of economic efficiency: the engineer chooses the batch size that maximizes throughput (minimizing cost per query) without violating the latency SLO $(L_{\text{lat}})$.
+This equation reveals the "cost of throughput." Increasing $B$ to saturate the GPU amortizes the hardware cost, but inflates the per-request latency. Concretely, at 500 QPS, moving from batch-1 to batch-32 increases wait-time from `{python} BatchingTax.wait_time_b1_ms_str` to `{python} BatchingTax.wait_time_b32_ms_str`, contributing to a `{python} BatchingTax.penalty_ratio_str`$\times$ total latency penalty (`{python} BatchingTax.lat_b1_ms_str` → `{python} BatchingTax.lat_b32_ms_str`). For a systems engineer, this tax is the primary regulator of economic efficiency: the engineer chooses the batch size that maximizes throughput (minimizing cost per query) without violating the latency SLO $(L_{\text{lat}})$.
 
 ### The utilization-latency relationship {#sec-model-serving-utilizationlatency-relationship-a2f0}
 
@@ -2405,7 +2405,7 @@ class CapacityPlanningCalc:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     cp_mu_required_str = fmt(cp_mu_required_value, precision=1, commas=False)
     cp_gpus_raw_str = fmt(cp_gpus_raw_value, precision=1, commas=False)
-    cp_gpus_ceil_str = fmt(cp_gpus_ceil_value, precision=0, commas=False, suffix=' ×')
+    cp_gpus_ceil_str = fmt_multiple(cp_gpus_ceil_value, precision=0, commas=False)
     cp_final_raw_str = fmt(cp_final_raw_value, precision=1, commas=False)
     cp_final_ceil_str = fmt(cp_final_ceil_value, precision=0, commas=False)
     cp_gpus_after_fail_str = fmt(cp_gpus_after_fail_value, precision=0, commas=False)
@@ -2451,10 +2451,10 @@ From @eq-p99-latency, $T_{\text{lat},\text{p99}} \approx$ `{python} CapacityPlan
 **Step 3**: Determine GPU count.
 Single V100 throughput at $B = 16$: `{python} CapacityPlanningCalc.cp_v100_throughput_str`
 
-GPUs needed = `{python} CapacityPlanningCalc.cp_mu_required_str` / `{python} CapacityPlanningCalc.cp_v100_throughput_str` = `{python} CapacityPlanningCalc.cp_gpus_raw_str` → `{python} CapacityPlanningCalc.cp_gpus_ceil_str`
+GPUs needed = `{python} CapacityPlanningCalc.cp_mu_required_str` / `{python} CapacityPlanningCalc.cp_v100_throughput_str` = `{python} CapacityPlanningCalc.cp_gpus_raw_str` → `{python} CapacityPlanningCalc.cp_gpus_ceil_str`$\times$
 
 **Step 4**: Add headroom for variance.
-Production systems add `{python} CapacityPlanningCalc.cp_headroom_pct_str` headroom for traffic spikes and variance: final count = `{python} CapacityPlanningCalc.cp_gpus_ceil_str` `{python} CapacityPlanningCalc.cp_headroom_multiplier_str`$\times$ = `{python} CapacityPlanningCalc.cp_final_raw_str`, rounded up to `{python} CapacityPlanningCalc.cp_final_ceil_str`.
+Production systems add `{python} CapacityPlanningCalc.cp_headroom_pct_str` headroom for traffic spikes and variance: final count = `{python} CapacityPlanningCalc.cp_gpus_ceil_str`$\times$ `{python} CapacityPlanningCalc.cp_headroom_multiplier_str`$\times$ = `{python} CapacityPlanningCalc.cp_final_raw_str`, rounded up to `{python} CapacityPlanningCalc.cp_final_ceil_str`.
 
 **Step 5**: Verify fault tolerance.
 The `{python} CapacityPlanningCalc.cp_headroom_pct_str` headroom addresses traffic variance, but production systems also need fault tolerance. With `{python} CapacityPlanningCalc.cp_final_ceil_str` GPUs, losing one leaves `{python} CapacityPlanningCalc.cp_gpus_after_fail_str` GPUs handling `{python} CapacityPlanningCalc.cp_peak_qps_str`. The postfailure utilization is (`{python} CapacityPlanningCalc.cp_peak_qps_str` / `{python} CapacityPlanningCalc.cp_v100_throughput_str`) / `{python} CapacityPlanningCalc.cp_gpus_after_fail_str` = `{python} CapacityPlanningCalc.cp_util_after_fail_str`.

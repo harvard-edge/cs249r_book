@@ -90,6 +90,29 @@ class QueueItem:
     action: str        # the human decision needed
 
 
+def _rewrite_fmt_int_multiplier(call, src: str) -> str | None:
+    """fmt_int(arg, …, suffix='×') → fmt_multiple(round(arg), precision=0, commas=…).
+
+    fmt_int is documented as fmt(round(val), precision=0, …) with commas=True,
+    so this is provably value-equivalent (only the glyph moves to prose).
+    """
+    if not call.args:
+        return None
+    arg0 = ast.get_source_segment(src, call.args[0])
+    if arg0 is None or "\n" in arg0:
+        return None
+    if "prefix=" in (ast.get_source_segment(src, call) or ""):
+        return None
+    commas = "True"  # fmt_int default
+    for kw in call.keywords:
+        if kw.arg == "commas":
+            v = _const_str(kw.value)
+            commas = "False" if (isinstance(kw.value, ast.Constant) and kw.value.value is False) else \
+                     ("True" if (isinstance(kw.value, ast.Constant) and kw.value.value is True) else commas)
+    inner = arg0 if arg0.strip().startswith("round(") else f"round({arg0})"
+    return f"fmt_multiple({inner}, precision=0, commas={commas})"
+
+
 def _rewrite_call_to_multiple(seg: str) -> str | None:
     """Textual rewrite of a single-line ``fmt(...×)`` call → ``fmt_multiple(...)``.
 
@@ -116,8 +139,17 @@ def _rewrite_call_to_multiple(seg: str) -> str | None:
     return new
 
 
-def scan_file(path: Path):
-    """Return (mult_edits, mult_vars, queue_items) for one chapter."""
+def scan_file(path: Path, variants: bool = False):
+    """Return (mult_edits, mult_vars, queue_items) for one chapter.
+
+    variants=False (default): only the provable, value-identical lane —
+      fmt(…suffix='×') -> fmt_multiple (exact glyph). Everything else queued.
+    variants=True: ALSO emit edits for the intended-normalization multiplier
+      forms — fmt(…suffix='x'|'X'|' ×') and fmt_int(…×) — which standardize the
+      glyph to × and relocate it to prose. These change rendered output (x->×,
+      rounding made explicit) and MUST be verified with the transformation-aware
+      gate (run_multiplier_lane --variants), not the byte-identical gate.
+    """
     text = path.read_text(encoding="utf-8", errors="replace")
     mult_edits: list[MultEdit] = []
     mult_vars: set[str] = set()
@@ -161,8 +193,10 @@ def scan_file(path: Path):
             sfx = suffix.strip()
 
             if suffix == "×":
-                # exact glyph only — the provable auto lane
+                # exact glyph — provable lane for fmt; fmt_int handled in variants
                 new = _rewrite_call_to_multiple(seg)
+                if not new and variants and var and fname == "fmt_int":
+                    new = _rewrite_fmt_int_multiplier(call, src)
                 if new and var:
                     mult_edits.append(MultEdit(file_line, var, seg, new))
                     mult_vars.add(_qualifier(node.lineno) + var)
@@ -177,12 +211,23 @@ def scan_file(path: Path):
                         "multiline-multiplier", seg.replace("\n", " ⏎ "),
                         "Convert by hand to fmt_multiple(...) + add $\\times$ in prose."))
             elif sfx in {"×", "x", "X"}:
-                # space-padded glyph (' ×') or a LITERAL letter x — ambiguous;
-                # never auto-touch (x could be a variable/axis; spacing differs).
-                queue.append(QueueItem(str(path), file_line, var, fname, suffix,
-                    "multiplier-variant", seg.replace("\n", " ⏎ "),
-                    f"suffix={suffix!r}: confirm it is a multiplier, then "
-                    "fmt_multiple(...) + $\\times$ in prose (drop the literal x/space)."))
+                # space-padded glyph (' ×') or a LITERAL letter x, or an fmt_int
+                # multiplier. In variants mode these are converted (intended
+                # normalization, transformation-gated); otherwise queued.
+                new = None
+                if variants and var:
+                    if fname == "fmt":
+                        new = _rewrite_call_to_multiple(seg)
+                    elif fname == "fmt_int":
+                        new = _rewrite_fmt_int_multiplier(call, src)
+                if new and var:
+                    mult_edits.append(MultEdit(file_line, var, seg, new))
+                    mult_vars.add(_qualifier(node.lineno) + var)
+                else:
+                    queue.append(QueueItem(str(path), file_line, var, fname, suffix,
+                        "multiplier-variant", seg.replace("\n", " ⏎ "),
+                        f"suffix={suffix!r}: confirm it is a multiplier, then "
+                        "fmt_multiple(...) + $\\times$ in prose (drop the literal x/space)."))
             elif sfx in {g.strip() for g in PERCENT_GLYPHS}:
                 queue.append(QueueItem(str(path), file_line, var, fname, suffix,
                     "percent", seg.replace("\n", " ⏎ "),
