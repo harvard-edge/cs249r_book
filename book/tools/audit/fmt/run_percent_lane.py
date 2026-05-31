@@ -100,8 +100,47 @@ def _ensure_percent_import(text: str, edit_lines: set[int]) -> str:
     return "\n".join(lines)
 
 
+def _identical(path: Path, edits, before_vals, before_prose) -> tuple[bool, str]:
+    """Apply `edits` to the clean tree, write, and report whether the rendered
+    values AND visible prose are byte-identical. Leaves the file written."""
+    text = path.read_text(encoding="utf-8")
+    new_text = _apply_cell_edits(text, edits)
+    if new_text == text:
+        return False, "no-op (stale offsets)"
+    new_text = _ensure_percent_import(new_text, {e.line for e in edits})
+    path.write_text(new_text, encoding="utf-8")
+    av, ap, fail = snapshot_file(path)
+    if fail:
+        return False, f"exec: {fail[0][:90]}"
+    if set(av) != set(before_vals):
+        return False, "export set changed"
+    vdiff = [k for k in before_vals if before_vals[k] != av.get(k)]
+    if vdiff:
+        return False, f"value drift: {vdiff[0]} {before_vals[vdiff[0]]!r}->{av.get(vdiff[0])!r}"
+    if before_prose != ap:
+        return False, "prose drift"
+    return True, "byte-identical"
+
+
+QUEUE_OUT = HERE / "percent_adjudication_queue.txt"
+
+
+def _queue_bad(path: Path, bad: list[tuple]) -> None:
+    rel = str(path).split("contents/")[-1]
+    with QUEUE_OUT.open("a", encoding="utf-8") as fh:
+        for e, why in bad:
+            fh.write(f"{rel}\tL{e.line}\t{e.var}\t{why}\t{e.old}\n")
+
+
 def process(path: Path) -> tuple[str, str]:
-    """Return (verdict, detail). verdict in {PASS, SKIP, FAIL, NOOP}."""
+    """Return (verdict, detail). verdict in {PASS, PART, SKIP, FAIL, NOOP}.
+
+    Fast path: apply all edits, accept iff byte-identical. If that fails, bisect
+    to the per-edit granularity — keep every edit that is *individually*
+    byte-identical, queue the rest (guard trips: negative / >max_ratio percents
+    that need a human to add max_ratio= or reclassify). This means one stubborn
+    site no longer blocks a chapter's other (provably safe) percent migrations.
+    """
     edits, _queue = scan_percent(path)
     if not edits:
         return "NOOP", "no auto-rewritable percent sites"
@@ -110,41 +149,36 @@ def process(path: Path) -> tuple[str, str]:
     if fail:
         return "SKIP", f"chapter does not execute headlessly: {fail[0][:80]}"
 
-    text = path.read_text(encoding="utf-8")
-    new_text = _apply_cell_edits(text, edits)
-    if new_text == text:
-        return "NOOP", "edits did not match source lines (stale offsets?)"
-    new_text = _ensure_percent_import(new_text, {e.line for e in edits})
-    path.write_text(new_text, encoding="utf-8")
+    ok, why = _identical(path, edits, before_vals, before_prose)
+    if ok:
+        pct_viol = [v for v in check_file(path) if v.code in PCT_CODES]
+        if pct_viol:
+            _revert(path)
+            return "FAIL", f"G-contract: {len(pct_viol)} percent dup violation(s): {pct_viol[0].ref}"
+        return "PASS", f"{len(edits)} cell rewrites -> fmt_percent, output byte-identical"
 
-    after_vals, after_prose, fail2 = snapshot_file(path)
-    if fail2:
+    # bisect: test each edit on its own against the clean tree
+    _revert(path)
+    good, bad = [], []
+    for e in edits:
+        ind_ok, ind_why = _identical(path, [e], before_vals, before_prose)
         _revert(path)
-        # the headline failure is usually a max_ratio guard trip (>150%) or a
-        # missing fmt_percent import — both are intentional safety stops.
-        return "FAIL", f"G-exec: broke after rewrite (likely max_ratio guard): {fail2[0][:90]}"
+        (good if ind_ok else bad).append(e if ind_ok else (e, ind_why))
 
-    if set(before_vals) != set(after_vals):
+    if not good:
+        _queue_bad(path, bad)
+        return "FAIL", f"all {len(edits)} sites tripped the guard ({why}); queued for adjudication"
+
+    ok2, why2 = _identical(path, good, before_vals, before_prose)
+    if not ok2:
         _revert(path)
-        return "FAIL", "G-value: export set changed"
-
-    vdiff = [f"{k}: {before_vals[k]!r}->{after_vals[k]!r}"
-             for k in before_vals if before_vals[k] != after_vals[k]]
-    if vdiff:
-        _revert(path)
-        return "FAIL", f"G-value: {len(vdiff)} value(s) changed (not byte-identical): {vdiff[:3]}"
-
-    if before_prose != after_prose:
-        diffs = [k for k in before_prose if before_prose.get(k) != after_prose.get(k)]
-        _revert(path)
-        return "FAIL", f"G-prose: visible prose changed at {len(diffs)} site(s): {diffs[:2]}"
-
+        return "FAIL", f"combined good-set not byte-identical ({why2}); needs manual review"
     pct_viol = [v for v in check_file(path) if v.code in PCT_CODES]
     if pct_viol:
         _revert(path)
-        return "FAIL", f"G-contract: {len(pct_viol)} percent dup violation(s): {pct_viol[0].ref}"
-
-    return "PASS", f"{len(edits)} cell rewrites -> fmt_percent, output byte-identical"
+        return "FAIL", f"G-contract: {pct_viol[0].ref}"
+    _queue_bad(path, bad)
+    return "PART", f"{len(good)}/{len(edits)} migrated byte-identical; {len(bad)} queued (guard trips)"
 
 
 def main() -> int:
@@ -168,7 +202,7 @@ def main() -> int:
                 print(f"  {len(edits):3d} edits  ({len(q)} queued)  {str(f).split('contents/')[-1]}")
         return 0
 
-    results: dict[str, list[str]] = {"PASS": [], "SKIP": [], "FAIL": [], "NOOP": []}
+    results: dict[str, list[str]] = {"PASS": [], "PART": [], "SKIP": [], "FAIL": [], "NOOP": []}
     for f in files:
         if not f.is_file():
             continue
@@ -177,7 +211,7 @@ def main() -> int:
         if verdict != "NOOP":
             print(f"[{verdict}] {str(f).split('contents/')[-1]}\n    {detail}")
     print("\n=== summary ===")
-    for v in ("PASS", "SKIP", "FAIL"):
+    for v in ("PASS", "PART", "SKIP", "FAIL"):
         print(f"  {v}: {len(results[v])}")
         for f in results[v]:
             print(f"      {f}")
