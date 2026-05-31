@@ -155,6 +155,27 @@ def _rewrite_percent(call, src: str) -> str | None:
     return f"fmt_percent({ratio}{extra}, style='{PERCENT_STYLE[suffix]}')"
 
 
+def _rewrite_percent_int(call, src: str, style: str) -> str | None:
+    """fmt_int(x, …, suffix='%'|' percent') -> fmt_percent(round(x)/100, …).
+
+    fmt_int is fmt(round(val), precision=0, commas=True), so rounding x first
+    and dividing to a ratio reproduces the integer percent byte-for-byte
+    (round(x)/100 * 100 == round(x) exactly for the integers fmt_int yields).
+    """
+    seg = ast.get_source_segment(src, call) or ""
+    if "prefix=" in seg or not call.args:
+        return None
+    arg0 = ast.get_source_segment(src, call.args[0])
+    if arg0 is None or "\n" in arg0:
+        return None
+    commas = "True"  # fmt_int default
+    for kw in call.keywords:
+        if kw.arg == "commas" and isinstance(kw.value, ast.Constant):
+            commas = "True" if kw.value.value else "False"
+    inner = arg0 if arg0.strip().startswith("round(") else f"round({arg0})"
+    return f"fmt_percent({inner}/100, precision=0, commas={commas}, style='{style}')"
+
+
 def scan_percent(path: Path):
     """Return (percent_edits, queue) for the byte-identical percent lane."""
     text = path.read_text(encoding="utf-8", errors="replace")
@@ -185,7 +206,12 @@ def scan_percent(path: Path):
             var = _assign_target(node)
             seg = ast.get_source_segment(src, call) or ""
             file_line = fence_line + call.lineno
-            new = _rewrite_percent(call, src) if fname == "fmt" else None
+            if fname == "fmt":
+                new = _rewrite_percent(call, src)
+            elif fname == "fmt_int" and suffix in PERCENT_STYLE:
+                new = _rewrite_percent_int(call, src, PERCENT_STYLE[suffix])
+            else:
+                new = None
             # a multiline call can't be spliced by the single-line applier — route
             # it to the queue rather than emit an edit that silently won't apply.
             if new and var and "\n" not in seg:

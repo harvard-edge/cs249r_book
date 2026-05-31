@@ -178,7 +178,7 @@ def test_percent_declines_prefix_and_nonexact_suffix():
     assert _percent("fmt(x, suffix='percent')") is None  # no leading space -> queue
 
 
-def test_scan_percent_routes_fmt_int_and_variants_to_queue(tmp_path):
+def test_scan_percent_migrates_fmt_int_exact_queues_variants(tmp_path):
     p = tmp_path / "c.qmd"
     p.write_text(CELL.format(
         assigns=("ok_str = fmt(acc, suffix='%')\n"
@@ -186,9 +186,13 @@ def test_scan_percent_routes_fmt_int_and_variants_to_queue(tmp_path):
                  "    sp_str = fmt(x, suffix=' %')"),
         prose="x"), encoding="utf-8")
     edits, queue = scan_percent(p)
-    assert [e.var for e in edits] == ["ok_str"]      # only the exact fmt('%')
-    assert all(q.kind == "percent" for q in queue)
-    assert len(queue) == 2                            # fmt_int + ' %' variant
+    # exact fmt('%') and fmt_int('%') both migrate (the latter via round()/100)
+    assert sorted(e.var for e in edits) == ["int_str", "ok_str"]
+    int_edit = next(e for e in edits if e.var == "int_str")
+    assert int_edit.new == "fmt_percent(round(rate)/100, precision=0, commas=True, style='symbol')"
+    # the spacing variant ' %' still goes to the adjudication queue
+    assert [q.var for q in queue] == ["sp_str"]
+    assert queue[0].kind == "percent"
 
 
 def test_scan_percent_queues_multiline_calls_not_silently_dropped(tmp_path):
