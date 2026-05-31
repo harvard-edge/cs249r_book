@@ -360,9 +360,15 @@ class TestFmtPercentGuards:
             fmt_percent(0.456, precision=0, commas=False)
 
     def test_default_style_is_bare_number_backward_compatible(self):
-        # The 11 pre-existing call sites rely on the bare-number default.
-        assert fmt_percent(0.85, precision=0) == "85"
+        # Default precision=None auto-resolves integer-like percentages.
+        assert fmt_percent(0.85) == "85"
         assert fmt_percent(0.123, precision=1) == "12.3"
+
+    def test_default_precision_auto_resolves_integer_like_percentages(self):
+        assert fmt_percent(0.85, style="prose") == "85 percent"
+        assert fmt_percent(0.90, style="symbol") == "90%"
+        assert fmt_percent_range(0.85, 0.90, style="prose") == "85\u201390 percent"
+        assert fmt_pp(7.0) == "7 percentage points"
 
     def test_prose_style_owns_the_word_percent(self):
         assert fmt_percent(0.85, precision=0, style="prose") == "85 percent"
@@ -707,6 +713,7 @@ class TestTypedRanges:
             fmt_time_range(5, 20, ureg.millisecond, precision=0, commas=False)
             == "5\u201320 ms"
         )
+        assert fmt_time_range(5, 20, ureg.millisecond, commas=False) == "5\u201320 ms"
         assert (
             fmt_time_range(1, 2, ureg.second, precision=0, style="word",
                            commas=False)

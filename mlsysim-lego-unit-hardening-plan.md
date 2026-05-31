@@ -166,7 +166,7 @@ doc is the spec; the progress file is the build log.
 - [x] Phase 8½-A — Fix L014 + re-baseline (G1–G2)
 - [x] Phase 8½-B — prose-units clean, 17 files (G3)
 - [x] Phase 8½-C — rate-quantity integrity audit (G4)
-- [ ] Phase 8½-D — fmt precision defaults (G5)
+- [x] Phase 8½-D — fmt precision defaults (G5)
 - [ ] Phase 9A — HTML per chapter
 - [ ] Phase 9B — PDF per chapter
 - [ ] Phase 9C — Full volume builds

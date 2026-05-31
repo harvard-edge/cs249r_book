@@ -1,12 +1,12 @@
 # MLSysBook LEGO Unit Hardening — Progress
 
-**Last updated:** 2026-05-31 (Phase 8½-C complete)
+**Last updated:** 2026-05-31 (Phase 8½-D complete)
 **Branch:** `fmt-fix`
 **Worktree:** `/Users/VJ/GitHub/MLSysBook-fmt-fix`
 **Plan spec:** [`mlsysim-lego-unit-hardening-plan.md`](mlsysim-lego-unit-hardening-plan.md)
-**Last commit:** `e6a3636bfa` — Close prose-units gate: scoped checker and sustainable_ai pilot.
+**Last commit:** `e7c3f7e34f` — Fix TFLOP/s per W rate integrity and add L011 lint rule.
 
-**Next action:** Phase **8½-D1** — decide `fmt_percent` / range default precision policy (`mlsysim/mlsysim/fmt.py`).
+**Next action:** Phase **8½-E** — discard `lego_cells_verify_report.json` artifact diff; then **Phase 9A** (HTML pilot chapter).
 
 **Resume phrase (new Agent chat):** `Resume LEGO hardening: PROGRESS.md next action. Branch fmt-fix, worktree MLSysBook-fmt-fix.`
 
@@ -54,7 +54,7 @@ All must pass before Phase 10. **Do not trust "lint 0 warnings" until G1 is fixe
 | **G2** | `lego-units` baseline reflects real debt | **PASS** | **81 L014** allowlisted in `lego_units_baseline.json` (2026-05-31) |
 | **G3** | `book_check_lego_prose_units.py` clean | **PASS** | 81/81 QMD files; checker scoped to closed-export duplicates |
 | **G4** | Rate quantities keep dimensions through OUTPUT | **PASS** | Pilot fixed; L011 blocks magnitude-ratio rate reattach |
-| **G5** | fmt precision defaults vs guard | **OPEN** | `fmt_percent(0.85)`, range helpers default `precision=1` |
+| **G5** | fmt precision defaults vs guard | **PASS** | `precision=None` → `_resolve_display_precision` on percent/range/pp |
 | **G6** | Headless cell exec | **PASS** | 81/81 `.qmd` files |
 | **G7** | Phase 9 HTML + PDF renders | **NOT STARTED** | — |
 | **G8** | No accidental artifacts in commits | **WATCH** | `lego_cells_verify_report.json` unstaged partial regen — discard |
@@ -98,7 +98,7 @@ All must pass before Phase 10. **Do not trust "lint 0 warnings" until G1 is fixe
 | **8½-B** | Prose-units: 17 files → 0 | **DONE** | Checker fix + `sustainable_ai` OUTPUT/prose |
 | **8½-B** | Pilot: `sustainable_ai.qmd` | **DONE** | L357 tonnes dup; L2553 table; LifecycleCarbonEstimate fmt_emissions |
 | **8½-C** | Rate-quantity audit | **DONE** | `GpuEfficiencyTrajectoryRecap`; L011 added |
-| **8½-D** | fmt precision defaults | **NOT STARTED** | `fmt_percent`, `fmt_*_range` |
+| **8½-D** | fmt precision defaults | **DONE** | `fmt_percent`, ranges, `fmt_pp` → auto precision |
 | **8½-E** | Discard artifact diff | **NOT STARTED** | `git restore lego_cells_verify_report.json` |
 
 ### Phase 9 — render verification — NOT STARTED
@@ -151,10 +151,10 @@ Blocked on Phase 8½-A/B minimum (renders will otherwise duplicate Codex finding
 8½-C2  Grep audit: .magnitude/ patterns that reattach wrong unit             ✓ DONE — 1 hit fixed; 1 defer (distributed_training L470)
 8½-C3  Optional: new lint rule for rate dimension loss                       ✓ DONE — L011
 
-8½-D1  Decide fmt_percent / range default precision policy                    ← NEXT
-8½-D2  Implement + tests in test_fmt.py
+8½-D1  Decide fmt_percent / range default precision policy                    ✓ DONE — precision=None → auto
+8½-D2  Implement + tests in test_fmt.py                                      ✓ DONE — 120 passed
 
-── then Phase 9A (HTML pilot chapter → manifest order) ──
+8½-E   Discard artifact diff (lego_cells_verify_report.json)                 ← NEXT
 ```
 
 ---
@@ -251,6 +251,13 @@ Refresh: `python3 book/tools/audit/book_check_lego_prose_units.py book/quarto/co
 - **Gate:** lint 0 warnings — **not sufficient** (L014 broken)
 - **Gate:** prose-units — **fail** (17 files)
 - **Status:** DONE for migration; **NOT merge-ready**
+
+### Phase 8½-D — fmt precision defaults — 2026-05-31
+
+- **Policy:** `precision=None` (new default) delegates to `_resolve_display_precision`, matching `fmt_multiple`.
+- **Scope:** `fmt_percent`, `fmt_percent_range`, `fmt_qty_range`, `fmt_time_range`, `fmt_pp`.
+- **Fixes:** `fmt_percent(0.85)` no longer raises spurious-trailing-zero error; integer-like percentages render without decimals.
+- **Gate:** G5 PASS; `test_fmt.py` 120 passed; no chapter OUTPUT changes required.
 
 ### Phase 8½-C — rate-quantity integrity — 2026-05-31
 

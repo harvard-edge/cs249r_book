@@ -538,7 +538,7 @@ def fmt_unit(quantity, default="-"):
     return out
 
 
-def fmt_percent(ratio, precision=1, commas=False, style="number",
+def fmt_percent(ratio, precision=None, commas=False, style="number",
                 max_ratio=1.5, allow_negative=False):
     """
     Format a 0-1 **ratio** as a percentage. The single canonical domain for
@@ -580,7 +580,9 @@ def fmt_percent(ratio, precision=1, commas=False, style="number",
             f"got {style!r}."
         )
     glyph = {"number": "", "prose": " percent", "symbol": "%"}[style]
-    return fmt(r * 100, precision=precision, commas=commas, suffix=glyph)
+    pct_val = r * 100
+    p = _resolve_display_precision(pct_val, precision)
+    return fmt(pct_val, precision=p, commas=commas, suffix=glyph)
 
 
 def _percent_ratio_value(ratio, *, max_ratio=1.5, allow_negative=False, what="fmt_percent"):
@@ -605,6 +607,19 @@ def _percent_ratio_value(ratio, *, max_ratio=1.5, allow_negative=False, what="fm
     return r
 
 
+def _resolve_display_precision(val, precision):
+    """Pick precision when caller passes precision=None (domain helpers, fmt_multiple)."""
+    if precision is not None:
+        return precision
+    if _is_integer_like(val):
+        return 0
+    if abs(val) >= 100:
+        return 0
+    if abs(val) >= 10:
+        return 1
+    return 1
+
+
 def _range_precisions(precision, *, what="range precision"):
     """Return endpoint precisions for a range helper."""
     if isinstance(precision, (tuple, list)):
@@ -613,16 +628,28 @@ def _range_precisions(precision, *, what="range precision"):
         lo_p, hi_p = precision
     else:
         lo_p = hi_p = precision
-    if not isinstance(lo_p, int) or not isinstance(hi_p, int):
+    if lo_p is not None and (not isinstance(lo_p, int) or not isinstance(hi_p, int)):
         raise TypeError(f"{what} must be an int or a 2-item int tuple/list.")
     return lo_p, hi_p
+
+
+def _range_endpoint_precisions(lo_val, hi_val, precision, *, what="range precision"):
+    """Resolve per-endpoint precision; None → auto like fmt_multiple."""
+    if isinstance(precision, (tuple, list)):
+        return _range_precisions(precision, what=what)
+    if precision is not None:
+        return precision, precision
+    return (
+        _resolve_display_precision(lo_val, None),
+        _resolve_display_precision(hi_val, None),
+    )
 
 
 def fmt_percent_range(
     lo,
     hi,
     *,
-    precision=1,
+    precision=None,
     commas=False,
     style="prose",
     max_ratio=1.5,
@@ -656,14 +683,19 @@ def fmt_percent_range(
             f"fmt_percent_range style must be 'number', 'prose', or 'symbol', "
             f"got {style!r}."
         )
-    lo_p, hi_p = _range_precisions(precision, what="fmt_percent_range precision")
+    lo_p, hi_p = _range_endpoint_precisions(
+        lo_r * 100,
+        hi_r * 100,
+        precision,
+        what="fmt_percent_range precision",
+    )
     a = fmt(lo_r * 100, precision=lo_p, commas=commas)
     b = fmt(hi_r * 100, precision=hi_p, commas=commas)
     suffix = {"number": "", "prose": " percent", "symbol": "%"}[style]
     return MarkdownStr(f"{a}\u2013{b}{suffix}")
 
 
-def fmt_pp(points, precision=1, commas=False, style="prose", attributive=False):
+def fmt_pp(points, precision=None, commas=False, style="prose", attributive=False):
     """
     Format a difference of two percentages as **percentage points**.
 
@@ -699,26 +731,13 @@ def fmt_pp(points, precision=1, commas=False, style="prose", attributive=False):
             "fmt_pp(attributive=True) applies only to style='prose' (the "
             "hyphenated adjective form), not style='symbol'."
         )
-    num = str(fmt(v, precision=precision, commas=commas))
+    num = str(fmt(v, precision=_resolve_display_precision(v, precision), commas=commas))
     if style == "symbol":
         return MarkdownStr(f"{num} pp")
     if attributive:
         return MarkdownStr(f"{num} percentage-point")
     word = "percentage point" if num == "1" else "percentage points"
     return MarkdownStr(f"{num} {word}")
-
-
-def _resolve_display_precision(val, precision):
-    """Pick precision when caller passes precision=None (domain helpers, fmt_multiple)."""
-    if precision is not None:
-        return precision
-    if _is_integer_like(val):
-        return 0
-    if abs(val) >= 100:
-        return 0
-    if abs(val) >= 10:
-        return 1
-    return 1
 
 
 def fmt_multiple(factor, precision=None, commas=False):
@@ -990,7 +1009,7 @@ def fmt_qty_range(
     hi,
     display_unit,
     *,
-    precision=1,
+    precision=None,
     commas=False,
     unit_label=None,
     per=None,
@@ -1008,8 +1027,11 @@ def fmt_qty_range(
         raise ValueError(
             f"fmt_qty_range expects hi >= lo, got lo={lo_v}, hi={hi_v}."
         )
-    a = fmt(lo_v, precision=precision, commas=commas)
-    b = fmt(hi_v, precision=precision, commas=commas)
+    lo_p, hi_p = _range_endpoint_precisions(
+        lo_v, hi_v, precision, what="fmt_qty_range precision"
+    )
+    a = fmt(lo_v, precision=lo_p, commas=commas)
+    b = fmt(hi_v, precision=hi_p, commas=commas)
     suffix = _quantity_suffix(display_unit, unit_label=unit_label, per=per)
     return MarkdownStr(f"{a}\u2013{b}{suffix}")
 
@@ -1041,7 +1063,7 @@ def fmt_time_range(
     hi,
     display_unit,
     *,
-    precision=1,
+    precision=None,
     commas=False,
     style="symbol",
 ):
@@ -1072,8 +1094,11 @@ def fmt_time_range(
         raise ValueError(
             f"fmt_time_range expects hi >= lo, got lo={lo_v}, hi={hi_v}."
         )
-    a = fmt(lo_v, precision=precision, commas=commas)
-    b = fmt(hi_v, precision=precision, commas=commas)
+    lo_p, hi_p = _range_endpoint_precisions(
+        lo_v, hi_v, precision, what="fmt_time_range precision"
+    )
+    a = fmt(lo_v, precision=lo_p, commas=commas)
+    b = fmt(hi_v, precision=hi_p, commas=commas)
     label_value = (
         1 if abs(lo_v - 1) <= 1e-9 and abs(hi_v - 1) <= 1e-9 else 2
     )
