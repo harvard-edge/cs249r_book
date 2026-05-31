@@ -13,6 +13,7 @@ from mlsysim.core.constants import Q_, ureg
 from mlsysim.engine.solver import SingleNodeModel, DistributedModel, ServingModel
 from mlsysim.hardware.registry import Hardware
 from mlsysim.models.registry import Models
+from mlsysim.physics import calc_transformer_training_flops
 from mlsysim.systems.types import Fleet, NetworkFabric, Node
 
 # ─── 1. RESNET-50 TRAINING (SINGLE NODE) ───────────────────────────────────
@@ -97,3 +98,42 @@ def test_dimensional_integrity():
 
     assert profile.latency.check('[time]')
     assert profile.throughput.check('1/[time]')
+
+
+@pytest.mark.empirical
+def test_documented_calibration_table_stays_in_range():
+    """Check the calibration anchors documented in empirical-calibration.md.
+
+    These are broad sanity bands, not exact benchmarks. They catch registry or
+    formula drift that would move MLSysIM outside the published calibration
+    envelope for common teaching examples.
+    """
+    resnet_a100 = SingleNodeModel().solve(
+        Models.Vision.ResNet50,
+        Hardware.Cloud.A100,
+        batch_size=256,
+        efficiency=0.13,
+        is_training=True,
+    )
+    assert resnet_a100.throughput.m_as("1/s") == pytest.approx(3200.0, rel=0.10)
+
+    resnet_h100 = SingleNodeModel().solve(
+        Models.Vision.ResNet50,
+        Hardware.Cloud.H100,
+        batch_size=256,
+        efficiency=0.065,
+        is_training=True,
+    )
+    assert resnet_h100.throughput.m_as("1/s") == pytest.approx(5000.0, rel=0.10)
+
+    llama_itl = ServingModel().solve(
+        Models.Language.Llama3_8B,
+        Hardware.Cloud.H100,
+        seq_len=2048,
+        batch_size=1,
+        efficiency=0.5,
+    ).itl.m_as("ms")
+    assert 3.0 <= llama_itl <= 10.0
+
+    gpt3_flops = calc_transformer_training_flops(Q_("175e9 param"), Q_("300e9 count"))
+    assert gpt3_flops.m_as("flop") == pytest.approx(3.14e23, rel=0.01)
