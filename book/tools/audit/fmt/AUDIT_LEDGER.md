@@ -53,6 +53,45 @@ Status:
 - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/codemod_fmt.py queue --root book/quarto/contents` PASS, `by kind: {}`
 - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_prose_semantics.py --root book/quarto/contents` PASS, 0 findings
 
+## 2026-05-31 — Small chapter physical-unit cleanup
+
+Change type: byte-identical formatter relocation. Replaced 17 remaining
+physical-unit suffix sites with typed quantity formatters across three small
+chapters.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol1/ml_ops/ml_ops.qmd` | 5 | 132 | 75 | identical values + prose |
+| `vol1/backmatter/appendix_data.qmd` | 6 | 36 | 28 | identical values + prose |
+| `vol2/security_privacy/security_privacy.qmd` | 6 | 69 | 38 | identical values + prose |
+
+Validation details:
+
+- Migrated KV-cache capacity, observability ingest rates, monitoring storage
+  volume, serialization throughput, data-algebra sizes, and TEE/model memory
+  displays.
+- The rejected automatic `ml_ops` unit-lane candidates were manually corrected:
+  split-rate ingest values now attach `/second` before `fmt_qty(...,
+  GB/second|MB/second)`.
+- `assess_equiv.py` baseline/snapshot/diff reported `IDENTICAL values` and
+  `IDENTICAL prose` for all three touched files after preserving the
+  comma-sensitive `> 1,000 MB/s` display.
+- All three touched files now have zero `suffix=` calls.
+- `audit_fmt_usage.py` reports `physical_unit` suffixes dropped 932 -> 915,
+  `fmt_qty` at 473, and `fmt_qty_int` at 31.
+- Verification: `git diff --check` PASS; py_compile PASS for formatter,
+  math-canonical, and fmt audit modules; focused pytest suite PASS, 190 tests;
+  `fmt_prose_contract.py` PASS, 0 violations; `codemod_fmt.py queue` PASS,
+  `by kind: {}`; `./book/binder check math` PASS;
+  `./book/binder check code --scope lego-dead-code` PASS;
+  `audit_prose_semantics.py` PASS, 0 findings across 81 files.
+- HTML/PDF render evidence: not run yet. Full rendering is intentionally
+  deferred for the separate render/prose audit checkpoint.
+
+Status: non-render verified; render audit pending.
+
 ## 2026-05-31 — Tiny Vol2 physical-unit tail
 
 Change type: byte-identical formatter relocation. Replaced 7 remaining
