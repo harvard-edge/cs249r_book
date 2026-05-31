@@ -115,6 +115,14 @@ LEGO cells. Verification: py_compile PASS, `git diff --check` PASS, focused
 pytest suite PASS (157 tests), prose-contract 0, semantic audit 0 findings,
 codemod queue empty.
 
+**A5 — Currency denominator relocation: DONE.**
+91 chapter call sites moved from `fmt_usd(..., suffix="/...")` to
+`fmt_usd(..., per="...")`, removing the `rate_denominator` `suffix=` bucket from
+`audit_fmt_usage.py`. `assess_equiv` proved byte-identical exported values and
+inline prose for all 10 touched chapters. Verification: `git diff --check` PASS,
+focused pytest suite PASS (157 tests), prose-contract 0, semantic audit 0
+findings, codemod queue empty.
+
 ### B. WS4 — unit-suffix lane (~2,393 sites: `GB`/`ms`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.

@@ -52,3 +52,36 @@ Status:
   - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/fmt_prose_contract.py --root book/quarto/contents` PASS, 0 violations
   - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/codemod_fmt.py queue --root book/quarto/contents` PASS, `by kind: {}`
   - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_prose_semantics.py --root book/quarto/contents` PASS, 0 findings
+
+## 2026-05-31 — Currency denominator relocation
+
+Change type: byte-identical formatter relocation. Replaced 91
+`fmt_usd(..., suffix="/...")` chapter call sites with structured
+`fmt_usd(..., per="...")`. This keeps the rendered denominator text unchanged
+while moving denominator validation into `fmt_usd`.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol1/data_engineering/data_engineering.qmd` | 26 | 203 | 99 | identical values + prose |
+| `vol1/hw_acceleration/hw_acceleration.qmd` | 5 | 255 | 140 | identical values + prose |
+| `vol1/ml_ops/ml_ops.qmd` | 8 | 132 | 75 | identical values + prose |
+| `vol1/ml_systems/ml_systems.qmd` | 15 | 296 | 143 | identical values + prose |
+| `vol1/ml_workflow/ml_workflow.qmd` | 8 | 77 | 36 | identical values + prose |
+| `vol1/responsible_engr/responsible_engr.qmd` | 3 | 168 | 79 | identical values + prose |
+| `vol1/training/training.qmd` | 6 | 453 | 214 | identical values + prose |
+| `vol2/distributed_training/distributed_training.qmd` | 1 | 261 | 142 | identical values + prose |
+| `vol2/ops_scale/ops_scale.qmd` | 16 | 195 | 95 | identical values + prose |
+| `vol2/sustainable_ai/sustainable_ai.qmd` | 3 | 197 | 120 | identical values + prose |
+
+Validation details:
+
+- Before/after snapshots were generated with `assess_equiv.py baseline --ref HEAD`
+  and `assess_equiv.py snapshot` under `/tmp/fmt_currency_per_assess`.
+- `assess_equiv.py diff` reported `IDENTICAL values` and `IDENTICAL prose` for
+  every touched chapter.
+- `audit_fmt_usage.py` confirms the `rate_denominator` `suffix=` bucket is now
+  gone; only the pre-existing single `extra_suffix=` denominator remains.
+- Render evidence: deferred to the chapter render sweep; this batch is a pure
+  byte-identical relocation with executed value/prose proof.

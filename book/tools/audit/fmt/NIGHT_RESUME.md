@@ -37,13 +37,13 @@ python3 -m pytest mlsysim/tests/test_fmt.py book/tests/test_codemod_fmt.py book/
 
 ## NOW / NEXT  (update before every commit)
 
-**STATUS: Structured formatter API batch complete and verified. Safe to continue with migration lanes.**
+**STATUS: Currency denominator relocation complete and verified. Safe to continue with remaining migration lanes.**
 
 **State:** multiplier + percent + scale 100% migrated; pp → typed fmt_pp (14
 byte-identical sites + grammar fixes, plus the user-approved A2 benchmarking
 edits); 4 dangerous glyph stragglers killed; NEW semantic scanner gate (+ unit-dup
 bug fixes). 81/81 chapters exec clean; prose-contract 0; semantic scanner 0;
-codemod queue empty; 129 focused tests pass. User ruled for no-space scaled
+codemod queue empty; 157 focused tests pass. User ruled for no-space scaled
 counts, so `run_scale_style_lane.py` migrated the 44 queued scale sites to
 `fmt_count` and one manual `fmt(...) + "B"` blind spot. User also approved A2, so
 `benchmarking` now renders `0.9 percentage-point drop`, `below 1
@@ -147,9 +147,18 @@ py_compile PASS; `git diff --check` PASS; focused pytest suite PASS
 (157 tests); `fmt_prose_contract` 0; `codemod_fmt queue` empty; substituted
 prose semantic audit CLEAN across 81 files.
 
+**NOW done:** Currency denominator relocation — migrated 91 chapter call sites
+from `fmt_usd(..., suffix="/...")` to structured `fmt_usd(..., per="...")`
+across 10 chapters. This removed the `rate_denominator` `suffix=` bucket from
+`audit_fmt_usage.py` while keeping rendered values and substituted prose
+byte-identical by `assess_equiv` for every touched chapter. Verification:
+`git diff --check` PASS; focused pytest suite PASS (157 tests);
+`fmt_prose_contract` 0; `codemod_fmt queue` empty; substituted prose semantic
+audit CLEAN across 81 files.
+
 **NEXT:**
-1. Migrate the semantic non-Quantity lanes first: currency scale/per, count
-   labels, non-physical rates, and time values. Add entries to
+1. Continue the semantic non-Quantity lanes: currency scale/range oddities,
+   count labels, non-physical rates, and time values. Add entries to
    `AUDIT_LEDGER.md` for every touched LEGO cell.
 2. Continue WS4 with `run_unit_lane.py` chapter-sized batches. Highest remaining
    clean counts: `vol2/backmatter/appendix_fleet` (14), `vol2/ops_scale` (14),
