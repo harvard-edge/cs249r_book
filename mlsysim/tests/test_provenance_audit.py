@@ -7,17 +7,27 @@ from mlsysim.tools.appendix_lineage import (
     audit_appendix_reliability,
 )
 from mlsysim.tools.audit_provenance import (
+    audit_hardware_tech,
     audit_infra_capacity,
     audit_infra_grids,
     audit_infra_pricing,
     audit_literature_sourced,
     audit_registries,
+    audit_systems_topology,
     audit_systems_reliability,
 )
 
 class TestProvenanceAudit(unittest.TestCase):
     def test_all_registries_have_provenance(self):
         issues = audit_registries(scope_cloud=False)
+        self.assertEqual(issues, [], "\n".join(issues))
+
+    def test_hardware_tech_has_provenance(self):
+        issues = audit_hardware_tech()
+        self.assertEqual(issues, [], "\n".join(issues))
+
+    def test_systems_topology_has_provenance(self):
+        issues = audit_systems_topology()
         self.assertEqual(issues, [], "\n".join(issues))
 
     def test_infra_grids_have_provenance(self):

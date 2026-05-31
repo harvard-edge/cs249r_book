@@ -1,6 +1,8 @@
 import unittest
 
-from mlsysim.core.provenance import ProvenanceKind, Sourced
+from pydantic import ValidationError
+
+from mlsysim.core.provenance import Provenance, ProvenanceKind, Sourced
 from mlsysim.hardware.registry import Hardware
 from mlsysim.infrastructure.registry import Infrastructure
 from mlsysim.systems.reliability import Reliability
@@ -23,6 +25,18 @@ class TestProvenance(unittest.TestCase):
         prov = mttf.provenance
         self.assertIsNotNone(prov)
         self.assertEqual(prov.kind, ProvenanceKind.LITERATURE)
+
+    def test_provenance_requires_verified_date(self):
+        with self.assertRaises(ValidationError):
+            Provenance(kind=ProvenanceKind.CONVENTION, ref="missing date")
+
+    def test_evidence_provenance_requires_url(self):
+        with self.assertRaises(ValidationError):
+            Provenance(
+                kind=ProvenanceKind.LITERATURE,
+                ref="paper without URL",
+                verified="2026-05-31",
+            )
 
     def test_defaults_module_removed(self):
         import importlib.util

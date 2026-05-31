@@ -45,6 +45,7 @@ class Nodes(Registry):
         accelerators_per_node=8,
         intra_node_bw=Hardware.Cloud.A100.nvlink.bandwidth,
         nics_per_node=8,
+        metadata=Metadata(provenance=pc.BOOK_DGX_GPUS_PER_HOST),
     )
     DGX_B200 = Node(
         name="DGX B200",
@@ -52,6 +53,7 @@ class Nodes(Registry):
         accelerators_per_node=8,
         intra_node_bw=Hardware.Cloud.B200.nvlink.bandwidth,
         nics_per_node=8,
+        metadata=Metadata(provenance=pc.BOOK_DGX_GPUS_PER_HOST),
     )
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from enum import Enum
 from typing import Optional, Union
 
@@ -38,15 +39,25 @@ class Provenance(BaseModel):
         """
         Enforces validation rules based on the ProvenanceKind.
         
-        Requires URLs for datasheets, and notes for estimates and derived values,
-        ensuring proper traceability and justification for textbook numbers.
+        Requires source URLs and verification dates for evidence-backed records,
+        and notes for estimates and derived values. This keeps textbook-facing
+        numbers traceable and makes intentionally illustrative numbers explicit.
         """
-        if self.kind == ProvenanceKind.DATASHEET and not self.url:
-            raise ValueError(f"datasheet provenance requires url: {self.ref!r}")
-        if self.kind == ProvenanceKind.ESTIMATE and not self.notes:
-            raise ValueError(f"estimate provenance requires notes: {self.ref!r}")
-        if self.kind == ProvenanceKind.DERIVED and not self.notes:
-            raise ValueError(f"derived provenance requires notes: {self.ref!r}")
+        if not self.verified:
+            raise ValueError(f"provenance requires verified date: {self.ref!r}")
+        try:
+            date.fromisoformat(self.verified)
+        except ValueError as e:
+            raise ValueError(f"provenance verified date must be YYYY-MM-DD: {self.ref!r}") from e
+
+        if self.kind in {
+            ProvenanceKind.DATASHEET,
+            ProvenanceKind.LITERATURE,
+            ProvenanceKind.INDUSTRY_REPORT,
+        } and not self.url:
+            raise ValueError(f"{self.kind.value} provenance requires url: {self.ref!r}")
+        if self.kind in {ProvenanceKind.ESTIMATE, ProvenanceKind.DERIVED} and not self.notes:
+            raise ValueError(f"{self.kind.value} provenance requires notes: {self.ref!r}")
         return self
 
 

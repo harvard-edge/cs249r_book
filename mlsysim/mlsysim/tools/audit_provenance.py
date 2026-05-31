@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import date
 from typing import Any, Iterable
 
 from mlsysim.tools.appendix_lineage import (
@@ -21,6 +22,7 @@ from mlsysim.hardware.registry import (
     TinyHardware,
     WorkstationHardware,
 )
+from mlsysim.hardware.tech import Interconnect, Memory, Op, Storage as TechStorage
 from mlsysim.infrastructure.registry import Grids
 from mlsysim.infrastructure.pricing import Cloud, Storage, Labeling, Fleet, Capital, OnPremises
 from mlsysim.infrastructure.capacity import Capacity
@@ -33,6 +35,7 @@ from mlsysim.models.registry import (
     TinyModels,
     VisionModels,
 )
+from mlsysim.systems.registry import Clusters, Fabrics, Nodes, Pods
 def _registry_nodes(registry_cls: type) -> Iterable[Any]:
     """Yields all Sourced AST nodes found in the target registry file."""
     if not hasattr(registry_cls, "list"):
@@ -47,14 +50,21 @@ def _validate_provenance_record(path: str, prov: Provenance | None) -> list[str]
     issues: list[str] = []
     if not prov.ref.strip():
         issues.append(f"{path}: empty provenance.ref")
-    if prov.kind == ProvenanceKind.DATASHEET and not prov.url:
-        issues.append(f"{path}: datasheet without url")
-    if prov.kind == ProvenanceKind.ESTIMATE and not prov.notes:
-        issues.append(f"{path}: estimate without notes")
-    if prov.kind == ProvenanceKind.DERIVED and not prov.notes:
-        issues.append(f"{path}: derived without notes")
-    if prov.verified and len(prov.verified) != 10:
-        issues.append(f"{path}: verified date must be YYYY-MM-DD")
+    if not prov.verified:
+        issues.append(f"{path}: missing verified date")
+    else:
+        try:
+            date.fromisoformat(prov.verified)
+        except ValueError:
+            issues.append(f"{path}: verified date must be YYYY-MM-DD")
+    if prov.kind in {
+        ProvenanceKind.DATASHEET,
+        ProvenanceKind.LITERATURE,
+        ProvenanceKind.INDUSTRY_REPORT,
+    } and not prov.url:
+        issues.append(f"{path}: {prov.kind.value} without url")
+    if prov.kind in {ProvenanceKind.ESTIMATE, ProvenanceKind.DERIVED} and not prov.notes:
+        issues.append(f"{path}: {prov.kind.value} without notes")
     return issues
 
 
@@ -92,6 +102,34 @@ def audit_registries(*, scope_cloud: bool = False) -> list[str]:
         ]
     )
     for prefix, reg in groups:
+        for node in _registry_nodes(reg):
+            name = getattr(node, "name", type(node).__name__)
+            issues.extend(_check_node(f"{prefix}.{name}", node))
+    return issues
+
+
+def audit_hardware_tech() -> list[str]:
+    issues: list[str] = []
+    for prefix, reg in (
+        ("Hardware.Tech.Memory", Memory),
+        ("Hardware.Tech.Storage", TechStorage),
+        ("Hardware.Tech.Op", Op),
+        ("Hardware.Tech.Interconnect", Interconnect),
+    ):
+        for node in _registry_nodes(reg):
+            name = getattr(node, "name", type(node).__name__)
+            issues.extend(_check_node(f"{prefix}.{name}", node))
+    return issues
+
+
+def audit_systems_topology() -> list[str]:
+    issues: list[str] = []
+    for prefix, reg in (
+        ("Systems.Nodes", Nodes),
+        ("Systems.Fabrics", Fabrics),
+        ("Systems.Clusters", Clusters),
+        ("Systems.Pods", Pods),
+    ):
         for node in _registry_nodes(reg):
             name = getattr(node, "name", type(node).__name__)
             issues.extend(_check_node(f"{prefix}.{name}", node))
@@ -197,6 +235,8 @@ def main(argv: list[str] | None = None) -> int:
         issues.extend(audit_registries(scope_cloud=True))
     if args.scope in ("all", "textbook"):
         issues.extend(audit_registries(scope_cloud=False))
+        issues.extend(audit_hardware_tech())
+        issues.extend(audit_systems_topology())
         issues.extend(audit_infra_grids())
         issues.extend(audit_infra_pricing())
         issues.extend(audit_infra_capacity())

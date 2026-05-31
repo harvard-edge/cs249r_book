@@ -86,6 +86,7 @@ UPTIME_PUE_2022 = Provenance(
     id="prov:uptime-pue-survey-2022",
     kind=ProvenanceKind.INDUSTRY_REPORT,
     ref="Uptime Institute Global Data Center Survey 2022",
+    url="https://uptimeinstitute.com/resources/research-and-reports/uptime-institute-global-data-center-survey-2022",
     verified="2025-03-06",
 )
 
@@ -124,6 +125,7 @@ BOOK_DEVICE_ANCHORS = Provenance(
 HOROWITZ_ENERGY = _lit(
     "prov:horowitz-2014",
     "Horowitz (2014), \"Computing's Energy Problem (and what we can do about it)\", ISSCC — 45 nm per-operation/per-byte energies",
+    url="https://ieeexplore.ieee.org/document/6757323",
 )
 BOOK_LATENCY_HIERARCHY = _conv(
     "prov:book-latency-hierarchy",
