@@ -205,8 +205,9 @@ class TestFmtCountLegacy:
 
 class TestFmtRate:
     def test_formats_allowlisted_service_rates(self):
-        assert fmt_rate(2500, "QPS") == "2500 QPS"
-        assert fmt_rate(1200, "tokens/s") == "1200 tokens/s"
+        assert fmt_rate(2500, "QPS") == "2,500 QPS"
+        assert fmt_rate(1200, "tokens/s") == "1,200 tokens/s"
+        assert fmt_rate(2500, "QPS", commas=False) == "2500 QPS"
         assert fmt_rate(60, "FPS") == "60 FPS"
 
     def test_rejects_unknown_rate_unit(self):

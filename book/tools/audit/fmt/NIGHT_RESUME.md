@@ -167,10 +167,19 @@ range normalizing `~\$25,000-30,000` to `~\$25,000–30,000` through
 PASS (161 tests); `fmt_prose_contract` 0; `codemod_fmt queue` empty;
 substituted prose semantic audit CLEAN across 81 files.
 
+**NOW done:** QPS rate relocation — migrated 26 `suffix=" QPS"` sites to
+`fmt_rate(..., "QPS")`. `fmt_rate` now defaults to `commas=True`, preserving old
+`fmt`/`fmt_int` output unless the site explicitly requests `commas=False`.
+`assess_equiv` proved byte-identical values and substituted prose across all 5
+touched chapters. Verification: py_compile PASS; `git diff --check` PASS;
+`./book/binder check math` PASS; focused pytest suite PASS (161 tests);
+`fmt_prose_contract` 0; `codemod_fmt queue` empty; substituted prose semantic
+audit CLEAN across 81 files.
+
 **NEXT:**
-1. Continue the semantic non-Quantity lanes: count labels, non-physical rates,
-   and time values. Add entries to `AUDIT_LEDGER.md` for every touched LEGO
-   cell.
+1. Continue the semantic non-Quantity lanes: count labels, any remaining
+   non-physical rates, and time values. Add entries to `AUDIT_LEDGER.md` for
+   every touched LEGO cell.
 2. Continue WS4 with `run_unit_lane.py` chapter-sized batches. Highest remaining
    clean counts: `vol2/backmatter/appendix_fleet` (14), `vol2/ops_scale` (14),
    `vol1/hw_acceleration` (11), `vol1/introduction` (11),

@@ -134,6 +134,15 @@ Verification: py_compile PASS, `git diff --check` PASS, focused pytest suite
 PASS (161 tests), `./book/binder check math` PASS, prose-contract 0, semantic
 audit 0 findings, codemod queue empty.
 
+**A7 — QPS rate relocation: DONE.**
+26 `suffix=" QPS"` sites moved to `fmt_rate(..., "QPS")`. `fmt_rate` now
+defaults to `commas=True` so it matches old `fmt`/`fmt_int` output unless a site
+explicitly passes `commas=False`. `assess_equiv` proved byte-identical values
+and inline prose for all 5 touched chapters. Verification: py_compile PASS,
+`git diff --check` PASS, `./book/binder check math` PASS, focused pytest suite
+PASS (161 tests), prose-contract 0, semantic audit 0 findings, codemod queue
+empty.
+
 ### B. WS4 — unit-suffix lane (~2,393 sites: `GB`/`ms`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.

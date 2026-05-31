@@ -131,3 +131,35 @@ Validation details:
   `by kind: {}`; `audit_prose_semantics.py` PASS, 0 findings across 81 files.
 - Render evidence: deferred to the chapter render sweep; this batch has executed
   value/prose proof plus one documented intentional range-dash normalization.
+
+## 2026-05-31 — QPS rate relocation
+
+Change type: byte-identical formatter relocation. Replaced 26
+`fmt(..., suffix=" QPS")` / `fmt_int(..., suffix=" QPS")` chapter call sites
+with `fmt_rate(..., "QPS")`. `fmt_rate` now defaults to `commas=True`, matching
+the old `fmt`/`fmt_int` default; compact table sites keep `commas=False`
+explicitly.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol1/benchmarking/benchmarking.qmd` | 3 | 240 | 102 | identical values + prose |
+| `vol1/ml_ops/ml_ops.qmd` | 1 | 132 | 75 | identical values + prose |
+| `vol1/model_serving/model_serving.qmd` | 10 | 365 | 172 | identical values + prose |
+| `vol2/fleet_orchestration/fleet_orchestration.qmd` | 5 | 160 | 60 | identical values + prose |
+| `vol2/inference/inference.qmd` | 7 | 208 | 119 | identical values + prose |
+
+Validation details:
+
+- Before/after snapshots were generated with `assess_equiv.py baseline --ref HEAD`
+  and `assess_equiv.py snapshot` under `/tmp/fmt_qps_rate_assess`.
+- `assess_equiv.py diff` reported `IDENTICAL values` and `IDENTICAL prose` for
+  every touched chapter.
+- `audit_fmt_usage.py` now reports 26 `fmt_rate` calls and the `count_label`
+  suffix bucket dropped from 144 to 118.
+- Verification: `python3 -m py_compile mlsysim/mlsysim/fmt.py book/cli/checks/math_canonical.py` PASS;
+  `git diff --check` PASS; `./book/binder check math` PASS; focused pytest
+  suite PASS, 161 tests; `fmt_prose_contract.py` PASS, 0 violations;
+  `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
+  0 findings across 81 files.

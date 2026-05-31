@@ -697,7 +697,7 @@ def fmt_rate(
     unit,
     *,
     precision=0,
-    commas=False,
+    commas=True,
     approx=False,
     lower_bound=False,
     allow_negative=False,
