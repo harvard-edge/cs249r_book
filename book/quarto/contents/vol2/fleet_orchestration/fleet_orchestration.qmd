@@ -330,6 +330,8 @@ The most fundamental scheduling algorithm is **bin packing**[^fn-bin-packing-sch
 # │ Context: Bin packing — fragmentation and NVLink locality.
 # │ Exports: FleetFragmentation.total_gpus_str, effective_capacity_pct_str,
 # │          nvlink_h100_str, ib_ndr_gbs_str
+from mlsysim.fmt import fmt_qty
+
 class FleetFragmentation:
     from mlsysim import Hardware
     h_h100 = Hardware.Cloud.H100
@@ -340,13 +342,11 @@ class FleetFragmentation:
     job_request = 6
     wasted_per_node = gpus_per_node - job_request
     frag_pct = (wasted_per_node / gpus_per_node) * 100
-    nvlink_h100_val = h_h100.nvlink.bandwidth.m_as(GB/second)
-    ib_ndr_gbs_val = ib_ndr.bandwidth.m_as(GB/second)
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     total_gpus_str = fmt_count(total_gpus, label="GPU")
     effective_capacity_pct_str = fmt_percent((100 - frag_pct)/100, precision=0, commas=False, style='prose')
-    nvlink_h100_str = fmt(nvlink_h100_val, precision=0, suffix=' GB/s')
-    ib_ndr_gbs_str = fmt(ib_ndr_gbs_val, precision=0, suffix=' GB/s')
+    nvlink_h100_str = fmt_qty(h_h100.nvlink.bandwidth, GB/second, precision=0)
+    ib_ndr_gbs_str = fmt_qty(ib_ndr.bandwidth, GB/second, precision=0)
 ```
 
 Consider a 64-node cluster with 8 GPUs per node, totaling `{python} FleetFragmentation.total_gpus_str`. If jobs request 6 GPUs each, each job occupies one full node but wastes 2 GPUs per node, reducing effective capacity to `{python} FleetFragmentation.effective_capacity_pct_str`. The remaining 2 GPUs per node cannot be combined across nodes because GPU workloads require local memory access. This **fragmentation**\index{Fragmentation!scheduling} grows worse with heterogeneous job sizes: a mix of 1-GPU, 3-GPU, and 7-GPU jobs creates irregular gaps distributed across many nodes, where no single pending job can fit into any individual gap, yet the total free capacity would be sufficient if the gaps were contiguous.
@@ -801,7 +801,8 @@ class FleetTopologyInterconnect:
     nvlink_a100_val = h_a100.nvlink.bandwidth.m_as(GB/second)
     ib_ndr_gbps_val = ib_ndr.bandwidth.m_as('Gbps')
     ib_ndr_gbs_val = ib_ndr.bandwidth.m_as(GB/second)
-    activation_gb = 1
+    activation = 1 * GB
+    activation_gb = activation.m_as(GB)
     # ┌── 2. EXECUTE ───────────────────────────────────────
     nvlink_xfer_ms = activation_gb / nvlink_h100_val * THOUSAND
     ib_xfer_ms = activation_gb / ib_ndr_gbs_val * THOUSAND
@@ -810,11 +811,11 @@ class FleetTopologyInterconnect:
     check(abs(nvlink_xfer_ms - ib_xfer_ms) > 0, "IB transfer should differ from NVLink")
     check(xfer_slowdown > 1, f"Expected IB slowdown > 1, got {xfer_slowdown}")
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    nvlink_h100_str = fmt(nvlink_h100_val, precision=0, suffix=' GB/s')
-    nvlink_a100_str = fmt(nvlink_a100_val, precision=0, suffix=' GB/s')
+    nvlink_h100_str = fmt_qty(h_h100.nvlink.bandwidth, GB/second, precision=0)
+    nvlink_a100_str = fmt_qty(h_a100.nvlink.bandwidth, GB/second, precision=0)
     ib_ndr_str = fmt_qty(ib_ndr.bandwidth, Gbps, precision=0, unit_label="Gb/s")
-    ib_ndr_gbs_str = fmt(ib_ndr_gbs_val, precision=0, suffix=' GB/s')
-    activation_gb_str = fmt(activation_gb, precision=0, commas=False, suffix=' GB')
+    ib_ndr_gbs_str = fmt_qty(ib_ndr.bandwidth, GB/second, precision=0)
+    activation_gb_str = fmt_qty(activation, GB, precision=0, commas=False)
     nvlink_xfer_ms_str = fmt_time(nvlink_xfer_ms, 'millisecond', precision=1, commas=False)
     ib_xfer_ms_str = fmt_time(ib_xfer_ms, 'millisecond', precision=0, commas=False)
     xfer_slowdown_str = fmt(xfer_slowdown, precision=0, commas=False)
@@ -1801,26 +1802,31 @@ For a heterogeneous fleet, this logic dictates a bifurcated strategy. Our 175B p
 # │ Imports: mlsysim.book (fmt, check), mlsysim.constants (HOURS_PER_YEAR)
 # │ Exports: gs_* strings for callout
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int,  fmt, check, fmt_count
+from mlsysim.fmt import fmt_int, fmt_qty, fmt_qty_int, fmt, check, fmt_count
 
 class GpuSharingRoi:
     # ┌── 1. LOAD ──────────────────────────────────────────
     n_small = 100
-    small_footprint_gb = 26
+    small_footprint = 26 * GB
+    small_footprint_gb = small_footprint.m_as(GB)
     n_large = 10
-    large_footprint_gb = (Models.Language.GPT3.parameters * BYTES_FP16).m_as(GB)  # 175B FP16
-    a100_mem_gb = Hardware.Cloud.A100.memory.capacity.m_as(GiB)
+    large_footprint = Models.Language.GPT3.parameters * BYTES_FP16  # 175B FP16
+    large_footprint_gb = large_footprint.m_as(GB)
+    a100_mem = Hardware.Cloud.A100.memory.capacity
+    a100_mem_gb = a100_mem.m_as(GiB)
     gpus_per_large = 8
     models_per_gpu_shared = 2
     gpu_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate.m_as("dollar / hour")
     # ┌── 2. EXECUTE ───────────────────────────────────────
     excl_small_gpus = n_small
+    excl_total_mem = excl_small_gpus * a100_mem
     excl_total_mem_gb = excl_small_gpus * a100_mem_gb
     excl_used_mem_gb = n_small * small_footprint_gb
     excl_util_pct = excl_used_mem_gb/excl_total_mem_gb * 100
     excl_large_gpus = n_large * gpus_per_large
     excl_total = excl_small_gpus + excl_large_gpus
     shared_small_gpus = n_small // models_per_gpu_shared
+    shared_mem_per_gpu_q = models_per_gpu_shared * small_footprint
     shared_mem_per_gpu = models_per_gpu_shared * small_footprint_gb
     shared_util_pct = shared_mem_per_gpu/a100_mem_gb * 100
     shared_total = shared_small_gpus + excl_large_gpus
@@ -1834,11 +1840,11 @@ class GpuSharingRoi:
     check(abs(annual_savings - 876000) < 1000, f"Savings: expected ~876K, got {annual_savings}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     gs_excl_util_str = fmt_percent(excl_util_pct/100, precision=1, style='prose')
-    gs_excl_total_mem_str = fmt_int(excl_total_mem_gb, suffix=' GB')
+    gs_excl_total_mem_str = fmt_qty_int(excl_total_mem, GiB, unit_label="GB")
     gs_excl_large_str = fmt_count(excl_large_gpus, label="GPU")
     gs_excl_total_str = fmt_count(excl_total, label="GPU")
     gs_shared_gpus_str = fmt_count(shared_small_gpus, label="GPU")
-    gs_shared_mem_str = fmt(shared_mem_per_gpu, precision=0, suffix=' GB')
+    gs_shared_mem_str = fmt_qty(shared_mem_per_gpu_q, GB, precision=0)
     gs_shared_util_str = fmt_percent(shared_util_pct/100, precision=0, commas=False, style='prose')
     gs_shared_total_str = fmt_count(shared_total, label="GPU")
     gs_saved_gpus_str = fmt(saved_gpus, precision=0)
@@ -1853,12 +1859,12 @@ class GpuSharingRoi:
         commas=False,
     )
     gs_n_small_str = fmt(n_small, precision=0, commas=False)
-    gs_a100_mem_str = fmt(a100_mem_gb, precision=0, commas=False, suffix=' GB')
-    gs_small_footprint_str = fmt(small_footprint_gb, precision=0, commas=False, suffix=' GB')
+    gs_a100_mem_str = fmt_qty(a100_mem, GiB, precision=0, commas=False, unit_label="GB")
+    gs_small_footprint_str = fmt_qty(small_footprint, GB, precision=0, commas=False)
     gs_models_per_gpu_str = fmt(models_per_gpu_shared, precision=0, commas=False)
     gs_n_large_str = fmt(n_large, precision=0, commas=False)
     gs_gpus_per_large_str = fmt_count(gpus_per_large, commas=False, label="GPU")
-    gs_large_footprint_str = fmt(large_footprint_gb, precision=0, commas=False, suffix=' GB')
+    gs_large_footprint_str = fmt_qty(large_footprint, GB, precision=0, commas=False)
     gs_gpu_hour_rate_str = fmt(gpu_rate, precision=0, commas=False)
 ```
 
@@ -2335,10 +2341,11 @@ The Fleet Stack framework in @fig-fleet-stack provides a structured approach: an
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Debug inventory table — A100 NVLink bandwidth.
 # │ Exports: FleetDebugNvlinkRecap.nvlink_a100_str
+from mlsysim.fmt import fmt_qty
+
 class FleetDebugNvlinkRecap:
-    nvlink_a100_val = Hardware.Cloud.A100.nvlink.bandwidth.m_as(GB/second)
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    nvlink_a100_str = fmt(nvlink_a100_val, precision=0, suffix=' GB/s')
+    nvlink_a100_str = fmt_qty(Hardware.Cloud.A100.nvlink.bandwidth, GB/second, precision=0)
 ```
 
 | **GPU Type**   | **Count** | **Memory**  | **Interconnect**                                          | **Nodes**                |
