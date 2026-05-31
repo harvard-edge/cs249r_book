@@ -215,18 +215,20 @@ Compute requirements have grown exponentially. AlexNet trained on two GTX 580 GP
 # │          param, BILLION, BYTES_FP32), mlsysim.book (sci, check)
 # │ Exports: gpt3_params_b_str, gpt3_training_ops_str, gpt3_gradient_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_sci, MarkdownStr, check
+from mlsysim.fmt import fmt, fmt_sci, MarkdownStr, check, fmt_qty
 
 class Gpt3TrainingScenario:
     """GPT-3 training and model statistics."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    params = Models.Language.GPT3.parameters.m_as(param)
+    params_q = Models.Language.GPT3.parameters
+    params = params_q.m_as(param)
     ops = Models.Language.GPT3.training_ops.m_as(Models.Language.GPT3.training_ops.units)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     params_b = params/BILLION
-    gradient_gb = (params * BYTES_FP32).m_as(GB) # FP32 gradients
+    gradient_q = params * BYTES_FP32 # FP32 gradients
+    gradient_gb = gradient_q.m_as(GB)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(params_b == 175, f"GPT-3 should be 175B params, got {params_b}")
@@ -234,7 +236,7 @@ class Gpt3TrainingScenario:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     gpt3_params_b_str = fmt(params_b, precision=0, commas=False)
     gpt3_training_ops_str = MarkdownStr(f"{fmt_sci(ops)} FLOPs")
-    gpt3_gradient_gb_str = fmt(gradient_gb, precision=0, commas=False, suffix=" GB")
+    gpt3_gradient_gb_str = fmt_qty(gradient_q, GB, precision=0, commas=False)
 ```
 
 GPT-3 consumed an estimated `{python} Gpt3TrainingScenario.gpt3_training_ops_str` during training on V100 GPUs in a Microsoft high-bandwidth cluster [@brown2020language]. The surrounding Microsoft infrastructure for this era reached roughly 10,000 GPUs, which is the cluster-size anchor used in @fig-cluster-size-explosion [@patterson2021carbon]. PaLM trained on 6,144 TPU v4 chips for roughly 60 days, consuming approximately $10^{24}$ FLOPs [@chowdhery2022palm]. OpenAI's GPT-4 report did not disclose model size, training hardware, or training compute, so the GPT-4-class scenario in this section should be read as illustrative rather than a published configuration [@openai2023gpt4]. These examples sit within the rapid training-compute growth trend documented by earlier compute-trend studies [@amodei2018ai; @sevilla2022].
@@ -420,13 +422,13 @@ class InfiniBandScenario:
     ndr_gbs = ndr_gbps/BITS_PER_BYTE
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    from mlsysim.fmt import fmt, check
+    from mlsysim.fmt import fmt_qty, check
     check(ndr_gbps > hdr_gbps, "NDR bandwidth must be greater than HDR bandwidth")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    ib_hdr_gbps_str = fmt(hdr_gbps, precision=0, commas=False, suffix=" Gb")
-    ib_hdr_gbs_str = fmt(hdr_gbs, precision=0, commas=False, suffix=" GB")
-    ib_ndr_gbs_str = fmt(ndr_gbs, precision=0, commas=False, suffix=" GB")
+    ib_hdr_gbps_str = fmt_qty(hdr, Gbps, precision=0, commas=False, unit_label="Gb")
+    ib_hdr_gbs_str = fmt_qty(hdr, GB/second, precision=0, commas=False, unit_label="GB")
+    ib_ndr_gbs_str = fmt_qty(ndr, GB/second, precision=0, commas=False, unit_label="GB")
 ```
 
 These scale-induced challenges drive infrastructure investment by the largest AI organizations. Meta's Research SuperCluster (RSC) contains 16,000 NVIDIA A100 GPUs connected by `{python} InfiniBandScenario.ib_hdr_gbps_str`/s InfiniBand[^fn-infiniband-rdma-v2] networking [@meta2022rsc]. Google's TPU v4 pods contain 4,096 chips with 1.1 exaFLOP/s of aggregate compute capacity. Microsoft's Azure AI infrastructure spans multiple data centers with tens of thousands of GPUs dedicated to AI workloads. The scale of the models dictates the scale of the infrastructure. @Sec-appdx-comm-foundations-alpha-beta catalogs these interconnect bandwidth constants and feeds them into the $\alpha$-$\beta$ communication model, which lets a reader turn a link's bandwidth and latency into a predicted transfer cost.
@@ -822,10 +824,10 @@ class InfiniBandStackRecap:
     nvlink_h100 = Hardware.Cloud.H100.nvlink.bandwidth
     ndr_gbps = ndr.m_as(Gbps)
     nvlink_h100_gbs_val = nvlink_h100.m_as(GB/second)
-    from mlsysim.fmt import fmt
+    from mlsysim.fmt import fmt_qty
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    nvlink_h100_gbs_str = fmt(nvlink_h100_gbs_val, precision=0, commas=False, suffix=" GB")
-    ib_ndr_gbps_str = fmt(ndr_gbps, precision=0, commas=False, suffix=" Gb")
+    nvlink_h100_gbs_str = fmt_qty(nvlink_h100, GB/second, precision=0, commas=False, unit_label="GB")
+    ib_ndr_gbps_str = fmt_qty(ndr, Gbps, precision=0, commas=False, unit_label="Gb")
 ```
 
 The stack architecture in @fig-vol2-system-scaling-regimes does not change when we scale: every ML system still has hardware, a system envelope, a workload, and a mission. *What* changes is the physics at each layer. Read the figure from bottom to top. At the bottom row, Hardware (NVLink at `{python} InfiniBandStackRecap.nvlink_h100_gbs_str`/s within one node) becomes Infrastructure (InfiniBand RDMA fabric spanning racks at `{python} InfiniBandStackRecap.ib_ndr_gbps_str`/s per link), and the bottleneck shifts from the memory wall to the bisection bandwidth wall. One row up, System Software (a single CUDA runtime managing PCIe DMA) becomes Distribution (NCCL and RDMA libraries coordinating thousands of processes across the fabric).
@@ -904,17 +906,19 @@ At small scale, *computation dominates*. Training a model on a single GPU spends
 # │ Exports: Gpt3CommunicationScenario.gpt3_params_b_str,
 # │          Gpt3CommunicationScenario.gpt3_gradient_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, check, fmt_qty
 
 class Gpt3CommunicationScenario:
     """GPT-3 gradient sync statistics."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    params = Models.Language.GPT3.parameters.m_as(param)
+    params_q = Models.Language.GPT3.parameters
+    params = params_q.m_as(param)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     params_b = params/BILLION
-    gradient_gb = (params * BYTES_FP32).m_as(GB) # FP32 gradients
+    gradient_q = params * BYTES_FP32 # FP32 gradients
+    gradient_gb = gradient_q.m_as(GB)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(params_b == 175, f"GPT-3 should be 175B params, got {params_b}")
@@ -922,7 +926,7 @@ class Gpt3CommunicationScenario:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     gpt3_params_b_str = fmt(params_b, precision=0, commas=False)
-    gpt3_gradient_gb_str = fmt(gradient_gb, precision=0, commas=False, suffix=" GB")
+    gpt3_gradient_gb_str = fmt_qty(gradient_q, GB, precision=0, commas=False)
 ```
 
 At large scale, *communication dominates*. Distributed training requires synchronizing gradients across workers after each batch. For a model with `{python} Gpt3CommunicationScenario.gpt3_params_b_str` billion parameters, FP32 gradients occupy about `{python} Gpt3CommunicationScenario.gpt3_gradient_gb_str` before any collective algorithm is applied. In Ring All-Reduce, each worker sends and receives roughly $2(N-1)/N$ times the gradient tensor size, so network traffic depends on precision, worker count, and collective implementation. *When* using Ring All-Reduce across 1,000 workers on InfiniBand, communication can consume up to 40 percent of the total iteration time.
@@ -973,7 +977,7 @@ The rapid evolution in AI capabilities since the late 2010s exemplifies this sca
 # │          Gpt3StatsScenario.gpt3_training_ops_str,
 # │          Gpt3StatsScenario.a100_fp16_tflops_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_sci, MarkdownStr, check
+from mlsysim.fmt import fmt, fmt_sci, MarkdownStr, check, fmt_qty
 
 class Gpt3StatsScenario:
     """GPT-3 scale and hardware reference."""
@@ -981,7 +985,8 @@ class Gpt3StatsScenario:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     params = Models.Language.GPT3.parameters.m_as(param)
     ops = Models.Language.GPT3.training_ops.m_as(Models.Language.GPT3.training_ops.units)
-    a100_throughput = Hardware.Cloud.A100.compute.peak_flops.m_as(TFLOPs/second)
+    a100_throughput_q = Hardware.Cloud.A100.compute.peak_flops
+    a100_throughput = a100_throughput_q.m_as(TFLOPs/second)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     params_b = params/BILLION
@@ -992,7 +997,7 @@ class Gpt3StatsScenario:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     gpt3_params_b_str = fmt(params_b, precision=0, commas=False)
     gpt3_training_ops_str = MarkdownStr(f"{fmt_sci(ops)} FLOPs")
-    a100_fp16_tflops_str = fmt(a100_throughput, precision=0, commas=False, suffix=" TFLOP/s")
+    a100_fp16_tflops_str = fmt_qty(a100_throughput_q, TFLOPs/second, precision=0, commas=False, unit_label="TFLOP/s")
 ```
 
 GPT-3 (2020) expanded to `{python} Gpt3StatsScenario.gpt3_params_b_str` billion parameters and achieved sophisticated text generation across diverse domains. Each increase in model size brought substantially improved capabilities at exponentially increasing costs.
