@@ -2101,7 +2101,7 @@ class FaultToleranceCheckpointRecap:
     gpt3_ckpt_bytes = mem_res.total_memory
     gpt3_adam_bytes = mem_res.optimizer_state
     n_workers = Systems.Clusters.Training_1K.total_accelerators
-    aggregate_ckpt_bw = 100 * GB / second
+    aggregate_ckpt_bw = 100 * (GB / second)
     ckpt_write_s = (gpt3_ckpt_bytes / aggregate_ckpt_bw).to(second).magnitude
     check(34 < ckpt_write_s < 38, f"GPT-3 checkpoint write should be ~36 s, got {ckpt_write_s:.1f}")
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
@@ -2259,7 +2259,7 @@ plt.close()
 
 The U-shaped cost curve in @fig-young-daly visualizes this trade-off: checkpoint overhead decreases as intervals lengthen, while rework cost from failures increases linearly. The optimal point minimizes their sum.
 
-For our 10,000-GPU cluster with calculated system MTBF of 3.69 hours (from @sec-fault-tolerance-reliability-reliability-worked-example-cluster-mtbf-calculation-9255) and checkpoint time of `{python} FaultToleranceCheckpointRecap.ckpt_write_s_str` s (from `{python} FaultToleranceCheckpointRecap.gpt3_ckpt_tb_str` checkpoint at `{python} FaultToleranceCheckpointRecap.aggregate_read_gbs_str`), the Young-Daly formula computes the optimal interval.
+For our 10,000-GPU cluster with calculated system MTBF of 3.69 hours (from @sec-fault-tolerance-reliability-reliability-worked-example-cluster-mtbf-calculation-9255) and checkpoint time of `{python} FaultToleranceCheckpointRecap.ckpt_write_s_str` (from `{python} FaultToleranceCheckpointRecap.gpt3_ckpt_tb_str` checkpoint at `{python} FaultToleranceCheckpointRecap.aggregate_read_gbs_str`), the Young-Daly formula computes the optimal interval.
 
 ```{python}
 #| echo: false
@@ -2287,7 +2287,7 @@ class YoungDalyOptimal:
     # ┌── 1. LOAD ──────────────────────────────────────────
     from mlsysim.engine.solver import TrainingMemoryModel
     _mem = TrainingMemoryModel().solve(Models.Language.GPT3, Hardware.Cloud.A100, batch_size=1, precision="fp32")
-    t_write_s = (_mem.total_memory / (100 * GB / second)).to(second).magnitude
+    t_write_s = (_mem.total_memory / (100 * (GB / second))).to(second).magnitude
     mtbf_h = 3.69
     # ┌── 2. EXECUTE ───────────────────────────────────────
     mtbf_s = mtbf_h * SEC_PER_HOUR
@@ -2314,13 +2314,13 @@ class YoungDalyOptimal:
 
 ::: {#nbk-fault-tolerance-young-daly-optimal-interval .callout-notebook title="The Young-Daly optimal interval"}
 
-**Problem**: A `{python} YoungDalyOptimal.n_gpus_str`-GPU cluster has an MTBF of `{python} YoungDalyOptimal.mtbf_h_str`. A full model checkpoint takes `{python} YoungDalyOptimal.t_write_s_str` s to write. What is the optimal checkpoint frequency?
+**Problem**: A `{python} YoungDalyOptimal.n_gpus_str`-GPU cluster has an MTBF of `{python} YoungDalyOptimal.mtbf_h_str`. A full model checkpoint takes `{python} YoungDalyOptimal.t_write_s_str` to write. What is the optimal checkpoint frequency?
 
 **Math**:
 Apply the Young-Daly formula: $\tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}_{\text{system}}}$
 
-1. **Convert to common units**: $\text{MTBF}_{\text{system}} =$ `{python} YoungDalyOptimal.mtbf_h_str` $\times$ `{python} YoungDalyOptimal.seconds_per_hour_str` s/hr = `{python} YoungDalyOptimal.mtbf_s_str` s.
-2. **Substitute and solve**: With $T_{\text{write}} =$ `{python} YoungDalyOptimal.t_write_s_str` s and $\text{MTBF} =$ `{python} YoungDalyOptimal.mtbf_s_str` s, the formula gives $\tau_{\text{opt}} \approx$ `{python} YoungDalyOptimal.tau_opt_s_str` s, or about `{python} YoungDalyOptimal.tau_opt_min_str`.
+1. **Convert to common units**: $\text{MTBF}_{\text{system}} =$ `{python} YoungDalyOptimal.mtbf_h_str` $\times$ `{python} YoungDalyOptimal.seconds_per_hour_str` s/hr = `{python} YoungDalyOptimal.mtbf_s_str`.
+2. **Substitute and solve**: With $T_{\text{write}} =$ `{python} YoungDalyOptimal.t_write_s_str` and $\text{MTBF} =$ `{python} YoungDalyOptimal.mtbf_s_str`, the formula gives $\tau_{\text{opt}} \approx$ `{python} YoungDalyOptimal.tau_opt_s_str`, or about `{python} YoungDalyOptimal.tau_opt_min_str`.
 
 **Systems insight**: At this interval, the "checkpoint tax" (time spent saving + time spent re-computing) is minimized to approximately `{python} YoungDalyOptimal.overhead_pct_str`. Checkpointing every hour instead would increase failure risk, wasting about `{python} YoungDalyOptimal.hourly_overhead_pct_str` of the cluster's capacity. As clusters scale, the optimal interval must shrink to keep up with the falling MTBF.
 
@@ -2620,7 +2620,7 @@ Analysis begins at the bottom of the stack, examining the hardware constraints:
 - **Model state size**\index{Model State Size}: `{python} CheckpointDebug.params_b_str` parameters $\times$ `{python} CheckpointDebug.bytes_per_param_weights_str` bytes (BF16) = `{python} CheckpointDebug.weights_gb_str` for weights, plus `{python} CheckpointDebug.optimizer_gb_str` for FP32 Adam optimizer states (first and second moments), totaling approximately `{python} CheckpointDebug.total_ckpt_gb_str` per checkpoint before gradients, master weights, metadata, or framework overhead
 - **Storage system**\index{Storage!system}: Shared NFS filer with 10 Gbps network attachment
 - **Theoretical bandwidth**\index{Bandwidth!theoretical}: 10 Gbps = `{python} CheckpointDebug.nfs_gbs_str` maximum throughput
-- **Minimum write time**\index{Minimum Write Time}: `{python} CheckpointDebug.total_ckpt_gb_str` / `{python} CheckpointDebug.nfs_gbs_str` = `{python} CheckpointDebug.min_write_s_str` s (`{python} CheckpointDebug.min_write_min_str`)
+- **Minimum write time**\index{Minimum Write Time}: `{python} CheckpointDebug.total_ckpt_gb_str` / `{python} CheckpointDebug.nfs_gbs_str` = `{python} CheckpointDebug.min_write_s_str` (`{python} CheckpointDebug.min_write_min_str`)
 
 The infrastructure layer reveals our first insight: even with perfect efficiency, the NFS bandwidth cannot achieve a 2-minute checkpoint for this model size.
 
@@ -2651,7 +2651,7 @@ Understanding all three layers enables a targeted solution:
    - Phase 1: GPU $\rightarrow$ CPU memory copy (fast, `{python} CheckpointDebug.pcie_gbs_str` PCIe)
    - Phase 2: CPU $\rightarrow$ local NVMe (`{python} CheckpointDebug.nvme_bw_gbs_str`, training resumes)
    - Phase 3: Background NVMe $\rightarrow$ NFS copy (overlapped with training)
-3. **Validation**\index{Validation}: The critical-path data copy drops to approximately `{python} CheckpointDebug.gpu_cpu_parallel_s_str` s if GPU-to-CPU staging proceeds in parallel across `{python} CheckpointDebug.n_nodes_str` (or `{python} CheckpointDebug.gpu_cpu_single_path_s_str` s if serialized through one `{python} CheckpointDebug.pcie_gbs_str` path), reducing training impact from `{python} CheckpointDebug.overhead_pct_str` to under `{python} CheckpointDebug.residual_overhead_pct_str` once background NVMe and NFS copies are overlapped
+3. **Validation**\index{Validation}: The critical-path data copy drops to approximately `{python} CheckpointDebug.gpu_cpu_parallel_s_str` if GPU-to-CPU staging proceeds in parallel across `{python} CheckpointDebug.n_nodes_str` (or `{python} CheckpointDebug.gpu_cpu_single_path_s_str` if serialized through one `{python} CheckpointDebug.pcie_gbs_str` path), reducing training impact from `{python} CheckpointDebug.overhead_pct_str` to under `{python} CheckpointDebug.residual_overhead_pct_str` once background NVMe and NFS copies are overlapped
 
 This example illustrates the fleet stack principle: diagnosing distributed systems failures requires examining all layers. A purely algorithmic fix (Distribution Layer) would fail because the physical bandwidth was insufficient. A purely hardware fix (infrastructure layer) would be wasteful without understanding the coordination pattern. The solution required changes at multiple layers working in concert.
 
@@ -2926,9 +2926,9 @@ Consider our `{python} FaultToleranceRecoveryRecap.params_b_str`B parameter mode
 
 **The budget ($T_{\text{recovery}}$)**:
 
-1. **$T_{\text{detect}}$**: `{python} RecoveryBudget.t_detect_s_str` s (conservative heartbeat timeout with verification retries)
+1. **$T_{\text{detect}}$**: `{python} RecoveryBudget.t_detect_s_str` (conservative heartbeat timeout with verification retries)
 2. **$T_{\text{restart}}$**: `{python} RecoveryBudget.t_restart_min_str` (scheduler queue time + container launch + Python import overhead + NCCL initialization)
-3. **$T_{\text{load}}$**: `{python} RecoveryBudget.t_load_s_str` s (this is the aggregate-shared-storage read of the full `{python} FaultToleranceRecoveryRecap.gpt3_ckpt_tb_str` checkpoint at `{python} RecoveryBudget.aggregate_read_gbs_str` aggregate; with sharded local-NVMe reads at `{python} RecoveryBudget.shard_read_gbs_str`, each `{python} FaultToleranceRecoveryRecap.gpt3_shard_gb_str` shard loads in well under one second)
+3. **$T_{\text{load}}$**: `{python} RecoveryBudget.t_load_s_str` (this is the aggregate-shared-storage read of the full `{python} FaultToleranceRecoveryRecap.gpt3_ckpt_tb_str` checkpoint at `{python} RecoveryBudget.aggregate_read_gbs_str` aggregate; with sharded local-NVMe reads at `{python} RecoveryBudget.shard_read_gbs_str`, each `{python} FaultToleranceRecoveryRecap.gpt3_shard_gb_str` shard loads in well under one second)
 4. **$T_{\text{warmup}}$**: `{python} RecoveryBudget.t_warmup_min_str` (JIT kernel compilation, data pipeline buffer fill, TCP connection re-establishment)
 
 **Total**: $T_{\text{recovery}} = T_{\text{detect}} + T_{\text{restart}} + T_{\text{load}} + T_{\text{warmup}} \approx$ `{python} RecoveryBudget.t_total_str` minutes per failure event.
