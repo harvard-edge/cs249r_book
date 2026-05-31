@@ -310,6 +310,31 @@ Validation details:
   `./book/binder check code --scope lego-dead-code` PASS;
   `audit_prose_semantics.py` PASS, 0 findings across 81 files.
 
+## 2026-05-31 — `vol2/backmatter/appendix_communication` physical-unit lane
+
+Change type: byte-identical chapter cleanup. Migrated all 9 remaining
+physical-unit suffix sites in `vol2/backmatter/appendix_communication.qmd` to
+typed quantity formatters. Most of these are split-rate bandwidth displays that
+export `GB` while prose/table text appends `/s`; the formatter now checks them
+as `GB/second` with `unit_label="GB"` to preserve the byte-identical value.
+
+Touched chapter and equivalence:
+
+| Chapter file | Values/prose checked | Result |
+|---|---:|---|
+| `vol2/backmatter/appendix_communication.qmd` | 56 values / 33 prose lines | identical |
+
+Validation details:
+
+- `audit_fmt_usage.py` physical-unit suffix count dropped from 948 to 939.
+- `vol2/backmatter/appendix_communication.qmd` now has 0 `suffix=` calls.
+- `fmt_qty` call count is 449; `fmt_qty_int` call count is 31.
+- Verification: `git diff --check` PASS; py_compile PASS; focused pytest suite
+  PASS, 190 tests; `fmt_prose_contract.py` PASS, 0 violations;
+  `codemod_fmt.py queue` PASS, `by kind: {}`; `./book/binder check math` PASS;
+  `./book/binder check code --scope lego-dead-code` PASS;
+  `audit_prose_semantics.py` PASS, 0 findings across 81 files.
+
 ## 2026-05-31 — Currency denominator relocation
 
 Change type: byte-identical formatter relocation. Replaced 91
