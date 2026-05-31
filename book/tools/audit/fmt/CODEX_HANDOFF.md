@@ -922,7 +922,22 @@ pytest suite PASS (190 tests); `fmt_prose_contract.py` 0; `codemod_fmt.py queue`
 `by kind: {}`; `./book/binder check math` PASS; `./book/binder check code
 --scope lego-dead-code` PASS; `audit_prose_semantics.py` CLEAN across 81 files.
 
-### B. WS4 — unit-suffix lane (remaining 584 physical-unit suffixes: `GB`/`MB`/`W`/`GB/s`/…)  ← the big one
+**A66 — `vol2/sustainable_ai` physical-unit cleanup: DONE.**
+Migrated all 39 remaining physical-unit suffix sites in `sustainable_ai` to
+typed quantity formatters, leaving the file with 0 `suffix=` calls. The lane
+covered energy and power displays in carbon-cost, placement, lifecycle-carbon,
+PUE, inference, grid-queue, power-delivery, cooling, mobile-power, and
+on-device-learning examples. Explicit old rounding remains explicit via
+`fmt_qty_int(...)`, and range strings keep one visible unit at the high endpoint
+where that was the prior output. `audit_fmt_usage.py` now reports physical-unit
+suffixes down to 545, `fmt_qty` at 789, and `fmt_qty_int` at 85. Verification:
+`assess_equiv.py` values/prose identical for `sustainable_ai`; `git diff
+--check` PASS; py_compile PASS; focused pytest suite PASS (190 tests);
+`fmt_prose_contract.py` 0; `codemod_fmt.py queue` `by kind: {}`;
+`./book/binder check math` PASS; `./book/binder check code --scope
+lego-dead-code` PASS; `audit_prose_semantics.py` CLEAN across 81 files.
+
+### B. WS4 — unit-suffix lane (remaining 545 physical-unit suffixes: `GB`/`MB`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.
 `weights_gb`), not Pint Quantities, and `fmt_qty` requires a Pint Quantity to

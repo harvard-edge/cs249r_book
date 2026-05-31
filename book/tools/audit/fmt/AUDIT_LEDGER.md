@@ -49,9 +49,46 @@ Status:
   - `python3 -m py_compile mlsysim/mlsysim/fmt.py book/tools/audit/fmt/audit_fmt_usage.py` PASS
   - `git diff --check` PASS
   - `PYTHONPATH=mlsysim python3 -m pytest mlsysim/tests/test_fmt.py book/tests/test_codemod_fmt.py book/tests/test_fmt_prose_contract.py book/tests/test_audit_prose_semantics.py book/tests/test_visible_text.py -q -o addopts=''` PASS, 157 tests
-  - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/fmt_prose_contract.py --root book/quarto/contents` PASS, 0 violations
+- `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/fmt_prose_contract.py --root book/quarto/contents` PASS, 0 violations
 - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/codemod_fmt.py queue --root book/quarto/contents` PASS, `by kind: {}`
 - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_prose_semantics.py --root book/quarto/contents` PASS, 0 findings
+
+## 2026-05-31 — `vol2/sustainable_ai` physical-unit cleanup
+
+Change type: byte-identical formatter relocation. Replaced all 39 remaining
+physical-unit suffix sites in `sustainable_ai` with typed quantity formatters.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol2/sustainable_ai/sustainable_ai.qmd` | 39 | 197 | 120 | identical values + prose |
+
+Validation details:
+
+- Migrated energy/power displays across training carbon, carbon-aware placement,
+  lifecycle carbon, PUE, inference lifecycle, grid-queue, power-delivery,
+  cooling, mobile power, and on-device learning examples.
+- Existing rounded integer displays are preserved with `fmt_qty_int(...)` where
+  the old source explicitly rounded before formatting.
+- Mobile range strings still render only one unit at the high endpoint
+  (`5–10 W`, `10–20 W`) by composing the low endpoint as a bare number and the
+  high endpoint through `fmt_qty(...)` inside `MarkdownStr`.
+- `assess_equiv.py` baseline/snapshot/diff reported `IDENTICAL values` and
+  `IDENTICAL prose`.
+- `sustainable_ai` now has zero `suffix=` calls.
+- `audit_fmt_usage.py` reports `physical_unit` suffixes dropped 584 -> 545,
+  `fmt_qty` at 789, and `fmt_qty_int` at 85.
+- Verification: `git diff --check` PASS; py_compile PASS for formatter,
+  math-canonical, and fmt audit modules; focused pytest suite PASS, 190 tests;
+  `fmt_prose_contract.py` PASS, 0 violations; `codemod_fmt.py queue` PASS,
+  `by kind: {}`; `./book/binder check math` PASS;
+  `./book/binder check code --scope lego-dead-code` PASS;
+  `audit_prose_semantics.py` PASS, 0 findings across 81 files.
+- HTML/PDF render evidence: not run yet. Full rendering is intentionally
+  deferred for the separate render/prose audit checkpoint.
+
+Status: non-render verified; render audit pending.
 
 ## 2026-05-31 — `vol1/frameworks` physical-unit cleanup
 
