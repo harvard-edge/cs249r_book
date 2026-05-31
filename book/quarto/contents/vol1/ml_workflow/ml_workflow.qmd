@@ -806,7 +806,8 @@ class MobilenetSpecs:
     # Assuming FP32 weights for size estimate
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    mobilenet_size_mb = (Models.Vision.MobileNetV2.parameters * BYTES_FP32).m_as(MB)
+    mobilenet_size_q = Models.Vision.MobileNetV2.parameters * BYTES_FP32
+    mobilenet_size_mb = mobilenet_size_q.m_as(MB)
     mobilenet_flops_m = Models.Vision.MobileNetV2.inference_flops.m_as(MFLOPs)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -814,7 +815,7 @@ class MobilenetSpecs:
     check(250 <= mobilenet_flops_m <= 350, f"Unexpected MobileNetV2 FLOPs: {mobilenet_flops_m:.1f} MFLOPs.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    mobilenet_size_str = fmt(mobilenet_size_mb, precision=0, commas=False, suffix=" MB")
+    mobilenet_size_str = fmt_qty(mobilenet_size_q, MB, precision=0, commas=False)
     mobilenet_flops_str = fmt_qty(Models.Vision.MobileNetV2.inference_flops, MFLOPs, precision=0, commas=False)
 ```
 
@@ -915,7 +916,7 @@ This specification reveals why ML projects experience the iteration cycles diagr
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim.physics import calc_constraint_propagation_factor
-from mlsysim.fmt import fmt, fmt_math
+from mlsysim.fmt import check, fmt, fmt_math, fmt_percent, fmt_qty, fmt_time, MarkdownStr
 
 class ConstraintPropagation:
     """Exponential cost multiplier for late constraint discovery across lifecycle stages."""
@@ -933,10 +934,13 @@ class ConstraintPropagation:
     sensitivity_target_pct = 90
     specificity_target_pct = 80
     stage5_latency_ms = 100
-    stage5_memory_mb = 500
+    stage5_memory_q = 500 * MB
+    stage5_memory_mb = stage5_memory_q.m_as(MB)
     jetson_latency_ms = 50
-    jetson_model_mb = 200
-    resnet_variant_mb = 200
+    jetson_model_q = 200 * MB
+    jetson_model_mb = jetson_model_q.m_as(MB)
+    resnet_variant_q = 200 * MB
+    resnet_variant_mb = resnet_variant_q.m_as(MB)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     cost_factor = calc_constraint_propagation_factor(
@@ -964,10 +968,10 @@ class ConstraintPropagation:
     sensitivity_target_pct_str = fmt_percent(sensitivity_target_pct/100, precision=0, commas=False, style='symbol')
     specificity_target_pct_str = fmt_percent(specificity_target_pct/100, precision=0, commas=False, style='symbol')
     stage5_latency_ms_str = fmt_time(stage5_latency_ms, 'millisecond', precision=0, commas=False)
-    stage5_memory_mb_str = fmt(stage5_memory_mb, precision=0, commas=False, suffix=" MB")
+    stage5_memory_mb_str = fmt_qty(stage5_memory_q, MB, precision=0, commas=False)
     jetson_latency_ms_str = fmt_time(jetson_latency_ms, 'millisecond', precision=0, commas=False)
-    jetson_model_mb_str = fmt(jetson_model_mb, precision=0, commas=False, suffix=" MB")
-    resnet_variant_mb_str = fmt(resnet_variant_mb, precision=0, commas=False, suffix=" MB")
+    jetson_model_mb_str = fmt_qty(jetson_model_q, MB, precision=0, commas=False)
+    resnet_variant_mb_str = fmt_qty(resnet_variant_q, MB, precision=0, commas=False)
 ```
 
 ::: {#exmp-ml-workflow-auditing-stage-transitions .callout-example title="Auditing stage transitions"}
@@ -1081,6 +1085,7 @@ High-resolution retinal scans can generate tens of megabytes per image, creating
 # │          BandwidthCompute.bw_bandwidth_pct_str,
 # │          BandwidthCompute.bw_summary_kb_str, BandwidthCompute.bw_reduction_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_multiple, fmt_percent, fmt_qty, fmt_time
 
 # ┌── LEGO ───────────────────────────────────────────────
 class BandwidthCompute:
@@ -1099,11 +1104,14 @@ class BandwidthCompute:
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Data Volume
-    daily_mb = patients_day * photos_per_patient * mb_per_photo
-    daily_gb = (daily_mb * MB).m_as(GB)
+    daily_q = patients_day * photos_per_patient * mb_per_photo * MB
+    daily_mb = daily_q.m_as(MB)
+    daily_gb = daily_q.m_as(GB)
 
     # Step 2: Transmission Time
-    uplink_mbs = uplink_mbps / 8.0 # Mbps -> MB/s
+    uplink_q = uplink_mbps * ureg.megabit/second
+    uplink_mbs_q = uplink_q.to(MB/second)
+    uplink_mbs = uplink_mbs_q.m_as(MB/second)
     upload_seconds = daily_mb/uplink_mbs
     upload_hours = upload_seconds/SEC_PER_HOUR
 
@@ -1111,7 +1119,7 @@ class BandwidthCompute:
     saturation_pct = (upload_hours/clinic_hours) * 100.0
 
     # Step 4: Edge Reduction
-    original_kb = (daily_mb * MB).m_as(KB)
+    original_kb = daily_q.m_as(KB)
     summary_total_kb = patients_day * summary_kb
     reduction_factor = original_kb/summary_total_kb
 
@@ -1124,10 +1132,10 @@ class BandwidthCompute:
     bw_patients_str = fmt(patients_day, precision=0, commas=False)
     bw_photos_str = fmt(photos_per_patient, precision=0, commas=False)
     bw_mb_per_photo_str = fmt_qty(mb_per_photo * MB, MB, precision=0, commas=False, per="photo")
-    bw_daily_mb_str = fmt(daily_mb, precision=0, suffix=" MB")
-    bw_daily_gb_str = fmt_qty(daily_gb * GB, GB, precision=1, commas=False, per="day")
-    bw_upload_mbps_str = fmt(uplink_mbps, precision=0, commas=False, suffix=" Mb/s")
-    bw_upload_mbs_str = fmt(uplink_mbs, precision=2, commas=False, suffix=" MB/s")
+    bw_daily_mb_str = fmt_qty(daily_q, MB, precision=0, commas=True)
+    bw_daily_gb_str = fmt_qty(daily_q, GB, precision=1, commas=False, per="day")
+    bw_upload_mbps_str = fmt_qty(uplink_q, ureg.megabit/second, precision=0, commas=False, unit_label="Mb/s")
+    bw_upload_mbs_str = fmt_qty(uplink_mbs_q, MB/second, precision=2, commas=False)
     bw_upload_sec_str = fmt_time(upload_seconds, 'second', precision=0, commas=True)
     bw_upload_hours_str = fmt_time(round(upload_hours), 'hour', precision=0, commas=False)
     bw_clinic_hours_str = fmt_time(clinic_hours, 'hour', precision=0, commas=False)
@@ -1881,6 +1889,7 @@ These requirements influence deployment strategies. The edge deployment decision
 # │          DeploymentEconomics.edge_opex_year_str,
 # │          DeploymentEconomics.payback_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_int, fmt_time, fmt_usd, fmt_qty
 
 # ┌── LEGO ───────────────────────────────────────────────
 class DeploymentEconomics:
@@ -1899,7 +1908,8 @@ class DeploymentEconomics:
     cloud_inf_cost = 0.01    # $/image
     cloud_network_cost = 45000 # $/year total
     cloud_latency_ms = 200
-    image_size_mb = 5.0      # matches retinal scan size in Bandwidth vs. Compute exercise
+    image_size_q = 5.0 * MB  # matches retinal scan size in Bandwidth vs. Compute exercise
+    image_size_mb = image_size_q.m_as(MB)
 
     # Edge Costs
     edge_unit_cost = 500     # $/device (CapEx)
@@ -1938,7 +1948,7 @@ class DeploymentEconomics:
     cloud_cost_per_image_str = fmt_usd(cloud_inf_cost, precision=2, commas=False, per="image")
     cloud_network_str = fmt_usd(cloud_network_cost, precision=0, per="year")
     edge_cost_per_unit_str = fmt_usd(edge_unit_cost, precision=0)
-    image_size_mb_str = fmt(image_size_mb, precision=0, commas=False, suffix=" MB")
+    image_size_mb_str = fmt_qty(image_size_q, MB, precision=0, commas=False)
     edge_inference_cost_str = fmt_usd(edge_inf_cost, precision=3, commas=False, per="image")
     cloud_latency_risk_str = fmt_time(
         cloud_latency_ms, "millisecond", precision=0, commas=False, marker="+"

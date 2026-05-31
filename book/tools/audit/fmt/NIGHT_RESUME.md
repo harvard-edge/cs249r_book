@@ -148,8 +148,10 @@ physical-unit cleanup then migrated 10 sites across the Vol1 and Vol2
 `appendix_assumptions` files, byte-identically, leaving both files with zero
 `suffix=` calls. The Vol1 introduction/data-selection physical-unit cleanup then
 migrated 8 sites across `introduction` and `data_selection`, byte-identically,
-leaving both files with zero `suffix=` calls. Remaining suffix bucket is only
-897 `physical_unit` suffixes. Remaining: the rest of WS4/WS3 and later PDF/lock
+leaving both files with zero `suffix=` calls. The `ml_workflow` physical-unit
+cleanup then migrated all 8 remaining sites in that chapter, byte-identically,
+leaving the file with zero `suffix=` calls. Remaining suffix bucket is only
+889 `physical_unit` suffixes. Remaining: the rest of WS4/WS3 and later PDF/lock
 phases. Nothing is half-done or broken.
 
 **New TODOs from user discussion:** add a prose-bound output contract/gate so
@@ -566,6 +568,10 @@ drop. The adjacent prose/table text was updated to `1 percentage-point threshold
 and `(drop of 6.8 percentage points)`. No user-decision items remain open.
 
 ## Session commit log (newest first)
+- Codex `vol1/ml_workflow` physical-unit cleanup: migrated all 8 remaining
+  physical-unit suffix sites in the chapter to typed quantity formatters,
+  byte-identically. `ml_workflow` now has 0 `suffix=` calls; physical-unit
+  suffixes dropped 897 -> 889.
 - Codex Vol1 introduction/data-selection physical-unit cleanup: migrated 8
   physical-unit suffix sites across `introduction` and `data_selection` to
   typed quantity formatters, byte-identically. Both touched files now have 0
