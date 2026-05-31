@@ -98,7 +98,7 @@ class TransformerWorkload(Workload):
     training_tokens: Optional[Quantity] = None
     training_accelerators_ref: Optional[Quantity] = None
     training_days_ref: Optional[Quantity] = None
-    training_energy_mwh: Optional[float] = None
+    training_energy_mwh: Optional[Quantity] = None
     training_gpu_days: Optional[float] = None
     training_hardware_label: Optional[str] = None
     inference_flops: Optional[Quantity] = None

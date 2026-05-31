@@ -590,6 +590,16 @@ BOOK_CARBON_PER_GPU_HR = _est(
     notes="0.16 kg/GPU-hr order-of-magnitude; not a grid-specific intensity calculation.",
 )
 
+LIT_TRANSATLANTIC_ROUND_TRIP_CO2 = _est(
+    "prov:lit-transatlantic-round-trip-co2",
+    "Aviation CO₂e factors for long-haul economy passenger travel (DEFRA-class)",
+    notes=(
+        "Rounded to 1000 kg CO₂e for the NY–London round-trip pedagogical anchor; "
+        "agency calculators typically report ~900–1100 kg CO₂e per economy passenger."
+    ),
+    verified="2026-05-31",
+)
+
 MFU_INFERENCE_BATCHED_LIT = _lit(
     "prov:mfu-inference-batched",
     "Pope et al. (2023); batched inference MFU upper illustrative bound",

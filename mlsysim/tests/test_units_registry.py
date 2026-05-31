@@ -33,6 +33,7 @@ from mlsysim.core.units import (
     minute,
     mJ,
     MW,
+    MWh,
     param,
     pJ,
     second,
@@ -98,3 +99,19 @@ def test_mlsysbook_units_file_loaded():
 def test_registry_yaml_strings_still_parse():
     assert Q_("80 GiB").to(GiB).magnitude == pytest.approx(80)
     assert Q_("3.35 TB/s").to(TB / second).magnitude == pytest.approx(3.35)
+
+
+def test_gpt3_training_energy_is_quantity():
+    from mlsysim import Models
+
+    energy = Models.Language.GPT3.training_energy_mwh
+    assert energy.to(MWh).magnitude == pytest.approx(1287, rel=1e-3)
+
+
+def test_literature_transatlantic_flight_co2_anchor():
+    from mlsysim import Literature
+    from mlsysim.core.provenance import scalar_value
+
+    anchor = Literature.Sustainability.TransatlanticRoundTripCo2Kg
+    assert scalar_value(anchor) == pytest.approx(1000)
+    assert anchor.provenance.ref

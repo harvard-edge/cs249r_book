@@ -23,6 +23,10 @@ Overheads = _load("overheads", "Overheads")
 Chinchilla = _load("chinchilla", "Chinchilla")
 Communication = _load("communication", "Communication")
 BatchSize = _load("batchsize", "BatchSize", "McCandlish et al. (2018) critical batch size estimates.")
+Sustainability = _load(
+    "sustainability", "Sustainability",
+    """Sustainability comparison anchors cited in the book (aviation CO₂e, …).""",
+)
 Energy = _load(
     "energy", "Energy",
     """Simplified pedagogical energy hierarchy for the sustainability chapter.
@@ -100,4 +104,5 @@ class Literature(Registry):
     Communication = Communication
     BatchSize = BatchSize
     Energy = Energy
+    Sustainability = Sustainability
     ComputeTrend = ComputeTrend
