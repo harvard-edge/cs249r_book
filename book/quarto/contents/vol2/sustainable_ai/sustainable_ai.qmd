@@ -196,35 +196,34 @@ class CarbonCostGPT3:
 # │ Imports: mlsysim.core.constants (Hardware.Cloud.H100.tdp, watt)
 # │ Exports: ArchetypeATdp.h_h100_tdp_w_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_qty
+from mlsysim.fmt import fmt, fmt_qty, fmt_power, check, assert_qty_close
+from mlsysim.core.units import MW, watt
 
 class ArchetypeATdp:
     """H100 per-chip TDP for the Archetype A energy framing."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     tdp = Hardware.Cloud.H100.tdp
+    cluster_gpus = 25000
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    tdp_w = tdp.m_as(watt)
-    cluster_gpus = 25000
-    cluster_accel_mw = cluster_gpus * tdp_w / MILLION
+    accelerator_power = cluster_gpus * tdp
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    from mlsysim.fmt import check
-    check(tdp_w > 500, "H100 TDP should exceed 500 W")
-    check(abs(cluster_accel_mw - 17.5) < 0.1, f"Cluster MW unexpected: {cluster_accel_mw}")
+    check(tdp.to(watt).magnitude > 500, "H100 TDP should exceed 500 W")
+    assert_qty_close(accelerator_power, 17.5, MW, rel=1e-3)
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    h_h100_tdp_w_str = fmt(tdp_w, precision=0, commas=False)
+    h_h100_tdp_w_str = fmt_qty(tdp, watt, precision=0, commas=False)
     cluster_gpus_str = fmt(cluster_gpus, precision=0, commas=True)
-    cluster_accel_mw_str = fmt_qty(cluster_accel_mw * ureg.megawatt, ureg.megawatt, precision=1, commas=False)
+    cluster_accel_mw_str = fmt_power(accelerator_power, precision=1, commas=False)
 ```
 
 That arithmetic shows the carbon cost of one run; at frontier scale, the next constraint is whether enough power can be delivered to the cluster at all.
 
 ::: {#lhs-sustainable-ai-archetype-gpt-4-llama-3-energy-wall .callout-lighthouse title="Archetype A (GPT-4/Llama-3): The energy wall"}
 
-Archetype A (GPT-4) is the primary driver of the industry's exponential energy growth. A single `{python} ArchetypeATdp.cluster_gpus_str`-GPU cluster drawing `{python} ArchetypeATdp.h_h100_tdp_w_str` W per chip requires `{python} ArchetypeATdp.cluster_accel_mw_str` of accelerator power before server, network, and cooling overhead. The constraint is *physical*, not *financial*: it is a grid capacity problem. Organizations operating Archetype A models are increasingly forced to build their own power infrastructure or relocate to regions with excess renewable energy, making Carbon-Aware Scheduling and Geographic Optimization as critical as learning rate tuning.
+Archetype A (GPT-4) is the primary driver of the industry's exponential energy growth. A single `{python} ArchetypeATdp.cluster_gpus_str`-GPU cluster drawing `{python} ArchetypeATdp.h_h100_tdp_w_str` per chip requires `{python} ArchetypeATdp.cluster_accel_mw_str` of accelerator power before server, network, and cooling overhead. The constraint is *physical*, not *financial*: it is a grid capacity problem. Organizations operating Archetype A models are increasingly forced to build their own power infrastructure or relocate to regions with excess renewable energy, making Carbon-Aware Scheduling and Geographic Optimization as critical as learning rate tuning.
 
 :::
 
@@ -245,35 +244,34 @@ That accelerator draw alone, before server, network, and cooling overhead, alrea
 # │ Imports: mlsysim.book (check)
 # │ Exports: cf_energy_mwh_str, cf_quebec_tonnes_str, cf_poland_tonnes_str, cf_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_qty, check
+from mlsysim.fmt import fmt, fmt_qty, fmt_energy, fmt_emissions, check
+from mlsysim.physics.quantities import carbon_from_energy
+from mlsysim.core.units import MWh, kWh, gram, metric_ton
 
 class CarbonFrontier:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    energy_mwh = 10000 # 10 GWh training run
+    energy = 10_000 * MWh
     quebec_grid = Infrastructure.Grids.Quebec
     poland_grid = Infrastructure.Grids.Poland
-    intensity_quebec = quebec_grid.carbon_intensity_g_kwh
-    intensity_poland = poland_grid.carbon_intensity_g_kwh
+    intensity_quebec = quebec_grid.carbon_intensity_g_kwh * (gram / kWh)
+    intensity_poland = poland_grid.carbon_intensity_g_kwh * (gram / kWh)
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    energy_kwh = energy_mwh * THOUSAND  # MWh → kWh
-    quebec_g = energy_kwh * intensity_quebec
-    poland_g = energy_kwh * intensity_poland
-    # g CO2 → tonnes (mlsysim does not export mass pint units yet; use MILLION = g/tonne).
-    quebec_tonnes = quebec_g / MILLION
-    poland_tonnes = poland_g / MILLION
-    ratio = poland_tonnes / quebec_tonnes
+    energy_kwh = energy.to(kWh)
+    quebec_carbon = carbon_from_energy(energy, intensity_quebec)
+    poland_carbon = carbon_from_energy(energy, intensity_poland)
+    ratio = (poland_carbon / quebec_carbon).to("").magnitude
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(ratio > 40, f"Ratio {ratio:.1f} unexpected")
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    cf_energy_mwh_str = fmt_qty(energy_mwh * ureg.megawatt_hour, ureg.megawatt_hour, precision=0, commas=True)
-    energy_kwh_str = fmt(energy_kwh, precision=0)
-    quebec_g_str = fmt(quebec_g, precision=0)
-    poland_g_str = fmt(poland_g, precision=0)
-    cf_quebec_tonnes_str = fmt(quebec_tonnes, precision=0)
-    cf_poland_tonnes_str = fmt(poland_tonnes, precision=0)
+    cf_energy_mwh_str = fmt_energy(energy, unit=MWh, precision=0, commas=True)
+    energy_kwh_str = fmt(energy_kwh.magnitude, precision=0)
+    quebec_g_str = fmt(quebec_carbon.to(gram).magnitude, precision=0)
+    poland_g_str = fmt(poland_carbon.to(gram).magnitude, precision=0)
+    cf_quebec_tonnes_str = fmt_emissions(quebec_carbon.to(metric_ton), precision=0)
+    cf_poland_tonnes_str = fmt_emissions(poland_carbon.to(metric_ton), precision=0)
     cf_ratio_str = fmt(ratio, precision=0, commas=False)
-    intensity_quebec_str = fmt(intensity_quebec, precision=0, commas=False)
-    intensity_poland_str = fmt(intensity_poland, precision=0, commas=False)
+    intensity_quebec_str = fmt(intensity_quebec.to(gram / kWh).magnitude, precision=0, commas=False)
+    intensity_poland_str = fmt(intensity_poland.to(gram / kWh).magnitude, precision=0, commas=False)
 ```
 
 ```{python}
@@ -3080,7 +3078,7 @@ While inference on TinyML devices is highly efficient, on-device learning introd
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Scenarios
 from mlsysim.core.constants import watt
-from mlsysim.fmt import MarkdownStr, fmt, fmt_qty, check
+from mlsysim.fmt import check, fmt_qty_range
 
 class SustainableMobilePowerEnvelope:
     """Shared mobile power ranges for sustainable on-device learning prose."""
@@ -3096,13 +3094,19 @@ class SustainableMobilePowerEnvelope:
           "Mobile sustained and burst power ranges should be ordered.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    sustained_range_str = MarkdownStr(
-        f"{fmt(sustained_low_w, precision=0, commas=False)}–"
-        f"{fmt_qty(sustained_high_w * watt, watt, precision=0, commas=False)}"
+    sustained_range_str = fmt_qty_range(
+        sustained_low_w * watt,
+        sustained_high_w * watt,
+        watt,
+        precision=0,
+        commas=False,
     )
-    burst_range_str = MarkdownStr(
-        f"{fmt(burst_low_w, precision=0, commas=False)}–"
-        f"{fmt_qty(burst_high_w * watt, watt, precision=0, commas=False)}"
+    burst_range_str = fmt_qty_range(
+        burst_low_w * watt,
+        burst_high_w * watt,
+        watt,
+        precision=0,
+        commas=False,
     )
 ```
 
