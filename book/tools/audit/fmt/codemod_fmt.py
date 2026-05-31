@@ -788,6 +788,105 @@ def scan_time(path: Path):
     return edits, queue
 
 
+_RATE_SUFFIX_INFO = {
+    " QPS": "QPS",
+    " FPS": "FPS",
+    " tokens/s": "tokens/s",
+    " img/s": "img/s",
+    " images/s": "images/s",
+    " req/s": "req/s",
+    " samples/s": "samples/s",
+}
+
+
+def _rewrite_rate(call: ast.Call, src: str) -> str | None:
+    """fmt/fmt_int(..., suffix=' tokens/s') -> fmt_rate(...)."""
+    seg = ast.get_source_segment(src, call) or ""
+    if not call.args or "\n" in seg:
+        return None
+    fname = call.func.id if isinstance(call.func, ast.Name) else (
+        call.func.attr if isinstance(call.func, ast.Attribute) else None
+    )
+    if fname not in {"fmt", "fmt_int"}:
+        return None
+
+    suffix = None
+    allowed_kwargs = {"precision", "commas", "suffix", "approx", "lower_bound"}
+    kw_src: dict[str, str] = {}
+    for kw in call.keywords:
+        if kw.arg not in allowed_kwargs:
+            return None
+        if kw.arg == "suffix":
+            suffix = _const_str(kw.value)
+        elif kw.arg:
+            val = ast.get_source_segment(src, kw.value)
+            if val is None or "\n" in val:
+                return None
+            kw_src[kw.arg] = val
+    if suffix not in _RATE_SUFFIX_INFO:
+        return None
+    unit = _RATE_SUFFIX_INFO[suffix]
+
+    arg0 = ast.get_source_segment(src, call.args[0])
+    if arg0 is None or "\n" in arg0:
+        return None
+    if fname == "fmt_int":
+        arg0 = arg0 if arg0.strip().startswith("round(") else f"round({arg0})"
+
+    tail = ""
+    if fname == "fmt_int":
+        tail += ", precision=0"
+        if "commas" in kw_src:
+            tail += f", commas={kw_src['commas']}"
+    else:
+        if "precision" in kw_src:
+            tail += f", precision={kw_src['precision']}"
+        if "commas" in kw_src:
+            tail += f", commas={kw_src['commas']}"
+    for marker in ("approx", "lower_bound"):
+        if marker in kw_src:
+            tail += f", {marker}={kw_src[marker]}"
+    return f"fmt_rate({arg0}, {unit!r}{tail})"
+
+
+def scan_rate(path: Path):
+    """Return (rate_edits, queue) for exact service-rate suffixes."""
+    text = path.read_text(encoding="utf-8", errors="replace")
+    edits: list[MultEdit] = []
+    queue: list[QueueItem] = []
+    for fence_line, src in extract_python_cells(text):
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Call):
+                continue
+            call = node.value
+            fn = call.func
+            fname = fn.id if isinstance(fn, ast.Name) else (fn.attr if isinstance(fn, ast.Attribute) else None)
+            if fname not in {"fmt", "fmt_int"}:
+                continue
+            suffix = None
+            for kw in call.keywords:
+                if kw.arg == "suffix":
+                    suffix = _const_str(kw.value)
+            if suffix not in _RATE_SUFFIX_INFO:
+                continue
+            var = _assign_target(node)
+            seg = ast.get_source_segment(src, call) or ""
+            file_line = fence_line + call.lineno
+            new = _rewrite_rate(call, src)
+            if new and var:
+                edits.append(MultEdit(file_line, var, seg, new))
+            else:
+                queue.append(QueueItem(str(path), file_line, var, fname, suffix,
+                    "rate", seg.replace("\n", " ⏎ "),
+                    "exact service-rate suffix could not be rewritten "
+                    "mechanically; convert by hand to fmt_rate(value, unit)."))
+    return edits, queue
+
+
 def _rewrite_fmt_int_multiplier(call, src: str) -> str | None:
     """fmt_int(arg, …, suffix='×') → fmt_multiple(round(arg), precision=0, commas=…).
 

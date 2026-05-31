@@ -334,6 +334,17 @@ pytest suite PASS (171 tests); `fmt_prose_contract` 0; `codemod_fmt queue`
 empty; `./book/binder check math` PASS; substituted prose semantic audit CLEAN
 across 81 files.
 
+**NOW done:** service-rate suffix lane — added `run_rate_lane.py` and migrated
+41 exact counted service-rate suffix sites (`tokens/s`, `img/s`, `images/s`,
+`req/s`, `samples/s`, `FPS`) to `fmt_rate(...)`, byte-identical across 9
+chapters. `fmt_rate` calls now stand at 67 and the `physical_unit` suffix
+bucket is down to 1,217. `fmt_semantic_suffix` now flags these as
+`rate_in_suffix`, so future service-rate labels cannot hide in generic
+`suffix=`. Verification: `git diff --check` PASS; py_compile PASS; focused
+pytest suite PASS (174 tests); `fmt_prose_contract` 0; `codemod_fmt queue`
+empty; `./book/binder check math` PASS; substituted prose semantic audit CLEAN
+across 81 files.
+
 **NEXT:**
 1. Add a formatter-default cleanup pass after the semantic lanes: each
    formatter should own comma defaults by value kind, and explicit `commas=`

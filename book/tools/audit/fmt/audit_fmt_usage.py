@@ -43,6 +43,9 @@ PERCENT_SUFFIXES = {"%", " percent", "percent"}
 PP_SUFFIXES = {" pp", "pp", " percentage points", " percentage point",
                "percentage points", "percentage point"}
 MULTIPLIER_SUFFIXES = {"x", "×", " x", " ×"}
+SERVICE_RATE_SUFFIXES = {
+    "QPS", "FPS", "tokens/s", "img/s", "images/s", "req/s", "samples/s",
+}
 
 
 def extract_python_cells(text: str):
@@ -97,6 +100,8 @@ def classify_suffix(suffix: str):
         return "multiplier"
     if s.startswith("/"):
         return "rate_denominator"
+    if s.strip() in SERVICE_RATE_SUFFIXES:
+        return "service_rate"
     if s.strip() in {"K", "M", "B", "T"}:
         return "scale_glyph"
     if s.strip() in {"million", "billion", "thousand"}:

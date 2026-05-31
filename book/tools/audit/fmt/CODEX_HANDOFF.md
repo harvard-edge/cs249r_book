@@ -328,6 +328,18 @@ decisions, not automatic byte-identical relocations. Verification: `git diff
 `./book/binder check math` PASS; `audit_prose_semantics.py` CLEAN across 81
 files.
 
+**A25 — Service-rate suffix lane: DONE.**
+Added `run_rate_lane.py` and migrated 41 exact service-rate suffix sites
+(`tokens/s`, `img/s`, `images/s`, `req/s`, `samples/s`, `FPS`) to
+`fmt_rate(...)`, byte-identical across 9 chapters. `fmt_rate` calls now stand
+at 67, the `physical_unit` bucket dropped to 1,217, and grep finds no remaining
+QMD service-rate `suffix=` calls. `fmt_semantic_suffix` now flags these suffixes
+as `rate_in_suffix` so they cannot come back through generic `fmt`.
+Verification: `git diff --check` PASS; py_compile PASS; focused pytest suite
+PASS (174 tests); `fmt_prose_contract.py` 0; `codemod_fmt.py queue`
+`by kind: {}`; `./book/binder check math` PASS; `audit_prose_semantics.py`
+CLEAN across 81 files.
+
 ### B. WS4 — unit-suffix lane (~2,393 sites: `GB`/`ms`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.

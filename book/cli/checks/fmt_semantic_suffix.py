@@ -47,6 +47,9 @@ PP_VALUES = {
     "percentage points", "percentage point", "pp",
 }
 SCALE_VALUES = {"K", "M", "B", "T"}
+RATE_VALUES = {
+    "QPS", "FPS", "tokens/s", "img/s", "images/s", "req/s", "samples/s",
+}
 
 
 @dataclass
@@ -111,6 +114,12 @@ def _classify(suffix: str):
             "scale_glyph_in_suffix",
             f"Use fmt_count(value, scale='{stripped}') so the magnitude scale "
             "and glyph are declared together. (Currency uses fmt_usd.)",
+        )
+    if stripped in RATE_VALUES:
+        return (
+            "rate_in_suffix",
+            f"Use fmt_rate(value, '{stripped}') so service-rate labels are "
+            "allowlisted and checked by the formatter.",
         )
     if stripped == "x" or "×" in suffix:
         return (

@@ -12,6 +12,7 @@ from codemod_fmt import (  # noqa: E402
     _rewrite_scale_style, scan_scale_style,
     _rewrite_unit, scan_unit,
     _rewrite_time, scan_time,
+    _rewrite_rate, scan_rate,
 )
 
 
@@ -39,6 +40,11 @@ def _unit(expr: str):
 def _time(expr: str):
     call = ast.parse(expr, mode="eval").body
     return _rewrite_time(call, expr)
+
+
+def _rate(expr: str):
+    call = ast.parse(expr, mode="eval").body
+    return _rewrite_rate(call, expr)
 
 
 # --- the provable cell rewrite -------------------------------------------------
@@ -365,4 +371,24 @@ def test_scan_time_migrates_exact_time_suffixes(tmp_path):
         prose="x"), encoding="utf-8")
     edits, queue = scan_time(p)
     assert [e.var for e in edits] == ["latency_str", "duration_str"]
+    assert queue == []
+
+
+def test_rate_rewrite_service_rate_suffixes():
+    assert _rate("fmt(tps, precision=0, commas=False, suffix=' tokens/s')") == \
+        "fmt_rate(tps, 'tokens/s', precision=0, commas=False)"
+    assert _rate("fmt(fps, precision=0, commas=False, suffix=' FPS')") == \
+        "fmt_rate(fps, 'FPS', precision=0, commas=False)"
+    assert _rate("fmt_int(imgs, suffix=' img/s')") == \
+        "fmt_rate(round(imgs), 'img/s', precision=0)"
+
+
+def test_scan_rate_migrates_exact_service_rates(tmp_path):
+    p = tmp_path / "c.qmd"
+    p.write_text(CELL.format(
+        assigns=("toks_str = fmt(toks, precision=0, commas=False, suffix=' tokens/s')\n"
+                 "    bw_str = fmt(bw, precision=0, commas=False, suffix=' GB/s')"),
+        prose="x"), encoding="utf-8")
+    edits, queue = scan_rate(p)
+    assert [e.var for e in edits] == ["toks_str"]
     assert queue == []

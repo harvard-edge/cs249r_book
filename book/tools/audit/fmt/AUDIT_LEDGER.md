@@ -521,6 +521,41 @@ Validation details:
   PASS, `by kind: {}`; `./book/binder check math` PASS;
   `audit_prose_semantics.py` PASS, 0 findings across 81 files.
 
+## 2026-05-31 — Service-rate suffix lane
+
+Change type: byte-identical formatter relocation plus checker hardening. Added
+`run_rate_lane.py` and migrated exact non-physical service-rate suffixes to
+`fmt_rate(...)`. Physical rates (`GB/s`, `TFLOP/s`, `W`) remain `fmt_qty` work;
+this lane is only for counted service throughputs.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls migrated | Result |
+|---|---:|---|
+| `vol1/benchmarking/benchmarking.qmd` | 1 | byte-identical |
+| `vol1/data_engineering/data_engineering.qmd` | 4 | byte-identical |
+| `vol1/frameworks/frameworks.qmd` | 2 | byte-identical |
+| `vol1/ml_systems/ml_systems.qmd` | 4 | byte-identical |
+| `vol1/model_compression/model_compression.qmd` | 2 | byte-identical |
+| `vol1/model_serving/model_serving.qmd` | 19 | byte-identical |
+| `vol1/training/training.qmd` | 4 | byte-identical |
+| `vol2/data_storage/data_storage.qmd` | 3 | byte-identical |
+| `vol2/performance_engineering/performance_engineering.qmd` | 2 | byte-identical |
+
+Validation details:
+
+- `fmt_rate` calls increased from 26 to 67.
+- `physical_unit` suffix calls dropped from 1,258 to 1,217.
+- `audit_fmt_usage.py` now classifies exact service-rate suffixes as
+  `service_rate`; none remain in QMD.
+- `fmt_semantic_suffix` now reports exact service-rate suffixes as
+  `rate_in_suffix`, with regression coverage.
+- Verification: `git diff --check` PASS; py_compile PASS for formatter,
+  codemod, audit, and binder check modules; focused pytest suite PASS, 174
+  tests; `fmt_prose_contract.py` PASS, 0 violations; `codemod_fmt.py queue`
+  PASS, `by kind: {}`; `./book/binder check math` PASS;
+  `audit_prose_semantics.py` PASS, 0 findings across 81 files.
+
 ## 2026-05-31 — Remaining direct count labels
 
 Change type: byte-identical formatter relocation. Replaced 40 hard-coded direct

@@ -51,6 +51,16 @@ def test_flags_scale_glyph_on_fmt(tmp_path):
     assert codes.count("scale_glyph_in_suffix") == 1
 
 
+def test_flags_service_rate_suffix(tmp_path):
+    chapter = _write(
+        tmp_path,
+        "r_str = fmt(rate, precision=0, commas=False, suffix=' tokens/s')\n"
+        "f_str = fmt(frames, precision=0, commas=False, suffix=' FPS')\n",
+    )
+    codes = [v.code for v in audit([chapter])]
+    assert codes.count("rate_in_suffix") == 2
+
+
 def test_does_not_flag_physical_unit_suffix(tmp_path):
     chapter = _write(
         tmp_path,
