@@ -1,3 +1,8 @@
-from .registry import Scenarios
+from .registry import ReferenceStats
 
-__all__ = ["Scenarios"]
+# ``mlsysim.scenarios.Scenarios`` is retained only for subpackage-level
+# compatibility. The top-level ``mlsysim.Scenarios`` is the executable scenario
+# registry from ``mlsysim.engine.scenarios``.
+Scenarios = ReferenceStats
+
+__all__ = ["ReferenceStats", "Scenarios"]

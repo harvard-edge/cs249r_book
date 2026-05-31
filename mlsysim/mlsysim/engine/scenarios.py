@@ -6,17 +6,22 @@ from ..models.types import Workload
 from ..hardware.types import HardwareNode
 from ..systems.types import Fleet
 from ..core.exceptions import OOMError, SLAViolation
+from ..scenarios.registry import ReferenceStats
 from .evaluation import SystemEvaluation, EvaluationLevel
 
 class Scenario(BaseModel):
     """
-    A Narrative Bundle tying a Workload, a System, and Performance Constraints.
-    This is the primary entry point for student labs and textbook case studies.
+    Concrete executable case: a workload on a system with constraints.
+
+    ``application`` names the product/domain context, while the scenario itself
+    is what the simulator can evaluate. Model facts stay in ``Models.*``;
+    hardware and fleet facts stay in ``Hardware.*`` / ``Systems.*``.
     """
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     name: str
     description: str
+    application: Optional[str] = None
     workload: Workload
     system: Union[Fleet, HardwareNode]
     
@@ -149,16 +154,25 @@ class Scenario(BaseModel):
 
 class Scenarios:
     """
-    The Lighthouse Archetypes used throughout Volume 1 and Volume 2.
+    Executable scenario registry.
+
+    Each entry composes one ``Models.*`` workload, one ``Hardware.*`` or
+    ``Systems.*`` target, and scenario-local constraints such as latency or
+    power budget. Non-executable sourced anchors are attached under
+    ``ReferenceStats`` and also exposed as legacy direct aliases so existing
+    book cells keep rendering until they are migrated.
     """
     from ..models.registry import Models
     from ..hardware.registry import Hardware
     from ..systems.registry import Clusters, Nodes
+
+    ReferenceStats = ReferenceStats
     
     # --- TINYML WORLD ---
     SmartDoorbell = Scenario(
         name="Smart Doorbell",
         description="Identifying humans at the door using a sub-watt microcontroller.",
+        application="Smart Doorbell",
         workload=Models.Tiny.WakeVision,
         system=Hardware.Tiny.ESP32_S3,
         sla_latency=Q_("200 ms"),
@@ -168,6 +182,7 @@ class Scenarios:
     TinySensor = Scenario(
         name="Anomaly Sensor",
         description="Low-power vibration monitoring for industrial predictive maintenance.",
+        application="Industrial Anomaly Detection",
         workload=Models.Tiny.AnomalyDetector,
         system=Hardware.Tiny.ESP32_S3,
         sla_latency=Q_("10 ms"),
@@ -178,6 +193,7 @@ class Scenarios:
     AutonomousVehicle = Scenario(
         name="Autonomous Vehicle",
         description="Real-time object detection for safe urban navigation.",
+        application="Autonomous Vehicle",
         workload=Models.Vision.YOLOv8_Nano,
         system=Hardware.Edge.JetsonOrinNX,
         sla_latency=Q_("10 ms")
@@ -186,6 +202,7 @@ class Scenarios:
     AutonomousVehicle_Waymo = Scenario(
         name="Waymo AV Data Pipeline",
         description="High-throughput data ingestion for autonomous fleet training.",
+        application="Autonomous Vehicle",
         workload=Models.Vision.YOLOv8_Nano.model_copy(update={"name": "Waymo (High)", "data_rate": Q_("19 TB/hour")}),
         system=Hardware.Edge.JetsonOrinNX,
         sla_latency=Q_("10 ms")
@@ -195,6 +212,7 @@ class Scenarios:
     MobileHealth = Scenario(
         name="Mobile Health",
         description="On-device medical image analysis for remote diagnostics.",
+        application="Mobile Health",
         workload=Models.Vision.MobileNetV2,
         system=Hardware.Mobile.iPhone15Pro,
         sla_latency=Q_("30 ms")
@@ -203,6 +221,7 @@ class Scenarios:
     MobileAssistant = Scenario(
         name="Mobile Assistant",
         description="On-device assistant with a quantized small LLM on a smartphone.",
+        application="Mobile Assistant",
         workload=Models.Language.Llama3_8B,
         system=Hardware.Mobile.iPhone15Pro,
         sla_latency=Q_("100 ms"),
@@ -213,6 +232,7 @@ class Scenarios:
     LocalTraining = Scenario(
         name="Local LLM Fine-tuning",
         description="Fine-tuning a Llama-3 model on a high-end student workstation.",
+        application="Local Fine-tuning",
         workload=Models.Language.Llama3_8B,
         system=Hardware.Workstation.MacBookM3Max,
         sla_latency=Q_("100 ms")
@@ -222,6 +242,7 @@ class Scenarios:
     FrontierTraining = Scenario(
         name="Frontier LLM Training",
         description="Pre-training a GPT-4-class frontier model on a massive fleet.",
+        application="Frontier Training",
         workload=Models.Language.GPT4,
         system=Clusters.Frontier_8K,
         sla_latency=Q_("500 ms") # Per-step target
@@ -231,6 +252,7 @@ class Scenarios:
     ChatbotServing = Scenario(
         name="Chatbot Serving",
         description="Serving a Llama-3 8B chatbot on a single H100 with latency SLA.",
+        application="Chatbot Serving",
         workload=Models.Language.Llama3_8B,
         system=Hardware.Cloud.H100,
         sla_latency=Q_("500 ms"),  # TTFT target
@@ -240,17 +262,33 @@ class Scenarios:
     KeywordSpotting = Scenario(
         name="Keyword Spotting",
         description="Always-on wake-word detection on a microcontroller (MLPerf Tiny benchmark).",
+        application="Keyword Spotting",
         workload=Models.Tiny.DS_CNN,
         system=Hardware.Tiny.ESP32_S3,
         sla_latency=Q_("30 ms"),
         power_budget=Q_("1 mW"),
     )
 
-class Applications:
-    Doorbell = Scenarios.SmartDoorbell
-    AutoDrive = Scenarios.AutonomousVehicle
-    Mobile = Scenarios.MobileAssistant
-    Workstation = Scenarios.LocalTraining
-    Frontier = Scenarios.FrontierTraining
-    Chatbot = Scenarios.ChatbotServing
-    KWS = Scenarios.KeywordSpotting
+    # Legacy short names used by existing book cells and examples. They are
+    # aliases to executable scenarios, not a separate application registry.
+    Doorbell = SmartDoorbell
+    AutoDrive = AutonomousVehicle
+    Mobile = MobileAssistant
+    Workstation = LocalTraining
+    Frontier = FrontierTraining
+    Chatbot = ChatbotServing
+    KWS = KeywordSpotting
+
+    # Legacy direct aliases for existing QMD cells. Canonical new references are
+    # ``Scenarios.ReferenceStats.<Group>`` or top-level ``ReferenceStats.<Group>``.
+    Workloads = ReferenceStats.Workloads
+    AnomalyModel = ReferenceStats.AnomalyModel
+    EnergyAnchors = ReferenceStats.EnergyAnchors
+    MobilePower = ReferenceStats.MobilePower
+    PhoneBattery = ReferenceStats.PhoneBattery
+
+
+# Compatibility names. ``Applications`` and ``ScenarioBundles`` both point to
+# the executable scenario registry so there is still one source of truth.
+Applications = Scenarios
+ScenarioBundles = Scenarios

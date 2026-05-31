@@ -1,13 +1,13 @@
 # mlsysim.engine — The Simulator
 #
-# Solvers, the analytical engine, multi-level evaluation, scenario bundles,
+# Solvers, the analytical engine, multi-level evaluation, executable scenarios,
 # and composition. Extracted from core/ in the taxonomy refactor so that core/
 # is primitives-only. Engine modules depend on core primitives + data
 # registries; nothing in core depends on engine.
 
 from . import config
 from . import evaluation
-from .scenarios import Scenario, Scenarios, Applications, Fleet
+from .scenarios import Scenario, Scenarios, Applications, ScenarioBundles, Fleet
 from .resolver_factory import ResolverFactory
 from .results import *
 from .pipeline import Pipeline, CompositionError

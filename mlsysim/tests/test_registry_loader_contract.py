@@ -76,14 +76,16 @@ def test_generated_registry_classes_are_picklable_by_public_module():
     assert pickle.loads(pickle.dumps(Models.Language)) is Models.Language
 
 
-def test_package_scenarios_export_remains_book_facing():
-    assert hasattr(mlsysim.Scenarios, "Workloads")
-    assert hasattr(mlsysim.Scenarios, "MobilePower")
-    assert hasattr(mlsysim.ScenarioBundles, "ChatbotServing")
+def test_package_scenarios_export_names_executable_bundles():
+    assert hasattr(mlsysim.Scenarios, "ChatbotServing")
+    assert hasattr(mlsysim.Scenarios, "SmartDoorbell")
+    assert mlsysim.ScenarioBundles is mlsysim.Scenarios
+    assert mlsysim.Applications is mlsysim.Scenarios
+    assert hasattr(mlsysim.ReferenceStats, "MobilePower")
 
 
 def test_mobile_power_scenario_ranges_remain_available():
-    mobile_power = mlsysim.Scenarios.MobilePower
+    mobile_power = mlsysim.ReferenceStats.MobilePower
 
     assert mobile_power.MobileMlSustainedLow.m_as("watt") == 2
     assert mobile_power.MobileMlSustainedHigh.m_as("watt") == 3
@@ -91,6 +93,7 @@ def test_mobile_power_scenario_ranges_remain_available():
     assert mobile_power.MobileMlBurstHigh.m_as("watt") == 10
     assert mobile_power.BackgroundAdaptationLow.m_as("milliwatt") == 500
     assert mobile_power.BackgroundAdaptationHigh.m_as("milliwatt") == 1000
+    assert mlsysim.Scenarios.MobilePower is mobile_power
 
 
 def test_models_short_alias_remains_available_for_legacy_book_code():

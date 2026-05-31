@@ -19,6 +19,8 @@ tutorials should prefer zoos + `mlsysim.physics.*` + explicit operands.
 
 - **`mlsysim.core.constants`** — pint units, energy/latency laws, precision map, dimensionless teaching examples.
 - **`Literature.*`** — cited appendix scalars (MFU bands, Chinchilla, scaling η, overheads).
+- **`Scenarios.*`** — executable workload + system + constraint bundles, suitable for `Scenario.evaluate()`.
+- **`ReferenceStats.*`** — non-executable sourced anchors for real-world scenario and case-study statistics.
 - **`Systems.Reliability` / `Orchestration`** — MTTF, recovery, scheduling assumptions.
 - **`Ops.Monitoring`** — PSI, KS, drift thresholds (MLOps chapters).
 - **`mlsysim.engine.calibration`** — solver/engine default kwargs (not appendix tables).
@@ -60,6 +62,8 @@ flowchart TB
   subgraph support [Support]
     constants[constants.py]
     literature[Literature.*]
+    scenarios[Scenarios.*]
+    referenceStats[ReferenceStats.*]
     calibration[core/calibration.py]
     physics[physics.*]
   end
@@ -72,11 +76,17 @@ flowchart TB
   literature --> physics
   calibration --> physics
   Systems --> physics
+  Models --> scenarios
+  Hardware --> scenarios
+  Systems --> scenarios
+  referenceStats --> scenarios
 ```
 
 - **Fleet ≠ datacenter:** `Systems.Clusters.*` (Fleet) references optional `Infrastructure.Datacenters.*` / grid for carbon and PUE.
 - **NVL72** is `Hardware.Cloud.GB200_NVL72`, not an Infrastructure rack entry.
 - **Networks/fabrics:** interconnect specs on Hardware; topology instances under `Systems.Fabrics`.
+- **Scenario ≠ model or hardware:** a scenario composes existing model and system facts with local constraints. It does not redefine GPT-4, H100, or a fleet.
+- **Reference statistics are not scenarios:** `ReferenceStats.MobilePower.*` and `ReferenceStats.Workloads.*` are sourced anchors for book calculations, not runnable bundles.
 
 ## Book LEGO conventions
 
@@ -84,6 +94,7 @@ flowchart TB
 2. Import `from mlsysim import *` or explicit zoo paths — not `from mlsysim.core.constants import *`.
 3. Use `mlsysim.physics.*` for derived quantities; registries for operands.
 4. `Scenario.evaluate()` reserved for labs; capstone book cells only (≤5–10 total).
+5. Prefer `ReferenceStats.*` for non-executable anchors. Legacy `Scenarios.MobilePower` aliases remain only so existing book cells render until a QMD migration pass.
 
 ## Migration tiers (QMD)
 

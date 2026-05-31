@@ -93,11 +93,19 @@ import from `mlsysim.engine.solver`. Workload types import from `mlsysim.models.
 ### Scenario Registry
 
 ```python
-from mlsysim import Scenarios
+from mlsysim import ReferenceStats, Scenarios
 ```
 
-All scenarios shipping in 0.1.0 are stable. Their names, parameters, and
-behavior are fixed for the 0.1.x series.
+`Scenarios.*` is the executable scenario registry: each entry composes an
+existing `Models.*` workload, a `Hardware.*` or `Systems.*` target, and
+scenario-local constraints such as latency or power budget. `ReferenceStats.*`
+holds non-executable sourced anchors used by the book, such as mobile power
+envelopes, Waymo data-rate ranges, and TinyML case-study measurements.
+
+`Applications` and `ScenarioBundles` are compatibility aliases for `Scenarios`.
+`Scenarios.MobilePower`-style direct reference-stat aliases remain available so
+existing book cells render, but new code should prefer
+`ReferenceStats.MobilePower` or `Scenarios.ReferenceStats.MobilePower`.
 
 ### PerformanceProfile Fields
 

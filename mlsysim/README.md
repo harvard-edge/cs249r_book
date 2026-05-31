@@ -50,7 +50,7 @@
     <tr>
       <td align="center"><b>Layer D</b></td>
       <td><b>Systems & Topology</b><br><code>mlsysim.systems</code></td>
-      <td>Fleet configurations and network fabrics.<br><i>e.g., Doorbell, AutoDrive Scenarios</i></td>
+      <td>Fleet configurations and network fabrics.<br><i>e.g., <code>Systems.Clusters.Frontier_8K</code>, <code>Systems.Fabrics.InfiniBand_NDR</code></i></td>
     </tr>
     <tr>
       <td align="center"><b>Layer E</b></td>
@@ -59,6 +59,13 @@
     </tr>
   </tbody>
 </table>
+
+`Scenarios.*` sits above the stack as the runnable composition layer: it pairs a
+`Models.*` workload with a `Hardware.*` or `Systems.*` target and local
+constraints such as latency or power. Non-executable real-world anchors live in
+`ReferenceStats.*`; compatibility aliases such as `Applications` and
+`Scenarios.MobilePower` remain for existing book material but are not new source
+locations.
 
 ---
 
