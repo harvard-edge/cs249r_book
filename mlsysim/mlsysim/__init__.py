@@ -27,22 +27,8 @@ from .infrastructure.registry import Infrastructure
 from .literature.registry import Literature
 # Non-executable sourced anchors used by examples and external analyses.
 from .scenarios.registry import ReferenceStats
-from .ops import Ops, Monitoring
+from .ops import Ops
 from .engine import calibration
-
-# AUTHORITATIVE SOLVERS
-from .engine.solver import (
-    SingleNodeModel,
-    DistributedModel,
-    ReliabilityModel,
-    SustainabilityModel,
-    EconomicsModel,
-    ServingModel,
-    TrainingMemoryModel,
-    ServingCapacityModel,
-    DataModel,
-    PlacementOptimizer,
-)
 
 # AUTHORITATIVE MEASUREMENT (units + physics-only constants)
 from .core.constants import *  # noqa: F401,F403

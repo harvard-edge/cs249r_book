@@ -1,3 +1,5 @@
+import mlsysim
+import mlsysim.ops as ops
 from mlsysim.engine import solver
 from mlsysim.engine.solvers import (
     BatchingOptimizer,
@@ -70,3 +72,24 @@ def test_solver_implementations_live_in_domain_modules():
     assert solver.EconomicsModel.__module__.endswith(".solvers.economics")
     assert solver.DataModel.__module__.endswith(".solvers.data")
     assert solver.CompressionModel.__module__.endswith(".solvers.compression")
+
+
+def test_package_root_does_not_reexport_solver_aliases():
+    root_only = (
+        "SingleNodeModel",
+        "DistributedModel",
+        "ReliabilityModel",
+        "SustainabilityModel",
+        "EconomicsModel",
+        "ServingModel",
+        "TrainingMemoryModel",
+        "ServingCapacityModel",
+        "DataModel",
+        "PlacementOptimizer",
+        "Monitoring",
+    )
+
+    assert mlsysim.Ops.Monitoring.__name__ == "Monitoring"
+    assert not hasattr(ops, "Monitoring")
+    for name in root_only:
+        assert not hasattr(mlsysim, name)

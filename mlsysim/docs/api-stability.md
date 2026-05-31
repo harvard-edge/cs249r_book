@@ -147,10 +147,10 @@ The solver class hierarchy, their constructors, and their method signatures
 may change. The `Engine.solve()` facade insulates you from these changes --
 prefer it over direct solver instantiation.
 
-Top-level convenience imports such as `from mlsysim import ServingModel` are
-kept working throughout the 0.1.x series because the tutorials use them. For
-library code, prefer `mlsysim.solvers` so the import path makes the dependency
-on solver-specific behavior explicit.
+Solver classes are exported from `mlsysim.solvers`, not the package root. Use
+`from mlsysim.solvers import ServingModel` so solver-specific dependencies stay
+explicit and the root namespace remains reserved for registries, units, and
+formatting helpers.
 
 ### Training Mode Parameter
 

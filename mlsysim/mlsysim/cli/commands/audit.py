@@ -38,7 +38,7 @@ def audit_main(
     """
     **[Audit] Profile local hardware against the Iron Law.**
 
-    Detects your local CPU/GPU and benchmarks its theoretical capability against the textbook's hardware registry.
+    Detects your local CPU/GPU and compares its theoretical capability against the hardware registry.
     """
     output_format = resolve_output_format(ctx, output, supported={"text", "json", "markdown"})
 

@@ -98,9 +98,8 @@ class NetworkRooflineModel(ForwardModel):
     if the fleet is Compute-Bound (Wall 1) or Network-Bound (Wall 2).
 
     Literature Source:
-    1. Reddi et al. (2025), "Machine Learning Systems," Volume 2, Chapter 1.
-    2. Williams et al. (2009), "Roofline Model." (Theoretical basis)
-    3. Ghose et al. (2019), "A Survey of Communication-Efficient Distributed
+    1. Williams et al. (2009), "Roofline Model." (Theoretical basis)
+    2. Ghose et al. (2019), "A Survey of Communication-Efficient Distributed
        Training."
     """
     requires = ("workload", "fleet")

@@ -80,7 +80,8 @@ GPU memory, accounting for both model weights and KV-cache.
 ### Setup
 
 ```python
-from mlsysim import ServingModel, Hardware, Models
+from mlsysim import Hardware, Models
+from mlsysim.solvers import ServingModel
 
 serving = ServingModel()
 model   = Models.Language.Llama3_8B
@@ -306,7 +307,8 @@ carbon footprint of a long training run.
 ### Setup
 
 ```python
-from mlsysim import SustainabilityModel, Infrastructure, Systems
+from mlsysim import Infrastructure, Systems
+from mlsysim.solvers import SustainabilityModel
 
 sustain = SustainabilityModel()
 fleet   = Systems.Clusters.Research_256  # 256 H100s

@@ -61,7 +61,7 @@ from .units import *  # noqa: F401,F403 — re-export full unit registry
 # TRANSFORMER FLOP ratios -> Literature.Chinchilla.{ComputeConstant(6PD), DecodeConstant(2P)}
 # TRANSFORMER_*_EXAMPLE dims -> inlined in the one worked example that used them (hw_acceleration)
 # SIMD_REGISTER_BITS, FP32_BITS, INT8_BITS -> core/units.py (bit widths)
-# Single-chapter pedagogical example scalars are inlined in their LEGO cells (no
+# Example-specific pedagogical scalars are inlined at their call sites (no
 # canonical registry home, per the architecture's pedagogical-input carve-out):
 #   SYSTOLIC_ARRAY_DIM -> hw_acceleration; SYNTHETIC_* -> data_storage;
 #   LOGIC_WALL_REASONING_STEPS_EXAMPLE -> inference; ML_WORKFLOW_STAGE_*/COST_BASE -> ml_workflow
@@ -69,7 +69,7 @@ from .units import *  # noqa: F401,F403 — re-export full unit registry
 
 # --- Storage (I/O Bandwidth) ---
 # NVME_*/SYSTEM_MEMORY_BW/HOST_DRAM_BW -> Hardware.Tech.Storage (tech-class bandwidth)
-# LOCAL_NVME_DRIVES_PER_NODE_REF -> inlined node-config in data_storage (pedagogical)
+# LOCAL_NVME_DRIVES_PER_NODE_REF -> inlined node-config in storage examples
 
 # --- Case Studies --- (WAYMO_*, ANOMALY_MODEL_* -> ReferenceStats.Workloads / ReferenceStats.AnomalyModel)
 

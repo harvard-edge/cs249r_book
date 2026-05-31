@@ -152,7 +152,7 @@ NS = ureg.NS
 MILLISECOND = MS
 MICROSECOND = US
 NANOSECOND = NS
-# SI lowercase aliases (consumed by several chapter LEGO cells)
+# SI lowercase aliases (consumed by interactive examples and notebooks)
 microsecond = ureg.microsecond
 millisecond = ureg.millisecond
 nanosecond = ureg.nanosecond

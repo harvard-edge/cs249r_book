@@ -26,7 +26,8 @@ mlsysim eval Llama3_8B H100 --batch-size 32
   Sarathi-Serve-style chunked-prefill stall proxy:
 
   ```python
-  from mlsysim import Hardware, Models, ServingModel
+  from mlsysim import Hardware, Models
+  from mlsysim.solvers import ServingModel
 
   result = ServingModel().solve(
       Models.Language.Llama3_8B,
