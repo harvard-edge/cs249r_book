@@ -312,6 +312,22 @@ calls to full unit names. `audit_fmt_usage.py` now reports `fmt_time` calls at
 `./book/binder check math` PASS; `audit_prose_semantics.py` CLEAN across 81
 files.
 
+**A24 — WS4 clean Quantity-backed unit batch 2: DONE.**
+`run_unit_lane.py --write --all` migrated 99 additional clean
+`fmt(q.m_as(UNIT), suffix=" UNIT")` sites to `fmt_qty(q, UNIT)`, all accepted
+only when values and substituted prose were byte-identical. `fmt_qty` calls now
+stand at 263 and the `physical_unit` suffix bucket is down to 1,258. The unit
+lane was hardened to emit `per="token"` instead of legacy
+`extra_suffix="/token"`, and QMD again has zero `extra_suffix=` calls. Twenty
+Quantity-backed candidates remain intentionally queued because canonical units
+would visibly change output, mostly `GB`→`GiB` memory capacity and missing
+bandwidth denominators such as `TB`→`TB/s`; handle those as correctness/prose
+decisions, not automatic byte-identical relocations. Verification: `git diff
+--check` PASS; py_compile PASS; focused pytest suite PASS (171 tests);
+`fmt_prose_contract.py` 0; `codemod_fmt.py queue` `by kind: {}`;
+`./book/binder check math` PASS; `audit_prose_semantics.py` CLEAN across 81
+files.
+
 ### B. WS4 — unit-suffix lane (~2,393 sites: `GB`/`ms`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.

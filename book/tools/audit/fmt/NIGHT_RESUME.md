@@ -82,9 +82,11 @@ or broken.
 targets are physical-unit suffixes, then scale-word design and MarkdownStr sites.
 For physical Quantity-backed sites, continue WS4 with
 `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/run_unit_lane.py --write <qmd>`
-one chapter at a time. Current dry-run reports 119 remaining clean unit candidates
-across 19 chapters; many more suffix sites are plain floats and should stay queued
-unless the source is refactored to carry a Pint Quantity.
+one chapter at a time. The latest all-chapter run migrated the remaining
+byte-identical clean candidates; the dry-run now shows only 20 Quantity-backed
+candidates that visibly change output (`GB`→`GiB`, `TB`→`TB/s`, `GB`→`GB/s`).
+Many more suffix sites are plain floats and should stay queued unless the source
+is refactored to carry a Pint Quantity.
 
 **NEW TOOL:** `audit_prose_semantics.py` — executes each chapter, substitutes
 LEGO values into prose, normalizes LaTeX→visible, flags duplicated glyph/unit,
@@ -319,6 +321,18 @@ byte-identical gate. A follow-up source-only pass normalized earlier
 --check` PASS; py_compile PASS; focused pytest suite PASS (171 tests);
 `fmt_prose_contract` 0; `codemod_fmt queue` empty; `./book/binder check math`
 PASS; substituted prose semantic audit CLEAN across 81 files.
+
+**NOW done:** WS4 clean Quantity-backed unit batch 2 — migrated 99 additional
+`fmt(q.m_as(UNIT), suffix=" UNIT")` sites to `fmt_qty(q, UNIT)`, byte-identical
+by `run_unit_lane.py`. `fmt_qty` calls now stand at 263 and the `physical_unit`
+suffix bucket is down to 1,258. The lane now emits `per="token"` rather than
+legacy `extra_suffix="/token"`, and QMD has zero `extra_suffix=` calls. Twenty
+Quantity-backed candidates remain because accepting them would visibly change
+units (`GB`→`GiB` or missing `/s` denominators); treat those as correctness
+decisions. Verification: `git diff --check` PASS; py_compile PASS; focused
+pytest suite PASS (171 tests); `fmt_prose_contract` 0; `codemod_fmt queue`
+empty; `./book/binder check math` PASS; substituted prose semantic audit CLEAN
+across 81 files.
 
 **NEXT:**
 1. Add a formatter-default cleanup pass after the semantic lanes: each

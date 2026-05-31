@@ -117,7 +117,7 @@ In a single machine, the memory bus moves data between the processor and memory.
 # │          bandwidth refs in Level 1, Level 2, Level 5, Virtualization,
 # │          Monitoring, Fallacies sections.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, check, fmt_qty
 
 class NetworkFabricsContextScenario:
     """Bandwidth hierarchy specs for the chapter-wide fabric discussion."""
@@ -143,8 +143,8 @@ class NetworkFabricsContextScenario:
     ib_ndr_gbs_str = fmt(ib_ndr_gbs_val, precision=0, commas=False, suffix=" GB/s")
     nvlink_h100_gbs_str = fmt(nvlink_h100_gbs_val, precision=0, commas=False, suffix=" GB/s")
     nvlink_to_ib_ratio_str = fmt(nvlink_to_ib_ratio_val, precision=0, commas=False)
-    h100_tflops_str = fmt(h100_flops_raw.m_as(TFLOPs/second), precision=0, commas=False, suffix=" TFLOP/s")
-    h100_mem_bw_str = fmt(h100_mem_bw_raw.m_as(TB/second), precision=2, commas=False, suffix=" TB/s")
+    h100_tflops_str = fmt_qty(h100_flops_raw, TFLOP/second, precision=0, commas=False)
+    h100_mem_bw_str = fmt_qty(h100_mem_bw_raw, TB/second, precision=2, commas=False)
 ```
 
 The concrete bandwidth cliff that separates intra-node from inter-node communication makes this Gradient Bus analogy precise. @Sec-compute-infrastructure established that a single H100 delivers `{python} NetworkFabricsContextScenario.h100_tflops_str` of FP16 throughput with `{python} NetworkFabricsContextScenario.h100_mem_bw_str` of memory bandwidth. Within a node, eight such accelerators communicate through NVLink at `{python} NetworkFabricsContextScenario.nvlink_h100_gbs_str`. The moment computation crosses a node boundary, however, the available bandwidth drops by a factor of `{python} NetworkFabricsContextScenario.nvlink_to_ib_ratio_str`$\times$, from `{python} NetworkFabricsContextScenario.nvlink_h100_gbs_str` (NVLink) to `{python} NetworkFabricsContextScenario.ib_ndr_gbs_str` (NDR InfiniBand per port). This cliff, the transition from intra-node to inter-node communication, is the central challenge of network fabric design. @Sec-appdx-fleet-foundations-numbers-to-know collects the canonical NVLink and InfiniBand bandwidth specifications and the 1K-GPU cluster reference configuration that anchor the figures used throughout this chapter. For our 175B model, moving 350 GB of gradients through `{python} NetworkFabricsContextScenario.ib_ndr_gbs_str` links means that the AllReduce alone can take seconds, during which every GPU in the cluster sits idle unless the fabric and collective algorithms can overlap that transfer with computation.
@@ -542,7 +542,7 @@ Protocol choice determines whether the fabric can behave as a lossless medium; p
 # │          NetworkAlphaBeta.ib_alpha_us_str,
 # │          NetworkAlphaBeta.ib_beta_gbs_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, fmt_math, fmt_time
+from mlsysim.fmt import fmt, check, fmt_math, fmt_time, fmt_qty
 
 class NetworkAlphaBeta:
     """Namespace for the alpha-beta communication model."""
@@ -570,16 +570,16 @@ class NetworkAlphaBeta:
     check(small_bw_term_pct < 10, f"Small msg should be latency-bound, got {small_bw_term_pct:.1f}% BW share")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    n_cross_ib_kb_str = fmt((n_cross_ib * byte).m_as(KB), precision=0, commas=False, suffix=" KB")
+    n_cross_ib_kb_str = fmt_qty(n_cross_ib * byte, KB, precision=0, commas=False)
     t_small_ib_us_str = fmt_time(t_small_ib * MILLION, 'microsecond', precision=2, commas=False)
     small_bw_pct_str = fmt_percent(small_bw_term_pct/100, precision=1, commas=False, style='prose')
     t_large_ib_ms_str = fmt_time(t_large_ib * THOUSAND, 'millisecond', precision=1, commas=False)
     ib_alpha_us_str = fmt_time(alpha_ib * MILLION, 'microsecond', precision=1, commas=False)
-    ib_beta_gbs_str = fmt((beta_ib * byte / second).m_as(GB / second), precision=0, commas=False, suffix=" GB/s")
-    n_small_kb_str = fmt((n_small * byte).m_as(KB), precision=0, commas=False, suffix=" KB")
-    n_large_mb_str = fmt((n_large * byte).m_as(MB), precision=0, commas=False, suffix=" MB")
-    n_demo_large_mb_str = fmt((n_demo_large * byte).m_as(MB), precision=0, commas=False, suffix=" MB")
-    n_large_grad_mb_str = fmt((350 * MILLION * byte).m_as(MB), precision=0, commas=False, suffix=" MB")
+    ib_beta_gbs_str = fmt_qty(beta_ib * byte / second, GB / second, precision=0, commas=False)
+    n_small_kb_str = fmt_qty(n_small * byte, KB, precision=0, commas=False)
+    n_large_mb_str = fmt_qty(n_large * byte, MB, precision=0, commas=False)
+    n_demo_large_mb_str = fmt_qty(n_demo_large * byte, MB, precision=0, commas=False)
+    n_large_grad_mb_str = fmt_qty(350 * MILLION * byte, MB, precision=0, commas=False)
     eth_alpha_us = 5.0
     eth_beta_gbs = 12.5
     eth_alpha_us_str = fmt_time(eth_alpha_us, 'microsecond', precision=0, commas=False)
@@ -730,6 +730,7 @@ The $\alpha$-$\beta$ analysis above focused on the transfer time of individual m
 ```{python}
 #| echo: false
 #| label: allreduce-bottleneck
+from mlsysim.fmt import fmt_qty
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ ALLREDUCE BOTTLENECK ANALYSIS
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -803,11 +804,11 @@ class AllReduceBottleneck:
 
     num_gpus_str = fmt_int(num_gpus, commas=False)
     params_1b_billion_str = fmt(m_1b.parameters.m_as(param) / BILLION, precision=1, commas=False, suffix=" billion")
-    grad_1b_gb_str = fmt(grad_1b.m_as(GB), precision=1, commas=False, suffix=" GB")
+    grad_1b_gb_str = fmt_qty(grad_1b, GB, precision=1, commas=False)
     gpu_util_pct_str = fmt_percent(gpu_util, precision=0, commas=False, style='prose')
     h100_tflops_str = fmt(peak_tflops, precision=0, commas=False, suffix=" TFLOP/s")
     params_70b_billion_str = fmt(m_70b.parameters.m_as(param) / BILLION, precision=0, commas=False, suffix=" billion")
-    grad_70b_gb_str = fmt(grad_70b.m_as(GB), precision=0, commas=False, suffix=" GB")
+    grad_70b_gb_str = fmt_qty(grad_70b, GB, precision=0, commas=False)
 ```
 
 **Setup**\index{Setup}: A cluster of `{python} AllReduceBottleneck.num_gpus_str` H100 GPUs training a model with `{python} AllReduceBottleneck.params_1b_billion_str` parameters (`{python} AllReduceBottleneck.grad_1b_gb_str` of FP32 gradients). Each GPU computes at `{python} AllReduceBottleneck.h100_tflops_str`. The network uses NDR InfiniBand (`{python} AllReduceBottleneck.alpha_math` and `{python} AllReduceBottleneck.beta_math` per link).
@@ -1686,13 +1687,14 @@ class IbHdrReference:
 
 ```{python}
 #| echo: false
+from mlsysim.fmt import fmt_qty
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Monitoring — NDR negotiated speed checks.
 # │ Exports: IbNdrMonitoringRecap.ib_ndr_gbps_str, ib_ndr_gbs_str
 class IbNdrMonitoringRecap:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     ib_ndr_gbps_str = fmt(Systems.Fabrics.InfiniBand_NDR.bandwidth.m_as(Gbps), precision=0, commas=False, suffix=" Gb/s")
-    ib_ndr_gbs_str = fmt(Systems.Fabrics.InfiniBand_NDR.bandwidth.m_as(GB/second), precision=0, commas=False, suffix=" GB/s")
+    ib_ndr_gbs_str = fmt_qty(Systems.Fabrics.InfiniBand_NDR.bandwidth, GB/second, precision=0, commas=False)
 ```
 
 These metrics are typically polled by a centralized monitoring system (for example, Prometheus with Grafana dashboards) at 10–30 second intervals to catch **silent degradation**\index{Silent Degradation}. A common failure mode involves a QSFP56 cable negotiating at HDR speed (`{python} IbHdrReference.ib_hdr_gbps_str`) instead of NDR (`{python} IbNdrMonitoringRecap.ib_ndr_gbps_str`), or silently dropping from 4 lanes to 2 lanes due to a single bad connector pin. The link remains "up" and functional, but its bandwidth is halved. In a cluster of `{python} NetworkMonitoringClusterRecap.n_gpus_str` with over 3,000 links, a 0.1 percent point-in-time component degradation rate implies about 3 degraded links in expectation, with a high probability that at least one link is degraded. Because distributed training algorithms like Ring AllReduce are synchronous, a single degraded link throttles the entire job to the speed of that straggler, transforming a minor hardware fault into a massive waste of idle compute cycles.

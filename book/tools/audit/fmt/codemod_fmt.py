@@ -621,7 +621,7 @@ def _rewrite_unit(call: ast.Call, src: str) -> str | None:
     if "prefix" in kw_src:
         tail += f", prefix={kw_src['prefix']}"
     if extra_suffix:
-        tail += f", extra_suffix={extra_suffix!r}"
+        tail += f", per={extra_suffix[1:]!r}"
     return f"fmt_qty({quantity}, {unit}{tail})"
 
 

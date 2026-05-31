@@ -306,6 +306,8 @@ def test_unit_rewrite_quantity_m_as_to_fmt_qty():
         "fmt_qty(d_vol, GB, precision=0, commas=False)"
     assert _unit("fmt(bw.m_as(TB/second), precision=2, commas=False, suffix=' TB/s')") == \
         "fmt_qty(bw, TB/second, precision=2, commas=False)"
+    assert _unit("fmt(energy.m_as(joule), precision=2, commas=False, suffix=' J/token')") == \
+        "fmt_qty(energy, joule, precision=2, commas=False, per='token')"
 
 
 def test_unit_rewrite_singularizes_flop_rate_suffix():

@@ -475,6 +475,52 @@ Validation details:
   violations; `codemod_fmt.py queue` PASS, `by kind: {}`; `./book/binder check
   math` PASS; `audit_prose_semantics.py` PASS, 0 findings across 81 files.
 
+## 2026-05-31 — WS4 clean Quantity-backed unit batch 2
+
+Change type: byte-identical formatter relocation plus lane hardening. Ran
+`run_unit_lane.py --write --all` after the time suffix lane and migrated 99
+additional clean Quantity-backed physical-unit suffix sites to `fmt_qty(...)`.
+The lane accepts a rewrite only when every exported value and substituted prose
+line is byte-identical.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls migrated | Result |
+|---|---:|---|
+| `vol1/data_engineering/data_engineering.qmd` | 2 | byte-identical |
+| `vol1/frameworks/frameworks.qmd` | 6 | byte-identical |
+| `vol1/hw_acceleration/hw_acceleration.qmd` | 11 | byte-identical |
+| `vol1/introduction/introduction.qmd` | 9 | byte-identical |
+| `vol1/ml_ops/ml_ops.qmd` | 1 | byte-identical |
+| `vol1/model_compression/model_compression.qmd` | 6 | byte-identical |
+| `vol1/model_serving/model_serving.qmd` | 4 | byte-identical |
+| `vol1/nn_computation/nn_computation.qmd` | 4 | byte-identical |
+| `vol1/training/training.qmd` | 3 | byte-identical |
+| `vol2/backmatter/appendix_assumptions.qmd` | 2 | byte-identical |
+| `vol2/compute_infrastructure/compute_infrastructure.qmd` | 1 | byte-identical |
+| `vol2/data_storage/data_storage.qmd` | 6 | byte-identical |
+| `vol2/fault_tolerance/fault_tolerance.qmd` | 8 | byte-identical |
+| `vol2/network_fabrics/network_fabrics.qmd` | 11 | byte-identical |
+| `vol2/ops_scale/ops_scale.qmd` | 14 | byte-identical |
+| `vol2/performance_engineering/performance_engineering.qmd` | 11 | byte-identical |
+
+Validation details:
+
+- `fmt_qty` calls increased from 164 to 263.
+- `physical_unit` suffix calls dropped from 1,357 to 1,258.
+- The unit lane now emits structured `per="token"` instead of
+  `extra_suffix="/token"` for suffixes like `J/token`.
+- `audit_fmt_usage.py` confirms QMD has zero `extra_suffix=` calls.
+- Twenty Quantity-backed candidates remain queued because canonical formatter
+  output would visibly change the unit label. Main buckets: binary memory
+  capacity (`80 GB`→`80 GiB`) and missing bandwidth denominators
+  (`TB`→`TB/s`, `GB`→`GB/s`). These require correctness/prose decisions.
+- Verification: `git diff --check` PASS; py_compile PASS for formatter,
+  codemod, audit, and binder check modules; focused pytest suite PASS, 171
+  tests; `fmt_prose_contract.py` PASS, 0 violations; `codemod_fmt.py queue`
+  PASS, `by kind: {}`; `./book/binder check math` PASS;
+  `audit_prose_semantics.py` PASS, 0 findings across 81 files.
+
 ## 2026-05-31 — Remaining direct count labels
 
 Change type: byte-identical formatter relocation. Replaced 40 hard-coded direct
