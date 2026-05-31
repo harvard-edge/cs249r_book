@@ -1199,7 +1199,8 @@ Compression matters more, not less, as the hardware budget tightens. As systems 
 # │          HardwareSpectrumSetup.tiny_thresh_mw_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt_percent, fmt_int, fmt_usd, fmt, check, MarkdownStr, fmt_qty
+from mlsysim.fmt import fmt_percent, fmt_int, fmt_usd, fmt, check, MarkdownStr, fmt_qty, fmt_power, fmt_qty_int
+from mlsysim.core.units import TB, GB, MB, watt, MW, milliwatt, USD
 
 # ┌── LEGO ───────────────────────────────────────────────
 class HardwareSpectrumSetup:
@@ -1208,19 +1209,19 @@ class HardwareSpectrumSetup:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     tpu_chips_str = fmt(Systems.Pods.TPUv4_4096.chips, precision=0)          # e.g. "4,096" chips
     cloud_mem_tb_str = fmt_qty(Systems.Pods.TPUv4_4096.memory, TB, precision=0, commas=False)
-    cloud_pwr_mw_str = fmt_qty(Systems.Pods.TPUv4_4096.power, ureg.megawatt, precision=0, commas=False)
+    cloud_pwr_mw_str = fmt_power(Systems.Pods.TPUv4_4096.power, unit=MW, precision=0, commas=False)
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     edge_mem_gb_str = fmt_qty(Hardware.Workstation.DGX_Spark.memory.capacity, GB, precision=0, commas=False)
     edge_stor_tb_str = fmt_qty(Hardware.Workstation.DGX_Spark.storage.capacity, TB, precision=0, commas=False)
-    edge_pwr_w_str = fmt_qty(Hardware.Workstation.DGX_Spark.tdp, watt, precision=0, commas=False)
-    edge_price_min_str = fmt_usd(Hardware.Workstation.DGX_Spark.unit_cost.m_as("dollar"), precision=0)
-    edge_price_max_str = fmt_usd(Hardware.Workstation.DGX_Spark.unit_cost_max.m_as("dollar"), precision=0)
+    edge_pwr_w_str = fmt_power(Hardware.Workstation.DGX_Spark.tdp, precision=0, commas=False)
+    edge_price_min_str = fmt_usd(Hardware.Workstation.DGX_Spark.unit_cost.to(USD).magnitude, precision=0)
+    edge_price_max_str = fmt_usd(Hardware.Workstation.DGX_Spark.unit_cost_max.to(USD).magnitude, precision=0)
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     tiny_flash_mb_str = fmt_qty(Hardware.Tiny.ESP32_S3.memory.flash_capacity, MB, precision=0, commas=False)
-    tiny_pwr_min_str = fmt_qty(Hardware.Tiny.ESP32_S3.tdp_min, watt, precision=2, commas=False)
-    tiny_pwr_max_str = fmt_qty(Hardware.Tiny.ESP32_S3.tdp_max, watt, precision=1, commas=False)
+    tiny_pwr_min_str = fmt_power(Hardware.Tiny.ESP32_S3.tdp_min, precision=2, commas=False)
+    tiny_pwr_max_str = fmt_power(Hardware.Tiny.ESP32_S3.tdp_max, precision=1, commas=False)
     tiny_price_str = fmt_usd(10, precision=0, commas=False)
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
@@ -1291,6 +1292,7 @@ Each paradigm occupies a distinct region of the deployment spectrum, governed by
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware
 from mlsysim.fmt import fmt, check, fmt_qty_range, MarkdownStr
+from mlsysim.core.units import TOPS, GB, second
 
 # ┌── LEGO ───────────────────────────────────────────────
 class DeploymentThresholdsTable:
@@ -1304,16 +1306,14 @@ class DeploymentThresholdsTable:
     ]
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    mobile_npu_values = [phone.compute.peak_flops.m_as(TOPS) for phone in representative_phones]
-    mobile_bw_values = [phone.memory.bandwidth.m_as(GB/second) for phone in representative_phones]
-    mobile_npu_min = min(mobile_npu_values)
-    mobile_npu_max = max(mobile_npu_values)
-    mobile_bw_min = min(mobile_bw_values)
-    mobile_bw_max = max(mobile_bw_values)
+    mobile_npu_lo = min(representative_phones, key=lambda p: p.compute.peak_flops.to(TOPS).magnitude).compute.peak_flops
+    mobile_npu_hi = max(representative_phones, key=lambda p: p.compute.peak_flops.to(TOPS).magnitude).compute.peak_flops
+    mobile_bw_lo = min(representative_phones, key=lambda p: p.memory.bandwidth.to(GB / second).magnitude).memory.bandwidth
+    mobile_bw_hi = max(representative_phones, key=lambda p: p.memory.bandwidth.to(GB / second).magnitude).memory.bandwidth
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(mobile_npu_max > mobile_npu_min, "Mobile NPU range collapsed to a single value.")
-    check(mobile_bw_max > mobile_bw_min, "Mobile bandwidth range collapsed to a single value.")
+    check(mobile_npu_hi.to(TOPS).magnitude > mobile_npu_lo.to(TOPS).magnitude, "Mobile NPU range collapsed to a single value.")
+    check(mobile_bw_hi.to(GB / second).magnitude > mobile_bw_lo.to(GB / second).magnitude, "Mobile bandwidth range collapsed to a single value.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     cloud_thresh_tflops_str = MarkdownStr(">1000 TFLOP/s")
@@ -1323,15 +1323,15 @@ class DeploymentThresholdsTable:
     edge_thresh_bw_str = MarkdownStr(">270 GB/s")
     edge_latency_range_str = Platforms.Edge.latency_range_ms
     mobile_npu_range_str = fmt_qty_range(
-        mobile_npu_min * TOPS,
-        mobile_npu_max * TOPS,
+        mobile_npu_lo,
+        mobile_npu_hi,
         TOPS,
         precision=0,
         commas=False,
     )
     mobile_bw_range_str = fmt_qty_range(
-        mobile_bw_min * (GB / second),
-        mobile_bw_max * (GB / second),
+        mobile_bw_lo,
+        mobile_bw_hi,
         GB / second,
         precision=0,
         commas=False,
@@ -1378,7 +1378,8 @@ Each section follows a consistent structure: definition, key characteristics, be
 # │          GPT3TrainingScale.gpt3_cost_m_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
-from mlsysim.fmt import fmt, fmt_count, fmt_usd, check
+from mlsysim.fmt import fmt, fmt_count, fmt_usd, fmt_time, check
+from mlsysim.core.constants import PFLOPs, SEC_PER_DAY
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT3TrainingScale:
@@ -1391,7 +1392,7 @@ class GPT3TrainingScale:
     gpt3_v100_count = 10000
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    gpt3_pflop_days = (m_gpt3.training_ops / (PFLOPs * SEC_PER_DAY)).to_base_units().m_as(ureg.dimensionless)
+    gpt3_pflop_days = (m_gpt3.training_ops / (PFLOPs * SEC_PER_DAY)).to_base_units().magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(gpt3_pflop_days >= 3000, f"GPT-3 training should be >=3000 PFLOP-days, got {gpt3_pflop_days:.0f}")
@@ -1520,7 +1521,8 @@ above=1of $(B2.north east)!0.5!(B3.north west)$](B0){Cloud ML};
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim.physics import calc_network_latency_ms, SPEED_OF_LIGHT_FIBER_KM_S
-from mlsysim.fmt import fmt_percent, fmt, check, fmt_qty
+from mlsysim.fmt import fmt, check, fmt_qty, fmt_time
+from mlsysim.core.units import kilometer, millisecond
 
 # ┌── LEGO ───────────────────────────────────────────────
 class DistancePenalty:
@@ -1528,7 +1530,7 @@ class DistancePenalty:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     distance_km_value = 1500                                 # km to cloud datacenter
-    distance_km = distance_km_value * ureg.km
+    distance_km = distance_km_value * kilometer
     safety_budget_ms_value = 10                              # ms safety requirement
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -1536,11 +1538,11 @@ class DistancePenalty:
     deficit_ms_value = safety_budget_ms_value - round_trip_ms_value
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    sol_kms_str = fmt_qty(SPEED_OF_LIGHT_FIBER_KM_S, ureg.kilometer/ureg.second, precision=0, commas=True)
-    rtt_formatted_str = fmt_time(round_trip_ms_value, 'millisecond', precision=0, commas=False)
-    deficit_str = fmt_time(deficit_ms_value, 'millisecond', precision=0, commas=False, allow_negative=True)
-    distance_km_str = fmt_qty(distance_km, ureg.km, precision=0, commas=True)
-    safety_budget_str = fmt_time(safety_budget_ms_value, 'millisecond', precision=0, commas=False)
+    sol_kms_str = fmt_qty(SPEED_OF_LIGHT_FIBER_KM_S, kilometer / second, precision=0, commas=True)
+    rtt_formatted_str = fmt_time(round_trip_ms_value, millisecond, precision=0, commas=False)
+    deficit_str = fmt_time(deficit_ms_value, millisecond, precision=0, commas=False, allow_negative=True)
+    distance_km_str = fmt_qty(distance_km, kilometer, precision=0, commas=True)
+    safety_budget_str = fmt_time(safety_budget_ms_value, millisecond, precision=0, commas=False)
 ```
 
 ::: {#nbk-ml-systems-distance-penalty .callout-notebook title="The distance penalty"}
@@ -1623,7 +1625,8 @@ Cost management introduces operational complexity requiring TCO[^fn-tco-deployme
 # │          CloudEdgeTCO.breakeven_utilization_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware
-from mlsysim.fmt import fmt_percent, fmt_int, fmt_usd, fmt, check, MarkdownStr, fmt_count, fmt_qty
+from mlsysim.fmt import fmt_percent, fmt_int, fmt_usd, fmt, check, MarkdownStr, fmt_count, fmt_qty, fmt_power, fmt_time
+from mlsysim.core.units import USD, GB, kWh, watt, hour, kilowatt, KB
 
 # ┌── LEGO ───────────────────────────────────────────────
 class CloudEdgeTCO:
@@ -1641,7 +1644,7 @@ class CloudEdgeTCO:
     # Cloud (AWS 2024)
     gpu_price_per_hr = 0.75 # A10G
     gpu_instances = 4
-    egress_per_gb = Infrastructure.Pricing.Cloud.EgressPerGB.rate.m_as("dollar / GB")
+    egress_per_gb = Infrastructure.Pricing.Cloud.EgressPerGB.rate.to(USD / GB).magnitude
     lb_base_per_hr = 0.025
     lb_lcu_per_hr = 0.008
     avg_lcu = 50
@@ -1650,8 +1653,8 @@ class CloudEdgeTCO:
     server = Hardware.Edge.GenericServer
     server_cost = 15000
     server_life_years = 3
-    power_watts = server.tdp.m_as(watt)
-    electricity_per_kwh = Infrastructure.Pricing.Cloud.ElectricityPerKwh.rate.m_as("dollar / kilowatt_hour")
+    server_tdp = server.tdp
+    electricity_rate = Infrastructure.Pricing.Cloud.ElectricityPerKwh.rate
     cooling_overhead = 0.30
     fiber_annual = 1200
     devops_fte = 0.1
@@ -1660,17 +1663,17 @@ class CloudEdgeTCO:
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Cloud
     c_gpu = gpu_instances * HOURS_PER_YEAR * gpu_price_per_hr
-    egress_gb_per_day = (requests_per_day * response_kb * KB).m_as(GB)
+    egress_volume_per_day = requests_per_day * response_kb * KB
+    egress_gb_per_day = egress_volume_per_day.to(GB).magnitude
     c_egress = egress_gb_per_day * DAYS_PER_YEAR * egress_per_gb
     c_lb = lb_base_per_hr * HOURS_PER_YEAR + lb_lcu_per_hr * avg_lcu * HOURS_PER_YEAR
     c_logs = 2000
     c_total = c_gpu + c_egress + c_lb + c_logs
 
     # Step 2: Edge
-    from mlsysim.physics import calc_fleet_tco
     e_capex = (server_cost / server_life_years)
-    # Power = (W * hours_per_year) / 1000 * electricity_per_kwh
-    e_power = (power_watts * HOURS_PER_YEAR / 1000.0) * electricity_per_kwh
+    annual_energy = server_tdp * HOURS_PER_YEAR * hour
+    e_power = annual_energy.to(kWh).magnitude * electricity_rate.to(USD / kWh).magnitude
     e_cool = e_power * cooling_overhead
     e_net = fiber_annual
     e_labor = devops_fte * devops_salary
@@ -1692,7 +1695,7 @@ class CloudEdgeTCO:
     response_str = fmt_qty(response_kb * KB, KB, precision=0, commas=False)
     gpu_instances_str = fmt(gpu_instances, precision=0, commas=False)
     gpu_price_str = fmt_usd(gpu_price_per_hr, precision=2, commas=False, per="hr")
-    egress_gb_str = fmt_qty(egress_gb_per_day * GB, GB, precision=0, commas=False, per="day")
+    egress_gb_str = fmt_qty(egress_volume_per_day, GB, precision=0, commas=False, per="day")
     egress_price_str = fmt_usd(egress_per_gb, precision=2, commas=False, per="GB")
     hours_per_year_str = fmt(HOURS_PER_YEAR, precision=0)
     days_per_year_str = fmt(DAYS_PER_YEAR, precision=0, commas=False)
@@ -1718,8 +1721,8 @@ class CloudEdgeTCO:
     # Additional Outputs for Prose
     server_cost_str = fmt_usd(server_cost, precision=0)
     server_life_years_str = fmt_time(server_life_years, "year", precision=0, commas=False, style="word")
-    power_str = fmt_qty(server.tdp, watt, precision=0, commas=False)
-    electricity_str = fmt_usd(electricity_per_kwh, precision=2, commas=False, per="kWh")
+    power_str = fmt_power(server_tdp, precision=0, commas=False)
+    electricity_str = fmt_usd(electricity_rate.to(USD / kWh).magnitude, precision=2, commas=False, per="kWh")
     devops_fte_str = fmt(devops_fte, precision=1, commas=False)
     devops_salary_str = fmt_usd(devops_salary, precision=0)
 ```
@@ -2043,6 +2046,7 @@ The benefits of lower bandwidth usage and reduced latency become stark when we e
 from mlsysim import Systems
 from mlsysim.physics import calc_monthly_egress_cost
 from mlsysim.fmt import fmt_int, fmt_usd, fmt, check, fmt_qty
+from mlsysim.core.units import USD, GB, MB, KB, second
 
 # ┌── LEGO ───────────────────────────────────────────────
 class BandwidthBottleneck:
@@ -2066,12 +2070,12 @@ class BandwidthBottleneck:
     total_bytes_per_sec = (num_cameras * bytes_per_sec_single).to("byte/second")
     network_cap_bytes = network.bandwidth.to("byte/second")
 
-    shortfall_ratio = (total_bytes_per_sec/network_cap_bytes).m_as('')
+    shortfall_ratio = (total_bytes_per_sec / network_cap_bytes).to("").magnitude
 
     metadata_events_per_sec = 20
     metadata_kb_per_event = 1 * KB
     metadata_bytes_per_sec = (metadata_events_per_sec * metadata_kb_per_event / second).to("byte/second")
-    metadata_reduction = (total_bytes_per_sec / metadata_bytes_per_sec).m_as("")
+    metadata_reduction = (total_bytes_per_sec / metadata_bytes_per_sec).to("").magnitude
 
     # Step 1: Cost (using helper formula)
     monthly_cost = calc_monthly_egress_cost(total_bytes_per_sec, Infrastructure.Pricing.Cloud.EgressPerGB.rate)
@@ -2081,18 +2085,18 @@ class BandwidthBottleneck:
     check(shortfall_ratio > 10, f"Narrative Violation: Bandwidth shortage dropped to {shortfall_ratio:.1f}x (text implies ~15x)")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    cam_rate_mbs_str = fmt_qty(bytes_per_sec_single, MB/second, precision=1, commas=False)
-    total_rate_gbs_str = fmt_qty(total_bytes_per_sec, GB/second, precision=1, commas=False)
+    cam_rate_mbs_str = fmt_qty(bytes_per_sec_single, MB / second, precision=1, commas=False)
+    total_rate_gbs_str = fmt_qty(total_bytes_per_sec, GB / second, precision=1, commas=False)
     monthly_cost_m_str = fmt_usd(monthly_cost, precision=1, commas=False, scale="M", per="month")
-    net_cap_gbs_str = fmt_qty(network.bandwidth, GB/second, precision=2, commas=False)
+    net_cap_gbs_str = fmt_qty(network.bandwidth, GB / second, precision=2, commas=False)
     bw_short_x_str = fmt(shortfall_ratio, precision=1, commas=False)
     metadata_events_per_sec_str = fmt(metadata_events_per_sec, precision=0, commas=False)
     metadata_kb_per_event_str = fmt_qty(metadata_kb_per_event, KB, precision=0, commas=False)
     metadata_reduction_x_str = fmt(metadata_reduction, precision=0, commas=True)
 
     num_cameras_str = fmt(num_cameras, precision=0, commas=False)
-    bb_fps_str = fmt_int(fps.m_as('Hz'), commas=False)
-    egress_cost_str = fmt_usd(Infrastructure.Pricing.Cloud.EgressPerGB.rate.m_as("dollar / GB"), precision=2, commas=False, per="GB")
+    bb_fps_str = fmt_int(fps.to("Hz").magnitude, commas=False)
+    egress_cost_str = fmt_usd(Infrastructure.Pricing.Cloud.EgressPerGB.rate.to(USD / GB).magnitude, precision=2, commas=False, per="GB")
     video_width_str = fmt(width, precision=0, commas=False)
     video_height_str = fmt(height, precision=0, commas=False)
     bytes_per_pixel_str = fmt(bpp, precision=0, commas=False)
@@ -2142,14 +2146,14 @@ class EdgeEnergyTransmissionRecap:
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     cloud_energy_total = (data_size * tx_energy_per_mb).to(ureg.millijoule)
     local_energy_total = local_energy_op
-    ratio = cloud_energy_total/local_energy_total
+    ratio = (cloud_energy_total / local_energy_total).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(ratio.m_as("") >= 500,
-          f"Transmission should dominate local compute; got {ratio.m_as(''):.1f}x.")
+    check(ratio >= 500,
+          f"Transmission should dominate local compute; got {ratio:.1f}x.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    ratio_str = fmt(ratio.m_as(""), precision=0, commas=True)
+    ratio_str = fmt(ratio, precision=0, commas=True)
 ```
 
 The preceding bandwidth calculation reveals why edge processing is mandatory for high-volume sensor deployments. For battery-powered edge devices (wireless cameras, drones, wearables), the constraint is even more severe: as "The Energy of Transmission" (@sec-ml-systems-bottleneck-principle-3514) established, radio transmission costs `{python} EdgeEnergyTransmissionRecap.ratio_str`$\times$ more energy than local inference, making cloud offloading physically impossible for battery-powered devices regardless of available bandwidth. @Fig-energy-per-inference quantifies this asymmetry across deployment tiers.
@@ -2285,7 +2289,8 @@ The locality crossover is easiest to see by comparing a single high-rate sensor 
 # │          DataLocalityInvariant.remote_ms_str,
 # │          DataLocalityInvariant.net_bw_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, MarkdownStr, fmt_qty
+from mlsysim.fmt import fmt, check, MarkdownStr, fmt_qty, fmt_time
+from mlsysim.core.units import MB, byte, bit, megabit, second, millisecond
 
 # ┌── LEGO ───────────────────────────────────────────────
 class DataLocalityInvariant:
@@ -2304,8 +2309,9 @@ class DataLocalityInvariant:
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     frame_size = width * height * bpp * byte
-    frame_mb = frame_size.m_as(MB)
-    tx_time_ms = (frame_mb * 8 / net_bw_mbps) * THOUSAND
+    net_bw = net_bw_mbps * megabit / second
+    frame_bits = frame_size * (8 * bit / byte)
+    tx_time_ms = (frame_bits / net_bw).to(millisecond).magnitude
     remote_total_ms = cloud_lat_ms + remote_compute_ms
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -2313,9 +2319,9 @@ class DataLocalityInvariant:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     frame_mb_str = fmt_qty(frame_size, MB, precision=1)
-    tx_time_ms_str = fmt_time(tx_time_ms, 'millisecond', precision=1, commas=True)
-    remote_ms_str = fmt_time(remote_total_ms, 'millisecond', precision=0)
-    net_bw_str = fmt_qty(net_bw_mbps * ureg.megabit / second, ureg.megabit / second, precision=0, commas=False, unit_label="Mb/s")
+    tx_time_ms_str = fmt_time(tx_time_ms, millisecond, precision=1, commas=True)
+    remote_ms_str = fmt_time(remote_total_ms, millisecond, precision=0)
+    net_bw_str = fmt_qty(net_bw, megabit / second, precision=0, commas=False, unit_label="Mb/s")
     frame_label_str = MarkdownStr("4K")
 ```
 
@@ -2364,7 +2370,8 @@ These benefits carry corresponding limitations that compound as deployments scal
 # │          .req_tops_equiv_str, .headroom_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
-from mlsysim.fmt import fmt
+from mlsysim.fmt import fmt, fmt_qty
+from mlsysim.core.units import GFLOPs, TOPS, second
 
 # ┌── LEGO ───────────────────────────────────────────────
 class EdgeSizingThroughput:
@@ -2380,8 +2387,9 @@ class EdgeSizingThroughput:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     inf_per_sec = cameras_per_store * fps
     yolo_flops = model.inference_flops if model.inference_flops else model.training_ops
-    sustained_gflops = (inf_per_sec * yolo_flops).m_as(GFLOPs)
-    required_tops_equiv = (sustained_gflops * headroom * GFLOPs / second).m_as(TOPS)
+    sustained_flop_rate = inf_per_sec * yolo_flops / second
+    sustained_gflops = sustained_flop_rate.to(GFLOPs / second).magnitude
+    required_tops_equiv = (sustained_flop_rate * headroom).to(TOPS).magnitude
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     stores_str = fmt(stores, precision=0, commas=False)
@@ -2389,7 +2397,7 @@ class EdgeSizingThroughput:
     fps_str = fmt(fps, precision=0, commas=False)
     headroom_str = fmt(headroom, precision=0, commas=False)
     inf_per_sec_str = fmt(inf_per_sec, precision=0, commas=False)
-    yolo_gflops_str = fmt(yolo_flops.m_as(GFLOPs), precision=1)
+    yolo_gflops_str = fmt_qty(yolo_flops, GFLOPs, precision=1)
     sustained_gf_str = fmt(sustained_gflops, precision=0)
     req_tops_equiv_str = fmt(required_tops_equiv, precision=2, commas=False)
 
@@ -2582,7 +2590,7 @@ Mobile ML addresses this challenge by integrating machine learning directly into
 # │          MobileEfficiencyRecap.mobile_tdp_range_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
-from mlsysim.fmt import fmt, check, fmt_qty_range, MarkdownStr
+from mlsysim.fmt import fmt, check, fmt_multiple, MarkdownStr
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MobileEfficiencyRecap:
@@ -2593,7 +2601,9 @@ class MobileEfficiencyRecap:
     mobile_tdp_range = Platforms.Mobile.tdp_range_w
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    mobilenet_flops_reduction = (Models.Vision.ResNet50.inference_flops / m_mobilenet.inference_flops).m_as("")
+    mobilenet_flops_reduction = (
+        Models.Vision.ResNet50.inference_flops / m_mobilenet.inference_flops
+    ).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(mobilenet_flops_reduction > 10, "MobileNet reduction should be >10x vs ResNet.")
