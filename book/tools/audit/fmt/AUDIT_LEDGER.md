@@ -170,6 +170,37 @@ Validation details:
   `./book/binder check code --scope lego-dead-code` PASS;
   `audit_prose_semantics.py` PASS, 0 findings across 81 files.
 
+## 2026-05-31 — Direct Quantity physical-unit lane
+
+Change type: byte-identical formatter relocation plus formatter API hardening.
+Added `fmt_qty_int(...)` for the narrow case where a Pint Quantity should remain
+unit-checked but the displayed magnitude is intentionally rounded to an integer.
+Kept `fmt_qty(..., precision=0)` strict so it still rejects hidden fractional
+unit conversions.
+
+Touched chapters and equivalence:
+
+| Chapter file | Values/prose checked | Result |
+|---|---:|---|
+| `vol1/introduction/introduction.qmd` | 91 values / 45 prose lines | identical |
+| `vol1/model_compression/model_compression.qmd` | 162 / 74 | identical |
+| `vol1/data_engineering/data_engineering.qmd` | 203 / 99 | identical |
+| `vol1/ml_systems/ml_systems.qmd` | 296 / 143 | identical |
+| `vol1/model_serving/model_serving.qmd` | 365 / 172 | identical |
+| `vol2/backmatter/appendix_fleet.qmd` | 173 / 99 | identical |
+| `vol2/data_storage/data_storage.qmd` | 180 / 99 | identical |
+| `vol2/performance_engineering/performance_engineering.qmd` | 109 / 58 | identical |
+
+Validation details:
+
+- `audit_fmt_usage.py` physical-unit suffix count dropped from 1,071 to 1,042.
+- `fmt_qty_int` call count is 20; `fmt_qty` call count is 357.
+- Verification: `git diff --check` PASS; py_compile PASS; focused pytest suite
+  PASS, 190 tests; `fmt_prose_contract.py` PASS, 0 violations;
+  `codemod_fmt.py queue` PASS, `by kind: {}`; `./book/binder check math` PASS;
+  `./book/binder check code --scope lego-dead-code` PASS;
+  `audit_prose_semantics.py` PASS, 0 findings across 81 files.
+
 ## 2026-05-31 — Currency denominator relocation
 
 Change type: byte-identical formatter relocation. Replaced 91

@@ -46,7 +46,7 @@ PLAIN_ASSIGN = re.compile(r"^\s*([A-Za-z_]\w*)\s*=\s*([^=].*)$")
 
 # Pattern: matches calls to canonical formatter helpers on the RHS.
 CANONICAL_STR_CALL = re.compile(
-    r"\b(fmt|fmt_qty|fmt_int|fmt_usd|fmt_percent|fmt_pp|fmt_multiple|fmt_count"
+    r"\b(fmt|fmt_qty|fmt_qty_int|fmt_int|fmt_usd|fmt_percent|fmt_pp|fmt_multiple|fmt_count"
     r"|fmt_ratio|fmt_range|fmt_qty_range|fmt_time_range|fmt_count_range"
     r"|fmt_usd_range|fmt_time|fmt_rate|fmt_val|fmt_unit|fmt_sci"
     r"|MarkdownStr)\s*\("
@@ -113,7 +113,7 @@ IMPLICIT_INT_CAST_FMT = re.compile(
 # Pattern: fmt-family helper names used as calls in a cell body. Any of these
 # requires a matching `from mlsysim.fmt import ...` line in the file.
 FMT_FAMILY_USE = re.compile(
-    r"\b(fmt|fmt_qty|fmt_int|fmt_usd|fmt_math|fmt_percent|fmt_pp|fmt_multiple"
+    r"\b(fmt|fmt_qty|fmt_qty_int|fmt_int|fmt_usd|fmt_math|fmt_percent|fmt_pp|fmt_multiple"
     r"|fmt_count|fmt_ratio|fmt_range|fmt_qty_range|fmt_time_range"
     r"|fmt_count_range|fmt_usd_range|fmt_time|fmt_rate|fmt_val|fmt_unit"
     r"|fmt_sci|fmt_frac|sci_latex|MarkdownStr|check)\s*\("
@@ -129,7 +129,7 @@ MLSYSIM_STAR_IMPORT = re.compile(r"\bfrom\s+mlsysim\s+import\s+\*")
 
 # Names exported by `from mlsysim import *` that belong to the fmt family.
 MLSYSIM_STAR_FMT_NAMES = frozenset({
-    "fmt", "fmt_qty", "fmt_int", "fmt_usd", "fmt_percent", "fmt_pp", "fmt_multiple",
+    "fmt", "fmt_qty", "fmt_qty_int", "fmt_int", "fmt_usd", "fmt_percent", "fmt_pp", "fmt_multiple",
     "fmt_count", "fmt_ratio", "fmt_range", "fmt_qty_range", "fmt_time_range",
     "fmt_count_range", "fmt_usd_range", "fmt_time", "fmt_rate", "fmt_val",
     "fmt_unit", "fmt_sci", "fmt_frac", "fmt_math", "MarkdownStr", "check",
@@ -235,7 +235,7 @@ def _audit_python_cells(qmd_path: Path) -> list[Violation]:
                 message=(
                     f"`{varname}` (suffix `{suffix}`) is not built via the "
                     f"canonical helper family (fmt/fmt_int/fmt_usd/fmt_percent/"
-                    f"fmt_pp/fmt_multiple/fmt_count/fmt_ratio/fmt_range/fmt_qty/"
+                    f"fmt_pp/fmt_multiple/fmt_count/fmt_ratio/fmt_range/fmt_qty/fmt_qty_int/"
                     f"fmt_*_range/fmt_time/fmt_rate/fmt_math/fmt_frac/"
                     f"MarkdownStr). "
                     f"Use the appropriate helper from mlsysim.fmt so the value "

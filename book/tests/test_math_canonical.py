@@ -67,3 +67,24 @@ class GoodFormatting:
     assert not [
         issue for issue in issues if issue.code == "noncanonical_str_assign"
     ]
+
+
+def test_math_canonical_allows_rounded_quantity_helper(tmp_path):
+    chapter = tmp_path / "chapter.qmd"
+    chapter.write_text(
+        """
+```{python}
+from mlsysim.fmt import fmt_qty_int
+
+class GoodFormatting:
+    memory_str = fmt_qty_int(memory, GB, commas=False)
+```
+""",
+        encoding="utf-8",
+    )
+
+    issues = audit([chapter])
+
+    assert not [
+        issue for issue in issues if issue.code == "noncanonical_str_assign"
+    ]

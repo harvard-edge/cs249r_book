@@ -1130,6 +1130,20 @@ def _compact_unit_suffix(display_unit) -> str:
     return f" {display_unit}"
 
 
+def _quantity_suffix(display_unit, *, unit_label=None, per=None, extra_suffix=""):
+    """Build the checked unit suffix shared by quantity formatters."""
+    if extra_suffix and per is not None:
+        raise ValueError("Use extra_suffix= or structured per=, not both.")
+    unit_suffix = _compact_unit_suffix(display_unit)
+    if unit_label is not None:
+        unit_suffix = f" {_clean_text_atom(unit_label, what='fmt_qty unit_label')}"
+    return (
+        unit_suffix
+        + _denominator_suffix(per, what="per")
+        + extra_suffix
+    )
+
+
 def fmt_qty(
     quantity,
     display_unit,
@@ -1155,22 +1169,60 @@ def fmt_qty(
             "call site, e.g. fmt_qty(bw, GB/second), not "
             "fmt_qty(bw.m_as(GB/second), GB/second)."
         )
-    if extra_suffix and per is not None:
-        raise ValueError("Use extra_suffix= or structured per=, not both.")
     display_unit = _coerce_unit(display_unit)
     q = quantity.to(display_unit)
     val = q.magnitude
-    unit_suffix = _compact_unit_suffix(display_unit)
-    if unit_label is not None:
-        unit_suffix = f" {_clean_text_atom(unit_label, what='fmt_qty unit_label')}"
-    suffix = (
-        unit_suffix
-        + _denominator_suffix(per, what="per")
-        + extra_suffix
+    suffix = _quantity_suffix(
+        display_unit,
+        unit_label=unit_label,
+        per=per,
+        extra_suffix=extra_suffix,
     )
     return fmt(
         val,
         precision=precision,
+        commas=commas,
+        prefix=prefix,
+        suffix=suffix,
+        approx=approx,
+        lower_bound=lower_bound,
+    )
+
+
+def fmt_qty_int(
+    quantity,
+    display_unit,
+    *,
+    commas=True,
+    prefix="",
+    extra_suffix="",
+    unit_label=None,
+    per=None,
+    approx=False,
+    lower_bound=False,
+):
+    """Format a Pint Quantity as a rounded integer with a checked unit suffix.
+
+    Use this only when rounded integer display is the editorial intent. For
+    exact integer quantities, prefer ``fmt_qty(..., precision=0)`` because it
+    rejects fractional values instead of rounding them.
+    """
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError(
+            "fmt_qty_int() requires a Pint Quantity. Keep units attached at "
+            "the call site, e.g. fmt_qty_int(memory, GB), not "
+            "fmt_qty_int(memory.m_as(GB), GB)."
+        )
+    display_unit = _coerce_unit(display_unit)
+    q = quantity.to(display_unit)
+    suffix = _quantity_suffix(
+        display_unit,
+        unit_label=unit_label,
+        per=per,
+        extra_suffix=extra_suffix,
+    )
+    return fmt_int(
+        q.magnitude,
         commas=commas,
         prefix=prefix,
         suffix=suffix,

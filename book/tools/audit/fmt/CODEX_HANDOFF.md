@@ -564,7 +564,21 @@ PASS (182 tests); `fmt_prose_contract.py` 0; `codemod_fmt.py queue`
 `by kind: {}`; `./book/binder check math` PASS; `./book/binder check code
 --scope lego-dead-code` PASS; `audit_prose_semantics.py` CLEAN across 81 files.
 
-### B. WS4 — unit-suffix lane (remaining 1,071 physical-unit suffixes: `GB`/`MB`/`W`/`GB/s`/…)  ← the big one
+**A41 — Direct Quantity physical-unit lane: DONE.**
+Added `fmt_qty_int(...)` for checked Pint Quantities that intentionally render
+as rounded integers, without weakening `fmt_qty(..., precision=0)`. Migrated 29
+direct Quantity-backed physical-unit suffix sites byte-identically across
+`introduction`, `model_compression`, `data_engineering`, `ml_systems`,
+`model_serving`, `appendix_fleet`, `data_storage`, and
+`performance_engineering`. `audit_fmt_usage.py` now reports `fmt_qty_int` at 20
+calls, `fmt_qty` at 357, and physical-unit suffixes down to 1,042.
+Verification: `assess_equiv.py` values/prose identical for all touched
+chapters; `git diff --check` PASS; py_compile PASS; focused pytest suite PASS
+(190 tests); `fmt_prose_contract.py` 0; `codemod_fmt.py queue` `by kind: {}`;
+`./book/binder check math` PASS; `./book/binder check code --scope
+lego-dead-code` PASS; `audit_prose_semantics.py` CLEAN across 81 files.
+
+### B. WS4 — unit-suffix lane (remaining 1,042 physical-unit suffixes: `GB`/`MB`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.
 `weights_gb`), not Pint Quantities, and `fmt_qty` requires a Pint Quantity to
@@ -575,10 +589,11 @@ generate the unit. So this is per-site, judgment-bearing source work. Method:
    python3 book/tools/audit/fmt/audit_fmt_usage.py --root book/quarto/contents --json > /tmp/fmt_usage.json
    ```
    Group by suffix unit and by whether the argument is already a Pint Quantity.
-2. **Quantity-backed sites → `fmt_qty`** (the clean, preferred case):
+2. **Quantity-backed sites → `fmt_qty` / `fmt_qty_int`** (the clean, preferred case):
    `bw_str = fmt(bw.m_as(GB/second), suffix=" GB/s")` → `bw_str = fmt_qty(bw, GB/second)`.
    `fmt_qty` generates the suffix from the unit (always canonical), dimension-checks,
-   and refuses currency. Then DROP any duplicate unit the prose was adding.
+   and refuses currency. Use `fmt_qty_int(q, UNIT)` only when rounded integer
+   display is intentional. Then DROP any duplicate unit the prose was adding.
 3. **Plain-float sites** (`fmt(weights_gb, suffix=" GB")` with no Quantity in scope):
    prefer refactoring the source to carry a Quantity and use `fmt_qty`; if that's a
    large refactor, it is acceptable to LEAVE these for now — they are honest unit

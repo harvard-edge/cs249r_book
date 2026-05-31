@@ -23,7 +23,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 FMT_FAMILY = {
-    "fmt", "fmt_int", "fmt_usd", "fmt_percent", "fmt_qty", "fmt_val",
+    "fmt", "fmt_int", "fmt_usd", "fmt_percent", "fmt_qty", "fmt_qty_int", "fmt_val",
     "fmt_unit", "fmt_sci", "fmt_math", "fmt_frac", "sci_latex",
     "fmt_pp", "fmt_multiple", "fmt_count", "fmt_ratio", "fmt_range",
     "fmt_time", "fmt_rate", "fmt_qty_range", "fmt_time_range",
@@ -32,7 +32,7 @@ FMT_FAMILY = {
 NUMERIC_FMT = {
     "fmt", "fmt_int", "fmt_usd", "fmt_percent", "fmt_pp", "fmt_multiple",
     "fmt_count", "fmt_ratio", "fmt_range", "fmt_sci", "fmt_val", "fmt_unit",
-    "fmt_time", "fmt_rate", "fmt_qty_range", "fmt_time_range",
+    "fmt_time", "fmt_rate", "fmt_qty_int", "fmt_qty_range", "fmt_time_range",
     "fmt_count_range", "fmt_usd_range",
 }
 

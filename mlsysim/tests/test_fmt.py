@@ -16,6 +16,7 @@ from mlsysim.fmt import (
     fmt_percent,
     fmt_pp,
     fmt_qty,
+    fmt_qty_int,
     fmt_qty_range,
     fmt_range,
     fmt_rate,
@@ -159,6 +160,29 @@ class TestFmtQty:
                 extra_suffix="/token",
                 per="inference",
             )
+
+
+class TestFmtQtyInt:
+    def test_rounds_quantity_after_unit_conversion(self):
+        assert (
+            fmt_qty_int(100 * ureg.GiB, ureg.GB, commas=False)
+            == "107 GB"
+        )
+
+    def test_supports_structured_quantity_suffixes(self):
+        out = fmt_qty_int(
+            1250 * ureg.MB / ureg.second,
+            ureg.GB / ureg.second,
+            commas=False,
+        )
+        assert out == "1 GB/s"
+
+    def test_plain_number_is_refused(self):
+        with pytest.raises(TypeError, match="requires a Pint Quantity"):
+            fmt_qty_int(5, ureg.GB, commas=False)
+
+    def test_returns_markdown_str(self):
+        assert isinstance(fmt_qty_int(5 * ureg.GB, ureg.GB), MarkdownStr)
 
 
 class TestFmtUsd:

@@ -122,8 +122,10 @@ substituted prose byte-identical. The network `Gb/s` lane then migrated all 20
 `suffix=" Gb/s"` sites to `fmt_qty(..., Gbps, unit_label="Gb/s")`
 byte-identically across seven chapters. The GiB-backed memory-capacity lane then
 migrated the remaining obvious `m_as(GiB)` + `suffix=" GB"` specs to
-`fmt_qty(..., GiB, unit_label="GB")` across seven chapters. Remaining suffix
-bucket is only 1,071 `physical_unit` suffixes. Remaining: the rest of WS4/WS3
+`fmt_qty(..., GiB, unit_label="GB")` across seven chapters. The direct Quantity
+physical-unit lane then added `fmt_qty_int(...)` for intentionally rounded
+Quantity displays and migrated 29 more sites byte-identically. Remaining suffix
+bucket is only 1,042 `physical_unit` suffixes. Remaining: the rest of WS4/WS3
 and later PDF/lock
 phases. Nothing is half-done or broken.
 
@@ -538,6 +540,11 @@ drop. The adjacent prose/table text was updated to `1 percentage-point threshold
 and `(drop of 6.8 percentage points)`. No user-decision items remain open.
 
 ## Session commit log (newest first)
+- Codex direct Quantity physical-unit lane: added `fmt_qty_int(...)` for
+  checked Pint Quantities that intentionally render as rounded integers and
+  migrated 29 direct Quantity-backed physical-unit suffix sites
+  byte-identically across 8 chapters. `fmt_qty_int` now has 20 call sites;
+  physical-unit suffixes dropped 1,071 → 1,042.
 - Codex GiB-backed memory-capacity lane: migrated remaining obvious
   `m_as(GiB)` + `suffix=" GB"` memory specs to
   `fmt_qty(..., GiB, unit_label="GB")`, byte-identical across 7 chapters.

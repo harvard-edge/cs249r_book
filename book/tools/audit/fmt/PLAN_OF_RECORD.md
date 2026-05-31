@@ -21,7 +21,7 @@ Use the smallest set of helpers that reflects real value kinds:
 | Value kind | Formatter | Owns |
 |---|---|---|
 | Plain scalar | `fmt` / `fmt_int` | finite and precision checks |
-| Physical quantity | `fmt_qty` | Pint conversion, unit suffix, currency refusal |
+| Physical quantity | `fmt_qty` / `fmt_qty_int` | Pint conversion, unit suffix, currency refusal, explicit rounded-integer display |
 | Duration | `fmt_time` | time-unit validation, non-negative duration, symbol/word style |
 | Count | `fmt_count` | non-negative tally, optional scale, singular/plural label |
 | Non-physical service rate | `fmt_rate` | allowlisted rate labels like `QPS`, `tokens/s`, `FPS` |
@@ -40,6 +40,8 @@ The migration target is not "better suffixes." It is structured formatter
 arguments:
 
 - `fmt_qty(bw, GB / second)`, not `fmt(bw.m_as(GB / second), suffix=" GB/s")`.
+- `fmt_qty_int(q, GB)` only when rounded integer display is intentional; use
+  `fmt_qty(q, GB, precision=0)` for values that should already be integer-like.
 - `fmt_time(t, "second", style="symbol")`, not `fmt(t, suffix=" s")`.
 - `fmt_count(n, label="GPU")`, not `fmt(n, suffix=" GPUs")`.
 - `fmt_rate(qps, "QPS")`, not `fmt(qps, suffix=" QPS")`.
