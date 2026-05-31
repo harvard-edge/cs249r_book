@@ -227,6 +227,40 @@ Validation details:
   `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
   0 findings across 81 files.
 
+## 2026-05-31 — Exact FLOP-count suffix relocation
+
+Change type: byte-identical formatter relocation. Replaced 12 exact FLOP-count
+suffixes (`GFLOPs`, `MFLOPs`, `KFLOPs`, `PFLOPs`) with `fmt_qty(...)` and the
+existing Pint FLOP units. No `fmt_ops` wrapper was added; Pint already provides
+the unit check for these exact-unit FLOP counts.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol1/conclusion/conclusion.qmd` | 1 | 25 | 15 | identical values + prose |
+| `vol1/frameworks/frameworks.qmd` | 6 | 131 | 70 | identical values + prose |
+| `vol1/ml_systems/ml_systems.qmd` | 3 | 296 | 143 | identical values + prose |
+| `vol1/ml_workflow/ml_workflow.qmd` | 1 | 77 | 36 | identical values + prose |
+| `vol1/training/training.qmd` | 1 | 453 | 214 | identical values + prose |
+
+Validation details:
+
+- Before/after snapshots were generated with `assess_equiv.py baseline --ref HEAD`
+  and `assess_equiv.py snapshot` under `/tmp/fmt_op_count_*`.
+- `assess_equiv.py diff` reported `IDENTICAL values` and `IDENTICAL prose` for
+  every touched chapter.
+- `audit_fmt_usage.py` reports no remaining `op_count` suffix bucket and
+  `fmt_qty` calls increased to 275.
+- Word-scale FLOP phrases such as `billion FLOPs` and `trillion FLOPs` remain in
+  `compound_scale`; migrating those to `GFLOPs`/`TFLOPs` would be a visible prose
+  change and needs a separate decision.
+- Verification: `python3 -m py_compile mlsysim/mlsysim/fmt.py book/tools/audit/fmt/audit_fmt_usage.py` PASS;
+  `git diff --check` PASS; `./book/binder check math` PASS; focused pytest
+  suite PASS, 176 tests; `fmt_prose_contract.py` PASS, 0 violations;
+  `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
+  0 findings across 81 files.
+
 ## 2026-05-31 — Remaining suffix bucket split and epoch label
 
 Change type: audit improvement plus byte-identical formatter relocation.

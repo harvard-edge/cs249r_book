@@ -439,6 +439,22 @@ decisions rather than simple plural count labels. Verification: `git diff
 `./book/binder check math` PASS; `audit_prose_semantics.py` CLEAN across 81
 files.
 
+**A33 — Exact FLOP-count suffix lane: DONE.**
+Migrated 12 exact FLOP-count suffixes (`GFLOPs`, `MFLOPs`, `KFLOPs`, `PFLOPs`)
+to `fmt_qty(...)`, using the existing Pint FLOP units rather than adding a new
+`fmt_ops` wrapper. Values and substituted prose were byte-identical across
+`conclusion`, `frameworks`, `ml_systems`, `ml_workflow`, and `training`.
+`audit_fmt_usage.py` now reports no `op_count` suffix bucket and `fmt_qty` at
+275. Remaining suffix buckets: `physical_unit` 1,126,
+`unit_rate_or_denominator` 16, `compound_scale` 14, `resource_time` 4, and
+`time_compound` 4. Word-scale FLOP phrases such as `billion FLOPs` and
+`trillion FLOPs` remain in the `compound_scale` bucket because changing them to
+`GFLOPs`/`TFLOPs` would alter visible wording. Verification: `git diff --check`
+PASS; py_compile PASS; focused pytest suite PASS (176 tests);
+`fmt_prose_contract.py` 0; `codemod_fmt.py queue` `by kind: {}`;
+`./book/binder check math` PASS; `audit_prose_semantics.py` CLEAN across 81
+files.
+
 ### B. WS4 — unit-suffix lane (~2,393 sites: `GB`/`ms`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.

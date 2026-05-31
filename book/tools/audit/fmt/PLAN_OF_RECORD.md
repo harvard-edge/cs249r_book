@@ -157,6 +157,14 @@ Plain scalar unit sites are not blindly fabricated into Quantities. They are
 either refactored to carry a Quantity, migrated to a typed scalar helper such as
 `fmt_time`/`fmt_rate`, or documented as an exception.
 
+FLOP counts are already Pint quantities in this repo (`flop`, `KFLOPs`,
+`MFLOPs`, `GFLOPs`, `PFLOPs`, ...), so exact FLOP-count suffixes should use
+`fmt_qty(quantity, FLOP_unit)`. Do not add a separate `fmt_ops` wrapper unless a
+later audit shows repeated call-site mistakes that the wrapper would prevent.
+Word-scale phrases such as `billion FLOPs` and `trillion FLOPs` are a separate
+compound-scale/prose decision because converting them to `GFLOPs`/`TFLOPs`
+changes visible wording.
+
 ## 7. Migration lanes
 
 Work by semantic bucket, not by string replacement:

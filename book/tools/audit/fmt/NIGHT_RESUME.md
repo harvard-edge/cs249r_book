@@ -103,6 +103,11 @@ use `fmt_count(..., label=...)` byte-identically across 7 chapters. The
 `resource_time` suffix bucket is down to 4, all hyphenated attributive forms
 (`-hour`, `-minute`) that need wording/API decisions rather than silent count
 label migration.
+Exact FLOP-count suffixes are also migrated: 12 `GFLOPs`/`MFLOPs`/`KFLOPs`/
+`PFLOPs` sites now use `fmt_qty(...)` with Pint FLOP units, byte-identical
+across 5 chapters. No separate `fmt_ops` wrapper was added because Pint already
+provides the unit check; word-scale FLOP phrases (`billion FLOPs`, `trillion
+FLOPs`) remain in `compound_scale` pending wording/API decisions.
 Remaining: the rest of WS4/WS3 and later PDF/lock phases. Nothing is half-done
 or broken.
 
@@ -511,6 +516,10 @@ drop. The adjacent prose/table text was updated to `1 percentage-point threshold
 and `(drop of 6.8 percentage points)`. No user-decision items remain open.
 
 ## Session commit log (newest first)
+- Codex exact FLOP-count lane: migrated 12 `GFLOPs`/`MFLOPs`/`KFLOPs`/`PFLOPs`
+  suffix sites to `fmt_qty(...)` with Pint FLOP units, byte-identical across 5
+  chapters; no `op_count` suffix bucket remains; contract 0, semantic 0, queue
+  empty, targeted suite 176 passing.
 - Codex resource-time count-label lane: migrated 15 straightforward
   resource-time suffixes (`PFLOP-days`, `TPUv4-hours`, `person-years`,
   `instance-seconds`, `GPU-hours`, `GPU-hr`) to `fmt_count(label=...)`
