@@ -386,6 +386,17 @@ suite PASS (176 tests); `fmt_prose_contract.py` 0; `codemod_fmt.py queue`
 `by kind: {}`; `./book/binder check math` PASS; `./book/binder check code
 --scope lego-dead-code` PASS; `audit_prose_semantics.py` CLEAN across 81 files.
 
+**A29 — Word-form micro/millisecond time suffix cleanup: DONE.**
+Extended the time codemod to recognize `microsecond(s)` and `millisecond(s)`,
+then migrated the three remaining exact word-form time suffixes in
+`model_compression` and `responsible_engr` to `fmt_time(..., style="word")`.
+`assess_equiv.py` confirmed identical values and prose for both chapters.
+`audit_fmt_usage.py` now reports `fmt_time` at 653 and direct suffix calls at
+1,196. Verification: `git diff --check` PASS; py_compile PASS; focused pytest
+suite PASS (176 tests); `fmt_prose_contract.py` 0; `codemod_fmt.py queue`
+`by kind: {}`; `./book/binder check math` PASS; `audit_prose_semantics.py`
+CLEAN across 81 files.
+
 ### B. WS4 — unit-suffix lane (~2,393 sites: `GB`/`ms`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.

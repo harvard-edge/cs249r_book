@@ -110,6 +110,7 @@ def classify_suffix(suffix: str):
                      "images", "img", "QPS", "ops", "operations"}:
         return "count_label"
     if s.strip() in {"hours", "hour", "minutes", "minute", "seconds", "second",
+                     "milliseconds", "millisecond", "microseconds", "microsecond",
                      "days", "day", "weeks", "week", "years", "year", "months",
                      "month", "h", "min", "s", "ms", "μs", "ns"}:
         return "time_unit"

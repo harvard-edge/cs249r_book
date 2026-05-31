@@ -164,6 +164,34 @@ Validation details:
   `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
   0 findings across 81 files.
 
+## 2026-05-31 — Word-form micro/millisecond suffix cleanup
+
+Change type: byte-identical formatter relocation. Added word-form
+`microsecond(s)` and `millisecond(s)` support to the time codemod and migrated
+the three remaining exact word-form time suffixes to `fmt_time(...,
+style="word")`.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol1/model_compression/model_compression.qmd` | 2 | 162 | 74 | identical values + prose |
+| `vol1/responsible_engr/responsible_engr.qmd` | 1 | 168 | 79 | identical values + prose |
+
+Validation details:
+
+- Before/after snapshots were generated with `assess_equiv.py baseline --ref HEAD`
+  and `assess_equiv.py snapshot` under `/tmp/fmt_word_time_*`.
+- `assess_equiv.py diff` reported `IDENTICAL values` and `IDENTICAL prose` for
+  both touched chapters.
+- `audit_fmt_usage.py` reports `fmt_time` calls increased to 653 and direct
+  suffix calls dropped to 1,196.
+- Verification: `python3 -m py_compile book/tools/audit/fmt/codemod_fmt.py book/tools/audit/fmt/audit_fmt_usage.py` PASS;
+  `git diff --check` PASS; `./book/binder check math` PASS; focused pytest
+  suite PASS, 176 tests; `fmt_prose_contract.py` PASS, 0 violations;
+  `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
+  0 findings across 81 files.
+
 ## 2026-05-31 — Residual plain count-label suffix relocation
 
 Change type: byte-identical formatter relocation. Replaced 17 remaining plain

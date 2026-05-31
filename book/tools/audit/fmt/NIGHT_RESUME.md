@@ -85,6 +85,9 @@ Residual plain count labels are also reduced: 17 suffixes such as `errors`,
 `steps`, `photos`, `requests`, `servers`, `workers`, `stages`, `V100s`, and
 `link tiers` now use `fmt_count(..., label=...)`, byte-identical across 9
 chapters.
+The time codemod now also recognizes word-form `microseconds` and
+`milliseconds`; the three remaining exact word-form time suffixes moved to
+`fmt_time(..., style="word")` byte-identically.
 Remaining: the rest of WS4/WS3 and later PDF/lock phases. Nothing is half-done
 or broken.
 

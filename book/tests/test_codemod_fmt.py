@@ -353,6 +353,10 @@ def test_time_rewrite_uses_full_unit_names_for_symbol_style():
 def test_time_rewrite_word_style_and_fmt_int_rounding():
     assert _time("fmt(elapsed, precision=0, commas=False, suffix=' seconds')") == \
         "fmt_time(elapsed, 'second', precision=0, commas=False, style='word')"
+    assert _time("fmt(latency, precision=0, commas=False, suffix=' milliseconds')") == \
+        "fmt_time(latency, 'millisecond', precision=0, commas=False, style='word')"
+    assert _time("fmt(us, precision=1, commas=False, suffix=' microseconds')") == \
+        "fmt_time(us, 'microsecond', precision=1, commas=False, style='word')"
     assert _time("fmt_int(hours, commas=False, suffix=' hours')") == \
         "fmt_time(round(hours), 'hour', precision=0, commas=False, style='word')"
 
