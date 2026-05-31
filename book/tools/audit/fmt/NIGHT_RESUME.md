@@ -252,20 +252,32 @@ focused pytest suite PASS (161 tests); `fmt_prose_contract` 0;
 `codemod_fmt queue` empty; substituted prose semantic audit CLEAN across 81
 files.
 
+**NOW done:** structured quantity denominator cleanup — migrated the only QMD
+`fmt_qty(..., extra_suffix="/inference")` call to `per="inference"` in
+`vol1/ml_systems/ml_systems.qmd`. `assess_equiv` stayed byte-identical across
+296 value exports and 143 substituted prose lines, and `audit_fmt_usage.py` now
+reports no `extra_suffix=` calls in QMD.
+
 **NEXT:**
 1. Add a formatter-default cleanup pass after the semantic lanes: each
    formatter should own comma defaults by value kind, and explicit `commas=`
    in QMD should remain only when it is an intentional override. During
    byte-identical migration, preserve explicit `commas=` first; remove
    redundant arguments only after equivalence is proven.
-2. Continue the semantic non-Quantity lanes: any remaining non-physical rates
+2. Add a keyword-unit API ergonomics pass after suffix migration stabilizes:
+   support and migrate toward `unit=` on unit-bearing helpers
+   (`fmt_time`, `fmt_qty`, `fmt_rate`, and range variants), then lint against
+   new positional unit arguments. Add tests for keyword compatibility,
+   missing/both-unit errors, time-unit validation, rate allowlists, and range
+   endpoint checks through keyword units.
+3. Continue the semantic non-Quantity lanes: any remaining non-physical rates
    and time values. Add entries to `AUDIT_LEDGER.md` for every touched LEGO
    cell.
-3. Continue WS4 with `run_unit_lane.py` chapter-sized batches. Highest remaining
+4. Continue WS4 with `run_unit_lane.py` chapter-sized batches. Highest remaining
    clean counts: `vol2/backmatter/appendix_fleet` (14), `vol2/ops_scale` (14),
    `vol1/hw_acceleration` (11), `vol1/introduction` (11),
    `vol2/network_fabrics` (11), `vol2/performance_engineering` (11).
-4. Render-verify any newly changed chapters before Phase 3B/PDF sign-off.
+5. Render-verify any newly changed chapters before Phase 3B/PDF sign-off.
 
 Gates to keep green (run all three):
 - fmt_prose_contract.py --root book/quarto/contents  → 0

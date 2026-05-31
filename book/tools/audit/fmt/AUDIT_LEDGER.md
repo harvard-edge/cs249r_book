@@ -306,6 +306,26 @@ Validation details:
   `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
   0 findings across 81 files.
 
+## 2026-05-31 — Structured quantity denominator cleanup
+
+Change type: byte-identical formatter API cleanup. Replaced the one remaining
+QMD `fmt_qty(..., extra_suffix="/inference")` site in
+`vol1/ml_systems/ml_systems.qmd` with structured `per="inference"`. This
+removes the `extra_suffix=` bucket from chapter formatter usage.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol1/ml_systems/ml_systems.qmd` | 1 | 296 | 143 | identical values + prose |
+
+Validation details:
+
+- Before/after snapshots were generated with `assess_equiv.py baseline --ref HEAD`
+  and `assess_equiv.py snapshot` under `/tmp/fmt_qty_per_ml_systems`.
+- `assess_equiv.py diff` reported `IDENTICAL values` and `IDENTICAL prose`.
+- `audit_fmt_usage.py` now reports no `extra_suffix=` calls in QMD.
+
 ## 2026-05-31 — Remaining direct count labels
 
 Change type: byte-identical formatter relocation. Replaced 40 hard-coded direct

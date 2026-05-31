@@ -48,6 +48,24 @@ arguments:
 Legacy `suffix=` can remain temporarily for migration compatibility, but QMD
 uses are counted, audited, and eventually blocked.
 
+### API ergonomics backlog
+
+After the semantic suffix lanes are stable, add an API cleanup pass for
+unit-bearing typed helpers. The preferred long-term call shape is keyworded:
+
+- `fmt_time(t, unit="ms")`, not `fmt_time(t, "ms")`.
+- `fmt_qty(q, unit=GB / second)`, not `fmt_qty(q, GB / second)`.
+- `fmt_rate(qps, unit="QPS")`, not `fmt_rate(qps, "QPS")`.
+- `fmt_time_range(lo, hi, unit="ms")` and `fmt_qty_range(lo, hi, unit=GB)`.
+
+This is not part of the byte-identical suffix migration. Keep the current
+positional forms available until the corpus is migrated, then add keyword
+aliases, convert QMD call sites, and finally lint against new positional unit
+arguments for semantic helpers. Required tests for that pass: keyword and
+temporary positional compatibility, missing-unit and both-unit errors,
+time-unit validation through `unit=`, rate allowlist validation through
+`unit=`, and range endpoint checks through keyword units.
+
 ## 4. Formatter defaults
 
 Semantic formatters should own the default display policy for their value kind.

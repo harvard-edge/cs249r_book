@@ -223,6 +223,22 @@ the `time_unit` suffix bucket down to 571. Verification: py_compile PASS,
 PASS (161 tests), prose-contract 0, semantic audit 0 findings, codemod queue
 empty.
 
+**A16 — Structured quantity denominator cleanup: DONE.**
+The only QMD `fmt_qty(..., extra_suffix="/inference")` call moved to structured
+`per="inference"` in `vol1/ml_systems/ml_systems.qmd`, byte-identical across
+296 value exports and 143 prose lines. `audit_fmt_usage.py` now reports no
+`extra_suffix=` calls in QMD.
+
+**A17 — Keyword-unit API ergonomics: TODO.**
+User raised that `fmt_time(x, "ms")` would read better and be harder to misuse
+as `fmt_time(x, unit="ms")`. Recommendation: after the active byte-identical
+suffix lanes, add keyword aliases for unit-bearing semantic helpers
+(`fmt_time`, `fmt_qty`, `fmt_rate`, `fmt_time_range`, `fmt_qty_range`), convert
+QMD call sites, then lint against new positional unit arguments. Keep
+positional compatibility during migration. Add tests for keyword compatibility,
+missing/both-unit errors, time-unit validation, rate allowlist validation, and
+range endpoint validation through keyword units.
+
 ### B. WS4 — unit-suffix lane (~2,393 sites: `GB`/`ms`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.
