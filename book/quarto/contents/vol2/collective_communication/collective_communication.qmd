@@ -142,8 +142,8 @@ class AllReduceCost:
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Gradient size (BF16 = 2 bytes/param)
-    gradient_qty = m.parameters.m_as(param) * 2 * ureg.byte
-    gradient_size_gb = gradient_qty.m_as(GB)
+    gradient_qty = m.parameters.to(param).magnitude * 2 * ureg.byte
+    gradient_size_gb = gradient_qty.to(GB).magnitude
 
     # Use library formula for Ring AllReduce time
     # Note: calc_ring_allreduce_time handles both bandwidth and latency (alpha)
@@ -153,11 +153,11 @@ class AllReduceCost:
         bandwidth_bytes_s=ib_ndr.bandwidth,
         latency_s=alpha_us * ureg.microsecond
     )
-    ring_total_ms = t_ring.m_as("ms")
+    ring_total_ms = t_ring.to(ms).magnitude
 
     # Break out terms for pedagogical display
     ring_bw_factor = 2 * (n_gpus - 1) / n_gpus
-    ring_bw_time_ms = (ring_bw_factor * gradient_size_gb / ib_bw.bandwidth.m_as(GB/second)) * THOUSAND
+    ring_bw_time_ms = (ring_bw_factor * gradient_size_gb / ib_bw.bandwidth.to(GB/second).magnitude) * THOUSAND
     ring_lat_time_ms = ring_total_ms - ring_bw_time_ms
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -173,7 +173,7 @@ class AllReduceCost:
     ib_bw_gbs_str = fmt_qty(ib_bw.bandwidth, GB/second, precision=0, commas=False)
     alpha_us_str = fmt(alpha_us, precision=0, commas=False)
     lat_steps_str = fmt(2 * (n_gpus - 1), precision=0, commas=False)
-    params_b_str = fmt(m.parameters.m_as(param) / BILLION, precision=0, commas=False)
+    params_b_str = fmt(m.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
 ```
 
 ::: {#nbk-collective-communication-allreduce-cost-70b-model .callout-notebook title="AllReduce cost for a 70B model"}
@@ -250,14 +250,14 @@ sync_pct = []
 for n in gpu_counts_num:
     # Use Engine.solve for large-batch training step approximation
     p = Engine.solve(m, h, batch_size=32, is_training=True)
-    t_comp = p.latency_compute.m_as("ms")
+    t_comp = p.latency_compute.to(ms).magnitude
 
     # Simple Ring AllReduce estimate for the scale
     from mlsysim.physics import calc_ring_allreduce_time
-    grad_size = m.parameters.m_as(param) * 2 * ureg.byte
+    grad_size = m.parameters.to(param).magnitude * 2 * ureg.byte
     # Effective BW decreases at scale due to topology
     bw = h.memory.bandwidth if n <= 8 else Systems.Fabrics.InfiniBand_NDR.bandwidth
-    t_comm = calc_ring_allreduce_time(grad_size, n, bw, 0*ureg.ms).m_as("ms")
+    t_comm = calc_ring_allreduce_time(grad_size, n, bw, 0*ureg.ms).to(ms).magnitude
 
     total = t_comp + t_comm
     # Add synthetic sync overhead (scales with log N)
@@ -398,7 +398,7 @@ class CriticalMsgSize:
     beta_gbs = 50
     # ┌── 2. EXECUTE ───────────────────────────────────────
     n_star_bytes = alpha_us / MILLION * beta_gbs * BILLION
-    n_star_kb = round((n_star_bytes * byte).m_as(KB))
+    n_star_kb = round((n_star_bytes * byte).to(KB).magnitude)
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(n_star_kb == 100, f"n* = {n_star_kb} KB, expected 100")
     # ┌── 4. OUTPUT ────────────────────────────────────────
@@ -546,9 +546,9 @@ class LlamaBudgetCalc:
     param_count_b       = 70
     gradient_bf16_gb    = param_count_b * 2   # 140 GB in BF16
 
-    nvlink_bw   = Hardware.Cloud.H100.nvlink.bandwidth.m_as(GB/second)         # GB/s (H100 NVLink 4.0)
+    nvlink_bw   = Hardware.Cloud.H100.nvlink.bandwidth.to(GB/second).magnitude         # GB/s (H100 NVLink 4.0)
     nvlink_alpha = 1.5                                    # us
-    ib_bw        = Systems.Fabrics.InfiniBand_NDR.bandwidth.m_as(GB/second)        # GB/s per port (NDR 400 Gbps)
+    ib_bw        = Systems.Fabrics.InfiniBand_NDR.bandwidth.to(GB/second).magnitude        # GB/s per port (NDR 400 Gbps)
     ib_alpha     = 3                                      # us
     compute_per_step_ms = 200  # approximate for illustration
 
@@ -1181,7 +1181,7 @@ class RingVsTree:
     tree_bw_us = 2 * log2N * M_mb/beta_gbs * THOUSAND
     ring_total_us = ring_lat_us + ring_bw_us
     tree_total_us = tree_lat_us + tree_bw_us
-    crossover_mb = (N * (alpha_us * US) * (beta_gbs * GB / second) / log2N).m_as(MB)
+    crossover_mb = (N * (alpha_us * US) * (beta_gbs * GB / second) / log2N).to(MB).magnitude
     tree_win_margin_pct = (ring_total_us - tree_total_us) / ring_total_us * 100
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(ring_lat_us == 1260, f"Ring lat = {ring_lat_us}")
@@ -1278,8 +1278,8 @@ class CommInfraScenario:
     ib_ndr_raw = Systems.Fabrics.InfiniBand_NDR.bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    nvlink_gbs = nvlink_raw.m_as(GB/second)
-    ib_gbs = ib_ndr_raw.m_as(GB/second)
+    nvlink_gbs = nvlink_raw.to(GB/second).magnitude
+    ib_gbs = ib_ndr_raw.to(GB/second).magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     from mlsysim.fmt import check, fmt, fmt_qty
@@ -1357,8 +1357,8 @@ class HierarchicalAllreduceCalc:
     n_nodes_har    = 8
     gpus_per_node  = 8
     gradient_gb    = 1       # 1 GB gradient buffer
-    ib_bw_gbs      = Systems.Fabrics.InfiniBand_NDR.bandwidth.m_as(GB/second)        # InfiniBand NDR 400 Gbps per port
-    nvlink_bw_gbs  = Hardware.Cloud.H100.nvlink.bandwidth.m_as(GB/second)            # NVLink 4.0 (H100)
+    ib_bw_gbs      = Systems.Fabrics.InfiniBand_NDR.bandwidth.to(GB/second).magnitude        # InfiniBand NDR 400 Gbps per port
+    nvlink_bw_gbs  = Hardware.Cloud.H100.nvlink.bandwidth.to(GB/second).magnitude            # NVLink 4.0 (H100)
     ib_alpha_us    = 3
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -1366,11 +1366,11 @@ class HierarchicalAllreduceCalc:
     flat_time_ms  = flat_data_gb/ib_bw_gbs * THOUSAND
 
     intra_data_mb = int(gradient_gb * THOUSAND * (gpus_per_node - 1) / gpus_per_node)  # ~875 MB
-    intra_rs_ms   = ((intra_data_mb * MB) / (nvlink_bw_gbs * GB / second)).m_as(ms)
+    intra_rs_ms   = ((intra_data_mb * MB) / (nvlink_bw_gbs * GB / second)).to(ms).magnitude
 
     inter_data_mb = int(gradient_gb * THOUSAND / gpus_per_node)  # 125 MB
     inter_ring_factor = 2 * (n_nodes_har - 1) / n_nodes_har
-    inter_bw_ms = ((inter_ring_factor * inter_data_mb * MB) / (ib_bw_gbs * GB / second)).m_as(ms)
+    inter_bw_ms = ((inter_ring_factor * inter_data_mb * MB) / (ib_bw_gbs * GB / second)).to(ms).magnitude
     inter_lat_ms = 2 * (n_nodes_har - 1) * ib_alpha_us / MS_PER_SEC
     inter_time_ms = inter_bw_ms + inter_lat_ms
 
@@ -2039,8 +2039,8 @@ Networks are not perfect. A bad cable can flip bits. Unlike TCP (which checksums
 # │ Exports: CommInfraRecap.nvlink_h100_bw_gbs_str, CommInfraRecap.ib_ndr_bw_gbs_str
 from mlsysim.core.constants import GB, second
 class CommInfraRecap:
-    nvlink_gbs = Hardware.Cloud.H100.nvlink.bandwidth.m_as(GB/second)
-    ib_gbs = Systems.Fabrics.InfiniBand_NDR.bandwidth.m_as(GB/second)
+    nvlink_gbs = Hardware.Cloud.H100.nvlink.bandwidth.to(GB/second).magnitude
+    ib_gbs = Systems.Fabrics.InfiniBand_NDR.bandwidth.to(GB/second).magnitude
     from mlsysim.fmt import fmt, fmt_qty
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     nvlink_h100_bw_gbs_str = fmt_qty(Hardware.Cloud.H100.nvlink.bandwidth, GB/second, precision=0, commas=False)

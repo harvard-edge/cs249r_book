@@ -67,7 +67,7 @@ class ReliabilityFoundations:
     t_reschedule = Systems.Reliability.Recovery.reschedule_time_s
     ckpt_write_bw = Systems.Reliability.Recovery.checkpoint_write_bw_gbs
 
-    model_sizes_params = [7e9, 13e9, Models.Language.Llama2_70B.parameters.m_as(param), Models.Language.GPT3.parameters.m_as(param), 1e12]
+    model_sizes_params = [7e9, 13e9, Models.Language.Llama2_70B.parameters.to(param).magnitude, Models.Language.GPT3.parameters.to(param).magnitude, 1e12]
     model_labels = ["7B", "13B", "70B", "175B", "1T"]
 
     avail_replicas = [1, 2, 3, 4, 5]
@@ -97,21 +97,21 @@ class ReliabilityFoundations:
     canonical_cluster_gpus_str = fmt(Systems.Clusters.Training_10K.total_accelerators, precision=0, commas=True)
 
     # Step 4: Young-Daly (10K cluster, 175B model)
-    ckpt_175b_bytes = calc_checkpoint_size(Models.Language.GPT3.parameters.m_as(param))
-    ckpt_175b_gb = ckpt_175b_bytes.m_as(GB)
+    ckpt_175b_bytes = calc_checkpoint_size(Models.Language.GPT3.parameters.to(param).magnitude)
+    ckpt_175b_gb = ckpt_175b_bytes.to(GB).magnitude
     ckpt_write_time_s = ckpt_175b_gb/ckpt_write_bw
 
-    cluster_mtbf_10k_s = cluster_mtbf_10k.m_as(ureg.second)
+    cluster_mtbf_10k_s = cluster_mtbf_10k.to(second).magnitude
     tau_opt_s = calc_young_daly_interval(ckpt_write_time_s, cluster_mtbf_10k_s)
-    tau_opt_min = tau_opt_s.m_as(ureg.minute)
+    tau_opt_min = tau_opt_s.to(minute).magnitude
 
     # Step 5: Recovery Sum
     t_reload_s = ckpt_write_time_s
     t_replay_s = tau_opt_s / 2
     t_recovery_total_s = (
         (t_detect + t_reschedule + t_reload_s) * ureg.second + t_replay_s
-    ).m_as(ureg.minute)
-    overhead_ckpt = ckpt_write_time_s / tau_opt_s.m_as(ureg.second)
+    ).to(minute).magnitude
+    overhead_ckpt = ckpt_write_time_s / tau_opt_s.to(second).magnitude
     overhead_failure = (t_recovery_total_s * MINUTES_PER_HOUR) / cluster_mtbf_10k_s
 
     @classmethod
@@ -128,14 +128,14 @@ class ReliabilityFoundations:
 
     @classmethod
     def ckpt_size_gb(cls, n_params):
-        return calc_checkpoint_size(n_params).m_as(GB)
+        return calc_checkpoint_size(n_params).to(GB).magnitude
 
     @classmethod
     def avail_stacked(cls, k):
         return calc_availability_stacked(cls.avail_single, k)
 
 # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-check(ReliabilityFoundations.cluster_mtbf_10k.m_as(ureg.hour) < 5.0, "10K cluster MTBF mismatch")
+check(ReliabilityFoundations.cluster_mtbf_10k.to(hour).magnitude < 5.0, "10K cluster MTBF mismatch")
 check(ReliabilityFoundations.tau_opt_min > 5, "Young-Daly interval too short")
 
 R = ReliabilityFoundations
@@ -285,9 +285,9 @@ from mlsysim.fmt import fmt_time
 class ReliabilityStringsMtbfRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    node_mtbf_str = fmt_time(R.node_mtbf.m_as(ureg.hour), 'hour', precision=1, commas=True, style='word')
+    node_mtbf_str = fmt_time(R.node_mtbf.to(hour).magnitude, 'hour', precision=1, commas=True, style='word')
     nodes_10k_str = fmt(R.nodes_10k, precision=0)
-    cluster_mtbf_10k_str = fmt_time(R.cluster_mtbf_10k.m_as(ureg.hour), 'hour', precision=2, commas=True, style='word')
+    cluster_mtbf_10k_str = fmt_time(R.cluster_mtbf_10k.to(hour).magnitude, 'hour', precision=2, commas=True, style='word')
 ```
 
 This is the **MTBF cascade**\index{MTBF cascade}: reliability degrades linearly with component count at each level, and the levels compound. A node with `{python} ReliabilityStringsMtbfRecap.node_mtbf_str` MTBF sounds reliable. A cluster of `{python} ReliabilityStringsMtbfRecap.nodes_10k_str` such nodes has an MTBF of just `{python} ReliabilityStringsMtbfRecap.cluster_mtbf_10k_str`---a failure every few hours is the expected steady state.
@@ -316,7 +316,7 @@ from mlsysim.fmt import check, fmt_time
 mtbf_data = []
 for n_gpus in R.cluster_sizes:
     n_nodes = R.nodes_for_gpus(n_gpus)
-    mtbf_h_val = R.cluster_mtbf(n_gpus).m_as(ureg.hour)  # raw float in hours
+    mtbf_h_val = R.cluster_mtbf(n_gpus).to(hour).magnitude  # raw float in hours
 
     if n_gpus == Systems.Clusters.Training_10K.total_accelerators:
         check(mtbf_h_val < 24.0, f"Narrative Violation: Cluster MTBF is {mtbf_h_val:.1f} hours. Failures are no longer a daily reality!")
@@ -535,20 +535,20 @@ class WorkedExampleYoungDaly:
     yd_tau_min = R.tau_opt_min               # raw float in minutes
 
     # Overhead from checkpointing alone
-    yd_ckpt_overhead = (yd_t_write_s/yd_tau_s.m_as(ureg.second)) * 100
+    yd_ckpt_overhead = (yd_t_write_s/yd_tau_s.to(second).magnitude) * 100
 
     # What if MTBF halves (20K GPUs)?
     mtbf_20k_h = R.node_mtbf / (n_gpus_20k // Systems.Nodes.DGX_H100.accelerators_per_node)  # Quantity[hour]
-    mtbf_20k_s = mtbf_20k_h.m_as(ureg.second)              # raw float (seconds)
+    mtbf_20k_s = mtbf_20k_h.to(second).magnitude              # raw float (seconds)
     tau_20k_s = calc_young_daly_interval(yd_t_write_s, mtbf_20k_s)  # Quantity[second]
-    tau_20k_min = tau_20k_s.m_as(ureg.minute)               # raw float in minutes
+    tau_20k_min = tau_20k_s.to(minute).magnitude               # raw float in minutes
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
-    yd_mtbf_h_str = fmt_time(yd_mtbf_h.m_as(ureg.hour), 'hour', precision=2, commas=True, style='word')
+    yd_mtbf_h_str = fmt_time(yd_mtbf_h.to(hour).magnitude, 'hour', precision=2, commas=True, style='word')
     yd_tau_min_str = fmt_time(yd_tau_min, 'minute', precision=1, commas=True, style='word')
     # Internal display-math values (no suffix — math adds its own \text{} units)
     _yd_t_write_val = fmt(yd_t_write_s, precision=1, commas=False)
-    _yd_mtbf_h_val = fmt(yd_mtbf_h.m_as(ureg.hour), precision=2, commas=False)
+    _yd_mtbf_h_val = fmt(yd_mtbf_h.to(hour).magnitude, precision=2, commas=False)
     _yd_tau_min_val = fmt(yd_tau_min, precision=1, commas=False)
     yd_overhead_str = fmt_percent(yd_ckpt_overhead/100, precision=1, style='symbol')
     tau_20k_min_str = fmt_time(tau_20k_min, 'minute', precision=1, commas=True, style='word')
@@ -789,7 +789,7 @@ class ReliabilitySummaryRecap:
     cluster_mtbf_10k = node_mtbf / Systems.Clusters.Training_10K.count
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
     gpu_mttf_yr_str = fmt_time(Systems.Reliability.Gpu.mttf_hours / HOURS_PER_YEAR, 'year', precision=1, commas=False, style='word')
-    cluster_mtbf_10k_str = fmt_time(cluster_mtbf_10k.m_as(ureg.hour), 'hour', precision=2, commas=True, style='word')
+    cluster_mtbf_10k_str = fmt_time(cluster_mtbf_10k.to(hour).magnitude, 'hour', precision=2, commas=True, style='word')
 ```
 
 ::: {.callout-takeaways title="Failure as a physical constraint"}
