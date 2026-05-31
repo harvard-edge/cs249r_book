@@ -71,7 +71,7 @@ The 612-vs-10 gap is the project. Regenerate with:
 - [x] **Production AST codemod** (`codemod_fmt.py`) — auto-rewrites only *provable* cases; queues ambiguous ones. Lanes: multiplier, percent (`%`/` percent`/`fmt_int`), scale-division.
 - [x] **`fmt_range`** typed/guarded helper + tests
 - [x] **Prose-unit duplication checker** (`fmt_prose_contract.py`, class-aware) — flags a unit/glyph typed after a ref that already owns it
-- [x] **Byte-identical lane drivers** with per-edit bisect + auto-revert gate (`run_multiplier_lane.py`, `run_percent_lane.py`→generic `lane_process`, `run_scale_lane.py`)
+- [x] **Lane drivers** with per-edit bisect + auto-revert gate (`run_multiplier_lane.py`, `run_percent_lane.py`→generic `lane_process`, `run_scale_lane.py`) plus the deliberate no-space style lane (`run_scale_style_lane.py`)
 
 ---
 
@@ -88,15 +88,15 @@ The 612-vs-10 gap is the project. Regenerate with:
 | **multiplier** (`×`/`x`/spaced/`fmt_int`) | **100% done** | `run_multiplier_lane.py` (byte-identical + `--variants` transform gate); glyph relocated to prose `$\times$` |
 | **percent** (`%`/` percent`/`fmt_int`) | **100% done** | `run_percent_lane.py`; `fmt(x,'%')`→`fmt_percent(ratio, style=…)`, strips `*100`, `round(x)/100` for `fmt_int`. 5 signed/>100% sites adjudicated via `fmt_percent(allow_negative=, max_ratio=)` |
 | **scale** (`K/M/B/T`, division form) | **clean cases done** (41 sites, 10 ch) | `run_scale_lane.py`; `fmt(x/MILLION,'M')`→`fmt_count(x, scale='M')` |
-| scale (pre-scaled / lowercase `k` / spaced / `fmt_int`) | **queued** | `scale_adjudication_queue.txt` — need source refactor to keep the RAW count, then `fmt_count(raw, scale=…)` |
+| scale (pre-scaled / lowercase `k` / spaced / `fmt_int`) | **100% done** | User ruled no-space house style; `run_scale_style_lane.py` migrated 44 queued sites to `fmt_count(raw, scale=…)` and one manual `fmt(...) + "B"` blind spot |
 
 **Real bug caught & fixed by the audit:** `vol2/robust_ai` `acc_drop` (76−50 = 26
 percentage *points*) rendered "26 percent" while prose appended "percentage points"
 → "26 percent percentage points". Fixed to a bare number. (commit `bc3729c676`)
 
 **Verification status (whole corpus):** 81/81 chapters execute headlessly; `fmt_prose_contract`
-**0 violations**; **`audit_prose_semantics` 0 findings**; multiplier + percent 100% (0 queued);
-scale 44 queued (deferred — house-style call, see NIGHT_RESUME); `pytest` 119 passing.
+**0 violations**; **`audit_prose_semantics` 0 findings**; multiplier + percent + scale 100% (0 queued);
+`codemod_fmt.py queue` empty; targeted `pytest` 129 passing.
 
 **Overnight session (semantic + consistency + render):**
 - NEW gate `audit_prose_semantics.py` (+ 7 tests): executes each chapter, substitutes
@@ -113,6 +113,11 @@ scale 44 queued (deferred — house-style call, see NIGHT_RESUME); `pytest` 119 
 - **Phase 3A render verification DONE** for every changed chapter (HTML built + migrated
   value grepped in rendered output). See NIGHT_RESUME for the fig-cap `title=` tooltip
   `\times` note (pre-existing book-wide Quarto behavior; visible caption correct).
+- Codex A1 scale-style pass DONE after user ruled for no-space scaled counts:
+  migrated 44 queued scale sites to `fmt_count` plus one `fmt(...) + "B"` blind
+  spot. This intentionally changes spacing/case only (`70 B`→`70B`, `270 K`→`270K`,
+  `100k`→`100K`). HTML built and grepped for all 13 source-changed chapters;
+  `codemod_fmt.py queue` is now empty.
 - Resume checkpoint: `book/tools/audit/fmt/NIGHT_RESUME.md`.
 
 ### Active / next lanes, by priority
@@ -126,7 +131,7 @@ scale 44 queued (deferred — house-style call, see NIGHT_RESUME); `pytest` 119 
   refactored source-first.
 - **WS2 — precision / spurious-`.0` re-sweep** (`audit_html.py`).
 - **WS5 — prose-reference integrity** (`audit_lego_html.py`, ground truth vs rendered HTML).
-- **WS6 — per-chapter semantic coherence** (incl. resolving the scale queue).
+- **WS6 — per-chapter semantic coherence** (scale queue resolved; continue with WS4/WS3 survivors).
 - **Phase 3A/3B render verification**, then **Phase 4 lock** (flip `fmt_semantic_suffix` to a blocker).
 
 ### How to re-verify (any agent, from repo root, `PYTHONPATH=mlsysim`)
@@ -137,7 +142,7 @@ python3 -c "import sys;sys.path.insert(0,'book/tools/audit/fmt');from pathlib im
 python3 book/tools/audit/fmt/fmt_prose_contract.py --root book/quarto/contents
 # rendered-composite semantic scan (expect "0 finding(s) ... CLEAN")
 python3 book/tools/audit/fmt/audit_prose_semantics.py --root book/quarto/contents
-# remaining dangerous suffixes by kind (expect only {'scale': 44}, deferred)
+# remaining dangerous suffixes by kind (expect by kind: {})
 python3 book/tools/audit/fmt/codemod_fmt.py queue --root book/quarto/contents
 # dry-run any lane to see what's left
 python3 book/tools/audit/fmt/run_scale_lane.py --all

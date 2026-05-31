@@ -227,6 +227,8 @@ def scan_percent(path: Path):
 # scale glyph -> magnitude, and the named/literal divisors that match each.
 _SCALE_FACTOR = {"K": 1e3, "M": 1e6, "B": 1e9, "T": 1e12}
 _NAMED_DIVISOR = {"THOUSAND": 1e3, "MILLION": 1e6, "BILLION": 1e9, "TRILLION": 1e12}
+_SCALE_FACTOR_NAME = {"K": "THOUSAND", "M": "MILLION", "B": "BILLION", "T": "TRILLION"}
+_PARAM_UNIT_SCALE = {"Kparam": "K", "Mparam": "M", "Bparam": "B", "Tparam": "T"}
 
 
 def _divisor_factor(node) -> float | None:
@@ -317,6 +319,169 @@ def scan_scale(path: Path):
                     "multiline: keep the RAW count at the source and use "
                     "fmt_count(raw, scale='K'|'M'|'B'|'T'); decide by hand."))
     return edits, queue
+
+
+def _round_divisor_raw(node: ast.AST, scale: str, src: str) -> str | None:
+    """Return raw numerator for round(x / SCALE), if it matches scale."""
+    if not isinstance(node, ast.Call):
+        return None
+    if not (isinstance(node.func, ast.Name) and node.func.id == "round"):
+        return None
+    if len(node.args) != 1 or node.keywords:
+        return None
+    inner = node.args[0]
+    if not (isinstance(inner, ast.BinOp) and isinstance(inner.op, ast.Div)):
+        return None
+    if _divisor_factor(inner.right) != _SCALE_FACTOR[scale]:
+        return None
+    raw = ast.get_source_segment(src, inner.left)
+    return raw if raw and "\n" not in raw else None
+
+
+def _division_raw(node: ast.AST, scale: str, src: str) -> str | None:
+    """Return raw numerator for x / SCALE or x // SCALE, if scale matches."""
+    if not (isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.FloorDiv))):
+        return None
+    if _divisor_factor(node.right) != _SCALE_FACTOR[scale]:
+        return None
+    raw = ast.get_source_segment(src, node.left)
+    return raw if raw and "\n" not in raw else None
+
+
+def _param_m_as_raw(node: ast.AST, scale: str, src: str) -> str | None:
+    """Return raw parameter count for q.m_as(Kparam/Mparam/Bparam/Tparam)."""
+    if not isinstance(node, ast.Call):
+        return None
+    func = node.func
+    if not (isinstance(func, ast.Attribute) and func.attr == "m_as"):
+        return None
+    if len(node.args) != 1 or node.keywords:
+        return None
+    unit = ast.get_source_segment(src, node.args[0])
+    if unit not in _PARAM_UNIT_SCALE or _PARAM_UNIT_SCALE[unit] != scale:
+        return None
+    quantity = ast.get_source_segment(src, func.value)
+    if not quantity or "\n" in quantity:
+        return None
+    if not re.match(r"^[A-Za-z_][\w.]*$", quantity):
+        quantity = f"({quantity})"
+    return f"{quantity}.m_as('param')"
+
+
+def _prescaled_raw(node: ast.AST, scale: str, src: str) -> str | None:
+    """Treat an already-scaled value as raw count by multiplying the factor back."""
+    arg = ast.get_source_segment(src, node)
+    if not arg or "\n" in arg:
+        return None
+    factor = _SCALE_FACTOR_NAME[scale]
+    if re.match(r"^[A-Za-z_][\w.]*$", arg) or re.match(r"^[0-9][0-9_]*(?:\.[0-9_]+)?$", arg):
+        return f"{arg} * {factor}"
+    return f"({arg}) * {factor}"
+
+
+def _scale_style_raw(node: ast.AST, scale: str, src: str) -> str | None:
+    return (
+        _division_raw(node, scale, src)
+        or _round_divisor_raw(node, scale, src)
+        or _param_m_as_raw(node, scale, src)
+        or _prescaled_raw(node, scale, src)
+    )
+
+
+def _rewrite_scale_style(call: ast.Call, src: str) -> str | None:
+    """Rewrite deferred scale suffixes to no-space ``fmt_count`` style.
+
+    This is an intentional house-style normalization, not a byte-identical
+    rewrite: ``"70 B"`` becomes ``"70B"`` and lowercase ``"100k"`` becomes
+    ``"100K"``.
+    """
+    seg = ast.get_source_segment(src, call) or ""
+    if "prefix=" in seg or not call.args or "\n" in seg:
+        return None
+    fname = call.func.id if isinstance(call.func, ast.Name) else (
+        call.func.attr if isinstance(call.func, ast.Attribute) else None
+    )
+    if fname not in {"fmt", "fmt_int"}:
+        return None
+    suffix = None
+    for kw in call.keywords:
+        if kw.arg == "suffix":
+            suffix = _const_str(kw.value)
+    scale = suffix.strip().upper() if suffix else None
+    if scale not in _SCALE_FACTOR:
+        return None
+
+    raw = _scale_style_raw(call.args[0], scale, src)
+    if raw is None:
+        return None
+
+    precision = "0" if fname == "fmt_int" else "1"
+    commas = None
+    for kw in call.keywords:
+        if kw.arg == "precision":
+            precision = ast.get_source_segment(src, kw.value)
+        elif kw.arg == "commas":
+            commas = ast.get_source_segment(src, kw.value)
+        elif kw.arg not in {"suffix"}:
+            return None
+    if fname == "fmt_int":
+        arg_src = ast.get_source_segment(src, call.args[0])
+        if not arg_src or "\n" in arg_src:
+            return None
+        factor = _SCALE_FACTOR_NAME[scale]
+        scaled = arg_src if arg_src.strip().startswith("round(") else f"round({arg_src})"
+        raw = f"{scaled} * {factor}"
+    tail = f", commas={commas}" if commas is not None else ""
+    return f"fmt_count({raw}, scale='{scale}', precision={precision}{tail})"
+
+
+def scan_scale_style(path: Path):
+    """Return (scale_edits, qualified_vars, queue) for the approved no-space style."""
+    text = path.read_text(encoding="utf-8", errors="replace")
+    edits: list[MultEdit] = []
+    qualified_vars: set[str] = set()
+    queue: list[QueueItem] = []
+    for fence_line, src in extract_python_cells(text):
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            continue
+        classes = [(n.name, n.lineno, n.end_lineno or n.lineno)
+                   for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]
+
+        def _qualifier(lineno: int) -> str:
+            best = None
+            for name, s, e in classes:
+                if s <= lineno <= e and (best is None or s > best[1]):
+                    best = (name, s, e)
+            return best[0] + "." if best else ""
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Call):
+                continue
+            call = node.value
+            fn = call.func
+            fname = fn.id if isinstance(fn, ast.Name) else (fn.attr if isinstance(fn, ast.Attribute) else None)
+            if fname not in ("fmt", "fmt_int"):
+                continue
+            suffix = None
+            for kw in call.keywords:
+                if kw.arg == "suffix":
+                    suffix = _const_str(kw.value)
+            if suffix is None or suffix.strip().upper() not in _SCALE_FACTOR:
+                continue
+            var = _assign_target(node)
+            seg = ast.get_source_segment(src, call) or ""
+            file_line = fence_line + call.lineno
+            new = _rewrite_scale_style(call, src)
+            if new and var:
+                edits.append(MultEdit(file_line, var, seg, new))
+                qualified_vars.add(_qualifier(node.lineno) + var)
+            else:
+                queue.append(QueueItem(str(path), file_line, var, fname, suffix,
+                    "scale", seg.replace("\n", " ⏎ "),
+                    "Could not derive raw count for fmt_count(raw, scale=…); decide by hand."))
+    return edits, qualified_vars, queue
 
 
 _UNIT_BASE_SUFFIXES = (

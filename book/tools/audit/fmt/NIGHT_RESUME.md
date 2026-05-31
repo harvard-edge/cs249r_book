@@ -9,7 +9,7 @@ Always run fmt tooling with `PYTHONPATH=mlsysim` from the repo root.
 
 ## Mission (from the user, this session)
 1. Migrate dangerous value-kinds into typed/guarded formatters (DONE for
-   multiplier + percent + scale-division; see MIGRATION.md).
+   multiplier + percent + scale; see MIGRATION.md).
 2. **Verify every migrated LEGO output renders correctly in prose — not just
    glyph-wise but SEMANTICALLY.** (e.g. the robust_ai "26 percent percentage
    points" bug: byte-identical migration preserved a real pre-existing error.)
@@ -29,31 +29,35 @@ Always run fmt tooling with `PYTHONPATH=mlsysim` from the repo root.
 ## Re-verify in one shot (repo root, PYTHONPATH=mlsysim)
 ```
 python3 book/tools/audit/fmt/fmt_prose_contract.py --root book/quarto/contents   # expect 0
-python3 book/tools/audit/fmt/codemod_fmt.py queue --root book/quarto/contents     # remaining dangerous
-python3 -m pytest mlsysim/tests/test_fmt.py book/tests/test_codemod_fmt.py book/tests/test_fmt_prose_contract.py book/tests/test_visible_text.py -q -o addopts=''
+python3 book/tools/audit/fmt/codemod_fmt.py queue --root book/quarto/contents     # expect empty
+python3 -m pytest mlsysim/tests/test_fmt.py book/tests/test_codemod_fmt.py book/tests/test_fmt_prose_contract.py book/tests/test_audit_prose_semantics.py book/tests/test_visible_text.py -q -o addopts=''
 ```
 
 ---
 
 ## NOW / NEXT  (update before every commit)
 
-**STATUS: Codex WS4 unit-lane batch complete and verified. Safe to continue.**
+**STATUS: Codex A1 scale-style pass complete and verified. Safe to continue.**
 
-**State:** multiplier + percent 100% migrated; scale-division done (41 sites);
-pp → typed fmt_pp (14 sites + grammar fixes); 4 dangerous glyph stragglers killed;
-NEW semantic scanner gate (+ unit-dup bug fixes). 81/81 chapters exec clean;
-prose-contract 0; semantic scanner 0; 124 tests pass. WS4 unit suffixes are now
-started: `run_unit_lane.py` migrates clean `fmt(q.m_as(UNIT), suffix=" UNIT")`
-sites through the same byte-identical gate as the percent/scale lanes. First
-batch migrated 26 Quantity-backed unit sites to `fmt_qty` across:
+**State:** multiplier + percent + scale 100% migrated; pp → typed fmt_pp (14
+sites + grammar fixes); 4 dangerous glyph stragglers killed; NEW semantic
+scanner gate (+ unit-dup bug fixes). 81/81 chapters exec clean; prose-contract 0;
+semantic scanner 0; codemod queue empty; 129 focused tests pass. User ruled for
+no-space scaled counts, so `run_scale_style_lane.py` migrated the 44 queued scale
+sites to `fmt_count` and one manual `fmt(...) + "B"` blind spot. WS4 unit suffixes
+are also started: `run_unit_lane.py` migrates clean
+`fmt(q.m_as(UNIT), suffix=" UNIT")` sites through the same byte-identical gate as
+the percent/scale lanes. First batch migrated 26 Quantity-backed unit sites to
+`fmt_qty` across:
 `vol1/benchmarking` (1), `vol1/conclusion` (5), `vol1/responsible_engr` (17),
 `vol2/backmatter/appendix_reliability` (1),
 `vol2/collective_communication` (1), and `vol2/introduction` (1).
-All six newly changed chapters are HTML-render-verified. Remaining: scale queue
-(44, deferred — style call), 4 pp editorial sites (documented below), and the
-rest of WS4/WS3. Nothing is half-done or broken.
+All six WS4-changed chapters are HTML-render-verified. The A1 scale-style pass is
+also HTML-render-verified for all 13 source-changed chapters. Remaining: 4 pp
+editorial sites (documented below), and the rest of WS4/WS3. Nothing is half-done
+or broken.
 
-**If continuing:** A1/A2 still need user decisions. Otherwise continue WS4 with
+**If continuing:** A2 still needs the user's editorial decision. Otherwise continue WS4 with
 `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/run_unit_lane.py --write <qmd>`
 one chapter at a time. Current dry-run reports 235 remaining clean unit candidates
 across 20 chapters; many more suffix sites are plain floats and should stay queued
@@ -92,14 +96,13 @@ Corpus CLEAN for all checks. Regression test `book/tests/test_audit_prose_semant
    clean counts: `vol2/compute_infrastructure` (64), `vol1/ml_systems` (28),
    `vol2/distributed_training` (20), `vol2/backmatter/appendix_fleet` (14),
    `vol2/ops_scale` (14).
-2. User-decision items: scale house-style (44 queued) and the 4 benchmarking pp
-   editorial sites remain deferred.
+2. User-decision item: the 4 benchmarking pp editorial sites remain deferred.
 3. Render-verify any new WS4-changed chapters before Phase 3B/PDF sign-off.
 
 Gates to keep green (run all three):
 - fmt_prose_contract.py --root book/quarto/contents  → 0
 - audit_prose_semantics.py --root book/quarto/contents → 0 findings
-- codemod_fmt.py queue --root book/quarto/contents → only known-deferred
+- codemod_fmt.py queue --root book/quarto/contents → by kind: {}
 
 ## Render verification (Phase 3A HTML) — DONE for all changed chapters
 Built each changed chapter with `./book/binder build html --volN volN/<ch>
@@ -124,6 +127,17 @@ under `/private/tmp` and grepped rendered HTML:
 - `collective_communication`: "50 GB/s" InfiniBand bandwidth.
 - `introduction` (vol2): "700 GB" GPT-3 synchronization size.
 
+Codex A1 scale-style HTML verification is DONE for all 13 source-changed
+chapters. Built the changed chapters by volume with Quarto/Deno caches under
+`/private/tmp` and grepped representative no-space scale strings:
+- Vol1: appendix_assumptions `7B`; benchmarking `270K`, `3.5M`, `25.6M`, `7B`;
+  data_selection `1M`, `100K`, `10K`, `500K`; frameworks `25.6M`;
+  ml_systems `612K`; nn_architectures `20M`, `421.4K`; nn_computation `100M`;
+  responsible_engr `3.5M`, `5.3M`, `25.6M`, `270K`; training `7B`, `1.5B`,
+  `100B`, `175B`, `70B`, `20B`.
+- Vol2: appendix_assumptions `70B`; appendix_fleet `7B`, `70B`, `175B`;
+  distributed_training `10K`; fleet_orchestration `7B`, `70B`, `175B`.
+
 FINDING (sustainable_ai fig-cap): the visible <figcaption> renders `$\times$`
 correctly as a math span ("6.2×/year"), but Quarto copies the caption into the
 figure `title=` hover-tooltip WITHOUT processing math, so the tooltip shows raw
@@ -132,24 +146,15 @@ shows "350,000\times" in another figure's title from an untouched caption ref.
 Not a regression from this migration; visible output is correct. (If the user
 wants tooltips clean, that's a separate book-wide caption-math decision.)
 
-## Scale queue (44 sites) — DEFERRED to a house-style decision (rationale)
-The remaining `codemod_fmt queue` items are all `kind=scale`: `fmt(x, suffix="K"/
-"M"/"B")` where `x` is ALREADY pre-scaled (e.g. `model_params_b = 7` → "7B";
-`_anomaly_k = …m_as(Kparam)` → "70 K"). The auto-migratable form `fmt(x/MILLION,
-suffix="M")` was already done (41 sites, prior commit). These 44 are NOT cleanly
-migratable because:
-  1. The raw count isn't at the call site — `fmt_count(raw, scale=…)` would need
-     an ugly `x * BILLION` reconstruction or pint `.m_as("param")` retracing.
-  2. ~most carry a SPACE ("70 K", "1.2 M"); `fmt_count` emits no space ("70K",
-     "1.2M"), so migrating CHANGES rendered text.
-  3. ZERO correctness risk: a scale glyph can't cause a silent 100x error the way
-     a percent/multiplier can. This is pure typing/consistency.
-DECISION (experienced-eng call): do NOT churn 44 sites + change rendered spacing
-overnight for a marginal consistency gain. This needs ONE house-style ruling from
-the user: **"scaled counts render as `<n><glyph>` no-space (70B / 5.3M / 12K)"?**
-If yes, a follow-up lane migrates all 44 to fmt_count (raw via `.m_as("param")`
-or `* FACTOR`) and normalizes the spacing in one reviewable pass. Until then they
-remain `fmt(..., suffix=…)` — harmless and rendering correctly today.
+## Scale queue (44 sites) — RESOLVED
+The user ruled for no-space scaled counts: `<n><glyph>` (`70B`, `5.3M`, `12K`).
+`run_scale_style_lane.py` migrated all 44 queued scale sites to `fmt_count(raw,
+scale=...)`, reconstructing raw counts with Pint `.m_as("param")`, `* THOUSAND`,
+`* MILLION`, or `* BILLION` as appropriate. One manual blind spot,
+`fmt(...) + "B"` in `fleet_orchestration`, was also migrated to `fmt_count`.
+
+This pass intentionally changes spacing/case only: examples include `70 B`→`70B`,
+`270 K`→`270K`, and `100k`→`100K`. The `codemod_fmt.py queue` gate is now empty.
 
 ## Editorial decisions left for the user (rendered TEXT would change)
 These are latent grammar issues in pre-existing prose. I fixed the isolated,
@@ -174,6 +179,11 @@ human editorial call — left as `fmt(..., suffix=" percentage point")` for now:
    noun form reads correctly there too; or split into two exports.
 
 ## Session commit log (newest first)
+- Codex A1 scale-style pass: user chose no-space scaled counts; added
+  `run_scale_style_lane.py` + tests; migrated 44 queued scale suffix sites and
+  one `fmt(...) + "B"` blind spot to `fmt_count`; contract 0, semantic 0, queue
+  empty, targeted suite 129 passing; all 13 source-changed chapters
+  HTML-render-verified.
 - Codex WS4 batch: added `run_unit_lane.py` + tests; migrated 26 clean
   Quantity-backed unit suffixes to `fmt_qty` across 6 chapters; contract 0,
   semantic 0, queue still only `{'scale': 44}`, targeted suite 124 passing;

@@ -9,6 +9,7 @@ from codemod_fmt import (  # noqa: E402
     _rewrite_call_to_multiple, _patch_prose, scan_file,
     _rewrite_percent, scan_percent,
     _rewrite_scale, scan_scale,
+    _rewrite_scale_style, scan_scale_style,
     _rewrite_unit, scan_unit,
 )
 
@@ -22,6 +23,11 @@ def _percent(expr: str):
 def _scale(expr: str):
     call = ast.parse(expr, mode="eval").body
     return _rewrite_scale(call, expr)
+
+
+def _scale_style(expr: str):
+    call = ast.parse(expr, mode="eval").body
+    return _rewrite_scale_style(call, expr)
 
 
 def _unit(expr: str):
@@ -241,6 +247,38 @@ def test_scan_scale_queues_prescaled_migrates_division(tmp_path):
     assert [e.var for e in edits] == ["a_str"]            # only the clean division
     assert sorted(q.var for q in queue) == ["b_str", "c_str"]
     assert all(q.kind == "scale" for q in queue)
+
+
+def test_scale_style_prescaled_value_reconstructs_raw_count():
+    assert _scale_style("fmt(params_b, precision=0, commas=False, suffix=' B')") == \
+        "fmt_count(params_b * BILLION, scale='B', precision=0, commas=False)"
+
+
+def test_scale_style_lowercase_k_division_becomes_uppercase_scale():
+    assert _scale_style("fmt(n / THOUSAND, precision=0, commas=False, suffix='k')") == \
+        "fmt_count(n, scale='K', precision=0, commas=False)"
+
+
+def test_scale_style_param_quantity_uses_raw_param_count():
+    assert _scale_style("fmt(model.parameters.m_as(Bparam), precision=0, commas=False, suffix=' B')") == \
+        "fmt_count(model.parameters.m_as('param'), scale='B', precision=0, commas=False)"
+
+
+def test_scale_style_fmt_int_round_division():
+    assert _scale_style("fmt_int(round(n_params / BILLION), commas=False, suffix='B')") == \
+        "fmt_count(round(n_params / BILLION) * BILLION, scale='B', precision=0, commas=False)"
+
+
+def test_scan_scale_style_qualifies_class_exports(tmp_path):
+    p = tmp_path / "c.qmd"
+    p.write_text(CELL.format(
+        assigns=("a_str = fmt(params_b, precision=0, commas=False, suffix=' B')\n"
+                 "    b_str = fmt(n / THOUSAND, precision=0, commas=False, suffix='k')"),
+        prose="x"), encoding="utf-8")
+    edits, qualified, queue = scan_scale_style(p)
+    assert sorted(e.var for e in edits) == ["a_str", "b_str"]
+    assert qualified == {"C.a_str", "C.b_str"}
+    assert queue == []
 
 
 def test_scan_percent_queues_multiline_calls_not_silently_dropped(tmp_path):
