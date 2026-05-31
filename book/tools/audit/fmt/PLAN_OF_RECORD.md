@@ -73,6 +73,11 @@ the rendered text is `ms`/`s`/`h` or `milliseconds`/`seconds`/`hours`. Short
 spellings remain accepted for compatibility, but new QMD edits should not add
 more mixed `"ms"`/`"second"` source style.
 
+Hyphenated time noun modifiers use `fmt_time(..., style="word",
+attributive=True)`, which renders a singular unit (`1-hour`, `24-hour`,
+`15-minute`) and rejects `per=`. This is distinct from ordinary prose word style
+(`1 hour`, `24 hours`) and from resource-time count labels such as `GPU-hour`.
+
 ### Scale-word and compound-scale backlog
 
 The audit still has a small `scale_word` bucket plus compound suffix blind

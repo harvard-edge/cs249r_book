@@ -1159,6 +1159,17 @@ def _time_word_suffix(value, display_unit, per=None) -> str:
     return f" {word}{_denominator_suffix(per, what='per')}"
 
 
+def _time_attributive_suffix(display_unit) -> str:
+    """Return a hyphenated singular time-unit suffix for noun modifiers."""
+    key = str(display_unit)
+    if key not in _TIME_WORDS:
+        raise ValueError(
+            f"fmt_time attributive=True does not know a word label for {key!r}."
+        )
+    singular, _ = _TIME_WORDS[key]
+    return f"-{singular}"
+
+
 def fmt_time(
     duration,
     display_unit,
@@ -1166,6 +1177,7 @@ def fmt_time(
     precision=1,
     commas=False,
     style="symbol",
+    attributive=False,
     per=None,
     approx=False,
     lower_bound=False,
@@ -1181,6 +1193,8 @@ def fmt_time(
     ``style="symbol"`` renders compact unit symbols such as ``35 ms``.
     ``style="word"`` renders prose words with singular/plural agreement such
     as ``1 second`` and ``2 seconds``.
+    ``attributive=True`` with ``style="word"`` renders a hyphenated singular
+    noun modifier such as ``10-minute`` or ``100,000-hour``.
 
     Plain numbers are accepted only because the display unit is explicit:
     ``fmt_time(35, second)`` means "35 seconds" and still validates that
@@ -1196,12 +1210,25 @@ def fmt_time(
         raise ValueError(
             f"fmt_time style must be 'symbol' or 'word', got {style!r}."
         )
+    if attributive and style != "word":
+        raise ValueError("fmt_time attributive=True requires style='word'.")
+    if attributive and per is not None:
+        raise ValueError("fmt_time attributive=True cannot be combined with per=.")
     q = duration if isinstance(duration, ureg.Quantity) else duration * display_unit
     val = _numeric_magnitude(q.to(display_unit))
     if val < 0 and not allow_negative:
         raise ValueError(
             f"fmt_time expects a non-negative duration, got {val}. Pass "
             f"allow_negative=True if a signed duration is genuinely intended."
+        )
+    if attributive:
+        return fmt(
+            val,
+            precision=precision,
+            commas=commas,
+            suffix=_time_attributive_suffix(display_unit),
+            approx=approx,
+            lower_bound=lower_bound,
         )
     if style == "word":
         return fmt(

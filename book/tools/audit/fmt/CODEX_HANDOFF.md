@@ -455,6 +455,19 @@ PASS; py_compile PASS; focused pytest suite PASS (176 tests);
 `./book/binder check math` PASS; `audit_prose_semantics.py` CLEAN across 81
 files.
 
+**A34 — Attributive time/resource-time suffix lane: DONE.**
+Added `fmt_time(..., style="word", attributive=True)` for hyphenated singular
+time noun modifiers such as `1-hour`, `24-hour`, `100,000-hour`, and
+`5-minute`. Migrated the four remaining `resource_time` suffix sites
+byte-identically across `data_engineering`, `data_selection`, and
+`distributed_training`. `audit_fmt_usage.py` now reports no `resource_time`
+suffix bucket and `fmt_time` at 661. Remaining suffix buckets:
+`physical_unit` 1,126, `unit_rate_or_denominator` 16, `compound_scale` 14, and
+`time_compound` 4. Verification: `git diff --check` PASS; py_compile PASS;
+focused pytest suite PASS (178 tests); `fmt_prose_contract.py` 0;
+`codemod_fmt.py queue` `by kind: {}`; `./book/binder check math` PASS;
+`audit_prose_semantics.py` CLEAN across 81 files.
+
 ### B. WS4 — unit-suffix lane (~2,393 sites: `GB`/`ms`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.

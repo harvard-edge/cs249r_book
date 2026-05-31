@@ -100,9 +100,9 @@ prose-adjective/lower-bound time compounds (`ms latency`, `ms round-trip`,
 Straightforward resource-time labels are now also migrated: `PFLOP-days`,
 `TPUv4-hours`, `person-years`, `instance-seconds`, `GPU-hours`, and `GPU-hr`
 use `fmt_count(..., label=...)` byte-identically across 7 chapters. The
-`resource_time` suffix bucket is down to 4, all hyphenated attributive forms
-(`-hour`, `-minute`) that need wording/API decisions rather than silent count
-label migration.
+hyphenated `-hour`/`-minute` forms now use `fmt_time(..., style="word",
+attributive=True)` byte-identically, so the `resource_time` suffix bucket is
+gone.
 Exact FLOP-count suffixes are also migrated: 12 `GFLOPs`/`MFLOPs`/`KFLOPs`/
 `PFLOPs` sites now use `fmt_qty(...)` with Pint FLOP units, byte-identical
 across 5 chapters. No separate `fmt_ops` wrapper was added because Pint already
@@ -112,9 +112,8 @@ Remaining: the rest of WS4/WS3 and later PDF/lock phases. Nothing is half-done
 or broken.
 
 **If continuing:** Continue with semantic lanes in `PLAN_OF_RECORD.md`. Good next
-targets are physical-unit suffixes, compound scale/rate/ops suffixes, the four
-hyphenated attributive time/resource-time suffixes, then MarkdownStr sites and
-the API-clarity pass.
+targets are physical-unit suffixes, compound scale/rate suffixes, the four
+remaining time compounds, then MarkdownStr sites and the API-clarity pass.
 For physical Quantity-backed sites, continue WS4 with
 `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/run_unit_lane.py --write <qmd>`
 one chapter at a time. The latest all-chapter run migrated the remaining
@@ -516,6 +515,11 @@ drop. The adjacent prose/table text was updated to `1 percentage-point threshold
 and `(drop of 6.8 percentage points)`. No user-decision items remain open.
 
 ## Session commit log (newest first)
+- Codex attributive time lane: added `fmt_time(..., style="word",
+  attributive=True)` for `1-hour`/`24-hour`/`5-minute` noun modifiers and
+  migrated the 4 remaining resource-time suffix sites byte-identically across 3
+  chapters; no `resource_time` suffix bucket remains; contract 0, semantic 0,
+  queue empty, targeted suite 178 passing.
 - Codex exact FLOP-count lane: migrated 12 `GFLOPs`/`MFLOPs`/`KFLOPs`/`PFLOPs`
   suffix sites to `fmt_qty(...)` with Pint FLOP units, byte-identical across 5
   chapters; no `op_count` suffix bucket remains; contract 0, semantic 0, queue

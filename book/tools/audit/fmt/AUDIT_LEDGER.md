@@ -261,6 +261,35 @@ Validation details:
   `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
   0 findings across 81 files.
 
+## 2026-05-31 — Attributive time/resource-time suffix relocation
+
+Change type: small formatter API addition plus byte-identical relocation. Added
+`fmt_time(..., style="word", attributive=True)` for hyphenated singular time
+noun modifiers and replaced the four remaining `resource_time` suffix sites
+(`-hour`, `-minute`).
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol1/data_engineering/data_engineering.qmd` | 1 | 203 | 99 | identical values + prose |
+| `vol1/data_selection/data_selection.qmd` | 1 | 250 | 128 | identical values + prose |
+| `vol2/distributed_training/distributed_training.qmd` | 2 | 261 | 142 | identical values + prose |
+
+Validation details:
+
+- Before/after snapshots were generated with `assess_equiv.py baseline --ref HEAD`
+  and `assess_equiv.py snapshot` under `/tmp/fmt_time_attr_*`.
+- `assess_equiv.py diff` reported `IDENTICAL values` and `IDENTICAL prose` for
+  every touched chapter.
+- `audit_fmt_usage.py` reports no remaining `resource_time` suffix bucket and
+  `fmt_time` calls increased to 661.
+- Verification: `python3 -m py_compile mlsysim/mlsysim/fmt.py book/tools/audit/fmt/audit_fmt_usage.py` PASS;
+  `git diff --check` PASS; `./book/binder check math` PASS; focused pytest
+  suite PASS, 178 tests; `fmt_prose_contract.py` PASS, 0 violations;
+  `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
+  0 findings across 81 files.
+
 ## 2026-05-31 — Remaining suffix bucket split and epoch label
 
 Change type: audit improvement plus byte-identical formatter relocation.

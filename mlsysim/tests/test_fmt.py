@@ -240,6 +240,33 @@ class TestFmtTime:
         assert fmt_time(2, ureg.second, precision=0, style="word") == "2 seconds"
         assert fmt_time(2, "year", precision=0, style="word") == "2 years"
 
+    def test_attributive_word_style_is_hyphenated_singular(self):
+        assert (
+            fmt_time(1, "hour", precision=0, style="word", attributive=True)
+            == "1-hour"
+        )
+        assert (
+            fmt_time(24, "hour", precision=0, style="word", attributive=True)
+            == "24-hour"
+        )
+        assert (
+            fmt_time(15, "minute", precision=0, style="word", attributive=True)
+            == "15-minute"
+        )
+
+    def test_attributive_rejects_symbol_style_and_per(self):
+        with pytest.raises(ValueError, match="attributive"):
+            fmt_time(5, "hour", precision=0, attributive=True)
+        with pytest.raises(ValueError, match="per="):
+            fmt_time(
+                5,
+                "hour",
+                precision=0,
+                style="word",
+                attributive=True,
+                per="day",
+            )
+
     def test_rejects_non_time_unit(self):
         with pytest.raises(ValueError, match="time unit"):
             fmt_time(5, ureg.GB)
