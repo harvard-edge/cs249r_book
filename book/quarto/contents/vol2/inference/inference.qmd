@@ -1998,13 +1998,14 @@ class KVCacheCapacityEstimator:
     """KV-cache capacity estimator for a long-context 70B GQA deployment."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    n_layers = 80
-    n_kv_heads = 8
-    d_head = 128
+    _model = Models.Language.Llama3_70B
+    n_layers = _model.layers
+    n_kv_heads = _model.kv_heads or _model.heads
+    d_head = _model.hidden_dim // _model.heads
     bytes_per_elem = 2
     context_tokens = 131_072
-    total_hbm_gb = 640
-    weight_gb = 140
+    total_hbm_gb = Systems.Nodes.DGX_H100.accelerators_per_node * Hardware.Cloud.H100.memory.capacity.m_as(GiB)
+    weight_gb = _model.size_in_bytes(BYTES_FP16).m_as(GB)
     system_gb = 20
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -2301,7 +2302,7 @@ All three requests reference the same physical blocks for the system prompt. Onl
 # │ Show: kv_tb_no_cache_str="~6.6" TB (without), kv_tb_cached_str="~1.3" TB
 # │   (with), memory_reduction_pct_str="80"%, concurrent_multiplier_str="5"—
 # │   inline in the "Prefix Caching at Scale" callout.
-# │ How: Multiply token count × KV pairs × layers × hidden_dim × bytes/element,
+# │ How: Multiply token count × KV pairs × Llama-70B layers × hidden_dim × bytes/element,
 # │   divide by 1e12 for TB; compare shared-prefix vs per-user-token totals.
 # │
 # │ Imports: (none)
@@ -2322,23 +2323,24 @@ class PrefixCachingAnalysis:
     system_prompt_tokens = 2000
     concurrent_users = 1000
     avg_response_tokens = 500
+    _model = Models.Language.Llama2_70B
     n_kv_pairs = 2      # key + value
-    n_layers = 80       # large LLM (e.g., 70B-class)
-    head_dim = 8192     # hidden dimension
+    n_layers = _model.layers
+    hidden_dim = _model.hidden_dim
     bytes_per_element = 2  # FP16
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Step 1: Without prefix caching: every user stores full system_prompt + response tokens
     tokens_per_user = system_prompt_tokens + avg_response_tokens  # 2500
     total_tokens_no_cache = tokens_per_user * concurrent_users
-    kv_bytes_no_cache = total_tokens_no_cache * n_kv_pairs * n_layers * head_dim * bytes_per_element
+    kv_bytes_no_cache = total_tokens_no_cache * n_kv_pairs * n_layers * hidden_dim * bytes_per_element
     kv_tb_no_cache_val = kv_bytes_no_cache / TRILLION
 
     # Step 2: With prefix caching: system prompt stored once; only response tokens per user
     shared_tokens = system_prompt_tokens  # stored once
     unique_tokens = avg_response_tokens * concurrent_users
     total_tokens_cached = shared_tokens + unique_tokens
-    kv_bytes_cached = total_tokens_cached * n_kv_pairs * n_layers * head_dim * bytes_per_element
+    kv_bytes_cached = total_tokens_cached * n_kv_pairs * n_layers * hidden_dim * bytes_per_element
     kv_tb_cached_val = kv_bytes_cached / TRILLION
 
     # Step 3: Savings
@@ -2420,9 +2422,10 @@ class KVCacheCalc:
     """KV cache memory footprint: FP16 vs INT4 for a 70B MHA model."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    kv_layers = 80
-    kv_heads = 64  # MHA baseline; GQA (8 heads) is introduced as the reduction below
-    kv_head_dim = 128
+    _model = Models.Language.Llama2_70B
+    kv_layers = _model.layers
+    kv_heads = _model.heads  # MHA baseline; GQA heads are introduced as the reduction below
+    kv_head_dim = _model.hidden_dim // _model.heads
     kv_seq_len = 4096
     kv_bytes_fp16 = BYTES_FP16.m_as(byte)
     kv_bytes_int4 = BYTES_INT4.m_as(byte)
@@ -2455,7 +2458,7 @@ class KVCacheCalc:
     h100_mem_gb_str = fmt_int(h100_mem.m_as(GiB), commas=False, suffix=' GB')
     batch8_kv_fp16_gb_str = fmt(batch8_kv_fp16_gb, precision=1, commas=False, suffix=' GB')
     gqa_kv_fp16_gb_str = fmt(gqa_kv_fp16_gb, precision=1, commas=False, suffix=' GB')
-    gqa_kv_heads = 8
+    gqa_kv_heads = _model.kv_heads or _model.heads
     kv_fp16_formula_math = MarkdownStr(
         rf"2 \times {kv_layers} \times {kv_heads} \times {kv_head_dim} \times {kv_seq_len} \times 2 "
         rf"\approx {kv_fp16_gb:.1f}"
@@ -3106,12 +3109,15 @@ class TpSpeedupCalc:
     """Compute realized speedup vs theoretical for 8-way tensor parallelism on 8xH100."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    _model = Models.Language.Llama2_70B
     seq_per_layer_ms = 30.0    # sequential compute per layer (attention + FF, 1 GPU)
     tp8_per_layer_ms = 4.35    # 8-way TP per layer (compute sharded + AllReduce overhead)
     tp_theoretical = 8         # linear scaling limit
-    n_layers = 80              # Llama-70B transformer layer count
-    hidden_dim = 8192
-    weight_fp16_gb = 140
+    n_layers = _model.layers
+    hidden_dim = _model.hidden_dim
+    attention_heads = _model.heads
+    weight_fp16_gb = _model.size_in_bytes(BYTES_FP16).m_as(GB)
+    parameters_b = _model.parameters.m_as(Bparam)
     activation_mb = 8
     nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth
 
@@ -3133,6 +3139,8 @@ class TpSpeedupCalc:
     tp8_total_ms_str = fmt_int(tp8_total_ms, suffix=' ms')
     tp_theoretical_str = fmt_int(tp_theoretical, commas=False)
     n_layers_str = fmt_int(n_layers, commas=False)
+    parameters_b_str = fmt_int(parameters_b, commas=False)
+    attention_heads_str = fmt_int(attention_heads, commas=False)
     nvlink_h100_gbs_str = fmt_int(nvlink_h100_gbs_val, commas=False, suffix=' GB/s')
     hidden_dim_str = fmt_int(hidden_dim)
     weight_fp16_gb_str = fmt_int(weight_fp16_gb, commas=False, suffix=' GB')
@@ -3145,10 +3153,10 @@ Consider serving Llama-70B with the following configuration: [@touvron2023llama2
 
 **Model specifications**:
 
-- Parameters: 70 billion
+- Parameters: `{python} TpSpeedupCalc.parameters_b_str` billion
 - Hidden dimension: `{python} TpSpeedupCalc.hidden_dim_str`
-- Attention heads: 64
-- Layers: 80
+- Attention heads: `{python} TpSpeedupCalc.attention_heads_str`
+- Layers: `{python} TpSpeedupCalc.n_layers_str`
 
 **Memory per GPU** (weight only, FP16):
 
@@ -3445,16 +3453,31 @@ The communication pattern differs from tensor parallelism: instead of all-reduce
 
 Load balancing challenge: If gating decisions cluster on certain experts, devices hosting popular experts become bottlenecks while others sit idle. MoE training includes auxiliary losses to encourage balanced routing, but inference still exhibits routing imbalance.
 
+```{python}
+#| echo: false
+#| label: mixtral-8x7b-registry-spec
+from mlsysim.fmt import fmt_int
+
+class Mixtral8x7BSpec:
+    """Book-facing Mixtral fields sourced from the model registry."""
+
+    _model = Models.Language.Mixtral_8x7B
+    total_params_b_str = fmt_int(_model.parameters.m_as(Bparam), commas=False)
+    active_params_b_str = fmt_int(_model.active_parameters.m_as(Bparam), commas=False)
+    experts_str = fmt_int(_model.experts, commas=False)
+    active_experts_str = fmt_int(_model.active_experts_per_token, commas=False)
+```
+
 ::: {#exmp-inference-expert-parallelism-mixtral-8x7b .callout-example title="Expert parallelism for Mixtral-8x7B"}
 
-Mixtral-8x7B uses 8 experts per MoE layer with top-2 routing:
+Mixtral-8x7B uses `{python} Mixtral8x7BSpec.experts_str` experts per MoE layer with top-`{python} Mixtral8x7BSpec.active_experts_str` routing:
 
 **Model characteristics**:
 
-- Total parameters: 47B (but only ~13B active per token)
-- Experts per layer: 8
-- Active experts per token: 2 (top-$k$ = 2)
-- MoE layers: Every feed-forward layer (each FFN replaced by an 8-expert MoE block)
+- Total parameters: `{python} Mixtral8x7BSpec.total_params_b_str`B (but only ~`{python} Mixtral8x7BSpec.active_params_b_str`B active per token)
+- Experts per layer: `{python} Mixtral8x7BSpec.experts_str`
+- Active experts per token: `{python} Mixtral8x7BSpec.active_experts_str` (top-$k$ = `{python} Mixtral8x7BSpec.active_experts_str`)
+- MoE layers: Every feed-forward layer (each FFN replaced by a `{python} Mixtral8x7BSpec.experts_str`-expert MoE block)
 
 **Sharding strategy** (4-way expert parallelism):
 
