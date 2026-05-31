@@ -196,6 +196,17 @@ suffix is the documented `GPU-days` compound. Verification: py_compile PASS;
 PASS (161 tests); `fmt_prose_contract` 0; `codemod_fmt queue` empty;
 substituted prose semantic audit CLEAN across 81 files.
 
+**NOW done:** Benchmarking millisecond time suffixes — migrated 25
+`suffix=" ms"` sites in `vol1/benchmarking/benchmarking.qmd` to
+`fmt_time(..., "ms")`, byte-identical by `assess_equiv` across 240 value exports
+and 102 substituted prose lines. Explicit `commas=False` was preserved for this
+migration; redundant comma arguments are deferred to the formatter-default
+cleanup pass. `audit_fmt_usage.py` now reports 25 `fmt_time` calls and the
+`time_unit` suffix bucket down to 623. Verification: py_compile PASS;
+`git diff --check` PASS; `./book/binder check math` PASS; focused pytest suite
+PASS (161 tests); `fmt_prose_contract` 0; `codemod_fmt queue` empty;
+substituted prose semantic audit CLEAN across 81 files.
+
 **NEXT:**
 1. Add a formatter-default cleanup pass after the semantic lanes: each
    formatter should own comma defaults by value kind, and explicit `commas=`

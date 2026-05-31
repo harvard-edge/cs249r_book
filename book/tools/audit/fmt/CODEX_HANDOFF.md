@@ -172,6 +172,16 @@ intentional overrides. Expected defaults: currency/count/rate helpers group
 large numbers; compact physical/time quantities, percentages, percentage
 points, ratios, and multipliers default to no grouping unless overridden.
 
+**A11 — Benchmarking millisecond time suffixes: DONE.**
+25 `suffix=" ms"` sites in `vol1/benchmarking/benchmarking.qmd` moved to
+`fmt_time(..., "ms")`, byte-identical values and inline prose. Explicit
+`commas=False` was preserved for now; removing redundant comma overrides belongs
+to A10. `audit_fmt_usage.py` now reports `fmt_time` calls at 25 and the
+`time_unit` suffix bucket down to 623. Verification: py_compile PASS,
+`git diff --check` PASS, `./book/binder check math` PASS, focused pytest suite
+PASS (161 tests), prose-contract 0, semantic audit 0 findings, codemod queue
+empty.
+
 ### B. WS4 — unit-suffix lane (~2,393 sites: `GB`/`ms`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.
