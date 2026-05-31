@@ -95,7 +95,25 @@ percentage *points*) rendered "26 percent" while prose appended "percentage poin
 → "26 percent percentage points". Fixed to a bare number. (commit `bc3729c676`)
 
 **Verification status (whole corpus):** 81/81 chapters execute headlessly; `fmt_prose_contract`
-**0 violations**; `scan_percent` 0 auto + 0 queued; `pytest` fmt suite 107 passing.
+**0 violations**; **`audit_prose_semantics` 0 findings**; multiplier + percent 100% (0 queued);
+scale 44 queued (deferred — house-style call, see NIGHT_RESUME); `pytest` 119 passing.
+
+**Overnight session (semantic + consistency + render):**
+- NEW gate `audit_prose_semantics.py` (+ 7 tests): executes each chapter, substitutes
+  LEGO values into prose, normalizes LaTeX→visible, flags duplicated glyph/unit,
+  abbr+spelled-word dup, mult-direction ("0.5× faster"), currency-as-percent,
+  unresolved refs. Fixed real unit-dup bugs: data_storage "7.6 PB PB"/"PB petabytes",
+  network_fabrics "2.56 MW megawatts".
+- Killed 4 dangerous glyph-in-suffix stragglers the exact-match lanes missed
+  (compound suffixes): "% annually", "×/year", 2× `row.append(fmt(p*100, suffix="%"))`.
+- `fmt_pp` made grammatically complete (singular/plural + attributive hyphen mode);
+  migrated 14 percentage-point sites to typed fmt_pp byte-identically across 6 chapters;
+  fixed 2 attributive hyphen grammar bugs (model_serving). 4 pp sites left for an
+  editorial call (documented in NIGHT_RESUME).
+- **Phase 3A render verification DONE** for every changed chapter (HTML built + migrated
+  value grepped in rendered output). See NIGHT_RESUME for the fig-cap `title=` tooltip
+  `\times` note (pre-existing book-wide Quarto behavior; visible caption correct).
+- Resume checkpoint: `book/tools/audit/fmt/NIGHT_RESUME.md`.
 
 ### NOT yet started (next lanes, by priority)
 - **WS3 — MarkdownStr (337):** ranges → `fmt_range`; justify/replace the rest. *Judgment-heavy.*
@@ -114,7 +132,9 @@ percentage *points*) rendered "26 percent" while prose appended "percentage poin
 python3 -c "import sys;sys.path.insert(0,'book/tools/audit/fmt');from pathlib import Path;from assess_equiv import snapshot_file;[print('FAIL',f) for f in Path('book/quarto/contents').rglob('*.qmd') if snapshot_file(f)[2]]"
 # glyph-ownership contract (expect no output)
 python3 book/tools/audit/fmt/fmt_prose_contract.py --root book/quarto/contents
-# remaining dangerous suffixes by kind
+# rendered-composite semantic scan (expect "0 finding(s) ... CLEAN")
+python3 book/tools/audit/fmt/audit_prose_semantics.py --root book/quarto/contents
+# remaining dangerous suffixes by kind (expect only {'scale': 44}, deferred)
 python3 book/tools/audit/fmt/codemod_fmt.py queue --root book/quarto/contents
 # dry-run any lane to see what's left
 python3 book/tools/audit/fmt/run_scale_lane.py --all

@@ -37,10 +37,18 @@ python3 -m pytest mlsysim/tests/test_fmt.py book/tests/test_codemod_fmt.py book/
 
 ## NOW / NEXT  (update before every commit)
 
-**Last commit:** _(this commit)_ semantic scanner + unit-dup prose fixes.
+**STATUS: overnight work complete and verified. Safe to review.**
 
 **State:** multiplier + percent 100% migrated; scale-division done (41 sites);
-81/81 chapters exec clean; contract 0 violations; semantic scanner 0 findings.
+pp → typed fmt_pp (14 sites + grammar fixes); 4 dangerous glyph stragglers killed;
+NEW semantic scanner gate (+ unit-dup bug fixes). 81/81 chapters exec clean;
+prose-contract 0; semantic scanner 0; 119 tests pass; ALL changed chapters
+HTML-render-verified. Remaining: scale queue (44, deferred — style call) and
+4 pp editorial sites (documented below). Nothing is half-done or broken.
+
+**If continuing:** the only open items are user-judgment calls (scale house-style,
+4 pp editorial sites) and the optional later phases (PDF/.tex verification, full
+audit_lego_html sweep, flip fmt_semantic_suffix to a global blocker at Phase 4).
 
 **NEW TOOL:** `audit_prose_semantics.py` — executes each chapter, substitutes
 LEGO values into prose, normalizes LaTeX→visible, flags duplicated glyph/unit,
@@ -76,6 +84,45 @@ Gates to keep green (run all three):
 - audit_prose_semantics.py --root book/quarto/contents → 0 findings
 - codemod_fmt.py queue --root book/quarto/contents → only known-deferred
 
+## Render verification (Phase 3A HTML) — DONE for all changed chapters
+Built each changed chapter with `./book/binder build html --volN volN/<ch>
+--skip-hygiene --skip-validate` (~10-20s each) and grepped the rendered HTML for
+the migrated value. ALL PASS:
+- ml_systems "improved only ~20% annually"; model_serving "3.2/5 percentage-point
+  loss" (hyphen) + "0.33 percentage points"; responsible_engr "15/30/5
+  percentage-point" (attributive); benchmarking "±1 percentage point" + "0.9
+  percentage points"; introduction "4.8 percentage points"; ml_workflow "0.1/0.15
+  percentage points"; data_selection "0.5/4.5/5/4 percentage points".
+- data_storage "7.6 PB" x8, ZERO "PB PB"/"PB petabytes"; network_fabrics
+  "consume 2.56 MW just to move light"; appendix_reliability % cells render.
+
+FINDING (sustainable_ai fig-cap): the visible <figcaption> renders `$\times$`
+correctly as a math span ("6.2×/year"), but Quarto copies the caption into the
+figure `title=` hover-tooltip WITHOUT processing math, so the tooltip shows raw
+"6.2\times/year". This is PRE-EXISTING book-wide behavior — the same HTML already
+shows "350,000\times" in another figure's title from an untouched caption ref.
+Not a regression from this migration; visible output is correct. (If the user
+wants tooltips clean, that's a separate book-wide caption-math decision.)
+
+## Scale queue (44 sites) — DEFERRED to a house-style decision (rationale)
+The remaining `codemod_fmt queue` items are all `kind=scale`: `fmt(x, suffix="K"/
+"M"/"B")` where `x` is ALREADY pre-scaled (e.g. `model_params_b = 7` → "7B";
+`_anomaly_k = …m_as(Kparam)` → "70 K"). The auto-migratable form `fmt(x/MILLION,
+suffix="M")` was already done (41 sites, prior commit). These 44 are NOT cleanly
+migratable because:
+  1. The raw count isn't at the call site — `fmt_count(raw, scale=…)` would need
+     an ugly `x * BILLION` reconstruction or pint `.m_as("param")` retracing.
+  2. ~most carry a SPACE ("70 K", "1.2 M"); `fmt_count` emits no space ("70K",
+     "1.2M"), so migrating CHANGES rendered text.
+  3. ZERO correctness risk: a scale glyph can't cause a silent 100x error the way
+     a percent/multiplier can. This is pure typing/consistency.
+DECISION (experienced-eng call): do NOT churn 44 sites + change rendered spacing
+overnight for a marginal consistency gain. This needs ONE house-style ruling from
+the user: **"scaled counts render as `<n><glyph>` no-space (70B / 5.3M / 12K)"?**
+If yes, a follow-up lane migrates all 44 to fmt_count (raw via `.m_as("param")`
+or `* FACTOR`) and normalizes the spacing in one reviewable pass. Until then they
+remain `fmt(..., suffix=…)` — harmless and rendering correctly today.
+
 ## Editorial decisions left for the user (rendered TEXT would change)
 These are latent grammar issues in pre-existing prose. I fixed the isolated,
 unambiguous ones (model_serving fs_acc_drop_str, fc_acc_loss_str → hyphenated
@@ -99,6 +146,8 @@ human editorial call — left as `fmt(..., suffix=" percentage point")` for now:
    noun form reads correctly there too; or split into two exports.
 
 ## Session commit log (newest first)
+- Final: corpus gates green (contract 0, semantic 0, 81/81 exec, 119 tests); all
+  changed chapters HTML-render-verified; MIGRATION.md + NIGHT_RESUME updated.
 - Pass3d: fixed 2 isolated attributive pp grammar bugs (model_serving fs/fc:
   "N percentage point loss" → "N percentage-point loss", hyphenated). Verified.
 - Pass3c: migrated 14 percentage-point sites to fmt_pp BYTE-IDENTICALLY (10 noun,
