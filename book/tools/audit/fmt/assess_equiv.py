@@ -52,8 +52,11 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-# reuse the canonical exec + prose-preview machinery (which uses cell_exec.py)
-from audit_prose import _exec_python_cells, audit_prose_previews  # noqa: E402
+# reuse the canonical exec + ref machinery (which uses cell_exec.py)
+from audit_prose import (  # noqa: E402
+    _exec_python_cells, _resolve_ref, INLINE_PY, CELL_START, CELL_END,
+)
+from visible_text import to_visible  # noqa: E402
 
 
 def collect_value_exports(ns: dict) -> dict:
@@ -71,26 +74,51 @@ def collect_value_exports(ns: dict) -> dict:
     return out
 
 
-def collect_prose_previews(qmd: Path) -> dict:
-    """{ 'L<line>|<sorted refs>' -> composite preview } for every inline-ref line."""
-    previews = audit_prose_previews(qmd)
+def collect_prose_previews(lines: list[str], ns: dict) -> dict:
+    """{ '<sorted refs>' -> visible composite } for every inline-ref prose line.
+
+    Keyed by the *set of refs* (not line number) so the diff is stable under
+    line shifts. The preview substitutes each ref's rendered value into the line
+    then normalizes to visible text, so a Regime-2 glyph relocation
+    (string ``6×`` → ``6`` + prose ``$\\times$``) compares equal.
+    """
     out: dict[str, str] = {}
-    for p in previews:
-        key = f"L{p.line}|{'+'.join(sorted(p.refs))}"
-        out[key] = p.preview
+    in_cell = False
+    for line in lines:
+        if CELL_START.match(line):
+            in_cell = True
+            continue
+        if in_cell and CELL_END.match(line):
+            in_cell = False
+            continue
+        if in_cell:
+            continue
+        refs = INLINE_PY.findall(line)
+        if not refs:
+            continue
+        preview = line
+        for ref in refs:
+            preview = preview.replace(f"`{{python}} {ref}`", _resolve_ref(ref, ns))
+        key = "+".join(sorted(refs))
+        # multiple lines can share a ref-set; keep them distinct by appending
+        base = key
+        i = 1
+        while key in out:
+            key = f"{base}#{i}"
+            i += 1
+        out[key] = to_visible(preview)
     return out
 
 
 def snapshot_file(qmd: Path) -> tuple[dict, dict, list]:
     lines = qmd.read_text(encoding="utf-8").splitlines()
-    failures: list = []
     try:
         ns = _exec_python_cells(lines)
     except RuntimeError as exc:
         return {}, {}, [str(exc)]
     values = collect_value_exports(ns)
-    prose = collect_prose_previews(qmd)
-    return values, prose, failures
+    prose = collect_prose_previews(lines, ns)
+    return values, prose, []
 
 
 def cmd_snapshot(args) -> int:
