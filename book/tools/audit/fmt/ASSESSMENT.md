@@ -226,14 +226,22 @@ Example (A) shows the guard + Regime-1 proof; (B) shows why the migration unit i
 
 ## 7. What must exist for this protocol to run (build order)
 
-1. **Equivalence harness** (`assess_equiv.py`) — §1. ✅ **built & validated** (453 exports
-   captured live from `training.qmd`; `snapshot` + `diff` modes).
-2. **Visible-text normalizer + composite prose check** — §0a Regime 2. *(Next.)*
+1. **Equivalence harness** (`assess_equiv.py`) — §1. ✅ **built, integrated & validated.**
+   Reuses `cell_exec.py` + `audit_prose.py` (no duplicate exec). `snapshot` (values +
+   prose), `baseline --ref` (git rev), `diff`. Round-trip on `training.qmd`: 453 value
+   exports + 214 prose lines, IDENTICAL @HEAD. Ground truth stays `audit_lego_html.py`.
+2. **Visible-text normalizer** — §0a Regime 2. `audit_prose.py` collapses `$\times$`→
+   `[math]`, hiding the multiplier glyph; a normalizer rendering `$\times$`→`×`,
+   `$\eta=85\%$`→`85%`, etc., is required so the composite prose-diff can *prove*
+   Regime-2 equivalence. *(Next.)*
 3. **Prose-contract checker** (`fmt_prose_contract.py`) — §3 (I2).
-4. **Codemod** (`codemod_fmt.py`) — provable rewrites + queue (feeds G0/G1); must emit
-   **paired** OUTPUT+prose edits for Regime 2.
-5. **`fmt_range`** — retire unguarded `MarkdownStr` ranges before they reach G1.
-6. Wire G0–G7 into a single `binder`-driven per-chapter runner that writes the log + ledger.
+4. **Codemod** (`codemod_fmt.py`) — provable rewrites + queue (feeds G0/G1); emits
+   **paired** OUTPUT+prose edits for Regime 2; percent → `style='prose'` in body,
+   `style='symbol'` in tables (MIT rule).
+5. **`fmt_range`** — typed range; MIT spec: **en-dash + all digits** (`1992–1993`).
+6. Per-chapter runner = the existing L0–L5 loop (`render_html.sh` → `audit_lego_html.py`
+   → `chapter_html_verify.py`) **plus** `assess_equiv diff` (G1/G4) and
+   `fmt_semantic_suffix` (G5). Extend, don't parallel.
 
 Until the harness + composite check exist, **no chapter is migrated.** Tooling first,
 then the loop.

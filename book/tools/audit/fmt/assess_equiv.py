@@ -1,59 +1,69 @@
 #!/usr/bin/env python3
 """
-assess_equiv.py — Equivalence harness for the fmt migration (Gates G1/G4/G6).
+assess_equiv.py — Before/after EQUIVALENCE diff for the fmt migration.
 
-Quarto runs a chapter's ```{python}``` cells sequentially in ONE shared kernel,
-so we can reproduce the runtime by exec'ing the cells into one namespace and
-snapshotting every exported ``*_str`` value (module-level OR class attribute).
+This is the migration's value-equivalence gate. It does NOT reimplement cell
+execution — it reuses the existing audit stack:
 
-This gives the migration its core guarantee: for each rewritten OUTPUT site we
-can prove, on the *real data*, that the rendered string is byte-identical
-before and after — or flag it for adjudication. No render required.
+  * ``cell_exec.py``      — headless shared-namespace exec (matplotlib-safe)
+  * ``audit_prose.py``    — exec cells + substitute ``{python}`` refs into prose
+                            (the *composite* "value-in-prose" preview)
 
-Modes
------
-  snapshot  : exec a chapter, dump {dotted_name -> rendered_str} as JSON.
-  diff      : snapshot two versions (e.g. baseline vs working tree) and report
-              every ``*_str`` whose rendered value changed.
+What it adds on top: a **before vs after diff**, keyed so a refactor can be
+*proven* value-preserving on real data without a full Quarto render.
+
+Two equivalence views (see ASSESSMENT.md §0a — the two I1 regimes):
+
+  values : snapshot every ``*_str`` export (module + class attr) keyed by dotted
+           name. Regime 1 (string-preserving: usd/percent/pp/count/qty) must be
+           byte-identical here.
+  prose  : snapshot every inline-ref line's rendered *composite* preview
+           (value ⊕ surrounding prose). Regime 2 (fmt_multiple moves ``×`` into
+           prose as ``$\\times$``) is proven here, where the string deliberately
+           changes but the visible prose does not.
+
+Ground truth remains ``audit_lego_html.py`` (refs vs real rendered HTML); this
+harness is the fast pre-render proof that feeds it.
 
 Usage
 -----
-  python3 book/tools/audit/fmt/assess_equiv.py snapshot \\
-      --qmd book/quarto/contents/vol1/training/training.qmd \\
-      [--json /tmp/fmt_assess/training.values.json] [--show NAME ...]
+  # snapshot current working tree
+  PYTHONPATH=mlsysim python3 .../assess_equiv.py snapshot --qmd CH.qmd \\
+      --json /tmp/fmt_assess/ch.values.json [--prose /tmp/fmt_assess/ch.prose.json]
 
-  python3 book/tools/audit/fmt/assess_equiv.py diff \\
-      --before /tmp/before.json --after /tmp/after.json
+  # snapshot a git revision of the same file (baseline), then diff
+  PYTHONPATH=mlsysim python3 .../assess_equiv.py baseline --qmd CH.qmd \\
+      --ref HEAD --out /tmp/fmt_assess/ch.before
+  PYTHONPATH=mlsysim python3 .../assess_equiv.py snapshot --qmd CH.qmd \\
+      --json /tmp/fmt_assess/ch.after.values.json --prose /tmp/fmt_assess/ch.after.prose.json
+  PYTHONPATH=mlsysim python3 .../assess_equiv.py diff \\
+      --before /tmp/fmt_assess/ch.before.values.json \\
+      --after  /tmp/fmt_assess/ch.after.values.json
 
-Exit codes: 0 = clean (or snapshot ok); 3 = diff found; 2 = a cell failed to exec.
+Exit: 0 identical/ok · 2 a cell failed to exec · 3 a difference was found.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
-# reuse the audited cell extractor so we parse cells identically everywhere
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from audit_fmt_usage import extract_python_cells  # noqa: E402
+# reuse the canonical exec + prose-preview machinery (which uses cell_exec.py)
+from audit_prose import _exec_python_cells, audit_prose_previews  # noqa: E402
 
 
-def _collect_str_exports(ns: dict) -> dict:
-    """Return {dotted_name -> str(value)} for every *_str export.
-
-    Captures module-level names AND class attributes (the book's LEGO cells
-    assign exports as attributes of a per-cell class, e.g.
-    ``TrainingScenarios.foo_str``), matching how prose references them
-    (``{python} TrainingScenarios.foo_str``).
-    """
+def collect_value_exports(ns: dict) -> dict:
+    """{dotted_name -> str(value)} for every *_str export (module + class attr)."""
     out: dict[str, str] = {}
     for name, val in list(ns.items()):
         if name.startswith("__"):
             continue
         if name.endswith("_str") and isinstance(val, str):
             out[name] = str(val)
-        # class defined in the cell: walk its own attributes
         if isinstance(val, type):
             for attr, aval in vars(val).items():
                 if attr.endswith("_str") and isinstance(aval, str):
@@ -61,68 +71,107 @@ def _collect_str_exports(ns: dict) -> dict:
     return out
 
 
-def snapshot(qmd: Path) -> tuple[dict, list]:
-    """Exec every code cell of *qmd* in one namespace; return (exports, failures)."""
-    text = qmd.read_text(encoding="utf-8", errors="replace")
-    ns: dict = {"__name__": "__mlsys_assess__"}
-    failures = []
-    for fence_line, cell in extract_python_cells(text):
-        if not cell.strip():
-            continue
-        try:
-            code = compile(cell, f"{qmd}:cell@{fence_line}", "exec")
-            exec(code, ns)  # noqa: S102  (trusted, first-party chapter code)
-        except Exception as exc:  # noqa: BLE001
-            failures.append({"fence_line": fence_line,
-                             "error": f"{type(exc).__name__}: {exc}"})
-    return _collect_str_exports(ns), failures
+def collect_prose_previews(qmd: Path) -> dict:
+    """{ 'L<line>|<sorted refs>' -> composite preview } for every inline-ref line."""
+    previews = audit_prose_previews(qmd)
+    out: dict[str, str] = {}
+    for p in previews:
+        key = f"L{p.line}|{'+'.join(sorted(p.refs))}"
+        out[key] = p.preview
+    return out
+
+
+def snapshot_file(qmd: Path) -> tuple[dict, dict, list]:
+    lines = qmd.read_text(encoding="utf-8").splitlines()
+    failures: list = []
+    try:
+        ns = _exec_python_cells(lines)
+    except RuntimeError as exc:
+        return {}, {}, [str(exc)]
+    values = collect_value_exports(ns)
+    prose = collect_prose_previews(qmd)
+    return values, prose, failures
 
 
 def cmd_snapshot(args) -> int:
-    exports, failures = snapshot(Path(args.qmd))
+    values, prose, failures = snapshot_file(Path(args.qmd))
     if failures:
-        print(f"[exec] {len(failures)} cell(s) failed:", file=sys.stderr)
         for f in failures:
-            print(f"  line {f['fence_line']}: {f['error']}", file=sys.stderr)
+            print(f"[exec] {f}", file=sys.stderr)
+        return 2
     if args.show:
         for name in args.show:
-            hits = {k: v for k, v in exports.items() if k.endswith(name) or k == name}
-            for k, v in sorted(hits.items()):
-                print(f"  {k} = {v!r}")
+            for k, v in sorted(values.items()):
+                if k == name or k.endswith(name):
+                    print(f"  {k} = {v!r}")
     if args.json:
         Path(args.json).parent.mkdir(parents=True, exist_ok=True)
-        Path(args.json).write_text(json.dumps(exports, indent=2, sort_keys=True))
-        print(f"[snapshot] {len(exports)} exports -> {args.json}")
-    else:
-        print(f"[snapshot] {len(exports)} *_str exports "
-              f"({len(failures)} cell failures)")
-    return 2 if failures else 0
+        Path(args.json).write_text(json.dumps(values, indent=2, sort_keys=True))
+        print(f"[values] {len(values)} exports -> {args.json}")
+    if args.prose:
+        Path(args.prose).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.prose).write_text(json.dumps(prose, indent=2, sort_keys=True))
+        print(f"[prose ] {len(prose)} inline-ref lines -> {args.prose}")
+    if not (args.json or args.prose or args.show):
+        print(f"[snapshot] {len(values)} value exports, "
+              f"{len(prose)} prose lines")
+    return 0
+
+
+def cmd_baseline(args) -> int:
+    """Materialize a git revision of --qmd, snapshot it to <out>.{values,prose}.json."""
+    qmd = Path(args.qmd)
+    try:
+        repo_rel = subprocess.check_output(
+            ["git", "ls-files", "--full-name", str(qmd)], text=True).strip()
+        blob = subprocess.check_output(
+            ["git", "show", f"{args.ref}:{repo_rel}"], text=True)
+    except subprocess.CalledProcessError as exc:
+        print(f"git error materializing {args.ref}:{qmd}: {exc}", file=sys.stderr)
+        return 2
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td) / qmd.name
+        tmp.write_text(blob, encoding="utf-8")
+        values, prose, failures = snapshot_file(tmp)
+    if failures:
+        for f in failures:
+            print(f"[exec @{args.ref}] {f}", file=sys.stderr)
+        return 2
+    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+    Path(f"{args.out}.values.json").write_text(
+        json.dumps(values, indent=2, sort_keys=True))
+    Path(f"{args.out}.prose.json").write_text(
+        json.dumps(prose, indent=2, sort_keys=True))
+    print(f"[baseline @{args.ref}] {len(values)} values, {len(prose)} prose "
+          f"-> {args.out}.{{values,prose}}.json")
+    return 0
+
+
+def _diff_maps(before: dict, after: dict, label: str) -> int:
+    keys = sorted(set(before) | set(after))
+    changed = [(k, before[k], after[k]) for k in keys
+               if k in before and k in after and before[k] != after[k]]
+    dropped = [k for k in keys if k in before and k not in after]
+    added = [k for k in keys if k in after and k not in before]
+    if changed:
+        print(f"CHANGED {label} (must be adjudicated):")
+        for k, b, a in changed:
+            print(f"  {k}:\n    - {b!r}\n    + {a!r}")
+    if dropped:
+        print(f"DROPPED {label}: {dropped}")
+    if added:
+        print(f"ADDED {label}: {added}")
+    if not (changed or dropped or added):
+        print(f"IDENTICAL {label}: no change. ✓")
+        return 0
+    return 3
 
 
 def cmd_diff(args) -> int:
     before = json.loads(Path(args.before).read_text())
     after = json.loads(Path(args.after).read_text())
-    keys = sorted(set(before) | set(after))
-    changed, dropped, added = [], [], []
-    for k in keys:
-        if k not in after:
-            dropped.append(k)
-        elif k not in before:
-            added.append(k)
-        elif before[k] != after[k]:
-            changed.append((k, before[k], after[k]))
-    if changed:
-        print("CHANGED (rendered value differs — must be adjudicated):")
-        for k, b, a in changed:
-            print(f"  {k}: {b!r} -> {a!r}")
-    if dropped:
-        print(f"DROPPED exports: {dropped}")
-    if added:
-        print(f"ADDED exports: {added}")
-    if not (changed or dropped or added):
-        print("IDENTICAL: every *_str export renders the same. Pure refactor. ✓")
-        return 0
-    return 3
+    label = "values" if "value" in Path(args.before).name else "prose"
+    return _diff_maps(before, after, label)
 
 
 def main() -> int:
@@ -130,9 +179,15 @@ def main() -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("snapshot")
     s.add_argument("--qmd", required=True)
-    s.add_argument("--json", default=None)
+    s.add_argument("--json", default=None, help="write value-export snapshot")
+    s.add_argument("--prose", default=None, help="write prose-preview snapshot")
     s.add_argument("--show", nargs="*", default=None)
     s.set_defaults(fn=cmd_snapshot)
+    b = sub.add_parser("baseline")
+    b.add_argument("--qmd", required=True)
+    b.add_argument("--ref", default="HEAD")
+    b.add_argument("--out", required=True, help="prefix; writes .values.json/.prose.json")
+    b.set_defaults(fn=cmd_baseline)
     d = sub.add_parser("diff")
     d.add_argument("--before", required=True)
     d.add_argument("--after", required=True)

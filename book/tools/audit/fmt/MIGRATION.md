@@ -6,6 +6,33 @@
 > carrying semantic meaning. The migration is **one-time, global, and must ship zero
 > wrong numbers.** Authoritative rules: `.claude/rules/fmt.md`.
 
+## Sources of truth (our rules DERIVE from these)
+
+| Source | Location | What it dictates |
+|---|---|---|
+| **MIT Press copyeditor style sheet** | `~/Desktop/MIT_Press_Feedback/13_style_rules/data/style_sheet.txt` | **Spell out "percent"** in body (`%` ok in tables/eqns); **en-dash + all digits** in ranges (`1992–1993`); **abbreviate** units of measure |
+| MIT Pass 03 (percent) | `~/Desktop/MIT_Press_Feedback/03_percent/PLAN.md` | ~2,650 `%`→"percent" annotations; the 3 contexts (prose, inline-py + `%`, string-internal `%`) |
+| Existing LEGO verification plan | `~/Desktop/MLSysBook-LEGO-HTML-Verification-Plan.md` | L0–L5 layered audit + per-chapter loop we **extend, not replace** |
+| `math.md §6 #14` | AIConfigs rules | multiplier glyph must be LaTeX `$\times$` in prose, never literal `×` |
+
+**Percent target (MIT-grounded, overrides "preserve"):** computed body-prose percents
+→ `fmt_percent(style='prose')` → `"71.1 percent"` (matches the hardcoded body prose,
+already spelled out); tables/equations/captions → `style='symbol'` → `"71.1%"`.
+
+**Coordination:** MIT Pass 03 percent work also exists on `shashank/feat/mitpress-vol1-copyedit-r1`
+(not in `dev`, different convention — glyph in prose). **Decision: typed `fmt_percent` is
+canonical**; that branch rebases/defers to it.
+
+## Reuse, do not reinvent (decision: integrate)
+
+The migration runs **inside** the existing audit stack:
+`cell_exec.py` (exec), `audit_prose.py` (exec + ref-substitution → composite preview),
+`audit_lego_html.py` (**ground truth**: every `{python}` ref vs rendered HTML),
+`render_html.sh`, `chapter_html_verify.py`, the focal queues/ledgers in
+`book/tools/audit/artifacts/`. New pieces are only: the typed formatters, the
+`fmt_semantic_suffix` gate, `assess_equiv.py` (before/after value+prose **diff**, reuses
+the above), the paired codemod, and `fmt_range`.
+
 ## Why this exists
 
 `fmt(x, suffix=' percent')` and friends let a 0–1 ratio silently render as `8500 percent`.
