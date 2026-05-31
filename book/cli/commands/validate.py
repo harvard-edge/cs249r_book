@@ -439,7 +439,7 @@ class ValidateCommand:
             Scope("lego-equations", "_run_lego_equations",
                   note="A/B=C prose lines must match computed values", default=False),
             Scope("lego-units", "_run_lego_units",
-                  note="LEGO unit discipline (warning-only + baseline)", default=False),
+                  note="LEGO unit discipline (warning-only + baseline)", default=True),
             # Added 2026-05-26: \\${python} collision — escaped dollar before
             # {python} silently fails to render; correct form is \\$\\`{python}.
             Scope("python-dollar-collision", "_run_python_dollar_collision",
