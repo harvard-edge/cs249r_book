@@ -191,6 +191,42 @@ Validation details:
   `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
   0 findings across 81 files.
 
+## 2026-05-31 — Resource-time count-label relocation
+
+Change type: byte-identical formatter relocation. Replaced 15 straightforward
+resource-time suffixes with strict `fmt_count(..., label=..., plural_label=...)`
+calls: `PFLOP-days`, `TPUv4-hours`, `person-years`, `instance-seconds`,
+`GPU-hours`, and `GPU-hr`.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol1/data_engineering/data_engineering.qmd` | 2 | 203 | 99 | identical values + prose |
+| `vol1/ml_systems/ml_systems.qmd` | 1 | 296 | 143 | identical values + prose |
+| `vol1/data_selection/data_selection.qmd` | 5 | 250 | 128 | identical values + prose |
+| `vol1/responsible_engr/responsible_engr.qmd` | 4 | 168 | 79 | identical values + prose |
+| `vol1/model_serving/model_serving.qmd` | 1 | 365 | 172 | identical values + prose |
+| `vol2/inference/inference.qmd` | 1 | 208 | 119 | identical values + prose |
+| `vol2/ops_scale/ops_scale.qmd` | 1 | 195 | 95 | identical values + prose |
+
+Validation details:
+
+- Before/after snapshots were generated with `assess_equiv.py baseline --ref HEAD`
+  and `assess_equiv.py snapshot` under `/tmp/fmt_resource_time_*`.
+- `assess_equiv.py diff` reported `IDENTICAL values` and `IDENTICAL prose` for
+  every touched chapter.
+- `audit_fmt_usage.py` reports `fmt_count` calls increased to 246. Remaining
+  suffix buckets: `physical_unit` 1,126; `unit_rate_or_denominator` 16;
+  `compound_scale` 14; `op_count` 12; `resource_time` 4; `time_compound` 4.
+- The four remaining `resource_time` sites are hyphenated attributive forms
+  (`-hour`, `-minute`) and are intentionally deferred to a prose/API decision.
+- Verification: `python3 -m py_compile mlsysim/mlsysim/fmt.py book/tools/audit/fmt/audit_fmt_usage.py` PASS;
+  `git diff --check` PASS; `./book/binder check math` PASS; focused pytest
+  suite PASS, 176 tests; `fmt_prose_contract.py` PASS, 0 violations;
+  `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
+  0 findings across 81 files.
+
 ## 2026-05-31 — Remaining suffix bucket split and epoch label
 
 Change type: audit improvement plus byte-identical formatter relocation.

@@ -66,7 +66,8 @@ Plus the test suite (keep at 100%):
 ```
 python3 -m pytest mlsysim/tests/test_fmt.py book/tests/test_codemod_fmt.py \
   book/tests/test_fmt_prose_contract.py book/tests/test_audit_prose_semantics.py \
-  book/tests/test_visible_text.py -q -o addopts=''
+  book/tests/test_visible_text.py book/tests/test_fmt_semantic_suffix.py \
+  book/tests/test_lego_dead_code.py -q -o addopts=''
 ```
 Gate 1 = glyph ownership (static AST). Gate 2 = rendered-composite semantics
 (executes chapters, substitutes values, flags dup unit/glyph, percent-vs-points,
@@ -417,6 +418,22 @@ byte-identical across `frameworks`, `data_engineering`, `introduction`, and
 `model_serving`. `audit_fmt_usage.py` now reports `fmt_time` at 657 and
 `time_compound` down to 4. The four remaining time compounds are prose/API
 decisions (`ms latency`, `ms round-trip`, `ms+`). Verification: `git diff
+--check` PASS; py_compile PASS; focused pytest suite PASS (176 tests);
+`fmt_prose_contract.py` 0; `codemod_fmt.py queue` `by kind: {}`;
+`./book/binder check math` PASS; `audit_prose_semantics.py` CLEAN across 81
+files.
+
+**A32 — Resource-time count-label lane: DONE.**
+Migrated 15 straightforward resource-time suffixes to `fmt_count(..., label=...)`:
+`PFLOP-days`, `TPUv4-hours`, `person-years`, `instance-seconds`, `GPU-hours`,
+and `GPU-hr`. Values and substituted prose were byte-identical across
+`data_engineering`, `ml_systems`, `data_selection`, `responsible_engr`,
+`model_serving`, `inference`, and `ops_scale`. `audit_fmt_usage.py` now reports
+`fmt_count` at 246 and remaining suffix buckets as: `physical_unit` 1,126,
+`unit_rate_or_denominator` 16, `compound_scale` 14, `op_count` 12,
+`resource_time` 4, and `time_compound` 4. The four remaining resource-time sites
+are the hyphenated attributive forms (`-hour`, `-minute`), which are prose/API
+decisions rather than simple plural count labels. Verification: `git diff
 --check` PASS; py_compile PASS; focused pytest suite PASS (176 tests);
 `fmt_prose_contract.py` 0; `codemod_fmt.py queue` `by kind: {}`;
 `./book/binder check math` PASS; `audit_prose_semantics.py` CLEAN across 81

@@ -97,12 +97,19 @@ Four denominator-style time compounds (`s/hr`, `hours/day`, `μs/op`, `ms/step`)
 now use `fmt_time(..., per=...)` byte-identically, leaving only four
 prose-adjective/lower-bound time compounds (`ms latency`, `ms round-trip`,
 `ms+`) for manual wording/API decisions.
+Straightforward resource-time labels are now also migrated: `PFLOP-days`,
+`TPUv4-hours`, `person-years`, `instance-seconds`, `GPU-hours`, and `GPU-hr`
+use `fmt_count(..., label=...)` byte-identically across 7 chapters. The
+`resource_time` suffix bucket is down to 4, all hyphenated attributive forms
+(`-hour`, `-minute`) that need wording/API decisions rather than silent count
+label migration.
 Remaining: the rest of WS4/WS3 and later PDF/lock phases. Nothing is half-done
 or broken.
 
 **If continuing:** Continue with semantic lanes in `PLAN_OF_RECORD.md`. Good next
-targets are physical-unit suffixes, compound scale/rate/ops suffixes, then
-MarkdownStr sites and the API-clarity pass.
+targets are physical-unit suffixes, compound scale/rate/ops suffixes, the four
+hyphenated attributive time/resource-time suffixes, then MarkdownStr sites and
+the API-clarity pass.
 For physical Quantity-backed sites, continue WS4 with
 `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/run_unit_lane.py --write <qmd>`
 one chapter at a time. The latest all-chapter run migrated the remaining
@@ -504,6 +511,12 @@ drop. The adjacent prose/table text was updated to `1 percentage-point threshold
 and `(drop of 6.8 percentage points)`. No user-decision items remain open.
 
 ## Session commit log (newest first)
+- Codex resource-time count-label lane: migrated 15 straightforward
+  resource-time suffixes (`PFLOP-days`, `TPUv4-hours`, `person-years`,
+  `instance-seconds`, `GPU-hours`, `GPU-hr`) to `fmt_count(label=...)`
+  byte-identically across 7 chapters; resource_time suffixes are down to 4
+  hyphenated attributive decision sites; contract 0, semantic 0, queue empty,
+  targeted suite 176 passing.
 - Codex WS4 `distributed_training` partial batch: migrated 15 clean
   Quantity-backed unit suffix sites to `fmt_qty`; 5 `80 GB`→`80 GiB` candidates
   left queued; fixed pre-existing `600 GB/s+ GB/s` prose; extended semantic

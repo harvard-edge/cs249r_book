@@ -128,6 +128,11 @@ domain-specific. The label API is strict:
   `1M parameters`.
 - Labels must be clean count nouns, not units, rates, currency, percent, or
   multiplier expressions.
+- Resource-time count nouns such as `GPU-hour`, `TPUv4-hour`, `PFLOP-day`,
+  `person-year`, and `instance-second` use `fmt_count(..., label=...)` when the
+  value is a tally of those resource-time buckets. Hyphenated attributive prose
+  such as `100,000-hour` or `10-minute` is not the same thing and remains a
+  separate wording/API decision.
 
 If one noun becomes frequent and mistake-prone, add a thin wrapper such as
 `fmt_gpus(n)` only after the audit shows that it removes real risk.
