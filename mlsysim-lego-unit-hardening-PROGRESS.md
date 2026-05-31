@@ -18,7 +18,8 @@
 | `vol1/introduction/introduction.qmd` | **DONE** (0 `.m_as()` in LEGO) |
 | `vol1/ml_systems/ml_systems.qmd` | **DONE** (0 `.m_as()` in LEGO) |
 | `vol1/ml_workflow/ml_workflow.qmd` | **DONE** (0 `.m_as()` in LEGO) |
-| Next per `_quarto-html-vol1.yml` | TBD (check manifest) |
+| `vol1/data_engineering/data_engineering.qmd` | **DONE** (0 `.m_as()` in LEGO) |
+| Next per `_quarto-html-vol1.yml` | `nn_computation.qmd` |
 
 ## ml_systems.qmd — migrated this session
 
@@ -28,7 +29,8 @@ HardwareSpectrumSetup, DeploymentThresholdsTable, GPT3TrainingScale, CloudEdgeTC
 
 | SHA | Summary |
 |-----|---------|
-| (pending) | ml_workflow.qmd complete |
+| (pending) | data_engineering.qmd complete |
+| `afb322c0e3` | ml_workflow.qmd complete |
 | `ac0618fabf` | ml_systems.qmd complete |
 | `faa2531d22` | ResNet pitfall + EnergyInference |
 | `692941bb27` | Edge fleet TCO + mobile constraint cells |
