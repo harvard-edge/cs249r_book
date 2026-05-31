@@ -9,17 +9,24 @@
 | Step | Status | Notes |
 |------|--------|-------|
 | 1–13 — MLSysIM infra + lint | DONE | units, physics, domain formatters, lint_lego_units.py |
-| 14+ — QMD migration | **DONE** | All Vol I + Vol II chapters and appendices |
+| 14+ — QMD migration | DONE | All Vol I + Vol II chapters and appendices |
+| Closure — L019 + baseline | DONE | `.m_as()` blocking error; baseline refreshed (411 warnings) |
 
 ## Migration summary
 
 - Bulk `.m_as(unit)` → `.to(unit).magnitude` via `book/tools/scripts/migrate_lego_m_as.py` (~1,235 replacements).
 - Remaining `.m_as(` references are **comment-only** (5 files, LEGO header docs).
-- Manual fixes: `US` (microsecond) vs `USD`, `'B'` (byte) vs `Bparam`, missing `USD`/`kg`/`param` imports, fmt precision guards.
-- Full-book LEGO exec test: **ALL OK** (all `{python}` blocks in `book/quarto/contents`).
+- **L019** promotes `.m_as(` to pre-commit **error** (default `--fail-on error`).
+- Warning baseline: `book/tools/audit/lego_units_baseline.json` (411 entries, post-migration).
+- Full-book LEGO exec test: **ALL OK**.
 
-## All chapters — DONE (0 `.m_as()` in LEGO code)
+## Next (plan closure phases)
 
-Vol I: introduction, ml_systems, ml_workflow, data_engineering, nn_computation, nn_architectures, frameworks, training, data_selection, model_compression, hw_acceleration, benchmarking, model_serving, ml_ops, responsible_engr, conclusion, appendices (algorithm, machine, data, assumptions).
+| Phase | Status |
+|-------|--------|
+| 9A — HTML render every chapter | pending |
+| 9B — PDF render every chapter | pending |
+| 9C — full volume HTML/PDF + pre-commit + pytest | pending |
+| 10 — merge fmt-fix → dev | pending |
 
-Vol II: introduction, compute_infrastructure, data_storage, distributed_training, performance_engineering, network_fabrics, inference, edge_intelligence, ops_scale, fleet_orchestration, collective_communication, fault_tolerance, security_privacy, sustainable_ai, robust_ai, conclusion, appendices (fleet, communication, reliability, assumptions, c3, dam, inference).
+Promote additional lint rules (L014, L015, L017, …) incrementally as warning debt is cleared.

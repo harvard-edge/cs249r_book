@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Warning-only LEGO unit discipline linter for QMD cells."""
+"""LEGO unit discipline linter for QMD cells (warnings + blocking errors)."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ class LintIssue:
 
 RULES = (
     "L001", "L002", "L003", "L004", "L006", "L007", "L008", "L009",
-    "L014", "L015", "L016", "L017",
+    "L014", "L015", "L016", "L017", "L019",
 )
 
 CLOSED_UNIT_SUFFIX = re.compile(
@@ -43,7 +43,9 @@ MASG_TO_CLOSED = re.compile(
     r"^\s*(?P<name>\w+_(?:w|kw|mw|j|wh|kwh|mwh|gb|tb|ms|s|kg|tonnes?)_str)\s*=.*\.m_as\s*\(",
     re.M | re.I,
 )
-FMT_QTY_SCALAR = re.compile(r"fmt_qty\s*\(\s*\w+\.m_as\s*\(")
+FMT_QTY_SCALAR = re.compile(
+    r"fmt_qty\s*\(\s*\w+\.(?:m_as\s*\(|to\([^)]+\)\.magnitude)"
+)
 RAW_FMT_SUFFIX = re.compile(
     r"fmt\s*\([^)]*suffix\s*=\s*['\"]\s*(?:GB|TB|MB|kWh|MWh|TFLOP|W|MW|ms|s)\b"
 )
@@ -80,21 +82,33 @@ def lint_file(path: Path, root: Path) -> list[LintIssue]:
         for i, line in enumerate(block.splitlines(), start=1):
             lineno = base_line + i
             if FMT_QTY_SCALAR.search(line):
-                issues.append(LintIssue("L001", rel, lineno, "fmt_qty requires Quantity, not .m_as(...)."))
+                issues.append(LintIssue(
+                    "L001", rel, lineno,
+                    "fmt_qty requires Quantity, not .m_as(...) or .to(...).magnitude.",
+                ))
             if RAW_FMT_SUFFIX.search(line):
                 issues.append(LintIssue("L002", rel, lineno, "Use fmt_qty or domain formatter for physical units."))
-            if re.search(r"=\s*\w+\.m_as\(", line) and re.search(r"\*\s*(?:GB|TB|watt|MW|joule|second)\b", line):
-                issues.append(LintIssue("L003", rel, lineno, "Avoid reattaching units after .m_as()."))
+            if re.search(r"=\s*\w+\.(?:m_as|to)\(", line) and re.search(
+                r"\*\s*(?:GB|TB|watt|MW|joule|second)\b", line
+            ):
+                issues.append(LintIssue("L003", rel, lineno, "Avoid reattaching units after scalar extraction."))
             if re.search(r"(energy_mwh|carbon|tonnes)\s*=.*(?:/\s*THOUSAND|\*\s*THOUSAND)", line, re.I):
                 issues.append(LintIssue("L004", rel, lineno, "Use energy_from_power/carbon_from_energy helpers."))
             if UNIT_LABEL.search(line):
                 issues.append(LintIssue("L006", rel, lineno, "Prefer domain formatter over unit_label=."))
-            if UPPER_TIME.search(line):
+            stripped = line.lstrip()
+            if UPPER_TIME.search(line) and not stripped.startswith("#"):
                 issues.append(LintIssue("L007", rel, lineno, "Prefer ms/microsecond/nanosecond over MS/US/NS."))
             if re.search(r"=\s*\d+(?:\.\d+)?\s*\*\s*(TB|GB|TFLOP|MB)\s*/\s*second\b", line) and "(" not in line.split("=")[-1]:
                 issues.append(LintIssue("L008", rel, lineno, "Prefer parenthesized rate: 1.9 * (TB / second)."))
             if UREG_ALIAS.search(line):
                 issues.append(LintIssue("L009", rel, lineno, "Prefer exported unit alias over ureg.*."))
+            if not stripped.startswith("#") and re.search(r"\.m_as\s*\(", line):
+                issues.append(LintIssue(
+                    "L019", rel, lineno,
+                    "Use .to(unit).magnitude instead of .m_as() in LEGO cells.",
+                    severity="error",
+                ))
 
         for match in CLOSED_UNIT_SUFFIX.finditer(block):
             name = match.group(0).split("=")[0].strip()
@@ -158,6 +172,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Lint only git-staged .qmd files (pre-commit default when PRE_COMMIT=1).",
     )
+    parser.add_argument(
+        "--write-baseline",
+        type=Path,
+        help="Write all warning-severity issues to JSON baseline and exit 0.",
+    )
     args = parser.parse_args(argv)
 
     root = Path(__file__).resolve().parents[3]
@@ -187,6 +206,16 @@ def main(argv: list[str] | None = None) -> int:
     issues: list[LintIssue] = []
     for path in qmd_paths:
         issues.extend(lint_file(path, root))
+
+    if args.write_baseline:
+        warnings_only = [issue for issue in issues if issue.severity == "warning"]
+        args.write_baseline.parent.mkdir(parents=True, exist_ok=True)
+        args.write_baseline.write_text(
+            json.dumps([issue.__dict__ for issue in warnings_only], indent=2) + "\n",
+            encoding="utf-8",
+        )
+        print(f"Wrote {len(warnings_only)} warning baseline entries to {args.write_baseline}")
+        return 0
 
     allowed: set[tuple[str, str, str]] = set()
     if args.baseline and args.baseline.exists():
