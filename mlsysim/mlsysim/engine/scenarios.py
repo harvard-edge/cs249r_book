@@ -178,7 +178,7 @@ class Scenarios:
     AutonomousVehicle = Scenario(
         name="Autonomous Vehicle",
         description="Real-time object detection for safe urban navigation.",
-        workload=Models.Vision.ResNet50,
+        workload=Models.Vision.YOLOv8_Nano,
         system=Hardware.Edge.JetsonOrinNX,
         sla_latency=Q_("10 ms")
     )
@@ -186,7 +186,7 @@ class Scenarios:
     AutonomousVehicle_Waymo = Scenario(
         name="Waymo AV Data Pipeline",
         description="High-throughput data ingestion for autonomous fleet training.",
-        workload=Models.Vision.ResNet50.model_copy(update={"name": "Waymo (High)", "data_rate": Q_("19 TB/hour")}),
+        workload=Models.Vision.YOLOv8_Nano.model_copy(update={"name": "Waymo (High)", "data_rate": Q_("19 TB/hour")}),
         system=Hardware.Edge.JetsonOrinNX,
         sla_latency=Q_("10 ms")
     )
@@ -198,6 +198,15 @@ class Scenarios:
         workload=Models.Vision.MobileNetV2,
         system=Hardware.Mobile.iPhone15Pro,
         sla_latency=Q_("30 ms")
+    )
+
+    MobileAssistant = Scenario(
+        name="Mobile Assistant",
+        description="On-device assistant with a quantized small LLM on a smartphone.",
+        workload=Models.Language.Llama3_8B,
+        system=Hardware.Mobile.iPhone15Pro,
+        sla_latency=Q_("100 ms"),
+        power_budget=Q_("5 W"),
     )
 
     # --- WORKSTATION WORLD ---
@@ -212,8 +221,8 @@ class Scenarios:
     # --- CLOUD WORLD ---
     FrontierTraining = Scenario(
         name="Frontier LLM Training",
-        description="Pre-training a 70B parameter foundation model on a massive fleet.",
-        workload=Models.Language.Llama3_70B,
+        description="Pre-training a GPT-4-class frontier model on a massive fleet.",
+        workload=Models.Language.GPT4,
         system=Clusters.Frontier_8K,
         sla_latency=Q_("500 ms") # Per-step target
     )
@@ -240,6 +249,7 @@ class Scenarios:
 class Applications:
     Doorbell = Scenarios.SmartDoorbell
     AutoDrive = Scenarios.AutonomousVehicle
+    Mobile = Scenarios.MobileAssistant
     Workstation = Scenarios.LocalTraining
     Frontier = Scenarios.FrontierTraining
     Chatbot = Scenarios.ChatbotServing

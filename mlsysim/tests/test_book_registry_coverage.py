@@ -103,3 +103,62 @@ def test_book_case_study_model_specs_are_registry_backed() -> None:
     assert mixtral.active_parameters.m_as("Bparam") == 12.9
     assert mixtral.experts == 8
     assert mixtral.active_experts_per_token == 2
+
+
+def test_book_workload_archetypes_are_model_registry_backed() -> None:
+    """Recurring Vol I lighthouse archetypes must point to Models.* objects."""
+
+    work = mlsysim.Scenarios.Archetypes.Workload
+
+    assert work.ResNet50.workload is mlsysim.Models.Vision.ResNet50
+    assert work.GPT2.workload is mlsysim.Models.Language.GPT2
+    assert work.DLRM.workload is mlsysim.Models.Recommendation.DLRM
+    assert work.MobileNetV2.workload is mlsysim.Models.Vision.MobileNetV2
+    assert work.KWS.workload is mlsysim.Models.Tiny.DS_CNN
+
+    assert work.ResNet50.archetype == "Compute Beast"
+    assert work.GPT2.archetype == "Bandwidth Hog"
+    assert work.DLRM.archetype == "Sparse Scatter"
+    assert work.KWS.archetype == "Tiny Constraint"
+
+
+def test_book_fleet_archetypes_are_model_and_system_registry_backed() -> None:
+    """Recurring Vol II A/B/C archetypes must resolve to model and system registries."""
+
+    fleet = mlsysim.Scenarios.Archetypes.Fleet
+
+    assert fleet.ArchetypeA.scale_anchor is mlsysim.Models.Language.GPT4
+    assert fleet.ArchetypeA.open_reference is mlsysim.Models.Language.Llama3_70B
+    assert fleet.ArchetypeA.system is mlsysim.Systems.Clusters.Frontier_8K
+    assert fleet.ArchetypeA.primary_communication == "AllReduce"
+
+    assert fleet.ArchetypeB.scale_anchor is mlsysim.Models.Recommendation.DLRM
+    assert fleet.ArchetypeB.system is mlsysim.Systems.Clusters.Production_2K
+    assert fleet.ArchetypeB.primary_communication == "AllToAll"
+
+    assert fleet.ArchetypeC.scale_anchor is mlsysim.Models.Vision.MobileNetV2
+    assert fleet.ArchetypeC.system is mlsysim.Hardware.Mobile.iPhone15Pro
+    assert fleet.ArchetypeC.partitioning_strategy == "Federated Learning"
+
+
+def test_application_missions_match_executable_scenario_bundles() -> None:
+    """Book mission metadata must agree with executable Applications.* scenarios."""
+
+    missions = mlsysim.Scenarios.Archetypes.Missions
+
+    assert mlsysim.Applications.Frontier.workload is missions.FrontierTraining.workload
+    assert mlsysim.Applications.Frontier.system is missions.FrontierTraining.system
+
+    assert mlsysim.Applications.AutoDrive.workload is missions.AutonomousPerception.workload
+    assert mlsysim.Applications.AutoDrive.system is missions.AutonomousPerception.system
+
+    assert mlsysim.Applications.Mobile.workload is missions.MobileAssistant.workload
+    assert mlsysim.Applications.Mobile.system is missions.MobileAssistant.system
+
+    assert mlsysim.Applications.Doorbell.workload is missions.SmartDoorbell.workload
+    assert mlsysim.Applications.Doorbell.system is missions.SmartDoorbell.system
+
+    assert mlsysim.Applications.Frontier.workload is mlsysim.Models.Language.GPT4
+    assert mlsysim.Applications.AutoDrive.workload is mlsysim.Models.Vision.YOLOv8_Nano
+    assert mlsysim.Applications.Mobile.workload is mlsysim.Models.Language.Llama3_8B
+    assert mlsysim.Applications.Doorbell.workload is mlsysim.Models.Tiny.WakeVision
