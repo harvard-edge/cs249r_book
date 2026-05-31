@@ -79,16 +79,16 @@ class AIMomentStats:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    from mlsysim.fmt import fmt, check, MarkdownStr
+    from mlsysim.fmt import fmt, fmt_qty, fmt_memory, check
     searches_per_day = Scenarios.Workloads.GoogleSearchesPerDay
     h100_flops = Hardware.Cloud.H100.compute.peak_flops
     cpu_flops = Hardware.Cloud.ReferenceCPU.compute.peak_flops
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     searches_b = searches_per_day / BILLION
-    gpu_tflops = h100_flops.m_as(TFLOPs/second)
-    cpu_tflops = cpu_flops.m_as(TFLOPs/second)
-    gpu_cpu_ratio = gpu_tflops / cpu_tflops
+    gpu_tflops = h100_flops.to(TFLOPs / second)
+    cpu_tflops = cpu_flops.to(TFLOPs / second)
+    gpu_cpu_ratio = (gpu_tflops / cpu_tflops).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(searches_b >= 5, f"Google searches ({searches_b:.1f}B) unexpectedly low.")
@@ -96,8 +96,8 @@ class AIMomentStats:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     google_search_b_str = fmt(searches_b, precision=1)
-    h100_fp16_tflops_str = fmt(gpu_tflops, precision=0, commas=False)
-    cpu_fp32_tflops_str = fmt(cpu_tflops, precision=0, commas=False)
+    h100_fp16_tflops_str = fmt_qty(gpu_tflops, TFLOPs / second, precision=0, commas=False)
+    cpu_fp32_tflops_str = fmt_qty(cpu_tflops, TFLOPs / second, precision=0, commas=False)
 ```
 
 ## AI Moment {#sec-introduction-ai-moment-37f1}
@@ -178,8 +178,8 @@ That failure lived not in the model but in the data, and it reflects how ML syst
 # │          mlsysim.physics (model_memory), mlsysim.fmt (fmt, check)
 # │ Exports: GPT3WeightFootprint.params_b_str, fp16_weights_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.physics import model_memory
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, fmt_memory, check
+from mlsysim.core.units import Bparam, GB
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT3WeightFootprint:
@@ -190,19 +190,19 @@ class GPT3WeightFootprint:
     bytes_per_param = BYTES_FP16
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    params_b = params.m_as(Bparam)
-    fp16_weights_gb = model_memory(params, bytes_per_param, GB)
+    params_b = params.to(Bparam).magnitude
+    fp16_weights = params * bytes_per_param
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(params_b == 175, f"GPT-3 parameter count should be 175 billion, got {params_b}.")
-    check(340 <= fp16_weights_gb <= 360, f"GPT-3 FP16 footprint should be about 350 GB, got {fp16_weights_gb:.1f}.")
+    check(340 <= fp16_weights.to(GB).magnitude <= 360, f"GPT-3 FP16 footprint should be about 350 GB, got {fp16_weights.to(GB).magnitude:.1f}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     params_b_str = fmt(params_b, precision=0, commas=False)
-    fp16_weights_gb_str = fmt(fp16_weights_gb, precision=0, commas=False)
+    fp16_weights_gb_str = fmt_memory(fp16_weights, unit=GB, precision=0, commas=False)
 ```
 
-[^fn-model-weights-inference]: **Model Weights**: The learned numerical parameters of a neural network, one value per connection between units. A GPT-3-scale model stores `{python} GPT3WeightFootprint.params_b_str` billion such values, consuming `{python} GPT3WeightFootprint.fp16_weights_gb_str` gigabytes in FP16 precision. Because every inference request must load these weights through the memory hierarchy, weight count is the single largest determinant of both memory footprint $(D_{\text{vol}})$ and serving cost (see @sec-neural-computation). \index{Model Weights!definition}
+[^fn-model-weights-inference]: **Model Weights**: The learned numerical parameters of a neural network, one value per connection between units. A GPT-3-scale model stores `{python} GPT3WeightFootprint.params_b_str` billion such values, consuming `{python} GPT3WeightFootprint.fp16_weights_gb_str` in FP16 precision. Because every inference request must load these weights through the memory hierarchy, weight count is the single largest determinant of both memory footprint $(D_{\text{vol}})$ and serving cost (see @sec-neural-computation). \index{Model Weights!definition}
 
 From a systems perspective, this represents a transition from *instruction-centric* to *data-centric* computing [@ng2021datacentric] \index{Data-Centric Computing}:
 
@@ -1307,7 +1307,7 @@ The lesson is "bitter" because our intuition misleads us\index{bitter lesson, Th
 # │ Exports: GPT3TrainingEnergy.energy_mwh_str, households_str,
 # │          household_mwh_year_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, fmt_qty, check
+from mlsysim.fmt import fmt_int, fmt, fmt_energy, fmt_qty, check
 from mlsysim.core.units import MWh
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -1326,7 +1326,7 @@ class GPT3TrainingEnergy:
     check(100 <= households <= 140, "Household-year comparison should be roughly 120 homes.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    energy_mwh_str = fmt_qty(energy, MWh, precision=0, commas=True)
+    energy_mwh_str = fmt_energy(energy, unit=MWh, precision=0, commas=True)
     households_str = fmt_int(households, commas=False)
     household_mwh_year_str = fmt_qty(household_mwh_year, MWh, precision=1, commas=False, per="household-year")
 ```
