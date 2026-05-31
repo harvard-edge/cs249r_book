@@ -201,6 +201,32 @@ Validation details:
   `./book/binder check code --scope lego-dead-code` PASS;
   `audit_prose_semantics.py` PASS, 0 findings across 81 files.
 
+## 2026-05-31 — `vol1/ml_systems` physical-unit lane
+
+Change type: byte-identical chapter cleanup. Migrated all 30 remaining
+physical-unit suffix sites in `vol1/ml_systems/ml_systems.qmd` to typed
+quantity formatters. This included data-size, bandwidth, TOPS, power, energy,
+temperature, and battery-capacity displays. One-off editorial labels such as
+`TOPS peak`, `TOPS derated`, `Mb/s`, and `KB of detection summaries` remain
+checked `unit_label=` values rather than raw suffixes.
+
+Touched chapter and equivalence:
+
+| Chapter file | Values/prose checked | Result |
+|---|---:|---|
+| `vol1/ml_systems/ml_systems.qmd` | 296 values / 143 prose lines | identical |
+
+Validation details:
+
+- `audit_fmt_usage.py` physical-unit suffix count dropped from 1,042 to 1,012.
+- `vol1/ml_systems/ml_systems.qmd` now has 0 physical-unit suffix sites.
+- `fmt_qty` call count is 384; `fmt_qty_int` call count is 23.
+- Verification: `git diff --check` PASS; py_compile PASS; focused pytest suite
+  PASS, 190 tests; `fmt_prose_contract.py` PASS, 0 violations;
+  `codemod_fmt.py queue` PASS, `by kind: {}`; `./book/binder check math` PASS;
+  `./book/binder check code --scope lego-dead-code` PASS;
+  `audit_prose_semantics.py` PASS, 0 findings across 81 files.
+
 ## 2026-05-31 — Currency denominator relocation
 
 Change type: byte-identical formatter relocation. Replaced 91

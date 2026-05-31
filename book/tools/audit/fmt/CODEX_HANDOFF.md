@@ -578,7 +578,19 @@ chapters; `git diff --check` PASS; py_compile PASS; focused pytest suite PASS
 `./book/binder check math` PASS; `./book/binder check code --scope
 lego-dead-code` PASS; `audit_prose_semantics.py` CLEAN across 81 files.
 
-### B. WS4 — unit-suffix lane (remaining 1,042 physical-unit suffixes: `GB`/`MB`/`W`/`GB/s`/…)  ← the big one
+**A42 — `vol1/ml_systems` physical-unit lane: DONE.**
+Migrated all 30 remaining physical-unit suffix sites in `ml_systems` to typed
+quantity formatters, byte-identically. The chapter now has 0 physical-unit
+suffixes. One-off labels such as `TOPS peak`, `TOPS derated`, `Mb/s`, and
+`KB of detection summaries` are checked `unit_label=` values. `audit_fmt_usage.py`
+now reports physical-unit suffixes down to 1,012, `fmt_qty` at 384, and
+`fmt_qty_int` at 23. Verification: `assess_equiv.py` values/prose identical for
+`ml_systems`; `git diff --check` PASS; py_compile PASS; focused pytest suite
+PASS (190 tests); `fmt_prose_contract.py` 0; `codemod_fmt.py queue`
+`by kind: {}`; `./book/binder check math` PASS; `./book/binder check code
+--scope lego-dead-code` PASS; `audit_prose_semantics.py` CLEAN across 81 files.
+
+### B. WS4 — unit-suffix lane (remaining 1,012 physical-unit suffixes: `GB`/`MB`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.
 `weights_gb`), not Pint Quantities, and `fmt_qty` requires a Pint Quantity to
