@@ -53,6 +53,42 @@ Status:
 - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/codemod_fmt.py queue --root book/quarto/contents` PASS, `by kind: {}`
 - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_prose_semantics.py --root book/quarto/contents` PASS, 0 findings
 
+## 2026-05-31 — Vol1 introduction/data-selection physical-unit cleanup
+
+Change type: byte-identical formatter relocation. Replaced 8 remaining
+physical-unit suffix sites with typed quantity formatters across two Vol1
+chapters.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol1/introduction/introduction.qmd` | 2 | 91 | 45 | identical values + prose |
+| `vol1/data_selection/data_selection.qmd` | 6 | 250 | 128 | identical values + prose |
+
+Validation details:
+
+- Migrated GPT-3 training energy, A100 peak FLOP/s, and the random-access
+  storage throughput table.
+- The storage throughput table remains a split-rate display: each value is
+  checked as `MB/second` through `fmt_qty(...)`, while `unit_label="MB"`
+  preserves the existing value string because the table literal appends `/s`.
+- `assess_equiv.py` baseline/snapshot/diff reported `IDENTICAL values` and
+  `IDENTICAL prose` for both touched files.
+- Both touched files now have zero `suffix=` calls.
+- `audit_fmt_usage.py` reports `physical_unit` suffixes dropped 905 -> 897,
+  `fmt_qty` at 491, and `fmt_qty_int` at 31.
+- Verification: `git diff --check` PASS; py_compile PASS for formatter,
+  math-canonical, and fmt audit modules; focused pytest suite PASS, 190 tests;
+  `fmt_prose_contract.py` PASS, 0 violations; `codemod_fmt.py queue` PASS,
+  `by kind: {}`; `./book/binder check math` PASS;
+  `./book/binder check code --scope lego-dead-code` PASS;
+  `audit_prose_semantics.py` PASS, 0 findings across 81 files.
+- HTML/PDF render evidence: not run yet. Full rendering is intentionally
+  deferred for the separate render/prose audit checkpoint.
+
+Status: non-render verified; render audit pending.
+
 ## 2026-05-31 — Assumptions appendix physical-unit cleanup
 
 Change type: byte-identical formatter relocation. Replaced 10 remaining
