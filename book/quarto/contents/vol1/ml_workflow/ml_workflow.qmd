@@ -797,7 +797,8 @@ filllcolor=gray, drawcolor=BlueLine!70!black,Linewidth=0.7pt}};
 # │ Exports: MobilenetSpecs.mobilenet_size_str, MobilenetSpecs.mobilenet_flops_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt, fmt_qty
+from mlsysim.fmt import fmt, fmt_qty, check
+from mlsysim.core.units import MB, MFLOPs, byte, param
 
 class MobilenetSpecs:
     """MobileNetV2 model size and FLOPs from canonical constants."""
@@ -807,8 +808,8 @@ class MobilenetSpecs:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     mobilenet_size_q = Models.Vision.MobileNetV2.parameters * BYTES_FP32
-    mobilenet_size_mb = mobilenet_size_q.m_as(MB)
-    mobilenet_flops_m = Models.Vision.MobileNetV2.inference_flops.m_as(MFLOPs)
+    mobilenet_size_mb = mobilenet_size_q.to(MB).magnitude
+    mobilenet_flops_m = Models.Vision.MobileNetV2.inference_flops.to(MFLOPs).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(13 <= mobilenet_size_mb <= 15, f"Unexpected MobileNetV2 size: {mobilenet_size_mb:.1f} MB.")
@@ -916,7 +917,7 @@ This specification reveals why ML projects experience the iteration cycles diagr
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim.physics import calc_constraint_propagation_factor
-from mlsysim.fmt import check, fmt, fmt_math, fmt_percent, fmt_qty, fmt_time, MarkdownStr
+from mlsysim.fmt import check, fmt, fmt_math, fmt_percent, fmt_qty, fmt_time, fmt_time_range, MarkdownStr
 
 class ConstraintPropagation:
     """Exponential cost multiplier for late constraint discovery across lifecycle stages."""
@@ -935,12 +936,9 @@ class ConstraintPropagation:
     specificity_target_pct = 80
     stage5_latency_ms = 100
     stage5_memory_q = 500 * MB
-    stage5_memory_mb = stage5_memory_q.m_as(MB)
     jetson_latency_ms = 50
     jetson_model_q = 200 * MB
-    jetson_model_mb = jetson_model_q.m_as(MB)
     resnet_variant_q = 200 * MB
-    resnet_variant_mb = resnet_variant_q.m_as(MB)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     cost_factor = calc_constraint_propagation_factor(
@@ -961,9 +959,13 @@ class ConstraintPropagation:
     cost_factor_str = fmt(cost_factor, precision=0, commas=False)
     constraint_math = fmt_math(f"2^{{{stage_deployment - stage_definition}}} = {cost_factor}\\times")
     rework_cycles_str = MarkdownStr(f"{avoided_cycles_min}--{avoided_cycles_max}")
-    rework_weeks_str = MarkdownStr(
-        f"{fmt(rework_weeks_min, precision=0, commas=False)}--"
-        f"{fmt_time(rework_weeks_max, 'week', precision=0, commas=False, style='word')}"
+    rework_weeks_str = fmt_time_range(
+        rework_weeks_min,
+        rework_weeks_max,
+        "week",
+        precision=0,
+        commas=False,
+        style="word",
     )
     sensitivity_target_pct_str = fmt_percent(sensitivity_target_pct/100, precision=0, commas=False, style='symbol')
     specificity_target_pct_str = fmt_percent(specificity_target_pct/100, precision=0, commas=False, style='symbol')
@@ -1086,6 +1088,7 @@ High-resolution retinal scans can generate tens of megabytes per image, creating
 # │          BandwidthCompute.bw_summary_kb_str, BandwidthCompute.bw_reduction_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt, fmt_multiple, fmt_percent, fmt_qty, fmt_time
+from mlsysim.core.units import MB, GB, KB, megabit, second
 
 # ┌── LEGO ───────────────────────────────────────────────
 class BandwidthCompute:
@@ -1105,23 +1108,23 @@ class BandwidthCompute:
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Data Volume
     daily_q = patients_day * photos_per_patient * mb_per_photo * MB
-    daily_mb = daily_q.m_as(MB)
-    daily_gb = daily_q.m_as(GB)
+    daily_mb = daily_q.to(MB).magnitude
+    daily_gb = daily_q.to(GB).magnitude
 
     # Step 2: Transmission Time
-    uplink_q = uplink_mbps * ureg.megabit/second
-    uplink_mbs_q = uplink_q.to(MB/second)
-    uplink_mbs = uplink_mbs_q.m_as(MB/second)
-    upload_seconds = daily_mb/uplink_mbs
-    upload_hours = upload_seconds/SEC_PER_HOUR
+    uplink_q = uplink_mbps * megabit / second
+    uplink_mbs_q = uplink_q.to(MB / second)
+    uplink_mbs = uplink_mbs_q.to(MB / second).magnitude
+    upload_seconds = (daily_q / uplink_mbs_q).to(second).magnitude
+    upload_hours = upload_seconds / SEC_PER_HOUR
 
     # Step 3: Saturation
-    saturation_pct = (upload_hours/clinic_hours) * 100.0
+    saturation_pct = (upload_hours / clinic_hours) * 100.0
 
     # Step 4: Edge Reduction
-    original_kb = daily_q.m_as(KB)
+    original_kb = daily_q.to(KB).magnitude
     summary_total_kb = patients_day * summary_kb
-    reduction_factor = original_kb/summary_total_kb
+    reduction_factor = original_kb / summary_total_kb
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(upload_hours >= clinic_hours, f"Upload fits in clinic day ({upload_hours:.1f} h < {clinic_hours} h). Edge not required.")
@@ -1134,9 +1137,9 @@ class BandwidthCompute:
     bw_mb_per_photo_str = fmt_qty(mb_per_photo * MB, MB, precision=0, commas=False, per="photo")
     bw_daily_mb_str = fmt_qty(daily_q, MB, precision=0, commas=True)
     bw_daily_gb_str = fmt_qty(daily_q, GB, precision=1, commas=False, per="day")
-    bw_upload_mbps_str = fmt_qty(uplink_q, ureg.megabit/second, precision=0, commas=False, unit_label="Mb/s")
-    bw_upload_mbs_str = fmt_qty(uplink_mbs_q, MB/second, precision=2, commas=False)
-    bw_upload_sec_str = fmt_time(upload_seconds, 'second', precision=0, commas=True)
+    bw_upload_mbps_str = fmt_qty(uplink_q, megabit / second, precision=0, commas=False, unit_label="Mb/s")
+    bw_upload_mbs_str = fmt_qty(uplink_mbs_q, MB / second, precision=2, commas=False)
+    bw_upload_sec_str = fmt_time(upload_seconds, second, precision=0, commas=True)
     bw_upload_hours_str = fmt_time(round(upload_hours), 'hour', precision=0, commas=False)
     bw_clinic_hours_str = fmt_time(clinic_hours, 'hour', precision=0, commas=False)
     bw_bandwidth_pct_str = fmt_percent(saturation_pct/100, precision=1, commas=False, style='symbol')
@@ -1194,18 +1197,21 @@ As the number of clinics grows from a handful to hundreds, data infrastructure m
 # │          StorageCosts.cost_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt
+from mlsysim.fmt import fmt, check
+from mlsysim.core.units import USD, GB, ureg
 
 class StorageCosts:
     """Hot vs. cold storage cost comparison for tiered storage footnote."""
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     # NVMe SSD: ~$0.10/GB/month (AWS EBS gp2 baseline)
     # S3 Standard: ~$0.023/GB/month
+    nvme_rate = Infrastructure.Pricing.Storage.NvmeLowPerTbMonth.rate
+    s3_rate = Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    cost_nvme_gb_mo = Infrastructure.Pricing.Storage.NvmeLowPerTbMonth.rate.m_as("dollar / GB / month")
-    cost_s3_gb_mo   = Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate.m_as("dollar / GB / month")
-    cost_ratio = cost_nvme_gb_mo / cost_s3_gb_mo
+    cost_nvme_gb_mo = nvme_rate.to(USD / GB / ureg.month).magnitude
+    cost_s3_gb_mo = s3_rate.to(USD / GB / ureg.month).magnitude
+    cost_ratio = (nvme_rate / s3_rate).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(4.0 <= cost_ratio <= 5.0, f"Expected roughly 4x storage gap, got {cost_ratio:.1f}x.")
@@ -1909,7 +1915,6 @@ class DeploymentEconomics:
     cloud_network_cost = 45000 # $/year total
     cloud_latency_ms = 200
     image_size_q = 5.0 * MB  # matches retinal scan size in Bandwidth vs. Compute exercise
-    image_size_mb = image_size_q.m_as(MB)
 
     # Edge Costs
     edge_unit_cost = 500     # $/device (CapEx)
@@ -1934,7 +1939,7 @@ class DeploymentEconomics:
     payback_years = edge_capex/annual_savings
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(image_size_mb == 5.0, "Deployment image size must match the bandwidth exercise (5 MB/photo).")
+    check(image_size_q.to(MB).magnitude == 5.0, "Deployment image size must match the bandwidth exercise (5 MB/photo).")
     check(edge_capex > cloud_total_year, "Edge deployment should have larger upfront cost than one year of cloud OpEx.")
     check(annual_savings > 0, "Edge OpEx must be lower than cloud OpEx for payback.")
     check(payback_years <= 3.0, f"Payback period ({payback_years:.1f} years) is too long to justify Edge CapEx.")
