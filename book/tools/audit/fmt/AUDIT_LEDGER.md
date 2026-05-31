@@ -326,6 +326,31 @@ Validation details:
 - `assess_equiv.py diff` reported `IDENTICAL values` and `IDENTICAL prose`.
 - `audit_fmt_usage.py` now reports no `extra_suffix=` calls in QMD.
 
+## 2026-05-31 — ML ops pp suffix gap
+
+Change type: byte-identical formatter relocation plus checker hardening.
+Replaced the 3 remaining `suffix=" pp"` sites in
+`vol1/ml_ops/ml_ops.qmd` with `fmt_pp(..., style="symbol")`. The semantic
+suffix checker now treats `pp` as a percentage-point suffix, and the audit
+inventory classifies percentage-point suffixes separately from percent-share
+suffixes.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol1/ml_ops/ml_ops.qmd` | 3 | 132 | 75 | identical values + prose |
+
+Validation details:
+
+- Before/after snapshots were generated with `assess_equiv.py baseline --ref HEAD`
+  and `assess_equiv.py snapshot` under `/tmp/fmt_pp_ml_ops`.
+- `assess_equiv.py diff` reported `IDENTICAL values` and `IDENTICAL prose`.
+- `audit_fmt_usage.py` now reports `fmt_pp` calls increased to 21 and physical
+  suffix calls dropped by 3.
+- `book/tests/test_fmt_semantic_suffix.py` now locks `suffix=" pp"` as a
+  `pp_in_suffix` violation.
+
 ## 2026-05-31 — Remaining direct count labels
 
 Change type: byte-identical formatter relocation. Replaced 40 hard-coded direct

@@ -258,6 +258,13 @@ files.
 296 value exports and 143 substituted prose lines, and `audit_fmt_usage.py` now
 reports no `extra_suffix=` calls in QMD.
 
+**NOW done:** `vol1/ml_ops` pp suffix gap — migrated 3 surviving
+`suffix=" pp"` sites to `fmt_pp(..., style="symbol")`, byte-identical across
+132 value exports and 75 substituted prose lines. The semantic suffix checker
+now treats `pp` as a percentage-point suffix and has a regression test for
+`suffix=" pp"`; `audit_fmt_usage.py` classifies percentage-point suffixes
+separately from percent-share suffixes.
+
 **NEXT:**
 1. Add a formatter-default cleanup pass after the semantic lanes: each
    formatter should own comma defaults by value kind, and explicit `commas=`

@@ -35,10 +35,11 @@ def test_flags_multiplier_suffix(tmp_path):
 def test_flags_percentage_points_suffix(tmp_path):
     chapter = _write(
         tmp_path,
-        "g_str = fmt(gap, precision=0, commas=False, suffix=' percentage points')\n",
+        "g_str = fmt(gap, precision=0, commas=False, suffix=' percentage points')\n"
+        "h_str = fmt(gap, precision=0, commas=False, suffix=' pp')\n",
     )
     codes = [v.code for v in audit([chapter])]
-    assert codes.count("pp_in_suffix") == 1
+    assert codes.count("pp_in_suffix") == 2
 
 
 def test_flags_scale_glyph_on_fmt(tmp_path):

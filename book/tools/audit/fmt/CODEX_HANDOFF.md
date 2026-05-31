@@ -239,6 +239,14 @@ positional compatibility during migration. Add tests for keyword compatibility,
 missing/both-unit errors, time-unit validation, rate allowlist validation, and
 range endpoint validation through keyword units.
 
+**A18 — ML ops pp suffix gap: DONE.**
+Audit found 3 `suffix=" pp"` sites that the semantic suffix checker missed
+because it recognized `"percentage points"` but not `"pp"`. These moved to
+`fmt_pp(..., style="symbol")` in `vol1/ml_ops/ml_ops.qmd`, byte-identical
+across 132 value exports and 75 prose lines. `fmt_semantic_suffix` and its test
+now flag `suffix=" pp"` as `pp_in_suffix`; `audit_fmt_usage.py` now classifies
+percentage-point suffixes separately and reports `fmt_pp` calls at 21.
+
 ### B. WS4 — unit-suffix lane (~2,393 sites: `GB`/`ms`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.

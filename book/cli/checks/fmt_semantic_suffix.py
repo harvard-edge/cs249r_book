@@ -44,7 +44,7 @@ PERCENT_VALUES = {
     "%", "percent",
 }
 PP_VALUES = {
-    "percentage points", "percentage point",
+    "percentage points", "percentage point", "pp",
 }
 SCALE_VALUES = {"K", "M", "B", "T"}
 

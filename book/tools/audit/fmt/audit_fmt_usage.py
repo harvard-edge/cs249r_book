@@ -39,8 +39,9 @@ NUMERIC_FMT = {
 FENCE_RE = re.compile(r"^([ \t]*)```+\s*\{python\}\s*$")
 CLOSE_RE = re.compile(r"^([ \t]*)```+\s*$")
 
-PERCENT_SUFFIXES = {"%", " percent", "percent", " percentage points",
-                    " percentage point", "percentage points", "percentage point"}
+PERCENT_SUFFIXES = {"%", " percent", "percent"}
+PP_SUFFIXES = {" pp", "pp", " percentage points", " percentage point",
+               "percentage points", "percentage point"}
 MULTIPLIER_SUFFIXES = {"x", "×", " x", " ×"}
 
 
@@ -85,9 +86,11 @@ def literal_str(node):
 
 def classify_suffix(suffix: str):
     s = suffix
-    if s in PERCENT_SUFFIXES or s.strip() in {"%", "percent", "percentage points",
-                                              "percentage point"}:
+    if s in PERCENT_SUFFIXES or s.strip() in {"%", "percent"}:
         return "percent"
+    if s in PP_SUFFIXES or s.strip() in {"pp", "percentage points",
+                                         "percentage point"}:
+        return "percentage_point"
     if s.strip() in {"x", "×"} or s.startswith("×") or s.startswith("x") and len(s.strip()) <= 6 and "×" in s:
         return "multiplier"
     if "×" in s or s.strip() == "x":
@@ -187,6 +190,8 @@ def analyze_cell(cell_src: str, fence_line: int, file_rel: str, records: list):
             kind = classify_suffix(suffix)
             if kind == "percent" and fname not in {"fmt_percent"}:
                 abuses.append("percent_via_suffix")
+            if kind == "percentage_point" and fname not in {"fmt_pp"}:
+                abuses.append("pp_via_suffix")
             if kind == "multiplier":
                 abuses.append("multiplier_via_suffix")
             if kind == "scale_glyph" and fname == "fmt":
