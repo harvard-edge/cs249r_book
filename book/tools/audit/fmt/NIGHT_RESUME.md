@@ -37,7 +37,7 @@ python3 -m pytest mlsysim/tests/test_fmt.py book/tests/test_codemod_fmt.py book/
 
 ## NOW / NEXT  (update before every commit)
 
-**STATUS: Codex WS4 `ml_systems` unit batch complete and verified. Safe to continue.**
+**STATUS: Codex WS4 `distributed_training` partial unit batch complete and verified. Safe to continue.**
 
 **State:** multiplier + percent + scale 100% migrated; pp → typed fmt_pp (14
 byte-identical sites + grammar fixes, plus the user-approved A2 benchmarking
@@ -65,14 +65,18 @@ named `approx=True` and `lower_bound=True` marker flags, and the 16 remaining
 chapter-level prefix sites were migrated byte-identically. All WS4-changed
 chapters are HTML-render-verified. WS4 continued with `vol1/ml_systems`, adding
 28 more byte-identical `fmt_qty` migrations and moving corpus `fmt_qty` calls
-149 while reducing physical-unit suffix calls to 1,385. The A1 scale-style pass is
+to 149 while reducing physical-unit suffix calls to 1,385. WS4 then continued
+with `vol2/distributed_training`, migrating 15 of 20 clean candidates
+byte-identically; 5 were correctly queued because canonical Pint labels would
+change visible text (`80 GB`→`80 GiB`). Corpus `fmt_qty` calls are now 164 and
+physical-unit suffix calls are now 1,370. The A1 scale-style pass is
 also HTML-render-verified for all 13 source-changed chapters. A2 is
 HTML-render-verified for `benchmarking`. Remaining: the rest of WS4/WS3 and later
 PDF/lock phases. Nothing is half-done or broken.
 
 **If continuing:** Continue WS4 with
 `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/run_unit_lane.py --write <qmd>`
-one chapter at a time. Current dry-run reports 147 remaining clean unit candidates
+one chapter at a time. Current dry-run reports 132 remaining clean unit candidates
 across 19 chapters; many more suffix sites are plain floats and should stay queued
 unless the source is refactored to carry a Pint Quantity.
 
@@ -122,10 +126,18 @@ audit moved `fmt_qty` calls 121 → 149 and physical-unit suffixes 1,413 → 1,3
 HTML build for `ml_systems` succeeded and representative migrated values were
 grepped in the output.
 
+**NOW done:** WS4 `vol2/distributed_training` partial batch — migrated 15 clean
+Quantity-backed unit suffix sites to `fmt_qty`, byte-identical by
+`run_unit_lane.py`. Five memory-capacity sites remain queued for visible
+unit-label drift (`80 GB` would become `80 GiB`). During HTML verification,
+fixed a pre-existing rendered prose bug, `600 GB/s+ GB/s NVLink domain`, to
+`NVLink domain (600 GB/s or higher)`, and added a semantic-scanner regression
+for this `unit+ unit` shape. Corpus audit moved `fmt_qty` calls 149 → 164 and
+physical-unit suffixes 1,385 → 1,370.
+
 **NEXT:**
 1. Continue WS4 with `run_unit_lane.py` chapter-sized batches. Highest remaining
-   clean counts: `vol2/distributed_training` (20),
-   `vol2/backmatter/appendix_fleet` (14), `vol2/ops_scale` (14),
+   clean counts: `vol2/backmatter/appendix_fleet` (14), `vol2/ops_scale` (14),
    `vol1/hw_acceleration` (11), `vol1/introduction` (11),
    `vol2/network_fabrics` (11), `vol2/performance_engineering` (11).
 2. Render-verify any new WS4-changed chapters before Phase 3B/PDF sign-off.
@@ -201,6 +213,14 @@ values:
 - `131 TB`, `128 GB`, `4 MB`, `186.6 MB/s`, `18.7 GB/s`, `1.25 GB/s`, `1 KB`
 - `100 TOPS`, `15 W`, `1 TOPS`, `2 W`, `15 Wh`
 
+Codex WS4 `distributed_training` HTML verification is DONE. Built
+`distributed_training` with Quarto/Deno caches under `/private/tmp` and grepped
+representative migrated values:
+- `600 GB/s`, `3 GB`, `25 GB/s`, `900 GB/s`, `50 GB/s`, `100 GB/s`
+- `1979 TFLOP/s`
+- Confirmed the previous `600 GB/s+ GB/s` rendered string is gone and the
+  corrected prose renders as `NVLink domain (600 GB/s or higher)`.
+
 FINDING (sustainable_ai fig-cap): the visible <figcaption> renders `$\times$`
 correctly as a math span ("6.2×/year"), but Quarto copies the caption into the
 figure `title=` hover-tooltip WITHOUT processing math, so the tooltip shows raw
@@ -227,6 +247,11 @@ drop. The adjacent prose/table text was updated to `1 percentage-point threshold
 and `(drop of 6.8 percentage points)`. No user-decision items remain open.
 
 ## Session commit log (newest first)
+- Codex WS4 `distributed_training` partial batch: migrated 15 clean
+  Quantity-backed unit suffix sites to `fmt_qty`; 5 `80 GB`→`80 GiB` candidates
+  left queued; fixed pre-existing `600 GB/s+ GB/s` prose; extended semantic
+  scanner to catch `unit+ unit`; contract 0, semantic 0, queue empty, targeted
+  suite 134 passing; `distributed_training` HTML-render-verified.
 - Codex WS4 `ml_systems` batch: migrated 28 clean Quantity-backed unit suffix
   sites to `fmt_qty`; `run_unit_lane.py` proved output byte-identical; contract
   0, semantic 0, queue empty, targeted suite 134 passing; `ml_systems`

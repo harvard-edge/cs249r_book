@@ -64,6 +64,9 @@ CHECKS: list[tuple[str, re.Pattern]] = [
     # same unit twice in a row after a number: "5 GB GB", "10 ms ms"
     ("double_unit",
      re.compile(rf"{_NUM}\s*({_UNIT})\s+\1\b")),
+    # unit-bearing value followed by a redundant "+ unit": "600 GB/s+ GB/s"
+    ("double_unit_after_plus",
+     re.compile(rf"{_NUM}\s*({_UNIT})\s*\+\s*\1\b")),
     # abbreviation immediately followed by its spelled-out word (or vice-versa):
     # "7.6 PB petabytes", "350 GB gigabytes", "10 ms milliseconds"
     ("unit_abbr_plus_word",

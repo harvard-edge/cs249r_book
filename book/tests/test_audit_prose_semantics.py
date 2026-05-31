@@ -20,6 +20,7 @@ def codes_for(text: str) -> set[str]:
 
 def test_unit_duplication_variants_flagged():
     assert "double_unit" in codes_for("about 7.6 PB PB total")
+    assert "double_unit_after_plus" in codes_for("inside the 600 GB/s+ GB/s domain")
     assert "unit_abbr_plus_word" in codes_for("2.56 MW megawatts used")
     assert "unit_abbr_plus_word" in codes_for("totaling over 7.6 PB petabytes")
 
