@@ -140,6 +140,34 @@ class X:
         assert not any("label_str" in i.message for i in l014)
 
 
+def test_l011_rate_dimension_loss():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        qmd = _write_qmd(
+            root,
+            "book/quarto/contents/vol1/foo/foo.qmd",
+            """```{python}
+ef_str = fmt_qty((peak.to(TFLOPs/second).magnitude/tdp.to(watt).magnitude) * TFLOP / second, TFLOP / second)
+```""",
+        )
+        issues = lint_file(qmd, root)
+        assert "L011" in _rules(issues)
+
+
+def test_l011_allows_quantity_division():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        qmd = _write_qmd(
+            root,
+            "book/quarto/contents/vol1/foo/foo.qmd",
+            """```{python}
+ef_str = fmt_qty(peak_flops / tdp, TFLOPs / second / watt, unit_label="TFLOP/s")
+```""",
+        )
+        issues = lint_file(qmd, root)
+        assert "L011" not in _rules(issues)
+
+
 def test_full_book_lint_with_baseline():
     """Production corpus: warnings allowed only via baseline (Phase 8½-A)."""
     baseline = ROOT / "book/tools/audit/lego_units_baseline.json"

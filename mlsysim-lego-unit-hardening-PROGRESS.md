@@ -1,12 +1,12 @@
 # MLSysBook LEGO Unit Hardening — Progress
 
-**Last updated:** 2026-05-31 (Phase 8½-B complete)
+**Last updated:** 2026-05-31 (Phase 8½-C complete)
 **Branch:** `fmt-fix`
 **Worktree:** `/Users/VJ/GitHub/MLSysBook-fmt-fix`
 **Plan spec:** [`mlsysim-lego-unit-hardening-plan.md`](mlsysim-lego-unit-hardening-plan.md)
-**Last commit:** `5c2d9bfcd2` — Fix L014 closed-name fmt detection and refresh honest baseline.
+**Last commit:** `e6a3636bfa` — Close prose-units gate: scoped checker and sustainable_ai pilot.
 
-**Next action:** Phase **8½-C1** — fix `GpuEfficiencyTrajectoryRecap` rate-quantity loss in `compute_infrastructure.qmd` (~1815).
+**Next action:** Phase **8½-D1** — decide `fmt_percent` / range default precision policy (`mlsysim/mlsysim/fmt.py`).
 
 **Resume phrase (new Agent chat):** `Resume LEGO hardening: PROGRESS.md next action. Branch fmt-fix, worktree MLSysBook-fmt-fix.`
 
@@ -53,7 +53,7 @@ All must pass before Phase 10. **Do not trust "lint 0 warnings" until G1 is fixe
 | **G1** | L014 linter detects closed-name + `fmt()` | **PASS** | `L014_CLOSED_FMT` regex; regression test added |
 | **G2** | `lego-units` baseline reflects real debt | **PASS** | **81 L014** allowlisted in `lego_units_baseline.json` (2026-05-31) |
 | **G3** | `book_check_lego_prose_units.py` clean | **PASS** | 81/81 QMD files; checker scoped to closed-export duplicates |
-| **G4** | Rate quantities keep dimensions through OUTPUT | **PARTIAL** | Pilot: `compute_infrastructure.qmd:1815` TFLOP/s÷W → TFLOP/s only |
+| **G4** | Rate quantities keep dimensions through OUTPUT | **PASS** | Pilot fixed; L011 blocks magnitude-ratio rate reattach |
 | **G5** | fmt precision defaults vs guard | **OPEN** | `fmt_percent(0.85)`, range helpers default `precision=1` |
 | **G6** | Headless cell exec | **PASS** | 81/81 `.qmd` files |
 | **G7** | Phase 9 HTML + PDF renders | **NOT STARTED** | — |
@@ -97,7 +97,7 @@ All must pass before Phase 10. **Do not trust "lint 0 warnings" until G1 is fixe
 | **8½-A** | Re-baseline after L014 fix | **DONE** | 81 L014 warnings allowlisted (burn-down deferred) |
 | **8½-B** | Prose-units: 17 files → 0 | **DONE** | Checker fix + `sustainable_ai` OUTPUT/prose |
 | **8½-B** | Pilot: `sustainable_ai.qmd` | **DONE** | L357 tonnes dup; L2553 table; LifecycleCarbonEstimate fmt_emissions |
-| **8½-C** | Rate-quantity audit | **NOT STARTED** | Start `compute_infrastructure.qmd:1815` |
+| **8½-C** | Rate-quantity audit | **DONE** | `GpuEfficiencyTrajectoryRecap`; L011 added |
 | **8½-D** | fmt precision defaults | **NOT STARTED** | `fmt_percent`, `fmt_*_range` |
 | **8½-E** | Discard artifact diff | **NOT STARTED** | `git restore lego_cells_verify_report.json` |
 
@@ -147,11 +147,11 @@ Blocked on Phase 8½-A/B minimum (renders will otherwise duplicate Codex finding
 8½-B2  Fix remaining 16 files from book_check_lego_prose_units.py              ✓ DONE (checker scoped to closed dupes)
 8½-B3  Consider wiring prose-units into pre-commit (or baseline)               DEFERRED
 
-8½-C1  Fix GpuEfficiencyTrajectoryRecap (compute_infrastructure ~1815)       ← NEXT
-8½-C2  Grep audit: .magnitude/ patterns that reattach wrong unit
-8½-C3  Optional: new lint rule for rate dimension loss
+8½-C1  Fix GpuEfficiencyTrajectoryRecap (compute_infrastructure ~1815)       ✓ DONE
+8½-C2  Grep audit: .magnitude/ patterns that reattach wrong unit             ✓ DONE — 1 hit fixed; 1 defer (distributed_training L470)
+8½-C3  Optional: new lint rule for rate dimension loss                       ✓ DONE — L011
 
-8½-D1  Decide fmt_percent / range default precision policy
+8½-D1  Decide fmt_percent / range default precision policy                    ← NEXT
 8½-D2  Implement + tests in test_fmt.py
 
 ── then Phase 9A (HTML pilot chapter → manifest order) ──
@@ -251,6 +251,13 @@ Refresh: `python3 book/tools/audit/book_check_lego_prose_units.py book/quarto/co
 - **Gate:** lint 0 warnings — **not sufficient** (L014 broken)
 - **Gate:** prose-units — **fail** (17 files)
 - **Status:** DONE for migration; **NOT merge-ready**
+
+### Phase 8½-C — rate-quantity integrity — 2026-05-31
+
+- **Fix:** `GpuEfficiencyTrajectoryRecap` — `peak_flops / tdp` with `TFLOPs/second/watt` (matches `ops_scale` `GpuEfficiencyTableRecap`).
+- **Audit:** one other `.magnitude/` ratio in `distributed_training.qmd:470` (bytes/bw → ms via `* THOUSAND`); deferred — not TFLOP/s÷W class.
+- **Lint:** L011 blocks magnitude-ratio + `* TFLOP/second` without preserved denominator.
+- **Gate:** G4 PASS.
 
 ### Phase 8½-B — prose-units clean — 2026-05-31
 

@@ -165,7 +165,7 @@ doc is the spec; the progress file is the build log.
 - [x] Steps 14+ — .m_as() migration (bulk)
 - [x] Phase 8½-A — Fix L014 + re-baseline (G1–G2)
 - [x] Phase 8½-B — prose-units clean, 17 files (G3)
-- [ ] Phase 8½-C — rate-quantity integrity audit (G4)
+- [x] Phase 8½-C — rate-quantity integrity audit (G4)
 - [ ] Phase 8½-D — fmt precision defaults (G5)
 - [ ] Phase 9A — HTML per chapter
 - [ ] Phase 9B — PDF per chapter
@@ -174,9 +174,9 @@ doc is the spec; the progress file is the build log.
 - [ ] Phase 10B — Re-verify
 - [ ] Phase 10C — Merge fmt-fix → dev
 
-**Current step:** Phase 8½-C — rate-quantity integrity (`compute_infrastructure.qmd`)
-**Last commit:** `5c2d9bfcd2`
-**Next action:** Fix GpuEfficiencyTrajectoryRecap TFLOP/s÷W dimension loss (~1815)
+**Current step:** Phase 8½-D — fmt precision defaults (G5)
+**Last commit:** `e6a3636bfa`
+**Next action:** Decide `fmt_percent` / range helper default precision policy
 ```
 
 **Per-step log entry (append after each finished step):**
@@ -2484,22 +2484,17 @@ Tool: `python3 book/tools/audit/book_check_lego_prose_units.py book/quarto/conte
 
 Wire into pre-commit only after clean (or baseline + burn-down).
 
-### Step 8½-C — Quantity integrity audit (G4)
+### Step 8½-C — Quantity integrity audit (G4) — **DONE 2026-05-31**
 
-Scan for anti-patterns:
+| Do | Status |
+|----|--------|
+| Fix `GpuEfficiencyTrajectoryRecap` — `flops / tdp` → `TFLOPs/second/watt` | ✓ |
+| Grep audit for `.magnitude/` ratio + rate reattach | ✓ 1 fixed; 1 defer |
+| Add L011 lint rule | ✓ + tests |
 
-```python
-# BAD: loses /W
-x = (flops_mag / tdp_mag) * TFLOP / second
+**Known instance fixed:** `compute_infrastructure.qmd` `GpuEfficiencyTrajectoryRecap` (~1815).
 
-# GOOD: keep rate dimensions
-efficiency = (peak_flops / tdp).to(TFLOP / second / watt)
-efficiency_str = fmt_qty(efficiency, TFLOP / second / watt, ...)
-```
-
-Queue: grep for `.magnitude/` followed by `* TFLOP` without `/ watt`; fix per cell; add L011/L003 lint if pattern is stable.
-
-**Known instance:** `compute_infrastructure.qmd` `GpuEfficiencyTrajectoryRecap` (~1815).
+**Deferred:** `distributed_training.qmd:470` — bytes/bw `* THOUSAND` → ms (different pattern).
 
 ### Step 8½-D — fmt precision defaults (G5)
 

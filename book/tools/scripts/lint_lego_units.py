@@ -24,7 +24,7 @@ class LintIssue:
 
 RULES = (
     "L001", "L002", "L003", "L004", "L006", "L007", "L008", "L009",
-    "L014", "L015", "L016", "L019",
+    "L011", "L014", "L015", "L016", "L019",
 )
 
 L014_CLOSED_FMT = re.compile(
@@ -73,6 +73,11 @@ PROSE_DUP_UNIT = re.compile(
     r"\{python\}\s*[\w.]+\.(?P<name>\w+_(?:w|kw|mw|wh|kwh|mwh|gb|tb|ms|s|kg)_str)\`\s+(?:W|MW|kWh|MWh|GB|TB|ms|s|kg)\b",
     re.I,
 )
+# 2026-05-31: magnitude ratio reattached as rate without preserved denominator (e.g. /W).
+MAG_RATIO_RATE = re.compile(
+    r"\.magnitude\s*/[^*\n]*\.magnitude\)\s*\*\s*(?:TFLOP|GB|TB|PFLOP)\s*/\s*second",
+    re.I,
+)
 
 
 def _scan_python_blocks(text: str) -> list[tuple[int, str]]:
@@ -110,6 +115,11 @@ def lint_file(path: Path, root: Path) -> list[LintIssue]:
                 r"\*\s*(?:GB|TB|watt|MW|joule|second)\b", line
             ):
                 issues.append(LintIssue("L003", rel, lineno, "Avoid reattaching units after scalar extraction."))
+            if MAG_RATIO_RATE.search(line):
+                issues.append(LintIssue(
+                    "L011", rel, lineno,
+                    "Keep rate dimensions through division (e.g. flops/tdp → TFLOP/s/W).",
+                ))
             if re.search(r"(energy_mwh|carbon|tonnes)\s*=.*(?:/\s*THOUSAND|\*\s*THOUSAND)", line, re.I):
                 issues.append(LintIssue("L004", rel, lineno, "Use energy_from_power/carbon_from_energy helpers."))
             if UNIT_LABEL.search(line):
