@@ -128,6 +128,19 @@ def scan_file(path: Path):
             tree = ast.parse(src)
         except SyntaxError:
             continue
+        # map each line to its innermost enclosing class so exports are tracked
+        # as Class.attr (prose refs them that way) — avoids the name-collision
+        # hazard where two cells export the same bare attr but only one is rewritten.
+        classes = [(n.name, n.lineno, n.end_lineno or n.lineno)
+                   for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]
+
+        def _qualifier(lineno: int) -> str:
+            best = None
+            for name, s, e in classes:
+                if s <= lineno <= e and (best is None or s > best[1]):
+                    best = (name, s, e)
+            return best[0] + "." if best else ""
+
         for node in ast.walk(tree):
             if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Call):
                 continue
@@ -152,7 +165,7 @@ def scan_file(path: Path):
                 new = _rewrite_call_to_multiple(seg)
                 if new and var:
                     mult_edits.append(MultEdit(file_line, var, seg, new))
-                    mult_vars.add(var)
+                    mult_vars.add(_qualifier(node.lineno) + var)
                 elif fname == "fmt_int":
                     queue.append(QueueItem(str(path), file_line, var, fname, suffix,
                         "fmt_int-multiplier", seg.replace("\n", " ⏎ "),
@@ -183,6 +196,20 @@ def scan_file(path: Path):
     return mult_edits, mult_vars, queue
 
 
+def _ref_is_mult(ref: str, mult_vars: set[str]) -> bool:
+    """True if a prose ref names a rewritten multiplier export.
+
+    mult_vars holds qualified names ('Class.attr' for class exports, bare
+    'attr' for module-level). A prose ref 'Class.attr' must match the qualified
+    entry exactly; a bare ref matches a bare entry. This prevents patching a
+    same-named export from a *different* class that was not rewritten.
+    """
+    if ref in mult_vars:
+        return True
+    # module-level export referenced bare
+    return "." not in ref and ref in mult_vars
+
+
 def _patch_prose(text: str, mult_vars: set[str]) -> tuple[str, list[tuple[int, str]]]:
     """Append $\\times$ after refs to multiplier vars that lack it. Returns
     (new_text, [(line, ref)])."""
@@ -210,7 +237,7 @@ def _patch_prose(text: str, mult_vars: set[str]) -> tuple[str, list[tuple[int, s
         inserts: list[tuple[int, str]] = []
         for m in INLINE_PY.finditer(line):
             ref = m.group(1)
-            if ref.split(".")[-1] not in mult_vars:
+            if not _ref_is_mult(ref, mult_vars):
                 continue
             if _TIMES_AFTER.match(line[m.end():]):
                 continue  # already followed by the glyph
