@@ -165,7 +165,10 @@ byte-identically, leaving the file with zero `suffix=` calls. Remaining suffix
 bucket is only 844 `physical_unit` suffixes. The `vol2/fleet_orchestration`
 physical-unit cleanup then migrated all 12 remaining sites in that chapter,
 byte-identically, leaving the file with zero `suffix=` calls. Remaining suffix
-bucket is only 832 `physical_unit` suffixes. Remaining: the rest of WS4/WS3 and
+bucket is only 832 `physical_unit` suffixes. The `appendix_machine`
+physical-unit cleanup then migrated all 17 remaining sites in that appendix,
+byte-identically, leaving the file with zero `suffix=` calls. Remaining suffix
+bucket is only 815 `physical_unit` suffixes. Remaining: the rest of WS4/WS3 and
 later PDF/lock phases. Nothing is half-done or broken.
 
 **New TODOs from user discussion:** add a prose-bound output contract/gate so
@@ -582,6 +585,10 @@ drop. The adjacent prose/table text was updated to `1 percentage-point threshold
 and `(drop of 6.8 percentage points)`. No user-decision items remain open.
 
 ## Session commit log (newest first)
+- Codex `vol1/backmatter/appendix_machine` physical-unit cleanup: migrated all
+  17 remaining physical-unit suffix sites in the appendix to typed quantity
+  formatters, byte-identically. `appendix_machine` now has 0 `suffix=` calls;
+  physical-unit suffixes dropped 832 -> 815.
 - Codex `vol2/fleet_orchestration` physical-unit cleanup: migrated all 12
   remaining physical-unit suffix sites in the chapter to typed quantity
   formatters, byte-identically. `fleet_orchestration` now has 0 `suffix=`

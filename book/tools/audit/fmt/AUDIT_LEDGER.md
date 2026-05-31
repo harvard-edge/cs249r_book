@@ -53,6 +53,45 @@ Status:
 - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/codemod_fmt.py queue --root book/quarto/contents` PASS, `by kind: {}`
 - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_prose_semantics.py --root book/quarto/contents` PASS, 0 findings
 
+## 2026-05-31 — `vol1/backmatter/appendix_machine` physical-unit cleanup
+
+Change type: byte-identical formatter relocation. Replaced all 17 remaining
+physical-unit suffix sites in `appendix_machine` with typed quantity
+formatters.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol1/backmatter/appendix_machine.qmd` | 17 | 111 | 70 | identical values + prose |
+
+Validation details:
+
+- Migrated A100 roofline FLOP/s and bandwidth, the training-time A100 throughput
+  string, Little's-law memory displays, H100/TPUv5p hardware cheat-sheet
+  capacity/cache/interconnect values, and the bandwidth-latency setup packet
+  size.
+- H100/TPUv5p capacity displays previously used `int(...m_as(GB))`, so the new
+  typed values preserve that explicit floor before `fmt_qty(...)`; this avoids
+  changing visible values by rounding fractional decimal-GB magnitudes.
+- Split bandwidth table displays keep formatter-owned `TB`/`GB` strings while
+  prose/table text owns `/s`, matching the pre-existing rendered output.
+- `assess_equiv.py` baseline/snapshot/diff reported `IDENTICAL values` and
+  `IDENTICAL prose`.
+- `appendix_machine` now has zero `suffix=` calls.
+- `audit_fmt_usage.py` reports `physical_unit` suffixes dropped 832 -> 815 and
+  `fmt_qty` at 571.
+- Verification: `git diff --check` PASS; py_compile PASS for formatter,
+  math-canonical, and fmt audit modules; focused pytest suite PASS, 190 tests;
+  `fmt_prose_contract.py` PASS, 0 violations; `codemod_fmt.py queue` PASS,
+  `by kind: {}`; `./book/binder check math` PASS;
+  `./book/binder check code --scope lego-dead-code` PASS;
+  `audit_prose_semantics.py` PASS, 0 findings across 81 files.
+- HTML/PDF render evidence: not run yet. Full rendering is intentionally
+  deferred for the separate render/prose audit checkpoint.
+
+Status: non-render verified; render audit pending.
+
 ## 2026-05-31 — `vol2/fleet_orchestration` physical-unit cleanup
 
 Change type: byte-identical formatter relocation. Replaced all 12 remaining
