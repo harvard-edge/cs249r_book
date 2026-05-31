@@ -328,13 +328,13 @@ class ComputeDataGap:
     filtered_corpus_tokens = 5e12
     public_text_stock = 300e12
     sustained_mfu = calibration.REFERENCE_MFU_SUSTAINED
-    training_flops_per_token = 6 * Models.Language.Llama2_70B.parameters.m_as(c.param)
+    training_flops_per_token = 6 * Models.Language.Llama2_70B.parameters.to(c.param).magnitude
     seconds = months * c.DAYS_PER_MONTH * c.HOURS_PER_DAY * c.SEC_PER_HOUR
 
     # EXECUTE
     total_flops = (
         h100_count
-        * Hardware.Cloud.H100.compute.peak_flops.m_as(c.flop / c.second)
+        * Hardware.Cloud.H100.compute.peak_flops.to(c.flop / c.second).magnitude
         * seconds
         * sustained_mfu
     )
@@ -345,7 +345,7 @@ class ComputeDataGap:
         * months
         * c.DAYS_PER_MONTH
         * c.HOURS_PER_DAY
-        * Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.m_as("dollar / hour")
+        * Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.to(USD / hour).magnitude
     )
 
     # GUARD
@@ -990,21 +990,21 @@ The practical question is how large the efficiency gap becomes on a real workloa
 # │ Exports: imagenet_size_str, icr_ratio_str, IcrCoresetComparison.coreset_pct_str, etc.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
-from mlsysim.fmt import fmt_percent, fmt, check, fmt_sci, MarkdownStr, fmt_count
+from mlsysim.fmt import fmt_percent, fmt, check, fmt_sci, fmt_sci_qty, fmt_count
 
 class IcrCoresetComparison:
     """Compare learning-per-FLOP for random sampling vs. coreset selection."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    imagenet_size_value = Datasets.ImageNet.training_examples.m_as('count')
+    imagenet_size_value = Datasets.ImageNet.training_examples.to("").magnitude
     acc_gain_random_value = 5.0                                 # % accuracy per epoch
     acc_gain_coreset_value = 4.5                                # % with 50% coreset
     coreset_fraction_value = 0.5                                # keep 50% of data
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     m_resnet = Models.Vision.ResNet50
-    resnet50_fwd_gflops_value = m_resnet.inference_flops.m_as(GFLOPs)
-    resnet50_fwdbwd_gflops_value = (m_resnet.inference_flops * 3).m_as(GFLOPs)
+    resnet50_fwd_gflops_value = m_resnet.inference_flops.to(GFLOPs).magnitude
+    resnet50_fwdbwd_gflops_value = (m_resnet.inference_flops * 3).to(GFLOPs).magnitude
     full_epoch_flops_value = imagenet_size_value * resnet50_fwdbwd_gflops_value * BILLION
 
     icr_random_value = acc_gain_random_value/full_epoch_flops_value
@@ -1022,12 +1022,12 @@ class IcrCoresetComparison:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     resnet50_fwd_gflops_str = fmt(m_resnet.inference_flops.to(GFLOPs), precision=1)
     resnet50_fwdbwd_gflops_str = fmt((m_resnet.inference_flops * 3).to(GFLOPs), precision=1)
-    full_epoch_flops_str = MarkdownStr(str(fmt_sci(full_epoch_flops_value, precision=2)) + " FLOPs")
+    full_epoch_flops_str = fmt_sci_qty(full_epoch_flops_value * flop, flop, precision=2, unit_label="FLOPs")
     icr_random_str = fmt_sci(icr_random_value, precision=1)
     imagenet_size_str = fmt_count(imagenet_size_value, scale='M', precision=2)
     # Custom "K" suffix on a divided count uses fmt() suffix discipline.
     coreset_size_str = fmt_count(coreset_size_value, scale='K', precision=1, commas=False)
-    coreset_flops_str = MarkdownStr(str(fmt_sci(coreset_flops_value, precision=1)) + " FLOPs")
+    coreset_flops_str = fmt_sci_qty(coreset_flops_value * flop, flop, precision=1, unit_label="FLOPs")
     icr_coreset_str = fmt_sci(icr_coreset_value, precision=1)
     icr_ratio_str = fmt(icr_ratio_value, precision=1, commas=False)
     acc_gain_random_str = fmt_pp(acc_gain_random_value, precision=0)
@@ -2014,7 +2014,7 @@ Random sampling will miss these rare failures. Instead, the Wake Vision team use
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 
-from mlsysim.fmt import check, fmt, MarkdownStr
+from mlsysim.fmt import check, fmt, fmt_time_range, MarkdownStr
 
 class ClinicalLabelingEconomics:
     # LOAD
@@ -2054,7 +2054,14 @@ class ClinicalLabelingEconomics:
     full_pool_scans_str = fmt(full_pool_scans, precision=0, commas=True)
     review_rate_range_str = MarkdownStr(f"{review_rate_low}–{review_rate_high}")
     hourly_rate_range_str = MarkdownStr(f"{hourly_rate_low}–{hourly_rate_high}")
-    labeled_hours_range_str = MarkdownStr(f"{fmt(labeled_hours_low_display, precision=0, commas=False)}–{fmt(labeled_hours_high_display, precision=0, commas=False)} hours")
+    labeled_hours_range_str = fmt_time_range(
+        labeled_hours_low_display,
+        labeled_hours_high_display,
+        "hour",
+        precision=0,
+        commas=False,
+        style="word",
+    )
     labeled_cost_range_str = f"{fmt(labeled_cost_low_display, precision=0, commas=True)}–{fmt(labeled_cost_high_display, precision=0, commas=True)}"
     full_hours_range_str = f"{fmt(full_hours_low, precision=0, commas=True)}–{fmt(full_hours_high, precision=0, commas=True)}"
     full_weeks_range_str = f"{fmt(full_weeks_low, precision=1, commas=False)}–{fmt(full_weeks_high, precision=0, commas=False)}"
@@ -2110,7 +2117,7 @@ class FixmatchLabelEfficiency:
     """FixMatch CIFAR-10: 200× label reduction for ~8× total cost savings."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    cifar10_full_labels = int(Datasets.CIFAR10.training_examples.m_as(count))
+    cifar10_full_labels = int(Datasets.CIFAR10.training_examples.to(count).magnitude)
     cifar10_full_acc = 96.1
 
     cifar10_fixmatch_4k_labels = 4000
@@ -3078,24 +3085,24 @@ from mlsysim.fmt import fmt_int,  check, fmt, fmt_count, fmt_qty
 class RandomAccessPenalty:
     # LOAD
     random_read_q = 4 * KB
-    random_read_kb = random_read_q.m_as(KB)
+    random_read_kb = random_read_q.to(KB).magnitude
     hdd_seq_q = 150 * MB/second
-    hdd_seq_mb_s = hdd_seq_q.m_as(MB/second)
+    hdd_seq_mb_s = hdd_seq_q.to(MB/second).magnitude
     hdd_iops = 80
     sata_seq_q = 550 * MB/second
-    sata_seq_mb_s = sata_seq_q.m_as(MB/second)
+    sata_seq_mb_s = sata_seq_q.to(MB/second).magnitude
     sata_iops = 10_000
     nvme_seq_q = 3_500 * MB/second
-    nvme_seq_mb_s = nvme_seq_q.m_as(MB/second)
+    nvme_seq_mb_s = nvme_seq_q.to(MB/second).magnitude
     nvme_iops = 500_000
 
     # EXECUTE
     hdd_random_q = hdd_iops * random_read_q / second
     sata_random_q = sata_iops * random_read_q / second
     nvme_random_q = nvme_iops * random_read_q / second
-    hdd_random_mb_s = hdd_random_q.m_as(MB/second)
-    sata_random_mb_s = sata_random_q.m_as(MB/second)
-    nvme_random_mb_s = nvme_random_q.m_as(MB/second)
+    hdd_random_mb_s = hdd_random_q.to(MB/second).magnitude
+    sata_random_mb_s = sata_random_q.to(MB/second).magnitude
+    nvme_random_mb_s = nvme_random_q.to(MB/second).magnitude
     hdd_penalty = hdd_seq_mb_s / hdd_random_mb_s
     sata_penalty = sata_seq_mb_s / sata_random_mb_s
     nvme_penalty = nvme_seq_mb_s / nvme_random_mb_s
@@ -4352,8 +4359,8 @@ class ChinchillaDiagnostic:
     compute_multiplier = 2.0
 
     # EXECUTE
-    gpt3_dn_ratio = Models.Language.GPT3.training_tokens.m_as(count) / m_gpt3.parameters.m_as(param)
-    llama2_dn_ratio = llama2_70b_training_tokens / m_llama2.parameters.m_as(param)
+    gpt3_dn_ratio = Models.Language.GPT3.training_tokens.to(count).magnitude / m_gpt3.parameters.to(param).magnitude
+    llama2_dn_ratio = llama2_70b_training_tokens / m_llama2.parameters.to(param).magnitude
     doubling_token_growth_pct = (math.sqrt(compute_multiplier) - 1) * 100
 
     # GUARD
