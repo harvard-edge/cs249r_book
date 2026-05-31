@@ -16,10 +16,14 @@
 
 ## Current
 
-- **Chapter in flight:** `vol2/sustainable_ai/sustainable_ai.qmd`
-- **Next after commit:** Vol I book order per `_quarto-html-vol1.yml` (introduction.qmd first unmigrated cell)
+- **Chapter in flight:** `vol1/introduction/introduction.qmd` — **complete** (no `.m_as()` in LEGO cells)
+- **Next:** `vol1/ml_systems/ml_systems.qmd` per `_quarto-html-vol1.yml`
 
-## sustainable_ai.qmd — migrated (committed + this batch)
+## introduction.qmd — migrated (this session)
+
+AIMomentStats, GPT3WeightFootprint, GPT3TrainingEnergy, VerificationGap, AlexNetBreakthrough, GPT3Scale, GPT4ScaleEstimate, ResNet50DamExample, DeploymentSystems, GPT3Training, ImageNetStats, ScenarioRegistry, WaymoStats (+ earlier GPT3TrainingEnergy duplicate cell)
+
+## sustainable_ai.qmd — migrated (prior commits)
 
 CarbonCostGPT3, ArchetypeATdp, CarbonFrontier, AutoPlacement, GpuEmissionsScenario, PueEfficiency, LifecycleCarbonEstimate, TrainingEmissions, A100PowerScenario, EmbodiedCarbonAmort, TrainingEmbodiedRecap, InferenceLifecycleExample, TrainingEmissionsRecap, GridQueue, H100TdpRackRecap, RackPowerBudget, SustainableMobilePowerEnvelope, MemoryHierarchyEnergy, MatMulEnergyAnalysis, SustainableCoolingRackPowerRecap, PueSavings, H100TdpCoolingRecap, RackPowerCoolingRecap, OnDeviceLearningEnergy, WakeWordPower, InfraFrontier* param recap cells
 
@@ -33,8 +37,9 @@ CarbonCostGPT3, ArchetypeATdp, CarbonFrontier, AutoPlacement, GpuEmissionsScenar
 
 | SHA | Summary |
 |-----|---------|
-| (pending) | Cooling/PUE/mobile/on-device LEGO quantity-first batch |
-| `9f9d64f09a` | GridQueue, RackPowerBudget |
+| (pending) | vol1 introduction LEGO cells through WaymoStats |
+| `92b0b3efb4` | vol1 introduction opening cells (AIMomentStats, GPT3WeightFootprint, GPT3TrainingEnergy) |
+| `ba03d8bdcb` | sustainable_ai cooling/PUE/mobile batch |
 | `96397f8efe` | Embodied carbon recap cells |
 | `3c4c8edbbd` | AutoPlacement through A100PowerScenario |
 | `49e1cff3c1` | CarbonCostGPT3 |
