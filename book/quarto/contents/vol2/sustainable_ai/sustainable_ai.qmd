@@ -2346,9 +2346,12 @@ Stage 1: Grid Connection. Utility power arrives at the data center as high-volta
 
 ```{python}
 #| echo: false
-
 #| label: grid-queue-calc
-from mlsysim.fmt import check, fmt, fmt_count, fmt_qty, fmt_qty_int, fmt_time
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GRID QUEUE (LEGO)
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_count, fmt_power, fmt_qty, fmt_time
+from mlsysim.core.units import MW, ureg
 
 class GridQueue:
     """The lead-time bottleneck of the ML fleet."""
@@ -2357,7 +2360,7 @@ class GridQueue:
     substation_lead_time_months = Infrastructure.Capacity.SubstationLeadTimeMonths
     grid_queue_size_gw = Infrastructure.Capacity.GridInterconnectionQueueGw
     cluster_gpus = Systems.Clusters.Training_10K.total_accelerators
-    cluster_power_mw = 7
+    cluster_power = 7 * MW  # pedagogical 10k-GPU cluster IT load
     # ┌── 2. EXECUTE ───────────────────────────────────────
     lead_time_ratio = substation_lead_time_months/gpu_lead_time_months
     # ┌── 3. GUARD ─────────────────────────────────────────
@@ -2377,11 +2380,11 @@ class GridQueue:
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
     ratio_str = fmt(lead_time_ratio, precision=0, commas=False)
-    queue_str = fmt_qty(grid_queue_size_gw * ureg.gigawatt, ureg.gigawatt, precision=0, commas=False)
+    queue_str = fmt_power(grid_queue_size_gw * ureg.gigawatt, precision=0, commas=False)
     gpu_lead_time_months_str = fmt_time(gpu_lead_time_months, 'month', precision=0, commas=False, style='word')
     substation_lead_time_months_str = fmt_time(substation_lead_time_months, 'month', precision=0, commas=False, style='word')
     cluster_gpus_str = fmt_count(cluster_gpus, commas=True, label="GPU")
-    cluster_power_mw_str = fmt_qty(cluster_power_mw * ureg.megawatt, ureg.megawatt, precision=0, commas=False)
+    cluster_power_mw_str = fmt_power(cluster_power, precision=0, commas=False)
 ```
 
 ::: {#nbk-sustainable-ai-interconnection-queue .callout-notebook title="The interconnection queue"}
@@ -2474,48 +2477,51 @@ To make this concrete, consider the power budget for a single rack containing fo
 # │ Imports: mlsysim.fmt (fmt, fmt_int, check), Hardware, Systems
 # │ Exports: RackPowerBudget.*_str (per-row power and percentage, plus total)
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, fmt_power, fmt_percent, check
+from mlsysim.core.units import kilowatt, watt
 
 class RackPowerBudget:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    gpu_tdp_w = Hardware.Cloud.H100.tdp.m_as(watt)
+    gpu_tdp = Hardware.Cloud.H100.tdp
     gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
     nodes_per_rack = 4
 
-    host_kw = 3.2
-    nvswitch_kw = 1.6
-    ib_kw = 0.8
-    conversion_kw = 2.8
-    cooling_kw = 2.7
+    host_kw = 3.2 * kilowatt
+    nvswitch_kw = 1.6 * kilowatt
+    ib_kw = 0.8 * kilowatt
+    conversion_kw = 2.8 * kilowatt
+    cooling_kw = 2.7 * kilowatt
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     num_gpus = gpus_per_node * nodes_per_rack
-    gpu_kw = num_gpus * gpu_tdp_w / THOUSAND
+    gpu_power = num_gpus * gpu_tdp
+    gpu_kw = gpu_power.to(kilowatt)
     total_kw = gpu_kw + host_kw + nvswitch_kw + ib_kw + conversion_kw + cooling_kw
 
-    gpu_pct = round(gpu_kw / total_kw * 100)
-    host_pct = round(host_kw / total_kw * 100)
-    nvswitch_pct = round(nvswitch_kw / total_kw * 100)
-    ib_pct = round(ib_kw / total_kw * 100)
-    conversion_pct = round(conversion_kw / total_kw * 100)
-    cooling_pct = round(cooling_kw / total_kw * 100)
+    gpu_pct = round(gpu_kw.magnitude / total_kw.to(kilowatt).magnitude * 100)
+    host_pct = round(host_kw.magnitude / total_kw.to(kilowatt).magnitude * 100)
+    nvswitch_pct = round(nvswitch_kw.magnitude / total_kw.to(kilowatt).magnitude * 100)
+    ib_pct = round(ib_kw.magnitude / total_kw.to(kilowatt).magnitude * 100)
+    conversion_pct = round(conversion_kw.magnitude / total_kw.to(kilowatt).magnitude * 100)
+    cooling_pct = round(cooling_kw.magnitude / total_kw.to(kilowatt).magnitude * 100)
     pct_sum = gpu_pct + host_pct + nvswitch_pct + ib_pct + conversion_pct + cooling_pct
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(num_gpus == 32, f"Expected 32 GPUs, got {num_gpus}")
-    check(abs(gpu_kw - 22.4) < 0.1, f"GPU power ({gpu_kw:.1f} kW)")
-    check(abs(total_kw - 33.5) < 0.1, f"Total rack power ({total_kw:.1f} kW)")
+    check(abs(gpu_kw.magnitude - 22.4) < 0.1, f"GPU power ({gpu_kw.magnitude:.1f} kW)")
+    check(abs(total_kw.to(kilowatt).magnitude - 33.5) < 0.1, f"Total rack power ({total_kw.to(kilowatt).magnitude:.1f} kW)")
     check(pct_sum == 100, f"Percentages sum to {pct_sum}, expected 100")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     num_gpus_str = fmt(num_gpus, precision=0, commas=False)
-    gpu_tdp_w_str = fmt(gpu_tdp_w, precision=0, commas=False)
-    gpu_kw_str = fmt(gpu_kw, precision=1, commas=False)
-    host_kw_str = fmt(host_kw, precision=1, commas=False)
-    nvswitch_kw_str = fmt(nvswitch_kw, precision=1, commas=False)
-    ib_kw_str = fmt(ib_kw, precision=1, commas=False)
-    conversion_kw_str = fmt(conversion_kw, precision=1, commas=False)
-    cooling_kw_str = fmt(cooling_kw, precision=1, commas=False)
-    total_kw_str = fmt(total_kw, precision=1, commas=False)
+    gpu_tdp_w_str = fmt_power(gpu_tdp, precision=0, commas=False)
+    gpu_kw_str = fmt_power(gpu_kw, precision=1, commas=False)
+    host_kw_str = fmt_power(host_kw, precision=1, commas=False)
+    nvswitch_kw_str = fmt_power(nvswitch_kw, precision=1, commas=False)
+    ib_kw_str = fmt_power(ib_kw, precision=1, commas=False)
+    conversion_kw_str = fmt_power(conversion_kw, precision=1, commas=False)
+    cooling_kw_str = fmt_power(cooling_kw, precision=1, commas=False)
+    total_kw_str = fmt_power(total_kw, precision=1, commas=False)
 
     gpu_pct_str = fmt_percent(gpu_pct/100, precision=0, commas=False, style='prose')
     host_pct_str = fmt_percent(host_pct/100, precision=0, commas=False, style='prose')
@@ -2527,7 +2533,7 @@ class RackPowerBudget:
 
 | **Component**                                                                                                 |                **Power (kW)**                |              **% of Rack Total**              |
 |:--------------------------------------------------------------------------------------------------------------|:--------------------------------------------:|:---------------------------------------------:|
-| **GPU compute ($`{python} RackPowerBudget.num_gpus_str` \times `{python} RackPowerBudget.gpu_tdp_w_str`$ W)** |    `{python} RackPowerBudget.gpu_kw_str`     |     `{python} RackPowerBudget.gpu_pct_str`    |
+| **GPU compute ($`{python} RackPowerBudget.num_gpus_str` \times `{python} RackPowerBudget.gpu_tdp_w_str`$)** |    `{python} RackPowerBudget.gpu_kw_str`     |     `{python} RackPowerBudget.gpu_pct_str`    |
 | **Host CPUs and DRAM**                                                                                        |    `{python} RackPowerBudget.host_kw_str`    |    `{python} RackPowerBudget.host_pct_str`    |
 | **NVSwitch fabric**                                                                                           |  `{python} RackPowerBudget.nvswitch_kw_str`  |  `{python} RackPowerBudget.nvswitch_pct_str`  |
 | **InfiniBand HCAs**                                                                                           |     `{python} RackPowerBudget.ib_kw_str`     |     `{python} RackPowerBudget.ib_pct_str`     |
