@@ -53,6 +53,44 @@ Status:
 - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/codemod_fmt.py queue --root book/quarto/contents` PASS, `by kind: {}`
 - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_prose_semantics.py --root book/quarto/contents` PASS, 0 findings
 
+## 2026-05-31 — `vol2/compute_infrastructure` physical-unit cleanup
+
+Change type: byte-identical formatter relocation. Replaced all 82 remaining
+physical-unit suffix sites in `compute_infrastructure` with typed quantity
+formatters.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol2/compute_infrastructure/compute_infrastructure.qmd` | 82 | 320 | 183 | identical values + prose |
+
+Validation details:
+
+- Migrated accelerator FLOP/s, memory bandwidth, TDP, NVLink, rack power,
+  per-watt efficiency displays, static training-state memory, HBM/host memory,
+  bandwidth hierarchy, tensor/activation communication, WSC bandwidth,
+  checkpoint bandwidth/storage, and option-comparison anchors.
+- Values whose prose owns "per watt" remain visible as `N TFLOP/s` so the
+  substituted prose is unchanged.
+- Rack power expressions now keep the whole expression as a Pint quantity before
+  formatting in `kilowatt`.
+- `assess_equiv.py` baseline/snapshot/diff reported `IDENTICAL values` and
+  `IDENTICAL prose`.
+- `compute_infrastructure` now has zero `suffix=` calls.
+- `audit_fmt_usage.py` reports `physical_unit` suffixes dropped 219 -> 137,
+  `fmt_qty` at 1147, and `fmt_qty_int` at 135.
+- Verification: `git diff --check` PASS; py_compile PASS for formatter,
+  math-canonical, and fmt audit modules; focused pytest suite PASS, 190 tests;
+  `fmt_prose_contract.py` PASS, 0 violations; `codemod_fmt.py queue` PASS,
+  `by kind: {}`; `./book/binder check math` PASS;
+  `./book/binder check code --scope lego-dead-code` PASS;
+  `audit_prose_semantics.py` PASS, 0 findings across 81 files.
+- HTML/PDF render evidence: not run yet. Full rendering is intentionally
+  deferred for the separate render/prose audit checkpoint.
+
+Status: non-render verified; render audit pending.
+
 ## 2026-05-31 — `vol2/data_storage` physical-unit cleanup
 
 Change type: byte-identical formatter relocation. Replaced all 67 remaining

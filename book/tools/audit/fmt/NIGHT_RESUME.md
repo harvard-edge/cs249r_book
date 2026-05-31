@@ -214,7 +214,10 @@ remaining sites in that chapter, byte-identically, leaving the file with zero
 across 3 chapters. The `data_storage` physical-unit cleanup then migrated all
 67 remaining sites in that chapter, byte-identically, leaving the file with zero
 `suffix=` calls. Remaining suffix bucket is only 219 `physical_unit` suffixes
-across 2 chapters. Remaining: the rest of WS4/WS3 and
+across 2 chapters. The `compute_infrastructure` physical-unit cleanup then
+migrated all 82 remaining sites in that chapter, byte-identically, leaving the
+file with zero `suffix=` calls. Remaining suffix bucket is only 137
+`physical_unit` suffixes, all in `vol1/training`. Remaining: the rest of WS4/WS3 and
 later PDF/lock phases. Nothing is half-done or broken.
 
 **New TODOs from user discussion:** add a prose-bound output contract/gate so
@@ -630,6 +633,10 @@ drop. The adjacent prose/table text was updated to `1 percentage-point threshold
 and `(drop of 6.8 percentage points)`. No user-decision items remain open.
 
 ## Session commit log (newest first)
+- Codex `vol2/compute_infrastructure` physical-unit cleanup: migrated all 82
+  remaining physical-unit suffix sites in the chapter to typed quantity
+  formatters, byte-identically. `compute_infrastructure` now has 0 `suffix=`
+  calls; physical-unit suffixes dropped 219 -> 137.
 - Codex `vol2/data_storage` physical-unit cleanup: migrated all 67 remaining
   physical-unit suffix sites in the chapter to typed quantity formatters,
   byte-identically. `data_storage` now has 0 `suffix=` calls; physical-unit
