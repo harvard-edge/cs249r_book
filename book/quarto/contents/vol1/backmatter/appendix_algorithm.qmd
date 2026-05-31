@@ -129,7 +129,7 @@ CSR is essential for recommendation systems (sparse embedding tables) and pruned
 # │ Context: @sec-appdx-algorithm-foundations-sparse-matrix-formats-0bd0 embedding example
 # │ Goal: Dense vs sparse vocabulary embedding footprint at 1% density
 # │ Exports: SparseEmbeddingExample.*_str
-from mlsysim.fmt import fmt_int, fmt
+from mlsysim.fmt import fmt_int, fmt, fmt_percent, fmt_qty
 
 class SparseEmbeddingExample:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
@@ -139,21 +139,24 @@ class SparseEmbeddingExample:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     total_elements = vocab_size * embed_dim
-    dense_bytes = total_elements * BYTES_FP32.m_as(ureg.byte)
-    dense_gb = (dense_bytes * byte).m_as(GB)
+    dense_bytes_q = total_elements * BYTES_FP32
+    dense_bytes = dense_bytes_q.m_as(byte)
+    dense_gb = dense_bytes_q.m_as(GB)
     nonzeros = int(total_elements * sparsity_pct / 100)
-    csr_bytes_per_nonzero = BYTES_FP32.m_as(ureg.byte) + BYTES_INT32.m_as(ureg.byte)
-    sparse_bytes = nonzeros * csr_bytes_per_nonzero
-    sparse_mb = (sparse_bytes * byte).m_as(MB)
+    csr_bytes_per_nonzero_q = BYTES_FP32 + BYTES_INT32
+    csr_bytes_per_nonzero = csr_bytes_per_nonzero_q.m_as(byte)
+    sparse_bytes_q = nonzeros * csr_bytes_per_nonzero_q
+    sparse_bytes = sparse_bytes_q.m_as(byte)
+    sparse_mb = sparse_bytes_q.m_as(MB)
     reduction_factor = int(dense_bytes / sparse_bytes)
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     vocab_size_str = fmt(vocab_size, precision=0)
     embed_dim_str = fmt(embed_dim, precision=0)
     total_elements_str = fmt(total_elements / BILLION, precision=0, commas=False)
-    dense_gb_str = fmt(dense_gb, precision=0, commas=False, suffix=' GB')
+    dense_gb_str = fmt_qty(dense_bytes_q, GB, precision=0, commas=False)
     nonzeros_str = fmt(nonzeros / MILLION, precision=0, commas=False)
-    sparse_mb_str = fmt(sparse_mb, precision=0, commas=False, suffix=' MB')
+    sparse_mb_str = fmt_qty(sparse_bytes_q, MB, precision=0, commas=False)
     bytes_fp32_str = fmt_int(BYTES_FP32.m_as(ureg.byte), commas=False)
     bytes_int32_str = fmt_int(BYTES_INT32.m_as(ureg.byte), commas=False)
     sparsity_pct_str = fmt_percent(sparsity_pct/100, precision=0, commas=False, style='prose')
@@ -348,7 +351,7 @@ To see how these components interact in practice, consider a concrete model.
 # │          gpt2_act_small_gb_str, gpt2_total_small_gb_str,
 # │          gpt2_batch_large_str, gpt2_act_large_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, check, sci_latex, fmt_math, MarkdownStr
+from mlsysim.fmt import fmt_int, fmt, check, sci_latex, fmt_math, MarkdownStr, fmt_percent, fmt_qty
 
 class GPT2TrainingMem:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -357,7 +360,8 @@ class GPT2TrainingMem:
     d = Models.Language.GPT2.hidden_dim
     bf16 = int(BYTES_FP16.m_as(ureg.byte))
     fp32 = int(BYTES_FP32.m_as(ureg.byte))
-    accel_gb = Hardware.Cloud.A100.memory.capacity.m_as(GB)
+    accel_q = Hardware.Cloud.A100.memory.capacity
+    accel_gb = accel_q.m_as(GB)
     batch_small = 8
     batch_large = 64
     seq_len = 1024
@@ -366,21 +370,29 @@ class GPT2TrainingMem:
     )  # FP32 master + momentum + variance
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    weights_gb = (P * bf16 * byte).m_as(GB)
-    grads_gb = (P * bf16 * byte).m_as(GB)
-    optim_gb = (P * optimizer_bytes_per_param * byte).m_as(GB)
-    model_state_gb = weights_gb + grads_gb + optim_gb
-    remaining_gb = accel_gb - model_state_gb
+    weights_q = P * bf16 * byte
+    grads_q = P * bf16 * byte
+    optim_q = P * optimizer_bytes_per_param * byte
+    weights_gb = weights_q.m_as(GB)
+    grads_gb = grads_q.m_as(GB)
+    optim_gb = optim_q.m_as(GB)
+    model_state_q = weights_q + grads_q + optim_q
+    model_state_gb = model_state_q.m_as(GB)
+    remaining_q = accel_q - model_state_q
+    remaining_gb = remaining_q.m_as(GB)
 
     # Per-layer activation ≈ 12 * B * S * d * bytes_bf16:
     # input(1d) + QKV(3d) + attn_out(1d) + FFN(4d) + output(1d) + norms/masks(2d)
     act_factor = 12
-    act_small_bytes = layers * act_factor * batch_small * seq_len * d * bf16
-    act_small_gb = (act_small_bytes * byte).m_as(GB)
-    total_small_gb = model_state_gb + act_small_gb
+    act_small_q = layers * act_factor * batch_small * seq_len * d * bf16 * byte
+    act_small_bytes = act_small_q.m_as(byte)
+    act_small_gb = act_small_q.m_as(GB)
+    total_small_q = model_state_q + act_small_q
+    total_small_gb = total_small_q.m_as(GB)
 
-    act_large_bytes = layers * act_factor * batch_large * seq_len * d * bf16
-    act_large_gb = (act_large_bytes * byte).m_as(GB)
+    act_large_q = layers * act_factor * batch_large * seq_len * d * bf16 * byte
+    act_large_bytes = act_large_q.m_as(byte)
+    act_large_gb = act_large_q.m_as(GB)
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(model_state_gb < accel_gb, "Model state must fit on accelerator")
@@ -392,21 +404,21 @@ class GPT2TrainingMem:
     layers_str = fmt(layers, precision=0, commas=False)
     d_str = fmt(d, precision=0, commas=False)
     bf16_str = fmt(bf16, precision=0, commas=False)
-    weights_gb_str = fmt(weights_gb, precision=0, commas=False, suffix=' GB')
-    grads_gb_str = fmt(grads_gb, precision=0, commas=False, suffix=' GB')
+    weights_gb_str = fmt_qty(weights_q, GB, precision=0, commas=False)
+    grads_gb_str = fmt_qty(grads_q, GB, precision=0, commas=False)
     optim_bytes_str = fmt(optimizer_bytes_per_param, precision=0, commas=False)
-    optim_gb_str = fmt(optim_gb, precision=0, commas=False, suffix=' GB')
-    model_state_gb_str = fmt(model_state_gb, precision=0, commas=False, suffix=' GB')
-    accel_gb_str = fmt(accel_gb, precision=1, commas=False, suffix=' GB')
-    remaining_gb_str = fmt(remaining_gb, precision=1, commas=False, suffix=' GB')
+    optim_gb_str = fmt_qty(optim_q, GB, precision=0, commas=False)
+    model_state_gb_str = fmt_qty(model_state_q, GB, precision=0, commas=False)
+    accel_gb_str = fmt_qty(accel_q, GB, precision=1, commas=False)
+    remaining_gb_str = fmt_qty(remaining_q, GB, precision=1, commas=False)
     batch_small_str = fmt(batch_small, precision=0, commas=False)
     seq_len_str = fmt(seq_len, precision=0, commas=False)
     act_small_gb_str = fmt(act_small_gb, precision=1, commas=False)
-    total_small_gb_str = fmt(total_small_gb, precision=1, commas=False, approx=True, suffix=' GB')
+    total_small_gb_str = fmt_qty(total_small_q, GB, precision=1, commas=False, approx=True)
     batch_large_str = fmt(batch_large, precision=0, commas=False)
-    act_large_gb_str = fmt(act_large_gb, precision=1, commas=False, approx=True, suffix=' GB')
+    act_large_gb_str = fmt_qty(act_large_q, GB, precision=1, commas=False, approx=True)
     act_factor_str = fmt(act_factor, precision=0, commas=False)
-    accel_class_gb_str = fmt(80, precision=0, commas=False, suffix=' GB')
+    accel_class_gb_str = fmt_qty(80 * GB, GB, precision=0, commas=False)
     grad_ckpt_overhead_pct_str = fmt_percent(33/100, precision=0, commas=False, style='prose')
 ```
 
