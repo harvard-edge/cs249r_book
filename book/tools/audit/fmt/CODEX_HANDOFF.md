@@ -322,7 +322,10 @@ lane was hardened to emit `per="token"` instead of legacy
 Quantity-backed candidates remain intentionally queued because canonical units
 would visibly change output, mostly `GB`→`GiB` memory capacity and missing
 bandwidth denominators such as `TB`→`TB/s`; handle those as correctness/prose
-decisions, not automatic byte-identical relocations. Verification: `git diff
+decisions, not automatic byte-identical relocations. A follow-up
+`run_unit_lane.py --write --all` after A27 reconfirmed that all 20 fail the
+byte-identical gate, and `.gitignore` now ignores these generated adjudication
+queue files. Verification: `git diff
 --check` PASS; py_compile PASS; focused pytest suite PASS (171 tests);
 `fmt_prose_contract.py` 0; `codemod_fmt.py queue` `by kind: {}`;
 `./book/binder check math` PASS; `audit_prose_semantics.py` CLEAN across 81

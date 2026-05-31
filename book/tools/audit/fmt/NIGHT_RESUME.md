@@ -90,8 +90,9 @@ MarkdownStr sites and the API-clarity pass.
 For physical Quantity-backed sites, continue WS4 with
 `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/run_unit_lane.py --write <qmd>`
 one chapter at a time. The latest all-chapter run migrated the remaining
-byte-identical clean candidates; the dry-run now shows only 20 Quantity-backed
-candidates that visibly change output (`GB`→`GiB`, `TB`→`TB/s`, `GB`→`GB/s`).
+byte-identical clean candidates; the follow-up write run confirmed the remaining
+20 Quantity-backed candidates all fail the byte-identical gate because they
+would visibly change output (`GB`→`GiB`, `TB`→`TB/s`, `GB`→`GB/s`).
 Many more suffix sites are plain floats and should stay queued unless the source
 is refactored to carry a Pint Quantity.
 
