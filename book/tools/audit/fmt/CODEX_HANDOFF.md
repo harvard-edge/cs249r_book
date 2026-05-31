@@ -1043,11 +1043,30 @@ pytest suite PASS (190 tests); `fmt_prose_contract.py` 0; `codemod_fmt.py queue`
 `by kind: {}`; `./book/binder check math` PASS; `./book/binder check code
 --scope lego-dead-code` PASS; `audit_prose_semantics.py` CLEAN across 81 files.
 
-### B. WS4 — unit-suffix lane (remaining 137 physical-unit suffixes: `GB`/`MB`/`W`/`GB/s`/…)  ← the big one
-**Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
-and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.
-`weights_gb`), not Pint Quantities, and `fmt_qty` requires a Pint Quantity to
-generate the unit. So this is per-site, judgment-bearing source work. Method:
+**A74 — `vol1/training` physical-unit cleanup: DONE.**
+Migrated all 137 remaining physical-unit suffix sites in `training` to typed
+quantity formatters, leaving the file with 0 `suffix=` or `extra_suffix=` calls.
+The lane covered opening memory examples, GPT-2 lighthouse hardware, optimizer
+and activation memory, A100/H100 throughput/bandwidth, data-pipeline
+bandwidths, VRAM and ResNet memory examples, mixed-precision memory,
+FlashAttention memory, gradient accumulation, scaling recap, NVLink, carbon
+footprint energy/power/CO2, and final fallacy/pitfall anchors. TFLOP/s uses
+`TFLOP / second`; PFLOP/s uses checked `unit_label="PFLOP/s"` where Pint's
+plural unit name would change visible text. The non-unit dimension labels
+`W`/`GB GPU` are composed with `MarkdownStr` around typed formatter output
+instead of base `fmt(..., suffix=...)`. `audit_fmt_usage.py` now reports no
+remaining `suffix=` or `extra_suffix=` semantic buckets, `fmt_qty` at 1282,
+and `fmt_qty_int` at 135. Verification: `assess_equiv.py` values/prose
+identical for `training`; `git diff --check` PASS; py_compile PASS; focused
+pytest suite PASS (190 tests); `fmt_prose_contract.py` 0; `codemod_fmt.py
+queue` `by kind: {}`; `./book/binder check math` PASS; `./book/binder check
+code --scope lego-dead-code` PASS; `audit_prose_semantics.py` CLEAN across 81
+files.
+
+### B. WS4 — unit-suffix lane: DONE
+All physical-unit suffix sites have been migrated. `audit_fmt_usage.py` now
+reports empty `suffix=` and `extra_suffix=` semantic buckets across all 81
+files. Historical method retained for auditability:
 
 1. **Inventory & bucket** (don't brute-force):
    ```
@@ -1062,8 +1081,8 @@ generate the unit. So this is per-site, judgment-bearing source work. Method:
 3. **Plain-float sites** (`fmt(weights_gb, suffix=" GB")` with no Quantity in scope):
    prefer restoring/creating the source Quantity and use `fmt_qty`; preserve any
    old explicit flooring/rounding by formatting a display Quantity made from the
-   already-rounded magnitude. Leave a raw suffix only for a documented genuine
-   label or if the source refactor would change semantics.
+   already-rounded magnitude. Do not leave a raw `suffix=`; use typed formatters
+   plus explicit prose/`MarkdownStr` composition for genuine non-unit labels.
 4. Go **one chapter at a time**, byte-identical, gate after each, commit per chapter.
    `run_unit_lane.py` now exists for the recurring clean sub-pattern
    `fmt(q.m_as(UNIT), suffix=" <unit>")` → `fmt_qty(q, UNIT)`. It reuses

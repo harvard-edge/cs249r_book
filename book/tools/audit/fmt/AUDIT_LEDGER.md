@@ -53,6 +53,46 @@ Status:
 - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/codemod_fmt.py queue --root book/quarto/contents` PASS, `by kind: {}`
 - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_prose_semantics.py --root book/quarto/contents` PASS, 0 findings
 
+## 2026-05-31 — `vol1/training` physical-unit cleanup
+
+Change type: byte-identical formatter relocation. Replaced all 137 remaining
+physical-unit suffix sites in `training` with typed quantity formatters.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol1/training/training.qmd` | 137 | 453 | 214 | identical values + prose |
+
+Validation details:
+
+- Migrated opening memory examples, GPT-2 lighthouse hardware, optimizer and
+  activation memory, A100/H100 throughput/bandwidth, data-pipeline bandwidths,
+  VRAM and ResNet memory examples, mixed-precision memory, FlashAttention
+  memory, gradient accumulation, scaling recap, NVLink, carbon footprint
+  energy/power/CO2, and final fallacy/pitfall anchors.
+- TFLOP/s displays use `TFLOP / second`. PFLOP/s displays use checked
+  `unit_label="PFLOP/s"` where Pint's plural unit label would change visible
+  house style.
+- Genuine non-unit compositions (`GB GPU` and matrix-width `W`) now wrap typed
+  formatter output with `MarkdownStr` instead of using base `fmt(..., suffix=...)`.
+- `assess_equiv.py` baseline/snapshot/diff reported `IDENTICAL values` and
+  `IDENTICAL prose`.
+- `training` now has zero `suffix=` or `extra_suffix=` calls.
+- `audit_fmt_usage.py` reports no remaining `suffix=` or `extra_suffix=`
+  semantic buckets across all 81 files, `fmt_qty` at 1282, and `fmt_qty_int`
+  at 135.
+- Verification: `git diff --check` PASS; py_compile PASS for formatter,
+  math-canonical, and fmt audit modules; focused pytest suite PASS, 190 tests;
+  `fmt_prose_contract.py` PASS, 0 violations; `codemod_fmt.py queue` PASS,
+  `by kind: {}`; `./book/binder check math` PASS;
+  `./book/binder check code --scope lego-dead-code` PASS;
+  `audit_prose_semantics.py` PASS, 0 findings across 81 files.
+- HTML/PDF render evidence: not run yet. Full rendering is intentionally
+  deferred for the separate render/prose audit checkpoint per user request.
+
+Status: non-render verified; render audit pending.
+
 ## 2026-05-31 — `vol2/compute_infrastructure` physical-unit cleanup
 
 Change type: byte-identical formatter relocation. Replaced all 82 remaining

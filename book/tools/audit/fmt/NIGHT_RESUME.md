@@ -37,7 +37,7 @@ python3 -m pytest mlsysim/tests/test_fmt.py book/tests/test_codemod_fmt.py book/
 
 ## NOW / NEXT  (update before every commit)
 
-**STATUS: Compound-scale suffix migration complete; remaining suffix work is WS4 physical units, MarkdownStr review, render/PDF audit, API cleanup, and final lock.**
+**STATUS: Physical-unit suffix migration complete; remaining work is WS3 MarkdownStr review, render/PDF audit, API cleanup, and final lock.**
 
 **State:** multiplier + percent + scale 100% migrated; pp → typed fmt_pp (14
 byte-identical sites + grammar fixes, plus the user-approved A2 benchmarking
@@ -217,8 +217,11 @@ across 3 chapters. The `data_storage` physical-unit cleanup then migrated all
 across 2 chapters. The `compute_infrastructure` physical-unit cleanup then
 migrated all 82 remaining sites in that chapter, byte-identically, leaving the
 file with zero `suffix=` calls. Remaining suffix bucket is only 137
-`physical_unit` suffixes, all in `vol1/training`. Remaining: the rest of WS4/WS3 and
-later PDF/lock phases. Nothing is half-done or broken.
+`physical_unit` suffixes, all in `vol1/training`. The `training` physical-unit
+cleanup then migrated all 137 remaining sites, byte-identically, leaving the
+entire corpus with no `suffix=` or `extra_suffix=` semantic buckets. Remaining:
+WS3 MarkdownStr review plus later render/PDF/API-cleanup/lock phases. Nothing
+is half-done or broken.
 
 **New TODOs from user discussion:** add a prose-bound output contract/gate so
 computed OUTPUT values consumed by inline prose are typed formatter results or
@@ -232,14 +235,9 @@ as a rate today but the rendered unit is still shared between formatter output
 and prose.
 
 **If continuing:** Continue with semantic lanes in `PLAN_OF_RECORD.md`. Good next
-targets are physical-unit suffixes, MarkdownStr sites, and the API-cleanup pass.
-For physical Quantity-backed sites, continue WS4 with
-`PYTHONPATH=mlsysim python3 book/tools/audit/fmt/run_unit_lane.py --write <qmd>`
-one chapter at a time when the exact lane applies, then inspect queued/plain-float
-sites by hand. Current direction is to prefer restoring/creating Pint quantities
-for unit-bearing outputs and use `fmt_qty`/`fmt_qty_int`; preserve old explicit
-flooring or prose-owned `/s` displays with display quantities and `unit_label=`
-only where necessary.
+targets are MarkdownStr sites and the API-cleanup pass. Do not start the full
+render/PDF/prose audit until the user gives the go-ahead; they asked to stop
+before that checkpoint.
 
 **NEW TOOL:** `audit_prose_semantics.py` — executes each chapter, substitutes
 LEGO values into prose, normalizes LaTeX→visible, flags duplicated glyph/unit,
@@ -633,6 +631,10 @@ drop. The adjacent prose/table text was updated to `1 percentage-point threshold
 and `(drop of 6.8 percentage points)`. No user-decision items remain open.
 
 ## Session commit log (newest first)
+- Codex `vol1/training` physical-unit cleanup: migrated all 137 remaining
+  physical-unit suffix sites in the chapter to typed quantity formatters,
+  byte-identically. `training` now has 0 `suffix=` or `extra_suffix=` calls;
+  corpus `audit_fmt_usage.py` reports no remaining suffix semantic buckets.
 - Codex `vol2/compute_infrastructure` physical-unit cleanup: migrated all 82
   remaining physical-unit suffix sites in the chapter to typed quantity
   formatters, byte-identically. `compute_infrastructure` now has 0 `suffix=`

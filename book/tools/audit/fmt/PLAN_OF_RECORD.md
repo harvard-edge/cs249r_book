@@ -225,8 +225,10 @@ Work by semantic bucket, not by string replacement:
 2. Currency scale/per/range oddities.
 3. Count labels and non-physical rates.
 4. Time values.
-5. Clean Pint-backed physical quantities.
-6. Plain-scalar unit sites, one chapter at a time.
+5. Clean Pint-backed physical quantities. **Done.**
+6. Plain-scalar unit sites, one chapter at a time. **Done for raw
+   `suffix=`/`extra_suffix=` physical units; non-unit `MarkdownStr`
+   compositions remain for WS3 review.**
 7. Suspicious `MarkdownStr` numeric wrappers.
 8. Final lock: make suffix semantics a global blocker.
 
