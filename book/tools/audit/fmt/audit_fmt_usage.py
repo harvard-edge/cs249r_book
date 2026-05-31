@@ -145,6 +145,10 @@ def analyze_cell(cell_src: str, fence_line: int, file_rel: str, records: list):
 
         kwargs = {kw.arg: kw.value for kw in node.keywords if kw.arg}
         suffix = literal_str(kwargs["suffix"]) if "suffix" in kwargs else None
+        extra_suffix = (
+            literal_str(kwargs["extra_suffix"])
+            if "extra_suffix" in kwargs else None
+        )
         prefix = literal_str(kwargs["prefix"]) if "prefix" in kwargs else None
         first_arg_src = src_of(node.args[0]) if node.args else ""
 
@@ -206,6 +210,7 @@ def analyze_cell(cell_src: str, fence_line: int, file_rel: str, records: list):
             "line": fence_line + (node.lineno or 0),
             "func": fname,
             "suffix": suffix,
+            "extra_suffix": extra_suffix,
             "prefix": prefix,
             "kind": kind,
             "first_arg": first_arg_src[:80],
@@ -234,6 +239,10 @@ def main():
     # ---- aggregate ----
     by_func = Counter(r["func"] for r in records)
     by_kind = Counter(r["kind"] for r in records if r["kind"])
+    by_extra_kind = Counter(
+        classify_suffix(r["extra_suffix"]) for r in records
+        if r.get("extra_suffix")
+    )
     abuse_counter = Counter()
     for r in records:
         for a in r["abuses"]:
@@ -256,6 +265,7 @@ def main():
     print(f"\nFiles scanned: {len(files)}   AST-parsed fmt calls: {len(records)}")
     table(by_func, "Calls by function")
     table(by_kind, "suffix= calls by semantic kind")
+    table(by_extra_kind, "extra_suffix= calls by semantic kind")
     table(abuse_counter, "Abuse patterns (targets for migration)")
     table(percent_inputs, "Percent input form (ratio vs pre-scaled)")
 
