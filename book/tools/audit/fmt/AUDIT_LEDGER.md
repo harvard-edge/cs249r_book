@@ -164,6 +164,43 @@ Validation details:
   `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
   0 findings across 81 files.
 
+## 2026-05-31 — Residual plain count-label suffix relocation
+
+Change type: byte-identical formatter relocation. Replaced 17 remaining plain
+count-noun suffixes (`errors`, `steps`, `photos`, `requests`, `servers`,
+`workers`, `stages`, `V100s`, `V100 GPUs`, etc.) with structured
+`fmt_count(..., label=...)`.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol1/benchmarking/benchmarking.qmd` | 4 | 240 | 102 | identical values + prose |
+| `vol1/data_engineering/data_engineering.qmd` | 1 | 203 | 99 | identical values + prose |
+| `vol1/ml_systems/ml_systems.qmd` | 1 | 296 | 143 | identical values + prose |
+| `vol1/model_serving/model_serving.qmd` | 3 | 365 | 172 | identical values + prose |
+| `vol1/training/training.qmd` | 4 | 453 | 214 | identical values + prose |
+| `vol2/conclusion/conclusion.qmd` | 1 | 19 | 18 | identical values + prose |
+| `vol2/data_storage/data_storage.qmd` | 1 | 180 | 99 | identical values + prose |
+| `vol2/distributed_training/distributed_training.qmd` | 1 | 261 | 142 | identical values + prose |
+| `vol2/network_fabrics/network_fabrics.qmd` | 1 | 106 | 62 | identical values + prose |
+
+Validation details:
+
+- Before/after snapshots were generated with `assess_equiv.py baseline --ref HEAD`
+  and `assess_equiv.py snapshot` under `/tmp/fmt_count_labels_*`.
+- `assess_equiv.py diff` reported `IDENTICAL values` and `IDENTICAL prose` for
+  every touched chapter.
+- `audit_fmt_usage.py` reports `fmt_count` calls increased to 230 and direct
+  suffix calls dropped to 1,199, all under the remaining physical/compound
+  suffix bucket.
+- Verification: `python3 -m py_compile mlsysim/mlsysim/fmt.py book/cli/checks/fmt_semantic_suffix.py book/tools/audit/fmt/audit_fmt_usage.py book/cli/checks/lego_dead_code.py` PASS;
+  `git diff --check` PASS; `./book/binder check math` PASS;
+  `./book/binder check code --scope lego-dead-code` PASS; focused pytest suite
+  PASS, 176 tests; `fmt_prose_contract.py` PASS, 0 violations;
+  `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
+  0 findings across 81 files.
+
 ## 2026-05-31 — Exact scale-word suffix relocation
 
 Change type: byte-identical formatter relocation. Added

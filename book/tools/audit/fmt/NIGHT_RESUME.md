@@ -81,6 +81,10 @@ migrated byte-identically, and `audit_fmt_usage.py` reports no `scale_word`
 suffix bucket. User flagged `fmt_count(..., scale="B", scale_style="word")` as
 unclear source spelling; `PLAN_OF_RECORD.md` records the API-clarity follow-up
 to discuss a cleaner spelling such as `scale="billion"` before final lock.
+Residual plain count labels are also reduced: 17 suffixes such as `errors`,
+`steps`, `photos`, `requests`, `servers`, `workers`, `stages`, `V100s`, and
+`link tiers` now use `fmt_count(..., label=...)`, byte-identical across 9
+chapters.
 Remaining: the rest of WS4/WS3 and later PDF/lock phases. Nothing is half-done
 or broken.
 

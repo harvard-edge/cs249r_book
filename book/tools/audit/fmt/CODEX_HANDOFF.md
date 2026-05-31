@@ -374,6 +374,18 @@ focused pytest suite PASS (176 tests); `fmt_prose_contract.py` 0;
 `scale="B", scale_style="word"` as unclear; discuss a clearer public spelling
 such as `scale="billion"` before final API lock.
 
+**A28 — Residual plain count-label suffix lane: DONE.**
+Migrated 17 remaining plain count-noun suffixes (`errors`, `steps`, `photos`,
+`requests`, `servers`, `workers`, `stages`, `V100s`, `V100 GPUs`, `link tiers`,
+etc.) to `fmt_count(..., label=...)`, byte-identical across 9 chapters:
+`benchmarking`, `data_engineering`, `ml_systems`, `model_serving`, `training`,
+`conclusion`, `data_storage`, `distributed_training`, and `network_fabrics`.
+`audit_fmt_usage.py` now reports `fmt_count` at 230 and direct suffix calls at
+1,199. Verification: `git diff --check` PASS; py_compile PASS; focused pytest
+suite PASS (176 tests); `fmt_prose_contract.py` 0; `codemod_fmt.py queue`
+`by kind: {}`; `./book/binder check math` PASS; `./book/binder check code
+--scope lego-dead-code` PASS; `audit_prose_semantics.py` CLEAN across 81 files.
+
 ### B. WS4 — unit-suffix lane (~2,393 sites: `GB`/`ms`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.
