@@ -438,6 +438,8 @@ class ValidateCommand:
                   note="physical *_value assignments must use ureg/registry", default=False),
             Scope("lego-equations", "_run_lego_equations",
                   note="A/B=C prose lines must match computed values", default=False),
+            Scope("lego-units", "_run_lego_units",
+                  note="LEGO unit discipline (warning-only + baseline)", default=False),
             # Added 2026-05-26: \\${python} collision — escaped dollar before
             # {python} silently fails to render; correct form is \\$\\`{python}.
             Scope("python-dollar-collision", "_run_python_dollar_collision",
@@ -8539,6 +8541,50 @@ class ValidateCommand:
         return ValidationRunResult(
             name="lego-equations",
             description=f"LEGO equation coherence ({qmd_count} files)",
+            files_checked=qmd_count,
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_lego_units(self, root: Path) -> ValidationRunResult:
+        """code --scope lego-units: warning-only LEGO unit discipline linter."""
+        import json
+        import subprocess
+        import sys
+
+        t0 = time.time()
+        repo = root
+        baseline = repo / "book" / "tools" / "audit" / "lego_units_baseline.json"
+        script = repo / "book" / "tools" / "scripts" / "lint_lego_units.py"
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--baseline",
+                str(baseline),
+                "--fail-on",
+                "warning",
+            ],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+        )
+        issues: list[ValidationIssue] = []
+        if proc.returncode != 0 and proc.stdout.strip():
+            for entry in json.loads(proc.stdout):
+                issues.append(
+                    ValidationIssue(
+                        file=entry["file"],
+                        line=entry["line"],
+                        code=entry["rule"],
+                        message=entry["message"],
+                        severity=entry.get("severity", "warning"),
+                    )
+                )
+        qmd_count = len(list((repo / "book" / "quarto" / "contents").rglob("*.qmd")))
+        return ValidationRunResult(
+            name="lego-units",
+            description=f"LEGO unit discipline lint ({qmd_count} files)",
             files_checked=qmd_count,
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),

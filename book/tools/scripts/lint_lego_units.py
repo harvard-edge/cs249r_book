@@ -1,0 +1,178 @@
+#!/usr/bin/env python3
+"""Warning-only LEGO unit discipline linter for QMD cells."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+
+@dataclass(frozen=True)
+class LintIssue:
+    rule: str
+    file: str
+    line: int
+    message: str
+    severity: str = "warning"
+
+
+RULES = (
+    "L001", "L002", "L003", "L004", "L006", "L007", "L008", "L009",
+    "L014", "L015", "L016", "L017",
+)
+
+CLOSED_UNIT_SUFFIX = re.compile(
+    r"_(?P<unit>w|kw|mw|j|mj|wh|kwh|mwh|gwh|gb|tb|gib|ms|s|mw|tonnes?|kg|gbps|tflop)s?_str\s*=",
+    re.I,
+)
+OPEN_FMT_ON_SCALAR = re.compile(
+    r"^\s*(?P<name>\w+_str)\s*=\s*fmt\s*\(",
+    re.M,
+)
+FMT_QTY_ASSIGN = re.compile(
+    r"^\s*(?P<name>\w+_str)\s*=\s*(?:fmt_qty|fmt_power|fmt_energy|fmt_bandwidth|fmt_memory|fmt_emissions|fmt_latency)\s*\(",
+    re.M,
+)
+MASG_TO_CLOSED = re.compile(
+    r"^\s*(?P<name>\w+_(?:w|kw|mw|j|wh|kwh|mwh|gb|tb|ms|s|kg|tonnes?)_str)\s*=.*\.m_as\s*\(",
+    re.M | re.I,
+)
+FMT_QTY_SCALAR = re.compile(r"fmt_qty\s*\(\s*\w+\.m_as\s*\(")
+RAW_FMT_SUFFIX = re.compile(
+    r"fmt\s*\([^)]*suffix\s*=\s*['\"]\s*(?:GB|TB|MB|kWh|MWh|TFLOP|W|MW|ms|s)\b"
+)
+UNIT_LABEL = re.compile(r"unit_label\s*=")
+UPPER_TIME = re.compile(r"\b(MS|US|NS)\b")
+UREG_ALIAS = re.compile(
+    r"ureg\.(millijoule|megawatt|joule|kilowatt_hour|megawatt_hour|kilogram|millisecond|microsecond|minute|watt_hour)\b"
+)
+PROSE_DUP_UNIT = re.compile(
+    r"\{python\}\s*[\w.]+\.(?P<name>\w+_(?:w|kw|mw|wh|kwh|mwh|gb|tb|ms|s|kg)_str)\`\s+(?:W|MW|kWh|MWh|GB|TB|ms|s|kg)\b",
+    re.I,
+)
+
+
+def _scan_python_blocks(text: str) -> list[tuple[int, str]]:
+    blocks: list[tuple[int, str]] = []
+    for match in re.finditer(r"```\{python\}(.*?)```", text, re.S):
+        start = text[: match.start()].count("\n") + 1
+        blocks.append((start, match.group(1)))
+    return blocks
+
+
+def lint_file(path: Path, root: Path) -> list[LintIssue]:
+    path = path.resolve()
+    root = root.resolve()
+    try:
+        rel = str(path.relative_to(root))
+    except ValueError:
+        rel = str(path)
+    text = path.read_text(encoding="utf-8")
+    issues: list[LintIssue] = []
+
+    for base_line, block in _scan_python_blocks(text):
+        for i, line in enumerate(block.splitlines(), start=1):
+            lineno = base_line + i
+            if FMT_QTY_SCALAR.search(line):
+                issues.append(LintIssue("L001", rel, lineno, "fmt_qty requires Quantity, not .m_as(...)."))
+            if RAW_FMT_SUFFIX.search(line):
+                issues.append(LintIssue("L002", rel, lineno, "Use fmt_qty or domain formatter for physical units."))
+            if re.search(r"=\s*\w+\.m_as\(", line) and re.search(r"\*\s*(?:GB|TB|watt|MW|joule|second)\b", line):
+                issues.append(LintIssue("L003", rel, lineno, "Avoid reattaching units after .m_as()."))
+            if re.search(r"(energy_mwh|carbon|tonnes)\s*=.*(?:/\s*THOUSAND|\*\s*THOUSAND)", line, re.I):
+                issues.append(LintIssue("L004", rel, lineno, "Use energy_from_power/carbon_from_energy helpers."))
+            if UNIT_LABEL.search(line):
+                issues.append(LintIssue("L006", rel, lineno, "Prefer domain formatter over unit_label=."))
+            if UPPER_TIME.search(line):
+                issues.append(LintIssue("L007", rel, lineno, "Prefer ms/microsecond/nanosecond over MS/US/NS."))
+            if re.search(r"=\s*\d+(?:\.\d+)?\s*\*\s*(TB|GB|TFLOP|MB)\s*/\s*second\b", line) and "(" not in line.split("=")[-1]:
+                issues.append(LintIssue("L008", rel, lineno, "Prefer parenthesized rate: 1.9 * (TB / second)."))
+            if UREG_ALIAS.search(line):
+                issues.append(LintIssue("L009", rel, lineno, "Prefer exported unit alias over ureg.*."))
+
+        for match in CLOSED_UNIT_SUFFIX.finditer(block):
+            name = match.group(0).split("=")[0].strip()
+            # find assignment line
+            for i, line in enumerate(block.splitlines(), start=1):
+                if name in line and "= fmt(" in line.replace(" ", ""):
+                    issues.append(LintIssue(
+                        "L014", rel, base_line + i,
+                        f"Closed name {name} uses open fmt() — use fmt_qty/domain formatter.",
+                    ))
+        for match in MASG_TO_CLOSED.finditer(block):
+            issues.append(LintIssue(
+                "L016", rel, base_line + match.start() // 80 + 1,
+                f"{match.group('name')} assigned from .m_as() scalar.",
+            ))
+        for match in FMT_QTY_ASSIGN.finditer(block):
+            n = match.group("name")
+            if not re.search(rf"_{re.escape(n.split('_')[-2])}_", n) and not re.search(
+                r"_(w|kw|mw|j|wh|kwh|mwh|gb|tb|ms|s|kg|tonnes?)_str$", n, re.I
+            ):
+                issues.append(LintIssue(
+                    "L017", rel, base_line + block[: match.start()].count("\n") + 1,
+                    f"{n} uses closed formatter but name is not closed-fixed.",
+                ))
+
+    for match in PROSE_DUP_UNIT.finditer(text):
+        lineno = text[: match.start()].count("\n") + 1
+        issues.append(LintIssue(
+            "L015", rel, lineno,
+            f"Prose repeats unit after closed export {match.group('name')}.",
+        ))
+    return issues
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Lint LEGO unit discipline in QMD files.")
+    parser.add_argument("paths", nargs="*", help="QMD files or directories")
+    parser.add_argument("--fail-on", choices=("error", "warning"), default="error")
+    parser.add_argument("--format", choices=("text", "json"), default="text")
+    parser.add_argument("--baseline", type=Path, help="JSON baseline of allowed warnings")
+    args = parser.parse_args(argv)
+
+    root = Path(__file__).resolve().parents[3]
+    qmd_paths: list[Path] = []
+    if args.paths:
+        for p in args.paths:
+            path = (root / p).resolve() if not Path(p).is_absolute() else Path(p).resolve()
+            if path.is_dir():
+                qmd_paths.extend(sorted(path.rglob("*.qmd")))
+            elif path.suffix == ".qmd" and path.exists():
+                qmd_paths.append(path)
+    else:
+        contents = root / "book" / "quarto" / "contents"
+        qmd_paths = sorted(contents.rglob("*.qmd"))
+
+    issues: list[LintIssue] = []
+    for path in qmd_paths:
+        issues.extend(lint_file(path, root))
+
+    allowed: set[tuple[str, str, int, str]] = set()
+    if args.baseline and args.baseline.exists():
+        for entry in json.loads(args.baseline.read_text(encoding="utf-8")):
+            allowed.add((entry["rule"], entry["file"], entry["line"], entry["message"]))
+
+    failures: list[LintIssue] = []
+    for issue in issues:
+        key = (issue.rule, issue.file, issue.line, issue.message)
+        if key in allowed:
+            continue
+        if args.fail_on == "warning" or issue.severity == "error":
+            failures.append(issue)
+
+    if args.format == "json":
+        print(json.dumps([issue.__dict__ for issue in failures], indent=2))
+    else:
+        for issue in failures:
+            print(f"{issue.file}:{issue.line}: [{issue.rule}] {issue.message}")
+
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
