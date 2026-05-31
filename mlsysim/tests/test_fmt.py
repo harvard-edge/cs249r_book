@@ -15,6 +15,7 @@ from mlsysim.fmt import (
     fmt_percent,
     fmt_pp,
     fmt_qty,
+    fmt_range,
     fmt_ratio,
     fmt_sci,
     fmt_usd,
@@ -277,3 +278,36 @@ class TestFmtCount:
 
     def test_returns_markdown_str(self):
         assert isinstance(fmt_count(1000, scale="K"), MarkdownStr)
+
+
+class TestFmtRange:
+    def test_uses_en_dash_not_hyphen(self):
+        out = fmt_range(5, 10, precision=0)
+        assert out == "5\u201310"
+        assert "-" not in out  # never an ASCII hyphen
+
+    def test_endpoints_written_in_full(self):
+        # MIT: 1992-1993, never 1992-93
+        assert fmt_range(1992, 1993, precision=0, commas=False) == "1992\u20131993"
+
+    def test_unit_appended_once(self):
+        assert fmt_range(5, 10, precision=0, unit="GB") == "5\u201310 GB"
+        assert fmt_range(2, 4, precision=0, unit="percent") == "2\u20134 percent"
+
+    def test_usd_kind_each_endpoint_carries_dollar(self):
+        assert fmt_range(0.10, 0.50, kind="usd", precision=2) == "\\$0.10\u2013\\$0.50"
+
+    def test_rejects_inverted_range(self):
+        with pytest.raises(ValueError, match="hi >= lo"):
+            fmt_range(10, 5, precision=0)
+
+    def test_rejects_non_finite_endpoint(self):
+        with pytest.raises(ValueError, match="finite|infinite"):
+            fmt_range(float("inf"), 5)
+
+    def test_rejects_unknown_kind(self):
+        with pytest.raises(ValueError, match="kind must be"):
+            fmt_range(5, 10, precision=0, kind="percent")
+
+    def test_returns_markdown_str(self):
+        assert isinstance(fmt_range(5, 10, precision=0), MarkdownStr)

@@ -465,6 +465,52 @@ def fmt_ratio(value, precision=1, commas=False, allow_negative=False):
     return fmt(v, precision=precision, commas=commas)
 
 
+def fmt_range(lo, hi, *, precision=1, commas=True, unit="", kind="number"):
+    """
+    Format an inclusive range ``lo–hi`` using an **en-dash** (MIT Press style).
+
+    MIT Press house style for ranges (style sheet §ranges): use an en-dash,
+    never a hyphen, and write **both endpoints in full** — ``1992–1993`` not
+    ``1992–93``, ``5–10`` not ``5-10``. This helper owns the en-dash so authors
+    never type ``-`` or ``--`` between two values, and applies the chosen
+    value-kind formatter to each endpoint so the unit/symbol is consistent.
+
+        fmt_range(5, 10, precision=0)                       # "5–10"
+        fmt_range(5, 10, precision=0, unit="GB")            # "5–10 GB"
+        fmt_range(1992, 1993, precision=0, commas=False)    # "1992–1993"
+        fmt_range(0.10, 0.50, kind="usd", precision=2)      # "\\$0.10–\\$0.50"
+        fmt_range(2, 4, precision=0, unit="percent")        # "2–4 percent"
+
+    ``kind`` selects the per-endpoint formatter: ``"number"`` (default, via
+    ``fmt``) or ``"usd"`` (via ``fmt_usd`` — each endpoint carries ``\\$``). For
+    a percent range, format the display scalars as numbers with
+    ``unit="percent"`` (body) or ``unit="%"`` (table).
+
+    Guards: both endpoints finite; ``hi >= lo`` (an inverted range is almost
+    always a bug); precision/sign guards inherited from the endpoint formatter.
+    """
+    lo_v = _numeric_magnitude(lo)
+    hi_v = _numeric_magnitude(hi)
+    if hi_v < lo_v:
+        raise ValueError(
+            f"fmt_range expects hi >= lo, got lo={lo_v}, hi={hi_v}. An inverted "
+            f"range is almost always a bug; swap the endpoints at the source."
+        )
+    if kind == "usd":
+        a = fmt_usd(lo, precision=precision, commas=commas)
+        b = fmt_usd(hi, precision=precision, commas=commas)
+    elif kind == "number":
+        a = fmt(lo, precision=precision, commas=commas)
+        b = fmt(hi, precision=precision, commas=commas)
+    else:
+        raise ValueError(
+            f"fmt_range kind must be 'number' or 'usd', got {kind!r}. For a "
+            f"percent range, use kind='number' with unit='percent'/'%'."
+        )
+    tail = f" {unit}" if unit else ""
+    return MarkdownStr(f"{a}\u2013{b}{tail}")
+
+
 def fmt_sci(val, precision=2):
     """
     Formats a number or Pint Quantity into scientific notation using Unicode.
