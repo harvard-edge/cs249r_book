@@ -76,7 +76,31 @@ Gates to keep green (run all three):
 - audit_prose_semantics.py --root book/quarto/contents → 0 findings
 - codemod_fmt.py queue --root book/quarto/contents → only known-deferred
 
+## Editorial decisions left for the user (rendered TEXT would change)
+These are latent grammar issues in pre-existing prose. I fixed the isolated,
+unambiguous ones (model_serving fs_acc_drop_str, fc_acc_loss_str → hyphenated
+attributive "N percentage-point loss"). The two below are entangled and need a
+human editorial call — left as `fmt(..., suffix=" percentage point")` for now:
+
+1. `benchmarking.qmd` `mv2_acc_drop_str` (renders "0.9 percentage point",
+   value 0.9). BOTH prose uses are attributive: "(0.9 percentage point drop)"
+   and "(0.9 percentage point drop; below 1 percentage point threshold)".
+   RECOMMEND: `fmt_pp(acc_drop, precision=1, attributive=True)` → "0.9
+   percentage-point". NOTE: the *hardcoded* sibling "1 percentage point
+   threshold" in the same parenthetical should then also be hyphenated to
+   "1 percentage-point threshold" for in-sentence consistency.
+
+2. `benchmarking.qmd` `mv2_edge_drop_str` (renders "6.8 percentage point",
+   value 6.8). CONFLICT — used as a noun ("edge-case accuracy dropped 6.8
+   percentage point[s]") AND attributively in a table cell ("(6.8 percentage
+   point drop)"). One `_str` cannot be both. RECOMMEND: make the export the
+   plural NOUN `fmt_pp(edge_drop, precision=1)` → "6.8 percentage points" (fixes
+   the prose), and reword the table cell from "(… drop)" to "(drop of …)" so the
+   noun form reads correctly there too; or split into two exports.
+
 ## Session commit log (newest first)
+- Pass3d: fixed 2 isolated attributive pp grammar bugs (model_serving fs/fc:
+  "N percentage point loss" → "N percentage-point loss", hyphenated). Verified.
 - Pass3c: migrated 14 percentage-point sites to fmt_pp BYTE-IDENTICALLY (10 noun,
   4 attributive across 6 chapters: benchmarking, introduction, ml_workflow,
   responsible_engr, model_serving, data_selection). All 14 rendered values proven
