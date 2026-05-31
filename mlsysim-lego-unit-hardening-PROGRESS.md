@@ -2,39 +2,24 @@
 
 **Branch:** `fmt-fix`
 **Worktree:** `/Users/VJ/GitHub/MLSysBook-fmt-fix`
-**Plan:** `/Users/VJ/.cursor/plans/lego_unit_hardening_040502db.plan.md` (Step 14+ Vol I queue)
+**Plan:** `/Users/VJ/.cursor/plans/lego_unit_hardening_040502db.plan.md`
 
 ## Checklist
 
 | Step | Status | Notes |
 |------|--------|-------|
 | 1–13 — MLSysIM infra + lint | DONE | units, physics, domain formatters, lint_lego_units.py |
-| 14+ — QMD migration | IN PROGRESS | Vol I per `_quarto-html-vol1.yml` |
+| 14+ — QMD migration | **DONE** | All Vol I + Vol II chapters and appendices |
 
-## Current queue
+## Migration summary
 
-| Chapter | Status |
-|---------|--------|
-| `vol1/introduction/introduction.qmd` | **DONE** (0 `.m_as()` in LEGO) |
-| `vol1/ml_systems/ml_systems.qmd` | **DONE** (0 `.m_as()` in LEGO) |
-| `vol1/ml_workflow/ml_workflow.qmd` | **DONE** (0 `.m_as()` in LEGO) |
-| `vol1/data_engineering/data_engineering.qmd` | **DONE** (0 `.m_as()` in LEGO) |
-| `vol1/nn_computation/nn_computation.qmd` | **DONE** (0 `.m_as()` in LEGO) |
-| Next per `_quarto-html-vol1.yml` | `nn_architectures.qmd` |
+- Bulk `.m_as(unit)` → `.to(unit).magnitude` via `book/tools/scripts/migrate_lego_m_as.py` (~1,235 replacements).
+- Remaining `.m_as(` references are **comment-only** (5 files, LEGO header docs).
+- Manual fixes: `US` (microsecond) vs `USD`, `'B'` (byte) vs `Bparam`, missing `USD`/`kg`/`param` imports, fmt precision guards.
+- Full-book LEGO exec test: **ALL OK** (all `{python}` blocks in `book/quarto/contents`).
 
-## ml_systems.qmd — migrated this session
+## All chapters — DONE (0 `.m_as()` in LEGO code)
 
-HardwareSpectrumSetup, DeploymentThresholdsTable, GPT3TrainingScale, CloudEdgeTCO, BandwidthBottleneck, EdgeEnergyTransmissionRecap, VoiceAssistantWall, DistancePenalty, DataLocalityInvariant, EdgeSizingThroughput, EdgeSizingFleetTCO, BatteryTax, ThermalQuantCalc, MobileBatteryCapacity, MobileResourceRecap, MobileEfficiencyRecap, MobileResnetPitfallRecap, EnergyInference (+ earlier: EnergyTransmission, LighthouseModels, ResnetSetup/Cloud/Mobile)
+Vol I: introduction, ml_systems, ml_workflow, data_engineering, nn_computation, nn_architectures, frameworks, training, data_selection, model_compression, hw_acceleration, benchmarking, model_serving, ml_ops, responsible_engr, conclusion, appendices (algorithm, machine, data, assumptions).
 
-## Recent commits (fmt-fix)
-
-| SHA | Summary |
-|-----|---------|
-| (pending) | data_engineering.qmd complete |
-| `afb322c0e3` | ml_workflow.qmd complete |
-| `ac0618fabf` | ml_systems.qmd complete |
-| `faa2531d22` | ResNet pitfall + EnergyInference |
-| `692941bb27` | Edge fleet TCO + mobile constraint cells |
-| `720e057583` | HardwareSpectrum through MobileEfficiencyRecap |
-| `0ce0ad2618` | EnergyTransmission, LighthouseModels, Resnet cells |
-| `33bc46cea5` | introduction.qmd complete |
+Vol II: introduction, compute_infrastructure, data_storage, distributed_training, performance_engineering, network_fabrics, inference, edge_intelligence, ops_scale, fleet_orchestration, collective_communication, fault_tolerance, security_privacy, sustainable_ai, robust_ai, conclusion, appendices (fleet, communication, reliability, assumptions, c3, dam, inference).
