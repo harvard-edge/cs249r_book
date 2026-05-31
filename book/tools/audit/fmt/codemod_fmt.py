@@ -186,13 +186,15 @@ def scan_percent(path: Path):
             seg = ast.get_source_segment(src, call) or ""
             file_line = fence_line + call.lineno
             new = _rewrite_percent(call, src) if fname == "fmt" else None
-            if new and var:
+            # a multiline call can't be spliced by the single-line applier — route
+            # it to the queue rather than emit an edit that silently won't apply.
+            if new and var and "\n" not in seg:
                 edits.append(MultEdit(file_line, var, seg, new))
             else:
                 queue.append(QueueItem(str(path), file_line, var, fname, suffix,
                     "percent", seg.replace("\n", " ⏎ "),
-                    "non-exact percent suffix or fmt_int/prefix: convert by hand to "
-                    "fmt_percent((x)/100, style='symbol'|'prose') by context."))
+                    "non-exact percent suffix / fmt_int / prefix / multiline: convert "
+                    "by hand to fmt_percent((x)/100, style='symbol'|'prose') by context."))
     return edits, queue
 
 

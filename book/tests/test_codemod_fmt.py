@@ -189,3 +189,17 @@ def test_scan_percent_routes_fmt_int_and_variants_to_queue(tmp_path):
     assert [e.var for e in edits] == ["ok_str"]      # only the exact fmt('%')
     assert all(q.kind == "percent" for q in queue)
     assert len(queue) == 2                            # fmt_int + ' %' variant
+
+
+def test_scan_percent_queues_multiline_calls_not_silently_dropped(tmp_path):
+    # a multiline fmt(...) can't be spliced by the single-line applier; it must
+    # land in the queue, never be emitted as an edit that won't apply.
+    p = tmp_path / "c.qmd"
+    p.write_text(
+        "```{python}\n#| echo: false\nclass C:\n"
+        "    total_str = fmt(\n        (a + b) * 100,\n        precision=0,\n"
+        "        suffix=' percent',\n    )\n```\n\nx `{python} C.total_str` y\n",
+        encoding="utf-8")
+    edits, queue = scan_percent(p)
+    assert edits == []
+    assert len(queue) == 1 and queue[0].kind == "percent"
