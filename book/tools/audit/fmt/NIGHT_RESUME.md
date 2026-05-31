@@ -48,12 +48,22 @@ abbr+spelled-word dup, unresolved refs, leaked glyph-commands. Run:
 `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_prose_semantics.py --root book/quarto/contents`
 This is now the third gate alongside fmt_prose_contract and codemod queue.
 
-**NOW:** Pass 2 — extend the scanner with higher-order semantic heuristics:
-percent-vs-points confusion, multiplier-direction ("Nx faster" with N<1),
-value-vs-descriptor mismatch. Then re-sweep + fix.
+**NOW done:** Pass 2 — scanner extended with numeric-aware checks
+(mult_direction: "0.5× faster" contradiction; currency_as_percent: "$5 percent").
+Corpus CLEAN for all checks. Regression test `book/tests/test_audit_prose_semantics.py`
+(7 cases) locks each pattern to fire-on-bad / quiet-on-good.
 
-**NEXT:** consistency audit vol1↔vol2 → scale queue → render verify (HTML build).
+**NEXT:** Pass 3 consistency audit vol1↔vol2 (same quantity/value-kind formatted
+identically) → Pass 4 scale adjudication queue → Pass 5 render verify (HTML build
++ audit_lego_html on changed chapters).
+
+Gates to keep green (run all three):
+- fmt_prose_contract.py --root book/quarto/contents  → 0
+- audit_prose_semantics.py --root book/quarto/contents → 0 findings
+- codemod_fmt.py queue --root book/quarto/contents → only known-deferred
 
 ## Session commit log (newest first)
+- Pass2: numeric semantic checks (mult-direction, currency-as-percent) + 7 regression
+  tests; corpus clean.
 - semantic scanner tool + fixed "7.6 PB PB"/"PB petabytes" (data_storage ×5) and
   "2.56 MW megawatts" (network_fabrics ×2) unit duplications; scanner CLEAN.

@@ -85,6 +85,30 @@ CHECKS: list[tuple[str, re.Pattern]] = [
 ]
 
 
+# words that, after an "N×"/"N times" multiplier, assert the quantity went UP.
+# "0.5× faster" / "0.3× larger" is self-contradictory: a sub-unit multiple means
+# the thing got *smaller/slower*, so the comparative word is wrong.
+_UP_WORDS = (r"faster|larger|bigger|greater|higher|more|longer|heavier|"
+             r"wider|deeper|denser|hotter|stronger")
+_MULT_DIR = re.compile(rf"(\d[\d,\.]*)\s*(?:×|x\b|times)\s+(?:as\s+\w+\s+|)({_UP_WORDS})\b", re.I)
+# a currency value described as a percentage: "$5 percent", "$1,200 %"
+_CCY_PCT = re.compile(r"\$\s*\d[\d,\.]*\s*(?:percent\b|%)")
+
+
+def _numeric_semantic_findings(text: str):
+    """Numeric-aware checks that need the substituted value, not just a pattern."""
+    for m in _MULT_DIR.finditer(text):
+        try:
+            n = float(m.group(1).replace(",", ""))
+        except ValueError:
+            continue
+        if n < 1.0:
+            yield "mult_direction", m
+    m = _CCY_PCT.search(text)
+    if m:
+        yield "currency_as_percent", m
+
+
 @dataclass
 class Finding:
     code: str
@@ -99,19 +123,23 @@ def scan_chapter(qmd: Path) -> tuple[list[Finding], str | None]:
     rel = str(qmd).split("contents/")[-1]
     out: list[Finding] = []
     seen: set[tuple[str, str]] = set()
+    def _emit(code: str, m):
+        lo = max(0, m.start() - 30)
+        hi = min(len(text), m.end() + 30)
+        snip = ("…" if lo else "") + text[lo:hi].strip() + ("…" if hi < len(text) else "")
+        sig = (code, snip)
+        if sig in seen:
+            return
+        seen.add(sig)
+        out.append(Finding(code, rel, snip))
+
     for _key, text in prose.items():
         for code, pat in CHECKS:
             m = pat.search(text)
-            if not m:
-                continue
-            lo = max(0, m.start() - 30)
-            hi = min(len(text), m.end() + 30)
-            snip = ("…" if lo else "") + text[lo:hi].strip() + ("…" if hi < len(text) else "")
-            sig = (code, snip)
-            if sig in seen:
-                continue
-            seen.add(sig)
-            out.append(Finding(code, rel, snip))
+            if m:
+                _emit(code, m)
+        for code, m in _numeric_semantic_findings(text):
+            _emit(code, m)
     return out, None
 
 
