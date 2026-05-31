@@ -127,40 +127,44 @@ The numbers become visceral when translated into familiar physical quantities. T
 # │ Exports: training_mwh_gpt3, grid_ci_us_kg, total_emissions_gpt3_kg_str,
 # │          flight_ratio_gpt3_str, emissions_ratio_low_carbon_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, fmt_energy, fmt_emissions, fmt_qty, check
+from mlsysim.physics.quantities import carbon_from_energy
+from mlsysim.core.units import MWh, kWh, kilogram, gram
+from mlsysim import Literature
 
 # ┌── LEGO ───────────────────────────────────────────────
 class CarbonCostGPT3:
     """Quantify the environmental impact of a frontier model training run."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    energy_mwh = 1287
+    energy = Models.Language.GPT3.training_energy_mwh
     us_grid = Infrastructure.Grids.US_Avg
     hydro_grid = Infrastructure.Grids.Quebec
-    grid_ci_us_kg = us_grid.carbon_intensity_kg_kwh
-    grid_ci_low_kg = hydro_grid.carbon_intensity_kg_kwh
-    kg_per_flight = 1000 # NY to London round trip
+    grid_ci_us = us_grid.carbon_intensity_kg_kwh * (kilogram / kWh)
+    grid_ci_low = hydro_grid.carbon_intensity_kg_kwh * (kilogram / kWh)
+    flight_co2 = Literature.Sustainability.TransatlanticRoundTripCo2Kg * kilogram
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    energy_kwh = energy_mwh * THOUSAND  # MWh → kWh (mlsysim does not export kilowatt_hour)
-    total_emissions_kg = energy_kwh * grid_ci_us_kg
-    flight_ratio = total_emissions_kg/kg_per_flight
+    energy_kwh = energy.to(kWh)
+    total_carbon = carbon_from_energy(energy, grid_ci_us)
+    flight_ratio = (total_carbon / flight_co2).to("").magnitude
 
-    low_carbon_emissions = energy_kwh * grid_ci_low_kg
-    emissions_ratio = total_emissions_kg/low_carbon_emissions
-    low_carbon_flights = low_carbon_emissions / kg_per_flight
+    low_carbon_emissions = carbon_from_energy(energy, grid_ci_low)
+    emissions_ratio = (total_carbon / low_carbon_emissions).to("").magnitude
+    low_carbon_flights = (low_carbon_emissions / flight_co2).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(total_emissions_kg > 500000, f"Expected >500k kg CO2, got {total_emissions_kg:.0f}")
+    check(total_carbon.to(kilogram).magnitude > 500_000, f"Expected >500k kg CO2, got {total_carbon.to(kilogram).magnitude:.0f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    training_mwh_str = fmt_qty(energy_mwh * ureg.megawatt_hour, ureg.megawatt_hour, precision=0, commas=True)
-    energy_kwh_str = fmt_qty(energy_kwh * ureg.kilowatt_hour, ureg.kilowatt_hour, precision=0, commas=True)
-    total_emissions_kg_str = fmt(total_emissions_kg, precision=0)
+    training_mwh_str = fmt_energy(energy, unit=MWh, precision=0, commas=True)
+    energy_kwh_str = fmt_energy(energy_kwh, unit=kWh, precision=0, commas=True)
+    total_emissions_kg_str = fmt_emissions(total_carbon.to(kilogram), precision=0)
     flight_ratio_str = fmt(flight_ratio, precision=1)
     emissions_ratio_str = fmt(emissions_ratio, precision=1, commas=False)
-    grid_ci_us_kg_str = fmt(grid_ci_us_kg, precision=3, commas=False)
-    grid_ci_low_kg_str = fmt(grid_ci_low_kg, precision=3, commas=False)
-    kg_per_flight_str = fmt(kg_per_flight, precision=0, commas=False)
+    grid_ci_us_kg_str = fmt_qty(grid_ci_us, kilogram / kWh, precision=3, commas=False)
+    grid_ci_low_kg_str = fmt_qty(grid_ci_low, kilogram / kWh, precision=3, commas=False)
+    kg_per_flight_str = fmt_emissions(flight_co2, precision=0, commas=False)
     low_carbon_flights_str = fmt(low_carbon_flights, precision=1, commas=False)
 ```
 
@@ -171,13 +175,13 @@ class CarbonCostGPT3:
 **Math**:
 
 1.  **Energy**\index{Training!energy consumption}: `{python} CarbonCostGPT3.training_mwh_str` = `{python} CarbonCostGPT3.energy_kwh_str`.
-2.  **Carbon intensity (US average)**: $\approx$ `{python} CarbonCostGPT3.grid_ci_us_kg_str` kg CO$_2$/kWh.
-3.  **Total Emissions**\index{Carbon Footprint!training emissions}: `{python} CarbonCostGPT3.energy_kwh_str` $\times$ `{python} CarbonCostGPT3.grid_ci_us_kg_str` kg/kWh $\approx$ `{python} CarbonCostGPT3.total_emissions_kg_str` kg CO$_2$.
+2.  **Carbon intensity (US average)**: $\approx$ `{python} CarbonCostGPT3.grid_ci_us_kg_str`.
+3.  **Total Emissions**\index{Carbon Footprint!training emissions}: `{python} CarbonCostGPT3.energy_kwh_str` $\times$ `{python} CarbonCostGPT3.grid_ci_us_kg_str` $\approx$ `{python} CarbonCostGPT3.total_emissions_kg_str`.
 4.  **Comparison**:
-    *   One passenger, NY to London (round trip): $\approx$ `{python} CarbonCostGPT3.kg_per_flight_str` kg CO$_2$.
+    *   One passenger, NY to London (round trip): $\approx$ `{python} CarbonCostGPT3.kg_per_flight_str`.
     *   **Ratio**: `{python} CarbonCostGPT3.total_emissions_kg_str` / `{python} CarbonCostGPT3.kg_per_flight_str` = `{python} CarbonCostGPT3.flight_ratio_str`.
 
-**Systems insight**: A single training run emits as much carbon as hundreds of trans-Atlantic passenger round trips. Optimization matters. Moving this job to a hydro-powered region (`{python} CarbonCostGPT3.grid_ci_low_kg_str` kg/kWh) would reduce emissions by `{python} CarbonCostGPT3.emissions_ratio_str`$\times$ to about `{python} CarbonCostGPT3.low_carbon_flights_str` passenger round trips.
+**Systems insight**: A single training run emits as much carbon as hundreds of trans-Atlantic passenger round trips. Optimization matters. Moving this job to a hydro-powered region (`{python} CarbonCostGPT3.grid_ci_low_kg_str`) would reduce emissions by `{python} CarbonCostGPT3.emissions_ratio_str`$\times$ to about `{python} CarbonCostGPT3.low_carbon_flights_str` passenger round trips.
 
 :::
 
