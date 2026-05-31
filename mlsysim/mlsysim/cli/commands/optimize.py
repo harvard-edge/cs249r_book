@@ -82,7 +82,7 @@ def optimize_batching(
             seq_len=schema.workload.seq_len,
             sla_latency_ms=sla_ms,
             arrival_rate_qps=qps,
-            num_replicas=schema.hardware.nodes,
+            num_replicas=schema.hardware.total_accelerators,
             precision=schema.hardware.precision,
             efficiency=schema.hardware.efficiency
         )

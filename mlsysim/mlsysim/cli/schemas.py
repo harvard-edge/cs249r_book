@@ -115,9 +115,11 @@ class HardwareConfig(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
 
     name: str
-    # Historical YAML plans use "nodes" as the total accelerator count.
-    # "accelerators_per_node" makes the physical topology explicit when needed.
-    nodes: int = Field(default=1, gt=0)
+    # Legacy field: historical YAML plans used "nodes" for total accelerators.
+    # New plans should prefer "accelerators" or "node_count" + accelerators_per_node.
+    nodes: Optional[int] = Field(default=None, gt=0)
+    accelerators: Optional[int] = Field(default=None, gt=0)
+    node_count: Optional[int] = Field(default=None, gt=0)
     accelerators_per_node: Optional[int] = Field(default=None, gt=0)
     intra_node_bw: Optional[Quantity] = None
     fabric_bandwidth: Quantity = Field(default_factory=lambda: Q_("50 GB/s"))
@@ -133,6 +135,35 @@ class HardwareConfig(BaseModel):
     @classmethod
     def _validate_bandwidth_fields(cls, v, info):
         return require_unit_family(v, ureg.bit / ureg.second, info.field_name, "data")
+
+    @property
+    def total_accelerators(self) -> int:
+        if self.node_count is not None and self.accelerators_per_node is not None:
+            return self.node_count * self.accelerators_per_node
+        if self.accelerators is not None:
+            return self.accelerators
+        if self.nodes is not None:
+            return self.nodes
+        return 1
+
+    @model_validator(mode="after")
+    def _validate_topology_aliases(self) -> "HardwareConfig":
+        if self.node_count is not None and self.accelerators_per_node is None:
+            raise ValueError("hardware.node_count requires hardware.accelerators_per_node")
+
+        derived_total = None
+        if self.node_count is not None and self.accelerators_per_node is not None:
+            derived_total = self.node_count * self.accelerators_per_node
+
+        explicit_total = self.accelerators
+        legacy_total = self.nodes
+        if explicit_total is not None and legacy_total is not None and explicit_total != legacy_total:
+            raise ValueError("hardware.nodes is a legacy alias for hardware.accelerators; values must match")
+        if derived_total is not None and explicit_total is not None and derived_total != explicit_total:
+            raise ValueError("hardware.node_count * hardware.accelerators_per_node must equal hardware.accelerators")
+        if derived_total is not None and legacy_total is not None and derived_total != legacy_total:
+            raise ValueError("hardware.node_count * hardware.accelerators_per_node must equal legacy hardware.nodes")
+        return self
 
 class OpsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -184,9 +215,9 @@ class MlsysPlanSchema(BaseModel):
         self._model_obj = _resolve_model(self.workload.name)
         self._hardware_obj = _resolve_hardware(self.hardware.name)
         
-        # 3. Resolve Fleet if nodes > 1. The schema field is historical:
-        # it represents total accelerators requested by the plan.
-        if self.hardware.nodes > 1:
+        # 3. Resolve Fleet if total accelerators > 1.
+        total_accelerators = self.hardware.total_accelerators
+        if total_accelerators > 1:
             from mlsysim.systems.types import Fleet, Node, NetworkFabric
 
             # Step 1: prefer an explicit plan topology, then hardware aggregate
@@ -198,10 +229,10 @@ class MlsysPlanSchema(BaseModel):
             )
             # Step 2: refuse to floor partial nodes; that would silently change
             # the number of accelerators represented by the plan.
-            if self.hardware.nodes % accelerators_per_node != 0:
+            if total_accelerators % accelerators_per_node != 0:
                 raise ValueError(
-                    "hardware.nodes must be divisible by hardware.accelerators_per_node "
-                    f"(got {self.hardware.nodes} and {accelerators_per_node})"
+                    "hardware total accelerators must be divisible by hardware.accelerators_per_node "
+                    f"(got {total_accelerators} and {accelerators_per_node})"
                 )
             # Step 3: use the most specific bandwidth source available.
             intra_node_bw = (
@@ -220,7 +251,7 @@ class MlsysPlanSchema(BaseModel):
                     accelerators_per_node=accelerators_per_node,
                     intra_node_bw=intra_node_bw,
                 ),
-                count=self.hardware.nodes // accelerators_per_node,
+                count=total_accelerators // accelerators_per_node,
                 fabric=NetworkFabric(name="Default Fabric", bandwidth=self.hardware.fabric_bandwidth),
             )
             

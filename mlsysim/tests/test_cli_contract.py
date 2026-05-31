@@ -85,8 +85,44 @@ def test_plan_builds_fleet_from_explicit_topology():
     assert schema.fleet_obj.fabric.bandwidth.m_as("Gbit/s") == pytest.approx(200)
 
 
+def test_plan_builds_fleet_from_node_count_topology():
+    schema = MlsysPlanSchema.model_validate(
+        {
+            "version": "1.0",
+            "name": "Node count topology test",
+            "workload": {"name": "Llama3_8B", "batch_size": 16},
+            "hardware": {
+                "name": "H100",
+                "node_count": 2,
+                "accelerators_per_node": 8,
+                "fabric_bandwidth": "400 Gbit/s",
+            },
+        }
+    )
+
+    assert schema.hardware.total_accelerators == 16
+    assert schema.fleet_obj.count == 2
+    assert schema.fleet_obj.total_accelerators == 16
+
+
+def test_plan_rejects_conflicting_topology_aliases():
+    with pytest.raises(ValidationError, match="legacy alias"):
+        MlsysPlanSchema.model_validate(
+            {
+                "version": "1.0",
+                "name": "Bad alias topology",
+                "workload": {"name": "Llama3_8B"},
+                "hardware": {
+                    "name": "H100",
+                    "nodes": 16,
+                    "accelerators": 8,
+                },
+            }
+        )
+
+
 def test_plan_rejects_non_divisible_topology():
-    with pytest.raises(ValidationError, match="hardware.nodes must be divisible"):
+    with pytest.raises(ValidationError, match="total accelerators must be divisible"):
         MlsysPlanSchema.model_validate(
             {
                 "version": "1.0",
