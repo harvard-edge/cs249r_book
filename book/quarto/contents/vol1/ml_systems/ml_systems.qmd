@@ -350,7 +350,7 @@ where $c_{\text{fiber}} \approx 200{,}000$ km/s is the speed of light in optical
 # │ Exports: min_latency_str, distance_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.physics import calc_network_latency_ms
-from mlsysim.fmt import fmt, check, fmt_time, MarkdownStr
+from mlsysim.fmt import fmt, check, fmt_time, fmt_qty, MarkdownStr
 
 # ┌── LEGO ───────────────────────────────────────────────
 class LightLatency:
@@ -372,9 +372,8 @@ class LightLatency:
           f"Physics forbids cloud ({min_latency_ms:.1f} ms) within {safety_budget_ms} ms budget!")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    min_latency_str = MarkdownStr(
-        f"{fmt_time(min_latency_ms, 'millisecond', precision=0, commas=False)} round-trip"
-    )
+    min_latency_value = fmt_time(min_latency_ms, 'millisecond', precision=0, commas=False)
+    min_latency_str = MarkdownStr(f"{min_latency_value} round-trip")
     distance_str = fmt_qty(distance_km, ureg.km, precision=0, commas=True)
 ```
 
@@ -577,11 +576,11 @@ class EnergyTransmission:
     cloud_energy_total = (data_size * tx_energy_per_mb).to(ureg.millijoule)
     local_energy_total = local_energy_op
 
-    ratio = cloud_energy_total/local_energy_total
+    ratio = (cloud_energy_total / local_energy_total).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(ratio.m_as("") >= 500,
-          f"Transmission ({cloud_energy_total}) is not expensive enough vs Compute ({local_energy_total}). Ratio: {ratio.m_as(''):.1f}x")
+    check(ratio >= 500,
+          f"Transmission ({cloud_energy_total}) is not expensive enough vs Compute ({local_energy_total}). Ratio: {ratio:.1f}x")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     data_mb_str = fmt_qty(data_size, MB, precision=0, commas=False)
@@ -589,7 +588,7 @@ class EnergyTransmission:
     compute_energy_str = fmt_qty(local_energy_op, ureg.millijoule, precision=1, commas=False, per="inference")
     cloud_total_str = fmt_qty(cloud_energy_total, ureg.millijoule, precision=0, commas=False)
     local_total_str = fmt_qty(local_energy_total, ureg.millijoule, precision=1, commas=False)
-    ratio_str = fmt(ratio.m_as(""), precision=0, commas=True)
+    ratio_str = fmt(ratio, precision=0, commas=True)
 ```
 
 ::: {#nbk-ml-systems-energy-transmission .callout-notebook title="The energy of transmission"}
@@ -793,7 +792,8 @@ plt.close()
 # │          .kws_size_kb_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
-from mlsysim.fmt import fmt_int, fmt, fmt_qty, fmt_qty_int, check, MarkdownStr, fmt_count
+from mlsysim.fmt import fmt_int, fmt, fmt_qty, fmt_qty_int, check, MarkdownStr, fmt_count, fmt_multiple
+from mlsysim.core.units import Mparam, Bparam, Kparam, MB, GB, KB, byte, GFLOPs, MFLOPs
 
 # ┌── LEGO ───────────────────────────────────────────────
 class LighthouseModels:
@@ -807,16 +807,12 @@ class LighthouseModels:
     m_kws = Models.Tiny.DS_CNN
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    resnet_params_m = m_resnet.parameters.m_as(Mparam)
     resnet_fp32_size = m_resnet.size_in_bytes(4 * byte)
-    resnet_fp32_mb = resnet_fp32_size.m_as(MB)
-    gpt2_params_b = m_gpt2.parameters.m_as(Bparam)
+    resnet_fp32_mb = resnet_fp32_size.to(MB).magnitude
     dlrm_embedding = m_dlrm.size_in_bytes()
-    dlrm_embedding_gb = dlrm_embedding.m_as(GB)
     mobilenet_flops_reduction = (m_resnet.inference_flops / m_mobilenet.inference_flops).to("count").magnitude
-    kws_params = m_kws.parameters.m_as(Kparam)
     kws_size = m_kws.size_in_bytes(4 * byte)
-    kws_size_kb = kws_size.m_as(KB)
+    kws_size_kb = kws_size.to(KB).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(resnet_fp32_mb >= 90, f"ResNet50 size should be ~98 MB, got {resnet_fp32_mb:.0f} MB")
@@ -825,14 +821,14 @@ class LighthouseModels:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     resnet_gflops_str = fmt_qty(m_resnet.inference_flops, GFLOPs, precision=1)
-    resnet_params_m_str = fmt_count(m_resnet.parameters.m_as(param), scale="million", precision=1, label="parameter")
+    resnet_params_m_str = fmt_count(m_resnet.parameters, scale="million", precision=1, label="parameter")
     resnet_fp32_mb_str = fmt_qty(resnet_fp32_size, MB, precision=1)
-    gpt2_params_b_str = fmt_count(m_gpt2.parameters.m_as(param), scale="billion", precision=1, label="parameter")
+    gpt2_params_b_str = fmt_count(m_gpt2.parameters, scale="billion", precision=1, label="parameter")
     llama_range_str = MarkdownStr("7 to 70 billion parameters")
     dlrm_embedding_str = fmt_qty_int(dlrm_embedding, GB)
     mobilenet_flops_reduction_str = fmt_multiple(mobilenet_flops_reduction, precision=1)
     mobile_tdp_range_str = MarkdownStr("2 to 5 W")
-    kws_params_str = fmt_count(m_kws.parameters.m_as(param), scale="K", precision=0, commas=False, label="parameter")
+    kws_params_str = fmt_count(m_kws.parameters, scale="K", precision=0, commas=False, label="parameter")
     kws_flops_m_str = fmt_qty(m_kws.inference_flops, MFLOPs, precision=0)
     kws_size_kb_str = fmt_qty_int(kws_size, KB)
 ```
@@ -1016,11 +1012,11 @@ class ResnetSetup:
     resnet_fp32_bytes_value = m.size_in_bytes(4 * byte)
     resnet_fp16_bytes_value = m.size_in_bytes(2 * byte)
     resnet_int8_bytes_value = m.size_in_bytes(1 * byte)
-    resnet_params_m_value = m.parameters.m_as(Mparam)
+    resnet_params_m_value = m.parameters.to(Mparam).magnitude
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     resnet_gflops_str = fmt_qty(m.inference_flops, GFLOPs, precision=1, commas=False)
-    resnet_params_m_str = fmt_count(m.parameters.m_as(param), scale="million", precision=1, commas=False, label="parameter")
+    resnet_params_m_str = fmt_count(m.parameters, scale="million", precision=1, commas=False, label="parameter")
     resnet_fp32_mb_str = fmt_qty(resnet_fp32_bytes_value, MB, precision=1, commas=False)
     resnet_fp16_mb_str = fmt_qty(resnet_fp16_bytes_value, MB, precision=1, commas=False)
     resnet_int8_mb_str = fmt_qty(resnet_int8_bytes_value, MB, precision=1, commas=False)
@@ -1051,6 +1047,7 @@ class ResnetSetup:
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Hardware, Engine
 from mlsysim.fmt import fmt, sci_latex, fmt_frac, MarkdownStr, fmt_qty
+from mlsysim.core.units import flop, byte, TFLOPs, TB, millisecond, second
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ResnetCloud:
@@ -1062,10 +1059,10 @@ class ResnetCloud:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     p = Engine.solve(m, h, batch_size=1, precision="fp16", efficiency=1.0)
-    cloud_compute_ms_value = p.latency_compute.m_as("ms")
-    cloud_memory_ms_display = (p.memory_footprint / p.peak_bw_actual).m_as("ms")
+    cloud_compute_ms_value = p.latency_compute.to(millisecond).magnitude
+    cloud_memory_ms_display = (p.memory_footprint / p.peak_bw_actual).to(millisecond).magnitude
     cloud_ratio_x_value = cloud_memory_ms_display / cloud_compute_ms_value
-    cloud_ai_display = m.inference_flops.m_as("flop") / p.memory_footprint.m_as("byte")
+    cloud_ai_display = (m.inference_flops / p.memory_footprint).to(flop / byte).magnitude
     resnet_flops_latex = sci_latex(m.inference_flops.to(flop))
     resnet_fp16_bytes_latex = sci_latex(p.memory_footprint.to(byte))
     cloud_compute_frac = fmt_frac(resnet_flops_latex, sci_latex(p.peak_flops_actual.to(flop/second)), f"{cloud_compute_ms_value:.3f}", "ms")
@@ -1073,8 +1070,8 @@ class ResnetCloud:
     cloud_ai_frac = fmt_frac(resnet_flops_latex, resnet_fp16_bytes_latex, f"{round(cloud_ai_display):.0f}", "FLOP/byte")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    a100_tflops_str = fmt_qty(p.peak_flops_actual, TFLOP/second, precision=0, commas=False)
-    a100_bw_tbs_str = fmt_qty(p.peak_bw_actual, TB/second, precision=2, commas=False)
+    a100_tflops_str = fmt_qty(p.peak_flops_actual, TFLOPs / second, precision=0, commas=False)
+    a100_bw_tbs_str = fmt_qty(p.peak_bw_actual, TB / second, precision=2, commas=False)
     cloud_ratio_x_str = fmt(cloud_ratio_x_value, precision=1, commas=False)
     cloud_bottleneck_str = MarkdownStr(p.bottleneck)
 ```
@@ -1107,6 +1104,7 @@ class ResnetCloud:
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Hardware, Engine
 from mlsysim.fmt import sci_latex, fmt_frac, fmt, MarkdownStr, fmt_qty
+from mlsysim.core.units import flop, byte, TOPS, GB, millisecond, second
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ResnetMobile:
@@ -1120,9 +1118,9 @@ class ResnetMobile:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     p = Engine.solve(m, h, batch_size=1, precision="int8", efficiency=1.0)
     p_cloud = Engine.solve(m, h_cloud, batch_size=1, precision="fp16", efficiency=1.0)
-    cloud_memory_ms_display = (p_cloud.memory_footprint / p_cloud.peak_bw_actual).m_as("ms")
-    mobile_compute_ms_display = (m.inference_flops / p.peak_flops_actual).m_as("ms")
-    mobile_memory_ms_display = (p.memory_footprint / p.peak_bw_actual).m_as("ms")
+    cloud_memory_ms_display = (p_cloud.memory_footprint / p_cloud.peak_bw_actual).to(millisecond).magnitude
+    mobile_compute_ms_display = (m.inference_flops / p.peak_flops_actual).to(millisecond).magnitude
+    mobile_memory_ms_display = (p.memory_footprint / p.peak_bw_actual).to(millisecond).magnitude
     mobile_ratio_x_value = mobile_memory_ms_display / mobile_compute_ms_display
     bw_advantage_x_value = h_cloud.memory.bandwidth / p.peak_bw_actual
     inference_speed_x_value = mobile_memory_ms_display / cloud_memory_ms_display
@@ -1136,7 +1134,7 @@ class ResnetMobile:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     mobile_tops_str = fmt_qty(p.peak_flops_actual, TOPS, precision=0, commas=False)
-    mobile_bw_gbs_str = fmt_qty(p.peak_bw_actual, GB/second, precision=0, commas=False)
+    mobile_bw_gbs_str = fmt_qty(p.peak_bw_actual, GB / second, precision=0, commas=False)
     mobile_ratio_x_str = fmt(mobile_ratio_x_value, precision=1, commas=False)
     mobile_bottleneck_str = MarkdownStr(p.bottleneck)
     bw_advantage_x_str = fmt(bw_advantage_x_value, precision=1, commas=False)
@@ -1292,7 +1290,7 @@ Each paradigm occupies a distinct region of the deployment spectrum, governed by
 # │ Exports: DeploymentThresholdsTable.*_str values used by the table below
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware
-from mlsysim.fmt import fmt, check, MarkdownStr
+from mlsysim.fmt import fmt, check, fmt_qty_range, MarkdownStr
 
 # ┌── LEGO ───────────────────────────────────────────────
 class DeploymentThresholdsTable:
@@ -1324,8 +1322,20 @@ class DeploymentThresholdsTable:
     edge_thresh_pflops_str = MarkdownStr("~1 PFLOP/s")
     edge_thresh_bw_str = MarkdownStr(">270 GB/s")
     edge_latency_range_str = Platforms.Edge.latency_range_ms
-    mobile_npu_range_str = MarkdownStr(f"{fmt(mobile_npu_min, precision=0, commas=False)}-{fmt(mobile_npu_max, precision=0, commas=False)} TOPS")
-    mobile_bw_range_str = MarkdownStr(f"{fmt(mobile_bw_min, precision=0, commas=False)}-{fmt(mobile_bw_max, precision=0, commas=False)} GB/s")
+    mobile_npu_range_str = fmt_qty_range(
+        mobile_npu_min * TOPS,
+        mobile_npu_max * TOPS,
+        TOPS,
+        precision=0,
+        commas=False,
+    )
+    mobile_bw_range_str = fmt_qty_range(
+        mobile_bw_min * (GB / second),
+        mobile_bw_max * (GB / second),
+        GB / second,
+        precision=0,
+        commas=False,
+    )
     mobile_tdp_range_str = MarkdownStr(f"{Platforms.Mobile.tdp_range_w} W")
     mobile_latency_range_str = Platforms.Mobile.latency_range_ms
     tiny_thresh_tops_str = MarkdownStr("<1 TOPS")
@@ -2572,7 +2582,7 @@ Mobile ML addresses this challenge by integrating machine learning directly into
 # │          MobileEfficiencyRecap.mobile_tdp_range_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
-from mlsysim.fmt import fmt, check, MarkdownStr
+from mlsysim.fmt import fmt, check, fmt_qty_range, MarkdownStr
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MobileEfficiencyRecap:
@@ -2941,8 +2951,20 @@ class MobileResourceRecap:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     mobile_ram_range_str = MarkdownStr(f"{mobile_ram_range} GB")
     mobile_storage_range_str = mobile_storage_range
-    mobile_npu_range_str = MarkdownStr(f"{fmt(mobile_npu_min, precision=0, commas=False)}-{fmt(mobile_npu_max, precision=0, commas=False)} TOPS")
-    mobile_bw_range_str = MarkdownStr(f"{fmt(mobile_bw_min, precision=0, commas=False)}-{fmt(mobile_bw_max, precision=0, commas=False)} GB/s")
+    mobile_npu_range_str = fmt_qty_range(
+        mobile_npu_min * TOPS,
+        mobile_npu_max * TOPS,
+        TOPS,
+        precision=0,
+        commas=False,
+    )
+    mobile_bw_range_str = fmt_qty_range(
+        mobile_bw_min * (GB / second),
+        mobile_bw_max * (GB / second),
+        GB / second,
+        precision=0,
+        commas=False,
+    )
     mobile_tdp_range_str = MarkdownStr(mobile_tdp_range.replace("-", " to ") + " W")
     mobile_latency_range_str = MarkdownStr(f"{mobile_latency_range} ms")
 ```
@@ -4512,8 +4534,8 @@ class AmdahlCameraCalc:
     cam_ml_str = fmt_time(cam_ml_ms_value, 'millisecond', precision=0, commas=False)
     cam_post_str = fmt_time(cam_post_ms_value, 'millisecond', precision=0, commas=False)
     cam_total_str = fmt_time(cam_total_ms_value, 'millisecond', precision=0, commas=False)
-    cam_ml_pct_str = MarkdownStr(f"{fmt_percent(cam_ml_frac_value, precision=0, commas=False)}%")
-    cam_non_ml_pct_str = MarkdownStr(f"{fmt_percent(cam_non_ml_frac_value, precision=0, commas=False)}%")
+    cam_ml_pct_str = fmt_percent(cam_ml_frac_value, precision=0, commas=False, style="symbol")
+    cam_non_ml_pct_str = fmt_percent(cam_non_ml_frac_value, precision=0, commas=False, style="symbol")
     cam_speedup_10x_str = fmt(cam_speedup_10x_value, precision=2, commas=False)    # "1.37"
     cam_speedup_inf_str = fmt(cam_speedup_inf_value, precision=2, commas=False)    # "1.43"
     cam_ml_opt_str = fmt_time(cam_ml_optimized_ms_value, 'millisecond', precision=0, commas=False)
