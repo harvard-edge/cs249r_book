@@ -77,7 +77,7 @@ from mlsysim.core.constants import *
 # │ Goal: Centralize imports for footnote-local calculations.
 # │ Exports: None (import-only cell)
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, fmt_sci, check, MarkdownStr
+from mlsysim.fmt import fmt_int, fmt, fmt_qty_int, fmt_sci, check, MarkdownStr
 ```
 
 ## From Logic to Arithmetic {#sec-neural-computation-deep-learning-systems-engineering-foundation-597f}
@@ -444,16 +444,18 @@ class TensorLayoutCost:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     tensor_bytes = image_height * image_width * channels * bytes_per_channel
-    tensor_kb = (tensor_bytes * byte).m_as(KB)
-    tensor_read_write_kb = tensor_kb * 2
+    tensor = tensor_bytes * byte
+    tensor_read_write = tensor * 2
+    tensor_kb = tensor.m_as(KB)
+    tensor_read_write_kb = tensor_read_write.m_as(KB)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(tensor_kb > 100, f"ImageNet tensor should exceed 100 KB; got {tensor_kb:.1f} KB")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     image_shape_str = MarkdownStr(f"{image_height}×{image_width}×{channels}")
-    tensor_kb_str = fmt_int(tensor_kb, commas=False, suffix=" KB")
-    tensor_read_write_kb_str = fmt_int(tensor_read_write_kb, commas=False, suffix=" KB")
+    tensor_kb_str = fmt_qty_int(tensor, KB, commas=False)
+    tensor_read_write_kb_str = fmt_qty_int(tensor_read_write, KB, commas=False)
 ```
 
 [^fn-tensor-operations]: **Tensor Operations**: The logical structure of a tensor (for example, a 4D image batch) often requires nonsequential memory access patterns to retrieve elements from its flat, 1D physical storage. A concrete example: PyTorch defaults to NCHW (channel-first) layout while most mobile hardware and ARM processors prefer NHWC (channel-last). A typical ImageNet input shape (`{python} TensorLayoutCost.image_shape_str`) is about `{python} TensorLayoutCost.tensor_kb_str`, so transposing it between formats requires about `{python} TensorLayoutCost.tensor_read_write_kb_str` of read-plus-write memory traffic per image—a pure memory operation with no arithmetic benefit. On tight latency budgets, this layout mismatch can consume a visible fraction of the end-to-end inference budget before the model does any useful math. \index{Tensor!n-dimensional arrays}\index{Tensor!memory layout}
@@ -597,7 +599,7 @@ Recognizing these limitations, the knowledge engineering approach that character
 # │          ParadigmSystemsCost.hog_*_str, ParadigmSystemsCost.dl_*_str,
 # │          ParadigmSystemsCost.training_examples_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, check, MarkdownStr
+from mlsysim.fmt import fmt_int, fmt, fmt_qty, fmt_qty_int, check, MarkdownStr
 
 _MNIST_DIMS = [784, 128, 64, 10]
 
@@ -628,7 +630,10 @@ class ParadigmSystemsCost:
     )
     hog_features = hog_cells * hog_bins
     hog_ops_ratio = hog_ops_approx / rb_ops
-    dl_weight_kb = (dl_params_with_bias * BYTES_FP32).m_as(KB)
+    rb_mem = rb_mem_bytes * byte
+    hog_mem = hog_mem_kb * KB
+    dl_weight = dl_params_with_bias * BYTES_FP32
+    dl_weight_kb = dl_weight.m_as(KB)
     dl_ops_ratio = dl_total_macs / rb_ops
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -639,16 +644,16 @@ class ParadigmSystemsCost:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     rb_ops_str = fmt(rb_ops, precision=0, commas=False)
-    rb_mem_str = fmt(rb_mem_bytes, precision=0, commas=True, suffix=" bytes")
+    rb_mem_str = fmt_qty(rb_mem, byte, precision=0, commas=True, unit_label="bytes")
     hog_grid_str = MarkdownStr("7")
     hog_bins_str = fmt(hog_bins, precision=0, commas=False)
     hog_features_str = fmt(hog_features, precision=0, commas=True)
     hog_ops_approx_str = fmt(hog_ops_approx, precision=0, commas=True)
     hog_ops_ratio_str = fmt(hog_ops_ratio, precision=0, commas=False)
-    hog_mem_str = fmt(hog_mem_kb, precision=0, commas=False, suffix=" KB")
+    hog_mem_str = fmt_qty(hog_mem, KB, precision=0, commas=False)
     dl_total_macs_str = fmt(dl_total_macs, precision=0, commas=True)
     dl_params_str = fmt(dl_params_with_bias, precision=0, commas=True)
-    dl_weight_kb_str = fmt_int(dl_weight_kb, commas=False, suffix=" KB")
+    dl_weight_kb_str = fmt_qty_int(dl_weight, KB, commas=False)
     dl_ops_ratio_str = fmt(dl_ops_ratio, precision=1, commas=True)
     training_examples_str = fmt(training_examples, precision=0, commas=True)
 ```
@@ -1781,7 +1786,7 @@ class HistoricalScale:
 # │          TrainingEnergyScale.us_homes_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt_int, fmt, check
+from mlsysim.fmt import fmt_int, fmt, fmt_qty, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class TrainingEnergyScale:
@@ -1797,8 +1802,10 @@ class TrainingEnergyScale:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     lenet_kwh = lenet_train_days * hours_per_day * lenet_workstation_kw
+    lenet_energy = lenet_kwh * ureg.kilowatt_hour
     gpt4_accelerator_mwh = Models.Language.GPT4.training_gpu_days * hours_per_day * a100_kw / THOUSAND
     gpt4_energy_mwh = gpt4_accelerator_mwh * pue
+    gpt4_energy = gpt4_energy_mwh * ureg.megawatt_hour
     us_homes_equiv = gpt4_energy_mwh / household_mwh_per_year
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -1806,8 +1813,8 @@ class TrainingEnergyScale:
     check(gpt4_energy_mwh > 5_000, f"GPT-4 energy estimate should be thousands of MWh, got {gpt4_energy_mwh:.0f}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    lenet_kwh_str = fmt(lenet_kwh, precision=0, commas=False, suffix=" kWh")
-    gpt4_energy_mwh_str = fmt(gpt4_energy_mwh, precision=0, commas=True, suffix=" MWh")
+    lenet_kwh_str = fmt_qty(lenet_energy, ureg.kilowatt_hour, precision=0, commas=False)
+    gpt4_energy_mwh_str = fmt_qty(gpt4_energy, ureg.megawatt_hour, precision=0, commas=True)
     us_homes_str = fmt(us_homes_equiv, precision=0, commas=True)
     household_mwh_per_year_str = fmt_qty(household_mwh_per_year * ureg.megawatt_hour, ureg.megawatt_hour, precision=1, commas=False, per="year")
 ```
@@ -3000,7 +3007,7 @@ Between these fixed input and output layers, we have flexibility in designing th
 ```{python}
 #| echo: false
 from mlsysim.physics import model_memory
-from mlsysim.fmt import fmt_int, fmt, fmt_count
+from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_qty_int
 #| label: mnist-scale-comparison
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ MNIST NETWORK SCALE COMPARISON
@@ -3039,15 +3046,17 @@ class MnistScaleComparison:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     mnist_large_params = sum(_i * _o + _o for _i, _o in mnist_large_arch)
-    mnist_large_mem_mb = model_memory(mnist_large_params, BYTES_FP32, MB)
+    mnist_large_mem = mnist_large_params * BYTES_FP32
+    mnist_large_mem_mb = mnist_large_mem.m_as(MB)
     mnist_small_params = sum(_i * _o + _o for _i, _o in mnist_small_arch)
-    mnist_small_mem_kb = model_memory(mnist_small_params, BYTES_FP32, KB)
+    mnist_small_mem = mnist_small_params * BYTES_FP32
+    mnist_small_mem_kb = mnist_small_mem.m_as(KB)
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     mnist_large_params_m_str = fmt_count((mnist_large_params * param).m_as('param'), scale='M', precision=1, commas=False)
-    mnist_large_mem_mb_str = fmt_int(mnist_large_mem_mb, commas=False, suffix=" MB")
+    mnist_large_mem_mb_str = fmt_qty_int(mnist_large_mem, MB, commas=False)
     mnist_small_params_k_str = fmt_count((mnist_small_params * param).m_as('param'), scale='K', precision=1, commas=False)
-    mnist_small_mem_kb_str = fmt_int(mnist_small_mem_kb, commas=False, suffix=" KB")
+    mnist_small_mem_kb_str = fmt_qty_int(mnist_small_mem, KB, commas=False)
 ```
 
 Widening hidden layers from 100 to 1000 neurons increases parameters from ~`{python} MnistScaleComparison.mnist_small_params_k_str` to ~`{python} MnistScaleComparison.mnist_large_params_m_str` (~`{python} MnistScaleComparison.mnist_small_mem_kb_str` vs. ~`{python} MnistScaleComparison.mnist_large_mem_mb_str` in FP32) while improving MNIST accuracy only marginally (98.5% vs. 99.5%)—a trade-off that matters when deployment targets mobile memory budgets.
@@ -3346,7 +3355,7 @@ How parameters\index{Model Size!parameter count}\index{Memory Footprint!computat
 # │          MnistTrainingMemoryCalc.training_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt_int, fmt, check, fmt_qty
+from mlsysim.fmt import fmt_int, fmt, check, fmt_qty, fmt_qty_int
 
 _MNIST_LAYERS_DIMS = [784, 128, 64, 10]
 _MNIST_BATCH_SIZE = 32
@@ -3362,23 +3371,30 @@ class MnistTrainingMemoryCalc:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     total_params = 109_386
-    param_mem_kb = (total_params * bytes_per_param * byte).m_as(KB)
-    grad_mem_kb = param_mem_kb
-    opt_mem_kb = param_mem_kb * 2
+    param_mem = total_params * bytes_per_param * byte
+    grad_mem = param_mem
+    opt_mem = param_mem * 2
+    param_mem_kb = param_mem.m_as(KB)
+    grad_mem_kb = grad_mem.m_as(KB)
+    opt_mem_kb = opt_mem.m_as(KB)
     batch_act_sizes = [_MNIST_BATCH_SIZE * dim for dim in _MNIST_LAYERS_DIMS]
-    act_mem_kb = (sum(batch_act_sizes) * bytes_per_param * byte).m_as(KB)
-    inf_act_kb = (sum(_MNIST_LAYERS_DIMS) * bytes_per_param * byte).m_as(KB)
+    act_mem = sum(batch_act_sizes) * bytes_per_param * byte
+    inf_act = sum(_MNIST_LAYERS_DIMS) * bytes_per_param * byte
+    act_mem_kb = act_mem.m_as(KB)
+    inf_act_kb = inf_act.m_as(KB)
     inference_total_kb = param_mem_kb + inf_act_kb
     training_total_kb = param_mem_kb + act_mem_kb + grad_mem_kb + opt_mem_kb
+    inference_total = inference_total_kb * KB
+    training_total = training_total_kb * KB
     training_ratio = training_total_kb / inference_total_kb
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(3.5 <= training_ratio <= 4.5, f"Expected ~4× training/inference ratio, got {training_ratio:.1f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    param_kb_str = fmt(param_mem_kb, precision=1, commas=False, suffix=" KB")
-    grad_kb_str = fmt(grad_mem_kb, precision=1, commas=False, suffix=" KB")
-    opt_kb_str = fmt(opt_mem_kb, precision=1, commas=False, suffix=" KB")
+    param_kb_str = fmt_qty(param_mem, KB, precision=1, commas=False)
+    grad_kb_str = fmt_qty(grad_mem, KB, precision=1, commas=False)
+    opt_kb_str = fmt_qty(opt_mem, KB, precision=1, commas=False)
     act_in_count_str = fmt(batch_act_sizes[0], precision=0)
     act_in_kb_str = fmt_qty((batch_act_sizes[0] * bytes_per_param) * byte, KB, precision=1, commas=False)
     act_h1_count_str = fmt(batch_act_sizes[1], precision=0)
@@ -3388,10 +3404,10 @@ class MnistTrainingMemoryCalc:
     act_out_count_str = fmt(batch_act_sizes[3], precision=0)
     act_out_kb_str = fmt_qty((batch_act_sizes[3] * bytes_per_param) * byte, KB, precision=1, commas=False)
     total_act_count_str = fmt(sum(batch_act_sizes), precision=0)
-    total_act_kb_str = fmt_int(act_mem_kb, commas=False, suffix=" KB")
-    total_infer_act_kb_str = fmt_int(inf_act_kb, commas=False, suffix=" KB")
-    total_train_mb_str = fmt(training_total_kb / THOUSAND, precision=1, commas=False, suffix=" MB")
-    total_infer_kb_str = fmt_int(inference_total_kb, commas=False, suffix=" KB")
+    total_act_kb_str = fmt_qty_int(act_mem, KB, commas=False)
+    total_infer_act_kb_str = fmt_qty_int(inf_act, KB, commas=False)
+    total_train_mb_str = fmt_qty(training_total, MB, precision=1, commas=False)
+    total_infer_kb_str = fmt_qty_int(inference_total, KB, commas=False)
     training_ratio_str = fmt(training_ratio, precision=1, commas=False)
 ```
 
@@ -3513,7 +3529,7 @@ The preceding memory requirements seem modest for our small MNIST classifier. Sc
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim.physics import model_memory
-from mlsysim.fmt import fmt_int,  fmt, check
+from mlsysim.fmt import fmt_int,  fmt, fmt_qty, fmt_qty_int, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MemoryExplosionCalc:
@@ -3531,10 +3547,12 @@ class MemoryExplosionCalc:
     mnist_params_value = sum(i * o + o for i, o in mnist_arch_value)  # weights + biases
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    mnist_mem_kb_value = model_memory(mnist_params_value, BYTES_FP32, KB)  # Decimal KB (1000-byte) for prose display
+    mnist_mem = mnist_params_value * BYTES_FP32
+    mnist_mem_kb_value = mnist_mem.m_as(KB)  # Decimal KB (1000-byte) for prose display
     gpt2_params_count_value = Models.Language.GPT2.parameters.m_as(param)
     gpt2_params_b_value = Models.Language.GPT2.parameters.m_as(Bparam)
-    gpt2_mem_gb_value = model_memory(Models.Language.GPT2.parameters, BYTES_FP32, GB)
+    gpt2_mem = gpt2_params_count_value * BYTES_FP32
+    gpt2_mem_gb_value = gpt2_mem.m_as(GB)
     mem_jump_value = gpt2_params_count_value/mnist_params_value
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -3546,10 +3564,10 @@ class MemoryExplosionCalc:
     mnist_params_count_str = fmt(mnist_params_value, precision=0)             # e.g. "109,386"
     mnist_params_k_str = fmt((mnist_params_value * param).m_as(Kparam),
                              precision=1, commas=False)                       # e.g. "109"
-    mnist_mem_str = fmt_int(mnist_mem_kb_value, commas=False, suffix=" KB")
+    mnist_mem_str = fmt_qty_int(mnist_mem, KB, commas=False)
     gpt2_params_count_str = fmt(gpt2_params_count_value, precision=0, commas=True)  # e.g. "1,558,000,000"
     gpt2_params_b_str = fmt(gpt2_params_b_value, precision=1, commas=False)   # e.g. "1.6"
-    gpt2_mem_str = fmt(gpt2_mem_gb_value, precision=0, commas=False, suffix=" GB")
+    gpt2_mem_str = fmt_qty(gpt2_mem, GB, precision=0, commas=False)
     mem_jump_str = fmt(mem_jump_value, precision=1, commas=True)              # e.g. "14,244"
 ```
 
@@ -3595,7 +3613,7 @@ The preceding memory calculations are precise but slow. In practice, systems eng
 # │          MentalMath.mm_params_m_str, MentalMath.mm_gpu_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt_int,  fmt, check, fmt_count
+from mlsysim.fmt import fmt_int,  fmt, check, fmt_count, fmt_qty, MarkdownStr
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MentalMathCalc:
@@ -3608,16 +3626,19 @@ class MentalMathCalc:
     mm_gpu_gb_value = 16
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    mm_model_gb_value = (
+    mm_model = (
         mm_params_m_value * MILLION * mm_bytes_value * mm_overhead_value * byte
-    ).m_as(GB)
-    mm_remaining_gb_value = mm_gpu_gb_value - mm_model_gb_value
+    )
+    mm_gpu = mm_gpu_gb_value * GB
+    mm_model_gb_value = mm_model.m_as(GB)
+    mm_remaining = mm_gpu - mm_model
+    mm_remaining_gb_value = mm_remaining.m_as(GB)
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    mm_model_str = fmt(mm_model_gb_value, precision=1, commas=False, suffix=" GB")
-    mm_remaining_str = fmt(mm_remaining_gb_value, precision=1, commas=False, suffix=" GB")
+    mm_model_str = fmt_qty(mm_model, GB, precision=1, commas=False)
+    mm_remaining_str = fmt_qty(mm_remaining, GB, precision=1, commas=False)
     mm_params_m_str = fmt_count(mm_params_m_value * MILLION, scale='M', precision=0, commas=False)
-    mm_gpu_gb_str = fmt(mm_gpu_gb_value, precision=0, commas=False, suffix=" GB GPU")
+    mm_gpu_gb_str = MarkdownStr(f"{fmt_qty(mm_gpu, GB, precision=0, commas=False)} GPU")
 ```
 
 ::: {#nbk-nn-computation-quick-estimation-ml-engineers .callout-notebook title="Quick estimation for ML engineers"}
@@ -3998,7 +4019,7 @@ For each image in the batch, this produces a probability distribution over the p
 # │          MnistFlopsCalc.double_ratio_str, MnistFlopsCalc.double_ratio_exact_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt_int,  fmt, check, MarkdownStr
+from mlsysim.fmt import fmt_int,  fmt, fmt_percent, fmt_qty_int, check, MarkdownStr
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MnistFlopsCalc:
@@ -4042,10 +4063,13 @@ class MnistFlopsCalc:
     total_params = sum(params_per_layer)
     total_macs = sum(weights)
     bytes_per_value = 4
-    param_mem_kb = (total_params * bytes_per_value * byte).m_as(KB)
+    param_mem = total_params * bytes_per_value * byte
+    param_mem_kb = param_mem.m_as(KB)
     inf_act_elements = in_dim_value + h1_value + h2_value + out_dim_value
-    inf_act_kb = (inf_act_elements * bytes_per_value * byte).m_as(KB)
+    inf_act = inf_act_elements * bytes_per_value * byte
+    inf_act_kb = inf_act.m_as(KB)
     inference_total_kb = param_mem_kb + inf_act_kb
+    inference_total = inference_total_kb * KB
     per_image_kops = (total_flops_value / batch_size_value) / THOUSAND
     arith_intensity = (total_flops_value / batch_size_value) / (inference_total_kb * THOUSAND)
     layer1_pct = weights[0] / total_macs * 100
@@ -4097,7 +4121,7 @@ class MnistFlopsCalc:
     double_total_mops_str = fmt_int(double_total_mops_value, commas=False)
     double_ratio_str = fmt(double_ratio_value, precision=1, commas=False)
     double_ratio_exact_str = fmt(double_ratio_value, precision=2, commas=False)
-    inference_kb_str = fmt_int(inference_total_kb, commas=False, suffix=" KB")
+    inference_kb_str = fmt_qty_int(inference_total, KB, commas=False)
 ```
 
 ::: {#exmp-nn-computation-counting-ops-forward-pass .callout-example title="Counting operations in forward pass"}
@@ -4395,7 +4419,7 @@ We established earlier that training requires storing activations for backpropag
 # │          BackpropMemory.bp_total_params_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt_int,  fmt, check, MarkdownStr
+from mlsysim.fmt import fmt_int,  fmt, fmt_qty_int, check, MarkdownStr
 
 # ┌── LEGO ───────────────────────────────────────────────
 class BackpropMemory:
@@ -4411,9 +4435,11 @@ class BackpropMemory:
     for dim in layers_dims:
         act_counts.append(batch_size * dim)
 
+    act_mem = []
     act_kb = []
     for count in act_counts:
-        act_kb.append((count * bytes_per_param * byte).m_as(KB))
+        act_mem.append(count * bytes_per_param * byte)
+        act_kb.append(act_mem[-1].m_as(KB))
 
     weights = []
     for i in range(len(layers_dims) - 1):
@@ -4427,10 +4453,10 @@ class BackpropMemory:
     check(len(act_counts) == len(layers_dims), "Activation counts should align with layers.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    bp_input_kb_str = fmt_int(act_kb[0], commas=False, suffix=" KB")
-    bp_h1_kb_str = fmt_int(act_kb[1], commas=False, suffix=" KB")
-    bp_h2_kb_str = fmt_int(act_kb[2], commas=False, suffix=" KB")
-    bp_out_kb_str = fmt_int(act_kb[3], commas=False, suffix=" KB")
+    bp_input_kb_str = fmt_qty_int(act_mem[0], KB, commas=False)
+    bp_h1_kb_str = fmt_qty_int(act_mem[1], KB, commas=False)
+    bp_h2_kb_str = fmt_qty_int(act_mem[2], KB, commas=False)
+    bp_out_kb_str = fmt_qty_int(act_mem[3], KB, commas=False)
     bp_total_params_str = fmt(total_params, precision=0)
 ```
 
@@ -4463,7 +4489,7 @@ Beyond activations, we must store gradients for each parameter. For this larger 
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim import Models
-from mlsysim.fmt import fmt_int, fmt, check
+from mlsysim.fmt import fmt_int, fmt, fmt_qty, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AdamMemoryOverhead:
@@ -4475,14 +4501,15 @@ class AdamMemoryOverhead:
     adam_state_tensors = 2
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    state_gb = (params_b * BILLION * bytes_per_param * adam_state_tensors * byte).m_as(GB)
+    state = params_b * BILLION * bytes_per_param * adam_state_tensors * byte
+    state_gb = state.m_as(GB)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(state_gb == 56, f"Expected 56 GB Adam state, got {state_gb}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     params_b_str = fmt_count(params_b * BILLION, scale="billion", precision=0, commas=False, attributive=True)
-    state_gb_str = fmt(state_gb, precision=0, commas=False, suffix=" GB")
+    state_gb_str = fmt_qty(state, GB, precision=0, commas=False)
 ```
 
 [^fn-adam-memory-overhead]: **Adam (Adaptive Moment Estimation)**: Maintains per-parameter first and second moment estimates (momentum and velocity), requiring 2$\times$ additional memory beyond the parameters themselves [@kingma2014adam]. For a 100K-parameter MNIST model this overhead is negligible, but for a `{python} AdamMemoryOverhead.params_b_str` parameter model it adds ~`{python} AdamMemoryOverhead.state_gb_str` in FP32, often the difference between fitting on one GPU or needing two. Adam became the default optimizer despite this cost because it converges with minimal hyperparameter tuning. \index{Adam Optimizer!memory overhead}
@@ -4997,7 +5024,7 @@ class GpuSpecsFootnote:
 # │          MnistInferenceResourceLocal.batch_output_act_str,
 # │          MnistInferenceResourceLocal.batch_size_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int,  fmt, check, MarkdownStr
+from mlsysim.fmt import fmt_int,  fmt, fmt_qty_int, check, MarkdownStr
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MnistInferenceResourceLocal:
@@ -5018,10 +5045,12 @@ class MnistInferenceResourceLocal:
     params_per_layer = [w + b for w, b in zip(weights, biases)]
     total_params = sum(params_per_layer)
     total_macs = sum(weights)
-    param_mem_kb = (total_params * bytes_per_value * byte).m_as(KB)
+    param_mem = total_params * bytes_per_value * byte
+    param_mem_kb = param_mem.m_as(KB)
     inf_act_elements = sum(layers_dims)
     inf_output_act_elements = sum(layers_dims[1:])
-    inf_act_kb = (inf_act_elements * bytes_per_value * byte).m_as(KB)
+    inf_act = inf_act_elements * bytes_per_value * byte
+    inf_act_kb = inf_act.m_as(KB)
     batch_act_elements = batch_size * inf_act_elements
     batch_act_kb = (batch_act_elements * bytes_per_value * byte).m_as(KB)
     inference_total_kb = param_mem_kb + inf_act_kb
@@ -5044,9 +5073,9 @@ class MnistInferenceResourceLocal:
     b2_str = fmt(biases[1], precision=0, commas=False)
     b3_str = fmt(biases[2], precision=0, commas=False)
     total_params_str = fmt(total_params, precision=0, commas=True)
-    param_mem_str = fmt_int(param_mem_kb, commas=False, suffix=" KB")
+    param_mem_str = fmt_qty_int(param_mem, KB, commas=False)
     total_inf_act_str = fmt(inf_act_elements, precision=0, commas=False)
-    total_infer_act_kb_str = fmt_int(inf_act_kb, commas=False, suffix=" KB")
+    total_infer_act_kb_str = fmt_qty_int(inf_act, KB, commas=False)
     inf_madd_l1_str = fmt(weights[0], precision=0, commas=True)
     inf_madd_l2_str = fmt(weights[1], precision=0, commas=True)
     inf_madd_l3_str = fmt(weights[2], precision=0, commas=True)
@@ -5537,7 +5566,7 @@ Once captured, the raw images are far from ready for neural network processing. 
 #| echo: false
 #| label: usps-lenet-specs
 from mlsysim.physics import model_memory
-from mlsysim.fmt import fmt_int, fmt, check, fmt_time
+from mlsysim.fmt import fmt_int, fmt, fmt_qty, check, fmt_time
 
 class UspsLenetSpecs:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
@@ -5558,7 +5587,8 @@ class UspsLenetSpecs:
     modern_cost_per_inference_usd = 0.000001
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    lenet_1_mem_kb = model_memory(lenet_1_params, BYTES_FP32, KB)
+    lenet_1_mem = lenet_1_params * BYTES_FP32
+    lenet_1_mem_kb = lenet_1_mem.m_as(KB)
     cost_ratio = old_hardware_cost_usd / modern_hardware_cost_usd
     latency_ratio = old_latency_ms / modern_latency_ms
     power_ratio_low = old_power_low_w / modern_power_w
@@ -5577,7 +5607,7 @@ class UspsLenetSpecs:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     lenet_1_params_str = fmt(lenet_1_params, precision=0)               # e.g. "10,000"
-    lenet_1_mem_kb_str = fmt(lenet_1_mem_kb, precision=0, commas=False, suffix=" KB") # e.g. "40 KB"
+    lenet_1_mem_kb_str = fmt_qty(lenet_1_mem, KB, precision=0, commas=False) # e.g. "40 KB"
     running_mnist_params_k_str = fmt(running_mnist_params / THOUSAND, precision=1, commas=False)
     old_hardware_cost_str = fmt(old_hardware_cost_usd, precision=0, commas=True)
     modern_hardware_cost_str = fmt(modern_hardware_cost_usd, precision=0, commas=False)
