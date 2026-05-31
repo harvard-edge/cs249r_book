@@ -19,7 +19,8 @@
 | `vol1/ml_systems/ml_systems.qmd` | **DONE** (0 `.m_as()` in LEGO) |
 | `vol1/ml_workflow/ml_workflow.qmd` | **DONE** (0 `.m_as()` in LEGO) |
 | `vol1/data_engineering/data_engineering.qmd` | **DONE** (0 `.m_as()` in LEGO) |
-| Next per `_quarto-html-vol1.yml` | `nn_computation.qmd` |
+| `vol1/nn_computation/nn_computation.qmd` | **DONE** (0 `.m_as()` in LEGO) |
+| Next per `_quarto-html-vol1.yml` | `nn_architectures.qmd` |
 
 ## ml_systems.qmd — migrated this session
 
