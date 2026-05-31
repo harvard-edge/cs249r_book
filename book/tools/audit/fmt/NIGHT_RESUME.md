@@ -53,9 +53,23 @@ This is now the third gate alongside fmt_prose_contract and codemod queue.
 Corpus CLEAN for all checks. Regression test `book/tests/test_audit_prose_semantics.py`
 (7 cases) locks each pattern to fire-on-bad / quiet-on-good.
 
-**NEXT:** Pass 3 consistency audit vol1↔vol2 (same quantity/value-kind formatted
-identically) → Pass 4 scale adjudication queue → Pass 5 render verify (HTML build
-+ audit_lego_html on changed chapters).
+**Pass 3 progress:** corpus grep for §10 anti-patterns found:
+- 4 DANGEROUS glyph-in-suffix stragglers the exact-match lanes missed because
+  the suffix was *compound* — NOW FIXED (visible-identical, gates clean):
+  * ml_systems `mem_bw_growth_pct_str` `"% annually"` → fmt_percent symbol + prose "annually"
+  * sustainable_ai `compute_annual_growth_str` `"×/year"` → fmt_multiple + prose `$\times$/year`
+  * appendix_reliability ×2 `row.append(fmt(p*100, suffix="%"))` → fmt_percent symbol
+- ~17 `suffix=" percentage point(s)"` / `"percentage-point"` sites: belong to
+  fmt_pp per the rule, BUT fmt_pp only emits plural-prose ("N percentage points")
+  or " pp" — it has NO singular / attributive(hyphen) mode. Migrating blindly
+  would change grammar ("5 percentage-point gap" → "5 percentage points gap").
+  DECISION PENDING (see NEXT). Low correctness risk (word spelled out, no 100x).
+
+**NEXT:**
+1. fmt_pp consistency: inspect each pp-site's prose context; migrate the clean
+   plural-noun ones byte-identically; for singular/attributive, either extend
+   fmt_pp with a grammatical mode or leave + document. (id: pp-consistency)
+2. Pass 4 scale adjudication queue (44 items). 3. Pass 5 render verify (HTML).
 
 Gates to keep green (run all three):
 - fmt_prose_contract.py --root book/quarto/contents  → 0
@@ -63,6 +77,8 @@ Gates to keep green (run all three):
 - codemod_fmt.py queue --root book/quarto/contents → only known-deferred
 
 ## Session commit log (newest first)
+- Pass3a: fixed 4 dangerous glyph-in-suffix stragglers (compound suffixes missed
+  by exact-match lanes): "% annually", "×/year", 2× row.append("%"). Visible-identical.
 - Pass2: numeric semantic checks (mult-direction, currency-as-percent) + 7 regression
   tests; corpus clean.
 - semantic scanner tool + fixed "7.6 PB PB"/"PB petabytes" (data_storage ×5) and
