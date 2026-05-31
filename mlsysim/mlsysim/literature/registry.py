@@ -18,6 +18,7 @@ def _load(stem: str, name: str, doc: str = "") -> type:
 
 
 Training = _load("training", "Training")
+Benchmarks = _load("benchmarks", "Benchmarks", "Published benchmark anchors used by empirical validation tests.")
 Scaling = _load("scaling", "Scaling")
 Overheads = _load("overheads", "Overheads")
 Chinchilla = _load("chinchilla", "Chinchilla")
@@ -94,6 +95,7 @@ class ComputeTrend:
 class Literature(Registry):
     """Registry namespace for Literature."""
     Training = Training
+    Benchmarks = Benchmarks
     Scaling = Scaling
     Overheads = Overheads
     Chinchilla = Chinchilla

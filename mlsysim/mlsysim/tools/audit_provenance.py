@@ -26,7 +26,7 @@ from mlsysim.hardware.tech import Interconnect, Memory, Op, Storage as TechStora
 from mlsysim.infrastructure.registry import Grids
 from mlsysim.infrastructure.pricing import Cloud, Storage, Labeling, Fleet, Capital, OnPremises
 from mlsysim.infrastructure.capacity import Capacity
-from mlsysim.literature.registry import Training, Scaling, Overheads, Chinchilla, Communication
+from mlsysim.literature.registry import Benchmarks, Training, Scaling, Overheads, Chinchilla, Communication
 from mlsysim.models.registry import (
     GenerativeVisionModels,
     LanguageModels,
@@ -172,6 +172,7 @@ def audit_literature_sourced() -> list[str]:
     issues: list[str] = []
     for prefix, reg in (
         ("Literature.Training", Training),
+        ("Literature.Benchmarks", Benchmarks),
         ("Literature.Scaling", Scaling),
         ("Literature.Overheads", Overheads),
         ("Literature.Chinchilla", Chinchilla),

@@ -357,6 +357,39 @@ MLPERF_TINY_KWS = _lit(
     notes="Parameter and FLOP counts aligned to TinyMLPerf KWS reference model scale.",
 )
 
+MLPERF_TRAINING_V30_RESNET50_A100 = Provenance(
+    id="prov:mlperf-training-v30-resnet50-a100",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="MLPerf Training v3.0 ResNet-50 results, A100 class systems",
+    url="https://mlcommons.org/benchmarks/training/",
+    verified="2026-05-31",
+    notes="Used as a broad single-accelerator throughput sanity anchor for ResNet-50/A100 teaching examples.",
+)
+
+MLPERF_TRAINING_V31_RESNET50_H100 = Provenance(
+    id="prov:mlperf-training-v31-resnet50-h100",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="MLPerf Training v3.1 ResNet-50 results, H100 class systems",
+    url="https://mlcommons.org/benchmarks/training/",
+    verified="2026-05-31",
+    notes="Used as a broad single-accelerator throughput sanity anchor for ResNet-50/H100 teaching examples.",
+)
+
+NVIDIA_NIM_LLAMA3_8B_H100 = Provenance(
+    id="prov:nvidia-nim-llama3-8b-h100",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="NVIDIA NIM LLM benchmarking results for Llama 3.x 8B on H100",
+    url="https://docs.nvidia.com/nim/benchmarking/llm/1.0.0/performance.html",
+    verified="2026-05-31",
+    notes="Used as a broad H100 Llama-family ITL sanity range; exact serving latency depends on engine, prompt shape, batching, and precision.",
+)
+
+BROWN_GPT3_2020 = _lit(
+    "prov:gpt3-brown-2020",
+    "Brown et al. (2020), Language Models are Few-Shot Learners",
+    url="https://arxiv.org/abs/2005.14165",
+)
+
 WAKE_VISION = _ds(
     "prov:wake-vision-dataset",
     "Wake Vision / doorbell-classifier TinyML reference",
