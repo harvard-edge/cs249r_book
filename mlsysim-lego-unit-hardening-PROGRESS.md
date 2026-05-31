@@ -16,8 +16,9 @@
 | Chapter | Status |
 |---------|--------|
 | `vol1/introduction/introduction.qmd` | **DONE** (0 `.m_as()` in LEGO) |
-| `vol1/ml_systems/ml_systems.qmd` | **IN PROGRESS** — ~4 `.m_as()` remain (fallacy/pitfall tail) |
-| `vol1/ml_workflow/ml_workflow.qmd` | **NEXT** |
+| `vol1/ml_systems/ml_systems.qmd` | **DONE** (0 `.m_as()` in LEGO) |
+| `vol1/ml_workflow/ml_workflow.qmd` | **DONE** (0 `.m_as()` in LEGO) |
+| Next per `_quarto-html-vol1.yml` | TBD (check manifest) |
 
 ## ml_systems.qmd — migrated this session
 
@@ -27,7 +28,9 @@ HardwareSpectrumSetup, DeploymentThresholdsTable, GPT3TrainingScale, CloudEdgeTC
 
 | SHA | Summary |
 |-----|---------|
-| (pending) | ResNet pitfall + EnergyInference |
+| (pending) | ml_workflow.qmd complete |
+| `ac0618fabf` | ml_systems.qmd complete |
+| `faa2531d22` | ResNet pitfall + EnergyInference |
 | `692941bb27` | Edge fleet TCO + mobile constraint cells |
 | `720e057583` | HardwareSpectrum through MobileEfficiencyRecap |
 | `0ce0ad2618` | EnergyTransmission, LighthouseModels, Resnet cells |
