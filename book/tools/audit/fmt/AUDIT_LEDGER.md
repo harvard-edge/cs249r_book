@@ -283,6 +283,33 @@ Validation details:
   `./book/binder check code --scope lego-dead-code` PASS;
   `audit_prose_semantics.py` PASS, 0 findings across 81 files.
 
+## 2026-05-31 — `vol2/fault_tolerance` physical-unit lane
+
+Change type: byte-identical chapter cleanup. Migrated all 10 remaining
+physical-unit suffix sites in `vol2/fault_tolerance/fault_tolerance.qmd` to
+typed quantity formatters. This covered checkpoint component sizes, total
+checkpoint size, per-node storage throughput, local NVMe bandwidth, GPT-3 shard
+size, and recovery read bandwidth.
+
+Touched chapter and equivalence:
+
+| Chapter file | Values/prose checked | Result |
+|---|---:|---|
+| `vol2/fault_tolerance/fault_tolerance.qmd` | 129 values / 70 prose lines | identical |
+
+Validation details:
+
+- `audit_fmt_usage.py` physical-unit suffix count dropped from 958 to 948.
+- `vol2/fault_tolerance/fault_tolerance.qmd` now has 0 `suffix=` calls.
+- `fmt_qty` call count is 441; `fmt_qty_int` call count is 30.
+- `CheckpointDebug.per_node_mbs_str` uses `fmt_qty_int(...)` because the old
+  value intentionally rounded `19.5 MB/s` to `20 MB/s`.
+- Verification: `git diff --check` PASS; py_compile PASS; focused pytest suite
+  PASS, 190 tests; `fmt_prose_contract.py` PASS, 0 violations;
+  `codemod_fmt.py queue` PASS, `by kind: {}`; `./book/binder check math` PASS;
+  `./book/binder check code --scope lego-dead-code` PASS;
+  `audit_prose_semantics.py` PASS, 0 findings across 81 files.
+
 ## 2026-05-31 — Currency denominator relocation
 
 Change type: byte-identical formatter relocation. Replaced 91

@@ -620,7 +620,22 @@ queue` `by kind: {}`; `./book/binder check math` PASS; `./book/binder check
 code --scope lego-dead-code` PASS; `audit_prose_semantics.py` CLEAN across 81
 files.
 
-### B. WS4 — unit-suffix lane (remaining 958 physical-unit suffixes: `GB`/`MB`/`W`/`GB/s`/…)  ← the big one
+**A45 — `vol2/fault_tolerance` physical-unit lane: DONE.**
+Migrated all 10 remaining physical-unit suffix sites in `fault_tolerance` to
+typed quantity formatters, byte-identically. The chapter now has 0 `suffix=`
+calls. This lane covered checkpoint component sizes, total checkpoint size,
+per-node storage throughput, local NVMe bandwidth, GPT-3 shard size, and
+recovery read bandwidth. The rounded per-node NFS throughput moved to
+`fmt_qty_int(...)` so the old integer display remains explicit and unit-checked.
+`audit_fmt_usage.py` now reports physical-unit suffixes down to 948,
+`fmt_qty` at 441, and `fmt_qty_int` at 30. Verification: `assess_equiv.py`
+values/prose identical for `fault_tolerance`; `git diff --check` PASS;
+py_compile PASS; focused pytest suite PASS (190 tests); `fmt_prose_contract.py`
+0; `codemod_fmt.py queue` `by kind: {}`; `./book/binder check math` PASS;
+`./book/binder check code --scope lego-dead-code` PASS;
+`audit_prose_semantics.py` CLEAN across 81 files.
+
+### B. WS4 — unit-suffix lane (remaining 948 physical-unit suffixes: `GB`/`MB`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.
 `weights_gb`), not Pint Quantities, and `fmt_qty` requires a Pint Quantity to
