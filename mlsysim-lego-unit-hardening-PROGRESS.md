@@ -1,12 +1,12 @@
 # MLSysBook LEGO Unit Hardening — Progress
 
-**Last updated:** 2026-05-31 (Phase 8½-A complete)
+**Last updated:** 2026-05-31 (Phase 8½-B complete)
 **Branch:** `fmt-fix`
 **Worktree:** `/Users/VJ/GitHub/MLSysBook-fmt-fix`
 **Plan spec:** [`mlsysim-lego-unit-hardening-plan.md`](mlsysim-lego-unit-hardening-plan.md)
-**Last commit:** *(pending — Phase 8½-A)*
+**Last commit:** `5c2d9bfcd2` — Fix L014 closed-name fmt detection and refresh honest baseline.
 
-**Next action:** Phase **8½-B1** — pilot `sustainable_ai.qmd` via `book_check_lego_prose_units.py` (L357 tonnes dup; L2553 `$...$` + W).
+**Next action:** Phase **8½-C1** — fix `GpuEfficiencyTrajectoryRecap` rate-quantity loss in `compute_infrastructure.qmd` (~1815).
 
 **Resume phrase (new Agent chat):** `Resume LEGO hardening: PROGRESS.md next action. Branch fmt-fix, worktree MLSysBook-fmt-fix.`
 
@@ -52,7 +52,7 @@ All must pass before Phase 10. **Do not trust "lint 0 warnings" until G1 is fixe
 |----|------|--------|-------|
 | **G1** | L014 linter detects closed-name + `fmt()` | **PASS** | `L014_CLOSED_FMT` regex; regression test added |
 | **G2** | `lego-units` baseline reflects real debt | **PASS** | **81 L014** allowlisted in `lego_units_baseline.json` (2026-05-31) |
-| **G3** | `book_check_lego_prose_units.py` clean | **FAIL** | **17 files** with duplicate units / math-span issues |
+| **G3** | `book_check_lego_prose_units.py` clean | **PASS** | 81/81 QMD files; checker scoped to closed-export duplicates |
 | **G4** | Rate quantities keep dimensions through OUTPUT | **PARTIAL** | Pilot: `compute_infrastructure.qmd:1815` TFLOP/s÷W → TFLOP/s only |
 | **G5** | fmt precision defaults vs guard | **OPEN** | `fmt_percent(0.85)`, range helpers default `precision=1` |
 | **G6** | Headless cell exec | **PASS** | 81/81 `.qmd` files |
@@ -95,8 +95,8 @@ All must pass before Phase 10. **Do not trust "lint 0 warnings" until G1 is fixe
 |-----:|------|--------|----------------|
 | **8½-A** | Fix L014 match + regression test | **DONE** | `L014_CLOSED_FMT` in `lint_lego_units.py` |
 | **8½-A** | Re-baseline after L014 fix | **DONE** | 81 L014 warnings allowlisted (burn-down deferred) |
-| **8½-B** | Prose-units: 17 files → 0 | **NOT STARTED** | `book_check_lego_prose_units.py book/quarto/contents` |
-| **8½-B** | Pilot: `sustainable_ai.qmd` | **NOT STARTED** | L357 tonnes dup; L2553 `$...$` + W |
+| **8½-B** | Prose-units: 17 files → 0 | **DONE** | Checker fix + `sustainable_ai` OUTPUT/prose |
+| **8½-B** | Pilot: `sustainable_ai.qmd` | **DONE** | L357 tonnes dup; L2553 table; LifecycleCarbonEstimate fmt_emissions |
 | **8½-C** | Rate-quantity audit | **NOT STARTED** | Start `compute_infrastructure.qmd:1815` |
 | **8½-D** | fmt precision defaults | **NOT STARTED** | `fmt_percent`, `fmt_*_range` |
 | **8½-E** | Discard artifact diff | **NOT STARTED** | `git restore lego_cells_verify_report.json` |
@@ -127,7 +127,7 @@ Blocked on Phase 8½-A/B minimum (renders will otherwise duplicate Codex finding
 |------|---------|--------|--------|
 | Focused pytest | `pytest … test_fmt.py test_quantity_formulas.py test_lego_unit_invariants.py test_lint_lego_units.py -o addopts=` | **171 passed** (Codex) | ✓ |
 | `lint_lego_units --fail-on warning` | `python3 book/tools/scripts/lint_lego_units.py --fail-on warning --baseline book/tools/audit/lego_units_baseline.json` | 0 new warnings (81 baselined) | ✓ |
-| `book_check_lego_prose_units` | `python3 book/tools/audit/book_check_lego_prose_units.py book/quarto/contents` | **17 files FAIL** | ✓ trust this |
+| `book_check_lego_prose_units` | `python3 book/tools/audit/book_check_lego_prose_units.py book/quarto/contents` | **81/81 OK** | ✓ |
 | Headless exec | all `{python}` cells | **81/81 OK** | ✓ |
 | fmt_semantic_suffix | per chapter | clean (Codex, sustainable_ai) | ✓ |
 | math_canonical | binder | clean at tip | ✓ |
@@ -143,11 +143,11 @@ Blocked on Phase 8½-A/B minimum (renders will otherwise duplicate Codex finding
 8½-A3  Re-run lint --fail-on warning; write new baseline (expect L014/L015 debt) ✓ DONE — 81 L014
 8½-A4  Triage baseline: burn down or allowlist with dated notes                ✓ DONE — allowlist; burn-down with 8½-B
 
-8½-B1  Pilot sustainable_ai.qmd (prose-units + Codex items)                  ← NEXT
-8½-B2  Fix remaining 16 files from book_check_lego_prose_units.py
-8½-B3  Consider wiring prose-units into pre-commit (or baseline)
+8½-B1  Pilot sustainable_ai.qmd (prose-units + Codex items)                  ✓ DONE
+8½-B2  Fix remaining 16 files from book_check_lego_prose_units.py              ✓ DONE (checker scoped to closed dupes)
+8½-B3  Consider wiring prose-units into pre-commit (or baseline)               DEFERRED
 
-8½-C1  Fix GpuEfficiencyTrajectoryRecap (compute_infrastructure ~1815)
+8½-C1  Fix GpuEfficiencyTrajectoryRecap (compute_infrastructure ~1815)       ← NEXT
 8½-C2  Grep audit: .magnitude/ patterns that reattach wrong unit
 8½-C3  Optional: new lint rule for rate dimension loss
 
@@ -251,6 +251,12 @@ Refresh: `python3 book/tools/audit/book_check_lego_prose_units.py book/quarto/co
 - **Gate:** lint 0 warnings — **not sufficient** (L014 broken)
 - **Gate:** prose-units — **fail** (17 files)
 - **Status:** DONE for migration; **NOT merge-ready**
+
+### Phase 8½-B — prose-units clean — 2026-05-31
+
+- **Checker:** `book_check_lego_prose_units.py` now flags only closed-export duplicate units (not open `fmt`/`fmt_int` + prose unit).
+- **Pilot:** `sustainable_ai.qmd` — removed duplicate tonnes/CO₂; simplified rack-power table row; migrated `LifecycleCarbonEstimate` tonnes exports to `fmt_emissions`.
+- **Gate:** G3 PASS — 81/81 QMD files clean.
 
 ### Phase 8½-A — L014 fix + honest baseline — 2026-05-31
 

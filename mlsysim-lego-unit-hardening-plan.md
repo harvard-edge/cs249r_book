@@ -164,7 +164,7 @@ doc is the spec; the progress file is the build log.
 - [x] Steps 11–13 — lint + pre-commit wired
 - [x] Steps 14+ — .m_as() migration (bulk)
 - [x] Phase 8½-A — Fix L014 + re-baseline (G1–G2)
-- [ ] Phase 8½-B — prose-units clean, 17 files (G3)
+- [x] Phase 8½-B — prose-units clean, 17 files (G3)
 - [ ] Phase 8½-C — rate-quantity integrity audit (G4)
 - [ ] Phase 8½-D — fmt precision defaults (G5)
 - [ ] Phase 9A — HTML per chapter
@@ -174,9 +174,9 @@ doc is the spec; the progress file is the build log.
 - [ ] Phase 10B — Re-verify
 - [ ] Phase 10C — Merge fmt-fix → dev
 
-**Current step:** Phase 8½-B — prose-units pilot (`sustainable_ai.qmd`)
-**Last commit:** *(pending — Phase 8½-A)*
-**Next action:** Fix `sustainable_ai.qmd` prose-units findings; then remaining 16 files
+**Current step:** Phase 8½-C — rate-quantity integrity (`compute_infrastructure.qmd`)
+**Last commit:** `5c2d9bfcd2`
+**Next action:** Fix GpuEfficiencyTrajectoryRecap TFLOP/s÷W dimension loss (~1815)
 ```
 
 **Per-step log entry (append after each finished step):**
