@@ -93,6 +93,10 @@ class TestFmtQty:
         with pytest.raises(ValueError, match="fmt_usd"):
             fmt_qty(price, USD, precision=2, commas=False)
 
+    def test_plain_number_is_refused(self):
+        with pytest.raises(TypeError, match="requires a Pint Quantity"):
+            fmt_qty(5, ureg.GB, precision=0, commas=False)
+
     def test_returns_markdown_str(self):
         out = fmt_qty(5 * ureg.millisecond, ureg.millisecond, precision=0, commas=False)
         assert isinstance(out, MarkdownStr)

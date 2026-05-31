@@ -622,12 +622,17 @@ def fmt_qty(
     """Format a pint Quantity in ``display_unit`` with a canonical unit suffix.
 
     Required OUTPUT path for physical quantities in LEGO cells.
+    The value must remain a Pint Quantity until this function so the formatter
+    can dimension-check the conversion before delegating to ``fmt``.
     """
-    if isinstance(quantity, ureg.Quantity):
-        q = quantity.to(display_unit)
-        val = q.magnitude
-    else:
-        val = _numeric_magnitude(quantity)
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError(
+            "fmt_qty() requires a Pint Quantity. Keep units attached at the "
+            "call site, e.g. fmt_qty(bw, GB/second), not "
+            "fmt_qty(bw.m_as(GB/second), GB/second)."
+        )
+    q = quantity.to(display_unit)
+    val = q.magnitude
     suffix = _compact_unit_suffix(display_unit) + extra_suffix
     return fmt(val, precision=precision, commas=commas, prefix=prefix, suffix=suffix)
 
