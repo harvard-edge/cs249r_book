@@ -87,6 +87,14 @@ etc.) render the book's house style automatically. Then migrate call sites like
 and reserve `unit_label=` for one-off editorial labels that truly are not stock
 units.
 
+Also cover split-rate prose contracts. Some existing prose renders a rate by
+exporting only the numerator unit, such as `100 GB`, and appending `/s` in the
+sentence or table header. During byte-identical migration this can be
+dimension-checked with `fmt_qty(rate, GB/second, unit_label="GB")`, but the
+long-term target should let the formatter own the full rendered unit while
+preserving readable prose. Do not silently change these exports in a
+byte-identical lane; record them for the unit-label/prose-bound output cleanup.
+
 ### Hardware display API backlog
 
 Hardware/model twin objects know the authoritative stored units and should

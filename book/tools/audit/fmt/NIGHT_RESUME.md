@@ -43,7 +43,7 @@ python3 -m pytest mlsysim/tests/test_fmt.py book/tests/test_codemod_fmt.py book/
 byte-identical sites + grammar fixes, plus the user-approved A2 benchmarking
 edits); 4 dangerous glyph stragglers killed; NEW semantic scanner gate (+ unit-dup
 bug fixes). 81/81 chapters exec clean; prose-contract 0; semantic scanner 0;
-codemod queue empty; 182 focused tests pass. User ruled for no-space scaled
+codemod queue empty; 190 focused tests pass. User ruled for no-space scaled
 counts, so `run_scale_style_lane.py` migrated the 44 queued scale sites to
 `fmt_count` and one manual `fmt(...) + "B"` blind spot. User also approved A2, so
 `benchmarking` now renders `0.9 percentage-point drop`, `below 1
@@ -126,9 +126,11 @@ migrated the remaining obvious `m_as(GiB)` + `suffix=" GB"` specs to
 physical-unit lane then added `fmt_qty_int(...)` for intentionally rounded
 Quantity displays and migrated 29 more sites byte-identically. The
 `vol1/ml_systems` lane then migrated all 30 remaining physical-unit suffixes in
-that chapter to typed quantity formatters, byte-identically. Remaining suffix
-bucket is only 1,012 `physical_unit` suffixes. Remaining: the rest of WS4/WS3
-and later PDF/lock
+that chapter to typed quantity formatters, byte-identically. The
+`vol2/backmatter/appendix_fleet` chapter lane then migrated all 28 remaining
+physical-unit suffixes in that chapter, byte-identically, leaving
+`appendix_fleet` with zero `suffix=` calls. Remaining suffix bucket is only 984
+`physical_unit` suffixes. Remaining: the rest of WS4/WS3 and later PDF/lock
 phases. Nothing is half-done or broken.
 
 **New TODOs from user discussion:** add a prose-bound output contract/gate so
@@ -137,7 +139,10 @@ intentional `MarkdownStr`; add a stock unit display-label registry so common
 units like `Gbps` render as `Gb/s` without repeating `unit_label="Gb/s"` at every
 call site; design hardware/model display accessors so hardware specs can print
 their own canonical display units for memory capacity, bandwidth, TDP, and peak
-FLOP/s without QMD call sites guessing the stored unit.
+FLOP/s without QMD call sites guessing the stored unit; handle split-rate prose
+contracts such as `100 GB` plus a literal `/s`, where the value can be checked
+as a rate today but the rendered unit is still shared between formatter output
+and prose.
 
 **If continuing:** Continue with semantic lanes in `PLAN_OF_RECORD.md`. Good next
 targets are physical-unit suffixes, MarkdownStr sites, and the API-cleanup pass.
@@ -542,6 +547,10 @@ drop. The adjacent prose/table text was updated to `1 percentage-point threshold
 and `(drop of 6.8 percentage points)`. No user-decision items remain open.
 
 ## Session commit log (newest first)
+- Codex `vol2/backmatter/appendix_fleet` physical-unit lane: migrated all 28
+  remaining physical-unit suffix sites in the chapter to typed quantity
+  formatters, byte-identically. `appendix_fleet` now has 0 `suffix=` calls;
+  physical-unit suffixes dropped 1,012 → 984.
 - Codex `vol1/ml_systems` physical-unit lane: migrated all 30 remaining
   physical-unit suffix sites in the chapter to typed quantity formatters,
   byte-identically. `ml_systems` now has 0 physical-unit suffix sites;

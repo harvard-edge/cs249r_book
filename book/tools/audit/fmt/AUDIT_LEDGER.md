@@ -227,6 +227,35 @@ Validation details:
   `./book/binder check code --scope lego-dead-code` PASS;
   `audit_prose_semantics.py` PASS, 0 findings across 81 files.
 
+## 2026-05-31 — `vol2/backmatter/appendix_fleet` physical-unit lane
+
+Change type: byte-identical chapter cleanup. Migrated all 28 remaining
+physical-unit suffix sites in `vol2/backmatter/appendix_fleet.qmd` to typed
+quantity formatters. This covered checkpoint sizes, network bandwidth, HBM
+bandwidth, BF16 peak FLOP/s, model weight footprint, rack/IT/facility power,
+and PUE overhead displays.
+
+Touched chapter and equivalence:
+
+| Chapter file | Values/prose checked | Result |
+|---|---:|---|
+| `vol2/backmatter/appendix_fleet.qmd` | 173 values / 99 prose lines | identical |
+
+Validation details:
+
+- `audit_fmt_usage.py` physical-unit suffix count dropped from 1,012 to 984.
+- `vol2/backmatter/appendix_fleet.qmd` now has 0 `suffix=` calls.
+- `fmt_qty` call count is 406; `fmt_qty_int` call count is 29.
+- The checkpoint write-bandwidth export remains byte-identical as `100 GB`
+  with prose adding `/s`, but the value is now checked as `GB/second` through
+  `fmt_qty(..., unit_label="GB")`. This split-rate rendering is recorded as a
+  unit-label/prose-bound output cleanup follow-up.
+- Verification: `git diff --check` PASS; py_compile PASS; focused pytest suite
+  PASS, 190 tests; `fmt_prose_contract.py` PASS, 0 violations;
+  `codemod_fmt.py queue` PASS, `by kind: {}`; `./book/binder check math` PASS;
+  `./book/binder check code --scope lego-dead-code` PASS;
+  `audit_prose_semantics.py` PASS, 0 findings across 81 files.
+
 ## 2026-05-31 — Currency denominator relocation
 
 Change type: byte-identical formatter relocation. Replaced 91

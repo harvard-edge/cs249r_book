@@ -590,7 +590,23 @@ PASS (190 tests); `fmt_prose_contract.py` 0; `codemod_fmt.py queue`
 `by kind: {}`; `./book/binder check math` PASS; `./book/binder check code
 --scope lego-dead-code` PASS; `audit_prose_semantics.py` CLEAN across 81 files.
 
-### B. WS4 — unit-suffix lane (remaining 1,012 physical-unit suffixes: `GB`/`MB`/`W`/`GB/s`/…)  ← the big one
+**A43 — `vol2/backmatter/appendix_fleet` physical-unit lane: DONE.**
+Migrated all 28 remaining physical-unit suffix sites in `appendix_fleet` to
+typed quantity formatters, byte-identically. The chapter now has 0 `suffix=`
+calls. This lane covered checkpoint sizes, bandwidths, memory footprint, peak
+FLOP/s, rack/IT/facility power, and PUE overhead examples. The checkpoint
+write-bandwidth string is now dimension-checked as `GB/second` but preserves the
+existing exported value `100 GB` with prose appending `/s`; this split-rate
+shape belongs in the later stock unit/prose-bound output design pass rather than
+in a byte-identical cleanup. `audit_fmt_usage.py` now reports physical-unit
+suffixes down to 984, `fmt_qty` at 406, and `fmt_qty_int` at 29. Verification:
+`assess_equiv.py` values/prose identical for `appendix_fleet`; `git diff
+--check` PASS; py_compile PASS; focused pytest suite PASS (190 tests);
+`fmt_prose_contract.py` 0; `codemod_fmt.py queue` `by kind: {}`;
+`./book/binder check math` PASS; `./book/binder check code --scope
+lego-dead-code` PASS; `audit_prose_semantics.py` CLEAN across 81 files.
+
+### B. WS4 — unit-suffix lane (remaining 984 physical-unit suffixes: `GB`/`MB`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.
 `weights_gb`), not Pint Quantities, and `fmt_qty` requires a Pint Quantity to
