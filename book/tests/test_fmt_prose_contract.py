@@ -29,8 +29,26 @@ def test_formatter_map_picks_up_typed_calls(tmp_path):
         prose="x"))
     cells = "\n".join(src for _, src in extract_python_cells(p.read_text()))
     fmap = build_formatter_map(cells)
-    assert fmap["cost_str"][0] == "fmt_usd"
-    assert fmap["rate_str"] == ("fmt_percent", {"style": "symbol"})
+    # keyed by qualified Class.attr now
+    assert fmap["C.cost_str"][0] == "fmt_usd"
+    assert fmap["C.rate_str"] == ("fmt_percent", {"style": "symbol"})
+
+
+def test_same_name_two_classes_no_false_positive(tmp_path):
+    # the usd_dup false positive: Plain.cost_str=fmt (needs $ in prose),
+    # Money.cost_str=fmt_usd (owns $). A qualified ref must use ITS class's rule.
+    body = (
+        "```{python}\n#| echo: false\n"
+        "class Plain:\n    cost_str = fmt(5)\n"
+        "class Money:\n    cost_str = fmt_usd(5)\n"
+        "```\n\n"
+        "plain \\$`{python} Plain.cost_str` and money `{python} Money.cost_str` end\n"
+    )
+    p = _write(tmp_path, body)
+    viol = check_file(p)
+    # Plain.cost_str correctly carries a prose '$' (fmt has none) -> NOT flagged;
+    # Money.cost_str has no prose '$' -> NOT flagged. Zero violations.
+    assert [v.code for v in viol] == []
 
 
 def test_percent_symbol_dup_flagged(tmp_path):

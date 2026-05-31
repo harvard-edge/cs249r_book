@@ -58,16 +58,29 @@ def _const_str(node) -> str | None:
 
 
 def build_formatter_map(cells_text: str) -> dict:
-    """{var_str_name -> (formatter, {kwarg: literal})} from `x = fmt_KIND(...)`.
+    """{name -> (formatter, {kwarg: literal})} from `x = fmt_KIND(...)`.
 
-    Keys are bare attribute names (e.g. 'cost_str'); prose refs match on their
-    last dotted component. Last assignment wins.
+    Keyed by the QUALIFIED export name — ``Class.attr`` for class-body
+    assignments, bare ``attr`` for module-level — because prose refs are
+    qualified (``Class.attr``) and two classes can export the same bare attr
+    with *different* formatters (e.g. a plain ``fmt`` vs an ``fmt_usd``). Keying
+    bare would collide them and mis-attribute the glyph rule. Last write wins.
     """
     out: dict[str, tuple[str, dict]] = {}
     try:
         tree = ast.parse(cells_text)
     except SyntaxError:
         return out
+    classes = [(n.name, n.lineno, n.end_lineno or n.lineno)
+               for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]
+
+    def _qual(lineno: int) -> str:
+        best = None
+        for nm, s, e in classes:
+            if s <= lineno <= e and (best is None or s > best[1]):
+                best = (nm, s, e)
+        return best[0] + "." if best else ""
+
     for node in ast.walk(tree):
         if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Call):
             continue
@@ -77,7 +90,6 @@ def build_formatter_map(cells_text: str) -> dict:
         if not fname or not fname.startswith("fmt"):
             continue
         kwargs = {kw.arg: _const_str(kw.value) for kw in call.keywords if kw.arg}
-        # also capture whether scale= is present (value-agnostic)
         if any(kw.arg == "scale" for kw in call.keywords):
             kwargs["__has_scale__"] = "1"
         for tgt in node.targets:
@@ -87,8 +99,26 @@ def build_formatter_map(cells_text: str) -> dict:
             elif isinstance(tgt, ast.Attribute):
                 name = tgt.attr
             if name and name.endswith(("_str", "_math", "_eq", "_frac")):
-                out[name] = (fname, kwargs)
+                out[_qual(node.lineno) + name] = (fname, kwargs)
     return out
+
+
+def _lookup(fmap: dict, ref: str):
+    """Resolve a prose ref to its formatter entry.
+
+    Exact qualified match first (``Class.attr``). For a bare or unresolved ref,
+    fall back to entries sharing the last component only when they ALL agree on
+    the formatter+kwargs — an ambiguous bare name (two classes, two formatters)
+    returns None so the checker stays silent rather than flag a false positive.
+    """
+    if ref in fmap:
+        return fmap[ref]
+    bare = ref.split(".")[-1]
+    cands = [v for k, v in fmap.items() if k == bare or k.endswith("." + bare)]
+    if not cands:
+        return None
+    sig = {(f, tuple(sorted((kw or {}).items()))) for f, kw in cands}
+    return cands[0] if len(sig) == 1 else None
 
 
 _PERCENT_RE = re.compile(r"^\s*(%|percent|percentage)", re.IGNORECASE)
@@ -116,10 +146,9 @@ def check_file(path: Path) -> list[Violation]:
             continue
         for m in INLINE_PY.finditer(line):
             ref = m.group(1)
-            name = ref.split(".")[-1]
-            entry = fmap.get(name)
+            entry = _lookup(fmap, ref)
             if not entry:
-                continue  # unknown / not a fmt export (or defined elsewhere)
+                continue  # unknown / ambiguous / not a fmt export
             fname, kwargs = entry
             after = line[m.end():m.end() + WIN]
             # currency prefix = '$' (or '\\$') *immediately* before the opening
