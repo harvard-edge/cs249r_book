@@ -66,6 +66,26 @@ temporary positional compatibility, missing-unit and both-unit errors,
 time-unit validation through `unit=`, rate allowlist validation through
 `unit=`, and range endpoint checks through keyword units.
 
+### Scale-word and compound-scale backlog
+
+The audit still has a small `scale_word` bucket plus compound suffix blind
+spots such as `"million parameters"`, `"million queries"`, `"million tokens/hour"`,
+and `"billion FLOPs"`. Do not blindly convert these to `M`/`B` glyph style:
+phrases like "60 million parameters" may be intentional prose.
+
+Recommended implementation:
+
+- extend `fmt_count` with a word-scale mode, e.g.
+  `fmt_count(n, scale="M", scale_style="word", label="parameter")` renders
+  `60 million parameters`;
+- add a structured rate form for word-scale counted rates such as tokens/hour;
+- decide whether FLOP-count prose should be `fmt_qty` with Pint FLOP units or a
+  thin `fmt_ops` wrapper;
+- teach `audit_fmt_usage.py` and `fmt_semantic_suffix` to classify compound
+  scale suffixes instead of falling through to `physical_unit`;
+- add tests for word-scale output, label pluralization, rate denominators,
+  FLOP handling, and checker coverage for exact and compound scale suffixes.
+
 ## 4. Formatter defaults
 
 Semantic formatters should own the default display policy for their value kind.

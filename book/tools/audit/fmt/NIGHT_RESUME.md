@@ -265,6 +265,15 @@ now treats `pp` as a percentage-point suffix and has a regression test for
 `suffix=" pp"`; `audit_fmt_usage.py` classifies percentage-point suffixes
 separately from percent-share suffixes.
 
+**AUDIT note:** exact `scale_word` suffixes and compound scale-word suffixes
+remain a separate design lane, not a blind migration. Current examples include
+`"million"`, `"billion"`, `"million parameters"`, `"million queries"`,
+`"million tokens/hour"`, and `"billion FLOPs"`. Recommended path: add
+formatter-owned word-scale support (`fmt_count(..., scale_style="word")`),
+structured counted-rate support, and a decision on FLOP prose (`fmt_qty` vs.
+thin `fmt_ops`), then extend the suffix checker/audit tests to catch compound
+scale suffixes.
+
 **NEXT:**
 1. Add a formatter-default cleanup pass after the semantic lanes: each
    formatter should own comma defaults by value kind, and explicit `commas=`
