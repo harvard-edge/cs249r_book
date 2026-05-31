@@ -37,7 +37,7 @@ python3 -m pytest mlsysim/tests/test_fmt.py book/tests/test_codemod_fmt.py book/
 
 ## NOW / NEXT  (update before every commit)
 
-**STATUS: Codex marker-prefix cleanup complete and verified. Safe to continue.**
+**STATUS: Codex WS4 `ml_systems` unit batch complete and verified. Safe to continue.**
 
 **State:** multiplier + percent + scale 100% migrated; pp → typed fmt_pp (14
 byte-identical sites + grammar fixes, plus the user-approved A2 benchmarking
@@ -63,15 +63,17 @@ information until the formatter can dimension-check. Raw `prefix=` use in QMD
 formatter calls is now eliminated: `fmt`/`fmt_int`/`fmt_qty`/`fmt_count` accept
 named `approx=True` and `lower_bound=True` marker flags, and the 16 remaining
 chapter-level prefix sites were migrated byte-identically. All WS4-changed
-chapters are HTML-render-verified. The A1 scale-style pass is
+chapters are HTML-render-verified. WS4 continued with `vol1/ml_systems`, adding
+28 more byte-identical `fmt_qty` migrations and moving corpus `fmt_qty` calls
+149 while reducing physical-unit suffix calls to 1,385. The A1 scale-style pass is
 also HTML-render-verified for all 13 source-changed chapters. A2 is
 HTML-render-verified for `benchmarking`. Remaining: the rest of WS4/WS3 and later
 PDF/lock phases. Nothing is half-done or broken.
 
 **If continuing:** Continue WS4 with
 `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/run_unit_lane.py --write <qmd>`
-one chapter at a time. Current dry-run reports 175 remaining clean unit candidates
-across 20 chapters; many more suffix sites are plain floats and should stay queued
+one chapter at a time. Current dry-run reports 147 remaining clean unit candidates
+across 19 chapters; many more suffix sites are plain floats and should stay queued
 unless the source is refactored to carry a Pint Quantity.
 
 **NEW TOOL:** `audit_prose_semantics.py` — executes each chapter, substitutes
@@ -114,9 +116,15 @@ byte-identical API cleanup: `assess_equiv` reported identical values and
 identical inline prose for all 8 changed chapters, and HTML builds were grepped
 for the marker-bearing values.
 
+**NOW done:** WS4 `vol1/ml_systems` batch — migrated 28 clean Quantity-backed
+unit suffix sites to `fmt_qty`, byte-identical by `run_unit_lane.py`. Corpus
+audit moved `fmt_qty` calls 121 → 149 and physical-unit suffixes 1,413 → 1,385.
+HTML build for `ml_systems` succeeded and representative migrated values were
+grepped in the output.
+
 **NEXT:**
 1. Continue WS4 with `run_unit_lane.py` chapter-sized batches. Highest remaining
-   clean counts: `vol1/ml_systems` (28), `vol2/distributed_training` (20),
+   clean counts: `vol2/distributed_training` (20),
    `vol2/backmatter/appendix_fleet` (14), `vol2/ops_scale` (14),
    `vol1/hw_acceleration` (11), `vol1/introduction` (11),
    `vol2/network_fabrics` (11), `vol2/performance_engineering` (11).
@@ -185,6 +193,14 @@ strings:
   data_storage build succeeded and semantic/equivalence gates covered the
   migrated `archive_lineage_tb_str`.
 
+Codex WS4 `ml_systems` HTML verification is DONE. Built `ml_systems` with
+Quarto/Deno caches under `/private/tmp` and grepped representative migrated
+values:
+- `1 MB`, `100 mJ/MB`, `0.1 mJ/inference`, `102.4 MB`, `51.2 MB`, `25.6 MB`
+- `312 TFLOP/s`, `2.04 TB/s`, `35 TOPS`, `100 GB/s`
+- `131 TB`, `128 GB`, `4 MB`, `186.6 MB/s`, `18.7 GB/s`, `1.25 GB/s`, `1 KB`
+- `100 TOPS`, `15 W`, `1 TOPS`, `2 W`, `15 Wh`
+
 FINDING (sustainable_ai fig-cap): the visible <figcaption> renders `$\times$`
 correctly as a math span ("6.2×/year"), but Quarto copies the caption into the
 figure `title=` hover-tooltip WITHOUT processing math, so the tooltip shows raw
@@ -211,6 +227,10 @@ drop. The adjacent prose/table text was updated to `1 percentage-point threshold
 and `(drop of 6.8 percentage points)`. No user-decision items remain open.
 
 ## Session commit log (newest first)
+- Codex WS4 `ml_systems` batch: migrated 28 clean Quantity-backed unit suffix
+  sites to `fmt_qty`; `run_unit_lane.py` proved output byte-identical; contract
+  0, semantic 0, queue empty, targeted suite 134 passing; `ml_systems`
+  HTML-render-verified.
 - Codex marker-prefix cleanup: added named marker flags (`approx=True`,
   `lower_bound=True`) to the formatter core and quantity/count wrappers; migrated
   the 16 remaining QMD raw-prefix formatter calls byte-identically; no QMD
