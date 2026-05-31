@@ -19,7 +19,12 @@ def serialize_quantity(v: Q_) -> str:
 
 
 def require_dimensionality(v: Any, expected_unit, field_name: str):
-    """Validate a unit-bearing field against its expected physical dimension."""
+    """Parse a value as a Quantity and validate its physical dimension.
+
+    This catches obvious unit errors such as watts in a latency field. The
+    unit-family helpers below add the stricter semantic checks for Pint units
+    that are dimensionless by construction, such as bytes, FLOPs, and dollars.
+    """
     if v is None:
         return None
     q = validate_quantity(v)
@@ -69,13 +74,16 @@ def _has_unit_family(q: Q_, family: str) -> bool:
 
 
 def require_unit_families(v: Any, expected_unit, field_name: str, families: tuple[str, ...]):
-    """Validate unit dimension and distinguish Pint's dimensionless aliases."""
+    """Validate dimension first, then require explicit semantic unit families."""
     q = require_dimensionality(v, expected_unit, field_name)
     if q is None:
         return None
+    # Step 1: reject bare numbers for fields that should carry units.
     if not _unit_names(q):
         required = ", ".join(families)
         raise ValueError(f"{field_name} must include explicit {required} units; got a bare number")
+    # Step 2: reject dimensionally-compatible but semantically-wrong aliases,
+    # e.g. "GB/s" as compute throughput or "TFLOP/s" as memory bandwidth.
     missing = [family for family in families if not _has_unit_family(q, family)]
     if missing:
         required = ", ".join(families)

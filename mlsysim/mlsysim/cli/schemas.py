@@ -115,6 +115,8 @@ class HardwareConfig(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
 
     name: str
+    # Historical YAML plans use "nodes" as the total accelerator count.
+    # "accelerators_per_node" makes the physical topology explicit when needed.
     nodes: int = Field(default=1, gt=0)
     accelerators_per_node: Optional[int] = Field(default=None, gt=0)
     intra_node_bw: Optional[Quantity] = None
@@ -187,22 +189,29 @@ class MlsysPlanSchema(BaseModel):
         if self.hardware.nodes > 1:
             from mlsysim.systems.types import Fleet, Node, NetworkFabric
 
+            # Step 1: prefer an explicit plan topology, then hardware aggregate
+            # metadata such as GB200 NVL72, then single-accelerator nodes.
             accelerators_per_node = (
                 self.hardware.accelerators_per_node
                 or self._hardware_obj.accelerator_count
                 or 1
             )
+            # Step 2: refuse to floor partial nodes; that would silently change
+            # the number of accelerators represented by the plan.
             if self.hardware.nodes % accelerators_per_node != 0:
                 raise ValueError(
                     "hardware.nodes must be divisible by hardware.accelerators_per_node "
                     f"(got {self.hardware.nodes} and {accelerators_per_node})"
                 )
+            # Step 3: use the most specific bandwidth source available.
             intra_node_bw = (
                 self.hardware.intra_node_bw
                 or (self._hardware_obj.nvlink.bandwidth if self._hardware_obj.nvlink else None)
                 or (self._hardware_obj.interconnect.bandwidth if self._hardware_obj.interconnect else None)
                 or self.hardware.fabric_bandwidth
             )
+            # Step 4: compile the declarative plan into the Fleet object used by
+            # distributed solvers.
             self._fleet_obj = Fleet(
                 name=f"{self.hardware.name} Fleet",
                 node=Node(

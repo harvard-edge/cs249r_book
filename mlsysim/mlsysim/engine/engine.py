@@ -132,7 +132,8 @@ class Engine:
         validate_range(efficiency, 1e-9, 1.0, "efficiency")  # >0 to prevent division by zero
         validate_at_least(batch_size, 1, "batch_size")
 
-        # 1. Map precision to bytes per parameter
+        # 1. Canonicalize precision and map it to bytes per parameter. Unknown
+        # precision names fail here instead of falling back to FP16 storage.
         precision, bpp = resolve_precision(precision)
 
         # 2. Resolve peak FLOPS for the requested precision

@@ -123,6 +123,8 @@ def calc_bottleneck(ops, model_bytes, device_flops, device_bw):
 
     is_memory_bound = t_mem_ms > t_comp_ms
     ratio = t_mem_ms / t_comp_ms if is_memory_bound else t_comp_ms / t_mem_ms
+    # Normalize before extracting magnitude so scaled inputs such as
+    # 1 TFLOP / 1 GB report 1000 flop/byte rather than Pint's raw magnitude.
     intensity = (ops / model_bytes).to("flop/byte")
     return {
         "compute_ms": t_comp_ms,

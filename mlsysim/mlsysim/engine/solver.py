@@ -273,6 +273,8 @@ class DistributedModel(BaseModel):
         n_accelerators = fleet.total_accelerators
         parallel_group_size = tp_size * pp_size * ep_size
         
+        # The remaining accelerators become data-parallel replicas. Require an
+        # exact split so invalid TP/PP/EP choices do not silently drop hardware.
         if parallel_group_size > n_accelerators:
             raise ValueError(f"Infeasible 4D Parallelism: TP({tp_size}) * PP({pp_size}) * EP({ep_size}) > Total({n_accelerators})")
         if n_accelerators % parallel_group_size != 0:
@@ -304,6 +306,8 @@ class DistributedModel(BaseModel):
         # DP AllReduce exchanges gradients, which equal model size in the active precision.
         # With TP, each rank holds 1/tp_size of the model, so gradient buffer is smaller.
         # With ZeRO-1/2, AllReduce is replaced by Reduce-Scatter and All-Gather (same total volume but different patterns).
+        # Resolve the precision after Engine.solve so communication uses the
+        # same canonical key and byte width as the local compute pass.
         precision, precision_bytes = resolve_precision(precision)
         gradient_size = model.size_in_bytes(precision_bytes) / tp_size
         if is_lora:
@@ -1066,6 +1070,8 @@ class TrainingMemoryModel(BaseModel):
         if zero_stage not in {0, 1, 2, 3}:
             raise ValueError("zero_stage must be 0, 1, 2, or 3")
 
+        # Step 1: shard model state across model-parallel dimensions before
+        # applying ZeRO's data-parallel sharding rules.
         bpp = precision_bytes.to(ureg.byte).magnitude
         total_params = model.parameters.to(ureg.count).magnitude
         model_parallel_shards = tp_size * pp_size * ep_size
@@ -1083,6 +1089,8 @@ class TrainingMemoryModel(BaseModel):
         if zero_stage >= 3:
             weights = weights / dp_size
 
+        # Step 2: activations scale with the local microbatch and layers owned by
+        # this pipeline stage. bpp is already bytes/element, not a FP16 ratio.
         local_microbatch = max(1, math.ceil(batch_size / (dp_size * gradient_accumulation_steps)))
         layers_per_stage = max(1, math.ceil(model.layers / pp_size))
         hidden_dim = model.hidden_dim or 4096
