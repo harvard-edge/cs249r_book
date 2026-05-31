@@ -544,7 +544,27 @@ be a `MarkdownStr`. Typed formatters already return `MarkdownStr`; add a later
 gate/design pass to flag prose-bound plain strings or f-strings unless they are
 intentional labels/sequences.
 
-### B. WS4 — unit-suffix lane (remaining 1,090 physical-unit suffixes: `GB`/`MB`/`W`/`GB/s`/…)  ← the big one
+**Backlog note — hardware display API.**
+The user raised that hardware/model objects should probably own common display
+forms for specs they already store: memory capacity, memory bandwidth,
+interconnect bandwidth, TDP, and peak FLOP/s. Add a later design pass for
+hardware-aware display helpers/accessors so QMD call sites do not have to know
+whether a stored value should display as GiB/GB, GB/s, Gb/s, or TB/s.
+
+**A40 — GiB-backed memory capacity lane: DONE.**
+Migrated the remaining obvious `m_as(GiB)` + `suffix=" GB"` memory-capacity
+sites to `fmt_qty(..., GiB, unit_label="GB")`, byte-identically across
+`model_serving`, `appendix_fleet`, `compute_infrastructure`,
+`distributed_training`, `fleet_orchestration`, `inference`, and
+`performance_engineering`. This preserves the visible `GB` house style while
+keeping binary-capacity quantities attached through the formatter.
+`audit_fmt_usage.py` now reports physical-unit suffixes down to 1,071.
+Verification: `git diff --check` PASS; py_compile PASS; focused pytest suite
+PASS (182 tests); `fmt_prose_contract.py` 0; `codemod_fmt.py queue`
+`by kind: {}`; `./book/binder check math` PASS; `./book/binder check code
+--scope lego-dead-code` PASS; `audit_prose_semantics.py` CLEAN across 81 files.
+
+### B. WS4 — unit-suffix lane (remaining 1,071 physical-unit suffixes: `GB`/`MB`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.
 `weights_gb`), not Pint Quantities, and `fmt_qty` requires a Pint Quantity to

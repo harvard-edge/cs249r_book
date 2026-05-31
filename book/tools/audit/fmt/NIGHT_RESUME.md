@@ -120,15 +120,20 @@ The appendix bandwidth denominator lane then moved 16 split `GB`/`TB` + prose
 `/s` values to full `fmt_qty(..., GB/second|TB/second)` strings while keeping
 substituted prose byte-identical. The network `Gb/s` lane then migrated all 20
 `suffix=" Gb/s"` sites to `fmt_qty(..., Gbps, unit_label="Gb/s")`
-byte-identically across seven chapters. Remaining suffix bucket is only 1,090
-`physical_unit` suffixes. Remaining: the rest of WS4/WS3 and later PDF/lock
+byte-identically across seven chapters. The GiB-backed memory-capacity lane then
+migrated the remaining obvious `m_as(GiB)` + `suffix=" GB"` specs to
+`fmt_qty(..., GiB, unit_label="GB")` across seven chapters. Remaining suffix
+bucket is only 1,071 `physical_unit` suffixes. Remaining: the rest of WS4/WS3
+and later PDF/lock
 phases. Nothing is half-done or broken.
 
 **New TODOs from user discussion:** add a prose-bound output contract/gate so
 computed OUTPUT values consumed by inline prose are typed formatter results or
 intentional `MarkdownStr`; add a stock unit display-label registry so common
 units like `Gbps` render as `Gb/s` without repeating `unit_label="Gb/s"` at every
-call site.
+call site; design hardware/model display accessors so hardware specs can print
+their own canonical display units for memory capacity, bandwidth, TDP, and peak
+FLOP/s without QMD call sites guessing the stored unit.
 
 **If continuing:** Continue with semantic lanes in `PLAN_OF_RECORD.md`. Good next
 targets are physical-unit suffixes, MarkdownStr sites, and the API-cleanup pass.
@@ -533,6 +538,12 @@ drop. The adjacent prose/table text was updated to `1 percentage-point threshold
 and `(drop of 6.8 percentage points)`. No user-decision items remain open.
 
 ## Session commit log (newest first)
+- Codex GiB-backed memory-capacity lane: migrated remaining obvious
+  `m_as(GiB)` + `suffix=" GB"` memory specs to
+  `fmt_qty(..., GiB, unit_label="GB")`, byte-identical across 7 chapters.
+  Physical-unit suffixes dropped 1,090 → 1,071. Follow-up TODO: hardware/model
+  display accessors should own canonical display units for memory capacity,
+  bandwidth, TDP, and peak FLOP/s.
 - Codex network `Gb/s` lane: migrated all 20 `suffix=" Gb/s"` sites to
   `fmt_qty(..., Gbps, unit_label="Gb/s")`, byte-identical across 7 chapters.
   No `Gb/s` suffix sites remain; physical-unit suffixes dropped 1,110 → 1,090.

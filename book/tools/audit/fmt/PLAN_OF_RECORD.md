@@ -85,6 +85,21 @@ etc.) render the book's house style automatically. Then migrate call sites like
 and reserve `unit_label=` for one-off editorial labels that truly are not stock
 units.
 
+### Hardware display API backlog
+
+Hardware/model twin objects know the authoritative stored units and should
+probably expose display-oriented accessors for recurring specs: memory capacity,
+memory bandwidth, interconnect bandwidth, TDP, and precision-specific peak
+FLOP/s. A call site such as `Hardware.Cloud.H100.memory.capacity` should not
+force prose authors to remember whether the canonical stored value is GiB or GB,
+or whether an interconnect bandwidth should display in `GB/s`, `Gb/s`, or
+`TB/s`. Candidate design: add methods/properties such as
+`h.memory.capacity_str(...)`, `h.memory.bandwidth_str(...)`,
+`h.interconnect.bandwidth_str(...)`, or a generic `fmt_hardware_spec(obj,
+spec="memory_capacity")` that delegates to `fmt_qty` with stock unit labels.
+This needs design review before implementation so it does not duplicate
+formatter policy or hide important unit conversions.
+
 For current `fmt_time(...)` migrations, the positional argument is still a unit,
 not a label. Prefer full unit-name strings in source (`"millisecond"`,
 `"second"`, `"hour"`) and let `style="symbol"` or `style="word"` decide whether

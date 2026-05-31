@@ -138,6 +138,38 @@ Validation details:
   `./book/binder check code --scope lego-dead-code` PASS;
   `audit_prose_semantics.py` PASS, 0 findings across 81 files.
 
+## 2026-05-31 — GiB-backed memory capacity lane
+
+Change type: byte-identical formatter relocation. Replaced the remaining
+`m_as(GiB)` + `suffix=" GB"` memory-capacity sites with
+`fmt_qty(..., GiB, unit_label="GB")`. This preserves the book's visible `GB`
+house style while keeping the binary-capacity source unit attached through the
+formatter.
+
+Touched chapters and equivalence:
+
+| Chapter file | Values/prose checked | Result |
+|---|---:|---|
+| `vol1/model_serving/model_serving.qmd` | 365 values / 172 prose lines | identical |
+| `vol2/backmatter/appendix_fleet.qmd` | 173 / 99 | identical |
+| `vol2/compute_infrastructure/compute_infrastructure.qmd` | 320 / 183 | identical |
+| `vol2/distributed_training/distributed_training.qmd` | 261 / 142 | identical |
+| `vol2/fleet_orchestration/fleet_orchestration.qmd` | 160 / 60 | identical |
+| `vol2/inference/inference.qmd` | 208 / 119 | identical |
+| `vol2/performance_engineering/performance_engineering.qmd` | 109 / 58 | identical |
+
+Validation details:
+
+- `audit_fmt_usage.py` physical-unit suffix count dropped from 1,090 to 1,071.
+- Follow-up TODO: hardware/model display accessors should own recurring spec
+  display policies for memory capacity instead of requiring QMD call sites to
+  know `GiB` + house-label `GB`.
+- Verification: `git diff --check` PASS; py_compile PASS; focused pytest suite
+  PASS, 182 tests; `fmt_prose_contract.py` PASS, 0 violations;
+  `codemod_fmt.py queue` PASS, `by kind: {}`; `./book/binder check math` PASS;
+  `./book/binder check code --scope lego-dead-code` PASS;
+  `audit_prose_semantics.py` PASS, 0 findings across 81 files.
+
 ## 2026-05-31 — Currency denominator relocation
 
 Change type: byte-identical formatter relocation. Replaced 91
