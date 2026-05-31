@@ -37,15 +37,18 @@ python3 -m pytest mlsysim/tests/test_fmt.py book/tests/test_codemod_fmt.py book/
 
 ## NOW / NEXT  (update before every commit)
 
-**STATUS: Codex A1 scale-style pass complete and verified. Safe to continue.**
+**STATUS: Codex A2 pp editorial pass complete and verified. Safe to continue.**
 
 **State:** multiplier + percent + scale 100% migrated; pp → typed fmt_pp (14
-sites + grammar fixes); 4 dangerous glyph stragglers killed; NEW semantic
-scanner gate (+ unit-dup bug fixes). 81/81 chapters exec clean; prose-contract 0;
-semantic scanner 0; codemod queue empty; 129 focused tests pass. User ruled for
-no-space scaled counts, so `run_scale_style_lane.py` migrated the 44 queued scale
-sites to `fmt_count` and one manual `fmt(...) + "B"` blind spot. WS4 unit suffixes
-are also started: `run_unit_lane.py` migrates clean
+byte-identical sites + grammar fixes, plus the user-approved A2 benchmarking
+edits); 4 dangerous glyph stragglers killed; NEW semantic scanner gate (+ unit-dup
+bug fixes). 81/81 chapters exec clean; prose-contract 0; semantic scanner 0;
+codemod queue empty; 129 focused tests pass. User ruled for no-space scaled
+counts, so `run_scale_style_lane.py` migrated the 44 queued scale sites to
+`fmt_count` and one manual `fmt(...) + "B"` blind spot. User also approved A2, so
+`benchmarking` now renders `0.9 percentage-point drop`, `below 1
+percentage-point threshold`, and `drop of 6.8 percentage points`. WS4 unit
+suffixes are also started: `run_unit_lane.py` migrates clean
 `fmt(q.m_as(UNIT), suffix=" UNIT")` sites through the same byte-identical gate as
 the percent/scale lanes. First batch migrated 26 Quantity-backed unit sites to
 `fmt_qty` across:
@@ -53,11 +56,11 @@ the percent/scale lanes. First batch migrated 26 Quantity-backed unit sites to
 `vol2/backmatter/appendix_reliability` (1),
 `vol2/collective_communication` (1), and `vol2/introduction` (1).
 All six WS4-changed chapters are HTML-render-verified. The A1 scale-style pass is
-also HTML-render-verified for all 13 source-changed chapters. Remaining: 4 pp
-editorial sites (documented below), and the rest of WS4/WS3. Nothing is half-done
-or broken.
+also HTML-render-verified for all 13 source-changed chapters. A2 is
+HTML-render-verified for `benchmarking`. Remaining: the rest of WS4/WS3 and later
+PDF/lock phases. Nothing is half-done or broken.
 
-**If continuing:** A2 still needs the user's editorial decision. Otherwise continue WS4 with
+**If continuing:** Continue WS4 with
 `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/run_unit_lane.py --write <qmd>`
 one chapter at a time. Current dry-run reports 235 remaining clean unit candidates
 across 20 chapters; many more suffix sites are plain floats and should stay queued
@@ -96,8 +99,7 @@ Corpus CLEAN for all checks. Regression test `book/tests/test_audit_prose_semant
    clean counts: `vol2/compute_infrastructure` (64), `vol1/ml_systems` (28),
    `vol2/distributed_training` (20), `vol2/backmatter/appendix_fleet` (14),
    `vol2/ops_scale` (14).
-2. User-decision item: the 4 benchmarking pp editorial sites remain deferred.
-3. Render-verify any new WS4-changed chapters before Phase 3B/PDF sign-off.
+2. Render-verify any new WS4-changed chapters before Phase 3B/PDF sign-off.
 
 Gates to keep green (run all three):
 - fmt_prose_contract.py --root book/quarto/contents  → 0
@@ -138,6 +140,12 @@ chapters. Built the changed chapters by volume with Quarto/Deno caches under
 - Vol2: appendix_assumptions `70B`; appendix_fleet `7B`, `70B`, `175B`;
   distributed_training `10K`; fleet_orchestration `7B`, `70B`, `175B`.
 
+Codex A2 pp editorial HTML verification is DONE for `benchmarking`. Built with
+Quarto/Deno caches under `/private/tmp` and grepped:
+- `0.9 percentage-point drop`
+- `below 1 percentage-point threshold`
+- `drop of 6.8 percentage points`
+
 FINDING (sustainable_ai fig-cap): the visible <figcaption> renders `$\times$`
 correctly as a math span ("6.2×/year"), but Quarto copies the caption into the
 figure `title=` hover-tooltip WITHOUT processing math, so the tooltip shows raw
@@ -156,29 +164,18 @@ scale=...)`, reconstructing raw counts with Pint `.m_as("param")`, `* THOUSAND`,
 This pass intentionally changes spacing/case only: examples include `70 B`→`70B`,
 `270 K`→`270K`, and `100k`→`100K`. The `codemod_fmt.py queue` gate is now empty.
 
-## Editorial decisions left for the user (rendered TEXT would change)
-These are latent grammar issues in pre-existing prose. I fixed the isolated,
-unambiguous ones (model_serving fs_acc_drop_str, fc_acc_loss_str → hyphenated
-attributive "N percentage-point loss"). The two below are entangled and need a
-human editorial call — left as `fmt(..., suffix=" percentage point")` for now:
-
-1. `benchmarking.qmd` `mv2_acc_drop_str` (renders "0.9 percentage point",
-   value 0.9). BOTH prose uses are attributive: "(0.9 percentage point drop)"
-   and "(0.9 percentage point drop; below 1 percentage point threshold)".
-   RECOMMEND: `fmt_pp(acc_drop, precision=1, attributive=True)` → "0.9
-   percentage-point". NOTE: the *hardcoded* sibling "1 percentage point
-   threshold" in the same parenthetical should then also be hyphenated to
-   "1 percentage-point threshold" for in-sentence consistency.
-
-2. `benchmarking.qmd` `mv2_edge_drop_str` (renders "6.8 percentage point",
-   value 6.8). CONFLICT — used as a noun ("edge-case accuracy dropped 6.8
-   percentage point[s]") AND attributively in a table cell ("(6.8 percentage
-   point drop)"). One `_str` cannot be both. RECOMMEND: make the export the
-   plural NOUN `fmt_pp(edge_drop, precision=1)` → "6.8 percentage points" (fixes
-   the prose), and reword the table cell from "(… drop)" to "(drop of …)" so the
-   noun form reads correctly there too; or split into two exports.
+## Editorial decisions — RESOLVED
+The user approved A2. `benchmarking.qmd` now uses
+`fmt_pp(acc_drop, precision=1, attributive=True)` for the attributive top-1
+accuracy drop and noun-form `fmt_pp(edge_drop, precision=1)` for the edge-case
+drop. The adjacent prose/table text was updated to `1 percentage-point threshold`
+and `(drop of 6.8 percentage points)`. No user-decision items remain open.
 
 ## Session commit log (newest first)
+- Codex A2 pp editorial pass: user approved the benchmarking wording; migrated
+  `mv2_acc_drop_str` and `mv2_edge_drop_str` to `fmt_pp`, hyphenated the hardcoded
+  threshold, reworded the edge-case table cell, and HTML-render-verified
+  `benchmarking`; contract 0, semantic 0, queue empty, targeted suite 129 passing.
 - Codex A1 scale-style pass: user chose no-space scaled counts; added
   `run_scale_style_lane.py` + tests; migrated 44 queued scale suffix sites and
   one `fmt(...) + "B"` blind spot to `fmt_count`; contract 0, semantic 0, queue

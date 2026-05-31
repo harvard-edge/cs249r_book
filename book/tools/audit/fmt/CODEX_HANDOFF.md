@@ -3,7 +3,7 @@
 > **You are continuing a corpus-wide migration to a typed `fmt_*` formatter
 > family.** The dangerous, error-prone part (percent / multiplier / scale-division
 > / percentage-points) is **already done and verified**. Your job is the remaining
-> lower-risk lanes + one remaining user-decision item + the later render/lock phases.
+> lower-risk lanes + the later render/lock phases.
 > Work the same way the previous agent did: small commits, keep the gates green,
 > never guess on the user's prose.
 
@@ -15,8 +15,8 @@ Run ALL fmt tooling from the repo root with `PYTHONPATH=mlsysim`.
 ## 0. Read these first (orientation, in order)
 1. `.claude/rules/fmt.md` — **the contract**: which formatter for which value-kind,
    the OUTPUT-block recipe, the prose rules, the per-kind guards. This is the law.
-2. `book/tools/audit/fmt/NIGHT_RESUME.md` — current state + the one deferred
-   user-decision item spelled out (4 pp editorial sites).
+2. `book/tools/audit/fmt/NIGHT_RESUME.md` — current state + the remaining
+   WS4/WS3/render work.
 3. `book/tools/audit/fmt/MIGRATION.md` — rollout board, workstreams, render phases.
 4. `book/tools/audit/fmt/ASSESSMENT.md` — the equivalence regimes (byte-identical
    vs glyph-relocation) and the verification gauntlet.
@@ -69,8 +69,8 @@ remaining dangerous suffixes by kind. All three already pass right now.
 
 ## 3. Work items — priority order
 
-### A. User-decision items
-These are written up in `NIGHT_RESUME.md` ("Editorial decisions").
+### A. User-decision items — DONE
+The previously blocked decisions are now resolved.
 
 **A1 — Scale queue: DONE.**
 User ruled for the no-space house style (`70K`, `3.5M`, `70B`). All 44 queued
@@ -81,15 +81,13 @@ style-normalization change, not a byte-identical relocation: examples include
 one-time runner is `run_scale_style_lane.py`; use it only if this lane needs to
 be replayed or audited.
 
-**A2 — Four entangled percentage-point sites.** Recommendations already worked out
-in `NIGHT_RESUME.md` ("Editorial decisions left for the user"):
-- `benchmarking.qmd` `mv2_acc_drop_str` → `fmt_pp(acc_drop, precision=1,
-  attributive=True)` AND hyphenate the adjacent hardcoded "1 percentage point
-  threshold" → "1 percentage-point threshold".
-- `benchmarking.qmd` `mv2_edge_drop_str` → make it the plural NOUN
-  `fmt_pp(edge_drop, precision=1)` and reword the table cell "(… drop)" → "(drop
-  of …)" so the noun reads correctly in both places (or split into two exports).
-Apply only after the user confirms the wording. Then render-verify benchmarking.
+**A2 — Four entangled percentage-point sites: DONE.**
+User approved the recommendation. `benchmarking.qmd` now uses
+`fmt_pp(acc_drop, precision=1, attributive=True)` for the top-1 drop,
+hyphenates the hardcoded `1 percentage-point threshold`, uses noun-form
+`fmt_pp(edge_drop, precision=1)` for the edge-case drop, and rewords the table
+cell to `(drop of 6.8 percentage points)`. Benchmarking HTML was rebuilt and
+grepped for the approved wording.
 
 ### B. WS4 — unit-suffix lane (~2,393 sites: `GB`/`ms`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**

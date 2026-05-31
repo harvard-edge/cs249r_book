@@ -108,8 +108,9 @@ percentage *points*) rendered "26 percent" while prose appended "percentage poin
   (compound suffixes): "% annually", "×/year", 2× `row.append(fmt(p*100, suffix="%"))`.
 - `fmt_pp` made grammatically complete (singular/plural + attributive hyphen mode);
   migrated 14 percentage-point sites to typed fmt_pp byte-identically across 6 chapters;
-  fixed 2 attributive hyphen grammar bugs (model_serving). 4 pp sites left for an
-  editorial call (documented in NIGHT_RESUME).
+  fixed 2 attributive hyphen grammar bugs (model_serving). After user approval,
+  the 4 deferred benchmarking pp grammar sites were also migrated and
+  render-verified.
 - **Phase 3A render verification DONE** for every changed chapter (HTML built + migrated
   value grepped in rendered output). See NIGHT_RESUME for the fig-cap `title=` tooltip
   `\times` note (pre-existing book-wide Quarto behavior; visible caption correct).
@@ -118,6 +119,10 @@ percentage *points*) rendered "26 percent" while prose appended "percentage poin
   spot. This intentionally changes spacing/case only (`70 B`→`70B`, `270 K`→`270K`,
   `100k`→`100K`). HTML built and grepped for all 13 source-changed chapters;
   `codemod_fmt.py queue` is now empty.
+- Codex A2 pp editorial pass DONE after user approved the recommended wording:
+  `benchmarking` now renders `0.9 percentage-point drop`, `below 1
+  percentage-point threshold`, and `drop of 6.8 percentage points`; HTML rebuilt
+  and grepped.
 - Resume checkpoint: `book/tools/audit/fmt/NIGHT_RESUME.md`.
 
 ### Active / next lanes, by priority
