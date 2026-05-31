@@ -799,7 +799,22 @@ pytest suite PASS (190 tests); `fmt_prose_contract.py` 0; `codemod_fmt.py queue`
 `by kind: {}`; `./book/binder check math` PASS; `./book/binder check code
 --scope lego-dead-code` PASS; `audit_prose_semantics.py` CLEAN across 81 files.
 
-### B. WS4 — unit-suffix lane (remaining 815 physical-unit suffixes: `GB`/`MB`/`W`/`GB/s`/…)  ← the big one
+**A58 — `vol2/network_fabrics` physical-unit cleanup: DONE.**
+Migrated all 19 remaining physical-unit suffix sites in `network_fabrics` to
+typed quantity formatters, leaving the file with 0 `suffix=` calls. The lane
+covered NVLink/InfiniBand/Ethernet bandwidths, H100 TFLOP/s, bisection data and
+bandwidth, optical power in W/kW/MW, and next-generation port/switch capacity
+in Tb/s. The Tb/s displays use Pint's `ureg.terabit / second` with
+`unit_label="Tb/s"` instead of string suffixes. Large bisection values preserve
+old comma grouping with explicit `commas=True`. `audit_fmt_usage.py` now reports
+physical-unit suffixes down to 796 and `fmt_qty` at 590. Verification:
+`assess_equiv.py` values/prose identical for `network_fabrics`; `git diff
+--check` PASS; py_compile PASS; focused pytest suite PASS (190 tests);
+`fmt_prose_contract.py` 0; `codemod_fmt.py queue` `by kind: {}`;
+`./book/binder check math` PASS; `./book/binder check code --scope
+lego-dead-code` PASS; `audit_prose_semantics.py` CLEAN across 81 files.
+
+### B. WS4 — unit-suffix lane (remaining 796 physical-unit suffixes: `GB`/`MB`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.
 `weights_gb`), not Pint Quantities, and `fmt_qty` requires a Pint Quantity to

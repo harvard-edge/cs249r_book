@@ -53,6 +53,42 @@ Status:
 - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/codemod_fmt.py queue --root book/quarto/contents` PASS, `by kind: {}`
 - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_prose_semantics.py --root book/quarto/contents` PASS, 0 findings
 
+## 2026-05-31 — `vol2/network_fabrics` physical-unit cleanup
+
+Change type: byte-identical formatter relocation. Replaced all 19 remaining
+physical-unit suffix sites in `network_fabrics` with typed quantity formatters.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol2/network_fabrics/network_fabrics.qmd` | 19 | 106 | 62 | identical values + prose |
+
+Validation details:
+
+- Migrated NVLink/InfiniBand/Ethernet bandwidth displays, H100 TFLOP/s,
+  bisection data and bandwidth, optical power in W/kW/MW, and next-generation
+  port/switch capacity in Tb/s.
+- Tb/s displays use Pint's `ureg.terabit / second` plus `unit_label="Tb/s"`,
+  keeping dimensional conversion checked without adding a new project unit alias.
+- Large bisection data/bandwidth strings preserve old comma grouping through
+  explicit `commas=True` because `fmt_qty` defaults compact.
+- `assess_equiv.py` baseline/snapshot/diff reported `IDENTICAL values` and
+  `IDENTICAL prose`.
+- `network_fabrics` now has zero `suffix=` calls.
+- `audit_fmt_usage.py` reports `physical_unit` suffixes dropped 815 -> 796 and
+  `fmt_qty` at 590.
+- Verification: `git diff --check` PASS; py_compile PASS for formatter,
+  math-canonical, and fmt audit modules; focused pytest suite PASS, 190 tests;
+  `fmt_prose_contract.py` PASS, 0 violations; `codemod_fmt.py queue` PASS,
+  `by kind: {}`; `./book/binder check math` PASS;
+  `./book/binder check code --scope lego-dead-code` PASS;
+  `audit_prose_semantics.py` PASS, 0 findings across 81 files.
+- HTML/PDF render evidence: not run yet. Full rendering is intentionally
+  deferred for the separate render/prose audit checkpoint.
+
+Status: non-render verified; render audit pending.
+
 ## 2026-05-31 — `vol1/backmatter/appendix_machine` physical-unit cleanup
 
 Change type: byte-identical formatter relocation. Replaced all 17 remaining

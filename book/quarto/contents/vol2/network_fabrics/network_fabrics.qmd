@@ -140,8 +140,8 @@ class NetworkFabricsContextScenario:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     ib_ndr_gbps_str = fmt_qty(ib_ndr_raw, Gbps, precision=0, commas=False, unit_label="Gb/s")
-    ib_ndr_gbs_str = fmt(ib_ndr_gbs_val, precision=0, commas=False, suffix=" GB/s")
-    nvlink_h100_gbs_str = fmt(nvlink_h100_gbs_val, precision=0, commas=False, suffix=" GB/s")
+    ib_ndr_gbs_str = fmt_qty(ib_ndr_raw, GB/second, precision=0, commas=False)
+    nvlink_h100_gbs_str = fmt_qty(nvlink_h100_raw, GB/second, precision=0, commas=False)
     nvlink_to_ib_ratio_str = fmt(nvlink_to_ib_ratio_val, precision=0, commas=False)
     h100_tflops_str = fmt_qty(h100_flops_raw, TFLOP/second, precision=0, commas=False)
     h100_mem_bw_str = fmt_qty(h100_mem_bw_raw, TB/second, precision=2, commas=False)
@@ -581,10 +581,11 @@ class NetworkAlphaBeta:
     n_demo_large_mb_str = fmt_qty(n_demo_large * byte, MB, precision=0, commas=False)
     n_large_grad_mb_str = fmt_qty(350 * MILLION * byte, MB, precision=0, commas=False)
     eth_alpha_us = 5.0
-    eth_beta_gbs = 12.5
+    eth_beta = 12.5 * GB / second
+    eth_beta_gbs = eth_beta.m_as(GB / second)
     eth_alpha_us_str = fmt_time(eth_alpha_us, 'microsecond', precision=0, commas=False)
-    eth_beta_gbs_str = fmt(eth_beta_gbs, precision=1, commas=False, suffix=" GB/s")
-    doubled_beta_gbs_str = fmt((beta_ib * byte / second).m_as(GB / second) * 2, precision=0, commas=False, suffix=" GB/s")
+    eth_beta_gbs_str = fmt_qty(eth_beta, GB / second, precision=1, commas=False)
+    doubled_beta_gbs_str = fmt_qty(2 * beta_ib * byte / second, GB / second, precision=0, commas=False)
 ```
 
 The model reveals two regimes:
@@ -762,7 +763,8 @@ class AllReduceBottleneck:
     h_h100 = Hardware.Cloud.H100
     ib_ndr = Systems.Fabrics.InfiniBand_NDR
 
-    peak_tflops = h_h100.compute.peak_flops.m_as(TFLOPs/second)
+    peak_flops = h_h100.compute.peak_flops
+    peak_tflops = peak_flops.m_as(TFLOPs/second)
     gpu_util = 0.50
     flops_per_sample_base = 5e13 # Realistic per-GPU compute for ~100ms iteration
 
@@ -812,7 +814,7 @@ class AllReduceBottleneck:
     )
     grad_1b_gb_str = fmt_qty(grad_1b, GB, precision=1, commas=False)
     gpu_util_pct_str = fmt_percent(gpu_util, precision=0, commas=False, style='prose')
-    h100_tflops_str = fmt(peak_tflops, precision=0, commas=False, suffix=" TFLOP/s")
+    h100_tflops_str = fmt_qty(peak_flops, TFLOPs/second, precision=0, commas=False, unit_label="TFLOP/s")
     params_70b_billion_str = fmt_count(
         m_70b.parameters.m_as(param),
         scale="B",
@@ -1041,17 +1043,22 @@ A concrete bisection estimate shows how quickly oversubscription turns into sync
 # │          bbs_total_data_gb_str, bbs_bw_1_1_gbs_str, bbs_bw_4_1_gbs_str,
 # │          bbs_slowdown_str, bbs_time_1_1_ms_str, bbs_time_4_1_ms_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int,  fmt, check, fmt_time
+from mlsysim.fmt import fmt_int, fmt_qty, fmt, check, fmt_time
 
 class BisectionScaling:
     # ┌── 1. LOAD ──────────────────────────────────────────
     n_gpus = Systems.Clusters.Training_1K.total_accelerators
-    beta_gbs = Systems.Fabrics.InfiniBand_NDR.bandwidth.m_as(GB / second)
-    gradient_gb = 100
+    beta = Systems.Fabrics.InfiniBand_NDR.bandwidth
+    beta_gbs = beta.m_as(GB / second)
+    gradient = 100 * GB
+    gradient_gb = gradient.m_as(GB)
     # ┌── 2. EXECUTE ───────────────────────────────────────
     gpus_per_side = n_gpus // 2
+    bw_1_1_q = gpus_per_side * beta
     bw_1_1 = gpus_per_side * beta_gbs
+    bw_4_1_q = bw_1_1_q / 4
     bw_4_1 = bw_1_1 / 4
+    total_data = gpus_per_side * gradient
     total_data_gb = gpus_per_side * gradient_gb
     time_1_1 = total_data_gb/bw_1_1
     time_4_1 = total_data_gb/bw_4_1
@@ -1062,10 +1069,10 @@ class BisectionScaling:
     # ┌── 4. OUTPUT ────────────────────────────────────────
     bbs_n_gpus_str = fmt_count(n_gpus, commas=False, label="GPU")
     bbs_gpus_per_side_str = fmt(gpus_per_side, precision=0, commas=False)
-    bbs_gradient_gb_str = fmt(gradient_gb, precision=0, commas=False, suffix=" GB")
-    bbs_total_data_gb_str = fmt(total_data_gb, precision=0, suffix=" GB")
-    bbs_bw_1_1_gbs_str = fmt(bw_1_1, precision=0, suffix=" GB/s")
-    bbs_bw_4_1_gbs_str = fmt(bw_4_1, precision=0, suffix=" GB/s")
+    bbs_gradient_gb_str = fmt_qty(gradient, GB, precision=0, commas=False)
+    bbs_total_data_gb_str = fmt_qty(total_data, GB, precision=0, commas=True)
+    bbs_bw_1_1_gbs_str = fmt_qty(bw_1_1_q, GB/second, precision=0, commas=True)
+    bbs_bw_4_1_gbs_str = fmt_qty(bw_4_1_q, GB/second, precision=0, commas=True)
     bbs_slowdown_str = fmt_int(slowdown, commas=False)
     bbs_time_1_1_ms_str = fmt_time(time_1_1 * THOUSAND, 'millisecond', precision=0, commas=True)
     bbs_time_4_1_ms_str = fmt_time(time_4_1 * THOUSAND, 'millisecond', precision=0, commas=True)
@@ -1453,11 +1460,13 @@ The final level of the stack is the **Cluster**\index{Cluster Design}, where wir
 # │ Exports: NetworkFabricsClusterRecap.nvlink_to_ib_ratio_str,
 # │          nvlink_h100_gbs_str, ib_ndr_gbps_str
 class NetworkFabricsClusterRecap:
-    ib_ndr_gbs = Systems.Fabrics.InfiniBand_NDR.bandwidth.m_as(GB/second)
-    nvlink_gbs = Hardware.Cloud.H100.nvlink.bandwidth.m_as(GB/second)
+    ib_ndr = Systems.Fabrics.InfiniBand_NDR.bandwidth
+    nvlink = Hardware.Cloud.H100.nvlink.bandwidth
+    ib_ndr_gbs = ib_ndr.m_as(GB/second)
+    nvlink_gbs = nvlink.m_as(GB/second)
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     nvlink_to_ib_ratio_str = fmt(nvlink_gbs / ib_ndr_gbs, precision=0, commas=False)
-    nvlink_h100_gbs_str = fmt(nvlink_gbs, precision=0, commas=False, suffix=" GB/s")
+    nvlink_h100_gbs_str = fmt_qty(nvlink, GB/second, precision=0, commas=False)
     ib_ndr_gbps_str = fmt_qty(Systems.Fabrics.InfiniBand_NDR.bandwidth, Gbps, precision=0, commas=False, unit_label="Gb/s")
 ```
 
@@ -1498,7 +1507,7 @@ A quick estimate makes the power dividend concrete.
 ```{python}
 #| echo: false
 #| label: optical-dividend-calc
-from mlsysim.fmt import fmt_int,  fmt, check
+from mlsysim.fmt import fmt_int, fmt_qty, fmt, check
 
 class OpticalDividend:
     """Power savings from Co-Packaged Optics (CPO)."""
@@ -1512,9 +1521,14 @@ class OpticalDividend:
     p_cpo_w = OPTICS_POWER_CPO_400G_W.m_as(watt)
     n_switches = 1000
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    total_pluggable_kw = (n_ports * p_pluggable_w * watt).m_as(kilowatt)
-    total_cpo_kw = (n_ports * p_cpo_w * watt).m_as(kilowatt)
+    total_pluggable = n_ports * OPTICS_POWER_PLUGGABLE_400G_W
+    total_cpo = n_ports * OPTICS_POWER_CPO_400G_W
+    total_pluggable_kw = total_pluggable.m_as(kilowatt)
+    total_cpo_kw = total_cpo.m_as(kilowatt)
+    savings = total_pluggable - total_cpo
     savings_kw = total_pluggable_kw - total_cpo_kw
+    cluster_pluggable = total_pluggable * n_switches
+    cluster_savings = savings * n_switches
     cluster_pluggable_mw = total_pluggable_kw * n_switches / THOUSAND
     cluster_savings_mw = savings_kw * n_switches / THOUSAND
     h100_tdp_kw = Hardware.Cloud.H100.tdp.m_as(kilowatt)
@@ -1534,14 +1548,14 @@ class OpticalDividend:
         )
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    p_pluggable_w_str = fmt(p_pluggable_w, precision=0, commas=False, suffix=" W")
-    p_cpo_w_str = fmt(p_cpo_w, precision=0, commas=False, suffix=" W")
-    savings_kw_str = fmt(savings_kw, precision=2, commas=False, suffix=" kW")
-    total_pluggable_kw_str = fmt(total_pluggable_kw, precision=2, commas=False, suffix=" kW")
-    total_cpo_kw_str = fmt(total_cpo_kw, precision=2, commas=False, suffix=" kW")
+    p_pluggable_w_str = fmt_qty(OPTICS_POWER_PLUGGABLE_400G_W, watt, precision=0, commas=False)
+    p_cpo_w_str = fmt_qty(OPTICS_POWER_CPO_400G_W, watt, precision=0, commas=False)
+    savings_kw_str = fmt_qty(savings, kilowatt, precision=2, commas=False)
+    total_pluggable_kw_str = fmt_qty(total_pluggable, kilowatt, precision=2, commas=False)
+    total_cpo_kw_str = fmt_qty(total_cpo, kilowatt, precision=2, commas=False)
     n_switches_str = fmt(n_switches, precision=0)
-    cluster_pluggable_mw_str = fmt(cluster_pluggable_mw, precision=2, commas=False, suffix=" MW")
-    cluster_savings_mw_str = fmt(cluster_savings_mw, precision=2, commas=False, suffix=" MW")
+    cluster_pluggable_mw_str = fmt_qty(cluster_pluggable, ureg.megawatt, precision=2, commas=False, unit_label="MW")
+    cluster_savings_mw_str = fmt_qty(cluster_savings, ureg.megawatt, precision=2, commas=False, unit_label="MW")
     equivalent_h100_gpus_str = fmt_int(round(equivalent_h100_gpus / 100) * 100)
 ```
 
@@ -1579,7 +1593,7 @@ For a 10,000-GPU cluster, eliminating pluggable modules could save over 100 kW o
 # │          NextGenLinkDensity.switch_capacity_tbps_str,
 # │          NextGenLinkDensity.port_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, fmt_qty, check
 
 class NextGenLinkDensity:
     """Port-rate and switch-capacity references for next-generation fabrics."""
@@ -1606,8 +1620,8 @@ class NextGenLinkDensity:
     # ┌── 4. OUTPUT ────────────────────────────────────────
     xdr_port_gbps_str = fmt_qty(Systems.Fabrics.InfiniBand_XDR.bandwidth, Gbps, precision=0, commas=False, unit_label="Gb/s")
     eth_800g_port_gbps_str = fmt_qty(ETHERNET_800G_BW, Gbps, precision=0, commas=False, unit_label="Gb/s")
-    eth_1_6t_port_tbps_str = fmt(eth_1_6t_port_gbps_val / THOUSAND, precision=1, commas=False, suffix=" Tb/s")
-    switch_capacity_tbps_str = fmt(switch_capacity_tbps_val, precision=1, commas=False, suffix=" Tb/s")
+    eth_1_6t_port_tbps_str = fmt_qty(ETHERNET_1P6T_BW, ureg.terabit / second, precision=1, commas=False, unit_label="Tb/s")
+    switch_capacity_tbps_str = fmt_qty(SWITCH_ASIC_102T4_BW, ureg.terabit / second, precision=1, commas=False, unit_label="Tb/s")
     port_ratio_str = fmt(port_ratio_val, precision=0, commas=False)
 ```
 
