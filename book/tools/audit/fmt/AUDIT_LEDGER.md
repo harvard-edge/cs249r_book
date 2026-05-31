@@ -53,6 +53,42 @@ Status:
 - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/codemod_fmt.py queue --root book/quarto/contents` PASS, `by kind: {}`
 - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_prose_semantics.py --root book/quarto/contents` PASS, 0 findings
 
+## 2026-05-31 — `vol1/model_compression` physical-unit cleanup
+
+Change type: byte-identical formatter relocation. Replaced all 38 remaining
+physical-unit suffix sites in `model_compression` with typed quantity
+formatters.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol1/model_compression/model_compression.qmd` | 38 | 162 | 74 | identical values + prose |
+
+Validation details:
+
+- Migrated LLM memory footprints, device RAM/cache/bandwidth, MobileNet pruning
+  sizes, low-rank factorization storage, INT4/FP16 quantization savings,
+  A100/V100 throughput and bandwidth specs, fusion traffic, and ResNet-50 INT8
+  size/energy.
+- Compound `GB GPU` displays are now composed from `fmt_qty(..., GB)` plus the
+  `GPU` noun in `MarkdownStr`, instead of using a raw formatter suffix.
+- `assess_equiv.py` baseline/snapshot/diff reported `IDENTICAL values` and
+  `IDENTICAL prose`.
+- `model_compression` now has zero `suffix=` calls.
+- `audit_fmt_usage.py` reports `physical_unit` suffixes dropped 661 -> 623,
+  `fmt_qty` at 713, and `fmt_qty_int` at 83.
+- Verification: `git diff --check` PASS; py_compile PASS for formatter,
+  math-canonical, and fmt audit modules; focused pytest suite PASS, 190 tests;
+  `fmt_prose_contract.py` PASS, 0 violations; `codemod_fmt.py queue` PASS,
+  `by kind: {}`; `./book/binder check math` PASS;
+  `./book/binder check code --scope lego-dead-code` PASS;
+  `audit_prose_semantics.py` PASS, 0 findings across 81 files.
+- HTML/PDF render evidence: not run yet. Full rendering is intentionally
+  deferred for the separate render/prose audit checkpoint.
+
+Status: non-render verified; render audit pending.
+
 ## 2026-05-31 — `vol1/data_engineering` physical-unit cleanup
 
 Change type: byte-identical formatter relocation. Replaced all 36 remaining

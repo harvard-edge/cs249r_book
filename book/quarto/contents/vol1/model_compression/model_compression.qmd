@@ -58,28 +58,32 @@ Bridging that gap requires a systematic discipline of *compression*: trading cap
 from mlsysim import *
 from mlsysim.core.constants import *
 from mlsysim import Models, Platforms
-from mlsysim.fmt import fmt, fmt_int, check
+from mlsysim.fmt import fmt, fmt_int, fmt_qty, fmt_qty_int, check
 
 class CompressionDeploymentScale:
     llm_7b_params = Models.Language.Llama2_7B.parameters.m_as(Bparam)
     bytes_fp16 = BYTES_FP16.m_as(byte)
 
     llm_7b_mem_fp16_gb = llm_7b_params * bytes_fp16
+    llm_7b_mem_fp16 = llm_7b_mem_fp16_gb * GB
     llm_175b_params = Models.Language.GPT3.parameters.m_as(Bparam)
     llm_175b_mem_fp16_gb = llm_175b_params * bytes_fp16
+    llm_175b_mem_fp16 = llm_175b_mem_fp16_gb * GB
     smartphone_ram_gb = Platforms.Mobile.ram.m_as(GB)
+    smartphone_ram = round(smartphone_ram_gb) * GB
     mcu_ram_kb = Platforms.Tiny.ram.m_as(KB)
+    mcu_ram = mcu_ram_kb * KB
 
     check(llm_7b_mem_fp16_gb > smartphone_ram_gb,
           "7-billion-parameter model must exceed smartphone RAM to illustrate the deployment gap.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     llm_7b_str = fmt(llm_7b_params, precision=0, commas=False)
-    llm_7b_mem_str = fmt(llm_7b_mem_fp16_gb, precision=0, commas=False, suffix=" GB")
+    llm_7b_mem_str = fmt_qty(llm_7b_mem_fp16, GB, precision=0, commas=False)
     llm_175b_str = fmt(llm_175b_params, precision=0, commas=False)
-    llm_175b_mem_str = fmt(llm_175b_mem_fp16_gb, precision=0, commas=False, suffix=" GB")
-    smartphone_ram_str = fmt_int(round(smartphone_ram_gb), commas=False, suffix=" GB")
-    mcu_ram_str = fmt(mcu_ram_kb, precision=1, commas=False, suffix=" KB")
+    llm_175b_mem_str = fmt_qty(llm_175b_mem_fp16, GB, precision=0, commas=False)
+    smartphone_ram_str = fmt_qty_int(smartphone_ram, GB, commas=False)
+    mcu_ram_str = fmt_qty(mcu_ram, KB, precision=1, commas=False)
 ```
 
 A `{python} CompressionDeploymentScale.llm_7b_str`-billion parameter language model requires `{python} CompressionDeploymentScale.llm_7b_mem_str` merely to store its weights in FP16. The deployment target is a smartphone with `{python} CompressionDeploymentScale.smartphone_ram_str` of RAM shared across the operating system, applications, and the model. *The math does not work.* No amount of clever engineering changes this arithmetic: `{python} CompressionDeploymentScale.llm_7b_mem_str` *cannot* fit in `{python} CompressionDeploymentScale.smartphone_ram_str`. Yet users expect the model to run: responsively, offline, without draining their battery in an hour. Latency budgets in @sec-model-serving-latency-budget-ef40 capture one visible part of this deployment gap, but the broader challenge also includes memory capacity, energy, and offline execution. That gap is not a minor inconvenience but a defining challenge of model compression.
@@ -105,7 +109,7 @@ Throughout this chapter, we ground each technique in concrete systems: ResNet-50
 # │ Goal: INT8 weight-memory reduction for iron-law definition item.
 # │ Exports: CompressionIronLawQuant.{llm_175b,llm_175b_mem,llm_175b_mem_int8,llm_175b_fp16_int8_reduction}_str
 from mlsysim import Models
-from mlsysim.fmt import fmt, check, fmt_count
+from mlsysim.fmt import fmt, fmt_qty, check, fmt_count
 
 class CompressionIronLawQuant:
     bytes_fp16 = BYTES_FP16.m_as(byte)
@@ -113,6 +117,8 @@ class CompressionIronLawQuant:
     llm_175b_params = Models.Language.GPT3.parameters.m_as(Bparam)
     llm_175b_mem_fp16_gb = llm_175b_params * bytes_fp16
     llm_175b_mem_int8_gb = llm_175b_params * bytes_int8
+    llm_175b_mem_fp16 = llm_175b_mem_fp16_gb * GB
+    llm_175b_mem_int8 = llm_175b_mem_int8_gb * GB
     llm_175b_fp16_int8_reduction = llm_175b_mem_fp16_gb / llm_175b_mem_int8_gb
 
     check(llm_175b_fp16_int8_reduction == 2,
@@ -120,8 +126,8 @@ class CompressionIronLawQuant:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     llm_175b_str = fmt(llm_175b_params, precision=0, commas=False)
-    llm_175b_mem_str = fmt(llm_175b_mem_fp16_gb, precision=0, commas=False, suffix=" GB")
-    llm_175b_mem_int8_str = fmt(llm_175b_mem_int8_gb, precision=0, commas=False, suffix=" GB")
+    llm_175b_mem_str = fmt_qty(llm_175b_mem_fp16, GB, precision=0, commas=False)
+    llm_175b_mem_int8_str = fmt_qty(llm_175b_mem_int8, GB, precision=0, commas=False)
     llm_175b_fp16_int8_reduction_str = fmt(llm_175b_fp16_int8_reduction, precision=0, commas=False)
 ```
 
@@ -370,7 +376,7 @@ These physics-level savings translate directly into deployment capabilities. A m
 # │          int4_toks_str, speedup_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
-from mlsysim.fmt import fmt_int,  fmt, check, fmt_time, fmt_rate
+from mlsysim.fmt import fmt_int,  fmt, fmt_qty, fmt_qty_int, check, fmt_time, fmt_rate
 
 # ┌── LEGO ───────────────────────────────────────────────
 class QuantizationSpeedup:
@@ -385,15 +391,21 @@ class QuantizationSpeedup:
     bytes_int4 = BYTES_INT4.m_as(byte)
 
     device_ram_gb = 16
+    device_ram = device_ram_gb * GB
     mem_bw_gbs = Hardware.Tech.Storage.SystemMemory.bandwidth.m_as(GB / second)
+    mem_bw = Hardware.Tech.Storage.SystemMemory.bandwidth
     kv_cache_gb = 1.0
+    kv_cache = kv_cache_gb * GB
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Sizes
     fp16_size_gb = params_b * bytes_fp16
+    fp16_size = fp16_size_gb * GB
     fp16_total_gb = fp16_size_gb + kv_cache_gb
+    fp16_total = fp16_total_gb * GB
 
     int4_size_gb = params_b * bytes_int4
+    int4_size = int4_size_gb * GB
 
     # Step 2: Latency (Bandwidth Bound)
     fp16_latency_ms = (fp16_size_gb/mem_bw_gbs) * THOUSAND
@@ -414,16 +426,16 @@ class QuantizationSpeedup:
     params_b_str = fmt(params_b, precision=0, commas=False)
     bytes_fp16_str = fmt_int(bytes_fp16, commas=False)
     bytes_int4_str = fmt(bytes_int4, precision=1, commas=False)
-    device_ram_gb_str = fmt(device_ram_gb, precision=0, commas=False, suffix=" GB")
-    mem_bw_gbs_str = fmt_int(mem_bw_gbs, commas=False, suffix=' GB/s')
-    kv_cache_gb_str = fmt_int(kv_cache_gb, commas=False, suffix=" GB")
+    device_ram_gb_str = fmt_qty(device_ram, GB, precision=0, commas=False)
+    mem_bw_gbs_str = fmt_qty_int(mem_bw, GB/second, commas=False)
+    kv_cache_gb_str = fmt_qty_int(kv_cache, GB, commas=False)
 
-    fp16_size_str = fmt_int(fp16_size_gb, commas=False, suffix=" GB")
-    fp16_total_str = fmt_int(fp16_total_gb, commas=False, suffix=" GB")
+    fp16_size_str = fmt_qty_int(fp16_size, GB, commas=False)
+    fp16_total_str = fmt_qty_int(fp16_total, GB, commas=False)
     fp16_latency_str = fmt_time(round(fp16_latency_ms), 'millisecond', precision=0, commas=False)
     fp16_toks_str = fmt_rate(fp16_toks, 'tokens/s', precision=1, commas=False)
 
-    int4_size_str = fmt(int4_size_gb, precision=1, commas=False, suffix=" GB")
+    int4_size_str = fmt_qty(int4_size, GB, precision=1, commas=False)
     int4_latency_str = fmt_time(round(int4_latency_ms), 'millisecond', precision=0, commas=False)
     int4_toks_str = fmt_rate(round(int4_toks), 'tokens/s', precision=0, commas=False)
     speedup_str = fmt_int(speedup, commas=False)
@@ -698,7 +710,7 @@ These three techniques address the challenge through complementary approaches. P
 # │ Imports: mlsysim.fmt (fmt, check)
 # │ Exports: MobileNetCompressionAnchor.pruning_pct_str, .original_size_str, .pruned_size_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, fmt_qty, check
 
 from mlsysim.fmt import MarkdownStr
 
@@ -710,6 +722,8 @@ class MobileNetCompressionAnchor:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     original_size_mb = 14
     pruned_size_mb = 2
+    original_size = original_size_mb * MB
+    pruned_size = pruned_size_mb * MB
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     pruning_pct = (1 - pruned_size_mb / original_size_mb) * 100
@@ -720,8 +734,8 @@ class MobileNetCompressionAnchor:
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
     # Custom "%" and " MB" suffixes → MarkdownStr per recipe Rule 1 escape-hatch
     pruning_pct_str = fmt_percent(pruning_pct/100, precision=1, commas=False, style='symbol')
-    original_size_str = fmt(original_size_mb, precision=0, commas=False, suffix=" MB")
-    pruned_size_str = fmt(pruned_size_mb, precision=0, commas=False, suffix=" MB")
+    original_size_str = fmt_qty(original_size, MB, precision=0, commas=False)
+    pruned_size_str = fmt_qty(pruned_size, MB, precision=0, commas=False)
 ```
 
 Consider a MobileNet trained for image classification on a wearable health monitor. The trained model occupies `{python} MobileNetCompressionAnchor.original_size_str`, but the target microcontroller offers only 2 MB of flash memory. Retraining a smaller architecture from scratch would require weeks of data collection and validation—time the product schedule does not allow. Fortunately, analysis reveals that about `{python} MobileNetCompressionAnchor.pruning_pct_str` of the model's weights hover near zero, contributing almost nothing to its predictions. Removing those weights and fine-tuning the remainder for a few epochs produces a model that fits in `{python} MobileNetCompressionAnchor.pruned_size_str` with less than 1 percent accuracy loss. This is pruning in practice.
@@ -2340,7 +2354,7 @@ Rather than eliminating parameters through pruning or transferring knowledge thr
 # │ Exports: full_mb_str, factored_mb_str, data_reduction_str,
 # │          mat_dim_str, rank_k_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, fmt_qty, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class LowRankFactorization:
@@ -2357,11 +2371,13 @@ class LowRankFactorization:
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Full Matrix: N * N
     full_params = mat_dim * mat_dim
-    full_mb = (full_params * bytes_per_param * byte).m_as(MB)
+    full = full_params * bytes_per_param * byte
+    full_mb = full.m_as(MB)
 
     # Step 2: Factored: 2 * N * K
     factored_params = 2 * mat_dim * rank_k
-    factored_mb = (factored_params * bytes_per_param * byte).m_as(MB)
+    factored = factored_params * bytes_per_param * byte
+    factored_mb = factored.m_as(MB)
 
     data_reduction = full_mb/factored_mb
 
@@ -2371,8 +2387,8 @@ class LowRankFactorization:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     mat_dim_str = fmt(mat_dim, precision=0, commas=False)
     rank_k_str = fmt(rank_k, precision=0, commas=False)
-    full_mb_str = fmt(full_mb, precision=1, commas=False, suffix=" MB")
-    factored_mb_str = fmt(factored_mb, precision=1, commas=False, suffix=" MB")
+    full_mb_str = fmt_qty(full, MB, precision=1, commas=False)
+    factored_mb_str = fmt_qty(factored, MB, precision=1, commas=False)
     data_reduction_str = fmt(data_reduction, precision=0, commas=False)
 ```
 
@@ -2973,7 +2989,7 @@ Quantization is the single most impactful optimization technique for deployment,
 # │          .smartphone_ram_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, fmt_qty, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class QuantizationMemoryAnchor:
@@ -2986,6 +3002,8 @@ class QuantizationMemoryAnchor:
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     llm_7b_mem_fp16_gb = llm_7b_params_b * bytes_fp16
+    llm_7b_mem_fp16 = llm_7b_mem_fp16_gb * GB
+    smartphone_ram = smartphone_ram_gb * GB
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(llm_7b_mem_fp16_gb > smartphone_ram_gb,
@@ -2993,8 +3011,8 @@ class QuantizationMemoryAnchor:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     llm_7b_str = fmt(llm_7b_params_b, precision=0, commas=False)
-    llm_7b_mem_str = fmt(llm_7b_mem_fp16_gb, precision=0, commas=False, suffix=" GB")
-    smartphone_ram_str = fmt(smartphone_ram_gb, precision=0, commas=False, suffix=" GB")
+    llm_7b_mem_str = fmt_qty(llm_7b_mem_fp16, GB, precision=0, commas=False)
+    smartphone_ram_str = fmt_qty(smartphone_ram, GB, precision=0, commas=False)
 ```
 
 A `{python} QuantizationMemoryAnchor.llm_7b_str` billion parameter language model stored in FP16 consumes `{python} QuantizationMemoryAnchor.llm_7b_mem_str`, yet users expect it to run on a smartphone with `{python} QuantizationMemoryAnchor.smartphone_ram_str` of shared RAM. Structural optimization alone cannot bridge this gap: even aggressive pruning rarely exceeds 50--70 percent parameter reduction, leaving a model far too large for the target device. The remaining gains come from a different dimension entirely: reducing the number of bits used to represent each parameter. *Quantization*, the process of reducing numerical precision, offers one of the most impactful optimizations for deployment, because it trades bits for speed and efficiency with minimal accuracy loss.
@@ -3364,7 +3382,7 @@ To make these gains concrete, consider the quantization savings when deploying a
 # │          fp16_size_gb_str, int4_size_gb_str, compression_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
-from mlsysim.fmt import fmt_int,  fmt, check
+from mlsysim.fmt import fmt_int,  fmt, fmt_qty, fmt_qty_int, check, MarkdownStr
 
 # ┌── LEGO ───────────────────────────────────────────────
 class QuantizationSavings:
@@ -3383,6 +3401,10 @@ class QuantizationSavings:
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     fp16_size_gb = params_b * bytes_fp16
     int4_size_gb = params_b * bytes_int4
+    fp16_size = fp16_size_gb * GB
+    int4_size = int4_size_gb * GB
+    gpu_mem_fp16 = gpu_mem_fp16_gb * GB
+    gpu_mem_int4 = gpu_mem_int4_gb * GB
 
     ratio = fp16_size_gb/int4_size_gb
 
@@ -3394,11 +3416,11 @@ class QuantizationSavings:
     llm_params_b_str = fmt(params_b, precision=0, commas=False)
     fp16_bytes_str = fmt_int(bytes_fp16, commas=False)
     int4_bytes_str = fmt(bytes_int4, precision=1, commas=False)
-    fp16_size_gb_str = fmt_int(fp16_size_gb, commas=False, suffix=" GB")
-    int4_size_gb_str = fmt_int(int4_size_gb, commas=False, suffix=" GB")
+    fp16_size_gb_str = fmt_qty_int(fp16_size, GB, commas=False)
+    int4_size_gb_str = fmt_qty_int(int4_size, GB, commas=False)
     compression_ratio_str = fmt_int(ratio, commas=False)
-    gpu_mem_fp16_gb_str = fmt(gpu_mem_fp16_gb, precision=0, commas=False, suffix=' GB GPU')
-    gpu_mem_int4_gb_str = fmt(gpu_mem_int4_gb, precision=0, commas=False, suffix=' GB GPU')
+    gpu_mem_fp16_gb_str = MarkdownStr(f"{fmt_qty(gpu_mem_fp16, GB, precision=0, commas=False)} GPU")
+    gpu_mem_int4_gb_str = MarkdownStr(f"{fmt_qty(gpu_mem_int4, GB, precision=0, commas=False)} GPU")
 ```
 
 ::: {#nbk-model-compression-quantization-savings .callout-notebook title="Quantization savings"}
@@ -3438,7 +3460,7 @@ Beyond storage savings, quantization also accelerates computation through hardwa
 # │ Exports: simd_fp32_str, simd_int8_str, simd_gain_str,
 # │          simd_register_bits_str, simd_fp32_bits_str, simd_int8_bits_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, fmt_qty, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class SIMDThroughput:
@@ -3633,6 +3655,8 @@ class A100Int8Speedup:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     a100_tflops_fp16 = Hardware.Cloud.A100.compute.peak_flops.m_as(TFLOPs/second)
     a100_tops_int8 = Hardware.Cloud.A100.compute.precision_flops["int8"].m_as(TOPS)
+    a100_fp16 = Hardware.Cloud.A100.compute.peak_flops
+    a100_int8 = Hardware.Cloud.A100.compute.precision_flops["int8"]
     bandwidth_bound_speedup = 2            # FP16 -> INT8 memory-traffic-dominated case
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -3643,8 +3667,8 @@ class A100Int8Speedup:
           "A100 INT8 should be at least 2x faster than FP16.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    a100_tflops_fp16_str = fmt(a100_tflops_fp16, precision=0, commas=False, suffix=" TFLOP/s")
-    a100_tops_int8_str = fmt(a100_tops_int8, precision=0, commas=False, suffix=" TOPS")
+    a100_tflops_fp16_str = fmt_qty(a100_fp16, TFLOP/second, precision=0, commas=False)
+    a100_tops_int8_str = fmt_qty(a100_int8, TOPS, precision=0, commas=False)
     a100_int8_speedup_str = fmt(a100_int8_speedup, precision=0, commas=False)
     bandwidth_bound_speedup_str = fmt(bandwidth_bound_speedup, precision=0, commas=False)
 ```
@@ -5239,7 +5263,7 @@ The same principle extends beyond CNNs. General matrix multiply (GEMM) bias-acti
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Goal: Conv-BN-ReLU bandwidth and kernel-launch savings for fusion prose.
 # │ Exports: FusionCalc.{feat_map_kb,weights_mb,bn_params_kb,unfused_conv_mb,unfused_bn_mb,unfused_relu_mb,total_unfused_mb,total_fused_mb,bandwidth_reduction_pct,unfused_time_us,fused_time_us,fusion_speedup,kernels_unfused,kernels_fused,saved_latency_ms}_str
-from mlsysim.fmt import fmt, fmt_int, check, fmt_time
+from mlsysim.fmt import fmt, fmt_int, fmt_qty, fmt_qty_int, check, fmt_time
 
 class FusionCalc:
     conv_channels = 256
@@ -5253,11 +5277,21 @@ class FusionCalc:
     v100_bw_gbs = Hardware.Cloud.V100.memory.bandwidth.m_as(GB/second)
 
     feat_map_mb = conv_channels * conv_spatial * conv_spatial * bytes_per_element/MILLION
+    feat_map = feat_map_mb * MB
+    weights = weights_mb * MB
+    bn_params = bn_params_mb * MB
     unfused_conv_mb = feat_map_mb * 2 + weights_mb
+    unfused_conv = unfused_conv_mb * MB
+    unfused_conv_display = round(unfused_conv_mb) * MB
     unfused_bn_mb = feat_map_mb * 2 + bn_params_mb
+    unfused_bn = unfused_bn_mb * MB
     unfused_relu_mb = feat_map_mb * 2
+    unfused_relu = unfused_relu_mb * MB
     total_unfused_mb = unfused_conv_mb + unfused_bn_mb + unfused_relu_mb
+    total_unfused = total_unfused_mb * MB
     total_fused_mb = feat_map_mb * 2 + weights_mb
+    total_fused = total_fused_mb * MB
+    total_fused_display = round(total_fused_mb) * MB
     bandwidth_reduction_pct = (1 - total_fused_mb/total_unfused_mb) * 100
     saved_latency_ms = (kernels_unfused - kernels_fused) * latency_per_kernel_us / THOUSAND
     unfused_time_us = total_unfused_mb/v100_bw_gbs * THOUSAND
@@ -5268,14 +5302,14 @@ class FusionCalc:
     check(fusion_speedup > 1, "Fused execution must be faster than unfused.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    feat_map_kb_str = fmt(feat_map_mb * THOUSAND, precision=1, commas=False, suffix=" KB")
-    weights_mb_str = fmt(weights_mb, precision=1, commas=False, suffix=" MB")
-    bn_params_kb_str = fmt(bn_params_mb * THOUSAND, precision=0, commas=False, suffix=" KB")
-    unfused_conv_mb_str = fmt_int(round(unfused_conv_mb), commas=False, suffix=" MB")
-    unfused_bn_mb_str = fmt(unfused_bn_mb, precision=1, commas=False, suffix=" MB")
-    unfused_relu_mb_str = fmt(unfused_relu_mb, precision=1, commas=False, suffix=" MB")
-    total_unfused_mb_str = fmt(total_unfused_mb, precision=1, commas=False, suffix=" MB")
-    total_fused_mb_str = fmt_int(round(total_fused_mb), commas=False, suffix=' MB')
+    feat_map_kb_str = fmt_qty(feat_map, KB, precision=1, commas=False)
+    weights_mb_str = fmt_qty(weights, MB, precision=1, commas=False)
+    bn_params_kb_str = fmt_qty(bn_params, KB, precision=0, commas=False)
+    unfused_conv_mb_str = fmt_qty_int(unfused_conv_display, MB, commas=False)
+    unfused_bn_mb_str = fmt_qty(unfused_bn, MB, precision=1, commas=False)
+    unfused_relu_mb_str = fmt_qty(unfused_relu, MB, precision=1, commas=False)
+    total_unfused_mb_str = fmt_qty(total_unfused, MB, precision=1, commas=False)
+    total_fused_mb_str = fmt_qty_int(total_fused_display, MB, commas=False)
     bandwidth_reduction_pct_str = fmt_percent(bandwidth_reduction_pct/100, precision=1, commas=False, style='prose')
     kernels_unfused_str = fmt(kernels_unfused, precision=0, commas=False)
     kernels_fused_str = fmt(kernels_fused, precision=0, commas=False)
@@ -5293,15 +5327,15 @@ Memory bandwidth analysis quantifies these fusion benefits concretely. Consider 
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Goal: V100 bandwidth and compute specs for fusion timing prose.
 # │ Exports: V100Specs.{v100_bw_gbs,v100_tflops_fp32}_str
-from mlsysim.fmt import fmt
+from mlsysim.fmt import fmt_qty
 
 class V100Specs:
-    v100_bw_gbs = Hardware.Cloud.V100.memory.bandwidth.m_as(GB/second)
-    v100_tflops_fp32 = Hardware.Cloud.V100.compute.precision_flops["fp32"].m_as(TFLOPs/second)
+    v100_bw = Hardware.Cloud.V100.memory.bandwidth
+    v100_tflops_fp32 = Hardware.Cloud.V100.compute.precision_flops["fp32"]
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    v100_bw_gbs_str = fmt(v100_bw_gbs, precision=0, commas=False, suffix=' GB/s')
-    v100_tflops_fp32_str = fmt(v100_tflops_fp32, precision=1, commas=False, suffix=" TFLOP/s")
+    v100_bw_gbs_str = fmt_qty(v100_bw, GB/second, precision=0, commas=False)
+    v100_tflops_fp32_str = fmt_qty(v100_tflops_fp32, TFLOP/second, precision=1, commas=False)
 ```
 
 On a V100 GPU with `{python} V100Specs.v100_bw_gbs_str` HBM bandwidth and `{python} V100Specs.v100_tflops_fp32_str` FP32 compute, the unfused sequence takes approximately `{python} FusionCalc.unfused_time_us_str` (memory bound), while the fused version takes approximately `{python} FusionCalc.fused_time_us_str` (`{python} FusionCalc.fusion_speedup_str`$\times$ speedup). The speedup comes entirely from reducing memory traffic, as the compute remains identical.
@@ -7328,7 +7362,7 @@ The measurement framework should establish clear baselines before applying any o
 # │          .size_reduction_str, .energy_improvement_str
 # └─────────────────────────────────────────────────────────────────────────────
 import warnings
-from mlsysim.fmt import fmt_int, fmt, check, fmt_time
+from mlsysim.fmt import fmt_int, fmt, fmt_qty, check, fmt_time
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ResNet50Int8Metrics:
@@ -7358,10 +7392,14 @@ class ResNet50Int8Metrics:
 
     fp32_latency_ms = p_fp32.latency.m_as("ms")
     int8_latency_ms = p_int8.latency.m_as("ms")
-    fp32_size_mb = p_fp32.memory_footprint.m_as("MB")
-    int8_size_mb = p_int8.memory_footprint.m_as("MB")
-    fp32_energy_j = p_fp32.energy.m_as("J")
-    int8_energy_j = p_int8.energy.m_as("J")
+    fp32_size = p_fp32.memory_footprint
+    int8_size = p_int8.memory_footprint
+    fp32_size_mb = fp32_size.m_as("MB")
+    int8_size_mb = int8_size.m_as("MB")
+    fp32_energy = p_fp32.energy
+    int8_energy = p_int8.energy
+    fp32_energy_j = fp32_energy.m_as("J")
+    int8_energy_j = int8_energy.m_as("J")
 
     top1_drop = fp32_top1 - int8_top1
     latency_speedup = fp32_latency_ms / int8_latency_ms
@@ -7379,10 +7417,10 @@ class ResNet50Int8Metrics:
     int8_top1_str = fmt_percent(int8_top1/100, precision=1, commas=False, style='prose')
     fp32_latency_ms_str = fmt_time(round(fp32_latency_ms), 'millisecond', precision=0, commas=False)
     int8_latency_ms_str = fmt_time(int8_latency_ms, 'millisecond', precision=1, commas=False)
-    fp32_size_mb_str = fmt(fp32_size_mb, precision=1, commas=False, suffix=" MB")
-    int8_size_mb_str = fmt(int8_size_mb, precision=1, commas=False, suffix=" MB")
-    fp32_energy_j_str = fmt(fp32_energy_j, precision=2, commas=False, suffix=" J")
-    int8_energy_j_str = fmt(int8_energy_j, precision=2, commas=False, suffix=" J")
+    fp32_size_mb_str = fmt_qty(fp32_size, MB, precision=1, commas=False)
+    int8_size_mb_str = fmt_qty(int8_size, MB, precision=1, commas=False)
+    fp32_energy_j_str = fmt_qty(fp32_energy, ureg.joule, precision=2, commas=False)
+    int8_energy_j_str = fmt_qty(int8_energy, ureg.joule, precision=2, commas=False)
     per_class_min_drop_str = fmt(per_class_min_drop, precision=1, commas=False)
     per_class_max_drop_str = fmt(per_class_max_drop, precision=1, commas=False)
     calibration_error_fp32_str = fmt_percent(calibration_error_fp32/100, precision=1, commas=False, style='prose')
