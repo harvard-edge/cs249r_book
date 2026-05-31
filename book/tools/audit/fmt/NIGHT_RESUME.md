@@ -186,6 +186,16 @@ the `count_label` suffix bucket down to 41. Verification: py_compile PASS;
 PASS (161 tests); `fmt_prose_contract` 0; `codemod_fmt queue` empty;
 substituted prose semantic audit CLEAN across 81 files.
 
+**NOW done:** Remaining direct count labels — migrated 40
+`tokens`/`nodes`/`layers`/`queries`/`images` suffix sites to
+`fmt_count(..., label=...)`, byte-identical across all 15 touched chapters. Old
+`fmt_int` query sites now round explicitly before `fmt_count`, preserving output
+while making the integer boundary visible. The only remaining `count_label`
+suffix is the documented `GPU-days` compound. Verification: py_compile PASS;
+`git diff --check` PASS; `./book/binder check math` PASS; focused pytest suite
+PASS (161 tests); `fmt_prose_contract` 0; `codemod_fmt queue` empty;
+substituted prose semantic audit CLEAN across 81 files.
+
 **NEXT:**
 1. Continue the semantic non-Quantity lanes: count labels, any remaining
    non-physical rates, and time values. Add entries to `AUDIT_LEDGER.md` for

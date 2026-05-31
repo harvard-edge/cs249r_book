@@ -164,6 +164,48 @@ Validation details:
   `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
   0 findings across 81 files.
 
+## 2026-05-31 — Remaining direct count labels
+
+Change type: byte-identical formatter relocation. Replaced 40 hard-coded direct
+count noun suffixes (`tokens`, `nodes`, `layers`, `queries`, `images`) with
+`fmt_count(..., label=...)`. For old `fmt_int` query count sites whose values
+were fractional before rounding, the rounding is now explicit via `round(...)`
+before `fmt_count`.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol1/benchmarking/benchmarking.qmd` | 1 | 240 | 102 | identical values + prose |
+| `vol1/frameworks/frameworks.qmd` | 1 | 131 | 70 | identical values + prose |
+| `vol1/ml_systems/ml_systems.qmd` | 4 | 296 | 143 | identical values + prose |
+| `vol1/model_serving/model_serving.qmd` | 4 | 365 | 172 | identical values + prose |
+| `vol1/responsible_engr/responsible_engr.qmd` | 2 | 168 | 79 | identical values + prose |
+| `vol1/training/training.qmd` | 6 | 453 | 214 | identical values + prose |
+| `vol2/collective_communication/collective_communication.qmd` | 1 | 104 | 60 | identical values + prose |
+| `vol2/compute_infrastructure/compute_infrastructure.qmd` | 1 | 320 | 183 | identical values + prose |
+| `vol2/data_storage/data_storage.qmd` | 5 | 180 | 99 | identical values + prose |
+| `vol2/distributed_training/distributed_training.qmd` | 3 | 261 | 142 | identical values + prose |
+| `vol2/fault_tolerance/fault_tolerance.qmd` | 1 | 129 | 70 | identical values + prose |
+| `vol2/inference/inference.qmd` | 5 | 208 | 119 | identical values + prose |
+| `vol2/network_fabrics/network_fabrics.qmd` | 2 | 106 | 62 | identical values + prose |
+| `vol2/security_privacy/security_privacy.qmd` | 3 | 69 | 38 | identical values + prose |
+| `vol2/sustainable_ai/sustainable_ai.qmd` | 1 | 197 | 120 | identical values + prose |
+
+Validation details:
+
+- Before/after snapshots were generated with `assess_equiv.py baseline --ref HEAD`
+  and `assess_equiv.py snapshot` under `/tmp/fmt_remaining_count_assess`.
+- `assess_equiv.py diff` reported `IDENTICAL values` and `IDENTICAL prose` for
+  every touched chapter.
+- `audit_fmt_usage.py` reports `fmt_count` calls increased to 203. The only
+  remaining `count_label` suffix is the documented `GPU-days` compound.
+- Verification: `python3 -m py_compile mlsysim/mlsysim/fmt.py book/cli/checks/math_canonical.py` PASS;
+  `git diff --check` PASS; `./book/binder check math` PASS; focused pytest
+  suite PASS, 161 tests; `fmt_prose_contract.py` PASS, 0 violations;
+  `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
+  0 findings across 81 files.
+
 ## 2026-05-31 — GPU count label relocation
 
 Change type: byte-identical formatter relocation. Replaced 77 hard-coded

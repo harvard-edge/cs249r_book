@@ -153,6 +153,16 @@ py_compile PASS, `git diff --check` PASS, `./book/binder check math` PASS,
 focused pytest suite PASS (161 tests), prose-contract 0, semantic audit 0
 findings, codemod queue empty.
 
+**A9 — Remaining direct count labels: DONE.**
+40 `tokens`/`nodes`/`layers`/`queries`/`images` suffix sites moved to
+`fmt_count(..., label=...)`, byte-identical across all 15 touched chapters. Old
+`fmt_int` query sites now round explicitly before `fmt_count`, preserving output
+while making the integer boundary visible. The only remaining `count_label`
+suffix is the documented `GPU-days` compound. Verification: py_compile PASS,
+`git diff --check` PASS, `./book/binder check math` PASS, focused pytest suite
+PASS (161 tests), prose-contract 0, semantic audit 0 findings, codemod queue
+empty.
+
 ### B. WS4 — unit-suffix lane (~2,393 sites: `GB`/`ms`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.
