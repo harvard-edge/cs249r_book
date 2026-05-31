@@ -3,9 +3,18 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools/audit/fmt"))
+import ast  # noqa: E402
+
 from codemod_fmt import (  # noqa: E402
     _rewrite_call_to_multiple, _patch_prose, scan_file,
+    _rewrite_percent, scan_percent,
 )
+
+
+def _percent(expr: str):
+    """Parse a single fmt(...) expression and run the percent rewriter on it."""
+    call = ast.parse(expr, mode="eval").body
+    return _rewrite_percent(call, expr)
 
 
 # --- the provable cell rewrite -------------------------------------------------
@@ -137,3 +146,46 @@ def test_literal_x_and_space_glyph_go_to_queue_not_auto(tmp_path):
     assert edits == []  # neither auto-rewritten
     assert all(q.kind == "multiplier-variant" for q in queue)
     assert len(queue) == 2
+
+
+# --- the byte-identical percent lane -------------------------------------------
+
+def test_percent_symbol_standalone_divides_by_100():
+    out = _percent("fmt(savings_pct, precision=1, commas=False, suffix='%')")
+    assert out == "fmt_percent(savings_pct/100, precision=1, commas=False, style='symbol')"
+
+
+def test_percent_prose_word_uses_prose_style():
+    out = _percent("fmt(share, precision=0, suffix=' percent')")
+    assert out == "fmt_percent(share/100, precision=0, style='prose')"
+
+
+def test_percent_strips_ratio_times_100():
+    # the clean win: fmt(ratio*100, '%') -> fmt_percent(ratio) (no *100/100)
+    assert _percent("fmt(mfu * 100, precision=1, suffix='%')") == \
+        "fmt_percent(mfu, precision=1, style='symbol')"
+    assert _percent("fmt(100 * util, suffix='%')") == "fmt_percent(util, style='symbol')"
+
+
+def test_percent_parenthesises_binop_before_dividing():
+    # a bare expression must be parenthesised so /100 binds to the whole value
+    assert _percent("fmt(a + b, suffix='%')") == "fmt_percent((a + b)/100, style='symbol')"
+
+
+def test_percent_declines_prefix_and_nonexact_suffix():
+    assert _percent("fmt(x, prefix='~', suffix='%')") is None
+    assert _percent("fmt(x, suffix=' %')") is None      # spacing variant -> queue
+    assert _percent("fmt(x, suffix='percent')") is None  # no leading space -> queue
+
+
+def test_scan_percent_routes_fmt_int_and_variants_to_queue(tmp_path):
+    p = tmp_path / "c.qmd"
+    p.write_text(CELL.format(
+        assigns=("ok_str = fmt(acc, suffix='%')\n"
+                 "    int_str = fmt_int(rate, suffix='%')\n"
+                 "    sp_str = fmt(x, suffix=' %')"),
+        prose="x"), encoding="utf-8")
+    edits, queue = scan_percent(p)
+    assert [e.var for e in edits] == ["ok_str"]      # only the exact fmt('%')
+    assert all(q.kind == "percent" for q in queue)
+    assert len(queue) == 2                            # fmt_int + ' %' variant

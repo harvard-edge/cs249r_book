@@ -90,6 +90,112 @@ class QueueItem:
     action: str        # the human decision needed
 
 
+# percent suffix -> fmt_percent style that reproduces the SAME glyph/word.
+# (exact forms only; spacing variants like ' %' / 'percent' are queued)
+PERCENT_STYLE = {"%": "symbol", " percent": "prose"}
+
+_NEEDS_PAREN = (ast.BinOp, ast.BoolOp, ast.Compare, ast.UnaryOp, ast.IfExp, ast.Lambda)
+
+
+def _is_const_100(node) -> bool:
+    return isinstance(node, ast.Constant) and node.value == 100 and not isinstance(node.value, bool)
+
+
+def _ratio_source(arg, src: str) -> str | None:
+    """Source for the 0-1 ratio fmt_percent expects, given the already-scaled
+    fmt argument.
+
+    * ``ratio * 100`` / ``100 * ratio``  -> strip the scaling: pass ``ratio``.
+      The cleanest, most honest result (``fmt_percent(utilization, …)``), and
+      still byte-identical (fmt_percent multiplies it back by 100).
+    * anything else (a standalone ``foo_pct`` number, a literal, a call) ->
+      divide by 100, parenthesised only when precedence requires it.
+    """
+    if isinstance(arg, ast.BinOp) and isinstance(arg.op, ast.Mult):
+        inner = None
+        if _is_const_100(arg.right):
+            inner = arg.left
+        elif _is_const_100(arg.left):
+            inner = arg.right
+        if inner is not None:
+            return ast.get_source_segment(src, inner)
+    seg = ast.get_source_segment(src, arg)
+    if seg is None:
+        return None
+    return f"({seg})/100" if isinstance(arg, _NEEDS_PAREN) else f"{seg}/100"
+
+
+def _rewrite_percent(call, src: str) -> str | None:
+    """fmt(x, …, suffix='%'|' percent') -> fmt_percent(<ratio>, …, style=…).
+
+    Byte-identical by construction: the 0-1 ratio fmt_percent expects renders x
+    back with the same glyph ('%'->symbol) or word (' percent'->prose). Moves
+    percent into the guarded formatter (no 10,000% possible) with no change to
+    rendered output. Values above 150% trip fmt_percent's max_ratio guard ->
+    exec fails -> the byte-identical gate reverts and the site is queued.
+    """
+    seg = ast.get_source_segment(src, call) or ""
+    if "prefix=" in seg or not call.args:
+        return None
+    suffix = None
+    for kw in call.keywords:
+        if kw.arg == "suffix":
+            suffix = _const_str(kw.value)
+    if suffix not in PERCENT_STYLE:
+        return None
+    ratio = _ratio_source(call.args[0], src)
+    if ratio is None or "\n" in ratio:
+        return None
+    extra = ""
+    for kw in call.keywords:
+        if kw.arg == "precision":
+            extra += f", precision={ast.get_source_segment(src, kw.value)}"
+        elif kw.arg == "commas":
+            extra += f", commas={ast.get_source_segment(src, kw.value)}"
+    return f"fmt_percent({ratio}{extra}, style='{PERCENT_STYLE[suffix]}')"
+
+
+def scan_percent(path: Path):
+    """Return (percent_edits, queue) for the byte-identical percent lane."""
+    text = path.read_text(encoding="utf-8", errors="replace")
+    edits: list[MultEdit] = []
+    queue: list[QueueItem] = []
+    for fence_line, src in extract_python_cells(text):
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Call):
+                continue
+            call = node.value
+            fn = call.func
+            fname = fn.id if isinstance(fn, ast.Name) else (fn.attr if isinstance(fn, ast.Attribute) else None)
+            if fname not in ("fmt", "fmt_int"):
+                continue
+            suffix = None
+            for kw in call.keywords:
+                if kw.arg == "suffix":
+                    suffix = _const_str(kw.value)
+            if suffix is None:
+                continue
+            sfx = suffix.strip().lower()
+            if sfx not in ("%", "percent", "percentage", "%%"):
+                continue
+            var = _assign_target(node)
+            seg = ast.get_source_segment(src, call) or ""
+            file_line = fence_line + call.lineno
+            new = _rewrite_percent(call, src) if fname == "fmt" else None
+            if new and var:
+                edits.append(MultEdit(file_line, var, seg, new))
+            else:
+                queue.append(QueueItem(str(path), file_line, var, fname, suffix,
+                    "percent", seg.replace("\n", " ⏎ "),
+                    "non-exact percent suffix or fmt_int/prefix: convert by hand to "
+                    "fmt_percent((x)/100, style='symbol'|'prose') by context."))
+    return edits, queue
+
+
 def _rewrite_fmt_int_multiplier(call, src: str) -> str | None:
     """fmt_int(arg, …, suffix='×') → fmt_multiple(round(arg), precision=0, commas=…).
 
