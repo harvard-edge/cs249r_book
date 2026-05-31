@@ -25,6 +25,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -93,13 +94,16 @@ def process(path: Path, variants: bool = False) -> tuple[str, str]:
 
     # G-prose
     if variants:
-        # expected after = before with each old value string rewritten to new+'×'
+        # expected after = before with each old value string rewritten to new+'×'.
+        # Use numeric boundaries so a short value like '3x' does NOT match inside
+        # an unrelated longer rendering like '13.3x' (substring-collision guard).
         expected = {}
         for key, bp in before_prose.items():
             s = bp
             for ov, nv in changed.values():
-                if ov and ov in s:
-                    s = s.replace(ov, nv + "×")
+                if not ov:
+                    continue
+                s = re.sub(r"(?<![\w.])" + re.escape(ov) + r"(?![\w])", nv + "×", s)
             expected[key] = s
         mism = [k for k in expected if expected[k] != after_prose.get(k)]
         if mism:
