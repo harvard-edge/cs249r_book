@@ -53,6 +53,44 @@ Status:
 - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/codemod_fmt.py queue --root book/quarto/contents` PASS, `by kind: {}`
 - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_prose_semantics.py --root book/quarto/contents` PASS, 0 findings
 
+## 2026-05-31 — `vol1/hw_acceleration` physical-unit cleanup
+
+Change type: byte-identical formatter relocation. Replaced all 65 remaining
+physical-unit suffix sites in `hw_acceleration` with typed quantity formatters.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol1/hw_acceleration/hw_acceleration.qmd` | 65 | 255 | 140 | identical values + prose |
+
+Validation details:
+
+- Migrated accelerator bandwidth/throughput anchors, TPU/Gaudi/NVLink examples,
+  PFLOP/s dense/sparse displays, tensor/attention/conv/dense/layernorm memory
+  traffic, roofline bandwidth and TFLOP/s values, fusion memory traffic,
+  fixed-point examples, edge memory headroom, and CPU/NPU power and energy
+  examples.
+- TFLOP/s displays use `TFLOP / second`; PFLOP/s displays use checked
+  `unit_label="PFLOP/s"` because Pint's compact alias pluralizes that unit.
+- Existing grouped bandwidth/energy displays preserve `commas=True` where the
+  old `fmt(...)` default owned grouping.
+- `assess_equiv.py` baseline/snapshot/diff reported `IDENTICAL values` and
+  `IDENTICAL prose`.
+- `hw_acceleration` now has zero `suffix=` calls.
+- `audit_fmt_usage.py` reports `physical_unit` suffixes dropped 351 -> 286,
+  `fmt_qty` at 1013, and `fmt_qty_int` at 120.
+- Verification: `git diff --check` PASS; py_compile PASS for formatter,
+  math-canonical, and fmt audit modules; focused pytest suite PASS, 190 tests;
+  `fmt_prose_contract.py` PASS, 0 violations; `codemod_fmt.py queue` PASS,
+  `by kind: {}`; `./book/binder check math` PASS;
+  `./book/binder check code --scope lego-dead-code` PASS;
+  `audit_prose_semantics.py` PASS, 0 findings across 81 files.
+- HTML/PDF render evidence: not run yet. Full rendering is intentionally
+  deferred for the separate render/prose audit checkpoint.
+
+Status: non-render verified; render audit pending.
+
 ## 2026-05-31 — `vol2/distributed_training` physical-unit cleanup
 
 Change type: byte-identical formatter relocation. Replaced all 60 remaining
