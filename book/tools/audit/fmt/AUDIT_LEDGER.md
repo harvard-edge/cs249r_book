@@ -53,6 +53,41 @@ Status:
 - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/codemod_fmt.py queue --root book/quarto/contents` PASS, `by kind: {}`
 - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_prose_semantics.py --root book/quarto/contents` PASS, 0 findings
 
+## 2026-05-31 — `vol1/model_serving` physical-unit cleanup
+
+Change type: byte-identical formatter relocation. Replaced all 23 remaining
+physical-unit suffix sites in `model_serving` with typed quantity formatters.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol1/model_serving/model_serving.qmd` | 23 | 365 | 172 | identical values + prose |
+
+Validation details:
+
+- Migrated model-size and activation-memory displays, mobile energy in mJ,
+  model-swap PCIe bandwidth, battery Wh, precision-tradeoff memory, H100/A100
+  bandwidth anchors, Llama case-study model weight, and remaining VRAM.
+- Pedagogical scalar constants such as `10 GB`, `12 mJ`, and `10 Wh` now become
+  Pint quantities at load/output boundaries; scalar equation variables remain
+  where existing math strings consume them.
+- `assess_equiv.py` baseline/snapshot/diff reported `IDENTICAL values` and
+  `IDENTICAL prose`.
+- `model_serving` now has zero `suffix=` calls.
+- `audit_fmt_usage.py` reports `physical_unit` suffixes dropped 796 -> 773,
+  `fmt_qty` at 612, and `fmt_qty_int` at 34.
+- Verification: `git diff --check` PASS; py_compile PASS for formatter,
+  math-canonical, and fmt audit modules; focused pytest suite PASS, 190 tests;
+  `fmt_prose_contract.py` PASS, 0 violations; `codemod_fmt.py queue` PASS,
+  `by kind: {}`; `./book/binder check math` PASS;
+  `./book/binder check code --scope lego-dead-code` PASS;
+  `audit_prose_semantics.py` PASS, 0 findings across 81 files.
+- HTML/PDF render evidence: not run yet. Full rendering is intentionally
+  deferred for the separate render/prose audit checkpoint.
+
+Status: non-render verified; render audit pending.
+
 ## 2026-05-31 — `vol2/network_fabrics` physical-unit cleanup
 
 Change type: byte-identical formatter relocation. Replaced all 19 remaining
