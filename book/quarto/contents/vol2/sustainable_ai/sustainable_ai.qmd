@@ -1713,22 +1713,9 @@ Understanding how embodied carbon accumulates over time reveals why hardware uti
 ```{python}
 #| echo: false
 #| label: embodied-carbon-amort-calc
-from mlsysim.fmt import fmt_qty, fmt_time
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ EMBODIED CARBON AMORTIZATION (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-sustainable-ai-embodied-carbon-assessment-9de0
-# │
-# │ Goal: Quantify the hourly carbon "rent" of an H100 GPU and its impact
-# │       on total training footprint in clean vs dirty grids.
-# │ Show: ~$0.46 kg CO2 embodied cost for 10hr run; ~30--40% share in clean grids.
-# │ How: Hourly_amort = Mfg_cost / (lifetime_yrs * 8760).
-# │
-# │ Imports: mlsysim.core.constants (Hardware.Cloud.H100.tdp, kilowatt),
-# │          mlsysim.fmt (fmt, check — module-wide)
-# │ Exports: op_carbon_dirty_str, op_carbon_clean_str, embodied_carbon_job_str,
-# │          share_clean_pct_str, t_job_hr_str, n_gpus_str
-# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, fmt_qty, fmt_power, fmt_energy, fmt_emissions, fmt_time, fmt_percent, check
+from mlsysim.physics.quantities import energy_from_power, carbon_from_energy
+from mlsysim.core.units import kilowatt, kWh, kilogram, hour, gram
 
 # ┌── LEGO ───────────────────────────────────────────────
 class EmbodiedCarbonAmort:
@@ -1736,43 +1723,45 @@ class EmbodiedCarbonAmort:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     n_gpus = 8
-    h_h100_tdp_kw = Hardware.Cloud.H100.tdp.m_as(kilowatt)
-    t_job_hr = 10
-    mfg_carbon_per_gpu = 164 # kg CO2 (NVIDIA H100 product carbon footprint)
+    h100_tdp = Hardware.Cloud.H100.tdp
+    t_job = 10 * hour
+    mfg_carbon_per_gpu = 164 * kilogram  # NVIDIA H100 product carbon footprint (even split)
     lifetime_years = 3
-    ci_dirty = Infrastructure.Grids.US_Avg.carbon_intensity_kg_kwh
-    ci_clean = Infrastructure.Grids.Quebec.carbon_intensity_kg_kwh
+    ci_dirty = Infrastructure.Grids.US_Avg.carbon_intensity_kg_kwh * (kilogram / kWh)
+    ci_clean = Infrastructure.Grids.Quebec.carbon_intensity_kg_kwh * (kilogram / kWh)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    op_energy_kwh = n_gpus * h_h100_tdp_kw * t_job_hr
-    op_carbon_dirty = op_energy_kwh * ci_dirty
-    op_carbon_clean = op_energy_kwh * ci_clean
+    op_energy = energy_from_power(h100_tdp, t_job) * n_gpus
+    op_carbon_dirty = carbon_from_energy(op_energy.to(kWh), ci_dirty)
+    op_carbon_clean = carbon_from_energy(op_energy.to(kWh), ci_clean)
 
     total_mfg_carbon = n_gpus * mfg_carbon_per_gpu
     total_lifetime_hr = lifetime_years * DAYS_PER_YEAR * HOURS_PER_DAY
-    hourly_rent_kg = total_mfg_carbon/total_lifetime_hr
-    embodied_carbon_job = hourly_rent_kg * t_job_hr
+    hourly_rent_kg = (total_mfg_carbon / (total_lifetime_hr * hour)).to(kilogram / hour)
+    embodied_carbon_job = hourly_rent_kg * t_job
 
-    share_clean_pct = (embodied_carbon_job / (op_carbon_clean + embodied_carbon_job)) * 100
+    share_clean_pct = (
+        embodied_carbon_job / (op_carbon_clean + embodied_carbon_job)
+    ).to("").magnitude * 100
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(embodied_carbon_job < 1.0, f"Expected small amortized cost, got {embodied_carbon_job:.2f}")
+    check(embodied_carbon_job.to(kilogram).magnitude < 1.0, f"Expected small amortized cost, got {embodied_carbon_job.to(kilogram).magnitude:.2f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    h_h100_tdp_kw_str = fmt_qty(h_h100_tdp_kw * kilowatt, kilowatt, precision=1, commas=False)
-    op_energy_kwh_str = fmt_qty(op_energy_kwh * ureg.kilowatt_hour, ureg.kilowatt_hour, precision=0, commas=False)
-    ci_dirty_str = fmt(ci_dirty, precision=3, commas=False)
-    ci_clean_str = fmt(ci_clean, precision=3, commas=False)
-    mfg_carbon_per_gpu_str = fmt(mfg_carbon_per_gpu, precision=0, commas=False)
-    total_mfg_carbon_str = fmt(total_mfg_carbon, precision=0, commas=False)
+    h_h100_tdp_kw_str = fmt_power(h100_tdp, unit=kilowatt, precision=1, commas=False)
+    op_energy_kwh_str = fmt_energy(op_energy.to(kWh), precision=0, commas=False)
+    ci_dirty_str = fmt_qty(ci_dirty, kilogram / kWh, precision=3, commas=False)
+    ci_clean_str = fmt_qty(ci_clean, kilogram / kWh, precision=3, commas=False)
+    mfg_carbon_per_gpu_str = fmt_emissions(mfg_carbon_per_gpu, precision=0, commas=False)
+    total_mfg_carbon_str = fmt_emissions(total_mfg_carbon, precision=0, commas=False)
     lifetime_years_str = fmt_time(lifetime_years, 'year', precision=0, commas=False, style='word')
-    total_lifetime_hr_str = fmt_time(total_lifetime_hr, 'hour', precision=0, commas=False, style='word')
-    hourly_rent_kg_str = fmt(hourly_rent_kg, precision=3, commas=False)
-    op_carbon_dirty_str = fmt(op_carbon_dirty, precision=1, commas=False)
-    op_carbon_clean_str = fmt(op_carbon_clean, precision=1, commas=False)
-    embodied_carbon_job_str = fmt(embodied_carbon_job, precision=2, commas=False)
+    total_lifetime_hr_str = fmt_time(total_lifetime_hr * hour, hour, precision=0, commas=False, style='word')
+    hourly_rent_kg_str = fmt_emissions(hourly_rent_kg.to(kilogram / hour), unit=kilogram / hour, precision=3, commas=False)
+    op_carbon_dirty_str = fmt_emissions(op_carbon_dirty.to(kilogram), precision=1, commas=False)
+    op_carbon_clean_str = fmt_emissions(op_carbon_clean.to(kilogram), precision=1, commas=False)
+    embodied_carbon_job_str = fmt_emissions(embodied_carbon_job.to(kilogram), precision=2, commas=False)
     share_clean_pct_str = fmt_percent(share_clean_pct/100, precision=1, commas=False, style='prose')
-    t_job_hr_str = fmt_time(t_job_hr, 'hour', precision=0, commas=False, style='word')
+    t_job_hr_str = fmt_time(t_job, hour, precision=0, commas=False, style='word')
     n_gpus_str = fmt(n_gpus, precision=0, commas=False)
 ```
 
@@ -1785,13 +1774,13 @@ $$C_{\text{total}} = C_{\text{operational}} + \left( \frac{C_{\text{manufacturin
 
 **Scenario**: Training a model for `{python} EmbodiedCarbonAmort.t_job_hr_str` on `{python} EmbodiedCarbonAmort.n_gpus_str` NVIDIA H100s.
 
-*   **Operational**: `{python} EmbodiedCarbonAmort.n_gpus_str` $\times$ `{python} EmbodiedCarbonAmort.h_h100_tdp_kw_str` $\times$ `{python} EmbodiedCarbonAmort.t_job_hr_str` h = `{python} EmbodiedCarbonAmort.op_energy_kwh_str`. At `{python} EmbodiedCarbonAmort.ci_dirty_str` kg/kWh (US-average grid) = `{python} EmbodiedCarbonAmort.op_carbon_dirty_str` kg CO~2~.
-*   **Embodied**: `{python} EmbodiedCarbonAmort.n_gpus_str` $\times$ `{python} EmbodiedCarbonAmort.mfg_carbon_per_gpu_str` kg/GPU = `{python} EmbodiedCarbonAmort.total_mfg_carbon_str` kg total.
+*   **Operational**: `{python} EmbodiedCarbonAmort.n_gpus_str` $\times$ `{python} EmbodiedCarbonAmort.h_h100_tdp_kw_str` $\times$ `{python} EmbodiedCarbonAmort.t_job_hr_str` = `{python} EmbodiedCarbonAmort.op_energy_kwh_str`. At `{python} EmbodiedCarbonAmort.ci_dirty_str` (US-average grid) = `{python} EmbodiedCarbonAmort.op_carbon_dirty_str`.
+*   **Embodied**: `{python} EmbodiedCarbonAmort.n_gpus_str` $\times$ `{python} EmbodiedCarbonAmort.mfg_carbon_per_gpu_str` = `{python} EmbodiedCarbonAmort.total_mfg_carbon_str`.
 *   **Amortization**: Lifetime = `{python} EmbodiedCarbonAmort.lifetime_years_str` (`{python} EmbodiedCarbonAmort.total_lifetime_hr_str`).
-    *   Hourly "Rent" = `{python} EmbodiedCarbonAmort.total_mfg_carbon_str` / `{python} EmbodiedCarbonAmort.total_lifetime_hr_str` $\approx$ `{python} EmbodiedCarbonAmort.hourly_rent_kg_str` kg/hour.
-    *   Job Cost = `{python} EmbodiedCarbonAmort.hourly_rent_kg_str` $\times$ `{python} EmbodiedCarbonAmort.t_job_hr_str` = `{python} EmbodiedCarbonAmort.embodied_carbon_job_str` kg CO~2~.
+    *   Hourly "Rent" = `{python} EmbodiedCarbonAmort.total_mfg_carbon_str` / `{python} EmbodiedCarbonAmort.total_lifetime_hr_str` $\approx$ `{python} EmbodiedCarbonAmort.hourly_rent_kg_str`.
+    *   Job Cost = `{python} EmbodiedCarbonAmort.hourly_rent_kg_str` $\times$ `{python} EmbodiedCarbonAmort.t_job_hr_str` = `{python} EmbodiedCarbonAmort.embodied_carbon_job_str`.
 
-**Systems insight**: For long-lived hardware in dirty grids, electricity dominates (`{python} EmbodiedCarbonAmort.op_carbon_dirty_str` vs. `{python} EmbodiedCarbonAmort.embodied_carbon_job_str`). However, in clean grids (hydro, `{python} EmbodiedCarbonAmort.ci_clean_str` kg/kWh), operational drops to `{python} EmbodiedCarbonAmort.op_carbon_clean_str` kg, making embodied carbon a significant fraction (~`{python} EmbodiedCarbonAmort.share_clean_pct_str`) of the total footprint.
+**Systems insight**: For long-lived hardware in dirty grids, electricity dominates (`{python} EmbodiedCarbonAmort.op_carbon_dirty_str` vs. `{python} EmbodiedCarbonAmort.embodied_carbon_job_str`). However, in clean grids (hydro, `{python} EmbodiedCarbonAmort.ci_clean_str`), operational drops to `{python} EmbodiedCarbonAmort.op_carbon_clean_str`, making embodied carbon a significant fraction (~`{python} EmbodiedCarbonAmort.share_clean_pct_str`) of the total footprint.
 
 :::
 
@@ -1801,26 +1790,31 @@ $$C_{\text{total}} = C_{\text{operational}} + \left( \frac{C_{\text{manufacturin
 # │ Context: Embodied carbon amortization prose below.
 # │ Goal: Recap embodied-carbon inputs for the training-run example.
 # │ Exports: TrainingEmbodiedRecap.*
-from mlsysim.fmt import fmt
+from mlsysim.fmt import fmt, fmt_emissions, fmt_percent
+from mlsysim.physics.quantities import energy_from_power, carbon_from_energy
+from mlsysim.core.units import hour, kWh, gram, kilogram, metric_ton, watt
 
 class TrainingEmbodiedRecap:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     n_gpus = 64
     training_days = 14
-    gpu_power_w = Hardware.Cloud.A100.tdp.m_as(watt)
+    training_duration = training_days * HOURS_PER_DAY * hour
+    a100_tdp = Hardware.Cloud.A100.tdp
     us_grid = Infrastructure.Grids.US_Avg
     quebec_grid = Infrastructure.Grids.Quebec
     pue = us_grid.pue
-    grid_ci_g_per_kwh = us_grid.carbon_intensity_g_kwh
-    quebec_ci = quebec_grid.carbon_intensity_g_kwh
+    grid_ci = us_grid.carbon_intensity_g_kwh * (gram / kWh)
+    quebec_ci = quebec_grid.carbon_intensity_g_kwh * (gram / kWh)
     embodied_kg_per_accelerator = 164
     embodied_lifetime_years = 4
     days_per_year = DAYS_PER_YEAR
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    gpu_energy_kwh = (n_gpus * gpu_power_w * training_days * HOURS_PER_DAY * watt * hour).m_as(ureg.kilowatt_hour)
+    gpu_energy_kwh = (energy_from_power(a100_tdp, training_duration) * n_gpus).to(kWh)
     facility_energy_kwh = gpu_energy_kwh * pue
-    emissions_kg = facility_energy_kwh * grid_ci_g_per_kwh / THOUSAND
-    quebec_emissions_kg = facility_energy_kwh * quebec_ci / THOUSAND
+    total_carbon = carbon_from_energy(facility_energy_kwh, grid_ci)
+    quebec_carbon = carbon_from_energy(facility_energy_kwh, quebec_ci)
+    emissions_kg = total_carbon.to(kilogram).magnitude
+    quebec_emissions_kg = quebec_carbon.to(kilogram).magnitude
     embodied_daily_kg = embodied_kg_per_accelerator / (embodied_lifetime_years * days_per_year)
     embodied_training_kg = n_gpus * training_days * embodied_daily_kg
     embodied_us_ratio_pct = embodied_training_kg / emissions_kg * 100
@@ -1832,11 +1826,11 @@ class TrainingEmbodiedRecap:
     embodied_daily_kg_str = fmt(embodied_daily_kg, precision=3, commas=False)
     n_gpus_str = fmt(n_gpus, precision=0, commas=False)
     training_days_str = fmt(training_days, precision=0, commas=False)
-    embodied_training_kg_str = fmt(embodied_training_kg, precision=1)
+    embodied_training_kg_str = fmt_emissions(embodied_training_kg * kilogram, precision=1)
     embodied_us_ratio_pct_str = fmt_percent(embodied_us_ratio_pct/100, precision=1, commas=False, style='prose')
     embodied_quebec_total_share_pct_str = fmt_percent(embodied_quebec_total_share_pct/100, precision=1, commas=False, style='prose')
-    emissions_kg_str = fmt(emissions_kg, precision=1)
-    quebec_emissions_kg_str = fmt(quebec_emissions_kg, precision=1)
+    emissions_kg_str = fmt_emissions(total_carbon.to(kilogram), precision=1)
+    quebec_emissions_kg_str = fmt_emissions(quebec_carbon.to(kilogram), precision=1)
 ```
 
 For an accelerator with `{python} TrainingEmbodiedRecap.embodied_kg_per_accelerator_str` kg embodied carbon (per NVIDIA's product carbon footprint) and a `{python} TrainingEmbodiedRecap.embodied_lifetime_years_str`-year data center lifetime:
@@ -1886,7 +1880,9 @@ The carbon-lifecycle breakdown in @fig-carbon-lifecycle shows training dominatin
 # │ Imports: mlsysim.fmt
 # │ Exports: InferenceLifecycleExample.*_str values for lifecycle prose.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_count, fmt_int, fmt_qty
+from mlsysim.fmt import check, fmt, fmt_count, fmt_int, fmt_qty, fmt_energy, fmt_emissions
+from mlsysim.physics.quantities import energy_from_power, carbon_from_energy
+from mlsysim.core.units import hour, kWh, kilogram, metric_ton, gram, watt
 
 # ┌── LEGO ───────────────────────────────────────────────
 class InferenceLifecycleExample:
@@ -1894,41 +1890,44 @@ class InferenceLifecycleExample:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     queries_per_day = 10_000_000
-    kwh_per_query = 0.001
+    kwh_per_query = 0.001 * kWh  # pedagogical per-query energy
     days_per_year = DAYS_PER_YEAR
     us_grid = Infrastructure.Grids.US_Avg
-    grid_ci_kg_per_kwh = us_grid.carbon_intensity_kg_kwh
+    grid_ci = us_grid.carbon_intensity_kg_kwh * (kilogram / kWh)
     n_gpus = 64
     training_days = 14
-    gpu_power_w = Hardware.Cloud.A100.tdp.m_as(watt)
+    training_duration = training_days * HOURS_PER_DAY * hour
+    a100_tdp = Hardware.Cloud.A100.tdp
     pue = us_grid.pue
-    grid_ci_g_per_kwh = us_grid.carbon_intensity_g_kwh
-    gpu_energy_kwh = (n_gpus * gpu_power_w * training_days * HOURS_PER_DAY * watt * hour).m_as(ureg.kilowatt_hour)
+    gpu_energy_kwh = (energy_from_power(a100_tdp, training_duration) * n_gpus).to(kWh)
     facility_energy_kwh = gpu_energy_kwh * pue
-    training_emissions_kg = facility_energy_kwh * grid_ci_g_per_kwh / THOUSAND
+    training_carbon = carbon_from_energy(
+        facility_energy_kwh, us_grid.carbon_intensity_g_kwh * (gram / kWh)
+    )
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    daily_energy_kwh = queries_per_day * kwh_per_query
-    annual_energy_kwh = daily_energy_kwh * days_per_year
-    annual_emissions_kg = annual_energy_kwh * grid_ci_kg_per_kwh
-    annual_emissions_tonnes = annual_emissions_kg / THOUSAND
-    daily_emissions_kg = daily_energy_kwh * grid_ci_kg_per_kwh
-    crossover_days = training_emissions_kg / daily_emissions_kg
+    daily_energy = queries_per_day * kwh_per_query
+    annual_energy = daily_energy * days_per_year
+    annual_carbon = carbon_from_energy(annual_energy, grid_ci)
+    daily_carbon = carbon_from_energy(daily_energy, grid_ci)
+    crossover_days = (
+        training_carbon.to(kilogram).magnitude / daily_carbon.to(kilogram).magnitude
+    )
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(annual_emissions_tonnes > 1500, f"Unexpected annual inference tCO2: {annual_emissions_tonnes:.1f}")
+    check(annual_carbon.to(metric_ton).magnitude > 1500, f"Unexpected annual inference tCO2: {annual_carbon.to(metric_ton).magnitude:.1f}")
     check(crossover_days < 2, f"Expected crossover under 2 days, got {crossover_days:.2f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     queries_per_day_str = fmt_count(
         queries_per_day, scale="M", precision=0, commas=False, scale_style="word"
     )
-    kwh_per_query_str = fmt_qty(kwh_per_query * ureg.kilowatt_hour, ureg.kilowatt_hour, precision=3, commas=False)
-    daily_energy_kwh_str = fmt_qty(daily_energy_kwh * ureg.kilowatt_hour, ureg.kilowatt_hour, precision=0, commas=True)
-    annual_energy_kwh_str = fmt_qty(annual_energy_kwh * ureg.kilowatt_hour, ureg.kilowatt_hour, precision=0, commas=True)
-    grid_ci_kg_per_kwh_str = fmt(grid_ci_kg_per_kwh, precision=3, commas=False)
-    annual_emissions_kg_str = fmt(annual_emissions_kg, precision=0)
-    annual_emissions_tonnes_str = fmt(annual_emissions_tonnes, precision=1)
+    kwh_per_query_str = fmt_energy(kwh_per_query, precision=3, commas=False)
+    daily_energy_kwh_str = fmt_energy(daily_energy, precision=0, commas=True)
+    annual_energy_kwh_str = fmt_energy(annual_energy, precision=0, commas=True)
+    grid_ci_kg_per_kwh_str = fmt_qty(grid_ci, kilogram / kWh, precision=3, commas=False)
+    annual_emissions_kg_str = fmt_emissions(annual_carbon.to(kilogram), precision=0)
+    annual_emissions_tonnes_str = fmt_emissions(annual_carbon.to(metric_ton), precision=1)
     days_per_year_str = fmt(days_per_year, precision=0, commas=False)
     crossover_days_str = fmt_int(round(crossover_days), commas=False)
 ```
@@ -1941,27 +1940,31 @@ For models deployed at scale, inference emissions often dominate the lifecycle.
 # │ Context: Inference lifecycle crossover prose below.
 # │ Goal: Recap training emissions total for inference crossover comparison.
 # │ Exports: TrainingEmissionsRecap.emissions_tons_str
+from mlsysim.physics.quantities import energy_from_power, carbon_from_energy
+from mlsysim.core.units import hour, kWh, gram, metric_ton
+
 class TrainingEmissionsRecap:
     n_gpus = 64
     training_days = 14
-    gpu_power_w = Hardware.Cloud.A100.tdp.m_as(watt)
+    training_duration = training_days * HOURS_PER_DAY * hour
+    a100_tdp = Hardware.Cloud.A100.tdp
     us_grid = Infrastructure.Grids.US_Avg
     pue = us_grid.pue
-    grid_ci_g_per_kwh = us_grid.carbon_intensity_g_kwh
-    gpu_energy_kwh = (n_gpus * gpu_power_w * training_days * HOURS_PER_DAY * watt * hour).m_as(ureg.kilowatt_hour)
+    gpu_energy_kwh = (energy_from_power(a100_tdp, training_duration) * n_gpus).to(kWh)
     facility_energy_kwh = gpu_energy_kwh * pue
-    emissions_kg = facility_energy_kwh * grid_ci_g_per_kwh / THOUSAND
-    emissions_tons = emissions_kg / THOUSAND
-    from mlsysim.fmt import fmt
+    total_carbon = carbon_from_energy(
+        facility_energy_kwh, us_grid.carbon_intensity_g_kwh * (gram / kWh)
+    )
+    from mlsysim.fmt import fmt_emissions
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    emissions_tons_str = fmt(emissions_tons, precision=1, commas=False)
+    emissions_tons_str = fmt_emissions(total_carbon.to(metric_ton), precision=1, commas=False)
 ```
 
 Consider a model serving `{python} InferenceLifecycleExample.queries_per_day_str` queries per day at `{python} InferenceLifecycleExample.kwh_per_query_str` per query. The annual inference energy and emissions break down as follows:
 
 - Daily energy: `{python} InferenceLifecycleExample.queries_per_day_str` queries $\times$ `{python} InferenceLifecycleExample.kwh_per_query_str` = `{python} InferenceLifecycleExample.daily_energy_kwh_str`
 - Annual energy: `{python} InferenceLifecycleExample.daily_energy_kwh_str` $\times$ `{python} InferenceLifecycleExample.days_per_year_str` days = `{python} InferenceLifecycleExample.annual_energy_kwh_str`
-- Annual emissions (US grid): `{python} InferenceLifecycleExample.annual_energy_kwh_str` $\times$ `{python} InferenceLifecycleExample.grid_ci_kg_per_kwh_str` kg/kWh = `{python} InferenceLifecycleExample.annual_emissions_kg_str` kg = `{python} InferenceLifecycleExample.annual_emissions_tonnes_str` metric tons CO~2~
+- Annual emissions (US grid): `{python} InferenceLifecycleExample.annual_energy_kwh_str` $\times$ `{python} InferenceLifecycleExample.grid_ci_kg_per_kwh_str` = `{python} InferenceLifecycleExample.annual_emissions_kg_str` = `{python} InferenceLifecycleExample.annual_emissions_tonnes_str`
 
 Compared with the 7B/64-A100 training example above (`{python} TrainingEmissionsRecap.emissions_tons_str` metric tons), cumulative inference emissions exceed training emissions after approximately `{python} InferenceLifecycleExample.crossover_days_str` day of deployment at this scale. For frontier-scale training runs, the crossover can shift to weeks or months depending on query volume, per-query energy, and grid intensity.
 
@@ -2407,35 +2410,32 @@ Stage 5: Voltage Regulators. On the baseboard, voltage regulator modules (VRMs) 
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt_count, fmt_qty, fmt_qty_int
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: H100TdpRackRecap.tdp_str, H100TdpRackRecap.cluster_gpus_str,
-# │          H100TdpRackRecap.comm_phase_w_str, H100TdpRackRecap.power_delta_w_str,
-# │          H100TdpRackRecap.power_delta_kw_str, H100TdpRackRecap.transition_us_str,
-# │          H100TdpRackRecap.power_rate_gws_str
+from mlsysim.fmt import fmt, fmt_count, fmt_power, fmt_qty, fmt_qty_int
+from mlsysim.core.units import watt, kilowatt, microsecond, count
+
 class H100TdpRackRecap:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    gpu_tdp_w = Hardware.Cloud.H100.tdp.m_as(watt)
+    gpu_tdp = Hardware.Cloud.H100.tdp
     cluster_gpus = Systems.Clusters.Training_1K.total_accelerators
-    comm_phase_w = 400
-    transition_us = 100
+    comm_phase = 400 * watt  # pedagogical idle/sync draw during AllReduce
+    transition = 100 * microsecond
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    power_delta_w = gpu_tdp_w - comm_phase_w
-    power_delta_kw = power_delta_w * cluster_gpus / THOUSAND
-    power_rate_gws = power_delta_w * cluster_gpus / (transition_us / MILLION) / BILLION
+    power_delta = gpu_tdp - comm_phase
+    cluster_power_delta = power_delta * cluster_gpus
+    power_rate = cluster_power_delta / transition
 
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(power_delta_kw > 300, "Power ramp should exceed 300 kW")
+    check(cluster_power_delta.to(kilowatt).magnitude > 300, "Power ramp should exceed 300 kW")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    tdp_str = fmt_qty(gpu_tdp_w * watt, watt, precision=0, commas=False)
+    tdp_str = fmt_power(gpu_tdp, precision=0, commas=False)
     cluster_gpus_str = fmt(cluster_gpus, precision=0, commas=False)
-    comm_phase_w_str = fmt(comm_phase_w, precision=0, commas=False)
-    power_delta_w_str = fmt(power_delta_w, precision=0, commas=False)
-    power_delta_kw_str = fmt_qty_int(power_delta_kw * kilowatt, kilowatt, commas=False)
-    transition_us_str = fmt(transition_us, precision=0, commas=False)
-    power_rate_gws_str = fmt_qty(power_rate_gws * ureg.gigawatt / second, ureg.gigawatt / second, precision=2, commas=False)
+    comm_phase_w_str = fmt_power(comm_phase, precision=0, commas=False)
+    power_delta_w_str = fmt_power(power_delta, precision=0, commas=False)
+    power_delta_kw_str = fmt_qty_int(cluster_power_delta.to(kilowatt), kilowatt, commas=False)
+    transition_us_str = fmt(transition.to(microsecond).magnitude, precision=0, commas=False)
+    power_rate_gws_str = fmt_qty(power_rate.to(ureg.gigawatt / second), ureg.gigawatt / second, precision=2, commas=False)
     node_power_budget_kw_str = fmt_qty(7.0 * kilowatt, kilowatt, precision=0, commas=False)
     node_gpus_str = fmt_count(Systems.Nodes.DGX_H100.accelerators_per_node, commas=False, label="GPU")
     node_gpu_only_kw_str = fmt_qty(Hardware.Cloud.H100.tdp * Systems.Nodes.DGX_H100.accelerators_per_node, kilowatt, precision=1, commas=False)
