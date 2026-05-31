@@ -104,9 +104,15 @@ def _rewrite_call_to_multiple(seg: str) -> str | None:
         return None
     if not seg.lstrip().startswith("fmt("):
         return None
+    if "prefix=" in seg:
+        return None  # fmt_multiple has no prefix= — not a clean rewrite
     new = re.sub(r"^fmt\(", "fmt_multiple(", seg, count=1)
     # drop the suffix kwarg (always comma-preceded; positional factor comes first)
     new = re.sub(r",\s*suffix\s*=\s*(?:'[^']*'|\"[^\"]*\")", "", new, count=1)
+    # fmt defaults commas=True but fmt_multiple defaults commas=False; if the
+    # original relied on the default, pin commas=True so grouping is preserved.
+    if "commas=" not in new and new.endswith(")"):
+        new = new[:-1] + ", commas=True)"
     return new
 
 
@@ -141,7 +147,8 @@ def scan_file(path: Path):
             file_line = fence_line + call.lineno
             sfx = suffix.strip()
 
-            if sfx in {g.strip() for g in MULT_GLYPHS} and sfx:
+            if suffix == "×":
+                # exact glyph only — the provable auto lane
                 new = _rewrite_call_to_multiple(seg)
                 if new and var:
                     mult_edits.append(MultEdit(file_line, var, seg, new))
@@ -156,6 +163,13 @@ def scan_file(path: Path):
                     queue.append(QueueItem(str(path), file_line, var, fname, suffix,
                         "multiline-multiplier", seg.replace("\n", " ⏎ "),
                         "Convert by hand to fmt_multiple(...) + add $\\times$ in prose."))
+            elif sfx in {"×", "x", "X"}:
+                # space-padded glyph (' ×') or a LITERAL letter x — ambiguous;
+                # never auto-touch (x could be a variable/axis; spacing differs).
+                queue.append(QueueItem(str(path), file_line, var, fname, suffix,
+                    "multiplier-variant", seg.replace("\n", " ⏎ "),
+                    f"suffix={suffix!r}: confirm it is a multiplier, then "
+                    "fmt_multiple(...) + $\\times$ in prose (drop the literal x/space)."))
             elif sfx in {g.strip() for g in PERCENT_GLYPHS}:
                 queue.append(QueueItem(str(path), file_line, var, fname, suffix,
                     "percent", seg.replace("\n", " ⏎ "),

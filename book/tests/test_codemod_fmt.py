@@ -24,6 +24,21 @@ def test_multiline_call_declined():
     assert _rewrite_call_to_multiple("fmt(x,\n    suffix='×')") is None
 
 
+def test_commas_true_injected_when_omitted():
+    # fmt defaults commas=True; fmt_multiple defaults commas=False -> must pin
+    assert _rewrite_call_to_multiple("fmt(x, suffix='×')") == "fmt_multiple(x, commas=True)"
+
+
+def test_explicit_commas_false_preserved():
+    out = _rewrite_call_to_multiple("fmt(x, commas=False, suffix='×')")
+    assert out == "fmt_multiple(x, commas=False)"
+
+
+def test_prefix_call_declined():
+    # fmt_multiple has no prefix= -> not a clean rewrite
+    assert _rewrite_call_to_multiple("fmt(x, prefix='~', suffix='×')") is None
+
+
 # --- the prose patch (position-based, handles repeats) -------------------------
 
 def test_prose_patch_single_ref():
@@ -89,3 +104,15 @@ def test_percent_and_scale_go_to_queue_not_rewritten(tmp_path):
     # only the multiplier is auto-rewritten
     assert [e.var for e in edits] == ["sp_str"]
     assert mult_vars == {"sp_str"}
+
+
+def test_literal_x_and_space_glyph_go_to_queue_not_auto(tmp_path):
+    p = tmp_path / "c.qmd"
+    p.write_text(CELL.format(
+        assigns=("xx_str = fmt(ratio, suffix='x')\n"
+                 "    sp_str = fmt(speedup, suffix=' ×')"),
+        prose="x"), encoding="utf-8")
+    edits, mult_vars, queue = scan_file(p)
+    assert edits == []  # neither auto-rewritten
+    assert all(q.kind == "multiplier-variant" for q in queue)
+    assert len(queue) == 2
