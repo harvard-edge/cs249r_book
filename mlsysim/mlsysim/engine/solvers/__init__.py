@@ -1,31 +1,56 @@
-"""Domain-oriented solver import paths.
+"""Domain-oriented MLSysIM solver implementations."""
 
-The public ``mlsysim.engine.solver`` module remains backward compatible. These
-modules provide stable homes for gradual extraction of the large solver file.
-"""
-
-from .distributed import DistributedModel, NetworkRooflineModel, ParallelismOptimizer
-from .economics import EconomicsModel, SustainabilityModel
+from .base import BaseModel, BaseOptimizer, BaseResolver, BaseSolver, ForwardModel
+from .compression import CompressionModel
+from .data import DataModel, TransformationModel
+from .distributed import DistributedModel, MoERoutingModel, ParallelismOptimizer, TopologyModel
+from .economics import EconomicsModel, PlacementOptimizer, ResponsibleEngineeringModel, SustainabilityModel
+from .orchestration import OrchestrationModel
+from .performance import EfficiencyModel, NetworkRooflineModel, SensitivitySolver, SingleNodeModel, SynthesisSolver
+from .reliability import ReliabilityModel
 from .serving import (
+    BatchingOptimizer,
     ContinuousBatchingModel,
+    InferenceScalingModel,
     ServingCapacityModel,
     ServingModel,
     TailLatencyModel,
     WeightStreamingModel,
 )
-from .training import CheckpointModel, TrainingMemoryModel
+from .training import CheckpointModel, ScalingModel, TrainingMemoryModel
 
 __all__ = [
-    "CheckpointModel",
-    "ContinuousBatchingModel",
-    "DistributedModel",
-    "EconomicsModel",
+    "BaseResolver",
+    "ForwardModel",
+    "BaseModel",
+    "BaseSolver",
+    "BaseOptimizer",
+    "SingleNodeModel",
     "NetworkRooflineModel",
+    "EfficiencyModel",
+    "SensitivitySolver",
+    "SynthesisSolver",
+    "DistributedModel",
+    "MoERoutingModel",
+    "TopologyModel",
     "ParallelismOptimizer",
-    "ServingCapacityModel",
-    "ServingModel",
-    "SustainabilityModel",
-    "TailLatencyModel",
+    "ReliabilityModel",
+    "CheckpointModel",
     "TrainingMemoryModel",
+    "ScalingModel",
+    "ServingModel",
+    "ServingCapacityModel",
+    "ContinuousBatchingModel",
     "WeightStreamingModel",
+    "TailLatencyModel",
+    "InferenceScalingModel",
+    "BatchingOptimizer",
+    "SustainabilityModel",
+    "EconomicsModel",
+    "ResponsibleEngineeringModel",
+    "PlacementOptimizer",
+    "DataModel",
+    "TransformationModel",
+    "OrchestrationModel",
+    "CompressionModel",
 ]
