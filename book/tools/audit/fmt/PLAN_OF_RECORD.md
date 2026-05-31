@@ -48,7 +48,23 @@ arguments:
 Legacy `suffix=` can remain temporarily for migration compatibility, but QMD
 uses are counted, audited, and eventually blocked.
 
-## 4. Count labels
+## 4. Formatter defaults
+
+Semantic formatters should own the default display policy for their value kind.
+That includes comma grouping. The intended direction is:
+
+- `fmt_usd`, `fmt_count`, and service-rate helpers such as `fmt_rate` default to
+  grouped large numbers.
+- compact physical/time quantities, percentages, percentage points, ratios, and
+  multipliers default to no grouping unless a specific callsite benefits from it.
+- explicit `commas=` in QMD should mean "this site intentionally overrides the
+  formatter's semantic default," not "the formatter cannot decide."
+
+During migration, keep explicit `commas=` when needed to prove byte-identical
+output. After each semantic lane is stable, run a cleanup audit that removes
+redundant `commas=` arguments and leaves only intentional overrides.
+
+## 5. Count labels
 
 `fmt_count` is the one intentionally string-bearing helper because the noun is
 domain-specific. The label API is strict:
@@ -64,7 +80,7 @@ domain-specific. The label API is strict:
 If one noun becomes frequent and mistake-prone, add a thin wrapper such as
 `fmt_gpus(n)` only after the audit shows that it removes real risk.
 
-## 5. Pint boundary
+## 6. Pint boundary
 
 For physical quantities, keep Pint attached until the formatter whenever
 practical. `.m_as(...)` is fine for calculations, guards, ratios, or legacy
@@ -84,7 +100,7 @@ Plain scalar unit sites are not blindly fabricated into Quantities. They are
 either refactored to carry a Quantity, migrated to a typed scalar helper such as
 `fmt_time`/`fmt_rate`, or documented as an exception.
 
-## 6. Migration lanes
+## 7. Migration lanes
 
 Work by semantic bucket, not by string replacement:
 
@@ -99,7 +115,7 @@ Work by semantic bucket, not by string replacement:
 
 Every batch must keep the static and semantic gates clean.
 
-## 7. Validation policy
+## 8. Validation policy
 
 There are two audit scopes.
 
@@ -134,7 +150,7 @@ the cell was touched. The final audit must confirm:
 This audit is separate from source cleanup. Static checks are necessary but not
 sufficient.
 
-## 8. Done criteria
+## 9. Done criteria
 
 The migration is done only when:
 

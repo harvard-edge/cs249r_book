@@ -197,14 +197,19 @@ PASS (161 tests); `fmt_prose_contract` 0; `codemod_fmt queue` empty;
 substituted prose semantic audit CLEAN across 81 files.
 
 **NEXT:**
-1. Continue the semantic non-Quantity lanes: count labels, any remaining
-   non-physical rates, and time values. Add entries to `AUDIT_LEDGER.md` for
-   every touched LEGO cell.
-2. Continue WS4 with `run_unit_lane.py` chapter-sized batches. Highest remaining
+1. Add a formatter-default cleanup pass after the semantic lanes: each
+   formatter should own comma defaults by value kind, and explicit `commas=`
+   in QMD should remain only when it is an intentional override. During
+   byte-identical migration, preserve explicit `commas=` first; remove
+   redundant arguments only after equivalence is proven.
+2. Continue the semantic non-Quantity lanes: any remaining non-physical rates
+   and time values. Add entries to `AUDIT_LEDGER.md` for every touched LEGO
+   cell.
+3. Continue WS4 with `run_unit_lane.py` chapter-sized batches. Highest remaining
    clean counts: `vol2/backmatter/appendix_fleet` (14), `vol2/ops_scale` (14),
    `vol1/hw_acceleration` (11), `vol1/introduction` (11),
    `vol2/network_fabrics` (11), `vol2/performance_engineering` (11).
-3. Render-verify any newly changed chapters before Phase 3B/PDF sign-off.
+4. Render-verify any newly changed chapters before Phase 3B/PDF sign-off.
 
 Gates to keep green (run all three):
 - fmt_prose_contract.py --root book/quarto/contents  → 0

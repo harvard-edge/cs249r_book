@@ -163,6 +163,15 @@ suffix is the documented `GPU-days` compound. Verification: py_compile PASS,
 PASS (161 tests), prose-contract 0, semantic audit 0 findings, codemod queue
 empty.
 
+**A10 — Formatter comma-default cleanup: TODO.**
+User raised a design concern that `commas=` should usually be owned by each
+semantic formatter, not repeated at the top-level callsite. The plan of record
+now says to preserve explicit `commas=` during byte-identical migration, then
+run a cleanup pass that removes redundant `commas=` arguments and leaves only
+intentional overrides. Expected defaults: currency/count/rate helpers group
+large numbers; compact physical/time quantities, percentages, percentage
+points, ratios, and multipliers default to no grouping unless overridden.
+
 ### B. WS4 — unit-suffix lane (~2,393 sites: `GB`/`ms`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.
