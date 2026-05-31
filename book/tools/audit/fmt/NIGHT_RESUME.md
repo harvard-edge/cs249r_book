@@ -294,6 +294,15 @@ focused pytest suite PASS (167 tests); `fmt_prose_contract` 0;
 `codemod_fmt queue` empty; substituted prose semantic audit CLEAN across 81
 files.
 
+**NOW done:** `vol1/ml_workflow` time suffixes — migrated all 10 `time_unit`
+suffix sites to `fmt_time(...)`, finishing that chapter's exact time suffix
+bucket. `assess_equiv` stayed byte-identical across 77 value exports and 36
+substituted prose lines. `audit_fmt_usage.py` now reports 126 `fmt_time` calls
+and the `time_unit` suffix bucket down to 522. Verification: py_compile PASS;
+`git diff --check` PASS; `./book/binder check math` PASS; focused pytest suite
+PASS (167 tests); `fmt_prose_contract` 0; `codemod_fmt queue` empty;
+substituted prose semantic audit CLEAN across 81 files.
+
 **NEXT:**
 1. Add a formatter-default cleanup pass after the semantic lanes: each
    formatter should own comma defaults by value kind, and explicit `commas=`
