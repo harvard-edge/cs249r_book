@@ -219,6 +219,18 @@ math` PASS; focused pytest suite PASS (161 tests); `fmt_prose_contract` 0;
 `codemod_fmt queue` empty; substituted prose semantic audit CLEAN across 81
 files.
 
+**NOW done:** `vol1/ml_systems` time suffixes — migrated all 24 `time_unit`
+suffix sites to `fmt_time(...)`, finishing that chapter's time suffix bucket.
+This also hardened `fmt_time(style="word")` for Pint's canonical `year` alias
+(`a`), used `allow_negative=True` for the negative latency-headroom string, and
+kept an explicit `commas=True` override for the one grouped millisecond value.
+`assess_equiv` stayed byte-identical across 296 value exports and 143
+substituted prose lines. `audit_fmt_usage.py` now reports 56 `fmt_time` calls
+and the `time_unit` suffix bucket down to 592. Verification: py_compile PASS;
+`git diff --check` PASS; `./book/binder check math` PASS; focused pytest suite
+PASS (161 tests); `fmt_prose_contract` 0; `codemod_fmt queue` empty;
+substituted prose semantic audit CLEAN across 81 files.
+
 **NEXT:**
 1. Add a formatter-default cleanup pass after the semantic lanes: each
    formatter should own comma defaults by value kind, and explicit `commas=`

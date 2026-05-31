@@ -1123,6 +1123,7 @@ _TIME_WORDS = {
     "week": ("week", "weeks"),
     "month": ("month", "months"),
     "year": ("year", "years"),
+    "a": ("year", "years"),
 }
 
 

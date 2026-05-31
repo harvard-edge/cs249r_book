@@ -231,6 +231,7 @@ class TestFmtTime:
     def test_word_style_pluralizes(self):
         assert fmt_time(1, ureg.second, precision=0, style="word") == "1 second"
         assert fmt_time(2, ureg.second, precision=0, style="word") == "2 seconds"
+        assert fmt_time(2, "year", precision=0, style="word") == "2 years"
 
     def test_rejects_non_time_unit(self):
         with pytest.raises(ValueError, match="time unit"):

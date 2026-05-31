@@ -220,6 +220,37 @@ Validation details:
   `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
   0 findings across 81 files.
 
+## 2026-05-31 — ML systems time suffixes
+
+Change type: byte-identical formatter relocation plus formatter hardening.
+Replaced all 24 `time_unit` suffix sites in
+`vol1/ml_systems/ml_systems.qmd` with `fmt_time(...)`. Symbol units (`ms`,
+`s`, `h`) use compact style; prose units (`months`, `days`, `years`, `hours`)
+use `style="word"` so pluralization is owned by the formatter. The negative
+cloud-latency headroom site uses `allow_negative=True`, and the one grouped
+millisecond value keeps an explicit `commas=True` override. `fmt_time` now also
+recognizes Pint's canonical `year` alias (`a`) for word-style formatting.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol1/ml_systems/ml_systems.qmd` | 24 | 296 | 143 | identical values + prose |
+
+Validation details:
+
+- Before/after snapshots were generated with `assess_equiv.py baseline --ref HEAD`
+  and `assess_equiv.py snapshot` under `/tmp/fmt_time_ml_systems`.
+- `assess_equiv.py diff` reported `IDENTICAL values` and `IDENTICAL prose`.
+- `audit_fmt_usage.py` now reports 56 `fmt_time` calls and the `time_unit`
+  suffix bucket dropped from 616 to 592. `ml_systems.qmd` has no remaining
+  `time_unit` suffix sites.
+- Verification: `python3 -m py_compile mlsysim/mlsysim/fmt.py book/cli/checks/math_canonical.py` PASS;
+  `git diff --check` PASS; `./book/binder check math` PASS; focused pytest
+  suite PASS, 161 tests; `fmt_prose_contract.py` PASS, 0 violations;
+  `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
+  0 findings across 81 files.
+
 ## 2026-05-31 — Remaining direct count labels
 
 Change type: byte-identical formatter relocation. Replaced 40 hard-coded direct
