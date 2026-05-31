@@ -164,6 +164,33 @@ Validation details:
   `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
   0 findings across 81 files.
 
+## 2026-05-31 — Time denominator suffix relocation
+
+Change type: byte-identical formatter relocation. Replaced four
+denominator-style time suffixes (`μs/op`, `s/hr`, `ms/step`, `hours/day`) with
+`fmt_time(..., per=...)`.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol1/data_engineering/data_engineering.qmd` | 1 | 203 | 99 | identical values + prose |
+| `vol1/frameworks/frameworks.qmd` | 1 | 131 | 70 | identical values + prose |
+| `vol1/introduction/introduction.qmd` | 1 | 91 | 45 | identical values + prose |
+| `vol1/model_serving/model_serving.qmd` | 1 | 365 | 172 | identical values + prose |
+
+Validation details:
+
+- Before/after snapshots were generated with `assess_equiv.py baseline --ref HEAD`
+  and `assess_equiv.py snapshot` under `/tmp/fmt_time_den_*`.
+- `audit_fmt_usage.py` reports `fmt_time` calls increased to 657 and
+  `time_compound` suffixes dropped to 4.
+- Verification: `python3 -m py_compile mlsysim/mlsysim/fmt.py book/tools/audit/fmt/audit_fmt_usage.py` PASS;
+  `git diff --check` PASS; `./book/binder check math` PASS; focused pytest
+  suite PASS, 176 tests; `fmt_prose_contract.py` PASS, 0 violations;
+  `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
+  0 findings across 81 files.
+
 ## 2026-05-31 — Remaining suffix bucket split and epoch label
 
 Change type: audit improvement plus byte-identical formatter relocation.

@@ -410,6 +410,18 @@ plain count label found in that sweep, `epochs`, moved to
 `./book/binder check math` PASS; `audit_prose_semantics.py` CLEAN across 81
 files.
 
+**A31 — Time denominator suffix lane: DONE.**
+Migrated four denominator-style time suffixes to `fmt_time(..., per=...)`:
+`μs/op`, `s/hr`, `ms/step`, and `hours/day`. Values and substituted prose were
+byte-identical across `frameworks`, `data_engineering`, `introduction`, and
+`model_serving`. `audit_fmt_usage.py` now reports `fmt_time` at 657 and
+`time_compound` down to 4. The four remaining time compounds are prose/API
+decisions (`ms latency`, `ms round-trip`, `ms+`). Verification: `git diff
+--check` PASS; py_compile PASS; focused pytest suite PASS (176 tests);
+`fmt_prose_contract.py` 0; `codemod_fmt.py queue` `by kind: {}`;
+`./book/binder check math` PASS; `audit_prose_semantics.py` CLEAN across 81
+files.
+
 ### B. WS4 — unit-suffix lane (~2,393 sites: `GB`/`ms`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.

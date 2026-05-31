@@ -93,6 +93,10 @@ sub-buckets: physical units (1,126), resource-time labels (19), unit
 rates/denominators (16), compound scale (14), operation counts (12), and
 time compounds (8). One more plain count label (`epochs`) was moved to
 `fmt_count(..., plural_label="epochs")`.
+Four denominator-style time compounds (`s/hr`, `hours/day`, `μs/op`, `ms/step`)
+now use `fmt_time(..., per=...)` byte-identically, leaving only four
+prose-adjective/lower-bound time compounds (`ms latency`, `ms round-trip`,
+`ms+`) for manual wording/API decisions.
 Remaining: the rest of WS4/WS3 and later PDF/lock phases. Nothing is half-done
 or broken.
 
