@@ -134,7 +134,8 @@ Before any of these pipeline stages can be designed well, however, we need to un
 # │          DataGravity.egress_cost_per_gb_str, DataGravity.tpu_cost_per_hour_str,
 # │          DataGravity.transfer_time_10g_math
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt_usd, fmt, fmt_count, check, fmt_math, fmt_qty
+from mlsysim.fmt import fmt_int, fmt_usd, fmt, fmt_count, check, fmt_math, fmt_qty, fmt_time
+from mlsysim.core.units import GB, Gbps, second, hour, USD, ureg
 
 # ┌── LEGO ───────────────────────────────────────────────
 class DataGravity:
@@ -146,8 +147,10 @@ class DataGravity:
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     dataset_pb = 1
     network_bw = Systems.Fabrics.Ethernet_100G.bandwidth
-    egress_cost_gb = Infrastructure.Pricing.Cloud.EgressPerGB.rate.m_as("dollar / GB")
-    tpu_hourly_cost = Infrastructure.Pricing.Cloud.TpuV4PerHour.rate.m_as("dollar / hour")
+    egress_rate = Infrastructure.Pricing.Cloud.EgressPerGB.rate
+    tpu_rate = Infrastructure.Pricing.Cloud.TpuV4PerHour.rate
+    egress_cost_gb = egress_rate.to(USD / GB).magnitude
+    tpu_hourly_cost = tpu_rate.to(USD / hour).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     dataset_gb = dataset_pb * MILLION
@@ -155,12 +158,12 @@ class DataGravity:
 
     # Step 1: Time using library formula
     t_100g = (dataset_pb * ureg.petabyte) / network_bw
-    transfer_seconds = t_100g.m_as(second)
-    transfer_hours = t_100g.m_as(hour)
+    transfer_seconds = t_100g.to(second).magnitude
+    transfer_hours = t_100g.to(hour).magnitude
 
     # Step 2: 10 Gbps = 1.25 GB/s
     t_10g = (dataset_pb * ureg.petabyte) / (10 * Gbps)
-    transfer_days_10g = t_10g.m_as(ureg.day)
+    transfer_days_10g = t_10g.to(ureg.day).magnitude
 
     # Step 3: Cost
     transfer_cost = dataset_gb * egress_cost_gb
@@ -220,7 +223,8 @@ $$ \text{Data Selection Gain} \propto \frac{\text{Information Entropy}}{\text{Da
 # │ Exports: FeedingProblem.req_bw_gbs_str, FeedingProblem.disk_bw_mbs_str,
 # │          FeedingProblem.feeding_tax_pct_str, FeedingProblem.img_per_sec_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int,  fmt, check, fmt_qty, fmt_rate
+from mlsysim.fmt import fmt_int, fmt, check, fmt_qty, fmt_rate, fmt_percent
+from mlsysim.core.units import GB, MB, second
 
 # ┌── LEGO ───────────────────────────────────────────────
 class FeedingProblem:
@@ -244,19 +248,19 @@ class FeedingProblem:
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Throughput using Engine.solve() with 100% efficiency
     p = Engine.solve(m, h, efficiency=1.0)
-    img_per_sec = p.throughput.m_as("count/second")
+    img_per_sec = p.throughput.to(1 / second).magnitude
 
     # Step 2: Required bandwidth (bytes/s) = img_per_sec * img_size_bytes
     req_bw_bytes_sec = img_per_sec * img_size_bytes
-    req_bw_gbs = req_bw_bytes_sec / BILLION
-    req_bw = req_bw_gbs * GB / second
+    req_bw = req_bw_bytes_sec * byte / second
     disk_bw = disk_bw_mbs * MB / second
 
     # Step 3: Feeding efficiency = disk BW / required BW
-    eta_feed = min(disk_bw_mbs / (req_bw_bytes_sec / MILLION), 1.0)
+    eta_feed = min((disk_bw / req_bw).to("").magnitude, 1.0)
     feeding_tax_pct = (1.0 - eta_feed) * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    req_bw_gbs = req_bw.to(GB / second).magnitude
     check(req_bw_gbs > 1.0, f"Required bandwidth ({req_bw_gbs:.1f} GB/s) is lower than expected.")
     check(feeding_tax_pct > 50, f"Feeding tax ({feeding_tax_pct:.1f}%) should be significant for standard disks.")
 
@@ -293,7 +297,8 @@ These physical properties also carry an energy cost: as data moves farther from 
 # │          EnergyAccessCosts.dram_multiplier_str, EnergyAccessCosts.local_ssd_multiplier_str,
 # │          EnergyAccessCosts.network_multiplier_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, fmt_qty, check
+from mlsysim.fmt import fmt_int, fmt, fmt_qty, check, fmt_percent, fmt_multiple
+from mlsysim.core.units import pJ, ureg
 
 # ┌── LEGO ───────────────────────────────────────────────
 class EnergyAccessCosts:
@@ -302,28 +307,28 @@ class EnergyAccessCosts:
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     ENERGY_DRAM_ACCESS_PJ = Hardware.Tech.Memory.DRAM.energy_per_access
     ENERGY_FLOP_FP32_PJ   = Hardware.Tech.Op.FlopFp32.energy
-    energy_dram_pj = ENERGY_DRAM_ACCESS_PJ.m_as(ureg.picojoule)
-    energy_flop_fp32_pj = ENERGY_FLOP_FP32_PJ.m_as(ureg.picojoule/ureg.count)
-    energy_local_ssd_pj = 10_000
-    energy_network_pj = 50_000
-    energy_dram = energy_dram_pj * ureg.picojoule
-    energy_flop_fp32 = energy_flop_fp32_pj * ureg.picojoule
-    energy_local_ssd = energy_local_ssd_pj * ureg.picojoule
-    energy_network = energy_network_pj * ureg.picojoule
+    energy_dram = ENERGY_DRAM_ACCESS_PJ
+    energy_flop_fp32 = ENERGY_FLOP_FP32_PJ
+    energy_local_ssd = 10_000 * pJ
+    energy_network = 50_000 * pJ
     prune_pct = 50
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    energy_dram_pj = energy_dram.to(pJ).magnitude
+    energy_flop_fp32_pj = energy_flop_fp32.to(pJ).magnitude
     energy_flop_fp32_pj_per_bit = energy_flop_fp32_pj / 32
+    energy_local_ssd_pj = energy_local_ssd.to(pJ).magnitude
+    energy_network_pj = energy_network.to(pJ).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(energy_dram_pj > energy_flop_fp32_pj, "DRAM access should cost more than one FP32 MAC.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     prune_pct_str = fmt_percent(prune_pct/100, precision=0, commas=False, style='symbol')
-    energy_dram_str = fmt_qty(energy_dram, ureg.picojoule, precision=0, commas=False)
-    energy_flop_fp32_str = fmt_qty(energy_flop_fp32, ureg.picojoule, precision=1, commas=False)
-    local_ssd_energy_str = fmt_qty(energy_local_ssd * 32, ureg.picojoule, precision=0, commas=True)
-    network_energy_str = fmt_qty(energy_network * 32, ureg.picojoule, precision=0, commas=True)
+    energy_dram_str = fmt_qty(energy_dram, pJ, precision=0, commas=False)
+    energy_flop_fp32_str = fmt_qty(energy_flop_fp32, pJ, precision=1, commas=False)
+    local_ssd_energy_str = fmt_qty(energy_local_ssd * 32, pJ, precision=0, commas=True)
+    network_energy_str = fmt_qty(energy_network * 32, pJ, precision=0, commas=True)
     dram_multiplier_str = fmt_multiple(round(energy_dram_pj / energy_flop_fp32_pj), precision=0, commas=True)
     local_ssd_multiplier_str = fmt_multiple(energy_local_ssd_pj/energy_flop_fp32_pj_per_bit, precision=1, commas=True)
     network_multiplier_str = fmt_multiple(energy_network_pj/energy_flop_fp32_pj_per_bit, precision=1, commas=True)
@@ -1159,21 +1164,22 @@ These complementary strategies, each with distinct trade-offs across quality, co
 # │          DataEngineeringCostConstants.storage_cost_s3_str,
 # │          DataEngineeringCostConstants.retrieval_cost_glacier_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, check, fmt_usd
+from mlsysim.core.units import USD, TB, GB, ureg
 
 # ┌── LEGO ───────────────────────────────────────────────
 class DataEngineeringCostConstants:
     """Per-unit labeling and storage costs for @tbl-data-engineering-cost-constants."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    labeling_cost_crowd_low = Infrastructure.Pricing.Labeling.CrowdLow.rate.m_as("dollar")
-    labeling_cost_crowd_high = Infrastructure.Pricing.Labeling.CrowdHigh.rate.m_as("dollar")
-    labeling_cost_box_low = Infrastructure.Pricing.Labeling.BoxLow.rate.m_as("dollar")
-    labeling_cost_box_high = Infrastructure.Pricing.Labeling.BoxHigh.rate.m_as("dollar")
-    labeling_cost_medical_low = Infrastructure.Pricing.Labeling.MedicalLow.rate.m_as("dollar")
-    labeling_cost_medical_high = Infrastructure.Pricing.Labeling.MedicalHigh.rate.m_as("dollar")
-    storage_cost_s3 = Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate.m_as("dollar / TB / month")
-    retrieval_cost_glacier = Infrastructure.Pricing.Storage.GlacierRetrievalPerGB.rate.m_as("dollar / GB")
+    labeling_cost_crowd_low = Infrastructure.Pricing.Labeling.CrowdLow.rate.to(USD).magnitude
+    labeling_cost_crowd_high = Infrastructure.Pricing.Labeling.CrowdHigh.rate.to(USD).magnitude
+    labeling_cost_box_low = Infrastructure.Pricing.Labeling.BoxLow.rate.to(USD).magnitude
+    labeling_cost_box_high = Infrastructure.Pricing.Labeling.BoxHigh.rate.to(USD).magnitude
+    labeling_cost_medical_low = Infrastructure.Pricing.Labeling.MedicalLow.rate.to(USD).magnitude
+    labeling_cost_medical_high = Infrastructure.Pricing.Labeling.MedicalHigh.rate.to(USD).magnitude
+    storage_cost_s3 = Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate.to(USD / TB / ureg.month).magnitude
+    retrieval_cost_glacier = Infrastructure.Pricing.Storage.GlacierRetrievalPerGB.rate.to(USD / GB).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(storage_cost_s3 > 0 and retrieval_cost_glacier > 0, "Storage and retrieval costs must be positive.")
@@ -1275,7 +1281,8 @@ class DataEngineeringTimeConstants:
 # │          LabelingComputeRatio.ratio_low_str,
 # │          LabelingComputeRatio.ratio_high_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_usd, check
+from mlsysim.fmt import fmt, fmt_usd, check, fmt_multiple, fmt_percent
+from mlsysim.core.units import USD, hour
 
 # ┌── LEGO ───────────────────────────────────────────────
 class LabelingComputeRatio:
@@ -1284,8 +1291,8 @@ class LabelingComputeRatio:
     a100_count = 8
     train_hours_low = 4
     train_hours_high = 6
-    gpu_hour_cost_low = Infrastructure.Pricing.Fleet.GpuHourRef.rate.m_as("dollar / hour")
-    gpu_hour_cost_high = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.m_as("dollar / hour")
+    gpu_hour_cost_low = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
+    gpu_hour_cost_high = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.to(USD / hour).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     train_cost_low = a100_count * train_hours_low * gpu_hour_cost_low
@@ -1332,14 +1339,16 @@ All cost figures reflect approximate 2024 cloud provider rates and are intended 
 # │          GlacierRetrievalPricing.retrieval_cost_glacier_expedited_str,
 # │          GlacierRetrievalPricing.retrieval_ratio_expedited_standard_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_usd, check
+from mlsysim.fmt import fmt, fmt_usd, check, fmt_multiple
+from mlsysim.core.units import USD, GB
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GlacierRetrievalPricing:
     """Glacier retrieval tier pricing for the cost-ratio footnote."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    retrieval_cost_glacier = Infrastructure.Pricing.Storage.GlacierRetrievalPerGB.rate.m_as("dollar / GB")
+    retrieval_rate = Infrastructure.Pricing.Storage.GlacierRetrievalPerGB.rate
+    retrieval_cost_glacier = retrieval_rate.to(USD / GB).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     retrieval_cost_glacier_expedited = retrieval_cost_glacier * 3
@@ -2550,7 +2559,8 @@ Production systems must balance cost vs. latency trade-offs when selecting patte
 # │          RealtimeCost.stream_hours_str, RealtimeCost.stream_cost_per_hr_str,
 # │          RealtimeCost.batch_core_hours_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt_usd, fmt, fmt_count, fmt_time, fmt_qty, fmt_qty_int, check
+from mlsysim.fmt import fmt_int, fmt_usd, fmt, fmt_count, fmt_time, fmt_qty, fmt_qty_int, check, fmt_multiple
+from mlsysim.core.units import KB, GB, TB, second
 
 # ┌── LEGO ───────────────────────────────────────────────
 class RealtimeCost:
@@ -2567,11 +2577,11 @@ class RealtimeCost:
     hours_per_day = int(SEC_PER_DAY / SEC_PER_HOUR)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    throughput_gbs = (events_per_sec * event_size_kb * KB).m_as(GB)  # GB/s
-    throughput = throughput_gbs * GB / second
+    throughput = (events_per_sec / second) * event_size_kb * KB
+    throughput_gbs = throughput.to(GB / second).magnitude
     stream_cost_day = stream_cores * stream_hours * stream_cost_per_hr
-    hourly_data_tb = (throughput_gbs * SEC_PER_HOUR * GB).m_as(TB)   # TB per hour
-    hourly_data = hourly_data_tb * TB
+    hourly_data = throughput * SEC_PER_HOUR * second
+    hourly_data_tb = hourly_data.to(TB).magnitude
     event_size = event_size_kb * KB
     batch_core_hours = batch_cores * (batch_window_min / 60) * hours_per_day
     batch_cost_day = batch_core_hours * stream_cost_per_hr
@@ -3710,7 +3720,8 @@ Beyond the functional differences between storage systems, cost and performance 
 # │          KWSStorageEconomics.storage_nvme_high_cost_str,
 # │          KWSStorageEconomics.load_speedup_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_usd, fmt_qty, check
+from mlsysim.fmt import fmt, fmt_usd, fmt_qty, check, fmt_multiple
+from mlsysim.core.units import GB, TB, byte, USD, ureg
 
 # ┌── LEGO ───────────────────────────────────────────────
 class KWSStorageEconomics:
@@ -3721,9 +3732,9 @@ class KWSStorageEconomics:
     sample_duration_s = 1
     sample_rate_hz = 16_000
     bytes_per_sample = 2
-    storage_cost_s3 = Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate.m_as("dollar / TB / month")
-    storage_cost_nvme_low = Infrastructure.Pricing.Storage.NvmeLowPerTbMonth.rate.m_as("dollar / TB / month")
-    storage_cost_nvme_high = Infrastructure.Pricing.Storage.NvmeHighPerTbMonth.rate.m_as("dollar / TB / month")
+    storage_cost_s3 = Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate.to(USD / TB / ureg.month).magnitude
+    storage_cost_nvme_low = Infrastructure.Pricing.Storage.NvmeLowPerTbMonth.rate.to(USD / TB / ureg.month).magnitude
+    storage_cost_nvme_high = Infrastructure.Pricing.Storage.NvmeHighPerTbMonth.rate.to(USD / TB / ureg.month).magnitude
     nvme_bw_gbs = 5
     obj_bw_gbs = 0.1
 
@@ -3731,8 +3742,8 @@ class KWSStorageEconomics:
     sample_count = rounded_sample_count_m * MILLION
     dataset_size_bytes = sample_count * sample_duration_s * sample_rate_hz * bytes_per_sample
     dataset_size = dataset_size_bytes * byte
-    dataset_size_gb = dataset_size.m_as(GB)
-    dataset_size_tb = dataset_size.m_as(TB)
+    dataset_size_gb = dataset_size.to(GB).magnitude
+    dataset_size_tb = dataset_size.to(TB).magnitude
     storage_s3_cost = dataset_size_tb * storage_cost_s3
     storage_nvme_low_cost = dataset_size_tb * storage_cost_nvme_low
     storage_nvme_high_cost = dataset_size_tb * storage_cost_nvme_high
@@ -3781,7 +3792,8 @@ class KWSStorageEconomics:
 # │ Exports: StorageLoading.nvme_load_str, StorageLoading.obj_load_str,
 # │          StorageLoading.load_speedup_str, StorageLoading.nvme_bw_gbs_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_qty, check
+from mlsysim.fmt import fmt, fmt_qty, check, fmt_time, fmt_multiple
+from mlsysim.core.units import GB, byte, second
 
 # ┌── LEGO ───────────────────────────────────────────────
 class StorageLoading:
@@ -3799,10 +3811,10 @@ class StorageLoading:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     sample_count = rounded_sample_count_m * MILLION
     dataset_size_bytes = sample_count * sample_duration_s * sample_rate_hz * bytes_per_sample
-    kws_dataset_gb = (dataset_size_bytes * byte).m_as(GB)
-    nvme_load_s = kws_dataset_gb/nvme_bw_gbs
-    obj_load_s = kws_dataset_gb/obj_bw_gbs
-    load_speedup = obj_load_s/nvme_load_s
+    kws_dataset = dataset_size_bytes * byte
+    nvme_load_s = (kws_dataset / nvme_bw).to(second).magnitude
+    obj_load_s = (kws_dataset / (obj_bw_gbs * GB / second)).to(second).magnitude
+    load_speedup = obj_load_s / nvme_load_s
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(load_speedup - 50) < 1e-9, f"Expected 50x object-to-NVMe load speedup, got {load_speedup:.1f}x.")
@@ -3876,6 +3888,7 @@ Beyond the core storage capabilities we have examined, ML workloads introduce un
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
 from mlsysim.fmt import fmt, fmt_qty, check, MarkdownStr
+from mlsysim.core.units import Bparam, Mparam, GB
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ModelStorageScale:
@@ -3886,12 +3899,12 @@ class ModelStorageScale:
     m_alexnet = Models.Vision.AlexNet
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    gpt3_params_b = m_gpt3.parameters.m_as(Bparam)
+    gpt3_params_b = m_gpt3.parameters.to(Bparam).magnitude
     gpt3_fp32 = m_gpt3.size_in_bytes(BYTES_FP32)
     gpt3_fp16 = m_gpt3.size_in_bytes(BYTES_FP16)
-    gpt3_fp32_gb = gpt3_fp32.m_as(GB)
-    gpt3_fp16_gb = gpt3_fp16.m_as(GB)
-    alexnet_params_m = m_alexnet.parameters.m_as(Mparam)
+    gpt3_fp32_gb = gpt3_fp32.to(GB).magnitude
+    gpt3_fp16_gb = gpt3_fp16.to(GB).magnitude
+    alexnet_params_m = m_alexnet.parameters.to(Mparam).magnitude
     model_growth_factor = int(gpt3_params_b * BILLION / (alexnet_params_m * MILLION))
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -3942,7 +3955,8 @@ Understanding these quantitative relationships enables informed architectural de
 # │          StorageBandwidth.s3_workers_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware, Models
-from mlsysim.fmt import fmt_int, fmt, fmt_count, check, fmt_qty, fmt_qty_int, fmt_rate
+from mlsysim.fmt import fmt_int, fmt, fmt_count, check, fmt_qty, fmt_qty_int, fmt_rate, fmt_percent
+from mlsysim.core.units import KB, GB, MB, byte, second, flop, GFLOPs, TFLOPs
 
 # ┌── LEGO ───────────────────────────────────────────────
 class StorageBandwidth:
@@ -3963,14 +3977,14 @@ class StorageBandwidth:
     nvme_bw_high = nvme_bw_high_gbs * GB / second
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    a100_flops_val = h_a100.compute.peak_flops.m_as(flop/second)
-    resnet_flops_per_img = (m_resnet.inference_flops * 3).m_as(flop)  # forward + backward
-    max_img_per_sec = int(a100_flops_val/resnet_flops_per_img)
-    required_bw_gbs = (max_img_per_sec * image_size_kb * KB).m_as(GB)
-    required_bw = required_bw_gbs * GB / second
-    sata_max_img_sec = int((sata_bw_mbs * MB).m_as(byte) / (image_size_kb * KB).m_as(byte))
-    sata_utilization_pct = int(round(sata_max_img_sec/max_img_per_sec * 100))
-    s3_workers = int(round((required_bw_gbs * GB).m_as(MB) / s3_bw_mbs))
+    a100_flops_val = h_a100.compute.peak_flops.to(flop / second).magnitude
+    resnet_flops_per_img = (m_resnet.inference_flops * 3).to(flop).magnitude  # forward + backward
+    max_img_per_sec = int(a100_flops_val / resnet_flops_per_img)
+    required_bw = (max_img_per_sec / second) * image_size
+    required_bw_gbs = required_bw.to(GB / second).magnitude
+    sata_max_img_sec = int((sata_bw / image_size).to(1 / second).magnitude)
+    sata_utilization_pct = int(round(sata_max_img_sec / max_img_per_sec * 100))
+    s3_workers = int(round(required_bw.to(MB / second).magnitude / s3_bw_mbs))
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(required_bw_gbs > 3.0, f"A100 storage budget should be multiple GB/s, got {required_bw_gbs:.1f}.")
@@ -3981,7 +3995,7 @@ class StorageBandwidth:
     max_img_per_sec_str = fmt_rate(max_img_per_sec, 'img/s', precision=0)
     required_bw_gbs_str = fmt_qty(required_bw, GB/second, precision=1, commas=False)
     a100_flops_t_str = fmt_qty_int(h_a100.compute.peak_flops, TFLOP/second, commas=False)
-    resnet_flops_g_str = fmt_qty(resnet_flops_per_img * flop, GFLOP, precision=1, commas=False)
+    resnet_flops_g_str = fmt_qty(m_resnet.inference_flops * 3, GFLOPs, precision=1, commas=False)
     image_size_kb_str = fmt_qty(image_size, KB, precision=0, commas=False)
     sata_bw_mbs_str = fmt_qty(sata_bw, MB/second, precision=0, commas=False)
     sata_max_img_sec_str = fmt_rate(sata_max_img_sec, 'img/s', precision=0)
@@ -4123,7 +4137,8 @@ Columnar storage formats\index{Parquet!columnar format}\index{ORC!columnar forma
 # │          CompressionTradeoff.dataset_gb_str,
 # │          CompressionTradeoff.n_epochs_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int,  fmt, fmt_qty, check
+from mlsysim.fmt import fmt_int, fmt, fmt_qty, check, fmt_time, fmt_multiple, fmt_count
+from mlsysim.core.units import MB, GB, second, minute, hour
 
 # ┌── LEGO ───────────────────────────────────────────────
 class CompressionTradeoff:
@@ -4139,12 +4154,11 @@ class CompressionTradeoff:
     snappy_decompress = snappy_decompress_mbs * MB / second
     gzip_decompress = gzip_decompress_mbs * MB / second
     dataset = dataset_gb * GB
-    decompress_speedup = snappy_decompress_mbs/gzip_decompress_mbs
-    dataset_mb = (dataset_gb * GB).m_as(MB)
-    gzip_decompress_min = dataset_mb/gzip_decompress_mbs / 60
-    snappy_decompress_min = dataset_mb/snappy_decompress_mbs / 60
+    decompress_speedup = snappy_decompress_mbs / gzip_decompress_mbs
+    gzip_decompress_min = (dataset / gzip_decompress).to(minute).magnitude
+    snappy_decompress_min = (dataset / snappy_decompress).to(minute).magnitude
     time_diff_min = gzip_decompress_min - snappy_decompress_min
-    total_diff_hours = time_diff_min * n_epochs / 60
+    total_diff_hours = (time_diff_min * minute * n_epochs).to(hour).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(decompress_speedup > 4, f"Snappy should be over 4x faster in this scenario, got {decompress_speedup:.1f}x.")
@@ -4200,7 +4214,8 @@ During development, flexibility matters more than raw performance. The key chall
 # │          LifecycleStorageRequirements.feature_reads_per_request_str,
 # │          LifecycleStorageRequirements.random_reads_per_sec_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_qty, check, fmt_rate
+from mlsysim.fmt import fmt, fmt_qty, check, fmt_rate, fmt_multiple
+from mlsysim.core.units import KB, GB, second
 
 # ┌── LEGO ───────────────────────────────────────────────
 class LifecycleStorageRequirements:
@@ -4214,9 +4229,9 @@ class LifecycleStorageRequirements:
     feature_reads_per_request = 10
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    training_bw_gbs = (train_img_per_sec * image_size_kb * KB).m_as(GB)
-    training_bw = training_bw_gbs * GB / second
-    storage_reduction = image_size_kb / feature_vector_kb
+    training_bw = (train_img_per_sec / second) * image_size
+    training_bw_gbs = training_bw.to(GB / second).magnitude
+    storage_reduction = (image_size / feature_vector).to("").magnitude
     random_reads_per_sec = serving_rps * feature_reads_per_request
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -4687,7 +4702,8 @@ The technical architecture of data systems demonstrates how engineering decision
 # │          DataEngineeringSummaryRecap.kws_dataset_size_m_round_str,
 # │          DataEngineeringSummaryRecap.kws_dataset_size_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int,  fmt, fmt_qty, check
+from mlsysim.fmt import fmt_int, fmt, fmt_qty, check, fmt_multiple
+from mlsysim.core.units import GB, byte, USD, hour
 
 # ┌── LEGO ───────────────────────────────────────────────
 class DataEngineeringSummaryRecap:
@@ -4699,7 +4715,7 @@ class DataEngineeringSummaryRecap:
     train_hours_low = 4
     train_hours_high = 6
     gpu_hour_cost_low = 2.0
-    gpu_hour_cost_high = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.m_as("dollar / hour")
+    gpu_hour_cost_high = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.to(USD / hour).magnitude
     kws_dataset_size_m = 23.4
     rounded_sample_count_m = 23
     sample_duration_s = 1
@@ -4710,7 +4726,7 @@ class DataEngineeringSummaryRecap:
     sample_count = rounded_sample_count_m * MILLION
     dataset_size_bytes = sample_count * sample_duration_s * sample_rate_hz * bytes_per_sample
     kws_dataset_size = dataset_size_bytes * byte
-    kws_dataset_size_gb = kws_dataset_size.m_as(GB)
+    kws_dataset_size_gb = kws_dataset_size.to(GB).magnitude
     train_cost_low = a100_count * train_hours_low * gpu_hour_cost_low
     train_cost_high = a100_count * train_hours_high * gpu_hour_cost_high
     ratio_low = labeling_budget/train_cost_high
@@ -4744,7 +4760,8 @@ class DataEngineeringSummaryRecap:
 # │ Imports: mlsysim.core.constants (MILLION, GB, byte), mlsysim.fmt (fmt, check)
 # │ Exports: StorageLoadingRecap.load_speedup_str, StorageLoadingRecap.nvme_bw_gbs_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_qty, check
+from mlsysim.fmt import fmt, fmt_qty, check, fmt_multiple
+from mlsysim.core.units import GB, byte, second
 
 # ┌── LEGO ───────────────────────────────────────────────
 class StorageLoadingRecap:
@@ -4762,9 +4779,9 @@ class StorageLoadingRecap:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     sample_count = rounded_sample_count_m * MILLION
     dataset_size_bytes = sample_count * sample_duration_s * sample_rate_hz * bytes_per_sample
-    kws_dataset_gb = (dataset_size_bytes * byte).m_as(GB)
-    nvme_load_s = kws_dataset_gb / nvme_bw_gbs
-    obj_load_s = kws_dataset_gb / obj_bw_gbs
+    kws_dataset = dataset_size_bytes * byte
+    nvme_load_s = (kws_dataset / nvme_bw).to(second).magnitude
+    obj_load_s = (kws_dataset / (obj_bw_gbs * GB / second)).to(second).magnitude
     load_speedup = obj_load_s / nvme_load_s
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
