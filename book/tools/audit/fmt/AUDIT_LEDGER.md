@@ -164,6 +164,33 @@ Validation details:
   `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
   0 findings across 81 files.
 
+## 2026-05-31 — Remaining suffix bucket split and epoch label
+
+Change type: audit improvement plus byte-identical formatter relocation.
+`audit_fmt_usage.py` now separates remaining suffixes into physical units,
+resource-time labels, unit rates/denominators, compound scale phrases, operation
+counts, and time compounds. The lone remaining plain count noun found in that
+split, `epochs`, moved to `fmt_count(..., label="epoch",
+plural_label="epochs")` in `vol1/data_engineering/data_engineering.qmd`.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol1/data_engineering/data_engineering.qmd` | 1 | 203 | 99 | identical values + prose |
+
+Validation details:
+
+- `audit_fmt_usage.py` reports remaining suffix buckets as: `physical_unit`
+  1,126; `resource_time` 19; `unit_rate_or_denominator` 16;
+  `compound_scale` 14; `op_count` 12; `time_compound` 8.
+- `assess_equiv.py diff` reported `IDENTICAL values` and `IDENTICAL prose` for
+  `data_engineering`.
+- Verification: `python3 -m py_compile book/tools/audit/fmt/audit_fmt_usage.py` PASS;
+  `git diff --check` PASS; `./book/binder check math` PASS;
+  `fmt_prose_contract.py` PASS, 0 violations; `codemod_fmt.py queue` PASS,
+  `by kind: {}`; `audit_prose_semantics.py` PASS, 0 findings across 81 files.
+
 ## 2026-05-31 — Word-form micro/millisecond suffix cleanup
 
 Change type: byte-identical formatter relocation. Added word-form

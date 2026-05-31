@@ -88,6 +88,11 @@ chapters.
 The time codemod now also recognizes word-form `microseconds` and
 `milliseconds`; the three remaining exact word-form time suffixes moved to
 `fmt_time(..., style="word")` byte-identically.
+`audit_fmt_usage.py` now splits the remaining suffix inventory into actionable
+sub-buckets: physical units (1,126), resource-time labels (19), unit
+rates/denominators (16), compound scale (14), operation counts (12), and
+time compounds (8). One more plain count label (`epochs`) was moved to
+`fmt_count(..., plural_label="epochs")`.
 Remaining: the rest of WS4/WS3 and later PDF/lock phases. Nothing is half-done
 or broken.
 

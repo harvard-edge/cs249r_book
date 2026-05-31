@@ -46,6 +46,20 @@ MULTIPLIER_SUFFIXES = {"x", "×", " x", " ×"}
 SERVICE_RATE_SUFFIXES = {
     "QPS", "FPS", "tokens/s", "img/s", "images/s", "req/s", "samples/s",
 }
+SCALE_WORDS = {"thousand", "million", "billion", "trillion", "Million"}
+SCALE_GLYPHS = {"K", "M", "B", "T"}
+RESOURCE_TIME_TOKENS = {
+    "GPU-hours", "GPU-hr", "TPUv4-hours", "PFLOP-days", "person-years",
+    "instance-seconds",
+}
+RATE_OR_PER_MARKERS = {
+    "/day", " per day", "/photo", "/patient", "/household-year", "/kWh",
+    "per W", "/MB", "/inference", "/byte", "kJ per hour", "/year",
+}
+TIME_COMPOUND_MARKERS = {
+    "ms latency", "ms round-trip", "ms/step", "ms+", "hours/day", "s/hr",
+    "μs/op",
+}
 
 
 def extract_python_cells(text: str):
@@ -89,6 +103,7 @@ def literal_str(node):
 
 def classify_suffix(suffix: str):
     s = suffix
+    stripped = s.strip()
     if s in PERCENT_SUFFIXES or s.strip() in {"%", "percent"}:
         return "percent"
     if s in PP_SUFFIXES or s.strip() in {"pp", "percentage points",
@@ -106,6 +121,19 @@ def classify_suffix(suffix: str):
         return "scale_glyph"
     if s.strip() in {"million", "billion", "thousand", "trillion"}:
         return "scale_word"
+    if (
+        re.search(r"(^|[- ])(" + "|".join(SCALE_WORDS | SCALE_GLYPHS) + r")\b", stripped)
+        and stripped not in SCALE_GLYPHS
+    ):
+        return "compound_scale"
+    if any(tok in stripped for tok in RESOURCE_TIME_TOKENS) or stripped.endswith(("-hour", "-minute")):
+        return "resource_time"
+    if "FLOP" in stripped and "/s" not in stripped and "FLOP/byte" not in stripped:
+        return "op_count"
+    if any(tok in stripped for tok in TIME_COMPOUND_MARKERS):
+        return "time_compound"
+    if any(tok in stripped for tok in RATE_OR_PER_MARKERS):
+        return "unit_rate_or_denominator"
     if s.strip() in {"GPUs", "GPU", "nodes", "tokens", "layers", "queries",
                      "images", "img", "QPS", "ops", "operations"}:
         return "count_label"

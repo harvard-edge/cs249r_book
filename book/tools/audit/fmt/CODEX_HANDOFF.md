@@ -397,6 +397,19 @@ suite PASS (176 tests); `fmt_prose_contract.py` 0; `codemod_fmt.py queue`
 `by kind: {}`; `./book/binder check math` PASS; `audit_prose_semantics.py`
 CLEAN across 81 files.
 
+**A30 — Remaining suffix bucket split + epoch label: DONE.**
+`audit_fmt_usage.py` now classifies the remaining direct suffix inventory into
+actionable sub-buckets instead of reporting everything as `physical_unit`:
+1,126 physical units, 19 resource-time labels, 16 unit rates/denominators, 14
+compound scale phrases, 12 operation counts, and 8 time compounds. The last
+plain count label found in that sweep, `epochs`, moved to
+`fmt_count(..., label="epoch", plural_label="epochs")` byte-identically in
+`data_engineering`. Verification: `assess_equiv.py` values/prose identical;
+`git diff --check` PASS; py_compile PASS; focused pytest subset PASS;
+`fmt_prose_contract.py` 0; `codemod_fmt.py queue` `by kind: {}`;
+`./book/binder check math` PASS; `audit_prose_semantics.py` CLEAN across 81
+files.
+
 ### B. WS4 — unit-suffix lane (~2,393 sites: `GB`/`ms`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.
