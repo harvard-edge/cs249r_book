@@ -46,3 +46,24 @@ class GoodFormatting:
     assert not [
         issue for issue in issues if issue.code == "manual_fmt_string_assembly"
     ]
+
+
+def test_math_canonical_allows_typed_range_helpers(tmp_path):
+    chapter = tmp_path / "chapter.qmd"
+    chapter.write_text(
+        """
+```{python}
+from mlsysim.fmt import fmt_usd_range
+
+class GoodFormatting:
+    cost_str = fmt_usd_range(25000, 30000, repeat_symbol=False)
+```
+""",
+        encoding="utf-8",
+    )
+
+    issues = audit([chapter])
+
+    assert not [
+        issue for issue in issues if issue.code == "noncanonical_str_assign"
+    ]

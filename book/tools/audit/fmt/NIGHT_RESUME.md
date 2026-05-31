@@ -37,7 +37,7 @@ python3 -m pytest mlsysim/tests/test_fmt.py book/tests/test_codemod_fmt.py book/
 
 ## NOW / NEXT  (update before every commit)
 
-**STATUS: Currency denominator relocation complete and verified. Safe to continue with remaining migration lanes.**
+**STATUS: Currency formatter suffix migration complete and verified. Safe to continue with remaining migration lanes.**
 
 **State:** multiplier + percent + scale 100% migrated; pp → typed fmt_pp (14
 byte-identical sites + grammar fixes, plus the user-approved A2 benchmarking
@@ -156,10 +156,21 @@ byte-identical by `assess_equiv` for every touched chapter. Verification:
 `fmt_prose_contract` 0; `codemod_fmt queue` empty; substituted prose semantic
 audit CLEAN across 81 files.
 
+**NOW done:** Currency scale/range relocation — migrated the remaining 78 QMD
+`fmt_usd(..., suffix=...)` call sites to structured `scale=`, `per=`,
+checked `marker="*"`, or `fmt_usd_range(...)`. QMD now has zero
+`fmt_usd(..., suffix=...)` calls. `assess_equiv` proved every scale/marker
+relocation byte-identical; the only intentional diff is the H100 table price
+range normalizing `~\$25,000-30,000` to `~\$25,000–30,000` through
+`fmt_usd_range(..., repeat_symbol=False)`. Verification: py_compile PASS;
+`git diff --check` PASS; `./book/binder check math` PASS; focused pytest suite
+PASS (161 tests); `fmt_prose_contract` 0; `codemod_fmt queue` empty;
+substituted prose semantic audit CLEAN across 81 files.
+
 **NEXT:**
-1. Continue the semantic non-Quantity lanes: currency scale/range oddities,
-   count labels, non-physical rates, and time values. Add entries to
-   `AUDIT_LEDGER.md` for every touched LEGO cell.
+1. Continue the semantic non-Quantity lanes: count labels, non-physical rates,
+   and time values. Add entries to `AUDIT_LEDGER.md` for every touched LEGO
+   cell.
 2. Continue WS4 with `run_unit_lane.py` chapter-sized batches. Highest remaining
    clean counts: `vol2/backmatter/appendix_fleet` (14), `vol2/ops_scale` (14),
    `vol1/hw_acceleration` (11), `vol1/introduction` (11),

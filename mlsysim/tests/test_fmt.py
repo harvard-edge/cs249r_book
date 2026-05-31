@@ -166,16 +166,23 @@ class TestFmtUsd:
         assert fmt_usd(4_600_000, precision=1, commas=False, scale="M") == "\\$4.6M"
         assert fmt_usd(0.09, precision=2, commas=False, per="GB") == "\\$0.09/GB"
         assert fmt_usd(12_000, commas=False, scale="K", per="year") == "\\$12K/year"
+        assert fmt_usd(8000, approx=True, marker="*") == "~\\$8,000*"
 
     def test_rejects_legacy_suffix_with_structured_parts(self):
         with pytest.raises(ValueError, match="suffix="):
             fmt_usd(1000, scale="K", suffix="K")
+        with pytest.raises(ValueError, match="suffix="):
+            fmt_usd(1000, marker="*", suffix="*")
 
     def test_rejects_bad_denominator(self):
         with pytest.raises(ValueError, match="omit the leading"):
             fmt_usd(0.09, precision=2, per="/GB")
         with pytest.raises(ValueError, match="fmt_usd per must be"):
             fmt_usd(0.09, precision=2, per="widgets")
+
+    def test_rejects_bad_marker(self):
+        with pytest.raises(ValueError, match="fmt_usd marker"):
+            fmt_usd(1000, marker="note")
 
     def test_approx_prepends_tilde(self):
         assert fmt_usd(1234.7, approx=True, suffix="/year") == "~\\$1,235/year"
@@ -525,6 +532,10 @@ class TestTypedRanges:
         assert (
             fmt_usd_range(10_000, 30_000, scale="K", commas=False)
             == "\\$10K\u2013\\$30K"
+        )
+        assert (
+            fmt_usd_range(25000, 30000, approx=True, repeat_symbol=False)
+            == "~\\$25,000\u201330,000"
         )
         assert (
             fmt_usd_range(0.10, 0.50, precision=2, commas=False, per="GB")

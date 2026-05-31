@@ -123,6 +123,17 @@ inline prose for all 10 touched chapters. Verification: `git diff --check` PASS,
 focused pytest suite PASS (157 tests), prose-contract 0, semantic audit 0
 findings, codemod queue empty.
 
+**A6 — Currency scale/range relocation: DONE.**
+The remaining 78 chapter-level `fmt_usd(..., suffix=...)` call sites were moved
+to `scale=`, `per=`, checked `marker="*"`, or `fmt_usd_range(...)`. QMD now has
+zero `fmt_usd(..., suffix=...)` calls. `assess_equiv` proved byte-identical
+values and inline prose for all scale/marker relocations; the only intentional
+diff is the H100 table price range changing `~\$25,000-30,000` to
+`~\$25,000–30,000` through `fmt_usd_range(..., repeat_symbol=False)`.
+Verification: py_compile PASS, `git diff --check` PASS, focused pytest suite
+PASS (161 tests), `./book/binder check math` PASS, prose-contract 0, semantic
+audit 0 findings, codemod queue empty.
+
 ### B. WS4 — unit-suffix lane (~2,393 sites: `GB`/`ms`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.

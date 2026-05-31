@@ -343,6 +343,7 @@ def fmt_int(
 
 
 _USD_SCALES = {"K": 1e3, "M": 1e6, "B": 1e9, "T": 1e12}
+_USD_MARKERS = {"*"}
 
 
 def fmt_usd(
@@ -353,6 +354,7 @@ def fmt_usd(
     approx=False,
     scale=None,
     per=None,
+    marker="",
     suffix="",
 ):
     """
@@ -395,6 +397,9 @@ def fmt_usd(
             the magnitude and display glyph cannot drift apart.
         per: Optional rate denominator (``"month"``, ``"GB"``, ``"kWh"``, or a
             Pint unit such as ``GB``). Pass without a leading slash.
+        marker: Optional checked table marker appended after the currency value.
+            Currently only ``"*"`` is allowlisted; this is for data-source
+            markers, not units or scale glyphs.
         suffix: Legacy escape hatch while the corpus is being migrated. New
             QMD code should use ``scale=`` and/or ``per=`` instead.
     """
@@ -403,8 +408,13 @@ def fmt_usd(
     if isinstance(amount, ureg.Quantity):
         amount = amount.m_as(USD)
 
-    if suffix and (scale is not None or per is not None):
-        raise ValueError("Use suffix= or structured scale=/per=, not both.")
+    if marker and marker not in _USD_MARKERS:
+        raise ValueError(
+            f"fmt_usd marker must be one of {sorted(_USD_MARKERS)}, "
+            f"got {marker!r}."
+        )
+    if suffix and (scale is not None or per is not None or marker):
+        raise ValueError("Use suffix= or structured scale=/per=/marker=, not both.")
     structured_suffix = ""
     if scale is not None:
         if scale not in _USD_SCALES:
@@ -420,6 +430,7 @@ def fmt_usd(
         allowed=_USD_DENOMINATORS,
     )
     suffix = suffix or structured_suffix
+    suffix += marker
 
     prefix = "~\\$" if approx else "\\$"
 
@@ -918,6 +929,8 @@ def fmt_usd_range(
     commas=True,
     scale=None,
     per=None,
+    approx=False,
+    repeat_symbol=True,
 ):
     """Format a currency range with optional scale and one denominator."""
     from .core.units import USD
@@ -932,8 +945,35 @@ def fmt_usd_range(
         raise ValueError(
             f"fmt_usd_range expects hi >= lo, got lo={lo_v}, hi={hi_v}."
         )
-    a = fmt_usd(lo_v, precision=precision, commas=commas, scale=scale)
-    b = fmt_usd(hi_v, precision=precision, commas=commas, scale=scale)
+    a = fmt_usd(
+        lo_v,
+        precision=precision,
+        commas=commas,
+        scale=scale,
+        approx=approx,
+    )
+    if repeat_symbol:
+        b = fmt_usd(hi_v, precision=precision, commas=commas, scale=scale)
+    else:
+        hi_display = hi_v
+        suffix = ""
+        if scale is not None:
+            if scale not in _USD_SCALES:
+                raise ValueError(
+                    f"fmt_usd_range scale must be one of "
+                    f"{sorted(_USD_SCALES)}, got {scale!r}."
+                )
+            hi_display = hi_display / _USD_SCALES[scale]
+            suffix = scale
+        if precision == 0:
+            b = fmt_int(hi_display, commas=commas, suffix=suffix)
+        else:
+            b = fmt(
+                hi_display,
+                precision=precision,
+                commas=commas,
+                suffix=suffix,
+            )
     suffix = _denominator_suffix(
         per,
         what="fmt_usd_range per",

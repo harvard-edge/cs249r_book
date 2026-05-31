@@ -85,3 +85,49 @@ Validation details:
   gone; only the pre-existing single `extra_suffix=` denominator remains.
 - Render evidence: deferred to the chapter render sweep; this batch is a pure
   byte-identical relocation with executed value/prose proof.
+
+## 2026-05-31 — Currency scale/range relocation
+
+Change type: structured currency migration. Replaced the remaining 78
+chapter-level `fmt_usd(..., suffix=...)` call sites with `scale=`, `per=`,
+`marker=`, or `fmt_usd_range(...)`. QMD now has zero `fmt_usd(..., suffix=...)`
+calls.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol1/data_engineering/data_engineering.qmd` | 13 | 203 | 99 | identical values + prose |
+| `vol1/data_selection/data_selection.qmd` | 5 | 250 | 128 | identical values + prose |
+| `vol1/hw_acceleration/hw_acceleration.qmd` | 2 | 255 | 140 | intentional range dash change |
+| `vol1/ml_ops/ml_ops.qmd` | 6 | 132 | 75 | identical values + prose |
+| `vol1/ml_systems/ml_systems.qmd` | 2 | 296 | 143 | identical values + prose |
+| `vol1/responsible_engr/responsible_engr.qmd` | 19 | 168 | 79 | identical values + prose |
+| `vol1/training/training.qmd` | 4 | 453 | 214 | identical values + prose |
+| `vol2/inference/inference.qmd` | 1 | 208 | 119 | identical values + prose |
+| `vol2/network_fabrics/network_fabrics.qmd` | 3 | 106 | 62 | identical values + prose |
+| `vol2/ops_scale/ops_scale.qmd` | 17 | 195 | 95 | identical values + prose |
+| `vol2/responsible_ai/responsible_ai.qmd` | 3 | 51 | 25 | identical values + prose |
+| `vol2/sustainable_ai/sustainable_ai.qmd` | 3 | 197 | 120 | identical values + prose |
+
+Validation details:
+
+- Before/after snapshots were generated with `assess_equiv.py baseline --ref HEAD`
+  and `assess_equiv.py snapshot` under `/tmp/fmt_currency_scale_marker_assess`.
+- Every scale relocation was byte-identical. The only value/prose diff was
+  `AcceleratorEconomics.h100_price_str`: `~\$25,000-30,000` became
+  `~\$25,000–30,000`, intentionally moving the price range through
+  `fmt_usd_range(..., repeat_symbol=False)` so the range dash is formatter-owned.
+- The TPU footnote marker moved from legacy `suffix="*"` to checked
+  `marker="*"` with byte-identical output.
+- `audit_fmt_usage.py` confirms `fmt_usd` has zero remaining `suffix=` call
+  sites and the `scale_glyph` `suffix=` bucket is gone. The only scale suffixes
+  left are 8 non-currency `fmt(..., suffix="million")`-style sites for later
+  count/quantity review.
+- Verification: `python3 -m py_compile mlsysim/mlsysim/fmt.py book/cli/checks/math_canonical.py` PASS;
+  `git diff --check` PASS; `./book/binder check math` PASS; focused pytest
+  suite PASS, 161 tests;
+  `fmt_prose_contract.py` PASS, 0 violations; `codemod_fmt.py queue` PASS,
+  `by kind: {}`; `audit_prose_semantics.py` PASS, 0 findings across 81 files.
+- Render evidence: deferred to the chapter render sweep; this batch has executed
+  value/prose proof plus one documented intentional range-dash normalization.
