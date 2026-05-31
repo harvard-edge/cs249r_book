@@ -845,7 +845,24 @@ pytest suite PASS (190 tests); `fmt_prose_contract.py` 0; `codemod_fmt.py queue`
 `by kind: {}`; `./book/binder check math` PASS; `./book/binder check code
 --scope lego-dead-code` PASS; `audit_prose_semantics.py` CLEAN across 81 files.
 
-### B. WS4 — unit-suffix lane (remaining 750 physical-unit suffixes: `GB`/`MB`/`W`/`GB/s`/…)  ← the big one
+**A61 — `vol2/edge_intelligence` physical-unit cleanup: DONE.**
+Migrated all 23 remaining physical-unit suffix sites in `edge_intelligence` to
+typed quantity formatters, leaving the file with 0 `suffix=` calls. The lane
+covered NPU/CPU energy in mJ, phone RAM, MobileNet/STM32 sizes, mobile power
+ranges in MarkdownStr, H100 memory bandwidth, phone battery Wh, adapter storage,
+federated update data sizes, and background power ranges. Markdown range strings
+preserve the existing `2–3 W` / `500–1000 mW` style by keeping the low endpoint
+bare and formatting the high endpoint with `fmt_qty`. H100 GB/s display preserves
+the old explicit integer floor by reconstructing a floored quantity before
+formatting. `audit_fmt_usage.py` now reports physical-unit suffixes down to 727,
+`fmt_qty` at 635, and `fmt_qty_int` at 57. Verification: `assess_equiv.py`
+values/prose identical for `edge_intelligence`; `git diff --check` PASS;
+py_compile PASS; focused pytest suite PASS (190 tests); `fmt_prose_contract.py`
+0; `codemod_fmt.py queue` `by kind: {}`; `./book/binder check math` PASS;
+`./book/binder check code --scope lego-dead-code` PASS;
+`audit_prose_semantics.py` CLEAN across 81 files.
+
+### B. WS4 — unit-suffix lane (remaining 727 physical-unit suffixes: `GB`/`MB`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.
 `weights_gb`), not Pint Quantities, and `fmt_qty` requires a Pint Quantity to
@@ -862,9 +879,10 @@ generate the unit. So this is per-site, judgment-bearing source work. Method:
    and refuses currency. Use `fmt_qty_int(q, UNIT)` only when rounded integer
    display is intentional. Then DROP any duplicate unit the prose was adding.
 3. **Plain-float sites** (`fmt(weights_gb, suffix=" GB")` with no Quantity in scope):
-   prefer refactoring the source to carry a Quantity and use `fmt_qty`; if that's a
-   large refactor, it is acceptable to LEAVE these for now — they are honest unit
-   labels, low risk. Do NOT fabricate a Quantity just to satisfy the rule.
+   prefer restoring/creating the source Quantity and use `fmt_qty`; preserve any
+   old explicit flooring/rounding by formatting a display Quantity made from the
+   already-rounded magnitude. Leave a raw suffix only for a documented genuine
+   label or if the source refactor would change semantics.
 4. Go **one chapter at a time**, byte-identical, gate after each, commit per chapter.
    `run_unit_lane.py` now exists for the recurring clean sub-pattern
    `fmt(q.m_as(UNIT), suffix=" <unit>")` → `fmt_qty(q, UNIT)`. It reuses

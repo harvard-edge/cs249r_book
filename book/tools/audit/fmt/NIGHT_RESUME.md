@@ -177,6 +177,9 @@ leaving the file with zero `suffix=` calls. Remaining suffix bucket is only 773
 `physical_unit` suffixes. The `performance_engineering` physical-unit cleanup
 then migrated all 23 remaining sites in that chapter, byte-identically, leaving
 the file with zero `suffix=` calls. Remaining suffix bucket is only 750
+`physical_unit` suffixes. The `edge_intelligence` physical-unit cleanup then
+migrated all 23 remaining sites in that chapter, byte-identically, leaving the
+file with zero `suffix=` calls. Remaining suffix bucket is only 727
 `physical_unit` suffixes. Remaining: the rest of WS4/WS3 and
 later PDF/lock phases. Nothing is half-done or broken.
 
@@ -195,12 +198,11 @@ and prose.
 targets are physical-unit suffixes, MarkdownStr sites, and the API-cleanup pass.
 For physical Quantity-backed sites, continue WS4 with
 `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/run_unit_lane.py --write <qmd>`
-one chapter at a time. The latest all-chapter run migrated the remaining
-byte-identical clean candidates; the follow-up write run confirmed the remaining
-20 Quantity-backed candidates all fail the byte-identical gate because they
-would visibly change output (`GB`→`GiB`, `TB`→`TB/s`, `GB`→`GB/s`).
-Many more suffix sites are plain floats and should stay queued unless the source
-is refactored to carry a Pint Quantity.
+one chapter at a time when the exact lane applies, then inspect queued/plain-float
+sites by hand. Current direction is to prefer restoring/creating Pint quantities
+for unit-bearing outputs and use `fmt_qty`/`fmt_qty_int`; preserve old explicit
+flooring or prose-owned `/s` displays with display quantities and `unit_label=`
+only where necessary.
 
 **NEW TOOL:** `audit_prose_semantics.py` — executes each chapter, substitutes
 LEGO values into prose, normalizes LaTeX→visible, flags duplicated glyph/unit,
@@ -594,6 +596,10 @@ drop. The adjacent prose/table text was updated to `1 percentage-point threshold
 and `(drop of 6.8 percentage points)`. No user-decision items remain open.
 
 ## Session commit log (newest first)
+- Codex `vol2/edge_intelligence` physical-unit cleanup: migrated all 23
+  remaining physical-unit suffix sites in the chapter to typed quantity
+  formatters, byte-identically. `edge_intelligence` now has 0 `suffix=` calls;
+  physical-unit suffixes dropped 750 -> 727.
 - Codex `vol2/performance_engineering` physical-unit cleanup: migrated all 23
   remaining physical-unit suffix sites in the chapter to typed quantity
   formatters, byte-identically. `performance_engineering` now has 0 `suffix=`

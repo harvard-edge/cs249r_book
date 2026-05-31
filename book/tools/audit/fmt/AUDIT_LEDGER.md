@@ -53,6 +53,44 @@ Status:
 - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/codemod_fmt.py queue --root book/quarto/contents` PASS, `by kind: {}`
 - `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_prose_semantics.py --root book/quarto/contents` PASS, 0 findings
 
+## 2026-05-31 — `vol2/edge_intelligence` physical-unit cleanup
+
+Change type: byte-identical formatter relocation. Replaced all 23 remaining
+physical-unit suffix sites in `edge_intelligence` with typed quantity
+formatters.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol2/edge_intelligence/edge_intelligence.qmd` | 23 | 75 | 39 | identical values + prose |
+
+Validation details:
+
+- Migrated NPU/CPU energy in mJ, smartphone RAM, MobileNet/STM32 memory sizes,
+  mobile power ranges, H100 memory bandwidth, battery Wh, adapter storage,
+  federated update sizes, and background power ranges.
+- Markdown range strings preserve existing output such as `2–3 W` and
+  `500–1000 mW` by leaving the low endpoint unitless and using `fmt_qty` for the
+  high endpoint.
+- H100 bandwidth preserves the old explicit `int(...m_as(GB/second))` floor by
+  formatting a floored display quantity.
+- `assess_equiv.py` baseline/snapshot/diff reported `IDENTICAL values` and
+  `IDENTICAL prose`.
+- `edge_intelligence` now has zero `suffix=` calls.
+- `audit_fmt_usage.py` reports `physical_unit` suffixes dropped 750 -> 727,
+  `fmt_qty` at 635, and `fmt_qty_int` at 57.
+- Verification: `git diff --check` PASS; py_compile PASS for formatter,
+  math-canonical, and fmt audit modules; focused pytest suite PASS, 190 tests;
+  `fmt_prose_contract.py` PASS, 0 violations; `codemod_fmt.py queue` PASS,
+  `by kind: {}`; `./book/binder check math` PASS;
+  `./book/binder check code --scope lego-dead-code` PASS;
+  `audit_prose_semantics.py` PASS, 0 findings across 81 files.
+- HTML/PDF render evidence: not run yet. Full rendering is intentionally
+  deferred for the separate render/prose audit checkpoint.
+
+Status: non-render verified; render audit pending.
+
 ## 2026-05-31 — `vol2/performance_engineering` physical-unit cleanup
 
 Change type: byte-identical formatter relocation. Replaced all 23 remaining

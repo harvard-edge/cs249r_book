@@ -84,8 +84,8 @@ These scenarios require on-device learning, where models train and adapt directl
 # │          npu_energy_mj_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Hardware, Engine
-from mlsysim.core.constants import THOUSAND
-from mlsysim.fmt import fmt_int, check, fmt, fmt_time
+from mlsysim.core.constants import joule, ureg
+from mlsysim.fmt import check, fmt_int, fmt_qty, fmt_time
 
 # ┌── LEGO ───────────────────────────────────────────────
 class EdgeNpuSpeedup:
@@ -105,8 +105,10 @@ class EdgeNpuSpeedup:
     # The narrative anchors on 20x speedup and 50x energy gain
     t_cpu_ms = p_cpu.latency.m_as("ms")
     t_npu_ms = t_cpu_ms / 20.0
-    e_cpu_j = p_cpu.energy.m_as("J")
-    e_npu_j = e_cpu_j / 60.0
+    e_cpu = p_cpu.energy
+    e_npu = e_cpu / 60.0
+    e_cpu_j = e_cpu.m_as(joule)
+    e_npu_j = e_npu.m_as(joule)
 
     speedup = t_cpu_ms / t_npu_ms
     energy_gain = e_cpu_j / e_npu_j
@@ -118,8 +120,8 @@ class EdgeNpuSpeedup:
     # ┌── 4. OUTPUT ────────────────────────────────────────
     npu_cpu_lat_ms_str = fmt_time(t_cpu_ms, 'millisecond', precision=3, commas=False)
     npu_lat_ms_str = fmt_time(t_npu_ms, 'millisecond', precision=3, commas=False)
-    npu_cpu_energy_mj_str = fmt(e_cpu_j * THOUSAND, precision=1, commas=False, suffix=' mJ')
-    npu_energy_mj_str = fmt(e_npu_j * THOUSAND, precision=3, commas=False, suffix=' mJ')
+    npu_cpu_energy_mj_str = fmt_qty(e_cpu, ureg.millijoule, precision=1, commas=False)
+    npu_energy_mj_str = fmt_qty(e_npu, ureg.millijoule, precision=3, commas=False)
     npu_speedup_str = fmt_int(speedup, commas=False)
     npu_energy_gain_str = fmt_int(energy_gain, commas=False)
 ```
@@ -422,9 +424,10 @@ fig = plt.gcf()
 # │ Exports: EdgeSmartphoneRamRecap.smartphone_ram_gb_str
 class EdgeSmartphoneRamRecap:
     smartphone_ram_gb = int(Platforms.Mobile.ram.m_as(GB))
-    from mlsysim.fmt import fmt_int, fmt
+    smartphone_ram = smartphone_ram_gb * GB
+    from mlsysim.fmt import fmt_qty_int
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    smartphone_ram_gb_str = fmt_int(smartphone_ram_gb, commas=False, suffix=' GB')
+    smartphone_ram_gb_str = fmt_qty_int(smartphone_ram, GB, commas=False)
 ```
 
 Memory consumption during training is not static. It fluctuates dynamically, reaching a maximum during the backward pass when activations, gradients, and optimizer states must coexist. This peak memory usage determines whether a model can be trained on a device. For a 10M parameter model on a smartphone with `{python} EdgeSmartphoneRamRecap.smartphone_ram_gb_str` RAM, the 40 MB of FP32 weights might spike to over 200 MB during backpropagation as activations, gradients, and optimizer states accumulate---competing directly with the operating system and foreground applications for the device's limited memory. Techniques like gradient checkpointing mitigate this by discarding intermediate activations during the forward pass and recomputing them on-demand during the backward pass. This approach trades increased computation (20 to 30 percent) for a dramatic reduction in peak memory, often achieving 3--4$\times$ reduction.
@@ -613,7 +616,7 @@ Resource-constrained devices use a two-stage learning process. Offline pretraini
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Model constraints — MobileNetV2 and STM32 sizing.
 # │ Exports: mobilenetv2_*_str, stm32_hidden_*_str
-from mlsysim.fmt import fmt, check, fmt_int
+from mlsysim.fmt import check, fmt, fmt_int, fmt_percent, fmt_qty, fmt_qty_int
 
 class EdgeMobilenetSizing:
     bytes_fp32 = BYTES_FP32.m_as(byte)
@@ -624,11 +627,15 @@ class EdgeMobilenetSizing:
     stm32_hidden_inputs = 1_000
     stm32_hidden_outputs = 10
 
-    alpha10_mb = (mobilenetv2_alpha10_params * bytes_fp32 * byte).m_as(MB)
-    alpha05_total_mb = (mobilenetv2_alpha05_total_params * bytes_fp32 * byte).m_as(MB)
-    alpha05_feature_mb = (mobilenetv2_alpha05_feature_params * bytes_fp32 * byte).m_as(MB)
+    alpha10 = mobilenetv2_alpha10_params * BYTES_FP32
+    alpha05_total = mobilenetv2_alpha05_total_params * BYTES_FP32
+    alpha05_feature = mobilenetv2_alpha05_feature_params * BYTES_FP32
+    alpha10_mb = alpha10.m_as(MB)
+    alpha05_total_mb = alpha05_total.m_as(MB)
+    alpha05_feature_mb = alpha05_feature.m_as(MB)
     stm32_hidden_params = stm32_hidden_inputs * stm32_hidden_outputs + stm32_hidden_outputs
-    stm32_hidden_kb = (stm32_hidden_params * bytes_fp32 * byte).m_as(KB)
+    stm32_hidden = stm32_hidden_params * BYTES_FP32
+    stm32_hidden_kb = stm32_hidden.m_as(KB)
     stm32_hidden_sram_pct = stm32_hidden_kb / stm32_sram_kb * 100
 
     check(alpha10_mb > alpha05_total_mb > alpha05_feature_mb,
@@ -638,16 +645,17 @@ class EdgeMobilenetSizing:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     mobilenetv2_alpha10_params_m_str = fmt(mobilenetv2_alpha10_params/ MILLION, precision=1, commas=False)
-    mobilenetv2_alpha10_mb_str = fmt_int(alpha10_mb, commas=False, suffix=' MB')
+    mobilenetv2_alpha10_mb_str = fmt_qty_int(alpha10, MB, commas=False)
     mobilenetv2_alpha05_total_params_m_str = fmt(mobilenetv2_alpha05_total_params/ MILLION, precision=1, commas=False)
-    mobilenetv2_alpha05_total_mb_str = fmt(alpha05_total_mb, precision=1, commas=False, suffix=' MB')
+    mobilenetv2_alpha05_total_mb_str = fmt_qty(alpha05_total, MB, precision=1, commas=False)
     mobilenetv2_alpha05_feature_params_m_str = fmt(mobilenetv2_alpha05_feature_params/ MILLION, precision=2, commas=False)
-    mobilenetv2_alpha05_feature_mb_str = fmt(alpha05_feature_mb, precision=1, commas=False, suffix=' MB')
+    mobilenetv2_alpha05_feature_mb_str = fmt_qty(alpha05_feature, MB, precision=1, commas=False)
     stm32_hidden_inputs_str = fmt_int(stm32_hidden_inputs, commas=False)
-    stm32_hidden_kb_str = fmt(stm32_hidden_kb, precision=3, commas=False, suffix=' KB')
+    stm32_hidden_kb_str = fmt_qty(stm32_hidden, KB, precision=3, commas=False)
     stm32_hidden_sram_pct_str = fmt_percent(stm32_hidden_sram_pct/100, precision=3, commas=False, style='prose')
-    model_budget_mb = 4
-    model_budget_mb_str = fmt_int(model_budget_mb, commas=False, suffix=' MB')
+    model_budget = 4 * MB
+    model_budget_mb = model_budget.m_as(MB)
+    model_budget_mb_str = fmt_qty_int(model_budget, MB, commas=False)
 ```
 
 The structure and size of the machine learning model directly determine whether on-device training is possible. Cloud-deployed models can span billions of parameters and rely on multi-gigabyte memory budgets; models intended for on-device learning must conform to tight constraints on memory, storage, and computational complexity. These constraints tighten further during training, where gradient computation, parameter updates, and optimizer state management all demand additional resources beyond inference.
@@ -679,15 +687,19 @@ Model complexity also directly affects runtime energy consumption and thermal li
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Scenarios
 from mlsysim.core.constants import watt
-from mlsysim.fmt import MarkdownStr, fmt, check
+from mlsysim.fmt import MarkdownStr, check, fmt, fmt_qty
 
 class EdgeMobilePowerEnvelope:
     """Shared mobile power ranges for edge-learning prose."""
 
-    sustained_low_w = Scenarios.MobilePower.MobileMlSustainedLow.m_as(watt)
-    sustained_high_w = Scenarios.MobilePower.MobileMlSustainedHigh.m_as(watt)
-    burst_low_w = Scenarios.MobilePower.MobileMlBurstLow.m_as(watt)
-    burst_high_w = Scenarios.MobilePower.MobileMlBurstHigh.m_as(watt)
+    sustained_low = Scenarios.MobilePower.MobileMlSustainedLow
+    sustained_high = Scenarios.MobilePower.MobileMlSustainedHigh
+    burst_low = Scenarios.MobilePower.MobileMlBurstLow
+    burst_high = Scenarios.MobilePower.MobileMlBurstHigh
+    sustained_low_w = sustained_low.m_as(watt)
+    sustained_high_w = sustained_high.m_as(watt)
+    burst_low_w = burst_low.m_as(watt)
+    burst_high_w = burst_high.m_as(watt)
 
     check(sustained_low_w < sustained_high_w < burst_low_w < burst_high_w,
           "Mobile sustained and burst power ranges should be ordered.")
@@ -695,11 +707,11 @@ class EdgeMobilePowerEnvelope:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     sustained_range_str = MarkdownStr(
         f"{fmt(sustained_low_w, precision=0, commas=False)}–"
-        f"{fmt(sustained_high_w, precision=0, commas=False, suffix=' W')}"
+        f"{fmt_qty(sustained_high, watt, precision=0, commas=False)}"
     )
     burst_range_str = MarkdownStr(
         f"{fmt(burst_low_w, precision=0, commas=False)}–"
-        f"{fmt(burst_high_w, precision=0, commas=False, suffix=' W')}"
+        f"{fmt_qty(burst_high, watt, precision=0, commas=False)}"
     )
 ```
 
@@ -968,9 +980,10 @@ Beyond raw computational capacity, the architectural implications of these hardw
 # │ Exports: EdgeH100BwRecap.h100_mem_bw_gbs_str
 class EdgeH100BwRecap:
     h100_mem_bw_gbs = int(Hardware.Cloud.H100.memory.bandwidth.m_as(GB/second))
-    from mlsysim.fmt import fmt_int, fmt
+    h100_mem_bw = h100_mem_bw_gbs * GB / second
+    from mlsysim.fmt import fmt_qty_int
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    h100_mem_bw_gbs_str = fmt_int(h100_mem_bw_gbs, suffix=' GB/s')
+    h100_mem_bw_gbs_str = fmt_qty_int(h100_mem_bw, GB/second)
 ```
 
 While mobile NPUs deliver impressive TOPS, the "memory wall" that @sec-compute-memory-wall examines becomes an impassable barrier for large-scale models on edge devices. Recent analysis [@ma2026challenges] highlights that autoregressive "Decode" operations are strictly bandwidth-bound.
@@ -1021,17 +1034,21 @@ Energy and thermal management represent the most challenging aspects of on-devic
 # │ Imports: mlsysim.book (check)
 # │ Exports: battery_power_w_str, battery_duration_min_str, battery_drain_pct_str, battery_total_wh_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, check, fmt, fmt_percent, fmt_time
+from mlsysim.core.constants import MINUTES_PER_HOUR, hour, ureg, watt
+from mlsysim.fmt import check, fmt, fmt_percent, fmt_qty, fmt_qty_int, fmt_time
 from mlsysim import Scenarios
 
 class EdgeBattery:
     # ┌── 1. LOAD ──────────────────────────────────────────
     p_train_w = 4.5  # Typical sustained SoC power during training
+    p_train = p_train_w * watt
     t_train_min = 30 # 30 minute adaptation job
-    battery_wh = Scenarios.PhoneBattery.EnergyWh.m_as(watt * hour)  # Modern flagship smartphone battery
+    battery = Scenarios.PhoneBattery.EnergyWh  # Modern flagship smartphone battery
+    battery_wh = battery.m_as(watt * hour)
     # ┌── 2. EXECUTE ───────────────────────────────────────
     t_train_h = t_train_min / MINUTES_PER_HOUR
-    energy_wh = p_train_w * t_train_h
+    energy = p_train * t_train_h * hour
+    energy_wh = energy.m_as(watt * hour)
     drain_pct = (energy_wh/battery_wh) * 100
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(14 < drain_pct < 16, f"Drain {drain_pct:.1f}% unexpected")
@@ -1039,9 +1056,9 @@ class EdgeBattery:
     battery_power_w_str = fmt(p_train_w, precision=1, commas=False)
     battery_duration_min_str = fmt_time(round(t_train_min), 'minute', precision=0, commas=False, style='word')
     battery_duration_h_str = fmt(t_train_h, precision=1, commas=False)
-    battery_energy_wh_str = fmt(energy_wh, precision=2, commas=False, suffix=' Wh')
+    battery_energy_wh_str = fmt_qty(energy, ureg.watt_hour, precision=2, commas=False, unit_label="Wh")
     battery_drain_pct_str = fmt_percent(round(drain_pct)/100, precision=0, commas=False, style='prose')
-    battery_total_wh_str = fmt_int(battery_wh, commas=False, suffix=' Wh')
+    battery_total_wh_str = fmt_qty_int(battery, ureg.watt_hour, commas=False, unit_label="Wh")
 ```
 
 ::: {#nbk-edge-intelligence-battery-drain-cost-edge-learning .callout-notebook title="Battery drain: The cost of edge learning"}
@@ -1146,7 +1163,7 @@ Personalizing a billion-parameter model on a smartwatch with 500 MB of total sys
 # │ Imports: mlsysim.book (check)
 # │ Exports: ls_full_mb_str, ls_adapter_kb_str, ls_savings_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, check, fmt
+from mlsysim.fmt import check, fmt, fmt_int, fmt_qty, fmt_qty_int
 
 class StorageWall:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -1171,12 +1188,12 @@ class StorageWall:
     check(9 < total_storage_savings < 10, f"Total savings {total_storage_savings:.1f} unexpected")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     ls_contexts_str = fmt_int(n_contexts, commas=False)
-    ls_full_mb_str = fmt_int(size_full_mb, commas=False, suffix=' MB')
-    ls_adapter_kb_str = fmt_int(size_adapter_kb, commas=False, suffix=' KB')
+    ls_full_mb_str = fmt_qty_int(size_full, MB, commas=False)
+    ls_adapter_kb_str = fmt_qty_int(size_adapter, KB, commas=False)
     ls_adapter_mb_str = fmt(size_adapter_mb, precision=1, commas=False)
     ls_savings_ratio_str = fmt_int(per_context_savings, commas=False)
-    ls_total_full_mb_str = fmt_int(total_full_mb, commas=False, suffix=' MB')
-    ls_total_adapter_mb_str = fmt_int(total_adapter_mb, commas=False, suffix=' MB')
+    ls_total_full_mb_str = fmt_qty_int(total_full, MB, commas=False)
+    ls_total_adapter_mb_str = fmt_qty_int(total_adapter, MB, commas=False)
     ls_total_savings_ratio_str = fmt(total_storage_savings, precision=1, commas=False)
 ```
 
@@ -1669,9 +1686,10 @@ This adapter adds a small residual transformation to a frozen layer. When insert
 # │ Exports: EdgeAdapterRamRecap.smartphone_ram_gb_str
 class EdgeAdapterRamRecap:
     smartphone_ram_gb = int(Platforms.Mobile.ram.m_as(GB))
-    from mlsysim.fmt import fmt_int, fmt
+    smartphone_ram = smartphone_ram_gb * GB
+    from mlsysim.fmt import fmt_qty_int
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    smartphone_ram_gb_str = fmt_int(smartphone_ram_gb, commas=False, suffix=' GB')
+    smartphone_ram_gb_str = fmt_qty_int(smartphone_ram, GB, commas=False)
 ```
 
 Adapters enable an efficient multi-tenant architecture for edge intelligence, where a single frozen backbone supports multiple personalized contexts. Consider a 10M parameter vision model deployed on a smartphone with `{python} EdgeAdapterRamRecap.smartphone_ram_gb_str` RAM. Full fine-tuning would require storing a separate 40 MB copy of the model weights for each personalization context (home, office, outdoor), rapidly consuming the device's storage. A rank-64 adapter introduces only approximately 50,000 parameters (roughly 200 KB) per context---a 200$\times$ reduction in storage. This efficiency allows the device to store dozens of specialized adapters that share the same frozen backbone, swapping them dynamically based on the user's location or activity.
@@ -2000,7 +2018,7 @@ Federated learning addresses these coordination constraints through privacy-pres
 # │ Imports: mlsysim.book (check)
 # │ Exports: fs_raw_data_mb_str, fs_update_mb_str, fs_reduction_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, check, fmt
+from mlsysim.fmt import check, fmt_int, fmt_qty, fmt_qty_int
 
 class FederatedSavings:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -2010,15 +2028,17 @@ class FederatedSavings:
     compression_ratio = 10 # Quantized updates (e.g. 4-bit)
     bits_per_update_param = 4 # 4-bit quantized updates
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    raw_data_mb = (n_images * img_size_kb * KB).m_as(MB)
+    raw_data = n_images * img_size_kb * KB
+    raw_data_mb = raw_data.m_as(MB)
     # Update size: 5M params * 4 bits / 8 bits-per-byte = 2.5 MB
-    update_mb = (model_params_m * MILLION * bits_per_update_param / BITS_PER_BYTE * byte).m_as(MB)
+    update = model_params_m * MILLION * bits_per_update_param / BITS_PER_BYTE * byte
+    update_mb = update.m_as(MB)
     reduction = raw_data_mb/update_mb
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(70 < reduction < 90, f"Reduction {reduction:.1f}x unexpected")
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    fs_raw_data_mb_str = fmt_int(raw_data_mb, commas=False, suffix=' MB')
-    fs_update_mb_str = fmt(update_mb, precision=1, commas=False, suffix=' MB')
+    fs_raw_data_mb_str = fmt_qty_int(raw_data, MB, commas=False)
+    fs_update_mb_str = fmt_qty(update, MB, precision=1, commas=False)
     fs_reduction_str = fmt_int(reduction, commas=False)
 ```
 
@@ -3001,14 +3021,18 @@ class EdgeFedNpuRecap:
 # │          EdgeFedPowerEnvelopeRecap.sustained_range_str
 from mlsysim import Scenarios
 from mlsysim.core.constants import milliwatt, watt
-from mlsysim.fmt import MarkdownStr, fmt, check
+from mlsysim.fmt import MarkdownStr, check, fmt, fmt_qty
 
 class EdgeFedPowerEnvelopeRecap:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    sustained_low_w = Scenarios.MobilePower.MobileMlSustainedLow.m_as(watt)
-    sustained_high_w = Scenarios.MobilePower.MobileMlSustainedHigh.m_as(watt)
-    background_low_mw = Scenarios.MobilePower.BackgroundAdaptationLow.m_as(milliwatt)
-    background_high_mw = Scenarios.MobilePower.BackgroundAdaptationHigh.m_as(milliwatt)
+    sustained_low = Scenarios.MobilePower.MobileMlSustainedLow
+    sustained_high = Scenarios.MobilePower.MobileMlSustainedHigh
+    background_low = Scenarios.MobilePower.BackgroundAdaptationLow
+    background_high = Scenarios.MobilePower.BackgroundAdaptationHigh
+    sustained_low_w = sustained_low.m_as(watt)
+    sustained_high_w = sustained_high.m_as(watt)
+    background_low_mw = background_low.m_as(milliwatt)
+    background_high_mw = background_high.m_as(milliwatt)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(sustained_low_w < sustained_high_w, "Sustained mobile power range should be ordered.")
@@ -3017,11 +3041,11 @@ class EdgeFedPowerEnvelopeRecap:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     sustained_range_str = MarkdownStr(
         f"{fmt(sustained_low_w, precision=0, commas=False)}–"
-        f"{fmt(sustained_high_w, precision=0, commas=False, suffix=' W')}"
+        f"{fmt_qty(sustained_high, watt, precision=0, commas=False)}"
     )
     background_range_str = MarkdownStr(
         f"{fmt(background_low_mw, precision=0, commas=False)}–"
-        f"{fmt(background_high_mw, precision=0, commas=False, suffix=' mW')}"
+        f"{fmt_qty(background_high, milliwatt, precision=0, commas=False)}"
     )
 ```
 
@@ -3368,8 +3392,10 @@ from mlsysim.fmt import MarkdownStr, fmt, fmt_qty, check
 
 class EdgeAdaptationPowerMetrics:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    background_low_mw = Scenarios.MobilePower.BackgroundAdaptationLow.m_as(milliwatt)
-    background_high_mw = Scenarios.MobilePower.BackgroundAdaptationHigh.m_as(milliwatt)
+    background_low = Scenarios.MobilePower.BackgroundAdaptationLow
+    background_high = Scenarios.MobilePower.BackgroundAdaptationHigh
+    background_low_mw = background_low.m_as(milliwatt)
+    background_high_mw = background_high.m_as(milliwatt)
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     background_low_kj_per_hour = background_low_mw / THOUSAND * SEC_PER_HOUR / THOUSAND
     background_high_kj_per_hour = background_high_mw / THOUSAND * SEC_PER_HOUR / THOUSAND
@@ -3380,7 +3406,7 @@ class EdgeAdaptationPowerMetrics:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     background_range_str = MarkdownStr(
         f"{fmt(background_low_mw, precision=0, commas=False)}–"
-        f"{fmt(background_high_mw, precision=0, commas=False, suffix=' mW')}"
+        f"{fmt_qty(background_high, milliwatt, precision=0, commas=False)}"
     )
     background_energy_per_hour_str = MarkdownStr(
         f"{fmt(background_low_kj_per_hour, precision=1, commas=False)}–"
