@@ -379,6 +379,34 @@ Validation details:
   `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
   0 findings across 81 files.
 
+## 2026-05-31 — Data engineering time suffixes
+
+Change type: byte-identical formatter relocation. Replaced all 21 `time_unit`
+suffix sites in `vol1/data_engineering/data_engineering.qmd` with
+`fmt_time(...)`. Symbol units (`h`, `ms`, `s`) use compact style; prose labels
+(`seconds`, `days`, `months`, `minutes`, `hours`) use `style="word"`. Old
+`fmt_int` duration sites now round explicitly before `fmt_time` where needed.
+
+Touched chapters and equivalence:
+
+| Chapter file | Calls | Value exports checked | Inline prose lines checked | Result |
+|---|---:|---:|---:|---|
+| `vol1/data_engineering/data_engineering.qmd` | 21 | 203 | 99 | identical values + prose |
+
+Validation details:
+
+- Before/after snapshots were generated with `assess_equiv.py baseline --ref HEAD`
+  and `assess_equiv.py snapshot` under `/tmp/fmt_time_data_engineering`.
+- `assess_equiv.py diff` reported `IDENTICAL values` and `IDENTICAL prose`.
+- `audit_fmt_usage.py` now reports 116 `fmt_time` calls and the `time_unit`
+  suffix bucket dropped from 552 to 532. `data_engineering.qmd` has no
+  remaining `time_unit` suffix sites.
+- Verification: `python3 -m py_compile mlsysim/mlsysim/fmt.py book/cli/checks/math_canonical.py book/cli/checks/fmt_semantic_suffix.py` PASS;
+  `git diff --check` PASS; `./book/binder check math` PASS; focused pytest
+  suite PASS, 167 tests; `fmt_prose_contract.py` PASS, 0 violations;
+  `codemod_fmt.py queue` PASS, `by kind: {}`; `audit_prose_semantics.py` PASS,
+  0 findings across 81 files.
+
 ## 2026-05-31 — Remaining direct count labels
 
 Change type: byte-identical formatter relocation. Replaced 40 hard-coded direct

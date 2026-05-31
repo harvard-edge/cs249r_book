@@ -268,6 +268,15 @@ Old `fmt_int` duration sites keep intentional integer display through
 `./book/binder check math` PASS, focused pytest suite PASS (167 tests),
 prose-contract 0, semantic audit 0 findings, codemod queue empty.
 
+**A21 — Data engineering time suffixes: DONE.**
+All 21 `time_unit` suffix sites in `vol1/data_engineering/data_engineering.qmd`
+moved to `fmt_time(...)`, byte-identical across 203 value exports and 99 prose
+lines. `audit_fmt_usage.py` now reports `fmt_time` calls at 116 and the
+`time_unit` suffix bucket down to 532; `data_engineering.qmd` has no remaining
+`time_unit` suffixes. Verification: py_compile PASS, `git diff --check` PASS,
+`./book/binder check math` PASS, focused pytest suite PASS (167 tests),
+prose-contract 0, semantic audit 0 findings, codemod queue empty.
+
 ### B. WS4 — unit-suffix lane (~2,393 sites: `GB`/`ms`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.
