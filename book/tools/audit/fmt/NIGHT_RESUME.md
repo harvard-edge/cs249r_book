@@ -37,7 +37,7 @@ python3 -m pytest mlsysim/tests/test_fmt.py book/tests/test_codemod_fmt.py book/
 
 ## NOW / NEXT  (update before every commit)
 
-**STATUS: Codex A2 pp editorial pass complete and verified. Safe to continue.**
+**STATUS: Codex WS4 compute-infrastructure unit batch complete and verified. Safe to continue.**
 
 **State:** multiplier + percent + scale 100% migrated; pp → typed fmt_pp (14
 byte-identical sites + grammar fixes, plus the user-approved A2 benchmarking
@@ -55,14 +55,19 @@ the percent/scale lanes. First batch migrated 26 Quantity-backed unit sites to
 `vol1/benchmarking` (1), `vol1/conclusion` (5), `vol1/responsible_engr` (17),
 `vol2/backmatter/appendix_reliability` (1),
 `vol2/collective_communication` (1), and `vol2/introduction` (1).
-All six WS4-changed chapters are HTML-render-verified. The A1 scale-style pass is
+Second batch migrated 60 clean Quantity-backed unit sites in
+`vol2/compute_infrastructure`; 4 candidates were correctly queued because
+canonical Pint labels would change visible text (`MB`→`megabyte`, `GB`→`GiB`).
+`fmt_qty` now rejects plain numbers, so callers must keep Pint Quantity type
+information until the formatter can dimension-check. All WS4-changed chapters are
+HTML-render-verified. The A1 scale-style pass is
 also HTML-render-verified for all 13 source-changed chapters. A2 is
 HTML-render-verified for `benchmarking`. Remaining: the rest of WS4/WS3 and later
 PDF/lock phases. Nothing is half-done or broken.
 
 **If continuing:** Continue WS4 with
 `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/run_unit_lane.py --write <qmd>`
-one chapter at a time. Current dry-run reports 235 remaining clean unit candidates
+one chapter at a time. Current dry-run reports 175 remaining clean unit candidates
 across 20 chapters; many more suffix sites are plain floats and should stay queued
 unless the source is refactored to carry a Pint Quantity.
 
@@ -83,22 +88,27 @@ Corpus CLEAN for all checks. Regression test `book/tests/test_audit_prose_semant
   * ml_systems `mem_bw_growth_pct_str` `"% annually"` → fmt_percent symbol + prose "annually"
   * sustainable_ai `compute_annual_growth_str` `"×/year"` → fmt_multiple + prose `$\times$/year`
   * appendix_reliability ×2 `row.append(fmt(p*100, suffix="%"))` → fmt_percent symbol
-- ~17 `suffix=" percentage point(s)"` / `"percentage-point"` sites: belong to
-  fmt_pp per the rule, BUT fmt_pp only emits plural-prose ("N percentage points")
-  or " pp" — it has NO singular / attributive(hyphen) mode. Migrating blindly
-  would change grammar ("5 percentage-point gap" → "5 percentage points gap").
-  DECISION PENDING (see NEXT). Low correctness risk (word spelled out, no 100x).
+- `fmt_pp` now has singular/plural and attributive-hyphen modes. The user
+  approved the remaining benchmarking grammar sites, so no pp editorial decision
+  remains open.
 
 **NOW done:** WS4 first pass — `run_unit_lane.py` added; tests added to
 `book/tests/test_codemod_fmt.py`; 26 clean unit sites migrated byte-identically.
 `audit_fmt_usage.py` moved `fmt_qty` calls 35 → 61, physical-unit suffixes
 1491 → 1476, and time-unit suffixes 659 → 648.
 
+**NOW done:** WS4 compute-infrastructure batch — migrated 60 clean
+Quantity-backed unit sites byte-identically. `audit_fmt_usage.py` moved
+`fmt_qty` calls 61 → 121 and physical-unit suffixes 1473 → 1413. Four
+`compute_infrastructure` candidates remain queued for visible unit-label drift:
+`50 MB` would become `50 megabyte`, and `80/640 GB` would become `80/640 GiB`.
+
 **NEXT:**
 1. Continue WS4 with `run_unit_lane.py` chapter-sized batches. Highest remaining
-   clean counts: `vol2/compute_infrastructure` (64), `vol1/ml_systems` (28),
-   `vol2/distributed_training` (20), `vol2/backmatter/appendix_fleet` (14),
-   `vol2/ops_scale` (14).
+   clean counts: `vol1/ml_systems` (28), `vol2/distributed_training` (20),
+   `vol2/backmatter/appendix_fleet` (14), `vol2/ops_scale` (14),
+   `vol1/hw_acceleration` (11), `vol1/introduction` (11),
+   `vol2/network_fabrics` (11), `vol2/performance_engineering` (11).
 2. Render-verify any new WS4-changed chapters before Phase 3B/PDF sign-off.
 
 Gates to keep green (run all three):
@@ -146,6 +156,12 @@ Quarto/Deno caches under `/private/tmp` and grepped:
 - `below 1 percentage-point threshold`
 - `drop of 6.8 percentage points`
 
+Codex WS4 compute-infrastructure HTML verification is DONE. Built
+`compute_infrastructure` with Quarto/Deno caches under `/private/tmp` and grepped
+representative migrated values:
+- `125 TFLOP/s`, `300 W`, `300 GB/s`, `900 GB/s`
+- `3.35 TB/s`, `700 W`, `1000 W`
+
 FINDING (sustainable_ai fig-cap): the visible <figcaption> renders `$\times$`
 correctly as a math span ("6.2×/year"), but Quarto copies the caption into the
 figure `title=` hover-tooltip WITHOUT processing math, so the tooltip shows raw
@@ -172,6 +188,11 @@ drop. The adjacent prose/table text was updated to `1 percentage-point threshold
 and `(drop of 6.8 percentage points)`. No user-decision items remain open.
 
 ## Session commit log (newest first)
+- Codex fmt_qty guard + WS4 compute-infrastructure batch: `fmt_qty` now requires
+  Pint Quantity input; migrated 60 clean `compute_infrastructure` unit suffixes
+  to `fmt_qty`; contract 0, semantic 0, queue empty, targeted suite 130 passing;
+  compute_infrastructure HTML-render-verified. Four local unit candidates remain
+  queued for intentional visible unit-label drift (`MB`/`GB` vs Pint labels).
 - Codex A2 pp editorial pass: user approved the benchmarking wording; migrated
   `mv2_acc_drop_str` and `mv2_edge_drop_str` to `fmt_pp`, hyphenated the hardcoded
   threshold, reworded the edge-case table cell, and HTML-render-verified
