@@ -121,7 +121,28 @@ mem_str = fmt_qty(mem, GiB, precision=0, commas=False, unit_label="gigabytes")
         assert rc == 0
 
 
-def test_full_book_lint_clean():
-    """Regression: production corpus has zero lint warnings."""
-    rc = main(["--fail-on", "warning"])
+def test_l014_closed_name_uses_fmt():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        qmd = _write_qmd(
+            root,
+            "book/quarto/contents/vol1/foo/foo.qmd",
+            """```{python}
+class X:
+    energy_kwh_str = fmt(1.0, precision=0)
+    label_str = fmt(1.0, precision=0)
+```""",
+        )
+        issues = lint_file(qmd, root)
+        l014 = [i for i in issues if i.rule == "L014"]
+        assert len(l014) == 1
+        assert "energy_kwh_str" in l014[0].message
+        assert not any("label_str" in i.message for i in l014)
+
+
+def test_full_book_lint_with_baseline():
+    """Production corpus: warnings allowed only via baseline (Phase 8½-A)."""
+    baseline = ROOT / "book/tools/audit/lego_units_baseline.json"
+    assert baseline.exists(), "lego_units_baseline.json required after 8½-A3"
+    rc = main(["--fail-on", "warning", "--baseline", str(baseline)])
     assert rc == 0

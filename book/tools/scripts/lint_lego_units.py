@@ -27,9 +27,9 @@ RULES = (
     "L014", "L015", "L016", "L019",
 )
 
-CLOSED_UNIT_SUFFIX = re.compile(
-    r"_(?P<unit>w|kw|mw|j|mj|wh|kwh|mwh|gwh|gb|tb|gib|ms|s|mw|tonnes?|kg|gbps|tflop)s?_str\s*=",
-    re.I,
+L014_CLOSED_FMT = re.compile(
+    r"^\s*(?P<name>\w+_(?:w|kw|mw|j|mj|wh|kwh|mwh|gwh|gb|tb|gib|ms|s|kg|gbps|tflop|tonnes?)_str)\s*=\s*fmt\s*\(",
+    re.M | re.I,
 )
 OPEN_FMT_ON_SCALAR = re.compile(
     r"^\s*(?P<name>\w+_str)\s*=\s*fmt\s*\(",
@@ -137,15 +137,12 @@ def lint_file(path: Path, root: Path) -> list[LintIssue]:
                     severity="error",
                 ))
 
-        for match in CLOSED_UNIT_SUFFIX.finditer(block):
-            name = match.group(0).split("=")[0].strip()
-            # find assignment line
-            for i, line in enumerate(block.splitlines(), start=1):
-                if name in line and "= fmt(" in line.replace(" ", ""):
-                    issues.append(LintIssue(
-                        "L014", rel, base_line + i,
-                        f"Closed name {name} uses open fmt() — use fmt_qty/domain formatter.",
-                    ))
+        for match in L014_CLOSED_FMT.finditer(block):
+            lineno = base_line + block[: match.start()].count("\n")
+            issues.append(LintIssue(
+                "L014", rel, lineno,
+                f"Closed name {match.group('name')} uses open fmt() — use fmt_qty/domain formatter.",
+            ))
         for match in MASG_TO_CLOSED.finditer(block):
             issues.append(LintIssue(
                 "L016", rel, base_line + match.start() // 80 + 1,

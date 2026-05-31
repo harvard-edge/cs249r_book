@@ -2,7 +2,68 @@
 
 This is a handoff plan for an implementation agent. The goal is to stop recurring LEGO-cell unit bugs by adding durable unit, formula, formatting, lint, and test guardrails around `mlsysim`, without redesigning the book's computation model.
 
+---
+
+## As-built status (2026-05-31, revised) — read this first
+
+**Live tracker:** [`mlsysim-lego-unit-hardening-PROGRESS.md`](mlsysim-lego-unit-hardening-PROGRESS.md) — systematic checklist, gates, work queue.
+
+**Current position:** Layer A/B/C + `.m_as()` migration **done**. **Phase 8½ gate hardening NOT done** — do not treat branch as merge-ready. Phase 9 renders **not started**.
+
+**Branch / worktree (actual):** `/Users/VJ/GitHub/MLSysBook-fmt-fix` on `fmt-fix`.
+
+### Checklist snapshot
+
+| Phase | Status |
+|-------|--------|
+| Layer A (Steps 1–10) — mlsysim infra | **DONE** |
+| Layer A′ — LOAD registry-first | **NOT DONE** (deferred) |
+| Layer B (Steps 11–13) — lint + hooks wired | **DONE** |
+| Layer C (Steps 14+) — `.m_as()` migration | **DONE** (bulk) |
+| Phase 8½ — trustworthy gates + OUTPUT/prose cleanup | **IN PROGRESS** ← **YOU ARE HERE** |
+| Phase 9A–9C — Quarto HTML/PDF renders | **NOT STARTED** |
+| Phase 10 — sync dev, re-verify, promote | **NOT STARTED** |
+
+### Merge-ready gates (all must pass)
+
+| # | Gate | Status | Blocker |
+|---|------|--------|---------|
+| G1 | **L014 linter trustworthy** | **FAIL** | `lint_lego_units.py:144` checks `"= fmt("` after space-stripping → never matches `=fmt(`; ~85+ closed-name `fmt()` assignments undetected |
+| G2 | **`lego-units` lint re-baselined** | **BLOCKED on G1** | Empty baseline is a false all-clear |
+| G3 | **`book_check_lego_prose_units.py` clean** | **FAIL** | 17 files with duplicated units / math-span violations |
+| G4 | **Rate quantities stay dimensional** | **PARTIAL** | e.g. `compute_infrastructure.qmd:1815` — TFLOP/s÷W reattached as TFLOP/s only |
+| G5 | **fmt precision defaults ergonomic** | **OPEN** | `fmt_percent(0.85)`, `fmt_*_range(...)` default `precision=1` fights spurious-zero guard |
+| G6 | **Headless cell exec** | **PASS** | 81/81 files |
+| G7 | **Phase 9 renders green** | **NOT STARTED** | HTML/PDF per chapter + full volume |
+| G8 | **No accidental artifact commits** | **WATCH** | `lego_cells_verify_report.json` unstaged partial regen — do not commit |
+
+### Lint rollout (actual vs plan below)
+
+| Plan said | Actual (2026-05-31) |
+|-----------|---------------------|
+| Separate feature branch → merge into `fmt-fix` | Work committed directly on `fmt-fix` |
+| `default=True` at Phase 9 prep | **Done** at closure (`89c287556f`) |
+| L014–L017 block after Phase 9 | L019 blocks `.m_as()` only; **L017 retired**; **L014 silently broken** |
+| Baseline 0 warnings | **Not trustworthy** until G1 fixed and re-run |
+
+### Codex review lessons (2026-05-31)
+
+1. **Exec clean ≠ render clean** — sustainable_ai cells execute; render still has L015/math-span issues and unrelated xref failures.
+2. **Two linters, one story** — `lint_lego_units.py` (L014–L015) and `book_check_lego_prose_units.py` must both be green.
+3. **Closed formatter contract** — if `fmt_emissions`/`fmt_power` owns the unit, prose must not repeat it; if value goes in `$...$`, use math-safe atoms not `_str` exports.
+4. **Quantity-first means through OUTPUT** — dividing TFLOP/s by W then storing TFLOP/s loses `/W`; use `(flops / tdp).to(TFLOP/second/watt)` or rename to open export.
+
+### Next action (strict order)
+
+See **Phase 8½** below and PROGRESS.md work queue. Do **not** start Phase 9A until G1–G3 are addressed (G4–G5 can overlap with Phase 9 pilot chapters).
+
+The sections below are the **original spec**. Where they conflict with this box or PROGRESS.md, trust the tracker.
+
+---
+
 ## Current Worktree and Branch Strategy
+
+> **Note (2026-05-31):** This section describes the *planned* isolation model. Execution used `fmt-fix` directly — see as-built status above. Phase 10C is now: merge `fmt-fix` → `dev` after Phase 9 green.
 
 ### Integration target
 
@@ -94,22 +155,28 @@ doc is the spec; the progress file is the build log.
 
 **Top of file — always-current checklist:**
 
+> **Use [`mlsysim-lego-unit-hardening-PROGRESS.md`](mlsysim-lego-unit-hardening-PROGRESS.md)** for the live checklist. Template below is the original shape; do not maintain duplicate state here.
+
 ```markdown
-## Step checklist
-- [ ] Step 0 — Branch `feat/lego-unit-hardening` + worktree `MLSysBook-lego-units`
-- [ ] Step 1 — Baseline
-- [ ] Step 2 — Characterization tests
-… (all atomic steps through 10C)
+## Step checklist (see PROGRESS.md for live state)
+- [x] Steps 1–10 — Layer A mlsysim foundation
+- [ ] Layer A′ — LOAD registry-first (deferred)
+- [x] Steps 11–13 — lint + pre-commit wired
+- [x] Steps 14+ — .m_as() migration (bulk)
+- [x] Phase 8½-A — Fix L014 + re-baseline (G1–G2)
+- [ ] Phase 8½-B — prose-units clean, 17 files (G3)
+- [ ] Phase 8½-C — rate-quantity integrity audit (G4)
+- [ ] Phase 8½-D — fmt precision defaults (G5)
 - [ ] Phase 9A — HTML per chapter
 - [ ] Phase 9B — PDF per chapter
 - [ ] Phase 9C — Full volume builds
-- [ ] Phase 10A — Merge dev into feature branch
+- [ ] Phase 10A — Merge dev → fmt-fix
 - [ ] Phase 10B — Re-verify
-- [ ] Phase 10C — Merge feature branch into fmt-fix
+- [ ] Phase 10C — Merge fmt-fix → dev
 
-**Current step:** Step N — description
-**Last commit:** `<sha>` — message
-**Next action:** one sentence
+**Current step:** Phase 8½-B — prose-units pilot (`sustainable_ai.qmd`)
+**Last commit:** *(pending — Phase 8½-A)*
+**Next action:** Fix `sustainable_ai.qmd` prose-units findings; then remaining 16 files
 ```
 
 **Per-step log entry (append after each finished step):**
@@ -2344,13 +2411,13 @@ Per [`.pre-commit-config.yaml`](.pre-commit-config.yaml) and
 
 **Rollout (do not flip to blocking on day one):**
 
-| Phase | Pre-commit behavior |
-|-------|---------------------|
-| Step 12 | Linter exists; manual CLI only |
-| Step 13 | Hook installed; `default=False` or `--fail-on warning` with baseline allowlist |
-| After Vol I queue ~50% clean | Promote high-confidence rules to `--fail-on error` on touched files |
-| After full migration (Phase 9 prep) | Hook `default=True`; errors block commit |
-| After Phase 9 renders green | All L014–L017 rules block; L018 stays advisory |
+| Phase | Pre-commit behavior | As-built (2026-05-31) |
+|-------|---------------------|------------------------|
+| Step 12 | Linter exists; manual CLI only | **Done** |
+| Step 13 | Hook installed; `default=False` or `--fail-on warning` with baseline allowlist | **Done** — hook + empty baseline |
+| After Vol I queue ~50% clean | Promote high-confidence rules to `--fail-on error` on touched files | L019 only (`.m_as()`) |
+| After full migration (Phase 9 prep) | Hook `default=True`; errors block commit | **`default=True` done**; warnings still `--fail-on warning` |
+| After Phase 9 renders green | All L014–L017 rules block; L018 stays advisory | **Not yet** — L017 retired |
 
 Also keep existing hooks that overlap:
 
@@ -2380,7 +2447,86 @@ Acceptance:
 
 ---
 
-## Phase 9: Final Render Verification (after all migration steps)
+## Phase 8½: Gate Hardening (before Phase 9 — added 2026-05-31)
+
+### Why this phase exists
+
+Codex review (2026-05-31) showed that **exec-clean + lint 0 warnings is not sufficient** for merge:
+
+- **L014 is silently broken** in `lint_lego_units.py` (line ~144): space-stripping turns `= fmt(` into `=fmt(` but the check looks for `"= fmt("`.
+- **`book_check_lego_prose_units.py`** still fails **17 files** (duplicate units, closed exports in math spans).
+- **OUTPUT/prose contract** incomplete: closed formatters + repeated prose units; prose `_str` inside `$...$`.
+- **Scalar reattachment** still loses dimensions (e.g. TFLOP/s per W stored as TFLOP/s).
+- **`fmt_percent` / range helpers** default `precision=1` conflicts with spurious-zero guard.
+
+Phase 9 renders will surface these; fix gates first so renders are diagnostic, not whack-a-mole.
+
+### Step 8½-A — Fix L014 and re-baseline (G1, G2) — **DONE 2026-05-31**
+
+| Do | Gate | Status |
+|----|------|--------|
+| Fix L014 match: `L014_CLOSED_FMT` regex on assignment line | Unit test: `energy_kwh_str = fmt(...)` → L014 | ✓ |
+| Add regression in `test_lint_lego_units.py` | pytest 7 passed | ✓ |
+| Re-run linter; refresh baseline with **real** L014 counts | 81 L014 in `lego_units_baseline.json` | ✓ |
+| Do **not** promote L014 to error until baseline queue has a burn-down plan | Allowlist + defer burn-down to 8½-B | ✓ |
+
+### Step 8½-B — Prose-unit contract (G3)
+
+Tool: `python3 book/tools/audit/book_check_lego_prose_units.py book/quarto/contents`
+
+| Category | Fix pattern | Example |
+|----------|-------------|---------|
+| **L015 duplicate unit** | Remove prose unit after closed export | `cf_quebec_tonnes_str` + `tonnes CO₂` → bare ref |
+| **Math span + closed export** | Move ref outside `$...$` or use open/`_math` atom | `gpu_tdp_w_str` (`700 W`) inside `$...$` |
+| **Misnamed export** | Rename or pin `unit=` on formatter | `*_kg_str` that auto-scales to tonnes |
+
+**Queue:** fix **17 files** reported by prose-units checker; pilot on `sustainable_ai.qmd` first (Codex already diagnosed).
+
+Wire into pre-commit only after clean (or baseline + burn-down).
+
+### Step 8½-C — Quantity integrity audit (G4)
+
+Scan for anti-patterns:
+
+```python
+# BAD: loses /W
+x = (flops_mag / tdp_mag) * TFLOP / second
+
+# GOOD: keep rate dimensions
+efficiency = (peak_flops / tdp).to(TFLOP / second / watt)
+efficiency_str = fmt_qty(efficiency, TFLOP / second / watt, ...)
+```
+
+Queue: grep for `.magnitude/` followed by `* TFLOP` without `/ watt`; fix per cell; add L011/L003 lint if pattern is stable.
+
+**Known instance:** `compute_infrastructure.qmd` `GpuEfficiencyTrajectoryRecap` (~1815).
+
+### Step 8½-D — fmt precision defaults (G5)
+
+| Helper | Issue | Fix direction |
+|--------|-------|---------------|
+| `fmt_percent` | `precision=1` default → `0.85` → `0.9` or guard error | Default `precision=None` → auto (like `fmt_multiple`) |
+| `fmt_percent_range`, `fmt_qty_range`, `fmt_time_range` | Same | Same |
+
+Add tests; do not change rendered values in chapters until defaults settled.
+
+### Step 8½-E — Hygiene
+
+- **Do not commit** `book/tools/audit/artifacts/lego_cells_verify_report.json` partial regen.
+- Keep fmt-thread WIP (`audit_fmt_usage.py`, etc.) out of unit-hardening commits.
+
+### Phase 8½ acceptance
+
+- G1–G3 green (L014 detects known cases; prose-units 0 files).
+- G4 queue started with compute_infrastructure pilot fix.
+- G5 decision documented (defaults changed or documented author rule).
+- PROGRESS.md merge-ready table updated.
+
+**Only then** proceed to Phase 9A.
+
+---
+
+## Phase 9: Final Render Verification (after Phase 8½ and migration steps)
 
 ### Objective
 
