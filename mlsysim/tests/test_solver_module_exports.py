@@ -1,5 +1,6 @@
 import mlsysim
 import mlsysim.ops as ops
+import mlsysim.solvers as public_solvers
 from mlsysim.engine import solver
 from mlsysim.engine.solvers import (
     BatchingOptimizer,
@@ -72,6 +73,11 @@ def test_solver_implementations_live_in_domain_modules():
     assert solver.EconomicsModel.__module__.endswith(".solvers.economics")
     assert solver.DataModel.__module__.endswith(".solvers.data")
     assert solver.CompressionModel.__module__.endswith(".solvers.compression")
+
+
+def test_public_solver_module_exports_protocol_and_solver_classes():
+    for name in solver.__all__:
+        assert getattr(public_solvers, name) is getattr(solver, name)
 
 
 def test_package_root_does_not_reexport_solver_aliases():

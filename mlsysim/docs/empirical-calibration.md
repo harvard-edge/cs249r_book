@@ -138,7 +138,7 @@ values minimize error against published benchmarks:
 
 ```python
 import mlsysim
-from mlsysim.engine.solver import SingleNodeModel, ServingModel
+from mlsysim.solvers import SingleNodeModel, ServingModel
 from mlsysim.physics import calc_transformer_training_flops
 
 # Config 1: ResNet-50 / A100 / training

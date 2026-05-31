@@ -88,7 +88,7 @@ Flat aliases at the registry root (for example bare `H100` or `ResNet50` leaf na
 The CLI still resolves short names (`mlsysim eval Llama3_8B H100`) for convenience.
 
 Solvers not listed in `mlsysim.__init__` (for example `CompressionModel`, `MoERoutingModel`)
-import from `mlsysim.engine.solver`. Workload types import from `mlsysim.models.types`.
+import from `mlsysim.solvers`. Workload types import from `mlsysim.models.types`.
 
 ### Scenario Registry
 
@@ -99,8 +99,8 @@ from mlsysim import ReferenceStats, Scenarios
 `Scenarios.*` is the executable scenario registry: each entry composes an
 existing `Models.*` workload, a `Hardware.*` or `Systems.*` target, and
 scenario-local constraints such as latency or power budget. `ReferenceStats.*`
-holds non-executable sourced anchors used by the book, such as mobile power
-envelopes, Waymo data-rate ranges, and TinyML case-study measurements.
+holds non-executable sourced anchors, such as mobile power envelopes, Waymo
+data-rate ranges, and TinyML case-study measurements.
 
 There are no compatibility aliases between these namespaces. Use
 `Scenarios.SmartDoorbell` for an executable case and

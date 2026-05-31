@@ -146,7 +146,7 @@ result = DistributedModel().solve(
 
 ```python
 from mlsysim import Hardware, Models
-from mlsysim.engine.solver import CompressionModel
+from mlsysim.solvers import CompressionModel
 
 result = CompressionModel().solve(
     model=Models.Language.Llama3_8B,

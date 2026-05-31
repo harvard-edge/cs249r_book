@@ -6,8 +6,12 @@ Usage:
 """
 
 from .engine.solver import (
+    BaseOptimizer,
+    BaseResolver,
+    BaseSolver,
     ForwardModel,
     SingleNodeModel,
+    NetworkRooflineModel,
     DistributedModel,
     ReliabilityModel,
     SustainabilityModel,
@@ -37,8 +41,12 @@ from .engine.solver import (
 )
 
 __all__ = [
+    "BaseOptimizer",
+    "BaseResolver",
+    "BaseSolver",
     "ForwardModel",
     "SingleNodeModel",
+    "NetworkRooflineModel",
     "DistributedModel",
     "ReliabilityModel",
     "SustainabilityModel",
