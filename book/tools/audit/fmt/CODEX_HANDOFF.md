@@ -982,7 +982,22 @@ suffixes down to 411, `fmt_qty` at 892, and `fmt_qty_int` at 116. Verification:
 `./book/binder check math` PASS; `./book/binder check code --scope
 lego-dead-code` PASS; `audit_prose_semantics.py` CLEAN across 81 files.
 
-### B. WS4 — unit-suffix lane (remaining 411 physical-unit suffixes: `GB`/`MB`/`W`/`GB/s`/…)  ← the big one
+**A70 — `vol2/distributed_training` physical-unit cleanup: DONE.**
+Migrated all 60 remaining physical-unit suffix sites in `distributed_training`
+to typed quantity formatters, leaving the file with 0 `suffix=` calls. The lane
+covered model/state memory, NVLink/InfiniBand bandwidth, activation headroom,
+pipeline payloads, hybrid parallel memory budgets, PPO/DPO/RLHF memory, and
+recap anchors. GiB-backed hardware capacities preserve visible `GB` with
+`unit_label="GB"`, and rounded displays remain explicit through
+`fmt_qty_int(...)`. `audit_fmt_usage.py` now reports physical-unit suffixes down
+to 351, `fmt_qty` at 951, and `fmt_qty_int` at 117. Verification:
+`assess_equiv.py` values/prose identical for `distributed_training`; `git diff
+--check` PASS; py_compile PASS; focused pytest suite PASS (190 tests);
+`fmt_prose_contract.py` 0; `codemod_fmt.py queue` `by kind: {}`;
+`./book/binder check math` PASS; `./book/binder check code --scope
+lego-dead-code` PASS; `audit_prose_semantics.py` CLEAN across 81 files.
+
+### B. WS4 — unit-suffix lane (remaining 351 physical-unit suffixes: `GB`/`MB`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**
 and NOT a clean codemod, because ~1,938 of the args are plain floats (e.g.
 `weights_gb`), not Pint Quantities, and `fmt_qty` requires a Pint Quantity to

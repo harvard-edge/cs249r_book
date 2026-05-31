@@ -204,8 +204,11 @@ leaving the file with zero `suffix=` calls. Remaining suffix bucket is only 461
 `physical_unit` suffixes across 6 chapters. The `nn_architectures`
 physical-unit cleanup then migrated all 50 remaining sites in that chapter,
 byte-identically, leaving the file with zero `suffix=` calls. Remaining suffix
-bucket is only 411 `physical_unit` suffixes across 5 chapters. Remaining: the
-rest of WS4/WS3 and
+bucket is only 411 `physical_unit` suffixes across 5 chapters. The
+`distributed_training` physical-unit cleanup then migrated all 60 remaining
+sites in that chapter, byte-identically, leaving the file with zero `suffix=`
+calls. Remaining suffix bucket is only 351 `physical_unit` suffixes across 4
+chapters. Remaining: the rest of WS4/WS3 and
 later PDF/lock phases. Nothing is half-done or broken.
 
 **New TODOs from user discussion:** add a prose-bound output contract/gate so
@@ -621,6 +624,10 @@ drop. The adjacent prose/table text was updated to `1 percentage-point threshold
 and `(drop of 6.8 percentage points)`. No user-decision items remain open.
 
 ## Session commit log (newest first)
+- Codex `vol2/distributed_training` physical-unit cleanup: migrated all 60
+  remaining physical-unit suffix sites in the chapter to typed quantity
+  formatters, byte-identically. `distributed_training` now has 0 `suffix=`
+  calls; physical-unit suffixes dropped 411 -> 351.
 - Codex `vol1/nn_architectures` physical-unit cleanup: migrated all 50
   remaining physical-unit suffix sites in the chapter to typed quantity
   formatters, byte-identically. `nn_architectures` now has 0 `suffix=` calls;
