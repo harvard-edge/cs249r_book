@@ -33,6 +33,10 @@ Run ALL fmt tooling from the repo root with `PYTHONPATH=mlsysim`.
 - **Never invent a value-kind glyph in a `suffix=`.** `%`, `×`, `$`, and scale
   letters K/M/B/T are forbidden in `suffix=`; use the typed formatter. A physical
   unit label (`" GB"`, `" ms"`, `" W"`) in `suffix=` is the WS4 target (§4B).
+- **No raw `prefix=` in chapter formatter calls.** Approximate and lower-bound
+  display markers are now named flags (`approx=True`, `lower_bound=True`) on the
+  relevant formatter wrappers. Currency approximation stays
+  `fmt_usd(..., approx=True)`.
 - **Git:** small commits with clear messages; let pre-commit run; do NOT
   `--amend`, do NOT force-push, do NOT skip hooks. The `prettify-tables` hook may
   re-touch a table AFTER staging and abort the commit — just `git add -A` and
@@ -88,6 +92,13 @@ hyphenates the hardcoded `1 percentage-point threshold`, uses noun-form
 `fmt_pp(edge_drop, precision=1)` for the edge-case drop, and rewords the table
 cell to `(drop of 6.8 percentage points)`. Benchmarking HTML was rebuilt and
 grepped for the approved wording.
+
+**A3 — Raw formatter prefixes: DONE.**
+The 16 remaining chapter-level `prefix="~"` / `prefix="> "` formatter calls were
+migrated byte-identically to named `approx=True` / `lower_bound=True` flags.
+`fmt`, `fmt_int`, `fmt_qty`, and `fmt_count` now expose those markers, so future
+approximate quantities/counts do not need raw string prefixes. The corpus has
+zero QMD `prefix=` call sites.
 
 ### B. WS4 — unit-suffix lane (~2,393 sites: `GB`/`ms`/`W`/`GB/s`/…)  ← the big one
 **Risk: LOW** (a unit label can't cause a 0–1↔0–100 / 100× error). **Effort: HIGH**

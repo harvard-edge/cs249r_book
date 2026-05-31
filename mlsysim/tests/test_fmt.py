@@ -62,6 +62,16 @@ class TestFmtPrecisionGuards:
         assert isinstance(out, MarkdownStr)
         assert out._repr_markdown_() == "42"
 
+    def test_named_display_markers_replace_raw_prefixes(self):
+        assert fmt(100, precision=0, commas=False, approx=True, suffix=" MB/s") == "~100 MB/s"
+        assert fmt(1000, precision=0, lower_bound=True, suffix=" MB/s") == "> 1,000 MB/s"
+
+    def test_rejects_conflicting_display_markers(self):
+        with pytest.raises(ValueError, match="both approximate and a lower bound"):
+            fmt(100, precision=0, approx=True, lower_bound=True)
+        with pytest.raises(ValueError, match="Use either prefix="):
+            fmt(100, precision=0, prefix="~", approx=True)
+
 
 class TestFmtInt:
     def test_rounds_computed_values_explicitly(self):
@@ -71,6 +81,9 @@ class TestFmtInt:
 
     def test_accepts_prefix_and_suffix(self):
         assert fmt_int(175, commas=False, suffix=" billion") == "175 billion"
+
+    def test_accepts_named_approx_marker(self):
+        assert fmt_int(80, commas=False, approx=True, suffix=" GB") == "~80 GB"
 
 
 class TestFmtQty:
@@ -85,6 +98,11 @@ class TestFmtQty:
         mem = 140 * ureg.GB
         out = fmt_qty(mem, ureg.GB, precision=0, commas=False)
         assert out == "140 GB"
+
+    def test_accepts_named_marker(self):
+        mem = 140 * ureg.GB
+        out = fmt_qty(mem, ureg.GB, precision=0, commas=False, approx=True)
+        assert out == "~140 GB"
 
     def test_currency_is_refused(self):
         # Currency must go through fmt_usd, not fmt_qty: fmt_qty cannot emit the
@@ -129,6 +147,11 @@ class TestFmtUsd:
 
     def test_returns_markdown_str(self):
         assert isinstance(fmt_usd(100), MarkdownStr)
+
+
+class TestFmtCount:
+    def test_accepts_named_marker(self):
+        assert fmt_count(1024, suffix=" GPUs", approx=True) == "~1,024 GPUs"
 
 
 class TestFmtPercentGuards:

@@ -136,8 +136,20 @@ def _check_fmt_precision(val, precision, result):
         )
 
 
+def _display_prefix(prefix="", *, approx=False, lower_bound=False):
+    """Build a standardized leading marker for a formatted display value."""
+    if approx and lower_bound:
+        raise ValueError("A value cannot be both approximate and a lower bound.")
+    marker = "~" if approx else ("> " if lower_bound else "")
+    if prefix and marker:
+        raise ValueError(
+            "Use either prefix= or the named approx/lower_bound marker, not both."
+        )
+    return prefix or marker
+
+
 def fmt(quantity, unit=None, precision=1, commas=True,
-        prefix="", suffix=""):
+        prefix="", suffix="", approx=False, lower_bound=False):
     """
     Format a Pint Quantity (or plain number) for narrative text.
     Returns a MarkdownStr so Quarto inserts the value verbatim (no escape).
@@ -145,7 +157,9 @@ def fmt(quantity, unit=None, precision=1, commas=True,
     The prefix and suffix arguments collapse the old MarkdownStr(f"...")
     escape-hatch idiom into a single canonical helper. Common uses:
 
-        fmt(price, precision=0, prefix="\\$")      # "$1,000" in QMD prose
+        fmt(price, precision=0, prefix="\\$")      # internal use by fmt_usd
+        fmt(value, precision=0, approx=True)       # "~1,000"
+        fmt(value, precision=0, lower_bound=True)  # "> 1,000"
         fmt(rate * 100, precision=1, commas=False, suffix="%")  # "12.4%"
         fmt(bw_mb_s, precision=1, commas=False, suffix=" MB/s")  # "2.4 MB/s"
         fmt(speedup, precision=0, commas=False)     # prose adds "$\\times$"
@@ -168,6 +182,7 @@ def fmt(quantity, unit=None, precision=1, commas=True,
 
     _check_fmt_precision(val, precision, result)
 
+    prefix = _display_prefix(prefix, approx=approx, lower_bound=lower_bound)
     decorated = f"{prefix}{result}{suffix}"
     out = MarkdownStr(decorated)
     assert isinstance(out, MarkdownStr), (
@@ -178,7 +193,15 @@ def fmt(quantity, unit=None, precision=1, commas=True,
     return out
 
 
-def fmt_int(quantity, unit=None, commas=True, prefix="", suffix=""):
+def fmt_int(
+    quantity,
+    unit=None,
+    commas=True,
+    prefix="",
+    suffix="",
+    approx=False,
+    lower_bound=False,
+):
     """
     Format a value as an integer for narrative text.
 
@@ -190,7 +213,15 @@ def fmt_int(quantity, unit=None, commas=True, prefix="", suffix=""):
         if isinstance(quantity, ureg.Quantity):
             quantity = quantity.to(unit)
     val = _numeric_magnitude(quantity)
-    return fmt(round(val), precision=0, commas=commas, prefix=prefix, suffix=suffix)
+    return fmt(
+        round(val),
+        precision=0,
+        commas=commas,
+        prefix=prefix,
+        suffix=suffix,
+        approx=approx,
+        lower_bound=lower_bound,
+    )
 
 
 def fmt_usd(amount, *, precision=0, commas=True, approx=False, suffix=""):
@@ -425,7 +456,15 @@ def fmt_multiple(factor, precision=1, commas=False):
 _COUNT_SCALES = {"K": 1e3, "M": 1e6, "B": 1e9, "T": 1e12}
 
 
-def fmt_count(value, scale=None, precision=0, commas=True, suffix=""):
+def fmt_count(
+    value,
+    scale=None,
+    precision=0,
+    commas=True,
+    suffix="",
+    approx=False,
+    lower_bound=False,
+):
     """
     Format a **count** (a dimensionless tally of things), optionally with a
     magnitude scale glyph.
@@ -439,6 +478,7 @@ def fmt_count(value, scale=None, precision=0, commas=True, suffix=""):
         fmt_count(70e9, scale="B")                   # "70B"   (e.g. params)
         fmt_count(8192)                              # "8,192" (no scale)
         fmt_count(1024, suffix=" GPUs")              # "1,024 GPUs"
+        fmt_count(1024, suffix=" GPUs", approx=True) # "~1,024 GPUs"
 
     Guard: counts are non-negative.
 
@@ -459,7 +499,14 @@ def fmt_count(value, scale=None, precision=0, commas=True, suffix=""):
             )
         v = v / _COUNT_SCALES[scale]
         glyph = scale
-    return fmt(v, precision=precision, commas=commas, suffix=glyph + suffix)
+    return fmt(
+        v,
+        precision=precision,
+        commas=commas,
+        suffix=glyph + suffix,
+        approx=approx,
+        lower_bound=lower_bound,
+    )
 
 
 def fmt_ratio(value, precision=1, commas=False, allow_negative=False):
@@ -618,6 +665,8 @@ def fmt_qty(
     commas=False,
     prefix="",
     extra_suffix="",
+    approx=False,
+    lower_bound=False,
 ):
     """Format a pint Quantity in ``display_unit`` with a canonical unit suffix.
 
@@ -634,7 +683,15 @@ def fmt_qty(
     q = quantity.to(display_unit)
     val = q.magnitude
     suffix = _compact_unit_suffix(display_unit) + extra_suffix
-    return fmt(val, precision=precision, commas=commas, prefix=prefix, suffix=suffix)
+    return fmt(
+        val,
+        precision=precision,
+        commas=commas,
+        prefix=prefix,
+        suffix=suffix,
+        approx=approx,
+        lower_bound=lower_bound,
+    )
 
 
 def check(condition, message):

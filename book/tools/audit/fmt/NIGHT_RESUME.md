@@ -37,7 +37,7 @@ python3 -m pytest mlsysim/tests/test_fmt.py book/tests/test_codemod_fmt.py book/
 
 ## NOW / NEXT  (update before every commit)
 
-**STATUS: Codex WS4 compute-infrastructure unit batch complete and verified. Safe to continue.**
+**STATUS: Codex marker-prefix cleanup complete and verified. Safe to continue.**
 
 **State:** multiplier + percent + scale 100% migrated; pp → typed fmt_pp (14
 byte-identical sites + grammar fixes, plus the user-approved A2 benchmarking
@@ -59,8 +59,11 @@ Second batch migrated 60 clean Quantity-backed unit sites in
 `vol2/compute_infrastructure`; 4 candidates were correctly queued because
 canonical Pint labels would change visible text (`MB`→`megabyte`, `GB`→`GiB`).
 `fmt_qty` now rejects plain numbers, so callers must keep Pint Quantity type
-information until the formatter can dimension-check. All WS4-changed chapters are
-HTML-render-verified. The A1 scale-style pass is
+information until the formatter can dimension-check. Raw `prefix=` use in QMD
+formatter calls is now eliminated: `fmt`/`fmt_int`/`fmt_qty`/`fmt_count` accept
+named `approx=True` and `lower_bound=True` marker flags, and the 16 remaining
+chapter-level prefix sites were migrated byte-identically. All WS4-changed
+chapters are HTML-render-verified. The A1 scale-style pass is
 also HTML-render-verified for all 13 source-changed chapters. A2 is
 HTML-render-verified for `benchmarking`. Remaining: the rest of WS4/WS3 and later
 PDF/lock phases. Nothing is half-done or broken.
@@ -102,6 +105,14 @@ Quantity-backed unit sites byte-identically. `audit_fmt_usage.py` moved
 `fmt_qty` calls 61 → 121 and physical-unit suffixes 1473 → 1413. Four
 `compute_infrastructure` candidates remain queued for visible unit-label drift:
 `50 MB` would become `50 megabyte`, and `80/640 GB` would become `80/640 GiB`.
+
+**NOW done:** marker-prefix cleanup — added named `approx=True` and
+`lower_bound=True` display markers to `fmt`, `fmt_int`, `fmt_qty`, and
+`fmt_count`; migrated all 16 QMD formatter calls that used raw `prefix="~"` or
+`prefix="> "`; verified no QMD `prefix=` call sites remain. This was a
+byte-identical API cleanup: `assess_equiv` reported identical values and
+identical inline prose for all 8 changed chapters, and HTML builds were grepped
+for the marker-bearing values.
 
 **NEXT:**
 1. Continue WS4 with `run_unit_lane.py` chapter-sized batches. Highest remaining
@@ -162,6 +173,18 @@ representative migrated values:
 - `125 TFLOP/s`, `300 W`, `300 GB/s`, `900 GB/s`
 - `3.35 TB/s`, `700 W`, `1000 W`
 
+Codex marker-prefix cleanup HTML verification is DONE for all 8 source-changed
+chapters. Built the changed chapters by volume and grepped representative marker
+strings:
+- Vol1: appendix_algorithm `~39.1 GB` and `~120.8 GB`;
+  appendix_assumptions `~25 wall-clock days`; appendix_data `~100 MB/s`,
+  `~300 MB/s`, and `> 1,000 MB/s`; model_compression `~107 GB`, `~8 GB`, and
+  `~524.3 KB`; model_serving `~1.5 s` and `~35 s`;
+  responsible_engr `~99 tons`.
+- Vol2: appendix_assumptions `~3.9 failures per day` and `~48 failures per day`;
+  data_storage build succeeded and semantic/equivalence gates covered the
+  migrated `archive_lineage_tb_str`.
+
 FINDING (sustainable_ai fig-cap): the visible <figcaption> renders `$\times$`
 correctly as a math span ("6.2×/year"), but Quarto copies the caption into the
 figure `title=` hover-tooltip WITHOUT processing math, so the tooltip shows raw
@@ -188,6 +211,12 @@ drop. The adjacent prose/table text was updated to `1 percentage-point threshold
 and `(drop of 6.8 percentage points)`. No user-decision items remain open.
 
 ## Session commit log (newest first)
+- Codex marker-prefix cleanup: added named marker flags (`approx=True`,
+  `lower_bound=True`) to the formatter core and quantity/count wrappers; migrated
+  the 16 remaining QMD raw-prefix formatter calls byte-identically; no QMD
+  `prefix=` call sites remain; `assess_equiv` values/prose identical for all 8
+  changed chapters; HTML-render-verified marker values; contract 0, semantic 0,
+  queue empty, targeted suite 134 passing.
 - Codex fmt_qty guard + WS4 compute-infrastructure batch: `fmt_qty` now requires
   Pint Quantity input; migrated 60 clean `compute_infrastructure` unit suffixes
   to `fmt_qty`; contract 0, semantic 0, queue empty, targeted suite 130 passing;
