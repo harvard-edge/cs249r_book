@@ -129,9 +129,12 @@ Quantity displays and migrated 29 more sites byte-identically. The
 that chapter to typed quantity formatters, byte-identically. The
 `vol2/backmatter/appendix_fleet` chapter lane then migrated all 28 remaining
 physical-unit suffixes in that chapter, byte-identically, leaving
-`appendix_fleet` with zero `suffix=` calls. Remaining suffix bucket is only 984
-`physical_unit` suffixes. Remaining: the rest of WS4/WS3 and later PDF/lock
-phases. Nothing is half-done or broken.
+`appendix_fleet` with zero `suffix=` calls. The
+`vol2/collective_communication` chapter lane then migrated all 26 remaining
+physical-unit suffixes in that chapter, byte-identically, leaving
+`collective_communication` with zero `suffix=` calls. Remaining suffix bucket
+is only 958 `physical_unit` suffixes. Remaining: the rest of WS4/WS3 and later
+PDF/lock phases. Nothing is half-done or broken.
 
 **New TODOs from user discussion:** add a prose-bound output contract/gate so
 computed OUTPUT values consumed by inline prose are typed formatter results or
@@ -547,6 +550,10 @@ drop. The adjacent prose/table text was updated to `1 percentage-point threshold
 and `(drop of 6.8 percentage points)`. No user-decision items remain open.
 
 ## Session commit log (newest first)
+- Codex `vol2/collective_communication` physical-unit lane: migrated all 26
+  remaining physical-unit suffix sites in the chapter to typed quantity
+  formatters, byte-identically. `collective_communication` now has 0 `suffix=`
+  calls; physical-unit suffixes dropped 984 → 958.
 - Codex `vol2/backmatter/appendix_fleet` physical-unit lane: migrated all 28
   remaining physical-unit suffix sites in the chapter to typed quantity
   formatters, byte-identically. `appendix_fleet` now has 0 `suffix=` calls;

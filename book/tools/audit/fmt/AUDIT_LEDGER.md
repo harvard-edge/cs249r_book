@@ -256,6 +256,33 @@ Validation details:
   `./book/binder check code --scope lego-dead-code` PASS;
   `audit_prose_semantics.py` PASS, 0 findings across 81 files.
 
+## 2026-05-31 — `vol2/collective_communication` physical-unit lane
+
+Change type: byte-identical chapter cleanup. Migrated all 26 remaining
+physical-unit suffix sites in `vol2/collective_communication/collective_communication.qmd`
+to typed quantity formatters. This covered gradient/message sizes, critical
+message size, MoE token transfer sizes, Ring-vs-Tree crossover examples,
+NVLink/InfiniBand bandwidth recaps, hierarchical AllReduce volumes, and overlap
+bucket sizes.
+
+Touched chapter and equivalence:
+
+| Chapter file | Values/prose checked | Result |
+|---|---:|---|
+| `vol2/collective_communication/collective_communication.qmd` | 104 values / 60 prose lines | identical |
+
+Validation details:
+
+- `audit_fmt_usage.py` physical-unit suffix count dropped from 984 to 958.
+- `vol2/collective_communication/collective_communication.qmd` now has 0
+  `suffix=` calls.
+- `fmt_qty` call count is 432; `fmt_qty_int` call count remains 29.
+- Verification: `git diff --check` PASS; py_compile PASS; focused pytest suite
+  PASS, 190 tests; `fmt_prose_contract.py` PASS, 0 violations;
+  `codemod_fmt.py queue` PASS, `by kind: {}`; `./book/binder check math` PASS;
+  `./book/binder check code --scope lego-dead-code` PASS;
+  `audit_prose_semantics.py` PASS, 0 findings across 81 files.
+
 ## 2026-05-31 — Currency denominator relocation
 
 Change type: byte-identical formatter relocation. Replaced 91
