@@ -3,9 +3,8 @@
 audit_fmt_usage.py — Ground-truth inventory of every fmt-family call site.
 
 Parses the ```{python}``` code cells of every chapter, AST-walks each cell, and
-classifies every call to the fmt-family helpers (fmt, fmt_int, fmt_usd,
-fmt_percent, fmt_qty, fmt_val, fmt_unit, fmt_sci, fmt_math, fmt_frac,
-sci_latex, MarkdownStr) by the *semantic kind* of value it formats and by any
+classifies every call to the fmt-family helpers by the *semantic kind* of value
+it formats and by any
 "abuse" pattern that the typed-formatter migration intends to eliminate.
 
 This is read-only. It writes a JSON inventory + prints a Markdown summary.
@@ -25,9 +24,14 @@ from pathlib import Path
 
 FMT_FAMILY = {
     "fmt", "fmt_int", "fmt_usd", "fmt_percent", "fmt_qty", "fmt_val",
-    "fmt_unit", "fmt_sci", "fmt_math", "fmt_frac", "sci_latex", "MarkdownStr",
+    "fmt_unit", "fmt_sci", "fmt_math", "fmt_frac", "sci_latex",
+    "fmt_pp", "fmt_multiple", "fmt_count", "fmt_ratio", "fmt_range",
+    "MarkdownStr",
 }
-NUMERIC_FMT = {"fmt", "fmt_int", "fmt_percent", "fmt_sci", "fmt_val", "fmt_unit"}
+NUMERIC_FMT = {
+    "fmt", "fmt_int", "fmt_usd", "fmt_percent", "fmt_pp", "fmt_multiple",
+    "fmt_count", "fmt_ratio", "fmt_range", "fmt_sci", "fmt_val", "fmt_unit",
+}
 
 FENCE_RE = re.compile(r"^([ \t]*)```+\s*\{python\}\s*$")
 CLOSE_RE = re.compile(r"^([ \t]*)```+\s*$")
@@ -87,7 +91,7 @@ def classify_suffix(suffix: str):
         return "multiplier"
     if s.startswith("/"):
         return "rate_denominator"
-    if s.strip() in {"K", "M", "B"}:
+    if s.strip() in {"K", "M", "B", "T"}:
         return "scale_glyph"
     if s.strip() in {"million", "billion", "thousand"}:
         return "scale_word"
