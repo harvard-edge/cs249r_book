@@ -1997,6 +1997,7 @@ are not all bugs, but they define the migration order:
 | Scalarization then reunitization | 3 hard hits | Keep units attached in EXECUTE; add registry/helper if needed. |
 | Closed formatter names that do not assert rendered unit/scale | 808 heuristic candidates | Rename only when touched or when prose ambiguity is real; do not churn every stable auto-scaled name in one pass. |
 | Currency/count misuse | 3 hits | Replace `fmt_count` on dollars with `fmt_usd(scale=...)`. |
+| Currency unit expression readability | low-count style cleanup | Prefer `(USD / GB)` for simple currency rates and require `USD / (GB * ureg.month)` for compound denominators; never write `USD / GB * ureg.month`. |
 | Prose duplicate units after closed formatters | 0 current hits | Keep running the prose-unit checker after each migration wave. |
 
 Editorial/layout queues are deferred until after semantic correctness:
@@ -2022,7 +2023,10 @@ Use this order to avoid another mixed-state cleanup:
    FLOP work/count, arithmetic intensity, and operation throughput.
 5. Migrate parameter and token count scalarizations to `fmt_params` and
    `fmt_tokens`.
-6. Run prose-unit and output-name audits after each wave.
-7. Only then tighten lint rules from reporting to blocking.
-8. Update shared `.claude/rules/` with stable future-facing rules.
-9. Run the deferred PDF layout QA pass.
+6. Normalize currency rate expressions so denominators are visually grouped:
+   `(USD / GB)` is acceptable and clearer; compound rates must use parentheses
+   around the whole denominator, such as `USD / (GB * ureg.month)`.
+7. Run prose-unit and output-name audits after each wave.
+8. Only then tighten lint rules from reporting to blocking.
+9. Update shared `.claude/rules/` with stable future-facing rules.
+10. Run the deferred PDF layout QA pass.

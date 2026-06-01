@@ -353,6 +353,20 @@ kv_cache_bandwidth_tbs_str = fmt_qty(
 
 The important rule is that `fmt_qty()` receives the original Pint quantity, not the scalar extracted with `.m_as(...)`.
 
+Currency-rate units follow the same readability principle. `USD / GB` and
+`(USD / GB)` are equivalent Pint unit expressions, but the parenthesized form is
+often clearer in dense LEGO cells. Compound denominators must be grouped:
+
+```python
+egress_rate = Infrastructure.Pricing.Cloud.EgressPerGB.rate.to(USD / GB)
+storage_rate = Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate.to(
+    USD / (TB * ureg.month)
+)
+```
+
+Do not write `USD / GB * ureg.month`; Python parses that as
+`(USD / GB) * ureg.month`, which is a different unit.
+
 Do not rely on Pint alone for these things:
 
 - When to show `GB` vs `GiB`.
