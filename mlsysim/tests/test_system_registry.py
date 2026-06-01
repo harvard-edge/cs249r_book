@@ -31,6 +31,23 @@ def test_training_1k_a100_cluster_matches_debug_examples():
     assert fleet.fabric is Systems.Fabrics.InfiniBand_HDR
 
 
+def test_small_reference_cluster_tiers():
+    assert Systems.Clusters.Lab_64_H100.count == 8
+    assert Systems.Clusters.Lab_64_H100.total_accelerators == 64
+    assert Systems.Clusters.Training_512_H100.count == 64
+    assert Systems.Clusters.Training_512_H100.total_accelerators == 512
+
+
+def test_kempner_h100_partition_profile():
+    fleet = Systems.Clusters.Kempner_H100_384
+
+    assert fleet.count == 96
+    assert fleet.node is Systems.Nodes.Kempner_H100_4GPU
+    assert fleet.node.accelerators_per_node == 4
+    assert fleet.total_accelerators == 384
+    assert fleet.fabric is Systems.Fabrics.InfiniBand_NDR
+
+
 def test_reliability_node_composite_profile():
     assert Systems.Reliability.DgxNodeComposite.mttf_hours == pytest.approx(1_000)
     assert Systems.Reliability.NodeRecoveryLowMin == pytest.approx(10)

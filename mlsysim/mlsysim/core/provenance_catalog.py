@@ -94,6 +94,14 @@ BOOK_CLUSTER_TIERS = _conv(
     "MLSysBook editorial cluster tiers (256 / 2k / 8k / 100k GPUs)",
 )
 
+KEMPNER_AI_CLUSTER_H100 = _ds(
+    "prov:kempner-ai-cluster-h100",
+    "Kempner Institute Computing Handbook, Overview of Cluster — H100 partition specs",
+    "https://handbook.eng.kempnerinstitute.harvard.edu/s1_high_performance_computing/kempner_cluster/overview_of_kempner_cluster.html",
+    verified="2026-06-01",
+    notes="H100 partition: 384 H100 80GB GPUs, 24 servers per rack, 4 GPUs per server, four H100 racks.",
+)
+
 # --- Real-world case-study / workload scale anchors (Scenarios registry) ---
 BOOK_WORKLOAD_SCALE = Provenance(
     id="prov:book-workload-scale",

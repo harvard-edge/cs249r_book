@@ -4,7 +4,7 @@ This is an advisory work queue for values that likely define
 hardware, systems, infrastructure, pricing, models, datasets,
 storage subsystems, or scenarios in LEGO LOAD stages.
 
-Findings: 1081
+Findings: 1078
 By target:
    270  Scenarios.* or Ops.*
    208  Models.* or Scenarios.TrainingRuns
@@ -12,7 +12,7 @@ By target:
    109  Datasets.* or Scenarios.DataWorkloads
    106  Infrastructure.Pricing.* or Scenarios.*
     49  Hardware.*
-    46  Systems.Clusters or Systems.Nodes
+    43  Systems.Clusters or Systems.Nodes
     31  Infrastructure.*
     23  Hardware.* or Hardware.Tech.*
     22  Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet
@@ -41,9 +41,9 @@ Top chapters:
     29  vol1/ml_workflow
     27  vol1/responsible_engr
     25  vol2/distributed_training
-    22  vol2/fleet_orchestration
     21  vol2/security_privacy
     19  vol2/compute_infrastructure
+    19  vol2/fleet_orchestration
 Top reasons:
    270  scenario/workload policy
    208  model/workload specification
@@ -51,7 +51,7 @@ Top reasons:
    106  economic input or scenario price
    105  dataset/workload specification
     49  hardware-related quantitative input
-    46  fleet/topology fact
+    43  fleet/topology fact
     31  infrastructure input
     23  hardware specification
     22  cloud/fleet price point
@@ -1101,26 +1101,23 @@ Top reasons:
 |---|---|---|---|---|---|
 | `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:944` | `TopologyPlacement` | `lat_rack_ms` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `85` |
 | `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:1131` | `ElasticScaling` | `window_h` | `Scenarios.* or Ops.*` | scenario/workload policy | `24` |
-| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:1432` | `SpotTrainingEconomics` | `gpus` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `512` |
-| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:1433` | `SpotTrainingEconomics` | `run_hours` | `Scenarios.* or Ops.*` | scenario/workload policy | `14 * HOURS_PER_DAY` |
-| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:1436` | `SpotTrainingEconomics` | `checkpoint_overhead_fraction` | `Systems.Storage or Datasets.*` | storage/data fact | `0.05` |
-| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:1438` | `SpotTrainingEconomics` | `restart_hours` | `Scenarios.* or Ops.*` | scenario/workload policy | `0.5` |
-| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:1702` | `AutoscalingLag` | `qps_per_replica` | `Scenarios.* or Ops.*` | scenario/workload policy | `5` |
-| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:1703` | `AutoscalingLag` | `traffic_start` | `Scenarios.* or Ops.*` | scenario/workload policy | `40` |
-| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:1704` | `AutoscalingLag` | `traffic_end` | `Scenarios.* or Ops.*` | scenario/workload policy | `80` |
-| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:1812` | `GpuSharingRoi` | `small_footprint` | `Scenarios.*` | unit-bearing scenario input | `26 * GiB` |
-| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:1816` | `GpuSharingRoi` | `gpus_per_large` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `8` |
-| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:1817` | `GpuSharingRoi` | `models_per_gpu_shared` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `2` |
-| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:2026` | `ChargebackExample` | `gpus` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `64` |
-| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:2027` | `ChargebackExample` | `days` | `Scenarios.* or Ops.*` | scenario/workload policy | `34` |
-| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:2093` | `PreemptionTax` | `gpus` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `64` |
-| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:2094` | `PreemptionTax` | `lost_minutes` | `Scenarios.* or Ops.*` | scenario/workload policy | `15` |
-| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:2095` | `PreemptionTax` | `reload_minutes` | `Scenarios.* or Ops.*` | scenario/workload policy | `20` |
-| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:2096` | `PreemptionTax` | `warmup_minutes` | `Scenarios.* or Ops.*` | scenario/workload policy | `10` |
-| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:2098` | `PreemptionTax` | `preemptions_per_day` | `Scenarios.* or Ops.*` | scenario/workload policy | `12` |
-| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:2146` | `QuotaHoardingCost` | `gpus` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `500` |
-| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:2147` | `QuotaHoardingCost` | `weeks` | `Scenarios.* or Ops.*` | scenario/workload policy | `3` |
-| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:2148` | `QuotaHoardingCost` | `hours_per_week` | `Scenarios.* or Ops.*` | scenario/workload policy | `7 * HOURS_PER_DAY` |
+| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:1435` | `SpotTrainingEconomics` | `run_hours` | `Scenarios.* or Ops.*` | scenario/workload policy | `14 * HOURS_PER_DAY` |
+| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:1438` | `SpotTrainingEconomics` | `checkpoint_overhead_fraction` | `Systems.Storage or Datasets.*` | storage/data fact | `0.05` |
+| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:1440` | `SpotTrainingEconomics` | `restart_hours` | `Scenarios.* or Ops.*` | scenario/workload policy | `0.5` |
+| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:1704` | `AutoscalingLag` | `qps_per_replica` | `Scenarios.* or Ops.*` | scenario/workload policy | `5` |
+| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:1705` | `AutoscalingLag` | `traffic_start` | `Scenarios.* or Ops.*` | scenario/workload policy | `40` |
+| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:1706` | `AutoscalingLag` | `traffic_end` | `Scenarios.* or Ops.*` | scenario/workload policy | `80` |
+| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:1814` | `GpuSharingRoi` | `small_footprint` | `Scenarios.*` | unit-bearing scenario input | `26 * GiB` |
+| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:1818` | `GpuSharingRoi` | `gpus_per_large` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `8` |
+| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:1819` | `GpuSharingRoi` | `models_per_gpu_shared` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `2` |
+| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:2032` | `ChargebackExample` | `days` | `Scenarios.* or Ops.*` | scenario/workload policy | `34` |
+| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:2103` | `PreemptionTax` | `lost_duration` | `Scenarios.* or Ops.*` | scenario/workload policy | `15 * minute` |
+| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:2104` | `PreemptionTax` | `reload_duration` | `Scenarios.* or Ops.*` | scenario/workload policy | `20 * minute` |
+| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:2105` | `PreemptionTax` | `warmup_duration` | `Scenarios.* or Ops.*` | scenario/workload policy | `10 * minute` |
+| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:2107` | `PreemptionTax` | `preemptions_per_day` | `Scenarios.* or Ops.*` | scenario/workload policy | `12` |
+| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:2159` | `QuotaHoardingCost` | `gpus` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `500` |
+| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:2160` | `QuotaHoardingCost` | `weeks` | `Scenarios.* or Ops.*` | scenario/workload policy | `3` |
+| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:2161` | `QuotaHoardingCost` | `hours_per_week` | `Scenarios.* or Ops.*` | scenario/workload policy | `7 * HOURS_PER_DAY` |
 
 ## vol2/inference
 

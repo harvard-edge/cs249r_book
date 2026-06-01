@@ -61,6 +61,17 @@ class Nodes(Registry):
         intra_node_bw=Hardware.Cloud.B200.nvlink.bandwidth,
         nics_per_node=8,
     )
+    Kempner_H100_4GPU = Node(
+        name="Kempner H100 4-GPU Server",
+        accelerator=Hardware.Cloud.H100,
+        accelerators_per_node=4,
+        intra_node_bw=Hardware.Cloud.H100.nvlink.bandwidth,
+        nics_per_node=4,
+        metadata=Metadata(
+            provenance=pc.KEMPNER_AI_CLUSTER_H100,
+            description="Kempner H100 partition server envelope: four H100 80GB GPUs per server.",
+        ),
+    )
 
 
 class Fabrics(Registry):
@@ -119,6 +130,20 @@ class Clusters(Registry):
         fabric=Fabrics.Ethernet_100G,
         metadata=Metadata(provenance=_TIER_PROV, description="Small cluster tier (256 GPUs)."),
     )
+    Lab_64_H100 = Fleet(
+        name="Lab Cluster (64 H100 GPUs)",
+        node=Nodes.DGX_H100,
+        count=8,
+        fabric=Fabrics.InfiniBand_HDR,
+        metadata=Metadata(provenance=_TIER_PROV, description="Small lab tier (64 H100 GPUs)."),
+    )
+    Training_512_H100 = Fleet(
+        name="Training Cluster (512 H100 GPUs)",
+        node=Nodes.DGX_H100,
+        count=64,
+        fabric=Fabrics.InfiniBand_HDR,
+        metadata=Metadata(provenance=_TIER_PROV, description="Mid-small training tier (512 H100 GPUs)."),
+    )
     Production_2K = Fleet(
         name="Production Cluster (2048 GPUs)",
         node=Nodes.DGX_H100,
@@ -165,6 +190,16 @@ class Clusters(Registry):
         metadata=Metadata(
             provenance=_TIER_PROV,
             description="Round-number reference H100 fleet tier (25000 GPUs).",
+        ),
+    )
+    Kempner_H100_384 = Fleet(
+        name="Kempner AI Cluster H100 Partition (384 H100 GPUs)",
+        node=Nodes.Kempner_H100_4GPU,
+        count=96,
+        fabric=Fabrics.InfiniBand_NDR,
+        metadata=Metadata(
+            provenance=pc.KEMPNER_AI_CLUSTER_H100,
+            description="Published Kempner Institute H100 partition before the 2026 heterogeneous expansion.",
         ),
     )
     Mega_100K = Fleet(

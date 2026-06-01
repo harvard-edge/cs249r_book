@@ -1425,11 +1425,13 @@ The optimal mix depends on workload characteristics and organizational prioritie
 # │ Imports: mlsysim.fmt (check)
 # │ Exports: spot_* strings for callout
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Systems
 from mlsysim.fmt import fmt, check, MarkdownStr, fmt_count, fmt_params, fmt_time, fmt_usd
 
 class SpotTrainingEconomics:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    gpus = 512
+    fleet = Systems.Clusters.Training_512_H100
+    gpus = fleet.total_accelerators
     run_hours = 14 * HOURS_PER_DAY
     on_demand_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
     spot_rate = Infrastructure.Pricing.Fleet.SpotGpuHourRef.rate.to(USD / hour).magnitude
@@ -2016,28 +2018,33 @@ Attribution in a shared fleet presents a forensic challenge. A single "training"
 # │ Goal: Quantify the visible chargeback cost of a 64-GPU, 34-day run.
 # │ How: Multiply GPU count, wall-clock hours, and internal GPU-hour rate.
 # │
-# │ Imports: mlsysim.fmt (fmt, MarkdownStr, check)
-# │ Exports: chargeback_hours_str, chargeback_cost_str
+# │ Imports: mlsysim.fmt (check, fmt_time, fmt_usd)
+# │ Exports: ChargebackExample.chargeback_hours_h_str,
+# │          ChargebackExample.chargeback_cost_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, MarkdownStr, check, fmt_usd
+from mlsysim import Systems
+from mlsysim.fmt import check, fmt_time, fmt_usd
 
 class ChargebackExample:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    gpus = 64
+    fleet = Systems.Clusters.Lab_64_H100
+    gpus = fleet.total_accelerators
     days = 34
+    duration = days * day
     gpu_hour_rate = Infrastructure.Pricing.Fleet.InternalChargebackPerHour.rate.to(USD / hour).magnitude
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    hours = days * HOURS_PER_DAY
+    hours = duration.to(hour).magnitude
     cost = gpus * hours * gpu_hour_rate
     # ┌── 3. GUARD ─────────────────────────────────────────
+    check(duration.check("[time]"), f"Expected a time quantity, got {duration}")
     check(hours == 816, f"Expected 816 hours, got {hours}")
     check(cost == 130560, f"Expected 130560, got {cost}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    chargeback_hours_str = fmt(hours, precision=0)
+    chargeback_hours_h_str = fmt_time(duration, hour, precision=0, commas=False)
     chargeback_cost_str = fmt_usd(cost, precision=0)
 ```
 
-This data feeds the utilization dashboard, the cluster operator's primary instrument for fleet health. This view must synthesize per-team utilization against quotas, queue depth by priority class, and the **fragmentation index**\index{Fragmentation Index}, a measure of free GPUs that cannot be allocated due to topology constraints. Crucially, it must track the "cost of chaos": preemption rates, spot instance interruption frequencies, and the recovery overhead they induce. When these metrics are visible, they drive behavior. A 64-GPU 175B scheduling run that lasts 34 days consumes about `{python} ChargebackExample.chargeback_cost_str` of capacity (64 GPUs $\times$ `{python} ChargebackExample.chargeback_hours_str` $\times$ \$2.50/GPU-hour). Without proper accounting, this cost is invisible to the team that requested it. With chargeback, the team must justify this expenditure against the model's expected business value.
+This data feeds the utilization dashboard, the cluster operator's primary instrument for fleet health. This view must synthesize per-team utilization against quotas, queue depth by priority class, and the **fragmentation index**\index{Fragmentation Index}, a measure of free GPUs that cannot be allocated due to topology constraints. Crucially, it must track the "cost of chaos": preemption rates, spot instance interruption frequencies, and the recovery overhead they induce. When these metrics are visible, they drive behavior. A 64-GPU 175B scheduling run that lasts 34 days consumes about `{python} ChargebackExample.chargeback_cost_str` of capacity (64 GPUs $\times$ `{python} ChargebackExample.chargeback_hours_h_str` $\times$ \$2.50/GPU-hour). Without proper accounting, this cost is invisible to the team that requested it. With chargeback, the team must justify this expenditure against the model's expected business value.
 
 Automated anomaly detection turns these metrics into actionable signals. A sudden spike in a team's consumption to 3$\times$ their historical norm might indicate a runaway script spawning infinite jobs. A queue that grows faster than it drains signals a capacity shortfall that auto-scaling must address. Conversely, a sudden drop in cluster-wide power consumption typically precedes a mass job failure event, often due to a shared dependency like a storage outage. These alerts allow operators to intervene before the budget is drained or the queue becomes unmanageable.
 
@@ -2083,38 +2090,44 @@ The engineering cost of preemption extends far beyond the scheduling latency. Th
 # │ Goal: Quantify wasted cost and GPU-hours from repeated preemptions.
 # │ How: Convert recovery time across all GPUs into wasted GPU-hour cost.
 # │
-# │ Imports: mlsysim.fmt (fmt, check)
+# │ Imports: mlsysim.fmt (check, fmt_count, fmt_time, fmt_usd)
 # │ Exports: preempt_* strings for prose
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, fmt_usd
+from mlsysim import Systems
+from mlsysim.fmt import check, fmt_count, fmt_time, fmt_usd
 
 class PreemptionTax:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    gpus = 64
-    lost_minutes = 15
-    reload_minutes = 20
-    warmup_minutes = 10
+    fleet = Systems.Clusters.Lab_64_H100
+    gpus = fleet.total_accelerators
+    lost_duration = 15 * minute
+    reload_duration = 20 * minute
+    warmup_duration = 10 * minute
     gpu_hour_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
     preemptions_per_day = 12
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    recovery_minutes = lost_minutes + reload_minutes + warmup_minutes
-    recovery_hours = recovery_minutes / MINUTES_PER_HOUR
+    recovery_duration = lost_duration + reload_duration + warmup_duration
+    recovery_minutes = recovery_duration.to(minute).magnitude
+    recovery_hours = recovery_duration.to(hour).magnitude
     cost_per_event = gpus * recovery_hours * gpu_hour_rate
-    wasted_hours_per_day = preemptions_per_day * recovery_hours
+    wasted_duration_per_day = preemptions_per_day * recovery_duration
+    wasted_hours_per_day = wasted_duration_per_day.to(hour).magnitude
     wasted_gpu_hours_per_day = gpus * wasted_hours_per_day
     # ┌── 3. GUARD ─────────────────────────────────────────
+    check(recovery_duration.check("[time]"), f"Expected recovery duration, got {recovery_duration}")
+    check(wasted_duration_per_day.check("[time]"), f"Expected wasted duration, got {wasted_duration_per_day}")
     check(recovery_minutes == 45, f"Expected 45 minutes, got {recovery_minutes}")
     check(cost_per_event == 96, f"Expected $96, got {cost_per_event}")
     check(wasted_gpu_hours_per_day == 576, f"Expected 576 GPU-hours, got {wasted_gpu_hours_per_day}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    recovery_minutes_str = fmt(recovery_minutes, precision=0, commas=False)
+    recovery_duration_min_attr_str = fmt_time(recovery_duration, minute, precision=0, commas=False, style="word", attributive=True)
     gpu_hour_rate_str = fmt_usd(gpu_hour_rate, precision=0, commas=False, per="GPU-hour")
     cost_per_event_str = fmt_usd(cost_per_event, precision=0)
-    wasted_hours_per_day_str = fmt(wasted_hours_per_day, precision=0, commas=False)
-    wasted_gpu_hours_per_day_str = fmt(wasted_gpu_hours_per_day, precision=0)
+    wasted_duration_per_day_h_str = fmt_time(wasted_duration_per_day, hour, precision=0, commas=False, style="word")
+    wasted_gpu_hours_per_day_str = fmt_count(wasted_gpu_hours_per_day, label="GPU-hour", plural_label="GPU-hours")
 ```
 
-During this `{python} PreemptionTax.recovery_minutes_str`-minute recovery window, the GPUs are active but effectively unproductive. At `{python} PreemptionTax.gpu_hour_rate_str`, a single preemption event costs `{python} PreemptionTax.cost_per_event_str` in wasted compute capital. If the scheduler allows unlimited preemption, 12 preemptions per day waste `{python} PreemptionTax.wasted_hours_per_day_str` hours/day of that job's allocation, or `{python} PreemptionTax.wasted_gpu_hours_per_day_str` GPU-hours/day for this 64-GPU run. To mitigate this, production systems enforce **preemption budgets**\index{Preemption Budgets}. These rate limits constrain disruption frequency, ensuring that a job cannot be preempted more than once per hour, or that total cluster preemption churn cannot exceed 5 percent of capacity in any 10-minute window. This forces the scheduler to wait for natural job completions rather than triggering a cascade, trading slightly higher pending times for significantly higher aggregate throughput.
+During this `{python} PreemptionTax.recovery_duration_min_attr_str` recovery window, the GPUs are active but effectively unproductive. At `{python} PreemptionTax.gpu_hour_rate_str`, a single preemption event costs `{python} PreemptionTax.cost_per_event_str` in wasted compute capital. If the scheduler allows unlimited preemption, 12 preemptions per day waste `{python} PreemptionTax.wasted_duration_per_day_h_str` per day of that job's allocation, or `{python} PreemptionTax.wasted_gpu_hours_per_day_str` per day for this 64-GPU run. To mitigate this, production systems enforce **preemption budgets**\index{Preemption Budgets}. These rate limits constrain disruption frequency, ensuring that a job cannot be preempted more than once per hour, or that total cluster preemption churn cannot exceed 5 percent of capacity in any 10-minute window. This forces the scheduler to wait for natural job completions rather than triggering a cascade, trading slightly higher pending times for significantly higher aggregate throughput.
 
 ### Quota governance and organizational dynamics {#sec-fleet-orchestration-quota-governance}
 

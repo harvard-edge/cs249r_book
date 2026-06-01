@@ -44,8 +44,8 @@ python3 book/tools/audit/book_check_lego_scenario_inputs.py \
 
 Current output:
 
-- **1,081 advisory MLSysIM source-of-truth candidates**
-- **119 high-confidence candidates**
+- **1,078 advisory MLSysIM source-of-truth candidates**
+- **116 high-confidence candidates**
 - Full JSON work queue:
   `book/tools/audit/artifacts/lego_scenario_inputs_audit.json`
 - Full Markdown work queue:
@@ -59,7 +59,7 @@ High-confidence buckets:
 
 | Target | Count | Meaning |
 |---|---:|---|
-| `Systems.Clusters` / `Systems.Nodes` | 46 | Fleet, node, GPU-count, cluster-topology facts |
+| `Systems.Clusters` / `Systems.Nodes` | 43 | Fleet, node, GPU-count, cluster-topology facts |
 | `Hardware.*` / `Hardware.Tech.*` | 23 | Hardware capacity, bandwidth, FLOP/s, TDP, memory/interconnect facts |
 | `Infrastructure.Pricing.Cloud` / `Infrastructure.Pricing.Fleet` | 22 | GPU-hour, cloud-instance, and fleet price points |
 | `Systems.Fabrics` / `Systems.SwitchFabric` | 14 | Network/fabric/switch-sizing facts |
@@ -72,10 +72,10 @@ Broader medium-confidence buckets:
 | Target | Count | Meaning |
 |---|---:|---|
 | `Scenarios.*` / `Ops.*` | 270 | Workload, SLA, monitoring, drift, threshold, and operational policies |
-| `Models.*` / `Scenarios.TrainingRuns` | 209 | Model dimensions and training-run workload inputs |
+| `Models.*` / `Scenarios.TrainingRuns` | 208 | Model dimensions and training-run workload inputs |
 | `Scenarios.*` | 164 | Unit-bearing scenario inputs |
 | `Datasets.*` / `Scenarios.DataWorkloads` | 109 | Dataset/sample/corpus sizes |
-| `Infrastructure.Pricing.*` / `Scenarios.*` | 107 | Economic assumptions not yet in a named price registry |
+| `Infrastructure.Pricing.*` / `Scenarios.*` | 106 | Economic assumptions not yet in a named price registry |
 | `Hardware.*` | 49 | Hardware-related values that need review |
 
 This is the first real full-cell audit. Migration is **underway**, not done.
@@ -126,6 +126,15 @@ Known concrete findings from the first pass:
   migrated the repeated `data_engineering.qmd` storage-throughput examples.
 - Stage 9 migrated the `fault_tolerance.qmd` checkpoint-debug NVMe bandwidth
   to `Systems.Storage.LocalNvmeGen3`.
+- Stage 10 added small H100 fleet tiers (`Lab_64_H100` and
+  `Training_512_H100`) and migrated the matching
+  `fleet_orchestration.qmd` spot-training, chargeback, and preemption examples.
+  The same pass changed chargeback/preemption duration outputs from plain
+  `fmt(...)` numbers plus prose units to Pint-backed `fmt_time(...)` output.
+- Stage 10 also added a sourced `Systems.Clusters.Kempner_H100_384` profile
+  for the published Kempner Institute H100 partition. It intentionally models
+  only the homogeneous H100 partition; the full 2026 Kempner expansion is
+  heterogeneous and should wait for a composite cluster type.
 - 100,000-GPU examples should load `Systems.Clusters.Mega_100K`.
 - Storage/checkpoint examples mix two different kinds of facts: storage-system
   facts such as local NVMe drive count, local/PFS bandwidth, capacity, and
@@ -195,9 +204,18 @@ Add these under `Systems.Clusters` with `Metadata(provenance=...)`:
 - `Reference_25K_H100`: 25,000 H100 GPUs, 3,125 DGX H100-style nodes, NDR
   fabric. Used only when the book needs a clean round-number fleet, not a
   named operator.
+- `Lab_64_H100`: 64 H100 GPUs, 8 DGX H100-style nodes, HDR fabric. Use this
+  for small physical-fleet examples such as chargeback or preemption when the
+  prose really means a 64-H100 cluster.
+- `Training_512_H100`: 512 H100 GPUs, 64 DGX H100-style nodes, HDR fabric.
+  Use this for mid-small H100 fleet economics examples.
 - `Training_1K_A100`: 1,024 A100 GPUs, 128 DGX A100-style nodes, HDR fabric.
   Use this for A100 debugging and communication examples that intentionally
   use A100 NVLink/HDR characteristics.
+- `Kempner_H100_384`: public Kempner Institute H100 partition profile:
+  384 H100 80GB GPUs in 96 four-GPU servers with NDR fabric. Do not use this
+  for the full 1,144-GPU 2026 mixed H200/H100/A100/RTX Pro 6000 expansion
+  until MLSysIM has a composite heterogeneous fleet representation.
 - `XAI_Colossus_H100`: public xAI Colossus profile. Official xAI page states
   200,000 H100 GPUs in a single interconnected cluster and also reports
   "180K GPUs" in its "By the numbers" section, plus 170 PB/s aggregate memory
@@ -219,8 +237,6 @@ Consider after audit classification:
 
 - `Lab_64_A100`: 64 A100 GPUs, 8 DGX A100 nodes. Use only where examples
   actually mean a 64-A100 training cluster.
-- `Lab_64_H100`: 64 H100 GPUs, 8 DGX H100 nodes. Use only where examples
-  actually mean a 64-H100 communication or scheduling cluster.
 - `SingleNode_H100` or direct `Systems.Nodes.DGX_H100` for 8-GPU examples.
   Prefer the node object when the example is about one node, not a fleet.
 
@@ -485,6 +501,9 @@ Required behavior:
   - 10,000 GPUs → `Systems.Clusters.Training_10K`
   - 100,000 GPUs → `Systems.Clusters.Mega_100K`
   - 25,000 GPUs → `Systems.Clusters.Reference_25K_H100`
+  - 512 H100 GPUs → `Systems.Clusters.Training_512_H100`
+  - 64 H100 GPUs → `Systems.Clusters.Lab_64_H100`
+  - Kempner H100 partition → `Systems.Clusters.Kempner_H100_384`
 - Emit JSON for agent work queues.
 - Allowlist pure algebra and figure-only cells explicitly.
 
@@ -509,6 +528,11 @@ The first slice should be small and high-confidence:
    example end to end, preferably the 2,048-GPU checkpoint path, to prove the
    taxonomy before broad migration.
 6. [x] Run focused LEGO execution for touched chapters and focused MLSysIM tests.
+7. [x] Add `Systems.Clusters.Lab_64_H100` and
+   `Systems.Clusters.Training_512_H100`, then migrate the matching
+   `fleet_orchestration.qmd` economics examples.
+8. [x] Add `Systems.Clusters.Kempner_H100_384` as a sourced public-cluster
+   profile for the homogeneous H100 partition only.
 
 This gives immediate value without forcing the whole scenario-profile taxonomy
 to exist on day one.
