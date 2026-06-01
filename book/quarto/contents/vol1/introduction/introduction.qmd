@@ -1307,7 +1307,8 @@ The lesson is "bitter" because our intuition misleads us\index{bitter lesson, Th
 # │ How: Divide the Patterson et al. GPT-3 energy estimate by a round
 # │      household-year electricity baseline.
 # │
-# │ Imports: mlsysim.core.constants (Models.Language.GPT3.training_energy_mwh),
+# │ Imports: mlsysim (Models.Language.GPT3.training_energy_mwh,
+# │          Scenarios.EnergyAnchors.USHouseholdAnnualElectricity),
 # │          mlsysim.fmt (fmt, check)
 # │ Exports: GPT3TrainingEnergy.energy_mwh_str, households_str,
 # │          household_mwh_year_str
@@ -1321,7 +1322,7 @@ class GPT3TrainingEnergy:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     energy = Models.Language.GPT3.training_energy_mwh
-    household_mwh_year = 10.7 * MWh
+    household_mwh_year = Scenarios.EnergyAnchors.USHouseholdAnnualElectricity
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     households = (energy / household_mwh_year).to("").magnitude
@@ -1393,8 +1394,8 @@ This definition motivates the **Data · Algorithm · Machine (D·A·M) taxonomy*
 # │          compute_time_us_str, a100_ridge_str, workload_ai_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Hardware, Engine
-from mlsysim.fmt import fmt_int, fmt, fmt_qty, check, fmt_time
-from mlsysim.core.units import MB, TB, GFLOPs, TFLOPs, flop, byte, US, second
+from mlsysim.fmt import fmt_int, fmt, fmt_qty, fmt_qty_int, check, fmt_time
+from mlsysim.core.units import MB, TB, GFLOPs, TFLOPs, flop, byte, US, microsecond, second
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ResNet50DamExample:
@@ -1411,26 +1412,26 @@ class ResNet50DamExample:
     # to illustrate the theoretical roofline boundary.
     p = Engine.solve(m, h, batch_size=1, precision="fp16", efficiency=1.0)
 
-    weight_mb = p.memory_footprint.to(MB).magnitude
-    a100_hbm_tbs = p.peak_bw_actual.to(TB / second).magnitude
+    weight = p.memory_footprint.to(MB)
+    a100_hbm = p.peak_bw_actual.to(TB / second)
     memory_traffic = p.latency_memory * p.peak_bw_actual
-    memory_time_us = p.latency_memory.to(microsecond).magnitude
+    memory_time = p.latency_memory.to(microsecond)
 
-    resnet_gflops = m.inference_flops.to(GFLOPs).magnitude
-    a100_peak_tflops = p.peak_flops_actual.to(TFLOPs / second).magnitude
-    compute_time_us = p.latency_compute.to(microsecond).magnitude
+    resnet_flops = m.inference_flops.to(GFLOPs)
+    a100_peak = p.peak_flops_actual.to(TFLOPs / second)
+    compute_time = p.latency_compute.to(microsecond)
 
-    a100_ridge = a100_peak_tflops / a100_hbm_tbs
-    workload_ai = p.arithmetic_intensity.to(flop / byte).magnitude
-    memory_compute_ratio = memory_time_us / compute_time_us
+    a100_ridge = (a100_peak / a100_hbm).to(flop / byte)
+    workload_ai = p.arithmetic_intensity.to(flop / byte)
+    memory_compute_ratio = (memory_time / compute_time).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(45 <= weight_mb <= 60, f"ResNet-50 FP16 weights should be about 50 MB, got {weight_mb:.1f} MB.")
+    check(45 <= weight.to(MB).magnitude <= 60, f"ResNet-50 FP16 weights should be about 50 MB, got {weight.to(MB).magnitude:.1f} MB.")
     check(
-        abs(memory_traffic.to(MB).magnitude - weight_mb * 1.1) < 1,
+        abs(memory_traffic.to(MB).magnitude - (weight * 1.1).to(MB).magnitude) < 1,
         f"Batch-one memory traffic should be weights plus ~10% activations, got {memory_traffic.to(MB).magnitude:.1f} MB.",
     )
-    check(memory_time_us > compute_time_us, "Small-batch ResNet-50 example should be memory-side.")
+    check(memory_time > compute_time, "Small-batch ResNet-50 example should be memory-side.")
     check(workload_ai < a100_ridge, "Example should fall below the A100 FP16 ridge point.")
     check(1.5 <= memory_compute_ratio <= 2.5, "Expected memory/compute ratio should be about 2x.")
 
@@ -1439,11 +1440,11 @@ class ResNet50DamExample:
     memory_traffic_mb_str = fmt_qty(memory_traffic, MB, precision=1, commas=False)
     a100_hbm_tbs_str = fmt_qty(p.peak_bw_actual, TB / second, precision=1, commas=False)
     memory_time_us_str = fmt_time(p.latency_memory, US, precision=1, commas=False)
-    resnet_gflops_str = fmt_qty(m.inference_flops, GFLOPs, precision=1, commas=False)
+    resnet_gflops_str = fmt_qty(resnet_flops, GFLOPs, precision=1, commas=False)
     a100_peak_tflops_str = fmt_qty(p.peak_flops_actual, TFLOPs / second, precision=0, commas=False)
     compute_time_us_str = fmt_time(p.latency_compute, US, precision=1, commas=False)
-    a100_ridge_str = fmt_qty(round(a100_ridge) * flop / byte, flop / byte, precision=0, commas=False, unit_label="FLOP/byte")
-    workload_ai_str = fmt_qty(round(workload_ai) * flop / byte, flop / byte, precision=0, commas=False, unit_label="FLOP/byte")
+    a100_ridge_str = fmt_qty_int(a100_ridge, flop / byte, commas=False, unit_label="FLOP/byte")
+    workload_ai_str = fmt_qty_int(workload_ai, flop / byte, commas=False, unit_label="FLOP/byte")
 ```
 
 ::: {#dfn-introduction-d-m-taxonomy .callout-definition title="The D·A·M taxonomy"}
@@ -1832,7 +1833,7 @@ Throughout this book, every optimization technique we study, from pruning to ker
 from mlsysim import Models, Hardware
 from mlsysim.physics import dTime
 from mlsysim.fmt import fmt_int, fmt, fmt_math, check, fmt_qty, fmt_count, fmt_percent, fmt_time
-from mlsysim.core.units import flop, TFLOPs, day
+from mlsysim.core.units import flop, TFLOPs, day, second
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT3Training:
@@ -1846,10 +1847,9 @@ class GPT3Training:
     h_a100 = Hardware.Cloud.A100
 
     ops_quantity = m_gpt3.training_ops
-    ops = ops_quantity.to(flop).magnitude
     num_gpus = Systems.Clusters.Training_1K.total_accelerators
     peak_flops_per_device = h_a100.compute.peak_flops
-    peak_tflops = peak_flops_per_device.to(TFLOPs / second).magnitude
+    peak_flops_rate = peak_flops_per_device.to(TFLOPs / second)
     eta_base = 0.45
     eta_opt = 0.60
 
@@ -1859,18 +1859,18 @@ class GPT3Training:
         num_devices=num_gpus,
         peak_flops_per_device=peak_flops_per_device,
         efficiency_eta=eta_base,
-    ).to(day).magnitude
+    ).to(day)
     days_opt = dTime(
         total_ops=ops_quantity,
         num_devices=num_gpus,
         peak_flops_per_device=peak_flops_per_device,
         efficiency_eta=eta_opt,
-    ).to(day).magnitude
+    ).to(day)
     days_saved = days_base - days_opt
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(days_base > 20, f"Text implies >20 days, got {days_base:.1f}")
-    check(days_saved > 5, f"Text claims significant savings, got {days_saved:.1f}")
+    check(days_base > 20 * day, f"Text implies >20 days, got {days_base.to(day).magnitude:.1f}")
+    check(days_saved > 5 * day, f"Text claims significant savings, got {days_saved.to(day).magnitude:.1f}")
     check(days_opt < days_base, "Optimization failed to reduce time")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
@@ -1878,22 +1878,23 @@ class GPT3Training:
     num_gpus_str = fmt_count(num_gpus, commas=False, label="GPU")
     eta_base_pct_str = fmt_percent(eta_base, precision=0, commas=False, style='symbol')
     eta_opt_pct_str = fmt_percent(eta_opt, precision=0, commas=False, style='symbol')
-    days_initial_str = fmt_time(round(days_base), "day", precision=0, commas=False, style="word")
-    days_optimized_str = fmt_time(round(days_opt), "day", precision=0, commas=False, style="word")
-    days_saved_str = fmt_time(round(days_saved), "day", precision=0, commas=False, style="word")
+    days_initial_str = fmt_time(round(days_base.to(day).magnitude), day, precision=0, commas=False, style="word")
+    days_optimized_str = fmt_time(round(days_opt.to(day).magnitude), day, precision=0, commas=False, style="word")
+    days_saved_str = fmt_time(round(days_saved.to(day).magnitude), day, precision=0, commas=False, style="word")
 
     # LaTeX math components
-    _ops_mag = f"{ops:.2e}"
+    _ops_mag = f"{ops_quantity.to(flop).magnitude:.2e}"
     _ops_coeff = _ops_mag.split("e+")[0]
     ops_exp_value = int(_ops_mag.split("e+")[1])
-    peak_tflops_str = fmt_qty(peak_flops_per_device, TFLOPs / second, precision=0, commas=False, unit_label="TFLOP/s")
+    peak_tflops_str = fmt_qty(peak_flops_rate, TFLOPs / second, precision=0, commas=False, unit_label="TFLOP/s")
+    peak_rate_value = peak_flops_rate.to(TFLOPs / second).magnitude
 
     # Equation assembly (inline refs use GPT3Training.* form)
     time_formula_math = fmt_math(r"T_{\text{train}} \approx \frac{O}{N_{\text{GPU}} \cdot R_{\text{peak}} \cdot \eta_{\text{hw}}}")
     time_value_math = fmt_math(
-        rf"\approx \frac{{{_ops_coeff} \times 10^{{{ops_exp_value}}}}}{{{num_gpus} \times {peak_tflops:.0f} \times 10^{{12}} \times {eta_base}}}"
+        rf"\approx \frac{{{_ops_coeff} \times 10^{{{ops_exp_value}}}}}{{{num_gpus} \times {peak_rate_value:.0f} \times 10^{{12}} \times {eta_base}}}"
     )
-    time_days_math = fmt_math(rf"\approx {fmt_int(days_base, commas=False)}\ \text{{days}}")
+    time_days_math = fmt_math(rf"\approx {fmt_int(days_base.to(day).magnitude, commas=False)}\ \text{{days}}")
     ops_math = fmt_math(rf"\approx {_ops_coeff} \times 10^{{{ops_exp_value}}}\ \text{{FLOPs}}")
 ```
 

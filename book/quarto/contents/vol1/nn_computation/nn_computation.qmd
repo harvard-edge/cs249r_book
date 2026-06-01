@@ -1439,27 +1439,28 @@ From a systems engineering perspective, this translation reveals *why* neural ne
 # │ Exports: MacAcceleratorSpecLocal.h100_fp16_tflops_str,
 # │          MacAcceleratorSpecLocal.h100_fp16_tmacs_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, fmt_qty, check
+from mlsysim.fmt import fmt, fmt_flop_rate, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MacAcceleratorSpecLocal:
     """Namespace for local MAC footnote accelerator specs."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    h100_fp16_tflops = Hardware.Cloud.H100.compute.peak_flops.to(TFLOPs / second).magnitude
+    h100_fp16_rate = Hardware.Cloud.H100.compute.peak_flops
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    h100_fp16_tmacs = h100_fp16_tflops / 2
+    h100_fp16_macs_rate = h100_fp16_rate / 2
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(h100_fp16_tflops > 900, f"H100 FP16 throughput unexpectedly low: {h100_fp16_tflops}")
+    check(h100_fp16_rate > 900 * (TFLOPs / second), f"H100 FP16 throughput unexpectedly low: {h100_fp16_rate}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    h100_fp16_tflops_str = fmt(h100_fp16_tflops, precision=0, commas=False)
-    h100_fp16_tmacs_str = fmt(h100_fp16_tmacs, precision=1, commas=False)
+    h100_fp16_tflops_str = fmt_flop_rate(h100_fp16_rate, unit=TFLOPs / second, precision=0, commas=False)
+    # Scalar boundary: MLSysIM tracks FLOP/s; prose maps half that rate to MAC/s by convention.
+    h100_fp16_tmacs_str = fmt(h100_fp16_macs_rate.to(TFLOPs / second).magnitude, precision=1, commas=False)
 ```
 
-[^fn-multiply-accumulate]: **MAC (Multiply-Accumulate)**: The atomic operation of neural computation: $a \leftarrow a + (b \times c)$. Modern accelerators are often marketed in FLOPs because a fused multiply-add is counted as two floating-point operations. On that convention, an NVIDIA H100 is rated at `{python} MacAcceleratorSpecLocal.h100_fp16_tflops_str` dense FP16 TFLOP/s, or about `{python} MacAcceleratorSpecLocal.h100_fp16_tmacs_str` trillion MAC/s if one MAC is counted as one multiply-accumulate. Every layer size and batch size decision ultimately reduces to how many MACs fit within the latency and power budget. \index{MAC!multiply-accumulate operation}
+[^fn-multiply-accumulate]: **MAC (Multiply-Accumulate)**: The atomic operation of neural computation: $a \leftarrow a + (b \times c)$. Modern accelerators are often marketed in FLOPs because a fused multiply-add is counted as two floating-point operations. On that convention, an NVIDIA H100 is rated at `{python} MacAcceleratorSpecLocal.h100_fp16_tflops_str` dense FP16, or about `{python} MacAcceleratorSpecLocal.h100_fp16_tmacs_str` trillion MAC/s if one MAC is counted as one multiply-accumulate. Every layer size and batch size decision ultimately reduces to how many MACs fit within the latency and power budget. \index{MAC!multiply-accumulate operation}
 
 The transition from individual neurons to integrated systems requires navigating the central trade-off\index{Neural Network!capacity vs. cost trade-off} between representational capacity and computational cost. While silicon transistors operate at gigahertz frequencies, millions of times faster than biological chemical signaling, the sheer volume of operations in deep networks creates unique bottlenecks.
 
@@ -1786,7 +1787,7 @@ class HistoricalScale:
 # │          TrainingEnergyScale.us_homes_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt_int, fmt, fmt_qty, check
+from mlsysim.fmt import fmt, fmt_energy, fmt_qty, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class TrainingEnergyScale:
@@ -1795,28 +1796,27 @@ class TrainingEnergyScale:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     hours_per_day = HOURS_PER_DAY
     lenet_train_days = 3
-    lenet_workstation_kw = 0.75
-    a100_kw = Hardware.Cloud.A100.tdp.to(kW).magnitude
+    lenet_workstation_power = 0.75 * kW  # scenario-local workstation power assumption
+    a100_tdp = Hardware.Cloud.A100.tdp
     pue = Infrastructure.FacilityCooling.Typical.pue
-    household_mwh_per_year = 10.5
+    household_energy_per_year = 10.5 * MWh  # representative household energy assumption
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    lenet_kwh = lenet_train_days * hours_per_day * lenet_workstation_kw
-    lenet_energy = lenet_kwh * kWh
-    gpt4_accelerator_mwh = Models.Language.GPT4.training_gpu_days * hours_per_day * a100_kw / THOUSAND
-    gpt4_energy_mwh = gpt4_accelerator_mwh * pue
-    gpt4_energy = gpt4_energy_mwh * MWh
-    us_homes_equiv = gpt4_energy_mwh / household_mwh_per_year
+    lenet_duration = lenet_train_days * hours_per_day * hour
+    lenet_energy = lenet_duration * lenet_workstation_power
+    gpt4_accelerator_energy = Models.Language.GPT4.training_gpu_days * hours_per_day * hour * a100_tdp
+    gpt4_energy = gpt4_accelerator_energy * pue
+    us_homes_equiv = (gpt4_energy / household_energy_per_year).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(lenet_kwh < 100, f"LeNet workstation energy should be tens of kWh, got {lenet_kwh:.1f}")
-    check(gpt4_energy_mwh > 5_000, f"GPT-4 energy estimate should be thousands of MWh, got {gpt4_energy_mwh:.0f}")
+    check(lenet_energy < 100 * kWh, f"LeNet workstation energy should be tens of kWh, got {lenet_energy.to(kWh).magnitude:.1f}")
+    check(gpt4_energy > 5_000 * MWh, f"GPT-4 energy estimate should be thousands of MWh, got {gpt4_energy.to(MWh).magnitude:.0f}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    lenet_kwh_str = fmt_qty(lenet_energy, kWh, precision=0, commas=False)
-    gpt4_energy_mwh_str = fmt_qty(gpt4_energy, MWh, precision=0, commas=True)
+    lenet_kwh_str = fmt_energy(lenet_energy, unit=kWh, precision=0, commas=False)
+    gpt4_energy_mwh_str = fmt_energy(gpt4_energy, unit=MWh, precision=0, commas=True)
     us_homes_str = fmt(us_homes_equiv, precision=0, commas=True)
-    household_mwh_per_year_str = fmt_qty(household_mwh_per_year * MWh, MWh, precision=1, commas=False, per="year")
+    household_mwh_per_year_str = fmt_qty(household_energy_per_year, MWh, precision=1, commas=False, per="year")
 ```
 
 While the preceding sections established the technical foundations of deep learning, the term itself gained prominence in the 2010s, coinciding with advances in computational power and data accessibility. The scale of this computational explosion is difficult to grasp without visualization. @Fig-trends plots seven decades of AI training compute on a logarithmic scale, revealing two fitted regimes: total training compute, measured in floating-point operations (FLOPs), followed a comparatively slow pre-2010 trend, then the post-2012 deep-learning frontier accelerated sharply. Large-scale models after 2015 sit orders of magnitude above the pre-2010 trajectory, showing that modern progress reinvests hardware and algorithmic gains into much larger training runs.
@@ -2125,29 +2125,29 @@ These algorithmic advances created demand for higher-throughput computing infras
 # │ Exports: TpuHardwareFootnoteLocal.tpuv1_tops_str,
 # │          TpuHardwareFootnoteLocal.tpuv1_tdp_w_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, check
+from mlsysim.fmt import fmt_power, fmt_qty, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class TpuHardwareFootnoteLocal:
     """Namespace for local TPU hardware footnote specs."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    tpuv1_tops = Hardware.Cloud.TPUv1.compute.precision_flops["int8"].to(TOPS).magnitude
-    tpuv1_tdp_w = Hardware.Cloud.TPUv1.tdp.to(watt).magnitude
+    tpuv1_tops = Hardware.Cloud.TPUv1.compute.precision_flops["int8"]
+    tpuv1_tdp = Hardware.Cloud.TPUv1.tdp
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    efficiency_tops_per_w = tpuv1_tops / tpuv1_tdp_w
+    efficiency_tops_per_w = tpuv1_tops / tpuv1_tdp
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(tpuv1_tops == 92, f"TPU v1 INT8 throughput changed: {tpuv1_tops}")
-    check(efficiency_tops_per_w > 1, f"Expected TPU v1 efficiency above 1 TOPS/W, got {efficiency_tops_per_w:.1f}")
+    check(tpuv1_tops == 92 * TOPS, f"TPU v1 INT8 throughput changed: {tpuv1_tops}")
+    check(efficiency_tops_per_w > 1 * (TOPS / watt), f"Expected TPU v1 efficiency above 1 TOPS/W, got {efficiency_tops_per_w.to(TOPS / watt).magnitude:.1f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    tpuv1_tops_str = fmt(tpuv1_tops, precision=0, commas=False)
-    tpuv1_tdp_w_str = fmt(tpuv1_tdp_w, precision=0, commas=False)
+    tpuv1_tops_str = fmt_qty(tpuv1_tops, TOPS, precision=0, commas=False)
+    tpuv1_tdp_w_str = fmt_power(tpuv1_tdp, unit=watt, precision=0, commas=False)
 ```
 
-[^fn-tpu-tensor-hardware]: **Tensor Processing Unit (TPU)**: Google's custom accelerator, first deployed internally in 2015, optimized specifically for the matrix multiplications that dominate neural network workloads. The TPU v1 achieved `{python} TpuHardwareFootnoteLocal.tpuv1_tops_str` TOPS (vendor-reported INT8 tera-operations/s) for inference at `{python} TpuHardwareFootnoteLocal.tpuv1_tdp_w_str`, a power efficiency that general-purpose GPUs of the era could not match. The name "Tensor Processing Unit" reflects the design decision to sacrifice general-purpose flexibility for maximum throughput on the specific operation that neural networks need most. \index{TPU!design trade-off}
+[^fn-tpu-tensor-hardware]: **Tensor Processing Unit (TPU)**: Google's custom accelerator, first deployed internally in 2015, optimized specifically for the matrix multiplications that dominate neural network workloads. The TPU v1 achieved `{python} TpuHardwareFootnoteLocal.tpuv1_tops_str` (vendor-reported INT8 tera-operations/s) for inference at `{python} TpuHardwareFootnoteLocal.tpuv1_tdp_w_str`, a power efficiency that general-purpose GPUs of the era could not match. The name "Tensor Processing Unit" reflects the design decision to sacrifice general-purpose flexibility for maximum throughput on the specific operation that neural networks need most. \index{TPU!design trade-off}
 
 The convergence of data availability, algorithmic innovation, and computational infrastructure created the foundation for modern deep learning. Understanding the computational operations that drive these infrastructure requirements is essential: when scaled across millions of parameters and billions of training examples, simple mathematical operations create the massive computational demands that shaped this evolution.
 
@@ -3047,15 +3047,13 @@ class MnistScaleComparison:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     mnist_large_params = sum(_i * _o + _o for _i, _o in mnist_large_arch)
     mnist_large_mem = mnist_large_params * BYTES_FP32
-    mnist_large_mem_mb = mnist_large_mem.to(MB).magnitude
     mnist_small_params = sum(_i * _o + _o for _i, _o in mnist_small_arch)
     mnist_small_mem = mnist_small_params * BYTES_FP32
-    mnist_small_mem_kb = mnist_small_mem.to(KB).magnitude
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    mnist_large_params_m_str = fmt_count((mnist_large_params * param).to(param).magnitude, scale='M', precision=1, commas=False)
+    mnist_large_params_m_str = fmt_count(mnist_large_params, scale='M', precision=1, commas=False)
     mnist_large_mem_mb_str = fmt_qty_int(mnist_large_mem, MB, commas=False)
-    mnist_small_params_k_str = fmt_count((mnist_small_params * param).to(param).magnitude, scale='K', precision=1, commas=False)
+    mnist_small_params_k_str = fmt_count(mnist_small_params, scale='K', precision=1, commas=False)
     mnist_small_mem_kb_str = fmt_qty_int(mnist_small_mem, KB, commas=False)
 ```
 
@@ -3620,24 +3618,21 @@ class MentalMathCalc:
     """Namespace for Mental Math Calc."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    mm_params_m_value = 100
-    mm_bytes_value = 4
-    mm_overhead_value = 4  # params + grads + optimizer states
-    mm_gpu_gb_value = 16
+    mm_params = 100 * Mparam      # scenario assumption: model size for quick feasibility math
+    mm_bytes = BYTES_FP32
+    mm_overhead = 4               # params + grads + optimizer states
+    mm_gpu = 16 * GB              # scenario assumption: target GPU memory
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     mm_model = (
-        mm_params_m_value * MILLION * mm_bytes_value * mm_overhead_value * byte
+        mm_params.to(param).magnitude * mm_bytes * mm_overhead
     )
-    mm_gpu = mm_gpu_gb_value * GB
-    mm_model_gb_value = mm_model.to(GB).magnitude
     mm_remaining = mm_gpu - mm_model
-    mm_remaining_gb_value = mm_remaining.to(GB).magnitude
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     mm_model_str = fmt_qty(mm_model, GB, precision=1, commas=False)
     mm_remaining_str = fmt_qty(mm_remaining, GB, precision=1, commas=False)
-    mm_params_m_str = fmt_count(mm_params_m_value * MILLION, scale='M', precision=0, commas=False)
+    mm_params_m_str = fmt_count(mm_params.to(param).magnitude, scale='M', commas=False)
     mm_gpu_gb_str = fmt_qty(mm_gpu, GB, precision=0, commas=False)
 ```
 
@@ -4026,23 +4021,23 @@ class MnistFlopsCalc:
     """Namespace for Mnist Flops Calc."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    batch_size_value = 32
-    in_dim_value = 784
-    h1_value = 128
-    h2_value = 64
-    out_dim_value = 10
-    double_h1_value = 256
-    double_h2_value = 128
+    batch_size = 32
+    in_dim = 784
+    h1_dim = 128
+    h2_dim = 64
+    out_dim = 10
+    double_h1_dim = 256
+    double_h2_dim = 128
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    flops_l1_mm_value = 2 * batch_size_value * in_dim_value * h1_value
-    flops_l1_bias_value = 2 * (batch_size_value * h1_value)  # Bias add + ReLU
+    flops_l1_mm_value = 2 * batch_size * in_dim * h1_dim
+    flops_l1_bias_value = 2 * (batch_size * h1_dim)  # Bias add + ReLU
 
-    flops_l2_mm_value = 2 * batch_size_value * h1_value * h2_value
-    flops_l2_bias_value = 2 * (batch_size_value * h2_value)
+    flops_l2_mm_value = 2 * batch_size * h1_dim * h2_dim
+    flops_l2_bias_value = 2 * (batch_size * h2_dim)
 
-    flops_l3_mm_value = 2 * batch_size_value * h2_value * out_dim_value
-    flops_l3_bias_value = 2 * (batch_size_value * out_dim_value)  # Bias + Softmax approx
+    flops_l3_mm_value = 2 * batch_size * h2_dim * out_dim
+    flops_l3_bias_value = 2 * (batch_size * out_dim)  # Bias + Softmax approx
 
     total_flops_value = (
         flops_l1_mm_value
@@ -4054,37 +4049,37 @@ class MnistFlopsCalc:
     )
     total_mops_value = (total_flops_value * flop).to(MFLOPs).magnitude
     weights = [
-        in_dim_value * h1_value,
-        h1_value * h2_value,
-        h2_value * out_dim_value,
+        in_dim * h1_dim,
+        h1_dim * h2_dim,
+        h2_dim * out_dim,
     ]
-    biases = [h1_value, h2_value, out_dim_value]
+    biases = [h1_dim, h2_dim, out_dim]
     params_per_layer = [w + b for w, b in zip(weights, biases)]
     total_params = sum(params_per_layer)
     total_macs = sum(weights)
-    bytes_per_value = 4
-    param_mem = total_params * bytes_per_value * byte
+    bytes_per_element = BYTES_FP32
+    param_mem = total_params * bytes_per_element
     param_mem_kb = param_mem.to(KB).magnitude
-    inf_act_elements = in_dim_value + h1_value + h2_value + out_dim_value
-    inf_act = inf_act_elements * bytes_per_value * byte
+    inf_act_elements = in_dim + h1_dim + h2_dim + out_dim
+    inf_act = inf_act_elements * bytes_per_element
     inf_act_kb = inf_act.to(KB).magnitude
-    inference_total_kb = param_mem_kb + inf_act_kb
-    inference_total = inference_total_kb * KB
-    per_image_kops = (total_flops_value / batch_size_value) / THOUSAND
-    arith_intensity = (total_flops_value / batch_size_value) / (inference_total_kb * THOUSAND)
+    inference_total = param_mem + inf_act
+    inference_total_kb = inference_total.to(KB).magnitude
+    per_image_kops = (total_flops_value / batch_size) / THOUSAND
+    arith_intensity = (((total_flops_value / batch_size) * flop) / inference_total).to(flop / byte).magnitude
     layer1_pct = weights[0] / total_macs * 100
-    batch_in_values = batch_size_value * in_dim_value
-    batch_h1_values = batch_size_value * h1_value
-    batch_h2_values = batch_size_value * h2_value
-    batch_out_values = batch_size_value * out_dim_value
+    batch_in_values = batch_size * in_dim
+    batch_h1_values = batch_size * h1_dim
+    batch_h2_values = batch_size * h2_dim
+    batch_out_values = batch_size * out_dim
     batch_act_total_values = batch_in_values + batch_h1_values + batch_h2_values + batch_out_values
 
-    double_flops_l1_mm_value = 2 * batch_size_value * in_dim_value * double_h1_value
-    double_flops_l1_bias_value = 2 * (batch_size_value * double_h1_value)
-    double_flops_l2_mm_value = 2 * batch_size_value * double_h1_value * double_h2_value
-    double_flops_l2_bias_value = 2 * (batch_size_value * double_h2_value)
-    double_flops_l3_mm_value = 2 * batch_size_value * double_h2_value * out_dim_value
-    double_flops_l3_bias_value = 2 * (batch_size_value * out_dim_value)
+    double_flops_l1_mm_value = 2 * batch_size * in_dim * double_h1_dim
+    double_flops_l1_bias_value = 2 * (batch_size * double_h1_dim)
+    double_flops_l2_mm_value = 2 * batch_size * double_h1_dim * double_h2_dim
+    double_flops_l2_bias_value = 2 * (batch_size * double_h2_dim)
+    double_flops_l3_mm_value = 2 * batch_size * double_h2_dim * out_dim
+    double_flops_l3_bias_value = 2 * (batch_size * out_dim)
     double_total_flops_value = (
         double_flops_l1_mm_value
         + double_flops_l1_bias_value
@@ -4489,26 +4484,26 @@ Beyond activations, we must store gradients for each parameter. For this larger 
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim import Models
-from mlsysim.fmt import fmt_int, fmt, fmt_qty, check
+from mlsysim.fmt import fmt_count, fmt_qty, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AdamMemoryOverhead:
     """Namespace for Adam optimizer-state memory example."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    params_b = Models.Language.Llama2_7B.parameters.to(Bparam).magnitude
+    params = Models.Language.Llama2_7B.parameters
     bytes_per_param = 4
     adam_state_tensors = 2
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    state = params_b * BILLION * bytes_per_param * adam_state_tensors * byte
-    state_gb = state.to(GB).magnitude
+    state = (params / param) * bytes_per_param * adam_state_tensors * byte
+    state_gb = state.to(GB)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(state_gb == 56, f"Expected 56 GB Adam state, got {state_gb}")
+    check(state_gb.magnitude == 56, f"Expected 56 GB Adam state, got {state_gb.magnitude:g}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    params_b_str = fmt_count(params_b * BILLION, scale="billion", precision=0, commas=False, attributive=True)
+    params_b_str = fmt_count(params, scale="billion", commas=False, attributive=True)
     state_gb_str = fmt_qty(state, GB, precision=0, commas=False)
 ```
 
@@ -5036,7 +5031,7 @@ class MnistInferenceResourceLocal:
     h2_dim = 64
     out_dim = 10
     batch_size = 32
-    bytes_per_value = 4
+    bytes_per_element = BYTES_FP32
     layers_dims = [in_dim, h1_dim, h2_dim, out_dim]
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -5045,17 +5040,15 @@ class MnistInferenceResourceLocal:
     params_per_layer = [w + b for w, b in zip(weights, biases)]
     total_params = sum(params_per_layer)
     total_macs = sum(weights)
-    param_mem = total_params * bytes_per_value * byte
-    param_mem_kb = param_mem.to(KB).magnitude
+    param_mem = total_params * bytes_per_element
     inf_act_elements = sum(layers_dims)
     inf_output_act_elements = sum(layers_dims[1:])
-    inf_act = inf_act_elements * bytes_per_value * byte
-    inf_act_kb = inf_act.to(KB).magnitude
+    inf_act = inf_act_elements * bytes_per_element
     batch_act_elements = batch_size * inf_act_elements
-    batch_act_kb = (batch_act_elements * bytes_per_value * byte).to(KB).magnitude
-    inference_total_kb = param_mem_kb + inf_act_kb
-    training_total_kb = param_mem_kb + batch_act_kb + param_mem_kb + (2 * param_mem_kb)
-    training_ratio = training_total_kb / inference_total_kb
+    batch_act = batch_act_elements * bytes_per_element
+    inference_total = param_mem + inf_act
+    training_total = param_mem + batch_act + param_mem + (2 * param_mem)
+    training_ratio = (training_total / inference_total).to_base_units().magnitude
     batch_output_act_elements = batch_size * inf_output_act_elements
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -5757,19 +5750,19 @@ class FallacyQuantExamples:
     """Namespace for fallacy-section numerical examples."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    model_latency_ms = 20
-    preprocessing_latency_ms = 25
-    postprocessing_latency_ms = 10
-    latency_budget_ms = 50
+    model_latency = 20 * ms          # scenario assumption: model inference latency
+    preprocessing_latency = 25 * ms  # scenario assumption: preprocessing latency
+    postprocessing_latency = 10 * ms  # scenario assumption: postprocessing latency
+    latency_budget = 50 * ms         # scenario assumption: end-to-end SLO budget
     majority_class = 99
     minority_class = 1
     mnist_dims = [784, 128, 64, 10]
     mnist_batch_size = 32
-    bytes_per_value = 4
+    bytes_per_element = BYTES_FP32
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    pipeline_total_ms = model_latency_ms + preprocessing_latency_ms + postprocessing_latency_ms
-    pipeline_over_ms = pipeline_total_ms - latency_budget_ms
+    pipeline_total = model_latency + preprocessing_latency + postprocessing_latency
+    pipeline_over = pipeline_total - latency_budget
     imbalance_majority_acc = majority_class / (majority_class + minority_class) * 100
     mnist_weights = [
         mnist_dims[0] * mnist_dims[1],
@@ -5779,10 +5772,10 @@ class FallacyQuantExamples:
     mnist_biases = mnist_dims[1:]
     mnist_total_params = sum(w + b for w, b in zip(mnist_weights, mnist_biases))
     mnist_total_flops = (2 * sum(mnist_weights) * mnist_batch_size) + (sum(mnist_biases) * mnist_batch_size)
-    mnist_param_kb = (mnist_total_params * bytes_per_value * byte).to(KB).magnitude
-    mnist_inf_act_kb = (sum(mnist_dims) * bytes_per_value * byte).to(KB).magnitude
+    mnist_param_kb = (mnist_total_params * bytes_per_element).to(KB).magnitude
+    mnist_inf_act_kb = (sum(mnist_dims) * bytes_per_element).to(KB).magnitude
     mnist_inference_total_kb = mnist_param_kb + mnist_inf_act_kb
-    mnist_batch_act_kb = (mnist_batch_size * sum(mnist_dims) * bytes_per_value * byte).to(KB).magnitude
+    mnist_batch_act_kb = (mnist_batch_size * sum(mnist_dims) * bytes_per_element).to(KB).magnitude
     mnist_training_total_kb = mnist_param_kb + mnist_batch_act_kb + mnist_param_kb + (2 * mnist_param_kb)
     mnist_arith_intensity = (mnist_total_flops / mnist_batch_size) / (mnist_inference_total_kb * THOUSAND)
     training_ratio = mnist_training_total_kb / mnist_inference_total_kb
@@ -5790,18 +5783,18 @@ class FallacyQuantExamples:
     h100_ridge = (Hardware.Cloud.H100.compute.peak_flops / Hardware.Cloud.H100.memory.bandwidth).to(flop / byte).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(pipeline_total_ms > latency_budget_ms, "Pipeline example should miss the latency SLO.")
+    check(pipeline_total > latency_budget, "Pipeline example should miss the latency SLO.")
     check(imbalance_majority_acc == 99, f"Expected 99% majority baseline, got {imbalance_majority_acc}")
     check(mnist_arith_intensity < 1, f"MNIST should be memory-bound, got {mnist_arith_intensity:.1f} FLOP/byte")
     check(a100_ridge > 100 and h100_ridge > a100_ridge, "GPU ridge points should be in the hundreds of FLOP/byte.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    model_latency_ms_str = fmt_time(model_latency_ms, 'millisecond', precision=0, commas=False)
-    preprocessing_latency_ms_str = fmt_time(preprocessing_latency_ms, 'millisecond', precision=0, commas=False)
-    postprocessing_latency_ms_str = fmt_time(postprocessing_latency_ms, 'millisecond', precision=0, commas=False)
-    pipeline_budget_ms_str = fmt_time(latency_budget_ms, 'millisecond', precision=0, commas=False)
-    pipeline_total_ms_str = fmt_time(pipeline_total_ms, 'millisecond', precision=0, commas=False)
-    pipeline_over_ms_str = fmt_time(pipeline_over_ms, 'millisecond', precision=0, commas=False)
+    model_latency_ms_str = fmt_time(model_latency, 'millisecond', precision=0, commas=False)
+    preprocessing_latency_ms_str = fmt_time(preprocessing_latency, 'millisecond', precision=0, commas=False)
+    postprocessing_latency_ms_str = fmt_time(postprocessing_latency, 'millisecond', precision=0, commas=False)
+    pipeline_budget_ms_str = fmt_time(latency_budget, 'millisecond', precision=0, commas=False)
+    pipeline_total_ms_str = fmt_time(pipeline_total, 'millisecond', precision=0, commas=False)
+    pipeline_over_ms_str = fmt_time(pipeline_over, 'millisecond', precision=0, commas=False)
     imbalance_ratio_str = MarkdownStr(f"{majority_class}:{minority_class}")
     imbalance_majority_acc_str = fmt_percent(imbalance_majority_acc/100, precision=0, commas=False, style='symbol')
     mnist_arith_intensity_str = fmt(mnist_arith_intensity, precision=1, commas=False)
@@ -5878,7 +5871,7 @@ Neural network architecture demonstrates hierarchical processing, where each lay
 # │ Show: That 784 pixels × 128 neurons = 100,352 weights for a single layer,
 # │       learning irrelevant long-range pixel relationships that convolutions
 # │       avoid by design.
-# │ How: Multiply mnist_pixels_value × fc1_neurons_value using built-in math;
+# │ How: Multiply mnist_pixels × fc1_neurons using built-in math;
 # │      no external imports needed.
 # │
 # │ Imports: mlsysim.fmt (fmt)
@@ -5894,16 +5887,16 @@ class MnistWeightsCalc:
     """Namespace for Mnist Weights Calc."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    mnist_pixels_value = 784
-    fc1_neurons_value = 128
+    mnist_pixels = 784
+    fc1_neurons = 128
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    fc1_weights_value = mnist_pixels_value * fc1_neurons_value
+    fc1_weights = mnist_pixels * fc1_neurons
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    fc1_weights_str = fmt(fc1_weights_value, precision=0)
-    mnist_pixels_str = fmt(mnist_pixels_value, precision=0, commas=False)
-    fc1_neurons_str = fmt(fc1_neurons_value, precision=0, commas=False)
+    fc1_weights_str = fmt(fc1_weights, precision=0)
+    mnist_pixels_str = fmt(mnist_pixels, precision=0, commas=False)
+    fc1_neurons_str = fmt(fc1_neurons, precision=0, commas=False)
 ```
 
 ```{python}

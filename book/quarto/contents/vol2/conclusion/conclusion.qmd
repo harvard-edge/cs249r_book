@@ -389,12 +389,14 @@ The scale of modern ML infrastructure invites comparison with the most efficient
 # │ Show: Raw math and synaptic activity are only a loose analogy.
 # │ How: Machine_ops = n_gpus * tflops; Brain_ops = synapses * firing_rate.
 # │
-# │ Imports: mlsysim.book (fmt, check)
+# │ Imports: mlsysim (Hardware.Cloud.H100), mlsysim.fmt (fmt, check)
 # │ Exports: machine_ops_math, machine_power_mw_str, brain_ops_math,
 # │          throughput_ratio_str, n_gpus_str, tflops_per_gpu_str,
 # │          power_calc_math
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int,  check, fmt, fmt_math, fmt_qty
+from mlsysim import Hardware
+from mlsysim.fmt import fmt_int, check, fmt, fmt_math, fmt_qty
+from mlsysim.core.units import TFLOP, flop, second, watt, MW
 
 # ┌── LEGO ───────────────────────────────────────────────
 class FermiEstimate:
@@ -402,36 +404,37 @@ class FermiEstimate:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     n_gpus = 25000
-    tflops_per_gpu = Hardware.Cloud.H100.compute.peak_flops.to(TFLOPs/second).magnitude
-    w_per_gpu = Hardware.Cloud.H100.tdp.to(watt).magnitude
+    gpu_peak_flops = Hardware.Cloud.H100.compute.peak_flops
+    gpu_tdp = Hardware.Cloud.H100.tdp
 
     brain_synapses = 1e14
-    brain_firing_hz = 1.0
-    brain_power_w = 20
+    brain_firing_rate = 1.0 / second  # scenario assumption: illustrative mean spike rate
+    brain_power = 20 * watt  # scenario assumption: rough human brain power
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    machine_ops = n_gpus * tflops_per_gpu * TRILLION
-    machine_power_w_q = n_gpus * w_per_gpu * watt
-    machine_power_mw = machine_power_w_q.to(kW).magnitude / THOUSAND
+    machine_ops_rate = (n_gpus * gpu_peak_flops).to(flop / second)
+    machine_power = n_gpus * gpu_tdp
 
-    brain_ops = brain_synapses * brain_firing_hz
+    brain_ops_rate = (brain_synapses * brain_firing_rate * flop).to(flop / second)
 
-    throughput_ratio = machine_ops/brain_ops
+    throughput_ratio = (machine_ops_rate / brain_ops_rate).to("").magnitude
 
-    machine_eff = machine_ops / machine_power_w_q.to(watt).magnitude
-    brain_eff = brain_ops/brain_power_w
+    machine_eff = (machine_ops_rate / machine_power).to(flop / second / watt).magnitude
+    brain_eff = (brain_ops_rate / brain_power).to(flop / second / watt).magnitude
     efficiency_gap = brain_eff/machine_eff
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(throughput_ratio > 100, "Machine should be faster than brain at raw ops")
-    check(round(machine_power_mw, 1) == 17.5, "Machine power should match H100 TDP scenario")
+    check(round(machine_power.to(MW).magnitude, 1) == 17.5, "Machine power should match H100 TDP scenario")
     check(200_000 < throughput_ratio < 300_000, "Throughput ratio should match Fermi scenario")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    machine_ops = machine_ops_rate.to(flop / second).magnitude
     _machine_exp = int(f"{machine_ops:.0e}".split("e+")[1])
     _machine_coeff = machine_ops / 10**_machine_exp
     machine_ops_math = fmt_math(f"{_machine_coeff:.2f} \\times 10^{{{_machine_exp}}}")
-    machine_power_mw_str = fmt_qty(machine_power_w_q, MW, precision=1)
+    machine_power_mw_str = fmt_qty(machine_power, MW, precision=1)
+    brain_ops = brain_ops_rate.to(flop / second).magnitude
     _brain_exp = int(f"{brain_ops:.0e}".split("e+")[1])
     _brain_coeff = brain_ops / 10**_brain_exp
     brain_ops_math = fmt_math(f"{_brain_coeff:.1f} \\times 10^{{{_brain_exp}}}")
@@ -439,7 +442,7 @@ class FermiEstimate:
     n_gpus_str = fmt(n_gpus, precision=0, commas=True)
     tflops_per_gpu_str = fmt_qty(Hardware.Cloud.H100.compute.peak_flops, TFLOP/second, precision=0)
     power_calc_math = fmt_math(
-        f"{n_gpus:,} \\times {int(w_per_gpu)} \\text{{ W}}"
+        f"{n_gpus:,} \\times {int(gpu_tdp.to(watt).magnitude)} \\text{{ W}}"
     )
 ```
 

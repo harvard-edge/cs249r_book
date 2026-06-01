@@ -88,32 +88,32 @@ from mlsysim.engine.solver import DistributedModel
 # │          DistTrainReliabilityFacts.cluster_failure_prob_pct_str,
 # │          DistTrainReliabilityFacts.cluster_mtbf_hours_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int,  fmt_percent, fmt, check, MarkdownStr, fmt_time
+from mlsysim.fmt import fmt_int,  fmt_percent, fmt, check, MarkdownStr, fmt_time, fmt_memory
 import math
 
 class DistTrainReliabilityFacts:
     # ┌── 1. LOAD (Constants) ──────────────────────────────
-    a100_mem_gb = Hardware.Cloud.A100.memory.capacity.to(GiB).magnitude
-    h100_mem_gb = Hardware.Cloud.H100.memory.capacity.to(GiB).magnitude
-    nvlink_a100_gbs = Hardware.Cloud.A100.nvlink.bandwidth.to(GB/second).magnitude
-    nvlink_h100_gbs = Hardware.Cloud.H100.nvlink.bandwidth.to(GB/second).magnitude
-    ib_hdr_gbs = Systems.Fabrics.InfiniBand_HDR.bandwidth.to(GB/second).magnitude  # 200 Gbps -> 25 GB/s per port
-    ib_ndr_gbs = Systems.Fabrics.InfiniBand_NDR.bandwidth.to(GB/second).magnitude  # 400 Gbps -> 50 GB/s per port
+    a100_mem = Hardware.Cloud.A100.memory.capacity
+    h100_mem = Hardware.Cloud.H100.memory.capacity
+    nvlink_a100_bw = Hardware.Cloud.A100.nvlink.bandwidth
+    nvlink_h100_bw = Hardware.Cloud.H100.nvlink.bandwidth
+    ib_hdr_bw = Systems.Fabrics.InfiniBand_HDR.bandwidth
+    ib_ndr_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth
     reliability_node_count = 100
     node_hourly_survival = 0.999
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────
-    nvlink_hdr_ratio_low = nvlink_a100_gbs / ib_hdr_gbs
-    nvlink_hdr_ratio_high = nvlink_h100_gbs / ib_hdr_gbs
+    nvlink_hdr_ratio_low = (nvlink_a100_bw / ib_hdr_bw).to_base_units().magnitude
+    nvlink_hdr_ratio_high = (nvlink_h100_bw / ib_hdr_bw).to_base_units().magnitude
     cluster_hourly_survival = node_hourly_survival ** reliability_node_count
     cluster_hourly_failure_prob = 1 - cluster_hourly_survival
     cluster_mtbf_hours = 1 / (reliability_node_count * -math.log(node_hourly_survival))
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────
-    check(a100_mem_gb > 0, "A100 memory must be positive")
-    check(nvlink_h100_gbs > nvlink_a100_gbs, "H100 NVLink faster than A100")
-    check(ib_hdr_gbs < ib_ndr_gbs, "InfiniBand HDR slower than NDR")
-    check(ib_ndr_gbs < nvlink_h100_gbs, "InfiniBand NDR slower than H100 NVLink")
+    check(a100_mem > 0 * GiB, "A100 memory must be positive")
+    check(nvlink_h100_bw > nvlink_a100_bw, "H100 NVLink faster than A100")
+    check(ib_hdr_bw < ib_ndr_bw, "InfiniBand HDR slower than NDR")
+    check(ib_ndr_bw < nvlink_h100_bw, "InfiniBand NDR slower than H100 NVLink")
     check(20 < nvlink_hdr_ratio_low < 30, "A100 NVLink/HDR ratio should be about 24x")
     check(30 < nvlink_hdr_ratio_high < 40, "H100 NVLink/HDR ratio should be about 36x")
     check(9 < cluster_mtbf_hours < 11, "100 nodes at 99.9% hourly survival should fail about every 10 hours")
@@ -123,7 +123,7 @@ class DistTrainReliabilityFacts:
     node_hourly_survival_pct_str = fmt_percent(node_hourly_survival, precision=1, commas=False, style='prose')
     cluster_failure_prob_pct_str = fmt_percent(cluster_hourly_failure_prob, precision=1, commas=False, style='prose')
     cluster_mtbf_hours_str = fmt_time(round(cluster_mtbf_hours), 'hour', precision=0, commas=False, style='word')
-    gpt4_mem_tb_str = fmt_qty((Models.Language.GPT4.parameters.to(param).magnitude * 2 / TRILLION) * TB, TB, precision=1, commas=False)
+    gpt4_mem_tb_str = fmt_memory(Models.Language.GPT4.size_in_bytes(BYTES_FP16), unit=TB, precision=1, commas=False)
     # Plain-string literal → MarkdownStr per recipe Rule 1
     dlrm_mem_tb_str = MarkdownStr("10 TB")
 ```
@@ -201,15 +201,15 @@ The bandwidth requirements impose a hard constraint on hardware placement: each 
 #| echo: false
 class DistTrainNvlinkIntro:
     from mlsysim.core.constants import GB, second
-    from mlsysim.fmt import fmt, check
-    nvlink_a100_gbs = Hardware.Cloud.A100.nvlink.bandwidth.to(GB/second).magnitude
-    nvlink_h100_gbs = Hardware.Cloud.H100.nvlink.bandwidth.to(GB/second).magnitude
-    ib_hdr_gbs = Systems.Fabrics.InfiniBand_HDR.bandwidth.to(GB/second).magnitude
-    nvlink_hdr_ratio_low = nvlink_a100_gbs / ib_hdr_gbs
-    nvlink_hdr_ratio_high = nvlink_h100_gbs / ib_hdr_gbs
+    from mlsysim.fmt import check, fmt_bandwidth, fmt_multiple
+    nvlink_a100_bw = Hardware.Cloud.A100.nvlink.bandwidth
+    nvlink_h100_bw = Hardware.Cloud.H100.nvlink.bandwidth
+    ib_hdr_bw = Systems.Fabrics.InfiniBand_HDR.bandwidth
+    nvlink_hdr_ratio_low = (nvlink_a100_bw / ib_hdr_bw).to_base_units().magnitude
+    nvlink_hdr_ratio_high = (nvlink_h100_bw / ib_hdr_bw).to_base_units().magnitude
     check(20 < nvlink_hdr_ratio_low < 30, "A100 NVLink/HDR ratio should be about 24x")
-    nvlink_a100_str = fmt_qty(nvlink_a100_gbs * GB / second, GB / second, precision=0, commas=False)
-    nvlink_h100_str = fmt_qty(nvlink_h100_gbs * GB / second, GB / second, precision=0, commas=False)
+    nvlink_a100_str = fmt_bandwidth(nvlink_a100_bw, unit=GB / second, precision=0, commas=False)
+    nvlink_h100_str = fmt_bandwidth(nvlink_h100_bw, unit=GB / second, precision=0, commas=False)
     nvlink_hdr_ratio_low_str = fmt_multiple(nvlink_hdr_ratio_low, precision=0, commas=False)
     nvlink_hdr_ratio_high_str = fmt_multiple(nvlink_hdr_ratio_high, precision=0, commas=False)
 ```
@@ -412,7 +412,7 @@ from mlsysim.engine.solver import DistributedModel
 # │      pays two intra-node NVLink phases.
 # │ Exports: HierarchicalAllReduceDebug.*_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, fmt_qty, fmt_time
+from mlsysim.fmt import fmt, check, fmt_memory, fmt_bandwidth, fmt_time, fmt_count, fmt_percent
 
 # ┌── LEGO ───────────────────────────────────────────────
 class HierarchicalAllReduceDebug:
@@ -420,54 +420,52 @@ class HierarchicalAllReduceDebug:
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
     from mlsysim.physics import calc_hierarchical_allreduce_time, calc_ring_allreduce_time
-    tensor_bytes = 3.0 * ureg.GB
+    tensor_bytes = 3.0 * GB  # scenario tensor size for the debugging example
     nodes = 128
     gpus_per_node = 8
-    ib_hdr_bw = 25.0 * ureg.GB / ureg.second
+    ib_hdr_bw = Systems.Fabrics.InfiniBand_HDR.bandwidth
     nvlink_bw = Hardware.Cloud.A100.nvlink.bandwidth
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
     # Flat Ring Baseline
-    t_flat = calc_ring_allreduce_time(tensor_bytes, nodes * gpus_per_node, ib_hdr_bw, 0*ureg.ms)
-    flat_ring_ms = t_flat.to(ms).magnitude
+    t_flat = calc_ring_allreduce_time(tensor_bytes, nodes * gpus_per_node, ib_hdr_bw, 0 * ms)
+    flat_ring_time = t_flat.to(ms)
 
     # Hierarchical Ideal
-    t_hier = calc_hierarchical_allreduce_time(
+    hierarchical_total_time = calc_hierarchical_allreduce_time(
         message_bytes=tensor_bytes,
         n_nodes=nodes,
         gpus_per_node=gpus_per_node,
         intra_node_bw=nvlink_bw,
         inter_node_bw=ib_hdr_bw
-    )
-    hierarchical_total_ms = t_hier.to(ms).magnitude
+    ).to(ms)
 
     # Inter-node phase only (for prose)
     reduced_message = tensor_bytes / gpus_per_node
-    t_inter = calc_ring_allreduce_time(reduced_message, nodes, ib_hdr_bw, 0*ureg.ms)
-    inter_node_ms = t_inter.to(ms).magnitude
+    inter_node_time = calc_ring_allreduce_time(reduced_message, nodes, ib_hdr_bw, 0 * ms).to(ms)
 
-    observed_ms = 100.0
-    residual_ms = observed_ms - hierarchical_total_ms
+    observed_time = 100.0 * ms
+    residual_time = observed_time - hierarchical_total_time
     ib_util_pct = 60
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
-    check(235 < flat_ring_ms < 245, "Flat ring should be about 240 ms")
-    check(29 < inter_node_ms < 35, "Inter-node hierarchical phase should be about 30 ms")
-    check(30 < hierarchical_total_ms < 60, f"Hierarchical ideal should be about 50 ms, got {hierarchical_total_ms:.1f}")
+    check(235 * ms < flat_ring_time < 245 * ms, "Flat ring should be about 240 ms")
+    check(29 * ms < inter_node_time < 35 * ms, "Inter-node hierarchical phase should be about 30 ms")
+    check(30 * ms < hierarchical_total_time < 60 * ms, f"Hierarchical ideal should be about 50 ms, got {hierarchical_total_time.to(ms).magnitude:.1f}")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
-    flat_ring_ms_str = fmt_time(flat_ring_ms, 'millisecond', precision=1, commas=False)
-    inter_node_ms_str = fmt_time(inter_node_ms, 'millisecond', precision=1, commas=False)
-    hierarchical_total_ms_str = fmt_time(hierarchical_total_ms, 'millisecond', precision=1, commas=False)
-    observed_ms_str = fmt_time(observed_ms, 'millisecond', precision=0, commas=False)
-    residual_ms_str = fmt_time(residual_ms, 'millisecond', precision=1, commas=False)
-    nvlink_a100_str = fmt_qty(nvlink_bw, GB/second, precision=0, commas=False)
-    tensor_gb_str = fmt_qty(tensor_bytes, GB, precision=0, commas=False)
+    flat_ring_ms_str = fmt_time(flat_ring_time, ms, precision=1, commas=False)
+    inter_node_ms_str = fmt_time(inter_node_time, ms, precision=1, commas=False)
+    hierarchical_total_ms_str = fmt_time(hierarchical_total_time, ms, precision=1, commas=False)
+    observed_ms_str = fmt_time(observed_time, ms, precision=0, commas=False)
+    residual_ms_str = fmt_time(residual_time, ms, precision=1, commas=False)
+    nvlink_a100_str = fmt_bandwidth(nvlink_bw, unit=GB/second, precision=0, commas=False)
+    tensor_gb_str = fmt_memory(tensor_bytes, unit=GB, precision=0, commas=False)
     nodes_str = fmt_count(nodes, commas=False, label="node")
     gpus_per_node_str = fmt_count(gpus_per_node, commas=False, label="GPU")
     total_gpus_str = fmt_count(nodes * gpus_per_node, commas=True, label="GPU")
-    ib_hdr_bw_str = fmt_qty(ib_hdr_bw, GB/second, precision=0, commas=False)
-    flat_single_link_ms_str = fmt_time((tensor_bytes.to(GB).magnitude / ib_hdr_bw.to(GB/second).magnitude) * THOUSAND, 'millisecond', precision=0, commas=False)
+    ib_hdr_bw_str = fmt_bandwidth(ib_hdr_bw, unit=GB/second, precision=0, commas=False)
+    flat_single_link_ms_str = fmt_time(tensor_bytes / ib_hdr_bw, ms, precision=0, commas=False)
     ib_util_pct_str = fmt_percent(ib_util_pct/100, precision=0, commas=False, style='prose')
 ```
 
@@ -588,7 +586,7 @@ A GPT-2 scaling scenario makes the efficiency loss concrete.
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt_qty, fmt_time
+from mlsysim.fmt import fmt_memory, fmt_bandwidth, fmt_time
 from mlsysim.engine.solver import DistributedModel
 #| label: scaling-8gpu-calc
 # ┌── LEGO ───────────────────────────────────────────────
@@ -598,20 +596,19 @@ class Scaling8GPU:
     from mlsysim.physics import calc_ring_allreduce_time
     single_gpu_step_s = 1.8
     batch_per_gpu_val = 16
-    fits_mem_gb = 32
+    fits_mem = 32 * GB  # scenario single-GPU fit threshold
     compute_8gpu_ms = 1800  # Matched to 1.8s baseline
     params_b = Models.Language.GPT2.parameters.to(Bparam).magnitude  # GPT-2
     nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth
     gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
-    fp16_gradient_bytes = 2
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Ring All-Reduce using library formula
-    gradient_tensor = Models.Language.GPT2.parameters.to(param).magnitude * fp16_gradient_bytes * ureg.byte
-    t_comm = calc_ring_allreduce_time(gradient_tensor, gpus_per_node, nvlink_bw, 0*ureg.ms)
+    gradient_tensor = Models.Language.GPT2.size_in_bytes(BYTES_FP16)
+    t_comm = calc_ring_allreduce_time(gradient_tensor, gpus_per_node, nvlink_bw, 0 * ms)
     comm_8gpu_ms_val = t_comm.to(ms).magnitude
 
-    sync_size_gb = (gradient_tensor * (2 * (gpus_per_node - 1) / gpus_per_node)).to(GB).magnitude
+    sync_size = gradient_tensor * (2 * (gpus_per_node - 1) / gpus_per_node)
 
     total_8gpu_ms_val = compute_8gpu_ms + comm_8gpu_ms_val
     # Speedup = (N * b/T_N) / (b/T_1) = N * (T_1 / T_N)
@@ -631,15 +628,15 @@ class Scaling8GPU:
     speedup_8gpu_str = fmt_int(round(speedup_8gpu_val), commas=False)
     efficiency_8gpu_str = fmt_percent(efficiency_8gpu_val/100, precision=1, commas=False, style='prose')
     training_8gpu_str = fmt_time(training_hours_8gpu_val, 'hour', precision=1, commas=False, style='word')
-    gpt2_sync_size_gb_str = fmt_qty(sync_size_gb * GB, GB, precision=1, commas=False)
-    nvlink_h100_str = fmt_qty(nvlink_bw, GB/second, precision=0, commas=False)
+    gpt2_sync_size_gb_str = fmt_memory(sync_size, unit=GB, precision=1, commas=False)
+    nvlink_h100_str = fmt_bandwidth(nvlink_bw, unit=GB/second, precision=0, commas=False)
     comm_8gpu_ms_str = fmt_time(comm_8gpu_ms_val, 'millisecond', precision=1, commas=False)
     # compute_8gpu_ms int "1800" — preserve original (no commas) via MarkdownStr
     compute_8gpu_ms_str = fmt_time(compute_8gpu_ms, 'millisecond', precision=0, commas=False)
     # Suffix-bearing prose aliases for raw ints/floats referenced in prose
     batch_per_gpu_str = fmt(batch_per_gpu_val, precision=0, commas=False)
     training_hours_1gpu_str = fmt_time(training_hours_1gpu, 'hour', precision=0, commas=False, style='word')
-    fits_mem_gb_str = fmt_qty(fits_mem_gb * GB, GB, precision=0, commas=False)
+    fits_mem_gb_str = fmt_memory(fits_mem, unit=GB, precision=0, commas=False)
 ```
 
 - Batch size: `{python} Scaling8GPU.batch_per_gpu_str` (with gradient checkpointing, fits in `{python} Scaling8GPU.fits_mem_gb_str`)
@@ -666,7 +663,7 @@ Training time: `{python} Scaling8GPU.training_hours_1gpu_str` ÷ `{python} Scali
 ```{python}
 #| echo: false
 from mlsysim import Models
-from mlsysim.fmt import fmt, check, fmt_time
+from mlsysim.fmt import fmt, check, fmt_time, fmt_memory, fmt_bandwidth
 
 # ┌── LEGO ───────────────────────────────────────────────
 class Scaling32GPU:
@@ -674,14 +671,14 @@ class Scaling32GPU:
     single_gpu_step_s = 1.8
     compute_32gpu_ms = 1800
     params_b = Models.Language.GPT2.parameters.to(Bparam).magnitude
-    net_bw = NETWORK_10G_BW.to(GB/second).magnitude
+    net_bw = NETWORK_10G_BW
     intra_node_ms_val = 0.35
     training_hours_1gpu = 25
     gpus = 32
     ring_factor = 2 * (gpus - 1) / gpus
-    gradient_tensor_gb = (params_b * BILLION * 2) / BILLION
-    sync_size_gb = gradient_tensor_gb * ring_factor
-    inter_node_ms_val = (sync_size_gb / net_bw) * THOUSAND
+    gradient_tensor = Models.Language.GPT2.size_in_bytes(BYTES_FP16)
+    sync_size = gradient_tensor * ring_factor
+    inter_node_ms_val = (sync_size / net_bw).to(ms).magnitude
     comm_32gpu_ms_val = inter_node_ms_val + intra_node_ms_val
     total_32gpu_ms_val = compute_32gpu_ms + comm_32gpu_ms_val
     compute_pct_val = compute_32gpu_ms / total_32gpu_ms_val * 100
@@ -699,9 +696,9 @@ class Scaling32GPU:
     speedup_32gpu_str = fmt(speedup_32gpu_val, precision=1, commas=False)
     efficiency_32gpu_str = fmt_percent(efficiency_32gpu_val/100, precision=1, commas=False, style='prose')
     training_32gpu_str = fmt_time(training_32gpu_hours_val, 'hour', precision=1, commas=False, style='word')
-    gpt2_sync_size_gb_str = fmt_qty(sync_size_gb * GB, GB, precision=1, commas=False)
+    gpt2_sync_size_gb_str = fmt_memory(sync_size, unit=GB, precision=1, commas=False)
     inter_node_ms_str = fmt_time(inter_node_ms_val, 'millisecond', precision=0, commas=False)
-    ib_hdr_str = fmt_qty(net_bw * GB / second, GB / second, precision=2, commas=False)
+    ib_hdr_str = fmt_bandwidth(net_bw, unit=GB / second, precision=2, commas=False)
     compute_32gpu_ms_str = fmt_time(compute_32gpu_ms, 'millisecond', precision=0, commas=False)
     comm_32gpu_ms_str = fmt_time(comm_32gpu_ms_val, 'millisecond', precision=1, commas=False)
     intra_node_comm_ms_str = fmt_time(intra_node_ms_val, 'millisecond', precision=1, commas=False)
@@ -803,25 +800,28 @@ To understand the scale of memory savings ZeRO provides, consider the concrete m
 ```{python}
 #| echo: false
 from mlsysim import Hardware, Models
-from mlsysim.core.constants import GiB
-from mlsysim.fmt import fmt, check, fmt_int
+from mlsysim.core.constants import GiB, GB, byte, param
+from mlsysim.fmt import fmt, check, fmt_int, fmt_qty_int
+from mlsysim.physics import memory_from_params
 
 class DistTrainA100Memory:
     model = Models.Language.Llama2_7B
-    bytes_per_param = 16
+    bytes_per_param_val = 16
+    bytes_per_param = bytes_per_param_val * (byte / param)
     n_gpus_zero = 64
     params_b = model.parameters.to(Bparam).magnitude
-    a100_mem_gb = Hardware.Cloud.A100.memory.capacity.to(GiB).magnitude
-    total_state_gb = params_b * bytes_per_param
-    zero3_per_gpu_gb = total_state_gb / n_gpus_zero
-    activation_headroom_gb = a100_mem_gb - zero3_per_gpu_gb
-    check(total_state_gb == 112, f"7B ZeRO state ({total_state_gb})")
-    check(abs(zero3_per_gpu_gb - 1.75) < 0.01, f"ZeRO-3 per GPU ({zero3_per_gpu_gb})")
+    a100_mem = Hardware.Cloud.A100.memory.capacity
+    a100_mem_budget = a100_mem.to(GiB) * (GB / GiB)
+    total_state = memory_from_params(model.parameters, bytes_per_param)
+    zero3_per_gpu = total_state / n_gpus_zero
+    activation_headroom = a100_mem_budget - zero3_per_gpu
+    check(total_state == 112 * GB, f"7B ZeRO state ({total_state})")
+    check(abs((zero3_per_gpu - 1.75 * GB).to(GB).magnitude) < 0.01, f"ZeRO-3 per GPU ({zero3_per_gpu})")
     params_b_str = fmt(params_b, precision=0, commas=False)
-    bytes_per_param_str = fmt(bytes_per_param, precision=0, commas=False)
+    bytes_per_param_str = fmt(bytes_per_param_val, precision=0, commas=False)
     n_gpus_zero_str = fmt_count(n_gpus_zero, commas=False, label="GPU")
-    activation_headroom_gb_str = fmt_qty_int(round(activation_headroom_gb) * GB, GB, commas=False)
-    a100_mem_str = fmt_qty(a100_mem_gb * GiB, GiB, precision=0, commas=False, unit_label="GB")
+    activation_headroom_gb_str = fmt_qty_int(round(activation_headroom.to(GB).magnitude) * GB, GB, commas=False)
+    a100_mem_str = fmt_qty(a100_mem, GiB, precision=0, commas=False, unit_label="GB")
 ```
 
 ::: {#nbk-distributed-training-zero-memory-savings .callout-notebook title="ZeRO memory savings"}
@@ -948,45 +948,47 @@ where $T_N$ is the training time on $N$ devices. An efficiency of 1.0 means perf
 # │          CommScalingMath.compute_per_step_math, CommScalingMath.t_compute_math,
 # │          CommScalingMath.t_comm_math
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_math, fmt_time
+from mlsysim.fmt import fmt, fmt_count, fmt_params, fmt_percent, fmt_qty, fmt_math, fmt_time
 
 class CommScalingMath:
     """Formatted math strings for scaling efficiency and communication overhead analysis."""
 
-    _ib_gbs = fmt(Systems.Fabrics.InfiniBand_NDR.bandwidth.to(GB/second).magnitude, precision=0, commas=False)
+    _ib_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth
     _overlap_fraction = 0.75
-    _gradient_size_gb = (Models.Language.GPT3.parameters.to(param).magnitude * BYTES_FP16.to(byte).magnitude * byte).to(GB).magnitude
+    _gradient_size = Models.Language.GPT3.size_in_bytes(BYTES_FP16)
 
     # ┌── GUARD (Invariants) ──────────────────────────────────────────
-    _raw_time_s = (2 * _gradient_size_gb) / float(_ib_gbs)
-    _effective_time_s = _raw_time_s * (1 - _overlap_fraction)
-    check(_raw_time_s > 5.0, f"Narrative Violation: Communication is too fast ({_raw_time_s:.1f}s)! The 'bottleneck' narrative is broken.")
+    _raw_time = (2 * _gradient_size / _ib_bw).to(second)
+    _effective_time = _raw_time * (1 - _overlap_fraction)
+    check(_raw_time.to(second).magnitude > 5.0, f"Narrative Violation: Communication is too fast ({_raw_time.to(second).magnitude:.1f}s)! The 'bottleneck' narrative is broken.")
 
-    comm_time_formula_math = fmt_math(f"2 \\times (N-1)/N \\times {_gradient_size_gb:.0f} / {_ib_gbs}")
-    comm_approx_math = fmt_math(f"2 \\times {_gradient_size_gb:.0f} / {_ib_gbs}")
-    gpt3_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    _ib_gbs_text = fmt(_ib_bw.to(GB / second).magnitude, precision=0, commas=False)
+    _gradient_size_gb_text = fmt(_gradient_size.to(GB).magnitude, precision=0, commas=False)
+    comm_time_formula_math = fmt_math(f"2 \\times (N-1)/N \\times {_gradient_size_gb_text} / {_ib_gbs_text}")
+    comm_approx_math = fmt_math(f"2 \\times {_gradient_size_gb_text} / {_ib_gbs_text}")
+    gpt3_params_b_str = fmt_params(Models.Language.GPT3.parameters)
     compute_per_step_math = fmt_math(f"O_{{\\text{{step}}}} = 6 \\times {gpt3_params_b_str} \\times 10^9 \\times 2 \\times 10^6 \\approx 2.1 \\times 10^{{18}}")
     t_compute_math = fmt_math(f"T_{{\\text{{compute}}}}/N \\approx 2.1")
-    t_comm_math = fmt_math(f"T_{{\\text{{comm}}}}(N) \\approx {_effective_time_s:.1f}")
+    t_comm_math = fmt_math(f"T_{{\\text{{comm}}}}(N) \\approx {_effective_time.to(second).magnitude:.1f}")
     t_compute_s = 2.1
-    exposed_step_s = t_compute_s + _effective_time_s
-    scaling_efficiency = t_compute_s / exposed_step_s
+    exposed_step = t_compute_s * second + _effective_time
+    scaling_efficiency = (t_compute_s * second / exposed_step).to_base_units().magnitude
     batch_tokens_m = 2
     n_gpus = Systems.Clusters.Training_1K.total_accelerators
     mfu_pct = 50
     flops_per_token = 6
     overlap_pct = int(_overlap_fraction * 100)
-    raw_comm_s = _raw_time_s
+    raw_comm_s = _raw_time
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    gradient_gb_str = fmt_qty(_gradient_size_gb * GB, GB, precision=0, commas=False)
-    exposed_step_s_str = fmt(exposed_step_s, precision=1, commas=False)
+    gradient_gb_str = fmt_qty(_gradient_size, GB, precision=0, commas=False)
+    exposed_step_s_str = fmt(exposed_step.to(second).magnitude, precision=1, commas=False)
     scaling_efficiency_str = fmt_percent(scaling_efficiency, precision=1, commas=False, style='prose')
     t_compute_s_str = fmt(t_compute_s, precision=1, commas=False)
     batch_tokens_m_str = fmt(batch_tokens_m, precision=0, commas=False)
     n_gpus_str = fmt_count(n_gpus, label="GPU")
     mfu_pct_str = fmt_percent(mfu_pct/100, precision=0, commas=False, style='prose')
-    raw_comm_s_str = fmt_time(raw_comm_s, 'second', precision=0, commas=False, style='word')
+    raw_comm_s_str = fmt_time(raw_comm_s, second, precision=0, commas=False, style='word')
     overlap_pct_str = fmt_percent(overlap_pct/100, precision=0, commas=False, style='prose')
     scaling_efficiency_pct_str = fmt_percent(scaling_efficiency, precision=1, commas=False, style='prose')
     flops_per_token_str = fmt(flops_per_token, precision=0, commas=False)
@@ -1669,34 +1671,35 @@ from mlsysim.engine.solver import DistributedModel
 # │ Exports: ModelParallelMemoryFacts.weight_gb_str,
 # │          .weight_per_gpu_str, .full_state_gb_str, .full_state_per_gpu_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, check, fmt_memory
+from mlsysim.physics import memory_from_params
 
 class ModelParallelMemoryFacts:
     # ┌── 1. LOAD ─────────────────────────────────────────
-    params_b = Models.Language.GPT3.parameters.to(Bparam).magnitude
+    params = Models.Language.GPT3.parameters
     n_gpus = 64
-    bytes_weights = 2
-    bytes_gradients = 2
-    bytes_adam_state = 12
+    bytes_weights = BYTES_FP16 / param
+    bytes_gradients = BYTES_FP16 / param
+    bytes_adam_state = 12 * (byte / param)
 
     # ┌── 2. EXECUTE ──────────────────────────────────────
-    weight_gb = params_b * bytes_weights
-    gradient_gb = params_b * bytes_gradients
-    optimizer_gb = params_b * bytes_adam_state
-    full_state_gb = weight_gb + gradient_gb + optimizer_gb
-    weight_per_gpu_gb = weight_gb / n_gpus
-    full_state_per_gpu_gb = full_state_gb / n_gpus
+    weight_mem = memory_from_params(params, bytes_weights)
+    gradient_mem = memory_from_params(params, bytes_gradients)
+    optimizer_mem = memory_from_params(params, bytes_adam_state)
+    full_state_mem = weight_mem + gradient_mem + optimizer_mem
+    weight_per_gpu_mem = weight_mem / n_gpus
+    full_state_per_gpu_mem = full_state_mem / n_gpus
 
     # ┌── 3. GUARD ────────────────────────────────────────
-    check(weight_gb == 350, "175B FP16 weights should be 350 GB")
-    check(full_state_gb == 2800, "Full mixed-precision Adam state should be 2,800 GB")
-    check(43 < full_state_per_gpu_gb < 44, "64-way sharded state should be about 43.8 GB/GPU")
+    check(weight_mem == 350 * GB, "175B FP16 weights should be 350 GB")
+    check(full_state_mem == 2800 * GB, "Full mixed-precision Adam state should be 2,800 GB")
+    check(43 * GB < full_state_per_gpu_mem < 44 * GB, "64-way sharded state should be about 43.8 GB/GPU")
 
     # ┌── 4. OUTPUT ───────────────────────────────────────
-    weight_gb_str = fmt_qty(weight_gb * GB, GB, precision=0, commas=False)
-    weight_per_gpu_str = fmt_qty(weight_per_gpu_gb * GB, GB, precision=1, commas=False)
-    full_state_gb_str = fmt_qty(full_state_gb * GB, GB, precision=0, commas=True)
-    full_state_per_gpu_str = fmt_qty(full_state_per_gpu_gb * GB, GB, precision=1, commas=False)
+    weight_gb_str = fmt_memory(weight_mem, unit=GB, precision=0, commas=False)
+    weight_per_gpu_str = fmt_memory(weight_per_gpu_mem, unit=GB, precision=1, commas=False)
+    full_state_gb_str = fmt_memory(full_state_mem, unit=GB, precision=0, commas=True)
+    full_state_per_gpu_str = fmt_memory(full_state_per_gpu_mem, unit=GB, precision=1, commas=False)
 ```
 
 ```{python}
@@ -1741,7 +1744,8 @@ from mlsysim.engine.solver import DistributedModel
 # │ Exports: ModelWeightSharding.mwa_per_gpu_str,
 # │          ModelWeightSharding.mwa_activation_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, MarkdownStr
+from mlsysim.fmt import fmt, check, MarkdownStr, fmt_memory
+from mlsysim.physics import memory_from_params
 class A100CapacityContext:
     """A100 hardware reference."""
 
@@ -1749,49 +1753,49 @@ class A100CapacityContext:
     mem = Hardware.Cloud.A100.memory.capacity
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    mem_gb = mem.to("gibibyte").magnitude
+    mem_capacity = mem.to(GiB)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(mem_gb == 80, "A100 memory capacity should be 80 GB")
+    check(mem_capacity == 80 * GiB, "A100 memory capacity should be 80 GB")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    a100_mem_str = fmt_qty(mem_gb * GiB, GiB, precision=0, commas=False, unit_label="GB")
+    a100_mem_str = fmt_qty(mem_capacity, GiB, precision=0, commas=False, unit_label="GB")
 
 class MemoryWallAnalysis:
     """ZeRO-3 memory wall analysis for 175B model on A100s."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    params_b = Models.Language.GPT3.parameters.to(Bparam).magnitude  # GPT-3 175B
-    bytes_weights = 2
-    bytes_gradients = 2
-    bytes_adam_state = 12
+    params = Models.Language.GPT3.parameters  # GPT-3 175B
+    bytes_weights = BYTES_FP16 / param
+    bytes_gradients = BYTES_FP16 / param
+    bytes_adam_state = 12 * (byte / param)
     n_gpus = 64
-    activation_approx_gb = 50
+    activation_approx = 50 * GB  # assumption: activation budget for this scenario
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    param_gb = params_b * bytes_weights
-    gradient_gb = params_b * bytes_gradients
-    optim_gb = params_b * bytes_adam_state
-    total_static_gb = param_gb + gradient_gb + optim_gb
-    per_gpu_static = total_static_gb/n_gpus
-    total_per_gpu = per_gpu_static + activation_approx_gb
+    param_mem = memory_from_params(params, bytes_weights)
+    gradient_mem = memory_from_params(params, bytes_gradients)
+    optim_mem = memory_from_params(params, bytes_adam_state)
+    total_static_mem = param_mem + gradient_mem + optim_mem
+    per_gpu_static = total_static_mem/n_gpus
+    total_per_gpu = per_gpu_static + activation_approx
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(param_gb == 350, f"param storage ({param_gb})")
-    check(gradient_gb == 350, f"gradient storage ({gradient_gb})")
-    check(optim_gb == 2100, f"optim storage ({optim_gb})")
-    check(total_static_gb == 2800, f"total static ({total_static_gb})")
-    check(43 < per_gpu_static < 44, f"per-GPU static ({per_gpu_static:.1f})")
-    check(93 < total_per_gpu < 94, f"total per GPU ({total_per_gpu})")
+    check(param_mem == 350 * GB, f"param storage ({param_mem})")
+    check(gradient_mem == 350 * GB, f"gradient storage ({gradient_mem})")
+    check(optim_mem == 2100 * GB, f"optim storage ({optim_mem})")
+    check(total_static_mem == 2800 * GB, f"total static ({total_static_mem})")
+    check(43 * GB < per_gpu_static < 44 * GB, f"per-GPU static ({per_gpu_static.to(GB).magnitude:.1f})")
+    check(93 * GB < total_per_gpu < 94 * GB, f"total per GPU ({total_per_gpu})")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    param_gb_str = fmt_qty(param_gb * GB, GB, precision=0, commas=False)
-    gradient_gb_str = fmt_qty(gradient_gb * GB, GB, precision=0, commas=False)
-    optim_gb_str = fmt_qty(optim_gb * GB, GB, precision=0, commas=True)
-    total_static_gb_str = fmt_qty(total_static_gb * GB, GB, precision=0, commas=True)
-    per_gpu_str = fmt_qty(per_gpu_static * GB, GB, precision=1, commas=False)
-    activation_str = fmt_qty(activation_approx_gb * GB, GB, precision=0, commas=False)
-    total_per_gpu_str = fmt_qty(total_per_gpu * GB, GB, precision=1, commas=False)
+    param_gb_str = fmt_memory(param_mem, unit=GB, precision=0, commas=False)
+    gradient_gb_str = fmt_memory(gradient_mem, unit=GB, precision=0, commas=False)
+    optim_gb_str = fmt_memory(optim_mem, unit=GB, precision=0, commas=True)
+    total_static_gb_str = fmt_memory(total_static_mem, unit=GB, precision=0, commas=True)
+    per_gpu_str = fmt_memory(per_gpu_static, unit=GB, precision=1, commas=False)
+    activation_str = fmt_memory(activation_approx, unit=GB, precision=0, commas=False)
+    total_per_gpu_str = fmt_memory(total_per_gpu, unit=GB, precision=1, commas=False)
     n_gpus_str = fmt_count(n_gpus, commas=False, label="GPU")
 ```
 
@@ -2026,13 +2030,13 @@ Tensor parallelism takes a fundamentally different approach: instead of assignin
 #| echo: false
 class TensorParallelBandwidth:
     from mlsysim.core.constants import GB, second
-    from mlsysim.fmt import fmt, fmt_qty
-    nvlink_h100_str = fmt_qty(Hardware.Cloud.H100.nvlink.bandwidth, GB/second, precision=0, commas=False)
-    ib_ndr_str = fmt_qty(Systems.Fabrics.InfiniBand_NDR.bandwidth, GB/second, precision=0, commas=False)
-    pipeline_ib_lo_gbs = 25
-    pipeline_ib_hi_gbs = 50
-    pipeline_ib_lo_str = fmt_qty(pipeline_ib_lo_gbs * GB / second, GB / second, precision=0, commas=False)
-    pipeline_ib_hi_str = fmt_qty(pipeline_ib_hi_gbs * GB / second, GB / second, precision=0, commas=False)
+    from mlsysim.fmt import fmt_bandwidth
+    nvlink_h100_str = fmt_bandwidth(Hardware.Cloud.H100.nvlink.bandwidth, unit=GB / second, precision=0, commas=False)
+    ib_ndr_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=GB / second, precision=0, commas=False)
+    pipeline_ib_lo_bw = Systems.Fabrics.InfiniBand_HDR.bandwidth
+    pipeline_ib_hi_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth
+    pipeline_ib_lo_str = fmt_bandwidth(pipeline_ib_lo_bw, unit=GB / second, precision=0, commas=False)
+    pipeline_ib_hi_str = fmt_bandwidth(pipeline_ib_hi_bw, unit=GB / second, precision=0, commas=False)
 ```
 
 ::: {#dfn-distributed-training-tensor-parallelism .callout-definition title="Tensor parallelism"}
@@ -2122,7 +2126,7 @@ from mlsysim.engine.solver import DistributedModel
 # │ Exports: FlashAttentionOverlapScenario.h100_hbm_bw_str,
 # │          FlashAttentionOverlapScenario.nvlink_h100_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, check, fmt_bandwidth
 
 class FlashAttentionOverlapScenario:
     """H100 bandwidth reference for overlap analysis."""
@@ -2132,16 +2136,16 @@ class FlashAttentionOverlapScenario:
     nvlink = Hardware.Cloud.H100.nvlink.bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    hbm_bw = hbm.to(TB/second).magnitude
-    nvlink_bw = nvlink.to(GB/second).magnitude
+    hbm_bw = hbm.to(TB/second)
+    nvlink_bw = nvlink.to(GB/second)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(hbm_bw > 2.0, "H100 HBM bandwidth should exceed 2 TB/s")
-    check(nvlink_bw == 900, "H100 NVLink bandwidth should be 900 GB/s")
+    check(hbm_bw > 2.0 * (TB / second), "H100 HBM bandwidth should exceed 2 TB/s")
+    check(nvlink_bw == 900 * (GB / second), "H100 NVLink bandwidth should be 900 GB/s")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    h100_hbm_bw_str = fmt_qty(hbm_bw * TB / second, TB / second, precision=2, commas=False)
-    nvlink_h100_str = fmt_qty(nvlink_bw * GB / second, GB / second, precision=0, commas=False)
+    h100_hbm_bw_str = fmt_bandwidth(hbm_bw, unit=TB/second, precision=2, commas=False)
+    nvlink_h100_str = fmt_bandwidth(nvlink_bw, unit=GB/second, precision=0, commas=False)
 ```
 
 If the compute time for one tile exceeds the communication time for transferring one tile over NVLink, the communication is fully hidden. On an H100 with `{python} FlashAttentionOverlapScenario.h100_hbm_bw_str` HBM bandwidth and `{python} FlashAttentionOverlapScenario.nvlink_h100_str` NVLink bandwidth, this overlap is achievable for typical tile sizes.
@@ -2297,7 +2301,7 @@ from mlsysim.engine.solver import DistributedModel
 # │          .activation_payload_mb_str, .full_forward_gb_str,
 # │          .per_stage_forward_gb_str, .per_stage_forward_backward_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, check, fmt_memory
 
 class TensorParallel3DTraffic:
     # ┌── 1. LOAD ─────────────────────────────────────────
@@ -2307,35 +2311,35 @@ class TensorParallel3DTraffic:
     microbatch = 4
     sequence_length = 2048
     hidden_dim = 12288
-    dtype_bytes = 2
+    dtype_bytes = BYTES_FP16
     layers = 96
     allreduces_per_layer = 2
 
     # ┌── 2. EXECUTE ──────────────────────────────────────
     total_gpus = tp * pp * dp
-    activation_payload_bytes = microbatch * sequence_length * hidden_dim * dtype_bytes
+    activation_payload = microbatch * sequence_length * hidden_dim * dtype_bytes
     ring_factor = 2 * (tp - 1) / tp
-    per_allreduce_gb = activation_payload_bytes * ring_factor / BILLION
-    full_forward_gb = per_allreduce_gb * allreduces_per_layer * layers
-    full_forward_backward_gb = full_forward_gb * 2
-    per_stage_forward_gb = full_forward_gb / pp
-    per_stage_forward_backward_gb = full_forward_backward_gb / pp
+    per_allreduce = activation_payload * ring_factor
+    full_forward = per_allreduce * allreduces_per_layer * layers
+    full_forward_backward = full_forward * 2
+    per_stage_forward = full_forward / pp
+    per_stage_forward_backward = full_forward_backward / pp
 
     # ┌── 3. GUARD ────────────────────────────────────────
     check(total_gpus == 16384, "TP×PP×DP should be 16,384 GPUs")
-    check(200 < activation_payload_bytes / MILLION < 202, "Activation payload should be about 201 MB")
-    check(67 < full_forward_gb < 68, "Full forward TP traffic should be about 68 GB")
-    check(4 < per_stage_forward_gb < 5, "Per-stage forward TP traffic should be about 4.2 GB")
+    check(200 * MB < activation_payload < 202 * MB, "Activation payload should be about 201 MB")
+    check(67 * GB < full_forward < 68 * GB, "Full forward TP traffic should be about 68 GB")
+    check(4 * GB < per_stage_forward < 5 * GB, "Per-stage forward TP traffic should be about 4.2 GB")
 
     # ┌── 4. OUTPUT ───────────────────────────────────────
     tp_str = fmt_count(tp, commas=False, label="GPU")
     pp_str = fmt(pp, precision=0, commas=False)
     dp_str = fmt(dp, precision=0, commas=False)
     total_gpus_str = fmt_count(total_gpus, label="GPU")
-    activation_payload_mb_str = fmt_qty((activation_payload_bytes / MILLION) * MB, MB, precision=1, commas=False)
-    full_forward_gb_str = fmt_qty(full_forward_gb * GB, GB, precision=1, commas=False)
-    per_stage_forward_gb_str = fmt_qty(per_stage_forward_gb * GB, GB, precision=1, commas=False)
-    per_stage_forward_backward_gb_str = fmt_qty(per_stage_forward_backward_gb * GB, GB, precision=1, commas=False)
+    activation_payload_mb_str = fmt_memory(activation_payload, unit=MB, precision=1, commas=False)
+    full_forward_gb_str = fmt_memory(full_forward, unit=GB, precision=1, commas=False)
+    per_stage_forward_gb_str = fmt_memory(per_stage_forward, unit=GB, precision=1, commas=False)
+    per_stage_forward_backward_gb_str = fmt_memory(per_stage_forward_backward, unit=GB, precision=1, commas=False)
 ```
 
 ```{python}
@@ -2381,40 +2385,41 @@ from mlsysim.engine.solver import DistributedModel
 # │ How: Compute global optimizer state and per-GPU static model state for t=8, p=16.
 # │ Exports: HybridMemoryAccounting.*_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, fmt_qty
+from mlsysim.fmt import fmt, check, fmt_memory
+from mlsysim.physics import memory_from_params
 
 class HybridMemoryAccounting:
     """Static memory for TP-8, PP-16 hybrid parallelism."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    params = Models.Language.GPT3.parameters.to(param).magnitude
+    params = Models.Language.GPT3.parameters
     tensor_parallel = 8
     pipeline_parallel = 16
-    simplified_optimizer_bytes_per_param = 2 * BYTES_FP32.to(byte).magnitude
-    full_adam_bytes_per_param = 3 * BYTES_FP32.to(byte).magnitude
+    simplified_optimizer_bytes_per_param = 2 * (BYTES_FP32 / param)
+    full_adam_bytes_per_param = 3 * (BYTES_FP32 / param)
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    weights_gb = (params * BYTES_FP16.to(byte).magnitude * byte).to(GB).magnitude
-    optimizer_simplified_gb = (params * simplified_optimizer_bytes_per_param * byte).to(GB).magnitude
-    optimizer_full_adam_gb = (params * full_adam_bytes_per_param * byte).to(GB).magnitude
-    tp_only_static_gb = (weights_gb + optimizer_simplified_gb) / tensor_parallel
-    hybrid_static_gb = (weights_gb + optimizer_simplified_gb) / (tensor_parallel * pipeline_parallel)
-    full_adam_hybrid_static_gb = (weights_gb + optimizer_full_adam_gb) / (tensor_parallel * pipeline_parallel)
+    weights = memory_from_params(params, BYTES_FP16 / param)
+    optimizer_simplified = memory_from_params(params, simplified_optimizer_bytes_per_param)
+    optimizer_full_adam = memory_from_params(params, full_adam_bytes_per_param)
+    tp_only_static = (weights + optimizer_simplified) / tensor_parallel
+    hybrid_static = (weights + optimizer_simplified) / (tensor_parallel * pipeline_parallel)
+    full_adam_hybrid_static = (weights + optimizer_full_adam) / (tensor_parallel * pipeline_parallel)
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
-    check(abs(optimizer_simplified_gb - 1400) < 1, "8-byte optimizer state should be 1.4 TB")
-    check(abs(optimizer_full_adam_gb - 2100) < 1, "12-byte Adam state should be 2.1 TB")
-    check(13 < hybrid_static_gb < 15, "Hybrid static memory should be about 14 GB/GPU")
+    check(abs((optimizer_simplified - 1400 * GB).to(GB).magnitude) < 1, "8-byte optimizer state should be 1.4 TB")
+    check(abs((optimizer_full_adam - 2100 * GB).to(GB).magnitude) < 1, "12-byte Adam state should be 2.1 TB")
+    check(13 * GB < hybrid_static < 15 * GB, "Hybrid static memory should be about 14 GB/GPU")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
-    weights_gb_str = fmt_qty(weights_gb * GB, GB, precision=0, commas=True)
-    weight_tp_slice_gb_str = fmt_qty((weights_gb / tensor_parallel) * GB, GB, precision=2, commas=False)
-    optimizer_simplified_tb_str = fmt_qty((optimizer_simplified_gb / THOUSAND) * TB, TB, precision=1, commas=False)
-    optimizer_full_adam_tb_str = fmt_qty((optimizer_full_adam_gb / THOUSAND) * TB, TB, precision=1, commas=False)
-    tp_only_static_gb_str = fmt_qty(tp_only_static_gb * GB, GB, precision=1, commas=False)
-    hybrid_static_gb_str = fmt_qty(hybrid_static_gb * GB, GB, precision=1, commas=False)
-    full_adam_hybrid_static_gb_str = fmt_qty(full_adam_hybrid_static_gb * GB, GB, precision=1, commas=False)
-    params_b_str = fmt(params / BILLION, precision=0, commas=False)
+    weights_gb_str = fmt_memory(weights, unit=GB, precision=0, commas=True)
+    weight_tp_slice_gb_str = fmt_memory(weights / tensor_parallel, unit=GB, precision=2, commas=False)
+    optimizer_simplified_tb_str = fmt_memory(optimizer_simplified, unit=TB, precision=1, commas=False)
+    optimizer_full_adam_tb_str = fmt_memory(optimizer_full_adam, unit=TB, precision=1, commas=False)
+    tp_only_static_gb_str = fmt_memory(tp_only_static, unit=GB, precision=1, commas=False)
+    hybrid_static_gb_str = fmt_memory(hybrid_static, unit=GB, precision=1, commas=False)
+    full_adam_hybrid_static_gb_str = fmt_memory(full_adam_hybrid_static, unit=GB, precision=1, commas=False)
+    params_b_str = fmt(params.to(param).magnitude / BILLION, precision=0, commas=False)
     hbm_gb_str = fmt_qty(Hardware.Cloud.H100.memory.capacity, GiB, precision=0, commas=False, unit_label="GB")
     budgeted_static_gb_str = fmt_qty(15 * GB, GB, precision=0, commas=False)
     tensor_parallel_str = fmt(tensor_parallel, precision=0, commas=False)
@@ -2437,24 +2442,24 @@ The primary efficiency penalty in pipeline parallelism is the "bubble"—the per
 #| echo: false
 from mlsysim.engine.solver import DistributedModel
 #| label: three-d-parallelism-config
-from mlsysim.fmt import check, fmt, MarkdownStr
+from mlsysim.fmt import check, fmt, MarkdownStr, fmt_bandwidth
 
 class ThreeDParallelism:
     """3D parallelism configuration for GPT-175B."""
     tp_h100 = 8
     pp_h100 = 16
     dp_h100 = 128
-    nvlink5_bw_tbs = Hardware.Cloud.B200.nvlink.bandwidth.to(TB/second).magnitude
+    nvlink5_bw = Hardware.Cloud.B200.nvlink.bandwidth
     total_gpus_h100 = tp_h100 * pp_h100 * dp_h100
     check(total_gpus_h100 == 16384, f"H100 total GPUs ({total_gpus_h100})")
     total_gpus_h100_str = fmt(total_gpus_h100, precision=0)
-    nvlink5_bw_str = fmt_qty(nvlink5_bw_tbs * TB / second, TB / second, precision=1, commas=False)
+    nvlink5_bw_str = fmt_bandwidth(nvlink5_bw, unit=TB / second, precision=1, commas=False)
     params_trillion_b_str = fmt(1, precision=0, commas=False)
     tp_blackwell_str = fmt(16, precision=0, commas=False)
     pp_blackwell_str = fmt(32, precision=0, commas=False)
     gpus_per_node_str = fmt(Systems.Nodes.DGX_H100.accelerators_per_node, precision=0, commas=False)
     tp_alt_str = fmt(32, precision=0, commas=False)
-    die_to_die_bw_str = fmt_qty(10 * (TB / second), TB / second, precision=0, commas=False)
+    die_to_die_bw_str = fmt_bandwidth(10 * (TB / second), unit=TB / second, precision=0, commas=False)
 ```
 
 The transition to the Blackwell architecture (2024) introduces two architectural shifts that redefine the 3D parallelism trade-offs. First, NVLink 5 provides `{python} ThreeDParallelism.nvlink5_bw_str` of bidirectional bandwidth per GPU, doubling the intra-node capacity of the Hopper generation. This allows for even larger tensor parallelism $(t)$ groups (e.g., $t=$ `{python} ThreeDParallelism.tp_blackwell_str` or $t=$ `{python} ThreeDParallelism.tp_alt_str` across multiple nodes) with lower latency overhead. Second, Blackwell adds FP4 Tensor Core support, improving low-precision throughput and memory efficiency for supported workloads; whether FP4 is used for training depends on the numerical recipe and software stack.
@@ -2684,21 +2689,28 @@ plt.close()
 # │ Context: @sec-distributed-training-rlhf-coordination
 # │ Exports: DistTrainH100Capacity.h100_mem_str
 from mlsysim import Hardware, Models
-from mlsysim.core.constants import GiB, Bparam
-from mlsysim.fmt import fmt, MarkdownStr, fmt_qty
+from mlsysim.core.constants import GiB, Bparam, GB, byte, param, BYTES_FP16
+from mlsysim.fmt import fmt, MarkdownStr, fmt_qty, fmt_memory
+from mlsysim.physics import memory_from_params
 import math
 
 class DistTrainH100Capacity:
     # ┌── 4. OUTPUT ───────────────────────────────────────
     h100_mem_str = fmt_qty(Hardware.Cloud.H100.memory.capacity, GiB, precision=0, commas=False, unit_label="GB")
-    policy_b = Models.Language.Llama2_70B.parameters.to(Bparam).magnitude
+    policy_params = Models.Language.Llama2_70B.parameters
     reward_b = 13
     value_b = 13
-    bytes_train = 16
-    bytes_infer = 2
-    ppo_total_mem = policy_b * bytes_train + policy_b * bytes_infer + reward_b * bytes_infer + value_b * bytes_train
-    min_gpus_mem = math.ceil(ppo_total_mem / Hardware.Cloud.H100.memory.capacity.to(GiB).magnitude)
-    ppo_total_mem_str = fmt_qty(ppo_total_mem * GB, GB, precision=0, commas=True)
+    bytes_train = 16 * (byte / param)
+    bytes_infer = BYTES_FP16 / param
+    h100_mem_budget = Hardware.Cloud.H100.memory.capacity.to(GiB) * (GB / GiB)
+    ppo_total_mem = (
+        memory_from_params(policy_params, bytes_train)
+        + memory_from_params(policy_params, bytes_infer)
+        + memory_from_params(reward_b * Bparam, bytes_infer)
+        + memory_from_params(value_b * Bparam, bytes_train)
+    )
+    min_gpus_mem = math.ceil((ppo_total_mem / h100_mem_budget).to_base_units().magnitude)
+    ppo_total_mem_str = fmt_memory(ppo_total_mem, unit=GB, precision=0, commas=True)
     min_gpus_mem_str = fmt_count(min_gpus_mem, commas=False, label="GPU")
     min_gpus_practical_str = MarkdownStr("64--128 GPUs")
 ```
@@ -2747,7 +2759,7 @@ from mlsysim.engine.solver import DistributedModel
 # │          RLHFKVCache.bytes_per_element_str, RLHFKVCache.kv_total_gb_str,
 # │          RLHFKVCache.dense_total_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt
+from mlsysim.fmt import check, fmt, fmt_memory
 
 class RLHFKVCache:
     """Generation-phase FP16 KV-cache footprint for a 70B GQA policy."""
@@ -2758,21 +2770,19 @@ class RLHFKVCache:
     kv_heads = Models.Language.Llama2_70B.kv_heads
     seq_len = 1024
     batch_size = 256
-    bytes_per_element = BYTES_FP16.to(byte).magnitude
+    bytes_per_element = BYTES_FP16
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     head_dim = hidden_dim // attention_heads
     kv_width = kv_heads * head_dim
-    kv_cache_bytes = 2 * layers * kv_width * seq_len * batch_size * bytes_per_element
-    kv_total_gb = (kv_cache_bytes * byte).to(GB).magnitude
-    dense_cache_bytes = 2 * layers * hidden_dim * seq_len * batch_size * bytes_per_element
-    dense_total_gb = (dense_cache_bytes * byte).to(GB).magnitude
+    kv_total = Models.Language.Llama2_70B.get_kv_cache_size(seq_len, batch_size, BYTES_FP16)
+    dense_total = 2 * layers * hidden_dim * seq_len * batch_size * bytes_per_element
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(hidden_dim % attention_heads == 0, "Hidden dimension must divide evenly by attention heads")
     check(kv_heads < attention_heads, "GQA should use fewer KV heads than attention heads")
-    check(85 <= kv_total_gb <= 87, f"GQA KV cache ({kv_total_gb:.1f} GB)")
-    check(685 <= dense_total_gb <= 689, f"Dense-attention KV cache ({dense_total_gb:.1f} GB)")
+    check(85 * GB <= kv_total <= 87 * GB, f"GQA KV cache ({kv_total.to(GB).magnitude:.1f} GB)")
+    check(685 * GB <= dense_total <= 689 * GB, f"Dense-attention KV cache ({dense_total.to(GB).magnitude:.1f} GB)")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     layers_str = fmt(layers, precision=0, commas=False)
@@ -2781,9 +2791,9 @@ class RLHFKVCache:
     head_dim_str = fmt(head_dim, precision=0, commas=False)
     seq_len_str = fmt(seq_len, precision=0)
     batch_size_str = fmt(batch_size, precision=0, commas=False)
-    bytes_per_element_str = fmt(bytes_per_element, precision=0, commas=False)
-    kv_total_gb_str = fmt_qty(kv_total_gb * GB, GB, precision=1, commas=False)
-    dense_total_gb_str = fmt_qty(dense_total_gb * GB, GB, precision=1, commas=False)
+    bytes_per_element_str = fmt(bytes_per_element.to(byte).magnitude, precision=0, commas=False)
+    kv_total_gb_str = fmt_memory(kv_total, unit=GB, precision=1, commas=False)
+    dense_total_gb_str = fmt_memory(dense_total, unit=GB, precision=1, commas=False)
 ```
 
 The generation phase itself introduces a sequential bottleneck absent from standard pretraining. RLHF requires the policy model to generate complete sequences (typically 256--2,048 tokens) autoregressively before computing rewards and policy gradients. Autoregressive generation is memory-bandwidth-bound, not compute-bound: each token requires a full forward pass through the model to produce a single output token. For a Llama-2-70B-style grouped-query attention policy, the KV cache grows by approximately $2 \times N_L \times H_{\text{KV}} \times d_{\text{head}} \times 2$ bytes per generated token per sequence. With `{python} RLHFKVCache.layers_str` layers, `{python} RLHFKVCache.kv_heads_str` KV heads, `{python} RLHFKVCache.head_dim_str`-dimensional heads, `{python} RLHFKVCache.seq_len_str` generated tokens, and a batch of `{python} RLHFKVCache.batch_size_str` prompts, the cache consumes `{python} RLHFKVCache.kv_total_gb_str`: $2 \times 80 \times 8 \times 128 \times 1024 \times 256 \times 2$ bytes. A dense multi-head attention model using the full `{python} RLHFKVCache.hidden_dim_str`-wide hidden state for K and V would yield `{python} RLHFKVCache.dense_total_gb_str`. Even with GQA, the cache uses about one H100 GPU's worth of HBM for intermediate attention state that is discarded after reward computation.
@@ -2824,20 +2834,23 @@ from mlsysim.engine.solver import DistributedModel
 # │          RLHFBudget.kv_total_gb_str, RLHFBudget.kv_per_gpu_str,
 # │          RLHFBudget.remaining_kv_str, RLHFBudget.dpo_activation_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt_percent, fmt
+from mlsysim.fmt import check, fmt_percent, fmt, fmt_memory
+from mlsysim.physics import memory_from_params
 
 class RLHFBudget:
     """PPO vs. DPO resource requirements for 70B alignment."""
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    policy_b = Models.Language.Llama2_70B.parameters.to(Bparam).magnitude  # Llama-2 70B
-    ref_b = Models.Language.Llama2_70B.parameters.to(Bparam).magnitude     # Llama-2 70B
+    policy_params = Models.Language.Llama2_70B.parameters  # Llama-2 70B
+    ref_params = Models.Language.Llama2_70B.parameters     # Llama-2 70B
+    policy_b = policy_params.to(Bparam).magnitude
+    ref_b = ref_params.to(Bparam).magnitude
     reward_b = 13
     value_b = 13
-    bytes_train = 16
-    bytes_infer = 2
+    bytes_train = 16 * (byte / param)
+    bytes_infer = BYTES_FP16 / param
     tp = 8
     pp = 4
-    h100_mem = Hardware.Cloud.H100.memory.capacity.to(GiB).magnitude
+    h100_mem = Hardware.Cloud.H100.memory.capacity.to(GiB) * (GB / GiB)
     layers = Models.Language.Llama2_70B.layers
     kv_heads = Models.Language.Llama2_70B.kv_heads
     hidden_dim = Models.Language.Llama2_70B.hidden_dim
@@ -2846,59 +2859,58 @@ class RLHFBudget:
     batch_size = 256
     head_dim = hidden_dim // attention_heads
     kv_width = kv_heads * head_dim
-    kv_cache_bytes = 2 * layers * kv_width * seq_len * batch_size * BYTES_FP16.to(byte).magnitude
-    kv_total_gb = (kv_cache_bytes * byte).to(GB).magnitude
-    kv_total_gb_str = fmt_qty(kv_total_gb * GB, GB, precision=1, commas=False)
+    kv_total = Models.Language.Llama2_70B.get_kv_cache_size(seq_len, batch_size, BYTES_FP16)
+    kv_total_gb_str = fmt_memory(kv_total, unit=GB, precision=1, commas=False)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    policy_mem = policy_b * bytes_train
-    ref_mem = ref_b * bytes_infer
+    policy_mem = memory_from_params(policy_params, bytes_train)
+    ref_mem = memory_from_params(ref_params, bytes_infer)
     n_gpus = tp * pp
     policy_per_gpu = policy_mem/n_gpus
     ref_per_gpu = ref_mem/n_gpus
     ref_per_gpu_sep = ref_mem/tp
-    reward_mem = reward_b * bytes_infer
-    value_mem = value_b * bytes_train
+    reward_mem = memory_from_params(reward_b * Bparam, bytes_infer)
+    value_mem = memory_from_params(value_b * Bparam, bytes_train)
     ppo_total_mem = policy_mem + ref_mem + reward_mem + value_mem
     dpo_total_mem = policy_mem + ref_mem
-    dpo_reduction_pct = (ppo_total_mem - dpo_total_mem) / ppo_total_mem
+    dpo_reduction_pct = ((ppo_total_mem - dpo_total_mem) / ppo_total_mem).to_base_units().magnitude
     static_per_gpu = policy_per_gpu + ref_per_gpu
     remaining = h100_mem - static_per_gpu
-    kv_per_gpu = kv_total_gb/n_gpus
+    kv_per_gpu = kv_total/n_gpus
     remaining_after_kv = remaining - kv_per_gpu
-    dpo_activation_ratio = remaining / remaining_after_kv
+    dpo_activation_ratio = (remaining / remaining_after_kv).to_base_units().magnitude
     gen_phase_pct = 60
     train_phase_pct = 100 - gen_phase_pct
     dpo_mfu_lo = 40
     dpo_mfu_hi = 55
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(policy_mem - 1120) < 15, f"policy memory ({policy_mem})")
+    check(abs((policy_mem - 1120 * GB).to(GB).magnitude) < 15, f"policy memory ({policy_mem})")
     check(n_gpus == 32, f"GPU count ({n_gpus})")
-    check(abs(policy_per_gpu - 35.0) < 0.5, f"policy per GPU ({policy_per_gpu})")
-    check(value_mem == 208, f"value mem ({value_mem})")
-    check(abs(ppo_total_mem - 1494) < 20, f"PPO total memory ({ppo_total_mem})")
-    check(abs(static_per_gpu - 39.4) < 0.4, f"static/GPU ({static_per_gpu:.1f})")
-    check(85 <= kv_total_gb <= 87, f"KV cache ({kv_total_gb:.1f} GB)")
+    check(abs((policy_per_gpu - 35.0 * GB).to(GB).magnitude) < 0.5, f"policy per GPU ({policy_per_gpu})")
+    check(value_mem == 208 * GB, f"value mem ({value_mem})")
+    check(abs((ppo_total_mem - 1494 * GB).to(GB).magnitude) < 20, f"PPO total memory ({ppo_total_mem})")
+    check(abs((static_per_gpu - 39.4 * GB).to(GB).magnitude) < 0.4, f"static/GPU ({static_per_gpu.to(GB).magnitude:.1f})")
+    check(85 * GB <= kv_total <= 87 * GB, f"KV cache ({kv_total.to(GB).magnitude:.1f} GB)")
     check(1.05 < dpo_activation_ratio < 1.10, f"DPO activation ratio ({dpo_activation_ratio:.2f}x)")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    policy_mem_str = fmt_qty(policy_mem * GB, GB, precision=0, commas=True)
-    ref_mem_str = fmt_qty(ref_mem * GB, GB, precision=0, commas=False)
+    policy_mem_str = fmt_memory(policy_mem, unit=GB, precision=0, commas=True)
+    ref_mem_str = fmt_memory(ref_mem, unit=GB, precision=0, commas=False)
     n_gpus_str = fmt_count(n_gpus, commas=False, label="GPU")
-    policy_per_gpu_str = fmt_qty(policy_per_gpu * GB, GB, precision=0, commas=False)
-    ref_per_gpu_str = fmt_qty(ref_per_gpu * GB, GB, precision=1, commas=False)
-    ref_per_gpu_sep_str = fmt_qty(ref_per_gpu_sep * GB, GB, precision=1, commas=False)
-    reward_mem_str = fmt_qty(reward_mem * GB, GB, precision=0, commas=False)
-    value_mem_str = fmt_qty(value_mem * GB, GB, precision=0, commas=False)
-    ppo_total_mem_str = fmt_qty(ppo_total_mem * GB, GB, precision=0, commas=True)
-    dpo_total_mem_str = fmt_qty(dpo_total_mem * GB, GB, precision=0, commas=True)
+    policy_per_gpu_str = fmt_memory(policy_per_gpu, unit=GB, precision=0, commas=False)
+    ref_per_gpu_str = fmt_memory(ref_per_gpu, unit=GB, precision=1, commas=False)
+    ref_per_gpu_sep_str = fmt_memory(ref_per_gpu_sep, unit=GB, precision=1, commas=False)
+    reward_mem_str = fmt_memory(reward_mem, unit=GB, precision=0, commas=False)
+    value_mem_str = fmt_memory(value_mem, unit=GB, precision=0, commas=False)
+    ppo_total_mem_str = fmt_memory(ppo_total_mem, unit=GB, precision=0, commas=True)
+    dpo_total_mem_str = fmt_memory(dpo_total_mem, unit=GB, precision=0, commas=True)
     dpo_reduction_pct_str = fmt_percent(dpo_reduction_pct, precision=1, commas=False, style='prose')
-    static_per_gpu_str = fmt_qty(static_per_gpu * GB, GB, precision=1, commas=False)
-    remaining_str = fmt_qty(remaining * GB, GB, precision=1, commas=False)
-    kv_total_gb_str = fmt_qty(kv_total_gb * GB, GB, precision=1, commas=False)
-    kv_per_gpu_str = fmt_qty(kv_per_gpu * GB, GB, precision=1, commas=False)
-    remaining_kv_str = fmt_qty(remaining_after_kv * GB, GB, precision=1, commas=False)
+    static_per_gpu_str = fmt_memory(static_per_gpu, unit=GB, precision=1, commas=False)
+    remaining_str = fmt_memory(remaining, unit=GB, precision=1, commas=False)
+    kv_total_gb_str = fmt_memory(kv_total, unit=GB, precision=1, commas=False)
+    kv_per_gpu_str = fmt_memory(kv_per_gpu, unit=GB, precision=1, commas=False)
+    remaining_kv_str = fmt_memory(remaining_after_kv, unit=GB, precision=1, commas=False)
     dpo_activation_ratio_str = fmt(dpo_activation_ratio, precision=2, commas=False)
     tp_str = fmt_count(tp, commas=False, label="GPU")
     pp_str = fmt(pp, precision=0, commas=False)
@@ -3039,10 +3051,10 @@ from mlsysim.core.constants import GiB, BILLION, param
 from mlsysim.fmt import fmt, check
 
 class A100CapacityFallacies:
-    mem_gb = Hardware.Cloud.A100.memory.capacity.to(GiB).magnitude
+    mem = Hardware.Cloud.A100.memory.capacity
     params_b = Models.Language.GPT3.parameters.to(param).magnitude / BILLION
-    check(mem_gb == 80, "A100 memory capacity should be 80 GB")
-    a100_mem_str = fmt_qty(mem_gb * GiB, GiB, precision=0, commas=False, unit_label="GB")
+    check(mem == 80 * GiB, "A100 memory capacity should be 80 GB")
+    a100_mem_str = fmt_qty(mem, GiB, precision=0, commas=False, unit_label="GB")
     frontier_params_b_str = fmt(params_b, precision=0)
 ```
 

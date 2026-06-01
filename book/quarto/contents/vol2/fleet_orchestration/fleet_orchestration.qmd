@@ -797,18 +797,13 @@ class FleetTopologyInterconnect:
     h_h100 = Hardware.Cloud.H100
     h_a100 = Hardware.Cloud.A100
     ib_ndr = Systems.Fabrics.InfiniBand_NDR
-    nvlink_h100_val = h_h100.nvlink.bandwidth.to(GB/second).magnitude
-    nvlink_a100_val = h_a100.nvlink.bandwidth.to(GB/second).magnitude
-    ib_ndr_gbps_val = ib_ndr.bandwidth.to(Gbps).magnitude
-    ib_ndr_gbs_val = ib_ndr.bandwidth.to(GB/second).magnitude
-    activation = 1 * GB
-    activation_gb = activation.to(GB).magnitude
+    activation = 1 * GB  # scenario assumption
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    nvlink_xfer_ms = activation_gb / nvlink_h100_val * THOUSAND
-    ib_xfer_ms = activation_gb / ib_ndr_gbs_val * THOUSAND
-    xfer_slowdown = ib_xfer_ms / nvlink_xfer_ms
+    nvlink_xfer = (activation / h_h100.nvlink.bandwidth).to(ms)
+    ib_xfer = (activation / ib_ndr.bandwidth).to(ms)
+    xfer_slowdown = (ib_xfer / nvlink_xfer).to("").magnitude
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(abs(nvlink_xfer_ms - ib_xfer_ms) > 0, "IB transfer should differ from NVLink")
+    check(abs((nvlink_xfer - ib_xfer).to(ms).magnitude) > 0, "IB transfer should differ from NVLink")
     check(xfer_slowdown > 1, f"Expected IB slowdown > 1, got {xfer_slowdown}")
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     nvlink_h100_str = fmt_qty(h_h100.nvlink.bandwidth, GB/second, precision=0)
@@ -816,8 +811,8 @@ class FleetTopologyInterconnect:
     ib_ndr_str = fmt_qty(ib_ndr.bandwidth, Gbps, precision=0, unit_label="Gb/s")
     ib_ndr_gbs_str = fmt_qty(ib_ndr.bandwidth, GB/second, precision=0)
     activation_gb_str = fmt_qty(activation, GB, precision=0, commas=False)
-    nvlink_xfer_ms_str = fmt_time(nvlink_xfer_ms, 'millisecond', precision=1, commas=False)
-    ib_xfer_ms_str = fmt_time(ib_xfer_ms, 'millisecond', precision=0, commas=False)
+    nvlink_xfer_ms_str = fmt_time(nvlink_xfer, ms, precision=1, commas=False)
+    ib_xfer_ms_str = fmt_time(ib_xfer, ms, precision=0, commas=False)
     xfer_slowdown_str = fmt(xfer_slowdown, precision=0, commas=False)
 ```
 
@@ -1425,7 +1420,7 @@ The optimal mix depends on workload characteristics and organizational prioritie
 # │ Imports: mlsysim.fmt (check)
 # │ Exports: spot_* strings for callout
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, MarkdownStr, fmt_count, fmt_time
+from mlsysim.fmt import fmt, check, MarkdownStr, fmt_count, fmt_params, fmt_time
 
 class SpotTrainingEconomics:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -1466,7 +1461,7 @@ class SpotTrainingEconomics:
     restart_interruptions_str = fmt(interruptions, precision=0, commas=False)
     restart_hours_each_str = fmt_time(restart_hours, 'hour', precision=1, commas=False, style='word')
     restart_min_str = fmt_time(restart_hours * 60, 'minute', precision=0, commas=False, style='word')
-    model_params_b_str = fmt_count(70 * BILLION, scale='B', precision=0, commas=False)
+    model_params_b_str = fmt_params(70 * BILLION, precision=0, commas=False)
     spot_run_days_str = fmt(run_hours // HOURS_PER_DAY, precision=0, commas=False)
     spot_discount_pct_str = fmt_percent(1 - spot_rate / on_demand_rate, precision=0, commas=False, style='prose')
 ```
@@ -1802,33 +1797,28 @@ For a heterogeneous fleet, this logic dictates a bifurcated strategy. Our 175B p
 # │ Imports: mlsysim.book (fmt, check), mlsysim.constants (HOURS_PER_YEAR)
 # │ Exports: gs_* strings for callout
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt_qty, fmt_qty_int, fmt, check, fmt_count
+from mlsysim.fmt import fmt_int, fmt_qty, fmt_qty_int, fmt, check, fmt_count, fmt_params
 
 class GpuSharingRoi:
     # ┌── 1. LOAD ──────────────────────────────────────────
     n_small = 100
-    small_footprint = 26 * GB
-    small_footprint_gb = small_footprint.to(GB).magnitude
+    small_footprint = 26 * GiB  # scenario assumption
     n_large = 10
     large_footprint = Models.Language.GPT3.parameters * BYTES_FP16  # 175B FP16
-    large_footprint_gb = large_footprint.to(GB).magnitude
     a100_mem = Hardware.Cloud.A100.memory.capacity
-    a100_mem_gb = a100_mem.to(GiB).magnitude
     gpus_per_large = 8
     models_per_gpu_shared = 2
     gpu_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
     # ┌── 2. EXECUTE ───────────────────────────────────────
     excl_small_gpus = n_small
     excl_total_mem = excl_small_gpus * a100_mem
-    excl_total_mem_gb = excl_small_gpus * a100_mem_gb
-    excl_used_mem_gb = n_small * small_footprint_gb
-    excl_util_pct = excl_used_mem_gb/excl_total_mem_gb * 100
+    excl_used_mem = n_small * small_footprint
+    excl_util_pct = (excl_used_mem / excl_total_mem).to("").magnitude * 100
     excl_large_gpus = n_large * gpus_per_large
     excl_total = excl_small_gpus + excl_large_gpus
     shared_small_gpus = n_small // models_per_gpu_shared
     shared_mem_per_gpu_q = models_per_gpu_shared * small_footprint
-    shared_mem_per_gpu = models_per_gpu_shared * small_footprint_gb
-    shared_util_pct = shared_mem_per_gpu/a100_mem_gb * 100
+    shared_util_pct = (shared_mem_per_gpu_q / a100_mem).to("").magnitude * 100
     shared_total = shared_small_gpus + excl_large_gpus
     saved_gpus = excl_total - shared_total
     saved_pct = saved_gpus/excl_total * 100
@@ -1844,23 +1834,17 @@ class GpuSharingRoi:
     gs_excl_large_str = fmt_count(excl_large_gpus, label="GPU")
     gs_excl_total_str = fmt_count(excl_total, label="GPU")
     gs_shared_gpus_str = fmt_count(shared_small_gpus, label="GPU")
-    gs_shared_mem_str = fmt_qty(shared_mem_per_gpu_q, GB, precision=0)
+    gs_shared_mem_str = fmt_qty(shared_mem_per_gpu_q, GiB, precision=0, unit_label="GB")
     gs_shared_util_str = fmt_percent(shared_util_pct/100, precision=0, commas=False, style='prose')
     gs_shared_total_str = fmt_count(shared_total, label="GPU")
     gs_saved_gpus_str = fmt(saved_gpus, precision=0)
     gs_saved_pct_str = fmt_percent(saved_pct/100, precision=1, style='prose')
     gs_annual_str = fmt(annual_savings, precision=0)
-    small_model_params_b = Models.Language.Llama2_7B.parameters.to(Bparam).magnitude
-    gs_small_model_b_str = fmt_count(small_model_params_b * BILLION, scale='B', precision=0, commas=False)
-    gs_large_model_b_str = fmt_count(
-        Models.Language.GPT3.parameters.to(param).magnitude,
-        scale='B',
-        precision=0,
-        commas=False,
-    )
+    gs_small_model_b_str = fmt_params(Models.Language.Llama2_7B.parameters, precision=0, commas=False)
+    gs_large_model_b_str = fmt_params(Models.Language.GPT3.parameters, precision=0, commas=False)
     gs_n_small_str = fmt(n_small, precision=0, commas=False)
     gs_a100_mem_str = fmt_qty(a100_mem, GiB, precision=0, commas=False, unit_label="GB")
-    gs_small_footprint_str = fmt_qty(small_footprint, GB, precision=0, commas=False)
+    gs_small_footprint_str = fmt_qty(small_footprint, GiB, precision=0, commas=False, unit_label="GB")
     gs_models_per_gpu_str = fmt(models_per_gpu_shared, precision=0, commas=False)
     gs_n_large_str = fmt(n_large, precision=0, commas=False)
     gs_gpus_per_large_str = fmt_count(gpus_per_large, commas=False, label="GPU")

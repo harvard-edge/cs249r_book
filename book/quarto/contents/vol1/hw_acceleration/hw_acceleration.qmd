@@ -51,7 +51,11 @@ The central surprise of modern computing is that *arithmetic is nearly free whil
 from mlsysim import *
 from mlsysim.core.constants import *
 #| label: hw-acceleration-setup
-from mlsysim.fmt import fmt_int, fmt, fmt_qty, fmt_qty_int, check
+from mlsysim.fmt import (
+    fmt_int, fmt, fmt_qty, fmt_qty_int, check,
+    fmt_memory, fmt_bandwidth, fmt_flop_rate, fmt_power, fmt_energy, fmt_count,
+    fmt_params, fmt_carbon_intensity, fmt_compute_efficiency,
+)
 
 class HwAccelSetup:
     """A100 peak FP16/BF16 throughput vs. server CPU for the opening callout."""
@@ -776,7 +780,7 @@ The engineering lesson is clear from this trajectory: the era of "free" performa
 # │          CpuMlInefficiency.a100_tflops_tf32,
 # │          CpuMlInefficiency.mobile_tops
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt
+from mlsysim.fmt import fmt, fmt_percent, fmt_flop_rate
 
 class CpuMlInefficiency:
     """CPU vs accelerator efficiency gap for ML workloads."""
@@ -784,20 +788,19 @@ class CpuMlInefficiency:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     cpu_utilization_min_value = 5                    # % utilization on ML workloads
     cpu_utilization_max_value = 10                   # % utilization on ML workloads
-    cpu_gflops_value = 100                           # Typical CPU GFLOP/s for ML
+    cpu_peak_flops = Hardware.Cloud.ReferenceCPU.compute.peak_flops
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    # (values are already given; no derivation needed)
+    cpu_delivered_flops = cpu_peak_flops * (cpu_utilization_max_value / 100)
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     cpu_utilization_min_str = fmt_percent(cpu_utilization_min_value/100, precision=0, commas=False, style='symbol')
     cpu_utilization_max_str = fmt_percent(cpu_utilization_max_value/100, precision=0, commas=False, style='symbol')
-    cpu_gflops_str = fmt(cpu_gflops_value, precision=0, commas=False)
+    cpu_gflops_str = fmt_flop_rate(cpu_delivered_flops, unit=GFLOP / second, precision=0, commas=False)
 
     # A100/Mobile specs for footnote comparison
-    a100_tflops_fp16 = f"{Hardware.Cloud.A100.compute.peak_flops.to(TFLOPs/second).magnitude:.0f}"
-    _tf32_tflops = Hardware.Cloud.A100.compute.precision_flops['tf32'].to(TFLOPs/second).magnitude
-    a100_tflops_tf32 = f"{_tf32_tflops:.0f}"
+    a100_tflops_fp16 = f"{Hardware.Cloud.A100.compute.peak_flops.to(TFLOP/second).magnitude:.0f}"
+    a100_tflops_tf32 = fmt(Hardware.Cloud.A100.compute.precision_flops['tf32'].to(TFLOP/second).magnitude, precision=0, commas=False)
     mobile_tops = f"{Hardware.Mobile.iPhone15Pro.compute.peak_flops.to(TOPS).magnitude:.0f}"
 ```
 
@@ -809,28 +812,28 @@ Machine learning constitutes a computational domain with unique characteristics 
 ```{python}
 #| echo: false
 #| label: ml-accelerator-callout-calc
-from mlsysim.fmt import fmt_int, fmt, check
+from mlsysim.fmt import fmt, check, fmt_bandwidth, fmt_flop_rate
 
 class MlAcceleratorCallout:
     """A100 throughput and bandwidth vs. server CPU for the ML accelerator callout."""
 
     # LOAD
-    a100_tflops_fp16 = Hardware.Cloud.A100.compute.peak_flops.to(TFLOPs/second).magnitude
-    a100_bw_tbs      = Hardware.Cloud.A100.memory.bandwidth.to(TB/second).magnitude
-    cpu_tflops_low   = Hardware.Cloud.ReferenceCPU.compute.peak_flops.to(TFLOPs/second).magnitude
-    cpu_tflops_high  = 2
+    a100_peak_flops = Hardware.Cloud.A100.compute.peak_flops
+    a100_bandwidth  = Hardware.Cloud.A100.memory.bandwidth
+    cpu_flops_low   = Hardware.Cloud.ReferenceCPU.compute.peak_flops
+    cpu_flops_high  = 2 * (TFLOP / second)  # scenario assumption: high-end server CPU upper bound
 
     # EXECUTE
-    cpu_gap_min = a100_tflops_fp16 / cpu_tflops_high
-    cpu_gap_max = a100_tflops_fp16 / cpu_tflops_low
+    cpu_gap_min = (a100_peak_flops / cpu_flops_high).to_base_units().magnitude
+    cpu_gap_max = (a100_peak_flops / cpu_flops_low).to_base_units().magnitude
 
     # GUARD
     check(150 <= cpu_gap_min <= 160, f"Unexpected lower CPU gap: {cpu_gap_min:.1f}x")
     check(300 <= cpu_gap_max <= 320, f"Unexpected upper CPU gap: {cpu_gap_max:.1f}x")
 
     # OUTPUT
-    a100_tflops_fp16_str = fmt(a100_tflops_fp16, precision=0, commas=False)
-    a100_bw_tbs_str      = fmt_qty(a100_bw_tbs * TB / second, TB / second, precision=2, commas=False)
+    a100_tflops_fp16_str = fmt_flop_rate(a100_peak_flops, unit=TFLOP / second, precision=0, commas=False)
+    a100_bw_tbs_str      = fmt_bandwidth(a100_bandwidth, unit=TB / second, precision=2, commas=False)
     cpu_gap_min_str      = fmt(cpu_gap_min, precision=0, commas=False)
     cpu_gap_max_str      = fmt(cpu_gap_max, precision=0, commas=False)
 ```
@@ -851,7 +854,7 @@ class MlAcceleratorCallout:
 *A DRAM access costs ~100$\times$ a MAC; data movement dominates energy.*
 :::
 
-Machine learning computational requirements reveal limitations in traditional processors. CPUs reach only `{python} CpuMlInefficiency.cpu_utilization_min_str`–`{python} CpuMlInefficiency.cpu_utilization_max_str` utilization on neural network workloads, delivering approximately `{python} CpuMlInefficiency.cpu_gflops_str` GFLOP/s (billions of floating-point operations per second) while consuming hundreds of watts. This inefficiency results from architectural mismatches: CPUs optimize for single-thread performance and irregular memory access, while neural networks require massive parallelism and predictable data streams. The memory bandwidth constraint compounds the problem: a single neural network layer may require accessing gigabytes of parameters, overwhelming CPU cache hierarchies designed for kilobyte-scale working sets.
+Machine learning computational requirements reveal limitations in traditional processors. CPUs reach only `{python} CpuMlInefficiency.cpu_utilization_min_str`–`{python} CpuMlInefficiency.cpu_utilization_max_str` utilization on neural network workloads, delivering approximately `{python} CpuMlInefficiency.cpu_gflops_str` (billions of floating-point operations per second) while consuming hundreds of watts. This inefficiency results from architectural mismatches: CPUs optimize for single-thread performance and irregular memory access, while neural networks require massive parallelism and predictable data streams. The memory bandwidth constraint compounds the problem: a single neural network layer may require accessing gigabytes of parameters, overwhelming CPU cache hierarchies designed for kilobyte-scale working sets.
 
 \index{Energy!data movement cost}
 
@@ -2324,7 +2327,7 @@ class SystolicOpsCalc:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     SYSTOLIC_ARRAY_DIM = 128          # pedagogical systolic-array dimension example
     systolic_dim_value = SYSTOLIC_ARRAY_DIM
-    tpuv4_bw_gbs       = Hardware.Cloud.TPUv4.memory.bandwidth.to(GB/second).magnitude
+    tpuv4_bw           = Hardware.Cloud.TPUv4.memory.bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     systolic_ops_value = systolic_dim_value * systolic_dim_value
@@ -2332,7 +2335,7 @@ class SystolicOpsCalc:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     systolic_dim_str = fmt(systolic_dim_value, precision=0, commas=False)
     systolic_ops_str = fmt(systolic_ops_value, precision=0)
-    tpuv4_bw_str     = fmt_qty(tpuv4_bw_gbs * GB / second, GB / second, precision=0, commas=True)
+    tpuv4_bw_str     = fmt_bandwidth(tpuv4_bw, unit=GB / second, precision=0, commas=True)
 ```
 
 A `{python} SystolicOpsCalc.systolic_dim_str` $\times$ `{python} SystolicOpsCalc.systolic_dim_str` systolic array capable of `{python} SystolicOpsCalc.systolic_ops_str` operations per cycle requires continuous data feed to maintain utilization. Each cycle demands fresh input activations and weight parameters that must traverse from off-chip memory through on-chip buffers to the array edges. The TPU v4's `{python} SystolicOpsCalc.tpuv4_bw_str` HBM2 bandwidth enables high utilization, but even this substantial bandwidth becomes limiting when processing large transformer models where memory requirements exceed on-chip capacity.
@@ -2415,20 +2418,20 @@ class InterconnectBandwidth:
     """Namespace for Interconnect Hierarchy bandwidth taper."""
     h_h100 = Hardware.Cloud.H100
 
-    hbm_bw = h_h100.memory.bandwidth.to(GB/second).magnitude
-    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth.to(GB/second).magnitude
-    pcie_bw = Hardware.Cloud.H100.interconnect.bandwidth.to(GB/second).magnitude
-    net_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth.to(GB/second).magnitude
+    hbm_bw = h_h100.memory.bandwidth
+    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth
+    pcie_bw = Hardware.Cloud.H100.interconnect.bandwidth
+    net_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth
 
     # Invariant: HBM > NVLink > PCIe > Network
     check(hbm_bw > nvlink_bw > pcie_bw > net_bw, "Bandwidth taper violated!")
 
     # Custom unit suffixes (TB/s, GB/s, x) → MarkdownStr per recipe Rule 1 escape-hatch
-    hbm_bw_str = fmt_qty(h_h100.memory.bandwidth, TB/second, precision=1, commas=False)
-    nvlink_bw_str = fmt_qty_int(nvlink_bw * GB / second, GB / second, commas=False)
-    pcie_bw_str = fmt_qty_int(pcie_bw * GB / second, GB / second, commas=False)
-    net_bw_str = fmt_qty_int(net_bw * GB / second, GB / second, commas=False)
-    gap_ratio_str = fmt_multiple(round(hbm_bw/pcie_bw), precision=0, commas=False)
+    hbm_bw_str = fmt_bandwidth(hbm_bw, unit=TB/second, precision=1, commas=False)
+    nvlink_bw_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
+    pcie_bw_str = fmt_bandwidth(pcie_bw, unit=GB / second, precision=0, commas=False)
+    net_bw_str = fmt_bandwidth(net_bw, unit=GB / second, precision=0, commas=False)
+    gap_ratio_str = fmt_multiple(round((hbm_bw / pcie_bw).to_base_units().magnitude), precision=0, commas=False)
 ```
 
 ::: {#nbk-hw-acceleration-bandwidth-taper .callout-notebook title="The bandwidth taper"}
@@ -2517,8 +2520,8 @@ class AcceleratorEconomics:
     price_gaudi = 12000  # Intel alternative
 
     # Gaudi 2 (FP8 — Gaudi 2's flagship precision)
-    gaudi_tf       = Hardware.Cloud.Gaudi2.compute.precision_flops["fp8"].to(TFLOPs/second).magnitude
-    gaudi_bw_value = Hardware.Cloud.Gaudi2.memory.bandwidth.to(GB/second).magnitude
+    gaudi_flops    = Hardware.Cloud.Gaudi2.compute.precision_flops["fp8"]
+    gaudi_bw       = Hardware.Cloud.Gaudi2.memory.bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     v100_tf    = h_v100.compute.peak_flops.to(TFLOPs/second).magnitude
@@ -2533,7 +2536,7 @@ class AcceleratorEconomics:
     tpu_tf    = h_tpu.compute.peak_flops.to(TFLOPs/second).magnitude
     tpu_ratio = price_tpu/tpu_tf
 
-    gaudi_ratio = price_gaudi/gaudi_tf
+    gaudi_ratio = price_gaudi / gaudi_flops.to(TFLOP/second).magnitude
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     # V100 specs
@@ -2566,8 +2569,8 @@ class AcceleratorEconomics:
     tpu_pp_str    = fmt_usd(tpu_ratio, precision=1, commas=False, approx=True, per="(TFLOP/s)")
 
     # Gaudi 2 specs
-    gaudi_tflops_str = fmt_qty(gaudi_tf * TFLOP / second, TFLOP / second, precision=0, commas=False)
-    gaudi_bw_str     = fmt_qty(gaudi_bw_value * GB / second, GB / second, precision=0, commas=True)
+    gaudi_tflops_str = fmt_flop_rate(gaudi_flops, unit=TFLOP / second, precision=0, commas=False)
+    gaudi_bw_str     = fmt_bandwidth(gaudi_bw, unit=GB / second, precision=0, commas=True)
     gaudi_price_str = fmt_usd(price_gaudi, precision=0, approx=True)
     gaudi_pp_str    = fmt_usd(gaudi_ratio, precision=1, commas=False, per="(TFLOP/s)")
 ```
@@ -2607,10 +2610,10 @@ from mlsysim.fmt import fmt
 
 class B200FP4Specs:
     """B200 FP4 peak throughput (dense and sparse)."""
-    dense_pflops      = Hardware.Cloud.B200.compute.precision_flops["fp4"].to(PFLOPs/second).magnitude
-    sparse_pflops     = 2 * dense_pflops
-    dense_pflops_str  = fmt_qty(dense_pflops * PFLOPs / second, PFLOPs / second, precision=0, commas=False, unit_label="PFLOP/s")
-    sparse_pflops_str = fmt_qty(sparse_pflops * PFLOPs / second, PFLOPs / second, precision=0, commas=False, unit_label="PFLOP/s")
+    dense_flops      = Hardware.Cloud.B200.compute.precision_flops["fp4"]
+    sparse_flops     = 2 * dense_flops
+    dense_pflops_str  = fmt_flop_rate(dense_flops, unit=PFLOP / second, precision=0, commas=False)
+    sparse_pflops_str = fmt_flop_rate(sparse_flops, unit=PFLOP / second, precision=0, commas=False)
 ```
 
 The preceding sections revealed impressive computational machinery: vector units achieving 8$\times$ parallelism through SIMD execution, matrix operations processing 256 elements simultaneously, and tensor cores executing $16{\times}16{\times}16$ fused multiply-accumulate blocks in single cycles. An NVIDIA A100's tensor cores can execute `{python} AcceleratorEconomics.a100_tflops_fp16_str`, and newer accelerators extend this trend with FP8 support for lower-precision deep learning workloads [@blankevoort2022; @micikevicius2022fp8]. At these rates, the pure arithmetic for a ResNet-50 forward pass could complete in microseconds.
@@ -2717,16 +2720,16 @@ plt.close()
 ```{python}
 #| echo: false
 #| label: memory-wall-h100-specs-calc
-from mlsysim.fmt import fmt
+from mlsysim.fmt import fmt_bandwidth, fmt_flop_rate
 
 class MemoryWallH100Specs:
     """H100 peak throughput and bandwidth for the memory-wall scaling prose."""
 
-    h100_tflops_fp16 = Hardware.Cloud.H100.compute.peak_flops.to(TFLOPs/second).magnitude
-    h100_bw_tbs      = Hardware.Cloud.H100.memory.bandwidth.to(TB/second).magnitude
+    h100_peak_flops = Hardware.Cloud.H100.compute.peak_flops
+    h100_bandwidth  = Hardware.Cloud.H100.memory.bandwidth
 
-    h100_tflops_fp16_str = fmt(h100_tflops_fp16, precision=0, commas=False)
-    h100_bw_tbs_str      = fmt_qty(h100_bw_tbs * TB / second, TB / second, precision=2, commas=False)
+    h100_tflops_fp16_str = fmt_flop_rate(h100_peak_flops, unit=TFLOP / second, precision=0, commas=False)
+    h100_bw_tbs_str      = fmt_bandwidth(h100_bandwidth, unit=TB / second, precision=2, commas=False)
 ```
 
 #### Quantifying the compute-memory performance gap {#sec-hardware-acceleration-quantifying-computememory-performance-gap-1526}
@@ -3011,19 +3014,19 @@ class TensorLifecycleCalc:
     kws_bytes_fp16_value = BYTES_FP16.to(byte).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    kws_tensor_kb_value      = (kws_samples_value * BYTES_FP16).to(KB).magnitude
+    kws_tensor               = kws_samples_value * BYTES_FP16
     dram_energy_pj_bit_value = ENERGY_DRAM_PJ_PER_BYTE.to(pJ / byte).magnitude / 8
-    a100_fp16_tflops_value   = Hardware.Cloud.A100.compute.peak_flops.to(TFLOPs/second).magnitude
+    a100_fp16_flops          = Hardware.Cloud.A100.compute.peak_flops
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    kws_tensor_str         = fmt_qty(kws_tensor_kb_value * KB, KB, precision=0, commas=False)
+    kws_tensor_str         = fmt_memory(kws_tensor, unit=KB, precision=0, commas=False)
     kws_samples_str        = fmt(kws_samples_value, precision=0, commas=True)
     kws_bytes_str          = fmt(kws_bytes_fp16_value, precision=0, commas=False)
     dram_energy_pj_bit_str = fmt(dram_energy_pj_bit_value, precision=0, commas=False)
     latency_hbm_str        = fmt(Hardware.Tech.Memory.DRAM.latency.to(nanosecond).magnitude, precision=0, commas=False)
     latency_l2_str         = fmt(Hardware.Tech.Memory.L2.latency.to(nanosecond).magnitude, precision=0, commas=False)
     latency_l1_str         = fmt(Hardware.Tech.Memory.L1.latency.to(nanosecond).magnitude, precision=0, commas=False)
-    a100_tflops_fp16_str   = fmt_qty(a100_fp16_tflops_value * TFLOP / second, TFLOP / second, precision=0, commas=False)
+    a100_tflops_fp16_str   = fmt_flop_rate(a100_fp16_flops, unit=TFLOP / second, precision=0, commas=False)
     # Plain-string literal → MarkdownStr per recipe Rule 1 (plain string literal _str)
     reg_energy_pj_bit_str  = MarkdownStr("0.1")
 ```
@@ -3486,42 +3489,42 @@ class InterconnectHierarchy:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     # Device
-    hbm_bw = Hardware.Cloud.A100.memory.bandwidth.to(GB/second).magnitude
+    hbm_bw = Hardware.Cloud.A100.memory.bandwidth
 
     # Chip-to-Chip
-    nvlink_a100 = Hardware.Cloud.A100.nvlink.bandwidth.to(GB/second).magnitude
-    nvlink_h100 = Hardware.Cloud.H100.nvlink.bandwidth.to(GB/second).magnitude
+    nvlink_a100 = Hardware.Cloud.A100.nvlink.bandwidth
+    nvlink_h100 = Hardware.Cloud.H100.nvlink.bandwidth
 
     # Host-to-Device
-    pcie_gen4 = Hardware.Cloud.A100.interconnect.bandwidth.to(GB/second).magnitude
+    pcie_gen4 = Hardware.Cloud.A100.interconnect.bandwidth
 
     # Node-to-Node (Network)
     ib_hdr_gbps = Systems.Fabrics.InfiniBand_HDR.bandwidth.to(Gbps).magnitude
-    ib_hdr_gbs = Systems.Fabrics.InfiniBand_HDR.bandwidth.to(GB/second).magnitude # ~25 GB/s
+    ib_hdr_bw = Systems.Fabrics.InfiniBand_HDR.bandwidth
 
     ib_ndr_gbps = Systems.Fabrics.InfiniBand_NDR.bandwidth.to(Gbps).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     # The "bandwidth taper" must hold: HBM > NVLink > PCIe > Network
-    check(hbm_bw > nvlink_h100 > pcie_gen4 > ib_hdr_gbs,
-          f"Bandwidth hierarchy violated. HBM({hbm_bw}) > NVLink({nvlink_h100}) > PCIe({pcie_gen4}) > Net({ib_hdr_gbs})")
+    check(hbm_bw > nvlink_h100 > pcie_gen4 > ib_hdr_bw,
+          "Bandwidth hierarchy violated. HBM > NVLink > PCIe > Network")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    nvlink_a100_str = fmt_qty(nvlink_a100 * (GB / second), GB / second, precision=0, commas=False)
-    nvlink_h100_str = fmt_qty(nvlink_h100 * (GB / second), GB / second, precision=0, commas=False)
-    ib_hdr_str = fmt_qty(Systems.Fabrics.InfiniBand_HDR.bandwidth, Gbps, precision=0, commas=False, unit_label="Gb/s")
+    nvlink_a100_str = fmt_bandwidth(nvlink_a100, unit=GB / second, precision=0, commas=False)
+    nvlink_h100_str = fmt_bandwidth(nvlink_h100, unit=GB / second, precision=0, commas=False)
+    ib_hdr_str = fmt_qty(ib_hdr_bw, Gbps, precision=0, commas=False, unit_label="Gb/s")
     ib_ndr_str = fmt_qty(Systems.Fabrics.InfiniBand_NDR.bandwidth, Gbps, precision=0, commas=False, unit_label="Gb/s")
 
     # Bandwidth-taper equation — one consistent chip (H100-class) so HBM, NVLink,
     # PCIe (Gen5), and the NDR network link cannot mix incompatible generations.
-    taper_hbm_gbs = Hardware.Cloud.H100.memory.bandwidth.to(GB/second).magnitude
-    taper_nvlink_gbs = nvlink_h100
-    taper_pcie_gbs = Hardware.Cloud.H100.interconnect.bandwidth.to(GB/second).magnitude
-    taper_net_gbs = Systems.Fabrics.InfiniBand_NDR.bandwidth.to(GB/second).magnitude
-    check(taper_hbm_gbs > taper_nvlink_gbs > taper_pcie_gbs > taper_net_gbs,
+    taper_hbm = Hardware.Cloud.H100.memory.bandwidth
+    taper_nvlink = nvlink_h100
+    taper_pcie = Hardware.Cloud.H100.interconnect.bandwidth
+    taper_net = Systems.Fabrics.InfiniBand_NDR.bandwidth
+    check(taper_hbm > taper_nvlink > taper_pcie > taper_net,
           "bandwidth taper HBM > NVLink > PCIe > Network must hold")
     taper_eq_math = MarkdownStr(
-        rf"$$\begin{{aligned}} \text{{HBM ({taper_hbm_gbs:.0f} GB/s)}} &\gg \text{{NVLink ({taper_nvlink_gbs:.0f} GB/s)}} \\ &\gg \text{{PCIe ({taper_pcie_gbs:.0f} GB/s)}} \gg \text{{Network ({taper_net_gbs:.0f} GB/s)}} \end{{aligned}}$$")
+        rf"$$\begin{{aligned}} \text{{HBM ({taper_hbm.to(GB/second).magnitude:.0f} GB/s)}} &\gg \text{{NVLink ({taper_nvlink.to(GB/second).magnitude:.0f} GB/s)}} \\ &\gg \text{{PCIe ({taper_pcie.to(GB/second).magnitude:.0f} GB/s)}} \gg \text{{Network ({taper_net.to(GB/second).magnitude:.0f} GB/s)}} \end{{aligned}}$$")
 ```
 
 1. **Device-Device Interconnect (NVLink/Infinity Fabric)**[^fn-nvlink-bandwidth]\index{NVLink!GPU interconnect}\index{GPU Interconnect!switching fabric}\index{Infinity Fabric!AMD interconnect}: Modern multi-GPU nodes use specialized high-speed bridges like NVLink to connect accelerators directly, bypassing the host CPU. Bandwidth ranges from `{python} InterconnectHierarchy.nvlink_a100_str` to `{python} InterconnectHierarchy.nvlink_h100_str` per GPU. The primary use case is gradient synchronization (AllReduce)\index{AllReduce!gradient synchronization}[^fn-allreduce-gradient-sync] during distributed training. This bandwidth is critical for scaling; without it, multi-GPU training often scales poorly.
@@ -3693,16 +3696,16 @@ class RooflineGap:
     a100_ridge_fp32 = (h_a100.compute.precision_flops['fp32'] / h_a100.memory.bandwidth).to(flop/byte).magnitude
 
     # Step 3: Display specs used by the nearby ridge-point prose
-    v100_tflops_value      = h_v100.compute.peak_flops.to(TFLOPs/second).magnitude
-    v100_bw_tbs_value      = h_v100.memory.bandwidth.to(TB/second).magnitude
-    a100_tflops_fp16_value = h_a100.compute.peak_flops.to(TFLOPs/second).magnitude
-    a100_bw_tbs_value      = h_a100.memory.bandwidth.to(TB/second).magnitude
-    h100_tflops_fp16_value = h_h100.compute.peak_flops.to(TFLOPs/second).magnitude
-    h100_bw_tbs_value      = h_h100.memory.bandwidth.to(TB/second).magnitude
+    v100_flops      = h_v100.compute.peak_flops
+    v100_bandwidth  = h_v100.memory.bandwidth
+    a100_fp16_flops = h_a100.compute.peak_flops
+    a100_bandwidth  = h_a100.memory.bandwidth
+    h100_fp16_flops = h_h100.compute.peak_flops
+    h100_bandwidth  = h_h100.memory.bandwidth
 
     # Step 4: Comparisons
-    bw_growth = h_h100.memory.bandwidth.to(GB/second).magnitude / h_a100.memory.bandwidth.to(GB/second).magnitude
-    flops_growth = h_h100.compute.peak_flops/h_a100.compute.peak_flops
+    bw_growth = (h_h100.memory.bandwidth / h_a100.memory.bandwidth).to_base_units().magnitude
+    flops_growth = (h_h100.compute.peak_flops / h_a100.compute.peak_flops).to_base_units().magnitude
     relu_gap = h100_ridge/relu_ai
     dense_matmul_flops = 2 * dense_matmul_dim ** 3
     dense_matmul_bytes = 3 * dense_matmul_dim ** 2 * dense_matmul_bytes_per_val
@@ -3714,16 +3717,16 @@ class RooflineGap:
           f"Ridge points must climb. H100({h100_ridge:.0f}) > A100({a100_ridge:.0f}) > V100({v100_ridge:.0f}).")
     check(relu_gap >= 1000, f"ReLU gap ({relu_gap:.0f}x) is too small.")
     check(dense_matmul_ai > h100_ridge, f"Large matmul should clear the H100 ridge, got AI={dense_matmul_ai:.0f}.")
-    check(300 <= a100_tflops_fp16_value <= 320,
-          f"A100 FP16 peak should be near 312 TFLOP/s, got {a100_tflops_fp16_value:.0f}.")
+    check(300 <= a100_fp16_flops.to(TFLOP/second).magnitude <= 320,
+          f"A100 FP16 peak should be near 312 TFLOP/s, got {a100_fp16_flops.to(TFLOP/second).magnitude:.0f}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    v100_tflops_str = fmt_qty(v100_tflops_value * TFLOP / second, TFLOP / second, precision=0, commas=False)
-    v100_bw_tbs_str = fmt_qty(v100_bw_tbs_value * TB / second, TB / second, precision=1, commas=False)
-    a100_tflops_fp16_str = fmt_qty(a100_tflops_fp16_value * TFLOP / second, TFLOP / second, precision=0, commas=False)
-    a100_bw_tbs_str = fmt_qty(a100_bw_tbs_value * TB / second, TB / second, precision=2, commas=False)
-    h100_tflops_fp16_str = fmt_qty(h100_tflops_fp16_value * TFLOP / second, TFLOP / second, precision=0, commas=False)
-    h100_bw_tbs_str = fmt_qty(h100_bw_tbs_value * TB / second, TB / second, precision=2, commas=False)
+    v100_tflops_str = fmt_flop_rate(v100_flops, unit=TFLOP / second, precision=0, commas=False)
+    v100_bw_tbs_str = fmt_bandwidth(v100_bandwidth, unit=TB / second, precision=1, commas=False)
+    a100_tflops_fp16_str = fmt_flop_rate(a100_fp16_flops, unit=TFLOP / second, precision=0, commas=False)
+    a100_bw_tbs_str = fmt_bandwidth(a100_bandwidth, unit=TB / second, precision=2, commas=False)
+    h100_tflops_fp16_str = fmt_flop_rate(h100_fp16_flops, unit=TFLOP / second, precision=0, commas=False)
+    h100_bw_tbs_str = fmt_bandwidth(h100_bandwidth, unit=TB / second, precision=2, commas=False)
 
     v100_ridge_str = fmt_int(round(v100_ridge), commas=False)
     a100_ridge_str = fmt_int(round(a100_ridge), commas=False)
@@ -3834,43 +3837,43 @@ class TransformerLayerCalc:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     # Illustrative transformer-layer config for this worked example (BERT-base-like).
-    t_hidden_value   = 768
-    t_batch_value    = 32
-    t_seq_value      = 512
-    t_heads_value    = 12
+    hidden_dim       = 768
+    batch_size       = 32
+    seq_len          = 512
+    num_heads        = 12
     t_fp_bytes_value = BYTES_FP16.to(byte).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # QKV Projection
-    qkv_flops_value  = 2 * 3 * t_batch_value * t_seq_value * t_hidden_value * t_hidden_value
+    qkv_flops_value  = 2 * 3 * batch_size * seq_len * hidden_dim * hidden_dim
     qkv_flops_b_value = (qkv_flops_value * flop).to(GFLOPs).magnitude
 
-    qkv_input_value   = t_batch_value * t_seq_value * t_hidden_value
-    qkv_weights_value = 3 * t_hidden_value * t_hidden_value
-    qkv_output_value  = t_batch_value * t_seq_value * t_hidden_value * 3
+    qkv_input_value   = batch_size * seq_len * hidden_dim
+    qkv_weights_value = 3 * hidden_dim * hidden_dim
+    qkv_output_value  = batch_size * seq_len * hidden_dim * 3
     qkv_bytes_value   = (qkv_input_value + qkv_weights_value + qkv_output_value) * t_fp_bytes_value
-    qkv_mb_value      = (qkv_bytes_value * byte).to(MB).magnitude
+    qkv_memory        = qkv_bytes_value * byte
     qkv_ai_value      = qkv_flops_value/qkv_bytes_value
 
     # Softmax
-    softmax_flops_value   = t_batch_value * t_heads_value * t_seq_value * t_seq_value * 3
+    softmax_flops_value   = batch_size * num_heads * seq_len * seq_len * 3
     softmax_flops_m_value = (softmax_flops_value * flop).to(MFLOPs).magnitude
-    softmax_bytes_value   = t_batch_value * t_heads_value * t_seq_value * t_seq_value * 2 * t_fp_bytes_value
-    softmax_mb_value      = (softmax_bytes_value * byte).to(MB).magnitude
+    softmax_bytes_value   = batch_size * num_heads * seq_len * seq_len * 2 * t_fp_bytes_value
+    softmax_memory        = softmax_bytes_value * byte
     softmax_ai_value      = softmax_flops_value/softmax_bytes_value
 
     a100_ridge_value = Hardware.Cloud.A100.ridge_point().to(flop/byte).magnitude
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    t_hidden_str        = fmt(t_hidden_value, precision=0, commas=False)
-    t_batch_str         = fmt(t_batch_value, precision=0, commas=False)
-    t_seq_str           = fmt(t_seq_value, precision=0, commas=False)
-    t_heads_str         = fmt(t_heads_value, precision=0, commas=False)
+    t_hidden_str        = fmt(hidden_dim, precision=0, commas=False)
+    t_batch_str         = fmt(batch_size, precision=0, commas=False)
+    t_seq_str           = fmt(seq_len, precision=0, commas=False)
+    t_heads_str         = fmt(num_heads, precision=0, commas=False)
     qkv_flops_b_str     = fmt(qkv_flops_b_value, precision=1, commas=False)
-    qkv_mb_str          = fmt_qty(qkv_mb_value * MB, MB, precision=1, commas=False)
+    qkv_mb_str          = fmt_memory(qkv_memory, unit=MB, precision=1, commas=False)
     qkv_ai_str          = fmt(qkv_ai_value, precision=1, commas=False)
     softmax_flops_m_str = fmt(softmax_flops_m_value, precision=1, commas=False)
-    softmax_mb_str      = fmt_qty(softmax_mb_value * MB, MB, precision=1, commas=False)
+    softmax_mb_str      = fmt_memory(softmax_memory, unit=MB, precision=1, commas=False)
     softmax_ai_str      = fmt(softmax_ai_value, precision=2, commas=False)
     a100_ridge_str      = fmt_int(round(a100_ridge_value), commas=False)
 ```
@@ -3950,29 +3953,29 @@ class Conv2dAnalysisCalc:
     conv_out_elements  = conv_batch * conv_cout * conv_h * conv_w
     conv_out_m         = conv_out_elements/MILLION
     conv_flops_per_out = conv_cin * conv_k * conv_k * 2
-    conv_total_gflops  = (conv_out_elements * conv_flops_per_out * flop).to(GFLOPs).magnitude
+    conv_total_flops   = conv_out_elements * conv_flops_per_out * flop
 
-    conv_input_mb   = (conv_batch * conv_cin * conv_h * conv_w * conv_fp_bytes * byte).to(MB).magnitude
-    conv_weights_mb = (conv_cout * conv_cin * conv_k * conv_k * conv_fp_bytes * byte).to(MB).magnitude
-    conv_output_mb  = (conv_batch * conv_cout * conv_h * conv_w * conv_fp_bytes * byte).to(MB).magnitude
-    conv_total_mb   = conv_input_mb + conv_weights_mb + conv_output_mb
+    conv_input_memory   = conv_batch * conv_cin * conv_h * conv_w * conv_fp_bytes * byte
+    conv_weights_memory = conv_cout * conv_cin * conv_k * conv_k * conv_fp_bytes * byte
+    conv_output_memory  = conv_batch * conv_cout * conv_h * conv_w * conv_fp_bytes * byte
+    conv_total_memory   = conv_input_memory + conv_weights_memory + conv_output_memory
 
-    conv_ai = conv_total_gflops * THOUSAND / conv_total_mb
+    conv_ai = (conv_total_flops / conv_total_memory).to(flop / byte).magnitude
 
     a100_ridge_value = Hardware.Cloud.A100.ridge_point().to(flop/byte).magnitude
-    a100_tflops_fp16_value = Hardware.Cloud.A100.compute.peak_flops.to(TFLOPs/second).magnitude
+    a100_fp16_flops = Hardware.Cloud.A100.compute.peak_flops
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     conv_out_m_str         = fmt(conv_out_m, precision=1, commas=False)
     conv_flops_per_out_str = fmt(conv_flops_per_out, precision=0)
-    conv_total_gflops_str  = fmt(conv_total_gflops, precision=1, commas=False)
-    conv_input_mb_str      = fmt_qty(conv_input_mb * MB, MB, precision=1, commas=False)
-    conv_weights_mb_str    = fmt_qty(conv_weights_mb * MB, MB, precision=1, commas=False)
-    conv_output_mb_str     = fmt_qty(conv_output_mb * MB, MB, precision=1, commas=False)
-    conv_total_mb_str      = fmt_qty(conv_total_mb * MB, MB, precision=1, commas=False)
+    conv_total_gflops_str  = fmt(conv_total_flops.to(GFLOPs).magnitude, precision=1, commas=False)
+    conv_input_mb_str      = fmt_memory(conv_input_memory, unit=MB, precision=1, commas=False)
+    conv_weights_mb_str    = fmt_memory(conv_weights_memory, unit=MB, precision=1, commas=False)
+    conv_output_mb_str     = fmt_memory(conv_output_memory, unit=MB, precision=1, commas=False)
+    conv_total_mb_str      = fmt_memory(conv_total_memory, unit=MB, precision=1, commas=False)
     conv_ai_str            = fmt(conv_ai, precision=1, commas=False)
     a100_ridge_str         = fmt_int(round(a100_ridge_value), commas=False)
-    a100_tflops_fp16_str   = fmt_qty(a100_tflops_fp16_value * TFLOP / second, TFLOP / second, precision=0, commas=False)
+    a100_tflops_fp16_str   = fmt_flop_rate(a100_fp16_flops, unit=TFLOP / second, precision=0, commas=False)
 ```
 
 ::: {#nbk-conv-analysis .callout-notebook title="Convolutional layer analysis"}
@@ -4042,30 +4045,32 @@ class DenseLayerAnalysisCalc:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     dense_total_mflops = (2 * dense_batch * dense_in * dense_out * flop).to(MFLOPs).magnitude
 
-    dense_input_kb   = (dense_batch * dense_in * 2 * byte).to(KB).magnitude
-    dense_weights_mb = (dense_in * dense_out * 2 * byte).to(MB).magnitude
-    dense_output_kb  = (dense_batch * dense_out * 2 * byte).to(KB).magnitude
-    dense_total_mb   = (dense_input_kb * KB + dense_weights_mb * MB + dense_output_kb * KB).to(MB).magnitude
+    dense_input_memory   = dense_batch * dense_in * 2 * byte
+    dense_weights_memory = dense_in * dense_out * 2 * byte
+    dense_output_memory  = dense_batch * dense_out * 2 * byte
+    dense_total_memory   = dense_input_memory + dense_weights_memory + dense_output_memory
 
-    dense_ai = dense_total_mflops/dense_total_mb
+    dense_total_flops = dense_total_mflops * MFLOPs
+    dense_ai_qty = (dense_total_flops / dense_total_memory).to(flop / byte)
+    dense_ai = dense_ai_qty.magnitude
 
-    a100_bw_gbs_value      = Hardware.Cloud.A100.memory.bandwidth.to(GB/second).magnitude
-    a100_peak              = Hardware.Cloud.A100.compute.peak_flops.to(TFLOPs/second).magnitude
-    dense_attainable_tflops = (a100_bw_gbs_value * dense_ai * GFLOPs).to(TFLOPs).magnitude
-    dense_util_pct         = dense_attainable_tflops/a100_peak * 100
+    a100_bandwidth        = Hardware.Cloud.A100.memory.bandwidth
+    a100_peak             = Hardware.Cloud.A100.compute.peak_flops
+    dense_attainable      = (a100_bandwidth * dense_ai_qty).to(TFLOP / second)
+    dense_util_pct        = (dense_attainable / a100_peak).to_base_units().magnitude * 100
 
     a100_ridge_value = Hardware.Cloud.A100.ridge_point().to(flop/byte).magnitude
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     dense_total_mflops_str = fmt(dense_total_mflops, precision=1, commas=False)
-    dense_input_kb_str     = fmt_qty(dense_input_kb * KB, KB, precision=1, commas=False)
-    dense_weights_mb_str   = fmt_qty(dense_weights_mb * MB, MB, precision=1, commas=False)
-    dense_output_kb_str    = fmt_qty(dense_output_kb * KB, KB, precision=1, commas=False)
-    dense_total_mb_str     = fmt_qty(dense_total_mb * MB, MB, precision=1, commas=False)
+    dense_input_kb_str     = fmt_memory(dense_input_memory, unit=KB, precision=1, commas=False)
+    dense_weights_mb_str   = fmt_memory(dense_weights_memory, unit=MB, precision=1, commas=False)
+    dense_output_kb_str    = fmt_memory(dense_output_memory, unit=KB, precision=1, commas=False)
+    dense_total_mb_str     = fmt_memory(dense_total_memory, unit=MB, precision=1, commas=False)
     dense_ai_str           = fmt(dense_ai, precision=1, commas=False)
-    dense_attainable_str   = fmt_qty(dense_attainable_tflops * TFLOP / second, TFLOP / second, precision=1, commas=False)
+    dense_attainable_str   = fmt_flop_rate(dense_attainable, unit=TFLOP / second, precision=1, commas=False)
     dense_util_pct_str     = fmt_percent(dense_util_pct/100, precision=1, commas=False, style='symbol')
-    a100_bw_str            = fmt_qty(a100_bw_gbs_value * GB / second, GB / second, precision=0, commas=True)
+    a100_bw_str            = fmt_bandwidth(a100_bandwidth, unit=GB / second, precision=0, commas=True)
     a100_ridge_str         = fmt_int(round(a100_ridge_value), commas=False)
 ```
 
@@ -4140,16 +4145,18 @@ class LayernormAnalysisCalc:
     ln_flops_per  = 6
     ln_total_mflops = ln_elements_m * ln_flops_per
 
-    ln_input_mb  = (ln_elements * 2 * byte).to(MB).magnitude
-    ln_params_kb = (ln_hidden * 2 * 2 * byte).to(KB).magnitude
-    ln_output_mb = (ln_elements * 2 * byte).to(MB).magnitude
-    ln_total_mb  = (ln_input_mb * MB + ln_output_mb * MB + ln_params_kb * KB).to(MB).magnitude
+    ln_input_memory  = ln_elements * 2 * byte
+    ln_params_memory = ln_hidden * 2 * 2 * byte
+    ln_output_memory = ln_elements * 2 * byte
+    ln_total_memory  = ln_input_memory + ln_output_memory + ln_params_memory
 
-    ln_ai = ln_total_mflops/ln_total_mb
+    ln_total_flops = ln_total_mflops * MFLOPs
+    ln_ai_qty = (ln_total_flops / ln_total_memory).to(flop / byte)
+    ln_ai = ln_ai_qty.magnitude
 
-    a100_bw_gbs_value    = Hardware.Cloud.A100.memory.bandwidth.to(GB/second).magnitude
+    a100_bandwidth       = Hardware.Cloud.A100.memory.bandwidth
     a100_ridge_value     = Hardware.Cloud.A100.ridge_point().to(flop/byte).magnitude
-    ln_attainable_tflops = (a100_bw_gbs_value * ln_ai * GFLOPs).to(TFLOPs).magnitude
+    ln_attainable        = (a100_bandwidth * ln_ai_qty).to(TFLOP / second)
     ln_ridge_gap = a100_ridge_value / ln_ai
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -4159,14 +4166,14 @@ class LayernormAnalysisCalc:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     ln_elements_m_str   = fmt(ln_elements_m, precision=1, commas=False)
     ln_total_mflops_str = fmt(ln_total_mflops, precision=1, commas=False)
-    ln_input_mb_str     = fmt_qty(ln_input_mb * MB, MB, precision=1, commas=False)
-    ln_params_kb_str    = fmt_qty(ln_params_kb * KB, KB, precision=1, commas=False)
-    ln_output_mb_str    = fmt_qty(ln_output_mb * MB, MB, precision=1, commas=False)
-    ln_total_mb_str     = fmt_qty(ln_total_mb * MB, MB, precision=1, commas=False)
+    ln_input_mb_str     = fmt_memory(ln_input_memory, unit=MB, precision=1, commas=False)
+    ln_params_kb_str    = fmt_memory(ln_params_memory, unit=KB, precision=1, commas=False)
+    ln_output_mb_str    = fmt_memory(ln_output_memory, unit=MB, precision=1, commas=False)
+    ln_total_mb_str     = fmt_memory(ln_total_memory, unit=MB, precision=1, commas=False)
     ln_ai_str           = fmt(ln_ai, precision=1, commas=False)
     ln_ridge_gap_str    = fmt_int(round(ln_ridge_gap), commas=False)
-    ln_attainable_str   = fmt(ln_attainable_tflops, precision=1, commas=False)
-    a100_bw_str         = fmt(a100_bw_gbs_value, precision=0, commas=False)
+    ln_attainable_str   = fmt(ln_attainable.to(TFLOP / second).magnitude, precision=1, commas=False)
+    a100_bw_str         = fmt_bandwidth(a100_bandwidth, unit=GB / second, precision=0, commas=False)
     ln_flops_per_str    = fmt(ln_flops_per, precision=0, commas=False)
 ```
 
@@ -4309,30 +4316,30 @@ class Gpt2ThroughputCalc:
     """Throughput ceiling for GPT-2 XL autoregressive inference at batch=1."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    gpt2_weight_gb = model_memory(Models.Language.GPT2.parameters, BYTES_FP16, GB)
+    gpt2_weight = Models.Language.GPT2.size_in_bytes(BYTES_FP16)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    gpt2_decode_flops    = 2 * Models.Language.GPT2.parameters.to(param).magnitude
-    gpt2_decode_gflops   = (gpt2_decode_flops * flop).to(GFLOPs).magnitude
-    gpt2_decode_ai       = gpt2_decode_gflops/gpt2_weight_gb
+    gpt2_decode_flops    = 2 * Models.Language.GPT2.parameters.to(param) * flop / param
+    gpt2_decode_ai_qty   = (gpt2_decode_flops / gpt2_weight).to(flop / byte)
+    gpt2_decode_ai       = gpt2_decode_ai_qty.magnitude
 
-    a100_bw_tbs_val      = Hardware.Cloud.A100.memory.bandwidth.to(TB/second).magnitude
-    a100_tflops_fp16_val = Hardware.Cloud.A100.compute.peak_flops.to(TFLOPs/second).magnitude
-    a100_tflops_fp32_val = Hardware.Cloud.A100.compute.precision_flops["fp32"].to(TFLOPs/second).magnitude
+    a100_bandwidth       = Hardware.Cloud.A100.memory.bandwidth
+    a100_fp16_flops      = Hardware.Cloud.A100.compute.peak_flops
+    a100_fp32_flops      = Hardware.Cloud.A100.compute.precision_flops["fp32"]
     a100_ridge_value     = Hardware.Cloud.A100.ridge_point().to(flop/byte).magnitude
     a100_ridge_fp32_value = (Hardware.Cloud.A100.compute.precision_flops['fp32'] / Hardware.Cloud.A100.memory.bandwidth).to(flop/byte).magnitude
-    gpt2_max_tflops      = gpt2_decode_ai * a100_bw_tbs_val
-    gpt2_utilization     = gpt2_max_tflops/a100_tflops_fp16_val * 100
+    gpt2_max_flops       = (gpt2_decode_ai_qty * a100_bandwidth).to(TFLOP / second)
+    gpt2_utilization     = (gpt2_max_flops / a100_fp16_flops).to_base_units().magnitude * 100
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    gpt2_weight_gb_str    = fmt_qty(gpt2_weight_gb * GB, GB, precision=0, commas=False)
-    gpt2_decode_gflops_str = fmt(gpt2_decode_gflops, precision=0, commas=False)
+    gpt2_weight_gb_str    = fmt_memory(gpt2_weight, unit=GB, precision=0, commas=False)
+    gpt2_decode_gflops_str = fmt(gpt2_decode_flops.to(GFLOPs).magnitude, precision=0, commas=False)
     gpt2_decode_ai_str    = fmt(gpt2_decode_ai, precision=0, commas=False)
-    gpt2_max_tflops_str   = fmt_qty(gpt2_max_tflops * TFLOP / second, TFLOP / second, precision=1, commas=False)
+    gpt2_max_tflops_str   = fmt_flop_rate(gpt2_max_flops, unit=TFLOP / second, precision=1, commas=False)
     gpt2_utilization_str  = fmt(gpt2_utilization, precision=1, commas=False)
-    a100_tflops_fp16_str  = fmt_qty(a100_tflops_fp16_val * TFLOP / second, TFLOP / second, precision=0, commas=False)
-    a100_bw_tbs_str       = fmt_qty(a100_bw_tbs_val * TB / second, TB / second, precision=2, commas=False)
-    a100_tflops_fp32_str  = fmt(a100_tflops_fp32_val, precision=1, commas=False)
+    a100_tflops_fp16_str  = fmt_flop_rate(a100_fp16_flops, unit=TFLOP / second, precision=0, commas=False)
+    a100_bw_tbs_str       = fmt_bandwidth(a100_bandwidth, unit=TB / second, precision=2, commas=False)
+    a100_tflops_fp32_str  = fmt(a100_fp32_flops.to(TFLOP / second).magnitude, precision=1, commas=False)
     a100_ridge_str        = fmt_int(round(a100_ridge_value), commas=False)
     a100_ridge_fp32_str   = fmt_int(round(a100_ridge_fp32_value), commas=False)
     a100_cost_usd_str     = fmt(15_000, precision=0)
@@ -4831,16 +4838,15 @@ class MemoryFootprintCalc:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     tensor_dim      = 1024
-    bytes_fp32      = BYTES_FP32.to(byte).magnitude
     n_intermediates = 4  # X, X', X'', Y tensors stored
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    tensor_mb       = (tensor_dim * tensor_dim * bytes_fp32 * byte).to(MB).magnitude
-    total_mb        = n_intermediates * tensor_mb
+    tensor_memory   = tensor_dim * tensor_dim * BYTES_FP32
+    total_memory    = n_intermediates * tensor_memory
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    tensor_mb_str       = fmt_qty(tensor_mb * MB, MB, precision=1, commas=False)
-    total_mb_str        = fmt_qty(total_mb * MB, MB, precision=1, commas=False)
+    tensor_mb_str       = fmt_memory(tensor_memory, unit=MB, precision=1, commas=False)
+    total_mb_str        = fmt_memory(total_memory, unit=MB, precision=1, commas=False)
 ```
 
 @Lst-naive_execution reveals how each operation becomes a separate kernel in a naïve execution model, forcing intermediate results to be written to memory and then read back for the next operation.
@@ -4920,19 +4926,19 @@ class FusionBenefitsCalc:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     tensor_dim      = 1024
-    bytes_per_float = BYTES_FP32.to(byte).magnitude
+    bytes_per_float = BYTES_FP32
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    tensor_mb = (tensor_dim * tensor_dim * bytes_per_float * byte).to(MB).magnitude
-    total_mb  = tensor_mb * 4
+    tensor_memory = tensor_dim * tensor_dim * bytes_per_float
+    total_memory  = tensor_memory * 4
 
-    naive_mb = total_mb   # ~16.8 MB with all four intermediates stored
-    fused_mb = tensor_mb  # ~4.2 MB with only final result Y stored
+    naive_memory = total_memory   # ~16.8 MB with all four intermediates stored
+    fused_memory = tensor_memory  # ~4.2 MB with only final result Y stored
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     # Custom " MB" suffix → MarkdownStr per recipe Rule 1 escape-hatch
-    naive_mb_str = fmt_qty(naive_mb * MB, MB, precision=1, commas=False)
-    fused_mb_str = fmt_qty(fused_mb * MB, MB, precision=1, commas=False)
+    naive_mb_str = fmt_memory(naive_memory, unit=MB, precision=1, commas=False)
+    fused_mb_str = fmt_memory(fused_memory, unit=MB, precision=1, commas=False)
 ```
 
 | **Execution Model** | **Intermediate Tensors Stored** |        **Total Memory Usage (MB)**         |
@@ -5711,44 +5717,47 @@ Hardware acceleration involves counterintuitive performance characteristics wher
 ```{python}
 #| echo: false
 #| label: fp-workload-fit-recap
-from mlsysim.fmt import fmt_int, fmt, check
+from mlsysim.fmt import fmt_int, fmt, check, fmt_flop_rate, fmt_percent
 
 class FpWorkloadFitRecap:
     """A100 roofline recap for the hardware-specialization fallacy."""
 
     # LOAD
-    a100_peak_tflops = Hardware.Cloud.A100.compute.peak_flops.to(TFLOPs/second).magnitude
-    a100_bw_tbs = Hardware.Cloud.A100.memory.bandwidth.to(TB/second).magnitude
-    softmax_ai_low = 2
-    softmax_ai_high = 5
-    cpu_ridge_low = 10
-    cpu_ridge_high = 20
+    a100_peak_flops = Hardware.Cloud.A100.compute.peak_flops
+    a100_bandwidth = Hardware.Cloud.A100.memory.bandwidth
+    softmax_ai_low = 2 * (flop / byte)        # scenario assumption: attention-softmax AI lower bound
+    softmax_ai_high = 5 * (flop / byte)       # scenario assumption: attention-softmax AI upper bound
+    cpu_ridge_low = 10 * (flop / byte)        # scenario assumption: CPU ridge lower bound
+    cpu_ridge_high = 20 * (flop / byte)       # scenario assumption: CPU ridge upper bound
 
     # EXECUTE
-    a100_ridge = a100_peak_tflops / a100_bw_tbs
-    softmax_tflops_low = softmax_ai_low * a100_bw_tbs
-    softmax_tflops_high = softmax_ai_high * a100_bw_tbs
-    softmax_util_high = softmax_tflops_high / a100_peak_tflops * 100
-    cpu_softmax_util_low = softmax_ai_low / cpu_ridge_high * 100
-    cpu_softmax_util_high = softmax_ai_high / cpu_ridge_low * 100
+    a100_ridge = (a100_peak_flops / a100_bandwidth).to(flop / byte)
+    softmax_flops_low = (softmax_ai_low * a100_bandwidth).to(TFLOP / second)
+    softmax_flops_high = (softmax_ai_high * a100_bandwidth).to(TFLOP / second)
+    softmax_util_high = (softmax_flops_high / a100_peak_flops).to_base_units().magnitude
+    cpu_softmax_util_low = (softmax_ai_low / cpu_ridge_high).to_base_units().magnitude
+    cpu_softmax_util_high = (softmax_ai_high / cpu_ridge_low).to_base_units().magnitude
 
     # GUARD
-    check(150 <= a100_ridge <= 160, f"Unexpected A100 ridge: {a100_ridge:.1f}")
-    check(4 <= softmax_tflops_low <= 5, f"Unexpected softmax low TFLOP/s: {softmax_tflops_low:.1f}")
-    check(10 <= softmax_tflops_high <= 11, f"Unexpected softmax high TFLOP/s: {softmax_tflops_high:.1f}")
+    check(150 * (flop / byte) <= a100_ridge <= 160 * (flop / byte),
+          f"Unexpected A100 ridge: {a100_ridge.to(flop / byte).magnitude:.1f}")
+    check(4 * (TFLOP / second) <= softmax_flops_low <= 5 * (TFLOP / second),
+          f"Unexpected softmax low throughput: {softmax_flops_low.to(TFLOP / second).magnitude:.1f} TFLOP/s")
+    check(10 * (TFLOP / second) <= softmax_flops_high <= 11 * (TFLOP / second),
+          f"Unexpected softmax high throughput: {softmax_flops_high.to(TFLOP / second).magnitude:.1f} TFLOP/s")
 
     # OUTPUT
-    a100_ridge_str = fmt_int(round(a100_ridge), commas=False)
-    a100_tflops_fp16_str = fmt(a100_peak_tflops, precision=0, commas=False)
-    softmax_ai_low_str = fmt(softmax_ai_low, precision=0, commas=False)
-    softmax_ai_high_str = fmt(softmax_ai_high, precision=0, commas=False)
-    softmax_tflops_low_str = fmt(softmax_tflops_low, precision=1, commas=False)
-    softmax_tflops_high_str = fmt(softmax_tflops_high, precision=1, commas=False)
-    softmax_util_high_str = fmt(softmax_util_high, precision=1, commas=False)
-    cpu_ridge_low_str = fmt(cpu_ridge_low, precision=0, commas=False)
-    cpu_ridge_high_str = fmt(cpu_ridge_high, precision=0, commas=False)
-    cpu_softmax_util_low_str = fmt(cpu_softmax_util_low, precision=0, commas=False)
-    cpu_softmax_util_high_str = fmt(cpu_softmax_util_high, precision=0, commas=False)
+    a100_ridge_str = fmt_int(round(a100_ridge.to(flop / byte).magnitude), commas=False)
+    a100_tflops_fp16_str = fmt_flop_rate(a100_peak_flops, unit=TFLOP / second, precision=0, commas=False)
+    softmax_ai_low_str = fmt(softmax_ai_low.to(flop / byte).magnitude, precision=0, commas=False)
+    softmax_ai_high_str = fmt(softmax_ai_high.to(flop / byte).magnitude, precision=0, commas=False)
+    softmax_tflops_low_str = fmt_flop_rate(softmax_flops_low, unit=TFLOP / second, precision=1, commas=False)
+    softmax_tflops_high_str = fmt_flop_rate(softmax_flops_high, unit=TFLOP / second, precision=1, commas=False)
+    softmax_util_high_str = fmt_percent(softmax_util_high, precision=1, commas=False, style='symbol')
+    cpu_ridge_low_str = fmt(cpu_ridge_low.to(flop / byte).magnitude, precision=0, commas=False)
+    cpu_ridge_high_str = fmt(cpu_ridge_high.to(flop / byte).magnitude, precision=0, commas=False)
+    cpu_softmax_util_low_str = fmt_percent(cpu_softmax_util_low, precision=0, commas=False, style='symbol')
+    cpu_softmax_util_high_str = fmt_percent(cpu_softmax_util_high, precision=0, commas=False, style='symbol')
 ```
 
 \index{Hardware Selection!workload matching}
@@ -5787,24 +5796,24 @@ class FpMemoryEnergyCalc:
     sram_pj = ENERGY_SRAM_L1_PJ.to(pJ).magnitude
 
     layernorm_ai = 1.5
-    peak_tflops  = 300   # hypothetical accelerator
-    peak_bw_tbs  = 2     # TB/s
+    peak_flops   = 300 * (TFLOP / second)   # hypothetical accelerator
+    peak_bw      = 2 * (TB / second)        # hypothetical accelerator
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     energy_ratio     = int(dram_pj/sram_pj)
-    fp_ridge_example = peak_tflops/peak_bw_tbs
+    fp_ridge_example = (peak_flops / peak_bw).to(flop / byte).magnitude
 
-    layernorm_tflops = layernorm_ai * peak_bw_tbs   # AI [FLOP/byte] × BW [TB/s] = TFLOP/s
-    layernorm_util   = layernorm_tflops/peak_tflops * 100
+    layernorm_flops = (layernorm_ai * flop / byte * peak_bw).to(TFLOP / second)
+    layernorm_util  = (layernorm_flops / peak_flops).to_base_units().magnitude * 100
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     fp_ridge_example_str    = fmt(fp_ridge_example, precision=0, commas=False)
-    fp_layernorm_tflops_str = fmt_qty(layernorm_tflops * TFLOP / second, TFLOP / second, precision=0, commas=False)
+    fp_layernorm_tflops_str = fmt_flop_rate(layernorm_flops, unit=TFLOP / second, precision=0, commas=False)
     fp_layernorm_util_str   = fmt_percent(layernorm_util/100, precision=0, commas=False, style='symbol')
     fp_dram_pj_str          = fmt(dram_pj, precision=0, commas=False)
     fp_sram_pj_str          = fmt(sram_pj, precision=1, commas=False)
-    fp_peak_tflops_str      = fmt_qty(peak_tflops * TFLOP / second, TFLOP / second, precision=0, commas=False)
-    fp_peak_bw_tbs_str      = fmt_qty(peak_bw_tbs * TB / second, TB / second, precision=0, commas=False)
+    fp_peak_tflops_str      = fmt_flop_rate(peak_flops, unit=TFLOP / second, precision=0, commas=False)
+    fp_peak_bw_tbs_str      = fmt_bandwidth(peak_bw, unit=TB / second, precision=0, commas=False)
     fp_layernorm_ai_str     = fmt(layernorm_ai, precision=1, commas=False)
 ```
 
@@ -5838,20 +5847,20 @@ class FpMultigpuScalingCalc:
     """NVLink gradient-sync overhead quantifying sublinear multi-GPU scaling."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    nvlink_bw_gbs    = Hardware.Cloud.A100.nvlink.bandwidth.to(GB/second).magnitude
-    gradient_size_gb = 1.0
-    step_time_ms     = 50
+    nvlink_bw        = Hardware.Cloud.A100.nvlink.bandwidth
+    gradient_size    = 1.0 * GB             # scenario assumption
+    step_time        = 50 * millisecond     # scenario assumption
     gpu_count = 8
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    sync_time_ms     = gradient_size_gb/nvlink_bw_gbs * THOUSAND
-    sync_overhead_pct = sync_time_ms/step_time_ms * 100
-    no_overlap_speedup = gpu_count * step_time_ms / (step_time_ms + sync_time_ms)
+    sync_time        = (gradient_size / nvlink_bw).to(millisecond)
+    sync_overhead_pct = (sync_time / step_time).to_base_units().magnitude * 100
+    no_overlap_speedup = (gpu_count * step_time / (step_time + sync_time)).to_base_units().magnitude
     no_overlap_efficiency_pct = no_overlap_speedup / gpu_count * 100
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    fp_nvlink_bw_str     = fmt_qty(nvlink_bw_gbs * GB / second, GB / second, precision=0, commas=False)
-    fp_sync_time_str     = fmt_time(sync_time_ms, 'millisecond', precision=2, commas=False)
+    fp_nvlink_bw_str     = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
+    fp_sync_time_str     = fmt_time(sync_time, 'millisecond', precision=2, commas=False)
     fp_sync_overhead_str = fmt_percent(sync_overhead_pct/100, precision=1, commas=False, style='symbol')
     fp_no_overlap_speedup_str = fmt(no_overlap_speedup, precision=1, commas=False)
     fp_no_overlap_efficiency_str = fmt_percent(no_overlap_efficiency_pct/100, precision=1, commas=False, style='symbol')
@@ -5864,44 +5873,45 @@ Teams expect eight GPUs to train 8$\times$ faster than one GPU. Multi-accelerato
 ```{python}
 #| echo: false
 #| label: fp-peak-vs-sustained-recap
-from mlsysim.fmt import fmt_int, fmt, check
+from mlsysim.fmt import fmt, check, fmt_flop_rate, fmt_percent
 
 class FpPeakVsSustainedRecap:
     """A100 peak and sustained ranges for the peak-FLOP/s fallacy."""
 
     # LOAD
-    a100_peak_tflops = Hardware.Cloud.A100.compute.peak_flops.to(TFLOPs/second).magnitude
-    transformer_tflops_low = 120
-    transformer_tflops_high = 180
-    recsys_tflops_low = 10
-    recsys_tflops_high = 30
+    a100_peak_flops = Hardware.Cloud.A100.compute.peak_flops
+    transformer_flops_low = 120 * (TFLOP / second)   # scenario assumption: sustained transformer lower bound
+    transformer_flops_high = 180 * (TFLOP / second)  # scenario assumption: sustained transformer upper bound
+    recsys_flops_low = 10 * (TFLOP / second)         # scenario assumption: sustained recommender lower bound
+    recsys_flops_high = 30 * (TFLOP / second)        # scenario assumption: sustained recommender upper bound
 
     # EXECUTE
-    transformer_util_low = transformer_tflops_low / a100_peak_tflops * 100
-    transformer_util_high = transformer_tflops_high / a100_peak_tflops * 100
-    recsys_util_low = recsys_tflops_low / a100_peak_tflops * 100
-    recsys_util_high = recsys_tflops_high / a100_peak_tflops * 100
+    transformer_util_low = (transformer_flops_low / a100_peak_flops).to_base_units().magnitude
+    transformer_util_high = (transformer_flops_high / a100_peak_flops).to_base_units().magnitude
+    recsys_util_low = (recsys_flops_low / a100_peak_flops).to_base_units().magnitude
+    recsys_util_high = (recsys_flops_high / a100_peak_flops).to_base_units().magnitude
 
-    transformer_util_low_rounded = round(transformer_util_low / 10) * 10
-    transformer_util_high_rounded = round(transformer_util_high / 10) * 10
+    transformer_util_low_rounded = round(transformer_util_low * 10) / 10
+    transformer_util_high_rounded = round(transformer_util_high * 10) / 10
 
     # GUARD
-    check(300 <= a100_peak_tflops <= 320, f"Unexpected A100 peak: {a100_peak_tflops:.0f}")
-    check(35 <= transformer_util_low <= 45, f"Unexpected transformer low utilization: {transformer_util_low:.1f}")
-    check(55 <= transformer_util_high <= 65, f"Unexpected transformer high utilization: {transformer_util_high:.1f}")
-    check(3 <= recsys_util_low <= 4, f"Unexpected recsys low utilization: {recsys_util_low:.1f}")
-    check(9 <= recsys_util_high <= 10, f"Unexpected recsys high utilization: {recsys_util_high:.1f}")
+    check(300 * (TFLOP / second) <= a100_peak_flops <= 320 * (TFLOP / second),
+          f"Unexpected A100 peak: {a100_peak_flops.to(TFLOP / second).magnitude:.0f}")
+    check(0.35 <= transformer_util_low <= 0.45, f"Unexpected transformer low utilization: {transformer_util_low:.3f}")
+    check(0.55 <= transformer_util_high <= 0.65, f"Unexpected transformer high utilization: {transformer_util_high:.3f}")
+    check(0.03 <= recsys_util_low <= 0.04, f"Unexpected recsys low utilization: {recsys_util_low:.3f}")
+    check(0.09 <= recsys_util_high <= 0.10, f"Unexpected recsys high utilization: {recsys_util_high:.3f}")
 
     # OUTPUT
-    a100_tflops_fp16_str = fmt(a100_peak_tflops, precision=0, commas=False)
-    transformer_tflops_low_str = fmt(transformer_tflops_low, precision=0, commas=False)
-    transformer_tflops_high_str = fmt(transformer_tflops_high, precision=0, commas=False)
-    transformer_util_low_str = fmt(transformer_util_low_rounded, precision=0, commas=False)
-    transformer_util_high_str = fmt(transformer_util_high_rounded, precision=0, commas=False)
-    recsys_tflops_low_str = fmt(recsys_tflops_low, precision=0, commas=False)
-    recsys_tflops_high_str = fmt(recsys_tflops_high, precision=0, commas=False)
-    recsys_util_low_str = fmt(recsys_util_low, precision=1, commas=False)
-    recsys_util_high_str = fmt(recsys_util_high, precision=1, commas=False)
+    a100_tflops_fp16_str = fmt_flop_rate(a100_peak_flops, unit=TFLOP / second, precision=0, commas=False)
+    transformer_tflops_low_str = fmt_flop_rate(transformer_flops_low, unit=TFLOP / second, precision=0, commas=False)
+    transformer_tflops_high_str = fmt_flop_rate(transformer_flops_high, unit=TFLOP / second, precision=0, commas=False)
+    transformer_util_low_str = fmt_percent(transformer_util_low_rounded, precision=0, commas=False, style='symbol')
+    transformer_util_high_str = fmt_percent(transformer_util_high_rounded, precision=0, commas=False, style='symbol')
+    recsys_tflops_low_str = fmt_flop_rate(recsys_flops_low, unit=TFLOP / second, precision=0, commas=False)
+    recsys_tflops_high_str = fmt_flop_rate(recsys_flops_high, unit=TFLOP / second, precision=0, commas=False)
+    recsys_util_low_str = fmt_percent(recsys_util_low, precision=1, commas=False, style='symbol')
+    recsys_util_high_str = fmt_percent(recsys_util_high, precision=1, commas=False, style='symbol')
 ```
 
 **Fallacy**: *Peak FLOP/s specifications determine real-world accelerator performance.*
@@ -5955,23 +5965,21 @@ class FpSmallBatchCalc:
     ai_b256     = flops_b256 / bytes_b256
 
     # T4 ridge point
-    t4_flops     = Hardware.Cloud.T4.compute.peak_flops.to(TFLOPs/second).magnitude
-    t4_bw        = Hardware.Cloud.T4.memory.bandwidth.to(GB/second).magnitude             # for "GB/s" prose display
-    a100_bw      = Hardware.Cloud.A100.memory.bandwidth.to(GB/second).magnitude
-    t4_bw_tbs    = Hardware.Cloud.T4.memory.bandwidth.to(TB/second).magnitude             # for dimensional roofline math
-    a100_bw_tbs  = Hardware.Cloud.A100.memory.bandwidth.to(TB/second).magnitude
-    t4_ridge     = t4_flops / t4_bw_tbs                  # TFLOP/s / (TB/s) = FLOP/byte
-    a100_roof_b1 = a100_bw_tbs * ai_b1                   # (TB/s) × (FLOP/byte) = TFLOP/s
-    t4_roof_b1   = t4_bw_tbs * ai_b1                     # same
+    t4_flops     = Hardware.Cloud.T4.compute.peak_flops
+    t4_bw        = Hardware.Cloud.T4.memory.bandwidth
+    a100_bw      = Hardware.Cloud.A100.memory.bandwidth
+    t4_ridge     = (t4_flops / t4_bw).to(flop / byte).magnitude
+    a100_roof_b1 = (a100_bw * ai_b1 * flop / byte).to(TFLOP / second)
+    t4_roof_b1   = (t4_bw * ai_b1 * flop / byte).to(TFLOP / second)
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     fp_ai_b1_str   = fmt(ai_b1, precision=1, commas=False)
     fp_ai_b256_str = fmt(ai_b256, precision=1, commas=False)
     fp_t4_ridge_str = fmt_int(round(t4_ridge), commas=False)
-    fp_t4_flops_str = fmt_qty(t4_flops * TFLOP / second, TFLOP / second, precision=0, commas=False)
-    fp_t4_bw_str    = fmt_qty(t4_bw * GB / second, GB / second, precision=0, commas=False)
-    fp_a100_roof_b1_str = fmt_qty(a100_roof_b1 * (TFLOP / second), TFLOP / second, precision=1, commas=False)
-    fp_t4_roof_b1_str = fmt_qty(t4_roof_b1 * (TFLOP / second), TFLOP / second, precision=1, commas=False)
+    fp_t4_flops_str = fmt_flop_rate(t4_flops, unit=TFLOP / second, precision=0, commas=False)
+    fp_t4_bw_str    = fmt_bandwidth(t4_bw, unit=GB / second, precision=0, commas=False)
+    fp_a100_roof_b1_str = fmt_flop_rate(a100_roof_b1, unit=TFLOP / second, precision=1, commas=False)
+    fp_t4_roof_b1_str = fmt_flop_rate(t4_roof_b1, unit=TFLOP / second, precision=1, commas=False)
 ```
 
 **Pitfall**: *Deploying small-batch inference workloads on high-compute accelerators.*
@@ -6015,44 +6023,44 @@ class FeasibilityAssessment:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     # Memory check: 7-billion-parameter Llama model on 16 GB GPU
-    params_7b = 7e9
-    gpu_mem_gb = 16
+    llama_7b = Models.Language.Llama2_7B
+    params_7b = llama_7b.parameters
+    gpu_memory = 16 * GB  # scenario assumption
 
     # Bandwidth check: 70-billion-parameter model on 1 TB/s GPU
-    params_70b = 70e9
-    mem_bw_gb_s = 1000  # 1 TB/s
+    llama_70b = Models.Language.Llama2_70B
+    mem_bw = 1 * (TB / second)  # scenario assumption
 
     # Compute check: video at 30 FPS
     fps_target = 30
-    latency_target_ms = 50
+    latency_target = 50 * millisecond  # scenario assumption
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Memory: does the model fit?
-    model_7b_gb = model_memory(params_7b, BYTES_FP16, GB)
-    headroom_gb = gpu_mem_gb - model_7b_gb
+    model_7b_memory = llama_7b.size_in_bytes(BYTES_FP16).to(GB)
+    headroom = gpu_memory - model_7b_memory
 
     # Step 2: Bandwidth: how fast can we generate tokens?
-    model_70b_gb = model_memory(params_70b, BYTES_FP16, GB)
-    token_latency_ms = (model_70b_gb/mem_bw_gb_s) * THOUSAND
+    model_70b_memory = llama_70b.size_in_bytes(BYTES_FP16).to(GB)
+    token_latency = (model_70b_memory / mem_bw).to(millisecond)
 
     # Step 3: Compute: real-time frame budget
-    frame_budget_ms = 1000 / fps_target
+    frame_budget = (1 / fps_target) * second
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(headroom_gb > 0, f"Model ({model_7b_gb}GB) doesn't fit on GPU ({gpu_mem_gb}GB)!")
-    check(token_latency_ms > 0, "Token latency must be positive.")
+    check(headroom > 0 * GB, f"Model ({model_7b_memory.to(GB).magnitude}GB) doesn't fit on GPU ({gpu_memory.to(GB).magnitude}GB)!")
+    check(token_latency > 0 * millisecond, "Token latency must be positive.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    headroom_str = fmt_qty(headroom_gb * GB, GB, precision=0, commas=False)
-    model_7b_gb_str = fmt_qty(model_7b_gb * GB, GB, precision=0, commas=False)
-    model_70b_gb_str = fmt_qty(model_70b_gb * GB, GB, precision=0, commas=False)
-    mem_bw_tb_s_str = fmt_qty((mem_bw_gb_s / THOUSAND) * TB / second, TB / second, precision=0, commas=False)
-    latency_target_ms_str = fmt_time(latency_target_ms, 'millisecond', precision=0, commas=False)
-    token_latency_ms_str = fmt_time(token_latency_ms, 'millisecond', precision=0, commas=False)
-    frame_budget_str = fmt_time(frame_budget_ms, 'millisecond', precision=1, commas=False)
-    params_7b_billion_str = fmt(params_7b / BILLION, precision=0, commas=False)
-    model_7b_gb_str = fmt_qty(model_7b_gb * GB, GB, precision=0, commas=False)
-    gpu_mem_gb_str = fmt_qty(gpu_mem_gb * GB, GB, precision=0, commas=False)
+    headroom_str = fmt_memory(headroom, unit=GB, precision=0, commas=False)
+    model_7b_gb_str = fmt_memory(model_7b_memory, unit=GB, precision=0, commas=False)
+    model_70b_gb_str = fmt_memory(model_70b_memory, unit=GB, precision=0, commas=False)
+    mem_bw_tb_s_str = fmt_bandwidth(mem_bw, unit=TB / second, precision=0, commas=False)
+    latency_target_ms_str = fmt_time(latency_target, 'millisecond', precision=0, commas=False)
+    token_latency_ms_str = fmt_time(token_latency, 'millisecond', precision=0, commas=False)
+    frame_budget_str = fmt_time(frame_budget, 'millisecond', precision=1, commas=False)
+    params_7b_billion_str = fmt_params(params_7b, scale="billion", precision=0, commas=False, scale_style="word", attributive=True)
+    gpu_mem_gb_str = fmt_memory(gpu_memory, unit=GB, precision=0, commas=False)
 ```
 
 The fallacies above reduce to a concrete procurement test.
@@ -6065,7 +6073,7 @@ Before procuring hardware, validate feasibility by calculating these hard constr
 
 *   **Formula**: $M_{\text{req}} = \text{Weights} + \text{KV Cache} + \text{Activation Buffer}$
 *   **Constraint**: $M_{\text{req}} < M_{\text{device}}$
-*   **Example**: Running a `{python} FeasibilityAssessment.params_7b_billion_str`-billion-parameter Llama model (`{python} FeasibilityAssessment.model_7b_gb_str` weights at FP16) on a GPU with `{python} FeasibilityAssessment.gpu_mem_gb_str` leaves only `{python} FeasibilityAssessment.headroom_str` for context. Long prompts will OOM (Out of Memory).
+*   **Example**: Running a `{python} FeasibilityAssessment.params_7b_billion_str`-parameter Llama model (`{python} FeasibilityAssessment.model_7b_gb_str` weights at FP16) on a GPU with `{python} FeasibilityAssessment.gpu_mem_gb_str` leaves only `{python} FeasibilityAssessment.headroom_str` for context. Long prompts will OOM (Out of Memory).
 
 **Bandwidth check**
 
@@ -6117,50 +6125,49 @@ class CarbonRoiCalc:
     """Carbon ROI of specialized NPU silicon vs generic CPU inference fleets."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    cpu_power_w        = 100    # W per CPU server doing inference
-    cpu_tflops         = 1      # Peak TFLOP/s for CPU inference
+    cpu_power          = 100 * watt    # scenario baseline per CPU server doing inference
+    cpu_flops          = 1 * (TFLOP / second)      # scenario baseline peak CPU inference throughput
     cpu_servers        = 1000   # Fleet size for 1B inferences/day example
-    npu_power_w        = 5      # W per NPU chip
-    npu_tflops         = 10     # Peak TFLOP/s for NPU inference
+    npu_power          = 5 * watt      # scenario baseline per NPU chip
+    npu_flops          = 10 * (TFLOP / second)     # scenario baseline peak NPU inference throughput
     npu_chips          = 100    # Same throughput class as 1000 CPUs
     inferences_per_day = 1 * BILLION    # 1 billion inferences/day
-    carbon_kg_per_kwh  = Infrastructure.Grids.US_Avg.carbon_intensity_kg_kwh
-    cpu_power_total    = cpu_servers * cpu_power_w * watt
-    npu_power_total    = npu_chips * npu_power_w * watt
-    cpu_energy_kwh_day = (cpu_power_total * HOURS_PER_DAY * hour).to(kilowatt * hour).magnitude
-    npu_energy_kwh_day = (npu_power_total * HOURS_PER_DAY * hour).to(kilowatt * hour).magnitude
+    carbon_intensity   = Infrastructure.Grids.US_Avg.carbon_intensity_kg_kwh * kg / kWh
+    cpu_power_total    = cpu_servers * cpu_power
+    npu_power_total    = npu_chips * npu_power
+    cpu_energy_day     = (cpu_power_total * HOURS_PER_DAY * hour).to(kWh)
+    npu_energy_day     = (npu_power_total * HOURS_PER_DAY * hour).to(kWh)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    cpu_eff = cpu_tflops/cpu_power_w
-    npu_eff = npu_tflops/npu_power_w
-    eff_gap = npu_eff/cpu_eff
+    cpu_eff = (cpu_flops / cpu_power).to(TFLOP / second / watt)
+    npu_eff = (npu_flops / npu_power).to(TFLOP / second / watt)
+    eff_gap = (npu_eff / cpu_eff).to_base_units().magnitude
 
-    energy_savings_kwh_day = cpu_energy_kwh_day - npu_energy_kwh_day
-    cpu_co2_metric_tons_year = cpu_energy_kwh_day * DAYS_PER_YEAR * carbon_kg_per_kwh / THOUSAND
-    co2_saved_kg_year      = energy_savings_kwh_day * DAYS_PER_YEAR * carbon_kg_per_kwh
-    co2_saved_metric_tons  = co2_saved_kg_year / THOUSAND   # kg → metric ton (1 t = 1000 kg)
+    energy_savings_day = cpu_energy_day - npu_energy_day
+    cpu_co2_year = (cpu_energy_day * DAYS_PER_YEAR * carbon_intensity).to(metric_ton)
+    co2_saved_year = (energy_savings_day * DAYS_PER_YEAR * carbon_intensity).to(metric_ton)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(eff_gap == 200, f"Efficiency gap should be 200×, got {eff_gap}×")
-    check(co2_saved_metric_tons > 300, f"CO2e savings should exceed 300 tons, got {co2_saved_metric_tons}")
-    check(co2_saved_metric_tons < cpu_co2_metric_tons_year,
+    check(co2_saved_year > 300 * metric_ton, f"CO2e savings should exceed 300 tons, got {co2_saved_year.to(metric_ton).magnitude}")
+    check(co2_saved_year < cpu_co2_year,
           "Annual savings cannot exceed total CPU fleet emissions.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    cpu_power_str      = fmt_qty(cpu_power_w * watt, watt, precision=0, commas=True)
-    npu_power_str      = fmt_qty(npu_power_w * watt, watt, precision=0, commas=True)
+    cpu_power_str      = fmt_power(cpu_power, unit=watt, precision=0, commas=True)
+    npu_power_str      = fmt_power(npu_power, unit=watt, precision=0, commas=True)
     cpu_servers_str    = fmt(cpu_servers, precision=0)
     npu_chips_str      = fmt(npu_chips, precision=0)
-    cpu_tflops_str     = fmt_qty(cpu_tflops * TFLOP / second, TFLOP / second, precision=0, commas=True)
-    npu_tflops_str     = fmt_qty(npu_tflops * TFLOP / second, TFLOP / second, precision=0, commas=True)
-    cpu_eff_str        = fmt_qty(cpu_eff * TFLOP / second / watt, TFLOP / second / watt, precision=2, unit_label="TFLOP/s per W")
-    npu_eff_str        = fmt_qty(npu_eff * TFLOP / second / watt, TFLOP / second / watt, precision=0, unit_label="TFLOP/s per W")
+    cpu_tflops_str     = fmt_flop_rate(cpu_flops, unit=TFLOP / second, precision=0, commas=True)
+    npu_tflops_str     = fmt_flop_rate(npu_flops, unit=TFLOP / second, precision=0, commas=True)
+    cpu_eff_str        = fmt_compute_efficiency(cpu_eff, unit=TFLOP / second / watt, precision=2)
+    npu_eff_str        = fmt_compute_efficiency(npu_eff, unit=TFLOP / second / watt, precision=0)
     eff_gap_str        = fmt(eff_gap, precision=0)
-    workload_str       = fmt(inferences_per_day / BILLION, precision=0)
-    cpu_energy_day_str = fmt_qty(cpu_energy_kwh_day * kWh, kWh, precision=0, commas=True)
-    npu_energy_day_str = fmt_qty(npu_energy_kwh_day * kWh, kWh, precision=0, commas=True)
-    carbon_intensity_str = fmt_qty(carbon_kg_per_kwh * kg / kWh, kg / kWh, precision=3)
-    co2_saved_str      = fmt(co2_saved_metric_tons, precision=1)
+    workload_str       = fmt_count(inferences_per_day, scale="billion", commas=False, scale_style="word")
+    cpu_energy_day_str = fmt_energy(cpu_energy_day, unit=kWh, precision=0, commas=True)
+    npu_energy_day_str = fmt_energy(npu_energy_day, unit=kWh, precision=0, commas=True)
+    carbon_intensity_str = fmt_carbon_intensity(carbon_intensity, unit=kg / kWh, precision=3)
+    co2_saved_str      = fmt(co2_saved_year.to(metric_ton).magnitude, precision=1)
 ```
 
 ::: {#nbk-hw-acceleration-carbon-roi-specialized-silicon .callout-notebook title="The carbon ROI of specialized silicon"}
@@ -6175,7 +6182,7 @@ class CarbonRoiCalc:
 
 **Math**:
 
-1.  **Workload**: `{python} CarbonRoiCalc.workload_str` Billion inferences per day.
+1.  **Workload**: `{python} CarbonRoiCalc.workload_str` inferences per day.
 2.  **CPU fleet energy**: `{python} CarbonRoiCalc.cpu_servers_str` CPU servers $\times$ `{python} CarbonRoiCalc.cpu_power_str` $\times$ 24 h $\approx$ `{python} CarbonRoiCalc.cpu_energy_day_str`/day.
 3.  **NPU fleet energy**: `{python} CarbonRoiCalc.npu_chips_str` NPU chips $\times$ `{python} CarbonRoiCalc.npu_power_str` $\times$ 24 h $\approx$ `{python} CarbonRoiCalc.npu_energy_day_str`/day.
 4.  **Carbon savings**: At `{python} CarbonRoiCalc.carbon_intensity_str`, switching to NPUs saves ~`{python} CarbonRoiCalc.co2_saved_str` metric tons of CO~2~ per year.
@@ -6197,23 +6204,24 @@ Building on these foundational concepts, the emergence of multi-chip and distrib
 ```{python}
 #| echo: false
 #| label: summary-roofline-recap
-from mlsysim.fmt import fmt_int, fmt, check
+from mlsysim.fmt import fmt_int, check
 
 class SummaryRooflineRecap:
     """A100 ridge-point recap for the final takeaways."""
 
     # LOAD
-    a100_peak_tflops = Hardware.Cloud.A100.compute.peak_flops.to(TFLOPs/second).magnitude
-    a100_bw_tbs = Hardware.Cloud.A100.memory.bandwidth.to(TB/second).magnitude
+    a100_peak_flops = Hardware.Cloud.A100.compute.peak_flops
+    a100_bandwidth = Hardware.Cloud.A100.memory.bandwidth
 
     # EXECUTE
-    a100_ridge = a100_peak_tflops / a100_bw_tbs
+    a100_ridge = (a100_peak_flops / a100_bandwidth).to(flop / byte)
 
     # GUARD
-    check(150 <= a100_ridge <= 160, f"Unexpected A100 summary ridge: {a100_ridge:.1f}")
+    check(150 * (flop / byte) <= a100_ridge <= 160 * (flop / byte),
+          f"Unexpected A100 summary ridge: {a100_ridge.to(flop / byte).magnitude:.1f}")
 
     # OUTPUT
-    a100_ridge_str = fmt_int(round(a100_ridge), commas=False)
+    a100_ridge_str = fmt_int(round(a100_ridge.to(flop / byte).magnitude), commas=False)
 ```
 
 ::: {.callout-takeaways title="Moving data costs more than computing it"}

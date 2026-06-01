@@ -141,13 +141,11 @@ class SparseEmbeddingExample:
     total_elements = vocab_size * embed_dim
     dense_bytes_q = total_elements * BYTES_FP32
     dense_bytes = dense_bytes_q.to(byte).magnitude
-    dense_gb = dense_bytes_q.to(GB).magnitude
     nonzeros = int(total_elements * sparsity_pct / 100)
     csr_bytes_per_nonzero_q = BYTES_FP32 + BYTES_INT32
     csr_bytes_per_nonzero = csr_bytes_per_nonzero_q.to(byte).magnitude
     sparse_bytes_q = nonzeros * csr_bytes_per_nonzero_q
     sparse_bytes = sparse_bytes_q.to(byte).magnitude
-    sparse_mb = sparse_bytes_q.to(MB).magnitude
     reduction_factor = int(dense_bytes / sparse_bytes)
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
@@ -352,6 +350,7 @@ To see how these components interact in practice, consider a concrete model.
 # │          gpt2_batch_large_str, gpt2_act_large_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, fmt, check, sci_latex, fmt_math, fmt_percent, fmt_qty
+from mlsysim.core.units import GiB
 
 class GPT2TrainingMem:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -361,7 +360,6 @@ class GPT2TrainingMem:
     bf16 = int(BYTES_FP16.to(byte).magnitude)
     fp32 = int(BYTES_FP32.to(byte).magnitude)
     accel_q = Hardware.Cloud.A100.memory.capacity
-    accel_gb = accel_q.to(GB).magnitude
     batch_small = 8
     batch_large = 64
     seq_len = 1024
@@ -373,31 +371,21 @@ class GPT2TrainingMem:
     weights_q = P * bf16 * byte
     grads_q = P * bf16 * byte
     optim_q = P * optimizer_bytes_per_param * byte
-    weights_gb = weights_q.to(GB).magnitude
-    grads_gb = grads_q.to(GB).magnitude
-    optim_gb = optim_q.to(GB).magnitude
     model_state_q = weights_q + grads_q + optim_q
-    model_state_gb = model_state_q.to(GB).magnitude
     remaining_q = accel_q - model_state_q
-    remaining_gb = remaining_q.to(GB).magnitude
 
     # Per-layer activation ≈ 12 * B * S * d * bytes_bf16:
     # input(1d) + QKV(3d) + attn_out(1d) + FFN(4d) + output(1d) + norms/masks(2d)
     act_factor = 12
     act_small_q = layers * act_factor * batch_small * seq_len * d * bf16 * byte
-    act_small_bytes = act_small_q.to(byte).magnitude
-    act_small_gb = act_small_q.to(GB).magnitude
     total_small_q = model_state_q + act_small_q
-    total_small_gb = total_small_q.to(GB).magnitude
 
     act_large_q = layers * act_factor * batch_large * seq_len * d * bf16 * byte
-    act_large_bytes = act_large_q.to(byte).magnitude
-    act_large_gb = act_large_q.to(GB).magnitude
 
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(model_state_gb < accel_gb, "Model state must fit on accelerator")
-    check(total_small_gb < accel_gb, "Small batch must fit on the accelerator")
-    check(act_large_gb > remaining_gb, "Large batch should exceed remaining capacity")
+    check(model_state_q < accel_q, "Model state must fit on accelerator")
+    check(total_small_q < accel_q, "Small batch must fit on the accelerator")
+    check(act_large_q > remaining_q, "Large batch should exceed remaining capacity")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
     P_str = fmt_math(sci_latex(P, precision=1))  # LaTeX-safe: 1.5 \times 10^{9} (avoids 1.5e+09)
@@ -413,12 +401,12 @@ class GPT2TrainingMem:
     remaining_gb_str = fmt_qty(remaining_q, GB, precision=1, commas=False)
     batch_small_str = fmt(batch_small, precision=0, commas=False)
     seq_len_str = fmt(seq_len, precision=0, commas=False)
-    act_small_gb_str = fmt(act_small_gb, precision=1, commas=False)
+    act_small_gb_str = fmt(act_small_q.to(GB).magnitude, precision=1, commas=False)
     total_small_gb_str = fmt_qty(total_small_q, GB, precision=1, commas=False, approx=True)
     batch_large_str = fmt(batch_large, precision=0, commas=False)
     act_large_gb_str = fmt_qty(act_large_q, GB, precision=1, commas=False, approx=True)
     act_factor_str = fmt(act_factor, precision=0, commas=False)
-    accel_class_gb_str = fmt_qty(80 * GB, GB, precision=0, commas=False)
+    accel_class_gb_str = fmt_qty(accel_q, GiB, precision=0, commas=False, unit_label="GB")
     grad_ckpt_overhead_pct_str = fmt_percent(33/100, precision=0, commas=False, style='prose')
 ```
 

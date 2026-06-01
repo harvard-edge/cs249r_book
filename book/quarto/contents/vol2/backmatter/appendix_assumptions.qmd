@@ -48,22 +48,35 @@ from mlsysim.core.constants import *
 # │          FleetQuickCalc.carbon_p_str, FleetQuickCalc.co2_p_str,
 # │          FleetQuickCalc.ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, MarkdownStr, fmt_qty
+from mlsysim.fmt import (
+    fmt,
+    check,
+    MarkdownStr,
+    fmt_count,
+    fmt_time,
+    fmt_params,
+    fmt_bandwidth,
+    fmt_memory,
+    fmt_power,
+    fmt_carbon_intensity,
+    fmt_emissions,
+)
 
 class FleetQuickCalc:
     # ┌── 1. LOAD ──────────────────────────────────────────
     n_gpus_small = 8_192
     n_gpus_large = 100_000
     mttf_h = Systems.Reliability.Gpu.mttf_hours
+    model_params = Models.Language.Llama2_70B.parameters
     model_params_b = Models.Language.Llama2_70B.parameters.to(param).magnitude / BILLION
     bf16_bytes = BYTES_FP16.to(byte).magnitude
-    ib_bw_gbs = Systems.Fabrics.InfiniBand_NDR.bandwidth_gbs
+    ib_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth
     n_gpus_carbon = Systems.Clusters.Training_10K.total_accelerators
-    tdp_w = Hardware.Cloud.H100.tdp.to(watt).magnitude
+    tdp = Hardware.Cloud.H100.tdp
     pue = Infrastructure.FacilityCooling.BestAir.pue
-    carbon_quebec = Infrastructure.Grids.Quebec.carbon_intensity_g_kwh
-    carbon_poland = Infrastructure.Grids.Poland.carbon_intensity_g_kwh
-    hours_per_month = 720
+    carbon_quebec = Infrastructure.Grids.Quebec.carbon_intensity_g_kwh * (gram / kWh)
+    carbon_poland = Infrastructure.Grids.Poland.carbon_intensity_g_kwh * (gram / kWh)
+    hours_per_month = 720 * hour  # scenario assumption
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
     # Failure rate
@@ -72,21 +85,19 @@ class FleetQuickCalc:
     fail_large_per_day = (n_gpus_large/mttf_h) * HOURS_PER_DAY
 
     # AllReduce time
-    grad_q = Models.Language.Llama2_70B.parameters.to(param).magnitude * BYTES_FP16
-    grad_gb = grad_q.to(GB).magnitude
-    allreduce_s = 2 * grad_gb/ib_bw_gbs
+    grad_q = model_params.to(param).magnitude * BYTES_FP16
+    allreduce_time = (2 * grad_q / ib_bw).to(second)
 
     # Carbon footprint
-    facility_power_q = n_gpus_carbon * tdp_w * pue * watt
-    facility_kw = facility_power_q.to(kW).magnitude
-    facility_mw = facility_power_q.to(MW).magnitude
-    co2_quebec_tonnes = facility_kw * hours_per_month * carbon_quebec / MILLION
-    co2_poland_tonnes = facility_kw * hours_per_month * carbon_poland / MILLION
-    carbon_ratio = co2_poland_tonnes/co2_quebec_tonnes
+    facility_power_q = n_gpus_carbon * tdp * pue
+    facility_energy_month = (facility_power_q * hours_per_month).to(kWh)
+    co2_quebec = (facility_energy_month * carbon_quebec).to(metric_ton)
+    co2_poland = (facility_energy_month * carbon_poland).to(metric_ton)
+    carbon_ratio = (co2_poland / co2_quebec).to("").magnitude
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(fail_per_day > 1, "Should see multiple failures per day")
-    check(allreduce_s > 1, "AllReduce should take multiple seconds")
+    check(allreduce_time > 1 * second, "AllReduce should take multiple seconds")
     check(carbon_ratio > 30, "Poland/Quebec ratio should be large")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
@@ -97,20 +108,20 @@ class FleetQuickCalc:
     n_large_str = fmt_count(n_gpus_large, label="GPU")
     fail_large_str = fmt(fail_large_per_day, precision=0, commas=False, approx=True)
 
-    model_str = fmt_count(model_params_b * BILLION, scale='B', precision=0, commas=False)
+    model_str = fmt_params(model_params, scale="B", commas=False)
     bf16_str = fmt(bf16_bytes, precision=0, commas=False)
-    grad_gb_str = fmt_qty(grad_q, GB, precision=0, commas=False)
-    ib_bw_str = fmt_qty(Systems.Fabrics.InfiniBand_NDR.bandwidth, GB/second, precision=0, commas=False)
-    allreduce_str = fmt_time(allreduce_s, 'second', precision=1, commas=False)
+    grad_gb_str = fmt_memory(grad_q, unit=GB, precision=0, commas=False)
+    ib_bw_str = fmt_bandwidth(ib_bw, unit=GB/second, precision=0, commas=False)
+    allreduce_str = fmt_time(allreduce_time, second, precision=1, commas=False)
 
     n_carbon_str = fmt_count(n_gpus_carbon, label="GPU")
-    tdp_str = fmt(tdp_w, precision=0, commas=False)
+    tdp_str = fmt_power(tdp, unit=watt, precision=0, commas=False)
     pue_str = fmt(pue, precision=2, commas=False)
-    facility_mw_str = fmt_qty(facility_power_q, MW, precision=2, commas=False)
-    carbon_q_str = fmt(carbon_quebec, precision=0, commas=False)
-    co2_q_str = fmt(co2_quebec_tonnes, precision=1, commas=False)
-    carbon_p_str = fmt(carbon_poland, precision=0, commas=False)
-    co2_p_str = fmt(co2_poland_tonnes, precision=1)
+    facility_mw_str = fmt_power(facility_power_q, unit=MW, precision=2, commas=False)
+    carbon_q_str = fmt_carbon_intensity(carbon_quebec, precision=0, commas=False)
+    co2_q_str = fmt_emissions(co2_quebec, unit=metric_ton, precision=1, commas=False)
+    carbon_p_str = fmt_carbon_intensity(carbon_poland, precision=0, commas=False)
+    co2_p_str = fmt_emissions(co2_poland, unit=metric_ton, precision=1)
     ratio_str = fmt(carbon_ratio, precision=0, commas=False)
     model_params_b_str = fmt(model_params_b, precision=0, commas=False)
 ```
@@ -123,7 +134,7 @@ These tables support quick distributed-systems napkin math. Three examples show 
 
 *How long does an AllReduce of a `{python} FleetQuickCalc.model_str` model take?* With BF16 parameters, the gradient payload is `{python} FleetQuickCalc.model_params_b_str` $\times 10^9 \times$ `{python} FleetQuickCalc.bf16_str` bytes = `{python} FleetQuickCalc.grad_gb_str`. Over InfiniBand NDR (`{python} FleetQuickCalc.ib_bw_str` effective per port), the ring AllReduce time is approximately 2 $\times$ `{python} FleetQuickCalc.grad_gb_str`/`{python} FleetQuickCalc.ib_bw_str` $\approx$ `{python} FleetQuickCalc.allreduce_str`—a significant fraction of a training step, which is why pipeline and tensor parallelism exist to shrink the gradient volume each rank must communicate.
 
-*What is the carbon footprint of a `{python} FleetQuickCalc.n_carbon_str` training run?* Each H100 draws `{python} FleetQuickCalc.tdp_str` W at TDP. With PUE of `{python} FleetQuickCalc.pue_str` (best-in-class air cooled), total facility power is `{python} FleetQuickCalc.n_carbon_str` $\times$ `{python} FleetQuickCalc.tdp_str` W $\times$ `{python} FleetQuickCalc.pue_str` = `{python} FleetQuickCalc.facility_mw_str`. Running in Quebec (`{python} FleetQuickCalc.carbon_q_str` gCO$_2$/kWh): `{python} FleetQuickCalc.facility_mw_str` $\times$ 720 h/month $\times$ `{python} FleetQuickCalc.carbon_q_str` g/kWh = `{python} FleetQuickCalc.co2_q_str` tonnes CO$_2$ per month. The same run in Poland (`{python} FleetQuickCalc.carbon_p_str` gCO$_2$/kWh) emits `{python} FleetQuickCalc.co2_p_str` tonnes—a `{python} FleetQuickCalc.ratio_str`$\times$ difference driven entirely by grid carbon intensity.
+*What is the carbon footprint of a `{python} FleetQuickCalc.n_carbon_str` training run?* Each H100 draws `{python} FleetQuickCalc.tdp_str` at TDP. With PUE of `{python} FleetQuickCalc.pue_str` (best-in-class air cooled), total facility power is `{python} FleetQuickCalc.n_carbon_str` $\times$ `{python} FleetQuickCalc.tdp_str` $\times$ `{python} FleetQuickCalc.pue_str` = `{python} FleetQuickCalc.facility_mw_str`. Running in Quebec (grid carbon intensity `{python} FleetQuickCalc.carbon_q_str`): `{python} FleetQuickCalc.facility_mw_str` $\times$ 720 h/month $\times$ `{python} FleetQuickCalc.carbon_q_str` = `{python} FleetQuickCalc.co2_q_str` CO$_2$ per month. The same run in Poland (`{python} FleetQuickCalc.carbon_p_str`) emits `{python} FleetQuickCalc.co2_p_str`—a `{python} FleetQuickCalc.ratio_str`$\times$ difference driven entirely by grid carbon intensity.
 
 :::
 
@@ -131,7 +142,7 @@ These tables support quick distributed-systems napkin math. Three examples show 
 #| echo: false
 #| label: appendix-h100-recap
 from mlsysim.core import constants
-from mlsysim.fmt import fmt, fmt_val, fmt_unit, fmt_int, MarkdownStr, fmt_qty
+from mlsysim.fmt import fmt, fmt_val, fmt_unit, fmt_int, MarkdownStr, fmt_qty, fmt_memory, fmt_power
 
 def _fmt_plain(val, unit_str=""):
     """Format a plain scalar with an explicit unit string. Returns (MarkdownStr, MarkdownStr)."""
@@ -141,8 +152,8 @@ class H100Recap:
     fp16_tflops_str = fmt_qty(Hardware.Cloud.H100.compute.peak_flops, TFLOP/second, precision=0, commas=False)
     fp8_tflops_str  = fmt_qty(Hardware.Cloud.H100.compute.precision_flops["fp8"], TFLOP/second, precision=0, commas=True)
     bw_tb_str       = fmt_qty(Hardware.Cloud.H100.memory.bandwidth, TB/second, precision=2, commas=False)
-    cap_gb_str      = MarkdownStr("80 GB")
-    tdp_w_str       = fmt(Hardware.Cloud.H100.tdp.to(watt).magnitude,                         precision=0, commas=False)
+    cap_gb_str      = fmt_memory(Hardware.Cloud.H100.memory.capacity, unit=GiB, precision=0, commas=False, binary=True)
+    tdp_w_str       = fmt_power(Hardware.Cloud.H100.tdp, unit=watt, precision=0, commas=False)
 ```
 
 ## Foundational Hardware Recap {.unnumbered}
@@ -204,7 +215,7 @@ With cluster sizes established, the next question is: what connects the machines
 
 from mlsysim.core import constants
 from mlsysim.physics import SPEED_OF_LIGHT_FIBER_KM_S
-from mlsysim.fmt import fmt, fmt_val, fmt_unit, fmt_int, MarkdownStr, fmt_time
+from mlsysim.fmt import fmt, fmt_val, fmt_unit, fmt_int, MarkdownStr, fmt_qty, fmt_time
 
 def _fmt_plain(val, unit_str=""):
     """Format a plain scalar with an explicit unit string. Returns (MarkdownStr, MarkdownStr)."""
@@ -252,11 +263,11 @@ class NetworkConstants:
     nvlink_pcie_ratio_min_str = fmt(nvlink_pcie_ratio_min, precision=1, commas=False)
     nvlink_pcie_ratio_max_str = fmt_int(round(nvlink_pcie_ratio_max), commas=False)
     nvlink_h100_ndr_ratio_str = fmt(Hardware.Cloud.H100.nvlink.bandwidth.to(GB/second).magnitude / Systems.Fabrics.InfiniBand_NDR.bandwidth_gbs, precision=0, commas=False)
-    wan_example_km = 5_000
-    wan_latency_ms = (wan_example_km * ureg.kilometer / SPEED_OF_LIGHT_FIBER_KM_S).to(ms).magnitude
-    wan_example_km_str = fmt(wan_example_km, precision=0)
-    wan_fiber_speed_kms_str = fmt(SPEED_OF_LIGHT_FIBER_KM_S, precision=0, commas=True)
-    wan_latency_ms_str = fmt_time(wan_latency_ms, 'millisecond', precision=0, commas=False)
+    wan_example_distance = 5_000 * km  # scenario assumption
+    wan_latency = (wan_example_distance / SPEED_OF_LIGHT_FIBER_KM_S).to(ms)
+    wan_example_km_str = fmt_qty(wan_example_distance, km, precision=0)
+    wan_fiber_speed_kms_str = fmt_qty(SPEED_OF_LIGHT_FIBER_KM_S, km / second, precision=0, commas=True)
+    wan_latency_ms_str = fmt_time(wan_latency, ms, precision=0, commas=False)
 ```
 
 ## Network and Interconnect Specifications {.unnumbered}
@@ -300,7 +311,7 @@ Once data crosses the node boundary, bandwidth drops by an order of magnitude an
 
 ### Wide-area network {.unnumbered}
 
-Cross-region communication introduces latency floors set by the speed of light in optical fiber. For a `{python} NetworkConstants.wan_example_km_str` km link (roughly New York to London), the minimum one-way latency is `{python} NetworkConstants.wan_example_km_str` km/`{python} NetworkConstants.wan_fiber_speed_kms_str` km/s = `{python} NetworkConstants.wan_latency_ms_str`—orders of magnitude higher than intra-data-center latency. This physical constraint is why geo-distributed training uses asynchronous methods or careful placement of pipeline stages, and why federated learning (@sec-edge-intelligence) tolerates stale gradients.
+Cross-region communication introduces latency floors set by the speed of light in optical fiber. For a `{python} NetworkConstants.wan_example_km_str` link (roughly New York to London), the minimum one-way latency is `{python} NetworkConstants.wan_example_km_str`/`{python} NetworkConstants.wan_fiber_speed_kms_str` = `{python} NetworkConstants.wan_latency_ms_str`—orders of magnitude higher than intra-data-center latency. This physical constraint is why geo-distributed training uses asynchronous methods or careful placement of pipeline stages, and why federated learning (@sec-edge-intelligence) tolerates stale gradients.
 
 Network specifications define how fast data moves, but they say nothing about how often the machines sending that data fail. The next section quantifies the reliability of individual components—the building blocks from which cluster-level failure rates are derived.
 
@@ -308,7 +319,7 @@ Network specifications define how fast data moves, but they say nothing about ho
 #| echo: false
 #| label: appendix-reliability-constants
 from mlsysim.core import constants
-from mlsysim.fmt import fmt, fmt_val, fmt_unit, fmt_int, MarkdownStr
+from mlsysim.fmt import fmt, fmt_val, fmt_unit, fmt_int, MarkdownStr, fmt_memory, fmt_time
 
 def _fmt_plain(val, unit_str=""):
     """Format a plain scalar with an explicit unit string. Returns (MarkdownStr, MarkdownStr)."""
@@ -335,14 +346,18 @@ class ReliabilityConstants:
     )
     node_mttf_hours_str = fmt(node_mttf_hours, precision=1)
     node_mttf_days_str = fmt(node_mttf_hours / HOURS_PER_DAY, precision=1, commas=False)
-    recovery_checkpoint_gb = (Models.Language.Llama2_70B.parameters.to(param).magnitude * BYTES_FP32).to(GB).magnitude
-    recovery_time_s = Systems.Reliability.Recovery.heartbeat_timeout_s + Systems.Reliability.Recovery.reschedule_time_s + recovery_checkpoint_gb / Systems.Reliability.Recovery.checkpoint_write_bw_gbs
+    recovery_checkpoint = Models.Language.Llama2_70B.parameters.to(param).magnitude * BYTES_FP32
+    recovery_time = (
+        Systems.Reliability.Recovery.heartbeat_timeout_s * second
+        + Systems.Reliability.Recovery.reschedule_time_s * second
+        + recovery_checkpoint / (Systems.Reliability.Recovery.checkpoint_write_bw_gbs * GB / second)
+    )
     recovery_failures_per_day = Systems.Clusters.Frontier_8K.total_accelerators / Systems.Reliability.Gpu.mttf_hours * HOURS_PER_DAY
-    recovery_lost_min_per_day = recovery_time_s * recovery_failures_per_day / MINUTES_PER_HOUR
-    recovery_checkpoint_gb_str = fmt(recovery_checkpoint_gb, precision=0, commas=False)
-    recovery_time_s_str = fmt(recovery_time_s, precision=1, commas=False)
+    recovery_lost_time_per_day = recovery_time * recovery_failures_per_day
+    recovery_checkpoint_gb_str = fmt_memory(recovery_checkpoint, unit=GB, precision=0, commas=False)
+    recovery_time_s_str = fmt_time(recovery_time, second, precision=1, commas=False)
     recovery_failures_per_day_str = fmt(recovery_failures_per_day, precision=1, commas=False)
-    recovery_lost_min_per_day_str = fmt(recovery_lost_min_per_day, precision=1, commas=False)
+    recovery_lost_min_per_day_str = fmt_time(recovery_lost_time_per_day, minute, precision=1, commas=False)
 ```
 
 ## Reliability Assumptions {.unnumbered}
@@ -384,7 +399,7 @@ Reliability constants quantify how often failures occur and how long recovery ta
 #| label: appendix-comm-model-constants
 
 from mlsysim.core import constants
-from mlsysim.fmt import fmt, fmt_val, fmt_unit, fmt_int, MarkdownStr
+from mlsysim.fmt import fmt, fmt_val, fmt_unit, fmt_int, MarkdownStr, fmt_qty, fmt_power
 
 def _fmt_plain(val, unit_str=""):
     """Format a plain scalar with an explicit unit string. Returns (MarkdownStr, MarkdownStr)."""
@@ -437,7 +452,7 @@ Communication models quantify the overhead of coordination. The sustainability c
 #| label: appendix-sustainability-constants
 
 from mlsysim.core import constants
-from mlsysim.fmt import fmt, fmt_val, fmt_unit, fmt_int, MarkdownStr
+from mlsysim.fmt import fmt, fmt_val, fmt_unit, fmt_int, fmt_percent, MarkdownStr, fmt_qty, fmt_power, fmt_water_rate
 
 def _fmt_plain(val, unit_str=""):
     """Format a plain scalar with an explicit unit string. Returns (MarkdownStr, MarkdownStr)."""
@@ -462,17 +477,19 @@ class SustainabilityConstants:
     rack_power_ai_high_kw_str,     rack_power_ai_high_kw_unit_str     = _fmt_plain(Infrastructure.Racks.AI_High.power_kw,     "kW")
     AIR_COOLING_LIMIT_KW_str,      AIR_COOLING_LIMIT_KW_unit_str      = _fmt_plain(Infrastructure.AIR_COOLING_LIMIT_KW,      "kW")
     pue_legacy_extra_pct_str = fmt_percent(Infrastructure.FacilityCooling.Legacy.pue / Infrastructure.FacilityCooling.LiquidCooled.pue - 1, precision=1, commas=False, style='symbol')
-    tenk_h100_it_mw = 10_000 * Hardware.Cloud.H100.tdp.to(watt).magnitude / MILLION
-    pue_extra_overhead_mw = tenk_h100_it_mw * (Infrastructure.FacilityCooling.Legacy.pue - Infrastructure.FacilityCooling.LiquidCooled.pue)
-    tenk_h100_it_mw_str = fmt(tenk_h100_it_mw, precision=0, commas=False)
-    pue_extra_overhead_mw_str = fmt(pue_extra_overhead_mw, precision=1, commas=False)
-    wue_example_mw_q = 10 * MW
-    wue_example_mw = wue_example_mw_q.to(MW).magnitude
-    wue_evap_lph = wue_example_mw * THOUSAND * Infrastructure.FacilityCooling.Typical.wue
-    wue_evap_lpd = wue_evap_lph * HOURS_PER_DAY
-    wue_example_mw_str = fmt_qty(wue_example_mw_q, MW, precision=0, commas=False)
-    wue_evap_lph_str = fmt(wue_evap_lph, precision=0)
-    wue_evap_lpd_str = fmt(wue_evap_lpd, precision=0)
+    tenk_h100_it_power = 10_000 * Hardware.Cloud.H100.tdp
+    pue_extra_overhead_power = tenk_h100_it_power * (Infrastructure.FacilityCooling.Legacy.pue - Infrastructure.FacilityCooling.LiquidCooled.pue)
+    tenk_h100_it_mw_str = fmt_power(tenk_h100_it_power, unit=MW, precision=0, commas=False)
+    pue_extra_overhead_mw_str = fmt_power(pue_extra_overhead_power, unit=MW, precision=1, commas=False)
+    wue_example_power = 10 * MW  # scenario assumption
+    wue_evap_rate = (
+        (wue_example_power * hour).to(kWh)
+        * (Infrastructure.FacilityCooling.Typical.wue * ureg.liter / kWh)
+        / hour
+    )
+    wue_example_mw_str = fmt_power(wue_example_power, unit=MW, precision=0, commas=False)
+    wue_evap_lph_str = fmt_water_rate(wue_evap_rate, unit=L / hour, precision=0)
+    wue_evap_lpd_str = fmt_water_rate(wue_evap_rate, unit=L / day, precision=0)
     carbon_low_high_ratio_str = fmt(Infrastructure.Grids.Poland.carbon_intensity_g_kwh / Infrastructure.Grids.Norway.carbon_intensity_g_kwh, precision=0, commas=False)
     rack_ai_low_str = fmt_qty(Infrastructure.Racks.AI_Standard.power_kw * kilowatt, kilowatt, precision=0, commas=False)
     rack_ai_high_str = fmt_qty(Infrastructure.Racks.AI_High.power_kw * kilowatt, kilowatt, precision=0, commas=False)
@@ -505,7 +522,7 @@ Water Usage Effectiveness (WUE) measures liters of water consumed per kilowatt-h
 | WUE (evaporative cooling) | `{python} SustainabilityConstants.wue_evaporative_str` | `{python} SustainabilityConstants.wue_evaporative_unit_str` |
 | WUE (closed-loop liquid)  | `{python} SustainabilityConstants.wue_liquid_str`      | `{python} SustainabilityConstants.wue_liquid_unit_str`      |
 
-: **Water Usage Effectiveness (WUE)**: Illustrative WUE tiers for cooling-class comparisons [@davis2022uptime]. Evaporative example at `{python} SustainabilityConstants.wue_example_mw_str` IT load: `{python} SustainabilityConstants.wue_evap_lpd_str` L/day. {#tbl-fleet-wue}
+: **Water Usage Effectiveness (WUE)**: Illustrative WUE tiers for cooling-class comparisons [@davis2022uptime]. Evaporative example at `{python} SustainabilityConstants.wue_example_mw_str` IT load: `{python} SustainabilityConstants.wue_evap_lpd_str`. {#tbl-fleet-wue}
 
 ### Regional carbon intensity {.unnumbered}
 

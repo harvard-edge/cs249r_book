@@ -63,11 +63,11 @@ class ReliabilityFoundations:
     ]
 
     # Recovery Params
-    t_detect = Systems.Reliability.Recovery.heartbeat_timeout_s
-    t_reschedule = Systems.Reliability.Recovery.reschedule_time_s
-    ckpt_write_bw = Systems.Reliability.Recovery.checkpoint_write_bw_gbs
+    t_detect = Systems.Reliability.Recovery.heartbeat_timeout_s * second
+    t_reschedule = Systems.Reliability.Recovery.reschedule_time_s * second
+    ckpt_write_bw = Systems.Reliability.Recovery.checkpoint_write_bw_gbs * (GB / second)
 
-    model_sizes_params = [7e9, 13e9, Models.Language.Llama2_70B.parameters.to(param).magnitude, Models.Language.GPT3.parameters.to(param).magnitude, 1e12]
+    model_sizes_params = [7 * Bparam, 13 * Bparam, Models.Language.Llama2_70B.parameters, Models.Language.GPT3.parameters, 1 * Tparam]
     model_labels = ["7B", "13B", "70B", "175B", "1T"]
 
     avail_replicas = [1, 2, 3, 4, 5]
@@ -93,26 +93,27 @@ class ReliabilityFoundations:
     # Step 3: Canonical 10K-GPU cluster
     nodes_10k = Systems.Clusters.Training_10K.count
     cluster_mtbf_10k = node_mtbf/nodes_10k
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    canonical_cluster_gpus_str = fmt(Systems.Clusters.Training_10K.total_accelerators, precision=0, commas=True)
 
     # Step 4: Young-Daly (10K cluster, 175B model)
-    ckpt_175b_bytes = calc_checkpoint_size(Models.Language.GPT3.parameters.to(param).magnitude)
-    ckpt_175b_gb = ckpt_175b_bytes.to(GB).magnitude
-    ckpt_write_time_s = ckpt_175b_gb/ckpt_write_bw
+    ckpt_175b_bytes = calc_checkpoint_size(Models.Language.GPT3.parameters)
+    ckpt_175b_gb = ckpt_175b_bytes.to(GB)
+    ckpt_write_time_s = (ckpt_175b_bytes / ckpt_write_bw).to(second)
 
-    cluster_mtbf_10k_s = cluster_mtbf_10k.to(second).magnitude
+    cluster_mtbf_10k_s = cluster_mtbf_10k.to(second)
     tau_opt_s = calc_young_daly_interval(ckpt_write_time_s, cluster_mtbf_10k_s)
-    tau_opt_min = tau_opt_s.to(minute).magnitude
+    tau_opt_min = tau_opt_s.to(minute)
 
     # Step 5: Recovery Sum
     t_reload_s = ckpt_write_time_s
     t_replay_s = tau_opt_s / 2
     t_recovery_total_s = (
-        (t_detect + t_reschedule + t_reload_s) * ureg.second + t_replay_s
-    ).to(minute).magnitude
-    overhead_ckpt = ckpt_write_time_s / tau_opt_s.to(second).magnitude
-    overhead_failure = (t_recovery_total_s * MINUTES_PER_HOUR) / cluster_mtbf_10k_s
+        t_detect + t_reschedule + t_reload_s + t_replay_s
+    ).to(minute)
+    overhead_ckpt = (ckpt_write_time_s / tau_opt_s).to_base_units().magnitude
+    overhead_failure = (t_recovery_total_s / cluster_mtbf_10k_s).to_base_units().magnitude
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    canonical_cluster_gpus_str = fmt(Systems.Clusters.Training_10K.total_accelerators, precision=0, commas=True)
 
     @classmethod
     def nodes_for_gpus(cls, n_gpus):
@@ -124,19 +125,19 @@ class ReliabilityFoundations:
 
     @classmethod
     def p_failure(cls, n_gpus, duration_hours):
-        return calc_failure_probability(cls.cluster_mtbf(n_gpus), duration_hours * ureg.hour)
+        return calc_failure_probability(cls.cluster_mtbf(n_gpus), duration_hours * hour)
 
     @classmethod
     def ckpt_size_gb(cls, n_params):
-        return calc_checkpoint_size(n_params).to(GB).magnitude
+        return calc_checkpoint_size(n_params).to(GB)
 
     @classmethod
     def avail_stacked(cls, k):
         return calc_availability_stacked(cls.avail_single, k)
 
 # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-check(ReliabilityFoundations.cluster_mtbf_10k.to(hour).magnitude < 5.0, "10K cluster MTBF mismatch")
-check(ReliabilityFoundations.tau_opt_min > 5, "Young-Daly interval too short")
+check(ReliabilityFoundations.cluster_mtbf_10k < 5.0 * hour, "10K cluster MTBF mismatch")
+check(ReliabilityFoundations.tau_opt_s > 5 * minute, "Young-Daly interval too short")
 
 R = ReliabilityFoundations
 ```
@@ -447,17 +448,18 @@ $$ \text{Checkpoint Size} = P_{\text{model}} \times 14 \text{ bytes/parameter} $
 
 ```{python}
 #| echo: false
+from mlsysim.fmt import fmt_bandwidth
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Exports: ReliabilityStringsCkptRecap.ckpt_write_bw_str
 class ReliabilityStringsCkptRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    ckpt_write_bw_str = fmt_qty(R.ckpt_write_bw * GB/second, GB/second, precision=0)
+    ckpt_write_bw_str = fmt_bandwidth(R.ckpt_write_bw, unit=GB/second, precision=0)
 ```
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt_int, fmt_time, fmt_qty
+from mlsysim.fmt import fmt_memory, fmt_time
 #| label: checkpoint-sizing-table
 # ┌── LEGO ───────────────────────────────────────────────
 # ┌─────────────────────────────────────────────────────────────────────────────
@@ -467,7 +469,7 @@ from mlsysim.fmt import fmt_int, fmt_time, fmt_qty
 # │
 # │ Goal: Format checkpoint sizes and write times for 7B–1T models.
 # │ Show: ckpt_data list rendered as table with label, ckpt_gb, write_time columns.
-# │ How: R.ckpt_size_gb() and R.ckpt_write_bw; fmt() for display strings.
+# │ How: R.ckpt_size_gb() and R.ckpt_write_bw; domain formatters for display strings.
 # │
 # │ Imports: mlsysim.book (fmt)
 # │ Exports: ckpt_data list of dicts with "label", "ckpt_gb", "write_time" keys
@@ -476,19 +478,19 @@ from mlsysim.fmt import fmt_int, fmt_time, fmt_qty
 ckpt_data = []
 for i, n_params in enumerate(R.model_sizes_params):
     ckpt_gb = R.ckpt_size_gb(n_params)
-    write_time = ckpt_gb/R.ckpt_write_bw
-    if write_time < 1.0:
-        write_str = fmt_time(write_time, 'second', precision=2, commas=False)
+    write_time = (ckpt_gb / R.ckpt_write_bw).to(second)
+    if write_time < 1 * second:
+        write_str = fmt_time(write_time, second, precision=2, commas=False)
     else:
-        write_str = fmt_time(round(write_time), 'second', precision=0, commas=False)
+        write_str = fmt_time(round(write_time.to(second).magnitude) * second, second, precision=0, commas=False)
     ckpt_data.append({
         "label": R.model_labels[i],
-        "ckpt_gb": fmt(ckpt_gb, precision=0),
+        "ckpt_gb": fmt_memory(ckpt_gb, unit=GB, precision=0),
         "write_time": write_str
     })
 ```
 
-| **Model Size**                       | **Checkpoint Size (GB)**           | **Write Time at `{python} ReliabilityStringsCkptRecap.ckpt_write_bw_str`** |
+| **Model Size**                       | **Checkpoint Size**                | **Write Time at `{python} ReliabilityStringsCkptRecap.ckpt_write_bw_str`** |
 |:-------------------------------------|:-----------------------------------|:---------------------------------------------------------------------------|
 | **`{python} ckpt_data[0]["label"]`** | `{python} ckpt_data[0]["ckpt_gb"]` | `{python} ckpt_data[0]["write_time"]`                                      |
 | **`{python} ckpt_data[1]["label"]`** | `{python} ckpt_data[1]["ckpt_gb"]` | `{python} ckpt_data[1]["write_time"]`                                      |
@@ -507,7 +509,7 @@ Combining the checkpoint write time with the 10,000-GPU MTBF gives a concrete ch
 ```{python}
 #| echo: false
 #| label: worked-example-young-daly
-from mlsysim.fmt import fmt_time
+from mlsysim.fmt import fmt_bandwidth, fmt_memory, fmt_time
 # ┌── LEGO ───────────────────────────────────────────────
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ YOUNG-DALY WORKED EXAMPLE
@@ -529,39 +531,39 @@ class WorkedExampleYoungDaly:
     n_gpus_20k = 2 * Systems.Clusters.Training_10K.total_accelerators
     # All values already computed in ReliabilityFoundations
     yd_mtbf_h = R.cluster_mtbf_10k          # Quantity[hour]
-    yd_mtbf_s = R.cluster_mtbf_10k_s        # raw float (seconds)
-    yd_t_write_s = R.ckpt_write_time_s       # raw float (seconds)
+    yd_mtbf_s = R.cluster_mtbf_10k_s        # Quantity[second]
+    yd_t_write_s = R.ckpt_write_time_s       # Quantity[second]
     yd_tau_s = R.tau_opt_s                   # Quantity[second]
-    yd_tau_min = R.tau_opt_min               # raw float in minutes
+    yd_tau_min = R.tau_opt_min               # Quantity[minute]
 
     # Overhead from checkpointing alone
-    yd_ckpt_overhead = (yd_t_write_s/yd_tau_s.to(second).magnitude) * 100
+    yd_ckpt_overhead = (yd_t_write_s / yd_tau_s).to_base_units().magnitude * 100
 
     # What if MTBF halves (20K GPUs)?
     mtbf_20k_h = R.node_mtbf / (n_gpus_20k // Systems.Nodes.DGX_H100.accelerators_per_node)  # Quantity[hour]
-    mtbf_20k_s = mtbf_20k_h.to(second).magnitude              # raw float (seconds)
+    mtbf_20k_s = mtbf_20k_h.to(second)                        # Quantity[second]
     tau_20k_s = calc_young_daly_interval(yd_t_write_s, mtbf_20k_s)  # Quantity[second]
-    tau_20k_min = tau_20k_s.to(minute).magnitude               # raw float in minutes
+    tau_20k_min = tau_20k_s.to(minute)                         # Quantity[minute]
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
-    yd_mtbf_h_str = fmt_time(yd_mtbf_h.to(hour).magnitude, 'hour', precision=2, commas=True, style='word')
-    yd_tau_min_str = fmt_time(yd_tau_min, 'minute', precision=1, commas=True, style='word')
+    yd_mtbf_h_str = fmt_time(yd_mtbf_h, hour, precision=2, commas=True, style='word')
+    yd_tau_min_str = fmt_time(yd_tau_min, minute, precision=1, commas=True, style='word')
     # Internal display-math values (no suffix — math adds its own \text{} units)
-    _yd_t_write_val = fmt(yd_t_write_s, precision=1, commas=False)
+    _yd_t_write_val = fmt(yd_t_write_s.to(second).magnitude, precision=1, commas=False)
     _yd_mtbf_h_val = fmt(yd_mtbf_h.to(hour).magnitude, precision=2, commas=False)
-    _yd_tau_min_val = fmt(yd_tau_min, precision=1, commas=False)
+    _yd_tau_min_val = fmt(yd_tau_min.to(minute).magnitude, precision=1, commas=False)
     yd_overhead_str = fmt_percent(yd_ckpt_overhead/100, precision=1, style='symbol')
-    tau_20k_min_str = fmt_time(tau_20k_min, 'minute', precision=1, commas=True, style='word')
+    tau_20k_min_str = fmt_time(tau_20k_min, minute, precision=1, commas=True, style='word')
     n_gpus_str = fmt(n_gpus, precision=0)
     n_gpus_20k_str = fmt(n_gpus_20k, precision=0)
 
     # Build display math attributes (vol1 pattern: no {python} inside math)
-    _ckpt_gb_str = fmt(R.ckpt_175b_gb, precision=0)
-    _bw_str = fmt(R.ckpt_write_bw, precision=0, commas=False)
+    _ckpt_gb_val = fmt(R.ckpt_175b_gb.to(GB).magnitude, precision=0)
+    _bw_val = fmt(R.ckpt_write_bw.to(GB/second).magnitude, precision=0, commas=False)
     _sec_per_hour_str = fmt(SEC_PER_HOUR, precision=0).replace(",", "{,}")
     t_write_eq_math = MarkdownStr(
         f"$$T_{{\\text{{write}}}} = \\frac{{\\text{{Checkpoint Size}}}}{{\\text{{Write Bandwidth}}}} "
-        f"= \\frac{{{_ckpt_gb_str} \\text{{ GB}}}}{{{_bw_str} \\text{{ GB/s}}}} "
+        f"= \\frac{{{_ckpt_gb_val} \\text{{ GB}}}}{{{_bw_val} \\text{{ GB/s}}}} "
         f"= {_yd_t_write_val} \\text{{ s}}$$"
     )
     tau_opt_eq_math = MarkdownStr(
@@ -571,8 +573,8 @@ class WorkedExampleYoungDaly:
         f"\\times {_yd_mtbf_h_val} \\text{{ h}} \\times {_sec_per_hour_str} \\text{{ s/h}}}} "
         f"= {_yd_tau_min_val} \\text{{ min}}$$"
     )
-    ckpt_175b_gb_str = fmt_qty(R.ckpt_175b_bytes, GB, precision=0, commas=True)
-    ckpt_write_bw_str = fmt_qty(R.ckpt_write_bw * GB/second, GB/second, precision=0, commas=False)
+    ckpt_175b_gb_str = fmt_memory(R.ckpt_175b_bytes, unit=GB, precision=0, commas=True)
+    ckpt_write_bw_str = fmt_bandwidth(R.ckpt_write_bw, unit=GB/second, precision=0, commas=False)
 ```
 
 ::: {#exmp-appendix-reliability-young-daly-175b-10000-gpu-cluster .callout-example title="Young-Daly: 175B model on a 10,000-GPU cluster"}
@@ -608,7 +610,7 @@ $$ T_{\text{recovery}} = T_{\text{detect}} + T_{\text{reschedule}} + T_{\text{re
 ```{python}
 #| echo: false
 #| label: recovery-anatomy-table
-from mlsysim.fmt import fmt_qty, fmt_time
+from mlsysim.fmt import fmt_time
 # ┌── LEGO ───────────────────────────────────────────────
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ RECOVERY ANATOMY TABLE
@@ -617,7 +619,7 @@ from mlsysim.fmt import fmt_qty, fmt_time
 # │
 # │ Goal: Format recovery phase durations (detect, reschedule, reload, replay, total).
 # │ Show: RecoveryAnatomy.t_detect_str, RecoveryAnatomy.t_reload_str, etc. in table cells.
-# │ How: fmt() on R recovery time values.
+# │ How: fmt_time() on R recovery time values.
 # │
 # │ Imports: mlsysim.book (fmt)
 # │ Exports: RecoveryAnatomy.t_detect_str, RecoveryAnatomy.t_reschedule_str, RecoveryAnatomy.t_reload_str,
@@ -626,20 +628,20 @@ from mlsysim.fmt import fmt_qty, fmt_time
 
 class RecoveryAnatomy:
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
-    t_detect_str      = fmt(R.t_detect, precision=0, commas=False)
-    t_reschedule_str  = fmt(R.t_reschedule, precision=0, commas=False)
-    t_reload_str      = fmt(R.t_reload_s, precision=1)
-    t_replay_str      = fmt_qty(R.t_replay_s, minute, precision=1, commas=True)
-    t_total_str = fmt_time(round(R.t_recovery_total_s), 'minute', precision=0, commas=True)
+    t_detect_str      = fmt_time(R.t_detect, second, precision=0, commas=False)
+    t_reschedule_str  = fmt_time(R.t_reschedule, second, precision=0, commas=False)
+    t_reload_str      = fmt_time(R.t_reload_s, second, precision=1)
+    t_replay_str      = fmt_time(R.t_replay_s, minute, precision=1, commas=True)
+    t_total_str = fmt_time(round(R.t_recovery_total_s.to(minute).magnitude) * minute, minute, precision=0, commas=True)
 ```
 
-| **Phase**                       | **Typical Duration**                          | **What Happens**                                |
-|:--------------------------------|:----------------------------------------------|:------------------------------------------------|
-| **$T_{\text{detect}}$**         | `{python} RecoveryAnatomy.t_detect_str` s     | Heartbeat timeout expires; failure is confirmed |
-| **$T_{\text{reschedule}}$**     | `{python} RecoveryAnatomy.t_reschedule_str` s | Replacement node allocated from spare pool      |
-| **$T_{\text{reload}}$**         | `{python} RecoveryAnatomy.t_reload_str` s     | Checkpoint read from storage into GPU memory    |
-| **$T_{\text{replay}}$**         | ~`{python} RecoveryAnatomy.t_replay_str`      | Recompute training steps since last checkpoint  |
-| **Total $T_{\text{recovery}}$** | ~`{python} RecoveryAnatomy.t_total_str`       | System fully productive again                   |
+| **Phase**                       | **Typical Duration**                        | **What Happens**                                |
+|:--------------------------------|:--------------------------------------------|:------------------------------------------------|
+| **$T_{\text{detect}}$**         | `{python} RecoveryAnatomy.t_detect_str`     | Heartbeat timeout expires; failure is confirmed |
+| **$T_{\text{reschedule}}$**     | `{python} RecoveryAnatomy.t_reschedule_str` | Replacement node allocated from spare pool      |
+| **$T_{\text{reload}}$**         | `{python} RecoveryAnatomy.t_reload_str`     | Checkpoint read from storage into GPU memory    |
+| **$T_{\text{replay}}$**         | ~`{python} RecoveryAnatomy.t_replay_str`    | Recompute training steps since last checkpoint  |
+| **Total $T_{\text{recovery}}$** | ~`{python} RecoveryAnatomy.t_total_str`     | System fully productive again                   |
 
 : **Recovery Time Breakdown**: Each phase contributes to the total time between failure and full-speed resumption. For the 10K-GPU, 175B-model scenario, replay dominates because it recomputes work lost since the last checkpoint. {#tbl-recovery-anatomy}
 

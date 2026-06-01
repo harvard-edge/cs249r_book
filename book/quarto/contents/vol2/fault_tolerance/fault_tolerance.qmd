@@ -2094,7 +2094,7 @@ A training cluster that loses power without state preservation loses millions of
 # │ Exports: FaultToleranceCheckpointRecap.*
 from mlsysim.engine.solver import TrainingMemoryModel
 from mlsysim import Models, Hardware
-from mlsysim.fmt import fmt, fmt_int, check, fmt_qty
+from mlsysim.fmt import fmt, check, fmt_qty, fmt_time
 class FaultToleranceCheckpointRecap:
     m = Models.Language.GPT3
     mem_res = TrainingMemoryModel().solve(m, Hardware.Cloud.A100, batch_size=1, precision="fp32")
@@ -2102,14 +2102,14 @@ class FaultToleranceCheckpointRecap:
     gpt3_adam_bytes = mem_res.optimizer_state
     n_workers = Systems.Clusters.Training_1K.total_accelerators
     aggregate_ckpt_bw = 100 * (GB / second)
-    ckpt_write_s = (gpt3_ckpt_bytes / aggregate_ckpt_bw).to(second).magnitude
-    check(34 < ckpt_write_s < 38, f"GPT-3 checkpoint write should be ~36 s, got {ckpt_write_s:.1f}")
+    ckpt_write = (gpt3_ckpt_bytes / aggregate_ckpt_bw).to(second)
+    check(34 < ckpt_write.to(second).magnitude < 38, f"GPT-3 checkpoint write should be ~36 s, got {ckpt_write.to(second).magnitude:.1f}")
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     gpt3_params_b_str = fmt(m.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
     gpt3_ckpt_tb_str = fmt_qty(gpt3_ckpt_bytes, TB, precision=1, commas=False)
     gpt3_adam_tb_str = fmt_qty(gpt3_adam_bytes, TB, precision=1, commas=False)
-    gpt3_shard_gb_str = fmt(gpt3_ckpt_bytes.to(GB).magnitude / n_workers, precision=1, commas=False)
-    ckpt_write_s_str = fmt_int(round(ckpt_write_s), commas=False)
+    gpt3_shard_gb_str = fmt_qty(gpt3_ckpt_bytes / n_workers, GB, precision=1, commas=False)
+    ckpt_write_s_str = fmt_time(ckpt_write, second, precision=1, commas=False)
     aggregate_read_gbs_str = fmt_qty(aggregate_ckpt_bw, GB / second, precision=0, commas=False)
 ```
 
@@ -2279,33 +2279,29 @@ For our 10,000-GPU cluster with calculated system MTBF of 3.69 hours (from @sec-
 # │ Exports: t_write_s_str, mtbf_h_str, mtbf_s_str,
 # │   tau_opt_s_str, tau_opt_min_str, overhead_pct_str, hourly_overhead_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_int, check, fmt_time
+from mlsysim.fmt import fmt, check, fmt_time
 from mlsysim.core.constants import SEC_PER_HOUR
-import math
 
 class YoungDalyOptimal:
     # ┌── 1. LOAD ──────────────────────────────────────────
     from mlsysim.engine.solver import TrainingMemoryModel
     _mem = TrainingMemoryModel().solve(Models.Language.GPT3, Hardware.Cloud.A100, batch_size=1, precision="fp32")
-    t_write_s = (_mem.total_memory / (100 * (GB / second))).to(second).magnitude
-    mtbf_h = 3.69
+    mtbf = 3.69 * hour  # scenario assumption
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    mtbf_s = mtbf_h * SEC_PER_HOUR
-    radicand = 2 * t_write_s * mtbf_s
-    tau_opt_s = math.sqrt(radicand)
-    tau_opt_min = tau_opt_s / 60
-    overhead_pct = (t_write_s/tau_opt_s + tau_opt_s / (2 * mtbf_s)) * 100
-    hourly_interval_s = SEC_PER_HOUR
-    hourly_overhead_pct = (t_write_s/hourly_interval_s + hourly_interval_s / (2 * mtbf_s)) * 100
+    t_write = (_mem.total_memory / (100 * (GB / second))).to(second)
+    tau_opt = (2 * t_write * mtbf) ** 0.5
+    overhead_pct = ((t_write / tau_opt) + (tau_opt / (2 * mtbf))).to("").magnitude * 100
+    hourly_interval = 1 * hour
+    hourly_overhead_pct = ((t_write / hourly_interval) + (hourly_interval / (2 * mtbf))).to("").magnitude * 100
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(14 < tau_opt_min < 18, f"Interval {tau_opt_min:.1f}m outside expected range")
+    check(14 < tau_opt.to(minute).magnitude < 18, f"Interval {tau_opt.to(minute).magnitude:.1f}m outside expected range")
     check(hourly_overhead_pct > overhead_pct, "Hourly checkpointing should waste more than optimal")
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    t_write_s_str = fmt(t_write_s, precision=1, commas=False)
-    mtbf_h_str = fmt_time(mtbf_h, 'hour', precision=2, commas=False, style='word')
-    mtbf_s_str = fmt(mtbf_s, precision=0)
-    tau_opt_s_str = fmt(tau_opt_s, precision=1)
-    tau_opt_min_str = fmt_time(tau_opt_min, 'minute', precision=1, commas=False)
+    t_write_s_str = fmt_time(t_write, second, precision=1, commas=False)
+    mtbf_h_str = fmt_time(mtbf, hour, precision=2, commas=False, style='word')
+    mtbf_s_str = fmt_time(mtbf, second, precision=0, commas=False)
+    tau_opt_s_str = fmt_time(tau_opt, second, precision=1, commas=False)
+    tau_opt_min_str = fmt_time(tau_opt, minute, precision=1, commas=False)
     overhead_pct_str = fmt_percent(overhead_pct/100, precision=1, commas=False, style='prose')
     hourly_overhead_pct_str = fmt_percent(hourly_overhead_pct/100, precision=1, commas=False, style='prose')
     seconds_per_hour_str = fmt(SEC_PER_HOUR, precision=0, commas=False)
@@ -2507,7 +2503,7 @@ While @tbl-checkpoint-overhead-by-model suggests modest overhead percentages, re
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt_int, fmt_count, fmt_time, fmt_qty, fmt_qty_int
+from mlsysim.fmt import fmt_int, fmt_count, fmt_time, fmt_qty, fmt_qty_int, fmt_params
 #| label: checkpoint-debug-calc
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ CHECKPOINT DEBUG CALCULATION (LEGO)
@@ -2543,9 +2539,9 @@ class CheckpointDebug:
     from mlsysim import Models, Hardware
 
     m = Models.Language.Llama2_70B
-    nfs_bw = 10 * ureg.Gbps
-    pcie_bw = 32 * ureg.GB / ureg.second
-    nvme_bw_gbs = 3.5
+    nfs_bw = 10 * Gbps
+    pcie_bw = 32 * (GB / second)
+    nvme_bw = 3.5 * (GB / second)
     n_nodes = 64
     n_gpus_ckpt = 512
     observed_write_min = 10
@@ -2558,41 +2554,36 @@ class CheckpointDebug:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # 10 bytes/param = 2 (BF16 weights) + 8 (Adam FP32)
     bytes_per_param = 10
-    total_ckpt_qty = m.parameters.to(param).magnitude * bytes_per_param * ureg.byte
+    params_count = m.parameters.to(param).magnitude
+    total_ckpt_qty = params_count * bytes_per_param * byte
     total_ckpt_gb_val = total_ckpt_qty.to(GB).magnitude
 
     # Use library formula for transfer time
     t_write = (total_ckpt_qty / nfs_bw)
-    min_write_s_val = t_write.to(second).magnitude
-    min_write_min_val = t_write.to(minute).magnitude
-
     per_node_shard_qty = total_ckpt_qty / n_nodes
-    per_node_shard_gb_val = per_node_shard_qty.to(GB).magnitude
 
     # Staging over PCIe
     t_stage = (per_node_shard_qty / pcie_bw)
     t_stage_single = (total_ckpt_qty / pcie_bw)
-    gpu_cpu_parallel_s_val = t_stage.to(second).magnitude
-    gpu_cpu_single_path_s_val = t_stage_single.to(second).magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(total_ckpt_gb_val == 700, f"Expected 700 GB checkpoint, got {total_ckpt_gb_val}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    weights_gb_str = fmt_qty(m.parameters.to(param).magnitude * 2 * ureg.byte, GB, precision=0, commas=False)
-    optimizer_gb_str = fmt_qty(m.parameters.to(param).magnitude * 8 * ureg.byte, GB, precision=0, commas=False)
+    weights_gb_str = fmt_qty(params_count * 2 * byte, GB, precision=0, commas=False)
+    optimizer_gb_str = fmt_qty(params_count * 8 * byte, GB, precision=0, commas=False)
     total_ckpt_gb_str = fmt_qty(total_ckpt_qty, GB, precision=0, commas=False)
     nfs_gbs_str = fmt_qty(nfs_bw, GB/second, precision=2, commas=False)
-    min_write_s_str = fmt(min_write_s_val, precision=0, commas=False)
-    min_write_min_str = fmt_time(min_write_min_val, 'minute', precision=1, commas=False)
+    min_write_s_str = fmt_time(t_write, second, precision=0, commas=False)
+    min_write_min_str = fmt_time(t_write, minute, precision=1, commas=False)
     per_node_mbs_str = fmt_qty_int(nfs_bw / n_nodes, MB/second, commas=False)
     per_node_shard_gb_str = fmt_qty(per_node_shard_qty, GB, precision=1, commas=False)
-    per_node_write_min_str = fmt_time(min_write_min_val, 'minute', precision=1, commas=False) # Aggregated BW bottleneck
-    gpu_cpu_parallel_s_str = fmt(gpu_cpu_parallel_s_val, precision=2, commas=False)
-    gpu_cpu_single_path_s_str = fmt(gpu_cpu_single_path_s_val, precision=1, commas=False)
+    per_node_write_min_str = fmt_time(t_write, minute, precision=1, commas=False) # Aggregated BW bottleneck
+    gpu_cpu_parallel_s_str = fmt_time(t_stage, second, precision=2, commas=False)
+    gpu_cpu_single_path_s_str = fmt_time(t_stage_single, second, precision=1, commas=False)
     extended_weeks_str = fmt_time(base_weeks * (1 + overhead_pct / 100), 'week', precision=1, commas=False, style='word')
     extra_cost_k_str = fmt(extra_cost_k, precision=0, commas=False)
-    params_b_str = fmt_count(m.parameters.to(param).magnitude, scale='B', precision=0, commas=False)
+    params_b_str = fmt_params(m.parameters, precision=0)
     bytes_per_param_weights_str = fmt(2, precision=0, commas=False)
     n_gpus_str = fmt_count(n_gpus_ckpt, commas=False, label="GPU")
     n_nodes_str = fmt_count(n_nodes, commas=False, label="node")
@@ -2600,7 +2591,7 @@ class CheckpointDebug:
     target_write_min_str = fmt(target_write_min, precision=0, commas=False)
     overhead_pct_str = fmt_percent(overhead_pct/100, precision=0, commas=False, style='prose')
     sla_weeks_str = fmt_time(base_weeks, 'week', precision=0, commas=False, style='word')
-    nvme_bw_gbs_str = fmt_qty(nvme_bw_gbs * GB/second, GB/second, precision=1, commas=False)
+    nvme_bw_gbs_str = fmt_qty(nvme_bw, GB/second, precision=1, commas=False)
     pcie_gbs_str = fmt_qty(pcie_bw, GB/second, precision=0, commas=False)
     residual_overhead_pct_str = fmt_percent(residual_overhead_pct/100, precision=0, commas=False, style='prose')
 ```
@@ -2848,53 +2839,50 @@ class RecoveryBudget:
     # ┌── 1. LOAD ──────────────────────────────────────────
     from mlsysim.engine.solver import TrainingMemoryModel
     _mem = TrainingMemoryModel().solve(Models.Language.GPT3, Hardware.Cloud.A100, batch_size=1, precision="fp32")
-    t_detect_s = 60
-    t_restart_min = 3
-    aggregate_read_gbs = 100
-    aggregate_ckpt_bw = aggregate_read_gbs * GB / second
-    t_load_s = (_mem.total_memory / aggregate_ckpt_bw).to(second).magnitude
-    t_warmup_min = 2
-    shard_read_gbs = 5
+    t_detect = 60 * second  # scenario assumption
+    t_restart = 3 * minute
+    aggregate_ckpt_bw = 100 * (GB / second)
+    t_load = (_mem.total_memory / aggregate_ckpt_bw).to(second)
+    t_warmup = 2 * minute
+    shard_read_bw = 5 * (GB / second)
     n_gpus_1k = Systems.Clusters.Training_1K.total_accelerators
     n_gpus_10k = Systems.Clusters.Training_10K.total_accelerators
     failures_per_day_1k = 0.48
     failures_per_day_10k = 4.8
-    mtbf_1k_hrs = 50
-    mtbf_10k_hrs = 5
+    mtbf_1k = 50 * hour  # scenario assumption
+    mtbf_10k = 5 * hour  # scenario assumption
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    t_detect_min = t_detect_s / 60
-    t_load_min = t_load_s / 60
-    t_total_min = t_detect_min + t_restart_min + t_load_min + t_warmup_min
-    daily_loss_min_1k = failures_per_day_1k * t_total_min
-    daily_loss_min_10k = failures_per_day_10k * t_total_min
-    overhead_pct_1k = daily_loss_min_1k / (24 * 60) * 100
-    overhead_pct_10k = daily_loss_min_10k / (24 * 60) * 100
-    waste_gpu_hours_10k = daily_loss_min_10k * n_gpus_10k / 60
+    t_total = t_detect + t_restart + t_load + t_warmup
+    daily_loss_1k = failures_per_day_1k * t_total
+    daily_loss_10k = failures_per_day_10k * t_total
+    overhead_pct_1k = (daily_loss_1k / (24 * hour)).to("").magnitude * 100
+    overhead_pct_10k = (daily_loss_10k / (24 * hour)).to("").magnitude * 100
+    waste_gpu_hours_10k = daily_loss_10k.to(hour).magnitude * n_gpus_10k
 
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(t_total_min > 0, "Recovery time must be positive")
-    check(t_total_min < 30, "Recovery time should be under 30 min")
-    check(abs(daily_loss_min_1k - 3.0) < 0.5, f"1k daily loss ({daily_loss_min_1k:.1f} min)")
-    check(34 < t_load_s < 38, f"Aggregate checkpoint load should be ~36 s, got {t_load_s:.1f}")
-    check(abs(daily_loss_min_10k - 31.0) < 2.0, f"10k daily loss ({daily_loss_min_10k:.1f} min)")
+    check(t_total > 0 * minute, "Recovery time must be positive")
+    check(t_total < 30 * minute, "Recovery time should be under 30 min")
+    check(abs(daily_loss_1k.to(minute).magnitude - 3.0) < 0.5, f"1k daily loss ({daily_loss_1k.to(minute).magnitude:.1f} min)")
+    check(34 < t_load.to(second).magnitude < 38, f"Aggregate checkpoint load should be ~36 s, got {t_load.to(second).magnitude:.1f}")
+    check(abs(daily_loss_10k.to(minute).magnitude - 31.0) < 2.0, f"10k daily loss ({daily_loss_10k.to(minute).magnitude:.1f} min)")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    t_total_str = fmt(t_total_min, precision=1, commas=False)
-    t_detect_s_str = fmt(t_detect_s, precision=0, commas=False)
-    t_restart_min_str = fmt_time(t_restart_min, 'minute', precision=0, commas=False)
-    t_load_s_str = fmt_int(round(t_load_s), commas=False)
-    t_warmup_min_str = fmt_time(t_warmup_min, 'minute', precision=0, commas=False)
+    t_total_str = fmt(t_total.to(minute).magnitude, precision=1, commas=False)
+    t_detect_s_str = fmt_time(t_detect, second, precision=0, commas=False)
+    t_restart_min_str = fmt_time(t_restart, minute, precision=0, commas=False)
+    t_load_s_str = fmt_int(round(t_load.to(second).magnitude), commas=False)
+    t_warmup_min_str = fmt_time(t_warmup, minute, precision=0, commas=False)
     aggregate_read_gbs_str = fmt_qty(aggregate_ckpt_bw, GB/second, precision=0, commas=False)
-    shard_read_gbs_str = fmt_qty(shard_read_gbs * GB/second, GB/second, precision=0, commas=False)
+    shard_read_gbs_str = fmt_qty(shard_read_bw, GB/second, precision=0, commas=False)
     n_gpus_1k_str = fmt(n_gpus_1k, precision=0, commas=True)
     n_gpus_10k_str = fmt(n_gpus_10k, precision=0, commas=True)
-    mtbf_1k_hrs_str = fmt_time(mtbf_1k_hrs, 'hour', precision=0, commas=False, style='word')
-    mtbf_10k_hrs_str = fmt_time(mtbf_10k_hrs, 'hour', precision=0, commas=False, style='word')
+    mtbf_1k_hrs_str = fmt_time(mtbf_1k, hour, precision=0, commas=False, style='word')
+    mtbf_10k_hrs_str = fmt_time(mtbf_10k, hour, precision=0, commas=False, style='word')
     failures_per_day_1k_str = fmt(failures_per_day_1k, precision=2, commas=False)
     failures_per_day_10k_str = fmt(failures_per_day_10k, precision=1, commas=False)
-    daily_loss_min_1k_str = fmt_time(round(daily_loss_min_1k), 'minute', precision=0, commas=False, style='word')
-    daily_loss_min_10k_str = fmt_time(round(daily_loss_min_10k), 'minute', precision=0, commas=False, style='word')
+    daily_loss_min_1k_str = fmt_time(round(daily_loss_1k.to(minute).magnitude), minute, precision=0, commas=False, style='word')
+    daily_loss_min_10k_str = fmt_time(round(daily_loss_10k.to(minute).magnitude), minute, precision=0, commas=False, style='word')
     overhead_pct_1k_str = fmt_percent(overhead_pct_1k/100, precision=1, commas=False, style='prose')
     overhead_pct_10k_str = fmt_percent(overhead_pct_10k/100, precision=1, commas=False, style='prose')
     waste_gpu_hours_10k_str = fmt_int(round(waste_gpu_hours_10k), commas=True)

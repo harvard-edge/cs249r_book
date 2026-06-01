@@ -43,7 +43,7 @@ from mlsysim.core.constants import *
 # │          napkin_gpt3_ops_str, napkin_gpt3_days_str, napkin_elec_rate_str,
 # │          napkin_a100_kw_str, napkin_elec_cost_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt_usd, fmt, check, sci_latex, fmt_math, MarkdownStr, fmt_count, fmt_qty
+from mlsysim.fmt import fmt_int, fmt_usd, fmt, check, sci_latex, fmt_math, MarkdownStr, fmt_qty, fmt_flop_rate, fmt_bandwidth, fmt_memory, fmt_params, fmt_power
 
 class NapkinMath:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -51,10 +51,6 @@ class NapkinMath:
     h100_bw_q = Hardware.Cloud.H100.memory.bandwidth
     h100_mem_q = Hardware.Cloud.H100.memory.capacity
     a100_tdp_q = Hardware.Cloud.A100.tdp
-    h100_tflops = h100_flops_q.to(TFLOPs/second).magnitude
-    h100_bw_tbs = h100_bw_q.to(TB/second).magnitude
-    h100_mem_gb = h100_mem_q.to(GB).magnitude
-    a100_tdp_w = a100_tdp_q.to(watt).magnitude
     gpt3_ops = Models.Language.GPT3.training_ops.magnitude
     gpt3_days = Models.Language.GPT3.training_days_ref.magnitude
     gpt3_accelerators = Models.Language.GPT3.training_accelerators_ref.to(count).magnitude
@@ -71,33 +67,32 @@ class NapkinMath:
     hours_per_day = HOURS_PER_DAY
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    ridge = h100_tflops/h100_bw_tbs
+    ridge = (h100_flops_q / h100_bw_q).to(flop / byte).magnitude
     gemm_intensity = gemm_n / 3
     train_mem_q = model_params_b * BILLION * bytes_per_param_q
-    train_mem_gb = train_mem_q.to(GB).magnitude
-    a100_tdp_kw = a100_tdp_q.to(kW).magnitude
-    elec_cost = gpt3_days * gpt3_accelerators * hours_per_day * a100_tdp_kw * elec_per_kwh
+    elec_energy = gpt3_days * gpt3_accelerators * hours_per_day * hour * a100_tdp_q
+    elec_cost = (elec_energy.to(kWh).magnitude * elec_per_kwh)
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(ridge > 200, f"Ridge point {ridge} too low")
-    check(train_mem_gb > h100_mem_gb, "7B model state should exceed single GPU")
+    check(train_mem_q > h100_mem_q, "7B model state should exceed single GPU")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    h100_tflops_str = fmt_qty(h100_flops_q, TFLOPs/second, precision=0, commas=False, unit_label='TFLOP/s')
-    h100_bw_str = fmt_qty(h100_bw_q, TB/second, precision=2, commas=False)
+    h100_tflops_str = fmt_flop_rate(h100_flops_q, unit=TFLOPs/second, precision=0, commas=False)
+    h100_bw_str = fmt_bandwidth(h100_bw_q, unit=TB/second, precision=2, commas=False)
     ridge_str = fmt_int(round(ridge), commas=False)
     gemm_n_str = fmt(gemm_n, precision=0)
     gemm_intensity_str = fmt(gemm_intensity, precision=1, commas=True)
-    model_b_str = fmt_count(model_params_b * BILLION, scale='B', precision=0, commas=False)
+    model_b_str = fmt_params(model_params_b * BILLION, precision=0, commas=False)
     bytes_per_param_str = fmt(bytes_per_param, precision=0, commas=False)
-    train_mem_gb_str = fmt_qty(train_mem_q, GB, precision=0, commas=False)
-    accel_mem_str = fmt_qty(h100_mem_q, GB, precision=1, commas=False)
-    a100_tdp_str = fmt(a100_tdp_w, precision=0, commas=False)
+    train_mem_gb_str = fmt_memory(train_mem_q, unit=GB, precision=0, commas=False)
+    accel_mem_str = fmt_memory(h100_mem_q, unit=GB, precision=1, commas=False)
+    a100_tdp_str = fmt_power(a100_tdp_q, unit=watt, precision=0, commas=False)
     gpt3_ops_math = fmt_math(sci_latex(gpt3_ops, precision=2))
     gpt3_days_str = fmt(gpt3_days, precision=0, approx=True)
     gpt3_accelerators_str = fmt(gpt3_accelerators, precision=0)
     elec_rate_str = fmt(elec_per_kwh, precision=2, commas=False)
-    a100_kw_str = fmt_qty(a100_tdp_q, kilowatt, precision=1, commas=False)
+    a100_kw_str = fmt_power(a100_tdp_q, unit=kilowatt, precision=1, commas=False)
     elec_cost_str = fmt_usd(elec_cost, precision=1, approx=True)
     napkin_model_b_digit_str = fmt(model_params_b, precision=0, commas=False)
 ```
@@ -110,7 +105,7 @@ The constants in this appendix are not just for auditing—they are designed for
 
 *How much memory does training a `{python} NapkinMath.model_b_str` model require?* Mixed-precision Adaptive Moment Estimation (Adam) stores 2 bytes (BF16 weights) + 2 bytes (gradients) + 12 bytes (FP32 master weights + momentum + variance) = `{python} NapkinMath.bytes_per_param_str` bytes per parameter. For `{python} NapkinMath.model_b_str` parameters: `{python} NapkinMath.napkin_model_b_digit_str` $\times 10^9 \times$ `{python} NapkinMath.bytes_per_param_str` bytes = `{python} NapkinMath.train_mem_gb_str`. An H100 has `{python} NapkinMath.accel_mem_str` of HBM, so the model state alone exceeds a single accelerator—before accounting for activations.
 
-*How much energy would a GPT-3-scale training run cost on the reference cluster?* An A100 draws `{python} NapkinMath.a100_tdp_str` W at TDP. Using `{python} NapkinMath.gpt3_accelerators_str` A100s as a normalization for a run requiring roughly `{python} NapkinMath.gpt3_ops_math` FLOPs and the imported reference duration of `{python} NapkinMath.gpt3_days_str` wall-clock days gives an A100-equivalent energy estimate. At \$`{python} NapkinMath.elec_rate_str`/kWh: `{python} NapkinMath.gpt3_days_str` wall-clock days $\times$ `{python} NapkinMath.gpt3_accelerators_str` A100s $\times$ 24 h/day $\times$ `{python} NapkinMath.a100_kw_str` $\times$ \$`{python} NapkinMath.elec_rate_str`/kWh $=$ `{python} NapkinMath.elec_cost_str` in electricity alone—a small fraction of the total cost, which is dominated by accelerator amortization. The original GPT-3 run used V100-era infrastructure; this calculation is an A100-equivalent reference estimate, not a derivation of the run duration from peak FLOP/s alone.
+*How much energy would a GPT-3-scale training run cost on the reference cluster?* An A100 draws `{python} NapkinMath.a100_tdp_str` at TDP. Using `{python} NapkinMath.gpt3_accelerators_str` A100s as a normalization for a run requiring roughly `{python} NapkinMath.gpt3_ops_math` FLOPs and the imported reference duration of `{python} NapkinMath.gpt3_days_str` wall-clock days gives an A100-equivalent energy estimate. At \$`{python} NapkinMath.elec_rate_str`/kWh: `{python} NapkinMath.gpt3_days_str` wall-clock days $\times$ `{python} NapkinMath.gpt3_accelerators_str` A100s $\times$ 24 h/day $\times$ `{python} NapkinMath.a100_kw_str` $\times$ \$`{python} NapkinMath.elec_rate_str`/kWh $=$ `{python} NapkinMath.elec_cost_str` in electricity alone—a small fraction of the total cost, which is dominated by accelerator amortization. The original GPT-3 run used V100-era infrastructure; this calculation is an A100-equivalent reference estimate, not a derivation of the run duration from peak FLOP/s alone.
 
 :::
 

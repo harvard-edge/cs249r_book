@@ -2081,7 +2081,7 @@ Model serving performance depends critically on memory hierarchy utilization. Da
 # │          KVCacheFootprint.kv_cache_gb_str,
 # │          KVCacheFootprint.concurrent_8_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, fmt_qty
+from mlsysim.fmt import fmt, check, fmt_memory
 
 # ┌── LEGO ───────────────────────────────────────────────
 class KVCacheFootprint:
@@ -2110,14 +2110,12 @@ class KVCacheFootprint:
         batch_size=1,
         bytes_per_elem=bytes_per_element
     )
-    kv_cache_gb = kv_cache_one.to(GB).magnitude
-    concurrent_8_gb = 8 * kv_cache_gb
     concurrent_8_q = 8 * kv_cache_one
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(hidden_dim % attention_heads == 0, "Hidden dimension must divide evenly by attention heads.")
-    check(2.5 <= kv_cache_gb <= 4,
-          f"Expected 2.5-4 GB per active sequence, got {kv_cache_gb:.2f} GB.")
+    check(2.5 * GB <= kv_cache_one <= 4 * GB,
+          f"Expected 2.5-4 GB per active sequence, got {kv_cache_one.to(GB).magnitude:.2f} GB.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     layers_str = fmt(layers, precision=0, commas=False)
@@ -2125,8 +2123,8 @@ class KVCacheFootprint:
     seq_len_str = fmt(seq_len, precision=0, commas=True)
     head_dim_str = fmt(head_dim, precision=0, commas=False)
     bytes_per_element_str = fmt(bytes_per_element.to(byte).magnitude, precision=0, commas=False)
-    kv_cache_gb_str = fmt_qty(kv_cache_one, GB, precision=1, commas=False)
-    concurrent_8_gb_str = fmt_qty(concurrent_8_q, GB, precision=1, commas=False)
+    kv_cache_gb_str = fmt_memory(kv_cache_one, unit=GB, precision=1, commas=False)
+    concurrent_8_gb_str = fmt_memory(concurrent_8_q, unit=GB, precision=1, commas=False)
 ```
 
 For large language model (LLM) serving on a single GPU or server, the KV-cache\index{KV Cache!LLM serving bottleneck} (storing attention keys and values for each token) often becomes the memory bottleneck. For a 70-billion-parameter-class grouped-query attention model with `{python} KVCacheFootprint.layers_str` layers, `{python} KVCacheFootprint.kv_heads_str` KV heads, an `{python} KVCacheFootprint.seq_len_str`-token context, and FP16 cache entries, each active sequence stores about `{python} KVCacheFootprint.kv_cache_gb_str` of KV cache. Eight concurrent sequences therefore consume about `{python} KVCacheFootprint.concurrent_8_gb_str` before scheduler headroom, fragmentation, or activations, limiting how many requests a single node can batch together. Monitoring KV-cache utilization on each serving node enables capacity planning: when KV-cache approaches GPU memory limits, additional requests queue rather than batch, degrading latency.
@@ -2423,41 +2421,41 @@ Collecting all of these signals at production scale introduces its own cost cons
 # │          ObservabilitySampling.low_mb_s_str,
 # │          ObservabilitySampling.sampling_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, fmt_qty
+from mlsysim.fmt import fmt, check, fmt_bandwidth, fmt_memory, fmt_percent, fmt_time
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ObservabilitySampling:
     """Average ingest volume for high- and low-frequency request sampling."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    requests_per_second = MILLION
-    telemetry_per_request = 1 * KB
-    high_frequency_seconds = 1
-    low_frequency_seconds = 60
+    requests_per_second = MILLION / second
+    telemetry_per_request = 1 * KB  # scenario assumption
+    high_frequency_seconds = 1 * second  # scenario assumption
+    low_frequency_seconds = 60 * second  # scenario assumption
     success_sample_fraction = 0.01
     error_sample_fraction = 1.0
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    high_bytes_per_second = requests_per_second * telemetry_per_request / high_frequency_seconds
-    low_bytes_per_second = requests_per_second * telemetry_per_request / low_frequency_seconds
+    high_bytes_per_second = requests_per_second * telemetry_per_request * (second / high_frequency_seconds)
+    low_bytes_per_second = requests_per_second * telemetry_per_request * (second / low_frequency_seconds)
     sampling_ratio = (high_bytes_per_second / low_bytes_per_second).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(round(high_bytes_per_second.to(GB).magnitude, 1) == 1.0,
-          f"Expected ~1 GB/s, got {high_bytes_per_second.to(GB).magnitude:.2f} GB/s.")
-    check(round(low_bytes_per_second.to(MB).magnitude, 1) == 16.7,
-          f"Expected ~16.7 MB/s, got {low_bytes_per_second.to(MB).magnitude:.2f} MB/s.")
+    check(round(high_bytes_per_second.to(GB/second).magnitude, 1) == 1.0,
+          f"Expected ~1 GB/s, got {high_bytes_per_second.to(GB/second).magnitude:.2f} GB/s.")
+    check(round(low_bytes_per_second.to(MB/second).magnitude, 1) == 16.7,
+          f"Expected ~16.7 MB/s, got {low_bytes_per_second.to(MB/second).magnitude:.2f} MB/s.")
     check(round(sampling_ratio) == 60,
           f"Expected 60x sampling ratio, got {sampling_ratio:.1f}x.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    request_rate_m_str = fmt(requests_per_second / MILLION, precision=0, commas=False)
-    high_seconds_str = fmt_time(high_frequency_seconds, 'second', precision=0, commas=False)
-    low_seconds_str = fmt_time(low_frequency_seconds, 'second', precision=0, commas=False)
-    high_gb_s_str = fmt_qty(high_bytes_per_second / second, GB/second, precision=0, commas=False)
-    low_mb_s_str = fmt_qty(low_bytes_per_second / second, MB/second, precision=1, commas=False)
+    request_rate_m_str = fmt(requests_per_second.to(1/second).magnitude / MILLION, precision=0, commas=False)
+    high_seconds_str = fmt_time(high_frequency_seconds, second, precision=0, commas=False)
+    low_seconds_str = fmt_time(low_frequency_seconds, second, precision=0, commas=False)
+    high_gb_s_str = fmt_bandwidth(high_bytes_per_second, unit=GB/second, precision=0, commas=False)
+    low_mb_s_str = fmt_bandwidth(low_bytes_per_second, unit=MB/second, precision=1, commas=False)
     sampling_ratio_str = fmt(sampling_ratio, precision=0, commas=False)
-    telemetry_kb_str = fmt_qty(telemetry_per_request, KB, precision=0, commas=False)
+    telemetry_kb_str = fmt_memory(telemetry_per_request, unit=KB, precision=0, commas=False)
     success_sample_pct_str = fmt_percent(success_sample_fraction, precision=0, commas=False, style='prose')
     error_sample_pct_str = fmt_percent(error_sample_fraction, precision=0, commas=False, style='prose')
 ```
@@ -2710,7 +2708,7 @@ Translating these unit costs into a concrete budget estimate clarifies the real 
 # │ Imports: mlsysim.core.constants (byte, GB, MILLION), mlsysim.book (fmt)
 # │ Exports: dp_m_str, ingest_str, storage_gb_str, total_str, etc.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt_usd, fmt, check, fmt_qty
+from mlsysim.fmt import fmt_int, fmt_usd, fmt, check, fmt_memory, fmt_time
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MonitoringBudget:
@@ -2741,8 +2739,7 @@ class MonitoringBudget:
     datapoints_mo_m = datapoints_mo/MILLION
     ingestion_cost = datapoints_mo_m * ingestion_cost_per_m
     storage_q = datapoints_mo * bytes_per_point * byte
-    storage_gb = storage_q.to(GB).magnitude
-    storage_cost = storage_gb * storage_cost_per_gb
+    storage_cost = storage_q.to(GB).magnitude * storage_cost_per_gb
     queries_mo = n_dashboards * n_users * (queries_per_hr * work_hours * work_days)
     query_cost = queries_mo * query_cost_per
     total_cost = ingestion_cost + storage_cost + query_cost
@@ -2770,7 +2767,7 @@ class MonitoringBudget:
     query_cost_per_str = fmt_usd(query_cost_per, precision=2, commas=False, per="query")
     dp_m_str = fmt(datapoints_mo_m, precision=1, commas=False)
     ingest_str = fmt_usd(ingestion_cost, precision=1, commas=False, per="month")
-    storage_gb_str = fmt_qty(storage_q, GB, precision=1, commas=False)
+    storage_gb_str = fmt_memory(storage_q, unit=GB, precision=1, commas=False)
     storage_cost_str = fmt_usd(storage_cost, precision=2, commas=False, per="month")
     queries_str = fmt(queries_mo, precision=0, commas=True)
     query_cost_str = fmt_usd(query_cost, commas=False, per="month")

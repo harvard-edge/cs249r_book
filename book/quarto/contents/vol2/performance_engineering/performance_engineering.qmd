@@ -220,37 +220,32 @@ class MemoryWallScenario:
     hbm_latency = Hardware.Tech.Memory.DRAM.latency
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    ridge_fp8 = (flops_fp8 / bw).to(flop/byte).magnitude
+    ridge_fp8 = (flops_fp8 / bw).to(flop/byte)
     energy_ratio = energy_dram/energy_sram
     # Register file is quoted in binary (KiB/MiB) and labeled with decimal units
     # in prose, matching the branded-hardware-label convention (e.g. 80 GiB -> "80 GB").
-    reg_per_sm_kib = reg_per_sm.to(KiB).magnitude
-    shared_per_sm_kib = shared_per_sm.to(KiB).magnitude
-    register_total_mb = (sm_count * reg_per_sm).to(MiB).magnitude
-    l2_cache_mb = l2_cache.to(MB).magnitude
-    hbm_latency_ns = hbm_latency.to(nanosecond).magnitude
-    hbm_energy_pj = energy_dram.to(pJ).magnitude
+    register_total = sm_count * reg_per_sm
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     from mlsysim.fmt import check, fmt_time, fmt_qty, fmt_qty_int
     check(energy_ratio > 100, "DRAM energy cost should be at least 100x SRAM cost")
-    check(200 <= reg_per_sm_kib <= 300, "H100 register file/SM should be ~256 KiB")
-    check(200 <= shared_per_sm_kib <= 256, "H100 shared memory/SM should be ~228 KiB")
-    check(30 <= register_total_mb <= 36, "H100 register file total should be ~33 MiB")
-    check(40 <= l2_cache_mb <= 60, "H100 L2 cache should be ~50 MB")
-    check(250 <= hbm_latency_ns <= 350, "HBM3 access latency should be ~300 ns")
-    check(600 <= hbm_energy_pj <= 700, "HBM access energy should be ~640 pJ")
+    check(200 * KiB <= reg_per_sm <= 300 * KiB, "H100 register file/SM should be ~256 KiB")
+    check(200 * KiB <= shared_per_sm <= 256 * KiB, "H100 shared memory/SM should be ~228 KiB")
+    check(30 * MiB <= register_total <= 36 * MiB, "H100 register file total should be ~33 MiB")
+    check(40 * MB <= l2_cache <= 60 * MB, "H100 L2 cache should be ~50 MB")
+    check(250 * nanosecond <= hbm_latency <= 350 * nanosecond, "HBM3 access latency should be ~300 ns")
+    check(600 * pJ <= energy_dram <= 700 * pJ, "HBM access energy should be ~640 pJ")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     h100_fp8_str = fmt_qty_int(flops_fp8, TFLOP/second, commas=False)
     h100_hbm_bw_str = fmt_qty(bw, TB/second, precision=2, commas=False)
-    h100_ridge_fp8_str = fmt(ridge_fp8, precision=1, commas=False)
+    h100_ridge_fp8_str = fmt(ridge_fp8.to(flop/byte).magnitude, precision=1, commas=False)
     energy_ratio_str = fmt_int(energy_ratio.to("").magnitude, commas=False)
     h100_mem_str = fmt_qty(mem, GiB, precision=0, commas=False, unit_label="GB")
     h100_tdp_str = fmt_int(tdp.to(watt).magnitude, commas=False)
-    register_total_mb_str = fmt_qty_int(sm_count * reg_per_sm, MiB, commas=False, unit_label="MB")
+    register_total_mb_str = fmt_qty_int(register_total, MiB, commas=False, unit_label="MB")
     l2_cache_mb_str = fmt_qty_int(l2_cache, MB, commas=False)
-    hbm_latency_ns_str = fmt_time(round(hbm_latency_ns), 'nanosecond', precision=0, commas=False)
+    hbm_latency_ns_str = fmt_time(hbm_latency, nanosecond, precision=0, commas=False)
     hbm_energy_pj_str = fmt_qty_int(energy_dram, pJ, commas=False, unit_label="pJ")
     sm_count_str = fmt_int(sm_count, commas=False)
     reg_per_sm_str = fmt_qty_int(reg_per_sm, KiB, commas=False, unit_label="KB")
@@ -367,8 +362,8 @@ $$
 # │       A100 FP16 (~153), H100 FP16 (~295), and H100 FP8 (~591) to explain why
 # │       each new generation makes more workloads memory-bound.
 # │ Show: ~153 FLOP/byte (A100), ~295 (H100 FP16), ~591 (H100 FP8)—inline prose.
-# │ How: Extract precomputed ridge quantities from PerformanceSetup; convert to
-# │       FLOP/byte using .to(flop/byte).magnitude; guard ordering with check().
+# │ How: Extract precomputed ridge quantities from PerformanceSetup; keep them
+# │       as FLOP/byte quantities through guards, then format scalar magnitudes.
 # │
 # │ Imports: (none—values from perf-eng-setup cell), mlsysim.book (check)
 # │ Exports: a100_ridge_str, h100_fp16_ridge_str, h100_fp8_ridge_str
@@ -384,22 +379,22 @@ class RooflineRidgeCalc:
     h_h100 = Hardware.Cloud.H100
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    a100_ridge_val = h_a100.ridge_point().to(flop/byte).magnitude
-    h100_ridge_fp16_val = h_h100.ridge_point().to(flop/byte).magnitude
-    h100_ridge_fp8_val = h_h100.ridge_point("fp8").to(flop/byte).magnitude
+    a100_ridge = h_a100.ridge_point().to(flop/byte)
+    h100_ridge_fp16 = h_h100.ridge_point().to(flop/byte)
+    h100_ridge_fp8 = h_h100.ridge_point("fp8").to(flop/byte)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     from mlsysim.fmt import check
-    check(h100_ridge_fp16_val > a100_ridge_val,
+    check(h100_ridge_fp16 > a100_ridge,
           "H100 FP16 ridge should exceed A100 FP16 ridge")
-    check(h100_ridge_fp8_val > h100_ridge_fp16_val,
+    check(h100_ridge_fp8 > h100_ridge_fp16,
           "H100 FP8 ridge should exceed H100 FP16 ridge")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     from mlsysim.fmt import fmt, fmt_int, fmt_qty, fmt_qty_int
-    a100_ridge_str = fmt(a100_ridge_val, precision=1, commas=False)
-    h100_fp16_ridge_str = fmt(h100_ridge_fp16_val, precision=1, commas=False)
-    h100_fp8_ridge_str = fmt(h100_ridge_fp8_val, precision=1, commas=False)
+    a100_ridge_str = fmt(a100_ridge.to(flop/byte).magnitude, precision=1, commas=False)
+    h100_fp16_ridge_str = fmt(h100_ridge_fp16.to(flop/byte).magnitude, precision=1, commas=False)
+    h100_fp8_ridge_str = fmt(h100_ridge_fp8.to(flop/byte).magnitude, precision=1, commas=False)
 
     a100_fp16_str = fmt_qty_int(h_a100.compute.peak_flops, TFLOP/second, commas=False)
     a100_hbm_bw_str = fmt_qty(h_a100.memory.bandwidth, TB/second, precision=1, commas=False)
@@ -573,7 +568,7 @@ class WorkloadIntensityCalc:
     """Arithmetic intensity for GEMM, GELU, and LLM decode operations."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    bytes_per_elem = BYTES_FP16.to(byte).magnitude
+    bytes_per_elem = BYTES_FP16
     # GEMM: C = A*B where A is M_dim x K_dim, B is K_dim x C_dim
     M_dim, K_dim, C_dim = 4096, 4096, 4096
     # Element-wise (e.g., GELU): ~5 ops per element
@@ -585,19 +580,19 @@ class WorkloadIntensityCalc:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # GEMM: 2*M*C*K FLOPs, load A + B, then store C
-    gemm_flops = 2 * M_dim * C_dim * K_dim
+    gemm_flops = 2 * M_dim * C_dim * K_dim * flop
     gemm_bytes = (M_dim * K_dim + K_dim * C_dim + M_dim * C_dim) * bytes_per_elem
-    gemm_intensity = gemm_flops/gemm_bytes
+    gemm_intensity = (gemm_flops/gemm_bytes).to(flop/byte).magnitude
 
     # Element-wise: load+store
-    elem_flops = elem_flops_per_val * elem_count
+    elem_flops = elem_flops_per_val * elem_count * flop
     elem_bytes = 2 * elem_count * bytes_per_elem  # load + store
-    elem_intensity = elem_flops/elem_bytes
+    elem_intensity = (elem_flops/elem_bytes).to(flop/byte).magnitude
 
     # LLM decode step: one request times a square hidden-state weight matrix
-    decode_flops_val = 2 * decode_batch * decode_hidden * decode_hidden
+    decode_flops_val = 2 * decode_batch * decode_hidden * decode_hidden * flop
     decode_bytes_val = (decode_hidden * decode_hidden + decode_batch * decode_hidden) * bytes_per_elem
-    decode_intensity_val = decode_flops_val/decode_bytes_val
+    decode_intensity_val = (decode_flops_val/decode_bytes_val).to(flop/byte).magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(gemm_intensity > 100, f"GEMM should have high AI, got {gemm_intensity:.1f}")
@@ -676,35 +671,37 @@ The performance characteristics of each phase determine which optimization techn
 ```{python}
 #| echo: false
 #| label: roofline-diagnostic
-from mlsysim.fmt import fmt, fmt_int, check
+from mlsysim.fmt import fmt_int, check, fmt_count, fmt_memory, fmt_rate, fmt_time
 
 class RooflineDiagnostic:
     """Roofline analysis for 70B LLM decode on 8× H100."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────
     tensor_parallel_degree = 8
-    params_per_gpu_B = Models.Language.Llama2_70B.parameters.to(Bparam).magnitude / tensor_parallel_degree
-    bytes_fp16 = BYTES_FP16.to(byte).magnitude
-    h100_bw_tbs = Hardware.Cloud.H100.memory.bandwidth.to(TB/second).magnitude  # H100 HBM3 bandwidth (TB/s)
+    params_per_gpu = Models.Language.Llama2_70B.parameters / tensor_parallel_degree
+    h100_bw = Hardware.Cloud.H100.memory.bandwidth
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    flops_B = 2 * params_per_gpu_B                         # 17.5 (x10^9 FLOP)
-    weight_gb = params_per_gpu_B * bytes_fp16              # 17.5 GB
-    arith_intensity = flops_B/weight_gb                   # 1.0 FLOP/byte
-    decode_time_ms = weight_gb / (h100_bw_tbs * THOUSAND) * THOUSAND
-    tokens_per_sec = 1000.0 / decode_time_ms
+    flops = 2 * params_per_gpu * (flop / param)
+    weight_qty = params_per_gpu * (BYTES_FP16 / param)
+    arith_intensity = (flops / weight_qty).to(flop/byte)
+    decode_time = (weight_qty / h100_bw).to(ms)
+    tokens_per_sec = (1 / decode_time).to(1 / second)
 
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(abs(arith_intensity - 1.0) < 0.01, f"AI should be 1.0, got {arith_intensity}")
-    check(5 < decode_time_ms < 6, f"Decode time should be ~5.2ms, got {decode_time_ms:.1f}")
-    check(180 < tokens_per_sec < 200, f"Token rate should be ~191, got {tokens_per_sec:.0f}")
+    check(abs(arith_intensity - 1.0 * flop / byte) < 0.01 * flop / byte,
+          f"AI should be 1.0 FLOP/byte, got {arith_intensity:~P}")
+    check(5 * ms < decode_time < 6 * ms,
+          f"Decode time should be ~5.2 ms, got {fmt_time(decode_time, millisecond, precision=1, commas=False)}")
+    check(180 / second < tokens_per_sec < 200 / second,
+          f"Token rate should be ~191 tokens/s, got {tokens_per_sec:~P}")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    flops_B_str = fmt(flops_B, precision=1, commas=False)
-    weight_gb_str = fmt(weight_gb, precision=1, commas=False)
-    ai_str = fmt_int(arith_intensity, commas=False)
-    decode_ms_str = fmt(decode_time_ms, precision=1, commas=False)
-    tps_str = fmt(tokens_per_sec, precision=1, commas=False)
+    flops_str = fmt_count(flops.to(flop).magnitude, scale="B", precision=1, commas=False, label="FLOP")
+    weight_gb_str = fmt_memory(weight_qty, unit=GB, precision=1, commas=False)
+    ai_str = fmt_int(arith_intensity.to(flop/byte).magnitude, commas=False)
+    decode_ms_str = fmt_time(decode_time, millisecond, precision=1, commas=False)
+    tps_str = fmt_rate(tokens_per_sec.to(1 / second).magnitude, "tokens/s", precision=1, commas=False)
 ```
 
 A quick decode calculation shows why the memory wall dominates even when the accelerator has abundant unused FLOP/s.
@@ -716,7 +713,7 @@ A quick decode calculation shows why the memory wall dominates even when the acc
 **Math**:
 
 Step 1: Arithmetic intensity.
-Each decode step per GPU: FLOPs $= 2 \times 8.75 \times 10^9 =$ `{python} RooflineDiagnostic.flops_B_str` $\times 10^9$ FLOP. Bytes loaded $= 8.75 \times 10^9 \times 2 =$ `{python} RooflineDiagnostic.weight_gb_str` $\times 10^9$ bytes $=$ `{python} RooflineDiagnostic.weight_gb_str`.
+Each decode step per GPU: FLOPs $= 2 \times 8.75 \times 10^9 =$ `{python} RooflineDiagnostic.flops_str`. Bytes loaded $= 8.75 \times 10^9 \times 2$ bytes $=$ `{python} RooflineDiagnostic.weight_gb_str`.
 
 $$
 I = \frac{17.5 \times 10^9 \text{ FLOP}}{17.5 \times 10^9 \text{ bytes}} = 1.0 \text{ FLOP/byte}
@@ -731,7 +728,7 @@ $$
 t_{\text{decode}} = \frac{17.5 \text{ GB}}{3.35 \text{ TB/s}} \approx 5.2 \text{ ms per token}
 $$
 
-This yields approximately `{python} RooflineDiagnostic.tps_str`/second per GPU, or about `{python} RooflineDiagnostic.tps_str`/second for the model (since tensor parallelism does not multiply throughput for memory-bound decode). In practice, overheads from KV cache reads and NVLink synchronization reduce this substantially below the ideal bandwidth-only limit.
+This yields approximately `{python} RooflineDiagnostic.tps_str` per GPU, or about `{python} RooflineDiagnostic.tps_str` for the model (since tensor parallelism does not multiply throughput for memory-bound decode). In practice, overheads from KV cache reads and NVLink synchronization reduce this substantially below the ideal bandwidth-only limit.
 
 **Systems insight**: At batch size 1, fewer than 0.4 percent of the H100's FP16 FLOP/s are in use. The only ways to improve are: (a) increase batch size to amortize weight reads, (b) reduce weight bytes via quantization, or (c) use speculative decoding to generate multiple tokens per weight read.
 
@@ -789,7 +786,7 @@ class FusionTrafficCalc:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     hidden_dim = 4096
     batch_size = 2048
-    bytes_fp16 = BYTES_FP16.to(byte).magnitude
+    bytes_fp16 = BYTES_FP16
     intermediates = 2
     num_layers = 80
 
@@ -800,16 +797,16 @@ class FusionTrafficCalc:
     traffic_bytes_all_layers = traffic_bytes * num_layers
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    tensor_mb = (tensor_bytes * byte).to(MB).magnitude
-    traffic_mb = (traffic_bytes * byte).to(MB).magnitude
-    check(15 < tensor_mb < 17, f"Expected ~16 MB tensor, got {tensor_mb:.1f} MB")
-    check(60 < traffic_mb < 70, f"Expected ~64 MB traffic, got {traffic_mb:.1f} MB")
+    check(15 * MB < tensor_bytes < 17 * MB,
+          f"Expected ~16 MB tensor, got {tensor_bytes.to(MB).magnitude:.1f} MB")
+    check(60 * MB < traffic_bytes < 70 * MB,
+          f"Expected ~64 MB traffic, got {traffic_bytes.to(MB).magnitude:.1f} MB")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    tensor_mb_str = fmt_qty(tensor_bytes * byte, MB, precision=1, commas=False)
-    materialized_mb_str = fmt_qty(materialized_bytes * byte, MB, precision=1, commas=False)
-    traffic_mb_str = fmt_qty(traffic_bytes * byte, MB, precision=1, commas=False)
-    traffic_gb_str = fmt_qty(traffic_bytes_all_layers * byte, GB, precision=1, commas=False)
+    tensor_mb_str = fmt_qty(tensor_bytes, MB, precision=1, commas=False)
+    materialized_mb_str = fmt_qty(materialized_bytes, MB, precision=1, commas=False)
+    traffic_mb_str = fmt_qty(traffic_bytes, MB, precision=1, commas=False)
+    traffic_gb_str = fmt_qty(traffic_bytes_all_layers, GB, precision=1, commas=False)
     num_layers_str = fmt_int(num_layers, commas=False)
 ```
 
@@ -891,7 +888,7 @@ class FlashAttentionSavings:
     seq_len = 8192
     head_dim = m.hidden_dim // m.heads
     num_heads = m.heads
-    bytes_per_elem = BYTES_FP16.to(byte).magnitude
+    bytes_per_elem = BYTES_FP16
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Step 1: Naive attention materialized state per head:
@@ -908,7 +905,7 @@ class FlashAttentionSavings:
     flash_attn_bytes_total = flash_attn_bytes_per_head * num_heads
 
     # Step 4: Savings ratio
-    savings_ratio = naive_attn_bytes_per_head/flash_attn_bytes_per_head
+    savings_ratio = (naive_attn_bytes_per_head/flash_attn_bytes_per_head).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     from mlsysim.fmt import check
@@ -917,14 +914,14 @@ class FlashAttentionSavings:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     from mlsysim.fmt import fmt, fmt_int, fmt_qty
-    naive_mb_str = fmt_qty(naive_attn_bytes_total * byte, MB, precision=1, commas=False)
-    flash_mb_str = fmt_qty(flash_attn_bytes_total * byte, MB, precision=1, commas=False)
+    naive_mb_str = fmt_qty(naive_attn_bytes_total, MB, precision=1, commas=False)
+    flash_mb_str = fmt_qty(flash_attn_bytes_total, MB, precision=1, commas=False)
     savings_str = fmt_int(savings_ratio, commas=False)
 
     head_n_str = fmt_int(seq_len, commas=False)
     head_d_str = fmt_int(head_dim, commas=False)
-    naive_head_traffic_mb_str = fmt_qty(naive_attn_bytes_per_head * byte, MB, precision=1, commas=False)
-    flash_head_traffic_mb_str = fmt_qty(flash_attn_bytes_per_head * byte, MB, precision=1, commas=False)
+    naive_head_traffic_mb_str = fmt_qty(naive_attn_bytes_per_head, MB, precision=1, commas=False)
+    flash_head_traffic_mb_str = fmt_qty(flash_attn_bytes_per_head, MB, precision=1, commas=False)
 ```
 
 FlashAttention\index{FlashAttention} [@dao2022] reformulates attention as a **tiled**\index{Tiling}\index{Tiled Computation} computation. Instead of materializing the full $S{\times}S$ attention matrix, it processes $Q$, $K$, and $V$ in small blocks that fit in on-chip SRAM. The algorithm loads tiles of $Q$, $K$, and $V$, computes partial attention scores, and maintains running statistics (online softmax) to produce the exact result without ever storing the full attention matrix in HBM.
@@ -1185,66 +1182,66 @@ class KVCacheAnalysis:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     from mlsysim import Models, Hardware
-    from mlsysim.physics import calc_kv_cache_size, model_memory
+    from mlsysim.physics import calc_kv_cache_size
 
     model = Models.Language.Llama2_70B
     seq_len = 4096
 
     # Capacity per GPU (H100 80 GB)
     tensor_parallel_degree = 4
-    gpu_total_gb = Hardware.Cloud.H100.memory.capacity.to(GiB).magnitude
+    gpu_total = 80 * GB  # scenario assumption: vendor-facing H100 memory budget
     int4_bits = 4
     fp16_bits = 16
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    # Base size in GB per request (full model)
+    # Base size per request (full model)
     kv_cache_qty_f16 = calc_kv_cache_size(
         model.layers, model.kv_heads, model.hidden_dim // model.heads,
         seq_len, 1, bytes_per_elem=BYTES_FP16
     )
-    kv_fp16_gb_val = kv_cache_qty_f16.to(GB).magnitude
 
     kv_cache_qty_i8 = calc_kv_cache_size(
         model.layers, model.kv_heads, model.hidden_dim // model.heads,
         seq_len, 1, bytes_per_elem=BYTES_INT8
     )
-    kv_int8_gb_val = kv_cache_qty_i8.to(GB).magnitude
 
     # Shard weights (4-way TP)
-    weight_fp16_shard_gb = model_memory(model.parameters, BYTES_FP16, GB) / tensor_parallel_degree
-    weight_int4_shard_gb = model_memory(model.parameters, BYTES_INT4, GB) / tensor_parallel_degree
+    weight_fp16_shard = model.size_in_bytes(BYTES_FP16) / tensor_parallel_degree
+    weight_int4_shard = model.size_in_bytes(BYTES_INT4) / tensor_parallel_degree
 
     # Max batch calculations
-    avail_fp16_gb = gpu_total_gb - weight_fp16_shard_gb
-    max_batch_fp16_val = int(avail_fp16_gb / (kv_fp16_gb_val / tensor_parallel_degree))
+    avail_fp16 = gpu_total - weight_fp16_shard
+    kv_fp16_per_gpu = kv_cache_qty_f16 / tensor_parallel_degree
+    max_batch_fp16_val = int((avail_fp16 / kv_fp16_per_gpu).to("").magnitude)
 
-    avail_int8_gb = gpu_total_gb - weight_int4_shard_gb
-    kv_int8_per_gpu = kv_int8_gb_val / tensor_parallel_degree
-    max_batch_int8_val = int(avail_int8_gb / kv_int8_per_gpu)
+    avail_int8 = gpu_total - weight_int4_shard
+    kv_int8_per_gpu = kv_cache_qty_i8 / tensor_parallel_degree
+    max_batch_int8_val = int((avail_int8 / kv_int8_per_gpu).to("").magnitude)
 
     batch_ratio = max_batch_int8_val / max_batch_fp16_val
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     from mlsysim.fmt import fmt_int, check
-    check(kv_fp16_gb_val > 0.1, f"KV cache size too low, got {kv_fp16_gb_val:.2f}")
+    check(kv_cache_qty_f16 > 0.1 * GB,
+          f"KV cache size too low, got {kv_cache_qty_f16.to(GB).magnitude:.2f}")
     check(max_batch_int8_val > max_batch_fp16_val, "INT8 should increase batch size")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    from mlsysim.fmt import fmt_int, fmt, fmt_qty, fmt_qty_int
-    kv_fp16_gb_str = fmt_qty(kv_cache_qty_f16, GB, precision=2, commas=False)
-    kv_fp16_per_gpu_gb_str = fmt_qty(kv_cache_qty_f16 / tensor_parallel_degree, GB, precision=2, commas=False)
-    kv_int8_total_gb_str = fmt_qty(kv_cache_qty_i8, GB, precision=2, commas=False)
-    kv_int8_per_gpu_gb_str = fmt_qty(kv_cache_qty_i8 / tensor_parallel_degree, GB, precision=2, commas=False)
+    from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_memory
+    kv_fp16_gb_str = fmt_memory(kv_cache_qty_f16, unit=GB, precision=2, commas=False)
+    kv_fp16_per_gpu_gb_str = fmt_memory(kv_cache_qty_f16 / tensor_parallel_degree, unit=GB, precision=2, commas=False)
+    kv_int8_total_gb_str = fmt_memory(kv_cache_qty_i8, unit=GB, precision=2, commas=False)
+    kv_int8_per_gpu_gb_str = fmt_memory(kv_cache_qty_i8 / tensor_parallel_degree, unit=GB, precision=2, commas=False)
     max_batch_fp16_str = fmt_int(max_batch_fp16_val, commas=False)
     max_batch_int8_str = fmt_int(max_batch_int8_val, commas=False)
     batch_ratio_str = fmt(batch_ratio, precision=1, commas=False)
-    avail_fp16_gb_str = fmt_qty_int(avail_fp16_gb * GB, GB, commas=False)
-    weight_int4_gb_str = fmt_qty(weight_int4_shard_gb * GB, GB, precision=2, commas=False)
-    avail_int8_gb_str = fmt_qty(avail_int8_gb * GB, GB, precision=2, commas=False)
-    weight_fp16_shard_gb_str = fmt_qty_int(weight_fp16_shard_gb * GB, GB, commas=False)
-    weight_fp16_total_gb_str = fmt_qty_int(weight_fp16_shard_gb * tensor_parallel_degree * GB, GB, commas=False)
-    tensor_parallel_degree_str = fmt_int(tensor_parallel_degree, commas=False)
-    gpu_total_gb_str = fmt_qty_int(Hardware.Cloud.H100.memory.capacity, GiB, commas=False, unit_label="GB")
+    avail_fp16_gb_str = fmt_memory(avail_fp16, unit=GB, precision=0, commas=False)
+    weight_int4_gb_str = fmt_memory(weight_int4_shard, unit=GB, precision=2, commas=False)
+    avail_int8_gb_str = fmt_memory(avail_int8, unit=GB, precision=2, commas=False)
+    weight_fp16_shard_gb_str = fmt_memory(weight_fp16_shard, unit=GB, precision=0, commas=False)
+    weight_fp16_total_gb_str = fmt_memory(weight_fp16_shard * tensor_parallel_degree, unit=GB, precision=0, commas=False)
+    tensor_parallel_degree_str = fmt_count(tensor_parallel_degree, commas=False)
+    gpu_total_gb_str = fmt_memory(gpu_total, unit=GB, precision=0, commas=False)
     int4_scale_num_str = fmt_int(int4_bits, commas=False)
     int4_scale_den_str = fmt_int(fp16_bits, commas=False)
 ```
@@ -1554,12 +1551,9 @@ class NvlinkH100:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     bw = Hardware.Cloud.H100.nvlink.bandwidth
 
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    bw_gbps = bw.to(GB/second).magnitude
-
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     from mlsysim.fmt import fmt, fmt_qty_int, check
-    check(bw_gbps > 500, "H100 NVLink bandwidth should exceed 500 GB/s")
+    check(bw > 500 * GB/second, "H100 NVLink bandwidth should exceed 500 GB/s")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     bw_gbps_str = fmt_qty_int(bw, GB/second, commas=False)
@@ -1615,42 +1609,42 @@ class OverlapCalc:
     # Backward pass compute: ~2 * forward FLOPs (gradient computation)
     # Forward FLOPs ≈ 2 * P * tokens_per_gpu, where tokens_per_gpu = S * B_per_gpu
     tokens_per_gpu = 2048        # sequence length * per-GPU batch
-    forward_flops = 2 * m.parameters.to(param).magnitude * tokens_per_gpu * ureg.flop
+    forward_flops = 2 * m.parameters.to(param).magnitude * tokens_per_gpu * flop
     backward_flops = 2 * forward_flops  # backward is ~2x forward
     mfu = (Literature.Training.MfuLow + Literature.Training.MfuHigh) / 2
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Step 1: Gradient size (FP16)
-    gradient_qty = m.parameters.to(param).magnitude * 2 * ureg.byte
+    gradient_qty = m.parameters.to(param).magnitude * 2 * byte
 
     # Step 2: AllReduce time (ring)
     t_comm = calc_ring_allreduce_time(
         gradient_qty,
         num_gpus,
         nvlink_bw,
-        0 * ureg.second,
+        0 * second,
     )
-    allreduce_time_s = t_comm.to(second).magnitude
+    allreduce_time = t_comm.to(second)
     ring_allreduce_factor = 2 * (num_gpus - 1) / num_gpus
 
     # Step 3: Backward pass compute time
     peak_flops = h.compute.precision_flops.get('fp16', h.compute.peak_flops)
-    backward_time_s = (backward_flops / (peak_flops * mfu)).to(second).magnitude
+    backward_time = (backward_flops / (peak_flops * mfu)).to(second)
 
     # Step 4: Forward pass compute time
-    forward_time_s = (forward_flops / (peak_flops * mfu)).to(second).magnitude
+    forward_time = (forward_flops / (peak_flops * mfu)).to(second)
 
     # Step time without overlap
-    step_no_overlap = forward_time_s + backward_time_s + allreduce_time_s
+    step_no_overlap = forward_time + backward_time + allreduce_time
 
     # Step time with overlap
-    step_with_overlap = forward_time_s + max(backward_time_s, allreduce_time_s)
+    step_with_overlap = forward_time + max(backward_time, allreduce_time)
 
     # Step 5: Speedup
-    overlap_speedup = step_no_overlap/step_with_overlap
+    overlap_speedup = (step_no_overlap/step_with_overlap).to("").magnitude
 
     # Step 6: Can we fully overlap?
-    can_overlap = backward_time_s > allreduce_time_s
+    can_overlap = backward_time > allreduce_time
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     from mlsysim.fmt import check
@@ -1660,10 +1654,10 @@ class OverlapCalc:
     from mlsysim.fmt import fmt, fmt_int, MarkdownStr, fmt_time, fmt_qty, fmt_qty_int
     gradient_gb_str = fmt_qty(gradient_qty, GB, precision=1, commas=False)
     ring_allreduce_factor_str = fmt(ring_allreduce_factor, precision=2, commas=False)
-    allreduce_ms_str = fmt_time(allreduce_time_s * THOUSAND, 'millisecond', precision=1, commas=False)
-    backward_ms_str = fmt_time(backward_time_s * THOUSAND, 'millisecond', precision=1, commas=False)
-    step_no_overlap_ms_str = fmt_time(step_no_overlap * THOUSAND, 'millisecond', precision=1, commas=False)
-    step_overlap_ms_str = fmt_time(step_with_overlap * THOUSAND, 'millisecond', precision=1, commas=False)
+    allreduce_ms_str = fmt_time(allreduce_time, ms, precision=1, commas=False)
+    backward_ms_str = fmt_time(backward_time, ms, precision=1, commas=False)
+    step_no_overlap_ms_str = fmt_time(step_no_overlap, ms, precision=1, commas=False)
+    step_overlap_ms_str = fmt_time(step_with_overlap, ms, precision=1, commas=False)
     overlap_speedup_str = fmt(overlap_speedup, precision=2, commas=False)
     overlap_status_str = MarkdownStr("fully hidden" if can_overlap else "partially hidden")
     num_gpus_str = fmt_int(num_gpus, commas=False)
@@ -1878,12 +1872,10 @@ from mlsysim.fmt import fmt, fmt_qty, fmt_qty_int
 class LayerNormRoofline:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     achieved_flops = 15 * (TFLOPs / second)
-    achieved_tflops = achieved_flops.to(TFLOPs/second).magnitude
     achieved_bw = 2.8 * (TB / second)
-    achieved_tbs = achieved_bw.to(TB/second).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    arithmetic_intensity = achieved_tflops / achieved_tbs
+    arithmetic_intensity = (achieved_flops / achieved_bw).to(flop/byte).magnitude
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     achieved_tflops_str = fmt_qty_int(achieved_flops, TFLOPs/second, commas=False, unit_label="TFLOP/s")
@@ -2002,10 +1994,8 @@ class ProfilerDetective:
     observed_tps = 45
     ceiling_tps = 96
     decode_traffic = 35 * GB
-    decode_traffic_gb = decode_traffic.to(GB).magnitude
     hidden_performance_pct = 53
     gemm_bandwidth = 2.8 * (TB / second)
-    gemm_bandwidth_tbs = gemm_bandwidth.to(TB/second).magnitude
     gemm_efficiency_pct = 84
     gemm_time_share_pct = 42
     attn_share_pct = 28
@@ -2013,7 +2003,6 @@ class ProfilerDetective:
     softmax_share_pct = 8
     launch_gap_pct = 10
     kv_cache_bandwidth = 1.9 * (TB / second)
-    kv_cache_bandwidth_tbs = kv_cache_bandwidth.to(TB/second).magnitude
     kernels_per_layer = 120
     fused_kernels_per_layer = 30
     non_gemm_share_pct = 100 - gemm_time_share_pct
@@ -2117,35 +2106,35 @@ While Hardware Utilization reports how often GPUs are busy, it fails to distingu
 # │          fleet_local_mfu_str, fleet_global_mfu_str, fleet_scaling_tax_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.physics import calc_transformer_training_flops
-from mlsysim.fmt import fmt_int,  fmt, check, MarkdownStr, fmt_percent, fmt_time
+from mlsysim.fmt import check, MarkdownStr, fmt_count, fmt_percent, fmt_time
 
 class FleetEfficiencyCalc:
     """Calculates Fleet MFU and identifies the Scaling Tax."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     n_gpus = 128
-    r_peak_per_gpu = Hardware.Cloud.H100.compute.peak_flops.to(TFLOPs/second).magnitude * TRILLION
+    r_peak_per_gpu = Hardware.Cloud.H100.compute.peak_flops
     local_tokens_per_step = 2204
     fleet_tokens_per_step = 35446
 
     # Observed times
-    t_local_step_ms = 180.0  # 8-GPU node baseline
-    t_fleet_step_ms = 245.0  # 128-GPU cluster observed
+    t_local_step = 180.0 * ms  # scenario assumption: 8-GPU node baseline
+    t_fleet_step = 245.0 * ms  # scenario assumption: 128-GPU cluster observed
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Step 1: Useful FLOPs per step from parameters and tokens processed
     local_flops_per_step = calc_transformer_training_flops(
         Models.Language.Llama2_70B.parameters, local_tokens_per_step
-    ).to(flop).magnitude
+    )
     fleet_flops_per_step = calc_transformer_training_flops(
         Models.Language.Llama2_70B.parameters, fleet_tokens_per_step
-    ).to(flop).magnitude
+    )
 
     # Step 2: MFU is useful FLOPs divided by peak cluster FLOPs over wall time
-    local_mfu = local_flops_per_step / (8 * r_peak_per_gpu * (t_local_step_ms * ms).to(second).magnitude)
-    global_mfu = fleet_flops_per_step / (n_gpus * r_peak_per_gpu * (t_fleet_step_ms * ms).to(second).magnitude)
+    local_mfu = (local_flops_per_step / (8 * r_peak_per_gpu * t_local_step)).to("").magnitude
+    global_mfu = (fleet_flops_per_step / (n_gpus * r_peak_per_gpu * t_fleet_step)).to("").magnitude
 
-    scaling_tax = (1 - (global_mfu/local_mfu)) * 100
+    scaling_tax = 1 - (global_mfu/local_mfu)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(global_mfu < local_mfu, "Fleet MFU must be lower than local node MFU due to scaling overhead.")
@@ -2153,10 +2142,10 @@ class FleetEfficiencyCalc:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     fleet_params_b_str = MarkdownStr("70B")
     fleet_nodes_str = fmt_count(n_gpus, commas=False, label="GPU")
-    fleet_t_step_ms_str = fmt_time(round(t_fleet_step_ms), 'millisecond', precision=0, commas=False)
+    fleet_t_step_ms_str = fmt_time(t_fleet_step, millisecond, precision=0, commas=False)
     fleet_local_mfu_str = fmt_percent(round(local_mfu * 100)/100, precision=0, commas=False, style='prose')
     fleet_global_mfu_str = fmt_percent(round(global_mfu * 100)/100, precision=0, commas=False, style='prose')
-    fleet_scaling_tax_str = fmt_percent(scaling_tax/100, precision=1, commas=False, style='prose')
+    fleet_scaling_tax_str = fmt_percent(scaling_tax, precision=1, commas=False, style='prose')
 ```
 
 With MFU defined as useful work rather than raw busyness, the next calculation shows how distributed overhead turns a strong single-node number into a weaker fleet-wide result.
@@ -2407,7 +2396,8 @@ Recognizing these pitfalls saves teams from wasting months optimizing the wrong 
 # │ Exports: RooflineSummaryRecap.h100_fp16_ridge_str
 class RooflineSummaryRecap:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    h100_fp16_ridge_str = fmt(Hardware.Cloud.H100.ridge_point().to(flop/byte).magnitude, precision=1, commas=False)
+    h100_fp16_ridge = Hardware.Cloud.H100.ridge_point().to(flop/byte)
+    h100_fp16_ridge_str = fmt(h100_fp16_ridge.to(flop/byte).magnitude, precision=1, commas=False)
 ```
 Performance engineering transforms a model that should be efficient into one that is, by attacking the fundamental bottleneck of modern ML systems: the memory wall. @Fig-optimization-hierarchy illustrates the profiling hierarchy, providing four levels of diagnostic granularity from application-level global metrics down to hardware counters.
 
@@ -2427,13 +2417,13 @@ class FlashAttentionSummaryRecap:
     m = Models.Language.Llama2_70B
     seq_len = 8192
     head_dim = m.hidden_dim // m.heads
-    bytes_per_elem = BYTES_FP16.to(byte).magnitude
+    bytes_per_elem = BYTES_FP16
     naive_attn_bytes_per_head = (
         4 * seq_len * seq_len * bytes_per_elem
         + 4 * seq_len * head_dim * bytes_per_elem
     )
     flash_attn_bytes_per_head = (3 + 1) * seq_len * head_dim * bytes_per_elem
-    savings_ratio = naive_attn_bytes_per_head / flash_attn_bytes_per_head
+    savings_ratio = (naive_attn_bytes_per_head / flash_attn_bytes_per_head).to("").magnitude
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     savings_str = fmt_int(savings_ratio, commas=False)
 ```

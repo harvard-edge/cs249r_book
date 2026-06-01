@@ -87,7 +87,7 @@ from mlsysim.fmt import fmt, check
 # │ Exports: InferenceSetup.h100_mem_gb_str, InferenceSetup.h100_mem_bw_tbs_str,
 # │          InferenceSetup.a100_mem_bw_tbs_str, InferenceSetup.nvlink_h100_gbs_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, fmt_qty, fmt_qty_int
+from mlsysim.fmt import check, fmt_bandwidth, fmt_qty_int
 
 class InferenceSetup:
     """Namespace for localized inference hardware reference values."""
@@ -99,20 +99,18 @@ class InferenceSetup:
     nvlink = Hardware.Cloud.H100.nvlink.bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    h100_mem_gb_val = mem_h_h100.to(GiB).magnitude
-    h100_bw_tbs_val = bw_h_h100.to(TB/second).magnitude
-    a100_bw_tbs_val = bw_a100.to(TB/second).magnitude
-    nvlink_gbs_val = nvlink.to(GB/second).magnitude
+    h100_mem = mem_h_h100
+    h100_bw = bw_h_h100
+    a100_bw = bw_a100
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    from mlsysim.fmt import fmt_int, check
-    check(h100_bw_tbs_val > a100_bw_tbs_val, "H100 bandwidth should exceed A100 bandwidth")
+    check(h100_bw > a100_bw, "H100 bandwidth should exceed A100 bandwidth")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    h100_mem_gb_str = fmt_qty_int(h100_mem_gb_val * GiB, GiB, commas=False, unit_label="GB")
-    h100_mem_bw_tbs_str = fmt_qty(h100_bw_tbs_val * TB / second, TB / second, precision=2, commas=False)
-    a100_mem_bw_tbs_str = fmt_qty(a100_bw_tbs_val * TB / second, TB / second, precision=1, commas=False)
-    nvlink_h100_gbs_str = fmt_int(nvlink_gbs_val, commas=False)
+    h100_mem_gb_str = fmt_qty_int(h100_mem, GiB, commas=False, unit_label="GB")
+    h100_mem_bw_tbs_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
+    a100_mem_bw_tbs_str = fmt_bandwidth(a100_bw, unit=TB / second, precision=1, commas=False)
+    nvlink_h100_gbs_str = fmt_bandwidth(nvlink, unit=GB / second, precision=0, commas=False)
 ```
 
 ## The Economics and Architecture of Inference {#sec-inference-scale-scaling-inference-beyond-single-machines-54e6}
@@ -672,10 +670,10 @@ Single-GPU deployment is the simplest topology: the entire model fits in one dev
 # │ Context: Deployment topology — tensor-parallel NVLink bandwidth.
 # │ Exports: InferenceTopologyRecap.nvlink_h100_gbs_str
 class InferenceTopologyRecap:
-    nvlink_gbs = Hardware.Cloud.H100.nvlink.bandwidth.to(GB/second).magnitude
-    from mlsysim.fmt import fmt_int, fmt, fmt_qty_int
+    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth
+    from mlsysim.fmt import fmt_bandwidth
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    nvlink_h100_gbs_str = fmt_qty_int(nvlink_gbs * GB / second, GB / second, commas=False)
+    nvlink_h100_gbs_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
 ```
 
 Multi-GPU tensor parallelism shards each layer's weight matrices across multiple GPUs connected by high-bandwidth interconnect (NVLink at `{python} InferenceTopologyRecap.nvlink_h100_gbs_str` on H100). Each GPU computes a partial result for every layer, and an all-reduce operation synchronizes the partial results before the next layer. This topology is necessary when model weights exceed single-device memory and provides latency reduction proportional to the parallelism degree, at the cost of communication overhead per layer. The model sharding section (@sec-inference-scale-model-sharding-inference-82b3) analyzes the communication overhead quantitatively.
@@ -855,7 +853,7 @@ Translating these batch-level equations into system-wide capacity planning requi
 ```{python}
 #| echo: false
 #| label: littles-law-example
-from mlsysim.fmt import fmt_int, check, fmt, fmt_time
+from mlsysim.fmt import fmt_int, check, fmt_time
 
 class LittlesLawExample:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -1077,16 +1075,16 @@ class LogicScaling:
     """The latency tax of test-time reasoning."""
     # ┌── 1. LOAD ──────────────────────────────────────────
     LOGIC_WALL_REASONING_STEPS_EXAMPLE = 128     # pedagogical reasoning-steps example
-    t_std_ms = 100 # standard 1-token decode
+    t_std = 100 * ms # pedagogical standard 1-token decode
     reasoning_steps = LOGIC_WALL_REASONING_STEPS_EXAMPLE # tokens of 'thought' before the answer
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    t_reasoning_s = (t_std_ms * reasoning_steps * ms).to(second).magnitude
+    t_reasoning = (t_std * reasoning_steps).to(second)
     latency_expansion = reasoning_steps
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(latency_expansion == 128, f"Exp {latency_expansion} unexpected")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     steps_str = fmt_int(reasoning_steps, commas=False)
-    time_s_str = fmt_time(t_reasoning_s, 'second', precision=1, commas=False, style='word')
+    time_s_str = fmt_time(t_reasoning, second, precision=1, commas=False, style='word')
 
     @classmethod
     def plot(cls):
@@ -1094,7 +1092,7 @@ class LogicScaling:
         from mlsysim import viz
         return viz.bar_compare(
             labels=["Fast (Pattern)", "Slow (Reasoning)"],
-            values=[0.1, cls.t_reasoning_s], # 100ms vs multi-second
+            values=[cls.t_std.to(second).magnitude, cls.t_reasoning.to(second).magnitude],
             title="Inference Scaling: Reasoning Depth",
             ylabel="Latency (Seconds)"
         )
@@ -1500,7 +1498,7 @@ Even with modern frameworks, diagnosing tail latency anomalies requires systemat
 # │          A100HardwareScenario.nvlink_a100_gbs_str,
 # │          A100HardwareScenario.pcie_gen4_gbs_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, fmt_qty, fmt_qty_int
+from mlsysim.fmt import check, fmt_bandwidth, fmt_memory, fmt_time, fmt_qty_int
 
 class A100HardwareScenario:
     """A100 hardware reference."""
@@ -1510,30 +1508,24 @@ class A100HardwareScenario:
     bw = Hardware.Cloud.A100.memory.bandwidth
     nvlink = Hardware.Cloud.A100.nvlink.bandwidth
     pcie = Hardware.Cloud.A100.interconnect.bandwidth
-    activation_transfer_mb = 100
+    activation_transfer = 100 * MB  # scenario payload
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    a100_mem_gb_val = mem.to(GiB).magnitude
-    a100_mem_bw_tbs_val = bw.to(TB/second).magnitude
-    nvlink_a100_gbs_val = nvlink.to(GB/second).magnitude
-    pcie_gen4_gbs_val = pcie.to(GB/second).magnitude
-    activation_transfer_gb = activation_transfer_mb / THOUSAND
-    pcie_transfer_ms_val = (activation_transfer_gb / pcie_gen4_gbs_val) * THOUSAND
-    nvlink_transfer_ms_val = (activation_transfer_gb / nvlink_a100_gbs_val) * THOUSAND
+    pcie_transfer = (activation_transfer / pcie).to(millisecond)
+    nvlink_transfer = (activation_transfer / nvlink).to(millisecond)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    from mlsysim.fmt import fmt_int, check, fmt_time
-    check(nvlink_a100_gbs_val > pcie_gen4_gbs_val, "NVLink should be faster than PCIe")
-    check(pcie_transfer_ms_val > nvlink_transfer_ms_val, "PCIe transfer should be slower than NVLink")
+    check(nvlink > pcie, "NVLink should be faster than PCIe")
+    check(pcie_transfer > nvlink_transfer, "PCIe transfer should be slower than NVLink")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    a100_mem_gb_str = fmt_qty_int(a100_mem_gb_val * GiB, GiB, commas=False, unit_label="GB")
-    a100_mem_bw_tbs_str = fmt_qty(a100_mem_bw_tbs_val * TB / second, TB / second, precision=1, commas=False)
-    nvlink_a100_gbs_str = fmt_qty_int(nvlink_a100_gbs_val * GB / second, GB / second, commas=False)
-    pcie_gen4_gbs_str = fmt_qty_int(pcie_gen4_gbs_val * GB / second, GB / second, commas=False)
-    activation_transfer_mb_str = fmt_qty_int(activation_transfer_mb * MB, MB, commas=False)
-    pcie_transfer_ms_str = fmt_time(pcie_transfer_ms_val, 'millisecond', precision=1, commas=False)
-    nvlink_transfer_ms_str = fmt_time(nvlink_transfer_ms_val, 'millisecond', precision=2, commas=False)
+    a100_mem_gb_str = fmt_qty_int(mem, GiB, commas=False, unit_label="GB")
+    a100_mem_bw_tbs_str = fmt_bandwidth(bw, unit=TB / second, precision=1, commas=False)
+    nvlink_a100_gbs_str = fmt_bandwidth(nvlink, unit=GB / second, precision=0, commas=False)
+    pcie_gen4_gbs_str = fmt_bandwidth(pcie, unit=GB / second, precision=0, commas=False)
+    activation_transfer_mb_str = fmt_memory(activation_transfer, unit=MB, precision=0, commas=False)
+    pcie_transfer_ms_str = fmt_time(pcie_transfer, millisecond, precision=1, commas=False)
+    nvlink_transfer_ms_str = fmt_time(nvlink_transfer, millisecond, precision=2, commas=False)
 ```
 
 ::: {.callout-tip title="Debugging high P99 latency"}
@@ -1622,33 +1614,33 @@ Feature-parallel batching is natural when embeddings are sharded across servers:
 # │ Imports: mlsysim.fmt (fmt, check)
 # │ Exports: RecsysLatencyBreakdown.total_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import check, fmt_time
 
 
 class RecsysLatencyBreakdown:
     """Compute total latency from phase durations."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    routing_ms = 0.2
-    accumulation_ms = 0.5
-    embedding_ms = 2.0
-    feature_ms = 1.0
-    ranking_ms = 1.5
+    routing = 0.2 * ms  # scenario table row
+    accumulation = 0.5 * ms  # scenario table row
+    embedding = 2.0 * ms  # scenario table row
+    feature = 1.0 * ms  # scenario table row
+    ranking = 1.5 * ms  # scenario table row
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    total_ms = (
-        routing_ms
-        + accumulation_ms
-        + embedding_ms
-        + feature_ms
-        + ranking_ms
+    total = (
+        routing
+        + accumulation
+        + embedding
+        + feature
+        + ranking
     )
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
-    check(total_ms == 5.2, f"Total latency mismatch: {total_ms}")
+    check(abs(total.to(ms).magnitude - 5.2) < 1e-9, f"Total latency mismatch: {total.to(ms).magnitude}")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
-    total_str = fmt(total_ms, precision=1, commas=False)
+    total_str = fmt_time(total, millisecond, precision=1, commas=False)
 ```
 
 ::: {#exmp-inference-recsys-batching-at-meta-scale .callout-example title="RecSys batching at Meta scale"}
@@ -1678,14 +1670,14 @@ Each embedding shard processes about 50K lookups in a batched operation, achievi
 
 As @tbl-inference-recsys-latency-breakdown shows, the per-phase latency\index{Latency!breakdown} composition is:
 
-| **Phase**                                    |                                       **Duration** | **Notes**                   |
-|:---------------------------------------------|---------------------------------------------------:|:----------------------------|
-| **Request routing**                          |                                             0.2 ms | Consistent hashing to shard |
-| **Batch accumulation**                       |                                       0.5 ms (avg) | 1 ms window                 |
-| **Embedding lookup**\index{Embedding Lookup} |                                               2 ms | Batched, SSD-backed         |
-| **Feature processing**                       |                                               1 ms | Dense computation           |
-| **Ranking model**                            |                                             1.5 ms | Final scoring               |
-| **Total**                                    | **`{python} RecsysLatencyBreakdown.total_str` ms** | Within 10 ms SLO            |
+| **Phase**                                    |                                    **Duration** | **Notes**                   |
+|:---------------------------------------------|------------------------------------------------:|:----------------------------|
+| **Request routing**                          |                                          0.2 ms | Consistent hashing to shard |
+| **Batch accumulation**                       |                                    0.5 ms (avg) | 1 ms window                 |
+| **Embedding lookup**\index{Embedding Lookup} |                                            2 ms | Batched, SSD-backed         |
+| **Feature processing**                       |                                            1 ms | Dense computation           |
+| **Ranking model**                            |                                          1.5 ms | Final scoring               |
+| **Total**                                    | **`{python} RecsysLatencyBreakdown.total_str`** | Within 10 ms SLO            |
 
 : **Latency Breakdown for a 10M-QPS Recommender Request**: Per-phase contribution to end-to-end latency for a single recommender request at 10M QPS with 1,000 embedding shards. {#tbl-inference-recsys-latency-breakdown}
 
@@ -1992,7 +1984,7 @@ The same formula can be turned into an explicit batch-size limit for production 
 # │          KVCacheCapacityEstimator.max_batch_str,
 # │          KVCacheCapacityEstimator.step1_kv_per_token_math
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, check, fmt, fmt_qty_int, MarkdownStr
+from mlsysim.fmt import fmt_int, check, fmt_memory, fmt_qty_int, MarkdownStr
 
 class KVCacheCapacityEstimator:
     """KV-cache capacity estimator for a long-context 70B GQA deployment."""
@@ -2003,53 +1995,54 @@ class KVCacheCapacityEstimator:
     d_head = 128
     bytes_per_elem = 2
     context_tokens = 131_072
-    total_hbm_gb = 640
-    weight_gb = 140
-    system_gb = 20
+    total_hbm = 640 * GB  # scenario budget
+    weight = Models.Language.Llama2_70B.size_in_bytes(BYTES_FP16)
+    system_reserved = 20 * GB  # scenario reserve
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     from mlsysim.physics import calc_kv_cache_size
     # Use library formula for per-token KV bytes
     kv_cache_one_token = calc_kv_cache_size(n_layers, n_kv_heads, d_head, 1, 1, bytes_per_elem)
     kv_bytes_per_token = int(kv_cache_one_token.to(byte).magnitude)
-    kv_mb_per_token = kv_cache_one_token.to(MB).magnitude
 
     kv_cache_full = calc_kv_cache_size(n_layers, n_kv_heads, d_head, context_tokens, 1, bytes_per_elem)
-    kv_gb_per_request = kv_cache_full.to(GB).magnitude
 
-    available_kv_gb = total_hbm_gb - weight_gb - system_gb
-    max_batch = int(available_kv_gb // kv_gb_per_request)
+    available_kv = total_hbm - weight - system_reserved
+    max_batch = int((available_kv / kv_cache_full).to("").magnitude)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(kv_bytes_per_token == 327_680, "KV bytes/token should match GQA formula")
     check(max_batch == 11, f"Expected max batch 11, got {max_batch}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    kv_mb_per_token_display = kv_cache_one_token.to(MB).magnitude
+    kv_gb_per_request_display = kv_cache_full.to(GB).magnitude
+    available_kv_display = available_kv.to(GB).magnitude
     kv_bytes_per_token_str = fmt_int(kv_bytes_per_token)
-    kv_mb_per_token_str = fmt(kv_mb_per_token, precision=2, commas=False)
+    kv_mb_per_token_str = fmt_memory(kv_cache_one_token, unit=MB, precision=2, commas=False)
     context_tokens_str = fmt_int(context_tokens)
-    kv_gb_per_request_str = fmt(kv_gb_per_request, precision=1, commas=False)
-    available_kv_gb_str = fmt_qty_int(available_kv_gb * GB, GB, commas=False)
+    kv_gb_per_request_str = fmt_memory(kv_cache_full, unit=GB, precision=1, commas=False)
+    available_kv_gb_str = fmt_memory(available_kv, unit=GB, precision=0, commas=False)
     max_batch_str = fmt_int(max_batch, commas=False)
-    weight_gb_str = fmt_qty_int(weight_gb * GB, GB, commas=False)
-    total_hbm_gb_str = fmt_qty_int(total_hbm_gb * GB, GB, commas=False)
-    system_gb_str = fmt_qty_int(system_gb * GB, GB, commas=False)
+    weight_gb_str = fmt_memory(weight, unit=GB, precision=0, commas=False)
+    total_hbm_gb_str = fmt_memory(total_hbm, unit=GB, precision=0, commas=False)
+    system_gb_str = fmt_memory(system_reserved, unit=GB, precision=0, commas=False)
     node_gpus_str = fmt_int(Systems.Nodes.DGX_H100.accelerators_per_node, commas=False)
-    h100_mem_gb_str = fmt_int(Hardware.Cloud.H100.memory.capacity.to(GiB).magnitude, commas=False)
+    h100_mem_gb_str = fmt_qty_int(Hardware.Cloud.H100.memory.capacity, GiB, commas=False, unit_label="GB")
 
     # Display-math expressions for the three step equations (pre-compute LaTeX
     # in Python to avoid `{python}` refs inside $$..$$ — §7 anti-pattern).
     step1_kv_per_token_math = MarkdownStr(
         f"$$ M_{{\\text{{KV}}}} = 2 \\times {n_layers} \\times {n_kv_heads} \\times {d_head} \\times {bytes_per_elem} "
         f"= {kv_bytes_per_token:,} \\text{{ bytes}} \\approx "
-        f"\\mathbf{{{kv_mb_per_token:.2f} \\text{{ MB/token}}}} $$"
+        f"\\mathbf{{{kv_mb_per_token_display:.2f} \\text{{ MB/token}}}} $$"
     )
     step2_cache_per_request_math = MarkdownStr(
-        f"$$ {context_tokens:,} \\text{{ tokens}} \\times {kv_mb_per_token:.2f} \\text{{ MB/token}} \\approx "
-        f"\\mathbf{{{kv_gb_per_request:.0f} \\text{{ GB/request}}}} $$"
+        f"$$ {context_tokens:,} \\text{{ tokens}} \\times {kv_mb_per_token_display:.2f} \\text{{ MB/token}} \\approx "
+        f"\\mathbf{{{kv_gb_per_request_display:.0f} \\text{{ GB/request}}}} $$"
     )
     step3_max_batch_math = MarkdownStr(
-        f"$$ \\text{{Max Batch}} = \\left\\lfloor \\frac{{{available_kv_gb:.0f}}}{{{kv_gb_per_request:.0f}}} \\right\\rfloor "
+        f"$$ \\text{{Max Batch}} = \\left\\lfloor \\frac{{{available_kv_display:.0f}}}{{{kv_gb_per_request_display:.0f}}} \\right\\rfloor "
         f"= \\mathbf{{{max_batch}}} $$"
     )
 ```
@@ -2312,7 +2305,7 @@ All three requests reference the same physical blocks for the system prompt. Onl
 # │   PrefixCachingAnalysis.memory_reduction_pct_str,
 # │   PrefixCachingAnalysis.concurrent_multiplier_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int,  fmt, fmt_qty
+from mlsysim.fmt import check, fmt_count, fmt_int, fmt_memory, fmt_percent
 
 # ┌── LEGO ───────────────────────────────────────────────
 class PrefixCachingAnalysis:
@@ -2332,28 +2325,28 @@ class PrefixCachingAnalysis:
     tokens_per_user = system_prompt_tokens + avg_response_tokens  # 2500
     total_tokens_no_cache = tokens_per_user * concurrent_users
     kv_bytes_no_cache = total_tokens_no_cache * n_kv_pairs * n_layers * head_dim * bytes_per_element
-    kv_tb_no_cache_val = kv_bytes_no_cache / TRILLION
+    kv_no_cache = kv_bytes_no_cache * byte
 
     # Step 2: With prefix caching: system prompt stored once; only response tokens per user
     shared_tokens = system_prompt_tokens  # stored once
     unique_tokens = avg_response_tokens * concurrent_users
     total_tokens_cached = shared_tokens + unique_tokens
     kv_bytes_cached = total_tokens_cached * n_kv_pairs * n_layers * head_dim * bytes_per_element
-    kv_tb_cached_val = kv_bytes_cached / TRILLION
+    kv_cached = kv_bytes_cached * byte
 
     # Step 3: Savings
-    memory_reduction_pct_val = (1 - kv_tb_cached_val/kv_tb_no_cache_val) * 100
-    concurrent_multiplier_val = kv_tb_no_cache_val/kv_tb_cached_val
+    memory_reduction_pct_val = (1 - (kv_cached / kv_no_cache).to("").magnitude) * 100
+    concurrent_multiplier_val = (kv_no_cache / kv_cached).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(kv_tb_cached_val < kv_tb_no_cache_val, "Cached must be smaller than uncached")
+    check(kv_cached < kv_no_cache, "Cached must be smaller than uncached")
     check(memory_reduction_pct_val > 70, "Prefix caching should give substantial savings (>70%)")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     tokens_per_user_str = fmt_count(tokens_per_user, label="token")
-    kv_tb_no_cache_str = fmt_qty(kv_tb_no_cache_val * TB, TB, precision=1, commas=False)
+    kv_tb_no_cache_str = fmt_memory(kv_no_cache, unit=TB, precision=1, commas=False)
     total_tokens_cached_str = fmt_int(total_tokens_cached)
-    kv_tb_cached_str = fmt_qty(kv_tb_cached_val * TB, TB, precision=1, commas=False)
+    kv_tb_cached_str = fmt_memory(kv_cached, unit=TB, precision=1, commas=False)
     memory_reduction_pct_str = fmt_percent(memory_reduction_pct_val/100, precision=1, commas=False, style='prose')
     concurrent_multiplier_str = fmt_int(concurrent_multiplier_val, commas=False)
 ```
@@ -2424,45 +2417,40 @@ class KVCacheCalc:
     kv_heads = 64  # MHA baseline; GQA (8 heads) is introduced as the reduction below
     kv_head_dim = 128
     kv_seq_len = 4096
-    kv_bytes_fp16 = BYTES_FP16.to(byte).magnitude
-    kv_bytes_int4 = BYTES_INT4.to(byte).magnitude
     h100_mem = Hardware.Cloud.H100.memory.capacity
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    kv_fp16_bytes = 2 * kv_layers * kv_heads * kv_head_dim * kv_seq_len * kv_bytes_fp16
-    kv_int4_bytes = 2 * kv_layers * kv_heads * kv_head_dim * kv_seq_len * kv_bytes_int4
-
-    kv_fp16_gb = (kv_fp16_bytes * byte).to(GB).magnitude
-    kv_int4_gb = (kv_int4_bytes * byte).to(GB).magnitude
-    kv_savings_gb = kv_fp16_gb - kv_int4_gb
-    kv_compression = kv_fp16_gb/kv_int4_gb
-    batch8_kv_fp16_gb = kv_fp16_gb * 8
-    gqa_kv_fp16_gb = kv_fp16_gb * (8 / kv_heads)
+    kv_fp16 = 2 * kv_layers * kv_heads * kv_head_dim * kv_seq_len * BYTES_FP16
+    kv_int4 = 2 * kv_layers * kv_heads * kv_head_dim * kv_seq_len * BYTES_INT4
+    kv_savings = kv_fp16 - kv_int4
+    kv_compression = (kv_fp16 / kv_int4).to("").magnitude
+    batch8_kv_fp16 = kv_fp16 * 8
+    gqa_kv_fp16 = kv_fp16 * (8 / kv_heads)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    from mlsysim.fmt import fmt_int, check, MarkdownStr, fmt, fmt_math, fmt_qty
-    check(kv_fp16_gb > 5, f"KV cache should be substantial, got {kv_fp16_gb:.1f} GB")
-    check(abs(gqa_kv_fp16_gb - (kv_fp16_gb / 8)) < 1e-6, "GQA cache should be 8x smaller than MHA baseline")
+    from mlsysim.fmt import fmt_int, check, MarkdownStr, fmt_memory, fmt_qty
+    check(kv_fp16 > 5 * GB, f"KV cache should be substantial, got {kv_fp16.to(GB).magnitude:.1f} GB")
+    check(abs((gqa_kv_fp16 / (kv_fp16 / 8)).to("").magnitude - 1) < 1e-6, "GQA cache should be 8x smaller than MHA baseline")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     # MarkdownStr wraps the values so Quarto inserts them verbatim inside the
     # $$..$$ display math below — a bare f-string here lands as 10\.7 instead
     # of 10.7 (\. is a LaTeX dot accent, not a literal period).
-    kv_fp16_gb_str = fmt_qty(kv_fp16_gb * GB, GB, precision=1, commas=False)
-    kv_int4_gb_str = fmt_qty(kv_int4_gb * GB, GB, precision=1, commas=False)
-    kv_savings_gb_str = fmt(kv_savings_gb, precision=1, commas=False)
+    kv_fp16_gb_str = fmt_memory(kv_fp16, unit=GB, precision=1, commas=False)
+    kv_int4_gb_str = fmt_memory(kv_int4, unit=GB, precision=1, commas=False)
+    kv_savings_gb_str = fmt_memory(kv_savings, unit=GB, precision=1, commas=False)
     kv_compression_str = fmt_int(kv_compression, commas=False)
     h100_mem_gb_str = fmt_qty(h100_mem, GiB, precision=0, commas=False, unit_label="GB")
-    batch8_kv_fp16_gb_str = fmt_qty(batch8_kv_fp16_gb * GB, GB, precision=1, commas=False)
-    gqa_kv_fp16_gb_str = fmt_qty(gqa_kv_fp16_gb * GB, GB, precision=1, commas=False)
+    batch8_kv_fp16_gb_str = fmt_memory(batch8_kv_fp16, unit=GB, precision=1, commas=False)
+    gqa_kv_fp16_gb_str = fmt_memory(gqa_kv_fp16, unit=GB, precision=1, commas=False)
     gqa_kv_heads = 8
     kv_fp16_formula_math = MarkdownStr(
         rf"2 \times {kv_layers} \times {kv_heads} \times {kv_head_dim} \times {kv_seq_len} \times 2 "
-        rf"\approx {kv_fp16_gb:.1f}"
+        rf"\approx {kv_fp16.to(GB).magnitude:.1f}"
     )
     gqa_kv_fp16_formula_math = MarkdownStr(
         rf"2 \times {kv_layers} \times {gqa_kv_heads} \times {kv_head_dim} \times {kv_seq_len} \times 2 "
-        rf"\approx {gqa_kv_fp16_gb:.1f}"
+        rf"\approx {gqa_kv_fp16.to(GB).magnitude:.1f}"
     )
 ```
 
@@ -2495,48 +2483,50 @@ At `{python} KVCacheCalc.gqa_kv_fp16_gb_str`, the GQA cache is dramatically more
 ```{python}
 #| echo: false
 #| label: precision-dividend
-from mlsysim.fmt import fmt_int, check, fmt, fmt_qty, fmt_qty_int
+from mlsysim.fmt import fmt_int, check, fmt_memory
 
 class PrecisionDividend:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    # H100 HBM3 is stored as 80 * GiB in mlsysim (binary stacks); NVIDIA
-    # markets it as "80 GB" — book convention uses the vendor's GB label,
-    # so .to(GiB).magnitude gives the 80 that prose anchors to.
-    h100_mem_gb = Hardware.Cloud.H100.memory.capacity.to(GiB).magnitude
-    fp16_weight_per_gpu = 35
     int4_bits = 4
     fp16_bits = 16
     tensor_parallel_degree = 4
-    fp16_weight_total_gb = fp16_weight_per_gpu * tensor_parallel_degree
+    h100_capacity = Hardware.Cloud.H100.memory.capacity
+    # Scalar boundary: mlsysim stores H100 as 80 GiB; this worked example keeps
+    # the vendor-labeled 80 GB budget used by the surrounding prose math.
+    h100_vendor_capacity = h100_capacity.to(GiB).magnitude
+    h100_mem = h100_vendor_capacity * GB
+    fp16_weight_total = Models.Language.Llama2_70B.size_in_bytes(BYTES_FP16)
+    fp16_weight_per_gpu = fp16_weight_total / tensor_parallel_degree
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    avail_kv_fp16 = h100_mem_gb - fp16_weight_per_gpu
+    avail_kv_fp16 = h100_mem - fp16_weight_per_gpu
     int4_weight_per_gpu = fp16_weight_per_gpu * (int4_bits/fp16_bits)
-    avail_kv_int4 = h100_mem_gb - int4_weight_per_gpu
+    avail_kv_int4 = h100_mem - int4_weight_per_gpu
     kv_layers = 80
     kv_heads = 64
     kv_head_dim = 128
     kv_seq_len = 4096
-    kv_fp16_gb = (2 * kv_layers * kv_heads * kv_head_dim * kv_seq_len * BYTES_FP16.to(byte).magnitude * byte).to(GB).magnitude
-    kv_fp16_per_gpu = kv_fp16_gb / tensor_parallel_degree
-    kv_int8_per_gpu = (kv_fp16_gb / 2) / tensor_parallel_degree
-    max_batch_fp16 = int(avail_kv_fp16 / kv_fp16_per_gpu)
-    max_batch_int8 = int(avail_kv_int4 / kv_int8_per_gpu)
+    kv_fp16 = 2 * kv_layers * kv_heads * kv_head_dim * kv_seq_len * BYTES_FP16
+    kv_fp16_per_gpu = kv_fp16 / tensor_parallel_degree
+    kv_int8_total = kv_fp16 / 2
+    kv_int8_per_gpu = kv_int8_total / tensor_parallel_degree
+    max_batch_fp16 = int((avail_kv_fp16 / kv_fp16_per_gpu).to("").magnitude)
+    max_batch_int8 = int((avail_kv_int4 / kv_int8_per_gpu).to("").magnitude)
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(avail_kv_fp16 == 45, f"Expected 45, got {avail_kv_fp16}")
-    check(abs(int4_weight_per_gpu - 8.75) < 0.01, f"Expected 8.75, got {int4_weight_per_gpu}")
+    check(abs((avail_kv_fp16 - 45 * GB).to(GB).magnitude) < 1e-9, f"Expected 45 GB, got {avail_kv_fp16.to(GB).magnitude:.1f} GB")
+    check(abs((int4_weight_per_gpu - 8.75 * GB).to(GB).magnitude) < 0.01, f"Expected 8.75 GB, got {int4_weight_per_gpu.to(GB).magnitude:.2f} GB")
     check(max_batch_int8 > max_batch_fp16, "INT4 weights plus INT8 KV should increase max batch")
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    # Keep raw `fp16_weight_per_gpu` int for arithmetic; add _str alias for prose.
-    fp16_weight_per_gpu_str = fmt_qty_int(fp16_weight_per_gpu * GB, GB, commas=False)
-    avail_kv_fp16_str = fmt_int(avail_kv_fp16, commas=False)
-    int4_weight_per_gpu_str = fmt(int4_weight_per_gpu, precision=2, commas=False)
-    avail_kv_int4_str = fmt(avail_kv_int4, precision=2, commas=False)
-    kv_fp16_per_gpu_str = fmt_qty(kv_fp16_per_gpu * GB, GB, precision=1, commas=False)
-    kv_int8_total_str = fmt(kv_fp16_gb/2, precision=1, commas=False)
-    kv_int8_per_gpu_str = fmt(kv_int8_per_gpu, precision=1, commas=False)
+    h100_mem_gb_str = fmt_memory(h100_mem, unit=GB, precision=0, commas=False)
+    fp16_weight_per_gpu_str = fmt_memory(fp16_weight_per_gpu, unit=GB, precision=0, commas=False)
+    avail_kv_fp16_str = fmt_memory(avail_kv_fp16, unit=GB, precision=0, commas=False)
+    int4_weight_per_gpu_str = fmt_memory(int4_weight_per_gpu, unit=GB, precision=2, commas=False)
+    avail_kv_int4_str = fmt_memory(avail_kv_int4, unit=GB, precision=2, commas=False)
+    kv_fp16_per_gpu_str = fmt_memory(kv_fp16_per_gpu, unit=GB, precision=1, commas=False)
+    kv_int8_total_str = fmt_memory(kv_int8_total, unit=GB, precision=1, commas=False)
+    kv_int8_per_gpu_str = fmt_memory(kv_int8_per_gpu, unit=GB, precision=1, commas=False)
     max_batch_fp16_str = fmt_int(max_batch_fp16, commas=False)
     max_batch_int8_str = fmt_int(max_batch_int8, commas=False)
-    fp16_weight_total_gb_str = fmt_qty_int(fp16_weight_total_gb * GB, GB, commas=False)
+    fp16_weight_total_gb_str = fmt_memory(fp16_weight_total, unit=GB, precision=0, commas=False)
     tensor_parallel_degree_str = fmt_int(tensor_parallel_degree, commas=False)
 ```
 
@@ -2547,15 +2537,15 @@ class PrecisionDividend:
 **Before optimization** (all FP16):
 
 - Weights: `{python} PrecisionDividend.fp16_weight_per_gpu_str`/GPU
-- Available for KV cache: $80 -$ `{python} PrecisionDividend.fp16_weight_per_gpu_str` = `{python} PrecisionDividend.avail_kv_fp16_str`/GPU
+- Available for KV cache: `{python} PrecisionDividend.h100_mem_gb_str` $-$ `{python} PrecisionDividend.fp16_weight_per_gpu_str` = `{python} PrecisionDividend.avail_kv_fp16_str`/GPU
 - KV cache per request: `{python} KVCacheCalc.kv_fp16_gb_str` $\div$ `{python} PrecisionDividend.tensor_parallel_degree_str` $\approx$ `{python} PrecisionDividend.kv_fp16_per_gpu_str`/GPU
 - Maximum batch size: $\lfloor$ `{python} PrecisionDividend.avail_kv_fp16_str` divided by `{python} PrecisionDividend.kv_fp16_per_gpu_str` $\rfloor$ $\approx$ `{python} PrecisionDividend.max_batch_fp16_str` requests
 
 **After optimization** (INT4 weights, INT8 KV cache):
 
 - Weights: `{python} PrecisionDividend.fp16_weight_per_gpu_str` $\times (4/16) =$ `{python} PrecisionDividend.int4_weight_per_gpu_str`/GPU (INT4)
-- Available for KV cache: $80 -$ `{python} PrecisionDividend.int4_weight_per_gpu_str` = `{python} PrecisionDividend.avail_kv_int4_str`/GPU
-- KV cache per request (INT8): `{python} PrecisionDividend.kv_int8_total_str` $\div$ 4 $\approx$ `{python} PrecisionDividend.kv_int8_per_gpu_str`/GPU
+- Available for KV cache: `{python} PrecisionDividend.h100_mem_gb_str` $-$ `{python} PrecisionDividend.int4_weight_per_gpu_str` = `{python} PrecisionDividend.avail_kv_int4_str`/GPU
+- KV cache per request (INT8): `{python} PrecisionDividend.kv_int8_total_str` $\div$ `{python} PrecisionDividend.tensor_parallel_degree_str` $\approx$ `{python} PrecisionDividend.kv_int8_per_gpu_str`/GPU
 - Maximum batch size: $\lfloor$ `{python} PrecisionDividend.avail_kv_int4_str` divided by `{python} PrecisionDividend.kv_int8_per_gpu_str` $\rfloor$ $\approx$ `{python} PrecisionDividend.max_batch_int8_str` requests
 
 **Takeaway**: Precision engineering fundamentally changes serving economics by enabling larger batch sizes. Larger batches amortize the fixed cost of weight loading, shifting operations from memory-bound toward compute-bound.
@@ -3111,8 +3101,8 @@ class TpSpeedupCalc:
     tp_theoretical = 8         # linear scaling limit
     n_layers = 80              # Llama-70B transformer layer count
     hidden_dim = 8192
-    weight_fp16_gb = 140
-    activation_mb = 8
+    weight_fp16 = Models.Language.Llama2_70B.size_in_bytes(BYTES_FP16)
+    activation = 8 * MB  # scenario payload
     nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -3121,10 +3111,9 @@ class TpSpeedupCalc:
     # Step 1: Full-model prefill-pass timing
     seq_total_ms = seq_per_layer_ms * n_layers
     tp8_total_ms = tp8_per_layer_ms * n_layers
-    nvlink_h100_gbs_val = nvlink_bw.to(GB/second).magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    from mlsysim.fmt import fmt_int, check, fmt, fmt_qty_int, fmt_time
+    from mlsysim.fmt import fmt_int, check, fmt, fmt_bandwidth, fmt_memory, fmt_time
     check(tp_speedup < tp_theoretical, f"Realized speedup ({tp_speedup:.2f}) must be less than theoretical ({tp_theoretical})")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
@@ -3133,10 +3122,10 @@ class TpSpeedupCalc:
     tp8_total_ms_str = fmt_time(round(tp8_total_ms), 'millisecond', precision=0, commas=True)
     tp_theoretical_str = fmt_int(tp_theoretical, commas=False)
     n_layers_str = fmt_int(n_layers, commas=False)
-    nvlink_h100_gbs_str = fmt_qty_int(nvlink_h100_gbs_val * GB / second, GB / second, commas=False)
+    nvlink_h100_gbs_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
     hidden_dim_str = fmt_int(hidden_dim)
-    weight_fp16_gb_str = fmt_qty_int(weight_fp16_gb * GB, GB, commas=False)
-    activation_mb_str = fmt_qty_int(activation_mb * MB, MB, commas=False)
+    weight_fp16_gb_str = fmt_memory(weight_fp16, unit=GB, precision=0, commas=False)
+    activation_mb_str = fmt_memory(activation, unit=MB, precision=0, commas=False)
 ```
 
 ::: {#exmp-inference-tensor-parallelism-llama-70b .callout-example title="Tensor parallelism for Llama-70B"}
@@ -3260,29 +3249,28 @@ class MoEEconomics:
     """Memory and bandwidth comparison: Dense vs MoE."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    from mlsysim.physics import memory_from_params
     _moe = Models.Language.DeepSeek_V3
-    dense_params_b = 400
-    moe_total_params_b = _moe.parameters.to(Bparam).magnitude
-    moe_active_params_b = _moe.active_parameters.to(Bparam).magnitude
-    bytes_fp16 = BYTES_FP16.to(byte).magnitude
+    dense_params = 400 * Bparam  # illustrative dense baseline
+    moe_active_params = _moe.active_parameters
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    dense_mem_fp16 = dense_params_b * bytes_fp16  # 800 GB
-    moe_mem_fp16 = moe_total_params_b * bytes_fp16 # 1342 GB
+    dense_mem_fp16 = memory_from_params(dense_params, BYTES_FP16)  # 800 GB
+    moe_mem_fp16 = _moe.size_in_bytes(BYTES_FP16)  # 1342 GB
 
-    compute_ratio = dense_params_b/moe_active_params_b  # ~10.8x
+    compute_ratio = (dense_params / moe_active_params).to("").magnitude  # ~10.8x
 
-    dense_decode_bytes = dense_params_b * bytes_fp16      # 800 GB
-    moe_decode_bytes = moe_active_params_b * bytes_fp16  # 74 GB
-    bw_ratio = dense_decode_bytes/moe_decode_bytes
+    dense_decode_bytes = dense_mem_fp16
+    moe_decode_bytes = memory_from_params(moe_active_params, BYTES_FP16)  # 74 GB
+    bw_ratio = (dense_decode_bytes / moe_decode_bytes).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    from mlsysim.fmt import fmt_int, check, fmt, fmt_qty_int
+    from mlsysim.fmt import check, fmt, fmt_memory
     check(compute_ratio > 5, f"MoE should give >5x compute reduction, got {compute_ratio:.1f}x")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    dense_mem_str = fmt_qty_int(dense_mem_fp16 * GB, GB, commas=False)
-    moe_mem_str = fmt_qty_int(moe_mem_fp16 * GB, GB, commas=False)
+    dense_mem_str = fmt_memory(dense_mem_fp16, unit=GB, precision=0, commas=False)
+    moe_mem_str = fmt_memory(moe_mem_fp16, unit=GB, precision=0, commas=False)
     compute_ratio_str = fmt(compute_ratio, precision=1, commas=False)
     bw_ratio_str = fmt(bw_ratio, precision=1, commas=False)
 ```
@@ -3300,62 +3288,67 @@ The trade-off is memory capacity: all experts must reside in memory even though 
 ```{python}
 #| echo: false
 #| label: moe-capacity-planning
-from mlsysim.fmt import fmt_int, check, fmt, fmt_qty, fmt_qty_int, fmt_time
+from math import ceil
+from mlsysim.fmt import check, fmt_bandwidth, fmt_count, fmt_int, fmt_memory, fmt_params, fmt_rate, fmt_time
+from mlsysim.physics import memory_from_params
 
 class MoECapacityPlan:
     # ┌── 1. LOAD ──────────────────────────────────────────
     _moe = Models.Language.DeepSeek_V3
-    moe_total_params_b = _moe.parameters.to(Bparam).magnitude
-    moe_active_params_b = _moe.active_parameters.to(Bparam).magnitude
-    bytes_fp8 = BYTES_INT8.to(byte).magnitude  # FP8 = 1 byte
+    moe_total_params = _moe.parameters
+    moe_active_params = _moe.active_parameters
+    bytes_fp8 = BYTES_INT8  # FP8 = 1 byte
     node_gpus = Systems.Nodes.DGX_H100.accelerators_per_node
-    # H100 HBM3 = 80*GiB in mlsysim (binary stacks); vendor label "80 GB".
-    h100_mem_gb = Hardware.Cloud.H100.memory.capacity.to(GiB).magnitude
+    h100_capacity = Hardware.Cloud.H100.memory.capacity
+    # Scalar boundary: keep the vendor-labeled 80 GB capacity used in this
+    # capacity-planning example while sourcing the value from mlsysim.
+    h100_vendor_capacity = h100_capacity.to(GiB).magnitude
+    h100_mem = h100_vendor_capacity * GB
     n_gpus = 16
-    alltoall_overhead_ms = 0.3
-    h100_bw_gbs = Hardware.Cloud.H100.memory.bandwidth.to(GB/second).magnitude
-    h100_bw_tbs = Hardware.Cloud.H100.memory.bandwidth.to(TB/second).magnitude
+    alltoall_overhead = 0.3 * millisecond  # scenario routing overhead
+    h100_bw = Hardware.Cloud.H100.memory.bandwidth
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    total_weight_gb = moe_total_params_b * bytes_fp8
-    node_capacity_gb = node_gpus * h100_mem_gb
-    nodes_needed = int((total_weight_gb + node_capacity_gb - 1) // node_capacity_gb)
-    cluster_capacity_gb = nodes_needed * node_capacity_gb
-    active_mem_gb = moe_active_params_b * bytes_fp8
-    read_per_gpu_gb = active_mem_gb/n_gpus
-    t_read_ms = (read_per_gpu_gb/h100_bw_gbs) * THOUSAND
-    total_decode_ms = t_read_ms + alltoall_overhead_ms
-    tokens_per_sec = round(1000 / total_decode_ms, -2)
+    total_weight = _moe.size_in_bytes(bytes_fp8)
+    node_capacity = node_gpus * h100_mem
+    nodes_needed = ceil((total_weight / node_capacity).to("").magnitude)
+    cluster_capacity = nodes_needed * node_capacity
+    active_mem = memory_from_params(moe_active_params, bytes_fp8)
+    read_per_gpu = active_mem / n_gpus
+    t_read = (read_per_gpu / h100_bw).to(millisecond)
+    total_decode = t_read + alltoall_overhead
+    decode_rate = (count / total_decode).to(count / second)
+    tokens_per_sec = round(decode_rate.magnitude, -2)
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(nodes_needed == 2, f"Expected two nodes, got {nodes_needed}")
-    check(0.5 < total_decode_ms < 2.0, f"Expected ~1ms, got {total_decode_ms:.2f}")
+    check(0.5 * millisecond < total_decode < 2.0 * millisecond, f"Expected ~1ms, got {total_decode.to(millisecond).magnitude:.2f} ms")
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    read_per_gpu_str = fmt_qty(read_per_gpu_gb * GB, GB, precision=1, commas=False)
-    t_read_ms_str = fmt_time(t_read_ms, 'millisecond', precision=2, commas=False)
-    total_decode_ms_str = fmt_time(total_decode_ms, 'millisecond', precision=1, commas=False)
-    tokens_per_sec_str = fmt_int(tokens_per_sec)
-    total_weight_gb_str = fmt_qty_int(total_weight_gb * GB, GB, commas=False)
-    node_capacity_gb_str = fmt_qty_int(node_capacity_gb * GB, GB, commas=False)
+    read_per_gpu_str = fmt_memory(read_per_gpu, unit=GB, precision=1, commas=False)
+    t_read_ms_str = fmt_time(t_read, millisecond, precision=2, commas=False)
+    total_decode_ms_str = fmt_time(total_decode, millisecond, precision=1, commas=False)
+    tokens_per_sec_str = fmt_rate(tokens_per_sec, "tokens/s", precision=0, commas=True)
+    total_weight_gb_str = fmt_memory(total_weight, unit=GB, precision=0, commas=False)
+    node_capacity_gb_str = fmt_memory(node_capacity, unit=GB, precision=0, commas=False)
     nodes_needed_str = fmt_int(nodes_needed, commas=False)
-    cluster_capacity_gb_str = fmt_qty_int(cluster_capacity_gb * GB, GB)
-    active_mem_gb_str = fmt_qty_int(active_mem_gb * GB, GB, commas=False)
-    moe_active_params_b_str = fmt_int(moe_active_params_b, commas=False)
+    cluster_capacity_gb_str = fmt_memory(cluster_capacity, unit=GB, precision=0, commas=True)
+    active_mem_gb_str = fmt_memory(active_mem, unit=GB, precision=0, commas=False)
+    moe_active_params_str = fmt_params(moe_active_params, scale="B", precision=0, commas=False)
     n_gpus_str = fmt_count(n_gpus, commas=False, label="GPU")
-    alltoall_overhead_ms_str = fmt_time(alltoall_overhead_ms, 'millisecond', precision=1, commas=False)
-    h100_bw_tbs_str = fmt_qty(h100_bw_tbs * TB / second, TB / second, precision=2, commas=False)
-    h100_mem_gb_str = fmt_qty_int(h100_mem_gb * GiB, GiB, commas=False, unit_label="GB")
-    moe_total_params_b_str = fmt_int(moe_total_params_b, commas=False)
+    alltoall_overhead_ms_str = fmt_time(alltoall_overhead, millisecond, precision=1, commas=False)
+    h100_bw_tbs_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
+    h100_mem_gb_str = fmt_memory(h100_mem, unit=GB, precision=0, commas=False)
+    moe_total_params_str = fmt_params(moe_total_params, scale="B", precision=0, commas=False)
     node_gpus_str = fmt_int(node_gpus, commas=False)
 ```
 
 ::: {#nbk-inference-moe-capacity-planning .callout-notebook title="MoE capacity planning"}
 
-**Problem**: A team deploys DeepSeek-V3\index{DeepSeek-V3} (`{python} MoECapacityPlan.moe_total_params_b_str`B total parameters, `{python} MoECapacityPlan.moe_active_params_b_str`B active per token) for a chatbot application. The model uses FP8 weights (1 byte per parameter). The cluster has `{python} MoECapacityPlan.node_gpus_str`-GPU nodes, each with `{python} MoECapacityPlan.node_gpus_str`$\times$ H100 GPUs (`{python} MoECapacityPlan.h100_mem_gb_str` HBM per GPU, `{python} MoECapacityPlan.node_capacity_gb_str` per node). How many nodes are needed, and what is the per-token decode latency?
+**Problem**: A team deploys DeepSeek-V3\index{DeepSeek-V3} (`{python} MoECapacityPlan.moe_total_params_str` total parameters, `{python} MoECapacityPlan.moe_active_params_str` active per token) for a chatbot application. The model uses FP8 weights (1 byte per parameter). The cluster has `{python} MoECapacityPlan.node_gpus_str`-GPU nodes, each with `{python} MoECapacityPlan.node_gpus_str`$\times$ H100 GPUs (`{python} MoECapacityPlan.h100_mem_gb_str` HBM per GPU, `{python} MoECapacityPlan.node_capacity_gb_str` per node). How many nodes are needed, and what is the per-token decode latency?
 
 **Math**:
 
 1.  **Memory**: Total weight memory = `{python} MoECapacityPlan.total_weight_gb_str`. A single node (`{python} MoECapacityPlan.node_capacity_gb_str`) is insufficient. `{python} MoECapacityPlan.nodes_needed_str` provide `{python} MoECapacityPlan.cluster_capacity_gb_str`, leaving enough room for KV caches.
-2.  **Latency**: Each decode step reads `{python} MoECapacityPlan.moe_active_params_b_str`B active parameters (`{python} MoECapacityPlan.active_mem_gb_str`). Distributed across `{python} MoECapacityPlan.n_gpus_str`, each reads about `{python} MoECapacityPlan.read_per_gpu_str`. At `{python} MoECapacityPlan.h100_bw_tbs_str` HBM bandwidth, $t_{\text{read}} \approx$ `{python} MoECapacityPlan.t_read_ms_str`. AllToAll routing adds about `{python} MoECapacityPlan.alltoall_overhead_ms_str`.
-3.  **Floor**: Estimated decode latency $\approx$ `{python} MoECapacityPlan.total_decode_ms_str`/token, or `{python} MoECapacityPlan.tokens_per_sec_str`/second at batch size 1.
+2.  **Latency**: Each decode step reads `{python} MoECapacityPlan.moe_active_params_str` active parameters (`{python} MoECapacityPlan.active_mem_gb_str`). Distributed across `{python} MoECapacityPlan.n_gpus_str`, each reads about `{python} MoECapacityPlan.read_per_gpu_str`. At `{python} MoECapacityPlan.h100_bw_tbs_str` HBM bandwidth, $t_{\text{read}} \approx$ `{python} MoECapacityPlan.t_read_ms_str`. AllToAll routing adds about `{python} MoECapacityPlan.alltoall_overhead_ms_str`.
+3.  **Floor**: Estimated decode latency $\approx$ `{python} MoECapacityPlan.total_decode_ms_str`/token, or `{python} MoECapacityPlan.tokens_per_sec_str` at batch size 1.
 
 **Systems insight**: MoE allows a 671B model to approach the per-token bandwidth cost of a much smaller dense model, but capacity planning is still driven by the full parameter set that must remain resident.
 
@@ -3596,32 +3589,31 @@ All three sharding strategies operate at massive scale in production. Meta's rec
 # │          MetaEmbeddingScaleCheck.dense_int8_tb_str,
 # │          MetaEmbeddingScaleCheck.effective_bytes_per_entity_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, check, fmt, fmt_percent, fmt_qty_int
+from mlsysim.fmt import fmt_int, check, fmt, fmt_memory, fmt_percent
 
 class MetaEmbeddingScaleCheck:
     """Dense lower-bound check for the Meta embedding scale bullets."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    storage_tb = 100
+    storage = 100 * TB  # scenario storage total
     entity_count_t = 10
     min_dimension = 128
-    bytes_per_dimension_int8 = BYTES_INT8.to(byte).magnitude
+    bytes_per_dimension_int8 = BYTES_INT8
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    entity_count = entity_count_t * 1_000_000_000_000
-    storage_bytes = storage_tb * 1_000_000_000_000
-    dense_int8_tb = entity_count * min_dimension * bytes_per_dimension_int8 / TRILLION
-    effective_bytes_per_entity = storage_bytes / entity_count
+    entity_count = entity_count_t * TRILLION * count
+    dense_int8 = entity_count * min_dimension * bytes_per_dimension_int8
+    effective_bytes_per_entity = (storage / entity_count).to(byte / count).magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(dense_int8_tb > storage_tb, "Dense INT8 lower bound should exceed the stated storage total")
+    check(dense_int8 > storage, "Dense INT8 lower bound should exceed the stated storage total")
     check(effective_bytes_per_entity < min_dimension, "100 TB over 10T entities cannot hold a dense 128d INT8 vector per entity")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    storage_tb_str = fmt_qty_int(storage_tb * TB, TB, commas=False)
+    storage_tb_str = fmt_memory(storage, unit=TB, precision=0, commas=False)
     entity_count_t_str = fmt_int(entity_count_t, commas=False)
     min_dimension_str = fmt_int(min_dimension, commas=False)
-    dense_int8_tb_str = fmt_qty_int(dense_int8_tb * TB, TB)
+    dense_int8_tb_str = fmt_memory(dense_int8, unit=TB, precision=0, commas=True)
     effective_bytes_per_entity_str = fmt_int(effective_bytes_per_entity, commas=False)
     n_shards_str = fmt_int(1_000)
     warm_pct_str = fmt_percent(round(10)/100, precision=0, commas=False, style='prose')
@@ -3740,7 +3732,7 @@ Both equations make clear that the achievable bandwidth $\beta$ and latency $\al
 # │          AllReduceInterconnect.ib_pct_str,
 # │          AllReduceInterconnect.eth_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, check, fmt, fmt_qty_int
+from mlsysim.fmt import check, fmt_bandwidth, fmt_int, fmt_memory, fmt_percent, fmt_time
 
 class AllReduceInterconnect:
     """Raw AllReduce timing for an 8 MB activation payload."""
@@ -3748,37 +3740,36 @@ class AllReduceInterconnect:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     NETWORK_100G_BW = Systems.Fabrics.Ethernet_100G.bandwidth
     n_devices = Systems.Nodes.DGX_H100.accelerators_per_node
-    message_mb = 8
-    layer_budget_ms = 30
-    nvlink_bw_gbs = Hardware.Cloud.H100.nvlink.bandwidth.to(GB/second).magnitude
-    ib_hdr_bw_gbs = Systems.Fabrics.InfiniBand_HDR.bandwidth.to(GB/second).magnitude
-    eth_100g_bw_gbs = NETWORK_100G_BW.to(GB/second).magnitude
+    message = 8 * MB  # scenario payload
+    layer_budget = 30 * millisecond  # scenario layer budget
+    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth
+    ib_hdr_bw = Systems.Fabrics.InfiniBand_HDR.bandwidth
+    eth_100g_bw = NETWORK_100G_BW
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    message_gb = message_mb / THOUSAND
     allreduce_factor = 2 * (n_devices - 1) / n_devices
 
-    nvlink_ms = allreduce_factor * message_gb / nvlink_bw_gbs * THOUSAND
-    ib_ms = allreduce_factor * message_gb / ib_hdr_bw_gbs * THOUSAND
-    eth_ms = allreduce_factor * message_gb / eth_100g_bw_gbs * THOUSAND
+    nvlink_time = (allreduce_factor * message / nvlink_bw).to(millisecond)
+    ib_time = (allreduce_factor * message / ib_hdr_bw).to(millisecond)
+    eth_time = (allreduce_factor * message / eth_100g_bw).to(millisecond)
 
-    nvlink_pct = nvlink_ms / layer_budget_ms * 100
-    ib_pct = ib_ms / layer_budget_ms * 100
-    eth_pct = eth_ms / layer_budget_ms * 100
+    nvlink_pct = (nvlink_time / layer_budget).to("").magnitude * 100
+    ib_pct = (ib_time / layer_budget).to("").magnitude * 100
+    eth_pct = (eth_time / layer_budget).to("").magnitude * 100
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(nvlink_ms < ib_ms < eth_ms, "Interconnect timing should follow bandwidth order")
+    check(nvlink_time < ib_time < eth_time, "Interconnect timing should follow bandwidth order")
     check(eth_pct < 5, f"Raw 100G Ethernet share should remain under 5%, got {eth_pct:.1f}%")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    nvlink_bw_gbs_str = fmt_int(nvlink_bw_gbs, commas=False)
-    nvlink_ms_str = fmt(nvlink_ms, precision=2, commas=False)
-    ib_ms_str = fmt(ib_ms, precision=2, commas=False)
-    eth_ms_str = fmt(eth_ms, precision=2, commas=False)
-    nvlink_pct_str = fmt(nvlink_pct, precision=2, commas=False)
-    ib_pct_str = fmt(ib_pct, precision=1, commas=False)
-    eth_pct_str = fmt(eth_pct, precision=1, commas=False)
-    message_mb_str = fmt_qty_int(message_mb * MB, MB, commas=False)
+    nvlink_bw_gbs_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
+    nvlink_ms_str = fmt_time(nvlink_time, millisecond, precision=2, commas=False)
+    ib_ms_str = fmt_time(ib_time, millisecond, precision=2, commas=False)
+    eth_ms_str = fmt_time(eth_time, millisecond, precision=2, commas=False)
+    nvlink_pct_str = fmt_percent(nvlink_pct / 100, precision=2, commas=False, style="symbol")
+    ib_pct_str = fmt_percent(ib_pct / 100, precision=1, commas=False, style="symbol")
+    eth_pct_str = fmt_percent(eth_pct / 100, precision=1, commas=False, style="symbol")
+    message_mb_str = fmt_memory(message, unit=MB, precision=0, commas=False)
     hidden_dim_str = fmt_int(8192)
 ```
 
@@ -3797,7 +3788,7 @@ Communication overhead depends heavily on the interconnect technology. @Tbl-infe
 
 @Tbl-inference-allreduce-interconnect translates those bandwidths into AllReduce time for an 8-way tensor-parallel layer (activation `{python} AllReduceInterconnect.message_mb_str` per all-reduce; batch=1, hidden=`{python} AllReduceInterconnect.hidden_dim_str`) as a fraction of a 30 ms transformer-layer budget:
 
-| **Interconnect**                 |                             **AllReduce Time** |                            **% of 30 ms Layer** |
+| **Interconnect**                 |                             **AllReduce Time** |                        **Share of 30 ms Layer** |
 |:---------------------------------|-----------------------------------------------:|------------------------------------------------:|
 | **NVLink**                       | `{python} AllReduceInterconnect.nvlink_ms_str` | `{python} AllReduceInterconnect.nvlink_pct_str` |
 | **InfiniBand**\index{InfiniBand} |     `{python} AllReduceInterconnect.ib_ms_str` |     `{python} AllReduceInterconnect.ib_pct_str` |
@@ -3817,10 +3808,10 @@ NVLink bandwidth has evolved significantly over GPU generations.[^fn-nvlink-band
 # │ Context: NVLink bandwidth evolution footnote below.
 # │ Exports: TpNvlinkRecap.nvlink_h100_gbs_str
 class TpNvlinkRecap:
-    nvlink_gbs = Hardware.Cloud.H100.nvlink.bandwidth.to(GB/second).magnitude
-    from mlsysim.fmt import fmt_int, fmt, fmt_qty_int
+    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth
+    from mlsysim.fmt import fmt_bandwidth
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    nvlink_h100_gbs_str = fmt_qty_int(nvlink_gbs * GB / second, GB / second, commas=False)
+    nvlink_h100_gbs_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
 ```
 
 [^fn-nvlink-bandwidth-inf]: **NVLink Bandwidth Evolution**: From 160 GB/s bidirectional on early NVLink implementations to `{python} TpNvlinkRecap.nvlink_h100_gbs_str` on Hopper-class GPUs to 1.8 TB/s on Blackwell-class GPUs---roughly a 10$\times$ improvement across three hardware generations. This bandwidth growth is what made intra-node tensor parallelism across 8 GPUs practical with less than 5 percent communication overhead, directly determining the maximum model size servable without crossing the slower cross-node interconnect.
@@ -5498,36 +5489,36 @@ $$\text{Max batch} = \frac{\text{GPU Memory} - \text{Quantized Weights}}{\text{K
 # │          QuantizedServingCapacity.kv_per_1k_sequence_gb_str,
 # │          QuantizedServingCapacity.max_1k_sequences_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, check, fmt, fmt_qty, fmt_qty_int
+from mlsysim.fmt import fmt_int, check, fmt, fmt_memory, fmt_qty_int
 
 class QuantizedServingCapacity:
     """Estimate single-A100 batch capacity after 4-bit weight quantization."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    a100_mem_gb = Hardware.Cloud.A100.memory.capacity.to(GiB).magnitude
-    params_b = Models.Language.Llama2_70B.parameters.to(Bparam).magnitude
-    bytes_int4 = BYTES_INT4.to(byte).magnitude
+    a100_mem = Hardware.Cloud.A100.memory.capacity
+    a100_kv_budget = 80 * GB  # scenario capacity budget
+    llama70b = Models.Language.Llama2_70B
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    weight_int4_gb = params_b * bytes_int4
-    kv_headroom_gb = a100_mem_gb - weight_int4_gb
+    weight_int4 = llama70b.size_in_bytes(BYTES_INT4)
+    kv_headroom = a100_kv_budget - weight_int4
     kv_layers = 80
     kv_heads = 64
     kv_head_dim = 128
     kv_seq_len = 4096
-    kv_fp16_gb = (2 * kv_layers * kv_heads * kv_head_dim * kv_seq_len * BYTES_FP16.to(byte).magnitude * byte).to(GB).magnitude
-    kv_per_1k_sequence_gb = kv_fp16_gb / (kv_seq_len / THOUSAND)
-    max_1k_sequences = int(kv_headroom_gb // kv_per_1k_sequence_gb)
+    kv_fp16 = 2 * kv_layers * kv_heads * kv_head_dim * kv_seq_len * BYTES_FP16
+    kv_per_1k_sequence = kv_fp16 / (kv_seq_len / THOUSAND)
+    max_1k_sequences = int((kv_headroom / kv_per_1k_sequence).to("").magnitude)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(weight_int4_gb == 35, "70B INT4 weights should be 35 GB")
+    check(abs((weight_int4 - 35 * GB).to(GB).magnitude) < 1e-9, "70B INT4 weights should be 35 GB")
     check(max_1k_sequences > 10, "Quantized model should leave room for multiple 1K sequences")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    a100_mem_gb_str = fmt_qty_int(a100_mem_gb * GiB, GiB, commas=False, unit_label="GB")
-    weight_int4_gb_str = fmt_qty_int(weight_int4_gb * GB, GB, commas=False)
-    kv_headroom_gb_str = fmt_qty_int(kv_headroom_gb * GB, GB, commas=False)
-    kv_per_1k_sequence_gb_str = fmt_qty(kv_per_1k_sequence_gb * GB, GB, precision=1, commas=False)
+    a100_mem_gb_str = fmt_qty_int(a100_mem, GiB, commas=False, unit_label="GB")
+    weight_int4_gb_str = fmt_memory(weight_int4, unit=GB, precision=0, commas=False)
+    kv_headroom_gb_str = fmt_memory(kv_headroom, unit=GB, precision=0, commas=False)
+    kv_per_1k_sequence_gb_str = fmt_memory(kv_per_1k_sequence, unit=GB, precision=1, commas=False)
     max_1k_sequences_str = fmt_int(max_1k_sequences, commas=False)
 ```
 
@@ -6001,17 +5992,13 @@ class FinalSummaryHardware:
     h100_mem = Hardware.Cloud.H100.memory.capacity
     h100_bw = Hardware.Cloud.H100.memory.bandwidth
 
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    h100_mem_gb_val = h100_mem.to(GiB).magnitude
-    h100_bw_tbs_val = h100_bw.to(TB/second).magnitude
-
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    from mlsysim.fmt import fmt_int, check, fmt, fmt_qty, fmt_qty_int
-    check(h100_mem_gb_val == 80, "H100 memory capacity should be 80 GiB")
+    from mlsysim.fmt import check, fmt_bandwidth, fmt_qty_int
+    check(h100_mem == 80 * GiB, "H100 memory capacity should be 80 GiB")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    h100_mem_gb_str = fmt_qty_int(h100_mem_gb_val * GiB, GiB, commas=False, unit_label="GB")
-    h100_mem_bw_tbs_str = fmt_qty(h100_bw_tbs_val * TB / second, TB / second, precision=2, commas=False)
+    h100_mem_gb_str = fmt_qty_int(h100_mem, GiB, commas=False, unit_label="GB")
+    h100_mem_bw_tbs_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
 ```
 
 While larger GPU memory enables larger batches for models that fit in memory, the bottleneck often shifts before memory is exhausted. Memory bandwidth limits throughput for bandwidth-bound operations (LLM decode). Compute limits throughput for compute-bound operations (prefill, vision inference). A bandwidth-bound decode workload on an H100 with `{python} FinalSummaryHardware.h100_mem_gb_str` memory eventually plateaus when HBM3 bandwidth (`{python} FinalSummaryHardware.h100_mem_bw_tbs_str`) saturates; adding memory alone does not raise token throughput once that point is reached. Understanding whether the workload is compute-bound, memory-bandwidth-bound, or capacity-bound guides appropriate resource allocation.

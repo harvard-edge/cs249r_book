@@ -215,7 +215,7 @@ Compute requirements have grown exponentially. AlexNet trained on two GTX 580 GP
 # │          param, BILLION, BYTES_FP32), mlsysim.book (sci, check)
 # │ Exports: gpt3_params_b_str, gpt3_training_ops_str, gpt3_gradient_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_sci_qty, check, fmt_qty
+from mlsysim.fmt import fmt, fmt_sci_qty, check, fmt_memory
 
 class Gpt3TrainingScenario:
     """GPT-3 training and model statistics."""
@@ -228,7 +228,6 @@ class Gpt3TrainingScenario:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     params_b = params/BILLION
     gradient_q = params * BYTES_FP32 # FP32 gradients
-    gradient_gb = gradient_q.to(GB).magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(params_b == 175, f"GPT-3 should be 175B params, got {params_b}")
@@ -236,7 +235,7 @@ class Gpt3TrainingScenario:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     gpt3_params_b_str = fmt(params_b, precision=0, commas=False)
     gpt3_training_ops_str = fmt_sci_qty(ops * flop, flop, unit_label="FLOPs")
-    gpt3_gradient_gb_str = fmt_qty(gradient_q, GB, precision=0, commas=False)
+    gpt3_gradient_gb_str = fmt_memory(gradient_q, unit=GB, precision=0, commas=False)
 ```
 
 GPT-3 consumed an estimated `{python} Gpt3TrainingScenario.gpt3_training_ops_str` during training on V100 GPUs in a Microsoft high-bandwidth cluster [@brown2020language]. The surrounding Microsoft infrastructure for this era reached roughly 10,000 GPUs, which is the cluster-size anchor used in @fig-cluster-size-explosion [@patterson2021carbon]. PaLM trained on 6,144 TPU v4 chips for roughly 60 days, consuming approximately $10^{24}$ FLOPs [@chowdhery2022palm]. OpenAI's GPT-4 report did not disclose model size, training hardware, or training compute, so the GPT-4-class scenario in this section should be read as illustrative rather than a published configuration [@openai2023gpt4]. These examples sit within the rapid training-compute growth trend documented by earlier compute-trend studies [@amodei2018ai; @sevilla2022].
@@ -906,7 +905,7 @@ At small scale, *computation dominates*. Training a model on a single GPU spends
 # │ Exports: Gpt3CommunicationScenario.gpt3_params_b_str,
 # │          Gpt3CommunicationScenario.gpt3_gradient_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, fmt_qty
+from mlsysim.fmt import fmt, check, assert_qty_close, fmt_memory
 
 class Gpt3CommunicationScenario:
     """GPT-3 gradient sync statistics."""
@@ -918,15 +917,14 @@ class Gpt3CommunicationScenario:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     params_b = params/BILLION
     gradient_q = params * BYTES_FP32 # FP32 gradients
-    gradient_gb = gradient_q.to(GB).magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(params_b == 175, f"GPT-3 should be 175B params, got {params_b}")
-    check(gradient_gb == 700, f"GPT-3 gradient size should be 700 GB, got {gradient_gb}")
+    assert_qty_close(gradient_q, 700, GB, message="GPT-3 gradient size should be 700 GB")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     gpt3_params_b_str = fmt(params_b, precision=0, commas=False)
-    gpt3_gradient_gb_str = fmt_qty(gradient_q, GB, precision=0, commas=False)
+    gpt3_gradient_gb_str = fmt_memory(gradient_q, unit=GB, precision=0, commas=False)
 ```
 
 At large scale, *communication dominates*. Distributed training requires synchronizing gradients across workers after each batch. For a model with `{python} Gpt3CommunicationScenario.gpt3_params_b_str` billion parameters, FP32 gradients occupy about `{python} Gpt3CommunicationScenario.gpt3_gradient_gb_str` before any collective algorithm is applied. In Ring All-Reduce, each worker sends and receives roughly $2(N-1)/N$ times the gradient tensor size, so network traffic depends on precision, worker count, and collective implementation. *When* using Ring All-Reduce across 1,000 workers on InfiniBand, communication can consume up to 40 percent of the total iteration time.
@@ -1644,7 +1642,7 @@ A concrete GPT-3 synchronization estimate makes the coordination tax visible by 
 # │          GPT3SyncTax.million_steps_str,
 # │          GPT3SyncTax.sync_energy_mj_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, fmt_qty
+from mlsysim.fmt import fmt, check, fmt_energy, fmt_memory, fmt_percent
 
 class GPT3SyncTax:
     """
@@ -1654,47 +1652,49 @@ class GPT3SyncTax:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     params = Models.Language.GPT3.parameters.to(param).magnitude
-    bw_ib = Systems.Fabrics.InfiniBand_HDR.bandwidth.to(byte/second).magnitude # HDR InfiniBand
-    bw_eth = (100 * Gbps).to(byte/second).magnitude # 100 Gb/s Ethernet
-    t_compute_iter = 1.2 # seconds (typical T_compute/N)
+    bw_ib = Systems.Fabrics.InfiniBand_HDR.bandwidth  # HDR InfiniBand
+    bw_eth = 100 * Gbps  # scenario assumption
+    t_compute_iter = 1.2 * second  # scenario assumption: typical T_compute/N
     million_steps = 1_000_000
 
     # Physics: Energy cost of data movement (pJ/bit)
     # Typical optical interconnect + switch power ~10-20 pJ/bit
-    energy_per_bit_pj = 15.0
+    energy_per_bit = 15.0 * pJ / bit  # scenario assumption
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Ring All-Reduce transfers ~2 * Params.
-    sync_size_bytes = 2 * params * 2
-    sync_bits = sync_size_bytes * BITS_PER_BYTE
+    sync_size = 2 * params * BYTES_FP16
+    sync_bits = sync_size.to(bit)
 
     # Time Tax
-    t_comm_ib = sync_size_bytes/bw_ib
-    t_comm_eth = sync_size_bytes/bw_eth
+    t_comm_ib = (sync_size / bw_ib).to(second)
+    t_comm_eth = (sync_size / bw_eth).to(second)
 
     # Efficiency = (T_compute/N) / (T_compute/N + T_comm)
-    eff_ib = (t_compute_iter / (t_compute_iter + t_comm_ib)) * 100
-    eff_eth = (t_compute_iter / (t_compute_iter + t_comm_eth)) * 100
+    eff_ib = (t_compute_iter / (t_compute_iter + t_comm_ib)).to("").magnitude * 100
+    eff_eth = (t_compute_iter / (t_compute_iter + t_comm_eth)).to("").magnitude * 100
 
     # Energy Tax (per step)
     # Total Energy = bits * (Joules/bit)
     # 1 pJ = 1e-12 J
-    sync_energy_joules = sync_bits * (energy_per_bit_pj * 1e-12)
-    sync_energy_mj = sync_energy_joules * million_steps / MILLION
+    sync_energy = (sync_bits * energy_per_bit).to(joule)
+    sync_energy_total = sync_energy * million_steps
+    sync_energy_expected = 84.0 * MJ
+    sync_energy_delta = abs((sync_energy_total - sync_energy_expected).to(MJ))
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(eff_ib > eff_eth, "InfiniBand must be more efficient than Ethernet")
-    check(sync_energy_joules > 0.1, "Sync energy should be significant (multi-joule)")
-    check(abs(sync_energy_mj - 84.0) < 0.5, f"Expected about 84 MJ for 1M syncs, got {sync_energy_mj}")
+    check(sync_energy > 0.1 * joule, "Sync energy should be significant (multi-joule)")
+    check(sync_energy_delta < 0.5 * MJ, f"Expected about 84 MJ for 1M syncs, got {sync_energy_total.to(MJ).magnitude}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    sync_size_gb_str = fmt_qty(sync_size_bytes * byte, GB, precision=0, commas=True)
+    sync_size_gb_str = fmt_memory(sync_size, unit=GB, precision=0, commas=True)
     ib_efficiency_pct_str = fmt_percent(eff_ib/100, precision=1, style='prose')
     eth_efficiency_pct_str = fmt_percent(eff_eth/100, precision=1, style='prose')
     # Formatting energy in Joules (J) for scale impact
-    sync_energy_j_str = fmt(sync_energy_joules, precision=0)
+    sync_energy_j_str = fmt_energy(sync_energy, unit=joule, precision=0)
     million_steps_str = fmt(million_steps, precision=0)
-    sync_energy_mj_str = fmt(sync_energy_mj, precision=0)
+    sync_energy_mj_str = fmt_energy(sync_energy_total, unit=MJ, precision=0)
 ```
 
 ::: {#nbk-introduction-coordination-energy-tax .callout-notebook title="The coordination and energy tax"}
@@ -1710,7 +1710,7 @@ To synchronize 175B parameters (FP16), a Ring All-Reduce\index{Ring All-Reduce} 
 *   **Ethernet** (100 Gbps): Lower bandwidth and higher overhead collapse the scaling efficiency further to `{python} GPT3SyncTax.eth_efficiency_pct_str`, leaving the accelerators productive for roughly 2 out of every 100 seconds.
 
 **The thermodynamic cost (energy wall)**:
-Each endpoint's gradient synchronization consumes approximately `{python} GPT3SyncTax.sync_energy_j_str` Joules across the network fabric (at 15 pJ/bit). In a training run of `{python} GPT3SyncTax.million_steps_str` steps, the endpoint network movement alone accounts for about `{python} GPT3SyncTax.sync_energy_mj_str` MJ of energy before multiplying by the number of participating accelerators.
+Each endpoint's gradient synchronization consumes approximately `{python} GPT3SyncTax.sync_energy_j_str` across the network fabric (at 15 pJ/bit). In a training run of `{python} GPT3SyncTax.million_steps_str` steps, the endpoint network movement alone accounts for about `{python} GPT3SyncTax.sync_energy_mj_str` of energy before multiplying by the number of participating accelerators.
 
 **Systems insight**: Scale makes the network the primary "processor." If the network is inefficient, the GPUs sit idle, wasting millions of dollars in compute capacity. Furthermore, the thermodynamic cost of data movement (the energy wall) means that "more GPUs" is not a sustainable scaling strategy without communication-hiding and compression.
 

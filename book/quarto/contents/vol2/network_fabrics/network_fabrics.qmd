@@ -102,7 +102,7 @@ In a single machine, the memory bus moves data between the processor and memory.
 # │ Goal: Compute the bandwidth hierarchy (NVLink vs IB vs HBM) and the
 # │       NVLink-to-IB ratio that defines the intra/inter-node cliff.
 # │ Show: ~400 Gb/s NDR, ~50 GB/s NDR, ~900 GB/s NVLink, ~18x ratio.
-# │ How: .to(unit).magnitude on Pint constants; ratio via simple division.
+# │ How: Preserve Pint quantities; extract only the dimensionless ratio.
 # │
 # │ Imports: mlsysim.core.constants (Systems.Fabrics.InfiniBand_NDR.bandwidth, Hardware.Cloud.H100.nvlink.bandwidth,
 # │           Hardware.Cloud.H100.compute.peak_flops, Hardware.Cloud.H100.memory.bandwidth,
@@ -129,13 +129,10 @@ class NetworkFabricsContextScenario:
     h100_mem_bw_raw = Hardware.Cloud.H100.memory.bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    ib_ndr_gbps_val = ib_ndr_raw.to(Gbps).magnitude
-    ib_ndr_gbs_val = ib_ndr_raw.to(GB/second).magnitude
-    nvlink_h100_gbs_val = nvlink_h100_raw.to(GB/second).magnitude
-    nvlink_to_ib_ratio_val = nvlink_h100_gbs_val/ib_ndr_gbs_val
+    nvlink_to_ib_ratio_val = (nvlink_h100_raw / ib_ndr_raw).to_base_units().magnitude
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
-    check(ib_ndr_gbps_val > 300, "NDR BW should exceed 300 Gb/s")
+    check(ib_ndr_raw > 300 * Gbps, "NDR BW should exceed 300 Gb/s")
     check(nvlink_to_ib_ratio_val > 10, "NVLink-to-IB ratio should exceed 10x")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
@@ -382,23 +379,23 @@ from mlsysim.fmt import fmt_time
 class FECLatency:
     FEC_LATENCY_LOW = Systems.SwitchFabric.FecLatencyLow
     FEC_LATENCY_HIGH = Systems.SwitchFabric.FecLatencyHigh
-    ns_low = FEC_LATENCY_LOW.to(nanosecond).magnitude
-    ns_high = FEC_LATENCY_HIGH.to(nanosecond).magnitude
+    ns_low = FEC_LATENCY_LOW
+    ns_high = FEC_LATENCY_HIGH
     three_hops = 3
     round_trip_hops = 6
     three_hop_low = ns_low * three_hops
     three_hop_high = ns_high * three_hops
     round_trip_low = ns_low * round_trip_hops
     round_trip_high = ns_high * round_trip_hops
-    check(round(three_hop_low) == 300, "Three-hop one-way FEC lower bound should be 300 ns")
-    check(round(round_trip_high) == 1200, "Six-hop round-trip FEC upper bound should be 1200 ns")
+    check(round(three_hop_low.to(nanosecond).magnitude) == 300, "Three-hop one-way FEC lower bound should be 300 ns")
+    check(round(round_trip_high.to(nanosecond).magnitude) == 1200, "Six-hop round-trip FEC upper bound should be 1200 ns")
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    ns_low_str = fmt_time(ns_low, 'nanosecond', precision=0, commas=False)
-    ns_high_str = fmt_time(ns_high, 'nanosecond', precision=0, commas=False)
-    three_hop_low_str = fmt_time(three_hop_low, 'nanosecond', precision=0, commas=False)
-    three_hop_high_str = fmt_time(three_hop_high, 'nanosecond', precision=0, commas=False)
-    round_trip_low_str = fmt_time(round_trip_low, 'nanosecond', precision=0, commas=False)
-    round_trip_high_str = fmt_time(round_trip_high, 'nanosecond', precision=0, commas=False)
+    ns_low_str = fmt_time(ns_low, nanosecond, precision=0, commas=False)
+    ns_high_str = fmt_time(ns_high, nanosecond, precision=0, commas=False)
+    three_hop_low_str = fmt_time(three_hop_low, nanosecond, precision=0, commas=False)
+    three_hop_high_str = fmt_time(three_hop_high, nanosecond, precision=0, commas=False)
+    round_trip_low_str = fmt_time(round_trip_low, nanosecond, precision=0, commas=False)
+    round_trip_high_str = fmt_time(round_trip_high, nanosecond, precision=0, commas=False)
 ```
 
 To achieve `{python} IbNdrWireRecap.ib_ndr_gbps_str`, we *cannot* simply toggle a voltage on and off faster. Signal attenuation in copper and chromatic dispersion in fiber impose a hard ceiling on the **symbol rate**\index{Symbol Rate} (the number of signal transitions per second). Modern links overcome this by using PAM4 to pack more information into each transition.
@@ -542,50 +539,49 @@ Protocol choice determines whether the fabric can behave as a lossless medium; p
 # │          NetworkAlphaBeta.ib_alpha_us_str,
 # │          NetworkAlphaBeta.ib_beta_gbs_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, fmt_math, fmt_time, fmt_qty
+from mlsysim.fmt import fmt, check, fmt_math, fmt_percent, fmt_time, fmt_qty
 
 class NetworkAlphaBeta:
     """Namespace for the alpha-beta communication model."""
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     # Level 1: Hardware Specs
     FABRIC_ALPHA_NDR = Systems.SwitchFabric.AlphaNdr
-    alpha_ib = FABRIC_ALPHA_NDR.to(second).magnitude # 1.5 us (typical for IB NDR)
-    beta_ib = Systems.Fabrics.InfiniBand_NDR.bandwidth.to(byte/second).magnitude # ~50 GB/s
+    alpha_ib = FABRIC_ALPHA_NDR # 1.5 us (typical for IB NDR)
+    beta_ib = Systems.Fabrics.InfiniBand_NDR.bandwidth # ~50 GB/s
 
     # Level 2: Messages
-    n_small = 4000 # 4 KB
-    n_large = 350 * MILLION # 350 MB
-    n_demo_large = 100 * MILLION # 100 MB (alpha-beta walkthrough)
+    n_small = 4000 * byte # scenario assumption: 4 KB control message
+    n_large = 350 * MB # scenario assumption: 350 MB gradient shard
+    n_demo_large = 100 * MB # scenario assumption: 100 MB alpha-beta walkthrough
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     n_cross_ib = alpha_ib * beta_ib
 
     t_small_ib = alpha_ib + (n_small/beta_ib)
-    small_bw_term_pct = ((n_small/beta_ib) / t_small_ib) * 100
+    small_bw_term_pct = ((n_small/beta_ib) / t_small_ib).to_base_units().magnitude * 100
 
     t_large_ib = alpha_ib + (n_large/beta_ib)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(n_cross_ib < 100000, f"Crossover ({n_cross_ib:.0f}) should be < 100 KB for IB")
+    check(n_cross_ib < 100 * KB, f"Crossover ({n_cross_ib.to(KB).magnitude:.0f} KB) should be < 100 KB for IB")
     check(small_bw_term_pct < 10, f"Small msg should be latency-bound, got {small_bw_term_pct:.1f}% BW share")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    n_cross_ib_kb_str = fmt_qty(n_cross_ib * byte, KB, precision=0, commas=False)
-    t_small_ib_us_str = fmt_time(t_small_ib * MILLION, 'microsecond', precision=2, commas=False)
+    n_cross_ib_kb_str = fmt_qty(n_cross_ib, KB, precision=0, commas=False)
+    t_small_ib_us_str = fmt_time(t_small_ib, microsecond, precision=2, commas=False)
     small_bw_pct_str = fmt_percent(small_bw_term_pct/100, precision=1, commas=False, style='prose')
-    t_large_ib_ms_str = fmt_time(t_large_ib * THOUSAND, 'millisecond', precision=1, commas=False)
-    ib_alpha_us_str = fmt_time(alpha_ib * MILLION, 'microsecond', precision=1, commas=False)
-    ib_beta_gbs_str = fmt_qty(beta_ib * byte / second, GB / second, precision=0, commas=False)
-    n_small_kb_str = fmt_qty(n_small * byte, KB, precision=0, commas=False)
-    n_large_mb_str = fmt_qty(n_large * byte, MB, precision=0, commas=False)
-    n_demo_large_mb_str = fmt_qty(n_demo_large * byte, MB, precision=0, commas=False)
-    n_large_grad_mb_str = fmt_qty(350 * MILLION * byte, MB, precision=0, commas=False)
-    eth_alpha_us = 5.0
-    eth_beta = 12.5 * (GB / second)
-    eth_beta_gbs = eth_beta.to(GB / second).magnitude
-    eth_alpha_us_str = fmt_time(eth_alpha_us, 'microsecond', precision=0, commas=False)
+    t_large_ib_ms_str = fmt_time(t_large_ib, millisecond, precision=1, commas=False)
+    ib_alpha_us_str = fmt_time(alpha_ib, microsecond, precision=1, commas=False)
+    ib_beta_gbs_str = fmt_qty(beta_ib, GB / second, precision=0, commas=False)
+    n_small_kb_str = fmt_qty(n_small, KB, precision=0, commas=False)
+    n_large_mb_str = fmt_qty(n_large, MB, precision=0, commas=False)
+    n_demo_large_mb_str = fmt_qty(n_demo_large, MB, precision=0, commas=False)
+    n_large_grad_mb_str = fmt_qty(n_large, MB, precision=0, commas=False)
+    eth_alpha = Systems.SwitchFabric.AlphaRoce
+    eth_beta = Systems.Fabrics.Ethernet_100G.bandwidth
+    eth_alpha_us_str = fmt_time(eth_alpha, microsecond, precision=0, commas=False)
     eth_beta_gbs_str = fmt_qty(eth_beta, GB / second, precision=1, commas=False)
-    doubled_beta_gbs_str = fmt_qty(2 * beta_ib * byte / second, GB / second, precision=0, commas=False)
+    doubled_beta_gbs_str = fmt_qty(2 * beta_ib, GB / second, precision=0, commas=False)
 ```
 
 The model reveals two regimes:
@@ -647,29 +643,37 @@ The second message is a `{python} NetworkAlphaBeta.n_large_grad_mb_str` gradient
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import numpy as np
+from mlsysim.fmt import fmt_qty
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-alpha_ib = Systems.SwitchFabric.AlphaNdr.to(second).magnitude
-beta_ib = Systems.Fabrics.InfiniBand_NDR.bandwidth.to(byte/second).magnitude
-alpha_eth = Systems.SwitchFabric.AlphaRoce.to(second).magnitude
-beta_eth = Systems.Fabrics.Ethernet_100G.bandwidth.to(byte/second).magnitude
+alpha_ib_q = Systems.SwitchFabric.AlphaNdr
+beta_ib_q = Systems.Fabrics.InfiniBand_NDR.bandwidth
+alpha_eth_q = Systems.SwitchFabric.AlphaRoce
+beta_eth_q = Systems.Fabrics.Ethernet_100G.bandwidth
+
+alpha_ib = alpha_ib_q.to(second).magnitude
+beta_ib = beta_ib_q.to(byte/second).magnitude
+alpha_eth = alpha_eth_q.to(second).magnitude
+beta_eth = beta_eth_q.to(byte/second).magnitude
 
 n = np.logspace(0, 10, 1000)
 t_ib = alpha_ib + n/beta_ib
 t_eth = alpha_eth + n/beta_eth
 
-n_cross_ib = alpha_ib * beta_ib
+n_cross_ib_q = alpha_ib_q * beta_ib_q
+n_cross_ib = n_cross_ib_q.to(byte).magnitude
 t_cross_ib = 2 * alpha_ib
-n_cross_eth = alpha_eth * beta_eth
+n_cross_eth_q = alpha_eth_q * beta_eth_q
+n_cross_eth = n_cross_eth_q.to(byte).magnitude
 t_cross_eth = 2 * alpha_eth
 
 fig, ax = plt.subplots(figsize=(9, 5))
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-beta_ib_gbs = (beta_ib * byte / second).to(GB / second).magnitude
-beta_eth_gbs = (beta_eth * byte / second).to(GB / second).magnitude
-ax.plot(n, t_ib, label=f'InfiniBand NDR ({alpha_ib*1e6:.1f}us, {beta_ib_gbs:.0f} GB/s)', color='#006395', linewidth=2.5)
-ax.plot(n, t_eth, label=f'Ethernet RoCE ({alpha_eth*1e6:.1f}us, {beta_eth_gbs:.1f} GB/s)', color='#CB202D', linewidth=2.5, linestyle='--')
+ib_beta_label = fmt_qty(beta_ib_q, GB / second, precision=0, commas=False)
+eth_beta_label = fmt_qty(beta_eth_q, GB / second, precision=1, commas=False)
+ax.plot(n, t_ib, label=f'InfiniBand NDR ({alpha_ib*1e6:.1f}us, {ib_beta_label})', color='#006395', linewidth=2.5)
+ax.plot(n, t_eth, label=f'Ethernet RoCE ({alpha_eth*1e6:.1f}us, {eth_beta_label})', color='#CB202D', linewidth=2.5, linestyle='--')
 
 ax.scatter([n_cross_ib], [t_cross_ib], color='#006395', s=80, zorder=5, edgecolors='white')
 ax.scatter([n_cross_eth], [t_cross_eth], color='#CB202D', s=80, zorder=5, edgecolors='white')
@@ -677,7 +681,7 @@ ax.scatter([n_cross_eth], [t_cross_eth], color='#CB202D', s=80, zorder=5, edgeco
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
 #blue
 ax.annotate(
-    f'Crossover\n~{(n_cross_ib * byte).to(KB).magnitude:.0f} KB',
+    f'Crossover\n~{fmt_qty(n_cross_ib_q, KB, precision=0, commas=False)}',
     xy=(n_cross_ib*1.2, t_cross_ib*0.9),
     xytext=(n_cross_ib*40, t_cross_ib/1.5),
     arrowprops=dict(arrowstyle='->', color='#006395'),
@@ -689,7 +693,7 @@ ax.annotate(
 
 #red
 ax.annotate(
-    f'Crossover\n~{(n_cross_eth * byte).to(KB).magnitude:.0f} KB',
+    f'Crossover\n~{fmt_qty(n_cross_eth_q, KB, precision=1, commas=False)}',
     xy=(n_cross_eth*0.9, t_cross_eth*1.03),
     xytext=(n_cross_eth/40, t_cross_eth*5),
     arrowprops=dict(arrowstyle='->', color='#CB202D'),
@@ -731,7 +735,7 @@ The $\alpha$-$\beta$ analysis above focused on the transfer time of individual m
 ```{python}
 #| echo: false
 #| label: allreduce-bottleneck
-from mlsysim.fmt import fmt, fmt_count, fmt_int, fmt_math, fmt_percent, fmt_qty
+from mlsysim.fmt import fmt, fmt_count, fmt_int, fmt_math, fmt_params, fmt_percent, fmt_qty
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ ALLREDUCE BOTTLENECK ANALYSIS
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -764,49 +768,49 @@ class AllReduceBottleneck:
     ib_ndr = Systems.Fabrics.InfiniBand_NDR
 
     peak_flops = h_h100.compute.peak_flops
-    peak_tflops = peak_flops.to(TFLOPs/second).magnitude
     gpu_util = 0.50
-    flops_per_sample_base = 5e13 # Realistic per-GPU compute for ~100ms iteration
+    flops_per_sample_base = 5e13 * flop # scenario assumption: realistic per-GPU compute for ~100ms iteration
+    grad_bytes_per_param = 4 * byte / param # scenario assumption: FP32 gradients
 
     m_1b = Models.Language.BERT_Base # 1B scale for this example
     m_70b = Models.Language.Llama2_70B
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Compute time per GPU
-    t_comp_s = flops_per_sample_base / (peak_tflops * TRILLION * gpu_util)
+    t_comp = flops_per_sample_base / (peak_flops * gpu_util)
 
     # Use library formula for Ring AllReduce
     # Model A: 1B params (FP32 = 4 bytes/param)
-    grad_1b = m_1b.parameters.to(param).magnitude * 4 * ureg.byte
+    grad_1b = m_1b.parameters * grad_bytes_per_param
     t_comm_1b = calc_ring_allreduce_time(grad_1b, num_gpus, ib_ndr.bandwidth, FABRIC_ALPHA_NDR)
 
     # Model B: 70B params (FP32 = 4 bytes/param)
-    grad_70b = m_70b.parameters.to(param).magnitude * 4 * ureg.byte
+    grad_70b = m_70b.parameters * grad_bytes_per_param
     t_comm_70b = calc_ring_allreduce_time(grad_70b, num_gpus, ib_ndr.bandwidth, FABRIC_ALPHA_NDR)
 
-    comm_frac_small = t_comm_1b.to(second).magnitude / (t_comp_s + t_comm_1b.to(second).magnitude)
+    comm_frac_small = (t_comm_1b / (t_comp + t_comm_1b)).to_base_units().magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(t_comp_s > 0.1, f"Compute time should be significant, got {t_comp_s:.2f}s")
+    check(t_comp > 0.1 * second, f"Compute time should be significant, got {t_comp.to(second).magnitude:.2f}s")
     check(t_comm_70b > t_comm_1b * 50, "70B comm should be >50x 1B comm")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    t_comp_ms = f"{t_comp_s * THOUSAND:.0f}"
-    t_comm_1b_ms = f"{t_comm_1b.to(ms).magnitude:.0f}"
-    t_comm_70b_ms = f"{t_comm_70b.to(ms).magnitude:.0f}"
+    t_comp_display = f"{t_comp.to(ms).magnitude:.0f}"
+    t_comm_1b_display = f"{t_comm_1b.to(ms).magnitude:.0f}"
+    t_comm_70b_display = f"{t_comm_70b.to(ms).magnitude:.0f}"
     comm_frac_1b_pct = f"{comm_frac_small * 100:.1f}"
 
     # Math strings
     alpha_math           = fmt_math(f"\\alpha = {FABRIC_ALPHA_NDR.to(microsecond).magnitude:.1f} \\;\\mu\\text{{s}}")
     beta_math            = fmt_math(f"\\beta = {ib_ndr.bandwidth.to(GB/second).magnitude:.0f} \\;\\text{{GB/s}}")
-    t_comp_display_math  = MarkdownStr(f"$$ T_{{\\text{{compute}}}} = {t_comp_ms} \\text{{ ms}} $$")
-    t_ring_1b_math       = fmt_math(f"T_{{\\text{{ring}}}} \\approx {t_comm_1b_ms} \\text{{ ms}}")
+    t_comp_display_math  = MarkdownStr(f"$$ T_{{\\text{{compute}}}} = {t_comp_display} \\text{{ ms}} $$")
+    t_ring_1b_math       = fmt_math(f"T_{{\\text{{ring}}}} \\approx {t_comm_1b_display} \\text{{ ms}}")
     comm_frac_display_math = MarkdownStr(f"$$ \\text{{Comm. fraction}} = {comm_frac_1b_pct} \\% $$")
-    t_ring_70b_display_math = MarkdownStr(f"$$ T_{{\\text{{ring}}}} \\approx {t_comm_70b_ms} \\text{{ ms}} $$")
+    t_ring_70b_display_math = MarkdownStr(f"$$ T_{{\\text{{ring}}}} \\approx {t_comm_70b_display} \\text{{ ms}} $$")
 
     num_gpus_str = fmt_int(num_gpus, commas=False)
-    params_1b_billion_str = fmt_count(
-        m_1b.parameters.to(param).magnitude,
+    params_1b_billion_str = fmt_params(
+        m_1b.parameters,
         scale="B",
         precision=1,
         commas=False,
@@ -815,10 +819,9 @@ class AllReduceBottleneck:
     grad_1b_gb_str = fmt_qty(grad_1b, GB, precision=1, commas=False)
     gpu_util_pct_str = fmt_percent(gpu_util, precision=0, commas=False, style='prose')
     h100_tflops_str = fmt_qty(peak_flops, TFLOPs/second, precision=0, commas=False, unit_label="TFLOP/s")
-    params_70b_billion_str = fmt_count(
-        m_70b.parameters.to(param).magnitude,
+    params_70b_billion_str = fmt_params(
+        m_70b.parameters,
         scale="B",
-        precision=0,
         commas=False,
         scale_style="word",
     )
@@ -1043,26 +1046,21 @@ A concrete bisection estimate shows how quickly oversubscription turns into sync
 # │          bbs_total_data_gb_str, bbs_bw_1_1_gbs_str, bbs_bw_4_1_gbs_str,
 # │          bbs_slowdown_str, bbs_time_1_1_ms_str, bbs_time_4_1_ms_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt_qty, fmt, check, fmt_time
+from mlsysim.fmt import fmt_count, fmt_int, fmt_qty, fmt, check, fmt_time
 
 class BisectionScaling:
     # ┌── 1. LOAD ──────────────────────────────────────────
     n_gpus = Systems.Clusters.Training_1K.total_accelerators
     beta = Systems.Fabrics.InfiniBand_NDR.bandwidth
-    beta_gbs = beta.to(GB / second).magnitude
-    gradient = 100 * GB
-    gradient_gb = gradient.to(GB).magnitude
+    gradient = 100 * GB # scenario assumption: per-GPU gradient shard
     # ┌── 2. EXECUTE ───────────────────────────────────────
     gpus_per_side = n_gpus // 2
     bw_1_1_q = gpus_per_side * beta
-    bw_1_1 = gpus_per_side * beta_gbs
     bw_4_1_q = bw_1_1_q / 4
-    bw_4_1 = bw_1_1 / 4
     total_data = gpus_per_side * gradient
-    total_data_gb = gpus_per_side * gradient_gb
-    time_1_1 = total_data_gb/bw_1_1
-    time_4_1 = total_data_gb/bw_4_1
-    slowdown = time_4_1 / time_1_1
+    time_1_1 = total_data / bw_1_1_q
+    time_4_1 = total_data / bw_4_1_q
+    slowdown = (time_4_1 / time_1_1).to_base_units().magnitude
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(n_gpus % 2 == 0, "Bisection model requires an even GPU count")
     check(round(slowdown, 3) == 4.0, "Slowdown must match oversubscription ratio")
@@ -1074,8 +1072,8 @@ class BisectionScaling:
     bbs_bw_1_1_gbs_str = fmt_qty(bw_1_1_q, GB/second, precision=0, commas=True)
     bbs_bw_4_1_gbs_str = fmt_qty(bw_4_1_q, GB/second, precision=0, commas=True)
     bbs_slowdown_str = fmt_int(slowdown, commas=False)
-    bbs_time_1_1_ms_str = fmt_time(time_1_1 * THOUSAND, 'millisecond', precision=0, commas=True)
-    bbs_time_4_1_ms_str = fmt_time(time_4_1 * THOUSAND, 'millisecond', precision=0, commas=True)
+    bbs_time_1_1_ms_str = fmt_time(time_1_1, millisecond, precision=0, commas=True)
+    bbs_time_4_1_ms_str = fmt_time(time_4_1, millisecond, precision=0, commas=True)
 ```
 
 ::: {#nbk-network-fabrics-bisection-bandwidth-cost-oversubscription .callout-notebook title="Bisection bandwidth: The cost of oversubscription"}
@@ -1149,18 +1147,18 @@ from mlsysim.fmt import fmt, check, fmt_time
 class RailLatency:
     # ┌── 1. LOAD ──────────────────────────────────────────
     FABRIC_HOP_LATENCY = Systems.SwitchFabric.HopLatency
-    t_hop_us = FABRIC_HOP_LATENCY.to(microsecond).magnitude # switch + wire latency
+    t_hop = FABRIC_HOP_LATENCY # switch + wire latency
     n_nodes = 128
     # Standard fat-tree: Leaf -> Spine -> Leaf (2 hops)
     # Rail-optimized: Leaf (direct) (1 hop)
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    lat_std = 2 * t_hop_us
-    lat_rail = 1 * t_hop_us
-    speedup = lat_std/lat_rail
+    lat_std = 2 * t_hop
+    lat_rail = 1 * t_hop
+    speedup = (lat_std/lat_rail).to_base_units().magnitude
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(speedup == 2.0, f"Speedup {speedup:.1f}x unexpected")
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    rol_hop_lat_us_str = fmt_time(t_hop_us, 'microsecond', precision=1, commas=False)
+    rol_hop_lat_us_str = fmt_time(t_hop, microsecond, precision=1, commas=False)
     rol_speedup_str = fmt(speedup, precision=0, commas=False)
     rol_n_nodes_str = fmt_count(n_nodes, commas=False, label="node")
 ```
@@ -1462,10 +1460,8 @@ The final level of the stack is the **Cluster**\index{Cluster Design}, where wir
 class NetworkFabricsClusterRecap:
     ib_ndr = Systems.Fabrics.InfiniBand_NDR.bandwidth
     nvlink = Hardware.Cloud.H100.nvlink.bandwidth
-    ib_ndr_gbs = ib_ndr.to(GB/second).magnitude
-    nvlink_gbs = nvlink.to(GB/second).magnitude
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    nvlink_to_ib_ratio_str = fmt(nvlink_gbs / ib_ndr_gbs, precision=0, commas=False)
+    nvlink_to_ib_ratio_str = fmt((nvlink / ib_ndr).to_base_units().magnitude, precision=0, commas=False)
     nvlink_h100_gbs_str = fmt_qty(nvlink, GB/second, precision=0, commas=False)
     ib_ndr_gbps_str = fmt_qty(Systems.Fabrics.InfiniBand_NDR.bandwidth, Gbps, precision=0, commas=False, unit_label="Gb/s")
 ```
@@ -1516,25 +1512,17 @@ class OpticalDividend:
     ETHERNET_400G_BW = Systems.Fabrics.Ethernet_400G.bandwidth
     OPTICS_POWER_PLUGGABLE_400G_W = Systems.SwitchFabric.OpticsPluggable400G
     OPTICS_POWER_CPO_400G_W = Systems.SwitchFabric.OpticsCpo400G
-    n_ports = int(SWITCH_ASIC_51T2_BW.to(Gbps).magnitude / ETHERNET_400G_BW.to(Gbps).magnitude) # 51.2 Tb/s switch
-    p_pluggable_w = OPTICS_POWER_PLUGGABLE_400G_W.to(watt).magnitude
-    p_cpo_w = OPTICS_POWER_CPO_400G_W.to(watt).magnitude
+    n_ports = int((SWITCH_ASIC_51T2_BW / ETHERNET_400G_BW).to_base_units().magnitude) # 51.2 Tb/s switch
     n_switches = 1000
     # ┌── 2. EXECUTE ───────────────────────────────────────
     total_pluggable = n_ports * OPTICS_POWER_PLUGGABLE_400G_W
     total_cpo = n_ports * OPTICS_POWER_CPO_400G_W
-    total_pluggable_kw = total_pluggable.to(kW).magnitude
-    total_cpo_kw = total_cpo.to(kW).magnitude
     savings = total_pluggable - total_cpo
-    savings_kw = total_pluggable_kw - total_cpo_kw
     cluster_pluggable = total_pluggable * n_switches
     cluster_savings = savings * n_switches
-    cluster_pluggable_mw = total_pluggable_kw * n_switches / THOUSAND
-    cluster_savings_mw = savings_kw * n_switches / THOUSAND
-    h100_tdp_kw = Hardware.Cloud.H100.tdp.to(kW).magnitude
-    equivalent_h100_gpus = cluster_savings_mw * THOUSAND / h100_tdp_kw
+    equivalent_h100_gpus = (cluster_savings / Hardware.Cloud.H100.tdp).to_base_units().magnitude
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(savings_kw == 1.28, f"Savings {savings_kw:.2f}kW unexpected")
+    check(savings == 1.28 * kilowatt, f"Savings {savings.to(kW).magnitude:.2f}kW unexpected")
 
     @classmethod
     def plot(cls):
@@ -1542,7 +1530,7 @@ class OpticalDividend:
         from mlsysim import viz
         return viz.bar_compare(
             labels=["Pluggable", "CPO"],
-            values=[cls.total_pluggable_kw, cls.total_cpo_kw],
+            values=[cls.total_pluggable.to(kilowatt).magnitude, cls.total_cpo.to(kilowatt).magnitude],
             title="Optical Power Dividend",
             ylabel="Total Optics Power (kW)"
         )
@@ -1603,15 +1591,10 @@ class NextGenLinkDensity:
     ETHERNET_1P6T_BW = Systems.Fabrics.Ethernet_1P6T.bandwidth
     ETHERNET_400G_BW = Systems.Fabrics.Ethernet_400G.bandwidth
     SWITCH_ASIC_102T4_BW = Systems.SwitchFabric.SwitchAsic102T4
-    xdr_port_gbps_val = Systems.Fabrics.InfiniBand_XDR.bandwidth.to(Gbps).magnitude
-    eth_800g_port_gbps_val = ETHERNET_800G_BW.to(Gbps).magnitude
-    eth_1_6t_port_gbps_val = ETHERNET_1P6T_BW.to(Gbps).magnitude
-    baseline_port_gbps_val = ETHERNET_400G_BW.to(Gbps).magnitude
-    switch_capacity_tbps_val = SWITCH_ASIC_102T4_BW.to(Gbps).magnitude / THOUSAND
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    port_ratio_val = eth_1_6t_port_gbps_val / baseline_port_gbps_val
-    equivalent_1_6t_ports_val = (switch_capacity_tbps_val * THOUSAND) / eth_1_6t_port_gbps_val
+    port_ratio_val = (ETHERNET_1P6T_BW / ETHERNET_400G_BW).to_base_units().magnitude
+    equivalent_1_6t_ports_val = (SWITCH_ASIC_102T4_BW / ETHERNET_1P6T_BW).to_base_units().magnitude
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(round(port_ratio_val) == 4, "1.6T should equal four 400G ports")
@@ -1689,7 +1672,7 @@ The physical layer of a high-performance network is surprisingly fragile, making
 # │ Goal: Provide HDR bandwidth for comparison against NDR in monitoring and
 # │       fallacy discussions.
 # │ Show: ~200 Gb/s HDR vs ~400 Gb/s NDR.
-# │ How: .to(Gbps).magnitude on the Systems.Fabrics.InfiniBand_HDR.bandwidth constant.
+# │ How: Preserve the Pint bandwidth quantity through the guard and formatter.
 # │
 # │ Imports: mlsysim.core.constants (Systems.Fabrics.InfiniBand_HDR.bandwidth, Gbps)
 # │ Exports: IbHdrReference.ib_hdr_gbps
@@ -1701,11 +1684,9 @@ class IbHdrReference:
     hdr_bw = Systems.Fabrics.InfiniBand_HDR.bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    hdr_gbps = hdr_bw.to(Gbps).magnitude
-
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     from mlsysim.fmt import fmt, check, fmt_qty
-    check(round(hdr_gbps) == 200, "HDR bandwidth should be 200 Gb/s")
+    check(round(hdr_bw.to(Gbps).magnitude) == 200, "HDR bandwidth should be 200 Gb/s")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     ib_hdr_gbps_str = fmt_qty(hdr_bw, Gbps, precision=0, commas=False, unit_label="Gb/s")
@@ -1808,14 +1789,14 @@ from mlsysim.core.constants import Gbps
 from mlsysim.fmt import fmt, check, fmt_qty
 
 class IbBandwidthFallaciesRecap:
-    hdr_gbps = Systems.Fabrics.InfiniBand_HDR.bandwidth.to(Gbps).magnitude
-    ndr_gbps = Systems.Fabrics.InfiniBand_NDR.bandwidth.to(Gbps).magnitude
-    check(round(hdr_gbps) == 200, "HDR bandwidth should be 200 Gb/s")
-    check(round(ndr_gbps) == 400, "NDR bandwidth should be 400 Gb/s")
+    hdr_bw = Systems.Fabrics.InfiniBand_HDR.bandwidth
+    ndr_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth
+    check(round(hdr_bw.to(Gbps).magnitude) == 200, "HDR bandwidth should be 200 Gb/s")
+    check(round(ndr_bw.to(Gbps).magnitude) == 400, "NDR bandwidth should be 400 Gb/s")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    ib_hdr_gbps_str = fmt_qty(Systems.Fabrics.InfiniBand_HDR.bandwidth, Gbps, precision=0, commas=False, unit_label="Gb/s")
-    ib_ndr_gbps_str = fmt_qty(Systems.Fabrics.InfiniBand_NDR.bandwidth, Gbps, precision=0, commas=False, unit_label="Gb/s")
+    ib_hdr_gbps_str = fmt_qty(hdr_bw, Gbps, precision=0, commas=False, unit_label="Gb/s")
+    ib_ndr_gbps_str = fmt_qty(ndr_bw, Gbps, precision=0, commas=False, unit_label="Gb/s")
 ```
 
 Engineers assume upgrading from HDR (`{python} IbBandwidthFallaciesRecap.ib_hdr_gbps_str`) to NDR (`{python} IbBandwidthFallaciesRecap.ib_ndr_gbps_str`) will yield proportional gains, but the $\alpha$-$\beta$ model (@sec-network-fabrics-performance-model) reveals this is only true in the bandwidth-dominated regime. For small models or the small-message phases of pipeline parallelism, the latency term $\alpha$, dominated by switch hops and FEC (~1 $\mu\text{s}$), dictates performance. If a workload is latency-bound, a 2$\times$ bandwidth increase may deliver only a small fraction of the line-rate gain while adding substantial power and transceiver cost.
@@ -1853,16 +1834,15 @@ class BandwidthFallacy:
     ib_hdr = Systems.Fabrics.InfiniBand_HDR
     ib_ndr = Systems.Fabrics.InfiniBand_NDR
     FABRIC_ALPHA_NDR = Systems.SwitchFabric.AlphaNdr
-    alpha_us = FABRIC_ALPHA_NDR.to(microsecond).magnitude
-    msg_size_kb = 10
+    alpha = FABRIC_ALPHA_NDR
+    msg = 10 * KB # scenario assumption: small control packet
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # T(n) = alpha + n/beta, computed via pint to keep units explicit.
-    msg = msg_size_kb * ureg.KB
-    t_hdr = alpha_us + (msg / ib_hdr.bandwidth).to(microsecond).magnitude
-    t_ndr = alpha_us + (msg / ib_ndr.bandwidth).to(microsecond).magnitude
+    t_hdr = alpha + (msg / ib_hdr.bandwidth)
+    t_ndr = alpha + (msg / ib_ndr.bandwidth)
 
-    speedup_pct = (1 - (t_ndr/t_hdr)) * 100
+    speedup_pct = (1 - (t_ndr/t_hdr).to_base_units().magnitude) * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     from mlsysim.fmt import check
@@ -1872,8 +1852,8 @@ class BandwidthFallacy:
     from mlsysim.fmt import fmt, fmt_time, fmt_qty
     hdr_bw_str = fmt_qty(ib_hdr.bandwidth, Gbps, precision=0, commas=False, unit_label="Gb/s")
     ndr_bw_str = fmt_qty(ib_ndr.bandwidth, Gbps, precision=0, commas=False, unit_label="Gb/s")
-    t_hdr_str = fmt_time(t_hdr, 'microsecond', precision=2, commas=False)
-    t_ndr_str = fmt_time(t_ndr, 'microsecond', precision=2, commas=False)
+    t_hdr_str = fmt_time(t_hdr, microsecond, precision=2, commas=False)
+    t_ndr_str = fmt_time(t_ndr, microsecond, precision=2, commas=False)
     speed_pct_str = fmt_percent(speedup_pct/100, precision=1, commas=False, style='prose')
 ```
 
@@ -1900,9 +1880,6 @@ class BisectionWasteRecap:
     oversub_ratio_b = 4
     cluster_cost_m = 300
     comm_fraction = 0.30
-    gpus_per_side = num_gpus // 2
-    injection_bw = Systems.Fabrics.InfiniBand_NDR
-    total_bisec_bw_a = gpus_per_side * injection_bw.bandwidth.to(GB/second).magnitude
     rel_throughput = 1 / ((1 - comm_fraction) + (comm_fraction * oversub_ratio_b))
     waste_val = (1 - rel_throughput) * cluster_cost_m
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────

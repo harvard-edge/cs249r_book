@@ -69,12 +69,11 @@ class CompressionDeploymentScale:
     llm_175b_params = Models.Language.GPT3.parameters.to(Bparam).magnitude
     llm_175b_mem_fp16_gb = llm_175b_params * bytes_fp16
     llm_175b_mem_fp16 = llm_175b_mem_fp16_gb * GB
-    smartphone_ram_gb = Platforms.Mobile.ram.to(GB).magnitude
-    smartphone_ram = round(smartphone_ram_gb) * GB
+    smartphone_ram = round(Platforms.Mobile.ram.to(GB).magnitude) * GB
     mcu_ram_kb = Platforms.Tiny.ram.to(KB).magnitude
     mcu_ram = mcu_ram_kb * KB
 
-    check(llm_7b_mem_fp16_gb > smartphone_ram_gb,
+    check(llm_7b_mem_fp16 > smartphone_ram,
           "7-billion-parameter model must exceed smartphone RAM to illustrate the deployment gap.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
@@ -377,6 +376,7 @@ These physics-level savings translate directly into deployment capabilities. A m
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
 from mlsysim.fmt import fmt_int,  fmt, fmt_qty, fmt_qty_int, check, fmt_time, fmt_rate
+from mlsysim.core.units import ms
 
 # ┌── LEGO ───────────────────────────────────────────────
 class QuantizationSpeedup:
@@ -392,7 +392,6 @@ class QuantizationSpeedup:
 
     device_ram_gb = 16
     device_ram = device_ram_gb * GB
-    mem_bw_gbs = Hardware.Tech.Storage.SystemMemory.bandwidth.to(GB / second).magnitude
     mem_bw = Hardware.Tech.Storage.SystemMemory.bandwidth
     kv_cache_gb = 1.0
     kv_cache = kv_cache_gb * GB
@@ -408,12 +407,12 @@ class QuantizationSpeedup:
     int4_size = int4_size_gb * GB
 
     # Step 2: Latency (Bandwidth Bound)
-    fp16_latency_ms = (fp16_size_gb/mem_bw_gbs) * THOUSAND
-    int4_latency_ms = (int4_size_gb/mem_bw_gbs) * THOUSAND
+    fp16_latency = fp16_size / mem_bw
+    int4_latency = int4_size / mem_bw
 
     # Step 3: Throughput (tokens/s)
-    fp16_toks = MS_PER_SEC/fp16_latency_ms
-    int4_toks = MS_PER_SEC/int4_latency_ms
+    fp16_toks = (1 / fp16_latency).to(1 / second).magnitude
+    int4_toks = (1 / int4_latency).to(1 / second).magnitude
 
     speedup = int4_toks/fp16_toks
 
@@ -432,11 +431,11 @@ class QuantizationSpeedup:
 
     fp16_size_str = fmt_qty_int(fp16_size, GB, commas=False)
     fp16_total_str = fmt_qty_int(fp16_total, GB, commas=False)
-    fp16_latency_str = fmt_time(round(fp16_latency_ms), 'millisecond', precision=0, commas=False)
+    fp16_latency_str = fmt_time(round(fp16_latency.to(ms).magnitude), 'millisecond', precision=0, commas=False)
     fp16_toks_str = fmt_rate(fp16_toks, 'tokens/s', precision=1, commas=False)
 
     int4_size_str = fmt_qty(int4_size, GB, precision=1, commas=False)
-    int4_latency_str = fmt_time(round(int4_latency_ms), 'millisecond', precision=0, commas=False)
+    int4_latency_str = fmt_time(round(int4_latency.to(ms).magnitude), 'millisecond', precision=0, commas=False)
     int4_toks_str = fmt_rate(round(int4_toks), 'tokens/s', precision=0, commas=False)
     speedup_str = fmt_int(speedup, commas=False)
 ```
@@ -559,10 +558,10 @@ class ModelDeviceComparison:
     # Model sizes (decimal — match the underlying byte-count math)
     dlrm_mem = Models.Recommendation.DLRM.model_size
     gpt2_mem = Models.Language.GPT2.size_in_bytes(BYTES_FP32)
-    resnet_mem = 100 * MB            # ~25M params × 4 bytes
+    resnet_mem = 100 * MB            # scenario assumption: ~25M params × 4 bytes
     mobilenet_mem = Models.Vision.MobileNetV2.size_in_bytes(BYTES_FP32)
     mobilenet_int8_mem = Models.Vision.MobileNetV2.size_in_bytes(BYTES_INT8)
-    dscnn_mem = 500 * KB
+    dscnn_mem = 500 * KB             # scenario assumption
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     dlrm_mobile = _get_ratio(dlrm_mem, mobile_mem)
@@ -2372,14 +2371,12 @@ class LowRankFactorization:
     # Step 1: Full Matrix: N * N
     full_params = mat_dim * mat_dim
     full = full_params * bytes_per_param * byte
-    full_mb = full.to(MB).magnitude
 
     # Step 2: Factored: 2 * N * K
     factored_params = 2 * mat_dim * rank_k
     factored = factored_params * bytes_per_param * byte
-    factored_mb = factored.to(MB).magnitude
 
-    data_reduction = full_mb/factored_mb
+    data_reduction = (full / factored).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(data_reduction > 10, f"Low-rank reduction ({data_reduction:.1f}x) is too low for K=128.")
@@ -2998,15 +2995,14 @@ class QuantizationMemoryAnchor:
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     llm_7b_params_b = Models.Language.Llama2_7B.parameters.to(Bparam).magnitude
     bytes_fp16 = 2
-    smartphone_ram_gb = Platforms.Mobile.ram.to(GB).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     llm_7b_mem_fp16_gb = llm_7b_params_b * bytes_fp16
     llm_7b_mem_fp16 = llm_7b_mem_fp16_gb * GB
-    smartphone_ram = smartphone_ram_gb * GB
+    smartphone_ram = Platforms.Mobile.ram
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(llm_7b_mem_fp16_gb > smartphone_ram_gb,
+    check(llm_7b_mem_fp16 > smartphone_ram,
           "7-billion-parameter FP16 weights should exceed the smartphone RAM anchor.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
@@ -5264,6 +5260,7 @@ The same principle extends beyond CNNs. General matrix multiply (GEMM) bias-acti
 # │ Goal: Conv-BN-ReLU bandwidth and kernel-launch savings for fusion prose.
 # │ Exports: FusionCalc.{feat_map_kb,weights_mb,bn_params_kb,unfused_conv_mb,unfused_bn_mb,unfused_relu_mb,total_unfused_mb,total_fused_mb,bandwidth_reduction_pct,unfused_time_us,fused_time_us,fusion_speedup,kernels_unfused,kernels_fused,saved_latency_ms}_str
 from mlsysim.fmt import fmt, fmt_int, fmt_qty, fmt_qty_int, check, fmt_time
+from mlsysim.core.units import microsecond
 
 class FusionCalc:
     conv_channels = 256
@@ -5274,7 +5271,7 @@ class FusionCalc:
     kernels_unfused = 159
     kernels_fused = 53
     latency_per_kernel_us = 10
-    v100_bw_gbs = Hardware.Cloud.V100.memory.bandwidth.to(GB/second).magnitude
+    v100_bw = Hardware.Cloud.V100.memory.bandwidth
 
     feat_map_mb = conv_channels * conv_spatial * conv_spatial * bytes_per_element/MILLION
     feat_map = feat_map_mb * MB
@@ -5294,9 +5291,9 @@ class FusionCalc:
     total_fused_display = round(total_fused_mb) * MB
     bandwidth_reduction_pct = (1 - total_fused_mb/total_unfused_mb) * 100
     saved_latency_ms = (kernels_unfused - kernels_fused) * latency_per_kernel_us / THOUSAND
-    unfused_time_us = total_unfused_mb/v100_bw_gbs * THOUSAND
-    fused_time_us = total_fused_mb/v100_bw_gbs * THOUSAND
-    fusion_speedup = unfused_time_us/fused_time_us
+    unfused_time = total_unfused / v100_bw
+    fused_time = total_fused / v100_bw
+    fusion_speedup = (unfused_time/fused_time).to("").magnitude
 
     check(bandwidth_reduction_pct > 40, "Fusion should reduce bandwidth by more than 40%.")
     check(fusion_speedup > 1, "Fused execution must be faster than unfused.")
@@ -5314,8 +5311,8 @@ class FusionCalc:
     kernels_unfused_str = fmt(kernels_unfused, precision=0, commas=False)
     kernels_fused_str = fmt(kernels_fused, precision=0, commas=False)
     saved_latency_ms_str = fmt_time(saved_latency_ms, 'millisecond', precision=1, commas=False)
-    unfused_time_us_str = fmt_time(round(unfused_time_us), "microsecond", precision=0, commas=False, style="word")
-    fused_time_us_str = fmt_time(fused_time_us, "microsecond", precision=1, commas=False, style="word")
+    unfused_time_us_str = fmt_time(round(unfused_time.to(microsecond).magnitude), "microsecond", precision=0, commas=False, style="word")
+    fused_time_us_str = fmt_time(fused_time, "microsecond", precision=1, commas=False, style="word")
     fusion_speedup_str = fmt(fusion_speedup, precision=2, commas=False)
 ```
 
@@ -7390,21 +7387,17 @@ class ResNet50Int8Metrics:
     p_int8 = Engine.solve(m, h, batch_size=1, precision="int8")
     warnings.filters[:] = _prev_filters
 
-    fp32_latency_ms = p_fp32.latency.to(ms).magnitude
-    int8_latency_ms = p_int8.latency.to(ms).magnitude
+    fp32_latency = p_fp32.latency
+    int8_latency = p_int8.latency
     fp32_size = p_fp32.memory_footprint
     int8_size = p_int8.memory_footprint
-    fp32_size_mb = fp32_size.to(MB).magnitude
-    int8_size_mb = int8_size.to(MB).magnitude
     fp32_energy = p_fp32.energy
     int8_energy = p_int8.energy
-    fp32_energy_j = fp32_energy.to(joule).magnitude
-    int8_energy_j = int8_energy.to(joule).magnitude
 
     top1_drop = fp32_top1 - int8_top1
-    latency_speedup = fp32_latency_ms / int8_latency_ms
-    size_reduction = fp32_size_mb / int8_size_mb
-    energy_improvement = fp32_energy_j / int8_energy_j
+    latency_speedup = (fp32_latency / int8_latency).to("").magnitude
+    size_reduction = (fp32_size / int8_size).to("").magnitude
+    energy_improvement = (fp32_energy / int8_energy).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(0 < top1_drop < 1, "INT8 accuracy drop should be sub-point.")
@@ -7415,8 +7408,8 @@ class ResNet50Int8Metrics:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     fp32_top1_str = fmt_percent(fp32_top1/100, precision=1, commas=False, style='prose')
     int8_top1_str = fmt_percent(int8_top1/100, precision=1, commas=False, style='prose')
-    fp32_latency_ms_str = fmt_time(round(fp32_latency_ms), 'millisecond', precision=0, commas=False)
-    int8_latency_ms_str = fmt_time(int8_latency_ms, 'millisecond', precision=1, commas=False)
+    fp32_latency_ms_str = fmt_time(round(fp32_latency.to(ms).magnitude), 'millisecond', precision=0, commas=False)
+    int8_latency_ms_str = fmt_time(int8_latency, 'millisecond', precision=1, commas=False)
     fp32_size_mb_str = fmt_qty(fp32_size, MB, precision=1, commas=False)
     int8_size_mb_str = fmt_qty(int8_size, MB, precision=1, commas=False)
     fp32_energy_j_str = fmt_qty(fp32_energy, joule, precision=2, commas=False)

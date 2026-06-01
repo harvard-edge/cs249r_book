@@ -568,7 +568,7 @@ class EnergyTransmission:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    data_size = 1.0 * MB       # 1 sec audio
+    data_size = 1.0 * MB       # scenario assumption: 1 sec audio
     tx_energy_per_mb = Systems.NetworkEnergy.Per5gMb
     local_energy_op = Models.Vision.MobileNetV2.inference_energy
 
@@ -808,14 +808,14 @@ class LighthouseModels:
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     resnet_fp32_size = m_resnet.size_in_bytes(4 * byte)
-    resnet_fp32_mb = resnet_fp32_size.to(MB).magnitude
+    resnet_fp32_value = resnet_fp32_size.to(MB).magnitude
     dlrm_embedding = m_dlrm.size_in_bytes()
     mobilenet_flops_reduction = (m_resnet.inference_flops / m_mobilenet.inference_flops).to("count").magnitude
     kws_size = m_kws.size_in_bytes(4 * byte)
     kws_size_kb = kws_size.to(KB).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(resnet_fp32_mb >= 90, f"ResNet50 size should be ~98 MB, got {resnet_fp32_mb:.0f} MB")
+    check(resnet_fp32_size >= 90 * MB, f"ResNet50 size should be ~98 MB, got {resnet_fp32_value:.0f} MB")
     check(mobilenet_flops_reduction > 10, "MobileNet reduction should be >10x vs ResNet.")
     check(750 <= kws_size_kb <= 850, f"KWS size should be about 800 KB, got {kws_size_kb:.0f} KB")
 
@@ -828,7 +828,7 @@ class LighthouseModels:
     dlrm_embedding_str = fmt_qty_int(dlrm_embedding, GB)
     mobilenet_flops_reduction_str = fmt_multiple(mobilenet_flops_reduction, precision=1)
     mobile_tdp_range_str = MarkdownStr("2 to 5 W")
-    kws_params_str = fmt_count(m_kws.parameters, scale="K", precision=0, commas=False, label="parameter")
+    kws_params_str = fmt_count(m_kws.parameters, scale="K", commas=False, label="parameter")
     kws_flops_m_str = fmt_qty(m_kws.inference_flops, MFLOPs, precision=0)
     kws_size_kb_str = fmt_qty_int(kws_size, KB)
 ```
@@ -1522,27 +1522,26 @@ above=1of $(B2.north east)!0.5!(B3.north west)$](B0){Cloud ML};
 
 from mlsysim.physics import calc_network_latency_ms, SPEED_OF_LIGHT_FIBER_KM_S
 from mlsysim.fmt import fmt, check, fmt_qty, fmt_time
-from mlsysim.core.units import kilometer, millisecond
+from mlsysim.core.units import kilometer, millisecond, second
 
 # ┌── LEGO ───────────────────────────────────────────────
 class DistancePenalty:
     """Namespace for Distance Penalty."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    distance_km_value = 1500                                 # km to cloud datacenter
-    distance_km = distance_km_value * kilometer
-    safety_budget_ms_value = 10                              # ms safety requirement
+    distance = 1500 * kilometer                              # scenario assumption: cloud datacenter distance
+    safety_budget = 10 * millisecond                         # scenario assumption: safety response budget
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    round_trip_ms_value = calc_network_latency_ms(distance_km_value)
-    deficit_ms_value = safety_budget_ms_value - round_trip_ms_value
+    round_trip = calc_network_latency_ms(distance) * millisecond
+    deficit = safety_budget - round_trip
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     sol_kms_str = fmt_qty(SPEED_OF_LIGHT_FIBER_KM_S, kilometer / second, precision=0, commas=True)
-    rtt_formatted_str = fmt_time(round_trip_ms_value, millisecond, precision=0, commas=False)
-    deficit_str = fmt_time(deficit_ms_value, millisecond, precision=0, commas=False, allow_negative=True)
-    distance_km_str = fmt_qty(distance_km, kilometer, precision=0, commas=True)
-    safety_budget_str = fmt_time(safety_budget_ms_value, millisecond, precision=0, commas=False)
+    rtt_formatted_str = fmt_time(round_trip, millisecond, precision=0, commas=False)
+    deficit_str = fmt_time(deficit, millisecond, precision=0, commas=False, allow_negative=True)
+    distance_km_str = fmt_qty(distance, kilometer, precision=0, commas=True)
+    safety_budget_str = fmt_time(safety_budget, millisecond, precision=0, commas=False)
 ```
 
 ::: {#nbk-ml-systems-distance-penalty .callout-notebook title="The distance penalty"}
@@ -1639,12 +1638,12 @@ class CloudEdgeTCO:
     # Scenario
     requests_per_day = 1_000_000
     inference_ms = 10
-    response_kb = 100
+    response_size = 100 * KB   # scenario assumption
 
     # Cloud (AWS 2024)
     gpu_price_per_hr = 0.75 # A10G
     gpu_instances = 4
-    egress_per_gb = Infrastructure.Pricing.Cloud.EgressPerGB.rate.to(USD / GB).magnitude
+    egress_rate = Infrastructure.Pricing.Cloud.EgressPerGB.rate
     lb_base_per_hr = 0.025
     lb_lcu_per_hr = 0.008
     avg_lcu = 50
@@ -1663,9 +1662,8 @@ class CloudEdgeTCO:
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Cloud
     c_gpu = gpu_instances * HOURS_PER_YEAR * gpu_price_per_hr
-    egress_volume_per_day = requests_per_day * response_kb * KB
-    egress_gb_per_day = egress_volume_per_day.to(GB).magnitude
-    c_egress = egress_gb_per_day * DAYS_PER_YEAR * egress_per_gb
+    egress_volume_per_day = requests_per_day * response_size
+    c_egress = (egress_volume_per_day * DAYS_PER_YEAR * egress_rate).to(USD).magnitude
     c_lb = lb_base_per_hr * HOURS_PER_YEAR + lb_lcu_per_hr * avg_lcu * HOURS_PER_YEAR
     c_logs = 2000
     c_total = c_gpu + c_egress + c_lb + c_logs
@@ -1673,7 +1671,7 @@ class CloudEdgeTCO:
     # Step 2: Edge
     e_capex = (server_cost / server_life_years)
     annual_energy = server_tdp * HOURS_PER_YEAR * hour
-    e_power = annual_energy.to(kWh).magnitude * electricity_rate.to(USD / kWh).magnitude
+    e_power = (annual_energy * electricity_rate).to(USD).magnitude
     e_cool = e_power * cooling_overhead
     e_net = fiber_annual
     e_labor = devops_fte * devops_salary
@@ -1690,13 +1688,13 @@ class CloudEdgeTCO:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     # Custom suffixes/prefixes (M, ms, KB, $, /year, %, W) → MarkdownStr per recipe Rule 1 escape-hatch
-    requests_str = fmt_count(requests_per_day, scale='M', precision=0, commas=False)
+    requests_str = fmt_count(requests_per_day, scale='M', commas=False)
     inference_str = fmt_time(inference_ms, 'millisecond', precision=0, commas=False)
-    response_str = fmt_qty(response_kb * KB, KB, precision=0, commas=False)
+    response_str = fmt_qty(response_size, KB, precision=0, commas=False)
     gpu_instances_str = fmt(gpu_instances, precision=0, commas=False)
     gpu_price_str = fmt_usd(gpu_price_per_hr, precision=2, commas=False, per="hr")
     egress_gb_str = fmt_qty(egress_volume_per_day, GB, precision=0, commas=False, per="day")
-    egress_price_str = fmt_usd(egress_per_gb, precision=2, commas=False, per="GB")
+    egress_price_str = fmt_usd(egress_rate, precision=2, commas=False, per="GB")
     hours_per_year_str = fmt(HOURS_PER_YEAR, precision=0)
     days_per_year_str = fmt(DAYS_PER_YEAR, precision=0, commas=False)
 
@@ -1715,14 +1713,14 @@ class CloudEdgeTCO:
 
     edge_savings_str = fmt_percent(edge_savings_pct/100, precision=1, commas=False, style='symbol')
     labor_pct_str = fmt_percent(labor_pct/100, precision=1, commas=False, style='symbol')
-    breakeven_requests_str = fmt_count(round(breakeven_requests_per_day/ THOUSAND) * THOUSAND, scale='K', precision=0, commas=False)
+    breakeven_requests_str = fmt_count(round(breakeven_requests_per_day/ THOUSAND) * THOUSAND, scale='K', commas=False)
     breakeven_utilization_str = fmt_percent(breakeven_fraction, precision=2, commas=False, style='symbol')
 
     # Additional Outputs for Prose
     server_cost_str = fmt_usd(server_cost, precision=0)
     server_life_years_str = fmt_time(server_life_years, "year", precision=0, commas=False, style="word")
     power_str = fmt_power(server_tdp, precision=0, commas=False)
-    electricity_str = fmt_usd(electricity_rate.to(USD / kWh).magnitude, precision=2, commas=False, per="kWh")
+    electricity_str = fmt_usd(electricity_rate, precision=2, commas=False, per="kWh")
     devops_fte_str = fmt(devops_fte, precision=1, commas=False)
     devops_salary_str = fmt_usd(devops_salary, precision=0)
 ```
@@ -2137,7 +2135,7 @@ class EdgeEnergyTransmissionRecap:
     """Local recap for the radio-transmission energy penalty."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    data_size = 1.0 * MB
+    data_size = 1.0 * MB       # scenario assumption
     tx_energy_per_mb = Systems.NetworkEnergy.Per5gMb
     local_energy_op = Models.Vision.MobileNetV2.inference_energy
 
@@ -2309,15 +2307,15 @@ class DataLocalityInvariant:
     frame_size = width * height * bpp * byte
     net_bw = net_bw_mbps * megabit / second
     frame_bits = frame_size * (8 * bit / byte)
-    tx_time_ms = (frame_bits / net_bw).to(millisecond).magnitude
+    tx_time = frame_bits / net_bw
     remote_total_ms = cloud_lat_ms + remote_compute_ms
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(tx_time_ms > remote_total_ms, "4K video should require locality at 100 Mbps.")
+    check(tx_time > remote_total_ms * millisecond, "4K video should require locality at 100 Mbps.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     frame_mb_str = fmt_qty(frame_size, MB, precision=1)
-    tx_time_ms_str = fmt_time(tx_time_ms, millisecond, precision=1, commas=True)
+    tx_time_ms_str = fmt_time(tx_time, millisecond, precision=1, commas=True)
     remote_ms_str = fmt_time(remote_total_ms, millisecond, precision=0)
     net_bw_str = fmt_qty(net_bw, megabit / second, precision=0, commas=False, unit_label="Mb/s")
     frame_label_str = MarkdownStr("4K")
@@ -2386,7 +2384,7 @@ class EdgeSizingThroughput:
     inf_per_sec = cameras_per_store * fps
     yolo_flops = model.inference_flops if model.inference_flops else model.training_ops
     sustained_flop_rate = inf_per_sec * yolo_flops / second
-    sustained_gflops = sustained_flop_rate.to(GFLOPs / second).magnitude
+    sustained_gflops_value = sustained_flop_rate.to(GFLOPs / second).magnitude
     required_tops_equiv = (sustained_flop_rate * headroom).to(TOPS).magnitude
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
@@ -2396,7 +2394,7 @@ class EdgeSizingThroughput:
     headroom_str = fmt(headroom, precision=0, commas=False)
     inf_per_sec_str = fmt(inf_per_sec, precision=0, commas=False)
     yolo_gflops_str = fmt_qty(yolo_flops, GFLOPs, precision=1)
-    sustained_gf_str = fmt(sustained_gflops, precision=0)
+    sustained_gf_str = fmt(sustained_gflops_value, precision=0)
     req_tops_equiv_str = fmt(required_tops_equiv, precision=2, commas=False)
 ```
 
@@ -2469,7 +2467,6 @@ class EdgeSizingFleetTCO:
     inf_per_sec = cameras_per_store * fps
     yolo_flops = model.inference_flops if model.inference_flops else model.training_ops
     sustained_flop_rate = inf_per_sec * yolo_flops / second
-    sustained_gflops = sustained_flop_rate.to(GFLOPs / second).magnitude
     required_tops_equiv = (sustained_flop_rate * headroom).to(TOPS).magnitude
     coral_peak = coral.compute.peak_flops
     coral_sustained = coral_peak * derate
@@ -2810,17 +2807,17 @@ class ThermalQuantCalc:
     """Namespace for Thermal Quant Calc."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    baseline_power = 12 * watt                                                       # W, unoptimized LLM power
-    quant_reduction_value = 4                                                        # FP32→INT8 power reduction
+    baseline_power = 12 * watt                                                       # scenario assumption: W, unoptimized LLM power
+    quant_reduction_factor = 4                                                       # dimensionless FP32→INT8 power reduction
     mobile_tdp = Scenarios.MobilePower.MobileNpuTypical
     temp_rise = 1 * ureg.delta_degC / second
-    trip_time_s_value = 60
+    trip_time = 60 * second                                                          # scenario assumption: time to thermal trip
     trip_temp = ureg.Quantity(80, ureg.degC)
-    fps_before_value = 100
-    fps_after_value = 30
+    fps_before = 100                                                                 # dimensionless display rate for prose
+    fps_after = 30                                                                   # dimensionless display rate for prose
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    quant_power = baseline_power / quant_reduction_value                             # 12 W / 4 = 3 W
+    quant_power = baseline_power / quant_reduction_factor                            # 12 W / 4 = 3 W
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(quant_power.to(watt).magnitude - mobile_tdp.to(watt).magnitude) < 0.1,
@@ -2830,12 +2827,12 @@ class ThermalQuantCalc:
     baseline_str = fmt_qty(baseline_power, watt, precision=0, commas=False)
     mobile_tdp_str = fmt_qty(mobile_tdp, watt, precision=0, commas=False)
     quant_power_str = fmt_qty(quant_power, watt, precision=0, commas=False)
-    quant_red_str = fmt_multiple(quant_reduction_value, precision=0, commas=False)
+    quant_red_str = fmt_multiple(quant_reduction_factor, precision=0, commas=False)
     temp_rise_str = fmt_qty(temp_rise, ureg.delta_degC / second, precision=0, commas=False, unit_label="°C/s")
-    trip_time_str = fmt_time(trip_time_s_value, second, precision=0, commas=False)
+    trip_time_str = fmt_time(trip_time, second, precision=0, commas=False)
     trip_temp_str = fmt_qty(trip_temp, ureg.degC, precision=0, commas=False, unit_label="°C")
-    fps_before_str = fmt_rate(fps_before_value, 'FPS', precision=0, commas=False)
-    fps_after_str = fmt_rate(fps_after_value, 'FPS', precision=0, commas=False)
+    fps_before_str = fmt_rate(fps_before, 'FPS', precision=0, commas=False)
+    fps_after_str = fmt_rate(fps_after, 'FPS', precision=0, commas=False)
 ```
 
 ::: {#nbk-ml-systems-thermal-wall .callout-notebook title="The thermal wall"}
@@ -2884,9 +2881,9 @@ class MobileBatteryCapacity:
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     h_phone = Hardware.Mobile.iPhone15Pro
     phone_battery = h_phone.battery_capacity if h_phone.battery_capacity else 15 * Wh
-    phone_battery_high = 22 * Wh
-    baseline_runtime = 24 * hour
-    added_ml_power = 1 * watt
+    phone_battery_high = 22 * Wh   # scenario assumption
+    baseline_runtime = 24 * hour   # scenario assumption
+    added_ml_power = 1 * watt      # scenario assumption
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     baseline_power = phone_battery / baseline_runtime
@@ -3027,16 +3024,16 @@ class MobileResnetPitfallRecap:
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     resnet_fp32_bytes = resnet_params * 4 * byte / param
-    resnet_gflops = resnet_flops.to(GFLOPs).magnitude
-    resnet_fp32_mb = resnet_fp32_bytes.to(MB).magnitude
+    resnet_gflops_value = resnet_flops.to(GFLOPs).magnitude
+    resnet_fp32_value = resnet_fp32_bytes.to(MB).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(resnet_fp32_mb >= 90, f"ResNet-50 FP32 size should be near 100 MB; got {resnet_fp32_mb:.0f} MB.")
-    check(resnet_gflops >= 4, f"ResNet-50 compute should be about 4 GFLOPs; got {resnet_gflops:.1f}.")
+    check(resnet_fp32_bytes >= 90 * MB, f"ResNet-50 FP32 size should be near 100 MB; got {resnet_fp32_value:.0f} MB.")
+    check(resnet_flops >= 4 * GFLOPs, f"ResNet-50 compute should be about 4 GFLOPs; got {resnet_gflops_value:.1f}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     resnet_fp32_mb_str = fmt_qty(resnet_fp32_bytes, MB, precision=1, commas=False)
-    resnet_gflops_str = fmt(resnet_gflops, precision=1, commas=False)
+    resnet_gflops_str = fmt(resnet_gflops_value, precision=1, commas=False)
 ```
 
 These successes can create a misleading sense of ease. A common pitfall involves attempting to deploy desktop-trained models directly to mobile or edge devices without architecture modifications. Models developed on powerful workstations often fail when deployed to resource-constrained devices. A desktop ResNet-50 pipeline may require gigabytes once activations, batches, preprocessing buffers, and runtime overhead are included, even though the FP32 weights alone are about `{python} MobileResnetPitfallRecap.resnet_fp32_mb_str`. Such a pipeline, with `{python} MobileResnetPitfallRecap.resnet_gflops_str` billion FLOPs per inference, cannot run unchanged on a device with 512 MB of RAM and a 1 GFLOP/s processor. Beyond simple resource violations, desktop-optimized models may use operations unsupported by mobile hardware (specialized mathematical operations), assume floating-point precision unavailable on embedded systems, or require batch processing incompatible with single-sample inference. Successful deployment demands architecture-aware design from the beginning, including specialized architectural techniques for mobile devices such as MobileNet's depthwise separable convolutions [@howard2017mobilenets] (detailed in @sec-network-architectures), integer-only operations for microcontrollers, and optimization strategies that maintain accuracy while reducing computation.
@@ -3299,8 +3296,8 @@ class WildlifeMonitoring:
     """Namespace for wildlife-monitoring bandwidth reduction."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    raw_audio_per_day = 4.3 * GB
-    summary_per_day = 400 * KB
+    raw_audio_per_day = 4.3 * GB    # scenario assumption
+    summary_per_day = 400 * KB      # scenario assumption
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     reduction = (raw_audio_per_day / summary_per_day).to("").magnitude
@@ -4374,7 +4371,7 @@ A related misconception holds that moving computation closer to the user always 
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim import Hardware
-from mlsysim.fmt import fmt_percent, fmt, check, fmt_frac, fmt_qty
+from mlsysim.fmt import fmt_percent, fmt, check, fmt_frac, fmt_qty, fmt_multiple
 from mlsysim.core.units import Wh, watt, hour, ureg
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -4384,30 +4381,30 @@ class MobilePowerFallacyCalc:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     h_phone = Hardware.Mobile.iPhone15Pro
     battery = h_phone.battery_capacity if h_phone.battery_capacity else 15 * Wh
-    low_power = 1 * watt                                                           # light inference
-    high_power = 5 * watt                                                          # heavy on-device model
+    low_power = 1 * watt                                                           # scenario assumption: light inference
+    high_power = 5 * watt                                                          # scenario assumption: heavy on-device model
     mobile_tdp = Scenarios.MobilePower.MobileNpuTypical
-    quant_reduction_value = 4                                                       # FP32 to INT8 power reduction
+    quant_reduction_factor = 4                                                      # dimensionless FP32 to INT8 power reduction
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    low_power_hours = (battery / low_power).to(hour).magnitude
-    high_power_hours = (battery / high_power).to(hour).magnitude
+    low_power_runtime = (battery / low_power).to(hour)
+    high_power_runtime = (battery / high_power).to(hour)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     battery_wh = battery.to(Wh).magnitude
     check(10 <= battery_wh <= 25,
           f"Representative phone battery should be in a realistic Wh range, got {battery_wh:.1f}.")
-    check(high_power_hours < low_power_hours,
+    check(high_power_runtime < low_power_runtime,
           "Higher-power mobile workload should drain the battery faster.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     phone_battery_str = fmt_qty(battery, Wh, precision=0, commas=False)
     low_power_w_str = fmt_qty(low_power, watt, precision=0, commas=False)
     high_power_w_str = fmt_qty(high_power, watt, precision=0, commas=False)
-    low_power_hours_str = fmt(low_power_hours, precision=0, commas=False)
-    high_power_hours_str = fmt(high_power_hours, precision=0, commas=False)
+    low_power_hours_str = fmt(low_power_runtime, hour, precision=0, commas=False)
+    high_power_hours_str = fmt(high_power_runtime, hour, precision=0, commas=False)
     mobile_tdp_str = fmt_qty(mobile_tdp, watt, precision=0, commas=False)
-    quant_red_str = fmt(quant_reduction_value, precision=0, commas=False)
+    quant_red_str = fmt_multiple(quant_reduction_factor, precision=0, commas=False)
 
     # Inline fractions showing the physics.
     low_power_frac = fmt_frac(f"{phone_battery_str}", f"{low_power_w_str}", f"**{low_power_hours_str} hours**")
@@ -4447,34 +4444,36 @@ The difference is qualitative, not just quantitative. As @sec-ml-systems-tinyml-
 # │          TcoPitfallCalc.tco_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt_percent, fmt, fmt_usd, check
+from mlsysim.fmt import fmt_percent, fmt, fmt_usd, check, fmt_multiple
+from mlsysim.core.units import USD, ureg
 
 # ┌── LEGO ───────────────────────────────────────────────
 class TcoPitfallCalc:
     """Namespace for Tco Pitfall Calc."""
 
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     # Cloud costs (monthly)
-    cloud_compute_value = 2000                                                      # $, inference compute
+    cloud_compute = 2000 * USD / ureg.month                                         # scenario assumption: inference compute
 
     # Edge costs (monthly)
-    edge_hardware_value = 500                                                       # $, amortized hardware
-    edge_network_value = 3000                                                       # $, network engineering
-    edge_maintenance_value = 500                                                    # $, hardware maintenance
-    edge_reliability_value = 2000                                                   # $, reliability engineering
+    edge_hardware = 500 * USD / ureg.month                                          # scenario assumption: amortized hardware
+    edge_network = 3000 * USD / ureg.month                                          # scenario assumption: network engineering
+    edge_maintenance = 500 * USD / ureg.month                                       # scenario assumption: hardware maintenance
+    edge_reliability = 2000 * USD / ureg.month                                      # scenario assumption: reliability engineering
 
-    edge_total_value = (edge_hardware_value + edge_network_value +
-                        edge_maintenance_value + edge_reliability_value)            # $6,000
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    edge_total = edge_hardware + edge_network + edge_maintenance + edge_reliability
 
-    tco_ratio_value = edge_total_value/cloud_compute_value                        # 3x
+    tco_ratio = edge_total / cloud_compute                                          # 3x
 
-    cloud_compute_str = fmt_usd(cloud_compute_value, precision=0, commas=True, per="month")
-    edge_hw_str = fmt_usd(edge_hardware_value, precision=0, commas=False, per="month")
-    edge_network_str = fmt_usd(edge_network_value, precision=0, commas=True, per="month")
-    edge_maint_str = fmt_usd(edge_maintenance_value, precision=0, commas=False, per="month")
-    edge_reliability_str = fmt_usd(edge_reliability_value, precision=0, commas=True, per="month")
-    edge_total_str = fmt_usd(edge_total_value, precision=0, commas=True)
-    tco_ratio_str = fmt_multiple(tco_ratio_value, precision=0, commas=False)
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    cloud_compute_str = fmt_usd(cloud_compute, precision=0, commas=True, per="month")
+    edge_hw_str = fmt_usd(edge_hardware, precision=0, commas=False, per="month")
+    edge_network_str = fmt_usd(edge_network, precision=0, commas=True, per="month")
+    edge_maint_str = fmt_usd(edge_maintenance, precision=0, commas=False, per="month")
+    edge_reliability_str = fmt_usd(edge_reliability, precision=0, commas=True, per="month")
+    edge_total_str = fmt_usd(edge_total, precision=0, commas=True, per="month")
+    tco_ratio_str = fmt_multiple(tco_ratio, precision=0, commas=False)
 ```
 
 **Pitfall**: *Minimizing computational resources minimizes total cost.*
@@ -4504,48 +4503,47 @@ Teams optimize per-unit resource consumption while ignoring operational overhead
 # │          AmdahlCameraCalc.range_speedup_high_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt_int,  fmt_percent, fmt, check
+from mlsysim.fmt import fmt_int,  fmt_percent, fmt, check, fmt_time
+from mlsysim.core.units import millisecond
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AmdahlCameraCalc:
     """Namespace for Amdahl Camera Calc."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    cam_isp_ms_value = 100                                                         # ms, ISP + auto-exposure
-    cam_ml_ms_value = 60                                                           # ms, ML scene classification
-    cam_post_ms_value = 40                                                         # ms, tone mapping + HDR merge
-    cam_ml_speedup_value = 10                                                      # 10× faster ML model
-    general_ml_frac_low_value = 0.30
-    general_ml_frac_high_value = 0.50
-    general_model_speedup_value = 100
+    cam_isp = 100 * millisecond                                                    # scenario assumption: ISP + auto-exposure
+    cam_ml = 60 * millisecond                                                      # scenario assumption: ML scene classification
+    cam_post = 40 * millisecond                                                    # scenario assumption: tone mapping + HDR merge
+    cam_ml_speedup = 10                                                            # dimensionless 10× faster ML model
+    general_ml_frac_low = 0.30                                                     # dimensionless workload fraction
+    general_ml_frac_high = 0.50                                                    # dimensionless workload fraction
+    general_model_speedup = 100                                                    # dimensionless model speedup
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    cam_total_ms_value = cam_isp_ms_value + cam_ml_ms_value + cam_post_ms_value    # 200 ms
-    cam_ml_frac_value = cam_ml_ms_value/cam_total_ms_value                       # 0.30
-    cam_non_ml_frac_value = 1 - cam_ml_frac_value                                 # 0.70
+    cam_total = cam_isp + cam_ml + cam_post                                       # 200 ms
+    cam_ml_fraction = cam_ml / cam_total                                          # 0.30
+    cam_non_ml_fraction = 1 - cam_ml_fraction                                     # 0.70
 
-    cam_speedup_10x_value = 1 / (cam_non_ml_frac_value + cam_ml_frac_value/cam_ml_speedup_value)
-    cam_speedup_inf_value = 1 / cam_non_ml_frac_value                             # theoretical max
-    cam_ml_optimized_ms_value = cam_ml_ms_value/cam_ml_speedup_value             # 6 ms
-    cam_total_optimized_ms_value = (cam_isp_ms_value +
-                                    cam_ml_optimized_ms_value +
-                                    cam_post_ms_value)                             # 146 ms
-    range_speedup_low_value = 1 / ((1 - general_ml_frac_low_value) + general_ml_frac_low_value/general_model_speedup_value)
-    range_speedup_high_value = 1 / ((1 - general_ml_frac_high_value) + general_ml_frac_high_value/general_model_speedup_value)
+    cam_speedup_10x = 1 / (cam_non_ml_fraction + cam_ml_fraction/cam_ml_speedup)
+    cam_speedup_inf = 1 / cam_non_ml_fraction                                     # theoretical max
+    cam_ml_optimized = cam_ml / cam_ml_speedup                                    # 6 ms
+    cam_total_optimized = cam_isp + cam_ml_optimized + cam_post                   # 146 ms
+    range_speedup_low = 1 / ((1 - general_ml_frac_low) + general_ml_frac_low/general_model_speedup)
+    range_speedup_high = 1 / ((1 - general_ml_frac_high) + general_ml_frac_high/general_model_speedup)
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    cam_isp_str = fmt_time(cam_isp_ms_value, 'millisecond', precision=0, commas=False)
-    cam_ml_str = fmt_time(cam_ml_ms_value, 'millisecond', precision=0, commas=False)
-    cam_post_str = fmt_time(cam_post_ms_value, 'millisecond', precision=0, commas=False)
-    cam_total_str = fmt_time(cam_total_ms_value, 'millisecond', precision=0, commas=False)
-    cam_ml_pct_str = fmt_percent(cam_ml_frac_value, precision=0, commas=False, style="symbol")
-    cam_non_ml_pct_str = fmt_percent(cam_non_ml_frac_value, precision=0, commas=False, style="symbol")
-    cam_speedup_10x_str = fmt(cam_speedup_10x_value, precision=2, commas=False)    # "1.37"
-    cam_speedup_inf_str = fmt(cam_speedup_inf_value, precision=2, commas=False)    # "1.43"
-    cam_ml_opt_str = fmt_time(cam_ml_optimized_ms_value, 'millisecond', precision=0, commas=False)
-    cam_total_opt_str = fmt_time(cam_total_optimized_ms_value, 'millisecond', precision=0, commas=False)
-    range_speedup_low_str = fmt(range_speedup_low_value, precision=1, commas=False)
-    range_speedup_high_str = fmt_int(round(range_speedup_high_value), commas=False)
+    cam_isp_str = fmt_time(cam_isp, millisecond, precision=0, commas=False)
+    cam_ml_str = fmt_time(cam_ml, millisecond, precision=0, commas=False)
+    cam_post_str = fmt_time(cam_post, millisecond, precision=0, commas=False)
+    cam_total_str = fmt_time(cam_total, millisecond, precision=0, commas=False)
+    cam_ml_pct_str = fmt_percent(cam_ml_fraction, precision=0, commas=False, style="symbol")
+    cam_non_ml_pct_str = fmt_percent(cam_non_ml_fraction, precision=0, commas=False, style="symbol")
+    cam_speedup_10x_str = fmt(cam_speedup_10x, precision=2, commas=False)          # "1.37"
+    cam_speedup_inf_str = fmt(cam_speedup_inf, precision=2, commas=False)          # "1.43"
+    cam_ml_opt_str = fmt_time(cam_ml_optimized, millisecond, precision=0, commas=False)
+    cam_total_opt_str = fmt_time(cam_total_optimized, millisecond, precision=0, commas=False)
+    range_speedup_low_str = fmt(range_speedup_low, precision=1, commas=False)
+    range_speedup_high_str = fmt_int(round(range_speedup_high), commas=False)
 ```
 
 **Fallacy**: *Model optimization translates linearly to system speedup.*

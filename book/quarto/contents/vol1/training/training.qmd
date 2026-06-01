@@ -62,13 +62,14 @@ from mlsysim.core.constants import *
 # │ How:  Retrieve model specs from Digital Twins; format costs and FLOPs.
 # │
 # │ Imports: mlsysim (Hardware, Models), mlsysim.core.constants (*),
-# │          mlsysim.fmt (fmt, sci, fmt_math, check),
-# │          mlsysim.physics (model_memory)
+# │          mlsysim.fmt (domain formatters, fmt, sci, fmt_math, check)
 # │ Exports: TrainingScenarios.{cost,flops,loss,fp16}
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware, Models
-from mlsysim.fmt import fmt_int, fmt, fmt_sci, fmt_sci_qty, fmt_math, check, fmt_qty
-from mlsysim.physics import model_memory
+from mlsysim.fmt import (
+    fmt_int, fmt, fmt_count, fmt_sci, fmt_sci_qty, fmt_math, check,
+    fmt_bandwidth, fmt_flop_rate, fmt_memory, fmt_params,
+)
 
 class TrainingScenarios:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
@@ -76,16 +77,16 @@ class TrainingScenarios:
     gpt4_cost_est    = 100 * MILLION
     gpt2_fwd_flops   = 3e9
     gpt2_total_flops = 1e19
-    adam_example_params_b = Models.Language.Llama2_7B.parameters.to(Bparam).magnitude
-    adam_example_params = adam_example_params_b * BILLION
+    adam_example_model = Models.Language.Llama2_7B
+    adam_example_params = adam_example_model.parameters
     ckpt_layers = 48
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    adam_inference_gb = model_memory(adam_example_params, BYTES_FP16, GB)
-    adam_grad_gb = model_memory(adam_example_params, BYTES_FP16, GB)
-    adam_moments_gb = model_memory(adam_example_params, BYTES_ADAM_STATE, GB)
-    adam_training_state_gb = adam_inference_gb + adam_grad_gb + adam_moments_gb
-    adam_training_memory_multiplier = adam_training_state_gb / adam_inference_gb
+    adam_inference = adam_example_model.size_in_bytes(BYTES_FP16)
+    adam_grad = adam_example_model.size_in_bytes(BYTES_FP16)
+    adam_moments = adam_example_model.size_in_bytes(BYTES_ADAM_STATE)
+    adam_training_state = adam_inference + adam_grad + adam_moments
+    adam_training_memory_multiplier = (adam_training_state / adam_inference).to("").magnitude
 
     ckpt_count = round(ckpt_layers ** 0.5)
     ckpt_memory_units = ckpt_count + (ckpt_layers / ckpt_count)
@@ -100,11 +101,11 @@ class TrainingScenarios:
     gpt4_training_cost_est_str  = fmt(gpt4_cost_est/MILLION, precision=0, commas=False)
     gpt2_fwd_flops_str          = fmt_sci(gpt2_fwd_flops)
     gpt2_total_flops_str        = fmt_sci_qty(gpt2_total_flops * flop, flop, unit_label="FLOPs")
-    adam_example_params_b_str = fmt_count(adam_example_params_b * BILLION, scale='B', precision=0, commas=False)
-    adam_inference_gb_str = fmt_qty(adam_inference_gb * GB, GB, precision=0, commas=False)
-    adam_grad_gb_str = fmt_qty(adam_grad_gb * GB, GB, precision=0, commas=False)
-    adam_moments_gb_str = fmt_qty(adam_moments_gb * GB, GB, precision=0, commas=False)
-    adam_training_state_gb_str = fmt_qty(adam_training_state_gb * GB, GB, precision=0, commas=False)
+    adam_example_params_b_str = fmt_params(adam_example_params, precision=0)
+    adam_inference_gb_str = fmt_memory(adam_inference, unit=GB, precision=0, commas=False)
+    adam_grad_gb_str = fmt_memory(adam_grad, unit=GB, precision=0, commas=False)
+    adam_moments_gb_str = fmt_memory(adam_moments, unit=GB, precision=0, commas=False)
+    adam_training_state_gb_str = fmt_memory(adam_training_state, unit=GB, precision=0, commas=False)
     adam_training_memory_multiplier_str = fmt_multiple(adam_training_memory_multiplier, precision=0, commas=False)
     ckpt_layers_str = fmt_count(ckpt_layers, commas=False, label="layer")
     ckpt_layers_count_str = fmt(ckpt_layers, precision=0, commas=False)
@@ -113,8 +114,15 @@ class TrainingScenarios:
     ckpt_memory_savings_pct_str = fmt_percent(ckpt_memory_savings_pct/100, precision=1, commas=False, style='symbol')
 
     # Hardware specs used in the staged-pipeline narrative and MFU callout
-    nvlink_h100_gbs_str = fmt_qty(Hardware.Cloud.H100.nvlink.bandwidth, GB/second, precision=0, commas=False)
-    a100_tflops_fp16_str        = fmt_qty(Hardware.Cloud.A100.compute.peak_flops, TFLOP/second, precision=0, commas=False)
+    nvlink_h100_gbs_str = fmt_bandwidth(
+        Hardware.Cloud.H100.nvlink.bandwidth, unit=GB / second, precision=0, commas=False
+    )
+    a100_tflops_fp16_str = fmt_flop_rate(
+        Hardware.Cloud.A100.compute.peak_flops,
+        unit=TFLOP / second,
+        precision=0,
+        commas=False,
+    )
 ```
 
 ## Training Systems Fundamentals {#sec-model-training-training-systems-fundamentals-05d2}
@@ -151,20 +159,20 @@ from mlsysim import Models
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Goal: GPT-2 weight, Adam, and layer counts for memory-pressure prose.
 # │ Exports: TrainingMemoryPressure.{gpt2_params_b,gpt2_params_gb_fp32,gpt2_adam,gpt2_layers}_str
-from mlsysim.fmt import fmt, fmt_count, fmt_qty
+from mlsysim.fmt import fmt_count, fmt_memory, fmt_params
 
 class TrainingMemoryPressure:
     gpt2 = Models.Language.GPT2
-    gpt2_params_b = gpt2.parameters.to(Bparam).magnitude
+    gpt2_params = gpt2.parameters
     gpt2_layers = gpt2.layers
-    gpt2_params_gb_fp32 = gpt2.size_in_bytes(BYTES_FP32).to(GB).magnitude
-    gpt2_adam_gb = gpt2.size_in_bytes(BYTES_ADAM_STATE).to(GB).magnitude
+    gpt2_params_fp32 = gpt2.size_in_bytes(BYTES_FP32)
+    gpt2_adam = gpt2.size_in_bytes(BYTES_ADAM_STATE)
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    gpt2_params_b_str = fmt_count(gpt2_params_b * BILLION, scale='B', precision=1, commas=False)
+    gpt2_params_b_str = fmt_params(gpt2_params)
     gpt2_layers_str = fmt_count(gpt2_layers, commas=False, label="layer")
-    gpt2_params_gb_fp32_str = fmt_qty(gpt2_params_gb_fp32 * GB, GB, precision=0, commas=False)
-    gpt2_adam_gb_str = fmt_qty(gpt2_adam_gb * GB, GB, precision=0, commas=False)
+    gpt2_params_gb_fp32_str = fmt_memory(gpt2_params_fp32, unit=GB, precision=0, commas=False)
+    gpt2_adam_gb_str = fmt_memory(gpt2_adam, unit=GB, precision=0, commas=False)
 ```
 
 \index{Training!computational intensity}\index{Training!memory pressure}
@@ -266,7 +274,7 @@ The iron law provides a static framework for reasoning about training performanc
 ```{python}
 #| echo: false
 #| label: gpt2-lighthouse-hardware-calc
-from mlsysim.fmt import fmt, fmt_count, fmt_sci_qty, fmt_qty
+from mlsysim.fmt import fmt_sci_qty, fmt_memory, fmt_params
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ GPT-2 LIGHTHOUSE + V100 HARDWARE SPECS
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -286,22 +294,24 @@ from mlsysim.fmt import fmt, fmt_count, fmt_sci_qty, fmt_qty
 # ── GPT-2 Lighthouse Sizes + DLRM Scale ──────────────────────────────────
 class GPT2LighthouseSpecs:
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────────
-    gpt2_params_b        = Models.Language.GPT2.parameters.to(Bparam).magnitude
+    gpt2_model           = Models.Language.GPT2
+    gpt2_params          = gpt2_model.parameters
     gpt2_total_flops     = 1e19
-    gpt2_weights_fp16_gb = 3
-    gpt2_weights_fp32_gb = 6
-    gpt2_dataset_size_gb = 40
-    dlrm_params_min_b    = 100
-    dlrm_params_max_t    = 10
+    gpt2_weights_fp16    = gpt2_model.size_in_bytes(BYTES_FP16)
+    gpt2_weights_fp32    = gpt2_model.size_in_bytes(BYTES_FP32)
+    gpt2_dataset_size    = gpt2_model.training_dataset_size
+    dlrm_model           = Models.Recommendation.DLRM
+    dlrm_params_min      = dlrm_model.parameter_range_min
+    dlrm_params_max      = dlrm_model.parameter_range_max
 
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────────
-    gpt2_params_b_str = fmt_count(gpt2_params_b * BILLION, scale='B', precision=1, commas=False)
+    gpt2_params_b_str = fmt_params(gpt2_params)
     gpt2_total_flops_str     = fmt_sci_qty(gpt2_total_flops * flop, flop, unit_label="FLOPs")
-    gpt2_weights_fp16_gb_str = fmt_qty(gpt2_weights_fp16_gb * GB, GB, precision=0, commas=False)
-    gpt2_weights_fp32_gb_str = fmt_qty(gpt2_weights_fp32_gb * GB, GB, precision=0, commas=False)
-    gpt2_dataset_size_gb_str = fmt_qty(gpt2_dataset_size_gb * GB, GB, precision=0, commas=False)
-    dlrm_params_min_b_str = fmt_count(dlrm_params_min_b * BILLION, scale='B', precision=0, commas=False)
-    dlrm_params_max_t_str    = fmt(dlrm_params_max_t, precision=0, commas=False)
+    gpt2_weights_fp16_gb_str = fmt_memory(gpt2_weights_fp16, unit=GB, precision=0, commas=False)
+    gpt2_weights_fp32_gb_str = fmt_memory(gpt2_weights_fp32, unit=GB, precision=0, commas=False)
+    gpt2_dataset_size_gb_str = fmt_memory(gpt2_dataset_size, unit=GB, precision=0, commas=False)
+    dlrm_params_min_b_str = fmt_params(dlrm_params_min, precision=0)
+    dlrm_params_max_t_str = fmt_params(dlrm_params_max, precision=0)
 ```
 
 ### Running example: Training GPT-2 {#sec-model-training-running-example-training-gpt2-19cd}
@@ -327,7 +337,7 @@ Training GPT-2 is primarily memory-bound (due to activation storage) and compute
 
 :::
 
-Not all training workloads are compute bound. Recommendation models like Deep Learning Recommendation Model (DLRM) are dominated by massive embedding tables\index{Embedding Table!capacity bottleneck} (`{python} GPT2LighthouseSpecs.dlrm_params_min_b_str` to `{python} GPT2LighthouseSpecs.dlrm_params_max_t_str` trillion parameters, mostly embeddings) that make them memory-bandwidth-bound rather than compute bound, requiring model parallelism for *capacity* rather than *throughput*. The remainder of this chapter focuses on dense, compute-intensive training using GPT-2 as the primary worked example.
+Not all training workloads are compute bound. Recommendation models like Deep Learning Recommendation Model (DLRM) are dominated by massive embedding tables\index{Embedding Table!capacity bottleneck} (`{python} GPT2LighthouseSpecs.dlrm_params_min_b_str` to `{python} GPT2LighthouseSpecs.dlrm_params_max_t_str` parameters, mostly embeddings) that make them memory-bandwidth-bound rather than compute bound, requiring model parallelism for *capacity* rather than *throughput*. The remainder of this chapter focuses on dense, compute-intensive training using GPT-2 as the primary worked example.
 
 Training systems occupy a critical position in the machine learning pipeline: they consume prepared data from upstream engineering (@sec-data-engineering) and produce trained models for downstream deployment (@sec-ml-operations). Data quality directly impacts training stability, while training efficiency determines iteration velocity during model development. Modern training systems face three scaling challenges. First, data scale: processing petabyte datasets requires efficient I/O pipelines and distributed storage. Second, model scale: billion-parameter models demand parallelization strategies including data parallelism\index{Distributed Training!data parallelism}[^fn-training-data-parallelism] (replicate model, split data) and model parallelism\index{Distributed Training!model parallelism}[^fn-training-model-parallelism] (split model across devices). Third, infrastructure scale: coordinating thousands of accelerators introduces communication overhead that can dominate training time. These challenges motivate the workflow management tools (@sec-ml-workflow) that automate training orchestration.
 
@@ -423,7 +433,7 @@ To illustrate the scale of these operations concretely, consider the attention l
 # │          n_layers_gpt2_str, training_steps_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware, Models
-from mlsysim.fmt import fmt_int, fmt, fmt_count, check, fmt_time, fmt_qty
+from mlsysim.fmt import fmt_int, fmt, fmt_count, check, fmt_time, fmt_qty, fmt_flop_rate
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT2Compute:
@@ -446,7 +456,7 @@ class GPT2Compute:
     steps = 50_000
 
     # Hardware (V100)
-    v100_tflops = Hardware.Cloud.V100.compute.peak_flops.to(TFLOPs/second).magnitude
+    v100_peak_flops = Hardware.Cloud.V100.compute.peak_flops
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # A. Attention Layer
@@ -476,10 +486,12 @@ class GPT2Compute:
 
     # Step 7: Total Training
     flops_training_total = flops_step_total * steps
+    flops_layer_fwd_qty = flops_layer_fwd * flop
+    flops_step_total_qty = flops_step_total * flop
+    flops_training_total_qty = flops_training_total * flop
 
     # Step 8: Time
-    step_tflops = flops_step_total/TRILLION
-    v100_time_s = step_tflops/v100_tflops
+    v100_time = (flops_step_total_qty / v100_peak_flops).to(second)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(flops_training_total >= QUADRILLION, f"Training FLOPs ({flops_training_total:.1e}) too low.")
@@ -490,11 +502,11 @@ class GPT2Compute:
     attn_pair_billion_str = fmt_int(flops_attn_pair/BILLION, commas=False)
     out_proj_billion_str = fmt_int(flops_out_proj/BILLION, commas=False)
 
-    total_layer_str = fmt_qty(flops_layer_fwd * flop, GFLOPs, precision=1, commas=False, unit_label="billion FLOPs")
+    total_layer_str = fmt_qty(flops_layer_fwd_qty, GFLOPs, precision=1, commas=False, unit_label="billion FLOPs")
 
-    per_step_t_str = fmt_qty(flops_step_total * flop, TFLOPs, precision=1, commas=False, unit_label="trillion FLOPs")
-    total_peta_str = fmt_qty(flops_training_total * flop, PFLOPs, precision=1, commas=False)
-    v100_time_str = fmt_time(v100_time_s, 'second', precision=1, commas=False)
+    per_step_t_str = fmt_qty(flops_step_total_qty, TFLOPs, precision=1, commas=False, unit_label="trillion FLOPs")
+    total_peta_str = fmt_qty(flops_training_total_qty, PFLOPs, precision=1, commas=False)
+    v100_time_str = fmt_time(v100_time, second, precision=1, commas=False)
 
     # Formula structure constants
     mac_factor = 2
@@ -566,18 +578,18 @@ $$
 # │ Imports: mlsysim.core.constants (TFLOPs, second, GB)
 # │ Exports: TrainingHardware.v100_tflops_fp16_str, TrainingHardware.v100_tflops_fp32_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_bandwidth, fmt_flop_rate, fmt_memory
 
 class TrainingHardware:
     v100 = Hardware.Cloud.V100
-    v100_tflops_fp16 = v100.compute.peak_flops.to(TFLOPs/second).magnitude
-    v100_tflops_fp32 = v100.compute.precision_flops['fp32'].to(TFLOPs/second).magnitude
-    v100_bw          = v100.memory.bandwidth.to(GB/second).magnitude
-    v100_mem         = v100.memory.capacity.to(GB).magnitude
-
-    v100_tflops_fp16_str = fmt_qty(v100_tflops_fp16 * (TFLOP / second), TFLOP / second, precision=0, commas=False)
-    v100_tflops_fp32_str = fmt_qty(v100_tflops_fp32 * (TFLOP / second), TFLOP / second, precision=1, commas=False)
-    v100_bw_str = fmt_qty(v100_bw * GB / second, GB / second, precision=0, commas=False)
-    v100_mem_str         = fmt_qty(v100_mem * GB, GB, precision=1, commas=False)
+    v100_tflops_fp16_str = fmt_flop_rate(
+        v100.compute.peak_flops, unit=TFLOP / second, precision=0, commas=False
+    )
+    v100_tflops_fp32_str = fmt_flop_rate(
+        v100.compute.precision_flops["fp32"], unit=TFLOP / second, precision=1, commas=False
+    )
+    v100_bw_str = fmt_bandwidth(v100.memory.bandwidth, unit=GB / second, precision=0, commas=False)
+    v100_mem_str = fmt_memory(v100.memory.capacity, unit=GB, precision=1, commas=False)
 ```
 
 **Systems insight**: A V100 GPU (`{python} TrainingHardware.v100_tflops_fp16_str` peak with Tensor Cores, `{python} TrainingHardware.v100_tflops_fp32_str` without) would require `{python} GPT2Compute.v100_time_str` for the modeled attention-plus-FFN training-step estimate at 100 percent utilization (theoretical peak; practical throughput would be lower). Actual training steps take 180 to 220 ms, requiring 8 to 32 GPUs to achieve this throughput depending on utilization and interconnect efficiency.
@@ -893,8 +905,7 @@ $$ {#eq-batch-memory-decomposition}
 # │          resnet50_grad_mem_b64_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
-from mlsysim.physics import model_memory
-from mlsysim.fmt import fmt, check, fmt_qty
+from mlsysim.fmt import check, fmt_memory, fmt_percent
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ResNetBatchMemory:
@@ -906,27 +917,28 @@ class ResNetBatchMemory:
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     # Activations and gradients are representative measured values; parameter
     # memory comes from the model registry.
-    act_mem_b32_gb = 8
-    grad_mem_b32_gb = 4
+    act_mem_b32 = 8 * GB  # scenario assumption
+    grad_mem_b32 = 4 * GB  # scenario assumption
     model = Models.Vision.ResNet50
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Doubling batch size doubles activation and gradient memory
-    act_mem_b64_gb = act_mem_b32_gb * 2
-    grad_mem_b64_gb = grad_mem_b32_gb * 2
-    param_mem_b32_mb = model_memory(model.parameters, BYTES_FP32, MB)
+    act_mem_b64 = act_mem_b32 * 2
+    grad_mem_b64 = grad_mem_b32 * 2
+    param_mem_b32 = model.size_in_bytes(BYTES_FP32)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(act_mem_b64_gb == 2 * act_mem_b32_gb, "Batch doubling should double activation memory")
-    check(100 <= param_mem_b32_mb <= 105, f"ResNet-50 FP32 parameters should be about 102 MB, got {param_mem_b32_mb:.1f}")
+    check(act_mem_b64 == 2 * act_mem_b32, "Batch doubling should double activation memory")
+    param_mem_b32_value = param_mem_b32.to(MB).magnitude
+    check(100 <= param_mem_b32_value <= 105, f"ResNet-50 FP32 parameters should be about 102 MB, got {param_mem_b32_value:.1f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    resnet50_act_mem_b32_gb_str = fmt_qty(act_mem_b32_gb * GB, GB, precision=0, commas=False)
-    resnet50_grad_mem_b32_gb_str = fmt_qty(grad_mem_b32_gb * GB, GB, precision=0, commas=False)
-    resnet50_param_mem_b32_mb_str = fmt_qty(param_mem_b32_mb * MB, MB, precision=1, commas=False)
+    resnet50_act_mem_b32_gb_str = fmt_memory(act_mem_b32, unit=GB, precision=0, commas=False)
+    resnet50_grad_mem_b32_gb_str = fmt_memory(grad_mem_b32, unit=GB, precision=0, commas=False)
+    resnet50_param_mem_b32_mb_str = fmt_memory(param_mem_b32, unit=MB, precision=1, commas=False)
 
-    resnet50_act_mem_b64_gb_str = fmt_qty(act_mem_b64_gb * GB, GB, precision=0, commas=False)
-    resnet50_grad_mem_b64_gb_str = fmt_qty(grad_mem_b64_gb * GB, GB, precision=0, commas=False)
+    resnet50_act_mem_b64_gb_str = fmt_memory(act_mem_b64, unit=GB, precision=0, commas=False)
+    resnet50_grad_mem_b64_gb_str = fmt_memory(grad_mem_b64, unit=GB, precision=0, commas=False)
 
 # Note: Use ResNetBatchMemory.resnet50_act_mem_b32_gb_str directly.
 ```
@@ -989,7 +1001,8 @@ v_t = \beta_2 v_{t-1} + (1-\beta_2)\big(\nabla \mathcal{L}(\theta_t)\big)^2
 # │ Imports: mlsysim.core.constants (BYTES_FP32, byte)
 # │ Exports: adam_overhead_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, fmt_qty, check
+from mlsysim.physics import memory_from_params
+from mlsysim.fmt import fmt_memory
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AdamMemory:
@@ -999,16 +1012,15 @@ class AdamMemory:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    params_m = 100
+    params = 100 * Mparam  # scenario assumption
     vectors = 2 # m_t, v_t
-    bytes_per_val = BYTES_FP32.to(byte).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Overhead = params * 2 vectors * 4 bytes
-    overhead_mb = params_m * vectors * bytes_per_val
+    overhead = memory_from_params(params, vectors * BYTES_FP32 / param)
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    adam_overhead_str = fmt_qty(overhead_mb * MB, MB, precision=0, commas=False)
+    adam_overhead_str = fmt_memory(overhead, unit=MB, precision=0, commas=False)
 
 # Note: Use AdamMemory.adam_overhead_str directly.
 ```
@@ -1021,27 +1033,27 @@ The system implications of Adam are more substantial than previous methods. The 
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Goal: SGD iteration ranges and Adam memory for a 7B-parameter model.
 # │ Exports: OptimizerScenarios.{sgd_iterations,adam_7b}_*_str
-from mlsysim.physics import model_memory
-from mlsysim.fmt import fmt, check, fmt_count, fmt_qty
+from mlsysim.physics import memory_from_params
+from mlsysim.fmt import fmt, check, fmt_memory, fmt_params
 
 class OptimizerScenarios:
     sgd_iters_min      = 50_000
     sgd_iters_max      = 500_000
-    adam_7b_params     = 7
+    adam_7b_params     = 7 * Bparam
 
-    adam_7b_param_count = adam_7b_params * BILLION
-    adam_7b_weights_gb = model_memory(adam_7b_param_count, BYTES_FP16, GB)
-    adam_7b_gradients_gb = adam_7b_weights_gb
-    adam_7b_moments_gb = model_memory(adam_7b_param_count, BYTES_ADAM_STATE, GB)
-    adam_7b_state_gb = adam_7b_weights_gb + adam_7b_gradients_gb + adam_7b_moments_gb
+    adam_7b_weights = memory_from_params(adam_7b_params, BYTES_FP16 / param)
+    adam_7b_gradients = adam_7b_weights
+    adam_7b_moments = memory_from_params(adam_7b_params, BYTES_ADAM_STATE / param)
+    adam_7b_state = adam_7b_weights + adam_7b_gradients + adam_7b_moments
 
-    check(adam_7b_state_gb == 84, f"7-billion-parameter Adam state should be 84 GB, got {adam_7b_state_gb}")
+    adam_7b_state_value = adam_7b_state.to(GB).magnitude
+    check(adam_7b_state_value == 84, f"7-billion-parameter Adam state should be 84 GB, got {adam_7b_state_value}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     sgd_iterations_min_str = fmt(sgd_iters_min, precision=0, commas=True)
     sgd_iterations_max_str = fmt(sgd_iters_max, precision=0, commas=True)
-    adam_7b_params_str = fmt_count(adam_7b_params * BILLION, scale='B', precision=0, commas=False)
-    adam_7b_state_gb_str = fmt_qty(adam_7b_state_gb * GB, GB, precision=0, commas=False)
+    adam_7b_params_str = fmt_params(adam_7b_params, precision=0)
+    adam_7b_state_gb_str = fmt_memory(adam_7b_state, unit=GB, precision=0, commas=False)
 ```
 
 [^fn-adam-optimizer-memory]: **Adam (Adaptive Moment Estimation)**: The two moving averages are the first moment (momentum) and second moment (uncentered variance) of the gradients, stored for every model parameter. For a `{python} OptimizerScenarios.adam_7b_params_str` model, Adam's FP32 moment tensors alone consume 56 GB; the full mixed-precision training state before activations is `{python} OptimizerScenarios.adam_7b_state_gb_str` once FP16 weights, FP16 gradients, and Adam moments are counted together. \index{Adam Optimizer!memory overhead}
@@ -1077,14 +1089,12 @@ The choice of optimization algorithm creates specific patterns of computation an
 # │ How: Compare weight, gradient, and state bytes for GPT-2.
 # │
 # │ Imports: mlsysim (Hardware, Models), mlsysim.core.constants (Bparam,
-# │          BYTES_FP32, BYTES_FP16, GB), mlsysim.book (fmt),
-# │          mlsysim.physics (model_memory)
+# │          BYTES_FP32, BYTES_FP16, GB), mlsysim.book (fmt)
 # │ Exports: param_fp32_str, grad_fp32_str, adam_state_str,
 # │          total_static_fp32_str, total_static_amp_str, v100_mem_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware, Models
-from mlsysim.fmt import fmt_int, fmt, check, fmt_count, fmt_qty
-from mlsysim.physics import model_memory
+from mlsysim.fmt import check, fmt_memory, fmt_params
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT2Optimizer:
@@ -1095,33 +1105,33 @@ class GPT2Optimizer:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     model = Models.Language.GPT2
-    v100_mem_gb = Hardware.Cloud.V100.memory.capacity.to(GiB).magnitude
+    v100_mem = Hardware.Cloud.V100.memory.capacity
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    model_params_b = model.parameters.to(Bparam).magnitude
+    model_params = model.parameters
 
     # FP32 Baseline
-    param_fp32_gb = model_memory(model.parameters, BYTES_FP32, GB)
-    grad_fp32_gb = model_memory(model.parameters, BYTES_FP32, GB)
-    adam_m_fp32_gb = model_memory(model.parameters, BYTES_FP32, GB)
-    adam_v_fp32_gb = model_memory(model.parameters, BYTES_FP32, GB)
-    total_static_fp32 = param_fp32_gb + grad_fp32_gb + adam_m_fp32_gb + adam_v_fp32_gb
+    param_fp32 = model.size_in_bytes(BYTES_FP32)
+    grad_fp32 = model.size_in_bytes(BYTES_FP32)
+    adam_m_fp32 = model.size_in_bytes(BYTES_FP32)
+    adam_v_fp32 = model.size_in_bytes(BYTES_FP32)
+    total_static_fp32 = param_fp32 + grad_fp32 + adam_m_fp32 + adam_v_fp32
 
     # AMP (FP16)
-    param_fp16_gb = model_memory(model.parameters, BYTES_FP16, GB)
-    grad_fp16_gb = model_memory(model.parameters, BYTES_FP16, GB)
-    master_fp32_gb = model_memory(model.parameters, BYTES_FP32, GB)
+    param_fp16 = model.size_in_bytes(BYTES_FP16)
+    grad_fp16 = model.size_in_bytes(BYTES_FP16)
+    master_fp32 = model.size_in_bytes(BYTES_FP32)
     # Optimizer remains FP32
-    total_static_amp = param_fp16_gb + grad_fp16_gb + master_fp32_gb + adam_m_fp32_gb + adam_v_fp32_gb
+    total_static_amp = param_fp16 + grad_fp16 + master_fp32 + adam_m_fp32 + adam_v_fp32
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    model_params_b_str = fmt_count(model_params_b * BILLION, scale='B', precision=1, commas=False)
-    param_fp32_str = fmt_qty(param_fp32_gb * GB, GB, precision=0, commas=False)
-    grad_fp32_str = fmt_qty(grad_fp32_gb * GB, GB, precision=0, commas=False)
-    adam_state_str = fmt_qty((adam_m_fp32_gb + adam_v_fp32_gb) * GB, GB, precision=0, commas=False)
-    total_static_fp32_str = fmt_qty(total_static_fp32 * GB, GB, precision=0, commas=False)
-    total_static_amp_str = fmt_qty(total_static_amp * GB, GB, precision=0, commas=False)
-    v100_mem_gb_str = fmt_qty(v100_mem_gb * GiB, GiB, precision=0, commas=False)
+    model_params_b_str = fmt_params(model_params)
+    param_fp32_str = fmt_memory(param_fp32, unit=GB, precision=0, commas=False)
+    grad_fp32_str = fmt_memory(grad_fp32, unit=GB, precision=0, commas=False)
+    adam_state_str = fmt_memory(adam_m_fp32 + adam_v_fp32, unit=GB, precision=0, commas=False)
+    total_static_fp32_str = fmt_memory(total_static_fp32, unit=GB, precision=0, commas=False)
+    total_static_amp_str = fmt_memory(total_static_amp, unit=GB, precision=0, commas=False)
+    v100_mem_gb_str = fmt_memory(v100_mem, unit=GiB, precision=0, commas=False)
 
 # Note: Use GPT2Optimizer.param_fp32_str directly.
 ```
@@ -1361,8 +1371,8 @@ Here, we shift focus from *what* backpropagation computes to *what it costs* to 
 # │          peak_gb_str, v100_mem_str, ckpt_reduction_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware, Models
-from mlsysim.fmt import fmt_int, fmt, check, fmt_qty
-from mlsysim.physics import model_memory
+from mlsysim.fmt import fmt, check, fmt_count, fmt_memory, fmt_percent
+from mlsysim.physics import calc_activation_memory
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT2ActivationMemory:
@@ -1382,17 +1392,15 @@ class GPT2ActivationMemory:
     # Config
     batch_size = 8
     seq_len = 1024
-    bytes_per_val = 2 # FP16
+    bytes_per_val = BYTES_FP16.to(byte).magnitude
 
     # Derived
     ffn_dim = hidden_dim * 4
 
     # Hardware
-    v100_mem_gb = Hardware.Cloud.V100.memory.capacity.to(GiB).magnitude
+    v100_mem = Hardware.Cloud.V100.memory.capacity
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    from mlsysim.physics import calc_activation_memory, model_memory
-
     # Use library formula for activations
     total_act = calc_activation_memory(
         n_layers=layers,
@@ -1402,30 +1410,31 @@ class GPT2ActivationMemory:
         precision_bytes=bytes_per_val,
         strategy="none"
     )
-    total_act_gb = total_act.to(GB).magnitude
 
     # Individual parts for formatting (approximate for display)
-    attn_act_mb = (batch_size * seq_len * hidden_dim * 4 * bytes_per_val) / MILLION
-    ffn_act_mb = (batch_size * seq_len * ffn_dim * bytes_per_val) / MILLION
-    layernorm_mb = 10.0
-    per_layer_mb = attn_act_mb + ffn_act_mb + layernorm_mb
+    attn_act = batch_size * seq_len * hidden_dim * 4 * BYTES_FP16
+    ffn_act = batch_size * seq_len * ffn_dim * BYTES_FP16
+    layernorm = 10.0 * MB
+    per_layer = attn_act + ffn_act + layernorm
 
     # Step 5: C. Parameters & State
-    params_gb = model_memory(model.parameters, BYTES_FP16, GB)
-    grad_gb = params_gb
-    opt_gb = model_memory(model.parameters, BYTES_ADAM_STATE, GB)
+    params = model.size_in_bytes(BYTES_FP16)
+    grad = params
+    opt = model.size_in_bytes(BYTES_ADAM_STATE)
 
-    peak_gb = total_act_gb + params_gb + grad_gb + opt_gb
+    peak = total_act + params + grad + opt
 
     # Step 6: D. Optimizations
     ckpt_reduction_pct = 75
-    ckpt_act_gb = total_act_gb * (1 - ckpt_reduction_pct/100.0)
+    ckpt_act = total_act * (1 - ckpt_reduction_pct/100.0)
 
     recompute_overhead = 33
-    act_fp32_gb = total_act_gb * 2
+    act_fp32 = total_act * 2
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(total_act_gb >= params_gb, f"Activations ({total_act_gb:.1f}G) should exceed Params ({params_gb:.1f}G).")
+    total_act_value = total_act.to(GB).magnitude
+    params_value = params.to(GB).magnitude
+    check(total_act_value >= params_value, f"Activations ({total_act_value:.1f}G) should exceed Params ({params_value:.1f}G).")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     batch_size_str = fmt(batch_size, precision=0, commas=False)
@@ -1434,22 +1443,22 @@ class GPT2ActivationMemory:
     hidden_dim_str = fmt(hidden_dim, precision=0, commas=False)
     ffn_dim_str = fmt(ffn_dim, precision=0, commas=False)
 
-    attn_act_str = fmt_qty(attn_act_mb * MB, MB, precision=1, commas=False)
-    ffn_act_str = fmt_qty(ffn_act_mb * MB, MB, precision=1, commas=False)
-    layernorm_mb_str = fmt_qty(layernorm_mb * MB, MB, precision=0, commas=False)
-    per_layer_str = fmt_qty(per_layer_mb * MB, MB, precision=1, commas=False)
+    attn_act_str = fmt_memory(attn_act, unit=MB, precision=1, commas=False)
+    ffn_act_str = fmt_memory(ffn_act, unit=MB, precision=1, commas=False)
+    layernorm_mb_str = fmt_memory(layernorm, unit=MB, precision=0, commas=False)
+    per_layer_str = fmt_memory(per_layer, unit=MB, precision=1, commas=False)
 
-    total_act_str = fmt_qty(total_act_gb * GB, GB, precision=1, commas=False)
-    params_gb_str = fmt_qty(params_gb * GB, GB, precision=0, commas=False)
-    grad_gb_str = fmt_qty(grad_gb * GB, GB, precision=0, commas=False)
-    opt_gb_str = fmt_qty(opt_gb * GB, GB, precision=0, commas=False)
-    peak_gb_str = fmt_qty(peak_gb * GB, GB, precision=1, commas=False)
-    v100_mem_str = fmt_qty(v100_mem_gb * GiB, GiB, precision=0, commas=False)
+    total_act_str = fmt_memory(total_act, unit=GB, precision=1, commas=False)
+    params_gb_str = fmt_memory(params, unit=GB, precision=0, commas=False)
+    grad_gb_str = fmt_memory(grad, unit=GB, precision=0, commas=False)
+    opt_gb_str = fmt_memory(opt, unit=GB, precision=0, commas=False)
+    peak_gb_str = fmt_memory(peak, unit=GB, precision=1, commas=False)
+    v100_mem_str = fmt_memory(v100_mem, unit=GiB, precision=0, commas=False)
 
-    ckpt_reduction_str = fmt_multiple(ckpt_reduction_pct, precision=0, commas=False)
-    ckpt_act_gb_str = fmt_qty(ckpt_act_gb * GB, GB, precision=1, commas=False)
+    ckpt_reduction_str = fmt_percent(ckpt_reduction_pct / 100, precision=0, commas=False, style="symbol")
+    ckpt_act_gb_str = fmt_memory(ckpt_act, unit=GB, precision=1, commas=False)
     recompute_str = fmt(recompute_overhead, precision=0, commas=False)
-    act_fp32_gb_str = fmt_qty(act_fp32_gb * GB, GB, precision=1, commas=False)
+    act_fp32_gb_str = fmt_memory(act_fp32, unit=GB, precision=1, commas=False)
 
 # Note: Use GPT2ActivationMemory.total_act_str directly.
 ```
@@ -1519,7 +1528,7 @@ This exceeds a single V100's `{python} GPT2ActivationMemory.v100_mem_str` capaci
 
 **System Solutions Applied.**
 
-1. Gradient checkpointing: Recompute activations during backward pass, reducing activation memory by `{python} GPT2ActivationMemory.ckpt_reduction_str`$\times$ (to ~`{python} GPT2ActivationMemory.ckpt_act_gb_str`) at cost of `{python} GPT2ActivationMemory.recompute_str` more compute
+1. Gradient checkpointing: Recompute activations during backward pass, reducing activation memory by `{python} GPT2ActivationMemory.ckpt_reduction_str` (to ~`{python} GPT2ActivationMemory.ckpt_act_gb_str`) at cost of `{python} GPT2ActivationMemory.recompute_str` more compute
 2. Activation CPU offloading: Store some activations in CPU RAM, transfer during backward pass
 3. Mixed precision: FP16 activations (already applied) vs. FP32 (would be `{python} GPT2ActivationMemory.act_fp32_gb_str`)
 4. Reduced batch size: Use batch size $B=16$ per accelerator + gradient accumulation over two steps = effective batch size $B=32$
@@ -1713,7 +1722,7 @@ plt.close()
 # │       a100_bw_tbs_str, a100_ridge_str, h100_tflops_fp16_str,
 # │       h100_bw_tbs_str, h100_ridge_str—all defined in training-setup.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, check, fmt_qty
+from mlsysim.fmt import fmt, fmt_qty
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AttentionIntensity:
@@ -1730,10 +1739,10 @@ class AttentionIntensity:
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Materialized score attention: QK^T costs 2*S*S*d_head FLOPs per head,
     # while writing and later reading the S*S FP16 score matrix costs 4 bytes.
-    intensity = head_dim / 2
+    intensity = (head_dim / 2) * flop / byte
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    attn_intensity_str = fmt_qty(intensity * flop / byte, flop / byte, precision=0, commas=False, unit_label="FLOP/byte")
+    attn_intensity_str = fmt_qty(intensity, flop / byte, precision=0, commas=False, unit_label="FLOP/byte")
     H_small_str = fmt(h_small, precision=0, commas=False)
     heads_small_str = fmt(heads_small, precision=0, commas=False)
     head_dim_str = fmt(head_dim, precision=0, commas=False)
@@ -1759,55 +1768,50 @@ class AttentionIntensity:
 # │
 # │ Imports: Hardware (Cloud.A100, Cloud.H100), mlsysim.constants (TFLOPs,
 # │          PFLOPs, TB, GB, second, flop, byte, watt),
-# │          mlsysim.book (fmt)
+# │          mlsysim.book (domain formatters)
 # │ Exports: AcceleratorSpecs.{a100,h_h100}_*_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, fmt_bandwidth, fmt_flop_rate, fmt_multiple, fmt_qty, fmt_qty_int
+
 class AcceleratorSpecs:
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────────
     _a100 = Hardware.Cloud.A100
     _h_h100 = Hardware.Cloud.H100
 
     # ┌── 2. EXECUTE (A100) ────────────────────────────────────────────────────
-    a100_tflops_fp16 = _a100.compute.peak_flops.to(TFLOPs/second).magnitude
-    a100_tflops_fp32 = _a100.compute.precision_flops['fp32'].to(TFLOPs/second).magnitude
-    a100_bw_gbs      = _a100.memory.bandwidth.to(GB/second).magnitude
-    a100_bw_tbs      = _a100.memory.bandwidth.to(TB/second).magnitude
-    a100_mem          = _a100.memory.capacity.to(GB).magnitude
-    a100_ridge        = _a100.ridge_point().to(flop/byte).magnitude
-    a100_tdp          = _a100.tdp.to(watt).magnitude
+    a100_flops_fp16 = _a100.compute.peak_flops
+    a100_flops_fp32 = _a100.compute.precision_flops["fp32"]
+    a100_bw = _a100.memory.bandwidth
+    a100_ridge = _a100.ridge_point()
 
     # ┌── 2. EXECUTE (H100) ────────────────────────────────────────────────────
-    h100_mem          = _h_h100.memory.capacity.to(GB).magnitude
-    h100_tflops_fp16  = _h_h100.compute.peak_flops.to(TFLOPs/second).magnitude
-    h100_tflops_fp32_cuda = Hardware.Cloud.H100.compute.precision_flops["fp32_cuda"].to(TFLOPs/second).magnitude
-    h100_tflops_tf32  = _h_h100.compute.precision_flops["tf32"].to(TFLOPs/second).magnitude
-    h100_tflops_fp8   = _h_h100.compute.precision_flops["fp8"].to(TFLOPs/second).magnitude
-    h100_pflops_fp8   = _h_h100.compute.precision_flops["fp8"].to(PFLOPs/second).magnitude
-    h100_pflops_fp16  = _h_h100.compute.peak_flops.to(PFLOPs/second).magnitude
-    h100_bw_tbs       = _h_h100.memory.bandwidth.to(TB/second).magnitude
-    h100_ridge        = _h_h100.ridge_point().to(flop/byte).magnitude
-    a100_fp16_speedup = a100_tflops_fp16 / a100_tflops_fp32
-    h100_fp8_speedup_vs_fp16 = h100_tflops_fp8 / h100_tflops_fp16
-    h100_fp8_speedup_vs_fp32 = h100_tflops_fp8 / h100_tflops_fp32_cuda
+    h100_flops_fp16 = _h_h100.compute.peak_flops
+    h100_flops_fp32_cuda = _h_h100.compute.precision_flops["fp32_cuda"]
+    h100_flops_fp8 = _h_h100.compute.precision_flops["fp8"]
+    h100_bw = _h_h100.memory.bandwidth
+    h100_ridge = _h_h100.ridge_point()
+    a100_fp16_speedup = (a100_flops_fp16 / a100_flops_fp32).to("").magnitude
+    h100_fp8_speedup_vs_fp16 = (h100_flops_fp8 / h100_flops_fp16).to("").magnitude
+    h100_fp8_speedup_vs_fp32 = (h100_flops_fp8 / h100_flops_fp32_cuda).to("").magnitude
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────────
     check(15 <= a100_fp16_speedup <= 17, f"A100 FP16:FP32 peak ratio should be about 16x, got {a100_fp16_speedup:.1f}")
     check(1.9 <= h100_fp8_speedup_vs_fp16 <= 2.1, f"H100 FP8:FP16 peak ratio should be about 2x, got {h100_fp8_speedup_vs_fp16:.1f}")
 
     # ┌── 4. OUTPUT (A100) ─────────────────────────────────────────────────────
-    a100_tflops_fp16_str = fmt_qty(a100_tflops_fp16 * (TFLOP / second), TFLOP / second, precision=0, commas=False)
-    a100_tflops_fp32_str = fmt_qty(a100_tflops_fp32 * (TFLOP / second), TFLOP / second, precision=1, commas=False)
-    a100_bw_gbs_str = fmt_qty(a100_bw_gbs * GB / second, GB / second, precision=0, commas=True)
-    a100_bw_tbs_str = fmt_qty(a100_bw_tbs * TB / second, TB / second, precision=2, commas=False)
-    a100_ridge_str = fmt_qty(round(a100_ridge) * flop / byte, flop / byte, precision=0, commas=False, unit_label="FLOP/byte")
+    a100_tflops_fp16_str = fmt_flop_rate(a100_flops_fp16, unit=TFLOP / second, precision=0, commas=False)
+    a100_tflops_fp32_str = fmt_flop_rate(a100_flops_fp32, unit=TFLOP / second, precision=1, commas=False)
+    a100_bw_gbs_str = fmt_bandwidth(a100_bw, unit=GB / second, precision=0, commas=True)
+    a100_bw_tbs_str = fmt_bandwidth(a100_bw, unit=TB / second, precision=2, commas=False)
+    a100_ridge_str = fmt_qty_int(a100_ridge, flop / byte, commas=False, unit_label="FLOP/byte")
 
     # ┌── 4. OUTPUT (H100) ─────────────────────────────────────────────────────
-    h100_tflops_fp16_str  = fmt_qty(h100_tflops_fp16 * (TFLOP / second), TFLOP / second, precision=0, commas=False)
-    h100_tflops_fp8_str   = fmt(h100_tflops_fp8, precision=0, commas=True)
-    h100_pflops_fp8_str   = fmt(h100_pflops_fp8, precision=2, commas=False)
-    h100_pflops_fp16_str  = fmt(h100_pflops_fp16, precision=2, commas=False)
-    h100_bw_tbs_str = fmt_qty(h100_bw_tbs * TB / second, TB / second, precision=2, commas=False)
-    h100_ridge_str = fmt_qty(round(h100_ridge) * flop / byte, flop / byte, precision=0, commas=False, unit_label="FLOP/byte")
+    h100_tflops_fp16_str = fmt_flop_rate(h100_flops_fp16, unit=TFLOP / second, precision=0, commas=False)
+    h100_tflops_fp8_str = fmt_flop_rate(h100_flops_fp8, unit=TFLOP / second, precision=0, commas=True)
+    h100_pflops_fp8_str = fmt_flop_rate(h100_flops_fp8, unit=PFLOP / second, precision=2, commas=False)
+    h100_pflops_fp16_str = fmt_flop_rate(h100_flops_fp16, unit=PFLOP / second, precision=2, commas=False)
+    h100_bw_tbs_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
+    h100_ridge_str = fmt_qty_int(h100_ridge, flop / byte, commas=False, unit_label="FLOP/byte")
     a100_fp16_speedup_str = fmt_multiple(a100_fp16_speedup, precision=0, commas=False)
     h100_fp8_speedup_vs_fp16_str = fmt_int(round(h100_fp8_speedup_vs_fp16), commas=False)
 ```
@@ -2423,7 +2427,7 @@ where $R_{\text{compute}}$ is the accelerator's realized compute throughput for 
 # │ Exports: PipelineThroughputHardware.a100_tflops_fp16_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware
-from mlsysim.fmt import fmt, check, fmt_qty
+from mlsysim.fmt import check, fmt_bandwidth
 
 class PipelineThroughputHardware:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
@@ -2464,7 +2468,7 @@ Applying this throughput analysis to our GPT-2 Lighthouse Model reveals where th
 # │          pcie_gen3_str, transfer_ms_str, n_cpu_workers_str,
 # │          parallel_tokenization_ms_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int,  fmt, check, fmt_time, fmt_count, fmt_rate, fmt_qty
+from mlsysim.fmt import fmt_int, fmt, fmt_time, fmt_count, fmt_rate, fmt_memory, fmt_bandwidth
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT2DataPipeline:
@@ -2478,7 +2482,7 @@ class GPT2DataPipeline:
     seq_len = 1024
     token_rate = 500_000 # tokens/s/core
     workers = 8
-    dataset_gb = 40
+    dataset = Models.Language.GPT2.training_dataset_size
     bpe_vocab = 50_257
     f_access = 0.1
     gpu_forward_ms = 80
@@ -2486,17 +2490,16 @@ class GPT2DataPipeline:
     throughput_samples = 380
     n_v100_gpus = 8
 
-    pcie_bw = Hardware.Cloud.V100.interconnect.bandwidth.to(GB/second).magnitude
-    random_access_gbs = Hardware.Tech.Storage.NvmeGen3.bandwidth.to(GB/second).magnitude * f_access
+    pcie_bw = Hardware.Cloud.V100.interconnect.bandwidth
+    random_access_bw = Hardware.Tech.Storage.NvmeGen3.bandwidth * f_access
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     tokens_per_batch = batch_size * seq_len
     tokenization_ms = (tokens_per_batch/token_rate) * THOUSAND
 
-    batch_bytes = tokens_per_batch * 8 # int64
-    batch_kb = (batch_bytes * byte).to(KB).magnitude
+    batch_bytes = tokens_per_batch * 8 * byte # int64
 
-    transfer_ms = (batch_bytes/BILLION) / pcie_bw * THOUSAND # GB/GB/s * THOUSAND
+    transfer_time = (batch_bytes / pcie_bw).to(second)
 
     parallel_token_ms = tokenization_ms/workers
 
@@ -2504,14 +2507,14 @@ class GPT2DataPipeline:
     tokens_per_batch_str = fmt_count(tokens_per_batch, scale="K", precision=1, commas=False, label="token")
     token_rate_str = fmt_rate(token_rate, "tokens/s", scale="K", precision=0, commas=False)
     tokenization_ms_str = fmt_time(tokenization_ms, 'millisecond', precision=1, commas=False)
-    batch_kb_str = fmt_qty(batch_kb * KB, KB, precision=1, commas=False)
-    pcie_gen3_str = fmt_qty(pcie_bw * GB / second, GB / second, precision=2, commas=False)
-    transfer_ms_str = fmt_time(transfer_ms, 'millisecond', precision=3, commas=False)
+    batch_kb_str = fmt_memory(batch_bytes, unit=KB, precision=1, commas=False)
+    pcie_gen3_str = fmt_bandwidth(pcie_bw, unit=GB / second, precision=2, commas=False)
+    transfer_ms_str = fmt_time(transfer_time, millisecond, precision=3, commas=False)
     n_cpu_workers_str = fmt(workers, precision=0, commas=False)
     parallel_tokenization_ms_str = fmt_time(parallel_token_ms, 'millisecond', precision=1, commas=False)
-    dataset_gb_str = fmt_qty(dataset_gb * GB, GB, precision=0, commas=False)
+    dataset_gb_str = fmt_memory(dataset, unit=GB, precision=0, commas=False)
     bpe_vocab_str = fmt_int(bpe_vocab, commas=True)
-    random_access_gbs_str = fmt_qty(random_access_gbs * GB / second, GB / second, precision=2, commas=False)
+    random_access_gbs_str = fmt_bandwidth(random_access_bw, unit=GB / second, precision=2, commas=False)
     f_access_str = fmt(f_access, precision=1, commas=False)
     utilization_pct_str = fmt_percent(utilization_pct/100, precision=0, commas=False, style='symbol')
     throughput_samples_str = fmt_int(throughput_samples, commas=False)
@@ -2527,13 +2530,13 @@ from mlsysim.core.constants import GB, second
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Goal: NVMe sequential read bandwidth for GPT-2 data pipeline callout.
 # │ Exports: StorageBandwidthNvme.nvme_bw_str
-from mlsysim.fmt import fmt_qty
+from mlsysim.fmt import fmt_bandwidth
 
 class StorageBandwidthNvme:
-    nvme_bw = Hardware.Tech.Storage.NvmeGen4.bandwidth.to(GB/second).magnitude
+    nvme_bw = Hardware.Tech.Storage.NvmeGen4.bandwidth
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    nvme_bw_str = fmt_qty(nvme_bw * GB / second, GB / second, precision=0, commas=False)
+    nvme_bw_str = fmt_bandwidth(nvme_bw, unit=GB / second, precision=0, commas=False)
 ```
 
 ::: {#exmp-training-gpt-2-language-model-data-pipeline .callout-example title="GPT-2 language model data pipeline"}
@@ -2601,7 +2604,7 @@ While data pipeline throughput determines how fast training data reaches the GPU
 # │          network_time_str, network_bw_str, n_gpus_str,
 # │          allreduce_factor_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, check, fmt_count, fmt_time, fmt_qty
+from mlsysim.fmt import fmt_count, fmt_time, fmt_memory, fmt_bandwidth, fmt_multiple, fmt_params
 
 # ┌── LEGO ───────────────────────────────────────────────
 class NetworkWall:
@@ -2612,32 +2615,31 @@ class NetworkWall:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     model = Models.Language.Llama2_7B
-    params_b = model.parameters.to(Bparam).magnitude
-    bytes_per_param = BYTES_FP16.to(byte).magnitude # 2
-    network_bw_gbs = Systems.Fabrics.Ethernet_100G.bandwidth.to(GB / second).magnitude # 100 Gbps
-    nvlink_h100_gbs = Hardware.Cloud.H100.nvlink.bandwidth.to(GB / second).magnitude
+    params = model.parameters
+    network_bw = Systems.Fabrics.Ethernet_100G.bandwidth # 100 Gbps
+    nvlink_h100 = Hardware.Cloud.H100.nvlink.bandwidth
     n_gpus = Systems.Nodes.DGX_H100.accelerators_per_node
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Gradient Size = 7 billion * 2 bytes = 14 GB
-    gradient_size_gb = params_b * bytes_per_param
+    gradient_size = model.size_in_bytes(BYTES_FP16)
 
     # Ring AllReduce sends 2(N_GPU-1)/N_GPU copies of the gradient per worker.
     allreduce_factor = 2 * (n_gpus - 1) / n_gpus
-    allreduce_gb = allreduce_factor * gradient_size_gb
+    allreduce = allreduce_factor * gradient_size
 
     # Time = Data/Bandwidth
-    time_s = allreduce_gb/network_bw_gbs
+    time = (allreduce / network_bw).to(second)
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    model_params_b_str = fmt_count(params_b * BILLION, scale='B', precision=0, commas=False)
+    model_params_b_str = fmt_params(params, precision=0)
     n_gpus_str = fmt_count(n_gpus, commas=False, label="GPU")
-    gradient_size_str = fmt_qty(gradient_size_gb * GB, GB, precision=0, commas=False)
+    gradient_size_str = fmt_memory(gradient_size, unit=GB, precision=0, commas=False)
     allreduce_factor_str = fmt_multiple(allreduce_factor, precision=2, commas=False)
-    allreduce_str = fmt_qty(allreduce_gb * GB, GB, precision=1, commas=False)
-    network_time_str = fmt_time(time_s, 'second', precision=2, commas=False)
-    network_bw_str = fmt_qty(network_bw_gbs * GB / second, GB / second, precision=1, commas=False)
-    nvlink_h100_str = fmt_qty(nvlink_h100_gbs * GB / second, GB / second, precision=0, commas=False)
+    allreduce_str = fmt_memory(allreduce, unit=GB, precision=1, commas=False)
+    network_time_str = fmt_time(time, second, precision=2, commas=False)
+    network_bw_str = fmt_bandwidth(network_bw, unit=GB / second, precision=1, commas=False)
+    nvlink_h100_str = fmt_bandwidth(nvlink_h100, unit=GB / second, precision=0, commas=False)
 
 # Note: Use NetworkWall.network_time_str directly.
 ```
@@ -2697,20 +2699,20 @@ $$R_{\text{memory}} =\min(\text{BW}_{\text{storage}}, \text{BW}_{\text{system}},
 # │ Exports: MemoryHierarchyBandwidth.v100_bw_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware
-from mlsysim.fmt import fmt, check, fmt_qty
+from mlsysim.fmt import check, fmt_bandwidth
 
 class MemoryHierarchyBandwidth:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     v100 = Hardware.Cloud.V100
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    v100_bw = v100.memory.bandwidth.to(GB/second).magnitude
+    v100_bw = v100.memory.bandwidth
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(v100_bw > 0, "V100 memory bandwidth must be positive")
+    check(v100_bw.to(GB / second).magnitude > 0, "V100 memory bandwidth must be positive")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    v100_bw_str = fmt_qty(v100_bw * GB / second, GB / second, precision=0, commas=False)
+    v100_bw_str = fmt_bandwidth(v100_bw, unit=GB / second, precision=0, commas=False)
 ```
 
 Storage devices provide 1--2 GB/s, system memory delivers 50--100 GB/s, and accelerator HBM achieves `{python} MemoryHierarchyBandwidth.v100_bw_str` or higher. Each tier is orders of magnitude faster than the one below it, which means data that flows freely within accelerator memory creates a severe bottleneck when it must be fetched from disk. This cascading bandwidth hierarchy explains why the iteration time of a well-pipelined system is governed by the *maximum* of its component latencies rather than their *sum*, as @eq-iteration-time shows:
@@ -2728,15 +2730,15 @@ from mlsysim.core.constants import GB, second
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Goal: NVMe theoretical and sustained bandwidth for practical-architectures prose.
 # │ Exports: StorageBandwidthPractical.{nvme_bw,nvme_bw_sustained}_str
-from mlsysim.fmt import fmt_qty
+from mlsysim.fmt import fmt_bandwidth
 
 class StorageBandwidthPractical:
-    nvme_bw = Hardware.Tech.Storage.NvmeGen4.bandwidth.to(GB/second).magnitude
+    nvme_bw = Hardware.Tech.Storage.NvmeGen4.bandwidth
     nvme_bw_sustained = nvme_bw * 0.5
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    nvme_bw_str = fmt_qty(nvme_bw * GB / second, GB / second, precision=0, commas=False)
-    nvme_bw_sustained_str = fmt_qty(nvme_bw_sustained * GB / second, GB / second, precision=2, commas=False)
+    nvme_bw_str = fmt_bandwidth(nvme_bw, unit=GB / second, precision=0, commas=False)
+    nvme_bw_sustained_str = fmt_bandwidth(nvme_bw_sustained, unit=GB / second, precision=2, commas=False)
 ```
 
 These throughput relationships become concrete when applied to real storage hardware. An NVMe storage device with `{python} StorageBandwidthPractical.nvme_bw_str` theoretical bandwidth typically sustains approximately `{python} StorageBandwidthPractical.nvme_bw_sustained_str` in practice, as @eq-practical-throughput shows, and random access patterns for data shuffling reduce effective throughput by another 90 percent.
@@ -2932,7 +2934,7 @@ These hardware utilization patterns reinforce the batch-size--utilization relati
 # │          vram_optimizer_gb_str, vram_subtotal_gb_str, vram_seq_str,
 # │          vram_hidden_str, vram_layers_str, vram_activations_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int,  fmt, check, fmt_count, fmt_qty, MarkdownStr
+from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_memory, fmt_multiple, fmt_params, MarkdownStr
 
 # ┌── LEGO ───────────────────────────────────────────────
 class VRAMRequirements:
@@ -2943,12 +2945,11 @@ class VRAMRequirements:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     model = Models.Language.Llama2_7B
-    params_b = model.parameters.to(Bparam).magnitude
-    gpu_capacity_gb = 24
+    params = model.parameters
+    gpu_capacity = 24 * GB  # scenario assumption
 
-    bytes_fp16 = BYTES_FP16.to(byte).magnitude
-    bytes_fp32 = BYTES_FP32.to(byte).magnitude
-    bytes_adam = BYTES_ADAM_STATE.to(byte).magnitude
+    bytes_fp16_value = BYTES_FP16.to(byte).magnitude
+    bytes_adam_value = BYTES_ADAM_STATE.to(byte).magnitude
 
     # Activation example (matches Llama-2-7B shape)
     batch = 1
@@ -2957,13 +2958,13 @@ class VRAMRequirements:
     layers = model.layers
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    from mlsysim.physics import calc_activation_memory, model_memory
+    from mlsysim.physics import calc_activation_memory
 
     # Weights and State
-    weights_gb = (params_b * BILLION * BYTES_FP16).to(GB).magnitude
-    gradients_gb = weights_gb
-    optimizer_gb = (params_b * BILLION * BYTES_ADAM_STATE).to(GB).magnitude
-    subtotal_gb = weights_gb + gradients_gb + optimizer_gb
+    weights = model.size_in_bytes(BYTES_FP16)
+    gradients = weights
+    optimizer = model.size_in_bytes(BYTES_ADAM_STATE)
+    subtotal = weights + gradients + optimizer
 
     # Activations using library formula
     total_act = calc_activation_memory(
@@ -2971,28 +2972,29 @@ class VRAMRequirements:
         seq_len=seq,
         batch_size=batch,
         hidden_dim=hidden,
-        precision_bytes=int(bytes_fp16),
+        precision_bytes=int(bytes_fp16_value),
         strategy="none"
     )
-    activations_gb = total_act.to(GB).magnitude
-    activation_factor = round(activations_gb / (batch * seq * hidden * layers * bytes_fp16 / BILLION))
+    activation_factor = round(
+        (total_act / (batch * seq * hidden * layers * BYTES_FP16)).to("").magnitude
+    )
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    vram_params_b_str = fmt_count(params_b * BILLION, scale='B', precision=0, commas=False)
-    vram_gpu_capacity_str = fmt_qty(gpu_capacity_gb * GB, GB, precision=0, commas=False)
-    vram_fp16_bytes_str = fmt_int(bytes_fp16, commas=False)
-    vram_adam_bytes_str = fmt_int(bytes_adam, commas=False)
+    vram_params_b_str = fmt_params(params, precision=0)
+    vram_gpu_capacity_str = fmt_memory(gpu_capacity, unit=GB, precision=0, commas=False)
+    vram_fp16_bytes_str = fmt_int(bytes_fp16_value, commas=False)
+    vram_adam_bytes_str = fmt_int(bytes_adam_value, commas=False)
 
-    vram_weights_gb_str = fmt_qty(weights_gb * GB, GB, precision=0, commas=False)
-    vram_gradients_gb_str = fmt_qty(gradients_gb * GB, GB, precision=0, commas=False)
-    vram_optimizer_gb_str = fmt_qty(optimizer_gb * GB, GB, precision=0, commas=False)
-    vram_subtotal_gb_str = fmt_qty(subtotal_gb * GB, GB, precision=0, commas=False)
+    vram_weights_gb_str = fmt_memory(weights, unit=GB, precision=0, commas=False)
+    vram_gradients_gb_str = fmt_memory(gradients, unit=GB, precision=0, commas=False)
+    vram_optimizer_gb_str = fmt_memory(optimizer, unit=GB, precision=0, commas=False)
+    vram_subtotal_gb_str = fmt_memory(subtotal, unit=GB, precision=0, commas=False)
 
     vram_seq_str = fmt(seq, precision=0, commas=False)
     vram_hidden_str = fmt(hidden, precision=0, commas=False)
     vram_layers_str = fmt_count(layers, commas=False, label="layer")
     vram_activation_factor_str = fmt_multiple(activation_factor, precision=0, commas=False)
-    vram_activations_gb_str = fmt_qty(activations_gb * GB, GB, precision=1, commas=False)
+    vram_activations_gb_str = fmt_memory(total_act, unit=GB, precision=1, commas=False)
     vram_batch_str = fmt(batch, precision=0, commas=False)
 ```
 
@@ -3037,8 +3039,7 @@ The total memory scales linearly with batch size (as established in @eq-activati
 # │          act_gb_b64_str, grad_gb_b64_str, total_gb_b64_str,
 # │          gpt3_fp32_str, gpt3_fp16_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, check, fmt_count, fmt_qty
-from mlsysim.physics import model_memory
+from mlsysim.fmt import fmt, check, fmt_count, fmt_memory, fmt_params, fmt_percent
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ResNetMemoryScaling:
@@ -3052,81 +3053,80 @@ class ResNetMemoryScaling:
     first_conv_h, first_conv_w, first_conv_c = 112, 112, 64
 
     # Empirical values
-    act_gb_b32 = 8
-    grad_gb_b32 = 4
-    a100_mem_gib = Hardware.Cloud.A100.memory.capacity.to(GiB).magnitude
+    act_b32 = 8 * GB
+    grad_b32 = 4 * GB
+    a100_mem = Hardware.Cloud.A100.memory.capacity
 
     # GPT-3
-    gpt3_params = Models.Language.GPT3.parameters.to(param).magnitude
+    gpt3 = Models.Language.GPT3
+    gpt3_params = gpt3.parameters
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Conv1 size
-    first_conv_mb = (first_conv_h * first_conv_w * first_conv_c * 4) / MILLION # FP32=4 bytes
-    param_gb = model_memory(Models.Vision.ResNet50.parameters, BYTES_FP32, GB)
+    first_conv = first_conv_h * first_conv_w * first_conv_c * BYTES_FP32
+    param_mem = Models.Vision.ResNet50.size_in_bytes(BYTES_FP32)
 
     # Batch 32 (compare totals in GiB against nominal A100 capacity)
-    total_mem_b32 = (act_gb_b32 + grad_gb_b32 + param_gb) * GB
-    total_gib_b32 = total_mem_b32.to(GiB).magnitude
-    pct_a100 = (total_gib_b32 / a100_mem_gib) * 100
+    total_mem_b32 = act_b32 + grad_b32 + param_mem
+    pct_a100 = (total_mem_b32 / a100_mem).to("").magnitude
 
     # Batch 64 (Doubling acts/grads)
-    act_gb_b64 = act_gb_b32 * 2
-    grad_gb_b64 = grad_gb_b32 * 2
-    total_mem_b64 = (act_gb_b64 + grad_gb_b64 + param_gb) * GB
-    total_gib_b64 = total_mem_b64.to(GiB).magnitude
+    act_b64 = act_b32 * 2
+    grad_b64 = grad_b32 * 2
+    total_mem_b64 = act_b64 + grad_b64 + param_mem
 
     # GPT-3 Params
-    gpt3_fp32_gb = model_memory(gpt3_params, BYTES_FP32, GB)
-    gpt3_fp16_gb = model_memory(gpt3_params, BYTES_FP16, GB)
-    gpt3_params_b = gpt3_params / BILLION
+    gpt3_fp32 = gpt3.size_in_bytes(BYTES_FP32)
+    gpt3_fp16 = gpt3.size_in_bytes(BYTES_FP16)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(0.10 <= param_gb <= 0.11, f"ResNet-50 FP32 parameters should be about 0.10 GB, got {param_gb:.3f}")
+    param_value = param_mem.to(GB).magnitude
+    check(0.10 <= param_value <= 0.11, f"ResNet-50 FP32 parameters should be about 0.10 GB, got {param_value:.3f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
 
-    total_gb_b32_str = fmt_qty(total_gib_b32 * GiB, GiB, precision=1, commas=False)
-    pct_a100_str = fmt_percent(pct_a100/100, precision=1, commas=False, style='symbol')
+    total_gb_b32_str = fmt_memory(total_mem_b32, unit=GiB, precision=1, commas=False)
+    pct_a100_str = fmt_percent(pct_a100, precision=1, commas=False, style='symbol')
 
-    act_gb_b64_str = fmt_qty(act_gb_b64 * GB, GB, precision=0, commas=False)
-    grad_gb_b64_str = fmt_qty(grad_gb_b64 * GB, GB, precision=0, commas=False)
-    total_gb_b64_str = fmt_qty(total_gib_b64 * GiB, GiB, precision=1, commas=False)
+    act_gb_b64_str = fmt_memory(act_b64, unit=GB, precision=0, commas=False)
+    grad_gb_b64_str = fmt_memory(grad_b64, unit=GB, precision=0, commas=False)
+    total_gb_b64_str = fmt_memory(total_mem_b64, unit=GiB, precision=1, commas=False)
 
-    gpt3_fp32_str = fmt_qty(gpt3_fp32_gb * GB, GB, precision=0, commas=False)
-    gpt3_fp16_str = fmt_qty(gpt3_fp16_gb * GB, GB, precision=0, commas=False)
-    gpt3_params_b_str = fmt_count(gpt3_params_b * BILLION, scale='B', precision=0, commas=False)
+    gpt3_fp32_str = fmt_memory(gpt3_fp32, unit=GB, precision=0, commas=False)
+    gpt3_fp16_str = fmt_memory(gpt3_fp16, unit=GB, precision=0, commas=False)
+    gpt3_params_b_str = fmt_params(gpt3_params, precision=0)
 
     # Context Exports
     resnet_input_dim       = 224
     resnet_batch_32        = 32
     resnet_batch_64        = 64
     resnet_layers          = 50
-    bytes_fp32             = 4
-    gpu_mem_range_min      = 40
-    gpu_mem_range_max      = 80
+    bytes_fp32             = BYTES_FP32.to(byte).magnitude
+    gpu_mem_range_min      = 40 * GB
+    gpu_mem_range_max      = 80 * GB
     mid_layer_filters      = 256
     bwd_filters            = 64
-    bwd_total_grad_gb      = 3.2
+    bwd_total_grad         = 3.2 * GB
     resnet_input_dim_str = fmt(resnet_input_dim, precision=0, commas=False)
     resnet_batch_32_str = fmt(resnet_batch_32, precision=0, commas=False)
     resnet_batch_64_str = fmt(resnet_batch_64, precision=0, commas=False)
     resnet_conv1_h_str = fmt(first_conv_h, precision=0, commas=False)
     resnet_conv1_w_str = fmt(first_conv_w, precision=0, commas=False)
     resnet_conv1_c_str = fmt(first_conv_c, precision=0, commas=False)
-    resnet_conv1_mb_str = fmt_qty(first_conv_mb * MB, MB, precision=1, commas=False)
+    resnet_conv1_mb_str = fmt_memory(first_conv, unit=MB, precision=1, commas=False)
     resnet_layers_str = fmt_count(resnet_layers, commas=False, label="layer")
-    act_gb_b32_str = fmt_qty(act_gb_b32 * GB, GB, precision=0, commas=False)
-    grad_gb_b32_str = fmt_qty(grad_gb_b32 * GB, GB, precision=0, commas=False)
-    param_mb_str = fmt_qty(param_gb * GB, MB, precision=1, commas=False)
-    a100_mem_gb_str = fmt_qty(a100_mem_gib * GiB, GiB, precision=0, commas=False)
+    act_gb_b32_str = fmt_memory(act_b32, unit=GB, precision=0, commas=False)
+    grad_gb_b32_str = fmt_memory(grad_b32, unit=GB, precision=0, commas=False)
+    param_mb_str = fmt_memory(param_mem, unit=MB, precision=1, commas=False)
+    a100_mem_gb_str = fmt_memory(a100_mem, unit=GiB, precision=0, commas=False)
     bytes_fp32_str = fmt(bytes_fp32, precision=0, commas=False)
-    gpu_mem_range_min_str = fmt_qty(gpu_mem_range_min * GB, GB, precision=0, commas=False)
-    gpu_mem_range_max_str = fmt_qty(gpu_mem_range_max * GB, GB, precision=0, commas=False)
+    gpu_mem_range_min_str = fmt_memory(gpu_mem_range_min, unit=GB, precision=0, commas=False)
+    gpu_mem_range_max_str = fmt_memory(gpu_mem_range_max, unit=GB, precision=0, commas=False)
 
     # Backward pass context (from original text logic)
     mid_layer_filters_str = fmt(mid_layer_filters, precision=0, commas=False)
     bwd_filters_str = fmt(bwd_filters, precision=0, commas=False)
-    bwd_total_grad_gb_str = fmt_qty(bwd_total_grad_gb * GB, GB, precision=1, commas=False)
+    bwd_total_grad_gb_str = fmt_memory(bwd_total_grad, unit=GB, precision=1, commas=False)
 
 # Note: Use ResNetMemoryScaling.total_gb_b32_str directly.
 ```
@@ -3178,22 +3178,23 @@ The optimizer memory hierarchy established in @tbl-optimizer-properties manifest
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
 from mlsysim.physics import model_memory
-from mlsysim.fmt import fmt, check, fmt_count, fmt_qty
+from mlsysim.fmt import check, fmt_memory, fmt_params
 
 class OptimizerStateRecap:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     model = Models.Language.GPT2
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    model_params_b = model.parameters.to(Bparam).magnitude
-    adam_state_gb = 2 * model_memory(model.parameters, BYTES_FP32, GB)
+    model_params = model.parameters
+    adam_state = 2 * model.size_in_bytes(BYTES_FP32)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(10 <= adam_state_gb <= 13, f"GPT-2 Adam state should be about 12 GB, got {adam_state_gb:.1f}")
+    adam_state_value = adam_state.to(GB).magnitude
+    check(10 <= adam_state_value <= 13, f"GPT-2 Adam state should be about 12 GB, got {adam_state_value:.1f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    model_params_b_str = fmt_count(model_params_b * BILLION, scale='B', precision=1, commas=False)
-    adam_state_str = fmt_qty(adam_state_gb * GB, GB, precision=0, commas=False)
+    model_params_b_str = fmt_params(model_params)
+    adam_state_str = fmt_memory(adam_state, unit=GB, precision=0, commas=False)
 ```
 
 At billion-parameter scale, optimizer state dominates the memory budget. As quantified in the GPT-2 worked example (@sec-model-training-optimization-algorithm-system-implications-f9f2), a `{python} OptimizerStateRecap.model_params_b_str` model requires `{python} OptimizerStateRecap.adam_state_str` for Adam optimizer state alone in FP32, in addition to parameters and gradients, before accounting for activations. This challenge has motivated memory-efficient optimizer variants. Compare the memory bars in @fig-galore-llm-memory-breakdown to see how GaLoRE attacks this constraint: by computing updates in a compressed space [@zhao2024galorememoryefficientllmtraining], the technique reduces the memory footprint dominated by optimizer states to a fraction of its original size, enabling training of larger models on fixed hardware.
@@ -3354,7 +3355,10 @@ Every batch-size and precision decision so far has aimed at wall-clock time; at 
 # │          ub_compute_math, ub_time_math
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware
-from mlsysim.fmt import fmt, fmt_usd, fmt_math, check, fmt_count, fmt_time, fmt_qty
+from mlsysim.fmt import (
+    fmt, fmt_usd, fmt_math, check, fmt_count, fmt_time,
+    fmt_flop_rate, fmt_params, fmt_percent, fmt_tokens,
+)
 
 # ┌── LEGO ───────────────────────────────────────────────
 class LlamaTraining:
@@ -3370,7 +3374,7 @@ class LlamaTraining:
     scaling_factor = Literature.Chinchilla.ComputeConstant
 
     # Hardware: H100 Cluster
-    peak_tflops = Hardware.Cloud.H100.compute.peak_flops.to(TFLOPs/second).magnitude
+    peak_flops = Hardware.Cloud.H100.compute.peak_flops
     utilization = Literature.Training.MfuHigh
     num_gpus = Systems.Clusters.Training_1K.total_accelerators
 
@@ -3380,10 +3384,10 @@ class LlamaTraining:
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Compute Logic
-    effective_tflops = peak_tflops * utilization
+    effective_flops = peak_flops * utilization
     total_flops = scaling_factor * params * tokens
     # Step 2: total_flops is absolute, TFLOPs is 1e12
-    time_seconds = total_flops / (effective_tflops * TRILLION)
+    time_seconds = total_flops / effective_flops.to(flop / second).magnitude
 
     # Step 3: Time Conversions
     time_years = time_seconds/SEC_PER_YEAR_LEAP
@@ -3417,18 +3421,19 @@ class LlamaTraining:
     ub_purchase_str = fmt_usd(purchase_cost, precision=1, commas=False, scale="M")
     ub_breakeven_str = fmt(breakeven_runs, precision=1, commas=False)
 
-    ub_params_b_str = fmt_count(model.parameters.to(param).magnitude, scale='B', precision=0, commas=False)
-    ub_tokens_t_str = fmt(tokens / TRILLION, precision=0, commas=False)
-    ub_peak_tflops_str = fmt_qty(peak_tflops * TFLOP / second, TFLOP / second, precision=0, commas=True)
+    ub_params_b_str = fmt_params(model.parameters, precision=0)
+    ub_tokens_t_str = fmt_tokens(model.training_tokens, scale="T", precision=0, commas=False)
+    ub_tokens_t_scalar_str = fmt(tokens / TRILLION, precision=0, commas=False)
+    ub_peak_tflops_str = fmt_flop_rate(peak_flops, unit=TFLOP / second, precision=0, commas=True)
     ub_utilization_pct_str = fmt_percent(utilization, precision=0, commas=False, style='symbol')
-    ub_effective_tflops_str = fmt_qty(effective_tflops * TFLOP / second, TFLOP / second, precision=1, commas=False)
+    ub_effective_tflops_str = fmt_flop_rate(effective_flops, unit=TFLOP / second, precision=1, commas=False)
     ub_num_gpus_str = fmt_count(num_gpus, label="GPU")
     ub_rental_rate_str = fmt_usd(rental_rate, precision=0, commas=False, per="hr")
     ub_purchase_price_str = fmt_usd(purchase_price, precision=0, commas=True)
 
     # Pre-composed math expressions (avoids Pandoc \(...\) + {python} parsing failure)
     ub_compute_math = fmt_math(
-        f"6 \\times {model.parameters.to(Bparam).magnitude:.0f} \\times 10^9 \\times {ub_tokens_t_str} \\times 10^{{12}}"
+        f"6 \\times {model.parameters.to(Bparam).magnitude:.0f} \\times 10^9 \\times {ub_tokens_t_scalar_str} \\times 10^{{12}}"
         f" \\approx {flops_mantissa} \\times 10^{{{flops_exp}}}"
     )
     ub_time_math = fmt_math(
@@ -3445,7 +3450,7 @@ class LlamaTraining:
 
 **Math**:
 
-1.  **Workload**: Llama 2 70B model (`{python} LlamaTraining.ub_params_b_str` parameters, `{python} LlamaTraining.ub_tokens_t_str` trillion tokens).
+1.  **Workload**: Llama 2 70B model (`{python} LlamaTraining.ub_params_b_str` parameters, `{python} LlamaTraining.ub_tokens_t_str` tokens).
 2.  **Compute required**: `{python} LlamaTraining.ub_compute_math` FLOPs.
 3.  **Hardware**: NVIDIA H100 (Peak: `{python} LlamaTraining.ub_peak_tflops_str` FP16). Assumed Utilization: `{python} LlamaTraining.ub_utilization_pct_str` (`{python} LlamaTraining.ub_effective_tflops_str`).
 4.  **Time**: `{python} LlamaTraining.ub_time_math` seconds ≈ `{python} LlamaTraining.ub_years_str` (on one GPU).
@@ -3473,7 +3478,7 @@ Production systems typically achieve 30–50 percent MFU\index{Model FLOPs Utili
 ```{python}
 #| echo: false
 #| label: mfu-example-calc
-from mlsysim.fmt import fmt, check, fmt_count, fmt_qty
+from mlsysim.fmt import fmt, check, fmt_flop_rate, fmt_params, fmt_time
 
 class MFUExampleCalc:
     """MFU example for a 7-billion-parameter transformer processing 1024 tokens per step."""
@@ -3484,24 +3489,24 @@ class MFUExampleCalc:
     params = model.parameters.to(param).magnitude
     flops_per_param_token = Literature.Chinchilla.ComputeConstant
     tokens_per_step = 1024
-    step_seconds = 1.2
-    a100_tflops = Hardware.Cloud.A100.compute.peak_flops.to(TFLOPs/second).magnitude
+    step_time = 1.2 * second  # scenario assumption
+    a100_flops = Hardware.Cloud.A100.compute.peak_flops
 
     # EXECUTE
-    useful_flops = params * flops_per_param_token * tokens_per_step
-    available_flops = a100_tflops * TRILLION * step_seconds
-    mfu = useful_flops / available_flops
+    useful_flops = params * flops_per_param_token * tokens_per_step * flop
+    available_flops = (a100_flops * step_time).to(flop)
+    mfu = (useful_flops / available_flops).to("").magnitude
     lost_fraction = 1 - mfu
 
     # GUARD
     check(0.10 <= mfu <= 0.12, f"MFU example should be about 11 percent, got {mfu:.3f}")
 
     # OUTPUT
-    params_b_str = fmt_count(params_b * BILLION, scale='B', precision=0, commas=False)
+    params_b_str = fmt_params(model.parameters, precision=0)
     tokens_per_step_str = fmt(tokens_per_step, precision=0, commas=True)
     flops_per_param_token_str = fmt(flops_per_param_token, precision=0, commas=False)
-    step_seconds_str = fmt(step_seconds, precision=1, commas=False)
-    a100_tflops_str = fmt_qty(a100_tflops * TFLOP / second, TFLOP / second, precision=0, commas=False)
+    step_time_str = fmt_time(step_time, second, precision=1, commas=False, style="word", attributive=True)
+    a100_tflops_str = fmt_flop_rate(a100_flops, unit=TFLOP / second, precision=0, commas=False)
     mfu_str = fmt(mfu, precision=2, commas=False)
     mfu_pct_str = fmt_percent(mfu, precision=1, commas=False, style='symbol')
     lost_pct_str = fmt_percent(lost_fraction, precision=1, commas=False, style='symbol')
@@ -3513,7 +3518,7 @@ class MFUExampleCalc:
 
 ***Model FLOPs Utilization (MFU)***\index{Model FLOPs Utilization!definition} is the efficiency metric $\text{MFU} = O_{\text{model}} / (R_{\text{peak}} \cdot T_{\text{step}})$, where $O_{\text{model}}$ is the useful per-step model FLOP count (forward plus backward, excluding rematerialization) and $T_{\text{step}}$ is the measured wall-clock time per training step, expressing what fraction of peak hardware throughput is doing useful model computation.
 
-1.  **Significance (quantitative)**: MFU is the $\eta_{\text{hw}}$ term in the iron law made concrete. For a `{python} MFUExampleCalc.params_b_str`-parameter transformer processing `{python} MFUExampleCalc.tokens_per_step_str` per step on an A100 (`{python} MFUExampleCalc.a100_tflops_str` FP16/BF16 Tensor Core peak), a `{python} MFUExampleCalc.step_seconds_str`-second step gives useful model FLOPs divided by the available peak-rate FLOP budget of approximately `{python} MFUExampleCalc.mfu_str` (`{python} MFUExampleCalc.mfu_pct_str`), meaning `{python} MFUExampleCalc.lost_pct_str` of peak compute is lost to memory stalls, communication, and scheduling overhead. Production systems typically reach 30–50 percent MFU; values below 30 percent indicate a specific addressable bottleneck.
+1.  **Significance (quantitative)**: MFU is the $\eta_{\text{hw}}$ term in the iron law made concrete. For a `{python} MFUExampleCalc.params_b_str`-parameter transformer processing `{python} MFUExampleCalc.tokens_per_step_str` per step on an A100 (`{python} MFUExampleCalc.a100_tflops_str` FP16/BF16 Tensor Core peak), a `{python} MFUExampleCalc.step_time_str` step gives useful model FLOPs divided by the available peak-rate FLOP budget of approximately `{python} MFUExampleCalc.mfu_str` (`{python} MFUExampleCalc.mfu_pct_str`), meaning `{python} MFUExampleCalc.lost_pct_str` of peak compute is lost to memory stalls, communication, and scheduling overhead. Production systems typically reach 30–50 percent MFU; values below 30 percent indicate a specific addressable bottleneck.
 2.  **Distinction (durable)**: Unlike hardware utilization reported by profilers (which counts all cycles where the compute units are active, including gradient checkpointing recomputation and padding FLOPs), MFU counts only the FLOPs that directly advance the model toward convergence—providing a hardware-agnostic efficiency score that is comparable across different accelerator generations.
 3.  **Common pitfall**: A frequent misconception is that 100 percent MFU is achievable. Memory bandwidth is always a finite resource: even a perfectly compute-bound kernel must load weights from DRAM, and the resulting stalls impose a ceiling well below 100 percent. The practical upper bound for most transformer training runs is 55–65 percent MFU, achievable only with FlashAttention and carefully tuned batch sizes.
 
@@ -3566,7 +3571,7 @@ In practice, the characteristic signatures from @tbl-dam-training-bottlenecks ar
 ```{python}
 #| echo: false
 #| label: utilization-gap-calc
-from mlsysim.fmt import fmt_time, fmt_qty
+from mlsysim.fmt import fmt_flop_rate, fmt_percent, fmt_time
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ UTILIZATION GAP SCENARIO
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -3587,16 +3592,16 @@ class UtilizationGap:
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────────
     util_gap_min          = 50
     util_gap_max          = 70
-    gpu_advertised_tflops = 300
-    gpu_real_tflops_min   = 90
-    gpu_real_tflops_max   = 150
+    gpu_advertised_flops = 300 * (TFLOP / second)
+    gpu_real_flops_min   = 90 * (TFLOP / second)
+    gpu_real_flops_max   = 150 * (TFLOP / second)
 
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────────
     util_gap_min_str = fmt_percent(util_gap_min/100, precision=0, commas=False, style='symbol')
     util_gap_max_str = fmt_percent(util_gap_max/100, precision=0, commas=False, style='symbol')
-    gpu_advertised_tflops_str = fmt_qty(gpu_advertised_tflops * TFLOP / second, TFLOP / second, precision=0, commas=False)
-    gpu_real_tflops_min_str   = fmt_qty(gpu_real_tflops_min * TFLOP / second, TFLOP / second, precision=0, commas=False)
-    gpu_real_tflops_max_str   = fmt_qty(gpu_real_tflops_max * TFLOP / second, TFLOP / second, precision=0, commas=False)
+    gpu_advertised_tflops_str = fmt_flop_rate(gpu_advertised_flops, unit=TFLOP / second, precision=0, commas=False)
+    gpu_real_tflops_min_str = fmt_flop_rate(gpu_real_flops_min, unit=TFLOP / second, precision=0, commas=False)
+    gpu_real_tflops_max_str = fmt_flop_rate(gpu_real_flops_max, unit=TFLOP / second, precision=0, commas=False)
 
 # ── Profiling + Pipeline Timing ─────────────────────────────────────────────
 class ProfilingScenarios:
@@ -4019,7 +4024,7 @@ These optimization techniques demonstrate particular value in scenarios involvin
 # │ Exports: PreprocessingScenarios.{crop,jitter,norm,total_preprocess,
 # │          num_workers,prefetch,buffer}_*_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_math, check, MarkdownStr, fmt_time, fmt_qty
+from mlsysim.fmt import fmt, fmt_math, check, MarkdownStr, fmt_time, fmt_memory
 
 class PreprocessingScenarios:
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────────
@@ -4036,15 +4041,16 @@ class PreprocessingScenarios:
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────────
     total_preprocess_ms = crop_time_ms + jitter_time_ms + norm_time_ms
     prefetch_buffer_batches = num_workers * prefetch_factor
-    buffer_batch_mem_gb = (
-        (buffer_batch_size * buffer_image_res**2 * buffer_channels * buffer_bytes_per_value) * byte
-    ).to(GB).magnitude
-    buffer_total_mem_gb = buffer_batch_mem_gb * prefetch_buffer_batches
+    buffer_batch_mem = (
+        buffer_batch_size * buffer_image_res**2 * buffer_channels * buffer_bytes_per_value
+    ) * byte
+    buffer_total_mem = buffer_batch_mem * prefetch_buffer_batches
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────────
     check(total_preprocess_ms == 30, f"Preprocessing time mismatch: {total_preprocess_ms} != 30 ms")
     check(prefetch_buffer_batches == 8, f"Expected 8 in-flight batches, got {prefetch_buffer_batches}")
-    check(buffer_total_mem_gb > 20, f"Total prefetch memory ({buffer_total_mem_gb:.1f} GB) unexpectedly low.")
+    buffer_total_value = buffer_total_mem.to(GB).magnitude
+    check(buffer_total_value > 20, f"Total prefetch memory ({buffer_total_value:.1f} GB) unexpectedly low.")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────────
     num_workers_str             = MarkdownStr("num_workers=4")
@@ -4057,8 +4063,8 @@ class PreprocessingScenarios:
     buffer_batch_size_str       = fmt(buffer_batch_size, precision=0, commas=False)
     buffer_image_res_str        = fmt(buffer_image_res, precision=0, commas=False)
     buffer_dims_math            = fmt_math(f"{buffer_image_res}\\times {buffer_image_res}")
-    buffer_batch_mem_gb_str = fmt_qty(buffer_batch_mem_gb * GB, GB, precision=1, commas=False)
-    buffer_total_mem_gb_str = fmt_qty(buffer_total_mem_gb * GB, GB, precision=1, commas=True)
+    buffer_batch_mem_gb_str = fmt_memory(buffer_batch_mem, unit=GB, precision=1, commas=False)
+    buffer_total_mem_gb_str = fmt_memory(buffer_total_mem, unit=GB, precision=1, commas=True)
 ```
 
 Training data undergoes three main stages: retrieval from storage, transformation into a suitable format, and use in model training. An unoptimized pipeline executes these stages sequentially, leaving the GPU idle during data fetching and preprocessing. Prefetching eliminates this waiting time by loading data asynchronously during model computation. Data loaders operate as separate threads or processes, preparing the next batch while the current batch trains. This ensures immediate data availability for the GPU when the current batch completes.
@@ -4121,24 +4127,26 @@ Mixed-precision training combines FP32, 16-bit floating-point (FP16), and BF16 f
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Goal: FP16/FP32 byte widths and 1B-parameter weight memory.
 # │ Exports: MixedPrecisionIntro.{bytes_fp16,bytes_fp32,model_1b_fp32,model_1b_fp16}_str
-from mlsysim.physics import model_memory
-from mlsysim.fmt import fmt, check, fmt_qty
+from mlsysim.physics import memory_from_params
+from mlsysim.fmt import fmt, check, fmt_memory, fmt_multiple, fmt_percent
 
 class MixedPrecisionIntro:
-    model_params = 1 * BILLION
+    model_params = 1 * Bparam
     bytes_fp16 = int(BYTES_FP16.to(byte).magnitude)
     bytes_fp32 = int(BYTES_FP32.to(byte).magnitude)
-    model_1b_fp32_gb = model_memory(model_params, BYTES_FP32, GB)
-    model_1b_fp16_gb = model_memory(model_params, BYTES_FP16, GB)
+    model_1b_fp32 = memory_from_params(model_params, BYTES_FP32 / param)
+    model_1b_fp16 = memory_from_params(model_params, BYTES_FP16 / param)
 
-    check(model_1b_fp32_gb == 4, f"1B FP32 parameters should be 4 GB, got {model_1b_fp32_gb}")
-    check(model_1b_fp16_gb == 2, f"1B FP16 parameters should be 2 GB, got {model_1b_fp16_gb}")
+    model_1b_fp32_value = model_1b_fp32.to(GB).magnitude
+    model_1b_fp16_value = model_1b_fp16.to(GB).magnitude
+    check(model_1b_fp32_value == 4, f"1B FP32 parameters should be 4 GB, got {model_1b_fp32_value}")
+    check(model_1b_fp16_value == 2, f"1B FP16 parameters should be 2 GB, got {model_1b_fp16_value}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     bytes_fp16_str = fmt(bytes_fp16, precision=0, commas=False)
     bytes_fp32_str = fmt(bytes_fp32, precision=0, commas=False)
-    model_1b_fp32_gb_str = fmt_qty(model_1b_fp32_gb * GB, GB, precision=0, commas=False)
-    model_1b_fp16_gb_str = fmt_qty(model_1b_fp16_gb * GB, GB, precision=0, commas=False)
+    model_1b_fp32_gb_str = fmt_memory(model_1b_fp32, unit=GB, precision=0, commas=False)
+    model_1b_fp16_gb_str = fmt_memory(model_1b_fp16, unit=GB, precision=0, commas=False)
 ```
 
 A neural network trained in FP32 requires `{python} MixedPrecisionIntro.bytes_fp32_str` bytes per parameter, while both FP16 and BF16 use `{python} MixedPrecisionIntro.bytes_fp16_str` bytes. For a model with $10^9$ parameters, this reduction cuts memory usage from `{python} MixedPrecisionIntro.model_1b_fp32_gb_str` to `{python} MixedPrecisionIntro.model_1b_fp16_gb_str`. This memory reduction enables larger batch sizes and deeper architectures on the same hardware.
@@ -4264,21 +4272,22 @@ Machine learning frameworks provide built-in support for mixed-precision trainin
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Goal: 50% weight-memory savings for 1B-parameter transformer example.
 # │ Exports: MixedPrecisionBenefits.{mp_mem_savings_pct,model_1b_fp32,model_1b_fp16}_str
-from mlsysim.physics import model_memory
-from mlsysim.fmt import fmt, check
+from mlsysim.physics import memory_from_params
+from mlsysim.fmt import check, fmt_memory, fmt_percent
 
 class MixedPrecisionBenefits:
-    model_params = 1 * BILLION
-    model_1b_fp32_gb = model_memory(model_params, BYTES_FP32, GB)
-    model_1b_fp16_gb = model_memory(model_params, BYTES_FP16, GB)
-    mp_mem_savings_pct = (1 - model_1b_fp16_gb / model_1b_fp32_gb) * 100
+    model_params = 1 * Bparam
+    model_1b_fp32 = memory_from_params(model_params, BYTES_FP32 / param)
+    model_1b_fp16 = memory_from_params(model_params, BYTES_FP16 / param)
+    mp_mem_savings = 1 - (model_1b_fp16 / model_1b_fp32).to("").magnitude
 
-    check(model_1b_fp32_gb == 4, f"1B FP32 parameters should be 4 GB, got {model_1b_fp32_gb}")
+    model_1b_fp32_value = model_1b_fp32.to(GB).magnitude
+    check(model_1b_fp32_value == 4, f"1B FP32 parameters should be 4 GB, got {model_1b_fp32_value}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    mp_mem_savings_pct_str = fmt_percent(mp_mem_savings_pct/100, precision=0, commas=False, style='symbol')
-    model_1b_fp32_gb_str = fmt_qty(model_1b_fp32_gb * GB, GB, precision=0, commas=False)
-    model_1b_fp16_gb_str = fmt_qty(model_1b_fp16_gb * GB, GB, precision=0, commas=False)
+    mp_mem_savings_pct_str = fmt_percent(mp_mem_savings, precision=0, commas=False, style='symbol')
+    model_1b_fp32_gb_str = fmt_memory(model_1b_fp32, unit=GB, precision=0, commas=False)
+    model_1b_fp16_gb_str = fmt_memory(model_1b_fp16, unit=GB, precision=0, commas=False)
 ```
 
 Mixed-precision benefits manifest across three dimensions that compound in practice. First, memory consumption decreases by approximately `{python} MixedPrecisionBenefits.mp_mem_savings_pct_str`: a one billion parameter transformer requires `{python} MixedPrecisionBenefits.model_1b_fp32_gb_str` in FP32 but only `{python} MixedPrecisionBenefits.model_1b_fp16_gb_str` in FP16 for weights alone, enabling larger batch sizes or deeper architectures. Second, computational throughput increases dramatically as Tensor Cores achieve 2--3$\times$ speedup for matrix multiplications, as detailed in @sec-model-training-mixedprecision-hardware-support-d7c1. Third, halving tensor sizes proportionally reduces inter-device communication bandwidth requirements in distributed training.
@@ -4292,62 +4301,63 @@ from mlsysim import Hardware, Models
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Goal: GPT-2 FP32 vs FP16 vs checkpointed training memory in callout below.
 # │ Exports: MixedPrecisionMemory.{gpt2_b,mp_batch_size,fp32_*,fp16_*,ckpt_*,v100_capacity}_str
-from mlsysim.fmt import fmt, check, fmt_count, fmt_qty
-from mlsysim.physics import calc_activation_memory, model_memory
+from mlsysim.fmt import fmt, check, fmt_memory, fmt_params
+from mlsysim.physics import calc_activation_memory
 
 class MixedPrecisionMemory:
     batch_size = 32
     seq_len = 1024
-    bytes_per_val = 2
+    bytes_per_val = BYTES_FP16.to(byte).magnitude
     checkpoint_factor = 4
 
-    act_fp16_gb = calc_activation_memory(
+    act_fp16 = calc_activation_memory(
         n_layers=Models.Language.GPT2.layers,
         seq_len=seq_len,
         batch_size=batch_size,
         hidden_dim=Models.Language.GPT2.hidden_dim,
         precision_bytes=bytes_per_val,
         strategy="none",
-    ).to(GB).magnitude
-    act_fp32_gb = act_fp16_gb * 2
+    )
+    act_fp32 = act_fp16 * 2
 
-    p_fp32 = model_memory(Models.Language.GPT2.parameters, BYTES_FP32, GB)
+    p_fp32 = Models.Language.GPT2.size_in_bytes(BYTES_FP32)
     g_fp32 = p_fp32
-    opt_fp32 = model_memory(Models.Language.GPT2.parameters, BYTES_ADAM_STATE, GB)
-    total_fp32 = p_fp32 + act_fp32_gb + g_fp32 + opt_fp32
+    opt_fp32 = Models.Language.GPT2.size_in_bytes(BYTES_ADAM_STATE)
+    total_fp32 = p_fp32 + act_fp32 + g_fp32 + opt_fp32
 
-    p_fp16 = model_memory(Models.Language.GPT2.parameters, BYTES_FP16, GB)
+    p_fp16 = Models.Language.GPT2.size_in_bytes(BYTES_FP16)
     g_fp16 = p_fp16
     master_fp32 = p_fp32
-    act_fp16_gb = act_fp32_gb * (BYTES_FP16.to(byte).magnitude / BYTES_FP32.to(byte).magnitude)
-    total_mp = p_fp16 + g_fp16 + act_fp16_gb + master_fp32 + opt_fp32
+    total_mp = p_fp16 + g_fp16 + act_fp16 + master_fp32 + opt_fp32
 
-    act_ckpt_gb = act_fp16_gb / checkpoint_factor
-    total_ckpt = p_fp16 + g_fp16 + act_ckpt_gb + master_fp32 + opt_fp32
+    act_ckpt = act_fp16 / checkpoint_factor
+    total_ckpt = p_fp16 + g_fp16 + act_ckpt + master_fp32 + opt_fp32
 
-    check(total_mp < total_fp32, f"Mixed Precision ({total_mp:.1f}G) didn't save memory vs FP32 ({total_fp32:.1f}G).")
+    total_mp_value = total_mp.to(GB).magnitude
+    total_fp32_value = total_fp32.to(GB).magnitude
+    check(total_mp < total_fp32, f"Mixed Precision ({total_mp_value:.1f}G) didn't save memory vs FP32 ({total_fp32_value:.1f}G).")
     check(total_ckpt < total_mp, "Checkpointing should further reduce memory.")
-    check(abs((p_fp32 + act_fp32_gb + g_fp32 + opt_fp32) - total_fp32) < 0.1,
+    check(abs((p_fp32 + act_fp32 + g_fp32 + opt_fp32 - total_fp32).to(GB).magnitude) < 0.1,
           "FP32 total must equal sum of parameters, activations, gradients, and optimizer states.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    gpt2_b_str = fmt_count(Models.Language.GPT2.parameters.to(param).magnitude, scale='B', precision=1, commas=False)
+    gpt2_b_str = fmt_params(Models.Language.GPT2.parameters)
     mp_batch_size_str = fmt(batch_size, precision=0, commas=False)
-    fp32_act_str = fmt_qty(act_fp32_gb * GB, GB, precision=1, commas=False)
-    fp16_act_str = fmt_qty(act_fp16_gb * GB, GB, precision=1, commas=False)
-    fp32_p_str = fmt_qty(p_fp32 * GB, GB, precision=0, commas=False)
-    fp32_g_str = fmt_qty(g_fp32 * GB, GB, precision=0, commas=False)
-    fp32_pg_str = fmt_qty((p_fp32 + g_fp32) * GB, GB, precision=0, commas=False)
-    fp32_opt_str = fmt_qty(opt_fp32 * GB, GB, precision=0, commas=False)
-    fp32_t_str = fmt_qty(total_fp32 * GB, GB, precision=1, commas=False)
-    fp16_p_str = fmt_qty(p_fp16 * GB, GB, precision=0, commas=False)
-    fp16_g_str = fmt_qty(g_fp16 * GB, GB, precision=0, commas=False)
-    master_str = fmt_qty(master_fp32 * GB, GB, precision=0, commas=False)
-    opt_str = fmt_qty(opt_fp32 * GB, GB, precision=0, commas=False)
-    fp16_t_str = fmt_qty(total_mp * GB, GB, precision=1, commas=False)
-    ckpt_act_str = fmt_qty(act_ckpt_gb * GB, GB, precision=1, commas=False)
-    ckpt_total_str = fmt_qty(total_ckpt * GB, GB, precision=1, commas=False)
-    v100_capacity_str = fmt_qty(Hardware.Cloud.V100.memory.capacity, GiB, precision=0, commas=False)
+    fp32_act_str = fmt_memory(act_fp32, unit=GB, precision=1, commas=False)
+    fp16_act_str = fmt_memory(act_fp16, unit=GB, precision=1, commas=False)
+    fp32_p_str = fmt_memory(p_fp32, unit=GB, precision=0, commas=False)
+    fp32_g_str = fmt_memory(g_fp32, unit=GB, precision=0, commas=False)
+    fp32_pg_str = fmt_memory(p_fp32 + g_fp32, unit=GB, precision=0, commas=False)
+    fp32_opt_str = fmt_memory(opt_fp32, unit=GB, precision=0, commas=False)
+    fp32_t_str = fmt_memory(total_fp32, unit=GB, precision=1, commas=False)
+    fp16_p_str = fmt_memory(p_fp16, unit=GB, precision=0, commas=False)
+    fp16_g_str = fmt_memory(g_fp16, unit=GB, precision=0, commas=False)
+    master_str = fmt_memory(master_fp32, unit=GB, precision=0, commas=False)
+    opt_str = fmt_memory(opt_fp32, unit=GB, precision=0, commas=False)
+    fp16_t_str = fmt_memory(total_mp, unit=GB, precision=1, commas=False)
+    ckpt_act_str = fmt_memory(act_ckpt, unit=GB, precision=1, commas=False)
+    ckpt_total_str = fmt_memory(total_ckpt, unit=GB, precision=1, commas=False)
+    v100_capacity_str = fmt_memory(Hardware.Cloud.V100.memory.capacity, unit=GiB, precision=0, commas=False)
 ```
 
 ::: {#nbk-training-gpt-2-mixed-precision-memory .callout-notebook title="GPT-2 mixed precision memory savings"}
@@ -4491,43 +4501,41 @@ Despite the benefits demonstrated earlier, mixed-precision training introduces n
 ```{python}
 #| echo: false
 from mlsysim import Hardware
-from mlsysim.core.constants import TFLOP, TFLOPs, PFLOPs, GB, TB, second
+from mlsysim.core.constants import TFLOP, TFLOPs, PFLOP, PFLOPs, GB, TB, second
 #| label: mixed-precision-hardware-detail-calc
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Goal: A100/H100 peak throughput and bandwidth for hardware-support prose.
 # │ Exports: MixedPrecisionHardwareDetail.a100_*_str, h100_*_str
-from mlsysim.fmt import fmt, fmt_int, check, fmt_qty
+from mlsysim.fmt import check, fmt_bandwidth, fmt_flop_rate, fmt_multiple
 
 class MixedPrecisionHardwareDetail:
     a100 = Hardware.Cloud.A100
     h_h100 = Hardware.Cloud.H100
 
-    a100_tflops_fp32 = a100.compute.precision_flops['fp32'].to(TFLOPs/second).magnitude
-    a100_tflops_fp16 = a100.compute.peak_flops.to(TFLOPs/second).magnitude
-    a100_bw_gbs = a100.memory.bandwidth.to(GB/second).magnitude
-    h100_tflops_fp16 = h_h100.compute.peak_flops.to(TFLOPs/second).magnitude
-    h100_tflops_fp8 = h_h100.compute.precision_flops["fp8"].to(TFLOPs/second).magnitude
-    h100_pflops_fp16 = h_h100.compute.peak_flops.to(PFLOPs/second).magnitude
-    h100_pflops_fp8 = h_h100.compute.precision_flops["fp8"].to(PFLOPs/second).magnitude
+    a100_flops_fp32 = a100.compute.precision_flops["fp32"]
+    a100_flops_fp16 = a100.compute.peak_flops
+    a100_bw = a100.memory.bandwidth
+    h100_flops_fp16 = h_h100.compute.peak_flops
+    h100_flops_fp8 = h_h100.compute.precision_flops["fp8"]
 
-    a100_fp16_speedup = a100_tflops_fp16 / a100_tflops_fp32
-    h100_fp8_speedup_vs_fp16 = h100_tflops_fp8 / h100_tflops_fp16
+    a100_fp16_speedup = (a100_flops_fp16 / a100_flops_fp32).to("").magnitude
+    h100_fp8_speedup_vs_fp16 = (h100_flops_fp8 / h100_flops_fp16).to("").magnitude
     # FP32 peak TFLOP/s × 4 bytes/FLOP → TB/s if every FLOP needs fresh data
-    fp32_bw_demand_tb_s = a100_tflops_fp32 * 4
+    fp32_bw_demand = a100_flops_fp32 * BYTES_FP32 / flop
 
     check(15 <= a100_fp16_speedup <= 17, f"A100 FP16:FP32 peak ratio should be about 16x, got {a100_fp16_speedup:.1f}")
     check(1.9 <= h100_fp8_speedup_vs_fp16 <= 2.1, f"H100 FP8:FP16 peak ratio should be about 2x, got {h100_fp8_speedup_vs_fp16:.1f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    a100_tflops_fp32_str = fmt_qty(a100_tflops_fp32 * (TFLOP / second), TFLOP / second, precision=1, commas=False)
-    a100_tflops_fp16_str = fmt_qty(a100_tflops_fp16 * (TFLOP / second), TFLOP / second, precision=0, commas=False)
-    a100_bw_gbs_str = fmt_qty(a100_bw_gbs * GB / second, GB / second, precision=0, commas=True)
+    a100_tflops_fp32_str = fmt_flop_rate(a100_flops_fp32, unit=TFLOP / second, precision=1, commas=False)
+    a100_tflops_fp16_str = fmt_flop_rate(a100_flops_fp16, unit=TFLOP / second, precision=0, commas=False)
+    a100_bw_gbs_str = fmt_bandwidth(a100_bw, unit=GB / second, precision=0, commas=True)
     a100_fp16_speedup_str = fmt_multiple(a100_fp16_speedup, precision=0, commas=False)
-    h100_tflops_fp8_str = fmt_qty(h100_tflops_fp8 * (TFLOP / second), TFLOP / second, precision=0, commas=True)
-    h100_pflops_fp16_str = fmt_qty(h100_pflops_fp16 * (PFLOPs / second), PFLOPs / second, precision=2, commas=False, unit_label="PFLOP/s")
-    h100_pflops_fp8_str = fmt_qty(h100_pflops_fp8 * (PFLOPs / second), PFLOPs / second, precision=2, commas=False, unit_label="PFLOP/s")
+    h100_tflops_fp8_str = fmt_flop_rate(h100_flops_fp8, unit=TFLOP / second, precision=0, commas=True)
+    h100_pflops_fp16_str = fmt_flop_rate(h100_flops_fp16, unit=PFLOP / second, precision=2, commas=False)
+    h100_pflops_fp8_str = fmt_flop_rate(h100_flops_fp8, unit=PFLOP / second, precision=2, commas=False)
     h100_fp8_speedup_vs_fp16_str = fmt_multiple(round(h100_fp8_speedup_vs_fp16), precision=0, commas=False)
-    fp32_bw_demand_tb_s_str = fmt_qty(fp32_bw_demand_tb_s * TB / second, TB / second, precision=0, commas=False)
+    fp32_bw_demand_tb_s_str = fmt_bandwidth(fp32_bw_demand, unit=TB / second, precision=0, commas=False)
 ```
 
 Understanding how modern hardware implements reduced-precision arithmetic reveals why mixed-precision achieves substantial speedups beyond mere memory savings. The performance gains from FP16 and BF16 computation stem from specialized hardware units designed explicitly for low-precision tensor operations[^fn-tensor-core-training], with architectural decisions that trade numerical range or precision for dramatic increases in computational throughput.
@@ -4723,7 +4731,7 @@ $$ \text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right
 # │ Exports: fa_seq_len_str, embed_dim_str, fa_n_heads_str, bytes_fp32_str,
 # │          attn_matrix_mb_str, total_attn_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, fmt_count, check, MarkdownStr, fmt_qty
+from mlsysim.fmt import fmt, fmt_count, MarkdownStr, fmt_memory
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AttentionMemoryCalc:
@@ -4735,17 +4743,16 @@ class AttentionMemoryCalc:
     n_heads = 16
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    attn_matrix_mb = (seq_len ** 2 * BYTES_FP32).to(MB).magnitude
-    total_attn_mb = attn_matrix_mb * n_heads
-    total_attn_gb = (total_attn_mb * MB).to(GB).magnitude
+    attn_matrix = seq_len ** 2 * BYTES_FP32
+    total_attn = attn_matrix * n_heads
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     fa_seq_len_str = fmt(seq_len, precision=0)
     embed_dim_str = fmt(embed_dim, precision=0, commas=False)
     fa_n_heads_str = fmt_count(n_heads, commas=False, label="head")
     bytes_fp32_str = fmt(BYTES_FP32.to(byte).magnitude, precision=0, commas=False)
-    attn_matrix_mb_str = fmt_qty(attn_matrix_mb * MB, MB, precision=1, commas=False)
-    total_attn_gb_str = fmt_qty(total_attn_gb * GB, GB, precision=1, commas=False)
+    attn_matrix_mb_str = fmt_memory(attn_matrix, unit=MB, precision=1, commas=False)
+    total_attn_gb_str = fmt_memory(total_attn, unit=GB, precision=1, commas=False)
     attn_bytes_formula_str = MarkdownStr(
         f"${fa_seq_len_str}^2 \\times {bytes_fp32_str}$"
     )
@@ -4818,7 +4825,7 @@ Flash Attention achieves asymptotic improvements in both memory footprint and me
 # │ Imports: mlsysim.core.constants (BYTES_FP32, MB), mlsysim.book (fmt)
 # │ Exports: fa_standard_mb_str, fa_flash_mb_str, fa_reduction_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, check, fmt_qty
+from mlsysim.fmt import fmt_multiple, fmt_memory
 
 # ┌── LEGO ───────────────────────────────────────────────
 class FlashAttentionCalc:
@@ -4830,17 +4837,17 @@ class FlashAttentionCalc:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Standard attention: n^2 attention matrix
-    fa_standard_mb = (fa_n**2 * BYTES_FP32).to(MB).magnitude
+    fa_standard = fa_n**2 * BYTES_FP32
 
     # Flash Attention: 3 input tensors (Q, K, V) each n x d
-    fa_flash_mb = (3 * fa_n * fa_d * BYTES_FP32).to(MB).magnitude
+    fa_flash = 3 * fa_n * fa_d * BYTES_FP32
 
     # Reduction factor
-    fa_reduction = fa_standard_mb/fa_flash_mb
+    fa_reduction = (fa_standard / fa_flash).to("").magnitude
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    fa_standard_mb_str = fmt_qty(fa_standard_mb * MB, MB, precision=1, commas=False)
-    fa_flash_mb_str = fmt_qty(fa_flash_mb * MB, MB, precision=1, commas=False)
+    fa_standard_mb_str = fmt_memory(fa_standard, unit=MB, precision=1, commas=False)
+    fa_flash_mb_str = fmt_memory(fa_flash, unit=MB, precision=1, commas=False)
     fa_reduction_str = fmt_multiple(fa_reduction, precision=1, commas=False)
 ```
 
@@ -5231,7 +5238,7 @@ Both techniques enhance scalability and cost efficiency by reducing hardware req
 # │          accum_2wk_str, naive_2wk_str, comm_reduction_pct_str,
 # │          accum_steps_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt_usd, fmt, fmt_count, check, MarkdownStr, fmt_qty
+from mlsysim.fmt import fmt_usd, fmt, fmt_count, check, MarkdownStr, fmt_memory
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GradientAccumulation:
@@ -5246,7 +5253,7 @@ class GradientAccumulation:
     accum_steps = 4
     gpu_hourly_rate = 16  # $/hour per accelerator
     training_hours = 14 * 24  # 2 weeks
-    v100_mem_gb = Hardware.Cloud.V100.memory.capacity.to(GiB).magnitude
+    v100_mem = Hardware.Cloud.V100.memory.capacity
 
     # ┌── 2. CALCULATION ───────────────────────────────────────────────────────
     gpus_naive = effective_batch // micro_batch
@@ -5285,7 +5292,7 @@ class GradientAccumulation:
     naive_2wk_str = fmt_usd((round(naive_2wk)) * THOUSAND, commas=False, scale="K")
     comm_reduction_pct_str = fmt_percent(comm_reduction_pct/100, precision=0, commas=False, style='symbol')
     accum_steps_str = fmt_count(accum_steps, commas=False, label="step")
-    v100_mem_str = fmt_qty(v100_mem_gb * GiB, GiB, precision=0, commas=False)
+    v100_mem_str = fmt_memory(v100_mem, unit=GiB, precision=0, commas=False)
     local_grad_eqn_str = MarkdownStr(
         rf"\frac{{1}}{{{accum_steps}}}\sum_{{j=1}}^{{{accum_steps}}} "
         rf"\left[\frac{{1}}{{{micro_batch}}}\sum_{{k=1}}^{{{micro_batch}}} "
@@ -5437,8 +5444,8 @@ To answer that question, let us walk through the memory-feasibility path for GPT
 # │          amp_reduction_str, recompute_overhead_str, checkpoint_factor_str,
 # │          memory_reduction_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, check, fmt_qty
-from mlsysim.physics import calc_activation_memory, model_memory
+from mlsysim.fmt import fmt, check, fmt_memory
+from mlsysim.physics import calc_activation_memory
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT2WalkthroughCalc:
@@ -5447,49 +5454,50 @@ class GPT2WalkthroughCalc:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     batch_size = 4
     seq_len = 1024
-    bytes_per_val = 2
-    act_fp16_gb = calc_activation_memory(
+    bytes_per_val = BYTES_FP16.to(byte).magnitude
+    act_fp16 = calc_activation_memory(
         n_layers=Models.Language.GPT2.layers,
         seq_len=seq_len,
         batch_size=batch_size,
         hidden_dim=Models.Language.GPT2.hidden_dim,
         precision_bytes=bytes_per_val,
         strategy="none",
-    ).to(GB).magnitude
-    act_fp32_gb = act_fp16_gb * 2
+    )
+    act_fp32 = act_fp16 * 2
     checkpoint_factor = 4  # checkpoint every 4 layers → 4× reduction
     recompute_overhead_pct = 33  # empirical: ~33% more compute
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Step 1: FP32 Baseline
-    params_fp32_gb = model_memory(Models.Language.GPT2.parameters, BYTES_FP32, GB)
-    grads_fp32_gb = params_fp32_gb
-    adam_fp32_gb = 2 * params_fp32_gb  # m and v states
-    total_fp32_gb = params_fp32_gb + grads_fp32_gb + adam_fp32_gb + act_fp32_gb
+    params_fp32 = Models.Language.GPT2.size_in_bytes(BYTES_FP32)
+    grads_fp32 = params_fp32
+    adam_fp32 = 2 * params_fp32  # m and v states
+    total_fp32 = params_fp32 + grads_fp32 + adam_fp32 + act_fp32
 
     # Step 2: Mixed Precision (AMP)
-    params_fp16_gb = model_memory(Models.Language.GPT2.parameters, BYTES_FP16, GB)
-    grads_fp16_gb = params_fp16_gb
-    master_weights_gb = params_fp32_gb  # FP32 copy for optimizer
-    adam_amp_gb = adam_fp32_gb          # Adam states stay FP32
-    act_fp16_gb = act_fp32_gb * (BYTES_FP16.to(byte).magnitude / BYTES_FP32.to(byte).magnitude)
-    total_amp_gb = params_fp16_gb + grads_fp16_gb + master_weights_gb + adam_amp_gb + act_fp16_gb
+    params_fp16 = Models.Language.GPT2.size_in_bytes(BYTES_FP16)
+    grads_fp16 = params_fp16
+    master_weights = params_fp32  # FP32 copy for optimizer
+    adam_amp = adam_fp32          # Adam states stay FP32
+    total_amp = params_fp16 + grads_fp16 + master_weights + adam_amp + act_fp16
 
     # Step 3: Gradient Checkpointing
-    static_mem_gb = params_fp16_gb + grads_fp16_gb + master_weights_gb + adam_amp_gb
-    act_ckpt_gb = act_fp16_gb/checkpoint_factor
-    total_ckpt_gb = static_mem_gb + act_ckpt_gb
+    static_mem = params_fp16 + grads_fp16 + master_weights + adam_amp
+    act_ckpt = act_fp16/checkpoint_factor
+    total_ckpt = static_mem + act_ckpt
 
-    v100_mem_gb = Hardware.Cloud.V100.memory.capacity.to(GiB).magnitude
+    v100_mem = Hardware.Cloud.V100.memory.capacity
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(total_fp32_gb > v100_mem_gb, "FP32 GPT-2 walkthrough should exceed V100 memory.")
-    check(total_amp_gb > v100_mem_gb, "AMP GPT-2 walkthrough should still exceed V100 memory.")
-    check(total_ckpt_gb < v100_mem_gb, f"Checkpointed GPT-2 walkthrough should fit V100: {total_ckpt_gb:.1f} GB vs {v100_mem_gb:.1f} GB.")
+    total_ckpt_value = total_ckpt.to(GB).magnitude
+    v100_mem_value = v100_mem.to(GiB).magnitude
+    check(total_fp32 > v100_mem, "FP32 GPT-2 walkthrough should exceed V100 memory.")
+    check(total_amp > v100_mem, "AMP GPT-2 walkthrough should still exceed V100 memory.")
+    check(total_ckpt < v100_mem, f"Checkpointed GPT-2 walkthrough should fit V100: {total_ckpt_value:.1f} GB vs {v100_mem_value:.1f} GiB.")
 
     # Improvement calculations
-    amp_reduction_pct = (1 - total_amp_gb/total_fp32_gb) * 100
-    memory_reduction = total_fp32_gb / total_ckpt_gb
+    amp_reduction = 1 - (total_amp / total_fp32).to("").magnitude
+    memory_reduction = (total_fp32 / total_ckpt).to("").magnitude
 
     # Step 4 profile breakdown (naive vs optimized)
     util_naive_pct = 45
@@ -5501,32 +5509,32 @@ class GPT2WalkthroughCalc:
 
     # Batch-32 summary cross-reference (matches @tbl-gpt2-summary)
     summary_batch = 32
-    summary_act_fp16_gb = calc_activation_memory(
+    summary_act_fp16 = calc_activation_memory(
         n_layers=Models.Language.GPT2.layers,
         seq_len=seq_len,
         batch_size=summary_batch,
         hidden_dim=Models.Language.GPT2.hidden_dim,
         precision_bytes=bytes_per_val,
         strategy="none",
-    ).to(GB).magnitude
-    summary_act_fp32_gb = summary_act_fp16_gb * 2
-    summary_b_param_gb = model_memory(Models.Language.GPT2.parameters, BYTES_FP32, GB)
-    summary_o_param_gb = model_memory(Models.Language.GPT2.parameters, BYTES_FP16, GB)
-    summary_b_total_gb = (
-        summary_b_param_gb + summary_b_param_gb + 2 * summary_b_param_gb + summary_act_fp32_gb
     )
-    summary_o_total_gb = (
-        summary_o_param_gb + summary_o_param_gb + summary_b_param_gb
-        + 2 * summary_b_param_gb + summary_act_fp16_gb / checkpoint_factor
+    summary_act_fp32 = summary_act_fp16 * 2
+    summary_b_param = Models.Language.GPT2.size_in_bytes(BYTES_FP32)
+    summary_o_param = Models.Language.GPT2.size_in_bytes(BYTES_FP16)
+    summary_b_total = (
+        summary_b_param + summary_b_param + 2 * summary_b_param + summary_act_fp32
+    )
+    summary_o_total = (
+        summary_o_param + summary_o_param + summary_b_param
+        + 2 * summary_b_param + summary_act_fp16 / checkpoint_factor
     )
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    total_fp32_str = fmt_qty(total_fp32_gb * GB, GB, precision=1, commas=False)
-    total_amp_str = fmt_qty(total_amp_gb * GB, GB, precision=1, commas=False)
-    total_ckpt_str = fmt_qty(total_ckpt_gb * GB, GB, precision=1, commas=False)
-    v100_mem_str = fmt_qty(v100_mem_gb * GiB, GiB, precision=0, commas=False)
+    total_fp32_str = fmt_memory(total_fp32, unit=GB, precision=1, commas=False)
+    total_amp_str = fmt_memory(total_amp, unit=GB, precision=1, commas=False)
+    total_ckpt_str = fmt_memory(total_ckpt, unit=GB, precision=1, commas=False)
+    v100_mem_str = fmt_memory(v100_mem, unit=GiB, precision=0, commas=False)
     memory_reduction_str = fmt_multiple(memory_reduction, precision=1, commas=False)
-    amp_reduction_str = fmt_percent(amp_reduction_pct/100, precision=1, commas=False, style='symbol')
+    amp_reduction_str = fmt_percent(amp_reduction, precision=1, commas=False, style='symbol')
     recompute_overhead_str = fmt_percent(recompute_overhead_pct/100, precision=0, commas=False, style='symbol')
     checkpoint_factor_str = fmt_multiple(checkpoint_factor, precision=0, commas=False)
     util_naive_str = fmt_percent(util_naive_pct/100, precision=0, commas=False, style='symbol')
@@ -5535,8 +5543,8 @@ class GPT2WalkthroughCalc:
     mem_xfer_naive_str = fmt_percent(mem_xfer_naive_pct/100, precision=0, commas=False, style='symbol')
     util_optim_str = fmt_percent(util_optim_pct/100, precision=0, commas=False, style='symbol')
     overhead_str = fmt_percent(overhead_pct/100, precision=0, commas=False, style='symbol')
-    summary_b_total_mem_str = fmt_qty(summary_b_total_gb * GB, GB, precision=1, commas=False)
-    summary_o_total_mem_str = fmt_qty(summary_o_total_gb * GB, GB, precision=1, commas=False)
+    summary_b_total_mem_str = fmt_memory(summary_b_total, unit=GB, precision=1, commas=False)
+    summary_o_total_mem_str = fmt_memory(summary_o_total, unit=GB, precision=1, commas=False)
 ```
 
 ::: {#exmp-training-gpt-2-optimization-v100 .callout-example title="GPT-2 optimization on V100"}
@@ -5624,9 +5632,11 @@ The GPT-2 case study demonstrates how targeted techniques compose to transform i
 # │ Imports: mlsysim.constants, mlsysim.book (fmt/check)
 # │ Exports: b_param_str..b_carbon_str, o_param_str..o_carbon_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt_usd, fmt, check
-from mlsysim.physics import calc_activation_memory, model_memory, carbon_from_energy
-from mlsysim.core.units import kilogram, kWh, metric_ton
+from mlsysim.fmt import (
+    fmt_usd, fmt, check, fmt_emissions, fmt_memory, fmt_qty_int, fmt_time,
+)
+from mlsysim.physics import calc_activation_memory, carbon_from_energy
+from mlsysim.core.units import kilogram, kWh, metric_ton, USD
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT2SummaryCalc:
@@ -5634,76 +5644,76 @@ class GPT2SummaryCalc:
 
     batch_size = 32
     seq_len = 1024
-    bytes_per_val = 2
+    bytes_per_val = BYTES_FP16.to(byte).magnitude
     checkpoint_factor = 4
-    act_fp16_gb = calc_activation_memory(
+    act_fp16 = calc_activation_memory(
         n_layers=Models.Language.GPT2.layers,
         seq_len=seq_len,
         batch_size=batch_size,
         hidden_dim=Models.Language.GPT2.hidden_dim,
         precision_bytes=bytes_per_val,
         strategy="none",
-    ).to(GB).magnitude
-    act_fp32_gb = act_fp16_gb * 2
+    )
+    act_fp32 = act_fp16 * 2
 
-    b_param = model_memory(Models.Language.GPT2.parameters, BYTES_FP32, GB)
+    b_param = Models.Language.GPT2.size_in_bytes(BYTES_FP32)
     b_grad = b_param
-    b_master = 0.0
+    b_master = 0 * GB
     b_opt = 2 * b_param
-    b_act = act_fp32_gb
-    b_time = 14.0
+    b_act = act_fp32
+    b_time = 14.0 * HOURS_PER_DAY * hour  # scenario assumption
 
-    o_param = model_memory(Models.Language.GPT2.parameters, BYTES_FP16, GB)
+    o_param = Models.Language.GPT2.size_in_bytes(BYTES_FP16)
     o_grad = o_param
     o_master = b_param
     o_opt = b_opt
-    o_act = (act_fp16_gb / checkpoint_factor)
-    o_time = 8.4
+    o_act = (act_fp16 / checkpoint_factor)
+    o_time = 8.4 * HOURS_PER_DAY * hour  # scenario assumption
     gpu_count = 32
-    host_cpu_power_w = 200
+    host_cpu_power = 200 * watt  # scenario assumption
     pue = Infrastructure.Grids.US_Avg.pue
-    electricity_usd_per_kwh = 0.10
+    electricity_rate = 0.10 * USD / kWh  # scenario assumption
     grid_kg_co2_per_kwh = Infrastructure.Grids.US_Avg.carbon_intensity_kg_kwh
 
     b_total_mem = b_param + b_grad + b_master + b_opt + b_act
     o_total_mem = o_param + o_grad + o_master + o_opt + o_act
     hosts = gpu_count // Systems.Nodes.DGX_H100.accelerators_per_node
-    cluster_power_kw = ((gpu_count * Hardware.Cloud.V100.tdp.to(watt).magnitude) + (hosts * host_cpu_power_w)) / THOUSAND
+    cluster_power = (gpu_count * Hardware.Cloud.V100.tdp) + (hosts * host_cpu_power)
 
-    b_energy = cluster_power_kw * b_time * HOURS_PER_DAY * pue
-    o_energy = cluster_power_kw * o_time * HOURS_PER_DAY * pue
-    b_cost = b_energy * electricity_usd_per_kwh
-    o_cost = o_energy * electricity_usd_per_kwh
+    b_energy = (cluster_power * b_time * pue).to(kWh)
+    o_energy = (cluster_power * o_time * pue).to(kWh)
+    b_cost = (b_energy * electricity_rate).to(USD)
+    o_cost = (o_energy * electricity_rate).to(USD)
     grid_ci = grid_kg_co2_per_kwh * (kilogram / kWh)
-    b_carbon = carbon_from_energy(b_energy * kWh, grid_ci).to(metric_ton).magnitude
-    o_carbon = carbon_from_energy(o_energy * kWh, grid_ci).to(metric_ton).magnitude
-    energy_reduction_pct = (1 - o_energy / b_energy) * 100
+    b_carbon = carbon_from_energy(b_energy, grid_ci).to(metric_ton)
+    o_carbon = carbon_from_energy(o_energy, grid_ci).to(metric_ton)
+    energy_reduction = 1 - (o_energy / b_energy).to("").magnitude
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    b_param_str = f"{fmt(b_param, precision=0, commas=False)} GB"
-    b_grad_str = f"{fmt(b_grad, precision=0, commas=False)} GB"
-    b_master_str = f"{fmt(b_master, precision=0, commas=False)} GB"
-    b_opt_str = f"{fmt(b_opt, precision=0, commas=False)} GB"
-    b_act_str = f"{fmt(b_act, precision=1, commas=False)} GB"
-    b_total_mem_str = f"{fmt(b_total_mem, precision=1, commas=False)} GB"
-    b_time_str = f"{fmt(b_time, precision=0, commas=False)} days"
-    b_energy_str = f"{fmt_int(round(b_energy), commas=True)} kWh"
+    b_param_str = fmt_memory(b_param, unit=GB, precision=0, commas=False)
+    b_grad_str = fmt_memory(b_grad, unit=GB, precision=0, commas=False)
+    b_master_str = fmt_memory(b_master, unit=GB, precision=0, commas=False)
+    b_opt_str = fmt_memory(b_opt, unit=GB, precision=0, commas=False)
+    b_act_str = fmt_memory(b_act, unit=GB, precision=1, commas=False)
+    b_total_mem_str = fmt_memory(b_total_mem, unit=GB, precision=1, commas=False)
+    b_time_str = fmt_time(b_time, "day", precision=0, commas=False, style="word")
+    b_energy_str = fmt_qty_int(b_energy, kWh, commas=True)
     b_cost_str = fmt_usd(b_cost, precision=1, commas=True)
-    b_carbon_str = f"~{fmt(b_carbon, precision=1, commas=False)} tons CO~2~"
+    b_carbon_str = fmt_emissions(b_carbon, unit=metric_ton, precision=1, commas=False)
 
-    o_param_str = f"{fmt(o_param, precision=0, commas=False)} GB"
-    o_grad_str = f"{fmt(o_grad, precision=0, commas=False)} GB"
-    o_master_str = f"{fmt(o_master, precision=0, commas=False)} GB"
-    o_opt_str = f"{fmt(o_opt, precision=0, commas=False)} GB"
-    o_act_str = f"{fmt(o_act, precision=1, commas=False)} GB"
-    o_total_mem_str = f"{fmt(o_total_mem, precision=1, commas=False)} GB"
-    o_time_str = f"{fmt(o_time, precision=1, commas=False)} days"
-    o_energy_str = f"{fmt_int(round(o_energy), commas=True)} kWh"
+    o_param_str = fmt_memory(o_param, unit=GB, precision=0, commas=False)
+    o_grad_str = fmt_memory(o_grad, unit=GB, precision=0, commas=False)
+    o_master_str = fmt_memory(o_master, unit=GB, precision=0, commas=False)
+    o_opt_str = fmt_memory(o_opt, unit=GB, precision=0, commas=False)
+    o_act_str = fmt_memory(o_act, unit=GB, precision=1, commas=False)
+    o_total_mem_str = fmt_memory(o_total_mem, unit=GB, precision=1, commas=False)
+    o_time_str = fmt_time(o_time, "day", precision=1, commas=False, style="word")
+    o_energy_str = fmt_qty_int(o_energy, kWh, commas=True)
     o_cost_str = fmt_usd(o_cost, precision=1, commas=True)
-    o_carbon_str = f"~{fmt_int(round(o_carbon), commas=False)} tons CO~2~"
-    energy_reduction_pct_str = fmt_percent(energy_reduction_pct/100, precision=0, commas=False, style='symbol')
+    o_carbon_str = fmt_emissions(o_carbon, unit=metric_ton, precision=2, commas=False)
+    energy_reduction_pct_str = fmt_percent(energy_reduction, precision=0, commas=False, style='symbol')
     grid_kg_kwh_str = fmt(grid_kg_co2_per_kwh, precision=2, commas=False)
-    electricity_rate_str = fmt_usd(electricity_usd_per_kwh, precision=2, commas=False, per="kWh")
+    electricity_rate_str = fmt_usd(electricity_rate, precision=2, commas=False, per="kWh")
 ```
 
 @Tbl-gpt2-summary compiles the cluster-level impact of applying mixed-precision training, gradient checkpointing, and the data-pipeline utilization gains from the walkthrough to GPT-2.
@@ -5740,8 +5750,8 @@ from mlsysim.fmt import fmt_int
 # │ Imports: mlsysim.book (fmt)
 # │ Exports: mem_reduction_str, energy_reduction_pct_str, time_speedup_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, check
-from mlsysim.physics import calc_activation_memory, model_memory
+from mlsysim.fmt import fmt, check, fmt_multiple, fmt_percent
+from mlsysim.physics import calc_activation_memory
 
 # ┌── LEGO ───────────────────────────────────────────────
 class OptimizationSummaryCalc:
@@ -5749,37 +5759,40 @@ class OptimizationSummaryCalc:
 
     batch_size = 32
     seq_len = 1024
-    bytes_per_val = 2
+    bytes_per_val = BYTES_FP16.to(byte).magnitude
     checkpoint_factor = 4
-    act_fp16_gb = calc_activation_memory(
+    act_fp16 = calc_activation_memory(
         n_layers=Models.Language.GPT2.layers,
         seq_len=seq_len,
         batch_size=batch_size,
         hidden_dim=Models.Language.GPT2.hidden_dim,
         precision_bytes=bytes_per_val,
         strategy="none",
-    ).to(GB).magnitude
-    act_fp32_gb = act_fp16_gb * 2
+    )
+    act_fp32 = act_fp16 * 2
 
-    b_param = model_memory(Models.Language.GPT2.parameters, BYTES_FP32, GB)
-    naive_mem_gb = 4 * b_param + act_fp32_gb
-    optimized_mem_gb = 2 * b_param + b_param + 2 * b_param + (act_fp16_gb / checkpoint_factor)
+    b_param = Models.Language.GPT2.size_in_bytes(BYTES_FP32)
+    naive_mem = 4 * b_param + act_fp32
+    optimized_mem = 2 * b_param + b_param + 2 * b_param + (act_fp16 / checkpoint_factor)
     naive_days = 14.0
     optimized_days = 8.4
     gpu_count = 32
     host_cpu_power_w = 200
     pue = Infrastructure.Grids.US_Avg.pue
-    cluster_power_kw = ((gpu_count * Hardware.Cloud.V100.tdp.to(watt).magnitude) + ((gpu_count // Systems.Nodes.DGX_H100.accelerators_per_node) * host_cpu_power_w)) / THOUSAND
-    naive_energy_kwh = cluster_power_kw * naive_days * HOURS_PER_DAY * pue
-    optimized_energy_kwh = cluster_power_kw * optimized_days * HOURS_PER_DAY * pue
+    cluster_power = (
+        gpu_count * Hardware.Cloud.V100.tdp
+        + ((gpu_count // Systems.Nodes.DGX_H100.accelerators_per_node) * host_cpu_power_w * watt)
+    )
+    naive_energy = (cluster_power * naive_days * HOURS_PER_DAY * hour * pue).to(kWh)
+    optimized_energy = (cluster_power * optimized_days * HOURS_PER_DAY * hour * pue).to(kWh)
 
-    mem_reduction = naive_mem_gb / optimized_mem_gb
-    energy_reduction_pct = (1 - optimized_energy_kwh / naive_energy_kwh) * 100
+    mem_reduction = (naive_mem / optimized_mem).to("").magnitude
+    energy_reduction = 1 - (optimized_energy / naive_energy).to("").magnitude
     time_speedup = naive_days / optimized_days
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     mem_reduction_str = fmt_multiple(round(mem_reduction), precision=0, commas=False)
-    energy_reduction_pct_str = fmt_percent(energy_reduction_pct/100, precision=0, commas=False, style='symbol')
+    energy_reduction_pct_str = fmt_percent(energy_reduction, precision=0, commas=False, style='symbol')
     time_speedup_str = fmt_multiple(time_speedup, precision=1, commas=False)
 ```
 
@@ -5798,40 +5811,40 @@ from mlsysim import Hardware, Models
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Goal: Recap optimized GPT-2 memory and V100 capacity for scaling intro.
 # │ Exports: GPT2SummaryScalingRecap.{b_total_mem,o_total_mem,v100_mem}_str
-from mlsysim.fmt import fmt_qty
-from mlsysim.physics import calc_activation_memory, model_memory
+from mlsysim.fmt import fmt_memory
+from mlsysim.physics import calc_activation_memory
 
 class GPT2SummaryScalingRecap:
     batch_size = 32
     seq_len = 1024
     checkpoint_factor = 4
-    act_fp16_gb = calc_activation_memory(
+    act_fp16 = calc_activation_memory(
         n_layers=Models.Language.GPT2.layers,
         seq_len=seq_len,
         batch_size=batch_size,
         hidden_dim=Models.Language.GPT2.hidden_dim,
-        precision_bytes=2,
+        precision_bytes=BYTES_FP16.to(byte).magnitude,
         strategy="none",
-    ).to(GB).magnitude
-    act_fp32_gb = act_fp16_gb * 2
-    b_param = model_memory(Models.Language.GPT2.parameters, BYTES_FP32, GB)
+    )
+    act_fp32 = act_fp16 * 2
+    b_param = Models.Language.GPT2.size_in_bytes(BYTES_FP32)
     b_grad = b_param
-    b_master = 0.0
+    b_master = 0 * GB
     b_opt = 2 * b_param
-    b_act = act_fp32_gb
+    b_act = act_fp32
     b_total_mem = b_param + b_grad + b_master + b_opt + b_act
-    o_param = model_memory(Models.Language.GPT2.parameters, BYTES_FP16, GB)
+    o_param = Models.Language.GPT2.size_in_bytes(BYTES_FP16)
     o_grad = o_param
     o_master = b_param
     o_opt = b_opt
-    o_act = act_fp16_gb / checkpoint_factor
+    o_act = act_fp16 / checkpoint_factor
     o_total_mem = o_param + o_grad + o_master + o_opt + o_act
-    v100_mem_gb = Hardware.Cloud.V100.memory.capacity.to(GiB).magnitude
+    v100_mem = Hardware.Cloud.V100.memory.capacity
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    b_total_mem_str = fmt_qty(b_total_mem * GB, GB, precision=1, commas=False)
-    o_total_mem_str = fmt_qty(o_total_mem * GB, GB, precision=1, commas=False)
-    v100_mem_str = fmt_qty(v100_mem_gb * GiB, GiB, precision=0, commas=False)
+    b_total_mem_str = fmt_memory(b_total_mem, unit=GB, precision=1, commas=False)
+    o_total_mem_str = fmt_memory(o_total_mem, unit=GB, precision=1, commas=False)
+    v100_mem_str = fmt_memory(v100_mem, unit=GiB, precision=0, commas=False)
 ```
 
 \index{Training!scaling strategies}\index{Scaling!single-device limitations}\index{Conservation of Complexity!distributed training}
@@ -6516,16 +6529,16 @@ from mlsysim.fmt import fmt, check, fmt_qty
 
 class SingleNodeInterconnect:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    nvlink_h100 = Hardware.Cloud.H100.nvlink.bandwidth.to(GB/second).magnitude
+    nvlink_h100 = Hardware.Cloud.H100.nvlink.bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     nvlink_h100_effective = nvlink_h100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(nvlink_h100_effective > 0, "NVLink bandwidth must be positive")
+    check(nvlink_h100_effective.to(GB / second).magnitude > 0, "NVLink bandwidth must be positive")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    nvlink_h100_str = fmt_qty(nvlink_h100_effective * GB / second, GB / second, precision=0, commas=False)
+    nvlink_h100_str = fmt_bandwidth(nvlink_h100_effective, unit=GB / second, precision=0, commas=False)
 ```
 
 \index{NVLink!GPU interconnect}\index{NVLink!gradient synchronization}
@@ -6694,7 +6707,10 @@ The practical decision is *when* to accept the complexity of distributed trainin
 # │          cf_energy_kwh_str, cf_energy_saved_str, cf_co2_str,
 # │          cf_household_months_str, cf_flops_mantissa_str, cf_flops_exp_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, fmt_count, check, MarkdownStr, fmt_time, fmt_qty
+from mlsysim.fmt import (
+    fmt_int, fmt, fmt_count, check, MarkdownStr, fmt_time,
+    fmt_energy, fmt_emissions, fmt_flop_rate, fmt_power,
+)
 
 # ┌── LEGO ───────────────────────────────────────────────
 class TrainingCarbonFootprint:
@@ -6707,34 +6723,34 @@ class TrainingCarbonFootprint:
     cf_params = cf_model.parameters.to(param).magnitude
     cf_tokens = TRILLION  # illustrative 1T-token scenario (full pretrain: cf_model.training_tokens)
     cf_scaling_factor = Literature.Chinchilla.ComputeConstant
-    cf_sustained_tflops = 150    # sustained TFLOP/s on A100
+    cf_sustained_flops = 150 * (TFLOP / second)    # sustained on A100
     cf_num_gpus = Systems.Clusters.Training_1K.total_accelerators
-    cf_gpu_tdp_w = Hardware.Cloud.A100.tdp.to(watt).magnitude
-    cf_cpu_tdp_per_host_w = 200  # CPU power per host
+    cf_gpu_tdp = Hardware.Cloud.A100.tdp
+    cf_cpu_tdp_per_host = 200 * watt  # scenario assumption: CPU power per host
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     cf_hosts = cf_num_gpus // Systems.Nodes.DGX_H100.accelerators_per_node
 
     # Step 1: Compute time
     cf_total_flops = cf_scaling_factor * cf_params * cf_tokens
-    cf_time_seconds = cf_total_flops / (cf_sustained_tflops * TRILLION * cf_num_gpus)
+    cf_time_seconds = cf_total_flops / (cf_sustained_flops.to(flop / second).magnitude * cf_num_gpus)
     cf_time_hours = cf_time_seconds/SEC_PER_HOUR
     cf_time_days = cf_time_hours/HOURS_PER_DAY
 
     # Step 2: Energy
-    cf_gpu_power_w = cf_num_gpus * cf_gpu_tdp_w
-    cf_cpu_power_w = cf_hosts * cf_cpu_tdp_per_host_w
-    cf_total_power_w = cf_gpu_power_w + cf_cpu_power_w
+    cf_gpu_power = cf_num_gpus * cf_gpu_tdp
+    cf_cpu_power = cf_hosts * cf_cpu_tdp_per_host
+    cf_total_power = cf_gpu_power + cf_cpu_power
     # Step 3: W * hours / 1000 = kWh
-    cf_energy_kwh = cf_total_power_w * cf_time_hours/THOUSAND
+    cf_energy = (cf_total_power * cf_time_hours * hour).to(kWh)
 
     # Step 4: Optimization dividend: halving time saves half the energy
-    cf_energy_saved_kwh = cf_energy_kwh / 2
+    cf_energy_saved = cf_energy / 2
     cf_us_grid = Infrastructure.Grids.US_Avg
-    cf_co2_tons = cf_energy_saved_kwh * cf_us_grid.carbon_intensity_kg_kwh / THOUSAND
+    cf_co2 = (cf_energy_saved * cf_us_grid.carbon_intensity_kg_kwh * kilogram / kWh).to(metric_ton)
 
     # Step 5: US household average ~900 kWh/month
-    cf_household_months = cf_energy_kwh / 900
+    cf_household_months = cf_energy.to(kWh).magnitude / 900
 
     # Step 6: Scientific notation decomposition for total FLOPs
     _cf_flops_sci = f"{cf_total_flops:.1e}"
@@ -6743,23 +6759,23 @@ class TrainingCarbonFootprint:
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(cf_time_days > 0, "Training time must be positive")
-    check(cf_energy_kwh > 0, "Energy consumption must be positive")
+    check(cf_energy.to(kWh).magnitude > 0, "Energy consumption must be positive")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     cf_num_gpus_str = fmt_count(cf_num_gpus, commas=False, label="GPU")
     cf_hosts_str = fmt_count(cf_hosts, commas=False, label="host")
-    cf_cpu_tdp_per_host_w_str = fmt_qty(cf_cpu_tdp_per_host_w * watt, watt, precision=0, commas=False)
-    cf_gpu_tdp_str = fmt_qty(cf_gpu_tdp_w * watt, watt, precision=0, commas=False)
+    cf_cpu_tdp_per_host_w_str = fmt_power(cf_cpu_tdp_per_host, unit=watt, precision=0, commas=False)
+    cf_gpu_tdp_str = fmt_power(cf_gpu_tdp, unit=watt, precision=0, commas=False)
     cf_time_days_str = fmt_time(cf_time_days, 'day', precision=1, commas=False, style='word')
     cf_time_hours_str = fmt_time(round(cf_time_hours), 'hour', precision=0, commas=False, style='word')
-    cf_energy_kwh_str = fmt_qty(cf_energy_kwh * kWh, kWh, precision=1, commas=True)
-    cf_energy_saved_str = fmt_qty(cf_energy_saved_kwh * kWh, kWh, precision=1, commas=True)
-    cf_co2_str = fmt_qty(cf_co2_tons * metric_ton, metric_ton, precision=1, commas=False, unit_label="tons CO₂")
+    cf_energy_kwh_str = fmt_energy(cf_energy, unit=kWh, precision=1, commas=True)
+    cf_energy_saved_str = fmt_energy(cf_energy_saved, unit=kWh, precision=1, commas=True)
+    cf_co2_str = fmt_emissions(cf_co2, unit=metric_ton, precision=1, commas=False)
     cf_household_months_str = fmt_time(cf_household_months, 'month', precision=1, commas=False, style='word')
     cf_flops_eqn_str = MarkdownStr(
         f"${cf_flops_mantissa_str} \\times 10^{{{cf_flops_exp_str}}}$"
     )
-    cf_sustained_tflops_str = fmt_qty(cf_sustained_tflops * TFLOP / second, TFLOP / second, precision=0, commas=False)
+    cf_sustained_tflops_str = fmt_flop_rate(cf_sustained_flops, unit=TFLOP / second, precision=0, commas=False)
     cf_util_before_pct_str = fmt_percent(30/100, precision=0, commas=False, style='symbol')
     cf_util_after_pct_str = fmt_percent(60/100, precision=0, commas=False, style='symbol')
 
@@ -6849,7 +6865,10 @@ The journey from single-GPU optimization through multi-device parallelism reveal
 # │ Imports: mlsysim.core.constants (*), mlsysim.book (fmt)
 # │ Exports: fp_model_20b_params_str..fp_prefetch_reduction_str (~30 vars)
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, check, fmt_count, fmt_time, fmt_qty
+from mlsysim.fmt import (
+    fmt_int, fmt, check, fmt_count, fmt_memory, fmt_multiple,
+    fmt_params, fmt_percent, fmt_time,
+)
 
 class FallaciesPitfallsSetup:
     """Quantitative values for all Fallacies and Pitfalls examples."""
@@ -6857,11 +6876,11 @@ class FallaciesPitfallsSetup:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
 
     # Fallacy 1: Model scaling without data
-    fp_model_20b_params = 20  # billion parameters
-    fp_model_7b_params = 7    # billion parameters
-    fp_model_20b_fp16_gb = fp_model_20b_params * 2  # 2 bytes per param in FP16
-    fp_model_20b_optim_gb = fp_model_20b_params * 4 * 2  # Adam: 2 states * 4 bytes each
-    fp_model_20b_total_gb = fp_model_20b_fp16_gb + fp_model_20b_optim_gb
+    fp_model_20b_params = 20 * Bparam  # scenario assumption
+    fp_model_7b_params = Models.Language.Llama2_7B.parameters
+    fp_model_20b_fp16 = 20 * 2 * GB  # 2 bytes per param in FP16
+    fp_model_20b_optim = 20 * 4 * 2 * GB  # Adam: 2 states * 4 bytes each
+    fp_model_20b_total = fp_model_20b_fp16 + fp_model_20b_optim
     fp_data_threshold_m = 100  # million examples
     fp_overfit_degrade_min = 5
     fp_overfit_degrade_max = 10
@@ -6912,17 +6931,17 @@ class FallaciesPitfallsSetup:
     fp_prefetch_reduction = int(100 * (fp_prefetch_time_before - fp_prefetch_time_after) / fp_prefetch_time_before)
 
     # ┌── 2. GUARD (Invariants) ───────────────────────────────────────────
-    check(fp_model_20b_total_gb > fp_model_20b_fp16_gb, "Total memory must exceed weights alone")
+    check(fp_model_20b_total > fp_model_20b_fp16, "Total memory must exceed weights alone")
     check(fp_actual_speedup_max < fp_gpu_count, "Actual speedup must be less than GPU count (Amdahl)")
     check(fp_prefetch_reduction >= 47,
           f"Prefetch reduction should be ~48% (105→55 s), got {fp_prefetch_reduction}%")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    fp_model_20b_params_str = fmt_count(fp_model_20b_params * BILLION, scale='B', precision=0, commas=False)
-    fp_model_7b_params_str = fmt_count(fp_model_7b_params * BILLION, scale='B', precision=0, commas=False)
-    fp_model_20b_total_gb_str = fmt_qty(fp_model_20b_total_gb * GB, GB, precision=0, commas=False)
-    fp_model_20b_fp16_gb_str = fmt_qty(fp_model_20b_fp16_gb * GB, GB, precision=0, commas=False)
-    fp_model_20b_optim_gb_str = fmt_qty(fp_model_20b_optim_gb * GB, GB, precision=0, commas=False)
+    fp_model_20b_params_str = fmt_params(fp_model_20b_params, precision=0)
+    fp_model_7b_params_str = fmt_params(fp_model_7b_params, precision=0)
+    fp_model_20b_total_gb_str = fmt_memory(fp_model_20b_total, unit=GB, precision=0, commas=False)
+    fp_model_20b_fp16_gb_str = fmt_memory(fp_model_20b_fp16, unit=GB, precision=0, commas=False)
+    fp_model_20b_optim_gb_str = fmt_memory(fp_model_20b_optim, unit=GB, precision=0, commas=False)
     fp_data_threshold_m_str = fmt_count(
         fp_data_threshold_m * MILLION,
         scale="M",

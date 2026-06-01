@@ -35,10 +35,10 @@ from mlsysim.core.constants import *
 # │ Context: ## The α-β Communication Model
 # │ Goal: α-β table, crossover callout, and perspective ring-N anchor.
 # │ Exports: CommAlphaBeta.*_str
-from mlsysim.fmt import fmt_int, fmt, check, MarkdownStr, fmt_qty, fmt_qty_int
+from mlsysim.fmt import fmt_int, fmt, check, MarkdownStr, fmt_count, fmt_qty, fmt_qty_int
 
 from mlsysim.core.constants import (
-    GB, KB, second, ureg,
+    GB, KB, microsecond, nanosecond, second,
 )
 
 class CommAlphaBeta:
@@ -48,37 +48,37 @@ class CommAlphaBeta:
     roce = Systems.Fabrics.Ethernet_100G
 
     ib_ndr_alpha_us = Systems.Fabrics.InfiniBand_NDR.latency_us
-    ib_ndr_beta_gbs = int(ib_ndr.bandwidth.to(GB/second).magnitude)
+    ib_ndr_beta = ib_ndr.bandwidth
     ib_hdr_alpha_us = Systems.Fabrics.InfiniBand_HDR.latency_us
-    ib_hdr_beta_gbs = int(ib_hdr.bandwidth.to(GB/second).magnitude)
+    ib_hdr_beta = ib_hdr.bandwidth
     roce_alpha_us = Systems.Fabrics.RoCE_100G.latency_us
-    roce_beta_gbs = roce.bandwidth.to(GB/second).magnitude
+    roce_beta = roce.bandwidth
     tcp_alpha_us = Systems.Fabrics.Ethernet_100G.latency_us
-    nvlink_h100_bw_gbs = int(Hardware.Cloud.H100.nvlink.bandwidth.to(GB/second).magnitude)
-    pcie_gen5_bw_gbs = int(Hardware.Cloud.H100.interconnect.bandwidth.to(GB/second).magnitude)
-    nvlink_latency_ns = int(Hardware.Tech.Interconnect.NVLink.latency.to(nanosecond).magnitude)
-    pcie_latency_ns = int(Hardware.Tech.Interconnect.PCIeGen5.latency.to(nanosecond).magnitude)
+    nvlink_h100_bw = Hardware.Cloud.H100.nvlink.bandwidth
+    pcie_gen5_bw = Hardware.Cloud.H100.interconnect.bandwidth
+    nvlink_latency = Hardware.Tech.Interconnect.NVLink.latency
+    pcie_latency = Hardware.Tech.Interconnect.PCIeGen5.latency
     ring_n_gpus = 256
     grad_layer_mb_min = 10
     grad_layer_mb_max = 100
 
-    crossover_kb_val = (ib_ndr_alpha_us * microsecond * ib_ndr.bandwidth).to(KB).magnitude
+    crossover = ib_ndr_alpha_us * microsecond * ib_ndr_beta
 
-    check(round(crossover_kb_val) == 250, f"IB NDR crossover mismatch: {crossover_kb_val}")
+    check(round(crossover.to(KB).magnitude) == 250, f"IB NDR crossover mismatch: {crossover}")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
     ib_ndr_alpha_us_str = fmt_int(ib_ndr_alpha_us, commas=False)
-    ib_ndr_beta_gbs_str = fmt_qty(ib_ndr.bandwidth, GB/second, precision=0, commas=False, unit_label="GB")
+    ib_ndr_beta_gbs_str = fmt_qty(ib_ndr_beta, GB/second, precision=0, commas=False, unit_label="GB")
     ib_hdr_alpha_us_str = fmt_int(ib_hdr_alpha_us, commas=False)
-    ib_hdr_beta_gbs_str = fmt_qty(ib_hdr.bandwidth, GB/second, precision=0, commas=False, unit_label="GB")
+    ib_hdr_beta_gbs_str = fmt_qty(ib_hdr_beta, GB/second, precision=0, commas=False, unit_label="GB")
     roce_alpha_us_str = fmt_int(roce_alpha_us, commas=False)
-    roce_beta_gbs_str = fmt_qty(roce.bandwidth, GB/second, precision=1, commas=False, unit_label="GB")
+    roce_beta_gbs_str = fmt_qty(roce_beta, GB/second, precision=1, commas=False, unit_label="GB")
     tcp_alpha_us_str = fmt_int(tcp_alpha_us, commas=False)
-    nvlink_bw_str = fmt_qty(Hardware.Cloud.H100.nvlink.bandwidth, GB/second, precision=0, commas=False, unit_label="GB")
-    pcie_bw_str = fmt_qty(Hardware.Cloud.H100.interconnect.bandwidth, GB/second, precision=0, commas=False, unit_label="GB")
-    nvlink_lat_str = fmt(nvlink_latency_ns, precision=0, commas=False)
-    pcie_lat_str = fmt(pcie_latency_ns, precision=0, commas=False)
-    crossover_kb_str = fmt_qty_int(crossover_kb_val * KB, KB, commas=False)
+    nvlink_bw_str = fmt_qty(nvlink_h100_bw, GB/second, precision=0, commas=False, unit_label="GB")
+    pcie_bw_str = fmt_qty(pcie_gen5_bw, GB/second, precision=0, commas=False, unit_label="GB")
+    nvlink_lat_str = fmt(nvlink_latency.to(nanosecond).magnitude, precision=0, commas=False)
+    pcie_lat_str = fmt(pcie_latency.to(nanosecond).magnitude, precision=0, commas=False)
+    crossover_kb_str = fmt_qty_int(crossover, KB, commas=False)
     ring_n_str = fmt_count(ring_n_gpus, commas=False, label="GPU")
     grad_layer_mb_range_str = MarkdownStr(f"{grad_layer_mb_min}--{grad_layer_mb_max} MB")
 ```
@@ -192,7 +192,7 @@ The tree algorithm trades bandwidth efficiency for latency efficiency: the laten
 # │ Exports: CommCollectives.*_str
 from mlsysim.fmt import fmt_int, fmt, check, fmt_qty, fmt_time
 
-from mlsysim.core.constants import GB, ureg
+from mlsysim.core.constants import BILLION, GB, MILLION, microsecond, ms, second
 from mlsysim.physics import calc_ring_allreduce_time, calc_tree_allreduce_time
 
 class CommCollectives:
@@ -201,30 +201,30 @@ class CommCollectives:
     ring_n_gpus = 256
     ring_msg = 1 * GB
     ib_ndr_alpha_us = Systems.Fabrics.InfiniBand_NDR.latency_us
-    ib_ndr_beta_gbs = int(ib_ndr.bandwidth.to(GB/second).magnitude)
+    ib_ndr_beta = ib_ndr.bandwidth
 
-    ring_time_ms = calc_ring_allreduce_time(
-        ring_msg, ring_n_gpus, ib_ndr.bandwidth, ib_ndr_alpha_us * microsecond
-    ).to(ms).magnitude
-    tree_time_ms = calc_tree_allreduce_time(
-        ring_msg, ring_n_gpus, ib_ndr.bandwidth, ib_ndr_alpha_us * microsecond
-    ).to(ms).magnitude
+    ring_time = calc_ring_allreduce_time(
+        ring_msg, ring_n_gpus, ib_ndr_beta, ib_ndr_alpha_us * microsecond
+    )
+    tree_time = calc_tree_allreduce_time(
+        ring_msg, ring_n_gpus, ib_ndr_beta, ib_ndr_alpha_us * microsecond
+    )
 
-    check(ring_time_ms < tree_time_ms, "Ring should be faster than tree for 1 GB message")
-    min_transfer_ms = (ring_msg / ib_ndr.bandwidth).to("ms").magnitude
-    check(ring_time_ms >= min_transfer_ms, "Ring time must cover link transfer floor")
+    check(ring_time < tree_time, "Ring should be faster than tree for 1 GB message")
+    min_transfer = ring_msg / ib_ndr_beta
+    check(ring_time >= min_transfer, "Ring time must cover link transfer floor")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
     ring_n_str = fmt(ring_n_gpus, precision=0, commas=False)
     ib_ndr_alpha_us_str = fmt_int(ib_ndr_alpha_us, commas=False)
-    ib_ndr_beta_gbs_str = fmt_qty(ib_ndr.bandwidth, GB/second, precision=0, commas=False, unit_label="GB")
+    ib_ndr_beta_gbs_str = fmt_qty(ib_ndr_beta, GB/second, precision=0, commas=False, unit_label="GB")
     ring_msg_gb_str = fmt_qty(ring_msg, GB, precision=0, commas=False)
     ring_msg_params_m_str = fmt_int(
         int(ring_msg.to(GB).magnitude * BILLION / 2 / MILLION),
         commas=False,
     )
-    ring_time_ms_str = fmt_time(ring_time_ms, 'millisecond', precision=1, commas=False)
-    tree_time_ms_str = fmt_time(tree_time_ms, 'millisecond', precision=1, commas=False)
+    ring_time_ms_str = fmt_time(ring_time, ms, precision=1, commas=False)
+    tree_time_ms_str = fmt_time(tree_time, ms, precision=1, commas=False)
 ```
 
 ::: {#nbk-appendix-communication-ring-vs-tree-allreduce .callout-notebook title="Worked example: Ring vs. tree AllReduce"}
@@ -348,15 +348,15 @@ from mlsysim.core.constants import GB, second
 Systems.Nodes.DGX_H100.accelerators_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
 class CommAlgorithmSelection:
     from mlsysim import Hardware
-    ib_ndr_beta_gbs = int(Systems.Fabrics.InfiniBand_NDR.bandwidth.to(GB/second).magnitude)
-    nvlink_h100_bw_gbs = int(Hardware.Cloud.H100.nvlink.bandwidth.to(GB/second).magnitude)
-    nvlink_to_ndr_ratio = nvlink_h100_bw_gbs / ib_ndr_beta_gbs
+    ib_ndr_beta = Systems.Fabrics.InfiniBand_NDR.bandwidth
+    nvlink_h100_bw = Hardware.Cloud.H100.nvlink.bandwidth
+    nvlink_to_ndr_ratio = (nvlink_h100_bw / ib_ndr_beta).to_base_units().magnitude
 
     check(abs(nvlink_to_ndr_ratio - 18) < 1e-9, "NVLink/NDR ratio should be 18x")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
-    nvlink_bw_str = fmt_qty(Hardware.Cloud.H100.nvlink.bandwidth, GB/second, precision=0, commas=False, unit_label="GB")
-    ib_ndr_beta_gbs_str = fmt_qty(Systems.Fabrics.InfiniBand_NDR.bandwidth, GB/second, precision=0, commas=False, unit_label="GB")
+    nvlink_bw_str = fmt_qty(nvlink_h100_bw, GB/second, precision=0, commas=False, unit_label="GB")
+    ib_ndr_beta_gbs_str = fmt_qty(ib_ndr_beta, GB/second, precision=0, commas=False, unit_label="GB")
     gpus_per_host_str = fmt(Systems.Nodes.DGX_H100.accelerators_per_node, precision=0, commas=False)
     nvlink_to_ndr_ratio_str = fmt(nvlink_to_ndr_ratio, precision=0, commas=False)
 ```
@@ -483,7 +483,7 @@ In the bandwidth-dominated regime ($M \gg n^*$), the communication time scales l
 # │ Exports: CommCompression.*_str
 from mlsysim.fmt import fmt_int, fmt, check, fmt_qty, fmt_time
 
-from mlsysim.core.constants import GB, ureg
+from mlsysim.core.constants import GB, microsecond, ms
 from mlsysim.physics import calc_ring_allreduce_time
 
 class CommCompression:
@@ -492,19 +492,19 @@ class CommCompression:
     ring_n_gpus = 256
     ring_msg = 1 * GB
     compress_ratio = 64
-    compress_overhead_ms = 2.0
+    compress_overhead = 2.0 * ms
 
-    ring_time_ms = calc_ring_allreduce_time(
+    ring_time = calc_ring_allreduce_time(
         ring_msg, ring_n_gpus, ib_ndr.bandwidth, Systems.Fabrics.InfiniBand_NDR.latency_us * microsecond
-    ).to(ms).magnitude
+    )
     compressed_msg = ring_msg / compress_ratio
-    compressed_comm_ms = calc_ring_allreduce_time(
+    compressed_comm = calc_ring_allreduce_time(
         compressed_msg, ring_n_gpus, ib_ndr.bandwidth, Systems.Fabrics.InfiniBand_NDR.latency_us * microsecond
-    ).to(ms).magnitude
-    compressed_total_ms = compressed_comm_ms + compress_overhead_ms
-    compress_speedup = ring_time_ms / compressed_total_ms
-    min_transfer_ms = (ring_msg / ib_ndr.bandwidth).to("ms").magnitude
-    check(ring_time_ms >= min_transfer_ms, "Uncompressed time must cover link transfer floor")
+    )
+    compressed_total = compressed_comm + compress_overhead
+    compress_speedup = (ring_time / compressed_total).to_base_units().magnitude
+    min_transfer = ring_msg / ib_ndr.bandwidth
+    check(ring_time >= min_transfer, "Uncompressed time must cover link transfer floor")
 
     @staticmethod
     def breakeven_ms(comm_ms, compression_ratio):
@@ -514,10 +514,10 @@ class CommCompression:
     ring_n_str = fmt(ring_n_gpus, precision=0, commas=False)
     ring_msg_gb_str = fmt_qty(ring_msg, GB, precision=0, commas=False)
     compress_ratio_str = fmt_int(compress_ratio, commas=False)
-    compress_overhead_ms_str = fmt_time(compress_overhead_ms, 'millisecond', precision=0, commas=False)
-    uncompressed_ms_str = fmt_time(ring_time_ms, 'millisecond', precision=1, commas=False)
-    compressed_comm_ms_str = fmt_time(compressed_comm_ms, 'millisecond', precision=1, commas=False)
-    compressed_total_ms_str = fmt_time(compressed_total_ms, 'millisecond', precision=1, commas=False)
+    compress_overhead_ms_str = fmt_time(compress_overhead, ms, precision=0, commas=False)
+    uncompressed_ms_str = fmt_time(ring_time, ms, precision=1, commas=False)
+    compressed_comm_ms_str = fmt_time(compressed_comm, ms, precision=1, commas=False)
+    compressed_total_ms_str = fmt_time(compressed_total, ms, precision=1, commas=False)
     compress_speedup_str = fmt(compress_speedup, precision=1, commas=False)
     breakeven_4_10_str = fmt(breakeven_ms(10, 4), precision=1, commas=False)
     breakeven_4_40_str = fmt(breakeven_ms(40, 4), precision=0, commas=False)

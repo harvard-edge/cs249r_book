@@ -228,8 +228,6 @@ class MemoryWallSpecs:
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     gpu = Hardware.Cloud.A100
 
-    flops_fp16 = gpu.compute.peak_flops.to(TFLOPs/second).magnitude
-    bw_tbs = gpu.memory.bandwidth.to(TB/second).magnitude
     flops_fp16_q = gpu.compute.peak_flops
     bw_q = gpu.memory.bandwidth
 
@@ -258,7 +256,6 @@ class A100BLASMemoryWallRecap:
     gpu = Hardware.Cloud.A100
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    dense_flops = gpu.compute.peak_flops.to(TFLOPs/second).magnitude
     dense_flops_q = gpu.compute.peak_flops
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
@@ -2607,22 +2604,18 @@ class ResNetMemory:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     model = Models.Vision.ResNet50
-    training_min_gb = 10
-    training_max_gb = 15
+    training_min = 10 * GB  # scenario assumption
+    training_max = 15 * GB  # scenario assumption
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     params_m = model.parameters.to(Mparam).magnitude
 
     fp32 = model.size_in_bytes(BYTES_FP32)
     adam = model.size_in_bytes(BYTES_ADAM_STATE)
-    fp32_mb = fp32.to(MB).magnitude
-    adam_mb = adam.to(MB).magnitude
-    training_min = training_min_gb * GB
-    training_max = training_max_gb * GB
 
     # Decimal GB → MB is ×1000 (book-prose §1: decimal units in prose).
-    training_ratio_min = (training_min_gb * THOUSAND) / fp32_mb
-    training_ratio_max = (training_max_gb * THOUSAND) / fp32_mb
+    training_ratio_min = (training_min / fp32).to_base_units().magnitude
+    training_ratio_max = (training_max / fp32).to_base_units().magnitude
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     resnet_params_m_str = fmt_count(params_m * MILLION, scale='M', precision=1, commas=False)
@@ -2898,6 +2891,7 @@ optimizer.step()
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.physics import model_memory
 from mlsysim.fmt import fmt_qty, check
+from mlsysim import Models
 
 # ┌── LEGO ───────────────────────────────────────────────
 class Model7B:
@@ -2907,15 +2901,12 @@ class Model7B:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    params = 7e9 * ureg.param
+    params = Models.Language.Llama2_7B.parameters
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    fp16_gb = model_memory(params, BYTES_FP16, GB)
-    adam_gb = model_memory(params, BYTES_ADAM_STATE, GB)
-    total_gb = fp16_gb + adam_gb
-    fp16 = fp16_gb * GB
-    adam = adam_gb * GB
-    total = total_gb * GB
+    fp16 = params * BYTES_FP16
+    adam = params * BYTES_ADAM_STATE
+    total = fp16 + adam
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     model_7b_fp16_gb_str = fmt_qty(fp16, GB, precision=0, commas=False)
@@ -3134,10 +3125,9 @@ class TensorFootprint:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     footprint = rows * cols * dtype_bytes
-    footprint_mb = footprint.to(MB).magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(4.1 < footprint_mb < 4.2, f"Expected about 4.2 MB, got {footprint_mb}.")
+    check(4.1 < footprint.to(MB).magnitude < 4.2, f"Expected about 4.2 MB, got {footprint.to(MB).magnitude}.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     tensor_1024_fp32_mb_str = fmt_qty(footprint, MB, precision=1, commas=False)
@@ -3186,7 +3176,7 @@ class AdminTax:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    params_count = 1 * BILLION
+    params_count = 1 * BILLION * param
     batch_size = 32
     layers = 100
     width = 1024
@@ -3195,20 +3185,15 @@ class AdminTax:
     weights = params_count * BYTES_FP16
     grads = weights
     opt = params_count * BYTES_ADAM_STATE
-    weights_gb = weights.to(GB).magnitude
-    grads_gb = grads.to(GB).magnitude
-    opt_gb = opt.to(GB).magnitude
 
     # Step 1: Activation approximation: Batch * Layers * Width^2 * FP16
     act_bytes = batch_size * layers * (width ** 2) * BYTES_FP16
-    act_gb = act_bytes.to(GB).magnitude
 
-    total_gb = weights_gb + grads_gb + opt_gb + act_gb
-    tax_gb = total_gb - weights_gb
-    tax = tax_gb * GB
+    total = weights + grads + opt + act_bytes
+    tax = total - weights
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(tax_gb > 15, f"Administrative tax ({tax_gb:.1f} GB) unexpectedly low.")
+    check(tax.to(GB).magnitude > 15, f"Administrative tax ({tax.to(GB).magnitude:.1f} GB) unexpectedly low.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     admin_weights_gb_str = fmt_qty(weights, GB, precision=0, commas=False)
@@ -3237,13 +3222,13 @@ class ResNetAdminTaxRatio:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     model = Models.Vision.ResNet50
-    training_min_gb = 10
-    training_max_gb = 15
+    training_min = 10 * GB  # scenario assumption
+    training_max = 15 * GB  # scenario assumption
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    fp32_mb = model.size_in_bytes(BYTES_FP32).to(MB).magnitude
-    training_ratio_min = (training_min_gb * THOUSAND) / fp32_mb
-    training_ratio_max = (training_max_gb * THOUSAND) / fp32_mb
+    fp32 = model.size_in_bytes(BYTES_FP32)
+    training_ratio_min = (training_min / fp32).to_base_units().magnitude
+    training_ratio_max = (training_max / fp32).to_base_units().magnitude
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     resnet_training_ratio_min_str = fmt(training_ratio_min, precision=1, commas=False)
@@ -3477,35 +3462,26 @@ class DeviceBandwidthHierarchy:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    tensor_4mb = 4 * MILLION
+    tensor_4mb = 4 * MB  # scenario assumption
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    pcie4_gbs = Hardware.Cloud.A100.interconnect.bandwidth.to(GB/second).magnitude
     pcie4 = Hardware.Cloud.A100.interconnect.bandwidth
-    nvlink_a100_gbs = Hardware.Cloud.A100.nvlink.bandwidth.to(GB/second).magnitude
     nvlink_a100 = Hardware.Cloud.A100.nvlink.bandwidth
-    nvlink_a100_per_direction_gbs = nvlink_a100_gbs / 2
-    nvlink_a100_per_direction = nvlink_a100_per_direction_gbs * GB / second
-    a100_bw_gbs = Hardware.Cloud.A100.memory.bandwidth.to(GB/second).magnitude
+    nvlink_a100_per_direction = nvlink_a100 / 2
     a100_bw = Hardware.Cloud.A100.memory.bandwidth
-    a100_bw_tbs = Hardware.Cloud.A100.memory.bandwidth.to(TB/second).magnitude
-    a100_mem = Hardware.Cloud.A100.memory.capacity.to(GiB).magnitude  # pedagogical 80 GB nominal
-    a100_mem_display = a100_mem * GiB
-    a100_tflops_fp16 = Hardware.Cloud.A100.compute.peak_flops.to(TFLOPs/second).magnitude
+    a100_mem_display = Hardware.Cloud.A100.memory.capacity
     a100_flops_fp16 = Hardware.Cloud.A100.compute.peak_flops
 
     # Transfer times for 4 MB tensor
-    pcie4_4mb_ms = (tensor_4mb/Hardware.Cloud.A100.interconnect.bandwidth.to(byte/second).magnitude) * THOUSAND
-    nvlink_4mb_ms = (tensor_4mb/(Hardware.Cloud.A100.nvlink.bandwidth.to(byte/second).magnitude / 2)) * THOUSAND
-    hbm_4mb_ms = (tensor_4mb/Hardware.Cloud.A100.memory.bandwidth.to(byte/second).magnitude) * THOUSAND
+    pcie4_4mb = (tensor_4mb / pcie4).to(millisecond)
+    nvlink_4mb = (tensor_4mb / nvlink_a100_per_direction).to(millisecond)
+    hbm_4mb = (tensor_4mb / a100_bw).to(millisecond)
 
     # 1 GB transfer cost analysis
-    # 1 GB/BW (B/s) * THOUSAND ms
-    pcie4_1gb_ms = (BILLION/Hardware.Cloud.A100.interconnect.bandwidth.to(byte/second).magnitude) * THOUSAND
-    # Equiv Ops: (ms / 1000) * FLOP/s
-    pcie4_1gb_equiv_ops = (pcie4_1gb_ms/THOUSAND) * Hardware.Cloud.A100.compute.peak_flops.to(flop/second).magnitude
+    pcie4_1gb = ((1 * GB) / pcie4).to(millisecond)
+    pcie4_1gb_equiv_ops = pcie4_1gb.to(second) * Hardware.Cloud.A100.compute.peak_flops
 
-    pcie_to_hbm_gap = a100_bw_gbs / pcie4_gbs
+    pcie_to_hbm_gap = (a100_bw / pcie4).to_base_units().magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(60 <= pcie_to_hbm_gap <= 70,
@@ -3520,11 +3496,11 @@ class DeviceBandwidthHierarchy:
     a100_bw_tbs_str = fmt_qty(a100_bw, TB/second, precision=2, commas=False)
     a100_tflops_fp16_str = fmt_qty(a100_flops_fp16, TFLOP/second, precision=0, commas=False)
     a100_mem_str = fmt_qty(a100_mem_display, GiB, precision=0, commas=False, unit_label="GB")
-    pcie4_4mb_ms_str = fmt_time(pcie4_4mb_ms, 'millisecond', precision=3, commas=False)
-    nvlink_4mb_ms_str = fmt_time(nvlink_4mb_ms, 'millisecond', precision=3, commas=False)
-    hbm_4mb_ms_str = fmt_time(hbm_4mb_ms, 'millisecond', precision=3, commas=False)
-    pcie4_1gb_ms_str = fmt_time(pcie4_1gb_ms, 'millisecond', precision=1, commas=False)
-    pcie4_1gb_equiv_ops_str = fmt_qty(pcie4_1gb_equiv_ops * flop, TFLOP, precision=1, commas=False)
+    pcie4_4mb_ms_str = fmt_time(pcie4_4mb, millisecond, precision=3, commas=False)
+    nvlink_4mb_ms_str = fmt_time(nvlink_4mb, millisecond, precision=3, commas=False)
+    hbm_4mb_ms_str = fmt_time(hbm_4mb, millisecond, precision=3, commas=False)
+    pcie4_1gb_ms_str = fmt_time(pcie4_1gb, millisecond, precision=1, commas=False)
+    pcie4_1gb_equiv_ops_str = fmt_qty(pcie4_1gb_equiv_ops, TFLOP, precision=1, commas=False)
     pcie_to_hbm_gap_str = fmt_multiple(pcie_to_hbm_gap, precision=1, commas=False)
 ```
 
@@ -3726,27 +3702,23 @@ class DataloaderThroughput:
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Throughput requirement
-    throughput_bytes_sec = img_per_sec * img_res * img_res * img_channels * byte
-    dataloader_mbs = throughput_bytes_sec.to(MB).magnitude
-    dataloader = dataloader_mbs * MB / second
+    dataloader = img_per_sec * img_res * img_res * img_channels * (byte / second)
 
     # Step 2: Batch transfer
     batch_bytes = batch_size * img_res * img_res * img_channels * BYTES_FP32
-    batch_mb = batch_bytes.to(MB).magnitude
-    batch_transfer_ms = (batch_bytes / Hardware.Cloud.A100.interconnect.bandwidth).to(second).magnitude * MS_PER_SEC
+    batch_transfer = (batch_bytes / Hardware.Cloud.A100.interconnect.bandwidth).to(millisecond)
 
     # Step 3: PCIe Ref
-    pcie4_gbs = Hardware.Cloud.A100.interconnect.bandwidth.to(GB/second).magnitude
     pcie4 = Hardware.Cloud.A100.interconnect.bandwidth
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(dataloader_mbs > 100, f"Throughput requirement ({dataloader_mbs:.1f} MB/s) too low.")
+    check(dataloader.to(MB / second).magnitude > 100, f"Throughput requirement ({dataloader.to(MB / second).magnitude:.1f} MB/s) too low.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     img_res_str = fmt(img_res, precision=0, commas=False)
     dataloader_mbs_str = fmt_qty(dataloader, MB/second, precision=1, commas=False)
     batch_mb_str = fmt_qty(batch_bytes, MB, precision=1, commas=False)
-    batch_transfer_ms_str = fmt_time(batch_transfer_ms, 'millisecond', precision=1, commas=False)
+    batch_transfer_ms_str = fmt_time(batch_transfer, millisecond, precision=1, commas=False)
     pcie4_gbs_str = fmt_qty(pcie4, GB/second, precision=0, commas=False)
 ```
 
@@ -4154,20 +4126,20 @@ The operation scheduler analyzes the computational graph to find parallelism whi
 from mlsysim import Models
 from mlsysim.physics import model_memory
 from mlsysim.fmt import fmt_qty, check
+from mlsysim import Models
 
 # ┌── LEGO ───────────────────────────────────────────────
 class Module7bRuntimeMemory:
     """7-billion-parameter FP16 weight memory for system-level memory manager prose."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    model_7b_params = 7e9 * ureg.param
+    model_7b_params = Models.Language.Llama2_7B.parameters
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    model_7b_fp16_gb = model_memory(model_7b_params, BYTES_FP16, GB)
-    model_7b_fp16 = model_7b_fp16_gb * GB
+    model_7b_fp16 = model_7b_params * BYTES_FP16
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(round(model_7b_fp16_gb) == 14, "7-billion-parameter FP16 weights should be about 14 GB.")
+    check(round(model_7b_fp16.to(GB).magnitude) == 14, "7-billion-parameter FP16 weights should be about 14 GB.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     model_7b_fp16_gb_str = fmt_qty(model_7b_fp16, GB, precision=0, commas=False)
@@ -4355,19 +4327,19 @@ Hierarchical composition mirrors the hardware memory hierarchy in a systems-rele
 # │ Exports: Module7bCheckpointSize.model_7b_fp16_gb_str
 from mlsysim.physics import model_memory
 from mlsysim.fmt import fmt_qty, check
+from mlsysim import Models
 
 class Module7bCheckpointSize:
     """7-billion-parameter FP16 checkpoint size for state_dict serialization prose."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    model_7b_params = 7e9 * ureg.param
+    model_7b_params = Models.Language.Llama2_7B.parameters
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    model_7b_fp16_gb = model_memory(model_7b_params, BYTES_FP16, GB)
-    model_7b_fp16 = model_7b_fp16_gb * GB
+    model_7b_fp16 = model_7b_params * BYTES_FP16
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(round(model_7b_fp16_gb) == 14, "7-billion-parameter FP16 checkpoint should be about 14 GB.")
+    check(round(model_7b_fp16.to(GB).magnitude) == 14, "7-billion-parameter FP16 checkpoint should be about 14 GB.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     model_7b_fp16_gb_str = fmt_qty(model_7b_fp16, GB, precision=0, commas=False)
@@ -4934,14 +4906,13 @@ class HbmCapacityFootnote:
     """Local A100 HBM capacity anchor for the training-step footnote."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    a100_mem_gb = Hardware.Cloud.A100.memory.capacity.to(GiB).magnitude  # pedagogical 80 GB nominal
-    a100_mem = a100_mem_gb * GiB
+    a100_mem = Hardware.Cloud.A100.memory.capacity
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Direct hardware-constant lookup.
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(a100_mem_gb >= 80, "A100 HBM capacity anchor should be at least 80 GB.")
+    check(a100_mem.to(GiB).magnitude >= 80, "A100 HBM capacity anchor should be at least 80 GB.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     a100_mem_str = fmt_qty(a100_mem, GiB, precision=0, commas=False, unit_label="GB")
@@ -5007,30 +4978,30 @@ class TrainingStepCalc:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Step 1: MatMul 1: [32, 784] @ [784, 256]
-    mm1_flops = 2 * _batch * _input * _hidden                                  # ~12.8M FLOPs
-    mm1_mem_bytes = (_batch * _input + _input * _hidden + _batch * _hidden) * 4  # FP32
+    mm1_flops = 2 * _batch * _input * _hidden * flop                            # ~12.8M FLOPs
+    mm1_mem = (_batch * _input + _input * _hidden + _batch * _hidden) * 4 * byte  # FP32
 
     # Step 2: ReLU: [32, 256]
-    relu_flops = _batch * _hidden                                               # ~8K FLOPs
-    relu_mem_bytes = (_batch * _hidden) * 2 * 4                                # read + write
+    relu_flops = _batch * _hidden * flop                                        # ~8K FLOPs
+    relu_mem = (_batch * _hidden) * 2 * 4 * byte                                # read + write
 
     # Step 3: MatMul 2: [32, 256] @ [256, 10]
-    mm2_flops = 2 * _batch * _hidden * _output                                 # ~164K FLOPs
-    mm2_mem_bytes = (_batch * _hidden + _hidden * _output + _batch * _output) * 4
+    mm2_flops = 2 * _batch * _hidden * _output * flop                           # ~164K FLOPs
+    mm2_mem = (_batch * _hidden + _hidden * _output + _batch * _output) * 4 * byte
 
     # Step 4: Cross Entropy: [32, 10]
-    ce_flops = _batch * _output * 3                                             # ~1K FLOPs (exp + sum + div)
-    ce_mem_bytes = (_batch * _output) * 2 * 4
+    ce_flops = _batch * _output * 3 * flop                                      # ~1K FLOPs (exp + sum + div)
+    ce_mem = (_batch * _output) * 2 * 4 * byte
 
     # Step 5: Backward pass (2x forward FLOPs, ~3x forward memory traffic)
     forward_flops = mm1_flops + relu_flops + mm2_flops + ce_flops
-    forward_mem_bytes = mm1_mem_bytes + relu_mem_bytes + mm2_mem_bytes + ce_mem_bytes
+    forward_mem = mm1_mem + relu_mem + mm2_mem + ce_mem
     bwd_flops = 2 * forward_flops
-    bwd_mem_bytes = 3 * forward_mem_bytes
-    bwd_ai = bwd_flops / bwd_mem_bytes
+    bwd_mem = 3 * forward_mem
+    bwd_ai = (bwd_flops / bwd_mem).to(flop / byte).magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(mm1_flops/mm1_mem_bytes > relu_flops/relu_mem_bytes,
+    check((mm1_flops / mm1_mem).to(flop / byte).magnitude > (relu_flops / relu_mem).to(flop / byte).magnitude,
           "MatMul must have higher arithmetic intensity than ReLU.")
     check(bwd_flops > forward_flops,
           "Backward FLOPs should exceed forward FLOPs in this approximation.")
@@ -5038,24 +5009,24 @@ class TrainingStepCalc:
           f"Backward arithmetic intensity ({bwd_ai:.1f}) drifted from the expected range.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    train_mm1_flops_str = fmt_qty(mm1_flops * flop, MFLOPs, precision=1, commas=False)
-    train_mm1_mem_str = fmt_qty(mm1_mem_bytes * byte, MB, precision=1, commas=False)
-    train_mm1_ai_str = fmt(mm1_flops/mm1_mem_bytes, precision=1, commas=False)
+    train_mm1_flops_str = fmt_qty(mm1_flops, MFLOPs, precision=1, commas=False)
+    train_mm1_mem_str = fmt_qty(mm1_mem, MB, precision=1, commas=False)
+    train_mm1_ai_str = fmt((mm1_flops / mm1_mem).to(flop / byte).magnitude, precision=1, commas=False)
 
-    train_relu_flops_str = fmt_qty(relu_flops * flop, KFLOPs, precision=1, commas=False)
-    train_relu_mem_str = fmt_qty(relu_mem_bytes * byte, KB, precision=1, commas=False)
-    train_relu_ai_str = fmt(relu_flops/relu_mem_bytes, precision=3, commas=False)
+    train_relu_flops_str = fmt_qty(relu_flops, KFLOPs, precision=1, commas=False)
+    train_relu_mem_str = fmt_qty(relu_mem, KB, precision=1, commas=False)
+    train_relu_ai_str = fmt((relu_flops / relu_mem).to(flop / byte).magnitude, precision=3, commas=False)
 
-    train_mm2_flops_str = fmt_qty(mm2_flops * flop, KFLOPs, precision=1, commas=False)
-    train_mm2_mem_str = fmt_qty(mm2_mem_bytes * byte, KB, precision=1, commas=False)
-    train_mm2_ai_str = fmt(mm2_flops/mm2_mem_bytes, precision=1, commas=False)
+    train_mm2_flops_str = fmt_qty(mm2_flops, KFLOPs, precision=1, commas=False)
+    train_mm2_mem_str = fmt_qty(mm2_mem, KB, precision=1, commas=False)
+    train_mm2_ai_str = fmt((mm2_flops / mm2_mem).to(flop / byte).magnitude, precision=1, commas=False)
 
-    train_ce_flops_str = fmt_qty(ce_flops * flop, KFLOPs, precision=1, commas=False)
-    train_ce_mem_str = fmt_qty(ce_mem_bytes * byte, KB, precision=1, commas=False)
-    train_ce_ai_str = fmt(ce_flops/ce_mem_bytes, precision=1, commas=False)
+    train_ce_flops_str = fmt_qty(ce_flops, KFLOPs, precision=1, commas=False)
+    train_ce_mem_str = fmt_qty(ce_mem, KB, precision=1, commas=False)
+    train_ce_ai_str = fmt((ce_flops / ce_mem).to(flop / byte).magnitude, precision=1, commas=False)
 
-    train_bwd_flops_str = fmt_qty(bwd_flops * flop, MFLOPs, precision=1, commas=False)
-    train_bwd_mem_str = fmt_qty(bwd_mem_bytes * byte, MB, precision=1, commas=False)
+    train_bwd_flops_str = fmt_qty(bwd_flops, MFLOPs, precision=1, commas=False)
+    train_bwd_mem_str = fmt_qty(bwd_mem, MB, precision=1, commas=False)
     train_bwd_ai_str = fmt(bwd_ai, precision=1, commas=False)
 ```
 
@@ -5098,42 +5069,39 @@ class MnistTrainingStepCalc:
     _output = 10
     n_ops = 6                                                                   # 6 kernel launches
     us_per_op = 5                                                               # 5 μs dispatch/op
-    peak_flops = Hardware.Cloud.A100.compute.peak_flops.to(flop/second).magnitude                      # 312e12 FLOP/s
-    peak_flops_q = Hardware.Cloud.A100.compute.peak_flops
-    mem_bw_bytes = Hardware.Cloud.A100.memory.bandwidth.to(byte/second).magnitude                               # ~2e12 B/s
-    mem_bw_q = Hardware.Cloud.A100.memory.bandwidth
+    peak_flops = Hardware.Cloud.A100.compute.peak_flops
+    mem_bw = Hardware.Cloud.A100.memory.bandwidth
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    mm1_flops = 2 * _batch * _input * _hidden
-    mm1_mem_bytes = (_batch * _input + _input * _hidden + _batch * _hidden) * 4
-    relu_flops = _batch * _hidden
-    relu_mem_bytes = (_batch * _hidden) * 2 * 4
-    mm2_flops = 2 * _batch * _hidden * _output
-    mm2_mem_bytes = (_batch * _hidden + _hidden * _output + _batch * _output) * 4
-    ce_flops = _batch * _output * 3
-    ce_mem_bytes = (_batch * _output) * 2 * 4
+    mm1_flops = 2 * _batch * _input * _hidden * flop
+    mm1_mem = (_batch * _input + _input * _hidden + _batch * _hidden) * 4 * byte
+    relu_flops = _batch * _hidden * flop
+    relu_mem = (_batch * _hidden) * 2 * 4 * byte
+    mm2_flops = 2 * _batch * _hidden * _output * flop
+    mm2_mem = (_batch * _hidden + _hidden * _output + _batch * _output) * 4 * byte
+    ce_flops = _batch * _output * 3 * flop
+    ce_mem = (_batch * _output) * 2 * 4 * byte
     forward_flops = mm1_flops + relu_flops + mm2_flops + ce_flops
-    forward_mem_bytes = mm1_mem_bytes + relu_mem_bytes + mm2_mem_bytes + ce_mem_bytes
+    forward_mem = mm1_mem + relu_mem + mm2_mem + ce_mem
     bwd_flops = 2 * forward_flops
-    bwd_mem_bytes = 3 * forward_mem_bytes
+    bwd_mem = 3 * forward_mem
     total_flops = forward_flops + bwd_flops
-    mem_traffic_bytes = forward_mem_bytes + bwd_mem_bytes
-    mem_traffic = mem_traffic_bytes * byte
-    t_compute_us = total_flops/peak_flops * MILLION                          # ~0.1 μs
-    t_memory_us = mem_traffic_bytes/mem_bw_bytes * MILLION                   # ~2 μs
+    mem_traffic = forward_mem + bwd_mem
+    t_compute = (total_flops / peak_flops).to(microsecond)
+    t_memory = (mem_traffic / mem_bw).to(microsecond)
     t_overhead_us = n_ops * us_per_op                                          # 30 μs (dominant!)
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(t_overhead_us > 10 * max(t_compute_us, t_memory_us),
-          f"Expected overhead to dominate, got overhead={t_overhead_us:.1f} μs, compute={t_compute_us:.2f} μs, memory={t_memory_us:.2f} μs.")
+    check(t_overhead_us > 10 * max(t_compute.to(microsecond).magnitude, t_memory.to(microsecond).magnitude),
+          f"Expected overhead to dominate, got overhead={t_overhead_us:.1f} μs, compute={t_compute.to(microsecond).magnitude:.2f} μs, memory={t_memory.to(microsecond).magnitude:.2f} μs.")
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    mnist_t_compute_us_str = fmt_time(t_compute_us, 'microsecond', precision=1, commas=False)
-    mnist_t_memory_us_str = fmt_time(t_memory_us, 'microsecond', precision=1, commas=False)
-    mnist_t_overhead_us_str = fmt_time(t_overhead_us, 'microsecond', precision=0, commas=False)
-    mnist_total_flops_str = fmt_qty(total_flops * flop, MFLOPs, precision=1, commas=False)
+    mnist_t_compute_us_str = fmt_time(t_compute, microsecond, precision=1, commas=False)
+    mnist_t_memory_us_str = fmt_time(t_memory, microsecond, precision=1, commas=False)
+    mnist_t_overhead_us_str = fmt_time(t_overhead_us, microsecond, precision=0, commas=False)
+    mnist_total_flops_str = fmt_qty(total_flops, MFLOPs, precision=1, commas=False)
     mnist_mem_traffic_str = fmt_qty(mem_traffic, MB, precision=1, commas=False)
     mnist_n_ops_str = fmt(n_ops, precision=0, commas=False)
     mnist_us_per_op_str = fmt_time(us_per_op, 'microsecond', precision=0, commas=False)
-    a100_peak_tflops_str = fmt_qty(peak_flops_q, TFLOP/second, precision=0, commas=False)
-    a100_mem_bw_tbs_str = fmt_qty(mem_bw_q, TB/second, precision=1, commas=False)
+    a100_peak_tflops_str = fmt_qty(peak_flops, TFLOP/second, precision=0, commas=False)
+    a100_mem_bw_tbs_str = fmt_qty(mem_bw, TB/second, precision=1, commas=False)
 ```
 
 Total: ~`{python} MnistTrainingStepCalc.mnist_total_flops_str`, ~`{python} MnistTrainingStepCalc.mnist_mem_traffic_str` memory traffic. On an A100:
@@ -5221,20 +5189,17 @@ from mlsysim.fmt import fmt_qty, check
 class Model7BMemory:
     """7-billion-parameter FP16 weight memory to show batch-size myth under capacity constraints."""
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    params = 7e9                                                                # 7 billion parameters
-    a100_mem = Hardware.Cloud.A100.memory.capacity.to(GiB).magnitude  # pedagogical 80 GB nominal
-    a100_mem_display = a100_mem * GiB
+    params = Models.Language.Llama2_7B.parameters
+    a100_mem_display = 80 * GB  # pedagogical 80 GB nominal
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    fp16_gb = model_memory(params, BYTES_FP16, GB)                             # 14 GB
-    remaining_gb = a100_mem - fp16_gb
-    fp16 = fp16_gb * GB
-    remaining = remaining_gb * GB
+    fp16 = params * BYTES_FP16                                                  # 14 GB
+    remaining = a100_mem_display - fp16
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(remaining_gb > 60, f"7-billion-parameter FP16 weights leave less A100 memory than expected: {remaining_gb:.1f} GB.")
+    check(remaining.to(GB).magnitude > 60, f"7-billion-parameter FP16 weights leave less A100 memory than expected: {remaining.to(GB).magnitude:.1f} GB.")
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     model_7b_fp16_gb_str = fmt_qty(fp16, GB, precision=0, commas=False)             # e.g. "14 GB"
     a100_remaining_7b_gb_str = fmt_qty(remaining, GB, precision=0, commas=False)     # e.g. "66 GB"
-    a100_mem_str = fmt_qty(a100_mem_display, GiB, precision=0, commas=False, unit_label="GB")                    # e.g. "80 GB"
+    a100_mem_str = fmt_qty(a100_mem_display, GB, precision=0, commas=False)                    # e.g. "80 GB"
 ```
 
 **Fallacy**: *"Increasing batch size is a free throughput optimization within framework memory limits."*

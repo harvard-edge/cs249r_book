@@ -325,27 +325,27 @@ class ComputeDataGap:
     # LOAD
     h100_count = Systems.Clusters.Training_10K.total_accelerators
     months = 3
-    filtered_corpus_tokens = 5e12
-    public_text_stock = 300e12
+    filtered_corpus_tokens = 5e12 * c.count
+    public_text_stock = 300e12 * c.count
     sustained_mfu = calibration.REFERENCE_MFU_SUSTAINED
-    training_flops_per_token = 6 * Models.Language.Llama2_70B.parameters.to(c.param).magnitude
-    seconds = months * c.DAYS_PER_MONTH * c.HOURS_PER_DAY * c.SEC_PER_HOUR
+    training_flops_per_token = (
+        6 * Models.Language.Llama2_70B.parameters.to(c.param) * c.flop / c.param
+    )
+    training_duration = months * c.DAYS_PER_MONTH * c.HOURS_PER_DAY * c.hour
 
     # EXECUTE
     total_flops = (
         h100_count
-        * Hardware.Cloud.H100.compute.peak_flops.to(c.flop / c.second).magnitude
-        * seconds
+        * Hardware.Cloud.H100.compute.peak_flops.to(c.flop / c.second)
+        * training_duration.to(c.second)
         * sustained_mfu
     )
-    tokens_capacity = total_flops / training_flops_per_token
-    corpus_reuse_ratio = tokens_capacity/filtered_corpus_tokens
+    tokens_capacity = (total_flops / training_flops_per_token).to(c.count)
+    corpus_reuse_ratio = (tokens_capacity / filtered_corpus_tokens).to("").magnitude
     cluster_cost = (
         h100_count
-        * months
-        * c.DAYS_PER_MONTH
-        * c.HOURS_PER_DAY
-        * Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.to(USD / hour).magnitude
+        * training_duration.to(c.hour)
+        * Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.to(c.USD / c.hour)
     )
 
     # GUARD
@@ -355,8 +355,8 @@ class ComputeDataGap:
     # OUTPUT
     h100_count_str = fmt(h100_count, precision=0, commas=True)
     tokens_capacity_str = fmt_count(tokens_capacity, scale='T', precision=1, commas=False)
-    filtered_corpus_tokens_str = fmt_count(filtered_corpus_tokens, scale='T', precision=0, commas=False)
-    public_text_stock_str = fmt_count(public_text_stock, scale='T', precision=0, commas=False)
+    filtered_corpus_tokens_str = fmt_count(filtered_corpus_tokens, scale='T', commas=False)
+    public_text_stock_str = fmt_count(public_text_stock, scale='T', commas=False)
     corpus_reuse_ratio_str = fmt(corpus_reuse_ratio, precision=1, commas=False)
     training_months_str = fmt_time(months, 'month', precision=0, commas=False, style='word')
     sustained_mfu_pct_str = fmt_percent(sustained_mfu, precision=0, commas=False)
@@ -996,45 +996,45 @@ class IcrCoresetComparison:
     """Compare learning-per-FLOP for random sampling vs. coreset selection."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    imagenet_size_value = Datasets.ImageNet.training_examples.to("").magnitude
-    acc_gain_random_value = 5.0                                 # % accuracy per epoch
-    acc_gain_coreset_value = 4.5                                # % with 50% coreset
+    imagenet_size = Datasets.ImageNet.training_examples.to(count)
+    acc_gain_random_pp = 5.0                                    # percentage-point gain per epoch
+    acc_gain_coreset_pp = 4.5                                   # percentage points with 50% coreset
     coreset_fraction_value = 0.5                                # keep 50% of data
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     m_resnet = Models.Vision.ResNet50
-    resnet50_fwd_gflops_value = m_resnet.inference_flops.to(GFLOPs).magnitude
-    resnet50_fwdbwd_gflops_value = (m_resnet.inference_flops * 3).to(GFLOPs).magnitude
-    full_epoch_flops_value = imagenet_size_value * resnet50_fwdbwd_gflops_value * BILLION
+    resnet50_fwd_flops = m_resnet.inference_flops.to(GFLOPs)
+    resnet50_fwdbwd_flops = (m_resnet.inference_flops * 3).to(GFLOPs)
+    full_epoch_flops = imagenet_size * resnet50_fwdbwd_flops
 
-    icr_random_value = acc_gain_random_value/full_epoch_flops_value
+    icr_random_value = acc_gain_random_pp / full_epoch_flops.to(flop).magnitude
 
-    coreset_size_value = int(imagenet_size_value * coreset_fraction_value)
-    coreset_flops_value = coreset_size_value * resnet50_fwdbwd_gflops_value * BILLION
-    icr_coreset_value = acc_gain_coreset_value/coreset_flops_value
-    icr_ratio_value = icr_coreset_value/icr_random_value
-    acc_diff_value = acc_gain_random_value - acc_gain_coreset_value
+    coreset_size = imagenet_size * coreset_fraction_value
+    coreset_flops = coreset_size * resnet50_fwdbwd_flops
+    icr_coreset_value = acc_gain_coreset_pp / coreset_flops.to(flop).magnitude
+    icr_ratio_value = icr_coreset_value / icr_random_value
+    acc_diff_pp = acc_gain_random_pp - acc_gain_coreset_pp
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(icr_ratio_value > 1.0, f"Coreset ICR ({icr_ratio_value:.2f}) should exceed random ICR.")
     check(coreset_fraction_value < 1.0, "Coreset fraction must be less than 1.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    resnet50_fwd_gflops_str = fmt(m_resnet.inference_flops.to(GFLOPs), precision=1)
-    resnet50_fwdbwd_gflops_str = fmt((m_resnet.inference_flops * 3).to(GFLOPs), precision=1)
-    full_epoch_flops_str = fmt_sci_qty(full_epoch_flops_value * flop, flop, precision=2, unit_label="FLOPs")
+    resnet50_fwd_gflops_str = fmt(resnet50_fwd_flops, precision=1)
+    resnet50_fwdbwd_gflops_str = fmt(resnet50_fwdbwd_flops, precision=1)
+    full_epoch_flops_str = fmt_sci_qty(full_epoch_flops, flop, precision=2, unit_label="FLOPs")
     icr_random_str = fmt_sci(icr_random_value, precision=1)
-    imagenet_size_str = fmt_count(imagenet_size_value, scale='M', precision=2)
+    imagenet_size_str = fmt_count(imagenet_size, scale='M', precision=2)
     # Custom "K" suffix on a divided count uses fmt() suffix discipline.
-    coreset_size_str = fmt_count(coreset_size_value, scale='K', precision=1, commas=False)
-    coreset_flops_str = fmt_sci_qty(coreset_flops_value * flop, flop, precision=1, unit_label="FLOPs")
+    coreset_size_str = fmt_count(coreset_size, scale='K', precision=1, commas=False)
+    coreset_flops_str = fmt_sci_qty(coreset_flops, flop, precision=1, unit_label="FLOPs")
     icr_coreset_str = fmt_sci(icr_coreset_value, precision=1)
     icr_ratio_str = fmt(icr_ratio_value, precision=1, commas=False)
-    acc_gain_random_str = fmt_pp(acc_gain_random_value, precision=0)
-    acc_gain_coreset_str = fmt_pp(acc_gain_coreset_value, precision=1)
-    acc_diff_str = fmt_pp(acc_diff_value, precision=1)
+    acc_gain_random_str = fmt_pp(acc_gain_random_pp, precision=0)
+    acc_gain_coreset_str = fmt_pp(acc_gain_coreset_pp, precision=1)
+    acc_diff_str = fmt_pp(acc_diff_pp, precision=1)
     coreset_pct_str = fmt_percent(coreset_fraction_value, precision=0, commas=False, style='prose')
-    acc_perf_pct_str = fmt_percent(acc_gain_coreset_value / acc_gain_random_value, precision=0, commas=False, style='prose')
+    acc_perf_pct_str = fmt_percent(acc_gain_coreset_pp / acc_gain_random_pp, precision=0, commas=False, style='prose')
 ```
 
 ::: {#nbk-data-selection-computing-icr-coresets .callout-notebook title="Computing ICR: Coresets"}
@@ -1311,30 +1311,31 @@ Given these trade-offs, most practitioners find that EL2N with a small proxy mod
 # │ Imports: mlsysim.book (fmt)
 # │ Exports: n_train_images_str, coreset_fraction_pct_str, n_coreset_str, etc.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import count
 from mlsysim.fmt import fmt_percent, fmt, fmt_count, check
 
 class CoresetPractice:
     """Practical 10× coreset workflow: 5-epoch proxy selects 100K from 1M images."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    n_train_images_value = 1_000_000                            # 1M training images
+    train_image_count = 1_000_000 * count                       # scenario assumption: 1M training images
     coreset_fraction_value = 0.1                                # keep 10%
-    n_epochs_proxy_value = 5                                    # proxy training epochs
+    proxy_epoch_count = 5                                       # proxy training epochs
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    n_coreset_value = int(n_train_images_value * coreset_fraction_value)
+    coreset_image_count = train_image_count * coreset_fraction_value
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(n_coreset_value > 0, "Coreset must be nonempty.")
+    check(coreset_image_count > 0 * count, "Coreset must be nonempty.")
     check(coreset_fraction_value < 1.0, "Coreset fraction must be less than 1.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     n_train_images_str = fmt_count(
-        n_train_images_value, scale="M", precision=0, scale_style="word"
+        train_image_count, scale="M", precision=0, scale_style="word"
     )
     coreset_fraction_pct_str = fmt_percent(coreset_fraction_value, precision=0, commas=False, style='prose')
-    n_coreset_str = fmt(n_coreset_value, precision=0, commas=True)
-    n_epochs_proxy_str = fmt(n_epochs_proxy_value, precision=0, commas=False)
+    n_coreset_str = fmt_count(coreset_image_count, precision=0, commas=True)
+    n_epochs_proxy_str = fmt(proxy_epoch_count, precision=0, commas=False)
 ```
 
 ::: {#exmp-data-selection-coreset-selection-practice .callout-example title="Coreset selection in practice"}
@@ -1848,63 +1849,66 @@ The economic implications are substantial. In production settings, labeling cost
 # │ Imports: mlsysim.book (fmt)
 # │ Exports: n_unlabeled_str, cost_saving_str, speedup_str, etc.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import USD, count, ureg
 from mlsysim.fmt import fmt_percent, fmt, check, fmt_time, fmt_count, fmt_usd
 
 class ActiveLearningRoi:
     """Medical imaging active learning: 20× speedup, $4.75M savings vs. naive labeling."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    n_unlabeled_value = 1_000_000                               # scans in pool
-    cost_per_label_value = 5.00                                 # $/label (specialist)
-    budget_value = 500_000                                      # $ available
-    deadline_months_value = 1                                   # time constraint
-    n_active_value = 50_000                                     # samples needed with AL
+    unlabeled_scan_count = 1_000_000 * count                    # scenario assumption: scans in pool
+    cost_per_label = 5.00 * (USD / count)                       # scenario assumption: specialist label cost
+    budget = 500_000 * USD                                      # scenario assumption: available budget
+    deadline = 1 * ureg.month                                   # scenario assumption: time constraint
+    active_scan_count = 50_000 * count                          # scenario assumption: samples needed with AL
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    cost_all_value = n_unlabeled_value * cost_per_label_value
-    n_random_value = int(budget_value/cost_per_label_value)
-    n_random_pct_value = n_random_value/n_unlabeled_value * 100
+    cost_all = unlabeled_scan_count * cost_per_label
+    random_scan_count = (budget / cost_per_label).to(count)
+    random_fraction = random_scan_count / unlabeled_scan_count
 
-    cost_active_value = n_active_value * cost_per_label_value
-    cost_active_pct_value = (budget_value - cost_active_value) / budget_value * 100
-    speedup_value = n_unlabeled_value/n_active_value
-    cost_saving_value = cost_all_value - cost_active_value
-    over_budget_ratio_value = cost_all_value / budget_value
+    cost_active = active_scan_count * cost_per_label
+    cost_active_under_budget = (budget - cost_active) / budget
+    speedup_value = (unlabeled_scan_count / active_scan_count).to("").magnitude
+    cost_saving = cost_all - cost_active
+    over_budget_ratio_value = (cost_all / budget).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(cost_active_value < budget_value, "Active learning cost must be within budget.")
+    check(cost_active < budget, "Active learning cost must be within budget.")
     check(speedup_value > 1.0, "Active learning must require fewer labels than naive labeling.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    n_unlabeled_str = fmt_count(n_unlabeled_value, scale="Million", precision=0)
-    cost_per_label_str = fmt(cost_per_label_value, precision=0, commas=False)
-    budget_str = fmt(budget_value, precision=0, commas=True)
-    cost_all_str = fmt(cost_all_value, precision=0, commas=True)
-    n_random_str = fmt(n_random_value, precision=0, commas=True)
-    n_random_pct_str = fmt_percent(n_random_pct_value/100, precision=0, commas=False, style='prose')
-    n_active_str = fmt(n_active_value, precision=0, commas=True)
-    cost_active_str = fmt(cost_active_value, precision=0, commas=True)
-    cost_active_pct_str = fmt_percent(cost_active_pct_value/100, precision=0, commas=False, style='prose')
+    n_unlabeled_str = fmt_count(unlabeled_scan_count, scale="Million")
+    cost_per_label_str = fmt_usd(
+        cost_per_label.to(USD / count).magnitude, precision=0, commas=False, per="label"
+    )
+    budget_str = fmt_usd(budget, precision=0, commas=True)
+    cost_all_str = fmt_usd(cost_all, precision=0, commas=True)
+    n_random_str = fmt_count(random_scan_count, precision=0, commas=True)
+    n_random_pct_str = fmt_percent(random_fraction, precision=0, commas=False, style='prose')
+    n_active_str = fmt_count(active_scan_count, precision=0, commas=True)
+    cost_active_str = fmt_usd(cost_active, precision=0, commas=True)
+    cost_active_pct_str = fmt_percent(cost_active_under_budget, precision=0, commas=False, style='prose')
     speedup_str = fmt(speedup_value, precision=0, commas=False)
-    cost_saving_str = fmt_usd(cost_saving_value, precision=2, commas=False, scale="Million")
+    cost_saving_str = fmt_usd(cost_saving, precision=2, commas=False, scale="Million")
     over_budget_ratio_str = fmt(over_budget_ratio_value, precision=0, commas=False)
-    deadline_months_str = fmt_time(deadline_months_value, 'month', precision=0, commas=False, style='word')
+    deadline_months_str = fmt_time(deadline, 'month', precision=0, commas=False, style='word')
 ```
 
 ::: {#nbk-data-selection-active-learning-roi .callout-notebook title="The active learning ROI"}
 
-**Problem**: A hospital team is building a medical diagnostic AI. The pool contains `{python} ActiveLearningRoi.n_unlabeled_str` unlabeled scans. A specialist doctor charges \$`{python} ActiveLearningRoi.cost_per_label_str` to label one scan. The team has a budget of \$`{python} ActiveLearningRoi.budget_str` and a deadline of `{python} ActiveLearningRoi.deadline_months_str`.
+**Problem**: A hospital team is building a medical diagnostic AI. The pool contains `{python} ActiveLearningRoi.n_unlabeled_str` unlabeled scans. A specialist doctor charges `{python} ActiveLearningRoi.cost_per_label_str`. The team has a budget of `{python} ActiveLearningRoi.budget_str` and a deadline of `{python} ActiveLearningRoi.deadline_months_str`.
 
 **Scenario A: Naive Labeling**
 
-1.  **Cost**: Labeling all `{python} ActiveLearningRoi.n_unlabeled_str` scans would cost \$`{python} ActiveLearningRoi.cost_all_str` (`{python} ActiveLearningRoi.over_budget_ratio_str`$\times$ over budget).
+1.  **Cost**: Labeling all `{python} ActiveLearningRoi.n_unlabeled_str` scans would cost `{python} ActiveLearningRoi.cost_all_str` (`{python} ActiveLearningRoi.over_budget_ratio_str`$\times$ over budget).
 2.  **Time**: The budget only covers labeling `{python} ActiveLearningRoi.n_random_str` random scans.
 3.  **Naive labeling outcome**: The model misses rare pathologies because they were not in the random `{python} ActiveLearningRoi.n_random_pct_str`.
 
 **Scenario B: Active Learning**
 
 1.  **Strategy**: Use an uncertainty-based selection to pick the `{python} ActiveLearningRoi.n_active_str` "hardest" scans for the doctor to label.
-2.  **Cost**: `{python} ActiveLearningRoi.n_active_str` $\times$ `{python} ActiveLearningRoi.cost_per_label_str` = \$`{python} ActiveLearningRoi.cost_active_str`. (`{python} ActiveLearningRoi.cost_active_pct_str` under budget).
+2.  **Cost**: `{python} ActiveLearningRoi.n_active_str` $\times$ `{python} ActiveLearningRoi.cost_per_label_str` = `{python} ActiveLearningRoi.cost_active_str`. (`{python} ActiveLearningRoi.cost_active_pct_str` under budget).
 3.  **Training speed**: With `{python} ActiveLearningRoi.speedup_str`$\times$ less data, each training epoch is `{python} ActiveLearningRoi.speedup_str`$\times$ faster.
 4.  **Active learning outcome**: Empirical studies suggest that these `{python} ActiveLearningRoi.n_active_str` "high-information" samples often achieve higher accuracy than `{python} ActiveLearningRoi.n_random_str` random samples.
 
@@ -2267,30 +2271,31 @@ Understanding *why* self-supervised learning dominates modern ML practice requir
 # │ Imports: mlsysim.book (fmt), mlsysim.core.constants (MILLION, THOUSAND)
 # │ Exports: label_cost_drop_str, marginal_compute_reduction_str, etc.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import USD, count, hour
 from mlsysim.fmt import fmt_percent, fmt, fmt_count, fmt_usd, check, MarkdownStr
 
 class FoundationCostAmortization:
     """Foundation model amortization: 10 tasks, 100× label reduction, 20× marginal compute drop."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    cost_scratch_per_task_value = 1000                          # GPU-hrs per task
-    n_tasks_value = 10                                          # number of tasks
-    cost_pretrain_value = 10000                                 # GPU-hrs (one-time)
-    cost_finetune_value = 50                                    # GPU-hrs per task
-    labels_per_task_scratch = 100_000                           # labels from scratch
-    cost_per_label = 1                                          # $/label
-    labels_per_task_finetune = 1_000                            # labels for fine-tuning
+    scratch_compute_per_task = 1000 * hour                      # scenario assumption: GPU-hours per task
+    task_count = 10                                             # number of tasks
+    pretrain_compute = 10000 * hour                             # scenario assumption: one-time GPU-hours
+    finetune_compute_per_task = 50 * hour                       # scenario assumption: GPU-hours per task
+    labels_per_task_scratch = 100_000 * count                   # scenario assumption: labels from scratch
+    cost_per_label = 1 * (USD / count)                          # scenario assumption: label price
+    labels_per_task_finetune = 1_000 * count                    # scenario assumption: labels for fine-tuning
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    cost_scratch_total_value = cost_scratch_per_task_value * n_tasks_value
-    cost_foundation_total_value = cost_pretrain_value + (cost_finetune_value * n_tasks_value)
+    scratch_compute_total = scratch_compute_per_task * task_count
+    foundation_compute_total = pretrain_compute + (finetune_compute_per_task * task_count)
 
-    label_cost_scratch_total = labels_per_task_scratch * cost_per_label * n_tasks_value
-    label_cost_finetune_total = labels_per_task_finetune * cost_per_label * n_tasks_value
+    label_cost_scratch_total = labels_per_task_scratch * cost_per_label * task_count
+    label_cost_finetune_total = labels_per_task_finetune * cost_per_label * task_count
 
     label_cost_reduction = label_cost_scratch_total/label_cost_finetune_total
-    marginal_compute_reduction = cost_scratch_per_task_value/cost_finetune_value
-    crossover_tasks_value = cost_pretrain_value / (cost_scratch_per_task_value - cost_finetune_value)
+    marginal_compute_reduction = (scratch_compute_per_task/finetune_compute_per_task).to("").magnitude
+    crossover_tasks_value = (pretrain_compute / (scratch_compute_per_task - finetune_compute_per_task)).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(label_cost_reduction > 1.0, "Fine-tuning must require fewer labels than scratch training.")
@@ -2298,18 +2303,20 @@ class FoundationCostAmortization:
     check(crossover_tasks_value > 0, "Crossover must be a positive number of tasks.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    n_tasks_str = fmt(n_tasks_value, precision=0, commas=False)
-    cost_per_label_str = fmt_usd(cost_per_label, precision=0, commas=False)
-    labels_per_task_scratch_str = fmt(labels_per_task_scratch, precision=0, commas=True)
+    n_tasks_str = fmt(task_count, precision=0, commas=False)
+    cost_per_label_str = fmt_usd(
+        cost_per_label.to(USD / count).magnitude, precision=0, commas=False
+    )
+    labels_per_task_scratch_str = fmt_count(labels_per_task_scratch, precision=0, commas=True)
     # Currency prefix + M/K suffixes use fmt() prefix/suffix discipline.
     label_cost_scratch_total_str = fmt_usd(label_cost_scratch_total, precision=0, commas=False, scale="M")
-    cost_scratch_per_task_str = fmt_count(cost_scratch_per_task_value, precision=0, commas=True, label="GPU-hour", plural_label="GPU-hours")
-    cost_scratch_total_str = fmt_count(cost_scratch_total_value, precision=0, commas=True, label="GPU-hour", plural_label="GPU-hours")
-    cost_foundation_total_str = fmt_count(cost_foundation_total_value, precision=0, commas=True, label="GPU-hour", plural_label="GPU-hours")
-    labels_per_task_finetune_str = fmt(labels_per_task_finetune, precision=0, commas=True)
+    cost_scratch_per_task_str = fmt_count(scratch_compute_per_task.to(hour).magnitude, precision=0, commas=True, label="GPU-hour", plural_label="GPU-hours")
+    cost_scratch_total_str = fmt_count(scratch_compute_total.to(hour).magnitude, precision=0, commas=True, label="GPU-hour", plural_label="GPU-hours")
+    cost_foundation_total_str = fmt_count(foundation_compute_total.to(hour).magnitude, precision=0, commas=True, label="GPU-hour", plural_label="GPU-hours")
+    labels_per_task_finetune_str = fmt_count(labels_per_task_finetune, precision=0, commas=True)
     label_cost_finetune_total_str = fmt_usd(label_cost_finetune_total, precision=0, commas=False, scale="K")
-    cost_finetune_value_str = fmt_count(cost_finetune_value, precision=0, commas=True, label="GPU-hour", plural_label="GPU-hours")
-    cost_pretrain_value_str = fmt_count(cost_pretrain_value, precision=0, commas=True, label="GPU-hour", plural_label="GPU-hours")
+    cost_finetune_value_str = fmt_count(finetune_compute_per_task.to(hour).magnitude, precision=0, commas=True, label="GPU-hour", plural_label="GPU-hours")
+    cost_pretrain_value_str = fmt_count(pretrain_compute.to(hour).magnitude, precision=0, commas=True, label="GPU-hour", plural_label="GPU-hours")
     marginal_compute_reduction_str = fmt(marginal_compute_reduction, precision=0, commas=False)
     crossover_tasks_str = fmt(crossover_tasks_value, precision=1, commas=False)
     label_cost_drop_str = fmt(label_cost_reduction, precision=0, commas=True)
@@ -2815,6 +2822,8 @@ Choosing the right data selection technique is necessary but not sufficient. The
 # │ Exports: SelectionBottleneckAnchor.dataset_size_str,
 # │          .scoring_time_str, .coreset_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import count, hour
+from mlsysim.core.constants import count, day, hour
 from mlsysim.fmt import fmt, check, fmt_percent, fmt_count, fmt_time
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2822,20 +2831,20 @@ class SelectionBottleneckAnchor:
     """Local anchor for the selection-latency bottleneck scenario."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    dataset_size_m = 1
-    scoring_time_hrs = 2.8
+    dataset_image_count = 1_000_000 * count                    # scenario assumption: candidate images
+    scoring_time = 2.8 * hour                                  # scenario assumption: full-model scoring pass
     coreset_pct = 10
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Values are the scenario constants for the prose below.
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(scoring_time_hrs > 2, "Full-model scoring should be hours, not minutes.")
+    check(scoring_time > 2 * hour, "Full-model scoring should be hours, not minutes.")
     check(coreset_pct == 10, "Worked example assumes a 10% coreset.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    dataset_size_str = fmt_count(dataset_size_m * MILLION, scale='M', precision=0, commas=False)
-    scoring_time_str = fmt_time(scoring_time_hrs, 'hour', precision=1, commas=False, style='word')
+    dataset_size_str = fmt_count(dataset_image_count, scale='M', commas=False)
+    scoring_time_str = fmt_time(scoring_time, 'hour', precision=1, commas=False, style='word')
     coreset_pct_str = fmt_percent(coreset_pct/100, precision=0, commas=False, style='symbol')
 ```
 
@@ -2863,75 +2872,73 @@ from mlsysim.fmt import fmt_int
 # │ Imports: mlsysim.book (fmt)
 # │ Exports: score_a_str, savings_b_pct_str, trap_pct_str, etc.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import count, hour, second
 from mlsysim.fmt import fmt_percent, fmt_int, fmt, check, fmt_count, fmt_time
 
 class SelectionInequalityCalc:
     """1M image scenario: proxy scoring (0.6 hrs) preserves 90% compute savings vs full-model scoring."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    n_images_value = 1_000_000                                  # total images
-    n_coreset_value = 100_000                                   # 10% coreset
-    n_epochs_value = 100                                        # training epochs
-    resnet50_time_per_image_value = 0.01                        # sec/image (full model)
-    resnet18_time_per_image_value = 0.002                       # sec/image (proxy)
-    trap_sel_hrs_value = 50                                     # hrs for 7B model scoring
-    coreset_fraction_value = n_coreset_value/n_images_value
+    image_count = 1_000_000 * count                             # scenario assumption: total images
+    coreset_image_count = 100_000 * count                       # scenario assumption: 10% coreset
+    training_epoch_count = 100                                  # training epochs
+    resnet50_time_per_image = 0.01 * (second / count)           # scenario assumption: full-model scoring latency
+    resnet18_time_per_image = 0.002 * (second / count)          # scenario assumption: proxy scoring latency
+    trap_selection_time = 50 * hour                             # scenario assumption: 7B model scoring
+    coreset_fraction_value = coreset_image_count / image_count
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    score_a_sec_value = n_images_value * resnet50_time_per_image_value
-    train_a_sec_value = n_coreset_value * n_epochs_value * resnet50_time_per_image_value
-    total_a_sec_value = score_a_sec_value + train_a_sec_value
-    total_a_hrs_value = total_a_sec_value/SEC_PER_HOUR
+    score_a_time = image_count * resnet50_time_per_image
+    train_a_time = coreset_image_count * training_epoch_count * resnet50_time_per_image
+    total_a_time = score_a_time + train_a_time
 
-    score_b_sec_value = n_images_value * resnet18_time_per_image_value
-    train_b_sec_value = train_a_sec_value
-    total_b_sec_value = score_b_sec_value + train_b_sec_value
-    total_b_hrs_value = total_b_sec_value/SEC_PER_HOUR
+    score_b_time = image_count * resnet18_time_per_image
+    train_b_time = train_a_time
+    total_b_time = score_b_time + train_b_time
 
-    baseline_sec_value = n_images_value * n_epochs_value * resnet50_time_per_image_value
-    baseline_hrs_value = baseline_sec_value/SEC_PER_HOUR
+    baseline_time = image_count * training_epoch_count * resnet50_time_per_image
 
-    savings_a_hrs_value = baseline_hrs_value - total_a_hrs_value
-    savings_a_pct_value = savings_a_hrs_value/baseline_hrs_value * 100
-    savings_b_hrs_value = baseline_hrs_value - total_b_hrs_value
-    savings_b_pct_value = savings_b_hrs_value/baseline_hrs_value * 100
-    b_beats_a_hrs_value = total_a_hrs_value - total_b_hrs_value
+    savings_a_time = baseline_time - total_a_time
+    savings_a_fraction = savings_a_time / baseline_time
+    savings_b_time = baseline_time - total_b_time
+    savings_b_fraction = savings_b_time / baseline_time
+    b_beats_a_time = total_a_time - total_b_time
 
-    trap_total_hrs_value = trap_sel_hrs_value + train_a_sec_value/SEC_PER_HOUR
-    trap_overhead_pct_value = trap_sel_hrs_value / (baseline_hrs_value - trap_total_hrs_value) * 100
+    trap_total_time = trap_selection_time + train_a_time
+    trap_overhead_fraction = trap_selection_time / (baseline_time - trap_total_time)
 
-    score_b_hrs_value = score_b_sec_value / SEC_PER_HOUR
+    score_b_hrs_value = score_b_time.to(hour).magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(savings_b_pct_value > savings_a_pct_value, "Proxy selection must outperform full-model selection.")
-    check(total_b_hrs_value < baseline_hrs_value, "Selection + subset training must beat full training.")
+    check(savings_b_fraction > savings_a_fraction, "Proxy selection must outperform full-model selection.")
+    check(total_b_time < baseline_time, "Selection + subset training must beat full training.")
     check(score_b_hrs_value < 1.0, f"Proxy scoring should take under 1 hour, got {score_b_hrs_value:.2f} h.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    score_a_str = fmt_time(score_a_sec_value, 'second', precision=0, commas=True)
-    score_a_hrs_str = fmt_time(score_a_sec_value / SEC_PER_HOUR, 'hour', precision=1, commas=False)
-    train_a_str = fmt_time(train_a_sec_value, 'second', precision=0, commas=True)
-    train_a_hrs_str = fmt_time(round(train_a_sec_value / SEC_PER_HOUR), 'hour', precision=0, commas=False)
-    total_a_hrs_str = fmt_time(round(total_a_hrs_value), 'hour', precision=0, commas=False)
-    score_b_str = fmt_time(score_b_sec_value, 'second', precision=0, commas=True)
+    score_a_str = fmt_time(score_a_time, 'second', precision=0, commas=True)
+    score_a_hrs_str = fmt_time(score_a_time, 'hour', precision=1, commas=False)
+    train_a_str = fmt_time(train_a_time, 'second', precision=0, commas=True)
+    train_a_hrs_str = fmt_time(round(train_a_time.to(hour).magnitude), 'hour', precision=0, commas=False)
+    total_a_hrs_str = fmt_time(round(total_a_time.to(hour).magnitude), 'hour', precision=0, commas=False)
+    score_b_str = fmt_time(score_b_time, 'second', precision=0, commas=True)
     score_b_hrs_str = fmt_time(score_b_hrs_value, 'hour', precision=1, commas=False)
-    total_b_hrs_str = fmt_time(round(total_b_hrs_value), 'hour', precision=0, commas=False)
-    baseline_str = fmt_time(baseline_sec_value, 'second', precision=0, commas=True)
-    baseline_hrs_str = fmt_time(round(baseline_hrs_value), 'hour', precision=0, commas=False)
-    savings_a_str = fmt_time(round(savings_a_hrs_value), 'hour', precision=0, commas=False)
-    savings_a_pct_str = fmt_percent(savings_a_pct_value/100, precision=0, commas=False, style='symbol')
-    savings_b_str = fmt_time(round(savings_b_hrs_value), 'hour', precision=0, commas=False)
-    savings_b_pct_str = fmt_percent(savings_b_pct_value/100, precision=1, commas=False, style='symbol')
-    b_beats_a_str = fmt_time(round(b_beats_a_hrs_value), 'hour', precision=0, commas=False)
-    trap_total_str = fmt_time(round(trap_total_hrs_value), 'hour', precision=0, commas=False)
-    trap_pct_str = fmt_percent(trap_overhead_pct_value/100, precision=0, commas=False, style='symbol')
-    n_images_str = fmt_count(n_images_value, scale='M', precision=0, commas=False)
-    n_coreset_str = fmt_count(n_coreset_value, scale='K', precision=0, commas=False)
-    n_epochs_str = fmt(n_epochs_value, precision=0, commas=False)
+    total_b_hrs_str = fmt_time(round(total_b_time.to(hour).magnitude), 'hour', precision=0, commas=False)
+    baseline_str = fmt_time(baseline_time, 'second', precision=0, commas=True)
+    baseline_hrs_str = fmt_time(round(baseline_time.to(hour).magnitude), 'hour', precision=0, commas=False)
+    savings_a_str = fmt_time(round(savings_a_time.to(hour).magnitude), 'hour', precision=0, commas=False)
+    savings_a_pct_str = fmt_percent(savings_a_fraction, precision=0, commas=False, style='symbol')
+    savings_b_str = fmt_time(round(savings_b_time.to(hour).magnitude), 'hour', precision=0, commas=False)
+    savings_b_pct_str = fmt_percent(savings_b_fraction, precision=1, commas=False, style='symbol')
+    b_beats_a_str = fmt_time(round(b_beats_a_time.to(hour).magnitude), 'hour', precision=0, commas=False)
+    trap_total_str = fmt_time(round(trap_total_time.to(hour).magnitude), 'hour', precision=0, commas=False)
+    trap_pct_str = fmt_percent(trap_overhead_fraction, precision=0, commas=False, style='symbol')
+    n_images_str = fmt_count(image_count, scale='M', commas=False)
+    n_coreset_str = fmt_count(coreset_image_count, scale='K', commas=False)
+    n_epochs_str = fmt(training_epoch_count, precision=0, commas=False)
     coreset_pct_str = fmt_percent(coreset_fraction_value, precision=0, commas=False, style='prose')
-    resnet50_time_per_image_str = fmt_time(resnet50_time_per_image_value, 'second', precision=2, commas=False)
-    resnet18_time_per_image_str = fmt_time(resnet18_time_per_image_value, 'second', precision=3, commas=False)
-    trap_sel_hrs_str = fmt_time(trap_sel_hrs_value, 'hour', precision=0, commas=False)
+    resnet50_time_per_image_str = fmt_time(resnet50_time_per_image, 'second', precision=2, commas=False, per='image')
+    resnet18_time_per_image_str = fmt_time(resnet18_time_per_image, 'second', precision=3, commas=False, per='image')
+    trap_sel_hrs_str = fmt_time(trap_selection_time, 'hour', precision=0, commas=False)
 ```
 
 ::: {#exmp-data-selection-selection-inequality-practice .callout-example title="Selection inequality in practice"}
@@ -3084,32 +3091,25 @@ from mlsysim.fmt import fmt_int,  check, fmt, fmt_count, fmt_qty
 
 class RandomAccessPenalty:
     # LOAD
-    random_read_q = 4 * KB
-    random_read_kb = random_read_q.to(KB).magnitude
+    random_read_q = 4 * KB  # scenario assumption: standard small random-read size
     hdd_seq_q = 150 * (MB / second)
-    hdd_seq_mb_s = hdd_seq_q.to(MB/second).magnitude
     hdd_iops = 80
     sata_seq_q = 550 * (MB / second)
-    sata_seq_mb_s = sata_seq_q.to(MB/second).magnitude
     sata_iops = 10_000
     nvme_seq_q = 3_500 * (MB / second)
-    nvme_seq_mb_s = nvme_seq_q.to(MB/second).magnitude
     nvme_iops = 500_000
 
     # EXECUTE
     hdd_random_q = hdd_iops * random_read_q / second
     sata_random_q = sata_iops * random_read_q / second
     nvme_random_q = nvme_iops * random_read_q / second
-    hdd_random_mb_s = hdd_random_q.to(MB/second).magnitude
-    sata_random_mb_s = sata_random_q.to(MB/second).magnitude
-    nvme_random_mb_s = nvme_random_q.to(MB/second).magnitude
-    hdd_penalty = hdd_seq_mb_s / hdd_random_mb_s
-    sata_penalty = sata_seq_mb_s / sata_random_mb_s
-    nvme_penalty = nvme_seq_mb_s / nvme_random_mb_s
+    hdd_penalty = (hdd_seq_q / hdd_random_q).to("").magnitude
+    sata_penalty = (sata_seq_q / sata_random_q).to("").magnitude
+    nvme_penalty = (nvme_seq_q / nvme_random_q).to("").magnitude
 
     # GUARD
     check(hdd_penalty > sata_penalty > nvme_penalty, "Random penalty should shrink as storage latency improves.")
-    check(nvme_random_mb_s < nvme_seq_mb_s, "Random NVMe throughput should remain below sequential throughput.")
+    check(nvme_random_q < nvme_seq_q, "Random NVMe throughput should remain below sequential throughput.")
 
     # OUTPUT
     hdd_seq_mb_s_str = fmt_qty(hdd_seq_q, MB/second, precision=0, commas=False, unit_label="MB")
@@ -3118,12 +3118,12 @@ class RandomAccessPenalty:
     hdd_penalty_str = fmt_int(hdd_penalty, -2, commas=False)
 
     sata_seq_mb_s_str = fmt_qty(sata_seq_q, MB/second, precision=0, commas=False, unit_label="MB")
-    sata_iops_str = fmt_count(sata_iops, scale='K', precision=0, commas=False)
+    sata_iops_str = fmt_count(sata_iops, scale='K', commas=False)
     sata_random_mb_s_str = fmt_qty(sata_random_q, MB/second, precision=0, commas=False, unit_label="MB")
     sata_penalty_str = fmt(sata_penalty, precision=1, commas=False)
 
     nvme_seq_mb_s_str = fmt_qty(nvme_seq_q, MB/second, precision=0, commas=True, unit_label="MB")
-    nvme_iops_str = fmt_count(nvme_iops, scale='K', precision=0, commas=False)
+    nvme_iops_str = fmt_count(nvme_iops, scale='K', commas=False)
     nvme_random_mb_s_str = fmt_qty(nvme_random_q, MB/second, precision=0, commas=True, unit_label="MB")
     nvme_penalty_str = fmt(nvme_penalty, precision=2, commas=False)
 ```
@@ -3184,47 +3184,46 @@ from mlsysim.fmt import fmt_int
 # │ Imports: mlsysim.book (fmt)
 # │ Exports: pipeline_throughput_str, pipeline_ratio_str, idle_pct_str, echo_hrs_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_percent, fmt, check, fmt_time
+from mlsysim.core.constants import count, second
+from mlsysim.fmt import fmt_percent, fmt, check, fmt_time, fmt_rate
 
 class DataEchoingRoi:
     """ImageNet heavy augmentation: echo factor 2 cuts training from 107 hrs to 53 hrs."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    pipeline_throughput_value = 300                             # images/sec (CPU-bound)
-    gpu_throughput_value = 800                                  # images/sec (GPU capacity)
-    n_epochs_echo_value = 90                                    # standard ImageNet epochs
-    imagenet_size_value = 1_280_000                             # ~1.28M images
+    pipeline_throughput = 300 * (count / second)                # scenario assumption: CPU-bound images/sec
+    gpu_throughput = 800 * (count / second)                     # scenario assumption: GPU image/sec capacity
+    echo_epoch_count = 90                                       # standard ImageNet epochs
+    imagenet_size = Datasets.ImageNet.training_examples.to(count)
     echo_factor_value = 2                                       # repeat each batch 2x
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    ratio_r_value = gpu_throughput_value/pipeline_throughput_value
-    gpu_idle_pct_value = (1 - pipeline_throughput_value/gpu_throughput_value) * 100
+    ratio_r_value = (gpu_throughput/pipeline_throughput).to("").magnitude
+    gpu_idle_fraction = 1 - pipeline_throughput/gpu_throughput
 
-    no_echo_throughput_value = pipeline_throughput_value
-    no_echo_sec_value = n_epochs_echo_value * imagenet_size_value/no_echo_throughput_value
-    no_echo_hrs_value = no_echo_sec_value/SEC_PER_HOUR
-    gpu_util_no_echo_value = pipeline_throughput_value/gpu_throughput_value * 100
+    no_echo_throughput = pipeline_throughput
+    no_echo_time = echo_epoch_count * imagenet_size/no_echo_throughput
+    gpu_util_no_echo = pipeline_throughput/gpu_throughput
 
-    echo_throughput_value = pipeline_throughput_value * echo_factor_value
-    echo_sec_value = n_epochs_echo_value * imagenet_size_value/echo_throughput_value
-    echo_hrs_value = echo_sec_value/SEC_PER_HOUR
+    echo_throughput = pipeline_throughput * echo_factor_value
+    echo_time = echo_epoch_count * imagenet_size/echo_throughput
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(ratio_r_value > 1.0, "Pipeline must be slower than GPU for echoing to help.")
-    check(echo_hrs_value < no_echo_hrs_value, "Echoing must reduce training time.")
+    check(echo_time < no_echo_time, "Echoing must reduce training time.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    pipeline_throughput_str = fmt(pipeline_throughput_value, precision=0, commas=False)
-    gpu_throughput_str = fmt(gpu_throughput_value, precision=0, commas=False)
+    pipeline_throughput_str = fmt_rate(pipeline_throughput, "images/s", precision=0, commas=False)
+    gpu_throughput_str = fmt_rate(gpu_throughput, "images/s", precision=0, commas=False)
     pipeline_ratio_str = fmt(ratio_r_value, precision=2, commas=False)
-    idle_pct_str = fmt_percent(gpu_idle_pct_value/100, precision=1, commas=False, style='prose')
-    no_echo_sec_str = fmt_time(no_echo_sec_value, 'second', precision=0, commas=True, style='word')
-    no_echo_hrs_str = fmt_time(no_echo_hrs_value, 'hour', precision=1, commas=False, style='word')
-    gpu_util_str = fmt_percent(round(gpu_util_no_echo_value)/100, precision=0, commas=False, style='symbol')
-    echo_sec_str = fmt_time(echo_sec_value, 'second', precision=0, commas=True, style='word')
-    echo_hrs_str = fmt_time(echo_hrs_value, 'hour', precision=1, commas=False, style='word')
+    idle_pct_str = fmt_percent(gpu_idle_fraction, precision=1, commas=False, style='prose')
+    no_echo_sec_str = fmt_time(round(no_echo_time.to(second).magnitude), 'second', precision=0, commas=True, style='word')
+    no_echo_hrs_str = fmt_time(no_echo_time, 'hour', precision=1, commas=False, style='word')
+    gpu_util_str = fmt_percent(round(gpu_util_no_echo.to("").magnitude * 100) / 100, precision=0, commas=False, style='symbol')
+    echo_sec_str = fmt_time(round(echo_time.to(second).magnitude), 'second', precision=0, commas=True, style='word')
+    echo_hrs_str = fmt_time(echo_time, 'hour', precision=1, commas=False, style='word')
     echo_factor_str = fmt(echo_factor_value, precision=0, commas=False)
-    effective_throughput_str = fmt(echo_throughput_value, precision=0, commas=False)
+    effective_throughput_str = fmt_rate(echo_throughput, "images/s", precision=0, commas=False)
 ```
 
 ::: {#exmp-data-selection-worked-example-data-echoing-roi .callout-example title="Worked example: Data echoing ROI"}
@@ -3233,20 +3232,20 @@ class DataEchoingRoi:
 
 **Measurements**:
 
-- Data pipeline throughput: `{python} DataEchoingRoi.pipeline_throughput_str`/second (reading, decoding, augmenting on CPU)
-- GPU training throughput: `{python} DataEchoingRoi.gpu_throughput_str`/second (forward + backward pass)
+- Data pipeline throughput: `{python} DataEchoingRoi.pipeline_throughput_str` (reading, decoding, augmenting on CPU)
+- GPU training throughput: `{python} DataEchoingRoi.gpu_throughput_str` (forward + backward pass)
 - Ratio $R = T_{\text{pipeline}} / T_{\text{GPU}}$ = (1/`{python} DataEchoingRoi.pipeline_throughput_str`) / (1/`{python} DataEchoingRoi.gpu_throughput_str`) = `{python} DataEchoingRoi.gpu_throughput_str`/`{python} DataEchoingRoi.pipeline_throughput_str` ≈ `{python} DataEchoingRoi.pipeline_ratio_str` (GPU waiting `{python} DataEchoingRoi.idle_pct_str` of time)
 
 **Without Echoing**:
 
-- Effective throughput: `{python} DataEchoingRoi.pipeline_throughput_str`/second (limited by data pipeline)
+- Effective throughput: `{python} DataEchoingRoi.pipeline_throughput_str` (limited by data pipeline)
 - Training time for 90 epochs: $90 \times 1.28\text{M}$ / `{python} DataEchoingRoi.pipeline_throughput_str` = `{python} DataEchoingRoi.no_echo_sec_str` (`{python} DataEchoingRoi.no_echo_hrs_str`)
 - GPU utilization: ~`{python} DataEchoingRoi.gpu_util_str`
 
 **With Echo Factor** $e$ = `{python} DataEchoingRoi.echo_factor_str`:
 
 - Each batch is processed twice with different augmentations
-- Effective throughput: `{python} DataEchoingRoi.effective_throughput_str`/second (still below GPU capacity)
+- Effective throughput: `{python} DataEchoingRoi.effective_throughput_str` (still below GPU capacity)
 - Unique images per second: `{python} DataEchoingRoi.pipeline_throughput_str` (unchanged)
 - Training time: $90 \times 1.28\text{M}$ / `{python} DataEchoingRoi.effective_throughput_str` = `{python} DataEchoingRoi.echo_sec_str` (`{python} DataEchoingRoi.echo_hrs_str`) if echoed data is equally valuable
 
@@ -3308,48 +3307,55 @@ For a concrete example, consider training a vision model:
 # │ Imports: mlsysim.book (fmt)
 # │ Exports: c_raw_str, c_label_str, c_total_str, p_data_str, p_compute_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import GB, USD, count, hour, ureg
 from mlsysim.fmt import fmt_percent, fmt, fmt_usd, check, MarkdownStr, fmt_count
 
 class CostBreakdown:
     """ImageNet-scale training cost breakdown: data costs (~81%) dominate compute (~19%)."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    c_raw_value = 50000                                         # $ for licensed dataset
-    n_labels_value = 1_200_000                                  # images to label
-    cost_per_label_value = 0.05                                 # $/label (crowd)
-    c_store_value = 200                                         # $ storage (150 GB × 12mo)
-    c_train_value = 25000                                       # $ GPU compute
-    storage_gb = 150
-    storage_months = 12
-    train_epochs = 100
-    train_gpus = 8
-    train_hours = 24
+    raw_data_cost = 50000 * USD                                 # scenario assumption: licensed dataset
+    label_count = 1_200_000 * count                             # scenario assumption: images to label
+    cost_per_label = 0.05 * (USD / count)                       # scenario assumption: crowd label cost
+    storage_cost = 200 * USD                                    # scenario assumption: 150 GB for 12 months
+    train_compute_cost = 25000 * USD                            # scenario assumption: GPU compute
+    storage_size = 150 * GB                                     # scenario assumption: retained training data
+    storage_duration = 12 * ureg.month                          # scenario assumption: retention time
+    train_epoch_count = 100
+    train_gpu_count = 8
+    train_duration = 24 * hour                                  # scenario assumption: training runtime
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    c_label_value = n_labels_value * cost_per_label_value
-    c_total_value = c_raw_value + c_label_value + c_store_value + c_train_value
+    label_cost = label_count * cost_per_label
+    total_cost = raw_data_cost + label_cost + storage_cost + train_compute_cost
 
-    p_data_value = (c_raw_value + c_label_value + c_store_value) / c_total_value * 100
-    p_compute_value = c_train_value/c_total_value * 100
+    p_data = (raw_data_cost + label_cost + storage_cost) / total_cost
+    p_compute = train_compute_cost/total_cost
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(p_data_value > p_compute_value, "Data costs must dominate compute costs in this scenario.")
-    check(abs(p_data_value + p_compute_value - 100) < 0.1, "Data + compute percentages must sum to 100.")
+    check(p_data > p_compute, "Data costs must dominate compute costs in this scenario.")
+    check(abs((p_data + p_compute).to("").magnitude - 1.0) < 0.001, "Data + compute percentages must sum to 100%.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     # Currency prefix and % suffix → MarkdownStr per recipe Rule 1 escape-hatch
-    c_raw_str = fmt_usd(c_raw_value, precision=0)
-    c_label_str = fmt_usd(c_label_value, precision=0)
-    c_store_str = fmt_usd(c_store_value, precision=0, commas=False)
-    c_train_str = fmt_usd(c_train_value, precision=0)
-    c_total_str = fmt_usd(c_total_value, precision=0)
-    p_data_str = fmt_percent(p_data_value/100, precision=1, commas=False, style='symbol')
-    p_compute_str = fmt_percent(p_compute_value/100, precision=1, commas=False, style='symbol')
-    n_labels_str = fmt_count(n_labels_value, scale='M', precision=1)
-    cb_cost_per_label_str = fmt_usd(cost_per_label_value, precision=2, commas=False)
+    c_raw_str = fmt_usd(raw_data_cost, precision=0)
+    c_label_str = fmt_usd(label_cost, precision=0)
+    c_store_str = fmt_usd(storage_cost, precision=0, commas=False)
+    c_train_str = fmt_usd(train_compute_cost, precision=0)
+    c_total_str = fmt_usd(total_cost, precision=0)
+    p_data_str = fmt_percent(p_data, precision=1, commas=False, style='symbol')
+    p_compute_str = fmt_percent(p_compute, precision=1, commas=False, style='symbol')
+    n_labels_str = fmt_count(label_count, scale='M', precision=1)
+    cb_cost_per_label_str = fmt_usd(
+        cost_per_label.to(USD / count).magnitude, precision=2, commas=False, per="label"
+    )
     # Mixed prose + math symbol (×) → MarkdownStr escape-hatch
-    storage_str = MarkdownStr(f"{storage_gb} GB × {storage_months} months")
-    train_desc_str = MarkdownStr(f"{train_epochs} epochs × {train_gpus} A100s × {train_hours} h")
+    storage_str = MarkdownStr(
+        f"{storage_size.to(GB).magnitude:.0f} GB × {storage_duration.to(ureg.month).magnitude:.0f} months"
+    )
+    train_desc_str = MarkdownStr(
+        f"{train_epoch_count} epochs × {train_gpu_count} A100s × {train_duration.to(hour).magnitude:.0f} h"
+    )
 ```
 
 ::: {#exmp-data-selection-cost-breakdown-imagenet-scale-training .callout-example title="Cost breakdown: ImageNet-scale training"}
@@ -3646,32 +3652,33 @@ Several strategies mitigate this staleness problem, each with distinct overhead 
 # │ Imports: mlsysim.fmt (check)
 # │ Exports: t_embed_str, t_dedup_str, t_score_str, t_total_overhead_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import minute
 from mlsysim.fmt import check, MarkdownStr, fmt_time
 
 class DistributedOverheadCalc:
     """8× A100 cluster coreset selection: 67-minute total overhead for 10× training speedup."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    t_embed_value = 20                                          # minutes (parallel)
-    t_dedup_value = 15                                          # minutes (distributed hash)
-    t_score_value = 30                                          # minutes (parallel proxy)
-    t_select_value = 2                                          # minutes (centralized)
+    t_embed = 20 * minute                                      # scenario assumption: parallel embedding
+    t_dedup = 15 * minute                                      # scenario assumption: distributed hash
+    t_score = 30 * minute                                      # scenario assumption: parallel proxy scoring
+    t_select = 2 * minute                                      # scenario assumption: centralized selection
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    t_total_overhead_value = t_embed_value + t_dedup_value + t_score_value + t_select_value
+    t_total_overhead = t_embed + t_dedup + t_score + t_select
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(t_total_overhead_value > 0, "Total overhead must be positive.")
-    check(t_score_value == max(t_embed_value, t_dedup_value, t_score_value, t_select_value),
+    check(t_total_overhead > 0 * minute, "Total overhead must be positive.")
+    check(t_score == max(t_embed, t_dedup, t_score, t_select),
           "Scoring must be the dominant overhead phase.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     # Custom "minutes" suffix → MarkdownStr per recipe Rule 1 escape-hatch
-    t_embed_str = fmt_time(t_embed_value, 'minute', precision=0, commas=False, style='word')
-    t_dedup_str = fmt_time(t_dedup_value, 'minute', precision=0, commas=False, style='word')
-    t_score_str = fmt_time(t_score_value, 'minute', precision=0, commas=False, style='word')
-    t_select_str = fmt_time(t_select_value, 'minute', precision=0, commas=False, style='word')
-    t_total_overhead_str = fmt_time(t_total_overhead_value, 'minute', precision=0, commas=False, style='word')
+    t_embed_str = fmt_time(t_embed, 'minute', precision=0, commas=False, style='word')
+    t_dedup_str = fmt_time(t_dedup, 'minute', precision=0, commas=False, style='word')
+    t_score_str = fmt_time(t_score, 'minute', precision=0, commas=False, style='word')
+    t_select_str = fmt_time(t_select, 'minute', precision=0, commas=False, style='word')
+    t_total_overhead_str = fmt_time(t_total_overhead, 'minute', precision=0, commas=False, style='word')
 ```
 
 ::: {#exmp-data-selection-distributed-coreset-selection .callout-example title="Distributed coreset selection"}
@@ -4355,12 +4362,16 @@ class ChinchillaDiagnostic:
     tokens_per_param_opt = 20
     starvation_ratio = 10
     diminishing_ratio = 40
-    llama2_70b_training_tokens = 2.0 * c.TRILLION
+    llama2_70b_training_tokens = 2.0 * c.TRILLION * c.count
     compute_multiplier = 2.0
 
     # EXECUTE
-    gpt3_dn_ratio = Models.Language.GPT3.training_tokens.to(count).magnitude / m_gpt3.parameters.to(param).magnitude
-    llama2_dn_ratio = llama2_70b_training_tokens / m_llama2.parameters.to(param).magnitude
+    gpt3_dn_ratio = (
+        Models.Language.GPT3.training_tokens.to(c.count) / m_gpt3.parameters.to(c.param)
+    ).to("").magnitude
+    llama2_dn_ratio = (
+        llama2_70b_training_tokens / m_llama2.parameters.to(c.param)
+    ).to("").magnitude
     doubling_token_growth_pct = (math.sqrt(compute_multiplier) - 1) * 100
 
     # GUARD
@@ -4496,61 +4507,62 @@ Data selection involves counterintuitive diminishing returns that contradict the
 # │ Imports: mlsysim.fmt, mlsysim.core.constants (MILLION, THOUSAND)
 # │ Exports: FpFallacyCalc.* (fallacy prose in F&P section)
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_percent, fmt, check, MarkdownStr, fmt_count
+from mlsysim.core.constants import USD, count
+from mlsysim.fmt import fmt_percent, fmt, check, MarkdownStr, fmt_count, fmt_usd
 
 # ┌── LEGO ───────────────────────────────────────────────
 class FpFallacyCalc:
     """Quantitative backing for Fallacies in the F&P section."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    data_1m_value = 1_000_000
-    data_10m_value = 10_000_000
-    acc_gain_10x_value = 4.0
-    curated_size_value = 100_000
-    raw_size_value = 1_000_000
-    curated_accuracy_value = 92.0
-    raw_accuracy_value = 88.0
-    synthetic_gen1_acc_value = 95.0
-    synthetic_gen5_acc_value = 78.0
-    optimal_synthetic_mix_min_value = 50
-    optimal_synthetic_mix_max_value = 80
-    training_run_cost_value = 100_000_000
+    data_1m_count = 1_000_000 * count
+    data_10m_count = 10_000_000 * count
+    acc_gain_10x_pp = 4.0
+    curated_sample_count = 100_000 * count
+    raw_sample_count = 1_000_000 * count
+    curated_accuracy_pct = 92.0
+    raw_accuracy_pct = 88.0
+    synthetic_gen1_acc_pct = 95.0
+    synthetic_gen5_acc_pct = 78.0
+    optimal_synthetic_mix_min_pct = 50
+    optimal_synthetic_mix_max_pct = 80
+    training_run_cost = 100_000_000 * USD                       # scenario assumption: frontier-scale run
     efficiency_gain_pct_value = 10
     cifar10_coreset_pct_value = 50
-    cifar10_acc_retained_value = 98
-    imagenet_acc_retained_value = 95
-    medical_acc_retained_value = 72
+    cifar10_acc_retained_pct = 98
+    imagenet_acc_retained_pct = 95
+    medical_acc_retained_pct = 72
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    curated_cost_ratio_value = raw_size_value / curated_size_value
-    synthetic_acc_drop_value = synthetic_gen1_acc_value - synthetic_gen5_acc_value
-    savings_value = training_run_cost_value * efficiency_gain_pct_value / 100
+    curated_cost_ratio_value = (raw_sample_count / curated_sample_count).to("").magnitude
+    synthetic_acc_drop_pp = synthetic_gen1_acc_pct - synthetic_gen5_acc_pct
+    savings = training_run_cost * efficiency_gain_pct_value / 100
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(curated_accuracy_value > raw_accuracy_value,
+    check(curated_accuracy_pct > raw_accuracy_pct,
           "Curated small dataset must outperform raw large dataset.")
-    check(synthetic_acc_drop_value > 0, "Model collapse must degrade accuracy.")
+    check(synthetic_acc_drop_pp > 0, "Model collapse must degrade accuracy.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    data_1m_str = fmt_count(data_1m_value, scale='M', precision=0)
-    data_10m_str = fmt_count(data_10m_value, scale='M', precision=0)
-    acc_gain_10x_str = fmt_pp(acc_gain_10x_value, precision=0)
-    curated_size_str = fmt_count(curated_size_value, scale='K', precision=0)
-    raw_size_str = fmt_count(raw_size_value, scale='M', precision=0)
-    curated_accuracy_str = fmt_percent(curated_accuracy_value/100, precision=0, commas=False, style='prose')
-    raw_accuracy_str = fmt_percent(raw_accuracy_value/100, precision=0, commas=False, style='prose')
+    data_1m_str = fmt_count(data_1m_count, scale='M')
+    data_10m_str = fmt_count(data_10m_count, scale='M')
+    acc_gain_10x_str = fmt_pp(acc_gain_10x_pp, precision=0)
+    curated_size_str = fmt_count(curated_sample_count, scale='K')
+    raw_size_str = fmt_count(raw_sample_count, scale='M')
+    curated_accuracy_str = fmt_percent(curated_accuracy_pct/100, precision=0, commas=False, style='prose')
+    raw_accuracy_str = fmt_percent(raw_accuracy_pct/100, precision=0, commas=False, style='prose')
     curated_cost_ratio_str = fmt(curated_cost_ratio_value, precision=0, commas=False)
-    synthetic_gen1_acc_str = fmt_percent(synthetic_gen1_acc_value/100, precision=0, commas=False, style='prose')
-    synthetic_gen5_acc_str = fmt_percent(synthetic_gen5_acc_value/100, precision=0, commas=False, style='prose')
-    synthetic_acc_drop_str = fmt(synthetic_acc_drop_value, precision=0, commas=False)
-    optimal_synthetic_mix_str = MarkdownStr(f"{optimal_synthetic_mix_min_value}–{optimal_synthetic_mix_max_value} percent")
-    training_run_cost_str = fmt_count(training_run_cost_value, scale='M', precision=0)
+    synthetic_gen1_acc_str = fmt_percent(synthetic_gen1_acc_pct/100, precision=0, commas=False, style='prose')
+    synthetic_gen5_acc_str = fmt_percent(synthetic_gen5_acc_pct/100, precision=0, commas=False, style='prose')
+    synthetic_acc_drop_str = fmt(synthetic_acc_drop_pp, precision=0, commas=False)
+    optimal_synthetic_mix_str = MarkdownStr(f"{optimal_synthetic_mix_min_pct}–{optimal_synthetic_mix_max_pct} percent")
+    training_run_cost_str = fmt_usd(training_run_cost, precision=0, commas=False, scale='M')
     efficiency_gain_pct_str = fmt_percent(efficiency_gain_pct_value/100, precision=0, commas=False, style='prose')
-    savings_str = fmt_count(savings_value, scale='M', precision=0)
+    savings_str = fmt_usd(savings, precision=0, commas=False, scale='M')
     cifar10_coreset_pct_str = fmt_percent(cifar10_coreset_pct_value/100, precision=0, commas=False, style='prose')
-    cifar10_acc_retained_str = fmt_percent(cifar10_acc_retained_value/100, precision=0, commas=False, style='prose')
-    imagenet_acc_retained_str = fmt_percent(imagenet_acc_retained_value/100, precision=0, commas=False, style='prose')
-    medical_acc_retained_str = fmt_percent(medical_acc_retained_value/100, precision=0, commas=False, style='prose')
+    cifar10_acc_retained_str = fmt_percent(cifar10_acc_retained_pct/100, precision=0, commas=False, style='prose')
+    imagenet_acc_retained_str = fmt_percent(imagenet_acc_retained_pct/100, precision=0, commas=False, style='prose')
+    medical_acc_retained_str = fmt_percent(medical_acc_retained_pct/100, precision=0, commas=False, style='prose')
 ```
 
 **Fallacy**: *Data is the new oil, so more is always better.*
@@ -4573,7 +4585,7 @@ Engineers conflate data quality (removing errors) with data value (maximizing IC
 
 **Fallacy**: *Data selection is only for resource-constrained settings.*
 
-Practitioners view data selection as relevant only for TinyML or budget-limited startups. In reality, data selection delivers maximum ROI at scale. A `{python} FpFallacyCalc.efficiency_gain_pct_str` efficiency gain on a \$`{python} FpFallacyCalc.training_run_cost_str` training run saves \$`{python} FpFallacyCalc.savings_str`. The data wall (@fig-running-out-of-human-data) affects frontier labs most acutely: they have compute but lack quality data. @Sec-data-selection-amortization-across-training-runs-f6b8 shows that amortized ROI grows with reuse: deduplication infrastructure yielding \$10K savings per run becomes highly profitable across 50 training runs. Organizations with "unlimited" budgets increasingly adopt data selection because it addresses their true bottleneck: high-quality training data, not GPU hours.
+Practitioners view data selection as relevant only for TinyML or budget-limited startups. In reality, data selection delivers maximum ROI at scale. A `{python} FpFallacyCalc.efficiency_gain_pct_str` efficiency gain on a `{python} FpFallacyCalc.training_run_cost_str` training run saves `{python} FpFallacyCalc.savings_str`. The data wall (@fig-running-out-of-human-data) affects frontier labs most acutely: they have compute but lack quality data. @Sec-data-selection-amortization-across-training-runs-f6b8 shows that amortized ROI grows with reuse: deduplication infrastructure yielding \$10K savings per run becomes highly profitable across 50 training runs. Organizations with "unlimited" budgets increasingly adopt data selection because it addresses their true bottleneck: high-quality training data, not GPU hours.
 
 Conceptual misunderstandings often lead to flawed strategies. Equally damaging are the implementation pitfalls that arise when correct strategies meet messy engineering realities.
 
@@ -4600,59 +4612,59 @@ class FpPitfallCalc:
     """Quantitative backing for Pitfalls in the F&P section."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    selection_time_bad_value = 10
-    training_time_value = 2
-    full_training_time_value = 8
-    selection_time_good_value = 0.5
-    total_samples_value = 1_000_000
+    selection_time_bad = 10 * hour                              # scenario assumption: expensive selection
+    training_time = 2 * hour                                    # scenario assumption: subset training run
+    full_training_time = 8 * hour                               # scenario assumption: full training run
+    selection_time_good = 0.5 * hour                            # scenario assumption: proxy scoring
+    total_sample_count = 1_000_000 * count
     rare_class_pct_value = 0.1
     coreset_pct_value = 10
-    min_samples_threshold_value = 150
-    al_latency_days_value = 14
-    model_drift_epochs_value = 10
-    batch_size_small_value = 100
-    batch_size_large_value = 1000
+    min_sample_threshold = 150 * count
+    al_latency = 14 * day                                       # scenario assumption: annotation turnaround
+    model_drift_epoch_count = 10
+    batch_size_small_count = 100
+    batch_size_large_count = 1000
     coreset_size_pct_value = 10
-    rare_class_acc_value = 45
-    majority_class_acc_value = 97
+    rare_class_acc_pct = 45
+    majority_class_acc_pct = 97
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    selection_overhead_ratio_value = selection_time_bad_value / training_time_value
-    selection_overhead_good_pct_value = selection_time_good_value / full_training_time_value * 100
-    rare_class_count_value = int(total_samples_value * rare_class_pct_value / 100)
-    expected_rare_in_coreset_value = int(rare_class_count_value * coreset_pct_value / 100)
+    selection_overhead_ratio_value = (selection_time_bad / training_time).to("").magnitude
+    selection_overhead_good_fraction = selection_time_good / full_training_time
+    rare_class_count = total_sample_count * rare_class_pct_value / 100
+    expected_rare_in_coreset = rare_class_count * coreset_pct_value / 100
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(expected_rare_in_coreset_value < min_samples_threshold_value,
+    check(expected_rare_in_coreset < min_sample_threshold,
           "Random coreset should drop rare class below minimum threshold.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    selection_time_bad_str = fmt_time(selection_time_bad_value, 'hour', precision=0, commas=False, style='word')
+    selection_time_bad_str = fmt_time(selection_time_bad, 'hour', precision=0, commas=False, style='word')
     training_time_str = fmt_time(
-        training_time_value,
+        training_time,
         "hour",
         precision=0,
         commas=False,
         style="word",
         attributive=True,
     )
-    full_training_time_str = fmt_time(full_training_time_value, 'hour', precision=0, commas=False, style='word')
+    full_training_time_str = fmt_time(full_training_time, 'hour', precision=0, commas=False, style='word')
     selection_overhead_ratio_str = fmt(selection_overhead_ratio_value, precision=0, commas=False)
-    selection_time_good_str = fmt_time(selection_time_good_value * 60, 'minute', precision=0, commas=False, style='word')
-    selection_overhead_good_pct_str = fmt_percent(selection_overhead_good_pct_value/100, precision=1, commas=False, style='prose')
-    total_samples_str = fmt_count(total_samples_value, scale='M', precision=0)
+    selection_time_good_str = fmt_time(selection_time_good, 'minute', precision=0, commas=False, style='word')
+    selection_overhead_good_pct_str = fmt_percent(selection_overhead_good_fraction, precision=1, commas=False, style='prose')
+    total_samples_str = fmt_count(total_sample_count, scale='M')
     rare_class_pct_str = fmt_percent(rare_class_pct_value/100, precision=1, commas=False, style='prose')
-    rare_class_count_str = fmt(rare_class_count_value, precision=0, commas=True)
+    rare_class_count_str = fmt_count(rare_class_count, precision=0, commas=True)
     fp_coreset_pct_str = fmt_percent(coreset_pct_value/100, precision=0, commas=False, style='prose')
-    expected_rare_in_coreset_str = fmt(expected_rare_in_coreset_value, precision=0, commas=False)
-    min_samples_threshold_str = fmt(min_samples_threshold_value, precision=0, commas=False)
-    al_latency_days_str = fmt(al_latency_days_value, precision=0, commas=False)
-    model_drift_epochs_str = fmt(model_drift_epochs_value, precision=0, commas=False)
-    batch_size_small_str = fmt(batch_size_small_value, precision=0, commas=False)
-    batch_size_large_str = fmt(batch_size_large_value, precision=0, commas=True)
+    expected_rare_in_coreset_str = fmt_count(expected_rare_in_coreset, precision=0, commas=False)
+    min_samples_threshold_str = fmt_count(min_sample_threshold, precision=0, commas=False)
+    al_latency_days_str = fmt_time(al_latency, 'day', precision=0, commas=False, style='word', attributive=True)
+    model_drift_epochs_str = fmt(model_drift_epoch_count, precision=0, commas=False)
+    batch_size_small_str = fmt_count(batch_size_small_count, precision=0, commas=False)
+    batch_size_large_str = fmt_count(batch_size_large_count, precision=0, commas=True)
     coreset_size_pct_str = fmt_percent(coreset_size_pct_value/100, precision=0, commas=False, style='prose')
-    rare_class_acc_str = fmt_percent(rare_class_acc_value/100, precision=0, commas=False, style='prose')
-    majority_class_acc_str = fmt_percent(majority_class_acc_value/100, precision=0, commas=False, style='prose')
+    rare_class_acc_str = fmt_percent(rare_class_acc_pct/100, precision=0, commas=False, style='prose')
+    majority_class_acc_str = fmt_percent(majority_class_acc_pct/100, precision=0, commas=False, style='prose')
 ```
 
 **Pitfall**: *Optimizing selection without measuring selection overhead.*
@@ -4669,7 +4681,7 @@ Some standard language-modeling datasets have measurable train-test overlap; a d
 
 **Pitfall**: *Active learning without considering annotation latency.*
 
-Active learning theory assumes instant oracle responses. In production annotation workflows, expert labels can require days or weeks in practice. With `{python} FpPitfallCalc.al_latency_days_str`-day annotation latency, a model trained for `{python} FpPitfallCalc.model_drift_epochs_str` epochs between query rounds may have drifted significantly: samples selected as uncertain become irrelevant as the decision boundary shifts. Select larger batches (`{python} FpPitfallCalc.batch_size_large_str` vs. `{python} FpPitfallCalc.batch_size_small_str` samples) to amortize latency and use diversity sampling to hedge against model drift. Active learning ROI therefore depends not only on label cost, as analyzed in @sec-data-selection-breakeven-analysis-9a38, but also on matching batch size to annotation turnaround time.
+Active learning theory assumes instant oracle responses. In production annotation workflows, expert labels can require days or weeks in practice. With `{python} FpPitfallCalc.al_latency_days_str` annotation latency, a model trained for `{python} FpPitfallCalc.model_drift_epochs_str` epochs between query rounds may have drifted significantly: samples selected as uncertain become irrelevant as the decision boundary shifts. Select larger batches (`{python} FpPitfallCalc.batch_size_large_str` vs. `{python} FpPitfallCalc.batch_size_small_str` samples) to amortize latency and use diversity sampling to hedge against model drift. Active learning ROI therefore depends not only on label cost, as analyzed in @sec-data-selection-breakeven-analysis-9a38, but also on matching batch size to annotation turnaround time.
 
 A subtler class of errors emerges when practitioners assume that benchmark results transfer directly to their specific domains and deployment contexts.
 

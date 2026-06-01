@@ -741,7 +741,7 @@ Using a three-criterion scoring system (impact severity, frequency, and resoluti
 ```{python}
 #| echo: false
 #| label: debt-priority-lego
-from mlsysim.fmt import fmt_count, fmt_time
+from mlsysim.fmt import fmt_time, fmt_usd
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ DEBT PRIORITY SCORING (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -796,7 +796,7 @@ class DebtPriority:
     monitoring_score_str = fmt(monitoring_score, precision=0, commas=False)
     pipeline_score_str = fmt(pipeline_score, precision=1, commas=False)
     weeks_saved_str = fmt_time(weeks_saved, 'week', precision=0, commas=False, style='word')
-    config_savings_str = fmt_count(config_savings, scale='K', precision=0, commas=False)
+    config_savings_str = fmt_usd(config_savings, scale='K', precision=0, commas=False)
     deployment_delay_weeks_str = fmt_time(deployment_delay_weeks, 'week', precision=0, commas=False, style='word')
     eliminated_delay_pct_str = fmt_percent(eliminated_delay_fraction, precision=0, commas=False, style='prose')
     delay_per_model_weeks_str = fmt_time(deployment_delay_weeks * eliminated_delay_fraction, 'week', precision=1, commas=False, style='word')
@@ -814,7 +814,7 @@ class DebtPriority:
 
 **Recommendation**: Prioritize configuration debt paydown. Build configuration schema validation and templating system.
 
-**Result**: `{python} DebtPriority.deployment_delay_weeks_str` engineering investment to build config system. Saves `{python} DebtPriority.eliminated_delay_pct_str` of deployment delays = `{python} DebtPriority.delay_per_model_weeks_str` per model $\times$ `{python} DebtPriority.models_per_year_str` models/year = `{python} DebtPriority.weeks_saved_str` of deployment time saved. At \$150/hour engineer cost, `{python} DebtPriority.weeks_saved_str` = \$`{python} DebtPriority.config_savings_str` annual savings. Investment pays back within `{python} DebtPriority.payback_months_str`.
+**Result**: `{python} DebtPriority.deployment_delay_weeks_str` engineering investment to build config system. Saves `{python} DebtPriority.eliminated_delay_pct_str` of deployment delays = `{python} DebtPriority.delay_per_model_weeks_str` per model $\times$ `{python} DebtPriority.models_per_year_str` models/year = `{python} DebtPriority.weeks_saved_str` of deployment time saved. At \$150/hour engineer cost, `{python} DebtPriority.weeks_saved_str` = `{python} DebtPriority.config_savings_str` annual savings. Investment pays back within `{python} DebtPriority.payback_months_str`.
 
 #### Decision framework {#sec-ml-operations-scale-decision-framework-b97b}
 
@@ -1181,15 +1181,18 @@ class TcoScenario:
     cloud_node_annual = cloud_h100_hourly * gpus_per_node * hours_per_year * utilization
 
     # On-prem: CapEx + OpEx
-    node_power_kw = (h100_tdp * gpus_per_node).to(kW).magnitude * 1.2 # including system
-    annual_elec = node_power_kw * hours_per_year * utilization * electricity_rate * pue
+    node_power = h100_tdp * gpus_per_node * 1.2 # including system
+    annual_energy = node_power.to(kW) * (hours_per_year * hour) * utilization * pue
+    annual_elec = annual_energy.to(kWh).magnitude * electricity_rate
     onprem_node_annual = (dgx_h100_price/amortization_years) + annual_elec
 
     # Breakeven utilization (rough estimate)
-    # cloud_rate * hours * util = (price/3) + power_kw * hours * util * elec_rate
-    # util * (cloud_rate * hours - power_kw * hours * elec_rate) = price/3
+    # cloud_rate * hours * util = (price/3) + facility energy * elec_rate
+    # util * (cloud_rate * hours - power energy * elec_rate) = price/3
     numerator = dgx_h100_price/amortization_years
-    denominator = (cloud_h100_hourly * gpus_per_node * hours_per_year) - (node_power_kw * hours_per_year * electricity_rate * pue)
+    denominator = (cloud_h100_hourly * gpus_per_node * hours_per_year) - (
+        (node_power.to(kW) * (hours_per_year * hour) * pue).to(kWh).magnitude * electricity_rate
+    )
     breakeven = (numerator/denominator) * 100
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
@@ -1298,13 +1301,13 @@ class TenKGpuClusterTco:
     utilization = 0.80
     lifecycle_years = 3
     gpu_tdp = Hardware.Cloud.H100.tdp
-    gpu_tdp_w = gpu_tdp.to(watt).magnitude
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
     nodes = gpus // gpus_per_node
     hardware_capex_usd = nodes * node_price_usd
     upfront_capex_usd = hardware_capex_usd + network_capex_usd + facility_capex_usd
-    annual_electricity_usd = gpus * gpu_tdp_w / THOUSAND * pue * HOURS_PER_YEAR * electricity_rate
+    annual_gpu_energy = (gpus * gpu_tdp).to(kW) * (HOURS_PER_YEAR * hour) * pue
+    annual_electricity_usd = annual_gpu_energy.to(kWh).magnitude * electricity_rate
     annual_opex_usd = annual_electricity_usd + annual_staffing_usd
     three_year_total_usd = upfront_capex_usd + lifecycle_years * annual_opex_usd
     cloud_annual_usd = gpus * cloud_gpu_hour_usd * HOURS_PER_YEAR * utilization
@@ -1482,7 +1485,7 @@ class H100TdpEfficiencyRecap:
 class TensorCoreEfficiencyRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    h100_fp8_tc_str = fmt(Hardware.Cloud.H100.compute.precision_flops['fp8'].to(TFLOPs/second).magnitude, precision=0, commas=True)
+    h100_fp8_tc_str = fmt_qty(Hardware.Cloud.H100.compute.precision_flops['fp8'], TFLOPs/second, precision=0, commas=True, unit_label="TFLOP/s")
 ```
 
 | **Generation**  |                            **Peak TFLOP/s (best precision)** |                                       **TDP (W)** |              **TFLOP/s per watt**              | **Relative Efficiency** |
@@ -1708,11 +1711,9 @@ class PlanningThroughputScenario:
     mfu = Literature.Training.MfuHigh * 0.9
     gpus = 1_024
     h100_peak_flops = Hardware.Cloud.H100.compute.peak_flops
-    h100_peak_tflops = h100_peak_flops.to(TFLOPs / second).magnitude
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
     total_flops = training_flops_per_token_param * params * tokens
-    per_gpu_sustained_tflops = h100_peak_tflops * mfu
     per_gpu_sustained_flops = h100_peak_flops * mfu
     cluster_sustained_flops = per_gpu_sustained_flops * gpus
     cluster_sustained_pflops = cluster_sustained_flops.to(PFLOPs / second).magnitude
@@ -1784,7 +1785,6 @@ class InfraPlanningExercise:
     tokens_t = 1
     weeks = 4
     power = 2 * MW
-    power_mw = power.to(MW).magnitude
     mfu_pct = round(Literature.Training.MfuHigh * 0.9 * 100)
     pue = Infrastructure.FacilityCooling.StateOfArt.pue
     non_gpu_overhead_pct = 50
@@ -3109,13 +3109,11 @@ from mlsysim.fmt import fmt_int, fmt_qty, fmt_qty_int, fmt_time
 # │          CheckpointComputeTradeoff.tau_opt_s_str,
 # │          CheckpointComputeTradeoff.tau_opt_min_str,
 # │          CheckpointComputeTradeoff.overhead_pct_str
-import math
 
 class CheckpointComputeTradeoff:
     # ┌── 1. LOAD ──────────────────────────────────────────
     params = Models.Language.GPT3.parameters.to(param).magnitude
     write_bw = 100 * (GB / second)
-    write_bw_gbs = write_bw.to(GB / second).magnitude
     num_gpus = Systems.Clusters.Training_10K.total_accelerators
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
@@ -3123,27 +3121,25 @@ class CheckpointComputeTradeoff:
     gradients = weights
     optimizer = params * BYTES_FP32 * 2
     training_state = weights + gradients + optimizer
-    training_state_tb = training_state.to(TB).magnitude
-    t_write_s = (training_state / write_bw).to(second).magnitude
-    mtbf_system_s = Systems.Reliability.Gpu.mttf_hours * SEC_PER_HOUR / num_gpus
-    mtbf_system_hr = mtbf_system_s / SEC_PER_HOUR
-    tau_opt_s = math.sqrt(2 * t_write_s * mtbf_system_s)
-    overhead_pct = t_write_s / tau_opt_s * 100
+    t_write = (training_state / write_bw).to(second)
+    mtbf_system = (Systems.Reliability.Gpu.mttf_hours * hour) / num_gpus
+    tau_opt = (2 * t_write * mtbf_system) ** 0.5
+    overhead_pct = (t_write / tau_opt).to("").magnitude * 100
 
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(abs(t_write_s - 21) < 1, "Checkpoint write time should be about 21 s")
-    check(800 < tau_opt_s < 900, "Optimal checkpoint interval should be about 14 min")
+    check(abs(t_write.to(second).magnitude - 21) < 1, "Checkpoint write time should be about 21 s")
+    check(800 < tau_opt.to(second).magnitude < 900, "Optimal checkpoint interval should be about 14 min")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     frontier_params_b_str = fmt(params / BILLION, precision=0, commas=False)
     training_state_tb_str = fmt_qty_int(training_state, TB, commas=False)
     write_bw_gbs_str = fmt_qty(write_bw, GB / second, precision=0, commas=False)
-    t_write_s_str = fmt_time(t_write_s, 'second', precision=0, commas=False, style='word')
+    t_write_s_str = fmt_time(t_write, 'second', precision=0, commas=False, style='word')
     num_gpus_str = fmt(num_gpus, precision=0, commas=True)
-    mtbf_system_s_str = fmt(mtbf_system_s, precision=0, commas=True)
-    mtbf_system_hr_str = fmt_time(mtbf_system_hr, 'hour', precision=0, commas=False, style='word')
-    tau_opt_s_str = fmt_int(tau_opt_s, commas=False)
-    tau_opt_min_str = fmt_time(round(tau_opt_s / SECONDS_PER_MINUTE), 'minute', precision=0, commas=False, style='word')
+    mtbf_system_s_str = fmt(mtbf_system, unit=second, precision=0, commas=True)
+    mtbf_system_hr_str = fmt_time(mtbf_system, 'hour', precision=0, commas=False, style='word')
+    tau_opt_s_str = fmt_int(tau_opt, unit=second, commas=False)
+    tau_opt_min_str = fmt_time(round(tau_opt.to(second).magnitude / SECONDS_PER_MINUTE), 'minute', precision=0, commas=False, style='word')
     overhead_pct_str = fmt_percent(overhead_pct/100, precision=1, commas=False, style='prose')
 ```
 
