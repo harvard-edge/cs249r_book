@@ -44,8 +44,8 @@ python3 book/tools/audit/book_check_lego_scenario_inputs.py \
 
 Current output:
 
-- **1,082 advisory MLSysIM source-of-truth candidates**
-- **120 high-confidence candidates**
+- **1,081 advisory MLSysIM source-of-truth candidates**
+- **119 high-confidence candidates**
 - Full JSON work queue:
   `book/tools/audit/artifacts/lego_scenario_inputs_audit.json`
 - Full Markdown work queue:
@@ -64,7 +64,7 @@ High-confidence buckets:
 | `Infrastructure.Pricing.Cloud` / `Infrastructure.Pricing.Fleet` | 22 | GPU-hour, cloud-instance, and fleet price points |
 | `Systems.Fabrics` / `Systems.SwitchFabric` | 14 | Network/fabric/switch-sizing facts |
 | `Infrastructure.*` / `Scenarios.Sustainability` | 7 | PUE, cooling, carbon, sustainability scenario facts |
-| `Systems.Storage` | 7 | Local NVMe, HDD, PFS, S3/object-store, checkpoint-path storage facts |
+| `Systems.Storage` | 6 | Local NVMe, HDD, PFS, S3/object-store, checkpoint-path storage facts |
 | `Infrastructure.Pricing.Storage` | 1 | Storage/monitoring price points |
 
 Broader medium-confidence buckets:
@@ -124,6 +124,8 @@ Known concrete findings from the first pass:
 - Stage 8 added effective training-storage throughput profiles for cloud block
   volumes, object-store single-stream reads, SATA SSDs, and local NVMe, then
   migrated the repeated `data_engineering.qmd` storage-throughput examples.
+- Stage 9 migrated the `fault_tolerance.qmd` checkpoint-debug NVMe bandwidth
+  to `Systems.Storage.LocalNvmeGen3`.
 - 100,000-GPU examples should load `Systems.Clusters.Mega_100K`.
 - Storage/checkpoint examples mix two different kinds of facts: storage-system
   facts such as local NVMe drive count, local/PFS bandwidth, capacity, and

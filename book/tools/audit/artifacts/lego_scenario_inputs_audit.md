@@ -4,7 +4,7 @@ This is an advisory work queue for values that likely define
 hardware, systems, infrastructure, pricing, models, datasets,
 storage subsystems, or scenarios in LEGO LOAD stages.
 
-Findings: 1082
+Findings: 1081
 By target:
    270  Scenarios.* or Ops.*
    208  Models.* or Scenarios.TrainingRuns
@@ -20,7 +20,7 @@ By target:
     13  Systems.Storage or Datasets.*
     10  Systems.*
      7  Infrastructure.* or Scenarios.Sustainability
-     7  Systems.Storage
+     6  Systems.Storage
      2  Scenarios.TrainingRuns or Systems.Reliability
      1  Infrastructure.Pricing.Storage
 Top chapters:
@@ -59,7 +59,7 @@ Top reasons:
     13  storage/data fact
     10  system-level fact
      7  infrastructure/sustainability fact
-     7  storage subsystem fact
+     6  storage subsystem fact
      4  dataset/workload size
      2  checkpoint policy/workload cadence
      1  storage price/rate belongs in pricing registry
@@ -1090,7 +1090,6 @@ Top reasons:
 | `book/quarto/contents/vol2/fault_tolerance/fault_tolerance.qmd:2407` | `CheckpointOverheadCalc` | `mtbf_hours` | `Systems.*` | system-level fact | `5` |
 | `book/quarto/contents/vol2/fault_tolerance/fault_tolerance.qmd:2408` | `CheckpointOverheadCalc` | `mtbf_s` | `Systems.*` | system-level fact | `mtbf_hours * 3600` |
 | `book/quarto/contents/vol2/fault_tolerance/fault_tolerance.qmd:2543` | `CheckpointDebug` | `pcie_bw` | `Hardware.* or Hardware.Tech.*` | hardware specification | `32 * (GB / second)` |
-| `book/quarto/contents/vol2/fault_tolerance/fault_tolerance.qmd:2544` | `CheckpointDebug` | `nvme_bw` | `Systems.Storage` | storage subsystem fact | `3.5 * (GB / second)` |
 | `book/quarto/contents/vol2/fault_tolerance/fault_tolerance.qmd:2549` | `CheckpointDebug` | `overhead_pct` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `30` |
 | `book/quarto/contents/vol2/fault_tolerance/fault_tolerance.qmd:2550` | `CheckpointDebug` | `residual_overhead_pct` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `1` |
 | `book/quarto/contents/vol2/fault_tolerance/fault_tolerance.qmd:2551` | `CheckpointDebug` | `base_weeks` | `Scenarios.* or Ops.*` | scenario/workload policy | `2` |
