@@ -44,8 +44,8 @@ python3 book/tools/audit/book_check_lego_scenario_inputs.py \
 
 Current output:
 
-- **1,102 advisory MLSysIM source-of-truth candidates**
-- **138 high-confidence candidates**
+- **1,100 advisory MLSysIM source-of-truth candidates**
+- **136 high-confidence candidates**
 - Full JSON work queue:
   `book/tools/audit/artifacts/lego_scenario_inputs_audit.json`
 - Full Markdown work queue:
@@ -59,7 +59,7 @@ High-confidence buckets:
 
 | Target | Count | Meaning |
 |---|---:|---|
-| `Systems.Clusters` / `Systems.Nodes` | 48 | Fleet, node, GPU-count, cluster-topology facts |
+| `Systems.Clusters` / `Systems.Nodes` | 46 | Fleet, node, GPU-count, cluster-topology facts |
 | `Hardware.*` / `Hardware.Tech.*` | 23 | Hardware capacity, bandwidth, FLOP/s, TDP, memory/interconnect facts |
 | `Infrastructure.Pricing.Cloud` / `Infrastructure.Pricing.Fleet` | 23 | GPU-hour, cloud-instance, and fleet price points |
 | `Systems.Storage` | 18 | Local NVMe, HDD, PFS, S3/object-store, checkpoint-path storage facts |
@@ -107,6 +107,10 @@ Known concrete findings from the first pass:
   Do not force A100 examples through the H100 reference fleet.
 - Stage 3 moved the 256-node HBM memory-budget example in `data_storage.qmd`
   to `Systems.Clusters.Production_2K`.
+- Stage 4 moved the 128-node reliability example in
+  `compute_infrastructure.qmd` to `Systems.Clusters.Training_1K`, and moved
+  the composite DGX-node MTBF plus low/high recovery window assumptions to
+  `Systems.Reliability`.
 - 100,000-GPU examples should load `Systems.Clusters.Mega_100K`.
 - Storage/checkpoint examples mix two different kinds of facts: storage-system
   facts such as local NVMe drive count, local/PFS bandwidth, capacity, and

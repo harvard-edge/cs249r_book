@@ -4,7 +4,7 @@ This is an advisory work queue for values that likely define
 hardware, systems, infrastructure, pricing, models, datasets,
 storage subsystems, or scenarios in LEGO LOAD stages.
 
-Findings: 1102
+Findings: 1100
 By target:
    270  Scenarios.* or Ops.*
    209  Models.* or Scenarios.TrainingRuns
@@ -12,7 +12,7 @@ By target:
    109  Datasets.* or Scenarios.DataWorkloads
    107  Infrastructure.Pricing.* or Scenarios.*
     49  Hardware.*
-    48  Systems.Clusters or Systems.Nodes
+    46  Systems.Clusters or Systems.Nodes
     31  Infrastructure.*
     23  Hardware.* or Hardware.Tech.*
     23  Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet
@@ -42,8 +42,8 @@ Top chapters:
     27  vol1/responsible_engr
     25  vol2/distributed_training
     22  vol2/fleet_orchestration
-    21  vol2/compute_infrastructure
     21  vol2/security_privacy
+    19  vol2/compute_infrastructure
 Top reasons:
    270  scenario/workload policy
    209  model/workload specification
@@ -51,7 +51,7 @@ Top reasons:
    107  economic input or scenario price
    105  dataset/workload specification
     49  hardware-related quantitative input
-    48  fleet/topology fact
+    46  fleet/topology fact
     31  infrastructure input
     23  hardware specification
     23  cloud/fleet price point
@@ -987,22 +987,20 @@ Top reasons:
 | `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:2284` | `BandwidthStaircase` | `transfer` | `Scenarios.*` | unit-bearing scenario input | `10 * GB` |
 | `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:2361` | `InfraFrontierNodeTpRecap` | `microbatch` | `Scenarios.* or Ops.*` | scenario/workload policy | `4` |
 | `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:2362` | `InfraFrontierNodeTpRecap` | `seq_len` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `2048` |
-| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:2593` | `NodeReliabilityScenario` | `nodes` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `128` |
-| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:2594` | `NodeReliabilityScenario` | `run_days` | `Scenarios.* or Ops.*` | scenario/workload policy | `14` |
-| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:2596` | `NodeReliabilityScenario` | `composite_node_mtbf_hours` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `1_000` |
-| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:2770` | `NodeCapacityTrainMemRecap` | `host_dram` | `Hardware.* or Hardware.Tech.*` | hardware specification | `2 * TB` |
-| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3117` | `H100TdpRackRecap` | `comm_phase_power` | `Infrastructure.*` | infrastructure input | `400 * watt` |
-| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3118` | `H100TdpRackRecap` | `transition` | `Scenarios.*` | unit-bearing scenario input | `100 * microsecond` |
-| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3602` | `CheckpointOverheadBudget` | `cadence` | `Scenarios.* or Ops.*` | scenario/workload policy | `10 * minute` |
-| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3603` | `CheckpointOverheadBudget` | `target_overhead_pct` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `2` |
-| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3604` | `CheckpointOverheadBudget` | `reference_write` | `Scenarios.*` | unit-bearing scenario input | `30 * second` |
-| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3605` | `CheckpointOverheadBudget` | `run_days` | `Scenarios.* or Ops.*` | scenario/workload policy | `14` |
-| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3606` | `CheckpointOverheadBudget` | `checkpoints_retained` | `Systems.Storage or Datasets.*` | storage/data fact | `10` |
-| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3761` | `CheckpointComputeTradeoff` | `write_bw` | `Scenarios.*` | unit-bearing scenario input | `100 * (GB / second)` |
-| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3914` | `FabricSizingScenario` | `switch_ports` | `Systems.Fabrics or Systems.SwitchFabric` | network/fabric system fact | `64` |
-| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3917` | `FabricSizingScenario` | `endpoint_links_per_gpu` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `2` |
-| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3918` | `FabricSizingScenario` | `spine_switches` | `Systems.Fabrics or Systems.SwitchFabric` | network/fabric system fact | `32` |
-| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:4175` | `A100FallaciesRecap` | `option_a_hbm` | `Hardware.* or Hardware.Tech.*` | hardware specification | `192 * GB` |
+| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:2595` | `NodeReliabilityScenario` | `run_days` | `Scenarios.* or Ops.*` | scenario/workload policy | `14` |
+| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:2771` | `NodeCapacityTrainMemRecap` | `host_dram` | `Hardware.* or Hardware.Tech.*` | hardware specification | `2 * TB` |
+| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3118` | `H100TdpRackRecap` | `comm_phase_power` | `Infrastructure.*` | infrastructure input | `400 * watt` |
+| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3119` | `H100TdpRackRecap` | `transition` | `Scenarios.*` | unit-bearing scenario input | `100 * microsecond` |
+| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3603` | `CheckpointOverheadBudget` | `cadence` | `Scenarios.* or Ops.*` | scenario/workload policy | `10 * minute` |
+| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3604` | `CheckpointOverheadBudget` | `target_overhead_pct` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `2` |
+| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3605` | `CheckpointOverheadBudget` | `reference_write` | `Scenarios.*` | unit-bearing scenario input | `30 * second` |
+| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3606` | `CheckpointOverheadBudget` | `run_days` | `Scenarios.* or Ops.*` | scenario/workload policy | `14` |
+| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3607` | `CheckpointOverheadBudget` | `checkpoints_retained` | `Systems.Storage or Datasets.*` | storage/data fact | `10` |
+| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3762` | `CheckpointComputeTradeoff` | `write_bw` | `Scenarios.*` | unit-bearing scenario input | `100 * (GB / second)` |
+| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3915` | `FabricSizingScenario` | `switch_ports` | `Systems.Fabrics or Systems.SwitchFabric` | network/fabric system fact | `64` |
+| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3918` | `FabricSizingScenario` | `endpoint_links_per_gpu` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `2` |
+| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3919` | `FabricSizingScenario` | `spine_switches` | `Systems.Fabrics or Systems.SwitchFabric` | network/fabric system fact | `32` |
+| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:4176` | `A100FallaciesRecap` | `option_a_hbm` | `Hardware.* or Hardware.Tech.*` | hardware specification | `192 * GB` |
 
 ## vol2/conclusion
 

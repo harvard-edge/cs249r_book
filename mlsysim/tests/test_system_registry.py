@@ -31,6 +31,12 @@ def test_training_1k_a100_cluster_matches_debug_examples():
     assert fleet.fabric is Systems.Fabrics.InfiniBand_HDR
 
 
+def test_reliability_node_composite_profile():
+    assert Systems.Reliability.DgxNodeComposite.mttf_hours == pytest.approx(1_000)
+    assert Systems.Reliability.NodeRecoveryLowMin == pytest.approx(10)
+    assert Systems.Reliability.NodeRecoveryHighMin == pytest.approx(30)
+
+
 def test_production_2k_checkpoint_storage_path():
     path = Systems.Storage.Production2KCheckpointPath
 
