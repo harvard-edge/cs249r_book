@@ -87,6 +87,25 @@ class Storage(Registry):
     )
 
 
+class Monitoring(Registry):
+    """Cloud monitoring and observability service price anchors."""
+    IngestionPerMillionDatapoints = PricePoint(
+        name="Monitoring ingestion per million datapoints",
+        rate=0.30 * USD,
+        metadata=_CLOUD,
+    )
+    StoragePerGbMonth = PricePoint(
+        name="Monitoring storage",
+        rate=1.00 * USD / (GB * ureg.month),
+        metadata=_CLOUD,
+    )
+    QueryPerRequest = PricePoint(
+        name="Monitoring dashboard query",
+        rate=0.02 * USD,
+        metadata=_CLOUD,
+    )
+
+
 class Labeling(Registry):
     """Data-labeling cost tiers."""
     CrowdLow = PricePoint(name="Crowd labeling (low)", rate=0.01 * USD, metadata=_LABELING)
@@ -144,6 +163,7 @@ class OnPremises(Registry):
 class Pricing(Registry):
     Cloud = Cloud
     Storage = Storage
+    Monitoring = Monitoring
     Labeling = Labeling
     Fleet = Fleet
     Capital = Capital

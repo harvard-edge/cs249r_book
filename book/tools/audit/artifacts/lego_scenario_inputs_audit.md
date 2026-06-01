@@ -4,13 +4,13 @@ This is an advisory work queue for values that likely define
 hardware, systems, infrastructure, pricing, models, datasets,
 storage subsystems, or scenarios in LEGO LOAD stages.
 
-Findings: 1092
+Findings: 1089
 By target:
    270  Scenarios.* or Ops.*
    208  Models.* or Scenarios.TrainingRuns
    164  Scenarios.*
    109  Datasets.* or Scenarios.DataWorkloads
-   107  Infrastructure.Pricing.* or Scenarios.*
+   106  Infrastructure.Pricing.* or Scenarios.*
     49  Hardware.*
     46  Systems.Clusters or Systems.Nodes
     31  Infrastructure.*
@@ -21,8 +21,8 @@ By target:
     13  Systems.Storage or Datasets.*
     10  Systems.*
      7  Infrastructure.* or Scenarios.Sustainability
-     3  Infrastructure.Pricing.Storage
      2  Scenarios.TrainingRuns or Systems.Reliability
+     1  Infrastructure.Pricing.Storage
 Top chapters:
    152  vol1/model_serving
     84  vol1/data_selection
@@ -31,7 +31,7 @@ Top chapters:
     53  vol1/nn_computation
     51  vol1/benchmarking
     51  vol1/ml_systems
-    41  vol1/ml_ops
+    38  vol1/ml_ops
     38  vol1/nn_architectures
     37  vol2/inference
     36  vol2/sustainable_ai
@@ -48,7 +48,7 @@ Top reasons:
    270  scenario/workload policy
    208  model/workload specification
    164  unit-bearing scenario input
-   107  economic input or scenario price
+   106  economic input or scenario price
    105  dataset/workload specification
     49  hardware-related quantitative input
     46  fleet/topology fact
@@ -61,8 +61,8 @@ Top reasons:
     10  system-level fact
      7  infrastructure/sustainability fact
      4  dataset/workload size
-     3  storage price/rate belongs in pricing registry
      2  checkpoint policy/workload cadence
+     1  storage price/rate belongs in pricing registry
 
 ## vol1/backmatter/appendix_algorithm.qmd
 
@@ -433,25 +433,22 @@ Top reasons:
 | `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:2438` | `ObservabilitySampling` | `low_frequency_seconds` | `Scenarios.*` | unit-bearing scenario input | `60 * second` |
 | `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:2439` | `ObservabilitySampling` | `success_sample_fraction` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `0.01` |
 | `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:2440` | `ObservabilitySampling` | `error_sample_fraction` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `1.0` |
-| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:2724` | `MonitoringBudget` | `samples_per_min` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `4` |
-| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:2729` | `MonitoringBudget` | `ingestion_cost_per_m` | `Infrastructure.Pricing.Storage` | storage price/rate belongs in pricing registry | `0.30` |
-| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:2731` | `MonitoringBudget` | `storage_cost_per_gb` | `Infrastructure.Pricing.Storage` | storage price/rate belongs in pricing registry | `1.00` |
-| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:2734` | `MonitoringBudget` | `queries_per_hr` | `Scenarios.* or Ops.*` | scenario/workload policy | `12` |
-| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:2735` | `MonitoringBudget` | `work_hours` | `Scenarios.* or Ops.*` | scenario/workload policy | `8` |
-| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:2736` | `MonitoringBudget` | `work_days` | `Scenarios.* or Ops.*` | scenario/workload policy | `22` |
-| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:2737` | `MonitoringBudget` | `query_cost_per` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `0.02` |
-| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:2844` | `MonitoringROI` | `avg_incident_cost` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `50_000` |
-| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:2845` | `MonitoringROI` | `annual_monitoring_cost` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `50_000` |
-| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:2951` | `SliceAnalysisCalc` | `traffic_pcts` | `Scenarios.* or Ops.*` | scenario/workload policy | `[45, 30, 20, 5]` |
-| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:3212` | `FraudDetectionImprovement` | `current_rate` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `0.92` |
-| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:3213` | `FraudDetectionImprovement` | `target_rate` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `0.94` |
-| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:3214` | `FraudDetectionImprovement` | `infra_cost_increase` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `0.30` |
-| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:3216` | `FraudDetectionImprovement` | `monthly_false_positive_alerts` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `250_000` |
-| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:3491` | `SingleModelROI` | `incident_cost` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `25_000` |
-| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:3492` | `SingleModelROI` | `hours_saved_monthly` | `Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet` | cloud/fleet price point | `20` |
-| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:3493` | `SingleModelROI` | `hourly_cost` | `Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet` | cloud/fleet price point | `150` |
-| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:3593` | `OuraValidationGap` | `accel_only_accuracy` | `Scenarios.* or Ops.*` | scenario/workload policy | `0.57` |
-| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:3594` | `OuraValidationGap` | `enhanced_accuracy` | `Scenarios.* or Ops.*` | scenario/workload policy | `0.79` |
+| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:2725` | `MonitoringBudget` | `samples_per_min` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `4` |
+| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:2735` | `MonitoringBudget` | `queries_per_hr` | `Scenarios.* or Ops.*` | scenario/workload policy | `12` |
+| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:2736` | `MonitoringBudget` | `work_hours` | `Scenarios.* or Ops.*` | scenario/workload policy | `8` |
+| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:2737` | `MonitoringBudget` | `work_days` | `Scenarios.* or Ops.*` | scenario/workload policy | `22` |
+| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:2845` | `MonitoringROI` | `avg_incident_cost` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `50_000` |
+| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:2846` | `MonitoringROI` | `annual_monitoring_cost` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `50_000` |
+| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:2952` | `SliceAnalysisCalc` | `traffic_pcts` | `Scenarios.* or Ops.*` | scenario/workload policy | `[45, 30, 20, 5]` |
+| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:3213` | `FraudDetectionImprovement` | `current_rate` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `0.92` |
+| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:3214` | `FraudDetectionImprovement` | `target_rate` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `0.94` |
+| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:3215` | `FraudDetectionImprovement` | `infra_cost_increase` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `0.30` |
+| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:3217` | `FraudDetectionImprovement` | `monthly_false_positive_alerts` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `250_000` |
+| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:3492` | `SingleModelROI` | `incident_cost` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `25_000` |
+| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:3493` | `SingleModelROI` | `hours_saved_monthly` | `Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet` | cloud/fleet price point | `20` |
+| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:3494` | `SingleModelROI` | `hourly_cost` | `Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet` | cloud/fleet price point | `150` |
+| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:3594` | `OuraValidationGap` | `accel_only_accuracy` | `Scenarios.* or Ops.*` | scenario/workload policy | `0.57` |
+| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:3595` | `OuraValidationGap` | `enhanced_accuracy` | `Scenarios.* or Ops.*` | scenario/workload policy | `0.79` |
 
 ## vol1/ml_systems
 

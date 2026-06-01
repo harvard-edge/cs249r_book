@@ -44,8 +44,8 @@ python3 book/tools/audit/book_check_lego_scenario_inputs.py \
 
 Current output:
 
-- **1,092 advisory MLSysIM source-of-truth candidates**
-- **129 high-confidence candidates**
+- **1,089 advisory MLSysIM source-of-truth candidates**
+- **127 high-confidence candidates**
 - Full JSON work queue:
   `book/tools/audit/artifacts/lego_scenario_inputs_audit.json`
 - Full Markdown work queue:
@@ -65,7 +65,7 @@ High-confidence buckets:
 | `Systems.Fabrics` / `Systems.SwitchFabric` | 14 | Network/fabric/switch-sizing facts |
 | `Systems.Storage` | 14 | Local NVMe, HDD, PFS, S3/object-store, checkpoint-path storage facts |
 | `Infrastructure.*` / `Scenarios.Sustainability` | 7 | PUE, cooling, carbon, sustainability scenario facts |
-| `Infrastructure.Pricing.Storage` | 3 | Storage/monitoring price points |
+| `Infrastructure.Pricing.Storage` | 1 | Storage/monitoring price points |
 
 Broader medium-confidence buckets:
 
@@ -118,6 +118,9 @@ Known concrete findings from the first pass:
   (`S3StandardLowPerTbMonth`, `GlacierStandardPerTbMonth`) so examples that
   intentionally use $0.02/GB-month and $0.004/GB-month no longer hide those
   assumptions in QMD cells.
+- Stage 7 added `Infrastructure.Pricing.Monitoring` and migrated the
+  `ml_ops.qmd` single-model monitoring budget to load ingestion, storage, and
+  query rates from MLSysIM.
 - 100,000-GPU examples should load `Systems.Clusters.Mega_100K`.
 - Storage/checkpoint examples mix two different kinds of facts: storage-system
   facts such as local NVMe drive count, local/PFS bandwidth, capacity, and
