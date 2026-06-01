@@ -183,7 +183,7 @@ export default function TopicDetail({ topic, areaName, style, onClose, selectedT
                     return (
                       <button key={level} onClick={() => setDrillLevel(level)}
                         className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl border border-borderSubtle bg-surface hover:bg-surfaceElevated hover:border-borderHighlight transition-all group">
-                        <LevelBadge level={level} />
+                        <LevelBadge level={level} withTooltip={false} />
                         <span className="flex-1 text-left text-[13px] font-medium text-textSecondary">{levelDef?.name}</span>
                         <span className="text-[13px] font-mono font-bold text-textPrimary">{count}</span>
                         <ChevronRight className="w-4 h-4 text-textMuted group-hover:text-textSecondary shrink-0 transition-colors" />
