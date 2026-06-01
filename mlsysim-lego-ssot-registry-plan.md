@@ -44,8 +44,8 @@ python3 book/tools/audit/book_check_lego_scenario_inputs.py \
 
 Current output:
 
-- **1,115 advisory MLSysIM source-of-truth candidates**
-- **150 high-confidence candidates**
+- **1,111 advisory MLSysIM source-of-truth candidates**
+- **147 high-confidence candidates**
 - Full JSON work queue:
   `book/tools/audit/artifacts/lego_scenario_inputs_audit.json`
 - Full Markdown work queue:
@@ -59,7 +59,7 @@ High-confidence buckets:
 
 | Target | Count | Meaning |
 |---|---:|---|
-| `Systems.Clusters` / `Systems.Nodes` | 58 | Fleet, node, GPU-count, cluster-topology facts |
+| `Systems.Clusters` / `Systems.Nodes` | 55 | Fleet, node, GPU-count, cluster-topology facts |
 | `Hardware.*` / `Hardware.Tech.*` | 23 | Hardware capacity, bandwidth, FLOP/s, TDP, memory/interconnect facts |
 | `Infrastructure.Pricing.Cloud` / `Infrastructure.Pricing.Fleet` | 23 | GPU-hour, cloud-instance, and fleet price points |
 | `Systems.Storage` | 20 | Local NVMe, HDD, PFS, S3/object-store, checkpoint-path storage facts |
@@ -78,7 +78,7 @@ Broader medium-confidence buckets:
 | `Infrastructure.Pricing.*` / `Scenarios.*` | 107 | Economic assumptions not yet in a named price registry |
 | `Hardware.*` | 49 | Hardware-related values that need review |
 
-This is the first real full-cell audit. Migration is **not** done yet.
+This is the first real full-cell audit. Migration is **underway**, not done.
 
 The earlier rough classification remains useful for planning the larger waves:
 
@@ -94,10 +94,11 @@ The earlier rough classification remains useful for planning the larger waves:
 
 Known concrete findings from the first pass:
 
-- `sustainable_ai.qmd` creates a local `DummyFleet` for a 2,048-H100 run even
-  though `Systems.Clusters.Production_2K` already exists.
-- 25,000-H100 frontier-cluster examples appear in both `sustainable_ai.qmd` and
-  `conclusion.qmd`; this should be a stock `Systems.Clusters` entry.
+- Stage 1 moved the Sustainable AI lifecycle-carbon `DummyFleet` to
+  `Systems.Clusters.Production_2K`.
+- Stage 1 moved the 25,000-H100 reference-cluster examples in
+  `sustainable_ai.qmd` and `conclusion.qmd` to
+  `Systems.Clusters.Reference_25K_H100`.
 - Multiple 256-node / 2,048-GPU storage and capacity examples should load
   `Systems.Clusters.Production_2K` instead of independent node-count literals.
 - Multiple 128-node / 1,024-GPU examples should load
@@ -112,11 +113,11 @@ Known concrete findings from the first pass:
 
 Additional concrete findings from the refined audit:
 
-- `sustainable_ai.qmd:873` still defines `LifecycleCarbonEstimate.DummyFleet`.
-  This should become `Systems.Clusters.Production_2K` or a named sustainability
-  scenario that references that fleet.
-- `sustainable_ai.qmd:211` uses `cluster_gpus = 25000`; this needs
-  `Systems.Clusters.Frontier_25K`.
+- `sustainable_ai.qmd:873` previously defined
+  `LifecycleCarbonEstimate.DummyFleet`; Stage 1 replaced it with
+  `Systems.Clusters.Production_2K`.
+- `sustainable_ai.qmd:211` previously used `cluster_gpus = 25000`; Stage 1
+  replaced it with `Systems.Clusters.Reference_25K_H100`.
 - `data_storage.qmd:2330-2335` has the clearest `Systems.Storage` pilot:
   local NVMe drives per node, 256 nodes, PFS aggregate bandwidth, and checkpoint
   interval. The storage path belongs in `Systems.Storage`; checkpoint cadence
@@ -301,8 +302,8 @@ Start with the high-value examples that currently cause drift:
   - amortization: 36 months, 1-month window
   - embodied carbon source: `Hardware.Cloud.H100.embodied_carbon_kg`
 
-- `Scenarios.Sustainability.Frontier25KEnergyWall`
-  - fleet: `Systems.Clusters.Frontier_25K`
+- `Scenarios.Sustainability.Reference25KEnergyWall`
+  - fleet: `Systems.Clusters.Reference_25K_H100`
   - hardware: H100 through the fleet
 
 - `Scenarios.Sustainability.Training7B64A100UsAvg`
@@ -447,7 +448,7 @@ Required behavior:
   - 8,192 GPUs → `Systems.Clusters.Frontier_8K`
   - 10,000 GPUs → `Systems.Clusters.Training_10K`
   - 100,000 GPUs → `Systems.Clusters.Mega_100K`
-  - 25,000 GPUs → `Systems.Clusters.Frontier_25K` after it exists
+  - 25,000 GPUs → `Systems.Clusters.Reference_25K_H100`
 - Emit JSON for agent work queues.
 - Allowlist pure algebra and figure-only cells explicitly.
 
@@ -458,7 +459,7 @@ and the allowlist is honest.
 
 The first slice should be small and high-confidence:
 
-1. Add `Systems.Clusters.Frontier_25K`.
+1. Add `Systems.Clusters.Reference_25K_H100`.
 2. Replace the local 25,000-GPU literals in:
    - `vol2/sustainable_ai/sustainable_ai.qmd`
    - `vol2/conclusion/conclusion.qmd`

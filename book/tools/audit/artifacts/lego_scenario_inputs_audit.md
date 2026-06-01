@@ -4,14 +4,14 @@ This is an advisory work queue for values that likely define
 hardware, systems, infrastructure, pricing, models, datasets,
 storage subsystems, or scenarios in LEGO LOAD stages.
 
-Findings: 1115
+Findings: 1111
 By target:
    270  Scenarios.* or Ops.*
    209  Models.* or Scenarios.TrainingRuns
    164  Scenarios.*
    109  Datasets.* or Scenarios.DataWorkloads
    107  Infrastructure.Pricing.* or Scenarios.*
-    58  Systems.Clusters or Systems.Nodes
+    55  Systems.Clusters or Systems.Nodes
     49  Hardware.*
     31  Infrastructure.*
     23  Hardware.* or Hardware.Tech.*
@@ -19,7 +19,7 @@ By target:
     20  Systems.Storage
     14  Systems.Fabrics or Systems.SwitchFabric
     13  Systems.Storage or Datasets.*
-    11  Systems.*
+    10  Systems.*
      7  Infrastructure.* or Scenarios.Sustainability
      5  Infrastructure.Pricing.Storage
      2  Scenarios.TrainingRuns or Systems.Reliability
@@ -33,9 +33,9 @@ Top chapters:
     51  vol1/ml_systems
     41  vol1/ml_ops
     40  vol2/data_storage
-    40  vol2/sustainable_ai
     38  vol1/nn_architectures
     37  vol2/inference
+    36  vol2/sustainable_ai
     35  vol2/ops_scale
     32  vol1/hw_acceleration
     29  vol1/ml_workflow
@@ -50,7 +50,7 @@ Top reasons:
    164  unit-bearing scenario input
    107  economic input or scenario price
    105  dataset/workload specification
-    58  fleet/topology fact
+    55  fleet/topology fact
     49  hardware-related quantitative input
     31  infrastructure input
     23  hardware specification
@@ -58,7 +58,7 @@ Top reasons:
     20  storage subsystem fact
     14  network/fabric system fact
     13  storage/data fact
-    11  system-level fact
+    10  system-level fact
      7  infrastructure/sustainability fact
      5  storage price/rate belongs in pricing registry
      4  dataset/workload size
@@ -1014,8 +1014,8 @@ Top reasons:
 | `book/quarto/contents/vol2/conclusion/conclusion.qmd:132` | `ConclusionScaleFacts` | `llama_failures` | `Systems.*` | system-level fact | `419` |
 | `book/quarto/contents/vol2/conclusion/conclusion.qmd:133` | `ConclusionScaleFacts` | `llama_days` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `54` |
 | `book/quarto/contents/vol2/conclusion/conclusion.qmd:134` | `ConclusionScaleFacts` | `hours_per_day` | `Scenarios.* or Ops.*` | scenario/workload policy | `24` |
-| `book/quarto/contents/vol2/conclusion/conclusion.qmd:411` | `FermiEstimate` | `brain_firing_rate` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `1.0 / second` |
-| `book/quarto/contents/vol2/conclusion/conclusion.qmd:412` | `FermiEstimate` | `brain_power` | `Infrastructure.*` | infrastructure input | `20 * watt` |
+| `book/quarto/contents/vol2/conclusion/conclusion.qmd:412` | `FermiEstimate` | `brain_firing_rate` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `1.0 / second` |
+| `book/quarto/contents/vol2/conclusion/conclusion.qmd:413` | `FermiEstimate` | `brain_power` | `Infrastructure.*` | infrastructure input | `20 * watt` |
 
 ## vol2/data_storage
 
@@ -1338,43 +1338,39 @@ Top reasons:
 
 | File:Line | Cell | Symbol | Target | Reason | RHS |
 |---|---|---|---|---|---|
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:211` | `ArchetypeATdp` | `cluster_gpus` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `25000` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:257` | `CarbonFrontier` | `energy` | `Infrastructure.*` | infrastructure input | `10_000 * MWh` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:310` | `AutoPlacement` | `energy` | `Infrastructure.*` | infrastructure input | `10_000 * MWh` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:311` | `AutoPlacement` | `carbon_tax` | `Infrastructure.* or Scenarios.Sustainability` | infrastructure/sustainability fact | `100.0` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:312` | `AutoPlacement` | `duration_days` | `Infrastructure.*` | infrastructure input | `(energy.to(MWh).magnitude / 143.0) / 24.0` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:696` | `EnergyWallScenario` | `grid_annual_growth` | `Infrastructure.* or Scenarios.Sustainability` | infrastructure/sustainability fact | `0.02` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:868` | `LifecycleCarbonEstimate` | `training_days` | `Scenarios.* or Ops.*` | scenario/workload policy | `30` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:873` | `LifecycleCarbonEstimate` | `DummyFleet` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `class definition` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:875` | `LifecycleCarbonEstimate` | `total_accelerators` | `Systems.*` | system-level fact | `2048` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:879` | `LifecycleCarbonEstimate` | `embodied_kg_per_gpu` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `164` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:881` | `LifecycleCarbonEstimate` | `amortization_window_months` | `Scenarios.* or Ops.*` | scenario/workload policy | `1` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:1083` | `PueEfficiency` | `p_it` | `Scenarios.*` | unit-bearing scenario input | `2.0 * MW` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:1084` | `PueEfficiency` | `pue_old` | `Infrastructure.* or Scenarios.Sustainability` | infrastructure/sustainability fact | `1.58` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:1085` | `PueEfficiency` | `pue_new` | `Infrastructure.* or Scenarios.Sustainability` | infrastructure/sustainability fact | `1.10` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:1086` | `PueEfficiency` | `elec_price` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `0.07` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:1615` | `TrainingEmissions` | `training_days` | `Scenarios.* or Ops.*` | scenario/workload policy | `14` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:1745` | `EmbodiedCarbonAmort` | `t_job` | `Scenarios.* or Ops.*` | scenario/workload policy | `10 * hour` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:1818` | `TrainingEmbodiedRecap` | `training_days` | `Scenarios.* or Ops.*` | scenario/workload policy | `14` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:1910` | `InferenceLifecycleExample` | `queries_per_day` | `Scenarios.* or Ops.*` | scenario/workload policy | `10_000_000` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:1911` | `InferenceLifecycleExample` | `kwh_per_query` | `Scenarios.*` | unit-bearing scenario input | `0.001 * kWh` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:1916` | `InferenceLifecycleExample` | `training_days` | `Scenarios.* or Ops.*` | scenario/workload policy | `14` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2381` | `GridQueue` | `cluster_power` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `7 * MW` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2510` | `RackPowerBudget` | `nodes_per_rack` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `4` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2512` | `RackPowerBudget` | `host_kw` | `Scenarios.*` | unit-bearing scenario input | `3.2 * kilowatt` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2513` | `RackPowerBudget` | `nvswitch_kw` | `Systems.Fabrics or Systems.SwitchFabric` | network/fabric system fact | `1.6 * kilowatt` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2514` | `RackPowerBudget` | `ib_kw` | `Scenarios.*` | unit-bearing scenario input | `0.8 * kilowatt` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2515` | `RackPowerBudget` | `conversion_kw` | `Scenarios.*` | unit-bearing scenario input | `2.8 * kilowatt` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2516` | `RackPowerBudget` | `cooling_kw` | `Infrastructure.* or Scenarios.Sustainability` | infrastructure/sustainability fact | `2.7 * kilowatt` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2643` | `SustainableCoolingRackPowerRecap` | `nodes_per_rack` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `4` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2644` | `SustainableCoolingRackPowerRecap` | `non_gpu_power` | `Hardware.*` | hardware-related quantitative input | `10.3 * kilowatt` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2702` | `PueSavings` | `it_power` | `Infrastructure.*` | infrastructure input | `7.0 * MW` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2703` | `PueSavings` | `pue_air_simple` | `Infrastructure.* or Scenarios.Sustainability` | infrastructure/sustainability fact | `1.5` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2708` | `PueSavings` | `gpt3_households` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `120.0` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:3193` | `OnDeviceLearningEnergy` | `model_params` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `1_000_000_000` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:3194` | `OnDeviceLearningEnergy` | `forward_nj_per_param` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `2` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:3195` | `OnDeviceLearningEnergy` | `backward_nj_per_param` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `4` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:3327` | `WakeWordPower` | `vad_power` | `Infrastructure.*` | infrastructure input | `0.01 * milliwatt` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:3329` | `WakeWordPower` | `wake_detector_power` | `Infrastructure.*` | infrastructure input | `0.1 * milliwatt` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:3331` | `WakeWordPower` | `full_model_power` | `Infrastructure.*` | infrastructure input | `10 * milliwatt` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:3332` | `WakeWordPower` | `full_model_duty_s` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `0.05` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:259` | `CarbonFrontier` | `energy` | `Infrastructure.*` | infrastructure input | `10_000 * MWh` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:312` | `AutoPlacement` | `energy` | `Infrastructure.*` | infrastructure input | `10_000 * MWh` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:313` | `AutoPlacement` | `carbon_tax` | `Infrastructure.* or Scenarios.Sustainability` | infrastructure/sustainability fact | `100.0` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:314` | `AutoPlacement` | `duration_days` | `Infrastructure.*` | infrastructure input | `(energy.to(MWh).magnitude / 143.0) / 24.0` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:698` | `EnergyWallScenario` | `grid_annual_growth` | `Infrastructure.* or Scenarios.Sustainability` | infrastructure/sustainability fact | `0.02` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:871` | `LifecycleCarbonEstimate` | `training_days` | `Scenarios.* or Ops.*` | scenario/workload policy | `30` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:879` | `LifecycleCarbonEstimate` | `amortization_window_months` | `Scenarios.* or Ops.*` | scenario/workload policy | `1` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:1081` | `PueEfficiency` | `p_it` | `Scenarios.*` | unit-bearing scenario input | `2.0 * MW` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:1082` | `PueEfficiency` | `pue_old` | `Infrastructure.* or Scenarios.Sustainability` | infrastructure/sustainability fact | `1.58` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:1083` | `PueEfficiency` | `pue_new` | `Infrastructure.* or Scenarios.Sustainability` | infrastructure/sustainability fact | `1.10` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:1084` | `PueEfficiency` | `elec_price` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `0.07` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:1613` | `TrainingEmissions` | `training_days` | `Scenarios.* or Ops.*` | scenario/workload policy | `14` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:1743` | `EmbodiedCarbonAmort` | `t_job` | `Scenarios.* or Ops.*` | scenario/workload policy | `10 * hour` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:1816` | `TrainingEmbodiedRecap` | `training_days` | `Scenarios.* or Ops.*` | scenario/workload policy | `14` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:1908` | `InferenceLifecycleExample` | `queries_per_day` | `Scenarios.* or Ops.*` | scenario/workload policy | `10_000_000` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:1909` | `InferenceLifecycleExample` | `kwh_per_query` | `Scenarios.*` | unit-bearing scenario input | `0.001 * kWh` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:1914` | `InferenceLifecycleExample` | `training_days` | `Scenarios.* or Ops.*` | scenario/workload policy | `14` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2379` | `GridQueue` | `cluster_power` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `7 * MW` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2508` | `RackPowerBudget` | `nodes_per_rack` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `4` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2510` | `RackPowerBudget` | `host_kw` | `Scenarios.*` | unit-bearing scenario input | `3.2 * kilowatt` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2511` | `RackPowerBudget` | `nvswitch_kw` | `Systems.Fabrics or Systems.SwitchFabric` | network/fabric system fact | `1.6 * kilowatt` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2512` | `RackPowerBudget` | `ib_kw` | `Scenarios.*` | unit-bearing scenario input | `0.8 * kilowatt` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2513` | `RackPowerBudget` | `conversion_kw` | `Scenarios.*` | unit-bearing scenario input | `2.8 * kilowatt` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2514` | `RackPowerBudget` | `cooling_kw` | `Infrastructure.* or Scenarios.Sustainability` | infrastructure/sustainability fact | `2.7 * kilowatt` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2641` | `SustainableCoolingRackPowerRecap` | `nodes_per_rack` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `4` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2642` | `SustainableCoolingRackPowerRecap` | `non_gpu_power` | `Hardware.*` | hardware-related quantitative input | `10.3 * kilowatt` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2700` | `PueSavings` | `it_power` | `Infrastructure.*` | infrastructure input | `7.0 * MW` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2701` | `PueSavings` | `pue_air_simple` | `Infrastructure.* or Scenarios.Sustainability` | infrastructure/sustainability fact | `1.5` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2706` | `PueSavings` | `gpt3_households` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `120.0` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:3191` | `OnDeviceLearningEnergy` | `model_params` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `1_000_000_000` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:3192` | `OnDeviceLearningEnergy` | `forward_nj_per_param` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `2` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:3193` | `OnDeviceLearningEnergy` | `backward_nj_per_param` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `4` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:3325` | `WakeWordPower` | `vad_power` | `Infrastructure.*` | infrastructure input | `0.01 * milliwatt` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:3327` | `WakeWordPower` | `wake_detector_power` | `Infrastructure.*` | infrastructure input | `0.1 * milliwatt` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:3329` | `WakeWordPower` | `full_model_power` | `Infrastructure.*` | infrastructure input | `10 * milliwatt` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:3330` | `WakeWordPower` | `full_model_duty_s` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `0.05` |

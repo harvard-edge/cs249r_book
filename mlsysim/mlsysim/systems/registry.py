@@ -139,6 +139,16 @@ class Clusters(Registry):
         fabric=Fabrics.InfiniBand_NDR,
         metadata=Metadata(provenance=_TIER_PROV, description="Large training tier (10000 GPUs)."),
     )
+    Reference_25K_H100 = Fleet(
+        name="Reference H100 Cluster (25000 GPUs)",
+        node=Nodes.DGX_H100,
+        count=3125,
+        fabric=Fabrics.InfiniBand_NDR,
+        metadata=Metadata(
+            provenance=_TIER_PROV,
+            description="Round-number reference H100 fleet tier (25000 GPUs).",
+        ),
+    )
     Mega_100K = Fleet(
         name="Mega Cluster (100000 GPUs)",
         node=Nodes.DGX_H100,

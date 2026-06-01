@@ -200,6 +200,7 @@ class CarbonCostGPT3:
 # │ Imports: mlsysim.core.constants (Hardware.Cloud.H100.tdp, watt)
 # │ Exports: ArchetypeATdp.h_h100_tdp_w_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Systems
 from mlsysim.fmt import fmt, fmt_qty, fmt_power, check, assert_qty_close
 from mlsysim.core.units import MW, watt
 
@@ -207,8 +208,9 @@ class ArchetypeATdp:
     """H100 per-chip TDP for the Archetype A energy framing."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    tdp = Hardware.Cloud.H100.tdp
-    cluster_gpus = 25000
+    fleet = Systems.Clusters.Reference_25K_H100
+    tdp = fleet.node.accelerator.tdp
+    cluster_gpus = fleet.total_accelerators
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     accelerator_power = cluster_gpus * tdp
@@ -861,29 +863,25 @@ class LifecycleCarbonEstimate:
     """Worked lifecycle carbon estimate for a 70B training run."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    from mlsysim import Hardware, Systems, Infrastructure
+    from mlsysim import Systems, Infrastructure
     from mlsysim.engine.solver import SustainabilityModel
 
-    n_gpus = 2048
+    fleet = Systems.Clusters.Production_2K
+    n_gpus = fleet.total_accelerators
     training_days = 30
-    h_h100 = Hardware.Cloud.H100
+    h_h100 = fleet.node.accelerator
     baseline_grid = Infrastructure.Grids.US_Avg
-
-    # Define Fleet and Region (nested class cannot see outer n_gpus at class body time)
-    class DummyFleet:
-        node = type('obj', (object,), {'accelerator': Hardware.Cloud.H100})
-        total_accelerators = 2048
-        effective_pue = Infrastructure.Grids.US_Avg.pue
+    effective_pue = baseline_grid.pue
 
     # Amortization details
-    embodied_kg_per_gpu = 164
+    embodied_kg_per_gpu = h_h100.embodied_carbon_kg
     amortization_months = 36
     amortization_window_months = 1
     lifecycle_years = amortization_months // 12
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     res = SustainabilityModel().solve(
-        fleet=DummyFleet(),
+        fleet=fleet,
         datacenter=baseline_grid,
         duration_days=training_days,
         mfu=1.0 # Peak training
@@ -901,7 +899,7 @@ class LifecycleCarbonEstimate:
     total_carbon = operational_carbon + embodied_carbon
     total_tonnes = total_carbon.magnitude
     accelerator_power = n_gpus * h_h100.tdp
-    facility_power = accelerator_power * DummyFleet.effective_pue
+    facility_power = accelerator_power * effective_pue
     hours_per_day = HOURS_PER_DAY
     total_facility_energy_kwh = res.total_energy_kwh.magnitude
     facility_power_kw_mag = facility_power.to(kilowatt).magnitude
@@ -919,7 +917,7 @@ class LifecycleCarbonEstimate:
     h_h100_tdp_w_str = fmt_power(h_h100.tdp, unit=watt, precision=0, commas=False)
     gpu_tdp_kw_str = fmt_power(h_h100.tdp, unit=kilowatt, precision=1, commas=False)
     hours_per_day_str = fmt(hours_per_day, precision=0, commas=False)
-    pue_str = fmt(DummyFleet.effective_pue, precision=2, commas=False)
+    pue_str = fmt(effective_pue, precision=2, commas=False)
     grid_ci_str = fmt(baseline_grid.carbon_intensity_g_kwh, precision=0, commas=False)
     it_power_kw_str = fmt_power(accelerator_power, unit=kilowatt, precision=1)
     facility_power_kw_str = fmt_power(facility_power, unit=kilowatt, precision=1, commas=True)
