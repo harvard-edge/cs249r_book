@@ -4,7 +4,7 @@ This is an advisory work queue for values that likely define
 hardware, systems, infrastructure, pricing, models, datasets,
 storage subsystems, or scenarios in LEGO LOAD stages.
 
-Findings: 1095
+Findings: 1092
 By target:
    270  Scenarios.* or Ops.*
    208  Models.* or Scenarios.TrainingRuns
@@ -15,13 +15,13 @@ By target:
     46  Systems.Clusters or Systems.Nodes
     31  Infrastructure.*
     23  Hardware.* or Hardware.Tech.*
-    23  Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet
+    22  Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet
     14  Systems.Fabrics or Systems.SwitchFabric
     14  Systems.Storage
     13  Systems.Storage or Datasets.*
     10  Systems.*
      7  Infrastructure.* or Scenarios.Sustainability
-     5  Infrastructure.Pricing.Storage
+     3  Infrastructure.Pricing.Storage
      2  Scenarios.TrainingRuns or Systems.Reliability
 Top chapters:
    152  vol1/model_serving
@@ -34,9 +34,9 @@ Top chapters:
     41  vol1/ml_ops
     38  vol1/nn_architectures
     37  vol2/inference
-    36  vol2/data_storage
     36  vol2/sustainable_ai
     34  vol2/ops_scale
+    33  vol2/data_storage
     32  vol1/hw_acceleration
     29  vol1/ml_workflow
     27  vol1/responsible_engr
@@ -54,14 +54,14 @@ Top reasons:
     46  fleet/topology fact
     31  infrastructure input
     23  hardware specification
-    23  cloud/fleet price point
+    22  cloud/fleet price point
     14  network/fabric system fact
     14  storage subsystem fact
     13  storage/data fact
     10  system-level fact
      7  infrastructure/sustainability fact
-     5  storage price/rate belongs in pricing registry
      4  dataset/workload size
+     3  storage price/rate belongs in pricing registry
      2  checkpoint policy/workload cadence
 
 ## vol1/backmatter/appendix_algorithm.qmd
@@ -1026,7 +1026,6 @@ Top reasons:
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:897` | `NVMeTierCalcs` | `hdd_iops` | `Systems.Storage` | storage subsystem fact | `100` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:898` | `NVMeTierCalcs` | `imagenet_images` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `1_280_000` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:1204` | `ObjectStorageCost` | `dataset_size_tb` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `100` |
-| `book/quarto/contents/vol2/data_storage/data_storage.qmd:1205` | `ObjectStorageCost` | `cost_s3_gb_mo` | `Infrastructure.Pricing.Storage` | storage price/rate belongs in pricing registry | `0.02` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:1283` | `GlacierCost` | `dataset_size_tb` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `100` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:1284` | `GlacierCost` | `cost_glacier_gb_mo` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `0.004` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:1383` | `PipelineCalcs` | `img_size` | `Scenarios.*` | unit-bearing scenario input | `150 * KB` |
@@ -1037,17 +1036,15 @@ Top reasons:
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:1766` | `HashValidationCost` | `dataset` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `100 * TB` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:1767` | `HashValidationCost` | `throughput_per_core` | `Scenarios.*` | unit-bearing scenario input | `18.5 * (MB / second)` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:1818` | `GDSLatency` | `images_per_s_per_gpu` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `8_000` |
-| `book/quarto/contents/vol2/data_storage/data_storage.qmd:1962` | `EconRatios` | `cost_s3_gb_mo` | `Infrastructure.Pricing.Storage` | storage price/rate belongs in pricing registry | `0.02` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:1964` | `EconRatios` | `dataset_size` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `100 * TB` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:2110` | `BuildVsBuyStorageEconomics` | `capex_low` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `3_000_000` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:2111` | `BuildVsBuyStorageEconomics` | `capex_high` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `5_000_000` |
-| `book/quarto/contents/vol2/data_storage/data_storage.qmd:2113` | `BuildVsBuyStorageEconomics` | `cloud_cost_gb_month` | `Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet` | cloud/fleet price point | `0.02` |
-| `book/quarto/contents/vol2/data_storage/data_storage.qmd:2115` | `BuildVsBuyStorageEconomics` | `dataset_pb` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `1` |
-| `book/quarto/contents/vol2/data_storage/data_storage.qmd:2235` | `CheckpointModelIntro` | `ckpt_total` | `Systems.Storage or Datasets.*` | storage/data fact | `gpt3_params * (10 * (byte / param))` |
-| `book/quarto/contents/vol2/data_storage/data_storage.qmd:2338` | `CheckpointStormCalc` | `checkpoint_interval` | `Scenarios.TrainingRuns or Systems.Reliability` | checkpoint policy/workload cadence | `600 * second` |
-| `book/quarto/contents/vol2/data_storage/data_storage.qmd:2416` | `CheckpointFleetRetention` | `checkpoint_count_val` | `Systems.Storage or Datasets.*` | storage/data fact | `30 * 24 * 60 // 10` |
-| `book/quarto/contents/vol2/data_storage/data_storage.qmd:2418` | `CheckpointFleetRetention` | `retention_recent` | `Systems.Storage or Datasets.*` | storage/data fact | `3 * ckpt_total` |
-| `book/quarto/contents/vol2/data_storage/data_storage.qmd:2419` | `CheckpointFleetRetention` | `retained_every_100_count_val` | `Scenarios.TrainingRuns or Systems.Reliability` | checkpoint policy/workload cadence | `checkpoint_count_val // 100` |
+| `book/quarto/contents/vol2/data_storage/data_storage.qmd:2116` | `BuildVsBuyStorageEconomics` | `dataset_pb` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `1` |
+| `book/quarto/contents/vol2/data_storage/data_storage.qmd:2236` | `CheckpointModelIntro` | `ckpt_total` | `Systems.Storage or Datasets.*` | storage/data fact | `gpt3_params * (10 * (byte / param))` |
+| `book/quarto/contents/vol2/data_storage/data_storage.qmd:2339` | `CheckpointStormCalc` | `checkpoint_interval` | `Scenarios.TrainingRuns or Systems.Reliability` | checkpoint policy/workload cadence | `600 * second` |
+| `book/quarto/contents/vol2/data_storage/data_storage.qmd:2417` | `CheckpointFleetRetention` | `checkpoint_count_val` | `Systems.Storage or Datasets.*` | storage/data fact | `30 * 24 * 60 // 10` |
+| `book/quarto/contents/vol2/data_storage/data_storage.qmd:2419` | `CheckpointFleetRetention` | `retention_recent` | `Systems.Storage or Datasets.*` | storage/data fact | `3 * ckpt_total` |
+| `book/quarto/contents/vol2/data_storage/data_storage.qmd:2420` | `CheckpointFleetRetention` | `retained_every_100_count_val` | `Scenarios.TrainingRuns or Systems.Reliability` | checkpoint policy/workload cadence | `checkpoint_count_val // 100` |
 
 ## vol2/distributed_training
 

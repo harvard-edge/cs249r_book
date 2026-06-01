@@ -55,9 +55,19 @@ class Storage(Registry):
         rate=23 * USD / (TB * ureg.month),
         metadata=_STORAGE,
     )
+    S3StandardLowPerTbMonth = PricePoint(
+        name="S3 standard (low round-number anchor)",
+        rate=20 * USD / (TB * ureg.month),
+        metadata=_STORAGE,
+    )
     GlacierPerTbMonth = PricePoint(
         name="Glacier",
         rate=1 * USD / (TB * ureg.month),
+        metadata=_STORAGE,
+    )
+    GlacierStandardPerTbMonth = PricePoint(
+        name="Glacier standard retrieval-era anchor",
+        rate=4 * USD / (TB * ureg.month),
         metadata=_STORAGE,
     )
     NvmeLowPerTbMonth = PricePoint(
