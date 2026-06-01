@@ -16,12 +16,12 @@ By target:
     21  Systems.*
     13  Hardware.* or Scenarios.*
     11  Systems.Storage or Datasets.*
-     5  Systems.Clusters or Systems.Nodes
+     4  Infrastructure.* or Scenarios.*
      4  Systems.Storage or Scenarios.*
      3  Infrastructure.Pricing.Labeling or Scenarios.*
-     3  Infrastructure.* or Scenarios.Sustainability
+     3  Systems.* or Scenarios.*
      2  Scenarios.TrainingRuns or Systems.Reliability
-     1  Infrastructure.* or Scenarios.*
+     2  Systems.Clusters or Systems.Nodes
 Top chapters:
    151  vol1/model_serving
     83  vol1/data_selection
@@ -51,17 +51,16 @@ Top reasons:
    107  dataset/workload specification
     49  hardware-related quantitative input
     31  infrastructure input
+    22  scenario/profile input
     21  system-level fact
-    16  scenario/profile input
     11  storage/data fact
-     5  fleet/topology fact
      5  workload compute requirement
      4  dataset/workload size
      3  storage observation or utilization scenario
      3  human-labeling price input
-     3  infrastructure/sustainability fact
      3  storage-related scenario input
      2  checkpoint policy/workload cadence
+     2  fleet/topology fact
 
 ## vol1/backmatter/appendix_algorithm.qmd
 
@@ -286,7 +285,7 @@ Top reasons:
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:3361` | `CostBreakdown` | `storage_size` | `Systems.Storage or Datasets.*` | storage/data fact | `150 * GB` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:3362` | `CostBreakdown` | `storage_duration` | `Scenarios.* or Ops.*` | storage observation or utilization scenario | `12 * ureg.month` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:3363` | `CostBreakdown` | `train_epoch_count` | `Scenarios.* or Ops.*` | scenario/workload policy | `100` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3364` | `CostBreakdown` | `train_gpu_count` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `8` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3364` | `CostBreakdown` | `train_gpu_count` | `Systems.* or Scenarios.*` | scenario/profile input | `8` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:3365` | `CostBreakdown` | `train_duration` | `Scenarios.* or Ops.*` | scenario/workload policy | `24 * hour` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:3467` | `BreakevenCalc` | `cost_inference` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `50` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:3545` | `DeduplicationAmortization` | `cost_build` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `50000` |
@@ -446,7 +445,7 @@ Top reasons:
 | `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1645` | `CloudEdgeTCO` | `gpu_instances` | `Systems.*` | system-level fact | `4` |
 | `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1653` | `CloudEdgeTCO` | `server_cost` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `15000` |
 | `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1654` | `CloudEdgeTCO` | `server_life_years` | `Systems.*` | system-level fact | `3` |
-| `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1657` | `CloudEdgeTCO` | `cooling_overhead` | `Infrastructure.* or Scenarios.Sustainability` | infrastructure/sustainability fact | `0.30` |
+| `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1657` | `CloudEdgeTCO` | `cooling_overhead` | `Infrastructure.* or Scenarios.*` | scenario/profile input | `0.30` |
 | `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1816` | `VoiceAssistantWall` | `ww_cloud_cost_per_device` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `0.50` |
 | `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1817` | `VoiceAssistantWall` | `ww_edge_power_min_mw` | `Infrastructure.*` | infrastructure input | `0.1` |
 | `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1818` | `VoiceAssistantWall` | `ww_edge_power_max_mw` | `Infrastructure.*` | infrastructure input | `1` |
@@ -880,7 +879,7 @@ Top reasons:
 | `book/quarto/contents/vol1/training/training.qmd:6883` | `FallaciesPitfallsSetup` | `fp_model_20b_fp16` | `Hardware.*` | hardware-related quantitative input | `20 * 2 * GB` |
 | `book/quarto/contents/vol1/training/training.qmd:6884` | `FallaciesPitfallsSetup` | `fp_model_20b_optim` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `20 * 4 * 2 * GB` |
 | `book/quarto/contents/vol1/training/training.qmd:6886` | `FallaciesPitfallsSetup` | `fp_data_threshold_m` | `Scenarios.* or Ops.*` | scenario/workload policy | `100` |
-| `book/quarto/contents/vol1/training/training.qmd:6891` | `FallaciesPitfallsSetup` | `fp_gpu_count` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `8` |
+| `book/quarto/contents/vol1/training/training.qmd:6891` | `FallaciesPitfallsSetup` | `fp_gpu_count` | `Systems.* or Scenarios.*` | scenario/profile input | `8` |
 | `book/quarto/contents/vol1/training/training.qmd:6892` | `FallaciesPitfallsSetup` | `fp_sync_overhead_min` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `30` |
 | `book/quarto/contents/vol1/training/training.qmd:6893` | `FallaciesPitfallsSetup` | `fp_sync_overhead_max` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `50` |
 | `book/quarto/contents/vol1/training/training.qmd:6896` | `FallaciesPitfallsSetup` | `fp_single_gpu_hours` | `Systems.*` | system-level fact | `24` |
@@ -1010,7 +1009,7 @@ Top reasons:
 
 | File:Line | Cell | Symbol | Target | Reason | RHS |
 |---|---|---|---|---|---|
-| `book/quarto/contents/vol2/distributed_training/distributed_training.qmd:102` | `DistTrainReliabilityFacts` | `reliability_node_count` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `100` |
+| `book/quarto/contents/vol2/distributed_training/distributed_training.qmd:102` | `DistTrainReliabilityFacts` | `reliability_node_count` | `Systems.* or Scenarios.*` | scenario/profile input | `100` |
 | `book/quarto/contents/vol2/distributed_training/distributed_training.qmd:103` | `DistTrainReliabilityFacts` | `node_hourly_survival` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `0.999` |
 | `book/quarto/contents/vol2/distributed_training/distributed_training.qmd:424` | `HierarchicalAllReduceDebug` | `tensor_bytes` | `Scenarios.*` | unit-bearing scenario input | `3.0 * GB` |
 | `book/quarto/contents/vol2/distributed_training/distributed_training.qmd:598` | `Scaling8GPU` | `single_gpu_step_s` | `Scenarios.* or Ops.*` | scenario/workload policy | `1.8` |
@@ -1267,9 +1266,9 @@ Top reasons:
 |---|---|---|---|---|---|
 | `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:259` | `CarbonFrontier` | `energy` | `Infrastructure.*` | infrastructure input | `10_000 * MWh` |
 | `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:312` | `AutoPlacement` | `energy` | `Infrastructure.*` | infrastructure input | `10_000 * MWh` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:313` | `AutoPlacement` | `carbon_tax` | `Infrastructure.* or Scenarios.Sustainability` | infrastructure/sustainability fact | `100.0` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:313` | `AutoPlacement` | `carbon_tax` | `Infrastructure.* or Scenarios.*` | scenario/profile input | `100.0` |
 | `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:314` | `AutoPlacement` | `duration_days` | `Infrastructure.*` | infrastructure input | `(energy.to(MWh).magnitude / 143.0) / 24.0` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:698` | `EnergyWallScenario` | `grid_annual_growth` | `Infrastructure.* or Scenarios.Sustainability` | infrastructure/sustainability fact | `0.02` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:698` | `EnergyWallScenario` | `grid_annual_growth` | `Infrastructure.* or Scenarios.*` | scenario/profile input | `0.02` |
 | `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:871` | `LifecycleCarbonEstimate` | `training_days` | `Scenarios.* or Ops.*` | scenario/workload policy | `30` |
 | `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:879` | `LifecycleCarbonEstimate` | `amortization_window_months` | `Scenarios.* or Ops.*` | scenario/workload policy | `1` |
 | `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:1081` | `PueEfficiency` | `p_it` | `Scenarios.*` | unit-bearing scenario input | `2.0 * MW` |

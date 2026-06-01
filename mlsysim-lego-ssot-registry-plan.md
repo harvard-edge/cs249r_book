@@ -45,7 +45,7 @@ python3 book/tools/audit/book_check_lego_scenario_inputs.py \
 Current output:
 
 - **1,041 advisory MLSysIM source-of-truth candidates**
-- **8 high-confidence candidates**
+- **2 high-confidence candidates**
 - Full JSON work queue:
   `book/tools/audit/artifacts/lego_scenario_inputs_audit.json`
 - Full Markdown work queue:
@@ -59,8 +59,7 @@ High-confidence buckets:
 
 | Target | Count | Meaning |
 |---|---:|---|
-| `Systems.Clusters` / `Systems.Nodes` | 5 | Fleet, node, GPU-count, cluster-topology facts |
-| `Infrastructure.*` / `Scenarios.Sustainability` | 3 | PUE, cooling, carbon, sustainability scenario facts |
+| `Systems.Clusters` / `Systems.Nodes` | 2 | Fleet, node, GPU-count, cluster-topology facts |
 
 Broader medium-confidence buckets:
 
@@ -183,6 +182,12 @@ Known concrete findings from the first pass:
   HDD random IOPS loads from `Systems.Storage.Hdd7200Rpm`. The HDD random-IOPS
   registry anchor was standardized to 100 IOPS so Volume I and Volume II use
   the same storage profile.
+- Stage 21 marked local scenario/policy inputs explicitly in LOAD comments:
+  8-GPU data-selection and training examples, 100-node reliability example,
+  edge cooling overhead, carbon-tax policy, and grid-growth assumption. These
+  are not canonical hardware/system facts and should remain local until a named
+  scenario profile is created. High-confidence audit findings are now down to
+  the repeated four-node H100 rack topology in `sustainable_ai.qmd`.
 - MLSysIM registry/provenance names should stay product-, system-, source-, or
   convention-oriented. Avoid new `BOOK_*`, `MLSysBook`, `Volume I/II`, or
   "worked example" identifiers inside MLSysIM. Existing `BOOK_*` provenance
