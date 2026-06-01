@@ -3,7 +3,7 @@
 import pytest
 
 from mlsysim.core.constants import ureg
-from mlsysim.core.units import USD
+from mlsysim.core.units import GB, TB, USD, hour, kWh
 import math
 
 from mlsysim.fmt import (
@@ -11,15 +11,22 @@ from mlsysim.fmt import (
     fmt,
     fmt_count,
     fmt_count_range,
+    fmt_compute_efficiency,
+    fmt_carbon_intensity,
     fmt_int,
     fmt_multiple,
     fmt_multiple_range,
     fmt_percent,
     fmt_percent_range,
     fmt_pp,
+    fmt_params,
     fmt_qty,
     fmt_qty_int,
     fmt_qty_range,
+    fmt_flop_rate,
+    fmt_water,
+    fmt_water_rate,
+    fmt_water_intensity,
     fmt_range,
     fmt_rate,
     fmt_ratio,
@@ -27,6 +34,7 @@ from mlsysim.fmt import (
     fmt_sci_qty,
     fmt_time,
     fmt_time_range,
+    fmt_tokens,
     fmt_usd,
     fmt_usd_range,
     fmt_val,
@@ -237,6 +245,23 @@ class TestFmtUsd:
 
     def test_accepts_pure_dollar_quantity(self):
         assert fmt_usd(2500 * USD) == "\\$2,500"
+
+    def test_accepts_dollar_rate_quantity_with_physical_denominator(self):
+        assert fmt_usd(0.09 * USD / GB, precision=2, commas=False, per="GB") == "\\$0.09/GB"
+        assert fmt_usd(5 * USD / hour, commas=False, per="hr") == "\\$5/hr"
+        assert (
+            fmt_usd(23 * USD / TB / ureg.month, commas=False, per="TB/month")
+            == "\\$23/TB/month"
+        )
+        assert fmt_usd(0.12 * USD / kWh, precision=2, commas=False, per="kWh") == "\\$0.12/kWh"
+
+    def test_rejects_non_currency_quantities(self):
+        with pytest.raises(ValueError, match="dollar Quantity"):
+            fmt_usd(3 * GB)
+
+    def test_rejects_rate_quantity_without_denominator(self):
+        with pytest.raises(ValueError, match="no per="):
+            fmt_usd(0.09 * USD / GB, precision=2)
 
     def test_never_emits_literal_usd(self):
         for out in (fmt_usd(5), fmt_usd(5 * USD, suffix="/hr"), fmt_usd(5, approx=True)):
@@ -794,10 +819,17 @@ class TestFmtSciQty:
 class TestDomainFormatters:
     def test_fmt_power_scales_to_mw(self):
         from mlsysim.fmt import fmt_power
-        from mlsysim.core.units import MW, watt
+        from mlsysim.core.units import watt
 
         out = fmt_power(17.5e6 * watt, precision=1, commas=False)
         assert out == "17.5 MW"
+
+    def test_fmt_power_scales_to_gw(self):
+        from mlsysim.fmt import fmt_power
+        from mlsysim.core.units import GW
+
+        out = fmt_power(2.6 * GW, precision=1, commas=False)
+        assert out == "2.6 GW"
 
     def test_fmt_energy_scales_to_kwh(self):
         from mlsysim.fmt import fmt_energy
@@ -813,12 +845,83 @@ class TestDomainFormatters:
         out = fmt_bandwidth(3.35 * TB / second, precision=2, commas=False)
         assert out == "3.35 TB/s"
 
+    def test_fmt_params_auto_precision(self):
+        from mlsysim.core.units import Bparam, Mparam
+
+        assert fmt_params(175 * Bparam) == "175B"
+        assert fmt_params(1.5 * Bparam) == "1.5B"
+        assert fmt_params(150 * Mparam) == "150M"
+        assert fmt_params(150 * Mparam, scale="B") == "0.15B"
+
+    def test_fmt_tokens_scales_checked_counts(self):
+        from mlsysim.core.units import count
+
+        assert fmt_tokens(300e9 * count, scale="B", commas=False) == "300B"
+        assert fmt_tokens(1.5e12 * count, scale="T", commas=False) == "1.5T"
+
+    def test_fmt_flop_rate_scales_to_tflop_per_second(self):
+        from mlsysim.core.units import TFLOP, second
+
+        out = fmt_flop_rate(989 * TFLOP / second, precision=0, commas=False)
+        assert out == "989 TFLOP/s"
+
+    def test_fmt_flop_rate_scales_to_pflop_per_second(self):
+        from mlsysim.core.units import PFLOP, TFLOP, second
+
+        out = fmt_flop_rate(1_979 * TFLOP / second, precision=3, commas=False)
+        assert out == "1.979 PFLOP/s"
+        assert fmt_flop_rate(2 * PFLOP / second, precision=0, commas=False) == "2 PFLOP/s"
+
+    def test_fmt_flop_rate_requires_quantity(self):
+        with pytest.raises(TypeError, match="requires a Pint Quantity"):
+            fmt_flop_rate(989)
+
+    def test_fmt_compute_efficiency_renders_full_unit(self):
+        from mlsysim.core.units import TFLOP, second, watt
+
+        out = fmt_compute_efficiency(
+            (989 * TFLOP / second) / (700 * watt),
+            precision=2,
+            commas=False,
+        )
+        assert out == "1.41 TFLOP/s/W"
+
     def test_fmt_memory_scales(self):
         from mlsysim.fmt import fmt_memory
         from mlsysim.core.units import GB, byte
 
         out = fmt_memory(14 * GB, precision=0, commas=False)
         assert out == "14 GB"
+
+    def test_fmt_carbon_intensity_defaults_to_grams_per_kwh(self):
+        from mlsysim.core.units import gram, kilogram, kWh
+
+        assert (
+            fmt_carbon_intensity(429 * gram / kWh, precision=0, commas=False)
+            == "429 g/kWh"
+        )
+        assert (
+            fmt_carbon_intensity(0.429 * kilogram / kWh, precision=0, commas=False)
+            == "429 g/kWh"
+        )
+
+    def test_fmt_water_helpers_use_book_liter_labels(self):
+        from mlsysim.core.units import L, day, hour, kWh
+
+        assert fmt_water(18_000_000 * L, precision=0) == "18,000,000 L"
+        assert fmt_water_rate(12_000 * L / hour, unit=L / hour, precision=0) == "12,000 L/h"
+        assert fmt_water_rate(12_000 * L / hour, unit=L / day, precision=0) == "288,000 L/day"
+        assert fmt_water_intensity(1.8 * L / kWh, precision=1) == "1.8 L/kWh"
+
+    def test_fmt_water_helpers_reject_wrong_dimensions(self):
+        from mlsysim.core.units import L, watt
+
+        with pytest.raises(ValueError, match="volume unit"):
+            fmt_water(1 * L, unit=watt)
+        with pytest.raises(ValueError, match="volume/time"):
+            fmt_water_rate(1 * L, unit=L)
+        with pytest.raises(ValueError, match="volume/energy"):
+            fmt_water_intensity(1 * L, unit=L)
 
     def test_usd_range_repeat_symbol_false_with_scale(self):
         assert (

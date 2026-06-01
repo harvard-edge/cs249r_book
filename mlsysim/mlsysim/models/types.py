@@ -43,6 +43,9 @@ class Workload(BaseModel):
     inference_flops: Optional[Quantity] = None
     inference_energy: Optional[Quantity] = None  # per-inference energy (e.g. mobile on-device)
     data_rate: Optional[Quantity] = None # e.g., TB/hour for autonomous driving
+    training_dataset_size: Optional[Quantity] = None
+    parameter_range_min: Optional[Quantity] = None
+    parameter_range_max: Optional[Quantity] = None
 
     def lower(self, precision: Quantity = BYTES_FP16) -> ComputationGraph:
         """

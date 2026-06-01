@@ -11,7 +11,7 @@ reference-statistics counterpart — sourced numbers the prose cites, not things
 from ..core.provenance import sourced, sourced_qty
 from ..core.registry import Registry
 from ..core import provenance_catalog as pc
-from ..core.units import ureg, TB
+from ..core.units import ureg, MWh, TB
 
 _hour = ureg.hour
 _joule = ureg.joule
@@ -57,6 +57,10 @@ class EnergyAnchors(Registry):
     BoilingWater = sourced_qty(
         100_000 * _joule, pc.BOOK_ENERGY_ANCHORS,
         name="Boiling 1 L of water", description="Approximate energy to bring one liter of water to a boil.")
+    USHouseholdAnnualElectricity = sourced_qty(
+        10.7 * MWh, pc.BOOK_ENERGY_ANCHORS,
+        name="US household annual electricity",
+        description="Rounded annual electricity use baseline for one average US household-year.")
 
 
 class MobilePower(Registry):

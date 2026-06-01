@@ -220,6 +220,33 @@ def _resolve_decimal_scale(scale, *, what, style="symbol", attributive=False):
     raise ValueError(f"{what} must be one of {allowed}, got {scale!r}.")
 
 
+def _auto_decimal_scale(raw_value):
+    """Pick the largest K/M/B/T scale that keeps a count display >= 1."""
+    abs_value = abs(raw_value)
+    for symbol, divisor in sorted(
+        _DECIMAL_SCALE_FACTORS.items(), key=lambda item: item[1], reverse=True
+    ):
+        if abs_value >= divisor:
+            return symbol
+    return None
+
+
+def _resolve_scaled_count_precision(val, precision):
+    """Pick precision for scaled counts without hiding sub-unit explicit scales."""
+    if precision is not None:
+        return precision
+    if _is_integer_like(val):
+        return 0
+    abs_val = abs(val)
+    if abs_val >= 1:
+        return _resolve_display_precision(val, None)
+    if abs_val >= 0.1:
+        return 2
+    if abs_val >= 0.01:
+        return 3
+    return 4
+
+
 def _validate_count_label(label, *, what="label") -> str:
     """Validate a count noun label before pluralization."""
     label = _clean_text_atom(label, what=what)
@@ -310,6 +337,71 @@ def _denominator_suffix(per, *, what="per", allowed=None) -> str:
             f"{what} must be one of {sorted(allowed)}, got {unit_label!r}."
         )
     return f"/{unit_label}"
+
+
+def _usd_denominator_unit(per):
+    """Return the Pint denominator unit implied by ``fmt_usd(per=...)``.
+
+    Display strings such as ``"TB/month"`` mean dollars per TB per month, so
+    their physical denominator is the product ``TB * month``. Parenthesized
+    strings such as ``"(TFLOP/s)"`` are intentionally parsed as one compound
+    unit because the prose meaning is dollars per throughput.
+    """
+    if per is None:
+        return None
+    if not isinstance(per, str):
+        return _coerce_unit(per)
+    value = _clean_text_atom(per, what="fmt_usd per")
+    if value.startswith("/"):
+        raise ValueError(f"fmt_usd per should omit the leading '/', got {per!r}.")
+    if value.startswith("(") and value.endswith(")"):
+        return ureg.Unit(value[1:-1])
+    denom = None
+    for part in value.split("/"):
+        unit = ureg.Unit(part)
+        denom = unit if denom is None else denom * unit
+    return denom
+
+
+def _usd_amount_magnitude(amount, per):
+    """Coerce a scalar or Pint dollar Quantity into fmt_usd's display domain."""
+    from .core.units import USD
+
+    if not isinstance(amount, ureg.Quantity):
+        return amount
+
+    unit_label = f"{amount.units}"
+    if "dollar" not in unit_label:
+        raise ValueError(
+            f"fmt_usd expects a dollar Quantity, got units {amount.units}. "
+            "Pass a plain numeric dollar magnitude only at an intentional "
+            "scalar boundary."
+        )
+
+    if per is None:
+        if unit_label != "dollar":
+            raise ValueError(
+                f"fmt_usd received a dollar rate with units {amount.units} but "
+                "no per= denominator. Pass per= so the formatter owns the "
+                "unit conversion."
+            )
+        return amount.m_as(USD)
+
+    try:
+        denominator = _usd_denominator_unit(per)
+    except Exception:
+        # Some accepted prose denominators are not physical Pint units
+        # ("label", "GPU-hour", "device/year"). They can still decorate a
+        # pure dollar quantity, but a Pint rate needs a Pint denominator.
+        if unit_label == "dollar":
+            return amount.m_as(USD)
+        raise ValueError(
+            f"fmt_usd cannot infer a Pint denominator from per={per!r} for "
+            f"quantity units {amount.units}. Use a Pint-parsable per= value "
+            "or pass an already-extracted numeric magnitude at the boundary."
+        )
+
+    return amount.to(USD / denominator).magnitude
 
 
 def fmt(quantity, unit=None, precision=1, commas=True,
@@ -429,10 +521,11 @@ def fmt_usd(
                 commas=False, per="GB")      # "\\$0.09/GB"
 
     Args:
-        amount: A plain number or a pure-dollar Pint ``Quantity`` (converted
-            via the ``USD`` unit). For rate values (e.g. dollars per GB), pass
-            the already-extracted magnitude and describe the denominator with
-            ``per=``.
+        amount: A plain number, a pure-dollar Pint ``Quantity``, or a Pint
+            dollar rate when ``per=`` is a Pint-parsable denominator such as
+            ``"GB"``, ``"TB/month"``, ``"hour"``, or ``"kWh"``. Non-physical
+            denominators such as ``"label"`` still decorate plain numbers or
+            pure-dollar quantities.
         precision: Decimal places. ``precision=0`` rounds to whole dollars
             (``fmt_int`` semantics); ``precision>=1`` uses ``fmt`` semantics
             with its spurious-zero guard.
@@ -451,10 +544,7 @@ def fmt_usd(
         suffix: Legacy escape hatch while the corpus is being migrated. New
             QMD code should use ``scale=`` and/or ``per=`` instead.
     """
-    from .core.units import USD
-
-    if isinstance(amount, ureg.Quantity):
-        amount = amount.m_as(USD)
+    amount = _usd_amount_magnitude(amount, per)
 
     if marker and marker not in _USD_MARKERS:
         raise ValueError(
@@ -872,6 +962,103 @@ def fmt_count(
         precision=precision,
         commas=commas,
         suffix=glyph + suffix,
+        approx=approx,
+        lower_bound=lower_bound,
+    )
+
+
+def _fmt_scaled_count_quantity(
+    value,
+    *,
+    unit,
+    scale,
+    precision,
+    commas,
+    what,
+    scale_style="symbol",
+    attributive=False,
+    approx=False,
+    lower_bound=False,
+):
+    raw_v = _numeric_magnitude(value.to(unit) if isinstance(value, ureg.Quantity) else value)
+    _validate_count_value(raw_v, allow_fractional=False, require_integer=True)
+    scale = _auto_decimal_scale(raw_v) if scale == "auto" else scale
+    divisor, glyph = _resolve_decimal_scale(
+        scale,
+        what=f"{what} scale",
+        style=scale_style,
+        attributive=attributive,
+    )
+    v = raw_v / divisor
+    p = _resolve_scaled_count_precision(v, precision)
+    return fmt(
+        v,
+        precision=p,
+        commas=commas,
+        suffix=glyph,
+        approx=approx,
+        lower_bound=lower_bound,
+    )
+
+
+def fmt_params(
+    parameters,
+    *,
+    scale="auto",
+    precision=None,
+    commas=False,
+    scale_style="symbol",
+    attributive=False,
+    approx=False,
+    lower_bound=False,
+):
+    """Format model-parameter counts as checked count quantities.
+
+    Accepts a Pint ``param``/``count`` quantity or a raw parameter count. The
+    default auto-scales to compact model-size strings such as ``175B`` and
+    ``150M`` while preserving decimals when needed, such as ``1.5B``. Pass an
+    explicit scale when a comparison needs a fixed denominator, e.g.
+    ``scale="B"`` to render ``150M`` as ``0.15B``.
+    """
+    from .core.units import param
+
+    return _fmt_scaled_count_quantity(
+        parameters,
+        unit=param,
+        scale=scale,
+        precision=precision,
+        commas=commas,
+        what="fmt_params",
+        scale_style=scale_style,
+        attributive=attributive,
+        approx=approx,
+        lower_bound=lower_bound,
+    )
+
+
+def fmt_tokens(
+    tokens,
+    *,
+    scale=None,
+    precision=None,
+    commas=True,
+    scale_style="symbol",
+    attributive=False,
+    approx=False,
+    lower_bound=False,
+):
+    """Format token counts as checked count quantities."""
+    from .core.units import count
+
+    return _fmt_scaled_count_quantity(
+        tokens,
+        unit=count,
+        scale=scale,
+        precision=precision,
+        commas=commas,
+        what="fmt_tokens",
+        scale_style=scale_style,
+        attributive=attributive,
         approx=approx,
         lower_bound=lower_bound,
     )
@@ -1573,11 +1760,32 @@ def _pick_bandwidth_unit(qty):
     return TB / second
 
 
+def _pick_flop_rate_unit(qty):
+    from .core.units import EFLOP, GFLOP, PFLOP, TFLOP, ZFLOP, second
+
+    q = qty.to(GFLOP / second)
+    mag = abs(q.magnitude)
+    if mag < 1e3:
+        return GFLOP / second
+    tflops = q.to(TFLOP / second).magnitude
+    if abs(tflops) < 1e3:
+        return TFLOP / second
+    pflops = q.to(PFLOP / second).magnitude
+    if abs(pflops) < 1e3:
+        return PFLOP / second
+    eflops = q.to(EFLOP / second).magnitude
+    if abs(eflops) < 1e3:
+        return EFLOP / second
+    return ZFLOP / second
+
+
 def _pick_power_unit(qty):
-    from .core.units import MW, kilowatt, watt
+    from .core.units import GW, MW, kilowatt, watt
 
     q = qty.to(watt)
     mag = abs(q.magnitude)
+    if mag >= 1e9:
+        return GW
     if mag >= 1e6:
         return MW
     if mag >= 1e3:
@@ -1617,6 +1825,15 @@ def _pick_emissions_unit(qty):
     return metric_ton
 
 
+def _pick_carbon_intensity_unit(qty):
+    from .core.units import gram, kWh
+
+    # Grid intensities in the book are normally communicated as g/kWh. Callers
+    # can force kg/kWh when prose needs that convention.
+    qty.to(gram / kWh)
+    return gram / kWh
+
+
 def _pick_latency_unit(qty):
     from .core.units import hour, microsecond, millisecond, minute, nanosecond, second
 
@@ -1636,7 +1853,7 @@ def _pick_latency_unit(qty):
 
 
 def fmt_power(quantity, *, unit=None, precision=None, commas=False):
-    """Auto-scale power quantities for prose (W, kW, MW)."""
+    """Auto-scale power quantities for prose (W, kW, MW, GW)."""
     if not isinstance(quantity, ureg.Quantity):
         raise TypeError("fmt_power() requires a Pint Quantity.")
     display_unit = _coerce_unit(unit) if unit is not None else _pick_power_unit(quantity)
@@ -1667,6 +1884,30 @@ def fmt_bandwidth(quantity, *, unit=None, precision=None, commas=False):
     return fmt_qty(q, display_unit, precision=p, commas=commas)
 
 
+def fmt_flop_rate(quantity, *, unit=None, precision=None, commas=False):
+    """Auto-scale FLOP throughput for prose (GFLOP/s through ZFLOP/s)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_flop_rate() requires a Pint Quantity.")
+    display_unit = (
+        _coerce_unit(unit) if unit is not None else _pick_flop_rate_unit(quantity)
+    )
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas)
+
+
+def fmt_compute_efficiency(quantity, *, unit=None, precision=None, commas=False):
+    """Format accelerator efficiency as FLOP throughput per watt."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_compute_efficiency() requires a Pint Quantity.")
+    from .core.units import TFLOP, second, watt
+
+    display_unit = _coerce_unit(unit) if unit is not None else TFLOP / second / watt
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas)
+
+
 def fmt_memory(quantity, *, unit=None, precision=None, commas=False, binary=False):
     """Auto-scale memory sizes for prose."""
     if not isinstance(quantity, ureg.Quantity):
@@ -1689,6 +1930,78 @@ def fmt_emissions(quantity, *, unit=None, precision=None, commas=False):
     q = quantity.to(display_unit)
     p = _resolve_display_precision(q.magnitude, precision)
     return fmt_qty(q, display_unit, precision=p, commas=commas)
+
+
+def fmt_carbon_intensity(quantity, *, unit=None, precision=None, commas=False):
+    """Format grid carbon intensity quantities (typically g/kWh)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_carbon_intensity() requires a Pint Quantity.")
+    display_unit = (
+        _coerce_unit(unit) if unit is not None else _pick_carbon_intensity_unit(quantity)
+    )
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas)
+
+
+def _water_unit_label(display_unit):
+    from .core.units import L, day, hour, kWh
+
+    known = (
+        (L, "L"),
+        (L / hour, "L/h"),
+        (L / day, "L/day"),
+        (L / kWh, "L/kWh"),
+    )
+    for unit, label in known:
+        try:
+            if abs((1 * display_unit).to(unit).magnitude - 1) < 1e-12:
+                return label
+        except Exception:
+            continue
+    return None
+
+
+def fmt_water(quantity, *, unit=None, precision=None, commas=True):
+    """Format water volume quantities with book-preferred liter labels."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_water() requires a Pint Quantity.")
+    from .core.units import L
+
+    display_unit = _coerce_unit(unit) if unit is not None else L
+    if (1 * display_unit).dimensionality != (1 * L).dimensionality:
+        raise ValueError(f"fmt_water unit must be a volume unit, got {display_unit}.")
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, unit_label=_water_unit_label(display_unit))
+
+
+def fmt_water_rate(quantity, *, unit=None, precision=None, commas=True):
+    """Format water flow rates such as L/h and L/day."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_water_rate() requires a Pint Quantity.")
+    from .core.units import L, day
+
+    display_unit = _coerce_unit(unit) if unit is not None else L / day
+    if (1 * display_unit).dimensionality != (1 * L / day).dimensionality:
+        raise ValueError(f"fmt_water_rate unit must be volume/time, got {display_unit}.")
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, unit_label=_water_unit_label(display_unit))
+
+
+def fmt_water_intensity(quantity, *, unit=None, precision=None, commas=False):
+    """Format water usage effectiveness style quantities such as L/kWh."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_water_intensity() requires a Pint Quantity.")
+    from .core.units import L, kWh
+
+    display_unit = _coerce_unit(unit) if unit is not None else L / kWh
+    if (1 * display_unit).dimensionality != (1 * L / kWh).dimensionality:
+        raise ValueError(f"fmt_water_intensity unit must be volume/energy, got {display_unit}.")
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, unit_label=_water_unit_label(display_unit))
 
 
 def fmt_latency(duration, *, unit=None, precision=None, commas=False):

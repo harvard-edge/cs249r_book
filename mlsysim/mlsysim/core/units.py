@@ -13,7 +13,7 @@ __all__ = [
     # Dimensionless scalars
     "QUADRILLION", "TRILLION", "BILLION", "MILLION", "THOUSAND", "HUNDRED",
     # Base units
-    "byte", "bit", "second", "joule", "watt", "kilowatt", "milliwatt", "meter", "hour", "day", "count",
+    "byte", "bit", "second", "joule", "watt", "kilowatt", "milliwatt", "meter", "liter", "L", "hour", "day", "count",
     # Data scale units
     "KB", "MB", "GB", "TB", "PB", "KiB", "MiB", "GiB", "TiB",
     # Precision sizes
@@ -32,7 +32,8 @@ __all__ = [
     # Data size scalars
     "BITS_PER_BYTE", "KIB_TO_BYTES", "MIB_TO_BYTES", "GIB_TO_BYTES",
     # FLOPs and operation-rate units
-    "flop", "KFLOPs", "MFLOPs", "GFLOP", "GFLOPs", "TFLOP", "TFLOPs", "PFLOPs", "EFLOP", "EFLOPs", "ZFLOPs",
+    "flop", "KFLOPs", "MFLOPs", "GFLOP", "GFLOPs", "TFLOP", "TFLOPs",
+    "PFLOP", "PFLOPs", "EFLOP", "EFLOPs", "ZFLOP", "ZFLOPs",
     "OPS", "KOPS", "MOPS", "GOPS", "TOPS",
     # Network
     "Gbps", "megabit", "gigabit", "terabit",
@@ -41,7 +42,9 @@ __all__ = [
     # Model parameters
     "param", "Kparam", "Mparam", "Bparam", "Tparam",
     # Energy and power aliases
-    "J", "mJ", "uJ", "pJ", "Wh", "kWh", "MWh", "GWh", "MW", "kW", "mW", "megawatt",
+    "J", "kJ", "MJ", "mJ", "uJ", "pJ", "Wh", "kWh", "MWh", "GWh",
+    "GW", "MW", "kW", "mW", "uW",
+    "kilojoule", "microjoule", "gigawatt", "megawatt", "microwatt",
     # Mass and length
     "gram", "kilogram", "kg", "metric_ton", "tonne", "kilometer", "km",
 ]
@@ -71,6 +74,8 @@ watt = ureg.watt
 kilowatt = ureg.kilowatt
 milliwatt = ureg.milliwatt
 meter = ureg.meter
+liter = ureg.liter
+L = ureg.liter
 hour = ureg.hour
 day = ureg.day
 count = ureg.count
@@ -169,8 +174,10 @@ GFLOPs = ureg.GFLOPs
 TFLOP = ureg.TFLOP
 TFLOPs = ureg.TFLOPs
 PFLOPs = ureg.PFLOPs
+PFLOP = ureg.PFLOP
 EFLOP = ureg.EFLOP
 EFLOPs = ureg.EFLOPs
+ZFLOP = ureg.ZFLOP
 ZFLOPs = ureg.ZFLOPs
 
 OPS = ureg.OPS
@@ -192,6 +199,8 @@ Tparam = ureg.Tparam
 
 # --- Book-facing aliases (prefer these over ureg.* in QMD) ---
 J = joule
+kJ = ureg.kilojoule
+MJ = ureg.megajoule
 mJ = ureg.millijoule
 uJ = ureg.microjoule
 pJ = ureg.picojoule
@@ -199,10 +208,16 @@ Wh = ureg.watt_hour
 kWh = ureg.kilowatt_hour
 MWh = ureg.megawatt_hour
 GWh = ureg.gigawatt_hour
+GW = ureg.gigawatt
 MW = ureg.megawatt
 kW = kilowatt
 mW = milliwatt
+uW = ureg.microwatt
+kilojoule = ureg.kilojoule
+microjoule = ureg.microjoule
+gigawatt = ureg.gigawatt
 megawatt = ureg.megawatt
+microwatt = ureg.microwatt
 gram = ureg.gram
 kilogram = ureg.kilogram
 kg = ureg.kilogram

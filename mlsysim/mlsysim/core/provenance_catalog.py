@@ -110,7 +110,7 @@ BOOK_ANOMALY_CASE = Provenance(
 BOOK_ENERGY_ANCHORS = Provenance(
     id="prov:book-energy-anchors",
     kind=ProvenanceKind.ILLUSTRATIVE,
-    ref="Everyday energy-scale comparison anchors (smartphone charge ~40 kJ, boiling 1 L water ~100 kJ) for order-of-magnitude intuition about ML energy",
+    ref="Everyday energy-scale comparison anchors (smartphone charge ~40 kJ, boiling 1 L water ~100 kJ, US household electricity ~10.7 MWh/year) for order-of-magnitude intuition about ML energy",
     verified="2025-03-06",
 )
 BOOK_DEVICE_ANCHORS = Provenance(
