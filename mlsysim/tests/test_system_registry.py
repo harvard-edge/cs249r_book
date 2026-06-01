@@ -56,7 +56,7 @@ def test_reliability_node_composite_profile():
 
 def test_storage_random_access_profiles():
     assert Systems.Storage.Hdd7200Rpm.bandwidth.to(GB / second).magnitude == pytest.approx(0.15)
-    assert Systems.Storage.Hdd7200Rpm.iops == pytest.approx(80)
+    assert Systems.Storage.Hdd7200Rpm.iops == pytest.approx(100)
     assert Systems.Storage.SataSsd.bandwidth.to(GB / second).magnitude == pytest.approx(0.55)
     assert Systems.Storage.SataSsd.iops == pytest.approx(10_000)
     assert Systems.Storage.LocalNvmeGen3.bandwidth.to(GB / second).magnitude == pytest.approx(3.5)

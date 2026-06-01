@@ -312,7 +312,7 @@ class Storage(Registry):
     Hdd7200Rpm = StorageSubsystem(
         name="7.2k RPM HDD",
         bandwidth=150 * (MB / ureg.second),
-        iops=80,
+        iops=100,
         media="HDD",
         interface="SATA",
         durability="local",

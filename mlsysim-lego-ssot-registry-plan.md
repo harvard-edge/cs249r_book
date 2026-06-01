@@ -44,8 +44,8 @@ python3 book/tools/audit/book_check_lego_scenario_inputs.py \
 
 Current output:
 
-- **1,047 advisory MLSysIM source-of-truth candidates**
-- **14 high-confidence candidates**
+- **1,041 advisory MLSysIM source-of-truth candidates**
+- **8 high-confidence candidates**
 - Full JSON work queue:
   `book/tools/audit/artifacts/lego_scenario_inputs_audit.json`
 - Full Markdown work queue:
@@ -60,9 +60,7 @@ High-confidence buckets:
 | Target | Count | Meaning |
 |---|---:|---|
 | `Systems.Clusters` / `Systems.Nodes` | 5 | Fleet, node, GPU-count, cluster-topology facts |
-| `Hardware.*` / `Hardware.Tech.*` | 5 | Hardware capacity, bandwidth, FLOP/s, TDP, memory/interconnect facts |
 | `Infrastructure.*` / `Scenarios.Sustainability` | 3 | PUE, cooling, carbon, sustainability scenario facts |
-| `Systems.Storage` | 1 | Local NVMe, HDD, PFS, S3/object-store, checkpoint-path storage facts |
 
 Broader medium-confidence buckets:
 
@@ -178,6 +176,13 @@ Known concrete findings from the first pass:
   split is recorded as a topology convention. The same slice also renamed the
   fabric-latency provenance used by `Systems.Fabrics` / `Systems.SwitchFabric`
   to a neutral datacenter-fabric reference.
+- Stage 20 migrated remaining high-confidence hardware/storage facts out of
+  QMD literals: A100 advertised and sustained training FLOP/s now derive from
+  `Hardware.Cloud.A100.compute.peak_flops` and `Literature.Training.Mfu*`;
+  checkpoint PCIe bandwidth loads from `Hardware.Cloud.A100.interconnect`;
+  HDD random IOPS loads from `Systems.Storage.Hdd7200Rpm`. The HDD random-IOPS
+  registry anchor was standardized to 100 IOPS so Volume I and Volume II use
+  the same storage profile.
 - MLSysIM registry/provenance names should stay product-, system-, source-, or
   convention-oriented. Avoid new `BOOK_*`, `MLSysBook`, `Volume I/II`, or
   "worked example" identifiers inside MLSysIM. Existing `BOOK_*` provenance

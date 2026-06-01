@@ -4,7 +4,7 @@ This is an advisory work queue for values that likely define
 hardware, systems, infrastructure, pricing, models, datasets,
 storage subsystems, or scenarios in LEGO LOAD stages.
 
-Findings: 1047
+Findings: 1041
 By target:
    285  Scenarios.* or Ops.*
    216  Models.* or Scenarios.TrainingRuns
@@ -17,17 +17,15 @@ By target:
     13  Hardware.* or Scenarios.*
     11  Systems.Storage or Datasets.*
      5  Systems.Clusters or Systems.Nodes
-     5  Hardware.* or Hardware.Tech.*
      4  Systems.Storage or Scenarios.*
      3  Infrastructure.Pricing.Labeling or Scenarios.*
      3  Infrastructure.* or Scenarios.Sustainability
      2  Scenarios.TrainingRuns or Systems.Reliability
-     1  Systems.Storage
      1  Infrastructure.* or Scenarios.*
 Top chapters:
    151  vol1/model_serving
     83  vol1/data_selection
-    72  vol1/training
+    68  vol1/training
     57  vol1/data_engineering
     53  vol1/nn_computation
     50  vol1/benchmarking
@@ -35,8 +33,8 @@ Top chapters:
     38  vol1/nn_architectures
     36  vol1/ml_ops
     36  vol2/inference
-    33  vol2/data_storage
     33  vol2/sustainable_ai
+    32  vol2/data_storage
     32  vol2/ops_scale
     30  vol1/hw_acceleration
     29  vol1/ml_workflow
@@ -57,7 +55,6 @@ Top reasons:
     16  scenario/profile input
     11  storage/data fact
      5  fleet/topology fact
-     5  hardware specification
      5  workload compute requirement
      4  dataset/workload size
      3  storage observation or utilization scenario
@@ -65,7 +62,6 @@ Top reasons:
      3  infrastructure/sustainability fact
      3  storage-related scenario input
      2  checkpoint policy/workload cadence
-     1  storage subsystem fact
 
 ## vol1/backmatter/appendix_algorithm.qmd
 
@@ -867,43 +863,39 @@ Top reasons:
 | `book/quarto/contents/vol1/training/training.qmd:2949` | `VRAMRequirements` | `gpu_capacity` | `Hardware.*` | hardware-related quantitative input | `24 * GB` |
 | `book/quarto/contents/vol1/training/training.qmd:2955` | `VRAMRequirements` | `batch` | `Scenarios.* or Ops.*` | scenario/workload policy | `1` |
 | `book/quarto/contents/vol1/training/training.qmd:2956` | `VRAMRequirements` | `seq` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `2048` |
-| `book/quarto/contents/vol1/training/training.qmd:3595` | `UtilizationGap` | `gpu_advertised_flops` | `Hardware.* or Hardware.Tech.*` | hardware specification | `300 * (TFLOP / second)` |
-| `book/quarto/contents/vol1/training/training.qmd:3596` | `UtilizationGap` | `gpu_real_flops_min` | `Hardware.* or Hardware.Tech.*` | hardware specification | `90 * (TFLOP / second)` |
-| `book/quarto/contents/vol1/training/training.qmd:3597` | `UtilizationGap` | `gpu_real_flops_max` | `Hardware.* or Hardware.Tech.*` | hardware specification | `150 * (TFLOP / second)` |
-| `book/quarto/contents/vol1/training/training.qmd:3609` | `UtilizationGap` | `gpt2_attn_time_pct` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `50` |
-| `book/quarto/contents/vol1/training/training.qmd:3610` | `UtilizationGap` | `gpt2_data_time_pct` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `25` |
-| `book/quarto/contents/vol1/training/training.qmd:3611` | `UtilizationGap` | `gpt2_compute_time_pct` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `25` |
-| `book/quarto/contents/vol1/training/training.qmd:3615` | `UtilizationGap` | `seq_pipeline_time` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `105` |
-| `book/quarto/contents/vol1/training/training.qmd:3617` | `UtilizationGap` | `pipeline_speedup_pct` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `(1 - opt_pipeline_time/seq_pipeline_time) * 100` |
-| `book/quarto/contents/vol1/training/training.qmd:4036` | `PreprocessingScenarios` | `buffer_batch_size` | `Scenarios.* or Ops.*` | scenario/workload policy | `256` |
-| `book/quarto/contents/vol1/training/training.qmd:4037` | `PreprocessingScenarios` | `buffer_image_res` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `1024` |
-| `book/quarto/contents/vol1/training/training.qmd:4741` | `AttentionMemoryCalc` | `seq_len` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `4096` |
-| `book/quarto/contents/vol1/training/training.qmd:5455` | `GPT2WalkthroughCalc` | `batch_size` | `Scenarios.* or Ops.*` | scenario/workload policy | `4` |
-| `book/quarto/contents/vol1/training/training.qmd:5456` | `GPT2WalkthroughCalc` | `seq_len` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `1024` |
-| `book/quarto/contents/vol1/training/training.qmd:5467` | `GPT2WalkthroughCalc` | `checkpoint_factor` | `Systems.Storage or Datasets.*` | storage/data fact | `4` |
-| `book/quarto/contents/vol1/training/training.qmd:5468` | `GPT2WalkthroughCalc` | `recompute_overhead_pct` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `33` |
-| `book/quarto/contents/vol1/training/training.qmd:6727` | `TrainingCarbonFootprint` | `cf_sustained_flops` | `Hardware.* or Hardware.Tech.*` | hardware specification | `150 * (TFLOP / second)` |
-| `book/quarto/contents/vol1/training/training.qmd:6730` | `TrainingCarbonFootprint` | `cf_cpu_tdp_per_host` | `Hardware.* or Scenarios.*` | scenario/profile input | `200 * watt` |
-| `book/quarto/contents/vol1/training/training.qmd:6880` | `FallaciesPitfallsSetup` | `fp_model_20b_params` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `20 * Bparam` |
-| `book/quarto/contents/vol1/training/training.qmd:6882` | `FallaciesPitfallsSetup` | `fp_model_20b_fp16` | `Hardware.*` | hardware-related quantitative input | `20 * 2 * GB` |
-| `book/quarto/contents/vol1/training/training.qmd:6883` | `FallaciesPitfallsSetup` | `fp_model_20b_optim` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `20 * 4 * 2 * GB` |
-| `book/quarto/contents/vol1/training/training.qmd:6885` | `FallaciesPitfallsSetup` | `fp_data_threshold_m` | `Scenarios.* or Ops.*` | scenario/workload policy | `100` |
-| `book/quarto/contents/vol1/training/training.qmd:6890` | `FallaciesPitfallsSetup` | `fp_gpu_count` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `8` |
-| `book/quarto/contents/vol1/training/training.qmd:6891` | `FallaciesPitfallsSetup` | `fp_sync_overhead_min` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `30` |
-| `book/quarto/contents/vol1/training/training.qmd:6892` | `FallaciesPitfallsSetup` | `fp_sync_overhead_max` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `50` |
-| `book/quarto/contents/vol1/training/training.qmd:6895` | `FallaciesPitfallsSetup` | `fp_single_gpu_hours` | `Systems.*` | system-level fact | `24` |
-| `book/quarto/contents/vol1/training/training.qmd:6896` | `FallaciesPitfallsSetup` | `fp_cluster_hours` | `Systems.*` | system-level fact | `36` |
-| `book/quarto/contents/vol1/training/training.qmd:6899` | `FallaciesPitfallsSetup` | `fp_batch_small` | `Scenarios.* or Ops.*` | scenario/workload policy | `512` |
-| `book/quarto/contents/vol1/training/training.qmd:6901` | `FallaciesPitfallsSetup` | `fp_batch_large` | `Scenarios.* or Ops.*` | scenario/workload policy | `4096` |
-| `book/quarto/contents/vol1/training/training.qmd:6904` | `FallaciesPitfallsSetup` | `fp_failure_days_min` | `Systems.*` | system-level fact | `3` |
-| `book/quarto/contents/vol1/training/training.qmd:6905` | `FallaciesPitfallsSetup` | `fp_failure_days_max` | `Systems.*` | system-level fact | `5` |
-| `book/quarto/contents/vol1/training/training.qmd:6910` | `FallaciesPitfallsSetup` | `fp_training_hours` | `Scenarios.* or Ops.*` | scenario/workload policy | `48` |
-| `book/quarto/contents/vol1/training/training.qmd:6911` | `FallaciesPitfallsSetup` | `fp_divergence_step` | `Scenarios.* or Ops.*` | scenario/workload policy | `10000` |
-| `book/quarto/contents/vol1/training/training.qmd:6914` | `FallaciesPitfallsSetup` | `fp_util_batch_256` | `Scenarios.* or Ops.*` | scenario/workload policy | `90` |
-| `book/quarto/contents/vol1/training/training.qmd:6915` | `FallaciesPitfallsSetup` | `fp_util_batch_16_min` | `Scenarios.* or Ops.*` | scenario/workload policy | `60` |
-| `book/quarto/contents/vol1/training/training.qmd:6916` | `FallaciesPitfallsSetup` | `fp_util_batch_16_max` | `Scenarios.* or Ops.*` | scenario/workload policy | `70` |
-| `book/quarto/contents/vol1/training/training.qmd:6917` | `FallaciesPitfallsSetup` | `fp_effective_batch` | `Scenarios.* or Ops.*` | scenario/workload policy | `512` |
-| `book/quarto/contents/vol1/training/training.qmd:6918` | `FallaciesPitfallsSetup` | `fp_physical_batch` | `Scenarios.* or Ops.*` | scenario/workload policy | `64` |
+| `book/quarto/contents/vol1/training/training.qmd:3610` | `UtilizationGap` | `gpt2_attn_time_pct` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `50` |
+| `book/quarto/contents/vol1/training/training.qmd:3611` | `UtilizationGap` | `gpt2_data_time_pct` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `25` |
+| `book/quarto/contents/vol1/training/training.qmd:3612` | `UtilizationGap` | `gpt2_compute_time_pct` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `25` |
+| `book/quarto/contents/vol1/training/training.qmd:3616` | `UtilizationGap` | `seq_pipeline_time` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `105` |
+| `book/quarto/contents/vol1/training/training.qmd:3618` | `UtilizationGap` | `pipeline_speedup_pct` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `(1 - opt_pipeline_time/seq_pipeline_time) * 100` |
+| `book/quarto/contents/vol1/training/training.qmd:4037` | `PreprocessingScenarios` | `buffer_batch_size` | `Scenarios.* or Ops.*` | scenario/workload policy | `256` |
+| `book/quarto/contents/vol1/training/training.qmd:4038` | `PreprocessingScenarios` | `buffer_image_res` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `1024` |
+| `book/quarto/contents/vol1/training/training.qmd:4742` | `AttentionMemoryCalc` | `seq_len` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `4096` |
+| `book/quarto/contents/vol1/training/training.qmd:5456` | `GPT2WalkthroughCalc` | `batch_size` | `Scenarios.* or Ops.*` | scenario/workload policy | `4` |
+| `book/quarto/contents/vol1/training/training.qmd:5457` | `GPT2WalkthroughCalc` | `seq_len` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `1024` |
+| `book/quarto/contents/vol1/training/training.qmd:5468` | `GPT2WalkthroughCalc` | `checkpoint_factor` | `Systems.Storage or Datasets.*` | storage/data fact | `4` |
+| `book/quarto/contents/vol1/training/training.qmd:5469` | `GPT2WalkthroughCalc` | `recompute_overhead_pct` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `33` |
+| `book/quarto/contents/vol1/training/training.qmd:6731` | `TrainingCarbonFootprint` | `cf_cpu_tdp_per_host` | `Hardware.* or Scenarios.*` | scenario/profile input | `200 * watt` |
+| `book/quarto/contents/vol1/training/training.qmd:6881` | `FallaciesPitfallsSetup` | `fp_model_20b_params` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `20 * Bparam` |
+| `book/quarto/contents/vol1/training/training.qmd:6883` | `FallaciesPitfallsSetup` | `fp_model_20b_fp16` | `Hardware.*` | hardware-related quantitative input | `20 * 2 * GB` |
+| `book/quarto/contents/vol1/training/training.qmd:6884` | `FallaciesPitfallsSetup` | `fp_model_20b_optim` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `20 * 4 * 2 * GB` |
+| `book/quarto/contents/vol1/training/training.qmd:6886` | `FallaciesPitfallsSetup` | `fp_data_threshold_m` | `Scenarios.* or Ops.*` | scenario/workload policy | `100` |
+| `book/quarto/contents/vol1/training/training.qmd:6891` | `FallaciesPitfallsSetup` | `fp_gpu_count` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `8` |
+| `book/quarto/contents/vol1/training/training.qmd:6892` | `FallaciesPitfallsSetup` | `fp_sync_overhead_min` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `30` |
+| `book/quarto/contents/vol1/training/training.qmd:6893` | `FallaciesPitfallsSetup` | `fp_sync_overhead_max` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `50` |
+| `book/quarto/contents/vol1/training/training.qmd:6896` | `FallaciesPitfallsSetup` | `fp_single_gpu_hours` | `Systems.*` | system-level fact | `24` |
+| `book/quarto/contents/vol1/training/training.qmd:6897` | `FallaciesPitfallsSetup` | `fp_cluster_hours` | `Systems.*` | system-level fact | `36` |
+| `book/quarto/contents/vol1/training/training.qmd:6900` | `FallaciesPitfallsSetup` | `fp_batch_small` | `Scenarios.* or Ops.*` | scenario/workload policy | `512` |
+| `book/quarto/contents/vol1/training/training.qmd:6902` | `FallaciesPitfallsSetup` | `fp_batch_large` | `Scenarios.* or Ops.*` | scenario/workload policy | `4096` |
+| `book/quarto/contents/vol1/training/training.qmd:6905` | `FallaciesPitfallsSetup` | `fp_failure_days_min` | `Systems.*` | system-level fact | `3` |
+| `book/quarto/contents/vol1/training/training.qmd:6906` | `FallaciesPitfallsSetup` | `fp_failure_days_max` | `Systems.*` | system-level fact | `5` |
+| `book/quarto/contents/vol1/training/training.qmd:6911` | `FallaciesPitfallsSetup` | `fp_training_hours` | `Scenarios.* or Ops.*` | scenario/workload policy | `48` |
+| `book/quarto/contents/vol1/training/training.qmd:6912` | `FallaciesPitfallsSetup` | `fp_divergence_step` | `Scenarios.* or Ops.*` | scenario/workload policy | `10000` |
+| `book/quarto/contents/vol1/training/training.qmd:6915` | `FallaciesPitfallsSetup` | `fp_util_batch_256` | `Scenarios.* or Ops.*` | scenario/workload policy | `90` |
+| `book/quarto/contents/vol1/training/training.qmd:6916` | `FallaciesPitfallsSetup` | `fp_util_batch_16_min` | `Scenarios.* or Ops.*` | scenario/workload policy | `60` |
+| `book/quarto/contents/vol1/training/training.qmd:6917` | `FallaciesPitfallsSetup` | `fp_util_batch_16_max` | `Scenarios.* or Ops.*` | scenario/workload policy | `70` |
+| `book/quarto/contents/vol1/training/training.qmd:6918` | `FallaciesPitfallsSetup` | `fp_effective_batch` | `Scenarios.* or Ops.*` | scenario/workload policy | `512` |
+| `book/quarto/contents/vol1/training/training.qmd:6919` | `FallaciesPitfallsSetup` | `fp_physical_batch` | `Scenarios.* or Ops.*` | scenario/workload policy | `64` |
 
 ## vol2/backmatter/appendix_assumptions.qmd
 
@@ -992,7 +984,6 @@ Top reasons:
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:894` | `NVMeTierCalcs` | `pfs_node_bw` | `Systems.Storage or Scenarios.*` | scenario/profile input | `4.0 * (GB / second)` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:895` | `NVMeTierCalcs` | `images_per_sec` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `1000` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:896` | `NVMeTierCalcs` | `img_size` | `Scenarios.*` | unit-bearing scenario input | `150 * KB` |
-| `book/quarto/contents/vol2/data_storage/data_storage.qmd:897` | `NVMeTierCalcs` | `hdd_iops` | `Systems.Storage` | storage subsystem fact | `100` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:898` | `NVMeTierCalcs` | `imagenet_images` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `1_280_000` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:1204` | `ObjectStorageCost` | `dataset_size_tb` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `100` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:1283` | `GlacierCost` | `dataset_size_tb` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `100` |
@@ -1065,7 +1056,6 @@ Top reasons:
 | `book/quarto/contents/vol2/fault_tolerance/fault_tolerance.qmd:2403` | `CheckpointOverheadCalc` | `resnet_size_gb` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `0.1` |
 | `book/quarto/contents/vol2/fault_tolerance/fault_tolerance.qmd:2407` | `CheckpointOverheadCalc` | `mtbf_hours` | `Systems.*` | system-level fact | `5` |
 | `book/quarto/contents/vol2/fault_tolerance/fault_tolerance.qmd:2408` | `CheckpointOverheadCalc` | `mtbf_s` | `Systems.*` | system-level fact | `mtbf_hours * 3600` |
-| `book/quarto/contents/vol2/fault_tolerance/fault_tolerance.qmd:2543` | `CheckpointDebug` | `pcie_bw` | `Hardware.* or Hardware.Tech.*` | hardware specification | `32 * (GB / second)` |
 | `book/quarto/contents/vol2/fault_tolerance/fault_tolerance.qmd:2549` | `CheckpointDebug` | `overhead_pct` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `30` |
 | `book/quarto/contents/vol2/fault_tolerance/fault_tolerance.qmd:2550` | `CheckpointDebug` | `residual_overhead_pct` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `1` |
 | `book/quarto/contents/vol2/fault_tolerance/fault_tolerance.qmd:2551` | `CheckpointDebug` | `base_weeks` | `Scenarios.* or Ops.*` | scenario/workload policy | `2` |
