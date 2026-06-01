@@ -4,7 +4,7 @@ This is an advisory work queue for values that likely define
 hardware, systems, infrastructure, pricing, models, datasets,
 storage subsystems, or scenarios in LEGO LOAD stages.
 
-Findings: 1074
+Findings: 1071
 By target:
    270  Scenarios.* or Ops.*
    208  Models.* or Scenarios.TrainingRuns
@@ -19,8 +19,8 @@ By target:
     14  Systems.Fabrics or Systems.SwitchFabric
     13  Systems.Storage or Datasets.*
     10  Systems.*
-     7  Infrastructure.* or Scenarios.Sustainability
      6  Systems.Storage
+     4  Infrastructure.* or Scenarios.Sustainability
      2  Scenarios.TrainingRuns or Systems.Reliability
      1  Infrastructure.Pricing.Storage
 Top chapters:
@@ -34,8 +34,8 @@ Top chapters:
     38  vol1/ml_ops
     38  vol1/nn_architectures
     37  vol2/inference
-    36  vol2/sustainable_ai
     33  vol2/data_storage
+    33  vol2/sustainable_ai
     32  vol1/hw_acceleration
     32  vol2/ops_scale
     29  vol1/ml_workflow
@@ -58,9 +58,9 @@ Top reasons:
     14  network/fabric system fact
     13  storage/data fact
     10  system-level fact
-     7  infrastructure/sustainability fact
      6  storage subsystem fact
      4  dataset/workload size
+     4  infrastructure/sustainability fact
      2  checkpoint policy/workload cadence
      1  storage price/rate belongs in pricing registry
 
@@ -1309,8 +1309,6 @@ Top reasons:
 | `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:871` | `LifecycleCarbonEstimate` | `training_days` | `Scenarios.* or Ops.*` | scenario/workload policy | `30` |
 | `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:879` | `LifecycleCarbonEstimate` | `amortization_window_months` | `Scenarios.* or Ops.*` | scenario/workload policy | `1` |
 | `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:1081` | `PueEfficiency` | `p_it` | `Scenarios.*` | unit-bearing scenario input | `2.0 * MW` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:1082` | `PueEfficiency` | `pue_old` | `Infrastructure.* or Scenarios.Sustainability` | infrastructure/sustainability fact | `1.58` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:1083` | `PueEfficiency` | `pue_new` | `Infrastructure.* or Scenarios.Sustainability` | infrastructure/sustainability fact | `1.10` |
 | `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:1084` | `PueEfficiency` | `elec_price` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `0.07` |
 | `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:1613` | `TrainingEmissions` | `training_days` | `Scenarios.* or Ops.*` | scenario/workload policy | `14` |
 | `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:1743` | `EmbodiedCarbonAmort` | `t_job` | `Scenarios.* or Ops.*` | scenario/workload policy | `10 * hour` |
@@ -1328,7 +1326,6 @@ Top reasons:
 | `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2641` | `SustainableCoolingRackPowerRecap` | `nodes_per_rack` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `4` |
 | `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2642` | `SustainableCoolingRackPowerRecap` | `non_gpu_power` | `Hardware.*` | hardware-related quantitative input | `10.3 * kilowatt` |
 | `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2700` | `PueSavings` | `it_power` | `Infrastructure.*` | infrastructure input | `7.0 * MW` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2701` | `PueSavings` | `pue_air_simple` | `Infrastructure.* or Scenarios.Sustainability` | infrastructure/sustainability fact | `1.5` |
 | `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2706` | `PueSavings` | `gpt3_households` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `120.0` |
 | `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:3191` | `OnDeviceLearningEnergy` | `model_params` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `1_000_000_000` |
 | `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:3192` | `OnDeviceLearningEnergy` | `forward_nj_per_param` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `2` |

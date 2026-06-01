@@ -44,8 +44,8 @@ python3 book/tools/audit/book_check_lego_scenario_inputs.py \
 
 Current output:
 
-- **1,074 advisory MLSysIM source-of-truth candidates**
-- **112 high-confidence candidates**
+- **1,071 advisory MLSysIM source-of-truth candidates**
+- **109 high-confidence candidates**
 - Full JSON work queue:
   `book/tools/audit/artifacts/lego_scenario_inputs_audit.json`
 - Full Markdown work queue:
@@ -63,8 +63,8 @@ High-confidence buckets:
 | `Hardware.*` / `Hardware.Tech.*` | 23 | Hardware capacity, bandwidth, FLOP/s, TDP, memory/interconnect facts |
 | `Infrastructure.Pricing.Cloud` / `Infrastructure.Pricing.Fleet` | 18 | GPU-hour, cloud-instance, and fleet price points |
 | `Systems.Fabrics` / `Systems.SwitchFabric` | 14 | Network/fabric/switch-sizing facts |
-| `Infrastructure.*` / `Scenarios.Sustainability` | 7 | PUE, cooling, carbon, sustainability scenario facts |
 | `Systems.Storage` | 6 | Local NVMe, HDD, PFS, S3/object-store, checkpoint-path storage facts |
+| `Infrastructure.*` / `Scenarios.Sustainability` | 4 | PUE, cooling, carbon, sustainability scenario facts |
 | `Infrastructure.Pricing.Storage` | 1 | Storage/monitoring price points |
 
 Broader medium-confidence buckets:
@@ -140,6 +140,10 @@ Known concrete findings from the first pass:
   `Infrastructure.Pricing.Fleet.GpuHourRef` and
   `Infrastructure.Pricing.Cloud.GpuTrainingUtilityScenarioPerHour` entries.
   Ambiguous or scenario-specific price assumptions remain for later review.
+- Stage 12 migrated Sustainable AI PUE anchors to `Infrastructure.FacilityCooling`.
+  `PueEfficiency` now loads legacy and state-of-art PUE values from the
+  registry, and `PueSavings` loads the simple air-cooled baseline from the new
+  `SimpleAir` cooling profile rather than redefining `1.5` locally.
 - 100,000-GPU examples should load `Systems.Clusters.Mega_100K`.
 - Storage/checkpoint examples mix two different kinds of facts: storage-system
   facts such as local NVMe drive count, local/PFS bandwidth, capacity, and

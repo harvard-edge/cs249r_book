@@ -30,6 +30,7 @@ class FacilityCooling(Registry):
     Typical = CoolingProfile(name="Industry Average", pue=PUE_TYPICAL, wue=WUE_EVAPORATIVE, metadata=Metadata(provenance=pc.UPTIME_PUE_2022))
     Legacy = CoolingProfile(name="Legacy Air-Cooled", pue=PUE_LEGACY, wue=WUE_EVAPORATIVE, metadata=Metadata(provenance=pc.UPTIME_PUE_2022))
     StateOfArt = CoolingProfile(name="State of Art", pue=PUE_STATE_OF_ART, wue=WUE_EVAPORATIVE, metadata=Metadata(provenance=pc.UPTIME_PUE_2022))
+    SimpleAir = CoolingProfile(name="Simple Air-Cooled", pue=1.50, wue=WUE_EVAPORATIVE, metadata=Metadata(provenance=pc.UPTIME_PUE_2022))
 
 
 # Regional grid carbon intensity (gCO2/kWh) with typical facility PUE/WUE — leaf
