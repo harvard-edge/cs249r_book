@@ -276,7 +276,7 @@ class TestFmtUsd:
         assert fmt_usd(0.09 * USD / GB, precision=2, commas=False, per="GB") == "\\$0.09/GB"
         assert fmt_usd(5 * USD / hour, commas=False, per="hr") == "\\$5/hr"
         assert (
-            fmt_usd(23 * USD / TB / ureg.month, commas=False, per="TB/month")
+            fmt_usd(23 * USD / (TB * ureg.month), commas=False, per="TB/month")
             == "\\$23/TB/month"
         )
         assert fmt_usd(0.12 * USD / kWh, precision=2, commas=False, per="kWh") == "\\$0.12/kWh"

@@ -52,22 +52,22 @@ class Storage(Registry):
     """Object/block storage tiers."""
     S3StandardPerTbMonth = PricePoint(
         name="S3 standard",
-        rate=23 * USD / TB / ureg.month,
+        rate=23 * USD / (TB * ureg.month),
         metadata=_STORAGE,
     )
     GlacierPerTbMonth = PricePoint(
         name="Glacier",
-        rate=1 * USD / TB / ureg.month,
+        rate=1 * USD / (TB * ureg.month),
         metadata=_STORAGE,
     )
     NvmeLowPerTbMonth = PricePoint(
         name="NVMe (low)",
-        rate=100 * USD / TB / ureg.month,
+        rate=100 * USD / (TB * ureg.month),
         metadata=_STORAGE,
     )
     NvmeHighPerTbMonth = PricePoint(
         name="NVMe (high)",
-        rate=300 * USD / TB / ureg.month,
+        rate=300 * USD / (TB * ureg.month),
         metadata=_STORAGE,
     )
     GlacierRetrievalPerGB = PricePoint(
