@@ -73,6 +73,19 @@ def _numeric_magnitude(quantity):
     return _require_finite(float(quantity), "value")
 
 
+def _dimensionless_magnitude(value, *, what):
+    """Return a scalar magnitude only after checking dimensional consistency."""
+    if isinstance(value, ureg.Quantity):
+        if value.units != ureg.dimensionless:
+            raise ValueError(
+                f"{what} expects a dimensionless scalar, got units {value.units}. "
+                "Convert same-unit quotients to dimensionless at the source, or "
+                "use a domain formatter for unit-bearing quantities."
+            )
+        return _require_finite(float(value.to("").magnitude), what)
+    return _numeric_magnitude(value)
+
+
 def _parse_formatted_number(result):
     """Parse a formatted numeric string, ignoring thousands separators."""
     try:
@@ -310,6 +323,15 @@ def _coerce_unit(display_unit):
     return display_unit
 
 
+def _resolve_unit_arg(display_unit, unit, *, what):
+    """Resolve the display unit from positional or keyword ``unit=`` spelling."""
+    if display_unit is None and unit is None:
+        raise TypeError(f"{what} requires a display unit.")
+    if display_unit is not None and unit is not None:
+        raise TypeError(f"{what} accepts either a positional unit or unit=, not both.")
+    return _coerce_unit(unit if unit is not None else display_unit)
+
+
 _USD_DENOMINATORS = {
     "month", "year", "hour", "hr", "day", "week",
     "GB", "TB", "GB/month", "TB/month", "kWh", "MWh", "(TFLOP/s)",
@@ -413,12 +435,11 @@ def fmt(quantity, unit=None, precision=1, commas=True,
     The prefix and suffix arguments collapse the old MarkdownStr(f"...")
     escape-hatch idiom into a single canonical helper. Common uses:
 
-        fmt(price, precision=0, prefix="\\$")      # internal use by fmt_usd
         fmt(value, precision=0, approx=True)       # "~1,000"
         fmt(value, precision=0, lower_bound=True)  # "> 1,000"
-        fmt(rate * 100, precision=1, commas=False, suffix="%")  # "12.4%"
-        fmt(bw_mb_s, precision=1, commas=False, suffix=" MB/s")  # "2.4 MB/s"
-        fmt(speedup, precision=0, commas=False)     # prose adds "$\\times$"
+        fmt_percent(rate, precision=1, style="symbol")  # "12.4%"
+        fmt_qty(bandwidth, unit=MB/second)         # "2.4 MB/s"
+        fmt_multiple(speedup)                      # prose adds "$\\times$"
 
     Safety: Raises ValueError if formatting would hide meaningful magnitude:
     non-zero values displayed as ``0``, non-integers displayed with
@@ -844,7 +865,7 @@ def fmt_multiple(factor, precision=None, commas=False):
 
     Guard: a multiplier is non-negative.
     """
-    v = _numeric_magnitude(factor)
+    v = _dimensionless_magnitude(factor, what="multiplier")
     if v < 0:
         raise ValueError(
             f"fmt_multiple expects a non-negative factor, got {v}. A negative "
@@ -860,8 +881,8 @@ def fmt_multiple_range(lo, hi, *, precision=1, commas=False):
     The multiplication glyph remains prose-owned, as with ``fmt_multiple``.
     ``precision`` may be one int or a ``(lo_precision, hi_precision)`` pair.
     """
-    lo_v = _numeric_magnitude(lo)
-    hi_v = _numeric_magnitude(hi)
+    lo_v = _dimensionless_magnitude(lo, what="multiplier range endpoint")
+    hi_v = _dimensionless_magnitude(hi, what="multiplier range endpoint")
     if lo_v < 0 or hi_v < 0:
         raise ValueError(
             f"fmt_multiple_range expects non-negative factors, got lo={lo_v}, "
@@ -1136,7 +1157,7 @@ def fmt_ratio(value, precision=1, commas=False, allow_negative=False):
     of magnitudes usually signals a sign bug; pass ``allow_negative=True`` for
     the rare signed ratio.
     """
-    v = _numeric_magnitude(value)
+    v = _dimensionless_magnitude(value, what="ratio")
     if v < 0 and not allow_negative:
         raise ValueError(
             f"fmt_ratio expects a non-negative ratio, got {v}. Pass "
@@ -1194,8 +1215,9 @@ def fmt_range(lo, hi, *, precision=1, commas=True, unit="", kind="number"):
 def fmt_qty_range(
     lo,
     hi,
-    display_unit,
+    display_unit=None,
     *,
+    unit=None,
     precision=None,
     commas=False,
     unit_label=None,
@@ -1207,7 +1229,7 @@ def fmt_qty_range(
             "fmt_qty_range() requires Pint Quantity endpoints. Keep units "
             "attached until formatting."
         )
-    display_unit = _coerce_unit(display_unit)
+    display_unit = _resolve_unit_arg(display_unit, unit, what="fmt_qty_range")
     lo_v = _numeric_magnitude(lo.to(display_unit))
     hi_v = _numeric_magnitude(hi.to(display_unit))
     if hi_v < lo_v:
@@ -1225,8 +1247,9 @@ def fmt_qty_range(
 
 def fmt_sci_qty(
     quantity,
-    display_unit,
+    display_unit=None,
     *,
+    unit=None,
     precision=2,
     unit_label=None,
     per=None,
@@ -1238,7 +1261,7 @@ def fmt_sci_qty(
             "the call site, e.g. fmt_sci_qty(ops, flop), not "
             "fmt_sci_qty(ops.magnitude, flop)."
         )
-    display_unit = _coerce_unit(display_unit)
+    display_unit = _resolve_unit_arg(display_unit, unit, what="fmt_sci_qty")
     q = quantity.to(display_unit)
     body = fmt_sci(q.magnitude, precision=precision)
     suffix = _quantity_suffix(display_unit, unit_label=unit_label, per=per)
@@ -1248,14 +1271,15 @@ def fmt_sci_qty(
 def fmt_time_range(
     lo,
     hi,
-    display_unit,
+    display_unit=None,
     *,
+    unit=None,
     precision=None,
     commas=False,
     style="symbol",
 ):
     """Format a duration range with time-unit validation."""
-    display_unit = _coerce_unit(display_unit)
+    display_unit = _resolve_unit_arg(display_unit, unit, what="fmt_time_range")
     one = 1 * display_unit
     if not one.check("[time]"):
         raise ValueError(
@@ -1454,6 +1478,29 @@ def fmt_frac(numerator, denominator, result=None, unit=None):
     return out
 
 
+_UNIT_LABEL_NORMALIZATION = {
+    "KFLOPs": "KFLOP",
+    "MFLOPs": "MFLOP",
+    "GFLOPs": "GFLOP",
+    "TFLOPs": "TFLOP",
+    "PFLOPs": "PFLOP",
+    "EFLOPs": "EFLOP",
+    "ZFLOPs": "ZFLOP",
+    "KFLOPs/s": "KFLOP/s",
+    "MFLOPs/s": "MFLOP/s",
+    "GFLOPs/s": "GFLOP/s",
+    "TFLOPs/s": "TFLOP/s",
+    "PFLOPs/s": "PFLOP/s",
+    "EFLOPs/s": "EFLOP/s",
+    "ZFLOPs/s": "ZFLOP/s",
+    "Gbps": "Gb/s",
+    "Mbit/s": "Mb/s",
+    "Gbit/s": "Gb/s",
+    "Tbit/s": "Tb/s",
+    "µs": "μs",
+}
+
+
 def _compact_unit_suffix(display_unit) -> str:
     """Derive a leading-space compact unit label from a pint display unit."""
     # Currency is not a fmt_qty value-kind. It must go through fmt_usd(), which
@@ -1467,15 +1514,11 @@ def _compact_unit_suffix(display_unit) -> str:
             "See .claude/rules/numbers-and-math-in-prose.md §4."
         )
     try:
-        one = 1 * display_unit
-        formatted = f"{one:~P}"
+        label = f"{_coerce_unit(display_unit):~P}"
     except Exception:
-        return f" {display_unit}"
-    parts = formatted.split(None, 1)
-    if len(parts) == 2:
-        label = parts[1].replace("µs", "μs")
-        return f" {label}"
-    return f" {display_unit}"
+        label = f"{display_unit}"
+    label = _UNIT_LABEL_NORMALIZATION.get(label, label.replace("µs", "μs"))
+    return f" {label}"
 
 
 def _quantity_suffix(display_unit, *, unit_label=None, per=None, extra_suffix=""):
@@ -1494,8 +1537,9 @@ def _quantity_suffix(display_unit, *, unit_label=None, per=None, extra_suffix=""
 
 def fmt_qty(
     quantity,
-    display_unit,
+    display_unit=None,
     *,
+    unit=None,
     precision=1,
     commas=False,
     prefix="",
@@ -1517,7 +1561,7 @@ def fmt_qty(
             "call site, e.g. fmt_qty(bw, GB/second), not "
             "fmt_qty(bw.m_as(GB/second), GB/second)."
         )
-    display_unit = _coerce_unit(display_unit)
+    display_unit = _resolve_unit_arg(display_unit, unit, what="fmt_qty")
     q = quantity.to(display_unit)
     val = q.magnitude
     suffix = _quantity_suffix(
@@ -1539,8 +1583,9 @@ def fmt_qty(
 
 def fmt_qty_int(
     quantity,
-    display_unit,
+    display_unit=None,
     *,
+    unit=None,
     commas=True,
     prefix="",
     extra_suffix="",
@@ -1561,7 +1606,7 @@ def fmt_qty_int(
             "the call site, e.g. fmt_qty_int(memory, GB), not "
             "fmt_qty_int(memory.m_as(GB), GB)."
         )
-    display_unit = _coerce_unit(display_unit)
+    display_unit = _resolve_unit_arg(display_unit, unit, what="fmt_qty_int")
     q = quantity.to(display_unit)
     suffix = _quantity_suffix(
         display_unit,
@@ -1634,8 +1679,9 @@ def _time_attributive_suffix(display_unit) -> str:
 
 def fmt_time(
     duration,
-    display_unit,
+    display_unit=None,
     *,
+    unit=None,
     precision=1,
     commas=False,
     style="symbol",
@@ -1665,7 +1711,7 @@ def fmt_time(
     ``fmt_time(35, second)`` means "35 seconds" and still validates that
     ``second`` is a time unit.
     """
-    display_unit = _coerce_unit(display_unit)
+    display_unit = _resolve_unit_arg(display_unit, unit, what="fmt_time")
     one = 1 * display_unit
     if not one.check("[time]"):
         raise ValueError(
@@ -1777,6 +1823,42 @@ def _pick_flop_rate_unit(qty):
     if abs(eflops) < 1e3:
         return EFLOP / second
     return ZFLOP / second
+
+
+def _pick_flops_unit(qty):
+    from .core.units import EFLOP, GFLOP, KFLOP, MFLOP, PFLOP, TFLOP, ZFLOP, flop
+
+    q = qty.to(flop)
+    mag = abs(q.magnitude)
+    if mag < 1e6:
+        return KFLOP
+    if mag < 1e9:
+        return MFLOP
+    if mag < 1e12:
+        return GFLOP
+    if mag < 1e15:
+        return TFLOP
+    if mag < 1e18:
+        return PFLOP
+    if mag < 1e21:
+        return EFLOP
+    return ZFLOP
+
+
+def _pick_ops_rate_unit(qty):
+    from .core.units import GOPS, KOPS, MOPS, OPS, TOPS
+
+    q = qty.to(OPS)
+    mag = abs(q.magnitude)
+    if mag < 1e3:
+        return OPS
+    if mag < 1e6:
+        return KOPS
+    if mag < 1e9:
+        return MOPS
+    if mag < 1e12:
+        return GOPS
+    return TOPS
 
 
 def _pick_power_unit(qty):
@@ -1891,6 +1973,44 @@ def fmt_flop_rate(quantity, *, unit=None, precision=None, commas=False):
     display_unit = (
         _coerce_unit(unit) if unit is not None else _pick_flop_rate_unit(quantity)
     )
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas)
+
+
+def fmt_flops(quantity, *, unit=None, precision=None, commas=False):
+    """Auto-scale FLOP work/count quantities for prose (KFLOP through ZFLOP)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_flops() requires a Pint Quantity.")
+    display_unit = _coerce_unit(unit) if unit is not None else _pick_flops_unit(quantity)
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas)
+
+
+def fmt_arithmetic_intensity(quantity, *, unit=None, precision=None, commas=False):
+    """Format arithmetic intensity quantities as FLOP/byte."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_arithmetic_intensity() requires a Pint Quantity.")
+    from .core.units import byte, flop
+
+    display_unit = _coerce_unit(unit) if unit is not None else flop / byte
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        unit_label="FLOP/byte",
+    )
+
+
+def fmt_ops_rate(quantity, *, unit=None, precision=None, commas=False):
+    """Auto-scale non-FLOP operation rates for prose (OPS through TOPS)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_ops_rate() requires a Pint Quantity.")
+    display_unit = _coerce_unit(unit) if unit is not None else _pick_ops_rate_unit(quantity)
     q = quantity.to(display_unit)
     p = _resolve_display_precision(q.magnitude, precision)
     return fmt_qty(q, display_unit, precision=p, commas=commas)

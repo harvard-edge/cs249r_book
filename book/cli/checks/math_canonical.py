@@ -51,7 +51,8 @@ CANONICAL_STR_CALL = re.compile(
     r"|fmt_usd_range|fmt_time|fmt_rate|fmt_val|fmt_unit|fmt_sci|fmt_sci_qty"
     r"|fmt_percent_range|fmt_multiple_range"
     r"|fmt_power|fmt_energy|fmt_emissions|fmt_bandwidth|fmt_memory|fmt_latency"
-    r"|fmt_params|fmt_tokens|fmt_flop_rate|fmt_compute_efficiency"
+    r"|fmt_params|fmt_tokens|fmt_flop_rate|fmt_flops|fmt_ops_rate"
+    r"|fmt_arithmetic_intensity|fmt_compute_efficiency"
     r"|fmt_carbon_intensity|fmt_water|fmt_water_rate|fmt_water_intensity"
     r"|MarkdownStr)\s*\("
 )
@@ -121,7 +122,8 @@ FMT_FAMILY_USE = re.compile(
     r"|fmt_count|fmt_ratio|fmt_range|fmt_qty_range|fmt_time_range"
     r"|fmt_count_range|fmt_usd_range|fmt_time|fmt_rate|fmt_val|fmt_unit"
     r"|fmt_power|fmt_energy|fmt_emissions|fmt_bandwidth|fmt_memory|fmt_latency"
-    r"|fmt_params|fmt_tokens|fmt_flop_rate|fmt_compute_efficiency"
+    r"|fmt_params|fmt_tokens|fmt_flop_rate|fmt_flops|fmt_ops_rate"
+    r"|fmt_arithmetic_intensity|fmt_compute_efficiency"
     r"|fmt_carbon_intensity|fmt_water|fmt_water_rate|fmt_water_intensity"
     r"|fmt_sci|fmt_frac|sci_latex|MarkdownStr|check)\s*\("
 )
@@ -145,6 +147,7 @@ MLSYSIM_STAR_FMT_NAMES = frozenset({
     "fmt_power", "fmt_energy", "fmt_emissions", "fmt_bandwidth", "fmt_memory",
     "fmt_latency",
     "fmt_params", "fmt_tokens", "fmt_flop_rate", "fmt_compute_efficiency",
+    "fmt_flops", "fmt_ops_rate", "fmt_arithmetic_intensity",
     "fmt_carbon_intensity", "fmt_water", "fmt_water_rate",
     "fmt_water_intensity",
 })

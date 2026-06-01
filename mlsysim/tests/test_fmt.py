@@ -9,6 +9,7 @@ import math
 from mlsysim.fmt import (
     MarkdownStr,
     fmt,
+    fmt_arithmetic_intensity,
     fmt_count,
     fmt_count_range,
     fmt_compute_efficiency,
@@ -24,6 +25,8 @@ from mlsysim.fmt import (
     fmt_qty_int,
     fmt_qty_range,
     fmt_flop_rate,
+    fmt_flops,
+    fmt_ops_rate,
     fmt_water,
     fmt_water_rate,
     fmt_water_intensity,
@@ -117,6 +120,12 @@ class TestFmtQty:
         out = fmt_qty(mem, ureg.GB, precision=0, commas=False)
         assert out == "140 GB"
 
+    def test_accepts_unit_keyword(self):
+        mem = 140 * ureg.GB
+        assert fmt_qty(mem, unit=ureg.GB, precision=0, commas=False) == "140 GB"
+        with pytest.raises(TypeError, match="either a positional unit or unit="):
+            fmt_qty(mem, ureg.GB, unit=ureg.GB, precision=0)
+
     def test_accepts_named_marker(self):
         mem = 140 * ureg.GB
         out = fmt_qty(mem, ureg.GB, precision=0, commas=False, approx=True)
@@ -187,6 +196,9 @@ class TestFmtQtyInt:
             commas=False,
         )
         assert out == "1 GB/s"
+
+    def test_accepts_unit_keyword(self):
+        assert fmt_qty_int(100 * ureg.GB, unit=ureg.GB, commas=False) == "100 GB"
 
     def test_plain_number_is_refused(self):
         with pytest.raises(TypeError, match="requires a Pint Quantity"):
@@ -313,6 +325,7 @@ class TestFmtRate:
 class TestFmtTime:
     def test_symbol_style_accepts_quantities_and_plain_numbers(self):
         assert fmt_time(1500 * ureg.millisecond, ureg.second) == "1.5 s"
+        assert fmt_time(1500 * ureg.millisecond, unit=ureg.second) == "1.5 s"
         assert fmt_time(35, ureg.second, precision=0) == "35 s"
         assert fmt_time(35, "second", precision=0) == "35 s"
         assert fmt_time(35, "s", precision=0) == "35 s"
@@ -492,6 +505,10 @@ class TestFmtMultiple:
         with pytest.raises(ValueError, match="non-negative factor"):
             fmt_multiple(-3)
 
+    def test_rejects_dimensioned_quantity(self):
+        with pytest.raises(ValueError, match="dimensionless scalar"):
+            fmt_multiple(3 * GB)
+
     def test_returns_markdown_str(self):
         assert isinstance(fmt_multiple(2.5), MarkdownStr)
 
@@ -546,6 +563,10 @@ class TestFmtRatio:
 
     def test_allows_signed_ratio_with_flag(self):
         assert fmt_ratio(-2.0, precision=0, allow_negative=True) == "-2"
+
+    def test_rejects_dimensioned_quantity(self):
+        with pytest.raises(ValueError, match="dimensionless scalar"):
+            fmt_ratio(5 * GB)
 
     def test_returns_markdown_str(self):
         assert isinstance(fmt_ratio(1.5), MarkdownStr)
@@ -693,6 +714,10 @@ class TestTypedRanges:
             commas=False,
         )
         assert out == "1\u20132 GB"
+        assert (
+            fmt_qty_range(1 * ureg.GB, 2 * ureg.GB, unit=ureg.GB, precision=0, commas=False)
+            == "1\u20132 GB"
+        )
 
     def test_quantity_range_accepts_checked_display_label(self):
         out = fmt_qty_range(
@@ -739,6 +764,7 @@ class TestTypedRanges:
             == "5\u201320 ms"
         )
         assert fmt_time_range(5, 20, ureg.millisecond, commas=False) == "5\u201320 ms"
+        assert fmt_time_range(5, 20, unit=ureg.millisecond, commas=False) == "5\u201320 ms"
         assert (
             fmt_time_range(1, 2, ureg.second, precision=0, style="word",
                            commas=False)
@@ -801,6 +827,10 @@ class TestFmtSciQty:
         )
         assert out == "4.10 × 10¹⁷ FLOPs"
         assert isinstance(out, MarkdownStr)
+        assert (
+            fmt_sci_qty(4.1e17 * ureg.flop, unit=ureg.flop, precision=2, unit_label="FLOPs")
+            == "4.10 × 10¹⁷ FLOPs"
+        )
 
     def test_scientific_quantity_converts_before_formatting(self):
         out = fmt_sci_qty(
@@ -875,6 +905,35 @@ class TestDomainFormatters:
     def test_fmt_flop_rate_requires_quantity(self):
         with pytest.raises(TypeError, match="requires a Pint Quantity"):
             fmt_flop_rate(989)
+
+    def test_fmt_flops_scales_to_canonical_singular_units(self):
+        from mlsysim.core.units import GFLOP, MFLOP, TFLOP
+
+        assert fmt_flops(569 * MFLOP, precision=0, commas=False) == "569 MFLOP"
+        assert fmt_flops(4.1 * GFLOP, precision=1, commas=False) == "4.1 GFLOP"
+        assert fmt_flops(350 * TFLOP, precision=0, commas=False) == "350 TFLOP"
+
+    def test_fmt_flops_requires_quantity(self):
+        with pytest.raises(TypeError, match="requires a Pint Quantity"):
+            fmt_flops(4.1e9)
+
+    def test_fmt_arithmetic_intensity_owns_flop_per_byte_label(self):
+        from mlsysim.core.units import GB, TFLOP, byte, flop
+
+        assert (
+            fmt_arithmetic_intensity(5 * flop / byte, precision=0, commas=False)
+            == "5 FLOP/byte"
+        )
+        assert (
+            fmt_arithmetic_intensity(1 * TFLOP / GB, precision=0, commas=False)
+            == "1000 FLOP/byte"
+        )
+
+    def test_fmt_ops_rate_scales_integer_ops(self):
+        from mlsysim.core.units import TOPS
+
+        assert fmt_ops_rate(2 * TOPS, precision=0, commas=False) == "2 TOPS"
+        assert fmt_ops_rate(0.002 * TOPS, precision=0, commas=False) == "2 GOPS"
 
     def test_fmt_compute_efficiency_renders_full_unit(self):
         from mlsysim.core.units import TFLOP, second, watt

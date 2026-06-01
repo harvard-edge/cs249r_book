@@ -32,7 +32,7 @@ __all__ = [
     # Data size scalars
     "BITS_PER_BYTE", "KIB_TO_BYTES", "MIB_TO_BYTES", "GIB_TO_BYTES",
     # FLOPs and operation-rate units
-    "flop", "KFLOPs", "MFLOPs", "GFLOP", "GFLOPs", "TFLOP", "TFLOPs",
+    "flop", "KFLOP", "KFLOPs", "MFLOP", "MFLOPs", "GFLOP", "GFLOPs", "TFLOP", "TFLOPs",
     "PFLOP", "PFLOPs", "EFLOP", "EFLOPs", "ZFLOP", "ZFLOPs",
     "OPS", "KOPS", "MOPS", "GOPS", "TOPS",
     # Network
@@ -167,7 +167,9 @@ NS_PER_SEC = NS_PER_MS * MS_PER_SEC
 
 # --- FLOPs and operation rates (loaded from mlsysbook_units.txt) ---
 flop = ureg.flop
+KFLOP = ureg.KFLOP
 KFLOPs = ureg.KFLOPs
+MFLOP = ureg.MFLOP
 MFLOPs = ureg.MFLOPs
 GFLOP = ureg.GFLOP
 GFLOPs = ureg.GFLOPs
