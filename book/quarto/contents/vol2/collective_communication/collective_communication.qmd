@@ -408,13 +408,13 @@ class CriticalMsgSize:
     check(n_star_kb == 100, f"n* = {n_star_kb} KB, expected 100")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     alpha_str = fmt(alpha_us, precision=0, commas=False)
-    beta_str = fmt_qty(beta, GB/second, precision=0, commas=False)
+    beta_gb_s_str = fmt_qty(beta, GB/second, precision=0, commas=False)
     n_star_kb_str = fmt_qty(n_star, KB, precision=0, commas=False)
 ```
 
 ::: {#nbk-collective-communication-critical-message-size .callout-notebook title="The critical message size"}
 
-**Problem**: Consider a cluster using InfiniBand NDR 400 Gbps with $\alpha =$ `{python} CriticalMsgSize.alpha_str` $\mu\text{s}$ and $\beta =$ `{python} CriticalMsgSize.beta_str`. At what message size does optimizing for bandwidth start to matter more than optimizing for latency?
+**Problem**: Consider a cluster using InfiniBand NDR 400 Gbps with $\alpha =$ `{python} CriticalMsgSize.alpha_str` $\mu\text{s}$ and $\beta =$ `{python} CriticalMsgSize.beta_gb_s_str`. At what message size does optimizing for bandwidth start to matter more than optimizing for latency?
 
 **Math**:
 
@@ -537,7 +537,7 @@ The alpha-beta model becomes most valuable when applied to real training configu
 # │          inter_ring_bw_time_ms_str, inter_ring_lat_time_ms_str,
 # │          intra_ag_time_ms_str, hier_total_llama_ms_str, flat_total_ms_str,
 # │          ccr_hier_str, ccr_flat_str, n_gpus_llama_str,
-# │          nvlink_bw_str, ib_bw_str
+# │          nvlink_bw_gb_s_str, ib_bw_gb_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware, Models, Systems
 from mlsysim.core.constants import BILLION, GB, byte, microsecond, ms, param, second
@@ -597,14 +597,14 @@ class LlamaBudgetCalc:
     ccr_hier_str               = fmt(ccr_hier, precision=1, commas=False)
     ccr_flat_str               = fmt(ccr_flat, precision=1, commas=False)
     n_gpus_llama_str           = fmt(n_gpus_llama, precision=0, commas=False)
-    nvlink_bw_str              = fmt_qty(nvlink_bw, GB/second, precision=0, commas=False)
-    ib_bw_str                  = fmt_qty(ib_bw, GB/second, precision=0, commas=False)
+    nvlink_bw_gb_s_str              = fmt_qty(nvlink_bw, GB/second, precision=0, commas=False)
+    ib_bw_gb_s_str                  = fmt_qty(ib_bw, GB/second, precision=0, commas=False)
 ```
 
 Using BF16 gradients (a standard practice that halves communication volume to `{python} LlamaBudgetCalc.gradient_bf16_gb_str`), the hierarchical AllReduce decomposes as follows:
 
-1. **Intra-Node ReduceScatter** (NVLink at `{python} LlamaBudgetCalc.nvlink_bw_str`): Each GPU exchanges 7/8 of the gradient locally. Time: `{python} LlamaBudgetCalc.intra_rs_time_ms_str`.
-2. **Inter-Node Ring AllReduce** (InfiniBand NDR at `{python} LlamaBudgetCalc.ib_bw_str`): Each GPU synchronizes only `{python} LlamaBudgetCalc.inter_payload_gb_str` across 16 nodes. Bandwidth time: `{python} LlamaBudgetCalc.inter_ring_bw_time_ms_str`. Latency time: `{python} LlamaBudgetCalc.inter_ring_lat_time_ms_str`.
+1. **Intra-Node ReduceScatter** (NVLink at `{python} LlamaBudgetCalc.nvlink_bw_gb_s_str`): Each GPU exchanges 7/8 of the gradient locally. Time: `{python} LlamaBudgetCalc.intra_rs_time_ms_str`.
+2. **Inter-Node Ring AllReduce** (InfiniBand NDR at `{python} LlamaBudgetCalc.ib_bw_gb_s_str`): Each GPU synchronizes only `{python} LlamaBudgetCalc.inter_payload_gb_str` across 16 nodes. Bandwidth time: `{python} LlamaBudgetCalc.inter_ring_bw_time_ms_str`. Latency time: `{python} LlamaBudgetCalc.inter_ring_lat_time_ms_str`.
 3. **Intra-Node AllGather** (NVLink): Distributes the final result locally. Time: `{python} LlamaBudgetCalc.intra_ag_time_ms_str`.
 
 The total hierarchical AllReduce takes approximately `{python} LlamaBudgetCalc.hier_total_llama_ms_str`, compared to `{python} LlamaBudgetCalc.flat_total_ms_str` for a flat Ring AllReduce that ignores the bandwidth hierarchy. This difference is not marginal; it determines whether communication can be hidden behind computation or whether it becomes the critical path.
@@ -744,7 +744,7 @@ class MoeAllToAll:
     check(per_transfer == 8 * microsecond, f"T/transfer = {per_transfer.to(microsecond).magnitude} μs")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     alpha_str = fmt(alpha_us, precision=0, commas=False)
-    beta_str = fmt_qty(beta, GB/second, precision=0, commas=False)
+    beta_gb_s_str = fmt_qty(beta, GB/second, precision=0, commas=False)
     tokens_per_gpu_str = fmt(tokens_per_gpu, precision=0, commas=False)
     tokens_per_transfer_str = fmt(tokens_per_transfer, precision=0, commas=False)
     kb_per_token_str = fmt_qty(kb_per_token, KB, precision=3, commas=False)
@@ -775,7 +775,7 @@ Each GPU holds `{python} MoeAllToAll.tokens_per_gpu_str` tokens that need to rea
 *   Total data sent per GPU: 7 $\times$ `{python} MoeAllToAll.data_per_transfer_kb_str` = `{python} MoeAllToAll.total_sent_mb_str`
 *   Total data received per GPU: `{python} MoeAllToAll.total_sent_mb_str` (symmetric)
 
-**Latency Analysis** (InfiniBand NDR, $\alpha =$ `{python} MoeAllToAll.alpha_str` $\mu\text{s}$, $\beta =$ `{python} MoeAllToAll.beta_str`):
+**Latency Analysis** (InfiniBand NDR, $\alpha =$ `{python} MoeAllToAll.alpha_str` $\mu\text{s}$, $\beta =$ `{python} MoeAllToAll.beta_gb_s_str`):
 
 Each of the 7 transfers is a `{python} MoeAllToAll.data_per_transfer_kb_str` message. From the $\alpha$-$\beta$ model: $T_{\text{transfer}}$ = 3 + `{python} MoeAllToAll.bw_time_approx_str` = `{python} MoeAllToAll.per_transfer_us_str` $\mu\text{s}$ per transfer.
 
@@ -1199,14 +1199,14 @@ class RingVsTree:
     check(abs(crossover.to(MB).magnitude - 1.1) < 0.05, f"Crossover = {crossover.to(MB).magnitude}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     alpha_str = fmt(alpha_us, precision=0, commas=False)
-    beta_str = fmt_qty(beta, GB/second, precision=0, commas=False)
-    ring_lat_str = fmt_time(ring_lat, unit=microsecond, precision=0)
-    tree_lat_str = fmt_time(tree_lat, unit=microsecond, precision=0, commas=False)
-    ring_bw_str = fmt_time(ring_bw, unit=microsecond, precision=1, commas=False)
-    tree_bw_str = fmt_time(tree_bw, unit=microsecond, precision=0)
-    ring_total_str = fmt_time(ring_total, unit=microsecond, precision=1)
-    tree_total_str = fmt_time(tree_total, unit=microsecond, precision=0)
-    crossover_str = fmt_qty(crossover, MB, precision=1, commas=False)
+    beta_gb_s_str = fmt_qty(beta, GB/second, precision=0, commas=False)
+    ring_lat_us_str = fmt_time(ring_lat, unit=microsecond, precision=0)
+    tree_lat_us_str = fmt_time(tree_lat, unit=microsecond, precision=0, commas=False)
+    ring_bw_us_str = fmt_time(ring_bw, unit=microsecond, precision=1, commas=False)
+    tree_bw_us_str = fmt_time(tree_bw, unit=microsecond, precision=0)
+    ring_total_us_str = fmt_time(ring_total, unit=microsecond, precision=1)
+    tree_total_us_str = fmt_time(tree_total, unit=microsecond, precision=0)
+    crossover_mb_str = fmt_qty(crossover, MB, precision=1, commas=False)
     M_mb_str = fmt_qty(M, MB, precision=0, commas=False)
     N_str = fmt(N, precision=0, commas=False)
     tree_win_margin_pct_str = fmt_percent(round(tree_win_margin_pct)/100, precision=0, commas=False, style='prose')
@@ -1214,31 +1214,31 @@ class RingVsTree:
 
 ::: {#nbk-collective-communication-ring-vs-tree-crossover .callout-notebook title="The ring vs. tree crossover"}
 
-**Problem**: A cluster synchronizes a `{python} RingVsTree.M_mb_str` buffer across `{python} RingVsTree.N_str` GPUs. The network has latency $\alpha =$ `{python} RingVsTree.alpha_str` $\mu\text{s}$ and bandwidth $\beta =$ `{python} RingVsTree.beta_str`. Which algorithm performs better: Ring or Tree?
+**Problem**: A cluster synchronizes a `{python} RingVsTree.M_mb_str` buffer across `{python} RingVsTree.N_str` GPUs. The network has latency $\alpha =$ `{python} RingVsTree.alpha_str` $\mu\text{s}$ and bandwidth $\beta =$ `{python} RingVsTree.beta_gb_s_str`. Which algorithm performs better: Ring or Tree?
 
 **Math**:
 
 **Latency**:
 
-1.  **Ring Latency**\index{Ring AllReduce!latency}: $2(N-1)\alpha = 2 \times 63 \times 10\ \mu\text{s}$ = `{python} RingVsTree.ring_lat_str` $\mu\text{s}$.
-2.  **Tree Latency**\index{Tree AllReduce!latency}: $2(\log_2 N)\alpha = 2 \times 6 \times 10\ \mu\text{s}$ = `{python} RingVsTree.tree_lat_str` $\mu\text{s}$.
+1.  **Ring Latency**\index{Ring AllReduce!latency}: $2(N-1)\alpha = 2 \times 63 \times 10\ \mu\text{s}$ = `{python} RingVsTree.ring_lat_us_str` $\mu\text{s}$.
+2.  **Tree Latency**\index{Tree AllReduce!latency}: $2(\log_2 N)\alpha = 2 \times 6 \times 10\ \mu\text{s}$ = `{python} RingVsTree.tree_lat_us_str` $\mu\text{s}$.
 
 **Bandwidth** (note the difference):
 
-3.  **Ring Bandwidth**\index{Ring AllReduce!bandwidth}: $2\frac{N-1}{N}\frac{M}{\beta} \approx 2 \times \frac{1\text{ MB}}{10\text{ GB/s}}$ = `{python} RingVsTree.ring_bw_str` $\mu\text{s}$ (optimal: each byte sent once).
-4.  **Tree Bandwidth**\index{Tree AllReduce!bandwidth}: $2\log_2 N \cdot \frac{M}{\beta} = 12 \times \frac{1\text{ MB}}{10\text{ GB/s}}$ = `{python} RingVsTree.tree_bw_str` $\mu\text{s}$ (each level sends full message).
+3.  **Ring Bandwidth**\index{Ring AllReduce!bandwidth}: $2\frac{N-1}{N}\frac{M}{\beta} \approx 2 \times \frac{1\text{ MB}}{10\text{ GB/s}}$ = `{python} RingVsTree.ring_bw_us_str` $\mu\text{s}$ (optimal: each byte sent once).
+4.  **Tree Bandwidth**\index{Tree AllReduce!bandwidth}: $2\log_2 N \cdot \frac{M}{\beta} = 12 \times \frac{1\text{ MB}}{10\text{ GB/s}}$ = `{python} RingVsTree.tree_bw_us_str` $\mu\text{s}$ (each level sends full message).
 
 @Tbl-collective-communication-ring-vs-tree-1mb-64gpu sums the latency and bandwidth contributions into a head-to-head comparison:
 
-| **Algorithm** |                           **Latency** |                        **Bandwidth** |                               **Total** |
-|:--------------|--------------------------------------:|-------------------------------------:|----------------------------------------:|
-| **Ring**      | `{python} RingVsTree.ring_lat_str` μs | `{python} RingVsTree.ring_bw_str` μs | `{python} RingVsTree.ring_total_str` μs |
-| **Tree**      | `{python} RingVsTree.tree_lat_str` μs | `{python} RingVsTree.tree_bw_str` μs | `{python} RingVsTree.tree_total_str` μs |
+| **Algorithm** |                              **Latency** |                           **Bandwidth** |                                  **Total** |
+|:--------------|-----------------------------------------:|----------------------------------------:|-------------------------------------------:|
+| **Ring**      | `{python} RingVsTree.ring_lat_us_str` μs | `{python} RingVsTree.ring_bw_us_str` μs | `{python} RingVsTree.ring_total_us_str` μs |
+| **Tree**      | `{python} RingVsTree.tree_lat_us_str` μs | `{python} RingVsTree.tree_bw_us_str` μs | `{python} RingVsTree.tree_total_us_str` μs |
 : **Ring vs. tree AllReduce timing for a 1 MB buffer on 64 GPUs**: Latency, bandwidth, and total-time terms with $\alpha = 10\ \mu\text{s}$ and $\beta = 10\ \text{GB/s}$. {#tbl-collective-communication-ring-vs-tree-1mb-64gpu}
 
 Tree wins, but only by `{python} RingVsTree.tree_win_margin_pct_str`. For this `{python} RingVsTree.M_mb_str` message, we are near the crossover point.
 
-**Systems insight**: Ring's latency penalty (10$\times$ worse than Tree) nearly balances Tree's bandwidth penalty (6$\times$ worse than Ring). The log-aware crossover estimate predicts $M_{\text{crossover}} \approx N \alpha \beta / \log_2 N = 64 \times 10\ \mu\text{s} \times 10\ \text{GB/s} / 6 \approx$ `{python} RingVsTree.crossover_str`. At 1 MB, we are just below crossover, so Tree wins. At 10 MB, Ring would dominate.
+**Systems insight**: Ring's latency penalty (10$\times$ worse than Tree) nearly balances Tree's bandwidth penalty (6$\times$ worse than Ring). The log-aware crossover estimate predicts $M_{\text{crossover}} \approx N \alpha \beta / \log_2 N = 64 \times 10\ \mu\text{s} \times 10\ \text{GB/s} / 6 \approx$ `{python} RingVsTree.crossover_mb_str`. At 1 MB, we are just below crossover, so Tree wins. At 10 MB, Ring would dominate.
 
 :::
 

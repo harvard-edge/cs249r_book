@@ -208,13 +208,13 @@ class DistTrainNvlinkIntro:
     nvlink_hdr_ratio_low = (nvlink_a100_bw / ib_hdr_bw).to_base_units().magnitude
     nvlink_hdr_ratio_high = (nvlink_h100_bw / ib_hdr_bw).to_base_units().magnitude
     check(20 < nvlink_hdr_ratio_low < 30, "A100 NVLink/HDR ratio should be about 24x")
-    nvlink_a100_str = fmt_bandwidth(nvlink_a100_bw, unit=GB / second, precision=0, commas=False)
-    nvlink_h100_str = fmt_bandwidth(nvlink_h100_bw, unit=GB / second, precision=0, commas=False)
+    nvlink_a100_gb_s_str = fmt_bandwidth(nvlink_a100_bw, unit=GB / second, precision=0, commas=False)
+    nvlink_h100_gb_s_str = fmt_bandwidth(nvlink_h100_bw, unit=GB / second, precision=0, commas=False)
     nvlink_hdr_ratio_low_str = fmt_multiple(nvlink_hdr_ratio_low, precision=0, commas=False)
     nvlink_hdr_ratio_high_str = fmt_multiple(nvlink_hdr_ratio_high, precision=0, commas=False)
 ```
 
-Tensor parallelism across server racks connected by standard Ethernet will stall. The communication volume scales with batch size $B$ and layer count $N_L$. It requires the `{python} DistTrainNvlinkIntro.nvlink_a100_str`--`{python} DistTrainNvlinkIntro.nvlink_h100_str` throughput of NVLink. For cross-rack scaling, the design must switch to pipeline or data parallelism to respect the physics of the network.
+Tensor parallelism across server racks connected by standard Ethernet will stall. The communication volume scales with batch size $B$ and layer count $N_L$. It requires the `{python} DistTrainNvlinkIntro.nvlink_a100_gb_s_str`--`{python} DistTrainNvlinkIntro.nvlink_h100_gb_s_str` throughput of NVLink. For cross-rack scaling, the design must switch to pipeline or data parallelism to respect the physics of the network.
 
 :::
 
@@ -256,7 +256,7 @@ Coordination relies on consensus protocols and synchronization primitives that k
 
 The progression from single-device to distributed training follows a systematic scaling path where each stage builds on the previous level's challenges. Single-GPU training requires only local memory management and straightforward forward/backward passes, establishing the baseline computational patterns. Scaling to multiple GPUs within a single node introduces high-bandwidth communication requirements, typically handled through NVLink[^fn-nvlink-intranode] or PCIe connections with NCCL[^fn-nccl-topology] optimization while preserving the single-machine simplicity of fault tolerance and scheduling.
 
-[^fn-nvlink-intranode]: **NVLink**: NVIDIA's point-to-point GPU interconnect delivers `{python} DistTrainNvlinkIntro.nvlink_a100_str`--`{python} DistTrainNvlinkIntro.nvlink_h100_str` bidirectional bandwidth, roughly `{python} DistTrainNvlinkIntro.nvlink_hdr_ratio_low_str`$\times$--`{python} DistTrainNvlinkIntro.nvlink_hdr_ratio_high_str`$\times$ InfiniBand HDR per port. This bandwidth gap is why tensor parallelism, which requires AllReduce on every layer, is confined to intra-node communication, while pipeline and data parallelism tolerate the slower inter-node fabric. \index{NVLink!distributed training}
+[^fn-nvlink-intranode]: **NVLink**: NVIDIA's point-to-point GPU interconnect delivers `{python} DistTrainNvlinkIntro.nvlink_a100_gb_s_str`--`{python} DistTrainNvlinkIntro.nvlink_h100_gb_s_str` bidirectional bandwidth, roughly `{python} DistTrainNvlinkIntro.nvlink_hdr_ratio_low_str`$\times$--`{python} DistTrainNvlinkIntro.nvlink_hdr_ratio_high_str`$\times$ InfiniBand HDR per port. This bandwidth gap is why tensor parallelism, which requires AllReduce on every layer, is confined to intra-node communication, while pipeline and data parallelism tolerate the slower inter-node fabric. \index{NVLink!distributed training}
 
 [^fn-nccl-topology]: **NCCL (NVIDIA Collective Communications Library)**: Released in 2015, NCCL automatically selects ring, tree, or hierarchical AllReduce algorithms based on detected hardware topology: NVLink within nodes, InfiniBand across nodes. This topology-aware routing is critical because a naive single-ring AllReduce across 128 nodes would force all traffic through the slowest inter-node link, collapsing bandwidth utilization to under 30 percent. \index{NCCL!topology}
 
@@ -459,12 +459,12 @@ class HierarchicalAllReduceDebug:
     hierarchical_total_ms_str = fmt_time(hierarchical_total_time, ms, precision=1, commas=False)
     observed_ms_str = fmt_time(observed_time, ms, precision=0, commas=False)
     residual_ms_str = fmt_time(residual_time, ms, precision=1, commas=False)
-    nvlink_a100_str = fmt_bandwidth(nvlink_bw, unit=GB/second, precision=0, commas=False)
+    nvlink_a100_gb_s_str = fmt_bandwidth(nvlink_bw, unit=GB/second, precision=0, commas=False)
     tensor_gb_str = fmt_memory(tensor_bytes, unit=GB, precision=0, commas=False)
     nodes_str = fmt_count(nodes, commas=False, label="node")
     gpus_per_node_str = fmt_count(gpus_per_node, commas=False, label="GPU")
     total_gpus_str = fmt_count(nodes * gpus_per_node, commas=True, label="GPU")
-    ib_hdr_bw_str = fmt_bandwidth(ib_hdr_bw, unit=GB/second, precision=0, commas=False)
+    ib_hdr_bw_gb_s_str = fmt_bandwidth(ib_hdr_bw, unit=GB/second, precision=0, commas=False)
     flat_single_link_ms_str = fmt_time(tensor_bytes / ib_hdr_bw, ms, precision=0, commas=False)
     ib_util_pct_str = fmt_percent(ib_util_pct/100, precision=0, commas=False, style='prose')
 ```
@@ -476,9 +476,9 @@ class HierarchicalAllReduceDebug:
 **Infrastructure Layer**:
 
 - **Topology**: `{python} HierarchicalAllReduceDebug.nodes_str`, `{python} HierarchicalAllReduceDebug.gpus_per_node_str` per node
-- **Intra-node**: NVLink at `{python} HierarchicalAllReduceDebug.nvlink_a100_str` bidirectional between GPUs
-- **Inter-node**: InfiniBand HDR at 200 Gb/s (`{python} HierarchicalAllReduceDebug.ib_hdr_bw_str`) per port
-- **Naive single-stream baseline**: A flat `{python} HierarchicalAllReduceDebug.tensor_gb_str` transfer over one InfiniBand link takes `{python} HierarchicalAllReduceDebug.tensor_gb_str` / `{python} HierarchicalAllReduceDebug.ib_hdr_bw_str` = `{python} HierarchicalAllReduceDebug.flat_single_link_ms_str`, and a flat ring across all `{python} HierarchicalAllReduceDebug.total_gpus_str` pays $2(N-1)/N \times$ `{python} HierarchicalAllReduceDebug.tensor_gb_str` / `{python} HierarchicalAllReduceDebug.ib_hdr_bw_str`, or approximately `{python} HierarchicalAllReduceDebug.flat_ring_ms_str`. A hierarchical AllReduce (intra-node ring over NVLink + inter-node ring over InfiniBand) brings the inter-node cost down to roughly `{python} HierarchicalAllReduceDebug.inter_node_ms_str` because each node only ships its 1/8 share over the slow link, or roughly `{python} HierarchicalAllReduceDebug.hierarchical_total_ms_str` after adding two intra-node NVLink phases.
+- **Intra-node**: NVLink at `{python} HierarchicalAllReduceDebug.nvlink_a100_gb_s_str` bidirectional between GPUs
+- **Inter-node**: InfiniBand HDR at 200 Gb/s (`{python} HierarchicalAllReduceDebug.ib_hdr_bw_gb_s_str`) per port
+- **Naive single-stream baseline**: A flat `{python} HierarchicalAllReduceDebug.tensor_gb_str` transfer over one InfiniBand link takes `{python} HierarchicalAllReduceDebug.tensor_gb_str` / `{python} HierarchicalAllReduceDebug.ib_hdr_bw_gb_s_str` = `{python} HierarchicalAllReduceDebug.flat_single_link_ms_str`, and a flat ring across all `{python} HierarchicalAllReduceDebug.total_gpus_str` pays $2(N-1)/N \times$ `{python} HierarchicalAllReduceDebug.tensor_gb_str` / `{python} HierarchicalAllReduceDebug.ib_hdr_bw_gb_s_str`, or approximately `{python} HierarchicalAllReduceDebug.flat_ring_ms_str`. A hierarchical AllReduce (intra-node ring over NVLink + inter-node ring over InfiniBand) brings the inter-node cost down to roughly `{python} HierarchicalAllReduceDebug.inter_node_ms_str` because each node only ships its 1/8 share over the slow link, or roughly `{python} HierarchicalAllReduceDebug.hierarchical_total_ms_str` after adding two intra-node NVLink phases.
 
 **Distribution Layer**:
 
@@ -622,14 +622,14 @@ class Scaling8GPU:
     check(efficiency_8gpu_val > 90, f"Intra-node efficiency ({efficiency_8gpu_val:.1f}%) should be high")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    total_8gpu_str = fmt_time(total_8gpu_ms_val, 'millisecond', precision=1, commas=False)
+    total_8gpu_ms_str = fmt_time(total_8gpu_ms_val, 'millisecond', precision=1, commas=False)
     # single_gpu_step_s float "1.8" — canonical fmt would corrupt; use MarkdownStr escape-hatch
     single_gpu_step_s_str = fmt_time(single_gpu_step_s, 'second', precision=1, commas=False)
     speedup_8gpu_str = fmt_int(round(speedup_8gpu_val), commas=False)
     efficiency_8gpu_str = fmt_percent(efficiency_8gpu_val/100, precision=1, commas=False, style='prose')
-    training_8gpu_str = fmt_time(training_hours_8gpu_val, 'hour', precision=1, commas=False, style='word')
+    training_8gpu_hours_str = fmt_time(training_hours_8gpu_val, 'hour', precision=1, commas=False, style='word')
     gpt2_sync_size_gb_str = fmt_memory(sync_size, unit=GB, precision=1, commas=False)
-    nvlink_h100_str = fmt_bandwidth(nvlink_bw, unit=GB/second, precision=0, commas=False)
+    nvlink_h100_gb_s_str = fmt_bandwidth(nvlink_bw, unit=GB/second, precision=0, commas=False)
     comm_8gpu_ms_str = fmt_time(comm_8gpu_ms_val, 'millisecond', precision=1, commas=False)
     # compute_8gpu_ms int "1800" — preserve original (no commas) via MarkdownStr
     compute_8gpu_ms_str = fmt_time(compute_8gpu_ms, 'millisecond', precision=0, commas=False)
@@ -648,17 +648,17 @@ class Scaling8GPU:
 Configuration:
 
 - Per-GPU batch: 16, global batch: 128
-- Gradient synchronization: `{python} Scaling8GPU.gpt2_sync_size_gb_str` @ `{python} Scaling8GPU.nvlink_h100_str` (NVLink) $\approx$ `{python} Scaling8GPU.comm_8gpu_ms_str`
+- Gradient synchronization: `{python} Scaling8GPU.gpt2_sync_size_gb_str` @ `{python} Scaling8GPU.nvlink_h100_gb_s_str` (NVLink) $\approx$ `{python} Scaling8GPU.comm_8gpu_ms_str`
 
 Performance results:
 
 - Computation: `{python} Scaling8GPU.compute_8gpu_ms_str` per step
 - Communication: `{python} Scaling8GPU.comm_8gpu_ms_str` per step
-- Total: `{python} Scaling8GPU.total_8gpu_str` per step
+- Total: `{python} Scaling8GPU.total_8gpu_ms_str` per step
 - Speedup (throughput): `{python} Scaling8GPU.speedup_8gpu_str`$\times$
 - Parallel efficiency: `{python} Scaling8GPU.efficiency_8gpu_str`
 
-Training time: `{python} Scaling8GPU.training_hours_1gpu_str` ÷ `{python} Scaling8GPU.speedup_8gpu_str` = `{python} Scaling8GPU.training_8gpu_str`
+Training time: `{python} Scaling8GPU.training_hours_1gpu_str` ÷ `{python} Scaling8GPU.speedup_8gpu_str` = `{python} Scaling8GPU.training_8gpu_hours_str`
 
 ```{python}
 #| echo: false
@@ -692,13 +692,13 @@ class Scaling32GPU:
     # ┌── 4. OUTPUT ───────────────────────────────────────
     compute_pct_str = fmt_percent(compute_pct_val/100, precision=1, commas=False, style='prose')
     comm_pct_str = fmt_percent(comm_pct_val/100, precision=1, commas=False, style='prose')
-    total_32gpu_str = fmt_time(total_32gpu_ms_val, 'millisecond', precision=1, commas=False)
+    total_32gpu_ms_str = fmt_time(total_32gpu_ms_val, 'millisecond', precision=1, commas=False)
     speedup_32gpu_str = fmt(speedup_32gpu_val, precision=1, commas=False)
     efficiency_32gpu_str = fmt_percent(efficiency_32gpu_val/100, precision=1, commas=False, style='prose')
-    training_32gpu_str = fmt_time(training_32gpu_hours_val, 'hour', precision=1, commas=False, style='word')
+    training_32gpu_hours_str = fmt_time(training_32gpu_hours_val, 'hour', precision=1, commas=False, style='word')
     gpt2_sync_size_gb_str = fmt_memory(sync_size, unit=GB, precision=1, commas=False)
     inter_node_ms_str = fmt_time(inter_node_ms_val, 'millisecond', precision=0, commas=False)
-    ib_hdr_str = fmt_bandwidth(net_bw, unit=GB / second, precision=2, commas=False)
+    ib_hdr_gb_s_str = fmt_bandwidth(net_bw, unit=GB / second, precision=2, commas=False)
     compute_32gpu_ms_str = fmt_time(compute_32gpu_ms, 'millisecond', precision=0, commas=False)
     comm_32gpu_ms_str = fmt_time(comm_32gpu_ms_val, 'millisecond', precision=1, commas=False)
     intra_node_comm_ms_str = fmt_time(intra_node_ms_val, 'millisecond', precision=1, commas=False)
@@ -712,14 +712,14 @@ Configuration:
 
 - Per-GPU batch: 16, global batch: 512
 - Intra-node communication: `{python} Scaling32GPU.intra_node_comm_ms_str` (NVLink)
-- Inter-node communication: `{python} Scaling32GPU.gpt2_sync_size_gb_str` @ `{python} Scaling32GPU.ib_hdr_str` (10GbE) $\approx$ `{python} Scaling32GPU.inter_node_ms_str`
+- Inter-node communication: `{python} Scaling32GPU.gpt2_sync_size_gb_str` @ `{python} Scaling32GPU.ib_hdr_gb_s_str` (10GbE) $\approx$ `{python} Scaling32GPU.inter_node_ms_str`
 
 Performance results:
 
 - Computation: `{python} Scaling32GPU.compute_32gpu_ms_str` (`{python} Scaling32GPU.compute_pct_str` of time)
 - Communication: `{python} Scaling32GPU.comm_32gpu_ms_str` (`{python} Scaling32GPU.comm_pct_str` of time)
-- Total: `{python} Scaling32GPU.total_32gpu_str` per step
-- Speedup (throughput): `{python} Scaling32GPU.speedup_32gpu_str`$\times$ faster → `{python} Scaling32GPU.training_32gpu_str`
+- Total: `{python} Scaling32GPU.total_32gpu_ms_str` per step
+- Speedup (throughput): `{python} Scaling32GPU.speedup_32gpu_str`$\times$ faster → `{python} Scaling32GPU.training_32gpu_hours_str`
 - Parallel efficiency: `{python} Scaling32GPU.efficiency_32gpu_str`
 
 Communication dominates and becomes the bottleneck.
@@ -821,12 +821,12 @@ class DistTrainA100Memory:
     bytes_per_param_str = fmt(bytes_per_param_val, precision=0, commas=False)
     n_gpus_zero_str = fmt_count(n_gpus_zero, commas=False, label="GPU")
     activation_headroom_gb_str = fmt_qty_int(round(activation_headroom.to(GB).magnitude) * GB, GB, commas=False)
-    a100_mem_str = fmt_qty(a100_mem, GiB, precision=0, commas=False, unit_label="GB")
+    a100_mem_gb_str = fmt_qty(a100_mem, GiB, precision=0, commas=False, unit_label="GB")
 ```
 
 ::: {#nbk-distributed-training-zero-memory-savings .callout-notebook title="ZeRO memory savings"}
 
-**Problem**: Training a `{python} DistTrainA100Memory.params_b_str` parameter Llama-2 model in mixed precision requires `{python} DistTrainA100Memory.bytes_per_param_str` bytes per parameter for weights, gradients, and optimizer state. Does the full training state fit on a single A100-`{python} DistTrainA100Memory.a100_mem_str`, and how does ZeRO Stage 3 with `{python} DistTrainA100Memory.n_gpus_zero_str` change the per-device memory requirement?
+**Problem**: Training a `{python} DistTrainA100Memory.params_b_str` parameter Llama-2 model in mixed precision requires `{python} DistTrainA100Memory.bytes_per_param_str` bytes per parameter for weights, gradients, and optimizer state. Does the full training state fit on a single A100-`{python} DistTrainA100Memory.a100_mem_gb_str`, and how does ZeRO Stage 3 with `{python} DistTrainA100Memory.n_gpus_zero_str` change the per-device memory requirement?
 
 **Baseline: Standard DDP (Replicated State)**
 Per-Parameter Memory Cost:
@@ -838,7 +838,7 @@ Per-Parameter Memory Cost:
 
 Total Memory for 7B Model:
 $$ C_{\text{state,total}} = 7 \times 10^9 \times 16 \text{ bytes} \approx \mathbf{112 \text{ GB}} $$
-**Baseline outcome**: out-of-memory (OOM)\index{Out-of-Memory}\index{OOM} on A100-`{python} DistTrainA100Memory.a100_mem_str`.
+**Baseline outcome**: out-of-memory (OOM)\index{Out-of-Memory}\index{OOM} on A100-`{python} DistTrainA100Memory.a100_mem_gb_str`.
 
 **Optimization: ZeRO-3 (Fully Sharded)**
 With $N=64$ GPUs, state is partitioned:
@@ -887,7 +887,7 @@ Total FSDP communication volume: approximately $3M_{\text{state}}$ bytes (vs. $2
 
 :::
 
-The choice between FSDP and DDP depends on model size and memory constraints. Use DDP when the model fits in GPU memory with room for activations, as it has lower overhead. Use FSDP ZeRO-2 when the model barely fits or requires activation checkpointing. Use FSDP ZeRO-3 when model parameters exceed single-GPU memory. For training 70B+ models on `{python} DistTrainA100Memory.a100_mem_str`, combine FSDP with tensor parallelism.
+The choice between FSDP and DDP depends on model size and memory constraints. Use DDP when the model fits in GPU memory with room for activations, as it has lower overhead. Use FSDP ZeRO-2 when the model barely fits or requires activation checkpointing. Use FSDP ZeRO-3 when model parameters exceed single-GPU memory. For training 70B+ models on `{python} DistTrainA100Memory.a100_mem_gb_str`, combine FSDP with tensor parallelism.
 
 Memory-efficient data parallelism requires careful tuning of sharding strategy (by layer, by transformer block, or flat) and mixed precision settings. The sharding granularity determines the trade-off: finer sharding reduces per-GPU memory but increases communication frequency as more AllGather and ReduceScatter operations must execute per training step.
 
@@ -1008,14 +1008,14 @@ class InfraFrontierStragglerRecap13:
 #| echo: false
 from mlsysim.fmt import fmt_qty
 # ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: CommScalingIbRecap.ib_bw_str
+# │ Exports: CommScalingIbRecap.ib_bw_gb_s_str
 class CommScalingIbRecap:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    ib_bw_str = fmt_qty(Systems.Fabrics.InfiniBand_NDR.bandwidth, GB/second, precision=0, commas=False)
+    ib_bw_gb_s_str = fmt_qty(Systems.Fabrics.InfiniBand_NDR.bandwidth, GB/second, precision=0, commas=False)
 ```
 For data-parallel training of our `{python} InfraFrontierStragglerRecap13.frontier_params_b_str` model, the communication cost per step is dominated by the AllReduce of `{python} CommScalingMath.gradient_gb_str` of gradients.
 
-Using ring-AllReduce over InfiniBand at `{python} CommScalingIbRecap.ib_bw_str` effective bandwidth, the raw communication time is approximately `{python} CommScalingMath.comm_time_formula_math`, which for large $N$ approaches `{python} CommScalingMath.comm_approx_math` seconds. With 75 percent overlap between gradient communication and the backward pass, the effective exposed communication time drops to `{python} CommScalingMath.t_comm_math` seconds. Under the same assumptions, the compute term is `{python} CommScalingMath.t_compute_math` seconds, so the exposed step time is about `{python} CommScalingMath.exposed_step_s_str` and naive data-parallel scaling efficiency is `{python} CommScalingMath.t_compute_s_str`/`{python} CommScalingMath.exposed_step_s_str` $\approx$ `{python} CommScalingMath.scaling_efficiency_str`. Production systems recover much of this loss by combining tensor parallelism, pipeline parallelism, topology-aware placement, and more effective communication overlap, achieving 70--90 percent scaling efficiency for well-optimized training systems.
+Using ring-AllReduce over InfiniBand at `{python} CommScalingIbRecap.ib_bw_gb_s_str` effective bandwidth, the raw communication time is approximately `{python} CommScalingMath.comm_time_formula_math`, which for large $N$ approaches `{python} CommScalingMath.comm_approx_math` seconds. With 75 percent overlap between gradient communication and the backward pass, the effective exposed communication time drops to `{python} CommScalingMath.t_comm_math` seconds. Under the same assumptions, the compute term is `{python} CommScalingMath.t_compute_math` seconds, so the exposed step time is about `{python} CommScalingMath.exposed_step_s_str` and naive data-parallel scaling efficiency is `{python} CommScalingMath.t_compute_s_str`/`{python} CommScalingMath.exposed_step_s_str` $\approx$ `{python} CommScalingMath.scaling_efficiency_str`. Production systems recover much of this loss by combining tensor parallelism, pipeline parallelism, topology-aware placement, and more effective communication overlap, achieving 70--90 percent scaling efficiency for well-optimized training systems.
 
 The scaling efficiency depends critically on the ratio of computation to communication. Three factors govern this ratio:
 
@@ -1044,11 +1044,11 @@ However, even for large models, scaling does not continue indefinitely. There ex
 ```{python}
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: InfraIbBwPodRecap.ib_bw_str
+# │ Exports: InfraIbBwPodRecap.ib_bw_gbps_str
 class InfraIbBwPodRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    ib_bw_str = fmt_qty(Systems.Fabrics.InfiniBand_NDR.bandwidth, Gbps, precision=0, commas=False, unit_label="Gb/s")
+    ib_bw_gbps_str = fmt_qty(Systems.Fabrics.InfiniBand_NDR.bandwidth, Gbps, precision=0, commas=False, unit_label="Gb/s")
 ```
 
 ```{python}
@@ -1072,7 +1072,7 @@ class PodSetupComputeRecap:
     h100_tflops_str = fmt_qty(Hardware.Cloud.H100.compute.precision_flops['fp8'], TFLOP/second, precision=0, commas=False)
 ```
 
-**Setup**\index{Setup}: Training a `{python} InfraFrontierPodSetupRecap.frontier_params_b_str` model on a DGX H100 cluster with `{python} InfraIbBwPodRecap.ib_bw_str` InfiniBand per GPU.
+**Setup**\index{Setup}: Training a `{python} InfraFrontierPodSetupRecap.frontier_params_b_str` model on a DGX H100 cluster with `{python} InfraIbBwPodRecap.ib_bw_gbps_str` InfiniBand per GPU.
 
 - **Compute per step** (assuming batch size `{python} CommScalingMath.batch_tokens_m_str`M tokens, `{python} CommScalingMath.flops_per_token_str` per parameter per token):
   `{python} CommScalingMath.compute_per_step_math` FLOPs
@@ -1285,10 +1285,10 @@ Wall-clock efficiency and the energy tax degrade together as $N$ grows, followin
 class DistTrainNvlinkScaling:
     from mlsysim.core.constants import GB, second
     from mlsysim.fmt import fmt, fmt_qty
-    nvlink_a100_str = fmt_qty(Hardware.Cloud.A100.nvlink.bandwidth, GB/second, precision=0, commas=False)
+    nvlink_a100_gb_s_str = fmt_qty(Hardware.Cloud.A100.nvlink.bandwidth, GB/second, precision=0, commas=False)
 ```
 
-Hardware selection critically impacts these scaling characteristics. NVIDIA DGX A100 systems provide `{python} DistTrainNvlinkScaling.nvlink_a100_str` of bidirectional NVLink bandwidth per GPU, with aggregate NVSwitch bandwidth at the system level, enabling high parallel efficiency up to 8 GPUs per node. Multi-node scaling requires InfiniBand networks, where EDR at 100 Gbps supports efficient training up to 64 nodes, while HDR at 200 Gbps enables scaling to 256+ nodes with greater than 70 percent efficiency.
+Hardware selection critically impacts these scaling characteristics. NVIDIA DGX A100 systems provide `{python} DistTrainNvlinkScaling.nvlink_a100_gb_s_str` of bidirectional NVLink bandwidth per GPU, with aggregate NVSwitch bandwidth at the system level, enabling high parallel efficiency up to 8 GPUs per node. Multi-node scaling requires InfiniBand networks, where EDR at 100 Gbps supports efficient training up to 64 nodes, while HDR at 200 Gbps enables scaling to 256+ nodes with greater than 70 percent efficiency.
 
 The efficiency metrics directly influence the choice of parallelism strategy. Data parallelism works well in the linear scaling regime but becomes communication-bound at scale. Model parallelism addresses memory constraints but introduces sequential dependencies that limit efficiency. Pipeline parallelism reduces device idle time but introduces complexity in managing microbatches. The optimal strategy depends on which constraint—memory, bandwidth, or synchronization—dominates the target workload.
 
@@ -1669,7 +1669,7 @@ from mlsysim.engine.solver import DistributedModel
 # │
 # │ Imports: mlsysim.core.constants (Models.Language.GPT3.parameters, Bparam); mlsysim.fmt (fmt, check)
 # │ Exports: ModelParallelMemoryFacts.weight_gb_str,
-# │          .weight_per_gpu_str, .full_state_gb_str, .full_state_per_gpu_str
+# │          .weight_per_gpu_gb_str, .full_state_gb_str, .full_state_per_gpu_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check, fmt_memory
 from mlsysim.physics import memory_from_params
@@ -1697,9 +1697,9 @@ class ModelParallelMemoryFacts:
 
     # ┌── 4. OUTPUT ───────────────────────────────────────
     weight_gb_str = fmt_memory(weight_mem, unit=GB, precision=0, commas=False)
-    weight_per_gpu_str = fmt_memory(weight_per_gpu_mem, unit=GB, precision=1, commas=False)
+    weight_per_gpu_gb_str = fmt_memory(weight_per_gpu_mem, unit=GB, precision=1, commas=False)
     full_state_gb_str = fmt_memory(full_state_mem, unit=GB, precision=0, commas=True)
-    full_state_per_gpu_str = fmt_memory(full_state_per_gpu_mem, unit=GB, precision=1, commas=False)
+    full_state_per_gpu_gb_str = fmt_memory(full_state_per_gpu_mem, unit=GB, precision=1, commas=False)
 ```
 
 ```{python}
@@ -1718,7 +1718,7 @@ class FrontierModelParallelRecap:
 *Optimizer state, not weights, dominates the per-replica training budget.*
 :::
 
-Even with ZeRO-3 fully deployed, sharding optimizer states, gradients, and parameters across workers, some architectures remain intractable. Tensor parallelism, illustrated in @fig-model-parallel-flow, addresses this by partitioning individual weight matrices across devices; pipeline parallelism partitions layers across stages and is introduced later in @sec-distributed-training-systems-systems-pipeline-parallelism-8748. For a `{python} FrontierModelParallelRecap.frontier_params_b_str` parameter model, weights alone occupy `{python} ModelParallelMemoryFacts.weight_gb_str`, or about `{python} ModelParallelMemoryFacts.weight_per_gpu_str` per GPU across 64 GPUs. Full mixed-precision Adam training state is much larger: `{python} ModelParallelMemoryFacts.full_state_gb_str` globally, or roughly `{python} ModelParallelMemoryFacts.full_state_per_gpu_str` per GPU before activations. This distinction matters because optimizer sharding reduces static state, but it does not eliminate the activation and per-layer capacity constraints that force model parallelism.
+Even with ZeRO-3 fully deployed, sharding optimizer states, gradients, and parameters across workers, some architectures remain intractable. Tensor parallelism, illustrated in @fig-model-parallel-flow, addresses this by partitioning individual weight matrices across devices; pipeline parallelism partitions layers across stages and is introduced later in @sec-distributed-training-systems-systems-pipeline-parallelism-8748. For a `{python} FrontierModelParallelRecap.frontier_params_b_str` parameter model, weights alone occupy `{python} ModelParallelMemoryFacts.weight_gb_str`, or about `{python} ModelParallelMemoryFacts.weight_per_gpu_gb_str` per GPU across 64 GPUs. Full mixed-precision Adam training state is much larger: `{python} ModelParallelMemoryFacts.full_state_gb_str` globally, or roughly `{python} ModelParallelMemoryFacts.full_state_per_gpu_gb_str` per GPU before activations. This distinction matters because optimizer sharding reduces static state, but it does not eliminate the activation and per-layer capacity constraints that force model parallelism.
 
 ::: {#fig-model-parallel-flow fig-env="figure" fig-pos="htb" fig-cap="**Tensor Parallelism Data Flow**: Tensor parallelism column-splits a single weight matrix ($W_0\ldots W_3$) across four GPUs, with each GPU computing a partial output that is recombined through an AllGather. The companion strategy, pipeline parallelism, partitions layers vertically across stages and is shown separately in the layer-block figure. The two strategies are often combined in hybrid 3D parallelism for frontier models." fig-alt="Single panel showing tensor parallelism: a weight matrix column-split as W0, W1, W2, W3 across four GPUs, with partial outputs combined via AllGather."}
 ![](images/svg/model-parallel-flow.svg){width=100%}
@@ -1759,7 +1759,7 @@ class A100CapacityContext:
     check(mem_capacity == 80 * GiB, "A100 memory capacity should be 80 GB")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    a100_mem_str = fmt_qty(mem_capacity, GiB, precision=0, commas=False, unit_label="GB")
+    a100_mem_gb_str = fmt_qty(mem_capacity, GiB, precision=0, commas=False, unit_label="GB")
 
 class MemoryWallAnalysis:
     """ZeRO-3 memory wall analysis for 175B model on A100s."""
@@ -1793,25 +1793,25 @@ class MemoryWallAnalysis:
     gradient_gb_str = fmt_memory(gradient_mem, unit=GB, precision=0, commas=False)
     optim_gb_str = fmt_memory(optim_mem, unit=GB, precision=0, commas=True)
     total_static_gb_str = fmt_memory(total_static_mem, unit=GB, precision=0, commas=True)
-    per_gpu_str = fmt_memory(per_gpu_static, unit=GB, precision=1, commas=False)
-    activation_str = fmt_memory(activation_approx, unit=GB, precision=0, commas=False)
-    total_per_gpu_str = fmt_memory(total_per_gpu, unit=GB, precision=1, commas=False)
+    per_gpu_gb_str = fmt_memory(per_gpu_static, unit=GB, precision=1, commas=False)
+    activation_gb_str = fmt_memory(activation_approx, unit=GB, precision=0, commas=False)
+    total_per_gpu_gb_str = fmt_memory(total_per_gpu, unit=GB, precision=1, commas=False)
     n_gpus_str = fmt_count(n_gpus, commas=False, label="GPU")
 ```
 
 ::: {#nbk-distributed-training-memory-wall-scale .callout-notebook title="The memory wall of scale"}
 
-**Problem**: Training a `{python} FrontierModelParallelRecap.frontier_params_b_str` parameter model (like GPT-3) on NVIDIA A100s (`{python} A100CapacityContext.a100_mem_str`). Can Data Parallelism with ZeRO-3 handle this?
+**Problem**: Training a `{python} FrontierModelParallelRecap.frontier_params_b_str` parameter model (like GPT-3) on NVIDIA A100s (`{python} A100CapacityContext.a100_mem_gb_str`). Can Data Parallelism with ZeRO-3 handle this?
 
 **Math**:
 
 1.  **Parameter storage**: `{python} FrontierModelParallelRecap.frontier_params_b_str` params $\times$ 2 bytes (FP16) = `{python} MemoryWallAnalysis.param_gb_str`.
 2.  **Gradients and optimizer state**: gradients add `{python} FrontierModelParallelRecap.frontier_params_b_str` params $\times$ 2 bytes = `{python} MemoryWallAnalysis.gradient_gb_str`, while Adam FP32 master weights, momentum, and variance add `{python} FrontierModelParallelRecap.frontier_params_b_str` params $\times$ 12 bytes = `{python} MemoryWallAnalysis.optim_gb_str`.
 3.  **Total static memory**: `{python} MemoryWallAnalysis.total_static_gb_str`.
-4.  **ZeRO-3 Sharding**: With `{python} MemoryWallAnalysis.n_gpus_str`, per-GPU static memory = `{python} MemoryWallAnalysis.total_static_gb_str`/`{python} MemoryWallAnalysis.n_gpus_str` $\approx$ `{python} MemoryWallAnalysis.per_gpu_str`.
-5.  **Activation memory**: For sequence length 2048 and batch size 1, a 96-layer transformer generates $\approx$ `{python} MemoryWallAnalysis.activation_str` of activations per GPU.
+4.  **ZeRO-3 Sharding**: With `{python} MemoryWallAnalysis.n_gpus_str`, per-GPU static memory = `{python} MemoryWallAnalysis.total_static_gb_str`/`{python} MemoryWallAnalysis.n_gpus_str` $\approx$ `{python} MemoryWallAnalysis.per_gpu_gb_str`.
+5.  **Activation memory**: For sequence length 2048 and batch size 1, a 96-layer transformer generates $\approx$ `{python} MemoryWallAnalysis.activation_gb_str` of activations per GPU.
 
-**Systems insight**: `{python} MemoryWallAnalysis.per_gpu_str` (static) + `{python} MemoryWallAnalysis.activation_str` (dynamic) = `{python} MemoryWallAnalysis.total_per_gpu_str`. This exceeds the `{python} A100CapacityContext.a100_mem_str` capacity of the A100. Even with full ZeRO-3 sharding, *pure Data Parallelism fails*. The only recourse is tensor parallelism to split the layers themselves.
+**Systems insight**: `{python} MemoryWallAnalysis.per_gpu_gb_str` (static) + `{python} MemoryWallAnalysis.activation_gb_str` (dynamic) = `{python} MemoryWallAnalysis.total_per_gpu_gb_str`. This exceeds the `{python} A100CapacityContext.a100_mem_gb_str` capacity of the A100. Even with full ZeRO-3 sharding, *pure Data Parallelism fails*. The only recourse is tensor parallelism to split the layers themselves.
 
 :::
 
@@ -1905,7 +1905,7 @@ class FrontierModelParallelPipelineRecap:
     frontier_params_b_str = fmt(params_b, precision=0)
 ```
 
-Consider our running example: the `{python} FrontierModelParallelPipelineRecap.frontier_params_b_str` parameter model requires 350 GB of memory in FP16, exceeding the `{python} A100CapacityContext.a100_mem_str` capacity of a single A100 by a factor of four. Model parallelism addresses this **capacity wall**\index{Capacity Wall} by partitioning model weights across multiple devices, effectively stitching them into a single super-accelerator. Unlike data parallelism, where every GPU holds a full replica of the model and processes a unique fraction of the global batch, model parallelism requires each GPU to hold a *unique* fraction of the model and process the *same* data stream sequentially. With 8-way partitioning on A100s, BF16 weights alone occupy approximately 44 GB per GPU. That is only the weights budget: full training still needs activations, gradients, and optimizer state, so pure 8-way model parallelism is not sufficient by itself. Training requires additional sharding or offload for optimizer and gradient state, plus pipeline or hybrid parallelism to keep activation memory within capacity.
+Consider our running example: the `{python} FrontierModelParallelPipelineRecap.frontier_params_b_str` parameter model requires 350 GB of memory in FP16, exceeding the `{python} A100CapacityContext.a100_mem_gb_str` capacity of a single A100 by a factor of four. Model parallelism addresses this **capacity wall**\index{Capacity Wall} by partitioning model weights across multiple devices, effectively stitching them into a single super-accelerator. Unlike data parallelism, where every GPU holds a full replica of the model and processes a unique fraction of the global batch, model parallelism requires each GPU to hold a *unique* fraction of the model and process the *same* data stream sequentially. With 8-way partitioning on A100s, BF16 weights alone occupy approximately 44 GB per GPU. That is only the weights budget: full training still needs activations, gradients, and optimizer state, so pure 8-way model parallelism is not sufficient by itself. Training requires additional sharding or offload for optimizer and gradient state, plus pipeline or hybrid parallelism to keep activation memory within capacity.
 
 In a typical pipeline parallel implementation, the training loop operates as a relay race. The forward pass initiates on GPU 1, which computes the initial transformer blocks and transmits the resulting intermediate activation tensor across the interconnect to GPU 2. For our `{python} FrontierModelParallelPipelineRecap.frontier_params_b_str` model with a hidden dimension of 12,288 and a micro-batch size of 4 sequences at 2,048 tokens each, this handoff involves moving approximately 200 MB of data per stage boundary per step. GPU 2 must wait for this payload before it can begin its computation, creating a strict dependency chain that propagates through all stages. The backward pass mirrors this path in reverse, propagating error gradients from the final layer back to the input, with each device computing gradients only for its local parameters.
 
@@ -2031,21 +2031,21 @@ Tensor parallelism takes a fundamentally different approach: instead of assignin
 class TensorParallelBandwidth:
     from mlsysim.core.constants import GB, second
     from mlsysim.fmt import fmt_bandwidth
-    nvlink_h100_str = fmt_bandwidth(Hardware.Cloud.H100.nvlink.bandwidth, unit=GB / second, precision=0, commas=False)
-    ib_ndr_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=GB / second, precision=0, commas=False)
+    nvlink_h100_gb_s_str = fmt_bandwidth(Hardware.Cloud.H100.nvlink.bandwidth, unit=GB / second, precision=0, commas=False)
+    ib_ndr_gb_s_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=GB / second, precision=0, commas=False)
     pipeline_ib_lo_bw = Systems.Fabrics.InfiniBand_HDR.bandwidth
     pipeline_ib_hi_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth
-    pipeline_ib_lo_str = fmt_bandwidth(pipeline_ib_lo_bw, unit=GB / second, precision=0, commas=False)
-    pipeline_ib_hi_str = fmt_bandwidth(pipeline_ib_hi_bw, unit=GB / second, precision=0, commas=False)
+    pipeline_ib_lo_gb_s_str = fmt_bandwidth(pipeline_ib_lo_bw, unit=GB / second, precision=0, commas=False)
+    pipeline_ib_hi_gb_s_str = fmt_bandwidth(pipeline_ib_hi_bw, unit=GB / second, precision=0, commas=False)
 ```
 
 ::: {#dfn-distributed-training-tensor-parallelism .callout-definition title="Tensor parallelism"}
 
 ***Tensor Parallelism***\index{Tensor Parallelism!definition} is a model parallelism technique that partitions individual tensor operations—primarily matrix multiplications—across multiple devices using column-parallel or row-parallel weight splits, typically requiring two AllReduce operations per transformer layer in Megatron-style transformer blocks to sum partial results from all participating devices.
 
-1.  **Significance (quantitative)**: Megatron-LM style tensor parallelism places two AllReduce operations per transformer block—one after attention and one after the MLP—with each collective reducing an activation tensor of size $B_{\text{batch}} \times S \times d_{\text{model}} \times 2$ bytes in BF16. A ring AllReduce moves roughly $2(t-1)/t$ times that payload per GPU. At degree $t=8$ on NVLink with `{python} TensorParallelBandwidth.nvlink_h100_str` bandwidth, each AllReduce takes approximately 0.1–0.5 ms. The same operation over InfiniBand (`{python} TensorParallelBandwidth.ib_ndr_str`) takes 2–10 ms per layer—with 96 transformer blocks, this adds 200–960 ms of pure synchronization overhead per step, collapsing MFU to single digits.
+1.  **Significance (quantitative)**: Megatron-LM style tensor parallelism places two AllReduce operations per transformer block—one after attention and one after the MLP—with each collective reducing an activation tensor of size $B_{\text{batch}} \times S \times d_{\text{model}} \times 2$ bytes in BF16. A ring AllReduce moves roughly $2(t-1)/t$ times that payload per GPU. At degree $t=8$ on NVLink with `{python} TensorParallelBandwidth.nvlink_h100_gb_s_str` bandwidth, each AllReduce takes approximately 0.1–0.5 ms. The same operation over InfiniBand (`{python} TensorParallelBandwidth.ib_ndr_gb_s_str`) takes 2–10 ms per layer—with 96 transformer blocks, this adds 200–960 ms of pure synchronization overhead per step, collapsing MFU to single digits.
 2.  **Distinction (durable)**: Unlike pipeline parallelism, which communicates only at layer boundaries and transfers small activation slices, tensor parallelism synchronizes within every layer via AllReduce, making it sensitive to the per-operation latency of the interconnect and restricting it to within-node NVLink fabrics in practice.
-3.  **Common pitfall**: A frequent misconception is that tensor parallelism can simply be scaled across nodes over InfiniBand. NVLink delivers approximately `{python} TensorParallelBandwidth.nvlink_h100_str` bidirectional bandwidth; InfiniBand NDR delivers `{python} TensorParallelBandwidth.ib_ndr_str`—an 18$\times$ gap. Running tensor parallelism across InfiniBand typically collapses MFU to single-digit percentages, making the communication overhead larger than the compute benefit of distributing the matrix multiplication.
+3.  **Common pitfall**: A frequent misconception is that tensor parallelism can simply be scaled across nodes over InfiniBand. NVLink delivers approximately `{python} TensorParallelBandwidth.nvlink_h100_gb_s_str` bidirectional bandwidth; InfiniBand NDR delivers `{python} TensorParallelBandwidth.ib_ndr_gb_s_str`—an 18$\times$ gap. Running tensor parallelism across InfiniBand typically collapses MFU to single-digit percentages, making the communication overhead larger than the compute benefit of distributing the matrix multiplication.
 
 :::
 
@@ -2123,8 +2123,8 @@ from mlsysim.engine.solver import DistributedModel
 # │
 # │ Imports: mlsysim.core.constants (Hardware.Cloud.H100.memory.bandwidth, Hardware.Cloud.H100.nvlink.bandwidth, TB, GB, second)
 # │ Imports: mlsysim.book (fmt)
-# │ Exports: FlashAttentionOverlapScenario.h100_hbm_bw_str,
-# │          FlashAttentionOverlapScenario.nvlink_h100_str
+# │ Exports: FlashAttentionOverlapScenario.h100_hbm_bw_tb_s_str,
+# │          FlashAttentionOverlapScenario.nvlink_h100_gb_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check, fmt_bandwidth
 
@@ -2144,11 +2144,11 @@ class FlashAttentionOverlapScenario:
     check(nvlink_bw == 900 * (GB / second), "H100 NVLink bandwidth should be 900 GB/s")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    h100_hbm_bw_str = fmt_bandwidth(hbm_bw, unit=TB/second, precision=2, commas=False)
-    nvlink_h100_str = fmt_bandwidth(nvlink_bw, unit=GB/second, precision=0, commas=False)
+    h100_hbm_bw_tb_s_str = fmt_bandwidth(hbm_bw, unit=TB/second, precision=2, commas=False)
+    nvlink_h100_gb_s_str = fmt_bandwidth(nvlink_bw, unit=GB/second, precision=0, commas=False)
 ```
 
-If the compute time for one tile exceeds the communication time for transferring one tile over NVLink, the communication is fully hidden. On an H100 with `{python} FlashAttentionOverlapScenario.h100_hbm_bw_str` HBM bandwidth and `{python} FlashAttentionOverlapScenario.nvlink_h100_str` NVLink bandwidth, this overlap is achievable for typical tile sizes.
+If the compute time for one tile exceeds the communication time for transferring one tile over NVLink, the communication is fully hidden. On an H100 with `{python} FlashAttentionOverlapScenario.h100_hbm_bw_tb_s_str` HBM bandwidth and `{python} FlashAttentionOverlapScenario.nvlink_h100_gb_s_str` NVLink bandwidth, this overlap is achievable for typical tile sizes.
 
 The practical impact of Ring Attention is measured in context length. Without it, a single GPU's attention computation is limited by HBM capacity: the KV cache for a sequence of length $S$ must fit entirely in one GPU's memory. With Ring Attention across $N$ GPUs, each GPU holds $S/N$ tokens of the KV cache, enabling context lengths of $N \times S_{\text{single}}$. Combined with FlashAttention's efficient tiling within each GPU (see @sec-performance-engineering-flashattention), Ring Attention enables the massive context windows required for long-document reasoning and multi-modal understanding.
 
@@ -2347,29 +2347,29 @@ class TensorParallel3DTraffic:
 class DistTrainNvlinkHybridRecap:
     from mlsysim.core.constants import GB, second
     from mlsysim.fmt import fmt, fmt_qty
-    nvlink_a100_str = fmt_qty(Hardware.Cloud.A100.nvlink.bandwidth, GB/second, precision=0, commas=False)
-    ib_ndr_bw_str = fmt_qty(Systems.Fabrics.InfiniBand_NDR.bandwidth, GB/second, precision=0, commas=False)
-    ib_xdr_bw_str = fmt_qty(Systems.Fabrics.InfiniBand_XDR.bandwidth, GB/second, precision=0, commas=False)
+    nvlink_a100_gb_s_str = fmt_qty(Hardware.Cloud.A100.nvlink.bandwidth, GB/second, precision=0, commas=False)
+    ib_ndr_bw_gb_s_str = fmt_qty(Systems.Fabrics.InfiniBand_NDR.bandwidth, GB/second, precision=0, commas=False)
+    ib_xdr_bw_gb_s_str = fmt_qty(Systems.Fabrics.InfiniBand_XDR.bandwidth, GB/second, precision=0, commas=False)
     hbm_a100_gb_str = fmt_qty(Hardware.Cloud.A100.memory.capacity, GiB, precision=0, commas=False, unit_label="GB")
     hbm_h100_gb_str = fmt_qty(Hardware.Cloud.H100.memory.capacity, GiB, precision=0, commas=False, unit_label="GB")
 
 class FlashAttentionHybridRecap:
     from mlsysim.core.constants import GB, second
     from mlsysim.fmt import fmt, fmt_qty
-    nvlink_h100_str = fmt_qty(Hardware.Cloud.H100.nvlink.bandwidth, GB/second, precision=0, commas=False)
+    nvlink_h100_gb_s_str = fmt_qty(Hardware.Cloud.H100.nvlink.bandwidth, GB/second, precision=0, commas=False)
 ```
 
 Consider a training fleet configured with Tensor Parallelism (TP) of `{python} TensorParallel3DTraffic.tp_str`, Pipeline Parallelism (PP) of `{python} TensorParallel3DTraffic.pp_str`, and Data Parallelism (DP) of `{python} TensorParallel3DTraffic.dp_str`. This configuration uses `{python} TensorParallel3DTraffic.total_gpus_str` (`{python} TensorParallel3DTraffic.tp_str` $\times$ `{python} TensorParallel3DTraffic.pp_str` $\times$ `{python} TensorParallel3DTraffic.dp_str`) organized into a hierarchy of bandwidth domains.
 
-The training step begins at the Data Parallel level. Each of the `{python} TensorParallel3DTraffic.dp_str` model replicas receives a distinct slice of the global batch. Within each replica, the model is split across `{python} TensorParallel3DTraffic.pp_str` pipeline stages (nodes), with micro-batches flowing sequentially from the embedding layer on Node 0 to the loss calculation on Node 15. At the finest granularity, within each node, the `{python} TensorParallel3DTraffic.tp_str` fuse into a single "super-accelerator" via TP. Every matrix multiplication in the forward pass is fractured across these devices, which must exchange partial results via high-bandwidth NVLink after every operation. For a 175B-scale hidden dimension, the activation payload is roughly `{python} TensorParallel3DTraffic.activation_payload_mb_str`; the resulting tensor-parallel traffic is about `{python} TensorParallel3DTraffic.per_stage_forward_gb_str` per pipeline stage per microbatch in the forward pass, or `{python} TensorParallel3DTraffic.per_stage_forward_backward_gb_str` including the backward pass. Across the full 96-layer replica, the forward tensor-parallel traffic is about `{python} TensorParallel3DTraffic.full_forward_gb_str`. This traffic is the highest-intensity in the system, but latency remains negligible due to the `{python} DistTrainNvlinkHybridRecap.nvlink_a100_str`--`{python} FlashAttentionHybridRecap.nvlink_h100_str` bandwidth between co-located chips.
+The training step begins at the Data Parallel level. Each of the `{python} TensorParallel3DTraffic.dp_str` model replicas receives a distinct slice of the global batch. Within each replica, the model is split across `{python} TensorParallel3DTraffic.pp_str` pipeline stages (nodes), with micro-batches flowing sequentially from the embedding layer on Node 0 to the loss calculation on Node 15. At the finest granularity, within each node, the `{python} TensorParallel3DTraffic.tp_str` fuse into a single "super-accelerator" via TP. Every matrix multiplication in the forward pass is fractured across these devices, which must exchange partial results via high-bandwidth NVLink after every operation. For a 175B-scale hidden dimension, the activation payload is roughly `{python} TensorParallel3DTraffic.activation_payload_mb_str`; the resulting tensor-parallel traffic is about `{python} TensorParallel3DTraffic.per_stage_forward_gb_str` per pipeline stage per microbatch in the forward pass, or `{python} TensorParallel3DTraffic.per_stage_forward_backward_gb_str` including the backward pass. Across the full 96-layer replica, the forward tensor-parallel traffic is about `{python} TensorParallel3DTraffic.full_forward_gb_str`. This traffic is the highest-intensity in the system, but latency remains negligible due to the `{python} DistTrainNvlinkHybridRecap.nvlink_a100_gb_s_str`--`{python} FlashAttentionHybridRecap.nvlink_h100_gb_s_str` bandwidth between co-located chips.
 
 The backward pass inverts this flow and exposes the critical dependencies between parallelism dimensions. As gradients flow backward through the pipeline, nodes exchange activation gradients point-to-point. This traffic is relatively light—roughly `{python} TensorParallel3DTraffic.activation_payload_mb_str` per stage boundary—allowing it to traverse slower inter-node InfiniBand links without stalling the pipeline. The true bottleneck emerges at the end of the step: the global AllReduce. All `{python} TensorParallel3DTraffic.dp_str` replicas must synchronize their gradients to update the weights, requiring the summation of 350 GB of gradient data across the entire cluster. By overlapping this communication with the computation of subsequent micro-batches through gradient bucketing, the system hides the latency of moving terabytes of data across the data center fabric.
 
-The architectural imperative is *bandwidth matching*: the communication volume of each algorithm must map inversely to the latency of the hardware interconnects. Chatty, blocking TP communication stays within the NVLink domain (`{python} DistTrainNvlinkHybridRecap.nvlink_a100_str` or higher). Serialized, point-to-point PP transfers traverse the cluster spine at InfiniBand speeds. The massive but infrequent DP synchronization amortizes across the full training step. Attempting to run TP across racks, or DP without gradient accumulation, would violate this hierarchy—causing the 16,000-GPU fleet to wait idly for data to traverse the wire. This bandwidth-matching principle is precisely the "Jeff Dean Test" introduced in @sec-distributed-training-systems-systems-engineering-tradeoffs-selecting-parallelism-strategy-b344.
+The architectural imperative is *bandwidth matching*: the communication volume of each algorithm must map inversely to the latency of the hardware interconnects. Chatty, blocking TP communication stays within the NVLink domain (`{python} DistTrainNvlinkHybridRecap.nvlink_a100_gb_s_str` or higher). Serialized, point-to-point PP transfers traverse the cluster spine at InfiniBand speeds. The massive but infrequent DP synchronization amortizes across the full training step. Attempting to run TP across racks, or DP without gradient accumulation, would violate this hierarchy—causing the 16,000-GPU fleet to wait idly for data to traverse the wire. This bandwidth-matching principle is precisely the "Jeff Dean Test" introduced in @sec-distributed-training-systems-systems-engineering-tradeoffs-selecting-parallelism-strategy-b344.
 
 ### Configuration design {#sec-distributed-training-systems-systems-hybrid-parallelism-configuration-design}
 
-Applying this bandwidth-matching principle to physical infrastructure transforms cluster design into a combinatorial optimization problem: mapping the three dimensions of parallelism (Tensor, Pipeline, and Data) to the network topology. The fundamental constraint is that hardware interconnects dictate which strategies are feasible at each level. Intra-node NVLink (`{python} DistTrainNvlinkHybridRecap.nvlink_a100_str`--`{python} FlashAttentionHybridRecap.nvlink_h100_str`) supports the frequent AllReduce operations of Tensor Parallelism. Inter-node InfiniBand (`{python} DistTrainNvlinkHybridRecap.ib_ndr_bw_str`--`{python} DistTrainNvlinkHybridRecap.ib_xdr_bw_str`) handles the less frequent point-to-point transfers of Pipeline Parallelism. The remaining cross-pod bandwidth serves Data Parallelism's once-per-step gradient synchronization. Memory capacity per device (`{python} DistTrainNvlinkHybridRecap.hbm_a100_gb_str`–`{python} DistTrainNvlinkHybridRecap.hbm_h100_gb_str`) sets the hard limit for model shards at each level. A detailed analysis of these physical systems—including TPU Pods, SuperPODs, and wafer-scale integration—is provided in @sec-compute-infrastructure. For a standard DGX A100 deployment, we typically fix Tensor Parallelism at $t=8$ to match the number of GPUs within a single node. This ensures that the bandwidth-heavy `AllReduce` operations required by matrix multiplications occur over the high-speed NVLink fabric. We then map Pipeline Parallelism ($p$) across multiple nodes within the same high-bandwidth rack or island to handle the point-to-point activation transfers, often setting $p=8$ or $p=16$ depending on the memory footprint. Finally, Data Parallelism ($d$) scales out to the remaining dimensions across pods, as the gradient synchronization step is less sensitive to the bisection bandwidth constraints of the upper network layers.
+Applying this bandwidth-matching principle to physical infrastructure transforms cluster design into a combinatorial optimization problem: mapping the three dimensions of parallelism (Tensor, Pipeline, and Data) to the network topology. The fundamental constraint is that hardware interconnects dictate which strategies are feasible at each level. Intra-node NVLink (`{python} DistTrainNvlinkHybridRecap.nvlink_a100_gb_s_str`--`{python} FlashAttentionHybridRecap.nvlink_h100_gb_s_str`) supports the frequent AllReduce operations of Tensor Parallelism. Inter-node InfiniBand (`{python} DistTrainNvlinkHybridRecap.ib_ndr_bw_gb_s_str`--`{python} DistTrainNvlinkHybridRecap.ib_xdr_bw_gb_s_str`) handles the less frequent point-to-point transfers of Pipeline Parallelism. The remaining cross-pod bandwidth serves Data Parallelism's once-per-step gradient synchronization. Memory capacity per device (`{python} DistTrainNvlinkHybridRecap.hbm_a100_gb_str`–`{python} DistTrainNvlinkHybridRecap.hbm_h100_gb_str`) sets the hard limit for model shards at each level. A detailed analysis of these physical systems—including TPU Pods, SuperPODs, and wafer-scale integration—is provided in @sec-compute-infrastructure. For a standard DGX A100 deployment, we typically fix Tensor Parallelism at $t=8$ to match the number of GPUs within a single node. This ensures that the bandwidth-heavy `AllReduce` operations required by matrix multiplications occur over the high-speed NVLink fabric. We then map Pipeline Parallelism ($p$) across multiple nodes within the same high-bandwidth rack or island to handle the point-to-point activation transfers, often setting $p=8$ or $p=16$ depending on the memory footprint. Finally, Data Parallelism ($d$) scales out to the remaining dimensions across pods, as the gradient synchronization step is less sensitive to the bisection bandwidth constraints of the upper network layers.
 
 ### Memory analysis {#sec-distributed-training-systems-systems-hybrid-parallelism-memory-analysis}
 
@@ -2453,18 +2453,18 @@ class ThreeDParallelism:
     total_gpus_h100 = tp_h100 * pp_h100 * dp_h100
     check(total_gpus_h100 == 16384, f"H100 total GPUs ({total_gpus_h100})")
     total_gpus_h100_str = fmt(total_gpus_h100, precision=0)
-    nvlink5_bw_str = fmt_bandwidth(nvlink5_bw, unit=TB / second, precision=1, commas=False)
+    nvlink5_bw_tb_s_str = fmt_bandwidth(nvlink5_bw, unit=TB / second, precision=1, commas=False)
     params_trillion_b_str = fmt(1, precision=0, commas=False)
     tp_blackwell_str = fmt(16, precision=0, commas=False)
     pp_blackwell_str = fmt(32, precision=0, commas=False)
     gpus_per_node_str = fmt(Systems.Nodes.DGX_H100.accelerators_per_node, precision=0, commas=False)
     tp_alt_str = fmt(32, precision=0, commas=False)
-    die_to_die_bw_str = fmt_bandwidth(10 * (TB / second), unit=TB / second, precision=0, commas=False)
+    die_to_die_bw_tb_s_str = fmt_bandwidth(10 * (TB / second), unit=TB / second, precision=0, commas=False)
 ```
 
-The transition to the Blackwell architecture (2024) introduces two architectural shifts that redefine the 3D parallelism trade-offs. First, NVLink 5 provides `{python} ThreeDParallelism.nvlink5_bw_str` of bidirectional bandwidth per GPU, doubling the intra-node capacity of the Hopper generation. This allows for even larger tensor parallelism $(t)$ groups (e.g., $t=$ `{python} ThreeDParallelism.tp_blackwell_str` or $t=$ `{python} ThreeDParallelism.tp_alt_str` across multiple nodes) with lower latency overhead. Second, Blackwell adds FP4 Tensor Core support, improving low-precision throughput and memory efficiency for supported workloads; whether FP4 is used for training depends on the numerical recipe and software stack.
+The transition to the Blackwell architecture (2024) introduces two architectural shifts that redefine the 3D parallelism trade-offs. First, NVLink 5 provides `{python} ThreeDParallelism.nvlink5_bw_tb_s_str` of bidirectional bandwidth per GPU, doubling the intra-node capacity of the Hopper generation. This allows for even larger tensor parallelism $(t)$ groups (e.g., $t=$ `{python} ThreeDParallelism.tp_blackwell_str` or $t=$ `{python} ThreeDParallelism.tp_alt_str` across multiple nodes) with lower latency overhead. Second, Blackwell adds FP4 Tensor Core support, improving low-precision throughput and memory efficiency for supported workloads; whether FP4 is used for training depends on the numerical recipe and software stack.
 
-For a `{python} ThreeDParallelism.params_trillion_b_str`-trillion parameter model, Blackwell enables a configuration of $t=$ `{python} ThreeDParallelism.tp_blackwell_str` (spanning two `{python} ThreeDParallelism.gpus_per_node_str`-GPU nodes via NVLink Switch) and $p=$ `{python} ThreeDParallelism.pp_blackwell_str`, reducing the total number of pipeline stages and associated bubble overhead on a `{python} ThreeDParallelism.total_gpus_h100_str`-GPU Hopper-scale fleet reference configuration. The `{python} ThreeDParallelism.die_to_die_bw_str` die-to-die interconnect within the Blackwell GPU further collapses the distinction between intra-chip and intra-package communication, allowing the two reticle-limited dies to function as a single high-bandwidth tensor parallel unit. These advancements shift the bottleneck from intra-node communication to the inter-pod optical fabric, making rail-optimized topologies (@sec-network-fabrics-rail-optimized) and All-to-All optimization even more critical for the next generation of the Machine Learning Fleet.
+For a `{python} ThreeDParallelism.params_trillion_b_str`-trillion parameter model, Blackwell enables a configuration of $t=$ `{python} ThreeDParallelism.tp_blackwell_str` (spanning two `{python} ThreeDParallelism.gpus_per_node_str`-GPU nodes via NVLink Switch) and $p=$ `{python} ThreeDParallelism.pp_blackwell_str`, reducing the total number of pipeline stages and associated bubble overhead on a `{python} ThreeDParallelism.total_gpus_h100_str`-GPU Hopper-scale fleet reference configuration. The `{python} ThreeDParallelism.die_to_die_bw_tb_s_str` die-to-die interconnect within the Blackwell GPU further collapses the distinction between intra-chip and intra-package communication, allowing the two reticle-limited dies to function as a single high-bandwidth tensor parallel unit. These advancements shift the bottleneck from intra-node communication to the inter-pod optical fabric, making rail-optimized topologies (@sec-network-fabrics-rail-optimized) and All-to-All optimization even more critical for the next generation of the Machine Learning Fleet.
 
 The same placement constraints can be made operational through design-space search.
 
@@ -2687,7 +2687,7 @@ plt.close()
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @sec-distributed-training-rlhf-coordination
-# │ Exports: DistTrainH100Capacity.h100_mem_str
+# │ Exports: DistTrainH100Capacity.h100_mem_gb_str
 from mlsysim import Hardware, Models
 from mlsysim.core.constants import GiB, Bparam, GB, byte, param, BYTES_FP16
 from mlsysim.fmt import fmt, MarkdownStr, fmt_qty, fmt_memory
@@ -2696,7 +2696,7 @@ import math
 
 class DistTrainH100Capacity:
     # ┌── 4. OUTPUT ───────────────────────────────────────
-    h100_mem_str = fmt_qty(Hardware.Cloud.H100.memory.capacity, GiB, precision=0, commas=False, unit_label="GB")
+    h100_mem_gb_str = fmt_qty(Hardware.Cloud.H100.memory.capacity, GiB, precision=0, commas=False, unit_label="GB")
     policy_params = Models.Language.Llama2_70B.parameters
     reward_b = 13
     value_b = 13
@@ -2710,7 +2710,7 @@ class DistTrainH100Capacity:
         + memory_from_params(value_b * Bparam, bytes_train)
     )
     min_gpus_mem = math.ceil((ppo_total_mem / h100_mem_budget).to_base_units().magnitude)
-    ppo_total_mem_str = fmt_memory(ppo_total_mem, unit=GB, precision=0, commas=True)
+    ppo_total_mem_gb_str = fmt_memory(ppo_total_mem, unit=GB, precision=0, commas=True)
     min_gpus_mem_str = fmt_count(min_gpus_mem, commas=False, label="GPU")
     min_gpus_practical_str = MarkdownStr("64--128 GPUs")
 ```
@@ -2729,7 +2729,7 @@ Standard pretraining involves one model, one loss function, and one gradient str
 
 4. The **value model**\index{Value Model} (the PPO critic that estimates expected future reward) requires its own training state. If the value model shares the policy's architecture, it adds another 1,120 GB of training memory; in practice, value models are often smaller or share the policy backbone with a separate value head, reducing this to 200--400 GB.
 
-The aggregate memory demand of the four-model PPO system dwarfs standard pretraining. A naive co-location of a 70B policy, 70B reference, 13B reward, and 13B value model requires approximately `{python} DistTrainH100Capacity.ppo_total_mem_str` of accelerator memory, before accounting for the KV caches and intermediate activations generated during sequence generation. On H100 GPUs with `{python} DistTrainH100Capacity.h100_mem_str` of HBM each, this system requires a minimum of `{python} DistTrainH100Capacity.min_gpus_mem_str` for parameter storage alone. Once generation-phase KV caches (which grow linearly with output sequence length) and training-phase activations are included, the practical minimum rises to `{python} DistTrainH100Capacity.min_gpus_practical_str` for a single RLHF training instance.
+The aggregate memory demand of the four-model PPO system dwarfs standard pretraining. A naive co-location of a 70B policy, 70B reference, 13B reward, and 13B value model requires approximately `{python} DistTrainH100Capacity.ppo_total_mem_gb_str` of accelerator memory, before accounting for the KV caches and intermediate activations generated during sequence generation. On H100 GPUs with `{python} DistTrainH100Capacity.h100_mem_gb_str` of HBM each, this system requires a minimum of `{python} DistTrainH100Capacity.min_gpus_mem_str` for parameter storage alone. Once generation-phase KV caches (which grow linearly with output sequence length) and training-phase activations are included, the practical minimum rises to `{python} DistTrainH100Capacity.min_gpus_practical_str` for a single RLHF training instance.
 
 ### Infrastructure asymmetry: Training vs. inference models {#sec-distributed-training-rlhf-asymmetry}
 
@@ -2810,7 +2810,7 @@ The trade-off is capability. DPO operates on a static preference dataset, meanin
 
 ### Quantitative analysis: PPO vs. DPO resource requirements {#sec-distributed-training-rlhf-quantitative}
 
-To make the infrastructure trade-off concrete, consider aligning a 70B policy model on a cluster of 256 H100 GPUs (`{python} DistTrainH100Capacity.h100_mem_str` HBM each).
+To make the infrastructure trade-off concrete, consider aligning a 70B policy model on a cluster of 256 H100 GPUs (`{python} DistTrainH100Capacity.h100_mem_gb_str` HBM each).
 
 ```{python}
 #| echo: false
@@ -2826,13 +2826,13 @@ from mlsysim.engine.solver import DistributedModel
 # │ How: Distribute total model memory across TP×PP GPU mesh.
 # │
 # │ Imports: mlsysim.book (check)
-# │ Exports: RLHFBudget.policy_mem_str, RLHFBudget.ref_mem_str,
-# │          RLHFBudget.n_gpus_str, RLHFBudget.policy_per_gpu_str,
-# │          RLHFBudget.ref_per_gpu_str, RLHFBudget.ref_per_gpu_sep_str,
-# │          RLHFBudget.reward_mem_str, RLHFBudget.value_mem_str,
-# │          RLHFBudget.static_per_gpu_str, RLHFBudget.remaining_str,
-# │          RLHFBudget.kv_total_gb_str, RLHFBudget.kv_per_gpu_str,
-# │          RLHFBudget.remaining_kv_str, RLHFBudget.dpo_activation_ratio_str
+# │ Exports: RLHFBudget.policy_mem_gb_str, RLHFBudget.ref_mem_gb_str,
+# │          RLHFBudget.n_gpus_str, RLHFBudget.policy_per_gpu_gb_str,
+# │          RLHFBudget.ref_per_gpu_gb_str, RLHFBudget.ref_per_gpu_sep_gb_str,
+# │          RLHFBudget.reward_mem_gb_str, RLHFBudget.value_mem_gb_str,
+# │          RLHFBudget.static_per_gpu_gb_str, RLHFBudget.remaining_gb_str,
+# │          RLHFBudget.kv_total_gb_str, RLHFBudget.kv_per_gpu_gb_str,
+# │          RLHFBudget.remaining_kv_gb_str, RLHFBudget.dpo_activation_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt_percent, fmt, fmt_memory
 from mlsysim.physics import memory_from_params
@@ -2895,22 +2895,22 @@ class RLHFBudget:
     check(1.05 < dpo_activation_ratio < 1.10, f"DPO activation ratio ({dpo_activation_ratio:.2f}x)")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    policy_mem_str = fmt_memory(policy_mem, unit=GB, precision=0, commas=True)
-    ref_mem_str = fmt_memory(ref_mem, unit=GB, precision=0, commas=False)
+    policy_mem_gb_str = fmt_memory(policy_mem, unit=GB, precision=0, commas=True)
+    ref_mem_gb_str = fmt_memory(ref_mem, unit=GB, precision=0, commas=False)
     n_gpus_str = fmt_count(n_gpus, commas=False, label="GPU")
-    policy_per_gpu_str = fmt_memory(policy_per_gpu, unit=GB, precision=0, commas=False)
-    ref_per_gpu_str = fmt_memory(ref_per_gpu, unit=GB, precision=1, commas=False)
-    ref_per_gpu_sep_str = fmt_memory(ref_per_gpu_sep, unit=GB, precision=1, commas=False)
-    reward_mem_str = fmt_memory(reward_mem, unit=GB, precision=0, commas=False)
-    value_mem_str = fmt_memory(value_mem, unit=GB, precision=0, commas=False)
-    ppo_total_mem_str = fmt_memory(ppo_total_mem, unit=GB, precision=0, commas=True)
-    dpo_total_mem_str = fmt_memory(dpo_total_mem, unit=GB, precision=0, commas=True)
+    policy_per_gpu_gb_str = fmt_memory(policy_per_gpu, unit=GB, precision=0, commas=False)
+    ref_per_gpu_gb_str = fmt_memory(ref_per_gpu, unit=GB, precision=1, commas=False)
+    ref_per_gpu_sep_gb_str = fmt_memory(ref_per_gpu_sep, unit=GB, precision=1, commas=False)
+    reward_mem_gb_str = fmt_memory(reward_mem, unit=GB, precision=0, commas=False)
+    value_mem_gb_str = fmt_memory(value_mem, unit=GB, precision=0, commas=False)
+    ppo_total_mem_gb_str = fmt_memory(ppo_total_mem, unit=GB, precision=0, commas=True)
+    dpo_total_mem_gb_str = fmt_memory(dpo_total_mem, unit=GB, precision=0, commas=True)
     dpo_reduction_pct_str = fmt_percent(dpo_reduction_pct, precision=1, commas=False, style='prose')
-    static_per_gpu_str = fmt_memory(static_per_gpu, unit=GB, precision=1, commas=False)
-    remaining_str = fmt_memory(remaining, unit=GB, precision=1, commas=False)
+    static_per_gpu_gb_str = fmt_memory(static_per_gpu, unit=GB, precision=1, commas=False)
+    remaining_gb_str = fmt_memory(remaining, unit=GB, precision=1, commas=False)
     kv_total_gb_str = fmt_memory(kv_total, unit=GB, precision=1, commas=False)
-    kv_per_gpu_str = fmt_memory(kv_per_gpu, unit=GB, precision=1, commas=False)
-    remaining_kv_str = fmt_memory(remaining_after_kv, unit=GB, precision=1, commas=False)
+    kv_per_gpu_gb_str = fmt_memory(kv_per_gpu, unit=GB, precision=1, commas=False)
+    remaining_kv_gb_str = fmt_memory(remaining_after_kv, unit=GB, precision=1, commas=False)
     dpo_activation_ratio_str = fmt(dpo_activation_ratio, precision=2, commas=False)
     tp_str = fmt_count(tp, commas=False, label="GPU")
     pp_str = fmt(pp, precision=0, commas=False)
@@ -2934,28 +2934,28 @@ class RLHFBudget:
 
 **PPO memory budget** (per-GPU, with TP=`{python} RLHFBudget.tp_str`, PP=`{python} RLHFBudget.pp_str`, DP=`{python} RLHFBudget.dp_str` for policy)
 
-The policy model under 3D parallelism with TP=`{python} RLHFBudget.tp_str` and PP=`{python} RLHFBudget.pp_str` distributes its `{python} RLHFBudget.policy_mem_str` training state across `{python} RLHFBudget.n_gpus_str`, yielding `{python} RLHFBudget.policy_per_gpu_str` per GPU. The reference model, requiring only `{python} RLHFBudget.ref_mem_str` for inference, can be sharded across a separate pool of `{python} RLHFBudget.ref_pool_gpus_str` at `{python} RLHFBudget.ref_per_gpu_sep_str` each, or co-located with the policy GPUs at an additional `{python} RLHFBudget.ref_per_gpu_str` per GPU (`{python} RLHFBudget.ref_mem_str` / `{python} RLHFBudget.n_gpus_str`). The `{python} RLHFBudget.reward_b_str`B reward model adds `{python} RLHFBudget.reward_mem_str` shared across its pool. The `{python} RLHFBudget.value_b_str`B value model in training mode adds approximately `{python} RLHFBudget.value_mem_str` (`{python} RLHFBudget.value_b_str`B $\times$ `{python} RLHFBudget.bytes_train_str` bytes/param) across its pool.
+The policy model under 3D parallelism with TP=`{python} RLHFBudget.tp_str` and PP=`{python} RLHFBudget.pp_str` distributes its `{python} RLHFBudget.policy_mem_gb_str` training state across `{python} RLHFBudget.n_gpus_str`, yielding `{python} RLHFBudget.policy_per_gpu_gb_str` per GPU. The reference model, requiring only `{python} RLHFBudget.ref_mem_gb_str` for inference, can be sharded across a separate pool of `{python} RLHFBudget.ref_pool_gpus_str` at `{python} RLHFBudget.ref_per_gpu_sep_gb_str` each, or co-located with the policy GPUs at an additional `{python} RLHFBudget.ref_per_gpu_gb_str` per GPU (`{python} RLHFBudget.ref_mem_gb_str` / `{python} RLHFBudget.n_gpus_str`). The `{python} RLHFBudget.reward_b_str`B reward model adds `{python} RLHFBudget.reward_mem_gb_str` shared across its pool. The `{python} RLHFBudget.value_b_str`B value model in training mode adds approximately `{python} RLHFBudget.value_mem_gb_str` (`{python} RLHFBudget.value_b_str`B $\times$ `{python} RLHFBudget.bytes_train_str` bytes/param) across its pool.
 
-Total static memory (co-located policy + reference on `{python} RLHFBudget.n_gpus_str`): `{python} RLHFBudget.policy_per_gpu_str` + `{python} RLHFBudget.ref_per_gpu_str` $\approx$ `{python} RLHFBudget.static_per_gpu_str` per GPU, leaving $\sim$ `{python} RLHFBudget.remaining_str` for activations and KV cache. With generation-phase KV caches for a `{python} RLHFBudget.rollout_seq_str`-sequence, `{python} RLHFBudget.rollout_tokens_str`-token rollout batch inside one $TP{\times}PP$ policy replica, each policy GPU must reserve an additional `{python} RLHFBudget.kv_total_gb_str`/`{python} RLHFBudget.n_gpus_str` $\approx$ `{python} RLHFBudget.kv_per_gpu_str` for its KV cache shard. The remaining $\sim$ `{python} RLHFBudget.remaining_kv_str` constrains the micro-batch size during the training phase.
+Total static memory (co-located policy + reference on `{python} RLHFBudget.n_gpus_str`): `{python} RLHFBudget.policy_per_gpu_gb_str` + `{python} RLHFBudget.ref_per_gpu_gb_str` $\approx$ `{python} RLHFBudget.static_per_gpu_gb_str` per GPU, leaving $\sim$ `{python} RLHFBudget.remaining_gb_str` for activations and KV cache. With generation-phase KV caches for a `{python} RLHFBudget.rollout_seq_str`-sequence, `{python} RLHFBudget.rollout_tokens_str`-token rollout batch inside one $TP{\times}PP$ policy replica, each policy GPU must reserve an additional `{python} RLHFBudget.kv_total_gb_str`/`{python} RLHFBudget.n_gpus_str` $\approx$ `{python} RLHFBudget.kv_per_gpu_gb_str` for its KV cache shard. The remaining $\sim$ `{python} RLHFBudget.remaining_kv_gb_str` constrains the micro-batch size during the training phase.
 
 **DPO Memory Budget (same parallelism configuration)**
 
-The policy model uses the same `{python} RLHFBudget.policy_per_gpu_str` per GPU. The reference model adds `{python} RLHFBudget.ref_per_gpu_str` per GPU (co-located). No reward model, no value model, no KV cache for generation.
+The policy model uses the same `{python} RLHFBudget.policy_per_gpu_gb_str` per GPU. The reference model adds `{python} RLHFBudget.ref_per_gpu_gb_str` per GPU (co-located). No reward model, no value model, no KV cache for generation.
 
-On the policy GPUs, total static memory is `{python} RLHFBudget.policy_per_gpu_str` + `{python} RLHFBudget.ref_per_gpu_str` = `{python} RLHFBudget.static_per_gpu_str` per GPU, identical to PPO's co-located policy/reference footprint. Cluster-wide, however, DPO avoids the PPO reward and value model memory, and it also removes the generation-phase KV cache burden. The full $\sim$ `{python} RLHFBudget.remaining_str` remaining on each policy GPU is available for training activations, permitting modestly larger micro-batches (about `{python} RLHFBudget.dpo_activation_ratio_str`$\times$ under this co-located policy/reference memory budget) or reducing the need for activation checkpointing that PPO requires.
+On the policy GPUs, total static memory is `{python} RLHFBudget.policy_per_gpu_gb_str` + `{python} RLHFBudget.ref_per_gpu_gb_str` = `{python} RLHFBudget.static_per_gpu_gb_str` per GPU, identical to PPO's co-located policy/reference footprint. Cluster-wide, however, DPO avoids the PPO reward and value model memory, and it also removes the generation-phase KV cache burden. The full $\sim$ `{python} RLHFBudget.remaining_gb_str` remaining on each policy GPU is available for training activations, permitting modestly larger micro-batches (about `{python} RLHFBudget.dpo_activation_ratio_str`$\times$ under this co-located policy/reference memory budget) or reducing the need for activation checkpointing that PPO requires.
 
 **Throughput Comparison**
 
 PPO's two-phase design (generate then train) introduces a fundamental throughput penalty. If generation consumes `{python} RLHFBudget.gen_phase_pct_str` of the step time (typical for autoregressive decoding of long sequences), the training hardware achieves only `{python} RLHFBudget.train_phase_pct_str` utilization during an RLHF step. DPO, operating as a standard training loop, achieves the same `{python} RLHFBudget.dpo_mfu_lo_str`--`{python} RLHFBudget.dpo_mfu_hi_str` MFU as pretraining. @Tbl-ppo-vs-dpo compares the two regimes side by side.
 
-| **Metric**                 | **PPO (70B policy)**                           | **DPO (70B policy)**                           |
-|:---------------------------|:-----------------------------------------------|:-----------------------------------------------|
-| **Models required**        | 4 (policy, ref, reward, value)                 | 2 (policy, reference)                          |
-| **Total parameter memory** | $\sim$ `{python} RLHFBudget.ppo_total_mem_str` | $\sim$ `{python} RLHFBudget.dpo_total_mem_str` |
-| **Minimum GPUs (memory)**  | 64--128                                        | 32--64                                         |
-| **Generation phase**       | Yes (sequential, BW-bound)                     | None                                           |
-| **Effective training MFU** | 15--25%                                        | 40--55%                                        |
-| **Data pipeline**          | Online generation                              | Static preference pairs                        |
+| **Metric**                 | **PPO (70B policy)**                              | **DPO (70B policy)**                              |
+|:---------------------------|:--------------------------------------------------|:--------------------------------------------------|
+| **Models required**        | 4 (policy, ref, reward, value)                    | 2 (policy, reference)                             |
+| **Total parameter memory** | $\sim$ `{python} RLHFBudget.ppo_total_mem_gb_str` | $\sim$ `{python} RLHFBudget.dpo_total_mem_gb_str` |
+| **Minimum GPUs (memory)**  | 64--128                                           | 32--64                                            |
+| **Generation phase**       | Yes (sequential, BW-bound)                        | None                                              |
+| **Effective training MFU** | 15--25%                                           | 40--55%                                           |
+| **Data pipeline**          | Online generation                                 | Static preference pairs                           |
 
 : **PPO vs DPO Memory and MFU**: Per-GPU memory and effective training MFU for PPO and DPO on the same accelerator budget. {#tbl-ppo-vs-dpo}
 
@@ -3054,15 +3054,15 @@ class A100CapacityFallacies:
     mem = Hardware.Cloud.A100.memory.capacity
     params_b = Models.Language.GPT3.parameters.to(param).magnitude / BILLION
     check(mem == 80 * GiB, "A100 memory capacity should be 80 GB")
-    a100_mem_str = fmt_qty(mem, GiB, precision=0, commas=False, unit_label="GB")
+    a100_mem_gb_str = fmt_qty(mem, GiB, precision=0, commas=False, unit_label="GB")
     frontier_params_b_str = fmt(params_b, precision=0)
 ```
 
-Engineers see that a 70B model exceeds `{python} A100CapacityFallacies.a100_mem_str` memory and immediately choose tensor parallelism or pipeline parallelism to split weights. In production, the optimal strategy depends on the interaction between memory pressure, computation patterns, and communication topology. As @sec-distributed-training-systems-systems-parallelism-strategy-comparison-d92a explains, tensor parallelism splits each layer across devices with AllReduce synchronization per layer, achieving even memory distribution but placing communication on the critical path. Pipeline parallelism assigns complete layers to stages with point-to-point transfers between stages, reducing per-step communication but introducing pipeline bubble overhead that wastes 10--30 percent of cycles. For a `{python} A100CapacityFallacies.frontier_params_b_str` model on 64 A100 GPUs where tensor parallelism degree-8 enables training, pipeline parallelism with 8 stages achieves 23 percent higher throughput due to reduced all-to-all communication despite similar memory footprints. The decision requires profiling communication patterns and bubble overhead, not just checking if weights fit in memory.
+Engineers see that a 70B model exceeds `{python} A100CapacityFallacies.a100_mem_gb_str` memory and immediately choose tensor parallelism or pipeline parallelism to split weights. In production, the optimal strategy depends on the interaction between memory pressure, computation patterns, and communication topology. As @sec-distributed-training-systems-systems-parallelism-strategy-comparison-d92a explains, tensor parallelism splits each layer across devices with AllReduce synchronization per layer, achieving even memory distribution but placing communication on the critical path. Pipeline parallelism assigns complete layers to stages with point-to-point transfers between stages, reducing per-step communication but introducing pipeline bubble overhead that wastes 10--30 percent of cycles. For a `{python} A100CapacityFallacies.frontier_params_b_str` model on 64 A100 GPUs where tensor parallelism degree-8 enables training, pipeline parallelism with 8 stages achieves 23 percent higher throughput due to reduced all-to-all communication despite similar memory footprints. The decision requires profiling communication patterns and bubble overhead, not just checking if weights fit in memory.
 
 **Fallacy**: *FSDP and ZeRO always improve training efficiency.*
 
-Engineers adopt FSDP (Fully Sharded Data Parallel) universally after reading that it "reduces memory and enables larger models". In production, sharding introduces 10--25 percent communication overhead that only pays off when memory pressure justifies it. FSDP reduces memory footprint by sharding optimizer state, gradients, and optionally parameters across GPUs, but requires AllGather operations before each forward pass and ReduceScatter after backward pass. For a 7B model on A100-`{python} A100CapacityFallacies.a100_mem_str` with batch size 4, standard DDP achieves 145 samples/second while FSDP achieves only 118 samples/second (19 percent slower) because the model fits comfortably without sharding and the added communication overhead provides no benefit. FSDP provides value when model plus optimizer state exceeds single-GPU memory, when enabling larger per-GPU batch sizes justifies the overhead, or when ZeRO-Offload to CPU memory extends capacity. A 65B model that cannot fit on `{python} A100CapacityFallacies.a100_mem_str` becomes trainable with FSDP ZeRO-3, accepting 15 percent throughput loss to enable training at all. Applying FSDP universally without measuring memory pressure wastes performance.
+Engineers adopt FSDP (Fully Sharded Data Parallel) universally after reading that it "reduces memory and enables larger models". In production, sharding introduces 10--25 percent communication overhead that only pays off when memory pressure justifies it. FSDP reduces memory footprint by sharding optimizer state, gradients, and optionally parameters across GPUs, but requires AllGather operations before each forward pass and ReduceScatter after backward pass. For a 7B model on A100-`{python} A100CapacityFallacies.a100_mem_gb_str` with batch size 4, standard DDP achieves 145 samples/second while FSDP achieves only 118 samples/second (19 percent slower) because the model fits comfortably without sharding and the added communication overhead provides no benefit. FSDP provides value when model plus optimizer state exceeds single-GPU memory, when enabling larger per-GPU batch sizes justifies the overhead, or when ZeRO-Offload to CPU memory extends capacity. A 65B model that cannot fit on `{python} A100CapacityFallacies.a100_mem_gb_str` becomes trainable with FSDP ZeRO-3, accepting 15 percent throughput loss to enable training at all. Applying FSDP universally without measuring memory pressure wastes performance.
 
 **Fallacy**: *Parallelism overhead is roughly constant regardless of model size.*
 
@@ -3202,8 +3202,8 @@ from mlsysim.core.constants import GB, second
 from mlsysim.fmt import fmt, MarkdownStr, fmt_qty
 
 class DistTrainSummaryRecap:
-    nvlink_a100_str = fmt_qty(Hardware.Cloud.A100.nvlink.bandwidth, GB/second, precision=0, commas=False)
-    nvlink_h100_str = fmt_qty(Hardware.Cloud.H100.nvlink.bandwidth, GB/second, precision=0, commas=False)
+    nvlink_a100_gb_s_str = fmt_qty(Hardware.Cloud.A100.nvlink.bandwidth, GB/second, precision=0, commas=False)
+    nvlink_h100_gb_s_str = fmt_qty(Hardware.Cloud.H100.nvlink.bandwidth, GB/second, precision=0, commas=False)
     gpt4_mem_tb_str = fmt_qty((Models.Language.GPT4.parameters.to(param).magnitude * 2 / TRILLION) * TB, TB, precision=1, commas=False)
     dlrm_mem_tb_str = MarkdownStr("10 TB")
 ```
@@ -3212,7 +3212,7 @@ class DistTrainSummaryRecap:
 
 * **Communication-computation ratio is the ceiling**: Distributed training is governed by an extended Amdahl's Law. Speedup is limited by the sequential nature of synchronization (AllReduce) relative to the parallel work of computation.
 * **Data parallelism is the default, but hits the batch trap**: Scaling replicas improves throughput linearly until the "critical batch size" is reached, beyond which larger batches yield diminishing returns in convergence.
-* **Tensor parallelism is node-local**: Because it partitions matrix operations, it requires the `{python} DistTrainSummaryRecap.nvlink_a100_str`-`{python} DistTrainSummaryRecap.nvlink_h100_str` bandwidth of NVLink. Scaling it across racks on standard Ethernet will stall the fleet.
+* **Tensor parallelism is node-local**: Because it partitions matrix operations, it requires the `{python} DistTrainSummaryRecap.nvlink_a100_gb_s_str`-`{python} DistTrainSummaryRecap.nvlink_h100_gb_s_str` bandwidth of NVLink. Scaling it across racks on standard Ethernet will stall the fleet.
 * **Pipeline parallelism minimizes bandwidth, but adds "bubbles"**: Splitting depth across nodes allows for massive models, but efficiency depends on microbatching $(m \gg p)$ to minimize idle time during fill and drain phases.
 * **Memory-efficient DP (ZeRO/FSDP) scales linear memory**: By sharding optimizer states, gradients, and parameters, ZeRO-3 allows 100B+ models to fit on commodity hardware that would otherwise require complex model parallelism.
 * **The linear scaling rule requires warmup**: Multiplying batch size $B$ by $k$ allows for multiplying learning rate by $k$, but only with a linear warmup period to maintain stability during the high-gradient-noise initial phase.

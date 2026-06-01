@@ -97,7 +97,7 @@ In the Fleet Stack shown in @fig-fleet-stack, orchestration operates at the Dist
 # │ Exports: cluster_size_str, gpu_hour_cost_str, daily_cost_str, annual_cost_str,
 # │          daily_waste_str, annual_waste_str, productive_gpu_gain_str,
 # │          raw_gpu_equivalent_gain_str, idle_pct_str, util_low_pct_str,
-# │          util_high_pct_str, a100_mem_str, h100_mem_str
+# │          util_high_pct_str, a100_mem_gb_str, h100_mem_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check, fmt_qty, fmt_usd, fmt_percent
 
@@ -138,8 +138,8 @@ class ClusterEconomicsContext:
     annual_waste_str = fmt_usd(annual_waste_m * MILLION, scale="M", precision=1, commas=False)
     productive_gpu_gain_str = fmt(productive_gpu_gain, precision=0)
     raw_gpu_equivalent_gain_str = fmt(raw_gpu_equivalent_gain, precision=0)
-    a100_mem_str = fmt_qty(a100_mem, GiB, precision=0, commas=False, unit_label="GB")
-    h100_mem_str = fmt_qty(h100_mem, GiB, precision=0, commas=False, unit_label="GB")
+    a100_mem_gb_str = fmt_qty(a100_mem, GiB, precision=0, commas=False, unit_label="GB")
+    h100_mem_gb_str = fmt_qty(h100_mem, GiB, precision=0, commas=False, unit_label="GB")
 ```
 
 To make the scheduling problem concrete, consider a research organization operating a `{python} ClusterEconomicsContext.cluster_size_str`-GPU cluster. @brown2020language report that training GPT-3 175B used 3.14$\times 10^{23}$ floating-point operations on a V100 GPU cluster. Imagine 100 frontier-scale training jobs of that class queued, alongside thousands of smaller experiments and inference workloads all competing for the same resources. The system must decide which jobs run, when they run, and where they run. A naive first-come-first-served policy would let the first few large jobs monopolize the cluster for weeks, starving smaller experiments that researchers need to iterate quickly. A strict fair-share policy would fragment GPUs across many small allocations, preventing any large job from assembling the contiguous allocation it needs. Neither extreme works. The scheduler must navigate a multi-dimensional trade-off space where every decision affects throughput, fairness, cost, and researcher productivity simultaneously.
@@ -206,7 +206,7 @@ Beyond gang scheduling, topology awareness via **placement groups**[^fn-placemen
 
 [^fn-gang-scheduling]: **Gang Scheduling**: Formalized by @ousterhout1982scheduling for parallel systems, where the "Ousterhout matrix" co-schedules related threads across processors in synchronized time slices. In ML clusters, the constraint is stricter: synchronous AllReduce requires all workers simultaneously, so partial allocation wastes 100 percent of held resources rather than merely degrading throughput. A 1,024-GPU job holding 900 GPUs while waiting for 124 more burns approximately \$1,800/hour in idle capacity [@burns2016]. \index{Gang Scheduling!definition}
 
-GPU heterogeneity adds a second challenging dimension. Modern clusters contain mixtures of A100 and H100 accelerators with different memory capacities (`{python} ClusterEconomicsContext.a100_mem_str` vs. `{python} ClusterEconomicsContext.h100_mem_str`), compute throughput, and interconnect bandwidth. An H100 provides roughly twice the training throughput of an A100 for transformer workloads but costs proportionally more. Some models fit in A100 memory with appropriate parallelism strategies; others require the larger H100 memory to avoid excessive model sharding. The scheduler must match workloads to appropriate hardware based on actual requirements, not user preferences, while maintaining high utilization across heterogeneous pools. When users request specific GPU types out of habit rather than necessity, the mismatch between requested and required resources can leave entire hardware pools idle while queues overflow on preferred hardware.
+GPU heterogeneity adds a second challenging dimension. Modern clusters contain mixtures of A100 and H100 accelerators with different memory capacities (`{python} ClusterEconomicsContext.a100_mem_gb_str` vs. `{python} ClusterEconomicsContext.h100_mem_gb_str`), compute throughput, and interconnect bandwidth. An H100 provides roughly twice the training throughput of an A100 for transformer workloads but costs proportionally more. Some models fit in A100 memory with appropriate parallelism strategies; others require the larger H100 memory to avoid excessive model sharding. The scheduler must match workloads to appropriate hardware based on actual requirements, not user preferences, while maintaining high utilization across heterogeneous pools. When users request specific GPU types out of habit rather than necessity, the mismatch between requested and required resources can leave entire hardware pools idle while queues overflow on preferred hardware.
 
 Job duration unpredictability compounds these challenges further. A training run may converge early and complete in days rather than weeks. Hardware failures may abort jobs unexpectedly, returning resources at unpredictable times. Hyperparameter searches may reveal early that certain configurations will not succeed, leading to voluntary termination. Traditional scientific computing workloads, such as weather simulations or molecular dynamics, have more predictable runtimes that enable better scheduling decisions: the scheduler can project when resources will become available and plan accordingly. ML workloads deny this luxury, forcing schedulers to operate with deep uncertainty about when current jobs will release resources.
 
@@ -329,7 +329,7 @@ The most fundamental scheduling algorithm is **bin packing**[^fn-bin-packing-sch
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Bin packing — fragmentation and NVLink locality.
 # │ Exports: FleetFragmentation.total_gpus_str, effective_capacity_pct_str,
-# │          nvlink_h100_str, ib_ndr_gbs_str
+# │          nvlink_h100_gb_s_str, ib_ndr_gbs_str
 from mlsysim.fmt import fmt_qty
 
 class FleetFragmentation:
@@ -345,7 +345,7 @@ class FleetFragmentation:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     total_gpus_str = fmt_count(total_gpus, label="GPU")
     effective_capacity_pct_str = fmt_percent((100 - frag_pct)/100, precision=0, commas=False, style='prose')
-    nvlink_h100_str = fmt_qty(h_h100.nvlink.bandwidth, GB/second, precision=0)
+    nvlink_h100_gb_s_str = fmt_qty(h_h100.nvlink.bandwidth, GB/second, precision=0)
     ib_ndr_gbs_str = fmt_qty(ib_ndr.bandwidth, GB/second, precision=0)
 ```
 
@@ -353,7 +353,7 @@ Consider a 64-node cluster with 8 GPUs per node, totaling `{python} FleetFragmen
 
 ML workloads make bin packing multi-dimensional in ways that traditional scheduling rarely encounters. Each job requires GPUs together with CPU cores for data preprocessing, host memory for data loading and augmentation pipelines, local SSD storage for dataset caching, and network bandwidth for gradient synchronization. A job requesting 4 GPUs, 32 CPU cores, and 256 GB of RAM may not fit on a node that has 4 free GPUs but only 16 free CPU cores because other jobs have consumed the host CPU for preprocessing. The scheduler must simultaneously satisfy all resource dimensions, and the job fits only if every dimension has sufficient capacity on the selected node. This multi-dimensional constraint dramatically reduces the solution space compared to single-dimensional packing, because a bottleneck in any single resource dimension can strand capacity in all others.
 
-Locality constraints further restrict placement beyond simple resource availability. A training job using tensor parallelism requires GPUs connected via NVLink within the same node, since cross-node communication over InfiniBand is an order of magnitude slower (`{python} FleetFragmentation.nvlink_h100_str` intra-node vs. `{python} FleetFragmentation.ib_ndr_gbs_str` inter-node). A job requesting "4 GPUs with NVLink connectivity" cannot use 2 GPUs from node A and 2 from node B, even if all 4 GPUs are individually available and the total capacity is sufficient. These topology constraints transform a packing problem into a placement problem where which specific resources matter as much as how many resources are available. The placement problem is strictly harder than the packing problem because it adds spatial constraints to the existing capacity constraints.
+Locality constraints further restrict placement beyond simple resource availability. A training job using tensor parallelism requires GPUs connected via NVLink within the same node, since cross-node communication over InfiniBand is an order of magnitude slower (`{python} FleetFragmentation.nvlink_h100_gb_s_str` intra-node vs. `{python} FleetFragmentation.ib_ndr_gbs_str` inter-node). A job requesting "4 GPUs with NVLink connectivity" cannot use 2 GPUs from node A and 2 from node B, even if all 4 GPUs are individually available and the total capacity is sufficient. These topology constraints transform a packing problem into a placement problem where which specific resources matter as much as how many resources are available. The placement problem is strictly harder than the packing problem because it adds spatial constraints to the existing capacity constraints.
 
 Production schedulers address fragmentation through several complementary strategies, each targeting a different aspect of the problem.
 
@@ -668,18 +668,18 @@ This binary allocation model creates a significant inefficiency for inference wo
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: MIG partitioning — A100/H100 memory capacities.
-# │ Exports: ClusterEconomicsMigRecap.a100_mem_str, h100_mem_str
+# │ Exports: ClusterEconomicsMigRecap.a100_mem_gb_str, h100_mem_gb_str
 from mlsysim.core.constants import GiB
 from mlsysim.fmt import fmt, fmt_qty
 
 class ClusterEconomicsMigRecap:
     from mlsysim import Hardware
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    a100_mem_str = fmt_qty(Hardware.Cloud.A100.memory.capacity, GiB, precision=0, commas=False, unit_label="GB")
-    h100_mem_str = fmt_memory(Hardware.Cloud.H100.memory.capacity, unit=GiB, precision=0, commas=False)
+    a100_mem_gb_str = fmt_qty(Hardware.Cloud.A100.memory.capacity, GiB, precision=0, commas=False, unit_label="GB")
+    h100_mem_gb_str = fmt_qty(Hardware.Cloud.H100.memory.capacity, GiB, precision=0, commas=False, unit_label="GB")
 ```
 
-**Multi-Instance GPU (MIG)**[^fn-mig-isolation] technology addresses this inefficiency by partitioning A100 and H100 GPUs into hardware-isolated instances. An A100 with `{python} ClusterEconomicsMigRecap.a100_mem_str` of memory can be divided into configurations ranging from 7 small instances of approximately 10 GB each to 2 large instances of approximately 40 GB each. Unlike software-based GPU sharing (time-slicing), MIG provides hardware isolation: each instance has dedicated memory, cache, and compute resources, preventing one workload from interfering with another and eliminating the noisy neighbor[^fn-noisy-neighbor-etymology] effect. The device plugin exposes MIG instances as separate schedulable resources, allowing the scheduler to treat each instance as an independent GPU for allocation purposes.
+**Multi-Instance GPU (MIG)**[^fn-mig-isolation] technology addresses this inefficiency by partitioning A100 and H100 GPUs into hardware-isolated instances. An A100 with `{python} ClusterEconomicsMigRecap.a100_mem_gb_str` of memory can be divided into configurations ranging from 7 small instances of approximately 10 GB each to 2 large instances of approximately 40 GB each. Unlike software-based GPU sharing (time-slicing), MIG provides hardware isolation: each instance has dedicated memory, cache, and compute resources, preventing one workload from interfering with another and eliminating the noisy neighbor[^fn-noisy-neighbor-etymology] effect. The device plugin exposes MIG instances as separate schedulable resources, allowing the scheduler to treat each instance as an independent GPU for allocation purposes.
 
 [^fn-mig-isolation]: **Multi-Instance GPU (MIG)**: Introduced with the A100 (2020), MIG partitions a single GPU into up to 7 hardware-isolated instances with dedicated memory controllers, L2 cache slices, and compute units. The isolation is enforced at the hardware level, not by time-slicing, eliminating the noisy-neighbor interference that degrades P99 latency by 10 to 20 percent under software sharing. The trade-off is rigidity: partition profiles cannot change without draining all workloads, making MIG poorly suited for clusters with rapidly shifting workload mixes. \index{MIG!GPU isolation}
 
@@ -791,8 +791,8 @@ Randomly assigning 64 GPUs across a massive data center cripples a synchronous t
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Topology hierarchy — NVLink and InfiniBand bandwidth.
-# │ Exports: FleetTopologyInterconnect.nvlink_a100_str, nvlink_h100_str,
-# │          ib_ndr_str, ib_ndr_gbs_str
+# │ Exports: FleetTopologyInterconnect.nvlink_a100_gb_s_str, nvlink_h100_gb_s_str,
+# │          ib_ndr_gbps_str, ib_ndr_gbs_str
 from mlsysim.fmt import fmt, check, fmt_time, fmt_qty
 class FleetTopologyInterconnect:
     from mlsysim import Hardware
@@ -808,9 +808,9 @@ class FleetTopologyInterconnect:
     check(abs((nvlink_xfer - ib_xfer).to(ms).magnitude) > 0, "IB transfer should differ from NVLink")
     check(xfer_slowdown > 1, f"Expected IB slowdown > 1, got {xfer_slowdown}")
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    nvlink_h100_str = fmt_qty(h_h100.nvlink.bandwidth, GB/second, precision=0)
-    nvlink_a100_str = fmt_qty(h_a100.nvlink.bandwidth, GB/second, precision=0)
-    ib_ndr_str = fmt_qty(ib_ndr.bandwidth, Gbps, precision=0, unit_label="Gb/s")
+    nvlink_h100_gb_s_str = fmt_qty(h_h100.nvlink.bandwidth, GB/second, precision=0)
+    nvlink_a100_gb_s_str = fmt_qty(h_a100.nvlink.bandwidth, GB/second, precision=0)
+    ib_ndr_gbps_str = fmt_qty(ib_ndr.bandwidth, Gbps, precision=0, unit_label="Gb/s")
     ib_ndr_gbs_str = fmt_qty(ib_ndr.bandwidth, GB/second, precision=0)
     activation_gb_str = fmt_qty(activation, GB, precision=0, commas=False)
     nvlink_xfer_ms_str = fmt_time(nvlink_xfer, ms, precision=1, commas=False)
@@ -826,9 +826,9 @@ Modern GPU clusters exhibit a multi-level communication hierarchy, where bandwid
 *Bandwidth cliffs from NVLink to spine across the fabric.*
 :::
 
-Within a single node, GPUs communicate via **NVLink**\index{NVLink}, providing `{python} FleetTopologyInterconnect.nvlink_a100_str` per GPU on A100 systems and `{python} FleetTopologyInterconnect.nvlink_h100_str` on H100 systems. This high-bandwidth, low-latency interconnect enables efficient tensor parallelism, where matrix operations are split across GPUs that must exchange intermediate results (activations and gradients) at every transformer layer. The NVLink bandwidth is sufficient to overlap communication with computation for most model architectures, meaning tensor parallel operations can proceed at near-ideal throughput when confined to a single node.
+Within a single node, GPUs communicate via **NVLink**\index{NVLink}, providing `{python} FleetTopologyInterconnect.nvlink_a100_gb_s_str` per GPU on A100 systems and `{python} FleetTopologyInterconnect.nvlink_h100_gb_s_str` on H100 systems. This high-bandwidth, low-latency interconnect enables efficient tensor parallelism, where matrix operations are split across GPUs that must exchange intermediate results (activations and gradients) at every transformer layer. The NVLink bandwidth is sufficient to overlap communication with computation for most model architectures, meaning tensor parallel operations can proceed at near-ideal throughput when confined to a single node.
 
-Between nodes within the same rack or **leaf switch domain**\index{Leaf Switch Domain}, communication traverses InfiniBand or RoCE at `{python} FleetTopologyInterconnect.ib_ndr_str` (NDR InfiniBand), roughly `{python} FleetTopologyInterconnect.ib_ndr_gbs_str` per link. This represents an order of magnitude reduction from NVLink bandwidth. Data parallelism, which requires AllReduce of gradients after each training step, operates efficiently at this level because the gradient synchronization pattern allows overlap between communication and the next iteration's forward pass. The latency penalty is modest (microseconds vs. nanoseconds), and the aggregate bandwidth is sufficient for gradient tensors that are typically smaller than the activation tensors exchanged in tensor parallelism.
+Between nodes within the same rack or **leaf switch domain**\index{Leaf Switch Domain}, communication traverses InfiniBand or RoCE at `{python} FleetTopologyInterconnect.ib_ndr_gbps_str` (NDR InfiniBand), roughly `{python} FleetTopologyInterconnect.ib_ndr_gbs_str` per link. This represents an order of magnitude reduction from NVLink bandwidth. Data parallelism, which requires AllReduce of gradients after each training step, operates efficiently at this level because the gradient synchronization pattern allows overlap between communication and the next iteration's forward pass. The latency penalty is modest (microseconds vs. nanoseconds), and the aggregate bandwidth is sufficient for gradient tensors that are typically smaller than the activation tensors exchanged in tensor parallelism.
 
 Between racks connected through **spine switches**\index{Spine Switch}, communication crosses additional switch hops, introducing both higher latency and potentially reduced effective bandwidth due to network congestion. The fat-tree topologies analyzed in @sec-network-fabrics-fat-tree provide full bisection bandwidth in theory, but in practice, congestion from concurrent flows, routing inefficiencies, and switch buffer limitations reduce effective cross-rack bandwidth by 10 to 30 percent compared to intra-rack communication. Cross-rack communication also adds tail latency variability: while median latency may be only slightly higher, P99 latency can spike during congestion events, creating straggler effects in synchronous training where the slowest communicator determines the pace for all workers.
 
@@ -972,7 +972,7 @@ Consider a 256-GPU training job using 3D parallelism: 8-way tensor parallel, 4-w
 
 **Good placement** (topology-aware):
 
-- Tensor parallel groups: 32 groups of 8 GPUs, each confined to one 8-GPU node (NVLink: `{python} FleetTopologyInterconnect.nvlink_h100_str`)
+- Tensor parallel groups: 32 groups of 8 GPUs, each confined to one 8-GPU node (NVLink: `{python} FleetTopologyInterconnect.nvlink_h100_gb_s_str`)
 - Pipeline stages: 4 consecutive nodes within the same rack (1 switch hop, InfiniBand: `{python} FleetTopologyInterconnect.ib_ndr_gbs_str`)
 - Data parallel replicas: 8 racks (2 switch hops for cross-rack AllReduce)
 
@@ -982,7 +982,7 @@ Consider a 256-GPU training job using 3D parallelism: 8-way tensor parallel, 4-w
 - Pipeline stages scattered across racks (2 switch hops instead of 1)
 - Data parallel replicas randomly distributed
 
-The tensor parallel communication alone illustrates the impact. With NVLink at `{python} FleetTopologyInterconnect.nvlink_h100_str`, a `{python} FleetTopologyInterconnect.activation_gb_str` activation transfer takes approximately `{python} FleetTopologyInterconnect.nvlink_xfer_ms_str`. Over InfiniBand at `{python} FleetTopologyInterconnect.ib_ndr_gbs_str`, the same transfer takes approximately `{python} FleetTopologyInterconnect.ib_xfer_ms_str`, a `{python} FleetTopologyInterconnect.xfer_slowdown_str`$\times$ slowdown. Since tensor parallelism communicates at every transformer layer (typically 80+ layers for large models), this difference compounds to 15 to 30 percent total training throughput degradation.
+The tensor parallel communication alone illustrates the impact. With NVLink at `{python} FleetTopologyInterconnect.nvlink_h100_gb_s_str`, a `{python} FleetTopologyInterconnect.activation_gb_str` activation transfer takes approximately `{python} FleetTopologyInterconnect.nvlink_xfer_ms_str`. Over InfiniBand at `{python} FleetTopologyInterconnect.ib_ndr_gbs_str`, the same transfer takes approximately `{python} FleetTopologyInterconnect.ib_xfer_ms_str`, a `{python} FleetTopologyInterconnect.xfer_slowdown_str`$\times$ slowdown. Since tensor parallelism communicates at every transformer layer (typically 80+ layers for large models), this difference compounds to 15 to 30 percent total training throughput degradation.
 
 :::
 
@@ -1122,7 +1122,7 @@ This logic extends to the temporal dimension, where the scheduler must weigh the
 # │
 # │ Imports: mlsysim.book (fmt, check)
 # │ Exports: es_s1_str, es_s2_str, es_s3p1_str, es_s3p2_str, es_s3_str,
-# │          es_rescale_str, es_vs_wait_str, es_vs_imm_str
+# │          es_rescale_hours_str, es_vs_wait_str, es_vs_imm_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_math, check, fmt_time
 
@@ -1156,7 +1156,7 @@ class ElasticScaling:
     es_s3p1_str = fmt(s3_phase1, precision=1, commas=False)
     es_s3p2_str = fmt(s3_phase2, precision=1, commas=False)
     es_s3_str = fmt(s3_work, precision=1, commas=False)
-    es_rescale_str = fmt_time(rescale_h, 'hour', precision=2, commas=False, style='word')
+    es_rescale_hours_str = fmt_time(rescale_h, 'hour', precision=2, commas=False, style='word')
     es_rescale_min_str = fmt_time(rescale_min, 'minute', precision=0, commas=False, style='word')
     es_rescale_break_even_h_str = fmt_time(2, 'hour', precision=0, commas=False, style='word')
     # Pre-compute the full Phase 2 math expression to avoid the
@@ -1190,7 +1190,7 @@ class ElasticScaling:
 
 Consider a large language model training job with a target batch size that requires `{python} ElasticScaling.es_peak_gpus_str` A100s for peak efficiency. Three scheduling strategies are evaluated over a window of `{python} ElasticScaling.es_window_h_str`.
 
-**Assumptions**: Throughput at `{python} ElasticScaling.es_gpus_128_str` is `{python} ElasticScaling.es_tp_128_str` epoch/hour (baseline). Throughput at `{python} ElasticScaling.es_gpus_256_str` is `{python} ElasticScaling.es_tp_256_str` epochs/hour (`{python} ElasticScaling.es_eff_256_pct_str` scaling efficiency). Throughput at `{python} ElasticScaling.es_s2_gpus_str` is `{python} ElasticScaling.es_tp_512_str` epochs/hour (`{python} ElasticScaling.es_eff_512_pct_str` scaling efficiency). Re-scaling cost is `{python} ElasticScaling.es_rescale_min_str` (`{python} ElasticScaling.es_rescale_str`) to checkpoint, re-shard, and restart.
+**Assumptions**: Throughput at `{python} ElasticScaling.es_gpus_128_str` is `{python} ElasticScaling.es_tp_128_str` epoch/hour (baseline). Throughput at `{python} ElasticScaling.es_gpus_256_str` is `{python} ElasticScaling.es_tp_256_str` epochs/hour (`{python} ElasticScaling.es_eff_256_pct_str` scaling efficiency). Throughput at `{python} ElasticScaling.es_s2_gpus_str` is `{python} ElasticScaling.es_tp_512_str` epochs/hour (`{python} ElasticScaling.es_eff_512_pct_str` scaling efficiency). Re-scaling cost is `{python} ElasticScaling.es_rescale_min_str` (`{python} ElasticScaling.es_rescale_hours_str`) to checkpoint, re-shard, and restart.
 
 **Strategy 1 -- Immediate start (no scaling)**: The job starts immediately with `{python} ElasticScaling.es_s1_gpus_str` and runs for the full `{python} ElasticScaling.es_window_h_str`. Total work: $24 \times 1.0 =$ `{python} ElasticScaling.es_s1_str` epochs.
 
@@ -1691,8 +1691,8 @@ To prevent **oscillation**\index{Oscillation}, where the scaler rapidly adds and
 # │      SLO violations from excess QPS × duration.
 # │
 # │ Imports: mlsysim.book (fmt, check)
-# │ Exports: as_capacity_str, as_detect_str, as_ready_str, as_excess_str,
-# │          as_violations_str, as_pred_trigger_str, as_pred_capacity_str
+# │ Exports: as_capacity_qps_str, as_detect_str, as_ready_str, as_excess_qps_str,
+# │          as_violations_str, as_pred_trigger_str, as_pred_capacity_qps_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check, fmt_time
 
@@ -1723,19 +1723,19 @@ class AutoscalingLag:
     check(slo_violations == 4725, f"Violations: expected 4725, got {slo_violations}")
     check(pred_capacity == 100, f"Pred capacity: expected 100, got {pred_capacity}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    as_capacity_str = fmt_rate(capacity, "QPS")
+    as_capacity_qps_str = fmt_rate(capacity, "QPS")
     as_detect_str = fmt(detect_sec, precision=0)
     as_ready_str = fmt(ready_sec, precision=0)
-    as_excess_str = fmt_rate(excess_at_peak, "QPS")
+    as_excess_qps_str = fmt_rate(excess_at_peak, "QPS")
     as_violations_str = fmt(slo_violations, precision=0)
     as_pred_trigger_str = fmt(pred_trigger_sec, precision=0)
-    as_pred_capacity_str = fmt_rate(pred_capacity, "QPS")
-    as_load_time_str = fmt_time(load_time_sec, 'second', precision=0, commas=False, style='word')
-    as_traffic_end_str = fmt_rate(traffic_end, "QPS", commas=False)
+    as_pred_capacity_qps_str = fmt_rate(pred_capacity, "QPS")
+    as_load_time_s_str = fmt_time(load_time_sec, 'second', precision=0, commas=False, style='word')
+    as_traffic_end_qps_str = fmt_rate(traffic_end, "QPS", commas=False)
     as_new_replicas_str = fmt(replicas, precision=0, commas=False)
     as_replicas_str = fmt(replicas, precision=0, commas=False)
     as_qps_per_replica_str = fmt(qps_per_replica, precision=0, commas=False)
-    as_traffic_start_str = fmt_rate(traffic_start, "QPS", commas=False)
+    as_traffic_start_qps_str = fmt_rate(traffic_start, "QPS", commas=False)
     as_ramp_sec_str = fmt_time(ramp_sec, 'second', precision=0, commas=False, style='word')
     as_slo_ms_str = fmt_time(slo_ms, 'millisecond', precision=0, commas=False)
     as_load_time_min_str = fmt_time(load_time_sec / 60, 'minute', precision=0, commas=False, style='word')
@@ -1743,13 +1743,13 @@ class AutoscalingLag:
 
 ::: {#nbk-fleet-orchestration-autoscaling-lag .callout-notebook title="The autoscaling lag"}
 
-Consider a serving fleet with `{python} AutoscalingLag.as_replicas_str` replicas, each capable of `{python} AutoscalingLag.as_qps_per_replica_str` queries per second (QPS) while meeting the `{python} AutoscalingLag.as_slo_ms_str` SLO. Total capacity: `{python} AutoscalingLag.as_capacity_str`.
+Consider a serving fleet with `{python} AutoscalingLag.as_replicas_str` replicas, each capable of `{python} AutoscalingLag.as_qps_per_replica_str` queries per second (QPS) while meeting the `{python} AutoscalingLag.as_slo_ms_str` SLO. Total capacity: `{python} AutoscalingLag.as_capacity_qps_str`.
 
-**Scenario**: Traffic ramps from `{python} AutoscalingLag.as_traffic_start_str` to `{python} AutoscalingLag.as_traffic_end_str` linearly over `{python} AutoscalingLag.as_ramp_sec_str`. Model load time: `{python} AutoscalingLag.as_load_time_min_str` (`{python} AutoscalingLag.as_load_time_str`).
+**Scenario**: Traffic ramps from `{python} AutoscalingLag.as_traffic_start_qps_str` to `{python} AutoscalingLag.as_traffic_end_qps_str` linearly over `{python} AutoscalingLag.as_ramp_sec_str`. Model load time: `{python} AutoscalingLag.as_load_time_min_str` (`{python} AutoscalingLag.as_load_time_s_str`).
 
-**Reactive scaling**\index{Reactive Scaling}: HPA detects overload at $t =$ `{python} AutoscalingLag.as_detect_str` s (when traffic hits `{python} AutoscalingLag.as_capacity_str`). It requests `{python} AutoscalingLag.as_new_replicas_str` new replicas. These replicas become ready at $t =$ `{python} AutoscalingLag.as_ready_str` s (`{python} AutoscalingLag.as_detect_str` + `{python} AutoscalingLag.as_load_time_str`). From $t =$ `{python} AutoscalingLag.as_detect_str` s to $t =$ `{python} AutoscalingLag.as_ready_str` s, demand exceeds capacity. During the ramp, excess demand grows linearly from 0 to `{python} AutoscalingLag.as_excess_str`; after the ramp reaches `{python} AutoscalingLag.as_traffic_end_str`, the full `{python} AutoscalingLag.as_excess_str` overload persists until the new replicas are ready. The area above capacity is approximately `{python} AutoscalingLag.as_violations_str` requests, all of which are queued or dropped and violate the SLO.
+**Reactive scaling**\index{Reactive Scaling}: HPA detects overload at $t =$ `{python} AutoscalingLag.as_detect_str` s (when traffic hits `{python} AutoscalingLag.as_capacity_qps_str`). It requests `{python} AutoscalingLag.as_new_replicas_str` new replicas. These replicas become ready at $t =$ `{python} AutoscalingLag.as_ready_str` s (`{python} AutoscalingLag.as_detect_str` + `{python} AutoscalingLag.as_load_time_s_str`). From $t =$ `{python} AutoscalingLag.as_detect_str` s to $t =$ `{python} AutoscalingLag.as_ready_str` s, demand exceeds capacity. During the ramp, excess demand grows linearly from 0 to `{python} AutoscalingLag.as_excess_qps_str`; after the ramp reaches `{python} AutoscalingLag.as_traffic_end_qps_str`, the full `{python} AutoscalingLag.as_excess_qps_str` overload persists until the new replicas are ready. The area above capacity is approximately `{python} AutoscalingLag.as_violations_str` requests, all of which are queued or dropped and violate the SLO.
 
-**Predictive scaling**: The scaler forecasts the ramp and triggers scale-up at $t =$ `{python} AutoscalingLag.as_pred_trigger_str` s. The `{python} AutoscalingLag.as_new_replicas_str` new replicas come online at $t = 0$ s, pushing capacity to `{python} AutoscalingLag.as_pred_capacity_str` just as the ramp begins. Zero SLO violations.
+**Predictive scaling**: The scaler forecasts the ramp and triggers scale-up at $t =$ `{python} AutoscalingLag.as_pred_trigger_str` s. The `{python} AutoscalingLag.as_new_replicas_str` new replicas come online at $t = 0$ s, pushing capacity to `{python} AutoscalingLag.as_pred_capacity_qps_str` just as the ramp begins. Zero SLO violations.
 
 :::
 
@@ -1837,11 +1837,11 @@ class GpuSharingRoi:
     check(abs(annual_savings - 876000) < 1000, f"Savings: expected ~876K, got {annual_savings}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     gs_excl_util_str = fmt_percent(excl_util_pct/100, precision=1, style='prose')
-    gs_excl_total_mem_str = fmt_qty_int(excl_total_mem, GiB, unit_label="GB")
+    gs_excl_total_mem_gb_str = fmt_qty_int(excl_total_mem, GiB, unit_label="GB")
     gs_excl_large_str = fmt_count(excl_large_gpus, label="GPU")
     gs_excl_total_str = fmt_count(excl_total, label="GPU")
     gs_shared_gpus_str = fmt_count(shared_small_gpus, label="GPU")
-    gs_shared_mem_str = fmt_qty(shared_mem_per_gpu_q, GiB, precision=0, unit_label="GB")
+    gs_shared_mem_gb_str = fmt_qty(shared_mem_per_gpu_q, GiB, precision=0, unit_label="GB")
     gs_shared_util_str = fmt_percent(shared_util_pct/100, precision=0, commas=False, style='prose')
     gs_shared_total_str = fmt_count(shared_total, label="GPU")
     gs_saved_gpus_str = fmt(saved_gpus, precision=0)
@@ -1850,22 +1850,22 @@ class GpuSharingRoi:
     gs_small_model_b_str = fmt_params(Models.Language.Llama2_7B.parameters, precision=0, commas=False)
     gs_large_model_b_str = fmt_params(Models.Language.GPT3.parameters, precision=0, commas=False)
     gs_n_small_str = fmt(n_small, precision=0, commas=False)
-    gs_a100_mem_str = fmt_qty(a100_mem, GiB, precision=0, commas=False, unit_label="GB")
-    gs_small_footprint_str = fmt_qty(small_footprint, GiB, precision=0, commas=False, unit_label="GB")
+    gs_a100_mem_gb_str = fmt_qty(a100_mem, GiB, precision=0, commas=False, unit_label="GB")
+    gs_small_footprint_gb_str = fmt_qty(small_footprint, GiB, precision=0, commas=False, unit_label="GB")
     gs_models_per_gpu_str = fmt(models_per_gpu_shared, precision=0, commas=False)
     gs_n_large_str = fmt(n_large, precision=0, commas=False)
     gs_gpus_per_large_str = fmt_count(gpus_per_large, commas=False, label="GPU")
-    gs_large_footprint_str = fmt_qty(large_footprint, GB, precision=0, commas=False)
+    gs_large_footprint_gb_str = fmt_qty(large_footprint, GB, precision=0, commas=False)
     gs_gpu_hour_rate_str = fmt_usd(gpu_rate, precision=0, commas=False, per="GPU-hour")
 ```
 
 ::: {#nbk-fleet-orchestration-gpu-sharing-roi .callout-notebook title="GPU sharing ROI"}
 
-Consider a fleet serving `{python} GpuSharingRoi.gs_n_small_str` distinct `{python} GpuSharingRoi.gs_small_model_b_str` models (`{python} GpuSharingRoi.gs_small_footprint_str` footprint each) and `{python} GpuSharingRoi.gs_n_large_str` distinct `{python} GpuSharingRoi.gs_large_model_b_str` models (`{python} GpuSharingRoi.gs_large_footprint_str` footprint each).
+Consider a fleet serving `{python} GpuSharingRoi.gs_n_small_str` distinct `{python} GpuSharingRoi.gs_small_model_b_str` models (`{python} GpuSharingRoi.gs_small_footprint_gb_str` footprint each) and `{python} GpuSharingRoi.gs_n_large_str` distinct `{python} GpuSharingRoi.gs_large_model_b_str` models (`{python} GpuSharingRoi.gs_large_footprint_gb_str` footprint each).
 
-**Strategy A -- Exclusive access (one model per GPU)**: The `{python} GpuSharingRoi.gs_small_model_b_str` models require `{python} GpuSharingRoi.gs_n_small_str` A100 GPUs (`{python} GpuSharingRoi.gs_a100_mem_str` each), achieving only `{python} GpuSharingRoi.gs_excl_util_str` memory utilization (`{python} GpuSharingRoi.gs_n_small_str` $\times$ `{python} GpuSharingRoi.gs_small_footprint_str` used out of `{python} GpuSharingRoi.gs_excl_total_mem_str` total). The `{python} GpuSharingRoi.gs_large_model_b_str` models require `{python} GpuSharingRoi.gs_excl_large_str` (`{python} GpuSharingRoi.gs_n_large_str` models $\times$ `{python} GpuSharingRoi.gs_gpus_per_large_str` each for tensor parallelism). Total fleet: `{python} GpuSharingRoi.gs_excl_total_str`.
+**Strategy A -- Exclusive access (one model per GPU)**: The `{python} GpuSharingRoi.gs_small_model_b_str` models require `{python} GpuSharingRoi.gs_n_small_str` A100 GPUs (`{python} GpuSharingRoi.gs_a100_mem_gb_str` each), achieving only `{python} GpuSharingRoi.gs_excl_util_str` memory utilization (`{python} GpuSharingRoi.gs_n_small_str` $\times$ `{python} GpuSharingRoi.gs_small_footprint_gb_str` used out of `{python} GpuSharingRoi.gs_excl_total_mem_gb_str` total). The `{python} GpuSharingRoi.gs_large_model_b_str` models require `{python} GpuSharingRoi.gs_excl_large_str` (`{python} GpuSharingRoi.gs_n_large_str` models $\times$ `{python} GpuSharingRoi.gs_gpus_per_large_str` each for tensor parallelism). Total fleet: `{python} GpuSharingRoi.gs_excl_total_str`.
 
-**Strategy B -- Mixed sharing (MPS for small, exclusive for large)**: Pack `{python} GpuSharingRoi.gs_models_per_gpu_str` models per A100 for the `{python} GpuSharingRoi.gs_small_model_b_str` models (`{python} GpuSharingRoi.gs_models_per_gpu_str` $\times$ `{python} GpuSharingRoi.gs_small_footprint_str` = `{python} GpuSharingRoi.gs_shared_mem_str`, well within `{python} GpuSharingRoi.gs_a100_mem_str`), requiring only `{python} GpuSharingRoi.gs_shared_gpus_str` at `{python} GpuSharingRoi.gs_shared_util_str` memory utilization. The `{python} GpuSharingRoi.gs_large_model_b_str` models remain unchanged at `{python} GpuSharingRoi.gs_excl_large_str`. Total fleet: `{python} GpuSharingRoi.gs_shared_total_str`.
+**Strategy B -- Mixed sharing (MPS for small, exclusive for large)**: Pack `{python} GpuSharingRoi.gs_models_per_gpu_str` models per A100 for the `{python} GpuSharingRoi.gs_small_model_b_str` models (`{python} GpuSharingRoi.gs_models_per_gpu_str` $\times$ `{python} GpuSharingRoi.gs_small_footprint_gb_str` = `{python} GpuSharingRoi.gs_shared_mem_gb_str`, well within `{python} GpuSharingRoi.gs_a100_mem_gb_str`), requiring only `{python} GpuSharingRoi.gs_shared_gpus_str` at `{python} GpuSharingRoi.gs_shared_util_str` memory utilization. The `{python} GpuSharingRoi.gs_large_model_b_str` models remain unchanged at `{python} GpuSharingRoi.gs_excl_large_str`. Total fleet: `{python} GpuSharingRoi.gs_shared_total_str`.
 
 Sharing reduces the fleet size by `{python} GpuSharingRoi.gs_saved_pct_str` (`{python} GpuSharingRoi.gs_saved_gpus_str` fewer GPUs). At `{python} GpuSharingRoi.gs_gpu_hour_rate_str`, this saves approximately `{python} GpuSharingRoi.gs_annual_usd_str` annually in compute costs, purely through scheduling policy.
 
@@ -2332,19 +2332,19 @@ The Fleet Stack framework in @fig-fleet-stack provides a structured approach: an
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Debug inventory table — A100 NVLink bandwidth.
-# │ Exports: FleetDebugNvlinkRecap.nvlink_a100_str
+# │ Exports: FleetDebugNvlinkRecap.nvlink_a100_gb_s_str
 from mlsysim.fmt import fmt_qty
 
 class FleetDebugNvlinkRecap:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    nvlink_a100_str = fmt_qty(Hardware.Cloud.A100.nvlink.bandwidth, GB/second, precision=0)
+    nvlink_a100_gb_s_str = fmt_qty(Hardware.Cloud.A100.nvlink.bandwidth, GB/second, precision=0)
 ```
 
-| **GPU Type**   | **Count** | **Memory**  | **Interconnect**                                          | **Nodes**                |
-|:---------------|----------:|:------------|:----------------------------------------------------------|:-------------------------|
-| **A100-80 GB** |       400 | 80 GB HBM2e | NVLink (`{python} FleetDebugNvlinkRecap.nvlink_a100_str`) | 50 nodes $\times$ 8 GPUs |
-| **A100-40 GB** |       400 | 40 GB HBM2e | NVLink (`{python} FleetDebugNvlinkRecap.nvlink_a100_str`) | 50 nodes $\times$ 8 GPUs |
-| **V100-32 GB** |       200 | 32 GB HBM2  | PCIe Gen3 (16 GB/s)                                       | 50 nodes $\times$ 4 GPUs |
+| **GPU Type**   | **Count** | **Memory**  | **Interconnect**                                               | **Nodes**                |
+|:---------------|----------:|:------------|:---------------------------------------------------------------|:-------------------------|
+| **A100-80 GB** |       400 | 80 GB HBM2e | NVLink (`{python} FleetDebugNvlinkRecap.nvlink_a100_gb_s_str`) | 50 nodes $\times$ 8 GPUs |
+| **A100-40 GB** |       400 | 40 GB HBM2e | NVLink (`{python} FleetDebugNvlinkRecap.nvlink_a100_gb_s_str`) | 50 nodes $\times$ 8 GPUs |
+| **V100-32 GB** |       200 | 32 GB HBM2  | PCIe Gen3 (16 GB/s)                                            | 50 nodes $\times$ 4 GPUs |
 
 : **Cluster Hardware Inventory**: Three procurement generations create distinct resource pools with different capabilities. A100 nodes support tensor parallelism via NVLink, while V100 nodes are limited to data parallelism. {#tbl-fleet-orchestration-debug-inventory}
 
