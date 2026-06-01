@@ -4,19 +4,19 @@ This is an advisory work queue for values that likely define
 hardware, systems, infrastructure, pricing, models, datasets,
 storage subsystems, or scenarios in LEGO LOAD stages.
 
-Findings: 1111
+Findings: 1108
 By target:
    270  Scenarios.* or Ops.*
    209  Models.* or Scenarios.TrainingRuns
    164  Scenarios.*
    109  Datasets.* or Scenarios.DataWorkloads
    107  Infrastructure.Pricing.* or Scenarios.*
-    55  Systems.Clusters or Systems.Nodes
+    54  Systems.Clusters or Systems.Nodes
     49  Hardware.*
     31  Infrastructure.*
     23  Hardware.* or Hardware.Tech.*
     23  Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet
-    20  Systems.Storage
+    18  Systems.Storage
     14  Systems.Fabrics or Systems.SwitchFabric
     13  Systems.Storage or Datasets.*
     10  Systems.*
@@ -32,8 +32,8 @@ Top chapters:
     51  vol1/benchmarking
     51  vol1/ml_systems
     41  vol1/ml_ops
-    40  vol2/data_storage
     38  vol1/nn_architectures
+    37  vol2/data_storage
     37  vol2/inference
     36  vol2/sustainable_ai
     35  vol2/ops_scale
@@ -50,12 +50,12 @@ Top reasons:
    164  unit-bearing scenario input
    107  economic input or scenario price
    105  dataset/workload specification
-    55  fleet/topology fact
+    54  fleet/topology fact
     49  hardware-related quantitative input
     31  infrastructure input
     23  hardware specification
     23  cloud/fleet price point
-    20  storage subsystem fact
+    18  storage subsystem fact
     14  network/fabric system fact
     13  storage/data fact
     10  system-level fact
@@ -1054,13 +1054,10 @@ Top reasons:
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:2112` | `BuildVsBuyStorageEconomics` | `cloud_cost_gb_month` | `Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet` | cloud/fleet price point | `0.02` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:2114` | `BuildVsBuyStorageEconomics` | `dataset_pb` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `1` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:2234` | `CheckpointModelIntro` | `ckpt_total` | `Systems.Storage or Datasets.*` | storage/data fact | `gpt3_params * (10 * (byte / param))` |
-| `book/quarto/contents/vol2/data_storage/data_storage.qmd:2330` | `CheckpointStormCalc` | `LOCAL_NVME_DRIVES_PER_NODE_REF` | `Systems.Storage` | storage subsystem fact | `4 * count` |
-| `book/quarto/contents/vol2/data_storage/data_storage.qmd:2331` | `CheckpointStormCalc` | `nodes` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `256` |
-| `book/quarto/contents/vol2/data_storage/data_storage.qmd:2334` | `CheckpointStormCalc` | `pfs_aggregate_bw` | `Systems.Storage` | storage subsystem fact | `1000 * (GB / second)` |
-| `book/quarto/contents/vol2/data_storage/data_storage.qmd:2335` | `CheckpointStormCalc` | `checkpoint_interval` | `Scenarios.TrainingRuns or Systems.Reliability` | checkpoint policy/workload cadence | `600 * second` |
-| `book/quarto/contents/vol2/data_storage/data_storage.qmd:2413` | `CheckpointFleetRetention` | `checkpoint_count_val` | `Systems.Storage or Datasets.*` | storage/data fact | `30 * 24 * 60 // 10` |
-| `book/quarto/contents/vol2/data_storage/data_storage.qmd:2415` | `CheckpointFleetRetention` | `retention_recent` | `Systems.Storage or Datasets.*` | storage/data fact | `3 * ckpt_total` |
-| `book/quarto/contents/vol2/data_storage/data_storage.qmd:2416` | `CheckpointFleetRetention` | `retained_every_100_count_val` | `Scenarios.TrainingRuns or Systems.Reliability` | checkpoint policy/workload cadence | `checkpoint_count_val // 100` |
+| `book/quarto/contents/vol2/data_storage/data_storage.qmd:2337` | `CheckpointStormCalc` | `checkpoint_interval` | `Scenarios.TrainingRuns or Systems.Reliability` | checkpoint policy/workload cadence | `600 * second` |
+| `book/quarto/contents/vol2/data_storage/data_storage.qmd:2415` | `CheckpointFleetRetention` | `checkpoint_count_val` | `Systems.Storage or Datasets.*` | storage/data fact | `30 * 24 * 60 // 10` |
+| `book/quarto/contents/vol2/data_storage/data_storage.qmd:2417` | `CheckpointFleetRetention` | `retention_recent` | `Systems.Storage or Datasets.*` | storage/data fact | `3 * ckpt_total` |
+| `book/quarto/contents/vol2/data_storage/data_storage.qmd:2418` | `CheckpointFleetRetention` | `retained_every_100_count_val` | `Scenarios.TrainingRuns or Systems.Reliability` | checkpoint policy/workload cadence | `checkpoint_count_val // 100` |
 
 ## vol2/distributed_training
 

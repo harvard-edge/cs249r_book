@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Optional
+from typing import Any, Optional
 from ..hardware.types import HardwareNode
 from ..infrastructure.types import Datacenter, GridProfile
 from ..core.types import Quantity, Metadata
@@ -10,6 +10,47 @@ class DeploymentTier(BaseModel):
     ram: Quantity
     storage: Quantity
     typical_latency_budget: Quantity
+
+
+class StorageSubsystem(BaseModel):
+    """Reusable storage tier or service in a system design."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    name: str
+    storage_tech: Any | None = None
+    capacity: Optional[Quantity] = None
+    bandwidth: Quantity
+    latency: Optional[Quantity] = None
+    media: Optional[str] = None
+    interface: Optional[str] = None
+    durability: Optional[str] = None
+    metadata: Metadata = Field(default_factory=Metadata)
+
+
+class NodeStorageConfig(BaseModel):
+    """Per-node storage composition, such as four local NVMe drives."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    name: str
+    device: StorageSubsystem
+    devices_per_node: int = 1
+    metadata: Metadata = Field(default_factory=Metadata)
+
+    @property
+    def aggregate_bandwidth(self) -> Quantity:
+        return self.devices_per_node * self.device.bandwidth
+
+
+class CheckpointStoragePath(BaseModel):
+    """Local staging plus durable checkpoint destination for training fleets."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    name: str
+    local_stage: Optional[NodeStorageConfig] = None
+    durable_store: Optional[StorageSubsystem] = None
+    write_bandwidth: Optional[Quantity] = None
+    metadata: Metadata = Field(default_factory=Metadata)
+
 
 class NetworkFabric(BaseModel):
     """

@@ -1,4 +1,12 @@
-from .types import Node, Fleet, NetworkFabric, PodEnvelope
+from .types import (
+    CheckpointStoragePath,
+    Fleet,
+    NetworkFabric,
+    Node,
+    NodeStorageConfig,
+    PodEnvelope,
+    StorageSubsystem,
+)
 from .reliability import Reliability
 from .orchestration import Orchestration
 from ..core.units import ureg, Q_, Gbps, TB, watt, MB
@@ -210,11 +218,53 @@ class NetworkEnergy(Registry):
         name="Network energy per KB", description="Approximate energy to move 1 KB across a datacenter network (~1 µJ).")
 
 
+class Storage(Registry):
+    """Reusable storage-system profiles for data and checkpoint paths."""
+
+    LocalNvmeGen4 = StorageSubsystem(
+        name="Local NVMe SSD (Gen4)",
+        storage_tech=Hardware.Tech.Storage.NvmeGen4,
+        bandwidth=Hardware.Tech.Storage.NvmeGen4.bandwidth,
+        latency=Hardware.Tech.Storage.NvmeGen4.latency,
+        media="NVMe SSD",
+        interface="PCIe Gen4",
+        durability="local",
+        metadata=Metadata(provenance=pc.BOOK_STORAGE_TIERS),
+    )
+    LocalNvmeGen4x4 = NodeStorageConfig(
+        name="4x local Gen4 NVMe drives per node",
+        device=LocalNvmeGen4,
+        devices_per_node=4,
+        metadata=Metadata(provenance=pc.BOOK_STORAGE_TIERS),
+    )
+    PfsOneTbPerSecond = StorageSubsystem(
+        name="Reference parallel file system (1 TB/s)",
+        bandwidth=1 * (TB / ureg.second),
+        media="parallel file system",
+        durability="durable",
+        metadata=Metadata(
+            provenance=pc.BOOK_STORAGE_TIERS,
+            description="Reference aggregate PFS bandwidth for checkpoint-staging examples.",
+        ),
+    )
+    Production2KCheckpointPath = CheckpointStoragePath(
+        name="Production 2K checkpoint path",
+        local_stage=LocalNvmeGen4x4,
+        durable_store=PfsOneTbPerSecond,
+        write_bandwidth=PfsOneTbPerSecond.bandwidth,
+        metadata=Metadata(
+            provenance=pc.BOOK_STORAGE_TIERS,
+            description="Reference local-NVMe-to-PFS checkpoint path for a 2K H100 fleet.",
+        ),
+    )
+
+
 class Systems(Registry):
     """Registry namespace for Systems."""
     Nodes = Nodes
     Clusters = Clusters
     Fabrics = Fabrics
+    Storage = Storage
     SwitchFabric = SwitchFabric
     NetworkEnergy = NetworkEnergy
     Pods = Pods

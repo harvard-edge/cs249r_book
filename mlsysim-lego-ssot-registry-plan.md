@@ -44,8 +44,8 @@ python3 book/tools/audit/book_check_lego_scenario_inputs.py \
 
 Current output:
 
-- **1,111 advisory MLSysIM source-of-truth candidates**
-- **147 high-confidence candidates**
+- **1,108 advisory MLSysIM source-of-truth candidates**
+- **144 high-confidence candidates**
 - Full JSON work queue:
   `book/tools/audit/artifacts/lego_scenario_inputs_audit.json`
 - Full Markdown work queue:
@@ -59,10 +59,10 @@ High-confidence buckets:
 
 | Target | Count | Meaning |
 |---|---:|---|
-| `Systems.Clusters` / `Systems.Nodes` | 55 | Fleet, node, GPU-count, cluster-topology facts |
+| `Systems.Clusters` / `Systems.Nodes` | 54 | Fleet, node, GPU-count, cluster-topology facts |
 | `Hardware.*` / `Hardware.Tech.*` | 23 | Hardware capacity, bandwidth, FLOP/s, TDP, memory/interconnect facts |
 | `Infrastructure.Pricing.Cloud` / `Infrastructure.Pricing.Fleet` | 23 | GPU-hour, cloud-instance, and fleet price points |
-| `Systems.Storage` | 20 | Local NVMe, HDD, PFS, S3/object-store, checkpoint-path storage facts |
+| `Systems.Storage` | 18 | Local NVMe, HDD, PFS, S3/object-store, checkpoint-path storage facts |
 | `Systems.Fabrics` / `Systems.SwitchFabric` | 14 | Network/fabric/switch-sizing facts |
 | `Infrastructure.*` / `Scenarios.Sustainability` | 7 | PUE, cooling, carbon, sustainability scenario facts |
 | `Infrastructure.Pricing.Storage` | 5 | Storage/monitoring price points |
@@ -118,10 +118,9 @@ Additional concrete findings from the refined audit:
   `Systems.Clusters.Production_2K`.
 - `sustainable_ai.qmd:211` previously used `cluster_gpus = 25000`; Stage 1
   replaced it with `Systems.Clusters.Reference_25K_H100`.
-- `data_storage.qmd:2330-2335` has the clearest `Systems.Storage` pilot:
-  local NVMe drives per node, 256 nodes, PFS aggregate bandwidth, and checkpoint
-  interval. The storage path belongs in `Systems.Storage`; checkpoint cadence
-  belongs in a training-run scenario.
+- Stage 2 added `Systems.Storage.Production2KCheckpointPath` and migrated the
+  `data_storage.qmd:2330-2335` checkpoint-storm storage path to it. Checkpoint
+  cadence remains local until training-run scenario profiles exist.
 - `compute_infrastructure.qmd:3910-3912` uses 1,024 GPUs, 128 nodes, and switch
   ports for fabric sizing; that should load a stock cluster/fabric profile.
 - Repeated NVMe/HDD/S3 bandwidth examples in `data_engineering.qmd`,
@@ -459,19 +458,19 @@ and the allowlist is honest.
 
 The first slice should be small and high-confidence:
 
-1. Add `Systems.Clusters.Reference_25K_H100`.
-2. Replace the local 25,000-GPU literals in:
+1. [x] Add `Systems.Clusters.Reference_25K_H100`.
+2. [x] Replace the local 25,000-GPU literals in:
    - `vol2/sustainable_ai/sustainable_ai.qmd`
    - `vol2/conclusion/conclusion.qmd`
-3. Replace `LifecycleCarbonEstimate.DummyFleet` with
+3. [x] Replace `LifecycleCarbonEstimate.DummyFleet` with
    `Systems.Clusters.Production_2K`.
-4. Replace obvious `n_gpus = 2048` / `nodes = 256` cases that are already
+4. [ ] Replace obvious `n_gpus = 2048` / `nodes = 256` cases that are already
    described as 2,048-GPU or 256-node H100 training clusters with
    `Systems.Clusters.Production_2K`.
-5. Add the `Systems.Storage` skeleton and migrate one checkpoint/storage
+5. [x] Add the `Systems.Storage` skeleton and migrate one checkpoint/storage
    example end to end, preferably the 2,048-GPU checkpoint path, to prove the
    taxonomy before broad migration.
-6. Run focused LEGO execution for touched chapters and focused MLSysIM tests.
+6. [x] Run focused LEGO execution for touched chapters and focused MLSysIM tests.
 
 This gives immediate value without forcing the whole scenario-profile taxonomy
 to exist on day one.
