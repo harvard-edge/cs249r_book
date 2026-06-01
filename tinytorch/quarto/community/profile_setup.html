@@ -307,7 +307,7 @@
 </script>
 
 <script type="module">
-    import { SUPABASE_PROJECT_URL, SUPABASE_ANON_KEY, SUPABASE_URL, getBasePath } from './modules/config.js';
+    import { SUPABASE_PROJECT_URL, SUPABASE_ANON_KEY, SUPABASE_URL, NETLIFY_URL, getBasePath } from './modules/config.js';
     import { initCandle } from './modules/candle.js';
     import { supabase } from './modules/state.js';
     import './modules/guard.js'; // Guard handles access control and completeness redirects
@@ -523,14 +523,31 @@
     });
 
     // --- 3. SUBMIT LOGIC ---
+
+    // Geocode helper (used if user typed location without picking from dropdown)
+    async function geocodeLocation(location) {
+        if (!location) return null;
+        try {
+            const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(location)}&limit=1`);
+            if (!res.ok) return null;
+            const data = await res.json();
+            if (data && data.length > 0) {
+                return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
+            }
+        } catch(e) { console.warn('Geocoding failed:', e); }
+        return null;
+    }
+
     document.getElementById('setupForm').addEventListener('submit', async (e) => {
         e.preventDefault();
         const btn = document.getElementById('saveBtn');
         btn.textContent = "Saving Profile...";
         btn.disabled = true;
 
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) {
+        let token = localStorage.getItem("tinytorch_token");
+        const refreshToken = localStorage.getItem("tinytorch_refresh_token");
+
+        if (!token) {
             alert("Session lost. Please log in again.");
             window.location.href = getBasePath() + '/index.html?action=login';
             return;
@@ -541,38 +558,102 @@
         const webVal = document.getElementById('websites').value;
         const websites = webVal.split(',').map(s => s.trim()).filter(s => s);
 
-        try {
-            const res = await fetch(`${SUPABASE_URL}/update-profile`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${session.access_token}`
-                },
-                body: JSON.stringify({
-                    display_name: document.getElementById('displayName').value,
-                    full_name: document.getElementById('fullName').value,
-                    institution: institutions,
-                    role: document.getElementById('roleInput').value,
-                    location: locInput.value,
-                    bio: document.getElementById('summary').value,
-                    website: websites,
-                    mailing_list: document.getElementById('mailingList').checked,
-                    latitude: document.getElementById('latParams').value ? parseFloat(document.getElementById('latParams').value) : undefined,
-                    longitude: document.getElementById('lonParams').value ? parseFloat(document.getElementById('lonParams').value) : undefined
-                })
-            });
+        // Get location coordinates (from autocomplete or geocode now)
+        let lat = document.getElementById('latParams').value;
+        let lon = document.getElementById('lonParams').value;
 
-            if(!res.ok) throw new Error("Save failed");
-            
-            // Success! Guard will now see profile as complete and allow dashboard access
-            window.location.href = getBasePath() + '/dashboard.html';
-
-        } catch(err) {
-            console.error(err);
-            alert("Error saving. Please try again.");
-            btn.textContent = "Complete Setup";
-            btn.disabled = false;
+        if (!lat || !lon) {
+            // User typed location without selecting from dropdown - geocode now
+            const coords = await geocodeLocation(locInput.value);
+            if (coords) {
+                lat = coords.lat;
+                lon = coords.lon;
+            }
         }
+
+        let retryCount = 0;
+        const MAX_RETRIES = 1;
+        let lastError = null;
+
+        do {
+            try {
+                const res = await fetch(`${SUPABASE_URL}/update-profile`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        display_name: document.getElementById('displayName').value,
+                        full_name: document.getElementById('fullName').value,
+                        institution: institutions,
+                        role: document.getElementById('roleInput').value,
+                        location: locInput.value,
+                        bio: document.getElementById('summary').value,
+                        website: websites,
+                        mailing_list: document.getElementById('mailingList').checked,
+                        latitude: lat ? parseFloat(lat) : null,
+                        longitude: lon ? parseFloat(lon) : null
+                    })
+                });
+
+                // Check if token needs refresh (401 or "Invalid Token" on 400)
+                let needsRefresh = res.status === 401;
+                if (res.status === 400) {
+                    try {
+                        const errData = await res.clone().json();
+                        if (errData?.error?.includes("Invalid Token")) needsRefresh = true;
+                    } catch(e) {}
+                }
+
+                if (needsRefresh && retryCount === 0 && refreshToken) {
+                    console.log("Token expired, attempting refresh...");
+                    const refreshRes = await fetch(`${NETLIFY_URL}/api/auth/refresh`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ refreshToken })
+                    });
+
+                    if (!refreshRes.ok) throw new Error("Session expired. Please log in again.");
+
+                    const refreshData = await refreshRes.json();
+                    const session = refreshData.session || refreshData;
+
+                    if (session?.access_token) {
+                        token = session.access_token;
+                        localStorage.setItem("tinytorch_token", token);
+                        if (session.refresh_token) localStorage.setItem("tinytorch_refresh_token", session.refresh_token);
+                        retryCount++;
+                        continue; // Retry with new token
+                    } else {
+                        throw new Error("Session expired. Please log in again.");
+                    }
+                }
+
+                if (!res.ok) {
+                    let errMsg = "Save failed";
+                    try {
+                        const errData = await res.json();
+                        errMsg = errData.error || errData.message || `Error ${res.status}`;
+                    } catch(e) {}
+                    throw new Error(errMsg);
+                }
+
+                // Success! Redirect to dashboard
+                window.location.href = getBasePath() + '/dashboard.html';
+                return;
+
+            } catch(err) {
+                console.error("Profile update error:", err);
+                lastError = err;
+                if (retryCount >= MAX_RETRIES) break;
+            }
+        } while (retryCount < MAX_RETRIES);
+
+        // If we get here, all retries failed
+        alert("Error saving profile: " + (lastError?.message || "Please try again."));
+        btn.textContent = "Complete Setup";
+        btn.disabled = false;
     });
 
     document.addEventListener('click', (e) => {
