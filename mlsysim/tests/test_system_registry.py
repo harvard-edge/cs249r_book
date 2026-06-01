@@ -37,6 +37,15 @@ def test_reliability_node_composite_profile():
     assert Systems.Reliability.NodeRecoveryHighMin == pytest.approx(30)
 
 
+def test_storage_random_access_profiles():
+    assert Systems.Storage.Hdd7200Rpm.bandwidth.to(GB / second).magnitude == pytest.approx(0.15)
+    assert Systems.Storage.Hdd7200Rpm.iops == pytest.approx(80)
+    assert Systems.Storage.SataSsd.bandwidth.to(GB / second).magnitude == pytest.approx(0.55)
+    assert Systems.Storage.SataSsd.iops == pytest.approx(10_000)
+    assert Systems.Storage.LocalNvmeGen3.bandwidth.to(GB / second).magnitude == pytest.approx(3.5)
+    assert Systems.Storage.LocalNvmeGen3.iops == pytest.approx(500_000)
+
+
 def test_production_2k_checkpoint_storage_path():
     path = Systems.Storage.Production2KCheckpointPath
 

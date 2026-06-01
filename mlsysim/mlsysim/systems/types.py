@@ -21,6 +21,7 @@ class StorageSubsystem(BaseModel):
     capacity: Optional[Quantity] = None
     bandwidth: Quantity
     latency: Optional[Quantity] = None
+    iops: Optional[float] = None
     media: Optional[str] = None
     interface: Optional[str] = None
     durability: Optional[str] = None

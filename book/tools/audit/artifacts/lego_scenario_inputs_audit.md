@@ -4,10 +4,10 @@ This is an advisory work queue for values that likely define
 hardware, systems, infrastructure, pricing, models, datasets,
 storage subsystems, or scenarios in LEGO LOAD stages.
 
-Findings: 1100
+Findings: 1095
 By target:
    270  Scenarios.* or Ops.*
-   209  Models.* or Scenarios.TrainingRuns
+   208  Models.* or Scenarios.TrainingRuns
    164  Scenarios.*
    109  Datasets.* or Scenarios.DataWorkloads
    107  Infrastructure.Pricing.* or Scenarios.*
@@ -16,8 +16,8 @@ By target:
     31  Infrastructure.*
     23  Hardware.* or Hardware.Tech.*
     23  Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet
-    18  Systems.Storage
     14  Systems.Fabrics or Systems.SwitchFabric
+    14  Systems.Storage
     13  Systems.Storage or Datasets.*
     10  Systems.*
      7  Infrastructure.* or Scenarios.Sustainability
@@ -25,7 +25,7 @@ By target:
      2  Scenarios.TrainingRuns or Systems.Reliability
 Top chapters:
    152  vol1/model_serving
-    89  vol1/data_selection
+    84  vol1/data_selection
     72  vol1/training
     65  vol1/data_engineering
     53  vol1/nn_computation
@@ -46,7 +46,7 @@ Top chapters:
     19  vol2/compute_infrastructure
 Top reasons:
    270  scenario/workload policy
-   209  model/workload specification
+   208  model/workload specification
    164  unit-bearing scenario input
    107  economic input or scenario price
    105  dataset/workload specification
@@ -55,8 +55,8 @@ Top reasons:
     31  infrastructure input
     23  hardware specification
     23  cloud/fleet price point
-    18  storage subsystem fact
     14  network/fabric system fact
+    14  storage subsystem fact
     13  storage/data fact
     10  system-level fact
      7  infrastructure/sustainability fact
@@ -290,51 +290,46 @@ Top reasons:
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:2918` | `SelectionInequalityCalc` | `resnet50_time_per_image` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload size | `0.01 * (second / count)` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:2919` | `SelectionInequalityCalc` | `resnet18_time_per_image` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload size | `0.002 * (second / count)` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:2920` | `SelectionInequalityCalc` | `trap_selection_time` | `Scenarios.* or Ops.*` | scenario/workload policy | `50 * hour` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3127` | `RandomAccessPenalty` | `random_read_q` | `Scenarios.*` | unit-bearing scenario input | `4 * KB` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3128` | `RandomAccessPenalty` | `hdd_seq_q` | `Systems.Storage` | storage subsystem fact | `150 * (MB / second)` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3129` | `RandomAccessPenalty` | `hdd_iops` | `Systems.Storage` | storage subsystem fact | `80` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3130` | `RandomAccessPenalty` | `sata_seq_q` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `550 * (MB / second)` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3132` | `RandomAccessPenalty` | `nvme_seq_q` | `Systems.Storage` | storage subsystem fact | `3_500 * (MB / second)` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3133` | `RandomAccessPenalty` | `nvme_iops` | `Systems.Storage` | storage subsystem fact | `500_000` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3227` | `DataEchoingRoi` | `pipeline_throughput` | `Scenarios.*` | unit-bearing scenario input | `300 * (count / second)` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3228` | `DataEchoingRoi` | `gpu_throughput` | `Hardware.*` | hardware-related quantitative input | `800 * (count / second)` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3229` | `DataEchoingRoi` | `echo_epoch_count` | `Scenarios.* or Ops.*` | scenario/workload policy | `90` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3350` | `CostBreakdown` | `raw_data_cost` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `50000 * USD` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3352` | `CostBreakdown` | `cost_per_label` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `0.05 * (USD / count)` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3353` | `CostBreakdown` | `storage_cost` | `Infrastructure.Pricing.Storage` | storage price/rate belongs in pricing registry | `200 * USD` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3354` | `CostBreakdown` | `train_compute_cost` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `25000 * USD` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3355` | `CostBreakdown` | `storage_size` | `Systems.Storage or Datasets.*` | storage/data fact | `150 * GB` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3356` | `CostBreakdown` | `storage_duration` | `Systems.Storage or Datasets.*` | storage/data fact | `12 * ureg.month` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3357` | `CostBreakdown` | `train_epoch_count` | `Scenarios.* or Ops.*` | scenario/workload policy | `100` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3358` | `CostBreakdown` | `train_gpu_count` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `8` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3359` | `CostBreakdown` | `train_duration` | `Scenarios.* or Ops.*` | scenario/workload policy | `24 * hour` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3461` | `BreakevenCalc` | `cost_inference` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `50` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3539` | `DeduplicationAmortization` | `cost_build` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `50000` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3540` | `DeduplicationAmortization` | `cost_compute_once` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `5000` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3695` | `DistributedOverheadCalc` | `t_embed` | `Scenarios.* or Ops.*` | scenario/workload policy | `20 * minute` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3696` | `DistributedOverheadCalc` | `t_dedup` | `Scenarios.* or Ops.*` | scenario/workload policy | `15 * minute` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3697` | `DistributedOverheadCalc` | `t_score` | `Scenarios.* or Ops.*` | scenario/workload policy | `30 * minute` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3698` | `DistributedOverheadCalc` | `t_select` | `Scenarios.* or Ops.*` | scenario/workload policy | `2 * minute` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4395` | `ChinchillaDiagnostic` | `tokens_per_param_opt` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `20` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4398` | `ChinchillaDiagnostic` | `llama2_70b_training_tokens` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `2.0 * c.TRILLION * c.count` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4554` | `FpFallacyCalc` | `curated_sample_count` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `100_000 * count` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4555` | `FpFallacyCalc` | `raw_sample_count` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `1_000_000 * count` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4556` | `FpFallacyCalc` | `curated_accuracy_pct` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `92.0` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4557` | `FpFallacyCalc` | `raw_accuracy_pct` | `Scenarios.* or Ops.*` | scenario/workload policy | `88.0` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4562` | `FpFallacyCalc` | `training_run_cost` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `100_000_000 * USD` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4564` | `FpFallacyCalc` | `cifar10_coreset_pct_value` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `50` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4565` | `FpFallacyCalc` | `cifar10_acc_retained_pct` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `98` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4566` | `FpFallacyCalc` | `imagenet_acc_retained_pct` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `95` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4648` | `FpPitfallCalc` | `selection_time_bad` | `Scenarios.* or Ops.*` | scenario/workload policy | `10 * hour` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4649` | `FpPitfallCalc` | `training_time` | `Scenarios.* or Ops.*` | scenario/workload policy | `2 * hour` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4650` | `FpPitfallCalc` | `full_training_time` | `Scenarios.* or Ops.*` | scenario/workload policy | `8 * hour` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4651` | `FpPitfallCalc` | `selection_time_good` | `Scenarios.* or Ops.*` | scenario/workload policy | `0.5 * hour` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4652` | `FpPitfallCalc` | `total_sample_count` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `1_000_000 * count` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4655` | `FpPitfallCalc` | `min_sample_threshold` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `150 * count` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4656` | `FpPitfallCalc` | `al_latency` | `Scenarios.* or Ops.*` | scenario/workload policy | `14 * day` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4657` | `FpPitfallCalc` | `model_drift_epoch_count` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `10` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4658` | `FpPitfallCalc` | `batch_size_small_count` | `Scenarios.* or Ops.*` | scenario/workload policy | `100` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4659` | `FpPitfallCalc` | `batch_size_large_count` | `Scenarios.* or Ops.*` | scenario/workload policy | `1000` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3131` | `RandomAccessPenalty` | `random_read_q` | `Scenarios.*` | unit-bearing scenario input | `4 * KB` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3231` | `DataEchoingRoi` | `pipeline_throughput` | `Scenarios.*` | unit-bearing scenario input | `300 * (count / second)` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3232` | `DataEchoingRoi` | `gpu_throughput` | `Hardware.*` | hardware-related quantitative input | `800 * (count / second)` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3233` | `DataEchoingRoi` | `echo_epoch_count` | `Scenarios.* or Ops.*` | scenario/workload policy | `90` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3354` | `CostBreakdown` | `raw_data_cost` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `50000 * USD` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3356` | `CostBreakdown` | `cost_per_label` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `0.05 * (USD / count)` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3357` | `CostBreakdown` | `storage_cost` | `Infrastructure.Pricing.Storage` | storage price/rate belongs in pricing registry | `200 * USD` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3358` | `CostBreakdown` | `train_compute_cost` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `25000 * USD` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3359` | `CostBreakdown` | `storage_size` | `Systems.Storage or Datasets.*` | storage/data fact | `150 * GB` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3360` | `CostBreakdown` | `storage_duration` | `Systems.Storage or Datasets.*` | storage/data fact | `12 * ureg.month` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3361` | `CostBreakdown` | `train_epoch_count` | `Scenarios.* or Ops.*` | scenario/workload policy | `100` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3362` | `CostBreakdown` | `train_gpu_count` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `8` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3363` | `CostBreakdown` | `train_duration` | `Scenarios.* or Ops.*` | scenario/workload policy | `24 * hour` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3465` | `BreakevenCalc` | `cost_inference` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `50` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3543` | `DeduplicationAmortization` | `cost_build` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `50000` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3544` | `DeduplicationAmortization` | `cost_compute_once` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `5000` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3699` | `DistributedOverheadCalc` | `t_embed` | `Scenarios.* or Ops.*` | scenario/workload policy | `20 * minute` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3700` | `DistributedOverheadCalc` | `t_dedup` | `Scenarios.* or Ops.*` | scenario/workload policy | `15 * minute` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3701` | `DistributedOverheadCalc` | `t_score` | `Scenarios.* or Ops.*` | scenario/workload policy | `30 * minute` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3702` | `DistributedOverheadCalc` | `t_select` | `Scenarios.* or Ops.*` | scenario/workload policy | `2 * minute` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4399` | `ChinchillaDiagnostic` | `tokens_per_param_opt` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `20` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4402` | `ChinchillaDiagnostic` | `llama2_70b_training_tokens` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `2.0 * c.TRILLION * c.count` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4558` | `FpFallacyCalc` | `curated_sample_count` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `100_000 * count` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4559` | `FpFallacyCalc` | `raw_sample_count` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `1_000_000 * count` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4560` | `FpFallacyCalc` | `curated_accuracy_pct` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `92.0` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4561` | `FpFallacyCalc` | `raw_accuracy_pct` | `Scenarios.* or Ops.*` | scenario/workload policy | `88.0` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4566` | `FpFallacyCalc` | `training_run_cost` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `100_000_000 * USD` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4568` | `FpFallacyCalc` | `cifar10_coreset_pct_value` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `50` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4569` | `FpFallacyCalc` | `cifar10_acc_retained_pct` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `98` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4570` | `FpFallacyCalc` | `imagenet_acc_retained_pct` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `95` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4652` | `FpPitfallCalc` | `selection_time_bad` | `Scenarios.* or Ops.*` | scenario/workload policy | `10 * hour` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4653` | `FpPitfallCalc` | `training_time` | `Scenarios.* or Ops.*` | scenario/workload policy | `2 * hour` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4654` | `FpPitfallCalc` | `full_training_time` | `Scenarios.* or Ops.*` | scenario/workload policy | `8 * hour` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4655` | `FpPitfallCalc` | `selection_time_good` | `Scenarios.* or Ops.*` | scenario/workload policy | `0.5 * hour` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4656` | `FpPitfallCalc` | `total_sample_count` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `1_000_000 * count` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4659` | `FpPitfallCalc` | `min_sample_threshold` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `150 * count` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4660` | `FpPitfallCalc` | `al_latency` | `Scenarios.* or Ops.*` | scenario/workload policy | `14 * day` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4661` | `FpPitfallCalc` | `model_drift_epoch_count` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `10` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4662` | `FpPitfallCalc` | `batch_size_small_count` | `Scenarios.* or Ops.*` | scenario/workload policy | `100` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:4663` | `FpPitfallCalc` | `batch_size_large_count` | `Scenarios.* or Ops.*` | scenario/workload policy | `1000` |
 
 ## vol1/frameworks
 

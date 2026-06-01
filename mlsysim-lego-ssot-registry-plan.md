@@ -44,8 +44,8 @@ python3 book/tools/audit/book_check_lego_scenario_inputs.py \
 
 Current output:
 
-- **1,100 advisory MLSysIM source-of-truth candidates**
-- **136 high-confidence candidates**
+- **1,095 advisory MLSysIM source-of-truth candidates**
+- **132 high-confidence candidates**
 - Full JSON work queue:
   `book/tools/audit/artifacts/lego_scenario_inputs_audit.json`
 - Full Markdown work queue:
@@ -62,8 +62,8 @@ High-confidence buckets:
 | `Systems.Clusters` / `Systems.Nodes` | 46 | Fleet, node, GPU-count, cluster-topology facts |
 | `Hardware.*` / `Hardware.Tech.*` | 23 | Hardware capacity, bandwidth, FLOP/s, TDP, memory/interconnect facts |
 | `Infrastructure.Pricing.Cloud` / `Infrastructure.Pricing.Fleet` | 23 | GPU-hour, cloud-instance, and fleet price points |
-| `Systems.Storage` | 18 | Local NVMe, HDD, PFS, S3/object-store, checkpoint-path storage facts |
 | `Systems.Fabrics` / `Systems.SwitchFabric` | 14 | Network/fabric/switch-sizing facts |
+| `Systems.Storage` | 14 | Local NVMe, HDD, PFS, S3/object-store, checkpoint-path storage facts |
 | `Infrastructure.*` / `Scenarios.Sustainability` | 7 | PUE, cooling, carbon, sustainability scenario facts |
 | `Infrastructure.Pricing.Storage` | 5 | Storage/monitoring price points |
 
@@ -111,6 +111,9 @@ Known concrete findings from the first pass:
   `compute_infrastructure.qmd` to `Systems.Clusters.Training_1K`, and moved
   the composite DGX-node MTBF plus low/high recovery window assumptions to
   `Systems.Reliability`.
+- Stage 5 added random-access storage profiles (`Hdd7200Rpm`, `SataSsd`,
+  `LocalNvmeGen3`) with IOPS metadata under `Systems.Storage`, then migrated
+  the `data_selection.qmd` random-access penalty table to load those tiers.
 - 100,000-GPU examples should load `Systems.Clusters.Mega_100K`.
 - Storage/checkpoint examples mix two different kinds of facts: storage-system
   facts such as local NVMe drive count, local/PFS bandwidth, capacity, and

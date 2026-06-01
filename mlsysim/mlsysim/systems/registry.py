@@ -241,6 +241,34 @@ class Storage(Registry):
         durability="local",
         metadata=Metadata(provenance=pc.BOOK_STORAGE_TIERS),
     )
+    LocalNvmeGen3 = StorageSubsystem(
+        name="Local NVMe SSD (Gen3)",
+        storage_tech=Hardware.Tech.Storage.NvmeGen3,
+        bandwidth=Hardware.Tech.Storage.NvmeGen3.bandwidth,
+        iops=500_000,
+        media="NVMe SSD",
+        interface="PCIe Gen3",
+        durability="local",
+        metadata=Metadata(provenance=pc.BOOK_STORAGE_TIERS),
+    )
+    SataSsd = StorageSubsystem(
+        name="SATA SSD",
+        bandwidth=550 * (MB / ureg.second),
+        iops=10_000,
+        media="SATA SSD",
+        interface="SATA",
+        durability="local",
+        metadata=Metadata(provenance=pc.BOOK_STORAGE_TIERS),
+    )
+    Hdd7200Rpm = StorageSubsystem(
+        name="7.2k RPM HDD",
+        bandwidth=150 * (MB / ureg.second),
+        iops=80,
+        media="HDD",
+        interface="SATA",
+        durability="local",
+        metadata=Metadata(provenance=pc.BOOK_STORAGE_TIERS),
+    )
     LocalNvmeGen4x4 = NodeStorageConfig(
         name="4x local Gen4 NVMe drives per node",
         device=LocalNvmeGen4,
