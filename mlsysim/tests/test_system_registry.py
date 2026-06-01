@@ -22,6 +22,15 @@ def test_reference_25k_h100_cluster_tdp_power():
     assert power.to(MW).magnitude == pytest.approx(17.5)
 
 
+def test_training_1k_a100_cluster_matches_debug_examples():
+    fleet = Systems.Clusters.Training_1K_A100
+
+    assert fleet.count == 128
+    assert fleet.node is Systems.Nodes.DGX_A100
+    assert fleet.total_accelerators == 1_024
+    assert fleet.fabric is Systems.Fabrics.InfiniBand_HDR
+
+
 def test_production_2k_checkpoint_storage_path():
     path = Systems.Storage.Production2KCheckpointPath
 

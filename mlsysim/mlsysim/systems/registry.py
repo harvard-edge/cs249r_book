@@ -133,6 +133,16 @@ class Clusters(Registry):
         fabric=Fabrics.InfiniBand_HDR,
         metadata=Metadata(provenance=_TIER_PROV, description="Mid cluster tier (1024 GPUs)."),
     )
+    Training_1K_A100 = Fleet(
+        name="Training Cluster (1024 A100 GPUs)",
+        node=Nodes.DGX_A100,
+        count=128,
+        fabric=Fabrics.InfiniBand_HDR,
+        metadata=Metadata(
+            provenance=_TIER_PROV,
+            description="A100/HDR mid cluster tier (1024 GPUs).",
+        ),
+    )
     Frontier_8K = Fleet(
         name="Frontier Cluster (8192 GPUs)",
         node=Nodes.DGX_H100,

@@ -44,8 +44,8 @@ python3 book/tools/audit/book_check_lego_scenario_inputs.py \
 
 Current output:
 
-- **1,108 advisory MLSysIM source-of-truth candidates**
-- **144 high-confidence candidates**
+- **1,102 advisory MLSysIM source-of-truth candidates**
+- **138 high-confidence candidates**
 - Full JSON work queue:
   `book/tools/audit/artifacts/lego_scenario_inputs_audit.json`
 - Full Markdown work queue:
@@ -59,7 +59,7 @@ High-confidence buckets:
 
 | Target | Count | Meaning |
 |---|---:|---|
-| `Systems.Clusters` / `Systems.Nodes` | 54 | Fleet, node, GPU-count, cluster-topology facts |
+| `Systems.Clusters` / `Systems.Nodes` | 48 | Fleet, node, GPU-count, cluster-topology facts |
 | `Hardware.*` / `Hardware.Tech.*` | 23 | Hardware capacity, bandwidth, FLOP/s, TDP, memory/interconnect facts |
 | `Infrastructure.Pricing.Cloud` / `Infrastructure.Pricing.Fleet` | 23 | GPU-hour, cloud-instance, and fleet price points |
 | `Systems.Storage` | 18 | Local NVMe, HDD, PFS, S3/object-store, checkpoint-path storage facts |
@@ -99,10 +99,14 @@ Known concrete findings from the first pass:
 - Stage 1 moved the 25,000-H100 reference-cluster examples in
   `sustainable_ai.qmd` and `conclusion.qmd` to
   `Systems.Clusters.Reference_25K_H100`.
-- Multiple 256-node / 2,048-GPU storage and capacity examples should load
-  `Systems.Clusters.Production_2K` instead of independent node-count literals.
-- Multiple 128-node / 1,024-GPU examples should load
+- Stage 3 moved clear 1,024-GPU / 128-node H100 examples in
+  `compute_infrastructure.qmd` and `ops_scale.qmd` to
   `Systems.Clusters.Training_1K`.
+- Stage 3 moved the 128-node / 1,024-GPU A100 hierarchical-AllReduce debugging
+  example in `distributed_training.qmd` to `Systems.Clusters.Training_1K_A100`.
+  Do not force A100 examples through the H100 reference fleet.
+- Stage 3 moved the 256-node HBM memory-budget example in `data_storage.qmd`
+  to `Systems.Clusters.Production_2K`.
 - 100,000-GPU examples should load `Systems.Clusters.Mega_100K`.
 - Storage/checkpoint examples mix two different kinds of facts: storage-system
   facts such as local NVMe drive count, local/PFS bandwidth, capacity, and
@@ -121,8 +125,10 @@ Additional concrete findings from the refined audit:
 - Stage 2 added `Systems.Storage.Production2KCheckpointPath` and migrated the
   `data_storage.qmd:2330-2335` checkpoint-storm storage path to it. Checkpoint
   cadence remains local until training-run scenario profiles exist.
-- `compute_infrastructure.qmd:3910-3912` uses 1,024 GPUs, 128 nodes, and switch
-  ports for fabric sizing; that should load a stock cluster/fabric profile.
+- `compute_infrastructure.qmd:3910-3912` previously used local 1,024-GPU and
+  128-node literals for fabric sizing; Stage 3 now loads the fleet from
+  `Systems.Clusters.Training_1K`. Switch-port topology constants remain local
+  until a richer fabric-profile object exists.
 - Repeated NVMe/HDD/S3 bandwidth examples in `data_engineering.qmd`,
   `data_selection.qmd`, `model_serving.qmd`, and `data_storage.qmd` should be
   normalized against `Hardware.Tech.Storage` plus `Systems.Storage` profiles.
@@ -137,10 +143,10 @@ semantically correct.
 
 | Value kind | Registry home | Notes |
 |---|---|---|
-| Hardware specs | `Hardware.*` | Existing. QMD should not redefine TDP, HBM, FLOP/s, memory, storage specs. |
+| Hardware specs | `Hardware.*` | Existing. QMD should not redefine TDP, HBM, FLOP/s, memory, storage specs. If the example is about one accelerator, load the hardware object directly instead of routing through a cluster. |
 | Model specs | `Models.*` | Existing. Parameters, training tokens, layers, hidden dims belong here. |
 | Dataset specs | `Datasets.*` | Existing for named datasets. Add missing datasets before using local literals. |
-| Fleet topology | `Systems.Clusters`, `Systems.Nodes`, `Systems.Fabrics` | Existing; add stock fleets for book scenarios. |
+| Fleet topology | `Systems.Clusters`, `Systems.Nodes`, `Systems.Fabrics` | Existing; add stock fleets for book scenarios. Use this when the example is about aggregate fleet behavior, topology, node count, reliability, power, storage paths, or cluster throughput. |
 | Grids/datacenters/cooling/racks | `Infrastructure.*` | Existing. Use grids/datacenters for carbon and PUE. |
 | Prices/rates | `Infrastructure.Pricing.*` | Existing. Scenario-specific prices can be `PricePoint`s or scenario fields with provenance. |
 | Literature constants | `Literature.*` | Existing for published or conventional model/system constants. |
@@ -170,6 +176,9 @@ Add these under `Systems.Clusters` with `Metadata(provenance=...)`:
 - `Reference_25K_H100`: 25,000 H100 GPUs, 3,125 DGX H100-style nodes, NDR
   fabric. Used only when the book needs a clean round-number fleet, not a
   named operator.
+- `Training_1K_A100`: 1,024 A100 GPUs, 128 DGX A100-style nodes, HDR fabric.
+  Use this for A100 debugging and communication examples that intentionally
+  use A100 NVLink/HDR characteristics.
 - `XAI_Colossus_H100`: public xAI Colossus profile. Official xAI page states
   200,000 H100 GPUs in a single interconnected cluster and also reports
   "180K GPUs" in its "By the numbers" section, plus 170 PB/s aggregate memory
@@ -369,12 +378,19 @@ Apply the same reference-vs-public split beyond clusters.
 
 Migration rule:
 
+- **Component fact** -> `Hardware.*`. Use this for one accelerator's memory,
+  TDP, FLOP/s, interconnect, storage, cost, or embodied carbon.
 - **Physical box/spec** -> `Hardware.*` or `Systems.Nodes`.
 - **Composed infrastructure design** -> `Systems.*`.
 - **Facility/grid/cooling context** -> `Infrastructure.*`.
 - **Workload/use case** -> `Scenarios.*`.
 - **Operational policy** -> `Ops.*` or `Systems.Orchestration`.
 - **Price/rate** -> `Infrastructure.Pricing.*`.
+
+Do not derive every value from `Systems.Clusters`. The source object should
+match the semantic focus of the calculation: GPU facts from `Hardware`, node
+composition from `Systems.Nodes`, fleet/topology facts from `Systems.Clusters`,
+and cross-domain workload assumptions from `Scenarios`.
 
 Narrative rule:
 
@@ -443,6 +459,8 @@ Required behavior:
     `Scenarios.*`, `Datasets.*`, or workload profiles.
 - Suggest existing fleet replacements when values match:
   - 1,024 GPUs or 128 DGX nodes → `Systems.Clusters.Training_1K`
+  - 1,024 A100 GPUs or 128 DGX A100 nodes →
+    `Systems.Clusters.Training_1K_A100`
   - 2,048 GPUs or 256 DGX nodes → `Systems.Clusters.Production_2K`
   - 8,192 GPUs → `Systems.Clusters.Frontier_8K`
   - 10,000 GPUs → `Systems.Clusters.Training_10K`
@@ -464,8 +482,9 @@ The first slice should be small and high-confidence:
    - `vol2/conclusion/conclusion.qmd`
 3. [x] Replace `LifecycleCarbonEstimate.DummyFleet` with
    `Systems.Clusters.Production_2K`.
-4. [ ] Replace obvious `n_gpus = 2048` / `nodes = 256` cases that are already
-   described as 2,048-GPU or 256-node H100 training clusters with
+4. [x] Replace obvious 1,024-GPU / 128-node and 2,048-GPU / 256-node cases that
+   are already described as stock H100 or A100 training clusters with
+   `Systems.Clusters.Training_1K`, `Systems.Clusters.Training_1K_A100`, or
    `Systems.Clusters.Production_2K`.
 5. [x] Add the `Systems.Storage` skeleton and migrate one checkpoint/storage
    example end to end, preferably the 2,048-GPU checkpoint path, to prove the
