@@ -1,12 +1,13 @@
 # MLSysBook LEGO Unit Hardening — Progress
 
-**Last updated:** 2026-05-31 (Phase 8½-D complete)
+**Last updated:** 2026-06-01 (Phase 9 render + verification gates green)
 **Branch:** `fmt-fix`
 **Worktree:** `/Users/VJ/GitHub/MLSysBook-fmt-fix`
 **Plan spec:** [`mlsysim-lego-unit-hardening-plan.md`](mlsysim-lego-unit-hardening-plan.md)
-**Last commit:** `e7c3f7e34f` — Fix TFLOP/s per W rate integrity and add L011 lint rule.
+**Coordinator execution plan:** [`mlsysim-lego-unit-hardening-agent-execution-plan.md`](mlsysim-lego-unit-hardening-agent-execution-plan.md)
+**Latest code commit:** `771911d1e0` — Apply LEGO unit discipline across chapters.
 
-**Next action:** Phase **8½-E** — discard `lego_cells_verify_report.json` artifact diff; then **Phase 9A** (HTML pilot chapter).
+**Next action:** Phase **10A** merge workflow: split/commit intended work, leave fmt-thread WIP and generated artifacts out of commits, then merge `dev` into `fmt-fix` and re-run the green gates.
 
 **Resume phrase (new Agent chat):** `Resume LEGO hardening: PROGRESS.md next action. Branch fmt-fix, worktree MLSysBook-fmt-fix.`
 
@@ -40,7 +41,13 @@ Rules:
 
 ## Where we are (one sentence)
 
-**`.m_as()` migration and infra are done, but the branch is not merge-ready — Phase 8½ must fix broken lint gates and OUTPUT/prose contract before Phase 9 renders.**
+**`.m_as()` migration, Phase 8½ gates (G1–G6), deeper SSoT/quantity-flow/load-Pint pass, and Phase 9 full render verification are done. Remaining work is Phase 10 commit/merge verification.**
+
+**Phase 9A render note:** Single-chapter `quarto render` exits **1** after `verify_rendered_xrefs.py` (scans entire `_build/html-vol1/`, not just the chapter). Treat as **expected** for isolated renders; 9A pass criteria are per-chapter: all cells Done, 0 `{python}` in that chapter's HTML, no traceback in HTML. Full `?@` xref gate is **9C** only.
+
+**Kernel:** Use `-M jupyter:python3` (system Python 3.14 + fmt-fix editable `mlsysim`). Project `mlsysbook` kernel points at main checkout `.venv`.
+
+**Current working doctrine:** MLSysIM is the source of truth; Pint quantities stay attached through calculations; display units are owned by typed/domain formatters. The active static/source queues are now clean, so render verification is the next definition-of-done layer.
 
 ---
 
@@ -55,9 +62,9 @@ All must pass before Phase 10. **Do not trust "lint 0 warnings" until G1 is fixe
 | **G3** | `book_check_lego_prose_units.py` clean | **PASS** | 81/81 QMD files; checker scoped to closed-export duplicates |
 | **G4** | Rate quantities keep dimensions through OUTPUT | **PASS** | Pilot fixed; L011 blocks magnitude-ratio rate reattach |
 | **G5** | fmt precision defaults vs guard | **PASS** | `precision=None` → `_resolve_display_precision` on percent/range/pp |
-| **G6** | Headless cell exec | **PASS** | 81/81 `.qmd` files |
-| **G7** | Phase 9 HTML + PDF renders | **NOT STARTED** | — |
-| **G8** | No accidental artifacts in commits | **WATCH** | `lego_cells_verify_report.json` unstaged partial regen — discard |
+| **G6** | Headless/rendered LEGO exec | **PASS** | 44/44 rendered LEGO chapters; 933/933 LEGO cells verified against HTML |
+| **G7** | Phase 9 HTML + PDF renders | **PASS** | Vol I/II PDFs, full Vol I/II HTML, xref scans, and `{python}` leak scans green |
+| **G8** | No accidental artifacts in commits | **PASS** | `lego_cells_verify_report.json` restored |
 
 ---
 
@@ -73,7 +80,7 @@ All must pass before Phase 10. **Do not trust "lint 0 warnings" until G1 is fixe
 
 | Step | Item | Status |
 |-----:|------|--------|
-| A′-1 … A′-4 | Registry-first LOAD audit | **NOT DONE** |
+| A′-1 … A′-4 | Registry-first LOAD audit | **DONE for current gates** (`registry_sources`, prose literals, quantity-flow, load-Pint clean) |
 
 ### Layer B — lint + hooks wired (Steps 11–13) — DONE
 
@@ -87,9 +94,9 @@ All must pass before Phase 10. **Do not trust "lint 0 warnings" until G1 is fixe
 |-----:|------|--------|
 | 14+ | Bulk `.m_as()` → `.to().magnitude` (~1,235) | **DONE** |
 | — | Glued cell fences (658 fixes) | **DONE** |
-| — | OUTPUT/prose closed-open alignment | **NOT DONE** (Phase 8½-B) |
+| — | OUTPUT/prose closed-open alignment | **DONE for current gates** (prose-units clean; quantity-flow all-cells clean) |
 
-### Phase 8½ — Gate hardening — IN PROGRESS ← **CURRENT**
+### Phase 8½ — Gate hardening — DONE
 
 | Step | Item | Status | Command / file |
 |-----:|------|--------|----------------|
@@ -99,17 +106,28 @@ All must pass before Phase 10. **Do not trust "lint 0 warnings" until G1 is fixe
 | **8½-B** | Pilot: `sustainable_ai.qmd` | **DONE** | L357 tonnes dup; L2553 table; LifecycleCarbonEstimate fmt_emissions |
 | **8½-C** | Rate-quantity audit | **DONE** | `GpuEfficiencyTrajectoryRecap`; L011 added |
 | **8½-D** | fmt precision defaults | **DONE** | `fmt_percent`, ranges, `fmt_pp` → auto precision |
-| **8½-E** | Discard artifact diff | **NOT STARTED** | `git restore lego_cells_verify_report.json` |
+| **8½-E** | Discard artifact diff | **DONE** | `git restore lego_cells_verify_report.json` |
 
-### Phase 9 — render verification — NOT STARTED
+### Phase 9 — render verification — DONE
 
-Blocked on Phase 8½-A/B minimum (renders will otherwise duplicate Codex findings).
+Blocked on Phase 8½ — **cleared** (G1–G6 pass).
 
 | Step | Item | Status |
 |-----:|------|--------|
-| 9A | HTML every chapter | **NOT STARTED** |
-| 9B | PDF every chapter | **NOT STARTED** |
-| 9C | Full volume HTML + PDF | **NOT STARTED** |
+| 9A | HTML every chapter | **DONE** (44/44 LEGO chapters; 0 `{python}` leaks) |
+| 9B | PDF every volume | **DONE** (Vol I + Vol II titlepage PDFs, exit 0) |
+| 9C | Full volume HTML + PDF | **DONE** (Vol I/II HTML xref verifier clean; PDFs clean) |
+
+### Wave 0–5 — SSoT + quantity-flow hardening — IN PROGRESS
+
+| Wave | Item | Status |
+|-----:|------|--------|
+| 0 | Coordinator inventories: L014, scalar reattachment, `ureg.*`, source candidates, count scale risks | **DONE** (advisory checker added) |
+| 1 | Pilot/source-hardening chapters | **DONE for current gates** |
+| 2 | Vol I content chapter batches | **DONE for current gates** |
+| 3 | Vol II content chapter batches | **DONE for current gates** |
+| 4 | Appendices with LEGO | **DONE for current gates** |
+| 5 | Global hardening: burn-down queues, central helpers/lints, full verification | **DONE for current gates** (static/source/headless/render gates clean) |
 
 ### Phase 10 — merge — NOT STARTED
 
@@ -125,13 +143,24 @@ Blocked on Phase 8½-A/B minimum (renders will otherwise duplicate Codex finding
 
 | Gate | Command | Result | Trust? |
 |------|---------|--------|--------|
-| Focused pytest | `pytest … test_fmt.py test_quantity_formulas.py test_lego_unit_invariants.py test_lint_lego_units.py -o addopts=` | **171 passed** (Codex) | ✓ |
+| Focused pytest | `pytest … test_fmt.py test_units_registry.py test_quantity_formulas.py test_lego_unit_invariants.py test_lint_lego_units.py test_lego_quantity_flow_audit.py -o addopts=` | **173 passed** (Codex) | ✓ |
+| Full MLSysIM pytest | `PYTHONPATH=mlsysim pytest mlsysim/ -o addopts=` | **637 passed, 31 skipped** | ✓ |
 | `lint_lego_units --fail-on warning` | `python3 book/tools/scripts/lint_lego_units.py --fail-on warning --baseline book/tools/audit/lego_units_baseline.json` | 0 new warnings (81 baselined) | ✓ |
 | `book_check_lego_prose_units` | `python3 book/tools/audit/book_check_lego_prose_units.py book/quarto/contents` | **81/81 OK** | ✓ |
-| Headless exec | all `{python}` cells | **81/81 OK** | ✓ |
+| `book_check_lego_quantity_flow` | default + `--all-cells` summary | **0 findings** | ✓ |
+| `book_check_lego_load_pint` | `python3 book/tools/audit/book_check_lego_load_pint.py book/quarto/contents` | **81/81 OK** | ✓ |
+| `book_check_registry_sources` | `python3 book/tools/audit/book_check_registry_sources.py book/quarto/contents` | **81/81 OK** | ✓ |
+| `book_check_lego_prose_literals` | `python3 book/tools/audit/book_check_lego_prose_literals.py book/quarto/contents` | **81/81 OK** | ✓ |
+| Headless exec | all `{python}` cells | **44 QMD files / 1,099 cells OK** | ✓ |
+| Rendered LEGO verifier | `PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_lego_cells.py` | **44/44 chapters; 933/933 LEGO cells PASS** | ✓ |
 | fmt_semantic_suffix | per chapter | clean (Codex, sustainable_ai) | ✓ |
 | math_canonical | binder | clean at tip | ✓ |
-| Quarto render | Phase 9 | not run | — |
+| Quarto render | Phase 9A HTML | **44/44 PASS** (0 `{python}`; xref verify exit 1 expected per isolated chapter) | ✓ |
+| Quarto render | Full Vol I HTML | `_build/html-vol1/index.html`; 0 `{python}`, 0 `?@`, xrefs PASS | ✓ |
+| Quarto render | Full Vol II HTML | `_build/html-vol2/index.html`; 0 `{python}`, 0 `?@`, xrefs PASS | ✓ |
+| Quarto render | Vol I PDF | `_build/pdf-vol1/Machine-Learning-Systems-Vol1.pdf` (31 MB); log clean | ✓ |
+| Quarto render | Vol II PDF | `_build/pdf-vol2/Machine-Learning-Systems-Vol2.pdf` (65 MB); log clean | ✓ |
+| Pre-commit | `pre-commit run --all-files` | **PASS** | ✓ |
 
 ---
 
@@ -154,8 +183,60 @@ Blocked on Phase 8½-A/B minimum (renders will otherwise duplicate Codex finding
 8½-D1  Decide fmt_percent / range default precision policy                    ✓ DONE — precision=None → auto
 8½-D2  Implement + tests in test_fmt.py                                      ✓ DONE — 120 passed
 
-8½-E   Discard artifact diff (lego_cells_verify_report.json)                 ← NEXT
+8½-E   Discard artifact diff (lego_cells_verify_report.json)                 ✓ DONE
 ```
+
+---
+
+## Phase 9 render log (append as chapters complete)
+
+### 9A HTML — DONE 2026-05-31
+
+**Criteria:** all cells execute; 0 `{python}` in chapter HTML; no traceback in HTML.
+**Note:** `quarto render` exits 1 on isolated chapters (post-render `verify_rendered_xrefs.py` scans full `_build/`). Ignore for 9A; xref gate is **9C**.
+
+| Vol | Scope | Chapters | `{python}` leaks | Status |
+|-----|-------|:--------:|:----------------:|:------:|
+| 1 | content | 16 | 0 | ✓ |
+| 1 | appendices | 4 | 0 | ✓ |
+| 2 | content | 17 | 0 | ✓ |
+| 2 | appendices | 7 | 0 | ✓ |
+| **Total** | | **44** | **0** | **PASS** |
+
+**Render command:**
+```bash
+cd book/quarto
+ln -sf config/_quarto-html-vol1.yml _quarto.yml   # or vol2
+MPLBACKEND=Agg quarto render contents/vol<N>/<chapter>/<chapter>.qmd --to html -M jupyter:python3
+# Output: _build/html-vol<N>/contents/vol<N>/...
+```
+
+**Logs:** `/private/tmp/mlsysbook-unit-hardening/phase9a-vol1-batch3.log`, `phase9a-vol2-batch1.log`, appendices logs.
+
+### 9B PDF — DONE
+
+| Vol | Artifact | Size | Exit | Date |
+|-----|----------|------|:----:|------|
+| 1 | `_build/pdf-vol1/Machine-Learning-Systems-Vol1.pdf` | 31 MB | 0 | 2026-05-31 |
+| 2 | `_build/pdf-vol2/Machine-Learning-Systems-Vol2.pdf` | 65 MB | 0 | 2026-05-31 |
+
+**Command used:**
+```bash
+cd book/quarto && ln -sf config/_quarto-pdf-vol1.yml _quarto.yml
+test -L index.qmd || ln -sf index-vol1.qmd index.qmd
+PYTHONPATH=/Users/VJ/GitHub/MLSysBook-fmt-fix/mlsysim:/Users/VJ/GitHub/MLSysBook-fmt-fix \
+MPLBACKEND=Agg quarto render --to titlepage-pdf
+```
+**Logs:** `/private/tmp/mlsysbook-unit-hardening/vol1-pdf-full.log`, `/private/tmp/mlsysbook-unit-hardening/vol2-pdf-full.log`
+
+### 9C Full volume — DONE
+
+| Vol | HTML artifact | Xrefs | `{python}` leaks | Status |
+|-----|---------------|-------|------------------|--------|
+| 1 | `_build/html-vol1/index.html` | 0 unresolved | 0 | PASS |
+| 2 | `_build/html-vol2/index.html` | 0 unresolved | 0 | PASS |
+
+**Logs:** `/private/tmp/mlsysbook-unit-hardening/vol1-html-full.log`, `/private/tmp/mlsysbook-unit-hardening/vol2-html-full.log`
 
 ---
 
@@ -234,14 +315,6 @@ Refresh: `python3 book/tools/audit/book_check_lego_prose_units.py book/quarto/co
 
 ---
 
-## Phase 9 render log (append as chapters complete)
-
-| Vol | Chapter | HTML | PDF | Notes | Date |
-|-----|---------|:----:|:---:|-------|------|
-| — | — | — | — | Blocked on Phase 8½ | — |
-
----
-
 ## Step log
 
 ### Closure — 2026-05-31 — pre-build (partial)
@@ -278,7 +351,9 @@ Refresh: `python3 book/tools/audit/book_check_lego_prose_units.py book/quarto/co
 - **Baseline triage:** 81 L014 (closed `*_unit_str = fmt(...)`). All allowlisted — burn-down deferred to post-8½-B OUTPUT fixes (same cells often need domain formatter migration).
 - **Gate:** G1 PASS, G2 PASS; `pytest test_lint_lego_units.py` 7 passed; lint with baseline 0 new warnings.
 
-### Codex review — 2026-05-31 — plan revision
+### Phase 9A — HTML chapter renders — 2026-05-31
 
-- **Action:** Added Phase 8½ to plan + PROGRESS; revised merge-ready gates
-- **Next:** Phase 8½-A (L014 fix)
+- **Scope:** All 44 vol1+vol2 chapters with LEGO cells (16+4 vol1 content/appendices; 17+7 vol2).
+- **Kernel:** `-M jupyter:python3` (fmt-fix editable `mlsysim` on system Python 3.14).
+- **Result:** 0 `{python}` leaks across all rendered HTML; all cells executed without ImportError/traceback.
+- **Gate:** G7 partial — 9A PASS; 9B/9C remain.

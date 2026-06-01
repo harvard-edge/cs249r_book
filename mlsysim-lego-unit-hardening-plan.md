@@ -4,11 +4,12 @@ This is a handoff plan for an implementation agent. The goal is to stop recurrin
 
 ---
 
-## As-built status (2026-05-31, revised) — read this first
+## As-built status (2026-06-01, revised) — read this first
 
 **Live tracker:** [`mlsysim-lego-unit-hardening-PROGRESS.md`](mlsysim-lego-unit-hardening-PROGRESS.md) — systematic checklist, gates, work queue.
+**Coordinator execution plan:** [`mlsysim-lego-unit-hardening-agent-execution-plan.md`](mlsysim-lego-unit-hardening-agent-execution-plan.md) — current overnight procedure, chapter-agent protocol, and pre-launch audit doctrine.
 
-**Current position:** Layer A/B/C + `.m_as()` migration **done**. **Phase 8½ gate hardening NOT done** — do not treat branch as merge-ready. Phase 9 renders **not started**.
+**Current position:** Layer A/B/C + `.m_as()` migration **done**. Phase 8½ gates **done** (G1-G6 pass). Wave 0-5 SSoT/quantity-flow/load-Pint gates are clean. Phase 9A/9B/9C render verification is **done**: Vol I/II PDFs, full Vol I/II HTML, xref scans, raw `{python}` leak scans, and rendered LEGO substitution verification all pass. Remaining work is Phase 10 commit/merge verification; do **not** treat local render success as `dev` merge completion.
 
 **Branch / worktree (actual):** `/Users/VJ/GitHub/MLSysBook-fmt-fix` on `fmt-fix`.
 
@@ -17,25 +18,26 @@ This is a handoff plan for an implementation agent. The goal is to stop recurrin
 | Phase | Status |
 |-------|--------|
 | Layer A (Steps 1–10) — mlsysim infra | **DONE** |
-| Layer A′ — LOAD registry-first | **NOT DONE** (deferred) |
+| Layer A′ — LOAD registry-first | **DONE for current gates** |
 | Layer B (Steps 11–13) — lint + hooks wired | **DONE** |
 | Layer C (Steps 14+) — `.m_as()` migration | **DONE** (bulk) |
-| Phase 8½ — trustworthy gates + OUTPUT/prose cleanup | **IN PROGRESS** ← **YOU ARE HERE** |
-| Phase 9A–9C — Quarto HTML/PDF renders | **NOT STARTED** |
+| Phase 8½ — trustworthy gates + OUTPUT/prose cleanup | **DONE** |
+| Phase 9A–9C — Quarto HTML/PDF renders | **DONE** |
+| Wave 0–5 coordinator pass — SSoT + quantity-flow hardening | **DONE for current gates** |
 | Phase 10 — sync dev, re-verify, promote | **NOT STARTED** |
 
 ### Merge-ready gates (all must pass)
 
 | # | Gate | Status | Blocker |
 |---|------|--------|---------|
-| G1 | **L014 linter trustworthy** | **FAIL** | `lint_lego_units.py:144` checks `"= fmt("` after space-stripping → never matches `=fmt(`; ~85+ closed-name `fmt()` assignments undetected |
-| G2 | **`lego-units` lint re-baselined** | **BLOCKED on G1** | Empty baseline is a false all-clear |
-| G3 | **`book_check_lego_prose_units.py` clean** | **FAIL** | 17 files with duplicated units / math-span violations |
-| G4 | **Rate quantities stay dimensional** | **PARTIAL** | e.g. `compute_infrastructure.qmd:1815` — TFLOP/s÷W reattached as TFLOP/s only |
-| G5 | **fmt precision defaults ergonomic** | **OPEN** | `fmt_percent(0.85)`, `fmt_*_range(...)` default `precision=1` fights spurious-zero guard |
-| G6 | **Headless cell exec** | **PASS** | 81/81 files |
-| G7 | **Phase 9 renders green** | **NOT STARTED** | HTML/PDF per chapter + full volume |
-| G8 | **No accidental artifact commits** | **WATCH** | `lego_cells_verify_report.json` unstaged partial regen — do not commit |
+| G1 | **L014 linter trustworthy** | **PASS** | Regex fixed; regression test added |
+| G2 | **`lego-units` lint re-baselined** | **PASS / BURN-DOWN OPEN** | 81 L014 entries are an honest queue, not completion |
+| G3 | **`book_check_lego_prose_units.py` clean** | **PASS** | 81/81 checked |
+| G4 | **Rate quantities stay dimensional** | **PASS** | L011 covers known TFLOP/s÷W bug; quantity-flow audit clean |
+| G5 | **fmt precision defaults ergonomic** | **PASS** | Percent/range/pp default precision fixed |
+| G6 | **Headless/rendered cell exec** | **PASS** | 44/44 rendered LEGO chapters; 933/933 LEGO cells |
+| G7 | **Phase 9 renders green** | **PASS** | Vol I/II PDF + full HTML + xref/leak scans clean |
+| G8 | **No accidental artifact commits** | **PASS** | Keep watching generated audit artifacts |
 
 ### Lint rollout (actual vs plan below)
 
@@ -55,7 +57,12 @@ This is a handoff plan for an implementation agent. The goal is to stop recurrin
 
 ### Next action (strict order)
 
-See **Phase 8½** below and PROGRESS.md work queue. Do **not** start Phase 9A until G1–G3 are addressed (G4–G5 can overlap with Phase 9 pilot chapters).
+Follow [`mlsysim-lego-unit-hardening-agent-execution-plan.md`](mlsysim-lego-unit-hardening-agent-execution-plan.md):
+
+1. Split and review the dirty worktree into intentional commit groups.
+2. Exclude fmt-thread WIP and generated audit artifacts from commits.
+3. Merge `dev` into `fmt-fix`.
+4. Re-run source gates, rendered LEGO verifier, full HTML/PDF checks as needed on the merged tip.
 
 The sections below are the **original spec**. Where they conflict with this box or PROGRESS.md, trust the tracker.
 
@@ -174,9 +181,9 @@ doc is the spec; the progress file is the build log.
 - [ ] Phase 10B — Re-verify
 - [ ] Phase 10C — Merge fmt-fix → dev
 
-**Current step:** Phase 8½-D — fmt precision defaults (G5)
-**Last commit:** `e6a3636bfa`
-**Next action:** Decide `fmt_percent` / range helper default precision policy
+**Current step:** Phase 8½-E hygiene, then Phase 9A renders
+**Last commit:** `8a4bc970e6`
+**Next action:** `git restore` artifact diff; begin Phase 9A HTML pilot
 ```
 
 **Per-step log entry (append after each finished step):**
