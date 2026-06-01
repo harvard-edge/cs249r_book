@@ -116,8 +116,8 @@ def test_exported_aliases_match_registry():
     assert minute == ureg.minute
 
 
-def test_mlsysbook_units_file_loaded():
-    """Custom units from mlsysbook_units.txt must parse like inline defines."""
+def test_mlsysim_units_file_loaded():
+    """Custom units from mlsysim_units.txt must parse like inline defines."""
     assert Q_("2.5 TFLOP").to(TFLOP).magnitude == pytest.approx(2.5)
     assert Q_("3 Bparam").to(Bparam).magnitude == pytest.approx(3)
 

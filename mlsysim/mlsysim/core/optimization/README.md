@@ -1,8 +1,8 @@
 # The mlsysim Optimization Engine
 
-`mlsysim` bridges the gap between pedagogical simplicity and production-grade Operations Research (OR).
+`mlsysim` bridges the gap between instructional simplicity and production-grade Operations Research (OR).
 
-While many academic tools rely on hardcoded Python `for` loops to find optimal configurations, `mlsysim` implements a strict **Solver Protocol**. This allows the engine to route mathematical problems to the correct industrial backend (Google OR-Tools, SciPy) without exposing the complexity to the textbook reader.
+While many academic tools rely on hardcoded Python `for` loops to find optimal configurations, `mlsysim` implements a strict **Solver Protocol**. This allows the engine to route mathematical problems to the correct industrial backend (Google OR-Tools, SciPy) without exposing unnecessary backend complexity.
 
 ## Why this Architecture?
 

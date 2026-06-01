@@ -59,21 +59,20 @@ from .units import *  # noqa: F401,F403 — re-export full unit registry
 
 # Reference model/dataset dimensions
 # TRANSFORMER FLOP ratios -> Literature.Chinchilla.{ComputeConstant(6PD), DecodeConstant(2P)}
-# TRANSFORMER_*_EXAMPLE dims -> inlined in the one worked example that used them (hw_acceleration)
+# TRANSFORMER_*_EXAMPLE dims -> inlined in the one local hardware-acceleration example that used them.
 # SIMD_REGISTER_BITS, FP32_BITS, INT8_BITS -> core/units.py (bit widths)
-# Single-chapter pedagogical example scalars are inlined in their LEGO cells (no
-# canonical registry home, per the architecture's pedagogical-input carve-out):
+# Single-scenario illustrative scalars are inlined in their LEGO cells when they
+# have no canonical registry home:
 #   SYSTOLIC_ARRAY_DIM -> hw_acceleration; SYNTHETIC_* -> data_storage;
 #   LOGIC_WALL_REASONING_STEPS_EXAMPLE -> inference; ML_WORKFLOW_STAGE_*/COST_BASE -> ml_workflow
 # GOOGLE_SEARCHES_PER_DAY, GMAIL_EMAILS_PER_DAY -> Scenarios.Workloads
 
 # --- Storage (I/O Bandwidth) ---
 # NVME_*/SYSTEM_MEMORY_BW/HOST_DRAM_BW -> Hardware.Tech.Storage (tech-class bandwidth)
-# LOCAL_NVME_DRIVES_PER_NODE_REF -> inlined node-config in data_storage (pedagogical)
+# LOCAL_NVME_DRIVES_PER_NODE_REF -> inlined node-config in data_storage.
 
 # --- Case Studies --- (WAYMO_*, ANOMALY_MODEL_* -> Scenarios.Workloads / Scenarios.AnomalyModel)
 
 # Phone battery capacity/voltage/energy -> Scenarios.PhoneBattery.{CapacityMah,VoltageV,EnergyJ}
 
 # PRECISION_MAP -> core/units.py (precision-string -> byte-width is a measurement fact)
-

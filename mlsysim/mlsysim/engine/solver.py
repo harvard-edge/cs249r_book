@@ -110,7 +110,7 @@ class BaseResolver(ABC):
 
         Following the Hennessy & Patterson tradition, each solver declares
         the misconceptions students most commonly hold about its domain.
-        Call ``solver.fallacies()`` in notebooks for pedagogical discussion.
+        Call ``solver.fallacies()`` in notebooks for instructional discussion.
         """
         return cls._fallacies
 
@@ -1852,7 +1852,7 @@ class OrchestrationModel(BaseModel):
     """
     Analyzes Cluster Orchestration and Queueing (Little's Law).
 
-    **Caveat:** This model uses a pedagogical M/D/1 queue (single server, deterministic
+    **Caveat:** This model uses a simplified M/D/1 queue (single server, deterministic
     service) to establish macroscopic wait-time bounds for dedicated, monolithic cluster workloads. 
     For detailed multi-tenant job packing and preemption, a discrete-event M/G/c 
     scheduler simulation would be required.

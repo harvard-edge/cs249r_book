@@ -1,6 +1,6 @@
 # Provenance in `mlsysim`
 
-Every **Tier A** number (registry entries and appendix-facing `Sourced` scalars) must carry a `Provenance` record. BibTeX stays in the book; the package stores structured lineage only.
+Every **Tier A** number (registry entries and narrative-facing `Sourced` scalars) must carry a `Provenance` record. External citations stay with the prose; the package stores structured lineage only.
 
 ## Audit gates
 
@@ -10,10 +10,10 @@ Every **Tier A** number (registry entries and appendix-facing `Sourced` scalars)
 | 2. **Sourced scalars** | `Literature.*`, `Infrastructure.Capacity.*`, `core.calibration.*` without notes/URL rules | `audit_literature_sourced`, `audit_infra_capacity`, `audit_calibration_sourced` |
 | 3. **Appendix lineage** | Stale `defaults.*` or registry paths in assumption appendices without provenance | `audit_appendix_*` |
 
-Run the textbook gate:
+Run the narrative lineage gate:
 
 ```bash
-python -m mlsysim.tools.audit_provenance --scope textbook --strict
+python -m mlsysim.tools.audit_provenance --scope narrative --strict
 ```
 
 ## Where constants live

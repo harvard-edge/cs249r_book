@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Replace ``defaults.*`` with domain registry paths in book QMD and Python."""
+"""Replace ``defaults.*`` with domain registry paths in QMD and Python."""
 
 from __future__ import annotations
 

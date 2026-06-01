@@ -193,8 +193,8 @@ def render_scorecard(eval_obj, output_format: str):
         return
 
     # Human Mode: Render the UI Scorecard
-    # We use the unified scorecard() method from the core library to ensure 
-    # the CLI matches the textbook (Jupyter) output exactly.
+    # We use the unified scorecard() method from the core library to keep CLI
+    # and notebook output consistent.
     console_out.print(eval_obj.scorecard())
 
 

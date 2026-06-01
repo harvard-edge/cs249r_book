@@ -20,7 +20,7 @@ _DATA = Path(__file__).parent / "data"
 
 CloudHardware = load_registry(
     _DATA / "cloud", HardwareNode, name="CloudHardware",
-    doc="Datacenter-scale accelerators (Volume II).", tech_root=_Tech,
+    doc="Datacenter-scale accelerators.", tech_root=_Tech,
 )
 WorkstationHardware = load_registry(
     _DATA / "workstation", HardwareNode, name="WorkstationHardware",
@@ -28,11 +28,11 @@ WorkstationHardware = load_registry(
 )
 MobileHardware = load_registry(
     _DATA / "mobile", HardwareNode, name="MobileHardware",
-    doc="Smartphone and handheld devices (Volume I).", tech_root=_Tech,
+    doc="Smartphone and handheld devices.", tech_root=_Tech,
 )
 EdgeHardware = load_registry(
     _DATA / "edge", HardwareNode, name="EdgeHardware",
-    doc="Robotics and Industrial Edge (Volume I).", tech_root=_Tech,
+    doc="Robotics and industrial edge devices.", tech_root=_Tech,
 )
 TinyHardware = load_registry(
     _DATA / "tiny", HardwareNode, name="TinyHardware",

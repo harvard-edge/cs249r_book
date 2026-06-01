@@ -10,8 +10,8 @@ from .evaluation import SystemEvaluation, EvaluationLevel
 
 class Scenario(BaseModel):
     """
-    A Narrative Bundle tying a Workload, a System, and Performance Constraints.
-    This is the primary entry point for student labs and textbook case studies.
+    A narrative bundle tying a Workload, a System, and performance constraints.
+    This is the primary entry point for labs and scenario case studies.
     """
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

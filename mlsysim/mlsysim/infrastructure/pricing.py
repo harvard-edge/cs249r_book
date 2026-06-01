@@ -6,10 +6,10 @@ from ..core.types import Metadata
 from ..core import provenance_catalog as pc
 from .types import PricePoint
 
-_CLOUD = Metadata(provenance=pc.BOOK_CLOUD_PRICING_2024)
-_STORAGE = Metadata(provenance=pc.BOOK_STORAGE_PRICING_2024)
-_LABELING = Metadata(provenance=pc.BOOK_LABELING_PRICING_2024)
-_FLEET = Metadata(provenance=pc.BOOK_FLEET_ECONOMICS_2024)
+_CLOUD = Metadata(provenance=pc.CLOUD_PRICING_2024_ANCHORS)
+_STORAGE = Metadata(provenance=pc.STORAGE_PRICING_2024_ANCHORS)
+_LABELING = Metadata(provenance=pc.LABELING_PRICING_2024_ANCHORS)
+_FLEET = Metadata(provenance=pc.FLEET_ECONOMICS_2024_ANCHORS)
 _CAPITAL = Metadata(provenance=pc.BARROSO_DATACENTER_ECONOMICS)
 _ONPREM = Metadata(provenance=pc.BARROSO_DATACENTER_ECONOMICS)
 
@@ -138,7 +138,7 @@ class Fleet(Registry):
     CarbonPerGpuHr = PricePoint(
         name="Carbon per GPU-hour (illustrative)",
         rate=0.16 * ureg.kilogram,
-        metadata=Metadata(provenance=pc.BOOK_CARBON_PER_GPU_HR),
+        metadata=Metadata(provenance=pc.GPU_HOUR_CARBON_PROXY),
     )
 
 

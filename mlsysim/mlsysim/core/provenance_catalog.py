@@ -73,7 +73,7 @@ def _conv(id: str, ref: str, *, notes: str | None = None) -> Provenance:
     )
 
 
-# --- Book / grid anchors (existing) ---
+# --- Grid and convention anchors ---
 IEA_WEO_2023 = Provenance(
     id="prov:iea-weo-2023-carbon",
     kind=ProvenanceKind.INDUSTRY_REPORT,
@@ -89,9 +89,9 @@ UPTIME_PUE_2022 = Provenance(
     verified="2025-03-06",
 )
 
-BOOK_CLUSTER_TIERS = _conv(
-    "prov:book-cluster-tier-convention",
-    "MLSysBook editorial cluster tiers (256 / 2k / 8k / 100k GPUs)",
+CLUSTER_TIER_CONVENTION = _conv(
+    "prov:cluster-tier-convention",
+    "Reference cluster-size tiers (256 / 2k / 8k / 100k GPUs)",
 )
 
 KEMPNER_AI_CLUSTER_H100 = _ds(
@@ -103,26 +103,26 @@ KEMPNER_AI_CLUSTER_H100 = _ds(
 )
 
 # --- Real-world case-study / workload scale anchors (Scenarios registry) ---
-BOOK_WORKLOAD_SCALE = Provenance(
-    id="prov:book-workload-scale",
+WORKLOAD_SCALE_ANCHORS = Provenance(
+    id="prov:workload-scale-anchors",
     kind=ProvenanceKind.ILLUSTRATIVE,
     ref="Illustrative real-world scale anchors (Gmail volume, Google searches, Waymo sensor rate) for order-of-magnitude intuition",
     verified="2025-03-06",
 )
-BOOK_ANOMALY_CASE = Provenance(
-    id="prov:book-anomaly-tinyml-case",
+TINYML_ANOMALY_CASE_STUDY = Provenance(
+    id="prov:tinyml-anomaly-case-study",
     kind=ProvenanceKind.ILLUSTRATIVE,
     ref="TinyML anomaly-detection case study (latency / AUC / energy) used as a benchmarking example",
     verified="2025-03-06",
 )
-BOOK_ENERGY_ANCHORS = Provenance(
-    id="prov:book-energy-anchors",
+ENERGY_SCALE_ANCHORS = Provenance(
+    id="prov:energy-scale-anchors",
     kind=ProvenanceKind.ILLUSTRATIVE,
     ref="Everyday energy-scale comparison anchors (smartphone charge ~40 kJ, boiling 1 L water ~100 kJ, US household electricity ~10.7 MWh/year) for order-of-magnitude intuition about ML energy",
     verified="2025-03-06",
 )
-BOOK_DEVICE_ANCHORS = Provenance(
-    id="prov:book-device-anchors",
+MOBILE_EDGE_DEVICE_ANCHORS = Provenance(
+    id="prov:mobile-edge-device-anchors",
     kind=ProvenanceKind.ILLUSTRATIVE,
     ref="Mobile/edge device reference figures (flagship phone battery ~15 Wh / 3000 mAh @ 3.7 V, mobile NPU power 3-4 W, object-detector ~2 W) for on-device ML intuition",
     verified="2025-03-06",
@@ -133,12 +133,12 @@ HOROWITZ_ENERGY = _lit(
     "prov:horowitz-2014",
     "Horowitz (2014), \"Computing's Energy Problem (and what we can do about it)\", ISSCC — 45 nm per-operation/per-byte energies",
 )
-BOOK_LATENCY_HIERARCHY = _conv(
-    "prov:book-latency-hierarchy",
-    "MLSysBook memory/interconnect access-latency hierarchy (order-of-magnitude class figures)",
+MEMORY_LATENCY_HIERARCHY = _conv(
+    "prov:memory-latency-hierarchy",
+    "Memory/interconnect access-latency hierarchy (order-of-magnitude class figures)",
 )
-BOOK_STORAGE_TIERS = _conv(
-    "prov:book-storage-tiers",
+STORAGE_TIER_REFERENCE = _conv(
+    "prov:storage-tier-reference",
     "Generic storage/memory bandwidth tiers (NVMe Gen3/4/5, DDR, host DRAM) from vendor datasheet ranges",
 )
 
@@ -148,10 +148,10 @@ RELIABILITY_MTTF_LITERATURE = _lit(
     url="https://doi.org/10.1109/hpca61900.2025.00096",
 )
 
-BOOK_ILLUSTRATIVE_IOWA_CARBON = Provenance(
-    id="prov:book-illustrative-iowa-carbon",
+IOWA_GRID_CARBON_ILLUSTRATIVE = Provenance(
+    id="prov:iowa-grid-carbon-illustrative",
     kind=ProvenanceKind.ILLUSTRATIVE,
-    ref="MLSysBook illustrative high-carbon US grid contrast (not IEA country average)",
+    ref="Illustrative high-carbon US grid contrast (not IEA country average)",
     verified="2025-03-06",
 )
 
@@ -240,9 +240,9 @@ INTEL_SGX = _ds(
     "https://www.intel.com/content/www/us/en/developer/tools/software-guard-extensions/overview.html",
 )
 
-BOOK_REFERENCE_CPU = _conv(
-    "prov:book-reference-desktop-cpu",
-    "MLSysBook reference 1 TFLOP/s FP32 desktop CPU for pedagogy (order-of-magnitude)",
+REFERENCE_DESKTOP_CPU = _conv(
+    "prov:reference-desktop-cpu",
+    "Reference 1 TFLOP/s FP32 desktop CPU (order-of-magnitude)",
 )
 
 # --- Workstation / mobile / edge / tiny ---
@@ -255,7 +255,7 @@ NVIDIA_DGX_SPARK = _ds(
 APPLE_M3_MAX = _est(
     "prov:apple-m3-max-estimate",
     "Apple M3 Max technical specifications (GPU core count × peak FLOP/core, rounded)",
-    notes="Peak TFLOP/s is an MLSysBook rounding of Apple-published core counts, not a sustained ML benchmark.",
+    notes="Peak TFLOP/s is an estimate from Apple-published core counts, not a sustained ML benchmark.",
     url="https://www.apple.com/macbook-pro/specs/",
 )
 
@@ -290,9 +290,9 @@ INTEL_NUC_MOVIDIUS = _est(
     url="https://www.intel.com/content/www/us/en/products/details/processors/neural-processing-unit.html",
 )
 
-BOOK_EDGE_SERVER = _conv(
-    "prov:book-edge-server-reference",
-    "MLSysBook reference edge server (1 TFLOP/s, 128 GB) for pedagogy",
+REFERENCE_EDGE_SERVER = _conv(
+    "prov:reference-edge-server",
+    "Reference edge server (1 TFLOP/s, 128 GB)",
 )
 
 ESP32_S3 = _ds(
@@ -369,9 +369,9 @@ WAKE_VISION = _ds(
     "https://github.com/TI-malaria/wake-vision",
 )
 
-BOOK_ANOMALY_MLP = _conv(
-    "prov:book-tiny-anomaly-mlp",
-    "MLSysBook TinyML anomaly-detector reference MLP (~270k parameters)",
+TINYML_ANOMALY_MLP_REFERENCE = _conv(
+    "prov:tinyml-anomaly-mlp-reference",
+    "TinyML anomaly-detector reference MLP (~270k parameters)",
 )
 
 NAUMOV_DLRM = _lit(
@@ -422,15 +422,15 @@ MEGATRON_OVERLAP = _lit(
     url="https://arxiv.org/abs/1909.08053",
 )
 
-BOOK_SCALING_RULE_OF_THUMB = _conv(
-    "prov:book-scaling-efficiency-rule-of-thumb",
+PARALLEL_SCALING_EFFICIENCY_RULE = _conv(
+    "prov:parallel-scaling-efficiency-rule",
     "Common industry rule-of-thumb (~90% parallel efficiency on well-tuned clusters)",
 )
 
-BOOK_DGX_GPUS_PER_HOST = _conv(
-    "prov:book-dgx-gpus-per-host",
+DGX_GPUS_PER_HOST_CONVENTION = _conv(
+    "prov:dgx-gpus-per-host-convention",
     "NVIDIA DGX H100/H200 node envelope (8 GPUs per host)",
-    notes="Used for cluster tier node counts in fleet appendices.",
+    notes="Reference convention for cluster-tier node-count calculations.",
 )
 
 GIBIANSKY_ALLREDUCE = _lit(
@@ -528,72 +528,72 @@ DGX_H100_RACK_REFERENCE = _conv(
     notes="Four DGX H100 nodes per rack, yielding 32 H100 GPUs per rack for rack-level power and cooling models.",
 )
 
-BOOK_NETWORK_ENERGY = _conv(
-    "prov:book-network-energy",
-    "MLSysBook network data-transfer energy anchors (5G per-MB, generic per-KB)",
+NETWORK_TRANSFER_ENERGY_ANCHORS = _conv(
+    "prov:network-transfer-energy-anchors",
+    "Network data-transfer energy anchors (5G per-MB, generic per-KB)",
     notes="Order-of-magnitude transfer-energy figures for intuition; not measured device values.",
 )
 
-BOOK_RECOVERY_ASSUMPTIONS = _conv(
-    "prov:book-recovery-time-assumptions",
-    "MLSysBook fleet recovery design assumptions (heartbeat, reschedule, checkpoint BW)",
-    notes="Engineering targets for appendix reliability tables; see Young/Daly in book prose.",
+FLEET_RECOVERY_ASSUMPTIONS = _conv(
+    "prov:fleet-recovery-time-assumptions",
+    "Fleet recovery design assumptions (heartbeat, reschedule, checkpoint BW)",
+    notes="Engineering targets for reliability tables; use Young/Daly for checkpoint-interval theory.",
 )
 
-BOOK_OVERHEAD_BUDGETS = _conv(
-    "prov:book-overhead-budgets",
-    "MLSysBook combined overhead budgets (pipeline, checkpoint, failure, maintenance)",
+TRAINING_OVERHEAD_BUDGETS = _conv(
+    "prov:training-overhead-budgets",
+    "Combined training overhead budgets (pipeline, checkpoint, failure, maintenance)",
     notes="Fractions of wall time for 10k+ GPU training scenarios.",
 )
 
-BOOK_SCALING_EFFICIENCY_TIERS = _conv(
-    "prov:book-scaling-efficiency-tiers",
-    "MLSysBook illustrative scaling efficiency vs GPU count (32→1024 GPUs)",
+SCALING_EFFICIENCY_TIERS = _conv(
+    "prov:scaling-efficiency-tiers",
+    "Illustrative scaling efficiency vs GPU count (32→1024 GPUs)",
     notes="8192-GPU tier uses MEGASCALE literature anchor separately.",
 )
 
-BOOK_ENERGY_HIERARCHY = _conv(
-    "prov:book-energy-hierarchy",
-    "MLSysBook simplified energy hierarchy: architecture-class effective pJ/FLOP (CPU→ASIC) and per-byte data-movement cost (register→network)",
+COMPUTE_ENERGY_HIERARCHY = _conv(
+    "prov:compute-energy-hierarchy",
+    "Simplified energy hierarchy: architecture-class effective pJ/FLOP (CPU→ASIC) and per-byte data-movement cost (register→network)",
     notes="Order-of-magnitude teaching figures; effective system-level energy, consistent with the Horowitz (2014) energy trend.",
 )
 
-BOOK_WUE_ANCHORS = _conv(
-    "prov:book-wue-anchors",
-    "MLSysBook water-usage effectiveness (WUE) tiers for sustainability examples",
+WUE_TIER_ANCHORS = _conv(
+    "prov:wue-tier-anchors",
+    "Water-usage effectiveness (WUE) tiers for sustainability scenarios",
 )
 
-BOOK_RACK_POWER = _conv(
-    "prov:book-rack-power-tiers",
-    "MLSysBook rack power tiers (traditional vs AI cluster, air-cooling limit)",
+RACK_POWER_TIER_ANCHORS = _conv(
+    "prov:rack-power-tier-anchors",
+    "Rack power tiers (traditional vs AI cluster, air-cooling limit)",
 )
 
-BOOK_CLOUD_PRICING_2024 = Provenance(
-    id="prov:book-cloud-pricing-2024",
+CLOUD_PRICING_2024_ANCHORS = Provenance(
+    id="prov:cloud-pricing-2024-anchors",
     kind=ProvenanceKind.ILLUSTRATIVE,
     ref="Illustrative US cloud list prices (2024–2025 order of magnitude)",
-    notes="GPU-hour, egress, and electricity rates for worked examples—not a specific vendor quote.",
+    notes="GPU-hour, egress, and electricity rates for illustrative scenarios; not a specific vendor quote.",
     verified="2025-03-06",
 )
 
-BOOK_STORAGE_PRICING_2024 = Provenance(
-    id="prov:book-storage-pricing-2024",
+STORAGE_PRICING_2024_ANCHORS = Provenance(
+    id="prov:storage-pricing-2024-anchors",
     kind=ProvenanceKind.ILLUSTRATIVE,
     ref="Illustrative cloud/object-storage list prices (2024 order of magnitude)",
-    notes="S3, Glacier, NVMe tier rates for data-engineering worked examples.",
+    notes="S3, Glacier, NVMe tier rates for data-engineering scenarios.",
     verified="2025-03-06",
 )
 
-BOOK_LABELING_PRICING_2024 = Provenance(
-    id="prov:book-labeling-pricing-2024",
+LABELING_PRICING_2024_ANCHORS = Provenance(
+    id="prov:labeling-pricing-2024-anchors",
     kind=ProvenanceKind.ILLUSTRATIVE,
     ref="Illustrative data-labeling cost ranges (2024 estimates)",
     notes="Crowd, bounding-box, and medical labeling tiers for workflow examples.",
     verified="2025-03-06",
 )
 
-BOOK_FLEET_ECONOMICS_2024 = Provenance(
-    id="prov:book-fleet-economics-2024",
+FLEET_ECONOMICS_2024_ANCHORS = Provenance(
+    id="prov:fleet-economics-2024-anchors",
     kind=ProvenanceKind.ILLUSTRATIVE,
     ref="Illustrative internal GPU-hour and chargeback rates (2024)",
     notes="On-demand, spot, and internal chargeback references for fleet orchestration examples.",
@@ -606,14 +606,14 @@ BARROSO_DATACENTER_ECONOMICS = _lit(
     url="https://doi.org/10.1201/9781351066146",
 )
 
-BOOK_CAPACITY_LEAD_TIMES = _est(
-    "prov:book-capacity-lead-times",
-    "MLSysBook illustrative datacenter build-out lead times",
-    notes="Order-of-magnitude planning anchors for compute-infrastructure chapters.",
+DATACENTER_CAPACITY_LEAD_TIMES = _est(
+    "prov:datacenter-capacity-lead-times",
+    "Illustrative datacenter build-out lead times",
+    notes="Order-of-magnitude planning anchors for compute-infrastructure scenarios.",
 )
 
-BOOK_CARBON_PER_GPU_HR = _est(
-    "prov:book-carbon-per-gpu-hr",
+GPU_HOUR_CARBON_PROXY = _est(
+    "prov:gpu-hour-carbon-proxy",
     "Illustrative per-GPU-hour carbon proxy for responsible-AI examples",
     notes="0.16 kg/GPU-hr order-of-magnitude; not a grid-specific intensity calculation.",
 )
@@ -622,7 +622,7 @@ LIT_TRANSATLANTIC_ROUND_TRIP_CO2 = _est(
     "prov:lit-transatlantic-round-trip-co2",
     "Aviation CO₂e factors for long-haul economy passenger travel (DEFRA-class)",
     notes=(
-        "Rounded to 1000 kg CO₂e for the NY–London round-trip pedagogical anchor; "
+        "Rounded to 1000 kg CO₂e for the NY–London round-trip reference anchor; "
         "agency calculators typically report ~900–1100 kg CO₂e per economy passenger."
     ),
     verified="2026-05-31",

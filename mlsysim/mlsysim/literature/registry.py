@@ -1,4 +1,4 @@
-"""Published literature anchors cited in the book (MFU, scaling, Chinchilla, …).
+"""Published literature anchors used by registry-backed calculations (MFU, scaling, Chinchilla, …).
 
 Each anchor is a provenance-carrying scalar; the values live as YAML under
 ``literature/data/<category>.yaml`` and are loaded via ``load_sourced_registry``
@@ -25,11 +25,11 @@ Communication = _load("communication", "Communication")
 BatchSize = _load("batchsize", "BatchSize", "McCandlish et al. (2018) critical batch size estimates.")
 Sustainability = _load(
     "sustainability", "Sustainability",
-    """Sustainability comparison anchors cited in the book (aviation CO₂e, …).""",
+    """Sustainability comparison anchors (aviation CO₂e, …).""",
 )
 Energy = _load(
     "energy", "Energy",
-    """Simplified pedagogical energy hierarchy for the sustainability chapter.
+    """Simplified energy hierarchy for sustainability scenarios.
 
     Architecture-class EFFECTIVE energy per FLOP (CPU->ASIC) and per-byte
     data-movement cost (register->network). Order-of-magnitude teaching figures,

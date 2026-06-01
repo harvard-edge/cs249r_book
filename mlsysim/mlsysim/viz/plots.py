@@ -59,7 +59,7 @@ def set_book_style():
 WEB_FIG_DPI = 120
 
 def _finalize_web_figure(fig):
-    """Match Quarto web defaults; book PDF cells keep set_book_style() dpi."""
+    """Match Quarto web defaults; PDF cells keep set_book_style() dpi."""
     fig.set_dpi(WEB_FIG_DPI)
     return fig
 

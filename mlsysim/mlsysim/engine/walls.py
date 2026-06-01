@@ -1,7 +1,7 @@
 """The 22 ML Systems Walls — canonical taxonomy.
 
 This module is the single source of truth for the wall classification
-used throughout mlsysim, the paper, and the textbook.  Every wall
+used throughout mlsysim documentation and examples.  Every wall
 represents a physical or logical constraint that bounds system
 performance; each is resolved by a dedicated solver.
 
@@ -377,8 +377,8 @@ def walls_in_domain(domain: Domain) -> List[Wall]:
 def taxonomy() -> str:
     """Return a human-readable summary of the full wall taxonomy.
 
-    This is the pedagogical entry point — print this in a notebook
-    and students see the entire analytical framework at a glance.
+    This is the overview entry point — print this in a notebook
+    to see the entire analytical framework at a glance.
     """
     lines = ["═══ The 22 ML Systems Walls ═══", ""]
     for domain in Domain:

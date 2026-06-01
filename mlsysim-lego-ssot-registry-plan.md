@@ -44,7 +44,7 @@ python3 book/tools/audit/book_check_lego_scenario_inputs.py \
 
 Current output:
 
-- **1,039 advisory MLSysIM source-of-truth candidates**
+- **1,038 advisory MLSysIM source-of-truth candidates**
 - **0 high-confidence candidates**
 - Full JSON work queue:
   `book/tools/audit/artifacts/lego_scenario_inputs_audit.json`
@@ -66,7 +66,7 @@ Broader medium-confidence buckets:
 | `Scenarios.*` | 170 | Unit-bearing scenario inputs |
 | `Datasets.*` / `Scenarios.DataWorkloads` | 111 | Dataset/sample/corpus sizes |
 | `Infrastructure.Pricing.*` / `Scenarios.*` | 116 | Economic assumptions not yet in a named price registry |
-| `Hardware.*` | 49 | Hardware-related values that need review |
+| `Hardware.*` | 50 | Hardware-related values that need review |
 | `Hardware.*` / `Scenarios.*` | 13 | Hardware-like scenario inputs that should become scenario profiles before being treated as canonical specs |
 
 This is the first real full-cell audit. Migration is **underway**, not done.
@@ -188,11 +188,10 @@ Known concrete findings from the first pass:
   profile and migrated Sustainable AI's rack power/cooling cells to load
   `nodes_per_rack`, node type, and GPU count from that profile. The advisory
   audit now has zero high-confidence findings.
-- MLSysIM registry/provenance names should stay product-, system-, source-, or
-  convention-oriented. Avoid new `BOOK_*`, `MLSysBook`, `Volume I/II`, or
-  "worked example" identifiers inside MLSysIM. Existing `BOOK_*` provenance
-  records should be renamed in a dedicated cleanup pass without changing their
-  values.
+- Stage 23 removed legacy book-specific MLSysIM provenance names and IDs.
+  Registry/provenance names now stay product-, system-, source-, scenario-, or
+  convention-oriented. Do not introduce new `BOOK_*`, `prov:book-*`,
+  `MLSysBook`, `Volume I/II`, or "worked example" identifiers inside MLSysIM.
 - 100,000-GPU examples should load `Systems.Clusters.Mega_100K`.
 - Storage/checkpoint examples mix two different kinds of facts: storage-system
   facts such as local NVMe drive count, local/PFS bandwidth, capacity, and
@@ -607,7 +606,7 @@ This effort is complete when:
   or another typed MLSysIM registry.
 - Physical quantities in profiles are Pint quantities, not untyped scalars.
 - Scenario profiles carry provenance metadata, even when the provenance is an
-  MLSysBook illustrative convention.
+  illustrative convention rather than a primary external source.
 - The scenario-input audit is clean except for explicit pure-algebra and
   figure-layout allowlist entries.
 - Existing unit/format gates remain green.

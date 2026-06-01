@@ -54,8 +54,8 @@ ureg.formatter.default_format = "~P"           # compact Pretty: "312 TFLOP/s" n
 pint.set_application_registry(ureg)  # canonical registry for the whole mlsysim package
 Q_ = ureg.Quantity
 
-# Custom MLSysBook units — single reviewable vocabulary file.
-ureg.load_definitions(str(Path(__file__).with_name("mlsysbook_units.txt")))
+# Custom MLSysIM units — single reviewable vocabulary file.
+ureg.load_definitions(str(Path(__file__).with_name("mlsysim_units.txt")))
 
 # --- Dimensionless Scalars (Helpers) ---
 QUADRILLION = 1e15
@@ -124,7 +124,7 @@ MiB = ureg.MiB
 GiB = ureg.GiB
 TiB = ureg.TiB
 
-# --- Time (legacy uppercase MS/US/NS loaded from mlsysbook_units.txt) ---
+# --- Time (legacy uppercase MS/US/NS loaded from mlsysim_units.txt) ---
 MS = ureg.MS
 ms = ureg.ms          # pint built-in millisecond (alias for convenience)
 US = ureg.US
@@ -132,7 +132,7 @@ NS = ureg.NS
 MILLISECOND = MS
 MICROSECOND = US
 NANOSECOND = NS
-# SI lowercase aliases (consumed by several chapter LEGO cells)
+# SI lowercase aliases (consumed by several QMD LEGO cells)
 microsecond = ureg.microsecond
 millisecond = ureg.millisecond
 nanosecond = ureg.nanosecond
@@ -165,7 +165,7 @@ NS_PER_US = 1000
 NS_PER_MS = NS_PER_US * US_PER_MS
 NS_PER_SEC = NS_PER_MS * MS_PER_SEC
 
-# --- FLOPs and operation rates (loaded from mlsysbook_units.txt) ---
+# --- FLOPs and operation rates (loaded from mlsysim_units.txt) ---
 flop = ureg.flop
 KFLOP = ureg.KFLOP
 KFLOPs = ureg.KFLOPs

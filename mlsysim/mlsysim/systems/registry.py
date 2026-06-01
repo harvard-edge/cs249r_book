@@ -46,7 +46,7 @@ class Nodes(Registry):
         accelerators_per_node=8,
         intra_node_bw=Hardware.Cloud.H100.nvlink.bandwidth,
         nics_per_node=8,
-        metadata=Metadata(provenance=pc.BOOK_DGX_GPUS_PER_HOST),
+        metadata=Metadata(provenance=pc.DGX_GPUS_PER_HOST_CONVENTION),
     )
     DGX_A100 = Node(
         name="DGX A100",
@@ -119,7 +119,7 @@ class Fabrics(Registry):
     )
 
 
-_TIER_PROV = pc.BOOK_CLUSTER_TIERS
+_TIER_PROV = pc.CLUSTER_TIER_CONVENTION
 
 
 class Clusters(Registry):
@@ -220,7 +220,7 @@ class Pods(Registry):
         memory=131 * TB,
         power=3 * ureg.megawatt,
         metadata=Metadata(
-            provenance=pc.BOOK_CLUSTER_TIERS,
+            provenance=pc.CLUSTER_TIER_CONVENTION,
             description="Reference TPU pod envelope for cloud-scale system models.",
         ),
     )
@@ -278,9 +278,9 @@ class SwitchFabric(Registry):
 class NetworkEnergy(Registry):
     """Network data-transfer energy anchors (order-of-magnitude intuition)."""
 
-    Per5gMb = sourced_qty(100 * ureg.millijoule / MB, pc.BOOK_NETWORK_ENERGY,
+    Per5gMb = sourced_qty(100 * ureg.millijoule / MB, pc.NETWORK_TRANSFER_ENERGY_ANCHORS,
         name="5G transfer energy per MB", description="Approximate radio-access energy to move 1 MB over 5G.")
-    Per1Kb = sourced_qty(1_000_000 * ureg.picojoule, pc.BOOK_NETWORK_ENERGY,
+    Per1Kb = sourced_qty(1_000_000 * ureg.picojoule, pc.NETWORK_TRANSFER_ENERGY_ANCHORS,
         name="Network energy per KB", description="Approximate energy to move 1 KB across a datacenter network (~1 µJ).")
 
 
@@ -295,7 +295,7 @@ class Storage(Registry):
         media="NVMe SSD",
         interface="PCIe Gen4",
         durability="local",
-        metadata=Metadata(provenance=pc.BOOK_STORAGE_TIERS),
+        metadata=Metadata(provenance=pc.STORAGE_TIER_REFERENCE),
     )
     LocalNvmeGen3 = StorageSubsystem(
         name="Local NVMe SSD (Gen3)",
@@ -305,7 +305,7 @@ class Storage(Registry):
         media="NVMe SSD",
         interface="PCIe Gen3",
         durability="local",
-        metadata=Metadata(provenance=pc.BOOK_STORAGE_TIERS),
+        metadata=Metadata(provenance=pc.STORAGE_TIER_REFERENCE),
     )
     SataSsd = StorageSubsystem(
         name="SATA SSD",
@@ -314,7 +314,7 @@ class Storage(Registry):
         media="SATA SSD",
         interface="SATA",
         durability="local",
-        metadata=Metadata(provenance=pc.BOOK_STORAGE_TIERS),
+        metadata=Metadata(provenance=pc.STORAGE_TIER_REFERENCE),
     )
     SataSsdEffective = StorageSubsystem(
         name="SATA SSD (effective sequential)",
@@ -322,7 +322,7 @@ class Storage(Registry):
         media="SATA SSD",
         interface="SATA",
         durability="local",
-        metadata=Metadata(provenance=pc.BOOK_STORAGE_TIERS),
+        metadata=Metadata(provenance=pc.STORAGE_TIER_REFERENCE),
     )
     Hdd7200Rpm = StorageSubsystem(
         name="7.2k RPM HDD",
@@ -331,14 +331,14 @@ class Storage(Registry):
         media="HDD",
         interface="SATA",
         durability="local",
-        metadata=Metadata(provenance=pc.BOOK_STORAGE_TIERS),
+        metadata=Metadata(provenance=pc.STORAGE_TIER_REFERENCE),
     )
     CloudBlockStorageBaseline = StorageSubsystem(
         name="Cloud block storage baseline",
         bandwidth=250 * (MB / ureg.second),
         media="cloud block volume",
         durability="durable",
-        metadata=Metadata(provenance=pc.BOOK_STORAGE_TIERS),
+        metadata=Metadata(provenance=pc.STORAGE_TIER_REFERENCE),
     )
     ObjectStoreSingleStream = StorageSubsystem(
         name="Object storage single-stream read",
@@ -346,7 +346,7 @@ class Storage(Registry):
         media="object storage",
         interface="HTTP range request",
         durability="durable",
-        metadata=Metadata(provenance=pc.BOOK_STORAGE_TIERS),
+        metadata=Metadata(provenance=pc.STORAGE_TIER_REFERENCE),
     )
     LocalNvmeTrainingLow = StorageSubsystem(
         name="Local NVMe training tier (low)",
@@ -354,7 +354,7 @@ class Storage(Registry):
         media="NVMe SSD",
         interface="PCIe",
         durability="local",
-        metadata=Metadata(provenance=pc.BOOK_STORAGE_TIERS),
+        metadata=Metadata(provenance=pc.STORAGE_TIER_REFERENCE),
     )
     LocalNvmeTrainingTypical = StorageSubsystem(
         name="Local NVMe training tier (typical)",
@@ -362,13 +362,13 @@ class Storage(Registry):
         media="NVMe SSD",
         interface="PCIe",
         durability="local",
-        metadata=Metadata(provenance=pc.BOOK_STORAGE_TIERS),
+        metadata=Metadata(provenance=pc.STORAGE_TIER_REFERENCE),
     )
     LocalNvmeGen4x4 = NodeStorageConfig(
         name="4x local Gen4 NVMe drives per node",
         device=LocalNvmeGen4,
         devices_per_node=4,
-        metadata=Metadata(provenance=pc.BOOK_STORAGE_TIERS),
+        metadata=Metadata(provenance=pc.STORAGE_TIER_REFERENCE),
     )
     PfsOneTbPerSecond = StorageSubsystem(
         name="Reference parallel file system (1 TB/s)",
@@ -376,7 +376,7 @@ class Storage(Registry):
         media="parallel file system",
         durability="durable",
         metadata=Metadata(
-            provenance=pc.BOOK_STORAGE_TIERS,
+            provenance=pc.STORAGE_TIER_REFERENCE,
             description="Reference aggregate PFS bandwidth for checkpoint-staging examples.",
         ),
     )
@@ -386,7 +386,7 @@ class Storage(Registry):
         durable_store=PfsOneTbPerSecond,
         write_bandwidth=PfsOneTbPerSecond.bandwidth,
         metadata=Metadata(
-            provenance=pc.BOOK_STORAGE_TIERS,
+            provenance=pc.STORAGE_TIER_REFERENCE,
             description="Reference local-NVMe-to-PFS checkpoint path for a 2K H100 fleet.",
         ),
     )

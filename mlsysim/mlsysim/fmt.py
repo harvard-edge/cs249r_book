@@ -1977,7 +1977,7 @@ def _pick_emissions_unit(qty):
 def _pick_carbon_intensity_unit(qty):
     from .core.units import gram, kWh
 
-    # Grid intensities in the book are normally communicated as g/kWh. Callers
+    # Grid intensities are normally communicated as g/kWh. Callers
     # can force kg/kWh when prose needs that convention.
     qty.to(gram / kWh)
     return gram / kWh
@@ -2150,7 +2150,7 @@ def _water_unit_label(display_unit):
 
 
 def fmt_water(quantity, *, unit=None, precision=None, commas=True):
-    """Format water volume quantities with book-preferred liter labels."""
+    """Format water volume quantities with compact liter labels."""
     if not isinstance(quantity, ureg.Quantity):
         raise TypeError("fmt_water() requires a Pint Quantity.")
     from .core.units import L
@@ -2223,7 +2223,7 @@ def assert_qty_close(actual, expected, display_unit, *, rel=1e-9, abs_tol=None, 
 def check(condition, message):
     """
     Invariant guard for narrative logic.
-    Ensures that the calculated values support the textbook's claims.
+    Ensures that calculated values support the surrounding narrative claims.
     """
     if not condition:
         raise ValueError(f"Narrative broken: {message}")

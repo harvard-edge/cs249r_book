@@ -181,8 +181,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--scope",
-        choices=("cloud", "all", "textbook"),
-        default="textbook",
+        choices=("cloud", "all", "narrative"),
+        default="narrative",
         help="What to scan",
     )
     parser.add_argument(
@@ -195,7 +195,7 @@ def main(argv: list[str] | None = None) -> int:
     issues: list[str] = []
     if args.scope == "cloud":
         issues.extend(audit_registries(scope_cloud=True))
-    if args.scope in ("all", "textbook"):
+    if args.scope in ("all", "narrative"):
         issues.extend(audit_registries(scope_cloud=False))
         issues.extend(audit_infra_grids())
         issues.extend(audit_infra_pricing())
@@ -203,7 +203,7 @@ def main(argv: list[str] | None = None) -> int:
         issues.extend(audit_literature_sourced())
         issues.extend(audit_systems_reliability())
         issues.extend(audit_calibration_sourced())
-    if args.scope == "textbook":
+    if args.scope == "narrative":
         issues.extend(audit_appendix_defaults())
         issues.extend(audit_appendix_pricing())
         issues.extend(audit_appendix_reliability())

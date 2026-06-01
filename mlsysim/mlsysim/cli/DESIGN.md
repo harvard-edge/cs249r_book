@@ -2,7 +2,7 @@
 
 This document establishes the design rules for the `mlsysim` CLI.
 
-The CLI is both a textbook companion and a public interface for reproducible
+The CLI is both an instructional companion and a public interface for reproducible
 ML infrastructure analysis. It must be predictable for humans, scripts, CI
 jobs, and other tooling that consumes structured output.
 
@@ -39,7 +39,7 @@ The CLI UX must accurately reflect the architectural rigor of the underlying eng
     *   `mlsysim eval ...` strictly calls `BaseModel` components (Physics Engine). It can take direct flags or a full `mlsys.yaml` specification.
     *   `mlsysim solve ...` strictly calls `BaseSolver` components (Math Engine).
     *   `mlsysim optimize ...` strictly calls `BaseOptimizer` components (Engineering Engine).
-*   **The Rationale:** The CLI help text reinforces the textbook's pedagogical goals: teaching students the difference between evaluating a state, algebraically inverting an equation, and searching a design space.
+*   **The Rationale:** The CLI help text reinforces MLSysIM's instructional goals: teaching users the difference between evaluating a state, algebraically inverting an equation, and searching a design space.
 
 ### Rule 5: Presentation is a Translation Layer, Not Logic
 

@@ -14,8 +14,8 @@ app = typer.Typer(
     **First-principles infrastructure modeling for machine learning systems.**
 
     Predicts performance, cost, and carbon footprint from hardware and
-    workload specifications. The analytical engine behind the
-    *Machine Learning Systems* textbook.
+    workload specifications, with unit-safe registries and reproducible
+    scenario calculations.
     """,
     no_args_is_help=True,
     add_completion=True,

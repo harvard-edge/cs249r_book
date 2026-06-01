@@ -1,4 +1,4 @@
-"""Provenance types for registry entries and book-facing sourced scalars."""
+"""Provenance types for registry entries and sourced scalars."""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ class Provenance(BaseModel):
         Enforces validation rules based on the ProvenanceKind.
         
         Requires URLs for datasheets, and notes for estimates and derived values,
-        ensuring proper traceability and justification for textbook numbers.
+        ensuring proper traceability and justification for sourced numbers.
         """
         if self.kind == ProvenanceKind.DATASHEET and not self.url:
             raise ValueError(f"datasheet provenance requires url: {self.ref!r}")
