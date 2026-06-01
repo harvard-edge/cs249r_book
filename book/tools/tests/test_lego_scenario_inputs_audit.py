@@ -54,3 +54,19 @@ def test_workload_flops_formula_is_not_hardware_spec():
     assert target == "Models.* or Scenarios.TrainingRuns"
     assert confidence == "medium"
     assert reason == "workload compute requirement"
+
+
+def test_amdahl_processor_count_is_not_fabric():
+    target, confidence, reason = classify("processor_count", "8")
+
+    assert target == "Scenarios.* or keep local"
+    assert confidence == "low"
+    assert reason == "bare numeric scenario input"
+
+
+def test_rack_latency_is_workload_policy_not_topology():
+    target, confidence, reason = classify("lat_rack_ms", "85")
+
+    assert target == "Scenarios.* or Ops.*"
+    assert confidence == "medium"
+    assert reason == "scenario/workload policy"

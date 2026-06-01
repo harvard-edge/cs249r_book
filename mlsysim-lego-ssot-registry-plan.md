@@ -44,8 +44,8 @@ python3 book/tools/audit/book_check_lego_scenario_inputs.py \
 
 Current output:
 
-- **1,067 advisory MLSysIM source-of-truth candidates**
-- **53 high-confidence candidates**
+- **1,053 advisory MLSysIM source-of-truth candidates**
+- **40 high-confidence candidates**
 - Full JSON work queue:
   `book/tools/audit/artifacts/lego_scenario_inputs_audit.json`
 - Full Markdown work queue:
@@ -60,21 +60,21 @@ High-confidence buckets:
 | Target | Count | Meaning |
 |---|---:|---|
 | `Hardware.*` / `Hardware.Tech.*` | 18 | Hardware capacity, bandwidth, FLOP/s, TDP, memory/interconnect facts |
-| `Systems.Clusters` / `Systems.Nodes` | 13 | Fleet, node, GPU-count, cluster-topology facts |
-| `Systems.Fabrics` / `Systems.SwitchFabric` | 9 | Network/fabric/switch-sizing facts |
+| `Systems.Clusters` / `Systems.Nodes` | 8 | Fleet, node, GPU-count, cluster-topology facts |
 | `Infrastructure.Pricing.Cloud` / `Infrastructure.Pricing.Fleet` | 6 | GPU-hour, cloud-instance, and fleet price points |
 | `Infrastructure.*` / `Scenarios.Sustainability` | 4 | PUE, cooling, carbon, sustainability scenario facts |
 | `Systems.Storage` | 2 | Local NVMe, HDD, PFS, S3/object-store, checkpoint-path storage facts |
 | `Infrastructure.Pricing.Storage` | 1 | Storage/monitoring price points |
+| `Systems.Fabrics` / `Systems.SwitchFabric` | 1 | Network/fabric/switch-sizing facts |
 
 Broader medium-confidence buckets:
 
 | Target | Count | Meaning |
 |---|---:|---|
-| `Scenarios.*` / `Ops.*` | 287 | Workload, SLA, monitoring, drift, threshold, and operational policies |
-| `Models.*` / `Scenarios.TrainingRuns` | 213 | Model dimensions and training-run workload inputs |
-| `Scenarios.*` | 164 | Unit-bearing scenario inputs |
-| `Datasets.*` / `Scenarios.DataWorkloads` | 109 | Dataset/sample/corpus sizes |
+| `Scenarios.*` / `Ops.*` | 285 | Workload, SLA, monitoring, drift, threshold, and operational policies |
+| `Models.*` / `Scenarios.TrainingRuns` | 216 | Model dimensions and training-run workload inputs |
+| `Scenarios.*` | 170 | Unit-bearing scenario inputs |
+| `Datasets.*` / `Scenarios.DataWorkloads` | 111 | Dataset/sample/corpus sizes |
 | `Infrastructure.Pricing.*` / `Scenarios.*` | 111 | Economic assumptions not yet in a named price registry |
 | `Hardware.*` | 49 | Hardware-related values that need review |
 

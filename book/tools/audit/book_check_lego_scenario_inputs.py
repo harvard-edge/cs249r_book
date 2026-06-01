@@ -110,9 +110,9 @@ DATASET_WORD = re.compile(
     re.I,
 )
 SYSTEM_WORD = re.compile(
-    r"(?:fleet|cluster|node|nodes|gpu|gpus|accelerator|server|rack|pod|nic|nics|"
-    r"psu|psus|fabric|network|topology|switch|infiniband|ethernet|roce|nvlink|"
-    r"pcie|mtbf|failure)",
+    r"(?:^|_)(?:fleet|cluster|node|nodes|gpu|gpus|accelerator|server|rack|"
+    r"pod|nic|nics|psu|psus|fabric|network|topology|switch|infiniband|"
+    r"ethernet|roce|nvlink|pcie|mtbf|failure)(?:_|$)",
     re.I,
 )
 HARDWARE_WORD = re.compile(
@@ -137,13 +137,14 @@ WORKLOAD_WORD = re.compile(
 )
 WORKLOAD_PHASE_WORD = re.compile(
     r"(?:preprocess|postprocess|forward|backward|allreduce|warmup|compile|"
-    r"cuda|runtime|latency|deadline|budget|overhead|step|batch|bucket|"
+    r"cuda|runtime|latency|(?:^|_)lat(?:_|$)|deadline|budget|overhead|"
+    r"step|batch|bucket|"
     r"profile|pipeline|dispatch|sample|query|request|per_layer)",
     re.I,
 )
 FABRIC_SPEC_WORD = re.compile(
-    r"(?:fabric|switch|infiniband|ethernet|roce|nvlink|pcie|ports?|spine|"
-    r"leaf|endpoint_links|links_per_gpu|gbps|tbps)",
+    r"(?:^|_)(?:fabric|switch|infiniband|ethernet|roce|nvlink|pcie|ports?|"
+    r"spine|leaf|endpoint_links|links_per_gpu|gbps|tbps|nvswitch)(?:_|$)",
     re.I,
 )
 TOPOLOGY_COUNT_WORD = re.compile(
@@ -335,7 +336,7 @@ def _classify(name: str, rhs: str, calls: set[str]) -> tuple[str, str, str]:
             return "Scenarios.* or Ops.*", "medium", "scenario/workload policy"
         if FABRIC_SPEC_WORD.search(text):
             return "Systems.Fabrics or Systems.SwitchFabric", "high", "network/fabric system fact"
-        if TOPOLOGY_COUNT_WORD.search(text) or any(word in lower for word in ("fleet", "cluster")):
+        if TOPOLOGY_COUNT_WORD.search(text):
             return "Systems.Clusters or Systems.Nodes", "high", "fleet/topology fact"
         return "Systems.*", "medium", "system-level fact"
 
