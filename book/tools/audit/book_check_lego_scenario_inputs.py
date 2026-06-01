@@ -146,6 +146,10 @@ WORKLOAD_PHASE_WORD = re.compile(
     r"profile|pipeline|dispatch|sample|query|request|per_layer)",
     re.I,
 )
+SCENARIO_COMMENT_WORD = re.compile(
+    r"#.*\b(?:scenario|hypothetical|illustrative|reference|baseline|budget)\b",
+    re.I,
+)
 FABRIC_SPEC_WORD = re.compile(
     r"(?:^|_)(?:fabric|switch|infiniband|ethernet|roce|nvlink|pcie|ports?|"
     r"spine|leaf|endpoint_links|links_per_gpu|gbps|tbps|nvswitch)(?:_|$)",
@@ -366,6 +370,27 @@ def _classify(name: str, rhs: str, calls: set[str]) -> tuple[str, str, str]:
     return "Scenarios.* or keep local", "low", "bare numeric scenario input"
 
 
+def _downgrade_scenario_comment(
+    line: str,
+    target: str,
+    confidence: str,
+    reason: str,
+) -> tuple[str, str, str]:
+    if confidence != "high" or not SCENARIO_COMMENT_WORD.search(line):
+        return target, confidence, reason
+    if target.startswith("Infrastructure.Pricing"):
+        return "Infrastructure.Pricing.* or Scenarios.*", "medium", "scenario/profile input"
+    if target.startswith("Infrastructure"):
+        return "Infrastructure.* or Scenarios.*", "medium", "scenario/profile input"
+    if target.startswith("Systems.Storage"):
+        return "Systems.Storage or Scenarios.*", "medium", "scenario/profile input"
+    if target.startswith("Systems"):
+        return "Systems.* or Scenarios.*", "medium", "scenario/profile input"
+    if target.startswith("Hardware"):
+        return "Hardware.* or Scenarios.*", "medium", "scenario/profile input"
+    return "Scenarios.*", "medium", "scenario/profile input"
+
+
 def _target_names(node: ast.AST) -> Iterable[str]:
     if isinstance(node, ast.Name):
         yield node.id
@@ -382,6 +407,7 @@ def _findings_for_cell(path: Path, cell_start: int, code: str) -> list[Finding]:
     cell = _class_name(code)
     chapter = _chapter_key(path)
     rel = _repo_rel(path)
+    code_lines = code.splitlines()
 
     try:
         tree = ast.parse(code)
@@ -441,6 +467,10 @@ def _findings_for_cell(path: Path, cell_start: int, code: str) -> list[Finding]:
             if _is_safe_local(name, rhs):
                 continue
             target, confidence, reason = _classify(name, rhs, calls)
+            line_text = code_lines[lineno - 1] if 0 < lineno <= len(code_lines) else ""
+            target, confidence, reason = _downgrade_scenario_comment(
+                line_text, target, confidence, reason
+            )
             if confidence == "low" and not UNIT_TOKEN.search(rhs) and not has_constructor:
                 continue
             findings.append(

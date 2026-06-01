@@ -6,11 +6,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "book" / "tools" / "audit"))
 
-from book_check_lego_scenario_inputs import _classify  # noqa: E402
+from book_check_lego_scenario_inputs import _classify, check_file  # noqa: E402
 
 
 def classify(name, rhs):
     return _classify(name, rhs, set())
+
+
+def _write_qmd(tmp_path: Path, body: str) -> Path:
+    path = tmp_path / "chapter.qmd"
+    path.write_text(body, encoding="utf-8")
+    return path
 
 
 def test_network_latency_is_workload_policy_not_fabric():
@@ -86,3 +92,22 @@ def test_rack_latency_is_workload_policy_not_topology():
     assert target == "Scenarios.* or Ops.*"
     assert confidence == "medium"
     assert reason == "scenario/workload policy"
+
+
+def test_scenario_comment_downgrades_hardware_high_confidence(tmp_path):
+    qmd = _write_qmd(
+        tmp_path,
+        """```{python}
+# │ Exports: X.gpu_memory
+class X:
+    # ┌── 1. LOAD ─────────────────────────────────────────
+    gpu_memory = 16 * GB  # scenario assumption
+```""",
+    )
+
+    findings = check_file(qmd)
+
+    assert len(findings) == 1
+    assert findings[0].target == "Hardware.* or Scenarios.*"
+    assert findings[0].confidence == "medium"
+    assert findings[0].reason == "scenario/profile input"

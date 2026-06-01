@@ -45,7 +45,7 @@ python3 book/tools/audit/book_check_lego_scenario_inputs.py \
 Current output:
 
 - **1,048 advisory MLSysIM source-of-truth candidates**
-- **31 high-confidence candidates**
+- **15 high-confidence candidates**
 - Full JSON work queue:
   `book/tools/audit/artifacts/lego_scenario_inputs_audit.json`
 - Full Markdown work queue:
@@ -59,12 +59,11 @@ High-confidence buckets:
 
 | Target | Count | Meaning |
 |---|---:|---|
-| `Hardware.*` / `Hardware.Tech.*` | 18 | Hardware capacity, bandwidth, FLOP/s, TDP, memory/interconnect facts |
 | `Systems.Clusters` / `Systems.Nodes` | 5 | Fleet, node, GPU-count, cluster-topology facts |
-| `Infrastructure.*` / `Scenarios.Sustainability` | 4 | PUE, cooling, carbon, sustainability scenario facts |
-| `Systems.Storage` | 2 | Local NVMe, HDD, PFS, S3/object-store, checkpoint-path storage facts |
-| `Infrastructure.Pricing.Storage` | 1 | Storage/monitoring price points |
+| `Hardware.*` / `Hardware.Tech.*` | 5 | Hardware capacity, bandwidth, FLOP/s, TDP, memory/interconnect facts |
+| `Infrastructure.*` / `Scenarios.Sustainability` | 3 | PUE, cooling, carbon, sustainability scenario facts |
 | `Systems.Fabrics` / `Systems.SwitchFabric` | 1 | Network/fabric/switch-sizing facts |
+| `Systems.Storage` | 1 | Local NVMe, HDD, PFS, S3/object-store, checkpoint-path storage facts |
 
 Broader medium-confidence buckets:
 
@@ -74,8 +73,9 @@ Broader medium-confidence buckets:
 | `Models.*` / `Scenarios.TrainingRuns` | 216 | Model dimensions and training-run workload inputs |
 | `Scenarios.*` | 170 | Unit-bearing scenario inputs |
 | `Datasets.*` / `Scenarios.DataWorkloads` | 111 | Dataset/sample/corpus sizes |
-| `Infrastructure.Pricing.*` / `Scenarios.*` | 115 | Economic assumptions not yet in a named price registry |
+| `Infrastructure.Pricing.*` / `Scenarios.*` | 116 | Economic assumptions not yet in a named price registry |
 | `Hardware.*` | 49 | Hardware-related values that need review |
+| `Hardware.*` / `Scenarios.*` | 13 | Hardware-like scenario inputs that should become scenario profiles before being treated as canonical specs |
 
 This is the first real full-cell audit. Migration is **underway**, not done.
 
@@ -167,6 +167,10 @@ Known concrete findings from the first pass:
 - Stage 17 added named low-cost GPU-hour and A10G inference GPU-hour price
   anchors under `Infrastructure.Pricing.Cloud`, then migrated the FixMatch
   and cloud-edge TCO cells to those registry entries.
+- Stage 18 made the source-of-truth audit comment-aware. Values explicitly
+  marked as scenario, hypothetical, illustrative, reference, baseline, or
+  budget inputs now remain medium-confidence scenario/profile work instead of
+  high-confidence canonical hardware/system facts.
 - 100,000-GPU examples should load `Systems.Clusters.Mega_100K`.
 - Storage/checkpoint examples mix two different kinds of facts: storage-system
   facts such as local NVMe drive count, local/PFS bandwidth, capacity, and

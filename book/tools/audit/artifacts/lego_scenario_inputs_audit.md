@@ -9,21 +9,22 @@ By target:
    285  Scenarios.* or Ops.*
    216  Models.* or Scenarios.TrainingRuns
    170  Scenarios.*
-   115  Infrastructure.Pricing.* or Scenarios.*
+   116  Infrastructure.Pricing.* or Scenarios.*
    111  Datasets.* or Scenarios.DataWorkloads
     49  Hardware.*
     31  Infrastructure.*
     21  Systems.*
-    18  Hardware.* or Hardware.Tech.*
+    13  Hardware.* or Scenarios.*
     11  Systems.Storage or Datasets.*
      5  Systems.Clusters or Systems.Nodes
-     4  Infrastructure.* or Scenarios.Sustainability
+     5  Hardware.* or Hardware.Tech.*
+     4  Systems.Storage or Scenarios.*
      3  Infrastructure.Pricing.Labeling or Scenarios.*
-     3  Systems.Storage or Scenarios.*
-     2  Systems.Storage
+     3  Infrastructure.* or Scenarios.Sustainability
      2  Scenarios.TrainingRuns or Systems.Reliability
-     1  Infrastructure.Pricing.Storage
      1  Systems.Fabrics or Systems.SwitchFabric
+     1  Systems.Storage
+     1  Infrastructure.* or Scenarios.*
 Top chapters:
    151  vol1/model_serving
     83  vol1/data_selection
@@ -54,18 +55,18 @@ Top reasons:
     49  hardware-related quantitative input
     31  infrastructure input
     21  system-level fact
-    18  hardware specification
+    16  scenario/profile input
     11  storage/data fact
      5  fleet/topology fact
+     5  hardware specification
      5  workload compute requirement
      4  dataset/workload size
-     4  infrastructure/sustainability fact
      3  storage observation or utilization scenario
      3  human-labeling price input
+     3  infrastructure/sustainability fact
      3  storage-related scenario input
-     2  storage subsystem fact
      2  checkpoint policy/workload cadence
-     1  storage price/rate belongs in pricing registry
+     1  network/fabric system fact
 
 ## vol1/backmatter/appendix_algorithm.qmd
 
@@ -134,7 +135,7 @@ Top reasons:
 | `book/quarto/contents/vol1/benchmarking/benchmarking.qmd:1977` | `InferenceEnergy` | `_latency_slow` | `Scenarios.*` | unit-bearing scenario input | `100 * ms` |
 | `book/quarto/contents/vol1/benchmarking/benchmarking.qmd:2335` | `ScalingEfficiencyCalc` | `t1_hours` | `Scenarios.* or Ops.*` | scenario/workload policy | `24` |
 | `book/quarto/contents/vol1/benchmarking/benchmarking.qmd:2337` | `ScalingEfficiencyCalc` | `tn_hours` | `Scenarios.* or Ops.*` | scenario/workload policy | `4` |
-| `book/quarto/contents/vol1/benchmarking/benchmarking.qmd:3071` | `ColdStartTransferCalc` | `pcie_effective_bw` | `Hardware.* or Hardware.Tech.*` | hardware specification | `25 * (GB / second)` |
+| `book/quarto/contents/vol1/benchmarking/benchmarking.qmd:3071` | `ColdStartTransferCalc` | `pcie_effective_bw` | `Hardware.* or Scenarios.*` | scenario/profile input | `25 * (GB / second)` |
 | `book/quarto/contents/vol1/benchmarking/benchmarking.qmd:3247` | `EdgeTPUSpeedupCalc` | `edgetpu_latency` | `Hardware.*` | hardware-related quantitative input | `2 * ms` |
 | `book/quarto/contents/vol1/benchmarking/benchmarking.qmd:3248` | `EdgeTPUSpeedupCalc` | `cpu_latency` | `Hardware.*` | hardware-related quantitative input | `15 * ms` |
 | `book/quarto/contents/vol1/benchmarking/benchmarking.qmd:3249` | `EdgeTPUSpeedupCalc` | `edgetpu_e2e` | `Hardware.*` | hardware-related quantitative input | `6 * ms` |
@@ -285,7 +286,7 @@ Top reasons:
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:3235` | `DataEchoingRoi` | `echo_epoch_count` | `Scenarios.* or Ops.*` | scenario/workload policy | `90` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:3356` | `CostBreakdown` | `raw_data_cost` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `50000 * USD` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:3358` | `CostBreakdown` | `cost_per_label` | `Infrastructure.Pricing.Labeling or Scenarios.*` | human-labeling price input | `0.05 * (USD / count)` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3359` | `CostBreakdown` | `storage_cost` | `Infrastructure.Pricing.Storage` | storage price/rate belongs in pricing registry | `200 * USD` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3359` | `CostBreakdown` | `storage_cost` | `Infrastructure.Pricing.* or Scenarios.*` | scenario/profile input | `200 * USD` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:3360` | `CostBreakdown` | `train_compute_cost` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `25000 * USD` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:3361` | `CostBreakdown` | `storage_size` | `Systems.Storage or Datasets.*` | storage/data fact | `150 * GB` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:3362` | `CostBreakdown` | `storage_duration` | `Scenarios.* or Ops.*` | storage observation or utilization scenario | `12 * ureg.month` |
@@ -363,17 +364,17 @@ Top reasons:
 | `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:4141` | `LayernormAnalysisCalc` | `ln_seq` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `512` |
 | `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:4142` | `LayernormAnalysisCalc` | `ln_hidden` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `768` |
 | `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:5800` | `FpMemoryEnergyCalc` | `layernorm_ai` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `1.5` |
-| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:5801` | `FpMemoryEnergyCalc` | `peak_flops` | `Hardware.* or Hardware.Tech.*` | hardware specification | `300 * (TFLOP / second)` |
+| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:5801` | `FpMemoryEnergyCalc` | `peak_flops` | `Hardware.* or Scenarios.*` | scenario/profile input | `300 * (TFLOP / second)` |
 | `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:5802` | `FpMemoryEnergyCalc` | `peak_bw` | `Scenarios.*` | unit-bearing scenario input | `2 * (TB / second)` |
 | `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:5853` | `FpMultigpuScalingCalc` | `gradient_size` | `Hardware.*` | hardware-related quantitative input | `1.0 * GB` |
 | `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:5854` | `FpMultigpuScalingCalc` | `step_time` | `Scenarios.* or Ops.*` | scenario/workload policy | `50 * millisecond` |
-| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:6030` | `FeasibilityAssessment` | `gpu_memory` | `Hardware.* or Hardware.Tech.*` | hardware specification | `16 * GB` |
+| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:6030` | `FeasibilityAssessment` | `gpu_memory` | `Hardware.* or Scenarios.*` | scenario/profile input | `16 * GB` |
 | `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:6034` | `FeasibilityAssessment` | `mem_bw` | `Scenarios.*` | unit-bearing scenario input | `1 * (TB / second)` |
 | `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:6038` | `FeasibilityAssessment` | `latency_target` | `Scenarios.*` | unit-bearing scenario input | `50 * millisecond` |
 | `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:6130` | `CarbonRoiCalc` | `cpu_power` | `Hardware.*` | hardware-related quantitative input | `100 * watt` |
-| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:6131` | `CarbonRoiCalc` | `cpu_flops` | `Hardware.* or Hardware.Tech.*` | hardware specification | `1 * (TFLOP / second)` |
+| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:6131` | `CarbonRoiCalc` | `cpu_flops` | `Hardware.* or Scenarios.*` | scenario/profile input | `1 * (TFLOP / second)` |
 | `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:6133` | `CarbonRoiCalc` | `npu_power` | `Hardware.*` | hardware-related quantitative input | `5 * watt` |
-| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:6134` | `CarbonRoiCalc` | `npu_flops` | `Hardware.* or Hardware.Tech.*` | hardware specification | `10 * (TFLOP / second)` |
+| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:6134` | `CarbonRoiCalc` | `npu_flops` | `Hardware.* or Scenarios.*` | scenario/profile input | `10 * (TFLOP / second)` |
 | `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:6136` | `CarbonRoiCalc` | `inferences_per_day` | `Scenarios.* or Ops.*` | scenario/workload policy | `1 * BILLION` |
 
 ## vol1/introduction
@@ -502,7 +503,7 @@ Top reasons:
 | `book/quarto/contents/vol1/ml_workflow/ml_workflow.qmd:927` | `ConstraintPropagation` | `ML_WORKFLOW_CONSTRAINT_COST_BASE` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `2` |
 | `book/quarto/contents/vol1/ml_workflow/ml_workflow.qmd:933` | `ConstraintPropagation` | `weeks_per_cycle` | `Scenarios.* or Ops.*` | scenario/workload policy | `4` |
 | `book/quarto/contents/vol1/ml_workflow/ml_workflow.qmd:936` | `ConstraintPropagation` | `stage5_latency_q` | `Scenarios.*` | unit-bearing scenario input | `100 * millisecond` |
-| `book/quarto/contents/vol1/ml_workflow/ml_workflow.qmd:937` | `ConstraintPropagation` | `stage5_memory_q` | `Hardware.* or Hardware.Tech.*` | hardware specification | `500 * MB` |
+| `book/quarto/contents/vol1/ml_workflow/ml_workflow.qmd:937` | `ConstraintPropagation` | `stage5_memory_q` | `Hardware.* or Scenarios.*` | scenario/profile input | `500 * MB` |
 | `book/quarto/contents/vol1/ml_workflow/ml_workflow.qmd:938` | `ConstraintPropagation` | `jetson_latency_q` | `Scenarios.*` | unit-bearing scenario input | `50 * millisecond` |
 | `book/quarto/contents/vol1/ml_workflow/ml_workflow.qmd:939` | `ConstraintPropagation` | `jetson_model_q` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `200 * MB` |
 | `book/quarto/contents/vol1/ml_workflow/ml_workflow.qmd:940` | `ConstraintPropagation` | `resnet_variant_q` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `200 * MB` |
@@ -553,7 +554,7 @@ Top reasons:
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:803` | `CostLatencyCalc` | `throughput_a_rps_value` | `Scenarios.*` | unit-bearing scenario input | `200 * (count / second)` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:804` | `CostLatencyCalc` | `latency_b_ms_value` | `Scenarios.*` | unit-bearing scenario input | `10 * ms` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:805` | `CostLatencyCalc` | `throughput_b_rps_value` | `Scenarios.*` | unit-bearing scenario input | `800 * (count / second)` |
-| `book/quarto/contents/vol1/model_serving/model_serving.qmd:947` | `ResNetServingSpectrum` | `cloud_vram` | `Hardware.* or Hardware.Tech.*` | hardware specification | `2 * GB` |
+| `book/quarto/contents/vol1/model_serving/model_serving.qmd:947` | `ResNetServingSpectrum` | `cloud_vram` | `Hardware.* or Scenarios.*` | scenario/profile input | `2 * GB` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:953` | `ResNetServingSpectrum` | `mobile_energy_npu` | `Hardware.*` | hardware-related quantitative input | `0.8 * mJ` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:954` | `ResNetServingSpectrum` | `mobile_energy_cpu` | `Hardware.*` | hardware-related quantitative input | `4.2 * mJ` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:958` | `ResNetServingSpectrum` | `tiny_energy` | `Infrastructure.*` | infrastructure input | `12.0 * mJ` |
@@ -642,7 +643,7 @@ Top reasons:
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:3683` | `MobileServingCalc` | `m_resize_ms` | `Scenarios.*` | unit-bearing scenario input | `5 * ms` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:3684` | `MobileServingCalc` | `m_npu_ms` | `Hardware.*` | hardware-related quantitative input | `12 * ms` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:3685` | `MobileServingCalc` | `m_ui_ms` | `Scenarios.*` | unit-bearing scenario input | `5 * ms` |
-| `book/quarto/contents/vol1/model_serving/model_serving.qmd:3686` | `MobileServingCalc` | `peak_memory` | `Hardware.* or Hardware.Tech.*` | hardware specification | `150 * MB` |
+| `book/quarto/contents/vol1/model_serving/model_serving.qmd:3686` | `MobileServingCalc` | `peak_memory` | `Hardware.* or Scenarios.*` | scenario/profile input | `150 * MB` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:3687` | `MobileServingCalc` | `m_cam_mj` | `Scenarios.*` | unit-bearing scenario input | `0.08 * mJ` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:3688` | `MobileServingCalc` | `m_jpeg_mj` | `Scenarios.*` | unit-bearing scenario input | `1.5 * mJ` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:3689` | `MobileServingCalc` | `m_resize_mj` | `Scenarios.*` | unit-bearing scenario input | `0.4 * mJ` |
@@ -723,7 +724,7 @@ Top reasons:
 | `book/quarto/contents/vol1/nn_architectures/nn_architectures.qmd:3689` | `DLRMEmbedding` | `num_users` | `Scenarios.* or Ops.*` | scenario/workload policy | `1_000_000_000` |
 | `book/quarto/contents/vol1/nn_architectures/nn_architectures.qmd:4049` | `ResNetSkipOverhead` | `memory_overhead_pct` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `20` |
 | `book/quarto/contents/vol1/nn_architectures/nn_architectures.qmd:4050` | `ResNetSkipOverhead` | `epoch_cost_pct` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `10` |
-| `book/quarto/contents/vol1/nn_architectures/nn_architectures.qmd:5006` | `ThroughputCeilingCalc` | `midrange_gpu_throughput` | `Hardware.* or Hardware.Tech.*` | hardware specification | `10 * (TFLOP / second)` |
+| `book/quarto/contents/vol1/nn_architectures/nn_architectures.qmd:5006` | `ThroughputCeilingCalc` | `midrange_gpu_throughput` | `Hardware.* or Scenarios.*` | scenario/profile input | `10 * (TFLOP / second)` |
 | `book/quarto/contents/vol1/nn_architectures/nn_architectures.qmd:5080` | `WildlifeModelSizing` | `mnv1_params_m` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `4.2` |
 | `book/quarto/contents/vol1/nn_architectures/nn_architectures.qmd:5082` | `WildlifeModelSizing` | `mnv2_params_m` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `2.2` |
 | `book/quarto/contents/vol1/nn_architectures/nn_architectures.qmd:5085` | `WildlifeModelSizing` | `inference_power_mw` | `Infrastructure.*` | infrastructure input | `200` |
@@ -883,7 +884,7 @@ Top reasons:
 | `book/quarto/contents/vol1/training/training.qmd:5467` | `GPT2WalkthroughCalc` | `checkpoint_factor` | `Systems.Storage or Datasets.*` | storage/data fact | `4` |
 | `book/quarto/contents/vol1/training/training.qmd:5468` | `GPT2WalkthroughCalc` | `recompute_overhead_pct` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `33` |
 | `book/quarto/contents/vol1/training/training.qmd:6727` | `TrainingCarbonFootprint` | `cf_sustained_flops` | `Hardware.* or Hardware.Tech.*` | hardware specification | `150 * (TFLOP / second)` |
-| `book/quarto/contents/vol1/training/training.qmd:6730` | `TrainingCarbonFootprint` | `cf_cpu_tdp_per_host` | `Hardware.* or Hardware.Tech.*` | hardware specification | `200 * watt` |
+| `book/quarto/contents/vol1/training/training.qmd:6730` | `TrainingCarbonFootprint` | `cf_cpu_tdp_per_host` | `Hardware.* or Scenarios.*` | scenario/profile input | `200 * watt` |
 | `book/quarto/contents/vol1/training/training.qmd:6880` | `FallaciesPitfallsSetup` | `fp_model_20b_params` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `20 * Bparam` |
 | `book/quarto/contents/vol1/training/training.qmd:6882` | `FallaciesPitfallsSetup` | `fp_model_20b_fp16` | `Hardware.*` | hardware-related quantitative input | `20 * 2 * GB` |
 | `book/quarto/contents/vol1/training/training.qmd:6883` | `FallaciesPitfallsSetup` | `fp_model_20b_optim` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `20 * 4 * 2 * GB` |
@@ -955,7 +956,7 @@ Top reasons:
 | `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:2361` | `InfraFrontierNodeTpRecap` | `microbatch` | `Scenarios.* or Ops.*` | scenario/workload policy | `4` |
 | `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:2362` | `InfraFrontierNodeTpRecap` | `seq_len` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `2048` |
 | `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:2595` | `NodeReliabilityScenario` | `run_days` | `Scenarios.* or Ops.*` | scenario/workload policy | `14` |
-| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:2771` | `NodeCapacityTrainMemRecap` | `host_dram` | `Hardware.* or Hardware.Tech.*` | hardware specification | `2 * TB` |
+| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:2771` | `NodeCapacityTrainMemRecap` | `host_dram` | `Hardware.* or Scenarios.*` | scenario/profile input | `2 * TB` |
 | `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3118` | `H100TdpRackRecap` | `comm_phase_power` | `Infrastructure.*` | infrastructure input | `400 * watt` |
 | `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3119` | `H100TdpRackRecap` | `transition` | `Scenarios.*` | unit-bearing scenario input | `100 * microsecond` |
 | `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3603` | `CheckpointOverheadBudget` | `cadence` | `Scenarios.* or Ops.*` | scenario/workload policy | `10 * minute` |
@@ -966,7 +967,7 @@ Top reasons:
 | `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3762` | `CheckpointComputeTradeoff` | `write_bw` | `Scenarios.*` | unit-bearing scenario input | `100 * (GB / second)` |
 | `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3915` | `FabricSizingScenario` | `switch_ports` | `Systems.Fabrics or Systems.SwitchFabric` | network/fabric system fact | `64` |
 | `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3918` | `FabricSizingScenario` | `endpoint_links_per_gpu` | `Scenarios.* or Ops.*` | scenario/workload policy | `2` |
-| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:4176` | `A100FallaciesRecap` | `option_a_hbm` | `Hardware.* or Hardware.Tech.*` | hardware specification | `192 * GB` |
+| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:4176` | `A100FallaciesRecap` | `option_a_hbm` | `Hardware.* or Scenarios.*` | scenario/profile input | `192 * GB` |
 
 ## vol2/conclusion
 
@@ -990,7 +991,7 @@ Top reasons:
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:756` | `HbmMemoryBudget` | `activation_max` | `Scenarios.*` | unit-bearing scenario input | `20 * GB` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:757` | `HbmMemoryBudget` | `comm_min` | `Scenarios.*` | unit-bearing scenario input | `2 * GB` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:758` | `HbmMemoryBudget` | `comm_max` | `Scenarios.*` | unit-bearing scenario input | `4 * GB` |
-| `book/quarto/contents/vol2/data_storage/data_storage.qmd:894` | `NVMeTierCalcs` | `pfs_node_bw` | `Systems.Storage` | storage subsystem fact | `4.0 * (GB / second)` |
+| `book/quarto/contents/vol2/data_storage/data_storage.qmd:894` | `NVMeTierCalcs` | `pfs_node_bw` | `Systems.Storage or Scenarios.*` | scenario/profile input | `4.0 * (GB / second)` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:895` | `NVMeTierCalcs` | `images_per_sec` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `1000` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:896` | `NVMeTierCalcs` | `img_size` | `Scenarios.*` | unit-bearing scenario input | `150 * KB` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:897` | `NVMeTierCalcs` | `hdd_iops` | `Systems.Storage` | storage subsystem fact | `100` |
@@ -1110,7 +1111,7 @@ Top reasons:
 | `book/quarto/contents/vol2/inference/inference.qmd:1643` | `RecsysLatencyBreakdown` | `ranking` | `Scenarios.*` | unit-bearing scenario input | `1.5 * ms` |
 | `book/quarto/contents/vol2/inference/inference.qmd:2010` | `KVCacheCapacityEstimator` | `d_head` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `128` |
 | `book/quarto/contents/vol2/inference/inference.qmd:2012` | `KVCacheCapacityEstimator` | `context_tokens` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `131_072` |
-| `book/quarto/contents/vol2/inference/inference.qmd:2013` | `KVCacheCapacityEstimator` | `total_hbm` | `Hardware.* or Hardware.Tech.*` | hardware specification | `640 * GB` |
+| `book/quarto/contents/vol2/inference/inference.qmd:2013` | `KVCacheCapacityEstimator` | `total_hbm` | `Hardware.* or Scenarios.*` | scenario/profile input | `640 * GB` |
 | `book/quarto/contents/vol2/inference/inference.qmd:2015` | `KVCacheCapacityEstimator` | `system_reserved` | `Scenarios.*` | unit-bearing scenario input | `20 * GB` |
 | `book/quarto/contents/vol2/inference/inference.qmd:2330` | `PrefixCachingAnalysis` | `system_prompt_tokens` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `2000` |
 | `book/quarto/contents/vol2/inference/inference.qmd:2331` | `PrefixCachingAnalysis` | `concurrent_users` | `Scenarios.* or Ops.*` | scenario/workload policy | `1000` |
@@ -1297,7 +1298,7 @@ Top reasons:
 | `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2511` | `RackPowerBudget` | `nvswitch_kw` | `Scenarios.*` | unit-bearing scenario input | `1.6 * kilowatt` |
 | `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2512` | `RackPowerBudget` | `ib_kw` | `Scenarios.*` | unit-bearing scenario input | `0.8 * kilowatt` |
 | `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2513` | `RackPowerBudget` | `conversion_kw` | `Scenarios.*` | unit-bearing scenario input | `2.8 * kilowatt` |
-| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2514` | `RackPowerBudget` | `cooling_kw` | `Infrastructure.* or Scenarios.Sustainability` | infrastructure/sustainability fact | `2.7 * kilowatt` |
+| `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2514` | `RackPowerBudget` | `cooling_kw` | `Infrastructure.* or Scenarios.*` | scenario/profile input | `2.7 * kilowatt` |
 | `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2641` | `SustainableCoolingRackPowerRecap` | `nodes_per_rack` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `4` |
 | `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2642` | `SustainableCoolingRackPowerRecap` | `non_gpu_power` | `Hardware.*` | hardware-related quantitative input | `10.3 * kilowatt` |
 | `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd:2700` | `PueSavings` | `it_power` | `Infrastructure.*` | infrastructure input | `7.0 * MW` |
