@@ -51,6 +51,8 @@ CANONICAL_STR_CALL = re.compile(
     r"|fmt_usd_range|fmt_time|fmt_rate|fmt_val|fmt_unit|fmt_sci|fmt_sci_qty"
     r"|fmt_percent_range|fmt_multiple_range"
     r"|fmt_power|fmt_energy|fmt_emissions|fmt_bandwidth|fmt_memory|fmt_latency"
+    r"|fmt_params|fmt_tokens|fmt_flop_rate|fmt_compute_efficiency"
+    r"|fmt_carbon_intensity|fmt_water|fmt_water_rate|fmt_water_intensity"
     r"|MarkdownStr)\s*\("
 )
 CANONICAL_MATH_CALL = re.compile(
@@ -119,6 +121,8 @@ FMT_FAMILY_USE = re.compile(
     r"|fmt_count|fmt_ratio|fmt_range|fmt_qty_range|fmt_time_range"
     r"|fmt_count_range|fmt_usd_range|fmt_time|fmt_rate|fmt_val|fmt_unit"
     r"|fmt_power|fmt_energy|fmt_emissions|fmt_bandwidth|fmt_memory|fmt_latency"
+    r"|fmt_params|fmt_tokens|fmt_flop_rate|fmt_compute_efficiency"
+    r"|fmt_carbon_intensity|fmt_water|fmt_water_rate|fmt_water_intensity"
     r"|fmt_sci|fmt_frac|sci_latex|MarkdownStr|check)\s*\("
 )
 
@@ -140,6 +144,9 @@ MLSYSIM_STAR_FMT_NAMES = frozenset({
     "sci_latex",
     "fmt_power", "fmt_energy", "fmt_emissions", "fmt_bandwidth", "fmt_memory",
     "fmt_latency",
+    "fmt_params", "fmt_tokens", "fmt_flop_rate", "fmt_compute_efficiency",
+    "fmt_carbon_intensity", "fmt_water", "fmt_water_rate",
+    "fmt_water_intensity",
 })
 
 # Pattern: fmt_percent(..., suffix=...) — fmt_percent does not accept suffix=.
@@ -242,7 +249,7 @@ def _audit_python_cells(qmd_path: Path) -> list[Violation]:
                     f"`{varname}` (suffix `{suffix}`) is not built via the "
                     f"canonical helper family (fmt/fmt_int/fmt_usd/fmt_percent/"
                     f"fmt_pp/fmt_multiple/fmt_count/fmt_ratio/fmt_range/fmt_qty/fmt_qty_int/"
-                    f"fmt_*_range/fmt_time/fmt_rate/fmt_math/fmt_frac/"
+                    f"fmt_*_range/fmt_time/fmt_rate/domain fmt helpers/fmt_math/fmt_frac/"
                     f"MarkdownStr). "
                     f"Use the appropriate helper from mlsysim.fmt so the value "
                     f"renders correctly inside math mode."
