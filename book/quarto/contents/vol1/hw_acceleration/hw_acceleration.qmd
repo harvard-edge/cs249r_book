@@ -1125,7 +1125,7 @@ We call the hardware units that exploit these patterns AI compute primitives: sp
 #| echo: false
 #| label: weight-matrix-calc
 from mlsysim import MFLOP, flop
-from mlsysim.fmt import fmt_int, fmt, fmt_flops, fmt_time, check
+from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_flops, fmt_time, check
 
 class WeightMatrixCalc:
     """Dense-layer MAC counts used by the compute-primitives listings."""
@@ -1151,7 +1151,7 @@ class WeightMatrixCalc:
     wm_out_str = fmt(wm_out_value, precision=0, commas=False)
     wm_in_str = fmt(wm_in_value, precision=0, commas=False)
     wm_batch_str = fmt(wm_batch_value, precision=0, commas=False)
-    wm_batch_macs_m_str = fmt(wm_batch_macs_value / MILLION, precision=1, commas=False)
+    wm_batch_macs_m_str = fmt_count(wm_batch_macs_value, scale="M", precision=1, commas=False, label="MAC")
     wm_vector_chunks_str = fmt(wm_vector_chunks_value, precision=0, commas=True)
 ```
 
@@ -1549,13 +1549,13 @@ class AttentionHeadTensorCoreCalc:
     # OUTPUT
     seq_len_str = fmt(seq_len, precision=0, commas=True)
     head_dim_str = fmt(head_dim, precision=0, commas=False)
-    macs_m_str = fmt(macs / MILLION, precision=1, commas=False)
+    macs_m_str = fmt_count(macs, scale="M", precision=1, commas=False, label="MAC")
     flops_m_str = fmt_flops(flops * flop, unit=MFLOP, precision=1, commas=False)
     scalar_ms_str = fmt_time(scalar_ms, unit="millisecond", precision=1, commas=False)
     tensor_speedup_str = fmt(tensor_speedup, precision=1, commas=False)
 ```
 
-Consider a single transformer attention head computing the $Q \times K^T$ product for a `{python} AttentionHeadTensorCoreCalc.seq_len_str`-token sequence with `{python} AttentionHeadTensorCoreCalc.head_dim_str`-dimensional embeddings. This operation requires multiplying a $2048{\times}64$ matrix by a $64{\times}2048$ matrix: roughly `{python} AttentionHeadTensorCoreCalc.macs_m_str` million multiply-accumulate operations, or about `{python} AttentionHeadTensorCoreCalc.flops_m_str` million FLOPs when the multiply and add are counted separately. On a scalar processor executing one FLOP per cycle at 2 GHz, this single attention head would take about `{python} AttentionHeadTensorCoreCalc.scalar_ms_str` milliseconds. GPU SIMT execution can distribute this work across many threads, but tensor cores go further by processing entire $16{\times}16$ matrix tiles per instruction; under the illustrative assumption used here, the tiled path completes the same operation in under 0.5 milliseconds, a roughly `{python} AttentionHeadTensorCoreCalc.tensor_speedup_str`$\times$ improvement over scalar execution. This dramatic speedup arises not from faster clock speeds but from a fundamentally different approach to organizing computation around matrix blocks rather than individual elements.
+Consider a single transformer attention head computing the $Q \times K^T$ product for a `{python} AttentionHeadTensorCoreCalc.seq_len_str`-token sequence with `{python} AttentionHeadTensorCoreCalc.head_dim_str`-dimensional embeddings. This operation requires multiplying a $2048{\times}64$ matrix by a $64{\times}2048$ matrix: roughly `{python} AttentionHeadTensorCoreCalc.macs_m_str`, or about `{python} AttentionHeadTensorCoreCalc.flops_m_str` when the multiply and add are counted separately. On a scalar processor executing one FLOP per cycle at 2 GHz, this single attention head would take about `{python} AttentionHeadTensorCoreCalc.scalar_ms_str` milliseconds. GPU SIMT execution can distribute this work across many threads, but tensor cores go further by processing entire $16{\times}16$ matrix tiles per instruction; under the illustrative assumption used here, the tiled path completes the same operation in under 0.5 milliseconds, a roughly `{python} AttentionHeadTensorCoreCalc.tensor_speedup_str`$\times$ improvement over scalar execution. This dramatic speedup arises not from faster clock speeds but from a fundamentally different approach to organizing computation around matrix blocks rather than individual elements.
 
 While SIMD and SIMT units provide efficient execution of vector operations, neural networks rely heavily on matrix computations\index{Matrix Operations!neural network workloads} that require specialized execution units for structured multi-dimensional processing. The energy economics of matrix operations drive this specialization: traditional scalar processing can require multiple off-chip memory accesses per operation, while **tensor cores**\index{Tensor Core!definition}\index{Tensor Core!energy efficiency} amortize data movement across entire matrix blocks. Tensor processing units extend SIMD and SIMT principles by enabling efficient matrix operations through dedicated hardware blocks (tensor cores) that execute matrix multiplications and accumulations on matrix tiles[^fn-tensor-core-alignment]. In many cases, this shifts the dominant cost from off-chip data movement toward on-chip reuse and arithmetic, depending on the kernel mix and memory behavior.
 
@@ -2556,8 +2556,8 @@ class AcceleratorEconomics:
 
     # H100 specs
     h100_tflops_tf32_str = fmt_qty(h_h100.compute.precision_flops["tf32"], TFLOP/second, precision=0, commas=False)
-    h100_tflops_fp16_str = fmt(h_h100.compute.peak_flops.to(TFLOPs/second).magnitude, precision=0, commas=False)
-    h100_tflops_fp8_str  = fmt(Hardware.Cloud.H100.compute.precision_flops["fp8"].to(TFLOPs/second).magnitude, precision=0)
+    h100_tflops_fp16_str = fmt_flop_rate(h_h100.compute.peak_flops, unit=TFLOPs/second, precision=0, commas=False)
+    h100_tflops_fp8_str  = fmt_flop_rate(Hardware.Cloud.H100.compute.precision_flops["fp8"], unit=TFLOPs/second, precision=0)
     h100_bw_str          = fmt_qty(h_h100.memory.bandwidth, GB/second, precision=0, commas=True)
     h100_bw_tbs_str      = fmt_qty(h_h100.memory.bandwidth, TB/second, precision=2, commas=False)
     h100_price_str   = fmt_usd_range(price_h100, 30000, precision=0, approx=True, repeat_symbol=False)
@@ -3024,9 +3024,9 @@ class TensorLifecycleCalc:
     kws_samples_str        = fmt(kws_samples_value, precision=0, commas=True)
     kws_bytes_str          = fmt(kws_bytes_fp16_value, precision=0, commas=False)
     dram_energy_pj_bit_str = fmt(dram_energy_pj_bit_value, precision=0, commas=False)
-    latency_hbm_str        = fmt(Hardware.Tech.Memory.DRAM.latency.to(nanosecond).magnitude, precision=0, commas=False)
-    latency_l2_str         = fmt(Hardware.Tech.Memory.L2.latency.to(nanosecond).magnitude, precision=0, commas=False)
-    latency_l1_str         = fmt(Hardware.Tech.Memory.L1.latency.to(nanosecond).magnitude, precision=0, commas=False)
+    latency_hbm_str        = fmt_time(Hardware.Tech.Memory.DRAM.latency, unit=nanosecond, precision=0, commas=False)
+    latency_l2_str         = fmt_time(Hardware.Tech.Memory.L2.latency, unit=nanosecond, precision=0, commas=False)
+    latency_l1_str         = fmt_time(Hardware.Tech.Memory.L1.latency, unit=nanosecond, precision=0, commas=False)
     a100_tflops_fp16_str   = fmt_flop_rate(a100_fp16_flops, unit=TFLOP / second, precision=0, commas=False)
     # Plain-string literal → MarkdownStr per recipe Rule 1 (plain string literal _str)
     reg_energy_pj_bit_str  = MarkdownStr("0.1")
@@ -3969,7 +3969,7 @@ class Conv2dAnalysisCalc:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     conv_out_m_str         = fmt(conv_out_m, precision=1, commas=False)
     conv_flops_per_out_str = fmt(conv_flops_per_out, precision=0)
-    conv_total_gflops_str  = fmt(conv_total_flops.to(GFLOPs).magnitude, precision=1, commas=False)
+    conv_total_gflops_str  = fmt_flops(conv_total_flops, unit=GFLOPs, precision=1, commas=False)
     conv_input_mb_str      = fmt_memory(conv_input_memory, unit=MB, precision=1, commas=False)
     conv_weights_mb_str    = fmt_memory(conv_weights_memory, unit=MB, precision=1, commas=False)
     conv_output_mb_str     = fmt_memory(conv_output_memory, unit=MB, precision=1, commas=False)
@@ -4173,7 +4173,7 @@ class LayernormAnalysisCalc:
     ln_total_mb_str     = fmt_memory(ln_total_memory, unit=MB, precision=1, commas=False)
     ln_ai_str           = fmt(ln_ai, precision=1, commas=False)
     ln_ridge_gap_str    = fmt_int(round(ln_ridge_gap), commas=False)
-    ln_attainable_str   = fmt(ln_attainable.to(TFLOP / second).magnitude, precision=1, commas=False)
+    ln_attainable_str   = fmt_flop_rate(ln_attainable, unit=TFLOP / second, precision=1, commas=False)
     a100_bw_str         = fmt_bandwidth(a100_bandwidth, unit=GB / second, precision=0, commas=False)
     ln_flops_per_str    = fmt(ln_flops_per, precision=0, commas=False)
 ```
@@ -4334,13 +4334,13 @@ class Gpt2ThroughputCalc:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     gpt2_weight_gb_str    = fmt_memory(gpt2_weight, unit=GB, precision=0, commas=False)
-    gpt2_decode_gflops_str = fmt(gpt2_decode_flops.to(GFLOPs).magnitude, precision=0, commas=False)
+    gpt2_decode_gflops_str = fmt_flops(gpt2_decode_flops, unit=GFLOPs, precision=0, commas=False)
     gpt2_decode_ai_str    = fmt(gpt2_decode_ai, precision=0, commas=False)
     gpt2_max_tflops_str   = fmt_flop_rate(gpt2_max_flops, unit=TFLOP / second, precision=1, commas=False)
     gpt2_utilization_str  = fmt(gpt2_utilization, precision=1, commas=False)
     a100_tflops_fp16_str  = fmt_flop_rate(a100_fp16_flops, unit=TFLOP / second, precision=0, commas=False)
     a100_bw_tbs_str       = fmt_bandwidth(a100_bandwidth, unit=TB / second, precision=2, commas=False)
-    a100_tflops_fp32_str  = fmt(a100_fp32_flops.to(TFLOP / second).magnitude, precision=1, commas=False)
+    a100_tflops_fp32_str  = fmt_flop_rate(a100_fp32_flops, unit=TFLOP / second, precision=1, commas=False)
     a100_ridge_str        = fmt_int(round(a100_ridge_value), commas=False)
     a100_ridge_fp32_str   = fmt_int(round(a100_ridge_fp32_value), commas=False)
     a100_cost_usd_str     = fmt(15_000, precision=0)
@@ -5496,7 +5496,7 @@ class RuntimeProductionTdp:
     # (constant lookup, no derivation)
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    a100_tdp_str = fmt(Hardware.Cloud.A100.tdp.to(watt).magnitude, precision=0, commas=False)
+    a100_tdp_str = fmt_power(Hardware.Cloud.A100.tdp, unit=watt, precision=0, commas=False)
 ```
 
 ::: {#psp-hw-acceleration-when-production-differs-from-development .callout-perspective title="When production differs from development"}
@@ -5587,7 +5587,7 @@ class Gpt3SingleH100Calc:
     check(4.5 < peak_years < 5.5, f"Single-H100 FP8 peak time should be ~5 years, got {peak_years:.2f}")
 
     # OUTPUT
-    h100_pflops_fp8_str = fmt_int(Hardware.Cloud.H100.compute.precision_flops["fp8"].to(PFLOPs/second).magnitude, commas=False)
+    h100_pflops_fp8_str = fmt_flop_rate(Hardware.Cloud.H100.compute.precision_flops["fp8"], unit=PFLOPs/second, precision=2, commas=False)
     peak_years_str = fmt_int(round(peak_years), commas=False)
     realistic_years_low_str = fmt(realistic_years_low, precision=1, commas=False)
     realistic_years_high_str = fmt(realistic_years_high, precision=1, commas=False)
@@ -5748,21 +5748,21 @@ class FpWorkloadFitRecap:
           f"Unexpected softmax high throughput: {softmax_flops_high.to(TFLOP / second).magnitude:.1f} TFLOP/s")
 
     # OUTPUT
-    a100_ridge_str = fmt_int(round(a100_ridge.to(flop / byte).magnitude), commas=False)
+    a100_ridge_str = fmt_arithmetic_intensity(a100_ridge, unit=flop / byte, precision=1, commas=False)
     a100_tflops_fp16_str = fmt_flop_rate(a100_peak_flops, unit=TFLOP / second, precision=0, commas=False)
-    softmax_ai_low_str = fmt(softmax_ai_low.to(flop / byte).magnitude, precision=0, commas=False)
-    softmax_ai_high_str = fmt(softmax_ai_high.to(flop / byte).magnitude, precision=0, commas=False)
+    softmax_ai_low_str = fmt_arithmetic_intensity(softmax_ai_low, unit=flop / byte, precision=0, commas=False)
+    softmax_ai_high_str = fmt_arithmetic_intensity(softmax_ai_high, unit=flop / byte, precision=0, commas=False)
     softmax_tflops_low_str = fmt_flop_rate(softmax_flops_low, unit=TFLOP / second, precision=1, commas=False)
     softmax_tflops_high_str = fmt_flop_rate(softmax_flops_high, unit=TFLOP / second, precision=1, commas=False)
     softmax_util_high_str = fmt_percent(softmax_util_high, precision=1, commas=False, style='symbol')
-    cpu_ridge_low_str = fmt(cpu_ridge_low.to(flop / byte).magnitude, precision=0, commas=False)
-    cpu_ridge_high_str = fmt(cpu_ridge_high.to(flop / byte).magnitude, precision=0, commas=False)
+    cpu_ridge_low_str = fmt_arithmetic_intensity(cpu_ridge_low, unit=flop / byte, precision=0, commas=False)
+    cpu_ridge_high_str = fmt_arithmetic_intensity(cpu_ridge_high, unit=flop / byte, precision=0, commas=False)
     cpu_softmax_util_low_str = fmt_percent(cpu_softmax_util_low, precision=0, commas=False, style='symbol')
     cpu_softmax_util_high_str = fmt_percent(cpu_softmax_util_high, precision=0, commas=False, style='symbol')
 ```
 
 \index{Hardware Selection!workload matching}
-Engineers assume specialized accelerators automatically outperform general-purpose processors for all AI workloads. In reality, specialized hardware achieves peak performance only when workloads match architectural assumptions. As demonstrated in @sec-hardware-acceleration-roofline-model-42ff, operations must exceed the accelerator's ridge point to be compute bound; an A100 GPU has a ridge point of `{python} FpWorkloadFitRecap.a100_ridge_str` FLOP/byte, meaning operations with arithmetic intensity below this threshold are memory bound regardless of the accelerator's `{python} FpWorkloadFitRecap.a100_tflops_fp16_str` peak compute. A transformer attention softmax with AI = `{python} FpWorkloadFitRecap.softmax_ai_low_str`--`{python} FpWorkloadFitRecap.softmax_ai_high_str` FLOP/byte achieves only `{python} FpWorkloadFitRecap.softmax_tflops_low_str`--`{python} FpWorkloadFitRecap.softmax_tflops_high_str` (`{python} FpWorkloadFitRecap.softmax_util_high_str` utilization) on an A100. CPUs with ridge points around `{python} FpWorkloadFitRecap.cpu_ridge_low_str`--`{python} FpWorkloadFitRecap.cpu_ridge_high_str` FLOP/byte still treat this kernel as memory-bound, but the same AI range corresponds to about `{python} FpWorkloadFitRecap.cpu_softmax_util_low_str`--`{python} FpWorkloadFitRecap.cpu_softmax_util_high_str` of a CPU's lower peak. Models with irregular memory access, small batch sizes, or dynamic computation graphs may perform better on flexible processors. Effective hardware selection requires matching workload arithmetic intensity to architectural ridge points, not assuming specialization always wins.
+Engineers assume specialized accelerators automatically outperform general-purpose processors for all AI workloads. In reality, specialized hardware achieves peak performance only when workloads match architectural assumptions. As demonstrated in @sec-hardware-acceleration-roofline-model-42ff, operations must exceed the accelerator's ridge point to be compute bound; an A100 GPU has a ridge point of `{python} FpWorkloadFitRecap.a100_ridge_str`, meaning operations with arithmetic intensity below this threshold are memory bound regardless of the accelerator's `{python} FpWorkloadFitRecap.a100_tflops_fp16_str` peak compute. A transformer attention softmax with AI = `{python} FpWorkloadFitRecap.softmax_ai_low_str`--`{python} FpWorkloadFitRecap.softmax_ai_high_str` achieves only `{python} FpWorkloadFitRecap.softmax_tflops_low_str`--`{python} FpWorkloadFitRecap.softmax_tflops_high_str` (`{python} FpWorkloadFitRecap.softmax_util_high_str` utilization) on an A100. CPUs with ridge points around `{python} FpWorkloadFitRecap.cpu_ridge_low_str`--`{python} FpWorkloadFitRecap.cpu_ridge_high_str` still treat this kernel as memory-bound, but the same AI range corresponds to about `{python} FpWorkloadFitRecap.cpu_softmax_util_low_str`--`{python} FpWorkloadFitRecap.cpu_softmax_util_high_str` of a CPU's lower peak. Models with irregular memory access, small batch sizes, or dynamic computation graphs may perform better on flexible processors. Effective hardware selection requires matching workload arithmetic intensity to architectural ridge points, not assuming specialization always wins.
 
 ```{python}
 #| echo: false
@@ -6168,7 +6168,7 @@ class CarbonRoiCalc:
     cpu_energy_day_str = fmt_energy(cpu_energy_day, unit=kWh, precision=0, commas=True)
     npu_energy_day_str = fmt_energy(npu_energy_day, unit=kWh, precision=0, commas=True)
     carbon_intensity_str = fmt_carbon_intensity(carbon_intensity, unit=kg / kWh, precision=3)
-    co2_saved_str      = fmt(co2_saved_year.to(metric_ton).magnitude, precision=1)
+    co2_saved_str      = fmt_emissions(co2_saved_year, unit=metric_ton, precision=1)
 ```
 
 ::: {#nbk-hw-acceleration-carbon-roi-specialized-silicon .callout-notebook title="The carbon ROI of specialized silicon"}
@@ -6186,7 +6186,7 @@ class CarbonRoiCalc:
 1.  **Workload**: `{python} CarbonRoiCalc.workload_str` inferences per day.
 2.  **CPU fleet energy**: `{python} CarbonRoiCalc.cpu_servers_str` CPU servers $\times$ `{python} CarbonRoiCalc.cpu_power_str` $\times$ 24 h $\approx$ `{python} CarbonRoiCalc.cpu_energy_day_str`/day.
 3.  **NPU fleet energy**: `{python} CarbonRoiCalc.npu_chips_str` NPU chips $\times$ `{python} CarbonRoiCalc.npu_power_str` $\times$ 24 h $\approx$ `{python} CarbonRoiCalc.npu_energy_day_str`/day.
-4.  **Carbon savings**: At `{python} CarbonRoiCalc.carbon_intensity_str`, switching to NPUs saves ~`{python} CarbonRoiCalc.co2_saved_str` metric tons of CO~2~ per year.
+4.  **Carbon savings**: At `{python} CarbonRoiCalc.carbon_intensity_str`, switching to NPUs saves ~`{python} CarbonRoiCalc.co2_saved_str` of CO~2~ per year.
 
 **Systems insight**: Specialized accelerators can materially reduce the energy use of matched inference workloads. For workloads with stable arithmetic patterns and high deployment volume, the per-operation energy gains compound into substantial reductions in operational carbon footprint relative to general-purpose hardware.
 
@@ -6222,7 +6222,7 @@ class SummaryRooflineRecap:
           f"Unexpected A100 summary ridge: {a100_ridge.to(flop / byte).magnitude:.1f}")
 
     # OUTPUT
-    a100_ridge_str = fmt_int(round(a100_ridge.to(flop / byte).magnitude), commas=False)
+    a100_ridge_str = fmt_arithmetic_intensity(a100_ridge, unit=flop / byte, precision=1, commas=False)
 ```
 
 ::: {.callout-takeaways title="Moving data costs more than computing it"}
@@ -6231,7 +6231,7 @@ class SummaryRooflineRecap:
 * **Memory bandwidth constrains performance**: GPU compute capacity has grown orders of magnitude faster than memory bandwidth over the past two decades. Most inference workloads are memory bound, making data movement optimization the primary concern.
 * **Hardware-software co-design compounds performance**: Matching algorithm patterns to architectural capabilities (systolic arrays for dense GEMM, sparse accelerators for pruned models) can produce 10--100$\times$ improvements and typically outperforms raw hardware upgrades.
 * **Tensor Cores require specific conditions**: A supported precision format (TF32, BF16, FP16, or INT8 depending on architecture), appropriate tensor dimensions, and sufficient batch size are necessary for peak utilization. Batch size directly affects arithmetic intensity and determines whether workloads reach the compute-bound regime.
-* **Arithmetic intensity determines optimization strategy**: Operations with low arithmetic intensity (1--2 FLOP/byte, like LayerNorm) are memory bound; operations around 50--200 FLOP/byte, like convolutions, straddle modern accelerator ridge points and become compute bound only when reuse and tiling push them above the threshold. The ridge point (for example, `{python} SummaryRooflineRecap.a100_ridge_str` FLOP/byte for A100) marks the transition.
+* **Arithmetic intensity determines optimization strategy**: Operations with low arithmetic intensity (1--2 FLOP/byte, like LayerNorm) are memory bound; operations around 50--200 FLOP/byte, like convolutions, straddle modern accelerator ridge points and become compute bound only when reuse and tiling push them above the threshold. The ridge point (for example, `{python} SummaryRooflineRecap.a100_ridge_str` for A100) marks the transition.
 
 :::
 

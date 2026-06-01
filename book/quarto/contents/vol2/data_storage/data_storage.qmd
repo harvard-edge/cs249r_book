@@ -417,7 +417,7 @@ class StorageAccessPatternFacts:
     checkpoint_interval_min = 10
     check(abs(ckpt_burst.to(TB).magnitude - ckpt_total.to(TB).magnitude) < 0.01, "Burst write volume must equal checkpoint size")
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    gpt3_params_b_str = fmt(gpt3_params.to(param).magnitude / BILLION, precision=0, commas=False)
+    gpt3_params_b_str = fmt_params(gpt3_params, scale="B", precision=0, commas=False)
     tokenized_text_tb_str = fmt_memory(tokenized_text, unit=TB, precision=0, commas=False)
     compressed_text_tb_str = fmt_memory(compressed_text, unit=TB, precision=0, commas=False)
     ckpt_total_gb_str = fmt_qty_int(ckpt_total, GB)
@@ -432,7 +432,7 @@ The second inversion is **working set size**\index{Working Set Size}. Traditiona
 
 The exception to this uniformity is multi-task or curriculum learning\index{Curriculum Learning!data locality}, where certain subsets of the dataset are accessed more frequently during specific training phases. In curriculum learning, the trainer begins with "easy" examples and progressively introduces harder ones. This creates a temporary working set that does exhibit locality, and local caching at the NVMe tier can exploit this structure. For the majority of large-scale pretraining workloads, however, the access pattern is effectively uniform, and the storage system must be designed for full-dataset streaming rather than hot-subset caching.
 
-The third inversion is **write pattern**\index{Write Pattern}. Transactional systems generate continuous streams of small writes, each immediately durable. ML systems generate occasional massive writes when saving checkpoints. A `{python} StorageAccessPatternFacts.gpt3_params_b_str`B parameter model checkpoint, including optimizer state, occupies roughly `{python} StorageAccessPatternFacts.ckpt_total_gb_str`. Saving it every `{python} StorageAccessPatternFacts.checkpoint_interval_min_str` generates concentrated bursts that saturate bandwidth for seconds, followed by long idle periods. These bursts are the **checkpoint storms**\index{Checkpoint Storm!definition} that parallel file systems must absorb without disrupting ongoing training reads. The bursty write pattern is particularly challenging because all nodes in the cluster write their checkpoint shards simultaneously. If `{python} StorageAccessPatternFacts.ckpt_node_count_str` each write `{python} StorageAccessPatternFacts.ckpt_shard_gb_str`, the parallel file system receives `{python} StorageAccessPatternFacts.ckpt_burst_tb_str` of writes in a single burst, which must complete before the training pipeline can resume.
+The third inversion is **write pattern**\index{Write Pattern}. Transactional systems generate continuous streams of small writes, each immediately durable. ML systems generate occasional massive writes when saving checkpoints. A `{python} StorageAccessPatternFacts.gpt3_params_b_str` parameter model checkpoint, including optimizer state, occupies roughly `{python} StorageAccessPatternFacts.ckpt_total_gb_str`. Saving it every `{python} StorageAccessPatternFacts.checkpoint_interval_min_str` generates concentrated bursts that saturate bandwidth for seconds, followed by long idle periods. These bursts are the **checkpoint storms**\index{Checkpoint Storm!definition} that parallel file systems must absorb without disrupting ongoing training reads. The bursty write pattern is particularly challenging because all nodes in the cluster write their checkpoint shards simultaneously. If `{python} StorageAccessPatternFacts.ckpt_node_count_str` each write `{python} StorageAccessPatternFacts.ckpt_shard_gb_str`, the parallel file system receives `{python} StorageAccessPatternFacts.ckpt_burst_tb_str` of writes in a single burst, which must complete before the training pipeline can resume.
 
 | **Workload Pattern** | **Traditional Assumption**                        | **ML Reality**                 |
 |:---------------------|:--------------------------------------------------|:-------------------------------|
@@ -967,7 +967,7 @@ class NvmeTierContext:
     multimodal_excess_tb_str = fmt_memory(multimodal_excess, unit=TB, precision=1, commas=False)
     tokenized_shard_count_str = fmt(tokenized_shard_count_val, precision=0)
     tokenized_shard_gb_str = fmt_memory(tokenized_shard, unit=GB, precision=0, commas=False)
-    gpt3_params_b_str = fmt(gpt3_params.to(param).magnitude / BILLION, precision=0, commas=False)
+    gpt3_params_b_str = fmt_params(gpt3_params, scale="B", precision=0, commas=False)
     ckpt_total_gb_str = fmt_qty_int(ckpt_total, GB, commas=False)
 ```
 ### Tier 2: Local NVMe {#sec-storage-tier2-nvme}
@@ -1014,7 +1014,7 @@ A standard ImageNet training pipeline makes the cost of the wrong format visible
 
 The central challenge at this tier is the I/O wall: a single NVMe drive is roughly 500$\times$ slower than HBM, and even a four-drive RAID-0 stripe remains roughly 120$\times$ slower. Bridging this gap requires pipelining (overlap I/O with compute, detailed in @sec-storage-pipeline-equation) and, increasingly, GPU Direct Storage (detailed in @sec-storage-gds) to bypass CPU overhead entirely. The I/O wall at this tier is particularly insidious because NVMe performance is excellent by historical standards. A storage engineer accustomed to HDD-era throughput of 100 MB/s might view 28 GB/s from a local RAID-0 stripe as superabundant. Relative to the accelerator's appetite, however, 28 GB/s is a trickle. The only way to bridge the gap is to overlap storage reads with computation so thoroughly that the accelerator never perceives the storage delay.
 
-Local NVMe is also the primary tier for **local checkpoint staging**. When saving a model checkpoint, the fastest strategy is to write to local NVMe at full bandwidth (minimizing the time the training pipeline is paused), then asynchronously replicate to shared storage for durability. For a `{python} NvmeTierContext.gpt3_params_b_str`B parameter checkpoint of `{python} NvmeTierContext.ckpt_total_gb_str` sharded across 256 nodes, each node's roughly 7 GB shard writes to local NVMe in approximately `{python} NVMeTierCalcs.ckpt_nvme_s_str`, compared to `{python} NVMeTierCalcs.ckpt_pfs_s_str` if the same per-node shard were written directly to a parallel file system where the node competes with hundreds of other writers. The optimal checkpoint frequency depends on cluster failure rates and is derived quantitatively in @sec-fault-tolerance-young-daly using the Young-Daly formula. From a storage perspective, the key design goal is minimizing $T_{\text{write}}$ through tiered staging: write to local NVMe at full bandwidth, then background-copy to shared storage.
+Local NVMe is also the primary tier for **local checkpoint staging**. When saving a model checkpoint, the fastest strategy is to write to local NVMe at full bandwidth (minimizing the time the training pipeline is paused), then asynchronously replicate to shared storage for durability. For a `{python} NvmeTierContext.gpt3_params_b_str` parameter checkpoint of `{python} NvmeTierContext.ckpt_total_gb_str` sharded across 256 nodes, each node's roughly 7 GB shard writes to local NVMe in approximately `{python} NVMeTierCalcs.ckpt_nvme_s_str`, compared to `{python} NVMeTierCalcs.ckpt_pfs_s_str` if the same per-node shard were written directly to a parallel file system where the node competes with hundreds of other writers. The optimal checkpoint frequency depends on cluster failure rates and is derived quantitatively in @sec-fault-tolerance-young-daly using the Young-Daly formula. From a storage perspective, the key design goal is minimizing $T_{\text{write}}$ through tiered staging: write to local NVMe at full bandwidth, then background-copy to shared storage.
 
 ```{python}
 #| echo: false
@@ -1271,28 +1271,31 @@ The transition from Tier 4 to Tier 5 is driven entirely by economics: data that 
 # │ Show:    $4,800/year at $0.004/GB/month.
 # │ How:     100 TB × 1000 GB/TB × $0.004/GB/month × 12 months.
 # │
-# │ Imports: (none—uses literal cost constants)
+# │ Imports: mlsysim units and fmt_usd
 # │ Exports: GlacierCost.glacier_annual_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import GB, THOUSAND, USD, ureg
+from mlsysim.fmt import check, fmt_usd
+
 class GlacierCost:
     # ┌── 1. LOAD ─────────────────────────────────────────
     dataset_size_tb    = 100
     cost_glacier_gb_mo = 0.004
 
     # ┌── 2. EXECUTE ──────────────────────────────────────
-    glacier_annual_val = dataset_size_tb * THOUSAND * cost_glacier_gb_mo * 12
+    dataset_size = dataset_size_tb * THOUSAND * GB
+    glacier_annual_cost = dataset_size * (cost_glacier_gb_mo * USD / GB / ureg.month) * 12 * ureg.month
 
     # ┌── 3. GUARD ────────────────────────────────────────
-    from mlsysim.fmt import check, fmt
-    check(glacier_annual_val > 0, "Glacier annual cost should be positive")
+    check(glacier_annual_cost.to(USD).magnitude > 0, "Glacier annual cost should be positive")
 
     # ┌── 4. OUTPUT ───────────────────────────────────────
-    glacier_annual_str = fmt(glacier_annual_val, precision=0)
+    glacier_annual_str = fmt_usd(glacier_annual_cost, precision=0)
 ```
 
 ### Tier 5: Archive and cold storage {#sec-storage-tier5-archive}
 
-The final tier provides long-term preservation for compliance and auditability. Archive services (such as S3 Glacier) are designed for data that is rarely accessed: training logs from previous years, superseded model checkpoints, audit trails for regulatory compliance. At roughly \$0.004/GB/month, archive storage costs roughly \$`{python} GlacierCost.glacier_annual_str` per year for 100 TB, which is 5$\times$ cheaper than standard object storage at \$0.02/GB/month. The trade-off is retrieval latency measured in minutes to hours, making this tier unsuitable for any operational access.
+The final tier provides long-term preservation for compliance and auditability. Archive services (such as S3 Glacier) are designed for data that is rarely accessed: training logs from previous years, superseded model checkpoints, audit trails for regulatory compliance. At roughly \$0.004/GB/month, archive storage costs roughly `{python} GlacierCost.glacier_annual_str` per year for 100 TB, which is 5$\times$ cheaper than standard object storage at \$0.02/GB/month. The trade-off is retrieval latency measured in minutes to hours, making this tier unsuitable for any operational access.
 
 The primary value of archive storage is organizational memory. When a model trained two years ago produces unexpected behavior in production, the ability to recover the exact training data, hyperparameters, and intermediate checkpoints for forensic analysis depends on archive storage. Organizations that aggressively purge old data to save costs discover, often at the worst possible moment, that they cannot reproduce or explain the behavior of deployed models.
 
@@ -1979,28 +1982,34 @@ class EconRatios:
 # │ Exports: ObjectStorageCostRecap.s3_annual_str, ObjectStorageCostRecap.nvme_annual_str
 
 
-from mlsysim.fmt import fmt, fmt_memory
+from mlsysim.fmt import fmt_usd
 class ObjectStorageCostRecap:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    s3_annual_str = fmt(100 * THOUSAND * 0.02 * 12, precision=0)
-    nvme_annual_str = fmt(100 * THOUSAND * Infrastructure.Pricing.Storage.NvmeLowPerTbMonth.rate.to(USD / GB / ureg.month).magnitude * 12, precision=0)
+    dataset_size = 100 * THOUSAND * GB
+    s3_annual_cost = dataset_size * (0.02 * USD / GB / ureg.month) * 12 * ureg.month
+    nvme_annual_cost = dataset_size.to(TB) * Infrastructure.Pricing.Storage.NvmeLowPerTbMonth.rate * 12 * ureg.month
+    s3_annual_str = fmt_usd(s3_annual_cost, precision=0)
+    nvme_annual_str = fmt_usd(nvme_annual_cost, precision=0)
 ```
 Consider storing a 100 TB training dataset. The annual storage cost varies enormously by tier:
 
-- **Object storage (S3 Standard)**: \$`{python} ObjectStorageCostRecap.s3_annual_str`/year
+- **Object storage (S3 Standard)**: `{python} ObjectStorageCostRecap.s3_annual_str`/year
 ```{python}
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @sec-storage-economics tier cost list
 # │ Exports: GlacierCostRecap.glacier_annual_str
 
-from mlsysim.fmt import fmt_qty_int
+from mlsysim import GB, THOUSAND, USD, ureg
+from mlsysim.fmt import fmt_usd
 class GlacierCostRecap:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    glacier_annual_str = fmt(100 * THOUSAND * 0.004 * 12, precision=0)
+    dataset_size = 100 * THOUSAND * GB
+    glacier_annual_cost = dataset_size * (0.004 * USD / GB / ureg.month) * 12 * ureg.month
+    glacier_annual_str = fmt_usd(glacier_annual_cost, precision=0)
 ```
-- **Local NVMe (provisioned)**: \$`{python} ObjectStorageCostRecap.nvme_annual_str`/year
-- **Archive (Glacier)**: \$`{python} GlacierCostRecap.glacier_annual_str`/year
+- **Local NVMe (provisioned)**: `{python} ObjectStorageCostRecap.nvme_annual_str`/year
+- **Archive (Glacier)**: `{python} GlacierCostRecap.glacier_annual_str`/year
 - **HBM equivalent** (hypothetically storing 100 TB in GPU memory at \$15/GB): \$1,500,000 in hardware amortization
 
 The `{python} EconRatios.tier_cost_ratio_str`$\times$ cost difference between local NVMe and object storage (with the full HBM-to-archive span exceeding 3,000$\times$) explains why the hierarchy exists: data must live at the cheapest tier possible, migrating upward only when needed and returning downward when done. This cost gradient reflects the underlying physics. Faster storage requires more expensive materials (HBM uses 3D-stacked silicon with through-silicon vias), more energy per bit accessed, and more physical proximity to the accelerator (which limits the amount that can be provisioned per node). Cheaper storage uses commodity components (standard hard drives for archive), consumes minimal energy when idle, and can be located anywhere with network connectivity.
@@ -2224,7 +2233,7 @@ class CheckpointModelIntro:
     gpt3_params = Models.Language.GPT3.parameters
     ckpt_total = gpt3_params * (10 * (byte / param))
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    gpt3_params_b_str = fmt(gpt3_params.to(param).magnitude / BILLION, precision=0, commas=False)
+    gpt3_params_b_str = fmt_params(gpt3_params, scale="B", precision=0, commas=False)
     ckpt_total_gb_str = fmt_memory(ckpt_total, unit=GB, precision=0, commas=True)
 ```
 
@@ -2232,7 +2241,7 @@ class CheckpointModelIntro:
 
 \index{Checkpoint!storage architecture}When a thousand GPUs have been training for six hours since the last checkpoint and a power supply fails, what determines how much work is lost? The answer is entirely a storage problem: how quickly the most recent checkpoint was saved, and where it resides. Checkpoints are the most demanding write workload in the storage hierarchy. They are also among the most consequential: a lost checkpoint after a hardware failure means repeating hours or days of training. The interaction between checkpoint storage and fault tolerance strategy is covered in depth in @sec-fault-tolerance-reliability, where the Young-Daly formula (@sec-fault-tolerance-young-daly) derives the optimal checkpoint frequency from cluster failure rates and checkpoint write time. Here we focus on the storage architecture that minimizes $T_{\text{write}}$, the time the training pipeline pauses to save a checkpoint.
 
-A `{python} CheckpointModelIntro.gpt3_params_b_str`B parameter model with Adam optimizer\index{Adam Optimizer!state size} generates checkpoints of approximately `{python} CheckpointModelIntro.ckpt_total_gb_str`. The checkpoint includes model weights (`350` GB in FP16), optimizer state (momentum and variance, `1,400` GB in FP32), learning rate scheduler state, random number generator state, and the current data loader position. Every GPU in the cluster saves its shard of the checkpoint simultaneously, creating a checkpoint storm that the storage system must absorb without disrupting ongoing training reads.
+A `{python} CheckpointModelIntro.gpt3_params_b_str` parameter model with Adam optimizer\index{Adam Optimizer!state size} generates checkpoints of approximately `{python} CheckpointModelIntro.ckpt_total_gb_str`. The checkpoint includes model weights (`350` GB in FP16), optimizer state (momentum and variance, `1,400` GB in FP32), learning rate scheduler state, random number generator state, and the current data loader position. Every GPU in the cluster saves its shard of the checkpoint simultaneously, creating a checkpoint storm that the storage system must absorb without disrupting ongoing training reads.
 
 ::: {#dfn-data-storage-checkpoint-storm .callout-definition title="Checkpoint storm"}
 
@@ -2693,10 +2702,15 @@ class GDSLatencyRecap:
 # │ Exports: EconRatiosRecap.tier_cost_ratio_str
 
 
-from mlsysim.fmt import fmt
+from mlsysim.fmt import fmt_multiple
 class EconRatiosRecap:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    tier_cost_ratio_str = fmt(Infrastructure.Pricing.Storage.NvmeLowPerTbMonth.rate.to(USD / GB / ureg.month).magnitude / 0.02, precision=0, commas=False)
+    tier_cost_ratio = Infrastructure.Pricing.Storage.NvmeLowPerTbMonth.rate.to(USD / GB / ureg.month) / (0.02 * USD / GB / ureg.month)
+    tier_cost_ratio_str = fmt_multiple(
+        tier_cost_ratio.to("").magnitude,
+        precision=0,
+        commas=False,
+    )
 ```
 * **ML workloads invert storage assumptions**: Traditional caching, IOPS optimization, and small-write durability patterns\index{ML Storage!inverted assumptions} all produce the wrong answer for ML training. Throughput (GB/s) matters more than IOPS. Small files are the enemy; aggregated shards are the solution.
 * **The pipeline equation governs design**: Required bandwidth scales linearly with GPU count and inversely with iteration time. Use $\text{BW}_{\text{required}} = N_{\text{GPU}} \times U_{\text{target}} \times D_{\text{vol,batch}} / T_{\text{iteration}}$ to size every tier.

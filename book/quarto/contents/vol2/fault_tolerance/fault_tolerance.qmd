@@ -2105,7 +2105,7 @@ class FaultToleranceCheckpointRecap:
     ckpt_write = (gpt3_ckpt_bytes / aggregate_ckpt_bw).to(second)
     check(34 < ckpt_write.to(second).magnitude < 38, f"GPT-3 checkpoint write should be ~36 s, got {ckpt_write.to(second).magnitude:.1f}")
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    gpt3_params_b_str = fmt(m.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    gpt3_params_b_str = fmt_params(m.parameters, scale="B", precision=0, commas=False)
     gpt3_ckpt_tb_str = fmt_qty(gpt3_ckpt_bytes, TB, precision=1, commas=False)
     gpt3_adam_tb_str = fmt_qty(gpt3_adam_bytes, TB, precision=1, commas=False)
     gpt3_shard_gb_str = fmt_qty(gpt3_ckpt_bytes / n_workers, GB, precision=1, commas=False)
@@ -2113,7 +2113,7 @@ class FaultToleranceCheckpointRecap:
     aggregate_read_gbs_str = fmt_qty(aggregate_ckpt_bw, GB / second, precision=0, commas=False)
 ```
 
-[^fn-adam-state-memory]: **Adam Optimizer State**\index{Adam Optimizer!state}: Adaptive Moment Estimation (Adam) maintains per-parameter first-moment ($m$) and second-moment ($v$) estimates, tripling memory requirements compared to vanilla SGD (3$\times$: parameters + two state vectors). For a `{python} FaultToleranceCheckpointRecap.gpt3_params_b_str`B parameter model, optimizer state alone reaches `{python} FaultToleranceCheckpointRecap.gpt3_adam_tb_str`, which typically dominates checkpoint size and recovery time, making optimizer state the primary bottleneck in checkpoint I/O design. \index{Adam Optimizer!checkpoint memory}
+[^fn-adam-state-memory]: **Adam Optimizer State**\index{Adam Optimizer!state}: Adaptive Moment Estimation (Adam) maintains per-parameter first-moment ($m$) and second-moment ($v$) estimates, tripling memory requirements compared to vanilla SGD (3$\times$: parameters + two state vectors). For a `{python} FaultToleranceCheckpointRecap.gpt3_params_b_str` parameter model, optimizer state alone reaches `{python} FaultToleranceCheckpointRecap.gpt3_adam_tb_str`, which typically dominates checkpoint size and recovery time, making optimizer state the primary bottleneck in checkpoint I/O design. \index{Adam Optimizer!checkpoint memory}
 
 ### Checkpoint interval from failure analysis {#sec-fault-tolerance-reliability-reliability-checkpoint-interval-failure-analysis-c28d}
 
@@ -2740,15 +2740,15 @@ class FaultToleranceShardRecap:
     n_workers = Systems.Clusters.Training_1K.total_accelerators
     from mlsysim.fmt import fmt, fmt_qty
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    gpt3_params_b_str = fmt(m.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    gpt3_params_b_str = fmt_params(m.parameters, scale="B", precision=0, commas=False)
     gpt3_ckpt_tb_str = fmt_qty(gpt3_ckpt_bytes, TB, precision=1, commas=False)
     gpt3_shard_gb_str = fmt_qty(gpt3_ckpt_bytes / n_workers, GB, precision=1, commas=False)
     n_workers_str = fmt(n_workers, precision=0, commas=True)
 ```
 
-[^fn-sharded-ckpt-io]: **Sharded Checkpointing**: Each worker saves only its local partition rather than gathering state to a single writer. For ZeRO-3 or FSDP with `{python} FaultToleranceShardRecap.n_workers_str` workers training a `{python} FaultToleranceShardRecap.gpt3_params_b_str`B model, each worker writes approximately `{python} FaultToleranceShardRecap.gpt3_shard_gb_str` instead of one writer handling `{python} FaultToleranceShardRecap.gpt3_ckpt_tb_str`, parallelizing I/O across all nodes. The trade-off: recovery requires all shards to be present and consistent, making the checkpoint protocol more complex and the failure of any single shard's storage fatal to the entire checkpoint. \index{Sharded Checkpointing!I/O parallelism}
+[^fn-sharded-ckpt-io]: **Sharded Checkpointing**: Each worker saves only its local partition rather than gathering state to a single writer. For ZeRO-3 or FSDP with `{python} FaultToleranceShardRecap.n_workers_str` workers training a `{python} FaultToleranceShardRecap.gpt3_params_b_str` model, each worker writes approximately `{python} FaultToleranceShardRecap.gpt3_shard_gb_str` instead of one writer handling `{python} FaultToleranceShardRecap.gpt3_ckpt_tb_str`, parallelizing I/O across all nodes. The trade-off: recovery requires all shards to be present and consistent, making the checkpoint protocol more complex and the failure of any single shard's storage fatal to the entire checkpoint. \index{Sharded Checkpointing!I/O parallelism}
 
-This approach enables efficient checkpointing even for massive models. A `{python} FaultToleranceShardRecap.gpt3_params_b_str`B parameter model with a `{python} FaultToleranceShardRecap.gpt3_ckpt_tb_str` checkpoint distributed across `{python} FaultToleranceShardRecap.n_workers_str` workers requires each worker to write only `{python} FaultToleranceShardRecap.gpt3_shard_gb_str`, achievable in seconds with local NVMe storage.
+This approach enables efficient checkpointing even for massive models. A `{python} FaultToleranceShardRecap.gpt3_params_b_str` parameter model with a `{python} FaultToleranceShardRecap.gpt3_ckpt_tb_str` checkpoint distributed across `{python} FaultToleranceShardRecap.n_workers_str` workers requires each worker to write only `{python} FaultToleranceShardRecap.gpt3_shard_gb_str`, achievable in seconds with local NVMe storage.
 
 When recovering with a different number of workers than the checkpoint, shard redistribution must remap state to the new worker configuration. This occurs due to elastic scaling or hardware changes. Modern frameworks support flexible resharding, enabling recovery even when the worker count changes. However, possessing a valid checkpoint is not sufficient on its own. The system must first identify that a failure has occurred and trigger the restoration. The speed of this detection, and the subsequent recovery, determines the true cost of the interruption.
 
@@ -2868,10 +2868,10 @@ class RecoveryBudget:
     check(abs(daily_loss_10k.to(minute).magnitude - 31.0) < 2.0, f"10k daily loss ({daily_loss_10k.to(minute).magnitude:.1f} min)")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    t_total_str = fmt(t_total.to(minute).magnitude, precision=1, commas=False)
+    t_total_str = fmt_time(t_total, unit=minute, precision=1, commas=False)
     t_detect_s_str = fmt_time(t_detect, second, precision=0, commas=False)
     t_restart_min_str = fmt_time(t_restart, minute, precision=0, commas=False)
-    t_load_s_str = fmt_int(round(t_load.to(second).magnitude), commas=False)
+    t_load_s_str = fmt_time(t_load, second, precision=1, commas=False)
     t_warmup_min_str = fmt_time(t_warmup, minute, precision=0, commas=False)
     aggregate_read_gbs_str = fmt_qty(aggregate_ckpt_bw, GB/second, precision=0, commas=False)
     shard_read_gbs_str = fmt_qty(shard_read_bw, GB/second, precision=0, commas=False)
@@ -2904,13 +2904,13 @@ class FaultToleranceRecoveryRecap:
     gpt3_ckpt_bytes = mem_res.total_memory
     n_workers = Systems.Clusters.Training_1K.total_accelerators
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    params_b_str = fmt(m.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    params_b_str = fmt_params(m.parameters, scale="B", precision=0, commas=False)
     gpt3_ckpt_tb_str = fmt_qty(gpt3_ckpt_bytes, TB, precision=1, commas=False)
     gpt3_shard_gb_str = fmt_qty(gpt3_ckpt_bytes / n_workers, GB, precision=1, commas=False)
     n_workers_str = fmt_count(n_workers, commas=True, label="GPU")
 ```
 
-Consider our `{python} FaultToleranceRecoveryRecap.params_b_str`B parameter model training on `{python} FaultToleranceRecoveryRecap.n_workers_str`. The checkpoint size is approximately `{python} FaultToleranceRecoveryRecap.gpt3_ckpt_tb_str` (weights + Adam optimizer state). How much does a single failure event cost?
+Consider our `{python} FaultToleranceRecoveryRecap.params_b_str` parameter model training on `{python} FaultToleranceRecoveryRecap.n_workers_str`. The checkpoint size is approximately `{python} FaultToleranceRecoveryRecap.gpt3_ckpt_tb_str` (weights + Adam optimizer state). How much does a single failure event cost?
 
 **The budget ($T_{\text{recovery}}$)**:
 
@@ -2919,7 +2919,7 @@ Consider our `{python} FaultToleranceRecoveryRecap.params_b_str`B parameter mode
 3. **$T_{\text{load}}$**: `{python} RecoveryBudget.t_load_s_str` (this is the aggregate-shared-storage read of the full `{python} FaultToleranceRecoveryRecap.gpt3_ckpt_tb_str` checkpoint at `{python} RecoveryBudget.aggregate_read_gbs_str` aggregate; with sharded local-NVMe reads at `{python} RecoveryBudget.shard_read_gbs_str`, each `{python} FaultToleranceRecoveryRecap.gpt3_shard_gb_str` shard loads in well under one second)
 4. **$T_{\text{warmup}}$**: `{python} RecoveryBudget.t_warmup_min_str` (JIT kernel compilation, data pipeline buffer fill, TCP connection re-establishment)
 
-**Total**: $T_{\text{recovery}} = T_{\text{detect}} + T_{\text{restart}} + T_{\text{load}} + T_{\text{warmup}} \approx$ `{python} RecoveryBudget.t_total_str` minutes per failure event.
+**Total**: $T_{\text{recovery}} = T_{\text{detect}} + T_{\text{restart}} + T_{\text{load}} + T_{\text{warmup}} \approx$ `{python} RecoveryBudget.t_total_str` per failure event.
 
 **Impact at scale**\index{Recovery Time!scale impact}: With the GPU-only baseline from @tbl-cluster-mtbf-scaling, a `{python} RecoveryBudget.n_gpus_1k_str`-GPU cluster has MTBF of `{python} RecoveryBudget.mtbf_1k_hrs_str` and experiences about `{python} RecoveryBudget.failures_per_day_1k_str` failures per day, losing about `{python} RecoveryBudget.daily_loss_min_1k_str` daily, a modest `{python} RecoveryBudget.overhead_pct_1k_str` overhead. However, a `{python} RecoveryBudget.n_gpus_10k_str`-GPU cluster has GPU-only MTBF of `{python} RecoveryBudget.mtbf_10k_hrs_str` and experiences about `{python} RecoveryBudget.failures_per_day_10k_str` failures per day, losing about `{python} RecoveryBudget.daily_loss_min_10k_str` daily—a `{python} RecoveryBudget.overhead_pct_10k_str` overhead equivalent to wasting roughly `{python} RecoveryBudget.waste_gpu_hours_10k_str` GPU-hours every day (`{python} RecoveryBudget.daily_loss_min_10k_str` $\times$ `{python} RecoveryBudget.n_gpus_10k_str` ÷ 60). This is why recovery time optimization matters more as clusters grow.
 
@@ -2931,7 +2931,7 @@ The standard recovery procedure described earlier is a **cold restart**\index{Co
 
 A **warm restart**\index{Warm Restart} preserves the state of surviving workers. When a rank fails, surviving ranks detect the failure but do not exit. They enter a waiting state, preserving loaded model weights and optimizer states in GPU memory. The scheduler replaces only the failed node. The new node joins, loads its partition of the state from disk (or receives it via broadcast from a peer), and the communicator is rebuilt. Training resumes with minimal disruption.
 
-Warm restarts can reduce $T_{\text{load}}$ and $T_{\text{warmup}}$ to near-zero for 99.9 percent of the cluster, cutting total recovery time from minutes to seconds. For the `{python} FaultToleranceRecoveryRecap.n_workers_str` example, a warm restart avoids reloading `{python} FaultToleranceRecoveryRecap.gpt3_ckpt_tb_str` from storage, saving the `{python} RecoveryBudget.t_load_s_str`-second $T_{\text{load}}$ and 2-minute $T_{\text{warmup}}$ for all but the replacement node.
+Warm restarts can reduce $T_{\text{load}}$ and $T_{\text{warmup}}$ to near-zero for 99.9 percent of the cluster, cutting total recovery time from minutes to seconds. For the `{python} FaultToleranceRecoveryRecap.n_workers_str` example, a warm restart avoids reloading `{python} FaultToleranceRecoveryRecap.gpt3_ckpt_tb_str` from storage, saving the `{python} RecoveryBudget.t_load_s_str` $T_{\text{load}}$ and 2-minute $T_{\text{warmup}}$ for all but the replacement node.
 
 The trade-off is software complexity. Warm restarts require the application to handle dynamic membership changes without leaking CUDA memory, corrupting shared state, or deadlocking during communicator reconstruction. Frameworks like TorchElastic and DeepSpeed provide this capability, but the failure modes during warm restart itself (a crash during communicator rebuild, for instance) must be handled by falling back to cold restart. Production systems implement warm restart as the fast path with cold restart as the safety net. @Tbl-cold-vs-warm-restart contrasts the two strategies:
 

@@ -674,7 +674,7 @@ class ClusterEconomicsMigRecap:
     from mlsysim import Hardware
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     a100_mem_str = fmt_qty(Hardware.Cloud.A100.memory.capacity, GiB, precision=0, commas=False, unit_label="GB")
-    h100_mem_str = fmt(Hardware.Cloud.H100.memory.capacity.to(GiB).magnitude, precision=0, commas=False)
+    h100_mem_str = fmt_memory(Hardware.Cloud.H100.memory.capacity, unit=GiB, precision=0, commas=False)
 ```
 
 **Multi-Instance GPU (MIG)**[^fn-mig-isolation] technology addresses this inefficiency by partitioning A100 and H100 GPUs into hardware-isolated instances. An A100 with `{python} ClusterEconomicsMigRecap.a100_mem_str` of memory can be divided into configurations ranging from 7 small instances of approximately 10 GB each to 2 large instances of approximately 40 GB each. Unlike software-based GPU sharing (time-slicing), MIG provides hardware isolation: each instance has dedicated memory, cache, and compute resources, preventing one workload from interfering with another and eliminating the noisy neighbor[^fn-noisy-neighbor-etymology] effect. The device plugin exposes MIG instances as separate schedulable resources, allowing the scheduler to treat each instance as an independent GPU for allocation purposes.
@@ -1914,7 +1914,7 @@ class DiurnalGpuShift:
     static_util_pct = static_active/fleet * 100
     dynamic_active = serving_avg + training_fixed + reclaimed
     dynamic_util_pct = dynamic_active/fleet * 100
-    annual_value = reclaimed * gpu_rate * HOURS_PER_YEAR
+    annual_value = reclaimed * gpu_rate * HOURS_PER_YEAR * USD
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(static_active == 768, f"Static: expected 768, got {static_active}")
     check(static_util_pct == 75, f"Static util: expected 75%, got {static_util_pct}")
@@ -1927,12 +1927,12 @@ class DiurnalGpuShift:
     ds_dynamic_active_str = fmt(dynamic_active, precision=0)
     ds_dynamic_util_str = fmt_percent(round(dynamic_util_pct)/100, precision=0, commas=True, style='prose')
     ds_reclaimed_str = fmt_count(reclaimed, label="GPU")
-    ds_annual_str = fmt(annual_value / MILLION, precision=1, commas=False)
+    ds_annual_str = fmt_usd(annual_value, scale="M", precision=1, commas=False)
     ds_serving_peak_str = fmt_count(serving_peak, commas=False, label="GPU")
     ds_serving_avg_str = fmt_count(serving_avg, commas=False, label="GPU")
     ds_training_fixed_str = fmt_count(training_fixed, commas=False, label="GPU")
     ds_fleet_gpus_str = fmt_count(fleet, commas=True, label="GPU")
-    ds_gpu_hour_rate_str = fmt(gpu_rate, precision=0, commas=False)
+    ds_gpu_hour_rate_str = fmt_usd(gpu_rate, precision=0, commas=False, per="GPU-hour")
     ds_serving_peak_util_str = fmt_percent(serving_avg / serving_peak, precision=1, commas=False, style='prose')
     ds_safety_buffer_str = fmt(safety_buffer, precision=0, commas=False)
     ds_serving_reclaimable_str = fmt_count(serving_reclaimable, commas=False, label="GPU")
@@ -1947,7 +1947,7 @@ Consider a fleet of `{python} DiurnalGpuShift.ds_fleet_gpus_str` managed under t
 
 **Scenario B -- Dynamic Sharing**: Serving claims GPUs strictly as needed (average `{python} DiurnalGpuShift.ds_serving_avg_str`). Training reclaims unused serving GPUs (average `{python} DiurnalGpuShift.ds_serving_reclaimable_str`), minus a `{python} DiurnalGpuShift.ds_safety_buffer_str`-GPU safety buffer. The orchestrator shifts approximately `{python} DiurnalGpuShift.ds_reclaimed_str` between roles twice daily based on diurnal forecasts. Result: serving (`{python} DiurnalGpuShift.ds_serving_avg_str`) + training (`{python} DiurnalGpuShift.ds_training_fixed_str` + `{python} DiurnalGpuShift.ds_reclaimed_str`) = `{python} DiurnalGpuShift.ds_dynamic_active_str` active GPUs (the second training term is reclaimed serving capacity). Fleet utilization: `{python} DiurnalGpuShift.ds_dynamic_util_str`.
 
-Dynamic sharing recovers `{python} DiurnalGpuShift.ds_reclaimed_str` of effective capacity. At \$`{python} DiurnalGpuShift.ds_gpu_hour_rate_str`/GPU-hour, this creates approximately \$`{python} DiurnalGpuShift.ds_annual_str` million per year in value without purchasing a single additional accelerator.
+Dynamic sharing recovers `{python} DiurnalGpuShift.ds_reclaimed_str` of effective capacity. At `{python} DiurnalGpuShift.ds_gpu_hour_rate_str`, this creates approximately `{python} DiurnalGpuShift.ds_annual_str` per year in value without purchasing a single additional accelerator.
 
 :::
 

@@ -32,7 +32,7 @@ CLASS = re.compile(r"^class\s+(\w+)", re.M)
 CLOSED_DOMAIN_FMT = re.compile(
     r"^\s*(?P<name>\w+_str)\s*=\s*"
     r"(?:fmt_qty|fmt_power|fmt_energy|fmt_bandwidth|fmt_memory|fmt_emissions|"
-    r"fmt_latency|fmt_percent|fmt_rate|fmt_usd|fmt_time|fmt_tokens|fmt_params|"
+    r"fmt_latency|fmt_percent|fmt_rate|fmt_usd|fmt_eur|fmt_time|fmt_tokens|fmt_params|"
     r"fmt_flop_rate|fmt_flops|fmt_ops_rate|fmt_arithmetic_intensity|"
     r"fmt_compute_efficiency|fmt_carbon_intensity|fmt_throughput|"
     r"fmt_sci_qty)\s*\(",
@@ -83,6 +83,7 @@ _SUFFIX_UNITS: dict[str, frozenset[str]] = {
 _FMT_UNITS: dict[str, frozenset[str]] = {
     "fmt_percent": frozenset({"percent", "%"}),
     "fmt_usd": frozenset({"$", "usd"}),
+    "fmt_eur": frozenset({"eur"}),
     "fmt_rate": frozenset({"qps", "tflop/s", "tflops/s", "gb/s", "tb/s"}),
     "fmt_flop_rate": frozenset({"flop/s", "flops/s", "tflop/s", "tflops/s", "pflop/s", "pflops/s"}),
     "fmt_flops": frozenset({"flop", "flops", "kflop", "mflop", "gflop", "tflop", "pflop"}),

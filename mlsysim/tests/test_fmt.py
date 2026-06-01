@@ -14,6 +14,7 @@ from mlsysim.fmt import (
     fmt_count_range,
     fmt_compute_efficiency,
     fmt_carbon_intensity,
+    fmt_eur,
     fmt_int,
     fmt_multiple,
     fmt_multiple_range,
@@ -24,6 +25,7 @@ from mlsysim.fmt import (
     fmt_qty,
     fmt_qty_int,
     fmt_qty_range,
+    fmt_magnitude,
     fmt_flop_rate,
     fmt_flops,
     fmt_ops_rate,
@@ -125,6 +127,14 @@ class TestFmtQty:
         assert fmt_qty(mem, unit=ureg.GB, precision=0, commas=False) == "140 GB"
         with pytest.raises(TypeError, match="either a positional unit or unit="):
             fmt_qty(mem, ureg.GB, unit=ureg.GB, precision=0)
+
+    def test_fmt_magnitude_keeps_unit_conversion_checked(self):
+        q = 2048 * ureg.MB
+        assert fmt_magnitude(q, unit=ureg.GB, precision=3, commas=False) == "2.048"
+
+    def test_fmt_magnitude_requires_quantity(self):
+        with pytest.raises(TypeError, match="requires a Pint Quantity"):
+            fmt_magnitude(2048, unit=ureg.GB, precision=0)
 
     def test_accepts_named_marker(self):
         mem = 140 * ureg.GB
@@ -281,6 +291,11 @@ class TestFmtUsd:
 
     def test_returns_markdown_str(self):
         assert isinstance(fmt_usd(100), MarkdownStr)
+
+
+class TestFmtEur:
+    def test_basic_eur_code_style(self):
+        assert fmt_eur(210_000_000, scale="M", precision=0, commas=False) == "EUR 210M"
 
 
 class TestFmtCountLegacy:

@@ -1952,6 +1952,38 @@ part of the plan:
    - Use `fmt_tokens(tokens, scale="T")` or `scale="B"` for corpus/training
      totals.
 
+### Phase 1 Implementation Checkpoint — 2026-06-01
+
+The first semantic formatter pass is implemented in the working tree:
+
+1. **Sanctioned scalar boundary.** `fmt_magnitude(quantity, unit=...)` exists
+   for algebraic displays and value/unit split tables. It is not a prose
+   formatter; ordinary prose should use `fmt_qty` or a domain formatter that
+   emits the unit.
+2. **Euro currency.** `fmt_eur(...)` exists for euro-denominated prose such as
+   `EUR 390M`, so chapter prose no longer assembles `EUR` + number + `million`
+   by hand.
+3. **Direct scaled `fmt(...)` burn-down.** The current scanner for
+   `fmt(x / MILLION)`, `fmt(x * THOUSAND)`, and formatter `suffix=` scale
+   patterns reports zero QMD hits.
+4. **Scalarized OUTPUT burn-down.** The current scanner for
+   `fmt(q.to(unit).magnitude)` and `.m_as(...)` inside `_str = fmt(...)`
+   reports zero QMD hits.
+5. **Pint-safe multipliers.** Unit-bearing ratios are normalized to a common
+   unit and collapsed to dimensionless scalars before `fmt_multiple`.
+6. **Currency amount/rate discipline.** A rate such as `USD/hour` is formatted
+   with `per=...` when it remains a rate, or multiplied by the physical
+   denominator first when computing an amount.
+
+Verification at this checkpoint:
+
+- `book_check_lego_prose_units.py book/quarto/contents` → 81/81 OK.
+- `audit_math_canonical.py book/quarto/contents` → 0 violations.
+- Focused formatter/unit pytest → 166 passed.
+- Headless LEGO execution over all 81 QMD files → 932 LEGO classes, 0
+  failures.
+- `pre-commit run --all-files` → pass.
+
 ### Current Static Audit Queue
 
 Read-only agent audits on 2026-06-01 found the following source queues. These

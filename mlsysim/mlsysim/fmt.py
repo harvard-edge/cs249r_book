@@ -597,6 +597,33 @@ def fmt_usd(
     return fmt(amount, precision=precision, commas=commas, prefix=prefix, suffix=suffix)
 
 
+def fmt_eur(
+    amount,
+    *,
+    precision=0,
+    commas=True,
+    scale=None,
+    approx=False,
+):
+    """Format euro-denominated amounts using the book's ``EUR`` prose style."""
+    from .core.units import EUR
+
+    if isinstance(amount, ureg.Quantity):
+        amount = amount.to(EUR).magnitude
+    if scale is not None:
+        divisor, scale_suffix = _resolve_decimal_scale(
+            scale,
+            what="fmt_eur scale",
+        )
+        amount = amount / divisor
+    else:
+        scale_suffix = ""
+    prefix = "~EUR " if approx else "EUR "
+    if precision == 0:
+        return fmt_int(amount, commas=commas, prefix=prefix, suffix=scale_suffix)
+    return fmt(amount, precision=precision, commas=commas, prefix=prefix, suffix=scale_suffix)
+
+
 def fmt_val(quantity, default="-"):
     """
     Format the magnitude of a Pint Quantity (or a plain scalar) using Python's
@@ -1572,6 +1599,45 @@ def fmt_qty(
     )
     return fmt(
         val,
+        precision=precision,
+        commas=commas,
+        prefix=prefix,
+        suffix=suffix,
+        approx=approx,
+        lower_bound=lower_bound,
+    )
+
+
+def fmt_magnitude(
+    quantity,
+    display_unit=None,
+    *,
+    unit=None,
+    precision=1,
+    commas=False,
+    prefix="",
+    suffix="",
+    approx=False,
+    lower_bound=False,
+):
+    """Format a Pint quantity's magnitude in an explicit unit, without a suffix.
+
+    This is the sanctioned scalar boundary for algebraic displays where the
+    surrounding equation, table header, or variable name carries the unit.
+    It keeps the Pint conversion inside ``mlsysim.fmt`` while intentionally
+    rendering only the numeric magnitude. For prose-facing closed outputs,
+    prefer ``fmt_qty`` or a domain formatter so the unit is rendered with the
+    value.
+    """
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError(
+            "fmt_magnitude() requires a Pint Quantity. Use fmt()/fmt_count() "
+            "only for values that are already intentionally dimensionless."
+        )
+    display_unit = _resolve_unit_arg(display_unit, unit, what="fmt_magnitude")
+    q = quantity.to(display_unit)
+    return fmt(
+        q.magnitude,
         precision=precision,
         commas=commas,
         prefix=prefix,

@@ -215,10 +215,10 @@ The key wafer-scale trade-off is manufacturing complexity and defect-aware routi
 class InfraFrontierAccelRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-As @tbl-accelerator-comparison summarizes, for our `{python} InfraFrontierAccelRecap.frontier_params_b_str`B model, the choice is not purely about peak FLOP/s. If we are a research lab experimenting with novel architectures weekly, the GPU's flexibility justifies its generality tax. If we are deploying a fixed Transformer at scale for years, the TPU's dataflow efficiency or a custom ASIC's power advantage may dominate total cost. The accelerator spectrum is ultimately an economic question of *how much flexibility can be surrendered, given the stability of the workload*.
+As @tbl-accelerator-comparison summarizes, for our `{python} InfraFrontierAccelRecap.frontier_params_b_str` model, the choice is not purely about peak FLOP/s. If we are a research lab experimenting with novel architectures weekly, the GPU's flexibility justifies its generality tax. If we are deploying a fixed Transformer at scale for years, the TPU's dataflow efficiency or a custom ASIC's power advantage may dominate total cost. The accelerator spectrum is ultimately an economic question of *how much flexibility can be surrendered, given the stability of the workload*.
 
 An emerging trend in accelerator design is the **chiplet**\index{Chiplet} architecture, exemplified by NVIDIA's Blackwell and AMD's Instinct MI300 series. Rather than fabricating a single monolithic die, chiplet-based designs partition the processor into multiple smaller dies connected by a high-bandwidth die-to-die interconnect on a common package substrate. This approach addresses two physical limitations that constrain monolithic designs.
 
@@ -603,7 +603,7 @@ With the accelerator's arithmetic engine selected, we confront a paradox: the fa
 class InfraFrontierMemoryWallRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
 ```{python}
@@ -617,7 +617,7 @@ class MemoryBandwidthIntroRecap:
     h100_bw_str = fmt_qty(Hardware.Cloud.H100.memory.bandwidth, TB/second, precision=2, commas=False)
 ```
 
-The implications are concrete and perceptible in our running example. Our `{python} InfraFrontierMemoryWallRecap.frontier_params_b_str`B model's weights occupy 350 GB in FP16. During autoregressive decoding, this entire 350 GB tensor must be streamed from off-chip memory into the processor's registers for every single token generated. A single H100 cannot hold that tensor, so this is a bandwidth-floor calculation after sharding or quantization has solved the capacity problem. At H100-class HBM bandwidths (~`{python} MemoryBandwidthIntroRecap.h100_bw_str` per accelerator), the data movement alone dictates a latency floor of over 100 ms per token if one accelerator-equivalent bandwidth path must stream the weights. The memory wall is not an abstract architectural concept: it is the physical reason a chatbot takes a perceptible pause between words. Three engineering responses address this constraint: high bandwidth memory (HBM) widens the data pipe, the roofline model rigorously diagnoses whether a workload is starving for data or for compute, and Tensor Cores maximize the arithmetic value of every byte fetched.
+The implications are concrete and perceptible in our running example. Our `{python} InfraFrontierMemoryWallRecap.frontier_params_b_str` model's weights occupy 350 GB in FP16. During autoregressive decoding, this entire 350 GB tensor must be streamed from off-chip memory into the processor's registers for every single token generated. A single H100 cannot hold that tensor, so this is a bandwidth-floor calculation after sharding or quantization has solved the capacity problem. At H100-class HBM bandwidths (~`{python} MemoryBandwidthIntroRecap.h100_bw_str` per accelerator), the data movement alone dictates a latency floor of over 100 ms per token if one accelerator-equivalent bandwidth path must stream the weights. The memory wall is not an abstract architectural concept: it is the physical reason a chatbot takes a perceptible pause between words. Three engineering responses address this constraint: high bandwidth memory (HBM) widens the data pipe, the roofline model rigorously diagnoses whether a workload is starving for data or for compute, and Tensor Cores maximize the arithmetic value of every byte fetched.
 
 ### HBM: Breaking the memory wall {#sec-compute-hbm}
 
@@ -630,10 +630,10 @@ The implications are concrete and perceptible in our running example. Our `{pyth
 class InfraFrontierMemoryIntroRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-An H100 can execute nearly 2,000 TFLOP/s of low-precision matrix arithmetic, yet during autoregressive decoding of our `{python} InfraFrontierMemoryIntroRecap.frontier_params_b_str`B model, its Tensor Cores would sit idle for over 99 percent of each cycle in a bandwidth-floor model. The bottleneck is not the speed of *multiplication* but the speed of *delivery*: once the model has been sharded or compressed so the weights fit, the serving path must still stream the active weight shards through the arithmetic units for every output token. No amount of additional Tensor Cores can help when the existing ones are already starved for data. The technology that defines the modern accelerator's response to this fundamental limitation is High Bandwidth Memory[^fn-hbm-origin].
+An H100 can execute nearly 2,000 TFLOP/s of low-precision matrix arithmetic, yet during autoregressive decoding of our `{python} InfraFrontierMemoryIntroRecap.frontier_params_b_str` model, its Tensor Cores would sit idle for over 99 percent of each cycle in a bandwidth-floor model. The bottleneck is not the speed of *multiplication* but the speed of *delivery*: once the model has been sharded or compressed so the weights fit, the serving path must still stream the active weight shards through the arithmetic units for every output token. No amount of additional Tensor Cores can help when the existing ones are already starved for data. The technology that defines the modern accelerator's response to this fundamental limitation is High Bandwidth Memory[^fn-hbm-origin].
 
 The memory hierarchy within a single accelerator spans orders of magnitude in both capacity and bandwidth. At the top sits the **register file**[^fn-register-file-bandwidth] -- approximately 20--30 MB distributed across all SMs -- with effectively infinite bandwidth (hundreds of TB/s) but minuscule capacity. Below this lies the L1 cache and **shared memory**\index{Shared memory!accelerator SRAM} (SRAM)[^fn-sram-energy-efficiency], offering roughly 256 KB per SM (approximately 33 MB total) with an aggregate bandwidth of ~19 TB/s.
 
@@ -675,10 +675,10 @@ The bandwidth gap between registers and HBM is approximately 100$\times$. If an 
 class InfraFrontierMemoryTilingRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-Despite the `{python} InfraFrontierMemoryTilingRecap.frontier_params_b_str`B model's massive total memory footprint, the active working set at any given microsecond must be meticulously managed to reside in that top 30 MB of register space, or the chip's theoretical performance becomes a mirage.
+Despite the `{python} InfraFrontierMemoryTilingRecap.frontier_params_b_str` model's massive total memory footprint, the active working set at any given microsecond must be meticulously managed to reside in that top 30 MB of register space, or the chip's theoretical performance becomes a mirage.
 
 [^fn-hbm-origin]: **HBM (High Bandwidth Memory)**: Standardized by JEDEC in 2013 as a joint development between AMD and SK Hynix, originally for graphics cards. ML accelerators adopted HBM because neural networks exhibit the same bandwidth-hungry, capacity-moderate access pattern as high-end rendering. Each HBM generation has roughly doubled bandwidth (128 GB/s in HBM1 to 1.2 TB/s per stack in HBM3e), yet the gap between memory bandwidth and arithmetic throughput continues to widen -- making HBM a necessary but never sufficient response to the memory wall. \index{HBM!origin}
 
@@ -792,10 +792,10 @@ For infrastructure planners, this supply chain concentration means that HBM avai
 class InfraFrontierMemoryHbmRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-For our `{python} InfraFrontierMemoryHbmRecap.frontier_params_b_str`B model, the HBM alone in a cluster of 1,000 accelerators represents roughly \$0.8--1.2 million at 80 GB/accelerator (or \$2--3 million at 192 GB/accelerator) under the \$10--15/GB cost model above. This cost-capacity trade-off explains *why* accelerators typically offer 80--192 GB of HBM while the host server provides 512 GB to 2 TB of DDR: the *fast* memory holds the active computation (weights, activations, gradients that are accessed every cycle), and the *cheap* memory holds everything else (optimizer states, checkpoint buffers, data loading queues).
+For our `{python} InfraFrontierMemoryHbmRecap.frontier_params_b_str` model, the HBM alone in a cluster of 1,000 accelerators represents roughly \$0.8--1.2 million at 80 GB/accelerator (or \$2--3 million at 192 GB/accelerator) under the \$10--15/GB cost model above. This cost-capacity trade-off explains *why* accelerators typically offer 80--192 GB of HBM while the host server provides 512 GB to 2 TB of DDR: the *fast* memory holds the active computation (weights, activations, gradients that are accessed every cycle), and the *cheap* memory holds everything else (optimizer states, checkpoint buffers, data loading queues).
 
 The boundary between what resides in HBM and what resides in DDR is a critical design parameter for training frameworks, and managing this boundary efficiently is one of the key challenges addressed by the ZeRO optimization and offloading strategies described in @sec-distributed-training-systems-systems-memoryefficient-data-parallelism-zero-fsdp-0e69. Getting this boundary wrong in either direction is costly: placing too much data in HBM wastes expensive capacity, while placing too much in DDR creates bandwidth stalls that idle the arithmetic units.
 
@@ -819,10 +819,10 @@ The evolution of HBM tracks the growth of model sizes with close correspondence.
 class InfraFrontierStragglerRecap1:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-As @tbl-hbm-evolution shows, the transition from HBM3 to HBM3e is particularly significant for our running example. An A100 with 80 GB of HBM2e can hold only 23 percent of our `{python} InfraFrontierStragglerRecap1.frontier_params_b_str`B model's weights (at FP16). An H100 with 80 GB of HBM3 can hold the same fraction but deliver the data 65 percent faster. A B200 with 192 GB of HBM3e can hold 55 percent of the weights and deliver them at about 8 TB/s. Neither can hold the full model, which is precisely *why* we need multiple accelerators in a node, a topic we address in @sec-compute-node.
+As @tbl-hbm-evolution shows, the transition from HBM3 to HBM3e is particularly significant for our running example. An A100 with 80 GB of HBM2e can hold only 23 percent of our `{python} InfraFrontierStragglerRecap1.frontier_params_b_str` model's weights (at FP16). An H100 with 80 GB of HBM3 can hold the same fraction but deliver the data 65 percent faster. A B200 with 192 GB of HBM3e can hold 55 percent of the weights and deliver them at about 8 TB/s. Neither can hold the full model, which is precisely *why* we need multiple accelerators in a node, a topic we address in @sec-compute-node.
 
 ```{python}
 #| echo: false
@@ -831,10 +831,10 @@ As @tbl-hbm-evolution shows, the transition from HBM3 to HBM3e is particularly s
 class InfraFrontierMemoryQuantRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-However, the capacity story changes significantly when quantization is applied. The same `{python} InfraFrontierMemoryQuantRecap.frontier_params_b_str`B model quantized to INT8 requires only 175 GB, fitting in 3 H100 GPUs or a single B200. Quantized to INT4, it requires only 87.5 GB, fitting in two H100 GPUs. The capacity constraints that drive the need for multi-accelerator nodes for training (where FP16 or BF16 precision is typically required) are substantially relaxed for inference (where INT8 or INT4 quantization is often acceptable). This is another reason *why* training and inference infrastructure have different optimal configurations.
+However, the capacity story changes significantly when quantization is applied. The same `{python} InfraFrontierMemoryQuantRecap.frontier_params_b_str` model quantized to INT8 requires only 175 GB, fitting in 3 H100 GPUs or a single B200. Quantized to INT4, it requires only 87.5 GB, fitting in two H100 GPUs. The capacity constraints that drive the need for multi-accelerator nodes for training (where FP16 or BF16 precision is typically required) are substantially relaxed for inference (where INT8 or INT4 quantization is often acceptable). This is another reason *why* training and inference infrastructure have different optimal configurations.
 
 ```{python}
 #| echo: false
@@ -1134,7 +1134,7 @@ class MemoryBandwidthRooflineFnRecap:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     h100_bw_str = fmt_qty(Hardware.Cloud.H100.memory.bandwidth, TB/second, precision=2, commas=False)
     h100_flops_fp16_str = fmt_qty(Hardware.Cloud.H100.compute.peak_flops, TFLOP/second, precision=0, commas=False)
-    h100_ridge_str = fmt((Hardware.Cloud.H100.compute.peak_flops/Hardware.Cloud.H100.memory.bandwidth).to(flop/byte).magnitude, precision=1, commas=False)
+    h100_ridge_str = fmt_arithmetic_intensity((Hardware.Cloud.H100.compute.peak_flops/Hardware.Cloud.H100.memory.bandwidth), unit=flop/byte, precision=1, commas=False)
 ```
 
 [^fn-roofline-origin-ci]: **Roofline Model**: Introduced by Williams, Waterman, and Patterson at UC Berkeley in 2009, the model plots attainable FLOP/s against arithmetic intensity on a log-log scale, producing two intersecting lines whose crossover point -- the *ridge point* -- separates memory-bound from compute-bound regimes.
@@ -1189,10 +1189,10 @@ If the point lies below either line, the workload is not fully using the availab
 class InfraFrontierMemoryRooflineRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-The Roofline's diagnostic power extends beyond individual kernels to entire training runs. For our `{python} InfraFrontierMemoryRooflineRecap.frontier_params_b_str`B model, the computation graph contains thousands of distinct operations with different arithmetic intensities. The dense Feed-Forward Network (FFN) layers are dominated by large GEMMs with high arithmetic intensity, placing them firmly in the compute-bound regime where Tensor Core utilization is the bottleneck. Conversely, operations like layer normalization and element-wise activations possess low arithmetic intensity, sitting deep in the memory-bound region where the compute units idle while waiting for data. The self-attention mechanism fluctuates between regimes depending on sequence length: while the quadratic complexity of attention scores suggests a compute bound, the loading of Key and Value matrices creates memory pressure at shorter sequences. This diagnostic distinction dictates the optimization strategy: memory-bound layers benefit from kernel fusion (reducing HBM round-trips), while compute-bound layers benefit from precision reduction (moving from FP16 to FP8, which effectively raises the hardware's compute ceiling).
+The Roofline's diagnostic power extends beyond individual kernels to entire training runs. For our `{python} InfraFrontierMemoryRooflineRecap.frontier_params_b_str` model, the computation graph contains thousands of distinct operations with different arithmetic intensities. The dense Feed-Forward Network (FFN) layers are dominated by large GEMMs with high arithmetic intensity, placing them firmly in the compute-bound regime where Tensor Core utilization is the bottleneck. Conversely, operations like layer normalization and element-wise activations possess low arithmetic intensity, sitting deep in the memory-bound region where the compute units idle while waiting for data. The self-attention mechanism fluctuates between regimes depending on sequence length: while the quadratic complexity of attention scores suggests a compute bound, the loading of Key and Value matrices creates memory pressure at shorter sequences. This diagnostic distinction dictates the optimization strategy: memory-bound layers benefit from kernel fusion (reducing HBM round-trips), while compute-bound layers benefit from precision reduction (moving from FP16 to FP8, which effectively raises the hardware's compute ceiling).
 
 ```{python}
 #| echo: false
@@ -1385,7 +1385,7 @@ class RooflineCaptionRecap:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     h100_tflops_str = fmt_qty(h_h100.compute.peak_flops, TFLOP/second, precision=0, commas=False)
     h100_bw_str = fmt_qty(h_h100.memory.bandwidth, TB/second, precision=2, commas=False)
-    h100_ridge_str = fmt((h_h100.compute.peak_flops/h_h100.memory.bandwidth).to(flop/byte).magnitude, precision=1, commas=False)
+    h100_ridge_str = fmt_arithmetic_intensity((h_h100.compute.peak_flops/h_h100.memory.bandwidth), unit=flop/byte, precision=1, commas=False)
 ```
 
 The roofline in @fig-roofline-landscape is defined by two ceilings: memory bandwidth (diagonal) and peak compute (horizontal), meeting at the FP16 ridge point (~`{python} RooflineCaptionRecap.h100_ridge_str` FLOP/byte for `{python} RooflineCaptionRecap.h100_tflops_str` over `{python} RooflineCaptionRecap.h100_bw_str`). ML workloads span the full range: LLM decode at batch size 1 is deeply memory-bound, while LLM training at large batch sizes is compute-bound. The position of each workload determines whether faster memory or faster compute would improve performance.
@@ -1405,10 +1405,10 @@ The practical value of the Roofline Model is that it tells us which resource to 
 class InfraFrontierMemoryTrainRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-For our `{python} InfraFrontierMemoryTrainRecap.frontier_params_b_str`B model, training with large batch sizes is compute-bound (optimize for TFLOP/s), while serving individual requests is memory-bound (optimize for bandwidth). This duality explains why some organizations use different hardware generations for training and inference. An A100, with its lower cost and adequate memory bandwidth, may be more cost-effective for inference than an H100, despite the H100's higher peak FLOP/s.
+For our `{python} InfraFrontierMemoryTrainRecap.frontier_params_b_str` model, training with large batch sizes is compute-bound (optimize for TFLOP/s), while serving individual requests is memory-bound (optimize for bandwidth). This duality explains why some organizations use different hardware generations for training and inference. An A100, with its lower cost and adequate memory bandwidth, may be more cost-effective for inference than an H100, despite the H100's higher peak FLOP/s.
 
 The Roofline Model also provides a quantitative framework for evaluating the return on investment of different optimizations. If a workload is 10$\times$ below the compute ceiling but already touching the bandwidth ceiling, spending engineering effort on kernel optimization (moving toward the compute ceiling) yields no benefit. The effort should instead be directed toward reducing memory traffic (shifting the workload rightward on the plot) through techniques like batching, kernel fusion, or quantization.
 
@@ -1433,7 +1433,7 @@ The Roofline's diagnostic power makes it one of the most practically useful anal
 # │          RooflineInferenceMath.inf_flops_math, RooflineInferenceMath.inf_throughput_math,
 # │          RooflineInferenceMath.inf_peak_pct_str, RooflineInferenceMath.train_intensity_math
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_math, fmt_params, fmt_memory, fmt_bandwidth, fmt_flop_rate
+from mlsysim.fmt import check, fmt, fmt_math, fmt_params, fmt_memory, fmt_bandwidth, fmt_flop_rate, fmt_magnitude, fmt_percent
 
 class RooflineInferenceMath:
     """Formatted math strings for the roofline inference vs training intensity example."""
@@ -1447,8 +1447,9 @@ class RooflineInferenceMath:
     h100_peak = h_h100.compute.peak_flops
     ridge = (h_h100.compute.peak_flops / h_h100.memory.bandwidth).to(flop/byte).magnitude
     params_count = params.to(param).magnitude
-    params_b_str = fmt(params_count / BILLION, precision=0, commas=False)
-    h100_bw_value_str = fmt(h100_bw.to(TB / second).magnitude, precision=2, commas=False)
+    params_b_str = fmt_params(params, scale="B", precision=0, commas=False)
+    params_b_value_str = fmt_magnitude(params, unit=Bparam, precision=0, commas=False)
+    h100_bw_tb_s_value_str = fmt_magnitude(h100_bw, unit=TB / second, precision=2, commas=False)
     h100_bw_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
     h100_tflops_str = fmt_flop_rate(h100_peak, unit=TFLOP / second, precision=0, commas=False)
     h100_ridge_str = fmt(ridge, precision=1, commas=False)
@@ -1468,15 +1469,15 @@ class RooflineInferenceMath:
 
     # ┌── 4. OUTPUT ───────────────────────────────────────────
     inf_weight_gb_str = fmt_memory(inf_weight, unit=GB, precision=0, commas=True)
-    inf_weight_gb_value_str = fmt(inf_weight.to(GB).magnitude, precision=0, commas=True)
+    inf_weight_gb_value_str = fmt_magnitude(inf_weight, unit=GB, precision=0, commas=True)
     inf_intensity_str = fmt(inf_intensity, precision=0, commas=False)
-    inf_throughput_value_str = fmt(inf_throughput.to(TFLOP / second).magnitude, precision=2, commas=False)
+    inf_throughput_tflop_s_value_str = fmt_magnitude(inf_throughput, unit=TFLOP / second, precision=2, commas=False)
     inf_peak_pct_str = fmt_percent(inf_peak_pct/100, precision=2, commas=False, style='prose')
     batch_size_str = fmt(batch_size, precision=0, commas=False)
     train_intensity_str = fmt(train_intensity, precision=0, commas=True)
-    inf_flops_math = fmt_math(f"2 \\times {params_b_str} \\times 10^9")
-    inf_intensity_math = fmt_math(f"\\frac{{2 \\times {params_b_str} \\times 10^9}}{{{inf_weight_gb_value_str} \\times 10^9}} = {inf_intensity_str}")
-    inf_throughput_math = fmt_math(f"{h100_bw_value_str} \\times {inf_intensity_str} = {inf_throughput_value_str}")
+    inf_flops_math = fmt_math(f"2 \\times {params_b_value_str} \\times 10^9")
+    inf_intensity_math = fmt_math(f"\\frac{{2 \\times {params_b_value_str} \\times 10^9}}{{{inf_weight_gb_value_str} \\times 10^9}} = {inf_intensity_str}")
+    inf_throughput_math = fmt_math(f"{h100_bw_tb_s_value_str} \\times {inf_intensity_str} = {inf_throughput_tflop_s_value_str}")
     train_intensity_math = fmt_math(f"{batch_size_str} \\times {inf_intensity_str} = {train_intensity_str}")
 ```
 
@@ -1491,7 +1492,7 @@ The same arithmetic-intensity calculation separates the running model's inferenc
 class InfraFrontierMemoryMxRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
 ```{python}
@@ -1502,10 +1503,10 @@ from mlsysim.fmt import fmt_qty
 class RooflineCalloutRecap:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     h100_tflops_str = fmt_qty(Hardware.Cloud.H100.compute.peak_flops, TFLOP/second, precision=0, commas=False)
-    h100_ridge_str = fmt((Hardware.Cloud.H100.compute.peak_flops/Hardware.Cloud.H100.memory.bandwidth).to(flop/byte).magnitude, precision=1, commas=False)
+    h100_ridge_str = fmt_arithmetic_intensity((Hardware.Cloud.H100.compute.peak_flops/Hardware.Cloud.H100.memory.bandwidth), unit=flop/byte, precision=1, commas=False)
 ```
 
-Consider our `{python} InfraFrontierMemoryMxRecap.frontier_params_b_str`B model on an H100 with `{python} RooflineInferenceMath.h100_tflops_str` peak compute and `{python} RooflineInferenceMath.h100_bw_str` memory bandwidth. The ridge point is `{python} RooflineCalloutRecap.h100_ridge_str` FLOP/byte.
+Consider our `{python} InfraFrontierMemoryMxRecap.frontier_params_b_str` model on an H100 with `{python} RooflineInferenceMath.h100_tflops_str` peak compute and `{python} RooflineInferenceMath.h100_bw_str` memory bandwidth. The ridge point is `{python} RooflineCalloutRecap.h100_ridge_str` FLOP/byte.
 
 **Inference (Decode, Batch Size 1)**: Each token loads `{python} RooflineInferenceMath.inf_weight_gb_str` of FP16 weights and performs `{python} RooflineInferenceMath.inf_flops_math` FLOPs. Arithmetic intensity: $I =$ `{python} RooflineInferenceMath.inf_intensity_math` FLOP/byte. Since `{python} RooflineInferenceMath.inf_intensity_str` $\ll$ `{python} RooflineCalloutRecap.h100_ridge_str` (the ridge point), the workload is deeply memory-bound. The achievable throughput is `{python} RooflineInferenceMath.inf_throughput_math` TFLOP/s, which is about `{python} RooflineInferenceMath.inf_peak_pct_str` of the H100's peak `{python} RooflineCalloutRecap.h100_tflops_str`. No amount of additional compute will help; only more memory bandwidth improves throughput.
 
@@ -1554,10 +1555,10 @@ Google's MXUs take the same concept further by organizing the multipliers into a
 class InfraFrontierMemoryArchRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-For our `{python} InfraFrontierMemoryArchRecap.frontier_params_b_str`B model, the choice between Tensor Cores and MXUs manifests in the compiler stack. CUDA kernels can intermix Tensor Core operations with arbitrary thread-level code, enabling fused kernels that combine matrix multiplies with activation functions, dropout, and layer normalization in a single launch. This fusion is critical for performance because it eliminates the intermediate memory reads and writes that would otherwise occur between operations, keeping data in registers and shared memory where access is fastest.
+For our `{python} InfraFrontierMemoryArchRecap.frontier_params_b_str` model, the choice between Tensor Cores and MXUs manifests in the compiler stack. CUDA kernels can intermix Tensor Core operations with arbitrary thread-level code, enabling fused kernels that combine matrix multiplies with activation functions, dropout, and layer normalization in a single launch. This fusion is critical for performance because it eliminates the intermediate memory reads and writes that would otherwise occur between operations, keeping data in registers and shared memory where access is fastest.
 
 XLA compilation for TPUs must decompose the computation into sequences of matrix operations that map onto the systolic dataflow, which can be more efficient for standard Transformer architectures but less flexible for custom operations. The XLA compiler performs whole-program optimization, analyzing the entire computation graph to find the optimal tiling, memory layout, and execution schedule for the systolic array. For standard Transformer layers, this whole-program optimization can achieve higher hardware utilization than hand-tuned CUDA kernels, because the compiler can reason about the entire computation rather than optimizing individual operations in isolation.
 
@@ -1569,16 +1570,16 @@ The hardware dictates the software abstraction, which in turn shapes what archit
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt_int
+from mlsysim.fmt import fmt, fmt_flop_rate
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Exports: TensorCoreTdpRecap.h100_fp16_tc_str, TensorCoreTdpRecap.h100_fp8_tc_str, TensorCoreTdpRecap.tc_vs_cuda_ratio_str, TensorCoreTdpRecap.h100_fp32_cuda_str
 class TensorCoreTdpRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    h100_fp16_tc_str = fmt(Hardware.Cloud.H100.compute.peak_flops.to(TFLOPs/second).magnitude, precision=0, commas=False)
-    h100_fp8_tc_str = fmt(Hardware.Cloud.H100.compute.precision_flops['fp8'].to(TFLOPs/second).magnitude, precision=0, commas=True)
+    h100_fp16_tc_str = fmt_flop_rate(Hardware.Cloud.H100.compute.peak_flops, unit=TFLOPs/second, precision=0, commas=False)
+    h100_fp8_tc_str = fmt_flop_rate(Hardware.Cloud.H100.compute.precision_flops['fp8'], unit=TFLOPs/second, precision=0, commas=True)
     tc_vs_cuda_ratio_str = fmt(64.0, precision=0, commas=False)
-    h100_fp32_cuda_str = fmt_int(Hardware.Cloud.H100.compute.peak_flops.to(TFLOPs/second).magnitude/64, commas=False)
+    h100_fp32_cuda_str = fmt_flop_rate(Hardware.Cloud.H100.compute.peak_flops / 64, unit=TFLOPs/second, precision=1, commas=False)
 ```
 
 1.  **Significance (quantitative)**: Tensor Cores provide the bulk of the H100's `{python} TensorCoreTdpRecap.h100_fp16_tc_str` FP16/BF16 peak (and ~`{python} TensorCoreTdpRecap.h100_fp8_tc_str` at FP8)—roughly `{python} TensorCoreTdpRecap.tc_vs_cuda_ratio_str`$\times$ the ~`{python} TensorCoreTdpRecap.h100_fp32_cuda_str` delivered by CUDA (vector) cores alone. However, this peak is only achievable for operations that decompose into tiled matrix multiplications. Layer normalization and softmax, which involve reductions and element-wise operations rather than matrix multiplications, run at approximately 3–8 percent of peak throughput on the same hardware.
@@ -1612,7 +1613,7 @@ The practical implication for fleet design is that peak TFLOP/s specifications a
 class InfraFrontierStragglerRecap2:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
 ```{python}
@@ -1628,7 +1629,7 @@ class MemoryBandwidthPipelineRecap:
 
 To achieve this peak throughput in practice, the entire accelerator must be viewed as a rigid pipeline where data flows from HBM through a deepening hierarchy of caches before reaching the Tensor Cores. The fundamental constraint is **pipeline balance**\index{Pipeline!balance}: the rate at which data is staged into registers must match or exceed the rate at which the arithmetic units consume it. When the arithmetic intensity of an operation falls below the ridge point, the pipeline stalls, leaving teraflops of compute potential idle while waiting for data. This makes **kernel fusion**\index{Kernel Fusion} the single most critical software optimization for large-scale training. By fusing multiple operations (matrix multiplication, bias addition, activation function) into a single kernel, the system eliminates the round-trips to HBM that would occur if each operation were executed sequentially. Consider the attention mechanism: a naive, unfused implementation writes the $S{\times}S$ attention matrix to HBM only to read it back for the softmax operation,
 
-a round trip capped by the `{python} MemoryBandwidthPipelineRecap.h100_bw_str` memory bandwidth. A fused implementation like FlashAttention keeps these intermediate matrices entirely in on-chip SRAM, bypassing HBM and allowing the Tensor Cores to run near their theoretical peak. For our `{python} InfraFrontierStragglerRecap2.frontier_params_b_str`B model, where each training step involves thousands of matrix operations across 96 Transformer layers, the difference between fused and unfused kernels can be a 2--3$\times$ throughput improvement, separating a 2-week training run from a 6-week one.
+a round trip capped by the `{python} MemoryBandwidthPipelineRecap.h100_bw_str` memory bandwidth. A fused implementation like FlashAttention keeps these intermediate matrices entirely in on-chip SRAM, bypassing HBM and allowing the Tensor Cores to run near their theoretical peak. For our `{python} InfraFrontierStragglerRecap2.frontier_params_b_str` model, where each training step involves thousands of matrix operations across 96 Transformer layers, the difference between fused and unfused kernels can be a 2--3$\times$ throughput improvement, separating a 2-week training run from a 6-week one.
 
 #### Peak vs. sustained throughput {#sec-compute-infrastructure-peak-vs-sustained-throughput-625a}
 
@@ -1839,10 +1840,10 @@ An accelerator's compute throughput, memory bandwidth, memory capacity, and powe
 class InfraFrontierTdpRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-Large language model training -- our `{python} InfraFrontierTdpRecap.frontier_params_b_str`B running example -- is typically compute-bound during the forward and backward passes because large batch sizes push the arithmetic intensity above the ridge point. The dominant hardware requirement is peak TFLOP/s, with memory capacity being a constraint that determines the minimum number of accelerators needed to hold the model state. The H100 and B200 are well-suited for this workload, as are TPU v5p pods for organizations willing to accept the XLA compilation requirement. The choice between GPU and TPU often comes down to software ecosystem compatibility: PyTorch-native research teams prefer GPUs, while JAX-based teams can take advantage of TPU's cost efficiency.
+Large language model training -- our `{python} InfraFrontierTdpRecap.frontier_params_b_str` running example -- is typically compute-bound during the forward and backward passes because large batch sizes push the arithmetic intensity above the ridge point. The dominant hardware requirement is peak TFLOP/s, with memory capacity being a constraint that determines the minimum number of accelerators needed to hold the model state. The H100 and B200 are well-suited for this workload, as are TPU v5p pods for organizations willing to accept the XLA compilation requirement. The choice between GPU and TPU often comes down to software ecosystem compatibility: PyTorch-native research teams prefer GPUs, while JAX-based teams can take advantage of TPU's cost efficiency.
 
 ```{python}
 #| echo: false
@@ -1902,8 +1903,8 @@ The precision landscape for ML has evolved rapidly. @Tbl-precision-throughput su
 class TensorCorePrecisionRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    h100_fp16_tc_str = fmt(Hardware.Cloud.H100.compute.peak_flops.to(TFLOPs/second).magnitude, precision=0, commas=False)
-    h100_fp8_tc_str = fmt(Hardware.Cloud.H100.compute.precision_flops['fp8'].to(TFLOPs/second).magnitude, precision=0, commas=True)
+    h100_fp16_tc_str = fmt_flop_rate(Hardware.Cloud.H100.compute.peak_flops, unit=TFLOPs/second, precision=0, commas=False)
+    h100_fp8_tc_str = fmt_flop_rate(Hardware.Cloud.H100.compute.precision_flops['fp8'], unit=TFLOPs/second, precision=0, commas=True)
 ```
 
 | **Format**           | **Bits** | **Exponent** | **Mantissa** |                **H100 Dense TFLOP/s**                | **Typical Use**                  |
@@ -1930,10 +1931,10 @@ However, not all workloads can use FP8 without accuracy degradation. The reduced
 class InfraFrontierStragglerRecap3:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-For inference, **quantization**\index{Quantization} stands as the single most impactful optimization for serving economics, directly altering the hardware topology required for large models. Our `{python} InfraFrontierStragglerRecap3.frontier_params_b_str`B model at FP16 requires 350 GB, necessitating a minimum of five 80 GB H100 GPUs simply to load the parameters. At INT8, this drops to 175 GB, fitting on three GPUs. At INT4, it shrinks to 87.5 GB, fitting on two GPUs. Because inference is strictly memory-bandwidth-bound, reading 4-bit weights instead of 16-bit weights effectively quadruples the available bandwidth for weight loading, proportionally reducing per-token latency. A production team deploying at INT4 rather than FP16 reduces their inference fleet by 4$\times$, saving millions of dollars annually at scale while incurring less than 1 percent quality loss on standard benchmarks when using group quantization techniques.
+For inference, **quantization**\index{Quantization} stands as the single most impactful optimization for serving economics, directly altering the hardware topology required for large models. Our `{python} InfraFrontierStragglerRecap3.frontier_params_b_str` model at FP16 requires 350 GB, necessitating a minimum of five 80 GB H100 GPUs simply to load the parameters. At INT8, this drops to 175 GB, fitting on three GPUs. At INT4, it shrinks to 87.5 GB, fitting on two GPUs. Because inference is strictly memory-bandwidth-bound, reading 4-bit weights instead of 16-bit weights effectively quadruples the available bandwidth for weight loading, proportionally reducing per-token latency. A production team deploying at INT4 rather than FP16 reduces their inference fleet by 4$\times$, saving millions of dollars annually at scale while incurring less than 1 percent quality loss on standard benchmarks when using group quantization techniques.
 
 For training, modern workloads use **mixed-precision training**\index{Mixed-Precision Training}, a strategy that decouples storage precision from arithmetic precision. A "master copy" of weights remains in FP32 for numerical stability, while the computationally intensive forward and backward passes are cast to BF16 or FP16 to exploit the full throughput of Tensor Cores. Gradients are accumulated in FP32 to prevent underflow before the optimizer updates the master weights. The H100's Transformer Engine extends this paradigm by dynamically selecting between FP8 and FP16 on a per-layer basis, potentially doubling throughput again for layers resilient to reduced precision. The cumulative effect on training velocity can be multiple-fold when the model remains numerically stable at the lower precision.
 
@@ -1980,11 +1981,11 @@ from mlsysim.fmt import fmt_qty
 class InfraFrontierTdpServingRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
     weight_gb_str = fmt_qty(Models.Language.GPT3.parameters * BYTES_FP16, GB, precision=0, commas=False)
 ```
 
-The macro impact appears when serving our `{python} InfraFrontierTdpServingRecap.frontier_params_b_str`B model. Generating a single token requires loading the entire `{python} InfraFrontierTdpServingRecap.weight_gb_str` weight tensor from HBM:
+The macro impact appears when serving our `{python} InfraFrontierTdpServingRecap.frontier_params_b_str` model. Generating a single token requires loading the entire `{python} InfraFrontierTdpServingRecap.weight_gb_str` weight tensor from HBM:
 
 $$\text{Data Movement Energy} = 350 \text{ GB} \times 8 \text{ bits/byte} \times 4 \text{ pJ/bit} \approx \mathbf{11.2 \text{ Joules}}$$
 
@@ -2013,10 +2014,10 @@ A critical subtlety in interpreting MLPerf results is the distinction between *c
 class InfraFrontierTdpBenchRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-For our `{python} InfraFrontierTdpBenchRecap.frontier_params_b_str`B model, no single benchmark captures the full picture. The training phase is compute-bound at large batch sizes, making peak TFLOP/s and scaling efficiency the dominant metrics. The inference phase at batch size 1 is memory-bandwidth-bound, making GB/s per dollar the relevant metric. The fine-tuning phase falls between these extremes, with moderate batch sizes placing the workload near the Roofline ridge point. A comprehensive evaluation must benchmark all three phases on the candidate hardware, using the organization's actual model and data pipeline rather than relying solely on published MLPerf numbers.
+For our `{python} InfraFrontierTdpBenchRecap.frontier_params_b_str` model, no single benchmark captures the full picture. The training phase is compute-bound at large batch sizes, making peak TFLOP/s and scaling efficiency the dominant metrics. The inference phase at batch size 1 is memory-bandwidth-bound, making GB/s per dollar the relevant metric. The fine-tuning phase falls between these extremes, with moderate batch sizes placing the workload near the Roofline ridge point. A comprehensive evaluation must benchmark all three phases on the candidate hardware, using the organization's actual model and data pipeline rather than relying solely on published MLPerf numbers.
 
 ::: {#psp-compute-infrastructure-beyond-peak-specifications .callout-perspective title="Beyond peak specifications"}
 
@@ -2077,10 +2078,10 @@ The implication is that optimal serving infrastructure often uses different hard
 class InfraFrontierStragglerRecap4:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-The inference workload itself bifurcates into two distinct phases with opposing bottlenecks. The **prefill**\index{Prefill!inference phase} phase processes the input prompt, performing a large matrix-matrix multiplication that is compute-bound and achieves high Tensor Core utilization. The **decode**\index{Decode!inference phase} phase generates tokens one by one, performing matrix-vector multiplications that are deeply memory-bandwidth-bound. To maximize hardware utilization, modern serving systems employ **continuous batching**\index{Continuous Batching}, which schedules requests at the iteration level rather than the request level. This allows the engine to inject a new prefill computation for a waiting request into the idle compute slots of an ongoing decode batch, dynamically filling the GPU's arithmetic pipelines. For our `{python} InfraFrontierStragglerRecap4.frontier_params_b_str`B model, serving 10,000 requests per second with a 50 ms time-to-first-token service level agreement (SLA) requires distributing traffic across hundreds of 8-GPU replicas (each holding the full model via tensor parallelism), with a load balancer routing requests to the replica with the lowest current queue depth. Unlike training, where 99.9 percent reliability is acceptable via checkpointing, inference architectures must account for tail latency, where a single slow replica can violate the SLA for the entire request batch.
+The inference workload itself bifurcates into two distinct phases with opposing bottlenecks. The **prefill**\index{Prefill!inference phase} phase processes the input prompt, performing a large matrix-matrix multiplication that is compute-bound and achieves high Tensor Core utilization. The **decode**\index{Decode!inference phase} phase generates tokens one by one, performing matrix-vector multiplications that are deeply memory-bandwidth-bound. To maximize hardware utilization, modern serving systems employ **continuous batching**\index{Continuous Batching}, which schedules requests at the iteration level rather than the request level. This allows the engine to inject a new prefill computation for a waiting request into the idle compute slots of an ongoing decode batch, dynamically filling the GPU's arithmetic pipelines. For our `{python} InfraFrontierStragglerRecap4.frontier_params_b_str` model, serving 10,000 requests per second with a 50 ms time-to-first-token service level agreement (SLA) requires distributing traffic across hundreds of 8-GPU replicas (each holding the full model via tensor parallelism), with a load balancer routing requests to the replica with the lowest current queue depth. Unlike training, where 99.9 percent reliability is acceptable via checkpointing, inference architectures must account for tail latency, where a single slow replica can violate the SLA for the entire request batch.
 
 #### The accelerator decision matrix {#sec-compute-infrastructure-accelerator-decision-matrix-8bba}
 
@@ -2105,10 +2106,10 @@ A practical decision framework synthesizes these workload-specific characteristi
 class InfraFrontierTdpDecisionRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-As @tbl-accelerator-decision shows, for our `{python} InfraFrontierTdpDecisionRecap.frontier_params_b_str`B model, the decision depends on the phase of the model's lifecycle. During training, large batch sizes push the workload into the compute-bound regime, making peak TFLOP/s the dominant metric. The H100 or B200, with their high Tensor Core throughput and fast NVLink for tensor parallelism, are the natural choices. During inference at low batch sizes, the same model becomes deeply memory-bound, and the relevant metric shifts to bandwidth per dollar. An A100 with adequate HBM bandwidth at a lower price point may deliver better cost-per-token than an H100 whose additional TFLOP/s go unused.
+As @tbl-accelerator-decision shows, for our `{python} InfraFrontierTdpDecisionRecap.frontier_params_b_str` model, the decision depends on the phase of the model's lifecycle. During training, large batch sizes push the workload into the compute-bound regime, making peak TFLOP/s the dominant metric. The H100 or B200, with their high Tensor Core throughput and fast NVLink for tensor parallelism, are the natural choices. During inference at low batch sizes, the same model becomes deeply memory-bound, and the relevant metric shifts to bandwidth per dollar. An A100 with adequate HBM bandwidth at a lower price point may deliver better cost-per-token than an H100 whose additional TFLOP/s go unused.
 
 The organizational dimension adds a further consideration. Research labs that modify model architectures weekly need the flexibility of the GPU's CUDA ecosystem, where custom kernels can be written and tested in hours. Production teams running a fixed Transformer architecture at scale for months may benefit from TPUs, where the XLA compiler's whole-program optimization can achieve higher sustained utilization than hand-tuned CUDA kernels for standard operations. Custom ASICs make economic sense only for organizations with enough scale to amortize the \$50--200 million NRE cost and enough workload stability to justify a 2--3 year design cycle. The accelerator spectrum is ultimately an economic question answered at the intersection of workload physics, organizational scale, and time horizon.
 
@@ -2125,10 +2126,10 @@ Your team needs to deploy a 70B-parameter model for both training and inference.
 class InfraFrontierTdpTransitionRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-With the accelerator's physics established, we face a concrete problem. Our `{python} InfraFrontierTdpTransitionRecap.frontier_params_b_str`B model requires 350 GB of memory for its weights alone in FP16, and Adam-style training state raises the requirement to multiple terabytes once optimizer moments, gradients, and activations are included. A single H100 provides 80 GB of HBM. No single accelerator can hold this model. We must expand to the next physical level: the node, where @fig-node-topology-comparison contrasts the two dominant approaches to wiring multiple accelerators within a single chassis.\index{Ring}\index{Full Mesh}\index{NVSwitch Crossbar}
+With the accelerator's physics established, we face a concrete problem. Our `{python} InfraFrontierTdpTransitionRecap.frontier_params_b_str` model requires 350 GB of memory for its weights alone in FP16, and Adam-style training state raises the requirement to multiple terabytes once optimizer moments, gradients, and activations are included. A single H100 provides 80 GB of HBM. No single accelerator can hold this model. We must expand to the next physical level: the node, where @fig-node-topology-comparison contrasts the two dominant approaches to wiring multiple accelerators within a single chassis.\index{Ring}\index{Full Mesh}\index{NVSwitch Crossbar}
 
 ## The Node {#sec-compute-node}
 
@@ -2147,10 +2148,10 @@ With the accelerator's physics established, we face a concrete problem. Our `{py
 class InfraFrontierNodeMemRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-Our `{python} InfraFrontierNodeMemRecap.frontier_params_b_str`B model needs 350 GB for its FP16 weights alone. A single H100 provides 80 GB of HBM, so we need at least five accelerators just to place the weights. An 8-H100 dense node can hold those weight shards, but it cannot hold the full Adam training state in HBM: optimizer moments, gradients, activations, and communication buffers push the requirement into the 2 TB range. This arithmetic forces us beyond the single die to the next physical level: the node, and it also forces the training system to combine tensor parallelism with optimizer sharding and memory offload.
+Our `{python} InfraFrontierNodeMemRecap.frontier_params_b_str` model needs 350 GB for its FP16 weights alone. A single H100 provides 80 GB of HBM, so we need at least five accelerators just to place the weights. An 8-H100 dense node can hold those weight shards, but it cannot hold the full Adam training state in HBM: optimizer moments, gradients, activations, and communication buffers push the requirement into the 2 TB range. This arithmetic forces us beyond the single die to the next physical level: the node, and it also forces the training system to combine tensor parallelism with optimizer sharding and memory offload.
 
 ```{python}
 #| echo: false
@@ -2207,7 +2208,7 @@ class InfraFrontierNodeBudgetRecap:
     check(abs(total_static.to(GB).magnitude - 2100) < 1, "Static training state should be about 2.1 TB")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(params.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(params, scale="B", precision=0, commas=False)
     weights_gb_str = fmt_memory(weights, unit=GB, precision=0, commas=True)
     optimizer_gb_str = fmt_memory(optimizer, unit=GB, precision=0, commas=True)
     gradients_gb_str = fmt_memory(gradients, unit=GB, precision=0, commas=True)
@@ -2216,7 +2217,7 @@ class InfraFrontierNodeBudgetRecap:
     node_hbm_gb_str = fmt_qty(node_hbm, GiB, precision=0, commas=False, unit_label="GB")
 ```
 
-Understanding how the node partitions memory across its components is essential for selecting parallelism strategies. Consider the memory budget for training our `{python} InfraFrontierNodeBudgetRecap.frontier_params_b_str`B model. The model weights in FP16 require `{python} InfraFrontierNodeBudgetRecap.weights_gb_str`. The Adam optimizer maintains two additional copies of every parameter (first and second moments) in FP32 precision, adding `{python} InfraFrontierNodeBudgetRecap.frontier_params_b_str` $\times 10^9 \times 2 \times 4$ bytes = `{python} InfraFrontierNodeBudgetRecap.optimizer_gb_str`. Gradients require another `{python} InfraFrontierNodeBudgetRecap.gradients_gb_str`. The total is approximately `{python} InfraFrontierNodeBudgetRecap.total_static_tb_str` before activations, far exceeding both a single accelerator's `{python} InfraFrontierNodeBudgetRecap.gpu_hbm_gb_str` HBM and an 8-H100 node's `{python} InfraFrontierNodeBudgetRecap.node_hbm_gb_str` aggregate HBM.
+Understanding how the node partitions memory across its components is essential for selecting parallelism strategies. Consider the memory budget for training our `{python} InfraFrontierNodeBudgetRecap.frontier_params_b_str` model. The model weights in FP16 require `{python} InfraFrontierNodeBudgetRecap.weights_gb_str`. The Adam optimizer maintains two additional copies of every parameter (first and second moments) in FP32 precision, adding `{python} InfraFrontierNodeBudgetRecap.frontier_params_b_str` $\times 10^9 \times 2 \times 4$ bytes = `{python} InfraFrontierNodeBudgetRecap.optimizer_gb_str`. Gradients require another `{python} InfraFrontierNodeBudgetRecap.gradients_gb_str`. The total is approximately `{python} InfraFrontierNodeBudgetRecap.total_static_tb_str` before activations, far exceeding both a single accelerator's `{python} InfraFrontierNodeBudgetRecap.gpu_hbm_gb_str` HBM and an 8-H100 node's `{python} InfraFrontierNodeBudgetRecap.node_hbm_gb_str` aggregate HBM.
 
 When using ZeRO or FSDP-style optimization (which shards optimizer states, gradients, and optionally parameters across data-parallel workers), the training system avoids replicating this full 2.1 TB state on every GPU. Tensor parallelism first reduces each GPU's active weight shard; data-parallel sharding then spreads optimizer state and gradients across many workers; activation checkpointing reduces the activation peak; and offload moves cold optimizer state to host DRAM over PCIe. The node is therefore a high-bandwidth compute and communication unit, not a standalone container for the entire training state.
 
@@ -2370,7 +2371,7 @@ class InfraFrontierNodeTpRecap:
     check(activation < gradient_allreduce, "Activation payload should be smaller than the gradient buffer")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(params.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(params, scale="B", precision=0, commas=False)
     hidden_dim_str = fmt(hidden_dim, precision=0, commas=True)
     microbatch_str = fmt(microbatch, precision=0, commas=False)
     seq_len_str = fmt(seq_len, precision=0, commas=True)
@@ -2378,7 +2379,7 @@ class InfraFrontierNodeTpRecap:
     gradient_allreduce_gb_str = fmt_memory(gradient_allreduce, unit=GB, precision=0, commas=False)
 ```
 
-For our `{python} InfraFrontierNodeTpRecap.frontier_params_b_str`B model with hidden dimension `{python} InfraFrontierNodeTpRecap.hidden_dim_str` and a microbatch of `{python} InfraFrontierNodeTpRecap.microbatch_str` sequences at `{python} InfraFrontierNodeTpRecap.seq_len_str`, the activation tensor at each stage boundary is approximately $4 \times 2{,}048 \times 12{,}288 \times 2$ bytes (FP16) $\approx$ `{python} InfraFrontierNodeTpRecap.activation_mb_str`. This is far smaller than the `{python} InfraFrontierNodeTpRecap.gradient_allreduce_gb_str` gradient AllReduce required by data parallelism, which is why pipeline parallelism places less demanding requirements on the inter-node network.
+For our `{python} InfraFrontierNodeTpRecap.frontier_params_b_str` model with hidden dimension `{python} InfraFrontierNodeTpRecap.hidden_dim_str` and a microbatch of `{python} InfraFrontierNodeTpRecap.microbatch_str` sequences at `{python} InfraFrontierNodeTpRecap.seq_len_str`, the activation tensor at each stage boundary is approximately $4 \times 2{,}048 \times 12{,}288 \times 2$ bytes (FP16) $\approx$ `{python} InfraFrontierNodeTpRecap.activation_mb_str`. This is far smaller than the `{python} InfraFrontierNodeTpRecap.gradient_allreduce_gb_str` gradient AllReduce required by data parallelism, which is why pipeline parallelism places less demanding requirements on the inter-node network.
 
 Activation transfers occur once per microbatch per stage boundary, far less frequently than tensor parallelism's per-layer AllReduce. Pipeline parallelism can therefore tolerate the lower bandwidth of inter-node links, making it the preferred strategy for spanning multiple nodes when the model's depth exceeds a single node's capacity.
 
@@ -2512,10 +2513,10 @@ The host CPU also runs the training framework's Python runtime, which orchestrat
 class InfraFrontierStragglerRecap5:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-As the "data center tax" on host CPUs has grown -- with up to 30 percent of CPU cycles consumed by network protocol processing, storage virtualization, and security functions -- modern ML nodes increasingly incorporate **Data Processing Units (DPUs)**\index{Data Processing Unit} or SmartNICs. Devices like the NVIDIA BlueField DPU offload these infrastructure tasks to dedicated ARM cores and hardware accelerators integrated into the network adapter itself. By moving the control plane for RDMA, firewall rules, and storage protocols to the DPU, the host CPU recovers nearly all its cycles for the ML pipeline: data loading, tokenization, and kernel orchestration. The DPU also acts as an isolated security domain, allowing cloud providers to maintain control over the network and storage layer via the DPU while granting customers full access to the host CPU and GPUs. For our `{python} InfraFrontierStragglerRecap5.frontier_params_b_str`B model training, the DPU's offloading of RDMA protocol processing ensures that the host CPU is never on the critical path for gradient synchronization, which flows directly from GPU HBM through the DPU to the InfiniBand fabric without host CPU involvement.
+As the "data center tax" on host CPUs has grown -- with up to 30 percent of CPU cycles consumed by network protocol processing, storage virtualization, and security functions -- modern ML nodes increasingly incorporate **Data Processing Units (DPUs)**\index{Data Processing Unit} or SmartNICs. Devices like the NVIDIA BlueField DPU offload these infrastructure tasks to dedicated ARM cores and hardware accelerators integrated into the network adapter itself. By moving the control plane for RDMA, firewall rules, and storage protocols to the DPU, the host CPU recovers nearly all its cycles for the ML pipeline: data loading, tokenization, and kernel orchestration. The DPU also acts as an isolated security domain, allowing cloud providers to maintain control over the network and storage layer via the DPU while granting customers full access to the host CPU and GPUs. For our `{python} InfraFrontierStragglerRecap5.frontier_params_b_str` model training, the DPU's offloading of RDMA protocol processing ensures that the host CPU is never on the critical path for gradient synchronization, which flows directly from GPU HBM through the DPU to the InfiniBand fabric without host CPU involvement.
 
 #### Alternative node architectures {#sec-compute-infrastructure-alternative-node-architectures-2e3c}
 
@@ -2530,10 +2531,10 @@ AMD's MI300X represents a distinct alternative. The MI300X is a chiplet-based de
 class InfraFrontierStragglerRecap6:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-The MI300X's 192 GB of HBM per accelerator is particularly notable. While the H100 offers 80 GB, the MI300X's larger capacity means that a single 8-GPU node can hold 1,536 GB of HBM, enough to fit the full weight tensor of our `{python} InfraFrontierStragglerRecap6.frontier_params_b_str`B model (350 GB in FP16) with much more headroom for gradients and activations. It still does not hold the entire 2.2--2.5 TB Adam training footprint in HBM, but the extra capacity reduces offload pressure, enables larger microbatches, and can improve scaling efficiency.
+The MI300X's 192 GB of HBM per accelerator is particularly notable. While the H100 offers 80 GB, the MI300X's larger capacity means that a single 8-GPU node can hold 1,536 GB of HBM, enough to fit the full weight tensor of our `{python} InfraFrontierStragglerRecap6.frontier_params_b_str` model (350 GB in FP16) with much more headroom for gradients and activations. It still does not hold the entire 2.2--2.5 TB Adam training footprint in HBM, but the extra capacity reduces offload pressure, enables larger microbatches, and can improve scaling efficiency.
 
 ```{python}
 #| echo: false
@@ -2559,10 +2560,10 @@ Each approach reflects a different bet about which constraint will be most bindi
 class InfraFrontierNodeChoiceRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-For our `{python} InfraFrontierNodeChoiceRecap.frontier_params_b_str`B model, the choice matters primarily for the tensor-parallel portion of the training computation, where the accelerator interconnect is on the critical path. The secondary effects (software ecosystem maturity, supply chain availability, total cost of ownership), however, often dominate the primary performance differences in practice.
+For our `{python} InfraFrontierNodeChoiceRecap.frontier_params_b_str` model, the choice matters primarily for the tensor-parallel portion of the training computation, where the accelerator interconnect is on the critical path. The secondary effects (software ecosystem maturity, supply chain availability, total cost of ownership), however, often dominate the primary performance differences in practice.
 
 #### Node health and reliability {#sec-compute-infrastructure-node-health-reliability-56a6}
 
@@ -2635,10 +2636,10 @@ class NodeReliabilityScenario:
 class InfraFrontierNodeTrainRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-For our `{python} InfraFrontierNodeTrainRecap.frontier_params_b_str`B model training across `{python} NodeReliabilityScenario.nodes_str` nodes, the probability of at least one node experiencing a hardware issue during a two-week training run is substantial. Under a composite node-level MTBF assumption of `{python} NodeReliabilityScenario.node_mtbf_str`, which includes GPUs, host components, power, cooling, and network links, the expected number of node failures during a `{python} NodeReliabilityScenario.run_hours_str`-hour run is approximately `{python} NodeReliabilityScenario.expected_failures_str`. This means the training run will experience, on average, roughly `{python} NodeReliabilityScenario.failures_per_day_str` failures per day. A GPU-only lower bound from the canonical `{python} NodeReliabilityScenario.gpu_mtbf_str`-hour per-GPU MTBF would predict only `{python} NodeReliabilityScenario.gpu_only_outages_str` GPU-driven node outages over the same run, before adding host, power, cooling, and network failure terms. Each failure requires detecting the degraded node, draining its workload, substituting a spare node, and resuming from the last checkpoint -- a process that takes `{python} NodeReliabilityScenario.recovery_low_str`--`{python} NodeReliabilityScenario.recovery_high_str` with automated tooling. With automated recovery, the direct restart overhead is roughly `{python} NodeReliabilityScenario.restart_overhead_low_str`--`{python} NodeReliabilityScenario.restart_overhead_high_str` of the run; without spare nodes and automated recovery, multi-hour interventions can push overhead into the 20--30 percent range, consuming millions of dollars in wasted GPU-hours.
+For our `{python} InfraFrontierNodeTrainRecap.frontier_params_b_str` model training across `{python} NodeReliabilityScenario.nodes_str` nodes, the probability of at least one node experiencing a hardware issue during a two-week training run is substantial. Under a composite node-level MTBF assumption of `{python} NodeReliabilityScenario.node_mtbf_str`, which includes GPUs, host components, power, cooling, and network links, the expected number of node failures during a `{python} NodeReliabilityScenario.run_hours_str`-hour run is approximately `{python} NodeReliabilityScenario.expected_failures_str`. This means the training run will experience, on average, roughly `{python} NodeReliabilityScenario.failures_per_day_str` failures per day. A GPU-only lower bound from the canonical `{python} NodeReliabilityScenario.gpu_mtbf_str`-hour per-GPU MTBF would predict only `{python} NodeReliabilityScenario.gpu_only_outages_str` GPU-driven node outages over the same run, before adding host, power, cooling, and network failure terms. Each failure requires detecting the degraded node, draining its workload, substituting a spare node, and resuming from the last checkpoint -- a process that takes `{python} NodeReliabilityScenario.recovery_low_str`--`{python} NodeReliabilityScenario.recovery_high_str` with automated tooling. With automated recovery, the direct restart overhead is roughly `{python} NodeReliabilityScenario.restart_overhead_low_str`--`{python} NodeReliabilityScenario.restart_overhead_high_str` of the run; without spare nodes and automated recovery, multi-hour interventions can push overhead into the 20--30 percent range, consuming millions of dollars in wasted GPU-hours.
 
 ### Node memory partitioning {#sec-compute-node-memory}
 
@@ -2651,10 +2652,10 @@ A common misconception is that a model's memory footprint equals its weight stor
 class InfraFrontierNodeBreakdownRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-As @tbl-memory-breakdown shows, for our `{python} InfraFrontierNodeBreakdownRecap.frontier_params_b_str`B model, the training memory breaks down as follows:
+As @tbl-memory-breakdown shows, for our `{python} InfraFrontierNodeBreakdownRecap.frontier_params_b_str` model, the training memory breaks down as follows:
 
 ```{python}
 #| echo: false
@@ -2691,9 +2692,9 @@ class InfraFrontierNodeTableRecap:
     check(optimizer_m > weights, "FP32 optimizer moment must exceed FP16 weights")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(params.to(param).magnitude / BILLION, precision=0, commas=False)
-    bytes_fp16_str = fmt_int(BYTES_FP16.to(byte).magnitude, commas=False)
-    bytes_fp32_str = fmt_int(BYTES_FP32.to(byte).magnitude, commas=False)
+    frontier_params_b_str = fmt_params(params, scale="B", precision=0, commas=False)
+    bytes_fp16_str = fmt_memory(BYTES_FP16, unit=byte, precision=0, commas=False)
+    bytes_fp32_str = fmt_memory(BYTES_FP32, unit=byte, precision=0, commas=False)
     weights_gb_str = fmt_memory(weights, unit=GB, precision=0, commas=False)
     gradients_gb_str = fmt_memory(gradients, unit=GB, precision=0, commas=False)
     optimizer_m_gb_str = fmt_memory(optimizer_m, unit=GB, precision=0, commas=False)
@@ -2702,14 +2703,14 @@ class InfraFrontierNodeTableRecap:
     total_range_tb_str = fmt_qty_range(total_min, total_max, TB, precision=1, commas=False)
 ```
 
-| **Component**                          | **Precision** |                   **Memory per Parameter**                  | **Total for `{python} InfraFrontierNodeTableRecap.frontier_params_b_str`B Model** |
-|:---------------------------------------|:-------------:|:-----------------------------------------------------------:|:---------------------------------------------------------------------------------:|
-| **Model Weights**\index{Model Weights} |      FP16     | `{python} InfraFrontierNodeTableRecap.bytes_fp16_str` bytes |               `{python} InfraFrontierNodeTableRecap.weights_gb_str`               |
-| **Gradients**                          |      FP16     | `{python} InfraFrontierNodeTableRecap.bytes_fp16_str` bytes |              `{python} InfraFrontierNodeTableRecap.gradients_gb_str`              |
-| **Optimizer (Adam $m$)**               |      FP32     | `{python} InfraFrontierNodeTableRecap.bytes_fp32_str` bytes |             `{python} InfraFrontierNodeTableRecap.optimizer_m_gb_str`             |
-| **Optimizer (Adam $v$)**               |      FP32     | `{python} InfraFrontierNodeTableRecap.bytes_fp32_str` bytes |             `{python} InfraFrontierNodeTableRecap.optimizer_v_gb_str`             |
-| **Activations**                        |     Mixed     |                           Variable                          |           `{python} InfraFrontierNodeTableRecap.activation_range_gb_str`          |
-| **Total**                              |               |                                                             |           **`{python} InfraFrontierNodeTableRecap.total_range_tb_str`**           |
+| **Component**                          | **Precision** |                   **Memory per Parameter**                  | **Total for `{python} InfraFrontierNodeTableRecap.frontier_params_b_str` Model** |
+|:---------------------------------------|:-------------:|:-----------------------------------------------------------:|:--------------------------------------------------------------------------------:|
+| **Model Weights**\index{Model Weights} |      FP16     | `{python} InfraFrontierNodeTableRecap.bytes_fp16_str` bytes |              `{python} InfraFrontierNodeTableRecap.weights_gb_str`               |
+| **Gradients**                          |      FP16     | `{python} InfraFrontierNodeTableRecap.bytes_fp16_str` bytes |             `{python} InfraFrontierNodeTableRecap.gradients_gb_str`              |
+| **Optimizer (Adam $m$)**               |      FP32     | `{python} InfraFrontierNodeTableRecap.bytes_fp32_str` bytes |            `{python} InfraFrontierNodeTableRecap.optimizer_m_gb_str`             |
+| **Optimizer (Adam $v$)**               |      FP32     | `{python} InfraFrontierNodeTableRecap.bytes_fp32_str` bytes |            `{python} InfraFrontierNodeTableRecap.optimizer_v_gb_str`             |
+| **Activations**                        |     Mixed     |                           Variable                          |          `{python} InfraFrontierNodeTableRecap.activation_range_gb_str`          |
+| **Total**                              |               |                                                             |          **`{python} InfraFrontierNodeTableRecap.total_range_tb_str`**           |
 
 : **Training Memory Breakdown for a 175B-Parameter Frontier Model**: The optimizer state alone (first and second moments in FP32) consumes 4$\times$ the memory of the model weights, making optimizer memory the dominant component of training memory. This is why memory optimization techniques focus heavily on optimizer state sharding and offloading. {#tbl-memory-breakdown}
 
@@ -2735,7 +2736,7 @@ class InfraFrontierNodeWeightsRecap:
     total_footprint_max = 2.5 * TB
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(params.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(params, scale="B", precision=0, commas=False)
     weights_gb_str = fmt_memory(weights, unit=GB, precision=0, commas=False)
     optimizer_gb_str = fmt_memory(optimizer, unit=GB, precision=0, commas=True)
     gradients_gb_str = fmt_memory(gradients, unit=GB, precision=0, commas=False)
@@ -2860,10 +2861,10 @@ class MemoryBandwidthNodeTableRecap:
 class InfraFrontierNodeOrchRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-The orchestration is complex but essential: without it, training our `{python} InfraFrontierNodeOrchRecap.frontier_params_b_str`B model on currently available hardware would be impossible. @Sec-distributed-training-systems examines these memory optimization strategies and their interaction with parallelism in full detail.
+The orchestration is complex but essential: without it, training our `{python} InfraFrontierNodeOrchRecap.frontier_params_b_str` model on currently available hardware would be impossible. @Sec-distributed-training-systems examines these memory optimization strategies and their interaction with parallelism in full detail.
 
 #### Putting it together: Memory budget exercise {#sec-compute-infrastructure-putting-together-memory-budget-exercise-f357}
 
@@ -2874,10 +2875,10 @@ The orchestration is complex but essential: without it, training our `{python} I
 class InfraFrontierNodeSizingRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-To solidify the memory planning concepts, consider a concrete sizing exercise for our `{python} InfraFrontierNodeSizingRecap.frontier_params_b_str`B model on a DGX H100 node.
+To solidify the memory planning concepts, consider a concrete sizing exercise for our `{python} InfraFrontierNodeSizingRecap.frontier_params_b_str` model on a DGX H100 node.
 
 ::: {#exmp-compute-infrastructure-memory-budget-175b-training-dgx-h_h100 .callout-example title="Memory budget for 175B training on DGX H100"}
 
@@ -2913,7 +2914,7 @@ class InfraFrontierNodeModelRecap:
     optimizer_pool = weight * 4
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
     node_gpus_str = fmt(node_gpus, precision=0, commas=False)
     h100_mem_gb_str = fmt_qty(h100_mem, GiB, precision=0, commas=False, unit_label="GB")
     total_hbm_gb_str = fmt_qty(h100_mem * node_gpus, GiB, precision=0, commas=False, unit_label="GB")
@@ -2927,7 +2928,7 @@ class InfraFrontierNodeModelRecap:
     optimizer_pool_gb_str = fmt_memory(optimizer_pool, unit=GB, precision=0, commas=True)
 ```
 
-- Model: `{python} InfraFrontierNodeModelRecap.frontier_params_b_str`B parameters
+- Model: `{python} InfraFrontierNodeModelRecap.frontier_params_b_str` parameters
 - Node: `{python} InfraFrontierNodeModelRecap.node_gpus_str`$\times$ H100 GPUs, `{python} InfraFrontierNodeModelRecap.h100_mem_gb_str` HBM each (`{python} InfraFrontierNodeModelRecap.total_hbm_gb_str` total HBM)
 - Host: `{python} InfraFrontierNodeModelRecap.host_ddr_tb_str` DDR5
 - Parallelism: 8-way tensor parallelism within the node
@@ -3064,10 +3065,10 @@ The required prefetch depth is not arbitrary but follows from the statistics of 
 class InfraFrontierNodeIoRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-As cluster sizes expand, a new bottleneck emerges at the storage layer: the I/O wall. When training our `{python} InfraFrontierNodeIoRecap.frontier_params_b_str`B model across 128 nodes, the system acts as a synchronized "thundering herd" -- all 128 nodes simultaneously demand the next microbatch of tokens at the start of every training step. A shared parallel filesystem like Lustre, even with 500 GB/s of aggregate throughput, will buckle when 128 clients simultaneously pull data, causing read latencies to spike from milliseconds to seconds. The architectural solution is **tiered storage**\index{Tiered Storage} with aggressive local caching. By provisioning each training node with local NVMe SSDs capable of delivering 25 GB/s per node, the cluster decouples its immediate data dependency from the shared filesystem. A background process prefetches data from the central store to the local NVMe cache asynchronously, smoothing out I/O spikes. For the 128-node cluster, local NVMe creates an aggregate read bandwidth of 3.2 TB/s ($128 \times 25$ GB/s), eclipsing the capability of even the most expensive centralized storage arrays and ensuring the GPUs are never starved.
+As cluster sizes expand, a new bottleneck emerges at the storage layer: the I/O wall. When training our `{python} InfraFrontierNodeIoRecap.frontier_params_b_str` model across 128 nodes, the system acts as a synchronized "thundering herd" -- all 128 nodes simultaneously demand the next microbatch of tokens at the start of every training step. A shared parallel filesystem like Lustre, even with 500 GB/s of aggregate throughput, will buckle when 128 clients simultaneously pull data, causing read latencies to spike from milliseconds to seconds. The architectural solution is **tiered storage**\index{Tiered Storage} with aggressive local caching. By provisioning each training node with local NVMe SSDs capable of delivering 25 GB/s per node, the cluster decouples its immediate data dependency from the shared filesystem. A background process prefetches data from the central store to the local NVMe cache asynchronously, smoothing out I/O spikes. For the 128-node cluster, local NVMe creates an aggregate read bandwidth of 3.2 TB/s ($128 \times 25$ GB/s), eclipsing the capability of even the most expensive centralized storage arrays and ensuring the GPUs are never starved.
 
 ::: {.callout-warning title="The data loading trap"}
 
@@ -3081,7 +3082,7 @@ A subtle failure mode occurs when data loading appears fast in benchmarks but de
 # │ Exports: InfraFrontierNodeCapacityRecap.frontier_params_b_str
 class InfraFrontierNodeCapacityRecap:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 ```{python}
 #| echo: false
@@ -3091,7 +3092,7 @@ class NodeCapacityTransitionRecap:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     node_hbm_cap_str = fmt_qty(Hardware.Cloud.H100.memory.capacity * Systems.Nodes.DGX_H100.accelerators_per_node, GiB, precision=0, commas=False, unit_label="GB")
 ```
-For our `{python} InfraFrontierNodeCapacityRecap.frontier_params_b_str`B model, a single DGX H100 node provides `{python} NodeCapacityTransitionRecap.node_hbm_cap_str` of aggregate HBM, enough to hold the FP16 model weights but not the full Adam training state without sharding and offload. Training also requires processing trillions of tokens, and a single node's compute throughput limits training time to months. To complete training in a reasonable timeframe (weeks rather than months), we need tens or hundreds of nodes. Stacking those nodes into a physical enclosure brings us to the next level of infrastructure, where the constraints shift from bandwidth and capacity to raw power and heat.
+For our `{python} InfraFrontierNodeCapacityRecap.frontier_params_b_str` model, a single DGX H100 node provides `{python} NodeCapacityTransitionRecap.node_hbm_cap_str` of aggregate HBM, enough to hold the FP16 model weights but not the full Adam training state without sharding and offload. Training also requires processing trillions of tokens, and a single node's compute throughput limits training time to months. To complete training in a reasonable timeframe (weeks rather than months), we need tens or hundreds of nodes. Stacking those nodes into a physical enclosure brings us to the next level of infrastructure, where the constraints shift from bandwidth and capacity to raw power and heat.
 
 ```{python}
 #| echo: false
@@ -3158,10 +3159,10 @@ A standard 42U server rack in a traditional data center draws 5--10 kW and can b
 class InfraFrontierRackPowerRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-For our `{python} InfraFrontierRackPowerRecap.frontier_params_b_str`B model, training across 1,024 GPUs requires approximately 32 racks (4 nodes of 8 GPUs each per rack). Each rack dissipates `{python} RackPowerRackRecap.rack_power_str` as heat, the thermal output of a small industrial furnace. The aggregate facility-relevant power draw of the training cluster is approximately 1.1 MW, enough to power several hundred homes. Delivering this power reliably, converting it efficiently, and removing the resulting heat without allowing any component to exceed its thermal limit is a multi-disciplinary engineering challenge that spans electrical, mechanical, and civil engineering. A failure at any point in the power delivery chain, from the utility substation to the individual GPU voltage regulator, can halt the entire training run, wasting hours of computation and potentially corrupting the training state.
+For our `{python} InfraFrontierRackPowerRecap.frontier_params_b_str` model, training across 1,024 GPUs requires approximately 32 racks (4 nodes of 8 GPUs each per rack). Each rack dissipates `{python} RackPowerRackRecap.rack_power_str` as heat, the thermal output of a small industrial furnace. The aggregate facility-relevant power draw of the training cluster is approximately 1.1 MW, enough to power several hundred homes. Delivering this power reliably, converting it efficiently, and removing the resulting heat without allowing any component to exceed its thermal limit is a multi-disciplinary engineering challenge that spans electrical, mechanical, and civil engineering. A failure at any point in the power delivery chain, from the utility substation to the individual GPU voltage regulator, can halt the entire training run, wasting hours of computation and potentially corrupting the training state.
 
 ::: {#dfn-compute-infrastructure-rack .callout-definition title="Rack"}
 
@@ -3243,10 +3244,10 @@ A team is planning to deploy 256 H100 GPUs (32 nodes) in an existing air-cooled 
 class InfraFrontierStragglerRecap10:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-The rack concentrates power and heat into a physical volume where thermodynamics, not software, sets the limits. A single rack of 32 GPUs, however, is far from sufficient for our `{python} InfraFrontierStragglerRecap10.frontier_params_b_str`B model, which may require thousands of accelerators to train in a reasonable timeframe. The next level of infrastructure aggregates hundreds of racks into a unified computing system: the pod, whose network topology (@fig-pod-network-topology) ensures that any GPU can communicate with any other at full line rate.
+The rack concentrates power and heat into a physical volume where thermodynamics, not software, sets the limits. A single rack of 32 GPUs, however, is far from sufficient for our `{python} InfraFrontierStragglerRecap10.frontier_params_b_str` model, which may require thousands of accelerators to train in a reasonable timeframe. The next level of infrastructure aggregates hundreds of racks into a unified computing system: the pod, whose network topology (@fig-pod-network-topology) ensures that any GPU can communicate with any other at full line rate.
 
 ## The Pod {#sec-compute-pod}
 
@@ -3264,10 +3265,10 @@ The rack concentrates power and heat into a physical volume where thermodynamics
 class InfraFrontierPodIntroRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-Training our `{python} InfraFrontierPodIntroRecap.frontier_params_b_str`B model on a single DGX H100 node (8 GPUs, roughly 16,000 TFLOP/s aggregate) would take several months, assuming we can fit the model at all. Reducing training time to weeks requires 100--1,000 nodes operating in concert, and doing so demands that these nodes be wired together into a network fast enough to keep gradient synchronization from becoming the bottleneck. This is the engineering challenge of the pod: aggregating hundreds of racks into a single, coordinated computing system where the network fabric serves the same role that the system bus serves within a single machine.
+Training our `{python} InfraFrontierPodIntroRecap.frontier_params_b_str` model on a single DGX H100 node (8 GPUs, roughly 16,000 TFLOP/s aggregate) would take several months, assuming we can fit the model at all. Reducing training time to weeks requires 100--1,000 nodes operating in concert, and doing so demands that these nodes be wired together into a network fast enough to keep gradient synchronization from becoming the bottleneck. This is the engineering challenge of the pod: aggregating hundreds of racks into a single, coordinated computing system where the network fabric serves the same role that the system bus serves within a single machine.
 
 The scale of this challenge is worth appreciating concretely. A 1,024-node DGX H100 cluster contains 8,192 GPUs, 4,096 NVSwitch chips, 8,192 InfiniBand HCAs, several hundred InfiniBand switches, tens of thousands of cables, and consumes approximately 7--10 MW of power. It occupies roughly 250 racks across one or more data center halls.
 
@@ -3308,7 +3309,7 @@ class PodTrainingMath:
     gpt3_tokens_b_str = fmt(gpt3_tokens_b, precision=0, commas=False)
     gpt3_tokens_billion_str = fmt(gpt3_tokens_b, precision=0, commas=False)
     h100_fp8_flops = Hardware.Cloud.H100.compute.precision_flops['fp8']
-    h100_tflops_math_str = fmt(h100_fp8_flops.to(TFLOP / second).magnitude, precision=0, commas=False)
+    h100_tflops_math_str = fmt_flop_rate(h100_fp8_flops, unit=TFLOP / second, precision=0, commas=False)
     h100_tflops_str = fmt_flop_rate(h100_fp8_flops, unit=TFLOP / second, precision=0, commas=False)
     mfu = Literature.Training.MfuHigh * 0.9
     _total_flops = 6 * _gpt3.parameters.to(param).magnitude * _gpt3.training_tokens.to(count).magnitude
@@ -3326,7 +3327,7 @@ class PodTrainingMath:
         f"{n_gpus_fmt} \\times {h100_tflops_math_str} \\times 10^{{12}} \\times {mfu}"
     )
     cluster_throughput = n_gpus * h100_fp8_flops * mfu
-    cluster_eflops_str = fmt(cluster_throughput.to(EFLOP / second).magnitude, precision=2, commas=False)
+    cluster_eflops_str = fmt_flop_rate(cluster_throughput, unit=EFLOP / second, precision=2, commas=False)
     n_gpus_str = fmt(n_gpus, precision=0)
     mfu_pct_str = fmt_percent(mfu, precision=0, commas=False, style='prose')
 
@@ -3340,10 +3341,10 @@ class PodTrainingMath:
 class InfraFrontierPodTrainingRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-Training a `{python} InfraFrontierPodTrainingRecap.frontier_params_b_str`B model on this cluster requires `{python} PodTrainingMath.pod_flops_math` total floating-point operations (assuming `{python} PodTrainingMath.gpt3_tokens_billion_str` billion training tokens). At 45 percent MFU -- a strong but achievable figure for well-tuned large-model training -- the cluster sustains `{python} PodTrainingMath.cluster_throughput_math` FLOP/s, or about `{python} PodTrainingMath.cluster_eflops_str` EFLOP/s, yielding a physics-limit training time of approximately 12 hours. This is the absolute floor: every GPU computing useful FLOPs at 45 percent of FP8 peak, with zero communication overhead, zero pipeline bubbles, and zero downtime.
+Training a `{python} InfraFrontierPodTrainingRecap.frontier_params_b_str` model on this cluster requires `{python} PodTrainingMath.pod_flops_math` total floating-point operations (assuming `{python} PodTrainingMath.gpt3_tokens_billion_str` billion training tokens). At 45 percent MFU -- a strong but achievable figure for well-tuned large-model training -- the cluster sustains `{python} PodTrainingMath.cluster_throughput_math` FLOP/s, or about `{python} PodTrainingMath.cluster_eflops_str` EFLOP/s, yielding a physics-limit training time of approximately 12 hours. This is the absolute floor: every GPU computing useful FLOPs at 45 percent of FP8 peak, with zero communication overhead, zero pipeline bubbles, and zero downtime.
 
 In practice, communication overhead, pipeline bubbles, checkpoint I/O, hardware failures, and maintenance windows compound to extend the actual wall-clock time beyond the physics limit. A simplified multiplier chain reaches an approximately 18-hour system minimum; production schedules can stretch to days or weeks once queueing, data readiness, debugging, reruns, and site-specific operational margins enter the plan. The central theme is unchanged: at pod scale, infrastructure imperfections dominate over the raw capability of the silicon. Recovering this lost time is the central challenge of distributed systems engineering, and the solutions span hardware (better networks), software (overlapped communication), and operations (proactive maintenance to minimize downtime).
 
@@ -3429,10 +3430,10 @@ class TrainingTime175B:
 class InfraFrontierPodTimeRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-We can derive the training time for our `{python} InfraFrontierPodTimeRecap.frontier_params_b_str`B model from first principles.
+We can derive the training time for our `{python} InfraFrontierPodTimeRecap.frontier_params_b_str` model from first principles.
 
 1. **Total FLOPs**\index{Training Time!total FLOPs}: Using the approximation $6 \times P \times D$, where `{python} PodTrainingMath.n_params_math` and `{python} PodTrainingMath.n_tokens_math` tokens:
    `{python} PodTrainingMath.total_flops_math` FLOPs
@@ -3494,8 +3495,8 @@ class WscThroughput:
     check(wsc_fp8 > wsc_fp16, "FP8 throughput must exceed FP16")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
-    wsc_fp16_eflops_str = fmt(wsc_fp16.to(EFLOP / second).magnitude, precision=2, commas=False)
-    wsc_fp8_eflops_str = fmt(wsc_fp8.to(EFLOP / second).magnitude, precision=1, commas=False)
+    wsc_fp16_eflops_str = fmt_flop_rate(wsc_fp16, unit=EFLOP / second, precision=2, commas=False)
+    wsc_fp8_eflops_str = fmt_flop_rate(wsc_fp8, unit=EFLOP / second, precision=1, commas=False)
     wsc_inject_tbs_str = fmt_bandwidth(wsc_inject, unit=TB / second, precision=0, commas=False)
     wsc_oversub_tbs_str = fmt_bandwidth(wsc_oversub, unit=TB / second, precision=0, commas=False)
     n_gpus_str = fmt(n_gpus, precision=0, commas=False)
@@ -3534,10 +3535,10 @@ The first principle is that *the network is the bottleneck, not the compute*. Wi
 class InfraFrontierPodCommRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-For our `{python} InfraFrontierPodCommRecap.frontier_params_b_str`B model with data parallelism across 128 nodes, each training step requires an AllReduce of approximately 350 GB of gradients. If the network *cannot* overlap this communication with the next forward pass, the GPUs sit idle during synchronization.
+For our `{python} InfraFrontierPodCommRecap.frontier_params_b_str` model with data parallelism across 128 nodes, each training step requires an AllReduce of approximately 350 GB of gradients. If the network *cannot* overlap this communication with the next forward pass, the GPUs sit idle during synchronization.
 
 The fraction of time spent on communication (as opposed to computation) is the single largest determinant of cluster efficiency, often mattering more than the peak FLOP/s of the individual accelerators. This is a counterintuitive result for teams accustomed to thinking about hardware in terms of compute specifications. A cluster with slightly slower GPUs but a better network fabric can outperform a cluster with faster GPUs but an inadequate network, because the faster GPUs spend more of their time idle, waiting for gradient synchronization.
 
@@ -3560,10 +3561,10 @@ The second principle is that failure is routine, not exceptional. A cluster of 1
 class InfraFrontierPodPerspectiveRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-To put this in perspective: if training our `{python} InfraFrontierPodPerspectiveRecap.frontier_params_b_str`B model takes 2 weeks (336 hours) on a 10,000-GPU cluster, we should expect approximately 67 individual GPU failures during the training run. Each failure potentially corrupts the training state and requires either rolling back to a checkpoint or reorganizing the cluster to work around the failed node.
+To put this in perspective: if training our `{python} InfraFrontierPodPerspectiveRecap.frontier_params_b_str` model takes 2 weeks (336 hours) on a 10,000-GPU cluster, we should expect approximately 67 individual GPU failures during the training run. Each failure potentially corrupts the training state and requires either rolling back to a checkpoint or reorganizing the cluster to work around the failed node.
 
 The checkpointing frequency determines the cost of each failure. If checkpoints are taken every 10 minutes, a failure costs at most 10 minutes of lost work plus the time to restart. If checkpoints are taken every hour, each failure costs up to an hour of lost work plus restart overhead, and with roughly 67 failures, the cumulative lost time could exceed 67 hours before restart overhead, lengthening the training run by days.
 
@@ -3652,10 +3653,10 @@ class CheckpointOverheadBudget:
 class InfraFrontierStragglerRecap11:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-Checkpointing also creates a significant *storage* requirement that demands its own dedicated infrastructure. A full checkpoint for our `{python} InfraFrontierStragglerRecap11.frontier_params_b_str`B model includes the model weights (350 GB), optimizer states (1,400 GB), and the random number generator states needed to resume training deterministically. The total is approximately `{python} CheckpointOverheadBudget.ckpt_total_tb_str` per checkpoint. At a cadence of `{python} CheckpointOverheadBudget.ckpt_cadence_min_str`, a write that takes `{python} CheckpointOverheadBudget.ckpt_reference_write_s_str` would consume `{python} CheckpointOverheadBudget.ckpt_reference_overhead_pct_str` of training time, not `{python} CheckpointOverheadBudget.ckpt_target_overhead_pct_str`. To keep checkpoint overhead below `{python} CheckpointOverheadBudget.ckpt_target_overhead_pct_str`, the write must complete in about `{python} CheckpointOverheadBudget.ckpt_allowed_write_s_str`, demanding a sustained aggregate write bandwidth of approximately `{python} CheckpointOverheadBudget.ckpt_required_bw_gbs_str`. A write target of `{python} CheckpointOverheadBudget.ckpt_reference_write_s_str` corresponds to approximately `{python} CheckpointOverheadBudget.ckpt_reference_bw_gbs_str` and only fits a `{python} CheckpointOverheadBudget.ckpt_target_overhead_pct_str` budget when checkpoints are spaced at least `{python} CheckpointOverheadBudget.ckpt_reference_min_cadence_min_str` apart. Standard NFS or object storage implementations collapse under this "thundering herd" pattern, where all GPUs transition from compute to I/O simultaneously. The solution requires a high-performance parallel file system like Lustre or IBM Spectrum Scale (GPFS), architected with hundreds of Object Storage Targets (OSTs) striping data across thousands of NVMe drives. A failure to architect for this burst bandwidth results in "I/O jitter," where training hangs unpredictably for minutes as the checkpoint write saturates the storage backend, effectively burning millions of dollars in idle GPU cycles. @Sec-data-storage examines the storage architectures that meet these throughput requirements in detail. If checkpoints are taken every `{python} CheckpointOverheadBudget.ckpt_cadence_min_str` during a 2-week training run, the system must write:
+Checkpointing also creates a significant *storage* requirement that demands its own dedicated infrastructure. A full checkpoint for our `{python} InfraFrontierStragglerRecap11.frontier_params_b_str` model includes the model weights (350 GB), optimizer states (1,400 GB), and the random number generator states needed to resume training deterministically. The total is approximately `{python} CheckpointOverheadBudget.ckpt_total_tb_str` per checkpoint. At a cadence of `{python} CheckpointOverheadBudget.ckpt_cadence_min_str`, a write that takes `{python} CheckpointOverheadBudget.ckpt_reference_write_s_str` would consume `{python} CheckpointOverheadBudget.ckpt_reference_overhead_pct_str` of training time, not `{python} CheckpointOverheadBudget.ckpt_target_overhead_pct_str`. To keep checkpoint overhead below `{python} CheckpointOverheadBudget.ckpt_target_overhead_pct_str`, the write must complete in about `{python} CheckpointOverheadBudget.ckpt_allowed_write_s_str`, demanding a sustained aggregate write bandwidth of approximately `{python} CheckpointOverheadBudget.ckpt_required_bw_gbs_str`. A write target of `{python} CheckpointOverheadBudget.ckpt_reference_write_s_str` corresponds to approximately `{python} CheckpointOverheadBudget.ckpt_reference_bw_gbs_str` and only fits a `{python} CheckpointOverheadBudget.ckpt_target_overhead_pct_str` budget when checkpoints are spaced at least `{python} CheckpointOverheadBudget.ckpt_reference_min_cadence_min_str` apart. Standard NFS or object storage implementations collapse under this "thundering herd" pattern, where all GPUs transition from compute to I/O simultaneously. The solution requires a high-performance parallel file system like Lustre or IBM Spectrum Scale (GPFS), architected with hundreds of Object Storage Targets (OSTs) striping data across thousands of NVMe drives. A failure to architect for this burst bandwidth results in "I/O jitter," where training hangs unpredictably for minutes as the checkpoint write saturates the storage backend, effectively burning millions of dollars in idle GPU cycles. @Sec-data-storage examines the storage architectures that meet these throughput requirements in detail. If checkpoints are taken every `{python} CheckpointOverheadBudget.ckpt_cadence_min_str` during a 2-week training run, the system must write:
 
 - **Checkpoints per run**\index{Checkpointing!checkpoints per run}: (`{python} CheckpointOverheadBudget.ckpt_run_days_str` days $\times$ `{python} CheckpointOverheadBudget.ckpt_run_hours_per_day_str` $\times$ `{python} CheckpointOverheadBudget.ckpt_per_hour_str` per hour) = `{python} CheckpointOverheadBudget.ckpt_run_count_str` checkpoints
 - **Total checkpoint data**\index{Checkpointing!total checkpoint data}: `{python} CheckpointOverheadBudget.ckpt_run_count_str` $\times$ `{python} CheckpointOverheadBudget.ckpt_total_tb_str` = `{python} CheckpointOverheadBudget.ckpt_run_total_tb_str`
@@ -3693,10 +3694,10 @@ The cost of this homogeneity is inflexibility. A pod designed for Transformer tr
 class InfraFrontierStragglerRecap12:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-The software infrastructure of a WSC functions less like a collection of servers and more like a single distributed operating system, with the **job scheduler**\index{Job Scheduler} acting as the kernel. Systems like Slurm or Kubernetes do not merely assign tasks; they orchestrate the rigid resource geometry required for distributed training. The critical constraint is gang scheduling\index{Gang Scheduling}: a training job for our `{python} InfraFrontierStragglerRecap12.frontier_params_b_str`B model requiring 1,024 GPUs cannot start if only 1,023 are available. The scheduler must allocate the entire cohort simultaneously, because the synchronous nature of the training algorithm means a single missing node halts the progress of the entire fleet. Beyond binary allocation, the scheduler must enforce **topology awareness**\index{Topology Awareness}, placing the job on a contiguous block of high-speed interconnects to minimize cross-sectional bandwidth bottlenecks. Allocating 1,024 GPUs scattered randomly across the data center introduces hop-count penalties that can reduce effective AllReduce bandwidth by 30--50 percent. In a multi-tenant environment, this creates complex queue management challenges where high-priority jobs may need to preempt lower-priority experiments, triggering automated checkpointing and eviction to free up the required contiguous hardware blocks. @Sec-fleet-orchestration examines the scheduling algorithms and resource management strategies for WSC-scale clusters in detail.
+The software infrastructure of a WSC functions less like a collection of servers and more like a single distributed operating system, with the **job scheduler**\index{Job Scheduler} acting as the kernel. Systems like Slurm or Kubernetes do not merely assign tasks; they orchestrate the rigid resource geometry required for distributed training. The critical constraint is gang scheduling\index{Gang Scheduling}: a training job for our `{python} InfraFrontierStragglerRecap12.frontier_params_b_str` model requiring 1,024 GPUs cannot start if only 1,023 are available. The scheduler must allocate the entire cohort simultaneously, because the synchronous nature of the training algorithm means a single missing node halts the progress of the entire fleet. Beyond binary allocation, the scheduler must enforce **topology awareness**\index{Topology Awareness}, placing the job on a contiguous block of high-speed interconnects to minimize cross-sectional bandwidth bottlenecks. Allocating 1,024 GPUs scattered randomly across the data center introduces hop-count penalties that can reduce effective AllReduce bandwidth by 30--50 percent. In a multi-tenant environment, this creates complex queue management challenges where high-priority jobs may need to preempt lower-priority experiments, triggering automated checkpointing and eviction to free up the required contiguous hardware blocks. @Sec-fleet-orchestration examines the scheduling algorithms and resource management strategies for WSC-scale clusters in detail.
 
 ### Fleet monitoring and observability {#sec-compute-fleet-monitoring}
 
@@ -3734,10 +3735,10 @@ Fleet operators have learned, often through costly experience, that proactive ma
 class InfraFrontierStragglerRecap15:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-In multi-tenant clusters where multiple training jobs share the same physical infrastructure, the **noisy neighbor**\index{Noisy neighbor!fleet interference} problem introduces a performance hazard that is invisible to individual job metrics. While containerization strictly limits CPU and memory usage, the network fabric is often a shared resource susceptible to interference. If Job A initiates a massive AllReduce operation across the spine switches just as Job B attempts to fetch training data from networked storage, the resulting micro-bursts of packet contention can throttle Job B's throughput by 30--40 percent. This interference is particularly pernicious in RDMA-enabled clusters where traffic bypasses the host CPU, rendering standard OS-level packet scheduling ineffective. Modern orchestration mitigates this via **static rail alignment**\index{Static Rail Alignment} -- physically dedicating specific InfiniBand subnets to specific jobs -- or by deploying congestion notification protocols that throttle aggressive flows at the switch hardware level. For organizations running our `{python} InfraFrontierStragglerRecap15.frontier_params_b_str`B model training alongside smaller research experiments, the safest approach is to physically partition the cluster into isolated "islands" with dedicated network fabrics, accepting the utilization penalty of fragmentation in exchange for performance predictability.
+In multi-tenant clusters where multiple training jobs share the same physical infrastructure, the **noisy neighbor**\index{Noisy neighbor!fleet interference} problem introduces a performance hazard that is invisible to individual job metrics. While containerization strictly limits CPU and memory usage, the network fabric is often a shared resource susceptible to interference. If Job A initiates a massive AllReduce operation across the spine switches just as Job B attempts to fetch training data from networked storage, the resulting micro-bursts of packet contention can throttle Job B's throughput by 30--40 percent. This interference is particularly pernicious in RDMA-enabled clusters where traffic bypasses the host CPU, rendering standard OS-level packet scheduling ineffective. Modern orchestration mitigates this via **static rail alignment**\index{Static Rail Alignment} -- physically dedicating specific InfiniBand subnets to specific jobs -- or by deploying congestion notification protocols that throttle aggressive flows at the switch hardware level. For organizations running our `{python} InfraFrontierStragglerRecap15.frontier_params_b_str` model training alongside smaller research experiments, the safest approach is to physically partition the cluster into isolated "islands" with dedicated network fabrics, accepting the utilization penalty of fragmentation in exchange for performance predictability.
 
 ```{python}
 #| echo: false
@@ -3779,7 +3780,7 @@ class CheckpointComputeTradeoff:
     check(800 < tau_opt_s < 900, "Optimal checkpoint interval should be about 14 min")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(params.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(params, scale="B", precision=0, commas=False)
     training_state_tb_str = fmt_qty_int(training_state, TB, commas=False)
     write_bw_gbs_str = fmt_bandwidth(write_bw, unit=GB / second, precision=0, commas=False)
     t_write_s_str = fmt_time(t_write, second, precision=0, commas=False, style='word')
@@ -3791,7 +3792,7 @@ class CheckpointComputeTradeoff:
     overhead_pct_str = fmt_percent(overhead_pct/100, precision=1, commas=False, style='prose')
 ```
 
-The reliability challenge is formalized by the **checkpoint-compute trade-off**\index{Checkpoint-Compute Trade-Off}, which balances the time lost to saving state against the time lost to recomputing work after a failure. The **Young/Daly formula** defines the optimal checkpoint interval $\tau_{\text{opt}}$ as $\sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}_{\text{system}}}$, where $T_{\text{write}}$ is the time to write a checkpoint and $\text{MTBF}_{\text{system}}$ is the system-wide Mean Time Between Failures. For our `{python} CheckpointComputeTradeoff.frontier_params_b_str`B model, the full training state -- weights, optimizer moments, and gradients -- approaches `{python} CheckpointComputeTradeoff.training_state_tb_str`. Even with a high-performance parallel filesystem capable of `{python} CheckpointComputeTradeoff.write_bw_gbs_str` write throughput, committing this state to persistent storage takes approximately $T_{\text{write}} \approx$ `{python} CheckpointComputeTradeoff.t_write_s_str`. In a cluster of `{python} CheckpointComputeTradeoff.num_gpus_str` GPUs, $\text{MTBF}_{\text{system}} \approx$ `{python} CheckpointComputeTradeoff.mtbf_system_s_str` (`{python} CheckpointComputeTradeoff.mtbf_system_hr_str`), the formula yields $\tau_{\text{opt}} \approx$ `{python} CheckpointComputeTradeoff.tau_opt_s_str`, an optimal checkpoint interval of roughly `{python} CheckpointComputeTradeoff.tau_opt_min_str`. This creates a steady cadence: every `{python} CheckpointComputeTradeoff.tau_opt_min_str`, the entire cluster pauses for `{python} CheckpointComputeTradeoff.t_write_s_str` to serialize its state to disk, introducing a sustained training overhead of approximately `{python} CheckpointComputeTradeoff.overhead_pct_str`. If the interval is too long, the cost of recomputing lost work after a failure exceeds the savings from fewer checkpoints; if too short, the I/O overhead dominates the training budget. @Sec-fault-tolerance-young-daly examines checkpointing strategies, including asynchronous checkpointing and incremental state saving, that reduce this overhead.
+The reliability challenge is formalized by the **checkpoint-compute trade-off**\index{Checkpoint-Compute Trade-Off}, which balances the time lost to saving state against the time lost to recomputing work after a failure. The **Young/Daly formula** defines the optimal checkpoint interval $\tau_{\text{opt}}$ as $\sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}_{\text{system}}}$, where $T_{\text{write}}$ is the time to write a checkpoint and $\text{MTBF}_{\text{system}}$ is the system-wide Mean Time Between Failures. For our `{python} CheckpointComputeTradeoff.frontier_params_b_str` model, the full training state -- weights, optimizer moments, and gradients -- approaches `{python} CheckpointComputeTradeoff.training_state_tb_str`. Even with a high-performance parallel filesystem capable of `{python} CheckpointComputeTradeoff.write_bw_gbs_str` write throughput, committing this state to persistent storage takes approximately $T_{\text{write}} \approx$ `{python} CheckpointComputeTradeoff.t_write_s_str`. In a cluster of `{python} CheckpointComputeTradeoff.num_gpus_str` GPUs, $\text{MTBF}_{\text{system}} \approx$ `{python} CheckpointComputeTradeoff.mtbf_system_s_str` (`{python} CheckpointComputeTradeoff.mtbf_system_hr_str`), the formula yields $\tau_{\text{opt}} \approx$ `{python} CheckpointComputeTradeoff.tau_opt_s_str`, an optimal checkpoint interval of roughly `{python} CheckpointComputeTradeoff.tau_opt_min_str`. This creates a steady cadence: every `{python} CheckpointComputeTradeoff.tau_opt_min_str`, the entire cluster pauses for `{python} CheckpointComputeTradeoff.t_write_s_str` to serialize its state to disk, introducing a sustained training overhead of approximately `{python} CheckpointComputeTradeoff.overhead_pct_str`. If the interval is too long, the cost of recomputing lost work after a failure exceeds the savings from fewer checkpoints; if too short, the I/O overhead dominates the training budget. @Sec-fault-tolerance-young-daly examines checkpointing strategies, including asynchronous checkpointing and incremental state saving, that reduce this overhead.
 
 ```{python}
 #| echo: false
@@ -3800,10 +3801,10 @@ The reliability challenge is formalized by the **checkpoint-compute trade-off**\
 class InfraFrontierStragglerRecap17:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-The choice of network topology is a direct reflection of the dominant communication patterns in the distributed training workload. A fat-tree topology offers full bisection bandwidth and non-blocking any-to-any communication, making it theoretically ideal for algorithms like AllReduce and AllToAll. However, the cost of the upper-tier spine switches makes it expensive at scale. A torus or mesh topology provides excellent nearest-neighbor bandwidth at a fraction of the switch cost but suffers severe congestion penalties for global traffic patterns. A rail-optimized topology physically wires the network so that each GPU rank connects to a dedicated leaf switch, maximizing the efficiency of structured AllReduce within parallelism groups. For our `{python} InfraFrontierStragglerRecap17.frontier_params_b_str`B model configured with TP-8, PP-4, and DP-32, the rail-optimized topology is the natural match: the bandwidth-heavy tensor parallelism traffic is entirely contained within the NVLink domain of a single node, the pipeline parallelism traffic flows between adjacent nodes requiring only moderate point-to-point bandwidth, and the data-parallel gradient reduction happens across the full fleet but with reduced volume (each DP group synchronizes only 1/32 of the total gradients). The rail-optimized design physically matches this communication structure, placing the nodes that communicate most frequently on the same switch.
+The choice of network topology is a direct reflection of the dominant communication patterns in the distributed training workload. A fat-tree topology offers full bisection bandwidth and non-blocking any-to-any communication, making it theoretically ideal for algorithms like AllReduce and AllToAll. However, the cost of the upper-tier spine switches makes it expensive at scale. A torus or mesh topology provides excellent nearest-neighbor bandwidth at a fraction of the switch cost but suffers severe congestion penalties for global traffic patterns. A rail-optimized topology physically wires the network so that each GPU rank connects to a dedicated leaf switch, maximizing the efficiency of structured AllReduce within parallelism groups. For our `{python} InfraFrontierStragglerRecap17.frontier_params_b_str` model configured with TP-8, PP-4, and DP-32, the rail-optimized topology is the natural match: the bandwidth-heavy tensor parallelism traffic is entirely contained within the NVLink domain of a single node, the pipeline parallelism traffic flows between adjacent nodes requiring only moderate point-to-point bandwidth, and the data-parallel gradient reduction happens across the full fleet but with reduced volume (each DP group synchronizes only 1/32 of the total gradients). The rail-optimized design physically matches this communication structure, placing the nodes that communicate most frequently on the same switch.
 
 ### Fleet architecture case studies {#sec-compute-fleet-case-studies}
 
@@ -3826,10 +3827,10 @@ The fat-tree also simplifies job scheduling significantly. Because any subset of
 class InfraFrontierPodSuperRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-For our `{python} InfraFrontierPodSuperRecap.frontier_params_b_str`B model, a SuperPOD configuration of 128 DGX H100 nodes (1,024 GPUs) connected via a two-tier InfiniBand fat-tree provides the baseline training platform. The fat-tree's full bisection bandwidth ensures that the data-parallel AllReduce of 350 GB of gradients across 128 nodes proceeds at the full InfiniBand line rate, regardless of which specific nodes are assigned to the job. This topology flexibility is particularly valuable when nodes are periodically quarantined for maintenance: the scheduler simply substitutes healthy nodes from elsewhere in the fabric without any performance penalty, maintaining training continuity.
+For our `{python} InfraFrontierPodSuperRecap.frontier_params_b_str` model, a SuperPOD configuration of 128 DGX H100 nodes (1,024 GPUs) connected via a two-tier InfiniBand fat-tree provides the baseline training platform. The fat-tree's full bisection bandwidth ensures that the data-parallel AllReduce of 350 GB of gradients across 128 nodes proceeds at the full InfiniBand line rate, regardless of which specific nodes are assigned to the job. This topology flexibility is particularly valuable when nodes are periodically quarantined for maintenance: the scheduler simply substitutes healthy nodes from elsewhere in the fabric without any performance penalty, maintaining training continuity.
 
 The trade-off is cost and complexity. A fat-tree requires a large number of expensive InfiniBand switches (each costing \$15,000--30,000), and the switch count grows super-linearly with the number of endpoints. For a 1,024-GPU cluster, the switch fabric alone can cost \$10--20 million, representing 10--15 percent of total system cost. Cable management also becomes formidable: a three-tier fat-tree for 1,024 GPUs requires thousands of individual cables, each of which must be precisely routed, labeled, and tested. @Sec-network-fabrics examines the fat-tree topology and its alternatives in full quantitative detail.
 
@@ -3882,10 +3883,10 @@ Twenty-five D1 chips are assembled into a "training tile," with the chips arrang
 class InfraFrontierStragglerRecap18:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-Dojo's efficiency for its target workload is exceptional, but the system cannot run Transformer-based language models efficiently because the 2D mesh topology and small local memory per processing node are poorly matched to the all-to-all communication and large weight matrices characteristic of Transformer training. Training our `{python} InfraFrontierStragglerRecap18.frontier_params_b_str`B model on Dojo would be impractical: the 350 GB weight tensor would need to be distributed across many tiles, and the all-to-all communication required for tensor parallelism would traverse many hops in the 2D mesh, creating latencies that would dominate the training step. This makes Dojo a high-stakes bet on the continued centrality of vision models to Tesla's autonomous driving stack, and it illustrates the extreme end of the generality-efficiency trade-off at the system level. If Tesla's workload shifts toward large language models (as the industry trend suggests), the Dojo architecture would need fundamental redesign -- a risk that custom silicon always carries.
+Dojo's efficiency for its target workload is exceptional, but the system cannot run Transformer-based language models efficiently because the 2D mesh topology and small local memory per processing node are poorly matched to the all-to-all communication and large weight matrices characteristic of Transformer training. Training our `{python} InfraFrontierStragglerRecap18.frontier_params_b_str` model on Dojo would be impractical: the 350 GB weight tensor would need to be distributed across many tiles, and the all-to-all communication required for tensor parallelism would traverse many hops in the 2D mesh, creating latencies that would dominate the training step. This makes Dojo a high-stakes bet on the continued centrality of vision models to Tesla's autonomous driving stack, and it illustrates the extreme end of the generality-efficiency trade-off at the system level. If Tesla's workload shifts toward large language models (as the industry trend suggests), the Dojo architecture would need fundamental redesign -- a risk that custom silicon always carries.
 
 The choice between fat-tree, torus, and rail-optimized topologies has quantitative implications for training throughput that can alter AllReduce time by 2--3$\times$ for the same cluster size. The key insight for infrastructure planning is that topology choice is not separable from workload selection: Transformer training with its regular AllReduce patterns favors different topologies than Mixture-of-Experts models with their AllToAll communication. The network fabric cost (10--15 percent of total system cost) is easily justified if it improves scaling efficiency by even a few percentage points, because poor scaling wastes the other 85--90 percent of the investment.
 
@@ -3943,10 +3944,10 @@ class FabricSizingScenario:
 class InfraFrontierStragglerRecap19:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-The cost structure of the network fabric itself warrants quantitative examination. An InfiniBand NDR switch with `{python} FabricSizingScenario.switch_ports_str` ports of 400 Gb/s costs \$15,000--30,000, with specialized active optical cables adding \$500--1,000 per link. Under a dual-link endpoint model for `{python} FabricSizingScenario.gpus_str` (`{python} FabricSizingScenario.nodes_str`), a two-tier fat-tree requires approximately `{python} FabricSizingScenario.leaf_switches_str` leaf switches and `{python} FabricSizingScenario.spine_switches_str` spine switches, plus `{python} FabricSizingScenario.fabric_links_str` fabric links, bringing the total fabric cost to \$5--15 million depending on the oversubscription ratio and optical mix. Ethernet\index{Ethernet}-based alternatives using RoCE (RDMA over Converged Ethernet) reduce the per-port cost by 30--50 percent, but introduce a latency and reliability penalty. Ethernet is inherently lossy: when switch buffers overflow under the bursty, synchronized traffic patterns of distributed training, packets are dropped and must be retransmitted. For our `{python} InfraFrontierStragglerRecap19.frontier_params_b_str`B model training on `{python} FabricSizingScenario.gpus_str`, even a 1 percent packet retransmission rate on a RoCE fabric can degrade effective AllReduce throughput by 10--20 percent, because thousands of GPUs wait for the slowest participant. The cost-performance frontier analysis asks whether the \$3--5 million savings of Ethernet justifies the potential 10--20 percent throughput loss. For frontier model training where time-to-market is paramount and the GPU fleet represents a \$35+ million investment, the InfiniBand premium pays for itself by ensuring the network never becomes the bottleneck.
+The cost structure of the network fabric itself warrants quantitative examination. An InfiniBand NDR switch with `{python} FabricSizingScenario.switch_ports_str` ports of 400 Gb/s costs \$15,000--30,000, with specialized active optical cables adding \$500--1,000 per link. Under a dual-link endpoint model for `{python} FabricSizingScenario.gpus_str` (`{python} FabricSizingScenario.nodes_str`), a two-tier fat-tree requires approximately `{python} FabricSizingScenario.leaf_switches_str` leaf switches and `{python} FabricSizingScenario.spine_switches_str` spine switches, plus `{python} FabricSizingScenario.fabric_links_str` fabric links, bringing the total fabric cost to \$5--15 million depending on the oversubscription ratio and optical mix. Ethernet\index{Ethernet}-based alternatives using RoCE (RDMA over Converged Ethernet) reduce the per-port cost by 30--50 percent, but introduce a latency and reliability penalty. Ethernet is inherently lossy: when switch buffers overflow under the bursty, synchronized traffic patterns of distributed training, packets are dropped and must be retransmitted. For our `{python} InfraFrontierStragglerRecap19.frontier_params_b_str` model training on `{python} FabricSizingScenario.gpus_str`, even a 1 percent packet retransmission rate on a RoCE fabric can degrade effective AllReduce throughput by 10--20 percent, because thousands of GPUs wait for the slowest participant. The cost-performance frontier analysis asks whether the \$3--5 million savings of Ethernet justifies the potential 10--20 percent throughput loss. For frontier model training where time-to-market is paramount and the GPU fleet represents a \$35+ million investment, the InfiniBand premium pays for itself by ensuring the network never becomes the bottleneck.
 
 #### Site selection and physical constraints {#sec-compute-infrastructure-site-selection-physical-constraints-fba0}
 
@@ -3993,10 +3994,10 @@ A data center built in 2025 will host three or four generations of accelerators 
 class InfraFrontierStragglerRecap22:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-The next generation of hardware confronts head-on the three walls that have governed this chapter: memory, communication, and power. Compute Express Link (CXL) attacks the memory wall by decoupling capacity from individual accelerators, while Wafer-Scale Integration attacks the memory, communication, and power walls simultaneously by eliminating the off-chip boundary entirely. For our `{python} InfraFrontierStragglerRecap22.frontier_params_b_str`B model, these technologies would progressively relax the constraints that currently force complex multi-node parallelism: if CXL memory pooling provides terabyte-scale capacity accessible from any accelerator, the memory-capacity constraint would decouple from the per-node HBM budget. (Advances in optical interconnects and disaggregated networking, which attack the communication wall, are covered in @sec-network-fabrics).
+The next generation of hardware confronts head-on the three walls that have governed this chapter: memory, communication, and power. Compute Express Link (CXL) attacks the memory wall by decoupling capacity from individual accelerators, while Wafer-Scale Integration attacks the memory, communication, and power walls simultaneously by eliminating the off-chip boundary entirely. For our `{python} InfraFrontierStragglerRecap22.frontier_params_b_str` model, these technologies would progressively relax the constraints that currently force complex multi-node parallelism: if CXL memory pooling provides terabyte-scale capacity accessible from any accelerator, the memory-capacity constraint would decouple from the per-node HBM budget. (Advances in optical interconnects and disaggregated networking, which attack the communication wall, are covered in @sec-network-fabrics).
 
 ### Compute express link (CXL) {#sec-compute-cxl}
 
@@ -4018,9 +4019,9 @@ The more consequential application of CXL is **memory pooling**\index{Memory poo
 # │ Exports: InfraFrontierEmergingCxlRecap.frontier_params_b_str
 class InfraFrontierEmergingCxlRecap:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
-For ML training, memory pooling addresses the optimizer state problem directly. The 1,400 GB of optimizer state for our `{python} InfraFrontierEmergingCxlRecap.frontier_params_b_str`B model could reside in a shared CXL memory pool rather than being replicated or sharded across individual nodes. Nodes that are executing the compute-intensive forward and backward passes would access only their weight and activation shards from HBM, while the optimizer state would be fetched from the CXL pool only during the parameter update step. This architecture would reduce the per-node memory requirement and potentially allow training of larger models on fewer nodes.
+For ML training, memory pooling addresses the optimizer state problem directly. The 1,400 GB of optimizer state for our `{python} InfraFrontierEmergingCxlRecap.frontier_params_b_str` model could reside in a shared CXL memory pool rather than being replicated or sharded across individual nodes. Nodes that are executing the compute-intensive forward and backward passes would access only their weight and activation shards from HBM, while the optimizer state would be fetched from the CXL pool only during the parameter update step. This architecture would reduce the per-node memory requirement and potentially allow training of larger models on fewer nodes.
 
 ```{python}
 #| echo: false
@@ -4050,10 +4051,10 @@ The approach directly attacks the memory wall. By replacing HBM (which is off-ch
 class InfraFrontierEmergingSramRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-The limitation is that 44 GB of SRAM is insufficient for frontier models. Our `{python} InfraFrontierEmergingSramRecap.frontier_params_b_str`B model requires 350 GB for weights alone, far exceeding the WSE's capacity. Cerebras addresses this through a model-parallel scheme where the WSE processes layers sequentially, with weights streamed from external memory (MemoryX units) to the chip. This weight streaming approach works well for inference (where each layer is used once per token) but introduces pipelining complexity for training (where each layer is used in both forward and backward passes with different activations).
+The limitation is that 44 GB of SRAM is insufficient for frontier models. Our `{python} InfraFrontierEmergingSramRecap.frontier_params_b_str` model requires 350 GB for weights alone, far exceeding the WSE's capacity. Cerebras addresses this through a model-parallel scheme where the WSE processes layers sequentially, with weights streamed from external memory (MemoryX units) to the chip. This weight streaming approach works well for inference (where each layer is used once per token) but introduces pipelining complexity for training (where each layer is used in both forward and backward passes with different activations).
 
 Wafer-scale integration also faces manufacturing challenges. Because the chip spans an entire wafer, individual defective cores must be disabled and routed around using redundant interconnect paths. The yield model is fundamentally different from conventional chips: rather than discarding entire dies with defects, the WSE includes spare cores and spare interconnect links that can be activated to replace defective ones. This redundancy-based yield strategy works because neural network workloads are tolerant of slight variations in available compute (losing 1 percent of cores has negligible impact on training throughput).
 
@@ -4078,10 +4079,10 @@ Engineers frequently assume that training time scales linearly with GPU count: d
 class InfraFrontierStragglerRecap23:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-Amdahl's Law\index{Amdahl's Law} establishes the theoretical limit: the sequential fraction of the computation (gradient synchronization, pipeline bubble time, data loading stalls) bounds the maximum speedup regardless of parallelism. For a `{python} InfraFrontierStragglerRecap23.frontier_params_b_str`B-parameter model with 350 GB of gradients, the AllReduce at each training step requires every GPU to exchange data with every other GPU.
+Amdahl's Law\index{Amdahl's Law} establishes the theoretical limit: the sequential fraction of the computation (gradient synchronization, pipeline bubble time, data loading stalls) bounds the maximum speedup regardless of parallelism. For a `{python} InfraFrontierStragglerRecap23.frontier_params_b_str`-parameter model with 350 GB of gradients, the AllReduce at each training step requires every GPU to exchange data with every other GPU.
 
 On a cluster of 1,024 GPUs, this synchronization can consume 30--50 percent of the total step time if the network is not carefully engineered. Scaling from 1,024 to 2,048 GPUs doubles the hardware cost but may reduce training time by only 30--40 percent, yielding rapidly diminishing returns. The scaling efficiency curve is concave: the first 100 GPUs provide nearly linear speedup, the next 900 provide diminishing returns, and beyond 2,000--4,000 GPUs the marginal benefit per GPU approaches zero for most model sizes.
 
@@ -4094,7 +4095,7 @@ The correct approach is to profile the communication-to-computation ratio at the
 class RooflineFallaciesRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    h100_ridge_str = fmt((Hardware.Cloud.H100.compute.peak_flops/Hardware.Cloud.H100.memory.bandwidth).to(flop/byte).magnitude, precision=1, commas=False)
+    h100_ridge_str = fmt_arithmetic_intensity((Hardware.Cloud.H100.compute.peak_flops/Hardware.Cloud.H100.memory.bandwidth), unit=flop/byte, precision=1, commas=False)
 ```
 
 **Fallacy**: *Peak FLOP/s determines training throughput.*
@@ -4210,7 +4211,7 @@ Teams that focus all their predeployment optimization on GPU kernel performance 
 class InfraFrontierStragglerRecap24:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
 ```{python}
@@ -4222,7 +4223,7 @@ class A100UniformFleetRecap:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     mem_bw_tbs_str = fmt_qty(Hardware.Cloud.A100.memory.bandwidth, TB/second, precision=2, commas=False)
 ```
-The intuition that uniform hardware simplifies scheduling and reduces stragglers often leads organizations to retire capable older generations prematurely. For our `{python} InfraFrontierStragglerRecap24.frontier_params_b_str`B model, the cost-optimal strategy frequently involves a mixed-generation fleet. While training requires the raw FLOP/s and interconnect bandwidth of H100s to minimize synchronization overhead, inference serving is memory-bandwidth-bound rather than compute-bound.
+The intuition that uniform hardware simplifies scheduling and reduces stragglers often leads organizations to retire capable older generations prematurely. For our `{python} InfraFrontierStragglerRecap24.frontier_params_b_str` model, the cost-optimal strategy frequently involves a mixed-generation fleet. While training requires the raw FLOP/s and interconnect bandwidth of H100s to minimize synchronization overhead, inference serving is memory-bandwidth-bound rather than compute-bound.
 
 An A100 offers `{python} A100UniformFleetRecap.mem_bw_tbs_str` of bandwidth at a significantly lower capital expenditure than the H100's 3.35 TB/s. By dedicating H100 nodes to training and A100 nodes to inference, an organization can reduce TCO by 15--25 percent compared to an all-H100 fleet. The fallacy lies in conflating *job-level* homogeneity -- which is critical to prevent stragglers within a single distributed training run -- with *cluster-level* homogeneity. A sophisticated scheduler can effectively manage a heterogeneous fleet, routing bandwidth-intensive inference jobs to older hardware where the bandwidth-per-dollar ratio is competitive, while reserving peak compute nodes for training throughput.
 
@@ -4235,10 +4236,10 @@ An A100 offers `{python} A100UniformFleetRecap.mem_bw_tbs_str` of bandwidth at a
 class InfraFrontierStragglerRecap25:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-Engineering teams often allocate 90 percent of their planning effort to hardware selection and facility design, assuming that racking and stacking is a deterministic commodity task. In reality, the last mile -- physically installing servers, routing cables, filling coolant loops, and running burn-in tests -- frequently delays production availability by 2--4 months. A cluster for our `{python} InfraFrontierStragglerRecap25.frontier_params_b_str`B model involves thousands of cables; a single loose InfiniBand connection or a pinched fiber optic cable can degrade effective bisection bandwidth by 50 percent, stalling distributed training. Insidious issues like firmware incompatibilities between GPU driver versions and InfiniBand switch firmware, or NUMA misconfigurations in the BIOS, often manifest only under sustained load. Experienced infrastructure teams allocate 15--20 percent of the total project timeline specifically for commissioning and burn-in, running synthetic stress tests (NCCL-tests, HPL benchmarks) for weeks to weed out "infant mortality" failures before a single production job is scheduled.
+Engineering teams often allocate 90 percent of their planning effort to hardware selection and facility design, assuming that racking and stacking is a deterministic commodity task. In reality, the last mile -- physically installing servers, routing cables, filling coolant loops, and running burn-in tests -- frequently delays production availability by 2--4 months. A cluster for our `{python} InfraFrontierStragglerRecap25.frontier_params_b_str` model involves thousands of cables; a single loose InfiniBand connection or a pinched fiber optic cable can degrade effective bisection bandwidth by 50 percent, stalling distributed training. Insidious issues like firmware incompatibilities between GPU driver versions and InfiniBand switch firmware, or NUMA misconfigurations in the BIOS, often manifest only under sustained load. Experienced infrastructure teams allocate 15--20 percent of the total project timeline specifically for commissioning and burn-in, running synthetic stress tests (NCCL-tests, HPL benchmarks) for weeks to weed out "infant mortality" failures before a single production job is scheduled.
 
 ## Summary {#sec-compute-summary}
 
@@ -4251,10 +4252,10 @@ Engineering teams often allocate 90 percent of their planning effort to hardware
 class InfraFrontierSummaryRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-The physical infrastructure of machine learning spans from the transistor to the data center, with the running example of training a `{python} InfraFrontierSummaryRecap.frontier_params_b_str`B-parameter model grounding each concept in quantitative reality. The infrastructure stack is not a *collection of independent components* but an *integrated system* where decisions at each level constrain and enable choices at every other level. The accelerator's TDP determines the rack's cooling requirements. The rack's power density determines the pod's physical layout. The pod's network topology determines the achievable scaling efficiency. The scaling efficiency, in turn, determines the economics that make the entire enterprise viable or futile.
+The physical infrastructure of machine learning spans from the transistor to the data center, with the running example of training a `{python} InfraFrontierSummaryRecap.frontier_params_b_str`-parameter model grounding each concept in quantitative reality. The infrastructure stack is not a *collection of independent components* but an *integrated system* where decisions at each level constrain and enable choices at every other level. The accelerator's TDP determines the rack's cooling requirements. The rack's power density determines the pod's physical layout. The pod's network topology determines the achievable scaling efficiency. The scaling efficiency, in turn, determines the economics that make the entire enterprise viable or futile.
 
 The ML fleet is built through a series of progressive responses to physical constraints. Each constraint at one level of the hierarchy creates the engineering motivation for the next level:
 
@@ -4328,10 +4329,10 @@ class SummaryScaleScenario:
 class InfraFrontierClosingRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-Our `{python} InfraFrontierClosingRecap.frontier_params_b_str`B-parameter model has served as the persistent architectural forcing function connecting every layer of this hierarchy. At the accelerator level, processing a single token requires about 350 billion floating-point operations, yet the arithmetic is not the limiting resource on modern Tensor Cores. At the memory level, the 350 GB FP16 weight tensor exceeds a single accelerator's HBM capacity and saturates HBM bandwidth once it is sharded or compressed for serving; streaming this volume at `{python} SummaryScaleScenario.h100_bw_str` creates a bandwidth-floor latency of over 100 ms per token for one accelerator-equivalent HBM path. Moving to the node level, the full training state -- comprising weights, gradients, optimizer states, and activations -- expands beyond 2 TB, shattering the 80 GB limit of individual chips and requiring tensor parallelism, data-parallel sharding, and memory offload. At the rack level, the thermal density of 32 such accelerators drawing `{python} SummaryScaleScenario.h100_tdp_str` each necessitates `{python} SummaryScaleScenario.rack_power_str` of power delivery and liquid cooling infrastructure. At the pod level, training within a viable two-week window requires synchronizing over 1,000 GPUs across a non-blocking InfiniBand fabric, where the statistical certainty of hardware failure forces a checkpointing strategy that trades compute cycles for reliability. At the economics level, bursty cloud rental can beat ownership, while owned clusters become compelling only when sustained utilization is high enough to amortize the \$63M three-year cost. Every constraint in this chapter -- from the width of the HBM bus to the topology of the data center network -- traces back to the single arithmetic fact that this model does not fit on a single chip.
+Our `{python} InfraFrontierClosingRecap.frontier_params_b_str`-parameter model has served as the persistent architectural forcing function connecting every layer of this hierarchy. At the accelerator level, processing a single token requires about 350 billion floating-point operations, yet the arithmetic is not the limiting resource on modern Tensor Cores. At the memory level, the 350 GB FP16 weight tensor exceeds a single accelerator's HBM capacity and saturates HBM bandwidth once it is sharded or compressed for serving; streaming this volume at `{python} SummaryScaleScenario.h100_bw_str` creates a bandwidth-floor latency of over 100 ms per token for one accelerator-equivalent HBM path. Moving to the node level, the full training state -- comprising weights, gradients, optimizer states, and activations -- expands beyond 2 TB, shattering the 80 GB limit of individual chips and requiring tensor parallelism, data-parallel sharding, and memory offload. At the rack level, the thermal density of 32 such accelerators drawing `{python} SummaryScaleScenario.h100_tdp_str` each necessitates `{python} SummaryScaleScenario.rack_power_str` of power delivery and liquid cooling infrastructure. At the pod level, training within a viable two-week window requires synchronizing over 1,000 GPUs across a non-blocking InfiniBand fabric, where the statistical certainty of hardware failure forces a checkpointing strategy that trades compute cycles for reliability. At the economics level, bursty cloud rental can beat ownership, while owned clusters become compelling only when sustained utilization is high enough to amortize the \$63M three-year cost. Every constraint in this chapter -- from the width of the HBM bus to the topology of the data center network -- traces back to the single arithmetic fact that this model does not fit on a single chip.
 
 ```{python}
 #| echo: false
@@ -4340,10 +4341,10 @@ Our `{python} InfraFrontierClosingRecap.frontier_params_b_str`B-parameter model 
 class InfraFrontierStragglerRecap26:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-For our `{python} InfraFrontierStragglerRecap26.frontier_params_b_str`B model, the chapter has shown that infrastructure selection is not a single decision but a cascade of interdependent choices. The accelerator determines the per-chip throughput and memory bandwidth. The node design determines how many accelerators can cooperate efficiently on tensor-parallel operations. The rack design determines how much power and cooling is available per unit of floor space. The pod design determines how many nodes can synchronize gradients without communication overhead dominating the training loop.
+For our `{python} InfraFrontierStragglerRecap26.frontier_params_b_str` model, the chapter has shown that infrastructure selection is not a single decision but a cascade of interdependent choices. The accelerator determines the per-chip throughput and memory bandwidth. The node design determines how many accelerators can cooperate efficiently on tensor-parallel operations. The rack design determines how much power and cooling is available per unit of floor space. The pod design determines how many nodes can synchronize gradients without communication overhead dominating the training loop.
 
 The TCO analysis determines whether the entire enterprise makes financial sense. Each choice constrains the next, creating a system where no component can be optimized in isolation. Selecting the fastest accelerator is counterproductive if the cooling infrastructure cannot remove its heat. Building the densest rack is futile if the power grid cannot supply its demand. Deploying the widest network is wasteful if the workload's communication pattern does not use the bandwidth. Infrastructure engineering is systems engineering in its purest form: every component exists in a web of physical, economic, and operational constraints that must be satisfied simultaneously.
 
@@ -4387,10 +4388,10 @@ class TcoSummaryBreakevenRecap:
 class InfraFrontierTakeawayRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(Models.Language.GPT3.parameters.to(param).magnitude / BILLION, precision=0, commas=False)
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-The practitioner's central takeaway from this infrastructure stack is that no component exists in isolation. The `{python} InfraFrontierTakeawayRecap.frontier_params_b_str`B-parameter running example was chosen precisely because its scale forces engagement with every level of the hierarchy: a model that fit comfortably on a single chip would never expose the cooling constraints, network topology trade-offs, or failure-rate arithmetic that dominate real production systems. By tracing a single model from the arithmetic unit through HBM, NVLink, the rack power envelope, and the data center fabric, the chapter demonstrates a mode of reasoning that transfers to any model at any scale. The specific numbers will change as hardware generations advance, but the method of analysis remains: identify the binding constraint at each level, quantify its impact, and propagate its consequences upward through the stack.
+The practitioner's central takeaway from this infrastructure stack is that no component exists in isolation. The `{python} InfraFrontierTakeawayRecap.frontier_params_b_str`-parameter running example was chosen precisely because its scale forces engagement with every level of the hierarchy: a model that fit comfortably on a single chip would never expose the cooling constraints, network topology trade-offs, or failure-rate arithmetic that dominate real production systems. By tracing a single model from the arithmetic unit through HBM, NVLink, the rack power envelope, and the data center fabric, the chapter demonstrates a mode of reasoning that transfers to any model at any scale. The specific numbers will change as hardware generations advance, but the method of analysis remains: identify the binding constraint at each level, quantify its impact, and propagate its consequences upward through the stack.
 
 The systems-level perspective is what separates infrastructure engineering from hardware shopping. An engineer who understands only accelerator FLOP/s will over-provision compute and under-provision cooling. An engineer who understands only network bandwidth will design a topology that exceeds the facility's power budget. The discipline this chapter cultivates is the ability to hold the entire constraint graph in mind simultaneously, reasoning about how a change in numerical precision at the chip level alters the power draw at the rack level, the cooling load at the facility level, and the TCO at the business level. That integrative judgment, grounded in quantitative analysis rather than intuition, is the foundation on which every subsequent chapter in this volume builds.
 
