@@ -4,7 +4,7 @@ This is an advisory work queue for values that likely define
 hardware, systems, infrastructure, pricing, models, datasets,
 storage subsystems, or scenarios in LEGO LOAD stages.
 
-Findings: 1089
+Findings: 1082
 By target:
    270  Scenarios.* or Ops.*
    208  Models.* or Scenarios.TrainingRuns
@@ -17,17 +17,17 @@ By target:
     23  Hardware.* or Hardware.Tech.*
     22  Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet
     14  Systems.Fabrics or Systems.SwitchFabric
-    14  Systems.Storage
     13  Systems.Storage or Datasets.*
     10  Systems.*
      7  Infrastructure.* or Scenarios.Sustainability
+     7  Systems.Storage
      2  Scenarios.TrainingRuns or Systems.Reliability
      1  Infrastructure.Pricing.Storage
 Top chapters:
    152  vol1/model_serving
     84  vol1/data_selection
     72  vol1/training
-    65  vol1/data_engineering
+    58  vol1/data_engineering
     53  vol1/nn_computation
     51  vol1/benchmarking
     51  vol1/ml_systems
@@ -56,10 +56,10 @@ Top reasons:
     23  hardware specification
     22  cloud/fleet price point
     14  network/fabric system fact
-    14  storage subsystem fact
     13  storage/data fact
     10  system-level fact
      7  infrastructure/sustainability fact
+     7  storage subsystem fact
      4  dataset/workload size
      2  checkpoint policy/workload cadence
      1  storage price/rate belongs in pricing registry
@@ -178,7 +178,6 @@ Top reasons:
 |---|---|---|---|---|---|
 | `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:148` | `DataGravity` | `dataset_pb` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `1` |
 | `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:240` | `FeedingProblem` | `img_size_bytes` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload size | `IMAGE_DIM_RESNET * IMAGE_DIM_RESNET * IMAGE_CHANNELS_RGB * 4` |
-| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:243` | `FeedingProblem` | `disk_bw_mbs` | `Systems.Storage` | storage subsystem fact | `250.0` |
 | `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:838` | `KWSProblemTargets` | `kws_accuracy_target` | `Scenarios.* or Ops.*` | scenario/workload policy | `98` |
 | `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:891` | `FalsePositiveTarget` | `duty_cycle_hours` | `Scenarios.* or Ops.*` | scenario/workload policy | `24` |
 | `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:892` | `FalsePositiveTarget` | `window_sec` | `Scenarios.* or Ops.*` | scenario/workload policy | `1` |
@@ -211,20 +210,15 @@ Top reasons:
 | `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:3615` | `KWSAutomatedLabelingScale` | `accuracy_target` | `Scenarios.* or Ops.*` | scenario/workload policy | `98` |
 | `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:3616` | `KWSAutomatedLabelingScale` | `sample_duration_ms_low` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `500` |
 | `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:3617` | `KWSAutomatedLabelingScale` | `sample_duration_ms_high` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `800` |
-| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:3745` | `KWSStorageEconomics` | `rounded_sample_count_m` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `23` |
-| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:3746` | `KWSStorageEconomics` | `sample_duration_s` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `1` |
-| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:3747` | `KWSStorageEconomics` | `sample_rate_hz` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `16_000` |
-| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:3748` | `KWSStorageEconomics` | `bytes_per_sample` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `2` |
-| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:3752` | `KWSStorageEconomics` | `nvme_bw_gbs` | `Systems.Storage` | storage subsystem fact | `5` |
-| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:3816` | `StorageLoading` | `rounded_sample_count_m` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `23` |
-| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:3817` | `StorageLoading` | `sample_duration_s` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `1` |
-| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:3818` | `StorageLoading` | `sample_rate_hz` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `16_000` |
-| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:3819` | `StorageLoading` | `bytes_per_sample` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `2` |
-| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:3820` | `StorageLoading` | `nvme_bw_gbs` | `Systems.Storage` | storage subsystem fact | `5` |
+| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:3746` | `KWSStorageEconomics` | `rounded_sample_count_m` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `23` |
+| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:3747` | `KWSStorageEconomics` | `sample_duration_s` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `1` |
+| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:3748` | `KWSStorageEconomics` | `sample_rate_hz` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `16_000` |
+| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:3749` | `KWSStorageEconomics` | `bytes_per_sample` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `2` |
+| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:3818` | `StorageLoading` | `rounded_sample_count_m` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `23` |
+| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:3819` | `StorageLoading` | `sample_duration_s` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `1` |
+| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:3820` | `StorageLoading` | `sample_rate_hz` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `16_000` |
+| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:3821` | `StorageLoading` | `bytes_per_sample` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `2` |
 | `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:3980` | `StorageBandwidth` | `image_size_kb` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `150` |
-| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:3982` | `StorageBandwidth` | `s3_bw_mbs` | `Systems.Storage` | storage subsystem fact | `100` |
-| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:3983` | `StorageBandwidth` | `nvme_bw_low_gbs` | `Systems.Storage` | storage subsystem fact | `3` |
-| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:3984` | `StorageBandwidth` | `nvme_bw_high_gbs` | `Systems.Storage` | storage subsystem fact | `7` |
 | `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:4162` | `CompressionTradeoff` | `dataset_gb` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `100` |
 | `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:4236` | `LifecycleStorageRequirements` | `image_size_kb` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `150` |
 | `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:4241` | `LifecycleStorageRequirements` | `feature_reads_per_request` | `Scenarios.* or Ops.*` | scenario/workload policy | `10` |
@@ -236,11 +230,10 @@ Top reasons:
 | `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:4733` | `DataEngineeringSummaryRecap` | `sample_duration_s` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `1` |
 | `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:4734` | `DataEngineeringSummaryRecap` | `sample_rate_hz` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `16_000` |
 | `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:4735` | `DataEngineeringSummaryRecap` | `bytes_per_sample` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `2` |
-| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:4782` | `StorageLoadingRecap` | `rounded_sample_count_m` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `23` |
-| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:4783` | `StorageLoadingRecap` | `sample_duration_s` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `1` |
-| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:4784` | `StorageLoadingRecap` | `sample_rate_hz` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `16_000` |
-| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:4785` | `StorageLoadingRecap` | `bytes_per_sample` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `2` |
-| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:4786` | `StorageLoadingRecap` | `nvme_bw_gbs` | `Systems.Storage` | storage subsystem fact | `5` |
+| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:4783` | `StorageLoadingRecap` | `rounded_sample_count_m` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `23` |
+| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:4784` | `StorageLoadingRecap` | `sample_duration_s` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `1` |
+| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:4785` | `StorageLoadingRecap` | `sample_rate_hz` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `16_000` |
+| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:4786` | `StorageLoadingRecap` | `bytes_per_sample` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `2` |
 
 ## vol1/data_selection
 

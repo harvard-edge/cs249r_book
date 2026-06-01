@@ -231,7 +231,7 @@ class FeedingProblem:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    from mlsysim import Models, Hardware, Engine, Datasets
+    from mlsysim import Models, Hardware, Engine, Datasets, Systems
     m = Models.Vision.ResNet50
     h = Hardware.Cloud.A100
 
@@ -240,7 +240,7 @@ class FeedingProblem:
     img_size_bytes = IMAGE_DIM_RESNET * IMAGE_DIM_RESNET * IMAGE_CHANNELS_RGB * 4 # FP32
 
     # Standard Cloud Disk (e.g. AWS gp3 baseline)
-    disk_bw_mbs = 250.0
+    disk_profile = Systems.Storage.CloudBlockStorageBaseline
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Throughput using Engine.solve() with 100% efficiency
@@ -250,7 +250,7 @@ class FeedingProblem:
     # Step 2: Required bandwidth (bytes/s) = img_per_sec * img_size_bytes
     req_bw_bytes_sec = img_per_sec * img_size_bytes
     req_bw = req_bw_bytes_sec * byte / second
-    disk_bw = disk_bw_mbs * MB / second
+    disk_bw = disk_profile.bandwidth
 
     # Step 3: Feeding efficiency = disk BW / required BW
     eta_feed = min((disk_bw / req_bw).to("").magnitude, 1.0)
@@ -3734,6 +3734,7 @@ Beyond the functional differences between storage systems, cost and performance 
 # │          KWSStorageEconomics.storage_nvme_high_cost_str,
 # │          KWSStorageEconomics.load_speedup_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Systems
 from mlsysim.fmt import fmt, fmt_usd, fmt_qty, check, fmt_multiple
 from mlsysim.core.units import GB, TB, byte, USD, ureg
 
@@ -3749,8 +3750,8 @@ class KWSStorageEconomics:
     storage_cost_s3 = Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate
     storage_cost_nvme_low = Infrastructure.Pricing.Storage.NvmeLowPerTbMonth.rate
     storage_cost_nvme_high = Infrastructure.Pricing.Storage.NvmeHighPerTbMonth.rate
-    nvme_bw_gbs = 5
-    obj_bw_gbs = 0.1
+    nvme_bw = Systems.Storage.LocalNvmeTrainingTypical.bandwidth
+    obj_bw = Systems.Storage.ObjectStoreSingleStream.bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     sample_count = rounded_sample_count_m * MILLION
@@ -3760,7 +3761,7 @@ class KWSStorageEconomics:
     storage_s3_cost = (dataset_size * storage_cost_s3).to(USD / ureg.month)
     storage_nvme_low_cost = (dataset_size * storage_cost_nvme_low).to(USD / ureg.month)
     storage_nvme_high_cost = (dataset_size * storage_cost_nvme_high).to(USD / ureg.month)
-    load_speedup = nvme_bw_gbs/obj_bw_gbs
+    load_speedup = (nvme_bw / obj_bw).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(dataset_size_value - 736) < 1e-9, f"Rounded KWS storage example should be 736 GB, got {dataset_size_value:.1f} GB.")
@@ -3805,6 +3806,7 @@ class KWSStorageEconomics:
 # │ Exports: StorageLoading.nvme_load_s_str, StorageLoading.obj_load_s_str,
 # │          StorageLoading.load_speedup_str, StorageLoading.nvme_bw_gbs_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Systems
 from mlsysim.fmt import fmt, fmt_qty, check, fmt_time, fmt_multiple
 from mlsysim.core.units import GB, byte, second
 
@@ -3817,10 +3819,8 @@ class StorageLoading:
     sample_duration_s = 1
     sample_rate_hz = 16_000
     bytes_per_sample = 2
-    nvme_bw_gbs = 5    # effective NVMe throughput
-    nvme_bw = nvme_bw_gbs * GB / second
-    obj_bw_gbs = 0.1   # typical object storage throughput
-    obj_bw = obj_bw_gbs * GB / second
+    nvme_bw = Systems.Storage.LocalNvmeTrainingTypical.bandwidth
+    obj_bw = Systems.Storage.ObjectStoreSingleStream.bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     sample_count = rounded_sample_count_m * MILLION
@@ -3966,7 +3966,7 @@ Understanding these quantitative relationships enables informed architectural de
 # │          StorageBandwidth.s3_bw_mbs_str,
 # │          StorageBandwidth.s3_workers_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Models
+from mlsysim import Hardware, Models, Systems
 from mlsysim.fmt import fmt_int, fmt, fmt_count, check, fmt_qty, fmt_qty_int, fmt_rate, fmt_percent
 from mlsysim.core.units import KB, GB, MB, byte, second, flop, GFLOPs, TFLOPs
 
@@ -3978,15 +3978,15 @@ class StorageBandwidth:
     h_a100 = Hardware.Cloud.A100
     m_resnet = Models.Vision.ResNet50
     image_size_kb = 150
-    sata_bw_mbs = 500
-    s3_bw_mbs = 100
-    nvme_bw_low_gbs = 3
-    nvme_bw_high_gbs = 7
+    sata = Systems.Storage.SataSsdEffective
+    s3 = Systems.Storage.ObjectStoreSingleStream
+    nvme_low = Systems.Storage.LocalNvmeTrainingLow
+    nvme_high = Systems.Storage.LocalNvmeGen4
     image_size = image_size_kb * KB
-    sata_bw = sata_bw_mbs * MB / second
-    s3_bw = s3_bw_mbs * MB / second
-    nvme_bw_low = nvme_bw_low_gbs * GB / second
-    nvme_bw_high = nvme_bw_high_gbs * GB / second
+    sata_bw = sata.bandwidth
+    s3_bw = s3.bandwidth
+    nvme_bw_low = nvme_low.bandwidth
+    nvme_bw_high = nvme_high.bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     a100_flops_val = h_a100.compute.peak_flops.to(flop / second).magnitude
@@ -3996,7 +3996,7 @@ class StorageBandwidth:
     required_bw_value = required_bw.to(GB / second).magnitude
     sata_max_img_sec = int((sata_bw / image_size).to(1 / second).magnitude)
     sata_utilization_pct = int(round(sata_max_img_sec / max_img_per_sec * 100))
-    s3_workers = int(round(required_bw.to(MB / second).magnitude / s3_bw_mbs))
+    s3_workers = int(round((required_bw / s3_bw).to("").magnitude))
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(required_bw > 3.0 * GB / second, f"A100 storage budget should be multiple GB/s, got {required_bw_value:.1f}.")
@@ -4771,6 +4771,7 @@ class DataEngineeringSummaryRecap:
 # │ Imports: mlsysim.core.constants (MILLION, GB, byte), mlsysim.fmt (fmt, check)
 # │ Exports: StorageLoadingRecap.load_speedup_str, StorageLoadingRecap.nvme_bw_gbs_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Systems
 from mlsysim.fmt import fmt, fmt_qty, check, fmt_multiple
 from mlsysim.core.units import GB, byte, second
 
@@ -4783,10 +4784,8 @@ class StorageLoadingRecap:
     sample_duration_s = 1
     sample_rate_hz = 16_000
     bytes_per_sample = 2
-    nvme_bw_gbs = 5
-    nvme_bw = nvme_bw_gbs * GB / second
-    obj_bw_gbs = 0.1
-    obj_bw = obj_bw_gbs * GB / second
+    nvme_bw = Systems.Storage.LocalNvmeTrainingTypical.bandwidth
+    obj_bw = Systems.Storage.ObjectStoreSingleStream.bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     sample_count = rounded_sample_count_m * MILLION

@@ -9,7 +9,7 @@ from .types import (
 )
 from .reliability import Reliability
 from .orchestration import Orchestration
-from ..core.units import ureg, Q_, Gbps, TB, watt, MB
+from ..core.units import ureg, Q_, Gbps, GB, TB, watt, MB
 from ..core.provenance import sourced, sourced_qty
 from ..hardware.registry import Hardware
 from ..core.registry import Registry
@@ -260,12 +260,51 @@ class Storage(Registry):
         durability="local",
         metadata=Metadata(provenance=pc.BOOK_STORAGE_TIERS),
     )
+    SataSsdEffective = StorageSubsystem(
+        name="SATA SSD (effective sequential)",
+        bandwidth=500 * (MB / ureg.second),
+        media="SATA SSD",
+        interface="SATA",
+        durability="local",
+        metadata=Metadata(provenance=pc.BOOK_STORAGE_TIERS),
+    )
     Hdd7200Rpm = StorageSubsystem(
         name="7.2k RPM HDD",
         bandwidth=150 * (MB / ureg.second),
         iops=80,
         media="HDD",
         interface="SATA",
+        durability="local",
+        metadata=Metadata(provenance=pc.BOOK_STORAGE_TIERS),
+    )
+    CloudBlockStorageBaseline = StorageSubsystem(
+        name="Cloud block storage baseline",
+        bandwidth=250 * (MB / ureg.second),
+        media="cloud block volume",
+        durability="durable",
+        metadata=Metadata(provenance=pc.BOOK_STORAGE_TIERS),
+    )
+    ObjectStoreSingleStream = StorageSubsystem(
+        name="Object storage single-stream read",
+        bandwidth=100 * (MB / ureg.second),
+        media="object storage",
+        interface="HTTP range request",
+        durability="durable",
+        metadata=Metadata(provenance=pc.BOOK_STORAGE_TIERS),
+    )
+    LocalNvmeTrainingLow = StorageSubsystem(
+        name="Local NVMe training tier (low)",
+        bandwidth=3 * (GB / ureg.second),
+        media="NVMe SSD",
+        interface="PCIe",
+        durability="local",
+        metadata=Metadata(provenance=pc.BOOK_STORAGE_TIERS),
+    )
+    LocalNvmeTrainingTypical = StorageSubsystem(
+        name="Local NVMe training tier (typical)",
+        bandwidth=5 * (GB / ureg.second),
+        media="NVMe SSD",
+        interface="PCIe",
         durability="local",
         metadata=Metadata(provenance=pc.BOOK_STORAGE_TIERS),
     )

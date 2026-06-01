@@ -46,6 +46,14 @@ def test_storage_random_access_profiles():
     assert Systems.Storage.LocalNvmeGen3.iops == pytest.approx(500_000)
 
 
+def test_storage_training_effective_profiles():
+    assert Systems.Storage.CloudBlockStorageBaseline.bandwidth.to(GB / second).magnitude == pytest.approx(0.25)
+    assert Systems.Storage.ObjectStoreSingleStream.bandwidth.to(GB / second).magnitude == pytest.approx(0.1)
+    assert Systems.Storage.SataSsdEffective.bandwidth.to(GB / second).magnitude == pytest.approx(0.5)
+    assert Systems.Storage.LocalNvmeTrainingLow.bandwidth.to(GB / second).magnitude == pytest.approx(3.0)
+    assert Systems.Storage.LocalNvmeTrainingTypical.bandwidth.to(GB / second).magnitude == pytest.approx(5.0)
+
+
 def test_production_2k_checkpoint_storage_path():
     path = Systems.Storage.Production2KCheckpointPath
 
