@@ -44,8 +44,8 @@ python3 book/tools/audit/book_check_lego_scenario_inputs.py \
 
 Current output:
 
-- **1,050 advisory MLSysIM source-of-truth candidates**
-- **33 high-confidence candidates**
+- **1,048 advisory MLSysIM source-of-truth candidates**
+- **31 high-confidence candidates**
 - Full JSON work queue:
   `book/tools/audit/artifacts/lego_scenario_inputs_audit.json`
 - Full Markdown work queue:
@@ -62,7 +62,6 @@ High-confidence buckets:
 | `Hardware.*` / `Hardware.Tech.*` | 18 | Hardware capacity, bandwidth, FLOP/s, TDP, memory/interconnect facts |
 | `Systems.Clusters` / `Systems.Nodes` | 5 | Fleet, node, GPU-count, cluster-topology facts |
 | `Infrastructure.*` / `Scenarios.Sustainability` | 4 | PUE, cooling, carbon, sustainability scenario facts |
-| `Infrastructure.Pricing.Cloud` / `Infrastructure.Pricing.Fleet` | 2 | GPU-hour, cloud-instance, and fleet price points |
 | `Systems.Storage` | 2 | Local NVMe, HDD, PFS, S3/object-store, checkpoint-path storage facts |
 | `Infrastructure.Pricing.Storage` | 1 | Storage/monitoring price points |
 | `Systems.Fabrics` / `Systems.SwitchFabric` | 1 | Network/fabric/switch-sizing facts |
@@ -165,6 +164,9 @@ Known concrete findings from the first pass:
   cloud cost per device, per-query edge/cloud economics, or annual network
   cost now stay in medium scenario/pricing review until scenario profiles
   exist.
+- Stage 17 added named low-cost GPU-hour and A10G inference GPU-hour price
+  anchors under `Infrastructure.Pricing.Cloud`, then migrated the FixMatch
+  and cloud-edge TCO cells to those registry entries.
 - 100,000-GPU examples should load `Systems.Clusters.Mega_100K`.
 - Storage/checkpoint examples mix two different kinds of facts: storage-system
   facts such as local NVMe drive count, local/PFS bandwidth, capacity, and

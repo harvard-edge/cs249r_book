@@ -41,6 +41,16 @@ class Cloud(Registry):
         rate=2.5 * USD / hour,
         metadata=_CLOUD,
     )
+    LowCostGpuPerHour = PricePoint(
+        name="Cloud low-cost GPU",
+        rate=0.50 * USD / hour,
+        metadata=_CLOUD,
+    )
+    A10GInferencePerHour = PricePoint(
+        name="Cloud A10G inference",
+        rate=0.75 * USD / hour,
+        metadata=_CLOUD,
+    )
     TpuV4PerHour = PricePoint(
         name="Cloud TPU v4",
         rate=4.0 * USD / hour,
