@@ -496,16 +496,30 @@ ROCE_100G_GBS = Provenance(
     verified="2025-03-06",
 )
 
-BOOK_FABRIC_LATENCY = _conv(
-    "prov:book-fabric-latency-assumptions",
-    "MLSysBook α-model one-way latency anchors (InfiniBand NDR/HDR, RoCE, TCP)",
+FABRIC_LATENCY_REFERENCE = _conv(
+    "prov:fabric-latency-reference",
+    "Datacenter fabric α-model one-way latency anchors (InfiniBand NDR/HDR, RoCE, TCP)",
     notes="Order-of-magnitude μs values for napkin math; not vendor QoS guarantees.",
 )
 
-BOOK_SWITCH_OPTICS = _conv(
-    "prov:book-switch-optics",
-    "MLSysBook switch-ASIC capacity (51.2T/102.4T) and 400G optics power (pluggable/CPO) reference figures",
-    notes="2025-26 datacenter-switching reference points for the network-fabrics worked examples.",
+NVIDIA_QUANTUM2_QM97XX_SWITCH = _ds(
+    "prov:nvidia-quantum2-qm97xx-switch",
+    "NVIDIA QM97XX 1U NDR 400Gbps InfiniBand Switch Systems User Manual",
+    "https://docs.nvidia.com/networking/display/qm97x0um/introduction",
+    verified="2026-06-01",
+    notes="QM9700/QM9701/QM9790-class switches: 64 NDR 400 Gb/s ports and 51.2 Tb/s aggregate bidirectional throughput.",
+)
+
+NDR_LEAF_SPINE_64_PORT_SPLIT = _conv(
+    "prov:ndr-leaf-spine-64-port-split",
+    "Reference non-oversubscribed two-tier leaf-spine split for a 64-port NDR switch",
+    notes="Uses 32 endpoint downlinks and 32 spine uplinks per leaf switch.",
+)
+
+DATACENTER_SWITCH_OPTICS_REFERENCE = _conv(
+    "prov:datacenter-switch-optics-reference",
+    "Datacenter switch-ASIC capacity and 400G optics power reference figures",
+    notes="2025-26 datacenter-switching reference points for switch ASIC capacity classes and per-port optics power.",
 )
 
 BOOK_NETWORK_ENERGY = _conv(

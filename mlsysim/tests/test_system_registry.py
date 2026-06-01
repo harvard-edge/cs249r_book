@@ -63,6 +63,12 @@ def test_storage_random_access_profiles():
     assert Systems.Storage.LocalNvmeGen3.iops == pytest.approx(500_000)
 
 
+def test_switch_fabric_port_anchors():
+    assert int(Systems.SwitchFabric.NdrSwitchPorts) == 64
+    assert int(Systems.SwitchFabric.NdrLeafDownlinkPorts) == 32
+    assert int(Systems.SwitchFabric.NdrLeafUplinkPorts) == 32
+
+
 def test_storage_training_effective_profiles():
     assert Systems.Storage.CloudBlockStorageBaseline.bandwidth.to(GB / second).magnitude == pytest.approx(0.25)
     assert Systems.Storage.ObjectStoreSingleStream.bandwidth.to(GB / second).magnitude == pytest.approx(0.1)

@@ -44,8 +44,8 @@ python3 book/tools/audit/book_check_lego_scenario_inputs.py \
 
 Current output:
 
-- **1,048 advisory MLSysIM source-of-truth candidates**
-- **15 high-confidence candidates**
+- **1,047 advisory MLSysIM source-of-truth candidates**
+- **14 high-confidence candidates**
 - Full JSON work queue:
   `book/tools/audit/artifacts/lego_scenario_inputs_audit.json`
 - Full Markdown work queue:
@@ -62,7 +62,6 @@ High-confidence buckets:
 | `Systems.Clusters` / `Systems.Nodes` | 5 | Fleet, node, GPU-count, cluster-topology facts |
 | `Hardware.*` / `Hardware.Tech.*` | 5 | Hardware capacity, bandwidth, FLOP/s, TDP, memory/interconnect facts |
 | `Infrastructure.*` / `Scenarios.Sustainability` | 3 | PUE, cooling, carbon, sustainability scenario facts |
-| `Systems.Fabrics` / `Systems.SwitchFabric` | 1 | Network/fabric/switch-sizing facts |
 | `Systems.Storage` | 1 | Local NVMe, HDD, PFS, S3/object-store, checkpoint-path storage facts |
 
 Broader medium-confidence buckets:
@@ -171,6 +170,19 @@ Known concrete findings from the first pass:
   marked as scenario, hypothetical, illustrative, reference, baseline, or
   budget inputs now remain medium-confidence scenario/profile work instead of
   high-confidence canonical hardware/system facts.
+- Stage 19 added NDR switch port/downlink/uplink anchors to
+  `Systems.SwitchFabric` and migrated the two-tier fabric sizing example to
+  load those values from MLSysIM. The new entries use neutral source/convention
+  provenance rather than book-specific provenance identifiers: 64 NDR ports and
+  51.2 Tb/s are tied to NVIDIA QM97XX documentation, while the 32/32 leaf-spine
+  split is recorded as a topology convention. The same slice also renamed the
+  fabric-latency provenance used by `Systems.Fabrics` / `Systems.SwitchFabric`
+  to a neutral datacenter-fabric reference.
+- MLSysIM registry/provenance names should stay product-, system-, source-, or
+  convention-oriented. Avoid new `BOOK_*`, `MLSysBook`, `Volume I/II`, or
+  "worked example" identifiers inside MLSysIM. Existing `BOOK_*` provenance
+  records should be renamed in a dedicated cleanup pass without changing their
+  values.
 - 100,000-GPU examples should load `Systems.Clusters.Mega_100K`.
 - Storage/checkpoint examples mix two different kinds of facts: storage-system
   facts such as local NVMe drive count, local/PFS bandwidth, capacity, and

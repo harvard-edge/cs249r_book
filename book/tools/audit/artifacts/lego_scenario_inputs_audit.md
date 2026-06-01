@@ -4,7 +4,7 @@ This is an advisory work queue for values that likely define
 hardware, systems, infrastructure, pricing, models, datasets,
 storage subsystems, or scenarios in LEGO LOAD stages.
 
-Findings: 1048
+Findings: 1047
 By target:
    285  Scenarios.* or Ops.*
    216  Models.* or Scenarios.TrainingRuns
@@ -22,7 +22,6 @@ By target:
      3  Infrastructure.Pricing.Labeling or Scenarios.*
      3  Infrastructure.* or Scenarios.Sustainability
      2  Scenarios.TrainingRuns or Systems.Reliability
-     1  Systems.Fabrics or Systems.SwitchFabric
      1  Systems.Storage
      1  Infrastructure.* or Scenarios.*
 Top chapters:
@@ -44,8 +43,8 @@ Top chapters:
     27  vol1/responsible_engr
     22  vol2/distributed_training
     21  vol2/security_privacy
-    18  vol2/compute_infrastructure
     18  vol2/fleet_orchestration
+    18  vol2/performance_engineering
 Top reasons:
    282  scenario/workload policy
    211  model/workload specification
@@ -66,7 +65,7 @@ Top reasons:
      3  infrastructure/sustainability fact
      3  storage-related scenario input
      2  checkpoint policy/workload cadence
-     1  network/fabric system fact
+     1  storage subsystem fact
 
 ## vol1/backmatter/appendix_algorithm.qmd
 
@@ -965,7 +964,6 @@ Top reasons:
 | `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3606` | `CheckpointOverheadBudget` | `run_days` | `Scenarios.* or Ops.*` | scenario/workload policy | `14` |
 | `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3607` | `CheckpointOverheadBudget` | `checkpoints_retained` | `Systems.Storage or Datasets.*` | storage/data fact | `10` |
 | `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3762` | `CheckpointComputeTradeoff` | `write_bw` | `Scenarios.*` | unit-bearing scenario input | `100 * (GB / second)` |
-| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3915` | `FabricSizingScenario` | `switch_ports` | `Systems.Fabrics or Systems.SwitchFabric` | network/fabric system fact | `64` |
 | `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3918` | `FabricSizingScenario` | `endpoint_links_per_gpu` | `Scenarios.* or Ops.*` | scenario/workload policy | `2` |
 | `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:4176` | `A100FallaciesRecap` | `option_a_hbm` | `Hardware.* or Scenarios.*` | scenario/profile input | `192 * GB` |
 

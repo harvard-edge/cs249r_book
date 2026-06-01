@@ -16,11 +16,11 @@ from ..core.registry import Registry
 from ..core.types import Metadata
 from ..core import provenance_catalog as pc
 
-# Fabric α latencies (appendix α–β model)
-IB_NDR_LATENCY_US = sourced(5, pc.BOOK_FABRIC_LATENCY, name="InfiniBand NDR latency (μs)", description="One-way α latency for NDR fabrics.")
-IB_HDR_LATENCY_US = sourced(7, pc.BOOK_FABRIC_LATENCY, name="InfiniBand HDR latency (μs)", description="One-way α latency for HDR fabrics.")
-ROCE_LATENCY_US = sourced(10, pc.BOOK_FABRIC_LATENCY, name="RoCE latency (μs)", description="One-way α latency for RoCE v2.")
-TCP_LATENCY_US = sourced(50, pc.BOOK_FABRIC_LATENCY, name="TCP latency (μs)", description="One-way α latency for TCP over Ethernet.")
+# Fabric α latencies for α-β communication models.
+IB_NDR_LATENCY_US = sourced(5, pc.FABRIC_LATENCY_REFERENCE, name="InfiniBand NDR latency (μs)", description="One-way α latency for NDR fabrics.")
+IB_HDR_LATENCY_US = sourced(7, pc.FABRIC_LATENCY_REFERENCE, name="InfiniBand HDR latency (μs)", description="One-way α latency for HDR fabrics.")
+ROCE_LATENCY_US = sourced(10, pc.FABRIC_LATENCY_REFERENCE, name="RoCE latency (μs)", description="One-way α latency for RoCE v2.")
+TCP_LATENCY_US = sourced(50, pc.FABRIC_LATENCY_REFERENCE, name="TCP latency (μs)", description="One-way α latency for TCP over Ethernet.")
 
 _INFINIBAND_HDR_BW = 200 * Gbps
 _INFINIBAND_NDR_BW = 400 * Gbps
@@ -78,11 +78,11 @@ class Fabrics(Registry):
     """Vetted network fabrics (canonical bandwidth + latency)."""
     Ethernet_10G = NetworkFabric(
         name="10GbE", bandwidth=10 * Gbps, latency=Q_(TCP_LATENCY_US, "us"),
-        metadata=Metadata(provenance=pc.BOOK_FABRIC_LATENCY),
+        metadata=Metadata(provenance=pc.FABRIC_LATENCY_REFERENCE),
     )
     Ethernet_100G = NetworkFabric(
         name="100GbE", bandwidth=100 * Gbps, latency=Q_(TCP_LATENCY_US, "us"),
-        metadata=Metadata(provenance=pc.BOOK_FABRIC_LATENCY),
+        metadata=Metadata(provenance=pc.FABRIC_LATENCY_REFERENCE),
     )
     Ethernet_400G = NetworkFabric(
         name="400GbE", bandwidth=400 * Gbps, latency=Q_(TCP_LATENCY_US, "us"),
@@ -122,7 +122,7 @@ _TIER_PROV = pc.BOOK_CLUSTER_TIERS
 
 
 class Clusters(Registry):
-    """Book reference fleet tiers (256 / 1k / 2k / 8k / 10k / 100k GPUs)."""
+    """Reference fleet tiers (256 / 1k / 2k / 8k / 10k / 100k GPUs)."""
     Research_256 = Fleet(
         name="Research Cluster (256 GPUs)",
         node=Nodes.DGX_H100,
@@ -220,7 +220,7 @@ class Pods(Registry):
         power=3 * ureg.megawatt,
         metadata=Metadata(
             provenance=pc.BOOK_CLUSTER_TIERS,
-            description="Reference TPU pod envelope for Volume I cloud-scale examples.",
+            description="Reference TPU pod envelope for cloud-scale system models.",
         ),
     )
 
@@ -228,29 +228,35 @@ class Pods(Registry):
 
 class SwitchFabric(Registry):
     """Switch-ASIC capacity, 400G optics power, and α-β / FEC / hop latency reference
-    figures for the network-fabrics worked examples (Volume II)."""
+    figures for datacenter network-fabric models."""
 
-    SwitchAsic51T2 = sourced_qty(51_200 * Gbps, pc.BOOK_SWITCH_OPTICS,
+    NdrSwitchPorts = sourced(64, pc.NVIDIA_QUANTUM2_QM97XX_SWITCH,
+        name="NDR switch ports", description="Reference 64-port NDR switch used for two-tier fabric sizing.")
+    NdrLeafDownlinkPorts = sourced(32, pc.NDR_LEAF_SPINE_64_PORT_SPLIT,
+        name="NDR leaf downlink ports", description="Reference downlinks per 64-port leaf switch.")
+    NdrLeafUplinkPorts = sourced(32, pc.NDR_LEAF_SPINE_64_PORT_SPLIT,
+        name="NDR leaf uplink ports", description="Reference uplinks per 64-port leaf switch.")
+    SwitchAsic51T2 = sourced_qty(51_200 * Gbps, pc.NVIDIA_QUANTUM2_QM97XX_SWITCH,
         name="Switch ASIC 51.2T", description="Single-ASIC switch capacity (51.2 Tb/s class).")
-    SwitchAsic102T4 = sourced_qty(102_400 * Gbps, pc.BOOK_SWITCH_OPTICS,
+    SwitchAsic102T4 = sourced_qty(102_400 * Gbps, pc.DATACENTER_SWITCH_OPTICS_REFERENCE,
         name="Switch ASIC 102.4T", description="Single-ASIC switch capacity (102.4 Tb/s class).")
-    OpticsPluggable400G = sourced_qty(20 * watt, pc.BOOK_SWITCH_OPTICS,
+    OpticsPluggable400G = sourced_qty(20 * watt, pc.DATACENTER_SWITCH_OPTICS_REFERENCE,
         name="400G pluggable optics power", description="Per-module power for a 400G pluggable transceiver.")
-    OpticsCpo400G = sourced_qty(10 * watt, pc.BOOK_SWITCH_OPTICS,
+    OpticsCpo400G = sourced_qty(10 * watt, pc.DATACENTER_SWITCH_OPTICS_REFERENCE,
         name="400G co-packaged optics power", description="Per-port power for 400G co-packaged optics.")
     # α-β model latency anchors. NOTE: AlphaNdr (1.5 µs) is the per-message base latency used in
-    # the ring-allreduce worked example; it is DISTINCT from the end-to-end
+    # the ring-allreduce model; it is DISTINCT from the end-to-end
     # Fabrics.InfiniBand_NDR.latency (5 µs). Both values are preserved as-is here — reconciling
     # which is canonical is a separate editorial decision, not a taxonomy move.
-    AlphaNdr = sourced_qty(1.5 * ureg.microsecond, pc.BOOK_FABRIC_LATENCY,
-        name="α (NDR base latency)", description="Per-message base latency for the NDR α-β model worked example.")
-    AlphaRoce = sourced_qty(5.0 * ureg.microsecond, pc.BOOK_FABRIC_LATENCY,
-        name="α (RoCE base latency)", description="Per-message base latency for the RoCE α-β model worked example.")
-    HopLatency = sourced_qty(0.6 * ureg.microsecond, pc.BOOK_FABRIC_LATENCY,
+    AlphaNdr = sourced_qty(1.5 * ureg.microsecond, pc.FABRIC_LATENCY_REFERENCE,
+        name="α (NDR base latency)", description="Per-message base latency for the NDR α-β model.")
+    AlphaRoce = sourced_qty(5.0 * ureg.microsecond, pc.FABRIC_LATENCY_REFERENCE,
+        name="α (RoCE base latency)", description="Per-message base latency for the RoCE α-β model.")
+    HopLatency = sourced_qty(0.6 * ureg.microsecond, pc.FABRIC_LATENCY_REFERENCE,
         name="Per-hop switch latency", description="Approximate per-hop store-and-forward switch latency.")
-    FecLatencyLow = sourced_qty(100 * ureg.nanosecond, pc.BOOK_FABRIC_LATENCY,
+    FecLatencyLow = sourced_qty(100 * ureg.nanosecond, pc.FABRIC_LATENCY_REFERENCE,
         name="FEC latency (low)", description="Lower-bound forward-error-correction added latency.")
-    FecLatencyHigh = sourced_qty(200 * ureg.nanosecond, pc.BOOK_FABRIC_LATENCY,
+    FecLatencyHigh = sourced_qty(200 * ureg.nanosecond, pc.FABRIC_LATENCY_REFERENCE,
         name="FEC latency (high)", description="Upper-bound forward-error-correction added latency.")
 
 
