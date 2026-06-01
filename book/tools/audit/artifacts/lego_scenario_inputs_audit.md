@@ -4,16 +4,16 @@ This is an advisory work queue for values that likely define
 hardware, systems, infrastructure, pricing, models, datasets,
 storage subsystems, or scenarios in LEGO LOAD stages.
 
-Findings: 1039
+Findings: 1038
 By target:
    285  Scenarios.* or Ops.*
    216  Models.* or Scenarios.TrainingRuns
    170  Scenarios.*
    116  Infrastructure.Pricing.* or Scenarios.*
    111  Datasets.* or Scenarios.DataWorkloads
-    49  Hardware.*
+    50  Hardware.*
     31  Infrastructure.*
-    21  Systems.*
+    19  Systems.*
     13  Hardware.* or Scenarios.*
     11  Systems.Storage or Datasets.*
      4  Infrastructure.* or Scenarios.*
@@ -48,10 +48,10 @@ Top reasons:
    170  unit-bearing scenario input
    115  economic input or scenario price
    107  dataset/workload specification
-    49  hardware-related quantitative input
+    50  hardware-related quantitative input
     31  infrastructure input
     22  scenario/profile input
-    21  system-level fact
+    19  system-level fact
     11  storage/data fact
      5  workload compute requirement
      4  dataset/workload size
@@ -332,7 +332,6 @@ Top reasons:
 | `book/quarto/contents/vol1/frameworks/frameworks.qmd:4976` | `TrainingStepCalc` | `_hidden` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `256` |
 | `book/quarto/contents/vol1/frameworks/frameworks.qmd:5066` | `MnistTrainingStepCalc` | `_batch` | `Scenarios.* or Ops.*` | scenario/workload policy | `32` |
 | `book/quarto/contents/vol1/frameworks/frameworks.qmd:5068` | `MnistTrainingStepCalc` | `_hidden` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `256` |
-| `book/quarto/contents/vol1/frameworks/frameworks.qmd:5193` | `Model7BMemory` | `a100_mem_display` | `Hardware.*` | hardware-related quantitative input | `80 * GB` |
 
 ## vol1/hw_acceleration
 
@@ -525,12 +524,12 @@ Top reasons:
 | `book/quarto/contents/vol1/model_compression/model_compression.qmd:561` | `ModelDeviceComparison` | `resnet_mem` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `100 * MB` |
 | `book/quarto/contents/vol1/model_compression/model_compression.qmd:564` | `ModelDeviceComparison` | `dscnn_mem` | `Scenarios.*` | unit-bearing scenario input | `500 * KB` |
 | `book/quarto/contents/vol1/model_compression/model_compression.qmd:2368` | `LowRankFactorization` | `bytes_per_param` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `4` |
-| `book/quarto/contents/vol1/model_compression/model_compression.qmd:3392` | `QuantizationSavings` | `gpu_mem_fp16_gb` | `Systems.*` | system-level fact | `24` |
-| `book/quarto/contents/vol1/model_compression/model_compression.qmd:3393` | `QuantizationSavings` | `gpu_mem_int4_gb` | `Systems.*` | system-level fact | `8` |
-| `book/quarto/contents/vol1/model_compression/model_compression.qmd:7295` | `AmdahlCompression` | `model_fraction` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `0.20` |
-| `book/quarto/contents/vol1/model_compression/model_compression.qmd:7376` | `ResNet50Int8Metrics` | `calibration_error_fp32` | `Scenarios.* or Ops.*` | scenario/workload policy | `2.1` |
-| `book/quarto/contents/vol1/model_compression/model_compression.qmd:7377` | `ResNet50Int8Metrics` | `calibration_error_int8` | `Scenarios.* or Ops.*` | scenario/workload policy | `3.4` |
-| `book/quarto/contents/vol1/model_compression/model_compression.qmd:8150` | `FallaciesAnalysis` | `overhead_pct` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `15` |
+| `book/quarto/contents/vol1/model_compression/model_compression.qmd:3392` | `QuantizationSavings` | `gpu_mem_fp16` | `Hardware.*` | hardware-related quantitative input | `24 * GB` |
+| `book/quarto/contents/vol1/model_compression/model_compression.qmd:3393` | `QuantizationSavings` | `gpu_mem_int4` | `Hardware.*` | hardware-related quantitative input | `8 * GB` |
+| `book/quarto/contents/vol1/model_compression/model_compression.qmd:7292` | `AmdahlCompression` | `model_fraction` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `0.20` |
+| `book/quarto/contents/vol1/model_compression/model_compression.qmd:7373` | `ResNet50Int8Metrics` | `calibration_error_fp32` | `Scenarios.* or Ops.*` | scenario/workload policy | `2.1` |
+| `book/quarto/contents/vol1/model_compression/model_compression.qmd:7374` | `ResNet50Int8Metrics` | `calibration_error_int8` | `Scenarios.* or Ops.*` | scenario/workload policy | `3.4` |
+| `book/quarto/contents/vol1/model_compression/model_compression.qmd:8147` | `FallaciesAnalysis` | `overhead_pct` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `15` |
 
 ## vol1/model_serving
 

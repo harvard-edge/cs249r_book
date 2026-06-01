@@ -3449,10 +3449,10 @@ Tensors answer the first question---*what is the data?*---by encoding shape, lay
 # │          Hardware.Cloud.A100.compute.peak_flops), mlsysim.book (fmt)
 # │ Exports: pcie4_gbs_str, pcie4_bidir_gbs_str, nvlink_a100_gbs_str, a100_bw_gbs_str,
 # │          a100_bw_tbs_str, a100_tflops_fp16_str, pcie4_4mb_ms_str, nvlink_4mb_ms_str,
-# │          hbm_4mb_ms_str, pcie4_1gb_ms_str, pcie4_1gb_equiv_ops_str, a100_mem_gb_str,
+# │          hbm_4mb_ms_str, pcie4_1gb_ms_str, pcie4_1gb_equiv_ops_str, a100_mem_gib_str,
 # │          pcie_to_hbm_gap_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, fmt_time, fmt_qty
+from mlsysim.fmt import fmt, check, fmt_memory, fmt_time, fmt_qty
 
 # ┌── LEGO ───────────────────────────────────────────────
 class DeviceBandwidthHierarchy:
@@ -3469,7 +3469,7 @@ class DeviceBandwidthHierarchy:
     nvlink_a100 = Hardware.Cloud.A100.nvlink.bandwidth
     nvlink_a100_per_direction = nvlink_a100 / 2
     a100_bw = Hardware.Cloud.A100.memory.bandwidth
-    a100_mem_display = Hardware.Cloud.A100.memory.capacity
+    a100_mem = Hardware.Cloud.A100.memory.capacity
     a100_flops_fp16 = Hardware.Cloud.A100.compute.peak_flops
 
     # Transfer times for 4 MB tensor
@@ -3495,7 +3495,7 @@ class DeviceBandwidthHierarchy:
     a100_bw_gbs_str = fmt_qty(a100_bw, GB/second, precision=0, commas=False)
     a100_bw_tbs_str = fmt_qty(a100_bw, TB/second, precision=2, commas=False)
     a100_tflops_fp16_str = fmt_qty(a100_flops_fp16, TFLOP/second, precision=0, commas=False)
-    a100_mem_gb_str = fmt_qty(a100_mem_display, GiB, precision=0, commas=False, unit_label="GB")
+    a100_mem_gib_str = fmt_memory(a100_mem, binary=True, precision=0, commas=False)
     pcie4_4mb_ms_str = fmt_time(pcie4_4mb, millisecond, precision=3, commas=False)
     nvlink_4mb_ms_str = fmt_time(nvlink_4mb, millisecond, precision=3, commas=False)
     hbm_4mb_ms_str = fmt_time(hbm_4mb, millisecond, precision=3, commas=False)
@@ -4893,13 +4893,13 @@ When `h = torch.relu(x @ W1 + b1)` executes, PyTorch's eager execution triggers 
 # │ Context: HBM capacity footnote immediately below.
 # │
 # │ Goal: Keep the A100 HBM capacity local to the training-step narrative.
-# │ Show: A100 HBM capacity as a decimal-GB prose anchor in this chapter.
+# │ Show: A100 HBM capacity as a binary-memory prose anchor in this chapter.
 # │ How: Read the A100 memory capacity constant and format it for prose.
 # │
-# │ Imports: mlsysim.core.constants (Hardware.Cloud.A100.memory.capacity, GB)
-# │ Exports: HbmCapacityFootnote.a100_mem_gb_str
+# │ Imports: mlsysim.core.constants (Hardware.Cloud.A100.memory.capacity)
+# │ Exports: HbmCapacityFootnote.a100_mem_gib_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import check, fmt_memory
 
 # ┌── LEGO ───────────────────────────────────────────────
 class HbmCapacityFootnote:
@@ -4912,13 +4912,13 @@ class HbmCapacityFootnote:
     # Direct hardware-constant lookup.
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(a100_mem.to(GiB).magnitude >= 80, "A100 HBM capacity anchor should be at least 80 GB.")
+    check(a100_mem.to(GiB).magnitude >= 80, "A100 HBM capacity anchor should be at least 80 GiB.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    a100_mem_gb_str = fmt_qty(a100_mem, GiB, precision=0, commas=False, unit_label="GB")
+    a100_mem_gib_str = fmt_memory(a100_mem, binary=True, precision=0, commas=False)
 ```
 
-[^fn-hbm-capacity-constraint]: **HBM (High Bandwidth Memory)**: Provides 2--3 TB/s bandwidth on modern GPUs (introduced in @sec-hardware-acceleration-memory-hierarchy-1839). HBM bandwidth determines whether operations are memory bound or compute bound, and its `{python} HbmCapacityFootnote.a100_mem_gb_str` capacity on an A100 sets the hard ceiling on model size: weights, activations, gradients, and optimizer state must all fit simultaneously during training. When they do not, the framework must resort to offloading, checkpointing, or model parallelism, each adding complexity to what the programmer perceives as a single `loss.backward()` call. \index{HBM!capacity constraint}
+[^fn-hbm-capacity-constraint]: **HBM (High Bandwidth Memory)**: Provides 2--3 TB/s bandwidth on modern GPUs (introduced in @sec-hardware-acceleration-memory-hierarchy-1839). HBM bandwidth determines whether operations are memory bound or compute bound, and its `{python} HbmCapacityFootnote.a100_mem_gib_str` capacity on an A100 sets the hard ceiling on model size: weights, activations, gradients, and optimizer state must all fit simultaneously during training. When they do not, the framework must resort to offloading, checkpointing, or model parallelism, each adding complexity to what the programmer perceives as a single `loss.backward()` call. \index{HBM!capacity constraint}
 
 5. **Autograd Recording**: Simultaneously, PyTorch's autograd engine records a `MmBackward` node on the tape, storing references to `x` and `W1` for gradient computation.
 
@@ -5175,36 +5175,36 @@ Engineers assume training framework choice is independent of deployment infrastr
 # │ Context: Fallacy about batch size being free optimization
 # │
 # │ Goal: Dispel the myth that "small" models leave infinite room for batching.
-# │ Show: That 14 GB of weights consumes 18% of an A100 before training starts.
+# │ Show: That FP16 weights consume a meaningful share of A100 HBM before training starts.
 # │ How: Calculate weight memory for 7 billion parameters in FP16.
 # │
-# │ Imports: mlsysim.core.constants (Hardware.Cloud.A100.memory.capacity, BYTES_FP16, GB),
+# │ Imports: mlsysim.core.constants (Hardware.Cloud.A100.memory.capacity, BYTES_FP16),
 # │          mlsysim.physics (model_memory)
-# │ Exports: Model7BMemory.model_7b_fp16_gb_str,
-# │          Model7BMemory.a100_remaining_7b_gb_str, Model7BMemory.a100_mem_gb_str
+# │ Exports: Model7BMemory.model_7b_fp16_gib_str,
+# │          Model7BMemory.a100_remaining_7b_gib_str, Model7BMemory.a100_mem_gib_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.physics import model_memory
-from mlsysim.fmt import fmt_qty, check
+from mlsysim.fmt import check, fmt_memory
 
 class Model7BMemory:
     """7-billion-parameter FP16 weight memory to show batch-size myth under capacity constraints."""
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     params = Models.Language.Llama2_7B.parameters
-    a100_mem_display = 80 * GB  # pedagogical 80 GB nominal
+    a100_mem = Hardware.Cloud.A100.memory.capacity
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     fp16 = params * BYTES_FP16                                                  # 14 GB
-    remaining = a100_mem_display - fp16
+    remaining = a100_mem - fp16
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(remaining.to(GB).magnitude > 60, f"7-billion-parameter FP16 weights leave less A100 memory than expected: {remaining.to(GB).magnitude:.1f} GB.")
+    check(remaining.to(GiB).magnitude > 60, f"7-billion-parameter FP16 weights leave less A100 memory than expected: {remaining.to(GiB).magnitude:.1f} GiB.")
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    model_7b_fp16_gb_str = fmt_qty(fp16, GB, precision=0, commas=False)             # e.g. "14 GB"
-    a100_remaining_7b_gb_str = fmt_qty(remaining, GB, precision=0, commas=False)     # e.g. "66 GB"
-    a100_mem_gb_str = fmt_qty(a100_mem_display, GB, precision=0, commas=False)                    # e.g. "80 GB"
+    model_7b_fp16_gib_str = fmt_memory(fp16, binary=True, precision=1, commas=False)                 # e.g. "13.0 GiB"
+    a100_remaining_7b_gib_str = fmt_memory(remaining, binary=True, precision=1, commas=False)         # e.g. "67.0 GiB"
+    a100_mem_gib_str = fmt_memory(a100_mem, binary=True, precision=0, commas=False)                   # e.g. "80 GiB"
 ```
 
 **Fallacy**: *"Increasing batch size is a free throughput optimization within framework memory limits."*
 
-Engineers assume that if memory is available, larger batches always improve throughput. The mini-batch processing discussion in @sec-model-training-minibatch-processing-4eb0 explains the throughput target, but activation memory can reverse the benefit. A 7-billion-parameter model in FP16 consumes `{python} Model7BMemory.model_7b_fp16_gb_str`, leaving `{python} Model7BMemory.a100_remaining_7b_gb_str` on an `{python} Model7BMemory.a100_mem_gb_str` A100. Increasing batch size from 8 to 32 quadruples the batch-dependent activation footprint; transformer attention adds a large $\mathcal{O}(S^2)$ term in sequence length that makes each sample expensive. The resulting memory pressure can trigger recomputation strategies that reduce throughput by 20--30 percent despite the larger batch. Teams that blindly maximize batch size often achieve lower throughput than smaller batches that avoid these memory management pathways.
+Engineers assume that if memory is available, larger batches always improve throughput. The mini-batch processing discussion in @sec-model-training-minibatch-processing-4eb0 explains the throughput target, but activation memory can reverse the benefit. A 7-billion-parameter model in FP16 consumes `{python} Model7BMemory.model_7b_fp16_gib_str`, leaving `{python} Model7BMemory.a100_remaining_7b_gib_str` on an `{python} Model7BMemory.a100_mem_gib_str` A100. Increasing batch size from 8 to 32 quadruples the batch-dependent activation footprint; transformer attention adds a large $\mathcal{O}(S^2)$ term in sequence length that makes each sample expensive. The resulting memory pressure can trigger recomputation strategies that reduce throughput by 20--30 percent despite the larger batch. Teams that blindly maximize batch size often achieve lower throughput than smaller batches that avoid these memory management pathways.
 
 **Pitfall**: *Treating compilation overhead as negligible.*
 
