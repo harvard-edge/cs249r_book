@@ -44,8 +44,8 @@ python3 book/tools/audit/book_check_lego_scenario_inputs.py \
 
 Current output:
 
-- **1,053 advisory MLSysIM source-of-truth candidates**
-- **40 high-confidence candidates**
+- **1,050 advisory MLSysIM source-of-truth candidates**
+- **37 high-confidence candidates**
 - Full JSON work queue:
   `book/tools/audit/artifacts/lego_scenario_inputs_audit.json`
 - Full Markdown work queue:
@@ -60,8 +60,8 @@ High-confidence buckets:
 | Target | Count | Meaning |
 |---|---:|---|
 | `Hardware.*` / `Hardware.Tech.*` | 18 | Hardware capacity, bandwidth, FLOP/s, TDP, memory/interconnect facts |
-| `Systems.Clusters` / `Systems.Nodes` | 8 | Fleet, node, GPU-count, cluster-topology facts |
 | `Infrastructure.Pricing.Cloud` / `Infrastructure.Pricing.Fleet` | 6 | GPU-hour, cloud-instance, and fleet price points |
+| `Systems.Clusters` / `Systems.Nodes` | 5 | Fleet, node, GPU-count, cluster-topology facts |
 | `Infrastructure.*` / `Scenarios.Sustainability` | 4 | PUE, cooling, carbon, sustainability scenario facts |
 | `Systems.Storage` | 2 | Local NVMe, HDD, PFS, S3/object-store, checkpoint-path storage facts |
 | `Infrastructure.Pricing.Storage` | 1 | Storage/monitoring price points |
@@ -156,6 +156,10 @@ Known concrete findings from the first pass:
   or workload FLOP formulas. Those remain in the advisory queue as medium
   scenario/profile work; high-confidence findings now mean "likely registry
   source-of-truth migration" more reliably.
+- Stage 15 migrated explicit per-node GPU counts in A100/H100 communication
+  examples to `Systems.Nodes.DGX_A100.accelerators_per_node` and
+  `Systems.Nodes.DGX_H100.accelerators_per_node`. Generic "8 GPU" scenario
+  counts remain local until they have a named scenario profile.
 - 100,000-GPU examples should load `Systems.Clusters.Mega_100K`.
 - Storage/checkpoint examples mix two different kinds of facts: storage-system
   facts such as local NVMe drive count, local/PFS bandwidth, capacity, and

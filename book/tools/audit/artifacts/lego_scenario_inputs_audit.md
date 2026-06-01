@@ -4,7 +4,7 @@ This is an advisory work queue for values that likely define
 hardware, systems, infrastructure, pricing, models, datasets,
 storage subsystems, or scenarios in LEGO LOAD stages.
 
-Findings: 1053
+Findings: 1050
 By target:
    285  Scenarios.* or Ops.*
    216  Models.* or Scenarios.TrainingRuns
@@ -16,8 +16,8 @@ By target:
     21  Systems.*
     18  Hardware.* or Hardware.Tech.*
     11  Systems.Storage or Datasets.*
-     8  Systems.Clusters or Systems.Nodes
      6  Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet
+     5  Systems.Clusters or Systems.Nodes
      4  Infrastructure.* or Scenarios.Sustainability
      3  Infrastructure.Pricing.Labeling or Scenarios.*
      3  Systems.Storage or Scenarios.*
@@ -39,7 +39,7 @@ Top chapters:
     33  vol2/data_storage
     33  vol2/sustainable_ai
     32  vol2/ops_scale
-    31  vol1/hw_acceleration
+    30  vol1/hw_acceleration
     29  vol1/ml_workflow
     27  vol1/responsible_engr
     22  vol2/distributed_training
@@ -57,8 +57,8 @@ Top reasons:
     21  system-level fact
     18  hardware specification
     11  storage/data fact
-     8  fleet/topology fact
      6  cloud/fleet price point
+     5  fleet/topology fact
      5  workload compute requirement
      4  dataset/workload size
      4  infrastructure/sustainability fact
@@ -354,30 +354,29 @@ Top reasons:
 | `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:2519` | `AcceleratorEconomics` | `price_h100` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `25000` |
 | `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:2520` | `AcceleratorEconomics` | `price_tpu` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `8000` |
 | `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:2521` | `AcceleratorEconomics` | `price_gaudi` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `12000` |
-| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:3014` | `TensorLifecycleCalc` | `kws_samples_value` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `16_000` |
-| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:3841` | `TransformerLayerCalc` | `hidden_dim` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `768` |
-| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:3842` | `TransformerLayerCalc` | `batch_size` | `Scenarios.* or Ops.*` | scenario/workload policy | `32` |
-| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:3843` | `TransformerLayerCalc` | `seq_len` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `512` |
-| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:3844` | `TransformerLayerCalc` | `num_heads` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `12` |
-| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:3945` | `Conv2dAnalysisCalc` | `conv_batch` | `Scenarios.* or Ops.*` | scenario/workload policy | `32` |
-| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:4042` | `DenseLayerAnalysisCalc` | `dense_batch` | `Scenarios.* or Ops.*` | scenario/workload policy | `32` |
-| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:4139` | `LayernormAnalysisCalc` | `ln_batch` | `Scenarios.* or Ops.*` | scenario/workload policy | `32` |
-| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:4140` | `LayernormAnalysisCalc` | `ln_seq` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `512` |
-| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:4141` | `LayernormAnalysisCalc` | `ln_hidden` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `768` |
-| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:5799` | `FpMemoryEnergyCalc` | `layernorm_ai` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `1.5` |
-| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:5800` | `FpMemoryEnergyCalc` | `peak_flops` | `Hardware.* or Hardware.Tech.*` | hardware specification | `300 * (TFLOP / second)` |
-| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:5801` | `FpMemoryEnergyCalc` | `peak_bw` | `Scenarios.*` | unit-bearing scenario input | `2 * (TB / second)` |
-| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:5852` | `FpMultigpuScalingCalc` | `gradient_size` | `Hardware.*` | hardware-related quantitative input | `1.0 * GB` |
-| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:5853` | `FpMultigpuScalingCalc` | `step_time` | `Scenarios.* or Ops.*` | scenario/workload policy | `50 * millisecond` |
-| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:5854` | `FpMultigpuScalingCalc` | `gpu_count` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `8` |
-| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:6029` | `FeasibilityAssessment` | `gpu_memory` | `Hardware.* or Hardware.Tech.*` | hardware specification | `16 * GB` |
-| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:6033` | `FeasibilityAssessment` | `mem_bw` | `Scenarios.*` | unit-bearing scenario input | `1 * (TB / second)` |
-| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:6037` | `FeasibilityAssessment` | `latency_target` | `Scenarios.*` | unit-bearing scenario input | `50 * millisecond` |
-| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:6129` | `CarbonRoiCalc` | `cpu_power` | `Hardware.*` | hardware-related quantitative input | `100 * watt` |
-| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:6130` | `CarbonRoiCalc` | `cpu_flops` | `Hardware.* or Hardware.Tech.*` | hardware specification | `1 * (TFLOP / second)` |
-| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:6132` | `CarbonRoiCalc` | `npu_power` | `Hardware.*` | hardware-related quantitative input | `5 * watt` |
-| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:6133` | `CarbonRoiCalc` | `npu_flops` | `Hardware.* or Hardware.Tech.*` | hardware specification | `10 * (TFLOP / second)` |
-| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:6135` | `CarbonRoiCalc` | `inferences_per_day` | `Scenarios.* or Ops.*` | scenario/workload policy | `1 * BILLION` |
+| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:3015` | `TensorLifecycleCalc` | `kws_samples_value` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `16_000` |
+| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:3842` | `TransformerLayerCalc` | `hidden_dim` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `768` |
+| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:3843` | `TransformerLayerCalc` | `batch_size` | `Scenarios.* or Ops.*` | scenario/workload policy | `32` |
+| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:3844` | `TransformerLayerCalc` | `seq_len` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `512` |
+| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:3845` | `TransformerLayerCalc` | `num_heads` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `12` |
+| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:3946` | `Conv2dAnalysisCalc` | `conv_batch` | `Scenarios.* or Ops.*` | scenario/workload policy | `32` |
+| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:4043` | `DenseLayerAnalysisCalc` | `dense_batch` | `Scenarios.* or Ops.*` | scenario/workload policy | `32` |
+| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:4140` | `LayernormAnalysisCalc` | `ln_batch` | `Scenarios.* or Ops.*` | scenario/workload policy | `32` |
+| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:4141` | `LayernormAnalysisCalc` | `ln_seq` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `512` |
+| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:4142` | `LayernormAnalysisCalc` | `ln_hidden` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `768` |
+| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:5800` | `FpMemoryEnergyCalc` | `layernorm_ai` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `1.5` |
+| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:5801` | `FpMemoryEnergyCalc` | `peak_flops` | `Hardware.* or Hardware.Tech.*` | hardware specification | `300 * (TFLOP / second)` |
+| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:5802` | `FpMemoryEnergyCalc` | `peak_bw` | `Scenarios.*` | unit-bearing scenario input | `2 * (TB / second)` |
+| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:5853` | `FpMultigpuScalingCalc` | `gradient_size` | `Hardware.*` | hardware-related quantitative input | `1.0 * GB` |
+| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:5854` | `FpMultigpuScalingCalc` | `step_time` | `Scenarios.* or Ops.*` | scenario/workload policy | `50 * millisecond` |
+| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:6030` | `FeasibilityAssessment` | `gpu_memory` | `Hardware.* or Hardware.Tech.*` | hardware specification | `16 * GB` |
+| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:6034` | `FeasibilityAssessment` | `mem_bw` | `Scenarios.*` | unit-bearing scenario input | `1 * (TB / second)` |
+| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:6038` | `FeasibilityAssessment` | `latency_target` | `Scenarios.*` | unit-bearing scenario input | `50 * millisecond` |
+| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:6130` | `CarbonRoiCalc` | `cpu_power` | `Hardware.*` | hardware-related quantitative input | `100 * watt` |
+| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:6131` | `CarbonRoiCalc` | `cpu_flops` | `Hardware.* or Hardware.Tech.*` | hardware specification | `1 * (TFLOP / second)` |
+| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:6133` | `CarbonRoiCalc` | `npu_power` | `Hardware.*` | hardware-related quantitative input | `5 * watt` |
+| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:6134` | `CarbonRoiCalc` | `npu_flops` | `Hardware.* or Hardware.Tech.*` | hardware specification | `10 * (TFLOP / second)` |
+| `book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd:6136` | `CarbonRoiCalc` | `inferences_per_day` | `Scenarios.* or Ops.*` | scenario/workload policy | `1 * BILLION` |
 
 ## vol1/introduction
 
@@ -937,19 +936,17 @@ Top reasons:
 
 | File:Line | Cell | Symbol | Target | Reason | RHS |
 |---|---|---|---|---|---|
-| `book/quarto/contents/vol2/collective_communication/collective_communication.qmd:551` | `LlamaBudgetCalc` | `gpus_per_node_llama` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `8` |
 | `book/quarto/contents/vol2/collective_communication/collective_communication.qmd:553` | `LlamaBudgetCalc` | `gradient_bf16` | `Hardware.*` | hardware-related quantitative input | `param_count * (2 * byte / param)` |
 | `book/quarto/contents/vol2/collective_communication/collective_communication.qmd:557` | `LlamaBudgetCalc` | `ib_alpha` | `Scenarios.*` | unit-bearing scenario input | `3 * microsecond` |
 | `book/quarto/contents/vol2/collective_communication/collective_communication.qmd:558` | `LlamaBudgetCalc` | `compute_per_step` | `Scenarios.* or Ops.*` | scenario/workload policy | `200 * ms` |
-| `book/quarto/contents/vol2/collective_communication/collective_communication.qmd:1365` | `HierarchicalAllreduceCalc` | `gpus_per_node` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `8` |
-| `book/quarto/contents/vol2/collective_communication/collective_communication.qmd:1366` | `HierarchicalAllreduceCalc` | `gradient` | `Hardware.*` | hardware-related quantitative input | `1 * GB` |
-| `book/quarto/contents/vol2/collective_communication/collective_communication.qmd:1369` | `HierarchicalAllreduceCalc` | `ib_alpha` | `Scenarios.*` | unit-bearing scenario input | `3 * microsecond` |
-| `book/quarto/contents/vol2/collective_communication/collective_communication.qmd:1721` | `CompressionPayback` | `t_overhead_ms` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `2` |
-| `book/quarto/contents/vol2/collective_communication/collective_communication.qmd:1942` | `OverlapBudgetCalc` | `backward_per_layer` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `15 * ms` |
-| `book/quarto/contents/vol2/collective_communication/collective_communication.qmd:1943` | `OverlapBudgetCalc` | `gradient_per_layer` | `Hardware.*` | hardware-related quantitative input | `880 * MB` |
-| `book/quarto/contents/vol2/collective_communication/collective_communication.qmd:1944` | `OverlapBudgetCalc` | `bucket_size` | `Systems.Storage or Scenarios.*` | storage-related scenario input | `100 * MB` |
-| `book/quarto/contents/vol2/collective_communication/collective_communication.qmd:1945` | `OverlapBudgetCalc` | `allreduce_per_bucket` | `Systems.Storage or Scenarios.*` | storage-related scenario input | `3 * ms` |
-| `book/quarto/contents/vol2/collective_communication/collective_communication.qmd:1947` | `OverlapBudgetCalc` | `params_b_overlap` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `7` |
+| `book/quarto/contents/vol2/collective_communication/collective_communication.qmd:1367` | `HierarchicalAllreduceCalc` | `gradient` | `Hardware.*` | hardware-related quantitative input | `1 * GB` |
+| `book/quarto/contents/vol2/collective_communication/collective_communication.qmd:1370` | `HierarchicalAllreduceCalc` | `ib_alpha` | `Scenarios.*` | unit-bearing scenario input | `3 * microsecond` |
+| `book/quarto/contents/vol2/collective_communication/collective_communication.qmd:1722` | `CompressionPayback` | `t_overhead_ms` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `2` |
+| `book/quarto/contents/vol2/collective_communication/collective_communication.qmd:1943` | `OverlapBudgetCalc` | `backward_per_layer` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `15 * ms` |
+| `book/quarto/contents/vol2/collective_communication/collective_communication.qmd:1944` | `OverlapBudgetCalc` | `gradient_per_layer` | `Hardware.*` | hardware-related quantitative input | `880 * MB` |
+| `book/quarto/contents/vol2/collective_communication/collective_communication.qmd:1945` | `OverlapBudgetCalc` | `bucket_size` | `Systems.Storage or Scenarios.*` | storage-related scenario input | `100 * MB` |
+| `book/quarto/contents/vol2/collective_communication/collective_communication.qmd:1946` | `OverlapBudgetCalc` | `allreduce_per_bucket` | `Systems.Storage or Scenarios.*` | storage-related scenario input | `3 * ms` |
+| `book/quarto/contents/vol2/collective_communication/collective_communication.qmd:1948` | `OverlapBudgetCalc` | `params_b_overlap` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `7` |
 
 ## vol2/compute_infrastructure
 
