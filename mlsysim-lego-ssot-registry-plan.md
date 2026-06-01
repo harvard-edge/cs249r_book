@@ -44,8 +44,8 @@ python3 book/tools/audit/book_check_lego_scenario_inputs.py \
 
 Current output:
 
-- **1,041 advisory MLSysIM source-of-truth candidates**
-- **2 high-confidence candidates**
+- **1,039 advisory MLSysIM source-of-truth candidates**
+- **0 high-confidence candidates**
 - Full JSON work queue:
   `book/tools/audit/artifacts/lego_scenario_inputs_audit.json`
 - Full Markdown work queue:
@@ -55,11 +55,7 @@ The refined audit is still advisory. It is designed to produce the migration
 queue, not to block builds. It deliberately skips existing registry-sourced
 assignments and focuses on LOAD-stage numeric/constructor inputs.
 
-High-confidence buckets:
-
-| Target | Count | Meaning |
-|---|---:|---|
-| `Systems.Clusters` / `Systems.Nodes` | 2 | Fleet, node, GPU-count, cluster-topology facts |
+High-confidence buckets: **none remain**.
 
 Broader medium-confidence buckets:
 
@@ -188,6 +184,10 @@ Known concrete findings from the first pass:
   are not canonical hardware/system facts and should remain local until a named
   scenario profile is created. High-confidence audit findings are now down to
   the repeated four-node H100 rack topology in `sustainable_ai.qmd`.
+- Stage 22 added `Systems.Racks.DGX_H100_4Node` as a neutral rack topology
+  profile and migrated Sustainable AI's rack power/cooling cells to load
+  `nodes_per_rack`, node type, and GPU count from that profile. The advisory
+  audit now has zero high-confidence findings.
 - MLSysIM registry/provenance names should stay product-, system-, source-, or
   convention-oriented. Avoid new `BOOK_*`, `MLSysBook`, `Volume I/II`, or
   "worked example" identifiers inside MLSysIM. Existing `BOOK_*` provenance

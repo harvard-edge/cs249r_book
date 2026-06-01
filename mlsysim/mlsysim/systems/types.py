@@ -96,6 +96,21 @@ class Node(BaseModel):
     psus_per_node: int = 2
     metadata: Metadata = Field(default_factory=Metadata)
 
+
+class RackProfile(BaseModel):
+    """Physical rack composition for node-level system profiles."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    name: str
+    node: Node
+    nodes_per_rack: int
+    metadata: Metadata = Field(default_factory=Metadata)
+
+    @property
+    def accelerator_count(self) -> int:
+        return self.nodes_per_rack * self.node.accelerators_per_node
+
+
 class PodEnvelope(BaseModel):
     """Reference TPU/accelerator pod envelope (not a K8s Pod)."""
 

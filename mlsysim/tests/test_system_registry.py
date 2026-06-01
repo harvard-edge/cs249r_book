@@ -69,6 +69,13 @@ def test_switch_fabric_port_anchors():
     assert int(Systems.SwitchFabric.NdrLeafUplinkPorts) == 32
 
 
+def test_rack_profiles():
+    rack = Systems.Racks.DGX_H100_4Node
+    assert rack.nodes_per_rack == 4
+    assert rack.node is Systems.Nodes.DGX_H100
+    assert rack.accelerator_count == 32
+
+
 def test_storage_training_effective_profiles():
     assert Systems.Storage.CloudBlockStorageBaseline.bandwidth.to(GB / second).magnitude == pytest.approx(0.25)
     assert Systems.Storage.ObjectStoreSingleStream.bandwidth.to(GB / second).magnitude == pytest.approx(0.1)

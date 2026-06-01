@@ -5,6 +5,7 @@ from .types import (
     Node,
     NodeStorageConfig,
     PodEnvelope,
+    RackProfile,
     StorageSubsystem,
 )
 from .reliability import Reliability
@@ -225,6 +226,20 @@ class Pods(Registry):
     )
 
 
+class Racks(Registry):
+    """Reusable physical rack profiles."""
+
+    DGX_H100_4Node = RackProfile(
+        name="DGX H100 4-node rack",
+        node=Nodes.DGX_H100,
+        nodes_per_rack=4,
+        metadata=Metadata(
+            provenance=pc.DGX_H100_RACK_REFERENCE,
+            description="Reference 32-H100 rack profile for rack-level power and cooling models.",
+        ),
+    )
+
+
 
 class SwitchFabric(Registry):
     """Switch-ASIC capacity, 400G optics power, and α-β / FEC / hop latency reference
@@ -386,5 +401,6 @@ class Systems(Registry):
     SwitchFabric = SwitchFabric
     NetworkEnergy = NetworkEnergy
     Pods = Pods
+    Racks = Racks
     Reliability = Reliability
     Orchestration = Orchestration()

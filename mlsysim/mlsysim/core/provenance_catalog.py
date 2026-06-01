@@ -522,6 +522,12 @@ DATACENTER_SWITCH_OPTICS_REFERENCE = _conv(
     notes="2025-26 datacenter-switching reference points for switch ASIC capacity classes and per-port optics power.",
 )
 
+DGX_H100_RACK_REFERENCE = _conv(
+    "prov:dgx-h100-rack-reference",
+    "Reference DGX H100 rack profile",
+    notes="Four DGX H100 nodes per rack, yielding 32 H100 GPUs per rack for rack-level power and cooling models.",
+)
+
 BOOK_NETWORK_ENERGY = _conv(
     "prov:book-network-energy",
     "MLSysBook network data-transfer energy anchors (5G per-MB, generic per-KB)",
