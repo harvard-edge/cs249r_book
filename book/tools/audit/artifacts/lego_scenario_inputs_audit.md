@@ -4,7 +4,7 @@ This is an advisory work queue for values that likely define
 hardware, systems, infrastructure, pricing, models, datasets,
 storage subsystems, or scenarios in LEGO LOAD stages.
 
-Findings: 1078
+Findings: 1074
 By target:
    270  Scenarios.* or Ops.*
    208  Models.* or Scenarios.TrainingRuns
@@ -15,7 +15,7 @@ By target:
     43  Systems.Clusters or Systems.Nodes
     31  Infrastructure.*
     23  Hardware.* or Hardware.Tech.*
-    22  Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet
+    18  Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet
     14  Systems.Fabrics or Systems.SwitchFabric
     13  Systems.Storage or Datasets.*
     10  Systems.*
@@ -35,12 +35,12 @@ Top chapters:
     38  vol1/nn_architectures
     37  vol2/inference
     36  vol2/sustainable_ai
-    34  vol2/ops_scale
     33  vol2/data_storage
     32  vol1/hw_acceleration
+    32  vol2/ops_scale
     29  vol1/ml_workflow
     27  vol1/responsible_engr
-    25  vol2/distributed_training
+    23  vol2/distributed_training
     21  vol2/security_privacy
     19  vol2/compute_infrastructure
     19  vol2/fleet_orchestration
@@ -54,7 +54,7 @@ Top reasons:
     43  fleet/topology fact
     31  infrastructure input
     23  hardware specification
-    22  cloud/fleet price point
+    18  cloud/fleet price point
     14  network/fabric system fact
     13  storage/data fact
     10  system-level fact
@@ -1048,7 +1048,6 @@ Top reasons:
 | `book/quarto/contents/vol2/distributed_training/distributed_training.qmd:600` | `Scaling8GPU` | `fits_mem` | `Scenarios.*` | unit-bearing scenario input | `32 * GB` |
 | `book/quarto/contents/vol2/distributed_training/distributed_training.qmd:601` | `Scaling8GPU` | `compute_8gpu_ms` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `1800` |
 | `book/quarto/contents/vol2/distributed_training/distributed_training.qmd:1501` | `ScalingWorkers` | `critical_batch_size` | `Scenarios.* or Ops.*` | scenario/workload policy | `4_000` |
-| `book/quarto/contents/vol2/distributed_training/distributed_training.qmd:1503` | `ScalingWorkers` | `gpu_hour_rate` | `Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet` | cloud/fleet price point | `3` |
 | `book/quarto/contents/vol2/distributed_training/distributed_training.qmd:1684` | `ModelParallelMemoryFacts` | `bytes_adam_state` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `12 * (byte / param)` |
 | `book/quarto/contents/vol2/distributed_training/distributed_training.qmd:1772` | `A100CapacityContext` | `bytes_adam_state` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `12 * (byte / param)` |
 | `book/quarto/contents/vol2/distributed_training/distributed_training.qmd:1774` | `A100CapacityContext` | `activation_approx` | `Scenarios.*` | unit-bearing scenario input | `50 * GB` |
@@ -1064,7 +1063,6 @@ Top reasons:
 | `book/quarto/contents/vol2/distributed_training/distributed_training.qmd:2850` | `RLHFBudget` | `bytes_train` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `16 * (byte / param)` |
 | `book/quarto/contents/vol2/distributed_training/distributed_training.qmd:2859` | `RLHFBudget` | `seq_len` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `1024` |
 | `book/quarto/contents/vol2/distributed_training/distributed_training.qmd:2860` | `RLHFBudget` | `batch_size` | `Scenarios.* or Ops.*` | scenario/workload policy | `256` |
-| `book/quarto/contents/vol2/distributed_training/distributed_training.qmd:3121` | `YoungDaly` | `gpu_cost_hr` | `Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet` | cloud/fleet price point | `2.0` |
 
 ## vol2/edge_intelligence
 
@@ -1190,15 +1188,13 @@ Top reasons:
 
 | File:Line | Cell | Symbol | Target | Reason | RHS |
 |---|---|---|---|---|---|
-| `book/quarto/contents/vol2/ops_scale/ops_scale.qmd:140` | `MultiTenantEfficiency` | `gpu_cost_hour` | `Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet` | cloud/fleet price point | `2.0` |
-| `book/quarto/contents/vol2/ops_scale/ops_scale.qmd:325` | `PlatformRoi` | `engineer_rate` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `150` |
-| `book/quarto/contents/vol2/ops_scale/ops_scale.qmd:326` | `PlatformRoi` | `platform_cost_per_month` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `120000` |
-| `book/quarto/contents/vol2/ops_scale/ops_scale.qmd:389` | `PlatformEconomics` | `hours_per_model_month` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `40` |
-| `book/quarto/contents/vol2/ops_scale/ops_scale.qmd:391` | `PlatformEconomics` | `engineer_cost_hr` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `150` |
-| `book/quarto/contents/vol2/ops_scale/ops_scale.qmd:392` | `PlatformEconomics` | `platform_cost` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `2 * MILLION` |
-| `book/quarto/contents/vol2/ops_scale/ops_scale.qmd:394` | `PlatformEconomics` | `hours_saved_per_model` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `30` |
-| `book/quarto/contents/vol2/ops_scale/ops_scale.qmd:599` | `TrainingCapacityCost` | `training_days` | `Scenarios.* or Ops.*` | scenario/workload policy | `30` |
-| `book/quarto/contents/vol2/ops_scale/ops_scale.qmd:601` | `TrainingCapacityCost` | `gpu_hour_rate` | `Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet` | cloud/fleet price point | `2.00` |
+| `book/quarto/contents/vol2/ops_scale/ops_scale.qmd:324` | `PlatformRoi` | `engineer_rate` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `150` |
+| `book/quarto/contents/vol2/ops_scale/ops_scale.qmd:325` | `PlatformRoi` | `platform_cost_per_month` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `120000` |
+| `book/quarto/contents/vol2/ops_scale/ops_scale.qmd:388` | `PlatformEconomics` | `hours_per_model_month` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `40` |
+| `book/quarto/contents/vol2/ops_scale/ops_scale.qmd:390` | `PlatformEconomics` | `engineer_cost_hr` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `150` |
+| `book/quarto/contents/vol2/ops_scale/ops_scale.qmd:391` | `PlatformEconomics` | `platform_cost` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `2 * MILLION` |
+| `book/quarto/contents/vol2/ops_scale/ops_scale.qmd:393` | `PlatformEconomics` | `hours_saved_per_model` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `30` |
+| `book/quarto/contents/vol2/ops_scale/ops_scale.qmd:597` | `TrainingCapacityCost` | `training_days` | `Scenarios.* or Ops.*` | scenario/workload policy | `30` |
 | `book/quarto/contents/vol2/ops_scale/ops_scale.qmd:650` | `MaintenanceDividend` | `years` | `Scenarios.*` | unit-bearing scenario input | `3` |
 | `book/quarto/contents/vol2/ops_scale/ops_scale.qmd:651` | `MaintenanceDividend` | `engineer_rate` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `150` |
 | `book/quarto/contents/vol2/ops_scale/ops_scale.qmd:767` | `DebtPriority` | `config_resolution_cost` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `2` |
