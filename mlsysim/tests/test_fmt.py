@@ -243,6 +243,10 @@ class TestFmtUsd:
             == "\\$4.75 Million"
         )
         assert fmt_usd(0.09, precision=2, commas=False, per="GB") == "\\$0.09/GB"
+        assert fmt_usd(0.50, precision=2, commas=False, per="click") == "\\$0.50/click"
+        assert fmt_usd(10_000, per="run") == "\\$10,000/run"
+        assert fmt_usd(10, commas=False, per="million queries") == "\\$10/million queries"
+        assert fmt_usd(0.06, precision=2, commas=False, per="1K inferences") == "\\$0.06/1K inferences"
         assert fmt_usd(12_000, commas=False, scale="K", per="year") == "\\$12K/year"
         assert fmt_usd(8000, approx=True, marker="*") == "~\\$8,000*"
 

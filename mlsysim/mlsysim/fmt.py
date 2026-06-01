@@ -336,6 +336,7 @@ _USD_DENOMINATORS = {
     "month", "year", "hour", "hr", "day", "week",
     "GB", "TB", "GB/month", "TB/month", "kWh", "MWh", "(TFLOP/s)",
     "label", "image", "query", "request", "token", "inference", "sample",
+    "click", "run", "million queries", "million tokens", "1K inferences",
     "million", "tonne", "device", "device/year", "GPU-hour",
 }
 
