@@ -45,7 +45,7 @@ python3 book/tools/audit/book_check_lego_scenario_inputs.py \
 Current output:
 
 - **1,050 advisory MLSysIM source-of-truth candidates**
-- **37 high-confidence candidates**
+- **33 high-confidence candidates**
 - Full JSON work queue:
   `book/tools/audit/artifacts/lego_scenario_inputs_audit.json`
 - Full Markdown work queue:
@@ -60,9 +60,9 @@ High-confidence buckets:
 | Target | Count | Meaning |
 |---|---:|---|
 | `Hardware.*` / `Hardware.Tech.*` | 18 | Hardware capacity, bandwidth, FLOP/s, TDP, memory/interconnect facts |
-| `Infrastructure.Pricing.Cloud` / `Infrastructure.Pricing.Fleet` | 6 | GPU-hour, cloud-instance, and fleet price points |
 | `Systems.Clusters` / `Systems.Nodes` | 5 | Fleet, node, GPU-count, cluster-topology facts |
 | `Infrastructure.*` / `Scenarios.Sustainability` | 4 | PUE, cooling, carbon, sustainability scenario facts |
+| `Infrastructure.Pricing.Cloud` / `Infrastructure.Pricing.Fleet` | 2 | GPU-hour, cloud-instance, and fleet price points |
 | `Systems.Storage` | 2 | Local NVMe, HDD, PFS, S3/object-store, checkpoint-path storage facts |
 | `Infrastructure.Pricing.Storage` | 1 | Storage/monitoring price points |
 | `Systems.Fabrics` / `Systems.SwitchFabric` | 1 | Network/fabric/switch-sizing facts |
@@ -75,7 +75,7 @@ Broader medium-confidence buckets:
 | `Models.*` / `Scenarios.TrainingRuns` | 216 | Model dimensions and training-run workload inputs |
 | `Scenarios.*` | 170 | Unit-bearing scenario inputs |
 | `Datasets.*` / `Scenarios.DataWorkloads` | 111 | Dataset/sample/corpus sizes |
-| `Infrastructure.Pricing.*` / `Scenarios.*` | 111 | Economic assumptions not yet in a named price registry |
+| `Infrastructure.Pricing.*` / `Scenarios.*` | 115 | Economic assumptions not yet in a named price registry |
 | `Hardware.*` | 49 | Hardware-related values that need review |
 
 This is the first real full-cell audit. Migration is **underway**, not done.
@@ -160,6 +160,11 @@ Known concrete findings from the first pass:
   examples to `Systems.Nodes.DGX_A100.accelerators_per_node` and
   `Systems.Nodes.DGX_H100.accelerators_per_node`. Generic "8 GPU" scenario
   counts remain local until they have a named scenario profile.
+- Stage 16 narrowed high-confidence cloud/fleet pricing to GPU-hour,
+  instance-hour, or fleet price points. Broader business inputs such as
+  cloud cost per device, per-query edge/cloud economics, or annual network
+  cost now stay in medium scenario/pricing review until scenario profiles
+  exist.
 - 100,000-GPU examples should load `Systems.Clusters.Mega_100K`.
 - Storage/checkpoint examples mix two different kinds of facts: storage-system
   facts such as local NVMe drive count, local/PFS bandwidth, capacity, and

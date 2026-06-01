@@ -45,6 +45,22 @@ def test_human_hourly_rate_is_not_cloud_gpu_pricing():
     assert reason == "economic input or scenario price"
 
 
+def test_cloud_per_device_cost_is_not_gpu_hour_pricing():
+    target, confidence, reason = classify("ww_cloud_cost_per_device", "0.50")
+
+    assert target == "Infrastructure.Pricing.* or Scenarios.*"
+    assert confidence == "medium"
+    assert reason == "economic input or scenario price"
+
+
+def test_gpu_hour_price_remains_high_confidence():
+    target, confidence, reason = classify("cost_gpu_hr", "0.50")
+
+    assert target == "Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet"
+    assert confidence == "high"
+    assert reason == "cloud/fleet price point"
+
+
 def test_workload_flops_formula_is_not_hardware_spec():
     target, confidence, reason = classify(
         "decode_flops_val",

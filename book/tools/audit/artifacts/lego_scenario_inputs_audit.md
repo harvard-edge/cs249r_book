@@ -9,18 +9,18 @@ By target:
    285  Scenarios.* or Ops.*
    216  Models.* or Scenarios.TrainingRuns
    170  Scenarios.*
+   115  Infrastructure.Pricing.* or Scenarios.*
    111  Datasets.* or Scenarios.DataWorkloads
-   111  Infrastructure.Pricing.* or Scenarios.*
     49  Hardware.*
     31  Infrastructure.*
     21  Systems.*
     18  Hardware.* or Hardware.Tech.*
     11  Systems.Storage or Datasets.*
-     6  Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet
      5  Systems.Clusters or Systems.Nodes
      4  Infrastructure.* or Scenarios.Sustainability
      3  Infrastructure.Pricing.Labeling or Scenarios.*
      3  Systems.Storage or Scenarios.*
+     2  Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet
      2  Systems.Storage
      2  Scenarios.TrainingRuns or Systems.Reliability
      1  Infrastructure.Pricing.Storage
@@ -50,14 +50,13 @@ Top reasons:
    282  scenario/workload policy
    211  model/workload specification
    170  unit-bearing scenario input
-   111  economic input or scenario price
+   115  economic input or scenario price
    107  dataset/workload specification
     49  hardware-related quantitative input
     31  infrastructure input
     21  system-level fact
     18  hardware specification
     11  storage/data fact
-     6  cloud/fleet price point
      5  fleet/topology fact
      5  workload compute requirement
      4  dataset/workload size
@@ -65,6 +64,7 @@ Top reasons:
      3  storage observation or utilization scenario
      3  human-labeling price input
      3  storage-related scenario input
+     2  cloud/fleet price point
      2  storage subsystem fact
      2  checkpoint policy/workload cadence
 
@@ -454,7 +454,7 @@ Top reasons:
 | `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1653` | `CloudEdgeTCO` | `server_cost` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `15000` |
 | `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1654` | `CloudEdgeTCO` | `server_life_years` | `Systems.*` | system-level fact | `3` |
 | `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1657` | `CloudEdgeTCO` | `cooling_overhead` | `Infrastructure.* or Scenarios.Sustainability` | infrastructure/sustainability fact | `0.30` |
-| `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1816` | `VoiceAssistantWall` | `ww_cloud_cost_per_device` | `Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet` | cloud/fleet price point | `0.50` |
+| `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1816` | `VoiceAssistantWall` | `ww_cloud_cost_per_device` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `0.50` |
 | `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1817` | `VoiceAssistantWall` | `ww_edge_power_min_mw` | `Infrastructure.*` | infrastructure input | `0.1` |
 | `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1818` | `VoiceAssistantWall` | `ww_edge_power_max_mw` | `Infrastructure.*` | infrastructure input | `1` |
 | `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1819` | `VoiceAssistantWall` | `ww_edge_cost_per_year` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `0.01` |
@@ -483,7 +483,7 @@ Top reasons:
 | `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:4383` | `MobilePowerFallacyCalc` | `battery` | `Scenarios.*` | unit-bearing scenario input | `h_phone.battery_capacity if h_phone.battery_capacity else 15 * Wh` |
 | `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:4384` | `MobilePowerFallacyCalc` | `low_power` | `Infrastructure.*` | infrastructure input | `1 * watt` |
 | `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:4385` | `MobilePowerFallacyCalc` | `high_power` | `Infrastructure.*` | infrastructure input | `5 * watt` |
-| `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:4456` | `TcoPitfallCalc` | `cloud_compute` | `Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet` | cloud/fleet price point | `2000 * USD / ureg.month` |
+| `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:4456` | `TcoPitfallCalc` | `cloud_compute` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `2000 * USD / ureg.month` |
 | `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:4459` | `TcoPitfallCalc` | `edge_hardware` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `500 * USD / ureg.month` |
 | `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:4460` | `TcoPitfallCalc` | `edge_network` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `3000 * USD / ureg.month` |
 | `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:4461` | `TcoPitfallCalc` | `edge_maintenance` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `500 * USD / ureg.month` |
@@ -517,8 +517,8 @@ Top reasons:
 | `book/quarto/contents/vol1/ml_workflow/ml_workflow.qmd:1592` | `HyperparameterGrid` | `values_per_param` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `4` |
 | `book/quarto/contents/vol1/ml_workflow/ml_workflow.qmd:1905` | `DeploymentEconomics` | `patients_day` | `Scenarios.* or Ops.*` | scenario/workload policy | `50` |
 | `book/quarto/contents/vol1/ml_workflow/ml_workflow.qmd:1906` | `DeploymentEconomics` | `billable_images_per_patient` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `1` |
-| `book/quarto/contents/vol1/ml_workflow/ml_workflow.qmd:1910` | `DeploymentEconomics` | `cloud_inf_cost_q` | `Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet` | cloud/fleet price point | `0.01 * USD` |
-| `book/quarto/contents/vol1/ml_workflow/ml_workflow.qmd:1911` | `DeploymentEconomics` | `cloud_network_cost_q` | `Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet` | cloud/fleet price point | `45000 * (USD / year)` |
+| `book/quarto/contents/vol1/ml_workflow/ml_workflow.qmd:1910` | `DeploymentEconomics` | `cloud_inf_cost_q` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `0.01 * USD` |
+| `book/quarto/contents/vol1/ml_workflow/ml_workflow.qmd:1911` | `DeploymentEconomics` | `cloud_network_cost_q` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `45000 * (USD / year)` |
 | `book/quarto/contents/vol1/ml_workflow/ml_workflow.qmd:1912` | `DeploymentEconomics` | `cloud_latency_q` | `Scenarios.*` | unit-bearing scenario input | `200 * millisecond` |
 | `book/quarto/contents/vol1/ml_workflow/ml_workflow.qmd:1916` | `DeploymentEconomics` | `edge_unit_cost_q` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `500 * USD` |
 | `book/quarto/contents/vol1/ml_workflow/ml_workflow.qmd:1917` | `DeploymentEconomics` | `edge_maint_cost_q` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `25000 * (USD / year)` |

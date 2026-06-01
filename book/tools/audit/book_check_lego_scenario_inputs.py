@@ -129,6 +129,10 @@ PRICE_WORD = re.compile(
     r"(?:usd|dollar|price|cost|rate|fee|capex|opex|hourly|monthly)",
     re.I,
 )
+GPU_HOUR_PRICE_WORD = re.compile(
+    r"(?:gpu.*(?:hr|hour)|(?:hr|hour).*gpu|gpu_price|gpu_cost|instance|fleet)",
+    re.I,
+)
 WORKLOAD_WORD = re.compile(
     r"(?:qps|queries?|requests?|users?|traffic|arrival|sla|deadline|duration|"
     r"window|days?|hours?|minutes?|batch|epochs?|steps?|sampling|monitoring|"
@@ -307,7 +311,7 @@ def _classify(name: str, rhs: str, calls: set[str]) -> tuple[str, str, str]:
             return "Infrastructure.Pricing.Storage", "high", "storage price/rate belongs in pricing registry"
         if any(word in lower for word in ("label", "clinical", "radiologist", "specialist")):
             return "Infrastructure.Pricing.Labeling or Scenarios.*", "medium", "human-labeling price input"
-        if any(word in lower for word in ("gpu", "instance", "cloud", "fleet")):
+        if GPU_HOUR_PRICE_WORD.search(text):
             return "Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet", "high", "cloud/fleet price point"
         return "Infrastructure.Pricing.* or Scenarios.*", "medium", "economic input or scenario price"
 
