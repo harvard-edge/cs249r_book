@@ -91,6 +91,14 @@ STORAGE_SYSTEM_WORD = re.compile(
     r"staging|stage|capacity|bandwidth|bw|throughput|latency)",
     re.I,
 )
+STORAGE_MEASUREMENT_WORD = re.compile(
+    r"(?:^|_)(?:bw|bandwidth|throughput|capacity|iops|latency|drive|drives|"
+    r"disk|disks)(?:_|$)",
+    re.I,
+)
+STORAGE_OBSERVATION_WORD = re.compile(
+    r"(?:sat|saturation|util|utilization|pct|percent|ratio)", re.I
+)
 MODEL_WORD = re.compile(
     r"(?:model|params?|parameters?|tokens?|layers?|heads?|hidden|vocab|context|"
     r"seq|sequence|embedding|kv|cache|experts?|moe|gpt|llama|bert|resnet|"
@@ -125,6 +133,26 @@ WORKLOAD_WORD = re.compile(
     r"(?:qps|queries?|requests?|users?|traffic|arrival|sla|deadline|duration|"
     r"window|days?|hours?|minutes?|batch|epochs?|steps?|sampling|monitoring|"
     r"telemetry|retraining|error|accuracy|threshold|drift|psi|ks)",
+    re.I,
+)
+WORKLOAD_PHASE_WORD = re.compile(
+    r"(?:preprocess|postprocess|forward|backward|allreduce|warmup|compile|"
+    r"cuda|runtime|latency|deadline|budget|overhead|step|batch|bucket|"
+    r"profile|pipeline|dispatch|sample|query|request|per_layer)",
+    re.I,
+)
+FABRIC_SPEC_WORD = re.compile(
+    r"(?:fabric|switch|infiniband|ethernet|roce|nvlink|pcie|ports?|spine|"
+    r"leaf|endpoint_links|links_per_gpu|gbps|tbps)",
+    re.I,
+)
+TOPOLOGY_COUNT_WORD = re.compile(
+    r"(?:gpu_count|n_gpus|num_gpus|node_count|n_nodes|num_nodes|nodes_per|"
+    r"gpus_per_node|nics_per_node|racks?|pods?)",
+    re.I,
+)
+HARDWARE_WORKLOAD_FLOPS_WORD = re.compile(
+    r"(?:gemm|decode|forward|backward|achieved|per_sample|workload|sample)",
     re.I,
 )
 
@@ -276,18 +304,26 @@ def _classify(name: str, rhs: str, calls: set[str]) -> tuple[str, str, str]:
     if PRICE_WORD.search(text):
         if STORAGE_WORD.search(text):
             return "Infrastructure.Pricing.Storage", "high", "storage price/rate belongs in pricing registry"
-        if any(word in lower for word in ("gpu", "instance", "cloud", "hour")):
+        if any(word in lower for word in ("label", "clinical", "radiologist", "specialist")):
+            return "Infrastructure.Pricing.Labeling or Scenarios.*", "medium", "human-labeling price input"
+        if any(word in lower for word in ("gpu", "instance", "cloud", "fleet")):
             return "Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet", "high", "cloud/fleet price point"
         return "Infrastructure.Pricing.* or Scenarios.*", "medium", "economic input or scenario price"
 
     if STORAGE_WORD.search(text):
         if any(word in lower for word in ("interval", "period", "cadence", "every")):
             return "Scenarios.TrainingRuns or Systems.Reliability", "medium", "checkpoint policy/workload cadence"
-        if STORAGE_SYSTEM_WORD.search(text):
+        if STORAGE_OBSERVATION_WORD.search(name):
+            return "Scenarios.* or Ops.*", "medium", "storage observation or utilization scenario"
+        if STORAGE_MEASUREMENT_WORD.search(name):
             return "Systems.Storage", "high", "storage subsystem fact"
+        if STORAGE_SYSTEM_WORD.search(text):
+            return "Systems.Storage or Scenarios.*", "medium", "storage-related scenario input"
         return "Systems.Storage or Datasets.*", "medium", "storage/data fact"
 
     if HARDWARE_WORD.search(text) and UNIT_TOKEN.search(text):
+        if HARDWARE_WORKLOAD_FLOPS_WORD.search(name):
+            return "Models.* or Scenarios.TrainingRuns", "medium", "workload compute requirement"
         if any(word in lower for word in ("gpu_count", "n_gpus", "nodes", "node_count", "fleet", "cluster")):
             return "Systems.Clusters or Systems.Nodes", "high", "fleet/topology fact"
         if any(word in lower for word in ("nvlink", "pcie", "hbm", "memory", "dram", "vram", "tdp", "flops", "tflop", "pflo")):
@@ -295,9 +331,11 @@ def _classify(name: str, rhs: str, calls: set[str]) -> tuple[str, str, str]:
         return "Hardware.*", "medium", "hardware-related quantitative input"
 
     if SYSTEM_WORD.search(text):
-        if any(word in lower for word in ("fabric", "network", "switch", "infiniband", "ethernet", "roce")):
+        if WORKLOAD_PHASE_WORD.search(text):
+            return "Scenarios.* or Ops.*", "medium", "scenario/workload policy"
+        if FABRIC_SPEC_WORD.search(text):
             return "Systems.Fabrics or Systems.SwitchFabric", "high", "network/fabric system fact"
-        if any(word in lower for word in ("fleet", "cluster", "node", "nodes", "gpu", "gpus", "rack", "pod")):
+        if TOPOLOGY_COUNT_WORD.search(text) or any(word in lower for word in ("fleet", "cluster")):
             return "Systems.Clusters or Systems.Nodes", "high", "fleet/topology fact"
         return "Systems.*", "medium", "system-level fact"
 

@@ -45,7 +45,7 @@ python3 book/tools/audit/book_check_lego_scenario_inputs.py \
 Current output:
 
 - **1,067 advisory MLSysIM source-of-truth candidates**
-- **105 high-confidence candidates**
+- **53 high-confidence candidates**
 - Full JSON work queue:
   `book/tools/audit/artifacts/lego_scenario_inputs_audit.json`
 - Full Markdown work queue:
@@ -59,23 +59,23 @@ High-confidence buckets:
 
 | Target | Count | Meaning |
 |---|---:|---|
-| `Systems.Clusters` / `Systems.Nodes` | 43 | Fleet, node, GPU-count, cluster-topology facts |
-| `Hardware.*` / `Hardware.Tech.*` | 23 | Hardware capacity, bandwidth, FLOP/s, TDP, memory/interconnect facts |
-| `Systems.Fabrics` / `Systems.SwitchFabric` | 14 | Network/fabric/switch-sizing facts |
-| `Infrastructure.Pricing.Cloud` / `Infrastructure.Pricing.Fleet` | 14 | GPU-hour, cloud-instance, and fleet price points |
-| `Systems.Storage` | 6 | Local NVMe, HDD, PFS, S3/object-store, checkpoint-path storage facts |
+| `Hardware.*` / `Hardware.Tech.*` | 18 | Hardware capacity, bandwidth, FLOP/s, TDP, memory/interconnect facts |
+| `Systems.Clusters` / `Systems.Nodes` | 13 | Fleet, node, GPU-count, cluster-topology facts |
+| `Systems.Fabrics` / `Systems.SwitchFabric` | 9 | Network/fabric/switch-sizing facts |
+| `Infrastructure.Pricing.Cloud` / `Infrastructure.Pricing.Fleet` | 6 | GPU-hour, cloud-instance, and fleet price points |
 | `Infrastructure.*` / `Scenarios.Sustainability` | 4 | PUE, cooling, carbon, sustainability scenario facts |
+| `Systems.Storage` | 2 | Local NVMe, HDD, PFS, S3/object-store, checkpoint-path storage facts |
 | `Infrastructure.Pricing.Storage` | 1 | Storage/monitoring price points |
 
 Broader medium-confidence buckets:
 
 | Target | Count | Meaning |
 |---|---:|---|
-| `Scenarios.*` / `Ops.*` | 270 | Workload, SLA, monitoring, drift, threshold, and operational policies |
-| `Models.*` / `Scenarios.TrainingRuns` | 208 | Model dimensions and training-run workload inputs |
+| `Scenarios.*` / `Ops.*` | 287 | Workload, SLA, monitoring, drift, threshold, and operational policies |
+| `Models.*` / `Scenarios.TrainingRuns` | 213 | Model dimensions and training-run workload inputs |
 | `Scenarios.*` | 164 | Unit-bearing scenario inputs |
 | `Datasets.*` / `Scenarios.DataWorkloads` | 109 | Dataset/sample/corpus sizes |
-| `Infrastructure.Pricing.*` / `Scenarios.*` | 106 | Economic assumptions not yet in a named price registry |
+| `Infrastructure.Pricing.*` / `Scenarios.*` | 111 | Economic assumptions not yet in a named price registry |
 | `Hardware.*` | 49 | Hardware-related values that need review |
 
 This is the first real full-cell audit. Migration is **underway**, not done.
@@ -150,6 +150,12 @@ Known concrete findings from the first pass:
   These were exact matches to the registry price points; remaining price
   findings include labor rates, per-query business assumptions, or scenario
   prices that need a separate classification pass.
+- Stage 14 tightened the advisory audit's high-confidence classifier so it no
+  longer sends agents after pure scenario values such as Amdahl processor
+  counts, preprocessing/postprocessing latency budgets, AllReduce bucket sizes,
+  or workload FLOP formulas. Those remain in the advisory queue as medium
+  scenario/profile work; high-confidence findings now mean "likely registry
+  source-of-truth migration" more reliably.
 - 100,000-GPU examples should load `Systems.Clusters.Mega_100K`.
 - Storage/checkpoint examples mix two different kinds of facts: storage-system
   facts such as local NVMe drive count, local/PFS bandwidth, capacity, and

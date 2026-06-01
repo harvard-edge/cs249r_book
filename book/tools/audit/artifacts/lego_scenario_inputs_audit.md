@@ -6,21 +6,23 @@ storage subsystems, or scenarios in LEGO LOAD stages.
 
 Findings: 1067
 By target:
-   270  Scenarios.* or Ops.*
-   208  Models.* or Scenarios.TrainingRuns
+   287  Scenarios.* or Ops.*
+   213  Models.* or Scenarios.TrainingRuns
    164  Scenarios.*
+   111  Infrastructure.Pricing.* or Scenarios.*
    109  Datasets.* or Scenarios.DataWorkloads
-   106  Infrastructure.Pricing.* or Scenarios.*
     49  Hardware.*
-    43  Systems.Clusters or Systems.Nodes
     31  Infrastructure.*
-    23  Hardware.* or Hardware.Tech.*
-    14  Systems.Fabrics or Systems.SwitchFabric
-    14  Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet
-    13  Systems.Storage or Datasets.*
-    10  Systems.*
-     6  Systems.Storage
+    31  Systems.*
+    18  Hardware.* or Hardware.Tech.*
+    13  Systems.Clusters or Systems.Nodes
+    11  Systems.Storage or Datasets.*
+     9  Systems.Fabrics or Systems.SwitchFabric
+     6  Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet
      4  Infrastructure.* or Scenarios.Sustainability
+     3  Infrastructure.Pricing.Labeling or Scenarios.*
+     3  Systems.Storage or Scenarios.*
+     2  Systems.Storage
      2  Scenarios.TrainingRuns or Systems.Reliability
      1  Infrastructure.Pricing.Storage
 Top chapters:
@@ -45,24 +47,26 @@ Top chapters:
     19  vol2/compute_infrastructure
     19  vol2/fleet_orchestration
 Top reasons:
-   270  scenario/workload policy
+   284  scenario/workload policy
    208  model/workload specification
    164  unit-bearing scenario input
-   106  economic input or scenario price
+   111  economic input or scenario price
    105  dataset/workload specification
     49  hardware-related quantitative input
-    43  fleet/topology fact
     31  infrastructure input
-    23  hardware specification
-    14  network/fabric system fact
-    14  cloud/fleet price point
-    13  storage/data fact
-    10  system-level fact
-     6  storage subsystem fact
+    31  system-level fact
+    18  hardware specification
+    13  fleet/topology fact
+    11  storage/data fact
+     9  network/fabric system fact
+     6  cloud/fleet price point
+     5  workload compute requirement
      4  dataset/workload size
      4  infrastructure/sustainability fact
-     2  checkpoint policy/workload cadence
-     1  storage price/rate belongs in pricing registry
+     3  storage observation or utilization scenario
+     3  human-labeling price input
+     3  storage-related scenario input
+     2  storage subsystem fact
 
 ## vol1/backmatter/appendix_algorithm.qmd
 
@@ -135,7 +139,7 @@ Top reasons:
 | `book/quarto/contents/vol1/benchmarking/benchmarking.qmd:1977` | `InferenceEnergy` | `_latency_slow` | `Scenarios.*` | unit-bearing scenario input | `100 * ms` |
 | `book/quarto/contents/vol1/benchmarking/benchmarking.qmd:2335` | `ScalingEfficiencyCalc` | `t1_hours` | `Scenarios.* or Ops.*` | scenario/workload policy | `24` |
 | `book/quarto/contents/vol1/benchmarking/benchmarking.qmd:2337` | `ScalingEfficiencyCalc` | `tn_hours` | `Scenarios.* or Ops.*` | scenario/workload policy | `4` |
-| `book/quarto/contents/vol1/benchmarking/benchmarking.qmd:2885` | `AmdahlBenchmarkCalc` | `bench_preprocess_ms` | `Systems.Fabrics or Systems.SwitchFabric` | network/fabric system fact | `8` |
+| `book/quarto/contents/vol1/benchmarking/benchmarking.qmd:2885` | `AmdahlBenchmarkCalc` | `bench_preprocess_ms` | `Scenarios.* or Ops.*` | scenario/workload policy | `8` |
 | `book/quarto/contents/vol1/benchmarking/benchmarking.qmd:3071` | `ColdStartTransferCalc` | `pcie_effective_bw` | `Hardware.* or Hardware.Tech.*` | hardware specification | `25 * (GB / second)` |
 | `book/quarto/contents/vol1/benchmarking/benchmarking.qmd:3247` | `EdgeTPUSpeedupCalc` | `edgetpu_latency` | `Hardware.*` | hardware-related quantitative input | `2 * ms` |
 | `book/quarto/contents/vol1/benchmarking/benchmarking.qmd:3248` | `EdgeTPUSpeedupCalc` | `cpu_latency` | `Hardware.*` | hardware-related quantitative input | `15 * ms` |
@@ -181,14 +185,14 @@ Top reasons:
 | `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:838` | `KWSProblemTargets` | `kws_accuracy_target` | `Scenarios.* or Ops.*` | scenario/workload policy | `98` |
 | `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:891` | `FalsePositiveTarget` | `duty_cycle_hours` | `Scenarios.* or Ops.*` | scenario/workload policy | `24` |
 | `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:892` | `FalsePositiveTarget` | `window_sec` | `Scenarios.* or Ops.*` | scenario/workload policy | `1` |
-| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:990` | `BudgetAllocation` | `storage_pct` | `Systems.Storage or Datasets.*` | storage/data fact | `0.25` |
+| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:990` | `BudgetAllocation` | `storage_pct` | `Scenarios.* or Ops.*` | storage observation or utilization scenario | `0.25` |
 | `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:993` | `BudgetAllocation` | `review_overhead` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `0.20` |
 | `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:1048` | `KWSDesignConstraints` | `kws_accuracy_target` | `Scenarios.* or Ops.*` | scenario/workload policy | `98` |
 | `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:1054` | `KWSDesignConstraints` | `kws_base_model_acc` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `90` |
 | `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:1305` | `LabelingComputeRatio` | `train_hours_low` | `Scenarios.* or Ops.*` | scenario/workload policy | `4` |
 | `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:1306` | `LabelingComputeRatio` | `train_hours_high` | `Scenarios.* or Ops.*` | scenario/workload policy | `6` |
 | `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:2012` | `KWSAcquisitionScale` | `dataset_size_m` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `23.4` |
-| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:2458` | `DataloaderStats` | `gpu_limit_img_sec` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `3000` |
+| `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:2458` | `DataloaderStats` | `gpu_limit_img_sec` | `Systems.*` | system-level fact | `3000` |
 | `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:2586` | `RealtimeCost` | `stream_hours` | `Scenarios.* or Ops.*` | scenario/workload policy | `24` |
 | `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:2587` | `RealtimeCost` | `stream_cost_per_hr` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `0.05` |
 | `book/quarto/contents/vol1/data_engineering/data_engineering.qmd:2588` | `RealtimeCost` | `batch_cores` | `Scenarios.* or Ops.*` | scenario/workload policy | `200` |
@@ -238,8 +242,8 @@ Top reasons:
 
 | File:Line | Cell | Symbol | Target | Reason | RHS |
 |---|---|---|---|---|---|
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:98` | `ScalingAsymmetry` | `gpu_growth_factor` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `10.0` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:99` | `ScalingAsymmetry` | `gpu_period_years` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `3.0` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:98` | `ScalingAsymmetry` | `gpu_growth_factor` | `Systems.*` | system-level fact | `10.0` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:99` | `ScalingAsymmetry` | `gpu_period_years` | `Systems.*` | system-level fact | `3.0` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:418` | `IronLawSavings` | `factor_model` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `2.0` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:1118` | `QualityMultiplier` | `epsilon` | `Scenarios.* or Ops.*` | scenario/workload policy | `0.01` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:1321` | `CoresetPractice` | `train_image_count` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `1_000_000 * count` |
@@ -252,13 +256,13 @@ Top reasons:
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:1512` | `CurriculumBenchmarks` | `imagenet_curriculum_epochs` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `80` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:1514` | `CurriculumBenchmarks` | `mentornet_baseline_epochs` | `Scenarios.* or Ops.*` | scenario/workload policy | `90` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:1515` | `CurriculumBenchmarks` | `mentornet_curriculum_epochs` | `Scenarios.* or Ops.*` | scenario/workload policy | `70` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:1860` | `ActiveLearningRoi` | `cost_per_label` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `5.00 * (USD / count)` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:1860` | `ActiveLearningRoi` | `cost_per_label` | `Infrastructure.Pricing.Labeling or Scenarios.*` | human-labeling price input | `5.00 * (USD / count)` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:1861` | `ActiveLearningRoi` | `budget` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `500_000 * USD` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:1862` | `ActiveLearningRoi` | `deadline` | `Scenarios.* or Ops.*` | scenario/workload policy | `1 * ureg.month` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:2027` | `ClinicalLabelingEconomics` | `review_rate_low` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `50` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:2028` | `ClinicalLabelingEconomics` | `review_rate_high` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `80` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:2029` | `ClinicalLabelingEconomics` | `hourly_rate_low` | `Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet` | cloud/fleet price point | `150` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:2030` | `ClinicalLabelingEconomics` | `hourly_rate_high` | `Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet` | cloud/fleet price point | `300` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:2029` | `ClinicalLabelingEconomics` | `hourly_rate_low` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `150` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:2030` | `ClinicalLabelingEconomics` | `hourly_rate_high` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `300` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:2031` | `ClinicalLabelingEconomics` | `workweek_hours` | `Scenarios.* or Ops.*` | scenario/workload policy | `40` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:2144` | `FixmatchLabelEfficiency` | `cifar10_full_acc` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `96.1` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:2147` | `FixmatchLabelEfficiency` | `cifar10_fixmatch_4k_acc` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `95.7` |
@@ -270,7 +274,7 @@ Top reasons:
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:2300` | `FoundationCostAmortization` | `scratch_compute_per_task` | `Scenarios.* or Ops.*` | scenario/workload policy | `1000 * hour` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:2302` | `FoundationCostAmortization` | `pretrain_compute` | `Scenarios.* or Ops.*` | scenario/workload policy | `10000 * hour` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:2303` | `FoundationCostAmortization` | `finetune_compute_per_task` | `Scenarios.* or Ops.*` | scenario/workload policy | `50 * hour` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:2305` | `FoundationCostAmortization` | `cost_per_label` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `1 * (USD / count)` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:2305` | `FoundationCostAmortization` | `cost_per_label` | `Infrastructure.Pricing.Labeling or Scenarios.*` | human-labeling price input | `1 * (USD / count)` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:2620` | `KwsDataSelectionCalc` | `target_samples` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `10_000` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:2621` | `KwsDataSelectionCalc` | `cost_per_sample_low` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `2` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:2622` | `KwsDataSelectionCalc` | `cost_per_sample_high` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `5` |
@@ -287,11 +291,11 @@ Top reasons:
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:3232` | `DataEchoingRoi` | `gpu_throughput` | `Hardware.*` | hardware-related quantitative input | `800 * (count / second)` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:3233` | `DataEchoingRoi` | `echo_epoch_count` | `Scenarios.* or Ops.*` | scenario/workload policy | `90` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:3354` | `CostBreakdown` | `raw_data_cost` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `50000 * USD` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3356` | `CostBreakdown` | `cost_per_label` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `0.05 * (USD / count)` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3356` | `CostBreakdown` | `cost_per_label` | `Infrastructure.Pricing.Labeling or Scenarios.*` | human-labeling price input | `0.05 * (USD / count)` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:3357` | `CostBreakdown` | `storage_cost` | `Infrastructure.Pricing.Storage` | storage price/rate belongs in pricing registry | `200 * USD` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:3358` | `CostBreakdown` | `train_compute_cost` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `25000 * USD` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:3359` | `CostBreakdown` | `storage_size` | `Systems.Storage or Datasets.*` | storage/data fact | `150 * GB` |
-| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3360` | `CostBreakdown` | `storage_duration` | `Systems.Storage or Datasets.*` | storage/data fact | `12 * ureg.month` |
+| `book/quarto/contents/vol1/data_selection/data_selection.qmd:3360` | `CostBreakdown` | `storage_duration` | `Scenarios.* or Ops.*` | storage observation or utilization scenario | `12 * ureg.month` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:3361` | `CostBreakdown` | `train_epoch_count` | `Scenarios.* or Ops.*` | scenario/workload policy | `100` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:3362` | `CostBreakdown` | `train_gpu_count` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `8` |
 | `book/quarto/contents/vol1/data_selection/data_selection.qmd:3363` | `CostBreakdown` | `train_duration` | `Scenarios.* or Ops.*` | scenario/workload policy | `24 * hour` |
@@ -411,7 +415,7 @@ Top reasons:
 | `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:1730` | `ABSampleSize` | `power` | `Infrastructure.*` | infrastructure input | `0.80` |
 | `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:1731` | `ABSampleSize` | `baseline_rate` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `0.05` |
 | `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:1733` | `ABSampleSize` | `comparison_users_per_variant` | `Scenarios.* or Ops.*` | scenario/workload policy | `25_000` |
-| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:1891` | `LatencyBudget` | `network` | `Systems.Fabrics or Systems.SwitchFabric` | network/fabric system fact | `15` |
+| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:1891` | `LatencyBudget` | `network` | `Systems.*` | system-level fact | `15` |
 | `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:1893` | `LatencyBudget` | `request_parse` | `Scenarios.* or Ops.*` | scenario/workload policy | `5` |
 | `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:1897` | `LatencyBudget` | `model_speedup` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `2.0` |
 | `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:2100` | `KVCacheFootprint` | `seq_len` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `8_192` |
@@ -436,8 +440,8 @@ Top reasons:
 | `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:3217` | `FraudDetectionImprovement` | `infra_cost_increase` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `0.30` |
 | `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:3219` | `FraudDetectionImprovement` | `monthly_false_positive_alerts` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `250_000` |
 | `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:3494` | `SingleModelROI` | `incident_cost` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `25_000` |
-| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:3495` | `SingleModelROI` | `hours_saved_monthly` | `Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet` | cloud/fleet price point | `20` |
-| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:3496` | `SingleModelROI` | `hourly_cost` | `Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet` | cloud/fleet price point | `150` |
+| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:3495` | `SingleModelROI` | `hours_saved_monthly` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `20` |
+| `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:3496` | `SingleModelROI` | `hourly_cost` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `150` |
 | `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:3596` | `OuraValidationGap` | `accel_only_accuracy` | `Scenarios.* or Ops.*` | scenario/workload policy | `0.57` |
 | `book/quarto/contents/vol1/ml_ops/ml_ops.qmd:3597` | `OuraValidationGap` | `enhanced_accuracy` | `Scenarios.* or Ops.*` | scenario/workload policy | `0.79` |
 
@@ -454,7 +458,7 @@ Top reasons:
 | `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1639` | `CloudEdgeTCO` | `requests_per_day` | `Scenarios.* or Ops.*` | scenario/workload policy | `1_000_000` |
 | `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1641` | `CloudEdgeTCO` | `response_size` | `Scenarios.*` | unit-bearing scenario input | `100 * KB` |
 | `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1644` | `CloudEdgeTCO` | `gpu_price_per_hr` | `Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet` | cloud/fleet price point | `0.75` |
-| `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1645` | `CloudEdgeTCO` | `gpu_instances` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `4` |
+| `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1645` | `CloudEdgeTCO` | `gpu_instances` | `Systems.*` | system-level fact | `4` |
 | `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1653` | `CloudEdgeTCO` | `server_cost` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `15000` |
 | `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1654` | `CloudEdgeTCO` | `server_life_years` | `Systems.*` | system-level fact | `3` |
 | `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1657` | `CloudEdgeTCO` | `cooling_overhead` | `Infrastructure.* or Scenarios.Sustainability` | infrastructure/sustainability fact | `0.30` |
@@ -463,8 +467,8 @@ Top reasons:
 | `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1818` | `VoiceAssistantWall` | `ww_edge_power_max_mw` | `Infrastructure.*` | infrastructure input | `1` |
 | `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1819` | `VoiceAssistantWall` | `ww_edge_cost_per_year` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `0.01` |
 | `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1823` | `VoiceAssistantWall` | `vi_queries_per_day` | `Scenarios.* or Ops.*` | scenario/workload policy | `20` |
-| `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1824` | `VoiceAssistantWall` | `vi_gpu_ms_per_query` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `200` |
-| `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1825` | `VoiceAssistantWall` | `vi_gpus_per_datacenter` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `10_000` |
+| `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1824` | `VoiceAssistantWall` | `vi_gpu_ms_per_query` | `Scenarios.* or Ops.*` | scenario/workload policy | `200` |
+| `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1825` | `VoiceAssistantWall` | `vi_gpus_per_datacenter` | `Systems.*` | system-level fact | `10_000` |
 | `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1826` | `VoiceAssistantWall` | `vi_audio_sample_rate` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `16_000` |
 | `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:1828` | `VoiceAssistantWall` | `vi_waking_hours` | `Scenarios.* or Ops.*` | scenario/workload policy | `16` |
 | `book/quarto/contents/vol1/ml_systems/ml_systems.qmd:2138` | `EdgeEnergyTransmissionRecap` | `data_size` | `Scenarios.*` | unit-bearing scenario input | `1.0 * MB` |
@@ -539,8 +543,8 @@ Top reasons:
 | `book/quarto/contents/vol1/model_compression/model_compression.qmd:561` | `ModelDeviceComparison` | `resnet_mem` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `100 * MB` |
 | `book/quarto/contents/vol1/model_compression/model_compression.qmd:564` | `ModelDeviceComparison` | `dscnn_mem` | `Scenarios.*` | unit-bearing scenario input | `500 * KB` |
 | `book/quarto/contents/vol1/model_compression/model_compression.qmd:2368` | `LowRankFactorization` | `bytes_per_param` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `4` |
-| `book/quarto/contents/vol1/model_compression/model_compression.qmd:3392` | `QuantizationSavings` | `gpu_mem_fp16_gb` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `24` |
-| `book/quarto/contents/vol1/model_compression/model_compression.qmd:3393` | `QuantizationSavings` | `gpu_mem_int4_gb` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `8` |
+| `book/quarto/contents/vol1/model_compression/model_compression.qmd:3392` | `QuantizationSavings` | `gpu_mem_fp16_gb` | `Systems.*` | system-level fact | `24` |
+| `book/quarto/contents/vol1/model_compression/model_compression.qmd:3393` | `QuantizationSavings` | `gpu_mem_int4_gb` | `Systems.*` | system-level fact | `8` |
 | `book/quarto/contents/vol1/model_compression/model_compression.qmd:7295` | `AmdahlCompression` | `model_fraction` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `0.20` |
 | `book/quarto/contents/vol1/model_compression/model_compression.qmd:7376` | `ResNet50Int8Metrics` | `calibration_error_fp32` | `Scenarios.* or Ops.*` | scenario/workload policy | `2.1` |
 | `book/quarto/contents/vol1/model_compression/model_compression.qmd:7377` | `ResNet50Int8Metrics` | `calibration_error_int8` | `Scenarios.* or Ops.*` | scenario/workload policy | `3.4` |
@@ -577,16 +581,16 @@ Top reasons:
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:1627` | `LatencyBudgetCalc` | `normalize_ms_value` | `Scenarios.*` | unit-bearing scenario input | `0.5 * ms` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:1628` | `LatencyBudgetCalc` | `cpu_gpu_ms_value` | `Hardware.*` | hardware-related quantitative input | `0.5 * ms` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:1629` | `LatencyBudgetCalc` | `resnet_inference_ms_value` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `5.0 * ms` |
-| `book/quarto/contents/vol1/model_serving/model_serving.qmd:1630` | `LatencyBudgetCalc` | `postprocess_ms_value` | `Systems.Fabrics or Systems.SwitchFabric` | network/fabric system fact | `0.1 * ms` |
+| `book/quarto/contents/vol1/model_serving/model_serving.qmd:1630` | `LatencyBudgetCalc` | `postprocess_ms_value` | `Scenarios.* or Ops.*` | scenario/workload policy | `0.1 * ms` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:1631` | `LatencyBudgetCalc` | `tensorrt_inference_ms_value` | `Scenarios.*` | unit-bearing scenario input | `2.0 * ms` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:1696` | `DlrmLatencyCalc` | `dlrm_input_ms_value` | `Hardware.*` | hardware-related quantitative input | `0.5 * ms` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:1697` | `DlrmLatencyCalc` | `dlrm_embed_ms_value` | `Scenarios.*` | unit-bearing scenario input | `6.0 * ms` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:1698` | `DlrmLatencyCalc` | `dlrm_mlp_ms_value` | `Scenarios.*` | unit-bearing scenario input | `1.5 * ms` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:1699` | `DlrmLatencyCalc` | `dlrm_post_ms_value` | `Scenarios.*` | unit-bearing scenario input | `1.0 * ms` |
-| `book/quarto/contents/vol1/model_serving/model_serving.qmd:1758` | `AmdahlServingCalc` | `preprocess_ms_value` | `Systems.Fabrics or Systems.SwitchFabric` | network/fabric system fact | `(3.0 + 1.0 + 0.5) * ms` |
+| `book/quarto/contents/vol1/model_serving/model_serving.qmd:1758` | `AmdahlServingCalc` | `preprocess_ms_value` | `Scenarios.* or Ops.*` | scenario/workload policy | `(3.0 + 1.0 + 0.5) * ms` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:1759` | `AmdahlServingCalc` | `cpu_gpu_ms_value` | `Hardware.*` | hardware-related quantitative input | `0.5 * ms` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:1760` | `AmdahlServingCalc` | `resnet_inference_ms_value` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `5.0 * ms` |
-| `book/quarto/contents/vol1/model_serving/model_serving.qmd:1761` | `AmdahlServingCalc` | `postprocess_ms_value` | `Systems.Fabrics or Systems.SwitchFabric` | network/fabric system fact | `0.1 * ms` |
+| `book/quarto/contents/vol1/model_serving/model_serving.qmd:1761` | `AmdahlServingCalc` | `postprocess_ms_value` | `Scenarios.* or Ops.*` | scenario/workload policy | `0.1 * ms` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:1887` | `ResolutionScalingCalc` | `r2_value` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload size | `2 * IMAGE_DIM_RESNET` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:1923` | `ResolutionBottleneckCalc` | `act_224` | `Scenarios.*` | unit-bearing scenario input | `12.5 * MB` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:1924` | `ResolutionBottleneckCalc` | `act_384` | `Scenarios.*` | unit-bearing scenario input | `36.8 * MB` |
@@ -606,7 +610,7 @@ Top reasons:
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:2379` | `CapacityPlanningCalc` | `cp_v100_throughput_value` | `Hardware.*` | hardware-related quantitative input | `1143 * (count / second)` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:2380` | `CapacityPlanningCalc` | `cp_headroom_factor_value` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `1.3` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:2384` | `CapacityPlanningCalc` | `mm1_rho_example_util_value` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `0.7` |
-| `book/quarto/contents/vol1/model_serving/model_serving.qmd:2597` | `ColdStartCalc` | `cs_ssd_value` | `Systems.Storage` | storage subsystem fact | `0.5 * second` |
+| `book/quarto/contents/vol1/model_serving/model_serving.qmd:2597` | `ColdStartCalc` | `cs_ssd_value` | `Systems.Storage or Scenarios.*` | storage-related scenario input | `0.5 * second` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:2598` | `ColdStartCalc` | `cs_s3_value` | `Systems.Storage or Datasets.*` | storage/data fact | `4.0 * second` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:2599` | `ColdStartCalc` | `cs_cuda_value` | `Scenarios.*` | unit-bearing scenario input | `0.4 * second` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:2600` | `ColdStartCalc` | `cs_compile_value` | `Scenarios.*` | unit-bearing scenario input | `30.0 * second` |
@@ -672,11 +676,11 @@ Top reasons:
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:4195` | `PrecisionTradeoffCalc` | `pt_fp16_mem` | `Hardware.*` | hardware-related quantitative input | `49 * MB` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:4198` | `PrecisionTradeoffCalc` | `pt_int8_ms_value` | `Hardware.*` | hardware-related quantitative input | `0.9 * ms` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:4199` | `PrecisionTradeoffCalc` | `pt_int8_mem` | `Hardware.*` | hardware-related quantitative input | `25 * MB` |
-| `book/quarto/contents/vol1/model_serving/model_serving.qmd:4427` | `CostAnalysisCalc` | `ca_cpu_cost_value` | `Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet` | cloud/fleet price point | `0.17 * (USD / hour)` |
+| `book/quarto/contents/vol1/model_serving/model_serving.qmd:4427` | `CostAnalysisCalc` | `ca_cpu_cost_value` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `0.17 * (USD / hour)` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:4428` | `CostAnalysisCalc` | `ca_cpu_throughput_value` | `Hardware.*` | hardware-related quantitative input | `50 * (count / second)` |
-| `book/quarto/contents/vol1/model_serving/model_serving.qmd:4429` | `CostAnalysisCalc` | `ca_t4_cost_value` | `Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet` | cloud/fleet price point | `0.53 * (USD / hour)` |
+| `book/quarto/contents/vol1/model_serving/model_serving.qmd:4429` | `CostAnalysisCalc` | `ca_t4_cost_value` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `0.53 * (USD / hour)` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:4430` | `CostAnalysisCalc` | `ca_t4_throughput_value` | `Hardware.*` | hardware-related quantitative input | `400 * (count / second)` |
-| `book/quarto/contents/vol1/model_serving/model_serving.qmd:4431` | `CostAnalysisCalc` | `ca_v100_cost_value` | `Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet` | cloud/fleet price point | `3.06 * (USD / hour)` |
+| `book/quarto/contents/vol1/model_serving/model_serving.qmd:4431` | `CostAnalysisCalc` | `ca_v100_cost_value` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `3.06 * (USD / hour)` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:4432` | `CostAnalysisCalc` | `ca_v100_throughput_value` | `Hardware.*` | hardware-related quantitative input | `1200 * (count / second)` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:4509` | `CapacityPlanningRecap` | `cp_peak_qps_value` | `Scenarios.* or Ops.*` | scenario/workload policy | `5000 * (count / second)` |
 | `book/quarto/contents/vol1/model_serving/model_serving.qmd:4510` | `CapacityPlanningRecap` | `cp_service_ms_value` | `Scenarios.*` | unit-bearing scenario input | `5 * ms` |
@@ -795,8 +799,8 @@ Top reasons:
 | `book/quarto/contents/vol1/nn_computation/nn_computation.qmd:4622` | `MnistEpochLocal` | `batch_size` | `Scenarios.* or Ops.*` | scenario/workload policy | `32` |
 | `book/quarto/contents/vol1/nn_computation/nn_computation.qmd:5034` | `MnistInferenceResourceLocal` | `batch_size` | `Scenarios.* or Ops.*` | scenario/workload policy | `32` |
 | `book/quarto/contents/vol1/nn_computation/nn_computation.qmd:5755` | `FallacyQuantExamples` | `model_latency` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `20 * ms` |
-| `book/quarto/contents/vol1/nn_computation/nn_computation.qmd:5756` | `FallacyQuantExamples` | `preprocessing_latency` | `Systems.Fabrics or Systems.SwitchFabric` | network/fabric system fact | `25 * ms` |
-| `book/quarto/contents/vol1/nn_computation/nn_computation.qmd:5757` | `FallacyQuantExamples` | `postprocessing_latency` | `Systems.Fabrics or Systems.SwitchFabric` | network/fabric system fact | `10 * ms` |
+| `book/quarto/contents/vol1/nn_computation/nn_computation.qmd:5756` | `FallacyQuantExamples` | `preprocessing_latency` | `Scenarios.* or Ops.*` | scenario/workload policy | `25 * ms` |
+| `book/quarto/contents/vol1/nn_computation/nn_computation.qmd:5757` | `FallacyQuantExamples` | `postprocessing_latency` | `Scenarios.* or Ops.*` | scenario/workload policy | `10 * ms` |
 | `book/quarto/contents/vol1/nn_computation/nn_computation.qmd:5758` | `FallacyQuantExamples` | `latency_budget` | `Scenarios.*` | unit-bearing scenario input | `50 * ms` |
 | `book/quarto/contents/vol1/nn_computation/nn_computation.qmd:5761` | `FallacyQuantExamples` | `mnist_dims` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `[784, 128, 64, 10]` |
 | `book/quarto/contents/vol1/nn_computation/nn_computation.qmd:5762` | `FallacyQuantExamples` | `mnist_batch_size` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `32` |
@@ -861,7 +865,7 @@ Top reasons:
 | `book/quarto/contents/vol1/training/training.qmd:2482` | `GPT2DataPipeline` | `seq_len` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `1024` |
 | `book/quarto/contents/vol1/training/training.qmd:2483` | `GPT2DataPipeline` | `token_rate` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `500_000` |
 | `book/quarto/contents/vol1/training/training.qmd:2486` | `GPT2DataPipeline` | `bpe_vocab` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `50_257` |
-| `book/quarto/contents/vol1/training/training.qmd:2488` | `GPT2DataPipeline` | `gpu_forward_ms` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `80` |
+| `book/quarto/contents/vol1/training/training.qmd:2488` | `GPT2DataPipeline` | `gpu_forward_ms` | `Scenarios.* or Ops.*` | scenario/workload policy | `80` |
 | `book/quarto/contents/vol1/training/training.qmd:2490` | `GPT2DataPipeline` | `throughput_samples` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `380` |
 | `book/quarto/contents/vol1/training/training.qmd:2778` | `TrainingDimensions` | `layer_dim_h` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `512` |
 | `book/quarto/contents/vol1/training/training.qmd:2779` | `TrainingDimensions` | `layer_dim_w` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `1024` |
@@ -898,7 +902,7 @@ Top reasons:
 | `book/quarto/contents/vol1/training/training.qmd:6890` | `FallaciesPitfallsSetup` | `fp_gpu_count` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `8` |
 | `book/quarto/contents/vol1/training/training.qmd:6891` | `FallaciesPitfallsSetup` | `fp_sync_overhead_min` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `30` |
 | `book/quarto/contents/vol1/training/training.qmd:6892` | `FallaciesPitfallsSetup` | `fp_sync_overhead_max` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `50` |
-| `book/quarto/contents/vol1/training/training.qmd:6895` | `FallaciesPitfallsSetup` | `fp_single_gpu_hours` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `24` |
+| `book/quarto/contents/vol1/training/training.qmd:6895` | `FallaciesPitfallsSetup` | `fp_single_gpu_hours` | `Systems.*` | system-level fact | `24` |
 | `book/quarto/contents/vol1/training/training.qmd:6896` | `FallaciesPitfallsSetup` | `fp_cluster_hours` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `36` |
 | `book/quarto/contents/vol1/training/training.qmd:6899` | `FallaciesPitfallsSetup` | `fp_batch_small` | `Scenarios.* or Ops.*` | scenario/workload policy | `512` |
 | `book/quarto/contents/vol1/training/training.qmd:6901` | `FallaciesPitfallsSetup` | `fp_batch_large` | `Scenarios.* or Ops.*` | scenario/workload policy | `4096` |
@@ -922,11 +926,11 @@ Top reasons:
 
 | File:Line | Cell | Symbol | Target | Reason | RHS |
 |---|---|---|---|---|---|
-| `book/quarto/contents/vol2/backmatter/appendix_dam.qmd:44` | `DAMTaxonomy` | `ex1_gpu_util_pct` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `25` |
-| `book/quarto/contents/vol2/backmatter/appendix_dam.qmd:45` | `DAMTaxonomy` | `ex1_disk_sat_pct` | `Systems.Storage` | storage subsystem fact | `100` |
+| `book/quarto/contents/vol2/backmatter/appendix_dam.qmd:44` | `DAMTaxonomy` | `ex1_gpu_util_pct` | `Systems.*` | system-level fact | `25` |
+| `book/quarto/contents/vol2/backmatter/appendix_dam.qmd:45` | `DAMTaxonomy` | `ex1_disk_sat_pct` | `Scenarios.* or Ops.*` | storage observation or utilization scenario | `100` |
 | `book/quarto/contents/vol2/backmatter/appendix_dam.qmd:49` | `DAMTaxonomy` | `ex2_latency` | `Scenarios.*` | unit-bearing scenario input | `0.050 * second` |
-| `book/quarto/contents/vol2/backmatter/appendix_dam.qmd:59` | `DAMTaxonomy` | `ex4_gpu_old_n` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `4` |
-| `book/quarto/contents/vol2/backmatter/appendix_dam.qmd:60` | `DAMTaxonomy` | `ex4_gpu_new_n` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `8` |
+| `book/quarto/contents/vol2/backmatter/appendix_dam.qmd:59` | `DAMTaxonomy` | `ex4_gpu_old_n` | `Systems.*` | system-level fact | `4` |
+| `book/quarto/contents/vol2/backmatter/appendix_dam.qmd:60` | `DAMTaxonomy` | `ex4_gpu_new_n` | `Systems.*` | system-level fact | `8` |
 | `book/quarto/contents/vol2/backmatter/appendix_dam.qmd:61` | `DAMTaxonomy` | `ex4_cost_k` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `200` |
 
 ## vol2/backmatter/appendix_fleet.qmd
@@ -956,8 +960,8 @@ Top reasons:
 | `book/quarto/contents/vol2/collective_communication/collective_communication.qmd:1721` | `CompressionPayback` | `t_overhead_ms` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `2` |
 | `book/quarto/contents/vol2/collective_communication/collective_communication.qmd:1942` | `OverlapBudgetCalc` | `backward_per_layer` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `15 * ms` |
 | `book/quarto/contents/vol2/collective_communication/collective_communication.qmd:1943` | `OverlapBudgetCalc` | `gradient_per_layer` | `Hardware.*` | hardware-related quantitative input | `880 * MB` |
-| `book/quarto/contents/vol2/collective_communication/collective_communication.qmd:1944` | `OverlapBudgetCalc` | `bucket_size` | `Systems.Storage` | storage subsystem fact | `100 * MB` |
-| `book/quarto/contents/vol2/collective_communication/collective_communication.qmd:1945` | `OverlapBudgetCalc` | `allreduce_per_bucket` | `Systems.Storage` | storage subsystem fact | `3 * ms` |
+| `book/quarto/contents/vol2/collective_communication/collective_communication.qmd:1944` | `OverlapBudgetCalc` | `bucket_size` | `Systems.Storage or Scenarios.*` | storage-related scenario input | `100 * MB` |
+| `book/quarto/contents/vol2/collective_communication/collective_communication.qmd:1945` | `OverlapBudgetCalc` | `allreduce_per_bucket` | `Systems.Storage or Scenarios.*` | storage-related scenario input | `3 * ms` |
 | `book/quarto/contents/vol2/collective_communication/collective_communication.qmd:1947` | `OverlapBudgetCalc` | `params_b_overlap` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `7` |
 
 ## vol2/compute_infrastructure
@@ -980,7 +984,7 @@ Top reasons:
 | `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3607` | `CheckpointOverheadBudget` | `checkpoints_retained` | `Systems.Storage or Datasets.*` | storage/data fact | `10` |
 | `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3762` | `CheckpointComputeTradeoff` | `write_bw` | `Scenarios.*` | unit-bearing scenario input | `100 * (GB / second)` |
 | `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3915` | `FabricSizingScenario` | `switch_ports` | `Systems.Fabrics or Systems.SwitchFabric` | network/fabric system fact | `64` |
-| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3918` | `FabricSizingScenario` | `endpoint_links_per_gpu` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `2` |
+| `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3918` | `FabricSizingScenario` | `endpoint_links_per_gpu` | `Systems.Fabrics or Systems.SwitchFabric` | network/fabric system fact | `2` |
 | `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:3919` | `FabricSizingScenario` | `spine_switches` | `Systems.Fabrics or Systems.SwitchFabric` | network/fabric system fact | `32` |
 | `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd:4176` | `A100FallaciesRecap` | `option_a_hbm` | `Hardware.* or Hardware.Tech.*` | hardware specification | `192 * GB` |
 
@@ -999,8 +1003,8 @@ Top reasons:
 
 | File:Line | Cell | Symbol | Target | Reason | RHS |
 |---|---|---|---|---|---|
-| `book/quarto/contents/vol2/data_storage/data_storage.qmd:590` | `TextImageBandwidth` | `text_tokens_per_gpu` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `4096` |
-| `book/quarto/contents/vol2/data_storage/data_storage.qmd:592` | `TextImageBandwidth` | `image_batch_per_gpu` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `256` |
+| `book/quarto/contents/vol2/data_storage/data_storage.qmd:590` | `TextImageBandwidth` | `text_tokens_per_gpu` | `Systems.*` | system-level fact | `4096` |
+| `book/quarto/contents/vol2/data_storage/data_storage.qmd:592` | `TextImageBandwidth` | `image_batch_per_gpu` | `Scenarios.* or Ops.*` | scenario/workload policy | `256` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:593` | `TextImageBandwidth` | `image_bytes` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `150_000 * byte` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:594` | `TextImageBandwidth` | `step` | `Scenarios.* or Ops.*` | scenario/workload policy | `0.2 * second` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:755` | `HbmMemoryBudget` | `activation_min` | `Scenarios.*` | unit-bearing scenario input | `10 * GB` |
@@ -1016,13 +1020,13 @@ Top reasons:
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:1283` | `GlacierCost` | `dataset_size_tb` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `100` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:1284` | `GlacierCost` | `cost_glacier_gb_mo` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `0.004` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:1383` | `PipelineCalcs` | `img_size` | `Scenarios.*` | unit-bearing scenario input | `150 * KB` |
-| `book/quarto/contents/vol2/data_storage/data_storage.qmd:1384` | `PipelineCalcs` | `batch_img_gpu` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `256` |
+| `book/quarto/contents/vol2/data_storage/data_storage.qmd:1384` | `PipelineCalcs` | `batch_img_gpu` | `Scenarios.* or Ops.*` | scenario/workload policy | `256` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:1386` | `PipelineCalcs` | `t_step` | `Scenarios.* or Ops.*` | scenario/workload policy | `200 * ms` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:1387` | `PipelineCalcs` | `t_comp` | `Scenarios.*` | unit-bearing scenario input | `200 * ms` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:1388` | `PipelineCalcs` | `t_io` | `Scenarios.*` | unit-bearing scenario input | `250 * ms` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:1766` | `HashValidationCost` | `dataset` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `100 * TB` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:1767` | `HashValidationCost` | `throughput_per_core` | `Scenarios.*` | unit-bearing scenario input | `18.5 * (MB / second)` |
-| `book/quarto/contents/vol2/data_storage/data_storage.qmd:1818` | `GDSLatency` | `images_per_s_per_gpu` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `8_000` |
+| `book/quarto/contents/vol2/data_storage/data_storage.qmd:1818` | `GDSLatency` | `images_per_s_per_gpu` | `Systems.*` | system-level fact | `8_000` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:1964` | `EconRatios` | `dataset_size` | `Datasets.* or Scenarios.DataWorkloads` | dataset/workload specification | `100 * TB` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:2110` | `BuildVsBuyStorageEconomics` | `capex_low` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `3_000_000` |
 | `book/quarto/contents/vol2/data_storage/data_storage.qmd:2111` | `BuildVsBuyStorageEconomics` | `capex_high` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `5_000_000` |
@@ -1038,12 +1042,12 @@ Top reasons:
 | File:Line | Cell | Symbol | Target | Reason | RHS |
 |---|---|---|---|---|---|
 | `book/quarto/contents/vol2/distributed_training/distributed_training.qmd:102` | `DistTrainReliabilityFacts` | `reliability_node_count` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `100` |
-| `book/quarto/contents/vol2/distributed_training/distributed_training.qmd:103` | `DistTrainReliabilityFacts` | `node_hourly_survival` | `Infrastructure.Pricing.Cloud or Infrastructure.Pricing.Fleet` | cloud/fleet price point | `0.999` |
+| `book/quarto/contents/vol2/distributed_training/distributed_training.qmd:103` | `DistTrainReliabilityFacts` | `node_hourly_survival` | `Infrastructure.Pricing.* or Scenarios.*` | economic input or scenario price | `0.999` |
 | `book/quarto/contents/vol2/distributed_training/distributed_training.qmd:424` | `HierarchicalAllReduceDebug` | `tensor_bytes` | `Scenarios.*` | unit-bearing scenario input | `3.0 * GB` |
-| `book/quarto/contents/vol2/distributed_training/distributed_training.qmd:598` | `Scaling8GPU` | `single_gpu_step_s` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `1.8` |
-| `book/quarto/contents/vol2/distributed_training/distributed_training.qmd:599` | `Scaling8GPU` | `batch_per_gpu_val` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `16` |
+| `book/quarto/contents/vol2/distributed_training/distributed_training.qmd:598` | `Scaling8GPU` | `single_gpu_step_s` | `Scenarios.* or Ops.*` | scenario/workload policy | `1.8` |
+| `book/quarto/contents/vol2/distributed_training/distributed_training.qmd:599` | `Scaling8GPU` | `batch_per_gpu_val` | `Scenarios.* or Ops.*` | scenario/workload policy | `16` |
 | `book/quarto/contents/vol2/distributed_training/distributed_training.qmd:600` | `Scaling8GPU` | `fits_mem` | `Scenarios.*` | unit-bearing scenario input | `32 * GB` |
-| `book/quarto/contents/vol2/distributed_training/distributed_training.qmd:601` | `Scaling8GPU` | `compute_8gpu_ms` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `1800` |
+| `book/quarto/contents/vol2/distributed_training/distributed_training.qmd:601` | `Scaling8GPU` | `compute_8gpu_ms` | `Systems.*` | system-level fact | `1800` |
 | `book/quarto/contents/vol2/distributed_training/distributed_training.qmd:1501` | `ScalingWorkers` | `critical_batch_size` | `Scenarios.* or Ops.*` | scenario/workload policy | `4_000` |
 | `book/quarto/contents/vol2/distributed_training/distributed_training.qmd:1684` | `ModelParallelMemoryFacts` | `bytes_adam_state` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `12 * (byte / param)` |
 | `book/quarto/contents/vol2/distributed_training/distributed_training.qmd:1772` | `A100CapacityContext` | `bytes_adam_state` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `12 * (byte / param)` |
@@ -1103,14 +1107,14 @@ Top reasons:
 | `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:1705` | `AutoscalingLag` | `traffic_start` | `Scenarios.* or Ops.*` | scenario/workload policy | `40` |
 | `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:1706` | `AutoscalingLag` | `traffic_end` | `Scenarios.* or Ops.*` | scenario/workload policy | `80` |
 | `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:1814` | `GpuSharingRoi` | `small_footprint` | `Scenarios.*` | unit-bearing scenario input | `26 * GiB` |
-| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:1818` | `GpuSharingRoi` | `gpus_per_large` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `8` |
-| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:1819` | `GpuSharingRoi` | `models_per_gpu_shared` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `2` |
+| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:1818` | `GpuSharingRoi` | `gpus_per_large` | `Systems.*` | system-level fact | `8` |
+| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:1819` | `GpuSharingRoi` | `models_per_gpu_shared` | `Systems.*` | system-level fact | `2` |
 | `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:2032` | `ChargebackExample` | `days` | `Scenarios.* or Ops.*` | scenario/workload policy | `34` |
 | `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:2103` | `PreemptionTax` | `lost_duration` | `Scenarios.* or Ops.*` | scenario/workload policy | `15 * minute` |
 | `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:2104` | `PreemptionTax` | `reload_duration` | `Scenarios.* or Ops.*` | scenario/workload policy | `20 * minute` |
 | `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:2105` | `PreemptionTax` | `warmup_duration` | `Scenarios.* or Ops.*` | scenario/workload policy | `10 * minute` |
 | `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:2107` | `PreemptionTax` | `preemptions_per_day` | `Scenarios.* or Ops.*` | scenario/workload policy | `12` |
-| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:2159` | `QuotaHoardingCost` | `gpus` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `500` |
+| `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:2159` | `QuotaHoardingCost` | `gpus` | `Systems.*` | system-level fact | `500` |
 | `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:2160` | `QuotaHoardingCost` | `weeks` | `Scenarios.* or Ops.*` | scenario/workload policy | `3` |
 | `book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd:2161` | `QuotaHoardingCost` | `hours_per_week` | `Scenarios.* or Ops.*` | scenario/workload policy | `7 * HOURS_PER_DAY` |
 
@@ -1159,7 +1163,7 @@ Top reasons:
 
 | File:Line | Cell | Symbol | Target | Reason | RHS |
 |---|---|---|---|---|---|
-| `book/quarto/contents/vol2/introduction/introduction.qmd:1433` | `ReliabilityGap` | `p_node` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `0.999` |
+| `book/quarto/contents/vol2/introduction/introduction.qmd:1433` | `ReliabilityGap` | `p_node` | `Systems.*` | system-level fact | `0.999` |
 | `book/quarto/contents/vol2/introduction/introduction.qmd:1657` | `GPT3SyncTax` | `t_compute_iter` | `Scenarios.*` | unit-bearing scenario input | `1.2 * second` |
 | `book/quarto/contents/vol2/introduction/introduction.qmd:1658` | `GPT3SyncTax` | `million_steps` | `Scenarios.* or Ops.*` | scenario/workload policy | `1_000_000` |
 | `book/quarto/contents/vol2/introduction/introduction.qmd:1662` | `GPT3SyncTax` | `energy_per_bit` | `Infrastructure.*` | infrastructure input | `15.0 * pJ / bit` |
@@ -1173,11 +1177,11 @@ Top reasons:
 | `book/quarto/contents/vol2/network_fabrics/network_fabrics.qmd:553` | `NetworkAlphaBeta` | `n_small` | `Scenarios.*` | unit-bearing scenario input | `4000 * byte` |
 | `book/quarto/contents/vol2/network_fabrics/network_fabrics.qmd:554` | `NetworkAlphaBeta` | `n_large` | `Scenarios.*` | unit-bearing scenario input | `350 * MB` |
 | `book/quarto/contents/vol2/network_fabrics/network_fabrics.qmd:555` | `NetworkAlphaBeta` | `n_demo_large` | `Scenarios.*` | unit-bearing scenario input | `100 * MB` |
-| `book/quarto/contents/vol2/network_fabrics/network_fabrics.qmd:771` | `AllReduceBottleneck` | `gpu_util` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `0.50` |
-| `book/quarto/contents/vol2/network_fabrics/network_fabrics.qmd:772` | `AllReduceBottleneck` | `flops_per_sample_base` | `Hardware.* or Hardware.Tech.*` | hardware specification | `5e13 * flop` |
+| `book/quarto/contents/vol2/network_fabrics/network_fabrics.qmd:771` | `AllReduceBottleneck` | `gpu_util` | `Systems.*` | system-level fact | `0.50` |
+| `book/quarto/contents/vol2/network_fabrics/network_fabrics.qmd:772` | `AllReduceBottleneck` | `flops_per_sample_base` | `Models.* or Scenarios.TrainingRuns` | workload compute requirement | `5e13 * flop` |
 | `book/quarto/contents/vol2/network_fabrics/network_fabrics.qmd:773` | `AllReduceBottleneck` | `grad_bytes_per_param` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `4 * byte / param` |
 | `book/quarto/contents/vol2/network_fabrics/network_fabrics.qmd:1055` | `BisectionScaling` | `gradient` | `Hardware.*` | hardware-related quantitative input | `100 * GB` |
-| `book/quarto/contents/vol2/network_fabrics/network_fabrics.qmd:1330` | `PfcStormRisk` | `links_per_gpu` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `3` |
+| `book/quarto/contents/vol2/network_fabrics/network_fabrics.qmd:1330` | `PfcStormRisk` | `links_per_gpu` | `Systems.Fabrics or Systems.SwitchFabric` | network/fabric system fact | `3` |
 | `book/quarto/contents/vol2/network_fabrics/network_fabrics.qmd:1838` | `BandwidthFallacy` | `msg` | `Scenarios.*` | unit-bearing scenario input | `10 * KB` |
 
 ## vol2/ops_scale
@@ -1223,8 +1227,8 @@ Top reasons:
 |---|---|---|---|---|---|
 | `book/quarto/contents/vol2/performance_engineering/performance_engineering.qmd:578` | `WorkloadIntensityCalc` | `decode_batch` | `Scenarios.* or Ops.*` | scenario/workload policy | `1` |
 | `book/quarto/contents/vol2/performance_engineering/performance_engineering.qmd:579` | `WorkloadIntensityCalc` | `decode_hidden` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `4096` |
-| `book/quarto/contents/vol2/performance_engineering/performance_engineering.qmd:583` | `WorkloadIntensityCalc` | `gemm_flops` | `Hardware.* or Hardware.Tech.*` | hardware specification | `2 * M_dim * C_dim * K_dim * flop` |
-| `book/quarto/contents/vol2/performance_engineering/performance_engineering.qmd:593` | `WorkloadIntensityCalc` | `decode_flops_val` | `Hardware.* or Hardware.Tech.*` | hardware specification | `2 * decode_batch * decode_hidden * decode_hidden * flop` |
+| `book/quarto/contents/vol2/performance_engineering/performance_engineering.qmd:583` | `WorkloadIntensityCalc` | `gemm_flops` | `Models.* or Scenarios.TrainingRuns` | workload compute requirement | `2 * M_dim * C_dim * K_dim * flop` |
+| `book/quarto/contents/vol2/performance_engineering/performance_engineering.qmd:593` | `WorkloadIntensityCalc` | `decode_flops_val` | `Models.* or Scenarios.TrainingRuns` | workload compute requirement | `2 * decode_batch * decode_hidden * decode_hidden * flop` |
 | `book/quarto/contents/vol2/performance_engineering/performance_engineering.qmd:787` | `FusionTrafficCalc` | `hidden_dim` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `4096` |
 | `book/quarto/contents/vol2/performance_engineering/performance_engineering.qmd:788` | `FusionTrafficCalc` | `batch_size` | `Scenarios.* or Ops.*` | scenario/workload policy | `2048` |
 | `book/quarto/contents/vol2/performance_engineering/performance_engineering.qmd:791` | `FusionTrafficCalc` | `num_layers` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `80` |
@@ -1232,14 +1236,14 @@ Top reasons:
 | `book/quarto/contents/vol2/performance_engineering/performance_engineering.qmd:1188` | `KVCacheAnalysis` | `seq_len` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `4096` |
 | `book/quarto/contents/vol2/performance_engineering/performance_engineering.qmd:1192` | `KVCacheAnalysis` | `gpu_total` | `Hardware.*` | hardware-related quantitative input | `80 * GB` |
 | `book/quarto/contents/vol2/performance_engineering/performance_engineering.qmd:1606` | `OverlapCalc` | `num_gpus` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `8` |
-| `book/quarto/contents/vol2/performance_engineering/performance_engineering.qmd:1611` | `OverlapCalc` | `tokens_per_gpu` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `2048` |
-| `book/quarto/contents/vol2/performance_engineering/performance_engineering.qmd:1612` | `OverlapCalc` | `forward_flops` | `Hardware.* or Hardware.Tech.*` | hardware specification | `2 * m.parameters.to(param).magnitude * tokens_per_gpu * flop` |
-| `book/quarto/contents/vol2/performance_engineering/performance_engineering.qmd:1874` | `LayerNormRoofline` | `achieved_flops` | `Hardware.* or Hardware.Tech.*` | hardware specification | `15 * (TFLOPs / second)` |
+| `book/quarto/contents/vol2/performance_engineering/performance_engineering.qmd:1611` | `OverlapCalc` | `tokens_per_gpu` | `Systems.*` | system-level fact | `2048` |
+| `book/quarto/contents/vol2/performance_engineering/performance_engineering.qmd:1612` | `OverlapCalc` | `forward_flops` | `Models.* or Scenarios.TrainingRuns` | workload compute requirement | `2 * m.parameters.to(param).magnitude * tokens_per_gpu * flop` |
+| `book/quarto/contents/vol2/performance_engineering/performance_engineering.qmd:1874` | `LayerNormRoofline` | `achieved_flops` | `Models.* or Scenarios.TrainingRuns` | workload compute requirement | `15 * (TFLOPs / second)` |
 | `book/quarto/contents/vol2/performance_engineering/performance_engineering.qmd:1875` | `LayerNormRoofline` | `achieved_bw` | `Scenarios.*` | unit-bearing scenario input | `2.8 * (TB / second)` |
 | `book/quarto/contents/vol2/performance_engineering/performance_engineering.qmd:2117` | `FleetEfficiencyCalc` | `local_tokens_per_step` | `Models.* or Scenarios.TrainingRuns` | model/workload specification | `2204` |
-| `book/quarto/contents/vol2/performance_engineering/performance_engineering.qmd:2118` | `FleetEfficiencyCalc` | `fleet_tokens_per_step` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `35446` |
+| `book/quarto/contents/vol2/performance_engineering/performance_engineering.qmd:2118` | `FleetEfficiencyCalc` | `fleet_tokens_per_step` | `Scenarios.* or Ops.*` | scenario/workload policy | `35446` |
 | `book/quarto/contents/vol2/performance_engineering/performance_engineering.qmd:2121` | `FleetEfficiencyCalc` | `t_local_step` | `Scenarios.* or Ops.*` | scenario/workload policy | `180.0 * ms` |
-| `book/quarto/contents/vol2/performance_engineering/performance_engineering.qmd:2122` | `FleetEfficiencyCalc` | `t_fleet_step` | `Systems.Clusters or Systems.Nodes` | fleet/topology fact | `245.0 * ms` |
+| `book/quarto/contents/vol2/performance_engineering/performance_engineering.qmd:2122` | `FleetEfficiencyCalc` | `t_fleet_step` | `Scenarios.* or Ops.*` | scenario/workload policy | `245.0 * ms` |
 
 ## vol2/responsible_ai
 
