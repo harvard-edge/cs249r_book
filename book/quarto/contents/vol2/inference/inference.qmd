@@ -2011,7 +2011,13 @@ class KVCacheCapacityEstimator:
     d_head = _model.hidden_dim // _model.heads
     bytes_per_elem = 2
     context_tokens = 131_072
-    total_hbm = Systems.Nodes.DGX_H100.accelerators_per_node * Hardware.Cloud.H100.memory.capacity
+    node_gpus = Systems.Nodes.DGX_H100.accelerators_per_node
+    h100_capacity = Hardware.Cloud.H100.memory.capacity
+    # Scalar boundary: the registry stores H100 as 80 GiB; this worked
+    # example keeps the vendor-labeled 80 GB budget used by the figure and
+    # surrounding prose math.
+    h100_vendor_capacity = h100_capacity.to(GiB) * (GB / GiB)
+    total_hbm = node_gpus * h100_vendor_capacity
     weight = _model.size_in_bytes(BYTES_FP16)
     system_reserved = 20 * GB  # scenario reserve
 
@@ -2038,13 +2044,13 @@ class KVCacheCapacityEstimator:
     kv_mb_per_token_str = fmt_memory(kv_cache_one_token, unit=MB, precision=2, commas=False)
     context_tokens_str = fmt_int(context_tokens)
     kv_gb_per_request_str = fmt_memory(kv_cache_full, unit=GB, precision=1, commas=False)
-    available_kv_gb_str = fmt_memory(available_kv, unit=GB, precision=0, commas=False)
+    available_kv_gb_str = fmt_memory(available_kv, unit=GB, precision=1, commas=False)
     max_batch_str = fmt_int(max_batch, commas=False)
-    weight_gb_str = fmt_memory(weight, unit=GB, precision=0, commas=False)
+    weight_gb_str = fmt_memory(weight, unit=GB, precision=1, commas=False)
     total_hbm_gb_str = fmt_memory(total_hbm, unit=GB, precision=0, commas=False)
     system_gb_str = fmt_memory(system_reserved, unit=GB, precision=0, commas=False)
-    node_gpus_str = fmt_int(Systems.Nodes.DGX_H100.accelerators_per_node, commas=False)
-    h100_mem_gb_str = fmt_memory_capacity(Hardware.Cloud.H100.memory.capacity, unit=GiB, precision=0, commas=False)
+    node_gpus_str = fmt_int(node_gpus, commas=False)
+    h100_mem_gb_str = fmt_memory_capacity(h100_vendor_capacity, unit=GB, precision=0, commas=False)
 
     # Display-math expressions for the three step equations (pre-compute LaTeX
     # in Python to avoid `{python}` refs inside $$..$$ — §7 anti-pattern).
@@ -2055,10 +2061,10 @@ class KVCacheCapacityEstimator:
     )
     step2_cache_per_request_math = MarkdownStr(
         f"$$ {context_tokens:,} \\text{{ tokens}} \\times {kv_mb_per_token_display:.2f} \\text{{ MB/token}} \\approx "
-        f"\\mathbf{{{kv_gb_per_request_display:.0f} \\text{{ GB/request}}}} $$"
+        f"\\mathbf{{{kv_gb_per_request_display:.1f} \\text{{ GB/request}}}} $$"
     )
     step3_max_batch_math = MarkdownStr(
-        f"$$ \\text{{Max Batch}} = \\left\\lfloor \\frac{{{available_kv_display:.0f}}}{{{kv_gb_per_request_display:.0f}}} \\right\\rfloor "
+        f"$$ \\text{{Max Batch}} = \\left\\lfloor \\frac{{{available_kv_display:.1f}}}{{{kv_gb_per_request_display:.1f}}} \\right\\rfloor "
         f"= \\mathbf{{{max_batch}}} $$"
     )
 ```
