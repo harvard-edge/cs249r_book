@@ -53,3 +53,10 @@ sheet. The generator now splits the energy labels into two lines:
 - `INT32 add / 0.1 pJ`
 
 The ratio label remains in the gap and the energy color remains orange.
+
+## Deferred Editorial TODO
+
+- Add a short About-the-Book note explaining that margin visuals appear beside
+  the prose as glanceable thinking aids, not decorative art. Consider a compact
+  row of four or five representative device types after the figure work is
+  fully settled.
