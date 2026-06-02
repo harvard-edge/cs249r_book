@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from mlsysim import Systems
-from mlsysim.core.units import GB, MW, TB, second
+from mlsysim.core.units import GB, MW, TB, kilowatt, second
 
 
 def test_reference_25k_h100_cluster_totals():
@@ -74,6 +74,10 @@ def test_rack_profiles():
     assert rack.nodes_per_rack == 4
     assert rack.node is Systems.Nodes.DGX_H100
     assert rack.accelerator_count == 32
+    assert rack.node.host_memory.to(TB).magnitude == pytest.approx(2.0)
+    assert rack.non_accelerator_power.to(kilowatt).magnitude == pytest.approx(11.1)
+    assert rack.accelerator_power.to(kilowatt).magnitude == pytest.approx(22.4)
+    assert rack.total_power.to(kilowatt).magnitude == pytest.approx(33.5)
 
 
 def test_storage_training_effective_profiles():
@@ -82,6 +86,11 @@ def test_storage_training_effective_profiles():
     assert Systems.Storage.SataSsdEffective.bandwidth.to(GB / second).magnitude == pytest.approx(0.5)
     assert Systems.Storage.LocalNvmeTrainingLow.bandwidth.to(GB / second).magnitude == pytest.approx(3.0)
     assert Systems.Storage.LocalNvmeTrainingTypical.bandwidth.to(GB / second).magnitude == pytest.approx(5.0)
+
+
+def test_storage_access_path_latency_profiles():
+    assert Systems.Storage.TraditionalGpuIoLatency.to("microsecond").magnitude == pytest.approx(120)
+    assert Systems.Storage.GpuDirectStorageLatency.to("microsecond").magnitude == pytest.approx(30)
 
 
 def test_production_2k_checkpoint_storage_path():

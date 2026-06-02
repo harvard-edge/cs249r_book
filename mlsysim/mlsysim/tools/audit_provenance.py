@@ -15,6 +15,7 @@ from mlsysim.tools.appendix_lineage import (
 )
 from mlsysim.core.provenance import Provenance, ProvenanceKind, Sourced
 from mlsysim.hardware.registry import (
+    Hardware,
     CloudHardware,
     EdgeHardware,
     MobileHardware,
@@ -24,7 +25,7 @@ from mlsysim.hardware.registry import (
 from mlsysim.infrastructure.registry import Grids
 from mlsysim.infrastructure.pricing import Cloud, Storage, Labeling, Fleet, Capital, OnPremises
 from mlsysim.infrastructure.capacity import Capacity
-from mlsysim.literature.registry import Training, Scaling, Overheads, Chinchilla, Communication
+from mlsysim.literature.registry import Training, BatchSize, Chinchilla, Communication
 from mlsysim.models.registry import (
     GenerativeVisionModels,
     LanguageModels,
@@ -33,6 +34,8 @@ from mlsysim.models.registry import (
     TinyModels,
     VisionModels,
 )
+from mlsysim.ops import TrainingRunOverheads
+from mlsysim.scenarios.registry import TrainingScaleProfiles, EmissionsAnchors
 def _registry_nodes(registry_cls: type) -> Iterable[Any]:
     """Yields all Sourced AST nodes found in the target registry file."""
     if not hasattr(registry_cls, "list"):
@@ -134,14 +137,38 @@ def audit_literature_sourced() -> list[str]:
     issues: list[str] = []
     for prefix, reg in (
         ("Literature.Training", Training),
-        ("Literature.Scaling", Scaling),
-        ("Literature.Overheads", Overheads),
+        ("Literature.BatchSize", BatchSize),
         ("Literature.Chinchilla", Chinchilla),
         ("Literature.Communication", Communication),
     ):
         for item in _registry_nodes(reg):
             if isinstance(item, Sourced):
                 issues.extend(_validate_provenance_record(f"{prefix}", item.provenance))
+    return issues
+
+
+def audit_semantic_anchor_sourced() -> list[str]:
+    issues: list[str] = []
+    for prefix, reg in (
+        ("Ops.TrainingRunOverheads", TrainingRunOverheads),
+        ("Scenarios.TrainingScaleProfiles", TrainingScaleProfiles),
+        ("Scenarios.EmissionsAnchors", EmissionsAnchors),
+    ):
+        for item in _registry_nodes(reg):
+            if isinstance(item, Sourced):
+                issues.extend(_validate_provenance_record(prefix, item.provenance))
+    return issues
+
+
+def audit_hardware_tech() -> list[str]:
+    issues: list[str] = []
+    for prefix, reg in (
+        ("Hardware.Tech.EffectiveCompute", Hardware.Tech.EffectiveCompute),
+        ("Hardware.Tech.Movement", Hardware.Tech.Movement),
+    ):
+        for node in _registry_nodes(reg):
+            name = getattr(node, "name", type(node).__name__)
+            issues.extend(_check_node(f"{prefix}.{name}", node))
     return issues
 
 
@@ -201,6 +228,8 @@ def main(argv: list[str] | None = None) -> int:
         issues.extend(audit_infra_pricing())
         issues.extend(audit_infra_capacity())
         issues.extend(audit_literature_sourced())
+        issues.extend(audit_semantic_anchor_sourced())
+        issues.extend(audit_hardware_tech())
         issues.extend(audit_systems_reliability())
         issues.extend(audit_calibration_sourced())
     if args.scope == "narrative":

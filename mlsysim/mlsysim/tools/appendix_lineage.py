@@ -108,8 +108,6 @@ def audit_appendix_literature() -> list[str]:
     issues: list[str] = []
     section_map = {
         "Training": Literature.Training,
-        "Scaling": Literature.Scaling,
-        "Overheads": Literature.Overheads,
         "Chinchilla": Literature.Chinchilla,
         "Communication": Literature.Communication,
     }

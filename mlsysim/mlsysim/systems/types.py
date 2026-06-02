@@ -94,6 +94,7 @@ class Node(BaseModel):
     intra_node_bw: Quantity
     nics_per_node: int = 1
     psus_per_node: int = 2
+    host_memory: Optional[Quantity] = None
     metadata: Metadata = Field(default_factory=Metadata)
 
 
@@ -104,11 +105,22 @@ class RackProfile(BaseModel):
     name: str
     node: Node
     nodes_per_rack: int
+    non_accelerator_power: Optional[Quantity] = None
     metadata: Metadata = Field(default_factory=Metadata)
 
     @property
     def accelerator_count(self) -> int:
         return self.nodes_per_rack * self.node.accelerators_per_node
+
+    @property
+    def accelerator_power(self) -> Quantity:
+        return self.accelerator_count * self.node.accelerator.tdp
+
+    @property
+    def total_power(self) -> Quantity:
+        if self.non_accelerator_power is None:
+            return self.accelerator_power
+        return self.accelerator_power + self.non_accelerator_power
 
 
 class PodEnvelope(BaseModel):

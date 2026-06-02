@@ -11,7 +11,7 @@ reference-statistics counterpart — sourced numbers the prose cites, not things
 from ..core.provenance import sourced, sourced_qty
 from ..core.registry import Registry
 from ..core import provenance_catalog as pc
-from ..core.units import ureg, MWh, TB
+from ..core.units import ureg, MB, MWh, TB, byte, count, day, minute, param, TRILLION
 
 _hour = ureg.hour
 _joule = ureg.joule
@@ -48,6 +48,15 @@ class AnomalyModel(Registry):
         name="Anomaly model energy", description="Per-inference energy of the TinyML anomaly detector.")
 
 
+class ClinicalImaging(Registry):
+    """Clinical-imaging workflow anchors used by edge-deployment examples."""
+
+    RetinalPhotoSize = sourced_qty(
+        5.0 * MB, pc.CLINICAL_IMAGING_WORKFLOW_ANCHORS,
+        name="Retinal screening image size",
+        description="Reference size for one retinal screening photograph in the rural-clinic workflow.")
+
+
 class EnergyAnchors(Registry):
     """Everyday energy-scale comparison anchors (order-of-magnitude intuition)."""
 
@@ -61,6 +70,93 @@ class EnergyAnchors(Registry):
         10.7 * MWh, pc.ENERGY_SCALE_ANCHORS,
         name="US household annual electricity",
         description="Rounded annual electricity use baseline for one average US household-year.")
+
+
+class EmissionsAnchors(Registry):
+    """Everyday emissions-scale comparison anchors (order-of-magnitude intuition)."""
+
+    TransatlanticRoundTripCo2Kg = sourced(
+        1000.0,
+        pc.LIT_TRANSATLANTIC_ROUND_TRIP_CO2,
+        name="Transatlantic round-trip passenger CO₂e",
+        description="One economy passenger, New York to London and return (kg CO₂e).",
+    )
+
+
+class TrainingScaleProfiles(Registry):
+    """Reusable scenario assumptions for distributed training scale efficiency."""
+
+    Eff32Gpu = sourced(
+        0.9,
+        pc.SCALING_EFFICIENCY_TIERS,
+        name="Scaling efficiency (32 GPUs)",
+        description="Near-linear scaling regime for a reference training scenario.",
+    )
+    Eff256Gpu = sourced(
+        0.7,
+        pc.SCALING_EFFICIENCY_TIERS,
+        name="Scaling efficiency (256 GPUs)",
+        description="Reference training scenario where communication begins to reduce scaling efficiency.",
+    )
+    Eff1024Gpu = sourced(
+        0.5,
+        pc.SCALING_EFFICIENCY_TIERS,
+        name="Scaling efficiency (1024 GPUs)",
+        description="Reference training scenario with significant communication overhead at 1k GPUs.",
+    )
+    Eff8192Gpu = sourced(
+        0.35,
+        pc.MEGASCALE,
+        name="Scaling efficiency (8192 GPUs)",
+        description="Illustrative scaling efficiency at 8192 GPUs for LLM training.",
+    )
+
+
+class StorageTrainingCorpus(Registry):
+    """Reusable storage-chapter running example for a 175B-model training corpus."""
+
+    TrainingTokens = sourced_qty(
+        1.5 * TRILLION * count,
+        pc.STORAGE_TRAINING_CORPUS_REFERENCE,
+        name="Storage running-example training tokens",
+        description="Reference token count for the 175B-model storage running example.",
+    )
+    CompressedSource = sourced_qty(
+        3 * TB,
+        pc.STORAGE_TRAINING_CORPUS_REFERENCE,
+        name="Storage running-example compressed source corpus",
+        description="Compressed source corpus size for the storage running example.",
+    )
+    TokenIdBytes = sourced_qty(
+        4 * byte,
+        pc.STORAGE_TRAINING_CORPUS_REFERENCE,
+        name="Storage running-example token ID width",
+        description="Serialized token-ID width for the tokenized corpus.",
+    )
+    TokenizedText = sourced_qty(
+        TrainingTokens * TokenIdBytes,
+        pc.STORAGE_TRAINING_CORPUS_REFERENCE,
+        name="Storage running-example tokenized corpus",
+        description="Derived serialized token-ID corpus size for one epoch.",
+    )
+    TrainingWindow = sourced_qty(
+        30 * day,
+        pc.STORAGE_TRAINING_CORPUS_REFERENCE,
+        name="Storage running-example training window",
+        description="Reference training-window duration for checkpoint-count examples.",
+    )
+    CheckpointInterval = sourced_qty(
+        10 * minute,
+        pc.STORAGE_TRAINING_CORPUS_REFERENCE,
+        name="Storage running-example checkpoint interval",
+        description="Reference checkpoint interval for checkpoint-count examples.",
+    )
+    CheckpointBytesPerParameter = sourced_qty(
+        10 * (byte / param),
+        pc.STORAGE_TRAINING_CORPUS_REFERENCE,
+        name="Storage running-example checkpoint bytes per parameter",
+        description="Reference checkpoint footprint per model parameter.",
+    )
 
 
 class MobilePower(Registry):
@@ -108,6 +204,10 @@ class Scenarios(Registry):
 
     Workloads = Workloads
     AnomalyModel = AnomalyModel
+    ClinicalImaging = ClinicalImaging
     EnergyAnchors = EnergyAnchors
+    EmissionsAnchors = EmissionsAnchors
+    TrainingScaleProfiles = TrainingScaleProfiles
+    StorageTrainingCorpus = StorageTrainingCorpus
     MobilePower = MobilePower
     PhoneBattery = PhoneBattery

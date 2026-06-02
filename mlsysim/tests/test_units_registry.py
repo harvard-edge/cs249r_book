@@ -12,6 +12,7 @@ from mlsysim.core.units import (
     Gbps,
     Kparam,
     L,
+    MB,
     Mparam,
     MJ,
     MS,
@@ -150,10 +151,34 @@ def test_training_and_recommendation_model_anchors_are_quantities():
     assert Models.Recommendation.DLRM.parameter_range_max.to(Tparam).magnitude == pytest.approx(10)
 
 
-def test_literature_transatlantic_flight_co2_anchor():
-    from mlsysim import Literature
+def test_emissions_transatlantic_flight_co2_anchor():
+    from mlsysim import Scenarios
     from mlsysim.core.provenance import scalar_value
 
-    anchor = Literature.Sustainability.TransatlanticRoundTripCo2Kg
+    anchor = Scenarios.EmissionsAnchors.TransatlanticRoundTripCo2Kg
     assert scalar_value(anchor) == pytest.approx(1000)
     assert anchor.provenance.ref
+
+
+def test_clinical_imaging_photo_size_anchor():
+    from mlsysim import Scenarios
+
+    anchor = Scenarios.ClinicalImaging.RetinalPhotoSize
+    assert anchor.to(MB).magnitude == pytest.approx(5.0)
+    assert anchor.provenance.ref
+
+
+def test_storage_training_corpus_anchor():
+    from mlsysim import Scenarios
+    from mlsysim.core.units import byte, day, minute, param
+
+    corpus = Scenarios.StorageTrainingCorpus
+
+    assert corpus.TrainingTokens.to(count).magnitude == pytest.approx(1.5e12)
+    assert corpus.CompressedSource.to(TB).magnitude == pytest.approx(3.0)
+    assert corpus.TokenIdBytes.to(byte).magnitude == pytest.approx(4.0)
+    assert corpus.TokenizedText.to(TB).magnitude == pytest.approx(6.0)
+    assert corpus.TrainingWindow.to(day).magnitude == pytest.approx(30.0)
+    assert corpus.CheckpointInterval.to(minute).magnitude == pytest.approx(10.0)
+    assert corpus.CheckpointBytesPerParameter.to(byte / param).magnitude == pytest.approx(10.0)
+    assert corpus.CompressedSource.provenance.ref

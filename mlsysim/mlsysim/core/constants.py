@@ -41,7 +41,7 @@ from .units import *  # noqa: F401,F403 — re-export full unit registry
 # FLOP/ADD/INT8 op energy   -> Hardware.Tech.Op.*.energy        (Horowitz 2014, 45 nm)
 # DRAM access / per-byte    -> Hardware.Tech.Memory.DRAM.energy_per_access / energy_per_byte
 # SRAM L1/L2, register file  -> Hardware.Tech.Memory.{L1,L2,Register}.energy_per_access
-# Architecture-class efficiency + per-byte movement hierarchy -> Literature.Energy.*
+# Architecture-class efficiency + per-byte movement hierarchy -> Hardware.Tech.{EffectiveCompute,Movement}.*
 # MobileNet inference energy -> Models.Vision.MobileNetV2.inference_energy
 
 # Network transfer energy -> Systems.NetworkEnergy.{Per5gMb, Per1Kb}

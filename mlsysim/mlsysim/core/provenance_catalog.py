@@ -115,6 +115,12 @@ TINYML_ANOMALY_CASE_STUDY = Provenance(
     ref="TinyML anomaly-detection case study (latency / AUC / energy) used as a benchmarking example",
     verified="2025-03-06",
 )
+CLINICAL_IMAGING_WORKFLOW_ANCHORS = Provenance(
+    id="prov:clinical-imaging-workflow-anchors",
+    kind=ProvenanceKind.ILLUSTRATIVE,
+    ref="Clinical imaging workflow anchors for rural-clinic bandwidth and edge-deployment examples",
+    verified="2026-06-01",
+)
 ENERGY_SCALE_ANCHORS = Provenance(
     id="prov:energy-scale-anchors",
     kind=ProvenanceKind.ILLUSTRATIVE,
@@ -140,6 +146,14 @@ MEMORY_LATENCY_HIERARCHY = _conv(
 STORAGE_TIER_REFERENCE = _conv(
     "prov:storage-tier-reference",
     "Generic storage/memory bandwidth tiers (NVMe Gen3/4/5, DDR, host DRAM) from vendor datasheet ranges",
+)
+STORAGE_ACCESS_PATH_REFERENCE = _conv(
+    "prov:storage-access-path-reference",
+    "Reference GPU-storage access-path latencies for traditional CPU-mediated I/O and GPU Direct Storage bypass paths",
+)
+FRAMEWORK_RUNTIME_OVERHEAD_REFERENCE = _conv(
+    "prov:framework-runtime-overhead-reference",
+    "Reference framework/runtime overhead latencies for dispatch, kernel launch, and tiny memory-access operations",
 )
 
 RELIABILITY_MTTF_LITERATURE = _lit(
@@ -422,6 +436,13 @@ MEGATRON_OVERLAP = _lit(
     url="https://arxiv.org/abs/1909.08053",
 )
 
+MCCANDLISH_LARGE_BATCH_TRAINING = _lit(
+    "prov:mcandlish-large-batch-2018",
+    "McCandlish et al. (2018), An Empirical Model of Large-Batch Training",
+    url="https://arxiv.org/abs/1812.06162",
+    notes="Critical-batch-size anchors are rounded reference values derived from the paper's gradient-noise-scale framing.",
+)
+
 PARALLEL_SCALING_EFFICIENCY_RULE = _conv(
     "prov:parallel-scaling-efficiency-rule",
     "Common industry rule-of-thumb (~90% parallel efficiency on well-tuned clusters)",
@@ -525,7 +546,20 @@ DATACENTER_SWITCH_OPTICS_REFERENCE = _conv(
 DGX_H100_RACK_REFERENCE = _conv(
     "prov:dgx-h100-rack-reference",
     "Reference DGX H100 rack profile",
-    notes="Four DGX H100 nodes per rack, yielding 32 H100 GPUs per rack for rack-level power and cooling models.",
+    notes=(
+        "Four DGX H100 nodes per rack, yielding 32 H100 GPUs per rack for rack-level power "
+        "and cooling models; representative non-accelerator rack support load is 11.1 kW "
+        "(host CPUs/DRAM, NVSwitch, InfiniBand, power conversion, and cooling overhead)."
+    ),
+)
+
+STORAGE_TRAINING_CORPUS_REFERENCE = _conv(
+    "prov:storage-training-corpus-reference",
+    "Reference 175B-model storage running example",
+    notes=(
+        "Chapter-level storage scenario anchor: 1.5T training tokens, 3 TB compressed "
+        "source corpus, 4-byte token IDs, and 10 bytes/parameter checkpoint storage."
+    ),
 )
 
 NETWORK_TRANSFER_ENERGY_ANCHORS = _conv(

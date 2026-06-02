@@ -10,7 +10,7 @@ from .types import (
 )
 from .reliability import Reliability
 from .orchestration import Orchestration
-from ..core.units import ureg, Q_, Gbps, GB, TB, watt, MB
+from ..core.units import ureg, Q_, Gbps, GB, TB, watt, MB, kilowatt
 from ..core.provenance import sourced, sourced_qty
 from ..hardware.registry import Hardware
 from ..core.registry import Registry
@@ -46,6 +46,7 @@ class Nodes(Registry):
         accelerators_per_node=8,
         intra_node_bw=Hardware.Cloud.H100.nvlink.bandwidth,
         nics_per_node=8,
+        host_memory=2 * TB,
         metadata=Metadata(provenance=pc.DGX_GPUS_PER_HOST_CONVENTION),
     )
     DGX_A100 = Node(
@@ -233,6 +234,7 @@ class Racks(Registry):
         name="DGX H100 4-node rack",
         node=Nodes.DGX_H100,
         nodes_per_rack=4,
+        non_accelerator_power=11.1 * kilowatt,
         metadata=Metadata(
             provenance=pc.DGX_H100_RACK_REFERENCE,
             description="Reference 32-H100 rack profile for rack-level power and cooling models.",
@@ -286,6 +288,19 @@ class NetworkEnergy(Registry):
 
 class Storage(Registry):
     """Reusable storage-system profiles for data and checkpoint paths."""
+
+    TraditionalGpuIoLatency = sourced_qty(
+        120 * ureg.microsecond,
+        pc.STORAGE_ACCESS_PATH_REFERENCE,
+        name="Traditional GPU storage path latency",
+        description="Reference per-transfer latency for CPU-mediated storage-to-GPU I/O.",
+    )
+    GpuDirectStorageLatency = sourced_qty(
+        30 * ureg.microsecond,
+        pc.STORAGE_ACCESS_PATH_REFERENCE,
+        name="GPU Direct Storage path latency",
+        description="Reference per-transfer latency for GPU Direct Storage bypass I/O.",
+    )
 
     LocalNvmeGen4 = StorageSubsystem(
         name="Local NVMe SSD (Gen4)",
