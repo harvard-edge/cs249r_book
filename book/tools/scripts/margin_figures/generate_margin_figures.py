@@ -377,25 +377,54 @@ def pipeline_rows(chapter, name, rows, *, title=None):
     write(fig, chapter, name)
 
 
-def ratio_annotation_ladder(chapter, name, tiers, *, ratio_label, domain="memory"):
+def ratio_annotation_ladder(chapter, name, tiers, *, ratio_label, domain="memory", ratio_between=None):
     """Two or more measured tiers, with the ratio rendered as annotation text.
 
     Use this when the prose names both concrete quantities and a derived ratio.
-    The ratio is not a tier and must not become a third bar.
+    The ratio is not a tier and must not become a third bar. Render it as a
+    dimension annotation between the compared bar endpoints so labels like
+    "200x" never float without a visual referent.
+
+    ``ratio_between`` optionally names the displayed tier indexes to compare
+    after sorting largest to smallest. Use it when a ladder includes context
+    tiers beyond the pair named by the ratio.
     """
     fig, ax = new_fig("hierarchy-ladder")
     ladder(ax, tiers, domain=domain, wall=False)
-    ratio_x, ratio_y = (0.60, 0.50) if len(tiers) == 2 else (0.64, 0.58)
+    ordered = sorted(tiers, key=lambda r: r[1], reverse=True)
+    n = len(ordered)
+    if ratio_between is None:
+        ratio_between = (0, n - 1)
+    a_idx, b_idx = [idx if idx >= 0 else n + idx for idx in ratio_between]
+    compared = [ordered[a_idx][1], ordered[b_idx][1]]
+    lo, hi = min(compared), max(compared)
+    ratio_x = math.sqrt(lo * hi) if ax.get_xscale() == "log" else (lo + hi) / 2
+    ratio_y = max(n - 1 - a_idx, n - 1 - b_idx) - 0.50
+    ax.annotate(
+        "",
+        xy=(hi, ratio_y),
+        xytext=(lo, ratio_y),
+        arrowprops=dict(
+            arrowstyle="<->",
+            color="#777777",
+            lw=0.55,
+            mutation_scale=5.0,
+            shrinkA=0,
+            shrinkB=0,
+        ),
+        zorder=3,
+    )
     ax.text(
         ratio_x,
         ratio_y,
         ratio_label,
-        transform=ax.transAxes,
         ha="center",
         va="center",
         color=INK,
         fontsize=5.0,
         fontweight="bold",
+        bbox=dict(facecolor="white", edgecolor="none", boxstyle="round,pad=0.18", alpha=0.94),
+        zorder=4,
     )
     write(fig, chapter, name)
 
@@ -857,6 +886,7 @@ def sustainable_ai_radio_energy(candidate=None):
         [("radio bit\n250K pJ", 250_000), ("FP32 mult\n4 pJ", 4), ("INT32 add\n0.1 pJ", 0.1)],
         ratio_label="25K-125Kx",
         domain="energy",
+        ratio_between=(0, 1),
     )
 
 

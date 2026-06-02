@@ -162,6 +162,12 @@ Use these defaults:
 
 - `ladder()` for magnitude spans. It is linear for small spans and log-scaled for
   large spans.
+- `ratio_annotation_ladder()` for measured tiers plus a derived multiplier,
+  percentage, or symbolic span. The annotation is drawn as a thin leader between
+  the compared bar endpoints; it is not a third tier and should never float as
+  bare text. If a ladder includes context tiers beyond the pair named by the
+  ratio, pass the compared tier indexes explicitly so the leader points to the
+  right endpoints.
 - `ironbar()` or `simple_bar()` for fractional composition where segment widths
   sum to a total.
 - `pipeline_rows()` for Amdahl-style before/after bars where every row shares
