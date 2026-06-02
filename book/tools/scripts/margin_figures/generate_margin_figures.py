@@ -446,6 +446,32 @@ def benchmarking_tail_latency_gap():
     )
 
 
+def data_engineering_debt_compounding():
+    """Debt_n / Debt_0 = (1+r)^n for the adjacent 10-30% accumulation-rate prose."""
+    fig, ax = margin_axes("sparkline-trend", figsize=(1.18, 0.72))
+    periods = np.arange(0, 9)
+    low = (1.10 ** periods)
+    high = (1.30 ** periods)
+    ymin, ymax = 1.0, high.max()
+
+    def yscale(values):
+        return 0.14 + 0.72 * (values - ymin) / (ymax - ymin)
+
+    x = 0.10 + 0.80 * periods / periods.max()
+    y_low = yscale(low)
+    y_high = yscale(high)
+    ax.plot(x, y_low, color=TIME, lw=1.35)
+    ax.plot(x, y_high, color=RED, lw=1.55)
+    ax.fill_between(x, y_low, y_high, color=REDFILL, alpha=0.28)
+    ax.plot(x[-1], y_high[-1], "o", color=RED, ms=3.3)
+    ax.plot(x[-1], y_low[-1], "o", color=TIME, ms=3.0)
+    ax.text(0.60, 0.76, "30%", ha="center", va="center", color=RED, fontsize=5.0, fontweight="bold")
+    ax.text(0.69, 0.33, "10%", ha="center", va="center", color=TIME, fontsize=5.0, fontweight="bold")
+    ax.text(0.20, 0.08, "Debt0", ha="center", va="center", color=INK, fontsize=4.8)
+    ax.text(0.76, 0.08, "n periods", ha="center", va="center", color=INK, fontsize=4.8)
+    write(fig, "vol1/data_engineering", "data_engineering_debt_compounding")
+
+
 def vol1_conclusion_fleet_mtbf_ladder():
     from mlsysim import Systems, ureg
     from mlsysim.physics import calc_mtbf_cluster
@@ -589,6 +615,20 @@ def compute_infrastructure_mtbf_ladder(candidate=None):
     )
 
 
+def compute_infrastructure_cxl_bandwidth_gap():
+    from mlsysim import Hardware
+
+    hbm_gb_s = Hardware.Cloud.H100.memory.bandwidth.m_as("GB/s")
+    cxl_gb_s = 64.0
+    ratio_annotation_ladder(
+        "vol2/compute_infrastructure",
+        "compute_infrastructure_cxl_bandwidth_gap",
+        [(f"HBM3 {hbm_gb_s / 1000:.2f} TB/s", hbm_gb_s), ("CXL3 64 GB/s", cxl_gb_s)],
+        ratio_label="50x",
+        domain="bandwidth",
+    )
+
+
 def compute_infrastructure_rack_power_envelope(candidate=None):
     """Linear rack-power scale: legacy air envelope versus DGX H100 rack."""
     fig, ax = margin_axes("scale-anchor", figsize=(1.22, 0.58))
@@ -706,6 +746,10 @@ def distributed_training_young_daly_checkpoint_curve():
     ax.set_xlim(0, 8.4)
     ax.set_ylim(0, 1)
     write(fig, "vol2/distributed_training", "distributed_training_young_daly_optimum")
+
+
+def network_fabrics_pfc_pause_blast():
+    make_blast("vol2/network_fabrics", "network_fabrics_pfc_pause_blast", n=5, style="fan")
 
 
 def collective_communication_payload_shrink(candidate=None):
@@ -849,6 +893,20 @@ def responsible_ai_representation_tax_ladder():
         [("10 groups $125M", 125), ("1 group $12.5M", 12.5)],
         domain="compute",
         wall=False,
+    )
+
+
+def security_privacy_output_leakage_ladder():
+    from mlsysim import Datasets
+
+    class_count = Datasets.ImageNet.num_classes
+    top_k = 5
+    ratio_annotation_ladder(
+        "vol2/security_privacy",
+        "security_privacy_output_leakage_ladder",
+        [(f"full {class_count} scores", class_count), (f"top-{top_k} scores", top_k)],
+        ratio_label=f"{class_count // top_k}x",
+        domain="data",
     )
 
 
@@ -2107,6 +2165,7 @@ def generate() -> None:
     benchmarking_tail_latency_gap()
     taxonomy_quadrant("vol1/data_engineering", "data_engineering_data_gravity_entropy", selected=(0, 1), xlabel="data gravity", ylabel="info entropy", labels={(0, 1): "high\ngain"})
     make_ladder("vol1/data_engineering", "data_engineering_storage_latency_hierarchy", [("internet 100ms", 0.1), ("network 500us", 5e-4), ("SSD 100us", 1e-4), ("DRAM 100ns", 1e-7), ("L1 0.5ns", 5e-10)], domain="time", wall=True)
+    data_engineering_debt_compounding()
     data_selection_compute_data_gap()
     make_knee("vol1/data_selection", "data_selection_icr_frontier", knee_frac=0.72)
     make_ladder("vol1/frameworks", "frameworks_bandwidth_hierarchy", [("HBM 2039", 2039), ("NVLink 600", 600), ("PCIe 32", 32)], domain="bandwidth")
@@ -2147,6 +2206,7 @@ def generate() -> None:
     alpha_beta()
     make_sparkline("vol2/collective_communication", "collective_communication_ring_tree_divergence", threat=True, steep=2.0)
     make_roofline("vol2/compute_infrastructure", "compute_infrastructure_decode_roofline", ridge=295, dot_ai=1)
+    compute_infrastructure_cxl_bandwidth_gap()
     conclusion_tail_latency_fanout()
     make_dam("vol2/data_storage", "data_storage_dai_locator", focus=2, vol="vol2", style="pills")
     make_ladder("vol2/data_storage", "data_storage_checkpoint_dominance", [("Ckpts 7.56 PB", 7560), ("Data 6 TB", 6)], domain="memory")
@@ -2180,6 +2240,7 @@ def generate() -> None:
     make_knee("vol2/introduction", "vol2_introduction_ci_knee", knee_frac=0.70, style="dashed", pct_label="CI")
     coordination_tax()
     make_blast("vol2/network_fabrics", "network_fabrics_gpu_fanout", n=6)
+    network_fabrics_pfc_pause_blast()
     network_fabrics_physical_reach_ladder()
     ops_scale_embedding_update_blast()
     make_ironbar("vol2/ops_scale", "ops_scale_tco_dominance", [("Tr", 0.10, GRID), ("Inf", 0.50, COMP), ("Da", 0.25, GRID), ("It", 0.15, GRID)], dom=1)
@@ -2194,6 +2255,7 @@ def generate() -> None:
     fairness_tax("vol2/robust_ai", "robust_ai_robustness_tax", "Std", 0.76, "Robust", 0.50)
     make_knee("vol2/robust_ai", "robust_ai_psi_drift_knee", knee_frac=0.70)
     make_dam("vol2/security_privacy", "security_privacy_dai_attack_surface", focus="all", vol="vol2")
+    security_privacy_output_leakage_ladder()
     security_privacy_dp_dataset_threshold()
     energy_per_byte()
     make_sparkline("vol2/sustainable_ai", "sustainable_ai_inference_crossover", threat=True, steep=1.9)
