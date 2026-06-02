@@ -25,8 +25,8 @@ ACADEMIC_LAB_CSS = mo.Html(
   --mlsysbook-ok: #247A4D;
   --mlsysbook-warn: #9A5B00;
   --mlsysbook-danger: #B42318;
-  --mlsysbook-readable-width: 780px;
-  --mlsysbook-panel-width: 920px;
+  --mlsysbook-readable-width: 720px;
+  --mlsysbook-panel-width: 840px;
 }
 .mlsysbook-lab-shell {
   font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -57,7 +57,7 @@ ACADEMIC_LAB_CSS = mo.Html(
   letter-spacing: 0;
 }
 .mlsysbook-lab-header p {
-  max-width: 860px;
+  max-width: var(--mlsysbook-readable-width);
   color: #344054;
   line-height: 1.55;
   margin: 0;
@@ -125,6 +125,41 @@ ACADEMIC_LAB_CSS = mo.Html(
 .mlsysbook-readable {
   max-width: min(var(--mlsysbook-readable-width), 100%);
 }
+.lab-hud {
+  width: min(var(--mlsysbook-readable-width), 100%) !important;
+  max-width: min(var(--mlsysbook-readable-width), 100%) !important;
+  background: #FFFFFF !important;
+  color: #344054;
+  flex-wrap: wrap;
+}
+div[class~="fixed"][class~="bottom-0"][class~="right-0"][class~="z-50"],
+div[class~="fixed"][class~="right-0"][class~="top-0"][class~="z-50"],
+div[class~="fixed"][class~="right-8"][class~="z-10000"],
+div[class~="fixed"][class~="top-0"][class~="z-100"][class~="max-h-screen"],
+ol[class~="fixed"][class~="top-0"][class~="z-100"][class~="max-h-screen"] {
+  display: none !important;
+}
+.output.block > div:not(:has(svg, canvas, iframe, table, marimo-ui-element, .js-plotly-plot, .plotly)) {
+  width: min(var(--mlsysbook-panel-width), 100%) !important;
+  max-width: min(var(--mlsysbook-panel-width), 100%) !important;
+}
+.output.block > div:not(:has(svg, canvas, iframe, table, marimo-ui-element, .js-plotly-plot, .plotly)) p,
+.output.block > div:not(:has(svg, canvas, iframe, table, marimo-ui-element, .js-plotly-plot, .plotly)) li {
+  max-width: min(var(--mlsysbook-readable-width), 100%) !important;
+}
+marimo-tabs,
+div[style*="border-left:4px solid"][style*="border-radius:0 10px"],
+div[style*="border-left: 4px solid"][style*="border-radius: 0 10px"],
+div[style*="border-left:4px solid"][style*="border-radius:0px 10px"],
+div[style*="border-left: 4px solid"][style*="border-radius: 0px 10px"] {
+  display: block !important;
+  width: min(var(--mlsysbook-panel-width), 100%) !important;
+  max-width: min(var(--mlsysbook-panel-width), 100%) !important;
+}
+marimo-tabs {
+  overflow-x: auto !important;
+  overflow-y: visible !important;
+}
 marimo-callout-output {
   display: block !important;
   width: min(var(--mlsysbook-readable-width), 100%) !important;
@@ -142,6 +177,7 @@ marimo-callout-output {
   .mlsysbook-panel,
   .mlsysbook-callout,
   .mlsysbook-readable,
+  .lab-hud,
   marimo-callout-output {
     max-width: 100%;
   }

@@ -50,6 +50,8 @@ if [ ! -f "${BUILT_WHL}" ]; then
   echo "ERROR: Expected wheel not found after build: ${BUILT_WHL}" >&2
   exit 1
 fi
+mkdir -p "${REPO_ROOT}/wheels"
+cp "${BUILT_WHL}" "${REPO_ROOT}/wheels/"
 
 # Confirm every lab references the built wheel version.
 BAD_LABS=""

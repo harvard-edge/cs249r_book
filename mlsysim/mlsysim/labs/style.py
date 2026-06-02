@@ -79,8 +79,8 @@ LAB_CSS = mo.Html(f"""
     --radius-lg:      16px;
     --font-mono:      'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
     --font-sans:      'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    --readable-width:  820px;
-    --panel-width:     960px;
+    --readable-width:  720px;
+    --panel-width:     840px;
 }}
 
 /* ── BASE ── */
@@ -99,10 +99,49 @@ body, .lab-body {{
 .stakeholder-card,
 .prediction-lock-preview,
 .orientation-complete,
+.lab-hud,
+marimo-accordion,
 marimo-callout-output {{
     display: block !important;
     width: min(var(--readable-width), 100%) !important;
     max-width: min(var(--readable-width), 100%) !important;
+}}
+
+/* Published labs should show course-owned navigation and submission affordances,
+   not Marimo runtime chrome. */
+div[class~="fixed"][class~="bottom-0"][class~="right-0"][class~="z-50"],
+div[class~="fixed"][class~="right-0"][class~="top-0"][class~="z-50"],
+div[class~="fixed"][class~="right-8"][class~="z-10000"],
+div[class~="fixed"][class~="top-0"][class~="z-100"][class~="max-h-screen"],
+ol[class~="fixed"][class~="top-0"][class~="z-100"][class~="max-h-screen"] {{
+    display: none !important;
+}}
+
+/* Keep ordinary Markdown/HTML narrative cells in the worksheet column while
+   leaving charts, tables, and live controls free to use wider space. */
+.output.block > div:not(:has(svg, canvas, iframe, table, marimo-ui-element, .js-plotly-plot, .plotly)) {{
+    width: min(var(--panel-width), 100%) !important;
+    max-width: min(var(--panel-width), 100%) !important;
+}}
+
+.output.block > div:not(:has(svg, canvas, iframe, table, marimo-ui-element, .js-plotly-plot, .plotly)) p,
+.output.block > div:not(:has(svg, canvas, iframe, table, marimo-ui-element, .js-plotly-plot, .plotly)) li {{
+    max-width: min(var(--readable-width), 100%) !important;
+}}
+
+marimo-tabs,
+div[style*="border-left:4px solid"][style*="border-radius:0 10px"],
+div[style*="border-left: 4px solid"][style*="border-radius: 0 10px"],
+div[style*="border-left:4px solid"][style*="border-radius:0px 10px"],
+div[style*="border-left: 4px solid"][style*="border-radius: 0px 10px"] {{
+    display: block !important;
+    width: min(var(--panel-width), 100%) !important;
+    max-width: min(var(--panel-width), 100%) !important;
+}}
+
+marimo-tabs {{
+    overflow-x: auto !important;
+    overflow-y: visible !important;
 }}
 
 /* ── LEGACY LAB HEADER MODERNIZATION ──
@@ -162,6 +201,19 @@ div[style*="linear-gradient(135deg, rgb(15, 23, 42)"] div[style*="letter-spacing
 div[style*="linear-gradient(135deg, #0f172a"] span,
 div[style*="linear-gradient(135deg, rgb(15, 23, 42)"] span {{
     box-shadow: none !important;
+}}
+
+div[style*="linear-gradient(135deg, #0f172a"]::after,
+div[style*="linear-gradient(135deg, rgb(15, 23, 42)"]::after {{
+    content: "MLSysBook Labs v1.0.0 · MLSysIM 0.1.2 · Browser lab";
+    display: block;
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid #e2e8f0;
+    color: #64748b;
+    font-size: 0.76rem;
+    font-weight: 650;
+    letter-spacing: 0.04em;
 }}
 
 /* First-pass width cap for the common inline briefing panels used across the
@@ -433,18 +485,21 @@ div[style*="font-style: italic"][style*="line-height: 1.65"] {{
     gap: 28px;
     align-items: center;
     padding: 12px 24px;
-    background: var(--surface-0);
+    background: #ffffff;
     border-radius: var(--radius-md);
     margin-top: 32px;
     font-family: var(--font-mono);
     font-size: 0.8rem;
-    border: 1px solid var(--surface-1);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    flex-wrap: wrap;
 }}
 
 .hud-label  {{ color: var(--text-muted); font-weight: 600; letter-spacing: 0.06em; }}
-.hud-value  {{ color: #e2e8f0; }}
-.hud-active {{ color: #4ade80; }}
-.hud-none   {{ color: #f87171; }}
+.hud-value  {{ color: var(--text-secondary); }}
+.hud-active {{ color: var(--success); }}
+.hud-none   {{ color: var(--danger); }}
 
 /* ── DEPLOYMENT REGIME CARDS ── */
 .regime-cloud  {{ border-color: #c7d2fe; }}
