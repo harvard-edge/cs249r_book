@@ -2,13 +2,16 @@
 """Generate the committed MLSysBook margin-figure SVG assets.
 
 The output is intentionally SVG. The figures are authored at the native
-margin-column scale, use the book Helvetica stack through ``mlsysim.viz``, and
+margin-column scale, use the book Helvetica stack through Book Tools, and
 reuse the canonical margin-device vocabulary documented in
 ``.claude/rules/margin-figures.md``.
 
 LLM/editor notes:
-    * Treat this file plus ``margin_devices.py`` as the source of truth. Do not
-      hand-edit generated SVGs.
+    * Treat this file plus ``book.tools.figures.margin.devices`` as the source
+      of truth. Do not hand-edit generated SVGs.
+    * Edit this file for per-asset data, labels, and device calls. Edit
+      ``book.tools.figures.margin.devices`` only when changing shared geometry,
+      typography, color semantics, or SVG export behavior for a whole device.
     * A margin figure must serve the paragraph beside it. The chapter placement
       lives in QMD and, for curated/generic figures, in
       ``book/tools/audit/margin_figure_opportunities.yml`` and
@@ -46,7 +49,7 @@ import numpy as np  # noqa: E402
 import yaml  # noqa: E402
 from matplotlib.patches import Rectangle  # noqa: E402
 
-from margin_devices import (  # noqa: E402
+from book.tools.figures.margin.devices import (  # noqa: E402
     C,
     COMP,
     DATA,
@@ -58,7 +61,10 @@ from margin_devices import (  # noqa: E402
     REDFILL,
     SEL,
     TIME,
+    all_to_all_topology,
     blast,
+    budget_envelope,
+    causal_chain,
     dam,
     ironbar,
     knee,
@@ -66,6 +72,7 @@ from margin_devices import (  # noqa: E402
     new_fig,
     roofline,
     save,
+    sequence_strip,
     sparkline,
     taxonomy,
 )
@@ -125,6 +132,7 @@ def make_labeled_knee(
     knee(ax, knee_frac=knee_frac, style=style, pct_label=pct_label)
     if style == "twotone":
         ax.text(18, 4.0, "safe", ha="center", va="center", color=DATA, fontsize=5.2)
+        label_box = dict(facecolor="white", edgecolor="none", boxstyle="round,pad=0.10", alpha=0.92)
         ax.text(
             82,
             19.5,
@@ -134,19 +142,23 @@ def make_labeled_knee(
             color=RED,
             fontsize=5.2,
             fontweight="bold",
+            bbox=label_box,
         )
     elif style == "dashed":
-        ax.text(knee_frac * 100 + 4, 23.5, word_label, ha="left", va="center", color=RED, fontsize=5.0)
+        label_box = dict(facecolor="white", edgecolor="none", boxstyle="round,pad=0.10", alpha=0.92)
+        ax.text(knee_frac * 100 + 4, 23.5, word_label, ha="left", va="center", color=RED, fontsize=5.0, bbox=label_box)
     else:
+        label_box = dict(facecolor="white", edgecolor="none", boxstyle="round,pad=0.10", alpha=0.92)
         ax.text(
-            min(knee_frac * 100 + 14, 90),
-            23.5,
+            max(knee_frac * 100 - 16, 40),
+            19.5,
             word_label,
             ha="center",
             va="center",
             color=RED,
-            fontsize=5.1,
+            fontsize=4.9,
             fontweight="bold",
+            bbox=label_box,
         )
     write(fig, chapter, name)
 
@@ -189,28 +201,33 @@ def make_roofline_points(chapter, name, *, ridge=60.0, points=None, arrow=False)
     for label, ai, color in points:
         yy = min(ai / ridge, 1.0)
         ax.plot(ai, yy, "o", color=color, ms=3.4, zorder=4)
-        if yy < 0.78:
-            ax.text(
-                ai,
-                yy * 1.38,
+        if ai < ridge:
+            ax.annotate(
                 label,
-                ha="center",
-                va="center",
+                xy=(ai, yy),
+                xytext=(4, 11),
+                textcoords="offset points",
+                ha="right",
+                va="bottom",
                 color=color,
                 fontsize=5.0,
                 fontweight="bold",
+                bbox=dict(facecolor="white", edgecolor="none", boxstyle="round,pad=0.12", alpha=0.92),
+                zorder=5,
             )
         else:
             ax.annotate(
                 label,
                 xy=(ai, yy),
-                xytext=(5, -5),
+                xytext=(0, -14),
                 textcoords="offset points",
-                ha="left",
+                ha="center",
                 va="top",
                 color=color,
                 fontsize=5.0,
                 fontweight="bold",
+                bbox=dict(facecolor="white", edgecolor="none", boxstyle="round,pad=0.12", alpha=0.92),
+                zorder=5,
             )
     ymin = max(min(yvals + [xmin / ridge]) / 3.0, 1e-4)
     ax.set_xlim(xmin, xmax)
@@ -332,7 +349,8 @@ def labeled_memory_bars(chapter, name, rows, *, title=None):
     Older versions added a fixed visual width so tiny rows stayed visible, but
     that made the bars mathematically dishonest. Route through the canonical
     ladder renderer instead: it is linear for small spans and log-scaled for
-    large spans, with the scale choice documented in ``margin_devices.py``.
+    large spans, with the scale choice documented in
+    ``book.tools.figures.margin.devices``.
     """
     _ = title
     make_ladder(chapter, name, rows, domain="memory", wall=False)
@@ -346,9 +364,11 @@ def simple_bar(chapter, name, segments, *, height=0.20, y=0.48):
         sw = w * frac
         rect(ax, cur, y, sw, height, color, ec="white")
         if label and sw > 0.16:
-            ax.text(cur + sw / 2, y + height / 2, label, ha="center", va="center", color=tc, fontsize=5.3)
+            label_size = 4.3 if sw > 0.45 else 4.0 if sw > 0.25 else 3.8
+            ax.text(cur + sw / 2, y + height / 2, label, ha="center", va="center", color=tc, fontsize=label_size)
         elif label:
-            ax.text(cur + sw / 2, y + height + 0.07, label, ha="center", va="bottom", color=INK, fontsize=4.0)
+            label_x = max(cur + sw / 2, x + 0.08)
+            ax.text(label_x, y + height + 0.06, label, ha="center", va="bottom", color=INK, fontsize=3.6)
         cur += sw
     write(fig, chapter, name)
 
@@ -361,16 +381,16 @@ def pipeline_rows(chapter, name, rows, *, title=None):
     """
     fig, ax = margin_axes("iron-law-bar", figsize=(1.22, 0.70))
     max_total = max(sum(value for _, value, _ in segs) for _, segs, _ in rows)
-    x, w, h = 0.18, 0.70, 0.14
+    x, w, h = 0.24, 0.60, 0.14
     if title:
-        ax.text(0.54, 0.91, title, ha="center", va="center", color=INK, fontsize=5.0, fontweight="bold")
+        ax.text(0.54, 0.91, title, ha="center", va="center", color=INK, fontsize=4.9, fontweight="bold")
     for label, segs, y in rows:
-        ax.text(0.07, y + h / 2, label, ha="left", va="center", color=INK, fontsize=4.9)
+        ax.text(0.21, y + h / 2, label, ha="right", va="center", color=INK, fontsize=4.7)
         cur = x
         for seg_label, value, color in segs:
             sw = w * value / max_total
             rect(ax, cur, y, sw, h, color, ec="white", lw=0.35)
-            if sw > 0.18:
+            if sw > 0.06 + 0.037 * len(seg_label):
                 ax.text(cur + sw / 2, y + h / 2, seg_label, ha="center", va="center", color="white", fontsize=4.6, fontweight="bold")
             cur += sw
         ax.text(x + w + 0.035, y + h / 2, f"{sum(value for _, value, _ in segs):.0f}ms", ha="left", va="center", color="#555555", fontsize=4.7)
@@ -427,6 +447,84 @@ def ratio_annotation_ladder(chapter, name, tiers, *, ratio_label, domain="memory
         zorder=4,
     )
     write(fig, chapter, name)
+
+
+def data_engineering_active_learning_budget():
+    fig, ax = new_fig("budget-envelope")
+    budget_envelope(
+        ax,
+        [("budget", 50, GRID), ("score all", 100, RED)],
+        limit=50,
+        limit_label="$50K",
+    )
+    write(fig, "vol1/data_engineering", "data_engineering_active_learning_budget")
+
+
+def model_compression_quantization_roofline():
+    make_roofline_points(
+        "vol1/model_compression",
+        "model_compression_quantization_roofline",
+        ridge=60.0,
+        points=[("mem 2x", 8.0, MEM), ("comp 8x", 180.0, COMP)],
+    )
+
+
+def fault_tolerance_kv_live_state_ladder():
+    ratio_annotation_ladder(
+        "vol2/fault_tolerance",
+        "fault_tolerance_kv_live_state_ladder",
+        [("64-head KV 344 GB", 344), ("GQA KV 43 GB", 43)],
+        ratio_label="8x",
+        domain="memory",
+    )
+
+
+def edge_intelligence_straggler_cutoff_strip():
+    fig, ax = new_fig("sequence-strip")
+    sequence_strip(
+        ax,
+        [("1", MEM), ("2", MEM), ("K", MEM), ("late", RED)],
+        bracket=(0, 2),
+        bracket_label="first K",
+    )
+    write(fig, "vol2/edge_intelligence", "edge_intelligence_straggler_cutoff_strip")
+
+
+def ops_scale_canary_exposure_ladder():
+    ratio_annotation_ladder(
+        "vol2/ops_scale",
+        "ops_scale_canary_exposure_ladder",
+        [("blue-green 100%", 100), ("canary 5%", 5)],
+        ratio_label="20x",
+        domain="data",
+    )
+
+
+def inference_quantization_capacity_ladder():
+    ratio_annotation_ladder(
+        "vol2/inference",
+        "inference_quantization_capacity_ladder",
+        [("FP16 140 GB", 140), ("INT4 35 GB", 35)],
+        ratio_label="4x",
+        domain="memory",
+    )
+
+
+def sustainable_ai_grid_interconnection_ladder():
+    ratio_annotation_ladder(
+        "vol2/sustainable_ai",
+        "sustainable_ai_grid_interconnection_ladder",
+        [("substation 24 mo", 24), ("GPU 6 mo", 6)],
+        ratio_label="4x",
+        domain="time",
+    )
+
+
+def sustainable_ai_cooling_failure_blast():
+    fig, ax = new_fig("blast-radius")
+    blast(ax, n=6, style="fan")
+    ax.text(0.07, 0.28, "CDU", ha="center", va="center", color=RED, fontsize=5.0, fontweight="bold")
+    write(fig, "vol2/sustainable_ai", "sustainable_ai_cooling_failure_blast")
 
 
 def formula_rows(chapter, name, rows, *, title=None):
@@ -512,7 +610,7 @@ def vol1_conclusion_fleet_mtbf_ladder():
     make_ladder(
         "vol1/conclusion",
         "vol1_conclusion_fleet_mtbf_ladder",
-        [(f"1 GPU {gpu_mtbf_years:.1f}y", gpu_mtbf_h), (f"1024 GPUs {cluster_mtbf_h:.1f}h", cluster_mtbf_h)],
+        [(f"1 GPU {gpu_mtbf_years:.1f} yr", gpu_mtbf_h), (f"1024 GPUs {cluster_mtbf_h:.1f} h", cluster_mtbf_h)],
         domain="time",
         wall=False,
     )
@@ -792,20 +890,9 @@ def collective_communication_payload_shrink(candidate=None):
 
 
 def fleet_orchestration_priority_inversion():
-    fig, ax = margin_axes("other-new", figsize=(1.18, 0.86))
-    nodes = [
-        ("High", 0.20, 0.70, MEM),
-        ("Low", 0.72, 0.70, NET),
-        ("Med", 0.20, 0.28, GRID),
-    ]
-    for label, x, y, color in nodes:
-        rect(ax, x - 0.14, y - 0.08, 0.28, 0.16, color, ec="white", lw=0.55)
-        ax.text(x, y, label, ha="center", va="center", color="white", fontsize=4.9, fontweight="bold")
-    ax.annotate("", xy=(0.56, 0.70), xytext=(0.34, 0.70), arrowprops=dict(arrowstyle="->", color=GRID, lw=0.75))
-    ax.text(0.45, 0.83, "waits", ha="center", va="center", color=INK, fontsize=4.8)
-    ax.annotate("", xy=(0.59, 0.62), xytext=(0.31, 0.36), arrowprops=dict(arrowstyle="->", color=GRID, lw=0.75))
-    ax.text(0.50, 0.43, "exit\nblocked", ha="center", va="center", color=INK, fontsize=4.5)
-    ax.plot(0.08, 0.78, "o", color=RED, ms=4.2, zorder=5)
+    fig, ax = new_fig("causal-chain")
+    causal_chain(ax, ["high", "low", "med"], colors=[MEM, NET, RED])
+    ax.text(0.50, 0.80, "wait-for", ha="center", va="center", color=INK, fontsize=5.0)
     write(fig, "vol2/fleet_orchestration", "fleet_orchestration_dependency_cascade")
 
 
@@ -827,9 +914,10 @@ def fleet_orchestration_capacity_lag(candidate=None):
     ax.plot(t, demand, color=RED, lw=1.45)
     ax.plot(t, capacity, color=MEM, lw=1.45)
     ax.fill_between(t, capacity, demand, where=demand > capacity, color=REDFILL, alpha=0.36)
-    ax.text(0.77, 0.80, "demand", ha="center", va="center", color=RED, fontsize=4.9, fontweight="bold")
-    ax.text(0.74, 0.49, "capacity", ha="center", va="center", color=MEM, fontsize=4.9, fontweight="bold")
-    ax.text(0.50, 0.26, "SLO gap", ha="center", va="center", color=RED, fontsize=4.8)
+    label_box = dict(facecolor="white", edgecolor="none", boxstyle="round,pad=0.08", alpha=0.92)
+    ax.text(0.70, 0.82, "demand", ha="center", va="center", color=RED, fontsize=4.8, fontweight="bold", bbox=label_box)
+    ax.text(0.73, 0.40, "capacity", ha="center", va="center", color=MEM, fontsize=4.8, fontweight="bold", bbox=label_box)
+    ax.text(0.47, 0.25, "SLO gap", ha="center", va="center", color=RED, fontsize=4.7, bbox=label_box)
     write(fig, "vol2/fleet_orchestration", "vol2_fleet_orchestration_margin_003")
 
 
@@ -883,7 +971,7 @@ def sustainable_ai_radio_energy(candidate=None):
     ratio_annotation_ladder(
         "vol2/sustainable_ai",
         "vol2_sustainable_ai_margin_004",
-        [("radio bit\n250K pJ", 250_000), ("FP32 mult\n4 pJ", 4), ("INT32 add\n0.1 pJ", 0.1)],
+        [("Radio bit\n250K pJ", 250_000), ("FP32 mult\n4 pJ", 4), ("INT32 add\n0.1 pJ", 0.1)],
         ratio_label="25K-125Kx",
         domain="energy",
         ratio_between=(0, 1),
@@ -1035,14 +1123,16 @@ def frameworks_stream_overlap(candidate=None):
 def data_selection_compute_data_gap():
     fig, ax = margin_axes("sparkline-trend", figsize=(1.18, 0.72))
     t = np.linspace(0, 1, 120)
+    x = 0.06 + 0.88 * t
     compute = 0.12 + 0.74 * (t ** 1.18)
     data = 0.12 + 0.28 * (t ** 0.95)
-    ax.plot(t, compute, color=COMP, lw=1.45)
-    ax.plot(t, data, color=DATA, lw=1.45)
-    ax.fill_between(t, data, compute, color=REDFILL, alpha=0.28)
-    ax.text(0.80, 0.82, "compute", ha="center", va="center", color=COMP, fontsize=4.9, fontweight="bold")
-    ax.text(0.80, 0.39, "data", ha="center", va="center", color=DATA, fontsize=4.9, fontweight="bold")
-    ax.text(0.46, 0.55, "gap", ha="center", va="center", color=RED, fontsize=4.8)
+    ax.plot(x, compute, color=COMP, lw=1.45)
+    ax.plot(x, data, color=DATA, lw=1.45)
+    ax.fill_between(x, data, compute, color=REDFILL, alpha=0.28)
+    label_box = dict(facecolor="white", edgecolor="none", boxstyle="round,pad=0.08", alpha=0.92)
+    ax.text(0.71, 0.79, "compute", ha="center", va="center", color=COMP, fontsize=4.7, fontweight="bold", bbox=label_box)
+    ax.text(0.78, 0.39, "data", ha="center", va="center", color=DATA, fontsize=4.7, fontweight="bold", bbox=label_box)
+    ax.text(0.45, 0.54, "gap", ha="center", va="center", color=RED, fontsize=4.7, bbox=label_box)
     write(fig, "vol1/data_selection", "data_selection_scaling_saturation")
 
 
@@ -1117,7 +1207,7 @@ def data_engineering_locality_ladder(candidate=None):
     make_ladder(
         "vol1/data_engineering",
         "vol1_data_engineering_margin_003",
-        [("gather 120s", 120.0), ("local 0.2s", 0.2)],
+        [("Gather 120 s", 120.0), ("Local 0.2 s", 0.2)],
         domain="time",
         wall=False,
     )
@@ -1202,16 +1292,9 @@ def fault_tolerance_replica_downtime(candidate=None):
 
 
 def data_storage_prefetch_windows(candidate=None):
-    fig, ax = margin_axes("other-new", figsize=(1.20, 0.70))
-    x, y, w, h = 0.10, 0.40, 0.24, 0.16
-    for idx in range(3):
-        rect(ax, x + idx * w, y, w - 0.012, h, GRID, ec="white", lw=0.35)
-        ax.text(x + idx * w + (w - 0.012) / 2, y + h / 2, "200", ha="center", va="center", color="#555555", fontsize=4.7)
-    ax.plot([x, x + 2.5 * w], [0.70, 0.70], color=RED, lw=1.35)
-    ax.plot([x, x], [0.66, 0.74], color=RED, lw=0.8)
-    ax.plot([x + 2.5 * w, x + 2.5 * w], [0.66, 0.74], color=RED, lw=0.8)
-    ax.text(x + 1.25 * w, 0.84, "P99 500ms", ha="center", va="center", color=RED, fontsize=5.0, fontweight="bold")
-    ax.text(0.80, 0.27, "Q=3", ha="center", va="center", color=INK, fontsize=5.0, fontweight="bold")
+    fig, ax = new_fig("sequence-strip")
+    sequence_strip(ax, [("200", GRID), ("200", GRID), ("200", GRID)], bracket=(0, 2), bracket_label="P99 500ms")
+    ax.text(0.80, 0.24, "Q=3", ha="center", va="center", color=INK, fontsize=5.0, fontweight="bold")
     write(fig, "vol2/data_storage", "vol2_data_storage_margin_002")
 
 
@@ -1836,23 +1919,15 @@ def _generic_blast(candidate):
 def _nested_ml_system(candidate):
     fig, ax = margin_axes("other-new", figsize=(1.20, 0.92))
     rect(ax, 0.08, 0.14, 0.84, 0.66, "#E8ECEF", ec=GRID, lw=0.8)
-    rect(ax, 0.38, 0.39, 0.24, 0.16, COMP, ec="white", lw=0.8)
-    ax.text(0.50, 0.47, "ML", ha="center", va="center", color="white", fontsize=6.0, fontweight="bold")
-    ax.text(0.50, 0.72, "support 95%", ha="center", va="center", color=INK, fontsize=5.2)
+    rect(ax, 0.36, 0.39, 0.28, 0.16, COMP, ec="white", lw=0.8)
+    ax.text(0.50, 0.47, "ML code", ha="center", va="center", color="white", fontsize=4.7, fontweight="bold")
+    ax.text(0.50, 0.72, "System 95%", ha="center", va="center", color=INK, fontsize=5.0)
     write(fig, candidate["chapter"], curated_asset_name(candidate["id"]))
 
 
 def _all_to_all(candidate):
-    fig, ax = margin_axes("other-new", figsize=(1.15, 0.98))
-    pts = [(0.25, 0.72), (0.75, 0.72), (0.25, 0.28), (0.75, 0.28)]
-    for i, (x0, y0) in enumerate(pts):
-        for j, (x1, y1) in enumerate(pts):
-            if i < j:
-                ax.plot([x0, x1], [y0, y1], color=NET, lw=0.7, alpha=0.55)
-    for i, (x, y) in enumerate(pts, 1):
-        ax.plot(x, y, "s", color=MEM, ms=10)
-        ax.text(x, y, str(i), ha="center", va="center", color="white", fontsize=5.0, fontweight="bold")
-    ax.text(0.50, 0.08, "all-to-all", ha="center", va="center", color=INK, fontsize=5.4)
+    fig, ax = new_fig("all-to-all-topology")
+    all_to_all_topology(ax, n=4)
     write(fig, candidate["chapter"], curated_asset_name(candidate["id"]))
 
 
@@ -1869,47 +1944,30 @@ def _pareto(candidate):
 
 
 def _error_feedback(candidate):
-    fig, ax = margin_axes("other-new", figsize=(1.15, 0.95))
-    nodes = [("g+e", 0.22, 0.64), ("compress", 0.70, 0.64), ("e next", 0.46, 0.25)]
-    for label, x, y in nodes:
-        rect(ax, x - 0.16, y - 0.08, 0.32, 0.16, "#EEEEEE", ec=GRID, lw=0.8)
-        ax.text(x, y, label, ha="center", va="center", color=INK, fontsize=4.8, fontweight="bold")
-    arrows = [((0.38, 0.64), (0.54, 0.64)), ((0.70, 0.55), (0.53, 0.33)), ((0.38, 0.30), (0.22, 0.55))]
-    for start, end in arrows:
-        ax.annotate("", xy=end, xytext=start, arrowprops=dict(arrowstyle="->", color=NET, lw=1.0))
+    fig, ax = new_fig("causal-chain")
+    causal_chain(ax, ["g+e", "comp", "e next"], style="loop", colors=[MEM, NET, COMP])
     write(fig, candidate["chapter"], curated_asset_name(candidate["id"]))
 
 
 def _epsilon_budget(candidate):
-    fig, ax = margin_axes("other-new", figsize=(1.20, 0.52))
-    x, y, w, h = 0.08, 0.42, 0.84, 0.18
-    for i in range(10):
-        rect(ax, x + i * w / 10, y, w / 10 - 0.004, h, RED, ec="white", lw=0.2)
-    ax.text(0.08, 0.23, "10 x eps=1", ha="left", va="center", color=INK, fontsize=5.1)
-    ax.text(0.92, 0.23, "eps~10", ha="right", va="center", color=RED, fontsize=5.1, fontweight="bold")
+    fig, ax = new_fig("budget-envelope")
+    budget_envelope(ax, [("10 queries", 10, RED)], limit=10, limit_label="eps=10")
     write(fig, candidate["chapter"], curated_asset_name(candidate["id"]))
 
 
 def _causal_chain(candidate):
-    fig, ax = margin_axes("other-new", figsize=(1.20, 0.55))
-    labels = ["arch", "INT8", "P99", "drift"]
-    xs = np.linspace(0.13, 0.87, len(labels))
-    for i, (x, label) in enumerate(zip(xs, labels)):
-        ax.plot(x, 0.55, "o", color=COMP if i < 2 else RED, ms=8)
-        ax.text(x, 0.30, label, ha="center", va="center", color=INK, fontsize=4.9)
-        if i < len(labels) - 1:
-            ax.annotate("", xy=(xs[i + 1] - 0.06, 0.55), xytext=(x + 0.06, 0.55),
-                        arrowprops=dict(arrowstyle="->", color=GRID, lw=0.8))
+    fig, ax = new_fig("causal-chain")
+    causal_chain(ax, ["arch", "INT8", "P99", "drift"], colors=[COMP, COMP, RED, RED])
     write(fig, candidate["chapter"], curated_asset_name(candidate["id"]))
 
 
 def _codesign(candidate):
-    fig, ax = margin_axes("other-new", figsize=(1.18, 0.62))
-    rect(ax, 0.14, 0.58, 0.72, 0.12, NET, ec="white")
-    rect(ax, 0.14, 0.30, 0.72, 0.12, MEM, ec="white")
-    ax.text(0.50, 0.64, "comm cap", ha="center", va="center", color="white", fontsize=5.0)
-    ax.text(0.50, 0.36, "storage BW", ha="center", va="center", color="white", fontsize=5.0)
-    ax.text(0.50, 0.12, "matched rates", ha="center", va="center", color=DATA, fontsize=5.0, fontweight="bold")
+    fig, ax = new_fig("budget-envelope")
+    budget_envelope(
+        ax,
+        [("comm cap", 1.0, NET), ("storage BW", 1.0, MEM)],
+        style="matched",
+    )
     write(fig, candidate["chapter"], curated_asset_name(candidate["id"]))
 
 
@@ -2167,7 +2225,7 @@ def energy_per_byte():
     make_ladder(
         "vol2/sustainable_ai",
         "sustainable_ai_energy_per_byte_ladder",
-        [("Net 10k", 10000), ("NVMe 1k", 1000), ("DRAM 160", 160), ("L2 5", 5), ("L1 1", 1), ("Reg 0.1", 0.1)],
+        [("Network 10k", 10000), ("NVMe 1k", 1000), ("DRAM 160", 160), ("L2 5", 5), ("L1 1", 1), ("Register 0.1", 0.1)],
         domain="energy",
         wall=False,
         style="staircase",
@@ -2194,8 +2252,9 @@ def generate() -> None:
     benchmarking_confidence_detectability()
     benchmarking_tail_latency_gap()
     taxonomy_quadrant("vol1/data_engineering", "data_engineering_data_gravity_entropy", selected=(0, 1), xlabel="data gravity", ylabel="info entropy", labels={(0, 1): "high\ngain"})
-    make_ladder("vol1/data_engineering", "data_engineering_storage_latency_hierarchy", [("internet 100ms", 0.1), ("network 500us", 5e-4), ("SSD 100us", 1e-4), ("DRAM 100ns", 1e-7), ("L1 0.5ns", 5e-10)], domain="time", wall=True)
+    make_ladder("vol1/data_engineering", "data_engineering_storage_latency_hierarchy", [("Internet 100 ms", 0.1), ("Network 500 us", 5e-4), ("SSD 100 us", 1e-4), ("DRAM 100 ns", 1e-7), ("L1 0.5 ns", 5e-10)], domain="time", wall=False)
     data_engineering_debt_compounding()
+    data_engineering_active_learning_budget()
     data_selection_compute_data_gap()
     make_knee("vol1/data_selection", "data_selection_icr_frontier", knee_frac=0.72)
     make_ladder("vol1/frameworks", "frameworks_bandwidth_hierarchy", [("HBM 2039", 2039), ("NVLink 600", 600), ("PCIe 32", 32)], domain="bandwidth")
@@ -2212,6 +2271,7 @@ def generate() -> None:
     escalation_curve()
     make_ladder("vol1/ml_workflow", "ml_workflow_feedback_timescales", [("quarter", 90), ("month", 30), ("week", 7), ("day", 1), ("hour", 1 / 24), ("minute", 1 / 1440)], domain="time")
     make_dam("vol1/model_compression", "model_compression_dam_locator", focus=2, vol="vol1", style="boxes")
+    model_compression_quantization_roofline()
     before_after_quant()
     make_blast("vol1/model_serving", "model_serving_blast_radius", n=4)
     latency_budget()
@@ -2245,11 +2305,13 @@ def generate() -> None:
     make_ladder("vol2/distributed_training", "distributed_training_memory_budget", [("Optimizer 2100 GB", 2100), ("Gradients 350", 350), ("Weights 350", 350)], domain="memory")
     distributed_training_pipeline_bubble_tax()
     distributed_training_young_daly_checkpoint_curve()
-    make_ladder("vol2/edge_intelligence", "edge_intelligence_bandwidth_ladder", [("HBM3 3350", 3350), ("Mobile 100", 100)], domain="bandwidth", wall=True)
+    make_ladder("vol2/edge_intelligence", "edge_intelligence_bandwidth_ladder", [("HBM3 3.35 TB/s", 3350), ("Mobile 100 GB/s", 100)], domain="bandwidth", wall=False)
     make_ladder("vol2/edge_intelligence", "edge_intelligence_device_memory_ladder", [("Phone 8 GB", 8000), ("IoT 1 GB", 1000), ("MCU 4 MB", 4), ("SRAM 520 KB", 0.52)], domain="memory")
+    edge_intelligence_straggler_cutoff_strip()
     make_ladder("vol2/fault_tolerance", "fault_tolerance_mtbf_ladder", [("1 GPU 50K h", 50000), ("1K 50 h", 50), ("10K 5 h", 5)], domain="time")
     make_blast("vol2/fault_tolerance", "fault_tolerance_blast", n=5)
     make_ladder("vol2/fault_tolerance", "fault_tolerance_detection_ladder", [("SDC ~2h", 7200), ("partition 180s", 180), ("GPU hang 120s", 120), ("crash 30s", 30)], domain="time")
+    fault_tolerance_kv_live_state_ladder()
     make_knee("vol2/fleet_orchestration", "fleet_orchestration_util_knee", knee_frac=0.70)
     fleet_orchestration_priority_inversion()
     make_ladder("vol2/fleet_orchestration", "fleet_orchestration_bw_hierarchy", [("NVLink 900 GB/s", 900), ("IB 50 GB/s", 50), ("spine 12 GB/s", 12)], domain="bandwidth")
@@ -2259,6 +2321,7 @@ def generate() -> None:
     make_knee("vol2/inference", "inference_batching_knee", knee_frac=0.68)
     make_ladder("vol2/inference", "inference_logic_wall_ladder", [("reasoning 12.8 s", 12.8), ("fast 0.1 s", 0.1)], domain="time")
     kv_cache_ladder()
+    inference_quantization_capacity_ladder()
     make_roofline_points(
         "vol2/inference",
         "inference_decode_roofline",
@@ -2273,6 +2336,7 @@ def generate() -> None:
     network_fabrics_pfc_pause_blast()
     network_fabrics_physical_reach_ladder()
     ops_scale_embedding_update_blast()
+    ops_scale_canary_exposure_ladder()
     make_ironbar("vol2/ops_scale", "ops_scale_tco_dominance", [("Tr", 0.10, GRID), ("Inf", 0.50, COMP), ("Da", 0.25, GRID), ("It", 0.15, GRID)], dom=1)
     make_ironbar("vol2/performance_engineering", "performance_engineering_iron_law_bars", [("D", 0.58, MEM), ("C", 0.22, COMP), ("L", 0.20, NET)], dom=0)
     make_ladder("vol2/performance_engineering", "performance_engineering_flash_ladder", [("naive 35 GB", 35), ("Flash 537 MB", 0.537)], domain="memory")
@@ -2288,8 +2352,10 @@ def generate() -> None:
     security_privacy_output_leakage_ladder()
     security_privacy_dp_dataset_threshold()
     energy_per_byte()
+    sustainable_ai_grid_interconnection_ladder()
     make_sparkline("vol2/sustainable_ai", "sustainable_ai_inference_crossover", threat=True, steep=1.9)
     make_knee("vol2/sustainable_ai", "sustainable_ai_thermal_throttle_knee", knee_frac=0.70, style="twotone")
+    sustainable_ai_cooling_failure_blast()
     generate_curated_margin_figures()
 
 
