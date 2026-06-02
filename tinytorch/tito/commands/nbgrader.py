@@ -1,27 +1,36 @@
 """
 NBGrader integration commands for TinyTorch.
 
-This module provides commands for managing nbgrader assignments,
-auto-grading, and feedback generation with proper hierarchical module support.
+This command group is an instructor/developer convenience layer around
+nbgrader's own workflow. TinyTorch owns module discovery and assignment
+staging; nbgrader owns release, collection, autograding, feedback, and export.
 """
 
-import os
+import json
+import re
 import subprocess
-import sys
-from pathlib import Path
-from typing import Optional, List
 from argparse import ArgumentParser, Namespace
+from pathlib import Path
+from typing import Dict, List, Optional
+
 from rich.panel import Panel
 from rich.text import Text
 
 from .base import BaseCommand
+
+
+MODULE_DIR_RE = re.compile(r"^(\d{2})_[A-Za-z0-9_]+$")
+
 
 class NBGraderCommand(BaseCommand):
     """NBGrader integration command group."""
 
     def __init__(self, config):
         super().__init__(config)
-        self.assignments_dir = Path("assignments")
+        self.project_root = config.project_root
+        self.src_dir = self.project_root / "src"
+        self.modules_dir = self.project_root / "modules"
+        self.assignments_dir = self.project_root / "assignments"
         self.source_dir = self.assignments_dir / "source"
         self.release_dir = self.assignments_dir / "release"
         self.submitted_dir = self.assignments_dir / "submitted"
@@ -34,594 +43,601 @@ class NBGraderCommand(BaseCommand):
 
     @property
     def description(self) -> str:
-        return "Assignment management and auto-grading commands (experimental)"
+        return "Assignment staging and grading workflow for nbgrader"
 
     def add_arguments(self, parser: ArgumentParser) -> None:
         subparsers = parser.add_subparsers(
-            dest='nbgrader_command',
-            help='NBGrader subcommands',
-            metavar='SUBCOMMAND'
+            dest="nbgrader_command",
+            help="NBGrader subcommands",
+            metavar="SUBCOMMAND",
         )
 
-        # Init subcommand
-        init_parser = subparsers.add_parser(
-            'init',
-            help='Initialize nbgrader environment'
-        )
+        subparsers.add_parser("init", help="Initialize nbgrader directories and config")
 
-        # Generate subcommand
         generate_parser = subparsers.add_parser(
-            'generate',
-            help='Generate assignments from TinyTorch modules'
+            "generate",
+            help="Stage TinyTorch notebooks as nbgrader source assignments",
         )
         generate_parser.add_argument(
-            'module',
-            nargs='?',
-            help='Module to generate assignment for (e.g., setup, tensor, 01_setup)'
+            "module",
+            nargs="?",
+            help="Module to stage (e.g., 01, 01_tensor, tensor)",
         )
         generate_parser.add_argument(
-            '--all',
-            action='store_true',
-            help='Generate assignments for all modules'
+            "--all",
+            action="store_true",
+            help="Stage assignments for all modules",
         )
         generate_parser.add_argument(
-            '--range',
-            help='Generate assignments for module range (e.g., 01-04, setup-tensor)'
+            "--range",
+            dest="module_range",
+            help="Stage assignments for a module range (e.g., 01-04)",
         )
 
-        # Release subcommand
         release_parser = subparsers.add_parser(
-            'release',
-            help='Release assignments to students'
+            "release",
+            help="Create student release notebooks with nbgrader",
         )
-        release_parser.add_argument(
-            'assignment',
-            nargs='?',
-            help='Assignment to release'
-        )
-        release_parser.add_argument(
-            '--all',
-            action='store_true',
-            help='Release all assignments'
-        )
+        release_parser.add_argument("assignment", nargs="?", help="Assignment to release")
+        release_parser.add_argument("--all", action="store_true", help="Release all staged assignments")
 
-        # Collect subcommand
-        collect_parser = subparsers.add_parser(
-            'collect',
-            help='Collect student submissions'
-        )
-        collect_parser.add_argument(
-            'assignment',
-            nargs='?',
-            help='Assignment to collect'
-        )
-        collect_parser.add_argument(
-            '--all',
-            action='store_true',
-            help='Collect all submissions'
-        )
+        collect_parser = subparsers.add_parser("collect", help="Collect student submissions")
+        collect_parser.add_argument("assignment", nargs="?", help="Assignment to collect")
+        collect_parser.add_argument("--all", action="store_true", help="Collect all released assignments")
+        collect_parser.add_argument("--student", help="Limit collection to one student id")
 
-        # Autograde subcommand
-        autograde_parser = subparsers.add_parser(
-            'autograde',
-            help='Auto-grade submissions'
-        )
-        autograde_parser.add_argument(
-            'assignment',
-            nargs='?',
-            help='Assignment to auto-grade'
-        )
-        autograde_parser.add_argument(
-            '--all',
-            action='store_true',
-            help='Auto-grade all submissions'
-        )
+        autograde_parser = subparsers.add_parser("autograde", help="Auto-grade submissions")
+        autograde_parser.add_argument("assignment", nargs="?", help="Assignment to auto-grade")
+        autograde_parser.add_argument("--all", action="store_true", help="Auto-grade all submitted assignments")
+        autograde_parser.add_argument("--student", help="Limit autograding to one student id")
+        autograde_parser.add_argument("--force", action="store_true", help="Overwrite existing autograded output")
 
-        # Feedback subcommand
-        feedback_parser = subparsers.add_parser(
-            'feedback',
-            help='Generate feedback for students'
-        )
-        feedback_parser.add_argument(
-            'assignment',
-            nargs='?',
-            help='Assignment to generate feedback for'
-        )
-        feedback_parser.add_argument(
-            '--all',
-            action='store_true',
-            help='Generate feedback for all assignments'
-        )
+        feedback_parser = subparsers.add_parser("feedback", help="Generate feedback for students")
+        feedback_parser.add_argument("assignment", nargs="?", help="Assignment to generate feedback for")
+        feedback_parser.add_argument("--all", action="store_true", help="Generate feedback for all graded assignments")
+        feedback_parser.add_argument("--student", help="Limit feedback generation to one student id")
 
-        # Status subcommand
-        status_parser = subparsers.add_parser(
-            'status',
-            help='Show assignment status'
-        )
+        subparsers.add_parser("status", help="Show local assignment status")
 
-        # Analytics subcommand
-        analytics_parser = subparsers.add_parser(
-            'analytics',
-            help='Show assignment analytics'
-        )
-        analytics_parser.add_argument(
-            'assignment',
-            help='Assignment to analyze'
-        )
+        analytics_parser = subparsers.add_parser("analytics", help="Show local assignment analytics")
+        analytics_parser.add_argument("assignment", help="Assignment to analyze")
 
-        # Report subcommand
-        report_parser = subparsers.add_parser(
-            'report',
-            help='Export grades report'
+        report_parser = subparsers.add_parser("report", help="Export grades report with nbgrader")
+        report_parser.add_argument(
+            "--format",
+            choices=["csv"],
+            default="csv",
+            help="Export format (default: csv)",
         )
         report_parser.add_argument(
-            '--format',
-            choices=['csv', 'json'],
-            default='csv',
-            help='Export format (default: csv)'
+            "--assignment",
+            "--module",
+            dest="assignment",
+            help="Limit report to one assignment/module",
         )
+        report_parser.add_argument("--student", help="Limit report to one student id")
 
     def run(self, args: Namespace) -> int:
         console = self.console
 
-        # Show experimental warning
         console.print(Panel(
-            "[bold yellow]⚠️  Experimental Feature[/bold yellow]\n\n"
-            "The nbgrader integration is under active development.\n"
-            "Use for testing only - workflow may change.\n\n"
-            "[dim]Feedback welcome: github.com/harvard-edge/cs249r_book/discussions[/dim]",
-            border_style="yellow"
+            "[bold yellow]NBGrader Integration[/bold yellow]\n\n"
+            "TinyTorch stages module notebooks for nbgrader, then delegates grading "
+            "operations to the nbgrader CLI.\n\n"
+            "[dim]This is instructor/developer tooling, not the main learner workflow.[/dim]",
+            border_style="yellow",
         ))
         console.print()
 
-        if not hasattr(args, 'nbgrader_command') or not args.nbgrader_command:
+        if not getattr(args, "nbgrader_command", None):
             console.print(Panel(
                 "[bold cyan]NBGrader Commands[/bold cyan]\n\n"
                 "Available subcommands:\n"
-                "  • [bold]init[/bold]       - Initialize nbgrader environment\n"
-                "  • [bold]generate[/bold]   - Generate assignments from modules\n"
-                "  • [bold]release[/bold]    - Release assignments to students\n"
+                "  • [bold]init[/bold]       - Initialize nbgrader directories and config\n"
+                "  • [bold]generate[/bold]   - Stage source assignments from TinyTorch notebooks\n"
+                "  • [bold]release[/bold]    - Create student release notebooks\n"
                 "  • [bold]collect[/bold]    - Collect student submissions\n"
                 "  • [bold]autograde[/bold]  - Auto-grade submissions\n"
                 "  • [bold]feedback[/bold]   - Generate feedback for students\n"
-                "  • [bold]status[/bold]     - Show assignment status\n"
-                "  • [bold]analytics[/bold]  - Show assignment analytics\n"
+                "  • [bold]status[/bold]     - Show local assignment status\n"
+                "  • [bold]analytics[/bold]  - Show local assignment analytics\n"
                 "  • [bold]report[/bold]     - Export grades report\n\n"
                 "[dim]Examples:[/dim]\n"
                 "[dim]  tito nbgrader init[/dim]\n"
-                "[dim]  tito nbgrader generate setup[/dim]\n"
+                "[dim]  tito nbgrader generate 01[/dim]\n"
                 "[dim]  tito nbgrader generate --all[/dim]\n"
                 "[dim]  tito nbgrader generate --range 01-04[/dim]\n"
-                "[dim]  tito nbgrader release setup[/dim]\n"
-                "[dim]  tito nbgrader autograde --all[/dim]",
+                "[dim]  tito nbgrader release 01_tensor[/dim]\n"
+                "[dim]  tito nbgrader autograde 01_tensor --student student_id[/dim]",
                 title="NBGrader Command Group",
-                border_style="bright_cyan"
+                border_style="bright_cyan",
             ))
             return 0
 
-        # Execute the appropriate subcommand
-        if args.nbgrader_command == 'init':
-            return self._init()
-        elif args.nbgrader_command == 'generate':
-            return self._generate(args)
-        elif args.nbgrader_command == 'release':
-            return self._release(args)
-        elif args.nbgrader_command == 'collect':
-            return self._collect(args)
-        elif args.nbgrader_command == 'autograde':
-            return self._autograde(args)
-        elif args.nbgrader_command == 'feedback':
-            return self._feedback(args)
-        elif args.nbgrader_command == 'status':
-            return self._status()
-        elif args.nbgrader_command == 'analytics':
-            return self._analytics(args)
-        elif args.nbgrader_command == 'report':
-            return self._report(args)
-        else:
+        commands = {
+            "init": self._init,
+            "generate": self._generate,
+            "release": self._release,
+            "collect": self._collect,
+            "autograde": self._autograde,
+            "feedback": self._feedback,
+            "status": self._status,
+            "analytics": self._analytics,
+            "report": self._report,
+        }
+        handler = commands.get(args.nbgrader_command)
+        if handler is None:
             console.print(Panel(
                 f"[red]Unknown nbgrader subcommand: {args.nbgrader_command}[/red]",
                 title="Error",
-                border_style="red"
+                border_style="red",
             ))
             return 1
+        return handler(args) if args.nbgrader_command not in {"init", "status"} else handler()
 
-    def _get_module_directories(self) -> List[Path]:
-        """Get all module directories with proper hierarchy support."""
-        source_dir = Path("modules")
-        if not source_dir.exists():
-            return []
+    def _discover_modules(self) -> Dict[str, str]:
+        """Return module number to module directory mapping from src/."""
+        modules = {}
+        if not self.src_dir.exists():
+            return modules
+        for item in sorted(self.src_dir.iterdir()):
+            if not item.is_dir():
+                continue
+            match = MODULE_DIR_RE.match(item.name)
+            if match:
+                modules[match.group(1)] = item.name
+        return modules
 
-        # Get all numbered module directories
-        module_dirs = []
-        for item in source_dir.iterdir():
-            if item.is_dir() and not item.name.startswith("."):
-                module_dirs.append(item)
-
-        # Sort by number prefix if present
-        def sort_key(path: Path) -> tuple:
-            name = path.name
-            if name[:2].isdigit():
-                return (int(name[:2]), name)
-            return (999, name)  # Non-numbered modules go last
-
-        return sorted(module_dirs, key=sort_key)
+    def _get_module_directories(self) -> List[str]:
+        """Get all module directory names in curriculum order."""
+        return list(self._discover_modules().values())
 
     def _resolve_module_name(self, module_input: str) -> Optional[str]:
-        """Resolve module name from various input formats."""
-        # If it's already a directory name, use it
-        if Path(f"modules/{module_input}").exists():
-            return module_input
+        """Resolve module name from number, full directory name, or suffix."""
+        modules = self._discover_modules()
+        if not module_input:
+            return None
 
-        # Try to find by number prefix
         if module_input.isdigit():
-            prefix = module_input.zfill(2)
-            source_dir = Path("modules")
-            for item in source_dir.iterdir():
-                if item.is_dir() and item.name.startswith(prefix):
-                    return item.name
+            return modules.get(f"{int(module_input):02d}")
 
-        # Try to find by name suffix
-        source_dir = Path("modules")
-        for item in source_dir.iterdir():
-            if item.is_dir() and item.name.endswith(f"_{module_input}"):
-                return item.name
+        if MODULE_DIR_RE.match(module_input):
+            return module_input if module_input in modules.values() else None
+
+        normalized = module_input.lower().replace("-", "_")
+        for module_name in modules.values():
+            suffix = module_name.split("_", 1)[1]
+            if suffix == normalized:
+                return module_name
 
         return None
 
     def _parse_module_range(self, range_str: str) -> List[str]:
-        """Parse module range specification."""
+        """Parse a numeric module range specification."""
         if "-" not in range_str:
-            return [range_str]
+            resolved = self._resolve_module_name(range_str)
+            return [resolved] if resolved else []
 
         start, end = range_str.split("-", 1)
-        start_num = int(start) if start.isdigit() else 0
-        end_num = int(end) if end.isdigit() else 99
+        if not start.isdigit() or not end.isdigit():
+            return []
+
+        start_num = int(start)
+        end_num = int(end)
+        if end_num < start_num:
+            start_num, end_num = end_num, start_num
 
         modules = []
-        for module_dir in self._get_module_directories():
-            name = module_dir.name
-            if name[:2].isdigit():
-                num = int(name[:2])
-                if start_num <= num <= end_num:
-                    modules.append(name)
-
+        discovered = self._discover_modules()
+        for number in range(start_num, end_num + 1):
+            module_name = discovered.get(f"{number:02d}")
+            if module_name:
+                modules.append(module_name)
         return modules
+
+    def _short_name(self, module_name: str) -> str:
+        return module_name.split("_", 1)[1] if "_" in module_name else module_name
+
+    def _source_file_for(self, module_name: str) -> Path:
+        return self.src_dir / module_name / f"{module_name}.py"
+
+    def _notebook_for(self, module_name: str) -> Path:
+        return self.modules_dir / module_name / f"{self._short_name(module_name)}.ipynb"
+
+    def _assignment_file_for(self, module_name: str) -> Path:
+        return self.source_dir / module_name / f"{self._short_name(module_name)}.ipynb"
 
     def _init(self) -> int:
         """Initialize nbgrader environment."""
         console = self.console
-        console.print("🔧 Initializing NBGrader environment...")
+        console.print("Initializing NBGrader environment...")
 
-        # Check if nbgrader is installed
-        try:
-            result = subprocess.run(
-                ["nbgrader", "--version"],
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            console.print(f"✅ NBGrader version: {result.stdout.strip()}")
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            console.print("❌ NBGrader not found. Please install with: pip install nbgrader")
-            return 1
-
-        # Create directory structure
-        directories = [
+        for directory in [
             self.assignments_dir,
             self.source_dir,
             self.release_dir,
             self.submitted_dir,
             self.autograded_dir,
-            self.feedback_dir
-        ]
-
-        for directory in directories:
+            self.feedback_dir,
+        ]:
             directory.mkdir(parents=True, exist_ok=True)
-            console.print(f"📁 Created directory: {directory}")
+            console.print(f"Created directory: {directory.relative_to(self.project_root)}")
 
-        # Check if nbgrader_config.py exists
-        config_file = Path("nbgrader_config.py")
+        config_file = self.project_root / "nbgrader_config.py"
         if config_file.exists():
-            console.print(f"✅ Found nbgrader config: {config_file}")
+            console.print(f"Found nbgrader config: {config_file.relative_to(self.project_root)}")
         else:
-            console.print("⚠️  NBGrader config not found. Please create nbgrader_config.py")
+            config_file.write_text(self._default_config_text(), encoding="utf-8")
+            console.print(f"Created nbgrader config: {config_file.relative_to(self.project_root)}")
+
+        version = self._run_external(["nbgrader", "--version"], capture_output=True)
+        if version.returncode != 0:
+            console.print("[red]NBGrader not found. Install with: pip install nbgrader[/red]")
+            return 1
+        console.print(f"NBGrader version: {version.stdout.strip() or 'installed'}")
+
+        result = self._run_external(["nbgrader", "db", "upgrade"], capture_output=True)
+        if result.returncode != 0:
+            console.print("[red]Failed to initialize nbgrader database[/red]")
+            if result.stderr:
+                console.print(f"[red]{result.stderr.strip()}[/red]")
             return 1
 
-        # Initialize nbgrader database
-        try:
-            subprocess.run(
-                ["nbgrader", "db", "upgrade"],
-                check=True,
-                capture_output=True
-            )
-            console.print("✅ NBGrader database initialized")
-        except subprocess.CalledProcessError as e:
-            console.print(f"❌ Failed to initialize database: {e}")
-            return 1
-
-        console.print("🎉 NBGrader environment initialized successfully!")
+        console.print("[green]NBGrader environment initialized successfully.[/green]")
         return 0
 
+    def _default_config_text(self) -> str:
+        return (
+            '"""TinyTorch nbgrader configuration."""\n\n'
+            "c = get_config()  # noqa: F821\n\n"
+            "# nbgrader works inside this course directory. It contains source/,\n"
+            "# release/, submitted/, autograded/, feedback/, and gradebook.db.\n"
+            'c.CourseDirectory.root = "assignments"\n'
+            'c.CourseDirectory.course_id = "tinytorch"\n'
+            'c.CourseDirectory.db_url = "sqlite:///assignments/gradebook.db"\n'
+            "c.ExecutePreprocessor.timeout = 120\n"
+        )
+
     def _generate(self, args: Namespace) -> int:
-        """Generate assignments from TinyTorch modules."""
+        """Stage source assignments from TinyTorch notebooks."""
         console = self.console
 
-        modules_to_process = []
-
         if args.all:
-            # Generate all modules
-            module_dirs = self._get_module_directories()
-            modules_to_process = [d.name for d in module_dirs]
-        elif hasattr(args, 'range') and args.range:
-            # Generate range of modules
-            modules_to_process = self._parse_module_range(args.range)
-        elif args.module:
-            # Generate specific module
-            resolved_module = self._resolve_module_name(args.module)
-            if resolved_module:
-                modules_to_process = [resolved_module]
-            else:
-                console.print(f"❌ Module '{args.module}' not found")
+            modules_to_process = self._get_module_directories()
+        elif getattr(args, "module_range", None):
+            modules_to_process = self._parse_module_range(args.module_range)
+            if not modules_to_process:
+                console.print(f"[red]No modules found for range '{args.module_range}'[/red]")
                 return 1
+        elif args.module:
+            resolved_module = self._resolve_module_name(args.module)
+            if not resolved_module:
+                console.print(f"[red]Module '{args.module}' not found[/red]")
+                self._show_available_modules()
+                return 1
+            modules_to_process = [resolved_module]
         else:
-            console.print("❌ Must specify either --all, --range, or a module name")
+            console.print("[red]Must specify either --all, --range, or a module name[/red]")
             return 1
 
-        console.print(f"🔄 Generating assignments for modules: {modules_to_process}")
+        if not modules_to_process:
+            console.print("[red]No TinyTorch modules found in src/[/red]")
+            return 1
+
+        console.print(f"Staging nbgrader source assignments: {', '.join(modules_to_process)}")
 
         for module_name in modules_to_process:
-            success = self._generate_single_module(module_name)
-            if not success:
-                console.print(f"❌ Failed to generate assignment for {module_name}")
+            if not self._generate_single_module(module_name):
                 return 1
 
-        console.print("✅ All assignments generated successfully!")
+        console.print("[green]All requested source assignments staged successfully.[/green]")
         return 0
 
     def _generate_single_module(self, module_name: str) -> bool:
-        """Generate assignment from a single module."""
+        """Stage one module notebook under assignments/source."""
         console = self.console
-        console.print(f"📝 Generating assignment for module: {module_name}")
-
-        # Find the module development file in TinyTorch modules directory
-        module_dir = Path("modules") / module_name
-
-        # Extract the short name from the module directory name
-        # e.g., "00_setup" -> "setup", "01_tensor" -> "tensor"
-        if module_name.startswith(tuple(f"{i:02d}_" for i in range(100))):
-            short_name = module_name[3:]  # Remove "00_" prefix
-        else:
-            short_name = module_name
-
-        # Look for module Python file
-        dev_file = module_dir / f"{short_name}.py"
-
-        if not dev_file.exists():
-            console.print(f"❌ Module file not found in: {module_dir}")
-            console.print(f"   Looking for: {short_name}.py")
+        notebook_file = self._ensure_module_notebook(module_name)
+        if notebook_file is None:
             return False
 
-        # Convert to notebook and generate assignment
+        assignment_file = self._assignment_file_for(module_name)
+        assignment_file.parent.mkdir(parents=True, exist_ok=True)
+
         try:
-            # First convert .py to .ipynb using jupytext
-            console.print(f"🔄 Converting {dev_file} to notebook...")
-            # Use the same filename as the source file, just change extension
-            notebook_file = dev_file.with_suffix('.ipynb')
-
-            result = subprocess.run([
-                "jupytext", "--to", "ipynb", str(dev_file)
-            ], capture_output=True, text=True)
-
-            if result.returncode != 0:
-                console.print(f"❌ Failed to convert notebook: {result.stderr}")
-                return False
-
-            # Generate nbgrader assignment using the enhanced generator
-            sys.path.insert(0, str(Path.cwd()))
-            from bin.generate_student_notebooks import NotebookGenerator
-
-            generator = NotebookGenerator(use_nbgrader=True)
-            notebook = generator.process_notebook(notebook_file)
-
-            # Save to assignments/source
-            assignment_dir = self.source_dir / module_name
-            assignment_dir.mkdir(parents=True, exist_ok=True)
-
-            # Use short name for notebook (e.g., "tensor.ipynb" not "01_tensor.ipynb")
-            short_name = module_name.split("_", 1)[1] if "_" in module_name else module_name
-            assignment_file = assignment_dir / f"{short_name}.ipynb"
-            generator.save_student_notebook(notebook, assignment_file)
-
-            console.print(f"✅ Assignment created: {assignment_file}")
-            return True
-
-        except Exception as e:
-            console.print(f"❌ Error generating assignment: {e}")
+            notebook = json.loads(notebook_file.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            console.print(f"[red]Invalid notebook JSON: {notebook_file.relative_to(self.project_root)} ({exc})[/red]")
             return False
+
+        validation_errors = self._prepare_notebook_for_nbgrader(notebook)
+        if validation_errors:
+            console.print(f"[red]NBGrader metadata errors in {notebook_file.relative_to(self.project_root)}:[/red]")
+            for error in validation_errors:
+                console.print(f"[red]  • {error}[/red]")
+            return False
+
+        assignment_file.write_text(json.dumps(notebook, indent=1) + "\n", encoding="utf-8")
+        console.print(
+            f"Staged {notebook_file.relative_to(self.project_root)} "
+            f"→ {assignment_file.relative_to(self.project_root)}"
+        )
+        return True
+
+    def _ensure_module_notebook(self, module_name: str) -> Optional[Path]:
+        """Return the generated notebook, creating it from src/ if needed."""
+        notebook_file = self._notebook_for(module_name)
+        source_file = self._source_file_for(module_name)
+
+        if notebook_file.exists() and (
+            not source_file.exists() or source_file.stat().st_mtime <= notebook_file.stat().st_mtime
+        ):
+            return notebook_file
+
+        if not source_file.exists():
+            self.console.print(f"[red]Source file not found: {source_file.relative_to(self.project_root)}[/red]")
+            return None
+
+        notebook_file.parent.mkdir(parents=True, exist_ok=True)
+        reason = "Generated notebook missing" if not notebook_file.exists() else "Source file is newer"
+        self.console.print(
+            f"{reason}; converting {source_file.relative_to(self.project_root)} "
+            f"→ {notebook_file.relative_to(self.project_root)}"
+        )
+        result = self._run_external([
+            "jupytext",
+            "--to",
+            "ipynb",
+            str(source_file),
+            "--output",
+            str(notebook_file),
+        ], capture_output=True)
+        if result.returncode != 0:
+            self.console.print("[red]Failed to generate notebook with jupytext[/red]")
+            if result.stderr:
+                self.console.print(f"[red]{result.stderr.strip()}[/red]")
+            return None
+        return notebook_file
+
+    def _prepare_notebook_for_nbgrader(self, notebook: Dict) -> List[str]:
+        """Validate and normalize nbgrader cell metadata in a notebook."""
+        errors = []
+        cells = notebook.get("cells")
+        if not isinstance(cells, list):
+            return ["Notebook is missing a cells list"]
+
+        grade_ids = set()
+        nbgrader_cells = 0
+        graded_cells = 0
+
+        for index, cell in enumerate(cells, start=1):
+            metadata = cell.setdefault("metadata", {})
+            nbgrader = metadata.get("nbgrader")
+            source = "".join(cell.get("source", []))
+
+            if nbgrader is None:
+                if "BEGIN SOLUTION" in source or "END SOLUTION" in source:
+                    errors.append(f"Cell {index} contains a solution marker but no nbgrader metadata")
+                if re.search(r"^\s*def\s+test_", source, flags=re.MULTILINE):
+                    errors.append(f"Cell {index} contains a test function but no nbgrader metadata")
+                continue
+
+            if not isinstance(nbgrader, dict):
+                errors.append(f"Cell {index} has non-object nbgrader metadata")
+                continue
+
+            nbgrader_cells += 1
+            nbgrader.setdefault("schema_version", 3)
+
+            grade_id = nbgrader.get("grade_id")
+            if not grade_id:
+                errors.append(f"Cell {index} is missing grade_id")
+            elif grade_id in grade_ids:
+                errors.append(f"Duplicate grade_id '{grade_id}'")
+            else:
+                grade_ids.add(grade_id)
+
+            if nbgrader.get("grade") is True:
+                graded_cells += 1
+                if nbgrader.get("locked") is not True:
+                    errors.append(f"Graded cell '{grade_id}' must have locked=true")
+                if "points" not in nbgrader:
+                    errors.append(f"Graded cell '{grade_id}' is missing points")
+                nbgrader.setdefault("solution", False)
+
+            if nbgrader.get("solution") is True:
+                nbgrader.setdefault("grade", False)
+                nbgrader.setdefault("locked", False)
+
+        if nbgrader_cells == 0:
+            errors.append("Notebook has no nbgrader metadata cells")
+        if graded_cells == 0:
+            errors.append("Notebook has no graded nbgrader cells")
+
+        return errors
 
     def _release(self, args: Namespace) -> int:
-        """Release assignments to students."""
-        console = self.console
-
         if args.all:
-            return self._batch_operation("release", "generate_assignment")
-        elif args.assignment:
+            return self._batch_operation("release", "generate_assignment", self.source_dir)
+        if args.assignment:
             return self._single_operation("release", "generate_assignment", args.assignment)
-        else:
-            console.print("❌ Must specify either --all or an assignment name")
-            return 1
+        self.console.print("[red]Must specify either --all or an assignment name[/red]")
+        return 1
 
     def _collect(self, args: Namespace) -> int:
-        """Collect student submissions."""
-        console = self.console
-
         if args.all:
-            return self._batch_operation("collect", "collect")
-        elif args.assignment:
-            return self._single_operation("collect", "collect", args.assignment)
-        else:
-            console.print("❌ Must specify either --all or an assignment name")
-            return 1
+            return self._batch_operation("collect", "collect", self.release_dir, student=args.student)
+        if args.assignment:
+            return self._single_operation("collect", "collect", args.assignment, student=args.student)
+        self.console.print("[red]Must specify either --all or an assignment name[/red]")
+        return 1
 
     def _autograde(self, args: Namespace) -> int:
-        """Auto-grade submissions."""
-        console = self.console
-
+        extra_args = ["--force"] if args.force else None
         if args.all:
-            return self._batch_operation("autograde", "autograde")
-        elif args.assignment:
-            return self._single_operation("autograde", "autograde", args.assignment)
-        else:
-            console.print("❌ Must specify either --all or an assignment name")
-            return 1
+            return self._batch_operation(
+                "autograde",
+                "autograde",
+                self.submitted_dir,
+                student=args.student,
+                extra_args=extra_args,
+            )
+        if args.assignment:
+            return self._single_operation(
+                "autograde",
+                "autograde",
+                args.assignment,
+                student=args.student,
+                extra_args=extra_args,
+            )
+        self.console.print("[red]Must specify either --all or an assignment name[/red]")
+        return 1
 
     def _feedback(self, args: Namespace) -> int:
-        """Generate feedback for students."""
-        console = self.console
-
         if args.all:
-            return self._batch_operation("feedback", "generate_feedback")
-        elif args.assignment:
-            return self._single_operation("feedback", "generate_feedback", args.assignment)
-        else:
-            console.print("❌ Must specify either --all or an assignment name")
-            return 1
+            return self._batch_operation("feedback", "generate_feedback", self.autograded_dir, student=args.student)
+        if args.assignment:
+            return self._single_operation("feedback", "generate_feedback", args.assignment, student=args.student)
+        self.console.print("[red]Must specify either --all or an assignment name[/red]")
+        return 1
 
-    def _single_operation(self, action: str, nbgrader_cmd: str, assignment: str) -> int:
+    def _single_operation(
+        self,
+        action: str,
+        nbgrader_cmd: str,
+        assignment: str,
+        *,
+        student: Optional[str] = None,
+        extra_args: Optional[List[str]] = None,
+    ) -> int:
         """Perform a single nbgrader operation."""
         console = self.console
+        resolved_assignment = self._resolve_assignment_name(assignment) or assignment
+        console.print(f"{action.title()} assignment: {resolved_assignment}")
 
-        action_icons = {
-            "release": "🚀",
-            "collect": "📥",
-            "autograde": "🎯",
-            "feedback": "📋"
-        }
+        cmd = ["nbgrader", nbgrader_cmd, resolved_assignment, "--course-dir", str(self.assignments_dir)]
+        if student:
+            cmd.extend(["--student", student])
+        if extra_args:
+            cmd.extend(extra_args)
 
-        console.print(f"{action_icons.get(action, '🔄')} {action.title()}ing assignment: {assignment}")
+        result = self._run_external(cmd)
+        if result.returncode != 0:
+            console.print(f"[red]Failed to {action} assignment {resolved_assignment}[/red]")
+            return result.returncode or 1
 
-        try:
-            subprocess.run([
-                "nbgrader", nbgrader_cmd, assignment
-            ], check=True)
-            console.print(f"✅ Assignment {assignment} {action}d successfully")
-            return 0
-        except subprocess.CalledProcessError as e:
-            console.print(f"❌ Failed to {action} assignment {assignment}: {e}")
-            return 1
-
-    def _batch_operation(self, action: str, nbgrader_cmd: str) -> int:
-        """Perform a batch nbgrader operation."""
-        console = self.console
-
-        # Determine which directory to look in based on action
-        source_dirs = {
-            "release": self.source_dir,
-            "collect": self.release_dir,
-            "autograde": self.submitted_dir,
-            "feedback": self.autograded_dir
-        }
-
-        source_dir = source_dirs.get(action)
-        if not source_dir or not source_dir.exists():
-            console.print(f"❌ No {action} source directory found")
-            return 1
-
-        assignments = [d.name for d in source_dir.iterdir() if d.is_dir()]
-
-        if not assignments:
-            console.print(f"❌ No assignments found for {action}")
-            return 1
-
-        console.print(f"🔄 Batch {action}ing {len(assignments)} assignments...")
-
-        for assignment in assignments:
-            result = self._single_operation(action, nbgrader_cmd, assignment)
-            if result != 0:
-                return result
-
-        console.print(f"✅ All assignments {action}d successfully!")
+        console.print(f"[green]Assignment {resolved_assignment} {action} completed.[/green]")
         return 0
 
+    def _batch_operation(
+        self,
+        action: str,
+        nbgrader_cmd: str,
+        source_dir: Path,
+        *,
+        student: Optional[str] = None,
+        extra_args: Optional[List[str]] = None,
+    ) -> int:
+        """Perform a batch nbgrader operation."""
+        if not source_dir.exists():
+            self.console.print(f"[red]No {action} source directory found: {source_dir.relative_to(self.project_root)}[/red]")
+            return 1
+
+        assignments = sorted(d.name for d in source_dir.iterdir() if d.is_dir())
+        if not assignments:
+            self.console.print(f"[red]No assignments found for {action}[/red]")
+            return 1
+
+        self.console.print(f"Batch {action}: {len(assignments)} assignment(s)")
+        for assignment in assignments:
+            result = self._single_operation(
+                action,
+                nbgrader_cmd,
+                assignment,
+                student=student,
+                extra_args=extra_args,
+            )
+            if result != 0:
+                return result
+        return 0
+
+    def _resolve_assignment_name(self, assignment_input: str) -> Optional[str]:
+        """Resolve numeric assignment aliases to staged/released module names."""
+        resolved = self._resolve_module_name(assignment_input)
+        return resolved
+
     def _status(self) -> int:
-        """Show status of all assignments."""
+        """Show status of local assignment directories."""
         console = self.console
-        console.print("📊 Assignment Status:")
+        console.print("Assignment Status:")
 
-        # List source assignments
-        if self.source_dir.exists():
-            source_assignments = [d.name for d in self.source_dir.iterdir() if d.is_dir()]
-            console.print(f"📚 Source assignments: {len(source_assignments)}")
-            for assignment in source_assignments:
-                console.print(f"  - {assignment}")
-
-        # List released assignments
-        if self.release_dir.exists():
-            released_assignments = [d.name for d in self.release_dir.iterdir() if d.is_dir()]
-            console.print(f"🚀 Released assignments: {len(released_assignments)}")
-            for assignment in released_assignments:
-                console.print(f"  - {assignment}")
-
-        # List submitted assignments
-        if self.submitted_dir.exists():
-            submitted_assignments = [d.name for d in self.submitted_dir.iterdir() if d.is_dir()]
-            console.print(f"📥 Submitted assignments: {len(submitted_assignments)}")
-            for assignment in submitted_assignments:
-                console.print(f"  - {assignment}")
-
-        # List graded assignments
-        if self.autograded_dir.exists():
-            graded_assignments = [d.name for d in self.autograded_dir.iterdir() if d.is_dir()]
-            console.print(f"🎯 Graded assignments: {len(graded_assignments)}")
-            for assignment in graded_assignments:
+        for label, directory in [
+            ("Source", self.source_dir),
+            ("Release", self.release_dir),
+            ("Submitted", self.submitted_dir),
+            ("Autograded", self.autograded_dir),
+            ("Feedback", self.feedback_dir),
+        ]:
+            assignments = sorted(d.name for d in directory.iterdir() if d.is_dir()) if directory.exists() else []
+            console.print(f"{label}: {len(assignments)}")
+            for assignment in assignments:
                 console.print(f"  - {assignment}")
 
         return 0
 
     def _analytics(self, args: Namespace) -> int:
-        """Show analytics for an assignment."""
-        console = self.console
-        assignment = args.assignment
+        """Show simple local analytics for an assignment."""
+        assignment = self._resolve_assignment_name(args.assignment) or args.assignment
+        submitted = self.submitted_dir / assignment
+        autograded = self.autograded_dir / assignment
 
-        console.print(f"📈 Analytics for assignment: {assignment}")
-
-        # Check submissions
-        assignment_dir = self.submitted_dir / assignment
-        if not assignment_dir.exists():
-            console.print(f"❌ No submissions found for {assignment}")
+        self.console.print(f"Analytics for assignment: {assignment}")
+        if not submitted.exists():
+            self.console.print(f"[red]No submissions found for {assignment}[/red]")
             return 1
 
-        submissions = [d for d in assignment_dir.iterdir() if d.is_dir()]
-        console.print(f"📊 Total submissions: {len(submissions)}")
-
-        # Show grading status
-        graded_dir = self.autograded_dir / assignment
-        if graded_dir.exists():
-            graded_submissions = [d for d in graded_dir.iterdir() if d.is_dir()]
-            console.print(f"✅ Graded submissions: {len(graded_submissions)}")
-            console.print(f"⏳ Pending submissions: {len(submissions) - len(graded_submissions)}")
-
+        submissions = sorted(d for d in submitted.iterdir() if d.is_dir())
+        graded = sorted(d for d in autograded.iterdir() if d.is_dir()) if autograded.exists() else []
+        self.console.print(f"Total submissions: {len(submissions)}")
+        self.console.print(f"Graded submissions: {len(graded)}")
+        self.console.print(f"Pending submissions: {max(0, len(submissions) - len(graded))}")
         return 0
 
     def _report(self, args: Namespace) -> int:
         """Export grades report."""
-        console = self.console
-        format_type = args.format
+        cmd = ["nbgrader", "export", "--course-dir", str(self.assignments_dir)]
+        if args.assignment:
+            assignment = self._resolve_assignment_name(args.assignment) or args.assignment
+            cmd.extend(["--assignment", assignment])
+        if args.student:
+            cmd.extend(["--student", args.student])
 
-        console.print(f"📊 Generating grades report in {format_type} format...")
+        result = self._run_external(cmd)
+        if result.returncode != 0:
+            self.console.print("[red]Failed to generate grades report[/red]")
+            return result.returncode or 1
 
+        self.console.print("[green]Grades report exported by nbgrader.[/green]")
+        return 0
+
+    def _run_external(self, cmd: List[str], *, capture_output: bool = False) -> subprocess.CompletedProcess:
+        """Run an external command from the TinyTorch project root."""
         try:
-            if format_type == "csv":
-                subprocess.run([
-                    "nbgrader", "export"
-                ], check=True)
-                console.print("✅ Grades report exported to grades.csv")
-            else:
-                console.print(f"❌ Unsupported format: {format_type}")
-                return 1
+            return subprocess.run(
+                cmd,
+                cwd=self.project_root,
+                check=False,
+                capture_output=capture_output,
+                text=True,
+            )
+        except FileNotFoundError as exc:
+            return subprocess.CompletedProcess(cmd, 127, "", str(exc))
 
-            return 0
-        except subprocess.CalledProcessError:
-            console.print("❌ Failed to generate grades report")
-            return 1
+    def _show_available_modules(self) -> None:
+        modules = self._get_module_directories()
+        if not modules:
+            return
+        text = Text()
+        text.append("Available modules:\n", style="bold yellow")
+        for module in modules:
+            text.append(f"  • {module}\n", style="white")
+        self.console.print(Panel(text, title="Available Modules", border_style="yellow"))
