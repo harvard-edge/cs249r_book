@@ -164,7 +164,7 @@ def ladder(ax, tiers, wall=True, color=None, domain=None, style='bars'):
         span = np.log10(xmax) - np.log10(xmin)
         for i, (lab, v) in enumerate(tiers):
             yy = n - 1 - i
-            _rung(yy, v, xmin)
+            _rung(yy, v if style == 'lollipop' else v - xmin, xmin)
             _label(lab, v, yy, (np.log10(v) - np.log10(xmin)) / span, v * 0.92, v * 1.55)
         if wall:
             ax.plot([xmin, xmax], [n - 0.45, n - 0.45], color=RED, lw=0.75)

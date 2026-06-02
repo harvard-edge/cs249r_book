@@ -58,7 +58,9 @@ The ratio label remains in the gap and the energy color remains orange.
 
 Log-scaled hierarchy ladders now carry a small `log scale` label on the
 baseline. This prevents readers from assuming that large-span bars use a linear
-axis while preserving the compact margin-figure form.
+axis while preserving the compact margin-figure form. The log-bar renderer also
+terminates each bar at the actual value coordinate, so ratio arrows and bar
+edges align.
 
 ## Deferred Editorial TODO
 
