@@ -175,6 +175,12 @@ CASES: tuple[ContractCase, ...] = (
         must_include=("binder bib", "mechanical", "normalize", "sync"),
     ),
     ContractCase(
+        name="bib mechanical accepts pre-commit option before filenames",
+        argv=("bib", "mechanical", "--dry-run", "--pre-commit", "CITATION.bib"),
+        expected_exit=0,
+        must_include=("CITATION.bib", "Done:"),
+    ),
+    ContractCase(
         name="clean help documents artifact cleanup",
         argv=("clean", "help"),
         expected_exit=0,

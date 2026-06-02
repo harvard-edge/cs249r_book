@@ -70,7 +70,12 @@ class BibCommand:
         )
 
         try:
-            ns = parser.parse_args(args)
+            # Pre-commit appends filenames after the hook entry, so the public
+            # shape is `bib mechanical --pre-commit refs.bib`. Python 3.11's
+            # regular argparse parser rejects that optional-between-positionals
+            # form when a `nargs="*"` positional follows the subcommand.
+            parse = getattr(parser, "parse_intermixed_args", parser.parse_args)
+            ns = parse(args)
         except SystemExit:
             return ("-h" in args) or ("--help" in args)
 
