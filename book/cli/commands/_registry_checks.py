@@ -174,14 +174,14 @@ def run_registry_pytest(root: Path) -> list[RegistryIssue]:
         "../book/tests/test_mlsysim_registry_parity.py",
     ]
     proc = subprocess.run(
-        [sys.executable, "-m", "pytest", *tests, "--no-cov", "-q"],
+        [sys.executable, "-m", "pytest", *tests, "-q", "-o", "addopts="],
         cwd=root / "mlsysim",
         capture_output=True,
         text=True,
     )
     if proc.returncode == 0:
         return []
-    tail = (proc.stdout or proc.stderr or "").strip().splitlines()
+    tail = (proc.stdout + "\n" + proc.stderr).strip().splitlines()
     summary = tail[-1] if tail else f"pytest exited {proc.returncode}"
     return [RegistryIssue(code="registry_pytest", message=summary)]
 
