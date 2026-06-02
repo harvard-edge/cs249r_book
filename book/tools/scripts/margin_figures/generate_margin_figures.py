@@ -189,18 +189,29 @@ def make_roofline_points(chapter, name, *, ridge=60.0, points=None, arrow=False)
     for label, ai, color in points:
         yy = min(ai / ridge, 1.0)
         ax.plot(ai, yy, "o", color=color, ms=3.4, zorder=4)
-        above = yy < 0.78
-        yoff = 1.38 if above else 0.54
-        ax.text(
-            ai,
-            yy * yoff,
-            label,
-            ha="center",
-            va="center",
-            color=color,
-            fontsize=5.0,
-            fontweight="bold",
-        )
+        if yy < 0.78:
+            ax.text(
+                ai,
+                yy * 1.38,
+                label,
+                ha="center",
+                va="center",
+                color=color,
+                fontsize=5.0,
+                fontweight="bold",
+            )
+        else:
+            ax.annotate(
+                label,
+                xy=(ai, yy),
+                xytext=(5, -5),
+                textcoords="offset points",
+                ha="left",
+                va="top",
+                color=color,
+                fontsize=5.0,
+                fontweight="bold",
+            )
     ymin = max(min(yvals + [xmin / ridge]) / 3.0, 1e-4)
     ax.set_xlim(xmin, xmax)
     ax.set_ylim(ymin, 2.0)
@@ -308,7 +319,7 @@ def before_after_quant():
     ax.text(0.08, 0.30, "acc", ha="left", va="center", color=INK, fontsize=5.1)
     ax.plot([x0, x1], [0.70, 0.43], color=COMP, lw=1.8)
     ax.scatter([x0, x1], [0.70, 0.43], s=13, color=COMP, zorder=3)
-    ax.text(0.62, 0.62, "4x smaller", ha="center", va="center", color=COMP, fontsize=4.8)
+    ax.text(0.62, 0.69, "4x smaller", ha="center", va="center", color=COMP, fontsize=4.8)
     ax.plot([x0, x1], [0.30, 0.29], color=MEM, lw=1.8)
     ax.scatter([x0, x1], [0.30, 0.29], s=13, color=MEM, zorder=3)
     ax.text(0.62, 0.22, "~same", ha="center", va="center", color=MEM, fontsize=4.8)
@@ -374,12 +385,13 @@ def ratio_annotation_ladder(chapter, name, tiers, *, ratio_label, domain="memory
     """
     fig, ax = new_fig("hierarchy-ladder")
     ladder(ax, tiers, domain=domain, wall=False)
+    ratio_x, ratio_y = (0.60, 0.50) if len(tiers) == 2 else (0.64, 0.58)
     ax.text(
-        0.94,
-        0.86,
+        ratio_x,
+        ratio_y,
         ratio_label,
         transform=ax.transAxes,
-        ha="right",
+        ha="center",
         va="center",
         color=INK,
         fontsize=5.0,
@@ -405,7 +417,7 @@ def normalized_rows(chapter, name, rows, *, title=None, color=MEM, max_value=Non
     """Horizontal rows on one shared linear denominator."""
     max_value = max_value or max(value for _, value in rows)
     fig, ax = margin_axes("hierarchy-ladder", figsize=(1.24, 0.34 + 0.24 * len(rows)))
-    x, w, h = 0.26, 0.60, 0.13
+    x, w, h = 0.36, 0.50, 0.13
     if title:
         ax.text(0.54, 0.92, title, ha="center", va="center", color=INK, fontsize=5.0, fontweight="bold")
     for idx, (label, value) in enumerate(rows):
@@ -429,7 +441,7 @@ def benchmarking_tail_latency_gap():
         "vol1/benchmarking",
         "benchmarking_tail_latency_gap",
         [("prod p99 200ms", 200), ("bench mean 15ms", 15)],
-        ratio_label="10-13x",
+        ratio_label="10-13.3x",
         domain="time",
     )
 
@@ -502,7 +514,7 @@ def ml_systems_thermal_throttling(candidate=None):
     ax.plot([0.90], [0.36], "o", color=MEM, ms=3.2)
     ax.text(0.26, 0.83, "burst", ha="center", va="center", color=RED, fontsize=5.0, fontweight="bold")
     ax.text(0.73, 0.24, "sustain", ha="center", va="center", color=MEM, fontsize=5.0, fontweight="bold")
-    ax.text(0.50, 0.54, "throttle", ha="center", va="center", color=INK, fontsize=4.7)
+    ax.text(0.57, 0.57, "throttle", ha="left", va="center", color=INK, fontsize=4.7)
     write(fig, "vol1/ml_systems", "vol1_ml_systems_margin_003")
 
 
@@ -588,9 +600,9 @@ def compute_infrastructure_rack_power_envelope(candidate=None):
     ax.axvspan(x0 + w * legacy_hi / max_kw, x0 + w, color=REDFILL, alpha=0.32)
     ax.axvline(x0 + w * legacy_hi / max_kw, color=RED, lw=0.7, ls="--")
     ax.plot(x0 + w * dgx_kw / max_kw, y, "o", color=RED, ms=3.8)
-    ax.text(x0 + w * legacy_hi / max_kw, y + 0.22, "10kW\nair", ha="center", va="center", color=RED, fontsize=4.6, fontweight="bold")
+    ax.text(x0 + w * legacy_hi / max_kw + 0.035, y + 0.23, "10kW\nair", ha="left", va="center", color=RED, fontsize=4.6, fontweight="bold")
     ax.text(x0 + w * dgx_kw / max_kw - 0.02, y - 0.20, "DGX\n33kW", ha="right", va="center", color=RED, fontsize=4.6, fontweight="bold")
-    ax.text(0.52, 0.88, "rack power", ha="center", va="center", color=INK, fontsize=5.0)
+    ax.text(0.68, 0.88, "rack power", ha="center", va="center", color=INK, fontsize=5.0)
     write(fig, "vol2/compute_infrastructure", "vol2_compute_infrastructure_margin_002")
 
 
@@ -602,7 +614,7 @@ def distributed_training_ratio_threshold(candidate=None):
     ax.axvline(x + w / 2, ymin=0.22, ymax=0.78, color=RED, lw=0.75, ls="--")
     ax.text(x + w * 0.25, y + h / 2, "compute", ha="center", va="center", color="white", fontsize=4.8, fontweight="bold")
     ax.text(x + w * 0.75, y + h / 2, "comm", ha="center", va="center", color="white", fontsize=4.8, fontweight="bold")
-    ax.text(x + w / 2, 0.78, "rho=1", ha="center", va="center", color=RED, fontsize=5.0, fontweight="bold")
+    ax.text(x + w / 2 + 0.035, 0.78, "rho=1", ha="left", va="center", color=RED, fontsize=5.0, fontweight="bold")
     ax.text(x + w * 0.22, 0.24, "ideal", ha="center", va="center", color=COMP, fontsize=4.8)
     ax.text(x + w * 0.76, 0.24, "wait", ha="center", va="center", color=RED, fontsize=4.8)
     write(fig, "vol2/distributed_training", "vol2_distributed_training_margin_001")
@@ -720,7 +732,7 @@ def fleet_orchestration_priority_inversion():
     ax.text(0.45, 0.83, "waits", ha="center", va="center", color=INK, fontsize=4.8)
     ax.annotate("", xy=(0.59, 0.62), xytext=(0.31, 0.36), arrowprops=dict(arrowstyle="->", color=GRID, lw=0.75))
     ax.text(0.50, 0.43, "exit\nblocked", ha="center", va="center", color=INK, fontsize=4.5)
-    ax.plot(0.20, 0.70, "o", color=RED, ms=4.2, zorder=5)
+    ax.plot(0.08, 0.78, "o", color=RED, ms=4.2, zorder=5)
     write(fig, "vol2/fleet_orchestration", "fleet_orchestration_dependency_cascade")
 
 
@@ -978,7 +990,7 @@ def model_serving_model_load_slo(candidate=None):
     ax.axvspan(slo_x, x0 + w, color=REDFILL, alpha=0.36)
     ax.axvline(slo_x, color=RED, lw=0.7, ls="--")
     ax.plot(load_x, y, "o", color=RED, ms=3.8)
-    ax.text(slo_x, y + 0.21, "50ms\nSLO", ha="center", va="center", color=RED, fontsize=4.6, fontweight="bold")
+    ax.text(slo_x - 0.035, y + 0.21, "50ms\nSLO", ha="right", va="center", color=RED, fontsize=4.6, fontweight="bold")
     ax.text(load_x - 0.02, y - 0.20, "load\n312ms", ha="right", va="center", color=RED, fontsize=4.6, fontweight="bold")
     ax.text(0.50, 0.88, "model swap", ha="center", va="center", color=INK, fontsize=5.0)
     write(fig, "vol1/model_serving", "vol1_model_serving_margin_001")
@@ -1158,7 +1170,7 @@ def ops_scale_sample_size_curve(candidate=None):
     ax.plot(t[8], y[8], "o", color=RED, ms=3.3)
     ax.plot(t[-1], y[-1], "o", color=DATA, ms=3.3)
     ax.text(0.25, 0.80, "small\neffect", ha="center", va="center", color=RED, fontsize=4.8, fontweight="bold")
-    ax.text(0.78, 0.22, "large\neffect", ha="center", va="center", color=DATA, fontsize=4.8)
+    ax.text(0.78, 0.34, "large\neffect", ha="center", va="center", color=DATA, fontsize=4.8)
     ax.text(0.55, 0.53, "n ~ 1/d^2", ha="center", va="center", color=INK, fontsize=4.8)
     write(fig, "vol2/ops_scale", "vol2_ops_scale_margin_002")
 
@@ -1245,7 +1257,7 @@ def responsible_ai_fleet_risk(candidate=None):
     ax.plot(t, y, color=RED, lw=1.45)
     ax.axhline(0.90, color=GRID, lw=0.6)
     ax.text(0.27, 0.78, "rare", ha="center", va="center", color=INK, fontsize=4.9)
-    ax.text(0.70, 0.83, "certain", ha="center", va="center", color=RED, fontsize=5.0, fontweight="bold")
+    ax.text(0.72, 0.70, "certain", ha="center", va="center", color=RED, fontsize=5.0, fontweight="bold")
     ax.text(0.58, 0.24, "fleet scale", ha="center", va="center", color=INK, fontsize=4.8)
     write(fig, "vol2/responsible_ai", "vol2_responsible_ai_margin_004")
 
@@ -1297,7 +1309,7 @@ def performance_engineering_fleet_mfu(candidate=None):
     ax.text(x1, 0.86, "fleet", ha="center", va="center", color="#555555", fontsize=4.9)
     ax.plot([x0, x1], [0.68, 0.34], color=RED, lw=1.6)
     ax.scatter([x0, x1], [0.68, 0.34], s=13, color=RED, zorder=3)
-    ax.text(0.50, 0.54, "sync tax", ha="center", va="center", color=RED, fontsize=4.8, fontweight="bold")
+    ax.text(0.50, 0.42, "sync tax", ha="center", va="center", color=RED, fontsize=4.8, fontweight="bold")
     ax.text(x0, 0.20, "high", ha="center", va="center", color=INK, fontsize=4.8)
     ax.text(x1, 0.20, "lower", ha="center", va="center", color=INK, fontsize=4.8)
     write(fig, "vol2/performance_engineering", "vol2_performance_engineering_margin_004")
@@ -1736,8 +1748,8 @@ def _generic_blast(candidate):
 def _nested_ml_system(candidate):
     fig, ax = margin_axes("other-new", figsize=(1.20, 0.92))
     rect(ax, 0.08, 0.14, 0.84, 0.66, "#E8ECEF", ec=GRID, lw=0.8)
-    rect(ax, 0.39, 0.39, 0.22, 0.16, COMP, ec="white", lw=0.8)
-    ax.text(0.50, 0.47, "ML\ncode", ha="center", va="center", color="white", fontsize=5.1, fontweight="bold")
+    rect(ax, 0.38, 0.39, 0.24, 0.16, COMP, ec="white", lw=0.8)
+    ax.text(0.50, 0.47, "ML", ha="center", va="center", color="white", fontsize=6.0, fontweight="bold")
     ax.text(0.50, 0.72, "support 95%", ha="center", va="center", color=INK, fontsize=5.2)
     write(fig, candidate["chapter"], curated_asset_name(candidate["id"]))
 
