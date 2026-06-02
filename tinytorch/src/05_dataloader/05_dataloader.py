@@ -1556,8 +1556,8 @@ for batch_images, batch_labels in loader:
 
 **Full Datasets (for serious training):**
 ```python
-# See milestones/03_mlp_revival_1986/ for MNIST download (28×28 images)
-# See milestones/04_cnn_revolution_1998/ for CIFAR-10 download (32×32×3 images)
+# See milestones/data_manager.py for optional MNIST download utilities
+# See milestones/04_1998_cnn/02_lecun_cifar10.py for CIFAR-10 download
 ```
 
 ### What You've Accomplished
@@ -2333,7 +2333,7 @@ Your DataLoader implementation enables efficient training of CNNs and larger mod
 Export with: `tito module complete 05`
 
 **Apply your knowledge:**
-- Milestone 03: Train MLP on real MNIST digits
+- Milestone 03: Train MLP on TinyDigits
 - Milestone 04: Train CNN on CIFAR-10 images
 
 **Then continue with:** Module 06 (Autograd) for automatic differentiation!

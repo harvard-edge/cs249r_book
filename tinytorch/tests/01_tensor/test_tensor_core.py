@@ -417,14 +417,15 @@ class TestTensorBroadcasting:
 
     def test_scalar_broadcasting(self):
         """
-        WHAT: Add a scalar to every element.
+        WHAT: Apply a scalar to every element.
 
         WHY: Scalar operations are common:
         - Adding bias: output + bias
         - Normalization: (x - mean) / std
         - Scaling: x * 0.1
 
-        STUDENT LEARNING: Scalars broadcast to match any shape.
+        STUDENT LEARNING: Scalars broadcast to match any shape, regardless
+        of whether the scalar appears before or after the Tensor.
         """
         t = Tensor([1, 2, 3])
 
@@ -437,6 +438,20 @@ class TestTensorBroadcasting:
             f"  Got: {result.data}\n"
             "The scalar 5 should be added to every element."
         )
+
+        result = 5 + t
+        assert np.array_equal(result.data, expected), (
+            "Scalar arithmetic should work naturally with the scalar first too."
+        )
+
+        result = 2 * t
+        assert np.array_equal(result.data, np.array([2, 4, 6]))
+
+        result = 10 - t
+        assert np.array_equal(result.data, np.array([9, 8, 7]))
+
+        result = 12 / t
+        assert np.allclose(result.data, np.array([12.0, 6.0, 4.0]))
 
     def test_vector_broadcasting(self):
         """

@@ -112,7 +112,7 @@ class TestQuickVerification:
 
     @pytest.mark.quick
     def test_milestone_list_works(self):
-        """'tito milestones list' shows available milestones."""
+        """'tito milestone list' shows available milestones."""
         code, stdout, stderr = run_tito(["milestone", "list", "--simple"])
         assert code == 0, f"milestone list failed: {stderr}"
         # Should show milestone names
@@ -163,12 +163,14 @@ class TestModuleFlow:
 
     @pytest.fixture(autouse=True)
     def backup_progress(self):
-        """Backup and restore progress.json around tests."""
-        progress_file = PROJECT_ROOT / "progress.json"
-        backup_file = PROJECT_ROOT / "progress.json.e2e_backup"
+        """Backup and restore .tito/progress.json around tests."""
+        tito_dir = PROJECT_ROOT / ".tito"
+        progress_file = tito_dir / "progress.json"
+        backup_file = tito_dir / "progress.json.e2e_backup"
+        had_progress = progress_file.exists()
 
         # Backup existing progress
-        if progress_file.exists():
+        if had_progress:
             shutil.copy(progress_file, backup_file)
 
         yield
@@ -177,10 +179,8 @@ class TestModuleFlow:
         if backup_file.exists():
             shutil.copy(backup_file, progress_file)
             backup_file.unlink()
-        elif progress_file.exists():
-            # If there was no original, remove the test progress
-            # Actually, keep it - don't delete real progress
-            pass
+        elif not had_progress and progress_file.exists():
+            progress_file.unlink()
 
     @pytest.mark.module_flow
     def test_module_01_start_works(self):
@@ -217,7 +217,9 @@ class TestModuleFlow:
     @pytest.mark.module_flow
     def test_progress_tracking_persists(self):
         """Progress is saved and persisted across commands."""
-        progress_file = PROJECT_ROOT / "progress.json"
+        tito_dir = PROJECT_ROOT / ".tito"
+        tito_dir.mkdir(exist_ok=True)
+        progress_file = tito_dir / "progress.json"
 
         # Set a known state
         progress_file.write_text(json.dumps({
@@ -264,14 +266,14 @@ class TestMilestoneFlow:
 
     @pytest.mark.milestone_flow
     def test_milestone_info_works(self):
-        """'tito milestones info 01' shows milestone details."""
+        """'tito milestone info 01' shows milestone details."""
         code, stdout, stderr = run_tito(["milestone", "info", "01"])
         assert code == 0
         assert "Perceptron" in stdout or "1958" in stdout
 
     @pytest.mark.milestone_flow
     def test_milestone_status_works(self):
-        """'tito milestones status' shows progress."""
+        """'tito milestone status' shows progress."""
         code, stdout, stderr = run_tito(["milestone", "status"])
         assert code == 0
 
