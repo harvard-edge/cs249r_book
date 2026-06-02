@@ -1,4 +1,4 @@
-"""Characterization tests for MLSysIM Pint registry and book-facing unit aliases."""
+"""Characterization tests for MLSysIM Pint registry and unit aliases."""
 
 from __future__ import annotations
 

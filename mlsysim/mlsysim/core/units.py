@@ -217,7 +217,7 @@ Mparam = ureg.Mparam
 Bparam = ureg.Bparam
 Tparam = ureg.Tparam
 
-# --- Book-facing aliases (prefer these over ureg.* in QMD) ---
+# --- Convenience aliases (prefer these over ureg.* in authored examples) ---
 J = joule
 kJ = ureg.kilojoule
 MJ = ureg.megajoule

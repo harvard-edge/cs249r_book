@@ -1,6 +1,6 @@
 """Reference statistics for real-world scenarios and case studies.
 
-This registry is the home for the book's recurring real-world reference figures —
+This registry is the home for reusable real-world reference figures:
 illustrative scale anchors (Gmail volume, Waymo sensor rate) and case-study model
 metrics (the TinyML anomaly detector). Every value carries sourced() provenance.
 

@@ -603,7 +603,7 @@ FABRIC_LATENCY_ASSUMPTIONS = _conv(
 SWITCH_OPTICS_REFERENCE = _conv(
     "prov:switch-optics-reference",
     "Datacenter switch-ASIC capacity (51.2T/102.4T) and 400G optics power (pluggable/CPO) reference figures",
-    notes="2025-26 datacenter-switching reference points for the network-fabrics worked examples.",
+    notes="2025-26 datacenter-switching reference points for network-fabric sizing analyses.",
 )
 
 NVIDIA_QUANTUM2_QM97XX_SWITCH = _ds(
@@ -683,7 +683,7 @@ CLOUD_PRICING_2024 = Provenance(
     id="prov:cloud-pricing-2024",
     kind=ProvenanceKind.ILLUSTRATIVE,
     ref="Illustrative US cloud list prices (2024–2025 order of magnitude)",
-    notes="GPU-hour, egress, and electricity rates for worked examples—not a specific vendor quote.",
+    notes="GPU-hour, egress, and electricity rate anchors; not a specific vendor quote.",
     verified="2025-03-06",
 )
 
@@ -691,7 +691,7 @@ STORAGE_PRICING_2024 = Provenance(
     id="prov:storage-pricing-2024",
     kind=ProvenanceKind.ILLUSTRATIVE,
     ref="Illustrative cloud/object-storage list prices (2024 order of magnitude)",
-    notes="S3, Glacier, NVMe tier rates for data-engineering worked examples.",
+    notes="S3, Glacier, and NVMe tier rate anchors for data-engineering scenarios.",
     verified="2025-03-06",
 )
 

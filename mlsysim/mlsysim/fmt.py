@@ -606,7 +606,7 @@ def fmt_eur(
     scale=None,
     approx=False,
 ):
-    """Format euro-denominated amounts using the book's ``EUR`` prose style."""
+    """Format euro-denominated amounts using explicit ``EUR`` prose style."""
     from .core.units import EUR
 
     if isinstance(amount, ureg.Quantity):
@@ -1296,9 +1296,9 @@ def fmt_sci_flops(quantity, *, unit=None, precision=2):
     """Format FLOP work/count quantities in scientific notation.
 
     QMD code should not spell ``unit_label="FLOPs"`` at each call site. This
-    helper keeps the Pint conversion checked while centralizing the book's
-    prose convention that scalar floating-point operation counts are rendered
-    as plural ``FLOPs`` in scientific notation.
+    helper keeps the Pint conversion checked while centralizing the prose
+    convention that scalar floating-point operation counts are rendered as
+    plural ``FLOPs`` in scientific notation.
     """
     if not isinstance(quantity, ureg.Quantity):
         raise TypeError("fmt_sci_flops() requires a Pint Quantity.")
@@ -2225,8 +2225,8 @@ def fmt_memory_capacity(quantity, *, unit=None, precision=None, commas=False):
 
     Hardware spec sheets commonly label binary memory capacities with decimal
     symbols such as ``GB``. The registry keeps the Pint quantity intact (often
-    ``GiB`` for accelerator memory), while this formatter centralizes the book
-    display convention: preserve the binary magnitude and render the vendor
+    ``GiB`` for accelerator memory), while this formatter centralizes the vendor
+    display convention: preserve the binary magnitude and render the published
     capacity label. Use ``fmt_memory`` when physical decimal/binary conversion
     should be shown literally.
     """
