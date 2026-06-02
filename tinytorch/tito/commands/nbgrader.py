@@ -20,6 +20,9 @@ from .base import BaseCommand
 
 
 MODULE_DIR_RE = re.compile(r"^(\d{2})_[A-Za-z0-9_]+$")
+SOLUTION_BEGIN_MARKER = "### BEGIN SOLUTION"
+SOLUTION_END_MARKER = "### END SOLUTION"
+TEST_FUNCTION_RE = re.compile(r"^\s*def\s+test_", flags=re.MULTILINE)
 
 
 class NBGraderCommand(BaseCommand):
@@ -294,7 +297,9 @@ class NBGraderCommand(BaseCommand):
             "# release/, submitted/, autograded/, feedback/, and gradebook.db.\n"
             'c.CourseDirectory.root = "assignments"\n'
             'c.CourseDirectory.course_id = "tinytorch"\n'
-            'c.CourseDirectory.db_url = "sqlite:///assignments/gradebook.db"\n'
+            "# TinyTorch validates marker metadata during staging. Allow written\n"
+            "# reflection cells to be stripped without assigning manual-grade points.\n"
+            "c.ClearSolutions.enforce_metadata = False\n"
             "c.ExecutePreprocessor.timeout = 120\n"
         )
 
@@ -412,12 +417,18 @@ class NBGraderCommand(BaseCommand):
         for index, cell in enumerate(cells, start=1):
             metadata = cell.setdefault("metadata", {})
             nbgrader = metadata.get("nbgrader")
-            source = "".join(cell.get("source", []))
+            source = self._cell_source(cell)
+            has_begin_marker = SOLUTION_BEGIN_MARKER in source
+            has_end_marker = SOLUTION_END_MARKER in source
+            has_solution_markers = has_begin_marker or has_end_marker
+            has_complete_solution_markers = has_begin_marker and has_end_marker
+            has_test_function = TEST_FUNCTION_RE.search(source) is not None
+            is_markdown = cell.get("cell_type") == "markdown"
 
             if nbgrader is None:
-                if "BEGIN SOLUTION" in source or "END SOLUTION" in source:
+                if has_solution_markers:
                     errors.append(f"Cell {index} contains a solution marker but no nbgrader metadata")
-                if re.search(r"^\s*def\s+test_", source, flags=re.MULTILINE):
+                if has_test_function:
                     errors.append(f"Cell {index} contains a test function but no nbgrader metadata")
                 continue
 
@@ -426,7 +437,10 @@ class NBGraderCommand(BaseCommand):
                 continue
 
             nbgrader_cells += 1
-            nbgrader.setdefault("schema_version", 3)
+            nbgrader["schema_version"] = 3
+
+            if has_begin_marker != has_end_marker:
+                errors.append(f"Cell {index} has mismatched BEGIN/END SOLUTION markers")
 
             grade_id = nbgrader.get("grade_id")
             if not grade_id:
@@ -438,15 +452,28 @@ class NBGraderCommand(BaseCommand):
 
             if nbgrader.get("grade") is True:
                 graded_cells += 1
-                if nbgrader.get("locked") is not True:
-                    errors.append(f"Graded cell '{grade_id}' must have locked=true")
+                if has_complete_solution_markers and not has_test_function:
+                    nbgrader["locked"] = False
+                    nbgrader["solution"] = True
+                else:
+                    nbgrader["locked"] = True
+                    nbgrader["solution"] = False
+                if has_solution_markers and has_test_function:
+                    errors.append(f"Graded test cell '{grade_id}' must not contain solution markers")
                 if "points" not in nbgrader:
                     errors.append(f"Graded cell '{grade_id}' is missing points")
-                nbgrader.setdefault("solution", False)
+                continue
 
-            if nbgrader.get("solution") is True:
-                nbgrader.setdefault("grade", False)
-                nbgrader.setdefault("locked", False)
+            nbgrader["grade"] = False
+            if has_complete_solution_markers:
+                nbgrader["solution"] = not is_markdown
+                nbgrader["locked"] = False
+            elif nbgrader.get("solution") is True:
+                nbgrader["solution"] = False
+                nbgrader["locked"] = True
+            else:
+                nbgrader["solution"] = False
+                nbgrader.setdefault("locked", True)
 
         if nbgrader_cells == 0:
             errors.append("Notebook has no nbgrader metadata cells")
@@ -454,6 +481,15 @@ class NBGraderCommand(BaseCommand):
             errors.append("Notebook has no graded nbgrader cells")
 
         return errors
+
+    @staticmethod
+    def _cell_source(cell: Dict) -> str:
+        source = cell.get("source", "")
+        if isinstance(source, list):
+            return "".join(source)
+        if isinstance(source, str):
+            return source
+        return ""
 
     def _release(self, args: Namespace) -> int:
         if args.all:

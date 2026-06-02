@@ -41,6 +41,24 @@ def make_module(project_root: Path, module_name: str = "01_tensor") -> Path:
                 "execution_count": None,
                 "metadata": {
                     "nbgrader": {
+                        "grade": False,
+                        "grade_id": "tensor-class",
+                        "solution": True,
+                    }
+                },
+                "outputs": [],
+                "source": (
+                    "def add_one(x):\n"
+                    "    ### BEGIN SOLUTION\n"
+                    "    return x + 1\n"
+                    "    ### END SOLUTION\n"
+                ),
+            },
+            {
+                "cell_type": "code",
+                "execution_count": None,
+                "metadata": {
+                    "nbgrader": {
                         "grade": True,
                         "grade_id": "test-basic",
                         "locked": True,
@@ -71,12 +89,18 @@ def test_generate_stages_current_notebook_with_normalized_metadata(tmp_path):
     assert staged.exists()
 
     notebook = json.loads(staged.read_text(encoding="utf-8"))
-    solution_cell = notebook["cells"][0]["metadata"]["nbgrader"]
-    graded_cell = notebook["cells"][1]["metadata"]["nbgrader"]
+    setup_cell = notebook["cells"][0]["metadata"]["nbgrader"]
+    solution_cell = notebook["cells"][1]["metadata"]["nbgrader"]
+    graded_cell = notebook["cells"][2]["metadata"]["nbgrader"]
 
+    assert setup_cell["schema_version"] == 3
+    assert setup_cell["solution"] is False
+    assert setup_cell["locked"] is True
     assert solution_cell["schema_version"] == 3
+    assert solution_cell["solution"] is True
     assert solution_cell["locked"] is False
     assert graded_cell["schema_version"] == 3
+    assert graded_cell["locked"] is True
     assert graded_cell["solution"] is False
 
 
@@ -102,6 +126,143 @@ def test_generate_fails_when_notebook_has_no_nbgrader_metadata(tmp_path):
         }),
         encoding="utf-8",
     )
+    command = NBGraderCommand(make_config(tmp_path))
+
+    result = command._generate(Namespace(all=False, module_range=None, module="01"))
+
+    assert result == 1
+    assert not (tmp_path / "assignments" / "source" / "01_tensor" / "tensor.ipynb").exists()
+
+
+def test_generate_keeps_visible_support_tests_ungraded(tmp_path):
+    make_module(tmp_path)
+    notebook_path = tmp_path / "modules" / "01_tensor" / "tensor.ipynb"
+    notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
+    notebook["cells"].insert(
+        2,
+        {
+            "cell_type": "code",
+            "execution_count": None,
+            "metadata": {
+                "nbgrader": {
+                    "grade": False,
+                    "grade_id": "visible-test",
+                    "solution": True,
+                }
+            },
+            "outputs": [],
+            "source": "def test_visible_example():\n    assert True\n",
+        },
+    )
+    notebook_path.write_text(json.dumps(notebook), encoding="utf-8")
+    command = NBGraderCommand(make_config(tmp_path))
+
+    result = command._generate(Namespace(all=False, module_range=None, module="01"))
+
+    assert result == 0
+    staged = tmp_path / "assignments" / "source" / "01_tensor" / "tensor.ipynb"
+    staged_notebook = json.loads(staged.read_text(encoding="utf-8"))
+    support_test = staged_notebook["cells"][2]["metadata"]["nbgrader"]
+    assert support_test["grade"] is False
+    assert support_test["solution"] is False
+    assert support_test["locked"] is True
+
+
+def test_generate_completes_schema_for_non_solution_cells(tmp_path):
+    make_module(tmp_path)
+    notebook_path = tmp_path / "modules" / "01_tensor" / "tensor.ipynb"
+    notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
+    notebook["cells"].insert(
+        2,
+        {
+            "cell_type": "code",
+            "execution_count": None,
+            "metadata": {
+                "nbgrader": {
+                    "grade": False,
+                    "grade_id": "provided-helper",
+                    "solution": False,
+                }
+            },
+            "outputs": [],
+            "source": "def helper():\n    return 1\n",
+        },
+    )
+    notebook["cells"].insert(
+        3,
+        {
+            "cell_type": "markdown",
+            "metadata": {
+                "nbgrader": {
+                    "grade": False,
+                    "grade_id": "editable-reflection",
+                    "locked": False,
+                }
+            },
+            "source": "Write your answer here.\n",
+        },
+    )
+    notebook_path.write_text(json.dumps(notebook), encoding="utf-8")
+    command = NBGraderCommand(make_config(tmp_path))
+
+    result = command._generate(Namespace(all=False, module_range=None, module="01"))
+
+    assert result == 0
+    staged = tmp_path / "assignments" / "source" / "01_tensor" / "tensor.ipynb"
+    staged_notebook = json.loads(staged.read_text(encoding="utf-8"))
+    provided_helper = staged_notebook["cells"][2]["metadata"]["nbgrader"]
+    editable_reflection = staged_notebook["cells"][3]["metadata"]["nbgrader"]
+    assert provided_helper["grade"] is False
+    assert provided_helper["solution"] is False
+    assert provided_helper["locked"] is True
+    assert editable_reflection["grade"] is False
+    assert editable_reflection["solution"] is False
+    assert editable_reflection["locked"] is False
+
+
+def test_generate_keeps_ungraded_markdown_reflections_editable(tmp_path):
+    make_module(tmp_path)
+    notebook_path = tmp_path / "modules" / "01_tensor" / "tensor.ipynb"
+    notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
+    notebook["cells"].insert(
+        2,
+        {
+            "cell_type": "markdown",
+            "metadata": {
+                "nbgrader": {
+                    "grade": False,
+                    "grade_id": "reflection",
+                    "solution": True,
+                }
+            },
+            "source": (
+                "Question\n\n"
+                "### BEGIN SOLUTION\n"
+                "Instructor answer.\n"
+                "### END SOLUTION\n"
+            ),
+        },
+    )
+    notebook_path.write_text(json.dumps(notebook), encoding="utf-8")
+    command = NBGraderCommand(make_config(tmp_path))
+
+    result = command._generate(Namespace(all=False, module_range=None, module="01"))
+
+    assert result == 0
+    staged = tmp_path / "assignments" / "source" / "01_tensor" / "tensor.ipynb"
+    staged_notebook = json.loads(staged.read_text(encoding="utf-8"))
+    reflection = staged_notebook["cells"][2]["metadata"]["nbgrader"]
+    assert reflection["grade"] is False
+    assert reflection["solution"] is False
+    assert reflection["locked"] is False
+
+
+def test_generate_fails_on_mismatched_solution_markers(tmp_path):
+    make_module(tmp_path)
+    notebook_path = tmp_path / "modules" / "01_tensor" / "tensor.ipynb"
+    notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
+    notebook["cells"][1]["source"] = "def broken(x):\n    ### BEGIN SOLUTION\n    return x\n"
+    notebook_path.write_text(json.dumps(notebook), encoding="utf-8")
     command = NBGraderCommand(make_config(tmp_path))
 
     result = command._generate(Namespace(all=False, module_range=None, module="01"))
@@ -149,6 +310,8 @@ def test_init_creates_default_config_and_runs_nbgrader_db_upgrade(tmp_path, monk
     assert (tmp_path / "assignments" / "source").is_dir()
     config_text = (tmp_path / "nbgrader_config.py").read_text(encoding="utf-8")
     assert 'c.CourseDirectory.root = "assignments"' in config_text
+    assert "c.CourseDirectory.db_url" not in config_text
+    assert "c.ClearSolutions.enforce_metadata = False" in config_text
     assert calls == [
         (["nbgrader", "--version"], True),
         (["nbgrader", "db", "upgrade"], True),

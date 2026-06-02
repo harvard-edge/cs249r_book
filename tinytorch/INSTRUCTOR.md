@@ -20,7 +20,10 @@ source .venv/bin/activate
 
 # Install with instructor tools
 pip install -r requirements.txt
-pip install nbgrader
+
+# NBGrader must be on PATH for instructor workflows.
+# For course deployments, install it system-wide or in the managed grading environment.
+python -m pip install nbgrader
 
 # Setup grading infrastructure (creates assignments/ and nbgrader_config.py)
 tito nbgrader init
@@ -40,6 +43,8 @@ tito nbgrader
 ### **NBGrader Scope**
 NBGrader is instructor/developer tooling. TinyTorch stages notebooks into nbgrader's expected assignment layout; nbgrader itself handles release notebook generation, collection, autograding, feedback, and grade export.
 
+Tito owns TinyTorch-specific staging. It keeps the existing grading policy from source metadata, and it only treats regions delimited by `### BEGIN SOLUTION` / `### END SOLUTION` as removable solution content. Setup, import, demo, and visible-check cells without those markers are kept in the student release and locked when staged.
+
 ### **Using NBGrader via Tito**
 We provide `tito nbgrader` commands for grading workflows.
 
@@ -58,7 +63,7 @@ tito nbgrader release 01_tensor
 ```bash
 # Option A: GitHub Classroom (recommended)
 # 1. Create assignment repository from TinyTorch
-# 2. Remove solutions from modules
+# 2. Add the files generated under assignments/release/
 # 3. Students clone and work
 
 # Option B: Direct distribution
