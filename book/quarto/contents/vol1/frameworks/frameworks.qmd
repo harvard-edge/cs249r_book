@@ -1470,13 +1470,15 @@ The compilation overhead in these examples (approximately 100 ms to compile the 
 # │ Show: A 2× speedup from eliminating redundant kernel launches and memory traffic.
 # │ How: Model dispatch and memory overhead for eager vs. fused Add+ReLU.
 # │
-# │ Imports: mlsysim.book (fmt, check)
+# │ Imports: mlsysim.book (fmt_time, fmt_multiple, check)
 # │ Exports: python_dispatch_us_str, kernel_launch_only_us_str, memory_access_us_str,
 # │          kernel_launch_us_str, eager_overhead_str, compiled_overhead_str,
 # │          overhead_speedup_str, bw_efficiency_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt_int,  fmt, check
+from mlsysim.fmt import check, fmt_multiple, fmt_time
+from mlsysim import Ops
+from mlsysim.core.constants import microsecond
 
 # ┌── LEGO ───────────────────────────────────────────────
 class FusionSpeedup:
@@ -1486,9 +1488,9 @@ class FusionSpeedup:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    python_dispatch_us = 10
-    kernel_launch_us = 5
-    memory_access_us = 1
+    python_dispatch = Ops.RuntimeOverheads.PythonDispatch
+    kernel_launch = Ops.RuntimeOverheads.KernelLaunch
+    memory_access = Ops.RuntimeOverheads.TinyMemoryAccess
 
     eager_ops = 2
     fused_ops = 1
@@ -1497,28 +1499,28 @@ class FusionSpeedup:
     fused_mem_factor = 2 # 1R + 1W (intermediate fused)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    launch_overhead = python_dispatch_us + kernel_launch_us
+    launch_overhead = python_dispatch + kernel_launch
 
     eager_total_overhead = eager_ops * launch_overhead
     fused_total_overhead = fused_ops * launch_overhead
 
-    speedup = eager_total_overhead/fused_total_overhead
+    speedup = (eager_total_overhead/fused_total_overhead).to("").magnitude
     bw_efficiency = eager_mem_factor/fused_mem_factor
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(speedup >= 1.5, f"Fusion speedup ({speedup:.1f}x) is too small to justify compilation complexity.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    python_dispatch_us_str = fmt(python_dispatch_us, precision=0, commas=False)
-    kernel_launch_only_us_str = fmt(kernel_launch_us, precision=0, commas=False)
-    memory_access_us_str = fmt(memory_access_us, precision=0, commas=False)
-    kernel_launch_us_str = fmt(launch_overhead, precision=0, commas=False)
+    python_dispatch_us_str = fmt_time(python_dispatch, microsecond, precision=0, commas=False)
+    kernel_launch_only_us_str = fmt_time(kernel_launch, microsecond, precision=0, commas=False)
+    memory_access_us_str = fmt_time(memory_access, microsecond, precision=0, commas=False)
+    kernel_launch_us_str = fmt_time(launch_overhead, microsecond, precision=0, commas=False)
 
-    eager_overhead_str = fmt(eager_total_overhead, precision=0, commas=False)
-    compiled_overhead_str = fmt(fused_total_overhead, precision=0, commas=False)
+    eager_overhead_str = fmt_time(eager_total_overhead, microsecond, precision=0, commas=False)
+    compiled_overhead_str = fmt_time(fused_total_overhead, microsecond, precision=0, commas=False)
 
-    overhead_speedup_str = fmt_int(speedup, commas=False)
-    bw_efficiency_str = fmt_int(bw_efficiency, commas=False)
+    overhead_speedup_str = fmt_multiple(speedup, precision=0, commas=False)
+    bw_efficiency_str = fmt_multiple(bw_efficiency, precision=0, commas=False)
 
 # Note: Use FusionSpeedup.python_dispatch_us_str directly.
 ```
@@ -1530,9 +1532,9 @@ The **Latency Term** $(L_{\text{lat}})$ in the iron law is dominated by software
 
 **Constants of latency**:
 
-*   **Python dispatch**: ~`{python} FusionSpeedup.python_dispatch_us_str` μs per operation.
-*   **Kernel launch**: ~`{python} FusionSpeedup.kernel_launch_only_us_str` μs per operation.
-*   **Memory access (VRAM)**: ~`{python} FusionSpeedup.memory_access_us_str` μs.
+*   **Python dispatch**: ~`{python} FusionSpeedup.python_dispatch_us_str` per operation.
+*   **Kernel launch**: ~`{python} FusionSpeedup.kernel_launch_only_us_str` per operation.
+*   **Memory access (VRAM)**: ~`{python} FusionSpeedup.memory_access_us_str`.
 
 **Scenario one: Eager Mode (The "Tiny Op" Trap)**
 Consider a simple activation block: `y = relu(x + bias)`.
@@ -1540,11 +1542,11 @@ Consider a simple activation block: `y = relu(x + bias)`.
 *   **Operations**: Two (Add, ReLU).
 *   **Execution**:
 
-    1.  Launch `Add` Kernel: `{python} FusionSpeedup.kernel_launch_us_str` µs overhead.
+    1.  Launch `Add` Kernel: `{python} FusionSpeedup.kernel_launch_us_str` overhead.
     2.  Read/Write Memory: $2N$ bytes.
-    3.  Launch `ReLU` Kernel: `{python} FusionSpeedup.kernel_launch_us_str` µs overhead.
+    3.  Launch `ReLU` Kernel: `{python} FusionSpeedup.kernel_launch_us_str` overhead.
     4.  Read/Write Memory: $2N$ bytes.
-*   **Total overhead**: `{python} FusionSpeedup.eager_overhead_str` µs.
+*   **Total overhead**: `{python} FusionSpeedup.eager_overhead_str`.
 *   **Total memory traffic**: $4N$ bytes.
 
 **Scenario two: Compiled Mode (Fusion)**
@@ -1552,9 +1554,9 @@ The compiler fuses this into one kernel: `FusedAddRelu`.
 
 *   **Execution**:
 
-    1.  Launch `Fused` Kernel: `{python} FusionSpeedup.compiled_overhead_str` µs overhead.
+    1.  Launch `Fused` Kernel: `{python} FusionSpeedup.compiled_overhead_str` overhead.
     2.  Read/Write Memory: $2N$ bytes (intermediate result stays in registers).
-*   **Total overhead**: `{python} FusionSpeedup.compiled_overhead_str` µs (`{python} FusionSpeedup.overhead_speedup_str`$\times$ speedup).
+*   **Total overhead**: `{python} FusionSpeedup.compiled_overhead_str` (`{python} FusionSpeedup.overhead_speedup_str`$\times$ speedup).
 *   **Total memory traffic**: 2N bytes (`{python} FusionSpeedup.bw_efficiency_str`$\times$ bandwidth efficiency).
 
 **Systems insight**:

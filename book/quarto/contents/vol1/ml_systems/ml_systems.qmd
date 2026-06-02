@@ -2285,7 +2285,7 @@ The locality crossover is easiest to see by comparing a single high-rate sensor 
 # │          DataLocalityInvariant.remote_ms_str,
 # │          DataLocalityInvariant.net_bw_s_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, MarkdownStr, fmt_qty, fmt_time
+from mlsysim.fmt import fmt, check, MarkdownStr, fmt_bandwidth, fmt_qty, fmt_time
 from mlsysim.core.units import MB, byte, bit, megabit, second, millisecond
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2317,7 +2317,7 @@ class DataLocalityInvariant:
     frame_mb_str = fmt_qty(frame_size, MB, precision=1)
     tx_time_ms_str = fmt_time(tx_time, millisecond, precision=1, commas=True)
     remote_ms_str = fmt_time(remote_total_ms, millisecond, precision=0)
-    net_bw_s_str = fmt_qty(net_bw, megabit / second, precision=0, commas=False, unit_label="Mb/s")
+    net_bw_s_str = fmt_bandwidth(net_bw, unit=megabit / second, precision=0, commas=False)
     frame_label_str = MarkdownStr("4K")
 ```
 
@@ -2366,7 +2366,7 @@ These benefits carry corresponding limitations that compound as deployments scal
 # │          .req_tops_equiv_str, .headroom_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
-from mlsysim.fmt import fmt, fmt_qty
+from mlsysim.fmt import fmt, fmt_flop_rate, fmt_flops, fmt_ops_rate
 from mlsysim.core.units import GFLOPs, TOPS, second
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2384,8 +2384,7 @@ class EdgeSizingThroughput:
     inf_per_sec = cameras_per_store * fps
     yolo_flops = model.inference_flops if model.inference_flops else model.training_ops
     sustained_flop_rate = inf_per_sec * yolo_flops / second
-    sustained_gflops_value = sustained_flop_rate.to(GFLOPs / second).magnitude
-    required_tops_equiv = (sustained_flop_rate * headroom).to(TOPS).magnitude
+    required_ops_rate = sustained_flop_rate * headroom
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     stores_str = fmt(stores, precision=0, commas=False)
@@ -2393,9 +2392,9 @@ class EdgeSizingThroughput:
     fps_str = fmt(fps, precision=0, commas=False)
     headroom_str = fmt(headroom, precision=0, commas=False)
     inf_per_sec_str = fmt(inf_per_sec, precision=0, commas=False)
-    yolo_gflops_str = fmt_qty(yolo_flops, GFLOPs, precision=1)
-    sustained_gf_str = fmt(sustained_gflops_value, precision=0)
-    req_tops_equiv_str = fmt(required_tops_equiv, precision=2, commas=False)
+    yolo_gflops_per_inference_str = fmt_flops(yolo_flops, unit=GFLOPs, precision=1, per="inference")
+    sustained_gflops_str = fmt_flop_rate(sustained_flop_rate, unit=GFLOPs / second, precision=0)
+    req_tops_equiv_str = fmt_ops_rate(required_ops_rate, unit=TOPS, precision=2, commas=False)
 ```
 
 ::: {#nbk-ml-systems-edge-inference-sizing .callout-notebook title="Edge inference sizing"}
@@ -2409,11 +2408,11 @@ class EdgeSizingThroughput:
 \renewcommand{\arraystretch}{1.2}
 ```
 
-| **Metric**               |                                                      **Calculation**                                                      |                              **Result**                             |
-|:-------------------------|:-------------------------------------------------------------------------------------------------------------------------:|:-------------------------------------------------------------------:|
-| **Inferences per store** |     `{python} EdgeSizingThroughput.cameras_per_store_str` cameras $\times$ `{python} EdgeSizingThroughput.fps_str` FPS    |    `{python} EdgeSizingThroughput.inf_per_sec_str` inferences/sec   |
-| **Model compute**        |                       YOLOv8-nano: `{python} EdgeSizingThroughput.yolo_gflops_str` GFLOPs/inference                       |       `{python} EdgeSizingThroughput.sustained_gf_str` GFLOP/s      |
-| **Required throughput**  | `{python} EdgeSizingThroughput.sustained_gf_str` GFLOP/s $\times$ `{python} EdgeSizingThroughput.headroom_str` (headroom) | ~`{python} EdgeSizingThroughput.req_tops_equiv_str` TOPS equivalent |
+| **Metric**               |                                                    **Calculation**                                                    |                           **Result**                           |
+|:-------------------------|:---------------------------------------------------------------------------------------------------------------------:|:--------------------------------------------------------------:|
+| **Inferences per store** |   `{python} EdgeSizingThroughput.cameras_per_store_str` cameras $\times$ `{python} EdgeSizingThroughput.fps_str` FPS  | `{python} EdgeSizingThroughput.inf_per_sec_str` inferences/sec |
+| **Model compute**        |                       YOLOv8-nano: `{python} EdgeSizingThroughput.yolo_gflops_per_inference_str`                      |      `{python} EdgeSizingThroughput.sustained_gflops_str`      |
+| **Required throughput**  | `{python} EdgeSizingThroughput.sustained_gflops_str` $\times$ `{python} EdgeSizingThroughput.headroom_str` (headroom) | ~`{python} EdgeSizingThroughput.req_tops_equiv_str` equivalent |
 
 : **Edge Inference Sizing Requirements**: Per-store throughput target for the smart-retail person-detection scenario. {#tbl-ml-systems-edge-sizing-requirements tbl-colwidths="[33,41,25]"}
 
@@ -2441,7 +2440,7 @@ class EdgeSizingThroughput:
 from math import ceil
 from mlsysim import Hardware, Models
 from mlsysim.physics import calc_fleet_tco
-from mlsysim.fmt import fmt_percent, fmt, fmt_usd, check, MarkdownStr, fmt_qty, fmt_time
+from mlsysim.fmt import fmt_percent, fmt, fmt_usd, check, MarkdownStr, fmt_qty, fmt_time, fmt_ops_rate
 from mlsysim.core.units import GFLOPs, TOPS, second, hour, USD, watt, kWh
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2496,8 +2495,8 @@ class EdgeSizingFleetTCO:
     coral_tops_str = fmt_qty(coral_peak, TOPS, precision=0, commas=False)
     coral_sustained_tops_str = fmt_qty(coral_sustained, TOPS, precision=0, commas=False)
     coral_units_per_store_str = fmt(coral_units_per_store, precision=0, commas=False)
-    coral_cluster_peak_tops_str = fmt_qty(coral_cluster_peak, TOPS, precision=0, commas=False, unit_label="TOPS peak")
-    coral_cluster_sustained_tops_str = fmt_qty(coral_cluster_sustained, TOPS, precision=0, commas=False, unit_label="TOPS derated")
+    coral_cluster_peak_tops_str = fmt_ops_rate(coral_cluster_peak, unit=TOPS, precision=0, commas=False)
+    coral_cluster_sustained_tops_str = fmt_ops_rate(coral_cluster_sustained, unit=TOPS, precision=0, commas=False)
     coral_cluster_unit_cost_str = fmt_usd(coral_cost * coral_units_per_store, precision=0, commas=False)
     coral_cluster_power_w_str = fmt_qty(coral.tdp * coral_units_per_store, watt, precision=0, commas=False)
     coral_cluster_power_kw_str = fmt_qty(coral.tdp * coral_units_per_store, kilowatt, precision=3, commas=False)
@@ -2521,11 +2520,11 @@ class EdgeSizingFleetTCO:
     cloud_cost_str = fmt_usd(cloud_tco_3yr, precision=0, commas=True)
 ```
 
-| **Edge Device**                                                                          |                                                        **INT8 TOPS**                                                        |                        **Power**                        |                       **Unit Cost**                       |                       **Fleet Cost**                      |
-|:-----------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------:|:-------------------------------------------------------:|:---------------------------------------------------------:|:---------------------------------------------------------:|
-| **NVIDIA Jetson Orin NX**                                                                |                                        `{python} EdgeSizingFleetTCO.jetson_tops_str`                                        |   `{python} EdgeSizingFleetTCO.jetson_power_range_str`  |       `{python} EdgeSizingFleetTCO.jetson_cost_str`       |     `{python} EdgeSizingFleetTCO.jetson_fleet_usd_str`    |
-| **Intel NUC + Movidius**                                                                 |                                          `{python} EdgeSizingFleetTCO.nuc_tops_str`                                         |      `{python} EdgeSizingFleetTCO.nuc_power_w_str`      |         `{python} EdgeSizingFleetTCO.nuc_cost_str`        |      `{python} EdgeSizingFleetTCO.nuc_fleet_usd_str`      |
-| **Google Coral Dev (`{python} EdgeSizingFleetTCO.coral_units_per_store_str` per store)** | `{python} EdgeSizingFleetTCO.coral_cluster_peak_tops_str`<br>`{python} EdgeSizingFleetTCO.coral_cluster_sustained_tops_str` | `{python} EdgeSizingFleetTCO.coral_cluster_power_w_str` | `{python} EdgeSizingFleetTCO.coral_cluster_unit_cost_str` | `{python} EdgeSizingFleetTCO.coral_cluster_fleet_usd_str` |
+| **Edge Device**                                                                          |                                                              **INT8 TOPS**                                                               |                        **Power**                        |                       **Unit Cost**                       |                       **Fleet Cost**                      |
+|:-----------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------:|:-------------------------------------------------------:|:---------------------------------------------------------:|:---------------------------------------------------------:|
+| **NVIDIA Jetson Orin NX**                                                                |                                              `{python} EdgeSizingFleetTCO.jetson_tops_str`                                               |   `{python} EdgeSizingFleetTCO.jetson_power_range_str`  |       `{python} EdgeSizingFleetTCO.jetson_cost_str`       |     `{python} EdgeSizingFleetTCO.jetson_fleet_usd_str`    |
+| **Intel NUC + Movidius**                                                                 |                                                `{python} EdgeSizingFleetTCO.nuc_tops_str`                                                |      `{python} EdgeSizingFleetTCO.nuc_power_w_str`      |         `{python} EdgeSizingFleetTCO.nuc_cost_str`        |      `{python} EdgeSizingFleetTCO.nuc_fleet_usd_str`      |
+| **Google Coral Dev (`{python} EdgeSizingFleetTCO.coral_units_per_store_str` per store)** | peak `{python} EdgeSizingFleetTCO.coral_cluster_peak_tops_str`<br>derated `{python} EdgeSizingFleetTCO.coral_cluster_sustained_tops_str` | `{python} EdgeSizingFleetTCO.coral_cluster_power_w_str` | `{python} EdgeSizingFleetTCO.coral_cluster_unit_cost_str` | `{python} EdgeSizingFleetTCO.coral_cluster_fleet_usd_str` |
 
 : **Edge Accelerator Options**: Throughput, power, and cost for three candidate edge accelerators at fleet scale. {#tbl-ml-systems-edge-hardware-options tbl-colwidths="[40,15,15,15,15]"}
 
@@ -2799,7 +2798,7 @@ The distinction matters for engineering decisions: the battery tax is a budget p
 # │          ThermalQuantCalc.quant_red_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt_percent, fmt, check, fmt_rate, fmt_qty, fmt_multiple, fmt_time
+from mlsysim.fmt import fmt_percent, fmt, check, fmt_rate, fmt_qty, fmt_multiple, fmt_time, fmt_temperature, fmt_temperature_rate
 from mlsysim.core.units import watt, second, ureg
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2828,9 +2827,9 @@ class ThermalQuantCalc:
     mobile_tdp_w_str = fmt_qty(mobile_tdp, watt, precision=0, commas=False)
     quant_power_w_str = fmt_qty(quant_power, watt, precision=0, commas=False)
     quant_red_str = fmt_multiple(quant_reduction_factor, precision=0, commas=False)
-    temp_rise_s_str = fmt_qty(temp_rise, ureg.delta_degC / second, precision=0, commas=False, unit_label="°C/s")
+    temp_rise_s_str = fmt_temperature_rate(temp_rise, precision=0, commas=False)
     trip_time_s_str = fmt_time(trip_time, second, precision=0, commas=False)
-    trip_temp_str = fmt_qty(trip_temp, ureg.degC, precision=0, commas=False, unit_label="°C")
+    trip_temp_str = fmt_temperature(trip_temp, precision=0, commas=False)
     fps_before_str = fmt_rate(fps_before, 'FPS', precision=0, commas=False)
     fps_after_str = fmt_rate(fps_after, 'FPS', precision=0, commas=False)
 ```
@@ -3284,8 +3283,8 @@ Precision agriculture exploits TinyML's economic advantages where traditional so
 # │ How: Convert the raw daily audio and summary payloads to bytes and divide.
 # │
 # │ Imports: mlsysim.core.constants (GB, KB), mlsysim.book (fmt, check)
-# │ Exports: WildlifeMonitoring.raw_audio_gb_str,
-# │          WildlifeMonitoring.summary_kb_str,
+# │ Exports: WildlifeMonitoring.raw_audio_gb_per_day_str,
+# │          WildlifeMonitoring.summary_kb_per_day_str,
 # │          WildlifeMonitoring.reduction_x_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check, fmt_qty
@@ -3306,13 +3305,13 @@ class WildlifeMonitoring:
     check(reduction > 10_000, f"Expected >10,000x bandwidth reduction, got {reduction:.0f}x.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    raw_audio_gb_str = fmt_qty(raw_audio_per_day, GB, precision=1, commas=False, unit_label="GB per day")
-    summary_kb_str = fmt_qty(summary_per_day, KB, precision=0, commas=False, unit_label="KB of detection summaries")
+    raw_audio_gb_per_day_str = fmt_qty(raw_audio_per_day, GB, precision=1, commas=False, per="day")
+    summary_kb_per_day_str = fmt_qty(summary_per_day, KB, precision=0, commas=False, per="day")
     reduction_x_str = fmt(reduction, precision=0, commas=True)
 ```
 
 \index{Wildlife Conservation!TinyML monitoring}
-Wildlife conservation uses TinyML for remote environmental monitoring. Researchers deploy solar-powered audio sensors consuming 100–500 mW that process continuous audio streams for species identification. By performing local analysis, these systems reduce satellite transmission requirements from `{python} WildlifeMonitoring.raw_audio_gb_str` to `{python} WildlifeMonitoring.summary_kb_str`, a `{python} WildlifeMonitoring.reduction_x_str`$\times$ reduction that makes large-scale deployments of 100–1,000 sensors economically feasible.
+Wildlife conservation uses TinyML for remote environmental monitoring. Researchers deploy solar-powered audio sensors consuming 100–500 mW that process continuous audio streams for species identification. By performing local analysis, these systems reduce satellite transmission requirements from `{python} WildlifeMonitoring.raw_audio_gb_per_day_str` of raw audio to `{python} WildlifeMonitoring.summary_kb_per_day_str` of detection summaries, a `{python} WildlifeMonitoring.reduction_x_str`$\times$ reduction that makes large-scale deployments of 100–1,000 sensors economically feasible.
 
 Medical wearables push TinyML into healthcare, where the combination of always-on monitoring and on-device privacy proves uniquely valuable. FDA-cleared cardiac monitors achieve 95–98 percent sensitivity while processing 250–500 ECG samples per second at under 5 mW power consumption. This efficiency enables week-long continuous monitoring vs. hours for smartphone-based alternatives, while reducing diagnostic costs from \$2,000–5,000 for traditional in-lab studies to under \$100 for at-home testing.
 

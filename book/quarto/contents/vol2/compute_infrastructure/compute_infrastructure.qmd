@@ -71,6 +71,7 @@ from mlsysim.fmt import (
     fmt_math,
     fmt_params,
     fmt_memory,
+    fmt_memory_capacity,
     fmt_bandwidth,
     fmt_flop_rate,
     fmt_power,
@@ -650,7 +651,7 @@ class MemoryBandwidthCacheRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     h100_l2_bytes_str = fmt_qty(Hardware.Cloud.H100.memory.l2_cache, 'megabyte', precision=0, commas=False)
-    h100_mem_gb_str = fmt_qty(Hardware.Cloud.H100.memory.capacity, GiB, precision=0, commas=False, unit_label="GB")
+    h100_mem_gb_str = fmt_memory_capacity(Hardware.Cloud.H100.memory.capacity, unit=GiB, precision=0, commas=False)
     h100_bw_tb_s_str = fmt_qty(Hardware.Cloud.H100.memory.bandwidth, TB/second, precision=2, commas=False)
 ```
 
@@ -1789,9 +1790,11 @@ The critical component in this thermal path is the **Thermal Interface Material 
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Exports: RackPowerTdpRecap.rack_power_kw_str
 class RackPowerTdpRecap:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    rack = Systems.Racks.DGX_H100_4Node
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    rack_power_kw_str = fmt_qty(Hardware.Cloud.H100.tdp * Systems.Nodes.DGX_H100.accelerators_per_node * 4 + 10.3 * kilowatt, kilowatt, precision=1, commas=False)
+    rack_power_kw_str = fmt_power(rack.total_power, unit=kilowatt, precision=1, commas=False)
 ```
 
 At rack scale, four nodes of eight such chips require `{python} RackPowerTdpRecap.rack_power_kw_str` of facility-relevant power, enough to heat several homes in winter. To put this in more tangible terms, a single ML rack at full power could run about 33 household space heaters simultaneously, concentrated in a volume roughly the size of a large refrigerator.
@@ -1810,15 +1813,16 @@ At fleet scale, DVFS also affects power planning. The data center's power delive
 
 ```{python}
 #| echo: false
+from mlsysim.fmt import fmt_compute_efficiency
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Exports: GpuEfficiencyTrajectoryRecap.v100_ef_tflops_per_w_str, GpuEfficiencyTrajectoryRecap.a100_ef_tflops_per_w_str, GpuEfficiencyTrajectoryRecap.h100_ef_tflops_per_w_str, GpuEfficiencyTrajectoryRecap.b200_ef_tflops_per_w_str
 class GpuEfficiencyTrajectoryRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    v100_ef_tflops_per_w_str = fmt_qty(Hardware.Cloud.V100.compute.peak_flops / Hardware.Cloud.V100.tdp, TFLOPs / second / watt, precision=2, commas=False, unit_label="TFLOP/s")
-    a100_ef_tflops_per_w_str = fmt_qty(Hardware.Cloud.A100.compute.peak_flops / Hardware.Cloud.A100.tdp, TFLOPs / second / watt, precision=2, commas=False, unit_label="TFLOP/s")
-    h100_ef_tflops_per_w_str = fmt_qty(Hardware.Cloud.H100.compute.precision_flops["fp8"] / Hardware.Cloud.H100.tdp, TFLOPs / second / watt, precision=2, commas=False, unit_label="TFLOP/s")
-    b200_ef_tflops_per_w_str = fmt_qty(Hardware.Cloud.B200.compute.precision_flops["fp8"] / Hardware.Cloud.B200.tdp, TFLOPs / second / watt, precision=2, commas=False, unit_label="TFLOP/s")
+    v100_ef_tflops_per_w_str = fmt_compute_efficiency(Hardware.Cloud.V100.compute.peak_flops / Hardware.Cloud.V100.tdp, unit=TFLOPs / second / watt, precision=2, commas=False)
+    a100_ef_tflops_per_w_str = fmt_compute_efficiency(Hardware.Cloud.A100.compute.peak_flops / Hardware.Cloud.A100.tdp, unit=TFLOPs / second / watt, precision=2, commas=False)
+    h100_ef_tflops_per_w_str = fmt_compute_efficiency(Hardware.Cloud.H100.compute.precision_flops["fp8"] / Hardware.Cloud.H100.tdp, unit=TFLOPs / second / watt, precision=2, commas=False)
+    b200_ef_tflops_per_w_str = fmt_compute_efficiency(Hardware.Cloud.B200.compute.precision_flops["fp8"] / Hardware.Cloud.B200.tdp, unit=TFLOPs / second / watt, precision=2, commas=False)
 ```
 
 The power efficiency trajectory provides a partial counterweight to rising TDP. While absolute power has increased, the advertised low-precision TFLOP/s delivered per watt has improved dramatically: from `{python} GpuEfficiencyTrajectoryRecap.v100_ef_tflops_per_w_str` per watt (V100 FP16) to `{python} GpuEfficiencyTrajectoryRecap.h100_ef_tflops_per_w_str` per watt (H100 FP8) to `{python} GpuEfficiencyTrajectoryRecap.b200_ef_tflops_per_w_str` per watt (B200 FP8). These are not apples-to-apples FP16 numbers; the precision mode is part of the hardware trend. For a fixed compute budget that can use the newer precision modes, each generation requires fewer chips and therefore less total power. Frontier models, however, grow faster than efficiency improves, so the absolute power demand of training the latest model increases with every generation. This is the treadmill of infrastructure: efficiency gains buy time, but scale growth consumes it.
@@ -2211,8 +2215,8 @@ class InfraFrontierNodeBudgetRecap:
     optimizer_gb_str = fmt_memory(optimizer, unit=GB, precision=0, commas=True)
     gradients_gb_str = fmt_memory(gradients, unit=GB, precision=0, commas=True)
     total_static_tb_str = fmt_memory(total_static, unit=TB, precision=1, commas=False)
-    gpu_hbm_gb_str = fmt_qty(gpu_hbm, GiB, precision=0, commas=False, unit_label="GB")
-    node_hbm_gb_str = fmt_qty(node_hbm, GiB, precision=0, commas=False, unit_label="GB")
+    gpu_hbm_gb_str = fmt_memory_capacity(gpu_hbm, unit=GiB, precision=0, commas=False)
+    node_hbm_gb_str = fmt_memory_capacity(node_hbm, unit=GiB, precision=0, commas=False)
 ```
 
 Understanding how the node partitions memory across its components is essential for selecting parallelism strategies. Consider the memory budget for training our `{python} InfraFrontierNodeBudgetRecap.frontier_params_b_str` model. The model weights in FP16 require `{python} InfraFrontierNodeBudgetRecap.weights_gb_str`. The Adam optimizer maintains two additional copies of every parameter (first and second moments) in FP32 precision, adding `{python} InfraFrontierNodeBudgetRecap.frontier_params_b_str` $\times 10^9 \times 2 \times 4$ bytes = `{python} InfraFrontierNodeBudgetRecap.optimizer_gb_str`. Gradients require another `{python} InfraFrontierNodeBudgetRecap.gradients_gb_str`. The total is approximately `{python} InfraFrontierNodeBudgetRecap.total_static_tb_str` before activations, far exceeding both a single accelerator's `{python} InfraFrontierNodeBudgetRecap.gpu_hbm_gb_str` HBM and an 8-H100 node's `{python} InfraFrontierNodeBudgetRecap.node_hbm_gb_str` aggregate HBM.
@@ -2444,7 +2448,7 @@ from mlsysim.fmt import fmt_qty
 class NodeCapacityDenseRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    node_hbm_cap_gb_str = fmt_qty(Hardware.Cloud.H100.memory.capacity * Systems.Nodes.DGX_H100.accelerators_per_node, GiB, precision=0, commas=False, unit_label="GB")
+    node_hbm_cap_gb_str = fmt_memory_capacity(Hardware.Cloud.H100.memory.capacity * Systems.Nodes.DGX_H100.accelerators_per_node, unit=GiB, precision=0, commas=False)
     h100_tflops_str = fmt_qty(Hardware.Cloud.H100.compute.precision_flops['fp8'], TFLOP/second, precision=0, commas=False)
 ```
 
@@ -2584,7 +2588,7 @@ Node-level health monitoring is therefore a critical operational practice. Moder
 # │ How: Expected failures = nodes * run_hours / composite_node_mtbf_hours.
 # │ Exports: NodeReliabilityScenario.*_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, check, fmt_time
+from mlsysim.fmt import fmt_int, fmt, fmt_percent, check, fmt_time
 
 class NodeReliabilityScenario:
     """Composite node-level reliability for the 128-node running example."""
@@ -2616,7 +2620,7 @@ class NodeReliabilityScenario:
 
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
     nodes_str = fmt(nodes, precision=0, commas=False)
-    run_hours_str = fmt(run_hours, precision=0, commas=False)
+    run_hours_str = fmt_time(run_hours, 'hour', precision=0, commas=False, style='word')
     node_mtbf_hours_str = fmt_time(composite_node_mtbf_hours, 'hour', precision=0, commas=True, style='word')
     expected_failures_str = fmt_int(round(expected_failures), commas=False)
     failures_per_day_str = fmt(failures_per_day, precision=1, commas=False)
@@ -2638,7 +2642,7 @@ class InfraFrontierNodeTrainRecap:
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-For our `{python} InfraFrontierNodeTrainRecap.frontier_params_b_str` model training across `{python} NodeReliabilityScenario.nodes_str` nodes, the probability of at least one node experiencing a hardware issue during a two-week training run is substantial. Under a composite node-level MTBF assumption of `{python} NodeReliabilityScenario.node_mtbf_hours_str`, which includes GPUs, host components, power, cooling, and network links, the expected number of node failures during a `{python} NodeReliabilityScenario.run_hours_str`-hour run is approximately `{python} NodeReliabilityScenario.expected_failures_str`. This means the training run will experience, on average, roughly `{python} NodeReliabilityScenario.failures_per_day_str` failures per day. A GPU-only lower bound from the canonical `{python} NodeReliabilityScenario.gpu_mtbf_str`-hour per-GPU MTBF would predict only `{python} NodeReliabilityScenario.gpu_only_outages_str` GPU-driven node outages over the same run, before adding host, power, cooling, and network failure terms. Each failure requires detecting the degraded node, draining its workload, substituting a spare node, and resuming from the last checkpoint -- a process that takes `{python} NodeReliabilityScenario.recovery_low_min_str`--`{python} NodeReliabilityScenario.recovery_high_min_str` with automated tooling. With automated recovery, the direct restart overhead is roughly `{python} NodeReliabilityScenario.restart_overhead_low_str`--`{python} NodeReliabilityScenario.restart_overhead_high_str` of the run; without spare nodes and automated recovery, multi-hour interventions can push overhead into the 20--30 percent range, consuming millions of dollars in wasted GPU-hours.
+For our `{python} InfraFrontierNodeTrainRecap.frontier_params_b_str` model training across `{python} NodeReliabilityScenario.nodes_str` nodes, the probability of at least one node experiencing a hardware issue during a two-week training run is substantial. Under a composite node-level MTBF assumption of `{python} NodeReliabilityScenario.node_mtbf_hours_str`, which includes GPUs, host components, power, cooling, and network links, the expected number of node failures during a `{python} NodeReliabilityScenario.run_hours_str` run is approximately `{python} NodeReliabilityScenario.expected_failures_str`. This means the training run will experience, on average, roughly `{python} NodeReliabilityScenario.failures_per_day_str` failures per day. A GPU-only lower bound from the canonical `{python} NodeReliabilityScenario.gpu_mtbf_str`-hour per-GPU MTBF would predict only `{python} NodeReliabilityScenario.gpu_only_outages_str` GPU-driven node outages over the same run, before adding host, power, cooling, and network failure terms. Each failure requires detecting the degraded node, draining its workload, substituting a spare node, and resuming from the last checkpoint -- a process that takes `{python} NodeReliabilityScenario.recovery_low_min_str`--`{python} NodeReliabilityScenario.recovery_high_min_str` with automated tooling. With automated recovery, the direct restart overhead is roughly `{python} NodeReliabilityScenario.restart_overhead_low_str`--`{python} NodeReliabilityScenario.restart_overhead_high_str` of the run; without spare nodes and automated recovery, multi-hour interventions can push overhead into the 20--30 percent range, consuming millions of dollars in wasted GPU-hours.
 
 ### Node memory partitioning {#sec-compute-node-memory}
 
@@ -2768,7 +2772,7 @@ class NodeCapacityTrainMemRecap:
     gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
     tp_degree = gpus_per_node
     dp_degree = 128  # scenario assumption: data-parallel replicas
-    host_dram = 2 * TB  # scenario assumption: DGX H100 host DDR5 capacity
+    host_dram = Systems.Nodes.DGX_H100.host_memory
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
     weights = model.size_in_bytes(BYTES_FP16)
@@ -2788,13 +2792,13 @@ class NodeCapacityTrainMemRecap:
     check(node_hbm < total_dp, "Node HBM should be insufficient for full training state")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    node_hbm_cap_gb_str = fmt_qty(node_hbm, GiB, precision=0, commas=False, unit_label="GB")
+    node_hbm_cap_gb_str = fmt_memory_capacity(node_hbm, unit=GiB, precision=0, commas=False)
     host_dram_tb_str = fmt_memory(host_dram, unit=TB, precision=0, commas=False)
     weights_gb_str = fmt_memory(weights, unit=GB, precision=0, commas=True)
     gradients_gb_str = fmt_memory(gradients, unit=GB, precision=0, commas=True)
     optimizer_gb_str = fmt_memory(optimizer, unit=GB, precision=0, commas=True)
     total_dp_gb_str = fmt_memory(total_dp, unit=GB, precision=0, commas=True)
-    gpu_hbm_gb_str = fmt_qty(gpu_hbm, GiB, precision=0, commas=False, unit_label="GB")
+    gpu_hbm_gb_str = fmt_memory_capacity(gpu_hbm, unit=GiB, precision=0, commas=False)
     zero3_per_gpu_gb_str = fmt_memory(zero3_per_gpu, unit=GB, precision=1, commas=False)
     tp_weight_shard_gb_str = fmt_memory(tp_weight_shard, unit=GB, precision=2, commas=False)
     optimizer_per_gpu_gb_str = fmt_memory(optimizer_per_gpu, unit=GB, precision=1, commas=False)
@@ -2902,7 +2906,7 @@ from mlsysim.fmt import fmt_int
 class InfraFrontierNodeModelRecap:
     node_gpus = Systems.Nodes.DGX_H100.accelerators_per_node
     h100_mem = Hardware.Cloud.H100.memory.capacity
-    host_ddr = 2 * TB
+    host_ddr = Systems.Nodes.DGX_H100.host_memory
     weight = Models.Language.GPT3.size_in_bytes(BYTES_FP16)
     weight_per_gpu = weight / node_gpus
     opt_state = weight_per_gpu * 4
@@ -2915,8 +2919,8 @@ class InfraFrontierNodeModelRecap:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
     node_gpus_str = fmt(node_gpus, precision=0, commas=False)
-    h100_mem_gb_str = fmt_qty(h100_mem, GiB, precision=0, commas=False, unit_label="GB")
-    total_hbm_gb_str = fmt_qty(h100_mem * node_gpus, GiB, precision=0, commas=False, unit_label="GB")
+    h100_mem_gb_str = fmt_memory_capacity(h100_mem, unit=GiB, precision=0, commas=False)
+    total_hbm_gb_str = fmt_memory_capacity(h100_mem * node_gpus, unit=GiB, precision=0, commas=False)
     host_ddr_tb_str = fmt_memory(host_ddr, unit=TB, precision=0, commas=False)
     weight_per_gpu_gb_str = fmt_memory(weight_per_gpu, unit=GB, precision=2, commas=False)
     opt_state_gb_str = fmt_memory(opt_state, unit=GB, precision=0, commas=False)
@@ -3089,7 +3093,7 @@ class InfraFrontierNodeCapacityRecap:
 # │ Exports: NodeCapacityTransitionRecap.node_hbm_cap_gb_str
 class NodeCapacityTransitionRecap:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    node_hbm_cap_gb_str = fmt_qty(Hardware.Cloud.H100.memory.capacity * Systems.Nodes.DGX_H100.accelerators_per_node, GiB, precision=0, commas=False, unit_label="GB")
+    node_hbm_cap_gb_str = fmt_memory_capacity(Hardware.Cloud.H100.memory.capacity * Systems.Nodes.DGX_H100.accelerators_per_node, unit=GiB, precision=0, commas=False)
 ```
 For our `{python} InfraFrontierNodeCapacityRecap.frontier_params_b_str` model, a single DGX H100 node provides `{python} NodeCapacityTransitionRecap.node_hbm_cap_gb_str` of aggregate HBM, enough to hold the FP16 model weights but not the full Adam training state without sharding and offload. Training also requires processing trillions of tokens, and a single node's compute throughput limits training time to months. To complete training in a reasonable timeframe (weeks rather than months), we need tens or hundreds of nodes. Stacking those nodes into a physical enclosure brings us to the next level of infrastructure, where the constraints shift from bandwidth and capacity to raw power and heat.
 
@@ -3098,9 +3102,11 @@ For our `{python} InfraFrontierNodeCapacityRecap.frontier_params_b_str` model, a
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Exports: RackPowerRackRecap.rack_power_kw_str
 class RackPowerRackRecap:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    rack = Systems.Racks.DGX_H100_4Node
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    rack_power_kw_str = fmt_qty(Hardware.Cloud.H100.tdp * Systems.Nodes.DGX_H100.accelerators_per_node * 4 + 10.3 * kilowatt, kilowatt, precision=1, commas=False)
+    rack_power_kw_str = fmt_power(rack.total_power, unit=kilowatt, precision=1, commas=False)
 ```
 
 ```{python}
@@ -3187,12 +3193,13 @@ As rack power densities climb toward 100 kW for liquid-cooled clusters, the inef
 
 ```{python}
 #| echo: false
+from mlsysim.fmt import fmt_bandwidth
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Exports: InfraIbBwRackRecap.ib_bw_gbps_str
 class InfraIbBwRackRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    ib_bw_gbps_str = fmt_qty(Systems.Fabrics.InfiniBand_NDR.bandwidth, Gbps, precision=0, commas=False, unit_label="Gb/s")
+    ib_bw_gbps_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=Gbps, precision=0, commas=False)
 ```
 
 The **Top-of-Rack (ToR) switch**\index{Top-of-Rack switch} deserves special attention. In traditional data centers, a ToR switch provides 1--10 Gb/s Ethernet connectivity to each server, aggregated into uplinks to higher-level switches. In an ML rack, the ToR switch is an InfiniBand or high-speed Ethernet switch providing `{python} InfraIbBwRackRecap.ib_bw_gbps_str` per port, and it must handle the bursty, synchronized traffic patterns of distributed training.
@@ -3381,11 +3388,11 @@ class TrainingTime175B:
     mfu = Literature.Training.MfuHigh * 0.9
 
     # Multipliers
-    scaling_eff = Literature.Scaling.Eff32Gpu * 0.75 + Literature.Scaling.Eff256Gpu * 0.25
-    bubble_fraction = Literature.Overheads.PipelineBubble
-    ckpt_overhead = Literature.Overheads.Checkpoint
-    fail_overhead = Literature.Overheads.FailureRecovery
-    maint_overhead = Literature.Overheads.Maintenance
+    scaling_eff = Scenarios.TrainingScaleProfiles.Eff32Gpu * 0.75 + Scenarios.TrainingScaleProfiles.Eff256Gpu * 0.25
+    bubble_fraction = Ops.TrainingRunOverheads.PipelineBubble
+    ckpt_overhead = Ops.TrainingRunOverheads.Checkpoint
+    fail_overhead = Ops.TrainingRunOverheads.FailureRecovery
+    maint_overhead = Ops.TrainingRunOverheads.Maintenance
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Use dTime for authoritative training time math
@@ -3595,7 +3602,7 @@ The interaction between failure rate and checkpointing frequency creates an opti
 # │          .ckpt_run_count_str, .ckpt_run_total_tb_str,
 # │          .ckpt_recent_retention_tb_str, .ckpt_sustained_bw_gbs_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, fmt_time
+from mlsysim.fmt import fmt, check, fmt_bandwidth, fmt_memory, fmt_percent, fmt_time
 
 class CheckpointOverheadBudget:
     # ┌── 1. LOAD ─────────────────────────────────────────
@@ -3640,8 +3647,8 @@ class CheckpointOverheadBudget:
     ckpt_run_total_tb_str              = fmt_memory(run_total, unit=TB, precision=0, commas=True)
     ckpt_recent_retention_tb_str       = fmt_memory(recent_retention, unit=TB, precision=1, commas=False)
     ckpt_sustained_bw_gbs_str          = fmt_bandwidth(sustained_bw, unit=GB / second, precision=1, commas=False)
-    ckpt_run_days_str                  = fmt(run_days, precision=0, commas=False)
-    ckpt_run_hours_per_day_str         = fmt(HOURS_PER_DAY, precision=0, commas=False)
+    ckpt_run_days_str                  = fmt_time(run_days, 'day', precision=0, commas=False, style='word')
+    ckpt_run_hours_per_day_str         = fmt_time(HOURS_PER_DAY, 'hour', precision=0, commas=False, style='word')
     ckpt_per_hour_str                  = fmt(60 // cadence_min_value, precision=0, commas=False)
 ```
 
@@ -3657,7 +3664,7 @@ class InfraFrontierStragglerRecap11:
 
 Checkpointing also creates a significant *storage* requirement that demands its own dedicated infrastructure. A full checkpoint for our `{python} InfraFrontierStragglerRecap11.frontier_params_b_str` model includes the model weights (350 GB), optimizer states (1,400 GB), and the random number generator states needed to resume training deterministically. The total is approximately `{python} CheckpointOverheadBudget.ckpt_total_tb_str` per checkpoint. At a cadence of `{python} CheckpointOverheadBudget.ckpt_cadence_min_str`, a write that takes `{python} CheckpointOverheadBudget.ckpt_reference_write_s_str` would consume `{python} CheckpointOverheadBudget.ckpt_reference_overhead_pct_str` of training time, not `{python} CheckpointOverheadBudget.ckpt_target_overhead_pct_str`. To keep checkpoint overhead below `{python} CheckpointOverheadBudget.ckpt_target_overhead_pct_str`, the write must complete in about `{python} CheckpointOverheadBudget.ckpt_allowed_write_s_str`, demanding a sustained aggregate write bandwidth of approximately `{python} CheckpointOverheadBudget.ckpt_required_bw_gbs_str`. A write target of `{python} CheckpointOverheadBudget.ckpt_reference_write_s_str` corresponds to approximately `{python} CheckpointOverheadBudget.ckpt_reference_bw_gbs_str` and only fits a `{python} CheckpointOverheadBudget.ckpt_target_overhead_pct_str` budget when checkpoints are spaced at least `{python} CheckpointOverheadBudget.ckpt_reference_min_cadence_min_str` apart. Standard NFS or object storage implementations collapse under this "thundering herd" pattern, where all GPUs transition from compute to I/O simultaneously. The solution requires a high-performance parallel file system like Lustre or IBM Spectrum Scale (GPFS), architected with hundreds of Object Storage Targets (OSTs) striping data across thousands of NVMe drives. A failure to architect for this burst bandwidth results in "I/O jitter," where training hangs unpredictably for minutes as the checkpoint write saturates the storage backend, effectively burning millions of dollars in idle GPU cycles. @Sec-data-storage examines the storage architectures that meet these throughput requirements in detail. If checkpoints are taken every `{python} CheckpointOverheadBudget.ckpt_cadence_min_str` during a 2-week training run, the system must write:
 
-- **Checkpoints per run**\index{Checkpointing!checkpoints per run}: (`{python} CheckpointOverheadBudget.ckpt_run_days_str` days $\times$ `{python} CheckpointOverheadBudget.ckpt_run_hours_per_day_str` $\times$ `{python} CheckpointOverheadBudget.ckpt_per_hour_str` per hour) = `{python} CheckpointOverheadBudget.ckpt_run_count_str` checkpoints
+- **Checkpoints per run**\index{Checkpointing!checkpoints per run}: (`{python} CheckpointOverheadBudget.ckpt_run_days_str` $\times$ `{python} CheckpointOverheadBudget.ckpt_run_hours_per_day_str`/day $\times$ `{python} CheckpointOverheadBudget.ckpt_per_hour_str` per hour) = `{python} CheckpointOverheadBudget.ckpt_run_count_str` checkpoints
 - **Total checkpoint data**\index{Checkpointing!total checkpoint data}: `{python} CheckpointOverheadBudget.ckpt_run_count_str` $\times$ `{python} CheckpointOverheadBudget.ckpt_total_tb_str` = `{python} CheckpointOverheadBudget.ckpt_run_total_tb_str`
 
 Even retaining only the most recent 10 checkpoints (`{python} CheckpointOverheadBudget.ckpt_recent_retention_tb_str`), the storage system must sustain a continuous write throughput of `{python} CheckpointOverheadBudget.ckpt_total_tb_str` every `{python} CheckpointOverheadBudget.ckpt_cadence_min_str`, or approximately `{python} CheckpointOverheadBudget.ckpt_sustained_bw_gbs_str`. Organizations that undersize their checkpoint storage discover that checkpointing itself becomes a bottleneck, as the GPUs must wait for the previous checkpoint to complete writing before starting the next one. @Sec-data-storage examines the storage architectures that meet these throughput requirements.
@@ -4112,9 +4119,11 @@ Teams plan GPU purchases based on compute requirements without verifying that th
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Exports: RackPowerFallaciesRecap.rack_power_kw_str
 class RackPowerFallaciesRecap:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    rack = Systems.Racks.DGX_H100_4Node
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    rack_power_kw_str = fmt_qty(Hardware.Cloud.H100.tdp * Systems.Nodes.DGX_H100.accelerators_per_node * 4 + 10.3 * kilowatt, kilowatt, precision=1, commas=False)
+    rack_power_kw_str = fmt_power(rack.total_power, unit=kilowatt, precision=1, commas=False)
 ```
 
 A single rack of four DGX H100 systems requires `{python} RackPowerFallaciesRecap.rack_power_kw_str` of power. Upgrading a data center's electrical infrastructure (new transformers, switchgear, and UPS capacity) requires 12--18 months of lead time. Cooling plant upgrades (chillers, piping, pumps) require 6--12 months. Even seemingly simple changes, such as upgrading the PDU in a single rack from 20 kW to 60 kW, can require new cabling and circuit breaker panels.
@@ -4190,7 +4199,7 @@ class A100FallaciesRecap:
     option_a_hbm_gb_str = fmt_memory(option_a_hbm, unit=GB, precision=0, commas=False)
     weights_fp16_gb_str = fmt_qty_int(weights_fp16, GB, commas=False)
     option_a_lat_ms_str = fmt_time(option_a_lat, millisecond, precision=1, commas=False)
-    option_b_hbm_gb_str = fmt_qty(option_b_hbm, GiB, precision=0, commas=False, unit_label="GB")
+    option_b_hbm_gb_str = fmt_memory_capacity(option_b_hbm, unit=GiB, precision=0, commas=False)
     weights_int8_gb_str = fmt_qty_int(weights_int8, GB, commas=False)
     option_b_lat_ms_str = fmt_time(round(option_b_lat.to(millisecond).magnitude), millisecond, precision=0, commas=False)
     speedup_str = fmt(speedup, precision=1, commas=False)

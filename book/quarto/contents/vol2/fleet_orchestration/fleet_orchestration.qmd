@@ -99,7 +99,7 @@ In the Fleet Stack shown in @fig-fleet-stack, orchestration operates at the Dist
 # │          raw_gpu_equivalent_gain_str, idle_pct_str, util_low_pct_str,
 # │          util_high_pct_str, a100_mem_gb_str, h100_mem_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, fmt_qty, fmt_usd, fmt_percent
+from mlsysim.fmt import fmt, check, fmt_memory_capacity, fmt_qty, fmt_usd, fmt_percent
 
 class ClusterEconomicsContext:
     """Namespace for cluster orchestration economics."""
@@ -138,8 +138,8 @@ class ClusterEconomicsContext:
     annual_waste_str = fmt_usd(annual_waste_m * MILLION, scale="M", precision=1, commas=False)
     productive_gpu_gain_str = fmt(productive_gpu_gain, precision=0)
     raw_gpu_equivalent_gain_str = fmt(raw_gpu_equivalent_gain, precision=0)
-    a100_mem_gb_str = fmt_qty(a100_mem, GiB, precision=0, commas=False, unit_label="GB")
-    h100_mem_gb_str = fmt_qty(h100_mem, GiB, precision=0, commas=False, unit_label="GB")
+    a100_mem_gb_str = fmt_memory_capacity(a100_mem, unit=GiB, precision=0, commas=False)
+    h100_mem_gb_str = fmt_memory_capacity(h100_mem, unit=GiB, precision=0, commas=False)
 ```
 
 To make the scheduling problem concrete, consider a research organization operating a `{python} ClusterEconomicsContext.cluster_size_str`-GPU cluster. @brown2020language report that training GPT-3 175B used 3.14$\times 10^{23}$ floating-point operations on a V100 GPU cluster. Imagine 100 frontier-scale training jobs of that class queued, alongside thousands of smaller experiments and inference workloads all competing for the same resources. The system must decide which jobs run, when they run, and where they run. A naive first-come-first-served policy would let the first few large jobs monopolize the cluster for weeks, starving smaller experiments that researchers need to iterate quickly. A strict fair-share policy would fragment GPUs across many small allocations, preventing any large job from assembling the contiguous allocation it needs. Neither extreme works. The scheduler must navigate a multi-dimensional trade-off space where every decision affects throughput, fairness, cost, and researcher productivity simultaneously.
@@ -670,13 +670,13 @@ This binary allocation model creates a significant inefficiency for inference wo
 # │ Context: MIG partitioning — A100/H100 memory capacities.
 # │ Exports: ClusterEconomicsMigRecap.a100_mem_gb_str, h100_mem_gb_str
 from mlsysim.core.constants import GiB
-from mlsysim.fmt import fmt, fmt_qty
+from mlsysim.fmt import fmt, fmt_memory_capacity, fmt_qty
 
 class ClusterEconomicsMigRecap:
     from mlsysim import Hardware
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    a100_mem_gb_str = fmt_qty(Hardware.Cloud.A100.memory.capacity, GiB, precision=0, commas=False, unit_label="GB")
-    h100_mem_gb_str = fmt_qty(Hardware.Cloud.H100.memory.capacity, GiB, precision=0, commas=False, unit_label="GB")
+    a100_mem_gb_str = fmt_memory_capacity(Hardware.Cloud.A100.memory.capacity, unit=GiB, precision=0, commas=False)
+    h100_mem_gb_str = fmt_memory_capacity(Hardware.Cloud.H100.memory.capacity, unit=GiB, precision=0, commas=False)
 ```
 
 **Multi-Instance GPU (MIG)**[^fn-mig-isolation] technology addresses this inefficiency by partitioning A100 and H100 GPUs into hardware-isolated instances. An A100 with `{python} ClusterEconomicsMigRecap.a100_mem_gb_str` of memory can be divided into configurations ranging from 7 small instances of approximately 10 GB each to 2 large instances of approximately 40 GB each. Unlike software-based GPU sharing (time-slicing), MIG provides hardware isolation: each instance has dedicated memory, cache, and compute resources, preventing one workload from interfering with another and eliminating the noisy neighbor[^fn-noisy-neighbor-etymology] effect. The device plugin exposes MIG instances as separate schedulable resources, allowing the scheduler to treat each instance as an independent GPU for allocation purposes.
@@ -793,7 +793,7 @@ Randomly assigning 64 GPUs across a massive data center cripples a synchronous t
 # │ Context: Topology hierarchy — NVLink and InfiniBand bandwidth.
 # │ Exports: FleetTopologyInterconnect.nvlink_a100_gb_s_str, nvlink_h100_gb_s_str,
 # │          ib_ndr_gbps_str, ib_ndr_gbs_str
-from mlsysim.fmt import fmt, check, fmt_time, fmt_qty
+from mlsysim.fmt import fmt, check, fmt_bandwidth, fmt_time, fmt_qty
 class FleetTopologyInterconnect:
     from mlsysim import Hardware
     h_h100 = Hardware.Cloud.H100
@@ -810,7 +810,7 @@ class FleetTopologyInterconnect:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     nvlink_h100_gb_s_str = fmt_qty(h_h100.nvlink.bandwidth, GB/second, precision=0)
     nvlink_a100_gb_s_str = fmt_qty(h_a100.nvlink.bandwidth, GB/second, precision=0)
-    ib_ndr_gbps_str = fmt_qty(ib_ndr.bandwidth, Gbps, precision=0, unit_label="Gb/s")
+    ib_ndr_gbps_str = fmt_bandwidth(ib_ndr.bandwidth, unit=Gbps, precision=0)
     ib_ndr_gbs_str = fmt_qty(ib_ndr.bandwidth, GB/second, precision=0)
     activation_gb_str = fmt_qty(activation, GB, precision=0, commas=False)
     nvlink_xfer_ms_str = fmt_time(nvlink_xfer, ms, precision=1, commas=False)
@@ -1806,7 +1806,7 @@ For a heterogeneous fleet, this logic dictates a bifurcated strategy. Our 175B p
 # │ Imports: mlsysim.book (fmt, check), mlsysim.constants (HOURS_PER_YEAR)
 # │ Exports: gs_* strings for callout
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt_qty, fmt_qty_int, fmt, check, fmt_count, fmt_params, fmt_usd
+from mlsysim.fmt import fmt_int, fmt_memory_capacity, fmt_qty, fmt_qty_int, fmt, check, fmt_count, fmt_params, fmt_usd
 
 class GpuSharingRoi:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -1839,11 +1839,11 @@ class GpuSharingRoi:
     check(abs(annual_savings - 876000) < 1000, f"Savings: expected ~876K, got {annual_savings}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     gs_excl_util_str = fmt_percent(excl_util_pct/100, precision=1, style='prose')
-    gs_excl_total_mem_gb_str = fmt_qty_int(excl_total_mem, GiB, unit_label="GB")
+    gs_excl_total_mem_gb_str = fmt_memory_capacity(excl_total_mem, unit=GiB, precision=0)
     gs_excl_large_str = fmt_count(excl_large_gpus, label="GPU")
     gs_excl_total_str = fmt_count(excl_total, label="GPU")
     gs_shared_gpus_str = fmt_count(shared_small_gpus, label="GPU")
-    gs_shared_mem_gb_str = fmt_qty(shared_mem_per_gpu_q, GiB, precision=0, unit_label="GB")
+    gs_shared_mem_gb_str = fmt_memory_capacity(shared_mem_per_gpu_q, unit=GiB, precision=0)
     gs_shared_util_str = fmt_percent(shared_util_pct/100, precision=0, commas=False, style='prose')
     gs_shared_total_str = fmt_count(shared_total, label="GPU")
     gs_saved_gpus_str = fmt(saved_gpus, precision=0)
@@ -1852,8 +1852,8 @@ class GpuSharingRoi:
     gs_small_model_b_str = fmt_params(Models.Language.Llama2_7B.parameters, precision=0, commas=False)
     gs_large_model_b_str = fmt_params(Models.Language.GPT3.parameters, precision=0, commas=False)
     gs_n_small_str = fmt(n_small, precision=0, commas=False)
-    gs_a100_mem_gb_str = fmt_qty(a100_mem, GiB, precision=0, commas=False, unit_label="GB")
-    gs_small_footprint_gb_str = fmt_qty(small_footprint, GiB, precision=0, commas=False, unit_label="GB")
+    gs_a100_mem_gb_str = fmt_memory_capacity(a100_mem, unit=GiB, precision=0, commas=False)
+    gs_small_footprint_gb_str = fmt_memory_capacity(small_footprint, unit=GiB, precision=0, commas=False)
     gs_models_per_gpu_str = fmt(models_per_gpu_shared, precision=0, commas=False)
     gs_n_large_str = fmt(n_large, precision=0, commas=False)
     gs_gpus_per_large_str = fmt_count(gpus_per_large, commas=False, label="GPU")

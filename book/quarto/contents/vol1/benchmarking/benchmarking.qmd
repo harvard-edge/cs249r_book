@@ -2435,8 +2435,8 @@ Training large-scale machine learning models requires substantial computational 
 # │          energy_reg_str, energy_l1_str, energy_l2_str,
 # │          gpt3_energy_mwh_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_qty
-from mlsysim.core.units import MWh
+from mlsysim.fmt import fmt, fmt_multiple, fmt_qty
+from mlsysim.core.units import MWh, pJ, byte
 
 class EnergyPerOp:
     """Energy per operation and memory access for precision comparison tables."""
@@ -2448,23 +2448,19 @@ class EnergyPerOp:
     ENERGY_SRAM_L1_PJ       = Hardware.Tech.Memory.L1.energy_per_access
     ENERGY_SRAM_L2_PJ       = Hardware.Tech.Memory.L2.energy_per_access
     ENERGY_DRAM_PJ_PER_BYTE = Hardware.Tech.Memory.DRAM.energy_per_byte
-    # FP constants use pJ/FLOP; INT8 uses pJ/op. Use .magnitude for bare numeric values.
-    _fp32_pj = ENERGY_FLOP_FP32_PJ.magnitude
-    _fp16_pj = ENERGY_FLOP_FP16_PJ.magnitude
-    _int8_pj = ENERGY_OP_INT8_PJ.to(pJ).magnitude
-    _reg_pj = ENERGY_REG_PJ.to(pJ).magnitude
-    _l1_pj = ENERGY_SRAM_L1_PJ.to(pJ).magnitude
-    _l2_pj = ENERGY_SRAM_L2_PJ.to(pJ).magnitude
-    _dram_pj = ENERGY_DRAM_PJ_PER_BYTE.to(pJ / byte).magnitude
-    dram_vs_reg_ratio_value = round(_dram_pj / _reg_pj / 1000) * THOUSAND
+    dram_vs_reg_ratio_value = round(
+        ENERGY_DRAM_PJ_PER_BYTE.to(pJ / byte).magnitude
+        / ENERGY_REG_PJ.to(pJ).magnitude
+        / 1000
+    ) * THOUSAND
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    energy_fp32_str = fmt(_fp32_pj, precision=1, commas=False)
-    energy_fp16_str = fmt(_fp16_pj, precision=1, commas=False)
-    energy_int8_str = fmt(_int8_pj, precision=1, commas=False)
-    energy_reg_str = fmt(_reg_pj, precision=2, commas=False)
-    energy_l1_str = fmt(_l1_pj, precision=1, commas=False)
-    energy_l2_str = fmt(_l2_pj, precision=0, commas=False)
+    energy_fp32_pj_str = fmt_qty(ENERGY_FLOP_FP32_PJ, pJ, precision=1, commas=False)
+    energy_fp16_pj_str = fmt_qty(ENERGY_FLOP_FP16_PJ, pJ, precision=1, commas=False)
+    energy_int8_pj_str = fmt_qty(ENERGY_OP_INT8_PJ, pJ, precision=1, commas=False)
+    energy_reg_pj_str = fmt_qty(ENERGY_REG_PJ, pJ, precision=2, commas=False)
+    energy_l1_pj_str = fmt_qty(ENERGY_SRAM_L1_PJ, pJ, precision=1, commas=False)
+    energy_l2_pj_str = fmt_qty(ENERGY_SRAM_L2_PJ, pJ, precision=0, commas=False)
     gpt3_energy_mwh_str = fmt_qty(
         Models.Language.GPT3.training_energy_mwh, MWh, precision=0, commas=True
     )
@@ -2478,7 +2474,7 @@ class EnergyPerOp:
 # │ Context: INT8 energy callout tables — MobileNet load vs compute breakdown
 # │ Exports: EnergyBreakdownCalc.*
 from mlsysim import Models, Hardware
-from mlsysim.fmt import fmt, check, fmt_memory, fmt_energy
+from mlsysim.fmt import fmt, check, fmt_energy_per_byte, fmt_flops, fmt_memory, fmt_energy
 
 class EnergyBreakdownCalc:
     """FP32 vs INT8 MobileNet inference energy: memory load dominates; INT8 attacks both sources."""
@@ -2508,8 +2504,8 @@ class EnergyBreakdownCalc:
     check(s_load == 4.0, f"Expected 4x load-energy reduction, got {s_load:.1f}x")
     check(s_compute > 15, f"Expected INT8 compute to be much cheaper, got {s_compute:.1f}x")
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    dram_energy_pj_str = fmt(_dram_pj, precision=0, commas=False)
-    m_ops_str = fmt(m_ops, precision=0, commas=False)
+    dram_energy_pj_per_byte_str = fmt_energy_per_byte(ENERGY_DRAM_PJ_PER_BYTE, precision=0, commas=False)
+    m_ops_mflop_str = fmt_flops(Models.Vision.MobileNetV2.inference_flops, unit=MFLOPs, precision=0, commas=False)
     m_fp32_mb_str = fmt_memory(m_fp32, unit=MB, precision=0, commas=False)
     m_int8_mb_str = fmt_memory(m_int8, unit=MB, precision=1, commas=False)
     e_fp32_load_str = fmt_energy(e_fp32_load, unit=uJ, precision=0, commas=False)
@@ -2538,9 +2534,9 @@ Because transistor count scales roughly with bit-width squared, narrower datatyp
 
 | **Precision** |           **Multiplier Energy**            | **Relative Cost** |
 |:--------------|:------------------------------------------:|:-----------------:|
-| **FP32**      | ~`{python} EnergyPerOp.energy_fp32_str` pJ |    1.0$\times$    |
-| **FP16**      | ~`{python} EnergyPerOp.energy_fp16_str` pJ |    0.3$\times$    |
-| **INT8**      | ~`{python} EnergyPerOp.energy_int8_str` pJ |    0.05$\times$   |
+| **FP32**      | ~`{python} EnergyPerOp.energy_fp32_pj_str` |    1.0$\times$    |
+| **FP16**      | ~`{python} EnergyPerOp.energy_fp16_pj_str` |    0.3$\times$    |
+| **INT8**      | ~`{python} EnergyPerOp.energy_int8_pj_str` |    0.05$\times$   |
 
 : **Per-Operation Energy by Precision**: Energy cost of a single multiply-accumulate at FP32, FP16, and INT8, with relative cost normalized to FP32, illustrating why narrower datatypes dominate compute-energy savings. {#tbl-benchmarking-energy-per-precision}
 
@@ -2551,12 +2547,12 @@ An 8-bit multiplier uses ~20$\times$ less energy than a 32-bit floating-point mu
 
 @Tbl-benchmarking-energy-memory-tier extends the picture to memory access, with energy cost per byte across each tier of the hierarchy:
 
-| **Memory Level** |                  **Energy per Byte**                  | **Relative Cost** |
-|:-----------------|:-----------------------------------------------------:|:-----------------:|
-| **Register**     |       ~`{python} EnergyPerOp.energy_reg_str` pJ       |     1$\times$     |
-| **L1 Cache**     |        ~`{python} EnergyPerOp.energy_l1_str` pJ       |     50$\times$    |
-| **L2 Cache**     |        ~`{python} EnergyPerOp.energy_l2_str` pJ       |    200$\times$    |
-| **DRAM**         | ~`{python} EnergyBreakdownCalc.dram_energy_pj_str` pJ |   16,000$\times$  |
+| **Memory Level** |                     **Energy per Byte**                     | **Relative Cost** |
+|:-----------------|:-----------------------------------------------------------:|:-----------------:|
+| **Register**     |          ~`{python} EnergyPerOp.energy_reg_pj_str`          |     1$\times$     |
+| **L1 Cache**     |           ~`{python} EnergyPerOp.energy_l1_pj_str`          |     50$\times$    |
+| **L2 Cache**     |           ~`{python} EnergyPerOp.energy_l2_pj_str`          |    200$\times$    |
+| **DRAM**         | ~`{python} EnergyBreakdownCalc.dram_energy_pj_per_byte_str` |   16,000$\times$  |
 
 : **Memory Access Energy by Tier**: Per-byte energy cost across the register-to-DRAM hierarchy, with relative cost normalized to a register read, exposing why off-chip memory traffic dominates inference energy budgets. {#tbl-benchmarking-energy-memory-tier}
 
@@ -2567,11 +2563,11 @@ Memory access dominates: reading one byte from DRAM costs over `{python} EnergyP
 
 @Tbl-benchmarking-mobilenet-int8-energy combines the two effects for a MobileNet inference, decomposing per-inference energy into model-load and compute terms at FP32 vs. INT8:
 
-| **Component**                                                 | **FP32 (`{python} EnergyBreakdownCalc.m_fp32_mb_str`)** | **INT8 (`{python} EnergyBreakdownCalc.m_int8_mb_str`)** |                      **Savings**                       |
-|:--------------------------------------------------------------|:-------------------------------------------------------:|:-------------------------------------------------------:|:------------------------------------------------------:|
-| **Model load from DRAM**                                      |    `{python} EnergyBreakdownCalc.e_fp32_load_str` μJ    |    `{python} EnergyBreakdownCalc.e_int8_load_str` μJ    |   `{python} EnergyBreakdownCalc.s_load_str`$\times$    |
-| **Compute (`{python} EnergyBreakdownCalc.m_ops_str` MFLOPs)** |   `{python} EnergyBreakdownCalc.e_fp32_compute_str` μJ  |   `{python} EnergyBreakdownCalc.e_int8_compute_str` μJ  |  `{python} EnergyBreakdownCalc.s_compute_str`$\times$  |
-| **Total**                                                     |  **`{python} EnergyBreakdownCalc.e_fp32_total_str` μJ** |  **`{python} EnergyBreakdownCalc.e_int8_total_str` μJ** | **`{python} EnergyBreakdownCalc.s_total_str`$\times$** |
+| **Component**                                                | **FP32 (`{python} EnergyBreakdownCalc.m_fp32_mb_str`)** | **INT8 (`{python} EnergyBreakdownCalc.m_int8_mb_str`)** |                      **Savings**                       |
+|:-------------------------------------------------------------|:-------------------------------------------------------:|:-------------------------------------------------------:|:------------------------------------------------------:|
+| **Model load from DRAM**                                     |    `{python} EnergyBreakdownCalc.e_fp32_load_str` μJ    |    `{python} EnergyBreakdownCalc.e_int8_load_str` μJ    |   `{python} EnergyBreakdownCalc.s_load_str`$\times$    |
+| **Compute (`{python} EnergyBreakdownCalc.m_ops_mflop_str`)** |    `{python} EnergyBreakdownCalc.e_fp32_compute_str`    |    `{python} EnergyBreakdownCalc.e_int8_compute_str`    |  `{python} EnergyBreakdownCalc.s_compute_str`$\times$  |
+| **Total**                                                    |   **`{python} EnergyBreakdownCalc.e_fp32_total_str`**   |   **`{python} EnergyBreakdownCalc.e_int8_total_str`**   | **`{python} EnergyBreakdownCalc.s_total_str`$\times$** |
 
 : **MobileNet INT8 Energy Breakdown**: Per-inference energy decomposed into model-load and compute terms for FP32 vs. INT8, showing that INT8 quantization attacks DRAM-traffic energy as the dominant component. {#tbl-benchmarking-mobilenet-int8-energy}
 
@@ -2579,7 +2575,7 @@ Memory access dominates: reading one byte from DRAM costs over `{python} EnergyP
 \endgroup
 ```
 
-**Systems insight**: Memory access dominates FP32 energy consumption (~`{python} EnergyBreakdownCalc.e_fp32_load_mj_str` mJ vs. `{python} EnergyBreakdownCalc.e_fp32_compute_mj_str` mJ compute). INT8 quantization provides `{python} EnergyBreakdownCalc.s_load_str`$\times$ memory energy reduction and ~`{python} EnergyBreakdownCalc.s_compute_str`$\times$ compute energy reduction. The combined effect explains why quantized models on edge devices achieve dramatic battery life improvements: they attack the dominant memory bottleneck while simultaneously accelerating compute.
+**Systems insight**: Memory access dominates FP32 energy consumption (~`{python} EnergyBreakdownCalc.e_fp32_load_mj_str` vs. `{python} EnergyBreakdownCalc.e_fp32_compute_mj_str` compute). INT8 quantization provides `{python} EnergyBreakdownCalc.s_load_str`$\times$ memory energy reduction and ~`{python} EnergyBreakdownCalc.s_compute_str`$\times$ compute energy reduction. The combined effect explains why quantized models on edge devices achieve dramatic battery life improvements: they attack the dominant memory bottleneck while simultaneously accelerating compute.
 
 :::
 
@@ -3327,8 +3323,8 @@ Training benchmarks measure learning speed; inference benchmarks measure serving
 # │          PowerClaimGapCalc.sustained_w_str,
 # │          PowerClaimGapCalc.efficiency_gap_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_power, check
-from mlsysim.core.units import watt
+from mlsysim.fmt import fmt, fmt_ops_rate, fmt_power, check
+from mlsysim.core.units import TOPS, watt
 
 class PowerClaimGapCalc:
     """TOPS/W gap between a peak datasheet claim and sustained inference."""
@@ -3348,17 +3344,17 @@ class PowerClaimGapCalc:
     check(sustained_tops_per_w < datasheet_tops_per_w, "Sustained efficiency should trail the datasheet claim.")
 
     # OUTPUT
-    datasheet_tops_str = fmt(datasheet_tops, precision=0, commas=False)
+    datasheet_tops_str = fmt_ops_rate(datasheet_tops * TOPS, unit=TOPS, precision=0, commas=False)
     datasheet_w_str = fmt_power(datasheet_w * watt, unit=watt, precision=1, commas=False)
-    sustained_tops_str = fmt(sustained_tops, precision=0, commas=False)
+    sustained_tops_str = fmt_ops_rate(sustained_tops * TOPS, unit=TOPS, precision=0, commas=False)
     sustained_w_str = fmt_power(sustained_w * watt, unit=watt, precision=0, commas=False)
     efficiency_gap_str = fmt(efficiency_gap, precision=1, commas=False)
 ```
 
-A chip vendor advertises "`{python} PowerClaimGapCalc.datasheet_tops_str` TOPS at `{python} PowerClaimGapCalc.datasheet_w_str`," but under sustained inference load, thermal throttling drops actual throughput to `{python} PowerClaimGapCalc.sustained_tops_str` TOPS at `{python} PowerClaimGapCalc.sustained_w_str`. Without standardized power measurement, this `{python} PowerClaimGapCalc.efficiency_gap_str`$\times$ efficiency gap between the datasheet and reality goes undetected until deployment.
+A chip vendor advertises "`{python} PowerClaimGapCalc.datasheet_tops_str` at `{python} PowerClaimGapCalc.datasheet_w_str`," but under sustained inference load, thermal throttling drops actual throughput to `{python} PowerClaimGapCalc.sustained_tops_str` at `{python} PowerClaimGapCalc.sustained_w_str`. Without standardized power measurement, this `{python} PowerClaimGapCalc.efficiency_gap_str`$\times$ efficiency gap between the datasheet and reality goes undetected until deployment.
 
 \index{TOPS/W!primary design objective}
-This third dimension is critical because @sec-hardware-acceleration established TOPS/W as a primary design objective alongside raw TOPS. Power benchmarks validate whether efficiency-optimized accelerators deliver their promised energy savings. Power claims are particularly susceptible to gaming: a chip advertising "`{python} PowerClaimGapCalc.datasheet_tops_str` TOPS at `{python} PowerClaimGapCalc.datasheet_w_str`" might achieve that ratio only at minimal utilization; under sustained load, thermal throttling and voltage scaling may deliver `{python} PowerClaimGapCalc.sustained_tops_str` TOPS at `{python} PowerClaimGapCalc.sustained_w_str`. Power benchmarks expose these gaps.
+This third dimension is critical because @sec-hardware-acceleration established TOPS/W as a primary design objective alongside raw TOPS. Power benchmarks validate whether efficiency-optimized accelerators deliver their promised energy savings. Power claims are particularly susceptible to gaming: a chip advertising "`{python} PowerClaimGapCalc.datasheet_tops_str` at `{python} PowerClaimGapCalc.datasheet_w_str`" might achieve that ratio only at minimal utilization; under sustained load, thermal throttling and voltage scaling may deliver `{python} PowerClaimGapCalc.sustained_tops_str` at `{python} PowerClaimGapCalc.sustained_w_str`. Power benchmarks expose these gaps.
 
 However, measuring power consumption in machine learning systems presents challenges distinct from measuring time or throughput. Power varies with temperature, workload phase, and system configuration in ways that performance metrics do not. @Tbl-power quantifies how energy demands of ML models vary dramatically across deployment environments, spanning multiple orders of magnitude from TinyML devices consuming mere microwatts to data center racks requiring kilowatts. This wide spectrum illustrates the central challenge in creating standardized benchmarking methodologies [@henderson2020towards].
 
@@ -4504,7 +4500,7 @@ Acceptable degradation depends on deployment context. A 2 percent accuracy drop 
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
 from mlsysim.core.constants import Mparam, BYTES_FP32, BYTES_INT8, MB
-from mlsysim.fmt import fmt, fmt_qty, check, fmt_memory, fmt_params, fmt_pp
+from mlsysim.fmt import fmt, fmt_illuminance, check, fmt_memory, fmt_params, fmt_pp
 
 class MobileNetINT8Calc:
     """MobileNetV2 FP32 vs INT8: aggregate accuracy holds but calibration and edge cases degrade."""
@@ -4551,7 +4547,7 @@ class MobileNetINT8Calc:
     mv2_edge_drop_str = fmt_pp(edge_drop, precision=1, commas=False)
     ece_example_confidence_pct_str = fmt_percent(ece_example_confidence_pct/100, precision=0, commas=False, style='symbol')
     edge_occlusion_pct_str = fmt_percent(edge_occlusion_pct/100, precision=0, commas=False, style='symbol')
-    edge_lux_str = fmt_qty(edge_lux * ureg.lux, ureg.lux, precision=0, commas=False, unit_label="lux")
+    edge_lux_str = fmt_illuminance(edge_lux * ureg.lux, precision=0, commas=False)
     edge_rotation_deg_str = fmt(edge_rotation_deg, precision=0, commas=False)
     real_world_edge_pct_str = fmt_percent(real_world_edge_pct/100, precision=0, commas=False, style='symbol')
     confidence_threshold_pct_str = fmt_percent(confidence_threshold_pct/100, precision=0, commas=False, style='symbol')

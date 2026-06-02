@@ -120,7 +120,7 @@ from mlsysim.core.constants import *
 # │ Exports: gradient_size_gb_str, ring_bw_time_ms_str, ring_lat_time_ms_str,
 # │          ring_total_ms_str, n_gpus_napkin_str, ring_bw_factor_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_count, fmt_qty, fmt_time
+from mlsysim.fmt import check, fmt, fmt_count, fmt_multiple, fmt_params, fmt_qty, fmt_time
 from mlsysim.core.constants import GB, byte, microsecond, ms, param, second
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -138,7 +138,7 @@ class AllReduceCost:
     ib_ndr = Systems.Fabrics.InfiniBand_NDR
     n_gpus = 64
     ib_bw = Systems.Fabrics.InfiniBand_NDR
-    alpha_us = 3 # microseconds
+    alpha = Systems.SwitchFabric.AlphaNdr
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Gradient size (BF16 = 2 bytes/param)
@@ -150,7 +150,7 @@ class AllReduceCost:
         message_bytes=gradient_qty,
         n_gpus=n_gpus,
         bandwidth_bytes_s=ib_ndr.bandwidth,
-        latency_s=alpha_us * microsecond
+        latency_s=alpha
     )
     ring_total = t_ring.to(ms)
 
@@ -171,9 +171,9 @@ class AllReduceCost:
     ring_lat_time_ms_str = fmt_time(ring_lat_time, ms, precision=1, commas=False)
     ring_total_ms_str = fmt_time(ring_total, ms, precision=1, commas=True)
     n_gpus_napkin_str = fmt_count(n_gpus, commas=False, label="GPU")
-    ring_bw_factor_str = fmt(ring_bw_factor, precision=2, commas=False)
+    ring_bw_factor_str = fmt_multiple(ring_bw_factor, precision=2, commas=False)
     ib_bw_gbs_str = fmt_qty(ib_bw.bandwidth, GB/second, precision=0, commas=False)
-    alpha_us_str = fmt(alpha_us, precision=0, commas=False)
+    alpha_us_str = fmt_time(alpha, microsecond, precision=1, commas=False)
     lat_steps_str = fmt(2 * (n_gpus - 1), precision=0, commas=False)
     params_b_str = fmt_params(m.parameters, scale="B", precision=0, commas=False)
 ```
@@ -193,7 +193,7 @@ Substituting: $T_{\text{bandwidth}}$ = `{python} AllReduceCost.ring_bw_factor_st
 **Step 3**: Add the latency term.
 $$T_{\text{latency}} = 2(N-1) \cdot \alpha$$
 
-Substituting: $T_{\text{latency}} =$ `{python} AllReduceCost.lat_steps_str` $\times$ `{python} AllReduceCost.alpha_us_str` $\mu\text{s} =$ `{python} AllReduceCost.ring_lat_time_ms_str`.
+Substituting: $T_{\text{latency}} =$ `{python} AllReduceCost.lat_steps_str` $\times$ `{python} AllReduceCost.alpha_us_str` = `{python} AllReduceCost.ring_lat_time_ms_str`.
 
 **Step 4**: Total communication time.
 Total: $T_{\text{AllReduce}} \approx$ `{python} AllReduceCost.ring_bw_time_ms_str` + `{python} AllReduceCost.ring_lat_time_ms_str` $\approx$ `{python} AllReduceCost.ring_total_ms_str`.
@@ -392,7 +392,7 @@ Applying the critical message size formula to a concrete workload reveals which 
 ```{python}
 #| echo: false
 #| label: critical-msg-size-calc
-from mlsysim.fmt import check, fmt, fmt_qty
+from mlsysim.fmt import check, fmt_qty, fmt_time
 from mlsysim.core.constants import GB, KB, microsecond, second
 
 class CriticalMsgSize:
@@ -407,14 +407,14 @@ class CriticalMsgSize:
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(n_star_kb == 100, f"n* = {n_star_kb} KB, expected 100")
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    alpha_str = fmt(alpha_us, precision=0, commas=False)
+    alpha_us_str = fmt_time(alpha, microsecond, precision=0, commas=False)
     beta_gb_s_str = fmt_qty(beta, GB/second, precision=0, commas=False)
     n_star_kb_str = fmt_qty(n_star, KB, precision=0, commas=False)
 ```
 
 ::: {#nbk-collective-communication-critical-message-size .callout-notebook title="The critical message size"}
 
-**Problem**: Consider a cluster using InfiniBand NDR 400 Gbps with $\alpha =$ `{python} CriticalMsgSize.alpha_str` $\mu\text{s}$ and $\beta =$ `{python} CriticalMsgSize.beta_gb_s_str`. At what message size does optimizing for bandwidth start to matter more than optimizing for latency?
+**Problem**: Consider a cluster using InfiniBand NDR 400 Gbps with $\alpha =$ `{python} CriticalMsgSize.alpha_us_str` and $\beta =$ `{python} CriticalMsgSize.beta_gb_s_str`. At what message size does optimizing for bandwidth start to matter more than optimizing for latency?
 
 **Math**:
 
@@ -462,39 +462,45 @@ LogP distinguishes **network latency** ($L_{\text{lat}}$, which can be hidden) f
 ```{python}
 #| echo: false
 #| label: logp-overlap-calc
-from mlsysim.fmt import check, fmt
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Exports: LogPOverlap.L_us_str, LogPOverlap.o_us_str,
+# │          LogPOverlap.two_o_us_str, LogPOverlap.compute_us_str,
+# │          LogPOverlap.effective_us_str
+from mlsysim.fmt import check, fmt_time
+from mlsysim.core.constants import microsecond
 
 class LogPOverlap:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    L_us = 100
-    o_us = 50
-    compute_us = 500
+    L = 100 * microsecond  # scenario assumption: network latency
+    o = 50 * microsecond  # scenario assumption: per-side processor overhead
+    compute = 500 * microsecond  # scenario assumption: overlapped compute window
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    two_o_us = 2 * o_us
-    effective_us = two_o_us + max(compute_us, L_us)
+    two_o = 2 * o
+    effective = two_o + max(compute, L)
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(two_o_us == 100, f"2o = {two_o_us}, expected 100")
-    check(effective_us == 600, f"Effective = {effective_us}, expected 600")
+    check(two_o == 100 * microsecond, f"2o = {two_o.to(microsecond).magnitude}, expected 100 us")
+    check(effective == 600 * microsecond, f"Effective = {effective.to(microsecond).magnitude}, expected 600 us")
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    L_str = fmt(L_us, precision=0, commas=False)
-    two_o_str = fmt(two_o_us, precision=0, commas=False)
-    compute_str = fmt(compute_us, precision=0, commas=False)
-    effective_str = fmt(effective_us, precision=0, commas=False)
+    L_us_str = fmt_time(L, microsecond, precision=0, commas=False)
+    o_us_str = fmt_time(o, microsecond, precision=0, commas=False)
+    two_o_us_str = fmt_time(two_o, microsecond, precision=0, commas=False)
+    compute_us_str = fmt_time(compute, microsecond, precision=0, commas=False)
+    effective_us_str = fmt_time(effective, microsecond, precision=0, commas=False)
 ```
 
 ::: {#nbk-collective-communication-hiding-communication-behind-computation .callout-notebook title="Hiding communication behind computation"}
 
-**Problem**: A training pipeline attempts to overlap gradient AllReduce with the next layer's backward pass. The backward pass takes `{python} LogPOverlap.compute_str` μs. The AllReduce has network latency $L_{\text{lat}} = 100\ \mu\text{s}$ but processor overhead $o = 50\ \mu\text{s}$ to initiate and $o = 50\ \mu\text{s}$ to receive. Can the communication be hidden?
+**Problem**: A training pipeline attempts to overlap gradient AllReduce with the next layer's backward pass. The backward pass takes `{python} LogPOverlap.compute_us_str`. The AllReduce has network latency `{python} LogPOverlap.L_us_str` but processor overhead $o =$ `{python} LogPOverlap.o_us_str` to initiate and $o =$ `{python} LogPOverlap.o_us_str` to receive. Can the communication be hidden?
 
 **Math**:
 
-1.  **Overlappable portion**\index{LogP Model!overlappable latency}: Network latency $L_{\text{lat}}$ = `{python} LogPOverlap.L_str` $\mu\text{s}$ (data in flight while GPU computes).
-2.  **Non-overlappable portion**\index{LogP Model!nonoverlappable overhead}: $2o$ = `{python} LogPOverlap.two_o_str` $\mu\text{s}$ (GPU busy initiating/receiving).
-3.  **Compute available**: `{python} LogPOverlap.compute_str` $\mu\text{s}$.
-4.  **Hidden**: All `{python} LogPOverlap.L_str` μs of $L_{\text{lat}}$ can overlap with compute.
-5.  **Exposed**: The `{python} LogPOverlap.two_o_str` μs of $o$ cannot overlap.
+1.  **Overlappable portion**\index{LogP Model!overlappable latency}: Network latency $L_{\text{lat}}$ = `{python} LogPOverlap.L_us_str` (data in flight while GPU computes).
+2.  **Non-overlappable portion**\index{LogP Model!nonoverlappable overhead}: $2o$ = `{python} LogPOverlap.two_o_us_str` (GPU busy initiating/receiving).
+3.  **Compute available**: `{python} LogPOverlap.compute_us_str`.
+4.  **Hidden**: All `{python} LogPOverlap.L_us_str` of $L_{\text{lat}}$ can overlap with compute.
+5.  **Exposed**: The `{python} LogPOverlap.two_o_us_str` of $o$ cannot overlap.
 
-**Effective time**\index{Effective Time}: `{python} LogPOverlap.two_o_str` $\mu\text{s}$ + max(`{python} LogPOverlap.compute_str`, `{python} LogPOverlap.L_str`) = `{python} LogPOverlap.effective_str` $\mu\text{s}$. The network latency is hidden, but the processor overhead remains exposed. @Fig-comm-compute-overlap shows this overlap visually.
+**Effective time**\index{Effective Time}: `{python} LogPOverlap.two_o_us_str` + max(`{python} LogPOverlap.compute_us_str`, `{python} LogPOverlap.L_us_str`) = `{python} LogPOverlap.effective_us_str`. The network latency is hidden, but the processor overhead remains exposed. @Fig-comm-compute-overlap shows this overlap visually.
 
 **Systems insight**: The α-β model captures the total communication time. The LogP model reveals *how much of it can be hidden*. When designing pipelined training, optimize for low $o$ (kernel bypass, GPUDirect) rather than high $\beta$ alone.
 
@@ -708,7 +714,7 @@ To make the AllToAll pattern concrete, consider a Mixture of Experts model with 
 #| echo: false
 #| label: moe-alltoall-calc
 from mlsysim.core.constants import BYTES_FP16, GB, KB, MB, microsecond, second
-from mlsysim.fmt import check, fmt, fmt_qty
+from mlsysim.fmt import check, fmt, fmt_qty, fmt_time
 
 class MoeAllToAll:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -743,7 +749,7 @@ class MoeAllToAll:
     check(abs(data_per_transfer.to(KB).magnitude - 262.144) < 1e-9, f"data/transfer = {data_per_transfer.to(KB).magnitude} KB")
     check(per_transfer == 8 * microsecond, f"T/transfer = {per_transfer.to(microsecond).magnitude} μs")
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    alpha_str = fmt(alpha_us, precision=0, commas=False)
+    alpha_us_str = fmt_time(alpha, microsecond, precision=0, commas=False)
     beta_gb_s_str = fmt_qty(beta, GB/second, precision=0, commas=False)
     tokens_per_gpu_str = fmt(tokens_per_gpu, precision=0, commas=False)
     tokens_per_transfer_str = fmt(tokens_per_transfer, precision=0, commas=False)
@@ -751,7 +757,7 @@ class MoeAllToAll:
     tokens_per_expert_str = fmt(tokens_per_expert, precision=0, commas=False)
     data_per_transfer_kb_str = fmt_qty(data_per_transfer, KB, precision=3, commas=False)
     total_sent_mb_str = fmt_qty(total_sent, MB, precision=2, commas=False)
-    bw_time_approx_str = fmt(bw_time_us_approx, precision=0, commas=False)
+    bw_time_approx_us_str = fmt_time(bw_time_us_approx, microsecond, precision=0, commas=False)
     per_transfer_us_str = fmt_time(per_transfer, unit=microsecond, precision=0, commas=False)
     serialized_us_str = fmt_time(serialized, unit=microsecond, precision=0, commas=False)
     parallel_us_str = fmt_time(parallel, unit=microsecond, precision=0, commas=False)
@@ -775,11 +781,11 @@ Each GPU holds `{python} MoeAllToAll.tokens_per_gpu_str` tokens that need to rea
 *   Total data sent per GPU: 7 $\times$ `{python} MoeAllToAll.data_per_transfer_kb_str` = `{python} MoeAllToAll.total_sent_mb_str`
 *   Total data received per GPU: `{python} MoeAllToAll.total_sent_mb_str` (symmetric)
 
-**Latency Analysis** (InfiniBand NDR, $\alpha =$ `{python} MoeAllToAll.alpha_str` $\mu\text{s}$, $\beta =$ `{python} MoeAllToAll.beta_gb_s_str`):
+**Latency Analysis** (InfiniBand NDR, $\alpha =$ `{python} MoeAllToAll.alpha_us_str`, $\beta =$ `{python} MoeAllToAll.beta_gb_s_str`):
 
-Each of the 7 transfers is a `{python} MoeAllToAll.data_per_transfer_kb_str` message. From the $\alpha$-$\beta$ model: $T_{\text{transfer}}$ = 3 + `{python} MoeAllToAll.bw_time_approx_str` = `{python} MoeAllToAll.per_transfer_us_str` $\mu\text{s}$ per transfer.
+Each of the 7 transfers is a `{python} MoeAllToAll.data_per_transfer_kb_str` message. From the $\alpha$-$\beta$ model: $T_{\text{transfer}}$ = `{python} MoeAllToAll.alpha_us_str` + `{python} MoeAllToAll.bw_time_approx_us_str` = `{python} MoeAllToAll.per_transfer_us_str` per transfer.
 
-If serialized: 7 $\times$ `{python} MoeAllToAll.per_transfer_us_str` $\mu\text{s}$ = `{python} MoeAllToAll.serialized_us_str` $\mu\text{s}$. If all 7 transfers run in parallel (full-duplex, non-blocking): $\approx$ `{python} MoeAllToAll.parallel_us_str` $\mu\text{s}$.
+If serialized: 7 $\times$ `{python} MoeAllToAll.per_transfer_us_str` = `{python} MoeAllToAll.serialized_us_str`. If all 7 transfers run in parallel (full-duplex, non-blocking): $\approx$ `{python} MoeAllToAll.parallel_us_str`.
 
 **Systems insight**: The per-transfer sizes in this MoE example sit near the critical-message-size boundary, so startup overhead remains comparable to serialization time. This is why MoE scaling is often constrained by $\alpha$ (latency), fan-out, and contention rather than raw $\beta$ (bandwidth) alone, and why MoE systems benefit from low-latency switches, RDMA, message fusion, and topology-aware routing. The AllToAll also runs twice per layer (once for token dispatch, once for result collection), doubling the startup tax.
 
@@ -1168,7 +1174,7 @@ Nevertheless, the crossover formula remains the essential mental model for under
 ```{python}
 #| echo: false
 #| label: ring-vs-tree-calc
-from mlsysim.fmt import check, fmt, fmt_percent, fmt_qty
+from mlsysim.fmt import check, fmt, fmt_percent, fmt_qty, fmt_time
 from mlsysim.core.constants import GB, MB, microsecond, second
 import math
 
@@ -1198,7 +1204,7 @@ class RingVsTree:
     check(abs(tree_bw.to(microsecond).magnitude - 1200) < 1, f"Tree bw = {tree_bw.to(microsecond).magnitude}")
     check(abs(crossover.to(MB).magnitude - 1.1) < 0.05, f"Crossover = {crossover.to(MB).magnitude}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    alpha_str = fmt(alpha_us, precision=0, commas=False)
+    alpha_us_str = fmt_time(alpha, microsecond, precision=0, commas=False)
     beta_gb_s_str = fmt_qty(beta, GB/second, precision=0, commas=False)
     ring_lat_us_str = fmt_time(ring_lat, unit=microsecond, precision=0)
     tree_lat_us_str = fmt_time(tree_lat, unit=microsecond, precision=0, commas=False)
@@ -1214,26 +1220,26 @@ class RingVsTree:
 
 ::: {#nbk-collective-communication-ring-vs-tree-crossover .callout-notebook title="The ring vs. tree crossover"}
 
-**Problem**: A cluster synchronizes a `{python} RingVsTree.M_mb_str` buffer across `{python} RingVsTree.N_str` GPUs. The network has latency $\alpha =$ `{python} RingVsTree.alpha_str` $\mu\text{s}$ and bandwidth $\beta =$ `{python} RingVsTree.beta_gb_s_str`. Which algorithm performs better: Ring or Tree?
+**Problem**: A cluster synchronizes a `{python} RingVsTree.M_mb_str` buffer across `{python} RingVsTree.N_str` GPUs. The network has latency $\alpha =$ `{python} RingVsTree.alpha_us_str` and bandwidth $\beta =$ `{python} RingVsTree.beta_gb_s_str`. Which algorithm performs better: Ring or Tree?
 
 **Math**:
 
 **Latency**:
 
-1.  **Ring Latency**\index{Ring AllReduce!latency}: $2(N-1)\alpha = 2 \times 63 \times 10\ \mu\text{s}$ = `{python} RingVsTree.ring_lat_us_str` $\mu\text{s}$.
-2.  **Tree Latency**\index{Tree AllReduce!latency}: $2(\log_2 N)\alpha = 2 \times 6 \times 10\ \mu\text{s}$ = `{python} RingVsTree.tree_lat_us_str` $\mu\text{s}$.
+1.  **Ring Latency**\index{Ring AllReduce!latency}: $2(N-1)\alpha = 2 \times 63 \times 10\ \mu\text{s}$ = `{python} RingVsTree.ring_lat_us_str`.
+2.  **Tree Latency**\index{Tree AllReduce!latency}: $2(\log_2 N)\alpha = 2 \times 6 \times 10\ \mu\text{s}$ = `{python} RingVsTree.tree_lat_us_str`.
 
 **Bandwidth** (note the difference):
 
-3.  **Ring Bandwidth**\index{Ring AllReduce!bandwidth}: $2\frac{N-1}{N}\frac{M}{\beta} \approx 2 \times \frac{1\text{ MB}}{10\text{ GB/s}}$ = `{python} RingVsTree.ring_bw_us_str` $\mu\text{s}$ (optimal: each byte sent once).
-4.  **Tree Bandwidth**\index{Tree AllReduce!bandwidth}: $2\log_2 N \cdot \frac{M}{\beta} = 12 \times \frac{1\text{ MB}}{10\text{ GB/s}}$ = `{python} RingVsTree.tree_bw_us_str` $\mu\text{s}$ (each level sends full message).
+3.  **Ring Bandwidth**\index{Ring AllReduce!bandwidth}: $2\frac{N-1}{N}\frac{M}{\beta} \approx 2 \times \frac{1\text{ MB}}{10\text{ GB/s}}$ = `{python} RingVsTree.ring_bw_us_str` (optimal: each byte sent once).
+4.  **Tree Bandwidth**\index{Tree AllReduce!bandwidth}: $2\log_2 N \cdot \frac{M}{\beta} = 12 \times \frac{1\text{ MB}}{10\text{ GB/s}}$ = `{python} RingVsTree.tree_bw_us_str` (each level sends full message).
 
 @Tbl-collective-communication-ring-vs-tree-1mb-64gpu sums the latency and bandwidth contributions into a head-to-head comparison:
 
-| **Algorithm** |                              **Latency** |                           **Bandwidth** |                                  **Total** |
-|:--------------|-----------------------------------------:|----------------------------------------:|-------------------------------------------:|
-| **Ring**      | `{python} RingVsTree.ring_lat_us_str` μs | `{python} RingVsTree.ring_bw_us_str` μs | `{python} RingVsTree.ring_total_us_str` μs |
-| **Tree**      | `{python} RingVsTree.tree_lat_us_str` μs | `{python} RingVsTree.tree_bw_us_str` μs | `{python} RingVsTree.tree_total_us_str` μs |
+| **Algorithm** |                           **Latency** |                        **Bandwidth** |                               **Total** |
+|:--------------|--------------------------------------:|-------------------------------------:|----------------------------------------:|
+| **Ring**      | `{python} RingVsTree.ring_lat_us_str` | `{python} RingVsTree.ring_bw_us_str` | `{python} RingVsTree.ring_total_us_str` |
+| **Tree**      | `{python} RingVsTree.tree_lat_us_str` | `{python} RingVsTree.tree_bw_us_str` | `{python} RingVsTree.tree_total_us_str` |
 : **Ring vs. tree AllReduce timing for a 1 MB buffer on 64 GPUs**: Latency, bandwidth, and total-time terms with $\alpha = 10\ \mu\text{s}$ and $\beta = 10\ \text{GB/s}$. {#tbl-collective-communication-ring-vs-tree-1mb-64gpu}
 
 Tree wins, but only by `{python} RingVsTree.tree_win_margin_pct_str`. For this `{python} RingVsTree.M_mb_str` message, we are near the crossover point.

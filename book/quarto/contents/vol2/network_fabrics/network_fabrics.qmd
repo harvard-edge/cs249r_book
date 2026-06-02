@@ -117,7 +117,7 @@ In a single machine, the memory bus moves data between the processor and memory.
 # │          bandwidth refs in Level 1, Level 2, Level 5, Virtualization,
 # │          Monitoring, Fallacies sections.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, fmt_qty
+from mlsysim.fmt import fmt, check, fmt_bandwidth, fmt_flop_rate, fmt_qty
 
 class NetworkFabricsContextScenario:
     """Bandwidth hierarchy specs for the chapter-wide fabric discussion."""
@@ -136,11 +136,11 @@ class NetworkFabricsContextScenario:
     check(nvlink_to_ib_ratio_val > 10, "NVLink-to-IB ratio should exceed 10x")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    ib_ndr_gbps_str = fmt_qty(ib_ndr_raw, Gbps, precision=0, commas=False, unit_label="Gb/s")
+    ib_ndr_gbps_str = fmt_bandwidth(ib_ndr_raw, unit=Gbps, precision=0, commas=False)
     ib_ndr_gbs_str = fmt_qty(ib_ndr_raw, GB/second, precision=0, commas=False)
     nvlink_h100_gbs_str = fmt_qty(nvlink_h100_raw, GB/second, precision=0, commas=False)
     nvlink_to_ib_ratio_str = fmt(nvlink_to_ib_ratio_val, precision=0, commas=False)
-    h100_tflops_str = fmt_qty(h100_flops_raw, TFLOP/second, precision=0, commas=False)
+    h100_tflops_str = fmt_flop_rate(h100_flops_raw, unit=TFLOP/second, precision=0, commas=False)
     h100_mem_bw_tb_s_str = fmt_qty(h100_mem_bw_raw, TB/second, precision=2, commas=False)
 ```
 
@@ -353,7 +353,7 @@ class NetworkWireClusterRecap:
 # │ Exports: IbNdrWireRecap.ib_ndr_gbps_str
 class IbNdrWireRecap:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    ib_ndr_gbps_str = fmt_qty(Systems.Fabrics.InfiniBand_NDR.bandwidth, Gbps, precision=0, commas=False, unit_label="Gb/s")
+    ib_ndr_gbps_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=Gbps, precision=0, commas=False)
 ```
 
 Before analyzing protocols and topologies, we must understand the physical medium. Every network design decision is ultimately constrained by *what* the wire can carry. At `{python} IbNdrWireRecap.ib_ndr_gbps_str` and beyond, the physics of signal transmission imposes hard limits on cable length, power consumption, and error rates. These are not engineering inconveniences; they are fundamental constraints that shape cluster geometry.
@@ -465,7 +465,7 @@ Large-scale training requires sustained, synchronized bulk transfers. A single A
 # │ Exports: IbNdrTransportRecap.ib_ndr_gbps_str
 class IbNdrTransportRecap:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    ib_ndr_gbps_str = fmt_qty(Systems.Fabrics.InfiniBand_NDR.bandwidth, Gbps, precision=0, commas=False, unit_label="Gb/s")
+    ib_ndr_gbps_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=Gbps, precision=0, commas=False)
 ```
 
 Standard TCP/IP is architecturally unfit for the `{python} IbNdrTransportRecap.ib_ndr_gbps_str` era. The protocol stack was designed when network speeds were orders of magnitude slower than CPU memory bandwidth, but today that relationship has inverted. Processing a `{python} IbNdrTransportRecap.ib_ndr_gbps_str` stream through the Linux kernel imposes a crushing interrupt tax: copying payload data between user space and kernel buffers can consume the entire memory bandwidth of a dual-socket server, requiring tens of CPU cores merely to keep the pipe full. The result is a CPU wall where the host processor becomes the bottleneck for network traffic, starving the application logic it is meant to serve.
@@ -818,7 +818,7 @@ class AllReduceBottleneck:
     )
     grad_1b_gb_str = fmt_qty(grad_1b, GB, precision=1, commas=False)
     gpu_util_pct_str = fmt_percent(gpu_util, precision=0, commas=False, style='prose')
-    h100_tflops_str = fmt_qty(peak_flops, TFLOPs/second, precision=0, commas=False, unit_label="TFLOP/s")
+    h100_tflops_str = fmt_flop_rate(peak_flops, unit=TFLOPs/second, precision=0, commas=False)
     params_70b_billion_str = fmt_params(
         m_70b.parameters,
         scale="B",
@@ -1463,7 +1463,7 @@ class NetworkFabricsClusterRecap:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     nvlink_to_ib_ratio_str = fmt((nvlink / ib_ndr).to_base_units().magnitude, precision=0, commas=False)
     nvlink_h100_gbs_str = fmt_qty(nvlink, GB/second, precision=0, commas=False)
-    ib_ndr_gbps_str = fmt_qty(Systems.Fabrics.InfiniBand_NDR.bandwidth, Gbps, precision=0, commas=False, unit_label="Gb/s")
+    ib_ndr_gbps_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=Gbps, precision=0, commas=False)
 ```
 
 In a well-designed cluster, the network fabric acts as a scheduler-aware extension of the system bus, not a passive pipe. The intra-node (NVLink) bandwidth is ~`{python} NetworkFabricsClusterRecap.nvlink_to_ib_ratio_str`$\times$ higher than inter-node (InfiniBand/RoCE) bandwidth, and the primary mechanism for hiding this cliff is **communication-computation overlap**\index{Communication-Computation Overlap}. During the backward pass, gradients for the final layers are computed first. Instead of waiting for the entire backward pass to finish, the system triggers an asynchronous AllReduce for these gradients immediately while the GPUs continue computing gradients for earlier layers. If the backward pass requires 500 ms of computation and the AllReduce takes 300 ms, perfect overlap masks the entire communication cost behind computation, reducing the effective overhead to $\max(0, 300 - 500) = 0$. In practice, dependency chains and resource contention limit this efficiency to 60–80 percent, leaving a **last-mile problem**\index{Last-Mile Problem}: the gradients for the very first layer (computed last) have no subsequent computation to hide behind, exposing their raw transfer time to the critical path.
@@ -1503,7 +1503,7 @@ A quick estimate makes the power dividend concrete.
 ```{python}
 #| echo: false
 #| label: optical-dividend-calc
-from mlsysim.fmt import fmt_int, fmt_qty, fmt, check
+from mlsysim.fmt import fmt_int, fmt_power, fmt_qty, fmt, check
 
 class OpticalDividend:
     """Power savings from Co-Packaged Optics (CPO)."""
@@ -1542,8 +1542,8 @@ class OpticalDividend:
     total_pluggable_kw_str = fmt_qty(total_pluggable, kilowatt, precision=2, commas=False)
     total_cpo_kw_str = fmt_qty(total_cpo, kilowatt, precision=2, commas=False)
     n_switches_str = fmt(n_switches, precision=0)
-    cluster_pluggable_mw_str = fmt_qty(cluster_pluggable, MW, precision=2, commas=False, unit_label="MW")
-    cluster_savings_mw_str = fmt_qty(cluster_savings, MW, precision=2, commas=False, unit_label="MW")
+    cluster_pluggable_mw_str = fmt_power(cluster_pluggable, unit=MW, precision=2, commas=False)
+    cluster_savings_mw_str = fmt_power(cluster_savings, unit=MW, precision=2, commas=False)
     equivalent_h100_gpus_str = fmt_int(round(equivalent_h100_gpus / 100) * 100)
 ```
 
@@ -1581,7 +1581,7 @@ For a 10,000-GPU cluster, eliminating pluggable modules could save over 100 kW o
 # │          NextGenLinkDensity.switch_capacity_tbps_s_str,
 # │          NextGenLinkDensity.port_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_qty, check
+from mlsysim.fmt import fmt, fmt_bandwidth, fmt_qty, check
 
 class NextGenLinkDensity:
     """Port-rate and switch-capacity references for next-generation fabrics."""
@@ -1601,10 +1601,10 @@ class NextGenLinkDensity:
     check(equivalent_1_6t_ports_val == 64, "102.4 Tb/s should equal 64 * 1.6T ports")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    xdr_port_gbps_str = fmt_qty(Systems.Fabrics.InfiniBand_XDR.bandwidth, Gbps, precision=0, commas=False, unit_label="Gb/s")
-    eth_800g_port_gbps_str = fmt_qty(ETHERNET_800G_BW, Gbps, precision=0, commas=False, unit_label="Gb/s")
-    eth_1_6t_port_tbps_s_str = fmt_qty(ETHERNET_1P6T_BW, terabit / second, precision=1, commas=False, unit_label="Tb/s")
-    switch_capacity_tbps_s_str = fmt_qty(SWITCH_ASIC_102T4_BW, terabit / second, precision=1, commas=False, unit_label="Tb/s")
+    xdr_port_gbps_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_XDR.bandwidth, unit=Gbps, precision=0, commas=False)
+    eth_800g_port_gbps_str = fmt_bandwidth(ETHERNET_800G_BW, unit=Gbps, precision=0, commas=False)
+    eth_1_6t_port_tbps_s_str = fmt_bandwidth(ETHERNET_1P6T_BW, unit=terabit / second, precision=1, commas=False)
+    switch_capacity_tbps_s_str = fmt_bandwidth(SWITCH_ASIC_102T4_BW, unit=terabit / second, precision=1, commas=False)
     port_ratio_str = fmt(port_ratio_val, precision=0, commas=False)
 ```
 
@@ -1627,7 +1627,7 @@ Production ML clusters are rarely dedicated to a single training job, creating a
 # │ Exports: IbNdrVirtualizationRecap.ib_ndr_gbps_str
 class IbNdrVirtualizationRecap:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    ib_ndr_gbps_str = fmt_qty(Systems.Fabrics.InfiniBand_NDR.bandwidth, Gbps, precision=0, commas=False, unit_label="Gb/s")
+    ib_ndr_gbps_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=Gbps, precision=0, commas=False)
 ```
 
 Cloud providers deliver bare-metal RDMA performance to virtualized GPU instances through **Single Root I/O Virtualization (SR-IOV)**\index{SR-IOV}, a standard that allows a physical NIC to present itself as multiple independent **Virtual Functions (VFs)**\index{Virtual Function}. Each VF has its own hardware queues, doorbell registers, and DMA mappings. By assigning a dedicated VF to each VM or container, the hardware creates a direct path for DMA operations that bypasses the host kernel and hypervisor completely. The passthrough architecture is critical for ML training because it reduces virtualization overhead to negligible levels, typically adding less than 2 percent latency compared to bare metal. In a Kubernetes environment, the RDMA device plugin manages this resource allocation, exposing available VFs to the scheduler so that pods can request guaranteed network access just as they request GPU cores.
@@ -1685,22 +1685,22 @@ class IbHdrReference:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    from mlsysim.fmt import fmt, check, fmt_qty
+    from mlsysim.fmt import fmt, check, fmt_bandwidth
     check(round(hdr_bw.to(Gbps).magnitude) == 200, "HDR bandwidth should be 200 Gb/s")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    ib_hdr_gbps_str = fmt_qty(hdr_bw, Gbps, precision=0, commas=False, unit_label="Gb/s")
+    ib_hdr_gbps_str = fmt_bandwidth(hdr_bw, unit=Gbps, precision=0, commas=False)
 ```
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt_qty
+from mlsysim.fmt import fmt_bandwidth, fmt_qty
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Monitoring — NDR negotiated speed checks.
 # │ Exports: IbNdrMonitoringRecap.ib_ndr_gbps_str, ib_ndr_gbs_str
 class IbNdrMonitoringRecap:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    ib_ndr_gbps_str = fmt_qty(Systems.Fabrics.InfiniBand_NDR.bandwidth, Gbps, precision=0, commas=False, unit_label="Gb/s")
+    ib_ndr_gbps_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=Gbps, precision=0, commas=False)
     ib_ndr_gbs_str = fmt_qty(Systems.Fabrics.InfiniBand_NDR.bandwidth, GB/second, precision=0, commas=False)
 ```
 
@@ -1786,7 +1786,7 @@ Designing and operating high-performance fabrics for ML requires unlearning assu
 # │          IbBandwidthFallaciesRecap.ib_ndr_gbps_str
 from mlsysim import Systems
 from mlsysim.core.constants import Gbps
-from mlsysim.fmt import fmt, check, fmt_qty
+from mlsysim.fmt import fmt, check, fmt_bandwidth
 
 class IbBandwidthFallaciesRecap:
     hdr_bw = Systems.Fabrics.InfiniBand_HDR.bandwidth
@@ -1795,8 +1795,8 @@ class IbBandwidthFallaciesRecap:
     check(round(ndr_bw.to(Gbps).magnitude) == 400, "NDR bandwidth should be 400 Gb/s")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    ib_hdr_gbps_str = fmt_qty(hdr_bw, Gbps, precision=0, commas=False, unit_label="Gb/s")
-    ib_ndr_gbps_str = fmt_qty(ndr_bw, Gbps, precision=0, commas=False, unit_label="Gb/s")
+    ib_hdr_gbps_str = fmt_bandwidth(hdr_bw, unit=Gbps, precision=0, commas=False)
+    ib_ndr_gbps_str = fmt_bandwidth(ndr_bw, unit=Gbps, precision=0, commas=False)
 ```
 
 Engineers assume upgrading from HDR (`{python} IbBandwidthFallaciesRecap.ib_hdr_gbps_str`) to NDR (`{python} IbBandwidthFallaciesRecap.ib_ndr_gbps_str`) will yield proportional gains, but the $\alpha$-$\beta$ model (@sec-network-fabrics-performance-model) reveals this is only true in the bandwidth-dominated regime. For small models or the small-message phases of pipeline parallelism, the latency term $\alpha$, dominated by switch hops and FEC (~1 $\mu\text{s}$), dictates performance. If a workload is latency-bound, a 2$\times$ bandwidth increase may deliver only a small fraction of the line-rate gain while adding substantial power and transceiver cost.
@@ -1849,9 +1849,9 @@ class BandwidthFallacy:
     check(speedup_pct < 25, f"Speedup ({speedup_pct:.1f}%) too high; fallacy argument weakened.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    from mlsysim.fmt import fmt, fmt_time, fmt_qty
-    hdr_bw_gbps_str = fmt_qty(ib_hdr.bandwidth, Gbps, precision=0, commas=False, unit_label="Gb/s")
-    ndr_bw_gbps_str = fmt_qty(ib_ndr.bandwidth, Gbps, precision=0, commas=False, unit_label="Gb/s")
+    from mlsysim.fmt import fmt, fmt_bandwidth, fmt_time
+    hdr_bw_gbps_str = fmt_bandwidth(ib_hdr.bandwidth, unit=Gbps, precision=0, commas=False)
+    ndr_bw_gbps_str = fmt_bandwidth(ib_ndr.bandwidth, unit=Gbps, precision=0, commas=False)
     t_hdr_us_str = fmt_time(t_hdr, microsecond, precision=2, commas=False)
     t_ndr_us_str = fmt_time(t_ndr, microsecond, precision=2, commas=False)
     speed_pct_str = fmt_percent(speedup_pct/100, precision=1, commas=False, style='prose')

@@ -202,12 +202,14 @@ Throughout this book, each Part introduced quantitative principles that govern M
 # │          constants for FP32 and FP16 from mlsysim.core.constants.
 # │
 # │ Imports: mlsysim Hardware.Tech.Memory.DRAM.energy_per_access,
-# │          Hardware.Tech.Op.FlopFp32.energy, Hardware.Tech.Op.FlopFp16.energy;
+# │          Hardware.Tech.Op.FlopFp32.energy, Hardware.Tech.Op.FlopFp16.energy,
+# │          mlsysim.core.units.flop;
 # │          mlsysim.fmt (fmt, check)
 # │ Exports: EnergyMovementMath.dram_vs_fp32_str,
 # │          EnergyMovementMath.dram_vs_fp16_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, fmt_multiple, check
+from mlsysim.core.units import flop
+from mlsysim.fmt import fmt_int, fmt, fmt_multiple, fmt_multiple_range, check
 
 class EnergyMovementMath:
     # LOAD
@@ -215,37 +217,45 @@ class EnergyMovementMath:
     ENERGY_FLOP_FP32_PJ   = Hardware.Tech.Op.FlopFp32.energy
     ENERGY_FLOP_FP16_PJ   = Hardware.Tech.Op.FlopFp16.energy
     dram_access = ENERGY_DRAM_ACCESS_PJ
-    fp32_flop = ENERGY_FLOP_FP32_PJ
-    fp16_flop = ENERGY_FLOP_FP16_PJ
+    fp32_flop_energy = ENERGY_FLOP_FP32_PJ * flop
+    fp16_flop_energy = ENERGY_FLOP_FP16_PJ * flop
 
     # EXECUTE
-    dram_vs_fp32 = dram_access / fp32_flop
-    dram_vs_fp16 = dram_access / fp16_flop
+    dram_vs_fp32 = (dram_access / fp32_flop_energy).to("").magnitude
+    dram_vs_fp16 = (dram_access / fp16_flop_energy).to("").magnitude
 
     # GUARD
-    check(100 <= dram_vs_fp32.to("").magnitude <= 1000, "DRAM/FP32 energy ratio left expected range.")
-    check(100 <= dram_vs_fp16.to("").magnitude <= 1000, "DRAM/FP16 energy ratio left expected range.")
+    check(100 <= dram_vs_fp32 <= 1000, "DRAM/FP32 energy ratio left expected range.")
+    check(100 <= dram_vs_fp16 <= 1000, "DRAM/FP16 energy ratio left expected range.")
 
     # OUTPUT
-    dram_vs_fp32_str = fmt_multiple(round(dram_vs_fp32.to("").magnitude), precision=0, commas=False)
-    dram_vs_fp16_str = fmt_multiple(round(dram_vs_fp16.to("").magnitude), precision=0, commas=False)
+    dram_vs_fp32_display = round(dram_vs_fp32)
+    dram_vs_fp16_display = round(dram_vs_fp16)
+    dram_vs_fp32_str = fmt_multiple(dram_vs_fp32_display, precision=0, commas=False)
+    dram_vs_fp16_str = fmt_multiple(dram_vs_fp16_display, precision=0, commas=False)
+    dram_vs_range_str = fmt_multiple_range(
+        dram_vs_fp32_display,
+        dram_vs_fp16_display,
+        precision=0,
+        commas=False,
+    )
 ```
 
-| **#**                           | **Principle**               | **Part**       | **Core Equation/Statement**                                                                                                                                                           | **What It Predicts**                                                           |
-|:--------------------------------|:----------------------------|:---------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------|
-| \ref{pri-data-as-code}          | Data as Code Invariant      | I: Foundations | System Behavior $\approx f(\text{Data})$                                                                                                                                              | Changing data changes the program                                              |
-| \ref{pri-data-gravity}          | Data Gravity Invariant      | I: Foundations | $C_{\text{move}}(D_{\text{vol}}) \gg C_{\text{move}}(\text{Compute})$                                                                                                                 | Move compute to data, not data to compute                                      |
-| \ref{pri-iron-law}              | Iron Law of ML Systems      | II: Build      | $T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}}$                                                                            | Every optimization pulls one of three levers; reducing one may inflate another |
-| \ref{pri-silicon-contract}      | Silicon Contract            | II: Build      | $\eta_{\text{hw}} \to 1 \iff I_{\text{model}} \approx I_{\text{machine}}$                                                                                                             | Mismatched hardware wastes money; matched hardware achieves peak throughput    |
-| \ref{pri-pareto-frontier}       | Pareto Frontier             | III: Optimize  | $\forall \theta', \exists k \text{ s.t. } M_k(\theta') < M_k(\theta_{\text{pareto}})$                                                                                                 | There is no universal optimum; every gain trades against another metric        |
-| \ref{pri-arithmetic-intensity}  | Arithmetic Intensity Law    | III: Optimize  | $R_{\text{attainable}} = \min(R_{\text{peak}},\; I \times \text{BW})$                                                                                                                 | Adding compute to a memory-bound model yields zero gain                        |
-| \ref{pri-energy-movement}       | Energy-Movement Invariant   | III: Optimize  | $E_{\text{move}} \gg E_{\text{compute}}$ (`{python} EnergyMovementMath.dram_vs_fp32_str`--`{python} EnergyMovementMath.dram_vs_fp16_str`$\times$ for DRAM access vs. FP32/FP16 FLOPs) | Data locality, not raw FLOP/s, drives efficiency                               |
-| \ref{pri-amdahl}                | Amdahl's Law                | III: Optimize  | $\text{Speedup} = \frac{1}{(1-p) + \frac{p}{G_{\text{parallel}}}}$                                                                                                                    | The serial fraction caps all parallelism gains                                 |
-| \ref{pri-verification-gap}      | Verification Invariant      | IV: Deploy     | $\Pr(f(x) \approx y) > 1 - \epsilon_{\text{test}}$                                                                                                                                    | ML testing is statistical; it bounds error, not proves correctness             |
-| \ref{pri-statistical-drift}     | Statistical Drift Invariant | IV: Deploy     | $\text{Accuracy}(t) \approx \text{Accuracy}_0 - \lambda \cdot \mathcal{D}(P_t \lVert P_0)$                                                                                            | Models decay without code changes; the world drifts away from training data    |
-| \ref{pri-training-serving-skew} | Training-Serving Skew Law   | IV: Deploy     | $\Delta\text{Accuracy} \approx \mathbb{E}[\lvert f_{\text{serve}}(x) - f_{\text{train}}(x)\rvert]$                                                                                    | Even subtle preprocessing differences silently degrade accuracy                |
-| \ref{pri-latency-budget}        | Latency Budget Invariant    | IV: Deploy     | $T_{\text{p99}}(x) \le L_{\text{budget}}$                                                                                                                                             | Throughput is optimized within the latency envelope, never at its expense      |
-| \ref{pri-bias-feedback}         | Bias Feedback Invariant     | IV: Deploy     | $\Delta_{\text{err},g}(n) \approx \Delta_{\text{err},g}(0) \cdot \alpha_{\text{fb}}^n$, $\alpha_{\text{fb}} > 1$                                                                      | Errors against subgroups compound across cycles when outputs reshape inputs    |
+| **#**                           | **Principle**               | **Part**       | **Core Equation/Statement**                                                                                                            | **What It Predicts**                                                           |
+|:--------------------------------|:----------------------------|:---------------|:---------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------|
+| \ref{pri-data-as-code}          | Data as Code Invariant      | I: Foundations | System Behavior $\approx f(\text{Data})$                                                                                               | Changing data changes the program                                              |
+| \ref{pri-data-gravity}          | Data Gravity Invariant      | I: Foundations | $C_{\text{move}}(D_{\text{vol}}) \gg C_{\text{move}}(\text{Compute})$                                                                  | Move compute to data, not data to compute                                      |
+| \ref{pri-iron-law}              | Iron Law of ML Systems      | II: Build      | $T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}}$                             | Every optimization pulls one of three levers; reducing one may inflate another |
+| \ref{pri-silicon-contract}      | Silicon Contract            | II: Build      | $\eta_{\text{hw}} \to 1 \iff I_{\text{model}} \approx I_{\text{machine}}$                                                              | Mismatched hardware wastes money; matched hardware achieves peak throughput    |
+| \ref{pri-pareto-frontier}       | Pareto Frontier             | III: Optimize  | $\forall \theta', \exists k \text{ s.t. } M_k(\theta') < M_k(\theta_{\text{pareto}})$                                                  | There is no universal optimum; every gain trades against another metric        |
+| \ref{pri-arithmetic-intensity}  | Arithmetic Intensity Law    | III: Optimize  | $R_{\text{attainable}} = \min(R_{\text{peak}},\; I \times \text{BW})$                                                                  | Adding compute to a memory-bound model yields zero gain                        |
+| \ref{pri-energy-movement}       | Energy-Movement Invariant   | III: Optimize  | $E_{\text{move}} \gg E_{\text{compute}}$ (`{python} EnergyMovementMath.dram_vs_range_str`$\times$ for DRAM access vs. FP32/FP16 FLOPs) | Data locality, not raw FLOP/s, drives efficiency                               |
+| \ref{pri-amdahl}                | Amdahl's Law                | III: Optimize  | $\text{Speedup} = \frac{1}{(1-p) + \frac{p}{G_{\text{parallel}}}}$                                                                     | The serial fraction caps all parallelism gains                                 |
+| \ref{pri-verification-gap}      | Verification Invariant      | IV: Deploy     | $\Pr(f(x) \approx y) > 1 - \epsilon_{\text{test}}$                                                                                     | ML testing is statistical; it bounds error, not proves correctness             |
+| \ref{pri-statistical-drift}     | Statistical Drift Invariant | IV: Deploy     | $\text{Accuracy}(t) \approx \text{Accuracy}_0 - \lambda \cdot \mathcal{D}(P_t \lVert P_0)$                                             | Models decay without code changes; the world drifts away from training data    |
+| \ref{pri-training-serving-skew} | Training-Serving Skew Law   | IV: Deploy     | $\Delta\text{Accuracy} \approx \mathbb{E}[\lvert f_{\text{serve}}(x) - f_{\text{train}}(x)\rvert]$                                     | Even subtle preprocessing differences silently degrade accuracy                |
+| \ref{pri-latency-budget}        | Latency Budget Invariant    | IV: Deploy     | $T_{\text{p99}}(x) \le L_{\text{budget}}$                                                                                              | Throughput is optimized within the latency envelope, never at its expense      |
+| \ref{pri-bias-feedback}         | Bias Feedback Invariant     | IV: Deploy     | $\Delta_{\text{err},g}(n) \approx \Delta_{\text{err},g}(0) \cdot \alpha_{\text{fb}}^n$, $\alpha_{\text{fb}} > 1$                       | Errors against subgroups compound across cycles when outputs reshape inputs    |
 
 : **The Thirteen Quantitative Invariants of ML Systems Engineering**: Each invariant was introduced in the Part where its governing constraint first becomes visible. Together, they form the complete analytical framework for reasoning about ML system design, optimization, and deployment. The meta-principle that unifies them all is the conservation of complexity: complexity cannot be destroyed, only moved between data, algorithm, and machine. {#tbl-thirteen-principles tbl-colwidths="[3,18,14,30,35]"}
 
@@ -265,7 +275,7 @@ The iron law (Principle \ref{pri-iron-law}) and the silicon contract (Principle 
 
 ### Optimize: How constraints shape trade-offs (invariants 5–8) { .unnumbered}
 
-The four optimization invariants form a tightly coupled diagnostic chain. The Pareto frontier\index{Pareto Frontier!multi-objective optimization} (Principle \ref{pri-pareto-frontier}) establishes that no free improvements exist: quantization trades precision for memory traffic, pruning trades capacity for speed, and distillation trades training compute for inference efficiency. The arithmetic intensity law\index{Arithmetic Intensity!bottleneck diagnosis} (Principle \ref{pri-arithmetic-intensity}) diagnoses which resource is the bottleneck, revealing whether optimization should target compute or memory. The energy-movement invariant\index{Energy-Movement Invariant!data locality} (Principle \ref{pri-energy-movement}) explains why data locality dominates efficiency: in the book's reference constants, a DRAM access costs about `{python} EnergyMovementMath.dram_vs_fp32_str`--`{python} EnergyMovementMath.dram_vs_fp16_str`$\times$ as much energy as an FP32/FP16 arithmetic operation. Amdahl's Law (Principle \ref{pri-amdahl}) sets the ceiling on any parallelism gain, explaining why data loading and preprocessing become the ultimate bottlenecks in highly optimized systems.
+The four optimization invariants form a tightly coupled diagnostic chain. The Pareto frontier\index{Pareto Frontier!multi-objective optimization} (Principle \ref{pri-pareto-frontier}) establishes that no free improvements exist: quantization trades precision for memory traffic, pruning trades capacity for speed, and distillation trades training compute for inference efficiency. The arithmetic intensity law\index{Arithmetic Intensity!bottleneck diagnosis} (Principle \ref{pri-arithmetic-intensity}) diagnoses which resource is the bottleneck, revealing whether optimization should target compute or memory. The energy-movement invariant\index{Energy-Movement Invariant!data locality} (Principle \ref{pri-energy-movement}) explains why data locality dominates efficiency: in the book's reference constants, a DRAM access costs about `{python} EnergyMovementMath.dram_vs_range_str`$\times$ as much energy as an FP32/FP16 arithmetic operation. Amdahl's Law (Principle \ref{pri-amdahl}) sets the ceiling on any parallelism gain, explaining why data loading and preprocessing become the ultimate bottlenecks in highly optimized systems.
 
 MobileNetV2 (our Lighthouse from @sec-network-architectures) navigates all four simultaneously: depthwise separable convolutions reshape the Pareto frontier, quantization to INT8 exploits the arithmetic intensity law by increasing FLOP/byte through reduced memory traffic, and the resulting energy savings respect the energy-movement invariant while Amdahl's Law explains why the nonaccelerable preprocessing stage limits end-to-end speedup. The KWS Lighthouse pushes these trade-offs to their extreme, where sub-megabyte models on microcontrollers leave zero margin for waste on any axis.
 

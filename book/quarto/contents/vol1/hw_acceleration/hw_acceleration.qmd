@@ -1185,7 +1185,7 @@ output = activation(
 
 The matrix multiplication dominates computation time, but this abstraction still hides the underlying loop structure. At the processor level, @lst-loop_level_dense reveals how nested loops multiply inputs and weights, sum the results, and apply a nonlinear function, exposing the $\mathcal{O}(B \times d_{\text{in}} \times d_{\text{out}})$ complexity that accelerators must handle efficiently.
 
-::: {#lst-loop_level_dense lst-cap="**Processor-Level Execution**: Nested loops reveal the $\mathcal{O}(B \times d_{\text{in}} \times d_{\text{out}})$ multiply-accumulate operations that accelerators must execute, with `{python} WeightMatrixCalc.wm_batch_macs_m_str` million MACs for $B$=`{python} WeightMatrixCalc.wm_batch_str`, $d_{\text{in}}$=`{python} WeightMatrixCalc.wm_in_str`, $d_{\text{out}}$=`{python} WeightMatrixCalc.wm_out_str` configurations."}
+::: {#lst-loop_level_dense lst-cap="**Processor-Level Execution**: Nested loops reveal the $\mathcal{O}(B \times d_{\text{in}} \times d_{\text{out}})$ multiply-accumulate operations that accelerators must execute, with `{python} WeightMatrixCalc.wm_batch_macs_m_str` MACs for $B$=`{python} WeightMatrixCalc.wm_batch_str`, $d_{\text{in}}$=`{python} WeightMatrixCalc.wm_in_str`, $d_{\text{out}}$=`{python} WeightMatrixCalc.wm_out_str` configurations."}
 
 ```{.python}
 # Total operations: batch_size × output_size ×
@@ -1206,7 +1206,7 @@ This loop structure reveals three distinct computational patterns that recur acr
 
 ### Vector operations {#sec-hardware-acceleration-vector-operations-19bf}
 
-\index{Vector Operations!hardware acceleration}\index{SIMD!data-level parallelism}Vector operations provide the first level of hardware acceleration by processing multiple data elements simultaneously. Recall the nested-loop structure exposed in @lst-loop_level_dense: a batch of `{python} WeightMatrixCalc.wm_batch_str` samples through a `{python} WeightMatrixCalc.wm_in_str`-to-`{python} WeightMatrixCalc.wm_out_str` dense layer requires `{python} WeightMatrixCalc.wm_batch_macs_m_str` million multiply-accumulate operations. A traditional scalar processor executes these one at a time, loading an input value and a weight value, multiplying them, and accumulating the result. This sequential approach is hopelessly inefficient for neural networks that repeat this pattern across millions of parameters.
+\index{Vector Operations!hardware acceleration}\index{SIMD!data-level parallelism}Vector operations provide the first level of hardware acceleration by processing multiple data elements simultaneously. Recall the nested-loop structure exposed in @lst-loop_level_dense: a batch of `{python} WeightMatrixCalc.wm_batch_str` samples through a `{python} WeightMatrixCalc.wm_in_str`-to-`{python} WeightMatrixCalc.wm_out_str` dense layer requires `{python} WeightMatrixCalc.wm_batch_macs_m_str` multiply-accumulate operations. A traditional scalar processor executes these one at a time, loading an input value and a weight value, multiplying them, and accumulating the result. This sequential approach is hopelessly inefficient for neural networks that repeat this pattern across millions of parameters.
 
 Vector processing units solve this by operating on multiple data elements simultaneously. RISC-V\index{RISC-V!vector extensions}[^fn-riscv-ai-customization], the fifth generation of the reduced instruction set computer (RISC) architecture [@waterman2013], provides a useful setting for illustrating this idea. @Lst-riscv_vector_mac uses vector-style assembly code in which a single instruction processes a vector of data elements in parallel.
 
@@ -1236,7 +1236,7 @@ loop_batch:
 
 :::
 
-The key insight from this assembly sequence is that the fused multiply-accumulate instruction (`vfmacc.vv`) performs the same operation that would require separate multiply and add instructions on a scalar processor, while the vector load instructions (`vle32.v`) amortize memory access overhead across multiple data elements. This vector implementation processes eight data elements in parallel, reducing both computation time and energy consumption. Vector load instructions transfer eight values simultaneously, maximizing memory bandwidth utilization. The vector multiply-accumulate instruction processes eight pairs of values in parallel, dramatically reducing the total instruction count from `{python} WeightMatrixCalc.wm_batch_macs_m_str` million scalar operations to roughly `{python} WeightMatrixCalc.wm_vector_chunks_str` vector chunks.
+The key insight from this assembly sequence is that the fused multiply-accumulate instruction (`vfmacc.vv`) performs the same operation that would require separate multiply and add instructions on a scalar processor, while the vector load instructions (`vle32.v`) amortize memory access overhead across multiple data elements. This vector implementation processes eight data elements in parallel, reducing both computation time and energy consumption. Vector load instructions transfer eight values simultaneously, maximizing memory bandwidth utilization. The vector multiply-accumulate instruction processes eight pairs of values in parallel, dramatically reducing the total instruction count from `{python} WeightMatrixCalc.wm_batch_macs_m_str` scalar operations to roughly `{python} WeightMatrixCalc.wm_vector_chunks_str` vector chunks.
 
 Key vector operations map directly to common deep learning patterns. @Tbl-vector enumerates how operations such as reduction, gather, scatter, and masked operations appear frequently in pooling, embedding lookups, and attention mechanisms, clarifying the direct mapping between low-level vector hardware and high-level machine learning workloads.
 
@@ -2608,7 +2608,7 @@ Framework selection significantly impacts these economic decisions. Detailed har
 # │ Exports: B200FP4Specs.dense_pflops_str, B200FP4Specs.sparse_pflops_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Systems
-from mlsysim.fmt import fmt
+from mlsysim.fmt import fmt, fmt_bandwidth, fmt_flop_rate, fmt_percent, fmt_qty
 
 class B200FP4Specs:
     """B200 FP4 peak throughput (dense and sparse)."""
@@ -3004,7 +3004,7 @@ To make these energy costs concrete, we can trace a single tensor through every 
 # │          TensorLifecycleCalc.a100_tflops_fp16_str,
 # │          TensorLifecycleCalc.reg_energy_pj_bit_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, MarkdownStr
+from mlsysim.fmt import fmt_int, fmt, MarkdownStr, fmt_energy_per_bit, fmt_flop_rate, fmt_memory, fmt_qty, fmt_time
 
 class TensorLifecycleCalc:
     """Memory-hierarchy costs for a 1-second KWS audio tensor during inference."""
@@ -3018,13 +3018,14 @@ class TensorLifecycleCalc:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     kws_tensor               = kws_samples_value * BYTES_FP16
     dram_energy_pj_bit_value = ENERGY_DRAM_PJ_PER_BYTE.to(pJ / byte).magnitude / 8
+    dram_energy_per_bit = dram_energy_pj_bit_value * pJ / bit
     a100_fp16_flops          = Hardware.Cloud.A100.compute.peak_flops
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     kws_tensor_kb_str         = fmt_memory(kws_tensor, unit=KB, precision=0, commas=False)
     kws_samples_str        = fmt(kws_samples_value, precision=0, commas=True)
     kws_bytes_str          = fmt(kws_bytes_fp16_value, precision=0, commas=False)
-    dram_energy_pj_bit_str = fmt(dram_energy_pj_bit_value, precision=0, commas=False)
+    dram_energy_pj_bit_str = fmt_energy_per_bit(dram_energy_per_bit, precision=0, commas=False)
     latency_hbm_ns_str        = fmt_time(Hardware.Tech.Memory.DRAM.latency, unit=nanosecond, precision=0, commas=False)
     latency_l2_ns_str         = fmt_time(Hardware.Tech.Memory.L2.latency, unit=nanosecond, precision=0, commas=False)
     latency_l1_ns_str         = fmt_time(Hardware.Tech.Memory.L1.latency, unit=nanosecond, precision=0, commas=False)
@@ -3039,15 +3040,15 @@ Recall the Keyword Spotting lighthouse summarized in @tbl-ml-systems-lighthouse-
 
 1.  **DRAM (HBM)**: The tensor starts here.
     *   **Size**: `{python} TensorLifecycleCalc.kws_samples_str` samples $\times$ `{python} TensorLifecycleCalc.kws_bytes_str` bytes (FP16) = `{python} TensorLifecycleCalc.kws_tensor_kb_str`.
-    *   **Latency**: Fetching this from off-chip memory takes ~`{python} TensorLifecycleCalc.latency_hbm_ns_str` ns (plus queuing delay).
-    *   **Energy**: Cost is ~`{python} TensorLifecycleCalc.dram_energy_pj_bit_str` pJ/bit. High cost.
+    *   **Latency**: Fetching this from off-chip memory takes ~`{python} TensorLifecycleCalc.latency_hbm_ns_str` (plus queuing delay).
+    *   **Energy**: Cost is ~`{python} TensorLifecycleCalc.dram_energy_pj_bit_str`. High cost.
 
 2.  **L2 Cache**: The GPU's DMA engine pulls it here.
-    *   **Latency**: ~`{python} TensorLifecycleCalc.latency_l2_ns_str` ns.
+    *   **Latency**: ~`{python} TensorLifecycleCalc.latency_l2_ns_str`.
     *   **Access**: Shared across multiple Streaming Multiprocessors (SMs).
 
 3.  **L1 Cache/Shared Memory**: A specific SM claims a tile of the audio.
-    *   **Latency**: ~`{python} TensorLifecycleCalc.latency_l1_ns_str` ns.
+    *   **Latency**: ~`{python} TensorLifecycleCalc.latency_l1_ns_str`.
     *   **Locality**: Critical step. If the data leaves this level, we pay the "HBM Tax" again.
 
 4.  **Registers**: The Tensor Core operates here.
@@ -3480,7 +3481,7 @@ To optimize data movement, we must understand the physical topology of the compu
 # │          InterconnectHierarchy.ib_ndr, InterconnectHierarchy.ib_hdr_gbps_str,
 # │          InterconnectHierarchy.ib_ndr_gbps_str, InterconnectHierarchy.taper_eq_math
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, MarkdownStr
+from mlsysim.fmt import fmt, fmt_bandwidth, MarkdownStr
 
 # ┌── LEGO ───────────────────────────────────────────────
 class InterconnectHierarchy:
@@ -3514,8 +3515,8 @@ class InterconnectHierarchy:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     nvlink_a100_gb_s_str = fmt_bandwidth(nvlink_a100, unit=GB / second, precision=0, commas=False)
     nvlink_h100_gb_s_str = fmt_bandwidth(nvlink_h100, unit=GB / second, precision=0, commas=False)
-    ib_hdr_gbps_str = fmt_qty(ib_hdr_bw, Gbps, precision=0, commas=False, unit_label="Gb/s")
-    ib_ndr_gbps_str = fmt_qty(Systems.Fabrics.InfiniBand_NDR.bandwidth, Gbps, precision=0, commas=False, unit_label="Gb/s")
+    ib_hdr_gbps_str = fmt_bandwidth(ib_hdr_bw, unit=Gbps, precision=0, commas=False)
+    ib_ndr_gbps_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=Gbps, precision=0, commas=False)
 
     # Bandwidth-taper equation — one consistent chip (H100-class) so HBM, NVLink,
     # PCIe (Gen5), and the NDR network link cannot mix incompatible generations.
@@ -3998,7 +3999,7 @@ Consider a Conv2D\index{Roofline Analysis!conv2d layer} layer with input shape (
 - Total: `{python} Conv2dAnalysisCalc.conv_total_mb_str`
 
 **Arithmetic Intensity**:
-$\text{AI}$ = `{python} Conv2dAnalysisCalc.conv_total_gflops_str` GFLOPs / `{python} Conv2dAnalysisCalc.conv_total_mb_str` = `{python} Conv2dAnalysisCalc.conv_ai_str` FLOP/byte
+$\text{AI}$ = `{python} Conv2dAnalysisCalc.conv_total_gflops_str` / `{python} Conv2dAnalysisCalc.conv_total_mb_str` = `{python} Conv2dAnalysisCalc.conv_ai_str` FLOP/byte
 
 This is well above A100's ridge point of `{python} Conv2dAnalysisCalc.a100_ridge_str` FLOP/byte, making this operation compute-bound. The layer will achieve near-peak performance of ~`{python} Conv2dAnalysisCalc.a100_tflops_fp16_str` (FP16 with Tensor Cores).
 
@@ -5751,13 +5752,13 @@ class FpWorkloadFitRecap:
     # OUTPUT
     a100_ridge_str = fmt_arithmetic_intensity(a100_ridge, unit=flop / byte, precision=1, commas=False)
     a100_tflops_fp16_str = fmt_flop_rate(a100_peak_flops, unit=TFLOP / second, precision=0, commas=False)
-    softmax_ai_low_str = fmt_arithmetic_intensity(softmax_ai_low, unit=flop / byte, precision=0, commas=False)
-    softmax_ai_high_str = fmt_arithmetic_intensity(softmax_ai_high, unit=flop / byte, precision=0, commas=False)
+    softmax_ai_low_str = fmt_arithmetic_intensity(softmax_ai_low, unit=flop / byte, commas=False)
+    softmax_ai_high_str = fmt_arithmetic_intensity(softmax_ai_high, unit=flop / byte, commas=False)
     softmax_tflops_low_str = fmt_flop_rate(softmax_flops_low, unit=TFLOP / second, precision=1, commas=False)
     softmax_tflops_high_str = fmt_flop_rate(softmax_flops_high, unit=TFLOP / second, precision=1, commas=False)
     softmax_util_high_str = fmt_percent(softmax_util_high, precision=1, commas=False, style='symbol')
-    cpu_ridge_low_str = fmt_arithmetic_intensity(cpu_ridge_low, unit=flop / byte, precision=0, commas=False)
-    cpu_ridge_high_str = fmt_arithmetic_intensity(cpu_ridge_high, unit=flop / byte, precision=0, commas=False)
+    cpu_ridge_low_str = fmt_arithmetic_intensity(cpu_ridge_low, unit=flop / byte, commas=False)
+    cpu_ridge_high_str = fmt_arithmetic_intensity(cpu_ridge_high, unit=flop / byte, commas=False)
     cpu_softmax_util_low_str = fmt_percent(cpu_softmax_util_low, precision=0, commas=False, style='symbol')
     cpu_softmax_util_high_str = fmt_percent(cpu_softmax_util_high, precision=0, commas=False, style='symbol')
 ```
@@ -5812,8 +5813,8 @@ class FpMemoryEnergyCalc:
     fp_ridge_example_str    = fmt(fp_ridge_example, precision=0, commas=False)
     fp_layernorm_tflops_str = fmt_flop_rate(layernorm_flops, unit=TFLOP / second, precision=0, commas=False)
     fp_layernorm_util_str   = fmt_percent(layernorm_util/100, precision=0, commas=False, style='symbol')
-    fp_dram_pj_str          = fmt(dram_pj, precision=0, commas=False)
-    fp_sram_pj_str          = fmt(sram_pj, precision=1, commas=False)
+    fp_dram_pj_str          = fmt_qty(ENERGY_DRAM_ACCESS_PJ, pJ, precision=0, commas=False)
+    fp_sram_pj_str          = fmt_qty(ENERGY_SRAM_L1_PJ, pJ, precision=1, commas=False)
     fp_peak_tflops_str      = fmt_flop_rate(peak_flops, unit=TFLOP / second, precision=0, commas=False)
     fp_peak_bw_tbs_str      = fmt_bandwidth(peak_bw, unit=TB / second, precision=0, commas=False)
     fp_layernorm_ai_str     = fmt(layernorm_ai, precision=1, commas=False)
@@ -5821,7 +5822,7 @@ class FpMemoryEnergyCalc:
 
 **Pitfall**: *Ignoring memory bandwidth limitations when selecting acceleration strategies.*
 
-Practitioners focus on peak TFLOP/s without analyzing whether their workloads can achieve compute-bound performance. As quantified in @sec-hardware-acceleration-understanding-ai-memory-wall-3ea9, the energy model used here assigns about `{python} FpMemoryEnergyCalc.fp_dram_pj_str` pJ to a DRAM access versus `{python} FpMemoryEnergyCalc.fp_sram_pj_str` pJ for an on-chip SRAM access, creating orders-of-magnitude energy penalties. An accelerator advertising `{python} FpMemoryEnergyCalc.fp_peak_tflops_str` with `{python} FpMemoryEnergyCalc.fp_peak_bw_tbs_str` bandwidth has a ridge point of `{python} FpMemoryEnergyCalc.fp_ridge_example_str` FLOP/byte; LayerNorm operations with AI = `{python} FpMemoryEnergyCalc.fp_layernorm_ai_str` FLOP/byte achieve only `{python} FpMemoryEnergyCalc.fp_layernorm_tflops_str` (`{python} FpMemoryEnergyCalc.fp_layernorm_util_str` utilization). Organizations deploy expensive high-compute accelerators for memory-bound workloads, achieving 10–20 percent utilization when lower-cost, bandwidth-optimized alternatives would perform identically. Teams must calculate workload arithmetic intensity and compare against hardware ridge points before purchasing accelerators.
+Practitioners focus on peak TFLOP/s without analyzing whether their workloads can achieve compute-bound performance. As quantified in @sec-hardware-acceleration-understanding-ai-memory-wall-3ea9, the energy model used here assigns about `{python} FpMemoryEnergyCalc.fp_dram_pj_str` to a DRAM access versus `{python} FpMemoryEnergyCalc.fp_sram_pj_str` for an on-chip SRAM access, creating orders-of-magnitude energy penalties. An accelerator advertising `{python} FpMemoryEnergyCalc.fp_peak_tflops_str` with `{python} FpMemoryEnergyCalc.fp_peak_bw_tbs_str` bandwidth has a ridge point of `{python} FpMemoryEnergyCalc.fp_ridge_example_str` FLOP/byte; LayerNorm operations with AI = `{python} FpMemoryEnergyCalc.fp_layernorm_ai_str` FLOP/byte achieve only `{python} FpMemoryEnergyCalc.fp_layernorm_tflops_str` (`{python} FpMemoryEnergyCalc.fp_layernorm_util_str` utilization). Organizations deploy expensive high-compute accelerators for memory-bound workloads, achieving 10–20 percent utilization when lower-cost, bandwidth-optimized alternatives would perform identically. Teams must calculate workload arithmetic intensity and compare against hardware ridge points before purchasing accelerators.
 
 ```{python}
 #| echo: false
