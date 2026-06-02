@@ -752,10 +752,6 @@ def _resolve_display_precision(val, precision):
         return precision
     if _is_integer_like(val):
         return 0
-    if abs(val) >= 100:
-        return 0
-    if abs(val) >= 10:
-        return 1
     return 1
 
 
@@ -1115,7 +1111,7 @@ def fmt_tokens(
 
 _RATE_UNITS = {
     "QPS", "FPS", "tokens/s", "tokens/hour", "img/s", "images/s", "req/s",
-    "samples/s",
+    "requests/s", "samples/s", "samples/hour",
 }
 
 
@@ -1294,6 +1290,27 @@ def fmt_sci_qty(
     body = fmt_sci(q.magnitude, precision=precision)
     suffix = _quantity_suffix(display_unit, unit_label=unit_label, per=per)
     return MarkdownStr(f"{body}{suffix}")
+
+
+def fmt_sci_flops(quantity, *, unit=None, precision=2):
+    """Format FLOP work/count quantities in scientific notation.
+
+    QMD code should not spell ``unit_label="FLOPs"`` at each call site. This
+    helper keeps the Pint conversion checked while centralizing the book's
+    prose convention that scalar floating-point operation counts are rendered
+    as plural ``FLOPs`` in scientific notation.
+    """
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_sci_flops() requires a Pint Quantity.")
+    from .core.units import flop
+
+    display_unit = _coerce_unit(unit) if unit is not None else flop
+    return fmt_sci_qty(
+        quantity,
+        display_unit,
+        precision=precision,
+        unit_label="FLOPs",
+    )
 
 
 def fmt_time_range(
@@ -1525,6 +1542,10 @@ _UNIT_LABEL_NORMALIZATION = {
     "Mbit/s": "Mb/s",
     "Gbit/s": "Gb/s",
     "Tbit/s": "Tb/s",
+    "B": "bytes",
+    "flop/B": "FLOP/byte",
+    "pJ/B": "pJ/byte",
+    "pJ/flop": "pJ/FLOP",
     "µs": "μs",
 }
 
@@ -2045,14 +2066,14 @@ def fmt_flop_rate(quantity, *, unit=None, precision=None, commas=False):
     return fmt_qty(q, display_unit, precision=p, commas=commas)
 
 
-def fmt_flops(quantity, *, unit=None, precision=None, commas=False):
+def fmt_flops(quantity, *, unit=None, precision=None, commas=False, per=None):
     """Auto-scale FLOP work/count quantities for prose (KFLOP through ZFLOP)."""
     if not isinstance(quantity, ureg.Quantity):
         raise TypeError("fmt_flops() requires a Pint Quantity.")
     display_unit = _coerce_unit(unit) if unit is not None else _pick_flops_unit(quantity)
     q = quantity.to(display_unit)
     p = _resolve_display_precision(q.magnitude, precision)
-    return fmt_qty(q, display_unit, precision=p, commas=commas)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, per=per)
 
 
 def fmt_arithmetic_intensity(quantity, *, unit=None, precision=None, commas=False):
@@ -2064,13 +2085,7 @@ def fmt_arithmetic_intensity(quantity, *, unit=None, precision=None, commas=Fals
     display_unit = _coerce_unit(unit) if unit is not None else flop / byte
     q = quantity.to(display_unit)
     p = _resolve_display_precision(q.magnitude, precision)
-    return fmt_qty(
-        q,
-        display_unit,
-        precision=p,
-        commas=commas,
-        unit_label="FLOP/byte",
-    )
+    return fmt_qty(q, display_unit, precision=p, commas=commas)
 
 
 def fmt_ops_rate(quantity, *, unit=None, precision=None, commas=False):
@@ -2081,6 +2096,50 @@ def fmt_ops_rate(quantity, *, unit=None, precision=None, commas=False):
     q = quantity.to(display_unit)
     p = _resolve_display_precision(q.magnitude, precision)
     return fmt_qty(q, display_unit, precision=p, commas=commas)
+
+
+def fmt_decibel(quantity, *, unit=None, precision=None, commas=False):
+    """Format logarithmic level quantities as dB."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_decibel() requires a Pint Quantity.")
+    display_unit = _coerce_unit(unit) if unit is not None else ureg.decibel
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, unit_label="dB")
+
+
+def fmt_illuminance(quantity, *, unit=None, precision=None, commas=False):
+    """Format illuminance quantities with the prose label ``lux``."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_illuminance() requires a Pint Quantity.")
+    display_unit = _coerce_unit(unit) if unit is not None else ureg.lux
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, unit_label="lux")
+
+
+def fmt_temperature(quantity, *, unit=None, precision=None, commas=False):
+    """Format absolute temperatures, defaulting to degrees Celsius."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_temperature() requires a Pint Quantity.")
+    display_unit = _coerce_unit(unit) if unit is not None else ureg.degC
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, unit_label="°C")
+
+
+def fmt_temperature_rate(quantity, *, unit=None, precision=None, commas=False):
+    """Format temperature-change rates, defaulting to degrees Celsius per second."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_temperature_rate() requires a Pint Quantity.")
+    from .core.units import second
+
+    display_unit = (
+        _coerce_unit(unit) if unit is not None else ureg.delta_degC / second
+    )
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, unit_label="°C/s")
 
 
 def fmt_compute_efficiency(quantity, *, unit=None, precision=None, commas=False):
@@ -2095,6 +2154,42 @@ def fmt_compute_efficiency(quantity, *, unit=None, precision=None, commas=False)
     return fmt_qty(q, display_unit, precision=p, commas=commas)
 
 
+def fmt_energy_per_byte(quantity, *, unit=None, precision=None, commas=False, lower_bound=False):
+    """Format data-movement energy intensity, conventionally as pJ/byte."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_energy_per_byte() requires a Pint Quantity.")
+    from .core.units import byte, pJ
+
+    display_unit = _coerce_unit(unit) if unit is not None else pJ / byte
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, lower_bound=lower_bound)
+
+
+def fmt_energy_per_bit(quantity, *, unit=None, precision=None, commas=False, lower_bound=False):
+    """Format signaling or link energy intensity, conventionally as pJ/bit."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_energy_per_bit() requires a Pint Quantity.")
+    from .core.units import bit, pJ
+
+    display_unit = _coerce_unit(unit) if unit is not None else pJ / bit
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, lower_bound=lower_bound)
+
+
+def fmt_energy_per_flop(quantity, *, unit=None, precision=None, commas=False, lower_bound=False):
+    """Format compute energy intensity, conventionally as pJ/FLOP."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_energy_per_flop() requires a Pint Quantity.")
+    from .core.units import flop, pJ
+
+    display_unit = _coerce_unit(unit) if unit is not None else pJ / flop
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, lower_bound=lower_bound)
+
+
 def fmt_memory(quantity, *, unit=None, precision=None, commas=False, binary=False):
     """Auto-scale memory sizes for prose."""
     if not isinstance(quantity, ureg.Quantity):
@@ -2107,7 +2202,59 @@ def fmt_memory(quantity, *, unit=None, precision=None, commas=False, binary=Fals
     return fmt_qty(q, display_unit, precision=p, commas=commas)
 
 
-def fmt_emissions(quantity, *, unit=None, precision=None, commas=False):
+def _memory_capacity_unit_label(display_unit):
+    """Return vendor-style capacity labels for binary memory display units."""
+    from .core.units import GiB, KiB, MiB, TiB
+
+    for binary_unit, label in (
+        (KiB, "KB"),
+        (MiB, "MB"),
+        (GiB, "GB"),
+        (TiB, "TB"),
+    ):
+        try:
+            if abs((1 * display_unit).to(binary_unit).magnitude - 1) < 1e-12:
+                return label
+        except Exception:
+            continue
+    return None
+
+
+def fmt_memory_capacity(quantity, *, unit=None, precision=None, commas=False):
+    """Format branded hardware memory capacities.
+
+    Hardware spec sheets commonly label binary memory capacities with decimal
+    symbols such as ``GB``. The registry keeps the Pint quantity intact (often
+    ``GiB`` for accelerator memory), while this formatter centralizes the book
+    display convention: preserve the binary magnitude and render the vendor
+    capacity label. Use ``fmt_memory`` when physical decimal/binary conversion
+    should be shown literally.
+    """
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_memory_capacity() requires a Pint Quantity.")
+    display_unit = (
+        _coerce_unit(unit) if unit is not None else _pick_memory_unit(quantity, binary=True)
+    )
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        unit_label=_memory_capacity_unit_label(display_unit),
+    )
+
+
+def fmt_emissions(
+    quantity,
+    *,
+    unit=None,
+    precision=None,
+    commas=False,
+    approx=False,
+    lower_bound=False,
+):
     """Auto-scale carbon mass for prose (g, kg, metric tons)."""
     if not isinstance(quantity, ureg.Quantity):
         raise TypeError("fmt_emissions() requires a Pint Quantity.")
@@ -2116,7 +2263,14 @@ def fmt_emissions(quantity, *, unit=None, precision=None, commas=False):
     )
     q = quantity.to(display_unit)
     p = _resolve_display_precision(q.magnitude, precision)
-    return fmt_qty(q, display_unit, precision=p, commas=commas)
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        approx=approx,
+        lower_bound=lower_bound,
+    )
 
 
 def fmt_carbon_intensity(quantity, *, unit=None, precision=None, commas=False):

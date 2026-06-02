@@ -14,10 +14,17 @@ from mlsysim.fmt import (
     fmt_count_range,
     fmt_compute_efficiency,
     fmt_carbon_intensity,
+    fmt_decibel,
+    fmt_emissions,
     fmt_eur,
     fmt_int,
+    fmt_energy_per_bit,
+    fmt_energy_per_byte,
+    fmt_energy_per_flop,
+    fmt_illuminance,
     fmt_multiple,
     fmt_multiple_range,
+    fmt_memory_capacity,
     fmt_percent,
     fmt_percent_range,
     fmt_pp,
@@ -36,7 +43,10 @@ from mlsysim.fmt import (
     fmt_rate,
     fmt_ratio,
     fmt_sci,
+    fmt_sci_flops,
     fmt_sci_qty,
+    fmt_temperature,
+    fmt_temperature_rate,
     fmt_time,
     fmt_time_range,
     fmt_tokens,
@@ -73,6 +83,12 @@ class TestFmtPrecisionGuards:
     def test_precision_one_preserves_fractions(self):
         assert fmt(10.7, precision=1, commas=False) == "10.7"
         assert fmt(8.5, precision=1, commas=False) == "8.5"
+
+    def test_auto_precision_preserves_large_fractions(self):
+        assert fmt_arithmetic_intensity(
+            153.016 * ureg.flop / ureg.byte,
+            commas=False,
+        ) == "153.0 FLOP/byte"
 
     def test_precision_one_rejects_spurious_trailing_zeros_on_integers(self):
         with pytest.raises(ValueError, match="spurious trailing zeros"):
@@ -327,6 +343,8 @@ class TestFmtRate:
         )
         assert fmt_rate(2500, "QPS", commas=False) == "2500 QPS"
         assert fmt_rate(60, "FPS") == "60 FPS"
+        assert fmt_rate(5000, "requests/s") == "5,000 requests/s"
+        assert fmt_rate(1000, "samples/hour", commas=False) == "1000 samples/hour"
 
     def test_rejects_unknown_rate_unit(self):
         with pytest.raises(ValueError, match="fmt_rate unit must be"):
@@ -931,10 +949,22 @@ class TestDomainFormatters:
         assert fmt_flops(569 * MFLOP, precision=0, commas=False) == "569 MFLOP"
         assert fmt_flops(4.1 * GFLOP, precision=1, commas=False) == "4.1 GFLOP"
         assert fmt_flops(350 * TFLOP, precision=0, commas=False) == "350 TFLOP"
+        assert (
+            fmt_flops(4.1 * GFLOP, precision=1, commas=False, per="inference")
+            == "4.1 GFLOP/inference"
+        )
+
+    def test_fmt_sci_flops_owns_plural_scientific_label(self):
+        from mlsysim.core.units import GFLOP, flop
+
+        assert fmt_sci_flops(4.1e17 * flop, precision=2) == "4.10 × 10¹⁷ FLOPs"
+        assert fmt_sci_flops(4.1e8 * GFLOP, precision=2) == "4.10 × 10¹⁷ FLOPs"
 
     def test_fmt_flops_requires_quantity(self):
         with pytest.raises(TypeError, match="requires a Pint Quantity"):
             fmt_flops(4.1e9)
+        with pytest.raises(TypeError, match="requires a Pint Quantity"):
+            fmt_sci_flops(4.1e9)
 
     def test_fmt_arithmetic_intensity_owns_flop_per_byte_label(self):
         from mlsysim.core.units import GB, TFLOP, byte, flop
@@ -948,11 +978,48 @@ class TestDomainFormatters:
             == "1000 FLOP/byte"
         )
 
+    def test_fmt_energy_density_helpers_own_readable_labels(self):
+        from mlsysim.core.units import bit, byte, flop, pJ
+
+        assert fmt_energy_per_byte(160 * pJ / byte, precision=0, commas=False) == "160 pJ/byte"
+        assert fmt_energy_per_bit(5 * pJ / bit, precision=0, commas=False) == "5 pJ/bit"
+        assert fmt_energy_per_flop(10 * pJ / flop, precision=0, commas=False) == "10 pJ/FLOP"
+        assert fmt_qty(160 * pJ / byte, pJ / byte, precision=0, commas=False) == "160 pJ/byte"
+
+    def test_fmt_energy_density_helpers_require_quantities(self):
+        with pytest.raises(TypeError, match="requires a Pint Quantity"):
+            fmt_energy_per_byte(160)
+        with pytest.raises(TypeError, match="requires a Pint Quantity"):
+            fmt_energy_per_bit(5)
+        with pytest.raises(TypeError, match="requires a Pint Quantity"):
+            fmt_energy_per_flop(10)
+
     def test_fmt_ops_rate_scales_integer_ops(self):
         from mlsysim.core.units import TOPS
 
         assert fmt_ops_rate(2 * TOPS, precision=0, commas=False) == "2 TOPS"
         assert fmt_ops_rate(0.002 * TOPS, precision=0, commas=False) == "2 GOPS"
+
+    def test_small_physical_label_helpers(self):
+        from mlsysim.core.units import second
+
+        assert (
+            fmt_decibel(ureg.Quantity(20, ureg.decibel), precision=0, commas=False)
+            == "20 dB"
+        )
+        assert fmt_illuminance(100 * ureg.lux, precision=0, commas=False) == "100 lux"
+        assert (
+            fmt_temperature(ureg.Quantity(80, ureg.degC), precision=0, commas=False)
+            == "80 °C"
+        )
+        assert (
+            fmt_temperature_rate(
+                1 * ureg.delta_degC / second,
+                precision=0,
+                commas=False,
+            )
+            == "1 °C/s"
+        )
 
     def test_fmt_compute_efficiency_renders_full_unit(self):
         from mlsysim.core.units import TFLOP, second, watt
@@ -970,6 +1037,25 @@ class TestDomainFormatters:
 
         out = fmt_memory(14 * GB, precision=0, commas=False)
         assert out == "14 GB"
+        assert fmt_memory(4 * byte, unit=byte, precision=0, commas=False) == "4 bytes"
+
+    def test_fmt_memory_capacity_preserves_binary_magnitude_with_vendor_label(self):
+        from mlsysim.core.units import GB, GiB, KiB, MiB
+        from mlsysim.fmt import fmt_memory
+
+        assert (
+            fmt_memory_capacity(80 * GiB, unit=GiB, precision=0, commas=False)
+            == "80 GB"
+        )
+        assert (
+            fmt_memory_capacity(33 * MiB, unit=MiB, precision=0, commas=False)
+            == "33 MB"
+        )
+        assert (
+            fmt_memory_capacity(256 * KiB, unit=KiB, precision=0, commas=False)
+            == "256 KB"
+        )
+        assert fmt_memory(80 * GiB, unit=GB, precision=1, commas=False) == "85.9 GB"
 
     def test_fmt_carbon_intensity_defaults_to_grams_per_kwh(self):
         from mlsysim.core.units import gram, kilogram, kWh
@@ -981,6 +1067,20 @@ class TestDomainFormatters:
         assert (
             fmt_carbon_intensity(0.429 * kilogram / kWh, precision=0, commas=False)
             == "429 g/kWh"
+        )
+
+    def test_fmt_emissions_supports_display_markers(self):
+        from mlsysim.core.units import kilogram, metric_ton
+
+        assert (
+            fmt_emissions(
+                85_000 * kilogram,
+                unit=metric_ton,
+                precision=0,
+                commas=False,
+                approx=True,
+            )
+            == "~85 t"
         )
 
     def test_fmt_water_helpers_use_book_liter_labels(self):

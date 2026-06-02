@@ -17,24 +17,43 @@ from __future__ import annotations
 
 import argparse
 import ast
+import importlib
+import inspect
 import json
 import re
 from collections import Counter, defaultdict
 from pathlib import Path
 
-FMT_FAMILY = {
-    "fmt", "fmt_int", "fmt_usd", "fmt_percent", "fmt_qty", "fmt_qty_int", "fmt_val",
-    "fmt_unit", "fmt_sci", "fmt_math", "fmt_frac", "sci_latex",
+def _discover_fmt_family() -> set[str]:
+    """Return every public formatter exported by mlsysim.fmt.
+
+    The formatter surface is intentionally growing as more LEGO domains get
+    typed helpers. Keeping this audit dynamic prevents a new helper such as
+    ``fmt_energy_per_flop`` from becoming invisible to the inventory.
+    """
+    try:
+        fmt_mod = importlib.import_module("mlsysim.fmt")
+    except Exception:
+        return set()
+    names = {
+        name for name, value in vars(fmt_mod).items()
+        if (name.startswith("fmt_") or name in {"fmt", "sci_latex"})
+        and (inspect.isfunction(value) or inspect.isclass(value))
+    }
+    if hasattr(fmt_mod, "MarkdownStr"):
+        names.add("MarkdownStr")
+    return names
+
+
+FMT_FAMILY = _discover_fmt_family() or {
+    "fmt", "fmt_int", "fmt_usd", "fmt_percent", "fmt_qty", "fmt_qty_int",
+    "fmt_val", "fmt_unit", "fmt_sci", "fmt_math", "fmt_frac", "sci_latex",
     "fmt_pp", "fmt_multiple", "fmt_count", "fmt_ratio", "fmt_range",
     "fmt_time", "fmt_rate", "fmt_qty_range", "fmt_time_range",
-    "fmt_count_range", "fmt_usd_range", "MarkdownStr",
+    "fmt_count_range", "fmt_usd_range", "fmt_percent_range",
+    "fmt_multiple_range", "fmt_sci_qty", "MarkdownStr",
 }
-NUMERIC_FMT = {
-    "fmt", "fmt_int", "fmt_usd", "fmt_percent", "fmt_pp", "fmt_multiple",
-    "fmt_count", "fmt_ratio", "fmt_range", "fmt_sci", "fmt_val", "fmt_unit",
-    "fmt_time", "fmt_rate", "fmt_qty_int", "fmt_qty_range", "fmt_time_range",
-    "fmt_count_range", "fmt_usd_range",
-}
+NUMERIC_FMT = FMT_FAMILY - {"MarkdownStr", "fmt_math", "fmt_frac"}
 
 FENCE_RE = re.compile(r"^([ \t]*)```+\s*\{python\}\s*$")
 CLOSE_RE = re.compile(r"^([ \t]*)```+\s*$")

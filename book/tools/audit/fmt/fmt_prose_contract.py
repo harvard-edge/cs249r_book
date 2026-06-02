@@ -155,11 +155,11 @@ def check_file(path: Path) -> list[Violation]:
             # backtick — a space-separated '$' is a math delimiter (e.g. $\times$).
             prefix = line[max(0, m.start() - 2):m.start()]
 
-            if fname == "fmt_percent":
+            if fname in {"fmt_percent", "fmt_percent_range"}:
                 style = kwargs.get("style") or "number"
                 if style in ("prose", "symbol") and _PERCENT_RE.match(after):
                     out.append(Violation("percent_dup", rel, lineno, ref,
-                        f"fmt_percent(style={style!r}) already carries the glyph; "
+                        f"{fname}(style={style!r}) already carries the glyph; "
                         f"prose repeats it: …{after.strip()[:20]!r}"))
             elif fname == "fmt_pp":
                 if _PP_RE.match(after):
@@ -174,15 +174,15 @@ def check_file(path: Path) -> list[Violation]:
                     out.append(Violation("scale_dup", rel, lineno, ref,
                         f"fmt_count(scale=…) already carries the scale glyph; "
                         f"prose repeats it: …{after.strip()[:12]!r}"))
-            elif fname == "fmt_multiple":
+            elif fname in {"fmt_multiple", "fmt_multiple_range"}:
                 mm = _MULT_AFTER_RE.match(after)
                 if not mm:
                     out.append(Violation("mult_missing_glyph", rel, lineno, ref,
-                        "fmt_multiple is a bare number; prose must add $\\times$ "
+                        f"{fname} is a bare number; prose must add $\\times$ "
                         f"after the ref (got: …{after.strip()[:12]!r})"))
                 elif "×" in mm.group(0) or mm.group(0).strip() == "x":
                     out.append(Violation("mult_literal_x", rel, lineno, ref,
-                        "use $\\times$ not a literal ×/x after a fmt_multiple ref"))
+                        f"use $\\times$ not a literal ×/x after a {fname} ref"))
     return out
 
 
