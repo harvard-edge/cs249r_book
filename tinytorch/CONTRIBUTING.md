@@ -132,7 +132,7 @@ All contributions must pass:
 
 **For Contributors** (improving the framework):
 - **Source Files**: Edit `src/NN_name/NN_name.py` files (source of truth, e.g., `src/01_tensor/01_tensor.py`)
-- **Notebooks**: Generated from source files using `tito src export`
+- **Notebooks**: Generated from source files using `tito dev export`
 - **Structure**: Follow the standardized module structure
 - **Testing**: Include immediate testing after each implementation
 - **Systems Analysis**: MANDATORY memory and performance analysis

@@ -22,7 +22,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 pip install nbgrader
 
-# Setup grading infrastructure
+# Setup grading infrastructure (creates assignments/ and nbgrader_config.py)
 tito nbgrader init
 ```
 
@@ -37,18 +37,18 @@ tito nbgrader
 
 ## 📝 Assignment Workflow
 
-### **⚠️ Experimental Feature**
-The NBGrader integration is under active development. Use for testing only.
+### **NBGrader Scope**
+NBGrader is instructor/developer tooling. TinyTorch stages notebooks into nbgrader's expected assignment layout; nbgrader itself handles release notebook generation, collection, autograding, feedback, and grade export.
 
 ### **Using NBGrader via Tito**
 We provide `tito nbgrader` commands for grading workflows.
 
 ### **1. Prepare Assignments**
 ```bash
-# Generate instructor version (with solutions)
+# Stage instructor source assignment from the generated TinyTorch notebook
 tito nbgrader generate 01_tensor
 
-# Create student version (solutions removed)
+# Create student release notebook with solutions removed
 tito nbgrader release 01_tensor
 
 # Student version will be in: assignments/release/01_tensor/
@@ -104,8 +104,8 @@ tito nbgrader feedback 01_tensor
 # Export grades report
 tito nbgrader report
 
-# Or specific module
-tito nbgrader report --module 01_tensor
+# Or specific assignment/module
+tito nbgrader report --assignment 01_tensor
 ```
 
 ## 📊 Grading Components
@@ -514,7 +514,7 @@ tito module reset XX  # Reset specific module if needed
 **Module Import Errors**
 ```bash
 # Rebuild package
-tito export --all
+tito dev export --all
 ```
 
 **Test Failures**

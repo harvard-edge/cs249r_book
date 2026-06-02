@@ -7,12 +7,12 @@ document.addEventListener('DOMContentLoaded', function() {
     const timelineData = {
         perceptron: {
             year: "1958", title: "The Perceptron", researcher: "Frank Rosenblatt",
-            subtitle: "The first trainable neural network proves machines can learn from data",
-            achievement: "Binary classification with gradient descent",
+            subtitle: "The first neural network architecture starts the field",
+            achievement: "Binary classification with a forward pass",
             architecture: "Input → Linear → Sigmoid → Output",
-            whatYouBuild: ["Binary classification with gradient descent", "Simple but revolutionary architecture", "YOUR Linear layer recreates history"],
+            whatYouBuild: ["Binary classification with random weights", "Simple but revolutionary architecture", "YOUR Linear layer recreates history"],
             systemsInsights: ["Memory: O(n) parameters", "Compute: O(n) operations", "Limitation: Only linearly separable problems"],
-            modules: "After Modules 02-04", expectedResults: "~50% (untrained) → 95%+ (trained) accuracy",
+            modules: "After Modules 01-03", expectedResults: "~50% with untrained random weights",
             commands: ["tito milestone run perceptron"]
         },
         xor: {
@@ -30,9 +30,9 @@ document.addEventListener('DOMContentLoaded', function() {
             subtitle: "Backpropagation enables training deep networks on real datasets",
             achievement: "Multi-class digit recognition",
             architecture: "Images → Flatten → Linear → ReLU → Linear → ReLU → Linear → Classes",
-            whatYouBuild: ["Multi-class digit recognition", "Complete training pipelines", "YOUR optimizers achieve 95%+ accuracy"],
-            systemsInsights: ["Memory: ~100K parameters for MNIST", "Compute: Dense matrix operations", "Architecture: Multi-layer feature learning"],
-            modules: "After Modules 02-08", expectedResults: "95%+ accuracy on MNIST",
+            whatYouBuild: ["XOR solved with hidden layers", "TinyDigits classification", "YOUR training pipeline learns real images"],
+            systemsInsights: ["Memory: ~2.4K parameters for TinyDigits", "Compute: Dense matrix operations", "Architecture: Multi-layer feature learning"],
+            modules: "After Modules 01-08", expectedResults: "Solves XOR, 85%+ on TinyDigits",
             commands: ["tito milestone run mlp"]
         },
         cnn: {
