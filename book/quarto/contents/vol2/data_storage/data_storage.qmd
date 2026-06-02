@@ -2205,6 +2205,12 @@ class CheckpointModelIntro:
 
 A `{python} CheckpointModelIntro.gpt3_params_b_str`B parameter model with Adam optimizer\index{Adam Optimizer!state size} generates checkpoints of approximately `{python} CheckpointModelIntro.ckpt_total_gb_str`. The checkpoint includes model weights (`350` GB in FP16), optimizer state (momentum and variance, `1,400` GB in FP32), learning rate scheduler state, random number generator state, and the current data loader position. Every GPU in the cluster saves its shard of the checkpoint simultaneously, creating a checkpoint storm that the storage system must absorb without disrupting ongoing training reads.
 
+::: {.column-margin}
+![](images/svg/data_storage_checkpoint_storm_write_time.svg){width="100%" fig-alt="Margin ladder comparing a naive checkpoint storm taking about 23.9 minutes with a ZeRO-3 sharded write taking about 11.2 seconds, annotated as a 128 times reduction."}
+
+*Sharding collapses checkpoint-storm write time by two orders of magnitude.*
+:::
+
 ::: {#dfn-data-storage-checkpoint-storm .callout-definition title="Checkpoint storm"}
 
 ```{python}
@@ -2267,12 +2273,6 @@ class CheckpointStormDefinition:
 2.  **Distinction (durable)**: Unlike general I/O contention (which is stochastic and unpredictable), a Checkpoint Storm is synchronous and periodic: every node writes at the same moment because the training orchestrator triggers checkpoint after a fixed step count. Its predictability makes it both more damaging (all nodes compete simultaneously) and more tractable (it can be prevented by design through staggered scheduling or asynchronous serialization).
 3.  **Common pitfall**: A frequent misconception is that checkpointing every 100 steps is "low overhead." At 70B scale, this assumption is catastrophically wrong: if each training step takes 10 seconds and a checkpoint storm takes 1,400 seconds, checkpointing every 100 steps means spending $1400/(100 \times 10) = 140\%$ of compute time on checkpointing—more time saving state than doing useful training.
 
-:::
-
-::: {.column-margin}
-![](images/svg/data_storage_checkpoint_storm_write_time.svg){width="100%" fig-alt="Margin ladder comparing a naive checkpoint storm taking about 23.9 minutes with a ZeRO-3 sharded write taking about 11.2 seconds, annotated as a 128 times reduction."}
-
-*Sharding collapses checkpoint-storm write time by two orders of magnitude.*
 :::
 
 The severity of a checkpoint storm depends on two factors: the per-node shard size, determined by the model size and the sharding strategy, and the throughput of the first write tier, typically local NVMe. A concrete 175B example shows why the local-write phase, rather than the durable copy to the parallel file system, governs the exposed training pause.

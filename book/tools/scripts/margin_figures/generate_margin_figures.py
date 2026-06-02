@@ -652,16 +652,16 @@ def distributed_training_pipeline_bubble_tax():
         ("p16 m16", calc_pipeline_bubble(16, 16), 0.28),
     ]
     fig, ax = margin_axes("iron-law-bar", figsize=(1.22, 0.70))
-    x, w, h = 0.24, 0.62, 0.14
+    x, w, h = 0.34, 0.48, 0.14
     ax.text(0.54, 0.91, "bubble tax", ha="center", va="center", color=INK, fontsize=5.0, fontweight="bold")
     for label, bubble, y in rows:
         useful = 1.0 - bubble
-        ax.text(0.07, y + h / 2, label, ha="left", va="center", color=INK, fontsize=4.8)
+        ax.text(0.06, y + h / 2, label, ha="left", va="center", color=INK, fontsize=4.8)
         rect(ax, x, y, w * useful, h, COMP, ec="white", lw=0.35)
         rect(ax, x + w * useful, y, w * bubble, h, RED, ec="white", lw=0.35)
         if useful > 0.42:
             ax.text(x + w * useful / 2, y + h / 2, "work", ha="center", va="center", color="white", fontsize=4.6, fontweight="bold")
-        ax.text(x + w + 0.035, y + h / 2, f"{bubble * 100:.0f}% idle", ha="left", va="center", color=RED, fontsize=4.7, fontweight="bold")
+        ax.text(x + w + 0.025, y + h / 2, f"{bubble * 100:.0f}% idle", ha="left", va="center", color=RED, fontsize=4.7, fontweight="bold")
     write(fig, "vol2/distributed_training", "distributed_training_pipeline_bubble_tax")
 
 
@@ -682,14 +682,14 @@ def distributed_training_young_daly_checkpoint_curve():
     y = 0.14 + 0.66 * (overhead - overhead.min()) / (overhead.max() - overhead.min())
     fig, ax = margin_axes("scale-anchor", figsize=(1.22, 0.74))
     ax.plot(xs, y, color=INK, lw=1.35)
-    for hour_value, label, color, yoff in [
-        (safe_hr, "15m", RED, 0.13),
-        (t_opt_hr, "2.9h opt", DATA, 0.16),
-        (sparse_hr, "8h", GRID, -0.16),
+    for hour_value, label, color, text_x, yoff, ha in [
+        (safe_hr, "15m", RED, 0.62, 0.13, "left"),
+        (t_opt_hr, "2.9h opt", DATA, t_opt_hr, 0.16, "center"),
+        (sparse_hr, "8h", GRID, sparse_hr, -0.16, "center"),
     ]:
         yy = np.interp(hour_value, xs, y)
         ax.plot(hour_value, yy, "o", color=color, ms=3.5, zorder=4)
-        ax.text(hour_value, yy + yoff, label, ha="center", va="center", color=color if color != GRID else "#555555", fontsize=4.8, fontweight="bold")
+        ax.text(text_x, yy + yoff, label, ha=ha, va="center", color=color if color != GRID else "#555555", fontsize=4.8, fontweight="bold")
     ax.text(4.0, 0.90, "checkpoint interval", ha="center", va="center", color=INK, fontsize=5.0)
     ax.set_xlim(0, 8.4)
     ax.set_ylim(0, 1)

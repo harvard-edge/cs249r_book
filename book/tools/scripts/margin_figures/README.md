@@ -9,6 +9,7 @@ Generated assets live beside their chapters under
 - `generate_margin_figures.py` creates the committed margin SVG assets.
 - `margin_devices.py` owns the canonical device vocabulary and visual style.
 - `insert_curated_margin_figures.py` inserts accepted curated candidates into QMD.
+- `inventory_margin_figures.py` inventories actual QMD margin placements.
 - `render_margin_contact_sheet.py` renders referenced margin SVGs into contact sheets for visual QA.
 
 Related editorial rules and records:
@@ -63,6 +64,36 @@ The renderer uses `rsvg-convert` and Pillow. Inspect the contact sheet at normal
 size and zoomed in. Check that text is legible at margin scale, labels do not
 collide, line weights are clean, red is reserved for danger/limits, and the image
 does not look like a miniaturized body plot.
+
+## Inventory Placements
+
+List the actual SVG margin figures currently placed in the book:
+
+```bash
+python3 book/tools/scripts/margin_figures/inventory_margin_figures.py
+```
+
+Useful targeted checks:
+
+```bash
+python3 book/tools/scripts/margin_figures/inventory_margin_figures.py \
+  --chapter vol2/data_storage
+```
+
+```bash
+python3 book/tools/scripts/margin_figures/inventory_margin_figures.py \
+  --untracked-only
+```
+
+```bash
+python3 book/tools/scripts/margin_figures/inventory_margin_figures.py \
+  --format csv \
+  --output /tmp/mlsysbook-margin-figures.csv
+```
+
+The inventory is intentionally based on QMD `.column-margin` blocks rather than
+only on the audit YAML. Use it to confirm the real placement line, caption,
+alt text, asset existence, and any matching opportunity/decision metadata.
 
 ## SVG Hygiene
 
