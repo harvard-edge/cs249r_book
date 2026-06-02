@@ -89,6 +89,7 @@ import sys
 import os
 import time
 import copy
+import pickle
 import numpy as np
 rng = np.random.default_rng(7)
 from pathlib import Path
@@ -103,6 +104,32 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich import box
 
 console = Console()
+
+
+def load_tinydigits_arrays(project_root=None):
+    """Load TinyDigits arrays shipped with TinyTorch."""
+    root = Path(project_root) if project_root is not None else Path(__file__).parent.parent.parent
+    data_dir = root / "datasets" / "tinydigits"
+    train_path = data_dir / "train.pkl"
+    test_path = data_dir / "test.pkl"
+
+    if not train_path.exists() or not test_path.exists():
+        raise FileNotFoundError(
+            f"TinyDigits dataset not found in {data_dir}. "
+            "Run: python3 datasets/tinydigits/create_tinydigits.py"
+        )
+
+    with open(train_path, "rb") as f:
+        train_data = pickle.load(f)
+    with open(test_path, "rb") as f:
+        test_data = pickle.load(f)
+
+    return (
+        train_data["images"],
+        train_data["labels"],
+        test_data["images"],
+        test_data["labels"],
+    )
 
 # =============================================================================
 # 🎯 YOUR TINYTORCH MODULES IN ACTION
@@ -840,22 +867,23 @@ def main():
     console.print("\n[bold cyan]📊 Loading TinyDigits dataset...[/bold cyan]")
 
     try:
-        from tinytorch.core.dataloader import TinyDigits
-        dataset = TinyDigits()
-        X_train, y_train = dataset.get_train_data()
-        X_test, y_test = dataset.get_test_data()
+        train_images_np, y_train, test_images_np, y_test = load_tinydigits_arrays()
 
-        X_train = Tensor(X_train.reshape(X_train.shape[0], -1).astype(np.float32))
-        X_test = Tensor(X_test.reshape(X_test.shape[0], -1).astype(np.float32))
+        X_train = Tensor(train_images_np.reshape(train_images_np.shape[0], -1).astype(np.float32))
+        X_test = Tensor(test_images_np.reshape(test_images_np.shape[0], -1).astype(np.float32))
+        y_train = y_train.astype(np.int64)
+        y_test = y_test.astype(np.int64)
 
         console.print(f"  [green]✓[/green] Training: {len(y_train)} samples")
         console.print(f"  [green]✓[/green] Test: {len(y_test)} samples")
-    except Exception:
-        console.print("  [yellow]⚠️ Using synthetic data[/yellow]")
-        X_train = Tensor(rng.standard_normal((1000, 64)).astype(np.float32))
-        y_train = rng.integers(0, 10, 1000)
-        X_test = Tensor(rng.standard_normal((200, 64)).astype(np.float32))
-        y_test = rng.integers(0, 10, 200)
+    except FileNotFoundError as e:
+        console.print(Panel(
+            f"[red]{e}[/red]\n\n"
+            "[yellow]Milestone 06 uses the TinyDigits dataset shipped with TinyTorch.[/yellow]",
+            title="TinyDigits Missing",
+            border_style="red"
+        ))
+        return 1
 
     # ─────────────────────────────────────────────────────────────────────────
     # QUICK TRAINING

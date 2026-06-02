@@ -68,6 +68,7 @@ try:
     from .core.autograd import enable_autograd
     enable_autograd()
 except ImportError:
+    enable_autograd = None
     pass
 
 # Module 07: Optimizers
@@ -84,9 +85,9 @@ except ImportError:
 
 # Module 09: Convolutions (CNN)
 try:
-    from .core.spatial import Conv2d, MaxPool2d, AvgPool2d
+    from .core.spatial import Conv2d, MaxPool2d, AvgPool2d, BatchNorm2d
 except ImportError:
-    Conv2d = MaxPool2d = AvgPool2d = None
+    Conv2d = MaxPool2d = AvgPool2d = BatchNorm2d = None
 
 # Module 10: Tokenization
 try:
@@ -145,8 +146,10 @@ except ImportError:
 # Module 19: Benchmarking
 try:
     from .perf import benchmarking
+    from .perf.benchmarking import Benchmark, MLPerf
 except ImportError:
     benchmarking = None
+    Benchmark = MLPerf = None
 
 # Module 20: Olympics (submission infrastructure)
 try:
@@ -164,23 +167,26 @@ __all__ = [
     'Sigmoid', 'ReLU', 'Tanh', 'GELU', 'Softmax',
     'Layer', 'Linear', 'Dropout', 'Sequential',
     'MSELoss', 'CrossEntropyLoss', 'BinaryCrossEntropyLoss',
+    'enable_autograd',
     'SGD', 'Adam', 'AdamW',
     'Trainer', 'CosineSchedule', 'clip_grad_norm',
     # Data
     'Dataset', 'TensorDataset', 'DataLoader',
     'RandomHorizontalFlip', 'RandomCrop', 'Compose',
     # Spatial
-    'Conv2d', 'MaxPool2d', 'AvgPool2d',
+    'Conv2d', 'MaxPool2d', 'AvgPool2d', 'BatchNorm2d',
     # Text
     'Tokenizer', 'CharTokenizer', 'BPETokenizer',
     'Embedding', 'PositionalEncoding', 'EmbeddingLayer',
     # Attention & Transformers
     'MultiHeadAttention', 'scaled_dot_product_attention',
-    'LayerNorm', 'MLP', 'TransformerBlock', 'GPT', 'create_causal_mask',
+    'LayerNorm', 'MLP', 'TransformerBlock', 'GPT', 'TinyGPT', 'create_causal_mask',
     # Performance
+    'Profiler', 'quick_profile',
+    'Quantizer', 'quantize_int8', 'dequantize_int8',
     'magnitude_prune', 'structured_prune', 'low_rank_approximate', 'Compressor',
     'vectorized_matmul', 'fused_gelu', 'tiled_matmul',
     'KVCache', 'enable_kv_cache', 'disable_kv_cache',
-    'benchmarking',
+    'benchmarking', 'Benchmark', 'MLPerf',
     'olympics',
 ]

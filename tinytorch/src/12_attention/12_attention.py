@@ -1257,7 +1257,7 @@ Let's see these patterns emerge in our implementation.
 """
 
 # %%
-def test_unit_attention_scenarios():
+def run_attention_scenarios():
     """Test attention mechanisms in realistic scenarios."""
     print("🧪 Testing Attention Scenarios...")
 
@@ -1370,7 +1370,7 @@ def test_module():
     test_unit_multihead_attention()
 
     print("\nRunning integration scenarios...")
-    test_unit_attention_scenarios()
+    run_attention_scenarios()
 
     print("\nRunning performance analysis...")
     analyze_attention_complexity()

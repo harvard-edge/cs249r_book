@@ -104,7 +104,7 @@ We're sharing TinyTorch early because we'd rather shape the direction with commu
       <td>📅 NBGrader integration</td>
     </tr>
     <tr>
-      <td>✅ Complete test suite (600+ tests)</td>
+      <td>✅ Module, CLI, integration, and milestone tests</td>
       <td>🔧 Edge case handling</td>
       <td>📅 Community leaderboard</td>
     </tr>
@@ -316,7 +316,7 @@ TinyTorch/
 ├── milestones/                 # 🏆 Historical ML evolution - prove what you built!
 │   ├── 01_1958_perceptron/     # Rosenblatt's first trainable network
 │   ├── 02_1969_xor/            # Minsky's challenge & multi-layer solution
-│   ├── 03_1986_mlp/            # Backpropagation & MNIST digits
+│   ├── 03_1986_mlp/            # Backpropagation & TinyDigits
 │   ├── 04_1998_cnn/            # LeCun's CNNs & CIFAR-10
 │   ├── 05_2017_transformer/    # Attention mechanisms & language
 │   └── 06_2018_mlperf/         # Modern optimization & profiling
@@ -330,7 +330,7 @@ TinyTorch/
 │   ├── core/                   # Core ML components
 │   └── ...                     # Your built framework!
 │
-└── tests/                      # ✅ Comprehensive test suite (600+ tests)
+└── tests/                      # ✅ Module, CLI, integration, and milestone tests
 ```
 
 **Key workflow**: `src/*.py` → `modules/*.ipynb` → `tinytorch/*.py`

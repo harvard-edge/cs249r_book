@@ -1193,7 +1193,7 @@ def run_optimization_workflow_example():
     print("  ✅ How TinyTorch modules work together as a complete framework")
     print("\n💡 Next steps:")
     print("  - Apply real optimizations (quantization, pruning, etc.)")
-    print("  - Benchmark milestone models (XOR, MNIST, CNN, etc.)")
+    print("  - Benchmark milestone models (XOR, TinyDigits MLP/CNN, Transformer, etc.)")
     print("  - Share your optimized results with the community!")
 
     return submission

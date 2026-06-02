@@ -44,7 +44,7 @@ class DevCommand(BaseCommand):
         # Export subcommand (rebuild curriculum from src/)
         export_parser = subparsers.add_parser(
             'export',
-            help='Rebuild curriculum: src/*.py → modules/*.ipynb → tinytorch/core/*.py'
+            help='Rebuild curriculum: src/*.py → modules/*.ipynb → tinytorch package files'
         )
         export_cmd = DevExportCommand(self.config)
         export_cmd.add_arguments(export_parser)

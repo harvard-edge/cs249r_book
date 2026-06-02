@@ -37,7 +37,6 @@ Transformers didn't just improve NLP - they unified vision, language, and multim
 <tr><td><b>Module 05</b></td><td>DataLoader</td><td>YOUR data batching</td></tr>
 <tr><td><b>Module 06</b></td><td>Autograd</td><td>YOUR automatic differentiation</td></tr>
 <tr><td><b>Module 07</b></td><td>Optimizers</td><td>YOUR Adam optimizer</td></tr>
-<tr><td><b>Module 10</b></td><td>Tokenization</td><td>YOUR CharTokenizer</td></tr>
 <tr><td><b>Module 11</b></td><td>Embeddings</td><td>YOUR token + positional embeddings</td></tr>
 <tr><td><b>Module 12</b></td><td>Attention</td><td>YOUR multi-head self-attention</td></tr>
 <tr><td><b>Module 13</b></td><td>Transformers</td><td>YOUR LayerNorm + TransformerBlock + GPT</td></tr>

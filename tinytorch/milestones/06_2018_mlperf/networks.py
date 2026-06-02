@@ -6,7 +6,7 @@
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
 These are the SAME network architectures you built in earlier milestones:
-- Perceptron: Milestone 01 (1957 Rosenblatt)
+- Perceptron: Milestone 01 (1958 Rosenblatt)
 - DigitMLP: Milestone 03 (1986 Rumelhart)
 - SimpleCNN: Milestone 04 (1998 LeCun)
 - MinimalTransformer: Milestone 05 (2017 Vaswani)
@@ -27,7 +27,7 @@ import numpy as np
 
 
 # ============================================================================
-# MILESTONE 01: Perceptron (1957 - Rosenblatt)
+# MILESTONE 01: Perceptron (1958 - Rosenblatt)
 # ============================================================================
 
 class Perceptron:

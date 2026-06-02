@@ -207,13 +207,13 @@ class ModuleTestCommand(BaseCommand):
         # IMPORTANT: Only map tests that use features available UP TO that module!
         integration_test_map = {
             # Foundation modules (01-08)
-            1: ["test_basic_integration.py"],
-            2: ["test_basic_integration.py"],
+            1: [],
+            2: [],
             3: ["test_layers_integration.py"],
             4: [],  # Loss tests that need training moved to module 7+
             5: ["test_dataloader_integration.py"],  # DataLoader
             6: [],  # Autograd-only tests (gradient_flow requires optimizers)
-            7: ["test_loss_gradients.py", "test_gradient_flow.py", "test_training_flow.py"],  # Optimizers - can now run gradient tests
+            7: ["test_loss_gradients.py", "test_integration_gradient_flow.py", "test_training_flow.py"],  # Optimizers - can now run gradient tests
             8: ["test_training_flow.py"],  # Training
 
             # Architecture modules (09-13)

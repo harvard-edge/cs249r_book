@@ -2,7 +2,7 @@
 Enhanced Module Workflow for TinyTorch CLI.
 
 Implements the natural workflow:
-1. tito module 01 → Opens module 01 in Jupyter
+1. tito module start 01 → Opens module 01 in Jupyter
 2. Student works and saves
 3. tito module complete 01 → Tests, exports, updates progress
 """
@@ -38,6 +38,29 @@ from ...core.modules import (
 
 class ModuleWorkflowCommand(BaseCommand):
     """Enhanced module command with natural workflow."""
+
+    PRIMARY_EXPORT_LABELS = {
+        "01": "Tensor",
+        "02": "Activations",
+        "03": "Linear",
+        "04": "Losses",
+        "05": "DataLoader",
+        "06": "Autograd",
+        "07": "Optimizers",
+        "08": "Trainer",
+        "09": "Spatial",
+        "10": "Tokenizer",
+        "11": "Embedding",
+        "12": "Attention",
+        "13": "Transformer",
+        "14": "Profiler",
+        "15": "Quantizer",
+        "16": "Compressor",
+        "17": "Acceleration",
+        "18": "Memoization",
+        "19": "Benchmark",
+        "20": "Olympics",
+    }
 
     @property
     def name(self) -> str:
@@ -343,7 +366,12 @@ class ModuleWorkflowCommand(BaseCommand):
         if milestone_info:
             mid, mname, required = milestone_info
             if module_num in required:
-                modules_left = len([r for r in required if r not in completed and r >= module_num])
+                completed_nums = {
+                    int(str(module).split("_", 1)[0])
+                    for module in completed
+                    if str(module).split("_", 1)[0].isdigit()
+                }
+                modules_left = len([r for r in required if r not in completed_nums and r >= module_num])
                 if modules_left <= 3:
                     info_table.add_row("🏆 Milestone", f"[magenta]{mid} - {mname}[/magenta]")
                     info_table.add_row("", f"[dim]{modules_left} modules until unlock[/dim]")
@@ -392,7 +420,7 @@ class ModuleWorkflowCommand(BaseCommand):
     def _create_module_from_src(self, module_name: str) -> bool:
         """Create a module in modules/ by converting from src/.
 
-        Uses the same conversion logic as 'tito src export' but only creates
+        Uses the same conversion logic as 'tito dev export' but only creates
         the student-facing notebook, without exporting to the tinytorch package.
         Full `src/` (including `### BEGIN SOLUTION` ... `### END SOLUTION` blocks) is
         passed through to jupytext so notebooks match the source-of-truth and exports
@@ -409,20 +437,31 @@ class ModuleWorkflowCommand(BaseCommand):
 
     def _get_milestone_for_module(self, module_num: int) -> Optional[tuple]:
         """Get the milestone this module contributes to."""
-        milestones = [
-            ("01", "Perceptron (1958)", [1, 2, 3]),  # Forward pass only
-            ("02", "XOR Crisis (1969)", [1, 2, 3]),  # Forward pass to show limits
-            ("03", "MLP Revival (1986)", [1, 2, 3, 4, 5, 6, 7, 8]),  # Full training infrastructure
-            ("04", "CNN Revolution (1998)", [1, 2, 3, 4, 5, 6, 7, 8, 9]),  # Full training + Convolutions
-            ("05", "Transformer Era (2017)", [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13]),  # Full training + NLP (skip convolutions)
-            ("06", "MLPerf (2018)", list(range(1, 20))),  # All modules
-        ]
+        from ..milestone import MILESTONE_SCRIPTS, _required_modules_for
 
-        for mid, mname, required in milestones:
+        for mid, milestone in sorted(MILESTONE_SCRIPTS.items()):
+            required = _required_modules_for(milestone)
             if module_num in required:
-                return (mid, mname, required)
+                return (mid, milestone["name"], required)
 
         return None
+
+    def _get_export_path_for_module(self, module_name: str) -> str:
+        """Return the generated package path for a module based on default_exp."""
+        from ..export_utils import get_export_target
+
+        module_path = Path("modules") / module_name
+        export_target = get_export_target(module_path)
+        if export_target != "unknown":
+            return f"tinytorch/{export_target.replace('.', '/')}.py"
+
+        short_name = module_name.split("_", 1)[1] if "_" in module_name else module_name
+        return f"tinytorch/core/{short_name}.py"
+
+    def _get_primary_export_label(self, module_name: str) -> str:
+        """Return a concise user-facing label for the module's exported API."""
+        module_num = module_name.split("_", 1)[0]
+        return self.PRIMARY_EXPORT_LABELS.get(module_num, module_name.split("_", 1)[-1].title())
 
     def resume_module(self, module_number: Optional[str] = None) -> int:
         """Resume working on a module (continue previous work)."""
@@ -601,12 +640,12 @@ class ModuleWorkflowCommand(BaseCommand):
                 self.console.print("   💡 Fix the issues and try again")
                 return 1
             else:
-                # Extract export path (simplified)
-                export_path = f"tinytorch/core/{module_name.split('_')[1]}.py"
+                export_path = self._get_export_path_for_module(module_name)
+                export_label = self._get_primary_export_label(module_name)
                 self.console.print(f"   ✅ Exported: {export_path}")
                 self.console.print(f"   ✅ Updated: tinytorch/__init__.py")
                 self.console.print()
-                self.console.print(f"   [dim]Your {module_name.split('_')[1].title()} class is now part of the framework![/dim]")
+                self.console.print(f"   [dim]Your {export_label} implementation is now part of the framework![/dim]")
 
         # Step 3: Run INTEGRATION tests (AFTER export, since they import from tinytorch.core.*)
         if not skip_tests and success:
@@ -1150,7 +1189,12 @@ class ModuleWorkflowCommand(BaseCommand):
             # Run nbdev_export using Python API directly (more reliable than subprocess)
             from nbdev.export import nb_export
 
-            self.console.print(f"[dim]📦 Exporting {notebook_path.name} → tinytorch/core/...[/dim]")
+            target_display = (
+                f"tinytorch/{export_target.replace('.', '/')}.py"
+                if export_target != "unknown"
+                else "tinytorch/..."
+            )
+            self.console.print(f"[dim]📦 Exporting {notebook_path.name} → {target_display}[/dim]")
 
             lib_path = Path.cwd() / "tinytorch"
             nb_export(notebook_path, lib_path=lib_path)
@@ -1286,7 +1330,7 @@ class ModuleWorkflowCommand(BaseCommand):
             self.console.print(Panel(
                 f"🎉 Module {completed_module} completed!\n\n"
                 f"Next steps:\n"
-                f"  [bold cyan]tito module {next_num}[/bold cyan] - Start {next_module}\n"
+                f"  [bold cyan]tito module start {next_num}[/bold cyan] - Start {next_module}\n"
                 f"  [dim]tito module status[/dim] - View overall progress",
                 title="What's Next?",
                 border_style="green"
@@ -1536,40 +1580,35 @@ class ModuleWorkflowCommand(BaseCommand):
     def _check_milestone_readiness(self, completed_modules: list) -> list:
         """Check which milestones are unlocked or ready.
 
-        The required-modules list for each milestone must match the canonical
-        definition in ``tito milestone`` (``MILESTONE_SCRIPTS`` in
-        ``tinytorch/tito/commands/milestone.py``) and in
-        ``_get_milestone_for_module`` above. Diverging copies have caused
-        ``tito module status`` to advertise milestones as ready before the
-        student has actually completed every prerequisite module (issue #1612).
+        Uses the canonical ``MILESTONE_SCRIPTS`` table from ``tito milestone``
+        so module status, milestone list, and milestone run share one set of
+        prerequisites.
         """
         import json
+        from ..milestone import MILESTONE_SCRIPTS, _module_progress_to_int, _required_modules_for
 
-        milestones = [
-            ("01", "Perceptron (1958)", [1, 2, 3]),
-            ("02", "XOR Crisis (1969)", [1, 2, 3]),
-            ("03", "MLP Revival (1986)", [1, 2, 3, 4, 5, 6, 7, 8]),
-            ("04", "CNN Revolution (1998)", [1, 2, 3, 4, 5, 6, 7, 8, 9]),
-            ("05", "Transformer Era (2017)", [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13]),
-            ("06", "MLPerf (2018)", [1, 2, 3, 4, 5, 6, 7, 8, 14, 15, 16, 17, 18, 19]),
-        ]
-
-        # Check which milestones have been completed (run successfully)
+        # Check which milestones have been run successfully.
         milestones_file = self.config.project_root / ".tito" / "milestones.json"
         completed_milestones = []
         if milestones_file.exists():
             try:
                 with open(milestones_file, 'r') as f:
                     data = json.load(f)
-                    completed_milestones = data.get("unlocked_milestones", [])
+                    completed_milestones = data.get("completed_milestones", [])
             except Exception:
                 pass
 
+        completed_set = {
+            module_num
+            for module_num in (_module_progress_to_int(m) for m in completed_modules)
+            if module_num is not None
+        }
+
         result = []
-        for mid, name, required in milestones:
-            # Convert required module numbers to strings like "01", "02"
-            required_strs = [f"{m:02d}" for m in required]
-            all_modules_done = all(m in completed_modules for m in required_strs)
+        for mid, milestone in sorted(MILESTONE_SCRIPTS.items()):
+            required = _required_modules_for(milestone)
+            name = milestone["name"]
+            all_modules_done = all(m in completed_set for m in required)
 
             if mid in completed_milestones:
                 # Milestone has been run and completed
@@ -1657,22 +1696,70 @@ class ModuleWorkflowCommand(BaseCommand):
         return 0
 
     def _check_milestone_unlocks(self, module_name: str) -> None:
-        """Check if completing this module unlocks any milestones."""
+        """Show newly runnable milestones after completing a module."""
         try:
-            # Import milestone tracker
-            import sys
-            from pathlib import Path as PathLib
-            milestone_tracker_path = PathLib(__file__).parent.parent.parent / "tests" / "milestones"
-            if str(milestone_tracker_path) not in sys.path:
-                sys.path.insert(0, str(milestone_tracker_path))
+            import json
+            from datetime import datetime
+            from rich import box
+            from ..milestone import MILESTONE_SCRIPTS, _module_progress_to_int, _required_modules_for
 
-            from milestone_tracker import check_module_export
+            progress = self.get_progress_data()
+            completed = {
+                module_num
+                for module_num in (_module_progress_to_int(m) for m in progress.get("completed_modules", []))
+                if module_num is not None
+            }
 
-            # Let milestone tracker handle everything
-            check_module_export(module_name, console=self.console)
+            milestones_file = self.config.project_root / ".tito" / "milestones.json"
+            milestones_file.parent.mkdir(parents=True, exist_ok=True)
+            if milestones_file.exists():
+                try:
+                    with open(milestones_file, 'r') as f:
+                        milestone_progress = json.load(f)
+                except Exception:
+                    milestone_progress = {}
+            else:
+                milestone_progress = {}
+
+            unlocked = set(milestone_progress.get("unlocked_milestones", []))
+            completed_milestones = set(milestone_progress.get("completed_milestones", []))
+            newly_unlocked = []
+
+            for milestone_id, milestone in sorted(MILESTONE_SCRIPTS.items()):
+                if milestone_id in unlocked or milestone_id in completed_milestones:
+                    continue
+                required = set(_required_modules_for(milestone))
+                if required.issubset(completed):
+                    unlocked.add(milestone_id)
+                    newly_unlocked.append((milestone_id, milestone))
+
+            if not newly_unlocked:
+                return
+
+            milestone_progress["unlocked_milestones"] = sorted(unlocked)
+            milestone_progress["completed_milestones"] = sorted(completed_milestones)
+            milestone_progress.setdefault("unlock_dates", {})
+            for milestone_id, _ in newly_unlocked:
+                milestone_progress["unlock_dates"][milestone_id] = datetime.now().isoformat()
+            milestone_progress["total_unlocked"] = len(unlocked)
+            milestone_progress.setdefault("achievements", [])
+
+            with open(milestones_file, 'w') as f:
+                json.dump(milestone_progress, f, indent=2)
+
+            for milestone_id, milestone in newly_unlocked:
+                self.console.print()
+                self.console.print(Panel.fit(
+                    f"[bold green]Milestone ready to run[/bold green]\n\n"
+                    f"[bold cyan]Milestone {milestone_id}: {milestone['name']}[/bold cyan]\n"
+                    f"{milestone['description']}\n\n"
+                    f"[bold]Run:[/bold] [yellow]tito milestone run {milestone_id}[/yellow]",
+                    border_style="green",
+                    box=box.DOUBLE,
+                ))
+                self.console.print()
 
         except ImportError:
-            # Milestone tracker not available, skip silently
             pass
         except Exception as e:
             # Don't fail the workflow if milestone checking fails
