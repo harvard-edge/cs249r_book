@@ -149,7 +149,9 @@ def ladder(ax, tiers, wall=True, color=None, domain=None, style='bars'):
             ax.barh(yy, v, left=left, height=h, color=c, alpha=0.92)
 
     def _label(lab, v, yy, frac, inside_x, out_x):
-        if style != 'lollipop' and frac > 0.030 * len(lab) + 0.05:   # fits inside the bar
+        # Margin labels need a conservative fit test; a bar can be visibly
+        # substantial yet still too short for a right-aligned Helvetica label.
+        if style != 'lollipop' and frac > 0.040 * len(lab) + 0.08:   # fits inside the bar
             ax.text(inside_x, yy, lab, fontsize=5.2, va="center", ha="right",
                     color="white", fontweight="bold")
         else:                                            # outside (always for lollipop), dark ink
@@ -197,8 +199,8 @@ def knee(ax, knee_frac=0.75, style='shaded', pct_label=None):
         ax.plot(r * 100, lat, color=INK, lw=1.35)
         if style == 'dashed':
             ax.axvline(kx, color=RED, lw=0.65, ls="--")
-            ax.text(kx, ky + 5, pct_label or ("%g%%" % kx), fontsize=5.4,
-                    color=RED, ha="center", fontweight="bold")
+            ax.text(max(kx - 5, 4), ky + 5, pct_label or ("%g%%" % kx), fontsize=5.4,
+                    color=RED, ha="right", fontweight="bold")
         else:                                                # 'shaded'
             ax.axvspan(kx, 100, color=REDFILL, alpha=0.6)
         ax.plot(kx, ky, "o", color=RED, ms=3.3)
@@ -278,11 +280,18 @@ def ironbar(ax, segs=(("D", 0.25, MEM), ("C", 0.55, COMP), ("L", 0.2, NET)), dom
     rest desaturate to gray — the eye lands on what dominates."""
     if style == 'stacked':
         left = 0
+        total = sum(v for _, v, _ in segs)
         for i, (l, v, c) in enumerate(segs):
             ax.barh(0, v, left=left, height=0.5,
                     color=c if i == dom else GRID, alpha=0.95 if i == dom else 0.7)
-            ax.text(left + v / 2, 0, l, fontsize=6, ha="center", va="center",
-                    color="white", fontweight="bold"); left += v
+            frac = v / total if total else 0
+            if frac > 0.026 * len(l) + 0.06:
+                ax.text(left + v / 2, 0, l, fontsize=6, ha="center", va="center",
+                        color="white", fontweight="bold")
+            else:
+                ax.text(left + v / 2, 0.34, l, fontsize=4.7, ha="center", va="bottom",
+                        color=INK, fontweight="bold")
+            left += v
         ax.set_xlim(0, left); ax.set_ylim(-0.5, 0.5)
     elif style == 'columns':
         for i, (l, v, c) in enumerate(segs):
