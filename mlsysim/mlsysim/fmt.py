@@ -34,15 +34,56 @@ def _get_markdown():
     return MarkdownStr
 
 
+def _require_finite(val, what="value"):
+    """Reject non-finite inputs (``inf``/``nan``) with a clear message.
+
+    A divide-by-zero (``x / 0``) yields ``inf``; an indeterminate ``0 / 0``
+    yields ``nan``. Without this guard those silently render as the literal
+    text ``"inf"``/``"nan"`` (or trip an incidental ``OverflowError`` deep in
+    ``round()``). This is the formatter's last-line-of-defense against an
+    upstream divide-by-zero leaking into prose. Returns ``val`` unchanged when
+    finite so it composes inline.
+    """
+    import math
+
+    if isinstance(val, float) and not math.isfinite(val):
+        kind = "nan (0/0 or undefined)" if math.isnan(val) else "infinite (divide-by-zero)"
+        raise ValueError(
+            f"Non-finite {what}: {val} is {kind}. The formatter refuses to "
+            f"render it — this almost always means a divide-by-zero or an "
+            f"undefined 0/0 upstream in the compute. Fix the calculation (or "
+            f"guard the denominator) rather than formatting a non-finite value."
+        )
+    return val
+
+
 def _numeric_magnitude(quantity):
-    """Return a plain float magnitude for fmt safety checks."""
+    """Return a plain float magnitude for fmt safety checks.
+
+    All numeric formatters funnel their value extraction through here, so the
+    finite guard applied at this chokepoint protects every helper that takes a
+    number or Quantity.
+    """
     from .core.provenance import Sourced, scalar_value
 
     if isinstance(quantity, ureg.Quantity):
-        return float(quantity.magnitude)
+        return _require_finite(float(quantity.magnitude), "quantity magnitude")
     if isinstance(quantity, Sourced):
-        return scalar_value(quantity)
-    return float(quantity)
+        return _require_finite(float(scalar_value(quantity)), "value")
+    return _require_finite(float(quantity), "value")
+
+
+def _dimensionless_magnitude(value, *, what):
+    """Return a scalar magnitude only after checking dimensional consistency."""
+    if isinstance(value, ureg.Quantity):
+        if value.units != ureg.dimensionless:
+            raise ValueError(
+                f"{what} expects a dimensionless scalar, got units {value.units}. "
+                "Convert same-unit quotients to dimensionless at the source, or "
+                "use a domain formatter for unit-bearing quantities."
+            )
+        return _require_finite(float(value.to("").magnitude), what)
+    return _numeric_magnitude(value)
 
 
 def _parse_formatted_number(result):
@@ -108,8 +149,286 @@ def _check_fmt_precision(val, precision, result):
         )
 
 
+def _display_prefix(prefix="", *, approx=False, lower_bound=False):
+    """Build a standardized leading marker for a formatted display value."""
+    if approx and lower_bound:
+        raise ValueError("A value cannot be both approximate and a lower bound.")
+    marker = "~" if approx else ("> " if lower_bound else "")
+    if prefix and marker:
+        raise ValueError(
+            "Use either prefix= or the named approx/lower_bound marker, not both."
+        )
+    return prefix or marker
+
+
+def _clean_text_atom(value, *, what):
+    """Validate a structured display atom such as a count label or denominator."""
+    if not isinstance(value, str):
+        raise TypeError(f"{what} must be a string, got {type(value).__name__}.")
+    if not value:
+        raise ValueError(f"{what} must not be empty.")
+    if value != value.strip():
+        raise ValueError(f"{what} must not have leading/trailing whitespace.")
+    forbidden = {"$", "\\$", "%", "×"}
+    if any(tok in value for tok in forbidden):
+        raise ValueError(
+            f"{what} must not contain currency, percent, or multiplier glyphs."
+        )
+    return value
+
+
+_COUNT_LABEL_DENYLIST = {
+    "GB", "MB", "KB", "TB", "PB", "GiB", "MiB", "KiB", "TiB",
+    "GB/s", "MB/s", "TB/s", "Gb/s", "TFLOP/s", "PFLOP/s",
+    "W", "kW", "MW", "J", "mJ", "Wh", "kWh", "MWh",
+    "ms", "s", "min", "h", "ns", "us", "µs", "μs",
+    "QPS", "FPS", "tokens/s", "tokens/hour", "img/s", "images/s", "req/s",
+    "samples/s",
+    "percent", "percentage point", "percentage points",
+}
+
+
+_DECIMAL_SCALE_FACTORS = {"K": 1e3, "M": 1e6, "B": 1e9, "T": 1e12}
+_DECIMAL_SCALE_WORDS = {
+    "K": "thousand",
+    "M": "million",
+    "B": "billion",
+    "T": "trillion",
+}
+_DECIMAL_SCALE_SYMBOL_BY_WORD = {
+    word: symbol for symbol, word in _DECIMAL_SCALE_WORDS.items()
+}
+
+
+def _resolve_decimal_scale(scale, *, what, style="symbol", attributive=False):
+    """Return ``(divisor, suffix)`` for checked K/M/B/T decimal scales."""
+    if style not in {"symbol", "word"}:
+        raise ValueError(
+            f"{what} style must be 'symbol' or 'word', got {style!r}."
+        )
+    if scale is None:
+        if attributive:
+            raise ValueError(f"{what} attributive=True requires scale=.")
+        return 1, ""
+    if not isinstance(scale, str):
+        raise TypeError(
+            f"{what} must be a string or None, got {type(scale).__name__}."
+        )
+    if scale in _DECIMAL_SCALE_FACTORS:
+        if attributive and style != "word":
+            raise ValueError(
+                f"{what} attributive=True requires a word scale, got {scale!r}."
+            )
+        divisor = _DECIMAL_SCALE_FACTORS[scale]
+        if style == "word":
+            joiner = "-" if attributive else " "
+            return divisor, f"{joiner}{_DECIMAL_SCALE_WORDS[scale]}"
+        return divisor, scale
+    word_key = scale.lower()
+    if word_key in _DECIMAL_SCALE_SYMBOL_BY_WORD:
+        symbol = _DECIMAL_SCALE_SYMBOL_BY_WORD[word_key]
+        joiner = "-" if attributive else " "
+        return _DECIMAL_SCALE_FACTORS[symbol], f"{joiner}{scale}"
+    allowed = sorted(_DECIMAL_SCALE_FACTORS) + sorted(_DECIMAL_SCALE_SYMBOL_BY_WORD)
+    raise ValueError(f"{what} must be one of {allowed}, got {scale!r}.")
+
+
+def _auto_decimal_scale(raw_value):
+    """Pick the largest K/M/B/T scale that keeps a count display >= 1."""
+    abs_value = abs(raw_value)
+    for symbol, divisor in sorted(
+        _DECIMAL_SCALE_FACTORS.items(), key=lambda item: item[1], reverse=True
+    ):
+        if abs_value >= divisor:
+            return symbol
+    return None
+
+
+def _resolve_scaled_count_precision(val, precision):
+    """Pick precision for scaled counts without hiding sub-unit explicit scales."""
+    if precision is not None:
+        return precision
+    if _is_integer_like(val):
+        return 0
+    abs_val = abs(val)
+    if abs_val >= 1:
+        return _resolve_display_precision(val, None)
+    if abs_val >= 0.1:
+        return 2
+    if abs_val >= 0.01:
+        return 3
+    return 4
+
+
+def _validate_count_label(label, *, what="label") -> str:
+    """Validate a count noun label before pluralization."""
+    label = _clean_text_atom(label, what=what)
+    if "/" in label:
+        raise ValueError(f"{what} must be a count noun, not a rate/unit expression.")
+    if label in _COUNT_LABEL_DENYLIST:
+        raise ValueError(
+            f"{what}={label!r} looks like a unit, rate, percent, or glyph label. "
+            "Use the formatter for that value kind instead."
+        )
+    return label
+
+
+def _pluralize_label(label: str) -> str:
+    """Best-effort English plural for count labels."""
+    if label.endswith("y") and len(label) > 1 and label[-2].lower() not in "aeiou":
+        return f"{label[:-1]}ies"
+    if label.endswith(("s", "x", "ch", "sh")):
+        return f"{label}es"
+    return f"{label}s"
+
+
+def _label_suffix(raw_value, label=None, plural_label=None) -> str:
+    """Return a leading-space count label that agrees with the raw count."""
+    if label is None:
+        if plural_label is not None:
+            raise ValueError("plural_label requires label.")
+        return ""
+    label = _validate_count_label(label, what="label")
+    plural = (
+        _validate_count_label(plural_label, what="plural_label")
+        if plural_label is not None else _pluralize_label(label)
+    )
+    word = label if abs(raw_value - 1) <= 1e-9 else plural
+    return f" {word}"
+
+
+def _validate_count_value(
+    raw_value,
+    *,
+    allow_fractional=False,
+    require_integer=True,
+):
+    """Reject negative and, when requested, fractional raw counts."""
+    if raw_value < 0:
+        raise ValueError(
+            f"fmt_count expects a non-negative count, got {raw_value}."
+        )
+    if require_integer and not allow_fractional and not _is_integer_like(raw_value):
+        raise ValueError(
+            f"fmt_count expects a whole-number count, got {raw_value}. Pass "
+            "allow_fractional=True only when the count is intentionally "
+            "fractional."
+        )
+
+
+def _coerce_unit(display_unit):
+    """Return a Pint Unit from a Pint unit-like object or unit string."""
+    if isinstance(display_unit, str):
+        return ureg.Unit(display_unit)
+    return display_unit
+
+
+def _resolve_unit_arg(display_unit, unit, *, what):
+    """Resolve the display unit from positional or keyword ``unit=`` spelling."""
+    if display_unit is None and unit is None:
+        raise TypeError(f"{what} requires a display unit.")
+    if display_unit is not None and unit is not None:
+        raise TypeError(f"{what} accepts either a positional unit or unit=, not both.")
+    return _coerce_unit(unit if unit is not None else display_unit)
+
+
+_USD_DENOMINATORS = {
+    "month", "year", "hour", "hr", "day", "week",
+    "GB", "TB", "GB/month", "TB/month", "kWh", "MWh", "(TFLOP/s)",
+    "label", "image", "query", "request", "token", "inference", "sample",
+    "click", "run", "million queries", "million tokens", "1K inferences",
+    "million", "tonne", "device", "device/year", "GPU-hour",
+}
+
+
+def _denominator_suffix(per, *, what="per", allowed=None) -> str:
+    """Return a structured denominator suffix such as /month or /GB."""
+    if per is None:
+        return ""
+    if isinstance(per, str):
+        value = _clean_text_atom(per, what=what)
+        if value.startswith("/"):
+            raise ValueError(f"{what} should omit the leading '/', got {per!r}.")
+        if allowed is not None and value not in allowed:
+            raise ValueError(
+                f"{what} must be one of {sorted(allowed)}, got {value!r}."
+            )
+        return f"/{value}"
+    unit_label = _compact_unit_suffix(_coerce_unit(per)).strip()
+    if allowed is not None and unit_label not in allowed:
+        raise ValueError(
+            f"{what} must be one of {sorted(allowed)}, got {unit_label!r}."
+        )
+    return f"/{unit_label}"
+
+
+def _usd_denominator_unit(per):
+    """Return the Pint denominator unit implied by ``fmt_usd(per=...)``.
+
+    Display strings such as ``"TB/month"`` mean dollars per TB per month, so
+    their physical denominator is the product ``TB * month``. Parenthesized
+    strings such as ``"(TFLOP/s)"`` are intentionally parsed as one compound
+    unit because the prose meaning is dollars per throughput.
+    """
+    if per is None:
+        return None
+    if not isinstance(per, str):
+        return _coerce_unit(per)
+    value = _clean_text_atom(per, what="fmt_usd per")
+    if value.startswith("/"):
+        raise ValueError(f"fmt_usd per should omit the leading '/', got {per!r}.")
+    if value.startswith("(") and value.endswith(")"):
+        return ureg.Unit(value[1:-1])
+    denom = None
+    for part in value.split("/"):
+        unit = ureg.Unit(part)
+        denom = unit if denom is None else denom * unit
+    return denom
+
+
+def _usd_amount_magnitude(amount, per):
+    """Coerce a scalar or Pint dollar Quantity into fmt_usd's display domain."""
+    from .core.units import USD
+
+    if not isinstance(amount, ureg.Quantity):
+        return amount
+
+    unit_label = f"{amount.units}"
+    if "dollar" not in unit_label:
+        raise ValueError(
+            f"fmt_usd expects a dollar Quantity, got units {amount.units}. "
+            "Pass a plain numeric dollar magnitude only at an intentional "
+            "scalar boundary."
+        )
+
+    if per is None:
+        if unit_label != "dollar":
+            raise ValueError(
+                f"fmt_usd received a dollar rate with units {amount.units} but "
+                "no per= denominator. Pass per= so the formatter owns the "
+                "unit conversion."
+            )
+        return amount.m_as(USD)
+
+    try:
+        denominator = _usd_denominator_unit(per)
+    except Exception:
+        # Some accepted prose denominators are not physical Pint units
+        # ("label", "GPU-hour", "device/year"). They can still decorate a
+        # pure dollar quantity, but a Pint rate needs a Pint denominator.
+        if unit_label == "dollar":
+            return amount.m_as(USD)
+        raise ValueError(
+            f"fmt_usd cannot infer a Pint denominator from per={per!r} for "
+            f"quantity units {amount.units}. Use a Pint-parsable per= value "
+            "or pass an already-extracted numeric magnitude at the boundary."
+        )
+
+    return amount.to(USD / denominator).magnitude
+
+
 def fmt(quantity, unit=None, precision=1, commas=True,
-        prefix="", suffix=""):
+        prefix="", suffix="", approx=False, lower_bound=False):
     """
     Format a Pint Quantity (or plain number) for narrative text.
     Returns a MarkdownStr so Quarto inserts the value verbatim (no escape).
@@ -117,10 +436,11 @@ def fmt(quantity, unit=None, precision=1, commas=True,
     The prefix and suffix arguments collapse the old MarkdownStr(f"...")
     escape-hatch idiom into a single canonical helper. Common uses:
 
-        fmt(price, precision=0, prefix="\\$")      # "$1,000" in prose
-        fmt(rate * 100, precision=1, commas=False, suffix="%")  # "12.4%"
-        fmt(bw_mb_s, precision=1, commas=False, suffix=" MB/s")  # "2.4 MB/s"
-        fmt(speedup, precision=0, commas=False)     # prose adds "$\\times$"
+        fmt(value, precision=0, approx=True)       # "~1,000"
+        fmt(value, precision=0, lower_bound=True)  # "> 1,000"
+        fmt_percent(rate, precision=1, style="symbol")  # "12.4%"
+        fmt_qty(bandwidth, unit=MB/second)         # "2.4 MB/s"
+        fmt_multiple(speedup)                      # prose adds "$\\times$"
 
     Safety: Raises ValueError if formatting would hide meaningful magnitude:
     non-zero values displayed as ``0``, non-integers displayed with
@@ -140,6 +460,7 @@ def fmt(quantity, unit=None, precision=1, commas=True,
 
     _check_fmt_precision(val, precision, result)
 
+    prefix = _display_prefix(prefix, approx=approx, lower_bound=lower_bound)
     decorated = f"{prefix}{result}{suffix}"
     out = MarkdownStr(decorated)
     assert isinstance(out, MarkdownStr), (
@@ -150,7 +471,15 @@ def fmt(quantity, unit=None, precision=1, commas=True,
     return out
 
 
-def fmt_int(quantity, unit=None, commas=True, prefix="", suffix=""):
+def fmt_int(
+    quantity,
+    unit=None,
+    commas=True,
+    prefix="",
+    suffix="",
+    approx=False,
+    lower_bound=False,
+):
     """
     Format a value as an integer for narrative text.
 
@@ -162,10 +491,31 @@ def fmt_int(quantity, unit=None, commas=True, prefix="", suffix=""):
         if isinstance(quantity, ureg.Quantity):
             quantity = quantity.to(unit)
     val = _numeric_magnitude(quantity)
-    return fmt(round(val), precision=0, commas=commas, prefix=prefix, suffix=suffix)
+    return fmt(
+        round(val),
+        precision=0,
+        commas=commas,
+        prefix=prefix,
+        suffix=suffix,
+        approx=approx,
+        lower_bound=lower_bound,
+    )
 
 
-def fmt_usd(amount, *, precision=0, commas=True, approx=False, suffix=""):
+_USD_MARKERS = {"*"}
+
+
+def fmt_usd(
+    amount,
+    *,
+    precision=0,
+    commas=True,
+    approx=False,
+    scale=None,
+    per=None,
+    marker="",
+    suffix="",
+):
     """
     Canonical currency formatter — the single, blessed way to render any
     dollar amount in prose, tables, or callouts.
@@ -184,37 +534,95 @@ def fmt_usd(amount, *, precision=0, commas=True, approx=False, suffix=""):
 
         fmt_usd(15000)                       # "\\$15,000"
         fmt_usd(c_total, approx=True,
-                suffix="/year")              # "~\\$1,234/year"
-        fmt_usd(gpt3_cost_m, precision=1,
-                suffix="M")                  # "\\$4.6M"
+                per="year")                  # "~\\$1,234/year"
+        fmt_usd(gpt3_cost, precision=1,
+                scale="M")                   # "\\$4.6M"
+        fmt_usd(4_750_000, precision=2,
+                scale="million")             # "\\$4.75 million"
         fmt_usd(rate_per_gb, precision=2,
-                commas=False, suffix="/GB")  # "\\$0.09/GB"
+                commas=False, per="GB")      # "\\$0.09/GB"
 
     Args:
-        amount: A plain number or a pure-dollar Pint ``Quantity`` (converted
-            via the ``USD`` unit). For rate values (e.g. dollars per GB), pass
-            the already-extracted magnitude and describe the denominator with
-            ``suffix`` (e.g. ``suffix="/GB"``).
+        amount: A plain number, a pure-dollar Pint ``Quantity``, or a Pint
+            dollar rate when ``per=`` is a Pint-parsable denominator such as
+            ``"GB"``, ``"TB/month"``, ``"hour"``, or ``"kWh"``. Non-physical
+            denominators such as ``"label"`` still decorate plain numbers or
+            pure-dollar quantities.
         precision: Decimal places. ``precision=0`` rounds to whole dollars
             (``fmt_int`` semantics); ``precision>=1`` uses ``fmt`` semantics
             with its spurious-zero guard.
         commas: Thousands separators (default ``True`` — currency usually
             groups: ``\\$15,000``). Pass ``False`` for small rates.
         approx: When ``True``, prepend ``~`` before the dollar sign.
-        suffix: Scale glyph (``"K"``/``"M"``/``"B"``) or rate denominator
-            (``"/hr"``, ``"/GB/month"``, ``"/year"``). Must not contain a
-            currency code; the checker forbids literal ``USD`` here.
+        scale: Optional currency scale (``"K"``, ``"M"``, ``"B"``, ``"T"`` or
+            word forms such as ``"million"``). The raw dollar amount is divided
+            by the scale here, so the magnitude and display suffix cannot drift
+            apart.
+        per: Optional rate denominator (``"month"``, ``"GB"``, ``"kWh"``, or a
+            Pint unit such as ``GB``). Pass without a leading slash.
+        marker: Optional checked table marker appended after the currency value.
+            Currently only ``"*"`` is allowlisted; this is for data-source
+            markers, not units or scale glyphs.
+        suffix: Legacy escape hatch while the corpus is being migrated. New
+            QMD code should use ``scale=`` and/or ``per=`` instead.
     """
-    from .core.units import USD
+    amount = _usd_amount_magnitude(amount, per)
 
-    if isinstance(amount, ureg.Quantity):
-        amount = amount.m_as(USD)
+    if marker and marker not in _USD_MARKERS:
+        raise ValueError(
+            f"fmt_usd marker must be one of {sorted(_USD_MARKERS)}, "
+            f"got {marker!r}."
+        )
+    if suffix and (scale is not None or per is not None or marker):
+        raise ValueError("Use suffix= or structured scale=/per=/marker=, not both.")
+    structured_suffix = ""
+    if scale is not None:
+        divisor, scale_suffix = _resolve_decimal_scale(
+            scale,
+            what="fmt_usd scale",
+        )
+        amount = amount / divisor
+        structured_suffix += scale_suffix
+    structured_suffix += _denominator_suffix(
+        per,
+        what="fmt_usd per",
+        allowed=_USD_DENOMINATORS,
+    )
+    suffix = suffix or structured_suffix
+    suffix += marker
 
     prefix = "~\\$" if approx else "\\$"
 
     if precision == 0:
         return fmt_int(amount, commas=commas, prefix=prefix, suffix=suffix)
     return fmt(amount, precision=precision, commas=commas, prefix=prefix, suffix=suffix)
+
+
+def fmt_eur(
+    amount,
+    *,
+    precision=0,
+    commas=True,
+    scale=None,
+    approx=False,
+):
+    """Format euro-denominated amounts using explicit ``EUR`` prose style."""
+    from .core.units import EUR
+
+    if isinstance(amount, ureg.Quantity):
+        amount = amount.to(EUR).magnitude
+    if scale is not None:
+        divisor, scale_suffix = _resolve_decimal_scale(
+            scale,
+            what="fmt_eur scale",
+        )
+        amount = amount / divisor
+    else:
+        scale_suffix = ""
+    prefix = "~EUR " if approx else "EUR "
+    if precision == 0:
+        return fmt_int(amount, commas=commas, prefix=prefix, suffix=scale_suffix)
+    return fmt(amount, precision=precision, commas=commas, prefix=prefix, suffix=scale_suffix)
 
 
 def fmt_val(quantity, default="-"):
@@ -236,6 +644,7 @@ def fmt_val(quantity, default="-"):
         val = quantity
     if val is None:
         return MarkdownStr(default)
+    _require_finite(float(val), "table value")
     out = MarkdownStr(f"{val:g}")
     assert isinstance(out, MarkdownStr), "fmt_val() must return MarkdownStr"
     return out
@@ -268,24 +677,800 @@ def fmt_unit(quantity, default="-"):
     return out
 
 
-def fmt_percent(ratio, precision=1, commas=False, suffix=""):
+def fmt_percent(ratio, precision=None, commas=False, style="number",
+                max_ratio=1.5, allow_negative=False):
     """
-    Format a ratio (0.0 to 1.0) as a percentage string for display.
+    Format a 0-1 **ratio** as a percentage. The single canonical domain for
+    percentages: the input is always a fraction in ``[0, 1]`` (``0.85`` →
+    ``85``), never an already-scaled ``0-100`` value.
 
-    Use this for compound fractions (e.g. effective utilization) to avoid
-    display bugs from Quantity or wrong scaling.
-    Accepts Pint Quantity (uses magnitude) or plain float.
+    This one-domain rule is the structural fix for the "no 10,000%" guarantee.
+    A value outside ``[0, max_ratio]`` is almost always an already-scaled value
+    passed by mistake (``0.85`` accidentally typed/derived as ``85``), so it
+    raises instead of silently rendering ``8500``.     Legitimate values above
+    ``max_ratio`` (e.g. >150% growth) must pass ``max_ratio=`` explicitly,
+    making the intent visible at the call site. Likewise a percentage that can
+    be **negative** — a signed rate of change such as ROI or cost delta, as
+    opposed to a bounded proportion like accuracy — must pass
+    ``allow_negative=True`` (which widens the domain to ``[-max_ratio, max_ratio]``).
+    The default refusal of negatives keeps the common proportion case strict.
 
-    suffix=" percent" for body prose (MIT Press: spell out "percent").
-    suffix="%" for tables, equations, and constrained captions.
-    No suffix (default) when the prose context carries the meaning
-    (e.g., "50 MFU", "85 goodput").
+    The formatter owns the trailing glyph via ``style`` so authors never type
+    ``%`` or "percent" in prose (where a stray ``%`` could leak into math mode
+    and where MIT Press style — spell out "percent" in body, "%" in tables —
+    is otherwise unenforceable):
+
+        style="prose"   →  "85 percent"   (MIT Press body style)
+        style="symbol"  →  "85%"          (tables, equations, captions)
+        style="number"  →  "85"           (default; prose carries the meaning,
+                                            e.g. "85 MFU", "85 goodput")
+
+    Accepts a Pint Quantity (dimensionless magnitude) or plain float.
     """
+    r = _percent_ratio_value(
+        ratio,
+        max_ratio=max_ratio,
+        allow_negative=allow_negative,
+        what="fmt_percent",
+    )
+    if style not in {"number", "prose", "symbol"}:
+        raise ValueError(
+            f"fmt_percent style must be 'number', 'prose', or 'symbol', "
+            f"got {style!r}."
+        )
+    glyph = {"number": "", "prose": " percent", "symbol": "%"}[style]
+    pct_val = r * 100
+    p = _resolve_display_precision(pct_val, precision)
+    return fmt(pct_val, precision=p, commas=commas, suffix=glyph)
+
+
+def _percent_ratio_value(ratio, *, max_ratio=1.5, allow_negative=False, what="fmt_percent"):
+    """Coerce and validate the canonical 0-1 percentage ratio domain."""
     if isinstance(ratio, ureg.Quantity):
-        ratio = float(ratio.m_as(''))
+        r = float(ratio.m_as(''))
     else:
-        ratio = float(ratio)
-    return fmt(ratio * 100, precision=precision, commas=commas, suffix=suffix)
+        r = float(ratio)
+    _require_finite(r, "percent ratio")
+
+    lo = -max_ratio if allow_negative else 0.0
+    if not (lo <= r <= max_ratio):
+        raise ValueError(
+            f"{what} expects a 0-1 ratio, got {r}. If this is an "
+            f"already-scaled 0-100 value, divide by 100 at the source so the "
+            f"value flows through {what} as a ratio. If a value above "
+            f"{max_ratio * 100:.0f}% is genuinely intended (e.g. growth), pass "
+            f"max_ratio= explicitly; if it can be negative (e.g. ROI, a signed "
+            f"change), pass allow_negative=True. This guard prevents silent 100x "
+            f"errors such as 0.85 -> '8500 percent'."
+        )
+    return r
+
+
+def _resolve_display_precision(val, precision):
+    """Pick precision when caller passes precision=None (domain helpers, fmt_multiple)."""
+    if precision is not None:
+        return precision
+    if _is_integer_like(val):
+        return 0
+    return 1
+
+
+def _range_precisions(precision, *, what="range precision"):
+    """Return endpoint precisions for a range helper."""
+    if isinstance(precision, (tuple, list)):
+        if len(precision) != 2:
+            raise ValueError(f"{what} tuple/list must have exactly two entries.")
+        lo_p, hi_p = precision
+    else:
+        lo_p = hi_p = precision
+    if lo_p is not None and (not isinstance(lo_p, int) or not isinstance(hi_p, int)):
+        raise TypeError(f"{what} must be an int or a 2-item int tuple/list.")
+    return lo_p, hi_p
+
+
+def _range_endpoint_precisions(lo_val, hi_val, precision, *, what="range precision"):
+    """Resolve per-endpoint precision; None → auto like fmt_multiple."""
+    if isinstance(precision, (tuple, list)):
+        return _range_precisions(precision, what=what)
+    if precision is not None:
+        return precision, precision
+    return (
+        _resolve_display_precision(lo_val, None),
+        _resolve_display_precision(hi_val, None),
+    )
+
+
+def fmt_percent_range(
+    lo,
+    hi,
+    *,
+    precision=None,
+    commas=False,
+    style="prose",
+    max_ratio=1.5,
+    allow_negative=False,
+):
+    """Format a range of percent ratios with one checked percent suffix.
+
+    Inputs use the same canonical domain as ``fmt_percent``: ratios in ``[0, 1]``
+    by default, not already-scaled 0-100 values. ``precision`` may be one int or
+    a ``(lo_precision, hi_precision)`` pair when existing prose intentionally
+    uses asymmetric endpoint precision.
+    """
+    lo_r = _percent_ratio_value(
+        lo,
+        max_ratio=max_ratio,
+        allow_negative=allow_negative,
+        what="fmt_percent_range",
+    )
+    hi_r = _percent_ratio_value(
+        hi,
+        max_ratio=max_ratio,
+        allow_negative=allow_negative,
+        what="fmt_percent_range",
+    )
+    if hi_r < lo_r:
+        raise ValueError(
+            f"fmt_percent_range expects hi >= lo, got lo={lo_r}, hi={hi_r}."
+        )
+    if style not in {"number", "prose", "symbol"}:
+        raise ValueError(
+            f"fmt_percent_range style must be 'number', 'prose', or 'symbol', "
+            f"got {style!r}."
+        )
+    lo_p, hi_p = _range_endpoint_precisions(
+        lo_r * 100,
+        hi_r * 100,
+        precision,
+        what="fmt_percent_range precision",
+    )
+    a = fmt(lo_r * 100, precision=lo_p, commas=commas)
+    b = fmt(hi_r * 100, precision=hi_p, commas=commas)
+    suffix = {"number": "", "prose": " percent", "symbol": "%"}[style]
+    return MarkdownStr(f"{a}\u2013{b}{suffix}")
+
+
+def fmt_pp(points, precision=None, commas=False, style="prose", attributive=False):
+    """
+    Format a difference of two percentages as **percentage points**.
+
+    Distinct from ``fmt_percent``: the input is already on the ``0-100`` point
+    scale (it is a difference, not a ratio), so it is NOT multiplied by 100.
+    Using a dedicated helper keeps "5 percentage points" (an additive gap)
+    from being confused with "5 percent" (a multiplicative share).
+
+        style="prose"               →  "7 percentage points"  (plural noun)
+        style="prose", value == 1   →  "1 percentage point"    (singular noun)
+        style="prose", attributive  →  "7 percentage-point"    (hyphenated
+                                        compound adjective, e.g. "a 7
+                                        percentage-point gap" — always hyphenated
+                                        and singular, per standard English)
+        style="symbol"              →  "7 pp"
+
+    The noun form agrees in number with the **rendered** value, so a value that
+    rounds to 1 reads "1 percentage point" while 0.9 / 1.5 read "...points".
+    Use ``attributive=True`` only when the value directly modifies a following
+    noun; use the default noun form everywhere else.
+    """
+    if isinstance(points, ureg.Quantity):
+        v = float(points.m_as(''))
+    else:
+        v = float(points)
+    _require_finite(v, "percentage points")
+    if style not in {"prose", "symbol"}:
+        raise ValueError(
+            f"fmt_pp style must be 'prose' or 'symbol', got {style!r}."
+        )
+    if attributive and style != "prose":
+        raise ValueError(
+            "fmt_pp(attributive=True) applies only to style='prose' (the "
+            "hyphenated adjective form), not style='symbol'."
+        )
+    num = str(fmt(v, precision=_resolve_display_precision(v, precision), commas=commas))
+    if style == "symbol":
+        return MarkdownStr(f"{num} pp")
+    if attributive:
+        return MarkdownStr(f"{num} percentage-point")
+    word = "percentage point" if num == "1" else "percentage points"
+    return MarkdownStr(f"{num} {word}")
+
+
+def fmt_multiple(factor, precision=None, commas=False):
+    """
+    Format a multiplier / speedup / scaling factor as a **number only**.
+
+    The multiplier glyph belongs in prose as LaTeX ``$\\times$``, never inside
+    the computed string (see .claude/rules/math.md §6 #14). This helper exists
+    so the value-kind is explicit at the source while keeping the glyph out of
+    the string:
+
+        speedup_str = fmt_multiple(3.2)            # "3.2"
+        # prose: `{python} speedup_str`$\\times$ faster
+
+    Guard: a multiplier is non-negative.
+    """
+    v = _dimensionless_magnitude(factor, what="multiplier")
+    if v < 0:
+        raise ValueError(
+            f"fmt_multiple expects a non-negative factor, got {v}. A negative "
+            f"multiplier almost always signals a sign or ordering bug."
+        )
+    p = _resolve_display_precision(v, precision)
+    return fmt(v, precision=p, commas=commas)
+
+
+def fmt_multiple_range(lo, hi, *, precision=1, commas=False):
+    """Format a range of multiplier factors as bare numbers.
+
+    The multiplication glyph remains prose-owned, as with ``fmt_multiple``.
+    ``precision`` may be one int or a ``(lo_precision, hi_precision)`` pair.
+    """
+    lo_v = _dimensionless_magnitude(lo, what="multiplier range endpoint")
+    hi_v = _dimensionless_magnitude(hi, what="multiplier range endpoint")
+    if lo_v < 0 or hi_v < 0:
+        raise ValueError(
+            f"fmt_multiple_range expects non-negative factors, got lo={lo_v}, "
+            f"hi={hi_v}."
+        )
+    if hi_v < lo_v:
+        raise ValueError(
+            f"fmt_multiple_range expects hi >= lo, got lo={lo_v}, hi={hi_v}."
+        )
+    lo_p, hi_p = _range_precisions(precision, what="fmt_multiple_range precision")
+    a = fmt(lo_v, precision=lo_p, commas=commas)
+    b = fmt(hi_v, precision=hi_p, commas=commas)
+    return MarkdownStr(f"{a}\u2013{b}")
+
+
+def fmt_count(
+    value,
+    scale=None,
+    precision=0,
+    commas=True,
+    label=None,
+    plural_label=None,
+    suffix="",
+    approx=False,
+    lower_bound=False,
+    allow_fractional=False,
+    scale_style="symbol",
+    attributive=False,
+):
+    """
+    Format a **count** (a dimensionless tally of things), optionally with a
+    magnitude scale glyph.
+
+    Replaces the ``fmt(value / MILLION, suffix="M")`` idiom, where the scale
+    division and the glyph were two disconnected facts a reader had to keep in
+    sync. Here the scale is declared once and applied for you:
+
+        fmt_count(5_300_000, scale="M")              # "5M"
+        fmt_count(5_300_000, scale="M", precision=1) # "5.3M"
+        fmt_count(5_300_000, scale="M",
+                  scale_style="word", precision=1)   # "5.3 million"
+        fmt_count(5_300_000, scale="million",
+                  precision=1)                       # "5.3 million"
+        fmt_count(70e9, scale="B")                   # "70B"   (e.g. params)
+        fmt_count(7e9, scale="billion",
+                  attributive=True)                  # "7-billion"
+        fmt_count(8192)                              # "8,192" (no scale)
+        fmt_count(1024, label="GPU")                 # "1,024 GPUs"
+        fmt_count(1024, label="GPU", approx=True)    # "~1,024 GPUs"
+        fmt_count(2, label="batch",
+                  plural_label="batches")            # "2 batches"
+
+    Guard: counts are non-negative. When a count noun ``label`` is provided,
+    the raw value must be whole-number by default; pass
+    ``allow_fractional=True`` only when a fractional labeled count is
+    intentionally wanted. Label strings are count nouns; units/rates/glyphs
+    must use their own typed formatter.
+
+    For a currency amount use ``fmt_usd``; for a physical quantity use
+    ``fmt_qty``. ``fmt_count`` is for pure tallies only.
+    """
+    raw_v = _numeric_magnitude(value)
+    require_integer = label is not None or plural_label is not None or attributive
+    _validate_count_value(
+        raw_v,
+        allow_fractional=allow_fractional,
+        require_integer=require_integer,
+    )
+    if suffix and (label is not None or plural_label is not None):
+        raise ValueError("Use suffix= or structured label=, not both.")
+    if attributive and (suffix or label is not None or plural_label is not None):
+        raise ValueError(
+            "fmt_count attributive=True formats only the scaled modifier; "
+            "put the count noun in prose."
+        )
+    if scale_style not in {"symbol", "word"}:
+        raise ValueError(
+            "fmt_count scale_style must be 'symbol' or 'word', "
+            f"got {scale_style!r}."
+        )
+    if scale is None and scale_style != "symbol":
+        raise ValueError("fmt_count scale_style='word' requires scale=.")
+    if scale is None and attributive:
+        raise ValueError("fmt_count attributive=True requires scale=.")
+    v = raw_v
+    glyph = ""
+    if scale is not None:
+        divisor, glyph = _resolve_decimal_scale(
+            scale,
+            what="fmt_count scale",
+            style=scale_style,
+            attributive=attributive,
+        )
+        v = v / divisor
+    suffix = suffix or _label_suffix(raw_v, label, plural_label)
+    return fmt(
+        v,
+        precision=precision,
+        commas=commas,
+        suffix=glyph + suffix,
+        approx=approx,
+        lower_bound=lower_bound,
+    )
+
+
+def _fmt_scaled_count_quantity(
+    value,
+    *,
+    unit,
+    scale,
+    precision,
+    commas,
+    what,
+    scale_style="symbol",
+    attributive=False,
+    approx=False,
+    lower_bound=False,
+):
+    raw_v = _numeric_magnitude(value.to(unit) if isinstance(value, ureg.Quantity) else value)
+    _validate_count_value(raw_v, allow_fractional=False, require_integer=True)
+    scale = _auto_decimal_scale(raw_v) if scale == "auto" else scale
+    divisor, glyph = _resolve_decimal_scale(
+        scale,
+        what=f"{what} scale",
+        style=scale_style,
+        attributive=attributive,
+    )
+    v = raw_v / divisor
+    p = _resolve_scaled_count_precision(v, precision)
+    return fmt(
+        v,
+        precision=p,
+        commas=commas,
+        suffix=glyph,
+        approx=approx,
+        lower_bound=lower_bound,
+    )
+
+
+def fmt_params(
+    parameters,
+    *,
+    scale="auto",
+    precision=None,
+    commas=False,
+    scale_style="symbol",
+    attributive=False,
+    approx=False,
+    lower_bound=False,
+):
+    """Format model-parameter counts as checked count quantities.
+
+    Accepts a Pint ``param``/``count`` quantity or a raw parameter count. The
+    default auto-scales to compact model-size strings such as ``175B`` and
+    ``150M`` while preserving decimals when needed, such as ``1.5B``. Pass an
+    explicit scale when a comparison needs a fixed denominator, e.g.
+    ``scale="B"`` to render ``150M`` as ``0.15B``.
+    """
+    from .core.units import param
+
+    return _fmt_scaled_count_quantity(
+        parameters,
+        unit=param,
+        scale=scale,
+        precision=precision,
+        commas=commas,
+        what="fmt_params",
+        scale_style=scale_style,
+        attributive=attributive,
+        approx=approx,
+        lower_bound=lower_bound,
+    )
+
+
+def fmt_tokens(
+    tokens,
+    *,
+    scale=None,
+    precision=None,
+    commas=True,
+    scale_style="symbol",
+    attributive=False,
+    approx=False,
+    lower_bound=False,
+):
+    """Format token counts as checked count quantities."""
+    from .core.units import count
+
+    return _fmt_scaled_count_quantity(
+        tokens,
+        unit=count,
+        scale=scale,
+        precision=precision,
+        commas=commas,
+        what="fmt_tokens",
+        scale_style=scale_style,
+        attributive=attributive,
+        approx=approx,
+        lower_bound=lower_bound,
+    )
+
+
+_RATE_UNITS = {
+    "QPS", "FPS", "tokens/s", "tokens/hour", "img/s", "images/s", "req/s",
+    "requests/s", "samples/s", "samples/hour",
+}
+
+
+def fmt_rate(
+    value,
+    unit,
+    *,
+    precision=0,
+    commas=True,
+    scale=None,
+    approx=False,
+    lower_bound=False,
+    allow_negative=False,
+):
+    """Format a non-physical count throughput such as QPS or tokens/s.
+
+    Physical rates (``GB/s``, ``TFLOP/s``, ``W``) remain ``fmt_qty`` values.
+    This helper is for named service/data rates whose numerator is a counted
+    event rather than a Pint physical unit. ``scale=`` accepts the same checked
+    decimal scales as ``fmt_count``.
+    """
+    unit = _clean_text_atom(unit, what="rate unit")
+    if unit not in _RATE_UNITS:
+        raise ValueError(
+            f"fmt_rate unit must be one of {sorted(_RATE_UNITS)}, got {unit!r}."
+        )
+    v = _numeric_magnitude(value)
+    if v < 0 and not allow_negative:
+        raise ValueError(
+            f"fmt_rate expects a non-negative rate, got {v}. Pass "
+            f"allow_negative=True if a signed rate is genuinely intended."
+        )
+    scale_suffix = ""
+    if scale is not None:
+        divisor, scale_suffix = _resolve_decimal_scale(
+            scale,
+            what="fmt_rate scale",
+        )
+        v = v / divisor
+    return fmt(
+        v,
+        precision=precision,
+        commas=commas,
+        suffix=f"{scale_suffix} {unit}",
+        approx=approx,
+        lower_bound=lower_bound,
+    )
+
+
+def fmt_ratio(value, precision=1, commas=False, allow_negative=False):
+    """
+    Format a **dimensionless ratio** as a bare number (no unit, no glyph).
+
+    For quantities that are conceptually a quotient of like things —
+    arithmetic intensity (FLOP/byte), compression ratio, overcommit ratio,
+    speedup expressed as a plain ratio rather than a "×" multiplier. Naming
+    the kind at the call site makes intent explicit and, unlike ``fmt()``,
+    ``fmt_ratio`` accepts **no** ``prefix=``/``suffix=`` — a ratio is unitless
+    by definition, so decoration is a sign the wrong helper was chosen
+    (use ``fmt_qty`` for a dimensioned value, ``fmt_multiple`` for a "×"
+    factor, ``fmt_percent`` for a share).
+
+        intensity_str = fmt_ratio(5.0, precision=0)     # "5"    (FLOP/byte)
+        compression_str = fmt_ratio(3.2)                # "3.2"
+
+    Guards: finite (inherited) and non-negative by default — a negative ratio
+    of magnitudes usually signals a sign bug; pass ``allow_negative=True`` for
+    the rare signed ratio.
+    """
+    v = _dimensionless_magnitude(value, what="ratio")
+    if v < 0 and not allow_negative:
+        raise ValueError(
+            f"fmt_ratio expects a non-negative ratio, got {v}. Pass "
+            f"allow_negative=True if a signed ratio is genuinely intended."
+        )
+    return fmt(v, precision=precision, commas=commas)
+
+
+def fmt_range(lo, hi, *, precision=1, commas=True, unit="", kind="number"):
+    """
+    Format an inclusive range ``lo–hi`` using an **en-dash** (MIT Press style).
+
+    MIT Press house style for ranges (style sheet §ranges): use an en-dash,
+    never a hyphen, and write **both endpoints in full** — ``1992–1993`` not
+    ``1992–93``, ``5–10`` not ``5-10``. This helper owns the en-dash so authors
+    never type ``-`` or ``--`` between two values, and applies the chosen
+    value-kind formatter to each endpoint so the unit/symbol is consistent.
+
+        fmt_range(5, 10, precision=0)                       # "5–10"
+        fmt_range(5, 10, precision=0, unit="GB")            # "5–10 GB"
+        fmt_range(1992, 1993, precision=0, commas=False)    # "1992–1993"
+        fmt_range(0.10, 0.50, kind="usd", precision=2)      # "\\$0.10–\\$0.50"
+        fmt_range(2, 4, precision=0, unit="percent")        # "2–4 percent"
+
+    ``kind`` selects the per-endpoint formatter: ``"number"`` (default, via
+    ``fmt``) or ``"usd"`` (via ``fmt_usd`` — each endpoint carries ``\\$``). For
+    a percent range, format the display scalars as numbers with
+    ``unit="percent"`` (body) or ``unit="%"`` (table).
+
+    Guards: both endpoints finite; ``hi >= lo`` (an inverted range is almost
+    always a bug); precision/sign guards inherited from the endpoint formatter.
+    """
+    lo_v = _numeric_magnitude(lo)
+    hi_v = _numeric_magnitude(hi)
+    if hi_v < lo_v:
+        raise ValueError(
+            f"fmt_range expects hi >= lo, got lo={lo_v}, hi={hi_v}. An inverted "
+            f"range is almost always a bug; swap the endpoints at the source."
+        )
+    if kind == "usd":
+        a = fmt_usd(lo, precision=precision, commas=commas)
+        b = fmt_usd(hi, precision=precision, commas=commas)
+    elif kind == "number":
+        a = fmt(lo, precision=precision, commas=commas)
+        b = fmt(hi, precision=precision, commas=commas)
+    else:
+        raise ValueError(
+            f"fmt_range kind must be 'number' or 'usd', got {kind!r}. For a "
+            f"percent range, use kind='number' with unit='percent'/'%'."
+        )
+    tail = f" {unit}" if unit else ""
+    return MarkdownStr(f"{a}\u2013{b}{tail}")
+
+
+def fmt_qty_range(
+    lo,
+    hi,
+    display_unit=None,
+    *,
+    unit=None,
+    precision=None,
+    commas=False,
+    unit_label=None,
+    per=None,
+):
+    """Format a range of Pint quantities with one canonical unit suffix."""
+    if not isinstance(lo, ureg.Quantity) or not isinstance(hi, ureg.Quantity):
+        raise TypeError(
+            "fmt_qty_range() requires Pint Quantity endpoints. Keep units "
+            "attached until formatting."
+        )
+    display_unit = _resolve_unit_arg(display_unit, unit, what="fmt_qty_range")
+    lo_v = _numeric_magnitude(lo.to(display_unit))
+    hi_v = _numeric_magnitude(hi.to(display_unit))
+    if hi_v < lo_v:
+        raise ValueError(
+            f"fmt_qty_range expects hi >= lo, got lo={lo_v}, hi={hi_v}."
+        )
+    lo_p, hi_p = _range_endpoint_precisions(
+        lo_v, hi_v, precision, what="fmt_qty_range precision"
+    )
+    a = fmt(lo_v, precision=lo_p, commas=commas)
+    b = fmt(hi_v, precision=hi_p, commas=commas)
+    suffix = _quantity_suffix(display_unit, unit_label=unit_label, per=per)
+    return MarkdownStr(f"{a}\u2013{b}{suffix}")
+
+
+def fmt_sci_qty(
+    quantity,
+    display_unit=None,
+    *,
+    unit=None,
+    precision=2,
+    unit_label=None,
+    per=None,
+):
+    """Format a Pint quantity in scientific notation with a checked unit suffix."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError(
+            "fmt_sci_qty() requires a Pint Quantity. Keep units attached at "
+            "the call site, e.g. fmt_sci_qty(ops, flop), not "
+            "fmt_sci_qty(ops.magnitude, flop)."
+        )
+    display_unit = _resolve_unit_arg(display_unit, unit, what="fmt_sci_qty")
+    q = quantity.to(display_unit)
+    body = fmt_sci(q.magnitude, precision=precision)
+    suffix = _quantity_suffix(display_unit, unit_label=unit_label, per=per)
+    return MarkdownStr(f"{body}{suffix}")
+
+
+def fmt_sci_flops(quantity, *, unit=None, precision=2):
+    """Format FLOP work/count quantities in scientific notation.
+
+    QMD code should not spell ``unit_label="FLOPs"`` at each call site. This
+    helper keeps the Pint conversion checked while centralizing the prose
+    convention that scalar floating-point operation counts are rendered as
+    plural ``FLOPs`` in scientific notation.
+    """
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_sci_flops() requires a Pint Quantity.")
+    from .core.units import flop
+
+    display_unit = _coerce_unit(unit) if unit is not None else flop
+    return fmt_sci_qty(
+        quantity,
+        display_unit,
+        precision=precision,
+        unit_label="FLOPs",
+    )
+
+
+def fmt_time_range(
+    lo,
+    hi,
+    display_unit=None,
+    *,
+    unit=None,
+    precision=None,
+    commas=False,
+    style="symbol",
+):
+    """Format a duration range with time-unit validation."""
+    display_unit = _resolve_unit_arg(display_unit, unit, what="fmt_time_range")
+    one = 1 * display_unit
+    if not one.check("[time]"):
+        raise ValueError(
+            f"fmt_time_range display_unit must be a time unit, got {display_unit}."
+        )
+    lo_q = lo if isinstance(lo, ureg.Quantity) else lo * display_unit
+    hi_q = hi if isinstance(hi, ureg.Quantity) else hi * display_unit
+    if style == "symbol":
+        return fmt_qty_range(
+            lo_q,
+            hi_q,
+            display_unit,
+            precision=precision,
+            commas=commas,
+        )
+    if style != "word":
+        raise ValueError(
+            f"fmt_time_range style must be 'symbol' or 'word', got {style!r}."
+        )
+    lo_v = _numeric_magnitude(lo_q.to(display_unit))
+    hi_v = _numeric_magnitude(hi_q.to(display_unit))
+    if hi_v < lo_v:
+        raise ValueError(
+            f"fmt_time_range expects hi >= lo, got lo={lo_v}, hi={hi_v}."
+        )
+    lo_p, hi_p = _range_endpoint_precisions(
+        lo_v, hi_v, precision, what="fmt_time_range precision"
+    )
+    a = fmt(lo_v, precision=lo_p, commas=commas)
+    b = fmt(hi_v, precision=hi_p, commas=commas)
+    label_value = (
+        1 if abs(lo_v - 1) <= 1e-9 and abs(hi_v - 1) <= 1e-9 else 2
+    )
+    suffix = _time_word_suffix(label_value, display_unit)
+    return MarkdownStr(f"{a}\u2013{b}{suffix}")
+
+
+def fmt_count_range(
+    lo,
+    hi,
+    *,
+    scale=None,
+    precision=0,
+    commas=True,
+    label=None,
+    plural_label=None,
+    allow_fractional=False,
+):
+    """Format a range of counts with optional scale and count noun."""
+    lo_raw = _numeric_magnitude(lo)
+    hi_raw = _numeric_magnitude(hi)
+    require_integer = label is not None or plural_label is not None
+    _validate_count_value(
+        lo_raw,
+        allow_fractional=allow_fractional,
+        require_integer=require_integer,
+    )
+    _validate_count_value(
+        hi_raw,
+        allow_fractional=allow_fractional,
+        require_integer=require_integer,
+    )
+    if hi_raw < lo_raw:
+        raise ValueError(
+            f"fmt_count_range expects hi >= lo, got lo={lo_raw}, hi={hi_raw}."
+        )
+    lo_count = lo_raw
+    hi_count = hi_raw
+    glyph = ""
+    if scale is not None:
+        divisor, glyph = _resolve_decimal_scale(
+            scale,
+            what="fmt_count_range scale",
+        )
+        lo_raw = lo_raw / divisor
+        hi_raw = hi_raw / divisor
+    a = fmt(lo_raw, precision=precision, commas=commas)
+    b = fmt(hi_raw, precision=precision, commas=commas)
+    suffix = ""
+    if label is not None or plural_label is not None:
+        label_value = (
+            1 if abs(lo_count - 1) <= 1e-9 and abs(hi_count - 1) <= 1e-9
+            else 2
+        )
+        suffix = _label_suffix(label_value, label, plural_label)
+    return MarkdownStr(f"{a}{glyph}\u2013{b}{glyph}{suffix}")
+
+
+def fmt_usd_range(
+    lo,
+    hi,
+    *,
+    precision=0,
+    commas=True,
+    scale=None,
+    per=None,
+    approx=False,
+    repeat_symbol=True,
+):
+    """Format a currency range with optional scale and one denominator."""
+    from .core.units import USD
+
+    if isinstance(lo, ureg.Quantity):
+        lo = lo.m_as(USD)
+    if isinstance(hi, ureg.Quantity):
+        hi = hi.m_as(USD)
+    lo_v = _numeric_magnitude(lo)
+    hi_v = _numeric_magnitude(hi)
+    if hi_v < lo_v:
+        raise ValueError(
+            f"fmt_usd_range expects hi >= lo, got lo={lo_v}, hi={hi_v}."
+        )
+    a = fmt_usd(
+        lo_v,
+        precision=precision,
+        commas=commas,
+        scale=scale,
+        approx=approx,
+    )
+    if repeat_symbol:
+        b = fmt_usd(hi_v, precision=precision, commas=commas, scale=scale)
+    else:
+        hi_display = hi_v
+        suffix = ""
+        if scale is not None:
+            divisor, scale_suffix = _resolve_decimal_scale(
+                scale,
+                what="fmt_usd_range scale",
+            )
+            hi_display = hi_display / divisor
+            suffix = scale_suffix
+        if precision == 0:
+            b = fmt_int(hi_display, commas=commas, suffix=suffix)
+        else:
+            b = fmt(
+                hi_display,
+                precision=precision,
+                commas=commas,
+                suffix=suffix,
+            )
+    suffix = _denominator_suffix(
+        per,
+        what="fmt_usd_range per",
+        allowed=_USD_DENOMINATORS,
+    )
+    return MarkdownStr(f"{a}\u2013{b}{suffix}")
 
 
 def fmt_sci(val, precision=2):
@@ -301,6 +1486,7 @@ def fmt_sci(val, precision=2):
 
     if isinstance(val, ureg.Quantity):
         val = val.magnitude
+    _require_finite(float(val), "scientific value")
     s = f"{val:.{precision}e}"
     base, exp = s.split("e")
     exp_int = int(exp)
@@ -315,6 +1501,7 @@ def sci_latex(val, precision=2):
     """
     if isinstance(val, ureg.Quantity):
         val = val.magnitude
+    _require_finite(float(val), "scientific value")
     s = f"{val:.{precision}e}"
     base, exp = s.split('e')
     exp_int = int(exp)
@@ -336,6 +1523,33 @@ def fmt_frac(numerator, denominator, result=None, unit=None):
     return out
 
 
+_UNIT_LABEL_NORMALIZATION = {
+    "KFLOPs": "KFLOP",
+    "MFLOPs": "MFLOP",
+    "GFLOPs": "GFLOP",
+    "TFLOPs": "TFLOP",
+    "PFLOPs": "PFLOP",
+    "EFLOPs": "EFLOP",
+    "ZFLOPs": "ZFLOP",
+    "KFLOPs/s": "KFLOP/s",
+    "MFLOPs/s": "MFLOP/s",
+    "GFLOPs/s": "GFLOP/s",
+    "TFLOPs/s": "TFLOP/s",
+    "PFLOPs/s": "PFLOP/s",
+    "EFLOPs/s": "EFLOP/s",
+    "ZFLOPs/s": "ZFLOP/s",
+    "Gbps": "Gb/s",
+    "Mbit/s": "Mb/s",
+    "Gbit/s": "Gb/s",
+    "Tbit/s": "Tb/s",
+    "B": "bytes",
+    "flop/B": "FLOP/byte",
+    "pJ/B": "pJ/byte",
+    "pJ/flop": "pJ/FLOP",
+    "µs": "μs",
+}
+
+
 def _compact_unit_suffix(display_unit) -> str:
     """Derive a leading-space compact unit label from a pint display unit."""
     # Currency is not a fmt_qty value-kind. It must go through fmt_usd(), which
@@ -349,42 +1563,821 @@ def _compact_unit_suffix(display_unit) -> str:
             "See .claude/rules/numbers-and-math-in-prose.md §4."
         )
     try:
-        one = 1 * display_unit
-        formatted = f"{one:~P}"
+        label = f"{_coerce_unit(display_unit):~P}"
     except Exception:
-        return f" {display_unit}"
-    parts = formatted.split(None, 1)
-    if len(parts) == 2:
-        return f" {parts[1]}"
-    return f" {display_unit}"
+        label = f"{display_unit}"
+    label = _UNIT_LABEL_NORMALIZATION.get(label, label.replace("µs", "μs"))
+    return f" {label}"
+
+
+def _quantity_suffix(display_unit, *, unit_label=None, per=None, extra_suffix=""):
+    """Build the checked unit suffix shared by quantity formatters."""
+    if extra_suffix and per is not None:
+        raise ValueError("Use extra_suffix= or structured per=, not both.")
+    unit_suffix = _compact_unit_suffix(display_unit)
+    if unit_label is not None:
+        unit_suffix = f" {_clean_text_atom(unit_label, what='fmt_qty unit_label')}"
+    return (
+        unit_suffix
+        + _denominator_suffix(per, what="per")
+        + extra_suffix
+    )
 
 
 def fmt_qty(
     quantity,
-    display_unit,
+    display_unit=None,
     *,
+    unit=None,
     precision=1,
     commas=False,
     prefix="",
     extra_suffix="",
+    unit_label=None,
+    per=None,
+    approx=False,
+    lower_bound=False,
 ):
     """Format a pint Quantity in ``display_unit`` with a canonical unit suffix.
 
-    Required output path for physical quantities in generated examples.
+    Required OUTPUT path for physical quantities in LEGO cells.
+    The value must remain a Pint Quantity until this function so the formatter
+    can dimension-check the conversion before delegating to ``fmt``.
     """
-    if isinstance(quantity, ureg.Quantity):
-        q = quantity.to(display_unit)
-        val = q.magnitude
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError(
+            "fmt_qty() requires a Pint Quantity. Keep units attached at the "
+            "call site, e.g. fmt_qty(bw, GB/second), not "
+            "fmt_qty(bw.m_as(GB/second), GB/second)."
+        )
+    display_unit = _resolve_unit_arg(display_unit, unit, what="fmt_qty")
+    q = quantity.to(display_unit)
+    val = q.magnitude
+    suffix = _quantity_suffix(
+        display_unit,
+        unit_label=unit_label,
+        per=per,
+        extra_suffix=extra_suffix,
+    )
+    return fmt(
+        val,
+        precision=precision,
+        commas=commas,
+        prefix=prefix,
+        suffix=suffix,
+        approx=approx,
+        lower_bound=lower_bound,
+    )
+
+
+def fmt_magnitude(
+    quantity,
+    display_unit=None,
+    *,
+    unit=None,
+    precision=1,
+    commas=False,
+    prefix="",
+    suffix="",
+    approx=False,
+    lower_bound=False,
+):
+    """Format a Pint quantity's magnitude in an explicit unit, without a suffix.
+
+    This is the sanctioned scalar boundary for algebraic displays where the
+    surrounding equation, table header, or variable name carries the unit.
+    It keeps the Pint conversion inside ``mlsysim.fmt`` while intentionally
+    rendering only the numeric magnitude. For prose-facing closed outputs,
+    prefer ``fmt_qty`` or a domain formatter so the unit is rendered with the
+    value.
+    """
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError(
+            "fmt_magnitude() requires a Pint Quantity. Use fmt()/fmt_count() "
+            "only for values that are already intentionally dimensionless."
+        )
+    display_unit = _resolve_unit_arg(display_unit, unit, what="fmt_magnitude")
+    q = quantity.to(display_unit)
+    return fmt(
+        q.magnitude,
+        precision=precision,
+        commas=commas,
+        prefix=prefix,
+        suffix=suffix,
+        approx=approx,
+        lower_bound=lower_bound,
+    )
+
+
+def fmt_qty_int(
+    quantity,
+    display_unit=None,
+    *,
+    unit=None,
+    commas=True,
+    prefix="",
+    extra_suffix="",
+    unit_label=None,
+    per=None,
+    approx=False,
+    lower_bound=False,
+):
+    """Format a Pint Quantity as a rounded integer with a checked unit suffix.
+
+    Use this only when rounded integer display is the editorial intent. For
+    exact integer quantities, prefer ``fmt_qty(..., precision=0)`` because it
+    rejects fractional values instead of rounding them.
+    """
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError(
+            "fmt_qty_int() requires a Pint Quantity. Keep units attached at "
+            "the call site, e.g. fmt_qty_int(memory, GB), not "
+            "fmt_qty_int(memory.m_as(GB), GB)."
+        )
+    display_unit = _resolve_unit_arg(display_unit, unit, what="fmt_qty_int")
+    q = quantity.to(display_unit)
+    suffix = _quantity_suffix(
+        display_unit,
+        unit_label=unit_label,
+        per=per,
+        extra_suffix=extra_suffix,
+    )
+    return fmt_int(
+        q.magnitude,
+        commas=commas,
+        prefix=prefix,
+        suffix=suffix,
+        approx=approx,
+        lower_bound=lower_bound,
+    )
+
+
+_TIME_WORDS = {
+    "nanosecond": ("nanosecond", "nanoseconds"),
+    "ns": ("nanosecond", "nanoseconds"),
+    "NS": ("nanosecond", "nanoseconds"),
+    "microsecond": ("microsecond", "microseconds"),
+    "us": ("microsecond", "microseconds"),
+    "µs": ("microsecond", "microseconds"),
+    "μs": ("microsecond", "microseconds"),
+    "US": ("microsecond", "microseconds"),
+    "millisecond": ("millisecond", "milliseconds"),
+    "ms": ("millisecond", "milliseconds"),
+    "MS": ("millisecond", "milliseconds"),
+    "second": ("second", "seconds"),
+    "s": ("second", "seconds"),
+    "minute": ("minute", "minutes"),
+    "min": ("minute", "minutes"),
+    "hour": ("hour", "hours"),
+    "h": ("hour", "hours"),
+    "day": ("day", "days"),
+    "d": ("day", "days"),
+    "week": ("week", "weeks"),
+    "month": ("month", "months"),
+    "year": ("year", "years"),
+    "a": ("year", "years"),
+}
+
+
+_TIME_MARKERS = {"+": "trailing plus marker"}
+
+
+def _time_word_suffix(value, display_unit, per=None) -> str:
+    """Return a leading-space time-unit word suffix with plural agreement."""
+    key = str(display_unit)
+    if key not in _TIME_WORDS:
+        raise ValueError(
+            f"fmt_time style='word' does not know a word label for {key!r}."
+        )
+    singular, plural = _TIME_WORDS[key]
+    word = singular if abs(value - 1) <= 1e-9 else plural
+    return f" {word}{_denominator_suffix(per, what='per')}"
+
+
+def _time_attributive_suffix(display_unit) -> str:
+    """Return a hyphenated singular time-unit suffix for noun modifiers."""
+    key = str(display_unit)
+    if key not in _TIME_WORDS:
+        raise ValueError(
+            f"fmt_time attributive=True does not know a word label for {key!r}."
+        )
+    singular, _ = _TIME_WORDS[key]
+    return f"-{singular}"
+
+
+def fmt_time(
+    duration,
+    display_unit=None,
+    *,
+    unit=None,
+    precision=1,
+    commas=False,
+    style="symbol",
+    attributive=False,
+    per=None,
+    marker="",
+    approx=False,
+    lower_bound=False,
+    allow_negative=False,
+):
+    """Format a duration with time-specific checks and defaults.
+
+    ``fmt_qty`` remains the generic physical-quantity formatter. ``fmt_time``
+    exists because durations are common enough to deserve stricter semantics:
+    the display unit must be a Pint time unit, values are non-negative by
+    default, and comma grouping defaults off.
+
+    ``style="symbol"`` renders compact unit symbols such as ``35 ms``.
+    ``style="word"`` renders prose words with singular/plural agreement such
+    as ``1 second`` and ``2 seconds``.
+    ``attributive=True`` with ``style="word"`` renders a hyphenated singular
+    noun modifier such as ``10-minute`` or ``100,000-hour``.
+    ``marker="+"`` appends a checked trailing plus to compact values such as
+    ``100 ms+``.
+
+    Plain numbers are accepted only because the display unit is explicit:
+    ``fmt_time(35, second)`` means "35 seconds" and still validates that
+    ``second`` is a time unit.
+    """
+    display_unit = _resolve_unit_arg(display_unit, unit, what="fmt_time")
+    one = 1 * display_unit
+    if not one.check("[time]"):
+        raise ValueError(
+            f"fmt_time display_unit must be a time unit, got {display_unit}."
+        )
+    if style not in {"symbol", "word"}:
+        raise ValueError(
+            f"fmt_time style must be 'symbol' or 'word', got {style!r}."
+        )
+    if attributive and style != "word":
+        raise ValueError("fmt_time attributive=True requires style='word'.")
+    if attributive and per is not None:
+        raise ValueError("fmt_time attributive=True cannot be combined with per=.")
+    if marker and marker not in _TIME_MARKERS:
+        raise ValueError(
+            f"fmt_time marker must be one of {sorted(_TIME_MARKERS)}, got {marker!r}."
+        )
+    if marker and style != "symbol":
+        raise ValueError("fmt_time marker= is only supported with style='symbol'.")
+    if marker and (attributive or per is not None):
+        raise ValueError("fmt_time marker= cannot be combined with attributive=True or per=.")
+    q = duration if isinstance(duration, ureg.Quantity) else duration * display_unit
+    val = _numeric_magnitude(q.to(display_unit))
+    if val < 0 and not allow_negative:
+        raise ValueError(
+            f"fmt_time expects a non-negative duration, got {val}. Pass "
+            f"allow_negative=True if a signed duration is genuinely intended."
+        )
+    if attributive:
+        return fmt(
+            val,
+            precision=precision,
+            commas=commas,
+            suffix=_time_attributive_suffix(display_unit),
+            approx=approx,
+            lower_bound=lower_bound,
+        )
+    if style == "word":
+        return fmt(
+            val,
+            precision=precision,
+            commas=commas,
+            suffix=_time_word_suffix(val, display_unit, per),
+            approx=approx,
+            lower_bound=lower_bound,
+        )
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=precision,
+        commas=commas,
+        per=per,
+        extra_suffix=marker,
+        approx=approx,
+        lower_bound=lower_bound,
+    )
+
+
+def _pick_memory_unit(qty, *, binary=False):
+    from .core.units import GB, GiB, KB, KiB, MB, MiB, PB, TB, TiB, byte
+
+    q = qty.to(byte)
+    mag = abs(q.magnitude)
+    if binary:
+        if mag < 1024 ** 2:
+            return KiB
+        if mag < 1024 ** 3:
+            return MiB
+        if mag < 1024 ** 4:
+            return GiB
+        return TiB
+    if mag < 1e6:
+        return KB
+    if mag < 1e9:
+        return MB
+    if mag < 1e12:
+        return GB
+    if mag < 1e15:
+        return TB
+    return PB
+
+
+def _pick_bandwidth_unit(qty):
+    from .core.units import GB, MB, TB, byte, second
+
+    q = qty.to(byte / second)
+    mag = abs(q.magnitude)
+    if mag < 1e9:
+        return MB / second
+    if mag < 1e12:
+        return GB / second
+    return TB / second
+
+
+def _pick_flop_rate_unit(qty):
+    from .core.units import EFLOP, GFLOP, PFLOP, TFLOP, ZFLOP, second
+
+    q = qty.to(GFLOP / second)
+    mag = abs(q.magnitude)
+    if mag < 1e3:
+        return GFLOP / second
+    tflops = q.to(TFLOP / second).magnitude
+    if abs(tflops) < 1e3:
+        return TFLOP / second
+    pflops = q.to(PFLOP / second).magnitude
+    if abs(pflops) < 1e3:
+        return PFLOP / second
+    eflops = q.to(EFLOP / second).magnitude
+    if abs(eflops) < 1e3:
+        return EFLOP / second
+    return ZFLOP / second
+
+
+def _pick_flops_unit(qty):
+    from .core.units import EFLOP, GFLOP, KFLOP, MFLOP, PFLOP, TFLOP, ZFLOP, flop
+
+    q = qty.to(flop)
+    mag = abs(q.magnitude)
+    if mag < 1e6:
+        return KFLOP
+    if mag < 1e9:
+        return MFLOP
+    if mag < 1e12:
+        return GFLOP
+    if mag < 1e15:
+        return TFLOP
+    if mag < 1e18:
+        return PFLOP
+    if mag < 1e21:
+        return EFLOP
+    return ZFLOP
+
+
+def _pick_ops_rate_unit(qty):
+    from .core.units import GOPS, KOPS, MOPS, OPS, TOPS
+
+    q = qty.to(OPS)
+    mag = abs(q.magnitude)
+    if mag < 1e3:
+        return OPS
+    if mag < 1e6:
+        return KOPS
+    if mag < 1e9:
+        return MOPS
+    if mag < 1e12:
+        return GOPS
+    return TOPS
+
+
+def _pick_power_unit(qty):
+    from .core.units import GW, MW, kilowatt, watt
+
+    q = qty.to(watt)
+    mag = abs(q.magnitude)
+    if mag >= 1e9:
+        return GW
+    if mag >= 1e6:
+        return MW
+    if mag >= 1e3:
+        return kilowatt
+    return watt
+
+
+def _pick_energy_unit(qty):
+    from .core.units import GWh, MWh, Wh, joule, kWh
+
+    q = qty.to(joule)
+    mag = abs(q.magnitude)
+    if mag < 3600:
+        return joule
+    wh = q.to(Wh).magnitude
+    if wh < 1e3:
+        return Wh
+    kwh = q.to(kWh).magnitude
+    if kwh < 1e3:
+        return kWh
+    mwh = q.to(MWh).magnitude
+    if mwh < 1e3:
+        return MWh
+    return GWh
+
+
+def _pick_emissions_unit(qty):
+    from .core.units import gram, kilogram, metric_ton
+
+    q = qty.to(gram)
+    mag = abs(q.magnitude)
+    if mag < 1e3:
+        return gram
+    kg = q.to(kilogram).magnitude
+    if kg < 1e3:
+        return kilogram
+    return metric_ton
+
+
+def _pick_carbon_intensity_unit(qty):
+    from .core.units import gram, kWh
+
+    # Grid intensities are normally communicated as g/kWh. Callers
+    # can force kg/kWh when prose needs that convention.
+    qty.to(gram / kWh)
+    return gram / kWh
+
+
+def _pick_latency_unit(qty):
+    from .core.units import hour, microsecond, millisecond, minute, nanosecond, second
+
+    q = qty.to(second)
+    mag = abs(q.magnitude)
+    if mag < 1e-6:
+        return nanosecond
+    if mag < 1e-3:
+        return microsecond
+    if mag < 1:
+        return millisecond
+    if mag < 60:
+        return second
+    if mag < 3600:
+        return minute
+    return hour
+
+
+def fmt_power(quantity, *, unit=None, precision=None, commas=False):
+    """Auto-scale power quantities for prose (W, kW, MW, GW)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_power() requires a Pint Quantity.")
+    display_unit = _coerce_unit(unit) if unit is not None else _pick_power_unit(quantity)
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas)
+
+
+def fmt_energy(quantity, *, unit=None, precision=None, commas=False):
+    """Auto-scale energy quantities for prose (J, Wh, kWh, MWh, GWh)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_energy() requires a Pint Quantity.")
+    display_unit = _coerce_unit(unit) if unit is not None else _pick_energy_unit(quantity)
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas)
+
+
+def fmt_bandwidth(quantity, *, unit=None, precision=None, commas=False):
+    """Auto-scale bandwidth for prose (MB/s, GB/s, TB/s)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_bandwidth() requires a Pint Quantity.")
+    display_unit = (
+        _coerce_unit(unit) if unit is not None else _pick_bandwidth_unit(quantity)
+    )
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas)
+
+
+def fmt_flop_rate(quantity, *, unit=None, precision=None, commas=False):
+    """Auto-scale FLOP throughput for prose (GFLOP/s through ZFLOP/s)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_flop_rate() requires a Pint Quantity.")
+    display_unit = (
+        _coerce_unit(unit) if unit is not None else _pick_flop_rate_unit(quantity)
+    )
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas)
+
+
+def fmt_flops(quantity, *, unit=None, precision=None, commas=False, per=None):
+    """Auto-scale FLOP work/count quantities for prose (KFLOP through ZFLOP)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_flops() requires a Pint Quantity.")
+    display_unit = _coerce_unit(unit) if unit is not None else _pick_flops_unit(quantity)
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, per=per)
+
+
+def fmt_arithmetic_intensity(quantity, *, unit=None, precision=None, commas=False):
+    """Format arithmetic intensity quantities as FLOP/byte."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_arithmetic_intensity() requires a Pint Quantity.")
+    from .core.units import byte, flop
+
+    display_unit = _coerce_unit(unit) if unit is not None else flop / byte
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas)
+
+
+def fmt_ops_rate(quantity, *, unit=None, precision=None, commas=False):
+    """Auto-scale non-FLOP operation rates for prose (OPS through TOPS)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_ops_rate() requires a Pint Quantity.")
+    display_unit = _coerce_unit(unit) if unit is not None else _pick_ops_rate_unit(quantity)
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas)
+
+
+def fmt_decibel(quantity, *, unit=None, precision=None, commas=False):
+    """Format logarithmic level quantities as dB."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_decibel() requires a Pint Quantity.")
+    display_unit = _coerce_unit(unit) if unit is not None else ureg.decibel
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, unit_label="dB")
+
+
+def fmt_illuminance(quantity, *, unit=None, precision=None, commas=False):
+    """Format illuminance quantities with the prose label ``lux``."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_illuminance() requires a Pint Quantity.")
+    display_unit = _coerce_unit(unit) if unit is not None else ureg.lux
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, unit_label="lux")
+
+
+def fmt_temperature(quantity, *, unit=None, precision=None, commas=False):
+    """Format absolute temperatures, defaulting to degrees Celsius."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_temperature() requires a Pint Quantity.")
+    display_unit = _coerce_unit(unit) if unit is not None else ureg.degC
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, unit_label="°C")
+
+
+def fmt_temperature_rate(quantity, *, unit=None, precision=None, commas=False):
+    """Format temperature-change rates, defaulting to degrees Celsius per second."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_temperature_rate() requires a Pint Quantity.")
+    from .core.units import second
+
+    display_unit = (
+        _coerce_unit(unit) if unit is not None else ureg.delta_degC / second
+    )
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, unit_label="°C/s")
+
+
+def fmt_compute_efficiency(quantity, *, unit=None, precision=None, commas=False):
+    """Format accelerator efficiency as FLOP throughput per watt."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_compute_efficiency() requires a Pint Quantity.")
+    from .core.units import TFLOP, second, watt
+
+    display_unit = _coerce_unit(unit) if unit is not None else TFLOP / second / watt
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas)
+
+
+def fmt_energy_per_byte(quantity, *, unit=None, precision=None, commas=False, lower_bound=False):
+    """Format data-movement energy intensity, conventionally as pJ/byte."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_energy_per_byte() requires a Pint Quantity.")
+    from .core.units import byte, pJ
+
+    display_unit = _coerce_unit(unit) if unit is not None else pJ / byte
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, lower_bound=lower_bound)
+
+
+def fmt_energy_per_bit(quantity, *, unit=None, precision=None, commas=False, lower_bound=False):
+    """Format signaling or link energy intensity, conventionally as pJ/bit."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_energy_per_bit() requires a Pint Quantity.")
+    from .core.units import bit, pJ
+
+    display_unit = _coerce_unit(unit) if unit is not None else pJ / bit
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, lower_bound=lower_bound)
+
+
+def fmt_energy_per_flop(quantity, *, unit=None, precision=None, commas=False, lower_bound=False):
+    """Format compute energy intensity, conventionally as pJ/FLOP."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_energy_per_flop() requires a Pint Quantity.")
+    from .core.units import flop, pJ
+
+    display_unit = _coerce_unit(unit) if unit is not None else pJ / flop
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, lower_bound=lower_bound)
+
+
+def fmt_memory(quantity, *, unit=None, precision=None, commas=False, binary=False):
+    """Auto-scale memory sizes for prose."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_memory() requires a Pint Quantity.")
+    display_unit = (
+        _coerce_unit(unit) if unit is not None else _pick_memory_unit(quantity, binary=binary)
+    )
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas)
+
+
+def _memory_capacity_unit_label(display_unit):
+    """Return vendor-style capacity labels for binary memory display units."""
+    from .core.units import GiB, KiB, MiB, TiB
+
+    for binary_unit, label in (
+        (KiB, "KB"),
+        (MiB, "MB"),
+        (GiB, "GB"),
+        (TiB, "TB"),
+    ):
+        try:
+            if abs((1 * display_unit).to(binary_unit).magnitude - 1) < 1e-12:
+                return label
+        except Exception:
+            continue
+    return None
+
+
+def fmt_memory_capacity(quantity, *, unit=None, precision=None, commas=False):
+    """Format branded hardware memory capacities.
+
+    Hardware spec sheets commonly label binary memory capacities with decimal
+    symbols such as ``GB``. The registry keeps the Pint quantity intact (often
+    ``GiB`` for accelerator memory), while this formatter centralizes the vendor
+    display convention: preserve the binary magnitude and render the published
+    capacity label. Use ``fmt_memory`` when physical decimal/binary conversion
+    should be shown literally.
+    """
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_memory_capacity() requires a Pint Quantity.")
+    display_unit = (
+        _coerce_unit(unit) if unit is not None else _pick_memory_unit(quantity, binary=True)
+    )
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        unit_label=_memory_capacity_unit_label(display_unit),
+    )
+
+
+def fmt_emissions(
+    quantity,
+    *,
+    unit=None,
+    precision=None,
+    commas=False,
+    approx=False,
+    lower_bound=False,
+):
+    """Auto-scale carbon mass for prose (g, kg, metric tons)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_emissions() requires a Pint Quantity.")
+    display_unit = (
+        _coerce_unit(unit) if unit is not None else _pick_emissions_unit(quantity)
+    )
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        approx=approx,
+        lower_bound=lower_bound,
+    )
+
+
+def fmt_carbon_intensity(quantity, *, unit=None, precision=None, commas=False):
+    """Format grid carbon intensity quantities (typically g/kWh)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_carbon_intensity() requires a Pint Quantity.")
+    display_unit = (
+        _coerce_unit(unit) if unit is not None else _pick_carbon_intensity_unit(quantity)
+    )
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas)
+
+
+def _water_unit_label(display_unit):
+    from .core.units import L, day, hour, kWh
+
+    known = (
+        (L, "L"),
+        (L / hour, "L/h"),
+        (L / day, "L/day"),
+        (L / kWh, "L/kWh"),
+    )
+    for unit, label in known:
+        try:
+            if abs((1 * display_unit).to(unit).magnitude - 1) < 1e-12:
+                return label
+        except Exception:
+            continue
+    return None
+
+
+def fmt_water(quantity, *, unit=None, precision=None, commas=True):
+    """Format water volume quantities with compact liter labels."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_water() requires a Pint Quantity.")
+    from .core.units import L
+
+    display_unit = _coerce_unit(unit) if unit is not None else L
+    if (1 * display_unit).dimensionality != (1 * L).dimensionality:
+        raise ValueError(f"fmt_water unit must be a volume unit, got {display_unit}.")
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, unit_label=_water_unit_label(display_unit))
+
+
+def fmt_water_rate(quantity, *, unit=None, precision=None, commas=True):
+    """Format water flow rates such as L/h and L/day."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_water_rate() requires a Pint Quantity.")
+    from .core.units import L, day
+
+    display_unit = _coerce_unit(unit) if unit is not None else L / day
+    if (1 * display_unit).dimensionality != (1 * L / day).dimensionality:
+        raise ValueError(f"fmt_water_rate unit must be volume/time, got {display_unit}.")
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, unit_label=_water_unit_label(display_unit))
+
+
+def fmt_water_intensity(quantity, *, unit=None, precision=None, commas=False):
+    """Format water usage effectiveness style quantities such as L/kWh."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_water_intensity() requires a Pint Quantity.")
+    from .core.units import L, kWh
+
+    display_unit = _coerce_unit(unit) if unit is not None else L / kWh
+    if (1 * display_unit).dimensionality != (1 * L / kWh).dimensionality:
+        raise ValueError(f"fmt_water_intensity unit must be volume/energy, got {display_unit}.")
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, unit_label=_water_unit_label(display_unit))
+
+
+def fmt_latency(duration, *, unit=None, precision=None, commas=False):
+    """Auto-scale latency durations for prose (ns … hour)."""
+    if not isinstance(duration, ureg.Quantity):
+        raise TypeError("fmt_latency() requires a Pint Quantity.")
+    display_unit = (
+        _coerce_unit(unit) if unit is not None else _pick_latency_unit(duration)
+    )
+    q = duration.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_time(q, display_unit, precision=p, commas=commas, style="symbol")
+
+
+def assert_qty_close(actual, expected, display_unit, *, rel=1e-9, abs_tol=None, message=""):
+    """Guard helper: compare quantities in display_unit within tolerance."""
+    if not isinstance(actual, ureg.Quantity):
+        raise TypeError("assert_qty_close actual must be a Pint Quantity.")
+    display_unit = _coerce_unit(display_unit)
+    actual_mag = actual.to(display_unit).magnitude
+    if isinstance(expected, ureg.Quantity):
+        expected_mag = expected.to(display_unit).magnitude
     else:
-        val = _numeric_magnitude(quantity)
-    suffix = _compact_unit_suffix(display_unit) + extra_suffix
-    return fmt(val, precision=precision, commas=commas, prefix=prefix, suffix=suffix)
+        expected_mag = _numeric_magnitude(expected)
+    tol = abs_tol if abs_tol is not None else rel * max(abs(expected_mag), 1.0)
+    detail = message or (
+        f"expected {expected_mag} {display_unit}, got {actual_mag} {display_unit}"
+    )
+    check(abs(actual_mag - expected_mag) <= tol, detail)
 
 
 def check(condition, message):
     """
     Invariant guard for narrative logic.
-    Ensures that calculated values support the surrounding analytical claims.
+    Ensures that calculated values support the surrounding narrative claims.
     """
     if not condition:
         raise ValueError(f"Narrative broken: {message}")

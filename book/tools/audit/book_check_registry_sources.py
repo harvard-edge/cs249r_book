@@ -291,12 +291,23 @@ def main() -> int:
         help="QMD files (default: all chapter contents)",
     )
     args = parser.parse_args()
-    paths = args.paths or sorted(CONTENTS.rglob("*.qmd"))
+    paths: list[Path] = []
+    if args.paths:
+        for path in args.paths:
+            p = path if path.is_absolute() else REPO_ROOT / path
+            if p.is_dir():
+                paths.extend(sorted(p.rglob("*.qmd")))
+            elif p.suffix == ".qmd":
+                paths.append(p)
+    else:
+        paths = sorted(CONTENTS.rglob("*.qmd"))
     failures = 0
+    checked = 0
     for path in paths:
         p = path if path.is_absolute() else REPO_ROOT / path
         if not p.exists() or p.suffix != ".qmd":
             continue
+        checked += 1
         issues = check_file(p)
         if issues:
             failures += 1
@@ -306,7 +317,7 @@ def main() -> int:
     if failures:
         print(f"\n{failures} file(s) with registry source violations")
         return 1
-    print(f"OK registry sources ({len(paths)} QMD files checked)")
+    print(f"OK registry sources ({checked} QMD files checked)")
     return 0
 
 

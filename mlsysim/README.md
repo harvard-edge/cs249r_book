@@ -50,7 +50,7 @@
     <tr>
       <td align="center"><b>Layer D</b></td>
       <td><b>Systems & Topology</b><br><code>mlsysim.systems</code></td>
-      <td>Fleet configurations and network fabrics.<br><i>e.g., <code>Systems.Clusters.Frontier_8K</code>, <code>Systems.Fabrics.InfiniBand_NDR</code></i></td>
+      <td>Nodes, racks, fleet configurations, and network fabrics.<br><i>e.g., <code>Systems.Racks.DGX_H100_4Node</code>, <code>Systems.Clusters.Frontier_8K</code></i></td>
     </tr>
     <tr>
       <td align="center"><b>Layer E</b></td>

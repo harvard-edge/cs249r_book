@@ -22,8 +22,10 @@ Usage:
     ladder(ax, [("HBM",3350),("DRAM",100),("NVMe",7),("SSD",1),("net",0.1)])
     save(fig, "out.png")            # PNG draft; emit PDF/SVG for the real build
 
-Data devices (ladder/knee/sparkline/roofline/ironbar) take their numbers from the
-page's LEGO cell at build time (SSOT) — never hand-typed literals in production.
+Data devices (ladder/knee/sparkline/roofline/ironbar) must be fed by the same
+source of truth as the adjacent prose. New production figures should import or
+derive from MLSysIM/LEGO outputs where practical; legacy hard-coded constants are
+allowed only with an audit note and should be migrated in a later SSOT pass.
 """
 import os
 import matplotlib; matplotlib.use("Agg")
@@ -43,11 +45,14 @@ TIME = "#5E6B73"  # slate — time/latency/rate (a neutral backdrop dimension, n
 #   bytes/sec (bandwidth)→ NET  violet  : interconnect, storage-hierarchy bandwidth
 #   joules/watts (energy)→ COMP orange  : pJ/op, deployment power; compute-intensity
 #   seconds (time)       → TIME slate   : feedback cadence, MTBF
+#   meters (reach)       → NET  violet  : physical interconnect reach / fabric geometry
 # RED is never a domain hue — it stays sacred for danger/limit/selection.
 DOMAIN_COLOR = {
     'memory': MEM, 'capacity': MEM,
     'bandwidth': NET, 'network': NET,
+    'distance': NET, 'reach': NET, 'physical': NET,
     'energy': COMP, 'power': COMP, 'compute': COMP,
+    'data': DATA, 'count': DATA,
     'time': TIME, 'latency': TIME, 'rate': TIME,
 }
 
@@ -66,7 +71,12 @@ def new_fig(device):
     the HTML site and after the Linux SVG->PDF conversion — no fontconfig/Helvetica
     dependency on the build/CI machine (matches the book's vector-figure fidelity)."""
     viz.set_book_style()
-    plt.rcParams.update({'font.size': 5.5, 'axes.grid': False, 'svg.fonttype': 'path'})
+    plt.rcParams.update({
+        'font.size': 5.5,
+        'axes.grid': False,
+        'svg.fonttype': 'path',
+        'svg.hashsalt': 'mlsysbook-margin-figures',
+    })
     fig, ax = plt.subplots(figsize=FIGSIZE.get(device, (1.2, 1.1)), dpi=300)
     return fig, ax
 
@@ -74,6 +84,9 @@ def _clean(ax, keep=()):
     for s in ("top", "right", "left", "bottom"):
         if s not in keep:
             ax.spines[s].set_visible(False)
+        else:
+            ax.spines[s].set_color(GRID)
+            ax.spines[s].set_linewidth(0.55)
     ax.set_xticks([]); ax.set_yticks([])
 
 def save(fig, path, pad=0.02):
@@ -88,7 +101,14 @@ def save(fig, path, pad=0.02):
                             os.sep + "images" + os.sep + "svg" + os.sep)
     svg_path = os.path.splitext(svg_path)[0] + ".svg"
     os.makedirs(os.path.dirname(svg_path), exist_ok=True)
-    fig.savefig(svg_path, format="svg", bbox_inches="tight", facecolor="white", pad_inches=pad)
+    fig.savefig(
+        svg_path,
+        format="svg",
+        bbox_inches="tight",
+        facecolor="white",
+        pad_inches=pad,
+        metadata={"Date": None},
+    )
     with open(svg_path, "r", encoding="utf-8") as f:
         svg = f.read()
     with open(svg_path, "w", encoding="utf-8") as f:
@@ -124,7 +144,7 @@ def ladder(ax, tiers, wall=True, color=None, domain=None, style='bars'):
 
     def _rung(yy, v, left):
         if style == 'lollipop':                          # value as a POSITION on the scale
-            ax.hlines(yy, left, v, color=GRID, lw=1.0); ax.plot(v, yy, "o", color=c, ms=5)
+            ax.hlines(yy, left, v, color=GRID, lw=0.65); ax.plot(v, yy, "o", color=c, ms=4.2)
         else:                                            # 'bars' (separated) / 'staircase' (contiguous)
             ax.barh(yy, v, left=left, height=h, color=c, alpha=0.92)
 
@@ -143,9 +163,9 @@ def ladder(ax, tiers, wall=True, color=None, domain=None, style='bars'):
         for i, (lab, v) in enumerate(tiers):
             yy = n - 1 - i
             _rung(yy, v, xmin)
-            _label(lab, v, yy, (np.log10(v) - np.log10(xmin)) / span, v * 0.92, v * 1.25)
+            _label(lab, v, yy, (np.log10(v) - np.log10(xmin)) / span, v * 0.92, v * 1.55)
         if wall:
-            ax.plot([xmin, xmax], [n - 0.45, n - 0.45], color=RED, lw=1.1)
+            ax.plot([xmin, xmax], [n - 0.45, n - 0.45], color=RED, lw=0.75)
     else:
         xmax = max(vals) * 1.12; pad = 0.015 * xmax
         ax.set_xlim(0, xmax)
@@ -154,7 +174,7 @@ def ladder(ax, tiers, wall=True, color=None, domain=None, style='bars'):
             _rung(yy, v, 0)
             _label(lab, v, yy, v / xmax, v - pad, v + pad)
         if wall:
-            ax.plot([0, xmax], [n - 0.45, n - 0.45], color=RED, lw=1.1)
+            ax.plot([0, xmax], [n - 0.45, n - 0.45], color=RED, lw=0.75)
     _clean(ax, keep=("bottom",))
     ax.tick_params(axis="x", which="both", length=0)  # baseline spine, no tick marks
 
@@ -171,18 +191,18 @@ def knee(ax, knee_frac=0.75, style='shaded', pct_label=None):
     kx = knee_frac * 100; ky = 1 / (1 - knee_frac)
     if style == 'twotone':
         m = r < knee_frac
-        ax.plot(r[m] * 100, lat[m], color=DATA, lw=1.7)      # safe (green)
-        ax.plot(r[~m] * 100, lat[~m], color=RED, lw=1.7)     # danger (red)
+        ax.plot(r[m] * 100, lat[m], color=DATA, lw=1.35)     # safe (green)
+        ax.plot(r[~m] * 100, lat[~m], color=RED, lw=1.35)    # danger (red)
     else:
-        ax.plot(r * 100, lat, color=INK, lw=1.6)
+        ax.plot(r * 100, lat, color=INK, lw=1.35)
         if style == 'dashed':
-            ax.axvline(kx, color=RED, lw=0.9, ls="--")
+            ax.axvline(kx, color=RED, lw=0.65, ls="--")
             ax.text(kx, ky + 5, pct_label or ("%g%%" % kx), fontsize=5.4,
                     color=RED, ha="center", fontweight="bold")
         else:                                                # 'shaded'
             ax.axvspan(kx, 100, color=REDFILL, alpha=0.6)
-        ax.plot(kx, ky, "o", color=RED, ms=4)
-    ax.set_xlim(0, 100); ax.set_ylim(0, 30); _clean(ax, keep=("bottom", "left"))
+        ax.plot(kx, ky, "o", color=RED, ms=3.3)
+    ax.set_xlim(0, 100); ax.set_ylim(0, 36); _clean(ax, keep=("bottom", "left"))
 
 # ── trend → divergence sparkline ───────────────────────────────────────────────
 def sparkline(ax, steep=1.8, threat=True, style='gap', saturating=False, endpoints=None):
@@ -206,21 +226,21 @@ def sparkline(ax, steep=1.8, threat=True, style='gap', saturating=False, endpoin
             a = 0.12 + 0.83 * (1 - np.exp(-3.4 * t)); kx = 0.5   # concave rise → plateau
         else:
             a = 0.1 + 0.85 * t ** 2.2; kx = 0.7                  # convex accelerating
-        ax.axhline(0.12, color=GRID, lw=0.8)             # the baseline it pulls away from
-        ax.plot(t, a, color=INK, lw=1.6)
+        ax.axhline(0.12, color=GRID, lw=0.6)             # the baseline it pulls away from
+        ax.plot(t, a, color=INK, lw=1.35)
         ki = int(kx * (len(t) - 1))
-        ax.plot(t[ki], a[ki], "o", color=fast, ms=4)     # the turning point
+        ax.plot(t[ki], a[ki], "o", color=fast, ms=3.3)   # the turning point
     elif style == 'enddots':
         if endpoints:
             (a0, a1), (b0, b1) = endpoints
             a = a0 + (a1 - a0) * t; b = b0 + (b1 - b0) * t
         else:
             a = 0.1 + 0.85 * t ** steep
-        ax.plot(t, a, color=fast, lw=1.6); ax.plot(t, b, color=MEM, lw=1.6)
-        ax.plot(1, a[-1], "o", color=fast, ms=4); ax.plot(1, b[-1], "o", color=MEM, ms=4)
+        ax.plot(t, a, color=fast, lw=1.35); ax.plot(t, b, color=MEM, lw=1.35)
+        ax.plot(1, a[-1], "o", color=fast, ms=3.3); ax.plot(1, b[-1], "o", color=MEM, ms=3.3)
     else:                                                # 'gap'
         a = 0.1 + 0.85 * t ** steep
-        ax.plot(t, a, color=fast, lw=1.6); ax.plot(t, b, color=MEM, lw=1.6)
+        ax.plot(t, a, color=fast, lw=1.35); ax.plot(t, b, color=MEM, lw=1.35)
         ax.fill_between(t, b, a, color=fill, alpha=0.4)
     ax.set_xlim(0, 1.05 if style == 'enddots' else 1); ax.set_ylim(0, 1); _clean(ax)
 
@@ -238,9 +258,9 @@ def roofline(ax, ridge=60.0, dot_ai=6.0):
     x = np.logspace(np.log10(xmin), np.log10(xmax), 200)
     y = np.minimum(x / ridge, 1.0); m = x < ridge
     ax.set_xscale("log"); ax.set_yscale("log")
-    ax.plot(x[m], y[m], color=MEM, lw=1.8); ax.plot(x[~m], y[~m], color=COMP, lw=1.8)
-    ax.axvline(ridge, color=GRID, ls="--", lw=0.8)
-    ax.plot(dot_ai, dot_y, "o", color=INK, ms=3.5)
+    ax.plot(x[m], y[m], color=MEM, lw=1.45); ax.plot(x[~m], y[~m], color=COMP, lw=1.45)
+    ax.axvline(ridge, color=GRID, ls="--", lw=0.55)
+    ax.plot(dot_ai, dot_y, "o", color=INK, ms=3.2)
     ax.set_xlim(xmin, xmax); ax.set_ylim(ymin, 2.0); _clean(ax, keep=("bottom", "left"))
     ax.tick_params(axis="both", which="both", length=0)  # spines only, no log tick marks
 
@@ -315,10 +335,10 @@ def dam(ax, focus=1, vol="vol1", style='triangle'):
         ax.set_xlim(-0.1, 3.3); ax.set_ylim(-0.2, 0.85)
     else:                                                # 'triangle' — coupling edges visible
         pts = [(0.5, 0.9), (0.08, 0.12), (0.92, 0.12)]
-        ax.plot([0.5, 0.08, 0.92, 0.5], [0.9, 0.12, 0.12, 0.9], color=NET, lw=2)
+        ax.plot([0.5, 0.08, 0.92, 0.5], [0.9, 0.12, 0.12, 0.9], color=NET, lw=1.35)
         for i, ((g, rc), (x, y)) in enumerate(zip(triad, pts)):
             on = _lit(i)
-            ax.plot(x, y, "o", color=rc if on else "#DDD", ms=20)
+            ax.plot(x, y, "o", color=rc if on else "#DDD", ms=17)
             ax.text(x, y, g, fontsize=9, ha="center", va="center",
                     color="white" if on else "#999", fontweight="bold")
         ax.set_xlim(-0.18, 1.18); ax.set_ylim(-0.08, 1.12)
@@ -346,11 +366,11 @@ def taxonomy(ax, hot=3, style='quadrant', items=None):
             on = (i * 2 + j) == hot
             if style == 'dotcells':                      # outlined cells + status dots
                 ax.add_patch(plt.Rectangle((j, i), 0.92, 0.92,
-                             facecolor="none", edgecolor=GRID, lw=1))
-                ax.plot(j + 0.46, i + 0.46, "o", color=SEL if on else GRID, ms=8)
+                             facecolor="none", edgecolor=GRID, lw=0.65))
+                ax.plot(j + 0.46, i + 0.46, "o", color=SEL if on else GRID, ms=7)
             else:                                        # 'quadrant' — solid fills
                 ax.add_patch(plt.Rectangle((j, i), 0.92, 0.92,
-                             facecolor=SEL if on else "#EEE", edgecolor="white", lw=2))
+                             facecolor=SEL if on else "#EEE", edgecolor="white", lw=0.75))
     ax.set_xlim(-0.1, 2); ax.set_ylim(-0.1, 2); _clean(ax)
 
 # ── correlated-failure → blast-radius fan ──────────────────────────────────────
@@ -366,10 +386,10 @@ def blast(ax, n=5, style='fan'):
     if style == 'tree':
         ax.plot(0.05, 0.5, "s", color=RED, ms=9)
         for m in np.linspace(0.25, 0.75, 3):
-            ax.plot([0.1, 0.5], [0.5, m], color="#BBB", lw=0.8)
+            ax.plot([0.1, 0.5], [0.5, m], color="#BBB", lw=0.65)
             ax.plot(0.5, m, "o", color=NET, ms=5)
             for lf in (m - 0.08, m + 0.08):
-                ax.plot([0.55, 0.95], [m, lf], color="#DDD", lw=0.6)
+                ax.plot([0.55, 0.95], [m, lf], color="#DDD", lw=0.5)
                 ax.plot(0.95, lf, "o", color=MEM, ms=3)
         ax.set_xlim(0, 1.05); ax.set_ylim(0, 1)
     elif style == 'rings':
@@ -380,11 +400,11 @@ def blast(ax, n=5, style='fan'):
             ax.plot(0.5 + 0.45 * np.cos(ang), 0.5 + 0.45 * np.sin(ang), "o", color=MEM, ms=3)
         ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.set_aspect("equal")
     else:                                                # 'fan'
-        ax.plot(0.06, 0.5, "s", color=RED, ms=12)
+        ax.plot(0.06, 0.5, "s", color=RED, ms=10)
         for yy in np.linspace(0.06, 0.94, n):
             ax.annotate("", xy=(0.95, yy), xytext=(0.13, 0.5),
-                        arrowprops=dict(arrowstyle="->", color="#aaa", lw=1))
-            ax.plot(0.95, yy, "o", color=MEM, ms=6)
+                        arrowprops=dict(arrowstyle="->", color="#aaa", lw=0.65))
+            ax.plot(0.95, yy, "o", color=MEM, ms=5)
         ax.set_xlim(0, 1.05); ax.set_ylim(0, 1)
     _clean(ax)
 

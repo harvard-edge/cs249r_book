@@ -1,21 +1,17 @@
 """Reference statistics for real-world scenarios and case studies.
 
-Executable scenarios live in :mod:`mlsysim.engine.scenarios`. This module holds
-non-executable, provenance-carrying anchors such as Gmail volume, Waymo sensor
-rate, mobile power envelopes, and TinyML case-study measurements.
+This registry is the home for reusable real-world reference figures:
+illustrative scale anchors (Gmail volume, Waymo sensor rate) and case-study model
+metrics (the TinyML anomaly detector). Every value carries sourced() provenance.
 
-The boundary is intentional:
-
-* ``Models.*`` owns model/workload facts.
-* ``Hardware.*`` and ``Systems.*`` own machine and fleet facts.
-* ``Scenarios.*`` owns runnable workload + system + constraint bundles.
-* ``ReferenceStats.*`` owns sourced statistics that describe the world but are
-  not themselves runnable simulator inputs.
+Note: *evaluatable* scenario bundles (workload + system + SLA, with .evaluate())
+live in the Scenario model in core/scenarios.py. This registry is the
+reference-statistics counterpart — sourced numbers the prose cites, not things to run.
 """
 from ..core.provenance import sourced, sourced_qty
 from ..core.registry import Registry
 from ..core import provenance_catalog as pc
-from ..core.units import ureg, TB
+from ..core.units import ureg, MB, MWh, TB, byte, count, day, minute, param, TRILLION
 
 _hour = ureg.hour
 _joule = ureg.joule
@@ -52,6 +48,15 @@ class AnomalyModel(Registry):
         name="Anomaly model energy", description="Per-inference energy of the TinyML anomaly detector.")
 
 
+class ClinicalImaging(Registry):
+    """Clinical-imaging workflow anchors used by edge-deployment examples."""
+
+    RetinalPhotoSize = sourced_qty(
+        5.0 * MB, pc.CLINICAL_IMAGING_WORKFLOW_ANCHORS,
+        name="Retinal screening image size",
+        description="Reference size for one retinal screening photograph in the rural-clinic workflow.")
+
+
 class EnergyAnchors(Registry):
     """Everyday energy-scale comparison anchors (order-of-magnitude intuition)."""
 
@@ -61,6 +66,97 @@ class EnergyAnchors(Registry):
     BoilingWater = sourced_qty(
         100_000 * _joule, pc.ENERGY_SCALE_ANCHORS,
         name="Boiling 1 L of water", description="Approximate energy to bring one liter of water to a boil.")
+    USHouseholdAnnualElectricity = sourced_qty(
+        10.7 * MWh, pc.ENERGY_SCALE_ANCHORS,
+        name="US household annual electricity",
+        description="Rounded annual electricity use baseline for one average US household-year.")
+
+
+class EmissionsAnchors(Registry):
+    """Everyday emissions-scale comparison anchors (order-of-magnitude intuition)."""
+
+    TransatlanticRoundTripCo2Kg = sourced(
+        1000.0,
+        pc.LIT_TRANSATLANTIC_ROUND_TRIP_CO2,
+        name="Transatlantic round-trip passenger CO₂e",
+        description="One economy passenger, New York to London and return (kg CO₂e).",
+    )
+
+
+class TrainingScaleProfiles(Registry):
+    """Reusable scenario assumptions for distributed training scale efficiency."""
+
+    Eff32Gpu = sourced(
+        0.9,
+        pc.SCALING_EFFICIENCY_TIERS,
+        name="Scaling efficiency (32 GPUs)",
+        description="Near-linear scaling regime for a reference training scenario.",
+    )
+    Eff256Gpu = sourced(
+        0.7,
+        pc.SCALING_EFFICIENCY_TIERS,
+        name="Scaling efficiency (256 GPUs)",
+        description="Reference training scenario where communication begins to reduce scaling efficiency.",
+    )
+    Eff1024Gpu = sourced(
+        0.5,
+        pc.SCALING_EFFICIENCY_TIERS,
+        name="Scaling efficiency (1024 GPUs)",
+        description="Reference training scenario with significant communication overhead at 1k GPUs.",
+    )
+    Eff8192Gpu = sourced(
+        0.35,
+        pc.MEGASCALE,
+        name="Scaling efficiency (8192 GPUs)",
+        description="Illustrative scaling efficiency at 8192 GPUs for LLM training.",
+    )
+
+
+class StorageTrainingCorpus(Registry):
+    """Reusable storage-chapter running example for a 175B-model training corpus."""
+
+    TrainingTokens = sourced_qty(
+        1.5 * TRILLION * count,
+        pc.STORAGE_TRAINING_CORPUS_REFERENCE,
+        name="Storage running-example training tokens",
+        description="Reference token count for the 175B-model storage running example.",
+    )
+    CompressedSource = sourced_qty(
+        3 * TB,
+        pc.STORAGE_TRAINING_CORPUS_REFERENCE,
+        name="Storage running-example compressed source corpus",
+        description="Compressed source corpus size for the storage running example.",
+    )
+    TokenIdBytes = sourced_qty(
+        4 * byte,
+        pc.STORAGE_TRAINING_CORPUS_REFERENCE,
+        name="Storage running-example token ID width",
+        description="Serialized token-ID width for the tokenized corpus.",
+    )
+    TokenizedText = sourced_qty(
+        TrainingTokens * TokenIdBytes,
+        pc.STORAGE_TRAINING_CORPUS_REFERENCE,
+        name="Storage running-example tokenized corpus",
+        description="Derived serialized token-ID corpus size for one epoch.",
+    )
+    TrainingWindow = sourced_qty(
+        30 * day,
+        pc.STORAGE_TRAINING_CORPUS_REFERENCE,
+        name="Storage running-example training window",
+        description="Reference training-window duration for checkpoint-count examples.",
+    )
+    CheckpointInterval = sourced_qty(
+        10 * minute,
+        pc.STORAGE_TRAINING_CORPUS_REFERENCE,
+        name="Storage running-example checkpoint interval",
+        description="Reference checkpoint interval for checkpoint-count examples.",
+    )
+    CheckpointBytesPerParameter = sourced_qty(
+        10 * (byte / param),
+        pc.STORAGE_TRAINING_CORPUS_REFERENCE,
+        name="Storage running-example checkpoint bytes per parameter",
+        description="Reference checkpoint footprint per model parameter.",
+    )
 
 
 class MobilePower(Registry):
@@ -90,8 +186,8 @@ class PhoneBattery(Registry):
     """Flagship smartphone battery reference figures.
 
     Note: EnergyWh (15 Wh, a flagship pack rating) and EnergyJ (capacity x voltage =
-    3000 mAh x 3.7 V = 11.1 Wh) are two distinct battery models; both are
-    preserved as separate reference anchors rather than reconciled."""
+    3000 mAh x 3.7 V = 11.1 Wh) are two DISTINCT battery reference models used in
+    different scenarios; both are preserved as-is rather than reconciled."""
 
     CapacityMah = sourced_qty(3000 * ureg.milliampere_hour, pc.MOBILE_DEVICE_ANCHORS,
         name="Phone battery capacity", description="Typical flagship smartphone battery charge capacity.")
@@ -108,6 +204,14 @@ class ReferenceStats(Registry):
 
     Workloads = Workloads
     AnomalyModel = AnomalyModel
+    ClinicalImaging = ClinicalImaging
     EnergyAnchors = EnergyAnchors
+    EmissionsAnchors = EmissionsAnchors
+    TrainingScaleProfiles = TrainingScaleProfiles
+    StorageTrainingCorpus = StorageTrainingCorpus
     MobilePower = MobilePower
     PhoneBattery = PhoneBattery
+
+
+# Backward-compatible alias while book cells migrate to ``ReferenceStats``.
+Scenarios = ReferenceStats

@@ -100,9 +100,20 @@ def _is_allowed_notation_definition(path: Path, line: str) -> bool:
 def _audit_file(path: Path) -> list[Violation]:
     violations: list[Violation] = []
     lines = path.read_text(encoding="utf-8").splitlines()
+    in_python_cell = False
 
     for lineno, line in enumerate(lines, 1):
-        if "USD" in line and not _is_allowed_notation_definition(path, line):
+        if line.startswith("```{python}"):
+            in_python_cell = True
+            continue
+        if in_python_cell and line.strip() == "```":
+            in_python_cell = False
+            continue
+
+        # Pint uses USD as a currency unit in LEGO cells; prose policy is separate.
+        if in_python_cell:
+            pass
+        elif "USD" in line and not _is_allowed_notation_definition(path, line):
             for _match in USD_PATTERN.finditer(line):
                 violations.append(
                     Violation(

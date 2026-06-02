@@ -95,6 +95,14 @@ CLUSTER_TIER_CONVENTIONS = _conv(
     "MLSysIM reference cluster tiers (256 / 2k / 8k / 100k GPUs)",
 )
 
+KEMPNER_AI_CLUSTER_H100 = _ds(
+    "prov:kempner-ai-cluster-h100",
+    "Kempner Institute Computing Handbook, Overview of Cluster - H100 partition specs",
+    "https://handbook.eng.kempnerinstitute.harvard.edu/s1_high_performance_computing/kempner_cluster/overview_of_kempner_cluster.html",
+    verified="2026-06-01",
+    notes="H100 partition: 384 H100 80GB GPUs, 24 servers per rack, 4 GPUs per server, four H100 racks.",
+)
+
 # --- Real-world case-study / workload scale anchors (Scenarios registry) ---
 REFERENCE_WORKLOAD_SCALE = Provenance(
     id="prov:reference-workload-scale",
@@ -108,10 +116,16 @@ TINYML_ANOMALY_CASE = Provenance(
     ref="TinyML anomaly-detection case study (latency / AUC / energy) used as a benchmarking example",
     verified="2025-03-06",
 )
+CLINICAL_IMAGING_WORKFLOW_ANCHORS = Provenance(
+    id="prov:clinical-imaging-workflow-anchors",
+    kind=ProvenanceKind.ILLUSTRATIVE,
+    ref="Clinical imaging workflow anchors for rural-clinic bandwidth and edge-deployment examples",
+    verified="2026-06-01",
+)
 ENERGY_SCALE_ANCHORS = Provenance(
     id="prov:energy-scale-anchors",
     kind=ProvenanceKind.ILLUSTRATIVE,
-    ref="Everyday energy-scale comparison anchors (smartphone charge ~40 kJ, boiling 1 L water ~100 kJ) for order-of-magnitude intuition about ML energy",
+    ref="Everyday energy-scale comparison anchors (smartphone charge ~40 kJ, boiling 1 L water ~100 kJ, US household electricity ~10.7 MWh/year) for order-of-magnitude intuition about ML energy",
     verified="2025-03-06",
 )
 MOBILE_DEVICE_ANCHORS = Provenance(
@@ -134,6 +148,14 @@ MEMORY_LATENCY_HIERARCHY = _conv(
 STORAGE_TIER_CONVENTIONS = _conv(
     "prov:storage-tier-conventions",
     "Generic storage/memory bandwidth tiers (NVMe Gen3/4/5, DDR, host DRAM) from vendor datasheet ranges",
+)
+STORAGE_ACCESS_PATH_REFERENCE = _conv(
+    "prov:storage-access-path-reference",
+    "Reference GPU-storage access-path latencies for traditional CPU-mediated I/O and GPU Direct Storage bypass paths",
+)
+FRAMEWORK_RUNTIME_OVERHEAD_REFERENCE = _conv(
+    "prov:framework-runtime-overhead-reference",
+    "Reference framework/runtime overhead latencies for dispatch, kernel launch, and tiny memory-access operations",
 )
 
 RELIABILITY_MTTF_LITERATURE = _lit(
@@ -581,7 +603,21 @@ FABRIC_LATENCY_ASSUMPTIONS = _conv(
 SWITCH_OPTICS_REFERENCE = _conv(
     "prov:switch-optics-reference",
     "Datacenter switch-ASIC capacity (51.2T/102.4T) and 400G optics power (pluggable/CPO) reference figures",
-    notes="2025-26 datacenter-switching reference points for the network-fabrics worked examples.",
+    notes="2025-26 datacenter-switching reference points for network-fabric sizing analyses.",
+)
+
+NVIDIA_QUANTUM2_QM97XX_SWITCH = _ds(
+    "prov:nvidia-quantum2-qm97xx-switch",
+    "NVIDIA QM97XX 1U NDR 400Gbps InfiniBand Switch Systems User Manual",
+    "https://docs.nvidia.com/networking/display/qm97x0um/introduction",
+    verified="2026-06-01",
+    notes="QM9700/QM9701/QM9790-class switches: 64 NDR 400 Gb/s ports and 51.2 Tb/s aggregate bidirectional throughput.",
+)
+
+NDR_LEAF_SPINE_64_PORT_SPLIT = _conv(
+    "prov:ndr-leaf-spine-64-port-split",
+    "Reference non-oversubscribed two-tier leaf-spine split for a 64-port NDR switch",
+    notes="Uses 32 endpoint downlinks and 32 spine uplinks per leaf switch.",
 )
 
 NETWORK_ENERGY_ANCHORS = _conv(
@@ -624,11 +660,30 @@ RACK_POWER_TIERS = _conv(
     "Rack power tiers (traditional vs AI cluster, air-cooling limit)",
 )
 
+DGX_H100_RACK_REFERENCE = _conv(
+    "prov:dgx-h100-rack-reference",
+    "Reference DGX H100 rack profile",
+    notes=(
+        "Four DGX H100 nodes per rack, yielding 32 H100 GPUs per rack for rack-level power "
+        "and cooling models; representative non-accelerator rack support load is 11.1 kW "
+        "(host CPUs/DRAM, NVSwitch, InfiniBand, power conversion, and cooling overhead)."
+    ),
+)
+
+STORAGE_TRAINING_CORPUS_REFERENCE = _conv(
+    "prov:storage-training-corpus-reference",
+    "Reference 175B-model storage running example",
+    notes=(
+        "Chapter-level storage scenario anchor: 1.5T training tokens, 3 TB compressed "
+        "source corpus, 4-byte token IDs, and 10 bytes/parameter checkpoint storage."
+    ),
+)
+
 CLOUD_PRICING_2024 = Provenance(
     id="prov:cloud-pricing-2024",
     kind=ProvenanceKind.ILLUSTRATIVE,
     ref="Illustrative US cloud list prices (2024–2025 order of magnitude)",
-    notes="GPU-hour, egress, and electricity rates for worked examples—not a specific vendor quote.",
+    notes="GPU-hour, egress, and electricity rate anchors; not a specific vendor quote.",
     verified="2025-03-06",
 )
 
@@ -636,7 +691,7 @@ STORAGE_PRICING_2024 = Provenance(
     id="prov:storage-pricing-2024",
     kind=ProvenanceKind.ILLUSTRATIVE,
     ref="Illustrative cloud/object-storage list prices (2024 order of magnitude)",
-    notes="S3, Glacier, NVMe tier rates for data-engineering worked examples.",
+    notes="S3, Glacier, and NVMe tier rate anchors for data-engineering scenarios.",
     verified="2025-03-06",
 )
 
@@ -672,6 +727,16 @@ CARBON_PER_GPU_HR = _est(
     "prov:carbon-per-gpu-hr",
     "Illustrative per-GPU-hour carbon proxy for responsible-AI examples",
     notes="0.16 kg/GPU-hr order-of-magnitude; not a grid-specific intensity calculation.",
+)
+
+LIT_TRANSATLANTIC_ROUND_TRIP_CO2 = _est(
+    "prov:lit-transatlantic-round-trip-co2",
+    "Aviation CO2e factors for long-haul economy passenger travel (DEFRA-class)",
+    notes=(
+        "Rounded to 1000 kg CO2e for the NY-London round-trip reference anchor; "
+        "agency calculators typically report about 900-1100 kg CO2e per economy passenger."
+    ),
+    verified="2026-05-31",
 )
 
 MFU_INFERENCE_BATCHED_LIT = _lit(

@@ -14,7 +14,7 @@ from mlsysim.physics import calc_bottleneck
 
 
 def test_golden_roofline_resnet50_a100_batch1():
-    """Golden single-node example for textbook roofline calculations."""
+    """Golden single-node example for canonical roofline calculations."""
     result = SingleNodeModel().solve(
         mlsysim.Models.Vision.ResNet50,
         mlsysim.Hardware.Cloud.A100,

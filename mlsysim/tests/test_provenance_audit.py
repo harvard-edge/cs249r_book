@@ -8,7 +8,7 @@ from mlsysim.tools.audit_provenance import (
     audit_infra_grids,
     audit_infra_pricing,
     audit_literature_sourced,
-    audit_ops_monitoring,
+    audit_ops_sourced,
     audit_platforms,
     audit_reference_stats,
     audit_registries,
@@ -66,8 +66,8 @@ class TestProvenanceAudit(unittest.TestCase):
         issues = audit_reference_stats()
         self.assertEqual(issues, [], "\n".join(issues))
 
-    def test_ops_monitoring_has_provenance(self):
-        issues = audit_ops_monitoring()
+    def test_ops_sourced_have_provenance(self):
+        issues = audit_ops_sourced()
         self.assertEqual(issues, [], "\n".join(issues))
 
     def test_systems_reliability_have_provenance(self):

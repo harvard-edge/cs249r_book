@@ -152,27 +152,27 @@ class MobileNetJourneyMath:
 
     # GUARD
     check(8 <= standard_to_depthwise <= 9, "Depthwise separable example should land near 8--9x.")
-    check(13 <= resnet_to_mobilenet.m_as("") <= 15, "ResNet-50/MobileNetV2 ratio drifted.")
-    check(int8_vs_fp32.m_as("") == 4 and int8_vs_fp16.m_as("") == 2, "INT8 byte ratios changed.")
+    check(13 <= resnet_to_mobilenet.to("").magnitude <= 15, "ResNet-50/MobileNetV2 ratio drifted.")
+    check(int8_vs_fp32.to("").magnitude == 4 and int8_vs_fp16.to("").magnitude == 2, "INT8 byte ratios changed.")
 
     # OUTPUT
-    depthwise_reduction_str = fmt(standard_to_depthwise, precision=1, commas=False, suffix="×")
-    resnet_ops_reduction_str = fmt(resnet_to_mobilenet.m_as(""), precision=1, commas=False, suffix="×")
-    int8_fp32_reduction_str = fmt(int8_vs_fp32.m_as(""), precision=0, commas=False, suffix="×")
-    int8_fp16_reduction_str = fmt(int8_vs_fp16.m_as(""), precision=0, commas=False, suffix="×")
+    depthwise_reduction_str = fmt_multiple(standard_to_depthwise, precision=1, commas=False)
+    resnet_ops_reduction_str = fmt_multiple(resnet_to_mobilenet.to("").magnitude, precision=1, commas=False)
+    int8_fp32_reduction_str = fmt_multiple(int8_vs_fp32.to("").magnitude, precision=0, commas=False)
+    int8_fp16_reduction_str = fmt_multiple(int8_vs_fp16.to("").magnitude, precision=0, commas=False)
 ```
 
 @Tbl-lighthouse-journey-mobilenet traces this journey for a single model, MobileNetV2, demonstrating how every chapter's principles converge on a single engineering artifact. The table walks through seven phases (from foundational constraints through architecture, training, compression, acceleration, serving, and operations) showing how each phase's decisions propagate forward to shape what becomes possible in subsequent phases.
 
-| **Journey Phase**                             | **System Lens**                | **MobileNetV2 Implementation**                                                                                                                                                                                                                                                 |
-|:----------------------------------------------|:-------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Foundations (@sec-introduction)**           | The AI Triad                   | Bounded by *Machine* constraints (Battery/Thermal)                                                                                                                                                                                                                             |
-| **Architecture (@sec-network-architectures)** | Algorithmic Efficiency         | **Depthwise Separable Convolutions**: `{python} MobileNetJourneyMath.depthwise_reduction_str` fewer FLOPs for a representative 3-by-3, 256-output-channel layer and `{python} MobileNetJourneyMath.resnet_ops_reduction_str` fewer operations than ResNet-50 at ImageNet scale |
-| **Training (@sec-model-training)**            | Throughput vs. Latency         | Optimized for single-request mobile latency; training requires data augmentation for robustness                                                                                                                                                                                |
-| **Compression (@sec-model-compression)**      | Navigating the Pareto Frontier | **INT8 Quantization**: `{python} MobileNetJourneyMath.int8_fp32_reduction_str` memory reduction versus FP32 (`{python} MobileNetJourneyMath.int8_fp16_reduction_str` versus FP16), with accuracy revalidated per deployment                                                    |
-| **Acceleration (@sec-hardware-acceleration)** | Honoring the Silicon Contract  | Mapping kernels to **Mobile NPUs** (for example, Apple Neural Engine) to maximize hardware utilization                                                                                                                                                                         |
-| **Serving (@sec-model-serving)**              | Respecting the Latency Budget  | **$\text{P99} < 50$ ms** constraint; optimizing preprocessing (resize/normalize) to avoid CPU bottlenecks                                                                                                                                                                      |
-| **Operations (@sec-ml-operations)**           | Managing System Entropy        | **Drift Monitoring**: Detecting accuracy decay across heterogeneous device populations and lighting conditions                                                                                                                                                                 |
+| **Journey Phase**                             | **System Lens**                | **MobileNetV2 Implementation**                                                                                                                                                                                                                                                                 |
+|:----------------------------------------------|:-------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Foundations (@sec-introduction)**           | The AI Triad                   | Bounded by *Machine* constraints (Battery/Thermal)                                                                                                                                                                                                                                             |
+| **Architecture (@sec-network-architectures)** | Algorithmic Efficiency         | **Depthwise Separable Convolutions**: `{python} MobileNetJourneyMath.depthwise_reduction_str`$\times$ fewer FLOPs for a representative 3-by-3, 256-output-channel layer and `{python} MobileNetJourneyMath.resnet_ops_reduction_str`$\times$ fewer operations than ResNet-50 at ImageNet scale |
+| **Training (@sec-model-training)**            | Throughput vs. Latency         | Optimized for single-request mobile latency; training requires data augmentation for robustness                                                                                                                                                                                                |
+| **Compression (@sec-model-compression)**      | Navigating the Pareto Frontier | **INT8 Quantization**: `{python} MobileNetJourneyMath.int8_fp32_reduction_str`$\times$ memory reduction versus FP32 (`{python} MobileNetJourneyMath.int8_fp16_reduction_str`$\times$ versus FP16), with accuracy revalidated per deployment                                                    |
+| **Acceleration (@sec-hardware-acceleration)** | Honoring the Silicon Contract  | Mapping kernels to **Mobile NPUs** (for example, Apple Neural Engine) to maximize hardware utilization                                                                                                                                                                                         |
+| **Serving (@sec-model-serving)**              | Respecting the Latency Budget  | **$\text{P99} < 50$ ms** constraint; optimizing preprocessing (resize/normalize) to avoid CPU bottlenecks                                                                                                                                                                                      |
+| **Operations (@sec-ml-operations)**           | Managing System Entropy        | **Drift Monitoring**: Detecting accuracy decay across heterogeneous device populations and lighting conditions                                                                                                                                                                                 |
 
 : **The Lighthouse Journey (MobileNetV2)**: Tracing one model through the entire systems stack reveals how decisions in one domain (for example, architecture) propagate constraints and opportunities to every other domain (for example, hardware acceleration and monitoring). {#tbl-lighthouse-journey-mobilenet}
 
@@ -202,12 +202,14 @@ Throughout this book, each Part introduced quantitative principles that govern M
 # │          constants for FP32 and FP16 from mlsysim.core.constants.
 # │
 # │ Imports: mlsysim Hardware.Tech.Memory.DRAM.energy_per_access,
-# │          Hardware.Tech.Op.FlopFp32.energy, Hardware.Tech.Op.FlopFp16.energy;
+# │          Hardware.Tech.Op.FlopFp32.energy, Hardware.Tech.Op.FlopFp16.energy,
+# │          mlsysim.core.units.flop;
 # │          mlsysim.fmt (fmt, check)
 # │ Exports: EnergyMovementMath.dram_vs_fp32_str,
 # │          EnergyMovementMath.dram_vs_fp16_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, check
+from mlsysim.core.units import flop
+from mlsysim.fmt import fmt_int, fmt, fmt_multiple, fmt_multiple_range, check
 
 class EnergyMovementMath:
     # LOAD
@@ -215,37 +217,45 @@ class EnergyMovementMath:
     ENERGY_FLOP_FP32_PJ   = Hardware.Tech.Op.FlopFp32.energy
     ENERGY_FLOP_FP16_PJ   = Hardware.Tech.Op.FlopFp16.energy
     dram_access = ENERGY_DRAM_ACCESS_PJ
-    fp32_flop = ENERGY_FLOP_FP32_PJ
-    fp16_flop = ENERGY_FLOP_FP16_PJ
+    fp32_flop_energy = ENERGY_FLOP_FP32_PJ * flop
+    fp16_flop_energy = ENERGY_FLOP_FP16_PJ * flop
 
     # EXECUTE
-    dram_vs_fp32 = dram_access / fp32_flop
-    dram_vs_fp16 = dram_access / fp16_flop
+    dram_vs_fp32 = (dram_access / fp32_flop_energy).to("").magnitude
+    dram_vs_fp16 = (dram_access / fp16_flop_energy).to("").magnitude
 
     # GUARD
-    check(100 <= dram_vs_fp32.m_as("") <= 1000, "DRAM/FP32 energy ratio left expected range.")
-    check(100 <= dram_vs_fp16.m_as("") <= 1000, "DRAM/FP16 energy ratio left expected range.")
+    check(100 <= dram_vs_fp32 <= 1000, "DRAM/FP32 energy ratio left expected range.")
+    check(100 <= dram_vs_fp16 <= 1000, "DRAM/FP16 energy ratio left expected range.")
 
     # OUTPUT
-    dram_vs_fp32_str = fmt_int(round(dram_vs_fp32.m_as("")), commas=False)
-    dram_vs_fp16_str = fmt(dram_vs_fp16.m_as(""), precision=1, commas=False, suffix="×")
+    dram_vs_fp32_display = round(dram_vs_fp32)
+    dram_vs_fp16_display = round(dram_vs_fp16)
+    dram_vs_fp32_str = fmt_multiple(dram_vs_fp32_display, precision=0, commas=False)
+    dram_vs_fp16_str = fmt_multiple(dram_vs_fp16_display, precision=0, commas=False)
+    dram_vs_range_str = fmt_multiple_range(
+        dram_vs_fp32_display,
+        dram_vs_fp16_display,
+        precision=0,
+        commas=False,
+    )
 ```
 
-| **#**                           | **Principle**               | **Part**       | **Core Equation/Statement**                                                                                                                                                   | **What It Predicts**                                                           |
-|:--------------------------------|:----------------------------|:---------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------|
-| \ref{pri-data-as-code}          | Data as Code Invariant      | I: Foundations | System Behavior $\approx f(\text{Data})$                                                                                                                                      | Changing data changes the program                                              |
-| \ref{pri-data-gravity}          | Data Gravity Invariant      | I: Foundations | $C_{\text{move}}(D_{\text{vol}}) \gg C_{\text{move}}(\text{Compute})$                                                                                                         | Move compute to data, not data to compute                                      |
-| \ref{pri-iron-law}              | Iron Law of ML Systems      | II: Build      | $T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}}$                                                                    | Every optimization pulls one of three levers; reducing one may inflate another |
-| \ref{pri-silicon-contract}      | Silicon Contract            | II: Build      | $\eta_{\text{hw}} \to 1 \iff I_{\text{model}} \approx I_{\text{machine}}$                                                                                                     | Mismatched hardware wastes money; matched hardware achieves peak throughput    |
-| \ref{pri-pareto-frontier}       | Pareto Frontier             | III: Optimize  | $\forall \theta', \exists k \text{ s.t. } M_k(\theta') < M_k(\theta_{\text{pareto}})$                                                                                         | There is no universal optimum; every gain trades against another metric        |
-| \ref{pri-arithmetic-intensity}  | Arithmetic Intensity Law    | III: Optimize  | $R_{\text{attainable}} = \min(R_{\text{peak}},\; I \times \text{BW})$                                                                                                         | Adding compute to a memory-bound model yields zero gain                        |
-| \ref{pri-energy-movement}       | Energy-Movement Invariant   | III: Optimize  | $E_{\text{move}} \gg E_{\text{compute}}$ (`{python} EnergyMovementMath.dram_vs_fp32_str`--`{python} EnergyMovementMath.dram_vs_fp16_str` for DRAM access vs. FP32/FP16 FLOPs) | Data locality, not raw FLOP/s, drives efficiency                               |
-| \ref{pri-amdahl}                | Amdahl's Law                | III: Optimize  | $\text{Speedup} = \frac{1}{(1-p) + \frac{p}{G_{\text{parallel}}}}$                                                                                                            | The serial fraction caps all parallelism gains                                 |
-| \ref{pri-verification-gap}      | Verification Invariant      | IV: Deploy     | $\Pr(f(x) \approx y) > 1 - \epsilon_{\text{test}}$                                                                                                                            | ML testing is statistical; it bounds error, not proves correctness             |
-| \ref{pri-statistical-drift}     | Statistical Drift Invariant | IV: Deploy     | $\text{Accuracy}(t) \approx \text{Accuracy}_0 - \lambda \cdot \mathcal{D}(P_t \lVert P_0)$                                                                                    | Models decay without code changes; the world drifts away from training data    |
-| \ref{pri-training-serving-skew} | Training-Serving Skew Law   | IV: Deploy     | $\Delta\text{Accuracy} \approx \mathbb{E}[\lvert f_{\text{serve}}(x) - f_{\text{train}}(x)\rvert]$                                                                            | Even subtle preprocessing differences silently degrade accuracy                |
-| \ref{pri-latency-budget}        | Latency Budget Invariant    | IV: Deploy     | $T_{\text{p99}}(x) \le L_{\text{budget}}$                                                                                                                                     | Throughput is optimized within the latency envelope, never at its expense      |
-| \ref{pri-bias-feedback}         | Bias Feedback Invariant     | IV: Deploy     | $\Delta_{\text{err},g}(n) \approx \Delta_{\text{err},g}(0) \cdot \alpha_{\text{fb}}^n$, $\alpha_{\text{fb}} > 1$                                                              | Errors against subgroups compound across cycles when outputs reshape inputs    |
+| **#**                           | **Principle**               | **Part**       | **Core Equation/Statement**                                                                                                            | **What It Predicts**                                                           |
+|:--------------------------------|:----------------------------|:---------------|:---------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------|
+| \ref{pri-data-as-code}          | Data as Code Invariant      | I: Foundations | System Behavior $\approx f(\text{Data})$                                                                                               | Changing data changes the program                                              |
+| \ref{pri-data-gravity}          | Data Gravity Invariant      | I: Foundations | $C_{\text{move}}(D_{\text{vol}}) \gg C_{\text{move}}(\text{Compute})$                                                                  | Move compute to data, not data to compute                                      |
+| \ref{pri-iron-law}              | Iron Law of ML Systems      | II: Build      | $T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}}$                             | Every optimization pulls one of three levers; reducing one may inflate another |
+| \ref{pri-silicon-contract}      | Silicon Contract            | II: Build      | $\eta_{\text{hw}} \to 1 \iff I_{\text{model}} \approx I_{\text{machine}}$                                                              | Mismatched hardware wastes money; matched hardware achieves peak throughput    |
+| \ref{pri-pareto-frontier}       | Pareto Frontier             | III: Optimize  | $\forall \theta', \exists k \text{ s.t. } M_k(\theta') < M_k(\theta_{\text{pareto}})$                                                  | There is no universal optimum; every gain trades against another metric        |
+| \ref{pri-arithmetic-intensity}  | Arithmetic Intensity Law    | III: Optimize  | $R_{\text{attainable}} = \min(R_{\text{peak}},\; I \times \text{BW})$                                                                  | Adding compute to a memory-bound model yields zero gain                        |
+| \ref{pri-energy-movement}       | Energy-Movement Invariant   | III: Optimize  | $E_{\text{move}} \gg E_{\text{compute}}$ (`{python} EnergyMovementMath.dram_vs_range_str`$\times$ for DRAM access vs. FP32/FP16 FLOPs) | Data locality, not raw FLOP/s, drives efficiency                               |
+| \ref{pri-amdahl}                | Amdahl's Law                | III: Optimize  | $\text{Speedup} = \frac{1}{(1-p) + \frac{p}{G_{\text{parallel}}}}$                                                                     | The serial fraction caps all parallelism gains                                 |
+| \ref{pri-verification-gap}      | Verification Invariant      | IV: Deploy     | $\Pr(f(x) \approx y) > 1 - \epsilon_{\text{test}}$                                                                                     | ML testing is statistical; it bounds error, not proves correctness             |
+| \ref{pri-statistical-drift}     | Statistical Drift Invariant | IV: Deploy     | $\text{Accuracy}(t) \approx \text{Accuracy}_0 - \lambda \cdot \mathcal{D}(P_t \lVert P_0)$                                             | Models decay without code changes; the world drifts away from training data    |
+| \ref{pri-training-serving-skew} | Training-Serving Skew Law   | IV: Deploy     | $\Delta\text{Accuracy} \approx \mathbb{E}[\lvert f_{\text{serve}}(x) - f_{\text{train}}(x)\rvert]$                                     | Even subtle preprocessing differences silently degrade accuracy                |
+| \ref{pri-latency-budget}        | Latency Budget Invariant    | IV: Deploy     | $T_{\text{p99}}(x) \le L_{\text{budget}}$                                                                                              | Throughput is optimized within the latency envelope, never at its expense      |
+| \ref{pri-bias-feedback}         | Bias Feedback Invariant     | IV: Deploy     | $\Delta_{\text{err},g}(n) \approx \Delta_{\text{err},g}(0) \cdot \alpha_{\text{fb}}^n$, $\alpha_{\text{fb}} > 1$                       | Errors against subgroups compound across cycles when outputs reshape inputs    |
 
 : **The Thirteen Quantitative Invariants of ML Systems Engineering**: Each invariant was introduced in the Part where its governing constraint first becomes visible. Together, they form the complete analytical framework for reasoning about ML system design, optimization, and deployment. The meta-principle that unifies them all is the conservation of complexity: complexity cannot be destroyed, only moved between data, algorithm, and machine. {#tbl-thirteen-principles tbl-colwidths="[3,18,14,30,35]"}
 
@@ -265,7 +275,7 @@ The iron law (Principle \ref{pri-iron-law}) and the silicon contract (Principle 
 
 ### Optimize: How constraints shape trade-offs (invariants 5–8) { .unnumbered}
 
-The four optimization invariants form a tightly coupled diagnostic chain. The Pareto frontier\index{Pareto Frontier!multi-objective optimization} (Principle \ref{pri-pareto-frontier}) establishes that no free improvements exist: quantization trades precision for memory traffic, pruning trades capacity for speed, and distillation trades training compute for inference efficiency. The arithmetic intensity law\index{Arithmetic Intensity!bottleneck diagnosis} (Principle \ref{pri-arithmetic-intensity}) diagnoses which resource is the bottleneck, revealing whether optimization should target compute or memory. The energy-movement invariant\index{Energy-Movement Invariant!data locality} (Principle \ref{pri-energy-movement}) explains why data locality dominates efficiency: in the book's reference constants, a DRAM access costs about `{python} EnergyMovementMath.dram_vs_fp32_str`--`{python} EnergyMovementMath.dram_vs_fp16_str` as much energy as an FP32/FP16 arithmetic operation. Amdahl's Law (Principle \ref{pri-amdahl}) sets the ceiling on any parallelism gain, explaining why data loading and preprocessing become the ultimate bottlenecks in highly optimized systems.
+The four optimization invariants form a tightly coupled diagnostic chain. The Pareto frontier\index{Pareto Frontier!multi-objective optimization} (Principle \ref{pri-pareto-frontier}) establishes that no free improvements exist: quantization trades precision for memory traffic, pruning trades capacity for speed, and distillation trades training compute for inference efficiency. The arithmetic intensity law\index{Arithmetic Intensity!bottleneck diagnosis} (Principle \ref{pri-arithmetic-intensity}) diagnoses which resource is the bottleneck, revealing whether optimization should target compute or memory. The energy-movement invariant\index{Energy-Movement Invariant!data locality} (Principle \ref{pri-energy-movement}) explains why data locality dominates efficiency: in the book's reference constants, a DRAM access costs about `{python} EnergyMovementMath.dram_vs_range_str`$\times$ as much energy as an FP32/FP16 arithmetic operation. Amdahl's Law (Principle \ref{pri-amdahl}) sets the ceiling on any parallelism gain, explaining why data loading and preprocessing become the ultimate bottlenecks in highly optimized systems.
 
 MobileNetV2 (our Lighthouse from @sec-network-architectures) navigates all four simultaneously: depthwise separable convolutions reshape the Pareto frontier, quantization to INT8 exploits the arithmetic intensity law by increasing FLOP/byte through reduced memory traffic, and the resulting energy savings respect the energy-movement invariant while Amdahl's Law explains why the nonaccelerable preprocessing stage limits end-to-end speedup. The KWS Lighthouse pushes these trade-offs to their extreme, where sub-megabyte models on microcontrollers leave zero margin for waste on any axis.
 
@@ -628,12 +638,12 @@ The same diagnostic habit applies when the bottleneck is not an optimization pro
 # │          mlsysim.fmt (fmt, fmt_math, MarkdownStr, check)
 # │ Exports: llama_params_count_str, llama_params_prose_str, llama_dvol_gb_str,
 # │          llama_compute_gflops_str,
-# │          h100_bw_tb_str, h100_peak_tflops_str, t_mem_ms_str, t_comp_ms_str,
+# │          h100_bw_tb_s_str, h100_peak_tflops_str, t_mem_ms_str, t_comp_ms_str,
 # │          ratio_str, t_mem_eq, t_comp_eq
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware, Models
 from mlsysim.physics import calc_transformer_decode_flops
-from mlsysim.fmt import fmt, fmt_math, MarkdownStr, check
+from mlsysim.fmt import fmt, fmt_math, MarkdownStr, check, fmt_qty
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ConclusionRoofline:
@@ -663,23 +673,23 @@ class ConclusionRoofline:
     llama_params_b = fmt(model.parameters.to("count").magnitude / BILLION, precision=0, commas=False)
     llama_params_count_str = MarkdownStr(f"{llama_params_b} billion")
     llama_params_prose_str = MarkdownStr(f"{llama_params_b}-billion-parameter")
-    llama_dvol_gb_str = fmt(d_vol.m_as('GB'), precision=0, commas=False, suffix=" GB")
-    llama_compute_gflops_str = fmt(compute_req.m_as('GFLOPs'), precision=0, commas=False, suffix=" GFLOPs")
+    llama_dvol_gb_str = fmt_qty(d_vol, GB, precision=0, commas=False)
+    llama_compute_gflops_str = fmt_qty(compute_req, GFLOPs, precision=0, commas=False)
 
-    h100_bw_tb_str = fmt(gpu.memory.bandwidth.m_as('TB/s'), precision=2, commas=False, suffix=" TB/s")
-    h100_peak_tflops_str = fmt(gpu.compute.peak_flops.m_as('TFLOP/s'), precision=0, commas=False, suffix=" TFLOP/s")
+    h100_bw_tb_s_str = fmt_qty(gpu.memory.bandwidth, TB/second, precision=2, commas=False)
+    h100_peak_tflops_str = fmt_qty(gpu.compute.peak_flops, TFLOP/second, precision=0, commas=False)
 
-    t_mem_ms_str = fmt(t_mem.m_as('ms'), precision=1, commas=False, suffix=" ms")
-    t_comp_ms_str = fmt(t_comp.m_as('ms'), precision=2, commas=False, suffix=" ms")
-    ratio_str = fmt(ratio.m_as(''), precision=1, commas=False, suffix="×")
+    t_mem_ms_str = fmt_qty(t_mem, ms, precision=1, commas=False)
+    t_comp_ms_str = fmt_qty(t_comp, ms, precision=2, commas=False)
+    ratio_str = fmt_multiple(ratio.to("").magnitude, precision=1, commas=False)
 
     # LaTeX equations — use raw magnitudes, not suffixed _str exports
-    dvol_gb_val = d_vol.m_as('GB')
-    h100_bw_gb_val = gpu.memory.bandwidth.m_as('GB/s')
-    compute_gflops_val = compute_req.m_as('GFLOPs')
-    h100_peak_tflops_val = gpu.compute.peak_flops.m_as('TFLOP/s')
-    t_mem_ms_val = t_mem.m_as('ms')
-    t_comp_ms_val = t_comp.m_as('ms')
+    dvol_gb_val = d_vol.to(GB).magnitude
+    h100_bw_gb_val = gpu.memory.bandwidth.to(GB / second).magnitude
+    compute_gflops_val = compute_req.to(GFLOPs).magnitude
+    h100_peak_tflops_val = gpu.compute.peak_flops.to(TFLOP / second).magnitude
+    t_mem_ms_val = t_mem.to(ms).magnitude
+    t_comp_ms_val = t_comp.to(ms).magnitude
 
     t_mem_eq = fmt_math(f"T_{{\\text{{mem}}}} = \\frac{{{dvol_gb_val:.0f} \\text{{ GB}}}}{{{h100_bw_gb_val:.0f} \\text{{ GB/s}}}} \\approx {t_mem_ms_val:.1f} \\text{{ ms}}")
     t_comp_eq = fmt_math(f"T_{{\\text{{comp}}}} = \\frac{{{compute_gflops_val:.0f} \\times 10^9}}{{{h100_peak_tflops_val:.0f} \\times 10^{{12}}}} = {t_comp_ms_val:.2f} \\text{{ ms}}")
@@ -693,7 +703,7 @@ We can apply the iron law (Principle \ref{pri-iron-law}) and Arithmetic Intensit
 
 - **Model-weight byte volume moved** $(D_{\text{vol}})$: `{python} ConclusionRoofline.llama_params_count_str` parameters $\times$ 2 bytes (FP16) = `{python} ConclusionRoofline.llama_dvol_gb_str`.
 - **Compute** $(O)$: $\approx 2 \times P$ per token, where $P$ is the parameter count, = `{python} ConclusionRoofline.llama_compute_gflops_str`.
-- **Hardware**: H100 with $\text{BW}$ = `{python} ConclusionRoofline.h100_bw_tb_str`, $R_{\text{peak}} \approx$ `{python} ConclusionRoofline.h100_peak_tflops_str` FP16.
+- **Hardware**: H100 with $\text{BW}$ = `{python} ConclusionRoofline.h100_bw_tb_s_str`, $R_{\text{peak}} \approx$ `{python} ConclusionRoofline.h100_peak_tflops_str` FP16.
 
 **Math**:
 
@@ -702,7 +712,7 @@ We can apply the iron law (Principle \ref{pri-iron-law}) and Arithmetic Intensit
 
 **Systems insight**:
 
-The memory time $T_{\text{mem}}$ is `{python} ConclusionRoofline.ratio_str` larger than compute time $T_{\text{comp}}$. The system is heavily memory-bound (arithmetic intensity $\approx$ 1). To honor the silicon contract, we must either increase arithmetic intensity (via batching users to reuse $D_{\text{vol}}$) or reduce data volume (via quantization to INT4). A systems engineer who optimizes compute kernels $(T_{\text{comp}})$ without addressing memory $(T_{\text{mem}})$ can improve only the `{python} ConclusionRoofline.t_comp_ms_str` compute term while leaving the `{python} ConclusionRoofline.t_mem_ms_str` memory term untouched.
+The memory time $T_{\text{mem}}$ is `{python} ConclusionRoofline.ratio_str`$\times$ larger than compute time $T_{\text{comp}}$. The system is heavily memory-bound (arithmetic intensity $\approx$ 1). To honor the silicon contract, we must either increase arithmetic intensity (via batching users to reuse $D_{\text{vol}}$) or reduce data volume (via quantization to INT4). A systems engineer who optimizes compute kernels $(T_{\text{comp}})$ without addressing memory $(T_{\text{mem}})$ can improve only the `{python} ConclusionRoofline.t_comp_ms_str` compute term while leaving the `{python} ConclusionRoofline.t_mem_ms_str` memory term untouched.
 
 ::: {.column-margin}
 ![](images/svg/vol1_conclusion_margin_002.svg){width="100%" fig-alt="Margin illustration showing Llama decode dot on H100 memory-bound slope."}
@@ -766,12 +776,12 @@ class TailLatencyRatio:
     check(ratio >= 10, f"P99 tail latency ({ratio:.1f}x) is not significant enough.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    conclusion_tail_ratio_str = fmt(ratio, precision=0, commas=False, suffix="×")
+    conclusion_tail_ratio_str = fmt_multiple(ratio, precision=0, commas=False)
 ```
 
 ### Navigating production reality { .unnumbered}
 
-The transition from *training* to *inference* inverts optimization objectives: where training maximizes throughput over days, inference optimizes latency per request in milliseconds. The latency budget invariant makes P99 the governing constraint, and tracking tail latencies reveals that mean latency tells little about user experience when the 99th-percentile request can be `{python} TailLatencyRatio.conclusion_tail_ratio_str` the mean latency. MLOps (@sec-ml-operations) orchestrates the full system lifecycle, transforming the statistical drift invariant and the training-serving skew law from abstract equations into monitoring alerts and automated retraining triggers.
+The transition from *training* to *inference* inverts optimization objectives: where training maximizes throughput over days, inference optimizes latency per request in milliseconds. The latency budget invariant makes P99 the governing constraint, and tracking tail latencies reveals that mean latency tells little about user experience when the 99th-percentile request can be `{python} TailLatencyRatio.conclusion_tail_ratio_str`$\times$ the mean latency. MLOps (@sec-ml-operations) orchestrates the full system lifecycle, transforming the statistical drift invariant and the training-serving skew law from abstract equations into monitoring alerts and automated retraining triggers.
 
 ::: {.column-margin}
 ![](images/svg/vol1_conclusion_margin_003.svg){width="100%" fig-alt="Margin illustration showing Mean latency versus P99 latency."}
@@ -833,18 +843,18 @@ class EdgeReferenceRatios:
     memory_ratio = h_h100.memory.capacity / phone_ram
 
     # GUARD
-    check(int8_peak_ratio.m_as("") > 10, "Mobile edge example should be far below H100 throughput.")
-    check(memory_ratio.m_as("") > 5, "Mobile edge example should have meaningfully less memory headroom.")
-    check(power_ratio.m_as("") > 100, "Mobile edge example should have a much smaller power envelope.")
+    check(int8_peak_ratio.to("").magnitude > 10, "Mobile edge example should be far below H100 throughput.")
+    check(memory_ratio.to("").magnitude > 5, "Mobile edge example should have meaningfully less memory headroom.")
+    check(power_ratio.to("").magnitude > 100, "Mobile edge example should have a much smaller power envelope.")
 
     # OUTPUT
-    int8_peak_ratio_str = fmt(int8_peak_ratio.m_as(""), precision=1, commas=False, suffix="×")
-    power_ratio_str = fmt(power_ratio.m_as(""), precision=1, commas=False, suffix="×")
-    memory_ratio_str = fmt(memory_ratio.m_as(""), precision=1, commas=False, suffix="×")
+    int8_peak_ratio_str = fmt_multiple(int8_peak_ratio.to("").magnitude, precision=1, commas=False)
+    power_ratio_str = fmt_multiple(power_ratio.to("").magnitude, precision=1, commas=False)
+    memory_ratio_str = fmt_multiple(memory_ratio.to("").magnitude, precision=1, commas=False)
 ```
 
 \index{AI Democratization!edge deployment}
-In contrast, mobile and edge systems face stringent power, memory, and latency constraints that demand sophisticated hardware-software co-design\index{Hardware-Software Co-design!edge deployment}. Efficient architectures introduced in @sec-network-architectures (such as depthwise separable convolutions and neural architecture search) combined with compression techniques from @sec-model-compression (such as quantization and pruning) enable deployment on devices where the book's reference mobile NPU has about `{python} EdgeReferenceRatios.int8_peak_ratio_str` lower INT8 peak throughput, about `{python} EdgeReferenceRatios.memory_ratio_str` less memory headroom, and about `{python} EdgeReferenceRatios.power_ratio_str` smaller power envelope than an H100-class accelerator. Systems that cannot run on billions of edge devices cannot achieve global impact, making edge deployment essential for AI democratization[^fn-ai-democratization].
+In contrast, mobile and edge systems face stringent power, memory, and latency constraints that demand sophisticated hardware-software co-design\index{Hardware-Software Co-design!edge deployment}. Efficient architectures introduced in @sec-network-architectures (such as depthwise separable convolutions and neural architecture search) combined with compression techniques from @sec-model-compression (such as quantization and pruning) enable deployment on devices where the book's reference mobile NPU has about `{python} EdgeReferenceRatios.int8_peak_ratio_str`$\times$ lower INT8 peak throughput, about `{python} EdgeReferenceRatios.memory_ratio_str`$\times$ less memory headroom, and about `{python} EdgeReferenceRatios.power_ratio_str`$\times$ smaller power envelope than an H100-class accelerator. Systems that cannot run on billions of edge devices cannot achieve global impact, making edge deployment essential for AI democratization[^fn-ai-democratization].
 
 [^fn-ai-democratization]: **AI Democratization**: Making AI accessible beyond a small number of well-resourced organizations through efficient systems engineering. Mobile-optimized models and cloud APIs can widen access, but doing so sustainably requires systematic optimization across hardware, algorithms, and infrastructure to maintain quality at scale.
 
@@ -898,6 +908,12 @@ That era demands concrete engineering advances. Achieving exascale sustained thr
 
 Whether or not AGI emerges in its fullest form, the systems principles established throughout this book will remain essential. The principles do not expire; they evolve. Their most immediate evolution is the transition from a single machine to the fleet-scale infrastructure that frontier AI already demands, a transition that brings with it both engineering opportunity and engineering responsibility.
 
+::: {.column-margin}
+![](images/svg/vol1_conclusion_fleet_mtbf_ladder.svg){width="100%" fig-alt="Margin ladder showing one GPU with about 5.7 years mean time to failure versus a 1024 GPU pool with about 48.8 hours mean time between failures."}
+
+*Fleet scale turns rare component failures into routine system events.*
+:::
+
 ## Journey Forward {#sec--journey-forward-6453}
 
 Every frontier explored in the previous section (diverse deployment contexts, robust systems, societal applications, and the path to AGI through compound AI systems) rests on a common foundation: the engineering skills this book has developed. Managing the stochastic nature of data through the data as code invariant (Principle \ref{pri-data-as-code}) and the statistical drift invariant, while enforcing deterministic reliability through the iron law (Principle \ref{pri-iron-law}), silicon contract (Principle \ref{pri-silicon-contract}), and latency budget, requires bridging the gap between Software 1.0's explicit logic and Software 2.0's learned behaviors. That bridge is the engineering rigor required to make probabilistic systems dependable.
@@ -938,7 +954,7 @@ Exercising that responsibility at the scale these applications demand, however, 
 # │          FleetFailureMath.cluster_mtbf_hours_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.physics import calc_mtbf_cluster
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, check, fmt_time
 
 class FleetFailureMath:
     # LOAD
@@ -946,17 +962,17 @@ class FleetFailureMath:
     gpu_mtbf = float(Systems.Reliability.Gpu.mttf_hours) * ureg.hour
 
     # EXECUTE
-    gpu_mtbf_years = gpu_mtbf.m_as("hour") / (HOURS_PER_DAY * DAYS_PER_YEAR)
+    gpu_mtbf_years = gpu_mtbf.to(hour).magnitude / (HOURS_PER_DAY * DAYS_PER_YEAR)
     cluster_mtbf = calc_mtbf_cluster(gpu_mtbf, gpu_count)
 
     # GUARD
     check(gpu_mtbf_years > 1, "Component MTTF should read as years.")
-    check(cluster_mtbf.m_as("hour") < 100, "Thousand-GPU MTBF should read as hours.")
+    check(cluster_mtbf.to(hour).magnitude < 100, "Thousand-GPU MTBF should read as hours.")
 
     # OUTPUT
     gpu_count_str = fmt(gpu_count, precision=0)
-    gpu_mtbf_years_str = fmt(gpu_mtbf_years, precision=1, commas=False, suffix=" years")
-    cluster_mtbf_hours_str = fmt(cluster_mtbf.m_as("hour"), precision=1, commas=False, suffix=" hours")
+    gpu_mtbf_years_str = fmt_time(gpu_mtbf_years, 'year', precision=1, commas=False, style='word')
+    cluster_mtbf_hours_str = fmt_time(cluster_mtbf.to(hour).magnitude, 'hour', precision=1, commas=False, style='word')
 ```
 
 ### Node to fleet { .unnumbered}
@@ -1044,12 +1060,12 @@ class AmdahlPitfallMath:
     check(system_speedup < 1.2, "Amdahl example should remain bottlenecked by preprocessing.")
 
     # OUTPUT
-    local_speedup_str = fmt(local_speedup, precision=0, commas=False, suffix="×")
-    serial_percent_str = fmt(serial_fraction * 100, precision=0, commas=False, suffix=" percent")
-    system_speedup_str = fmt(system_speedup, precision=1, commas=False, suffix="×")
+    local_speedup_str = fmt_multiple(local_speedup, precision=0, commas=False)
+    serial_percent_str = fmt_percent(serial_fraction, precision=0, commas=False, style='prose')
+    system_speedup_str = fmt_multiple(system_speedup, precision=1, commas=False)
 ```
 
-Amdahl's Law (Principle \ref{pri-amdahl}) applies directly to end-to-end ML pipelines. Optimizing inference latency by `{python} AmdahlPitfallMath.local_speedup_str` yields only `{python} AmdahlPitfallMath.system_speedup_str` system speedup if data loading accounts for `{python} AmdahlPitfallMath.serial_percent_str` of end-to-end latency. The iron law of ML systems (Principle \ref{pri-iron-law}) decomposes execution time into data movement, computation, and latency terms precisely so that engineers can identify the dominant term before investing optimization effort. @Sec-benchmarking formalized this diagnostic process through profiling methodologies that measure where time actually goes. Engineers who optimize without profiling are guessing, and Amdahl's Law is unforgiving of guesses that target the wrong term.
+Amdahl's Law (Principle \ref{pri-amdahl}) applies directly to end-to-end ML pipelines. Optimizing inference latency by `{python} AmdahlPitfallMath.local_speedup_str`$\times$ yields only `{python} AmdahlPitfallMath.system_speedup_str`$\times$ system speedup if data loading accounts for `{python} AmdahlPitfallMath.serial_percent_str` of end-to-end latency. The iron law of ML systems (Principle \ref{pri-iron-law}) decomposes execution time into data movement, computation, and latency terms precisely so that engineers can identify the dominant term before investing optimization effort. @Sec-benchmarking formalized this diagnostic process through profiling methodologies that measure where time actually goes. Engineers who optimize without profiling are guessing, and Amdahl's Law is unforgiving of guesses that target the wrong term.
 
 All seven fallacies and pitfalls share a common root: the temptation to reduce a system to its parts, whether by optimizing a single metric, a single stage, or a single moment in time. The key takeaways that follow capture the integrated perspective that resists that reduction.
 

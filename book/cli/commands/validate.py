@@ -404,6 +404,13 @@ class ValidateCommand:
             Scope("multiplier-style", "_run_math_multiplier_style",
                   note="body-prose multiplier suffixes, Unicode ×, product spacing",
                   default=False),
+            # Typed-formatter migration gate: value-kind (percent/multiplier/
+            # percentage-points/count-scale) must be a typed formatter, not a
+            # free-text suffix= on fmt()/fmt_int(). default=False until the
+            # corpus migration completes; flip to gate on pre-commit.
+            Scope("suffix-semantics", "_run_fmt_semantic_suffix",
+                  note="value-kind in suffix= must be a typed formatter",
+                  default=False),
             # render-audit builds every chapter (~10 min). Manual stage only;
             # default=False ensures `binder check math` stays under 1s.
             Scope("render-audit", "_run_math_render_audit", default=False),
@@ -431,6 +438,8 @@ class ValidateCommand:
                   note="physical *_value assignments must use ureg/registry", default=False),
             Scope("lego-equations", "_run_lego_equations",
                   note="A/B=C prose lines must match computed values", default=False),
+            Scope("lego-units", "_run_lego_units",
+                  note="LEGO unit discipline (warning-only + baseline)", default=True),
             # Added 2026-05-26: \\${python} collision — escaped dollar before
             # {python} silently fails to render; correct form is \\$\\`{python}.
             Scope("python-dollar-collision", "_run_python_dollar_collision",
@@ -5528,6 +5537,42 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - start) * 1000),
         )
 
+    def _run_fmt_semantic_suffix(self, root: Path) -> ValidationRunResult:
+        """math --scope suffix-semantics: value-kind must be a typed formatter."""
+        from cli.checks.fmt_semantic_suffix import audit
+
+        start = time.time()
+        qmd_files = self._qmd_files(root)
+        violations = audit([root])
+
+        issues: List[ValidationIssue] = []
+        for violation in violations:
+            file_path = Path(violation.file)
+            try:
+                rel = str(file_path.resolve().relative_to(self.config_manager.book_dir))
+            except ValueError:
+                try:
+                    rel = str(file_path.resolve().relative_to(self.config_manager.root_dir))
+                except ValueError:
+                    rel = violation.file
+            issues.append(ValidationIssue(
+                file=rel,
+                line=violation.line,
+                code=violation.code,
+                message=violation.message,
+                severity="error",
+                context=violation.context,
+                suggestion=violation.suggestion,
+            ))
+
+        return ValidationRunResult(
+            name="fmt-semantic-suffix",
+            description="Value-kind (percent/multiplier/pp/scale) must be a typed formatter",
+            files_checked=len(qmd_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
     # ------------------------------------------------------------------
     # Purpose sections must be unnumbered
     # ------------------------------------------------------------------
@@ -8496,6 +8541,50 @@ class ValidateCommand:
         return ValidationRunResult(
             name="lego-equations",
             description=f"LEGO equation coherence ({qmd_count} files)",
+            files_checked=qmd_count,
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_lego_units(self, root: Path) -> ValidationRunResult:
+        """code --scope lego-units: warning-only LEGO unit discipline linter."""
+        import json
+        import subprocess
+        import sys
+
+        t0 = time.time()
+        repo = root
+        baseline = repo / "book" / "tools" / "audit" / "lego_units_baseline.json"
+        script = repo / "book" / "tools" / "scripts" / "lint_lego_units.py"
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--baseline",
+                str(baseline),
+                "--fail-on",
+                "warning",
+            ],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+        )
+        issues: list[ValidationIssue] = []
+        if proc.returncode != 0 and proc.stdout.strip():
+            for entry in json.loads(proc.stdout):
+                issues.append(
+                    ValidationIssue(
+                        file=entry["file"],
+                        line=entry["line"],
+                        code=entry["rule"],
+                        message=entry["message"],
+                        severity=entry.get("severity", "warning"),
+                    )
+                )
+        qmd_count = len(list((repo / "book" / "quarto" / "contents").rglob("*.qmd")))
+        return ValidationRunResult(
+            name="lego-units",
+            description=f"LEGO unit discipline lint ({qmd_count} files)",
             files_checked=qmd_count,
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),

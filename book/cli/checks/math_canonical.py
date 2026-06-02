@@ -46,7 +46,19 @@ PLAIN_ASSIGN = re.compile(r"^\s*([A-Za-z_]\w*)\s*=\s*([^=].*)$")
 
 # Pattern: matches calls to canonical formatter helpers on the RHS.
 CANONICAL_STR_CALL = re.compile(
-    r"\b(fmt|fmt_qty|fmt_int|fmt_usd|fmt_percent|fmt_val|fmt_unit|fmt_sci|MarkdownStr)\s*\("
+    r"\b(fmt|fmt_qty|fmt_qty_int|fmt_int|fmt_usd|fmt_eur|fmt_percent|fmt_pp|fmt_multiple|fmt_count"
+    r"|fmt_ratio|fmt_range|fmt_qty_range|fmt_time_range|fmt_count_range"
+    r"|fmt_usd_range|fmt_time|fmt_rate|fmt_val|fmt_unit|fmt_sci|fmt_sci_qty"
+    r"|fmt_magnitude"
+    r"|fmt_percent_range|fmt_multiple_range"
+    r"|fmt_power|fmt_energy|fmt_emissions|fmt_bandwidth|fmt_memory|fmt_latency"
+    r"|fmt_memory_capacity"
+    r"|fmt_params|fmt_tokens|fmt_flop_rate|fmt_flops|fmt_ops_rate"
+    r"|fmt_sci_flops|fmt_energy_per_flop|fmt_energy_per_byte|fmt_energy_per_bit"
+    r"|fmt_decibel|fmt_illuminance|fmt_temperature|fmt_temperature_rate"
+    r"|fmt_arithmetic_intensity|fmt_compute_efficiency"
+    r"|fmt_carbon_intensity|fmt_water|fmt_water_rate|fmt_water_intensity"
+    r"|MarkdownStr)\s*\("
 )
 CANONICAL_MATH_CALL = re.compile(
     r"\b(fmt_math|MarkdownStr)\s*\("
@@ -110,7 +122,18 @@ IMPLICIT_INT_CAST_FMT = re.compile(
 # Pattern: fmt-family helper names used as calls in a cell body. Any of these
 # requires a matching `from mlsysim.fmt import ...` line in the file.
 FMT_FAMILY_USE = re.compile(
-    r"\b(fmt|fmt_qty|fmt_int|fmt_usd|fmt_math|fmt_percent|fmt_val|fmt_unit|fmt_sci|fmt_frac|sci_latex|MarkdownStr|check)\s*\("
+    r"\b(fmt|fmt_qty|fmt_qty_int|fmt_int|fmt_usd|fmt_eur|fmt_math|fmt_percent|fmt_pp|fmt_multiple"
+    r"|fmt_count|fmt_ratio|fmt_range|fmt_qty_range|fmt_time_range"
+    r"|fmt_count_range|fmt_usd_range|fmt_time|fmt_rate|fmt_val|fmt_unit"
+    r"|fmt_magnitude"
+    r"|fmt_power|fmt_energy|fmt_emissions|fmt_bandwidth|fmt_memory|fmt_latency"
+    r"|fmt_memory_capacity"
+    r"|fmt_params|fmt_tokens|fmt_flop_rate|fmt_flops|fmt_ops_rate"
+    r"|fmt_sci_flops|fmt_energy_per_flop|fmt_energy_per_byte|fmt_energy_per_bit"
+    r"|fmt_decibel|fmt_illuminance|fmt_temperature|fmt_temperature_rate"
+    r"|fmt_arithmetic_intensity|fmt_compute_efficiency"
+    r"|fmt_carbon_intensity|fmt_water|fmt_water_rate|fmt_water_intensity"
+    r"|fmt_sci|fmt_frac|sci_latex|MarkdownStr|check)\s*\("
 )
 
 # Pattern: `from mlsysim.fmt import ...` block (possibly multi-line in parens
@@ -123,8 +146,22 @@ MLSYSIM_STAR_IMPORT = re.compile(r"\bfrom\s+mlsysim\s+import\s+\*")
 
 # Names exported by `from mlsysim import *` that belong to the fmt family.
 MLSYSIM_STAR_FMT_NAMES = frozenset({
-    "fmt", "fmt_qty", "fmt_int", "fmt_usd", "fmt_percent", "fmt_val", "fmt_unit",
-    "fmt_sci", "fmt_frac", "fmt_math", "MarkdownStr", "check", "sci_latex",
+    "fmt", "fmt_qty", "fmt_qty_int", "fmt_int", "fmt_usd", "fmt_eur", "fmt_percent", "fmt_pp", "fmt_multiple",
+    "fmt_count", "fmt_ratio", "fmt_range", "fmt_qty_range", "fmt_time_range",
+    "fmt_count_range", "fmt_usd_range", "fmt_time", "fmt_rate", "fmt_val",
+    "fmt_unit", "fmt_sci", "fmt_sci_qty", "fmt_magnitude", "fmt_frac", "fmt_math", "MarkdownStr", "check",
+    "fmt_percent_range", "fmt_multiple_range",
+    "sci_latex",
+    "fmt_power", "fmt_energy", "fmt_emissions", "fmt_bandwidth", "fmt_memory",
+    "fmt_latency", "fmt_memory_capacity",
+    "fmt_params", "fmt_tokens", "fmt_flop_rate", "fmt_compute_efficiency",
+    "fmt_flops", "fmt_ops_rate", "fmt_arithmetic_intensity",
+    "fmt_sci_flops", "fmt_energy_per_flop", "fmt_energy_per_byte",
+    "fmt_energy_per_bit",
+    "fmt_decibel", "fmt_illuminance", "fmt_temperature",
+    "fmt_temperature_rate",
+    "fmt_carbon_intensity", "fmt_water", "fmt_water_rate",
+    "fmt_water_intensity",
 })
 
 # Pattern: fmt_percent(..., suffix=...) — fmt_percent does not accept suffix=.
@@ -199,7 +236,7 @@ def _audit_python_cells(qmd_path: Path) -> list[Violation]:
 
         # Skip when RHS itself is a function call to a canonical helper.
         if suffix == "_str":
-            if CANONICAL_STR_CALL.search(rhs):
+            if CANONICAL_STR_CALL.search(rhs) or CANONICAL_MATH_CALL.search(rhs):
                 continue
         elif suffix in ("_math", "_eq"):
             if CANONICAL_MATH_CALL.search(rhs):
@@ -225,7 +262,10 @@ def _audit_python_cells(qmd_path: Path) -> list[Violation]:
                 code=code,
                 message=(
                     f"`{varname}` (suffix `{suffix}`) is not built via the "
-                    f"canonical helper family (fmt/fmt_math/fmt_frac/MarkdownStr). "
+                    f"canonical helper family (fmt/fmt_int/fmt_usd/fmt_percent/"
+                    f"fmt_pp/fmt_multiple/fmt_count/fmt_ratio/fmt_range/fmt_qty/fmt_qty_int/"
+                    f"fmt_*_range/fmt_time/fmt_rate/domain fmt helpers/fmt_math/fmt_frac/"
+                    f"MarkdownStr). "
                     f"Use the appropriate helper from mlsysim.fmt so the value "
                     f"renders correctly inside math mode."
                 ),
@@ -578,10 +618,10 @@ def _audit_missing_fmt_imports(qmd_path: Path) -> list[Violation]:
 def _audit_fmt_percent_suffix(qmd_path: Path) -> list[Violation]:
     """Flag ``fmt_percent(..., suffix=...)`` calls.
 
-    ``fmt_percent()`` does not accept a ``suffix=`` keyword argument — it
-    returns the bare percentage number.  Passing ``suffix=`` raises
-    ``TypeError`` at render time.  Use ``fmt(x * 100, precision=N,
-    suffix=...)`` instead.
+    ``fmt_percent()`` does not accept a ``suffix=`` keyword argument.  The
+    percent glyph is owned by the formatter via ``style=`` (``'prose'`` →
+    "85 percent", ``'symbol'`` → "85%", ``'number'`` → "85").  Passing
+    ``suffix=`` raises ``TypeError`` at render time.
     """
     out: list[Violation] = []
     lines = qmd_path.read_text(encoding="utf-8").splitlines()
@@ -603,8 +643,10 @@ def _audit_fmt_percent_suffix(qmd_path: Path) -> list[Violation]:
                     line=i,
                     code="fmt_percent_suffix",
                     message=(
-                        "fmt_percent() does not accept suffix=; "
-                        "use fmt(x * 100, precision=N, suffix=...) instead"
+                        "fmt_percent() does not accept suffix=. The percent "
+                        "glyph is owned by the formatter: pass style='prose' "
+                        "(\"85 percent\") or style='symbol' (\"85%\") instead "
+                        "of a suffix."
                     ),
                     context=line.strip()[:160],
                 )

@@ -11,6 +11,7 @@ from ..core import provenance_catalog as pc
 PUE_LIQUID_COOLED = sourced(1.06, pc.UPTIME_PUE_2022, name="PUE (Liquid-Cooled)", description="Best-in-class liquid-cooled AI datacenter PUE.")
 PUE_BEST_AIR = sourced(1.12, pc.UPTIME_PUE_2022, name="PUE (Best Air-Cooled)", description="Best-in-class air-cooled hyperscale datacenter PUE.")
 PUE_TYPICAL = sourced(1.40, pc.UPTIME_PUE_2022, name="PUE (Industry Average)", description="Industry average traditional datacenter PUE.")
+PUE_SIMPLE_AIR = sourced(1.50, pc.UPTIME_PUE_2022, name="PUE (Simple Air)", description="Simple air-cooled datacenter PUE tier.")
 PUE_LEGACY = sourced(1.58, pc.UPTIME_PUE_2022, name="PUE (Legacy Air-Cooled)", description="Older enterprise datacenter PUE tier.")
 PUE_STATE_OF_ART = sourced(1.10, pc.UPTIME_PUE_2022, name="PUE (state of art)", description="Highly optimized modern datacenter PUE benchmark.")
 WUE_AIR_COOLED = sourced(0.5, pc.WUE_ANCHORS, name="WUE (air-cooled)", description="Water usage effectiveness for air-cooled facilities.")
@@ -28,6 +29,7 @@ class FacilityCooling(Registry):
     LiquidCooled = CoolingProfile(name="Liquid-Cooled", pue=PUE_LIQUID_COOLED, wue=WUE_LIQUID, metadata=Metadata(provenance=pc.UPTIME_PUE_2022))
     BestAir = CoolingProfile(name="Best Air-Cooled", pue=PUE_BEST_AIR, wue=WUE_EVAPORATIVE, metadata=Metadata(provenance=pc.UPTIME_PUE_2022))
     Typical = CoolingProfile(name="Industry Average", pue=PUE_TYPICAL, wue=WUE_EVAPORATIVE, metadata=Metadata(provenance=pc.UPTIME_PUE_2022))
+    SimpleAir = CoolingProfile(name="Simple Air-Cooled", pue=PUE_SIMPLE_AIR, wue=WUE_EVAPORATIVE, metadata=Metadata(provenance=pc.UPTIME_PUE_2022))
     Legacy = CoolingProfile(name="Legacy Air-Cooled", pue=PUE_LEGACY, wue=WUE_EVAPORATIVE, metadata=Metadata(provenance=pc.UPTIME_PUE_2022))
     StateOfArt = CoolingProfile(name="State of Art", pue=PUE_STATE_OF_ART, wue=WUE_EVAPORATIVE, metadata=Metadata(provenance=pc.UPTIME_PUE_2022))
 

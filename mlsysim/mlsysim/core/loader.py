@@ -157,11 +157,10 @@ def load_sourced_registry(yaml_file, *, name: str, doc: str = "", module: str | 
 
     For literature/anchor registries whose entries are ``sourced(value, prov, …)``
     scalars (a ``float`` subclass carrying provenance) rather than pydantic models.
-    Each entry is either:
-
-    * a mapping ``{value, provenance: <catalog-key>, name?, description?}`` →
-      rebuilt via ``sourced(value, provenance_catalog.<key>, …)``; or
-    * a bare scalar (``int``/``float``) → stored as-is (e.g. critical batch sizes).
+    Each entry must be a mapping
+    ``{value, provenance: <catalog-key>, name?, description?}`` and is rebuilt via
+    ``sourced(value, provenance_catalog.<key>, …)``. Bare scalars are rejected so
+    sourced registries cannot silently bypass provenance.
     """
     from .provenance import sourced
     from . import provenance_catalog as pc
@@ -169,13 +168,14 @@ def load_sourced_registry(yaml_file, *, name: str, doc: str = "", module: str | 
     raw = _load_mapping(yaml_file)
     attrs: dict[str, Any] = {"__doc__": doc, "__module__": module or _caller_module()}
     for key, v in raw.items():
-        if isinstance(v, dict) and "provenance" in v:
-            attrs[key] = sourced(
-                v["value"], getattr(pc, v["provenance"]),
-                name=v.get("name", ""), description=v.get("description", ""),
+        if not isinstance(v, dict) or "provenance" not in v or "value" not in v:
+            raise ValueError(
+                f"{yaml_file}:{key} must define value and provenance for sourced registries"
             )
-        else:
-            attrs[key] = v
+        attrs[key] = sourced(
+            v["value"], getattr(pc, v["provenance"]),
+            name=v.get("name", ""), description=v.get("description", ""),
+        )
     return type(name, (Registry,), attrs)
 
 

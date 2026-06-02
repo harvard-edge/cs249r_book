@@ -43,8 +43,8 @@ from mlsysim.core.constants import *
 # │       "Numbers Every ML Systems Engineer Should Know" reference section.
 # │ Show: Energy ratios (~580$\times$ DRAM vs FP16 compute), latency hierarchy,
 # │       bandwidth specs, ridge points for A100/H100.
-# │ How: Scalar extraction via .m_as(unit); ratios remain stable across
-# │       hardware generations.
+# │ How: Quantities stay attached until ratio reduction or output formatting.
+# │       Ratios remain stable across hardware generations.
 # │
 # │ Imports: mlsysim.core.constants (*), mlsysim.book (fmt); energy figures via
 # │          Hardware.Tech.{Memory,Op} (energy-per-access / energy)
@@ -52,14 +52,14 @@ from mlsysim.core.constants import *
 # │          l1_vs_reg_str, hbm_vs_register_str, ssd_vs_register_str,
 # │          network_vs_local_str, gpu_bw_vs_pcie_str, lat_l1_ns_str,
 # │          lat_l2_ns_str, lat_hbm_ns_str, lat_pcie_ns_str, lat_ib_ns_str,
-# │          lat_ssd_ns_str, bw_hbm_h100_str, bw_pcie5_str, bw_dram_str,
-# │          bw_ib_str, bw_nvme_str, flops_h100_fp16_str, flops_h100_fp8_str,
-# │          flops_a100_fp16_str, mobile_tops_int8_str, dc_mobile_ratio_str,
+# │          lat_ssd_ns_str, bw_hbm_h100_tb_s_str, bw_pcie5_gb_s_str, bw_dram_gb_s_str,
+# │          bw_ib_gb_s_str, bw_nvme_gb_s_str, flops_h100_fp16_tflops_str, flops_h100_fp8_tflops_str,
+# │          flops_a100_fp16_tflops_str, mobile_tops_int8_str, dc_mobile_ratio_str,
 # │          ridge_a100_str, ridge_h100_str, hbm_vs_register_str,
 # │          ssd_vs_register_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt_int, fmt_int, fmt, MarkdownStr
+from mlsysim.fmt import fmt_int, fmt_int, fmt, fmt_qty, fmt_bandwidth, MarkdownStr
 from mlsysim.core.constants import (
     TOPS,
     SECONDS_PER_MINUTE, SEC_PER_HOUR, SEC_PER_DAY,
@@ -89,49 +89,48 @@ class NumbersToKnow:
     LATENCY_HBM3 = Hardware.Tech.Memory.DRAM.latency
     LATENCY_PCIE_GEN5 = Hardware.Tech.Interconnect.PCIeGen5.latency
     LATENCY_NVME_SSD = Hardware.Tech.Storage.NvmeGen4.latency
-    LATENCY_INFINIBAND = round(Systems.Fabrics.InfiniBand_NDR.latency.m_as(NS)) * NS  # µs→ns, round to exact 5000
+    LATENCY_INFINIBAND = round(Systems.Fabrics.InfiniBand_NDR.latency.to(nanosecond).magnitude) * nanosecond  # µs→ns, round to exact 5000
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Step 1: Physics Constants (Eternal)
-    speed_of_light_km_ms = int(SPEED_OF_LIGHT_FIBER_KM_S.m_as(ureg.kilometer / ureg.millisecond))
+    speed_of_light = SPEED_OF_LIGHT_FIBER_KM_S.to(km / ms)
 
     # Step 2: Energy Ratios (Stable across process nodes)
-    dram_vs_compute = int(ENERGY_DRAM_ACCESS_PJ.m_as(ureg.picojoule) / ENERGY_FLOP_FP16_PJ.m_as(ureg.picojoule))
-    fp32_vs_int8 = int(ENERGY_FLOP_FP32_PJ.m_as(ureg.picojoule) / ENERGY_OP_INT8_PJ.m_as(ureg.picojoule))
-    fp32_vs_fp16 = round(ENERGY_FLOP_FP32_PJ.m_as(ureg.picojoule) / ENERGY_FLOP_FP16_PJ.m_as(ureg.picojoule), 1)
-    l1_vs_reg = int(ENERGY_SRAM_L1_PJ.m_as(ureg.picojoule) / ENERGY_REG_PJ.m_as(ureg.picojoule))
+    dram_vs_compute = int((ENERGY_DRAM_ACCESS_PJ / ENERGY_FLOP_FP16_PJ).to_base_units().magnitude)
+    fp32_vs_int8 = int((ENERGY_FLOP_FP32_PJ / ENERGY_OP_INT8_PJ).to_base_units().magnitude)
+    fp32_vs_fp16 = round((ENERGY_FLOP_FP32_PJ / ENERGY_FLOP_FP16_PJ).to_base_units().magnitude, 1)
+    l1_vs_reg = int((ENERGY_SRAM_L1_PJ / ENERGY_REG_PJ).to_base_units().magnitude)
 
     # Step 3: Memory Hierarchy Ratios (Stable)
-    register_latency_ns = LATENCY_REGISTER_REF.m_as(NS)
-    hbm_vs_register = int(LATENCY_HBM3.m_as(NS) / register_latency_ns)
-    ssd_vs_register = int(round((LATENCY_NVME_SSD.m_as(NS) / register_latency_ns) / 100_000) * 100_000)
-    network_vs_local = int(LATENCY_INFINIBAND.m_as(NS) / LATENCY_HBM3.m_as(NS))
-    gpu_bw_vs_pcie = int(h_h100.memory.bandwidth.m_as(GB/second) / Hardware.Cloud.H100.interconnect.bandwidth.m_as(GB/second))
+    hbm_vs_register = int((LATENCY_HBM3 / LATENCY_REGISTER_REF).to_base_units().magnitude)
+    ssd_vs_register = int(round(((LATENCY_NVME_SSD / LATENCY_REGISTER_REF).to_base_units().magnitude) / 100_000) * 100_000)
+    network_vs_local = int((LATENCY_INFINIBAND / LATENCY_HBM3).to_base_units().magnitude)
+    gpu_bw_vs_pcie = int((h_h100.memory.bandwidth / Hardware.Cloud.H100.interconnect.bandwidth).to_base_units().magnitude)
 
     # Step 4: Current Hardware Reference (circa 2024)
-    lat_l1_ns = int(LATENCY_L1_REGISTER.m_as(NS))
-    lat_l2_ns = int(LATENCY_L2_CACHE.m_as(NS))
-    lat_hbm_ns = int(LATENCY_HBM3.m_as(NS))
-    lat_pcie_ns = int(LATENCY_PCIE_GEN5.m_as(NS))
-    lat_ib_ns = int(LATENCY_INFINIBAND.m_as(NS))
-    lat_ssd_ns = int(LATENCY_NVME_SSD.m_as(NS))
+    lat_l1 = LATENCY_L1_REGISTER.to(nanosecond)
+    lat_l2 = LATENCY_L2_CACHE.to(nanosecond)
+    lat_hbm = LATENCY_HBM3.to(nanosecond)
+    lat_pcie = LATENCY_PCIE_GEN5.to(nanosecond)
+    lat_ib = LATENCY_INFINIBAND.to(nanosecond)
+    lat_ssd = LATENCY_NVME_SSD.to(nanosecond)
 
-    bw_pcie5 = int(Hardware.Cloud.H100.interconnect.bandwidth.m_as(GB/second))
-    bw_dram = int(Hardware.Tech.Storage.SystemMemory.bandwidth.m_as(GB/second))
-    bw_ib = int(f.InfiniBand_NDR.bandwidth.m_as(GB/second))
+    bw_pcie5 = Hardware.Cloud.H100.interconnect.bandwidth.to(GB/second)
+    bw_dram = Hardware.Tech.Storage.SystemMemory.bandwidth.to(GB/second)
+    bw_ib = f.InfiniBand_NDR.bandwidth.to(GB/second)
 
-    flops_h100_fp16 = int(h_h100.compute.peak_flops.m_as(TFLOPs/second))
-    flops_h100_fp8 = int(h_h100.compute.precision_flops["fp8"].m_as(TFLOPs/second))
-    flops_a100_fp16 = int(h_a100.compute.peak_flops.m_as(TFLOPs/second))
-    mobile_tops_int8 = int(Hardware.Mobile.iPhone15Pro.compute.peak_flops.m_as(TOPS))
-    dc_mobile_ratio = flops_h100_fp16 / mobile_tops_int8
+    flops_h100_fp16 = h_h100.compute.peak_flops.to(TFLOPs/second)
+    flops_h100_fp8 = h_h100.compute.precision_flops["fp8"].to(TFLOPs/second)
+    flops_a100_fp16 = h_a100.compute.peak_flops.to(TFLOPs/second)
+    mobile_tops_int8 = Hardware.Mobile.iPhone15Pro.compute.peak_flops.to(TOPS)
+    dc_mobile_ratio = (flops_h100_fp16 / mobile_tops_int8).to_base_units().magnitude
 
-    ridge_a100 = int(h_a100.ridge_point().m_as("flop/byte"))
-    ridge_h100 = int(h_h100.ridge_point().m_as("flop/byte"))
+    ridge_a100 = int(h_a100.ridge_point().to(flop/byte).magnitude)
+    ridge_h100 = int(h_h100.ridge_point().to(flop/byte).magnitude)
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     # Canonical _str forms for prose; raw ints/floats above kept for arithmetic.
-    from mlsysim.fmt import fmt_int, fmt
+    from mlsysim.fmt import fmt_int, fmt, fmt_flop_rate, fmt_qty, fmt_bandwidth
     dram_vs_compute_str = fmt(dram_vs_compute, precision=0, commas=False)
     fp32_vs_int8_str = fmt(fp32_vs_int8, precision=0, commas=False)
     fp32_vs_fp16_str = fmt(fp32_vs_fp16, precision=1, commas=False)
@@ -142,23 +141,23 @@ class NumbersToKnow:
     network_vs_local_str = fmt(network_vs_local, precision=0, commas=False)
     gpu_bw_vs_pcie_str = fmt(gpu_bw_vs_pcie, precision=0, commas=False)
 
-    lat_l1_ns_str = fmt(lat_l1_ns, precision=0, commas=False)
-    lat_l2_ns_str = fmt(lat_l2_ns, precision=0, commas=False)
-    lat_hbm_ns_str = fmt(lat_hbm_ns, precision=0, commas=False)
-    lat_pcie_ns_str = fmt(lat_pcie_ns, precision=0, commas=False)
-    lat_ib_ns_str = fmt(lat_ib_ns, precision=0, commas=False)
-    lat_ssd_ns_str = fmt(lat_ssd_ns, precision=0, commas=False)
+    lat_l1_ns_str = fmt_time(lat_l1, unit=nanosecond, precision=0, commas=False)
+    lat_l2_ns_str = fmt_time(lat_l2, unit=nanosecond, precision=0, commas=False)
+    lat_hbm_ns_str = fmt_time(lat_hbm, unit=nanosecond, precision=0, commas=False)
+    lat_pcie_ns_str = fmt_time(lat_pcie, unit=nanosecond, precision=0, commas=False)
+    lat_ib_ns_str = fmt_time(lat_ib, unit=nanosecond, precision=0, commas=False)
+    lat_ssd_ns_str = fmt_time(lat_ssd, unit=nanosecond, precision=0, commas=False)
 
-    bw_hbm_h100_str = fmt(h_h100.memory.bandwidth.m_as(TB/second), precision=1, commas=False)
-    bw_pcie5_str = fmt(bw_pcie5, precision=0, commas=False)
-    bw_dram_str = fmt(bw_dram, precision=0, commas=False)
-    bw_ib_str = fmt(bw_ib, precision=0, commas=False)
-    bw_nvme_str = fmt(Hardware.Tech.Storage.NvmeGen4.bandwidth.m_as(GB/second), precision=0, commas=False)
+    bw_hbm_h100_tb_s_str = fmt_bandwidth(h_h100.memory.bandwidth, unit=TB/second, precision=1, commas=False)
+    bw_pcie5_gb_s_str = fmt_bandwidth(bw_pcie5, unit=GB/second, precision=0, commas=False)
+    bw_dram_gb_s_str = fmt_bandwidth(bw_dram, unit=GB/second, precision=0, commas=False)
+    bw_ib_gb_s_str = fmt_bandwidth(bw_ib, unit=GB/second, precision=0, commas=False)
+    bw_nvme_gb_s_str = fmt_bandwidth(Hardware.Tech.Storage.NvmeGen4.bandwidth, unit=GB/second, precision=0, commas=False)
 
-    flops_h100_fp16_str = fmt(flops_h100_fp16, precision=0, commas=False)
-    flops_h100_fp8_str = fmt(flops_h100_fp8, precision=0, commas=False)
-    flops_a100_fp16_str = fmt(flops_a100_fp16, precision=0, commas=False)
-    mobile_tops_int8_str = fmt(mobile_tops_int8, precision=0, commas=False)
+    flops_h100_fp16_tflops_str = fmt_flop_rate(flops_h100_fp16, unit=TFLOPs/second, precision=0, commas=False)
+    flops_h100_fp8_tflops_str = fmt_flop_rate(flops_h100_fp8, unit=TFLOPs/second, precision=0, commas=False)
+    flops_a100_fp16_tflops_str = fmt_flop_rate(flops_a100_fp16, unit=TFLOPs/second, precision=0, commas=False)
+    mobile_tops_int8_str = fmt_ops_rate(mobile_tops_int8, unit=TOPS, precision=0, commas=False)
     dc_mobile_ratio_str = fmt(dc_mobile_ratio, precision=1, commas=False)
 
     ridge_a100_str = fmt(ridge_a100, precision=0, commas=False)
@@ -261,16 +260,16 @@ These numbers reflect the current generation. Use them for back-of-envelope calc
 
 @Tbl-memory-current-ref captures the full latency and bandwidth hierarchy for current-generation hardware.
 
-| Level                |                   Latency                    |                 Bandwidth                  |
-|:---------------------|:--------------------------------------------:|:------------------------------------------:|
-| Register             |                   ~0.3 ns                    |                     —                      |
-| L1 Cache             |  ~`{python} NumbersToKnow.lat_l1_ns_str` ns  |                     —                      |
-| L2 Cache             |  ~`{python} NumbersToKnow.lat_l2_ns_str` ns  |                     —                      |
-| GPU HBM3             | ~`{python} NumbersToKnow.lat_hbm_ns_str` ns  | `{python} NumbersToKnow.bw_hbm_h100_str`/s |
-| PCIe Gen5 (CPU↔GPU)  | ~`{python} NumbersToKnow.lat_pcie_ns_str` ns |  `{python} NumbersToKnow.bw_pcie5_str`/s   |
-| CPU DRAM             |                   ~100 ns                    |   `{python} NumbersToKnow.bw_dram_str`/s   |
-| InfiniBand (network) |  ~`{python} NumbersToKnow.lat_ib_ns_str` ns  |    `{python} NumbersToKnow.bw_ib_str`/s    |
-| NVMe SSD             | ~`{python} NumbersToKnow.lat_ssd_ns_str` ns  |   `{python} NumbersToKnow.bw_nvme_str`/s   |
+| Level                |                  Latency                  |                   Bandwidth                   |
+|:---------------------|:-----------------------------------------:|:---------------------------------------------:|
+| Register             |                  ~0.3 ns                  |                       —                       |
+| L1 Cache             |  ~`{python} NumbersToKnow.lat_l1_ns_str`  |                       —                       |
+| L2 Cache             |  ~`{python} NumbersToKnow.lat_l2_ns_str`  |                       —                       |
+| GPU HBM3             |  ~`{python} NumbersToKnow.lat_hbm_ns_str` | `{python} NumbersToKnow.bw_hbm_h100_tb_s_str` |
+| PCIe Gen5 (CPU↔GPU)  | ~`{python} NumbersToKnow.lat_pcie_ns_str` |   `{python} NumbersToKnow.bw_pcie5_gb_s_str`  |
+| CPU DRAM             |                  ~100 ns                  |   `{python} NumbersToKnow.bw_dram_gb_s_str`   |
+| InfiniBand (network) |  ~`{python} NumbersToKnow.lat_ib_ns_str`  |    `{python} NumbersToKnow.bw_ib_gb_s_str`    |
+| NVMe SSD             |  ~`{python} NumbersToKnow.lat_ssd_ns_str` |   `{python} NumbersToKnow.bw_nvme_gb_s_str`   |
 
 : **Memory Hierarchy (c. 2024)**: Specific values for current hardware. {#tbl-memory-current-ref tbl-colwidths="[33,33,33]"}
 
@@ -278,11 +277,11 @@ These numbers reflect the current generation. Use them for back-of-envelope calc
 
 @Tbl-compute-current-ref shows the raw throughput available at each tier of the deployment hierarchy.
 
-| Platform               |                  FP16/BF16                   |                     INT8/FP8-class                     | Power |
-|:-----------------------|:--------------------------------------------:|:------------------------------------------------------:|:-----:|
-| Data center GPU (H100) | `{python} NumbersToKnow.flops_h100_fp16_str` | `{python} NumbersToKnow.flops_h100_fp8_str` (FP8 peak) | 700 W |
-| Data center GPU (A100) | `{python} NumbersToKnow.flops_a100_fp16_str` |                        624 TOPS                        | 400 W |
-| Mobile NPU             |                      —                       |   `{python} NumbersToKnow.mobile_tops_int8_str` TOPS   | 3–5 W |
+| Platform               |                      FP16/BF16                      |                         INT8/FP8-class                        | Power |
+|:-----------------------|:---------------------------------------------------:|:-------------------------------------------------------------:|:-----:|
+| Data center GPU (H100) | `{python} NumbersToKnow.flops_h100_fp16_tflops_str` | `{python} NumbersToKnow.flops_h100_fp8_tflops_str` (FP8 peak) | 700 W |
+| Data center GPU (A100) | `{python} NumbersToKnow.flops_a100_fp16_tflops_str` |                            624 TOPS                           | 400 W |
+| Mobile NPU             |                          —                          |       `{python} NumbersToKnow.mobile_tops_int8_str` TOPS      | 3–5 W |
 
 : **Compute Reference (c. 2024)**: Using the current FP16 and mobile INT8 constants, data-center peak throughput is about `{python} NumbersToKnow.dc_mobile_ratio_str`$\times$ the mobile reference; exact ratios depend on precision mode and workload. {#tbl-compute-current-ref tbl-colwidths="[33,20,32,15]"}
 
@@ -369,38 +368,38 @@ Doubling the batch size $B$ doubles FLOPs while keeping weight loads constant—
 # │ Context: @sec-appdx-machine-foundations-concrete-example-a100-analysis-5b30
 # │ Goal: A100 ridge point; GEMM vs ReLU intensity comparison
 # │ Exports: A100RooflineExample.*_str
-from mlsysim.fmt import fmt
+from mlsysim.fmt import fmt, fmt_arithmetic_intensity, fmt_flop_rate, fmt_qty
 
 class A100RooflineExample:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    n_gemm_value = 4096
-    relu_intensity_value = 0.25
+    n_gemm = 4096
+    relu_intensity = 0.25 * (flop / byte)  # scenario assumption: elementwise ReLU arithmetic intensity
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    a100_fp16_raw_value = Hardware.Cloud.A100.compute.peak_flops.m_as(TFLOPs/second)
-    a100_bw_raw_value = Hardware.Cloud.A100.memory.bandwidth.m_as(TB/second)
-    ridge_point_value = int(a100_fp16_raw_value / a100_bw_raw_value)
-    gemm_intensity_value = int(n_gemm_value / 3)
-    relu_achieved_tflops_value = relu_intensity_value * a100_bw_raw_value
-    relu_utilization_value = relu_achieved_tflops_value / a100_fp16_raw_value * 100
+    a100_fp16 = Hardware.Cloud.A100.compute.peak_flops
+    a100_bw = Hardware.Cloud.A100.memory.bandwidth
+    ridge_point = (a100_fp16 / a100_bw).to(flop / byte)
+    gemm_intensity = int(n_gemm / 3) * (flop / byte)
+    relu_achieved = (relu_intensity * a100_bw).to(TFLOPs / second)
+    relu_utilization_value = (relu_achieved / a100_fp16).to_base_units().magnitude * 100
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    a100_fp16_str = fmt(a100_fp16_raw_value, precision=0, suffix=' TFLOP/s')
-    a100_bw_tb_str = fmt(a100_bw_raw_value, precision=2, commas=False, suffix=' TB/s')
-    n_gemm_str = fmt(n_gemm_value, precision=0, commas=False)
-    ridge_point_str = fmt(ridge_point_value, precision=0, commas=False)
-    gemm_intensity_str = fmt(gemm_intensity_value, precision=0, commas=False)
-    relu_intensity_str = fmt(relu_intensity_value, precision=2, commas=False)
-    relu_util_str = fmt(relu_utilization_value, precision=2, commas=False, suffix=' percent')
+    a100_fp16_tflops_str = fmt_flop_rate(a100_fp16, unit=TFLOPs/second, precision=0)
+    a100_bw_tb_s_str = fmt_qty(a100_bw, TB/second, precision=2, commas=False)
+    n_gemm_str = fmt(n_gemm, precision=0, commas=False)
+    ridge_point_flops_per_byte_str = fmt_arithmetic_intensity(ridge_point, commas=False)
+    gemm_intensity_str = fmt_arithmetic_intensity(gemm_intensity, commas=False)
+    relu_intensity_str = fmt_arithmetic_intensity(relu_intensity, precision=2, commas=False)
+    relu_util_str = fmt_percent(relu_utilization_value/100, precision=2, commas=False, style='prose')
 ```
 
-Consider an NVIDIA A100 GPU with FP16 Tensor Core performance of `{python} A100RooflineExample.a100_fp16_str` and HBM2e bandwidth of `{python} A100RooflineExample.a100_bw_tb_str`. The ridge point is `{python} A100RooflineExample.a100_fp16_str`/`{python} A100RooflineExample.a100_bw_tb_str` = `{python} A100RooflineExample.ridge_point_str` FLOP/byte (the Tera prefixes cancel, yielding FLOP/byte).
+Consider an NVIDIA A100 GPU with FP16 Tensor Core performance of `{python} A100RooflineExample.a100_fp16_tflops_str` and HBM2e bandwidth of `{python} A100RooflineExample.a100_bw_tb_s_str`. The ridge point is `{python} A100RooflineExample.a100_fp16_tflops_str`/`{python} A100RooflineExample.a100_bw_tb_s_str` = `{python} A100RooflineExample.ridge_point_flops_per_byte_str` (the Tera prefixes cancel, yielding FLOP/byte).
 
 Consider two common operations:
 
-**General matrix multiply (GEMM)**: For two square matrices of size `{python} A100RooflineExample.n_gemm_str` by `{python} A100RooflineExample.n_gemm_str`, arithmetic intensity is approximately `{python} A100RooflineExample.gemm_intensity_str` FLOP/byte. Since `{python} A100RooflineExample.gemm_intensity_str` > `{python} A100RooflineExample.ridge_point_str`, this operation is compute bound. You are using the hardware efficiently.
+**General matrix multiply (GEMM)**: For two square matrices of size `{python} A100RooflineExample.n_gemm_str` by `{python} A100RooflineExample.n_gemm_str`, arithmetic intensity is approximately `{python} A100RooflineExample.gemm_intensity_str`. Since `{python} A100RooflineExample.gemm_intensity_str` > `{python} A100RooflineExample.ridge_point_flops_per_byte_str`, this operation is compute bound. You are using the hardware efficiently.
 
-**ReLU (Element-wise)**: For a square tensor of size `{python} A100RooflineExample.n_gemm_str` by `{python} A100RooflineExample.n_gemm_str`, intensity is approximately `{python} A100RooflineExample.relu_intensity_str` FLOP/byte. Since `{python} A100RooflineExample.relu_intensity_str` ≪ `{python} A100RooflineExample.ridge_point_str`, this operation is severely memory bound, achieving only about `{python} A100RooflineExample.relu_util_str` of peak TFLOP/s. The hardware is mostly waiting for data.
+**ReLU (Element-wise)**: For a square tensor of size `{python} A100RooflineExample.n_gemm_str` by `{python} A100RooflineExample.n_gemm_str`, intensity is approximately `{python} A100RooflineExample.relu_intensity_str`. Since `{python} A100RooflineExample.relu_intensity_str` ≪ `{python} A100RooflineExample.ridge_point_flops_per_byte_str`, this operation is severely memory bound, achieving only about `{python} A100RooflineExample.relu_util_str` of peak TFLOP/s. The hardware is mostly waiting for data.
 
 This explains why modern frameworks fuse operations: combining ReLU with the preceding MatMul avoids writing intermediate results to memory, effectively increasing arithmetic intensity.
 
@@ -459,23 +458,23 @@ class AmdahlSetup:
     """Namespace for Amdahl's Law lead-in constants."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    s_value = 0.05   # Serial fraction
-    n_8_value = 8    # Number of processors for example
+    serial_fraction = 0.05   # Serial fraction
+    processor_count = 8      # Number of processors for example
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    p_value = 1 - s_value  # Parallel fraction
-    s_pct_value = int(s_value * 100)
-    p_pct_value = int(p_value * 100)
+    parallel_fraction = 1 - serial_fraction
+    serial_pct = int(serial_fraction * 100)
+    parallel_pct = int(parallel_fraction * 100)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     # No check() calls needed—values are definitional constants.
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    s_pct_str = fmt(s_pct_value, precision=0, commas=False, suffix=' percent')
-    p_pct_str = fmt(p_pct_value, precision=0, commas=False, suffix=' percent')
-    n_8_str = fmt(n_8_value, precision=0, commas=False)
-    s_str = fmt(s_value, precision=2, commas=False)
-    p_str = fmt(p_value, precision=2, commas=False)
+    s_pct_str = fmt_percent(serial_pct/100, precision=0, commas=False, style='prose')
+    p_pct_str = fmt_percent(parallel_pct/100, precision=0, commas=False, style='prose')
+    n_8_str = fmt(processor_count, precision=0, commas=False)
+    s_str = fmt(serial_fraction, precision=2, commas=False)
+    p_str = fmt(parallel_fraction, precision=2, commas=False)
 ```
 
 To see Amdahl's Law in action, suppose `{python} AmdahlSetup.s_pct_str` of a training step is serial overhead (for example, Python global interpreter lock (GIL), kernel launch latency) and `{python} AmdahlSetup.p_pct_str` is parallelizable matrix math:
@@ -502,20 +501,20 @@ class AmdahlExample:
     """Namespace for Amdahl's Law speedup at 8 processors and theoretical max."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    s_value = 0.05
-    n_8_value = 8
+    serial_fraction = 0.05
+    processor_count = 8
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    p_value = 1 - s_value
-    amdahl_8_value = 1 / (s_value + p_value/n_8_value)
-    amdahl_inf_value = 1 / s_value
+    parallel_fraction = 1 - serial_fraction
+    amdahl_8 = 1 / (serial_fraction + parallel_fraction/processor_count)
+    amdahl_inf = 1 / serial_fraction
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(amdahl_inf_value == 20.0, f"Narrative Violation: 5% serial fraction cap should be exactly 20x, got {amdahl_inf_value}x")
+    check(amdahl_inf == 20.0, f"Narrative Violation: 5% serial fraction cap should be exactly 20x, got {amdahl_inf}x")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    amdahl_8_str = fmt(amdahl_8_value, precision=1, commas=False)
-    amdahl_inf_str = fmt(amdahl_inf_value, precision=0, commas=False)
+    amdahl_8_str = fmt(amdahl_8, precision=1, commas=False)
+    amdahl_inf_str = fmt(amdahl_inf, precision=0, commas=False)
 ```
 
 *   With $n=1$, speedup is 1.
@@ -559,17 +558,17 @@ class GustafsonSetup:
     """Namespace for Gustafson's Law lead-in constants."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    s_g_value = 0.05  # Serial fraction (same as Amdahl example)
+    serial_fraction = 0.05  # Serial fraction (same as Amdahl example)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    s_g_pct_value = int(s_g_value * 100)
+    serial_pct = int(serial_fraction * 100)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     # No check() calls needed—values are definitional constants.
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    s_g_pct_str = fmt(s_g_pct_value, precision=0, commas=False, suffix=' percent')
-    s_g_str = fmt(s_g_value, precision=2, commas=False)
+    s_g_pct_str = fmt_percent(serial_pct/100, precision=0, commas=False, style='prose')
+    s_g_str = fmt(serial_fraction, precision=2, commas=False)
 ```
 
 Using the same `{python} GustafsonSetup.s_g_pct_str` serial overhead ($s$ = `{python} GustafsonSetup.s_g_str`), Gustafson's Law tells a very different story:
@@ -597,27 +596,27 @@ class GustafsonExample:
     """Namespace for Gustafson's Law scaled speedup at 8 and 1000 processors."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    s_g_value = 0.05
-    n_8_g_value = 8
-    n_1000_value = 1000
+    serial_fraction = 0.05
+    processor_count_8 = 8
+    processor_count_1000 = 1000
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    gustafson_8_value = n_8_g_value - s_g_value * (n_8_g_value - 1)
-    gustafson_8_serial_value = s_g_value * (n_8_g_value - 1)
-    gustafson_1000_value = n_1000_value - s_g_value * (n_1000_value - 1)
+    gustafson_8 = processor_count_8 - serial_fraction * (processor_count_8 - 1)
+    gustafson_8_serial = serial_fraction * (processor_count_8 - 1)
+    gustafson_1000 = processor_count_1000 - serial_fraction * (processor_count_1000 - 1)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(gustafson_8_value > 1, "8-way Gustafson speedup should exceed serial speedup.")
-    check(gustafson_1000_value > gustafson_8_value, "Larger n should increase scaled speedup.")
+    check(gustafson_8 > 1, "8-way Gustafson speedup should exceed serial speedup.")
+    check(gustafson_1000 > gustafson_8, "Larger n should increase scaled speedup.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    gustafson_8_str = fmt(gustafson_8_value, precision=2, commas=False)
-    gustafson_8_serial_str = fmt(gustafson_8_serial_value, precision=2, commas=False)
-    gustafson_1000_str = fmt_int(round(gustafson_1000_value), commas=False)
-    n_8_g_str = fmt(n_8_g_value, precision=0, commas=False)
-    n_8_g_minus_1_str = fmt(n_8_g_value - 1, precision=0, commas=False)
-    n_1000_str = fmt(n_1000_value, precision=0, commas=False)
-    n_1000_minus_1_str = fmt(n_1000_value - 1, precision=0, commas=False)
+    gustafson_8_str = fmt(gustafson_8, precision=2, commas=False)
+    gustafson_8_serial_str = fmt(gustafson_8_serial, precision=2, commas=False)
+    gustafson_1000_str = fmt_int(round(gustafson_1000), commas=False)
+    n_8_g_str = fmt(processor_count_8, precision=0, commas=False)
+    n_8_g_minus_1_str = fmt(processor_count_8 - 1, precision=0, commas=False)
+    n_1000_str = fmt(processor_count_1000, precision=0, commas=False)
+    n_1000_minus_1_str = fmt(processor_count_1000 - 1, precision=0, commas=False)
 ```
 
 *   With $n=1$, speedup is 1.
@@ -630,7 +629,7 @@ In weak scaling, efficiency remains high because the useful work (training the m
 #| echo: false
 #| label: training-time-example
 from mlsysim.physics import calc_transformer_training_flops
-from mlsysim.fmt import fmt_int, fmt_int,  fmt, check, fmt_math, sci_latex, MarkdownStr
+from mlsysim.fmt import fmt_int, fmt_int, fmt_flop_rate, fmt_qty, fmt, check, fmt_math, sci_latex, MarkdownStr, fmt_percent, fmt_count, fmt_time
 
 # =============================================================================
 # PURPOSE
@@ -649,43 +648,42 @@ class TrainingTimeRef:
     p_params = 1 * BILLION
     d_tokens = Literature.Chinchilla.TokensPerParam * p_params
     n_gpus = 1
-    x_flops = Hardware.Cloud.A100.compute.peak_flops.m_as(TFLOPs/second)
+    x_flops_q = Hardware.Cloud.A100.compute.peak_flops
     u_mfu = calibration.REFERENCE_MFU_SUSTAINED
 
     # Rename variables for internal logic
     p_params_value = p_params
     d_tokens_value = d_tokens
     n_gpus_value = n_gpus
-    x_flops_value = x_flops * TRILLION
     u_mfu_value = u_mfu
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    total_flops = calc_transformer_training_flops(p_params_value, d_tokens_value).m_as(ureg.flop)
-    # Step 1: x_flops_value is in TFLOP/s (1e12)
-    throughput = n_gpus_value * (x_flops_value) * u_mfu_value
+    total_flops = calc_transformer_training_flops(p_params_value, d_tokens_value).to(flop)
+    throughput = n_gpus_value * x_flops_q * u_mfu_value
 
-    t_seconds_value = total_flops/throughput
-    t_minutes_value = t_seconds_value/SECONDS_PER_MINUTE
+    t_seconds = (total_flops/throughput).to(second)
+    t_seconds_value = t_seconds.to(second).magnitude
+    t_minutes_value = t_seconds.to("minute").magnitude
     t_days_value = t_seconds_value/SEC_PER_DAY
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(t_seconds_value > 0, "Training time must be positive.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    T_seconds_str = fmt(t_seconds_value, precision=1, commas=True, suffix=' seconds')
-    T_minutes_str = fmt(t_minutes_value, precision=1, commas=False, suffix=' minutes')
+    T_seconds_str = fmt_time(t_seconds, 'second', precision=1, commas=True, style='word')
+    T_minutes_str = fmt_time(t_seconds, 'minute', precision=1, commas=False, style='word')
     T_days_str = fmt(t_days_value, precision=1, commas=False)
     # Custom "NB" suffix (e.g., "1B", "20B") concatenated into the value →
     # MarkdownStr per recipe Rule 1 escape hatch. The number is formatted by
     # fmt() first; the literal "B" suffix is then appended.
-    p_params_str = fmt(p_params/BILLION, precision=0, commas=False, suffix="B")
-    d_tokens_str = fmt(d_tokens/BILLION, precision=0, commas=False, suffix="B")
+    p_params_str = fmt_count(p_params, scale='B', commas=False)
+    d_tokens_str = fmt_count(d_tokens, scale='B', commas=False)
     n_gpus_str = fmt_int(n_gpus, commas=False)
-    u_mfu_pct_str = fmt_int(u_mfu * 100, commas=False, suffix=' percent')
-    a100_fp16_str = fmt(x_flops, precision=0, commas=False, suffix=' TFLOP/s')
-    total_flops_eq = fmt_math(f"\\text{{Total FLOPs}} = {int(Literature.Chinchilla.ComputeConstant)} \\times {sci_latex(p_params, 0)} \\times {sci_latex(d_tokens, 0)} = {sci_latex(total_flops, 1)} \\text{{ FLOPs}}")
-    throughput_eq = fmt_math(f"\\text{{Throughput}} = {int(n_gpus)} \\times ({sci_latex(x_flops*TRILLION, 2)}) \\times {u_mfu:.2f} \\approx {sci_latex(throughput, 2)} \\text{{ FLOP/s}}")
-    time_eq = fmt_math(f"T = \\frac{{{sci_latex(total_flops, 1)}}}{{{sci_latex(throughput, 2)}}} \\approx {fmt(t_seconds_value, precision=1, commas=True)} \\text{{ seconds}} \\approx {fmt(t_minutes_value, precision=1, commas=True)} \\text{{ minutes}}")
+    u_mfu_pct_str = fmt_percent(round(u_mfu * 100)/100, precision=0, commas=False, style='prose')
+    a100_fp16_tflops_str = fmt_flop_rate(x_flops_q, unit=TFLOPs/second, precision=0, commas=False)
+    total_flops_eq = fmt_math(f"\\text{{Total FLOPs}} = {int(Literature.Chinchilla.ComputeConstant)} \\times {sci_latex(p_params, 0)} \\times {sci_latex(d_tokens, 0)} = {sci_latex(total_flops.to(flop), 1)} \\text{{ FLOPs}}")
+    throughput_eq = fmt_math(f"\\text{{Throughput}} = {int(n_gpus)} \\times ({sci_latex(x_flops_q.to(flop/second), 2)}) \\times {u_mfu:.2f} \\approx {sci_latex(throughput.to(flop/second), 2)} \\text{{ FLOP/s}}")
+    time_eq = fmt_math(f"T = \\frac{{{sci_latex(total_flops.to(flop), 1)}}}{{{sci_latex(throughput.to(flop/second), 2)}}} \\approx {fmt(t_seconds_value, precision=1, commas=True)} \\text{{ seconds}} \\approx {fmt(t_minutes_value, precision=1, commas=True)} \\text{{ minutes}}")
 ```
 
 The same scaling lens turns model size, data size, hardware count, and utilization into a single training-time estimate.
@@ -703,7 +701,7 @@ Where:
 *   **$R_{\text{peak}}$**: Peak FLOP/s of one accelerator.
 *   **$\eta_{\text{hw}}$**: Hardware utilization, typically 30 percent–50 percent in this training estimate.
 
-**Example**: Training a `{python} TrainingTimeRef.p_params_str` parameter model on `{python} TrainingTimeRef.d_tokens_str` using `{python} TrainingTimeRef.n_gpus_str` A100 (`{python} TrainingTimeRef.a100_fp16_str`) at `{python} TrainingTimeRef.u_mfu_pct_str` utilization.
+**Example**: Training a `{python} TrainingTimeRef.p_params_str` parameter model on `{python} TrainingTimeRef.d_tokens_str` using `{python} TrainingTimeRef.n_gpus_str` A100 (`{python} TrainingTimeRef.a100_fp16_tflops_str`) at `{python} TrainingTimeRef.u_mfu_pct_str` utilization.
 `{python} TrainingTimeRef.total_flops_eq`
 `{python} TrainingTimeRef.throughput_eq`
 `{python} TrainingTimeRef.time_eq`
@@ -743,12 +741,12 @@ $$ N_{\text{req}} = \lambda_{\text{arr}} \times L_{\text{lat}} $$
 # │ Show: "50" concurrent requests, "24" GPU memory cap at 1 GB/req—inline.
 # │ How: N_req = lambda_arr * L_lat; max_concurrent = gpu_mem/mem_per_req.
 # │
-# │ Imports: mlsysim.book (fmt, fmt_math)
+# │ Imports: mlsysim.book (fmt_rate, fmt_math)
 # │ Exports: L_concurrent_str, lambda_qps_str, lambda_qps_raw_str,
 # │          w_latency_ms_str, w_latency_s_str, mem_per_req_gb_str,
 # │          gpu_mem_gb_str, max_concurrent_str, eq_max_throughput
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt_int,  fmt, fmt_math
+from mlsysim.fmt import fmt, fmt_math, fmt_qty, fmt_rate, fmt_time
 
 # ┌── LEGO ───────────────────────────────────────────────
 class LittlesLawExample:
@@ -756,14 +754,15 @@ class LittlesLawExample:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     lambda_qps_value = 1000        # queries per second
-    w_latency_s_value = 0.050      # 50 ms in seconds
-    mem_per_req_gb_value = 1
-    gpu_mem_gb_value = 24
+    w_latency = 50 * ms            # scenario assumption: target average latency
+    w_latency_s_value = w_latency.to(second).magnitude
+    mem_per_req = 1 * GB           # scenario assumption: temporary memory per request
+    gpu_mem = 24 * GB              # scenario assumption: example accelerator memory
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     l_concurrent_value = lambda_qps_value * w_latency_s_value
-    total_mem_gb_value = l_concurrent_value * mem_per_req_gb_value
-    max_concurrent_value = int(gpu_mem_gb_value/mem_per_req_gb_value)
+    total_mem = l_concurrent_value * mem_per_req
+    max_concurrent_value = int((gpu_mem/mem_per_req).to_base_units().magnitude)
     max_throughput_value = max_concurrent_value/w_latency_s_value
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
@@ -771,18 +770,18 @@ class LittlesLawExample:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     L_concurrent_str = fmt(l_concurrent_value, precision=0, commas=False)
-    lambda_qps_str = fmt(lambda_qps_value, precision=0)
+    lambda_qps_str = fmt_rate(lambda_qps_value, "QPS")
     lambda_qps_raw_str = fmt(lambda_qps_value, precision=0, commas=False)
-    w_latency_ms_str = fmt_int(w_latency_s_value * THOUSAND, commas=False, suffix=' ms')
-    w_latency_s_str = fmt(w_latency_s_value, precision=2, commas=False)
-    mem_per_req_gb_str = fmt(mem_per_req_gb_value, precision=0, commas=False, suffix=' GB')
-    total_mem_gb_str = fmt(total_mem_gb_value, precision=0, commas=False, suffix=' GB')
-    gpu_mem_gb_str = fmt(gpu_mem_gb_value, precision=0, commas=False, suffix=' GB')
+    w_latency_ms_str = fmt_time(w_latency, 'millisecond', precision=0, commas=False)
+    w_latency_s_str = fmt_time(w_latency, unit=second, precision=2, commas=False)
+    mem_per_req_gb_str = fmt_qty(mem_per_req, GB, precision=0, commas=False)
+    total_mem_gb_str = fmt_qty(total_mem, GB, precision=0, commas=False)
+    gpu_mem_gb_str = fmt_qty(gpu_mem, GB, precision=0, commas=False)
     max_concurrent_str = fmt(max_concurrent_value, precision=0, commas=False)
     max_throughput_eq = fmt_math(f"N_{{\\text{{max}}}}/L_{{\\text{{lat}}}} = {max_concurrent_value} / {w_latency_s_value} = {int(max_throughput_value)} \\text{{ QPS}}")
 ```
 
-To see this in practice, consider sustaining `{python} LittlesLawExample.lambda_qps_str` queries per second (QPS) with `{python} LittlesLawExample.w_latency_ms_str` average latency. The law tells us the system must support `{python} LittlesLawExample.lambda_qps_raw_str` $\times$ `{python} LittlesLawExample.w_latency_s_str` = `{python} LittlesLawExample.L_concurrent_str` concurrent requests.
+To see this in practice, consider sustaining `{python} LittlesLawExample.lambda_qps_str` with `{python} LittlesLawExample.w_latency_ms_str` average latency. The law tells us the system must support `{python} LittlesLawExample.lambda_qps_raw_str` $\times$ `{python} LittlesLawExample.w_latency_s_str` = `{python} LittlesLawExample.L_concurrent_str` concurrent requests.
 
 This directly determines how to size inference worker pools. If serving one request requires `{python} LittlesLawExample.mem_per_req_gb_str` of temporary memory (KV cache, activations), handling `{python} LittlesLawExample.L_concurrent_str` concurrent requests requires `{python} LittlesLawExample.total_mem_gb_str` of memory. If the accelerator only has `{python} LittlesLawExample.gpu_mem_gb_str`, the system is physically limited to `{python} LittlesLawExample.max_concurrent_str` concurrent requests. Maximum throughput is capped at `{python} LittlesLawExample.max_throughput_eq`, regardless of how many requests arrive.
 
@@ -799,7 +798,7 @@ A GPU advertises 1,000 TFLOP/s, yet your kernel achieves only 30 TFLOP/s. The mi
 # │ Context: @tbl-latency-hierarchy, @tbl-hardware-cheatsheet, @tbl-physical-hierarchy-ref
 # │ Goal: Latency analogy, H100/TPUv5p specs, hierarchy energy/bandwidth table
 # │ Exports: ArchReferenceTables.*_str
-from mlsysim.fmt import fmt_int, fmt, MarkdownStr
+from mlsysim.fmt import fmt_int, fmt_flop_rate, fmt_qty, fmt, MarkdownStr, fmt_bandwidth, fmt_time
 
 def _fmt_dur_val(val):
     if abs(val - round(val)) < 1e-9:
@@ -824,35 +823,35 @@ class ArchReferenceTables:
     LATENCY_NVLINK = Hardware.Tech.Interconnect.NVLink.latency
     LATENCY_PCIE_GEN5 = Hardware.Tech.Interconnect.PCIeGen5.latency
     LATENCY_NVME_SSD = Hardware.Tech.Storage.NvmeGen4.latency
-    LATENCY_INFINIBAND = round(Systems.Fabrics.InfiniBand_NDR.latency.m_as(NS)) * NS  # µs→ns, round to exact 5000
-    h100_l2_mb_value = Hardware.Cloud.H100.memory.l2_cache.m_as(MB)
-    tpuv5_l2_mb_value = Hardware.Cloud.TPUv5p.memory.l2_cache.m_as(MB)
-    register_ns_value = LATENCY_REGISTER_REF.m_as(NS)
+    LATENCY_INFINIBAND = round(Systems.Fabrics.InfiniBand_NDR.latency.to(nanosecond).magnitude) * nanosecond  # µs→ns, round to exact 5000
+    h100_l2 = Hardware.Cloud.H100.memory.l2_cache
+    tpuv5_l2 = Hardware.Cloud.TPUv5p.memory.l2_cache
+    register_ns_value = LATENCY_REGISTER_REF.to(nanosecond).magnitude
     analogy_base_seconds = 10
     analogy_seconds_per_ns = analogy_base_seconds / register_ns_value
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    dram_pj_value = int(ENERGY_DRAM_ACCESS_PJ.m_as(ureg.picojoule))
-    flop_pj_value = ENERGY_FLOP_FP16_PJ.m_as(ureg.picojoule)
+    dram_pj_value = int(ENERGY_DRAM_ACCESS_PJ.to(pJ).magnitude)
+    flop_pj_value = ENERGY_FLOP_FP16_PJ.to(pJ).magnitude
     energy_ratio_value = int(dram_pj_value / flop_pj_value)
 
-    l1_ns_value = int(LATENCY_L1_REGISTER.m_as(NS))
-    l2_ns_value = int(LATENCY_L2_CACHE.m_as(NS))
-    hbm_ns_value = int(LATENCY_HBM3.m_as(NS))
-    nvlink_ns_value = int(LATENCY_NVLINK.m_as(NS))
-    pcie_ns_value = int(LATENCY_PCIE_GEN5.m_as(NS))
-    ib_ns_value = int(LATENCY_INFINIBAND.m_as(NS))
-    ssd_ns_value = int(LATENCY_NVME_SSD.m_as(NS))
+    l1_ns_value = int(LATENCY_L1_REGISTER.to(nanosecond).magnitude)
+    l2_ns_value = int(LATENCY_L2_CACHE.to(nanosecond).magnitude)
+    hbm_ns_value = int(LATENCY_HBM3.to(nanosecond).magnitude)
+    nvlink_ns_value = int(LATENCY_NVLINK.to(nanosecond).magnitude)
+    pcie_ns_value = int(LATENCY_PCIE_GEN5.to(nanosecond).magnitude)
+    ib_ns_value = int(LATENCY_INFINIBAND.to(nanosecond).magnitude)
+    ssd_ns_value = int(LATENCY_NVME_SSD.to(nanosecond).magnitude)
 
-    h100_flops_value = int(Hardware.Cloud.H100.compute.peak_flops.m_as(TFLOPs/second))
-    h100_bw_value = Hardware.Cloud.H100.memory.bandwidth.m_as(TB/second)
-    h100_cap_value = int(Hardware.Cloud.H100.memory.capacity.m_as(GB))
-    h100_nvlink_value = int(Hardware.Cloud.H100.nvlink.bandwidth.m_as(GB/second))
+    h100_flops = Hardware.Cloud.H100.compute.peak_flops
+    h100_bw = Hardware.Cloud.H100.memory.bandwidth
+    h100_cap = int(Hardware.Cloud.H100.memory.capacity.to(GB).magnitude) * GB
+    h100_nvlink = Hardware.Cloud.H100.nvlink.bandwidth
 
-    tpuv5_flops_value = int(Hardware.Cloud.TPUv5p.compute.peak_flops.m_as(TFLOPs/second))
-    tpuv5_bw_value = Hardware.Cloud.TPUv5p.memory.bandwidth.m_as(TB/second)
-    tpuv5_cap_value = int(Hardware.Cloud.TPUv5p.memory.capacity.m_as(GB))
-    tpuv5_ici_value = int(Hardware.Cloud.TPUv5p.nvlink.bandwidth.m_as(GB/second))
+    tpuv5_flops = Hardware.Cloud.TPUv5p.compute.peak_flops
+    tpuv5_bw = Hardware.Cloud.TPUv5p.memory.bandwidth
+    tpuv5_cap = int(Hardware.Cloud.TPUv5p.memory.capacity.to(GB).magnitude) * GB
+    tpuv5_ici = Hardware.Cloud.TPUv5p.nvlink.bandwidth
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     def duration_label(seconds):
@@ -868,13 +867,13 @@ class ArchReferenceTables:
     flop_pj_str = fmt(flop_pj_value, precision=1, commas=False)
     energy_ratio_str = fmt(energy_ratio_value, precision=0, commas=False)
 
-    l1_ns_str = fmt(l1_ns_value, precision=0, commas=False)
-    l2_ns_str = fmt(l2_ns_value, precision=0, commas=False)
-    hbm_ns_str = fmt(hbm_ns_value, precision=0, commas=False)
-    nvlink_ns_str = fmt(nvlink_ns_value, precision=0, commas=False)
-    pcie_ns_str = fmt(pcie_ns_value, precision=0, commas=False)
-    ib_ns_str = fmt(ib_ns_value, precision=0, commas=False)
-    ssd_ns_str = fmt(ssd_ns_value, precision=0, commas=False)
+    l1_ns_str = fmt_time(LATENCY_L1_REGISTER, unit=nanosecond, precision=0, commas=False)
+    l2_ns_str = fmt_time(LATENCY_L2_CACHE, unit=nanosecond, precision=0, commas=False)
+    hbm_ns_str = fmt_time(LATENCY_HBM3, unit=nanosecond, precision=0, commas=False)
+    nvlink_ns_str = fmt_time(LATENCY_NVLINK, unit=nanosecond, precision=0, commas=False)
+    pcie_ns_str = fmt_time(LATENCY_PCIE_GEN5, unit=nanosecond, precision=0, commas=False)
+    ib_ns_str = fmt_time(LATENCY_INFINIBAND, unit=nanosecond, precision=0, commas=False)
+    ssd_ns_str = fmt_time(LATENCY_NVME_SSD, unit=nanosecond, precision=0, commas=False)
     register_distance_str = MarkdownStr(duration_label(register_ns_value * analogy_seconds_per_ns))
     l1_distance_str = MarkdownStr(duration_label(l1_ns_value * analogy_seconds_per_ns))
     l2_distance_str = MarkdownStr(duration_label(l2_ns_value * analogy_seconds_per_ns))
@@ -884,47 +883,47 @@ class ArchReferenceTables:
     ib_distance_str = MarkdownStr(duration_label(ib_ns_value * analogy_seconds_per_ns))
     ssd_distance_str = MarkdownStr(duration_label(ssd_ns_value * analogy_seconds_per_ns))
 
-    h100_flops_str = fmt(h100_flops_value, precision=0, commas=False, suffix=" TFLOP/s")
-    h100_bw_str = fmt(h100_bw_value, precision=2, commas=False, suffix=" TB")
-    h100_cap_str = fmt(h100_cap_value, precision=0, commas=False, suffix=" GB")
-    h100_nvlink_str = fmt(h100_nvlink_value, precision=0, commas=False, suffix=" GB")
-    h100_l2_mb_str = fmt(h100_l2_mb_value, precision=0, commas=False, suffix=" MB")
+    h100_flops_tflops_str = fmt_flop_rate(h100_flops, unit=TFLOPs/second, precision=0, commas=False)
+    h100_bw_tb_s_str = fmt_bandwidth(h100_bw, unit=TB/second, precision=2, commas=False)
+    h100_cap_gb_str = fmt_qty(h100_cap, GB, precision=0, commas=False)
+    h100_nvlink_gb_s_str = fmt_bandwidth(h100_nvlink, unit=GB/second, precision=0, commas=False)
+    h100_l2_mb_str = fmt_qty(h100_l2, MB, precision=0, commas=False)
 
-    tpuv5_flops_str = fmt(tpuv5_flops_value, precision=0, commas=False, suffix=" TFLOP/s")
-    tpuv5_bw_str = fmt(tpuv5_bw_value, precision=2, commas=False, suffix=" TB")
-    tpuv5_cap_str = fmt(tpuv5_cap_value, precision=0, commas=False, suffix=" GB")
-    tpuv5_ici_str = fmt(tpuv5_ici_value, precision=0, commas=False, suffix=" GB")
-    tpuv5_l2_mb_str = fmt(tpuv5_l2_mb_value, precision=0, commas=False, suffix=" MB")
+    tpuv5_flops_tflops_str = fmt_flop_rate(tpuv5_flops, unit=TFLOPs/second, precision=0, commas=False)
+    tpuv5_bw_tb_s_str = fmt_bandwidth(tpuv5_bw, unit=TB/second, precision=2, commas=False)
+    tpuv5_cap_gb_str = fmt_qty(tpuv5_cap, GB, precision=0, commas=False)
+    tpuv5_ici_gb_s_str = fmt_bandwidth(tpuv5_ici, unit=GB/second, precision=0, commas=False)
+    tpuv5_l2_mb_str = fmt_qty(tpuv5_l2, MB, precision=0, commas=False)
 
-    bw_hbm_str = fmt(Hardware.Cloud.H100.memory.bandwidth.m_as(GB/second), precision=0)
-    bw_nvlink_str = fmt(Hardware.Cloud.H100.nvlink.bandwidth.m_as(GB/second), precision=0)
-    bw_pcie_str = fmt(Hardware.Cloud.H100.interconnect.bandwidth.m_as(GB/second), precision=0)
-    bw_dram_str = fmt(Hardware.Tech.Storage.SystemMemory.bandwidth.m_as(GB/second), precision=0)
-    bw_ssd_str = fmt(Hardware.Tech.Storage.NvmeGen4.bandwidth.m_as(GB/second), precision=0, commas=False)
-    bw_net_str = fmt(Systems.Fabrics.InfiniBand_NDR.bandwidth.m_as(GB/second), precision=0, commas=False)
+    bw_hbm_gb_s_str = fmt_bandwidth(Hardware.Cloud.H100.memory.bandwidth, unit=GB/second, precision=0)
+    bw_nvlink_gb_s_str = fmt_bandwidth(Hardware.Cloud.H100.nvlink.bandwidth, unit=GB/second, precision=0)
+    bw_pcie_gb_s_str = fmt_bandwidth(Hardware.Cloud.H100.interconnect.bandwidth, unit=GB/second, precision=0)
+    bw_dram_gb_s_str = fmt_bandwidth(Hardware.Tech.Storage.SystemMemory.bandwidth, unit=GB/second, precision=0)
+    bw_ssd_gb_s_str = fmt_bandwidth(Hardware.Tech.Storage.NvmeGen4.bandwidth, unit=GB/second, precision=0, commas=False)
+    bw_net_gb_s_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=GB/second, precision=0, commas=False)
 
-    e_reg_str = MarkdownStr(f"{ENERGY_REG_PJ.m_as(ureg.picojoule):.2f}")
-    e_l1_str = MarkdownStr(f"{ENERGY_SRAM_L1_PJ.m_as(ureg.picojoule):.1f}")
-    e_l2_str = MarkdownStr(f"{ENERGY_SRAM_L2_PJ.m_as(ureg.picojoule):.1f}")
-    e_dram_str = MarkdownStr(f"{ENERGY_DRAM_ACCESS_PJ.m_as(ureg.picojoule):.0f}")
-    e_ssd_str = MarkdownStr("~5,000")
-    e_net_str = MarkdownStr("~10,000")
+    e_reg_pj_str = fmt_qty(ENERGY_REG_PJ, pJ, precision=2, commas=False)
+    e_l1_pj_str = fmt_qty(ENERGY_SRAM_L1_PJ, pJ, precision=1, commas=False)
+    e_l2_pj_str = fmt_qty(ENERGY_SRAM_L2_PJ, pJ, precision=0, commas=False)
+    e_dram_pj_str = fmt_qty(ENERGY_DRAM_ACCESS_PJ, pJ, precision=0, commas=False)
+    e_ssd_pj_str = MarkdownStr("~5,000 pJ")
+    e_net_pj_str = MarkdownStr("~10,000 pJ")
 ```
 
 ### Latencies every programmer should know {#sec-appdx-machine-foundations-latencies-every-programmer-know-e89f}
 
 The first step in systems intuition is understanding the cost of distance. @Tbl-latency-hierarchy quantifies how long the processor waits for data from different levels of the memory hierarchy. If accessing a register is like picking up a pencil from your desk, fetching from HBM is walking across the office, and fetching from disk is flying to the moon.
 
-| **Component**            |                 **Latency (ns)**                 | **Cycles (Approx)** |               **Relative "Distance"**                |
-|:-------------------------|:------------------------------------------------:|:-------------------:|:----------------------------------------------------:|
-| **Register**             |                     ~0.3 ns                      |       1 cycle       | `{python} ArchReferenceTables.register_distance_str` |
-| **L1 Cache**             |   ~`{python} ArchReferenceTables.l1_ns_str` ns   |      3–4 cycles     |    `{python} ArchReferenceTables.l1_distance_str`    |
-| **L2 Cache**             |   ~`{python} ArchReferenceTables.l2_ns_str` ns   |      12 cycles      |    `{python} ArchReferenceTables.l2_distance_str`    |
-| **HBM3 (GPU Memory)**    |  ~`{python} ArchReferenceTables.hbm_ns_str` ns   |     1,000 cycles    |   `{python} ArchReferenceTables.hbm_distance_str`    |
-| **NVLink (GPU-GPU)**     | ~`{python} ArchReferenceTables.nvlink_ns_str` ns |     1,500 cycles    |  `{python} ArchReferenceTables.nvlink_distance_str`  |
-| **PCIe (CPU-GPU)**       |  ~`{python} ArchReferenceTables.pcie_ns_str` ns  |     3,000 cycles    |   `{python} ArchReferenceTables.pcie_distance_str`   |
-| **InfiniBand (Network)** |   ~`{python} ArchReferenceTables.ib_ns_str` ns   |    15,000 cycles    |    `{python} ArchReferenceTables.ib_distance_str`    |
-| **SSD (NVMe)**           |  ~`{python} ArchReferenceTables.ssd_ns_str` ns   |    300,000 cycles   |   `{python} ArchReferenceTables.ssd_distance_str`    |
+| **Component**            |                **Latency (ns)**               | **Cycles (Approx)** |               **Relative "Distance"**                |
+|:-------------------------|:---------------------------------------------:|:-------------------:|:----------------------------------------------------:|
+| **Register**             |                    ~0.3 ns                    |       1 cycle       | `{python} ArchReferenceTables.register_distance_str` |
+| **L1 Cache**             |   ~`{python} ArchReferenceTables.l1_ns_str`   |      3–4 cycles     |    `{python} ArchReferenceTables.l1_distance_str`    |
+| **L2 Cache**             |   ~`{python} ArchReferenceTables.l2_ns_str`   |      12 cycles      |    `{python} ArchReferenceTables.l2_distance_str`    |
+| **HBM3 (GPU Memory)**    |   ~`{python} ArchReferenceTables.hbm_ns_str`  |     1,000 cycles    |   `{python} ArchReferenceTables.hbm_distance_str`    |
+| **NVLink (GPU-GPU)**     | ~`{python} ArchReferenceTables.nvlink_ns_str` |     1,500 cycles    |  `{python} ArchReferenceTables.nvlink_distance_str`  |
+| **PCIe (CPU-GPU)**       |  ~`{python} ArchReferenceTables.pcie_ns_str`  |     3,000 cycles    |   `{python} ArchReferenceTables.pcie_distance_str`   |
+| **InfiniBand (Network)** |   ~`{python} ArchReferenceTables.ib_ns_str`   |    15,000 cycles    |    `{python} ArchReferenceTables.ib_distance_str`    |
+| **SSD (NVMe)**           |   ~`{python} ArchReferenceTables.ssd_ns_str`  |    300,000 cycles   |   `{python} ArchReferenceTables.ssd_distance_str`    |
 
 : **The Latency Hierarchy**: Access times for modern AI hardware. Note the massive jump from SRAM (Cache) to HBM. Any kernel that misses cache pays a heavy penalty. {#tbl-latency-hierarchy tbl-colwidths="[25,25,25,25]"}
 
@@ -932,13 +931,13 @@ The first step in systems intuition is understanding the cost of distance. @Tbl-
 
 While latency tells us how long we wait for the *first* byte, bandwidth tells us how many bytes follow. @Tbl-hardware-cheatsheet provides the constants for back-of-the-envelope "Roofline" calculations. These represent the "standard units of compute" for the current era of machine learning.
 
-| **Spec**             |                   **NVIDIA H100 (SXM)**                   |                               **Google TPU v5p**                              | **System Impact**                     |
-|:---------------------|:---------------------------------------------------------:|:-----------------------------------------------------------------------------:|:--------------------------------------|
-| **FP16/BF16 Peak**   |       `{python} ArchReferenceTables.h100_flops_str`       |                 `{python} ArchReferenceTables.tpuv5_flops_str`                | The "Speed Limit" ($R_{\text{peak}}$) |
-| **Memory Bandwidth** |        `{python} ArchReferenceTables.h100_bw_str`/s       |                 `{python} ArchReferenceTables.tpuv5_bw_str`/s                 | The "Width of the Pipe" ($\text{BW}$) |
-| **HBM Capacity**     |        `{python} ArchReferenceTables.h100_cap_str`        |                  `{python} ArchReferenceTables.tpuv5_cap_str`                 | Max Model Size ($P$)/Batch Size ($B$) |
-| **L2/SRAM Cache**    |       `{python} ArchReferenceTables.h100_l2_mb_str`       |                ~`{python} ArchReferenceTables.tpuv5_l2_mb_str`                | Critical for Operator Fusion          |
-| **Interconnect**     | `{python} ArchReferenceTables.h100_nvlink_str`/s (NVLink) | `{python} ArchReferenceTables.tpuv5_ici_str`/s (Inter-Chip Interconnect, ICI) | Determines Model Parallelism Scaling  |
+| **Spec**             |                    **NVIDIA H100 (SXM)**                     |                                **Google TPU v5p**                                | **System Impact**                     |
+|:---------------------|:------------------------------------------------------------:|:--------------------------------------------------------------------------------:|:--------------------------------------|
+| **FP16/BF16 Peak**   |     `{python} ArchReferenceTables.h100_flops_tflops_str`     |              `{python} ArchReferenceTables.tpuv5_flops_tflops_str`               | The "Speed Limit" ($R_{\text{peak}}$) |
+| **Memory Bandwidth** |       `{python} ArchReferenceTables.h100_bw_tb_s_str`        |                 `{python} ArchReferenceTables.tpuv5_bw_tb_s_str`                 | The "Width of the Pipe" ($\text{BW}$) |
+| **HBM Capacity**     |        `{python} ArchReferenceTables.h100_cap_gb_str`        |                 `{python} ArchReferenceTables.tpuv5_cap_gb_str`                  | Max Model Size ($P$)/Batch Size ($B$) |
+| **L2/SRAM Cache**    |        `{python} ArchReferenceTables.h100_l2_mb_str`         |                 ~`{python} ArchReferenceTables.tpuv5_l2_mb_str`                  | Critical for Operator Fusion          |
+| **Interconnect**     | `{python} ArchReferenceTables.h100_nvlink_gb_s_str` (NVLink) | `{python} ArchReferenceTables.tpuv5_ici_gb_s_str` (Inter-Chip Interconnect, ICI) | Determines Model Parallelism Scaling  |
 
 : **Reference Specs**: Key constants for quantitative analysis. Always check specific datasheets, but these serve as standard units of compute. {#tbl-hardware-cheatsheet tbl-colwidths="[22,23,20,35]"}
 
@@ -1008,17 +1007,17 @@ node[align=center,left]{Larger Capacity\\ Lower Cost}(L);
 
 The memory hierarchy is the fundamental physical constraint of machine learning systems. @Tbl-physical-hierarchy-ref consolidates the physical properties—latency, bandwidth, and energy—across the entire stack.
 
-| **Layer**            | **Technology** |                   **Latency**                    |                 **Bandwidth**                  |              **Energy (per 32b)**             |
-|:---------------------|:--------------:|:------------------------------------------------:|:----------------------------------------------:|:---------------------------------------------:|
-| **Registers**        |   Flip-Flops   |                     ~0.3 ns                      |                       —                        |  `{python} ArchReferenceTables.e_reg_str` pJ  |
-| **L1 Cache**         |      SRAM      |   ~`{python} ArchReferenceTables.l1_ns_str` ns   |                       —                        |   `{python} ArchReferenceTables.e_l1_str` pJ  |
-| **L2 Cache**         |      SRAM      |   ~`{python} ArchReferenceTables.l2_ns_str` ns   |                       —                        |   `{python} ArchReferenceTables.e_l2_str` pJ  |
-| **Memory (Local)**   |      HBM3      |  ~`{python} ArchReferenceTables.hbm_ns_str` ns   |  `{python} ArchReferenceTables.bw_hbm_str`/s   |  `{python} ArchReferenceTables.e_dram_str` pJ |
-| **Interconnect**     |   NVLink 4.0   | ~`{python} ArchReferenceTables.nvlink_ns_str` ns | `{python} ArchReferenceTables.bw_nvlink_str`/s | ~`{python} ArchReferenceTables.e_dram_str` pJ |
-| **Host Link**        |   PCIe Gen5    |  ~`{python} ArchReferenceTables.pcie_ns_str` ns  |  `{python} ArchReferenceTables.bw_pcie_str`/s  | ~`{python} ArchReferenceTables.e_dram_str` pJ |
-| **System RAM**       |      DDR5      |                     ~100 ns                      |  `{python} ArchReferenceTables.bw_dram_str`/s  | ~`{python} ArchReferenceTables.e_dram_str` pJ |
-| **Network (Fabric)** | InfiniBand NDR |   ~`{python} ArchReferenceTables.ib_ns_str` ns   |  `{python} ArchReferenceTables.bw_net_str`/s   |  `{python} ArchReferenceTables.e_net_str` pJ  |
-| **Storage (Local)**  |    NVMe SSD    |  ~`{python} ArchReferenceTables.ssd_ns_str` ns   |  `{python} ArchReferenceTables.bw_ssd_str`/s   |  `{python} ArchReferenceTables.e_ssd_str` pJ  |
+| **Layer**            | **Technology** |                  **Latency**                  |                   **Bandwidth**                   |              **Energy (per 32b)**             |
+|:---------------------|:--------------:|:---------------------------------------------:|:-------------------------------------------------:|:---------------------------------------------:|
+| **Registers**        |   Flip-Flops   |                    ~0.3 ns                    |                         —                         |  `{python} ArchReferenceTables.e_reg_pj_str`  |
+| **L1 Cache**         |      SRAM      |   ~`{python} ArchReferenceTables.l1_ns_str`   |                         —                         |   `{python} ArchReferenceTables.e_l1_pj_str`  |
+| **L2 Cache**         |      SRAM      |   ~`{python} ArchReferenceTables.l2_ns_str`   |                         —                         |   `{python} ArchReferenceTables.e_l2_pj_str`  |
+| **Memory (Local)**   |      HBM3      |   ~`{python} ArchReferenceTables.hbm_ns_str`  |   `{python} ArchReferenceTables.bw_hbm_gb_s_str`  |  `{python} ArchReferenceTables.e_dram_pj_str` |
+| **Interconnect**     |   NVLink 4.0   | ~`{python} ArchReferenceTables.nvlink_ns_str` | `{python} ArchReferenceTables.bw_nvlink_gb_s_str` | ~`{python} ArchReferenceTables.e_dram_pj_str` |
+| **Host Link**        |   PCIe Gen5    |  ~`{python} ArchReferenceTables.pcie_ns_str`  |  `{python} ArchReferenceTables.bw_pcie_gb_s_str`  | ~`{python} ArchReferenceTables.e_dram_pj_str` |
+| **System RAM**       |      DDR5      |                    ~100 ns                    |  `{python} ArchReferenceTables.bw_dram_gb_s_str`  | ~`{python} ArchReferenceTables.e_dram_pj_str` |
+| **Network (Fabric)** | InfiniBand NDR |   ~`{python} ArchReferenceTables.ib_ns_str`   |   `{python} ArchReferenceTables.bw_net_gb_s_str`  |  `{python} ArchReferenceTables.e_net_pj_str`  |
+| **Storage (Local)**  |    NVMe SSD    |   ~`{python} ArchReferenceTables.ssd_ns_str`  |   `{python} ArchReferenceTables.bw_ssd_gb_s_str`  |  `{python} ArchReferenceTables.e_ssd_pj_str`  |
 
 : **Physical Properties of the Memory Hierarchy (c. 2024)**: Consolidating latency, bandwidth, and energy across the memory hierarchy. The hierarchy spans five orders of magnitude in latency and six orders of magnitude in energy per access. For the ML engineer, this table defines the "silicon contract": every optimization that moves data one layer higher in the hierarchy delivers an order-of-magnitude dividend in performance. {#tbl-physical-hierarchy-ref tbl-colwidths="[20,20,20,20,20]"}
 
@@ -1026,7 +1025,7 @@ The hierarchy's energy costs reveal why data movement dominates modern system de
 
 ::: {#nbk-appendix-machine-high-cost-data-movement .callout-notebook title="The high cost of data movement"}
 
-Fetching a 32-bit value from DRAM costs roughly `{python} ArchReferenceTables.energy_ratio_str`$\times$ more energy than performing a floating-point operation on it (for example, ~`{python} ArchReferenceTables.dram_pj_str` pJ vs. ~`{python} ArchReferenceTables.flop_pj_str` pJ). This energy wall means that maximizing **arithmetic intensity** (doing many ops per loaded byte) is the only way to be energy efficient.
+Fetching a 32-bit value from DRAM costs roughly `{python} ArchReferenceTables.energy_ratio_str`$\times$ more energy than performing a floating-point operation on it (for example, ~`{python} ArchReferenceTables.dram_pj_str` vs. ~`{python} ArchReferenceTables.flop_pj_str`). This energy wall means that maximizing **arithmetic intensity** (doing many ops per loaded byte) is the only way to be energy efficient.
 
 :::
 
@@ -1052,16 +1051,16 @@ For small transfers (for example, single-token inference), latency dominates. Fo
 # │ Imports: (none—pure scalars)
 # │ Exports: bw_gbps_str, ping_ms_str, data_kb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt
+from mlsysim.fmt import fmt_int, fmt, fmt_bandwidth, fmt_time, fmt_qty
 
 # ┌── LEGO ───────────────────────────────────────────────
 class BandwidthLatencySetup:
     """Namespace for bandwidth-latency lead-in constants."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    bw_gbps_value = Systems.Fabrics.Ethernet_10G.bandwidth.m_as(Gbps)
-    ping_ms_value = 10    # Network latency in ms
-    data_kb_value = 1     # Packet size in KB
+    link_bandwidth = Systems.Fabrics.Ethernet_10G.bandwidth
+    ping_latency = 10 * ms  # scenario assumption: network latency
+    data = 1 * KB           # scenario assumption: packet size
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # No derived values—only string formatting.
@@ -1070,9 +1069,9 @@ class BandwidthLatencySetup:
     # No check() calls needed—values are definitional constants.
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    bw_gbps_str = fmt(bw_gbps_value, precision=0, commas=False, suffix=" Gb/s")
-    ping_ms_str = fmt(ping_ms_value, precision=0, commas=False, suffix=' ms')
-    data_kb_str = fmt(data_kb_value, precision=0, commas=False, suffix=' KB')
+    bw_gbps_str = fmt_bandwidth(link_bandwidth, unit=Gbps, precision=0, commas=False)
+    ping_ms_str = fmt_time(ping_latency, 'millisecond', precision=0, commas=False)
+    data_kb_str = fmt_qty(data, KB, precision=0, commas=False)
 ```
 
 Consider sending data over a `{python} BandwidthLatencySetup.bw_gbps_str` link with `{python} BandwidthLatencySetup.ping_ms_str` ping (latency). The dominant bottleneck depends entirely on the transfer size:
@@ -1093,40 +1092,36 @@ Consider sending data over a `{python} BandwidthLatencySetup.bw_gbps_str` link w
 # │ Imports: mlsysim.core.constants (MILLION, BILLION), mlsysim.book (fmt, fmt_math)
 # │ Exports: tx_time_us_str, large_data_gb_str, eq_large_tx, eq_large_total
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, fmt_math
-from mlsysim.core.constants import BITS_PER_BYTE
+from mlsysim.fmt import fmt_int, fmt, fmt_math, fmt_qty, fmt_time
 
 # ┌── LEGO ───────────────────────────────────────────────
 class BandwidthLatencyExample:
     """Namespace for latency-bound vs. bandwidth-bound transmission time example."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    data_kb_value = (1 * KB).m_as(byte)
-    bw_gbps_value = Systems.Fabrics.Ethernet_10G.bandwidth.m_as(Gbps) * BILLION
-    large_data_gb_value = 1
-    ping_ms_value = 10
+    packet_data = 1 * KB      # scenario assumption: latency-bound packet size
+    link_bandwidth = Systems.Fabrics.Ethernet_10G.bandwidth
+    large_data = 1 * GB       # scenario assumption: bandwidth-bound checkpoint size
+    ping_latency = 10 * ms    # scenario assumption: network latency
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    tx_time_s_value = (data_kb_value * BITS_PER_BYTE) / bw_gbps_value
-    tx_time_us_value = tx_time_s_value * MILLION
-
-    large_data_bits_value = large_data_gb_value * (1 * GB).m_as(byte) * BITS_PER_BYTE
-    large_tx_time_s_value = large_data_bits_value/bw_gbps_value
-    total_large_time_ms_value = ping_ms_value + large_tx_time_s_value * THOUSAND
+    tx_time = (packet_data / link_bandwidth).to(microsecond)
+    large_tx_time = (large_data / link_bandwidth).to(ms)
+    total_large_time = ping_latency + large_tx_time
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     # No check() calls needed—values are monotone functions of inputs.
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    tx_time_us_str = fmt(tx_time_us_value, precision=1, commas=False)
-    large_data_gb_str = fmt(large_data_gb_value, precision=0, commas=False)
-    large_tx_eq = fmt_math(f"{large_data_gb_value}\\text{{ GB}} \\times 8 / {int(bw_gbps_value/BILLION)}\\text{{ Gbps}} \\approx {int(large_tx_time_s_value*THOUSAND)}\\text{{ ms}}")
-    large_total_eq = fmt_math(f"\\approx {int(ping_ms_value)}\\text{{ ms}} + {int(large_tx_time_s_value*THOUSAND)}\\text{{ ms}} = {int(total_large_time_ms_value)}\\text{{ ms}}")
+    tx_time_us_str = fmt_time(tx_time, 'microsecond', precision=1, commas=False)
+    large_data_gb_str = fmt_qty(large_data, GB, precision=0, commas=False)
+    large_tx_eq = fmt_math(f"{int(large_data.to(GB).magnitude)}\\text{{ GB}} \\times 8 / {int(link_bandwidth.to(Gbps).magnitude)}\\text{{ Gbps}} \\approx {int(large_tx_time.to(ms).magnitude)}\\text{{ ms}}")
+    large_total_eq = fmt_math(f"\\approx {int(ping_latency.to(ms).magnitude)}\\text{{ ms}} + {int(large_tx_time.to(ms).magnitude)}\\text{{ ms}} = {int(total_large_time.to(ms).magnitude)}\\text{{ ms}}")
 ```
 
 *   **Latency-bound packet** (`{python} BandwidthLatencySetup.data_kb_str`):
-    *   Transmission: `{python} BandwidthLatencySetup.data_kb_str` $\times$ 8 / `{python} BandwidthLatencySetup.bw_gbps_str` ≈ `{python} BandwidthLatencyExample.tx_time_us_str` μs.
-    *   Total Time ≈ `{python} BandwidthLatencySetup.ping_ms_str` + `{python} BandwidthLatencyExample.tx_time_us_str` μs ≈ `{python} BandwidthLatencySetup.ping_ms_str`.
+    *   Transmission: `{python} BandwidthLatencySetup.data_kb_str` $\times$ 8 / `{python} BandwidthLatencySetup.bw_gbps_str` ≈ `{python} BandwidthLatencyExample.tx_time_us_str`.
+    *   Total Time ≈ `{python} BandwidthLatencySetup.ping_ms_str` + `{python} BandwidthLatencyExample.tx_time_us_str` ≈ `{python} BandwidthLatencySetup.ping_ms_str`.
     *   *Result*: The bandwidth is irrelevant; the speed of light (ping) is the bottleneck.
 
 *   **Bandwidth-bound checkpoint** (`{python} BandwidthLatencyExample.large_data_gb_str`):

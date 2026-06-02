@@ -77,12 +77,6 @@ These failure modes motivate a precise definition of Robust AI:
 
 :::
 
-::: {.column-margin}
-![](images/svg/robust_ai_robustness_tax.svg){width="100%" fig-alt="Two columns comparing clean ImageNet accuracy. The standard model column (gray) reaches 76 percent; the adversarially trained model column (orange) reaches only 50 percent, a 26-point robustness tax."}
-
-*Adversarial robustness costs roughly 26 points of clean accuracy.*
-:::
-
 Three categories of threat produce these silent failures, and each demands distinct engineering responses. The first and most pervasive is environmental change: distribution shifts, concept drift, and evolving operational contexts challenge the core assumptions underlying model training. A model trained on last year's transaction patterns quietly becomes unreliable as customer behavior evolves, requiring continuous monitoring and adaptation strategies that go beyond standard operational practices.
 
 The second category, malicious manipulation, targets model behavior directly. Adversarial attacks, data poisoning attempts, and prompt injection vulnerabilities cause models to misclassify inputs or produce unreliable outputs—failures that authentication and access control (@sec-security-privacy) cannot prevent because the attacker operates within the model's own input space.
@@ -341,13 +335,13 @@ from mlsysim.core.constants import *
 # │
 # │ Goal: Surface hardware fault exposure parameters for large models.
 # │ Show: ~175B params, ~900 GB/s V100 memory bandwidth, ~0.26 errors/hr.
-# │ How: .m_as() from mlsysim.core.constants plus bit-rate arithmetic.
+# │ How: .to(unit).magnitude from mlsysim.core.constants plus bit-rate arithmetic.
 # │
 # │ Imports: mlsysim.core.constants (*), mlsysim.fmt (*)
-# │ Exports: gpt3_params_b_str, v100_mem_bw_str, bits_per_second_math,
+# │ Exports: gpt3_params_b_str, v100_mem_bw_gb_s_str, bits_per_second_math,
 # │          base_error_rate_math, expected_errors_per_hour_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_math, sci_latex
+from mlsysim.fmt import check, fmt, fmt_math, fmt_qty, sci_latex
 
 # ┌── LEGO ───────────────────────────────────────────────
 class RobustAISetup:
@@ -360,9 +354,9 @@ class RobustAISetup:
     base_error_rate = Ops.Monitoring.MemoryBitErrorRatePerBit
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    gpt3_params_b_val = m.parameters.m_as(param) / BILLION
-    v100_bw_gbs_val = h.memory.bandwidth.m_as(GB/second)
-    bits_per_second_val = h.memory.bandwidth.m_as(byte/second) * BITS_PER_BYTE
+    gpt3_params_b_val = m.parameters.to(param).magnitude / BILLION
+    v100_bw_gbs_val = h.memory.bandwidth.to(GB/second).magnitude
+    bits_per_second_val = h.memory.bandwidth.to(byte/second).magnitude * BITS_PER_BYTE
     expected_errors_per_hour_val = bits_per_second_val * base_error_rate * SEC_PER_HOUR
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
@@ -370,15 +364,15 @@ class RobustAISetup:
     check(gpt3_params_b_val == 175, f"Expected 175B params, got {gpt3_params_b_val}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    from mlsysim.fmt import fmt, fmt_math, sci_latex
+    from mlsysim.fmt import fmt, fmt_math, fmt_qty, sci_latex
     gpt3_params_b_str = fmt(gpt3_params_b_val, precision=0, commas=False)
-    v100_mem_bw_str = fmt(v100_bw_gbs_val, precision=0, commas=False, suffix=' GB/s')
+    v100_mem_bw_gb_s_str = fmt_qty(h.memory.bandwidth, GB/second, precision=0, commas=False)
     bits_per_second_math = fmt_math(sci_latex(bits_per_second_val, precision=1))
     base_error_rate_math = fmt_math(sci_latex(base_error_rate, precision=1))
     expected_errors_per_hour_str = fmt(expected_errors_per_hour_val, precision=2, commas=False)
 ```
 
-Consider how hardware reliability directly impacts ML performance. As @fig-weight-corruption illustrates, a single bit flip in a critical neural network weight can degrade ResNet-50 classification accuracy from 76 percent (top-1) to 11 percent on ImageNet, while memory subsystem failures during training corrupt gradient updates and prevent model convergence. Modern transformer models such as GPT-3 with `{python} RobustAISetup.gpt3_params_b_str`&nbsp;B parameters execute enormous numbers of floating-point operations and create many opportunities for hardware faults during a forward pass. GPU memory systems operating at up to `{python} RobustAISetup.v100_mem_bw_str` bandwidth (such as V100 HBM2) process about `{python} RobustAISetup.bits_per_second_math` bits per second. At a base error rate of `{python} RobustAISetup.base_error_rate_math` errors per bit processed, sustained peak bandwidth would yield about `{python} RobustAISetup.expected_errors_per_hour_str` expected bit errors per hour per device; at fleet scale, those low per-device rates compound into operationally visible fault rates.
+Consider how hardware reliability directly impacts ML performance. As @fig-weight-corruption illustrates, a single bit flip in a critical neural network weight can degrade ResNet-50 classification accuracy from 76 percent (top-1) to 11 percent on ImageNet, while memory subsystem failures during training corrupt gradient updates and prevent model convergence. Modern transformer models such as GPT-3 with `{python} RobustAISetup.gpt3_params_b_str`&nbsp;B parameters execute enormous numbers of floating-point operations and create many opportunities for hardware faults during a forward pass. GPU memory systems operating at up to `{python} RobustAISetup.v100_mem_bw_gb_s_str` bandwidth (such as V100 HBM2) process about `{python} RobustAISetup.bits_per_second_math` bits per second. At a base error rate of `{python} RobustAISetup.base_error_rate_math` errors per bit processed, sustained peak bandwidth would yield about `{python} RobustAISetup.expected_errors_per_hour_str` expected bit errors per hour per device; at fleet scale, those low per-device rates compound into operationally visible fault rates.
 
 ::: {#fig-weight-corruption fig-env="figure" fig-pos="htb" fig-cap="**Weight Corruption via Bit Flip**: A neural-network forward-pass diagram (left) shows a BIT FLIP on one weight, turning a normal path into a corrupted path whose error propagates to the outputs. The weight-value histogram (right) shows a single corrupted weight landing at the extreme $10^k$ tail, far outside the normal distribution. Flipping an exponent bit with place value $2^k$ in IEEE 754 changes the value by a factor of $2^{\pm 2^k}$, saturating downstream neurons and causing silent misclassification." fig-alt="Left: neural-network forward pass with input, hidden, output neurons; BIT FLIP label on one weight, corrupted path arrows into outputs. Right: histogram of normal weights near zero, with one corrupted weight flagged at 10^k."}
 ![](images/svg/weight-corruption.svg)
@@ -426,7 +420,7 @@ class SilentErrorProbability:
     from mlsysim.fmt import fmt, fmt_math
     p_per_hr_math = fmt_math("10^{-4}")
     n_gpus_large_str = fmt(n_gpus_large, precision=0)
-    p_total_large_str = fmt(p_at_least_one_val * 100, precision=1, suffix=' percent')
+    p_total_large_str = fmt_percent(p_at_least_one_val, precision=1, style='prose')
     n_gpus_certain_str = fmt(n_gpus_certain_val, precision=0)
 ```
 The scale of modern GPU clusters transforms per-device error rates into fleet-level events. @Fig-silent-error-probability illustrates this compounding effect: for a cluster of $N$ devices each with per-device silent data corruption probability $p$ per hour, the probability of at least one SDC event is $\Pr(\geq 1) = 1 - (1 - p)^N$. Meta's SDC report establishes that silent corruption occurs at observable fleet scale [@dixit2021silent]; the curve below uses an illustrative stress-test rate of $p$ = `{python} SilentErrorProbability.p_per_hr_math` per device-hour to show the compounding math. At that rate, a `{python} SilentErrorProbability.n_gpus_large_str`-device cluster is already more likely than not to see an hourly silent error (`{python} SilentErrorProbability.p_total_large_str` probability), and the probability crosses 95 percent at about `{python} SilentErrorProbability.n_gpus_certain_str` devices.
@@ -655,9 +649,9 @@ class AdversarialPayback:
     ap_std_passes_str = fmt(std_passes, precision=0, commas=False)
     ap_n_pgd_steps_str = fmt(n_pgd_steps, precision=0, commas=False)
     ap_slowdown_str = fmt(slowdown, precision=0, commas=False)
-    ap_cert_acc_str = fmt(robust_acc*100, precision=0, commas=False, suffix="%")
+    ap_cert_acc_str = fmt_percent(robust_acc, precision=0, commas=False, style='symbol')
     ap_gap_pct_str = fmt(accuracy_gap_pct, precision=0, commas=False)
-    ap_std_acc_str = fmt(std_acc * 100, precision=0, commas=False, suffix="%")
+    ap_std_acc_str = fmt_percent(std_acc, precision=0, commas=False, style='symbol')
 ```
 
 ::: {#nbk-robust-ai-cost-defense .callout-notebook title="The cost of defense"}
@@ -854,9 +848,9 @@ class DistributionShiftMetrics:
     check(psi_critical > psi_warn, "Critical threshold must be above warning")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    from mlsysim.fmt import fmt
+    from mlsysim.fmt import fmt, fmt_time
     mmd_n_samples_str = fmt(n_samples_mmd, precision=0)
-    mmd_latency_ms_str = fmt(mmd_latency_ms, precision=0, commas=False, suffix=' ms')
+    mmd_latency_ms_str = fmt_time(mmd_latency_ms, 'millisecond', precision=0, commas=False)
     ks_n_samples_str = fmt(n_samples_ks, precision=0)
     psi_warn_thresh_str = fmt(psi_warn, precision=1, commas=False)
     psi_critical_thresh_str = fmt(psi_critical, precision=2, commas=False)
@@ -1326,13 +1320,13 @@ Optimization-based attacks are more computationally intensive than gradient-base
 
 Transfer-based attacks exploit the transferability property[^fn-transferability-blackbox] of adversarial examples. **Transferability**\index{Transferability} refers to the phenomenon where adversarial examples crafted for one ML model can often fool other models, even if they have different architectures or were trained on different datasets. This enables attackers to generate adversarial examples using a surrogate model and then transfer them to the target model without requiring direct access to its parameters or gradients.
 
+[^fn-transferability-blackbox]: **Transferability**: The property, analyzed in @papernot2016transferability, that adversarial examples crafted for one model fool different architectures with 30--70 percent success rates. This transforms the threat model for deployed ML systems: attackers need not query the target model at all---they can train a substitute locally, craft attacks offline, and transfer them to production APIs. Ensemble adversarial training (training against perturbations from multiple surrogate models) partially mitigates transfer attacks at 3--5$\times$ the training cost. \index{Transferability!black-box attack}
+
 ::: {.column-margin}
 ![](images/svg/vol2_robust_ai_margin_002.svg){width="100%" fig-alt="Margin illustration showing One surrogate-crafted attack fans out to target models."}
 
 *One surrogate-crafted adversarial example transfers across many models.*
 :::
-
-[^fn-transferability-blackbox]: **Transferability**: The property, analyzed in @papernot2016transferability, that adversarial examples crafted for one model fool different architectures with 30--70 percent success rates. This transforms the threat model for deployed ML systems: attackers need not query the target model at all---they can train a substitute locally, craft attacks offline, and transfer them to production APIs. Ensemble adversarial training (training against perturbations from multiple surrogate models) partially mitigates transfer attacks at 3--5$\times$ the training cost. \index{Transferability!black-box attack}
 
 Transferability underlies the feasibility of black-box attacks, where the adversary cannot query gradients but can still fool a model by crafting attacks on a publicly available or similar substitute model. Transfer-based attacks are particularly relevant in practical threat scenarios, such as attacking commercial ML APIs, where the attacker can observe inputs and outputs but not internal computations.
 
@@ -2020,9 +2014,11 @@ class RobustnessTaxAnalysis:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     from mlsysim.fmt import fmt
-    clean_acc_str = fmt(clean_acc, precision=0, commas=False, suffix=' percent')
-    robust_acc_str = fmt(robust_acc, precision=0, commas=False, suffix=' percent')
-    acc_drop_str = fmt(acc_drop, precision=0, commas=False, suffix=' percent')
+    clean_acc_str = fmt_percent(clean_acc/100, precision=0, commas=False, style='prose')
+    robust_acc_str = fmt_percent(robust_acc/100, precision=0, commas=False, style='prose')
+    # acc_drop is a difference of two accuracies = percentage POINTS, not a
+    # percent ratio; prose supplies "percentage points"/"accuracy points".
+    acc_drop_str = fmt(acc_drop, precision=0, commas=False)
 ```
 
 ::: {#nbk-robust-ai-robustness-tax .callout-notebook title="The robustness tax"}
@@ -2033,6 +2029,12 @@ class RobustnessTaxAnalysis:
 
 1.  **Standard ResNet-50**\index{ResNet-50!standard}: `{python} RobustnessTaxAnalysis.clean_acc_str` Top-1 Accuracy on ImageNet.
 2.  **Adversarially Trained ResNet-50** $(\epsilon=8/255)$: ~`{python} RobustnessTaxAnalysis.robust_acc_str` Top-1 Accuracy on Clean ImageNet.
+
+::: {.column-margin}
+![](images/svg/robust_ai_robustness_tax.svg){width="100%" fig-alt="Two columns comparing clean ImageNet accuracy. The standard model column reaches 76 percent; the adversarially trained model column reaches about 50 percent, a 26-point robustness tax."}
+
+*Adversarial robustness costs roughly 26 points of clean accuracy.*
+:::
 
 **Result**: Gaining robustness against rare adversarial attacks sacrifices `{python} RobustnessTaxAnalysis.acc_drop_str` percentage points of clean accuracy on normal inputs.
 
@@ -2555,15 +2557,15 @@ class HuberOutlierScaling:
 
 Robust optimization modifies the training objective to minimize the impact of outliers or poisoned instances. Robust loss functions such as the Huber loss[^fn-huber-loss-robust], the Tukey loss [@beaton1974], and the trimmed mean loss down-weight or ignore the contribution of abnormal instances during training. Regularization techniques ($\ell_1$ or $\ell_2$ regularization) constrain model complexity and reduce sensitivity to poisoned data. At a higher level, robust objective functions such as the minimax[^fn-minimax-adversarial] or distributionally robust objective optimize the model's performance under worst-case scenarios, providing formal guarantees against adversarial perturbations.
 
+[^fn-huber-loss-robust]: **Huber Loss**: This piecewise function transitions from quadratic (MSE) to linear (MAE) at threshold $\delta$ (typically 1.0--1.5), capping gradient magnitude for extreme samples. In poisoned-data settings, Huber loss prevents a small number of malicious samples from generating outsized gradients that would dominate parameter updates---a property standard MSE lacks, since a single outlier with `{python} HuberOutlierScaling.normal_error_multiple_str`$\times$ normal error contributes `{python} HuberOutlierScaling.squared_loss_multiple_str`$\times$ squared-error loss and `{python} HuberOutlierScaling.residual_gradient_multiple_str`$\times$ residual-gradient magnitude. \index{Huber Loss!poisoning defense}
+
+[^fn-minimax-adversarial]: **Minimax**: Game-theoretic strategy from @vonneumann1928theorie that minimizes the maximum possible loss. In adversarial robustness, the training objective becomes $\min_\theta \max_{\|\delta\| \leq \epsilon} \mathcal{L}(f_\theta(x + \delta), y)$---the model learns to minimize loss under the worst-case perturbation. This inner maximization is computationally expensive, typically requiring 7--20 PGD steps per training sample, and convergence is not guaranteed, which is why PGD-adversarial training remains 5--10$\times$ slower than standard training. \index{Minimax!adversarial training}
+
 ::: {.column-margin}
 ![](images/svg/vol2_robust_ai_margin_004.svg){width="100%" fig-alt="Margin illustration showing MSE curve versus Huber loss curve with gentler tail."}
 
 *Huber loss caps the outlier influence that squared loss amplifies.*
 :::
-
-[^fn-huber-loss-robust]: **Huber Loss**: This piecewise function transitions from quadratic (MSE) to linear (MAE) at threshold $\delta$ (typically 1.0--1.5), capping gradient magnitude for extreme samples. In poisoned-data settings, Huber loss prevents a small number of malicious samples from generating outsized gradients that would dominate parameter updates---a property standard MSE lacks, since a single outlier with `{python} HuberOutlierScaling.normal_error_multiple_str`$\times$ normal error contributes `{python} HuberOutlierScaling.squared_loss_multiple_str`$\times$ squared-error loss and `{python} HuberOutlierScaling.residual_gradient_multiple_str`$\times$ residual-gradient magnitude. \index{Huber Loss!poisoning defense}
-
-[^fn-minimax-adversarial]: **Minimax**: Game-theoretic strategy from @vonneumann1928theorie that minimizes the maximum possible loss. In adversarial robustness, the training objective becomes $\min_\theta \max_{\|\delta\| \leq \epsilon} \mathcal{L}(f_\theta(x + \delta), y)$---the model learns to minimize loss under the worst-case perturbation. This inner maximization is computationally expensive, typically requiring 7--20 PGD steps per training sample, and convergence is not guaranteed, which is why PGD-adversarial training remains 5--10$\times$ slower than standard training. \index{Minimax!adversarial training}
 
 Data augmentation generates additional training examples by applying random transformations or perturbations to existing data (@fig-data-augmentation), increasing the diversity and robustness of the training dataset. Controlled variations make the model less sensitive to specific patterns or artifacts that poisoned instances contain. Randomization techniques such as random subsampling or bootstrap aggregating further reduce the impact of poisoned data by training multiple models on different subsets and combining their predictions.\index{Data Augmentation!techniques}
 

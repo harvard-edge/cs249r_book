@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Replace ``defaults.*`` with domain registry paths in book QMD and Python."""
+"""Replace ``defaults.*`` with domain registry paths in QMD and Python."""
 
 from __future__ import annotations
 
@@ -14,8 +14,8 @@ _SYMBOL_MAP: list[tuple[str, str]] = [
     ("PCIE_SWITCH_MTTF_HOURS", "Systems.Reliability.PcieSwitch.mttf_hours"),
     ("GRID_INTERCONNECTION_QUEUE_US_GW", "Infrastructure.Capacity.GridInterconnectionQueueGw"),
     ("CHECKPOINT_WRITE_BW_GBS", "Systems.Reliability.Recovery.checkpoint_write_bw_gbs"),
-    ("OVERHEAD_FAILURE_RECOVERY", "Literature.Overheads.FailureRecovery"),
-    ("OVERHEAD_PIPELINE_BUBBLE", "Literature.Overheads.PipelineBubble"),
+    ("OVERHEAD_FAILURE_RECOVERY", "Ops.TrainingRunOverheads.FailureRecovery"),
+    ("OVERHEAD_PIPELINE_BUBBLE", "Ops.TrainingRunOverheads.PipelineBubble"),
     ("CHINCHILLA_TOKENS_PER_PARAM", "Literature.Chinchilla.TokensPerParam"),
     ("CHINCHILLA_COMPUTE_CONSTANT", "Literature.Chinchilla.ComputeConstant"),
     ("CRITICAL_BATCH_SIZE_DEFAULT", "Literature.BatchSize.Default"),
@@ -32,12 +32,12 @@ _SYMBOL_MAP: list[tuple[str, str]] = [
     ("TOR_SWITCH_MTTF_HOURS", "Systems.Reliability.TorSwitch.mttf_hours"),
     ("MFU_INFERENCE_BATCH1", "Literature.Training.MfuInferenceBatch1"),
     ("MFU_INFERENCE_BATCHED", "Literature.Training.MfuInferenceBatched"),
-    ("SCALING_EFF_1024GPU", "Literature.Scaling.Eff1024Gpu"),
-    ("SCALING_EFF_8192GPU", "Literature.Scaling.Eff8192Gpu"),
-    ("SCALING_EFF_256GPU", "Literature.Scaling.Eff256Gpu"),
-    ("SCALING_EFF_32GPU", "Literature.Scaling.Eff32Gpu"),
-    ("OVERHEAD_MAINTENANCE", "Literature.Overheads.Maintenance"),
-    ("OVERHEAD_CHECKPOINT", "Literature.Overheads.Checkpoint"),
+    ("SCALING_EFF_1024GPU", "ReferenceStats.TrainingScaleProfiles.Eff1024Gpu"),
+    ("SCALING_EFF_8192GPU", "ReferenceStats.TrainingScaleProfiles.Eff8192Gpu"),
+    ("SCALING_EFF_256GPU", "ReferenceStats.TrainingScaleProfiles.Eff256Gpu"),
+    ("SCALING_EFF_32GPU", "ReferenceStats.TrainingScaleProfiles.Eff32Gpu"),
+    ("OVERHEAD_MAINTENANCE", "Ops.TrainingRunOverheads.Maintenance"),
+    ("OVERHEAD_CHECKPOINT", "Ops.TrainingRunOverheads.Checkpoint"),
     ("LEAD_TIME_GPU_MONTHS", "Infrastructure.Capacity.GpuLeadTimeMonths"),
     ("HEARTBEAT_TIMEOUT_S", "Systems.Reliability.Recovery.heartbeat_timeout_s"),
     ("RESCHEDULE_TIME_S", "Systems.Reliability.Recovery.reschedule_time_s"),

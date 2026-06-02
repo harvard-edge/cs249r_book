@@ -34,6 +34,11 @@ class Violation:
     context: str = ""
 
 
+def _paren_delta(line: str) -> int:
+    """Approximate bracket depth for skipping wrapped call arguments."""
+    return line.count("(") + line.count("[") - line.count(")") - line.count("]")
+
+
 def _python_cells(lines: list[str]) -> Iterable[tuple[int, list[tuple[int, str]]]]:
     """Yield Python cell line spans as ``(start_line, [(lineno, text), ...])``."""
     in_cell = False
@@ -101,7 +106,13 @@ def audit_file(path: Path) -> list[Violation]:
             output_lines.append((lineno, line))
 
         output_text = "\n".join(line for _, line in output_lines)
+        paren_depth = 0
         for lineno, line in output_lines:
+            in_wrapped_expr = paren_depth > 0
+            paren_depth = max(0, paren_depth + _paren_delta(line))
+            if in_wrapped_expr:
+                continue
+
             assign_match = ASSIGN.match(line)
             if not assign_match:
                 continue

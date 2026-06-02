@@ -24,6 +24,7 @@ Direct `python3 book/tools/scripts/...` use is for maintenance or cases not wire
 |------|--------|
 | Content tools | [`content/README.md`](content/README.md) |
 | Images | [`images/README.md`](images/README.md) |
+| Margin figures | [`margin_figures/README.md`](margin_figures/README.md) |
 | Infra / CI helpers | [`infrastructure/README.md`](infrastructure/README.md) |
 | Utilities | [`utilities/README.md`](utilities/README.md) |
 | Extra script notes | [`docs/README.md`](docs/README.md) |
