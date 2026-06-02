@@ -55,6 +55,8 @@ Machine learning systems have a *physics*. Data must move through memory hierarc
 #| echo: false
 from mlsysim import *
 from mlsysim.core.constants import *
+from mlsysim import ReferenceStats
+from mlsysim.fmt import fmt, fmt_qty, fmt_memory, check
 #| label: ai-moment-stats
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ THE AI MOMENT STATISTICS (LEGO)
@@ -79,16 +81,15 @@ class AIMomentStats:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    from mlsysim.fmt import fmt, check, MarkdownStr
     searches_per_day = ReferenceStats.Workloads.GoogleSearchesPerDay
     h100_flops = Hardware.Cloud.H100.compute.peak_flops
     cpu_flops = Hardware.Cloud.ReferenceCPU.compute.peak_flops
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     searches_b = searches_per_day / BILLION
-    gpu_tflops = h100_flops.m_as(TFLOPs/second)
-    cpu_tflops = cpu_flops.m_as(TFLOPs/second)
-    gpu_cpu_ratio = gpu_tflops / cpu_tflops
+    gpu_tflops = h100_flops.to(TFLOPs / second)
+    cpu_tflops = cpu_flops.to(TFLOPs / second)
+    gpu_cpu_ratio = (gpu_tflops / cpu_tflops).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(searches_b >= 5, f"Google searches ({searches_b:.1f}B) unexpectedly low.")
@@ -96,8 +97,8 @@ class AIMomentStats:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     google_search_b_str = fmt(searches_b, precision=1)
-    h100_fp16_tflops_str = fmt(gpu_tflops, precision=0, commas=False)
-    cpu_fp32_tflops_str = fmt(cpu_tflops, precision=0, commas=False)
+    h100_fp16_tflops_str = fmt_qty(gpu_tflops, TFLOPs / second, precision=0, commas=False)
+    cpu_fp32_tflops_str = fmt_qty(cpu_tflops, TFLOPs / second, precision=0, commas=False)
 ```
 
 ## AI Moment {#sec-introduction-ai-moment-37f1}
@@ -178,8 +179,8 @@ That failure lived not in the model but in the data, and it reflects how ML syst
 # │          mlsysim.physics (model_memory), mlsysim.fmt (fmt, check)
 # │ Exports: GPT3WeightFootprint.params_b_str, fp16_weights_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.physics import model_memory
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, fmt_memory, check
+from mlsysim.core.units import Bparam, GB
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT3WeightFootprint:
@@ -190,19 +191,19 @@ class GPT3WeightFootprint:
     bytes_per_param = BYTES_FP16
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    params_b = params.m_as(Bparam)
-    fp16_weights_gb = model_memory(params, bytes_per_param, GB)
+    params_b = params.to(Bparam).magnitude
+    fp16_weights = params * bytes_per_param
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(params_b == 175, f"GPT-3 parameter count should be 175 billion, got {params_b}.")
-    check(340 <= fp16_weights_gb <= 360, f"GPT-3 FP16 footprint should be about 350 GB, got {fp16_weights_gb:.1f}.")
+    check(340 <= fp16_weights.to(GB).magnitude <= 360, f"GPT-3 FP16 footprint should be about 350 GB, got {fp16_weights.to(GB).magnitude:.1f}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     params_b_str = fmt(params_b, precision=0, commas=False)
-    fp16_weights_gb_str = fmt(fp16_weights_gb, precision=0, commas=False)
+    fp16_weights_gb_str = fmt_memory(fp16_weights, unit=GB, precision=0, commas=False)
 ```
 
-[^fn-model-weights-inference]: **Model Weights**: The learned numerical parameters of a neural network, one value per connection between units. A GPT-3-scale model stores `{python} GPT3WeightFootprint.params_b_str` billion such values, consuming `{python} GPT3WeightFootprint.fp16_weights_gb_str` gigabytes in FP16 precision. Because every inference request must load these weights through the memory hierarchy, weight count is the single largest determinant of both memory footprint $(D_{\text{vol}})$ and serving cost (see @sec-neural-computation). \index{Model Weights!definition}
+[^fn-model-weights-inference]: **Model Weights**: The learned numerical parameters of a neural network, one value per connection between units. A GPT-3-scale model stores `{python} GPT3WeightFootprint.params_b_str` billion such values, consuming `{python} GPT3WeightFootprint.fp16_weights_gb_str` in FP16 precision. Because every inference request must load these weights through the memory hierarchy, weight count is the single largest determinant of both memory footprint $(D_{\text{vol}})$ and serving cost (see @sec-neural-computation). \index{Model Weights!definition}
 
 From a systems perspective, this represents a transition from *instruction-centric* to *data-centric* computing [@ng2021datacentric] \index{Data-Centric Computing}:
 
@@ -228,7 +229,8 @@ Debugging an ML system therefore means debugging the data, not the Python script
 # │          VerificationGap.imagenet_test_images_str
 # └─────────────────────────────────────────────────────────────────────────────
 import math
-from mlsysim.fmt import fmt_int,  fmt, check
+from mlsysim.fmt import fmt_int, fmt, check
+from mlsysim.core.units import count
 
 # ┌── LEGO ───────────────────────────────────────────────
 class VerificationGap:
@@ -243,7 +245,7 @@ class VerificationGap:
     height = IMAGE_DIM_RESNET
     channels = IMAGE_CHANNELS_RGB
     depth = COLOR_DEPTH_8BIT
-    test_size = Datasets.ImageNet.test_examples.m_as('count')
+    test_size = Datasets.ImageNet.test_examples.to(count).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     total_pixels = width * height * channels
@@ -602,7 +604,8 @@ This hybrid approach combined human-engineered features with statistical learnin
 # │          AlexNetBreakthrough.alexnet_params_m_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, fmt_count, fmt_percent, check
+from mlsysim.core.units import Mparam, param
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AlexNetBreakthrough:
@@ -618,14 +621,19 @@ class AlexNetBreakthrough:
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     relative_improvement = (second_place_error - alexnet_top5_error) / second_place_error * 100
-    params_m = model.parameters.m_as('Mparam')
+    params_m = model.parameters.to(Mparam).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(relative_improvement >= 40, f"AlexNet improvement should be ~42%, got {relative_improvement:.1f}%")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    alexnet_relative_improvement_str = fmt(relative_improvement, precision=1, suffix="%")
-    alexnet_params_m_str = fmt(params_m, precision=0, suffix=" million")
+    alexnet_relative_improvement_str = fmt_percent(relative_improvement/100, precision=1, style='symbol')
+    alexnet_params_m_str = fmt_count(
+        model.parameters,
+        scale="M",
+        precision=0,
+        scale_style="word",
+    )
 ```
 
 ### Deep learning era: The infrastructure bottleneck {#sec-introduction-deep-learning-era-infrastructure-bottleneck-2f02}
@@ -1075,7 +1083,8 @@ node[below]{dense}(X1-|B1D.north west);
 # │          GPT3Scale.gpt3_training_zflops_str, GPT3Scale.data_scale_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware, Models
-from mlsysim.fmt import fmt_int,  fmt, check, MarkdownStr
+from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_memory, check, MarkdownStr
+from mlsysim.core.units import Bparam, ZFLOPs, byte, GB
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT3Scale:
@@ -1086,16 +1095,14 @@ class GPT3Scale:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     model = Models.Language.GPT3
-    tokens_b = Models.Language.GPT3.training_tokens.m_as(Bparam)
+    training_tokens = Models.Language.GPT3.training_tokens
     avg_token_bytes = 1.4
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Size in Bparam
-    params_b = model.parameters.m_as(Bparam)
-    # Compute in ZFLOPs
-    training_zflops = model.training_ops.m_as(ZFLOPs)
-    # Data scale in GB
-    data_gb = (tokens_b * BILLION * avg_token_bytes * byte).m_as(GB)
+    tokens_b = training_tokens.to(Bparam).magnitude
+    params_b = model.parameters.to(Bparam).magnitude
+    training_zflops = model.training_ops.to(ZFLOPs).magnitude
+    data_volume = training_tokens * avg_token_bytes * byte
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(params_b == 175, f"GPT-3 should be 175 billion parameters, got {params_b}")
@@ -1103,12 +1110,18 @@ class GPT3Scale:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     gpt3_params_b_str = fmt(params_b, precision=0, commas=False)
-    gpt3_params_billion_str = fmt(params_b, precision=0, commas=False, suffix=" billion")
+    gpt3_params_billion_str = fmt_count(
+        model.parameters,
+        scale="B",
+        precision=0,
+        commas=False,
+        scale_style="word",
+    )
     gpt3_training_zflops_str = fmt_int(training_zflops, commas=False)
-    data_scale_gb_str = fmt(data_gb, precision=0, commas=False)
+    data_scale_gb_str = fmt_memory(data_volume, unit=GB, precision=0, commas=False)
 ```
 
-Deep learning effectively traded the feature engineering bottleneck for a new **compute bottleneck**\index{Compute Bottleneck}. Models like GPT-3 [@brown2020language] (`{python} GPT3Scale.gpt3_params_billion_str` parameters) illustrate the scale of this new challenge. Training used about 300 billion tokens from filtered web text, books, and Wikipedia and required an estimated `{python} GPT3Scale.gpt3_training_zflops_str` zettaFLOPs of compute; the GPT-3 paper does not specify the exact hardware configuration, but that compute corresponds to hundreds of V100 GPU-years under common throughput assumptions. (One zettaFLOP equals $10^{21}$ floating-point operations; the training corpus comprised roughly `{python} GPT3Scale.data_scale_gb_str` gigabytes of text.) The primary engineering challenge shifted from "*how* do we describe a cat's ear?" to "*how* do we coordinate large-scale distributed training without failure?"
+Deep learning effectively traded the feature engineering bottleneck for a new **compute bottleneck**\index{Compute Bottleneck}. Models like GPT-3 [@brown2020language] (`{python} GPT3Scale.gpt3_params_billion_str` parameters) illustrate the scale of this new challenge. Training used about 300 billion tokens from filtered web text, books, and Wikipedia and required an estimated `{python} GPT3Scale.gpt3_training_zflops_str` zettaFLOPs of compute; the GPT-3 paper does not specify the exact hardware configuration, but that compute corresponds to hundreds of V100 GPU-years under common throughput assumptions. (One zettaFLOP equals $10^{21}$ floating-point operations; the training corpus comprised roughly `{python} GPT3Scale.data_scale_gb_str` of text.) The primary engineering challenge shifted from "*how* do we describe a cat's ear?" to "*how* do we coordinate large-scale distributed training without failure?"
 
 With these four paradigm shifts traced, the pattern becomes visible in @tbl-ai-evolution-strengths: each era's bottleneck is a systems constraint, not an algorithmic limitation, and each transition overcame that constraint by changing the infrastructure rather than the math.
 
@@ -1148,15 +1161,16 @@ The shift from expert systems to statistical learning to deep learning has drama
 # │          (GPT4 public-estimate references, Models.Language.GPT4.training_gpu_days, MILLION)
 # │ Exports: GPT4ScaleEstimate.gpu_count_str, training_days_str, gpu_days_m_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, fmt_qty, check
+from mlsysim.fmt import fmt_int, fmt, check
+from mlsysim.core.units import count, day
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT4ScaleEstimate:
     """Public-estimate scale anchor for GPT-4-class training; not an official disclosure."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    gpu_count = Models.Language.GPT4.training_accelerators_ref.m_as(count)
-    training_days = Models.Language.GPT4.training_days_ref.m_as(day)
+    gpu_count = Models.Language.GPT4.training_accelerators_ref.to(count).magnitude
+    training_days = Models.Language.GPT4.training_days_ref.to(day).magnitude
     reference_gpu_days = Models.Language.GPT4.training_gpu_days
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
@@ -1294,32 +1308,34 @@ The lesson is "bitter" because our intuition misleads us\index{bitter lesson, Th
 # │ How: Divide the Patterson et al. GPT-3 energy estimate by a round
 # │      household-year electricity baseline.
 # │
-# │ Imports: mlsysim.core.constants (Models.Language.GPT3.training_energy_mwh),
+# │ Imports: mlsysim (Models.Language.GPT3.training_energy_mwh,
+# │          ReferenceStats.EnergyAnchors.USHouseholdAnnualElectricity),
 # │          mlsysim.fmt (fmt, check)
 # │ Exports: GPT3TrainingEnergy.energy_mwh_str, households_str,
 # │          household_mwh_year_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, fmt_qty, check
+from mlsysim.fmt import fmt_int, fmt, fmt_energy, fmt_qty, check
+from mlsysim.core.units import MWh
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT3TrainingEnergy:
     """Energy scale conversion for the Patterson et al. GPT-3 estimate."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    energy_mwh = Models.Language.GPT3.training_energy_mwh
-    household_mwh_year = 10.7
+    energy = Models.Language.GPT3.training_energy_mwh
+    household_mwh_year = ReferenceStats.EnergyAnchors.USHouseholdAnnualElectricity
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    households = energy_mwh / household_mwh_year
+    households = (energy / household_mwh_year).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(1_000 <= energy_mwh <= 1_500, "GPT-3 training energy estimate should remain MWh-scale.")
+    check(1_000 <= energy.to(MWh).magnitude <= 1_500, "GPT-3 training energy estimate should remain MWh-scale.")
     check(100 <= households <= 140, "Household-year comparison should be roughly 120 homes.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    energy_mwh_str = fmt(energy_mwh, precision=0, commas=True, suffix=" MWh")
+    energy_mwh_str = fmt_energy(energy, unit=MWh, precision=0, commas=True)
     households_str = fmt_int(households, commas=False)
-    household_mwh_year_str = fmt(household_mwh_year, precision=1, commas=False, suffix=" MWh/household-year")
+    household_mwh_year_str = fmt_qty(household_mwh_year, MWh, precision=1, commas=False, per="household-year")
 ```
 
 Modern language models like GPT-4 and image generation systems like DALL-E illustrate this principle directly. Their capabilities emerge not from linguistic or artistic theories encoded by humans but from training general-purpose neural networks on vast amounts of data using substantial computational resources. Estimates for models at GPT-3's scale suggest thousands of megawatt-hours of energy[^fn-gpt3-training-energy] [@patterson2021carbon], and serving these models to millions of users demands data centers consuming power comparable to small cities.
@@ -1376,10 +1392,11 @@ This definition motivates the **Data · Algorithm · Machine (D·A·M) taxonomy*
 # │ Imports: mlsysim.fmt (fmt, check)
 # │ Exports: ResNet50DamExample.weight_mb_str, memory_traffic_mb_str, a100_hbm_tbs_str,
 # │          memory_time_us_str, resnet_gflops_str, a100_peak_tflops_str,
-# │          compute_time_us_str, a100_ridge_str, workload_ai_str
+# │          compute_time_us_str, a100_ridge_flops_per_byte_str, workload_ai_flops_per_byte_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Hardware, Engine
-from mlsysim.fmt import fmt_int, fmt, fmt_qty, check
+from mlsysim.fmt import fmt_int, fmt, fmt_arithmetic_intensity, fmt_qty, check, fmt_time
+from mlsysim.core.units import MB, TB, GFLOPs, TFLOPs, flop, byte, US, microsecond, second
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ResNet50DamExample:
@@ -1396,46 +1413,46 @@ class ResNet50DamExample:
     # to illustrate the theoretical roofline boundary.
     p = Engine.solve(m, h, batch_size=1, precision="fp16", efficiency=1.0)
 
-    weight_mb = p.memory_footprint.m_as(MB)
-    a100_hbm_tbs = p.peak_bw_actual.m_as(TB/second)
+    weight = p.memory_footprint.to(MB)
+    a100_hbm = p.peak_bw_actual.to(TB / second)
     memory_traffic = p.latency_memory * p.peak_bw_actual
-    memory_time_us = p.latency_memory.m_as(US)
+    memory_time = p.latency_memory.to(microsecond)
 
-    resnet_gflops = m.inference_flops.m_as(GFLOPs)
-    a100_peak_tflops = p.peak_flops_actual.m_as(TFLOPs/second)
-    compute_time_us = p.latency_compute.m_as(US)
+    resnet_flops = m.inference_flops.to(GFLOPs)
+    a100_peak = p.peak_flops_actual.to(TFLOPs / second)
+    compute_time = p.latency_compute.to(microsecond)
 
-    a100_ridge = a100_peak_tflops / a100_hbm_tbs
-    workload_ai = p.arithmetic_intensity.m_as("flop/byte")
-    memory_compute_ratio = memory_time_us / compute_time_us
+    a100_ridge = (a100_peak / a100_hbm).to(flop / byte)
+    workload_ai = p.arithmetic_intensity.to(flop / byte)
+    memory_compute_ratio = (memory_time / compute_time).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(45 <= weight_mb <= 60, f"ResNet-50 FP16 weights should be about 50 MB, got {weight_mb:.1f} MB.")
+    check(45 <= weight.to(MB).magnitude <= 60, f"ResNet-50 FP16 weights should be about 50 MB, got {weight.to(MB).magnitude:.1f} MB.")
     check(
-        abs(memory_traffic.m_as(MB) - weight_mb * 1.1) < 1,
-        f"Batch-one memory traffic should be weights plus ~10% activations, got {memory_traffic.m_as(MB):.1f} MB.",
+        abs(memory_traffic.to(MB).magnitude - (weight * 1.1).to(MB).magnitude) < 1,
+        f"Batch-one memory traffic should be weights plus ~10% activations, got {memory_traffic.to(MB).magnitude:.1f} MB.",
     )
-    check(memory_time_us > compute_time_us, "Small-batch ResNet-50 example should be memory-side.")
+    check(memory_time > compute_time, "Small-batch ResNet-50 example should be memory-side.")
     check(workload_ai < a100_ridge, "Example should fall below the A100 FP16 ridge point.")
     check(1.5 <= memory_compute_ratio <= 2.5, "Expected memory/compute ratio should be about 2x.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     weight_mb_str = fmt_qty(p.memory_footprint, MB, precision=1, commas=False)
     memory_traffic_mb_str = fmt_qty(memory_traffic, MB, precision=1, commas=False)
-    a100_hbm_tbs_str = fmt_qty(p.peak_bw_actual, TB/second, precision=1, commas=False)
-    memory_time_us_str = fmt(p.latency_memory.m_as(US), precision=1, commas=False, suffix=" µs")
-    resnet_gflops_str = fmt_qty(m.inference_flops, GFLOPs, precision=1, commas=False)
-    a100_peak_tflops_str = fmt_qty(p.peak_flops_actual, TFLOPs/second, precision=0, commas=False)
-    compute_time_us_str = fmt(p.latency_compute.m_as(US), precision=1, commas=False, suffix=" µs")
-    a100_ridge_str = fmt_int(round(a100_ridge), commas=False, suffix=" FLOP/byte")
-    workload_ai_str = fmt_int(round(workload_ai), commas=False, suffix=" FLOP/byte")
+    a100_hbm_tbs_str = fmt_qty(p.peak_bw_actual, TB / second, precision=1, commas=False)
+    memory_time_us_str = fmt_time(p.latency_memory, US, precision=1, commas=False)
+    resnet_gflops_str = fmt_qty(resnet_flops, GFLOPs, precision=1, commas=False)
+    a100_peak_tflops_str = fmt_qty(p.peak_flops_actual, TFLOPs / second, precision=0, commas=False)
+    compute_time_us_str = fmt_time(p.latency_compute, US, precision=1, commas=False)
+    a100_ridge_flops_per_byte_str = fmt_arithmetic_intensity(a100_ridge, commas=False)
+    workload_ai_flops_per_byte_str = fmt_arithmetic_intensity(workload_ai, commas=False)
 ```
 
 ::: {#dfn-introduction-d-m-taxonomy .callout-definition title="The D·A·M taxonomy"}
 
 ***D·A·M Taxonomy***\index{D·A·M Taxonomy!definition} is a diagnostic framework that classifies any machine learning system performance bottleneck along three axes: Data\index{Data!as source code} ($D_{\text{vol}}$, $\text{BW}$), Algorithm ($O$, model architecture), and Machine ($R_{\text{peak}}$, memory capacity). The goal is to identify which axis is the binding constraint.
 
-1.  **Significance (quantitative)**: The diagnostic power is concrete. A ResNet-50 inference run at batch size one on an A100 is on the memory-bound side of the roofline before framework overhead is included: FP16 weights alone are `{python} ResNet50DamExample.weight_mb_str`, and loading about `{python} ResNet50DamExample.memory_traffic_mb_str` (weights plus batch-one activations) across `{python} ResNet50DamExample.a100_hbm_tbs_str` of HBM takes about `{python} ResNet50DamExample.memory_time_us_str`, while `{python} ResNet50DamExample.resnet_gflops_str` at a `{python} ResNet50DamExample.a100_peak_tflops_str` tensor-core peak takes about `{python} ResNet50DamExample.compute_time_us_str`. The workload's arithmetic intensity is about `{python} ResNet50DamExample.workload_ai_str`, below the A100 FP16 ridge point of about `{python} ResNet50DamExample.a100_ridge_str`. The lesson is not a precise latency prediction; it is that small-batch inference cannot be optimized by buying peak FLOP/s alone. The binding axis is the Machine axis, especially data reuse, memory bandwidth, and utilization.
+1.  **Significance (quantitative)**: The diagnostic power is concrete. A ResNet-50 inference run at batch size one on an A100 is on the memory-bound side of the roofline before framework overhead is included: FP16 weights alone are `{python} ResNet50DamExample.weight_mb_str`, and loading about `{python} ResNet50DamExample.memory_traffic_mb_str` (weights plus batch-one activations) across `{python} ResNet50DamExample.a100_hbm_tbs_str` of HBM takes about `{python} ResNet50DamExample.memory_time_us_str`, while `{python} ResNet50DamExample.resnet_gflops_str` at a `{python} ResNet50DamExample.a100_peak_tflops_str` tensor-core peak takes about `{python} ResNet50DamExample.compute_time_us_str`. The workload's arithmetic intensity is about `{python} ResNet50DamExample.workload_ai_flops_per_byte_str`, below the A100 FP16 ridge point of about `{python} ResNet50DamExample.a100_ridge_flops_per_byte_str`. The lesson is not a precise latency prediction; it is that small-batch inference cannot be optimized by buying peak FLOP/s alone. The binding axis is the Machine axis, especially data reuse, memory bandwidth, and utilization.
 2.  **Distinction (durable)**: Unlike traditional software performance analysis, which treats code and data as separate concerns, the D·A·M taxonomy recognizes that algorithm choice directly determines both the training dataset size required (a transformer needs orders of magnitude more data than a linear model to generalize) and the machine required to run it.
 3.  **Common pitfall**: A frequent misconception is that the three axes are independent. Changing the algorithm (for example, switching from a CNN to a transformer) typically mandates a different machine (more memory for $\mathcal{O}(S^2)$ attention) and a different data distribution (more diverse training data to avoid overfitting the flexible hypothesis space).
 
@@ -1618,17 +1635,18 @@ This hierarchy ensures that when we build a lab or a case study, engineers are n
 # │ How: Reference the Systems Archetypes (Cloud, Edge, Mobile, Tiny).
 # │
 # │ Imports: mlsysim.Systems, mlsysim.book
-# │ Exports: DeploymentSystems.cloud_mem_str, DeploymentSystems.cloud_compute_str,
-# │          DeploymentSystems.cloud_power_str, DeploymentSystems.edge_mem_str,
-# │          DeploymentSystems.edge_compute_str, DeploymentSystems.edge_power_str,
-# │          DeploymentSystems.mobile_mem_str, DeploymentSystems.mobile_compute_str,
-# │          DeploymentSystems.mobile_power_str,
-# │          DeploymentSystems.tiny_mem_str, DeploymentSystems.tiny_compute_str,
-# │          DeploymentSystems.tiny_power_str,
+# │ Exports: DeploymentSystems.cloud_mem_gb_str, DeploymentSystems.cloud_compute_tflops_str,
+# │          DeploymentSystems.cloud_power_w_str, DeploymentSystems.edge_mem_gb_str,
+# │          DeploymentSystems.edge_compute_tflops_str, DeploymentSystems.edge_power_w_str,
+# │          DeploymentSystems.mobile_mem_gb_str, DeploymentSystems.mobile_compute_str,
+# │          DeploymentSystems.mobile_power_w_str,
+# │          DeploymentSystems.tiny_mem_kb_str, DeploymentSystems.tiny_compute_tflops_str,
+# │          DeploymentSystems.tiny_power_mw_str,
 # │          DeploymentSystems.mem_span_math, DeploymentSystems.compute_span_math
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Platforms, Hardware
-from mlsysim.fmt import fmt, fmt_int, check, fmt_math
+from mlsysim.fmt import fmt, fmt_int, check, fmt_math, fmt_qty, fmt_qty_int, fmt_power, fmt_memory
+from mlsysim.core.units import GB, KB, TFLOP, TOPS, watt, milliwatt
 import math
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -1658,21 +1676,21 @@ class DeploymentSystems:
     check(compute_scaling > 1e6, "Cloud compute should be >1,000,000x TinyML compute.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    cloud_mem_str = fmt_int(round(t_cloud.ram.m_as(GB)), commas=False, suffix=" GB")
-    cloud_compute_str = fmt(h_cloud.compute.peak_flops.m_as(TFLOPs/second), precision=0, suffix=" TFLOP/s")
-    cloud_power_str = fmt(h_cloud.tdp.m_as(watt), precision=0, suffix=" W")
+    cloud_mem_gb_str = fmt_qty_int(t_cloud.ram, GB, commas=False)
+    cloud_compute_tflops_str = fmt_qty(h_cloud.compute.peak_flops, TFLOP / second, precision=0, commas=True)
+    cloud_power_w_str = fmt_power(h_cloud.tdp, unit=watt, precision=0, commas=True)
 
-    edge_mem_str = fmt_int(round(t_edge.ram.m_as(GB)), commas=False, suffix=" GB")
-    edge_compute_str = fmt(h_edge.compute.peak_flops.m_as(TFLOPs/second), precision=0, suffix=" TFLOP/s")
-    edge_power_str = fmt(h_edge.tdp.m_as(watt), precision=0, suffix=" W")
+    edge_mem_gb_str = fmt_qty_int(t_edge.ram, GB, commas=False)
+    edge_compute_tflops_str = fmt_qty(h_edge.compute.peak_flops, TFLOP / second, precision=0, commas=True)
+    edge_power_w_str = fmt_power(h_edge.tdp, unit=watt, precision=0, commas=True)
 
-    mobile_mem_str = fmt_int(round(t_mobile.ram.m_as(GB)), commas=False, suffix=" GB")
-    mobile_compute_str = fmt(h_mobile.compute.peak_flops.m_as(TOPS), precision=0, commas=False, suffix=" TOPS")
-    mobile_power_str = fmt(h_mobile.tdp.m_as(watt), precision=0, suffix=" W")
+    mobile_mem_gb_str = fmt_qty_int(t_mobile.ram, GB, commas=False)
+    mobile_compute_str = fmt_qty(h_mobile.compute.peak_flops, TOPS, precision=0, commas=False)
+    mobile_power_w_str = fmt_power(h_mobile.tdp, unit=watt, precision=0, commas=True)
 
-    tiny_mem_str = fmt(t_tiny.ram.m_as(KB), precision=1, commas=False, suffix=" KB")
-    tiny_compute_str = fmt(h_tiny.compute.peak_flops.m_as(TFLOPs/second), precision=4, suffix=" TFLOP/s")
-    tiny_power_str = fmt(h_tiny.tdp.m_as(milliwatt), precision=0, suffix=" mW")
+    tiny_mem_kb_str = fmt_memory(t_tiny.ram, unit=KB, precision=1, commas=False)
+    tiny_compute_tflops_str = fmt_qty(h_tiny.compute.peak_flops, TFLOP / second, precision=4, commas=True)
+    tiny_power_mw_str = fmt_power(h_tiny.tdp, unit=milliwatt, precision=0, commas=True)
 
     mem_span_math = fmt_math(f"10^{{{round(math.log10(mem_scaling))}}}")
     compute_span_math = fmt_math(f"10^{{{round(math.log10(compute_scaling))}}}")
@@ -1688,12 +1706,12 @@ The machine learning systems landscape spans roughly `{python} DeploymentSystems
 
 :::
 
-| **Archetype** | **Example System** |                **RAM/Memory**               |                 **Peak Compute**                |                **Power Budget**               |
-|:--------------|:-------------------|:-------------------------------------------:|:-----------------------------------------------:|:---------------------------------------------:|
-| **Cloud**     | H100 GPU           |  `{python} DeploymentSystems.cloud_mem_str` |  `{python} DeploymentSystems.cloud_compute_str` |  `{python} DeploymentSystems.cloud_power_str` |
-| **Edge**      | Jetson Robotics    |  `{python} DeploymentSystems.edge_mem_str`  |  `{python} DeploymentSystems.edge_compute_str`  |  `{python} DeploymentSystems.edge_power_str`  |
-| **Mobile**    | Smartphone         | `{python} DeploymentSystems.mobile_mem_str` | `{python} DeploymentSystems.mobile_compute_str` | `{python} DeploymentSystems.mobile_power_str` |
-| **TinyML**    | ESP32-S3           |  `{python} DeploymentSystems.tiny_mem_str`  |  `{python} DeploymentSystems.tiny_compute_str`  |  `{python} DeploymentSystems.tiny_power_str`  |
+| **Archetype** | **Example System** |                 **RAM/Memory**                 |                    **Peak Compute**                   |                 **Power Budget**                |
+|:--------------|:-------------------|:----------------------------------------------:|:-----------------------------------------------------:|:-----------------------------------------------:|
+| **Cloud**     | H100 GPU           | `{python} DeploymentSystems.cloud_mem_gb_str`  | `{python} DeploymentSystems.cloud_compute_tflops_str` |  `{python} DeploymentSystems.cloud_power_w_str` |
+| **Edge**      | Jetson Robotics    |  `{python} DeploymentSystems.edge_mem_gb_str`  |  `{python} DeploymentSystems.edge_compute_tflops_str` |  `{python} DeploymentSystems.edge_power_w_str`  |
+| **Mobile**    | Smartphone         | `{python} DeploymentSystems.mobile_mem_gb_str` |    `{python} DeploymentSystems.mobile_compute_str`    | `{python} DeploymentSystems.mobile_power_w_str` |
+| **TinyML**    | ESP32-S3           |  `{python} DeploymentSystems.tiny_mem_kb_str`  |  `{python} DeploymentSystems.tiny_compute_tflops_str` |  `{python} DeploymentSystems.tiny_power_mw_str` |
 
 : **Four System Archetypes**: Representative memory, peak compute, and power budgets for cloud, edge, mobile, and TinyML systems, exposing the multi-order-of-magnitude span that prevents simple model reuse across tiers. {#tbl-introduction-system-archetypes tbl-colwidths="[17,23,20,20,20]"}
 
@@ -1815,7 +1833,8 @@ Throughout this book, every optimization technique we study, from pruning to ker
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Hardware
 from mlsysim.physics import dTime
-from mlsysim.fmt import fmt_int,  fmt, fmt_math, check
+from mlsysim.fmt import fmt_int, fmt, fmt_flop_rate, fmt_math, check, fmt_qty, fmt_count, fmt_percent, fmt_time
+from mlsysim.core.units import flop, TFLOPs, day, second
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT3Training:
@@ -1829,10 +1848,9 @@ class GPT3Training:
     h_a100 = Hardware.Cloud.A100
 
     ops_quantity = m_gpt3.training_ops
-    ops = ops_quantity.m_as(flop)
     num_gpus = Systems.Clusters.Training_1K.total_accelerators
     peak_flops_per_device = h_a100.compute.peak_flops
-    peak_tflops = peak_flops_per_device.m_as(TFLOPs/second)
+    peak_flops_rate = peak_flops_per_device.to(TFLOPs / second)
     eta_base = 0.45
     eta_opt = 0.60
 
@@ -1842,41 +1860,42 @@ class GPT3Training:
         num_devices=num_gpus,
         peak_flops_per_device=peak_flops_per_device,
         efficiency_eta=eta_base,
-    ).m_as(day)
+    ).to(day)
     days_opt = dTime(
         total_ops=ops_quantity,
         num_devices=num_gpus,
         peak_flops_per_device=peak_flops_per_device,
         efficiency_eta=eta_opt,
-    ).m_as(day)
+    ).to(day)
     days_saved = days_base - days_opt
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(days_base > 20, f"Text implies >20 days, got {days_base:.1f}")
-    check(days_saved > 5, f"Text claims significant savings, got {days_saved:.1f}")
+    check(days_base > 20 * day, f"Text implies >20 days, got {days_base.to(day).magnitude:.1f}")
+    check(days_saved > 5 * day, f"Text claims significant savings, got {days_saved.to(day).magnitude:.1f}")
     check(days_opt < days_base, "Optimization failed to reduce time")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     # Text strings
-    num_gpus_str = fmt(num_gpus, precision=0, commas=False, suffix=" GPUs")
-    eta_base_pct_str = fmt(eta_base * 100, precision=0, commas=False, suffix="%")
-    eta_opt_pct_str = fmt(eta_opt * 100, precision=0, commas=False, suffix="%")
-    days_initial_str = fmt_int(days_base, commas=False, suffix=" days")
-    days_optimized_str = fmt_int(days_opt, commas=False, suffix=" days")
-    days_saved_str = fmt_int(days_saved, commas=False, suffix=" days")
+    num_gpus_str = fmt_count(num_gpus, commas=False, label="GPU")
+    eta_base_pct_str = fmt_percent(eta_base, precision=0, commas=False, style='symbol')
+    eta_opt_pct_str = fmt_percent(eta_opt, precision=0, commas=False, style='symbol')
+    days_initial_str = fmt_time(round(days_base.to(day).magnitude), day, precision=0, commas=False, style="word")
+    days_optimized_str = fmt_time(round(days_opt.to(day).magnitude), day, precision=0, commas=False, style="word")
+    days_saved_str = fmt_time(round(days_saved.to(day).magnitude), day, precision=0, commas=False, style="word")
 
     # LaTeX math components
-    _ops_mag = f"{ops:.2e}"
+    _ops_mag = f"{ops_quantity.to(flop).magnitude:.2e}"
     _ops_coeff = _ops_mag.split("e+")[0]
     ops_exp_value = int(_ops_mag.split("e+")[1])
-    peak_tflops_str = fmt(peak_tflops, precision=0, commas=False, suffix=" TFLOP/s")
+    peak_tflops_str = fmt_flop_rate(peak_flops_rate, unit=TFLOPs / second, precision=0, commas=False)
+    peak_rate_value = peak_flops_rate.to(TFLOPs / second).magnitude
 
     # Equation assembly (inline refs use GPT3Training.* form)
     time_formula_math = fmt_math(r"T_{\text{train}} \approx \frac{O}{N_{\text{GPU}} \cdot R_{\text{peak}} \cdot \eta_{\text{hw}}}")
     time_value_math = fmt_math(
-        rf"\approx \frac{{{_ops_coeff} \times 10^{{{ops_exp_value}}}}}{{{num_gpus} \times {peak_tflops:.0f} \times 10^{{12}} \times {eta_base}}}"
+        rf"\approx \frac{{{_ops_coeff} \times 10^{{{ops_exp_value}}}}}{{{num_gpus} \times {peak_rate_value:.0f} \times 10^{{12}} \times {eta_base}}}"
     )
-    time_days_math = fmt_math(rf"\approx {fmt_int(days_base, commas=False)}\ \text{{days}}")
+    time_days_math = fmt_math(rf"\approx {fmt_int(days_base.to(day).magnitude, commas=False)}\ \text{{days}}")
     ops_math = fmt_math(rf"\approx {_ops_coeff} \times 10^{{{ops_exp_value}}}\ \text{{FLOPs}}")
 ```
 
@@ -2030,6 +2049,7 @@ Each lighthouse model manifests different constraints along the D·A·M axes, en
 # │ Exports: ImageNetStats.images_m_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check
+from mlsysim.core.units import count
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ImageNetStats:
@@ -2042,7 +2062,7 @@ class ImageNetStats:
     images_raw = Datasets.ImageNet.training_examples
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    images_million = images_raw.m_as('count') / MILLION
+    images_million = images_raw.to(count).magnitude / MILLION
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(1.0 <= images_million <= 1.5, f"ImageNet training split should be about 1.3M images, got {images_million:.2f}M.")
@@ -2256,15 +2276,15 @@ class EfficiencyGainsMetrics:
     check(growth_gap_ratio >= 5, f"AI growth ({ai_compute_doubling_months}mo) is not significantly faster than Moore's Law ({moores_doubling_months}mo). Gap: {growth_gap_ratio:.1f}x")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    algo_efficiency_max_str = fmt(algo_efficiency_max, precision=1, suffix="×")
-    algo_halving_months_str = fmt_int(algo_halving_months, commas=False, suffix=" months")
-    moores_window_speedup_str = fmt(moores_window_speedup, precision=1, commas=False, suffix="×")
-    growth_gap_ratio_str = fmt(growth_gap_ratio, precision=1, commas=False, suffix="×")
+    algo_efficiency_max_str = fmt_multiple(algo_efficiency_max, precision=1)
+    algo_halving_months_str = fmt_time(round(algo_halving_months), "month", precision=0, commas=False, style="word")
+    moores_window_speedup_str = fmt_multiple(moores_window_speedup, precision=1, commas=False)
+    growth_gap_ratio_str = fmt_multiple(growth_gap_ratio, precision=1, commas=False)
 ```
 
-The magnitude of efficiency improvements is measurable. Between 2012 and 2019, computational resources needed to train a neural network to achieve AlexNet-level performance on ImageNet classification decreased by approximately `{python} EfficiencyGainsMetrics.algo_efficiency_max_str` [@hernandez2020measuring]. This improvement, which halved about every `{python} EfficiencyGainsMetrics.algo_halving_months_str`, outpaced hardware efficiency gains predicted by Moore's Law[^fn-moores-law-baseline], demonstrating that algorithmic innovation drives efficiency as much as hardware advances.
+The magnitude of efficiency improvements is measurable. Between 2012 and 2019, computational resources needed to train a neural network to achieve AlexNet-level performance on ImageNet classification decreased by approximately `{python} EfficiencyGainsMetrics.algo_efficiency_max_str`$\times$ [@hernandez2020measuring]. This improvement, which halved about every `{python} EfficiencyGainsMetrics.algo_halving_months_str`, outpaced hardware efficiency gains predicted by Moore's Law[^fn-moores-law-baseline], demonstrating that algorithmic innovation drives efficiency as much as hardware advances.
 
-[^fn-moores-law-baseline]: **Moore’s Law**: Gordon Moore’s 1965 observation that transistor density doubles approximately every two years. Over the same 2012–2019 window where algorithmic efficiency improved `{python} EfficiencyGainsMetrics.algo_efficiency_max_str`, a two-year doubling cadence yields roughly `{python} EfficiencyGainsMetrics.moores_window_speedup_str` in transistor scaling, meaning algorithmic innovation closed more of the efficiency gap than hardware alone. Simultaneously, demand for training compute doubled every 3.4 months, about `{python} EfficiencyGainsMetrics.growth_gap_ratio_str` faster than the two-year hardware cadence, forcing the shift to domain-specific accelerators. \index{Moore's Law!vs. AI growth}
+[^fn-moores-law-baseline]: **Moore’s Law**: Gordon Moore’s 1965 observation that transistor density doubles approximately every two years. Over the same 2012–2019 window where algorithmic efficiency improved `{python} EfficiencyGainsMetrics.algo_efficiency_max_str`$\times$, a two-year doubling cadence yields roughly `{python} EfficiencyGainsMetrics.moores_window_speedup_str`$\times$ in transistor scaling, meaning algorithmic innovation closed more of the efficiency gap than hardware alone. Simultaneously, demand for training compute doubled every 3.4 months, about `{python} EfficiencyGainsMetrics.growth_gap_ratio_str`$\times$ faster than the two-year hardware cadence, forcing the shift to domain-specific accelerators. \index{Moore's Law!vs. AI growth}
 
 Simultaneously, the compute used in AI training increased by more than five orders of magnitude over the measured scale-up interval, with a fitted doubling time of approximately 3.4 months [@amodei2018aicompute]. This exponential growth far exceeds Moore's Law and explains *why* efficiency optimization is not optional. Without it, only the most resource-rich organizations could participate in AI development.
 
@@ -2300,10 +2320,10 @@ class EfficiencyAlgoFigureCaption:
     check(40 <= algo_efficiency_max <= 50, "Algorithmic efficiency anchor should be about 44.5x.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    algo_efficiency_max_str = fmt(algo_efficiency_max, precision=1, suffix="×")
+    algo_efficiency_max_str = fmt_multiple(algo_efficiency_max, precision=1)
 ```
 
-To appreciate the magnitude of these gains, consider the trajectory in @fig-algo-efficiency: starting from AlexNet as the baseline, each successive architecture (VGG, ResNet, MobileNet, EfficientNet) achieves comparable accuracy with dramatically fewer computational resources, culminating in a `{python} EfficiencyAlgoFigureCaption.algo_efficiency_max_str` improvement from AlexNet in 2012 to EfficientNet-B0 in 2019, a roughly seven-year span.
+To appreciate the magnitude of these gains, consider the trajectory in @fig-algo-efficiency: starting from AlexNet as the baseline, each successive architecture (VGG, ResNet, MobileNet, EfficientNet) achieves comparable accuracy with dramatically fewer computational resources, culminating in a `{python} EfficiencyAlgoFigureCaption.algo_efficiency_max_str`$\times$ improvement from AlexNet in 2012 to EfficientNet-B0 in 2019, a roughly seven-year span.
 
 ::: {#fig-algo-efficiency fig-env="figure" fig-pos="htb" fig-cap="**Algorithmic Efficiency Trajectory**: Training efficiency factor relative to AlexNet (2012 baseline) for ImageNet classification. Most later architectures achieve comparable accuracy with fewer computational resources, although individual points vary. The trajectory from AlexNet (1$\times$) through VGG, ResNet, MobileNet, and ShuffleNet to EfficientNet (44$\times$) demonstrates that algorithmic innovation has delivered a forty-four-fold reduction in required compute over seven years, independent of hardware improvements." fig-alt="Scatter plot showing training efficiency factors from AlexNet in 2012 to EfficientNet in 2019, with the x-axis extending to 2020. Red dots mark models from AlexNet at 1x to EfficientNet at 44x. Dashed trend line curves upward. Labels identify VGG, ResNet, MobileNet, and ShuffleNet versions at their positions."}
 
@@ -2630,11 +2650,11 @@ class EfficiencyParadoxBridge:
     check(compute_growth_order == 7, f"Expected seven orders of magnitude, got {compute_growth_order}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    algo_efficiency_max_str = fmt(algo_efficiency_max, precision=1, suffix="×")
+    algo_efficiency_max_str = fmt_multiple(algo_efficiency_max, precision=1)
     compute_growth_order_str = fmt(compute_growth_order, precision=0, commas=False)
 ```
 
-Taken together, these two figures reveal a seeming contradiction that defines the economics of modern AI development: @Fig-algo-efficiency shows efficiency improving `{python} EfficiencyParadoxBridge.algo_efficiency_max_str` while @fig-ai-training-compute-growth shows compute demand growing by roughly `{python} EfficiencyParadoxBridge.compute_growth_order_str` orders of magnitude. The resolution lies in understanding how efficiency and scale co-evolve.
+Taken together, these two figures reveal a seeming contradiction that defines the economics of modern AI development: @Fig-algo-efficiency shows efficiency improving `{python} EfficiencyParadoxBridge.algo_efficiency_max_str`$\times$ while @fig-ai-training-compute-growth shows compute demand growing by roughly `{python} EfficiencyParadoxBridge.compute_growth_order_str` orders of magnitude. The resolution lies in understanding how efficiency and scale co-evolve.
 
 ::: {#psp-introduction-efficiency-paradox .callout-perspective title="The efficiency paradox"}
 
@@ -2997,8 +3017,9 @@ node[Txt,below=0pt,pos=0.5]{Requirements}(B4.160);
 # │ Exports: ScenarioRegistry.frontier_limit_str, ScenarioRegistry.drive_limit_str,
 # │          ScenarioRegistry.doorbell_limit_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_power, fmt_time, MarkdownStr, check
+from mlsysim.core.units import millisecond, milliwatt
 from mlsysim import Scenarios
-from mlsysim.fmt import fmt, MarkdownStr, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ScenarioRegistry:
@@ -3010,26 +3031,36 @@ class ScenarioRegistry:
     app_doorbell = Scenarios.SmartDoorbell
 
     # ┌── 2. EXECUTE (Extract Constraints) ────────────────────────────────
-    frontier_latency_ms = app_frontier.sla_latency.m_as('ms')
-    drive_latency_ms = app_drive.sla_latency.m_as('ms')
-    doorbell_power_mw = app_doorbell.power_budget.m_as('mW') if app_doorbell.power_budget else None
-    doorbell_latency_ms = app_doorbell.sla_latency.m_as('ms')
+    frontier_latency = app_frontier.sla_latency
+    drive_latency = app_drive.sla_latency
+    doorbell_power = app_doorbell.power_budget
+    doorbell_latency = app_doorbell.sla_latency
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(frontier_latency_ms > drive_latency_ms, "Frontier training should have a looser SLA than autonomous perception.")
-    check(doorbell_power_mw is not None or doorbell_latency_ms > 0, "Doorbell scenario needs a power or latency constraint.")
+    check(
+        frontier_latency.to(millisecond).magnitude > drive_latency.to(millisecond).magnitude,
+        "Frontier training should have a looser SLA than autonomous perception.",
+    )
+    check(
+        doorbell_power is not None or doorbell_latency.to(millisecond).magnitude > 0,
+        "Doorbell scenario needs a power or latency constraint.",
+    )
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_limit_str = MarkdownStr(
-        f"Target: {fmt(frontier_latency_ms, precision=0, commas=False, suffix=' ms/step')}"
+    frontier_limit_value = fmt_time(frontier_latency, millisecond, precision=0, commas=False, per='step')
+    drive_limit_value = fmt_time(drive_latency, millisecond, precision=0, commas=False)
+    doorbell_power_value = (
+        fmt_power(doorbell_power, unit=milliwatt, precision=0, commas=False)
+        if doorbell_power is not None
+        else None
     )
-    drive_limit_str = MarkdownStr(
-        f"SLA: {fmt(drive_latency_ms, precision=0, commas=False, suffix=' ms latency')}"
-    )
+    doorbell_latency_value = fmt_time(doorbell_latency, millisecond, precision=0, commas=False)
+    frontier_limit_str = MarkdownStr(f"Target: {frontier_limit_value}")
+    drive_limit_str = MarkdownStr(f"SLA: {drive_limit_value} latency")
     doorbell_limit_str = MarkdownStr(
-        f"Power: {fmt(doorbell_power_mw, precision=0)} mW"
-        if doorbell_power_mw is not None
-        else f"SLA: {fmt(doorbell_latency_ms, precision=0, commas=False, suffix=' ms latency')}"
+        f"Power: {doorbell_power_value}"
+        if doorbell_power_value is not None
+        else f"SLA: {doorbell_latency_value} latency"
     )
 ```
 
@@ -3133,10 +3164,11 @@ The interdependencies across the D·A·M axes create specific challenge categori
 # │
 # │ Imports: mlsysim (ReferenceStats.Workloads.WaymoDataPerHour{Low,High}), mlsysim.core.constants
 # │          (TB, hour), mlsysim.book (fmt)
-# │ Exports: WaymoStats.low_str, WaymoStats.high_str
+# │ Exports: WaymoStats.low_tb_str, WaymoStats.high_tb_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_qty, check
+from mlsysim.core.units import TB, hour
 from mlsysim import ReferenceStats
-from mlsysim.fmt import fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class WaymoStats:
@@ -3151,19 +3183,19 @@ class WaymoStats:
     rate_high_raw = ReferenceStats.Workloads.WaymoDataPerHourHigh
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    val_low = rate_low_raw.m_as(TB/hour)
-    val_high = rate_high_raw.m_as(TB/hour)
+    val_low = rate_low_raw
+    val_high = rate_high_raw
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(val_low >= 1, f"Waymo data rate ({val_low} TB/hr) is too low.")
-    check(val_high > val_low, "High rate must be > Low rate.")
+    check(val_low.to("TB/hour").magnitude >= 1, f"Waymo data rate ({val_low.to('TB/hour').magnitude} TB/hr) is too low.")
+    check(val_high.to("TB/hour").magnitude > val_low.to("TB/hour").magnitude, "High rate must be > Low rate.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    low_str = fmt(val_low, precision=0, commas=False)
-    high_str = fmt(val_high, precision=0, commas=False)
+    low_tb_str = fmt_qty(val_low, TB / hour, precision=0, commas=False)
+    high_tb_str = fmt_qty(val_high, TB / hour, precision=0, commas=False)
 ```
 
-Real-world data is often noisy and inconsistent, presenting the first category of challenges. Waymo's autonomous vehicles serve as roving data centers, processing between `{python} WaymoStats.low_str` and `{python} WaymoStats.high_str` terabytes of data per hour across their sensor suite, including LiDAR[^fn-lidar-pointcloud], radar[^fn-radar-robustness], and cameras. Engineers must solve for sensor interference, such as rain obscuring cameras, and temporal misalignment across asynchronous data streams. Scale compounds these quality issues: while FarmBeats operates under severe constraints (running inference on models under 500 kilobytes transmitted over TV white-space bandwidth measured in kilobits per second), AlphaFold occupies the opposite extreme, requiring access to the Protein Data Bank's experimentally determined structures during training.
+Real-world data is often noisy and inconsistent, presenting the first category of challenges. Waymo's autonomous vehicles serve as roving data centers, processing between `{python} WaymoStats.low_tb_str` and `{python} WaymoStats.high_tb_str` across their sensor suite, including LiDAR[^fn-lidar-pointcloud], radar[^fn-radar-robustness], and cameras. Engineers must solve for sensor interference, such as rain obscuring cameras, and temporal misalignment across asynchronous data streams. Scale compounds these quality issues: while FarmBeats operates under severe constraints (running inference on models under 500 kilobytes transmitted over TV white-space bandwidth measured in kilobits per second), AlphaFold occupies the opposite extreme, requiring access to the Protein Data Bank's experimentally determined structures during training.
 
 Data drift\index{Data Drift!operational burden} creates an ongoing operational burden atop both quality and scale. The statistical properties of input data change over time, and models are only as reliable as their alignment with the current distribution. Waymo models trained on Phoenix's sun-drenched roads may fail in New York's snowstorms due to distribution shift[^fn-drift-entropy]; detecting these shifts requires continuous monitoring of input statistics before they manifest as system failures.
 
@@ -3272,8 +3304,8 @@ Engineers assume benchmark performance predicts production accuracy, but distrib
 # │ How: Calculate total latency before and after local optimization.
 # │
 # │ Imports: mlsysim.physics (calc_amdahls_speedup), mlsysim.book (fmt)
-# │ Exports: AmdahlsPitfall.t_inference_str, AmdahlsPitfall.t_inf_new_str,
-# │          AmdahlsPitfall.t_pre_str, AmdahlsPitfall.t_post_str,
+# │ Exports: AmdahlsPitfall.t_inference_ms_str, AmdahlsPitfall.t_inf_new_ms_str,
+# │          AmdahlsPitfall.t_pre_ms_str, AmdahlsPitfall.t_post_ms_str,
 # │          AmdahlsPitfall.total_ms_str, AmdahlsPitfall.new_total_ms_str,
 # │          AmdahlsPitfall.improv_pct_str, AmdahlsPitfall.naive_p_str
 # └─────────────────────────────────────────────────────────────────────────────
@@ -3309,20 +3341,20 @@ class AmdahlsPitfall:
     check((improvement_pct/naive_pct) <= 0.5, "The discrepancy between naive and actual improvement is too small.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    from mlsysim.fmt import fmt_int,  fmt
-    t_inference_str = fmt(t_inference, precision=0, commas=False, suffix=" ms")
-    t_inf_new_str = fmt(t_inf_new, precision=0, commas=False, suffix=" ms")
-    t_pre_str = fmt(t_pre, precision=0, commas=False, suffix=" ms")
-    t_post_str = fmt(t_post, precision=0, commas=False, suffix=" ms")
-    total_ms_str = fmt(t_total, precision=0, commas=False, suffix=" ms")
-    new_total_ms_str = fmt(t_total_new, precision=0, commas=False, suffix=" ms")
-    improv_pct_str = fmt_int(round(improvement_pct), commas=False, suffix="%")
-    naive_p_str = fmt_int(round(naive_pct), commas=False, suffix="%")
+    from mlsysim.fmt import fmt_int,  fmt, fmt_percent
+    t_inference_ms_str = fmt_time(t_inference, 'millisecond', precision=0, commas=False)
+    t_inf_new_ms_str = fmt_time(t_inf_new, 'millisecond', precision=0, commas=False)
+    t_pre_ms_str = fmt_time(t_pre, 'millisecond', precision=0, commas=False)
+    t_post_ms_str = fmt_time(t_post, 'millisecond', precision=0, commas=False)
+    total_ms_str = fmt_time(t_total, 'millisecond', precision=0, commas=False)
+    new_total_ms_str = fmt_time(t_total_new, 'millisecond', precision=0, commas=False)
+    improv_pct_str = fmt_percent(round(improvement_pct)/100, precision=0, commas=False, style='symbol')
+    naive_p_str = fmt_percent(round(naive_pct)/100, precision=0, commas=False, style='symbol')
 ```
 
 **Pitfall**: *Optimizing individual components without considering system interactions.*
 
-Engineers optimize inference latency in isolation, but Amdahl's Law governs end-to-end performance. A team reduces model inference from `{python} AmdahlsPitfall.t_inference_str` to `{python} AmdahlsPitfall.t_inf_new_str`, expecting proportional improvement. Yet preprocessing consumes `{python} AmdahlsPitfall.t_pre_str` and postprocessing adds `{python} AmdahlsPitfall.t_post_str`, so total latency drops only from `{python} AmdahlsPitfall.total_ms_str` to `{python} AmdahlsPitfall.new_total_ms_str`: `{python} AmdahlsPitfall.improv_pct_str` improvement rather than the expected `{python} AmdahlsPitfall.naive_p_str`. The D·A·M taxonomy (@tbl-dam-taxonomy) shows that data, algorithms, and machines form interdependent systems where optimizing one component shifts bottlenecks rather than eliminating them. A model requiring 3$\times$ more preprocessing can increase total cost 40 percent while improving accuracy only 2 percent. Teams optimizing components independently often find 50–70 percent of their engineering effort fails to improve end-to-end metrics.
+Engineers optimize inference latency in isolation, but Amdahl's Law governs end-to-end performance. A team reduces model inference from `{python} AmdahlsPitfall.t_inference_ms_str` to `{python} AmdahlsPitfall.t_inf_new_ms_str`, expecting proportional improvement. Yet preprocessing consumes `{python} AmdahlsPitfall.t_pre_ms_str` and postprocessing adds `{python} AmdahlsPitfall.t_post_ms_str`, so total latency drops only from `{python} AmdahlsPitfall.total_ms_str` to `{python} AmdahlsPitfall.new_total_ms_str`: `{python} AmdahlsPitfall.improv_pct_str` improvement rather than the expected `{python} AmdahlsPitfall.naive_p_str`. The D·A·M taxonomy (@tbl-dam-taxonomy) shows that data, algorithms, and machines form interdependent systems where optimizing one component shifts bottlenecks rather than eliminating them. A model requiring 3$\times$ more preprocessing can increase total cost 40 percent while improving accuracy only 2 percent. Teams optimizing components independently often find 50–70 percent of their engineering effort fails to improve end-to-end metrics.
 
 ::: {.column-margin}
 ![](images/svg/vol1_introduction_margin_004.svg){width="100%" fig-alt="Two stacked latency bars, before and after: the inference segment shrinks sharply in the after bar while the pre-processing and post-processing segments stay the same, so the total barely changes."}
@@ -3371,10 +3403,10 @@ class DriftFallacy:
     check(acc_final >= 50, f"Model became random guessing ({acc_final:.1f}%), which is unrealistic for 6 months.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    acc_initial_str = fmt(acc_initial, precision=0, commas=False, suffix="%")
-    acc_final_str = fmt(acc_final, precision=1, commas=False, suffix="%")
-    acc_drop_str = fmt(total_drop, precision=1, commas=False, suffix=" percentage points")
-    months_str = fmt(months, precision=0, commas=False, suffix=" months")
+    acc_initial_str = fmt_percent(acc_initial/100, precision=0, commas=False, style='symbol')
+    acc_final_str = fmt_percent(acc_final/100, precision=1, commas=False, style='symbol')
+    acc_drop_str = fmt_pp(total_drop, precision=1)
+    months_str = fmt_time(months, "month", precision=0, commas=False, style="word")
 ```
 
 **Fallacy**: *ML systems can be deployed once and left to run indefinitely.*
@@ -3428,7 +3460,7 @@ class EfficiencyScaleSummary:
     check(compute_growth_order == 7, f"Expected seven orders of magnitude, got {compute_growth_order}.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    algo_efficiency_max_str = fmt(algo_efficiency_max, precision=1, suffix="×")
+    algo_efficiency_max_str = fmt_multiple(algo_efficiency_max, precision=1)
     compute_growth_order_str = fmt(compute_growth_order, precision=0, commas=False)
 ```
 
@@ -3444,11 +3476,11 @@ class EfficiencyScaleSummary:
 # │ How: Recompute the 130 ms pipeline example from Fallacies and Pitfalls.
 # │
 # │ Imports: mlsysim.physics (calc_amdahls_speedup), mlsysim.fmt
-# │ Exports: AmdahlsPitfallRecap.t_inference_str, .t_inf_new_str, .t_pre_str,
-# │          .t_post_str, .improv_pct_str
+# │ Exports: AmdahlsPitfallRecap.t_inference_ms_str, .t_inf_new_ms_str, .t_pre_ms_str,
+# │          .t_post_ms_str, .improv_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.physics import calc_amdahls_speedup
-from mlsysim.fmt import fmt_int, fmt, check
+from mlsysim.fmt import fmt_int, fmt, check, fmt_percent
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AmdahlsPitfallRecap:
@@ -3471,20 +3503,20 @@ class AmdahlsPitfallRecap:
     check(overall_speedup <= 1.5, f"System speedup ({overall_speedup:.2f}x) is too high for a recap pitfall.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    t_inference_str = fmt(t_inference, precision=0, commas=False, suffix=" ms")
-    t_inf_new_str = fmt(t_inf_new, precision=0, commas=False, suffix=" ms")
-    t_pre_str = fmt(t_pre, precision=0, commas=False, suffix=" ms")
-    t_post_str = fmt(t_post, precision=0, commas=False, suffix=" ms")
-    improv_pct_str = fmt_int(round(improvement_pct), commas=False, suffix="%")
+    t_inference_ms_str = fmt_time(t_inference, 'millisecond', precision=0, commas=False)
+    t_inf_new_ms_str = fmt_time(t_inf_new, 'millisecond', precision=0, commas=False)
+    t_pre_ms_str = fmt_time(t_pre, 'millisecond', precision=0, commas=False)
+    t_post_ms_str = fmt_time(t_post, 'millisecond', precision=0, commas=False)
+    improv_pct_str = fmt_percent(round(improvement_pct)/100, precision=0, commas=False, style='symbol')
 ```
 
 ::: {.callout-takeaways title="Constraints drive architecture"}
 
 * **The D·A·M taxonomy governs all ML systems**: Data, Algorithm, and Machine are interdependent axes. Optimizing one axis in isolation shifts bottlenecks rather than eliminating them. When performance stalls, analysis should examine all three axes of the D·A·M taxonomy.
 * **ML systems fail silently, and the degradation equation quantifies why**: Unlike traditional software that crashes on errors, ML systems degrade as data distributions drift. Use the degradation equation to estimate expected accuracy loss over time and to set retraining triggers based on measurable drift.
-* **The iron law decomposes performance into three terms**: Data movement, computation, and overhead each resolve to time; the slowest term dominates. Reducing inference from `{python} AmdahlsPitfallRecap.t_inference_str` to `{python} AmdahlsPitfallRecap.t_inf_new_str` yields only `{python} AmdahlsPitfallRecap.improv_pct_str` end-to-end improvement when preprocessing (`{python} AmdahlsPitfallRecap.t_pre_str`) and postprocessing (`{python} AmdahlsPitfallRecap.t_post_str`) dominate total latency.
+* **The iron law decomposes performance into three terms**: Data movement, computation, and overhead each resolve to time; the slowest term dominates. Reducing inference from `{python} AmdahlsPitfallRecap.t_inference_ms_str` to `{python} AmdahlsPitfallRecap.t_inf_new_ms_str` yields only `{python} AmdahlsPitfallRecap.improv_pct_str` end-to-end improvement when preprocessing (`{python} AmdahlsPitfallRecap.t_pre_ms_str`) and postprocessing (`{python} AmdahlsPitfallRecap.t_post_ms_str`) dominate total latency.
 * **The bitter lesson applies**: Scale and compute outperform hand-crafted features. Systems that use general methods with more computation consistently outperform specialized approaches long term.
-* **Efficiency and scale co-evolve across the deployment spectrum**: Algorithmic improvements delivered a `{python} EfficiencyScaleSummary.algo_efficiency_max_str` compute reduction, yet total AI compute grew by roughly `{python} EfficiencyScaleSummary.compute_growth_order_str` orders of magnitude. Deployment context (from cloud to TinyML) determines which efficiency dimension (algorithmic, compute, or data) to prioritize.
+* **Efficiency and scale co-evolve across the deployment spectrum**: Algorithmic improvements delivered a `{python} EfficiencyScaleSummary.algo_efficiency_max_str`$\times$ compute reduction, yet total AI compute grew by roughly `{python} EfficiencyScaleSummary.compute_growth_order_str` orders of magnitude. Deployment context (from cloud to TinyML) determines which efficiency dimension (algorithmic, compute, or data) to prioritize.
 * **Five pillars require integration**: ML systems engineering encompasses Data Engineering, Training Systems, Deployment Infrastructure, Operations and Monitoring, and Ethics and Governance. Teams lacking expertise in any pillar face 60–85 percent project failure rates.
 * **Lifecycle and deployment context reshape every design decision**: ML systems require continuous iteration and monitoring, and the dominant bottlenecks shift across cloud, edge, mobile, and TinyML deployments.
 

@@ -97,9 +97,9 @@ In the Fleet Stack shown in @fig-fleet-stack, orchestration operates at the Dist
 # │ Exports: cluster_size_str, gpu_hour_cost_str, daily_cost_str, annual_cost_str,
 # │          daily_waste_str, annual_waste_str, productive_gpu_gain_str,
 # │          raw_gpu_equivalent_gain_str, idle_pct_str, util_low_pct_str,
-# │          util_high_pct_str, a100_mem_str, h100_mem_str
+# │          util_high_pct_str, a100_mem_gb_str, h100_mem_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, check, fmt_memory_capacity, fmt_qty, fmt_usd, fmt_percent
 
 class ClusterEconomicsContext:
     """Namespace for cluster orchestration economics."""
@@ -107,7 +107,7 @@ class ClusterEconomicsContext:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     from mlsysim import Hardware
     cluster_size = Systems.Clusters.Training_10K.total_accelerators
-    gpu_hour_cost_usd = Infrastructure.Pricing.Fleet.GpuHourRef.rate.m_as("dollar / hour")
+    gpu_hour_cost_usd = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
     idle_fraction = 0.30
     util_low = 0.50
     util_high = 0.80
@@ -128,23 +128,23 @@ class ClusterEconomicsContext:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     cluster_size_str = fmt(cluster_size, precision=0)
-    gpu_hour_cost_str = fmt(gpu_hour_cost_usd, precision=0, commas=False)
-    idle_pct_str = fmt(idle_fraction * 100, precision=0, commas=False, suffix=" percent")
-    util_low_pct_str = fmt(util_low * 100, precision=0, commas=False, suffix=" percent")
-    util_high_pct_str = fmt(util_high * 100, precision=0, commas=False, suffix=" percent")
-    daily_cost_str = fmt(daily_cost, precision=0)
-    annual_cost_str = fmt(annual_cost_m, precision=1, commas=False)
-    daily_waste_str = fmt(daily_waste, precision=0)
-    annual_waste_str = fmt(annual_waste_m, precision=1, commas=False)
+    gpu_hour_cost_str = fmt_usd(gpu_hour_cost_usd, precision=0, commas=False, per="GPU-hour")
+    idle_pct_str = fmt_percent(idle_fraction, precision=0, commas=False, style='prose')
+    util_low_pct_str = fmt_percent(util_low, precision=0, commas=False, style='prose')
+    util_high_pct_str = fmt_percent(util_high, precision=0, commas=False, style='prose')
+    daily_cost_str = fmt_usd(daily_cost, precision=0)
+    annual_cost_str = fmt_usd(annual_cost_m * MILLION, scale="M", precision=1, commas=False)
+    daily_waste_str = fmt_usd(daily_waste, precision=0)
+    annual_waste_str = fmt_usd(annual_waste_m * MILLION, scale="M", precision=1, commas=False)
     productive_gpu_gain_str = fmt(productive_gpu_gain, precision=0)
     raw_gpu_equivalent_gain_str = fmt(raw_gpu_equivalent_gain, precision=0)
-    a100_mem_str = fmt(a100_mem.m_as(GiB), precision=0, commas=False, suffix=' GB')
-    h100_mem_str = fmt(h100_mem.m_as(GiB), precision=0, commas=False, suffix=' GB')
+    a100_mem_gb_str = fmt_memory_capacity(a100_mem, unit=GiB, precision=0, commas=False)
+    h100_mem_gb_str = fmt_memory_capacity(h100_mem, unit=GiB, precision=0, commas=False)
 ```
 
 To make the scheduling problem concrete, consider a research organization operating a `{python} ClusterEconomicsContext.cluster_size_str`-GPU cluster. @brown2020language report that training GPT-3 175B used 3.14$\times 10^{23}$ floating-point operations on a V100 GPU cluster. Imagine 100 frontier-scale training jobs of that class queued, alongside thousands of smaller experiments and inference workloads all competing for the same resources. The system must decide which jobs run, when they run, and where they run. A naive first-come-first-served policy would let the first few large jobs monopolize the cluster for weeks, starving smaller experiments that researchers need to iterate quickly. A strict fair-share policy would fragment GPUs across many small allocations, preventing any large job from assembling the contiguous allocation it needs. Neither extreme works. The scheduler must navigate a multi-dimensional trade-off space where every decision affects throughput, fairness, cost, and researcher productivity simultaneously.
 
-The economic stakes make these decisions consequential at every scale. A `{python} ClusterEconomicsContext.cluster_size_str`-GPU cluster at \$`{python} ClusterEconomicsContext.gpu_hour_cost_str` per GPU-hour costs \$`{python} ClusterEconomicsContext.daily_cost_str` per day to operate, whether the GPUs are computing useful work or sitting idle in a queue. If scheduling inefficiencies leave `{python} ClusterEconomicsContext.idle_pct_str` of GPUs idle, that translates to \$`{python} ClusterEconomicsContext.daily_waste_str` per day in wasted capacity, or about \$`{python} ClusterEconomicsContext.annual_waste_str` million annually. Conversely, improving utilization from `{python} ClusterEconomicsContext.util_low_pct_str` to `{python} ClusterEconomicsContext.util_high_pct_str` adds `{python} ClusterEconomicsContext.productive_gpu_gain_str` fully utilized GPU-equivalents of productive capacity without purchasing additional hardware. That gain is equivalent to buying `{python} ClusterEconomicsContext.raw_gpu_equivalent_gain_str` raw GPUs if they ran at the old `{python} ClusterEconomicsContext.util_low_pct_str` utilization. At this scale, a 1 percentage-point improvement in utilization is worth more annually than the salary of the engineer who achieves it. *Scheduling is not operational overhead; it is one of the highest-leverage engineering investments in ML infrastructure.*
+The economic stakes make these decisions consequential at every scale. A `{python} ClusterEconomicsContext.cluster_size_str`-GPU cluster at `{python} ClusterEconomicsContext.gpu_hour_cost_str` costs `{python} ClusterEconomicsContext.daily_cost_str` per day to operate, whether the GPUs are computing useful work or sitting idle in a queue. If scheduling inefficiencies leave `{python} ClusterEconomicsContext.idle_pct_str` of GPUs idle, that translates to `{python} ClusterEconomicsContext.daily_waste_str` per day in wasted capacity, or about `{python} ClusterEconomicsContext.annual_waste_str` annually. Conversely, improving utilization from `{python} ClusterEconomicsContext.util_low_pct_str` to `{python} ClusterEconomicsContext.util_high_pct_str` adds `{python} ClusterEconomicsContext.productive_gpu_gain_str` fully utilized GPU-equivalents of productive capacity without purchasing additional hardware. That gain is equivalent to buying `{python} ClusterEconomicsContext.raw_gpu_equivalent_gain_str` raw GPUs if they ran at the old `{python} ClusterEconomicsContext.util_low_pct_str` utilization. At this scale, a 1 percentage-point improvement in utilization is worth more annually than the salary of the engineer who achieves it. *Scheduling is not operational overhead; it is one of the highest-leverage engineering investments in ML infrastructure.*
 
 ML workloads present scheduling challenges that distinguish them fundamentally from traditional high-performance computing and cloud computing. **Gang scheduling**[^fn-gang-scheduling] represents the most critical difference: a distributed training job requiring 1,024 GPUs *cannot* make progress with only 512. Unlike traditional HPC simulations that can often scale to whatever resources are available, synchronous data parallelism demands all-or-nothing allocation. Every worker must participate in every AllReduce operation, and a missing worker blocks all others. @Sec-appdx-comm-foundations-allreduce develops the ring and tree AllReduce cost model that makes this constraint physical: the collective stalls until the last worker arrives, so allocating $N$ GPUs but landing $N-1$ leaves the missing rank's peers burning fully idle on the synchronization barrier. A scheduler that partially allocates resources creates deadlocks where multiple jobs each hold some GPUs while waiting for more, with none able to proceed. This all-or-nothing requirement means the scheduler cannot simply "pack jobs tightly" as a traditional bin packer would; it must reason about atomic, multi-resource allocations across the entire cluster.
 
@@ -174,7 +174,7 @@ class GangSchedulingDeadlock:
     # ┌── 2. EXECUTE ───────────────────────────────────────
     # If scheduler allocates partially (e.g. 256 to each), no job can run.
     # Total idle waste per hour if deadlock occurs:
-    gpu_hour_cost = Infrastructure.Pricing.Fleet.GpuHourRef.rate.m_as("dollar / hour")
+    gpu_hour_cost = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
     waste_per_hour = n_total_gpus * gpu_hour_cost
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(waste_per_hour == 2048, f"Waste ${waste_per_hour} unexpected")
@@ -206,7 +206,7 @@ Beyond gang scheduling, topology awareness via **placement groups**[^fn-placemen
 
 [^fn-gang-scheduling]: **Gang Scheduling**: Formalized by @ousterhout1982scheduling for parallel systems, where the "Ousterhout matrix" co-schedules related threads across processors in synchronized time slices. In ML clusters, the constraint is stricter: synchronous AllReduce requires all workers simultaneously, so partial allocation wastes 100 percent of held resources rather than merely degrading throughput. A 1,024-GPU job holding 900 GPUs while waiting for 124 more burns approximately \$1,800/hour in idle capacity [@burns2016]. \index{Gang Scheduling!definition}
 
-GPU heterogeneity adds a second challenging dimension. Modern clusters contain mixtures of A100 and H100 accelerators with different memory capacities (`{python} ClusterEconomicsContext.a100_mem_str` vs. `{python} ClusterEconomicsContext.h100_mem_str`), compute throughput, and interconnect bandwidth. An H100 provides roughly twice the training throughput of an A100 for transformer workloads but costs proportionally more. Some models fit in A100 memory with appropriate parallelism strategies; others require the larger H100 memory to avoid excessive model sharding. The scheduler must match workloads to appropriate hardware based on actual requirements, not user preferences, while maintaining high utilization across heterogeneous pools. When users request specific GPU types out of habit rather than necessity, the mismatch between requested and required resources can leave entire hardware pools idle while queues overflow on preferred hardware.
+GPU heterogeneity adds a second challenging dimension. Modern clusters contain mixtures of A100 and H100 accelerators with different memory capacities (`{python} ClusterEconomicsContext.a100_mem_gb_str` vs. `{python} ClusterEconomicsContext.h100_mem_gb_str`), compute throughput, and interconnect bandwidth. An H100 provides roughly twice the training throughput of an A100 for transformer workloads but costs proportionally more. Some models fit in A100 memory with appropriate parallelism strategies; others require the larger H100 memory to avoid excessive model sharding. The scheduler must match workloads to appropriate hardware based on actual requirements, not user preferences, while maintaining high utilization across heterogeneous pools. When users request specific GPU types out of habit rather than necessity, the mismatch between requested and required resources can leave entire hardware pools idle while queues overflow on preferred hardware.
 
 Job duration unpredictability compounds these challenges further. A training run may converge early and complete in days rather than weeks. Hardware failures may abort jobs unexpectedly, returning resources at unpredictable times. Hyperparameter searches may reveal early that certain configurations will not succeed, leading to voluntary termination. Traditional scientific computing workloads, such as weather simulations or molecular dynamics, have more predictable runtimes that enable better scheduling decisions: the scheduler can project when resources will become available and plan accordingly. ML workloads deny this luxury, forcing schedulers to operate with deep uncertainty about when current jobs will release resources.
 
@@ -295,7 +295,7 @@ class QueuingTheory:
     # ┌── 4. OUTPUT ────────────────────────────────────────
     wq_uniform_str = fmt(wq_uniform, precision=0)
     wq_ml_str = fmt(wq_ml, precision=0)
-    rho_pct_str = fmt(rho * 100, precision=0, commas=False, suffix=" percent")
+    rho_pct_str = fmt_percent(rho, precision=0, commas=False, style='prose')
 ```
 
 ::: {.column-margin}
@@ -329,7 +329,9 @@ The most fundamental scheduling algorithm is **bin packing**[^fn-bin-packing-sch
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Bin packing — fragmentation and NVLink locality.
 # │ Exports: FleetFragmentation.total_gpus_str, effective_capacity_pct_str,
-# │          nvlink_h100_str, ib_ndr_gbs_str
+# │          nvlink_h100_gb_s_str, ib_ndr_gbs_str
+from mlsysim.fmt import fmt_qty
+
 class FleetFragmentation:
     from mlsysim import Hardware
     h_h100 = Hardware.Cloud.H100
@@ -340,20 +342,18 @@ class FleetFragmentation:
     job_request = 6
     wasted_per_node = gpus_per_node - job_request
     frag_pct = (wasted_per_node / gpus_per_node) * 100
-    nvlink_h100_val = h_h100.nvlink.bandwidth.m_as(GB/second)
-    ib_ndr_gbs_val = ib_ndr.bandwidth.m_as(GB/second)
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    total_gpus_str = fmt(total_gpus, precision=0, suffix=" GPUs")
-    effective_capacity_pct_str = fmt(100 - frag_pct, precision=0, commas=False, suffix=" percent")
-    nvlink_h100_str = fmt(nvlink_h100_val, precision=0, suffix=' GB/s')
-    ib_ndr_gbs_str = fmt(ib_ndr_gbs_val, precision=0, suffix=' GB/s')
+    total_gpus_str = fmt_count(total_gpus, label="GPU")
+    effective_capacity_pct_str = fmt_percent((100 - frag_pct)/100, precision=0, commas=False, style='prose')
+    nvlink_h100_gb_s_str = fmt_qty(h_h100.nvlink.bandwidth, GB/second, precision=0)
+    ib_ndr_gbs_str = fmt_qty(ib_ndr.bandwidth, GB/second, precision=0)
 ```
 
 Consider a 64-node cluster with 8 GPUs per node, totaling `{python} FleetFragmentation.total_gpus_str`. If jobs request 6 GPUs each, each job occupies one full node but wastes 2 GPUs per node, reducing effective capacity to `{python} FleetFragmentation.effective_capacity_pct_str`. The remaining 2 GPUs per node cannot be combined across nodes because GPU workloads require local memory access. This **fragmentation**\index{Fragmentation!scheduling} grows worse with heterogeneous job sizes: a mix of 1-GPU, 3-GPU, and 7-GPU jobs creates irregular gaps distributed across many nodes, where no single pending job can fit into any individual gap, yet the total free capacity would be sufficient if the gaps were contiguous.
 
 ML workloads make bin packing multi-dimensional in ways that traditional scheduling rarely encounters. Each job requires GPUs together with CPU cores for data preprocessing, host memory for data loading and augmentation pipelines, local SSD storage for dataset caching, and network bandwidth for gradient synchronization. A job requesting 4 GPUs, 32 CPU cores, and 256 GB of RAM may not fit on a node that has 4 free GPUs but only 16 free CPU cores because other jobs have consumed the host CPU for preprocessing. The scheduler must simultaneously satisfy all resource dimensions, and the job fits only if every dimension has sufficient capacity on the selected node. This multi-dimensional constraint dramatically reduces the solution space compared to single-dimensional packing, because a bottleneck in any single resource dimension can strand capacity in all others.
 
-Locality constraints further restrict placement beyond simple resource availability. A training job using tensor parallelism requires GPUs connected via NVLink within the same node, since cross-node communication over InfiniBand is an order of magnitude slower (`{python} FleetFragmentation.nvlink_h100_str` intra-node vs. `{python} FleetFragmentation.ib_ndr_gbs_str` inter-node). A job requesting "4 GPUs with NVLink connectivity" cannot use 2 GPUs from node A and 2 from node B, even if all 4 GPUs are individually available and the total capacity is sufficient. These topology constraints transform a packing problem into a placement problem where which specific resources matter as much as how many resources are available. The placement problem is strictly harder than the packing problem because it adds spatial constraints to the existing capacity constraints.
+Locality constraints further restrict placement beyond simple resource availability. A training job using tensor parallelism requires GPUs connected via NVLink within the same node, since cross-node communication over InfiniBand is an order of magnitude slower (`{python} FleetFragmentation.nvlink_h100_gb_s_str` intra-node vs. `{python} FleetFragmentation.ib_ndr_gbs_str` inter-node). A job requesting "4 GPUs with NVLink connectivity" cannot use 2 GPUs from node A and 2 from node B, even if all 4 GPUs are individually available and the total capacity is sufficient. These topology constraints transform a packing problem into a placement problem where which specific resources matter as much as how many resources are available. The placement problem is strictly harder than the packing problem because it adds spatial constraints to the existing capacity constraints.
 
 Production schedulers address fragmentation through several complementary strategies, each targeting a different aspect of the problem.
 
@@ -493,9 +493,11 @@ A quick cost estimate shows why even modest improvements in this balance justify
 # │ Context: Economics of idle GPUs callout.
 # │ Exports: ClusterEconomicsIdleRecap.cluster_size_str, daily_cost_str, annual_cost_str
 
+from mlsysim.fmt import fmt_usd
+
 class ClusterEconomicsIdleRecap:
     cluster_size = Systems.Clusters.Training_10K.total_accelerators
-    gpu_hour_cost_usd = Infrastructure.Pricing.Fleet.GpuHourRef.rate.m_as("dollar / hour")
+    gpu_hour_cost_usd = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
     daily_cost = cluster_size * gpu_hour_cost_usd * HOURS_PER_DAY
     annual_cost_m = (daily_cost * DAYS_PER_YEAR) / MILLION
     util_low = 0.60
@@ -510,28 +512,28 @@ class ClusterEconomicsIdleRecap:
     savings_annual_m = (savings_daily * DAYS_PER_YEAR) / MILLION
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     cluster_size_str = fmt(cluster_size, precision=0)
-    daily_cost_str = fmt(daily_cost, precision=0)
-    annual_cost_str = fmt(annual_cost_m, precision=1, commas=False)
-    util_low_pct_str = fmt(util_low * 100, precision=0, commas=False, suffix=" percent")
-    util_high_pct_str = fmt(util_high * 100, precision=0, commas=False, suffix=" percent")
+    daily_cost_str = fmt_usd(daily_cost, precision=0)
+    annual_cost_str = fmt_usd(annual_cost_m * MILLION, scale="M", precision=1, commas=False)
+    util_low_pct_str = fmt_percent(util_low, precision=0, commas=False, style='prose')
+    util_high_pct_str = fmt_percent(util_high, precision=0, commas=False, style='prose')
     productive_low_str = fmt(productive_low, precision=0)
     idle_low_str = fmt(idle_low, precision=0)
-    waste_low_str = fmt(waste_low, precision=0)
+    waste_low_str = fmt_usd(waste_low, precision=0)
     productive_high_str = fmt(productive_high, precision=0)
     idle_high_str = fmt(idle_high, precision=0)
-    waste_high_str = fmt(waste_high, precision=0)
-    savings_daily_str = fmt(savings_daily, precision=0)
-    savings_annual_m_str = fmt(savings_annual_m, precision=1, commas=False)
+    waste_high_str = fmt_usd(waste_high, precision=0)
+    savings_daily_str = fmt_usd(savings_daily, precision=0)
+    savings_annual_m_str = fmt_usd(savings_annual_m * MILLION, scale="M", precision=1, commas=False)
 ```
 
 ::: {#psp-fleet-orchestration-economics-idle-gpus .callout-perspective title="The economics of idle GPUs"}
 
 The cost of poor scheduling compounds rapidly. Consider a `{python} ClusterEconomicsIdleRecap.cluster_size_str`-GPU cluster:
 
-- **Operating cost**: \$`{python} ClusterEconomicsIdleRecap.daily_cost_str`/day (\$`{python} ClusterEconomicsIdleRecap.annual_cost_str`M/year)
-- **Lower utilization** (`{python} ClusterEconomicsIdleRecap.util_low_pct_str`): `{python} ClusterEconomicsIdleRecap.productive_low_str` productive, `{python} ClusterEconomicsIdleRecap.idle_low_str` idle = \$`{python} ClusterEconomicsIdleRecap.waste_low_str`/day wasted
-- **Higher utilization** (`{python} ClusterEconomicsIdleRecap.util_high_pct_str`): `{python} ClusterEconomicsIdleRecap.productive_high_str` productive, `{python} ClusterEconomicsIdleRecap.idle_high_str` idle = \$`{python} ClusterEconomicsIdleRecap.waste_high_str`/day wasted
-- **Improvement value**: Moving from `{python} ClusterEconomicsIdleRecap.util_low_pct_str` to `{python} ClusterEconomicsIdleRecap.util_high_pct_str` saves \$`{python} ClusterEconomicsIdleRecap.savings_daily_str`/day, or about \$`{python} ClusterEconomicsIdleRecap.savings_annual_m_str`M/year
+- **Operating cost**: `{python} ClusterEconomicsIdleRecap.daily_cost_str`/day (`{python} ClusterEconomicsIdleRecap.annual_cost_str`/year)
+- **Lower utilization** (`{python} ClusterEconomicsIdleRecap.util_low_pct_str`): `{python} ClusterEconomicsIdleRecap.productive_low_str` productive, `{python} ClusterEconomicsIdleRecap.idle_low_str` idle = `{python} ClusterEconomicsIdleRecap.waste_low_str`/day wasted
+- **Higher utilization** (`{python} ClusterEconomicsIdleRecap.util_high_pct_str`): `{python} ClusterEconomicsIdleRecap.productive_high_str` productive, `{python} ClusterEconomicsIdleRecap.idle_high_str` idle = `{python} ClusterEconomicsIdleRecap.waste_high_str`/day wasted
+- **Improvement value**: Moving from `{python} ClusterEconomicsIdleRecap.util_low_pct_str` to `{python} ClusterEconomicsIdleRecap.util_high_pct_str` saves `{python} ClusterEconomicsIdleRecap.savings_daily_str`/day, or about `{python} ClusterEconomicsIdleRecap.savings_annual_m_str`/year
 
 This savings exceeds the cost of a dedicated scheduling engineering team by orders of magnitude. Every percentage point of utilization improvement on a large cluster translates to millions of dollars annually.
 
@@ -666,15 +668,18 @@ This binary allocation model creates a significant inefficiency for inference wo
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: MIG partitioning — A100/H100 memory capacities.
-# │ Exports: ClusterEconomicsMigRecap.a100_mem_str, h100_mem_str
+# │ Exports: ClusterEconomicsMigRecap.a100_mem_gb_str, h100_mem_gb_str
+from mlsysim.core.constants import GiB
+from mlsysim.fmt import fmt, fmt_memory_capacity, fmt_qty
+
 class ClusterEconomicsMigRecap:
     from mlsysim import Hardware
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    a100_mem_str = fmt(Hardware.Cloud.A100.memory.capacity.m_as(GiB), precision=0, commas=False, suffix=' GB')
-    h100_mem_str = fmt(Hardware.Cloud.H100.memory.capacity.m_as(GiB), precision=0, commas=False)
+    a100_mem_gb_str = fmt_memory_capacity(Hardware.Cloud.A100.memory.capacity, unit=GiB, precision=0, commas=False)
+    h100_mem_gb_str = fmt_memory_capacity(Hardware.Cloud.H100.memory.capacity, unit=GiB, precision=0, commas=False)
 ```
 
-**Multi-Instance GPU (MIG)**[^fn-mig-isolation] technology addresses this inefficiency by partitioning A100 and H100 GPUs into hardware-isolated instances. An A100 with `{python} ClusterEconomicsMigRecap.a100_mem_str` of memory can be divided into configurations ranging from 7 small instances of approximately 10 GB each to 2 large instances of approximately 40 GB each. Unlike software-based GPU sharing (time-slicing), MIG provides hardware isolation: each instance has dedicated memory, cache, and compute resources, preventing one workload from interfering with another and eliminating the noisy neighbor[^fn-noisy-neighbor-etymology] effect. The device plugin exposes MIG instances as separate schedulable resources, allowing the scheduler to treat each instance as an independent GPU for allocation purposes.
+**Multi-Instance GPU (MIG)**[^fn-mig-isolation] technology addresses this inefficiency by partitioning A100 and H100 GPUs into hardware-isolated instances. An A100 with `{python} ClusterEconomicsMigRecap.a100_mem_gb_str` of memory can be divided into configurations ranging from 7 small instances of approximately 10 GB each to 2 large instances of approximately 40 GB each. Unlike software-based GPU sharing (time-slicing), MIG provides hardware isolation: each instance has dedicated memory, cache, and compute resources, preventing one workload from interfering with another and eliminating the noisy neighbor[^fn-noisy-neighbor-etymology] effect. The device plugin exposes MIG instances as separate schedulable resources, allowing the scheduler to treat each instance as an independent GPU for allocation purposes.
 
 [^fn-mig-isolation]: **Multi-Instance GPU (MIG)**: Introduced with the A100 (2020), MIG partitions a single GPU into up to 7 hardware-isolated instances with dedicated memory controllers, L2 cache slices, and compute units. The isolation is enforced at the hardware level, not by time-slicing, eliminating the noisy-neighbor interference that degrades P99 latency by 10 to 20 percent under software sharing. The trade-off is rigidity: partition profiles cannot change without draining all workloads, making MIG poorly suited for clusters with rapidly shifting workload mixes. \index{MIG!GPU isolation}
 
@@ -786,34 +791,30 @@ Randomly assigning 64 GPUs across a massive data center cripples a synchronous t
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Topology hierarchy — NVLink and InfiniBand bandwidth.
-# │ Exports: FleetTopologyInterconnect.nvlink_a100_str, nvlink_h100_str,
-# │          ib_ndr_str, ib_ndr_gbs_str
-from mlsysim.fmt import fmt, check
+# │ Exports: FleetTopologyInterconnect.nvlink_a100_gb_s_str, nvlink_h100_gb_s_str,
+# │          ib_ndr_gbps_str, ib_ndr_gbs_str
+from mlsysim.fmt import fmt, check, fmt_bandwidth, fmt_time, fmt_qty
 class FleetTopologyInterconnect:
     from mlsysim import Hardware
     h_h100 = Hardware.Cloud.H100
     h_a100 = Hardware.Cloud.A100
     ib_ndr = Systems.Fabrics.InfiniBand_NDR
-    nvlink_h100_val = h_h100.nvlink.bandwidth.m_as(GB/second)
-    nvlink_a100_val = h_a100.nvlink.bandwidth.m_as(GB/second)
-    ib_ndr_gbps_val = ib_ndr.bandwidth.m_as('Gbps')
-    ib_ndr_gbs_val = ib_ndr.bandwidth.m_as(GB/second)
-    activation_gb = 1
+    activation = 1 * GB  # scenario assumption
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    nvlink_xfer_ms = activation_gb / nvlink_h100_val * THOUSAND
-    ib_xfer_ms = activation_gb / ib_ndr_gbs_val * THOUSAND
-    xfer_slowdown = ib_xfer_ms / nvlink_xfer_ms
+    nvlink_xfer = (activation / h_h100.nvlink.bandwidth).to(ms)
+    ib_xfer = (activation / ib_ndr.bandwidth).to(ms)
+    xfer_slowdown = (ib_xfer / nvlink_xfer).to("").magnitude
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(abs(nvlink_xfer_ms - ib_xfer_ms) > 0, "IB transfer should differ from NVLink")
+    check(abs((nvlink_xfer - ib_xfer).to(ms).magnitude) > 0, "IB transfer should differ from NVLink")
     check(xfer_slowdown > 1, f"Expected IB slowdown > 1, got {xfer_slowdown}")
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    nvlink_h100_str = fmt(nvlink_h100_val, precision=0, suffix=' GB/s')
-    nvlink_a100_str = fmt(nvlink_a100_val, precision=0, suffix=' GB/s')
-    ib_ndr_str = fmt(ib_ndr_gbps_val, precision=0, suffix=" Gb/s")
-    ib_ndr_gbs_str = fmt(ib_ndr_gbs_val, precision=0, suffix=' GB/s')
-    activation_gb_str = fmt(activation_gb, precision=0, commas=False, suffix=' GB')
-    nvlink_xfer_ms_str = fmt(nvlink_xfer_ms, precision=1, commas=False, suffix=' ms')
-    ib_xfer_ms_str = fmt(ib_xfer_ms, precision=0, commas=False, suffix=' ms')
+    nvlink_h100_gb_s_str = fmt_qty(h_h100.nvlink.bandwidth, GB/second, precision=0)
+    nvlink_a100_gb_s_str = fmt_qty(h_a100.nvlink.bandwidth, GB/second, precision=0)
+    ib_ndr_gbps_str = fmt_bandwidth(ib_ndr.bandwidth, unit=Gbps, precision=0)
+    ib_ndr_gbs_str = fmt_qty(ib_ndr.bandwidth, GB/second, precision=0)
+    activation_gb_str = fmt_qty(activation, GB, precision=0, commas=False)
+    nvlink_xfer_ms_str = fmt_time(nvlink_xfer, ms, precision=1, commas=False)
+    ib_xfer_ms_str = fmt_time(ib_xfer, ms, precision=0, commas=False)
     xfer_slowdown_str = fmt(xfer_slowdown, precision=0, commas=False)
 ```
 
@@ -825,9 +826,9 @@ Modern GPU clusters exhibit a multi-level communication hierarchy, where bandwid
 *Bandwidth cliffs from NVLink to spine across the fabric.*
 :::
 
-Within a single node, GPUs communicate via **NVLink**\index{NVLink}, providing `{python} FleetTopologyInterconnect.nvlink_a100_str` per GPU on A100 systems and `{python} FleetTopologyInterconnect.nvlink_h100_str` on H100 systems. This high-bandwidth, low-latency interconnect enables efficient tensor parallelism, where matrix operations are split across GPUs that must exchange intermediate results (activations and gradients) at every transformer layer. The NVLink bandwidth is sufficient to overlap communication with computation for most model architectures, meaning tensor parallel operations can proceed at near-ideal throughput when confined to a single node.
+Within a single node, GPUs communicate via **NVLink**\index{NVLink}, providing `{python} FleetTopologyInterconnect.nvlink_a100_gb_s_str` per GPU on A100 systems and `{python} FleetTopologyInterconnect.nvlink_h100_gb_s_str` on H100 systems. This high-bandwidth, low-latency interconnect enables efficient tensor parallelism, where matrix operations are split across GPUs that must exchange intermediate results (activations and gradients) at every transformer layer. The NVLink bandwidth is sufficient to overlap communication with computation for most model architectures, meaning tensor parallel operations can proceed at near-ideal throughput when confined to a single node.
 
-Between nodes within the same rack or **leaf switch domain**\index{Leaf Switch Domain}, communication traverses InfiniBand or RoCE at `{python} FleetTopologyInterconnect.ib_ndr_str` (NDR InfiniBand), roughly `{python} FleetTopologyInterconnect.ib_ndr_gbs_str` per link. This represents an order of magnitude reduction from NVLink bandwidth. Data parallelism, which requires AllReduce of gradients after each training step, operates efficiently at this level because the gradient synchronization pattern allows overlap between communication and the next iteration's forward pass. The latency penalty is modest (microseconds vs. nanoseconds), and the aggregate bandwidth is sufficient for gradient tensors that are typically smaller than the activation tensors exchanged in tensor parallelism.
+Between nodes within the same rack or **leaf switch domain**\index{Leaf Switch Domain}, communication traverses InfiniBand or RoCE at `{python} FleetTopologyInterconnect.ib_ndr_gbps_str` (NDR InfiniBand), roughly `{python} FleetTopologyInterconnect.ib_ndr_gbs_str` per link. This represents an order of magnitude reduction from NVLink bandwidth. Data parallelism, which requires AllReduce of gradients after each training step, operates efficiently at this level because the gradient synchronization pattern allows overlap between communication and the next iteration's forward pass. The latency penalty is modest (microseconds vs. nanoseconds), and the aggregate bandwidth is sufficient for gradient tensors that are typically smaller than the activation tensors exchanged in tensor parallelism.
 
 Between racks connected through **spine switches**\index{Spine Switch}, communication crosses additional switch hops, introducing both higher latency and potentially reduced effective bandwidth due to network congestion. The fat-tree topologies analyzed in @sec-network-fabrics-fat-tree provide full bisection bandwidth in theory, but in practice, congestion from concurrent flows, routing inefficiencies, and switch buffer limitations reduce effective cross-rack bandwidth by 10 to 30 percent compared to intra-rack communication. Cross-rack communication also adds tail latency variability: while median latency may be only slightly higher, P99 latency can spike during congestion events, creating straggler effects in synchronous training where the slowest communicator determines the pace for all workers.
 
@@ -882,7 +883,7 @@ plt.style.use('seaborn-v0_8-whitegrid')
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 strategies = ['Random', 'Rack-Aware', 'Rail-Optimized', 'Topology-Optimal']
 times = [120, 85, 40, 25]
-bandwidths = [1.0 / (t * ms).m_as(second) for t in times]
+bandwidths = [1.0 / (t * ms).to(second).magnitude for t in times]
 
 colors = ['#d62728', '#ff7f0e', '#bcbd22', '#2ca02c']
 
@@ -971,7 +972,7 @@ Consider a 256-GPU training job using 3D parallelism: 8-way tensor parallel, 4-w
 
 **Good placement** (topology-aware):
 
-- Tensor parallel groups: 32 groups of 8 GPUs, each confined to one 8-GPU node (NVLink: `{python} FleetTopologyInterconnect.nvlink_h100_str`)
+- Tensor parallel groups: 32 groups of 8 GPUs, each confined to one 8-GPU node (NVLink: `{python} FleetTopologyInterconnect.nvlink_h100_gb_s_str`)
 - Pipeline stages: 4 consecutive nodes within the same rack (1 switch hop, InfiniBand: `{python} FleetTopologyInterconnect.ib_ndr_gbs_str`)
 - Data parallel replicas: 8 racks (2 switch hops for cross-rack AllReduce)
 
@@ -981,7 +982,7 @@ Consider a 256-GPU training job using 3D parallelism: 8-way tensor parallel, 4-w
 - Pipeline stages scattered across racks (2 switch hops instead of 1)
 - Data parallel replicas randomly distributed
 
-The tensor parallel communication alone illustrates the impact. With NVLink at `{python} FleetTopologyInterconnect.nvlink_h100_str`, a `{python} FleetTopologyInterconnect.activation_gb_str` activation transfer takes approximately `{python} FleetTopologyInterconnect.nvlink_xfer_ms_str`. Over InfiniBand at `{python} FleetTopologyInterconnect.ib_ndr_gbs_str`, the same transfer takes approximately `{python} FleetTopologyInterconnect.ib_xfer_ms_str`, a `{python} FleetTopologyInterconnect.xfer_slowdown_str`$\times$ slowdown. Since tensor parallelism communicates at every transformer layer (typically 80+ layers for large models), this difference compounds to 15 to 30 percent total training throughput degradation.
+The tensor parallel communication alone illustrates the impact. With NVLink at `{python} FleetTopologyInterconnect.nvlink_h100_gb_s_str`, a `{python} FleetTopologyInterconnect.activation_gb_str` activation transfer takes approximately `{python} FleetTopologyInterconnect.nvlink_xfer_ms_str`. Over InfiniBand at `{python} FleetTopologyInterconnect.ib_ndr_gbs_str`, the same transfer takes approximately `{python} FleetTopologyInterconnect.ib_xfer_ms_str`, a `{python} FleetTopologyInterconnect.xfer_slowdown_str`$\times$ slowdown. Since tensor parallelism communicates at every transformer layer (typically 80+ layers for large models), this difference compounds to 15 to 30 percent total training throughput degradation.
 
 :::
 
@@ -1121,9 +1122,9 @@ This logic extends to the temporal dimension, where the scheduler must weigh the
 # │
 # │ Imports: mlsysim.book (fmt, check)
 # │ Exports: es_s1_str, es_s2_str, es_s3p1_str, es_s3p2_str, es_s3_str,
-# │          es_rescale_str, es_vs_wait_str, es_vs_imm_str
+# │          es_rescale_hours_str, es_vs_wait_str, es_vs_imm_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_math, check
+from mlsysim.fmt import fmt, fmt_math, check, fmt_time
 
 class ElasticScaling:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -1155,9 +1156,9 @@ class ElasticScaling:
     es_s3p1_str = fmt(s3_phase1, precision=1, commas=False)
     es_s3p2_str = fmt(s3_phase2, precision=1, commas=False)
     es_s3_str = fmt(s3_work, precision=1, commas=False)
-    es_rescale_str = fmt(rescale_h, precision=2, commas=False, suffix=' hours')
-    es_rescale_min_str = fmt(rescale_min, precision=0, commas=False, suffix=' minutes')
-    es_rescale_break_even_h_str = fmt(2, precision=0, commas=False, suffix=' hours')
+    es_rescale_hours_str = fmt_time(rescale_h, 'hour', precision=2, commas=False, style='word')
+    es_rescale_min_str = fmt_time(rescale_min, 'minute', precision=0, commas=False, style='word')
+    es_rescale_break_even_h_str = fmt_time(2, 'hour', precision=0, commas=False, style='word')
     # Pre-compute the full Phase 2 math expression to avoid the
     # `\(...\)` + inline-`{python}` interaction anti-pattern that drops
     # the middle of the expression in rendered HTML (math.md §2).
@@ -1167,21 +1168,21 @@ class ElasticScaling:
     s1_gpus = 128
     s2_gpus = 512
     s3_gpus = 256
-    es_s1_gpus_str = fmt(s1_gpus, precision=0, commas=False, suffix=' GPUs')
-    es_window_h_str = fmt(window_h, precision=0, commas=False, suffix=' hours')
-    es_wait_h_str = fmt(wait_h, precision=0, commas=False, suffix=' hours')
-    es_s2_gpus_str = fmt(s2_gpus, precision=0, commas=False, suffix=' GPUs')
-    es_s2_run_h_str = fmt(s2_run_h, precision=0, commas=False, suffix=' hours')
-    es_s3_gpus_str = fmt(s3_gpus, precision=0, commas=False, suffix=' GPUs')
+    es_s1_gpus_str = fmt_count(s1_gpus, commas=False, label="GPU")
+    es_window_h_str = fmt_time(window_h, 'hour', precision=0, commas=False, style='word')
+    es_wait_h_str = fmt_time(wait_h, 'hour', precision=0, commas=False, style='word')
+    es_s2_gpus_str = fmt_count(s2_gpus, commas=False, label="GPU")
+    es_s2_run_h_str = fmt_time(s2_run_h, 'hour', precision=0, commas=False, style='word')
+    es_s3_gpus_str = fmt_count(s3_gpus, commas=False, label="GPU")
     es_peak_gpus_str = fmt(s2_gpus, precision=0, commas=False)
-    es_gpus_128_str = fmt(s1_gpus, precision=0, commas=False, suffix=' GPUs')
-    es_gpus_256_str = fmt(s3_gpus, precision=0, commas=False, suffix=' GPUs')
+    es_gpus_128_str = fmt_count(s1_gpus, commas=False, label="GPU")
+    es_gpus_256_str = fmt_count(s3_gpus, commas=False, label="GPU")
     es_tp_128_str = fmt(tp_128, precision=0, commas=False)
     es_tp_256_str = fmt(tp_256, precision=1, commas=False)
     es_tp_512_str = fmt(tp_512, precision=1, commas=False)
-    es_eff_256_pct_str = fmt(tp_256 / (2 * tp_128) * 100, precision=0, commas=False, suffix=' percent')
-    es_eff_512_pct_str = fmt(tp_512 / (4 * tp_128) * 100, precision=0, commas=False, suffix=' percent')
-    es_vs_wait_pct_str = fmt(elastic_vs_wait_pct, precision=1, commas=False, suffix=' percent')
+    es_eff_256_pct_str = fmt_percent(tp_256 / (2 * tp_128), precision=0, commas=False, style='prose')
+    es_eff_512_pct_str = fmt_percent(tp_512 / (4 * tp_128), precision=0, commas=False, style='prose')
+    es_vs_wait_pct_str = fmt_percent(elastic_vs_wait_pct/100, precision=1, commas=False, style='prose')
     es_vs_imm_mult_str = fmt(elastic_vs_immediate, precision=1, commas=False)
 ```
 
@@ -1189,7 +1190,7 @@ class ElasticScaling:
 
 Consider a large language model training job with a target batch size that requires `{python} ElasticScaling.es_peak_gpus_str` A100s for peak efficiency. Three scheduling strategies are evaluated over a window of `{python} ElasticScaling.es_window_h_str`.
 
-**Assumptions**: Throughput at `{python} ElasticScaling.es_gpus_128_str` is `{python} ElasticScaling.es_tp_128_str` epoch/hour (baseline). Throughput at `{python} ElasticScaling.es_gpus_256_str` is `{python} ElasticScaling.es_tp_256_str` epochs/hour (`{python} ElasticScaling.es_eff_256_pct_str` scaling efficiency). Throughput at `{python} ElasticScaling.es_s2_gpus_str` is `{python} ElasticScaling.es_tp_512_str` epochs/hour (`{python} ElasticScaling.es_eff_512_pct_str` scaling efficiency). Re-scaling cost is `{python} ElasticScaling.es_rescale_min_str` (`{python} ElasticScaling.es_rescale_str`) to checkpoint, re-shard, and restart.
+**Assumptions**: Throughput at `{python} ElasticScaling.es_gpus_128_str` is `{python} ElasticScaling.es_tp_128_str` epoch/hour (baseline). Throughput at `{python} ElasticScaling.es_gpus_256_str` is `{python} ElasticScaling.es_tp_256_str` epochs/hour (`{python} ElasticScaling.es_eff_256_pct_str` scaling efficiency). Throughput at `{python} ElasticScaling.es_s2_gpus_str` is `{python} ElasticScaling.es_tp_512_str` epochs/hour (`{python} ElasticScaling.es_eff_512_pct_str` scaling efficiency). Re-scaling cost is `{python} ElasticScaling.es_rescale_min_str` (`{python} ElasticScaling.es_rescale_hours_str`) to checkpoint, re-shard, and restart.
 
 **Strategy 1 -- Immediate start (no scaling)**: The job starts immediately with `{python} ElasticScaling.es_s1_gpus_str` and runs for the full `{python} ElasticScaling.es_window_h_str`. Total work: $24 \times 1.0 =$ `{python} ElasticScaling.es_s1_str` epochs.
 
@@ -1239,7 +1240,7 @@ fig, ax, COLORS, plt = viz.setup_plot(figsize=(8, 5))
 # Parameters
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-gpu_cost_per_hour = Infrastructure.Pricing.Fleet.GpuHourRef.rate.m_as("dollar / hour")
+gpu_cost_per_hour = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
 cluster_sizes = np.linspace(1000, 100000, 200)
 
 # Utilization levels and their colors
@@ -1347,14 +1348,17 @@ plt.close()
 # │ Context: Spot instance pricing comparison.
 # │ Exports: FleetSpotPricing.spot_price_str, on_demand_price_str
 
+from mlsysim.fmt import fmt_usd
+
 class FleetSpotPricing:
-    hourly_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate.m_as("dollar / hour")
+    hourly_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
+    spot_rate = Infrastructure.Pricing.Fleet.SpotGpuHourRef.rate.to(USD / hour).magnitude
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    spot_price_str = MarkdownStr("0.50")
-    on_demand_price_str = MarkdownStr(f"{hourly_rate:.2f}")
+    spot_price_str = fmt_usd(spot_rate, precision=2, commas=False, per="GPU-hour")
+    on_demand_price_str = fmt_usd(hourly_rate, precision=0, commas=False, per="GPU-hour")
 ```
 
-Cloud providers offer **spot instances**[^fn-spot-instances-cloud] (AWS) or **preemptible VMs**\index{Preemptible VMs} (GCP) at 60 to 90 percent discounts compared to on-demand pricing, with the caveat that instances can be reclaimed with as little as 30 seconds to 2 minutes notice when the provider needs the capacity for on-demand customers. At \$`{python} FleetSpotPricing.spot_price_str` per GPU-hour instead of \$`{python} FleetSpotPricing.on_demand_price_str`, spot instances transform the economics of large-scale training, potentially reducing the cost of a multi-week pretraining run from hundreds of thousands of dollars to under one hundred thousand.
+Cloud providers offer **spot instances**[^fn-spot-instances-cloud] (AWS) or **preemptible VMs**\index{Preemptible VMs} (GCP) at 60 to 90 percent discounts compared to on-demand pricing, with the caveat that instances can be reclaimed with as little as 30 seconds to 2 minutes notice when the provider needs the capacity for on-demand customers. At `{python} FleetSpotPricing.spot_price_str` instead of `{python} FleetSpotPricing.on_demand_price_str`, spot instances transform the economics of large-scale training, potentially reducing the cost of a multi-week pretraining run from hundreds of thousands of dollars to under one hundred thousand.
 
 [^fn-spot-instances-cloud]: **Spot Instances**: Named after commodity trading's "spot price" (the current market price for immediate delivery), spot instances sell spare cloud capacity at 60 to 90 percent discounts with the provider retaining reclamation rights. The critical asymmetry for ML training is the interruption notice window: AWS provides 2 minutes, GCP provides 30 seconds. A 175B-parameter model requires 3 to 5 minutes to checkpoint, so GCP's 30-second notice forces either continuous checkpointing overhead or acceptance of lost work on every interruption. \index{Spot Instances!cost optimization}
 
@@ -1421,14 +1425,16 @@ The optimal mix depends on workload characteristics and organizational prioritie
 # │ Imports: mlsysim.fmt (check)
 # │ Exports: spot_* strings for callout
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, MarkdownStr
+from mlsysim import Systems
+from mlsysim.fmt import fmt, check, MarkdownStr, fmt_count, fmt_params, fmt_time, fmt_usd
 
 class SpotTrainingEconomics:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    gpus = 512
+    fleet = Systems.Clusters.Training_512_H100
+    gpus = fleet.total_accelerators
     run_hours = 14 * HOURS_PER_DAY
-    on_demand_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate.m_as("dollar / hour")
-    spot_rate = Infrastructure.Pricing.Fleet.SpotGpuHourRef.rate.m_as("dollar / hour")
+    on_demand_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
+    spot_rate = Infrastructure.Pricing.Fleet.SpotGpuHourRef.rate.to(USD / hour).magnitude
     checkpoint_overhead_fraction = 0.05
     interruptions = 14
     restart_hours = 0.5
@@ -1447,41 +1453,43 @@ class SpotTrainingEconomics:
     check(abs(spot_total_hours - 359.8) < 1e-9, f"Expected 359.8 hours, got {spot_total_hours}")
     check(abs(spot_total_cost - 128952.32) < 1e-2, f"Expected spot cost 128952.32, got {spot_total_cost}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    on_demand_cost_str = fmt(on_demand_cost, precision=0)
-    spot_base_cost_str = fmt(spot_base_cost, precision=1)
+    on_demand_rate_str = fmt_usd(on_demand_rate, precision=0, commas=False, per="GPU-hour")
+    spot_rate_str = fmt_usd(spot_rate, precision=2, commas=False, per="GPU-hour")
+    on_demand_cost_str = fmt_usd(on_demand_cost, precision=0)
+    spot_base_cost_str = fmt_usd(spot_base_cost, precision=1)
     checkpoint_extra_hours_str = fmt(checkpoint_extra_hours, precision=1, commas=False)
-    restart_total_hours_str = fmt(restart_total_hours, precision=0, commas=False, suffix=' hours')
-    spot_total_hours_str = fmt(spot_total_hours, precision=1, commas=False, suffix=' hours')
-    spot_total_cost_str = fmt(spot_total_cost, precision=1)
-    savings_str = fmt(savings, precision=1)
-    savings_pct_str = fmt(savings_pct, precision=1, commas=False, suffix=" percent")
-    longer_pct_str = fmt(longer_pct, precision=1, commas=False, suffix=" percent")
-    spot_gpus_str = fmt(gpus, precision=0, commas=False, suffix=' GPUs')
-    spot_run_hours_str = fmt(run_hours, precision=0, commas=False, suffix=' hours')
+    restart_total_hours_str = fmt_time(restart_total_hours, 'hour', precision=0, commas=False, style='word')
+    spot_total_hours_str = fmt_time(spot_total_hours, 'hour', precision=1, commas=False, style='word')
+    spot_total_cost_str = fmt_usd(spot_total_cost, precision=1)
+    savings_str = fmt_usd(savings, precision=1)
+    savings_pct_str = fmt_percent(savings_pct/100, precision=1, commas=False, style='prose')
+    longer_pct_str = fmt_percent(longer_pct/100, precision=1, commas=False, style='prose')
+    spot_gpus_str = fmt_count(gpus, commas=False, label="GPU")
+    spot_run_hours_str = fmt_time(run_hours, 'hour', precision=0, commas=False, style='word')
     checkpoint_overhead_pct_str = MarkdownStr("5 percent")
     restart_interruptions_str = fmt(interruptions, precision=0, commas=False)
-    restart_hours_each_str = fmt(restart_hours, precision=1, commas=False, suffix=' hours')
-    restart_min_str = fmt(restart_hours * 60, precision=0, commas=False, suffix=' minutes')
-    model_params_b_str = fmt(70, precision=0, commas=False, suffix="B")
+    restart_hours_each_str = fmt_time(restart_hours, 'hour', precision=1, commas=False, style='word')
+    restart_min_str = fmt_time(restart_hours * 60, 'minute', precision=0, commas=False, style='word')
+    model_params_b_str = fmt_params(70 * BILLION, precision=0, commas=False)
     spot_run_days_str = fmt(run_hours // HOURS_PER_DAY, precision=0, commas=False)
-    spot_discount_pct_str = fmt((1 - spot_rate / on_demand_rate) * 100, precision=0, commas=False, suffix=' percent')
+    spot_discount_pct_str = fmt_percent(1 - spot_rate / on_demand_rate, precision=0, commas=False, style='prose')
 ```
 
 ::: {#psp-fleet-orchestration-spot-vs-demand-training .callout-perspective title="Spot vs. on-demand training"}
 
 Consider training a `{python} SpotTrainingEconomics.model_params_b_str` parameter model requiring `{python} SpotTrainingEconomics.spot_gpus_str` for `{python} SpotTrainingEconomics.spot_run_days_str` days.
 
-**On-demand**\index{On-Demand Capacity}: `{python} SpotTrainingEconomics.spot_gpus_str` $\times$ `{python} SpotTrainingEconomics.spot_run_hours_str` $\times$ \$2.00/GPU-hour = \$`{python} SpotTrainingEconomics.on_demand_cost_str`
+**On-demand**\index{On-Demand Capacity}: `{python} SpotTrainingEconomics.spot_gpus_str` $\times$ `{python} SpotTrainingEconomics.spot_run_hours_str` $\times$ `{python} SpotTrainingEconomics.on_demand_rate_str` = `{python} SpotTrainingEconomics.on_demand_cost_str`
 
 **Spot** (`{python} SpotTrainingEconomics.spot_discount_pct_str` discount, `{python} SpotTrainingEconomics.checkpoint_overhead_pct_str` checkpoint overhead, `{python} SpotTrainingEconomics.restart_interruptions_str` interruptions/day with `{python} SpotTrainingEconomics.restart_min_str` restart):
 
-- Base cost: `{python} SpotTrainingEconomics.spot_gpus_str` $\times$ `{python} SpotTrainingEconomics.spot_run_hours_str` $\times$ \$0.70 = \$`{python} SpotTrainingEconomics.spot_base_cost_str`
+- Base cost: `{python} SpotTrainingEconomics.spot_gpus_str` $\times$ `{python} SpotTrainingEconomics.spot_run_hours_str` $\times$ `{python} SpotTrainingEconomics.spot_rate_str` = `{python} SpotTrainingEconomics.spot_base_cost_str`
 - Checkpoint overhead: `{python} SpotTrainingEconomics.checkpoint_overhead_pct_str` $\times$ `{python} SpotTrainingEconomics.spot_run_hours_str` = `{python} SpotTrainingEconomics.checkpoint_extra_hours_str` extra hours
 - Restart overhead: `{python} SpotTrainingEconomics.restart_interruptions_str` interruptions $\times$ `{python} SpotTrainingEconomics.restart_hours_each_str` = `{python} SpotTrainingEconomics.restart_total_hours_str`
 - Total time: `{python} SpotTrainingEconomics.spot_run_hours_str` + `{python} SpotTrainingEconomics.checkpoint_extra_hours_str` hours + `{python} SpotTrainingEconomics.restart_total_hours_str` = `{python} SpotTrainingEconomics.spot_total_hours_str`
-- Total cost: `{python} SpotTrainingEconomics.spot_gpus_str` $\times$ `{python} SpotTrainingEconomics.spot_total_hours_str` $\times$ \$0.70 = \$`{python} SpotTrainingEconomics.spot_total_cost_str`
+- Total cost: `{python} SpotTrainingEconomics.spot_gpus_str` $\times$ `{python} SpotTrainingEconomics.spot_total_hours_str` $\times$ `{python} SpotTrainingEconomics.spot_rate_str` = `{python} SpotTrainingEconomics.spot_total_cost_str`
 
-**Savings**: \$`{python} SpotTrainingEconomics.savings_str` (`{python} SpotTrainingEconomics.savings_pct_str`), at the cost of approximately `{python} SpotTrainingEconomics.longer_pct_str` longer wall-clock time.
+**Savings**: `{python} SpotTrainingEconomics.savings_str` (`{python} SpotTrainingEconomics.savings_pct_str`), at the cost of approximately `{python} SpotTrainingEconomics.longer_pct_str` longer wall-clock time.
 
 The economics are compelling when fault tolerance infrastructure is already in place. Without checkpointing, a single interruption forces restart from scratch, potentially wasting days of compute and negating all savings.
 
@@ -1685,10 +1693,10 @@ To prevent **oscillation**\index{Oscillation}, where the scaler rapidly adds and
 # │      SLO violations from excess QPS × duration.
 # │
 # │ Imports: mlsysim.book (fmt, check)
-# │ Exports: as_capacity_str, as_detect_str, as_ready_str, as_excess_str,
-# │          as_violations_str, as_pred_trigger_str, as_pred_capacity_str
+# │ Exports: as_capacity_qps_str, as_detect_str, as_ready_str, as_excess_qps_str,
+# │          as_violations_str, as_pred_trigger_str, as_pred_capacity_qps_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, check, fmt_time
 
 class AutoscalingLag:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -1717,33 +1725,33 @@ class AutoscalingLag:
     check(slo_violations == 4725, f"Violations: expected 4725, got {slo_violations}")
     check(pred_capacity == 100, f"Pred capacity: expected 100, got {pred_capacity}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    as_capacity_str = fmt(capacity, precision=0, suffix=" QPS")
+    as_capacity_qps_str = fmt_rate(capacity, "QPS")
     as_detect_str = fmt(detect_sec, precision=0)
     as_ready_str = fmt(ready_sec, precision=0)
-    as_excess_str = fmt(excess_at_peak, precision=0, suffix=" QPS")
+    as_excess_qps_str = fmt_rate(excess_at_peak, "QPS")
     as_violations_str = fmt(slo_violations, precision=0)
     as_pred_trigger_str = fmt(pred_trigger_sec, precision=0)
-    as_pred_capacity_str = fmt(pred_capacity, precision=0, suffix=" QPS")
-    as_load_time_str = fmt(load_time_sec, precision=0, commas=False, suffix=" seconds")
-    as_traffic_end_str = fmt(traffic_end, precision=0, commas=False, suffix=" QPS")
+    as_pred_capacity_qps_str = fmt_rate(pred_capacity, "QPS")
+    as_load_time_s_str = fmt_time(load_time_sec, 'second', precision=0, commas=False, style='word')
+    as_traffic_end_qps_str = fmt_rate(traffic_end, "QPS", commas=False)
     as_new_replicas_str = fmt(replicas, precision=0, commas=False)
     as_replicas_str = fmt(replicas, precision=0, commas=False)
     as_qps_per_replica_str = fmt(qps_per_replica, precision=0, commas=False)
-    as_traffic_start_str = fmt(traffic_start, precision=0, commas=False, suffix=" QPS")
-    as_ramp_sec_str = fmt(ramp_sec, precision=0, commas=False, suffix=" seconds")
-    as_slo_ms_str = fmt(slo_ms, precision=0, commas=False, suffix=" ms")
-    as_load_time_min_str = fmt(load_time_sec / 60, precision=0, commas=False, suffix=" minutes")
+    as_traffic_start_qps_str = fmt_rate(traffic_start, "QPS", commas=False)
+    as_ramp_sec_str = fmt_time(ramp_sec, 'second', precision=0, commas=False, style='word')
+    as_slo_ms_str = fmt_time(slo_ms, 'millisecond', precision=0, commas=False)
+    as_load_time_min_str = fmt_time(load_time_sec / 60, 'minute', precision=0, commas=False, style='word')
 ```
 
 ::: {#nbk-fleet-orchestration-autoscaling-lag .callout-notebook title="The autoscaling lag"}
 
-Consider a serving fleet with `{python} AutoscalingLag.as_replicas_str` replicas, each capable of `{python} AutoscalingLag.as_qps_per_replica_str` queries per second (QPS) while meeting the `{python} AutoscalingLag.as_slo_ms_str` SLO. Total capacity: `{python} AutoscalingLag.as_capacity_str`.
+Consider a serving fleet with `{python} AutoscalingLag.as_replicas_str` replicas, each capable of `{python} AutoscalingLag.as_qps_per_replica_str` queries per second (QPS) while meeting the `{python} AutoscalingLag.as_slo_ms_str` SLO. Total capacity: `{python} AutoscalingLag.as_capacity_qps_str`.
 
-**Scenario**: Traffic ramps from `{python} AutoscalingLag.as_traffic_start_str` to `{python} AutoscalingLag.as_traffic_end_str` linearly over `{python} AutoscalingLag.as_ramp_sec_str`. Model load time: `{python} AutoscalingLag.as_load_time_min_str` (`{python} AutoscalingLag.as_load_time_str`).
+**Scenario**: Traffic ramps from `{python} AutoscalingLag.as_traffic_start_qps_str` to `{python} AutoscalingLag.as_traffic_end_qps_str` linearly over `{python} AutoscalingLag.as_ramp_sec_str`. Model load time: `{python} AutoscalingLag.as_load_time_min_str` (`{python} AutoscalingLag.as_load_time_s_str`).
 
-**Reactive scaling**\index{Reactive Scaling}: HPA detects overload at $t =$ `{python} AutoscalingLag.as_detect_str` s (when traffic hits `{python} AutoscalingLag.as_capacity_str`). It requests `{python} AutoscalingLag.as_new_replicas_str` new replicas. These replicas become ready at $t =$ `{python} AutoscalingLag.as_ready_str` s (`{python} AutoscalingLag.as_detect_str` + `{python} AutoscalingLag.as_load_time_str`). From $t =$ `{python} AutoscalingLag.as_detect_str` s to $t =$ `{python} AutoscalingLag.as_ready_str` s, demand exceeds capacity. During the ramp, excess demand grows linearly from 0 to `{python} AutoscalingLag.as_excess_str`; after the ramp reaches `{python} AutoscalingLag.as_traffic_end_str`, the full `{python} AutoscalingLag.as_excess_str` overload persists until the new replicas are ready. The area above capacity is approximately `{python} AutoscalingLag.as_violations_str` requests, all of which are queued or dropped and violate the SLO.
+**Reactive scaling**\index{Reactive Scaling}: HPA detects overload at $t =$ `{python} AutoscalingLag.as_detect_str` s (when traffic hits `{python} AutoscalingLag.as_capacity_qps_str`). It requests `{python} AutoscalingLag.as_new_replicas_str` new replicas. These replicas become ready at $t =$ `{python} AutoscalingLag.as_ready_str` s (`{python} AutoscalingLag.as_detect_str` + `{python} AutoscalingLag.as_load_time_s_str`). From $t =$ `{python} AutoscalingLag.as_detect_str` s to $t =$ `{python} AutoscalingLag.as_ready_str` s, demand exceeds capacity. During the ramp, excess demand grows linearly from 0 to `{python} AutoscalingLag.as_excess_qps_str`; after the ramp reaches `{python} AutoscalingLag.as_traffic_end_qps_str`, the full `{python} AutoscalingLag.as_excess_qps_str` overload persists until the new replicas are ready. The area above capacity is approximately `{python} AutoscalingLag.as_violations_str` requests, all of which are queued or dropped and violate the SLO.
 
-**Predictive scaling**: The scaler forecasts the ramp and triggers scale-up at $t =$ `{python} AutoscalingLag.as_pred_trigger_str` s. The `{python} AutoscalingLag.as_new_replicas_str` new replicas come online at $t = 0$ s, pushing capacity to `{python} AutoscalingLag.as_pred_capacity_str` just as the ramp begins. Zero SLO violations.
+**Predictive scaling**: The scaler forecasts the ramp and triggers scale-up at $t =$ `{python} AutoscalingLag.as_pred_trigger_str` s. The `{python} AutoscalingLag.as_new_replicas_str` new replicas come online at $t = 0$ s, pushing capacity to `{python} AutoscalingLag.as_pred_capacity_qps_str` just as the ramp begins. Zero SLO violations.
 
 :::
 
@@ -1798,28 +1806,28 @@ For a heterogeneous fleet, this logic dictates a bifurcated strategy. Our 175B p
 # │ Imports: mlsysim.book (fmt, check), mlsysim.constants (HOURS_PER_YEAR)
 # │ Exports: gs_* strings for callout
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int,  fmt, check
+from mlsysim.fmt import fmt_int, fmt_memory_capacity, fmt_qty, fmt_qty_int, fmt, check, fmt_count, fmt_params, fmt_usd
 
 class GpuSharingRoi:
     # ┌── 1. LOAD ──────────────────────────────────────────
     n_small = 100
-    small_footprint_gb = 26
+    small_footprint = 26 * GiB  # scenario assumption
     n_large = 10
-    large_footprint_gb = (Models.Language.GPT3.parameters * BYTES_FP16).m_as(GB)  # 175B FP16
-    a100_mem_gb = Hardware.Cloud.A100.memory.capacity.m_as(GiB)
+    large_footprint = Models.Language.GPT3.parameters * BYTES_FP16  # 175B FP16
+    a100_mem = Hardware.Cloud.A100.memory.capacity
     gpus_per_large = 8
     models_per_gpu_shared = 2
-    gpu_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate.m_as("dollar / hour")
+    gpu_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
     # ┌── 2. EXECUTE ───────────────────────────────────────
     excl_small_gpus = n_small
-    excl_total_mem_gb = excl_small_gpus * a100_mem_gb
-    excl_used_mem_gb = n_small * small_footprint_gb
-    excl_util_pct = excl_used_mem_gb/excl_total_mem_gb * 100
+    excl_total_mem = excl_small_gpus * a100_mem
+    excl_used_mem = n_small * small_footprint
+    excl_util_pct = (excl_used_mem / excl_total_mem).to("").magnitude * 100
     excl_large_gpus = n_large * gpus_per_large
     excl_total = excl_small_gpus + excl_large_gpus
     shared_small_gpus = n_small // models_per_gpu_shared
-    shared_mem_per_gpu = models_per_gpu_shared * small_footprint_gb
-    shared_util_pct = shared_mem_per_gpu/a100_mem_gb * 100
+    shared_mem_per_gpu_q = models_per_gpu_shared * small_footprint
+    shared_util_pct = (shared_mem_per_gpu_q / a100_mem).to("").magnitude * 100
     shared_total = shared_small_gpus + excl_large_gpus
     saved_gpus = excl_total - shared_total
     saved_pct = saved_gpus/excl_total * 100
@@ -1830,43 +1838,38 @@ class GpuSharingRoi:
     check(abs(shared_util_pct - 65) < 1, f"Shared util: expected 65%, got {shared_util_pct}")
     check(abs(annual_savings - 876000) < 1000, f"Savings: expected ~876K, got {annual_savings}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    gs_excl_util_str = fmt(excl_util_pct, precision=1, suffix=' percent')
-    gs_excl_total_mem_str = fmt_int(excl_total_mem_gb, suffix=' GB')
-    gs_excl_large_str = fmt(excl_large_gpus, precision=0, suffix=' GPUs')
-    gs_excl_total_str = fmt(excl_total, precision=0, suffix=' GPUs')
-    gs_shared_gpus_str = fmt(shared_small_gpus, precision=0, suffix=' GPUs')
-    gs_shared_mem_str = fmt(shared_mem_per_gpu, precision=0, suffix=' GB')
-    gs_shared_util_str = fmt(shared_util_pct, precision=0, commas=False, suffix=' percent')
-    gs_shared_total_str = fmt(shared_total, precision=0, suffix=' GPUs')
+    gs_excl_util_str = fmt_percent(excl_util_pct/100, precision=1, style='prose')
+    gs_excl_total_mem_gb_str = fmt_memory_capacity(excl_total_mem, unit=GiB, precision=0)
+    gs_excl_large_str = fmt_count(excl_large_gpus, label="GPU")
+    gs_excl_total_str = fmt_count(excl_total, label="GPU")
+    gs_shared_gpus_str = fmt_count(shared_small_gpus, label="GPU")
+    gs_shared_mem_gb_str = fmt_memory_capacity(shared_mem_per_gpu_q, unit=GiB, precision=0)
+    gs_shared_util_str = fmt_percent(shared_util_pct/100, precision=0, commas=False, style='prose')
+    gs_shared_total_str = fmt_count(shared_total, label="GPU")
     gs_saved_gpus_str = fmt(saved_gpus, precision=0)
-    gs_saved_pct_str = fmt(saved_pct, precision=1, suffix=' percent')
-    gs_annual_str = fmt(annual_savings, precision=0)
-    small_model_params_b = Models.Language.Llama2_7B.parameters.m_as(Bparam)
-    gs_small_model_b_str = fmt(small_model_params_b, precision=0, commas=False, suffix="B")
-    gs_large_model_b_str = fmt(
-        int(Models.Language.GPT3.parameters.m_as(param) / BILLION),
-        precision=0,
-        commas=False,
-    ) + "B"
+    gs_saved_pct_str = fmt_percent(saved_pct/100, precision=1, style='prose')
+    gs_annual_usd_str = fmt_usd(annual_savings, precision=0)
+    gs_small_model_b_str = fmt_params(Models.Language.Llama2_7B.parameters, precision=0, commas=False)
+    gs_large_model_b_str = fmt_params(Models.Language.GPT3.parameters, precision=0, commas=False)
     gs_n_small_str = fmt(n_small, precision=0, commas=False)
-    gs_a100_mem_str = fmt(a100_mem_gb, precision=0, commas=False, suffix=' GB')
-    gs_small_footprint_str = fmt(small_footprint_gb, precision=0, commas=False, suffix=' GB')
+    gs_a100_mem_gb_str = fmt_memory_capacity(a100_mem, unit=GiB, precision=0, commas=False)
+    gs_small_footprint_gb_str = fmt_memory_capacity(small_footprint, unit=GiB, precision=0, commas=False)
     gs_models_per_gpu_str = fmt(models_per_gpu_shared, precision=0, commas=False)
     gs_n_large_str = fmt(n_large, precision=0, commas=False)
-    gs_gpus_per_large_str = fmt(gpus_per_large, precision=0, commas=False, suffix=' GPUs')
-    gs_large_footprint_str = fmt(large_footprint_gb, precision=0, commas=False, suffix=' GB')
-    gs_gpu_hour_rate_str = fmt(gpu_rate, precision=0, commas=False)
+    gs_gpus_per_large_str = fmt_count(gpus_per_large, commas=False, label="GPU")
+    gs_large_footprint_gb_str = fmt_qty(large_footprint, GB, precision=0, commas=False)
+    gs_gpu_hour_rate_str = fmt_usd(gpu_rate, precision=0, commas=False, per="GPU-hour")
 ```
 
 ::: {#nbk-fleet-orchestration-gpu-sharing-roi .callout-notebook title="GPU sharing ROI"}
 
-Consider a fleet serving `{python} GpuSharingRoi.gs_n_small_str` distinct `{python} GpuSharingRoi.gs_small_model_b_str` models (`{python} GpuSharingRoi.gs_small_footprint_str` footprint each) and `{python} GpuSharingRoi.gs_n_large_str` distinct `{python} GpuSharingRoi.gs_large_model_b_str` models (`{python} GpuSharingRoi.gs_large_footprint_str` footprint each).
+Consider a fleet serving `{python} GpuSharingRoi.gs_n_small_str` distinct `{python} GpuSharingRoi.gs_small_model_b_str` models (`{python} GpuSharingRoi.gs_small_footprint_gb_str` footprint each) and `{python} GpuSharingRoi.gs_n_large_str` distinct `{python} GpuSharingRoi.gs_large_model_b_str` models (`{python} GpuSharingRoi.gs_large_footprint_gb_str` footprint each).
 
-**Strategy A -- Exclusive access (one model per GPU)**: The `{python} GpuSharingRoi.gs_small_model_b_str` models require `{python} GpuSharingRoi.gs_n_small_str` A100 GPUs (`{python} GpuSharingRoi.gs_a100_mem_str` each), achieving only `{python} GpuSharingRoi.gs_excl_util_str` memory utilization (`{python} GpuSharingRoi.gs_n_small_str` $\times$ `{python} GpuSharingRoi.gs_small_footprint_str` used out of `{python} GpuSharingRoi.gs_excl_total_mem_str` total). The `{python} GpuSharingRoi.gs_large_model_b_str` models require `{python} GpuSharingRoi.gs_excl_large_str` (`{python} GpuSharingRoi.gs_n_large_str` models $\times$ `{python} GpuSharingRoi.gs_gpus_per_large_str` each for tensor parallelism). Total fleet: `{python} GpuSharingRoi.gs_excl_total_str`.
+**Strategy A -- Exclusive access (one model per GPU)**: The `{python} GpuSharingRoi.gs_small_model_b_str` models require `{python} GpuSharingRoi.gs_n_small_str` A100 GPUs (`{python} GpuSharingRoi.gs_a100_mem_gb_str` each), achieving only `{python} GpuSharingRoi.gs_excl_util_str` memory utilization (`{python} GpuSharingRoi.gs_n_small_str` $\times$ `{python} GpuSharingRoi.gs_small_footprint_gb_str` used out of `{python} GpuSharingRoi.gs_excl_total_mem_gb_str` total). The `{python} GpuSharingRoi.gs_large_model_b_str` models require `{python} GpuSharingRoi.gs_excl_large_str` (`{python} GpuSharingRoi.gs_n_large_str` models $\times$ `{python} GpuSharingRoi.gs_gpus_per_large_str` each for tensor parallelism). Total fleet: `{python} GpuSharingRoi.gs_excl_total_str`.
 
-**Strategy B -- Mixed sharing (MPS for small, exclusive for large)**: Pack `{python} GpuSharingRoi.gs_models_per_gpu_str` models per A100 for the `{python} GpuSharingRoi.gs_small_model_b_str` models (`{python} GpuSharingRoi.gs_models_per_gpu_str` $\times$ `{python} GpuSharingRoi.gs_small_footprint_str` = `{python} GpuSharingRoi.gs_shared_mem_str`, well within `{python} GpuSharingRoi.gs_a100_mem_str`), requiring only `{python} GpuSharingRoi.gs_shared_gpus_str` at `{python} GpuSharingRoi.gs_shared_util_str` memory utilization. The `{python} GpuSharingRoi.gs_large_model_b_str` models remain unchanged at `{python} GpuSharingRoi.gs_excl_large_str`. Total fleet: `{python} GpuSharingRoi.gs_shared_total_str`.
+**Strategy B -- Mixed sharing (MPS for small, exclusive for large)**: Pack `{python} GpuSharingRoi.gs_models_per_gpu_str` models per A100 for the `{python} GpuSharingRoi.gs_small_model_b_str` models (`{python} GpuSharingRoi.gs_models_per_gpu_str` $\times$ `{python} GpuSharingRoi.gs_small_footprint_gb_str` = `{python} GpuSharingRoi.gs_shared_mem_gb_str`, well within `{python} GpuSharingRoi.gs_a100_mem_gb_str`), requiring only `{python} GpuSharingRoi.gs_shared_gpus_str` at `{python} GpuSharingRoi.gs_shared_util_str` memory utilization. The `{python} GpuSharingRoi.gs_large_model_b_str` models remain unchanged at `{python} GpuSharingRoi.gs_excl_large_str`. Total fleet: `{python} GpuSharingRoi.gs_shared_total_str`.
 
-Sharing reduces the fleet size by `{python} GpuSharingRoi.gs_saved_pct_str` (`{python} GpuSharingRoi.gs_saved_gpus_str` fewer GPUs). At \$`{python} GpuSharingRoi.gs_gpu_hour_rate_str`/GPU-hour, this saves approximately \$`{python} GpuSharingRoi.gs_annual_str` annually in compute costs, purely through scheduling policy.
+Sharing reduces the fleet size by `{python} GpuSharingRoi.gs_saved_pct_str` (`{python} GpuSharingRoi.gs_saved_gpus_str` fewer GPUs). At `{python} GpuSharingRoi.gs_gpu_hour_rate_str`, this saves approximately `{python} GpuSharingRoi.gs_annual_usd_str` annually in compute costs, purely through scheduling policy.
 
 :::
 
@@ -1903,7 +1906,7 @@ Inference traffic typically follows a "human curve": low at 3 AM, ramping up at 
 # │ Imports: mlsysim.book (fmt, check), mlsysim.constants (HOURS_PER_YEAR)
 # │ Exports: ds_* strings for callout
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_int, check, MarkdownStr
+from mlsysim.fmt import fmt, fmt_int, check, MarkdownStr, fmt_percent
 
 class DiurnalGpuShift:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -1913,14 +1916,14 @@ class DiurnalGpuShift:
     training_fixed = 618
     reclaimed = 133
     safety_buffer = 117
-    gpu_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate.m_as("dollar / hour")
+    gpu_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
     # ┌── 2. EXECUTE ───────────────────────────────────────
     serving_reclaimable = serving_peak - serving_avg
     static_active = serving_avg + training_fixed
     static_util_pct = static_active/fleet * 100
     dynamic_active = serving_avg + training_fixed + reclaimed
     dynamic_util_pct = dynamic_active/fleet * 100
-    annual_value = reclaimed * gpu_rate * HOURS_PER_YEAR
+    annual_value = reclaimed * gpu_rate * HOURS_PER_YEAR * USD
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(static_active == 768, f"Static: expected 768, got {static_active}")
     check(static_util_pct == 75, f"Static util: expected 75%, got {static_util_pct}")
@@ -1929,19 +1932,19 @@ class DiurnalGpuShift:
     check(serving_reclaimable - safety_buffer == reclaimed, f"Reclaimed mismatch: {serving_reclaimable - safety_buffer}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     ds_static_active_str = fmt(static_active, precision=0)
-    ds_static_util_str = fmt(static_util_pct, precision=0, suffix=' percent')
+    ds_static_util_str = fmt_percent(static_util_pct/100, precision=0, style='prose')
     ds_dynamic_active_str = fmt(dynamic_active, precision=0)
-    ds_dynamic_util_str = fmt_int(round(dynamic_util_pct), suffix=' percent')
-    ds_reclaimed_str = fmt(reclaimed, precision=0, suffix=' GPUs')
-    ds_annual_str = fmt(annual_value / MILLION, precision=1, commas=False)
-    ds_serving_peak_str = fmt(serving_peak, precision=0, commas=False, suffix=' GPUs')
-    ds_serving_avg_str = fmt(serving_avg, precision=0, commas=False, suffix=' GPUs')
-    ds_training_fixed_str = fmt(training_fixed, precision=0, commas=False, suffix=' GPUs')
-    ds_fleet_gpus_str = fmt(fleet, precision=0, commas=True, suffix=' GPUs')
-    ds_gpu_hour_rate_str = fmt(gpu_rate, precision=0, commas=False)
-    ds_serving_peak_util_str = fmt(serving_avg / serving_peak * 100, precision=1, commas=False, suffix=' percent')
+    ds_dynamic_util_str = fmt_percent(round(dynamic_util_pct)/100, precision=0, commas=True, style='prose')
+    ds_reclaimed_str = fmt_count(reclaimed, label="GPU")
+    ds_annual_usd_str = fmt_usd(annual_value, scale="M", precision=1, commas=False)
+    ds_serving_peak_str = fmt_count(serving_peak, commas=False, label="GPU")
+    ds_serving_avg_str = fmt_count(serving_avg, commas=False, label="GPU")
+    ds_training_fixed_str = fmt_count(training_fixed, commas=False, label="GPU")
+    ds_fleet_gpus_str = fmt_count(fleet, commas=True, label="GPU")
+    ds_gpu_hour_rate_str = fmt_usd(gpu_rate, precision=0, commas=False, per="GPU-hour")
+    ds_serving_peak_util_str = fmt_percent(serving_avg / serving_peak, precision=1, commas=False, style='prose')
     ds_safety_buffer_str = fmt(safety_buffer, precision=0, commas=False)
-    ds_serving_reclaimable_str = fmt(serving_reclaimable, precision=0, commas=False, suffix=' GPUs')
+    ds_serving_reclaimable_str = fmt_count(serving_reclaimable, commas=False, label="GPU")
     ds_training_full_util_str = MarkdownStr("100 percent")
 ```
 
@@ -1953,7 +1956,7 @@ Consider a fleet of `{python} DiurnalGpuShift.ds_fleet_gpus_str` managed under t
 
 **Scenario B -- Dynamic Sharing**: Serving claims GPUs strictly as needed (average `{python} DiurnalGpuShift.ds_serving_avg_str`). Training reclaims unused serving GPUs (average `{python} DiurnalGpuShift.ds_serving_reclaimable_str`), minus a `{python} DiurnalGpuShift.ds_safety_buffer_str`-GPU safety buffer. The orchestrator shifts approximately `{python} DiurnalGpuShift.ds_reclaimed_str` between roles twice daily based on diurnal forecasts. Result: serving (`{python} DiurnalGpuShift.ds_serving_avg_str`) + training (`{python} DiurnalGpuShift.ds_training_fixed_str` + `{python} DiurnalGpuShift.ds_reclaimed_str`) = `{python} DiurnalGpuShift.ds_dynamic_active_str` active GPUs (the second training term is reclaimed serving capacity). Fleet utilization: `{python} DiurnalGpuShift.ds_dynamic_util_str`.
 
-Dynamic sharing recovers `{python} DiurnalGpuShift.ds_reclaimed_str` of effective capacity. At \$`{python} DiurnalGpuShift.ds_gpu_hour_rate_str`/GPU-hour, this creates approximately \$`{python} DiurnalGpuShift.ds_annual_str` million per year in value without purchasing a single additional accelerator.
+Dynamic sharing recovers `{python} DiurnalGpuShift.ds_reclaimed_str` of effective capacity. At `{python} DiurnalGpuShift.ds_gpu_hour_rate_str`, this creates approximately `{python} DiurnalGpuShift.ds_annual_usd_str` per year in value without purchasing a single additional accelerator.
 
 :::
 
@@ -2015,28 +2018,33 @@ Attribution in a shared fleet presents a forensic challenge. A single "training"
 # │ Goal: Quantify the visible chargeback cost of a 64-GPU, 34-day run.
 # │ How: Multiply GPU count, wall-clock hours, and internal GPU-hour rate.
 # │
-# │ Imports: mlsysim.fmt (fmt, MarkdownStr, check)
-# │ Exports: chargeback_hours_str, chargeback_cost_str
+# │ Imports: mlsysim.fmt (check, fmt_time, fmt_usd)
+# │ Exports: ChargebackExample.chargeback_hours_h_str,
+# │          ChargebackExample.chargeback_cost_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, MarkdownStr, check
+from mlsysim import Systems
+from mlsysim.fmt import check, fmt_time, fmt_usd
 
 class ChargebackExample:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    gpus = 64
+    fleet = Systems.Clusters.Lab_64_H100
+    gpus = fleet.total_accelerators
     days = 34
-    gpu_hour_rate = Infrastructure.Pricing.Fleet.InternalChargebackPerHour.rate.m_as("dollar / hour")
+    duration = days * day
+    gpu_hour_rate = Infrastructure.Pricing.Fleet.InternalChargebackPerHour.rate.to(USD / hour).magnitude
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    hours = days * HOURS_PER_DAY
+    hours = duration.to(hour).magnitude
     cost = gpus * hours * gpu_hour_rate
     # ┌── 3. GUARD ─────────────────────────────────────────
+    check(duration.check("[time]"), f"Expected a time quantity, got {duration}")
     check(hours == 816, f"Expected 816 hours, got {hours}")
     check(cost == 130560, f"Expected 130560, got {cost}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    chargeback_hours_str = fmt(hours, precision=0)
-    chargeback_cost_str = MarkdownStr(f"{cost / THOUSAND:.0f},000")
+    chargeback_hours_h_str = fmt_time(duration, hour, precision=0, commas=False)
+    chargeback_cost_str = fmt_usd(cost, precision=0)
 ```
 
-This data feeds the utilization dashboard, the cluster operator's primary instrument for fleet health. This view must synthesize per-team utilization against quotas, queue depth by priority class, and the **fragmentation index**\index{Fragmentation Index}, a measure of free GPUs that cannot be allocated due to topology constraints. Crucially, it must track the "cost of chaos": preemption rates, spot instance interruption frequencies, and the recovery overhead they induce. When these metrics are visible, they drive behavior. A 64-GPU 175B scheduling run that lasts 34 days consumes about \$`{python} ChargebackExample.chargeback_cost_str` of capacity (64 GPUs $\times$ `{python} ChargebackExample.chargeback_hours_str` $\times$ \$2.50/GPU-hour). Without proper accounting, this cost is invisible to the team that requested it. With chargeback, the team must justify this expenditure against the model's expected business value.
+This data feeds the utilization dashboard, the cluster operator's primary instrument for fleet health. This view must synthesize per-team utilization against quotas, queue depth by priority class, and the **fragmentation index**\index{Fragmentation Index}, a measure of free GPUs that cannot be allocated due to topology constraints. Crucially, it must track the "cost of chaos": preemption rates, spot instance interruption frequencies, and the recovery overhead they induce. When these metrics are visible, they drive behavior. A 64-GPU 175B scheduling run that lasts 34 days consumes about `{python} ChargebackExample.chargeback_cost_str` of capacity (64 GPUs $\times$ `{python} ChargebackExample.chargeback_hours_h_str` $\times$ \$2.50/GPU-hour). Without proper accounting, this cost is invisible to the team that requested it. With chargeback, the team must justify this expenditure against the model's expected business value.
 
 Automated anomaly detection turns these metrics into actionable signals. A sudden spike in a team's consumption to 3$\times$ their historical norm might indicate a runaway script spawning infinite jobs. A queue that grows faster than it drains signals a capacity shortfall that auto-scaling must address. Conversely, a sudden drop in cluster-wide power consumption typically precedes a mass job failure event, often due to a shared dependency like a storage outage. These alerts allow operators to intervene before the budget is drained or the queue becomes unmanageable.
 
@@ -2082,37 +2090,44 @@ The engineering cost of preemption extends far beyond the scheduling latency. Th
 # │ Goal: Quantify wasted cost and GPU-hours from repeated preemptions.
 # │ How: Convert recovery time across all GPUs into wasted GPU-hour cost.
 # │
-# │ Imports: mlsysim.fmt (fmt, check)
+# │ Imports: mlsysim.fmt (check, fmt_count, fmt_time, fmt_usd)
 # │ Exports: preempt_* strings for prose
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim import Systems
+from mlsysim.fmt import check, fmt_count, fmt_time, fmt_usd
 
 class PreemptionTax:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    gpus = 64
-    lost_minutes = 15
-    reload_minutes = 20
-    warmup_minutes = 10
-    gpu_hour_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate.m_as("dollar / hour")
+    fleet = Systems.Clusters.Lab_64_H100
+    gpus = fleet.total_accelerators
+    lost_duration = 15 * minute
+    reload_duration = 20 * minute
+    warmup_duration = 10 * minute
+    gpu_hour_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
     preemptions_per_day = 12
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    recovery_minutes = lost_minutes + reload_minutes + warmup_minutes
-    recovery_hours = recovery_minutes / MINUTES_PER_HOUR
+    recovery_duration = lost_duration + reload_duration + warmup_duration
+    recovery_minutes = recovery_duration.to(minute).magnitude
+    recovery_hours = recovery_duration.to(hour).magnitude
     cost_per_event = gpus * recovery_hours * gpu_hour_rate
-    wasted_hours_per_day = preemptions_per_day * recovery_hours
+    wasted_duration_per_day = preemptions_per_day * recovery_duration
+    wasted_hours_per_day = wasted_duration_per_day.to(hour).magnitude
     wasted_gpu_hours_per_day = gpus * wasted_hours_per_day
     # ┌── 3. GUARD ─────────────────────────────────────────
+    check(recovery_duration.check("[time]"), f"Expected recovery duration, got {recovery_duration}")
+    check(wasted_duration_per_day.check("[time]"), f"Expected wasted duration, got {wasted_duration_per_day}")
     check(recovery_minutes == 45, f"Expected 45 minutes, got {recovery_minutes}")
     check(cost_per_event == 96, f"Expected $96, got {cost_per_event}")
     check(wasted_gpu_hours_per_day == 576, f"Expected 576 GPU-hours, got {wasted_gpu_hours_per_day}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    recovery_minutes_str = fmt(recovery_minutes, precision=0, commas=False)
-    cost_per_event_str = fmt(cost_per_event, precision=0)
-    wasted_hours_per_day_str = fmt(wasted_hours_per_day, precision=0, commas=False)
-    wasted_gpu_hours_per_day_str = fmt(wasted_gpu_hours_per_day, precision=0)
+    recovery_duration_min_attr_str = fmt_time(recovery_duration, minute, precision=0, commas=False, style="word", attributive=True)
+    gpu_hour_rate_str = fmt_usd(gpu_hour_rate, precision=0, commas=False, per="GPU-hour")
+    cost_per_event_str = fmt_usd(cost_per_event, precision=0)
+    wasted_duration_per_day_h_str = fmt_time(wasted_duration_per_day, hour, precision=0, commas=False, style="word")
+    wasted_gpu_hours_per_day_str = fmt_count(wasted_gpu_hours_per_day, label="GPU-hour", plural_label="GPU-hours")
 ```
 
-During this `{python} PreemptionTax.recovery_minutes_str`-minute recovery window, the GPUs are active but effectively unproductive. At \$2 per GPU-hour, a single preemption event costs \$`{python} PreemptionTax.cost_per_event_str` in wasted compute capital. If the scheduler allows unlimited preemption, 12 preemptions per day waste `{python} PreemptionTax.wasted_hours_per_day_str` hours/day of that job's allocation, or `{python} PreemptionTax.wasted_gpu_hours_per_day_str` GPU-hours/day for this 64-GPU run. To mitigate this, production systems enforce **preemption budgets**\index{Preemption Budgets}. These rate limits constrain disruption frequency, ensuring that a job cannot be preempted more than once per hour, or that total cluster preemption churn cannot exceed 5 percent of capacity in any 10-minute window. This forces the scheduler to wait for natural job completions rather than triggering a cascade, trading slightly higher pending times for significantly higher aggregate throughput.
+During this `{python} PreemptionTax.recovery_duration_min_attr_str` recovery window, the GPUs are active but effectively unproductive. At `{python} PreemptionTax.gpu_hour_rate_str`, a single preemption event costs `{python} PreemptionTax.cost_per_event_str` in wasted compute capital. If the scheduler allows unlimited preemption, 12 preemptions per day waste `{python} PreemptionTax.wasted_duration_per_day_h_str` per day of that job's allocation, or `{python} PreemptionTax.wasted_gpu_hours_per_day_str` per day for this 64-GPU run. To mitigate this, production systems enforce **preemption budgets**\index{Preemption Budgets}. These rate limits constrain disruption frequency, ensuring that a job cannot be preempted more than once per hour, or that total cluster preemption churn cannot exceed 5 percent of capacity in any 10-minute window. This forces the scheduler to wait for natural job completions rather than triggering a cascade, trading slightly higher pending times for significantly higher aggregate throughput.
 
 ### Quota governance and organizational dynamics {#sec-fleet-orchestration-quota-governance}
 
@@ -2137,14 +2152,14 @@ Financial accountability further aligns incentives. Organizations typically begi
 # │ Imports: mlsysim.fmt (fmt, check)
 # │ Exports: hoarding_cost_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, check, fmt_usd
 
 class QuotaHoardingCost:
     # ┌── 1. LOAD ──────────────────────────────────────────
     gpus = 500
     weeks = 3
     hours_per_week = 7 * HOURS_PER_DAY
-    gpu_hour_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate.m_as("dollar / hour")
+    gpu_hour_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
     # ┌── 2. EXECUTE ───────────────────────────────────────
     idle_hours = weeks * hours_per_week
     cost = gpus * idle_hours * gpu_hour_rate
@@ -2152,7 +2167,7 @@ class QuotaHoardingCost:
     check(idle_hours == 504, f"Expected 504 hours, got {idle_hours}")
     check(cost == 504000, f"Expected 504000, got {cost}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    hoarding_cost_str = fmt(cost, precision=0)
+    hoarding_cost_str = fmt_usd(cost, precision=0)
     hoarding_gpus_str = fmt(gpus, precision=0, commas=False)
 ```
 
@@ -2164,7 +2179,7 @@ A concrete quota scenario shows how quickly idle reservations become expensive.
 
 **Failure mode**: Upstream data delays postpone the training jobs, but the team retains the reservation to ensure availability "when the data arrives."
 
-**Consequence**: The GPUs sit idle for three weeks, a capital waste of roughly \$`{python} QuotaHoardingCost.hoarding_cost_str`, while other teams' queues grow.
+**Consequence**: The GPUs sit idle for three weeks, a capital waste of roughly `{python} QuotaHoardingCost.hoarding_cost_str`, while other teams' queues grow.
 
 **Systems insight**: The infrastructure team implemented a "use it or lose it" policy. Any reserved quota group operating below 20 percent utilization for 72 consecutive hours is now automatically reclaimed and converted to spot capacity for the general pool. Reclaiming the quota requires VP-level approval, effectively eliminating "parking" on idle hardware.
 
@@ -2285,9 +2300,9 @@ fig = plt.gcf()
 # │      convert recovered GPU-equivalent capacity into annual dollar value.
 # │
 # │ Imports: mlsysim.core.constants (Infrastructure.Pricing.Fleet.GpuHourRef.rate)
-# │ Exports: debug_cluster_str, debug_productive_gain_str, debug_recovered_str, debug_annual_str
+# │ Exports: debug_cluster_str, debug_productive_gain_str, debug_recovered_str, debug_annual_usd_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int,  fmt, check
+from mlsysim.fmt import fmt_int,  fmt, check, fmt_usd
 
 # ┌── LEGO ───────────────────────────────────────────────
 class DebugValueCalc:
@@ -2296,7 +2311,7 @@ class DebugValueCalc:
     debug_cluster      = Systems.Clusters.Training_1K.total_accelerators
     debug_util_before  = 0.60
     debug_util_after   = 0.84
-    _gpu_rate          = Infrastructure.Pricing.Fleet.GpuHourRef.rate.m_as("dollar / hour")
+    _gpu_rate          = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     debug_improvement  = debug_util_after - debug_util_before
@@ -2312,10 +2327,10 @@ class DebugValueCalc:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     debug_productive_gain_str = fmt_int(debug_productive_gain, commas=False)
     debug_recovered_str = fmt_int(debug_recovered, commas=False)
-    debug_annual_str    = fmt_int(round(debug_annual / MILLION), commas=False)
+    debug_annual_usd_str    = fmt_usd(debug_annual, scale="M", precision=0, commas=False)
     debug_cluster_comma_str = fmt(debug_cluster, precision=0, commas=True)
-    debug_util_before_pct_str = fmt(debug_util_before * 100, precision=0, commas=False, suffix=" percent")
-    debug_target_util_pct_str = fmt(80, precision=0, commas=False, suffix=" percent")
+    debug_util_before_pct_str = fmt_percent(debug_util_before, precision=0, commas=False, style='prose')
+    debug_target_util_pct_str = fmt_percent(80/100, precision=0, commas=False, style='prose')
 ```
 
 ::: {#exmp-fleet-orchestration-debugging-low-gpu-utilization .callout-example title="Debugging low GPU utilization"}
@@ -2330,18 +2345,19 @@ The Fleet Stack framework in @fig-fleet-stack provides a structured approach: an
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Debug inventory table — A100 NVLink bandwidth.
-# │ Exports: FleetDebugNvlinkRecap.nvlink_a100_str
+# │ Exports: FleetDebugNvlinkRecap.nvlink_a100_gb_s_str
+from mlsysim.fmt import fmt_qty
+
 class FleetDebugNvlinkRecap:
-    nvlink_a100_val = Hardware.Cloud.A100.nvlink.bandwidth.m_as(GB/second)
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    nvlink_a100_str = fmt(nvlink_a100_val, precision=0, suffix=' GB/s')
+    nvlink_a100_gb_s_str = fmt_qty(Hardware.Cloud.A100.nvlink.bandwidth, GB/second, precision=0)
 ```
 
-| **GPU Type**   | **Count** | **Memory**  | **Interconnect**                                          | **Nodes**                |
-|:---------------|----------:|:------------|:----------------------------------------------------------|:-------------------------|
-| **A100-80 GB** |       400 | 80 GB HBM2e | NVLink (`{python} FleetDebugNvlinkRecap.nvlink_a100_str`) | 50 nodes $\times$ 8 GPUs |
-| **A100-40 GB** |       400 | 40 GB HBM2e | NVLink (`{python} FleetDebugNvlinkRecap.nvlink_a100_str`) | 50 nodes $\times$ 8 GPUs |
-| **V100-32 GB** |       200 | 32 GB HBM2  | PCIe Gen3 (16 GB/s)                                       | 50 nodes $\times$ 4 GPUs |
+| **GPU Type**   | **Count** | **Memory**  | **Interconnect**                                               | **Nodes**                |
+|:---------------|----------:|:------------|:---------------------------------------------------------------|:-------------------------|
+| **A100-80 GB** |       400 | 80 GB HBM2e | NVLink (`{python} FleetDebugNvlinkRecap.nvlink_a100_gb_s_str`) | 50 nodes $\times$ 8 GPUs |
+| **A100-40 GB** |       400 | 40 GB HBM2e | NVLink (`{python} FleetDebugNvlinkRecap.nvlink_a100_gb_s_str`) | 50 nodes $\times$ 8 GPUs |
+| **V100-32 GB** |       200 | 32 GB HBM2  | PCIe Gen3 (16 GB/s)                                            | 50 nodes $\times$ 4 GPUs |
 
 : **Cluster Hardware Inventory**: Three procurement generations create distinct resource pools with different capabilities. A100 nodes support tensor parallelism via NVLink, while V100 nodes are limited to data parallelism. {#tbl-fleet-orchestration-debug-inventory}
 
@@ -2384,7 +2400,7 @@ The scheduler's allocation log shows A100-80 GB GPUs nearly saturated by a few r
 
 : **Utilization Recovery Results**: The distinction between "allocated" and "effective" utilization captures the policy-induced utilization gap: before the fix, A100-80 GB GPUs showed high allocation in Slurm but lower actual compute utilization, while strict job templates stranded other capable hardware pools. {#tbl-fleet-orchestration-debug-results}
 
-As @tbl-fleet-orchestration-debug-results shows, this utilization gain adds approximately `{python} DebugValueCalc.debug_productive_gain_str` fully utilized GPUs of productive work. That is equivalent to buying `{python} DebugValueCalc.debug_recovered_str` additional raw GPUs if those GPUs ran at the old `{python} DebugValueCalc.debug_util_before_pct_str` utilization. At \$2 per GPU-hour, the equivalent raw capacity represents approximately \$`{python} DebugValueCalc.debug_annual_str` million in annual recovered value, achieved through policy changes requiring zero additional hardware investment.
+As @tbl-fleet-orchestration-debug-results shows, this utilization gain adds approximately `{python} DebugValueCalc.debug_productive_gain_str` fully utilized GPUs of productive work. That is equivalent to buying `{python} DebugValueCalc.debug_recovered_str` additional raw GPUs if those GPUs ran at the old `{python} DebugValueCalc.debug_util_before_pct_str` utilization. At \$2 per GPU-hour, the equivalent raw capacity represents approximately `{python} DebugValueCalc.debug_annual_usd_str` in annual recovered value, achieved through policy changes requiring zero additional hardware investment.
 
 **The Fleet Stack lesson**: Surface-level diagnosis suggested a scheduling algorithm problem (Distribution Layer), perhaps requiring a more sophisticated scheduler like those discussed in @sec-fleet-orchestration-custom-schedulers. Management initially proposed evaluating Pollux or a custom scheduling solution, which would have required months of engineering effort and introduced operational risk. Deeper analysis revealed the root cause as a mismatch between Infrastructure Layer heterogeneity and Distribution Layer policies designed for homogeneous infrastructure. *The scheduler algorithm was not the problem; the policies it implemented were the problem.* The scheduler correctly implemented its configured policy; the policy itself created the utilization gap.
 

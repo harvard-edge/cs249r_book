@@ -41,6 +41,16 @@ class Cloud(Registry):
         rate=2.5 * USD / hour,
         metadata=_CLOUD,
     )
+    LowCostGpuPerHour = PricePoint(
+        name="Cloud GPU (low-cost reference)",
+        rate=0.50 * USD / hour,
+        metadata=_CLOUD,
+    )
+    A10GInferencePerHour = PricePoint(
+        name="A10G inference GPU",
+        rate=0.75 * USD / hour,
+        metadata=_CLOUD,
+    )
     TpuV4PerHour = PricePoint(
         name="Cloud TPU v4",
         rate=4.0 * USD / hour,
@@ -58,6 +68,16 @@ class Storage(Registry):
     GlacierPerTbMonth = PricePoint(
         name="Glacier",
         rate=1 * USD / TB / ureg.month,
+        metadata=_STORAGE,
+    )
+    S3StandardLowPerTbMonth = PricePoint(
+        name="S3 standard (low reference)",
+        rate=0.02 * USD / GB / ureg.month,
+        metadata=_STORAGE,
+    )
+    GlacierStandardPerTbMonth = PricePoint(
+        name="Glacier standard",
+        rate=0.004 * USD / GB / ureg.month,
         metadata=_STORAGE,
     )
     NvmeLowPerTbMonth = PricePoint(
@@ -103,6 +123,26 @@ class Fleet(Registry):
     )
 
 
+class Monitoring(Registry):
+    """Monitoring and observability price anchors."""
+
+    IngestionPerMillionDatapoints = PricePoint(
+        name="Monitoring ingestion per million datapoints",
+        rate=0.30 * USD,
+        metadata=_CLOUD,
+    )
+    StoragePerGbMonth = PricePoint(
+        name="Monitoring metric storage",
+        rate=1.00 * USD / GB / ureg.month,
+        metadata=_CLOUD,
+    )
+    QueryPerRequest = PricePoint(
+        name="Monitoring query request",
+        rate=0.02 * USD,
+        metadata=_CLOUD,
+    )
+
+
 class Capital(Registry):
     """CapEx / OpEx conventions."""
     AnnualMaintenanceRatio = PricePoint(
@@ -136,5 +176,6 @@ class Pricing(Registry):
     Storage = Storage
     Labeling = Labeling
     Fleet = Fleet
+    Monitoring = Monitoring
     Capital = Capital
     OnPremises = OnPremises

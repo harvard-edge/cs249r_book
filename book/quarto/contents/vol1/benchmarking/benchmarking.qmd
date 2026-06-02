@@ -63,14 +63,14 @@ ML benchmarking operates across three independent dimensions that map directly t
 from mlsysim import *
 from mlsysim.core.constants import *
 from mlsysim import Hardware
-from mlsysim.core.constants import TFLOPs, second
-from mlsysim.fmt import fmt
+from mlsysim.core.constants import TFLOP, second
+from mlsysim.fmt import fmt_flop_rate
 
 class A100PeakBenchmark:
-    _peak_tflops = Hardware.Cloud.A100.compute.peak_flops.m_as(TFLOPs / second)
+    _peak_flops = Hardware.Cloud.A100.compute.peak_flops
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    a100_tflops_fp16_str = fmt(_peak_tflops, precision=0, commas=False, suffix=" TFLOP/s")
+    a100_tflops_fp16_str = fmt_flop_rate(_peak_flops, unit=TFLOP / second, precision=0, commas=False)
 ```
 
 ::: {#dfn-benchmarking-machine-learning-benchmarking .callout-definition title="Machine learning benchmarking"}
@@ -108,24 +108,24 @@ To make this three-dimensional framework concrete, we ground it in a running exa
 # │          MobileNetLighthouseSetup.cpu_latency_ms_str
 from mlsysim import Models
 from mlsysim.core.constants import BYTES_FP32, BYTES_INT8, MB
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, fmt_memory, check
 
 class MobileNetLighthouseSetup:
     _mobilenet_v2 = Models.Vision.MobileNetV2
     _edgetpu_latency_ms = 2
     _cpu_latency_ms = 15
-    _mv2_size_mb = _mobilenet_v2.size_in_bytes(BYTES_FP32).m_as(MB)
-    _mv2_int8_mb = _mobilenet_v2.size_in_bytes(BYTES_INT8).m_as(MB)
-    _mv2_compress = _mv2_size_mb / _mv2_int8_mb
+    _mv2_size = _mobilenet_v2.size_in_bytes(BYTES_FP32)
+    _mv2_int8_size = _mobilenet_v2.size_in_bytes(BYTES_INT8)
+    _mv2_compress = (_mv2_size / _mv2_int8_size).to_base_units().magnitude
 
     check(_mv2_compress == 4.0, f"Expected 4x INT8 compression, got {_mv2_compress:.1f}x")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    mobilenet_v2_size_mb_str = fmt(_mv2_size_mb, precision=0, commas=False, suffix=" MB")
-    mobilenet_v2_int8_size_mb_str = fmt(_mv2_int8_mb, precision=1, commas=False, suffix=" MB")
+    mobilenet_v2_size_mb_str = fmt_memory(_mv2_size, unit=MB, precision=0, commas=False)
+    mobilenet_v2_int8_size_mb_str = fmt_memory(_mv2_int8_size, unit=MB, precision=1, commas=False)
     mobilenet_v2_compression_ratio_str = fmt(_mv2_compress, precision=0, commas=False)
-    edgetpu_latency_ms_str = fmt(_edgetpu_latency_ms, precision=0, commas=False, suffix=" ms")
-    cpu_latency_ms_str = fmt(_cpu_latency_ms, precision=0, commas=False, suffix=" ms")
+    edgetpu_latency_ms_str = fmt_time(_edgetpu_latency_ms, 'millisecond', precision=0, commas=False)
+    cpu_latency_ms_str = fmt_time(_cpu_latency_ms, 'millisecond', precision=0, commas=False)
 ```
 
 ::: {#lhs-benchmarking-mobilenet-deployment-validation .callout-lighthouse title="MobileNet deployment validation"}
@@ -168,7 +168,7 @@ Second, Goodhart's Law applies everywhere.[^fn-goodharts-law]\index{Goodhart's L
 # │          ComponentLatencyExample.e2e_latency_ms_str,
 # │          ComponentLatencyExample.component_speedup_str,
 # │          ComponentLatencyExample.e2e_speedup_str
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, fmt_qty, check
 
 class ComponentLatencyExample:
     """A component-only speedup diluted by non-model pipeline work."""
@@ -186,8 +186,8 @@ class ComponentLatencyExample:
     check(round(e2e_speedup, 1) == 1.2, f"Expected about 1.2x end-to-end speedup, got {e2e_speedup:.1f}x")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    model_latency_ms_str = fmt(model_latency_ms, precision=0, commas=False, suffix=" ms")
-    e2e_latency_ms_str = fmt(e2e_latency_ms, precision=0, commas=False, suffix=" ms")
+    model_latency_ms_str = fmt_time(model_latency_ms, 'millisecond', precision=0, commas=False)
+    e2e_latency_ms_str = fmt_time(e2e_latency_ms, 'millisecond', precision=0, commas=False)
     component_speedup_str = fmt(component_speedup, precision=0, commas=False)
     e2e_speedup_str = fmt(e2e_speedup, precision=1, commas=False)
 ```
@@ -271,12 +271,12 @@ Diverse workload patterns and system configurations continue to challenge power 
 # │ Exports: MobileNetEnergyFlops.mobilenet_flops_ratio_str
 from mlsysim import Models
 from mlsysim.core.constants import GFLOPs
-from mlsysim.fmt import fmt
+from mlsysim.fmt import fmt, fmt_qty
 
 class MobileNetEnergyFlops:
     _flops_ratio = (
-        Models.Vision.ResNet50.inference_flops.m_as(GFLOPs)
-        / Models.Vision.MobileNetV2.inference_flops.m_as(GFLOPs)
+        Models.Vision.ResNet50.inference_flops.to(GFLOPs).magnitude
+        / Models.Vision.MobileNetV2.inference_flops.to(GFLOPs).magnitude
     )
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
@@ -369,7 +369,7 @@ Beyond workload representativeness, the distinction between *statistical signifi
 # │          StatisticalConfidenceTrap.target_margin_pct_str,
 # │          StatisticalConfidenceTrap.z_95_str
 from math import sqrt, ceil
-from mlsysim.fmt import fmt_int,  fmt, check, MarkdownStr
+from mlsysim.fmt import fmt_int, fmt, fmt_count, check, MarkdownStr
 
 class StatisticalConfidenceTrap:
     """Binomial uncertainty for a 95% vs. 94% accuracy comparison on 1,000 images."""
@@ -398,17 +398,17 @@ class StatisticalConfidenceTrap:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     n_images_str = fmt(n_images, precision=0, commas=True)
-    baseline_accuracy_pct_str = fmt(baseline_accuracy * 100, precision=0, commas=False, suffix=" percent")
-    compressed_accuracy_pct_str = fmt(compressed_accuracy * 100, precision=0, commas=False, suffix=" percent")
-    baseline_errors_str = fmt(baseline_errors, precision=0, commas=False, suffix=" errors")
-    compressed_errors_str = fmt(compressed_errors, precision=0, commas=False, suffix=" errors")
-    sigma_errors_str = fmt_int(sigma_errors, commas=False, suffix=" errors")
+    baseline_accuracy_pct_str = fmt_percent(baseline_accuracy, precision=0, commas=False, style='prose')
+    compressed_accuracy_pct_str = fmt_percent(compressed_accuracy, precision=0, commas=False, style='prose')
+    baseline_errors_str = fmt_count(round(baseline_errors), commas=False, label="error")
+    compressed_errors_str = fmt_count(round(compressed_errors), commas=False, label="error")
+    sigma_errors_str = fmt_count(round(sigma_errors), commas=False, label="error")
     z_95_str = fmt(z_95, precision=2, commas=False)
     ci_range_str = MarkdownStr(f"[{round(ci_low):.0f}, {round(ci_high):.0f}]")
     one_prop_n_str = fmt(one_prop_n, precision=0, commas=True)
-    target_margin_pct_str = fmt(target_margin * 100, precision=0, commas=False, suffix=" percentage point")
+    target_margin_pct_str = fmt_pp(target_margin * 100, precision=0)
     ci_confidence_pct_value = 95
-    ci_confidence_pct_str = fmt(ci_confidence_pct_value, precision=0, commas=False, suffix=" percent")
+    ci_confidence_pct_str = fmt_percent(ci_confidence_pct_value/100, precision=0, commas=False, style='prose')
 ```
 
 ::: {.column-margin}
@@ -494,13 +494,13 @@ class GoodhartBLEUCalc:
     original_bleu_str = fmt(original_bleu, precision=0, commas=False)
     optimized_bleu_str = fmt(optimized_bleu, precision=1, commas=False)
     bleu_gain_str = fmt(bleu_gain, precision=1, commas=False)
-    original_latency_ms_str = fmt(original_latency_ms, precision=0, commas=False, suffix=" ms")
-    optimized_latency_ms_str = fmt(optimized_latency_ms, precision=0, commas=False, suffix=" ms")
+    original_latency_ms_str = fmt_time(original_latency_ms, 'millisecond', precision=0, commas=False)
+    optimized_latency_ms_str = fmt_time(optimized_latency_ms, 'millisecond', precision=0, commas=False)
     latency_slowdown_str = fmt(latency_slowdown, precision=0, commas=False)
     original_beam_size_str = fmt(original_beam_size, precision=0, commas=False)
     optimized_beam_size_str = fmt(optimized_beam_size, precision=0, commas=False)
     candidate_ratio_str = fmt(candidate_ratio, precision=0, commas=False)
-    latency_budget_ms_str = fmt(latency_budget_ms, precision=0, commas=False, suffix=" ms")
+    latency_budget_ms_str = fmt_time(latency_budget_ms, 'millisecond', precision=0, commas=False)
 ```
 
 ::: {#nbk-benchmarking-goodharts-law-action .callout-notebook title="Goodhart's Law in action"}
@@ -604,21 +604,22 @@ System benchmarks serve two functions. For practitioners, they enable informed h
 # │ Exports: a100_tflops_fp16_str, a100_tflops_fp32_str,
 # │          a100_bw_tbs_str, a100_ridge_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_bandwidth, fmt_flop_rate, fmt_int
 
 class A100Roofline:
     """A100 hardware constants for roofline analysis."""
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    _a100_fp16 = Hardware.Cloud.A100.compute.peak_flops.m_as(TFLOPs/second)
-    _a100_fp32 = Hardware.Cloud.A100.compute.precision_flops["fp32"].m_as(TFLOPs/second)
-    _a100_bw_tbs = Hardware.Cloud.A100.memory.bandwidth.m_as(TB/second)
+    _a100_fp16 = Hardware.Cloud.A100.compute.peak_flops
+    _a100_fp32 = Hardware.Cloud.A100.compute.precision_flops["fp32"]
+    _a100_bw = Hardware.Cloud.A100.memory.bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    _a100_ridge = Hardware.Cloud.A100.ridge_point().m_as('flop/byte')
+    _a100_ridge = Hardware.Cloud.A100.ridge_point().to(flop/byte).magnitude
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    a100_tflops_fp16_str = fmt(_a100_fp16, precision=0, commas=False, suffix=" TFLOP/s")
-    a100_tflops_fp32_str = fmt(_a100_fp32, precision=1, commas=False, suffix=" TFLOP/s")
-    a100_bw_tbs_str = fmt(_a100_bw_tbs, precision=2, commas=False, suffix=" TB/s")
+    a100_tflops_fp16_str = fmt_flop_rate(_a100_fp16, unit=TFLOP / second, precision=0, commas=False)
+    a100_tflops_fp32_str = fmt_flop_rate(_a100_fp32, unit=TFLOP / second, precision=1, commas=False)
+    a100_bw_tbs_str = fmt_bandwidth(_a100_bw, unit=TB / second, precision=2, commas=False)
     a100_ridge_str = fmt_int(round(_a100_ridge), commas=False)
 ```
 
@@ -652,11 +653,11 @@ Effective benchmark interpretation requires knowing the performance characterist
 # │ Imports: mlsysim.core.constants (Hardware.Cloud.A100.memory.bandwidth, Hardware.Cloud.A100.compute.peak_flops, TB, TFLOPs,
 # │          second), mlsysim.book (fmt)
 # │ Exports: resnet_ai_str, resnet_util_min_str, resnet_util_max_str,
-# │          resnet_perf_tflops_str, bert_ai_b1_str, bert_perf_b1_str,
+# │          resnet_perf_tflops_str, bert_ai_b1_str, bert_perf_b1_tflops_str,
 # │          bert_util_b1_str, utilization_peak_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
-from mlsysim.fmt import fmt_int,  fmt, check
+from mlsysim.fmt import fmt_int, fmt, check, fmt_bandwidth, fmt_flop_rate
 
 # ┌── LEGO ───────────────────────────────────────────────
 class RooflineExamples:
@@ -667,9 +668,9 @@ class RooflineExamples:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     # A100 Specs (re-derived locally for safety)
-    peak_flops = Hardware.Cloud.A100.compute.peak_flops.m_as(TFLOPs/second)
-    peak_bw = Hardware.Cloud.A100.memory.bandwidth.m_as(TB/second)
-    ridge_point = peak_flops / peak_bw # ~153
+    peak_flops = Hardware.Cloud.A100.compute.peak_flops
+    peak_bw = Hardware.Cloud.A100.memory.bandwidth
+    ridge_point = (peak_flops / peak_bw).to(flop / byte).magnitude # ~153
 
     # ResNet (Compute Bound)
     resnet_ai = 300.0
@@ -678,8 +679,8 @@ class RooflineExamples:
 
     # BERT (Memory Bound at Batch=1)
     bert_model = Models.Language.BERT_Base
-    bert_flops_b = bert_model.inference_flops.m_as(Bparam)
-    bert_weight_mb = bert_model.size_in_bytes(BYTES_FP32).m_as(MB)
+    bert_flops_b = bert_model.inference_flops.to(Bparam).magnitude
+    bert_weight = bert_model.size_in_bytes(BYTES_FP32)
     bert_util_peak = 0.85
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
@@ -687,9 +688,9 @@ class RooflineExamples:
     resnet_perf_tflops = peak_flops * (resnet_util_max / 100.0)
 
     # Step 2: BERT Performance
-    bert_ai_b1 = (bert_flops_b * BILLION) / (bert_weight_mb * MILLION)
-    bert_perf_b1 = bert_ai_b1 * peak_bw
-    bert_util_b1 = (bert_perf_b1 / peak_flops) * 100.0
+    bert_ai_b1 = (bert_model.inference_flops / bert_weight).to(flop / byte).magnitude
+    bert_perf_b1 = (bert_ai_b1 * flop / byte * peak_bw).to(TFLOP / second)
+    bert_util_b1 = (bert_perf_b1 / peak_flops).to_base_units().magnitude * 100.0
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(resnet_ai > ridge_point, f"ResNet AI ({resnet_ai}) must be > Ridge ({ridge_point:.0f}) to be compute-bound.")
@@ -697,27 +698,27 @@ class RooflineExamples:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     # A100 context
-    a100_tflops_fp16_str = fmt(peak_flops, precision=0, commas=False, suffix=" TFLOP/s")
-    a100_bw_tbs_str = fmt(peak_bw, precision=2, commas=False, suffix=" TB/s")
+    a100_tflops_fp16_str = fmt_flop_rate(peak_flops, unit=TFLOP / second, precision=0, commas=False)
+    a100_bw_tbs_str = fmt_bandwidth(peak_bw, unit=TB / second, precision=2, commas=False)
     a100_ridge_str = fmt_int(round(ridge_point), commas=False)
 
     # ResNet
     resnet_ai_str = fmt(resnet_ai, precision=0, commas=False)
-    resnet_util_min_str = fmt(resnet_util_min, precision=0, commas=False, suffix=" percent")
-    resnet_util_max_str = fmt(resnet_util_max, precision=0, commas=False, suffix=" percent")
-    resnet_perf_tflops_str = fmt(resnet_perf_tflops, precision=1, commas=False, suffix=" TFLOP/s")
+    resnet_util_min_str = fmt_percent(resnet_util_min/100, precision=0, commas=False, style='prose')
+    resnet_util_max_str = fmt_percent(resnet_util_max/100, precision=0, commas=False, style='prose')
+    resnet_perf_tflops_str = fmt_flop_rate(resnet_perf_tflops, unit=TFLOP / second, precision=1, commas=False)
 
     # BERT
     bert_ai_b1_str = fmt(bert_ai_b1, precision=0, commas=False)
-    bert_perf_b1_str = fmt(bert_perf_b1, precision=1, commas=False, suffix=" TFLOP/s")
-    bert_util_b1_str = fmt(bert_util_b1, precision=1, commas=False, suffix=" percent")
-    utilization_peak_pct_str = fmt(bert_util_peak * 100, precision=0, commas=False, suffix=" percent")
+    bert_perf_b1_tflops_str = fmt_flop_rate(bert_perf_b1, unit=TFLOP / second, precision=1, commas=False)
+    bert_util_b1_str = fmt_percent(bert_util_b1/100, precision=1, commas=False, style='prose')
+    utilization_peak_pct_str = fmt_percent(bert_util_peak, precision=0, commas=False, style='prose')
 ```
 
 [^fn-flops-throughput]: **FLOP/s (Floating-Point Operations Per Second)**: The gap between advertised peak FLOP/s and achieved FLOP/s is the central tension in hardware benchmarking. The A100 advertises `{python} RooflineExamples.a100_tflops_fp16_str` FP16 Tensor Core, but real workloads achieve 30--60 percent of peak depending on arithmetic intensity and memory access patterns. Reporting peak FLOP/s without utilization context is the most common benchmarking distortion. \index{FLOP/s!peak vs. achieved}
 
 \index{ResNet-50!roofline analysis}
-High-intensity operations like dense matrix multiplication in certain AI model operations (typically >150 FLOP/byte) achieve near-peak computational throughput on the A100. For example, a ResNet-50 forward pass on large batch sizes (256+) achieves arithmetic intensity of ~`{python} RooflineExamples.resnet_ai_str` FLOP/byte, enabling `{python} RooflineExamples.resnet_util_min_str`–`{python} RooflineExamples.resnet_util_max_str` of peak tensor performance (approximately `{python} RooflineExamples.resnet_perf_tflops_str` achieved vs. `{python} RooflineExamples.a100_tflops_fp16_str` theoretical) [@choquette2021]. Conversely, low-intensity operations like activation functions and certain lightweight operations (<10 FLOP/byte) become memory bandwidth limited, using only a fraction of the GPU's computational capacity. Considering only weight loading bytes, a BERT inference with batch size one achieves only ~`{python} RooflineExamples.bert_ai_b1_str` FLOP/byte arithmetic intensity, limiting performance to ~`{python} RooflineExamples.bert_perf_b1_str` (`{python} RooflineExamples.a100_bw_tbs_str` $\times$ `{python} RooflineExamples.bert_ai_b1_str` FLOP/byte), representing roughly `{python} RooflineExamples.bert_util_b1_str` of peak computational capability. Including additional data movement (KV cache and activations) would lower this further, illustrating how data movement assumptions significantly affect roofline predictions. @Sec-appdx-machine-foundations-concrete-example-a100-analysis-5b30 works the same calculation end to end on the A100, contrasting a compute-bound GEMM against a memory-bound element-wise operation, so the intensity-to-utilization steps applied here generalize to any model-hardware pair.
+High-intensity operations like dense matrix multiplication in certain AI model operations (typically >150 FLOP/byte) achieve near-peak computational throughput on the A100. For example, a ResNet-50 forward pass on large batch sizes (256+) achieves arithmetic intensity of ~`{python} RooflineExamples.resnet_ai_str` FLOP/byte, enabling `{python} RooflineExamples.resnet_util_min_str`–`{python} RooflineExamples.resnet_util_max_str` of peak tensor performance (approximately `{python} RooflineExamples.resnet_perf_tflops_str` achieved vs. `{python} RooflineExamples.a100_tflops_fp16_str` theoretical) [@choquette2021]. Conversely, low-intensity operations like activation functions and certain lightweight operations (<10 FLOP/byte) become memory bandwidth limited, using only a fraction of the GPU's computational capacity. Considering only weight loading bytes, a BERT inference with batch size one achieves only ~`{python} RooflineExamples.bert_ai_b1_str` FLOP/byte arithmetic intensity, limiting performance to ~`{python} RooflineExamples.bert_perf_b1_tflops_str` (`{python} RooflineExamples.a100_bw_tbs_str` $\times$ `{python} RooflineExamples.bert_ai_b1_str` FLOP/byte), representing roughly `{python} RooflineExamples.bert_util_b1_str` of peak computational capability. Including additional data movement (KV cache and activations) would lower this further, illustrating how data movement assumptions significantly affect roofline predictions. @Sec-appdx-machine-foundations-concrete-example-a100-analysis-5b30 works the same calculation end to end on the A100, contrasting a compute-bound GEMM against a memory-bound element-wise operation, so the intensity-to-utilization steps applied here generalize to any model-hardware pair.
 
 \index{BERT!roofline analysis at batch 1}
 \index{Roofline Model!batch size effect on utilization}
@@ -754,15 +755,15 @@ A worked BERT inference estimate shows how these roofline principles translate i
 # │          mlsysim.book (fmt)
 # │ Exports: BertRoofline.bert_params_m_str, BertRoofline.bert_flops_b_str,
 # │          BertRoofline.bert_weight_mb_str, BertRoofline.bert_ai_b1_str,
-# │          BertRoofline.bert_perf_b1_str, BertRoofline.bert_util_b1_str,
+# │          BertRoofline.bert_perf_b1_tflops_str, BertRoofline.bert_util_b1_str,
 # │          BertRoofline.bert_batch32_flops_str, BertRoofline.bert_ai_b32_str,
 # │          BertRoofline.bert_ai_eq_str, BertRoofline.bert_b32_flops_eq_str,
-# │          BertRoofline.bert_perf_b32_str, BertRoofline.batch32_str,
+# │          BertRoofline.bert_perf_b32_tflops_str, BertRoofline.batch32_str,
 # │          BertRoofline.utilization_peak_str,
 # │          BertRoofline.utilization_peak_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Hardware
-from mlsysim.fmt import fmt_int,  fmt, check, MarkdownStr
+from mlsysim.fmt import fmt_int, fmt, check, MarkdownStr, fmt_bandwidth, fmt_flop_rate, fmt_memory
 
 # ┌── LEGO ───────────────────────────────────────────────
 class BertRoofline:
@@ -785,42 +786,42 @@ class BertRoofline:
     p_b1 = Engine.solve(m_bert, h_a100, batch_size=batch_1, precision="fp32", efficiency=1.0)
     p_b32 = Engine.solve(m_bert, h_a100, batch_size=batch_32, precision="fp32", efficiency=0.85)
 
-    bert_params_m = m_bert.parameters.m_as(Mparam)
-    bert_flops_b = m_bert.inference_flops.m_as(Bparam)
-    bert_weight_mb = p_b1.memory_footprint.m_as(MB)
+    bert_params_m = m_bert.parameters.to(Mparam).magnitude
+    bert_flops_b = m_bert.inference_flops.to(Bparam).magnitude
+    bert_weight = p_b1.memory_footprint
 
-    ai_b1 = (m_bert.inference_flops / p_b1.memory_footprint).m_as("flop/byte")
+    ai_b1 = (m_bert.inference_flops / p_b1.memory_footprint).to(flop/byte).magnitude
     # Realized TFLOP/s = throughput * flops_per_inference
-    perf_b1 = (p_b1.throughput * m_bert.inference_flops).m_as(TFLOPs/second)
+    perf_b1 = (p_b1.throughput * m_bert.inference_flops).to(TFLOP / second)
     util_b1 = p_b1.mfu * 100.0
 
     flops_b32 = bert_flops_b * batch_32
-    ai_b32 = (m_bert.inference_flops * batch_32 / p_b1.memory_footprint).m_as("flop/byte")
+    ai_b32 = (m_bert.inference_flops * batch_32 / p_b1.memory_footprint).to(flop/byte).magnitude
 
     # Is it compute bound now?
     is_compute_bound_b32 = p_b32.bottleneck == "Compute"
-    perf_b32 = (p_b32.throughput * m_bert.inference_flops).m_as(TFLOPs/second)
+    perf_b32 = (p_b32.throughput * m_bert.inference_flops).to(TFLOP / second)
 
-    peak_flops = h_a100.compute.peak_flops.m_as(TFLOPs/second)
-    peak_bw = h_a100.memory.bandwidth.m_as(TB/second)
-    ridge_point = h_a100.ridge_point().m_as("flop/byte")
+    peak_flops = h_a100.compute.peak_flops
+    peak_bw = h_a100.memory.bandwidth
+    ridge_point = h_a100.ridge_point().to(flop/byte).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(ai_b32 > ai_b1, "Batching must increase Arithmetic Intensity.")
     check(140 <= ridge_point <= 160,
           f"A100 FP16 ridge should be ~153 FLOP/byte, got {ridge_point:.0f}.")
-    check(abs(ai_b1 - bert_flops_b * BILLION / (bert_weight_mb * MILLION)) < 1.0,
+    check(abs(ai_b1 - bert_flops_b * BILLION / (bert_weight.to(MB).magnitude * MILLION)) < 1.0,
           "Weights-only AI must match FLOPs ÷ weight bytes.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     bert_params_m_str = fmt(bert_params_m, precision=0, commas=False)
     bert_flops_b_str = fmt(bert_flops_b, precision=0, commas=False)
-    _bert_weight_mb_raw_str = fmt(bert_weight_mb, precision=0, commas=False)
-    bert_weight_mb_str = fmt(bert_weight_mb, precision=0, commas=False, suffix=" MB")
+    _bert_weight_mb_raw_str = fmt_memory(bert_weight, unit=MB, precision=0, commas=False)
+    bert_weight_mb_str = fmt_memory(bert_weight, unit=MB, precision=0, commas=False)
 
     bert_ai_b1_str = fmt_int(round(ai_b1), commas=False)
-    bert_perf_b1_str = fmt(perf_b1, precision=1, commas=False, suffix=" TFLOP/s")
-    bert_util_b1_str = fmt(util_b1, precision=1, commas=False, suffix=" percent")
+    bert_perf_b1_tflops_str = fmt_flop_rate(perf_b1, unit=TFLOP / second, precision=1, commas=False)
+    bert_util_b1_str = fmt_percent(util_b1/100, precision=1, commas=False, style='prose')
 
     bert_batch32_flops_str = fmt(flops_b32, precision=0, commas=False)
     bert_ai_b32_str = fmt_int(round(ai_b32), commas=False)
@@ -834,14 +835,14 @@ class BertRoofline:
         f"({bert_batch32_flops_str} $\\times$ $10^{{9}}$) ÷ ({_bert_weight_mb_raw_str} $\\times$ $10^{{6}}$)"
     )
 
-    bert_perf_b32_str = fmt(perf_b32, precision=1, commas=False, suffix=" TFLOP/s")
+    bert_perf_b32_tflops_str = fmt_flop_rate(perf_b32, unit=TFLOP / second, precision=1, commas=False)
     batch32_str = MarkdownStr(str(batch_32))
     util_peak = 0.85
-    utilization_peak_str = fmt(util_peak * 100, precision=0, commas=False, suffix=" percent")
-    utilization_peak_pct_str = fmt(util_peak * 100, precision=0, commas=False, suffix=" percent")
+    utilization_peak_str = fmt_percent(util_peak, precision=0, commas=False, style='prose')
+    utilization_peak_pct_str = fmt_percent(util_peak, precision=0, commas=False, style='prose')
 
-    a100_tflops_fp16_str = fmt(peak_flops, precision=0, commas=False, suffix=" TFLOP/s")
-    a100_bw_tbs_str = fmt(peak_bw, precision=2, commas=False, suffix=" TB/s")
+    a100_tflops_fp16_str = fmt_flop_rate(peak_flops, unit=TFLOP / second, precision=0, commas=False)
+    a100_bw_tbs_str = fmt_bandwidth(peak_bw, unit=TB / second, precision=2, commas=False)
     a100_ridge_str = fmt_int(round(ridge_point), commas=False)
 ```
 
@@ -867,9 +868,9 @@ Any workload with arithmetic intensity below `{python} BertRoofline.a100_ridge_s
 **Step 3**: Performance prediction.
 Since `{python} BertRoofline.bert_ai_b1_str` < `{python} BertRoofline.a100_ridge_str`, BERT at batch = 1 is memory-bound:
 
-Achievable perf = `{python} BertRoofline.bert_ai_b1_str` FLOP/byte $\times$ `{python} BertRoofline.a100_bw_tbs_str` = `{python} BertRoofline.bert_perf_b1_str`
+Achievable perf = `{python} BertRoofline.bert_ai_b1_str` FLOP/byte $\times$ `{python} BertRoofline.a100_bw_tbs_str` = `{python} BertRoofline.bert_perf_b1_tflops_str`
 
-GPU utilization = `{python} BertRoofline.bert_perf_b1_str` ÷ `{python} BertRoofline.a100_tflops_fp16_str` = `{python} BertRoofline.bert_util_b1_str`
+GPU utilization = `{python} BertRoofline.bert_perf_b1_tflops_str` ÷ `{python} BertRoofline.a100_tflops_fp16_str` = `{python} BertRoofline.bert_util_b1_str`
 
 **Step 4**: Optimization via batching.
 Increase batch size to `{python} BertRoofline.batch32_str`:
@@ -880,7 +881,7 @@ Increase batch size to `{python} BertRoofline.batch32_str`:
 
 Since `{python} BertRoofline.bert_ai_b32_str` > `{python} BertRoofline.a100_ridge_str`, batch = 32 is compute-bound:
 
-Achievable perf ≈ `{python} BertRoofline.utilization_peak_str` $\times$ `{python} BertRoofline.a100_tflops_fp16_str` = `{python} BertRoofline.bert_perf_b32_str`
+Achievable perf ≈ `{python} BertRoofline.utilization_peak_str` $\times$ `{python} BertRoofline.a100_tflops_fp16_str` = `{python} BertRoofline.bert_perf_b32_tflops_str`
 $$\text{GPU utilization} \approx 85\%$$
 
 **Systems insight**: Batch size transforms memory-bound inference (`{python} BertRoofline.bert_util_b1_str` utilization) into compute-bound inference (`{python} BertRoofline.utilization_peak_pct_str` utilization). Batching, however, increases latency because the system must wait to accumulate requests. This is the fundamental throughput-latency trade-off that MLPerf scenarios capture: SingleStream (batch = 1, latency-optimized) vs. Offline (maximum batch, throughput-optimized).
@@ -1128,26 +1129,26 @@ Measuring these operations correctly requires discipline. A small set of measure
 # │ Goal: H100 FP16/FP8 peak TFLOP/s for speed-of-light diagnostics.
 # │ Exports: H100SolCheck.h100_tflops_fp16_str, H100SolCheck.h100_tflops_fp8_str
 from mlsysim import Hardware
-from mlsysim.fmt import fmt
+from mlsysim.fmt import fmt, fmt_bandwidth, fmt_flop_rate
 
 class H100SolCheck:
     """H100 peak throughput for micro-benchmark SOL checks."""
-    _h100_fp16 = Hardware.Cloud.H100.compute.peak_flops.m_as(TFLOPs / second)
-    _h100_fp8 = Hardware.Cloud.H100.compute.precision_flops["fp8"].m_as(TFLOPs / second)
-    sol_example_tflops_value = 10
-    cache_bw_low_tbs_value = 5
-    cache_bw_high_tbs_value = 10
-    dram_bw_low_tbs_value = 1
-    dram_bw_high_tbs_value = 2
+    _h100_fp16 = Hardware.Cloud.H100.compute.peak_flops
+    _h100_fp8 = Hardware.Cloud.H100.compute.precision_flops["fp8"]
+    sol_example_tflops = 10 * (TFLOP / second)
+    cache_bw_low_tbs = 5 * (TB / second)  # scenario assumption: lower observed cache bandwidth
+    cache_bw_high_tbs = 10 * (TB / second)
+    dram_bw_low_tbs = 1 * (TB / second)   # scenario assumption: lower observed DRAM bandwidth
+    dram_bw_high_tbs = 2 * (TB / second)
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    h100_tflops_fp16_str = fmt(_h100_fp16, precision=0, commas=False, suffix=" TFLOP/s")
-    h100_tflops_fp8_str = fmt(_h100_fp8, precision=0, commas=True, suffix=" TFLOP/s")
-    sol_example_tflops_str = fmt(sol_example_tflops_value, precision=0, commas=False, suffix=" TFLOP/s")
-    cache_bw_low_tbs_str = fmt(cache_bw_low_tbs_value, precision=0, commas=False)
-    cache_bw_high_tbs_str = fmt(cache_bw_high_tbs_value, precision=0, commas=False, suffix=" TB/s")
-    dram_bw_low_tbs_str = fmt(dram_bw_low_tbs_value, precision=0, commas=False)
-    dram_bw_high_tbs_str = fmt(dram_bw_high_tbs_value, precision=0, commas=False, suffix=" TB/s")
+    h100_tflops_fp16_str = fmt_flop_rate(_h100_fp16, unit=TFLOP / second, precision=0, commas=False)
+    h100_tflops_fp8_str = fmt_flop_rate(_h100_fp8, unit=TFLOP / second, precision=0, commas=True)
+    sol_example_tflops_str = fmt_flop_rate(sol_example_tflops, unit=TFLOP / second, precision=0, commas=False)
+    cache_bw_low_tbs_str = fmt_bandwidth(cache_bw_low_tbs, unit=TB / second, precision=0, commas=False)
+    cache_bw_high_tbs_str = fmt_bandwidth(cache_bw_high_tbs, unit=TB / second, precision=0, commas=False)
+    dram_bw_low_tbs_str = fmt_bandwidth(dram_bw_low_tbs, unit=TB / second, precision=0, commas=False)
+    dram_bw_high_tbs_str = fmt_bandwidth(dram_bw_high_tbs, unit=TB / second, precision=0, commas=False)
 ```
 
 ::: {#psp-benchmarking-micro-benchmarking-rules .callout-perspective title="Micro-benchmarking rules"}
@@ -1528,7 +1529,7 @@ Dataset selection shapes everything downstream. In the audio anomaly detection e
 
 class BertModelSpecs:
     """BERT-Large parameter count for the model selection footnote."""
-    _bert_large_m = Models.Language.BERT_Large.parameters.m_as(Mparam)
+    _bert_large_m = Models.Language.BERT_Large.parameters.to(Mparam).magnitude
     bert_large_params_m_str = fmt(_bert_large_m, precision=0, commas=False)
 ```
 
@@ -1601,6 +1602,8 @@ Consequently, the selection of appropriate metrics requires careful consideratio
 ```{python}
 #| echo: false
 #| label: anomaly-detection-specs
+from mlsysim.core.constants import ms, uJ
+from mlsysim.fmt import fmt, fmt_energy, fmt_params, fmt_time
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ ANOMALY DETECTION MODEL SPECS
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -1620,17 +1623,17 @@ Consequently, the selection of appropriate metrics requires careful consideratio
 class AnomalySpecs:
     """Anomaly detection model constants for benchmark component examples."""
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    _anomaly_params = Models.Tiny.AnomalyDetector.parameters
     from mlsysim import ReferenceStats
-    _anomaly_k = Models.Tiny.AnomalyDetector.parameters.m_as(Kparam)
-    _anomaly_latency_ms = ReferenceStats.AnomalyModel.Latency.m_as(ureg.ms)
+    _anomaly_latency = ReferenceStats.AnomalyModel.Latency
     _anomaly_auc = ReferenceStats.AnomalyModel.Auc
-    _anomaly_energy_uj = ReferenceStats.AnomalyModel.Energy.m_as(ureg.microjoule)
+    _anomaly_energy = ReferenceStats.AnomalyModel.Energy
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    anomaly_params_k_str = fmt(_anomaly_k, precision=0, commas=False, suffix=" K")
-    anomaly_latency_ms_str = fmt(_anomaly_latency_ms, precision=1, commas=False, suffix=" ms")
+    anomaly_params_k_str = fmt_params(_anomaly_params, scale='K', precision=0, commas=False)
+    anomaly_latency_ms_str = fmt_time(_anomaly_latency, ms, precision=1, commas=False)
     anomaly_auc_str = fmt(_anomaly_auc, precision=2, commas=False)
-    anomaly_energy_uj_str = fmt(_anomaly_energy_uj, precision=0, commas=False, suffix=" µJ")
+    anomaly_energy_uj_str = fmt_energy(_anomaly_energy, unit=uJ, precision=0, commas=False)
 ```
 
 \index{AUC!anomaly detection performance}
@@ -1701,7 +1704,7 @@ Producing benchmark numbers is the easy part; interpreting them correctly is whe
 # │          MobileNetTradeoffCalc.fps_int8_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, check, fmt_memory, fmt_time
 
 class MobileNetTradeoffCalc:
     """MobileNetV2 FP32 vs INT8 edge-deployment trade-off."""
@@ -1710,13 +1713,13 @@ class MobileNetTradeoffCalc:
     latency_int8_ms = 35
     acc_fp32 = 71.8
     acc_int8 = 70.9
-    size_fp32_mb = Models.Vision.MobileNetV2.size_in_bytes(BYTES_FP32).m_as(MB)
-    size_int8_mb = Models.Vision.MobileNetV2.size_in_bytes(BYTES_INT8).m_as(MB)
+    size_fp32 = Models.Vision.MobileNetV2.size_in_bytes(BYTES_FP32)
+    size_int8 = Models.Vision.MobileNetV2.size_in_bytes(BYTES_INT8)
     milliseconds_per_second = 1000
 
     # EXECUTE
     latency_speedup = latency_fp32_ms / latency_int8_ms
-    size_reduction = size_fp32_mb / size_int8_mb
+    size_reduction = (size_fp32 / size_int8).to_base_units().magnitude
     acc_drop = acc_fp32 - acc_int8
     fps_fp32 = milliseconds_per_second / latency_fp32_ms
     fps_int8 = milliseconds_per_second / latency_int8_ms
@@ -1727,15 +1730,15 @@ class MobileNetTradeoffCalc:
     check(acc_drop < 1.0, f"Accuracy drop should stay below 1 point, got {acc_drop:.1f}")
 
     # OUTPUT
-    latency_fp32_ms_str = fmt(latency_fp32_ms, precision=0, commas=False)
-    latency_int8_ms_str = fmt(latency_int8_ms, precision=0, commas=False)
+    latency_fp32_ms_str = fmt_time(latency_fp32_ms, unit="millisecond", precision=0, commas=False)
+    latency_int8_ms_str = fmt_time(latency_int8_ms, unit="millisecond", precision=0, commas=False)
     acc_fp32_str = fmt(acc_fp32, precision=1, commas=False)
     acc_int8_str = fmt(acc_int8, precision=1, commas=False)
-    size_fp32_mb_str = fmt(size_fp32_mb, precision=0, commas=False)
-    size_int8_mb_str = fmt(size_int8_mb, precision=1, commas=False)
+    size_fp32_mb_str = fmt_memory(size_fp32, unit=MB, precision=0, commas=False)
+    size_int8_mb_str = fmt_memory(size_int8, unit=MB, precision=1, commas=False)
     latency_speedup_str = fmt(latency_speedup, precision=1, commas=False)
     size_reduction_str = fmt(size_reduction, precision=0, commas=False)
-    acc_drop_str = fmt(acc_drop, precision=1, commas=False, suffix=" percentage points")
+    acc_drop_str = fmt_pp(acc_drop, precision=1)
     fps_fp32_str = fmt(fps_fp32, precision=1, commas=False)
     fps_int8_str = fmt(fps_int8, precision=1, commas=False)
 ```
@@ -1746,7 +1749,7 @@ class MobileNetTradeoffCalc:
 
 The critical question is whether the accuracy cost of INT8 is acceptable for this deployment—@tbl-benchmarking-mobilenet-int8-tradeoff shows that quantization trades a modest accuracy drop for dramatic latency and size improvements:
 
-| **Precision** |                   **Latency (ms)**                   |              **Accuracy (Top-1)**             |                **Model Size (MB)**                |
+| **Precision** |                   **Latency (ms)**                   |              **Accuracy (Top-1)**             |                   **Model Size**                  |
 |:--------------|:----------------------------------------------------:|:---------------------------------------------:|:-------------------------------------------------:|
 | **FP32**      | `{python} MobileNetTradeoffCalc.latency_fp32_ms_str` | `{python} MobileNetTradeoffCalc.acc_fp32_str` | `{python} MobileNetTradeoffCalc.size_fp32_mb_str` |
 | **INT8**      | `{python} MobileNetTradeoffCalc.latency_int8_ms_str` | `{python} MobileNetTradeoffCalc.acc_int8_str` | `{python} MobileNetTradeoffCalc.size_int8_mb_str` |
@@ -1767,10 +1770,10 @@ Applying these questions to a representative vendor claim illustrates how incomp
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Interpreting a benchmark claim callout (H100 TDP).
 # │ Goal: H100 TDP for a complete vendor-specification example.
-# │ Exports: H100TdpClaim.h100_tdp_str
+# │ Exports: H100TdpClaim.h100_tdp_w_str
 from mlsysim import Hardware
 from mlsysim.core.constants import watt
-from mlsysim.fmt import fmt
+from mlsysim.fmt import fmt, fmt_count, fmt_qty
 
 class H100TdpClaim:
     vendor_claim_ips = 10_000
@@ -1778,10 +1781,10 @@ class H100TdpClaim:
     spec_top1_pct = 76
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    vendor_claim_ips_str = fmt(vendor_claim_ips, precision=0, commas=True, suffix=" inferences")
+    vendor_claim_ips_str = fmt_count(vendor_claim_ips, commas=True, label="inference")
     spec_batch_size_str = fmt(spec_batch_size, precision=0, commas=False)
-    spec_top1_pct_str = fmt(spec_top1_pct, precision=0, commas=False, suffix="%")
-    h100_tdp_str = fmt(Hardware.Cloud.H100.tdp.m_as(watt), precision=0, commas=False, suffix=" W")
+    spec_top1_pct_str = fmt_percent(spec_top1_pct/100, precision=0, commas=False, style='symbol')
+    h100_tdp_w_str = fmt_qty(Hardware.Cloud.H100.tdp, watt, precision=0, commas=False)
 ```
 
 Beyond vendor claims, context determines which metrics matter most. A 1 percent accuracy improvement may be decisive for medical diagnostics but irrelevant for an application that prioritizes inference speed. Practitioners should also guard against *benchmark overfitting*, where models are excessively optimized for specific benchmark tasks at the expense of real-world generalization, by evaluating performance on related but distinct tasks and considering practical deployment scenarios.
@@ -1797,7 +1800,7 @@ Beyond vendor claims, context determines which metrics matter most. A 1 percent 
 3. **What is included?** Pure inference, or including preprocessing?
 4. **What accuracy?** Matching the original 76.1 percent Top-1, or degraded?
 
-**A Complete Specification**: "`{python} H100TdpClaim.vendor_claim_ips_str`/second on ResNet-50 at batch size `{python} H100TdpClaim.spec_batch_size_str`, INT8 precision, `{python} H100TdpClaim.spec_top1_pct_str` Top-1 accuracy, including JPEG decoding, on NVIDIA H100 at `{python} H100TdpClaim.h100_tdp_str` TDP."
+**A Complete Specification**: "`{python} H100TdpClaim.vendor_claim_ips_str`/second on ResNet-50 at batch size `{python} H100TdpClaim.spec_batch_size_str`, INT8 precision, `{python} H100TdpClaim.spec_top1_pct_str` Top-1 accuracy, including JPEG decoding, on NVIDIA H100 at `{python} H100TdpClaim.h100_tdp_w_str` TDP."
 
 **Systems insight**: Understanding whether a performance difference is meaningful requires both statistical rigor and contextual validation. A benchmark number without these details is a marketing claim, not an engineering specification.
 
@@ -1814,6 +1817,7 @@ Which of these metrics matters most depends entirely on the deployment context. 
 ```{python}
 #| echo: false
 #| label: compression-model-specs
+from mlsysim.fmt import fmt_count
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ COMPRESSION BENCHMARK MODEL SPECS
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -1833,8 +1837,8 @@ Which of these metrics matters most depends entirely on the deployment context. 
 class CompressionModelSpecs:
     """MobileNetV2 vs ResNet-50 parameter counts for compression benchmarks."""
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    _mobilenet_m = Models.Vision.MobileNetV2.parameters.m_as(Mparam)
-    _resnet50_m = Models.Vision.ResNet50.parameters.m_as(Mparam)
+    _mobilenet_m = Models.Vision.MobileNetV2.parameters.to(Mparam).magnitude
+    _resnet50_m = Models.Vision.ResNet50.parameters.to(Mparam).magnitude
     _mobilenet_top1 = 72
     _resnet50_top1 = 76
 
@@ -1847,17 +1851,17 @@ class CompressionModelSpecs:
     check(_accuracy_per_param_ratio > 6, f"Expected >6x accuracy-per-parameter ratio, got {_accuracy_per_param_ratio:.1f}x")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    mobilenet_params_m_str = fmt(_mobilenet_m, precision=1, commas=False, suffix=" M")
-    resnet50_params_m_str = fmt(_resnet50_m, precision=1, commas=False, suffix=" M")
-    mobilenet_top1_str = fmt(_mobilenet_top1, precision=0, commas=False, suffix="%")
-    resnet50_top1_str = fmt(_resnet50_top1, precision=0, commas=False, suffix="%")
-    param_ratio_str = fmt(_param_ratio, precision=1, commas=False, suffix="x")
-    accuracy_per_param_ratio_str = fmt(_accuracy_per_param_ratio, precision=1, commas=False, suffix="x")
+    mobilenet_params_m_str = fmt_count(_mobilenet_m * MILLION, scale='M', precision=1, commas=False)
+    resnet50_params_m_str = fmt_count(_resnet50_m * MILLION, scale='M', precision=1, commas=False)
+    mobilenet_top1_str = fmt_percent(_mobilenet_top1/100, precision=0, commas=False, style='symbol')
+    resnet50_top1_str = fmt_percent(_resnet50_top1/100, precision=0, commas=False, style='symbol')
+    param_ratio_str = fmt_multiple(_param_ratio, precision=1, commas=False)
+    accuracy_per_param_ratio_str = fmt_multiple(_accuracy_per_param_ratio, precision=1, commas=False)
 ```
 
 Neural network compression (pruning, quantization, knowledge distillation, and architecture optimization) requires specialized benchmarks because compression reshapes the trade-off landscape: every byte saved or operation eliminated must be weighed against potential accuracy loss and hardware compatibility.
 
-The most basic compression metric is raw size reduction: parameter count, memory footprint in bytes, and compressed storage requirements. Size alone, however, is misleading. On ImageNet, MobileNetV2 achieves approximately `{python} CompressionModelSpecs.mobilenet_top1_str` top-1 accuracy with `{python} CompressionModelSpecs.mobilenet_params_m_str` parameters vs. ResNet-50's `{python} CompressionModelSpecs.resnet50_top1_str` accuracy with `{python} CompressionModelSpecs.resnet50_params_m_str` parameters, about `{python} CompressionModelSpecs.param_ratio_str` fewer parameters at comparable accuracy, or roughly `{python} CompressionModelSpecs.accuracy_per_param_ratio_str` more accuracy per parameter.
+The most basic compression metric is raw size reduction: parameter count, memory footprint in bytes, and compressed storage requirements. Size alone, however, is misleading. On ImageNet, MobileNetV2 achieves approximately `{python} CompressionModelSpecs.mobilenet_top1_str` top-1 accuracy with `{python} CompressionModelSpecs.mobilenet_params_m_str` parameters vs. ResNet-50's `{python} CompressionModelSpecs.resnet50_top1_str` accuracy with `{python} CompressionModelSpecs.resnet50_params_m_str` parameters, about `{python} CompressionModelSpecs.param_ratio_str`$\times$ fewer parameters at comparable accuracy, or roughly `{python} CompressionModelSpecs.accuracy_per_param_ratio_str`$\times$ more accuracy per parameter.
 
 Pruning benchmarks must distinguish between structured and unstructured approaches, because they produce qualitatively different results on real hardware. Structured pruning removes entire neurons or filters, achieving consistent speedups but typically lower compression ratios (2--4$\times$). Unstructured pruning eliminates individual weights for higher compression ratios (10--100$\times$), but realizing actual speedups requires specialized sparse computation support—meaning benchmark protocols must specify hardware platform and software implementation.
 
@@ -1968,41 +1972,42 @@ The differences cascade through every aspect of system design. Training involves
 # │          energy_fast_j_str, energy_fast_wh_str, energy_slow_wh_str,
 # │          energy_fast_calc_math (worked-example math via fmt_math())
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_math, check
+from mlsysim.fmt import fmt_math, check, fmt_energy, fmt_power, fmt_time
+from mlsysim.core.units import MWh
 
 class InferenceEnergy:
     """Per-query energy calculation for two inference latency scenarios."""
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    _power_w = Hardware.Cloud.V100.tdp.m_as(watt)  # Typical accelerator TDP (watts)
-    _latency_fast_ms = 10       # Fast inference (ms)
-    _latency_slow_ms = 100      # Slow inference (ms)
+    _power = Hardware.Cloud.V100.tdp  # Typical accelerator TDP
+    _latency_fast = 10 * ms       # Illustrative fast inference
+    _latency_slow = 100 * ms      # Illustrative slow inference
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    _latency_fast_s = (_latency_fast_ms * ms).m_as(second)   # seconds
-    _energy_fast_j = _power_w * _latency_fast_s              # joules
-    _energy_fast_wh = _energy_fast_j / (1 * hour).m_as(second)  # watt-hours
-    _energy_slow_j = _power_w * (_latency_slow_ms * ms).m_as(second)
-    _energy_slow_wh = _energy_slow_j / (1 * hour).m_as(second)
+    _energy_fast = (_power * _latency_fast).to(joule)
+    _energy_slow = (_power * _latency_slow).to(joule)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(_energy_fast_j == 3.0, f"Expected 3 J at 300 W for 10 ms, got {_energy_fast_j:.1f}")
-    check(_energy_slow_j == _energy_fast_j * 10, "100 ms scenario should use 10x the 10 ms energy.")
+    check(_energy_fast == 3 * joule, f"Expected 3 J at 300 W for 10 ms, got {_energy_fast.to(joule).magnitude:.1f}")
+    check(_energy_slow == _energy_fast * 10, "100 ms scenario should use 10x the 10 ms energy.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    accel_power_w_str = fmt(_power_w, precision=0, commas=False, suffix=" W")
-    latency_fast_ms_str = fmt(_latency_fast_ms, precision=0, commas=False, suffix=" ms")
-    latency_slow_ms_str = fmt(_latency_slow_ms, precision=0, commas=False, suffix=" ms")
-    _latency_fast_s_str = fmt(_latency_fast_s, precision=2, commas=False, suffix=" s")
-    energy_fast_j_str = fmt(_energy_fast_j, precision=0, commas=False, suffix=" J")
-    energy_fast_wh_str = fmt(_energy_fast_wh, precision=4, commas=False, suffix=" Wh")
-    energy_slow_wh_str = fmt(_energy_slow_wh, precision=4, commas=False, suffix=" Wh")
+    accel_power_w_str = fmt_power(_power, unit=watt, precision=0, commas=False)
+    latency_fast_ms_str = fmt_time(_latency_fast, ms, precision=0, commas=False)
+    latency_slow_ms_str = fmt_time(_latency_slow, ms, precision=0, commas=False)
+    _latency_fast_s_str = fmt_time(_latency_fast, second, precision=2, commas=False)
+    energy_fast_j_str = fmt_energy(_energy_fast, unit=joule, precision=0, commas=False)
+    energy_fast_wh_str = fmt_energy(_energy_fast, unit=Wh, precision=4, commas=False)
+    energy_slow_wh_str = fmt_energy(_energy_slow, unit=Wh, precision=4, commas=False)
 
     # Worked-example math: Power × t = E (fmt_math wraps for inline rendering)
     energy_fast_calc_math = fmt_math(
         rf"{accel_power_w_str} \times {_latency_fast_s_str} = {energy_fast_j_str}"
     )
-    gpt3_training_energy_mwh_str = fmt(
-        Models.Language.GPT3.training_energy_mwh, precision=0, commas=True, suffix=" MWh"
+    gpt3_training_energy_mwh_str = fmt_energy(
+        Models.Language.GPT3.training_energy_mwh,
+        unit=MWh,
+        precision=0,
+        commas=True,
     )
 ```
 
@@ -2040,7 +2045,7 @@ These benchmarks are vital because training represents the largest capital expen
 class GPT3TrainingSpecs:
     """GPT-3 parameter and token counts for training benchmark context."""
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    _params_b = Models.Language.GPT3.parameters.m_as(Bparam)
+    _params_b = Models.Language.GPT3.parameters.to(Bparam).magnitude
     _tokens_b = Models.Language.GPT3.training_tokens.to('count').magnitude / BILLION
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
@@ -2319,7 +2324,7 @@ A key metric for evaluating parallelism is *scaling efficiency*, which quantifie
 # │ How: Calculate the efficiency ratio between single-GPU and multi-GPU training times.
 # │
 # │ Imports: mlsysim.book (fmt)
-# │ Exports: ideal_str, eff_str, loss_str, eff_denom_str, t1_hours_str,
+# │ Exports: ideal_hours_str, eff_str, loss_str, eff_denom_str, t1_hours_str,
 # │          n_gpus_str, tn_hours_str, scaling_eq_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check, MarkdownStr
@@ -2339,14 +2344,14 @@ class ScalingEfficiencyCalc:
     check(efficiency_pct == 75.0, f"Expected 75% scaling efficiency, got {efficiency_pct:.1f}%")
     check(ideal_hours < tn_hours, "Actual multi-GPU time should be slower than perfect scaling.")
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    ideal_str = fmt(ideal_hours, precision=0, commas=False, suffix=" hours")
-    eff_str = fmt(efficiency_pct, precision=0, commas=False, suffix="%")
-    loss_str = fmt(loss_pct, precision=0, commas=False, suffix="%")
+    ideal_hours_str = fmt_time(ideal_hours, "hour", precision=0, commas=False, style="word")
+    eff_str = fmt_percent(efficiency_pct/100, precision=0, commas=False, style='symbol')
+    loss_str = fmt_percent(loss_pct/100, precision=0, commas=False, style='symbol')
     eff_denom_str = fmt(eff_denom, precision=0, commas=False)
-    t1_hours_str = fmt(t1_hours, precision=0, commas=False, suffix=" hours")
+    t1_hours_str = fmt_time(t1_hours, "hour", precision=0, commas=False, style="word")
     t1_raw_str = fmt(t1_hours, precision=0, commas=False)
-    n_gpus_str = fmt(n_gpus, precision=0, commas=False, suffix=" GPUs")
-    tn_hours_str = fmt(tn_hours, precision=0, commas=False, suffix=" hours")
+    n_gpus_str = fmt_count(n_gpus, commas=False, label="GPU")
+    tn_hours_str = fmt_time(tn_hours, "hour", precision=0, commas=False, style="word")
     scaling_eq_str = MarkdownStr(
         f"$\\text{{Eff}}_{{\\text{{scaling}}}}({n_gpus}) = "
         f"\\frac{{{t1_hours}\\,\\text{{hours}}}}{{{n_gpus} \\times {tn_hours}\\,\\text{{hours}}}} "
@@ -2369,7 +2374,7 @@ $$\text{Eff}_{\text{scaling}} = \frac{T(1)}{N_{\text{GPU}} \times T(N_{\text{GPU
 **Step 2**: Calculate efficiency.
 `{python} ScalingEfficiencyCalc.scaling_eq_str` = `{python} ScalingEfficiencyCalc.t1_raw_str`/`{python} ScalingEfficiencyCalc.eff_denom_str` = `{python} ScalingEfficiencyCalc.eff_str`
 
-With perfect scaling, `{python} ScalingEfficiencyCalc.n_gpus_str` would complete in `{python} ScalingEfficiencyCalc.ideal_str` (`{python} ScalingEfficiencyCalc.t1_hours_str`/`{python} ScalingEfficiencyCalc.n_gpus_str`). The actual `{python} ScalingEfficiencyCalc.tn_hours_str` represents `{python} ScalingEfficiencyCalc.eff_str` efficiency.
+With perfect scaling, `{python} ScalingEfficiencyCalc.n_gpus_str` would complete in `{python} ScalingEfficiencyCalc.ideal_hours_str` (`{python} ScalingEfficiencyCalc.t1_hours_str`/`{python} ScalingEfficiencyCalc.n_gpus_str`). The actual `{python} ScalingEfficiencyCalc.tn_hours_str` represents `{python} ScalingEfficiencyCalc.eff_str` efficiency.
 
 **Step 3**: Account for the efficiency loss. @Tbl-benchmarking-scaling-efficiency-loss decomposes the "missing" `{python} ScalingEfficiencyCalc.loss_str` into measurable overhead categories—gradient synchronization, memory copy, load imbalance, and batch-size effects—each measurable through a distinct profiling signal.
 
@@ -2430,7 +2435,8 @@ Training large-scale machine learning models requires substantial computational 
 # │          energy_reg_str, energy_l1_str, energy_l2_str,
 # │          gpt3_energy_mwh_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt
+from mlsysim.fmt import fmt, fmt_multiple, fmt_qty
+from mlsysim.core.units import MWh, pJ, byte
 
 class EnergyPerOp:
     """Energy per operation and memory access for precision comparison tables."""
@@ -2442,25 +2448,23 @@ class EnergyPerOp:
     ENERGY_SRAM_L1_PJ       = Hardware.Tech.Memory.L1.energy_per_access
     ENERGY_SRAM_L2_PJ       = Hardware.Tech.Memory.L2.energy_per_access
     ENERGY_DRAM_PJ_PER_BYTE = Hardware.Tech.Memory.DRAM.energy_per_byte
-    # FP constants use pJ/FLOP; INT8 uses pJ/op. Use .magnitude for bare numeric values.
-    _fp32_pj = ENERGY_FLOP_FP32_PJ.magnitude
-    _fp16_pj = ENERGY_FLOP_FP16_PJ.magnitude
-    _int8_pj = ENERGY_OP_INT8_PJ.m_as(ureg.picojoule/ureg.count)
-    _reg_pj = ENERGY_REG_PJ
-    _l1_pj = ENERGY_SRAM_L1_PJ
-    _l2_pj = ENERGY_SRAM_L2_PJ
-    _dram_pj = ENERGY_DRAM_PJ_PER_BYTE.m_as(ureg.picojoule/ureg.byte)
-    dram_vs_reg_ratio_value = round(_dram_pj / _reg_pj / 1000) * THOUSAND
+    dram_vs_reg_ratio_value = round(
+        ENERGY_DRAM_PJ_PER_BYTE.to(pJ / byte).magnitude
+        / ENERGY_REG_PJ.to(pJ).magnitude
+        / 1000
+    ) * THOUSAND
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    energy_fp32_str = fmt(_fp32_pj, precision=1, commas=False)
-    energy_fp16_str = fmt(_fp16_pj, precision=1, commas=False)
-    energy_int8_str = fmt(_int8_pj, precision=1, commas=False)
-    energy_reg_str = fmt(_reg_pj, precision=2, commas=False)
-    energy_l1_str = fmt(_l1_pj, precision=1, commas=False)
-    energy_l2_str = fmt(_l2_pj, precision=0, commas=False)
-    gpt3_energy_mwh_str = fmt(Models.Language.GPT3.training_energy_mwh, precision=0, commas=True, suffix=" MWh")
-    dram_vs_reg_ratio_str = fmt(dram_vs_reg_ratio_value, precision=0, commas=True, suffix="x")
+    energy_fp32_pj_str = fmt_qty(ENERGY_FLOP_FP32_PJ, pJ, precision=1, commas=False)
+    energy_fp16_pj_str = fmt_qty(ENERGY_FLOP_FP16_PJ, pJ, precision=1, commas=False)
+    energy_int8_pj_str = fmt_qty(ENERGY_OP_INT8_PJ, pJ, precision=1, commas=False)
+    energy_reg_pj_str = fmt_qty(ENERGY_REG_PJ, pJ, precision=2, commas=False)
+    energy_l1_pj_str = fmt_qty(ENERGY_SRAM_L1_PJ, pJ, precision=1, commas=False)
+    energy_l2_pj_str = fmt_qty(ENERGY_SRAM_L2_PJ, pJ, precision=0, commas=False)
+    gpt3_energy_mwh_str = fmt_qty(
+        Models.Language.GPT3.training_energy_mwh, MWh, precision=0, commas=True
+    )
+    dram_vs_reg_ratio_str = fmt_multiple(dram_vs_reg_ratio_value, precision=0, commas=True)
 ```
 
 ```{python}
@@ -2470,55 +2474,51 @@ class EnergyPerOp:
 # │ Context: INT8 energy callout tables — MobileNet load vs compute breakdown
 # │ Exports: EnergyBreakdownCalc.*
 from mlsysim import Models, Hardware
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, check, fmt_energy_per_byte, fmt_flops, fmt_memory, fmt_energy
 
 class EnergyBreakdownCalc:
     """FP32 vs INT8 MobileNet inference energy: memory load dominates; INT8 attacks both sources."""
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    m_params = Models.Vision.MobileNetV2.parameters.m_as(Mparam)
-    m_ops = Models.Vision.MobileNetV2.inference_flops.m_as(MFLOPs)
+    m_params = Models.Vision.MobileNetV2.parameters.to(Mparam).magnitude
+    m_ops = Models.Vision.MobileNetV2.inference_flops.to(MFLOPs).magnitude
     ENERGY_DRAM_PJ_PER_BYTE = Hardware.Tech.Memory.DRAM.energy_per_byte
     ENERGY_FLOP_FP32_PJ     = Hardware.Tech.Op.FlopFp32.energy
     ENERGY_OP_INT8_PJ       = Hardware.Tech.Op.OpInt8.energy
-    _dram_pj = ENERGY_DRAM_PJ_PER_BYTE.m_as(ureg.picojoule/byte)
-    _fp32_pj = ENERGY_FLOP_FP32_PJ.m_as(ureg.picojoule/ureg.flop)
-    _int8_pj = ENERGY_OP_INT8_PJ.m_as(ureg.picojoule/ureg.count)
-    _bytes_fp32 = BYTES_FP32.m_as(byte)
-    _bytes_int8 = BYTES_INT8.m_as(byte)
+    _dram_pj = ENERGY_DRAM_PJ_PER_BYTE.to(pJ / byte).magnitude
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    e_fp32_load = (m_params * MILLION * _bytes_fp32 * _dram_pj) / MILLION
-    e_fp32_compute = (m_ops * MILLION * _fp32_pj) / MILLION
-    e_int8_load = (m_params * MILLION * _bytes_int8 * _dram_pj) / MILLION
-    e_int8_compute = (m_ops * MILLION * _int8_pj) / MILLION
-    m_fp32_mb = Models.Vision.MobileNetV2.size_in_bytes(BYTES_FP32).m_as(MB)
-    m_int8_mb = Models.Vision.MobileNetV2.size_in_bytes(BYTES_INT8).m_as(MB)
+    m_fp32 = Models.Vision.MobileNetV2.size_in_bytes(BYTES_FP32)
+    m_int8 = Models.Vision.MobileNetV2.size_in_bytes(BYTES_INT8)
+    e_fp32_load = (m_fp32 * ENERGY_DRAM_PJ_PER_BYTE).to(uJ)
+    e_fp32_compute = (Models.Vision.MobileNetV2.inference_flops * ENERGY_FLOP_FP32_PJ).to(uJ)
+    e_int8_load = (m_int8 * ENERGY_DRAM_PJ_PER_BYTE).to(uJ)
+    e_int8_compute = (Models.Vision.MobileNetV2.inference_flops * (ENERGY_OP_INT8_PJ / flop)).to(uJ)
     e_fp32_total = e_fp32_load + e_fp32_compute
     e_int8_total = e_int8_load + e_int8_compute
-    s_load = e_fp32_load/e_int8_load
-    s_compute = e_fp32_compute/e_int8_compute
-    s_total = e_fp32_total/e_int8_total
-    e_fp32_load_mj = (e_fp32_load * ureg.microjoule).m_as(ureg.millijoule)
-    e_fp32_compute_mj = (e_fp32_compute * ureg.microjoule).m_as(ureg.millijoule)
+    s_load = (e_fp32_load/e_int8_load).to_base_units().magnitude
+    s_compute = (e_fp32_compute/e_int8_compute).to_base_units().magnitude
+    s_total = (e_fp32_total/e_int8_total).to_base_units().magnitude
+    e_fp32_load_mj = e_fp32_load.to(mJ)
+    e_fp32_compute_mj = e_fp32_compute.to(mJ)
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(round(m_fp32_mb) == 14, f"MobileNetV2 FP32 size should be about 14 MB, got {m_fp32_mb:.1f}")
+    check(round(m_fp32.to(MB).magnitude) == 14, f"MobileNetV2 FP32 size should be about 14 MB, got {m_fp32.to(MB).magnitude:.1f}")
     check(s_load == 4.0, f"Expected 4x load-energy reduction, got {s_load:.1f}x")
     check(s_compute > 15, f"Expected INT8 compute to be much cheaper, got {s_compute:.1f}x")
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    dram_energy_pj_str = fmt(_dram_pj, precision=0, commas=False)
-    m_ops_str = fmt(m_ops, precision=0, commas=False)
-    m_fp32_mb_str = fmt(m_fp32_mb, precision=0, commas=False, suffix=" MB")
-    m_int8_mb_str = fmt(m_int8_mb, precision=1, commas=False, suffix=" MB")
-    e_fp32_load_str = fmt(e_fp32_load, precision=0, commas=False)
-    e_fp32_compute_str = fmt(e_fp32_compute, precision=0, commas=True)
-    e_fp32_total_str = fmt(e_fp32_total, precision=0, commas=True)
-    e_int8_load_str = fmt(e_int8_load, precision=0, commas=False)
-    e_int8_compute_str = fmt(e_int8_compute, precision=0, commas=False)
-    e_int8_total_str = fmt(e_int8_total, precision=0, commas=True)
+    dram_energy_pj_per_byte_str = fmt_energy_per_byte(ENERGY_DRAM_PJ_PER_BYTE, precision=0, commas=False)
+    m_ops_mflop_str = fmt_flops(Models.Vision.MobileNetV2.inference_flops, unit=MFLOPs, precision=0, commas=False)
+    m_fp32_mb_str = fmt_memory(m_fp32, unit=MB, precision=0, commas=False)
+    m_int8_mb_str = fmt_memory(m_int8, unit=MB, precision=1, commas=False)
+    e_fp32_load_str = fmt_energy(e_fp32_load, unit=uJ, precision=0, commas=False)
+    e_fp32_compute_str = fmt_energy(e_fp32_compute, unit=uJ, precision=0, commas=True)
+    e_fp32_total_str = fmt_energy(e_fp32_total, unit=uJ, precision=0, commas=True)
+    e_int8_load_str = fmt_energy(e_int8_load, unit=uJ, precision=0, commas=False)
+    e_int8_compute_str = fmt_energy(e_int8_compute, unit=uJ, precision=0, commas=False)
+    e_int8_total_str = fmt_energy(e_int8_total, unit=uJ, precision=0, commas=True)
     s_load_str = fmt(s_load, precision=0, commas=False)
     s_compute_str = fmt(s_compute, precision=1, commas=False)
     s_total_str = fmt(s_total, precision=1, commas=False)
-    e_fp32_load_mj_str = fmt(e_fp32_load_mj, precision=1, commas=False)
-    e_fp32_compute_mj_str = fmt(e_fp32_compute_mj, precision=1, commas=False)
+    e_fp32_load_mj_str = fmt_energy(e_fp32_load_mj, unit=mJ, precision=1, commas=False)
+    e_fp32_compute_mj_str = fmt_energy(e_fp32_compute_mj, unit=mJ, precision=1, commas=False)
 ```
 
 ::: {#nbk-benchmarking-why-int8-saves-energy .callout-notebook title="Why INT8 saves energy"}
@@ -2534,9 +2534,9 @@ Because transistor count scales roughly with bit-width squared, narrower datatyp
 
 | **Precision** |           **Multiplier Energy**            | **Relative Cost** |
 |:--------------|:------------------------------------------:|:-----------------:|
-| **FP32**      | ~`{python} EnergyPerOp.energy_fp32_str` pJ |    1.0$\times$    |
-| **FP16**      | ~`{python} EnergyPerOp.energy_fp16_str` pJ |    0.3$\times$    |
-| **INT8**      | ~`{python} EnergyPerOp.energy_int8_str` pJ |    0.05$\times$   |
+| **FP32**      | ~`{python} EnergyPerOp.energy_fp32_pj_str` |    1.0$\times$    |
+| **FP16**      | ~`{python} EnergyPerOp.energy_fp16_pj_str` |    0.3$\times$    |
+| **INT8**      | ~`{python} EnergyPerOp.energy_int8_pj_str` |    0.05$\times$   |
 
 : **Per-Operation Energy by Precision**: Energy cost of a single multiply-accumulate at FP32, FP16, and INT8, with relative cost normalized to FP32, illustrating why narrower datatypes dominate compute-energy savings. {#tbl-benchmarking-energy-per-precision}
 
@@ -2547,27 +2547,27 @@ An 8-bit multiplier uses ~20$\times$ less energy than a 32-bit floating-point mu
 
 @Tbl-benchmarking-energy-memory-tier extends the picture to memory access, with energy cost per byte across each tier of the hierarchy:
 
-| **Memory Level** |                  **Energy per Byte**                  | **Relative Cost** |
-|:-----------------|:-----------------------------------------------------:|:-----------------:|
-| **Register**     |       ~`{python} EnergyPerOp.energy_reg_str` pJ       |     1$\times$     |
-| **L1 Cache**     |        ~`{python} EnergyPerOp.energy_l1_str` pJ       |     50$\times$    |
-| **L2 Cache**     |        ~`{python} EnergyPerOp.energy_l2_str` pJ       |    200$\times$    |
-| **DRAM**         | ~`{python} EnergyBreakdownCalc.dram_energy_pj_str` pJ |   16,000$\times$  |
+| **Memory Level** |                     **Energy per Byte**                     | **Relative Cost** |
+|:-----------------|:-----------------------------------------------------------:|:-----------------:|
+| **Register**     |          ~`{python} EnergyPerOp.energy_reg_pj_str`          |     1$\times$     |
+| **L1 Cache**     |           ~`{python} EnergyPerOp.energy_l1_pj_str`          |     50$\times$    |
+| **L2 Cache**     |           ~`{python} EnergyPerOp.energy_l2_pj_str`          |    200$\times$    |
+| **DRAM**         | ~`{python} EnergyBreakdownCalc.dram_energy_pj_per_byte_str` |   16,000$\times$  |
 
 : **Memory Access Energy by Tier**: Per-byte energy cost across the register-to-DRAM hierarchy, with relative cost normalized to a register read, exposing why off-chip memory traffic dominates inference energy budgets. {#tbl-benchmarking-energy-memory-tier}
 
 ```{=latex}
 \vspace*{-1.5ex}
 ```
-Memory access dominates: reading one byte from DRAM costs over `{python} EnergyPerOp.dram_vs_reg_ratio_str` more energy than a register access.
+Memory access dominates: reading one byte from DRAM costs over `{python} EnergyPerOp.dram_vs_reg_ratio_str`$\times$ more energy than a register access.
 
 @Tbl-benchmarking-mobilenet-int8-energy combines the two effects for a MobileNet inference, decomposing per-inference energy into model-load and compute terms at FP32 vs. INT8:
 
-| **Component**                                                 | **FP32 (`{python} EnergyBreakdownCalc.m_fp32_mb_str`)** | **INT8 (`{python} EnergyBreakdownCalc.m_int8_mb_str`)** |                      **Savings**                       |
-|:--------------------------------------------------------------|:-------------------------------------------------------:|:-------------------------------------------------------:|:------------------------------------------------------:|
-| **Model load from DRAM**                                      |    `{python} EnergyBreakdownCalc.e_fp32_load_str` μJ    |    `{python} EnergyBreakdownCalc.e_int8_load_str` μJ    |   `{python} EnergyBreakdownCalc.s_load_str`$\times$    |
-| **Compute (`{python} EnergyBreakdownCalc.m_ops_str` MFLOPs)** |   `{python} EnergyBreakdownCalc.e_fp32_compute_str` μJ  |   `{python} EnergyBreakdownCalc.e_int8_compute_str` μJ  |  `{python} EnergyBreakdownCalc.s_compute_str`$\times$  |
-| **Total**                                                     |  **`{python} EnergyBreakdownCalc.e_fp32_total_str` μJ** |  **`{python} EnergyBreakdownCalc.e_int8_total_str` μJ** | **`{python} EnergyBreakdownCalc.s_total_str`$\times$** |
+| **Component**                                                | **FP32 (`{python} EnergyBreakdownCalc.m_fp32_mb_str`)** | **INT8 (`{python} EnergyBreakdownCalc.m_int8_mb_str`)** |                      **Savings**                       |
+|:-------------------------------------------------------------|:-------------------------------------------------------:|:-------------------------------------------------------:|:------------------------------------------------------:|
+| **Model load from DRAM**                                     |    `{python} EnergyBreakdownCalc.e_fp32_load_str` μJ    |    `{python} EnergyBreakdownCalc.e_int8_load_str` μJ    |   `{python} EnergyBreakdownCalc.s_load_str`$\times$    |
+| **Compute (`{python} EnergyBreakdownCalc.m_ops_mflop_str`)** |    `{python} EnergyBreakdownCalc.e_fp32_compute_str`    |    `{python} EnergyBreakdownCalc.e_int8_compute_str`    |  `{python} EnergyBreakdownCalc.s_compute_str`$\times$  |
+| **Total**                                                    |   **`{python} EnergyBreakdownCalc.e_fp32_total_str`**   |   **`{python} EnergyBreakdownCalc.e_int8_total_str`**   | **`{python} EnergyBreakdownCalc.s_total_str`$\times$** |
 
 : **MobileNet INT8 Energy Breakdown**: Per-inference energy decomposed into model-load and compute terms for FP32 vs. INT8, showing that INT8 quantization attacks DRAM-traffic energy as the dominant component. {#tbl-benchmarking-mobilenet-int8-energy}
 
@@ -2575,7 +2575,7 @@ Memory access dominates: reading one byte from DRAM costs over `{python} EnergyP
 \endgroup
 ```
 
-**Systems insight**: Memory access dominates FP32 energy consumption (~`{python} EnergyBreakdownCalc.e_fp32_load_mj_str` mJ vs. `{python} EnergyBreakdownCalc.e_fp32_compute_mj_str` mJ compute). INT8 quantization provides `{python} EnergyBreakdownCalc.s_load_str`$\times$ memory energy reduction and ~`{python} EnergyBreakdownCalc.s_compute_str`$\times$ compute energy reduction. The combined effect explains why quantized models on edge devices achieve dramatic battery life improvements: they attack the dominant memory bottleneck while simultaneously accelerating compute.
+**Systems insight**: Memory access dominates FP32 energy consumption (~`{python} EnergyBreakdownCalc.e_fp32_load_mj_str` vs. `{python} EnergyBreakdownCalc.e_fp32_compute_mj_str` compute). INT8 quantization provides `{python} EnergyBreakdownCalc.s_load_str`$\times$ memory energy reduction and ~`{python} EnergyBreakdownCalc.s_compute_str`$\times$ compute energy reduction. The combined effect explains why quantized models on edge devices achieve dramatic battery life improvements: they attack the dominant memory bottleneck while simultaneously accelerating compute.
 
 :::
 
@@ -2648,8 +2648,8 @@ class ScalingEfficiencyRecap:
     check(efficiency_pct == 75.0, f"Expected 75% scaling efficiency, got {efficiency_pct:.1f}%")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    n_gpus_str = fmt(n_gpus, precision=0, commas=False, suffix=" GPUs")
-    eff_str = fmt(efficiency_pct, precision=0, commas=False, suffix="%")
+    n_gpus_str = fmt_count(n_gpus, commas=False, label="GPU")
+    eff_str = fmt_percent(efficiency_pct/100, precision=0, commas=False, style='symbol')
 ```
 
 As the preceding scaling efficiency calculation demonstrated (where `{python} ScalingEfficiencyRecap.n_gpus_str` achieved only `{python} ScalingEfficiencyRecap.eff_str` efficiency), extrapolating single-node results to clusters is a common error. Google's experience with 4,096-node TPU v4 clusters shows this effect at extreme scale, where synchronization challenges become the dominant performance factor. Proper benchmarking should measure scaling efficiency explicitly rather than assuming linear improvement.
@@ -2870,7 +2870,7 @@ These component-level contributions explain why optimizing any single stage yiel
 # │ Imports: mlsysim.book (fmt)
 # │ Exports: bench_preprocess_ms_str, bench_inference_ms_str,
 # │          bench_inf_speedup_str, bench_total_ms_str, bench_e2e_str,
-# │          bench_opt_total_str, bench_opt_inf_str, amdahl_ceiling_str,
+# │          bench_opt_total_ms_str, bench_opt_inf_ms_str, amdahl_ceiling_str,
 # │          preprocess_pct_str, preprocess_fraction_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check
@@ -2892,23 +2892,23 @@ class AmdahlBenchmarkCalc:
     check(bench_opt_inference_ms == 2.0, f"Expected optimized inference at 2 ms, got {bench_opt_inference_ms:.1f}")
     check(bench_e2e_improvement < bench_inf_speedup, "End-to-end speedup must be below component speedup.")
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    bench_preprocess_ms_str = fmt(bench_preprocess_ms, precision=0, commas=False, suffix=" ms")
-    bench_inference_ms_str = fmt(bench_inference_ms, precision=0, commas=False, suffix=" ms")
-    bench_inf_speedup_str = fmt(bench_inf_speedup, precision=0, commas=False, suffix="x")
-    bench_total_ms_str = fmt(bench_total_ms, precision=0, commas=False, suffix=" ms")
-    bench_e2e_str = fmt(bench_e2e_improvement, precision=1, commas=False, suffix="x")
-    bench_opt_total_str = fmt(bench_opt_total_ms, precision=0, commas=False, suffix=" ms")
-    bench_opt_inf_str = fmt(bench_opt_inference_ms, precision=0, commas=False, suffix=" ms")
-    amdahl_ceiling_str = fmt(amdahl_ceiling, precision=2, commas=False, suffix="x")
-    preprocess_pct_str = fmt(preprocess_fraction * 100, precision=1, commas=False, suffix="%")
+    bench_preprocess_ms_str = fmt_time(bench_preprocess_ms, 'millisecond', precision=0, commas=False)
+    bench_inference_ms_str = fmt_time(bench_inference_ms, 'millisecond', precision=0, commas=False)
+    bench_inf_speedup_str = fmt_multiple(bench_inf_speedup, precision=0, commas=False)
+    bench_total_ms_str = fmt_time(bench_total_ms, 'millisecond', precision=0, commas=False)
+    bench_e2e_str = fmt_multiple(bench_e2e_improvement, precision=1, commas=False)
+    bench_opt_total_ms_str = fmt_time(bench_opt_total_ms, 'millisecond', precision=0, commas=False)
+    bench_opt_inf_ms_str = fmt_time(bench_opt_inference_ms, 'millisecond', precision=0, commas=False)
+    amdahl_ceiling_str = fmt_multiple(amdahl_ceiling, precision=2, commas=False)
+    preprocess_pct_str = fmt_percent(preprocess_fraction, precision=1, commas=False, style='symbol')
     preprocess_fraction_str = fmt(preprocess_fraction, precision=2, commas=False)
 ```
 
 ::: {#nbk-benchmarking-amdahls-law-optimization-ceiling .callout-notebook title="Amdahl's Law: Optimization ceiling"}
 
-The latency breakdown reveals why aggressive model optimization often yields disappointing end-to-end results. Consider a vision pipeline where preprocessing (JPEG decode, resize, normalize) consumes `{python} AmdahlBenchmarkCalc.bench_preprocess_ms_str` and inference consumes `{python} AmdahlBenchmarkCalc.bench_inference_ms_str`. Optimizing inference by `{python} AmdahlBenchmarkCalc.bench_inf_speedup_str` (from `{python} AmdahlBenchmarkCalc.bench_inference_ms_str` to `{python} AmdahlBenchmarkCalc.bench_opt_inf_str`) reduces total latency from `{python} AmdahlBenchmarkCalc.bench_total_ms_str` to only `{python} AmdahlBenchmarkCalc.bench_opt_total_str`, a `{python} AmdahlBenchmarkCalc.bench_e2e_str` improvement rather than `{python} AmdahlBenchmarkCalc.bench_inf_speedup_str`.
+The latency breakdown reveals why aggressive model optimization often yields disappointing end-to-end results. Consider a vision pipeline where preprocessing (JPEG decode, resize, normalize) consumes `{python} AmdahlBenchmarkCalc.bench_preprocess_ms_str` and inference consumes `{python} AmdahlBenchmarkCalc.bench_inference_ms_str`. Optimizing inference by `{python} AmdahlBenchmarkCalc.bench_inf_speedup_str`$\times$ (from `{python} AmdahlBenchmarkCalc.bench_inference_ms_str` to `{python} AmdahlBenchmarkCalc.bench_opt_inf_ms_str`) reduces total latency from `{python} AmdahlBenchmarkCalc.bench_total_ms_str` to only `{python} AmdahlBenchmarkCalc.bench_opt_total_ms_str`, a `{python} AmdahlBenchmarkCalc.bench_e2e_str`$\times$ improvement rather than `{python} AmdahlBenchmarkCalc.bench_inf_speedup_str`$\times$.
 
-Amdahl's Law formalizes this ceiling: if preprocessing consumes fraction $f$ of total latency, then even infinitely fast inference yields at most $1/f$ speedup. With preprocessing at `{python} AmdahlBenchmarkCalc.preprocess_pct_str` of latency ($f \approx$ `{python} AmdahlBenchmarkCalc.preprocess_fraction_str`), the maximum achievable speedup is $1/f \approx$ `{python} AmdahlBenchmarkCalc.amdahl_ceiling_str` regardless of model optimization.
+Amdahl's Law formalizes this ceiling: if preprocessing consumes fraction $f$ of total latency, then even infinitely fast inference yields at most $1/f$ speedup. With preprocessing at `{python} AmdahlBenchmarkCalc.preprocess_pct_str` of latency ($f \approx$ `{python} AmdahlBenchmarkCalc.preprocess_fraction_str`), the maximum achievable speedup is $1/f \approx$ `{python} AmdahlBenchmarkCalc.amdahl_ceiling_str`$\times$ regardless of model optimization.
 
 This principle has direct implications for benchmarking interpretation. A 3$\times$ inference speedup reported in isolation might translate to only 1.5$\times$ end-to-end improvement in production. Comprehensive benchmarks must either include preprocessing in measurements or state explicitly that reported speedups apply only to the inference component.
 
@@ -3055,29 +3055,29 @@ In serverless environments, where models are loaded on demand, cold-start latenc
 # │          ColdStartTransferCalc.transfer_ms_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
-from mlsysim.fmt import fmt, check
+from mlsysim.core.constants import BYTES_FP16, GB, ms, second
+from mlsysim.fmt import check, fmt_bandwidth, fmt_memory, fmt_params, fmt_time
 
 class ColdStartTransferCalc:
     """FP16 weight transfer lower bound for a 7-billion-parameter model on PCIe 4.0."""
     # LOAD
-    params_b = Models.Language.Llama2_7B.parameters.m_as(Bparam)
-    bytes_per_param = 2
-    pcie_effective_gbs = 25
+    model = Models.Language.Llama2_7B
+    params = model.parameters
+    model_size = model.size_in_bytes(BYTES_FP16)
+    pcie_effective_bw = 25 * (GB / second)  # Illustrative PCIe 4.0 effective bandwidth
 
     # EXECUTE
-    model_size_gb = params_b * bytes_per_param
-    transfer_s = model_size_gb / pcie_effective_gbs
-    transfer_ms = transfer_s * THOUSAND
+    transfer = (model_size / pcie_effective_bw).to(ms)
 
     # GUARD
-    check(round(model_size_gb) == 14, f"Expected ~14 GB FP16 weights, got {model_size_gb:.1f}")
-    check(round(transfer_ms) == 560, f"Expected ~560 ms transfer, got {transfer_ms:.0f}")
+    check(round(model_size.to(GB).magnitude) == 14, f"Expected ~14 GB FP16 weights, got {model_size.to(GB).magnitude:.1f}")
+    check(round(transfer.to(ms).magnitude) == 560, f"Expected ~560 ms transfer, got {transfer.to(ms).magnitude:.0f}")
 
     # OUTPUT
-    params_b_str = fmt(params_b, precision=0, commas=False, suffix=" B")
-    model_size_gb_str = fmt(model_size_gb, precision=0, commas=False, suffix=" GB")
-    pcie_effective_gbs_str = fmt(pcie_effective_gbs, precision=0, commas=False, suffix=" GB/s")
-    transfer_ms_str = fmt(transfer_ms, precision=0, commas=False, suffix=" ms")
+    params_b_str = fmt_params(params, scale='B', precision=0, commas=False)
+    model_size_gb_str = fmt_memory(model_size, unit=GB, precision=0, commas=False)
+    pcie_effective_gbs_str = fmt_bandwidth(pcie_effective_bw, unit=GB / second, precision=0, commas=False)
+    transfer_ms_str = fmt_time(transfer, ms, precision=0, commas=False)
 ```
 
 [^fn-cold-start]: **Cold-Start Latency**: The initialization time from idle state, dominated by model weight loading from storage to accelerator memory. For a `{python} ColdStartTransferCalc.params_b_str`-parameter model in FP16 (~`{python} ColdStartTransferCalc.model_size_gb_str`), cold start on PCIe 4.0 (`{python} ColdStartTransferCalc.pcie_effective_gbs_str` effective) takes ~`{python} ColdStartTransferCalc.transfer_ms_str` for weight transfer alone, plus framework initialization overhead. This physical lower bound means that cold-start mitigation (model caching, speculative loading) is a systems design requirement, not just an operational convenience. \index{Cold Start Latency!physical lower bound}
@@ -3101,14 +3101,14 @@ Benchmarking inference systems often involves balancing competing metrics. For e
 # │ Imports: mlsysim.core.constants (Hardware.Cloud.H100.compute.precision_flops["int8"], TOPS)
 # │ Exports: TopsFootnoteAnchor.h100_tops_int8_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, fmt_qty, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class TopsFootnoteAnchor:
     """Local H100 INT8 TOPS anchor for the metric-comparability footnote."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    h100_tops_int8 = Hardware.Cloud.H100.compute.precision_flops["int8"].m_as(TOPS)
+    h100_tops_int8 = Hardware.Cloud.H100.compute.precision_flops["int8"].to(TOPS).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Direct hardware-constant lookup.
@@ -3234,60 +3234,61 @@ The scenarios explain why the same hardware can report dramatically different be
 # │          inference_speedup_str, e2e_speedup_str, edgetpu_power_ratio_str,
 # │          cpu_energy_mj_str, edgetpu_energy_mj_str, energy_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.core.constants import mJ, milliwatt, ms
+from mlsysim.fmt import check, fmt_energy, fmt_multiple, fmt_power, fmt_time
 
 class EdgeTPUSpeedupCalc:
     """EdgeTPU vs Cortex-M7: 7.5× inference speedup, higher peak power, lower energy per inference."""
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    edgetpu_latency_ms = 2
-    cpu_latency_ms = 15
-    edgetpu_e2e_ms = 6
-    cpu_e2e_ms = 18
-    edgetpu_power_mw = 500
-    cpu_power_mw = 120
+    edgetpu_latency = 2 * ms  # Illustrative EdgeTPU inference latency
+    cpu_latency = 15 * ms  # Illustrative Cortex-M7 inference latency
+    edgetpu_e2e = 6 * ms  # Illustrative EdgeTPU end-to-end latency
+    cpu_e2e = 18 * ms  # Illustrative Cortex-M7 end-to-end latency
+    edgetpu_power = 500 * milliwatt  # Illustrative EdgeTPU active power
+    cpu_power = 120 * milliwatt  # Illustrative Cortex-M7 active power
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    inference_speedup = cpu_latency_ms/edgetpu_latency_ms
-    e2e_speedup = cpu_e2e_ms/edgetpu_e2e_ms
-    power_ratio = edgetpu_power_mw/cpu_power_mw
-    cpu_energy_mj = cpu_power_mw * cpu_latency_ms / THOUSAND
-    edgetpu_energy_mj = edgetpu_power_mw * edgetpu_latency_ms / THOUSAND
-    energy_ratio = cpu_energy_mj/edgetpu_energy_mj
+    inference_speedup = (cpu_latency/edgetpu_latency).to_base_units().magnitude
+    e2e_speedup = (cpu_e2e/edgetpu_e2e).to_base_units().magnitude
+    power_ratio = (edgetpu_power/cpu_power).to_base_units().magnitude
+    cpu_energy = (cpu_power * cpu_latency).to(mJ)
+    edgetpu_energy = (edgetpu_power * edgetpu_latency).to(mJ)
+    energy_ratio = (cpu_energy/edgetpu_energy).to_base_units().magnitude
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(e2e_speedup < inference_speedup, "Preprocessing overhead should narrow the end-to-end speedup.")
     check(energy_ratio > 1, "EdgeTPU should use less active inference energy despite higher power.")
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    edgetpu_latency_ms_str = fmt(edgetpu_latency_ms, precision=0, commas=False, suffix=" ms")
-    cpu_latency_ms_str = fmt(cpu_latency_ms, precision=0, commas=False, suffix=" ms")
-    edgetpu_e2e_ms_str = fmt(edgetpu_e2e_ms, precision=0, commas=False, suffix=" ms")
-    cpu_e2e_ms_str = fmt(cpu_e2e_ms, precision=0, commas=False, suffix=" ms")
-    edgetpu_power_mw_str = fmt(edgetpu_power_mw, precision=0, commas=False, suffix=" mW")
-    cpu_power_mw_str = fmt(cpu_power_mw, precision=0, commas=False, suffix=" mW")
-    inference_speedup_str = fmt(inference_speedup, precision=1, commas=False, suffix="x")
-    e2e_speedup_str = fmt(e2e_speedup, precision=0, commas=False, suffix="x")
-    edgetpu_power_ratio_str = fmt(power_ratio, precision=1, commas=False, suffix="x")
-    cpu_energy_mj_str = fmt(cpu_energy_mj, precision=1, commas=False, suffix=" mJ")
-    edgetpu_energy_mj_str = fmt(edgetpu_energy_mj, precision=0, commas=False, suffix=" mJ")
-    energy_ratio_str = fmt(energy_ratio, precision=1, commas=False, suffix="x")
+    edgetpu_latency_ms_str = fmt_time(edgetpu_latency, ms, precision=0, commas=False)
+    cpu_latency_ms_str = fmt_time(cpu_latency, ms, precision=0, commas=False)
+    edgetpu_e2e_ms_str = fmt_time(edgetpu_e2e, ms, precision=0, commas=False)
+    cpu_e2e_ms_str = fmt_time(cpu_e2e, ms, precision=0, commas=False)
+    edgetpu_power_mw_str = fmt_power(edgetpu_power, unit=milliwatt, precision=0, commas=False)
+    cpu_power_mw_str = fmt_power(cpu_power, unit=milliwatt, precision=0, commas=False)
+    inference_speedup_str = fmt_multiple(inference_speedup, precision=1, commas=False)
+    e2e_speedup_str = fmt_multiple(e2e_speedup, precision=0, commas=False)
+    edgetpu_power_ratio_str = fmt_multiple(power_ratio, precision=1, commas=False)
+    cpu_energy_mj_str = fmt_energy(cpu_energy, unit=mJ, precision=1, commas=False)
+    edgetpu_energy_mj_str = fmt_energy(edgetpu_energy, unit=mJ, precision=0, commas=False)
+    energy_ratio_str = fmt_multiple(energy_ratio, precision=1, commas=False)
 ```
 
 ::: {#lhs-benchmarking-mobilenet-edgetpu .callout-lighthouse title="MobileNet on EdgeTPU"}
 
 Completing our MobileNet lighthouse example, we validate the hardware acceleration claims from @sec-hardware-acceleration using MLPerf Tiny scenarios.
 
-**Hardware acceleration claim**: EdgeTPU achieves ~`{python} EdgeTPUSpeedupCalc.edgetpu_latency_ms_str` inference for INT8 MobileNetV2, approximately `{python} EdgeTPUSpeedupCalc.inference_speedup_str` speedup over ARM Cortex-M7 CPU (~`{python} EdgeTPUSpeedupCalc.cpu_latency_ms_str`). These figures are illustrative of typical EdgeTPU and Cortex-M7 behavior; actual results depend on clock frequency, thermal state, and implementation.
+**Hardware acceleration claim**: EdgeTPU achieves ~`{python} EdgeTPUSpeedupCalc.edgetpu_latency_ms_str` inference for INT8 MobileNetV2, approximately `{python} EdgeTPUSpeedupCalc.inference_speedup_str`$\times$ speedup over ARM Cortex-M7 CPU (~`{python} EdgeTPUSpeedupCalc.cpu_latency_ms_str`). These figures are illustrative of typical EdgeTPU and Cortex-M7 behavior; actual results depend on clock frequency, thermal state, and implementation.
 
 @Tbl-benchmarking-edgetpu-validation reports the validation protocol under the SingleStream scenario:
 
-| **Metric**               |                **CPU (Cortex-M7)**                |                      **EdgeTPU**                      |                        **Claimed**                         |                         **Validated?**                         |
-|:-------------------------|:-------------------------------------------------:|:-----------------------------------------------------:|:----------------------------------------------------------:|:--------------------------------------------------------------:|
-| **Inference latency**    | ~`{python} EdgeTPUSpeedupCalc.cpu_latency_ms_str` | ~`{python} EdgeTPUSpeedupCalc.edgetpu_latency_ms_str` | `{python} EdgeTPUSpeedupCalc.inference_speedup_str` faster |                               ✓                                |
-| **End-to-end latency**   |   ~`{python} EdgeTPUSpeedupCalc.cpu_e2e_ms_str`   |   ~`{python} EdgeTPUSpeedupCalc.edgetpu_e2e_ms_str`   |                             —                              |     ~`{python} EdgeTPUSpeedupCalc.e2e_speedup_str` faster      |
-| **Power consumption**    |  ~`{python} EdgeTPUSpeedupCalc.cpu_power_mw_str`  |  ~`{python} EdgeTPUSpeedupCalc.edgetpu_power_mw_str`  |                             —                              | ~`{python} EdgeTPUSpeedupCalc.edgetpu_power_ratio_str` higher  |
-| **Energy per inference** |  ~`{python} EdgeTPUSpeedupCalc.cpu_energy_mj_str` |  ~`{python} EdgeTPUSpeedupCalc.edgetpu_energy_mj_str` |                             —                              | ~`{python} EdgeTPUSpeedupCalc.energy_ratio_str` more efficient |
+| **Metric**               |                **CPU (Cortex-M7)**                |                      **EdgeTPU**                      |                            **Claimed**                             |                             **Validated?**                             |
+|:-------------------------|:-------------------------------------------------:|:-----------------------------------------------------:|:------------------------------------------------------------------:|:----------------------------------------------------------------------:|
+| **Inference latency**    | ~`{python} EdgeTPUSpeedupCalc.cpu_latency_ms_str` | ~`{python} EdgeTPUSpeedupCalc.edgetpu_latency_ms_str` | `{python} EdgeTPUSpeedupCalc.inference_speedup_str`$\times$ faster |                                   ✓                                    |
+| **End-to-end latency**   |   ~`{python} EdgeTPUSpeedupCalc.cpu_e2e_ms_str`   |   ~`{python} EdgeTPUSpeedupCalc.edgetpu_e2e_ms_str`   |                                 —                                  |     ~`{python} EdgeTPUSpeedupCalc.e2e_speedup_str`$\times$ faster      |
+| **Power consumption**    |  ~`{python} EdgeTPUSpeedupCalc.cpu_power_mw_str`  |  ~`{python} EdgeTPUSpeedupCalc.edgetpu_power_mw_str`  |                                 —                                  | ~`{python} EdgeTPUSpeedupCalc.edgetpu_power_ratio_str`$\times$ higher  |
+| **Energy per inference** |  ~`{python} EdgeTPUSpeedupCalc.cpu_energy_mj_str` |  ~`{python} EdgeTPUSpeedupCalc.edgetpu_energy_mj_str` |                                 —                                  | ~`{python} EdgeTPUSpeedupCalc.energy_ratio_str`$\times$ more efficient |
 
 : **EdgeTPU vs. Cortex-M7 MobileNet Validation**: SingleStream-scenario measurements comparing inference latency, end-to-end latency, power, and energy per inference for INT8 MobileNetV2, showing how preprocessing overhead narrows the headline accelerator speedup. {#tbl-benchmarking-edgetpu-validation tbl-colwidths="[24,20,18,18,20]"}
 
-**What this reveals**: The `{python} EdgeTPUSpeedupCalc.inference_speedup_str` inference speedup is real, but end-to-end improvement is only ~`{python} EdgeTPUSpeedupCalc.e2e_speedup_str` because preprocessing (image capture, resize, normalize) runs on the CPU in both cases. EdgeTPU consumes more power but completes faster, yielding better energy efficiency per inference.
+**What this reveals**: The `{python} EdgeTPUSpeedupCalc.inference_speedup_str`$\times$ inference speedup is real, but end-to-end improvement is only ~`{python} EdgeTPUSpeedupCalc.e2e_speedup_str`$\times$ because preprocessing (image capture, resize, normalize) runs on the CPU in both cases. EdgeTPU consumes more power but completes faster, yielding better energy efficiency per inference.
 
 **The deployment decision**: For battery-powered devices running infrequently (doorbell camera: ~100 inferences/day), the active inference calculation alone favors EdgeTPU, but total battery impact depends on sleep power, wake-up energy, host-transfer overhead, and whether the accelerator adds idle leakage while the system waits. For continuous operation (real-time video analytics: 30 FPS), EdgeTPU's lower active energy per inference is much more likely to dominate.
 
@@ -3322,7 +3323,8 @@ Training benchmarks measure learning speed; inference benchmarks measure serving
 # │          PowerClaimGapCalc.sustained_w_str,
 # │          PowerClaimGapCalc.efficiency_gap_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, fmt_ops_rate, fmt_power, check
+from mlsysim.core.units import TOPS, watt
 
 class PowerClaimGapCalc:
     """TOPS/W gap between a peak datasheet claim and sustained inference."""
@@ -3342,17 +3344,17 @@ class PowerClaimGapCalc:
     check(sustained_tops_per_w < datasheet_tops_per_w, "Sustained efficiency should trail the datasheet claim.")
 
     # OUTPUT
-    datasheet_tops_str = fmt(datasheet_tops, precision=0, commas=False)
-    datasheet_w_str = fmt(datasheet_w, precision=1, commas=False)
-    sustained_tops_str = fmt(sustained_tops, precision=0, commas=False)
-    sustained_w_str = fmt(sustained_w, precision=0, commas=False)
+    datasheet_tops_str = fmt_ops_rate(datasheet_tops * TOPS, unit=TOPS, precision=0, commas=False)
+    datasheet_w_str = fmt_power(datasheet_w * watt, unit=watt, precision=1, commas=False)
+    sustained_tops_str = fmt_ops_rate(sustained_tops * TOPS, unit=TOPS, precision=0, commas=False)
+    sustained_w_str = fmt_power(sustained_w * watt, unit=watt, precision=0, commas=False)
     efficiency_gap_str = fmt(efficiency_gap, precision=1, commas=False)
 ```
 
-A chip vendor advertises "`{python} PowerClaimGapCalc.datasheet_tops_str` TOPS at `{python} PowerClaimGapCalc.datasheet_w_str` W," but under sustained inference load, thermal throttling drops actual throughput to `{python} PowerClaimGapCalc.sustained_tops_str` TOPS at `{python} PowerClaimGapCalc.sustained_w_str` W. Without standardized power measurement, this `{python} PowerClaimGapCalc.efficiency_gap_str`$\times$ efficiency gap between the datasheet and reality goes undetected until deployment.
+A chip vendor advertises "`{python} PowerClaimGapCalc.datasheet_tops_str` at `{python} PowerClaimGapCalc.datasheet_w_str`," but under sustained inference load, thermal throttling drops actual throughput to `{python} PowerClaimGapCalc.sustained_tops_str` at `{python} PowerClaimGapCalc.sustained_w_str`. Without standardized power measurement, this `{python} PowerClaimGapCalc.efficiency_gap_str`$\times$ efficiency gap between the datasheet and reality goes undetected until deployment.
 
 \index{TOPS/W!primary design objective}
-This third dimension is critical because @sec-hardware-acceleration established TOPS/W as a primary design objective alongside raw TOPS. Power benchmarks validate whether efficiency-optimized accelerators deliver their promised energy savings. Power claims are particularly susceptible to gaming: a chip advertising "`{python} PowerClaimGapCalc.datasheet_tops_str` TOPS at `{python} PowerClaimGapCalc.datasheet_w_str` W" might achieve that ratio only at minimal utilization; under sustained load, thermal throttling and voltage scaling may deliver `{python} PowerClaimGapCalc.sustained_tops_str` TOPS at `{python} PowerClaimGapCalc.sustained_w_str` W. Power benchmarks expose these gaps.
+This third dimension is critical because @sec-hardware-acceleration established TOPS/W as a primary design objective alongside raw TOPS. Power benchmarks validate whether efficiency-optimized accelerators deliver their promised energy savings. Power claims are particularly susceptible to gaming: a chip advertising "`{python} PowerClaimGapCalc.datasheet_tops_str` at `{python} PowerClaimGapCalc.datasheet_w_str`" might achieve that ratio only at minimal utilization; under sustained load, thermal throttling and voltage scaling may deliver `{python} PowerClaimGapCalc.sustained_tops_str` at `{python} PowerClaimGapCalc.sustained_w_str`. Power benchmarks expose these gaps.
 
 However, measuring power consumption in machine learning systems presents challenges distinct from measuring time or throughput. Power varies with temperature, workload phase, and system configuration in ways that performance metrics do not. @Tbl-power quantifies how energy demands of ML models vary dramatically across deployment environments, spanning multiple orders of magnitude from TinyML devices consuming mere microwatts to data center racks requiring kilowatts. This wide spectrum illustrates the central challenge in creating standardized benchmarking methodologies [@henderson2020towards].
 
@@ -4489,7 +4491,7 @@ Acceptable degradation depends on deployment context. A 2 percent accuracy drop 
 # │ How: Compare accuracy, ECE, and model size for FP32 vs. INT8 MobileNetV2.
 # │
 # │ Imports: mlsysim (Models), mlsysim.core.constants (Mparam),
-# │          mlsysim.fmt (fmt, check)
+# │          mlsysim.fmt (fmt, check, fmt_count, fmt_pp)
 # │ Exports: mv2_acc_fp32_str, mv2_params_m_str, mv2_size_fp32_mb_str,
 # │          mv2_size_int8_mb_str, mv2_acc_int8_str, mv2_acc_drop_str,
 # │          mv2_top5_fp32_str, mv2_top5_int8_str, mv2_ece_fp32_str,
@@ -4498,16 +4500,16 @@ Acceptable degradation depends on deployment context. A 2 percent accuracy drop 
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
 from mlsysim.core.constants import Mparam, BYTES_FP32, BYTES_INT8, MB
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, fmt_illuminance, check, fmt_memory, fmt_params, fmt_pp
 
 class MobileNetINT8Calc:
     """MobileNetV2 FP32 vs INT8: aggregate accuracy holds but calibration and edge cases degrade."""
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     _mobilenet_v2 = Models.Vision.MobileNetV2
     acc_fp32 = 71.8
-    params_m = _mobilenet_v2.parameters.m_as(Mparam)
-    size_fp32_mb = _mobilenet_v2.size_in_bytes(BYTES_FP32).m_as(MB)
-    size_int8_mb = _mobilenet_v2.size_in_bytes(BYTES_INT8).m_as(MB)
+    params = _mobilenet_v2.parameters
+    size_fp32 = _mobilenet_v2.size_in_bytes(BYTES_FP32)
+    size_int8 = _mobilenet_v2.size_in_bytes(BYTES_INT8)
     acc_int8 = 70.9
     top5_fp32 = 91.0
     top5_int8 = 90.4
@@ -4524,31 +4526,31 @@ class MobileNetINT8Calc:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     acc_drop = acc_fp32 - acc_int8
     edge_drop = edge_fp32 - edge_int8
-    size_reduction = size_fp32_mb / size_int8_mb
+    size_reduction = (size_fp32 / size_int8).to_base_units().magnitude
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(size_reduction == 4.0, f"Expected 4x size reduction, got {size_reduction:.1f}x")
     check(acc_drop < 1.0, f"Expected <1 point top-1 drop, got {acc_drop:.1f}")
     check(edge_drop > acc_drop, "Edge-case drop should exceed aggregate top-1 drop.")
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    mv2_acc_fp32_str = fmt(acc_fp32, precision=1, commas=False, suffix="%")
-    mv2_params_m_str = fmt(params_m, precision=1, commas=False, suffix=" M")
-    mv2_size_fp32_mb_str = fmt(size_fp32_mb, precision=0, commas=False, suffix=" MB")
-    mv2_size_int8_mb_str = fmt(size_int8_mb, precision=1, commas=False, suffix=" MB")
-    mv2_acc_int8_str = fmt(acc_int8, precision=1, commas=False, suffix="%")
-    mv2_acc_drop_str = fmt(acc_drop, precision=1, commas=False, suffix=" percentage point")                # 0.9
-    mv2_top5_fp32_str = fmt(top5_fp32, precision=0, commas=False, suffix="%")
-    mv2_top5_int8_str = fmt(top5_int8, precision=1, commas=False, suffix="%")
+    mv2_acc_fp32_str = fmt_percent(acc_fp32/100, precision=1, commas=False, style='symbol')
+    mv2_params_m_str = fmt_params(params, scale='M', precision=1, commas=False)
+    mv2_size_fp32_mb_str = fmt_memory(size_fp32, unit=MB, precision=0, commas=False)
+    mv2_size_int8_mb_str = fmt_memory(size_int8, unit=MB, precision=1, commas=False)
+    mv2_acc_int8_str = fmt_percent(acc_int8/100, precision=1, commas=False, style='symbol')
+    mv2_acc_drop_str = fmt_pp(acc_drop, precision=1, commas=False, attributive=True)  # 0.9
+    mv2_top5_fp32_str = fmt_percent(top5_fp32/100, precision=0, commas=False, style='symbol')
+    mv2_top5_int8_str = fmt_percent(top5_int8/100, precision=1, commas=False, style='symbol')
     mv2_ece_fp32_str = fmt(ece_fp32, precision=3, commas=False)
     mv2_ece_int8_str = fmt(ece_int8, precision=3, commas=False)
-    mv2_edge_fp32_str = fmt(edge_fp32, precision=1, commas=False, suffix="%")
-    mv2_edge_int8_str = fmt(edge_int8, precision=1, commas=False, suffix="%")
-    mv2_edge_drop_str = fmt(edge_drop, precision=1, commas=False, suffix=" percentage point")
-    ece_example_confidence_pct_str = fmt(ece_example_confidence_pct, precision=0, commas=False, suffix="%")
-    edge_occlusion_pct_str = fmt(edge_occlusion_pct, precision=0, commas=False, suffix="%")
-    edge_lux_str = fmt(edge_lux, precision=0, commas=False, suffix=" lux")
+    mv2_edge_fp32_str = fmt_percent(edge_fp32/100, precision=1, commas=False, style='symbol')
+    mv2_edge_int8_str = fmt_percent(edge_int8/100, precision=1, commas=False, style='symbol')
+    mv2_edge_drop_str = fmt_pp(edge_drop, precision=1, commas=False)
+    ece_example_confidence_pct_str = fmt_percent(ece_example_confidence_pct/100, precision=0, commas=False, style='symbol')
+    edge_occlusion_pct_str = fmt_percent(edge_occlusion_pct/100, precision=0, commas=False, style='symbol')
+    edge_lux_str = fmt_illuminance(edge_lux * ureg.lux, precision=0, commas=False)
     edge_rotation_deg_str = fmt(edge_rotation_deg, precision=0, commas=False)
-    real_world_edge_pct_str = fmt(real_world_edge_pct, precision=0, commas=False, suffix="%")
-    confidence_threshold_pct_str = fmt(confidence_threshold_pct, precision=0, commas=False, suffix="%")
+    real_world_edge_pct_str = fmt_percent(real_world_edge_pct/100, precision=0, commas=False, style='symbol')
+    confidence_threshold_pct_str = fmt_percent(confidence_threshold_pct/100, precision=0, commas=False, style='symbol')
 ```
 
 ::: {#lhs-benchmarking-mobilenet-int8-compression .callout-lighthouse title="MobileNet INT8 compression"}
@@ -4577,10 +4579,10 @@ The INT8 model's ECE of `{python} MobileNetINT8Calc.mv2_ece_int8_str` indicates 
 
 | **Metric**             |                    **FP32**                    |                    **INT8**                    | **Acceptable?**                                                                            |
 |:-----------------------|:----------------------------------------------:|:----------------------------------------------:|:-------------------------------------------------------------------------------------------|
-| **Top-1 accuracy**     | `{python} MobileNetINT8Calc.mv2_acc_fp32_str`  | `{python} MobileNetINT8Calc.mv2_acc_int8_str`  | ✓ (`{python} MobileNetINT8Calc.mv2_acc_drop_str` drop; below 1 percentage point threshold) |
+| **Top-1 accuracy**     | `{python} MobileNetINT8Calc.mv2_acc_fp32_str`  | `{python} MobileNetINT8Calc.mv2_acc_int8_str`  | ✓ (`{python} MobileNetINT8Calc.mv2_acc_drop_str` drop; below 1 percentage-point threshold) |
 | **Top-5 accuracy**     | `{python} MobileNetINT8Calc.mv2_top5_fp32_str` | `{python} MobileNetINT8Calc.mv2_top5_int8_str` | ✓                                                                                          |
 | **Calibration ECE**    | `{python} MobileNetINT8Calc.mv2_ece_fp32_str`  | `{python} MobileNetINT8Calc.mv2_ece_int8_str`  | ⚠ (degraded)                                                                               |
-| **Edge-case accuracy** | `{python} MobileNetINT8Calc.mv2_edge_fp32_str` | `{python} MobileNetINT8Calc.mv2_edge_int8_str` | ⚠ (`{python} MobileNetINT8Calc.mv2_edge_drop_str` drop)                                    |
+| **Edge-case accuracy** | `{python} MobileNetINT8Calc.mv2_edge_fp32_str` | `{python} MobileNetINT8Calc.mv2_edge_int8_str` | ⚠ (drop of `{python} MobileNetINT8Calc.mv2_edge_drop_str`)                                 |
 
 : **MobileNetV2 INT8 Postcompression Metrics**: FP32 vs. INT8 comparison across top-1 and top-5 accuracy, calibration error, and edge-case accuracy, revealing how aggregate accuracy can mask calibration and tail-case degradation. {#tbl-benchmarking-mobilenet-int8-validation tbl-colwidths="[25,25,25,25]"}
 
@@ -4628,10 +4630,10 @@ Generation-specific metrics capture properties absent from discriminative benchm
 # │ How: Calculate response duration for a 750-token payload across token rates.
 # │
 # │ Imports: mlsysim.book (fmt)
-# │ Exports: slow_str, fast_str, response_tokens_str, slow_toks_str,
+# │ Exports: slow_s_str, fast_s_str, response_tokens_str, slow_toks_str,
 # │          fast_toks_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, check, fmt_rate
 
 class LLMThroughputCalc:
     """25 vs 100 tok/s on a 750-token response: 30 s vs 7.5 s—a 4× user-perceived difference."""
@@ -4643,14 +4645,14 @@ class LLMThroughputCalc:
     slow_sec = response_tokens/slow_toks
     fast_sec = response_tokens/fast_toks
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    slow_str = fmt(slow_sec, precision=0, commas=False, suffix=" seconds")
-    fast_str = fmt(fast_sec, precision=1, commas=False, suffix=" seconds")
-    response_tokens_str = fmt(response_tokens, precision=0, commas=False, suffix=" tokens")
+    slow_s_str = fmt_time(slow_sec, "second", precision=0, commas=False, style="word")
+    fast_s_str = fmt_time(fast_sec, "second", precision=1, commas=False, style="word")
+    response_tokens_str = fmt_count(response_tokens, commas=False, label="token")
     slow_toks_str = fmt(slow_toks, precision=0, commas=False)
-    fast_toks_str = fmt(fast_toks, precision=0, commas=False, suffix=" tokens/s")
+    fast_toks_str = fmt_rate(fast_toks, 'tokens/s', precision=0, commas=False)
 ```
 
-- **tokens/s**\index{Token Throughput!generation rate} measures generation throughput. Modern LLMs achieve 20–100 tokens/s depending on model size and hardware. For a response of ~`{python} LLMThroughputCalc.response_tokens_str`, `{python} LLMThroughputCalc.slow_toks_str` vs. `{python} LLMThroughputCalc.fast_toks_str` means `{python} LLMThroughputCalc.slow_str` vs. `{python} LLMThroughputCalc.fast_str`.
+- **tokens/s**\index{Token Throughput!generation rate} measures generation throughput. Modern LLMs achieve 20–100 tokens/s depending on model size and hardware. For a response of ~`{python} LLMThroughputCalc.response_tokens_str`, `{python} LLMThroughputCalc.slow_toks_str` vs. `{python} LLMThroughputCalc.fast_toks_str` means `{python} LLMThroughputCalc.slow_s_str` vs. `{python} LLMThroughputCalc.fast_s_str`.
 - **Time-to-first-token vs. inter-token latency**\index{Inter-Token Latency!throughput trade-off} jointly capture different bottlenecks requiring different optimizations. Batching improves throughput but typically increases first-token latency, a trade-off invisible if only one metric is measured.
 
 \index{Benchmark Contamination!LLM memorization risk}
@@ -5073,7 +5075,17 @@ With benchmarking principles, methodologies, and production considerations estab
 # │          model_inference_range_str, e2e_latency_range_str,
 # │          availability_nines_str, downtime_minutes_month_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, MarkdownStr
+from mlsysim.fmt import (
+    MarkdownStr,
+    fmt,
+    fmt_multiple,
+    fmt_multiple_range,
+    fmt_percent,
+    fmt_percent_range,
+    fmt_power,
+    fmt_rate,
+    fmt_time,
+)
 
 class FallaciesPitfallsSetup:
     """Quantitative backing for all Fallacy/Pitfall items in the benchmarking chapter."""
@@ -5099,8 +5111,8 @@ class FallaciesPitfallsSetup:
     slo_p99_requirement_ms = 100
     high_throughput_qps = 1200
     low_throughput_qps = 1000
-    high_power_w = 420
-    low_power_w = 180
+    high_power = 420 * watt  # Illustrative high-throughput system power
+    low_power = 180 * watt  # Illustrative lower-throughput system power
     battery_multiplier = 2.3
     # Pitfall 2: Benchmark saturation (ImageNet)
     imagenet_error_2010_pct = 28.2
@@ -5125,56 +5137,61 @@ class FallaciesPitfallsSetup:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     accuracy_drop_pct = benchmark_accuracy_pct - production_accuracy_high_pct
     latency_multiplier = production_p99_low_ms/benchmark_latency_mean_ms
-    power_ratio = high_power_w/low_power_w
+    power_ratio = (high_power/low_power).to_base_units().magnitude
     throughput_loss_pct = round((1 - low_throughput_qps/high_throughput_qps) * 100)
     throughput_degradation_pct = round((1 - production_throughput_high_qps/isolated_throughput_qps) * 100)
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    benchmark_accuracy_pct_str = fmt(benchmark_accuracy_pct, precision=0, commas=False, suffix="%")
+    benchmark_accuracy_pct_str = fmt_percent(benchmark_accuracy_pct/100, precision=0, commas=False, style='symbol')
     production_accuracy_range_str = MarkdownStr(f"{production_accuracy_low_pct}-{production_accuracy_high_pct}%")
-    accuracy_drop_pct_str = fmt(accuracy_drop_pct, precision=0, commas=False, suffix="%")
-    benchmark_latency_mean_ms_str = fmt(benchmark_latency_mean_ms, precision=0, commas=False, suffix=" ms")
+    accuracy_drop_pct_str = fmt_percent(accuracy_drop_pct/100, precision=0, commas=False, style='symbol')
+    benchmark_latency_mean_ms_str = fmt_time(benchmark_latency_mean_ms, 'millisecond', precision=0, commas=False)
     production_p99_range_str = MarkdownStr(f"{production_p99_low_ms}-{production_p99_high_ms} ms")
     latency_multiplier_str = fmt(latency_multiplier, precision=0, commas=False)
-    pre_quant_latency_ms_str = fmt(pre_quant_latency_ms, precision=0, commas=False, suffix=" ms")
-    post_quant_latency_ms_str = fmt(post_quant_latency_ms, precision=0, commas=False, suffix=" ms")
+    pre_quant_latency_ms_str = fmt_time(pre_quant_latency_ms, 'millisecond', precision=0, commas=False)
+    post_quant_latency_ms_str = fmt_time(post_quant_latency_ms, 'millisecond', precision=0, commas=False)
     ranking_improvement_str = fmt(ranking_improvement, precision=0, commas=False)
-    energy_increase_pct_str = fmt(energy_increase_pct, precision=0, commas=False, suffix="%")
-    ood_degradation_pct_str = fmt(ood_degradation_pct, precision=0, commas=False, suffix="%")
-    accuracy_improvement_pct_str = fmt(accuracy_improvement_pct, precision=1, commas=False, suffix="%")
-    rec_accuracy_pct_str = fmt(rec_accuracy_pct, precision=0, commas=False, suffix="%")
-    rec_p99_latency_ms_str = fmt(rec_p99_latency_ms, precision=0, commas=False, suffix=" ms")
-    slo_p99_requirement_ms_str = fmt(slo_p99_requirement_ms, precision=0, commas=False, suffix=" ms")
-    high_throughput_qps_str = fmt(high_throughput_qps, precision=0, suffix=" QPS")
-    low_throughput_qps_str = fmt(low_throughput_qps, precision=0, suffix=" QPS")
-    high_power_w_str = fmt(high_power_w, precision=0, commas=False, suffix=" W")
-    low_power_w_str = fmt(low_power_w, precision=0, commas=False, suffix=" W")
-    power_ratio_str = fmt(power_ratio, precision=1, commas=False, suffix="x")
-    throughput_loss_pct_str = fmt(throughput_loss_pct, precision=0, commas=False, suffix="%")
-    battery_multiplier_str = fmt(battery_multiplier, precision=1, commas=False, suffix="x")
-    imagenet_error_2010_pct_str = fmt(imagenet_error_2010_pct, precision=1, commas=False, suffix="%")
-    imagenet_error_2015_pct_str = fmt(imagenet_error_2015_pct, precision=2, commas=False, suffix="%")
+    energy_increase_pct_str = fmt_percent(energy_increase_pct/100, precision=0, commas=False, style='symbol')
+    ood_degradation_pct_str = fmt_percent(ood_degradation_pct/100, precision=0, commas=False, style='symbol')
+    accuracy_improvement_pct_str = fmt_percent(accuracy_improvement_pct/100, precision=1, commas=False, style='symbol')
+    rec_accuracy_pct_str = fmt_percent(rec_accuracy_pct/100, precision=0, commas=False, style='symbol')
+    rec_p99_latency_ms_str = fmt_time(rec_p99_latency_ms, 'millisecond', precision=0, commas=False)
+    slo_p99_requirement_ms_str = fmt_time(slo_p99_requirement_ms, 'millisecond', precision=0, commas=False)
+    high_throughput_qps_str = fmt_rate(high_throughput_qps, "QPS")
+    low_throughput_qps_str = fmt_rate(low_throughput_qps, "QPS")
+    high_power_w_str = fmt_power(high_power, unit=watt, precision=0, commas=False)
+    low_power_w_str = fmt_power(low_power, unit=watt, precision=0, commas=False)
+    power_ratio_str = fmt_multiple(power_ratio, precision=1, commas=False)
+    throughput_loss_pct_str = fmt_percent(throughput_loss_pct/100, precision=0, commas=False, style='symbol')
+    battery_multiplier_str = fmt_multiple(battery_multiplier, precision=1, commas=False)
+    imagenet_error_2010_pct_str = fmt_percent(imagenet_error_2010_pct/100, precision=1, commas=False, style='symbol')
+    imagenet_error_2015_pct_str = fmt_percent(imagenet_error_2015_pct/100, precision=2, commas=False, style='symbol')
     imagenet_competition_end_year_str = fmt(imagenet_competition_end_year, precision=0, commas=False)
     imagenet_teams_above_95_str = fmt(imagenet_teams_above_95, precision=0, commas=False)
     imagenet_total_teams_str = fmt(imagenet_total_teams, precision=0, commas=False)
-    mnist_accuracy_pct_str = fmt(mnist_accuracy_pct, precision=1, commas=False, suffix="%")
-    edge_memory_constraint_x_str = fmt(edge_memory_constraint_x, precision=0, commas=False, suffix="x")
-    edge_power_constraint_x_str = fmt(edge_power_constraint_x, precision=0, commas=False, suffix="x")
-    isolated_throughput_qps_str = fmt(isolated_throughput_qps, precision=0, commas=False, suffix=" QPS")
+    mnist_accuracy_pct_str = fmt_percent(mnist_accuracy_pct/100, precision=1, commas=False, style='symbol')
+    edge_memory_constraint_x_str = fmt_multiple(edge_memory_constraint_x, precision=0, commas=False)
+    edge_power_constraint_x_str = fmt_multiple(edge_power_constraint_x, precision=0, commas=False)
+    isolated_throughput_qps_str = fmt_rate(isolated_throughput_qps, "QPS", commas=False)
     production_throughput_range_str = MarkdownStr(f"{production_throughput_low_qps}-{production_throughput_high_qps} QPS")
-    production_utilization_pct_str = fmt(production_utilization_pct, precision=0, commas=False, suffix="%")
-    throughput_degradation_pct_str = fmt(throughput_degradation_pct, precision=0, commas=False, suffix="%")
-    throughput_degradation_range_str = MarkdownStr(
-        f"{fmt((1 - production_throughput_high_qps/isolated_throughput_qps) * 100, precision=1, commas=False)}-"
-        f"{fmt((1 - production_throughput_low_qps/isolated_throughput_qps) * 100, precision=0, commas=False)}%"
+    production_utilization_pct_str = fmt_percent(production_utilization_pct/100, precision=0, commas=False, style='symbol')
+    throughput_degradation_pct_str = fmt_percent(throughput_degradation_pct/100, precision=0, commas=False, style='symbol')
+    throughput_degradation_range_str = fmt_percent_range(
+        1 - production_throughput_high_qps / isolated_throughput_qps,
+        1 - production_throughput_low_qps / isolated_throughput_qps,
+        precision=(1, 0),
+        commas=False,
+        style="symbol",
     )
-    latency_degradation_range_str = MarkdownStr(
-        f"{fmt(production_p99_low_ms/benchmark_latency_mean_ms, precision=0, commas=False)}-"
-        f"{fmt(production_p99_high_ms/benchmark_latency_mean_ms, precision=1, commas=False)}x"
+    latency_degradation_range_str = fmt_multiple_range(
+        production_p99_low_ms / benchmark_latency_mean_ms,
+        production_p99_high_ms / benchmark_latency_mean_ms,
+        precision=(0, 1),
+        commas=False,
     )
     model_inference_range_str = MarkdownStr(f"{model_inference_low_ms}-{model_inference_high_ms} ms")
     e2e_latency_range_str = MarkdownStr(f"{e2e_latency_low_ms}-{e2e_latency_high_ms} ms")
-    availability_nines_str = fmt(availability_nines, precision=1, commas=False, suffix="%")
-    downtime_minutes_month_str = fmt(downtime_minutes_month, precision=0, commas=False, suffix=" minutes")
+    availability_nines_str = fmt_percent(availability_nines/100, precision=1, commas=False, style='symbol')
+    downtime_minutes_month_str = fmt_time(downtime_minutes_month, "minute", precision=0, commas=False, style="word")
 ```
 
 Benchmarking creates false confidence when standardized measurement obscures deployment realities. Teams assume controlled evaluations predict production performance, but real systems face variability, resource constraints, and multi-objective trade-offs that benchmarks cannot capture. These fallacies waste engineering effort and produce systems optimized for evaluation rather than deployment.
@@ -5182,7 +5199,7 @@ Benchmarking creates false confidence when standardized measurement obscures dep
 \index{Benchmarking!fallacy of direct performance translation}
 **Fallacy**: *Benchmark performance directly translates to real-world application performance.*
 
-The seductive clarity of benchmark rankings leads teams to select systems as though leaderboard position predicts production behavior. It rarely does. As @sec-benchmarking-ml-measurement-challenges-60ea demonstrates, ML systems exhibit inherent variability from data quality issues, distribution shifts, and resource constraints absent in controlled evaluation. A language model achieving `{python} FallaciesPitfallsSetup.benchmark_accuracy_pct_str` benchmark accuracy drops to `{python} FallaciesPitfallsSetup.production_accuracy_range_str` accuracy in production when processing user-generated text with spelling errors, informal language, and domain-specific terminology. An inference system with `{python} FallaciesPitfallsSetup.benchmark_latency_mean_ms_str` mean latency on MLPerf experiences `{python} FallaciesPitfallsSetup.production_p99_range_str` p99 latency in production (`{python} FallaciesPitfallsSetup.latency_degradation_range_str` degradation) due to concurrent load, garbage collection pauses, and network variability. Teams relying solely on benchmark rankings systematically underestimate deployment complexity, leading to failed launches and costly re-engineering.
+The seductive clarity of benchmark rankings leads teams to select systems as though leaderboard position predicts production behavior. It rarely does. As @sec-benchmarking-ml-measurement-challenges-60ea demonstrates, ML systems exhibit inherent variability from data quality issues, distribution shifts, and resource constraints absent in controlled evaluation. A language model achieving `{python} FallaciesPitfallsSetup.benchmark_accuracy_pct_str` benchmark accuracy drops to `{python} FallaciesPitfallsSetup.production_accuracy_range_str` accuracy in production when processing user-generated text with spelling errors, informal language, and domain-specific terminology. An inference system with `{python} FallaciesPitfallsSetup.benchmark_latency_mean_ms_str` mean latency on MLPerf experiences `{python} FallaciesPitfallsSetup.production_p99_range_str` p99 latency in production (`{python} FallaciesPitfallsSetup.latency_degradation_range_str`$\times$ degradation) due to concurrent load, garbage collection pauses, and network variability. Teams relying solely on benchmark rankings systematically underestimate deployment complexity, leading to failed launches and costly re-engineering.
 
 ::: {.column-margin}
 ![](images/svg/benchmarking_tail_latency_gap.svg){width="100%" fig-alt="Margin ladder comparing production P99 latency around 150 to 200 milliseconds with a 15 millisecond benchmark mean, annotated as a 10 to 13 times gap."}
@@ -5197,12 +5214,12 @@ Benchmark leaderboards incentivize aggressive optimization, but the optimization
 \index{Single-Metric Evaluation!fallacy}
 **Fallacy**: *Single-metric evaluation provides sufficient insight into system performance.*
 
-A single number is seductively simple: this system is "94 percent accurate" or "1,200 QPS fast." But production success requires balancing multiple competing objectives that any single metric obscures. As established in @sec-benchmarking-inference-metrics-78d4, modern inference systems demand evaluation across accuracy, latency, throughput, energy, and robustness dimensions. A recommendation model achieving `{python} FallaciesPitfallsSetup.rec_accuracy_pct_str` accuracy with `{python} FallaciesPitfallsSetup.rec_p99_latency_ms_str` p99 latency fails service-level objectives requiring p99 < `{python} FallaciesPitfallsSetup.slo_p99_requirement_ms_str` despite excellent accuracy. Conversely, a system optimized for `{python} FallaciesPitfallsSetup.high_throughput_qps_str` throughput achieves this rate while consuming `{python} FallaciesPitfallsSetup.high_power_w_str` vs. `{python} FallaciesPitfallsSetup.low_power_w_str` for a slightly slower system at `{python} FallaciesPitfallsSetup.low_throughput_qps_str` (`{python} FallaciesPitfallsSetup.power_ratio_str` power difference). For battery-powered edge devices, the `{python} FallaciesPitfallsSetup.throughput_loss_pct_str` throughput loss enables `{python} FallaciesPitfallsSetup.battery_multiplier_str` longer operation time. Different stakeholders prioritize different metrics: ML engineers focus on accuracy, infrastructure teams on throughput and cost, product managers on latency percentiles. Single-metric optimization systematically produces systems that excel on one dimension while failing deployment requirements on others.
+A single number is seductively simple: this system is "94 percent accurate" or "1,200 QPS fast." But production success requires balancing multiple competing objectives that any single metric obscures. As established in @sec-benchmarking-inference-metrics-78d4, modern inference systems demand evaluation across accuracy, latency, throughput, energy, and robustness dimensions. A recommendation model achieving `{python} FallaciesPitfallsSetup.rec_accuracy_pct_str` accuracy with `{python} FallaciesPitfallsSetup.rec_p99_latency_ms_str` p99 latency fails service-level objectives requiring p99 < `{python} FallaciesPitfallsSetup.slo_p99_requirement_ms_str` despite excellent accuracy. Conversely, a system optimized for `{python} FallaciesPitfallsSetup.high_throughput_qps_str` throughput achieves this rate while consuming `{python} FallaciesPitfallsSetup.high_power_w_str` vs. `{python} FallaciesPitfallsSetup.low_power_w_str` for a slightly slower system at `{python} FallaciesPitfallsSetup.low_throughput_qps_str` (`{python} FallaciesPitfallsSetup.power_ratio_str`$\times$ power difference). For battery-powered edge devices, the `{python} FallaciesPitfallsSetup.throughput_loss_pct_str` throughput loss enables `{python} FallaciesPitfallsSetup.battery_multiplier_str`$\times$ longer operation time. Different stakeholders prioritize different metrics: ML engineers focus on accuracy, infrastructure teams on throughput and cost, product managers on latency percentiles. Single-metric optimization systematically produces systems that excel on one dimension while failing deployment requirements on others.
 
 \index{Benchmark Saturation!outdated benchmarks pitfall}
 **Pitfall**: *Using outdated benchmarks that no longer reflect current challenges and requirements.*
 
-Benchmarks have inertia: teams continue reporting on established benchmarks long after those benchmarks cease to provide meaningful discrimination. Saturation occurs when multiple approaches achieve near-identical performance, eliminating useful comparison. ImageNet top-5 classification error decreased from `{python} FallaciesPitfallsSetup.imagenet_error_2010_pct_str` in 2010 to `{python} FallaciesPitfallsSetup.imagenet_error_2015_pct_str` by 2015, with the competition ending in `{python} FallaciesPitfallsSetup.imagenet_competition_end_year_str`, at which point `{python} FallaciesPitfallsSetup.imagenet_teams_above_95_str` of `{python} FallaciesPitfallsSetup.imagenet_total_teams_str` teams exceeded 95 percent accuracy; further optimization beyond this threshold provides marginal value for most applications. Similarly, MNIST achieves `{python} FallaciesPitfallsSetup.mnist_accuracy_pct_str` accuracy with simple models, yet teams still report improvements at the third decimal place. As discussed in @sec-benchmarking-statistical-methodological-issues-7aa5, statistical confidence intervals around these measurements often exceed the claimed improvements. Changing deployment contexts compound the problem: benchmarks designed for server hardware become misleading for edge devices with `{python} FallaciesPitfallsSetup.edge_memory_constraint_x_str` memory constraints and `{python} FallaciesPitfallsSetup.edge_power_constraint_x_str` power budgets. Effective benchmarking requires retiring saturated benchmarks and developing evaluation frameworks matching current deployment realities.
+Benchmarks have inertia: teams continue reporting on established benchmarks long after those benchmarks cease to provide meaningful discrimination. Saturation occurs when multiple approaches achieve near-identical performance, eliminating useful comparison. ImageNet top-5 classification error decreased from `{python} FallaciesPitfallsSetup.imagenet_error_2010_pct_str` in 2010 to `{python} FallaciesPitfallsSetup.imagenet_error_2015_pct_str` by 2015, with the competition ending in `{python} FallaciesPitfallsSetup.imagenet_competition_end_year_str`, at which point `{python} FallaciesPitfallsSetup.imagenet_teams_above_95_str` of `{python} FallaciesPitfallsSetup.imagenet_total_teams_str` teams exceeded 95 percent accuracy; further optimization beyond this threshold provides marginal value for most applications. Similarly, MNIST achieves `{python} FallaciesPitfallsSetup.mnist_accuracy_pct_str` accuracy with simple models, yet teams still report improvements at the third decimal place. As discussed in @sec-benchmarking-statistical-methodological-issues-7aa5, statistical confidence intervals around these measurements often exceed the claimed improvements. Changing deployment contexts compound the problem: benchmarks designed for server hardware become misleading for edge devices with `{python} FallaciesPitfallsSetup.edge_memory_constraint_x_str`$\times$ memory constraints and `{python} FallaciesPitfallsSetup.edge_power_constraint_x_str`$\times$ power budgets. Effective benchmarking requires retiring saturated benchmarks and developing evaluation frameworks matching current deployment realities.
 
 \index{Amdahl's Law!optimization ceiling for ML pipelines}
 **Pitfall**: *Applying research-oriented benchmarks to evaluate production system performance.*
@@ -5236,14 +5253,14 @@ class PrecisionEnergySummary:
     """Local summary ratio for MobileNetV2 FP32 vs. INT8 inference energy."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    m_params = Models.Vision.MobileNetV2.parameters.m_as(Mparam)
-    m_ops = Models.Vision.MobileNetV2.inference_flops.m_as(MFLOPs)
+    m_params = Models.Vision.MobileNetV2.parameters.to(Mparam).magnitude
+    m_ops = Models.Vision.MobileNetV2.inference_flops.to(MFLOPs).magnitude
     ENERGY_DRAM_PJ_PER_BYTE = Hardware.Tech.Memory.DRAM.energy_per_byte
     ENERGY_FLOP_FP32_PJ     = Hardware.Tech.Op.FlopFp32.energy
     ENERGY_OP_INT8_PJ       = Hardware.Tech.Op.OpInt8.energy
-    dram_pj = ENERGY_DRAM_PJ_PER_BYTE.m_as(ureg.picojoule/byte)
-    fp32_pj = ENERGY_FLOP_FP32_PJ.m_as(ureg.picojoule/ureg.flop)
-    int8_pj = ENERGY_OP_INT8_PJ.m_as(ureg.picojoule/ureg.count)
+    dram_pj = ENERGY_DRAM_PJ_PER_BYTE.to(pJ / byte).magnitude
+    fp32_pj = ENERGY_FLOP_FP32_PJ.to(pJ / flop).magnitude
+    int8_pj = ENERGY_OP_INT8_PJ.to(pJ).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     e_fp32_load = (m_params * MILLION * 4 * dram_pj) / MILLION

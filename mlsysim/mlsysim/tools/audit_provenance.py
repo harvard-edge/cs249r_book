@@ -26,9 +26,6 @@ from mlsysim.literature.registry import (
     Benchmarks,
     Chinchilla,
     Communication,
-    Energy,
-    Overheads,
-    Scaling,
     Training,
 )
 from mlsysim.models.registry import (
@@ -40,9 +37,20 @@ from mlsysim.models.registry import (
     VisionModels,
 )
 from mlsysim.ops.monitoring import Monitoring
+from mlsysim.ops.runtime import RuntimeOverheads
+from mlsysim.ops.training import TrainingRunOverheads
 from mlsysim.platforms.registry import Platforms
 from mlsysim.scenarios.registry import ReferenceStats
-from mlsysim.systems.registry import Clusters, Fabrics, NetworkEnergy, Nodes, Pods, SwitchFabric
+from mlsysim.systems.registry import (
+    Clusters,
+    Fabrics,
+    NetworkEnergy,
+    Nodes,
+    Pods,
+    Racks as SystemRacks,
+    Storage as SystemStorage,
+    SwitchFabric,
+)
 
 
 def _registry_nodes(registry_cls: type) -> Iterable[Any]:
@@ -156,6 +164,8 @@ def audit_systems_topology() -> list[str]:
         ("Systems.Fabrics", Fabrics),
         ("Systems.Clusters", Clusters),
         ("Systems.Pods", Pods),
+        ("Systems.Racks", SystemRacks),
+        ("Systems.Storage", SystemStorage),
     ):
         for node in _registry_nodes(reg):
             name = getattr(node, "name", type(node).__name__)
@@ -225,12 +235,9 @@ def audit_literature_sourced() -> list[str]:
     for prefix, reg in (
         ("Literature.Training", Training),
         ("Literature.Benchmarks", Benchmarks),
-        ("Literature.Scaling", Scaling),
-        ("Literature.Overheads", Overheads),
         ("Literature.Chinchilla", Chinchilla),
         ("Literature.Communication", Communication),
         ("Literature.BatchSize", BatchSize),
-        ("Literature.Energy", Energy),
     ):
         for item in _registry_nodes(reg):
             if isinstance(item, Sourced):
@@ -246,11 +253,16 @@ def audit_reference_stats() -> list[str]:
     return issues
 
 
-def audit_ops_monitoring() -> list[str]:
+def audit_ops_sourced() -> list[str]:
     issues: list[str] = []
-    for item in _registry_nodes(Monitoring):
-        name = getattr(item, "name", type(item).__name__)
-        issues.extend(_check_node(f"Ops.Monitoring.{name}", item))
+    for prefix, reg in (
+        ("Ops.Monitoring", Monitoring),
+        ("Ops.RuntimeOverheads", RuntimeOverheads),
+        ("Ops.TrainingRunOverheads", TrainingRunOverheads),
+    ):
+        for item in _registry_nodes(reg):
+            name = getattr(item, "name", type(item).__name__)
+            issues.extend(_check_node(f"{prefix}.{name}", item))
     return issues
 
 
@@ -317,7 +329,7 @@ def main(argv: list[str] | None = None) -> int:
         issues.extend(audit_infra_capacity())
         issues.extend(audit_literature_sourced())
         issues.extend(audit_reference_stats())
-        issues.extend(audit_ops_monitoring())
+        issues.extend(audit_ops_sourced())
         issues.extend(audit_systems_reliability())
         issues.extend(audit_calibration_sourced())
 

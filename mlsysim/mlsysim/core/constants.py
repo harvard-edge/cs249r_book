@@ -41,7 +41,7 @@ from .units import *  # noqa: F401,F403 — re-export full unit registry
 # FLOP/ADD/INT8 op energy   -> Hardware.Tech.Op.*.energy        (Horowitz 2014, 45 nm)
 # DRAM access / per-byte    -> Hardware.Tech.Memory.DRAM.energy_per_access / energy_per_byte
 # SRAM L1/L2, register file  -> Hardware.Tech.Memory.{L1,L2,Register}.energy_per_access
-# Architecture-class efficiency + per-byte movement hierarchy -> Literature.Energy.*
+# Architecture-class efficiency + per-byte movement hierarchy -> Hardware.Tech.{EffectiveCompute,Movement}.*
 # MobileNet inference energy -> Models.Vision.MobileNetV2.inference_energy
 
 # Network transfer energy -> Systems.NetworkEnergy.{Per5gMb, Per1Kb}
@@ -59,7 +59,7 @@ from .units import *  # noqa: F401,F403 — re-export full unit registry
 
 # Reference model/dataset dimensions
 # TRANSFORMER FLOP ratios -> Literature.Chinchilla.{ComputeConstant(6PD), DecodeConstant(2P)}
-# TRANSFORMER_*_EXAMPLE dims -> inlined in the one worked example that used them (hw_acceleration)
+# TRANSFORMER_*_EXAMPLE dims -> inlined in the one local hardware-acceleration example that used them.
 # SIMD_REGISTER_BITS, FP32_BITS, INT8_BITS -> core/units.py (bit widths)
 # Example-specific pedagogical scalars are inlined at their call sites (no
 # canonical registry home, per the architecture's pedagogical-input carve-out):

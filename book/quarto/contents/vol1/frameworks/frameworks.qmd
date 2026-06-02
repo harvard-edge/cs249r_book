@@ -216,7 +216,7 @@ from mlsysim.core.constants import *
 # │ Exports: MemoryWallSpecs.a100_tflops_fp16_str, MemoryWallSpecs.a100_bw_tbs_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, fmt_qty, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MemoryWallSpecs:
@@ -228,19 +228,19 @@ class MemoryWallSpecs:
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     gpu = Hardware.Cloud.A100
 
-    flops_fp16 = gpu.compute.peak_flops.m_as(TFLOPs/second)
-    bw_tbs = gpu.memory.bandwidth.m_as(TB/second)
+    flops_fp16_q = gpu.compute.peak_flops
+    bw_q = gpu.memory.bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Arithmetic Intensity "Ridge Point" (FLOP/byte)
-    ridge_point = gpu.ridge_point().m_as(flop/byte)
+    ridge_point = gpu.ridge_point().to(flop/byte).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(ridge_point >= 100, f"A100 ridge point ({ridge_point:.1f}) is too low to claim a 'Memory Wall'.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    a100_tflops_fp16_str = fmt(flops_fp16, precision=0, commas=False, suffix=" TFLOP/s")
-    a100_bw_tbs_str = fmt(bw_tbs, precision=2, commas=False, suffix=" TB/s")
+    a100_tflops_fp16_str = fmt_qty(flops_fp16_q, TFLOP/second, precision=0, commas=False)
+    a100_bw_tbs_str = fmt_qty(bw_q, TB/second, precision=2, commas=False)
 
 # Note: Use MemoryWallSpecs.a100_tflops_fp16_str directly.
 ```
@@ -256,10 +256,10 @@ class A100BLASMemoryWallRecap:
     gpu = Hardware.Cloud.A100
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    dense_flops = gpu.compute.peak_flops.m_as(TFLOPs/second)
+    dense_flops_q = gpu.compute.peak_flops
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    dense_tflops_str = fmt(dense_flops, precision=0, commas=False, suffix=" TFLOP/s")
+    dense_tflops_str = fmt_qty(dense_flops_q, TFLOP/second, precision=0, commas=False)
 ```
 
 \index{Memory Wall!execution strategy impact}
@@ -837,7 +837,7 @@ For a typical ResNet-50 forward pass, eager execution overhead adds approximatel
 # │ Exports: python_overhead_str, small_kernel_str, large_kernel_str,
 # │          small_tax_pct_str, large_tax_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int,  fmt, check
+from mlsysim.fmt import fmt_int,  fmt, check, fmt_percent
 
 # ┌── LEGO ───────────────────────────────────────────────
 class DispatchTax:
@@ -869,8 +869,8 @@ class DispatchTax:
     python_overhead_str = fmt_int(python_overhead_us, commas=False)
     small_kernel_str = fmt_int(small_kernel_us, commas=False)
     large_kernel_str = fmt_int(large_kernel_us, commas=False)
-    small_tax_pct_str = fmt_int(round(small_tax_pct), commas=False, suffix="%")
-    large_tax_pct_str = fmt_int(round(large_tax_pct), commas=False, suffix="%")
+    small_tax_pct_str = fmt_percent(round(small_tax_pct)/100, precision=0, commas=False, style='symbol')
+    large_tax_pct_str = fmt_percent(round(large_tax_pct)/100, precision=0, commas=False, style='symbol')
 ```
 
 ### The dispatch tax: Python overhead vs. GPU reality {#sec-ml-frameworks-dispatch-tax}
@@ -1470,13 +1470,15 @@ The compilation overhead in these examples (approximately 100 ms to compile the 
 # │ Show: A 2× speedup from eliminating redundant kernel launches and memory traffic.
 # │ How: Model dispatch and memory overhead for eager vs. fused Add+ReLU.
 # │
-# │ Imports: mlsysim.book (fmt, check)
+# │ Imports: mlsysim.book (fmt_time, fmt_multiple, check)
 # │ Exports: python_dispatch_us_str, kernel_launch_only_us_str, memory_access_us_str,
 # │          kernel_launch_us_str, eager_overhead_str, compiled_overhead_str,
 # │          overhead_speedup_str, bw_efficiency_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt_int,  fmt, check
+from mlsysim.fmt import check, fmt_multiple, fmt_time
+from mlsysim import Ops
+from mlsysim.core.constants import microsecond
 
 # ┌── LEGO ───────────────────────────────────────────────
 class FusionSpeedup:
@@ -1486,9 +1488,9 @@ class FusionSpeedup:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    python_dispatch_us = 10
-    kernel_launch_us = 5
-    memory_access_us = 1
+    python_dispatch = Ops.RuntimeOverheads.PythonDispatch
+    kernel_launch = Ops.RuntimeOverheads.KernelLaunch
+    memory_access = Ops.RuntimeOverheads.TinyMemoryAccess
 
     eager_ops = 2
     fused_ops = 1
@@ -1497,28 +1499,28 @@ class FusionSpeedup:
     fused_mem_factor = 2 # 1R + 1W (intermediate fused)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    launch_overhead = python_dispatch_us + kernel_launch_us
+    launch_overhead = python_dispatch + kernel_launch
 
     eager_total_overhead = eager_ops * launch_overhead
     fused_total_overhead = fused_ops * launch_overhead
 
-    speedup = eager_total_overhead/fused_total_overhead
+    speedup = (eager_total_overhead/fused_total_overhead).to("").magnitude
     bw_efficiency = eager_mem_factor/fused_mem_factor
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(speedup >= 1.5, f"Fusion speedup ({speedup:.1f}x) is too small to justify compilation complexity.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    python_dispatch_us_str = fmt(python_dispatch_us, precision=0, commas=False)
-    kernel_launch_only_us_str = fmt(kernel_launch_us, precision=0, commas=False)
-    memory_access_us_str = fmt(memory_access_us, precision=0, commas=False)
-    kernel_launch_us_str = fmt(launch_overhead, precision=0, commas=False)
+    python_dispatch_us_str = fmt_time(python_dispatch, microsecond, precision=0, commas=False)
+    kernel_launch_only_us_str = fmt_time(kernel_launch, microsecond, precision=0, commas=False)
+    memory_access_us_str = fmt_time(memory_access, microsecond, precision=0, commas=False)
+    kernel_launch_us_str = fmt_time(launch_overhead, microsecond, precision=0, commas=False)
 
-    eager_overhead_str = fmt(eager_total_overhead, precision=0, commas=False)
-    compiled_overhead_str = fmt(fused_total_overhead, precision=0, commas=False)
+    eager_overhead_str = fmt_time(eager_total_overhead, microsecond, precision=0, commas=False)
+    compiled_overhead_str = fmt_time(fused_total_overhead, microsecond, precision=0, commas=False)
 
-    overhead_speedup_str = fmt_int(speedup, commas=False)
-    bw_efficiency_str = fmt_int(bw_efficiency, commas=False)
+    overhead_speedup_str = fmt_multiple(speedup, precision=0, commas=False)
+    bw_efficiency_str = fmt_multiple(bw_efficiency, precision=0, commas=False)
 
 # Note: Use FusionSpeedup.python_dispatch_us_str directly.
 ```
@@ -1530,9 +1532,9 @@ The **Latency Term** $(L_{\text{lat}})$ in the iron law is dominated by software
 
 **Constants of latency**:
 
-*   **Python dispatch**: ~`{python} FusionSpeedup.python_dispatch_us_str` μs per operation.
-*   **Kernel launch**: ~`{python} FusionSpeedup.kernel_launch_only_us_str` μs per operation.
-*   **Memory access (VRAM)**: ~`{python} FusionSpeedup.memory_access_us_str` μs.
+*   **Python dispatch**: ~`{python} FusionSpeedup.python_dispatch_us_str` per operation.
+*   **Kernel launch**: ~`{python} FusionSpeedup.kernel_launch_only_us_str` per operation.
+*   **Memory access (VRAM)**: ~`{python} FusionSpeedup.memory_access_us_str`.
 
 **Scenario one: Eager Mode (The "Tiny Op" Trap)**
 Consider a simple activation block: `y = relu(x + bias)`.
@@ -1540,11 +1542,11 @@ Consider a simple activation block: `y = relu(x + bias)`.
 *   **Operations**: Two (Add, ReLU).
 *   **Execution**:
 
-    1.  Launch `Add` Kernel: `{python} FusionSpeedup.kernel_launch_us_str` µs overhead.
+    1.  Launch `Add` Kernel: `{python} FusionSpeedup.kernel_launch_us_str` overhead.
     2.  Read/Write Memory: $2N$ bytes.
-    3.  Launch `ReLU` Kernel: `{python} FusionSpeedup.kernel_launch_us_str` µs overhead.
+    3.  Launch `ReLU` Kernel: `{python} FusionSpeedup.kernel_launch_us_str` overhead.
     4.  Read/Write Memory: $2N$ bytes.
-*   **Total overhead**: `{python} FusionSpeedup.eager_overhead_str` µs.
+*   **Total overhead**: `{python} FusionSpeedup.eager_overhead_str`.
 *   **Total memory traffic**: $4N$ bytes.
 
 **Scenario two: Compiled Mode (Fusion)**
@@ -1552,9 +1554,9 @@ The compiler fuses this into one kernel: `FusedAddRelu`.
 
 *   **Execution**:
 
-    1.  Launch `Fused` Kernel: `{python} FusionSpeedup.compiled_overhead_str` µs overhead.
+    1.  Launch `Fused` Kernel: `{python} FusionSpeedup.compiled_overhead_str` overhead.
     2.  Read/Write Memory: $2N$ bytes (intermediate result stays in registers).
-*   **Total overhead**: `{python} FusionSpeedup.compiled_overhead_str` µs (`{python} FusionSpeedup.overhead_speedup_str`$\times$ speedup).
+*   **Total overhead**: `{python} FusionSpeedup.compiled_overhead_str` (`{python} FusionSpeedup.overhead_speedup_str`$\times$ speedup).
 *   **Total memory traffic**: 2N bytes (`{python} FusionSpeedup.bw_efficiency_str`$\times$ bandwidth efficiency).
 
 **Systems insight**:
@@ -1881,7 +1883,7 @@ The decision rule is to compile when $\text{Compilation Benefit} > 1$. The ratio
 # │          resnet_tensorrt_speedup_str, compile_time_ref_s_str,
 # │          resnet_breakeven_images_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, check, fmt_time, fmt_rate
 
 class CompilationBenchmark:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
@@ -1920,18 +1922,18 @@ class CompilationBenchmark:
           "torch.compile examples should all improve over eager mode.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    resnet_eager_str = fmt(resnet["eager"], precision=0, commas=True, suffix=" img/s")
-    resnet_compile_str = fmt(resnet["compile"], precision=0, commas=True, suffix=" img/s")
+    resnet_eager_str = fmt_rate(resnet["eager"], 'img/s', precision=0, commas=True)
+    resnet_compile_str = fmt_rate(resnet["compile"], 'img/s', precision=0, commas=True)
 
     torch_compile_speedup_min_str = fmt(min(torch_compile_speedups), precision=1, commas=False)
     torch_compile_speedup_max_str = fmt(max(torch_compile_speedups), precision=1, commas=False)
     tensorrt_speedup_min_str = fmt(min(tensorrt_speedups), precision=1, commas=False)
     tensorrt_speedup_max_str = fmt(max(tensorrt_speedups), precision=1, commas=False)
 
-    resnet_compile_speedup_pct_str = fmt(resnet_compile_speedup_pct, precision=1, commas=False, suffix="%")
-    resnet_tensorrt_speedup_str = fmt(resnet_tensorrt_speedup, precision=1, commas=False, suffix="×")
-    compile_time_ref_s_str = fmt(compile_time_ref_s, precision=0, commas=False, suffix=" s")
-    resnet_breakeven_images_str = fmt(resnet_breakeven_images_rounded, precision=0, commas=True, suffix=" images")
+    resnet_compile_speedup_pct_str = fmt_percent(resnet_compile_speedup_pct/100, precision=1, commas=False, style='symbol')
+    resnet_tensorrt_speedup_str = fmt_multiple(resnet_tensorrt_speedup, precision=1, commas=False)
+    compile_time_ref_s_str = fmt_time(compile_time_ref_s, 'second', precision=0, commas=False)
+    resnet_breakeven_images_str = fmt_count(resnet_breakeven_images_rounded, commas=True, label="image")
 ```
 
 @Tbl-training-benchmark provides representative throughput data across execution modes and model architectures:
@@ -1960,7 +1962,7 @@ The optimal framework execution strategy depends on which iron law term dominate
 
 : **Framework Execution Strategy by Workload**: Recommended execution strategy for each workload archetype, aligned to the dominant iron law term. {#tbl-framework-archetype-strategy tbl-colwidths="[17,28,22,33]"}
 
-**Systems insight**: Compilation benefits scale with how much of the workload is optimizable. Compute Beasts (@tbl-training-benchmark: ResNet-50 sees `{python} CompilationBenchmark.resnet_tensorrt_speedup_str` speedup from TensorRT) benefit most. Sparse Scatter workloads gain little because their bottleneck (embedding lookups) is inherently irregular.
+**Systems insight**: Compilation benefits scale with how much of the workload is optimizable. Compute Beasts (@tbl-training-benchmark: ResNet-50 sees `{python} CompilationBenchmark.resnet_tensorrt_speedup_str`$\times$ speedup from TensorRT) benefit most. Sparse Scatter workloads gain little because their bottleneck (embedding lookups) is inherently irregular.
 
 :::
 
@@ -2076,11 +2078,11 @@ From the case study in @sec-ml-frameworks-putting-together-anatomy-training-step
 # │
 # │ Imports: mlsysim.book (fmt, fmt_math)
 # │ Exports: dispatch_n_ops_str, dispatch_us_per_op_str, dispatch_hw_time_us_str,
-# │          dispatch_sw_time_str, dispatch_ratio_small_str, dispatch_overhead_pct_str,
+# │          dispatch_sw_time_us_str, dispatch_ratio_small_str, dispatch_overhead_pct_str,
 # │          dispatch_compilation_speedup_str, gpt3_hw_time_us_str, gpt3_sw_time_us_str,
 # │          dispatch_ratio_large_str, t_sw_math
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int,  fmt, check, fmt_math
+from mlsysim.fmt import fmt_int,  fmt, check, fmt_math, fmt_percent, fmt_time
 
 # ┌── LEGO ───────────────────────────────────────────────
 class DispatchTaxSmallLarge:
@@ -2116,16 +2118,16 @@ class DispatchTaxSmallLarge:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     dispatch_n_ops_str = fmt(small_ops_count, precision=0, commas=False)
-    dispatch_us_per_op_str = fmt(small_dispatch_us, precision=0, commas=False, suffix=" μs/op")
-    dispatch_hw_time_us_str = fmt(small_hw_us, precision=1, commas=False, suffix=" μs")
+    dispatch_us_per_op_str = fmt_time(small_dispatch_us, 'microsecond', precision=0, commas=False, per="op")
+    dispatch_hw_time_us_str = fmt_time(small_hw_us, 'microsecond', precision=1, commas=False)
 
-    dispatch_sw_time_str = fmt(small_sw_total, precision=0, commas=False, suffix=" μs")
+    dispatch_sw_time_us_str = fmt_time(small_sw_total, 'microsecond', precision=0, commas=False)
     dispatch_ratio_small_str = fmt(small_overhead_ratio, precision=1, commas=False)
-    dispatch_overhead_pct_str = fmt_int(round(small_overhead_pct), commas=False, suffix="%")
-    dispatch_compilation_speedup_str = fmt(small_speedup_limit, precision=1, commas=False, suffix="×")
+    dispatch_overhead_pct_str = fmt_percent(round(small_overhead_pct)/100, precision=0, commas=False, style='symbol')
+    dispatch_compilation_speedup_str = fmt_multiple(small_speedup_limit, precision=1, commas=False)
 
-    gpt3_hw_time_us_str = fmt(large_hw_us, precision=0, commas=False, suffix=" μs")
-    gpt3_sw_time_us_str = fmt(large_dispatch_us, precision=0, commas=False, suffix=" μs")
+    gpt3_hw_time_us_str = fmt_time(large_hw_us, 'microsecond', precision=0, commas=False)
+    gpt3_sw_time_us_str = fmt_time(large_dispatch_us, 'microsecond', precision=0, commas=False)
     dispatch_ratio_large_str = fmt(large_overhead_ratio, precision=4, commas=False)
     t_sw_math = fmt_math(f"T_{{\\text{{sw}}}} \\approx {large_dispatch_us} \\, \\mu s")
 ```
@@ -2140,9 +2142,9 @@ This cumulative latency acts as a per-call tax on execution. Whether that tax do
 
 *   **Compute**: `{python} DispatchTaxSmallLarge.dispatch_n_ops_str` small matrix/element-wise operations.
 *   **Hardware time**: $T_{\text{hw}} \approx$ `{python} DispatchTaxSmallLarge.dispatch_hw_time_us_str` (mostly memory latency).
-*   **Software overhead**: $T_{\text{sw}} \approx$ `{python} DispatchTaxSmallLarge.dispatch_n_ops_str` ops $\times$ `{python} DispatchTaxSmallLarge.dispatch_us_per_op_str` = `{python} DispatchTaxSmallLarge.dispatch_sw_time_str`.
-*   **Ratio**: `{python} DispatchTaxSmallLarge.dispatch_sw_time_str`/`{python} DispatchTaxSmallLarge.dispatch_hw_time_us_str` ≈ `{python} DispatchTaxSmallLarge.dispatch_ratio_small_str`.
-*   **Small-model outcome**: The system spends `{python} DispatchTaxSmallLarge.dispatch_overhead_pct_str` of time in host-side dispatch and kernel-launch overhead. Compilation yields `{python} DispatchTaxSmallLarge.dispatch_compilation_speedup_str` speedup.
+*   **Software overhead**: $T_{\text{sw}} \approx$ `{python} DispatchTaxSmallLarge.dispatch_n_ops_str` ops $\times$ `{python} DispatchTaxSmallLarge.dispatch_us_per_op_str` = `{python} DispatchTaxSmallLarge.dispatch_sw_time_us_str`.
+*   **Ratio**: `{python} DispatchTaxSmallLarge.dispatch_sw_time_us_str`/`{python} DispatchTaxSmallLarge.dispatch_hw_time_us_str` ≈ `{python} DispatchTaxSmallLarge.dispatch_ratio_small_str`.
+*   **Small-model outcome**: The system spends `{python} DispatchTaxSmallLarge.dispatch_overhead_pct_str` of time in host-side dispatch and kernel-launch overhead. Compilation yields `{python} DispatchTaxSmallLarge.dispatch_compilation_speedup_str`$\times$ speedup.
 
 **Scenario two: GPT-3 Layer (Compute Bound)**
 
@@ -2186,7 +2188,7 @@ class GPT3DispatchScale:
     model = Models.Language.GPT3
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    params_b = model.parameters.m_as(Bparam)
+    params_b = model.parameters.to(Bparam).magnitude
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     gpt3_params_b_str = fmt(params_b, precision=0, commas=False)
@@ -2374,7 +2376,7 @@ class GPT3ReverseModeParams:
     model = Models.Language.GPT3
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    params_b = model.parameters.m_as(Bparam)
+    params_b = model.parameters.to(Bparam).magnitude
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     gpt3_params_b_str = fmt(params_b, precision=0, commas=False)
@@ -2463,21 +2465,22 @@ Three implementation requirements emerge from this example. First, the framework
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.physics import model_memory
 from mlsysim import Models
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, fmt_qty, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT3MemoryFootprint:
     """GPT-3 FP16 weight memory to show single-GPU capacity is exceeded."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    params_b = Models.Language.GPT3.parameters.m_as(Bparam)                                        # 175 billion
+    params_b = Models.Language.GPT3.parameters.to(Bparam).magnitude                                        # 175 billion
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     fp16_gb = model_memory(Models.Language.GPT3.parameters, BYTES_FP16, GB)                        # 350 GB
+    fp16 = fp16_gb * GB
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     gpt3_params_b_str = fmt(params_b, precision=0, commas=False)               # e.g. "175"
-    gpt3_fp16_gb_str = fmt(fp16_gb, precision=0, commas=False, suffix=" GB")                 # e.g. "350 GB"
+    gpt3_fp16_gb_str = fmt_qty(fp16, GB, precision=0, commas=False)                 # e.g. "350 GB"
 ```
 
 #### Memory management strategies {#sec-ml-frameworks-memory-management-strategies-b008}
@@ -2593,7 +2596,7 @@ Every activation saved for the backward pass persists in memory until consumed b
 # │          resnet_training_ratio_min_str, resnet_training_ratio_max_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, fmt_qty, check, fmt_count
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ResNetMemory:
@@ -2604,26 +2607,26 @@ class ResNetMemory:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     model = Models.Vision.ResNet50
-    training_min_gb = 10
-    training_max_gb = 15
+    training_min = 10 * GB  # scenario assumption
+    training_max = 15 * GB  # scenario assumption
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    params_m = model.parameters.m_as(Mparam)
+    params_m = model.parameters.to(Mparam).magnitude
 
-    fp32_mb = model.size_in_bytes(BYTES_FP32).m_as(MB)
-    adam_mb = model.size_in_bytes(BYTES_ADAM_STATE).m_as(MB)
+    fp32 = model.size_in_bytes(BYTES_FP32)
+    adam = model.size_in_bytes(BYTES_ADAM_STATE)
 
     # Decimal GB → MB is ×1000 (book-prose §1: decimal units in prose).
-    training_ratio_min = (training_min_gb * THOUSAND) / fp32_mb
-    training_ratio_max = (training_max_gb * THOUSAND) / fp32_mb
+    training_ratio_min = (training_min / fp32).to_base_units().magnitude
+    training_ratio_max = (training_max / fp32).to_base_units().magnitude
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    resnet_params_m_str = fmt(params_m, precision=1, commas=False, suffix=" M")
-    resnet_fp32_mb_str = fmt(fp32_mb, precision=1, commas=False, suffix=" MB")
-    resnet_adam_mb_str = fmt(adam_mb, precision=1, commas=False, suffix=" MB")
+    resnet_params_m_str = fmt_count(params_m * MILLION, scale='M', precision=1, commas=False)
+    resnet_fp32_mb_str = fmt_qty(fp32, MB, precision=1, commas=False)
+    resnet_adam_mb_str = fmt_qty(adam, MB, precision=1, commas=False)
 
-    resnet_training_min_gb_str = fmt(training_min_gb, precision=0, commas=False, suffix=" GB")
-    resnet_training_max_gb_str = fmt(training_max_gb, precision=0, commas=False, suffix=" GB")
+    resnet_training_min_gb_str = fmt_qty(training_min, GB, precision=0, commas=False)
+    resnet_training_max_gb_str = fmt_qty(training_max, GB, precision=0, commas=False)
     resnet_training_ratio_min_str = fmt(training_ratio_min, precision=1, commas=False)
     resnet_training_ratio_max_str = fmt(training_ratio_max, precision=1, commas=False)
 ```
@@ -2890,7 +2893,8 @@ optimizer.step()
 # │          Model7B.model_7b_total_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.physics import model_memory
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt_qty, check
+from mlsysim import Models
 
 # ┌── LEGO ───────────────────────────────────────────────
 class Model7B:
@@ -2903,14 +2907,14 @@ class Model7B:
     params = Models.Language.Llama2_7B.parameters
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    fp16_gb = model_memory(params, BYTES_FP16, GB)
-    adam_gb = model_memory(params, BYTES_ADAM_STATE, GB)
-    total_gb = fp16_gb + adam_gb
+    fp16 = params * BYTES_FP16
+    adam = params * BYTES_ADAM_STATE
+    total = fp16 + adam
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    model_7b_fp16_gb_str = fmt(fp16_gb, precision=0, commas=False, suffix=" GB")
-    model_7b_adam_gb_str = fmt(adam_gb, precision=0, commas=False, suffix=" GB")
-    model_7b_total_gb_str = fmt(total_gb, precision=0, commas=False, suffix=" GB")
+    model_7b_fp16_gb_str = fmt_qty(fp16, GB, precision=0, commas=False)
+    model_7b_adam_gb_str = fmt_qty(adam, GB, precision=0, commas=False)
+    model_7b_total_gb_str = fmt_qty(total, GB, precision=0, commas=False)
 
 # Note: Use Model7B.model_7b_total_gb_str directly.
 ```
@@ -3064,7 +3068,7 @@ To make this concrete, trace what must happen when a programmer writes `model(in
 # │ Imports: mlsysim.core.constants (Models.Vision.ResNet50.parameters), mlsysim.book (fmt)
 # │ Exports: resnet_params_m_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, fmt_qty, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ResNetAbstraction:
@@ -3075,7 +3079,7 @@ class ResNetAbstraction:
     params = Models.Vision.ResNet50.parameters
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    params_m = params.m_as(Mparam)
+    params_m = params.to(Mparam).magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(params_m > 20, f"ResNet-50 parameter count too low: {params_m:.1f}M")
@@ -3124,13 +3128,12 @@ class TensorFootprint:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     footprint = rows * cols * dtype_bytes
-    footprint_mb = footprint.m_as(MB)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(4.1 < footprint_mb < 4.2, f"Expected about 4.2 MB, got {footprint_mb}.")
+    check(4.1 < footprint.to(MB).magnitude < 4.2, f"Expected about 4.2 MB, got {footprint.to(MB).magnitude}.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    tensor_1024_fp32_mb_str = fmt(footprint_mb, precision=1, commas=False, suffix=" MB")
+    tensor_1024_fp32_mb_str = fmt_qty(footprint, MB, precision=1, commas=False)
 ```
 
 ::: {#dfn-frameworks-tensor .callout-definition title="Tensor"}
@@ -3166,7 +3169,7 @@ The tensor abstraction consumes far more memory than model weights alone suggest
 # │          admin_tax_gb_str, admin_batch_str, admin_layers_str, admin_width_str,
 # │          admin_act_calc_math
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, fmt_math
+from mlsysim.fmt import fmt, fmt_qty, check, fmt_math
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AdminTax:
@@ -3176,32 +3179,31 @@ class AdminTax:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    params_count = 1 * BILLION
+    params_count = 1 * BILLION * param
     batch_size = 32
     layers = 100
     width = 1024
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    weights_gb = (params_count * BYTES_FP16).m_as(GB)
-    grads_gb = weights_gb
-    opt_gb = (params_count * BYTES_ADAM_STATE).m_as(GB)
+    weights = params_count * BYTES_FP16
+    grads = weights
+    opt = params_count * BYTES_ADAM_STATE
 
     # Step 1: Activation approximation: Batch * Layers * Width^2 * FP16
     act_bytes = batch_size * layers * (width ** 2) * BYTES_FP16
-    act_gb = act_bytes.m_as(GB)
 
-    total_gb = weights_gb + grads_gb + opt_gb + act_gb
-    tax_gb = total_gb - weights_gb
+    total = weights + grads + opt + act_bytes
+    tax = total - weights
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(tax_gb > 15, f"Administrative tax ({tax_gb:.1f} GB) unexpectedly low.")
+    check(tax.to(GB).magnitude > 15, f"Administrative tax ({tax.to(GB).magnitude:.1f} GB) unexpectedly low.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    admin_weights_gb_str = fmt(weights_gb, precision=0, commas=False, suffix=" GB")
-    admin_grads_gb_str = fmt(grads_gb, precision=0, commas=False, suffix=" GB")
-    admin_opt_gb_str = fmt(opt_gb, precision=0, commas=False, suffix=" GB")
-    admin_act_gb_str = fmt(act_gb, precision=1, commas=False, suffix=" GB")
-    admin_tax_gb_str = fmt(tax_gb, precision=1, commas=False, suffix=" GB")
+    admin_weights_gb_str = fmt_qty(weights, GB, precision=0, commas=False)
+    admin_grads_gb_str = fmt_qty(grads, GB, precision=0, commas=False)
+    admin_opt_gb_str = fmt_qty(opt, GB, precision=0, commas=False)
+    admin_act_gb_str = fmt_qty(act_bytes, GB, precision=1, commas=False)
+    admin_tax_gb_str = fmt_qty(tax, GB, precision=1, commas=False)
     admin_batch_str = fmt(batch_size, precision=0, commas=False)
     admin_layers_str = fmt(layers, precision=0, commas=False)
     admin_width_str = fmt(width, precision=0, commas=False)
@@ -3223,13 +3225,13 @@ class ResNetAdminTaxRatio:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     model = Models.Vision.ResNet50
-    training_min_gb = 10
-    training_max_gb = 15
+    training_min = 10 * GB  # scenario assumption
+    training_max = 15 * GB  # scenario assumption
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    fp32_mb = model.size_in_bytes(BYTES_FP32).m_as(MB)
-    training_ratio_min = (training_min_gb * THOUSAND) / fp32_mb
-    training_ratio_max = (training_max_gb * THOUSAND) / fp32_mb
+    fp32 = model.size_in_bytes(BYTES_FP32)
+    training_ratio_min = (training_min / fp32).to_base_units().magnitude
+    training_ratio_max = (training_max / fp32).to_base_units().magnitude
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     resnet_training_ratio_min_str = fmt(training_ratio_min, precision=1, commas=False)
@@ -3450,10 +3452,10 @@ Tensors answer the first question---*what is the data?*---by encoding shape, lay
 # │          Hardware.Cloud.A100.compute.peak_flops), mlsysim.book (fmt)
 # │ Exports: pcie4_gbs_str, pcie4_bidir_gbs_str, nvlink_a100_gbs_str, a100_bw_gbs_str,
 # │          a100_bw_tbs_str, a100_tflops_fp16_str, pcie4_4mb_ms_str, nvlink_4mb_ms_str,
-# │          hbm_4mb_ms_str, pcie4_1gb_ms_str, pcie4_1gb_equiv_ops_str, a100_mem_str,
+# │          hbm_4mb_ms_str, pcie4_1gb_ms_str, pcie4_1gb_equiv_ops_str, a100_mem_gib_str,
 # │          pcie_to_hbm_gap_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, check, fmt_memory, fmt_time, fmt_qty
 
 # ┌── LEGO ───────────────────────────────────────────────
 class DeviceBandwidthHierarchy:
@@ -3463,49 +3465,46 @@ class DeviceBandwidthHierarchy:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    tensor_4mb = 4 * MILLION
+    tensor_4mb = 4 * MB  # scenario assumption
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    pcie4_gbs = Hardware.Cloud.A100.interconnect.bandwidth.m_as(GB/second)
-    nvlink_a100_gbs = Hardware.Cloud.A100.nvlink.bandwidth.m_as(GB/second)
-    nvlink_a100_per_direction_gbs = nvlink_a100_gbs / 2
-    a100_bw_gbs = Hardware.Cloud.A100.memory.bandwidth.m_as(GB/second)
-    a100_bw_tbs = Hardware.Cloud.A100.memory.bandwidth.m_as(TB/second)
-    a100_mem = Hardware.Cloud.A100.memory.capacity.m_as(GiB)  # pedagogical 80 GB nominal
-    a100_tflops_fp16 = Hardware.Cloud.A100.compute.peak_flops.m_as(TFLOPs/second)
+    pcie4 = Hardware.Cloud.A100.interconnect.bandwidth
+    nvlink_a100 = Hardware.Cloud.A100.nvlink.bandwidth
+    nvlink_a100_per_direction = nvlink_a100 / 2
+    a100_bw = Hardware.Cloud.A100.memory.bandwidth
+    a100_mem = Hardware.Cloud.A100.memory.capacity
+    a100_flops_fp16 = Hardware.Cloud.A100.compute.peak_flops
 
     # Transfer times for 4 MB tensor
-    pcie4_4mb_ms = (tensor_4mb/Hardware.Cloud.A100.interconnect.bandwidth.m_as(byte/second)) * THOUSAND
-    nvlink_4mb_ms = (tensor_4mb/(Hardware.Cloud.A100.nvlink.bandwidth.m_as(byte/second) / 2)) * THOUSAND
-    hbm_4mb_ms = (tensor_4mb/Hardware.Cloud.A100.memory.bandwidth.m_as(byte/second)) * THOUSAND
+    pcie4_4mb = (tensor_4mb / pcie4).to(millisecond)
+    nvlink_4mb = (tensor_4mb / nvlink_a100_per_direction).to(millisecond)
+    hbm_4mb = (tensor_4mb / a100_bw).to(millisecond)
 
     # 1 GB transfer cost analysis
-    # 1 GB/BW (B/s) * THOUSAND ms
-    pcie4_1gb_ms = (BILLION/Hardware.Cloud.A100.interconnect.bandwidth.m_as(byte/second)) * THOUSAND
-    # Equiv Ops: (ms / 1000) * FLOP/s
-    pcie4_1gb_equiv_ops = (pcie4_1gb_ms/THOUSAND) * Hardware.Cloud.A100.compute.peak_flops.m_as(flop/second)
+    pcie4_1gb = ((1 * GB) / pcie4).to(millisecond)
+    pcie4_1gb_equiv_ops = pcie4_1gb.to(second) * Hardware.Cloud.A100.compute.peak_flops
 
-    pcie_to_hbm_gap = a100_bw_gbs / pcie4_gbs
+    pcie_to_hbm_gap = (a100_bw / pcie4).to_base_units().magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(60 <= pcie_to_hbm_gap <= 70,
           f"PCIe-to-HBM bandwidth gap drifted to {pcie_to_hbm_gap:.1f}x.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    pcie4_gbs_str = fmt(pcie4_gbs, precision=0, commas=False, suffix=" GB/s")
-    pcie4_bidir_gbs_str = fmt(pcie4_gbs * 2, precision=0, commas=False, suffix=" GB/s")
-    nvlink_a100_gbs_str = fmt(nvlink_a100_gbs, precision=0, commas=False, suffix=" GB/s")
-    nvlink_a100_per_direction_gbs_str = fmt(nvlink_a100_per_direction_gbs, precision=0, commas=False, suffix=" GB/s")
-    a100_bw_gbs_str = fmt(a100_bw_gbs, precision=0, commas=False, suffix=" GB/s")
-    a100_bw_tbs_str = fmt(a100_bw_tbs, precision=2, commas=False, suffix=" TB/s")
-    a100_tflops_fp16_str = fmt(a100_tflops_fp16, precision=0, commas=False, suffix=" TFLOP/s")
-    a100_mem_str = fmt(a100_mem, precision=0, commas=False, suffix=" GB")
-    pcie4_4mb_ms_str = fmt(pcie4_4mb_ms, precision=3, commas=False, suffix=" ms")
-    nvlink_4mb_ms_str = fmt(nvlink_4mb_ms, precision=3, commas=False, suffix=" ms")
-    hbm_4mb_ms_str = fmt(hbm_4mb_ms, precision=3, commas=False, suffix=" ms")
-    pcie4_1gb_ms_str = fmt(pcie4_1gb_ms, precision=1, commas=False, suffix=" ms")
-    pcie4_1gb_equiv_ops_str = fmt((pcie4_1gb_equiv_ops * flop).m_as(TFLOPs), precision=1, commas=False, suffix=" TFLOP")
-    pcie_to_hbm_gap_str = fmt(pcie_to_hbm_gap, precision=1, commas=False, suffix="×")
+    pcie4_gbs_str = fmt_qty(pcie4, GB/second, precision=0, commas=False)
+    pcie4_bidir_gbs_str = fmt_qty(pcie4 * 2, GB/second, precision=0, commas=False)
+    nvlink_a100_gbs_str = fmt_qty(nvlink_a100, GB/second, precision=0, commas=False)
+    nvlink_a100_per_direction_gbs_str = fmt_qty(nvlink_a100_per_direction, GB/second, precision=0, commas=False)
+    a100_bw_gbs_str = fmt_qty(a100_bw, GB/second, precision=0, commas=False)
+    a100_bw_tbs_str = fmt_qty(a100_bw, TB/second, precision=2, commas=False)
+    a100_tflops_fp16_str = fmt_qty(a100_flops_fp16, TFLOP/second, precision=0, commas=False)
+    a100_mem_gib_str = fmt_memory(a100_mem, binary=True, precision=0, commas=False)
+    pcie4_4mb_ms_str = fmt_time(pcie4_4mb, millisecond, precision=3, commas=False)
+    nvlink_4mb_ms_str = fmt_time(nvlink_4mb, millisecond, precision=3, commas=False)
+    hbm_4mb_ms_str = fmt_time(hbm_4mb, millisecond, precision=3, commas=False)
+    pcie4_1gb_ms_str = fmt_time(pcie4_1gb, millisecond, precision=1, commas=False)
+    pcie4_1gb_equiv_ops_str = fmt_qty(pcie4_1gb_equiv_ops, TFLOP, precision=1, commas=False)
+    pcie_to_hbm_gap_str = fmt_multiple(pcie_to_hbm_gap, precision=1, commas=False)
 ```
 
 \index{Device Management!CPU-GPU transfers}
@@ -3518,7 +3517,7 @@ While the high-level API focuses on math, the framework's backend functions as t
 
 The CUDA Runtime\index{CUDA!runtime, OS layer} serves as this OS layer, providing the low-level primitives for launching kernels and managing device memory. The framework coordinates with this runtime to implement **Direct Memory Access (DMA)**\index{DMA!PCIe data movement interface} over the PCIe bus. As established in @sec-hardware-acceleration, the bandwidth gap between the host (CPU) and device (GPU) is the primary "Data Loading Bottleneck." @Sec-appdx-machine-foundations-bandwidth-vs-latency-5320 separates the two transfer constraints, $T = L_{\text{lat}} + D_{\text{vol}}/\text{BW}$, that determine whether a given data-loading strategy is limited by per-transfer latency or by sustained bandwidth. Frameworks mitigate this through **pinned memory**\index{Pinned Memory!definition} (page-locked memory) that allows the GPU to read directly from CPU RAM via DMA without interrupting the processor. This "HW/OS" interface is what makes high-throughput training loops possible on a single machine.
 
-Every tensor resides on a specific device, and cross-device operations incur transfer costs that can dominate execution time. PCIe 4.0 delivers `{python} DeviceBandwidthHierarchy.pcie4_gbs_str` between CPU and GPU, while HBM2e provides `{python} DeviceBandwidthHierarchy.a100_bw_tbs_str` within the GPU. This `{python} DeviceBandwidthHierarchy.pcie_to_hbm_gap_str` bandwidth gap means a single misplaced tensor transfer can erase the entire speedup from GPU acceleration.
+Every tensor resides on a specific device, and cross-device operations incur transfer costs that can dominate execution time. PCIe 4.0 delivers `{python} DeviceBandwidthHierarchy.pcie4_gbs_str` between CPU and GPU, while HBM2e provides `{python} DeviceBandwidthHierarchy.a100_bw_tbs_str` within the GPU. This `{python} DeviceBandwidthHierarchy.pcie_to_hbm_gap_str`$\times$ bandwidth gap means a single misplaced tensor transfer can erase the entire speedup from GPU acceleration.
 
 ::: {.column-margin}
 ![](images/svg/frameworks_bandwidth_hierarchy.svg){width="100%" fig-alt="Vertical bandwidth ladder on a log axis: HBM at 2,039 GB/s sits far above NVLink at 600 GB/s, which sits far above PCIe at 32 GB/s, spanning roughly 64 times from slowest to fastest interconnect."}
@@ -3689,7 +3688,7 @@ When overlap is insufficient, profiling reveals where time is lost. NVIDIA provi
 # │ Exports: img_res_str, dataloader_mbs_str, batch_mb_str, batch_transfer_ms_str,
 # │          pcie4_gbs_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, check, fmt_time
 
 # ┌── LEGO ───────────────────────────────────────────────
 class DataloaderThroughput:
@@ -3706,26 +3705,24 @@ class DataloaderThroughput:
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Throughput requirement
-    throughput_bytes_sec = img_per_sec * img_res * img_res * img_channels * byte
-    dataloader_mbs = throughput_bytes_sec.m_as(MB)
+    dataloader = img_per_sec * img_res * img_res * img_channels * (byte / second)
 
     # Step 2: Batch transfer
     batch_bytes = batch_size * img_res * img_res * img_channels * BYTES_FP32
-    batch_mb = batch_bytes.m_as(MB)
-    batch_transfer_ms = (batch_bytes/Hardware.Cloud.A100.interconnect.bandwidth).m_as(second) * MS_PER_SEC
+    batch_transfer = (batch_bytes / Hardware.Cloud.A100.interconnect.bandwidth).to(millisecond)
 
     # Step 3: PCIe Ref
-    pcie4_gbs = Hardware.Cloud.A100.interconnect.bandwidth.m_as(GB/second)
+    pcie4 = Hardware.Cloud.A100.interconnect.bandwidth
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(dataloader_mbs > 100, f"Throughput requirement ({dataloader_mbs:.1f} MB/s) too low.")
+    check(dataloader.to(MB / second).magnitude > 100, f"Throughput requirement ({dataloader.to(MB / second).magnitude:.1f} MB/s) too low.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     img_res_str = fmt(img_res, precision=0, commas=False)
-    dataloader_mbs_str = fmt(dataloader_mbs, precision=1, commas=False, suffix=" MB/s")
-    batch_mb_str = fmt(batch_mb, precision=1, commas=False, suffix=" MB")
-    batch_transfer_ms_str = fmt(batch_transfer_ms, precision=1, commas=False, suffix=" ms")
-    pcie4_gbs_str = fmt(pcie4_gbs, precision=0, commas=False, suffix=" GB/s")
+    dataloader_mbs_str = fmt_qty(dataloader, MB/second, precision=1, commas=False)
+    batch_mb_str = fmt_qty(batch_bytes, MB, precision=1, commas=False)
+    batch_transfer_ms_str = fmt_time(batch_transfer, millisecond, precision=1, commas=False)
+    pcie4_gbs_str = fmt_qty(pcie4, GB/second, precision=0, commas=False)
 ```
 
 \index{Data Pipeline!throughput optimization}
@@ -3796,21 +3793,22 @@ A final detail is *collation*\index{Collation!batch assembly}: the `collate_fn` 
 # │ Exports: GPT3ParameterStructures.gpt3_params_b_str, GPT3ParameterStructures.gpt3_fp16_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.physics import model_memory
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, fmt_qty, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT3ParameterStructures:
     """GPT-3 FP16 storage to motivate parameter sharding across devices."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    params_b = Models.Language.GPT3.parameters.m_as(Bparam)                                        # 175 billion
+    params_b = Models.Language.GPT3.parameters.to(Bparam).magnitude                                        # 175 billion
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     fp16_gb = model_memory(Models.Language.GPT3.parameters, BYTES_FP16, GB)                        # 350 GB
+    fp16 = fp16_gb * GB
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     gpt3_params_b_str = fmt(params_b, precision=0, commas=False)               # e.g. "175"
-    gpt3_fp16_gb_str = fmt(fp16_gb, precision=0, commas=False, suffix=" GB")                 # e.g. "350 GB"
+    gpt3_fp16_gb_str = fmt_qty(fp16, GB, precision=0, commas=False)                 # e.g. "350 GB"
 ```
 
 DataLoaders, Datasets, and collation functions answer the third question---*how does data arrive fast enough?*---by sustaining accelerator-rate throughput through parallelism, prefetching, and DMA. These structures, however, handle only *ephemeral* data: samples flow through the pipeline once per epoch and are discarded. The fourth question asks how frameworks manage data that *persists*---the model's own weights---especially when those weights exceed the memory of any single device.
@@ -4033,14 +4031,15 @@ The hardware abstraction layer isolates framework code from platform-specific de
 # │ Imports: mlsysim.core.constants (Hardware.Cloud.A100.compute.peak_flops, TFLOPs, second)
 # │ Exports: KernelDispatchAnchor.a100_tflops_fp16_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt_qty, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class KernelDispatchAnchor:
     """A100 Tensor Core peak used in the kernel-dispatch example."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    a100_tflops_fp16 = Hardware.Cloud.A100.compute.peak_flops.m_as(TFLOPs/second)
+    a100_tflops_fp16 = Hardware.Cloud.A100.compute.peak_flops.to(TFLOPs/second).magnitude
+    a100_flops_fp16 = Hardware.Cloud.A100.compute.peak_flops
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Direct hardware-constant lookup.
@@ -4049,7 +4048,7 @@ class KernelDispatchAnchor:
     check(a100_tflops_fp16 > 300, "A100 FP16 Tensor Core peak should exceed 300 TFLOP/s.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    a100_tflops_fp16_str = fmt(a100_tflops_fp16, precision=0, commas=False, suffix=" TFLOP/s")
+    a100_tflops_fp16_str = fmt_qty(a100_flops_fp16, TFLOP/second, precision=0, commas=False)
 ```
 
 The kernel manager dispatches each operation to the fastest available implementation for the current hardware. When a framework encounters a matrix multiplication, it selects among AVX-512 vector instructions on modern CPUs, cuBLAS\index{cuBLAS!kernel selection} [@nvidia_cublas] on NVIDIA GPUs, or dedicated tensor processing instructions on AI accelerators. The dispatch decision depends on input dimensions, data layout, and hardware capabilities. A $4096{\times}4096$ GEMM on an A100 GPU routes to cuBLAS Tensor Core kernels that sustain up to `{python} KernelDispatchAnchor.a100_tflops_fp16_str`, while the same operation on a CPU falls back to an AVX-512 path at roughly 2 TFLOP/s. When no specialized kernel exists, the manager falls back to a generic implementation rather than failing.
@@ -4091,7 +4090,7 @@ class ResNetGFLOPS:
     flops = Models.Vision.ResNet50.inference_flops
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    gflops = flops.m_as(GFLOPs)
+    gflops = flops.to(GFLOPs).magnitude
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     resnet_gflops_str = fmt(gflops, precision=1, commas=False)
@@ -4129,7 +4128,8 @@ The operation scheduler analyzes the computational graph to find parallelism whi
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
 from mlsysim.physics import model_memory
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt_qty, check
+from mlsysim import Models
 
 # ┌── LEGO ───────────────────────────────────────────────
 class Module7bRuntimeMemory:
@@ -4139,13 +4139,13 @@ class Module7bRuntimeMemory:
     model_7b_params = Models.Language.Llama2_7B.parameters
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    model_7b_fp16_gb = model_memory(model_7b_params, BYTES_FP16, GB)
+    model_7b_fp16 = model_7b_params * BYTES_FP16
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(round(model_7b_fp16_gb) == 14, "7-billion-parameter FP16 weights should be about 14 GB.")
+    check(round(model_7b_fp16.to(GB).magnitude) == 14, "7-billion-parameter FP16 weights should be about 14 GB.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    model_7b_fp16_gb_str = fmt(model_7b_fp16_gb, precision=0, commas=False, suffix=" GB")
+    model_7b_fp16_gb_str = fmt_qty(model_7b_fp16, GB, precision=0, commas=False)
 ```
 
 The memory manager allocates and reclaims GPU memory across the computational graph's lifetime. Model parameters (a 7-billion-parameter model consumes approximately `{python} Module7bRuntimeMemory.model_7b_fp16_gb_str` in FP16) persist for the entire training run, while activation tensors live only until the backward pass consumes them. PyTorch's caching allocator maintains a memory pool, subdividing and reusing freed blocks without returning them to CUDA, which avoids repeated `cudaMalloc` calls that can cost tens of microseconds and may be worse when they synchronize the device. For models that exceed GPU memory, the manager applies gradient checkpointing: discarding selected activations during the forward pass and recomputing them during the backward pass, trading roughly 20--33 percent additional compute for 60 percent or more memory savings (with optimal checkpoint placement).
@@ -4178,7 +4178,7 @@ class ResNetModuleParams:
     resnet50 = Models.Vision.ResNet50
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    resnet_params_m = resnet50.parameters.m_as(Mparam)
+    resnet_params_m = resnet50.parameters.to(Mparam).magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(25 <= resnet_params_m <= 26, "ResNet-50 parameter count should be about 25.6M.")
@@ -4330,7 +4330,7 @@ Hierarchical composition mirrors the hardware memory hierarchy in a systems-rele
 # │ Exports: Module7bCheckpointSize.model_7b_fp16_gb_str
 from mlsysim.physics import model_memory
 from mlsysim import Models
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt_qty, check
 
 class Module7bCheckpointSize:
     """7-billion-parameter FP16 checkpoint size for state_dict serialization prose."""
@@ -4339,13 +4339,13 @@ class Module7bCheckpointSize:
     model_7b_params = Models.Language.Llama2_7B.parameters
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    model_7b_fp16_gb = model_memory(model_7b_params, BYTES_FP16, GB)
+    model_7b_fp16 = model_7b_params * BYTES_FP16
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(round(model_7b_fp16_gb) == 14, "7-billion-parameter FP16 checkpoint should be about 14 GB.")
+    check(round(model_7b_fp16.to(GB).magnitude) == 14, "7-billion-parameter FP16 checkpoint should be about 14 GB.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    model_7b_fp16_gb_str = fmt(model_7b_fp16_gb, precision=0, commas=False, suffix=" GB")
+    model_7b_fp16_gb_str = fmt_qty(model_7b_fp16, GB, precision=0, commas=False)
 ```
 
 The state_dict() method produces a flat key-value mapping of the full module tree, where dotted path names (for example, blocks.0.conv1.weight) encode the hierarchy. This flat structure enables efficient serialization: a 7-billion-parameter model's approximately `{python} Module7bCheckpointSize.model_7b_fp16_gb_str` FP16 checkpoint can be written as a sequential byte stream, maximizing storage bandwidth utilization. The inverse operation, load_state_dict(), reconstructs the hierarchy from the flat mapping, enabling checkpoint recovery and cross-framework model exchange via formats like ONNX. @Lst-nested_modules demonstrates how the module tree enables both recursive parameter access and hierarchical state serialization.
@@ -4851,7 +4851,7 @@ optimizer.step()
 # │ Imports: mlsysim.fmt (fmt, check)
 # │ Exports: train_batch_str, train_input_str, train_hidden_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt_qty, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class TrainingStepDims:
@@ -4896,32 +4896,32 @@ When `h = torch.relu(x @ W1 + b1)` executes, PyTorch's eager execution triggers 
 # │ Context: HBM capacity footnote immediately below.
 # │
 # │ Goal: Keep the A100 HBM capacity local to the training-step narrative.
-# │ Show: A100 HBM capacity as a decimal-GB prose anchor in this chapter.
+# │ Show: A100 HBM capacity as a binary-memory prose anchor in this chapter.
 # │ How: Read the A100 memory capacity constant and format it for prose.
 # │
-# │ Imports: mlsysim.core.constants (Hardware.Cloud.A100.memory.capacity, GB)
-# │ Exports: HbmCapacityFootnote.a100_mem_str
+# │ Imports: mlsysim.core.constants (Hardware.Cloud.A100.memory.capacity)
+# │ Exports: HbmCapacityFootnote.a100_mem_gib_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import check, fmt_memory
 
 # ┌── LEGO ───────────────────────────────────────────────
 class HbmCapacityFootnote:
     """Local A100 HBM capacity anchor for the training-step footnote."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    a100_mem_gb = Hardware.Cloud.A100.memory.capacity.m_as(GiB)  # pedagogical 80 GB nominal
+    a100_mem = Hardware.Cloud.A100.memory.capacity
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Direct hardware-constant lookup.
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(a100_mem_gb >= 80, "A100 HBM capacity anchor should be at least 80 GB.")
+    check(a100_mem.to(GiB).magnitude >= 80, "A100 HBM capacity anchor should be at least 80 GiB.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    a100_mem_str = fmt(a100_mem_gb, precision=0, commas=False, suffix=" GB")
+    a100_mem_gib_str = fmt_memory(a100_mem, binary=True, precision=0, commas=False)
 ```
 
-[^fn-hbm-capacity-constraint]: **HBM (High Bandwidth Memory)**: Provides 2--3 TB/s bandwidth on modern GPUs (introduced in @sec-hardware-acceleration-memory-hierarchy-1839). HBM bandwidth determines whether operations are memory bound or compute bound, and its `{python} HbmCapacityFootnote.a100_mem_str` capacity on an A100 sets the hard ceiling on model size: weights, activations, gradients, and optimizer state must all fit simultaneously during training. When they do not, the framework must resort to offloading, checkpointing, or model parallelism, each adding complexity to what the programmer perceives as a single `loss.backward()` call. \index{HBM!capacity constraint}
+[^fn-hbm-capacity-constraint]: **HBM (High Bandwidth Memory)**: Provides 2--3 TB/s bandwidth on modern GPUs (introduced in @sec-hardware-acceleration-memory-hierarchy-1839). HBM bandwidth determines whether operations are memory bound or compute bound, and its `{python} HbmCapacityFootnote.a100_mem_gib_str` capacity on an A100 sets the hard ceiling on model size: weights, activations, gradients, and optimizer state must all fit simultaneously during training. When they do not, the framework must resort to offloading, checkpointing, or model parallelism, each adding complexity to what the programmer perceives as a single `loss.backward()` call. \index{HBM!capacity constraint}
 
 5. **Autograd Recording**: Simultaneously, PyTorch's autograd engine records a `MmBackward` node on the tape, storing references to `x` and `W1` for gradient computation.
 
@@ -4961,13 +4961,13 @@ Applying @eq-dispatch-overhead to this step, @tbl-training-step-roofline breaks 
 # │      why element-wise ops are memory-bound and benefit most from fusion.
 # │
 # │ Imports: mlsysim.core.constants (byte, KB, MB, flop, KFLOPs, MFLOPs), mlsysim.book (fmt)
-# │ Exports: train_mm1_flops_str, train_mm1_mem_str, train_mm1_ai_str,
-# │          train_relu_flops_str, train_relu_mem_str, train_relu_ai_str,
-# │          train_mm2_flops_str, train_mm2_mem_str, train_mm2_ai_str, train_ce_flops_str,
-# │          train_ce_mem_str, train_ce_ai_str, train_bwd_flops_str,
-# │          train_bwd_mem_str, train_bwd_ai_str
+# │ Exports: train_mm1_flops_str, train_mm1_mem_mb_str, train_mm1_ai_str,
+# │          train_relu_flops_str, train_relu_mem_kb_str, train_relu_ai_str,
+# │          train_mm2_flops_str, train_mm2_mem_kb_str, train_mm2_ai_str, train_ce_flops_str,
+# │          train_ce_mem_kb_str, train_ce_ai_str, train_bwd_flops_str,
+# │          train_bwd_mem_mb_str, train_bwd_ai_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, MarkdownStr
+from mlsysim.fmt import fmt, check, MarkdownStr, fmt_qty
 
 # ┌── LEGO ───────────────────────────────────────────────
 class TrainingStepCalc:
@@ -4981,30 +4981,30 @@ class TrainingStepCalc:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Step 1: MatMul 1: [32, 784] @ [784, 256]
-    mm1_flops = 2 * _batch * _input * _hidden                                  # ~12.8M FLOPs
-    mm1_mem_bytes = (_batch * _input + _input * _hidden + _batch * _hidden) * 4  # FP32
+    mm1_flops = 2 * _batch * _input * _hidden * flop                            # ~12.8M FLOPs
+    mm1_mem = (_batch * _input + _input * _hidden + _batch * _hidden) * 4 * byte  # FP32
 
     # Step 2: ReLU: [32, 256]
-    relu_flops = _batch * _hidden                                               # ~8K FLOPs
-    relu_mem_bytes = (_batch * _hidden) * 2 * 4                                # read + write
+    relu_flops = _batch * _hidden * flop                                        # ~8K FLOPs
+    relu_mem = (_batch * _hidden) * 2 * 4 * byte                                # read + write
 
     # Step 3: MatMul 2: [32, 256] @ [256, 10]
-    mm2_flops = 2 * _batch * _hidden * _output                                 # ~164K FLOPs
-    mm2_mem_bytes = (_batch * _hidden + _hidden * _output + _batch * _output) * 4
+    mm2_flops = 2 * _batch * _hidden * _output * flop                           # ~164K FLOPs
+    mm2_mem = (_batch * _hidden + _hidden * _output + _batch * _output) * 4 * byte
 
     # Step 4: Cross Entropy: [32, 10]
-    ce_flops = _batch * _output * 3                                             # ~1K FLOPs (exp + sum + div)
-    ce_mem_bytes = (_batch * _output) * 2 * 4
+    ce_flops = _batch * _output * 3 * flop                                      # ~1K FLOPs (exp + sum + div)
+    ce_mem = (_batch * _output) * 2 * 4 * byte
 
     # Step 5: Backward pass (2x forward FLOPs, ~3x forward memory traffic)
     forward_flops = mm1_flops + relu_flops + mm2_flops + ce_flops
-    forward_mem_bytes = mm1_mem_bytes + relu_mem_bytes + mm2_mem_bytes + ce_mem_bytes
+    forward_mem = mm1_mem + relu_mem + mm2_mem + ce_mem
     bwd_flops = 2 * forward_flops
-    bwd_mem_bytes = 3 * forward_mem_bytes
-    bwd_ai = bwd_flops / bwd_mem_bytes
+    bwd_mem = 3 * forward_mem
+    bwd_ai = (bwd_flops / bwd_mem).to(flop / byte).magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(mm1_flops/mm1_mem_bytes > relu_flops/relu_mem_bytes,
+    check((mm1_flops / mm1_mem).to(flop / byte).magnitude > (relu_flops / relu_mem).to(flop / byte).magnitude,
           "MatMul must have higher arithmetic intensity than ReLU.")
     check(bwd_flops > forward_flops,
           "Backward FLOPs should exceed forward FLOPs in this approximation.")
@@ -5012,34 +5012,34 @@ class TrainingStepCalc:
           f"Backward arithmetic intensity ({bwd_ai:.1f}) drifted from the expected range.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    train_mm1_flops_str = fmt((mm1_flops * flop).m_as(MFLOPs), precision=1, commas=False, suffix=" MFLOPs")
-    train_mm1_mem_str = fmt((mm1_mem_bytes * byte).m_as(MB), precision=1, commas=False, suffix=" MB")
-    train_mm1_ai_str = fmt(mm1_flops/mm1_mem_bytes, precision=1, commas=False)
+    train_mm1_flops_str = fmt_qty(mm1_flops, MFLOPs, precision=1, commas=False)
+    train_mm1_mem_mb_str = fmt_qty(mm1_mem, MB, precision=1, commas=False)
+    train_mm1_ai_str = fmt_arithmetic_intensity((mm1_flops / mm1_mem), unit=flop / byte, precision=1, commas=False)
 
-    train_relu_flops_str = fmt((relu_flops * flop).m_as(KFLOPs), precision=1, commas=False, suffix=" KFLOPs")
-    train_relu_mem_str = fmt((relu_mem_bytes * byte).m_as(KB), precision=1, commas=False, suffix=" KB")
-    train_relu_ai_str = fmt(relu_flops/relu_mem_bytes, precision=3, commas=False)
+    train_relu_flops_str = fmt_qty(relu_flops, KFLOPs, precision=1, commas=False)
+    train_relu_mem_kb_str = fmt_qty(relu_mem, KB, precision=1, commas=False)
+    train_relu_ai_str = fmt_arithmetic_intensity((relu_flops / relu_mem), unit=flop / byte, precision=3, commas=False)
 
-    train_mm2_flops_str = fmt((mm2_flops * flop).m_as(KFLOPs), precision=1, commas=False, suffix=" KFLOPs")
-    train_mm2_mem_str = fmt((mm2_mem_bytes * byte).m_as(KB), precision=1, commas=False, suffix=" KB")
-    train_mm2_ai_str = fmt(mm2_flops/mm2_mem_bytes, precision=1, commas=False)
+    train_mm2_flops_str = fmt_qty(mm2_flops, KFLOPs, precision=1, commas=False)
+    train_mm2_mem_kb_str = fmt_qty(mm2_mem, KB, precision=1, commas=False)
+    train_mm2_ai_str = fmt_arithmetic_intensity((mm2_flops / mm2_mem), unit=flop / byte, precision=1, commas=False)
 
-    train_ce_flops_str = fmt((ce_flops * flop).m_as(KFLOPs), precision=1, commas=False, suffix=" KFLOPs")
-    train_ce_mem_str = fmt((ce_mem_bytes * byte).m_as(KB), precision=1, commas=False, suffix=" KB")
-    train_ce_ai_str = fmt(ce_flops/ce_mem_bytes, precision=1, commas=False)
+    train_ce_flops_str = fmt_qty(ce_flops, KFLOPs, precision=1, commas=False)
+    train_ce_mem_kb_str = fmt_qty(ce_mem, KB, precision=1, commas=False)
+    train_ce_ai_str = fmt_arithmetic_intensity((ce_flops / ce_mem), unit=flop / byte, precision=1, commas=False)
 
-    train_bwd_flops_str = fmt((bwd_flops * flop).m_as(MFLOPs), precision=1, commas=False, suffix=" MFLOPs")
-    train_bwd_mem_str = fmt((bwd_mem_bytes * byte).m_as(MB), precision=1, commas=False, suffix=" MB")
+    train_bwd_flops_str = fmt_qty(bwd_flops, MFLOPs, precision=1, commas=False)
+    train_bwd_mem_mb_str = fmt_qty(bwd_mem, MB, precision=1, commas=False)
     train_bwd_ai_str = fmt(bwd_ai, precision=1, commas=False)
 ```
 
-| **Component**                    |                                         **FLOPs**                                         |               **Memory Traffic**               |            **Arithmetic Intensity**           |
-|:---------------------------------|:-----------------------------------------------------------------------------------------:|:----------------------------------------------:|:---------------------------------------------:|
-| **MatMul (x @ W1)**              | 2 $\times$ 32 $\times$ $784{\times}256$ = `{python} TrainingStepCalc.train_mm1_flops_str` | `{python} TrainingStepCalc.train_mm1_mem_str`  |  `{python} TrainingStepCalc.train_mm1_ai_str` |
-| **ReLU**                         |             $32{\times}256$ = `{python} TrainingStepCalc.train_relu_flops_str`            | `{python} TrainingStepCalc.train_relu_mem_str` | `{python} TrainingStepCalc.train_relu_ai_str` |
-| **MatMul (h @ W2)**              |  2 $\times$ 32 $\times$ $256{\times}10$ = `{python} TrainingStepCalc.train_mm2_flops_str` | `{python} TrainingStepCalc.train_mm2_mem_str`  |  `{python} TrainingStepCalc.train_mm2_ai_str` |
-| **Cross-entropy**                |                      ~`{python} TrainingStepCalc.train_ce_flops_str`                      |  `{python} TrainingStepCalc.train_ce_mem_str`  |  `{python} TrainingStepCalc.train_ce_ai_str`  |
-| **Backward (2$\times$ forward)** |                      ~`{python} TrainingStepCalc.train_bwd_flops_str`                     | `{python} TrainingStepCalc.train_bwd_mem_str`  |  `{python} TrainingStepCalc.train_bwd_ai_str` |
+| **Component**                    |                                         **FLOPs**                                         |                 **Memory Traffic**                |            **Arithmetic Intensity**           |
+|:---------------------------------|:-----------------------------------------------------------------------------------------:|:-------------------------------------------------:|:---------------------------------------------:|
+| **MatMul (x @ W1)**              | 2 $\times$ 32 $\times$ $784{\times}256$ = `{python} TrainingStepCalc.train_mm1_flops_str` |  `{python} TrainingStepCalc.train_mm1_mem_mb_str` |  `{python} TrainingStepCalc.train_mm1_ai_str` |
+| **ReLU**                         |             $32{\times}256$ = `{python} TrainingStepCalc.train_relu_flops_str`            | `{python} TrainingStepCalc.train_relu_mem_kb_str` | `{python} TrainingStepCalc.train_relu_ai_str` |
+| **MatMul (h @ W2)**              |  2 $\times$ 32 $\times$ $256{\times}10$ = `{python} TrainingStepCalc.train_mm2_flops_str` |  `{python} TrainingStepCalc.train_mm2_mem_kb_str` |  `{python} TrainingStepCalc.train_mm2_ai_str` |
+| **Cross-entropy**                |                      ~`{python} TrainingStepCalc.train_ce_flops_str`                      |  `{python} TrainingStepCalc.train_ce_mem_kb_str`  |  `{python} TrainingStepCalc.train_ce_ai_str`  |
+| **Backward (2$\times$ forward)** |                      ~`{python} TrainingStepCalc.train_bwd_flops_str`                     |  `{python} TrainingStepCalc.train_bwd_mem_mb_str` |  `{python} TrainingStepCalc.train_bwd_ai_str` |
 
 : **Per-Operation Roofline Analysis**: FLOPs, memory traffic, and arithmetic intensity for each operation in a two-layer MLP training step. MatMul operations have much higher arithmetic intensity than element-wise operations, while ReLU and cross-entropy are memory-bound; on high-end GPUs, small MatMuls may still fall below the ridge point, which is why this training step remains overhead- and memory-sensitive. {#tbl-training-step-roofline tbl-colwidths="[29,29,20,22]"}
 
@@ -5057,11 +5057,11 @@ class TrainingStepCalc:
 # │      This explains why torch.compile provides 2-3x speedup for small models.
 # │
 # │ Imports: mlsysim.core.constants (Hardware.Cloud.A100.compute.peak_flops, Hardware.Cloud.A100.memory.bandwidth), mlsysim.book (fmt)
-# │ Exports: mnist_total_flops_str, mnist_mem_traffic_str, a100_peak_tflops_str,
+# │ Exports: mnist_total_flops_str, mnist_mem_traffic_mb_str, a100_peak_tflops_str,
 # │          a100_mem_bw_tbs_str, mnist_t_compute_us_str, mnist_t_memory_us_str,
 # │          mnist_n_ops_str, mnist_us_per_op_str, mnist_t_overhead_us_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, MarkdownStr
+from mlsysim.fmt import fmt, check, MarkdownStr, fmt_time, fmt_qty
 
 class MnistTrainingStepCalc:
     """MNIST overhead-bound analysis: dispatch dominates compute and memory on A100."""
@@ -5072,45 +5072,45 @@ class MnistTrainingStepCalc:
     _output = 10
     n_ops = 6                                                                   # 6 kernel launches
     us_per_op = 5                                                               # 5 μs dispatch/op
-    peak_flops = Hardware.Cloud.A100.compute.peak_flops.m_as(flop/second)                      # 312e12 FLOP/s
-    mem_bw_bytes = Hardware.Cloud.A100.memory.bandwidth.m_as(byte/second)                               # ~2e12 B/s
+    peak_flops = Hardware.Cloud.A100.compute.peak_flops
+    mem_bw = Hardware.Cloud.A100.memory.bandwidth
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    mm1_flops = 2 * _batch * _input * _hidden
-    mm1_mem_bytes = (_batch * _input + _input * _hidden + _batch * _hidden) * 4
-    relu_flops = _batch * _hidden
-    relu_mem_bytes = (_batch * _hidden) * 2 * 4
-    mm2_flops = 2 * _batch * _hidden * _output
-    mm2_mem_bytes = (_batch * _hidden + _hidden * _output + _batch * _output) * 4
-    ce_flops = _batch * _output * 3
-    ce_mem_bytes = (_batch * _output) * 2 * 4
+    mm1_flops = 2 * _batch * _input * _hidden * flop
+    mm1_mem = (_batch * _input + _input * _hidden + _batch * _hidden) * 4 * byte
+    relu_flops = _batch * _hidden * flop
+    relu_mem = (_batch * _hidden) * 2 * 4 * byte
+    mm2_flops = 2 * _batch * _hidden * _output * flop
+    mm2_mem = (_batch * _hidden + _hidden * _output + _batch * _output) * 4 * byte
+    ce_flops = _batch * _output * 3 * flop
+    ce_mem = (_batch * _output) * 2 * 4 * byte
     forward_flops = mm1_flops + relu_flops + mm2_flops + ce_flops
-    forward_mem_bytes = mm1_mem_bytes + relu_mem_bytes + mm2_mem_bytes + ce_mem_bytes
+    forward_mem = mm1_mem + relu_mem + mm2_mem + ce_mem
     bwd_flops = 2 * forward_flops
-    bwd_mem_bytes = 3 * forward_mem_bytes
+    bwd_mem = 3 * forward_mem
     total_flops = forward_flops + bwd_flops
-    mem_traffic_bytes = forward_mem_bytes + bwd_mem_bytes
-    t_compute_us = total_flops/peak_flops * MILLION                          # ~0.1 μs
-    t_memory_us = mem_traffic_bytes/mem_bw_bytes * MILLION                   # ~2 μs
+    mem_traffic = forward_mem + bwd_mem
+    t_compute = (total_flops / peak_flops).to(microsecond)
+    t_memory = (mem_traffic / mem_bw).to(microsecond)
     t_overhead_us = n_ops * us_per_op                                          # 30 μs (dominant!)
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(t_overhead_us > 10 * max(t_compute_us, t_memory_us),
-          f"Expected overhead to dominate, got overhead={t_overhead_us:.1f} μs, compute={t_compute_us:.2f} μs, memory={t_memory_us:.2f} μs.")
+    check(t_overhead_us > 10 * max(t_compute.to(microsecond).magnitude, t_memory.to(microsecond).magnitude),
+          f"Expected overhead to dominate, got overhead={t_overhead_us:.1f} μs, compute={t_compute.to(microsecond).magnitude:.2f} μs, memory={t_memory.to(microsecond).magnitude:.2f} μs.")
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    mnist_t_compute_us_str = fmt(t_compute_us, precision=1, commas=False, suffix=" μs")
-    mnist_t_memory_us_str = fmt(t_memory_us, precision=1, commas=False, suffix=" μs")
-    mnist_t_overhead_us_str = fmt(t_overhead_us, precision=0, commas=False, suffix=" μs")
-    mnist_total_flops_str = fmt(total_flops/MILLION, precision=1, commas=False, suffix=" MFLOPs")
-    mnist_mem_traffic_str = fmt(mem_traffic_bytes/MILLION, precision=1, commas=False, suffix=" MB")
+    mnist_t_compute_us_str = fmt_time(t_compute, microsecond, precision=1, commas=False)
+    mnist_t_memory_us_str = fmt_time(t_memory, microsecond, precision=1, commas=False)
+    mnist_t_overhead_us_str = fmt_time(t_overhead_us, microsecond, precision=0, commas=False)
+    mnist_total_flops_str = fmt_qty(total_flops, MFLOPs, precision=1, commas=False)
+    mnist_mem_traffic_mb_str = fmt_qty(mem_traffic, MB, precision=1, commas=False)
     mnist_n_ops_str = fmt(n_ops, precision=0, commas=False)
-    mnist_us_per_op_str = fmt(us_per_op, precision=0, commas=False, suffix=" μs")
-    a100_peak_tflops_str = fmt(peak_flops/TRILLION, precision=0, commas=False, suffix=" TFLOP/s")
-    a100_mem_bw_tbs_str = fmt(mem_bw_bytes/TRILLION, precision=1, commas=False, suffix=" TB/s")
+    mnist_us_per_op_str = fmt_time(us_per_op, 'microsecond', precision=0, commas=False)
+    a100_peak_tflops_str = fmt_qty(peak_flops, TFLOP/second, precision=0, commas=False)
+    a100_mem_bw_tbs_str = fmt_qty(mem_bw, TB/second, precision=1, commas=False)
 ```
 
-Total: ~`{python} MnistTrainingStepCalc.mnist_total_flops_str`, ~`{python} MnistTrainingStepCalc.mnist_mem_traffic_str` memory traffic. On an A100:
+Total: ~`{python} MnistTrainingStepCalc.mnist_total_flops_str`, ~`{python} MnistTrainingStepCalc.mnist_mem_traffic_mb_str` memory traffic. On an A100:
 
 - $T_{\text{compute}} \approx$ `{python} MnistTrainingStepCalc.mnist_total_flops_str`/`{python} MnistTrainingStepCalc.a100_peak_tflops_str` ≈ `{python} MnistTrainingStepCalc.mnist_t_compute_us_str`
-- $T_{\text{memory}} \approx$ `{python} MnistTrainingStepCalc.mnist_mem_traffic_str`/`{python} MnistTrainingStepCalc.a100_mem_bw_tbs_str` ≈ `{python} MnistTrainingStepCalc.mnist_t_memory_us_str`
+- $T_{\text{memory}} \approx$ `{python} MnistTrainingStepCalc.mnist_mem_traffic_mb_str`/`{python} MnistTrainingStepCalc.a100_mem_bw_tbs_str` ≈ `{python} MnistTrainingStepCalc.mnist_t_memory_us_str`
 - $T_{\text{overhead}} \approx$ `{python} MnistTrainingStepCalc.mnist_n_ops_str` ops $\times$ `{python} MnistTrainingStepCalc.mnist_us_per_op_str` ≈ `{python} MnistTrainingStepCalc.mnist_t_overhead_us_str`
 
 The training step is overhead-bound.\index{Overhead-Bound!small model training} For small models, Python dispatch and kernel launch dominate. This explains why:
@@ -5178,37 +5178,37 @@ Engineers assume training framework choice is independent of deployment infrastr
 # │ Context: Fallacy about batch size being free optimization
 # │
 # │ Goal: Dispel the myth that "small" models leave infinite room for batching.
-# │ Show: That 14 GB of weights consumes 18% of an A100 before training starts.
+# │ Show: That FP16 weights consume a meaningful share of A100 HBM before training starts.
 # │ How: Calculate weight memory for 7 billion parameters in FP16.
 # │
-# │ Imports: mlsysim.core.constants (Hardware.Cloud.A100.memory.capacity, BYTES_FP16, GB),
+# │ Imports: mlsysim.core.constants (Hardware.Cloud.A100.memory.capacity, BYTES_FP16),
 # │          mlsysim.physics (model_memory)
-# │ Exports: Model7BMemory.model_7b_fp16_gb_str,
-# │          Model7BMemory.a100_remaining_7b_gb_str, Model7BMemory.a100_mem_str
+# │ Exports: Model7BMemory.model_7b_fp16_gib_str,
+# │          Model7BMemory.a100_remaining_7b_gib_str, Model7BMemory.a100_mem_gib_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.physics import model_memory
+from mlsysim.fmt import check, fmt_memory
 from mlsysim import Models
-from mlsysim.fmt import fmt, check
 
 class Model7BMemory:
     """7-billion-parameter FP16 weight memory to show batch-size myth under capacity constraints."""
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     params = Models.Language.Llama2_7B.parameters
-    a100_mem = Hardware.Cloud.A100.memory.capacity.m_as(GiB)  # pedagogical 80 GB nominal
+    a100_mem = Hardware.Cloud.A100.memory.capacity
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    fp16_gb = model_memory(params, BYTES_FP16, GB)                             # 14 GB
-    remaining_gb = a100_mem - fp16_gb
+    fp16 = params * BYTES_FP16                                                  # 14 GB
+    remaining = a100_mem - fp16
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(remaining_gb > 60, f"7-billion-parameter FP16 weights leave less A100 memory than expected: {remaining_gb:.1f} GB.")
+    check(remaining.to(GiB).magnitude > 60, f"7-billion-parameter FP16 weights leave less A100 memory than expected: {remaining.to(GiB).magnitude:.1f} GiB.")
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    model_7b_fp16_gb_str = fmt(fp16_gb, precision=0, commas=False, suffix=" GB")             # e.g. "14 GB"
-    a100_remaining_7b_gb_str = fmt(remaining_gb, precision=0, commas=False, suffix=" GB")     # e.g. "66 GB"
-    a100_mem_str = fmt(a100_mem, precision=0, commas=False, suffix=" GB")                    # e.g. "80 GB"
+    model_7b_fp16_gib_str = fmt_memory(fp16, binary=True, precision=1, commas=False)                 # e.g. "13.0 GiB"
+    a100_remaining_7b_gib_str = fmt_memory(remaining, binary=True, precision=1, commas=False)         # e.g. "67.0 GiB"
+    a100_mem_gib_str = fmt_memory(a100_mem, binary=True, precision=0, commas=False)                   # e.g. "80 GiB"
 ```
 
 **Fallacy**: *"Increasing batch size is a free throughput optimization within framework memory limits."*
 
-Engineers assume that if memory is available, larger batches always improve throughput. The mini-batch processing discussion in @sec-model-training-minibatch-processing-4eb0 explains the throughput target, but activation memory can reverse the benefit. A 7-billion-parameter model in FP16 consumes `{python} Model7BMemory.model_7b_fp16_gb_str`, leaving `{python} Model7BMemory.a100_remaining_7b_gb_str` on an `{python} Model7BMemory.a100_mem_str` A100. Increasing batch size from 8 to 32 quadruples the batch-dependent activation footprint; transformer attention adds a large $\mathcal{O}(S^2)$ term in sequence length that makes each sample expensive. The resulting memory pressure can trigger recomputation strategies that reduce throughput by 20--30 percent despite the larger batch. Teams that blindly maximize batch size often achieve lower throughput than smaller batches that avoid these memory management pathways.
+Engineers assume that if memory is available, larger batches always improve throughput. The mini-batch processing discussion in @sec-model-training-minibatch-processing-4eb0 explains the throughput target, but activation memory can reverse the benefit. A 7-billion-parameter model in FP16 consumes `{python} Model7BMemory.model_7b_fp16_gib_str`, leaving `{python} Model7BMemory.a100_remaining_7b_gib_str` on an `{python} Model7BMemory.a100_mem_gib_str` A100. Increasing batch size from 8 to 32 quadruples the batch-dependent activation footprint; transformer attention adds a large $\mathcal{O}(S^2)$ term in sequence length that makes each sample expensive. The resulting memory pressure can trigger recomputation strategies that reduce throughput by 20--30 percent despite the larger batch. Teams that blindly maximize batch size often achieve lower throughput than smaller batches that avoid these memory management pathways.
 
 **Pitfall**: *Treating compilation overhead as negligible.*
 
@@ -5228,10 +5228,10 @@ Engineers assume that if memory is available, larger batches always improve thro
 # │
 # │ Imports: mlsysim.book (fmt, check)
 # │ Exports: resnet_compile_speedup_pct_str, compile_min_s_str, compile_max_s_str,
-# │          n_images_str, n_recompilations_str, eager_total_str, compiled_total_str,
+# │          n_images_str, n_recompilations_str, eager_total_s_str, compiled_total_s_str,
 # │          compilation_time_s_str, compiled_slowdown_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, check, fmt_time
 
 class CompilationOverheadCalc:
     """Break-even analysis showing frequent recompilation negates compiled-mode throughput gains."""
@@ -5255,20 +5255,20 @@ class CompilationOverheadCalc:
     check(compiled_slowdown > 40,
           f"Expected frequent recompilation to be >40x slower, got {compiled_slowdown:.1f}x.")
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    resnet_compile_speedup_pct_str = fmt(resnet_compile_speedup_pct, precision=1, commas=False, suffix="%")
-    compile_min_s_str = fmt(compile_min_s, precision=0, commas=False, suffix=" s")
-    compile_max_s_str = fmt(compile_max_s, precision=0, commas=False, suffix=" s")
+    resnet_compile_speedup_pct_str = fmt_percent(resnet_compile_speedup_pct/100, precision=1, commas=False, style='symbol')
+    compile_min_s_str = fmt_time(compile_min_s, 'second', precision=0, commas=False)
+    compile_max_s_str = fmt_time(compile_max_s, 'second', precision=0, commas=False)
     n_images_str = fmt(n_images, precision=0)                                   # e.g. "10,000"
     n_recompilations_str = fmt(n_recompilations, precision=0, commas=False)    # e.g. "10"
     eager_throughput_str = fmt(eager_throughput, precision=0)                   # e.g. "1,450"
     compiled_throughput_str = fmt(compiled_throughput, precision=0)             # e.g. "2,150"
-    compilation_time_s_str = fmt(compilation_time_s, precision=0, commas=False, suffix=" s")  # e.g. "30 s"
-    eager_total_str = fmt(eager_total, precision=1, commas=False, suffix=" s")              # e.g. "6.9 s"
-    compiled_total_str = fmt(compiled_total, precision=1, commas=False, suffix=" s")        # e.g. "304.7 s"
-    compiled_slowdown_str = fmt(compiled_slowdown, precision=1, commas=False, suffix="×")  # e.g. "44×"
+    compilation_time_s_str = fmt_time(compilation_time_s, 'second', precision=0, commas=False)  # e.g. "30 s"
+    eager_total_s_str = fmt_time(eager_total, 'second', precision=1, commas=False)              # e.g. "6.9 s"
+    compiled_total_s_str = fmt_time(compiled_total, 'second', precision=1, commas=False)        # e.g. "304.7 s"
+    compiled_slowdown_str = fmt_multiple(compiled_slowdown, precision=1, commas=False)  # e.g. "44×"
 ```
 
-Engineers assume compilation overhead is a one-time cost that pays off quickly. @Tbl-training-benchmark shows torch.compile achieves `{python} CompilationOverheadCalc.resnet_compile_speedup_pct_str` higher ResNet-50 throughput, but the same table also assigns ResNet-50 a compile window of `{python} CompilationOverheadCalc.compile_min_s_str` to `{python} CompilationOverheadCalc.compile_max_s_str` per graph change. For a `{python} CompilationOverheadCalc.n_images_str`-image experiment with `{python} CompilationOverheadCalc.n_recompilations_str` code changes: Eager completes in `{python} CompilationOverheadCalc.eager_total_str`, whereas Compiled requires `{python} CompilationOverheadCalc.compiled_total_str` (including `{python} CompilationOverheadCalc.n_recompilations_str` $\times$ `{python} CompilationOverheadCalc.compilation_time_s_str` recompilation overhead), making the compiled workflow about `{python} CompilationOverheadCalc.compiled_slowdown_str` slower in this rapid-prototyping scenario. Teams that enable compilation during rapid prototyping can waste minutes waiting for recompilations that negate any throughput gains.
+Engineers assume compilation overhead is a one-time cost that pays off quickly. @Tbl-training-benchmark shows torch.compile achieves `{python} CompilationOverheadCalc.resnet_compile_speedup_pct_str` higher ResNet-50 throughput, but the same table also assigns ResNet-50 a compile window of `{python} CompilationOverheadCalc.compile_min_s_str` to `{python} CompilationOverheadCalc.compile_max_s_str` per graph change. For a `{python} CompilationOverheadCalc.n_images_str`-image experiment with `{python} CompilationOverheadCalc.n_recompilations_str` code changes: Eager completes in `{python} CompilationOverheadCalc.eager_total_s_str`, whereas Compiled requires `{python} CompilationOverheadCalc.compiled_total_s_str` (including `{python} CompilationOverheadCalc.n_recompilations_str` $\times$ `{python} CompilationOverheadCalc.compilation_time_s_str` recompilation overhead), making the compiled workflow about `{python} CompilationOverheadCalc.compiled_slowdown_str`$\times$ slower in this rapid-prototyping scenario. Teams that enable compilation during rapid prototyping can waste minutes waiting for recompilations that negate any throughput gains.
 
 ## Summary {#sec-ml-frameworks-summary-07f0}
 

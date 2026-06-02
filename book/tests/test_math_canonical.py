@@ -46,3 +46,68 @@ class GoodFormatting:
     assert not [
         issue for issue in issues if issue.code == "manual_fmt_string_assembly"
     ]
+
+
+def test_math_canonical_allows_typed_range_helpers(tmp_path):
+    chapter = tmp_path / "chapter.qmd"
+    chapter.write_text(
+        """
+```{python}
+from mlsysim.fmt import fmt_usd_range
+
+class GoodFormatting:
+    cost_str = fmt_usd_range(25000, 30000, repeat_symbol=False)
+```
+""",
+        encoding="utf-8",
+    )
+
+    issues = audit([chapter])
+
+    assert not [
+        issue for issue in issues if issue.code == "noncanonical_str_assign"
+    ]
+
+
+def test_math_canonical_allows_rounded_quantity_helper(tmp_path):
+    chapter = tmp_path / "chapter.qmd"
+    chapter.write_text(
+        """
+```{python}
+from mlsysim.fmt import fmt_qty_int
+
+class GoodFormatting:
+    memory_str = fmt_qty_int(memory, GB, commas=False)
+```
+""",
+        encoding="utf-8",
+    )
+
+    issues = audit([chapter])
+
+    assert not [
+        issue for issue in issues if issue.code == "noncanonical_str_assign"
+    ]
+
+
+def test_math_canonical_allows_domain_formatters(tmp_path):
+    chapter = tmp_path / "chapter.qmd"
+    chapter.write_text(
+        """
+```{python}
+from mlsysim.fmt import fmt_flop_rate, fmt_params, fmt_water_rate
+
+class GoodFormatting:
+    peak_str = fmt_flop_rate(peak, unit=TFLOP / second, precision=0)
+    params_str = fmt_params(params, scale="B", precision=1)
+    water_str = fmt_water_rate(water, precision=0)
+```
+""",
+        encoding="utf-8",
+    )
+
+    issues = audit([chapter])
+
+    assert not [
+        issue for issue in issues if issue.code == "noncanonical_str_assign"
+    ]

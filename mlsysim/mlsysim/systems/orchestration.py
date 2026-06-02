@@ -6,7 +6,7 @@ from ..core.types import Metadata
 
 
 class Orchestration(BaseModel):
-    """Shared cluster scheduling assumptions for worked examples."""
+    """Shared cluster scheduling assumptions for scenario calculations."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
     target_cluster_utilization: float = 0.80

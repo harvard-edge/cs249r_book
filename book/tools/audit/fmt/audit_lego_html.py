@@ -47,7 +47,7 @@ CHAPTER_LIST = {
         "introduction", "ml_systems", "ml_workflow", "data_engineering", "nn_computation",
         "nn_architectures", "frameworks", "training", "data_selection", "model_compression",
         "hw_acceleration", "benchmarking", "model_serving", "ml_ops", "responsible_engr",
-        "conclusion", "appendix_algorithm", "appendix_assumptions", "appendix_dam",
+        "conclusion", "appendix_algorithm", "appendix_assumptions",
         "appendix_data", "appendix_machine",
     ],
     "vol2": [
@@ -56,7 +56,8 @@ CHAPTER_LIST = {
         "fleet_orchestration", "performance_engineering", "inference", "edge_intelligence",
         "ops_scale", "security_privacy", "robust_ai", "sustainable_ai", "responsible_ai",
         "conclusion", "appendix_dam", "appendix_fleet", "appendix_communication",
-        "appendix_reliability", "appendix_c3", "appendix_assumptions",
+        "appendix_reliability", "appendix_inference", "appendix_c3",
+        "appendix_assumptions",
     ],
 }
 
@@ -70,6 +71,17 @@ def _chapter_paths(root: Path) -> list[tuple[str, str, Path, Path]]:
             else:
                 qmd = root / f"book/quarto/contents/{vol}/{name}/{name}.qmd"
             html = root / f"book/quarto/_build/html-audit/{vol}/{name}.html"
+            if not html.is_file():
+                if name.startswith("appendix_"):
+                    html = (
+                        root
+                        / f"book/quarto/_build/html-{vol}/contents/{vol}/backmatter/{name}.html"
+                    )
+                else:
+                    html = (
+                        root
+                        / f"book/quarto/_build/html-{vol}/contents/{vol}/{name}/{name}.html"
+                    )
             out.append((vol, name, qmd, html))
     return out
 

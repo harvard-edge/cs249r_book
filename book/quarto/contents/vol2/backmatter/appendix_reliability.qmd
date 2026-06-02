@@ -23,10 +23,10 @@ from mlsysim.core.constants import *
 # │
 # │ Imports: mlsysim.core.constants (*), mlsysim.physics (calc_*), mlsysim.book (*)
 # │ Exports: R = ReliabilityFoundations (accessed as R.attribute in downstream cells)
-# │          RS = ReliabilityStrings (formatted strings: RS.gpu_mttf, RS.cluster_mtbf_10k_str, etc.)
+# │          RS = ReliabilityStrings (formatted strings: RS.gpu_mttf, RS.cluster_mtbf_10k_hours_str, etc.)
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt, check, MarkdownStr
+from mlsysim.fmt import fmt, check, MarkdownStr, fmt_qty
 
 from mlsysim.physics import (calc_mtbf_cluster, calc_mtbf_node,
     calc_young_daly_interval, calc_failure_probability,
@@ -63,11 +63,11 @@ class ReliabilityFoundations:
     ]
 
     # Recovery Params
-    t_detect = Systems.Reliability.Recovery.heartbeat_timeout_s
-    t_reschedule = Systems.Reliability.Recovery.reschedule_time_s
-    ckpt_write_bw = Systems.Reliability.Recovery.checkpoint_write_bw_gbs
+    t_detect = Systems.Reliability.Recovery.heartbeat_timeout_s * second
+    t_reschedule = Systems.Reliability.Recovery.reschedule_time_s * second
+    ckpt_write_bw = Systems.Reliability.Recovery.checkpoint_write_bw_gbs * (GB / second)
 
-    model_sizes_params = [7e9, 13e9, Models.Language.Llama2_70B.parameters.m_as(param), Models.Language.GPT3.parameters.m_as(param), 1e12]
+    model_sizes_params = [7 * Bparam, 13 * Bparam, Models.Language.Llama2_70B.parameters, Models.Language.GPT3.parameters, 1 * Tparam]
     model_labels = ["7B", "13B", "70B", "175B", "1T"]
 
     avail_replicas = [1, 2, 3, 4, 5]
@@ -93,26 +93,27 @@ class ReliabilityFoundations:
     # Step 3: Canonical 10K-GPU cluster
     nodes_10k = Systems.Clusters.Training_10K.count
     cluster_mtbf_10k = node_mtbf/nodes_10k
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    canonical_cluster_gpus_str = fmt(Systems.Clusters.Training_10K.total_accelerators, precision=0, commas=True)
 
     # Step 4: Young-Daly (10K cluster, 175B model)
-    ckpt_175b_bytes = calc_checkpoint_size(Models.Language.GPT3.parameters.m_as(param))
-    ckpt_175b_gb = ckpt_175b_bytes.m_as(GB)
-    ckpt_write_time_s = ckpt_175b_gb/ckpt_write_bw
+    ckpt_175b_bytes = calc_checkpoint_size(Models.Language.GPT3.parameters)
+    ckpt_175b_gb = ckpt_175b_bytes.to(GB)
+    ckpt_write_time_s = (ckpt_175b_bytes / ckpt_write_bw).to(second)
 
-    cluster_mtbf_10k_s = cluster_mtbf_10k.m_as(ureg.second)
+    cluster_mtbf_10k_s = cluster_mtbf_10k.to(second)
     tau_opt_s = calc_young_daly_interval(ckpt_write_time_s, cluster_mtbf_10k_s)
-    tau_opt_min = tau_opt_s.m_as(ureg.minute)
+    tau_opt_min = tau_opt_s.to(minute)
 
     # Step 5: Recovery Sum
     t_reload_s = ckpt_write_time_s
     t_replay_s = tau_opt_s / 2
     t_recovery_total_s = (
-        (t_detect + t_reschedule + t_reload_s) * ureg.second + t_replay_s
-    ).m_as(ureg.minute)
-    overhead_ckpt = ckpt_write_time_s / tau_opt_s.m_as(ureg.second)
-    overhead_failure = (t_recovery_total_s * MINUTES_PER_HOUR) / cluster_mtbf_10k_s
+        t_detect + t_reschedule + t_reload_s + t_replay_s
+    ).to(minute)
+    overhead_ckpt = (ckpt_write_time_s / tau_opt_s).to_base_units().magnitude
+    overhead_failure = (t_recovery_total_s / cluster_mtbf_10k_s).to_base_units().magnitude
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    canonical_cluster_gpus_str = fmt(Systems.Clusters.Training_10K.total_accelerators, precision=0, commas=True)
 
     @classmethod
     def nodes_for_gpus(cls, n_gpus):
@@ -124,19 +125,19 @@ class ReliabilityFoundations:
 
     @classmethod
     def p_failure(cls, n_gpus, duration_hours):
-        return calc_failure_probability(cls.cluster_mtbf(n_gpus), duration_hours * ureg.hour)
+        return calc_failure_probability(cls.cluster_mtbf(n_gpus), duration_hours * hour)
 
     @classmethod
     def ckpt_size_gb(cls, n_params):
-        return calc_checkpoint_size(n_params).m_as(GB)
+        return calc_checkpoint_size(n_params).to(GB)
 
     @classmethod
     def avail_stacked(cls, k):
         return calc_availability_stacked(cls.avail_single, k)
 
 # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-check(ReliabilityFoundations.cluster_mtbf_10k.m_as(ureg.hour) < 5.0, "10K cluster MTBF mismatch")
-check(ReliabilityFoundations.tau_opt_min > 5, "Young-Daly interval too short")
+check(ReliabilityFoundations.cluster_mtbf_10k < 5.0 * hour, "10K cluster MTBF mismatch")
+check(ReliabilityFoundations.tau_opt_s > 5 * minute, "Young-Daly interval too short")
 
 R = ReliabilityFoundations
 ```
@@ -146,19 +147,20 @@ The worked examples in this appendix use a canonical `{python} ReliabilityFounda
 ```{python}
 #| echo: false
 
+from mlsysim.fmt import fmt_time
 # ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: ReliabilityIntroRecap.gpu_mttf_str
+# │ Exports: ReliabilityIntroRecap.gpu_mttf_hours_str
 class ReliabilityIntroRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    gpu_mttf_str = fmt(Systems.Reliability.Gpu.mttf_hours, precision=0, commas=True, suffix=" hours")
+    gpu_mttf_hours_str = fmt_time(Systems.Reliability.Gpu.mttf_hours, 'hour', precision=0, commas=True, style='word')
 ```
 
 ## Purpose {.unnumbered}
 
 _***How* do we reason about failure as a statistical certainty, and *what* does the math tell us about staying alive at scale?_
 
-Individual accelerators fail rarely---a reference GPU MTTF of `{python} ReliabilityIntroRecap.gpu_mttf_str` means years between failures for a single device---but fleets are large, and probability is relentless. Scale a cluster to that canonical scale and the expected time between failures drops from years to hours. Scale further and failures arrive faster than any human operator can respond. The math is straightforward, the implications are profound: at fleet scale, failure is not an exceptional event to be debugged but a continuous physical condition to be engineered around, no different from heat dissipation or power delivery.
+Individual accelerators fail rarely---a reference GPU MTTF of `{python} ReliabilityIntroRecap.gpu_mttf_hours_str` means years between failures for a single device---but fleets are large, and probability is relentless. Scale a cluster to that canonical scale and the expected time between failures drops from years to hours. Scale further and failures arrive faster than any human operator can respond. The math is straightforward, the implications are profound: at fleet scale, failure is not an exceptional event to be debugged but a continuous physical condition to be engineered around, no different from heat dissipation or power delivery.
 
 This appendix collects the reference calculations for reasoning quantitatively about failure, recovery, and availability at scale. It provides the mathematical tools behind the fault tolerance strategies in @sec-fault-tolerance-reliability, the fleet orchestration policies in @sec-fleet-orchestration, and the operational practices in @sec-ops-scale. Within the C$^3$ taxonomy (@sec-appdx-c3-taxonomy), it develops the failure-recovery and checkpointing foundations of the Coordination ($C_3$) axis.
 
@@ -189,6 +191,7 @@ $$ \text{MTTF} = \frac{10^9}{\text{FIT}} $$ {#eq-mttf-from-fit}
 #| echo: false
 
 #| label: component-fit-table
+from mlsysim.fmt import fmt_time
 # ┌── LEGO ───────────────────────────────────────────────
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ COMPONENT FIT TABLE—MTTF IN YEARS
@@ -231,14 +234,14 @@ class ComponentFitTable:
     pcie_fit_str       = fmt(pcie_fit, precision=0)
     cable_fit_str      = fmt(cable_fit, precision=0)
     tor_fit_str        = fmt(tor_fit, precision=1)
-    gpu_mttf_str       = fmt(gpu_mttf, precision=0)
+    gpu_mttf_hours_str       = fmt(gpu_mttf, precision=0)
     hbm_mttf_str       = fmt(hbm_mttf, precision=0)
     nic_mttf_str       = fmt(nic_mttf, precision=0)
     psu_mttf_str       = fmt(psu_mttf, precision=0)
     pcie_mttf_str      = fmt(pcie_mttf, precision=0)
     cable_mttf_str     = fmt(cable_mttf, precision=0)
     tor_mttf_str       = fmt(tor_mttf, precision=0)
-    gpu_mttf_yr_str   = fmt(gpu_mttf/HOURS_PER_YEAR, precision=1, commas=False, suffix=" years")
+    gpu_mttf_yr_str   = fmt_time(gpu_mttf/HOURS_PER_YEAR, 'year', precision=1, commas=False, style='word')
     hbm_mttf_yr_str   = fmt(hbm_mttf/HOURS_PER_YEAR, precision=1, commas=False)
     nic_mttf_yr_str   = fmt(nic_mttf/HOURS_PER_YEAR, precision=1, commas=False)
     psu_mttf_yr_str   = fmt(psu_mttf/HOURS_PER_YEAR, precision=1, commas=False)
@@ -247,15 +250,15 @@ class ComponentFitTable:
     tor_mttf_yr_str   = fmt(tor_mttf/HOURS_PER_YEAR, precision=1, commas=False)
 ```
 
-| **Component**     | **FIT Rate**                               | **MTTF (hours)**                            | **MTTF (years)**                               | **Typical Failure Mode**    |
-|:------------------|:-------------------------------------------|:--------------------------------------------|:-----------------------------------------------|:----------------------------|
-| **GPU**           | `{python} ComponentFitTable.gpu_fit_str`   | `{python} ComponentFitTable.gpu_mttf_str`   | `{python} ComponentFitTable.gpu_mttf_yr_str`   | Die defect, thermal fatigue |
-| **HBM**           | `{python} ComponentFitTable.hbm_fit_str`   | `{python} ComponentFitTable.hbm_mttf_str`   | `{python} ComponentFitTable.hbm_mttf_yr_str`   | Bit-flip accumulation, TSV  |
-| **NIC**           | `{python} ComponentFitTable.nic_fit_str`   | `{python} ComponentFitTable.nic_mttf_str`   | `{python} ComponentFitTable.nic_mttf_yr_str`   | Transceiver degradation     |
-| **PSU**           | `{python} ComponentFitTable.psu_fit_str`   | `{python} ComponentFitTable.psu_mttf_str`   | `{python} ComponentFitTable.psu_mttf_yr_str`   | Capacitor aging             |
-| **PCIe Switch**   | `{python} ComponentFitTable.pcie_fit_str`  | `{python} ComponentFitTable.pcie_mttf_str`  | `{python} ComponentFitTable.pcie_mttf_yr_str`  | Solder joint, ESD damage    |
-| **Optical Cable** | `{python} ComponentFitTable.cable_fit_str` | `{python} ComponentFitTable.cable_mttf_str` | `{python} ComponentFitTable.cable_mttf_yr_str` | Fiber bend, connector wear  |
-| **ToR Switch**    | `{python} ComponentFitTable.tor_fit_str`   | `{python} ComponentFitTable.tor_mttf_str`   | `{python} ComponentFitTable.tor_mttf_yr_str`   | ASIC failure, fan bearing   |
+| **Component**     | **FIT Rate**                               | **MTTF (hours)**                                | **MTTF (years)**                               | **Typical Failure Mode**    |
+|:------------------|:-------------------------------------------|:------------------------------------------------|:-----------------------------------------------|:----------------------------|
+| **GPU**           | `{python} ComponentFitTable.gpu_fit_str`   | `{python} ComponentFitTable.gpu_mttf_hours_str` | `{python} ComponentFitTable.gpu_mttf_yr_str`   | Die defect, thermal fatigue |
+| **HBM**           | `{python} ComponentFitTable.hbm_fit_str`   | `{python} ComponentFitTable.hbm_mttf_str`       | `{python} ComponentFitTable.hbm_mttf_yr_str`   | Bit-flip accumulation, TSV  |
+| **NIC**           | `{python} ComponentFitTable.nic_fit_str`   | `{python} ComponentFitTable.nic_mttf_str`       | `{python} ComponentFitTable.nic_mttf_yr_str`   | Transceiver degradation     |
+| **PSU**           | `{python} ComponentFitTable.psu_fit_str`   | `{python} ComponentFitTable.psu_mttf_str`       | `{python} ComponentFitTable.psu_mttf_yr_str`   | Capacitor aging             |
+| **PCIe Switch**   | `{python} ComponentFitTable.pcie_fit_str`  | `{python} ComponentFitTable.pcie_mttf_str`      | `{python} ComponentFitTable.pcie_mttf_yr_str`  | Solder joint, ESD damage    |
+| **Optical Cable** | `{python} ComponentFitTable.cable_fit_str` | `{python} ComponentFitTable.cable_mttf_str`     | `{python} ComponentFitTable.cable_mttf_yr_str` | Fiber bend, connector wear  |
+| **ToR Switch**    | `{python} ComponentFitTable.tor_fit_str`   | `{python} ComponentFitTable.tor_mttf_str`       | `{python} ComponentFitTable.tor_mttf_yr_str`   | ASIC failure, fan bearing   |
 
 : **Component Failure Rates**: Order-of-magnitude reference FIT/MTTF in the steady-state useful-life phase. Informed by large-GPU research-cluster analysis @kokolis2025, TPUv4 supercomputer resiliency and operations @zu2024tpuv4, and warehouse-scale machine design @barroso2019. {#tbl-component-fit}
 
@@ -275,19 +278,20 @@ $$ \text{MTBF}_{\text{cluster}} = \frac{\text{MTBF}_{\text{node}}}{N_{\text{node
 
 ```{python}
 #| echo: false
+from mlsysim.fmt import fmt_time
 # ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: ReliabilityStringsMtbfRecap.node_mtbf_str,
+# │ Exports: ReliabilityStringsMtbfRecap.node_mtbf_hours_str,
 # │          ReliabilityStringsMtbfRecap.nodes_10k_str,
-# │          ReliabilityStringsMtbfRecap.cluster_mtbf_10k_str
+# │          ReliabilityStringsMtbfRecap.cluster_mtbf_10k_hours_str
 class ReliabilityStringsMtbfRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    node_mtbf_str = fmt(R.node_mtbf.m_as(ureg.hour), precision=1, suffix=" hours")
+    node_mtbf_hours_str = fmt_time(R.node_mtbf.to(hour).magnitude, 'hour', precision=1, commas=True, style='word')
     nodes_10k_str = fmt(R.nodes_10k, precision=0)
-    cluster_mtbf_10k_str = fmt(R.cluster_mtbf_10k.m_as(ureg.hour), precision=2, suffix=" hours")
+    cluster_mtbf_10k_hours_str = fmt_time(R.cluster_mtbf_10k.to(hour).magnitude, 'hour', precision=2, commas=True, style='word')
 ```
 
-This is the **MTBF cascade**\index{MTBF cascade}: reliability degrades linearly with component count at each level, and the levels compound. A node with `{python} ReliabilityStringsMtbfRecap.node_mtbf_str` MTBF sounds reliable. A cluster of `{python} ReliabilityStringsMtbfRecap.nodes_10k_str` such nodes has an MTBF of just `{python} ReliabilityStringsMtbfRecap.cluster_mtbf_10k_str`---a failure every few hours is the expected steady state.
+This is the **MTBF cascade**\index{MTBF cascade}: reliability degrades linearly with component count at each level, and the levels compound. A node with `{python} ReliabilityStringsMtbfRecap.node_mtbf_hours_str` MTBF sounds reliable. A cluster of `{python} ReliabilityStringsMtbfRecap.nodes_10k_str` such nodes has an MTBF of just `{python} ReliabilityStringsMtbfRecap.cluster_mtbf_10k_hours_str`---a failure every few hours is the expected steady state.
 
 @Tbl-mtbf-cluster shows how cluster MTBF shrinks as fleet size grows.
 
@@ -308,21 +312,21 @@ This is the **MTBF cascade**\index{MTBF cascade}: reliability degrades linearly 
 # │ Exports: mtbf_data list of dicts with "gpus", "nodes", "mtbf", "per_day" keys
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import check
+from mlsysim.fmt import check, fmt_time
 
 mtbf_data = []
 for n_gpus in R.cluster_sizes:
     n_nodes = R.nodes_for_gpus(n_gpus)
-    mtbf_h_val = R.cluster_mtbf(n_gpus).m_as(ureg.hour)  # raw float in hours
+    mtbf_h_val = R.cluster_mtbf(n_gpus).to(hour).magnitude  # raw float in hours
 
     if n_gpus == Systems.Clusters.Training_10K.total_accelerators:
         check(mtbf_h_val < 24.0, f"Narrative Violation: Cluster MTBF is {mtbf_h_val:.1f} hours. Failures are no longer a daily reality!")
         check(mtbf_h_val < 5.0, f"Narrative Violation: Cluster MTBF is too high for the 'constant failure' narrative.")
 
     if mtbf_h_val >= 1.0:
-        mtbf_str = fmt(mtbf_h_val, precision=1, commas=False, suffix=" hours")
+        mtbf_str = fmt_time(mtbf_h_val, 'hour', precision=1, commas=False, style='word')
     else:
-        mtbf_str = fmt(mtbf_h_val * MINUTES_PER_HOUR, precision=1, commas=False, suffix=" minutes")
+        mtbf_str = fmt_time(mtbf_h_val * MINUTES_PER_HOUR, 'minute', precision=1, commas=False, style='word')
     per_day = HOURS_PER_DAY / mtbf_h_val
     mtbf_data.append({
         "gpus": f"{n_gpus:,}",
@@ -382,9 +386,9 @@ for n_gpus in R.cluster_sizes:
         if p > 0.999:
             row.append(MarkdownStr("> 99.9%"))
         elif p > 0.99:
-            row.append(fmt(p * 100, precision=1, commas=False, suffix="%"))
+            row.append(fmt_percent(p, precision=1, commas=False, style="symbol"))
         else:
-            row.append(fmt(p * 100, precision=1, commas=False, suffix="%"))
+            row.append(fmt_percent(p, precision=1, commas=False, style="symbol"))
     fp_data[n_gpus] = row
     fp_rows.append({
         "gpus": fmt(n_gpus, precision=0),
@@ -444,17 +448,18 @@ $$ \text{Checkpoint Size} = P_{\text{model}} \times 14 \text{ bytes/parameter} $
 
 ```{python}
 #| echo: false
+from mlsysim.fmt import fmt_bandwidth
 # ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: ReliabilityStringsCkptRecap.ckpt_write_bw_str
+# │ Exports: ReliabilityStringsCkptRecap.ckpt_write_bw_gb_s_str
 class ReliabilityStringsCkptRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    ckpt_write_bw_str = fmt(R.ckpt_write_bw, precision=0, suffix=" GB/s")
+    ckpt_write_bw_gb_s_str = fmt_bandwidth(R.ckpt_write_bw, unit=GB/second, precision=0)
 ```
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt_int
+from mlsysim.fmt import fmt_memory, fmt_time
 #| label: checkpoint-sizing-table
 # ┌── LEGO ───────────────────────────────────────────────
 # ┌─────────────────────────────────────────────────────────────────────────────
@@ -464,7 +469,7 @@ from mlsysim.fmt import fmt_int
 # │
 # │ Goal: Format checkpoint sizes and write times for 7B–1T models.
 # │ Show: ckpt_data list rendered as table with label, ckpt_gb, write_time columns.
-# │ How: R.ckpt_size_gb() and R.ckpt_write_bw; fmt() for display strings.
+# │ How: R.ckpt_size_gb() and R.ckpt_write_bw; domain formatters for display strings.
 # │
 # │ Imports: mlsysim.book (fmt)
 # │ Exports: ckpt_data list of dicts with "label", "ckpt_gb", "write_time" keys
@@ -473,25 +478,25 @@ from mlsysim.fmt import fmt_int
 ckpt_data = []
 for i, n_params in enumerate(R.model_sizes_params):
     ckpt_gb = R.ckpt_size_gb(n_params)
-    write_time = ckpt_gb/R.ckpt_write_bw
-    if write_time < 1.0:
-        write_str = fmt(write_time, precision=2, commas=False, suffix=" s")
+    write_time = (ckpt_gb / R.ckpt_write_bw).to(second)
+    if write_time < 1 * second:
+        write_s_str = fmt_time(write_time, second, precision=2, commas=False)
     else:
-        write_str = fmt_int(write_time, commas=False, suffix=" s")
+        write_s_str = fmt_time(round(write_time.to(second).magnitude) * second, second, precision=0, commas=False)
     ckpt_data.append({
         "label": R.model_labels[i],
-        "ckpt_gb": fmt(ckpt_gb, precision=0),
-        "write_time": write_str
+        "ckpt_gb": fmt_memory(ckpt_gb, unit=GB, precision=0),
+        "write_time": write_s_str
     })
 ```
 
-| **Model Size**                       | **Checkpoint Size (GB)**           | **Write Time at `{python} ReliabilityStringsCkptRecap.ckpt_write_bw_str`** |
-|:-------------------------------------|:-----------------------------------|:---------------------------------------------------------------------------|
-| **`{python} ckpt_data[0]["label"]`** | `{python} ckpt_data[0]["ckpt_gb"]` | `{python} ckpt_data[0]["write_time"]`                                      |
-| **`{python} ckpt_data[1]["label"]`** | `{python} ckpt_data[1]["ckpt_gb"]` | `{python} ckpt_data[1]["write_time"]`                                      |
-| **`{python} ckpt_data[2]["label"]`** | `{python} ckpt_data[2]["ckpt_gb"]` | `{python} ckpt_data[2]["write_time"]`                                      |
-| **`{python} ckpt_data[3]["label"]`** | `{python} ckpt_data[3]["ckpt_gb"]` | `{python} ckpt_data[3]["write_time"]`                                      |
-| **`{python} ckpt_data[4]["label"]`** | `{python} ckpt_data[4]["ckpt_gb"]` | `{python} ckpt_data[4]["write_time"]`                                      |
+| **Model Size**                       | **Checkpoint Size**                | **Write Time at `{python} ReliabilityStringsCkptRecap.ckpt_write_bw_gb_s_str`** |
+|:-------------------------------------|:-----------------------------------|:--------------------------------------------------------------------------------|
+| **`{python} ckpt_data[0]["label"]`** | `{python} ckpt_data[0]["ckpt_gb"]` | `{python} ckpt_data[0]["write_time"]`                                           |
+| **`{python} ckpt_data[1]["label"]`** | `{python} ckpt_data[1]["ckpt_gb"]` | `{python} ckpt_data[1]["write_time"]`                                           |
+| **`{python} ckpt_data[2]["label"]`** | `{python} ckpt_data[2]["ckpt_gb"]` | `{python} ckpt_data[2]["write_time"]`                                           |
+| **`{python} ckpt_data[3]["label"]`** | `{python} ckpt_data[3]["ckpt_gb"]` | `{python} ckpt_data[3]["write_time"]`                                           |
+| **`{python} ckpt_data[4]["label"]`** | `{python} ckpt_data[4]["ckpt_gb"]` | `{python} ckpt_data[4]["write_time"]`                                           |
 
 : **Checkpoint Sizes for Mixed-Precision Adam Training**: Each parameter requires about 14 bytes of persistent checkpoint state (model weights + FP32 master weights + optimizer moments); gradients are normally transient and recomputed after restore rather than serialized as durable checkpoint state. Write times assume 100 GB/s aggregate storage bandwidth. {#tbl-checkpoint-size}
 
@@ -504,6 +509,7 @@ Combining the checkpoint write time with the 10,000-GPU MTBF gives a concrete ch
 ```{python}
 #| echo: false
 #| label: worked-example-young-daly
+from mlsysim.fmt import fmt_bandwidth, fmt_memory, fmt_time
 # ┌── LEGO ───────────────────────────────────────────────
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ YOUNG-DALY WORKED EXAMPLE
@@ -525,39 +531,39 @@ class WorkedExampleYoungDaly:
     n_gpus_20k = 2 * Systems.Clusters.Training_10K.total_accelerators
     # All values already computed in ReliabilityFoundations
     yd_mtbf_h = R.cluster_mtbf_10k          # Quantity[hour]
-    yd_mtbf_s = R.cluster_mtbf_10k_s        # raw float (seconds)
-    yd_t_write_s = R.ckpt_write_time_s       # raw float (seconds)
+    yd_mtbf_s = R.cluster_mtbf_10k_s        # Quantity[second]
+    yd_t_write_s = R.ckpt_write_time_s       # Quantity[second]
     yd_tau_s = R.tau_opt_s                   # Quantity[second]
-    yd_tau_min = R.tau_opt_min               # raw float in minutes
+    yd_tau_min = R.tau_opt_min               # Quantity[minute]
 
     # Overhead from checkpointing alone
-    yd_ckpt_overhead = (yd_t_write_s/yd_tau_s.m_as(ureg.second)) * 100
+    yd_ckpt_overhead = (yd_t_write_s / yd_tau_s).to_base_units().magnitude * 100
 
     # What if MTBF halves (20K GPUs)?
     mtbf_20k_h = R.node_mtbf / (n_gpus_20k // Systems.Nodes.DGX_H100.accelerators_per_node)  # Quantity[hour]
-    mtbf_20k_s = mtbf_20k_h.m_as(ureg.second)              # raw float (seconds)
+    mtbf_20k_s = mtbf_20k_h.to(second)                        # Quantity[second]
     tau_20k_s = calc_young_daly_interval(yd_t_write_s, mtbf_20k_s)  # Quantity[second]
-    tau_20k_min = tau_20k_s.m_as(ureg.minute)               # raw float in minutes
+    tau_20k_min = tau_20k_s.to(minute)                         # Quantity[minute]
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
-    yd_mtbf_h_str = fmt(yd_mtbf_h.m_as(ureg.hour), precision=2, suffix=" hours")
-    yd_tau_min_str = fmt(yd_tau_min, precision=1, suffix=" minutes")
+    yd_mtbf_h_str = fmt_time(yd_mtbf_h, hour, precision=2, commas=True, style='word')
+    yd_tau_min_str = fmt_time(yd_tau_min, minute, precision=1, commas=True, style='word')
     # Internal display-math values (no suffix — math adds its own \text{} units)
-    _yd_t_write_val = fmt(yd_t_write_s, precision=1, commas=False)
-    _yd_mtbf_h_val = fmt(yd_mtbf_h.m_as(ureg.hour), precision=2, commas=False)
-    _yd_tau_min_val = fmt(yd_tau_min, precision=1, commas=False)
-    yd_overhead_str = fmt(yd_ckpt_overhead, precision=1, suffix="%")
-    tau_20k_min_str = fmt(tau_20k_min, precision=1, suffix=" minutes")
+    _yd_t_write_val = fmt(yd_t_write_s.to(second).magnitude, precision=1, commas=False)
+    _yd_mtbf_h_val = fmt(yd_mtbf_h.to(hour).magnitude, precision=2, commas=False)
+    _yd_tau_min_val = fmt(yd_tau_min.to(minute).magnitude, precision=1, commas=False)
+    yd_overhead_str = fmt_percent(yd_ckpt_overhead/100, precision=1, style='symbol')
+    tau_20k_min_str = fmt_time(tau_20k_min, minute, precision=1, commas=True, style='word')
     n_gpus_str = fmt(n_gpus, precision=0)
     n_gpus_20k_str = fmt(n_gpus_20k, precision=0)
 
     # Build display math attributes (vol1 pattern: no {python} inside math)
-    _ckpt_gb_str = fmt(R.ckpt_175b_gb, precision=0)
-    _bw_str = fmt(R.ckpt_write_bw, precision=0, commas=False)
+    _ckpt_gb_val = fmt(R.ckpt_175b_gb.to(GB).magnitude, precision=0)
+    _bw_val = fmt(R.ckpt_write_bw.to(GB/second).magnitude, precision=0, commas=False)
     _sec_per_hour_str = fmt(SEC_PER_HOUR, precision=0).replace(",", "{,}")
     t_write_eq_math = MarkdownStr(
         f"$$T_{{\\text{{write}}}} = \\frac{{\\text{{Checkpoint Size}}}}{{\\text{{Write Bandwidth}}}} "
-        f"= \\frac{{{_ckpt_gb_str} \\text{{ GB}}}}{{{_bw_str} \\text{{ GB/s}}}} "
+        f"= \\frac{{{_ckpt_gb_val} \\text{{ GB}}}}{{{_bw_val} \\text{{ GB/s}}}} "
         f"= {_yd_t_write_val} \\text{{ s}}$$"
     )
     tau_opt_eq_math = MarkdownStr(
@@ -567,13 +573,13 @@ class WorkedExampleYoungDaly:
         f"\\times {_yd_mtbf_h_val} \\text{{ h}} \\times {_sec_per_hour_str} \\text{{ s/h}}}} "
         f"= {_yd_tau_min_val} \\text{{ min}}$$"
     )
-    ckpt_175b_gb_str = fmt(R.ckpt_175b_gb, precision=0, suffix=" GB")
-    ckpt_write_bw_str = fmt(R.ckpt_write_bw, precision=0, commas=False, suffix=" GB/s")
+    ckpt_175b_gb_str = fmt_memory(R.ckpt_175b_bytes, unit=GB, precision=0, commas=True)
+    ckpt_write_bw_gb_s_str = fmt_bandwidth(R.ckpt_write_bw, unit=GB/second, precision=0, commas=False)
 ```
 
 ::: {#exmp-appendix-reliability-young-daly-175b-10000-gpu-cluster .callout-example title="Young-Daly: 175B model on a 10,000-GPU cluster"}
 
-**Setup**: Consider training a 175B-parameter model on a `{python} WorkedExampleYoungDaly.n_gpus_str`-GPU cluster. The cluster MTBF is `{python} WorkedExampleYoungDaly.yd_mtbf_h_str` (@tbl-mtbf-cluster). The checkpoint size is `{python} WorkedExampleYoungDaly.ckpt_175b_gb_str`, and the parallel storage system writes at `{python} WorkedExampleYoungDaly.ckpt_write_bw_str`.
+**Setup**: Consider training a 175B-parameter model on a `{python} WorkedExampleYoungDaly.n_gpus_str`-GPU cluster. The cluster MTBF is `{python} WorkedExampleYoungDaly.yd_mtbf_h_str` (@tbl-mtbf-cluster). The checkpoint size is `{python} WorkedExampleYoungDaly.ckpt_175b_gb_str`, and the parallel storage system writes at `{python} WorkedExampleYoungDaly.ckpt_write_bw_gb_s_str`.
 
 **Step 1**: Checkpoint write time ($T_{\text{write}}$).
 `{python} WorkedExampleYoungDaly.t_write_eq_math`
@@ -604,6 +610,7 @@ $$ T_{\text{recovery}} = T_{\text{detect}} + T_{\text{reschedule}} + T_{\text{re
 ```{python}
 #| echo: false
 #| label: recovery-anatomy-table
+from mlsysim.fmt import fmt_time
 # ┌── LEGO ───────────────────────────────────────────────
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ RECOVERY ANATOMY TABLE
@@ -611,30 +618,30 @@ $$ T_{\text{recovery}} = T_{\text{detect}} + T_{\text{reschedule}} + T_{\text{re
 # │ Context: @tbl-recovery-anatomy—recovery phase durations
 # │
 # │ Goal: Format recovery phase durations (detect, reschedule, reload, replay, total).
-# │ Show: RecoveryAnatomy.t_detect_str, RecoveryAnatomy.t_reload_str, etc. in table cells.
-# │ How: fmt() on R recovery time values.
+# │ Show: RecoveryAnatomy.t_detect_s_str, RecoveryAnatomy.t_reload_s_str, etc. in table cells.
+# │ How: fmt_time() on R recovery time values.
 # │
 # │ Imports: mlsysim.book (fmt)
-# │ Exports: RecoveryAnatomy.t_detect_str, RecoveryAnatomy.t_reschedule_str, RecoveryAnatomy.t_reload_str,
-# │          RecoveryAnatomy.t_replay_str, RecoveryAnatomy.t_total_str
+# │ Exports: RecoveryAnatomy.t_detect_s_str, RecoveryAnatomy.t_reschedule_s_str, RecoveryAnatomy.t_reload_s_str,
+# │          RecoveryAnatomy.t_replay_min_str, RecoveryAnatomy.t_total_min_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 class RecoveryAnatomy:
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
-    t_detect_str      = fmt(R.t_detect, precision=0, commas=False)
-    t_reschedule_str  = fmt(R.t_reschedule, precision=0, commas=False)
-    t_reload_str      = fmt(R.t_reload_s, precision=1)
-    t_replay_str      = fmt(R.t_replay_s.m_as(ureg.minute), precision=1, suffix=" min")
-    t_total_str = fmt_int(R.t_recovery_total_s, suffix=" min")
+    t_detect_s_str      = fmt_time(R.t_detect, second, precision=0, commas=False)
+    t_reschedule_s_str  = fmt_time(R.t_reschedule, second, precision=0, commas=False)
+    t_reload_s_str      = fmt_time(R.t_reload_s, second, precision=1)
+    t_replay_min_str      = fmt_time(R.t_replay_s, minute, precision=1, commas=True)
+    t_total_min_str = fmt_time(round(R.t_recovery_total_s.to(minute).magnitude) * minute, minute, precision=0, commas=True)
 ```
 
 | **Phase**                       | **Typical Duration**                          | **What Happens**                                |
 |:--------------------------------|:----------------------------------------------|:------------------------------------------------|
-| **$T_{\text{detect}}$**         | `{python} RecoveryAnatomy.t_detect_str` s     | Heartbeat timeout expires; failure is confirmed |
-| **$T_{\text{reschedule}}$**     | `{python} RecoveryAnatomy.t_reschedule_str` s | Replacement node allocated from spare pool      |
-| **$T_{\text{reload}}$**         | `{python} RecoveryAnatomy.t_reload_str` s     | Checkpoint read from storage into GPU memory    |
-| **$T_{\text{replay}}$**         | ~`{python} RecoveryAnatomy.t_replay_str`      | Recompute training steps since last checkpoint  |
-| **Total $T_{\text{recovery}}$** | ~`{python} RecoveryAnatomy.t_total_str`       | System fully productive again                   |
+| **$T_{\text{detect}}$**         | `{python} RecoveryAnatomy.t_detect_s_str`     | Heartbeat timeout expires; failure is confirmed |
+| **$T_{\text{reschedule}}$**     | `{python} RecoveryAnatomy.t_reschedule_s_str` | Replacement node allocated from spare pool      |
+| **$T_{\text{reload}}$**         | `{python} RecoveryAnatomy.t_reload_s_str`     | Checkpoint read from storage into GPU memory    |
+| **$T_{\text{replay}}$**         | ~`{python} RecoveryAnatomy.t_replay_min_str`  | Recompute training steps since last checkpoint  |
+| **Total $T_{\text{recovery}}$** | ~`{python} RecoveryAnatomy.t_total_min_str`   | System fully productive again                   |
 
 : **Recovery Time Breakdown**: Each phase contributes to the total time between failure and full-speed resumption. For the 10K-GPU, 175B-model scenario, replay dominates because it recomputes work lost since the last checkpoint. {#tbl-recovery-anatomy}
 
@@ -658,8 +665,8 @@ The gap between rawput and goodput comes from three sources:
 class ReliabilityStringsGoodputRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    overhead_ckpt_pct_str = fmt(R.overhead_ckpt * 100, precision=1, suffix="%")
-    overhead_failure_pct_str = fmt(R.overhead_failure * 100, precision=1, suffix="%")
+    overhead_ckpt_pct_str = fmt_percent(R.overhead_ckpt, precision=1, style='symbol')
+    overhead_failure_pct_str = fmt_percent(R.overhead_failure, precision=1, style='symbol')
 ```
 
 1. **Checkpoint overhead** ($\sim$ `{python} ReliabilityStringsGoodputRecap.overhead_ckpt_pct_str`): Training pauses during each checkpoint write.
@@ -712,6 +719,7 @@ where $A$ is the availability of a single replica and $k$ is the number of repli
 ```{python}
 #| echo: false
 #| label: availability-stacking-table
+from mlsysim.fmt import fmt_time
 # ┌── LEGO ───────────────────────────────────────────────
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ AVAILABILITY STACKING TABLE
@@ -732,13 +740,13 @@ for k in R.avail_replicas:
     nines = -math.log10(1 - a_sys) if a_sys < 1.0 else float('inf')
     downtime_yr_min = (1 - a_sys) * HOURS_PER_YEAR * MINUTES_PER_HOUR
     if downtime_yr_min > MINUTES_PER_HOUR:
-        dt_str = fmt(downtime_yr_min/MINUTES_PER_HOUR, precision=1, commas=False, suffix=" hours")
+        dt_str = fmt_time(downtime_yr_min/MINUTES_PER_HOUR, 'hour', precision=1, commas=False, style='word')
     elif downtime_yr_min >= 1:
-        dt_str = fmt(downtime_yr_min, precision=1, commas=False, suffix=" minutes")
+        dt_str = fmt_time(downtime_yr_min, 'minute', precision=1, commas=False, style='word')
     elif downtime_yr_min * SECONDS_PER_MINUTE >= 1:
-        dt_str = fmt(downtime_yr_min * SECONDS_PER_MINUTE, precision=1, commas=False, suffix=" seconds")
+        dt_str = fmt_time(downtime_yr_min * SECONDS_PER_MINUTE, 'second', precision=1, commas=False, style='word')
     else:
-        dt_str = fmt(downtime_yr_min * SECONDS_PER_MINUTE * MS_PER_SEC, precision=1, commas=False, suffix=" ms")
+        dt_str = fmt_time(downtime_yr_min * SECONDS_PER_MINUTE * MS_PER_SEC, 'millisecond', precision=1, commas=False)
     avail_data.append({
         "k": str(k),
         "avail": f"{a_sys * 100:.4f}%" if a_sys > 0.999 else f"{a_sys * 100:.2f}%",
@@ -769,8 +777,8 @@ The independence assumption is critical, however. Correlated failures---power ou
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: ## Summary — cross-section recap strings
 # │ Goal: Recap GPU MTTF and 10K cluster MTBF for summary callout.
-# │ Exports: ReliabilitySummaryRecap.gpu_mttf_yr_str, cluster_mtbf_10k_str
-from mlsysim.fmt import fmt
+# │ Exports: ReliabilitySummaryRecap.gpu_mttf_yr_str, cluster_mtbf_10k_hours_str
+from mlsysim.fmt import fmt, fmt_time
 from mlsysim.physics import calc_mtbf_node
 
 class ReliabilitySummaryRecap:
@@ -782,13 +790,13 @@ class ReliabilitySummaryRecap:
     )
     cluster_mtbf_10k = node_mtbf / Systems.Clusters.Training_10K.count
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
-    gpu_mttf_yr_str = fmt(Systems.Reliability.Gpu.mttf_hours / HOURS_PER_YEAR, precision=1, commas=False, suffix=" years")
-    cluster_mtbf_10k_str = fmt(cluster_mtbf_10k.m_as(ureg.hour), precision=2, suffix=" hours")
+    gpu_mttf_yr_str = fmt_time(Systems.Reliability.Gpu.mttf_hours / HOURS_PER_YEAR, 'year', precision=1, commas=False, style='word')
+    cluster_mtbf_10k_hours_str = fmt_time(cluster_mtbf_10k.to(hour).magnitude, 'hour', precision=2, commas=True, style='word')
 ```
 
 ::: {.callout-takeaways title="Failure as a physical constraint"}
 
-* **Failure rate scales linearly with component count**: A single GPU fails once per `{python} ReliabilitySummaryRecap.gpu_mttf_yr_str`; a 10,000-GPU cluster experiences a failure every `{python} ReliabilitySummaryRecap.cluster_mtbf_10k_str`. At fleet scale, failure is a continuous background condition, not an exceptional event.
+* **Failure rate scales linearly with component count**: A single GPU fails once per `{python} ReliabilitySummaryRecap.gpu_mttf_yr_str`; a 10,000-GPU cluster experiences a failure every `{python} ReliabilitySummaryRecap.cluster_mtbf_10k_hours_str`. At fleet scale, failure is a continuous background condition, not an exceptional event.
 * **The MTBF cascade compounds through system levels**: Node MTBF is determined by the weakest component type; cluster MTBF divides by node count. @Tbl-mtbf-cluster provides the reference numbers for capacity planning.
 * **Job failure probability approaches certainty quickly**: For clusters above a few thousand GPUs running multi-day jobs, the probability of at least one failure exceeds 99 percent. Fault tolerance is not optional at this scale---it is a prerequisite for completing any training run.
 * **Young-Daly checkpoint interval**: The formula $\tau_{\text{opt}} = \sqrt{2 T_{\text{write}} \, \text{MTBF}_{\text{system}}}$ optimizes checkpoint frequency by balancing the cost of writing checkpoints against the cost of lost work. It requires only two measurable inputs: checkpoint write time and system MTBF.

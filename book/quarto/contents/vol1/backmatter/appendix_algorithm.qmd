@@ -78,11 +78,11 @@ class GemmIntensityExample:
     n_small = 64
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    bytes_fp16 = int(BYTES_FP16.m_as(ureg.byte))
+    bytes_fp16 = int(BYTES_FP16.to(byte).magnitude)
     small_intensity = n_small / 3
     a100_ridge = int(
-        Hardware.Cloud.A100.compute.peak_flops.m_as(TFLOPs/second)
-        / Hardware.Cloud.A100.memory.bandwidth.m_as(TB/second)
+        Hardware.Cloud.A100.compute.peak_flops.to(TFLOPs/second).magnitude
+        / Hardware.Cloud.A100.memory.bandwidth.to(TB/second).magnitude
     )
     small_efficiency_pct = small_intensity / a100_ridge * 100
 
@@ -93,7 +93,7 @@ class GemmIntensityExample:
     bytes_fp16_str = fmt_int(bytes_fp16, commas=False)
     n_small_str = fmt(n_small, precision=0, commas=False)
     small_intensity_str = fmt_int(small_intensity, commas=False)
-    small_efficiency_pct_str = fmt(small_efficiency_pct, precision=1, commas=False, suffix=' percent')
+    small_efficiency_pct_str = fmt_percent(small_efficiency_pct/100, precision=1, commas=False, style='prose')
     a100_ridge_str = fmt(a100_ridge, precision=0, commas=False)
     gemm_intensity_eq = fmt_math(
         rf"\text{{Intensity}} = \frac{{O}}{{D_{{\text{{vol}}}}}} = \frac{{2n^3}}{{3n^2 \times {bytes_fp16_str}}} = \frac{{n}}{{3}} \text{{ FLOP/byte}}"
@@ -129,7 +129,7 @@ CSR is essential for recommendation systems (sparse embedding tables) and pruned
 # │ Context: @sec-appdx-algorithm-foundations-sparse-matrix-formats-0bd0 embedding example
 # │ Goal: Dense vs sparse vocabulary embedding footprint at 1% density
 # │ Exports: SparseEmbeddingExample.*_str
-from mlsysim.fmt import fmt_int, fmt
+from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_memory, fmt_percent, fmt_qty
 
 class SparseEmbeddingExample:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
@@ -139,28 +139,29 @@ class SparseEmbeddingExample:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     total_elements = vocab_size * embed_dim
-    dense_bytes = total_elements * BYTES_FP32.m_as(ureg.byte)
-    dense_gb = (dense_bytes * byte).m_as(GB)
+    dense_bytes_q = total_elements * BYTES_FP32
+    dense_bytes = dense_bytes_q.to(byte).magnitude
     nonzeros = int(total_elements * sparsity_pct / 100)
-    csr_bytes_per_nonzero = BYTES_FP32.m_as(ureg.byte) + BYTES_INT32.m_as(ureg.byte)
-    sparse_bytes = nonzeros * csr_bytes_per_nonzero
-    sparse_mb = (sparse_bytes * byte).m_as(MB)
+    csr_bytes_per_nonzero_q = BYTES_FP32 + BYTES_INT32
+    csr_bytes_per_nonzero = csr_bytes_per_nonzero_q.to(byte).magnitude
+    sparse_bytes_q = nonzeros * csr_bytes_per_nonzero_q
+    sparse_bytes = sparse_bytes_q.to(byte).magnitude
     reduction_factor = int(dense_bytes / sparse_bytes)
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     vocab_size_str = fmt(vocab_size, precision=0)
     embed_dim_str = fmt(embed_dim, precision=0)
-    total_elements_str = fmt(total_elements / BILLION, precision=0, commas=False)
-    dense_gb_str = fmt(dense_gb, precision=0, commas=False, suffix=' GB')
-    nonzeros_str = fmt(nonzeros / MILLION, precision=0, commas=False)
-    sparse_mb_str = fmt(sparse_mb, precision=0, commas=False, suffix=' MB')
-    bytes_fp32_str = fmt_int(BYTES_FP32.m_as(ureg.byte), commas=False)
-    bytes_int32_str = fmt_int(BYTES_INT32.m_as(ureg.byte), commas=False)
-    sparsity_pct_str = fmt(sparsity_pct, precision=0, commas=False, suffix=' percent')
+    total_elements_str = fmt_count(total_elements, scale="B", commas=False)
+    dense_gb_str = fmt_qty(dense_bytes_q, GB, precision=0, commas=False)
+    nonzeros_str = fmt_count(nonzeros, scale="M", commas=False)
+    sparse_mb_str = fmt_qty(sparse_bytes_q, MB, precision=0, commas=False)
+    bytes_fp32_str = fmt_memory(BYTES_FP32, unit=byte, precision=0, commas=False)
+    bytes_int32_str = fmt_memory(BYTES_INT32, unit=byte, precision=0, commas=False)
+    sparsity_pct_str = fmt_percent(sparsity_pct/100, precision=0, commas=False, style='prose')
     reduction_factor_str = fmt(reduction_factor, precision=0, commas=False)
 ```
 
-To see the trade-off concretely, consider a vocabulary embedding matrix with `{python} SparseEmbeddingExample.vocab_size_str` rows and `{python} SparseEmbeddingExample.embed_dim_str` columns (`{python} SparseEmbeddingExample.total_elements_str` billion parameters):
+To see the trade-off concretely, consider a vocabulary embedding matrix with `{python} SparseEmbeddingExample.vocab_size_str` rows and `{python} SparseEmbeddingExample.embed_dim_str` columns (`{python} SparseEmbeddingExample.total_elements_str` parameters):
 
 *   **Dense (FP32)**: `{python} SparseEmbeddingExample.total_elements_str` $\times$ $10^{9}$ $\times$ `{python} SparseEmbeddingExample.bytes_fp32_str` bytes = `{python} SparseEmbeddingExample.dense_gb_str`.
 *   **Sparse** (`{python} SparseEmbeddingExample.sparsity_pct_str` density): Storing only nonzeros requires roughly `{python} SparseEmbeddingExample.nonzeros_str` $\times$ $10^{6}$ $\times$ (`{python} SparseEmbeddingExample.bytes_fp32_str` bytes value + `{python} SparseEmbeddingExample.bytes_int32_str` bytes index) ≈ `{python} SparseEmbeddingExample.sparse_mb_str`.
@@ -307,14 +308,14 @@ For a standard Adaptive Moment Estimation (Adam) optimizer in Mixed Precision:
 # │ Context: @sec-appdx-algorithm-foundations-true-cost-training-memory-e54e
 # │ Goal: Per-parameter byte counts for mixed-precision Adam training
 # │ Exports: TrainingMemoryBytes.*_str
-from mlsysim.fmt import fmt_int, fmt, MarkdownStr
+from mlsysim.fmt import fmt_int, fmt, fmt_memory, MarkdownStr
 
 class TrainingMemoryBytes:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    bytes_fp16_str = fmt_int(BYTES_FP16.m_as(ureg.byte), commas=False)
-    bytes_fp32_str = fmt_int(BYTES_FP32.m_as(ureg.byte), commas=False)
-    optimizer_overhead_min = int(BYTES_ADAM_STATE.m_as(ureg.byte))
-    optimizer_overhead_max = optimizer_overhead_min + int(BYTES_FP32.m_as(ureg.byte))
+    bytes_fp16_str = fmt_memory(BYTES_FP16, unit=byte, precision=0, commas=False)
+    bytes_fp32_str = fmt_memory(BYTES_FP32, unit=byte, precision=0, commas=False)
+    optimizer_overhead_min = int(BYTES_ADAM_STATE.to(byte).magnitude)
+    optimizer_overhead_max = optimizer_overhead_min + int(BYTES_FP32.to(byte).magnitude)
     optimizer_overhead_str = MarkdownStr(f"{optimizer_overhead_min}–{optimizer_overhead_max}")
 ```
 
@@ -348,66 +349,65 @@ To see how these components interact in practice, consider a concrete model.
 # │          gpt2_act_small_gb_str, gpt2_total_small_gb_str,
 # │          gpt2_batch_large_str, gpt2_act_large_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, check, sci_latex, fmt_math, MarkdownStr
+from mlsysim.fmt import fmt_int, fmt, check, sci_latex, fmt_math, fmt_percent, fmt_memory_capacity, fmt_qty
+from mlsysim.core.units import GiB
 
 class GPT2TrainingMem:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    P = Models.Language.GPT2.parameters.m_as(param)
+    P = Models.Language.GPT2.parameters.to(param).magnitude
     layers = Models.Language.GPT2.layers
     d = Models.Language.GPT2.hidden_dim
-    bf16 = int(BYTES_FP16.m_as(ureg.byte))
-    fp32 = int(BYTES_FP32.m_as(ureg.byte))
-    accel_gb = Hardware.Cloud.A100.memory.capacity.m_as(GB)
+    bf16 = int(BYTES_FP16.to(byte).magnitude)
+    fp32 = int(BYTES_FP32.to(byte).magnitude)
+    accel_q = Hardware.Cloud.A100.memory.capacity
     batch_small = 8
     batch_large = 64
     seq_len = 1024
     optimizer_bytes_per_param = int(
-        (BYTES_ADAM_STATE + BYTES_FP32).m_as(ureg.byte)
+        (BYTES_ADAM_STATE + BYTES_FP32).to(byte).magnitude
     )  # FP32 master + momentum + variance
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    weights_gb = (P * bf16 * byte).m_as(GB)
-    grads_gb = (P * bf16 * byte).m_as(GB)
-    optim_gb = (P * optimizer_bytes_per_param * byte).m_as(GB)
-    model_state_gb = weights_gb + grads_gb + optim_gb
-    remaining_gb = accel_gb - model_state_gb
+    weights_q = P * bf16 * byte
+    grads_q = P * bf16 * byte
+    optim_q = P * optimizer_bytes_per_param * byte
+    model_state_q = weights_q + grads_q + optim_q
+    remaining_q = accel_q - model_state_q
 
     # Per-layer activation ≈ 12 * B * S * d * bytes_bf16:
     # input(1d) + QKV(3d) + attn_out(1d) + FFN(4d) + output(1d) + norms/masks(2d)
     act_factor = 12
-    act_small_bytes = layers * act_factor * batch_small * seq_len * d * bf16
-    act_small_gb = (act_small_bytes * byte).m_as(GB)
-    total_small_gb = model_state_gb + act_small_gb
+    act_small_q = layers * act_factor * batch_small * seq_len * d * bf16 * byte
+    total_small_q = model_state_q + act_small_q
 
-    act_large_bytes = layers * act_factor * batch_large * seq_len * d * bf16
-    act_large_gb = (act_large_bytes * byte).m_as(GB)
+    act_large_q = layers * act_factor * batch_large * seq_len * d * bf16 * byte
 
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(model_state_gb < accel_gb, "Model state must fit on accelerator")
-    check(total_small_gb < accel_gb, "Small batch must fit on the accelerator")
-    check(act_large_gb > remaining_gb, "Large batch should exceed remaining capacity")
+    check(model_state_q < accel_q, "Model state must fit on accelerator")
+    check(total_small_q < accel_q, "Small batch must fit on the accelerator")
+    check(act_large_q > remaining_q, "Large batch should exceed remaining capacity")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    P_str = MarkdownStr(f"${sci_latex(P, precision=1)}$")  # LaTeX-safe: 1.5 \times 10^{9} (avoids 1.5e+09)
+    P_str = fmt_math(sci_latex(P, precision=1))  # LaTeX-safe: 1.5 \times 10^{9} (avoids 1.5e+09)
     layers_str = fmt(layers, precision=0, commas=False)
     d_str = fmt(d, precision=0, commas=False)
     bf16_str = fmt(bf16, precision=0, commas=False)
-    weights_gb_str = fmt(weights_gb, precision=0, commas=False, suffix=' GB')
-    grads_gb_str = fmt(grads_gb, precision=0, commas=False, suffix=' GB')
+    weights_gb_str = fmt_qty(weights_q, GB, precision=0, commas=False)
+    grads_gb_str = fmt_qty(grads_q, GB, precision=0, commas=False)
     optim_bytes_str = fmt(optimizer_bytes_per_param, precision=0, commas=False)
-    optim_gb_str = fmt(optim_gb, precision=0, commas=False, suffix=' GB')
-    model_state_gb_str = fmt(model_state_gb, precision=0, commas=False, suffix=' GB')
-    accel_gb_str = fmt(accel_gb, precision=1, commas=False, suffix=' GB')
-    remaining_gb_str = fmt(remaining_gb, precision=1, commas=False, suffix=' GB')
+    optim_gb_str = fmt_qty(optim_q, GB, precision=0, commas=False)
+    model_state_gb_str = fmt_qty(model_state_q, GB, precision=0, commas=False)
+    accel_gb_str = fmt_qty(accel_q, GB, precision=1, commas=False)
+    remaining_gb_str = fmt_qty(remaining_q, GB, precision=1, commas=False)
     batch_small_str = fmt(batch_small, precision=0, commas=False)
     seq_len_str = fmt(seq_len, precision=0, commas=False)
-    act_small_gb_str = fmt(act_small_gb, precision=1, commas=False)
-    total_small_gb_str = fmt(total_small_gb, precision=1, commas=False, prefix="~", suffix=' GB')
+    act_small_gb_str = fmt_qty(act_small_q, unit=GB, precision=1, commas=False)
+    total_small_gb_str = fmt_qty(total_small_q, GB, precision=1, commas=False, approx=True)
     batch_large_str = fmt(batch_large, precision=0, commas=False)
-    act_large_gb_str = fmt(act_large_gb, precision=1, commas=False, prefix="~", suffix=' GB')
+    act_large_gb_str = fmt_qty(act_large_q, GB, precision=1, commas=False, approx=True)
     act_factor_str = fmt(act_factor, precision=0, commas=False)
-    accel_class_gb_str = fmt(80, precision=0, commas=False, suffix=' GB')
-    grad_ckpt_overhead_pct_str = fmt(33, precision=0, commas=False, suffix=' percent')
+    accel_class_gb_str = fmt_memory_capacity(accel_q, unit=GiB, precision=0, commas=False)
+    grad_ckpt_overhead_pct_str = fmt_percent(33/100, precision=0, commas=False, style='prose')
 ```
 
 ::: {#nbk-appendix-algorithm-gpt-2-training-memory .callout-notebook title="Worked example: GPT-2 (1.5B) training memory"}
@@ -426,7 +426,7 @@ class GPT2TrainingMem:
 Per-layer retained activations for a transformer are approximately $12 \times B \times S \times d$ BF16 elements, or $12 \times B \times S \times d \times 2$ bytes, where $B$ is batch size and $S$ is sequence length. The factor twelve accounts for the major intermediate tensors retained for backpropagation: input activations, QKV projections ($3d$), attention output, FFN intermediate ($4d$), and layer norm/dropout masks. With `{python} GPT2TrainingMem.layers_str` layers, batch size `{python} GPT2TrainingMem.batch_small_str`, and sequence length `{python} GPT2TrainingMem.seq_len_str`:
 
 $$
-`{python} GPT2TrainingMem.layers_str` \times `{python} GPT2TrainingMem.act_factor_str` \times `{python} GPT2TrainingMem.batch_small_str` \times `{python} GPT2TrainingMem.seq_len_str` \times `{python} GPT2TrainingMem.d_str` \times `{python} GPT2TrainingMem.bf16_str` \text{ bytes } \approx `{python} GPT2TrainingMem.act_small_gb_str` \text{ GB}
+`{python} GPT2TrainingMem.layers_str` \times `{python} GPT2TrainingMem.act_factor_str` \times `{python} GPT2TrainingMem.batch_small_str` \times `{python} GPT2TrainingMem.seq_len_str` \times `{python} GPT2TrainingMem.d_str` \times `{python} GPT2TrainingMem.bf16_str` \text{ bytes } \approx `{python} GPT2TrainingMem.act_small_gb_str`
 $$
 
 **Total**: `{python} GPT2TrainingMem.total_small_gb_str`—fits on one `{python} GPT2TrainingMem.accel_gb_str` accelerator. However, increase the batch to `{python} GPT2TrainingMem.batch_large_str` and activations grow to `{python} GPT2TrainingMem.act_large_gb_str`, exceeding the remaining capacity. This is the threshold where gradient checkpointing (trading ~`{python} GPT2TrainingMem.grad_ckpt_overhead_pct_str` more compute for $\mathcal{O}(\sqrt{N_L})$ activation memory) becomes necessary.
@@ -478,13 +478,13 @@ from mlsysim.fmt import fmt
 
 class SparseBreakEvenRecap:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    csr_bytes_per_nonzero = BYTES_FP32.m_as(ureg.byte) + BYTES_INT32.m_as(ureg.byte)
-    coo_bytes_per_nonzero = BYTES_FP32.m_as(ureg.byte) + 2 * BYTES_INT32.m_as(ureg.byte)
-    csr_break_even_density_pct = BYTES_FP32.m_as(ureg.byte) / csr_bytes_per_nonzero * 100
-    coo_break_even_density_pct = BYTES_FP32.m_as(ureg.byte) / coo_bytes_per_nonzero * 100
+    csr_bytes_per_nonzero = BYTES_FP32.to(byte).magnitude + BYTES_INT32.to(byte).magnitude
+    coo_bytes_per_nonzero = BYTES_FP32.to(byte).magnitude + 2 * BYTES_INT32.to(byte).magnitude
+    csr_break_even_density_pct = BYTES_FP32.to(byte).magnitude / csr_bytes_per_nonzero * 100
+    coo_break_even_density_pct = BYTES_FP32.to(byte).magnitude / coo_bytes_per_nonzero * 100
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    csr_break_even_density_pct_str = fmt(csr_break_even_density_pct, precision=0, commas=False, suffix=' percent')
+    csr_break_even_density_pct_str = fmt_percent(csr_break_even_density_pct/100, precision=0, commas=False, style='prose')
 ```
 
 ## Summary {.unnumbered}

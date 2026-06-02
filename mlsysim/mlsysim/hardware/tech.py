@@ -103,6 +103,24 @@ class OpEnergy(BaseModel):
         return require_dimensionality(v, ureg.joule, "energy")
 
 
+class EffectiveComputeEnergy(BaseModel):
+    """Architecture-class effective energy per FLOP."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    name: str
+    energy_per_flop: Quantity
+    metadata: Metadata = Field(default_factory=Metadata)
+
+
+class MovementEnergy(BaseModel):
+    """Technology-class effective data-movement energy per byte."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    name: str
+    energy_per_byte: Quantity
+    metadata: Metadata = Field(default_factory=Metadata)
+
+
 _DATA = Path(__file__).parent / "data" / "tech"
 
 Memory = load_collection(
@@ -117,6 +135,14 @@ Op = load_collection(
     _DATA / "op.yaml", OpEnergy, name="Op",
     doc="Per-operation arithmetic energy (Horowitz 2014, 45 nm).",
 )
+EffectiveCompute = load_collection(
+    _DATA / "effective_compute.yaml", EffectiveComputeEnergy, name="EffectiveCompute",
+    doc="Architecture-class effective energy per FLOP.",
+)
+Movement = load_collection(
+    _DATA / "movement.yaml", MovementEnergy, name="Movement",
+    doc="Technology-class effective data-movement energy per byte.",
+)
 Interconnect = load_collection(
     _DATA / "interconnect.yaml", InterconnectTier, name="Interconnect",
     doc="Interconnect technology generations (link access-latency floor).",
@@ -129,6 +155,8 @@ class Tech(Registry):
     Memory = Memory
     Storage = Storage
     Op = Op
+    EffectiveCompute = EffectiveCompute
+    Movement = Movement
     Interconnect = Interconnect
 
 

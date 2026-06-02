@@ -26,7 +26,12 @@ LIGHTBOX_PATTERN = re.compile(
 
 
 def fix_lightbox_hrefs(html_path: Path) -> int:
-    text = html_path.read_text(encoding="utf-8")
+    if not html_path.is_file():
+        return 0
+    try:
+        text = html_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return 0
     count = 0
 
     def replacer(m: re.Match) -> str:
