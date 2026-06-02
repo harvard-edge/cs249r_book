@@ -80,7 +80,7 @@ Performance Engineering is the Optimization Layer of the fleet stack. While Infe
 
 An H100 GPU capable of 989 teraFLOP/s often sits 95 percent idle while generating text from a large language model because the processor is starving for data. Performance engineering operates within a constrained optimization space defined by the memory wall, where the speed of moving bytes from memory to compute units fundamentally caps our operational throughput.
 
-Part II established the distributed logic of the fleet: partitioning workloads, synchronizing gradients, recovering from faults, and orchestrating scarce accelerator capacity. Those chapters ensured that workloads reach the right hardware and survive failures along the way. This chapter ensures that each workload uses that hardware efficiently, extracting maximum throughput from every accelerator cycle.
+Part II established the distributed logic of the fleet: partitioning workloads, synchronizing gradients, recovering from faults, and orchestrating scarce accelerator capacity. Those chapters ensured that workloads reach the right hardware and survive failures along the way. This chapter ensures that each workload uses that hardware efficiently, extracting maximum throughput from every accelerator cycle through operator fusion that keeps data in fast memory, precision formats that double effective bandwidth, graph compilation that automates kernel selection, and algorithmic techniques like speculative decoding and expert routing that change the performance equation outright.
 
 ### The iron law of ML performance {#sec-performance-engineering-efficiency-frontier}
 
@@ -825,13 +825,13 @@ In a naive implementation without operator fusion, executing one transformer lay
 
 ### Fusion categories {#sec-performance-engineering-fusion-categories}
 
-GPU kernel fusion falls into three categories, each with different complexity and performance impact.
+Fusion is profitable when the HBM traffic it removes is worth the kernel complexity it introduces. The three common categories differ by that trade-off: how much data movement they eliminate, how much synchronization they require, and how often a compiler can apply them automatically.
 
-Element-wise fusion is the simplest form: consecutive element-wise operations (add, multiply, activation functions) combine into a single kernel. Because each output element depends on exactly one input element, this fusion is always legal and straightforward to implement. Most modern deep learning frameworks perform element-wise fusion automatically for supported patterns.
+Element-wise fusion sits at the low-complexity end: consecutive element-wise operations (add, multiply, activation functions) combine into a single kernel. Because each output element depends on exactly one input element, this fusion is always legal and straightforward to implement. Most modern deep learning frameworks perform element-wise fusion automatically for supported patterns.
 
-Reduction fusion combines an element-wise operation with a subsequent reduction (such as summing elements for a loss function, or computing mean and variance for layer normalization). Reductions require inter-thread communication within the kernel, using warp-level shuffle instructions or shared memory to aggregate partial results across threads. Despite this complexity, the memory savings are substantial: the intermediate tensor before the reduction never materializes in HBM. For layer normalization specifically, reduction fusion avoids writing the large prenormalization tensor to HBM and reading it back for the mean/variance computation.
+When the sequence includes a reduction, the fusion decision becomes more constrained. Reduction fusion combines an element-wise operation with a subsequent reduction (such as summing elements for a loss function, or computing mean and variance for layer normalization). Reductions require inter-thread communication within the kernel, using warp-level shuffle instructions or shared memory to aggregate partial results across threads. Despite this complexity, the memory savings are substantial: the intermediate tensor before the reduction never materializes in HBM. For layer normalization specifically, reduction fusion avoids writing the large prenormalization tensor to HBM and reading it back for the mean/variance computation.
 
-Operator-specific fusion is the most impactful and the most difficult category. These are custom kernels designed for a specific sequence of operations, such as fused attention or fused GEMM-bias-activation. The kernel architect must reason about data flow, shared memory allocation, and thread scheduling simultaneously. The payoff is substantial: FlashAttention, which we examine next, removes the quadratic attention workspace and keeps the online softmax state linear in sequence length.
+The highest-payoff case is operator-specific fusion. These are custom kernels designed for a specific sequence of operations, such as fused attention or fused GEMM-bias-activation. The kernel architect must reason about data flow, shared memory allocation, and thread scheduling simultaneously. The payoff is substantial: FlashAttention, which we examine next, removes the quadratic attention workspace and keeps the online softmax state linear in sequence length.
 
 To appreciate the quantitative impact, consider each category applied to a single transformer layer with hidden dimension 4096 and batch size 2048 in FP16. Element-wise fusion of a bias-GELU-dropout chain in this shape eliminates two intermediate tensors of `{python} FusionTrafficCalc.tensor_mb_str` each, saving `{python} FusionTrafficCalc.traffic_mb_str` of HBM traffic per layer. Across `{python} FusionTrafficCalc.num_layers_str` layers, this reclaims about `{python} FusionTrafficCalc.traffic_gb_str` of HBM traffic per forward pass. Reduction fusion of LayerNorm avoids materializing large prenormalization tensors and intermediate statistics. Operator-specific attention fusion (FlashAttention) provides the largest single gain by removing the quadratic score and probability matrices that dominate long-context attention. The cumulative effect of all three fusion categories can remove a large fraction of HBM traffic for a memory-bound transformer forward pass, but the end-to-end speedup must still be verified with profiling because the bottleneck may shift.
 
@@ -1088,11 +1088,11 @@ FlashAttention reduces the memory wall within a single GPU by tiling across the 
 
 ## Precision Engineering {#sec-performance-engineering-precision}
 
-Moving FP16 weights through HBM consumes twice as many bytes as FP8. For bandwidth-bound kernels, shrinking weights from 2 bytes to 1 byte can roughly halve weight-read traffic and increase effective memory bandwidth. Precision engineering exploits the resilience of machine learning algorithms to numerical noise, compressing data types to double effective memory bandwidth and throughput. While @sec-distributed-training-fp8 examines 8-bit floating point (FP8) as a training-time primitive, here we focus on the quantization techniques that enable efficient inference at scale.
+Fusion reduces the number of trips through HBM; precision engineering reduces the payload of each trip. Moving FP16 weights through HBM consumes twice as many bytes as FP8. For bandwidth-bound kernels, shrinking weights from 2 bytes to 1 byte can roughly halve weight-read traffic and increase effective memory bandwidth. The engineering decision is where numerical noise can be tolerated to reduce bandwidth pressure and where quality demands higher precision. While @sec-distributed-training-fp8 examines 8-bit floating point (FP8) as a training-time primitive, here we focus on the quantization techniques that enable efficient inference at scale.
 
 ### Block-wise quantization {#sec-performance-engineering-block-quant}
 
-Post-training quantization to INT8 or INT4 delivers even greater bandwidth savings for inference, but LLMs present a unique challenge: **outlier features**[^fn-outlier-features]. @dettmers2022llmint8 discovered that large language models develop a small number of hidden dimensions (about 0.1 percent of features) with activation magnitudes roughly 3--20$\times$ larger than the rest.
+The first inference-side precision decision is how to shrink weights while protecting the channels that carry rare but essential signal. Post-training quantization to INT8 or INT4 delivers even greater bandwidth savings for inference, but LLMs present a unique challenge: **outlier features**[^fn-outlier-features]. @dettmers2022llmint8 discovered that large language models develop a small number of hidden dimensions (about 0.1 percent of features) with activation magnitudes roughly 3--20$\times$ larger than the rest.
 
 [^fn-outlier-features]: **Outlier Features**: Large-scale transformers develop emergent "outlier" dimensions with activation magnitudes up to about 20$\times$ larger than typical values. While these outliers constitute about 0.1 percent of all features, clipping them during INT8 quantization destroys the model's reasoning capabilities. This physical property of large models is the reason post-training quantization (PTQ) requires "outlier-aware" strategies like LLM.int8() or AWQ. \index{Outlier Features!quantization challenge}
 
@@ -1108,15 +1108,17 @@ Applying uniform per-tensor INT8 quantization clips these outliers, destroying t
 
 :::
 
-LLM.int8() solves this by decomposing each matrix multiplication into two parts: a small set of outlier dimensions processed in FP16, and the remaining dimensions processed in INT8. The system identifies outlier dimensions at runtime (those exceeding a magnitude threshold, typically 6.0), routes them to an FP16 GEMM, and routes the remaining dimensions to an INT8 GEMM. The results are combined to produce the final output. This achieves nearly lossless INT8 inference for models that would otherwise degrade substantially under uniform quantization.
+The deployment choice is where to pay for outlier protection. Each widely used method protects the same sensitive information, but it moves the cost to a different place in the serving pipeline.
 
-GPTQ\index{GPTQ} [@frantar2023gptq] takes a different approach: weight-only quantization using second-order information. Instead of quantizing each weight independently, GPTQ processes weights column by column, using the Hessian of the layer's loss surface to determine which quantization errors matter most and redistributing those errors across unquantized columns. This produces INT4 weight representations with minimal accuracy loss, even for models with severe outlier features. The key insight is that quantization error in one weight can be compensated by adjusting correlated weights.
+LLM.int8() keeps the outlier cost at runtime by decomposing each matrix multiplication into two parts: a small set of outlier dimensions processed in FP16, and the remaining dimensions processed in INT8. The system identifies outlier dimensions at runtime (those exceeding a magnitude threshold, typically 6.0), routes them to an FP16 GEMM, and routes the remaining dimensions to an INT8 GEMM. The results are combined to produce the final output. This achieves nearly lossless INT8 inference for models that would otherwise degrade substantially under uniform quantization.
 
-AWQ [Activation-Aware Weight Quantization; @lin2025] observes that not all weights are equally important: weights connected to high-activation channels contribute disproportionately to model output. AWQ identifies these salient weights by analyzing activation magnitudes across a calibration dataset, then applies per-channel scaling to protect them before uniform group quantization. This achieves INT4 weight quantization with quality competitive with reconstruction-based PTQ methods while avoiding GPTQ-style Hessian reconstruction.
+GPTQ\index{GPTQ} [@frantar2023gptq] moves the cost into calibration through weight-only quantization using second-order information. Instead of quantizing each weight independently, GPTQ processes weights column by column, using the Hessian of the layer's loss surface to determine which quantization errors matter most and redistributing those errors across unquantized columns. This produces INT4 weight representations with minimal accuracy loss, even for models with severe outlier features. The key insight is that quantization error in one weight can be compensated by adjusting correlated weights.
 
-SmoothQuant\index{SmoothQuant} [@xiao2023smoothquant] takes yet another approach to the outlier problem. Rather than handling outliers at runtime (LLM.int8()) or through weight optimization (GPTQ, AWQ), SmoothQuant smooths the activation distribution before quantization by migrating the quantization difficulty from activations to weights. The key observation is that activation outliers are channel-specific: certain hidden dimensions consistently produce large values across all tokens. SmoothQuant applies a per-channel scaling transformation that divides the activation by a smoothing factor and multiplies the corresponding weight by the same factor. This mathematically equivalent transformation reduces activation outlier magnitudes at the cost of slightly increasing weight magnitudes, making both tensors more amenable to uniform INT8 quantization. The result is efficient W8A8 (weight-8-bit, activation-8-bit) quantization that exploits INT8 Tensor Cores for both bandwidth and compute benefits.
+AWQ [Activation-Aware Weight Quantization; @lin2025] reduces the calibration burden by observing that not all weights are equally important: weights connected to high-activation channels contribute disproportionately to model output. AWQ identifies these salient weights by analyzing activation magnitudes across a calibration dataset, then applies per-channel scaling to protect them before uniform group quantization. This achieves INT4 weight quantization with quality competitive with reconstruction-based PTQ methods while avoiding GPTQ-style Hessian reconstruction.
 
-These four approaches, LLM.int8(), GPTQ, AWQ, and SmoothQuant, represent a progression in the sophistication of quantization techniques for LLMs. LLM.int8() handles outliers at runtime with mixed-precision decomposition but limits compression to INT8. GPTQ uses second-order information for aggressive INT4 weight compression but requires hours of calibration per model. AWQ achieves similar INT4 quality with minutes of calibration by focusing on activation-aware scaling. SmoothQuant enables W8A8 quantization by preprocessing the weight-activation pairs. In practice, AWQ is a common choice for weight-only quantization in production LLM deployment, while SmoothQuant is often used when both weight and activation quantization are needed for compute-bound workloads.
+SmoothQuant\index{SmoothQuant} [@xiao2023smoothquant] shifts the outlier burden from activations to weights before inference. Rather than handling outliers at runtime (LLM.int8()) or through weight optimization (GPTQ, AWQ), SmoothQuant smooths the activation distribution before quantization by migrating the quantization difficulty from activations to weights. The key observation is that activation outliers are channel-specific: certain hidden dimensions consistently produce large values across all tokens. SmoothQuant applies a per-channel scaling transformation that divides the activation by a smoothing factor and multiplies the corresponding weight by the same factor. This mathematically equivalent transformation reduces activation outlier magnitudes at the cost of slightly increasing weight magnitudes, making both tensors more amenable to uniform INT8 quantization. The result is efficient W8A8 (weight-8-bit, activation-8-bit) quantization that exploits INT8 Tensor Cores for both bandwidth and compute benefits.
+
+The practical choice depends on the binding resource and the quality budget. LLM.int8() handles outliers at runtime with mixed-precision decomposition but limits compression to INT8. GPTQ uses second-order information for aggressive INT4 weight compression but requires hours of calibration per model. AWQ reaches similar INT4 quality with minutes of calibration by focusing on activation-aware scaling. SmoothQuant enables W8A8 quantization by preprocessing the weight-activation pairs. For weight-only LLM serving, AWQ is often attractive when calibration time matters; for workloads that need activation quantization and INT8 Tensor Cores, SmoothQuant is the more relevant option.
 
 The choice among these techniques also depends on the deployment target. For GPU inference with Tensor Core support, GPTQ and AWQ produce INT4 weight representations that are dequantized to FP16 during the GEMM computation, using the GPU's FP16 Tensor Cores. For CPU inference or edge deployment, INT8 representations (LLM.int8() or static per-channel INT8 quantization) can directly exploit integer arithmetic units without dequantization overhead.
 
@@ -1130,7 +1132,7 @@ For Archetype C (Federated MobileNet), quantization is *a prerequisite for survi
 
 ### Post-training vs. quantization-aware training {#sec-performance-engineering-ptq-qat}
 
-The trade-off between **Post-Training Quantization (PTQ)**\index{Post-Training Quantization} and **Quantization-Aware Training (QAT)**\index{Quantization-Aware Training} centers on the balance between engineering agility and model fidelity. For a model like Llama-2-70B, PTQ is the usual first choice for immediate deployment. Techniques like GPTQ or AWQ process the model layer-by-layer using a small calibration dataset (typically 128--1024 samples) to minimize reconstruction error. This process is computationally cheap, often requiring hours rather than a distributed training run for a 70B model. While PTQ is usually robust at INT8, aggressive quantization to INT4 or INT3 can incur a visible penalty: perplexity may degrade, and reasoning benchmarks such as Massive Multitask Language Understanding (MMLU) can drop several percentage points if the quantization recipe does not protect sensitive layers and outlier channels.
+When a post-training recipe misses the quality budget, the precision decision shifts from calibration to training cost. The trade-off between **Post-Training Quantization (PTQ)**\index{Post-Training Quantization} and **Quantization-Aware Training (QAT)**\index{Quantization-Aware Training} centers on the balance between engineering agility and model fidelity. For a model like Llama-2-70B, PTQ is the usual first choice for immediate deployment. Techniques like GPTQ or AWQ process the model layer-by-layer using a small calibration dataset (typically 128--1024 samples) to minimize reconstruction error. This process is computationally cheap, often requiring hours rather than a distributed training run for a 70B model. While PTQ is usually robust at INT8, aggressive quantization to INT4 or INT3 can incur a visible penalty: perplexity may degrade, and reasoning benchmarks such as Massive Multitask Language Understanding (MMLU) can drop several percentage points if the quantization recipe does not protect sensitive layers and outlier channels.
 
 When PTQ fails to meet quality thresholds, QAT provides the remedy by integrating quantization noise directly into the training loop. By simulating low-precision rounding during the forward pass and approximating gradients during the backward pass via the straight-through estimator[^fn-ste-quantization] (STE), the network learns to adjust its weights to be robust to quantization.
 
@@ -1142,10 +1144,11 @@ The practical workflow in most production environments follows a two-stage appro
 
 ### KV cache compression and architectural optimization {#sec-performance-engineering-kv-cache}
 
-The Key-Value (KV) cache is the primary memory bottleneck in large-scale LLM inference. Strategies to mitigate this pressure include numerical compression (quantization to INT8, FP8, or INT4) and architectural optimizations like Grouped Query Attention (GQA). Because these techniques are fundamental to scaling model serving, we provide a rigorous quantitative analysis of KV cache memory footprints and the performance impact of GQA in @sec-inference-scale-kv-cache-compression-943a.
+The key-value (KV) cache is the precision problem that determines whether weight savings become larger batches. In decode, weights may be compressed aggressively while per-request cache state still grows with sequence length, so a precision change that leaves the cache untouched may fail to move the serving bottleneck. Strategies to mitigate this pressure include numerical compression (quantization to INT8, FP8, or INT4) and architectural optimizations like grouped query attention (GQA). Because these techniques are fundamental to scaling model serving, @sec-inference-scale-kv-cache-compression-943a provides the full quantitative treatment of KV cache memory footprints and the performance impact of GQA.
 
 ### Weight-only vs. weight-activation quantization {#sec-performance-engineering-quant-strategies}
-Weight-only quantization (GPTQ, AWQ) reduces weight precision to INT4 or INT3 while keeping activations in FP16. During a GEMM, the INT4 weights are dequantized to FP16 on-the-fly, and the computation proceeds using FP16 Tensor Cores. The benefit is reduced memory for weight storage and reduced HBM bandwidth for weight reads, but the GEMM itself still operates at FP16 precision. This approach is ideal for memory-bound inference (batch size 1 decode), where the bottleneck is reading weights from HBM.
+
+The final precision choice is whether the optimization should stop at the weights or include activations as well. Weight-only quantization (GPTQ, AWQ) reduces weight precision to INT4 or INT3 while keeping activations in FP16. During a GEMM, the INT4 weights are dequantized to FP16 on-the-fly, and the computation proceeds using FP16 Tensor Cores. The benefit is reduced memory for weight storage and reduced HBM bandwidth for weight reads, but the GEMM itself still operates at FP16 precision. This approach is ideal for memory-bound inference (batch size 1 decode), where the bottleneck is reading weights from HBM.
 
 Weight-activation quantization (SmoothQuant, FP8 training) reduces both weights and activations to lower precision, enabling the GEMM to execute using lower-precision arithmetic (INT8 Tensor Cores, FP8 Tensor Cores). This provides both bandwidth and compute benefits but is more challenging to implement without quality degradation, because activation distributions are more dynamic and harder to quantize than weight distributions.
 
@@ -1281,7 +1284,7 @@ Graph compilers automate both of these optimizations, applying them systematical
 
 ## Graph Compilation {#sec-performance-engineering-compilation}
 
-Manually writing fused CUDA kernels for every possible combination of layers in a massive neural network is a Sisyphean task for human engineers. Graph compilation automates this process: it analyzes the model's computational graph and generates optimized, hardware-aware machine instructions, transforming high-level PyTorch code into specialized kernels without manual effort.
+After precision and fusion expose repeatable optimization patterns, graph compilation asks whether those patterns are stable enough for the compiler to own. Manually writing fused CUDA kernels for every possible combination of layers in a massive neural network is a Sisyphean task for human engineers. A graph compiler analyzes the model's computational graph and generates optimized, hardware-aware machine instructions, transforming high-level PyTorch code into specialized kernels when shape stability and replay volume justify the compilation cost.
 
 ::: {#psp-performance-engineering-hardware-software-co-design .callout-perspective title="Hardware-software co-design"}
 
@@ -1305,7 +1308,7 @@ The kernel selection pass maps each fused operation to a specific machine code i
 
 ### torch.compile {#sec-performance-engineering-torch-compile}
 
-PyTorch's `torch.compile` (introduced in PyTorch 2.0) brings graph compilation to the most widely used ML framework. It operates through three components: **TorchDynamo** for graph capture, **TorchInductor**\index{TorchInductor} for code generation, and **AOTAutograd** for ahead-of-time backward graph construction.
+For workloads already written in PyTorch, `torch.compile` is the least disruptive compiler intervention: it tries to capture enough static graph to fuse memory-bound regions while preserving PyTorch's dynamic Python execution model. It operates through three components: **TorchDynamo** for graph capture, **TorchInductor**\index{TorchInductor} for code generation, and **AOTAutograd** for ahead-of-time backward graph construction.
 
 TorchDynamo operates at the Python bytecode level[^fn-torchdynamo-bytecode], a design choice that distinguishes it from earlier tracing approaches.
 
@@ -1341,11 +1344,11 @@ compiled_block = torch.compile(transformer_block)
 output = compiled_block(x, w1, w2, ln_weight, ln_bias)
 ```
 
-In this example, `torch.compile` will fuse the GELU activation with surrounding operations, combine the layer normalization mean/variance/normalize steps into a single kernel, and potentially fuse the bias addition with the preceding GEMM. The user writes standard PyTorch code; the compiler handles the optimization.
+In this example, `torch.compile` will fuse the GELU activation with surrounding operations, combine the layer normalization mean/variance/normalize steps into a single kernel, and potentially fuse the bias addition with the preceding GEMM. Model code remains standard PyTorch; the compiler handles the optimization.
 
 ### XLA and TPU optimization {#sec-performance-engineering-xla}
 
-XLA (Accelerated Linear Algebra\index{XLA!Accelerated Linear Algebra}) is Google's graph compiler, used as the backend for JAX and TensorFlow. Unlike TorchInductor, which generates Triton code targeting NVIDIA GPUs, XLA generates HLO (High-Level Operations) intermediate representation that targets multiple backends, including Google Tensor Processing Units (TPUs), NVIDIA GPUs, and CPUs. Its architecture is fundamentally different from `torch.compile`: while PyTorch prioritizes flexibility by allowing graph breaks for unsupported Python features, XLA enforces **whole-program compilation**\index{Whole-Program Compilation}, tracing the entire computation as a single static graph and enabling global optimizations that span across layers and even across the forward and backward passes.
+XLA (Accelerated Linear Algebra\index{XLA!Accelerated Linear Algebra}) pays for performance with static structure. Used as the backend for JAX and TensorFlow, it generates HLO (High-Level Operations) intermediate representation that targets multiple backends, including Google Tensor Processing Units (TPUs), NVIDIA GPUs, and CPUs. Unlike TorchInductor, which generates Triton code targeting NVIDIA GPUs while preserving more Python flexibility, XLA enforces **whole-program compilation**\index{Whole-Program Compilation}, tracing the entire computation as a single static graph and enabling global optimizations that span across layers and even across the forward and backward passes.
 
 The global view enables XLA's most distinctive capability: the **GSPMD (General Partitioner for SPMD)**\index{GSPMD}, where SPMD denotes the single program, multiple data execution model in which every device runs the same program over a different shard of the data. In distributed training, GSPMD automatically partitions the computation graph across thousands of TPU cores based on a few high-level user annotations. While a PyTorch user must manually wrap models with `DistributedDataParallel` or `FullyShardedDataParallel`, an XLA user defines the computation for a single device and allows the compiler to infer the necessary communication primitives (AllReduce, AllGather) and insert them into the graph. This allows for complex hybrid sharding strategies that are difficult to implement manually.
 
@@ -1379,15 +1382,15 @@ Graph compilation has reshaped the performance engineering workflow. Before `tor
 
 ### Compilation modes and backends {#sec-performance-engineering-compilation-modes}
 
-`torch.compile` supports multiple optimization levels that trade compilation time for runtime performance:
+`torch.compile` mode selection is an amortization decision: spend more compile time only when the workload will replay stable shapes enough times to recover that cost.
 
-The `default` mode applies standard optimizations: element-wise fusion, memory planning, and kernel selection from the pretuned library. Compilation is fast (seconds to minutes) and suitable for development iteration.
+The `default` mode is the development baseline. It applies standard optimizations: element-wise fusion, memory planning, and kernel selection from the pretuned library. Compilation is fast (seconds to minutes) and suitable for development iteration.
 
-The `reduce-overhead` mode additionally wraps the compiled graph in CUDA Graphs (discussed in @sec-performance-engineering-cuda-graphs), eliminating kernel launch overhead. The benefit is greatest for small models where launch overhead constitutes a significant fraction of execution time.
+The `reduce-overhead` mode is the launch-bound choice. It additionally wraps the compiled graph in CUDA Graphs (discussed in @sec-performance-engineering-cuda-graphs), eliminating kernel launch overhead. The benefit is greatest for small models where launch overhead constitutes a significant fraction of execution time.
 
-The `max-autotune` mode triggers extensive kernel autotuning, benchmarking multiple kernel variants (different tile sizes, thread block configurations, memory access patterns) for each operation and selecting the fastest. This produces the highest-performance code but may take 10--30 minutes of compilation time, making it suitable for production deployment but impractical during development.
+The `max-autotune` mode is the production specialization choice. It triggers extensive kernel autotuning, benchmarking multiple kernel variants (different tile sizes, thread block configurations, memory access patterns) for each operation and selecting the fastest. This produces the highest-performance code but may take 10--30 minutes of compilation time, making it suitable for production deployment but impractical during development.
 
-The choice of backend also matters. TorchInductor (the default) generates Triton kernels for GPU and C++ for CPU. For deployment-specific optimization, the model can be exported through `torch.export` to an intermediate representation that can be consumed by TensorRT, Open Neural Network Exchange (ONNX) Runtime, or other inference-specialized runtimes. Each backend applies its own optimization passes on top of the common graph-level transformations.
+Backend choice follows the same constraint: the more stable and deployment-specific the workload, the more specialized the runtime can be. TorchInductor (the default) generates Triton kernels for GPU and C++ for CPU. For deployment-specific optimization, the model can be exported through `torch.export` to an intermediate representation that can be consumed by TensorRT, Open Neural Network Exchange (ONNX) Runtime, or other inference-specialized runtimes. Each backend applies its own optimization passes on top of the common graph-level transformations.
 
 ### The triton language {#sec-performance-engineering-triton}
 
@@ -1432,7 +1435,7 @@ The programmer thinks in terms of tiles (`BLOCK_SIZE` elements), not individual 
 
 The real power of Triton emerges when fusing multiple operations. A Triton kernel that implements `y = LayerNorm(GELU(x))` loads `x` once from HBM, computes both GELU and LayerNorm in registers/shared memory, and writes `y` once to HBM. Without fusion, this sequence requires three HBM round-trips: read `x`, write `GELU(x)`, read `GELU(x)`, write `norm_input`, read `norm_input`, write `y`. The fused kernel reduces HBM traffic by 3$\times$, and for memory-bound operations, this translates directly to a 3$\times$ speedup.
 
-Triton's adoption has accelerated rapidly since its integration into PyTorch's TorchInductor backend. When `torch.compile` identifies a fusion opportunity that requires a custom kernel, TorchInductor automatically generates Triton code for the fused operation. This means that many of the fusion benefits described in this section are available to users through a single `torch.compile` call, without writing any Triton code directly. For advanced use cases where the compiler's heuristics are insufficient, hand-written Triton kernels provide a middle ground between the accessibility of PyTorch and the performance of hand-tuned CUDA.
+The performance-engineering consequence is that Triton turns many custom fusion opportunities into compiler output. When `torch.compile` identifies a fusion opportunity that requires a custom kernel, TorchInductor automatically generates Triton code for the fused operation. Many of the fusion benefits described in this section therefore come through a single `torch.compile` call, without hand-written Triton code. For advanced cases where the compiler's heuristics miss the bottleneck, hand-written Triton kernels provide a middle ground between the accessibility of PyTorch and the performance of hand-tuned CUDA.
 
 ```{python}
 #| echo: false
@@ -1522,9 +1525,11 @@ Speculative decoding is a latency optimization that breaks the sequential bottle
 
 A 1-trillion parameter dense model delivers superior reasoning capabilities, but its latency and compute costs are prohibitive for most serving budgets. The **Mixture of Experts (MoE)**\index{Mixture of Experts}\index{MoE} architecture resolves this tension by training a massive model but activating only a small, relevant fraction of it for any given token. By routing inputs to specialized sub-networks, MoE breaks the iron link between model size and inference cost.
 
+For performance engineering, the local question is whether active-parameter savings exceed the costs of routing and communication. Sparse activation improves the iron law budget only when inactive experts stay off the critical path and the router avoids creating a new AllToAll or load-imbalance bottleneck.
+
 ### MoE architecture {#sec-performance-engineering-moe-architecture}
 
-A standard MoE transformer layer replaces the feed-forward network (FFN) with multiple parallel "expert" FFNs and a lightweight **router**\index{Router!Mixture of Experts} (also called a gating network) that selects which experts process each token. Because the serving logic for these models, including Expert Parallelism (EP), AllToAll communication patterns, and load-balancing strategies, is fundamental to large-scale inference, we provide a rigorous quantitative treatment of MoE serving in @sec-inference-scale-expert-parallelism-moe-models-55f6.
+A standard MoE transformer layer replaces the feed-forward network (FFN) with multiple parallel "expert" FFNs and a lightweight **router**\index{Router!Mixture of Experts} (also called a gating network) that selects which experts process each token. That architecture shifts the performance problem from dense matrix throughput to routing, memory residency, Expert Parallelism (EP), AllToAll communication, and load balancing. Because the serving logic for these models is fundamental to large-scale inference, @sec-inference-scale-expert-parallelism-moe-models-55f6 provides the full quantitative treatment of MoE serving.
 
 ## Communication-Computation Overlap {#sec-performance-engineering-overlap}
 
@@ -1803,7 +1808,7 @@ Observing a distributed ML system fundamentally alters its behavior. Gathering h
 
 ### The profiling hierarchy {#sec-performance-engineering-profiling-hierarchy}
 
-ML system profiling operates at four levels, each providing different granularity and targeting different bottleneck categories.
+Profiling levels are useful only if they guide the drill-down from symptom to intervention. ML system profiling operates at four levels, each providing different granularity and targeting different bottleneck categories.
 
 Operation-level profiling measures the execution time and resource utilization of individual GPU kernels. Tools like NVIDIA Nsight Compute\index{Nsight Compute} provide detailed metrics for a single kernel: achieved memory bandwidth, compute utilization, occupancy (fraction of available threads active), and instruction mix. This level diagnoses whether a specific GEMM achieves peak throughput and whether a kernel is memory-bound or compute-bound.
 
@@ -1817,7 +1822,7 @@ Diagnosing performance requires a drill-down approach, moving from global sympto
 
 ### Key performance metrics {#sec-performance-engineering-metrics}
 
-ML system performance is characterized by a family of metrics, each capturing a different aspect of system behavior. Understanding their relationships and trade-offs is essential for performance engineering.
+Metrics are not interchangeable; each answers a different bottleneck question. MFU and MBU diagnose useful hardware work, TTFT and ITL diagnose serving latency, and throughput exposes capacity under batching. Understanding their relationships and trade-offs is essential for performance engineering.
 
 Model FLOPs Utilization (MFU) measures what fraction of the hardware's theoretical peak is being productively used by the model's computation. MFU captures the combined effect of all inefficiencies: memory bandwidth limitations, kernel launch overhead, communication wait time, and software stack overhead. For large-scale LLM training, MFU of 40--60 percent is typical; values above 60 percent indicate excellent optimization.
 
@@ -1885,7 +1890,7 @@ Consider a concrete example: a LayerNorm kernel profiled on an H100 reports `{py
 
 ### PyTorch profiler workflow {#sec-performance-engineering-pytorch-profiler}
 
-The PyTorch Profiler\index{PyTorch Profiler} integrates with the training loop to capture detailed traces with minimal code modification:
+The PyTorch Profiler\index{PyTorch Profiler} is most useful when application metrics show a slowdown but the responsible layer is still unknown. Its role is to narrow a global symptom to a layer, kernel family, or synchronization point before a heavier tool is used. It integrates with the training loop to capture detailed traces with minimal code modification:
 
 ```python
 import torch
@@ -1920,18 +1925,20 @@ with profile(
 
 The `schedule` parameter defines a warmup period where the profiler runs but does not record, allowing CUDA caches and just-in-time (JIT) compilation to stabilize before measurement begins. Without warmup, the first few iterations include one-time costs (kernel compilation, memory allocation, CUDA context initialization) that inflate the measured times and misrepresent steady-state performance.
 
-The resulting trace, viewable in TensorBoard or Chrome's trace viewer, shows:
+The resulting trace, viewable in TensorBoard or Chrome's trace viewer, matters only insofar as each view maps to an intervention:
 
 - **Kernel timeline**\index{Kernel!timeline}: Which CUDA kernels execute and for how long. Look for gaps (GPU idle time) and unexpectedly long kernels.
 - **Memory timeline**\index{Memory!timeline}: GPU memory allocation and deallocation over time. Spikes indicate inefficient memory management; gradual growth suggests memory leaks.
 - **CPU-GPU synchronization**\index{CPU-GPU Synchronization}: Points where the CPU waits for the GPU (or vice versa). Excessive synchronization often indicates that the CPU is not launching kernels fast enough to keep the GPU busy.
 - **Communication events**\index{Communication Events}: NCCL collective operations and their duration relative to compute kernels. Short compute between long communications indicates poor overlap.
 
+The profiler is therefore a triage tool, not the final performance proof: it identifies whether the next experiment should target fusion, memory planning, CUDA Graphs, or overlap.
+
 ### Nsight systems: Reading the timeline {#sec-performance-engineering-nsight-systems}
 
-NVIDIA Nsight Systems\index{Nsight Systems} is the primary tool for trace-level profiling. Understanding how to read its timeline view is an essential skill for performance engineers. The tool captures every GPU kernel launch, CUDA memory operation, NCCL communication, and CPU thread activity onto a unified timeline.
+NVIDIA Nsight Systems\index{Nsight Systems} answers the trace-level question raised by higher-level profiling: whether the GPU timeline is continuous, whether the CPU is feeding it fast enough, and whether communication overlaps compute. The tool captures every GPU kernel launch, CUDA memory operation, NCCL communication, and CPU thread activity onto a unified timeline.
 
-A typical Nsight Systems workflow begins with capturing a trace of a few training or inference iterations:
+Nsight Systems becomes useful when the question has shifted from which layer is slow to why the full timeline has gaps. A typical workflow begins with capturing a trace of a few training or inference iterations:
 
 ```bash
 nsys profile --trace=cuda,nvtx,osrt,cudnn,cublas \
@@ -1940,9 +1947,9 @@ nsys profile --trace=cuda,nvtx,osrt,cudnn,cublas \
     python3 inference_server.py --num-steps=5
 ```
 
-The `--trace` flags control which activities are recorded. The `cuda` flag captures kernel launches and memory operations. The `nvtx` flag captures user-annotated regions (PyTorch automatically annotates module boundaries with NVTX markers). The `cublas` and `cudnn` flags capture library-level operations, which helps identify whether a GEMM is using cuBLAS or a custom kernel.
+The `--trace` flags control which activities are recorded. The `cuda` flag captures kernel launches and memory operations. The `nvtx` flag captures user-annotated regions (PyTorch automatically annotates module boundaries with NVTX markers). The `cublas` and `cudnn` flags capture library-level operations, which helps identify whether a GEMM is using cuBLAS or a custom kernel. The command is useful because these rows expose whether the bottleneck is launch overhead, communication serialization, or kernel implementation.
 
-The resulting `.nsys-rep` file is opened in the Nsight Systems GUI, which presents a multi-row timeline. The most important rows are:
+The resulting `.nsys-rep` file is opened in the Nsight Systems GUI, which presents a multi-row timeline. The most important diagnostic rows are:
 
 The CUDA HW row shows the actual kernel execution on the GPU. Each colored bar represents a kernel, with width proportional to execution time. Gaps between bars indicate GPU idle time, which represents wasted potential. For a well-optimized inference pipeline, the CUDA HW row should show nearly continuous kernel execution with minimal gaps.
 
@@ -1964,7 +1971,7 @@ Experienced performance engineers develop pattern recognition for these traces, 
 
 ### Common bottleneck patterns {#sec-performance-engineering-bottleneck-patterns}
 
-Profiling reveals several recurring patterns in ML workloads that map directly to the optimization techniques in this chapter.
+Profiling is valuable because recurring trace patterns map directly to optimization choices.
 
 Small kernel gaps manifest as many short GPU idle periods between small kernels, indicating that kernel launch overhead dominates. Graph compilation (`torch.compile`) fuses these small kernels to reclaim the lost cycles.
 
@@ -2229,7 +2236,7 @@ The fourth step is to apply and verify. Implement the highest-impact optimizatio
 
 ### Combining techniques {#sec-performance-engineering-combining}
 
-The most performant production systems combine multiple techniques simultaneously. A highly optimized LLM serving system might employ all of the following:
+Production systems combine techniques because no single intervention covers every term in the iron law. A highly optimized LLM serving system might employ all of the following:
 
 - FlashAttention-2 or FlashAttention-3 for memory-efficient attention computation
 - INT4 weight quantization (GPTQ or AWQ) with FP16 dequantization during GEMM
@@ -2243,7 +2250,7 @@ The speedups from these techniques are not additive; they interact in ways that 
 
 The interaction between optimizations creates a dependency graph that the performance engineer must navigate. Some combinations are synergistic: FlashAttention removes attention intermediates, and INT8 KV cache compression reduces KV cache memory, together freeing enough memory for larger batch sizes that transform the economics of serving. Other combinations are redundant: applying both CUDA Graphs and the `reduce-overhead` mode of `torch.compile` achieves the same result, since `reduce-overhead` internally uses CUDA Graphs. Still other combinations conflict: speculative decoding benefits most at small batch sizes (where decode is memory-bound), while many throughput optimizations work by increasing batch size. At large batch sizes, speculation adds overhead without proportional benefit.
 
-A practical heuristic for sequencing optimizations is to apply them in order of decreasing impact and increasing effort:
+A practical heuristic for sequencing optimizations is to apply the cheapest bottleneck-moving intervention before adding new algorithmic machinery:
 
 1. torch.compile (1 line of code, 10--40 percent speedup): Apply first when input shapes are stable and graph breaks are limited. Verify with profiling, since compilation latency, recompilation on dynamic shapes, and reduced optimization for symbolic shapes can erode the gain.
 2. Weight quantization (INT4/FP8, hours of calibration, 2--4$\times$ throughput): Apply second. Frees memory for batching.
@@ -2464,11 +2471,7 @@ This iterative mindset also determines which skills endure as hardware evolves. 
 
 ::: {.callout-chapter-connection title="From optimization to serving"}
 
-Operator fusion, precision reduction, graph compilation, and algorithmic innovations like speculative decoding and MoE extract maximum computational efficiency from a single model executing on bare metal. Optimizing an isolated forward pass, however, is merely the precursor to deployment.
-
-In production, models do not operate in zero-contention vacuums. They must process unpredictable bursts of concurrent requests, multiplexing across fleets of distributed accelerators while strictly adhering to latency and throughput budgets.
-
-@Sec-inference-scale transitions from the mechanics of local execution to the architecture of robust serving systems. The low-level optimizations developed here become the foundational primitives for high-availability infrastructure: continuous batching, distributed KV cache management, and dynamic request routing.
+Operator fusion, precision reduction, graph compilation, and algorithmic innovations like speculative decoding and MoE extract maximum computational efficiency from a single model executing on bare metal. Optimizing an isolated forward pass, however, is merely the precursor to deployment. In production, models do not operate in zero-contention vacuums. They must process unpredictable bursts of concurrent requests, multiplexing across fleets of distributed accelerators while strictly adhering to latency and throughput budgets. @Sec-inference-scale transitions from the mechanics of local execution to the architecture of robust serving systems. The low-level optimizations developed here become the foundational primitives for high-availability infrastructure: continuous batching, distributed KV cache management, and dynamic request routing.
 
 :::
 

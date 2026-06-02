@@ -722,7 +722,7 @@ This chapter develops the engineering principles needed to orchestrate this pipe
 
 ### Static vs. dynamic inference {#sec-model-serving-static-vs-dynamic-inference-e864}
 
-The preceding examples explain *why* serving systems must maintain capacity headroom. However, before optimizing *how* to reduce inference latency, a prior question must be addressed: *when* should predictions be computed at all? The first architectural decision in any serving system is whether predictions happen before or during user requests [@google2024staticdynamic]. This choice shapes system design, cost structure, and capability boundaries.
+The preceding examples explain *why* serving systems must maintain capacity headroom. Before optimizing *how* to reduce inference latency, the system must decide *when* predictions are computed. The first architectural decision in any serving system is whether predictions happen before or during user requests [@google2024staticdynamic]. This choice shapes system design, cost structure, and capability boundaries.
 
 #### Static inference {#sec-model-serving-static-inference-35f4}
 
@@ -864,29 +864,19 @@ Although "serving" often implies a networked server processing API requests, the
 
 #### Networked serving (cloud/data center) {#sec-model-serving-networked-serving-clouddatacenter-0328}
 
-The model\index{Serving!cloud/data center}\index{Microservice!model serving} runs as a standalone service (microservice), the deployment paradigm @sec-ml-systems-cloud-ml-maximizing-computational-power-a338 characterized as trading latency for virtually unlimited compute. The primary interface is the network (HTTP/gRPC). Optimization focuses on throughput (batching) and concurrency.
-
-*   Key constraint: Network bandwidth and serialization cost.
-*   Typical hardware: NVIDIA GPUs (V100, A100, H100), Google Tensor Processing Units (TPUs), AWS Inferentia.
-*   Cold start: Seconds to minutes (container startup, model loading, warmup).\index{Cold Start!cloud serving}
+The model\index{Serving!cloud/data center}\index{Microservice!model serving} runs as a standalone service (microservice), the deployment paradigm @sec-ml-systems-cloud-ml-maximizing-computational-power-a338 characterized as trading latency for virtually unlimited compute. The primary interface is the network (HTTP/gRPC), so the binding constraints are network bandwidth and serialization cost before the request even reaches the accelerator. Data-center hardware such as NVIDIA GPUs (V100, A100, H100), Google Tensor Processing Units (TPUs), and AWS Inferentia supports high-throughput batching and concurrency, but cold start can still stretch from seconds to minutes because container startup, model loading, and warmup sit outside the steady-state inference path.\index{Cold Start!cloud serving}
 
 #### Application-embedded serving (mobile/edge) {#sec-model-serving-applicationembedded-serving-mobileedge-8bd1}
 
-The model\index{Serving!mobile/edge}\index{Serving!edge inference, embedded serving} runs within the user application process (for example, a smartphone app using CoreML or TensorFlow Lite), the embedded paradigm @sec-ml-systems-edge-ml-reducing-latency-privacy-risk-2625 and @sec-ml-systems-mobile-ml-personal-offline-intelligence-0983 analyzed for its latency, privacy, and offline advantages. There is no "server." The interface is a function call. Optimization focuses on energy and responsiveness (SingleStream).
+The model\index{Serving!mobile/edge}\index{Serving!edge inference, embedded serving} runs within the user application process (for example, a smartphone app using CoreML or TensorFlow Lite), the embedded paradigm @sec-ml-systems-edge-ml-reducing-latency-privacy-risk-2625 and @sec-ml-systems-mobile-ml-personal-offline-intelligence-0983 analyzed for its latency, privacy, and offline advantages. There is no "server." The interface is a function call, so optimization focuses on energy and responsiveness (SingleStream) rather than shared-server throughput.
 
-*   Key advantage: **Zero-Copy Inference**\index{Inference!zero-copy, mobile optimization}. When data moves through a system, each copy consumes CPU cycles and memory bandwidth. In cloud serving, a camera frame might be copied four times: from network buffer to application memory, then to a preprocessing buffer, then to GPU-accessible memory, and finally to GPU VRAM. Mobile NPUs can eliminate most of these copies by sharing memory directly with the camera hardware. The camera writes pixels into a buffer that the NPU reads directly, avoiding the CPU entirely. This reduces both latency (no copy operations) and energy (memory copies consume significant power). The mechanism requires hardware support: the camera, CPU, and NPU must share a unified memory architecture, which modern mobile system on chip (SoC) designs like Apple's M-series and Qualcomm Snapdragon provide.
-*   Typical hardware: Mobile NPUs (Apple Neural Engine, Qualcomm Hexagon), embedded GPUs (Jetson).
-*   Cold start: Milliseconds (model already in app memory); first inference may trigger just-in-time (JIT) compilation (100–500 ms).
-*   Power budget: 1–5 W sustained, with thermal throttling after prolonged inference.
+The central advantage is **Zero-Copy Inference**\index{Inference!zero-copy, mobile optimization}: when data moves through a system, each copy consumes CPU cycles and memory bandwidth. In cloud serving, a camera frame might be copied four times: from network buffer to application memory, then to a preprocessing buffer, then to GPU-accessible memory, and finally to GPU VRAM. Mobile NPUs can eliminate most of these copies by sharing memory directly with the camera hardware. The camera writes pixels into a buffer that the NPU reads directly, avoiding the CPU entirely. This reduces both latency (no copy operations) and energy (memory copies consume significant power). The mechanism requires hardware support: the camera, CPU, and NPU must share a unified memory architecture, which modern mobile system on chip (SoC) designs like Apple's M-series and Qualcomm Snapdragon provide.
+
+Typical hardware includes mobile NPUs (Apple Neural Engine, Qualcomm Hexagon) and embedded GPUs (Jetson). Cold start usually falls in milliseconds because the model is already in app memory, though first inference may trigger just-in-time (JIT) compilation (100–500 ms). The sustained power budget is 1–5 W, with thermal throttling after prolonged inference.
 
 #### Bare-metal serving (TinyML) {#sec-model-serving-baremetal-serving-tinyml-28cf}
 
-The model\index{Serving!TinyML}\index{TinyML!bare-metal serving} is compiled into the firmware of a microcontroller, the extreme end of the deployment spectrum @sec-ml-systems-tinyml-ubiquitous-sensing-scale-a67b introduced as ubiquitous sensing at microwatt power budgets. There is no operating system or dynamic memory allocator. "Serving" is a tight loop reading sensors and invoking the interpreter. Optimization focuses on static memory usage (fitting in SRAM).
-
-*   Key difference: All memory is preallocated (Tensor Arena)\index{Tensor Arena!TinyML memory}. Dynamic batching is impossible.
-*   Typical hardware: ARM Cortex-M series, ESP32, and specialized TinyML accelerators.
-*   Cold start: Microseconds (model weights in flash, tensor arena preallocated).
-*   Power budget: Microwatts to milliwatts; battery operation for months or years.
+The model\index{Serving!TinyML}\index{TinyML!bare-metal serving} is compiled into the firmware of a microcontroller, the extreme end of the deployment spectrum @sec-ml-systems-tinyml-ubiquitous-sensing-scale-a67b introduced as ubiquitous sensing at microwatt power budgets. There is no operating system or dynamic memory allocator. "Serving" is a tight loop reading sensors and invoking the interpreter. Optimization focuses on static memory usage (fitting in SRAM) because all memory is preallocated in the Tensor Arena\index{Tensor Arena!TinyML memory} and dynamic batching is impossible. Typical hardware includes ARM Cortex-M series, ESP32, and specialized TinyML accelerators. Cold start falls in microseconds because model weights live in flash and the tensor arena is preallocated, while the power budget ranges from microwatts to milliwatts for battery operation over months or years.
 
 @Tbl-serving-spectrum summarizes *how* these deployment contexts shape serving system design:
 
@@ -2108,7 +2098,7 @@ The preceding lifecycle analysis assumed sequential processing. In production, c
 
 ### Queuing fundamentals {#sec-model-serving-queuing-fundamentals-10d3}
 
-Serving engineers routinely face a concrete question: given a latency SLO\index{SLO!capacity planning} and an expected request rate, *how* many GPUs must be provisioned? Answering this question requires predicting *how* latency changes as load increases, which is precisely what queuing theory provides. Two mathematical foundations govern serving system behavior. Little's Law (@sec-appdx-machine-foundations-littles-law-21a3) relates queue depth to throughput. The M/M/1 model predicts how latency degrades under load. Together, they provide the quantitative framework for capacity planning.
+Serving engineers routinely face a concrete capacity decision: given a latency SLO\index{SLO!capacity planning} and an expected request rate, the system must determine how many GPUs to provision. That decision requires predicting *how* latency changes as load increases, which is precisely what queuing theory provides. Two mathematical foundations govern serving system behavior. Little's Law (@sec-appdx-machine-foundations-littles-law-21a3) relates queue depth to throughput. The M/M/1 model predicts how latency degrades under load. Together, they provide the quantitative framework for capacity planning.
 
 ### Little's Law {#sec-model-serving-littles-law-9352}
 
@@ -3999,19 +3989,19 @@ The batching strategies and LLM-specific techniques examined in preceding sectio
 
 ### Runtime ecosystem and configuration {#sec-model-serving-frameworknative-serving-da62}
 
-PyTorch and TensorFlow models can serve directly using their native runtimes. This approach maximizes compatibility (any model that trains will serve) and simplifies the deployment pipeline (no export or conversion step). Framework runtimes include training functionality that adds overhead, and default execution paths may not exploit hardware-specific optimizations.
+Runtime selection should start with the binding constraint rather than the framework used during training. When deployment speed and compatibility dominate, PyTorch and TensorFlow models can serve directly using their native runtimes. This approach maximizes compatibility (any model that trains will serve) and simplifies the deployment pipeline (no export or conversion step). Framework runtimes include training functionality that adds overhead, and default execution paths may not exploit hardware-specific optimizations.
 
 TorchScript and TensorFlow SavedModel formats enable ahead-of-time compilation and graph optimization, improving over eager execution while maintaining framework compatibility. These formats represent the first step toward deployment optimization without abandoning the familiar framework ecosystem.
 
 #### General-purpose optimization {#sec-model-serving-generalpurpose-optimization-9ec2}
 
-ONNX Runtime[^fn-onnx-runtime-serving]\index{ONNX Runtime!cross-platform inference} provides a hardware-agnostic optimization layer [@onnxruntime2024]. Models export to ONNX format, then ONNX Runtime applies graph optimizations and selects execution providers for the target hardware. This enables single-format deployment across CPUs, GPUs, and specialized accelerators.
+When portability across hardware is the binding constraint, ONNX Runtime[^fn-onnx-runtime-serving]\index{ONNX Runtime!cross-platform inference} provides a hardware-agnostic optimization layer [@onnxruntime2024]. Models export to ONNX format, then ONNX Runtime applies graph optimizations and selects execution providers for the target hardware. This enables single-format deployment across CPUs, GPUs, and specialized accelerators.
 
 [^fn-onnx-runtime-serving]: **ONNX Runtime**: Microsoft's inference engine acts as a hardware abstraction layer: the same ONNX model runs on CPUs, NVIDIA GPUs, AMD GPUs, or custom accelerators through pluggable "execution providers." ONNX Runtime applies framework-agnostic graph optimizations---constant folding, redundant node elimination, operator fusion---that benefit all targets. This cross-platform capability avoids maintaining separate optimization pipelines per hardware target, accepting a 5--15 percent throughput loss vs. TensorRT for vision models, offset by the ability to retarget the same `.onnx` artifact across CPU/GPU/NPU without recompilation---a flexibility premium that matters most in heterogeneous device fleets where recompiling per-target is measured in engineer-days. \index{ONNX Runtime!cross-platform serving}
 
 #### Specialized inference engines {#sec-model-serving-specialized-inference-engines-475f}
 
-TensorRT\index{Inference!engine, specialized}\index{TensorRT!GPU optimization}[^fn-tensorrt-gpu-serving] (NVIDIA GPUs), OpenVINO[^fn-openvino-serving]\index{OpenVINO!Intel optimization} (Intel hardware), and similar engines optimize specifically for their target hardware [@nvidia2024tensorrt; @chen2018tvm]. They apply aggressive optimizations that framework-native runtimes cannot safely perform:
+When latency or hardware cost binds more tightly than portability, TensorRT\index{Inference!engine, specialized}\index{TensorRT!GPU optimization}[^fn-tensorrt-gpu-serving] (NVIDIA GPUs), OpenVINO[^fn-openvino-serving]\index{OpenVINO!Intel optimization} (Intel hardware), and similar engines optimize specifically for their target hardware [@nvidia2024tensorrt; @chen2018tvm]. They apply aggressive optimizations that framework-native runtimes cannot safely perform:
 
 [^fn-openvino-serving]: **OpenVINO (Open Visual Inference and Neural network Optimization)**: An Intel-specific engine that bypasses framework abstractions to map computations directly onto proprietary hardware instructions like AVX-512 and AMX. This direct hardware targeting is an "aggressive" optimization because it abandons the portability that framework-native runtimes must guarantee, allowing it to exploit specialized kernels unsafe for general execution. The resulting 2--5$\times$ speedup over standard CPU execution makes dedicated CPU serving economically viable for models under ~500M parameters. \index{OpenVINO!Intel inference}
 
@@ -4144,7 +4134,7 @@ The optimization-compatibility trade-off is inherent. More aggressive optimizati
 
 #### Runtime configuration {#sec-model-serving-runtime-configuration-492b}
 
-Beyond runtime selection, configuration choices significantly impact serving performance. Thread pool sizing controls parallelism for CPU inference—too few threads leave cores idle, while too many cause contention. Memory allocation strategies (preallocated buffers vs. dynamic allocation) trade startup cost against flexibility. Execution provider selection prioritizes which hardware backends handle each operation, and graph optimization level trades compilation time for runtime performance. Production deployments require systematic experimentation to find optimal configurations for specific models and hardware combinations, measuring their impact on latency distributions rather than relying on defaults.
+After the runtime is chosen, configuration applies the same constraint-first logic. Thread pool sizing controls parallelism for CPU inference: too few threads leave cores idle, while too many cause contention. Memory allocation strategies (preallocated buffers vs. dynamic allocation) trade startup cost against flexibility. Execution provider selection prioritizes which hardware backends handle each operation, and graph optimization level trades compilation time for runtime performance. Production deployments require systematic experimentation to find optimal configurations for specific models and hardware combinations, measuring their impact on latency distributions rather than relying on defaults.
 
 ### Precision selection for serving {#sec-model-serving-precision-selection-serving-55ba}
 
@@ -4265,7 +4255,7 @@ Runtime selection and precision tuning operate at the model level: they determin
 
 ## Node-Level Optimization {#sec-model-serving-nodelevel-optimization-3d9d}
 
-Runtime selection and precision tuning establish the software foundation for serving. Achieving peak efficiency requires going deeper: understanding *how* the hardware executes each operation and *where* every microsecond goes. Optimizations at the boundary of software and silicon target the computation graph itself: compiling the computation graph\index{Graph Compilation!optimization}, exploiting CPU capabilities when GPUs are absent, minimizing the time to get bytes from disk to memory, and visualizing exactly where every microsecond goes.
+At that lower layer, node-level optimization identifies which boundary is wasting time on this machine. The answer may be the computation graph\index{Graph Compilation!optimization}, CPU execution when GPUs are absent, bytes moving from disk to memory, or gaps visible only in a profiling trace. The goal is not to apply every optimization, but to match the measured bottleneck to the smallest intervention that removes it.
 
 ### Runtime graph compilation {#sec-model-serving-runtime-graph-compilation-7a7e}
 
@@ -4343,11 +4333,11 @@ Optimization without measurement is guesswork. The system efficiency metric defi
 
 #### The timeline view {#sec-model-serving-timeline-view-6159}
 
-Tools\index{Timeline Profiling!serving optimization} like PyTorch Profiler\index{Framework Profiler!timeline analysis} or NVIDIA Nsight Systems (nsys)\index{GPU Profiler!timeline analysis} generate a timeline trace. This visualization reveals the exact sequence of events on the CPU and GPU. When examining a trace, look for:
+Tools\index{Timeline Profiling!serving optimization} like PyTorch Profiler\index{Framework Profiler!timeline analysis} or NVIDIA Nsight Systems (nsys)\index{GPU Profiler!timeline analysis} generate a timeline trace. This visualization reveals the exact sequence of events on the CPU and GPU. A useful trace reading is bottleneck-first: each visible artifact points to a different class of fix.
 
-1.  **Gaps in the GPU Timeline**: If the GPU bar has empty spaces, the GPU is idle. This usually means the GPU is waiting for the CPU (preprocessing bottleneck) or disk (data loading).
+1.  **Gaps in the GPU timeline**: Empty spaces in the GPU bar indicate idle hardware. This usually means the GPU is waiting for the CPU (preprocessing bottleneck) or disk (data loading).
 2.  **Kernel launch overhead**: Thousands of tiny slivers on the GPU timeline indicate the model is launching too many small kernels. This is a prime candidate for operator fusion.
-3.  **Host-to-device transfers**: Look for `MemcpyHtoD` (Host to Device) blocks. Determine whether they overlap with computation or block it.
+3.  **Host-to-device transfers**: `MemcpyHtoD` (Host to Device) blocks reveal input movement. The diagnostic distinction is whether those transfers overlap with computation or block it.
 
 ::: {#exmp-model-serving-profiling-loop .callout-example title="The profiling loop"}
 
@@ -4361,7 +4351,7 @@ Tools\index{Timeline Profiling!serving optimization} like PyTorch Profiler\index
 
 #### Optimization technique impact matrix {#sec-model-serving-optimization-technique-impact-matrix-7c1e}
 
-To guide optimization efforts, @tbl-optimization-impact summarizes the key techniques available at the node level, their primary targets, and expected returns.
+@Tbl-optimization-impact is a decision aid rather than a checklist: choose the technique whose target metric matches the measured bottleneck, not the row with the largest typical gain.
 
 | **Technique**         | **Target Metric**    |     **Typical Gain**    | **Implement. Cost** | **Best For**           |
 |:----------------------|:---------------------|:-----------------------:|:--------------------|:-----------------------|
@@ -4388,7 +4378,7 @@ Optimizing inference requires a layered approach.
 
 :::
 
-The optimization techniques examined so far (batching, runtime selection, precision tuning, graph compilation) collectively determine how much useful work a single serving node extracts from its hardware. The natural question that follows is economic: determining *how much* infrastructure is required and at *what* total cost.
+The optimization techniques examined so far (batching, runtime selection, precision tuning, graph compilation) collectively determine how much useful work a single serving node extracts from its hardware. The next step is economic: determining *how much* infrastructure is required and at *what* total cost.
 
 ## Economics and Planning {#sec-model-serving-economics-capacity-planning-3e7e}
 

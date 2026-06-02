@@ -123,6 +123,8 @@ As @fig-three-walls-grid illustrates, this chapter begins at the silicon die and
 \index{Accelerator!spectrum}
 \index{Generality Tax}
 
+Every Machine Learning Fleet rests on a physical foundation, and this chapter builds that foundation from the bottom up across four levels: the accelerator that performs the arithmetic, the node that wires a handful of accelerators into one high-bandwidth unit, the rack that delivers power and removes the heat, and the pod that binds thousands of nodes into a single machine. The foundation starts with the silicon, where a specialized chip earns its place by doing one thing a general-purpose processor cannot do efficiently: run the same dense arithmetic, over and over, at maximum throughput.
+
 Consider what happens when a CPU executes a matrix multiplication. The processor fetches an instruction, decodes it, checks for data hazards, routes operands through a deep pipeline, and writes the result back to a register file. For each multiply-accumulate operation, the chip expends energy on branch prediction, speculative execution, out-of-order scheduling, and cache coherence.
 
 These mechanisms exist because a CPU must handle any instruction sequence efficiently, from pointer-chasing linked-list traversals to system calls. For neural network workloads, however, the operation is almost always the same: multiply two matrices of known dimensions, add a bias, and apply a nonlinear function. The CPU's elaborate control logic represents a tax on every operation, one that buys flexibility the workload does not need. This concept mirrors the classic reduced instruction set computer (RISC) vs. complex instruction set computer (CISC) debate in computer architecture: just as RISC processors achieved higher throughput by simplifying the instruction set, ML accelerators achieve higher throughput by simplifying the computational model to match the dominant workload pattern.
@@ -1620,9 +1622,7 @@ class MemoryBandwidthPipelineRecap:
     h100_bw_tb_s_str = fmt_qty(Hardware.Cloud.H100.memory.bandwidth, TB/second, precision=2, commas=False)
 ```
 
-To achieve this peak throughput in practice, the entire accelerator must be viewed as a rigid pipeline where data flows from HBM through a deepening hierarchy of caches before reaching the Tensor Cores. The fundamental constraint is **pipeline balance**\index{Pipeline!balance}: the rate at which data is staged into registers must match or exceed the rate at which the arithmetic units consume it. When the arithmetic intensity of an operation falls below the ridge point, the pipeline stalls, leaving teraflops of compute potential idle while waiting for data. This makes **kernel fusion**\index{Kernel Fusion} the single most critical software optimization for large-scale training. By fusing multiple operations (matrix multiplication, bias addition, activation function) into a single kernel, the system eliminates the round-trips to HBM that would occur if each operation were executed sequentially. Consider the attention mechanism: a naive, unfused implementation writes the $S{\times}S$ attention matrix to HBM only to read it back for the softmax operation,
-
-a round trip capped by the `{python} MemoryBandwidthPipelineRecap.h100_bw_tb_s_str` memory bandwidth. A fused implementation like FlashAttention keeps these intermediate matrices entirely in on-chip SRAM, bypassing HBM and allowing the Tensor Cores to run near their theoretical peak. For our `{python} InfraFrontierStragglerRecap2.frontier_params_b_str` model, where each training step involves thousands of matrix operations across 96 Transformer layers, the difference between fused and unfused kernels can be a 2--3$\times$ throughput improvement, separating a 2-week training run from a 6-week one.
+To achieve this peak throughput in practice, the entire accelerator must be viewed as a rigid pipeline where data flows from HBM through a deepening hierarchy of caches before reaching the Tensor Cores. The fundamental constraint is **pipeline balance**\index{Pipeline!balance}: the rate at which data is staged into registers must match or exceed the rate at which the arithmetic units consume it. When the arithmetic intensity of an operation falls below the ridge point, the pipeline stalls, leaving teraflops of compute potential idle while waiting for data. This makes **kernel fusion**\index{Kernel Fusion} the single most critical software optimization for large-scale training. By fusing multiple operations (matrix multiplication, bias addition, activation function) into a single kernel, the system eliminates the round-trips to HBM that would occur if each operation were executed sequentially. Consider the attention mechanism: a naive, unfused implementation writes the $S{\times}S$ attention matrix to HBM only to read it back for the softmax operation, creating a round trip capped by the `{python} MemoryBandwidthPipelineRecap.h100_bw_tb_s_str` memory bandwidth. A fused implementation like FlashAttention keeps these intermediate matrices entirely in on-chip SRAM, bypassing HBM and allowing the Tensor Cores to run near their theoretical peak. For our `{python} InfraFrontierStragglerRecap2.frontier_params_b_str` model, where each training step involves thousands of matrix operations across 96 Transformer layers, the difference between fused and unfused kernels can be a 2--3$\times$ throughput improvement, separating a 2-week training run from a 6-week one.
 
 #### Peak vs. sustained throughput {#sec-compute-infrastructure-peak-vs-sustained-throughput-625a}
 
@@ -3808,7 +3808,7 @@ The choice of network topology is a direct reflection of the dominant communicat
 
 ### Fleet architecture case studies {#sec-compute-fleet-case-studies}
 
-Leading organizations have made different architectural choices for their pods, and these differences are not arbitrary. Each reflects the organization's dominant workload, its hardware supply chain, and its willingness to trade flexibility for efficiency. Examining these choices concretely illustrates how the WSC principles manifest in practice.
+Pod case studies are useful only when they reveal the workload decision behind the topology. The differences are not arbitrary: each reflects the organization's dominant workload, hardware supply chain, and willingness to trade flexibility for efficiency. The engineering comparison is therefore the match between workload, fabric, and operational constraint.
 
 #### NVIDIA DGX SuperPOD {#sec-compute-infrastructure-nvidia-dgx-superpod-b9e2}
 
@@ -3953,7 +3953,7 @@ The cost structure of the network fabric itself warrants quantitative examinatio
 
 #### Site selection and physical constraints {#sec-compute-infrastructure-site-selection-physical-constraints-fba0}
 
-Before any accelerators are purchased or racks are populated, the most consequential decision is *where* to build the pod. Three physical constraints, often in tension, drive the site selection for ML training infrastructure.
+Site selection fixes several infrastructure constraints before any accelerator is purchased or any rack is populated. The location of a pod determines which power, cooling, and network trade-offs the rest of the design must absorb.
 
 Power availability is the first and often most binding constraint. A 10,000-GPU pod requires 10--15 MW of continuous power, equivalent to a medium-sized factory. Locations near hydroelectric dams (Pacific Northwest, Scandinavia, Quebec) offer abundant power at low carbon intensity, but these power-rich sites are often remote from talent pools and existing fiber optic infrastructure. The trade-off between cheap power and proximity to engineers is one of the most consequential site-selection decisions, and at megawatt scale the difference between a favorable and unfavorable electricity rate can represent tens of millions of dollars over a hardware lifecycle.
 
@@ -3981,13 +3981,13 @@ To mitigate these synchronization risks, experienced infrastructure teams use **
 
 These logistical contortions are driven by the **time value of compute**\index{Time value of compute}. In the race for frontier model development, the cost of delay is the loss of strategic position, exceeding the interest on capital. If a frontier model is projected to generate \$10 million per month in value -- whether through direct inference revenue or downstream product capabilities -- a three-month construction delay represents a \$30 million loss, often exceeding the cost of the facility's electrical infrastructure entirely. This calculus justifies aggressive expediting measures, such as paying 2--3$\times$ premiums for prefabricated modular data centers or leasing temporary colocation space to bridge the gap between silicon delivery and facility readiness.
 
-These physical and logistical constraints have defined the current generation of Warehouse-Scale Computers. But the landscape is shifting. To understand what the next generation of infrastructure will look like, we must examine the emerging technologies attempting to break these physical ceilings.
+These physical and logistical constraints have defined the current generation of warehouse-scale computers. The next generation will not remove the walls; it will move them. Emerging technologies matter here because they change where the memory, communication, or power constraint binds.
 
 ## Emerging Infrastructure Technologies {#sec-compute-emerging}
 
 \index{CXL}
 
-A data center built in 2025 will host three or four generations of accelerators over its 15-year structural lifetime, and each generation may demand capabilities that the facility must already support. Several technologies under active development could fundamentally alter the constraints that shape fleet design, making it essential for infrastructure planners to anticipate shifts in the memory wall, communication wall, and power wall when committing to facility designs, power provisioning, and cooling architectures today.
+A new data center will host three or four generations of accelerators over its 15-year structural lifetime, and each generation may demand capabilities that the facility must already support. Several technologies under active development matter for that reason: they could alter the constraints that shape fleet design, so infrastructure planners must anticipate shifts in the memory wall, communication wall, and power wall when committing to facility designs, power provisioning, and cooling architectures.
 
 ```{python}
 #| echo: false
@@ -4042,7 +4042,7 @@ The challenge is bandwidth. CXL 3.0 over a PCIe Gen5 x16 link provides approxima
 *HBM is 50-fold faster, so CXL is capacity only.*
 :::
 
-The practical timeline for CXL adoption in ML infrastructure is 2025–2027 for initial deployments, with CXL 3.0 memory pooling expected to reach production readiness by 2026–2027. Infrastructure planners designing facilities today should ensure that their server platforms support CXL and that their rack layouts can accommodate CXL memory expander modules.
+At the 2025–2027 planning horizon, the practical question is less whether CXL replaces HBM than whether the platform can absorb CXL memory pooling as it matures. Infrastructure planners should ensure that server platforms expose CXL support and that rack layouts can accommodate CXL memory expander modules.
 
 ### Wafer-scale integration {#sec-compute-wafer-scale-integration}
 
@@ -4070,9 +4070,9 @@ The wafer-scale approach is instructive even for organizations that do not deplo
 
 Underpinning all of these technologies is the evolution of **advanced packaging**\index{Advanced Packaging}, which determines how efficiently multiple silicon dies can communicate within a single package. The reticle limit of approximately 858 mm$^2$ forces next-generation accelerators into multi-die (chiplet) designs, where the packaging technology determines the effective bandwidth between dies. Current **2.5D interposers**\index{2.5D interposers} (such as TSMC's CoWoS) mount multiple compute dies and HBM stacks on a passive silicon bridge, achieving bandwidth densities orders of magnitude higher than PCB traces. The next frontier is **3D stacking**\index{3D stacking} (SoIC), where SRAM caches or compute logic are vertically stacked directly atop one another, reducing data travel distance to microns. This vertical integration attacks the memory wall by placing cache memory directly above the compute logic, but introduces a thermal wall: dissipating heat from the bottom layer of a 3D stack without overheating the top layer requires exotic solutions like microfluidic cooling channels etched directly into the silicon substrate. For infrastructure planners, the implication is that next-generation accelerators will be larger, more complex packages that demand even more sophisticated cooling solutions and power delivery -- extending the trends already visible in the transition from H100 to B200.
 
-These emerging technologies share a common theme: they all seek to flatten one or more of the bandwidth cliffs that define the current infrastructure hierarchy. CXL blurs the boundary between HBM and DRAM. Optical interconnects narrow the gap between intra-node and inter-node bandwidth. Disaggregated architectures decouple the fixed ratios that current node designs impose. Wafer-scale integration eliminates the off-chip memory boundary entirely. None of these technologies will eliminate the fundamental physics of data movement (signals travel at a finite speed, and moving data over longer distances consumes more energy), but each promises to shift the location and magnitude of the bottlenecks, which in turn will reshape the optimal fleet architecture.
+The common theme is relocation rather than elimination: each technology seeks to flatten one or more of the bandwidth cliffs that define the current infrastructure hierarchy. CXL blurs the boundary between HBM and DRAM. Optical interconnects narrow the gap between intra-node and inter-node bandwidth. Disaggregated architectures decouple the fixed ratios that current node designs impose. Wafer-scale integration eliminates the off-chip memory boundary entirely. None of these technologies will eliminate the fundamental physics of data movement (signals travel at a finite speed, and moving data over longer distances consumes more energy), but each shifts the location and magnitude of the bottlenecks, which in turn reshapes the optimal fleet architecture.
 
-The next section examines common misconceptions that arise when the physical realities described in this chapter are overlooked.
+Because the bottlenecks move rather than disappear, the same planning mistakes recur: teams optimize the visible specification and miss the binding constraint.
 
 ## Fallacies and Pitfalls {#sec-compute-fallacies-pitfalls}
 
@@ -4407,9 +4407,7 @@ The systems-level perspective is what separates infrastructure engineering from 
 
 ::: {.callout-chapter-connection title="From silicon to wires"}
 
-We have mapped physical infrastructure from Tensor Core transistors to megawatt data-center substations. A fleet of disconnected nodes, however, is not yet a computer; it is a warehouse of expensive accelerators. The network fabric turns those nodes into a unified training system by carrying gradients, activations, and checkpoints between them.
-
-The chapter repeatedly exposed the same constraint: communication bandwidth limits scaling efficiency. The bandwidth hierarchy showed an 18$\times$ cliff between NVLink and InfiniBand, and the topology examples showed that fabric design can change AllReduce time by 2--3$\times$. @Sec-network-fabrics examines the physics, protocols, collectives, and topology decisions that determine whether a 10,000-GPU cluster behaves like one coherent machine or thousands of isolated devices.
+We have mapped physical infrastructure from Tensor Core transistors to megawatt data-center substations. A fleet of disconnected nodes, however, is not yet a computer; it is a warehouse of expensive accelerators. The network fabric turns those nodes into a unified training system by carrying gradients, activations, and checkpoints between them. The chapter repeatedly exposed the same constraint: communication bandwidth limits scaling efficiency. The bandwidth hierarchy showed an 18$\times$ cliff between NVLink and InfiniBand, and the topology examples showed that fabric design can change AllReduce time by 2--3$\times$. @Sec-network-fabrics examines the physics, protocols, collectives, and topology decisions that determine whether a 10,000-GPU cluster behaves like one coherent machine or thousands of isolated devices.
 
 :::
 

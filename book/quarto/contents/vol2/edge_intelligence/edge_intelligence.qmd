@@ -312,7 +312,7 @@ On-device learning operates under the same efficiency constraints as inference b
 
 The fundamental engineering challenges that shape on-device learning implementation follow directly from these motivations. Enabling learning on the device requires completely rethinking conventional assumptions about where and how machine learning systems operate. In centralized environments, models are trained with access to extensive compute infrastructure, large and curated datasets, and generous memory and energy budgets. At the edge, none of these assumptions hold, creating a fundamentally different design space.
 
-On-device learning constraints fall into three critical dimensions that define the efficiency framework. The first dimension is model compression requirements, which determine algorithmic efficiency. The second is sparse and nonuniform data characteristics, which determine data efficiency. The third is severely limited computational resources, which determine compute efficiency. These three dimensions form an interconnected constraint space that defines the feasible region for on-device learning systems. Each dimension imposes distinct limitations that influence algorithmic choices, system architecture, and deployment strategies.
+These constraints define a feasible region rather than a checklist. Model compression determines how little of the algorithm can change. Sparse, nonuniform data determines how much signal each local update can extract. Limited compute determines when training can run at all. The interaction among these dimensions sets the later choice among adaptation, data-efficiency, and federated-coordination techniques.
 
 ### Quantifying training overhead on edge devices {#sec-edge-intelligence-quantifying-training-overhead-edge-devices-3e4c}
 
@@ -1102,9 +1102,9 @@ class EdgeMobileNpuTierRecap:
     mobile_npu_tops_str = fmt_ops_rate(mobile_npu_rate, unit=TOPS, precision=0, commas=False)
 ```
 
-Different mobile platforms provide distinct acceleration capabilities that determine achievable model complexity and feasible learning paradigms. The architectural differences between these accelerators shape the design space for on-device training algorithms.
+Accelerator choice matters less as a peak-TOPS comparison than as a question of which training primitive the hardware can sustain. Fixed-precision inference engines favor inference-heavy adaptation, programmable vector units make compact backpropagation more plausible, and tight framework integration lowers federated coordination overhead. The architectural differences between these accelerators shape the design space for on-device training algorithms.
 
-Current generation mobile accelerators span a wide range of capabilities and optimization targets. Current flagship-class mobile NPUs provide tens of TOPS of peak performance, with `{python} EdgeMobileNpuTierRecap.mobile_npu_tops_str` serving here as a generic high-end reference point rather than a single named chip. Apple's Neural Engine is optimized primarily for CoreML inference patterns with limited training support, making it ideal for inference-heavy adaptation techniques. Qualcomm's Hexagon DSP\index{Hexagon DSP!mixed-precision training} in the Snapdragon 8 Gen 3 achieves 45 TOPS with flexible precision support and programmable vector units, enabling mixed-precision training workflows that can adapt precision dynamically based on training phase and memory constraints. Google's Tensor TPU in the Pixel 8 is optimized specifically for TensorFlow Lite operations with strong INT8 performance and tight integration with federated learning frameworks, reflecting Google's strategic focus on distributed learning scenarios. The energy efficiency comparison reveals why dedicated neural processing units are essential: NPUs achieve 1--5 TOPS per watt vs. general-purpose CPUs at just 0.1-0.2 TOPS per watt, representing a 5--50$\times$ efficiency advantage that makes the difference between feasible and infeasible on-device training.
+Current generation mobile accelerators should be read as different adaptation envelopes, not as a peak-TOPS ranking. Flagship-class mobile NPUs provide tens of TOPS of peak performance, with `{python} EdgeMobileNpuTierRecap.mobile_npu_tops_str` serving here as a generic high-end reference point rather than a single named chip. Apple's Neural Engine is optimized primarily for CoreML inference patterns with limited training support, making it ideal for inference-heavy adaptation techniques. Qualcomm's Hexagon DSP\index{Hexagon DSP!mixed-precision training} in the Snapdragon 8 Gen 3 achieves 45 TOPS with flexible precision support and programmable vector units, enabling mixed-precision training workflows that can adapt precision dynamically based on training phase and memory constraints. Google's Tensor TPU in the Pixel 8 is optimized specifically for TensorFlow Lite operations with strong INT8 performance and tight integration with federated learning frameworks, reflecting Google's strategic focus on distributed learning scenarios. The energy-efficiency gap explains why dedicated neural processing units are essential: NPUs achieve 1--5 TOPS per watt vs. general-purpose CPUs at just 0.1-0.2 TOPS per watt, representing a 5--50$\times$ efficiency advantage that makes the difference between feasible and infeasible on-device training.
 
 Each accelerator implies different learning paradigms. Apple's Neural Engine excels at fixed-precision inference but provides limited support for dynamic precision gradient computation, making it better suited for inference-heavy adaptation techniques like few-shot learning. Programmable DSPs offer greater training flexibility through vector units and mixed-precision arithmetic, enabling backpropagation on compact models when the software stack exposes the needed operators. Mobile TPU-class accelerators integrate tightly with framework runtimes and federated learning tooling, reducing the systems overhead of local training and update coordination.
 
@@ -1214,7 +1214,7 @@ The selection of adaptation techniques follows the same logic, starting with lig
 
 Where compression techniques such as quantization, pruning, and knowledge distillation serve as one-time optimizations in inference pipelines, on-device learning transforms them into ongoing constraints. Complete model retraining is neither necessary nor feasible at the edge. Systems can use pretrained representations strategically and adapt only the minimal parameter subset required to capture local variations: *preserve what works globally, adapt what matters locally*.
 
-Three complementary adaptation strategies address different device constraint profiles. Weight freezing addresses severe memory limitations by updating only bias terms or final layers. Structured updates use low-rank and residual adaptations to balance expressiveness with computational efficiency. Sparse updates enable selective parameter modification based on gradient importance, concentrating learning capacity on the most impactful parameters.
+Those three criteria turn adaptation into a device-matching decision. Weight freezing fits severe memory limits by updating only bias terms or final layers. Structured updates use low-rank and residual adaptations when the device can afford more expressiveness but not full fine-tuning. Sparse updates reserve scarce training capacity for the parameters with the highest adaptation value.
 
 ### Weight freezing {#sec-edge-intelligence-weight-freezing-3407}
 
@@ -1235,7 +1235,7 @@ $$
 
 This reduces the number of stored gradients and optimizer states, enabling training to proceed under memory-constrained conditions. On embedded devices that lack floating-point units, this reduction enables on-device learning.
 
-@Lst-bias-adaptation demonstrates the PyTorch implementation of this bias-only approach, freezing all convolutional and fully-connected weights while allowing only bias terms to adapt to local data.
+@Lst-bias-adaptation makes the constraint explicit: all convolutional and fully connected weights remain frozen, while only bias terms adapt to local data.
 
 ::: {#lst-bias-adaptation lst-cap="**Bias-Only Adaptation**: Freezes model parameters except for biases to reduce memory usage and allow on-device learning."}
 
@@ -1708,11 +1708,11 @@ Verify your understanding of efficient on-device adaptation:
 
 ### Sparse updates {#sec-edge-intelligence-sparse-updates-879b}
 
-Sparse updates represent the most fine-grained approach in the model adaptation hierarchy. While the previous techniques add new parameters or restrict updates to specific subsets, sparse updates dynamically identify which existing parameters provide the greatest adaptation benefit for each specific task or user. This approach maximizes adaptation expressivity while maintaining the computational efficiency essential for edge deployment.
+Sparse updates are the highest-expressivity end of the model adaptation hierarchy. Instead of adding new parameters or choosing a fixed subset in advance, the system dynamically identifies which existing parameters provide the greatest adaptation benefit for a specific task or user. This preserves more of full fine-tuning's flexibility while keeping the update footprint small enough for edge deployment.
 
-Even when adaptation is restricted to a small number of parameters through the techniques discussed earlier, training remains resource-intensive on constrained devices. Sparse updates address this challenge by selectively updating only task-relevant subsets of model parameters, rather than modifying entire networks or introducing new modules. This approach, known as task-adaptive sparse updating, represents the culmination of principled parameter selection strategies.
+The sparse-update decision goes beyond updating fewer parameters. Training remains resource-intensive even after the techniques discussed earlier restrict adaptation to a small subset. Sparse updating addresses the remaining cost by selecting only task-relevant parameters, reducing memory and compute while preserving meaningful personalization.
 
-The key insight is that not all layers of a deep model contribute equally to performance gains on a new task or dataset. If we can identify a minimal subset of parameters that are most impactful for adaptation, we can train only those, reducing memory and compute costs while still achieving meaningful personalization.
+The key insight is that layers do not contribute equally to local performance gains. If the system can identify the minimal subset with the highest adaptation value, it can spend scarce training capacity where it changes the model's behavior most.
 
 #### Sparse update design {#sec-edge-intelligence-sparse-update-design-ee7c}
 
@@ -1806,7 +1806,7 @@ While freezing weights and training adapters solves the memory bottleneck, it le
 
 ## Data Efficiency {#sec-edge-intelligence-data-efficiency-c701}
 
-A user corrects their smartphone keyboard's autocorrect perhaps three times a day. We cannot ask them to type 10,000 labeled sentences to train our language model. Data efficiency at the edge means learning aggressively from an incredibly sparse, noisy, and uncurated trickle of implicit user feedback, maximizing the signal extracted from every single interaction.
+A user corrects their smartphone keyboard's autocorrect perhaps three times a day. We cannot ask them to type 10,000 labeled sentences to train our language model. Data efficiency at the edge means learning aggressively from a sparse, noisy, and uncurated trickle of implicit user feedback, maximizing the signal extracted from each interaction.
 
 The systems engineering challenge centers on a critical trade-off: data collection cost vs. adaptation quality. Edge devices face severe data acquisition constraints that reshape learning system design in ways not encountered in centralized training. Understanding and navigating these constraints requires systematic analysis of four interconnected engineering dimensions.
 
@@ -1814,9 +1814,9 @@ First, every data point has acquisition costs in terms of user friction, energy 
 
 These engineering constraints create a systematic trade-off space where different data efficiency approaches serve different combinations of constraints. Rather than choosing a single technique, successful on-device learning systems typically combine multiple approaches, each addressing specific aspects of the data scarcity challenge.
 
-Four complementary data efficiency strategies address different facets of the data scarcity challenge. Few-shot learning enables adaptation from minimal labeled examples, allowing systems to personalize based on just a handful of user-provided samples rather than requiring extensive training datasets. Streaming updates accommodate data that arrives incrementally over time, enabling continuous adaptation as devices encounter new patterns during normal operation without needing to collect and store large batches. Experience replay maximizes learning from limited data through intelligent reuse, replaying important examples multiple times to extract maximum learning signal from scarce training data. Data compression reduces memory requirements while preserving learning signals, enabling systems to maintain replay buffers and training histories within the tight memory constraints of edge devices.
+The strategy choice depends on which scarcity binds first. Few-shot learning fits cases where a few labeled or weakly labeled examples must drive personalization. Streaming updates fit settings where useful data arrives incrementally and cannot be batched in advance. Experience replay spends memory to stabilize continual updates by reusing scarce examples. Data compression reduces the storage cost of those histories so replay and lightweight training remain feasible within edge memory budgets.
 
-Each technique addresses different aspects of the data constraint problem, enabling robust learning even when traditional supervised learning would fail.
+Together, these techniques turn data scarcity into an allocation problem: spend labels, memory, compute, and privacy budget where they produce the most reliable local signal.
 
 ### Few-shot learning and data streaming {#sec-edge-intelligence-fewshot-learning-data-streaming-566e}
 
@@ -2719,11 +2719,11 @@ You are architecting a federated learning system for a fleet of 10 million mobil
 
 ### Bandwidth-aware update compression {#sec-edge-intelligence-bandwidthaware-update-compression-7730}
 
-One of the principal bottlenecks in federated ML systems is the cost of communication between edge clients and the central server. Transmitting full model weights or gradients after every training round can overwhelm bandwidth and energy budgets, particularly for mobile or embedded devices operating over constrained wireless links[^fn-wireless-bandwidth-edge]. To address this, a range of techniques have been developed to reduce communication overhead while preserving learning efficacy.
+Update compression is a bottleneck diagnosis before it is a technique choice: if each round transmits full model weights or gradients, mobile bandwidth and battery budgets determine convergence before the optimizer does[^fn-wireless-bandwidth-edge]. The design decision is which information can be quantized, sparsified, or kept local while preserving enough gradient fidelity for FedAvg to converge.
 
 [^fn-wireless-bandwidth-edge]: **Wireless Upload Asymmetry**\index{Wireless Upload Asymmetry}: LTE uploads average 5--10 Mbps vs. 50+ Mbps downloads, creating the asymmetric bottleneck that dominates federated learning design. Transmitting a 50 MB model update consumes approximately 100 mAh (2--3 percent of battery) and takes 40--80 seconds over LTE. Low-power protocols are far worse: LoRaWAN maxes at 50 kbps with 1 percent duty cycle, making uncompressed updates physically impossible. This asymmetry is why gradient compression is not optional but architecturally required.
 
-These techniques fall into three primary categories: model compression, selective update sharing, and architectural partitioning.
+The compression decision separates into three levers, each changing a different part of the communication bottleneck: model compression reduces bits per update, selective sharing reduces which parameters travel, and architectural partitioning keeps private state local.
 
 Model compression methods aim to reduce the size of transmitted updates through quantization[^fn-gradient-quantization-compression], sparsification, or subsampling, as @fig-gradient-compression illustrates. Instead of sending full-precision gradients, a client transmits 8-bit quantized updates or communicates only the top-$k$ gradient elements[^fn-gradient-sparsification-topk] with highest magnitude.
 
@@ -3043,7 +3043,7 @@ class EdgeFedPowerEnvelopeRecap:
     )
 ```
 
-Real-world federated learning deployments exhibit extreme heterogeneity across multiple dimensions simultaneously: hardware capabilities, network conditions, data distributions, and availability patterns. This multi-dimensional heterogeneity fundamentally challenges traditional distributed machine learning assumptions about homogeneous participants operating under similar conditions.
+Million-device orchestration is a tiering decision: the system must decide which clients can train, which can only report lightweight updates, and how much bias that selection introduces. The difficulty is that hardware capabilities, network conditions, data distributions, and availability patterns vary simultaneously, challenging traditional distributed machine learning assumptions about homogeneous participants operating under similar conditions.
 
 Real-world federated learning deployments face multi-dimensional device heterogeneity that creates extreme variation across every system dimension. Computational variation spans about `{python} EdgeFedNpuRecap.compute_ratio_str`$\times$ differences in processing power between flagship smartphones running at `{python} EdgeFedNpuRecap.mobile_npu_tops_str` and IoT microcontrollers operating at just 0.03 TOPS, fundamentally limiting what models can train on different device tiers. Memory constraints exhibit even more dramatic differences in available RAM across device categories, up to roughly 65,000$\times$ between 256 KB microcontrollers and 16 GB premium smartphones, determining whether devices can perform any local training at all or must rely purely on inference. Energy limitations force training sessions to be carefully scheduled around charging patterns, thermal constraints, and battery preservation requirements: background adaptation often targets roughly `{python} EdgeFedPowerEnvelopeRecap.background_range_str`, even though phones may sustain `{python} EdgeFedPowerEnvelopeRecap.sustained_range_str` for foreground ML workloads and burst higher briefly. Network diversity introduces orders-of-magnitude performance differences as WiFi, 4G, 5G, and satellite connectivity exhibit vastly different bandwidth (ranging from 1 Mbps to 1 Gbps), latency (10 ms to 600 ms), and reliability characteristics that determine feasible update frequencies and compression requirements.
 
@@ -3061,7 +3061,7 @@ It is one thing to write a proof-of-concept script that fine-tunes an adapter on
 
 ### MLOps integration challenges {#sec-edge-intelligence-mlops-integration-challenges-bb4e}
 
-Integrating on-device learning into existing MLOps workflows requires extending operational frameworks to handle distributed training, heterogeneous devices, and privacy-preserving coordination. Traditional continuous integration pipelines, model versioning systems, and monitoring infrastructure provide essential foundations, but must be adapted to address unique edge deployment challenges. Standard MLOps pipelines assume centralized data access, controlled deployment environments, and unified monitoring capabilities that do not directly apply to edge learning scenarios, requiring new approaches to technical debt management and operational excellence.
+Integrating on-device learning into MLOps changes what operations must validate: a hierarchy of backbones, adapters, policies, and local states spread across heterogeneous devices, in place of a single model artifact in one controlled environment. Traditional continuous integration pipelines, model versioning systems, and monitoring infrastructure provide essential foundations, but they assume centralized data access, controlled deployment environments, and unified monitoring. Edge learning breaks those assumptions, requiring operational practices that preserve reliability while privacy-preserving coordination and local adaptation continue after deployment.
 
 #### Deployment pipeline transformations {#sec-edge-intelligence-deployment-pipeline-transformations-431d}
 
@@ -3145,9 +3145,9 @@ Successful on-device learning deployments build on proven MLOps methodologies wh
 
 ### Bio-inspired learning efficiency {#sec-edge-intelligence-bioinspired-learning-efficiency-55ad}
 
-The operational patterns examined above, from opportunistic scheduling to distributed validation, address immediate engineering requirements. Yet these patterns gain deeper motivation from how nature solved similar problems. The human brain operates at just 20 watts while continuously learning from limited supervision without catastrophic forgetting. This efficiency, refined through billions of years of evolutionary optimization, provides both theoretical grounding and practical inspiration for edge intelligence design.
+The operational patterns examined above are attempts to make continual learning fit an extreme efficiency target. The human brain operates at 20 watts while continuously learning from limited supervision without catastrophic forgetting. This comparison does not make biology a deployment recipe; it explains why edge systems keep returning to sparsity, replay, and opportunistic updates.
 
-Biological solutions illuminate why certain engineering approaches work. The sparse representations that enable efficient model adaptation mirror how only 1--2 percent of neurons activate during any cognitive task. The experience replay buffers that stabilize learning parallel how sleep consolidates memories through neural replay. The federated coordination patterns that balance local and global learning reflect how biological systems maintain individual adaptation while benefiting from population-level evolution. These connections transform production patterns from arbitrary design choices into principled approaches grounded in proven optimization strategies.
+Biological analogies are useful only when they clarify engineering choices. Sparse representations mirror the selective parameter updates that keep mobile adaptation low cost. Replay buffers parallel memory-consolidation mechanisms that stabilize continual learning. Local-global coordination echoes the need for individual adaptation without abandoning population-level improvement. The point is to recognize why the same constraints keep producing similar design patterns.
 
 #### Learning from biological neural efficiency {#sec-edge-intelligence-learning-biological-neural-efficiency-74b5}
 
@@ -3205,9 +3205,9 @@ Continual learning on edge devices faces several interconnected challenges that 
 
 Meta-learning approaches address these challenges by learning algorithms themselves rather than just learning specific tasks. Model-Agnostic Meta-Learning (MAML) trains models to quickly adapt to new tasks with minimal data, exactly the capability required for personalized on-device adaptation where collecting large user-specific datasets is impractical. Few-shot learning techniques enable rapid specialization from small user-specific datasets, allowing models to personalize based on just a handful of examples while maintaining general capabilities learned during pretraining.
 
-The theoretical foundation suggests that optimal on-device learning systems will combine three elements. These are sparse representations, self-supervised pretraining on sensor data, and meta-learning for rapid adaptation. These principles directly influence practical system design. Sparse model architectures reduce memory and compute requirements. Self-supervised objectives use abundant unlabeled sensor data. Meta-learning enables efficient personalization from limited user interactions.
+The theoretical foundation points to a compact design rule: durable on-device learning minimizes the adaptation footprint while preserving enough plasticity to track local change. Sparse model architectures reduce memory and compute requirements, self-supervised objectives use abundant unlabeled sensor data, and meta-learning enables efficient personalization from limited user interactions.
 
-A key principle in building practical systems is to minimize the adaptation footprint. Full-model fine-tuning is typically infeasible on edge platforms; instead, localized update strategies, including bias-only optimization, residual adapters, and lightweight task-specific heads, should be prioritized. These approaches allow model specialization under resource constraints while mitigating the risks of overfitting or instability.
+Full-model fine-tuning is typically infeasible on edge platforms. Localized update strategies, including bias-only optimization, residual adapters, and lightweight task-specific heads, keep model specialization within resource constraints while mitigating the risks of overfitting or instability.
 
 The feasibility of lightweight adaptation depends critically on the strength of offline pretraining [@bommasani2021opportunities]. Pretrained models should encapsulate generalizable feature representations that allow efficient adaptation from limited local data. Shifting the burden of feature extraction to centralized training reduces the complexity and energy cost of on-device updates, while improving convergence stability in data-sparse environments.
 
@@ -3238,9 +3238,9 @@ Following this systematic flowchart yields a functional deployment, but exposing
 
 ## Engineering Challenges and Mitigations {#sec-edge-intelligence-systems-integration-production-deployment-c6bb}
 
-When a billion-user predictive text model begins learning from live keyboard inputs, what prevents a coordinated group of malicious users from repeatedly typing a specific slur to poison the global federated update? The shift to on-device learning exposes the system to unprecedented security and robustness threats. Engineering mitigations must actively defend against both adversarial attacks and the natural statistical drift of the real world.
+A billion-user predictive text model that learns from live keyboard inputs can be poisoned if a coordinated group of malicious users repeatedly types a specific slur and those local updates enter the global federated aggregate. The shift to on-device learning exposes the system to unprecedented security and robustness threats. Engineering mitigations must actively defend against both adversarial attacks and the natural statistical drift of the real world.
 
-Consider a production voice assistant deployment across 50 million heterogeneous devices. The system architecture demonstrates systematic integration across three complementary layers that work together to enable effective learning under diverse constraints.
+A concrete way to bound these risks is to integrate the chapter's three pillars by device tier rather than deploy one adaptation policy everywhere. Consider a production voice assistant deployment across 50 million heterogeneous devices, where each layer constrains what the others are allowed to do.
 
 The model adaptation layer stratifies techniques by device capability, matching sophistication to available resources. Flagship phones representing the top 20 percent of the deployment use LoRA rank-32 adapters that enable sophisticated voice pattern learning through high-dimensional parameter updates. Mid-tier devices comprising 60 percent of the fleet employ rank-16 adapters that balance adaptation expressiveness with the tighter memory constraints typical of mainstream smartphones. Budget devices making up the remaining 20 percent rely on bias-only updates that stay comfortably within 1 GB memory limits while still enabling basic personalization.
 
@@ -3252,7 +3252,7 @@ The data efficiency layer implements adaptive strategies across the entire devic
 
 The federated coordination layer orchestrates privacy-preserving collaboration across the device population. Devices participate in federated training rounds opportunistically based on connectivity status and battery level, ensuring that coordination does not degrade user experience. LoRA adapters aggregate efficiently with just 50 MB per update compared to 14 GB for full model synchronization, making federated learning practical over mobile networks. Privacy-preserving aggregation protocols ensure that individual voice patterns never leave devices while still enabling population-scale improvements in accent recognition and language understanding that benefit all users.
 
-Effective systems integration requires adherence to key engineering principles that ensure robust operation across heterogeneous device populations:
+These layers only work as a system when the integration policy protects against capability mismatch, component failure, resource conflicts, and untested emergent behavior:
 
 1. **Hierarchical Capability Matching**\index{Hierarchical Capability Matching}: Deploy more sophisticated techniques on capable devices while ensuring basic functionality across the device spectrum. Never assume uniform capabilities.
 
@@ -3320,13 +3320,13 @@ The chapter built three pillars for on-device learning: model adaptation (bias-o
 
 ### Persistent technical and operational challenges {#sec-edge-intelligence-persistent-technical-operational-challenges-8c12}
 
-The solution techniques explored above, model adaptation, data efficiency, and federated coordination, address many fundamental constraints of on-device learning but also reveal persistent challenges that emerge from their interaction in real-world deployments. These challenges represent the current frontiers of on-device learning research and highlight areas where the techniques discussed earlier reach their limits or create new operational complexities. They provide critical context for evaluating when on-device learning approaches are appropriate and where alternative strategies may be necessary.
+The hardest edge-learning failures appear when model adaptation, data efficiency, and federated coordination interact rather than when any one pillar fails alone. The techniques above solve individual constraints, but they also create interaction failures in real deployments: an adapter can fit memory yet overfit sparse local data, a replay buffer can stabilize learning yet leak sensitive history, and a federated round can improve the global model while amplifying participation bias. These limits provide critical context for deciding when on-device learning is appropriate and when a simpler strategy is safer.
 
 Unlike conventional centralized systems, where training occurs in controlled environments with uniform hardware and curated datasets, edge systems must contend with heterogeneity in devices, fragmentation in data, and the absence of centralized validation infrastructure. These factors give rise to new systems-level tradeoffs that test the boundaries of the adaptation strategies, data efficiency methods, and coordination mechanisms we have examined.
 
 ### Device and data heterogeneity management {#sec-edge-intelligence-device-data-heterogeneity-management-a789}
 
-Federated and on-device ML systems must operate across a vast and diverse ecosystem of devices, ranging from smartphones and wearables to IoT sensors and microcontrollers. This heterogeneity spans multiple dimensions: hardware capabilities, software stacks, network connectivity, and power availability. Unlike cloud-based systems, where environments can be standardized and controlled, edge deployments encounter a wide distribution of system configurations and constraints. These variations introduce significant complexity in algorithm design, resource scheduling, and model deployment.
+Heterogeneity is not background variation; it determines which devices can train, which can validate, and which can only contribute lightweight signals. Federated and on-device ML systems span smartphones, wearables, IoT sensors, and microcontrollers across hardware capabilities, software stacks, network connectivity, and power availability. Unlike cloud-based systems, where environments can be standardized and controlled, edge deployments encounter a wide distribution of configurations that directly shape algorithm design, resource scheduling, and model rollout.
 
 At the hardware level, devices differ in terms of memory capacity, processor architecture (for example, ARM Cortex-M vs. A-series)[^fn-arm-cortex-heterogeneity], instruction set support (for example, availability of SIMD or floating-point units), and the presence or absence of AI accelerators. Some clients may possess powerful NPUs capable of running small training loops, while others may rely solely on low-frequency CPUs with minimal RAM. These differences affect the feasible size of models, the choice of training algorithm, and the frequency of updates.
 
@@ -3447,7 +3447,7 @@ The cost of on-device learning is not solely measured in FLOPs or memory usage. 
 
 ### Identifying and preventing system failures {#sec-edge-intelligence-identifying-preventing-system-failures-ee88}
 
-Understanding potential failure modes in on-device learning helps prevent costly deployment mistakes. Based on documented challenges in federated learning research [@kairouz2021] and known risks in adaptive systems, several categories of failures warrant careful consideration.
+Those same constraints also make failures hard to see: system failures in on-device learning emerge slowly, locally, and often without centralized evidence. Based on documented challenges in federated learning research [@kairouz2021] and known risks in adaptive systems, several categories of failures warrant careful consideration.
 
 The most fundamental risk in on-device learning is unbounded adaptation drift, where continuous learning without constraints causes models to gradually diverge from their intended behavior. Consider a hypothetical keyboard prediction system that learns from all user inputs including corrections, it might begin incorporating typos as valid suggestions, leading to progressively degraded predictions. This risk becomes acute in health monitoring applications where gradual changes in user baselines could be learned as "normal," potentially causing the system to miss important anomalies that would have been detected by a static model. The insidious nature of this drift is that it occurs slowly and locally, making detection difficult without proper monitoring infrastructure.
 

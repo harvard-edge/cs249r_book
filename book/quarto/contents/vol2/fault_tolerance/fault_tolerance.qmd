@@ -124,7 +124,7 @@ Imagine a 10,000-GPU cluster midway through a three-month training run for a new
 ![](images/svg/failure-spectrum.svg)
 :::
 
-The distributed training systems examined in @sec-distributed-training-systems achieve massive throughput by coordinating thousands of devices, and the collective communication patterns from @sec-collective-communication (AllReduce, AllGather, AllToAll) sustain that coordination through rigidly synchronized exchanges. However, this tight synchronization creates fragility: a failure in any single device can stall the entire fleet. This chapter builds the resilience layer necessary to keep that fleet running.
+The distributed training systems examined in @sec-distributed-training-systems achieve massive throughput by coordinating thousands of devices, and the collective communication patterns from @sec-collective-communication (AllReduce, AllGather, AllToAll) sustain that coordination through rigidly synchronized exchanges. However, this tight synchronization creates fragility: a failure in any single device can stall the entire fleet. This chapter builds the resilience layer that keeps that fleet running: a taxonomy of how hardware and software fail at scale, the detection methods that catch even silent data corruption, and the checkpointing, recovery, and elastic-training mechanisms that turn a failure from a catastrophe into a pause.
 
 The transition from small-scale experimentation to large-scale production changes the relationship between systems and failures. A researcher training a model on a single GPU can go years without a hardware failure. That same workload on a 1,000-GPU cluster sees GPU-only failures every couple of days, and a production cluster fails more often once PCIe, power, storage, and network domains enter the failure budget. This shift from *rare exception* to *routine occurrence* demands different engineering approaches. The mathematical analysis that follows makes this transition precise and quantitative.
 
@@ -931,7 +931,7 @@ A single bit-flip in a weight matrix illustrates the severity. If a critical wei
 
 Reliability remains a design pressure as accelerator devices scale. Smaller geometries and lower operating voltages can reduce the charge needed to disturb a stored value, increasing sensitivity to some soft-error mechanisms [@baumann2005], while large ML fleets expose rare hardware faults often enough that software-level detection and recovery become part of the training system design [@he2023]. ML system architects must treat hardware as an **unreliable substrate**\index{Unreliable Substrate}, where algorithmic fault tolerance (gradient checksums, weight replication, periodic production consistency checks) is a mandatory requirement rather than an HPC specialty.
 
-Hardware faults fall into three categories based on temporal characteristics, as @fig-fault-temporal-categories summarizes.
+The temporal signature of a hardware fault determines the recovery response, so the taxonomy must serve detection and mitigation rather than naming alone. @Fig-fault-temporal-categories summarizes the three categories that matter operationally.
 
 ::: {#fig-fault-temporal-categories fig-env="figure" fig-pos="htb" fig-cap="**Temporal Taxonomy of Hardware Faults**: Four panels show how the three temporal categories manifest in practice. Transient panels (bit flip and timing glitch) show temporary disruptions that do not cause permanent damage. The Intermittent panel shows sporadic errors driven by unstable conditions or aging. The Permanent panel (stuck-at-0/1) shows irreversible physical damage that requires replacement." fig-alt="Four-panel diagram showing Transient (bit-flip), Permanent (stuck-at), Transient (timing glitch), and Intermittent fault patterns over time, illustrating the three temporal categories."}
 ::: {layout-ncol=2}
@@ -1218,7 +1218,7 @@ For ML systems, intermittent faults in processing units or memory cause sporadic
 
 ### Hardware fault detection and mitigation {#sec-ft-hardware-fault-detection-mitigation-8f7f}
 
-Detecting and mitigating hardware faults in ML systems requires techniques at both the hardware and software levels. At the hardware level, two foundational mechanisms protect against the fault classes described earlier.
+Hardware fault mitigation works only when the detection mechanism matches the fault signature. Permanent defects are best exposed before deployment, transient bit flips need online correction, and intermittent or silent errors require runtime evidence. At the hardware level, two foundational mechanisms protect against the fault classes described earlier.
 
 Built-in self-test (BIST) [@bushnell2002] incorporates additional circuitry for self-testing using scan chains[^fn-scan-chains-testing] that apply predefined test patterns to internal logic during system startup. BIST catches manufacturing defects and permanent faults before they corrupt production workloads.
 
@@ -1350,11 +1350,13 @@ Hardware redundancy uses component duplication and voting to detect and mask fau
 
 At the software level, distributed ML systems employ runtime monitoring [@francalanza2017; @mahmoud2021], anomaly detection (statistical outlier detection, One-Class SVM [@chandola2009]), data-consistency checks for model validation [@lindholm2019], and heartbeat mechanisms [@kawazoe_aguilera1997] that detect node failures within configurable timeout periods. Software-implemented fault tolerance techniques such as SWIFT (Software Implemented Fault Tolerance) [@reis2005swift], N-version programming, and Reed-Solomon error correction codes [@plank1997; @reed1960] add redundancy at the software level, enabling detection and correction of errors without dedicated hardware. Watchdog timers [@pont2002using] monitor task execution and trigger recovery actions when systems become unresponsive.
 
+These mechanisms reduce the unreliable substrate risk, but they do not protect against faults introduced by the software stack itself. The next layer must reason about bugs that look like valid computation while corrupting the ML pipeline.
+
 ## Software Faults {#sec-ft-software-faults}
 
 A team spends three months fine-tuning an LLM to be perfectly robust against adversarial prompt injections, only to realize that their preprocessing script accidentally truncated all inputs at 512 tokens, silently discarding the system prompt entirely. In the pursuit of complex algorithmic robustness, engineers often overlook the most common cause of ML failure: mundane software bugs. In ML systems, a logic error in a data loader does not crash the pipeline; it just subtly degrades the gradient, making software faults uniquely catastrophic.
 
-Software faults differ fundamentally from hardware failures. Hardware faults result from the physics of silicon and electrons, while software faults result from human errors in system design and implementation. These faults can corrupt any aspect of the AI pipeline, from data preprocessing and model training to inference and result interpretation, often in subtle ways that may not be immediately apparent.
+Software faults require a different recovery lens from hardware failures. Hardware faults enter from silicon, electrons, and physical wear; software faults enter through design choices, dependency versions, and pipeline glue. The fault-tolerance problem shifts from replacing a failed component to identifying which valid-looking transformation corrupted data, gradients, or predictions.
 
 The practical challenge of software faults lies in their ability to interact with and amplify every other system threat. A bug in data preprocessing might create the distribution shifts that expose model vulnerabilities. Implementation errors in numerical computations might corrupt model behavior in ways that evade detection. Race conditions in distributed training might cause model corruption that resembles adversarial attacks on learned representations.
 
@@ -1376,7 +1378,7 @@ Concurrency and synchronization errors constitute another recurring fault class.
 
 ### Software fault detection and prevention {#sec-ft-software-fault-detection-prevention}
 
-Addressing software faults requires an integrated strategy spanning development, testing, deployment, and monitoring. @Tbl-software-faults-summary-ft organizes detection and mitigation approaches by lifecycle phase.
+Because many software faults leave the pipeline running while corrupting gradients, mitigation must assign each lifecycle phase a detection job. @Tbl-software-faults-summary-ft organizes those detection and mitigation approaches by lifecycle phase.
 
 | **Category**                     | **Technique**                                                            | **Purpose**                                                     | **When to Apply**                    |
 |:---------------------------------|:-------------------------------------------------------------------------|:----------------------------------------------------------------|:-------------------------------------|
@@ -1390,7 +1392,7 @@ Addressing software faults requires an integrated strategy spanning development,
 
 : **Fault Mitigation Strategies**\index{Software Fault!mitigation strategies}: Software faults in ML systems require layered detection and mitigation techniques applied throughout the development lifecycle, from initial testing to ongoing monitoring, to ensure reliability and robustness. {#tbl-software-faults-summary-ft}
 
-Systematic testing (unit, integration, and regression) forms the first line of defense (@fig-regression-testing-ft). Automated CI/CD pipelines (@fig-CI-CD-procedure-ft) embed testing, validation, and monitoring directly into the software delivery process, with gates at each stage that reduce the risk of unnoticed regressions.\index{Pipeline!ci/cd}\index{Regression Test Automation}
+These safeguards matter only when each gate targets a concrete corruption path. Systematic testing (unit, integration, and regression) catches faults before they enter distributed execution (@fig-regression-testing-ft). Automated CI/CD pipelines (@fig-CI-CD-procedure-ft) embed testing, validation, and monitoring directly into the software delivery process, with gates at each stage that reduce the risk of unnoticed regressions.\index{Pipeline!ci/cd}\index{Regression Test Automation}
 
 ::: {#fig-regression-testing-ft fig-env="figure" fig-pos="htb" fig-cap="**Regression Test Automation**: Automated regression tests verify that new code changes do not introduce unintended errors into existing functionality, preserving system reliability throughout the development lifecycle. Source: [UTOR](HTTPS://u-tor.com/topic/regression-vs.-integration)." fig-alt="Flowchart showing code commit triggering automated test suite. Tests run against existing functionality with pass/fail indicators before deployment approval."}
 
@@ -1913,17 +1915,17 @@ class SDCCollective:
 
 ## Fault Injection Tools and Frameworks {#sec-ft-fault-injection-tools-frameworks}
 
-Proving that a multi-node training cluster can survive a sudden network partition requires more than hope. Engineers do not wait for a real hurricane to take out a data center; they deliberately sever the network connection in a staging environment and observe what the orchestration layer does. **Fault injection**\index{Fault Injection} is the engineering discipline of deliberately breaking a system (flipping memory bits, dropping network packets, and corrupting API responses) to empirically verify that robustness mechanisms work before real chaos arrives [@chen2020; @tsai2021; @grafe2023].
+Verification only has value when the injected failure resembles the production failure the system must survive. A multi-node training cluster that claims to tolerate network partitions should have that connection severed in a staging environment so engineers can observe what the orchestration layer does. **Fault injection**\index{Fault Injection} is the engineering discipline of deliberately breaking a system (flipping memory bits, dropping network packets, and corrupting API responses) to empirically verify that robustness mechanisms work before production traffic discovers the gap [@chen2020; @tsai2021; @grafe2023].
 
 ### Fault and error models {#sec-ft-fault-error-models}
 
-Hardware faults manifest in various ways: transient, permanent, and intermittent. Beyond the type of fault, its manifestation characteristics matter equally. A fault may strike a memory cell or corrupt a functional unit mid-computation. It may affect a single bit or multiple bits simultaneously. It may propagate to the application level and cause an observable error, or it may be masked by microarchitectural redundancy and remain benign. These characteristics define the **fault model**\index{Fault Model}, which plays a major role in simulating and measuring what happens to a system when a fault occurs.
+That resemblance is a modeling decision, not an implementation detail. A transient bit flip, a permanent accelerator defect, and a corrupted gradient require different detection logic, so the experiment must specify duration, location, granularity, and propagation path before it begins.
 
-To study and understand the impact of hardware faults on ML systems, understanding the concepts of fault models and error models is essential. A fault model describes how a hardware fault manifests itself in the system, while an **error model**\index{Error Model} represents how the fault propagates and affects the system's behavior.
+These choices define the **fault model**\index{Fault Model}: how a hardware fault manifests in the system. The corresponding **error model**\index{Error Model} represents how that fault propagates and affects the system's behavior.
 
-Fault models are classified by several key properties. First, they can be defined by their duration: transient faults are temporary and vanish quickly; permanent faults persist indefinitely; and intermittent faults occur sporadically, making them difficult to identify or predict. Another dimension is fault location, with faults arising in hardware components such as memory cells, functional units, or interconnects. Faults can also be characterized by their granularity: some faults affect only a single bit (for example, a bitflip), while others impact multiple bits simultaneously, as in burst errors.
+The first modeling choice fixes the physical signature of the fault. Duration determines whether recovery should expect a transient event, a permanent defect, or an intermittent condition that is hard to reproduce. Location determines whether the injected fault enters through memory cells, functional units, or interconnects. Granularity determines whether the experiment studies a single bit, such as a bit flip, or a multi-bit burst error.
 
-Error models, in contrast, describe the behavioral effects of faults as they propagate through the system. These models help researchers understand how initial hardware-level disturbances might manifest in the system’s behavior, such as through corrupted weights or miscomputed activations in an ML model. These models may operate at various abstraction levels, from low-level hardware errors to higher-level logical errors in ML frameworks.
+The error model carries that physical signature into the ML system. It describes how an initial hardware-level disturbance becomes corrupted weights, miscomputed activations, or higher-level logical errors in an ML framework. The abstraction level matters because each level exposes different propagation paths and masks different effects.
 
 The choice of fault or error model is central to robustness evaluation. For example, a system built to study single-bit transient faults [@sangchoolie2017] will not offer meaningful insight into the effects of permanent multi-bit faults, since its design and assumptions are grounded in a different fault model entirely.
 
@@ -2008,13 +2010,13 @@ anchor=north]{\textbf{System-level masking effect analysis}};
 
 ### Hardware-based fault injection {#sec-ft-hardwarebased-fault-injection}
 
-Hardware-based fault injection\index{Hardware-Based Fault Injection} methods allow researchers to directly introduce faults into physical systems and observe their effects on ML models. These approaches are essential for validating assumptions made in software-level fault injection tools and for studying how real-world hardware faults influence system behavior. While most error injection tools used in ML robustness research are software-based, because of their speed and scalability, hardware-based approaches remain critical for grounding higher-level error models.
+Hardware-based fault injection\index{Hardware-Based Fault Injection} is the calibration point for the experiment: it introduces faults into physical systems so software-level assumptions can be checked against real hardware behavior. While most error injection tools used in ML robustness research are software-based because of their speed and scalability, hardware-based approaches remain critical for grounding higher-level error models.
 
 #### Hardware injection methods {#sec-ft-hardware-injection-methods}
 
-Two of the most common hardware-based fault injection methods are FPGA-based fault injection and radiation or beam testing.
+The method choice depends on whether the experiment needs bit-level targeting or physical radiation realism.
 
-FPGA-based Fault Injection. Field-Programmable Gate Arrays (FPGAs)[^fn-fpga-fault-injection-ft] are reconfigurable integrated circuits that can be programmed to implement various hardware designs. By modifying the FPGA configuration, faults can be introduced at specific locations and times during the execution of an ML model.
+FPGA-based fault injection uses field-programmable gate arrays (FPGAs)[^fn-fpga-fault-injection-ft], reconfigurable integrated circuits that can be programmed to implement various hardware designs. By modifying the FPGA configuration, faults can be introduced at specific locations and times during the execution of an ML model.
 
 [^fn-fpga-fault-injection-ft]: **FPGA (Field-Programmable Gate Array)**: Reconfigurable hardware containing millions of programmable logic blocks. For fault injection, FPGAs provide bit-level targeting precision that software-based tools cannot match. \index{FPGA!fault injection}
 
@@ -2022,15 +2024,15 @@ Radiation or beam testing [@velazco2010] exposes hardware running ML models to h
 
 #### Software-based fault injection {#sec-ft-softwarebased-fault-injection}
 
-Software-based fault injection\index{Software-Based Fault Injection} tools simulate the effects of hardware faults by modifying a model’s underlying computational graph, tensor values, or intermediate computations. These tools integrate directly with ML development pipelines, require no specialized hardware, and allow researchers to conduct large-scale fault injection experiments quickly and cost-effectively.
+Software-based fault injection\index{Software-Based Fault Injection} trades physical realism for experimental scale. These tools simulate the effects of hardware faults by modifying a model’s underlying computational graph, tensor values, or intermediate computations. They integrate directly with ML development pipelines, require no specialized hardware, and allow researchers to conduct large-scale fault injection experiments quickly and cost-effectively.
 
-One of the most influential tools is PyTorchFI\index{PyTorchFI} [@mahmoud2020], a dedicated fault injection library for PyTorch developed in collaboration with Nvidia Research. PyTorchFI allows fault injection into key components of ML models, including weights, activations, and gradients. Even simple bit-level faults can cause severe visual and classification errors, including the appearance of 'phantom' objects where none exist.
+PyTorchFI\index{PyTorchFI} [@mahmoud2020], a dedicated fault injection library for PyTorch developed in collaboration with Nvidia Research, is useful when the question is how tensor-visible perturbations affect model behavior. It injects faults into weights, activations, and gradients, showing that even simple bit-level faults can cause severe visual and classification errors, including the appearance of "phantom" objects where none exist.
 
 #### Bridging hardware-software gap {#sec-ft-bridging-hardwaresoftware-gap}
 
-While software-based fault injection tools offer many advantages in speed and flexibility, they do not always capture the full range of effects that hardware faults can impose on a system. This is largely due to the **abstraction gap**\index{Abstraction Gap}: software-based tools operate at a higher level and may overlook low-level hardware interactions or nuanced error propagation mechanisms.
+The abstraction choice is the central risk in software-based fault injection. These tools offer speed and flexibility, but they do not always capture the full range of effects that hardware faults can impose on a system. The **abstraction gap**\index{Abstraction Gap} arises because software-based tools operate at a higher level and may overlook low-level hardware interactions or nuanced error propagation mechanisms.
 
-To address this gap, researchers have developed tools like **Fidelity**\index{Fidelity} [@he2020], which aim to map low-level hardware error behavior to software-visible effects. By studying how faults originating in hardware move through various layers (including architectural registers, memory hierarchies, and numerical operations), Fidelity ensures that injected faults in software reflect the way faults would actually manifest in a physical system.
+Tools like **Fidelity**\index{Fidelity} [@he2020] address this gap by mapping low-level hardware error behavior to software-visible effects. By studying how faults originating in hardware move through architectural registers, memory hierarchies, and numerical operations, Fidelity makes software-injected faults resemble the way faults would manifest in a physical system.
 
 ::: {#exmp-fault-tolerance-software-fault-injection-limits .callout-example title="Software fault injection limits"}
 
@@ -2043,7 +2045,7 @@ While hardware and software faults represent distinct failure mechanisms, they u
 
 ### Hardware fault summary {#sec-ft-hardware-fault-summary-b40c}
 
-@Tbl-fault_types provides a comparative analysis of transient, permanent, and intermittent faults, outlining the primary characteristics that distinguish these fault types across duration, persistence, causes, and ML system impact. Understanding these dimensions guides the selection of appropriate detection and mitigation strategies for each fault category.
+@Tbl-fault_types closes the loop from fault model to recovery choice. It compares transient, permanent, and intermittent faults across duration, persistence, causes, and ML system impact so the detection and mitigation strategy matches the fault category being tested.
 
 | **Dimension**            | **Transient Faults**                                                        | **Permanent Faults**                                                      | **Intermittent Faults**                                                              |
 |:-------------------------|:----------------------------------------------------------------------------|:--------------------------------------------------------------------------|:-------------------------------------------------------------------------------------|
@@ -2655,7 +2657,7 @@ Asynchronous checkpointing reduces training disruption but requires tracking whi
 
 #### Checkpoint storage and recovery {#sec-fault-tolerance-reliability-reliability-checkpoint-storage-recovery-6634}
 
-The tiered checkpoint storage architecture described in @sec-storage-checkpointing, with local NVMe for speed, distributed filesystem for durability, and object storage for long-term retention, provides the storage foundation on which recovery mechanisms operate. This section focuses on how recovery mechanisms use that infrastructure rather than the storage design itself.
+The tiered checkpoint storage architecture described in @sec-storage-checkpointing, with local NVMe for speed, distributed filesystem for durability, and object storage for long-term retention, provides the storage foundation on which recovery mechanisms operate. The fault-tolerance question is how recovery mechanisms use that infrastructure rather than how the storage hierarchy is designed.
 
 For fault tolerance, the critical concern is not where checkpoints are stored but how quickly they can be read during recovery. Recovery time depends on storage tier bandwidth: local NVMe enables fastest recovery (5–10 GB/s per node), distributed filesystems provide moderate speed with durability (50–200 GB/s aggregate), while object storage offers slowest recovery but highest durability for disaster recovery scenarios.
 
@@ -3094,7 +3096,7 @@ This recovery capability unlocks a significant cost advantage. Organizations can
 
 #### Framework support for elastic recovery {#sec-fault-tolerance-reliability-reliability-framework-support-elastic-training-8b75}
 
-The recovery adaptation mechanisms above (batch size adjustment, learning rate recalibration, data loader redistribution, state resharding) must be implemented by the training framework. Frameworks differ in how much of this recovery logic they automate and how they coordinate the surviving workers after a failure.
+The framework question is which resize invariants it can enforce automatically: group membership, shard ownership, data coverage, and batch math. The recovery adaptation mechanisms above (batch size adjustment, learning rate recalibration, data loader redistribution, state resharding) must be implemented by the training framework, and frameworks differ in how much of this recovery logic they automate after a failure.
 
 PyTorch Elastic (TorchElastic) detects worker failures through a rendezvous mechanism[^fn-rendezvous-elastic] that re-executes whenever the worker group changes. Surviving workers re-form the communication group and continue training. TorchElastic handles rank reassignment and communication group reconstruction automatically, but leaves batch size and learning rate adjustment to user code. It integrates with Kubernetes for node-level failure detection.
 
@@ -3119,13 +3121,13 @@ Horovod Elastic extends Horovod's [@sergeev2018horovod] data parallel training w
 
 ### Model-specific training fault tolerance {#sec-fault-tolerance-reliability-reliability-modelspecific-training-fault-tolerance-4b70}
 
-The checkpoint and recovery strategies developed above require adaptation for different model types due to their distinct characteristics.
+The checkpoint and recovery strategies developed above require adaptation because each model type places a different state variable at risk: LLMs protect optimizer state and curriculum position, recommendation systems protect embedding freshness, vision models protect augmentation state, and scientific workloads protect exploration or simulator state.
 
 #### Large language models {#sec-fault-tolerance-reliability-reliability-large-language-models-5637}
 
 LLM training presents the most demanding fault tolerance requirements due to massive checkpoint sizes and extended training durations.
 
-Checkpoint optimization for LLMs involves several complementary strategies:
+The governing decision for LLMs is how to preserve optimizer and curriculum state without making checkpoint I/O the training bottleneck. Existing strategies attack different parts of that cost:
 
 - Use mixed-precision checkpoints (FP16/BF16 for weights, FP32 for optimizer critical state)
 - Use ZeRO/FSDP sharding to distribute checkpoint writes
@@ -3138,7 +3140,7 @@ Long-context models (32K, 128K tokens) have larger activation memory and corresp
 
 #### Recommendation systems {#sec-fault-tolerance-reliability-reliability-recommendation-systems-41d6}
 
-Recommendation models with trillion-parameter embedding tables present unique checkpoint challenges. Embedding tables can be multiple terabytes, making full checkpointing at high frequency impractical. Strategies include:
+Recommendation models with trillion-parameter embedding tables present unique checkpoint challenges. Embedding tables can be multiple terabytes, making full checkpointing at high frequency impractical. The checkpoint design therefore favors freshness over full-state exactness:
 
 - **Incremental checkpointing**\index{Checkpointing!incremental}: Only save embeddings that changed since last checkpoint
 - **Tiered checkpointing**\index{Checkpointing!tiered}: Frequent checkpoints for model parameters, infrequent for embeddings
@@ -3178,20 +3180,20 @@ Serving fault tolerance operates under constraints that training never faces. Wh
 
 ### Stateless vs. stateful serving {#sec-fault-tolerance-reliability-reliability-stateless-vs-stateful-serving-0a60}
 
-The complexity of serving fault tolerance depends critically on whether the serving system maintains state across requests.
+The first serving decision is where request state lives, because that choice determines whether failover is a retry or a state-reconstruction problem.
 
 #### Stateless serving {#sec-fault-tolerance-reliability-reliability-stateless-serving-5842}
 
 In stateless serving, each request is independent. The serving system maintains no per-session state; all information needed to process a request is contained in the request itself plus the static model weights.
 
-Examples of stateless serving:
+The stateless pattern appears when the input itself carries all context:
 
 - **Image classification**: Each image is classified independently
 - **Object detection**: Each frame is processed independently
 - **Single-turn text classification**: Each text snippet is classified without context
 - **Embedding generation**: Each input is embedded independently
 
-Fault tolerance for stateless serving is straightforward:
+The required mechanisms therefore target replica health and request routing rather than state preservation:
 
 - **Redundant replicas**\index{Redundant Replicas}: Multiple copies of the model serve requests in parallel
 - **Load balancing**\index{Load Balancing}: Requests are distributed across healthy replicas
@@ -3206,11 +3208,11 @@ The simplicity of stateless serving makes it the preferred architecture whenever
 
 Stateful serving maintains state across requests within a session. Subsequent requests depend on state accumulated from previous requests.
 
-Stateful serving appears in multiple applications. LLM conversations accumulate KV cache across turns. Streaming speech recognition maintains context from previous audio. Recommendation sessions accumulate user context. Interactive editing maintains document state across edits.
+Stateful serving appears wherever the current request depends on earlier requests. LLM conversations accumulate KV cache across turns, streaming speech recognition maintains context from previous audio, recommendation sessions accumulate user context, and interactive editing maintains document state across edits.
 
-Stateful serving complicates fault tolerance because state loss degrades service. KV cache loss requires reprocessing all previous turns. Session context loss forces users to repeat previous interactions. Accumulated state loss degrades quality when context is unavailable.
+The fault-tolerance consequence is that failure loses quality-bearing state, not just serving capacity. KV cache loss requires reprocessing previous turns, session context loss forces users to repeat previous interactions, and accumulated user state loss degrades quality when context is unavailable.
 
-Fault tolerance for stateful serving requires multiple mechanisms. Session affinity routes requests within a session to the same replica. State checkpointing periodically saves session state for recovery. State replication maintains copies for high availability. Graceful degradation allows service to continue with reduced quality if state is lost.
+The mitigation choice follows the size, update rate, and quality value of that state. Session affinity routes requests within a session to the same replica, state checkpointing periodically saves session state for recovery, state replication maintains copies for high availability, and graceful degradation allows service to continue with reduced quality if state is lost.
 
 @Tbl-stateless-stateful-comparison contrasts how the fundamental difference between stateless and stateful serving manifests in every aspect of fault tolerance design, from request routing to recovery complexity.
 
@@ -3226,7 +3228,7 @@ Fault tolerance for stateful serving requires multiple mechanisms. Session affin
 
 ### Redundancy and replication {#sec-fault-tolerance-reliability-reliability-redundancy-replication-2239}
 
-Redundancy is the foundation of serving fault tolerance. By maintaining multiple copies of serving capability, the system can continue operating when individual copies fail.
+Redundancy buys availability only when replica placement and spare capacity match the failure domain being defended against. Multiple copies of serving capability let the system continue operating when individual replicas fail.
 
 #### Availability calculations {#sec-fault-tolerance-reliability-reliability-availability-calculations-ef0a}
 
@@ -3280,7 +3282,7 @@ When a replica fails, traffic must be redirected to healthy replicas. The speed 
 
 #### Health checking {#sec-fault-tolerance-reliability-reliability-health-checking-a604}
 
-Health checks verify that replicas are operational and ready to serve requests:
+Health checks decide when traffic should move, so they must test not only liveness but readiness and inference correctness:
 
 Liveness checks verify that the process is running and responsive. A simple HTTP endpoint that returns 200 indicates liveness. Failure to respond triggers process restart.
 
@@ -3288,11 +3290,11 @@ Readiness checks go further, verifying that the replica is ready to serve reques
 
 Inference health checks verify that inference produces correct results. Running a known input through the model and verifying the output matches expected results catches silent failures where the model produces incorrect results without errors.
 
-Health check parameters require tuning. Check interval determines how often to check. For example, every 5 seconds. Timeout determines how long to wait for response. For example, 2 seconds. Failure threshold determines how many failures before marking unhealthy. For example, 3 failures. Success threshold determines how many successes before marking healthy. For example, 2 successes.
+Health check parameters set the false-positive/latency trade-off. A check interval such as 5 s controls sampling frequency, a 2 s timeout controls patience, a failure threshold of 3 missed probes marks a replica unhealthy, and a success threshold of 2 clean probes returns it to service.
 
 #### Load balancer integration {#sec-fault-tolerance-reliability-reliability-load-balancer-integration-2acd}
 
-Load balancers route requests to healthy replicas and remove unhealthy replicas from rotation. L4 load balancing routes based on IP and port, offering simple and fast operation. L7 load balancing routes based on HTTP and gRPC content, enabling sophisticated routing. Service mesh provides advanced traffic management, observability, and security.
+Load-balancer design sets how much request context the routing tier can use during failover. L4 load balancing routes based on IP and port, offering simple and fast operation. L7 load balancing routes based on HTTP and gRPC content, enabling more specific routing. Service mesh adds traffic management, observability, and security around those routing decisions.
 
 Load balancer failover latency depends on health check frequency and failure detection logic. Aggressive settings enable fast failover but increase false positives. This marks healthy replicas as unhealthy during transient issues.
 
@@ -3302,7 +3304,7 @@ For stateful serving, session affinity\index{Session Affinity} routes all reques
 
 Load balancers maintain session-to-replica mapping through sticky sessions. Implementation uses cookies, headers, or IP hashing.
 
-State failover offers multiple options. State loss accepts degraded quality on failover by regenerating state from scratch. State checkpointing periodically saves session state for recovery. State replication copies state to standby replica. Distributed state stores session state in external stores like Redis or Memcached.
+State failover choices trade recovery speed against consistency and operational complexity. State loss accepts degraded quality on failover by regenerating state from scratch. State checkpointing periodically saves session state for recovery. State replication copies state to a standby replica. Distributed state stores session state in external stores like Redis or Memcached.
 
 The choice depends on state size, update frequency, and the quality impact of state loss; @tbl-stateful-failover summarizes the trade-offs across the four common approaches:
 
@@ -3317,11 +3319,11 @@ The choice depends on state size, update frequency, and the quality impact of st
 
 ### Model-specific serving fault tolerance {#sec-fault-tolerance-reliability-reliability-modelspecific-serving-fault-tolerance-3245}
 
-Different model types have distinct serving fault tolerance requirements based on their state characteristics and latency constraints.
+Model-specific serving differences follow from what state is expensive to lose and how quickly the user needs a response.
 
 #### LLM serving fault tolerance {#sec-fault-tolerance-reliability-reliability-llm-serving-fault-tolerance-462b}
 
-LLM serving with conversational context presents significant fault tolerance challenges:
+The binding state in LLM serving is conversational context, especially the KV cache:
 
 The KV cache[^fn-kv-cache-serving-ft] can be substantial (gigabytes for long contexts across attention layers). Losing the KV cache requires regenerating all previous turns, which can take seconds to minutes.
 
@@ -3333,7 +3335,7 @@ The KV cache[^fn-kv-cache-serving-ft] can be substantial (gigabytes for long con
 *A long conversation carries tens of GB of live state.*
 :::
 
-LLM serving fault tolerance takes multiple approaches. Accepting regeneration cost means regenerating KV cache from conversation history on failure. This approach is simple but can significantly increase latency for long conversations. KV cache checkpointing periodically saves KV cache state. This enables partial recovery but introduces storage overhead and latency for checkpointing. KV cache replication duplicates KV cache to standby. This provides fast failover but doubles memory requirements. **Prefix caching**\index{Prefix Caching} stores common prefixes separately. System prompts and shared context are cached. On failure, common prefixes restore quickly. Only session-specific state requires regeneration.
+LLM serving choices trade KV-cache recovery latency against memory and storage overhead. Accepting regeneration cost means regenerating KV cache from conversation history on failure. This approach is simple but can significantly increase latency for long conversations. KV cache checkpointing periodically saves KV cache state, enabling partial recovery but introducing storage overhead and latency for checkpointing. KV cache replication duplicates KV cache to standby, providing fast failover but doubling memory requirements. **Prefix caching**\index{Prefix Caching} stores common prefixes separately. System prompts and shared context are cached. On failure, common prefixes restore quickly. Only session-specific state requires regeneration.
 
 Prompt caching\index{Prompt Caching} services like those offered by cloud providers store and reuse KV cache for common prefixes, reducing both cost and recovery time for failures.
 
@@ -3343,7 +3345,7 @@ Recommendation systems have unique fault tolerance requirements centered on feat
 
 Recommendations depend on user and item features from feature stores, and feature store unavailability degrades recommendation quality or blocks recommendations entirely.
 
-Feature store fault tolerance employs multiple strategies. Replicated feature stores span availability zones. Local caching stores frequently accessed features. Fallback to stale features accepts quality degradation. Default features activate when feature lookup fails.
+The serving decision is how stale the system may become before it should block or degrade. Replicated feature stores span availability zones. Local caching stores frequently accessed features. Fallback to stale features accepts quality degradation. Default features activate when feature lookup fails.
 
 Some features update in real-time. Recent user actions exemplify real-time features. Failure of real-time feature pipelines causes recommendations to use stale data. Monitoring feature freshness and alerting on staleness is essential.
 
@@ -3379,30 +3381,30 @@ During a major regional network outage, an e-commerce site suddenly loses access
 
 ### Degradation dimensions {#sec-fault-tolerance-reliability-reliability-degradation-dimensions-4b25}
 
-Service can degrade along multiple dimensions:
+A degradation plan must name which service property will be sacrificed before an incident begins. The common dimensions are quality, latency, coverage, freshness, and feature completeness.
 
-Quality degradation trades accuracy for availability by serving predictions from simpler, faster models. A recommendation system might fall back from a sophisticated multi-tower model to a simpler collaborative filtering model.
+Quality degradation is the most visible availability lever: the system serves predictions from simpler, faster models. A recommendation system might fall back from a sophisticated multi-tower model to a simpler collaborative filtering model.
 
-Latency degradation accepts longer response times to maintain quality. Under high load, batching more requests together increases latency but maintains throughput.
+Latency degradation preserves model quality by accepting slower responses. Under high load, batching more requests together increases latency but maintains throughput.
 
-Coverage degradation serves partial results rather than complete results. A search system might return top-10 results instead of top-100 when compute is constrained.
+Coverage degradation preserves a useful response by serving partial results rather than complete results. A search system might return top-10 results instead of top-100 when compute is constrained.
 
-Freshness degradation serves cached or stale results rather than real-time computation. News recommendations might serve hour-old recommendations when the recommendation service is unavailable.
+Freshness degradation preserves availability by serving cached or stale results rather than real-time computation. News recommendations might serve hour-old recommendations when the recommendation service is unavailable.
 
-Feature degradation uses fewer features when feature retrieval fails. A recommendation system might use only content features when user history is unavailable.
+Feature degradation preserves inference by using fewer features when feature retrieval fails. A recommendation system might use only content features when user history is unavailable.
 
 ### Graceful degradation strategies {#sec-fault-tolerance-reliability-reliability-graceful-degradation-strategies-e85e}
 
 #### Model fallback {#sec-fault-tolerance-reliability-reliability-model-fallback-bc6e}
 
-Maintain multiple model versions with different resource requirements:
+Model fallback turns quality into an explicit availability lever by maintaining multiple model versions with different resource requirements:
 
 - **Primary model**\index{Primary Model}: Full capability, highest resource requirements
 - **Secondary model**\index{Secondary Model}: Reduced capability, lower resource requirements
 - **Tertiary model**\index{Tertiary Model}: Minimal capability, minimal resources
 - **Static fallback**\index{Static Fallback}: Precomputed defaults, no inference required
 
-When primary model is unavailable or overloaded, fall back to secondary. Continue falling back as necessary.
+When the primary model is unavailable or overloaded, the policy descends only as far as resource pressure requires, then returns upward when the primary path is healthy again.
 
 An image classification cascade illustrates the trade-off between accuracy and resilience:
 
@@ -3414,7 +3416,7 @@ An image classification cascade illustrates the trade-off between accuracy and r
 
 4. **Fallback**\index{Fallback}: Return "classification unavailable" or cached results
 
-Model fallback requires:
+For that fallback path to be real rather than aspirational, the production system needs:
 
 - Multiple models deployed and ready to serve
 - Routing logic to select appropriate model
@@ -3425,7 +3427,7 @@ In production, recommendation and ranking systems routinely fall back from a com
 
 #### Feature fallback {#sec-fault-tolerance-reliability-reliability-feature-fallback-0730}
 
-When feature retrieval fails, use default or computed fallback values:
+Feature fallback controls how much input quality the model may lose before the request must be blocked. When feature retrieval fails, use default or computed fallback values:
 
 Precomputed population-level defaults substitute for missing user or item features. For a recommendation system:
 
@@ -3452,7 +3454,7 @@ Prioritizing features by importance to prediction quality allows systems to degr
 
 #### Load shedding {#sec-fault-tolerance-reliability-reliability-load-shedding-8476}
 
-When system capacity is insufficient for incoming load, deliberately drop requests to protect system stability:
+Load shedding protects the system by sacrificing selected requests before overload spreads to every request:
 
 Random shedding drops a fraction of incoming requests. This approach is simple but does not prioritize valuable requests.
 
@@ -3480,7 +3482,7 @@ The three-state cycle prevents a single failing dependency from consuming the en
 
 #### Graceful degradation implementation {#sec-fault-tolerance-reliability-reliability-graceful-degradation-implementation-1aa5}
 
-Implementing graceful degradation requires continuous monitoring of system health. Track request latency percentiles at p50, p95, and p99. Monitor error rates by error type. Measure resource utilization for CPU, GPU, and memory. Watch queue depths and wait times.
+Implementation begins with health signals that choose when to enter and leave each degradation level. Track request latency percentiles at p50, p95, and p99. Monitor error rates by error type. Measure resource utilization for CPU, GPU, and memory. Watch queue depths and wait times.
 
 Degradation triggers define conditions that activate degradation. @Lst-degradation-triggers illustrates three common trigger conditions that progressively activate fallback mechanisms based on latency, error rate, and feature store health.\index{Graceful Degradation!triggers}
 
@@ -3502,19 +3504,19 @@ if feature_store_latency > threshold:
 
 :::
 
-Progressively increase degradation as conditions worsen rather than binary switching. Increase fallback percentage gradually as load increases.
+Degradation should increase progressively as conditions worsen rather than switch at one cliff. The system can raise the fallback percentage gradually as load increases.
 
-Automatically recover from degraded state when conditions improve. Use hysteresis to prevent oscillation. Require sustained improvement before recovering.
+Recovery needs the same control discipline. Hysteresis prevents oscillation, and sustained improvement should be required before traffic returns to higher-capability paths.
 
 ### Degradation monitoring and alerting {#sec-fault-tolerance-reliability-reliability-degradation-monitoring-alerting-87c2}
 
-Graceful degradation enables continued operation but at reduced quality. Monitoring ensures degradation is detected, measured, and addressed.
+Because graceful degradation trades quality for availability, monitoring must make that trade visible rather than letting the system appear healthy while serving lower-fidelity results.
 
 Track degradation metrics including percentage of requests served by fallback models, percentage of features using defaults, request drop rate from load shedding, and quality metric differences between primary and fallback.
 
-Set alerting thresholds appropriately. Degradation activated triggers informational alert. Sustained degradation beyond 5 minutes triggers warning alert. Severe degradation affecting over 50 percent of requests triggers critical alert. Extended degradation beyond 1 hour triggers escalation.
+Alerting thresholds should reflect duration and blast radius. Degradation activation triggers an informational alert, sustained degradation beyond 5 minutes triggers a warning alert, severe degradation affecting over 50 percent of requests triggers a critical alert, and extended degradation beyond 1 hour triggers escalation.
 
-After degradation events, conduct postincident analysis. Analyze root cause of degradation, effectiveness of fallback mechanisms, user impact and business impact, and improvements to prevent future degradation.
+After degradation events, postincident analysis should identify the root cause, evaluate fallback effectiveness, measure user and business impact, and define improvements that prevent recurrence.
 
 Implementing these fallback mechanisms safely requires deep visibility into the system's runtime state. When a complex recommendation pipeline begins degrading, operators must rapidly determine which microservice is failing, and that diagnosis depends on distributed debugging and observability.
 
@@ -3524,23 +3526,21 @@ At 2:00 AM, latency on the flagship generative API spikes from 200 ms to 5 secon
 
 ### Why distributed ML systems are hard to debug {#sec-fault-tolerance-reliability-reliability-distributed-ml-systems-hard-debug-8d8a}
 
-Several factors combine to make distributed ML debugging exceptionally challenging.
+Distributed ML debugging is hard because the evidence needed for recovery is split across timing, state, scale, and model behavior.
 
-Distributed systems exhibit nondeterministic behavior[^fn-heisenbug-ml] from multiple sources. Network timing variations change execution order. Thread scheduling differences alter race conditions. GPU kernel execution order varies across runs. Floating-point operation ordering changes results. A bug that manifests on one execution may not reproduce on subsequent executions. These "Heisenbugs" appear to disappear when observed.
+Distributed systems exhibit nondeterministic behavior[^fn-heisenbug-ml] from multiple sources. Network timing variations change execution order, thread scheduling differences alter race conditions, GPU kernel execution order varies across runs, and floating-point operation ordering changes results. A bug that manifests on one execution may not reproduce on subsequent executions. These "Heisenbugs" appear to disappear when observed.
 
 [^fn-heisenbug-ml]: **Heisenbug**: Coined in hacker culture circa 1983, formalized by Jim Gray in his 1985 analysis of computer failures, as a pun on Heisenberg's uncertainty principle. The bug disappears under observation because adding instrumentation changes timing. In distributed ML training, this is especially pernicious: inserting gradient logging alters NCCL collective timing, masking the very race condition that caused the silent corruption. \index{Heisenbug!distributed debugging}
 
-Partial failures compound the difficulty. Unlike single-machine systems where failures are typically total, distributed systems experience partial failures where some components fail while others continue. The interaction between working and failed components produces complex failure modes.
+Partial failures turn that nondeterminism into a recovery problem. Unlike single-machine systems where failures are typically total, distributed systems experience partial failures where some components fail while others continue, and the interaction between working and failed components produces complex failure modes.
 
-Scale makes manual inspection impossible. With thousands of components, automated tools must filter relevant information from massive telemetry streams.
+Scale then removes manual inspection as a viable debugging method. With thousands of components, automated tools must filter relevant information from massive telemetry streams and identify the few signals that explain the incident.
 
-Emergent behavior adds a final layer of complexity: system behavior emerges from interactions between components, and individual components may appear healthy while system-level behavior is incorrect.
-
-ML systems face additional debugging challenges. Silent accuracy degradation produces wrong results without errors. Numerical issues like NaN and infinity propagate through computation. Data-dependent bugs manifest only for specific inputs. Distinguishing intentional model behavior changes from bugs becomes difficult. Learning causes expected behavior changes that resemble bugs.
+ML systems add model behavior to the same diagnostic problem. Silent accuracy degradation produces wrong results without errors, numerical issues like NaN and infinity propagate through computation, data-dependent bugs manifest only for specific inputs, and learning causes expected behavior changes that can resemble bugs.
 
 ### Observability pillars {#sec-fault-tolerance-reliability-reliability-observability-pillars-0e45}
 
-Effective distributed debugging requires three observability pillars, shown in @fig-observability-three-pillars: metrics, logs, and traces.
+Observability is useful only when it connects a symptom to an action: shed load, restart a replica, roll back a checkpoint, or degrade gracefully. The three signal types in @fig-observability-three-pillars supply different parts of that decision: metrics, logs, and traces.
 
 ::: {#fig-observability-three-pillars fig-env="figure" fig-pos="htb" fig-cap="**The Three Pillars of Observability**: Diagnosis of fleet failures requires correlating three signal types. Metrics reveal *when* and *where* a problem occurs (for example, GPU utilization drops). Logs provide the *what* through event context (for example, Out-of-Memory exception). Traces provide the *why* by linking events across the distributed lifecycle (for example, identifying the specific request that triggered the memory spike)." fig-alt="Venn diagram with three overlapping circles: Metrics, Logs, and Traces."}
 ![](images/svg/observability-three-pillars.svg)
@@ -3552,7 +3552,7 @@ Metrics are numerical measurements collected over time. In ML fleets, they span 
 
 #### Logs {#sec-fault-tolerance-reliability-reliability-logs-9906}
 
-Logs capture discrete events with context:
+Logs answer what happened at a specific point in the recovery path.
 
 Structured logging uses structured formats such as JavaScript Object Notation (JSON) with consistent fields. @Lst-structured-log-entry shows a typical error entry that captures both the failure context and the trace identifiers needed to correlate events across services.\index{Structured Logging!JSON log entry}
 
@@ -3574,7 +3574,7 @@ Structured logging uses structured formats such as JavaScript Object Notation (J
 
 :::
 
-Log levels should be consistent across all components:
+Log levels should map incidents to escalation consistently across all components:
 
 - DEBUG: Detailed diagnostic information
 - INFO: General operational information
@@ -3582,13 +3582,13 @@ Log levels should be consistent across all components:
 - ERROR: Problems that prevent specific operations
 - FATAL: System-wide failures requiring immediate attention
 
-Log aggregation centralizes logs from all components for search and analysis. Tools like Elasticsearch, Loki, or cloud logging services enable searching across distributed logs.
+Log aggregation centralizes logs from all components for search and analysis. The particular backend matters less than the ability to search distributed logs with the same trace and request identifiers used by metrics and spans.
 
 #### Traces {#sec-fault-tolerance-reliability-reliability-traces-ffc5}
 
-Traces track requests across distributed components:
+Traces show where latency or failure propagated across distributed components.
 
-Distributed tracing relies on three core concepts:
+Distributed tracing relies on three concepts that preserve request context across services:
 
 - **Trace**\index{Trace}: End-to-end journey of a request
 - **Span**\index{Span}: Single operation within a trace
@@ -3611,15 +3611,15 @@ Trace: user-request-12345
 Total: 66 ms
 ```
 
-OpenTelemetry provides a standard API for distributed tracing\index{Distributed Tracing}. Backend systems like Jaeger, Zipkin, or cloud tracing services store and visualize traces.
+OpenTelemetry provides a standard API for distributed tracing\index{Distributed Tracing}. Backend systems like Jaeger, Zipkin, or cloud tracing services store and visualize traces. The durable requirement is correlation: the same trace context must connect metrics, logs, and spans across the request path.
 
 ### ML-specific debugging {#sec-fault-tolerance-reliability-reliability-mlspecific-debugging-27d5}
 
-Beyond general distributed debugging, ML systems require specialized debugging capabilities:
+Operational signals are not enough when a computation is numerically valid but wrong for the model. ML systems also require specialized debugging capabilities:
 
 #### Numerical debugging {#sec-fault-tolerance-reliability-reliability-numerical-debugging-ee2a}
 
-ML computations are prone to numerical issues:
+Numerical debugging targets failures where tensors remain valid objects but contain invalid values:
 
 NaN detection[^fn-nan-propagation-training] is essential because NaN values propagate silently through all downstream computations. @Lst-nan-detection shows a minimal check that catches corruption before it reaches users.\index{NaN Detection}
 
@@ -3637,7 +3637,7 @@ if torch.isnan(output).any():
 
 :::
 
-During training, monitor gradient statistics. Gradient norm detects explosion or vanishing. Gradient distribution detects anomalies. Layer-wise gradients identify problematic layers.
+During training, gradient statistics make numerical faults visible before they corrupt the whole run. Gradient norm detects explosion or vanishing, gradient distribution detects anomalies, and layer-wise gradients identify problematic layers.
 
 Mixed-precision training[^fn-mixed-precision-ft] can introduce numerical issues. Monitor for loss scale adjustments indicating underflow, gradient overflow exceeding FP16 range, and inconsistency between FP16 and FP32 results.
 
@@ -3649,7 +3649,7 @@ ML bugs often originate in data, and because silent corruption and distribution 
 
 #### Straggler detection and analysis {#sec-fault-tolerance-reliability-reliability-straggler-detection-analysis-6925}
 
-Identify and diagnose slow components:
+Straggler diagnosis asks which component is slow enough to become a failure-equivalent bottleneck.
 
 Timing instrumentation measures time for each operation, enabling latency attribution across pipeline stages. @Lst-timing-instrumentation wraps operations in context managers that emit per-span timing metrics, making it straightforward to compare performance across replicas.\index{Operation-Level Timing}
 
@@ -3667,9 +3667,9 @@ with timer("model_inference"):
 
 :::
 
-Compare component timing across replicas using percentile analysis. p50 shows typical performance. p99 shows tail latency. Comparing p99 across replicas identifies stragglers.
+Compare component timing across replicas using percentile analysis. p50 shows typical performance, while p99 shows tail latency. Comparing p99 across replicas identifies workers whose slow path has become a fleet-wide bottleneck.
 
-Stragglers arise from multiple root causes. Hardware issues include thermal throttling and memory errors. Data skew means some inputs are slower to process. Resource contention occurs when other processes consume resources. Network issues create slow connection to data stores.
+The diagnosis must then separate the root causes that produce the same slow-worker symptom. Hardware issues include thermal throttling and memory errors, data skew means some inputs are slower to process, resource contention occurs when other processes consume resources, and network issues create slow connections to data stores.
 
 ### Common failure patterns {#sec-fault-tolerance-reliability-reliability-common-failure-patterns-3306}
 
@@ -3719,7 +3719,7 @@ Production case studies show how failure detection, state preservation, and obse
 
 ## Case Studies {#sec-fault-tolerance-reliability-reliability-case-studies-927f}
 
-The case studies that follow draw on published Meta OPT-175B training logbooks, Google's TPUv4 resiliency paper, Netflix's published chaos-engineering literature, and Microsoft DeepSpeed documentation. Specific operational numbers (failure counts, MFU achieved, availability percentages, and overhead percentages) reflect what those public sources have reported; treat them as representative magnitudes for the engineering pattern rather than precision benchmarks reproducible from this prose alone. Production deployments illustrate how leading organizations implement fault tolerance in ML systems, threading the principles developed throughout this chapter. Meta's OPT-175B training run on a 992-GPU cluster provides a well-documented study in handling dozens of hardware failures over the run without aborting training.
+Published production systems make the chapter's scale lesson concrete: the same failure arithmetic appears as checkpoint tax, topology reconfiguration, chaos testing, and elastic recovery. These examples draw on published Meta OPT-175B training logbooks, Google's TPUv4 resiliency paper, Netflix's published chaos-engineering literature, and Microsoft DeepSpeed documentation. Specific operational numbers (failure counts, MFU achieved, availability percentages, and overhead percentages) reflect what those public sources have reported; treat them as representative magnitudes for the engineering pattern rather than precision benchmarks reproducible from this prose alone. Meta's OPT-175B training run on a 992-GPU cluster provides a well-documented study in handling dozens of hardware failures over the run without aborting training.
 
 ### Large-scale LLM training at Meta {#sec-fault-tolerance-reliability-reliability-largescale-llm-training-fault-tolerance-f4aa}
 

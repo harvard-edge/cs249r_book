@@ -163,11 +163,13 @@ Third, **dataset scale**\index{Dataset Scale} exceeds single-machine storage whe
 
 ### Distributed training complexity trade-offs {#sec-distributed-training-systems-systems-distributed-training-complexity-tradeoffs-0138}
 
-Distributed training introduces three primary complexity dimensions not present in single-machine scenarios:
+Distribution changes the optimization problem by adding costs that do not exist inside one machine. The engineer must track three complexity dimensions because each one can become the ceiling that decides whether a parallelism strategy is viable:
 
 1.  **Communication Overhead**\index{Communication Overhead}: The cost of synchronizing gradients. For a model with $P$ parameters distributed across $N$ devices, all-reduce operations must transfer approximately $2P(N-1)/N$ gradient values per step, multiplied by the bytes per gradient element. On commodity networks, this can dominate computation time.
 2.  **Fault Tolerance**\index{Fault Tolerance}: The expected number of failures per unit time grows linearly with cluster size, while the probability that the entire cluster survives an interval without any failure decays exponentially. If a `{python} DistTrainReliabilityFacts.reliability_node_count_str`-node cluster has `{python} DistTrainReliabilityFacts.node_hourly_survival_pct_str` per-node hourly survival, the cluster-level failure probability is `{python} DistTrainReliabilityFacts.cluster_failure_prob_pct_str` per hour, corresponding to an MTBF of about `{python} DistTrainReliabilityFacts.cluster_mtbf_hours_str`. @Sec-appdx-reliability-foundations-mtbf-cascade derives this cascade from per-node survival to cluster MTBF and works the same calculation through a full example, so the reader can reproduce why MTBF collapses as the cluster grows.
 3.  **Algorithmic Stability**\index{Algorithmic Stability}: Large batch sizes from data parallelism affect convergence behavior, requiring learning rate scaling and warmup strategies that single-machine training does not require [@goyal2017accurate].
+
+Together, these costs explain why distributed training is a constraint satisfaction problem rather than a hardware multiplication exercise.
 
 ### Single-machine to distributed transition {#sec-distributed-training-systems-systems-singlemachine-distributed-transition-1ee4}
 
@@ -331,9 +333,9 @@ The method parallels gradient accumulation, where a single device accumulates gr
 
 ### Data parallelism implementation {#sec-distributed-training-systems-systems-data-parallelism-implementation-fa03}
 
-The mathematical foundation above (gradient averaging preserves the statistical properties of SGD) translates into concrete implementation steps. Each step corresponds to a phase in the gradient averaging process, from distributing data subsets to synchronizing the computed gradients.
+The implementation details matter because the SGD equivalence only holds when each phase preserves disjoint data, complete local gradients, and a single synchronized update. The concrete workflow therefore traces the path from distributing data subsets to synchronizing the computed gradients.
 
-The process of data parallelism can be broken into a series of distinct steps, each with its role in ensuring the system operates efficiently. Consider @fig-dist-train-data-parallelism: it traces the complete workflow from dataset splitting through gradient aggregation, showing how each GPU processes its assigned batch before synchronization brings all gradients together for parameter updates.
+Consider @fig-dist-train-data-parallelism: it traces the complete workflow from dataset splitting through gradient aggregation, showing how each GPU processes its assigned batch before synchronization brings all gradients together for parameter updates.
 
 ::: {#fig-dist-train-data-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Data Parallelism Implementation Pipeline**: The five-stage workflow for data parallel training: (1) split input data into nonoverlapping subsets, (2) assign batches to GPUs, (3) compute forward and backward passes independently, (4) synchronize gradients via AllReduce, and (5) update parameters uniformly across all devices. This approach contrasts with model parallelism, where the model itself is partitioned rather than replicated." fig-alt="Flowchart showing 5-stage data parallelism: Input Data splits into 4 batches assigned to GPUs 1-4, each performs forward and backward pass, gradients synchronize and aggregate, then model updates."}
 
@@ -345,9 +347,9 @@ As @fig-dist-train-data-parallelism shows, the critical synchronization point is
 
 #### Dataset splitting {#sec-distributed-training-systems-systems-dataset-splitting-1edf}
 
-The first step in data parallelism involves dividing the dataset into smaller, nonoverlapping subsets. This ensures that each device processes a unique portion of the data, avoiding redundancy and enabling efficient utilization of available hardware. With a dataset of 100,000 training examples and 4 GPUs, each GPU receives 25,000 examples per epoch. The DistributedSampler must ensure no overlap between subsets to maintain gradient estimation validity: if two GPUs process the same example, the resulting gradient average would overweight that example, violating the unbiased gradient assumption that makes data parallelism mathematically equivalent to single-device training.
+Data splitting is the first place where the SGD equivalence can fail: each worker must see a unique, deterministic slice of the epoch. With a dataset of 100,000 training examples and 4 GPUs, each GPU receives 25,000 examples per epoch. The DistributedSampler must ensure no overlap between subsets to maintain gradient estimation validity: if two GPUs process the same example, the resulting gradient average would overweight that example, violating the unbiased gradient assumption that makes data parallelism mathematically equivalent to single-device training.
 
-Modern distributed training frameworks handle this distribution automatically through a distributed sampler that implements prefetching and caching mechanisms to ensure data is readily available for processing. The sampler coordinates across workers using the process rank to deterministically partition indices, ensuring reproducibility when the same random seed is used. For a 1.2 million example dataset distributed across 32 GPUs, each GPU processes approximately 37,500 examples per epoch, with the sampler padding the final batch to maintain consistent batch sizes across all workers.
+The sampler is therefore part of the training system, not only an input-loader convenience. Modern distributed training frameworks handle this distribution automatically through a distributed sampler that implements prefetching and caching mechanisms to keep accelerators fed without changing sample ownership. The sampler coordinates across workers using the process rank to deterministically partition indices, ensuring reproducibility when the same random seed is used. For a 1.2 million example dataset distributed across 32 GPUs, each GPU processes approximately 37,500 examples per epoch, with the sampler padding the final batch to maintain consistent batch sizes across all workers.
 
 ```{python}
 #| echo: false
@@ -395,7 +397,7 @@ The backward pass mirrors this independence but introduces the system's primary 
 
 #### Gradient synchronization {#sec-distributed-training-systems-systems-gradient-synchronization-614b}
 
-To maintain consistency across the distributed system, the gradients computed by each device must be synchronized. This coordination represents a distributed systems challenge in achieving global consensus while minimizing communication complexity, one significant enough to warrant its own chapter. @Sec-collective-communication derives the bandwidth and latency bounds $(2(N-1)M/N)$ for Ring AllReduce\index{Ring AllReduce!bandwidth utilization}, Tree AllReduce\index{Tree AllReduce!latency reduction}, and Hierarchical AllReduce, explains how topology-aware algorithms exploit NVLink vs. InfiniBand, and details the gradient compression techniques used to reduce this overhead.
+Gradient synchronization is where independent SGD estimates become one update, so its cost determines whether data parallelism still behaves like a scaling strategy rather than a network benchmark. This coordination represents a distributed systems challenge in achieving global consensus while minimizing communication complexity, one significant enough to warrant its own chapter. @Sec-collective-communication derives the bandwidth and latency bounds $(2(N-1)M/N)$ for Ring AllReduce\index{Ring AllReduce!bandwidth utilization}, Tree AllReduce\index{Tree AllReduce!latency reduction}, and Hierarchical AllReduce, explains how topology-aware algorithms exploit NVLink vs. InfiniBand, and details the gradient compression techniques used to reduce this overhead.
 
 When synchronization performance deviates from theoretical expectations, the Fleet Stack framework provides a structured approach to isolating the bottleneck.
 
@@ -563,11 +565,11 @@ Production systems address these issues through timeouts, heartbeat monitoring, 
 
 #### Parameter updating {#sec-distributed-training-systems-systems-parameter-updating-bb64}
 
-After gradient aggregation, each device independently updates model parameters using the chosen optimization algorithm such as SGD with momentum or Adaptive Moment Estimation (Adam). This decentralized update strategy enables efficient parameter updates without requiring a central coordination server. Since all devices have identical gradient values after synchronization, they perform mathematically equivalent updates to maintain model consistency across the distributed system.
+Parameter updating closes the data-parallel invariant: after aggregation, every device must apply the same optimizer update from the same gradient values. Each device independently updates model parameters using the chosen optimization algorithm such as SGD with momentum or Adaptive Moment Estimation (Adam). This decentralized update strategy avoids a central coordination server because synchronization has already made the local gradients identical.
 
-In a system with 8 GPUs training a ResNet model, each GPU computes local gradients based on its data subset. After gradient averaging via ring all-reduce [@patarasuk2009], every GPU has the same global gradient values. Each device then independently applies these gradients using the optimizer's update rule. With SGD and learning rate 0.1, the update becomes `weights = weights - 0.1 * gradients`. This process maintains mathematical equivalence to single-device training while enabling distributed computation.
+In a system with 8 GPUs training a ResNet model, each GPU computes local gradients based on its data subset. After gradient averaging via ring all-reduce [@patarasuk2009], every GPU has the same global gradient values. Each device then independently applies these gradients using the optimizer's update rule. With SGD and learning rate 0.1, the update becomes `weights = weights - 0.1 * gradients`. The example shows why the update can remain decentralized without sacrificing mathematical equivalence to single-device training.
 
-The cycle of splitting data, computing gradients, synchronizing results, and updating parameters repeats for each batch. Modern frameworks automate this cycle, allowing engineers to focus on model architecture and hyperparameter tuning rather than distributed computing logistics.
+The cycle of splitting data, computing gradients, synchronizing results, and updating parameters repeats for each batch. Modern frameworks automate this cycle, but they cannot remove the ordering constraint that makes the replicas coherent: every worker must update only after the synchronized gradient is complete.
 
 ### Trade-offs: The communication wall {#sec-distributed-training-systems-systems-data-parallelism-tradeoffs}
 
@@ -1815,9 +1817,9 @@ class MemoryWallAnalysis:
 
 :::
 
-Model parallelism addresses this limitation by distributing the model architecture itself across devices. Several implementations exist. In layer-based splitting, devices process distinct groups of layers sequentially. The first device might compute layers 1-4 while the second handles layers 5-8. Channel-based splitting divides the channels within each layer across devices, where the first device processes 512 channels while the second manages the remaining ones. For transformer architectures, attention head splitting distributes different attention heads to separate devices.
+Model parallelism addresses this limitation by distributing the model architecture itself across devices, but the placement decision is where to cut the model. Layer-based splitting assigns devices to sequential layer groups, such as layers 1--4 on one device and layers 5--8 on the next. Channel-based splitting divides the channels within a layer, such as 512 channels on one device and the remaining channels on another. Transformer architectures add attention-head splitting, where separate devices own different heads. Each cut changes a different cost: layer cuts save memory but serialize the pipeline, while channel and head cuts expose more parallel work but require faster intra-layer communication.
 
-Model parallelism enables training of large-scale models. GPT-3, with `{python} FrontierModelParallelRecap.frontier_params_b_str` parameters, relies on model parallelism for training. Vision transformers processing high-resolution $16k{\times}16k$ pixel images use model parallelism to manage memory constraints. Mixture-of-Experts architectures use this approach to distribute their conditional computation paths across hardware.
+These cuts enable the large-scale cases that exceed a single device for different reasons. GPT-3, with `{python} FrontierModelParallelRecap.frontier_params_b_str` parameters, relies on model parallelism for training. Vision transformers processing high-resolution $16k{\times}16k$ pixel images use model parallelism to manage activation and memory constraints. Mixture-of-Experts architectures use this approach to distribute their conditional computation paths across hardware.
 
 Device coordination proceeds in three phases. In the forward pass, data flows sequentially through model segments on different devices. The backward pass propagates gradients in reverse order through these segments. During parameter updates, each device modifies only its assigned portion of the model. The coordination ensures mathematical equivalence to training on a single device while enabling models that exceed individual device memory capacities. The cost is sequential dependency between stages: while one device computes its forward pass, downstream devices sit idle, creating the pipeline bubble that dominates utilization analysis for model-parallel systems.
 
@@ -1834,7 +1836,7 @@ Verify your understanding of model sharding:
 
 ### Model parallelism implementation {#sec-distributed-training-systems-systems-model-parallelism-implementation-0728}
 
-When a model's parameter count exceeds single-device memory capacity, model parallelism\index{Model Parallelism!definition} divides the neural network across multiple computing devices, with each device computing a distinct portion of the model's operations. The technique encompasses device coordination, data flow management, and gradient computation across distributed model segments. @Fig-dist-model-parallelism captures this bidirectional data flow: input data propagates forward through sequentially assigned model partitions while gradients flow backward to update parameters, with intermediate results transferring across device boundaries at each stage.
+Once the model itself is the object being partitioned, the implementation problem is placement: every cut must save enough memory to justify the activation transfer and idle time it introduces. Model parallelism\index{Model Parallelism!definition} divides the neural network across multiple computing devices, with each device computing a distinct portion of the model's operations. @Fig-dist-model-parallelism captures this bidirectional data flow: input data propagates forward through sequentially assigned model partitions while gradients flow backward to update parameters, with intermediate results transferring across device boundaries at each stage.
 
 ::: {#fig-dist-model-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Model Parallelism Data Flow**: Sequential distribution of model partitions across three devices: input data flows forward through each partition in order (top path), while gradients propagate backward during the update phase (bottom path). Each device handles a distinct portion of the model, with intermediate activations and gradients transferring at partition boundaries. This approach enables training of models exceeding single-device memory at the cost of sequential dependencies that reduce hardware utilization." fig-alt="Linear flow diagram showing model parallelism: Input Data flows through Model Parts 1-3 on Devices 1-3 to Predictions via forward pass arrows above, with gradient update arrows returning below."}
 
@@ -1913,11 +1915,11 @@ The architecture fundamentally changes the optimization dynamics compared to dat
 
 ### Parallelism variations {#sec-distributed-training-systems-systems-parallelism-variations-592a}
 
-To address these latency and balancing challenges, the choice of partitioning strategy must align with the model's architecture. Three primary approaches, layer-wise partitioning\index{Layer-Wise Partitioning!model parallelism}, operator-level partitioning (tensor parallelism), and pipeline parallelism, each optimize for different structural constraints.
+Partitioning strategy determines which cost the model pays after memory no longer fits on one device. Layer-wise partitioning\index{Layer-Wise Partitioning!model parallelism} spends idle time to reduce per-device memory; pipeline parallelism spends scheduling complexity to hide that idle time; tensor parallelism spends NVLink bandwidth to split a single layer. The approaches below separate these choices by the architecture and interconnect that make each viable.
 
 #### Layer-wise partitioning {#sec-distributed-training-systems-systems-layerwise-partitioning-cf6a}
 
-Layer-wise partitioning assigns distinct model layers to separate computing devices. In transformer architectures, this translates to specific devices managing defined sets of attention and feed-forward blocks. @Fig-dist-layers-blocks demonstrates this partitioning for a 16-layer transformer: four consecutive blocks reside on each of four devices, with forward activations flowing left-to-right and backward gradients propagating right-to-left across the device boundaries.
+Layer-wise partitioning is the least invasive model cut: it saves memory by assigning consecutive layers to separate devices, but it preserves the model's sequential dependence. In transformer architectures, this translates to specific devices managing defined sets of attention and feed-forward blocks. @Fig-dist-layers-blocks demonstrates this partitioning for a 16-layer transformer: four consecutive blocks reside on each of four devices, with forward activations flowing left-to-right and backward gradients propagating right-to-left across the device boundaries.
 
 ::: {#fig-dist-layers-blocks fig-env="figure" fig-pos="htb" fig-cap="**Layer-Wise Model Parallelism**: A 16-layer transformer distributed across four GPUs, with four consecutive transformer blocks assigned to each device (L1--L4, L5--L8, L9--L12, L13--L16). Forward activations (black arrows) flow left-to-right through device boundaries, while backward gradients (red arrows) propagate right-to-left during parameter updates. This partitioning reduces per-GPU memory from the full model size to 1/4, but introduces sequential dependencies where downstream devices wait for upstream computation to complete." fig-alt="16-layer transformer split across 4 devices: Blocks L1-L4 on GPU 0, L5-L8 on GPU 1, L9-L12 on GPU 2, L13-L16 on GPU 3. Black arrows show forward activation flow; red arrows show backward gradient propagation."}
 
@@ -2166,7 +2168,7 @@ For dense models (like ResNet or BERT), the PS architecture creates a bottleneck
 
 However, for **Recommendation Systems**\index{Recommendation Systems}—specifically the Deep Learning Recommendation Model (DLRM)—the model parameters are dominated by massive Embedding Tables (often 10 TB+) that cannot fit on any single GPU. Furthermore, the updates are sparse: a batch of users interacts with only a tiny fraction (e.g., 0.001 percent) of the items.
 
-In this regime, Parameter Servers (often rebranded as "Embedding Servers") shine:
+In this sparse regime, the parameter server avoids dense synchronization by moving only the rows that a batch touches:
 
 1.  **Embedding Sharding**: The massive tables are partitioned across the PS fleet (often CPU nodes with massive DRAM).
 2.  **Sparse Lookups**: Workers send a list of IDs to the PS.
@@ -2233,11 +2235,15 @@ Numerical precision is itself a distribution lever: halving the bytes per value 
 
 ### FP8: The training frontier {#sec-distributed-training-fp8}
 
-Traditional mixed-precision training uses FP32 master weights with FP16 forward and backward passes. Modern hardware like the NVIDIA H100 adds support for 8-bit floating point (FP8), offering two formats optimized for different phases of training.
+FP8 matters to distributed training when its narrower formats reduce communication without destabilizing optimization. Traditional mixed-precision training uses FP32 master weights with FP16 forward and backward passes. Modern hardware like the NVIDIA H100 adds support for 8-bit floating point (FP8), offering two formats optimized for different phases of training.
+
+The choice between the two FP8 formats is therefore not an instruction-set detail; it decides which tensors can be narrowed without breaking the optimizer.
 
 The E4M3 format (4-bit exponent, 3-bit mantissa) provides a range of approximately $\pm 448$ with moderate precision. Its tighter range but better precision makes it suitable for representing *weights and activations* in the forward pass, where values cluster in predictable distributions.
 
 The E5M2 format (5-bit exponent, 2-bit mantissa) provides a much larger range of approximately $\pm 57344$ but coarser precision. This wider range accommodates *gradients*, which can span many orders of magnitude during backpropagation. Using E4M3 for gradients would cause frequent overflow and underflow, while E5M2's range captures the full gradient distribution at the cost of slightly noisier updates.
+
+Read the format table as a distribution constraint map: each row changes the balance among range, precision, memory traffic, and trainability.
 
 | **Format** | **Exponent** | **Mantissa** | **Range**                | **Precision** | **Use Case**               |
 |:-----------|:-------------|:-------------|:-------------------------|:--------------|:---------------------------|
@@ -2254,6 +2260,8 @@ The E5M2 format (5-bit exponent, 2-bit mantissa) provides a much larger range of
 As @tbl-precision-formats summarizes, the critical engineering challenge in FP8 training is *dynamic scaling*. FP8's narrow dynamic range means that a fixed scale factor will cause either overflow or underflow. Per-tensor scaling multiplies each tensor by a scale factor before casting to FP8, then divides by that factor after the FP8 computation. The scale factor is adjusted dynamically, typically by tracking the running maximum absolute value of each tensor and choosing a scale that maps this maximum to near the FP8 maximum representable value.
 
 The three-precision approach (FP32 master weights, FP8 general matrix multiply (GEMM) operations, FP16 accumulation) achieves near-FP16 training quality while doubling effective throughput on FP8-capable hardware. The energy implications are equally significant: if FP8 operations consume roughly half the energy per operation, they provide approximately 2$\times$ better operations per joule for compute-bound workloads. The doubled throughput is the performance expression of that same efficiency gain, not an additional multiplicative factor.
+
+For distributed training, FP8 earns its place only when smaller payloads reduce communication while dynamic scaling protects convergence.
 
 ## Hybrid Parallelism {#sec-distributed-training-systems-systems-hybrid-parallelism-12a0}
 
@@ -2978,7 +2986,7 @@ Production RLHF systems mitigate this through a combination of sequence packing 
 
 ## Parallelism Strategy Comparison {#sec-distributed-training-systems-systems-parallelism-strategy-comparison-d92a}
 
-To systematically weigh the architectural and hardware trade-offs for a new 50-billion parameter model, practitioners must compare data, model, pipeline, and hybrid parallelism across six critical dimensions. @Tbl-parallelism-compare presents this comparison.
+The final comparison is a feasibility filter, not a generic ranking. For a new 50-billion parameter model, the decisive questions are which memory state fits, how often communication occurs, where the pipeline bubble appears, and which abstraction cost the engineering team can tolerate. @Tbl-parallelism-compare presents this comparison.
 
 | **Aspect**                        | **Data Parallelism**                                             | **Model Parallelism**                                                      | **Pipeline Parallelism**                                                   | **Hybrid Parallelism**                                            |
 |:----------------------------------|:-----------------------------------------------------------------|:---------------------------------------------------------------------------|:---------------------------------------------------------------------------|:------------------------------------------------------------------|
@@ -2991,11 +2999,13 @@ To systematically weigh the architectural and hardware trade-offs for a new 50-b
 
 : **Parallel Training Strategies**: Data, model, pipeline, and hybrid parallelism each address the challenges of scaling machine learning training by distributing workload across devices, differing in how they partition data and model parameters to optimize memory usage, communication, and scalability. Understanding these trade-offs enables practitioners to select the most effective approach for their specific model and infrastructure. {#tbl-parallelism-compare}
 
-@Fig-parallelism-flowchart provides a decision tree for selecting parallelism strategies based on model size, dataset size, and scaling constraints. While intentionally simplified, real-world scenarios often involve additional complexities such as hardware heterogeneity, communication bandwidth, and workload imbalance that may influence the choice of parallelism techniques. Practitioners should view this as a foundational tool for understanding trade-offs and decision points, then adapt it to the specific requirements and constraints of their systems.
+@Fig-parallelism-flowchart converts the same filter into a decision tree. It begins with memory fit because capacity failure is nonnegotiable, then asks whether data scale alone justifies replication. The tree is intentionally simplified; hardware heterogeneity, communication bandwidth, and workload imbalance enter as second-order checks after the binding constraint has been identified.
 
 ::: {#fig-parallelism-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Parallelism Strategy Decision Tree**: A systematic selection guide based on two key questions: Does the model fit in single-device memory? Does the dataset fit on a single device? Models exceeding device memory require model parallelism; large datasets benefit from data parallelism; significant constraints in both dimensions demand hybrid approaches. While simplified, this framework captures the primary decision points before practitioners must consider secondary factors like hardware heterogeneity and workload imbalance." fig-alt="Decision tree flowchart starting from Start. Diamond nodes ask about model and dataset fit on single device. Paths lead to four outcomes: Single Device Optimization, Data Parallelism, Model Parallelism, or Hybrid Parallelism."}
 ![](images/svg/parallelism-flowchart.svg){width=100%}
 :::
+
+The table and flowchart are intentionally coarse, but their purpose is precise: identify the binding constraint before choosing the implementation stack.
 
 ## From Principles to Systems {#sec-distributed-training-systems-systems-framework-integration-cf71}
 
@@ -3250,9 +3260,7 @@ The parallelism strategies explored throughout this chapter (data, tensor, pipel
 
 ::: {.callout-chapter-connection title="From logic to traffic"}
 
-We have defined the *logical* traffic patterns of the Machine Learning Fleet—the *how* of splitting the math. These logical patterns, however, eventually hit the *physical* wires of the data center.
-
-In Communication (@sec-collective-communication), we open the black box of the collective operations (AllReduce, AllToAll) that make this consistency possible. We move from the logic of *what* to send to the mechanics of *how* to route it through rings, trees, and rails.
+We have defined the *logical* traffic patterns of the Machine Learning Fleet, the *how* of splitting the math. These logical patterns, however, eventually hit the *physical* wires of the data center. In Communication (@sec-collective-communication), we open the black box of the collective operations (AllReduce, AllToAll) that make this consistency possible. We move from the logic of *what* to send to the mechanics of *how* to route it through rings, trees, and rails.
 
 :::
 

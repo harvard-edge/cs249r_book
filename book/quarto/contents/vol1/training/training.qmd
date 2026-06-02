@@ -205,7 +205,7 @@ Before formalizing the iron law, consider how these constraints interact in prac
 
 **Failure**: The training loss spiked roughly 20 times despite gradient clipping. The spikes occurred irregularly, sometimes late in training, and were not explained by a simple "bad data batch" story.
 
-**Consequence**: The practical mitigation was operational: restart from a checkpoint about 100 steps before the spike and skip roughly 200--500 data batches around the failure window. That avoided recurrence at the same point, but it also showed that frontier training requires planned recovery paths, not only optimizer theory.
+**Consequence**: The practical mitigation was operational: restart from a checkpoint about 100 steps before the spike and skip roughly 200--500 data batches around the failure window. The mitigation avoided recurrence at the same point and showed that frontier training requires planned recovery paths alongside optimizer theory.
 
 **Systems lesson**: Large-scale training stability is an operational problem as much as an optimization problem. Checkpoint cadence, automated loss-spike detection, batch skipping, and numerically robust formats such as BF16\index{BF16!dynamic range advantage} are part of the training system, not afterthoughts.
 
@@ -348,7 +348,7 @@ GPT-2's `{python} GPT2LighthouseSpecs.gpt2_dataset_size_gb_str` WebText corpus s
 -   **Memory-resident regime** (10 GB): The entire dataset often fits in system RAM. Data loading is a one-time "startup cost," and the disk bandwidth $(\text{BW})$ does not matter after the first few seconds.
 -   **Streaming regime** (10 TB): Data becomes a continuous, high-pressure stream. The system can no longer "load" the data; it must orchestrate its movement. The $D_{\text{vol}}$ term shifts from a storage bottleneck to a networking and I/O bottleneck, requiring zero-copy paths and multi-worker prefetching just to keep the accelerator from starving.
 
-Scale is not just "more data"; it is a transformation of the system's physics.
+Scale changes more than the amount of data; it transforms the system's physics.
 
 :::
 
@@ -1179,7 +1179,7 @@ The costs quantified in @tbl-optimizer-properties create a design tension: Adam'
 
 #### Framework optimizer interface and scheduling {#sec-model-training-framework-optimizer-interface-82ff}
 
-Frameworks provide standardized interfaces that abstract optimization algorithms into practical training loops. The framework optimizer interface follows a consistent pattern that separates gradient computation from parameter updates. @Lst-adam-training demonstrates how Adam optimization\index{Adam Optimization|see{Adam Optimizer}} integrates into a standard training loop.
+After optimizer memory is quantified, the framework interface matters because it fixes when that state is read, written, cleared, and preserved across steps. A training loop separates gradient computation from parameter updates so that the system can accumulate gradients, synchronize them, or defer updates without changing the optimizer equations. @Lst-adam-training demonstrates where Adam optimization\index{Adam Optimization|see{Adam Optimizer}} enters that cycle.
 
 ::: {#lst-adam-training lst-cap="**Adam Training Loop**: Standard four-step optimization cycle with gradient clearing, forward pass, backward pass, and parameter update."}
 
@@ -1216,9 +1216,9 @@ for epoch in range(num_epochs):
 :::
 
 \index{Gradient Accumulation!framework behavior}
-The `optimizer.zero_grad()` call addresses a critical framework implementation detail: gradients accumulate across calls to `backward()`, requiring explicit clearing between batches. This behavior enables gradient accumulation patterns for large effective batch sizes but requires careful management in standard training loops.
+The `optimizer.zero_grad()` call marks the boundary between one update and the next. Gradients accumulate across calls to `backward()`, so clearing them explicitly prevents stale gradients from contaminating the next batch. The same accumulation behavior later becomes useful for large effective batch sizes, but only when the training loop manages the boundary deliberately.
 
-The `optimizer.step()` method encapsulates the mathematical update equations. For Adam optimization, this single call implements the momentum estimation, squared gradient tracking, bias correction, and parameter update computation automatically. @Lst-adam-internals illustrates the mathematical operations that occur within the optimizer.
+The `optimizer.step()` method is the other boundary: it consumes the current gradients and mutates persistent optimizer state. For Adam optimization, this call implements momentum estimation, squared gradient tracking, bias correction, and the parameter update. @Lst-adam-internals makes the hidden state explicit so the memory cost remains visible rather than disappearing behind an API call.
 
 ::: {#lst-adam-internals lst-cap="**Adam Optimizer Internals**: Illustrative pseudocode for the operations implemented by optimizer.step(), showing momentum estimation, variance tracking, bias correction, and parameter updates. Per-parameter optimizer state (momentum_buffer, variance_buffer, step_count) is initialized to zero on the first call and persisted across calls by the framework."}
 
@@ -1281,14 +1281,14 @@ for param in model.parameters():
 
 :::
 
-Framework implementations also handle the memory management challenges in optimizer trade-offs. The optimizer automatically allocates storage for momentum terms and squared gradient statistics, managing the 2--3$\times$ memory overhead transparently while providing efficient memory access patterns optimized for the underlying hardware.
+Framework implementations manage the allocator and access patterns for these optimizer states, but they do not remove the cost. Momentum terms and squared-gradient statistics still occupy 2--3$\times$ parameter memory and must be read and written every step. The abstraction reduces implementation burden; the systems budget still pays for the state.
 
 #### Learning rate scheduling integration {#sec-model-training-learning-rate-scheduling-integration-451b}
 
 \index{Learning Rate!scheduling}\index{Learning Rate!warmup}\index{Learning Rate!cosine decay}\index{Cosine Annealing!learning rate schedule}
-Frameworks integrate **learning rate scheduling**\index{Learning Rate Scheduling!definition} directly into the optimizer interface, enabling dynamic adjustment of the learning rate $\eta$ during training. This integration demonstrates how frameworks compose multiple optimization techniques through modular design patterns.
+The framework's **learning rate scheduling**\index{Learning Rate Scheduling!definition} hook changes the optimizer's trajectory without adding per-parameter state. It adjusts the learning rate $\eta$ during training, letting the system shape convergence behavior while leaving the underlying optimizer equations intact.
 
-Learning rate schedulers modify the optimizer's learning rate according to predefined schedules, such as cosine annealing, exponential decay, or step-wise reductions. @Lst-cosine-annealing demonstrates how to integrate cosine annealing with Adam optimization.
+Schedules such as cosine annealing, exponential decay, or step-wise reductions implement that trajectory by changing the step size over time. @Lst-cosine-annealing shows where cosine annealing enters an Adam training loop.
 
 ::: {#lst-cosine-annealing lst-cap="**Cosine Annealing Scheduler**: Learning rate scheduling with cosine annealing integrated into the training loop."}
 
@@ -1334,7 +1334,7 @@ for epoch in range(num_epochs):
 
 :::
 
-This composition pattern allows practitioners to combine base optimization algorithms (SGD, Adam) with scheduling strategies (cosine annealing, linear warmup) without modifying the core mathematical implementations.
+This separation lets the systems engineer combine base optimization algorithms (SGD, Adam) with scheduling strategies (cosine annealing, linear warmup) without reimplementing the update rule.
 
 The preceding optimization algorithms specify how to update parameters given gradients, but they take those gradients as given. SGD, momentum, and Adam all assume gradient vectors arrive ready-made. In practice, computing gradients for a network with billions of parameters is itself a major computational and memory challenge. The cost of gradient computation, not the cost of the optimizer step, is what makes training so much more expensive than inference.
 
@@ -2378,15 +2378,9 @@ filllcolor=magenta!40,Linewidth=0.7pt, filllcirclecolor=white}};
 
 :::
 
-The storage zone houses raw data on disk, the CPU preprocessing zone handles format conversion, processing, and batching, and the GPU training zone distributes preprocessed batches across multiple accelerators for parallel computation.
+These zones matter because each can become the slowest stage. Storage supplies raw examples from disk, typically image files for computer vision or text files for natural language processing. CPU preprocessing then converts formats, applies resizing, normalization, or data augmentation, and batches examples into tensors the accelerator can consume.
 
-In the storage zone, raw data resides on disk, typically in formats like image files for computer vision tasks or text files for natural language processing. The CPU preprocessing zone handles the transformation of this raw data through multiple stages. For example, in an image recognition model, these stages include:
-
-1. Format conversion: Reading image files and converting them to standardized formats
-2. Processing: Applying operations like resizing, normalization, and data augmentation
-3. Batching: Organizing processed examples into batches for efficient accelerator computation
-
-The final zone shows multiple GPUs receiving preprocessed batches for training. This organization ensures that each GPU maintains a steady supply of data, maximizing computational efficiency and minimizing idle time. The effectiveness of this pipeline directly impacts training performance, as any bottleneck in data preparation can leave expensive accelerator resources underutilized.
+The GPU training zone consumes those preprocessed batches across multiple accelerators for parallel computation. Format conversion, processing, and batching are therefore not housekeeping steps; they are throughput gates. If any one runs slower than the training loop, expensive accelerator resources idle while the data pipeline catches up.
 
 #### Core components {#sec-model-training-core-components-d28d}
 
@@ -4066,11 +4060,11 @@ class PreprocessingScenarios:
     buffer_total_mem_gb_str = fmt_memory(buffer_total_mem, unit=GB, precision=1, commas=True)
 ```
 
-Training data undergoes three main stages: retrieval from storage, transformation into a suitable format, and use in model training. An unoptimized pipeline executes these stages sequentially, leaving the GPU idle during data fetching and preprocessing. Prefetching eliminates this waiting time by loading data asynchronously during model computation. Data loaders operate as separate threads or processes, preparing the next batch while the current batch trains. This ensures immediate data availability for the GPU when the current batch completes.
+Prefetching only pays off when the profile shows data movement on the critical path. Training data still passes through retrieval, transformation, and model execution; the optimization changes when those stages run. An unoptimized pipeline serializes them, leaving the GPU idle during data fetching and preprocessing. Data loaders avoid that stall by preparing the next batch in separate threads or processes while the current batch trains.
 
-Overlapping extends this efficiency by coordinating all three pipeline stages simultaneously. As the GPU processes one batch, preprocessing begins on the next batch, while data fetching starts for the subsequent batch. This coordination maintains constant activity across all pipeline stages.
+Overlapping extends the same idea across the full pipeline. As the GPU processes one batch, preprocessing begins on the next batch, while data fetching starts for the subsequent batch. The goal is constant activity at each stage so the slowest stage no longer leaves the others waiting.
 
-Machine learning frameworks (introduced in @sec-ml-frameworks) implement these techniques through built-in utilities. @Lst-dataloader_usage demonstrates PyTorch's DataLoader configuration\index{DataLoader!configuration parameters}, where `{python} PreprocessingScenarios.num_workers_str` enables parallel preprocessing threads and `{python} PreprocessingScenarios.prefetch_factor_str` maintains a buffer of `{python} PreprocessingScenarios.prefetch_buffer_batches_str` batches ready for accelerator consumption.
+Machine learning frameworks (introduced in @sec-ml-frameworks) expose the control variables for this trade-off. @Lst-dataloader_usage demonstrates PyTorch's DataLoader configuration\index{DataLoader!configuration parameters}, where `{python} PreprocessingScenarios.num_workers_str` sets preprocessing parallelism and `{python} PreprocessingScenarios.prefetch_factor_str` maintains a buffer of `{python} PreprocessingScenarios.prefetch_buffer_batches_str` batches ready for accelerator consumption.
 
 ::: {#lst-dataloader_usage lst-cap="**Pipeline Optimization**: Machine learning workflows benefit from efficient data handling through batching and prefetching to maintain constant accelerator utilization."}
 
@@ -4082,11 +4076,9 @@ loader = DataLoader(
 
 :::
 
-The parameters `num_workers` and `prefetch_factor` control parallel processing and data buffering. Multiple worker processes handle data loading and preprocessing concurrently, while prefetch_factor determines the number of batches prepared in advance.
+The parameters `num_workers` and `prefetch_factor` are not generic performance toggles. They determine CPU parallelism and buffer depth, which means they shift pressure from accelerator idle time to host memory and CPU scheduling.
 
-Buffer management plays a key role in pipeline efficiency. The prefetch buffer size requires careful tuning to balance resource utilization. A buffer that is too small causes the GPU to wait for data preparation, reintroducing the idle time these techniques aim to eliminate. Conversely, allocating an overly large buffer consumes memory that could otherwise store model parameters or larger batch sizes.
-
-The implementation relies on effective CPU-GPU coordination. The CPU manages data preparation tasks while the GPU handles computation. This division of labor, combined with storage I/O operations, creates an efficient pipeline that minimizes idle time across hardware resources.
+Buffer management is the main trade-off. A buffer that is too small causes the GPU to wait for data preparation, reintroducing the idle time prefetching was meant to remove. An overly large buffer consumes memory that could otherwise store model parameters or larger batches. The right configuration coordinates CPU preparation, storage I/O, and GPU computation so each resource has work ready at the moment it can use it.
 
 These techniques yield the greatest benefit when storage access is slow, preprocessing is complex, or datasets are large.
 
@@ -4589,7 +4581,7 @@ FP8 training doubles Tensor Core throughput again (`{python} MixedPrecisionHardw
 
 : **Precision Selection Decision Tree**: Mixed-precision training requires choosing among FP8, BF16, FP16, and FP32 based on workload sensitivity to numerical range and the accelerator generation in use. The H100 unlocks FP8 throughput at the cost of more involved per-tensor scaling; BF16 is the default for transformer training because dynamic range matters more than mantissa precision for gradient magnitudes; FP16 remains useful for computer vision workloads with controlled gradients; FP32 is reserved for small models where numerical stability outweighs throughput. {#tbl-precision-decision-tree}
 
-Reduced precision not only accelerates computation but also alleviates memory bandwidth bottlenecks. Modern GPUs are increasingly compute-bound rather than bandwidth-bound for large matrix operations, but data movement still limits performance for smaller operations. A100's specifications illustrate this:
+Reduced precision accelerates computation and alleviates memory bandwidth bottlenecks. Modern GPUs are increasingly compute-bound rather than bandwidth-bound for large matrix operations, but data movement still limits performance for smaller operations. A100's specifications illustrate this:
 
 - HBM2e bandwidth: `{python} MixedPrecisionHardwareDetail.a100_bw_gbs_str`
 - FP32 throughput (`{python} MixedPrecisionHardwareDetail.a100_tflops_fp32_str`): worst-case demand is `{python} MixedPrecisionHardwareDetail.fp32_bw_demand_tb_s_str` if every FLOP needs new data
@@ -4983,13 +4975,13 @@ Subsequent versions have continued improving performance: FlashAttention-2 [@dao
 
 Flash Attention should be considered the default attention implementation for transformer training. It is essential for any model with sequence lengths exceeding 512 tokens, and mandatory above 2,048 tokens where standard attention likely exhausts memory. Modern GPUs (A100, H100) with hardware support for fast SRAM benefit most. The returns diminish for sequence lengths below 512 tokens (where tiling overhead is not worthwhile), on pre-Volta GPU architectures without fast SRAM, and for nonattention architectures such as convolutional neural networks (CNNs) and multilayer perceptrons (MLPs).
 
-In practice, deep learning frameworks handle Flash Attention integration transparently. PyTorch 2.0+ automatically selects Flash Attention when available and appropriate. For optimal performance:
+In practice, deep learning frameworks handle much of Flash Attention's integration, but the decision still depends on layout, precision, and memory budget. PyTorch 2.0+ automatically selects Flash Attention when available and appropriate. The practical checks are:
 
 1. Ensure tensor layouts match library expectations (contiguous memory, correct dimension ordering)
 2. Use FP16 or BF16 for maximum speedup (Flash Attention optimized for mixed precision)
 3. Combine with gradient checkpointing for further memory savings (4--8$\times$ larger models trainable)
 
-The integration is typically a single-line change---swapping a manual attention call for `F.scaled_dot_product_attention` (as shown in @lst-flash-attention-comparison). By using the framework's optimized primitive, the developer delegates the complex tiling and SRAM management required to bypass the HBM bandwidth bottleneck to the underlying library.
+The integration is often a single-line change---swapping a manual attention call for `F.scaled_dot_product_attention` (as shown in @lst-flash-attention-comparison). The engineering decision is still the same one established by the roofline analysis: use the optimized primitive when the bottleneck is HBM traffic, and let the library manage the tiling and SRAM scheduling needed to remove it.
 
 #### Systems implications and broader principles {#sec-model-training-systems-implications-broader-principles-c4f0}
 
@@ -5185,9 +5177,9 @@ With checkpointing, only a subset of the activations is retained during the forw
 
 :::
 
-The implementation involves three steps. First, split the model into segments. Second, retain activations only at the boundaries of these segments during the forward pass. Third, recompute activations for intermediate layers during the backward pass when needed.
+The implementation keeps the capacity trade-off explicit. The system splits the model into segments, retains activations only at segment boundaries during the forward pass, and recomputes intermediate activations during the backward pass when needed.
 
-Frameworks like PyTorch provide tools such as `torch.utils.checkpoint` to simplify this process. Checkpointing is particularly effective for deep architectures with dozens or hundreds of layers, such as transformers or large convolutional networks, where the memory required for storing activations can exceed the GPU's capacity.
+Frameworks like PyTorch provide tools such as `torch.utils.checkpoint` to simplify this process, but the recompute cost remains. Checkpointing is most effective for deep architectures with dozens or hundreds of layers, such as transformers or large convolutional networks, where activation storage exceeds the GPU's capacity before arithmetic throughput is exhausted.
 
 The synergy between gradient accumulation and checkpointing enables training of larger, more complex models. Gradient accumulation manages memory constraints related to batch size, while checkpointing optimizes memory usage for intermediate activations. Together, these techniques expand the range of models that can be trained on available hardware.
 
@@ -5215,7 +5207,7 @@ Gradient accumulation[^fn-gradient-accumulation-training] simulates larger batch
 
 Activation checkpointing significantly reduces the memory footprint of intermediate activations during the forward pass, allowing training of deeper models. By discarding and recomputing activations as needed, checkpointing frees up memory for larger models, additional layers, or higher resolution data. This is especially important in advanced architectures like transformers that require substantial memory for intermediate computations.
 
-Both techniques enhance scalability and cost efficiency by reducing hardware requirements, lowering development costs for organizations working within tight budgets. Returning to our GPT-2 Lighthouse Model, gradient accumulation is essential for achieving the target batch size within V100 memory constraints.
+Both techniques improve scalability by reducing the memory required before adding hardware. Returning to our GPT-2 Lighthouse Model, gradient accumulation is essential for achieving the target batch size within V100 memory constraints.
 
 ```{python}
 #| echo: false
@@ -6587,7 +6579,7 @@ Synchronizing gradients across a fleet of GPUs means moving megabytes of data ac
 
 :::
 
-Beyond data and model parallelism, three additional strategies address the specific challenges of distributed training:
+Once training crosses the node boundary, the strategy must match communication frequency to available bandwidth. The remaining strategies reduce the communication tax by changing where work waits, how tensors split, or how multiple forms of parallelism compose:
 
 #### Pipeline parallelism {#sec-model-training-pipeline-parallelism-b711}
 
@@ -6612,7 +6604,7 @@ The implementation details of gradient synchronization algorithms (AllReduce\ind
 ### The evolution of training infrastructure {#sec-model-training-evolution-training-infrastructure-f3a6}
 
 \index{Training!infrastructure evolution}
-The preceding parallelism strategies (data, model, pipeline, tensor, and their hybrids) did not appear from nowhere. Modern training systems took this form because computing infrastructure evolved through four distinct eras, each shaped by dominant workloads. Trace this evolution through @fig-evolution-systems and the computing eras table that follows: new application demands expose architectural limitations, triggering innovations that eventually become standardized infrastructure.
+The parallelism strategies above are the current endpoint of a longer infrastructure progression. Modern training systems took this form because computing infrastructure evolved through four distinct eras, each shaped by dominant workloads. @Fig-evolution-systems and the computing eras table that follows show the durable pattern: new application demands expose architectural limitations, triggering innovations that eventually become standardized infrastructure.
 
 Neural network training combines requirements from multiple predecessors while adding unique demands. Like HPC, training requires massive floating-point throughput for matrix operations. Like warehouse-scale computing\index{Warehouse-Scale Computing!training evolution}, training at scale requires fault tolerance across many machines. Unlike either, training involves iterative parameter updates with complex synchronization requirements. This hybrid requirement set drove the emergence of **AI hypercomputing**\index{AI Hypercomputing!definition}, characterized by specialized accelerators (GPUs, TPUs), high-bandwidth interconnects (NVLink, InfiniBand), and software stacks optimized for gradient-based learning.
 
@@ -6784,7 +6776,7 @@ class TrainingCarbonFootprint:
 ::: {#nbk-training-carbon-footprint-training .callout-notebook title="The carbon footprint of training"}
 
 **Scaling the Utility Bill**\index{Scaling!physical ceiling}:
-Training large models is not just a compute challenge; it is a massive energy sink. We can quantify the environmental impact of scaling training using the energy corollary to the iron law:
+Training large models is a massive energy sink as well as a compute challenge. We can quantify the environmental impact of scaling training using the energy corollary to the iron law:
 
 1.  **Workload**: Training a 7-billion-parameter model for one trillion tokens.
 2.  **Compute**: ≈ `{python} TrainingCarbonFootprint.cf_flops_eqn_str`.
@@ -7066,9 +7058,9 @@ class GPT2SummaryChapterRecap:
 
 The practitioners who internalize the iron law can look at a slow training job and immediately classify the bottleneck: compute-bound (increase batch size, enable mixed precision), memory-bound (activate checkpointing, reduce model size), or communication-bound (adjust gradient accumulation, rethink parallelism strategy). This diagnostic discipline distinguishes engineers who solve problems from those who throw hardware at symptoms. Treating training as a black box leads to wasted GPU-months on misdiagnosed problems: hardware upgrades for algorithmic bottlenecks, more GPUs for data pipeline starvation, precision reduction for communication-bound workloads. As training runs scale to millions of dollars and months of calendar time, the ability to profile, diagnose, and apply targeted optimizations determines whether organizations can iterate fast enough to remain competitive.
 
-::: {.callout-chapter-connection title="From training to compression"}
+::: {.callout-chapter-connection title="From training to data selection"}
 
-Training produces the model artifact: billions of learned parameters that encode patterns extracted from data. The expense of creating that artifact is paid once, but deployment repeats the cost of using it across cloud servers, edge devices, and mobile phones. A model that required `{python} GPT2SummaryChapterRecap.o_total_mem_gb_str` to train is often too large to serve efficiently in those environments. The optimization journey (@sec-model-compression) asks how much of the trained model is actually necessary. Quantization\index{Quantization!model compression}, pruning\index{Pruning!model compression}, and knowledge distillation\index{Knowledge Distillation!model compression} transform training's expensive output into a model that can meet real deployment constraints.
+Training produces the model artifact: billions of learned parameters that encode patterns extracted from data, at a cost paid once but paid steeply. A run that demanded `{python} GPT2SummaryChapterRecap.o_total_mem_gb_str` of memory spent compute on every example it ingested, yet not every example earned that price. Before optimizing how the trained model runs, the optimization journey turns upstream, to the workload itself. @Sec-data-selection asks how much of the training data is actually necessary, showing that a carefully chosen subset can match the accuracy of the full dataset while cutting the cost of every training iteration that follows.
 
 :::
 
