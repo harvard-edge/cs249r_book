@@ -52,7 +52,7 @@ The practical consequences are enormous: compressing models and accelerating har
 
 ## Data Selection Fundamentals {#sec-data-selection-data-selection-fundamentals-e839}
 
-Data selection asks a deceptively simple question with profound engineering consequences: given a clean, well-engineered dataset, which examples contribute the most learning per unit of compute cost? The data engineering infrastructure (@sec-data-engineering) established the infrastructure for collecting, cleaning, and preparing data, producing pipelines that ingest raw signals and yield well-governed, versioned datasets ready for training. That chapter ensured data *quality* through correct labels, consistent schemas, and clean records. Data selection optimizes data *value* by extracting maximum learning from minimum samples, directly shrinking the total operations $(O)$ term in the iron law\index{Iron Law!total operations reduction via data selection} (Principle \ref{pri-iron-law}). The distinction matters: quality asks whether data is correct, while value asks whether correct data is worth the compute spent processing it.
+Data selection gives a clean, well-engineered dataset a systems objective: keep the examples that contribute the most learning per unit of compute cost. The data engineering infrastructure (@sec-data-engineering) established the pipelines for collecting, cleaning, and preparing data, producing well-governed, versioned datasets ready for training. That chapter ensured data *quality* through correct labels, consistent schemas, and clean records. Data selection optimizes data *value* by extracting maximum learning from minimum samples, directly shrinking the total operations $(O)$ term in the iron law\index{Iron Law!total operations reduction via data selection} (Principle \ref{pri-iron-law}). The distinction matters: quality asks whether data is correct, while value asks whether correct data is worth the compute spent processing it.
 
 \index{Scaling Laws!data-compute asymmetry}
 For decades, the dominant strategy was straightforward: more data, better models. Scaling laws[^fn-scaling-laws-origin] [@kaplan2020scaling; @hoffmann2022chinchilla] confirmed that model performance improves predictably with dataset size, and teams responded rationally by scraping more web pages, labeling more images, and generating more synthetic examples. A critical asymmetry has since emerged. Hardware acceleration (@sec-hardware-acceleration) can expand usable compute faster than the supply of novel, high-quality human-generated text and images. Much of the easily accessible public web has already been incorporated into large training corpora, and expert labeling capacity grows slowly. This asymmetry, which this chapter calls the **Data Wall**\index{Data Wall!definition}[^fn-data-wall-scaling], has inverted the optimization priority from "get more data" to "get more from existing data."
@@ -461,12 +461,12 @@ Consider training cost reduction: a `{python} IronLawSavings.dataset_reduction_p
 \index{Green AI!data selection as energy reduction}
 Compute savings cascade through the entire infrastructure stack. Large datasets consume petabytes of storage and saturate network bandwidth during distributed training; deduplication and coreset selection reduce storage costs while eliminating I/O bottlenecks that can idle expensive GPU clusters. The savings extend to labeling economics: expert labeling costs (\$5--100+ per sample in domains like medical imaging) often exceed compute costs, and active learning and semi-supervised methods reduce labeling budgets by 10--100$\times$. The environmental implications compound further: training a large language model can emit hundreds of metric tons of CO~2~, making data selection the most direct lever for Green AI, since halving the dataset halves training energy with no accuracy trade-off if done correctly. Smaller curated datasets also enable faster iteration velocity. A team that can iterate in hours rather than days has a compounding advantage in model development.
 
-The cascading benefits illustrate a broader point: where the ML researcher asks "what is the sample complexity of this learning problem?", the systems engineer asks "what is the cost-per-accuracy-point across the entire pipeline, from data acquisition through deployment?" This chapter provides the systems engineer's toolkit for that question: techniques to minimize total cost, metrics to quantify efficiency gains, and architectural patterns to implement data selection at scale.
+The cascading benefits illustrate a broader point: the ML researcher usually frames the problem as sample complexity, while the systems engineer frames it as cost-per-accuracy-point across the entire pipeline, from data acquisition through deployment. This chapter provides the systems engineer's toolkit for that problem: techniques to minimize total cost, metrics to quantify efficiency gains, and architectural patterns to implement data selection at scale.
 
 ### Information-compute ratio {#sec-data-selection-informationcompute-ratio-8c0b}
 
 \index{Pareto Frontier!data selection context}
-The systems framing established earlier calls for a quantitative metric. The Optimize principles (Part III) introduced the *Pareto frontier* as the boundary where improving one metric necessarily degrades another, and identified three pillars of efficiency following the D·A·M taxonomy: data, algorithm (model compression, @sec-model-compression), and machine (hardware acceleration, @sec-hardware-acceleration). As the first pillar in the D·A·M ordering, data selection addresses the most critical question: *how much information does each sample contribute to the model's learning per unit of computation?* We formalize this with a central metric: the **information-compute ratio**\index{Information-Compute Ratio!definition}.
+The systems framing established earlier calls for a quantitative metric. The Optimize principles (Part III) introduced the *Pareto frontier* as the boundary where improving one metric necessarily degrades another, and identified three pillars of efficiency following the D·A·M taxonomy: data, algorithm (model compression, @sec-model-compression), and machine (hardware acceleration, @sec-hardware-acceleration). As the first pillar in the D·A·M ordering, data selection turns that trade-off into a measurable quantity: the information each sample contributes to the model's learning per unit of computation. We formalize this with a central metric: the **information-compute ratio**\index{Information-Compute Ratio!definition}.
 
 \index{Roofline Model!data selection interaction}
 In the optimization triad (@fig-optimization-triad), data selection plays the role of input optimization, reducing total workload before it enters the model or hardware. Model compression minimizes the math per parameter; hardware acceleration maximizes the math per second; data selection minimizes the total math required to reach convergence. The three edges of the triad capture the dominant bottlenecks: *compute bound* describes systems limited by arithmetic throughput, *I/O bound* describes systems limited by data movement, and *sample efficiency* describes systems limited by the information content of training data.
@@ -1175,11 +1175,11 @@ The practical question then becomes *how* to identify which samples to keep.
 ### Coreset selection algorithms {#sec-data-selection-coreset-selection-algorithms-2c74}
 
 \index{Coreset!etymology}
-**Coreset selection**\index{Coreset!definition}\index{Static Pruning!coreset selection}[^fn-coreset-geometry] answers this question by identifying a small subset of data that preserves the statistical properties of the entire dataset.
+**Coreset selection**\index{Coreset!definition}\index{Static Pruning!coreset selection}[^fn-coreset-geometry] turns the static pruning decision into a coverage problem: keep the smallest subset that preserves the statistical properties of the entire dataset.
 
 [^fn-coreset-geometry]: **Coreset (Core Set)**: The method's guarantee comes from computational geometry, where a small subset of points is proven to approximate the geometric properties of the full set within a $(1 + \varepsilon)$ factor. In machine learning, this preserves the statistical structure of the data, ensuring the loss landscape of a model trained on the coreset approximates the true loss landscape. This provable bound on error is the critical distinction from random downsampling, which offers no such guarantee. \index{Coreset!geometry origins}
 
-The goal is to find a compact set of examples that allows a model to generalize as well as it would if trained on the full dataset. Several algorithmic families have proven effective, each with distinct computational trade-offs.
+The systems decision is where to spend the selection budget: on cheap coverage metrics that preserve distributional structure, or on costlier training-dynamics scores that better target the decision boundary.
 
 \index{k-Center!coreset selection}
 Geometry-based methods select samples that cover the data distribution without requiring any model training. The $k$-Center algorithm[^fn-k-center-coverage], a facility-location-style coverage objective, selects samples that minimize the maximum distance from any point to its nearest selected center, ensuring coverage of the entire data manifold.
@@ -1198,7 +1198,7 @@ Crucially, these scores transfer across architectures: scores computed on a smal
 
 [^fn-forgetting-events-pruning]: **Forgetting Events**: This method identifies valuable examples by tracking when the model "forgets" them—transitioning from a correct to an incorrect classification during training. The central trade-off is the high cost of this analysis, which requires a full training run. However, the resulting importance scores transfer reliably from small proxy models to large target models (for example, ResNet-18 to ResNet-50), which is precisely what makes the "inexpensive proxy-based selection" strategy viable. \index{Forgetting Events!pruning trade-off}
 
-Gradient-based approaches generally outperform geometry-based methods in selection quality but incur the overhead of proxy model training. The quality advantage justifies the proxy training overhead for most production workloads, as @tbl-coreset-comparison quantifies:
+Gradient-based approaches generally outperform geometry-based methods in selection quality but incur the overhead of proxy model training. @Tbl-coreset-comparison should be read as a selection-budget table: higher-quality scores buy more information per sample, but only if their scoring cost stays below the compute they save.
 
 | **Method**     | **Compute Cost**                        | **Requires Training** | **Best For**          | **Limitation**            |
 |:---------------|:----------------------------------------|:----------------------|:----------------------|:--------------------------|
@@ -1210,7 +1210,7 @@ Gradient-based approaches generally outperform geometry-based methods in selecti
 
 : **Coreset Selection Algorithm Comparison**: $D =$ dataset size, $K =$ coreset size. The fundamental trade-off is selection quality vs. computational cost: gradient-based methods (GraNd, EL2N, Forgetting) outperform geometry-based methods ($k$-Center, Herding) because they use training dynamics to identify decision-boundary samples, but this advantage requires proxy model training as an upfront investment. {#tbl-coreset-comparison .striped .hover}
 
-Each algorithm in @tbl-coreset-comparison represents a different answer to the ICR framework's central question: where in the compute-vs.-information trade-off should the selection budget be spent to maximize learning signal per FLOP?
+Each algorithm in @tbl-coreset-comparison occupies a different point in the ICR framework's compute-vs.-information trade-off, determining how the selection budget is spent to maximize learning signal per FLOP.
 
 @Fig-coreset-selection makes the core insight behind coreset methods concrete. Compare the two panels: random sampling (left) selects points uniformly across the feature space, capturing many samples deep within class regions where the model is already confident. Coreset selection (right) concentrates the selection budget on samples near the decision boundary (the yellow uncertainty band) where the model's predictions are most uncertain. These boundary samples are precisely where additional training provides the most learning signal.
 
@@ -1469,9 +1469,7 @@ $$
 $$
 where $n_{\text{epoch}}$ is the current epoch, $D$ is the full dataset size, and $N_{\text{warmup}}$ is the number of warmup epochs before the full dataset becomes available. Early epochs train on the easiest $D \cdot (n_{\text{epoch}}/N_{\text{warmup}})$ fraction; after warmup, training proceeds on the full dataset.
 
-The difficulty scorer can be designed in several ways, each with different computational requirements and applicability (@tbl-difficulty-scoring).
-
-From a systems perspective, curriculum learning improves convergence by reducing wasted gradient updates on samples the model cannot yet learn from. The information-compute ratio introduced in @sec-data-selection-informationcompute-ratio-8c0b is higher in early training because easy samples provide strong learning signal relative to their compute cost. The efficiency gains manifest as faster convergence to target accuracy, not higher final accuracy. @Tbl-curriculum-benchmarks summarizes measured speedups from curriculum learning across standard benchmarks.
+The difficulty scorer is a systems choice because it trades probe-compute overhead against ordering quality, as @tbl-difficulty-scoring shows.
 
 | **Strategy**          | **Difficulty Score**                      | **Best For**                                |
 |:----------------------|:------------------------------------------|:--------------------------------------------|
@@ -1481,6 +1479,8 @@ From a systems perspective, curriculum learning improves convergence by reducing
 | **Self-Paced**        | Current model's loss (updated each epoch) | Adaptive; no probe needed                   |
 
 : **Difficulty Scoring Strategies for Curriculum Learning**: Loss-based and confidence-based methods require additional model inference; domain heuristics are free but require expertise; self-paced methods adapt dynamically during training. {#tbl-difficulty-scoring .striped .hover}
+
+From a systems perspective, curriculum learning improves convergence by reducing wasted gradient updates on samples the model cannot yet learn from. The information-compute ratio introduced in @sec-data-selection-informationcompute-ratio-8c0b is higher in early training because easy samples provide strong learning signal relative to their compute cost. The efficiency gains manifest as faster convergence to target accuracy, not higher final accuracy. @Tbl-curriculum-benchmarks summarizes measured speedups from curriculum learning across standard benchmarks.
 
 ```{python}
 #| echo: false
@@ -1544,7 +1544,7 @@ class CurriculumBenchmarks:
     mentornet_curriculum_epochs_str = fmt(mentornet_curriculum_epochs, precision=0, commas=False)
 ```
 
-Observe the varying convergence gains in @tbl-curriculum-benchmarks:
+@Tbl-curriculum-benchmarks shows the resulting convergence gains across datasets:
 
 | **Dataset**   | **Model** | **Pacing Strategy** | **Epochs to Target Acc.**                                                                                                                  |                        **Epoch Reduction**                         |
 |:--------------|:---------:|:--------------------|:-------------------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------:|
@@ -2463,12 +2463,12 @@ Static pruning removed redundancy before training. Dynamic selection focused com
 
 ### Data augmentation: Transformation-based synthesis {#sec-data-selection-data-augmentation-transformationbased-synthesis-3aa7}
 
-**Data augmentation**\index{Data Augmentation!definition} expands a dataset by applying transformations to existing samples. Because many transformations preserve label semantics while creating novel inputs, augmentation effectively multiplies the diversity of a training set without requiring additional data collection.
+**Data augmentation**\index{Data Augmentation!definition} is the lowest-cost form of synthetic generation: it expands a dataset by applying transformations to existing samples. Because many transformations preserve label semantics while creating novel inputs, augmentation effectively multiplies the diversity of a training set without requiring additional data collection.
 
 \index{Cutout!image augmentation}
 \index{MixUp!image augmentation}
 \index{CutMix!image augmentation}
-For image data, augmentation techniques span a range of complexity. Geometric transformations such as rotation, flipping, cropping, and scaling introduce spatial variation that makes models robust to viewpoint changes. Photometric transformations adjust brightness, contrast, saturation, and hue to simulate different lighting conditions and camera characteristics. More advanced techniques like Cutout[^fn-cutout-augmentation] (which applies random rectangular masks), MixUp [@zhang2018mixup] (which blends two images and their labels), and CutMix[^fn-cutmix-augmentation] (which pastes patches between images) push augmentation further by creating entirely synthetic training examples that regularize learning.
+For image data, augmentation should match the invariance the deployed model must learn. Geometric transformations such as rotation, flipping, cropping, and scaling introduce spatial variation that makes models robust to viewpoint changes. Photometric transformations adjust brightness, contrast, saturation, and hue to simulate different lighting conditions and camera characteristics. More advanced techniques like Cutout[^fn-cutout-augmentation] (which applies random rectangular masks), MixUp [@zhang2018mixup] (which blends two images and their labels), and CutMix[^fn-cutmix-augmentation] (which pastes patches between images) push augmentation further by creating entirely synthetic training examples that regularize learning.
 
 [^fn-cutout-augmentation]: **Cutout**: Randomly masks square regions of input images during training, forcing the model to recognize objects from partial information rather than relying on any single discriminative region. Unlike dropout (which zeroes *neurons* in feature space), Cutout operates in input space. The original Cutout experiments produced roughly 1--2 percentage-point gains on CIFAR-10/100 and strong gains on SVHN with negligible compute overhead, making it a high-ICR augmentation technique when occlusion-style invariance matches the task: more information per sample at near-zero additional cost to the pipeline. \index{Cutout!augmentation efficiency}
 
@@ -2501,7 +2501,7 @@ Augmentation transforms existing samples; synthetic data generation goes further
 
 \index{GAN!synthetic data generation}
 \index{Diffusion Models!text-to-image synthesis}
-Three classes of generative approaches address these needs, each with distinct cost and fidelity trade-offs. Generative Adversarial Networks (GANs) train a generator against a discriminator in an adversarial setup, producing realistic images through competition; StyleGAN, for instance, generates photorealistic faces that have augmented facial recognition datasets. Diffusion models use iterative denoising to produce high-quality images; systems like Stable Diffusion[^fn-stable-diffusion-synthesis] enable text-to-image synthesis, enabling targeted training example generation from natural language descriptions. Finally, simulation engines such as CARLA for autonomous driving or Unity and Unreal for robotics offer physics-based rendering that generates unlimited labeled data with perfect ground-truth annotations, making them particularly valuable for safety-critical applications where edge case coverage is essential.
+The choice among generative approaches is a cost-fidelity decision. Generative Adversarial Networks (GANs) train a generator against a discriminator in an adversarial setup, producing realistic images through competition; StyleGAN, for instance, generates photorealistic faces that have augmented facial recognition datasets. Diffusion models use iterative denoising to produce high-quality images; systems like Stable Diffusion[^fn-stable-diffusion-synthesis] support targeted training example generation from natural language descriptions through text-to-image synthesis. Finally, simulation engines such as CARLA for autonomous driving or Unity and Unreal for robotics offer physics-based rendering that generates unlimited labeled data with perfect ground-truth annotations, making them particularly valuable for safety-critical applications where edge case coverage is essential.
 
 ### Bridging the domain gap {#sec-data-selection-bridging-domain-gap-100b}
 
@@ -4213,12 +4213,12 @@ Quantifying this multiplicative effect requires determining whether a 50 percent
 ## Measurement Framework {#sec-data-selection-measurement-framework-733b}
 
 \index{Measurement Framework!data selection metrics}
-The techniques in this chapter (coreset selection, active learning, augmentation) all claim to improve efficiency, and rigorous measurement separates effective techniques from intuition.
+The cross-layer stack makes measurement unavoidable: every data selection technique claims to improve efficiency, but only rigorous measurement separates real savings from shifted costs or hidden quality loss.
 
 ### Core metrics {#sec-data-selection-core-metrics-32e9}
 
 \index{Performance-Per-Data!metric definition}
-Three metrics form the core measurement toolkit for evaluating data selection effectiveness.
+The core metrics connect sample reduction to model quality instead of reporting accuracy alone. They measure learning per sample, performance across data budgets, and compression at a target accuracy.
 
 #### Performance-per-data {.unnumbered}
 
@@ -4736,7 +4736,7 @@ The preceding fallacies and pitfalls share a common thread: they arise when prac
 
 ## Summary {#sec-data-selection-summary-cf3e}
 
-Smaller, curated datasets sometimes outperform massive ones because data selection is a *systems* problem rather than a purely *statistical* one: the "D" pillar of the D·A·M taxonomy, addressing the first question in the optimization ordering: can we reduce the work before it begins? Where traditional machine learning asks "how few samples achieve target accuracy?", the systems perspective asks "how do we minimize total cost across the entire pipeline?"
+Smaller, curated datasets sometimes outperform massive ones because data selection is a *systems* problem rather than a purely *statistical* one: the "D" pillar of the D·A·M taxonomy, addressing the first question in the optimization ordering by reducing work before it begins. Traditional machine learning frames the problem as the number of samples needed to achieve target accuracy; the systems perspective frames it as minimizing total cost across the entire pipeline.
 
 The reframing transforms how practitioners approach the ML development lifecycle. The shift introduced in the Purpose section, from accumulating data as a massive liability to curating it as a precise resource, becomes actionable through the ICR metric, the Selection Inequality, and the cost modeling framework. The goal is minimizing total cost across compute, storage, labeling, energy, and time, not merely maximizing accuracy.
 
