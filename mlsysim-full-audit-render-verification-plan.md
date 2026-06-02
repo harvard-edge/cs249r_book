@@ -1,11 +1,765 @@
 # MLSysIM Full Audit, Consumer Update, and Render Verification Plan
 
-**Status:** Execution and audit record. Commit in logical chunks; do not push without final sign-off.
+**Status:** Execution and audit record. Commit in logical chunks; push only in Phase 9 after local gates, merge, and final smoke checks are clean.
 **Working tree:** `/Users/VJ/GitHub/MLSysBook-fmt-fix` on branch `fmt-fix`
 **Created:** 2026-06-01
 **Primary objective:** Make every MLSysIM-backed value, every LEGO cell, every corresponding prose reference, and every downstream consumer use a clean single-source-of-truth path, then verify the book with full HTML and PDF renders before any push.
 
 This plan supersedes ad hoc cleanup ordering for the remaining work. It does not replace the narrower unit-hardening and SSOT plans; it coordinates them into one execution path.
+
+---
+
+## Overnight Execution Plan - 2026-06-02
+
+This is the current overnight runbook after the `fmt-fix` branch absorbed the
+margin-figure work. The order is deliberate:
+
+1. prove the source layer and MLSysIM consumers are coherent;
+2. prove every LEGO cell and prose reference is semantically correct;
+3. prove the rendered HTML and PDF expose the expected values without leaks;
+4. only then audit the margin SVG layout with PDF debug boxes.
+
+Do not start the margin-layout phase until the material, math, and rendered
+LEGO/prose checks are green. Layout work is allowed to be iterative and visual;
+numeric/prose correctness is not.
+
+### Nightly non-negotiables
+
+- Work only in `/Users/VJ/GitHub/MLSysBook-fmt-fix` on `fmt-fix`.
+- Treat `/Users/VJ/GitHub/MLSysBook` as the protected local `dev` reference.
+  Do not edit it.
+- Do not push to origin during verification. Final push happens only in Phase 9
+  after all local gates, merge checks, and final smoke checks are clean.
+- Commit in logical chunks when a stage is finished and verified. Stage explicit
+  files only.
+- The coordinator owns MLSysIM, shared formatters, shared checks, and rules.
+  Chapter agents may edit QMD/prose/layout but must report missing shared
+  values instead of inventing local registries.
+- If a shared MLSysIM value, formatter, or audit rule changes, rerun the
+  affected QMD checks and then the whole-book checks. A single-source-of-truth
+  change invalidates earlier rendered evidence.
+- Red margin/debug boxes are a temporary PDF inspection aid. `\MarginDebugtrue`
+  must never be committed or left on for final production renders.
+
+### Current state checkpoint
+
+Before executing anything, record:
+
+```bash
+cd /Users/VJ/GitHub/MLSysBook-fmt-fix
+pwd
+git rev-parse --show-toplevel
+git branch --show-current
+git status --short --branch
+git log --oneline -12
+git worktree list
+```
+
+Expected branch context at this writing:
+
+- worktree: `/Users/VJ/GitHub/MLSysBook-fmt-fix`
+- branch: `fmt-fix`
+- status: clean
+- branch is ahead of `origin/fmt-fix`
+- recent history includes the margin-figure merge and `c9e41d3451 Align KV
+  cache capacity example units`
+
+If the tree is dirty, classify every file before continuing:
+
+- source/docs/rules edits that are part of the plan;
+- generated build artifacts that should be ignored or removed;
+- temporary debug-box changes that must be restored;
+- user/editorial changes that must be preserved.
+
+### Phase 1 - Source and consumer inventory
+
+Goal: prove the repo has no stale MLSysIM paths or copied constants before
+rendering.
+
+Run the broad MLSysIM consumer inventory:
+
+```bash
+rg -n "mlsysim|from mlsysim|import mlsysim|Hardware\.|Models\.|Systems\.|Infrastructure\.|Literature\.|Scenarios\.|Ops\." \
+  book mlsysim slides labs site .claude \
+  --glob '!**/_build/**' \
+  --glob '!**/.quarto/**' \
+  --glob '!**/__pycache__/**'
+```
+
+Check these surfaces, even if the search returns only a few hits:
+
+- `book/quarto/contents/vol1/**/*.qmd`
+- `book/quarto/contents/vol2/**/*.qmd`
+- `book/quarto` support scripts and configs
+- `mlsysim/mlsysim/**`
+- `mlsysim/tests/**`
+- `mlsysim/docs/**`, `mlsysim/tutorial/**`, `mlsysim/examples/**`
+- `slides/**`
+- `labs/**`
+- `site/**`
+- `.claude/rules/**`
+
+For every hit:
+
+- current semantic path is used;
+- no old migrated names remain;
+- no copied H100/A100/model/grid/storage/price value survives where an MLSysIM
+  import should be used;
+- no `BOOK_*`, `prov:book`, `MLSysBook`, `Volume I`, `Volume II`, or "worked
+  example" naming exists inside `mlsysim/mlsysim`;
+- `Literature.*` is used only for directly cited/report field figures, not as a
+  generic provenance bucket.
+
+Run the source/provenance gates:
+
+```bash
+PYTHONPATH=mlsysim pytest mlsysim/tests -o addopts=
+PYTHONPATH=mlsysim python3 -m mlsysim.tools.audit_provenance --scope all --strict
+python3 book/tools/audit/book_check_registry_sources.py
+python3 book/tools/audit/book_check_lego_scenario_inputs.py book/quarto/contents --summary
+```
+
+If any of these fail because the margin merge restored stale paths or copied
+values, fix those first and commit the source-layer correction before touching
+chapter layout.
+
+### Phase 2 - Static LEGO, formatter, and prose gates
+
+Goal: every LEGO cell follows the Load, Execute, Guard, Output contract before
+we trust rendered output.
+
+Run:
+
+```bash
+python3 book/tools/scripts/lint_lego_units.py \
+  --fail-on warning \
+  --baseline book/tools/audit/lego_units_baseline.json
+
+python3 book/tools/audit/book_check_lego_load_pint.py book/quarto/contents
+python3 book/tools/audit/book_check_lego_prose_units.py book/quarto/contents
+python3 book/tools/audit/book_check_lego_quantity_flow.py book/quarto/contents --summary
+PYTHONPATH=mlsysim python3 book/tools/audit/lego_focal_verify.py book/quarto/contents
+
+PYTHONPATH=mlsysim python3 book/tools/audit/fmt/fmt_prose_contract.py --root book/quarto/contents
+PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_prose_semantics.py --root book/quarto/contents
+```
+
+Audit standards:
+
+- unit-bearing outputs use domain formatters;
+- fixed-unit names force the unit they claim, such as `_kwh_str`,
+  `_gb_s_str`, `_tflop_s_str`, `_hours_str`;
+- auto-scaled outputs have generic names;
+- plain `fmt()` is used only for dimensionless values or explicitly open
+  strings;
+- duration-like values use `fmt_time` or a tighter domain helper when the prose
+  needs unit validation;
+- rates such as `tokens/s`, `samples/s`, QPS, requests/s use semantic rate
+  helpers rather than manual suffix strings;
+- `fmt_multiple` and prose do not combine into `7x \times` or `7x times`;
+- compound Pint units are parenthesized for readability, for example
+  `1.9 * (TB / second)` and `rate / (USD / GB)`;
+- no LEGO cell depends on another LEGO class for a reusable value. Promote the
+  shared value to MLSysIM or a shared helper.
+
+If a recurring problem appears, add or tighten the checker before doing a broad
+manual sweep. Checks should be written backwards from real drift incidents.
+
+### Phase 3 - Chapter-by-chapter semantic read
+
+Goal: read the book with the values substituted, not just with syntax passing.
+
+Process chapters in book order. For each QMD with LEGO:
+
+1. list every LEGO class and every prose reference to that class;
+2. verify `LOAD` values come from MLSysIM when they are reusable facts;
+3. verify remaining local literals are visibly local scenario assumptions;
+4. verify `EXECUTE` keeps Pint quantities attached until output;
+5. verify guards check units, dimensions, and the values prose depends on;
+6. verify output names assert the rendered unit or stay generic if auto-scaled;
+7. read the substituted prose for logic, grammar, and math coherence;
+8. simplify repeated figure/table references when adjacent mentions do not add
+   meaning;
+9. merge or expand floating one-sentence paragraphs unless they are intentional
+   transitions;
+10. replace awkward standalone display equations with inline prose or aligned
+    math when the current layout reads poorly.
+
+Use the machine-assisted prose preview where useful:
+
+```bash
+PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_prose.py <chapter.qmd>
+PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_prose_semantics.py <chapter.qmd> -v
+```
+
+High-risk chapters that must receive a manual read after any source change:
+
+- `book/quarto/contents/vol2/sustainable_ai/sustainable_ai.qmd`
+- `book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd`
+- `book/quarto/contents/vol2/data_storage/data_storage.qmd`
+- `book/quarto/contents/vol2/distributed_training/distributed_training.qmd`
+- `book/quarto/contents/vol2/inference/inference.qmd`
+- `book/quarto/contents/vol2/ops_scale/ops_scale.qmd`
+- `book/quarto/contents/vol1/model_serving/model_serving.qmd`
+- `book/quarto/contents/vol1/benchmarking/benchmarking.qmd`
+- `book/quarto/contents/vol1/responsible_engr/responsible_engr.qmd`
+
+Commit semantic/prose fixes in volume-sized or topic-sized batches, not as one
+giant commit.
+
+### Phase 4 - Full HTML render and rendered LEGO exposure
+
+Goal: prove every inline Python value exposed in QMD appears in real rendered
+HTML with the expected value.
+
+Build both volumes:
+
+```bash
+cd /Users/VJ/GitHub/MLSysBook-fmt-fix
+./book/binder build html --vol1 -v
+./book/binder build html --vol2 -v
+```
+
+If binder routing is unstable, use the direct Quarto fallback:
+
+```bash
+cd /Users/VJ/GitHub/MLSysBook-fmt-fix/book/quarto
+ln -sf config/_quarto-html-vol1.yml _quarto.yml
+MPLBACKEND=Agg quarto render --to html -M jupyter:python3
+
+ln -sf config/_quarto-html-vol2.yml _quarto.yml
+MPLBACKEND=Agg quarto render --to html -M jupyter:python3
+```
+
+Post-render checks:
+
+```bash
+cd /Users/VJ/GitHub/MLSysBook-fmt-fix
+rg '\{python\}' book/quarto/_build/html-vol1 book/quarto/_build/html-vol2 --glob '*.html'
+rg '\?@|Traceback|ImportError|NameError|AttributeError|ModuleNotFoundError' \
+  book/quarto/_build/html-vol1 book/quarto/_build/html-vol2 --glob '*.html'
+
+cd book/quarto
+python3 scripts/verify_rendered_xrefs.py
+
+cd /Users/VJ/GitHub/MLSysBook-fmt-fix
+PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_lego_html.py \
+  --report book/quarto/_build/html-audit/lego_html_verify_report.json
+PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_html.py \
+  book/quarto/_build/html-vol1 book/quarto/_build/html-vol2
+```
+
+The `audit_lego_html.py` gate is the explicit rendered-value exposure check:
+it executes the LEGO cells, resolves `{python} Class.attr` references, and
+verifies the rendered HTML contains those values. A raw render success is not
+enough.
+
+If `audit_lego_html.py` finds a missing rendered value:
+
+- first check whether the value moved because the prose was rewritten;
+- then check whether the formatter output changed;
+- then inspect the HTML around the paragraph;
+- fix the source or audit rule, rebuild the affected volume, and rerun the
+  full rendered-value audit.
+
+### Phase 5 - Full PDF render and LaTeX/PDF text checks
+
+Goal: prove the production PDFs build without LaTeX errors and without rendered
+reference/value leaks.
+
+Build both volumes:
+
+```bash
+cd /Users/VJ/GitHub/MLSysBook-fmt-fix
+./book/binder build pdf --vol1 -v
+./book/binder build pdf --vol2 -v
+```
+
+Direct Quarto fallback:
+
+```bash
+cd /Users/VJ/GitHub/MLSysBook-fmt-fix/book/quarto
+ln -sf config/_quarto-pdf-vol1.yml _quarto.yml
+ln -sf index-vol1.qmd index.qmd
+MPLBACKEND=Agg quarto render --to titlepage-pdf -M jupyter:python3
+
+ln -sf config/_quarto-pdf-vol2.yml _quarto.yml
+ln -sf index-vol2.qmd index.qmd
+MPLBACKEND=Agg quarto render --to titlepage-pdf -M jupyter:python3
+```
+
+Never use `--to pdf`; use `titlepage-pdf` so the header includes are loaded.
+
+Post-render checks:
+
+```bash
+cd /Users/VJ/GitHub/MLSysBook-fmt-fix
+ls -lh book/quarto/_build/pdf-vol1/*.pdf book/quarto/_build/pdf-vol2/*.pdf
+rg '^!|Undefined control sequence|LaTeX Error|Emergency stop|Runaway argument|Missing \$ inserted|Traceback|ImportError|NameError|AttributeError|ModuleNotFoundError' \
+  book/quarto/*.log book/quarto/_build/pdf-vol1 book/quarto/_build/pdf-vol2
+
+./book/binder check pdf --vol1
+./book/binder check pdf --vol2
+./book/binder layout check book/quarto/_build/pdf-vol1/Machine-Learning-Systems-Vol1.pdf --skip-frontmatter
+./book/binder layout check book/quarto/_build/pdf-vol2/Machine-Learning-Systems-Vol2.pdf --skip-frontmatter
+./book/binder layout margins book/quarto/_build/pdf-vol1/Machine-Learning-Systems-Vol1.pdf --csv \
+  > /private/tmp/mlsysbook-margin-overflow-vol1.csv
+./book/binder layout margins book/quarto/_build/pdf-vol2/Machine-Learning-Systems-Vol2.pdf --csv \
+  > /private/tmp/mlsysbook-margin-overflow-vol2.csv
+```
+
+`layout margins` catches margin content that runs off the page. It does not
+catch figure-footnote overlap inside the margin. The visual phase below is still
+required.
+
+### Phase 6 - Rules and consumer documentation update
+
+Goal: before layout work, encode only the durable lessons that should guide
+future Claude/Codex work.
+
+Update `.claude/rules` only with general rules that apply across future work:
+
+- MLSysIM semantic homes and provenance separation;
+- LEGO Load, Execute, Guard, Output discipline;
+- fixed-unit output-name assertions;
+- formatter ownership of units, glyphs, ratios, and durations;
+- slides/labs/docs must source reusable measurable claims from MLSysIM;
+- quantitative margin figures must be generated from MLSysIM-backed data or a
+  recorded audited source;
+- PDF margin overlap requires rendered inspection, not grep proximity.
+
+Also check MLSysIM documentation, examples, tutorial, slides, labs, and site
+copy for stale descriptions introduced by the registry/formatter changes.
+
+Run after updates:
+
+```bash
+rg -n "Literature\.Scaling|Literature\.Overheads|Literature\.Energy|Literature\.Sustainability|BOOK_|prov:book|MLSysBook|Volume I|Volume II|worked example" \
+  book mlsysim slides labs site .claude \
+  --glob '!book/quarto/_build/**'
+pre-commit run --all-files
+```
+
+Commit docs/rules/consumer updates separately from QMD numerical changes.
+
+### Phase 7 - Margin SVG PDF layout audit
+
+Goal: inspect margin figures in rendered PDF pages with alignment guides on and
+fix only real layout problems: off-page content, figure-footnote overlap,
+figure-caption overlap, unreadable labels, or margin content outside the debug
+frame.
+
+This phase starts only after Phases 1-6 are green.
+
+#### 7.1 Prepare the layout ledger
+
+Maintain a live ledger while working:
+
+```text
+book/tools/audit/artifacts/margin_layout_audit.md
+book/tools/audit/artifacts/margin_layout_audit.json
+```
+
+Each finding should record:
+
+- volume and chapter;
+- QMD path and source line;
+- asset path;
+- PDF path and page label;
+- screenshot path if captured;
+- status: PASS, MOVE, RESIZE, PROMOTE_TO_BODY, REMOVE, or REGENERATE;
+- reason;
+- exact fix;
+- validation command after fix.
+
+Also maintain a learning note for future skill/rule extraction:
+
+```text
+mlsysbook-layout-pdf-skill-notes.md
+```
+
+Capture rules learned from actual fixes, not guesses.
+
+#### 7.2 Enable debug boxes temporarily
+
+In `book/quarto/tex/header-includes.tex`, change:
+
+```tex
+\MarginDebugfalse
+```
+
+to:
+
+```tex
+\MarginDebugtrue
+```
+
+Do not commit this debug toggle. Record that the tree is intentionally dirty
+while inspecting layout.
+
+#### 7.3 Inventory margin chapters
+
+Current chapters with `.column-margin` content:
+
+Vol I:
+
+```text
+introduction
+ml_systems
+ml_workflow
+data_engineering
+nn_computation
+nn_architectures
+frameworks
+training
+data_selection
+model_compression
+hw_acceleration
+benchmarking
+model_serving
+ml_ops
+responsible_engr
+conclusion
+```
+
+Vol II:
+
+```text
+introduction
+compute_infrastructure
+network_fabrics
+data_storage
+distributed_training
+collective_communication
+fault_tolerance
+fleet_orchestration
+performance_engineering
+inference
+edge_intelligence
+ops_scale
+security_privacy
+robust_ai
+sustainable_ai
+responsible_ai
+conclusion
+```
+
+Regenerate the current list before execution:
+
+```bash
+rg -l "column-margin" book/quarto/contents -g '*.qmd' \
+  > /private/tmp/mlsysbook-margin-chapters.txt
+rg -n "column-margin|images/svg|marginfigure|marginnote" book/quarto/contents -g '*.qmd' \
+  > /private/tmp/mlsysbook-margin-source-inventory.txt
+```
+
+#### 7.4 Build chapter PDFs in parallel batches
+
+Use chapter-level PDF audit builds. They archive PDF and TeX artifacts under
+`book/quarto/_build/pdf-audit/` and update the chapter audit ledger:
+
+```bash
+./book/binder audit chapter-pdf --vol1 training
+./book/binder audit chapter-pdf --vol2 sustainable_ai
+```
+
+For a direct build when the audit wrapper is not needed:
+
+```bash
+./book/binder build pdf training --vol1 -v
+./book/binder build pdf sustainable_ai --vol2 -v
+```
+
+Parallelization plan:
+
+- Coordinator: owns debug toggle, shared fixes, final verification, and ledger
+  merge.
+- Agent A: Vol I chapters 1-4.
+- Agent B: Vol I chapters 5-8.
+- Agent C: Vol I chapters 9-12.
+- Agent D: Vol I chapters 13-16.
+- Agent E: Vol II chapters 1-5.
+- Agent F: Vol II chapters 6-10.
+- Agent G: Vol II chapters 11-17.
+
+Each agent must:
+
+1. build its chapter PDF with debug boxes on;
+2. run `binder layout margins <pdf> --csv`;
+3. locate each margin figure page;
+4. rasterize pages with margin figures;
+5. visually inspect the margin band;
+6. fix only its assigned QMD/source assets;
+7. rebuild and recheck after every fix;
+8. update the ledger with findings and fixes.
+
+Useful page raster command:
+
+```bash
+pdftoppm -png -r 250 -f <page> -l <page> <pdf> /private/tmp/mlsysbook-margin-<chapter>-p
+```
+
+Visual checklist for each margin figure:
+
+- figure is inside the showframe margin column;
+- no overlap with footnotes, sidenotes, body-figure captions, or another margin
+  figure;
+- caption wraps inside the margin;
+- labels remain legible at print size;
+- figure stays above the footer and below the header;
+- figure is near the prose it supports but not forced into a crowded margin
+  slot;
+- quantitative labels trace to MLSysIM or an audited source;
+- the figure is not redundant with an adjacent body table/figure.
+
+#### 7.5 Fix taxonomy
+
+Use the least invasive fix that preserves the teaching point:
+
+- MOVE: move the `.column-margin` block to a footnote-clear anchor in the same
+  section.
+- RESIZE: adjust width/height only when the figure is inside the margin but too
+  cramped.
+- REGENERATE: rerun the margin SVG generator when labels or values are wrong.
+- PROMOTE_TO_BODY: convert to a normal body figure when the reader must inspect
+  details that are too dense for the margin.
+- REMOVE: delete the margin figure when it duplicates nearby prose/table/body
+  figure or cannot fit without harming the page.
+
+Do not solve a collision by deleting a necessary footnote without a prose
+reason. Footnotes and margin figures share the margin; the figure usually moves.
+
+#### 7.6 Restore production mode and final layout gates
+
+When all chapter-level layout findings are resolved, restore:
+
+```tex
+\MarginDebugfalse
+```
+
+Then rebuild final production PDFs:
+
+```bash
+./book/binder build pdf --vol1 -v
+./book/binder build pdf --vol2 -v
+./book/binder layout margins book/quarto/_build/pdf-vol1/Machine-Learning-Systems-Vol1.pdf --csv \
+  > /private/tmp/mlsysbook-margin-overflow-final-vol1.csv
+./book/binder layout margins book/quarto/_build/pdf-vol2/Machine-Learning-Systems-Vol2.pdf --csv \
+  > /private/tmp/mlsysbook-margin-overflow-final-vol2.csv
+```
+
+Final layout acceptance:
+
+- debug boxes are off;
+- no `layout margins` overflow findings remain unless explicitly accepted and
+  documented;
+- visually audited collision ledger has no open MOVE/RESIZE/PROMOTE/REMOVE
+  items;
+- full PDFs have no LaTeX hard errors;
+- final PDFs are built from clean production settings.
+
+### Phase 8 - Final verification and sign-off package
+
+Run the complete gate sequence after all substantive and layout changes:
+
+```bash
+cd /Users/VJ/GitHub/MLSysBook-fmt-fix
+git status --short --branch
+
+PYTHONPATH=mlsysim pytest mlsysim/tests -o addopts=
+PYTHONPATH=mlsysim python3 -m mlsysim.tools.audit_provenance --scope all --strict
+python3 book/tools/scripts/lint_lego_units.py --fail-on warning --baseline book/tools/audit/lego_units_baseline.json
+python3 book/tools/audit/book_check_lego_load_pint.py book/quarto/contents
+python3 book/tools/audit/book_check_lego_prose_units.py book/quarto/contents
+python3 book/tools/audit/book_check_lego_quantity_flow.py book/quarto/contents --summary
+PYTHONPATH=mlsysim python3 book/tools/audit/lego_focal_verify.py book/quarto/contents
+PYTHONPATH=mlsysim python3 book/tools/audit/fmt/fmt_prose_contract.py --root book/quarto/contents
+PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_prose_semantics.py --root book/quarto/contents
+pre-commit run --all-files
+
+./book/binder build html --vol1 -v
+./book/binder build html --vol2 -v
+PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_lego_html.py \
+  --report book/quarto/_build/html-audit/lego_html_verify_report.json
+
+./book/binder build pdf --vol1 -v
+./book/binder build pdf --vol2 -v
+./book/binder check pdf --vol1
+./book/binder check pdf --vol2
+./book/binder layout margins book/quarto/_build/pdf-vol1/Machine-Learning-Systems-Vol1.pdf --csv
+./book/binder layout margins book/quarto/_build/pdf-vol2/Machine-Learning-Systems-Vol2.pdf --csv
+```
+
+Prepare the sign-off summary:
+
+- latest commit hash;
+- list of commits made during the night;
+- source/MLSysIM changes;
+- QMD/prose changes;
+- docs/slides/labs/site/rules changes;
+- HTML render result;
+- rendered LEGO exposure audit result;
+- PDF render result;
+- margin-layout audit result;
+- any accepted residual risks;
+- confirmation that the branch is ready for final `dev` promotion.
+
+Only after this package is clean should the branch be considered ready for final
+`dev` merge and push.
+
+### Phase 9 - Merge to `dev`, push, and monitor GitHub workflows
+
+Goal: promote the verified work to `dev`, push once, and watch the CI runs that
+the push actually triggers.
+
+Do not manually dispatch validate workflows as a substitute for the push-driven
+signal. The push to `dev` should create the real integration runs. Manual
+dispatch is only a fallback if a path filter unexpectedly prevents a required
+workflow from starting.
+
+#### 9.1 Final branch cleanliness check
+
+In the task worktree:
+
+```bash
+cd /Users/VJ/GitHub/MLSysBook-fmt-fix
+git status --short --branch
+git log --oneline origin/dev..HEAD
+```
+
+All intended work must be committed. There must be no temporary debug-box
+change, generated audit JSON, or uncommitted QMD/rules/docs edit.
+
+#### 9.2 Sync local `dev`
+
+Use the protected main checkout only for `dev` sync and final merge:
+
+```bash
+cd /Users/VJ/GitHub/MLSysBook
+pwd
+git rev-parse --show-toplevel
+git branch --show-current
+git status --short --branch
+git pull --ff-only origin dev
+```
+
+If `/Users/VJ/GitHub/MLSysBook` is dirty, stop and report. Do not overwrite the
+main checkout.
+
+#### 9.3 Rebase/merge current `dev` into `fmt-fix` if needed
+
+If the pull advanced `dev`, bring it back into the task branch before promotion:
+
+```bash
+cd /Users/VJ/GitHub/MLSysBook-fmt-fix
+git fetch origin dev
+git merge --no-ff origin/dev
+```
+
+Conflict policy:
+
+- preserve Pint-safe, unit-hardened LEGO cells;
+- preserve MLSysIM semantic-home decisions;
+- preserve margin-layout fixes unless the incoming `dev` text is newer and
+  compatible;
+- never resolve a conflict by deleting checks, guards, or provenance;
+- never revive old `Literature.*` catch-all paths or book-specific MLSysIM
+  names.
+
+After any conflict resolution, rerun Phases 1-8 as needed. At minimum, rerun all
+static gates, full HTML, rendered LEGO exposure audit, full PDFs, and final
+margin overflow checks.
+
+Commit the merge resolution on `fmt-fix` before continuing.
+
+#### 9.4 Merge `fmt-fix` into `dev`
+
+From the main checkout:
+
+```bash
+cd /Users/VJ/GitHub/MLSysBook
+git checkout dev
+git status --short --branch
+git merge --no-ff fmt-fix
+```
+
+If this reports conflicts, resolve them in `dev` using the same conflict policy
+above, then rerun the affected local gates from the `dev` checkout. The preferred
+state is that `fmt-fix` already contains current `dev`, so this merge is clean.
+
+After the merge, verify the final `dev` tree:
+
+```bash
+git status --short --branch
+git log --oneline -8
+git diff --stat origin/dev..HEAD
+```
+
+Run the final smoke gate on `dev`:
+
+```bash
+PYTHONPATH=mlsysim pytest mlsysim/tests -o addopts=
+python3 book/tools/scripts/lint_lego_units.py --fail-on warning --baseline book/tools/audit/lego_units_baseline.json
+python3 book/tools/audit/book_check_lego_load_pint.py book/quarto/contents
+python3 book/tools/audit/book_check_lego_prose_units.py book/quarto/contents
+python3 book/tools/audit/book_check_lego_quantity_flow.py book/quarto/contents --summary
+PYTHONPATH=mlsysim python3 book/tools/audit/fmt/fmt_prose_contract.py --root book/quarto/contents
+PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_prose_semantics.py --root book/quarto/contents
+pre-commit run --all-files
+```
+
+If the exact tree differs from the final `fmt-fix` render-verified tree, rebuild
+HTML/PDF on `dev` too before pushing.
+
+#### 9.5 Push `dev`
+
+Push only after the merge commit and final smoke gate are clean:
+
+```bash
+git push origin dev
+PUSH_SHA=$(git rev-parse HEAD)
+echo "$PUSH_SHA"
+```
+
+Record the pushed SHA in the sign-off notes.
+
+#### 9.6 Monitor actual workflows from the push
+
+List the runs created by the pushed SHA:
+
+```bash
+gh run list --branch dev --commit "$PUSH_SHA" --limit 30
+```
+
+Expected workflow families depend on touched paths:
+
+- book changes: `📚 Book · ✅ Validate (Dev)`, followed by `📚 Book · 👁️ Preview (Dev)` after validate succeeds;
+- MLSysIM changes: `🧮 MLSysIM · ✅ Validate (Dev)` and related preview/build runs if configured by path filters;
+- slides changes: `📊 Slides · ✅ Validate (Dev)` and `📊 Slides · 👁️ Preview (Dev)`;
+- labs changes: `🔮 Labs · ✅ Validate (Dev)` and `🔮 Labs · 👁️ Preview (Dev)`;
+- site changes: `🌐 Landing Site · ✅ Validate (Dev)` and `🌐 Landing Site · 👁️ Preview (Dev)`;
+- workflow-file changes: `🧪 CI Sanity` plus any changed workflow's own path-triggered validation.
+
+Watch every run associated with the pushed SHA until it is completed:
+
+```bash
+for id in $(gh run list --branch dev --commit "$PUSH_SHA" --json databaseId --jq '.[].databaseId'); do
+  gh run watch "$id" --exit-status
+done
+```
+
+If a run fails:
+
+1. inspect the failing jobs and logs;
+2. fix on `dev` only if the failure is caused by this merge and the fix is
+   straightforward;
+3. otherwise create a small follow-up branch/worktree from `dev`;
+4. rerun the relevant local gate;
+5. commit, push `dev` again only when the fix is verified;
+6. monitor the new pushed SHA.
+
+Completion requires all required push-triggered workflows for the pushed SHA to
+be success or an explicitly documented non-required path-filter absence.
 
 ---
 
@@ -30,7 +784,7 @@ Remaining before final push/merge readiness:
 - merge local `dev` into `fmt-fix` and resolve conflicts from a clean branch baseline;
 - rerun LEGO/prose/static checks after the merge;
 - render full HTML/PDF after the merge;
-- push only after final sign-off.
+- push only in Phase 9 after the final local gate and `dev` merge are clean.
 
 ---
 
@@ -42,7 +796,8 @@ The user has approved committing completed work before merging local `dev` into
 `fmt-fix`. Commit only coherent chunks, stage explicit paths, and keep unrelated
 dirty files out of the commit.
 
-Never push to `origin` until all acceptance gates in this document are green and the user signs off.
+Never push to `origin` until all acceptance gates in this document are green and
+the Phase 9 `dev` merge checks have passed.
 
 ### 0.2 Worktree policy
 
@@ -879,7 +1634,10 @@ Do not sign off until all are true:
 - no raw `{python}`, unresolved `?@`, or render tracebacks remain
 - PDF logs have no LaTeX errors
 - margin-figure audit plan is ready to execute after correctness work
-- no push has happened before final user sign-off
+- `fmt-fix` has been merged cleanly into `dev`
+- `dev` has been pushed to `origin`
+- all workflows triggered by the pushed `dev` SHA have passed, or any
+  non-triggered workflow is explained by path filters
 
 ---
 
