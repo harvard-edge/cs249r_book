@@ -20,7 +20,7 @@ class TestMLSysRegistry(unittest.TestCase):
 
     def test_model_size(self):
         """Test model weight storage calculations."""
-        gpt3 = Models.GPT3
+        gpt3 = Models.Language.GPT3
         from mlsysim.core.constants import BYTES_FP16, BYTES_INT4
         
         # GPT-3 175B @ FP16 (2 bytes) = 350 GB

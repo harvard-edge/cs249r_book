@@ -73,7 +73,7 @@ def _conv(id: str, ref: str, *, notes: str | None = None) -> Provenance:
     )
 
 
-# --- Grid and convention anchors ---
+# --- Grid and reference anchors ---
 IEA_WEO_2023 = Provenance(
     id="prov:iea-weo-2023-carbon",
     kind=ProvenanceKind.INDUSTRY_REPORT,
@@ -86,31 +86,32 @@ UPTIME_PUE_2022 = Provenance(
     id="prov:uptime-pue-survey-2022",
     kind=ProvenanceKind.INDUSTRY_REPORT,
     ref="Uptime Institute Global Data Center Survey 2022",
+    url="https://uptimeinstitute.com/resources/research-and-reports/uptime-institute-global-data-center-survey-2022",
     verified="2025-03-06",
 )
 
-CLUSTER_TIER_CONVENTION = _conv(
+CLUSTER_TIER_CONVENTIONS = _conv(
     "prov:cluster-tier-convention",
-    "Reference cluster-size tiers (256 / 2k / 8k / 100k GPUs)",
+    "MLSysIM reference cluster tiers (256 / 2k / 8k / 100k GPUs)",
 )
 
 KEMPNER_AI_CLUSTER_H100 = _ds(
     "prov:kempner-ai-cluster-h100",
-    "Kempner Institute Computing Handbook, Overview of Cluster — H100 partition specs",
+    "Kempner Institute Computing Handbook, Overview of Cluster - H100 partition specs",
     "https://handbook.eng.kempnerinstitute.harvard.edu/s1_high_performance_computing/kempner_cluster/overview_of_kempner_cluster.html",
     verified="2026-06-01",
     notes="H100 partition: 384 H100 80GB GPUs, 24 servers per rack, 4 GPUs per server, four H100 racks.",
 )
 
 # --- Real-world case-study / workload scale anchors (Scenarios registry) ---
-WORKLOAD_SCALE_ANCHORS = Provenance(
-    id="prov:workload-scale-anchors",
+REFERENCE_WORKLOAD_SCALE = Provenance(
+    id="prov:reference-workload-scale",
     kind=ProvenanceKind.ILLUSTRATIVE,
     ref="Illustrative real-world scale anchors (Gmail volume, Google searches, Waymo sensor rate) for order-of-magnitude intuition",
     verified="2025-03-06",
 )
-TINYML_ANOMALY_CASE_STUDY = Provenance(
-    id="prov:tinyml-anomaly-case-study",
+TINYML_ANOMALY_CASE = Provenance(
+    id="prov:tinyml-anomaly-case",
     kind=ProvenanceKind.ILLUSTRATIVE,
     ref="TinyML anomaly-detection case study (latency / AUC / energy) used as a benchmarking example",
     verified="2025-03-06",
@@ -127,8 +128,8 @@ ENERGY_SCALE_ANCHORS = Provenance(
     ref="Everyday energy-scale comparison anchors (smartphone charge ~40 kJ, boiling 1 L water ~100 kJ, US household electricity ~10.7 MWh/year) for order-of-magnitude intuition about ML energy",
     verified="2025-03-06",
 )
-MOBILE_EDGE_DEVICE_ANCHORS = Provenance(
-    id="prov:mobile-edge-device-anchors",
+MOBILE_DEVICE_ANCHORS = Provenance(
+    id="prov:mobile-device-anchors",
     kind=ProvenanceKind.ILLUSTRATIVE,
     ref="Mobile/edge device reference figures (flagship phone battery ~15 Wh / 3000 mAh @ 3.7 V, mobile NPU power 3-4 W, object-detector ~2 W) for on-device ML intuition",
     verified="2025-03-06",
@@ -138,13 +139,14 @@ MOBILE_EDGE_DEVICE_ANCHORS = Provenance(
 HOROWITZ_ENERGY = _lit(
     "prov:horowitz-2014",
     "Horowitz (2014), \"Computing's Energy Problem (and what we can do about it)\", ISSCC — 45 nm per-operation/per-byte energies",
+    url="https://ieeexplore.ieee.org/document/6757323",
 )
 MEMORY_LATENCY_HIERARCHY = _conv(
     "prov:memory-latency-hierarchy",
-    "Memory/interconnect access-latency hierarchy (order-of-magnitude class figures)",
+    "MLSysIM memory/interconnect access-latency hierarchy (order-of-magnitude class figures)",
 )
-STORAGE_TIER_REFERENCE = _conv(
-    "prov:storage-tier-reference",
+STORAGE_TIER_CONVENTIONS = _conv(
+    "prov:storage-tier-conventions",
     "Generic storage/memory bandwidth tiers (NVMe Gen3/4/5, DDR, host DRAM) from vendor datasheet ranges",
 )
 STORAGE_ACCESS_PATH_REFERENCE = _conv(
@@ -162,8 +164,8 @@ RELIABILITY_MTTF_LITERATURE = _lit(
     url="https://doi.org/10.1109/hpca61900.2025.00096",
 )
 
-IOWA_GRID_CARBON_ILLUSTRATIVE = Provenance(
-    id="prov:iowa-grid-carbon-illustrative",
+ILLUSTRATIVE_IOWA_CARBON = Provenance(
+    id="prov:illustrative-iowa-carbon",
     kind=ProvenanceKind.ILLUSTRATIVE,
     ref="Illustrative high-carbon US grid contrast (not IEA country average)",
     verified="2025-03-06",
@@ -256,7 +258,7 @@ INTEL_SGX = _ds(
 
 REFERENCE_DESKTOP_CPU = _conv(
     "prov:reference-desktop-cpu",
-    "Reference 1 TFLOP/s FP32 desktop CPU (order-of-magnitude)",
+    "Reference 1 TFLOP/s FP32 desktop CPU for pedagogy (order-of-magnitude)",
 )
 
 # --- Workstation / mobile / edge / tiny ---
@@ -269,7 +271,7 @@ NVIDIA_DGX_SPARK = _ds(
 APPLE_M3_MAX = _est(
     "prov:apple-m3-max-estimate",
     "Apple M3 Max technical specifications (GPU core count × peak FLOP/core, rounded)",
-    notes="Peak TFLOP/s is an estimate from Apple-published core counts, not a sustained ML benchmark.",
+    notes="Peak TFLOP/s is an MLSysIM rounded estimate of Apple-published core counts, not a sustained ML benchmark.",
     url="https://www.apple.com/macbook-pro/specs/",
 )
 
@@ -306,7 +308,7 @@ INTEL_NUC_MOVIDIUS = _est(
 
 REFERENCE_EDGE_SERVER = _conv(
     "prov:reference-edge-server",
-    "Reference edge server (1 TFLOP/s, 128 GB)",
+    "Reference edge server (1 TFLOP/s, 128 GB) for pedagogy",
 )
 
 ESP32_S3 = _ds(
@@ -377,14 +379,96 @@ MLPERF_TINY_KWS = _lit(
     notes="Parameter and FLOP counts aligned to TinyMLPerf KWS reference model scale.",
 )
 
+MLPERF_TRAINING_V30_RESNET50_A100 = Provenance(
+    id="prov:mlperf-training-v30-resnet50-a100",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="MLPerf Training v3.0 ResNet-50 results, A100 class systems",
+    url="https://mlcommons.org/benchmarks/training/",
+    verified="2026-05-31",
+    notes="Used as a broad single-accelerator throughput sanity anchor for ResNet-50/A100 teaching examples.",
+)
+
+MLPERF_TRAINING_V31_RESNET50_H100 = Provenance(
+    id="prov:mlperf-training-v31-resnet50-h100",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="MLPerf Training v3.1 ResNet-50 results, H100 class systems",
+    url="https://mlcommons.org/benchmarks/training/",
+    verified="2026-05-31",
+    notes="Used as a broad single-accelerator throughput sanity anchor for ResNet-50/H100 teaching examples.",
+)
+
+NVIDIA_NIM_LLAMA3_8B_H100 = Provenance(
+    id="prov:nvidia-nim-llama3-8b-h100",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="NVIDIA NIM LLM benchmarking results for Llama 3.x 8B on H100",
+    url="https://docs.nvidia.com/nim/benchmarking/llm/1.0.0/performance.html",
+    verified="2026-05-31",
+    notes="Used as a broad H100 Llama-family ITL sanity range; exact serving latency depends on engine, prompt shape, batching, and precision.",
+)
+
+BROWN_GPT3_2020 = _lit(
+    "prov:gpt3-brown-2020",
+    "Brown et al. (2020), Language Models are Few-Shot Learners",
+    url="https://arxiv.org/abs/2005.14165",
+)
+
+IMAGENET_DATASET = _lit(
+    "prov:imagenet-ilsvrc-2015",
+    "Russakovsky et al. (2015), ImageNet Large Scale Visual Recognition Challenge",
+    url="https://arxiv.org/abs/1409.0575",
+)
+
+CIFAR10_DATASET = _lit(
+    "prov:cifar10-2009",
+    "Krizhevsky (2009), Learning Multiple Layers of Features from Tiny Images",
+    url="https://www.cs.toronto.edu/~kriz/learning-features-2009-TR.pdf",
+)
+
+MNIST_DATASET = _lit(
+    "prov:mnist-1998",
+    "LeCun et al. (1998), Gradient-Based Learning Applied to Document Recognition",
+    url="http://yann.lecun.com/exdb/publis/pdf/lecun-98.pdf",
+)
+
+DEPLOYMENT_ENVELOPES = _est(
+    "prov:mlsysim-deployment-envelopes",
+    "MLSysIM deployment envelope defaults for cloud, edge, mobile, and TinyML systems",
+    notes="Pedagogical order-of-magnitude envelopes used for first-pass deployment reasoning; not vendor SLA targets.",
+)
+
+MLOPS_DRIFT_THRESHOLDS = _conv(
+    "prov:mlops-drift-threshold-conventions",
+    "Common PSI and two-sample Kolmogorov-Smirnov drift-threshold conventions",
+    notes="PSI bands and KS coefficient are common monitoring defaults; production thresholds should be calibrated per application.",
+)
+
+MEMORY_SOFT_ERROR_RATE = _est(
+    "prov:memory-soft-error-rate-estimate",
+    "Order-of-magnitude memory soft-error bit rate for reliability and monitoring examples",
+    notes="Used as a teaching-scale sanity anchor rather than a device-specific FIT rate.",
+)
+
+ORCHESTRATION_ASSUMPTIONS = _est(
+    "prov:mlsysim-orchestration-assumptions",
+    "MLSysIM cluster orchestration defaults for utilization, queue discipline, and job duration",
+    notes="First-pass scheduler assumptions for analytical examples; production clusters should calibrate from trace data.",
+)
+
+CRITICAL_BATCH_SIZE_ESTIMATES = _lit(
+    "prov:mccandlish-critical-batch-2018",
+    "McCandlish et al. (2018), An Empirical Model of Large-Batch Training",
+    url="https://arxiv.org/abs/1812.06162",
+    notes="Order-of-magnitude critical batch size anchors; model-specific entries are rounded for analytical examples.",
+)
+
 WAKE_VISION = _ds(
     "prov:wake-vision-dataset",
     "Wake Vision / doorbell-classifier TinyML reference",
     "https://github.com/TI-malaria/wake-vision",
 )
 
-TINYML_ANOMALY_MLP_REFERENCE = _conv(
-    "prov:tinyml-anomaly-mlp-reference",
+REFERENCE_ANOMALY_MLP = _conv(
+    "prov:reference-anomaly-mlp",
     "TinyML anomaly-detector reference MLP (~270k parameters)",
 )
 
@@ -436,22 +520,15 @@ MEGATRON_OVERLAP = _lit(
     url="https://arxiv.org/abs/1909.08053",
 )
 
-MCCANDLISH_LARGE_BATCH_TRAINING = _lit(
-    "prov:mcandlish-large-batch-2018",
-    "McCandlish et al. (2018), An Empirical Model of Large-Batch Training",
-    url="https://arxiv.org/abs/1812.06162",
-    notes="Critical-batch-size anchors are rounded reference values derived from the paper's gradient-noise-scale framing.",
-)
-
-PARALLEL_SCALING_EFFICIENCY_RULE = _conv(
-    "prov:parallel-scaling-efficiency-rule",
+SCALING_EFFICIENCY_RULE_OF_THUMB = _conv(
+    "prov:scaling-efficiency-rule-of-thumb",
     "Common industry rule-of-thumb (~90% parallel efficiency on well-tuned clusters)",
 )
 
-DGX_GPUS_PER_HOST_CONVENTION = _conv(
-    "prov:dgx-gpus-per-host-convention",
+DGX_GPUS_PER_HOST = _conv(
+    "prov:dgx-gpus-per-host",
     "NVIDIA DGX H100/H200 node envelope (8 GPUs per host)",
-    notes="Reference convention for cluster-tier node-count calculations.",
+    notes="Used for cluster tier node counts in fleet appendices.",
 )
 
 GIBIANSKY_ALLREDUCE = _lit(
@@ -517,10 +594,16 @@ ROCE_100G_GBS = Provenance(
     verified="2025-03-06",
 )
 
-FABRIC_LATENCY_REFERENCE = _conv(
-    "prov:fabric-latency-reference",
-    "Datacenter fabric α-model one-way latency anchors (InfiniBand NDR/HDR, RoCE, TCP)",
+FABRIC_LATENCY_ASSUMPTIONS = _conv(
+    "prov:fabric-latency-assumptions",
+    "MLSysIM α-model one-way latency anchors (InfiniBand NDR/HDR, RoCE, TCP)",
     notes="Order-of-magnitude μs values for napkin math; not vendor QoS guarantees.",
+)
+
+SWITCH_OPTICS_REFERENCE = _conv(
+    "prov:switch-optics-reference",
+    "Datacenter switch-ASIC capacity (51.2T/102.4T) and 400G optics power (pluggable/CPO) reference figures",
+    notes="2025-26 datacenter-switching reference points for the network-fabrics worked examples.",
 )
 
 NVIDIA_QUANTUM2_QM97XX_SWITCH = _ds(
@@ -537,10 +620,44 @@ NDR_LEAF_SPINE_64_PORT_SPLIT = _conv(
     notes="Uses 32 endpoint downlinks and 32 spine uplinks per leaf switch.",
 )
 
-DATACENTER_SWITCH_OPTICS_REFERENCE = _conv(
-    "prov:datacenter-switch-optics-reference",
-    "Datacenter switch-ASIC capacity and 400G optics power reference figures",
-    notes="2025-26 datacenter-switching reference points for switch ASIC capacity classes and per-port optics power.",
+NETWORK_ENERGY_ANCHORS = _conv(
+    "prov:network-energy-anchors",
+    "Network data-transfer energy anchors (5G per-MB, generic per-KB)",
+    notes="Order-of-magnitude transfer-energy figures for intuition; not measured device values.",
+)
+
+RECOVERY_TIME_ASSUMPTIONS = _conv(
+    "prov:recovery-time-assumptions",
+    "Fleet recovery design assumptions (heartbeat, reschedule, checkpoint BW)",
+    notes="Engineering targets for reliability analyses; calibrate from cluster traces when available.",
+)
+
+OVERHEAD_BUDGETS = _conv(
+    "prov:overhead-budgets",
+    "Combined overhead budgets (pipeline, checkpoint, failure, maintenance)",
+    notes="Fractions of wall time for 10k+ GPU training scenarios.",
+)
+
+SCALING_EFFICIENCY_TIERS = _conv(
+    "prov:scaling-efficiency-tiers",
+    "Illustrative scaling efficiency vs GPU count (32→1024 GPUs)",
+    notes="8192-GPU tier uses MEGASCALE literature anchor separately.",
+)
+
+ENERGY_HIERARCHY_CONVENTIONS = _conv(
+    "prov:energy-hierarchy-conventions",
+    "Simplified energy hierarchy: architecture-class effective pJ/FLOP (CPU→ASIC) and per-byte data-movement cost (register→network)",
+    notes="Order-of-magnitude teaching figures; effective system-level energy, consistent with the Horowitz (2014) energy trend.",
+)
+
+WUE_ANCHORS = _conv(
+    "prov:wue-anchors",
+    "Water-usage effectiveness (WUE) tiers for sustainability examples",
+)
+
+RACK_POWER_TIERS = _conv(
+    "prov:rack-power-tiers",
+    "Rack power tiers (traditional vs AI cluster, air-cooling limit)",
 )
 
 DGX_H100_RACK_REFERENCE = _conv(
@@ -562,72 +679,32 @@ STORAGE_TRAINING_CORPUS_REFERENCE = _conv(
     ),
 )
 
-NETWORK_TRANSFER_ENERGY_ANCHORS = _conv(
-    "prov:network-transfer-energy-anchors",
-    "Network data-transfer energy anchors (5G per-MB, generic per-KB)",
-    notes="Order-of-magnitude transfer-energy figures for intuition; not measured device values.",
-)
-
-FLEET_RECOVERY_ASSUMPTIONS = _conv(
-    "prov:fleet-recovery-time-assumptions",
-    "Fleet recovery design assumptions (heartbeat, reschedule, checkpoint BW)",
-    notes="Engineering targets for reliability tables; use Young/Daly for checkpoint-interval theory.",
-)
-
-TRAINING_OVERHEAD_BUDGETS = _conv(
-    "prov:training-overhead-budgets",
-    "Combined training overhead budgets (pipeline, checkpoint, failure, maintenance)",
-    notes="Fractions of wall time for 10k+ GPU training scenarios.",
-)
-
-SCALING_EFFICIENCY_TIERS = _conv(
-    "prov:scaling-efficiency-tiers",
-    "Illustrative scaling efficiency vs GPU count (32→1024 GPUs)",
-    notes="8192-GPU tier uses MEGASCALE literature anchor separately.",
-)
-
-COMPUTE_ENERGY_HIERARCHY = _conv(
-    "prov:compute-energy-hierarchy",
-    "Simplified energy hierarchy: architecture-class effective pJ/FLOP (CPU→ASIC) and per-byte data-movement cost (register→network)",
-    notes="Order-of-magnitude teaching figures; effective system-level energy, consistent with the Horowitz (2014) energy trend.",
-)
-
-WUE_TIER_ANCHORS = _conv(
-    "prov:wue-tier-anchors",
-    "Water-usage effectiveness (WUE) tiers for sustainability scenarios",
-)
-
-RACK_POWER_TIER_ANCHORS = _conv(
-    "prov:rack-power-tier-anchors",
-    "Rack power tiers (traditional vs AI cluster, air-cooling limit)",
-)
-
-CLOUD_PRICING_2024_ANCHORS = Provenance(
-    id="prov:cloud-pricing-2024-anchors",
+CLOUD_PRICING_2024 = Provenance(
+    id="prov:cloud-pricing-2024",
     kind=ProvenanceKind.ILLUSTRATIVE,
     ref="Illustrative US cloud list prices (2024–2025 order of magnitude)",
-    notes="GPU-hour, egress, and electricity rates for illustrative scenarios; not a specific vendor quote.",
+    notes="GPU-hour, egress, and electricity rates for worked examples—not a specific vendor quote.",
     verified="2025-03-06",
 )
 
-STORAGE_PRICING_2024_ANCHORS = Provenance(
-    id="prov:storage-pricing-2024-anchors",
+STORAGE_PRICING_2024 = Provenance(
+    id="prov:storage-pricing-2024",
     kind=ProvenanceKind.ILLUSTRATIVE,
     ref="Illustrative cloud/object-storage list prices (2024 order of magnitude)",
-    notes="S3, Glacier, NVMe tier rates for data-engineering scenarios.",
+    notes="S3, Glacier, NVMe tier rates for data-engineering worked examples.",
     verified="2025-03-06",
 )
 
-LABELING_PRICING_2024_ANCHORS = Provenance(
-    id="prov:labeling-pricing-2024-anchors",
+LABELING_PRICING_2024 = Provenance(
+    id="prov:labeling-pricing-2024",
     kind=ProvenanceKind.ILLUSTRATIVE,
     ref="Illustrative data-labeling cost ranges (2024 estimates)",
     notes="Crowd, bounding-box, and medical labeling tiers for workflow examples.",
     verified="2025-03-06",
 )
 
-FLEET_ECONOMICS_2024_ANCHORS = Provenance(
-    id="prov:fleet-economics-2024-anchors",
+FLEET_ECONOMICS_2024 = Provenance(
+    id="prov:fleet-economics-2024",
     kind=ProvenanceKind.ILLUSTRATIVE,
     ref="Illustrative internal GPU-hour and chargeback rates (2024)",
     notes="On-demand, spot, and internal chargeback references for fleet orchestration examples.",
@@ -640,24 +717,24 @@ BARROSO_DATACENTER_ECONOMICS = _lit(
     url="https://doi.org/10.1201/9781351066146",
 )
 
-DATACENTER_CAPACITY_LEAD_TIMES = _est(
-    "prov:datacenter-capacity-lead-times",
+CAPACITY_LEAD_TIMES = _est(
+    "prov:capacity-lead-times",
     "Illustrative datacenter build-out lead times",
-    notes="Order-of-magnitude planning anchors for compute-infrastructure scenarios.",
+    notes="Order-of-magnitude planning anchors for compute-infrastructure analyses.",
 )
 
-GPU_HOUR_CARBON_PROXY = _est(
-    "prov:gpu-hour-carbon-proxy",
+CARBON_PER_GPU_HR = _est(
+    "prov:carbon-per-gpu-hr",
     "Illustrative per-GPU-hour carbon proxy for responsible-AI examples",
     notes="0.16 kg/GPU-hr order-of-magnitude; not a grid-specific intensity calculation.",
 )
 
 LIT_TRANSATLANTIC_ROUND_TRIP_CO2 = _est(
     "prov:lit-transatlantic-round-trip-co2",
-    "Aviation CO₂e factors for long-haul economy passenger travel (DEFRA-class)",
+    "Aviation CO2e factors for long-haul economy passenger travel (DEFRA-class)",
     notes=(
-        "Rounded to 1000 kg CO₂e for the NY–London round-trip reference anchor; "
-        "agency calculators typically report ~900–1100 kg CO₂e per economy passenger."
+        "Rounded to 1000 kg CO2e for the NY-London round-trip reference anchor; "
+        "agency calculators typically report about 900-1100 kg CO2e per economy passenger."
     ),
     verified="2026-05-31",
 )

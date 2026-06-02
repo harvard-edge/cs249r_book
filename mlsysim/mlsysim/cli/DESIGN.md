@@ -16,6 +16,14 @@ The core physics engine (`mlsysim.engine.solver`) must never receive bad data.
 *   **The Design:** Every input (CLI flags, YAML files, JSON strings) must be parsed and validated by a strict Pydantic schema (e.g., `EvalNodeSchema`) *before* any core mathematical logic is invoked.
 *   **The Rationale:** If a user specifies an H100 GPU but sets the bandwidth to 100 GB/s (which is physically wrong for that chip), the schema validator rejects it immediately. This guarantees that the analytical engine only ever processes mathematically and physically valid states.
 
+Cluster YAML follows the same rule. Use `hardware.accelerators` for total
+accelerators, or use `hardware.node_count` plus
+`hardware.accelerators_per_node` for explicit topology. If both forms are
+present, the derived total must equal `hardware.accelerators`. The CLI may infer
+intra-node bandwidth from the resolved hardware when available, but it must not
+invent a topology by silently flooring node counts or assuming an H100-like
+8-GPU node for every accelerator.
+
 ### Rule 2: Strict I/O Purity (The `stdout` vs `stderr` Rule)
 
 A modern CLI must serve two callers equally well: the human at the keyboard, and the automated process in the pipeline.
@@ -36,7 +44,7 @@ Scripts should not have to parse prose to know what went wrong.
 
 The CLI UX must accurately reflect the architectural rigor of the underlying engine.
 *   **The Design:** The CLI commands must explicitly map to the three tiers of the MLSysim engine. We do not mash everything into one command.
-    *   `mlsysim eval ...` strictly calls `BaseModel` components (Physics Engine). It can take direct flags or a full `mlsys.yaml` specification.
+    *   `mlsysim eval ...` strictly calls `ForwardModel` components (Physics Engine). It can take direct flags or a full `mlsys.yaml` specification.
     *   `mlsysim solve ...` strictly calls `BaseSolver` components (Math Engine).
     *   `mlsysim optimize ...` strictly calls `BaseOptimizer` components (Engineering Engine).
 *   **The Rationale:** The CLI help text reinforces MLSysIM's instructional goals: teaching users the difference between evaluating a state, algebraically inverting an equation, and searching a design space.

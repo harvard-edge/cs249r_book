@@ -48,7 +48,7 @@ def serve_main(
                 "Use 'mlsysim eval' for non-Transformer workloads."
             )
 
-        from mlsysim.engine.solver import ServingModel
+        from mlsysim.solvers import ServingModel
         solver = ServingModel()
         result = solver.solve(
             model=model_obj,

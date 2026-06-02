@@ -1,8 +1,8 @@
 """Parameters for analytical solvers and the roofline engine.
 
 These values tune ``mlsysim.engine.solver`` models and ``mlsysim.engine.engine.Engine``
-when callers omit explicit arguments. Not narrative-facing — use ``Literature.*``,
-``Systems.*``, and ``Infrastructure.*`` for sourced scenario numbers.
+when callers omit explicit arguments. Use ``Literature.*``, ``Systems.*``, and
+``Infrastructure.*`` for sourced domain reference values.
 """
 
 from ..core.provenance import sourced
@@ -36,7 +36,7 @@ SPECULATIVE_GAMMA = 4  # Typical lookahead (K) for draft verification
 DEFAULT_INFRASTRUCTURE_MULTIPLIER = 1.0  # Hardware only. Use 2.0-2.5 for full DC.
 
 # DistributedModel API fallbacks when efficiency kwargs are omitted
-DEFAULT_SCALING_EFFICIENCY = sourced(0.90, pc.PARALLEL_SCALING_EFFICIENCY_RULE, name="Scaling Efficiency (η)", description="Default parallel scaling efficiency (90%).")
+DEFAULT_SCALING_EFFICIENCY = sourced(0.90, pc.SCALING_EFFICIENCY_RULE_OF_THUMB, name="Scaling Efficiency (η)", description="Default parallel scaling efficiency (90%).")
 DEFAULT_OVERLAP_EFFICIENCY = sourced(0.85, pc.MEGATRON_OVERLAP, name="Communication Overlap Efficiency", description="Fraction of comm time hidden behind compute.")
 DEFAULT_COMPUTE_EFFICIENCY = sourced(0.50, pc.PALM_MFU, name="Baseline MFU", description="Baseline model FLOPs utilization for large LLM training.")
 

@@ -17,9 +17,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from ..core.types import Quantity, Metadata
+from ..core.constants import ureg
+from ..core.types import Quantity, Metadata, require_dimensionality, require_unit_family
 from ..core.registry import Registry
 from ..core.loader import load_collection
 
@@ -34,6 +35,21 @@ class MemoryTier(BaseModel):
     energy_per_byte: Optional[Quantity] = None    # pJ per byte
     metadata: Metadata = Field(default_factory=Metadata)
 
+    @field_validator("latency", mode="after")
+    @classmethod
+    def _validate_latency(cls, v):
+        return require_dimensionality(v, ureg.second, "latency")
+
+    @field_validator("energy_per_access", mode="after")
+    @classmethod
+    def _validate_energy_per_access(cls, v):
+        return require_dimensionality(v, ureg.joule, "energy_per_access")
+
+    @field_validator("energy_per_byte", mode="after")
+    @classmethod
+    def _validate_energy_per_byte(cls, v):
+        return require_unit_family(v, ureg.joule / ureg.byte, "energy_per_byte", "data")
+
 
 class StorageTier(BaseModel):
     """Generic storage/memory bandwidth tier (sequential bandwidth + optional latency)."""
@@ -43,6 +59,16 @@ class StorageTier(BaseModel):
     bandwidth: Quantity
     latency: Optional[Quantity] = None
     metadata: Metadata = Field(default_factory=Metadata)
+
+    @field_validator("bandwidth", mode="after")
+    @classmethod
+    def _validate_bandwidth(cls, v):
+        return require_unit_family(v, ureg.byte / ureg.second, "bandwidth", "data")
+
+    @field_validator("latency", mode="after")
+    @classmethod
+    def _validate_latency(cls, v):
+        return require_dimensionality(v, ureg.second, "latency")
 
 
 class InterconnectTier(BaseModel):
@@ -57,6 +83,11 @@ class InterconnectTier(BaseModel):
     latency: Optional[Quantity] = None
     metadata: Metadata = Field(default_factory=Metadata)
 
+    @field_validator("latency", mode="after")
+    @classmethod
+    def _validate_latency(cls, v):
+        return require_dimensionality(v, ureg.second, "latency")
+
 
 class OpEnergy(BaseModel):
     """Per-operation energy for an arithmetic op (technology/process-class)."""
@@ -65,6 +96,11 @@ class OpEnergy(BaseModel):
     name: str
     energy: Quantity
     metadata: Metadata = Field(default_factory=Metadata)
+
+    @field_validator("energy", mode="after")
+    @classmethod
+    def _validate_energy(cls, v):
+        return require_dimensionality(v, ureg.joule, "energy")
 
 
 class EffectiveComputeEnergy(BaseModel):

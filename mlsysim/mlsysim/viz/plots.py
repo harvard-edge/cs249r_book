@@ -1,7 +1,6 @@
 # viz/plots.py
-# Centralized Visualization Style for MLSys Book
-# Ensures all generated figures across Vol 1 & 2 share a consistent,
-# MIT Press-ready aesthetic.
+# Centralized visualization style for generated MLSysIM figures.
+# Ensures analytical figures share a consistent publication-ready aesthetic.
 
 import os
 
@@ -20,7 +19,7 @@ except ImportError:
     np = None
     _matplotlib_available = False
 
-# --- Brand & Book Palette ---
+# --- Publication Palette ---
 COLORS = {
     "crimson":    "#A51C30", # Harvard Crimson
     "primary":    "#333333", # Dark Gray (Text)
@@ -59,12 +58,12 @@ def set_book_style():
 WEB_FIG_DPI = 120
 
 def _finalize_web_figure(fig):
-    """Match Quarto web defaults; PDF cells keep set_book_style() dpi."""
+    """Match Quarto web defaults while publication figures keep print DPI."""
     fig.set_dpi(WEB_FIG_DPI)
     return fig
 
 def setup_plot(figsize=(8, 5)):
-    """One-line plot setup for QMD blocks."""
+    """One-line plot setup for generated plotting blocks."""
     set_book_style()
     fig, ax = plt.subplots(figsize=figsize)
     return fig, ax, COLORS, plt
@@ -408,7 +407,7 @@ def _memory_utilization(metrics):
 def plot_evaluation_scorecard(evaluation):
     """
     Visualizes the supply-vs-demand scorecard for a SystemEvaluation.
-    Follows the LEGO-style visualization pattern.
+    Follows the compact, labeled visualization pattern used by generated examples.
     """
     l1_metrics = evaluation.feasibility.metrics
     l2_metrics = evaluation.performance.metrics

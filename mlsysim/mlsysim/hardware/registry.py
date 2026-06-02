@@ -32,7 +32,7 @@ MobileHardware = load_registry(
 )
 EdgeHardware = load_registry(
     _DATA / "edge", HardwareNode, name="EdgeHardware",
-    doc="Robotics and industrial edge devices.", tech_root=_Tech,
+    doc="Robotics and industrial edge systems.", tech_root=_Tech,
 )
 TinyHardware = load_registry(
     _DATA / "tiny", HardwareNode, name="TinyHardware",

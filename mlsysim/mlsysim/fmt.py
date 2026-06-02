@@ -1,6 +1,6 @@
 """
 fmt.py
-Formatting + presentation helpers for QMD output.
+Formatting + presentation helpers for Markdown/Quarto output.
 Keep science in mlsysim/physics/; keep display here.
 """
 
@@ -518,7 +518,7 @@ def fmt_usd(
 ):
     """
     Canonical currency formatter — the single, blessed way to render any
-    dollar amount in QMD prose, tables, or callouts.
+    dollar amount in prose, tables, or callouts.
 
     This is the currency member of the ``fmt_*`` family (cf. ``fmt_percent``
     for percentages). It exists so the Pandoc/LaTeX escaping detail of a prose

@@ -5,7 +5,7 @@ from pathlib import Path
 from mlsysim.engine.evaluation import SystemEvaluator
 from mlsysim.hardware.registry import Hardware
 from mlsysim.models.registry import Models
-from mlsysim import Applications, Q_, plot_evaluation_scorecard
+from mlsysim import Q_, Scenarios, plot_evaluation_scorecard
 from mlsysim.systems.registry import Systems
 
 
@@ -100,7 +100,7 @@ def test_infeasible_single_node_marks_performance_failed():
 def test_scorecard_plot_accepts_scenario_evaluation_quantities():
     """Scenario evaluations expose Pint quantities; plots normalize them."""
     pytest.importorskip("matplotlib")
-    evaluation = Applications.Doorbell.evaluate()
+    evaluation = Scenarios.SmartDoorbell.evaluate()
     fig, ax = plot_evaluation_scorecard(evaluation)
     try:
         assert len(ax.patches) == 2

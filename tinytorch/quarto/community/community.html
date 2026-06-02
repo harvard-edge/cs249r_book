@@ -137,6 +137,17 @@
       flex-shrink: 0;
     }
 
+    .legend-dot-sea {
+      width: 8px;
+      height: 8px;
+      background-color: #00bcd4;
+      border-radius: 50%;
+      display: inline-block;
+      border: 1px solid #fff;
+      box-shadow: 0 0 2px rgba(0, 188, 212, 0.6);
+      flex-shrink: 0;
+    }
+
     /* Toggle Button Styling */
     .control-btn {
       display: inline-flex;
@@ -262,6 +273,28 @@
       color: #ff6600;
       font-weight: bold;
     }
+
+    #globe-container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    #globe-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    #globe-svg {
+      position: absolute;
+      top: 0;
+      left: 0;
+      z-index: 2;
+      background: transparent;
+    }
   </style>
 
   <!-- Load D3 and TopoJSON -->
@@ -289,15 +322,15 @@
 
     <div class="legend-row">
       <span class="legend-dot"></span>
-      <span id="member-count">0 Members on Map</span>
-    </div>
-    <div class="legend-row">
-      <span class="legend-dot" style="background-color: #2ecc71; border-color: #27ae60;"></span>
-      <span id="no-location-count">0 without Location (Lost at Sea)</span>
+      <span id="member-count">0 Total Members</span>
     </div>
     <div class="legend-row">
       <span class="legend-dot-institution"></span>
       <span id="institution-count">0 Institutions</span>
+    </div>
+    <div class="legend-row">
+      <span class="legend-dot-sea"></span>
+      <span>Lost at Sea</span>
     </div>
     <div class="legend-row" style="margin-top: 5px; border-top: 1px dashed #eee; padding-top: 8px; font-style: italic; color: #888;">
       Note: Members without a location set in their profile are placed at the Sea Station.
@@ -307,7 +340,10 @@
   <!-- Tooltip Container -->
   <div id="tooltip" class="tooltip"></div>
 
-  <svg id="globe-svg"></svg>
+  <div id="globe-container">
+    <canvas id="globe-canvas"></canvas>
+    <svg id="globe-svg"></svg>
+  </div>
 
   <script type="module">
     import './app.js'; // Keep existing app logic
@@ -354,7 +390,9 @@
     let institutions = [];
     const API_URL = "https://zrvmjrxhokwwmjacyhpq.supabase.co/functions/v1/search-profiles";
 
-    const svg = d3.select('#globe-svg');
+    const svg = d3.select('#globe-svg').attr('width', width).attr('height', height);
+    const canvas = d3.select('#globe-canvas').attr('width', width).attr('height', height);
+    const context = canvas.node().getContext('2d');
     const tooltip = d3.select('#tooltip');
 
     // Projection setup
@@ -364,6 +402,7 @@
       .translate([width / 2, height / 2]);
 
     const path = d3.geoPath().projection(projection);
+    const canvasPath = d3.geoPath().projection(projection).context(context);
     const center = [width/2, height/2];
 
     // State
@@ -371,96 +410,192 @@
     let isDragging = false;
     let isPaused = false;
     let isHovering = false;
+    let worldData = null; // Store for canvas redraw
 
-    // Groups
-    const globeGroup = svg.append('g');
+    // Groups (SVG Layer for Interactive Elements)
+    const globeGroup = svg.append('g'); // For interaction capture if needed
     const graticuleGroup = svg.append('g');
-    const mapGroup = svg.append('g');
     const institutionGroup = svg.append('g');
     const lostStationGroup = svg.append('g');
-    const markerGroup = svg.append('g');
-
-    // 1. Globe Background
-    globeGroup.append("path")
-      .datum({type: "Sphere"})
-      .attr("class", "globe-outline-circle")
-      .attr("d", path);
-
-    // 2. Graticules
-    const graticule = d3.geoGraticule().step([10, 10]);
-    graticuleGroup.append("path")
-      .datum(graticule)
-      .attr("class", "graticule")
-      .attr("d", path);
+    const markerOverlayGroup = svg.append('g'); // For tooltips only
 
     // 3. Load World Data
     d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json')
-      .then(worldData => {
-        // Optimized: Render countries as a single path
-        mapGroup.append("path")
-          .datum(topojson.feature(worldData, worldData.objects.countries))
-          .attr("class", "country")
-          .attr("d", path);
-
+      .then(data => {
+        worldData = topojson.feature(data, data.objects.countries);
         startAnimation();
         fetchProfiles();
       });
 
-    // API Fetch Logic
-    async function fetchProfiles(query = "") {
-        try {
+    const PAGE_SIZE = 1000;
+
+    function classifyProfiles(data) {
+        const mapUsers = [];
+        const tempLostUsers = [];
+
+        const lostLng = config.lostStationCoords[0];
+        const lostLat = config.lostStationCoords[1];
+
+        data.forEach(p => {
+            const lat = parseFloat(p.latitude);
+            const lng = parseFloat(p.longitude);
+            const locationStr = (p.location || "").toLowerCase();
+
+            // 1. Detection Logic for "Lost" users
+            const isLostLabel = locationStr.includes("lost at sea") || locationStr.includes("🌊");
+            const isOceanic = locationStr.includes("ocean") || locationStr.includes("pacific") || locationStr.includes("atlantic");
+            const isUnknown = !p.location || p.location === "unknown" || locationStr.trim() === "";
+
+            // Check if coordinates match the Sea Station or the Pacific "OSON" cluster
+            // Clusters identified around [-151, -4]
+            const isAtSeaStation = Math.abs(lat - lostLat) < 1.0 && Math.abs(lng - lostLng) < 1.0;
+            const isInPacificGaggle = lng < -130 && lng > -165 && lat < 20 && lat > -50;
+            const isAtZero = Math.abs(lat) < 0.1 && Math.abs(lng) < 0.1;
+
+            const hasInvalidCoords = isNaN(lat) || isNaN(lng) || isAtZero || isAtSeaStation || isInPacificGaggle;
+
+            const displayName = (p.display_name && p.display_name.trim())
+                ? p.display_name.trim()
+                : (p.username ? p.username.split('@')[0].trim() : 'Anonymous');
+
+            const userObj = {
+                user: p.username || p.id,
+                displayName: displayName,
+                completed: "Member",
+                institution: Array.isArray(p.institution) ? p.institution.join(", ") : (p.institution || "Independent"),
+                location: p.location || null
+            };
+
+            // 2. Routing Logic: Move them to Lost at Sea if they meet ANY "lost" criteria
+            if (isLostLabel || isOceanic || (isUnknown && hasInvalidCoords) || isAtSeaStation) {
+                tempLostUsers.push(userObj);
+            } else if (!hasInvalidCoords) {
+                // Real coordinates -> Place on map
+                mapUsers.push({
+                    ...userObj,
+                    latitude: lat + (crypto.getRandomValues(new Uint32Array(1))[0] / 0x100000000 - 0.5) * 0.2,
+                    longitude: lng + (crypto.getRandomValues(new Uint32Array(1))[0] / 0x100000000 - 0.5) * 0.2
+                });
+            } else {
+                // Fallback for anyone else without good coords
+                tempLostUsers.push(userObj);
+            }
+        });
+
+        console.log(`[Globe] Data: ${mapUsers.length} mapped, ${tempLostUsers.length} drifting.`);
+        return { mapUsers, tempLostUsers };
+    }
+
+    async function fetchAllProfiles(query = "") {
+        // 1. Initial Load Optimization: Use lean endpoint if no query
+        if (!query) {
+            const GLOBE_API_URL = API_URL.replace('search-profiles', 'get-globe-data');
+            try {
+                const response = await fetch(GLOBE_API_URL, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" }
+                });
+                if (response.ok) {
+                    const payload = await response.json();
+
+                    // Transform packed points [lat, lng, name, id, inst, location]
+                    const profiles = (payload.points || []).map(p => ({
+                        latitude: p[0],
+                        longitude: p[1],
+                        display_name: p[2],
+                        id: p[3],
+                        institution: p[4] ? [p[4]] : [],
+                        location: p[5] || null
+                    }));
+
+                    return {
+                        profiles,
+                        total: payload.stats?.total || profiles.length,
+                        stats: payload.stats // Pass through optimized stats
+                    };
+                }
+            } catch (e) {
+                console.warn("get-globe-data failed, falling back to paginated search", e);
+            }
+        }
+
+        const all = [];
+        let page = 0;
+        let total = 0;
+
+        while (page < 50) {
             const response = await fetch(API_URL, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ query: query, page: 0, limit: 1000 }) 
+                body: JSON.stringify({ query, page, limit: PAGE_SIZE, envelope: true })
             });
 
             if (!response.ok) throw new Error("API Error");
-            const data = await response.json();
+            const payload = await response.json();
 
-            if (Array.isArray(data) && data.length > 0) {
-                totalMemberCount = data.length;
-                let mapUsers = [];
-                let tempLostUsers = [];
+            // Backward compat: legacy raw array response
+            if (Array.isArray(payload)) {
+                all.push(...payload);
+                total = payload.length;
+                break;
+            }
 
-                data.forEach(p => {
-                    const lat = parseFloat(p.latitude);
-                    const lng = parseFloat(p.longitude);
-                    const isLostLabel = p.location === "Lost at Sea 🌊";
-                    const hasNoLocation = !p.location || p.location === "unknown";
-                    const hasNoCoords = isNaN(lat) || isNaN(lng) || (Math.abs(lat) < 0.001 && Math.abs(lng) < 0.001);
+            const batch = Array.isArray(payload.data) ? payload.data : [];
+            if (page === 0 && typeof payload.total === 'number') {
+                total = payload.total;
+            }
 
-                    const displayName = (p.display_name && p.display_name.trim()) ? p.display_name.trim() : (p.username ? p.username.split('@')[0].trim() : 'Anonymous');
-                    
-                    const userObj = {
-                        user: p.username,
-                        displayName: displayName,
-                        completed: "Member",
-                        institution: Array.isArray(p.institution) ? p.institution.join(", ") : (p.institution || "Independent"),
-                        location: p.location || null
-                    };
+            all.push(...batch);
 
-                    if (isLostLabel || (hasNoLocation && hasNoCoords)) {
-                        tempLostUsers.push(userObj);
-                    } else if (!hasNoCoords) {
-                         mapUsers.push({
-                             ...userObj, 
-                             latitude: lat + (crypto.getRandomValues(new Uint32Array(1))[0] / 0x100000000 - 0.5) * 0.2,
-                             longitude: lng + (crypto.getRandomValues(new Uint32Array(1))[0] / 0x100000000 - 0.5) * 0.2
-                         });
-                    } else {
-                        tempLostUsers.push(userObj);
-                    }
-                });
+            const hasMore = payload.hasMore === true
+                || (batch.length === PAGE_SIZE && all.length < (payload.total ?? all.length));
 
+            if (!hasMore || batch.length === 0) break;
+            page++;
+        }
+
+        if (!total) total = all.length;
+        return { profiles: all, total };
+    }
+
+    function updateMemberCount() {
+        document.getElementById('member-count').textContent = `${totalMemberCount} Total Members`;
+    }
+
+    // API Fetch Logic
+    async function fetchProfiles(query = "") {
+        const startTime = performance.now();
+        try {
+            console.log(`[Globe] Fetching profiles... ${query ? 'Search: ' + query : 'Initial Load'}`);
+            const { profiles, total, stats } = await fetchAllProfiles(query);
+            const fetchTime = performance.now();
+
+            if (profiles.length > 0 || total > 0) {
+                totalMemberCount = total;
+                const { mapUsers, tempLostUsers } = classifyProfiles(profiles);
                 locations = mapUsers;
-                lostUsers = tempLostUsers;
+
+                // If we have server stats, use them for accurate "lost" counts
+                if (stats && !query) {
+                    lostUsers = new Array(stats.drifting || 0).fill({ displayName: 'Anonymous' });
+                } else {
+                    lostUsers = tempLostUsers;
+                }
 
                 renderMarkers();
                 renderInstitutions();
                 renderLostStation();
-            } else {
-               if (query) { locations = []; lostUsers = []; totalMemberCount = 0; }
+
+                // Update institution count immediately from server stats if available
+                if (stats && !query && stats.institutions !== undefined) {
+                    document.getElementById('institution-count').textContent = `${stats.institutions} Institutions`;
+                }
+                const endTime = performance.now();
+                console.log(`[Globe] Performance: Fetch: ${(fetchTime - startTime).toFixed(0)}ms, Process/Render: ${(endTime - fetchTime).toFixed(0)}ms. Total Users: ${total}`);
+            } else if (query) {
+                locations = [];
+                lostUsers = [];
+                totalMemberCount = 0;
             }
         } catch (e) {
             locations = [];
@@ -475,30 +610,28 @@
 
     // Render Markers
     function renderMarkers() {
-      const markers = markerGroup.selectAll('circle.marker')
+      // SVG Layer: Invisible overlay circles for mouse interaction/tooltips
+      const markers = markerOverlayGroup.selectAll('circle.marker-hit')
         .data(locations, d => d.user);
 
       markers.exit().remove();
 
       markers.enter()
         .append('circle')
-        .attr('class', 'marker')
-        .attr('r', 4)
+        .attr('class', 'marker-hit')
+        .attr('r', 8)
+        .style('fill', 'transparent') // Invisible but catch mouse events
+        .style('cursor', 'pointer')
         .on("mouseover", function(event, d) {
             isHovering = true;
-            d3.select(this).attr("r", 6);
             showTooltip(event, d);
         })
         .on("mouseout", function() {
             isHovering = false;
-            d3.select(this).attr("r", 4);
             tooltip.style("opacity", 0);
-        })
-        .style('opacity', 0)
-        .transition().duration(300).style('opacity', 1);
+        });
 
-      document.getElementById('member-count').textContent = `${locations.length} Members on Map`;
-      document.getElementById('no-location-count').textContent = `${lostUsers.length} without Location (Lost at Sea)`;
+      updateMemberCount();
       updateMarkerPositions();
     }
 
@@ -514,7 +647,7 @@
             .style('cursor', 'pointer')
             .on("mouseover", function(event, d) {
                 isHovering = true;
-                tooltip.html(`<h3>🌊 Sea Station</h3><div class="info-row"><span class="highlight">${d.count}</span> Members drifting here...</div><div class="info-row" style="font-size:10px; color:#888;">(Update location in profile to be found)</div>`);
+                tooltip.html(`<h3>🌊 Sea Station</h3><div class="info-row"><b>Lost at Sea</b></div><div class="info-row"><span class="highlight">${d.count}</span> Members drifting here...</div><div class="info-row" style="font-size:10px; color:#888;">(Update location in profile to be found)</div>`);
                 tooltip.style("left", (event.pageX + 15) + "px").style("top", (event.pageY - 15) + "px").style("opacity", 1);
             })
             .on("mouseout", function() {
@@ -522,10 +655,10 @@
                 tooltip.style("opacity", 0);
             });
 
-        // Buoy/Station Visual
-        enter.append('circle').attr('r', 12).attr('fill', 'rgba(46, 204, 113, 0.2)').attr('stroke', '#2ecc71').attr('stroke-width', 1).attr('stroke-dasharray', '2,2');
-        enter.append('circle').attr('r', 4).attr('fill', '#2ecc71').attr('stroke', '#fff').attr('stroke-width', 1);
-        
+        // Buoy/Station Visual (Nautical Cyan)
+        enter.append('circle').attr('r', 12).attr('fill', 'rgba(0, 188, 212, 0.2)').attr('stroke', '#00bcd4').attr('stroke-width', 1).attr('stroke-dasharray', '2,2');
+        enter.append('circle').attr('r', 5).attr('fill', '#00bcd4').attr('stroke', '#fff').attr('stroke-width', 1);
+
         updateLostStationPosition();
     }
 
@@ -543,7 +676,7 @@
         const institutionMap = new Map();
         locations.forEach(loc => {
             if (loc.institution && loc.institution !== "Independent") {
-                const inst = loc.institution;
+                const inst = Array.isArray(loc.institution) ? loc.institution[0] : loc.institution;
                 if (!institutionMap.has(inst)) {
                     institutionMap.set(inst, {
                         name: inst,
@@ -577,8 +710,6 @@
                 tooltip.style("opacity", 0);
             });
 
-        document.getElementById('institution-count').textContent = `${institutions.length} Institutions`;
-
         enter.append('rect').attr('class', 'institution-building').attr('x', -5).attr('y', -8).attr('width', 10).attr('height', 8);
         const windowsGroup = enter.append('g').attr('class', 'building-windows');
         const windows = [{x:-4,y:-7},{x:-1,y:-7},{x:2.5,y:-7},{x:-4,y:-4.5},{x:-1,y:-4.5},{x:2.5,y:-4.5},{x:-4,y:-2},{x:2.5,y:-2}];
@@ -589,21 +720,22 @@
 
     // Update Globe Positions
     function updateMarkerPositions() {
-      const markers = markerGroup.selectAll('circle.marker');
+      const markers = markerOverlayGroup.selectAll('circle.marker-hit');
       if (markers.empty()) return;
-      
+
       const invCenter = projection.invert(center);
-      
-      markers.each(function(d) {
-        const coordinate = [d.longitude, d.latitude];
-        const gdistance = d3.geoDistance(coordinate, invCenter);
-        if (gdistance < 1.57) {
-          const pos = projection(coordinate);
-          d3.select(this).attr('cx', pos[0]).attr('cy', pos[1]).style('display', 'block');
-        } else {
-          d3.select(this).style('display', 'none');
-        }
-      });
+      const isVisible = d => d3.geoDistance([d.longitude, d.latitude], invCenter) < 1.57;
+
+      markers
+        .style('display', d => isVisible(d) ? 'block' : 'none')
+        .attr('cx', d => {
+            const pos = projection([d.longitude, d.latitude]);
+            return pos ? pos[0] : 0;
+        })
+        .attr('cy', d => {
+            const pos = projection([d.longitude, d.latitude]);
+            return pos ? pos[1] : 0;
+        });
     }
 
     function updateLostStationPosition() {
@@ -613,7 +745,7 @@
         const invCenter = projection.invert(center);
         const coordinate = config.lostStationCoords;
         const gdistance = d3.geoDistance(coordinate, invCenter);
-        
+
         if (gdistance < 1.57) {
             const pos = projection(coordinate);
             station.attr('transform', `translate(${pos[0]},${pos[1]})`).style('display', 'block');
@@ -625,7 +757,7 @@
     function updateInstitutionPositions() {
         const instMarkers = institutionGroup.selectAll('g.institution-marker');
         if (instMarkers.empty()) return;
-        
+
         const invCenter = projection.invert(center);
 
         instMarkers.each(function(d) {
@@ -633,16 +765,28 @@
             const gdistance = d3.geoDistance(coordinate, invCenter);
             if (gdistance < 1.57) {
                 const pos = projection(coordinate);
-                d3.select(this).attr('transform', `translate(${pos[0]},${pos[1]})`).style('display', 'block');
+                this.setAttribute('transform', `translate(${pos[0]},${pos[1]})`);
+                this.style.display = 'block';
             } else {
-                d3.select(this).style('display', 'none');
+                this.style.display = 'none';
             }
         });
     }
 
     // Animation
+    let lastTime = 0;
+    let frameCount = 0;
     function startAnimation() {
-      d3.timer(function () {
+      d3.timer(function (elapsed) {
+        // FPS Tracking
+        const now = performance.now();
+        frameCount++;
+        if (now - lastTime >= 1000) {
+            console.log(`[Globe] Animation Performance: ${frameCount} FPS`);
+            frameCount = 0;
+            lastTime = now;
+        }
+
         if (!isDragging && !isPaused && !isHovering) {
           currentRotation[0] += config.speed;
           projection.rotate(currentRotation);
@@ -652,8 +796,55 @@
     }
 
     function redraw() {
-        graticuleGroup.select("path").attr("d", path);
-        mapGroup.select("path").attr("d", path);
+        // Clear Canvas
+        context.clearRect(0, 0, width, height);
+
+        // 1. Draw Globe Background (Canvas)
+        context.beginPath();
+        canvasPath({type: "Sphere"});
+        context.fillStyle = "#fff";
+        context.fill();
+        context.strokeStyle = "#333";
+        context.lineWidth = 2;
+        context.stroke();
+
+        // 2. Draw Graticules (Canvas)
+        context.beginPath();
+        canvasPath(d3.geoGraticule().step([10, 10])());
+        context.strokeStyle = "#ccc";
+        context.lineWidth = 0.5;
+        context.setLineDash([2, 2]);
+        context.stroke();
+        context.setLineDash([]);
+
+        // 3. Draw Countries (Canvas)
+        if (worldData) {
+            context.beginPath();
+            canvasPath(worldData);
+            context.fillStyle = "#fff";
+            context.fill();
+            context.strokeStyle = "#2c3e50";
+            context.lineWidth = 1.2;
+            context.stroke();
+        }
+
+        // 4. Draw Markers (Canvas - The Speed Boost!)
+        const invCenter = projection.invert(center);
+        locations.forEach(d => {
+            const coordinate = [d.longitude, d.latitude];
+            if (d3.geoDistance(coordinate, invCenter) < 1.57) {
+                const pos = projection(coordinate);
+                context.beginPath();
+                context.arc(pos[0], pos[1], 4, 0, 2 * Math.PI);
+                context.fillStyle = "#ff6600";
+                context.fill();
+                context.strokeStyle = "#ffcc00";
+                context.lineWidth = 1;
+                context.stroke();
+            }
+        });
+
+        // 5. Update Interactive Overlays (SVG)
         updateMarkerPositions();
         updateInstitutionPositions();
         updateLostStationPosition();
@@ -684,7 +875,11 @@
 
     function updateSearchDropdown(query) {
         searchDropdown.innerHTML = '';
-        const matches = locations.slice(0, 8);
+        // Use locations (mapped users) for search results in the dropdown
+        const matches = locations.filter(d =>
+            d.displayName.toLowerCase().includes(query.toLowerCase())
+        ).slice(0, 8);
+
         if (matches.length > 0) {
             searchDropdown.style.display = 'block';
             matches.forEach(match => {
@@ -710,12 +905,10 @@
        const w = window.innerWidth;
        const h = window.innerHeight;
        svg.attr('width', w).attr('height', h);
+       canvas.attr('width', w).attr('height', h);
        projection.translate([w/2, h/2]).scale(Math.min(w, h) / 2.5);
        center[0] = w/2; center[1] = h/2;
-       
-       // Update static globe background
-       globeGroup.select("path").attr("d", path);
-       
+
        redraw();
     });
 

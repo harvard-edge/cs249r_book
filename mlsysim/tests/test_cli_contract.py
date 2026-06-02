@@ -1,9 +1,12 @@
 import json
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
 from typer.testing import CliRunner
 
 from mlsysim.cli.main import app
+from mlsysim.cli.schemas import MlsysPlanSchema
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,6 +48,104 @@ def test_eval_accepts_command_local_output_option():
     payload = json.loads(result.stdout)
     assert payload["scenario"] == "Llama3_8B on H100"
     assert payload["f_status"] == "PASS"
+
+
+def test_eval_rejects_unknown_precision():
+    result = runner.invoke(
+        app,
+        ["eval", "Llama3_8B", "H100", "--precision", "fp6", "-o", "json"],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "error"
+    assert "precision 'fp6' is not supported" in payload["reason"]
+
+
+def test_plan_builds_fleet_from_explicit_topology():
+    schema = MlsysPlanSchema.model_validate(
+        {
+            "version": "1.0",
+            "name": "Topology test",
+            "workload": {"name": "Llama3_8B", "batch_size": 16},
+            "hardware": {
+                "name": "H100",
+                "accelerators": 16,
+                "accelerators_per_node": 4,
+                "intra_node_bw": "400 GB/s",
+                "fabric_bandwidth": "200 Gbit/s",
+            },
+        }
+    )
+
+    assert schema.fleet_obj.total_accelerators == 16
+    assert schema.fleet_obj.count == 4
+    assert schema.fleet_obj.node.accelerators_per_node == 4
+    assert schema.fleet_obj.node.intra_node_bw.m_as("GB/s") == pytest.approx(400)
+    assert schema.fleet_obj.fabric.bandwidth.m_as("Gbit/s") == pytest.approx(200)
+
+
+def test_plan_builds_fleet_from_node_count_topology():
+    schema = MlsysPlanSchema.model_validate(
+        {
+            "version": "1.0",
+            "name": "Node count topology test",
+            "workload": {"name": "Llama3_8B", "batch_size": 16},
+            "hardware": {
+                "name": "H100",
+                "node_count": 2,
+                "accelerators_per_node": 8,
+                "fabric_bandwidth": "400 Gbit/s",
+            },
+        }
+    )
+
+    assert schema.hardware.total_accelerators == 16
+    assert schema.fleet_obj.count == 2
+    assert schema.fleet_obj.total_accelerators == 16
+
+
+def test_plan_rejects_legacy_nodes_field():
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        MlsysPlanSchema.model_validate(
+            {
+                "version": "1.0",
+                "name": "Legacy nodes topology",
+                "workload": {"name": "Llama3_8B"},
+                "hardware": {
+                    "name": "H100",
+                    "nodes": 16,
+                },
+            }
+        )
+
+
+def test_plan_rejects_non_divisible_topology():
+    with pytest.raises(ValidationError, match="total accelerators must be divisible"):
+        MlsysPlanSchema.model_validate(
+            {
+                "version": "1.0",
+                "name": "Bad topology",
+            "workload": {"name": "Llama3_8B"},
+            "hardware": {
+                "name": "H100",
+                "accelerators": 10,
+                "accelerators_per_node": 4,
+            },
+        }
+        )
+
+
+def test_plan_rejects_unknown_fields():
+    with pytest.raises(ValidationError, match="Extra inputs|extra_forbidden"):
+        MlsysPlanSchema.model_validate(
+            {
+                "version": "1.0",
+                "name": "Bad plan",
+                "workload": {"name": "Llama3_8B", "stray_field": True},
+                "hardware": {"name": "H100"},
+            }
+        )
 
 
 def test_zoo_accepts_command_local_output_option():

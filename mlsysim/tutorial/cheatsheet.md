@@ -108,7 +108,8 @@ profile = Engine.solve(
 ### 2. LLM Serving (Prefill + Decode)
 
 ```python
-from mlsysim import ServingModel, Hardware, Models
+from mlsysim import Hardware, Models
+from mlsysim.solvers import ServingModel
 
 result = ServingModel().solve(
     model=Models.Language.Llama3_8B,
@@ -124,7 +125,8 @@ result = ServingModel().solve(
 ### 3. Distributed Training (3D Parallelism)
 
 ```python
-from mlsysim import DistributedModel, Models, Systems
+from mlsysim import Models, Systems
+from mlsysim.solvers import DistributedModel
 
 result = DistributedModel().solve(
     model=Models.Language.Llama3_70B,
@@ -144,7 +146,7 @@ result = DistributedModel().solve(
 
 ```python
 from mlsysim import Hardware, Models
-from mlsysim.engine.solver import CompressionModel
+from mlsysim.solvers import CompressionModel
 
 result = CompressionModel().solve(
     model=Models.Language.Llama3_8B,
@@ -159,7 +161,8 @@ result = CompressionModel().solve(
 ### 5. Sustainability and Economics
 
 ```python
-from mlsysim import SustainabilityModel, EconomicsModel, Systems, Infrastructure
+from mlsysim import Systems, Infrastructure
+from mlsysim.solvers import SustainabilityModel, EconomicsModel
 
 fleet = Systems.Clusters.Research_256
 

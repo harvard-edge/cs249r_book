@@ -60,19 +60,19 @@ class Reliability(Registry):
     )
     NodeRecoveryLowMin = sourced(
         10,
-        pc.FLEET_RECOVERY_ASSUMPTIONS,
+        pc.RECOVERY_TIME_ASSUMPTIONS,
         name="Node recovery low estimate (minutes)",
         description="Lower-bound automated node-drain and restart time.",
     )
     NodeRecoveryHighMin = sourced(
         30,
-        pc.FLEET_RECOVERY_ASSUMPTIONS,
+        pc.RECOVERY_TIME_ASSUMPTIONS,
         name="Node recovery high estimate (minutes)",
         description="Upper-bound automated node-drain and restart time.",
     )
     SdcRatePerGpuHr = 1e-6
     Recovery = RecoveryProfile(
-        heartbeat_timeout_s=sourced(30, pc.FLEET_RECOVERY_ASSUMPTIONS, name="Heartbeat timeout", description="Failure detection latency before reschedule."),
-        reschedule_time_s=sourced(60, pc.FLEET_RECOVERY_ASSUMPTIONS, name="Reschedule time", description="Time to allocate a replacement node after failure detection."),
-        checkpoint_write_bw_gbs=sourced(100, pc.FLEET_RECOVERY_ASSUMPTIONS, name="Checkpoint write bandwidth", description="Aggregate checkpoint write bandwidth to storage (GB/s)."),
+        heartbeat_timeout_s=sourced(30, pc.RECOVERY_TIME_ASSUMPTIONS, name="Heartbeat timeout", description="Failure detection latency before reschedule."),
+        reschedule_time_s=sourced(60, pc.RECOVERY_TIME_ASSUMPTIONS, name="Reschedule time", description="Time to allocate a replacement node after failure detection."),
+        checkpoint_write_bw_gbs=sourced(100, pc.RECOVERY_TIME_ASSUMPTIONS, name="Checkpoint write bandwidth", description="Aggregate checkpoint write bandwidth to storage (GB/s)."),
     )

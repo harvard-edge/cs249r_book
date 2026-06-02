@@ -136,9 +136,9 @@ def test_gpt3_training_energy_is_quantity():
 
 
 def test_energy_anchor_household_year_is_quantity():
-    from mlsysim import Scenarios
+    from mlsysim import ReferenceStats
 
-    household_year = Scenarios.EnergyAnchors.USHouseholdAnnualElectricity
+    household_year = ReferenceStats.EnergyAnchors.USHouseholdAnnualElectricity
     assert household_year.to(MWh).magnitude == pytest.approx(10.7)
     assert household_year.provenance.ref
 
@@ -152,27 +152,27 @@ def test_training_and_recommendation_model_anchors_are_quantities():
 
 
 def test_emissions_transatlantic_flight_co2_anchor():
-    from mlsysim import Scenarios
+    from mlsysim import ReferenceStats
     from mlsysim.core.provenance import scalar_value
 
-    anchor = Scenarios.EmissionsAnchors.TransatlanticRoundTripCo2Kg
+    anchor = ReferenceStats.EmissionsAnchors.TransatlanticRoundTripCo2Kg
     assert scalar_value(anchor) == pytest.approx(1000)
     assert anchor.provenance.ref
 
 
 def test_clinical_imaging_photo_size_anchor():
-    from mlsysim import Scenarios
+    from mlsysim import ReferenceStats
 
-    anchor = Scenarios.ClinicalImaging.RetinalPhotoSize
+    anchor = ReferenceStats.ClinicalImaging.RetinalPhotoSize
     assert anchor.to(MB).magnitude == pytest.approx(5.0)
     assert anchor.provenance.ref
 
 
 def test_storage_training_corpus_anchor():
-    from mlsysim import Scenarios
+    from mlsysim import ReferenceStats
     from mlsysim.core.units import byte, day, minute, param
 
-    corpus = Scenarios.StorageTrainingCorpus
+    corpus = ReferenceStats.StorageTrainingCorpus
 
     assert corpus.TrainingTokens.to(count).magnitude == pytest.approx(1.5e12)
     assert corpus.CompressedSource.to(TB).magnitude == pytest.approx(3.0)

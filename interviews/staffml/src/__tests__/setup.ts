@@ -22,3 +22,11 @@ Object.defineProperty(globalThis, 'crypto', {
     randomUUID: () => 'test-session-' + Math.random().toString(36).slice(2, 10),
   },
 });
+
+// jsdom doesn't ship ResizeObserver; react-medium-image-zoom (and friends) need it.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;

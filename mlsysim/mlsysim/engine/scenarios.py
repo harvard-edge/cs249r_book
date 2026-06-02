@@ -7,16 +7,24 @@ from ..hardware.types import HardwareNode
 from ..systems.types import Fleet
 from ..core.exceptions import OOMError, SLAViolation
 from .evaluation import SystemEvaluation, EvaluationLevel
+from ..models.registry import Models as _Models
+from ..hardware.registry import Hardware as _Hardware
+from ..systems.registry import Clusters as _Clusters
+from ..scenarios.registry import ReferenceStats as _ReferenceStats
 
 class Scenario(BaseModel):
     """
-    A narrative bundle tying a Workload, a System, and performance constraints.
-    This is the primary entry point for labs and scenario case studies.
+    Concrete executable case: a workload on a system with constraints.
+
+    ``application`` names the product/domain context, while the scenario itself
+    is what the simulator can evaluate. Model facts stay in ``Models.*``;
+    hardware and fleet facts stay in ``Hardware.*`` / ``Systems.*``.
     """
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     name: str
     description: str
+    application: Optional[str] = None
     workload: Workload
     system: Union[Fleet, HardwareNode]
     
@@ -149,18 +157,21 @@ class Scenario(BaseModel):
 
 class Scenarios:
     """
-    The Lighthouse Archetypes used throughout Volume 1 and Volume 2.
+    Executable scenario registry.
+
+    Each entry composes one ``Models.*`` workload, one ``Hardware.*`` or
+    ``Systems.*`` target, and scenario-local constraints such as latency or
+    power budget. Non-executable sourced anchors live separately under
+    ``ReferenceStats``.
     """
-    from ..models.registry import Models
-    from ..hardware.registry import Hardware
-    from ..systems.registry import Clusters, Nodes
-    
+
     # --- TINYML WORLD ---
     SmartDoorbell = Scenario(
         name="Smart Doorbell",
         description="Identifying humans at the door using a sub-watt microcontroller.",
-        workload=Models.Tiny.WakeVision,
-        system=Hardware.Tiny.ESP32_S3,
+        application="Smart Doorbell",
+        workload=_Models.Tiny.WakeVision,
+        system=_Hardware.Tiny.ESP32_S3,
         sla_latency=Q_("200 ms"),
         power_budget=Q_("100 mW"),
     )
@@ -168,8 +179,9 @@ class Scenarios:
     TinySensor = Scenario(
         name="Anomaly Sensor",
         description="Low-power vibration monitoring for industrial predictive maintenance.",
-        workload=Models.Tiny.AnomalyDetector,
-        system=Hardware.Tiny.ESP32_S3,
+        application="Industrial Anomaly Detection",
+        workload=_Models.Tiny.AnomalyDetector,
+        system=_Hardware.Tiny.ESP32_S3,
         sla_latency=Q_("10 ms"),
         power_budget=Q_("50 mW"),
     )
@@ -178,16 +190,23 @@ class Scenarios:
     AutonomousVehicle = Scenario(
         name="Autonomous Vehicle",
         description="Real-time object detection for safe urban navigation.",
-        workload=Models.Vision.ResNet50,
-        system=Hardware.Edge.JetsonOrinNX,
+        application="Autonomous Vehicle",
+        workload=_Models.Vision.YOLOv8_Nano,
+        system=_Hardware.Edge.JetsonOrinNX,
         sla_latency=Q_("10 ms")
     )
 
     AutonomousVehicle_Waymo = Scenario(
         name="Waymo AV Data Pipeline",
         description="High-throughput data ingestion for autonomous fleet training.",
-        workload=Models.Vision.ResNet50.model_copy(update={"name": "Waymo (High)", "data_rate": Q_("19 TB/hour")}),
-        system=Hardware.Edge.JetsonOrinNX,
+        application="Autonomous Vehicle",
+        workload=_Models.Vision.YOLOv8_Nano.model_copy(
+            update={
+                "name": "Waymo (High)",
+                "data_rate": _ReferenceStats.Workloads.WaymoDataPerHourHigh,
+            }
+        ),
+        system=_Hardware.Edge.JetsonOrinNX,
         sla_latency=Q_("10 ms")
     )
 
@@ -195,26 +214,39 @@ class Scenarios:
     MobileHealth = Scenario(
         name="Mobile Health",
         description="On-device medical image analysis for remote diagnostics.",
-        workload=Models.Vision.MobileNetV2,
-        system=Hardware.Mobile.iPhone15Pro,
+        application="Mobile Health",
+        workload=_Models.Vision.MobileNetV2,
+        system=_Hardware.Mobile.iPhone15Pro,
         sla_latency=Q_("30 ms")
+    )
+
+    MobileAssistant = Scenario(
+        name="Mobile Assistant",
+        description="On-device assistant with a quantized small LLM on a smartphone.",
+        application="Mobile Assistant",
+        workload=_Models.Language.Llama3_8B,
+        system=_Hardware.Mobile.iPhone15Pro,
+        sla_latency=Q_("100 ms"),
+        power_budget=Q_("5 W"),
     )
 
     # --- WORKSTATION WORLD ---
     LocalTraining = Scenario(
         name="Local LLM Fine-tuning",
         description="Fine-tuning a Llama-3 model on a high-end student workstation.",
-        workload=Models.Language.Llama3_8B,
-        system=Hardware.Workstation.MacBookM3Max,
+        application="Local Fine-tuning",
+        workload=_Models.Language.Llama3_8B,
+        system=_Hardware.Workstation.MacBookM3Max,
         sla_latency=Q_("100 ms")
     )
 
     # --- CLOUD WORLD ---
     FrontierTraining = Scenario(
         name="Frontier LLM Training",
-        description="Pre-training a 70B parameter foundation model on a massive fleet.",
-        workload=Models.Language.Llama3_70B,
-        system=Clusters.Frontier_8K,
+        description="Pre-training a GPT-4-class frontier model on a massive fleet.",
+        application="Frontier Training",
+        workload=_Models.Language.GPT4,
+        system=_Clusters.Frontier_8K,
         sla_latency=Q_("500 ms") # Per-step target
     )
 
@@ -222,8 +254,9 @@ class Scenarios:
     ChatbotServing = Scenario(
         name="Chatbot Serving",
         description="Serving a Llama-3 8B chatbot on a single H100 with latency SLA.",
-        workload=Models.Language.Llama3_8B,
-        system=Hardware.Cloud.H100,
+        application="Chatbot Serving",
+        workload=_Models.Language.Llama3_8B,
+        system=_Hardware.Cloud.H100,
         sla_latency=Q_("500 ms"),  # TTFT target
     )
 
@@ -231,16 +264,9 @@ class Scenarios:
     KeywordSpotting = Scenario(
         name="Keyword Spotting",
         description="Always-on wake-word detection on a microcontroller (MLPerf Tiny benchmark).",
-        workload=Models.Tiny.DS_CNN,
-        system=Hardware.Tiny.ESP32_S3,
+        application="Keyword Spotting",
+        workload=_Models.Tiny.DS_CNN,
+        system=_Hardware.Tiny.ESP32_S3,
         sla_latency=Q_("30 ms"),
         power_budget=Q_("1 mW"),
     )
-
-class Applications:
-    Doorbell = Scenarios.SmartDoorbell
-    AutoDrive = Scenarios.AutonomousVehicle
-    Workstation = Scenarios.LocalTraining
-    Frontier = Scenarios.FrontierTraining
-    Chatbot = Scenarios.ChatbotServing
-    KWS = Scenarios.KeywordSpotting

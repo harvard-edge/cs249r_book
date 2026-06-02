@@ -27,7 +27,7 @@ from .units import *  # noqa: F401,F403 — re-export full unit registry
 # NVMe SSD            -> Hardware.Tech.Storage.NvmeGen4.latency
 # InfiniBand (fabric) -> Systems.Fabrics.InfiniBand_NDR.latency
 
-# Mobile NPU peak power -> Scenarios.MobilePower.MobileNpuPeak
+# Mobile NPU peak power -> ReferenceStats.MobilePower.MobileNpuPeak
 
 # Standard dimensions
 # IMAGE_DIM_RESNET -> Datasets.ImageNet.image_width
@@ -49,11 +49,11 @@ from .units import *  # noqa: F401,F403 — re-export full unit registry
 # --- Physics --- (universal physical constants -> physics/constants.py)
 # SPEED_OF_LIGHT_FIBER_KM_S -> physics/constants.py
 
-# --- Mobile / Battery --- (device reference figures -> Scenarios)
-# mobile NPU + object-detector power -> Scenarios.MobilePower.*
-# flagship phone battery (Wh) -> Scenarios.PhoneBattery.EnergyWh
+# --- Mobile / Battery --- (device reference figures -> ReferenceStats)
+# mobile NPU + object-detector power -> ReferenceStats.MobilePower.*
+# flagship phone battery (Wh) -> ReferenceStats.PhoneBattery.EnergyWh
 
-# Reference energy-scale anchors -> Scenarios.EnergyAnchors.{SmartphoneCharge,BoilingWater}
+# Reference energy-scale anchors -> ReferenceStats.EnergyAnchors.{SmartphoneCharge,BoilingWater}
 
 # --- Video --- (VIDEO_* encoding/format facts -> core/units.py)
 
@@ -61,18 +61,18 @@ from .units import *  # noqa: F401,F403 — re-export full unit registry
 # TRANSFORMER FLOP ratios -> Literature.Chinchilla.{ComputeConstant(6PD), DecodeConstant(2P)}
 # TRANSFORMER_*_EXAMPLE dims -> inlined in the one local hardware-acceleration example that used them.
 # SIMD_REGISTER_BITS, FP32_BITS, INT8_BITS -> core/units.py (bit widths)
-# Single-scenario illustrative scalars are inlined in their LEGO cells when they
-# have no canonical registry home:
+# Example-specific pedagogical scalars are inlined at their call sites (no
+# canonical registry home, per the architecture's pedagogical-input carve-out):
 #   SYSTOLIC_ARRAY_DIM -> hw_acceleration; SYNTHETIC_* -> data_storage;
 #   LOGIC_WALL_REASONING_STEPS_EXAMPLE -> inference; ML_WORKFLOW_STAGE_*/COST_BASE -> ml_workflow
-# GOOGLE_SEARCHES_PER_DAY, GMAIL_EMAILS_PER_DAY -> Scenarios.Workloads
+# GOOGLE_SEARCHES_PER_DAY, GMAIL_EMAILS_PER_DAY -> ReferenceStats.Workloads
 
 # --- Storage (I/O Bandwidth) ---
 # NVME_*/SYSTEM_MEMORY_BW/HOST_DRAM_BW -> Hardware.Tech.Storage (tech-class bandwidth)
-# LOCAL_NVME_DRIVES_PER_NODE_REF -> inlined node-config in data_storage.
+# LOCAL_NVME_DRIVES_PER_NODE_REF -> inlined node-config in storage examples
 
-# --- Case Studies --- (WAYMO_*, ANOMALY_MODEL_* -> Scenarios.Workloads / Scenarios.AnomalyModel)
+# --- Case Studies --- (WAYMO_*, ANOMALY_MODEL_* -> ReferenceStats.Workloads / ReferenceStats.AnomalyModel)
 
-# Phone battery capacity/voltage/energy -> Scenarios.PhoneBattery.{CapacityMah,VoltageV,EnergyJ}
+# Phone battery capacity/voltage/energy -> ReferenceStats.PhoneBattery.{CapacityMah,VoltageV,EnergyJ}
 
 # PRECISION_MAP -> core/units.py (precision-string -> byte-width is a measurement fact)

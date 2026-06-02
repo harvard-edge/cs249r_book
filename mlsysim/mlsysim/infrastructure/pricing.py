@@ -6,10 +6,10 @@ from ..core.types import Metadata
 from ..core import provenance_catalog as pc
 from .types import PricePoint
 
-_CLOUD = Metadata(provenance=pc.CLOUD_PRICING_2024_ANCHORS)
-_STORAGE = Metadata(provenance=pc.STORAGE_PRICING_2024_ANCHORS)
-_LABELING = Metadata(provenance=pc.LABELING_PRICING_2024_ANCHORS)
-_FLEET = Metadata(provenance=pc.FLEET_ECONOMICS_2024_ANCHORS)
+_CLOUD = Metadata(provenance=pc.CLOUD_PRICING_2024)
+_STORAGE = Metadata(provenance=pc.STORAGE_PRICING_2024)
+_LABELING = Metadata(provenance=pc.LABELING_PRICING_2024)
+_FLEET = Metadata(provenance=pc.FLEET_ECONOMICS_2024)
 _CAPITAL = Metadata(provenance=pc.BARROSO_DATACENTER_ECONOMICS)
 _ONPREM = Metadata(provenance=pc.BARROSO_DATACENTER_ECONOMICS)
 
@@ -42,12 +42,12 @@ class Cloud(Registry):
         metadata=_CLOUD,
     )
     LowCostGpuPerHour = PricePoint(
-        name="Cloud low-cost GPU",
+        name="Cloud GPU (low-cost reference)",
         rate=0.50 * USD / hour,
         metadata=_CLOUD,
     )
     A10GInferencePerHour = PricePoint(
-        name="Cloud A10G inference",
+        name="A10G inference GPU",
         rate=0.75 * USD / hour,
         metadata=_CLOUD,
     )
@@ -62,57 +62,38 @@ class Storage(Registry):
     """Object/block storage tiers."""
     S3StandardPerTbMonth = PricePoint(
         name="S3 standard",
-        rate=23 * USD / (TB * ureg.month),
-        metadata=_STORAGE,
-    )
-    S3StandardLowPerTbMonth = PricePoint(
-        name="S3 standard (low round-number anchor)",
-        rate=20 * USD / (TB * ureg.month),
+        rate=23 * USD / TB / ureg.month,
         metadata=_STORAGE,
     )
     GlacierPerTbMonth = PricePoint(
         name="Glacier",
-        rate=1 * USD / (TB * ureg.month),
+        rate=1 * USD / TB / ureg.month,
+        metadata=_STORAGE,
+    )
+    S3StandardLowPerTbMonth = PricePoint(
+        name="S3 standard (low reference)",
+        rate=0.02 * USD / GB / ureg.month,
         metadata=_STORAGE,
     )
     GlacierStandardPerTbMonth = PricePoint(
-        name="Glacier standard retrieval-era anchor",
-        rate=4 * USD / (TB * ureg.month),
+        name="Glacier standard",
+        rate=0.004 * USD / GB / ureg.month,
         metadata=_STORAGE,
     )
     NvmeLowPerTbMonth = PricePoint(
         name="NVMe (low)",
-        rate=100 * USD / (TB * ureg.month),
+        rate=100 * USD / TB / ureg.month,
         metadata=_STORAGE,
     )
     NvmeHighPerTbMonth = PricePoint(
         name="NVMe (high)",
-        rate=300 * USD / (TB * ureg.month),
+        rate=300 * USD / TB / ureg.month,
         metadata=_STORAGE,
     )
     GlacierRetrievalPerGB = PricePoint(
         name="Glacier retrieval",
         rate=0.02 * USD / GB,
         metadata=_STORAGE,
-    )
-
-
-class Monitoring(Registry):
-    """Cloud monitoring and observability service price anchors."""
-    IngestionPerMillionDatapoints = PricePoint(
-        name="Monitoring ingestion per million datapoints",
-        rate=0.30 * USD,
-        metadata=_CLOUD,
-    )
-    StoragePerGbMonth = PricePoint(
-        name="Monitoring storage",
-        rate=1.00 * USD / (GB * ureg.month),
-        metadata=_CLOUD,
-    )
-    QueryPerRequest = PricePoint(
-        name="Monitoring dashboard query",
-        rate=0.02 * USD,
-        metadata=_CLOUD,
     )
 
 
@@ -138,7 +119,27 @@ class Fleet(Registry):
     CarbonPerGpuHr = PricePoint(
         name="Carbon per GPU-hour (illustrative)",
         rate=0.16 * ureg.kilogram,
-        metadata=Metadata(provenance=pc.GPU_HOUR_CARBON_PROXY),
+        metadata=Metadata(provenance=pc.CARBON_PER_GPU_HR),
+    )
+
+
+class Monitoring(Registry):
+    """Monitoring and observability price anchors."""
+
+    IngestionPerMillionDatapoints = PricePoint(
+        name="Monitoring ingestion per million datapoints",
+        rate=0.30 * USD,
+        metadata=_CLOUD,
+    )
+    StoragePerGbMonth = PricePoint(
+        name="Monitoring metric storage",
+        rate=1.00 * USD / GB / ureg.month,
+        metadata=_CLOUD,
+    )
+    QueryPerRequest = PricePoint(
+        name="Monitoring query request",
+        rate=0.02 * USD,
+        metadata=_CLOUD,
     )
 
 
@@ -173,8 +174,8 @@ class OnPremises(Registry):
 class Pricing(Registry):
     Cloud = Cloud
     Storage = Storage
-    Monitoring = Monitoring
     Labeling = Labeling
     Fleet = Fleet
+    Monitoring = Monitoring
     Capital = Capital
     OnPremises = OnPremises

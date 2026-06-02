@@ -17,7 +17,7 @@ from . import physics
 
 # AUTHORITATIVE API ENTRY POINTS
 from .engine.engine import Engine
-from .engine.scenarios import Scenario, Scenarios as ScenarioBundles, Applications
+from .engine.scenarios import Scenario, Scenarios
 from .hardware.registry import Hardware
 from .models.registry import Models
 from .platforms.registry import Platforms
@@ -25,24 +25,10 @@ from .platforms.registry import Platforms
 from .systems.registry import Systems
 from .infrastructure.registry import Infrastructure
 from .literature.registry import Literature
-# Book-facing scenario anchors: Scenarios.Workloads, Scenarios.MobilePower, etc.
-from .scenarios.registry import Scenarios
-from .ops import Ops, Monitoring
+# Non-executable sourced anchors used by examples and external analyses.
+from .scenarios.registry import ReferenceStats
+from .ops import Ops
 from .engine import calibration
-
-# AUTHORITATIVE SOLVERS
-from .engine.solver import (
-    SingleNodeModel,
-    DistributedModel,
-    ReliabilityModel,
-    SustainabilityModel,
-    EconomicsModel,
-    ServingModel,
-    TrainingMemoryModel,
-    ServingCapacityModel,
-    DataModel,
-    PlacementOptimizer,
-)
 
 # AUTHORITATIVE MEASUREMENT (units + physics-only constants)
 from .core.constants import *  # noqa: F401,F403

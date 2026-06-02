@@ -1,4 +1,4 @@
-"""Published literature anchors used by registry-backed calculations (MFU, Chinchilla, …).
+"""Published literature anchors used by MLSysIM (MFU, Chinchilla, benchmarks, ...).
 
 Each anchor is a provenance-carrying scalar; the values live as YAML under
 ``literature/data/<category>.yaml`` and are loaded via ``load_sourced_registry``
@@ -18,6 +18,7 @@ def _load(stem: str, name: str, doc: str = "") -> type:
 
 
 Training = _load("training", "Training")
+Benchmarks = _load("benchmarks", "Benchmarks", "Published benchmark anchors used by empirical validation tests.")
 Chinchilla = _load("chinchilla", "Chinchilla")
 Communication = _load("communication", "Communication")
 BatchSize = _load("batchsize", "BatchSize", "McCandlish et al. (2018) critical batch size estimates.")
@@ -80,6 +81,7 @@ class ComputeTrend:
 class Literature(Registry):
     """Registry namespace for Literature."""
     Training = Training
+    Benchmarks = Benchmarks
     Chinchilla = Chinchilla
     Communication = Communication
     BatchSize = BatchSize

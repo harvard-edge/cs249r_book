@@ -162,16 +162,19 @@ def check_lego_equations(root: Path, paths: list[Path] | None = None) -> list[Re
 
 
 def run_registry_pytest(root: Path) -> list[RegistryIssue]:
-    """Run mlsysim registry gate tests."""
+    """Run MLSysIM registry gates plus book-owned usage checks."""
     tests = [
         "tests/test_constants_allowlist.py",
-        "tests/test_no_legacy_constant_refs.py",
-        "tests/test_appendix_constants.py",
         "tests/test_registry_no_duplicate_specs.py",
         "tests/test_provenance_audit.py",
+        "../book/tests/test_appendix_constants.py",
+        "../book/tests/test_appendix_lineage.py",
+        "../book/tests/test_no_legacy_constant_refs.py",
+        "../book/tests/test_mlsysim_registry_coverage.py",
+        "../book/tests/test_mlsysim_registry_parity.py",
     ]
     proc = subprocess.run(
-        [sys.executable, "-m", "pytest", *tests, "-q"],
+        [sys.executable, "-m", "pytest", *tests, "--no-cov", "-q"],
         cwd=root / "mlsysim",
         capture_output=True,
         text=True,

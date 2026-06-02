@@ -70,7 +70,7 @@ def evaluate_main(
                 precision=schema.hardware.precision,
                 efficiency=schema.hardware.efficiency,
                 fleet_obj=schema.fleet_obj,
-                nodes=schema.hardware.nodes,
+                nodes=schema.hardware.total_accelerators,
                 duration_days=schema.ops.duration_days if schema.ops else None
             )
             

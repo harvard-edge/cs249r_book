@@ -2,6 +2,8 @@
 
 from ..core.units import GB, GiB, KiB, MB, TB, ureg
 from ..core.registry import Registry
+from ..core.types import Metadata
+from ..core import provenance_catalog as pc
 from .types import PlatformEnvelope
 
 # Latency envelopes (ms, prose ranges for tables)
@@ -24,7 +26,7 @@ MCU_RAM_KIB = 512 * KiB
 
 
 class Platforms(Registry):
-    """Book deployment paradigms with latency, memory, and power envelopes."""
+    """Deployment paradigms with latency, memory, and power envelopes."""
 
     Cloud = PlatformEnvelope(
         name="Cloud",
@@ -33,6 +35,7 @@ class Platforms(Registry):
         typical_latency_budget=200 * ureg.ms,
         latency_range_ms=CLOUD_LATENCY_RANGE_MS,
         ram_range=f"{CLOUD_MEM_GIB.to('GiB').magnitude:.0f}+ GiB",
+        metadata=Metadata(provenance=pc.DEPLOYMENT_ENVELOPES),
     )
     Edge = PlatformEnvelope(
         name="Edge",
@@ -40,6 +43,7 @@ class Platforms(Registry):
         storage=1 * TB,
         typical_latency_budget=50 * ureg.ms,
         latency_range_ms=EDGE_LATENCY_RANGE_MS,
+        metadata=Metadata(provenance=pc.DEPLOYMENT_ENVELOPES),
     )
     Mobile = PlatformEnvelope(
         name="Mobile",
@@ -50,6 +54,7 @@ class Platforms(Registry):
         ram_range=MOBILE_RAM_RANGE_GB,
         storage_range=MOBILE_STORAGE_RANGE,
         tdp_range_w=MOBILE_TDP_RANGE_W,
+        metadata=Metadata(provenance=pc.DEPLOYMENT_ENVELOPES),
     )
     Tiny = PlatformEnvelope(
         name="TinyML",
@@ -58,4 +63,5 @@ class Platforms(Registry):
         typical_latency_budget=100 * ureg.ms,
         latency_range_ms=TINY_LATENCY_RANGE_MS,
         ram_range=f"{TINY_MEM_KIB.to('KiB').magnitude:.0f} KiB",
+        metadata=Metadata(provenance=pc.DEPLOYMENT_ENVELOPES),
     )

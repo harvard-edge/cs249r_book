@@ -9,7 +9,7 @@ from .types import (
     StorageSubsystem,
 )
 from .reliability import Reliability
-from .orchestration import Orchestration
+from .orchestration import Orchestration as OrchestrationProfile
 from ..core.units import ureg, Q_, Gbps, GB, TB, watt, MB, kilowatt
 from ..core.provenance import sourced, sourced_qty
 from ..hardware.registry import Hardware
@@ -18,10 +18,10 @@ from ..core.types import Metadata
 from ..core import provenance_catalog as pc
 
 # Fabric α latencies for α-β communication models.
-IB_NDR_LATENCY_US = sourced(5, pc.FABRIC_LATENCY_REFERENCE, name="InfiniBand NDR latency (μs)", description="One-way α latency for NDR fabrics.")
-IB_HDR_LATENCY_US = sourced(7, pc.FABRIC_LATENCY_REFERENCE, name="InfiniBand HDR latency (μs)", description="One-way α latency for HDR fabrics.")
-ROCE_LATENCY_US = sourced(10, pc.FABRIC_LATENCY_REFERENCE, name="RoCE latency (μs)", description="One-way α latency for RoCE v2.")
-TCP_LATENCY_US = sourced(50, pc.FABRIC_LATENCY_REFERENCE, name="TCP latency (μs)", description="One-way α latency for TCP over Ethernet.")
+IB_NDR_LATENCY_US = sourced(5, pc.FABRIC_LATENCY_ASSUMPTIONS, name="InfiniBand NDR latency (μs)", description="One-way α latency for NDR fabrics.")
+IB_HDR_LATENCY_US = sourced(7, pc.FABRIC_LATENCY_ASSUMPTIONS, name="InfiniBand HDR latency (μs)", description="One-way α latency for HDR fabrics.")
+ROCE_LATENCY_US = sourced(10, pc.FABRIC_LATENCY_ASSUMPTIONS, name="RoCE latency (μs)", description="One-way α latency for RoCE v2.")
+TCP_LATENCY_US = sourced(50, pc.FABRIC_LATENCY_ASSUMPTIONS, name="TCP latency (μs)", description="One-way α latency for TCP over Ethernet.")
 
 _INFINIBAND_HDR_BW = 200 * Gbps
 _INFINIBAND_NDR_BW = 400 * Gbps
@@ -47,7 +47,7 @@ class Nodes(Registry):
         intra_node_bw=Hardware.Cloud.H100.nvlink.bandwidth,
         nics_per_node=8,
         host_memory=2 * TB,
-        metadata=Metadata(provenance=pc.DGX_GPUS_PER_HOST_CONVENTION),
+        metadata=Metadata(provenance=pc.DGX_GPUS_PER_HOST),
     )
     DGX_A100 = Node(
         name="DGX A100",
@@ -55,6 +55,7 @@ class Nodes(Registry):
         accelerators_per_node=8,
         intra_node_bw=Hardware.Cloud.A100.nvlink.bandwidth,
         nics_per_node=8,
+        metadata=Metadata(provenance=pc.DGX_GPUS_PER_HOST),
     )
     DGX_B200 = Node(
         name="DGX B200",
@@ -62,6 +63,7 @@ class Nodes(Registry):
         accelerators_per_node=8,
         intra_node_bw=Hardware.Cloud.B200.nvlink.bandwidth,
         nics_per_node=8,
+        metadata=Metadata(provenance=pc.DGX_GPUS_PER_HOST),
     )
     Kempner_H100_4GPU = Node(
         name="Kempner H100 4-GPU Server",
@@ -80,11 +82,11 @@ class Fabrics(Registry):
     """Vetted network fabrics (canonical bandwidth + latency)."""
     Ethernet_10G = NetworkFabric(
         name="10GbE", bandwidth=10 * Gbps, latency=Q_(TCP_LATENCY_US, "us"),
-        metadata=Metadata(provenance=pc.FABRIC_LATENCY_REFERENCE),
+        metadata=Metadata(provenance=pc.FABRIC_LATENCY_ASSUMPTIONS),
     )
     Ethernet_100G = NetworkFabric(
         name="100GbE", bandwidth=100 * Gbps, latency=Q_(TCP_LATENCY_US, "us"),
-        metadata=Metadata(provenance=pc.FABRIC_LATENCY_REFERENCE),
+        metadata=Metadata(provenance=pc.FABRIC_LATENCY_ASSUMPTIONS),
     )
     Ethernet_400G = NetworkFabric(
         name="400GbE", bandwidth=400 * Gbps, latency=Q_(TCP_LATENCY_US, "us"),
@@ -120,7 +122,7 @@ class Fabrics(Registry):
     )
 
 
-_TIER_PROV = pc.CLUSTER_TIER_CONVENTION
+_TIER_PROV = pc.CLUSTER_TIER_CONVENTIONS
 
 
 class Clusters(Registry):
@@ -221,7 +223,7 @@ class Pods(Registry):
         memory=131 * TB,
         power=3 * ureg.megawatt,
         metadata=Metadata(
-            provenance=pc.CLUSTER_TIER_CONVENTION,
+            provenance=pc.CLUSTER_TIER_CONVENTIONS,
             description="Reference TPU pod envelope for cloud-scale system models.",
         ),
     )
@@ -255,34 +257,34 @@ class SwitchFabric(Registry):
         name="NDR leaf uplink ports", description="Reference uplinks per 64-port leaf switch.")
     SwitchAsic51T2 = sourced_qty(51_200 * Gbps, pc.NVIDIA_QUANTUM2_QM97XX_SWITCH,
         name="Switch ASIC 51.2T", description="Single-ASIC switch capacity (51.2 Tb/s class).")
-    SwitchAsic102T4 = sourced_qty(102_400 * Gbps, pc.DATACENTER_SWITCH_OPTICS_REFERENCE,
+    SwitchAsic102T4 = sourced_qty(102_400 * Gbps, pc.SWITCH_OPTICS_REFERENCE,
         name="Switch ASIC 102.4T", description="Single-ASIC switch capacity (102.4 Tb/s class).")
-    OpticsPluggable400G = sourced_qty(20 * watt, pc.DATACENTER_SWITCH_OPTICS_REFERENCE,
+    OpticsPluggable400G = sourced_qty(20 * watt, pc.SWITCH_OPTICS_REFERENCE,
         name="400G pluggable optics power", description="Per-module power for a 400G pluggable transceiver.")
-    OpticsCpo400G = sourced_qty(10 * watt, pc.DATACENTER_SWITCH_OPTICS_REFERENCE,
+    OpticsCpo400G = sourced_qty(10 * watt, pc.SWITCH_OPTICS_REFERENCE,
         name="400G co-packaged optics power", description="Per-port power for 400G co-packaged optics.")
     # α-β model latency anchors. NOTE: AlphaNdr (1.5 µs) is the per-message base latency used in
     # the ring-allreduce model; it is DISTINCT from the end-to-end
     # Fabrics.InfiniBand_NDR.latency (5 µs). Both values are preserved as-is here — reconciling
     # which is canonical is a separate editorial decision, not a taxonomy move.
-    AlphaNdr = sourced_qty(1.5 * ureg.microsecond, pc.FABRIC_LATENCY_REFERENCE,
+    AlphaNdr = sourced_qty(1.5 * ureg.microsecond, pc.FABRIC_LATENCY_ASSUMPTIONS,
         name="α (NDR base latency)", description="Per-message base latency for the NDR α-β model.")
-    AlphaRoce = sourced_qty(5.0 * ureg.microsecond, pc.FABRIC_LATENCY_REFERENCE,
+    AlphaRoce = sourced_qty(5.0 * ureg.microsecond, pc.FABRIC_LATENCY_ASSUMPTIONS,
         name="α (RoCE base latency)", description="Per-message base latency for the RoCE α-β model.")
-    HopLatency = sourced_qty(0.6 * ureg.microsecond, pc.FABRIC_LATENCY_REFERENCE,
+    HopLatency = sourced_qty(0.6 * ureg.microsecond, pc.FABRIC_LATENCY_ASSUMPTIONS,
         name="Per-hop switch latency", description="Approximate per-hop store-and-forward switch latency.")
-    FecLatencyLow = sourced_qty(100 * ureg.nanosecond, pc.FABRIC_LATENCY_REFERENCE,
+    FecLatencyLow = sourced_qty(100 * ureg.nanosecond, pc.FABRIC_LATENCY_ASSUMPTIONS,
         name="FEC latency (low)", description="Lower-bound forward-error-correction added latency.")
-    FecLatencyHigh = sourced_qty(200 * ureg.nanosecond, pc.FABRIC_LATENCY_REFERENCE,
+    FecLatencyHigh = sourced_qty(200 * ureg.nanosecond, pc.FABRIC_LATENCY_ASSUMPTIONS,
         name="FEC latency (high)", description="Upper-bound forward-error-correction added latency.")
 
 
 class NetworkEnergy(Registry):
     """Network data-transfer energy anchors (order-of-magnitude intuition)."""
 
-    Per5gMb = sourced_qty(100 * ureg.millijoule / MB, pc.NETWORK_TRANSFER_ENERGY_ANCHORS,
+    Per5gMb = sourced_qty(100 * ureg.millijoule / MB, pc.NETWORK_ENERGY_ANCHORS,
         name="5G transfer energy per MB", description="Approximate radio-access energy to move 1 MB over 5G.")
-    Per1Kb = sourced_qty(1_000_000 * ureg.picojoule, pc.NETWORK_TRANSFER_ENERGY_ANCHORS,
+    Per1Kb = sourced_qty(1_000_000 * ureg.picojoule, pc.NETWORK_ENERGY_ANCHORS,
         name="Network energy per KB", description="Approximate energy to move 1 KB across a datacenter network (~1 µJ).")
 
 
@@ -310,7 +312,7 @@ class Storage(Registry):
         media="NVMe SSD",
         interface="PCIe Gen4",
         durability="local",
-        metadata=Metadata(provenance=pc.STORAGE_TIER_REFERENCE),
+        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
     )
     LocalNvmeGen3 = StorageSubsystem(
         name="Local NVMe SSD (Gen3)",
@@ -320,7 +322,7 @@ class Storage(Registry):
         media="NVMe SSD",
         interface="PCIe Gen3",
         durability="local",
-        metadata=Metadata(provenance=pc.STORAGE_TIER_REFERENCE),
+        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
     )
     SataSsd = StorageSubsystem(
         name="SATA SSD",
@@ -329,7 +331,7 @@ class Storage(Registry):
         media="SATA SSD",
         interface="SATA",
         durability="local",
-        metadata=Metadata(provenance=pc.STORAGE_TIER_REFERENCE),
+        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
     )
     SataSsdEffective = StorageSubsystem(
         name="SATA SSD (effective sequential)",
@@ -337,7 +339,7 @@ class Storage(Registry):
         media="SATA SSD",
         interface="SATA",
         durability="local",
-        metadata=Metadata(provenance=pc.STORAGE_TIER_REFERENCE),
+        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
     )
     Hdd7200Rpm = StorageSubsystem(
         name="7.2k RPM HDD",
@@ -346,14 +348,14 @@ class Storage(Registry):
         media="HDD",
         interface="SATA",
         durability="local",
-        metadata=Metadata(provenance=pc.STORAGE_TIER_REFERENCE),
+        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
     )
     CloudBlockStorageBaseline = StorageSubsystem(
         name="Cloud block storage baseline",
         bandwidth=250 * (MB / ureg.second),
         media="cloud block volume",
         durability="durable",
-        metadata=Metadata(provenance=pc.STORAGE_TIER_REFERENCE),
+        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
     )
     ObjectStoreSingleStream = StorageSubsystem(
         name="Object storage single-stream read",
@@ -361,7 +363,7 @@ class Storage(Registry):
         media="object storage",
         interface="HTTP range request",
         durability="durable",
-        metadata=Metadata(provenance=pc.STORAGE_TIER_REFERENCE),
+        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
     )
     LocalNvmeTrainingLow = StorageSubsystem(
         name="Local NVMe training tier (low)",
@@ -369,7 +371,7 @@ class Storage(Registry):
         media="NVMe SSD",
         interface="PCIe",
         durability="local",
-        metadata=Metadata(provenance=pc.STORAGE_TIER_REFERENCE),
+        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
     )
     LocalNvmeTrainingTypical = StorageSubsystem(
         name="Local NVMe training tier (typical)",
@@ -377,13 +379,13 @@ class Storage(Registry):
         media="NVMe SSD",
         interface="PCIe",
         durability="local",
-        metadata=Metadata(provenance=pc.STORAGE_TIER_REFERENCE),
+        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
     )
     LocalNvmeGen4x4 = NodeStorageConfig(
         name="4x local Gen4 NVMe drives per node",
         device=LocalNvmeGen4,
         devices_per_node=4,
-        metadata=Metadata(provenance=pc.STORAGE_TIER_REFERENCE),
+        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
     )
     PfsOneTbPerSecond = StorageSubsystem(
         name="Reference parallel file system (1 TB/s)",
@@ -391,7 +393,7 @@ class Storage(Registry):
         media="parallel file system",
         durability="durable",
         metadata=Metadata(
-            provenance=pc.STORAGE_TIER_REFERENCE,
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
             description="Reference aggregate PFS bandwidth for checkpoint-staging examples.",
         ),
     )
@@ -401,7 +403,7 @@ class Storage(Registry):
         durable_store=PfsOneTbPerSecond,
         write_bandwidth=PfsOneTbPerSecond.bandwidth,
         metadata=Metadata(
-            provenance=pc.STORAGE_TIER_REFERENCE,
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
             description="Reference local-NVMe-to-PFS checkpoint path for a 2K H100 fleet.",
         ),
     )
@@ -418,4 +420,6 @@ class Systems(Registry):
     Pods = Pods
     Racks = Racks
     Reliability = Reliability
-    Orchestration = Orchestration()
+    Orchestration = OrchestrationProfile(
+        metadata=Metadata(provenance=pc.ORCHESTRATION_ASSUMPTIONS)
+    )

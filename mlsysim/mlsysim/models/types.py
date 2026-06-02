@@ -1,7 +1,13 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional
 from ..core.constants import ureg, BYTES_FP16
-from ..core.types import Quantity, Metadata
+from ..core.types import (
+    Quantity,
+    Metadata,
+    require_dimensionality,
+    require_unit_family,
+    require_unit_families,
+)
 
 class ComputationGraph(BaseModel):
     """
@@ -21,6 +27,26 @@ class ComputationGraph(BaseModel):
     
     # Optional metadata
     layers: Optional[int] = None
+
+    @field_validator("total_ops", mode="after")
+    @classmethod
+    def _validate_total_ops(cls, v):
+        return require_unit_family(v, ureg.count, "total_ops", "operation")
+
+    @field_validator("parameter_count", mode="after")
+    @classmethod
+    def _validate_parameter_count(cls, v):
+        return require_unit_family(v, ureg.count, "parameter_count", "count")
+
+    @field_validator("weight_bytes", mode="after")
+    @classmethod
+    def _validate_weight_bytes(cls, v):
+        return require_unit_family(v, ureg.byte, "weight_bytes", "data")
+
+    @field_validator("arithmetic_intensity", mode="after")
+    @classmethod
+    def _validate_arithmetic_intensity(cls, v):
+        return require_unit_families(v, ureg.count / ureg.byte, "arithmetic_intensity", ("operation", "data"))
     
     def __repr__(self):
         return f"ComputationGraph({self.name}, {self.total_ops:~P})"
@@ -46,6 +72,31 @@ class Workload(BaseModel):
     training_dataset_size: Optional[Quantity] = None
     parameter_range_min: Optional[Quantity] = None
     parameter_range_max: Optional[Quantity] = None
+
+    @field_validator("parameters", "embedding_entries", mode="after")
+    @classmethod
+    def _validate_count_fields(cls, v, info):
+        return require_unit_family(v, ureg.count, info.field_name, "count")
+
+    @field_validator("model_size", mode="after")
+    @classmethod
+    def _validate_model_size(cls, v):
+        return require_unit_family(v, ureg.byte, "model_size", "data")
+
+    @field_validator("inference_flops", mode="after")
+    @classmethod
+    def _validate_inference_flops(cls, v):
+        return require_unit_family(v, ureg.count, "inference_flops", "operation")
+
+    @field_validator("inference_energy", mode="after")
+    @classmethod
+    def _validate_inference_energy(cls, v):
+        return require_dimensionality(v, ureg.joule, "inference_energy")
+
+    @field_validator("data_rate", mode="after")
+    @classmethod
+    def _validate_data_rate(cls, v):
+        return require_unit_family(v, ureg.byte / ureg.second, "data_rate", "data")
 
     def lower(self, precision: Quantity = BYTES_FP16) -> ComputationGraph:
         """
@@ -105,6 +156,21 @@ class TransformerWorkload(Workload):
     training_gpu_days: Optional[float] = None
     training_hardware_label: Optional[str] = None
     inference_flops: Optional[Quantity] = None
+
+    @field_validator("training_ops", mode="after")
+    @classmethod
+    def _validate_training_ops(cls, v):
+        return require_unit_family(v, ureg.count, "training_ops", "operation")
+
+    @field_validator("training_tokens", "training_accelerators_ref", mode="after")
+    @classmethod
+    def _validate_training_count_fields(cls, v, info):
+        return require_unit_family(v, ureg.count, info.field_name, "count")
+
+    @field_validator("training_days_ref", mode="after")
+    @classmethod
+    def _validate_training_days_ref(cls, v):
+        return require_dimensionality(v, ureg.day, "training_days_ref")
     
     def size_in_bytes(self, precision: Quantity = BYTES_FP16) -> Quantity:
         param_count = self.parameters.to(ureg.count).magnitude
@@ -140,11 +206,11 @@ class TransformerWorkload(Workload):
         Returns:
             Quantity[byte]: Total training memory per GPU
         """
-        from ..core.constants import BYTES_FP32, BYTES_FP16, BYTES_INT8, BYTES_INT4
+        from ..core.constants import resolve_precision
         from ..physics import calc_activation_memory
         
-        prec_map = {"fp32": BYTES_FP32, "fp16": BYTES_FP16, "int8": BYTES_INT8, "int4": BYTES_INT4}
-        bpp = prec_map.get(precision, BYTES_FP16).to(ureg.byte).magnitude
+        _, precision_bytes = resolve_precision(precision)
+        bpp = precision_bytes.to(ureg.byte).magnitude
         
         n_params = self.parameters.to(ureg.count).magnitude
         
@@ -209,6 +275,11 @@ class SparseTransformerWorkload(TransformerWorkload):
     active_parameters: Quantity
     experts: int
     active_experts_per_token: int = 1
+
+    @field_validator("active_parameters", mode="after")
+    @classmethod
+    def _validate_active_parameters(cls, v):
+        return require_unit_family(v, ureg.count, "active_parameters", "count")
 
     def lower(self, precision: Quantity = BYTES_FP16) -> ComputationGraph:
         # For MoE, total parameters define the memory footprint,

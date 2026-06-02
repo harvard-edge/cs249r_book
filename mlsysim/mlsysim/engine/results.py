@@ -159,7 +159,6 @@ class TailLatencyResult(SolverResult):
     queue_utilization: float
     is_stable: bool
     slo_headroom_ratio: float
-    slo_violation_probability: float
 
 
 class EconomicsResult(SolverResult):
@@ -329,7 +328,7 @@ class BatchingOptimizerResult(OptimizerResult):
     best_batch_size: int
     max_throughput: float
     p99_latency: Quantity
-    slo_violation_probability: float
+    slo_headroom_ratio: float
     is_feasible: bool
 
 
