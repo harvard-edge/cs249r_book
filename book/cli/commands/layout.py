@@ -13,6 +13,7 @@ author, optionally guided by a /layout-fix skill.
 """
 
 import argparse
+import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -62,7 +63,7 @@ class PageReport:
 
 @dataclass
 class MarginFinding:
-    """A margin figure/note overflowing below the page's usable bottom."""
+    """A margin figure/note layout finding."""
     sheet: int                    # 1-indexed PDF sheet number
     label: str                    # printed page number
     chapter: str                  # enclosing chapter title
@@ -73,6 +74,20 @@ class MarginFinding:
     source_file: str = ""         # QMD chapter file, relative to repo root
     source_line: int = 0          # 1-indexed line of the matching caption
     section: str = ""             # nearest preceding H2/H3 header
+    issue: str = "overflow"       # overflow | baseline-crowding | image-text-overlap
+    severity: str = "error"       # error blocks the margin gate; warning is audit-only
+    related: str = ""             # paired text/object snippet for overlap findings
+
+
+@dataclass
+class CollisionFinding:
+    """A header/footer collision finding."""
+    sheet: int                    # 1-indexed PDF sheet number
+    label: str                    # printed page number
+    chapter: str                  # enclosing chapter title
+    band: str                     # "header" or "footer"
+    y: float                      # top coordinate of the colliding text line
+    snippet: str                  # colliding line text
 
 
 class LayoutCommand:
@@ -99,9 +114,29 @@ class LayoutCommand:
             help="Scan PDF for body content invading header / footer bands.",
         )
         collisions.add_argument("pdf", help="Path to PDF file to scan.")
+        collisions.add_argument(
+            "--chapter",
+            type=str,
+            default="",
+            help="Only scan outline chapters matching this comma-separated "
+                 "title/slug/substring filter.",
+        )
+        collisions.add_argument(
+            "--csv",
+            action="store_true",
+            help="Emit one CSV row per collision: chapter,sheet,label,band,y,"
+                 "snippet.",
+        )
 
         check = sub.add_parser("check", help="Scan PDF for whitespace gaps.")
         check.add_argument("pdf", help="Path to PDF file to scan.")
+        check.add_argument(
+            "--chapter",
+            type=str,
+            default="",
+            help="Only scan outline chapters matching this comma-separated "
+                 "title/slug/substring filter.",
+        )
         check.add_argument(
             "--threshold",
             type=float,
@@ -144,6 +179,13 @@ class LayoutCommand:
         )
         margins.add_argument("pdf", help="Path to PDF file to scan.")
         margins.add_argument(
+            "--chapter",
+            type=str,
+            default="",
+            help="Only scan outline chapters matching this comma-separated "
+                 "title/slug/substring filter.",
+        )
+        margins.add_argument(
             "--tol",
             type=float,
             default=2.0,
@@ -157,10 +199,18 @@ class LayoutCommand:
             help="Only scan the first N pages (0 = all). For quick iteration.",
         )
         margins.add_argument(
+            "--include-overlaps",
+            action="store_true",
+            help="Also emit warning-level margin text crowding and image/text "
+                 "overlap candidates. Footer/off-page overflow remains the "
+                 "blocking gate.",
+        )
+        margins.add_argument(
             "--csv",
             action="store_true",
-            help="Emit one CSV row per overflow: chapter,sheet,label,signal,"
-                 "over_pts,off_page,source_file,source_line,section,snippet.",
+            help="Emit one CSV row per finding: chapter,sheet,label,issue,"
+                 "severity,signal,over_pts,off_page,source_file,source_line,"
+                 "section,snippet,related.",
         )
 
         if not args:
@@ -169,10 +219,19 @@ class LayoutCommand:
 
         opts = parser.parse_args(args)
         if opts.subcommand == "collisions":
-            return self._collisions(Path(opts.pdf))
+            return self._collisions(
+                Path(opts.pdf),
+                chapter_filter=self._parse_chapter_filter(opts.chapter),
+                csv=opts.csv,
+            )
         if opts.subcommand == "margins":
             return self._margins(
-                Path(opts.pdf), tol=opts.tol, limit=opts.limit, csv=opts.csv
+                Path(opts.pdf),
+                tol=opts.tol,
+                limit=opts.limit,
+                csv=opts.csv,
+                chapter_filter=self._parse_chapter_filter(opts.chapter),
+                include_overlaps=opts.include_overlaps,
             )
         if opts.subcommand == "check":
             only = (
@@ -187,6 +246,7 @@ class LayoutCommand:
                 only=only,
                 skip_frontmatter=opts.skip_frontmatter,
                 csv=opts.csv,
+                chapter_filter=self._parse_chapter_filter(opts.chapter),
             )
 
         parser.print_help()
@@ -204,6 +264,7 @@ class LayoutCommand:
         only: Optional[set] = None,
         skip_frontmatter: bool = False,
         csv: bool = False,
+        chapter_filter: Optional[List[str]] = None,
     ) -> bool:
         if not pdf_path.exists():
             console.print(f"[red]PDF not found:[/red] {pdf_path}")
@@ -241,6 +302,8 @@ class LayoutCommand:
                 sheet = i + 1
                 label = labels[i] if i < len(labels) else str(sheet)
                 chapter = self._chapter_for(sheet, chapter_starts)
+                if not self._matches_chapter(chapter, chapter_filter):
+                    continue
                 report = self._scan_page(page, next_page, sheet, label, chapter)
                 scanned += 1
                 if report and report.whitespace_frac >= threshold:
@@ -252,13 +315,7 @@ class LayoutCommand:
                     if qmd_path is not None:
                         report.source_file = str(qmd_path)
                         # Resolve to absolute path for actual file reads.
-                        cur = pdf_path.resolve().parent
-                        repo_root = None
-                        for _ in range(8):
-                            if (cur / "book" / "quarto" / "contents").is_dir():
-                                repo_root = cur
-                                break
-                            cur = cur.parent
+                        repo_root = self._repo_root_for(pdf_path)
                         if repo_root is not None:
                             abs_path = repo_root / qmd_path
                             line_num = self._find_source_line(
@@ -296,7 +353,12 @@ class LayoutCommand:
     # collisions
     # ------------------------------------------------------------------
 
-    def _collisions(self, pdf_path: Path) -> bool:
+    def _collisions(
+        self,
+        pdf_path: Path,
+        chapter_filter: Optional[List[str]] = None,
+        csv: bool = False,
+    ) -> bool:
         """Detect body content invading the header / footer band.
 
         The header band (top 6%) is reserved for the running header and
@@ -321,12 +383,19 @@ class LayoutCommand:
             )
             return False
 
-        header_collisions: List[Tuple[int, float, str]] = []
-        footer_collisions: List[Tuple[int, float, str]] = []
+        header_collisions: List[CollisionFinding] = []
+        footer_collisions: List[CollisionFinding] = []
+        chapter_starts, labels = self._load_chapter_map(pdf_path)
+        scanned = 0
 
         with pdfplumber.open(str(pdf_path)) as pdf:
             for i, page in enumerate(pdf.pages):
                 sheet = i + 1
+                label = labels[i] if i < len(labels) else str(sheet)
+                chapter = self._chapter_for(sheet, chapter_starts)
+                if not self._matches_chapter(chapter, chapter_filter):
+                    continue
+                scanned += 1
                 ph = page.height
                 pw = page.width
                 header_bottom = ph * HEADER_FRAC
@@ -352,19 +421,29 @@ class LayoutCommand:
                 hdr = [y for y in ys if y < header_bottom + 5]
                 if len(hdr) > 1:
                     snippet = self._line_text(lines[hdr[1]])
-                    header_collisions.append((sheet, hdr[1], snippet))
+                    header_collisions.append(CollisionFinding(
+                        sheet=sheet, label=label, chapter=chapter,
+                        band="header", y=hdr[1], snippet=snippet,
+                    ))
 
                 # Footer collision: more than one logical line in footer band.
                 ftr = [y for y in ys if y > footer_top - 5]
                 if len(ftr) > 1:
                     snippet = self._line_text(lines[ftr[0]])
-                    footer_collisions.append((sheet, ftr[0], snippet))
+                    footer_collisions.append(CollisionFinding(
+                        sheet=sheet, label=label, chapter=chapter,
+                        band="footer", y=ftr[0], snippet=snippet,
+                    ))
+
+        if csv:
+            self._render_collisions_csv(header_collisions + footer_collisions)
+            return True
 
         if not header_collisions and not footer_collisions:
             console.print(
                 Panel(
                     f"No header or footer collisions across "
-                    f"{len(pdf.pages) if hasattr(pdf, 'pages') else '?'} "
+                    f"{scanned} "
                     f"pages.",
                     title="✅ Collision check clean",
                     border_style="green",
@@ -377,8 +456,11 @@ class LayoutCommand:
             f"[bold yellow]⚠ Header collisions: "
             f"{len(header_collisions)}[/bold yellow]"
         )
-        for sheet, y, txt in header_collisions[:20]:
-            console.print(f"  sheet {sheet} y={y:.0f}: [dim]{txt}[/dim]")
+        for item in header_collisions[:20]:
+            console.print(
+                f"  p.{item.label} sheet {item.sheet} {item.chapter} "
+                f"y={item.y:.0f}: [dim]{item.snippet}[/dim]"
+            )
         if len(header_collisions) > 20:
             console.print(
                 f"  [dim]…and {len(header_collisions) - 20} more[/dim]"
@@ -387,9 +469,29 @@ class LayoutCommand:
             f"[bold yellow]⚠ Footer collisions: "
             f"{len(footer_collisions)}[/bold yellow]"
         )
-        for sheet, y, txt in footer_collisions[:20]:
-            console.print(f"  sheet {sheet} y={y:.0f}: [dim]{txt}[/dim]")
+        for item in footer_collisions[:20]:
+            console.print(
+                f"  p.{item.label} sheet {item.sheet} {item.chapter} "
+                f"y={item.y:.0f}: [dim]{item.snippet}[/dim]"
+            )
         return True
+
+    def _render_collisions_csv(
+        self, findings: List[CollisionFinding]
+    ) -> None:
+        import csv as _csv
+        import sys
+        writer = _csv.writer(sys.stdout)
+        writer.writerow(["chapter", "sheet", "label", "band", "y", "snippet"])
+        for f in findings:
+            writer.writerow([
+                f.chapter,
+                f.sheet,
+                f.label,
+                f.band,
+                f"{f.y:.1f}",
+                f.snippet,
+            ])
 
     @staticmethod
     def _line_text(line_chars: list) -> str:
@@ -406,6 +508,8 @@ class LayoutCommand:
         tol: float = 2.0,
         limit: int = 0,
         csv: bool = False,
+        chapter_filter: Optional[List[str]] = None,
+        include_overlaps: bool = False,
     ) -> bool:
         """Flag margin-column content (figures, captions, notes) that runs
         below the page's usable bottom — the documented ``figure-margin.md``
@@ -433,12 +537,18 @@ class LayoutCommand:
             f"overflow = below {int((1-FOOTER_FRAC)*100)}% page height "
             f"+ {tol:.0f}pt)[/dim]"
         )
-        findings, scanned = self._collect_margin_findings(pdf_path, tol, limit)
+        findings, scanned = self._collect_margin_findings(
+            pdf_path,
+            tol,
+            limit,
+            chapter_filter=chapter_filter,
+            include_overlaps=include_overlaps,
+        )
         if csv:
             self._render_margins_csv(findings)
         else:
             self._render_margins(findings, scanned, pdf_path)
-        return not findings
+        return not any(f.severity == "error" for f in findings)
 
     @staticmethod
     def _page_overflow(pw, ph, chars, images, tol):
@@ -489,8 +599,108 @@ class LayoutCommand:
         ]
         return over_chars, over_imgs
 
+    @staticmethod
+    def _margin_text_lines(pw, chars) -> List[dict]:
+        """Cluster margin-only chars into logical text-line boxes."""
+        margin_x = pw * MAIN_COL_RIGHT_FRAC
+        raw_lines: Dict[float, list] = {}
+        for c in chars:
+            for ly in raw_lines:
+                if abs(c["top"] - ly) < 2.0:
+                    raw_lines[ly].append(c)
+                    break
+            else:
+                raw_lines[c["top"]] = [c]
+
+        lines = []
+        for ly in sorted(raw_lines):
+            line_chars = sorted(raw_lines[ly], key=lambda c: c["x0"])
+            if min(ch["x0"] for ch in line_chars) <= margin_x:
+                continue
+            text = "".join(ch.get("text", "") for ch in line_chars).strip()
+            if not text:
+                continue
+            lines.append({
+                "x0": min(ch["x0"] for ch in line_chars),
+                "x1": max(ch["x1"] for ch in line_chars),
+                "top": min(ch["top"] for ch in line_chars),
+                "bottom": max(ch["bottom"] for ch in line_chars),
+                "text": text[:90],
+            })
+        return lines
+
+    @staticmethod
+    def _substantial_margin_text(text: str) -> bool:
+        return len(re.findall(r"[A-Za-z0-9]", text or "")) >= 6
+
+    @classmethod
+    def _margin_baseline_crowding(
+        cls,
+        pw,
+        chars,
+        min_gap: float = 3.0,
+        min_deficit: float = 1.0,
+    ) -> List[Tuple[dict, dict, float]]:
+        """Return adjacent margin text lines whose baselines are implausibly close.
+
+        This intentionally uses baseline/top distance instead of bbox
+        intersection. Normal sidenote leading can make adjacent line boxes
+        geometrically overlap; truly bad collisions have baselines only a few
+        points apart.
+        """
+        lines = cls._margin_text_lines(pw, chars)
+        findings: List[Tuple[dict, dict, float]] = []
+        for prev, cur in zip(lines, lines[1:]):
+            if not (
+                cls._substantial_margin_text(prev["text"])
+                and cls._substantial_margin_text(cur["text"])
+            ):
+                continue
+            baseline_gap = cur["top"] - prev["top"]
+            deficit = min_gap - baseline_gap
+            if 0 < baseline_gap < min_gap and deficit >= min_deficit:
+                findings.append((prev, cur, deficit))
+        return findings
+
+    @classmethod
+    def _margin_image_text_overlaps(
+        cls,
+        pw,
+        chars,
+        images,
+        min_image_edge: float = 20.0,
+    ) -> List[Tuple[dict, dict, float]]:
+        """Return substantial margin text lines intersecting substantial images.
+
+        Tiny icons are ignored; those often sit inside callout artwork and are
+        expected to share a band with labels.
+        """
+        margin_x = pw * MAIN_COL_RIGHT_FRAC
+        lines = cls._margin_text_lines(pw, chars)
+        overlaps: List[Tuple[dict, dict, float]] = []
+        for im in images or []:
+            if im.get("x0", 0) <= margin_x:
+                continue
+            width = im.get("x1", 0) - im.get("x0", 0)
+            height = im.get("bottom", 0) - im.get("top", 0)
+            if width < min_image_edge or height < min_image_edge:
+                continue
+            for line in lines:
+                if not cls._substantial_margin_text(line["text"]):
+                    continue
+                x_overlap = min(line["x1"], im["x1"]) - max(line["x0"], im["x0"])
+                y_overlap = min(line["bottom"], im["bottom"]) - max(line["top"], im["top"])
+                if x_overlap > 0 and y_overlap > 1.0:
+                    overlaps.append((line, im, y_overlap))
+        return overlaps
+
     def _collect_margin_findings(
-        self, pdf_path: Path, tol: float = 2.0, limit: int = 0
+        self,
+        pdf_path: Path,
+        tol: float = 2.0,
+        limit: int = 0,
+        chapter_filter: Optional[List[str]] = None,
+        include_overlaps: bool = False,
     ) -> Tuple[List["MarginFinding"], int]:
         """Detection core (no console output). Returns (findings, pages_scanned).
 
@@ -503,17 +713,10 @@ class LayoutCommand:
         source_map = self._build_source_map(pdf_path)
 
         # Resolve repo root once for source-line lookups.
-        cur = pdf_path.resolve().parent
-        repo_root: Optional[Path] = None
-        for _ in range(8):
-            if (cur / "book" / "quarto" / "contents").is_dir():
-                repo_root = cur
-                break
-            if cur.parent == cur:
-                break
-            cur = cur.parent
+        repo_root = self._repo_root_for(pdf_path)
 
         findings: List[MarginFinding] = []
+        scanned = 0
         with pdfplumber.open(str(pdf_path)) as pdf:
             n_pages = len(pdf.pages)
             n_scan = n_pages if limit <= 0 else min(limit, n_pages)
@@ -523,74 +726,111 @@ class LayoutCommand:
                 pw, ph = page.width, page.height
                 margin_x = pw * MAIN_COL_RIGHT_FRAC
                 footer_top = ph * (1.0 - FOOTER_FRAC)
+                chapter = self._chapter_for(sheet, chapter_starts)
+                if not self._matches_chapter(chapter, chapter_filter):
+                    continue
+                scanned += 1
+                label = labels[i] if i < len(labels) else str(sheet)
+
+                margin_text_lines = self._margin_text_lines(pw, page.chars)
+                line_texts = [line["text"] for line in margin_text_lines]
 
                 over_chars, over_imgs = self._page_overflow(
                     pw, ph, page.chars, page.images, tol
                 )
-                if not over_chars and not over_imgs:
-                    continue
 
-                bottoms = (
-                    [c["bottom"] for c in over_chars]
-                    + [im["bottom"] for im in over_imgs]
-                )
-                max_bottom = max(bottoms)
-                over_pts = max_bottom - footer_top
-                off_page = max_bottom > ph
-                sig = []
-                if over_imgs:
-                    sig.append("image")
-                if over_chars:
-                    sig.append("caption/text")
-                signal = "+".join(sig)
+                if over_chars or over_imgs:
+                    bottoms = (
+                        [c["bottom"] for c in over_chars]
+                        + [im["bottom"] for im in over_imgs]
+                    )
+                    max_bottom = max(bottoms)
+                    over_pts = max_bottom - footer_top
+                    off_page = max_bottom > ph
+                    sig = []
+                    if over_imgs:
+                        sig.append("image")
+                    if over_chars:
+                        sig.append("caption/text")
+                    signal = "+".join(sig)
+                    snippet = line_texts[-1] if line_texts else ""
+                    src_file, src_line, section = self._locate_margin_source(
+                        repo_root, source_map, chapter, line_texts
+                    )
+                    findings.append(MarginFinding(
+                        sheet=sheet, label=label, chapter=chapter,
+                        signal=signal, over_pts=over_pts, off_page=off_page,
+                        snippet=snippet, source_file=src_file,
+                        source_line=src_line, section=section,
+                    ))
 
-                # Reconstruct margin-only text lines (same rule as
-                # _page_overflow) for source matching: cluster chars into
-                # baselines, keep only lines whose leftmost char is in the
-                # margin (excludes full-width code/table/figure lines).
-                all_lines: Dict[float, list] = {}
-                for c in page.chars:
-                    for ly in all_lines:
-                        if abs(c["top"] - ly) < 2.0:
-                            all_lines[ly].append(c)
-                            break
-                    else:
-                        all_lines[c["top"]] = [c]
-                margin_lines = {
-                    ly: lc for ly, lc in all_lines.items()
-                    if min(ch["x0"] for ch in lc) > margin_x
-                }
-                line_texts = [self._line_text(margin_lines[ly])
-                              for ly in sorted(margin_lines)]
-                line_texts = [t for t in line_texts if t]
-                snippet = line_texts[-1] if line_texts else ""  # lowest line
+                if include_overlaps:
+                    crowding = self._margin_baseline_crowding(pw, page.chars)
+                    if crowding:
+                        prev, cur, deficit = max(
+                            crowding, key=lambda item: item[2]
+                        )
+                        overlap_lines = [prev["text"], cur["text"]]
+                        src_file, src_line, section = self._locate_margin_source(
+                            repo_root, source_map, chapter, overlap_lines
+                        )
+                        findings.append(MarginFinding(
+                            sheet=sheet, label=label, chapter=chapter,
+                            signal="caption/text", over_pts=deficit,
+                            off_page=False, snippet=cur["text"],
+                            source_file=src_file, source_line=src_line,
+                            section=section, issue="baseline-crowding",
+                            severity="warning", related=prev["text"],
+                        ))
 
-                chapter = self._chapter_for(sheet, chapter_starts)
-                label = labels[i] if i < len(labels) else str(sheet)
+                    image_overlaps = self._margin_image_text_overlaps(
+                        pw, page.chars, page.images
+                    )
+                    if image_overlaps:
+                        line, im, y_overlap = max(
+                            image_overlaps, key=lambda item: item[2]
+                        )
+                        src_file, src_line, section = self._locate_margin_source(
+                            repo_root, source_map, chapter, [line["text"]]
+                        )
+                        related = (
+                            f"image {im.get('x0', 0):.0f},"
+                            f"{im.get('top', 0):.0f}-"
+                            f"{im.get('bottom', 0):.0f}"
+                        )
+                        findings.append(MarginFinding(
+                            sheet=sheet, label=label, chapter=chapter,
+                            signal="image+caption/text", over_pts=y_overlap,
+                            off_page=False, snippet=line["text"],
+                            source_file=src_file, source_line=src_line,
+                            section=section, issue="image-text-overlap",
+                            severity="warning", related=related,
+                        ))
 
-                src_file, src_line, section = "", 0, ""
-                qmd = source_map.get(chapter)
-                if qmd is not None:
-                    src_file = str(qmd)
-                    if repo_root is not None and line_texts:
-                        abs_path = repo_root / qmd
-                        # Try the longest margin lines first — the caption text
-                        # matches the source line more reliably than a short
-                        # wrapped fragment.
-                        for cand in sorted(line_texts, key=len, reverse=True):
-                            src_line = self._find_source_line(abs_path, cand)
-                            if src_line > 0:
-                                break
-                        if src_line > 0:
-                            section = self._find_section(abs_path, src_line)
+        return findings, scanned
 
-                findings.append(MarginFinding(
-                    sheet=sheet, label=label, chapter=chapter, signal=signal,
-                    over_pts=over_pts, off_page=off_page, snippet=snippet,
-                    source_file=src_file, source_line=src_line, section=section,
-                ))
-
-        return findings, n_scan
+    def _locate_margin_source(
+        self,
+        repo_root: Optional[Path],
+        source_map: Dict[str, Path],
+        chapter: str,
+        line_texts: List[str],
+    ) -> Tuple[str, int, str]:
+        qmd = source_map.get(chapter)
+        if qmd is None:
+            return "", 0, ""
+        src_file, src_line, section = str(qmd), 0, ""
+        if repo_root is not None and line_texts:
+            abs_path = repo_root / qmd
+            # Try the longest margin lines first — caption text matches the
+            # source line more reliably than a short wrapped fragment.
+            for cand in sorted(line_texts, key=len, reverse=True):
+                src_line = self._find_source_line(abs_path, cand)
+                if src_line > 0:
+                    break
+            if src_line > 0:
+                section = self._find_section(abs_path, src_line)
+        return src_file, src_line, section
 
     def _render_margins(
         self, findings: List[MarginFinding], scanned: int, pdf_path: Path
@@ -603,19 +843,31 @@ class LayoutCommand:
                 border_style="green",
             ))
             return
+        errors = [f for f in findings if f.severity == "error"]
+        warnings = [f for f in findings if f.severity != "error"]
         console.print()
-        console.print(
-            f"[bold red]✗ {len(findings)} margin overflow"
-            f"{'s' if len(findings) != 1 else ''}[/bold red] "
-            f"[dim](margin content running off the page bottom)[/dim]"
-        )
+        if errors:
+            console.print(
+                f"[bold red]✗ {len(errors)} blocking margin overflow"
+                f"{'s' if len(errors) != 1 else ''}[/bold red] "
+                f"[dim]+ {len(warnings)} warning candidate"
+                f"{'s' if len(warnings) != 1 else ''}[/dim]"
+            )
+        else:
+            console.print(
+                f"[bold yellow]⚠ {len(warnings)} margin warning candidate"
+                f"{'s' if len(warnings) != 1 else ''}[/bold yellow] "
+                f"[dim](no blocking footer/off-page overflow)[/dim]"
+            )
         table = Table(show_header=True, header_style="bold")
         table.add_column("page", justify="right")
         table.add_column("chapter")
+        table.add_column("issue")
+        table.add_column("sev")
         table.add_column("signal")
-        table.add_column("over", justify="right")
+        table.add_column("pts", justify="right")
         table.add_column("source", overflow="fold")
-        for f in sorted(findings, key=lambda r: -r.over_pts):
+        for f in sorted(findings, key=lambda r: (r.severity != "error", -r.over_pts)):
             over = f"{f.over_pts:.0f}pt"
             if f.off_page:
                 over += " ⎋"  # off the physical page edge
@@ -627,6 +879,8 @@ class LayoutCommand:
             table.add_row(
                 f"{f.label} (sheet {f.sheet})",
                 f.chapter,
+                f.issue,
+                f.severity,
                 f.signal,
                 over,
                 src or "[dim]?[/dim]",
@@ -635,7 +889,9 @@ class LayoutCommand:
         console.print(
             "[dim]⎋ = past the physical page edge. Fix per figure-margin.md "
             "§7: reposition the .column-margin block to a footnote-sparse, "
-            "mid-page anchor, shorten the caption, or cut it (§0 gate).[/dim]"
+            "mid-page anchor, shorten the caption, or cut it (§0 gate). "
+            "Overlap/crowding rows are warning-level candidates and require "
+            "visual confirmation.[/dim]"
         )
 
     def _render_margins_csv(self, findings: List[MarginFinding]) -> None:
@@ -643,14 +899,15 @@ class LayoutCommand:
         import sys
         writer = _csv.writer(sys.stdout)
         writer.writerow([
-            "chapter", "sheet", "label", "signal", "over_pts", "off_page",
-            "source_file", "source_line", "section", "snippet",
+            "chapter", "sheet", "label", "issue", "severity", "signal",
+            "over_pts", "off_page", "source_file", "source_line", "section",
+            "snippet", "related",
         ])
         for f in findings:
             writer.writerow([
-                f.chapter, f.sheet, f.label, f.signal, f"{f.over_pts:.1f}",
-                int(f.off_page), f.source_file, f.source_line, f.section,
-                f.snippet,
+                f.chapter, f.sheet, f.label, f.issue, f.severity, f.signal,
+                f"{f.over_pts:.1f}", int(f.off_page), f.source_file,
+                f.source_line, f.section, f.snippet, f.related,
             ])
 
     # ------------------------------------------------------------------
@@ -759,26 +1016,27 @@ class LayoutCommand:
     # ------------------------------------------------------------------
 
     def _build_source_map(self, pdf_path: Path) -> Dict[str, Path]:
-        """Scan book/quarto/contents/vol*/<slug>/<slug>.qmd files and
-        return {chapter_title → path} by reading each file's first H1.
+        """Return {chapter_title → QMD path}, scoped to the PDF volume when known.
+
+        Vol I and Vol II intentionally share chapter titles such as
+        "Introduction". Source localization must therefore scan only the
+        matching ``contents/volN`` tree when the PDF path/name identifies a
+        volume.
         """
         # Find repo root by walking up from pdf_path until we hit a dir
         # containing book/quarto/contents.
-        cur = pdf_path.resolve().parent
-        repo_root: Optional[Path] = None
-        for _ in range(8):
-            if (cur / "book" / "quarto" / "contents").is_dir():
-                repo_root = cur
-                break
-            if cur.parent == cur:
-                break
-            cur = cur.parent
+        repo_root = self._repo_root_for(pdf_path)
         if repo_root is None:
             return {}
 
         contents = repo_root / "book" / "quarto" / "contents"
+        volume = self._volume_from_pdf_path(pdf_path)
+        if volume and (contents / volume).is_dir():
+            vol_dirs = [contents / volume]
+        else:
+            vol_dirs = sorted(contents.glob("vol*"))
         out: Dict[str, Path] = {}
-        for vol_dir in sorted(contents.glob("vol*")):
+        for vol_dir in vol_dirs:
             for chapter_dir in sorted(vol_dir.iterdir()):
                 if not chapter_dir.is_dir():
                     continue
@@ -801,6 +1059,55 @@ class LayoutCommand:
                 except OSError:
                     continue
         return out
+
+    @staticmethod
+    def _repo_root_for(pdf_path: Path) -> Optional[Path]:
+        cur = Path(pdf_path).resolve().parent
+        for _ in range(8):
+            if (cur / "book" / "quarto" / "contents").is_dir():
+                return cur
+            if cur.parent == cur:
+                break
+            cur = cur.parent
+        return None
+
+    @staticmethod
+    def _volume_from_pdf_path(pdf_path: Path) -> Optional[str]:
+        haystack = " ".join([Path(pdf_path).name, *Path(pdf_path).parts]).lower()
+        if "vol1" in haystack:
+            return "vol1"
+        if "vol2" in haystack:
+            return "vol2"
+        return None
+
+    @staticmethod
+    def _parse_chapter_filter(raw: str) -> List[str]:
+        return [part.strip() for part in (raw or "").split(",") if part.strip()]
+
+    @staticmethod
+    def _chapter_key(text: str) -> str:
+        return re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
+
+    @classmethod
+    def _matches_chapter(
+        cls,
+        chapter: str,
+        chapter_filter: Optional[List[str]],
+    ) -> bool:
+        if not chapter_filter:
+            return True
+        chapter_key = cls._chapter_key(chapter)
+        chapter_slug = chapter_key.replace(" ", "-")
+        for raw in chapter_filter:
+            wanted_key = cls._chapter_key(raw)
+            wanted_slug = wanted_key.replace(" ", "-")
+            if not wanted_key:
+                continue
+            if wanted_key == chapter_key or wanted_slug == chapter_slug:
+                return True
+            if wanted_key in chapter_key:
+                return True
+        return False
 
     @staticmethod
     def _find_source_line(qmd_path: Path, detail: str) -> int:

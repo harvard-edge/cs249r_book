@@ -9,6 +9,8 @@ The log-based hbox gate and the cross-ref/traceback scans predate this change
 and are exercised indirectly here only where they intersect severity handling.
 """
 
+from pathlib import Path
+
 from book.cli.commands._pdf_checks import (
     PdfCheckItem,
     PdfIssue,
@@ -17,6 +19,7 @@ from book.cli.commands._pdf_checks import (
     scan_build_log,
 )
 from book.cli.commands.layout import LayoutCommand
+from book.cli.commands.layout import CollisionFinding
 
 
 # --------------------------------------------------------------------------
@@ -115,8 +118,14 @@ def test_checklist_renders_warning_section():
 PW, PH = 600.0, 800.0   # footer band top = 752; margin column starts at x=330
 
 
-def _char(x0, bottom):
-    return {"x0": x0, "bottom": bottom, "top": bottom - 8}
+def _char(x0, bottom, text="x", x1=None):
+    return {
+        "x0": x0,
+        "x1": x0 + 6 if x1 is None else x1,
+        "bottom": bottom,
+        "top": bottom - 8,
+        "text": text,
+    }
 
 
 def _img(x0, bottom):
@@ -203,3 +212,70 @@ def test_caption_clipping_at_page_edge_is_flagged():
 def test_scan_margin_overflow_missing_file_returns_none():
     from book.cli.commands.layout import scan_margin_overflow
     assert scan_margin_overflow("/no/such/file.pdf") is None
+
+
+def test_chapter_filter_matches_title_slug_and_substring():
+    assert LayoutCommand._matches_chapter("Inference at Scale", ["Inference at Scale"])
+    assert LayoutCommand._matches_chapter("Inference at Scale", ["inference-at-scale"])
+    assert LayoutCommand._matches_chapter("Distributed Training Systems", ["training"])
+    assert not LayoutCommand._matches_chapter("Inference at Scale", ["Model Training"])
+
+
+def test_source_map_is_scoped_to_pdf_volume(tmp_path):
+    root = tmp_path
+    vol1 = root / "book" / "quarto" / "contents" / "vol1" / "introduction"
+    vol2 = root / "book" / "quarto" / "contents" / "vol2" / "introduction"
+    vol1.mkdir(parents=True)
+    vol2.mkdir(parents=True)
+    (vol1 / "introduction.qmd").write_text("# Introduction\n", encoding="utf-8")
+    (vol2 / "introduction.qmd").write_text("# Introduction\n", encoding="utf-8")
+    pdf_dir = root / "book" / "quarto" / "_build" / "pdf-vol1"
+    pdf_dir.mkdir(parents=True)
+
+    source_map = LayoutCommand(None, None)._build_source_map(
+        pdf_dir / "Machine-Learning-Systems-Vol1.pdf"
+    )
+
+    assert source_map["Introduction"] == (
+        Path("book/quarto/contents/vol1/introduction/introduction.qmd")
+    )
+
+
+def test_margin_baseline_crowding_uses_baseline_gap_not_bbox_overlap():
+    crowded = [
+        _char(400, 108, text="first line", x1=455),
+        _char(400, 110, text="second line", x1=460),
+    ]
+    normal = [
+        _char(400, 108, text="first line", x1=455),
+        _char(400, 116, text="second line", x1=460),
+    ]
+
+    assert len(LayoutCommand._margin_baseline_crowding(PW, crowded)) == 1
+    assert not LayoutCommand._margin_baseline_crowding(PW, normal)
+
+
+def test_margin_image_text_overlap_ignores_tiny_icons_and_flags_big_images():
+    chars = [_char(400, 108, text="substantial label", x1=480)]
+    tiny_icon = {"x0": 400, "x1": 410, "top": 96, "bottom": 112}
+    big_image = {"x0": 390, "x1": 500, "top": 96, "bottom": 130}
+
+    assert not LayoutCommand._margin_image_text_overlaps(PW, chars, [tiny_icon])
+    assert len(LayoutCommand._margin_image_text_overlaps(PW, chars, [big_image])) == 1
+
+
+def test_collision_csv_is_machine_readable(capsys):
+    finding = CollisionFinding(
+        sheet=74,
+        label="66",
+        chapter="Inference at Scale",
+        band="footer",
+        y=688.4,
+        snippet="Bursts starve shared KV cache.",
+    )
+
+    LayoutCommand(None, None)._render_collisions_csv([finding])
+
+    out = capsys.readouterr().out
+    assert "chapter,sheet,label,band,y,snippet" in out
+    assert "Inference at Scale,74,66,footer,688.4" in out
