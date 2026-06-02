@@ -5,6 +5,8 @@ import subprocess
 from argparse import Namespace
 from pathlib import Path
 
+import pytest
+
 from tito.commands.nbgrader import NBGraderCommand
 from tito.core.config import CLIConfig
 
@@ -112,6 +114,20 @@ def test_generate_resolves_module_suffix(tmp_path):
 
     assert result == 0
     assert (tmp_path / "assignments" / "source" / "01_tensor" / "tensor.ipynb").exists()
+
+
+def test_generate_tier_option_is_hidden_but_parseable(tmp_path, capsys):
+    command = NBGraderCommand(make_config(tmp_path))
+    parser = argparse.ArgumentParser()
+    command.add_arguments(parser)
+
+    args = parser.parse_args(["generate", "--all", "--tier", "challenge"])
+    assert args.tier == "challenge"
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["generate", "--help"])
+    help_text = capsys.readouterr().out
+    assert "--tier" not in help_text
 
 
 def test_generate_fails_when_notebook_has_no_nbgrader_metadata(tmp_path):
@@ -255,6 +271,147 @@ def test_generate_keeps_ungraded_markdown_reflections_editable(tmp_path):
     assert reflection["grade"] is False
     assert reflection["solution"] is False
     assert reflection["locked"] is False
+
+
+def test_generate_keeps_scaffold_role_in_student_release(tmp_path):
+    make_module(tmp_path)
+    notebook_path = tmp_path / "modules" / "01_tensor" / "tensor.ipynb"
+    notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
+    notebook["cells"][1]["source"] = (
+        "def provided_pattern(x):\n"
+        "    ### BEGIN SOLUTION role=scaffold\n"
+        "    return x + 2\n"
+        "    ### END SOLUTION\n"
+    )
+    notebook_path.write_text(json.dumps(notebook), encoding="utf-8")
+    command = NBGraderCommand(make_config(tmp_path))
+
+    result = command._generate(Namespace(all=False, module_range=None, module="01"))
+
+    assert result == 0
+    staged = tmp_path / "assignments" / "source" / "01_tensor" / "tensor.ipynb"
+    staged_notebook = json.loads(staged.read_text(encoding="utf-8"))
+    source = staged_notebook["cells"][1]["source"]
+    solution_cell = staged_notebook["cells"][1]["metadata"]["nbgrader"]
+    assert "return x + 2" in source
+    assert "BEGIN SOLUTION" not in source
+    assert solution_cell["solution"] is False
+    assert solution_cell["locked"] is True
+
+
+def test_generate_challenge_tier_keeps_core_baseline(tmp_path):
+    make_module(tmp_path)
+    command = NBGraderCommand(make_config(tmp_path))
+
+    result = command._generate(Namespace(all=False, module_range=None, module="01", tier="challenge"))
+
+    assert result == 0
+    staged = tmp_path / "assignments" / "source" / "01_tensor" / "tensor.ipynb"
+    staged_notebook = json.loads(staged.read_text(encoding="utf-8"))
+    source = staged_notebook["cells"][1]["source"]
+    solution_cell = staged_notebook["cells"][1]["metadata"]["nbgrader"]
+    assert "return x + 1" in source
+    assert "BEGIN SOLUTION" not in source
+    assert solution_cell["solution"] is False
+    assert solution_cell["locked"] is True
+
+
+def test_generate_challenge_tier_strips_challenge_role(tmp_path):
+    make_module(tmp_path)
+    notebook_path = tmp_path / "modules" / "01_tensor" / "tensor.ipynb"
+    notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
+    notebook["cells"][1]["source"] = (
+        "def optimize(x):\n"
+        "    ### BEGIN SOLUTION role=challenge\n"
+        "    return x + 3\n"
+        "    ### END SOLUTION\n"
+    )
+    notebook_path.write_text(json.dumps(notebook), encoding="utf-8")
+    command = NBGraderCommand(make_config(tmp_path))
+
+    result = command._generate(Namespace(all=False, module_range=None, module="01", tier="challenge"))
+
+    assert result == 0
+    staged = tmp_path / "assignments" / "source" / "01_tensor" / "tensor.ipynb"
+    staged_notebook = json.loads(staged.read_text(encoding="utf-8"))
+    source = staged_notebook["cells"][1]["source"]
+    solution_cell = staged_notebook["cells"][1]["metadata"]["nbgrader"]
+    assert "return x + 3" in source
+    assert "BEGIN SOLUTION role=challenge" in source
+    assert solution_cell["solution"] is True
+    assert solution_cell["locked"] is False
+
+
+def test_generate_removes_instructor_only_regions_for_student(tmp_path):
+    make_module(tmp_path)
+    notebook_path = tmp_path / "modules" / "01_tensor" / "tensor.ipynb"
+    notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
+    notebook["cells"][1]["source"] = (
+        "def hidden_note(x):\n"
+        "    ### BEGIN SOLUTION role=instructor\n"
+        "    return 'do not release'\n"
+        "    ### END SOLUTION\n"
+        "    return x\n"
+    )
+    notebook_path.write_text(json.dumps(notebook), encoding="utf-8")
+    command = NBGraderCommand(make_config(tmp_path))
+
+    result = command._generate(Namespace(all=False, module_range=None, module="01"))
+
+    assert result == 0
+    staged = tmp_path / "assignments" / "source" / "01_tensor" / "tensor.ipynb"
+    staged_notebook = json.loads(staged.read_text(encoding="utf-8"))
+    source = staged_notebook["cells"][1]["source"]
+    solution_cell = staged_notebook["cells"][1]["metadata"]["nbgrader"]
+    assert "do not release" not in source
+    assert "BEGIN SOLUTION" not in source
+    assert "return x" in source
+    assert solution_cell["solution"] is False
+
+
+def test_generate_instructor_tier_keeps_instructor_regions(tmp_path):
+    make_module(tmp_path)
+    notebook_path = tmp_path / "modules" / "01_tensor" / "tensor.ipynb"
+    notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
+    notebook["cells"][1]["source"] = (
+        "def hidden_note(x):\n"
+        "    ### BEGIN SOLUTION role=instructor\n"
+        "    return 'reference answer'\n"
+        "    ### END SOLUTION\n"
+    )
+    notebook_path.write_text(json.dumps(notebook), encoding="utf-8")
+    command = NBGraderCommand(make_config(tmp_path))
+
+    result = command._generate(Namespace(all=False, module_range=None, module="01", tier="instructor"))
+
+    assert result == 0
+    staged = tmp_path / "assignments" / "source" / "01_tensor" / "tensor.ipynb"
+    staged_notebook = json.loads(staged.read_text(encoding="utf-8"))
+    source = staged_notebook["cells"][1]["source"]
+    solution_cell = staged_notebook["cells"][1]["metadata"]["nbgrader"]
+    assert "reference answer" in source
+    assert "BEGIN SOLUTION" not in source
+    assert solution_cell["solution"] is False
+    assert solution_cell["locked"] is True
+
+
+def test_generate_fails_on_unknown_solution_role(tmp_path):
+    make_module(tmp_path)
+    notebook_path = tmp_path / "modules" / "01_tensor" / "tensor.ipynb"
+    notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
+    notebook["cells"][1]["source"] = (
+        "def bad_role(x):\n"
+        "    ### BEGIN SOLUTION role=surprise\n"
+        "    return x\n"
+        "    ### END SOLUTION\n"
+    )
+    notebook_path.write_text(json.dumps(notebook), encoding="utf-8")
+    command = NBGraderCommand(make_config(tmp_path))
+
+    result = command._generate(Namespace(all=False, module_range=None, module="01"))
+
+    assert result == 1
+    assert not (tmp_path / "assignments" / "source" / "01_tensor" / "tensor.ipynb").exists()
 
 
 def test_generate_fails_on_mismatched_solution_markers(tmp_path):

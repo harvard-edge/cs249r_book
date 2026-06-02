@@ -9,9 +9,9 @@ staging; nbgrader owns release, collection, autograding, feedback, and export.
 import json
 import re
 import subprocess
-from argparse import ArgumentParser, Namespace
+from argparse import ArgumentParser, Namespace, SUPPRESS
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from rich.panel import Panel
 from rich.text import Text
@@ -23,6 +23,9 @@ MODULE_DIR_RE = re.compile(r"^(\d{2})_[A-Za-z0-9_]+$")
 SOLUTION_BEGIN_MARKER = "### BEGIN SOLUTION"
 SOLUTION_END_MARKER = "### END SOLUTION"
 TEST_FUNCTION_RE = re.compile(r"^\s*def\s+test_", flags=re.MULTILINE)
+SOLUTION_ROLE_RE = re.compile(r"\brole=[\"']?([A-Za-z0-9_-]+)")
+RELEASE_TIERS = ("student", "challenge", "instructor")
+VALID_SOLUTION_ROLES = {"core", "scaffold", "challenge", "instructor"}
 
 
 class NBGraderCommand(BaseCommand):
@@ -75,6 +78,12 @@ class NBGraderCommand(BaseCommand):
             "--range",
             dest="module_range",
             help="Stage assignments for a module range (e.g., 01-04)",
+        )
+        generate_parser.add_argument(
+            "--tier",
+            choices=RELEASE_TIERS,
+            default="student",
+            help=SUPPRESS,
         )
 
         release_parser = subparsers.add_parser(
@@ -329,16 +338,17 @@ class NBGraderCommand(BaseCommand):
             console.print("[red]No TinyTorch modules found in src/[/red]")
             return 1
 
+        release_tier = getattr(args, "tier", "student")
         console.print(f"Staging nbgrader source assignments: {', '.join(modules_to_process)}")
 
         for module_name in modules_to_process:
-            if not self._generate_single_module(module_name):
+            if not self._generate_single_module(module_name, release_tier=release_tier):
                 return 1
 
         console.print("[green]All requested source assignments staged successfully.[/green]")
         return 0
 
-    def _generate_single_module(self, module_name: str) -> bool:
+    def _generate_single_module(self, module_name: str, *, release_tier: str = "student") -> bool:
         """Stage one module notebook under assignments/source."""
         console = self.console
         notebook_file = self._ensure_module_notebook(module_name)
@@ -354,7 +364,7 @@ class NBGraderCommand(BaseCommand):
             console.print(f"[red]Invalid notebook JSON: {notebook_file.relative_to(self.project_root)} ({exc})[/red]")
             return False
 
-        validation_errors = self._prepare_notebook_for_nbgrader(notebook)
+        validation_errors = self._prepare_notebook_for_nbgrader(notebook, release_tier=release_tier)
         if validation_errors:
             console.print(f"[red]NBGrader metadata errors in {notebook_file.relative_to(self.project_root)}:[/red]")
             for error in validation_errors:
@@ -403,9 +413,12 @@ class NBGraderCommand(BaseCommand):
             return None
         return notebook_file
 
-    def _prepare_notebook_for_nbgrader(self, notebook: Dict) -> List[str]:
+    def _prepare_notebook_for_nbgrader(self, notebook: Dict, *, release_tier: str = "student") -> List[str]:
         """Validate and normalize nbgrader cell metadata in a notebook."""
         errors = []
+        if release_tier not in RELEASE_TIERS:
+            return [f"Unknown TinyTorch release tier: {release_tier}"]
+
         cells = notebook.get("cells")
         if not isinstance(cells, list):
             return ["Notebook is missing a cells list"]
@@ -418,6 +431,11 @@ class NBGraderCommand(BaseCommand):
             metadata = cell.setdefault("metadata", {})
             nbgrader = metadata.get("nbgrader")
             source = self._cell_source(cell)
+            source, tier_errors = self._apply_release_tier(source, release_tier)
+            if tier_errors:
+                errors.extend(f"Cell {index}: {error}" for error in tier_errors)
+            self._set_cell_source(cell, source)
+
             has_begin_marker = SOLUTION_BEGIN_MARKER in source
             has_end_marker = SOLUTION_END_MARKER in source
             has_solution_markers = has_begin_marker or has_end_marker
@@ -490,6 +508,72 @@ class NBGraderCommand(BaseCommand):
         if isinstance(source, str):
             return source
         return ""
+
+    @staticmethod
+    def _set_cell_source(cell: Dict, source: str) -> None:
+        cell["source"] = source
+
+    def _apply_release_tier(self, source: str, release_tier: str) -> Tuple[str, List[str]]:
+        """Apply TinyTorch release-role policy before nbgrader stripping."""
+        if not source or (SOLUTION_BEGIN_MARKER not in source and SOLUTION_END_MARKER not in source):
+            return source, []
+
+        lines = source.splitlines()
+        out = []
+        errors = []
+        in_solution = False
+        action = "strip"
+
+        for line in lines:
+            if SOLUTION_BEGIN_MARKER in line:
+                if in_solution:
+                    errors.append("nested BEGIN SOLUTION marker")
+                role = self._solution_role(line)
+                if role not in VALID_SOLUTION_ROLES:
+                    errors.append(f"unknown solution role '{role}'")
+                    role = "core"
+                action = self._solution_role_action(role, release_tier)
+                in_solution = True
+                if action == "strip":
+                    out.append(line)
+                continue
+
+            if SOLUTION_END_MARKER in line:
+                if not in_solution:
+                    errors.append("END SOLUTION marker without matching BEGIN SOLUTION")
+                    out.append(line)
+                    continue
+                if action == "strip":
+                    out.append(line)
+                in_solution = False
+                action = "strip"
+                continue
+
+            if not in_solution or action in {"strip", "keep"}:
+                out.append(line)
+
+        if in_solution:
+            errors.append("BEGIN SOLUTION marker without matching END SOLUTION")
+
+        result = "\n".join(out)
+        if source.endswith("\n"):
+            result += "\n"
+        return result, errors
+
+    @staticmethod
+    def _solution_role(marker_line: str) -> str:
+        match = SOLUTION_ROLE_RE.search(marker_line)
+        return match.group(1) if match else "core"
+
+    @staticmethod
+    def _solution_role_action(role: str, release_tier: str) -> str:
+        if release_tier == "instructor":
+            return "keep"
+        if role == "instructor":
+            return "remove"
+        if release_tier == "challenge":
+            return "strip" if role == "challenge" else "keep"
+        return "strip" if role == "core" else "keep"
 
     def _release(self, args: Namespace) -> int:
         if args.all:
