@@ -19,6 +19,7 @@ from book.cli.commands._pdf_checks import (
     scan_build_log,
 )
 from book.cli.commands.layout import LayoutCommand
+from book.cli.commands.layout import CollisionFinding
 
 
 # --------------------------------------------------------------------------
@@ -261,3 +262,20 @@ def test_margin_image_text_overlap_ignores_tiny_icons_and_flags_big_images():
 
     assert not LayoutCommand._margin_image_text_overlaps(PW, chars, [tiny_icon])
     assert len(LayoutCommand._margin_image_text_overlaps(PW, chars, [big_image])) == 1
+
+
+def test_collision_csv_is_machine_readable(capsys):
+    finding = CollisionFinding(
+        sheet=74,
+        label="66",
+        chapter="Inference at Scale",
+        band="footer",
+        y=688.4,
+        snippet="Bursts starve shared KV cache.",
+    )
+
+    LayoutCommand(None, None)._render_collisions_csv([finding])
+
+    out = capsys.readouterr().out
+    assert "chapter,sheet,label,band,y,snippet" in out
+    assert "Inference at Scale,74,66,footer,688.4" in out

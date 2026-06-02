@@ -79,6 +79,17 @@ class MarginFinding:
     related: str = ""             # paired text/object snippet for overlap findings
 
 
+@dataclass
+class CollisionFinding:
+    """A header/footer collision finding."""
+    sheet: int                    # 1-indexed PDF sheet number
+    label: str                    # printed page number
+    chapter: str                  # enclosing chapter title
+    band: str                     # "header" or "footer"
+    y: float                      # top coordinate of the colliding text line
+    snippet: str                  # colliding line text
+
+
 class LayoutCommand:
     """Diagnose PDF page-break whitespace issues."""
 
@@ -109,6 +120,12 @@ class LayoutCommand:
             default="",
             help="Only scan outline chapters matching this comma-separated "
                  "title/slug/substring filter.",
+        )
+        collisions.add_argument(
+            "--csv",
+            action="store_true",
+            help="Emit one CSV row per collision: chapter,sheet,label,band,y,"
+                 "snippet.",
         )
 
         check = sub.add_parser("check", help="Scan PDF for whitespace gaps.")
@@ -205,6 +222,7 @@ class LayoutCommand:
             return self._collisions(
                 Path(opts.pdf),
                 chapter_filter=self._parse_chapter_filter(opts.chapter),
+                csv=opts.csv,
             )
         if opts.subcommand == "margins":
             return self._margins(
@@ -339,6 +357,7 @@ class LayoutCommand:
         self,
         pdf_path: Path,
         chapter_filter: Optional[List[str]] = None,
+        csv: bool = False,
     ) -> bool:
         """Detect body content invading the header / footer band.
 
@@ -364,8 +383,8 @@ class LayoutCommand:
             )
             return False
 
-        header_collisions: List[Tuple[int, str, str, float, str]] = []
-        footer_collisions: List[Tuple[int, str, str, float, str]] = []
+        header_collisions: List[CollisionFinding] = []
+        footer_collisions: List[CollisionFinding] = []
         chapter_starts, labels = self._load_chapter_map(pdf_path)
         scanned = 0
 
@@ -402,17 +421,23 @@ class LayoutCommand:
                 hdr = [y for y in ys if y < header_bottom + 5]
                 if len(hdr) > 1:
                     snippet = self._line_text(lines[hdr[1]])
-                    header_collisions.append(
-                        (sheet, label, chapter, hdr[1], snippet)
-                    )
+                    header_collisions.append(CollisionFinding(
+                        sheet=sheet, label=label, chapter=chapter,
+                        band="header", y=hdr[1], snippet=snippet,
+                    ))
 
                 # Footer collision: more than one logical line in footer band.
                 ftr = [y for y in ys if y > footer_top - 5]
                 if len(ftr) > 1:
                     snippet = self._line_text(lines[ftr[0]])
-                    footer_collisions.append(
-                        (sheet, label, chapter, ftr[0], snippet)
-                    )
+                    footer_collisions.append(CollisionFinding(
+                        sheet=sheet, label=label, chapter=chapter,
+                        band="footer", y=ftr[0], snippet=snippet,
+                    ))
+
+        if csv:
+            self._render_collisions_csv(header_collisions + footer_collisions)
+            return True
 
         if not header_collisions and not footer_collisions:
             console.print(
@@ -431,10 +456,10 @@ class LayoutCommand:
             f"[bold yellow]⚠ Header collisions: "
             f"{len(header_collisions)}[/bold yellow]"
         )
-        for sheet, label, chapter, y, txt in header_collisions[:20]:
+        for item in header_collisions[:20]:
             console.print(
-                f"  p.{label} sheet {sheet} {chapter} y={y:.0f}: "
-                f"[dim]{txt}[/dim]"
+                f"  p.{item.label} sheet {item.sheet} {item.chapter} "
+                f"y={item.y:.0f}: [dim]{item.snippet}[/dim]"
             )
         if len(header_collisions) > 20:
             console.print(
@@ -444,12 +469,29 @@ class LayoutCommand:
             f"[bold yellow]⚠ Footer collisions: "
             f"{len(footer_collisions)}[/bold yellow]"
         )
-        for sheet, label, chapter, y, txt in footer_collisions[:20]:
+        for item in footer_collisions[:20]:
             console.print(
-                f"  p.{label} sheet {sheet} {chapter} y={y:.0f}: "
-                f"[dim]{txt}[/dim]"
+                f"  p.{item.label} sheet {item.sheet} {item.chapter} "
+                f"y={item.y:.0f}: [dim]{item.snippet}[/dim]"
             )
         return True
+
+    def _render_collisions_csv(
+        self, findings: List[CollisionFinding]
+    ) -> None:
+        import csv as _csv
+        import sys
+        writer = _csv.writer(sys.stdout)
+        writer.writerow(["chapter", "sheet", "label", "band", "y", "snippet"])
+        for f in findings:
+            writer.writerow([
+                f.chapter,
+                f.sheet,
+                f.label,
+                f.band,
+                f"{f.y:.1f}",
+                f.snippet,
+            ])
 
     @staticmethod
     def _line_text(line_chars: list) -> str:
