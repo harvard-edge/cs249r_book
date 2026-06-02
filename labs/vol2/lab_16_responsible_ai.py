@@ -110,7 +110,7 @@ def _(mo, LAB_CSS, COLORS):
                     box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
             <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
                         color: #475569; text-transform: uppercase; margin-bottom: 10px;">
-                Machine Learning Systems &middot; Volume II &middot; Lab 15
+                Machine Learning Systems &middot; Volume II &middot; Lab 16
             </div>
             <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
                        color: #f8fafc; line-height: 1.1; letter-spacing: -0.02em;">
@@ -1178,7 +1178,7 @@ low thresholds) shrinks $t_{\\text{debt}}$ but increases $C_{\\text{audit}}$.
                 <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
                             text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">What's Next</div>
                 <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Lab 16: The Fleet Synthesis (Capstone)</strong> -- Your fairness overhead,
+                    <strong>Lab 17: The Fleet Synthesis (Capstone)</strong> -- Your fairness overhead,
                     carbon cap, and robustness budget all feed into the final fleet design. Every
                     principle interacts. No single-axis optimization works.
                 </div>
@@ -1228,7 +1228,7 @@ def _(mo, ledger, COLORS, partA_pred, partB_pred, partC_pred, partD_pred, partD_
     _monitor_val = partD_monitor.value if hasattr(partD_monitor, 'value') else "basic"
     _explain_val = partD_explain.value if hasattr(partD_explain, 'value') else "none"
     _threshold_val = partE_threshold.value if hasattr(partE_threshold, 'value') else 0.05
-    ledger.save(chapter=15, design={
+    ledger.save(chapter=16, design={
         "partA_impossibility_prediction": _impossibility_pred,
         "partB_fairness_tax_prediction": _tax_pred,
         "partC_feedback_prediction": _feedback_pred,

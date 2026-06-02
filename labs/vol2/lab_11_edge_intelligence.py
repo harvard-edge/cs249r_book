@@ -124,7 +124,7 @@ def _(LAB_CSS, mo):
                     box-shadow: 0 8px 32px rgba(0,0,0,0.3); margin-bottom: 8px;">
             <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
                         color: #475569; text-transform: uppercase; margin-bottom: 10px;">
-                Machine Learning Systems &middot; Volume II &middot; Lab 10
+                Machine Learning Systems &middot; Volume II &middot; Lab 11
             </div>
             <h1 style="margin: 0 0 10px 0; font-size: 2.2rem; font-weight: 900;
                        color: #f8fafc; line-height: 1.1; letter-spacing: -0.02em;">
@@ -1246,7 +1246,7 @@ def _(COLORS, ledger, mo, pA_pred, pA_strategy, pB_pred, pC_pred, pC_target, pD_
     _exec_target = pC_target.value if hasattr(pC_target, 'value') else "cpu"
     _fed_pred = pD_pred.value if hasattr(pD_pred, 'value') else None
     _compress = pD_compress.value if hasattr(pD_compress, 'value') else "none"
-    ledger.save(chapter=10, design={
+    ledger.save(chapter=11, design={
         "partA_memory_prediction": _mem_pred,
         "partA_adaptation_strategy": _adapt,
         "partB_lora_prediction": _lora_pred,
