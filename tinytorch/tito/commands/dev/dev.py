@@ -10,6 +10,7 @@ from rich.panel import Panel
 
 from ..base import BaseCommand
 from .test import DevTestCommand
+from .preflight import PreflightCommand
 from .export import DevExportCommand
 from .build import DevBuildCommand
 from .clean import DevCleanCommand
@@ -24,7 +25,7 @@ class DevCommand(BaseCommand):
 
     @property
     def description(self) -> str:
-        return "Developer tools: test, export, build, clean"
+        return "Developer tools: test, preflight, export, build, clean"
 
     def add_arguments(self, parser: ArgumentParser) -> None:
         subparsers = parser.add_subparsers(
@@ -40,6 +41,14 @@ class DevCommand(BaseCommand):
         )
         test_cmd = DevTestCommand(self.config)
         test_cmd.add_arguments(test_parser)
+
+        # Preflight subcommand (release/CI verification)
+        preflight_parser = subparsers.add_parser(
+            'preflight',
+            help='Run preflight verification checks'
+        )
+        preflight_cmd = PreflightCommand(self.config)
+        preflight_cmd.add_arguments(preflight_parser)
 
         # Export subcommand (rebuild curriculum from src/)
         export_parser = subparsers.add_parser(
@@ -83,6 +92,10 @@ class DevCommand(BaseCommand):
                 "  [dim]tito dev test --milestone[/dim]   Milestone script tests\n"
                 "  [dim]tito dev test --release[/dim]     Full release validation\n"
                 "  [dim]tito dev test --module 06[/dim]   Test specific module\n\n"
+                "[bold cyan]Preflight (Release Checks):[/bold cyan]\n"
+                "  [dim]tito dev preflight[/dim]          Standard preflight checks\n"
+                "  [dim]tito dev preflight --quick[/dim]  Quick checks\n"
+                "  [dim]tito dev preflight --release[/dim] Release validation\n\n"
                 "[bold cyan]Export (Rebuild Curriculum):[/bold cyan]\n"
                 "  [dim]tito dev export --all[/dim]       Export all modules\n"
                 "  [dim]tito dev export 01[/dim]          Export specific module\n"
@@ -105,6 +118,9 @@ class DevCommand(BaseCommand):
         # Execute the appropriate subcommand
         if args.dev_command == 'test':
             cmd = DevTestCommand(self.config)
+            return cmd.run(args)
+        elif args.dev_command == 'preflight':
+            cmd = PreflightCommand(self.config)
             return cmd.run(args)
         elif args.dev_command == 'export':
             cmd = DevExportCommand(self.config)
