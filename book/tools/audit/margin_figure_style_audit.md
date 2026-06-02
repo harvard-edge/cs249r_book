@@ -96,3 +96,200 @@ Recommended next improvements:
 4. Use ladder lollipop/staircase when the prose is about positions or ordered levels rather than magnitude bars.
 5. Keep blast rings held until there is an honest severity-by-distance concept.
 6. Promote any margin figure that needs axes, legends, or more than one idea into a numbered body figure instead.
+
+## 2026-06 Editorial Illustration Pass
+
+This pass should be run as a textbook-editor and illustrator pass, not a coverage pass.
+The current committed SVGs are mostly visually coherent: labels are outlined paths rather
+than live font text, and the device vocabulary is stable. The next improvement is narrative
+fit plus small production polish: lighter rule lines, less roofline labeling, unclipped knee
+curves, and eventually fixed-width SVG canvases so `width="100%"` gives consistent effective
+font size.
+
+For each figure, answer:
+
+1. What turn in the local argument does this mark?
+2. What relationship does the image make visible faster than prose?
+3. Would the figure become weaker if moved two pages earlier or later?
+4. Is this a first introduction of the shape, or a callback to a shape the reader already knows?
+
+If the answers are weak, cut or move the figure even if the graphic itself is attractive.
+
+### Uploaded Physical-Scale Mockup
+
+The new vertical mockup showing "Nanometer / Rack scale / Cluster scale / Planet Scale /
+Extraterrestrial" has a strong underlying idea: it makes physical scale feel like a sequence
+of constraint boundaries. It should not be inserted as-is.
+
+Editorial verdict:
+
+- The icon-spine style is more decorative than the current margin grammar. It uses five
+  detailed pictorial boxes where the book's margin language normally uses simple geometric
+  devices.
+- The level names mix unlike categories: chip feature scale, rack/building distance, cluster
+  geography, planet-scale deployment, and orbital deployment. That mix is only justified if
+  the adjacent paragraph explicitly teaches that cross-domain span.
+- "Planet scale" and "Extraterrestrial" are seductive details unless the local prose actually
+  discusses global or orbital deployment. Current likely homes in `compute_infrastructure`
+  and `network_fabrics` discuss transistor-to-data-center and rack/pod/network reach, not
+  extraterrestrial deployment.
+- If used, translate the idea into the canonical grammar: a slim `hierarchy-ladder` /
+  staircase or a justified `other-new` physical-scale spine with minimal line icons, parallel
+  labels, and a caption that states the learning purpose.
+
+Best current treatment:
+
+- Do not force the full chip-to-orbit ladder into `network_fabrics`: that chapter already has
+  a well-placed slow-link blast-radius margin figure and dense body figures for the five-level
+  model, bandwidth hierarchy, alpha-beta crossover, topology, and congestion.
+- A scoped physical-reach ladder does fit `network_fabrics` at `### Optical interconnects`,
+  because the adjacent prose explicitly compares package-scale CPO, copper cable reach, active
+  optics, and 100-meter data-center fiber. This should stay visually simple: a thin reach
+  spine, four dots, and paired medium/distance labels rather than five pictorial icon boxes.
+- Consider a revised physical-stack margin in `compute_infrastructure` only if it is anchored
+  to the chapter's existing "Accelerator / Node / Rack / Pod" narrative. The labels should be
+  infrastructure levels, not planet/orbit levels: for example "Die", "Node", "Rack", "Pod",
+  "Facility". The figure should make the chapter's central move visible: every boundary adds
+  a new wall.
+- Otherwise keep the mockup as a design prompt for a future chapter or section that explicitly
+  spans chip-to-global/orbital deployment.
+
+### Source-of-Truth Workflow
+
+Do not hand-edit exported SVGs. Make visual changes in:
+
+- `book/tools/scripts/margin_figures/margin_devices.py` for reusable device style.
+- `book/tools/scripts/margin_figures/generate_margin_figures.py` for per-figure composition.
+- `book/tools/audit/margin_figure_decisions.yml` only when changing the curated figure set.
+
+Then regenerate with:
+
+```bash
+MPLCONFIGDIR=/tmp/mplconfig python3 book/tools/scripts/margin_figures/generate_margin_figures.py
+```
+
+After regeneration, inspect rendered SVG output, not only diffs. Font cleanliness means no
+live `<text>` nodes in committed margin SVGs; rule-line cleanliness means strokes remain
+visible at 1.25in without overpowering the labels.
+
+### Production Polish Backlog
+
+High-confidence cleanup items from the 2026-06 SVG/style audit:
+
+1. Keep font outlining. The referenced margin SVGs use outlined glyph paths rather than live
+   `<text>` nodes, which is the right production choice for print and HTML consistency.
+2. Stabilize the SVG canvas width in a dedicated pass. Current tight-bbox export creates
+   variable SVG widths that all QMDs render at `width="100%"`, so apparent label size varies.
+   This is a broad generated-artifact change and should be reviewed with contact sheets.
+3. Keep red sacred for danger, fault, and true limits. Use `SEL` crimson for selected taxonomy
+   cells and neutral/list colors for categories.
+4. Strip margin rooflines to the relationship: two regime strokes, a ridge guide, and at most
+   the operating-point label(s). The words `memory`, `compute`, and `ridge` are too much at
+   margin scale.
+5. Promote any bespoke diagram that needs more than three labels or more than one teaching job
+   into a body figure or cut it.
+
+### 2026-06 Autonomous Audit Decisions
+
+Implemented in the margin-figures worktree:
+
+1. `benchmarking_confidence_detectability.svg` at the statistical-confidence trap. The local
+   prose asks the reader to compare a 1K test set with the sample size needed to see a
+   one-point change; a two-mark detectability threshold offloads that comparison without
+   duplicating a nearby body figure.
+2. `vol2_collective_communication_margin_002.svg` was redrawn in place. The previous FSDP
+   loop was a small process diagram; the revised figure shows the actual relationship the
+   paragraph teaches: standard data parallelism pays one collective per step, while FSDP pays
+   two per layer.
+3. Several generic curated figures were replaced with source-pinned custom renderers because
+   their captions promised specific values or mechanisms:
+   - `vol1_benchmarking_margin_001.svg`: 3x component speedup becomes about 1.2x end-to-end.
+   - `vol1_introduction_margin_004.svg`: 60/45/25 ms Amdahl pipeline becomes 60/15/25 ms.
+   - `vol1_ml_systems_margin_002.svg`: 18.7 GB/s camera ingest versus a 1.25 GB/s 10G link.
+   - `vol1_ml_systems_margin_004.svg`: 100/60/40 ms camera pipeline becomes 100/6/40 ms.
+   - `vol1_training_margin_001.svg`: GPT-2 activations exceed a V100 HBM capacity anchor.
+   - `vol1_training_margin_002.svg`: storage, DRAM, and V100 HBM bandwidth are ordered correctly.
+   - `vol1_training_margin_003.svg`: 64 MB full attention matrix versus 64 KB SRAM tile.
+   - `vol2_compute_infrastructure_margin_003.svg`: 50,000h per-GPU MTTF becomes 50h at 1K GPUs and 5h at 10K GPUs.
+4. Misleading or stale mechanism figures were redrawn in place:
+   - `fleet_orchestration_dependency_cascade.svg` now shows priority inversion as a wait-for chain, not a root-failure tree.
+   - `ops_scale_cross_model_blast.svg` now shows an embedding/model-dependency update source, not a shared-infrastructure fault.
+   - `inference_decode_roofline.svg` now shows decode moving toward the ridge through parallel verification, not batching as the only lever.
+   - `vol2_sustainable_ai_margin_002.svg` now shows PUE as IT base plus infrastructure overhead.
+   - `vol2_conclusion_margin_002.svg` and `vol2_conclusion_margin_003.svg` are now matched-rate and gain-composition diagrams rather than stale taxonomy/list fallbacks.
+5. Two margin figures were retargeted and moved:
+   - `model_compression_dam_locator.svg` now highlights the Machine axis next to INT8/INT4 hardware discussion.
+   - `ml_ops_drift_threshold_knee.svg` now visualizes drift-detection delay (17 minutes versus 10 days) next to the sample-rate notebook rather than duplicating the rotting-asset body figure.
+6. Placement-only fixes moved figures after their local derivations or away from competing sidenotes:
+   - Vol. 2 coordination tax moved into the GPT-3 synchronization notebook after the 4%/2% values are introduced.
+   - Responsible AI unlearning cost moved into the cost-of-forgetting notebook.
+   - Robust AI robustness tax moved from the chapter definition to the adversarial-training notebook.
+   - Robust AI transferability and Huber-loss figures moved after long explanatory footnotes.
+   - Ops-scale freshness ladder moved beside the batch-versus-streaming comparison.
+   - Model-serving traffic-adaptive batching moved below the table it summarizes.
+   - Responsible Engineering Goodhart and automation-paradox figures moved after their mechanisms are named.
+7. Added `responsible_ai_representation_tax_ladder.svg` near the representation-tax notebook. This was accepted because the notebook asks readers to multiply subgroup count, images per subgroup, and medical-labeling cost; the margin ladder offloads a real magnitude relationship.
+
+Reviewed and deliberately held:
+
+1. `model_serving` high-utilization cliff near the fallacies section. The idea is strong, but
+   the chapter already has a body tail-latency explosion figure and a utilization-latency table.
+   Add a late margin callback only after rendered layout confirms the section needs it.
+2. `hw_acceleration` multi-chip Amdahl ceiling. The local footnote is useful, but Amdahl's Law
+   is already introduced with a theorem, equation, lighthouse callout, and existing margin
+   motifs in the chapter. A new margin figure here risks repeating a known shape.
+3. `nn_computation` diminishing-returns scaling curve near the fallacies section. The candidate
+   is pedagogically sound, but it would stack immediately after an existing roofline margin
+   figure. Keep the prose-only shape unless that section is redesigned.
+4. `responsible_engr` fairness-metric taxonomy near the confusion matrices. The tables and
+   footnote already occupy the reader's attention; a margin taxonomy would likely crowd the
+   same conceptual moment.
+5. Compute-infrastructure precision dotcells and data-storage staging taxonomy were cut after
+   the per-chapter audit. In both cases the local prose already made the relationship clear,
+   and the margin graphic was adding labels rather than reducing a real learning burden.
+6. Additional suggested figures in data engineering, data selection, frameworks, hardware
+   acceleration, neural architectures, network PAUSE propagation, and robust/responsible/sustainable
+   recap sections were held unless they solved a nonredundant local learning burden. The accepted
+   representation-tax addition is the exception because it carries real arithmetic, not coverage.
+
+### 2026-06 Per-Chapter Agent Audit Round
+
+The stricter pass used one read-only audit agent per chapter QMD, with structural front/back
+matter and Purpose-section stack macros exempt. The agents inspected existing `.column-margin`
+placements, rendered chapter contact sheets when useful, checked whether SVG text remained
+outlined, and proposed additions only when a paragraph exposed a nonredundant local relationship.
+
+Scope completed:
+
+- Vol. 1 chapter files: introduction, ml_systems, ml_workflow, data_engineering,
+  nn_computation, nn_architectures, frameworks, training, data_selection, model_compression,
+  hw_acceleration, benchmarking, model_serving, ml_ops, responsible_engr, conclusion.
+- Vol. 2 chapter files: introduction, compute_infrastructure, network_fabrics,
+  collective_communication, data_storage, distributed_training, edge_intelligence,
+  fault_tolerance, fleet_orchestration, inference, ops_scale, performance_engineering,
+  responsible_ai, robust_ai, security_privacy, sustainable_ai, conclusion.
+
+Accepted changes from this round:
+
+- Repaired generic-parser failures where derived ratios or fallback numbers became fake bars.
+  Ratios such as 40x, 18x, 32x, 80x, 200x, and 30x are now annotations unless the ratio itself
+  is the measured quantity.
+- Replaced inverted or misleading Vol. 2 figures with source-pinned custom renderers:
+  distributed-training rho/barrier/energy/bandwidth, collective payload shrink, edge memory
+  and radio-savings contrasts, fault checkpoint/downtime, fleet scheduling/capacity/failure
+  cadence, inference MoE memory, ops-scale statistics curves, performance-engineering energy
+  and roofline figures, responsible-AI trends/risk, security/privacy SGX memory, and
+  sustainable-AI carbon/radio-energy ladders.
+- Cut weak margin figures rather than filling space: compute precision dotcells and the
+  data-storage staging taxonomy.
+- Kept most proposed additions out. The agents repeatedly found that body figures, tables,
+  footnotes, or the prose itself already carried the moment; adding another margin graphic
+  would be decorative or redundant.
+
+Held for a later PDF-layout/SSOT pass:
+
+- Some existing figures still deserve deeper source binding to nearby LEGO classes rather than
+  hard-coded values, especially sustainable-AI PUE/energy-per-byte and conclusion tail/gain/power
+  figures.
+- A full Quarto PDF build should still check vertical collisions with footnote sidenotes. This
+  pass inspected QMD anchors and SVG/contact-sheet rendering, not final page breaks.
