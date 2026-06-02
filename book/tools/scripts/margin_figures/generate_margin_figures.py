@@ -810,7 +810,7 @@ def sustainable_ai_radio_energy(candidate=None):
     ratio_annotation_ladder(
         "vol2/sustainable_ai",
         "vol2_sustainable_ai_margin_004",
-        [("radio bit 250K pJ", 250_000), ("FP32 mult 4 pJ", 4), ("INT32 add 0.1 pJ", 0.1)],
+        [("radio bit\n250K pJ", 250_000), ("FP32 mult\n4 pJ", 4), ("INT32 add\n0.1 pJ", 0.1)],
         ratio_label="25K-125Kx",
         domain="energy",
     )

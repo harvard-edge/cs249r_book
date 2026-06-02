@@ -65,6 +65,53 @@ size and zoomed in. Check that text is legible at margin scale, labels do not
 collide, line weights are clean, red is reserved for danger/limits, and the image
 does not look like a miniaturized body plot.
 
+## Device Catalog
+
+The production margin kit is intentionally small and repeatable. Choose the
+device by the relationship the reader should see, not by the chapter topic:
+
+| Reader needs to see | Device | Default use |
+|---|---|---|
+| A magnitude span or gap | `hierarchy-ladder` | Orders of magnitude, capacity, bandwidth, energy, latency. |
+| A threshold, cliff, or regime change | `scale-anchor` | Queueing knees, utilization cliffs, phase changes, limits. |
+| Growth, decay, divergence, or saturation | `sparkline-trend` | One or two simple curves over time/scale. |
+| Which term dominates a total | `iron-law-bar` | Data/compute/latency/resource decomposition. |
+| Memory-bound vs compute-bound placement | `thumbnail-roofline` | Roofline regime locator. |
+| Which D/A/M or D/A/I axis matters | `dam-locator` | Framework locator, not a numeric chart. |
+| A category or state selection | `taxonomy-mini` | Two-axis quadrant or short status list. |
+| One source affecting many dependents | `blast-radius` | Correlated failure or propagation. |
+
+`other-new` is an audit flag, not a normal production device. If a proposed
+visual does not fit the catalog, first try to rewrite it as one of the devices
+above. Otherwise promote it to a numbered body figure, leave it as prose, or
+reject it. Add a new device only when the visual concept recurs across chapters,
+is readable at 1.25in width, and has a stable meaning not covered by the kit.
+
+## Caption Discipline
+
+Draft the caption before drawing. The caption is the editorial takeaway; the
+`fig-alt` is the objective accessibility description. Do not copy one into the
+other.
+
+Good margin captions are short declarative phrases that reinforce the paragraph
+beside them:
+
+| Device | Caption pattern |
+|---|---|
+| `hierarchy-ladder` | `X dwarfs Y` or `the constraint spans N orders`. |
+| `scale-anchor` | `Past T, Y becomes the constraint`. |
+| `sparkline-trend` | `X outpaces or falls behind Y as scale grows`. |
+| `thumbnail-roofline` | `The workload sits in or crosses into regime R`. |
+| `iron-law-bar` | `Term X dominates the total`. |
+| `dam-locator` | `This paragraph turns on axis X`. |
+| `taxonomy-mini` | `This case lands in quadrant/state X`. |
+| `blast-radius` | `One source perturbs many dependents`. |
+
+Reject captions that are just titles, legends, footnotes, implementation notes,
+or generic prompts like "why this matters." If the caption says "dominates,"
+the marks must visibly show dominance; if it says "cliff," the curve must
+visibly cliff.
+
 ## Inventory Placements
 
 List the actual SVG margin figures currently placed in the book:
