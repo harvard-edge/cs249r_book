@@ -581,9 +581,9 @@ Heterogeneous RLHF gangs are the exception; for the homogeneous training jobs th
 
 ## Orchestration Paradigms {#sec-fleet-orchestration-paradigms}
 
-Researchers face a choice between two paradigms: submitting a script specifying exact resource needs (imperative), or declaring desired state and letting a control loop determine provisioning (declarative). Two dominant philosophies have emerged for cluster orchestration: the HPC-oriented Slurm and the cloud-native Kubernetes, each reflecting the culture and requirements of its origin domain.
+The gang-scheduling/backfill tension does not have a tool-neutral answer: the orchestration paradigm determines which guarantee the platform protects first. Slurm, shaped by HPC batch systems, favors explicit resource requests and predictable allocation. Kubernetes, shaped by cloud-native service management, favors declared desired state and continuous reconciliation. The choice is therefore not Slurm vs. Kubernetes as products; it is which control model best matches the workload mix, failure behavior, and operational culture of the fleet.
 
-The fundamental distinction is between *imperative* and *declarative* resource management. In an imperative system, the user specifies exactly what resources they need and the system allocates them directly. In a declarative system, the user specifies what they want running and the system figures out how to make it happen. This distinction, familiar from programming language design, has profound consequences for how ML workloads are scheduled, monitored, and recovered from failure.
+The fundamental distinction is between *imperative* and *declarative* resource management. In an imperative system, users specify exactly what resources they need and the system allocates them directly. In a declarative system, users specify what they want running and the system converges toward that state. This distinction, familiar from programming language design, determines how ML workloads are scheduled, monitored, and recovered from failure.
 
 ### Slurm: The HPC heritage {#sec-fleet-orchestration-slurm}
 
@@ -626,7 +626,7 @@ Slurm's strengths for ML training are clear: predictable allocation guarantees, 
 
 ### Advanced Slurm configuration for ML {#sec-fleet-orchestration-slurm-advanced}
 
-Standard partitions and fair-share policies handle basic batch workloads, but optimizing Slurm for large-scale deep learning requires configuring logic that understands the specific parallelism and failure modes of distributed training. Production ML clusters rely on three advanced capabilities: job arrays, heterogeneous steps, and lifecycle hooks.
+Once Slurm owns batch training, the remaining question is how much ML semantics the batch system can see. Standard partitions and fair-share policies schedule ordinary jobs; large-scale deep learning needs configuration that exposes sweep structure, asymmetric pipeline resources, hardware health at job boundaries, and the economic weight of different accelerator types.
 
 Job arrays transform the chaotic submission of thousands of experimental hyperparameter sweep trials into a coherent, schedulable unit. Instead of flooding the controller with individual `sbatch` requests, a user submits a single array job: `#SBATCH --array=0-99`. Slurm treats this as a single object for parsing and queuing overhead but schedules each element as an independent task, allowing the scheduler to backfill small holes in the cluster with individual trials. Each task receives a unique `SLURM_ARRAY_TASK_ID` environment variable, which the training script uses to index into a hyperparameter configuration file (for example, selecting learning rate $\eta = 10^{-4}$ for task 0 and $\eta = 3 \times 10^{-4}$ for task 1). This mechanism is the standard for large-scale ablation studies, enabling researchers to launch 1,000 experiments with a single command while preserving scheduler throughput.
 
@@ -1533,7 +1533,9 @@ General-purpose orchestration and cost-saving measures treat ML models as opaque
 
 ## Custom ML Schedulers {#sec-fleet-orchestration-custom-schedulers}
 
-If a scheduler knew that a deep learning model was in the final, diminishing-returns phase of its learning curve, it could dynamically shrink its GPU allocation and give those resources to a brand-new experiment that would benefit more. General-purpose schedulers treat jobs as opaque black boxes, but custom ML schedulers peer inside the training loop to optimize for time-to-accuracy rather than just time-to-completion.
+General-purpose schedulers treat training jobs as opaque boxes, so they cannot tell whether a model is in the steep early phase of learning or the final diminishing-returns phase. Custom ML schedulers trade implementation complexity for that visibility: they peer inside the training loop to optimize time-to-accuracy rather than only time-to-completion. The selection question is which internal signal addresses the fleet's binding bottleneck.
+
+The four systems below differ less by scheduler sophistication than by the signal they ask the platform to trust: consumed service, iteration boundaries, completion value, or measured goodput.
 
 ### Tiresias: Duration-agnostic scheduling {#sec-fleet-orchestration-tiresias}
 
@@ -1573,7 +1575,7 @@ This co-optimization of scheduling and hyperparameters achieves 37 to 50 percent
 
 ### Scheduler comparison framework {#sec-fleet-orchestration-scheduler-comparison}
 
-Custom ML schedulers represent a progressive trade-off between implementation complexity and scheduling precision. While general-purpose schedulers treat jobs as opaque boxes, these research systems open the box to exploit specific characteristics of deep learning workloads: their iterative nature, their malleability (elasticity), and their predictability.
+Custom ML schedulers represent a progressive trade-off between implementation complexity and scheduling precision, so the comparison matters as a deployment filter rather than a ranking. While general-purpose schedulers treat jobs as opaque boxes, these research systems open the box to exploit specific characteristics of deep learning workloads: their iterative nature, their malleability (elasticity), and their predictability.
 
 | **Scheduler** | **Key Insight**                            | **Scheduling Signal** | **Optimization Target**  | **Overhead**                | **Production Readiness**    |
 |:--------------|:-------------------------------------------|:----------------------|:-------------------------|:----------------------------|:----------------------------|
@@ -1596,7 +1598,7 @@ The challenge for production systems is incorporating these insights while maint
 
 ### From research to production {#sec-fleet-orchestration-research-to-production}
 
-While research schedulers like Tiresias and Pollux offer theoretically optimal placement strategies, deploying them into a live production environment reveals a chasm between the clean abstractions of a paper and the messy reality of a data center. In research, the cluster is often assumed to be a homogeneous pool of accelerators with uniform interconnect topology, and jobs are well-behaved entities that declare their resource needs accurately. In production, the "cluster" is a geological formation of hardware generations: V100s alongside A100s and H100s, connected by a patchwork of InfiniBand and Ethernet, running jobs that frequently crash, hang, or misrepresent their memory requirements. Consequently, no major hyperscaler simply "installs" a research scheduler; instead, they selectively transplant specific algorithms into standard orchestrators via Kubernetes operators or Slurm plugins.
+Research schedulers become useful in production only when their core signal survives contact with a heterogeneous data center. In research, the cluster is often assumed to be a homogeneous pool of accelerators with uniform interconnect topology, and jobs are well-behaved entities that declare their resource needs accurately. In production, the "cluster" is a geological formation of hardware generations: V100s alongside A100s and H100s, connected by a patchwork of InfiniBand and Ethernet, running jobs that frequently crash, hang, or misrepresent their memory requirements. Consequently, no major hyperscaler simply "installs" a research scheduler; instead, they selectively transplant specific algorithms into standard orchestrators via Kubernetes operators or Slurm plugins.
 
 Consider our 175B-parameter model training run. A pure implementation of Pollux might aggressively resize the job based on global cluster load, scaling the number of GPUs up and down to maximize goodput. However, changing the worker count for a synchronous training job requires a checkpoint-restart cycle, which for a model of this size involves writing terabytes of optimizer state to persistent storage. If the re-scaling interval is too short, the I/O overhead of checkpointing negates the throughput gains. In practice, production teams adopt a hybrid approach: they use Pollux-style adaptive allocation primarily during the volatile early phase of training or for hyperparameter sweeps, but lock the 175B model into a static, topology-aware allocation once the learning rate warmup completes and the job enters its months-long steady state.
 
@@ -1639,7 +1641,7 @@ The serving infrastructure analyzed in @sec-inference-scale provides the archite
 
 ### Autoscaling for inference {#sec-fleet-orchestration-autoscaling}
 
-Kubernetes **Horizontal Pod Autoscaling (HPA)**\index{Horizontal Pod Autoscaling}\index{HPA} adjusts replica counts based on observed metrics, adding instances when load increases and removing them when load decreases. The default autoscaling metric for general cloud workloads is CPU utilization, with targets of 50 to 70 percent. This default poorly reflects GPU inference workloads for two reasons. First, GPU utilization is a noisy metric that can be high even when the system is not processing user requests (background maintenance, model warmup). Second, the relationship between GPU utilization and inference latency is highly nonlinear: latency can spike dramatically when utilization crosses a threshold (typically 70 to 80 percent for GPU inference), making utilization-based scaling reactive rather than predictive. Effective ML autoscaling uses custom metrics that better predict user-facing performance before degradation occurs:
+Kubernetes **Horizontal Pod Autoscaling (HPA)**\index{Horizontal Pod Autoscaling}\index{HPA} adjusts replica counts based on observed metrics, adding instances when load increases and removing them when load decreases. The default autoscaling metric for general cloud workloads is CPU utilization, with targets of 50 to 70 percent. This default poorly reflects GPU inference workloads for two reasons. First, GPU utilization is a noisy metric that can be high even when the system is not processing user requests (background maintenance, model warmup). Second, the relationship between GPU utilization and inference latency is highly nonlinear: latency can spike dramatically when utilization crosses a threshold (typically 70 to 80 percent for GPU inference), making utilization-based scaling reactive rather than predictive. The metric choice is therefore the first scheduling decision for serving: effective ML autoscaling uses custom signals that predict user-facing degradation before it occurs.
 
 | **Metric**                                 | **Target Range**  | **Considerations**                                             |
 |:-------------------------------------------|:------------------|:---------------------------------------------------------------|
