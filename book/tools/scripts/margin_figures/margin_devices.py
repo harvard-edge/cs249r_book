@@ -168,6 +168,8 @@ def ladder(ax, tiers, wall=True, color=None, domain=None, style='bars'):
             _label(lab, v, yy, (np.log10(v) - np.log10(xmin)) / span, v * 0.92, v * 1.55)
         if wall:
             ax.plot([xmin, xmax], [n - 0.45, n - 0.45], color=RED, lw=0.75)
+        ax.text(xmax, -0.32, "log scale", ha="right", va="bottom",
+                color="#777777", fontsize=3.9)
     else:
         xmax = max(vals) * 1.12; pad = 0.015 * xmax
         ax.set_xlim(0, xmax)

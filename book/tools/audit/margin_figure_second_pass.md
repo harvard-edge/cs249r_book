@@ -54,6 +54,12 @@ sheet. The generator now splits the energy labels into two lines:
 
 The ratio label remains in the gap and the energy color remains orange.
 
+## Follow-Up Visual Fix: Log-Scale Disclosure
+
+Log-scaled hierarchy ladders now carry a small `log scale` label on the
+baseline. This prevents readers from assuming that large-span bars use a linear
+axis while preserving the compact margin-figure form.
+
 ## Deferred Editorial TODO
 
 - Add a short About-the-Book note explaining that margin visuals appear beside

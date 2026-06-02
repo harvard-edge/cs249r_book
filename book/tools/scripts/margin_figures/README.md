@@ -161,7 +161,9 @@ If geometry encodes a number, it must be visually to scale on a declared scale.
 Use these defaults:
 
 - `ladder()` for magnitude spans. It is linear for small spans and log-scaled for
-  large spans.
+  large spans. Log-scaled ladders carry a small in-figure `log scale` baseline
+  cue; do not remove it unless the figure is converted to a purely schematic
+  non-quantitative device.
 - `ratio_annotation_ladder()` for measured tiers plus a derived multiplier,
   percentage, or symbolic span. The annotation is drawn as a thin leader between
   the compared bar endpoints; it is not a third tier and should never float as
