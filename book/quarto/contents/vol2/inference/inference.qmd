@@ -1071,6 +1071,8 @@ As @tbl-inference-continuous-batching-throughput shows, the 3$\times$ throughput
 
 :::
 
+Continuous batching removes waste caused by variable output length, but it does not make every request equally cheap. Reasoning-heavy inference pushes the same problem further: a prompt may demand test-time work proportional to task difficulty, forcing schedulers to budget compute per request instead of only filling decode slots.
+
 ## The Logic Wall: Test-Time Compute Scaling {#sec-inference-logic-wall}
 
 ::: {.column-margin}
@@ -1079,7 +1081,7 @@ As @tbl-inference-continuous-batching-throughput shows, the 3$\times$ throughput
 *Reasoning expands latency about 128 times over fast pattern-matching.*
 :::
 
-Large-model capability work describes emergent behaviors [@wei2022emergent], while later analysis cautions that some apparent emergence can be an artifact of metric choice [@schaeffer2023mirage]. From a serving-systems perspective, models that transition from "Fast Thinking" (instant pattern matching) to "Slow Thinking" (deliberative reasoning) shift pressure from HBM Bandwidth toward **Test-Time Compute**\index{Test-Time Compute}. This is the **Logic Wall**\index{Logic Wall}: the realization that for complex problems, the fleet must scale compute per request proportional to the difficulty of the task, often through search or "Chain-of-Thought" (CoT) unrolling.
+Large-model capability work describes emergent behaviors [@wei2022emergent], while later analysis cautions that some apparent emergence can be an artifact of metric choice [@schaeffer2023mirage]. From a serving-systems perspective, the serving-relevant shift is the work issued per request. Models that move from "fast thinking" (instant pattern matching) to "slow thinking" (deliberative reasoning) push pressure from HBM bandwidth toward **Test-Time Compute**\index{Test-Time Compute}: the scheduler must decide how many search steps or chain-of-thought (CoT) tokens a request may consume. The **Logic Wall**\index{Logic Wall} is the resulting serving constraint: for complex problems, compute per request grows with task difficulty, and a fleet optimized for tokens per second now needs a policy for allocating thinking time.
 
 ```{python}
 #| echo: false
@@ -1125,9 +1127,11 @@ class LogicScaling:
 
 :::
 
+The batching analysis that follows treats the logic wall as a scheduling problem. Once requests can vary from a short pattern match to a long reasoning trace, the waste created by grouping unequal work becomes the baseline cost that any test-time compute policy must control.
+
 ### Quantitative analysis: Traditional vs. continuous batching {#sec-inference-scale-quantitative-analysis-traditional-vs-continuous-batching-ca70}
 
-The performance gap between traditional and continuous batching becomes quantifiable through careful analysis of wasted compute cycles. The mathematics of batching waste reveals exactly how much throughput is lost and under what conditions continuous batching delivers the greatest improvement.
+The first baseline is traditional LLM batching, where unequal output lengths turn request heterogeneity into wasted decode cycles. The mathematics of batching waste reveals exactly how much throughput is lost and under what conditions continuous batching delivers the greatest improvement.
 
 #### The waste function for traditional batching {#sec-inference-scale-waste-function-traditional-batching-1fb8}
 
@@ -1469,7 +1473,7 @@ Conversely, continuous batching provides minimal benefit when:
 
 #### Implementation complexity trade-offs {#sec-inference-scale-implementation-complexity-tradeoffs-e055}
 
-Continuous batching's performance benefits come with implementation complexity that systems engineers must weigh:
+The same variability that makes continuous batching valuable also makes it harder to operate. Its performance benefits come with implementation complexity that systems engineers must weigh:
 
 Memory management complexity increases substantially. Traditional batching allocates a fixed KV cache region per sequence at batch formation, deallocating only when the entire batch completes. Continuous batching requires dynamic allocation as sequences grow and immediate deallocation upon completion, necessitating sophisticated memory management akin to operating system virtual memory.
 
@@ -1585,7 +1589,7 @@ Recommendation systems present a third constraint regime that resembles neither.
 ![](images/svg/feature-parallel-pipeline.svg)
 :::
 
-Recommendation systems have distinct batching requirements from vision or language models. As @fig-feature-parallel-pipeline shows, the computation pattern involves:
+Recommendation systems expose the same scheduling principle under a different bottleneck. As @fig-feature-parallel-pipeline shows, their computation pattern involves:
 
 1. **Sparse feature lookup**\index{Sparse Feature Lookup}: Retrieve embeddings for user, item, and context features
 
@@ -1700,7 +1704,7 @@ As @tbl-inference-recsys-latency-breakdown shows, the per-phase latency\index{La
 
 ### Streaming inference for real-time applications {#sec-inference-scale-streaming-inference-realtime-applications-906c}
 
-Some applications cannot tolerate batching delay of any kind. Real-time speech recognition, video analysis, and robotics require processing inputs as they arrive with minimal latency.
+Streaming workloads define the boundary where batching itself becomes the wrong response. Real-time speech recognition, video analysis, and robotics require processing inputs as they arrive with minimal latency.
 
 Streaming inference processes inputs incrementally without waiting for batch formation:
 
@@ -1747,7 +1751,7 @@ GPU utilization is typically 30--50 percent for streaming workloads, traded for 
 
 ### Adaptive batching strategies {#sec-inference-scale-adaptive-batching-strategies-4fc1}
 
-Production systems rarely use fixed batching parameters. Instead, they adapt batching behavior based on current conditions:
+Once batching is workload-specific, fixed parameters become fragile. Production systems adapt batching behavior based on current conditions:
 
 Traffic-adaptive batching adjusts the batch window based on arrival rate:
 
@@ -1789,7 +1793,7 @@ This optimization weighs both the current queue length and the kernel-efficiency
 
 ### Quantitative summary: Batching strategy selection {#sec-inference-scale-quantitative-summary-batching-strategy-selection-d5af}
 
-The choice of batching strategy depends on model characteristics, traffic patterns, and latency requirements. @Fig-inference-lifecycle visualizes the end-to-end request path, highlighting latency sources at each stage.
+The final selection problem is to match the batching mechanism to model shape, traffic variance, and latency budget. @Fig-inference-lifecycle visualizes the end-to-end request path, highlighting latency sources at each stage.
 
 ::: {#chk-inference-batching-strategy-trade-offs .callout-checkpoint title="Batching strategy trade-offs"}
 
@@ -4441,18 +4445,9 @@ Consider a critical customer-support chatbot running on the same GPU server as a
 
 ### The multi-tenancy challenge {#sec-inference-scale-multitenancy-challenge-8dca}
 
-Multi-tenancy provides significant benefits:
+Multi-tenancy saves cost through cost efficiency\index{Multi-Tenancy!cost efficiency}, operational simplicity\index{Operational Simplicity}, and statistical multiplexing\index{Statistical Multiplexing}. Sharing infrastructure raises utilization, reduces the number of clusters to manage, and makes aggregate traffic more predictable than any one tenant's traffic.
 
-- Cost efficiency\index{Multi-Tenancy!cost efficiency}: Sharing infrastructure across tenants improves utilization
-- **Operational simplicity**\index{Operational Simplicity}: Fewer clusters to manage, monitor, and upgrade
-- **Statistical multiplexing**\index{Statistical Multiplexing}: Aggregate traffic is more predictable than per-tenant traffic
-
-However, sharing introduces risks. @Tbl-tenancy-comparison weighs utilization gains against isolation challenges:
-
-- **Noisy neighbors**\index{Noisy Neighbor}: One tenant's burst traffic impacts others
-- **Resource contention**\index{Resource Contention}: GPU memory, network bandwidth, CPU cycles
-- **Security boundaries**\index{Security!boundaries}: Tenant data must remain isolated
-- **SLO complexity**\index{SLO!complexity}: Different tenants have different requirements
+The same sharing creates the isolation problem that @tbl-tenancy-comparison frames: noisy neighbors\index{Noisy Neighbor} can make one tenant's burst degrade others, resource contention\index{Resource Contention} spans GPU memory, network bandwidth, and CPU cycles, security boundaries\index{Security!boundaries} must protect tenant data, and SLO complexity\index{SLO!complexity} increases when tenants have different requirements.
 
 | **Aspect**                                           | **Single-Tenant**      | **Multi-Tenant**       |
 |:-----------------------------------------------------|:-----------------------|:-----------------------|
@@ -5119,7 +5114,7 @@ The split architecture in @fig-spot-aware-routing achieves approximately 18--27 
 
 ### Global inference infrastructure {#sec-inference-scale-global-inference-infrastructure-df52}
 
-Production inference systems serving global user bases must operate across multiple geographic regions. A user in Tokyo expects low-latency responses regardless of where models were trained or where the company headquarters is located. The architectural patterns for multi-region inference deployment address this requirement.
+Global serving becomes necessary when distance, failure domains, or data-residency constraints exceed what one region can hide. A user in Tokyo expects low-latency responses regardless of where models were trained or where the company headquarters is located; the engineering choice is whether to replicate computation, cache repeated work, or centralize the model and pay the network penalty. The architectural patterns are useful only when tied to that choice.
 
 #### Why multi-region matters {#sec-inference-scale-multiregion-matters-d7d3}
 
@@ -5137,6 +5132,8 @@ Single-region deployment creates three fundamental limitations. The most immedia
 For interactive applications (chatbots, autocomplete), these delays compound across multiple model calls per request. Beyond latency, single-region deployment creates a single point of failure: cloud region outages, while rare, affect all users simultaneously. Regulatory constraints add a third dimension, as data residency requirements (the General Data Protection Regulation (GDPR) and data sovereignty laws) may require processing user data within specific geographic boundaries.
 
 #### Multi-region architecture patterns {#sec-inference-scale-multiregion-architecture-patterns-5c67}
+
+The three patterns form a decision ladder. Regional replicas pay the highest deployment cost but minimize RTT and isolate regional failures. Edge caching pays operational complexity only when queries repeat. Cross-region sharding is a last resort for capacity shortages because inter-region latency overwhelms per-stage compute.
 
 #### Pattern 1: Global load balancing with regional replicas {#sec-inference-scale-pattern-1-global-load-balancing-regional-replicas-b7ac}
 
@@ -5272,15 +5269,15 @@ Scaling global infrastructure aggressively is highly effective, but it is also e
 
 ## Weight Quantization for Serving {#sec-inference-scale-weight-quantization-serving-097b}
 
-Weight quantization for serving compresses a 140 GB FP16 language model that requires two A100 GPUs into a 35 GB INT4 representation that fits on a single GPU, by reducing the precision of model weights from 16-bit floats to 8-bit or 4-bit integers. The trade-off is a small accuracy loss in exchange for a 4$\times$ reduction in memory bandwidth and capacity demand.
+Weight quantization for serving is a bottleneck-selection decision: reducing weights from 16-bit floats to 8-bit or 4-bit integers can turn a 140 GB FP16 language model that requires two A100 GPUs into a 35 GB INT4 representation that fits on a single GPU. The trade-off is a small accuracy loss in exchange for a 4$\times$ reduction in memory bandwidth and capacity demand.
 
 ::: {#psp-inference-prior-knowledge-quantization .callout-perspective title="Prior knowledge: Quantization"}
 
-The section assumes familiarity with quantization fundamentals including post-training quantization (PTQ), which quantizes a trained model without retraining, and quantization-aware training (QAT)\index{Quantization!quantization-aware training}, which incorporates quantization effects during training for higher accuracy. Readers should also understand precision formats (FP32, FP16, INT8) and the basic trade-off between numerical precision and memory/compute efficiency. These concepts are covered in standard deep learning optimization references and in @sec-performance-engineering-precision and @sec-performance-engineering-ptq-qat.
+The necessary background is quantization fundamentals including post-training quantization (PTQ), which quantizes a trained model without retraining, and quantization-aware training (QAT)\index{Quantization!quantization-aware training}, which incorporates quantization effects during training for higher accuracy. Readers should also understand precision formats (FP32, FP16, INT8) and the basic trade-off between numerical precision and memory/compute efficiency. These concepts are covered in standard deep learning optimization references and in @sec-performance-engineering-precision and @sec-performance-engineering-ptq-qat.
 
 :::
 
-Quantization reduces numerical precision of model weights and activations, decreasing memory footprint by 2--4$\times$ while increasing decode throughput, which is *memory-bandwidth limited* rather than *compute limited*. While these quantization fundamentals are established techniques, serving at scale introduces distinct challenges: models must be quantized after training without access to training data, quality must be preserved across diverse inputs, and hardware deployment targets vary from data center GPUs to edge accelerators. The following discussion covers quantization techniques specifically designed for production inference.
+Quantization reduces numerical precision of model weights and activations, decreasing memory footprint by 2--4$\times$ while increasing decode throughput, which is *memory-bandwidth limited* rather than *compute limited*. The serving decision is which quantity should shrink: resident weights for fit, bytes moved per decode step for bandwidth, activations for prefill throughput, or the precision path supported by target hardware. Serving at scale also introduces distinct challenges: models must be quantized after training without access to training data, quality must be preserved across diverse inputs, and hardware deployment targets vary from data center GPUs to edge accelerators. Production inference therefore needs quantization methods designed for specific serving constraints.
 
 ### LLM-specific quantization challenges {#sec-inference-scale-llmspecific-quantization-challenges-b7a2}
 
@@ -5295,7 +5292,7 @@ The outlier distribution motivates the specialized quantization methods that fol
 
 ### GPTQ: Layer-by-layer weight quantization {#sec-inference-scale-gptq-layerbylayer-weight-quantization-9284}
 
-GPTQ [@frantar2023gptq] quantizes LLM weights using Hessian-based[^fn-hessian-quantization] error compensation. Rather than quantizing all weights independently, GPTQ adjusts remaining weights to compensate for errors introduced by quantization.
+GPTQ [@frantar2023gptq] is the weight-only choice when deployment needs 4-bit compression after training and can afford calibration data. It uses Hessian-based[^fn-hessian-quantization] error compensation, adjusting remaining weights to compensate for errors introduced by quantization rather than quantizing all weights independently.
 
 [^fn-hessian-quantization]: **Hessian Matrix in Quantization**\index{Quantization!Hessian matrix}: The Hessian $H = X^T X$ captures second-order sensitivity: weights with large diagonal entries have outsized impact on model outputs. GPTQ exploits this to quantize insensitive weights aggressively while preserving sensitive ones, achieving 3--4-bit quantization with less than 1 percent perplexity degradation. Without Hessian guidance, naive uniform quantization below 8-bit typically destroys model quality. \index{Hessian!quantization}
 
@@ -5340,7 +5337,7 @@ GPTQ's strengths include fast quantization without retraining, minimal quality l
 
 ### AWQ: Activation-aware weight quantization {#sec-inference-scale-awq-activationaware-weight-quantization-abec}
 
-The central observation is that not all weights are equally important. AWQ [@lin2025] recognizes that weights connected to channels with large activation magnitudes have disproportionate impact on outputs. Rather than protecting weights based on their own magnitude, AWQ protects weights based on the magnitude of activations they produce.
+AWQ [@lin2025] attacks the same weight-only serving goal from the activation side. Weights connected to channels with large activation magnitudes have disproportionate impact on outputs, so AWQ protects weights based on the magnitude of activations they produce rather than on weight magnitude alone.
 
 The AWQ algorithm proceeds in four steps:
 
@@ -5371,7 +5368,7 @@ AWQ typically achieves 0.5-1 percent lower perplexity degradation than GPTQ at t
 
 ### SmoothQuant: Migrating quantization difficulty {#sec-inference-scale-smoothquant-migrating-quantization-difficulty-f37f}
 
-SmoothQuant [@xiao2023smoothquant] addresses the activation outlier problem by migrating quantization difficulty from activations to weights. Weights have predictable distributions; activations have unpredictable outliers. SmoothQuant transfers the outlier problem to weights where it can be handled with per-channel scaling.
+SmoothQuant [@xiao2023smoothquant] is the serving path for W8A8 deployments where activation quantization matters, especially compute-bound prefill. It addresses the activation outlier problem by migrating quantization difficulty from activations to weights. Weights have predictable distributions; activations have unpredictable outliers. SmoothQuant transfers the outlier problem to weights where it can be handled with per-channel scaling.
 
 The core technique inserts smoothing operations that divide activations by per-channel scales while multiplying weights by the same scales:
 
@@ -5401,7 +5398,7 @@ The critical distinction is that W8A8 provides near 2$\times$ speedup for comput
 
 ### Rotation-based quantization {#sec-inference-scale-rotationbased-quantization-8bee}
 
-Traditional quantization methods (GPTQ, AWQ, SmoothQuant) address outliers through compensation or migration. **Rotation-based quantization**\index{Quantization!rotation-based} [@ashkboos2024quarot] takes a fundamentally different approach: mathematically transforming the weight and activation space to eliminate outliers entirely.
+Traditional quantization methods (GPTQ, AWQ, SmoothQuant) address outliers through compensation or migration. **Rotation-based quantization**\index{Quantization!rotation-based} [@ashkboos2024quarot] is the aggressive path when activation outliers block lower precision: it mathematically transforms the weight and activation space to eliminate outliers entirely.
 
 The crucial realization is that outliers are artifacts of the coordinate basis representation. Rotating to a different basis spreads extreme values uniformly, making all values quantization-friendly.
 
@@ -5450,7 +5447,7 @@ SpinQuant is an extension of QuaRot that learns optimal rotation matrices during
 
 ### Hardware-deployment co-design {#sec-inference-scale-hardwaredeployment-codesign-617f}
 
-Quantization strategies must match target hardware capabilities. Different accelerators support different precisions with varying performance multipliers.
+The quantization method only pays off when the deployment hardware accelerates the chosen precision. Different accelerators support different precisions with varying performance multipliers.
 
 @Tbl-tensor-core-precision-support summarizes NVIDIA Tensor Core precision support across Ampere and Hopper:
 
@@ -5483,7 +5480,7 @@ $$\text{Decode throughput} \propto \frac{\text{Memory bandwidth}}{\text{Model si
 
 ### Framework integration {#sec-inference-scale-framework-integration-945c}
 
-Production serving frameworks integrate quantization with their batching and memory management systems.
+Production serving frameworks matter because quantized weights reduce cost only when the runtime selects kernels and memory managers that preserve the theoretical savings.
 
 @Lst-vllm-quantization shows how vLLM loads a prequantized AWQ model.\index{Quantization!vLLM integration}
 
@@ -5583,7 +5580,7 @@ A 70B model with 4-bit weights requires approximately `{python} QuantizedServing
 
 ### Quantization selection guidelines {#sec-inference-scale-quantization-selection-guidelines-24fb}
 
-Choosing the appropriate quantization method depends on deployment constraints:
+The final selection matches the method to the binding constraint. Deployment constraints determine the appropriate quantization method:
 
 #### Decision framework {#sec-inference-quantization-decision-framework-d3c1}
 
@@ -5623,20 +5620,20 @@ These serving optimizations span continuous batching, PagedAttention, global loa
 
 ## Case Studies {#sec-inference-scale-case-studies-9689}
 
-Production-scale serving systems test the batching, sharding, caching, and routing techniques developed above against real workload variance, latency budgets, and operational constraints. ChatGPT-style services handle unpredictable global request volume; TikTok-style recommenders serve ranked content at sub-100-millisecond latency. The case studies below show how each system combines the chapter's techniques to meet its specific cost and latency targets, working from the iteration-level scheduling popularized by vLLM in 2022 (which transformed LLM serving from a coarse-grained batch process into a fluid, high-utilization stream) through global request routing and embedding-server topologies.
+Production-scale serving systems force the chapter's techniques to meet real workload variance, latency budgets, and operational constraints. The cases bind on different constraints: embedding scale, variable-length generation, cascade cost, or multimodal freshness. The examples show how systems combine batching, sharding, caching, routing, and quantization to meet specific cost and latency targets. The sequence begins with iteration-level scheduling popularized by vLLM in 2022, which transformed LLM serving from a coarse-grained batch process into a fluid, high-utilization stream, and extends through global request routing and embedding-server topologies.
 
 ### Meta recommendation serving {#sec-inference-scale-meta-recommendation-serving-bede}
 
-Meta's recommendation infrastructure serves predictions for feeds, ads, and content ranking across Facebook, Instagram, WhatsApp, and Messenger. This represents one of the largest production inference deployments in the world.
+Meta's recommendation infrastructure binds on embedding scale rather than dense forward-pass compute. It serves predictions for feeds, ads, and content ranking across Facebook, Instagram, WhatsApp, and Messenger, making it one of the largest production inference deployments in the world.
 
-The system operates at the following scale:
+The scale numbers explain why embedding locality dominates the design:
 
 - Request volume: Billions of requests per day
 - Latency target: <10 ms P99
 - Model diversity: Hundreds of model variants
 - Feature cardinality: Trillions of unique entities
 
-The serving stack is organized as follows:
+The serving stack separates sparse lookup from dense ranking:
 
 ```
 User request → Feature collection → Embedding lookup → Model inference → Response
@@ -5667,7 +5664,7 @@ The resulting GPU-CPU hybrid architecture runs dense model computation (ranking 
 
 : **Meta DLRM Hybrid CPU/GPU Architecture**: Hardware-workload mapping for Meta's recommendation serving stack. CPU + SSD handles the bandwidth-bound sparse path; CPU handles low-arithmetic-intensity feature processing; GPU handles the compute-dense ranking forward pass. The three latency budgets sum to ~5 ms, well within typical recommendation SLOs. {#tbl-meta-dlrm-hybrid-hardware}
 
-Three lessons emerge from this design:
+The design produces three serving lessons:
 
 1. Embedding lookup, not model inference, often dominates latency for recommendation systems
 2. Feature-parallel batching achieves higher efficiency than request-level batching
@@ -5675,16 +5672,16 @@ Three lessons emerge from this design:
 
 ### OpenAI API infrastructure {#sec-inference-scale-openai-api-infrastructure-a65e}
 
-OpenAI-style API infrastructure serves GPT-class models to large developer and application workloads. The infrastructure must handle highly variable request sizes (from short prompts to long-context requests) while maintaining quality of service across diverse workloads.
+OpenAI-style API infrastructure binds on request variance: short prompts, long-context requests, and different model sizes share capacity while users expect predictable TTFT. The infrastructure serves GPT-class models to large developer and application workloads while maintaining quality of service across diverse workloads.
 
-The system operates at the following scale:
+The scale numbers explain why continuous batching and admission control dominate:
 
 - Request volume: Millions of requests per hour
 - Latency target: Time-to-first-token (TTFT) <2s, throughput varies by model
 - Model sizes: Billions to hundreds of billions of parameters
 - Context lengths: Up to 128K tokens
 
-The serving stack is organized as follows:
+The serving stack separates routing, scheduling, cache management, and shard groups:
 
 ```
 API Gateway → Rate Limiting → Request Router → Model Cluster → Response Streaming
@@ -5704,7 +5701,7 @@ API Gateway → Rate Limiting → Request Router → Model Cluster → Response 
                               └─────────────┘
 ```
 
-Several key design decisions shape this system.
+The main design decision is to prevent long prompts from blocking decode service for everyone else.
 
 OpenAI was an early adopter of continuous batching (Orca-style) to maintain high GPU utilization despite variable output lengths. Chunked prefill bounds decode latency by processing long prompts in chunks that interleave with ongoing generation. @Tbl-batching-strategies-comparison contrasts the three approaches:
 
@@ -5737,7 +5734,7 @@ if large_model_queue_depth > threshold:
     reallocate_cluster_capacity(from="smaller-model", to="large-model", fraction=0.2)
 ```
 
-Three lessons emerge from this design:
+The design produces three serving lessons:
 
 1. Continuous batching is essential for LLM serving at scale
 2. Prefix caching provides 2--3$\times$ efficiency for conversational workloads
@@ -5745,9 +5742,9 @@ Three lessons emerge from this design:
 
 ### Google search ranking {#sec-inference-scale-google-search-ranking-aab2}
 
-Google Search uses ensemble serving to combine multiple specialized models for query understanding, document relevance, and result ranking. This represents a different inference pattern: many smaller models coordinated for each request rather than one large model.
+Google Search binds on cascade cost: each query coordinates many smaller models under one end-to-end latency budget rather than serving one large model. The ensemble combines specialized models for query understanding, document relevance, and result ranking.
 
-The system operates at the following scale:
+The scale numbers explain why a cascade is mandatory:
 
 - Request volume: Billions of searches per day
 - Latency target: <200 ms end-to-end
@@ -5788,7 +5785,7 @@ To meet this latency budget while evaluating thousands of documents, the system 
 
 :::
 
-Several key design decisions shape this system.
+The central design decision is progressive refinement.
 
 Rather than running one expensive model on all candidates, Google uses a ranking cascade summarized in @tbl-google-ranking-cascade:
 
@@ -5893,7 +5890,7 @@ If deadline will be missed:
   Return cached/default result rather than timing out
 ```
 
-Three lessons emerge from this design:
+The design produces three serving lessons:
 
 1. Ranking cascades provide dramatic cost reduction for large candidate sets
 2. Deadline propagation and priority scheduling are essential for ensemble serving
@@ -5901,16 +5898,16 @@ Three lessons emerge from this design:
 
 ### TikTok multimodal recommendation {#sec-inference-scale-tiktok-multimodal-recommendation-91e9}
 
-TikTok's recommendation system combines video understanding (vision) with user modeling (recommendation) for personalized content ranking. This represents a multimodal inference challenge where different model types must coordinate.
+TikTok's recommendation system binds on freshness under a tight ranking SLO: video understanding is expensive, new content arrives continuously, and user modeling remains online. It combines video understanding (vision) with user modeling (recommendation) for personalized content ranking, creating a multimodal inference challenge where different model types must coordinate.
 
-The system operates at the following scale:
+The scale numbers explain why online/offline separation matters:
 
 - Request volume: Millions of video rankings per second
 - Latency target: <50 ms P99
 - Content volume: Millions of new videos daily
 - Modalities: Video, audio, text, user signals
 
-The serving stack is organized as follows:
+The serving stack separates content and user paths:
 
 ```
 User request → User embedding → Candidate videos → Video understanding → Ranking
@@ -5965,7 +5962,7 @@ Text embedding (256d)  ─┘
 
 Late fusion allows independent updates to each modality's model without retraining the full system.
 
-Three lessons emerge from this design:
+The design produces three serving lessons:
 
 1. Separating online and offline components enables aggressive caching
 2. Two-tower architectures scale better than joint models for user-item systems
@@ -5973,13 +5970,7 @@ Three lessons emerge from this design:
 
 ### Cross-cutting observations {#sec-inference-scale-crosscutting-observations-742e}
 
-Several patterns emerge across these case studies. @Tbl-case-studies-summary identifies the primary technique and key innovation from each system:
-
-- **Separation of concerns**: All systems separate embedding and retrieval from ranking and generation, enabling specialized optimization for each component.
-- **Hybrid architectures**: No system uses GPUs exclusively. CPU+GPU combinations match hardware to workload characteristics.
-- **Caching at multiple levels**: Embedding caching, result caching, and intermediate representation caching all appear. Caching reduces compute at the cost of staleness.
-- **Progressive refinement**: Cascades and early-exit strategies reduce average compute by quickly filtering unlikely candidates.
-- **Deadline awareness**: All systems propagate deadlines and make explicit trade-offs between quality and latency when under pressure.
+Across these cases, the common pattern is specialization instead of a universal serving stack. Systems separate embedding and retrieval from ranking and generation, use hybrid CPU-GPU architectures to match hardware to workload characteristics, cache at multiple levels while accepting staleness, progressively refine candidate sets to avoid expensive work on unlikely items, and propagate deadlines so quality/latency trade-offs stay explicit under pressure. @Tbl-case-studies-summary identifies the primary technique and key innovation from each system:
 
 | **System** | **Primary Technique** | **Key Innovation**        |
 |:-----------|:----------------------|:--------------------------|
