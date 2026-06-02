@@ -105,6 +105,8 @@ marimo-callout-output {{
     display: block !important;
     width: min(var(--readable-width), 100%) !important;
     max-width: min(var(--readable-width), 100%) !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
 }}
 
 /* Published labs should show course-owned navigation and submission affordances,
@@ -122,6 +124,8 @@ ol[class~="fixed"][class~="top-0"][class~="z-100"][class~="max-h-screen"] {{
 .output.block > div:not(:has(svg, canvas, iframe, table, marimo-ui-element, .js-plotly-plot, .plotly)) {{
     width: min(var(--panel-width), 100%) !important;
     max-width: min(var(--panel-width), 100%) !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
 }}
 
 .output.block > div:not(:has(svg, canvas, iframe, table, marimo-ui-element, .js-plotly-plot, .plotly)) p,
@@ -137,6 +141,8 @@ div[style*="border-left: 4px solid"][style*="border-radius: 0px 10px"] {{
     display: block !important;
     width: min(var(--panel-width), 100%) !important;
     max-width: min(var(--panel-width), 100%) !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
 }}
 
 marimo-tabs {{
@@ -157,6 +163,8 @@ div[style*="linear-gradient(135deg, rgb(15, 23, 42)"] {{
     box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06) !important;
     padding: 1.5rem 1.75rem !important;
     max-width: min(var(--panel-width), 100%) !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
 }}
 
 div[style*="linear-gradient(135deg, #0f172a"] h1,
@@ -225,6 +233,8 @@ div[style*="border-left: 4px solid"][style*="background: white"][style*="border-
 div[style*="border-left:4px solid"][style*="background:white"][style*="border-radius:0 12px 12px 0"],
 div[style*="border-left: 4px solid"][style*="box-shadow"][style*="border-radius: 0px 12px 12px 0px"] {{
     max-width: min(var(--panel-width), 100%) !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
 }}
 
 div[style*="font-style:italic"][style*="line-height:1.65"],

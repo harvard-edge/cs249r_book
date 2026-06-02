@@ -32,6 +32,8 @@ ACADEMIC_LAB_CSS = mo.Html(
   font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: var(--mlsysbook-ink);
   max-width: min(var(--mlsysbook-panel-width), 100%);
+  margin-left: auto;
+  margin-right: auto;
 }
 .mlsysbook-lab-header {
   background: var(--mlsysbook-panel);
@@ -39,7 +41,7 @@ ACADEMIC_LAB_CSS = mo.Html(
   border-left: 6px solid var(--mlsysbook-accent, var(--mlsysbook-crimson));
   border-radius: 8px;
   padding: 22px 26px;
-  margin: 0 0 18px 0;
+  margin: 0 auto 18px auto;
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
   max-width: min(var(--mlsysbook-panel-width), 100%);
 }
@@ -83,7 +85,7 @@ ACADEMIC_LAB_CSS = mo.Html(
   border: 1px solid var(--mlsysbook-line);
   border-radius: 8px;
   padding: 18px 20px;
-  margin: 12px 0;
+  margin: 12px auto;
   max-width: min(var(--mlsysbook-panel-width), 100%);
 }
 .mlsysbook-recap h2,
@@ -119,15 +121,19 @@ ACADEMIC_LAB_CSS = mo.Html(
   border: 1px solid var(--mlsysbook-line);
   border-radius: 8px;
   padding: 12px 14px;
-  margin: 10px 0;
+  margin: 10px auto;
   max-width: min(var(--mlsysbook-readable-width), 100%);
 }
 .mlsysbook-readable {
   max-width: min(var(--mlsysbook-readable-width), 100%);
+  margin-left: auto;
+  margin-right: auto;
 }
 .lab-hud {
   width: min(var(--mlsysbook-readable-width), 100%) !important;
   max-width: min(var(--mlsysbook-readable-width), 100%) !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
   background: #FFFFFF !important;
   color: #344054;
   flex-wrap: wrap;
@@ -142,6 +148,8 @@ ol[class~="fixed"][class~="top-0"][class~="z-100"][class~="max-h-screen"] {
 .output.block > div:not(:has(svg, canvas, iframe, table, marimo-ui-element, .js-plotly-plot, .plotly)) {
   width: min(var(--mlsysbook-panel-width), 100%) !important;
   max-width: min(var(--mlsysbook-panel-width), 100%) !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
 }
 .output.block > div:not(:has(svg, canvas, iframe, table, marimo-ui-element, .js-plotly-plot, .plotly)) p,
 .output.block > div:not(:has(svg, canvas, iframe, table, marimo-ui-element, .js-plotly-plot, .plotly)) li {
@@ -155,6 +163,8 @@ div[style*="border-left: 4px solid"][style*="border-radius: 0px 10px"] {
   display: block !important;
   width: min(var(--mlsysbook-panel-width), 100%) !important;
   max-width: min(var(--mlsysbook-panel-width), 100%) !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
 }
 marimo-tabs {
   overflow-x: auto !important;
@@ -164,6 +174,8 @@ marimo-callout-output {
   display: block !important;
   width: min(var(--mlsysbook-readable-width), 100%) !important;
   max-width: min(var(--mlsysbook-readable-width), 100%) !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
 }
 .mlsysbook-version {
   color: var(--mlsysbook-muted);
