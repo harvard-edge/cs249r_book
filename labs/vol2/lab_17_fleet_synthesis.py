@@ -124,7 +124,7 @@ def _(mo, LAB_CSS, COLORS, CARBON_CAP, FAIRNESS_METRIC, FAIRNESS_OVERHEAD_MS):
                     border: 1px solid rgba(99,102,241,0.2);">
             <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
                         color: #475569; text-transform: uppercase; margin-bottom: 10px;">
-                Machine Learning Systems &middot; Volume II &middot; Lab 16 &middot; Capstone
+                Machine Learning Systems &middot; Volume II &middot; Lab 17 &middot; Capstone
             </div>
             <h1 style="margin: 0 0 10px 0; font-size: 2.6rem; font-weight: 900;
                        color: #f8fafc; line-height: 1.1; letter-spacing: -0.02em;">
@@ -917,7 +917,7 @@ No configuration achieves 100% on all six axes simultaneously. The effective gai
                         line-height: 1.55; max-width: 700px;">
                 The terminal synthesis of the entire two-volume curriculum. Design a fleet that
                 achieves &ge;50&times; effective gain while keeping all six axes green. Your carbon
-                cap from Lab 14 ({CARBON_CAP:.0%} of baseline) and fairness overhead from Lab 15
+                cap from Lab 15 ({CARBON_CAP:.0%} of baseline) and fairness overhead from Lab 16
                 ({_metric_display}, {FAIRNESS_OVERHEAD_MS}ms) feed in as starting constraints.
             </div>
         </div>
@@ -1275,7 +1275,7 @@ any single axis while ignoring coupling effects will push another axis into the 
 @app.cell(hide_code=True)
 def _(mo, ledger, COLORS, fleet_target_met, fleet_effective_gain, fleet_axes):
     if fleet_axes:
-        ledger.save(chapter=16, design={
+        ledger.save(chapter=17, design={
             "chapter": "v2_16",
             "fleet_deployed": fleet_target_met,
             "effective_gain": float(f"{fleet_effective_gain:.1f}"),

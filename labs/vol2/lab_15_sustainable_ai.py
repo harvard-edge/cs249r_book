@@ -116,7 +116,7 @@ def _(mo, LAB_CSS, COLORS):
                     box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
             <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
                         color: #475569; text-transform: uppercase; margin-bottom: 10px;">
-                Machine Learning Systems &middot; Volume II &middot; Lab 14
+                Machine Learning Systems &middot; Volume II &middot; Lab 15
             </div>
             <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
                        color: #f8fafc; line-height: 1.1; letter-spacing: -0.02em;">
@@ -1181,7 +1181,7 @@ achieves 50%+ reduction targets.
                     What's Next
                 </div>
                 <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Lab 15: The Fairness Budget</strong> -- Carbon caps limit compute.
+                    <strong>Lab 16: The Fairness Budget</strong> -- Carbon caps limit compute.
                     Fairness monitoring consumes latency. The next lab reveals that mathematical
                     impossibility governs fairness metrics, and responsible AI infrastructure
                     has real system costs.
@@ -1235,7 +1235,7 @@ def _(mo, ledger, COLORS, partA_pred, partB_pred, partC_pred, partD_pred, partD_
     _elasticity = partD_elast_slider.value if hasattr(partD_elast_slider, 'value') else 2.0
     _geo_choice = partE_geo.value if hasattr(partE_geo, 'value') else "US average"
     _cap_choice = partE_cap.value if hasattr(partE_cap, 'value') else 1.0
-    ledger.save(chapter=14, design={
+    ledger.save(chapter=15, design={
         "partA_energy_deficit_prediction": _energy_pred,
         "partB_geography_prediction": _geo_pred,
         "partC_lifecycle_prediction": _lifecycle_pred,

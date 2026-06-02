@@ -120,7 +120,7 @@ def _(LAB_CSS, mo):
                     box-shadow: 0 8px 32px rgba(0,0,0,0.3); margin-bottom: 8px;">
             <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
                         color: #475569; text-transform: uppercase; margin-bottom: 10px;">
-                Machine Learning Systems &middot; Volume II &middot; Lab 11
+                Machine Learning Systems &middot; Volume II &middot; Lab 12
             </div>
             <h1 style="margin: 0 0 10px 0; font-size: 2.2rem; font-weight: 900;
                        color: #f8fafc; line-height: 1.1; letter-spacing: -0.02em;">
@@ -1109,7 +1109,7 @@ the ~50/day human processing capacity.
     def build_synthesis():
         # Persist to Design Ledger when student writes a decision
         if synth_decision_input.value:
-            ledger.save(chapter=11, design={
+            ledger.save(chapter=12, design={
                 "insight": synth_decision_input.value,
                 "complexity_crossover": 50,
                 "silent_failure_24h_cost": 1_080_000,
@@ -1181,7 +1181,7 @@ the ~50/day human processing capacity.
             mo.md("---"),
             mo.md("### Decision Log"),
             mo.md("Record the single most important insight from this lab. "
-                   "This entry carries forward to Lab 12 and beyond via the Design Ledger."),
+                   "This entry carries forward to Lab 13 and beyond via the Design Ledger."),
             synth_decision_ui,
         ])
 

@@ -125,7 +125,7 @@ def _(LAB_CSS, mo):
                     box-shadow: 0 8px 32px rgba(0,0,0,0.3); margin-bottom: 8px;">
             <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
                         color: #475569; text-transform: uppercase; margin-bottom: 10px;">
-                Machine Learning Systems &middot; Volume II &middot; Lab 12
+                Machine Learning Systems &middot; Volume II &middot; Lab 13
             </div>
             <h1 style="margin: 0 0 10px 0; font-size: 2.2rem; font-weight: 900;
                        color: #f8fafc; line-height: 1.1; letter-spacing: -0.02em;">
@@ -1143,7 +1143,7 @@ def _(COLORS, ledger, mo, pA_pred, pA_epsilon, pA_N, pB_pred, pC_pred, pD_pred, 
     _budget_pred = pD_pred.value if hasattr(pD_pred, 'value') else None
     _composition = pD_comp.value if hasattr(pD_comp, 'value') else "basic"
     _budget_eps = pD_budget.value if hasattr(pD_budget, 'value') else 10
-    ledger.save(chapter=12, design={
+    ledger.save(chapter=13, design={
         "partA_scaling_prediction": _scaling_pred,
         "partA_epsilon_choice": _epsilon,
         "partA_dataset_size": _dataset_n,

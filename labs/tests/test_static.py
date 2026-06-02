@@ -19,11 +19,13 @@ Tests:
 
 import ast
 import re
+import zipfile
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+LABS_ROOT = REPO_ROOT / "labs"
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -217,6 +219,80 @@ class TestWheelConsistency:
             f"but not found. Update the micropip.install() URL in this lab."
         )
 
+    def test_mlsysbook_labs_wheel_present_when_imported(self, lab_path):
+        """Labs importing mlsysbook_labs must install its browser wheel."""
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib
+
+        source = read_source(lab_path)
+        if "mlsysbook_labs" not in source:
+            pytest.skip("Lab has not migrated to mlsysbook_labs yet")
+
+        pyproject = REPO_ROOT / "labs" / "pyproject.toml"
+        with open(pyproject, "rb") as f:
+            version = tomllib.load(f)["project"]["version"]
+
+        expected_fragment = f"../../wheels/mlsysbook_labs-{version}-py3-none-any.whl"
+        assert expected_fragment in source, (
+            f"Missing mlsysbook_labs WASM wheel install. Expected '{expected_fragment}'."
+        )
+
+    def test_mlsysbook_labs_wheel_contains_contract_modules(self):
+        """The lab helper wheel must include the schema, UI, report, and version modules."""
+        wheel = REPO_ROOT / "wheels" / "mlsysbook_labs-0.1.0-py3-none-any.whl"
+        assert wheel.exists(), f"Missing lab helper wheel: {wheel}"
+        with zipfile.ZipFile(wheel) as zf:
+            names = set(zf.namelist())
+        required = {
+            "mlsysbook_labs/__init__.py",
+            "mlsysbook_labs/schemas.py",
+            "mlsysbook_labs/ui.py",
+            "mlsysbook_labs/reports.py",
+            "mlsysbook_labs/versions.py",
+        }
+        missing = sorted(required - names)
+        assert not missing, f"mlsysbook_labs wheel missing modules: {missing}"
+
+
+class TestLabCatalog:
+    """Release metadata catalog must stay aligned with the lab files."""
+
+    def test_every_lab_has_catalog_metadata(self):
+        from mlsysbook_labs import LAB_CATALOG
+
+        lab_files = {
+            str(path.relative_to(LABS_ROOT))
+            for path in sorted((LABS_ROOT / "vol1").glob("lab_*.py"))
+        }
+        lab_files.update(
+            str(path.relative_to(LABS_ROOT))
+            for path in sorted((LABS_ROOT / "vol2").glob("lab_*.py"))
+        )
+        assert lab_files == set(LAB_CATALOG), (
+            "Lab catalog and lab files differ. "
+            f"Missing metadata: {sorted(lab_files - set(LAB_CATALOG))}; "
+            f"stale metadata: {sorted(set(LAB_CATALOG) - lab_files)}"
+        )
+
+    def test_lab_ids_are_unique(self):
+        from mlsysbook_labs import LAB_CATALOG
+
+        lab_ids = [metadata.lab_id for metadata in LAB_CATALOG.values()]
+        duplicates = sorted({lab_id for lab_id in lab_ids if lab_ids.count(lab_id) > 1})
+        assert not duplicates, f"Duplicate lab IDs: {duplicates}"
+
+    def test_catalog_has_version_fields(self):
+        from mlsysbook_labs import LAB_CATALOG
+
+        for path, metadata in LAB_CATALOG.items():
+            assert metadata.lab_version, f"{path} missing lab_version"
+            assert metadata.report_schema_version, f"{path} missing report_schema_version"
+            assert metadata.ledger_schema_version, f"{path} missing ledger_schema_version"
+            assert metadata.mlsysim_version, f"{path} missing mlsysim_version"
+            assert metadata.updated_at, f"{path} missing updated_at"
+
     def test_no_absolute_wheel_url(self, lab_path):
         """Labs must use relative URLs for the wheel, not absolute mlsysbook.ai URLs."""
         source = read_source(lab_path)
@@ -243,6 +319,32 @@ class TestWheelConsistency:
             f"Labs reference version {version} but the wheel is not present in wheels/.\n"
             f"Fix: python3 -m build --wheel mlsysim/ && cp mlsysim/dist/mlsysim-*.whl wheels/\n"
             f"This causes BadZipFile in production when micropip fetches the missing URL."
+        )
+
+    def test_wheel_contains_lab_toolkit(self):
+        """The browser wheel must include mlsysim.labs used by every Marimo lab."""
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib
+
+        pyproject = REPO_ROOT / "mlsysim" / "pyproject.toml"
+        with open(pyproject, "rb") as f:
+            version = tomllib.load(f)["project"]["version"]
+
+        wheel_path = REPO_ROOT / "wheels" / f"mlsysim-{version}-py3-none-any.whl"
+        required = {
+            "mlsysim/labs/__init__.py",
+            "mlsysim/labs/state.py",
+            "mlsysim/labs/style.py",
+            "mlsysim/labs/components.py",
+        }
+        with zipfile.ZipFile(wheel_path) as wheel:
+            names = set(wheel.namelist())
+        missing = sorted(required - names)
+        assert not missing, (
+            f"Wheel is missing browser lab toolkit files: {missing}\n"
+            f"Fix: python3 -m build --wheel mlsysim/ && cp mlsysim/dist/mlsysim-*.whl wheels/"
         )
 
 

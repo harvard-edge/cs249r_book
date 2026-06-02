@@ -17,8 +17,17 @@ def _repo_root(lab_file: str) -> Path:
 
 def native_bootstrap(lab_file: str) -> None:
     """Add repo root to sys.path for editable/local mlsysim imports."""
-    if sys.platform == "emscripten" or "mlsysim" in sys.modules:
+    if sys.platform == "emscripten":
         return
-    root = str(_repo_root(lab_file))
-    if root not in sys.path:
-        sys.path.insert(0, root)
+    root = _repo_root(lab_file)
+    package_root = str(root / "mlsysim")
+    repo_root = str(root)
+    for path in (repo_root, package_root):
+        if path not in sys.path:
+            sys.path.insert(0, path)
+
+    # If the namespace directory was imported before the nested package path
+    # was added, discard it so the next import resolves to mlsysim/mlsysim.
+    loaded = sys.modules.get("mlsysim")
+    if loaded is not None and getattr(loaded, "__file__", None) is None:
+        del sys.modules["mlsysim"]

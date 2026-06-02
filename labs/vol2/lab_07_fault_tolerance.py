@@ -88,7 +88,7 @@ def _(COLORS, LAB_CSS, mo):
             <div>
                 <div style="font-size: 0.72rem; font-weight: 700; color: #94a3b8;
                             text-transform: uppercase; letter-spacing: 0.14em; margin-bottom: 8px;">
-                    Vol 2 &middot; Lab 06 &middot; Fault Tolerance
+                    Vol 2 &middot; Lab 07 &middot; Fault Tolerance
                 </div>
                 <div style="font-size: 2.0rem; font-weight: 800; color: #f1f5f9; line-height: 1.15; margin-bottom: 10px;">
                     When Failure is Routine
@@ -1450,7 +1450,7 @@ def _(COLORS, partA_prediction, partB_prediction, mo):
 
     mo.Html(f"""
     <div class="lab-hud">
-        <div><span class="hud-label">LAB</span> <span class="hud-value">Vol2 &middot; Lab 06</span></div>
+        <div><span class="hud-label">LAB</span> <span class="hud-value">Vol2 &middot; Lab 07</span></div>
         <div><span class="hud-label">CHAPTER</span> <span class="hud-value">v2_06 &middot; Fault Tolerance</span></div>
         <div><span class="hud-label">PART A</span> <span class="{'hud-active' if _a1_ok else 'hud-none'}">{"CORRECT" if _a1_ok else "REVIEW"}</span></div>
         <div><span class="hud-label">PART B</span> <span class="{'hud-active' if _a2_ok else 'hud-none'}">{"CORRECT" if _a2_ok else "REVIEW"}</span></div>

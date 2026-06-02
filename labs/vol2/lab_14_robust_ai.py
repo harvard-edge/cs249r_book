@@ -116,7 +116,7 @@ def _(mo, LAB_CSS, COLORS):
                     box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
             <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
                         color: #475569; text-transform: uppercase; margin-bottom: 10px;">
-                Machine Learning Systems &middot; Volume II &middot; Lab 13
+                Machine Learning Systems &middot; Volume II &middot; Lab 14
             </div>
             <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
                        color: #f8fafc; line-height: 1.1; letter-spacing: -0.02em;">
@@ -1268,7 +1268,7 @@ coarser — and the latter effect dominates. At eps=0 the gap is only
                     What's Next
                 </div>
                 <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Lab 14: The Carbon Budget</strong> -- Robustness defenses consume compute,
+                    <strong>Lab 15: The Carbon Budget</strong> -- Robustness defenses consume compute,
                     and compute has a carbon cost. The next lab reveals that efficiency gains can
                     <em>increase</em> total energy consumption through the Jevons Paradox.
                 </div>
@@ -1315,7 +1315,7 @@ coarser — and the latter effect dominates. At eps=0 the gap is only
 @app.cell(hide_code=True)
 def _(mo, ledger, COLORS, partA_pred):
     if partA_pred.value is not None:
-        ledger.save(chapter=13, design={
+        ledger.save(chapter=14, design={
             "chapter": "v2_13",
             "robustness_tax_pp": 26,
             "pgd_compute_multiplier": 8,
