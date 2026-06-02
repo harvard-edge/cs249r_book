@@ -30,6 +30,10 @@ MPLCONFIGDIR=/tmp/mplconfig python3 book/tools/scripts/margin_figures/generate_m
 Do not hand-edit generated SVGs. Change the Python source, regenerate, then check
 the diff.
 
+`margin_devices.py` fixes the SVG hash salt and omits per-run date metadata.
+Keep those settings in place so regeneration changes only intentional geometry,
+labels, or style decisions rather than timestamps and random clip-path ids.
+
 ## Render And Inspect
 
 Render a volume contact sheet:

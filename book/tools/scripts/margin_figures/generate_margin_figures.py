@@ -424,6 +424,33 @@ def normalized_rows(chapter, name, rows, *, title=None, color=MEM, max_value=Non
     write(fig, chapter, name)
 
 
+def benchmarking_tail_latency_gap():
+    ratio_annotation_ladder(
+        "vol1/benchmarking",
+        "benchmarking_tail_latency_gap",
+        [("prod p99 200ms", 200), ("bench mean 15ms", 15)],
+        ratio_label="10-13x",
+        domain="time",
+    )
+
+
+def vol1_conclusion_fleet_mtbf_ladder():
+    from mlsysim import Systems, ureg
+    from mlsysim.physics import calc_mtbf_cluster
+
+    gpu_count = Systems.Clusters.Training_1K.total_accelerators
+    gpu_mtbf_h = float(Systems.Reliability.Gpu.mttf_hours)
+    cluster_mtbf_h = calc_mtbf_cluster(gpu_mtbf_h * ureg.hour, gpu_count).m_as("hour")
+    gpu_mtbf_years = gpu_mtbf_h / (24 * 365)
+    make_ladder(
+        "vol1/conclusion",
+        "vol1_conclusion_fleet_mtbf_ladder",
+        [(f"1 GPU {gpu_mtbf_years:.1f}y", gpu_mtbf_h), (f"1024 GPUs {cluster_mtbf_h:.1f}h", cluster_mtbf_h)],
+        domain="time",
+        wall=False,
+    )
+
+
 def benchmarking_component_speedup_bars(candidate=None):
     model_latency = 10.0
     total_latency = 50.0
@@ -616,6 +643,59 @@ def distributed_training_bandwidth_gap(candidate=None):
     )
 
 
+def distributed_training_pipeline_bubble_tax():
+    """Pipeline bubble bars share one 100% denominator."""
+    from mlsysim.physics import calc_pipeline_bubble
+
+    rows = [
+        ("p8 m32", calc_pipeline_bubble(8, 32), 0.58),
+        ("p16 m16", calc_pipeline_bubble(16, 16), 0.28),
+    ]
+    fig, ax = margin_axes("iron-law-bar", figsize=(1.22, 0.70))
+    x, w, h = 0.24, 0.62, 0.14
+    ax.text(0.54, 0.91, "bubble tax", ha="center", va="center", color=INK, fontsize=5.0, fontweight="bold")
+    for label, bubble, y in rows:
+        useful = 1.0 - bubble
+        ax.text(0.07, y + h / 2, label, ha="left", va="center", color=INK, fontsize=4.8)
+        rect(ax, x, y, w * useful, h, COMP, ec="white", lw=0.35)
+        rect(ax, x + w * useful, y, w * bubble, h, RED, ec="white", lw=0.35)
+        if useful > 0.42:
+            ax.text(x + w * useful / 2, y + h / 2, "work", ha="center", va="center", color="white", fontsize=4.6, fontweight="bold")
+        ax.text(x + w + 0.035, y + h / 2, f"{bubble * 100:.0f}% idle", ha="left", va="center", color=RED, fontsize=4.7, fontweight="bold")
+    write(fig, "vol2/distributed_training", "distributed_training_pipeline_bubble_tax")
+
+
+def distributed_training_young_daly_checkpoint_curve():
+    """Young-Daly checkpoint interval trade-off from the chapter worked example."""
+    from mlsysim import Systems, ureg
+    from mlsysim.physics import calc_young_daly_interval
+
+    t_write_min = 5.0
+    num_gpus = Systems.Clusters.Training_1K.total_accelerators
+    cluster_mtbf_hr = float(Systems.Reliability.Gpu.mttf_hours) / num_gpus
+    t_opt_hr = calc_young_daly_interval(t_write_min * 60 * ureg.second, cluster_mtbf_hr * 3600 * ureg.second).m_as("hour")
+    safe_hr = 0.25
+    sparse_hr = 8.0
+
+    xs = np.linspace(0.18, 8.0, 160)
+    overhead = (t_write_min / 60) / xs + xs / (2 * cluster_mtbf_hr)
+    y = 0.14 + 0.66 * (overhead - overhead.min()) / (overhead.max() - overhead.min())
+    fig, ax = margin_axes("scale-anchor", figsize=(1.22, 0.74))
+    ax.plot(xs, y, color=INK, lw=1.35)
+    for hour_value, label, color, yoff in [
+        (safe_hr, "15m", RED, 0.13),
+        (t_opt_hr, "2.9h opt", DATA, 0.16),
+        (sparse_hr, "8h", GRID, -0.16),
+    ]:
+        yy = np.interp(hour_value, xs, y)
+        ax.plot(hour_value, yy, "o", color=color, ms=3.5, zorder=4)
+        ax.text(hour_value, yy + yoff, label, ha="center", va="center", color=color if color != GRID else "#555555", fontsize=4.8, fontweight="bold")
+    ax.text(4.0, 0.90, "checkpoint interval", ha="center", va="center", color=INK, fontsize=5.0)
+    ax.set_xlim(0, 8.4)
+    ax.set_ylim(0, 1)
+    write(fig, "vol2/distributed_training", "distributed_training_young_daly_optimum")
+
+
 def collective_communication_payload_shrink(candidate=None):
     ratio_annotation_ladder(
         "vol2/collective_communication",
@@ -672,9 +752,9 @@ def fleet_orchestration_scheduler_comparison(candidate=None):
     normalized_rows(
         "vol2/fleet_orchestration",
         "vol2_fleet_orchestration_margin_004",
-        [("FIFO", 500), ("gang", 350), ("aware", 280)],
-        title="wait time",
-        color=TIME,
+        [("allocated", 500), ("active", 350), ("productive", 280)],
+        title="utilization",
+        color=COMP,
         suffix="",
     )
 
@@ -732,6 +812,22 @@ def conclusion_gain_stack(candidate=None):
         domain="compute",
         wall=False,
     )
+
+
+def conclusion_tail_latency_fanout():
+    fig, ax = margin_axes("scale-anchor", figsize=(1.22, 0.58))
+    x0, w, y = 0.10, 0.78, 0.48
+    servers = 100
+    hit_probability = 1 - 0.99**servers
+    marker_x = x0 + w * hit_probability
+    ax.plot([x0, x0 + w], [y, y], color=GRID, lw=0.75)
+    ax.axvspan(marker_x, x0 + w, color=REDFILL, alpha=0.30)
+    ax.axvline(marker_x, color=RED, lw=0.75, ls="--")
+    ax.plot(x0 + w, y, "o", color=RED, ms=3.7)
+    ax.text(marker_x, y + 0.21, "63%", ha="center", va="center", color=RED, fontsize=5.1, fontweight="bold")
+    ax.text(x0 + w, y - 0.18, "100\nservers", ha="center", va="center", color=RED, fontsize=4.6, fontweight="bold")
+    ax.text(0.48, 0.88, "tail hit", ha="center", va="center", color=INK, fontsize=5.0)
+    write(fig, "vol2/conclusion", "conclusion_tail_latency_rise")
 
 
 def responsible_ai_representation_tax_ladder():
@@ -1026,10 +1122,32 @@ def data_storage_egress_cost(candidate=None):
     total = storage + egress
     rect(ax, x, y, w * storage / total, h, GRID, ec="white", lw=0.35)
     rect(ax, x + w * storage / total, y, w * egress / total, h, NET, ec="white", lw=0.35)
-    ax.text(x + w * storage / total / 2, y + h / 2, "$24K\nstore", ha="center", va="center", color="#555555", fontsize=4.3)
+    ax.text(x + w * storage / total / 2, y + h + 0.10, "$24K", ha="center", va="center", color="#555555", fontsize=4.5, fontweight="bold")
+    ax.text(x + w * storage / total / 2, y - 0.09, "store", ha="center", va="center", color="#555555", fontsize=4.2)
     ax.text(x + w * storage / total + w * egress / total / 2, y + h / 2, "$90K egress", ha="center", va="center", color="white", fontsize=4.8, fontweight="bold")
     ax.text(0.52, 0.78, "10 epochs", ha="center", va="center", color=INK, fontsize=5.0)
     write(fig, "vol2/data_storage", "vol2_data_storage_margin_003")
+
+
+def data_storage_checkpoint_storm_write_time():
+    from mlsysim import Models, Systems, Bparam, BYTES_FP16, BYTES_FP32, GB, THOUSAND, byte, second
+
+    params_b = Models.Language.Llama2_70B.parameters.m_as(Bparam)
+    nodes = Systems.Clusters.Training_1K.total_accelerators
+    fabric_bw_gbs = Systems.Fabrics.InfiniBand_XDR.bandwidth.m_as(GB / second)
+    weights_gb = params_b * BYTES_FP16.m_as(byte)
+    gradients_gb = weights_gb
+    optimizer_state_gb = params_b * BYTES_FP32.m_as(byte) * 3
+    zero3_total_gb = weights_gb + gradients_gb + optimizer_state_gb
+    zero3_write_s = zero3_total_gb / fabric_bw_gbs
+    naive_write_s = weights_gb * nodes / fabric_bw_gbs
+    ratio_annotation_ladder(
+        "vol2/data_storage",
+        "data_storage_checkpoint_storm_write_time",
+        [(f"naive {naive_write_s / 60:.1f}m", naive_write_s), (f"ZeRO-3 {zero3_write_s:.1f}s", zero3_write_s)],
+        ratio_label=f"{naive_write_s / zero3_write_s:.0f}x",
+        domain="time",
+    )
 
 
 def ops_scale_sample_size_curve(candidate=None):
@@ -1070,6 +1188,29 @@ def ops_scale_detection_window(candidate=None):
     )
 
 
+def responsible_ai_shap_subset_explosion(candidate=None):
+    ratio_annotation_ladder(
+        "vol2/responsible_ai",
+        "vol2_responsible_ai_margin_001",
+        [("20 feat 1M", 2**20), ("3 feat 8", 2**3)],
+        ratio_label="2^n",
+        domain="compute",
+    )
+
+
+def responsible_ai_monitoring_scale():
+    formula_rows(
+        "vol2/responsible_ai",
+        "responsible_ai_monitoring_scale",
+        [
+            ("metrics", "150", DATA),
+            ("events", "8.64M", NET),
+            ("false", "7.5", RED),
+        ],
+        title="monitoring/day",
+    )
+
+
 def responsible_ai_override_trend(candidate=None):
     fig, ax = margin_axes("sparkline-trend", figsize=(1.18, 0.72))
     t = np.linspace(0, 1, 80)
@@ -1086,13 +1227,13 @@ def responsible_ai_override_trend(candidate=None):
 
 
 def responsible_ai_governance_stack(candidate=None):
-    fig, ax = margin_axes("taxonomy-mini", figsize=(1.10, 0.98))
-    rows = [("card", 0.78), ("eval", 0.56), ("audit", 0.34)]
-    ax.plot([0.22, 0.22], [0.25, 0.86], color=GRID, lw=0.7)
+    fig, ax = margin_axes("taxonomy-mini", figsize=(1.12, 1.08))
+    rows = [("provenance", 0.80), ("explain", 0.60), ("appeal", 0.40), ("outcome", 0.20)]
+    ax.plot([0.20, 0.20], [0.14, 0.86], color=GRID, lw=0.7)
     for idx, (label, y) in enumerate(rows):
         color = SEL if idx == 0 else "#BBBBBB"
-        ax.plot(0.22, y, "o", color=color, ms=6)
-        ax.text(0.36, y, label, ha="left", va="center", color=INK, fontsize=5.2)
+        ax.plot(0.20, y, "o", color=color, ms=5.7)
+        ax.text(0.33, y, label, ha="left", va="center", color=INK, fontsize=4.9)
     write(fig, "vol2/responsible_ai", "vol2_responsible_ai_margin_003")
 
 
@@ -1133,8 +1274,8 @@ def performance_engineering_batch_roofline(candidate=None):
     make_roofline_points(
         "vol2/performance_engineering",
         "vol2_performance_engineering_margin_002",
-        ridge=80.0,
-        points=[("B=1", 2.0, MEM), ("B=256", 96.0, COMP)],
+        ridge=295.0,
+        points=[("B=1", 1.0, MEM), ("B=256", 256.0, COMP)],
         arrow=True,
     )
 
@@ -1170,6 +1311,23 @@ def security_privacy_sgx_memory(candidate=None):
         domain="memory",
         wall=True,
     )
+
+
+def security_privacy_dp_dataset_threshold():
+    fig, ax = margin_axes("scale-anchor", figsize=(1.22, 0.58))
+    x0, w, y = 0.10, 0.78, 0.48
+    max_samples = 100_000
+    small = 5_000
+    threshold = 50_000
+    small_x = x0 + w * small / max_samples
+    thresh_x = x0 + w * threshold / max_samples
+    ax.plot([x0, x0 + w], [y, y], color=GRID, lw=0.75)
+    ax.axvspan(x0, thresh_x, color=REDFILL, alpha=0.34)
+    ax.axvline(thresh_x, color=RED, lw=0.7, ls="--")
+    ax.plot(small_x, y, "o", color=RED, ms=3.8)
+    ax.text(small_x + 0.04, y - 0.19, "5K", ha="left", va="center", color=RED, fontsize=4.9, fontweight="bold")
+    ax.text(thresh_x + 0.05, y + 0.19, "50K\nthreshold", ha="left", va="center", color=RED, fontsize=4.6, fontweight="bold")
+    write(fig, "vol2/security_privacy", "security_privacy_dp_dataset_threshold")
 
 
 def sharing_fill():
@@ -1626,9 +1784,9 @@ def _epsilon_budget(candidate):
     fig, ax = margin_axes("other-new", figsize=(1.20, 0.52))
     x, y, w, h = 0.08, 0.42, 0.84, 0.18
     for i in range(10):
-        rect(ax, x + i * w / 10, y, w / 10 - 0.004, h, RED if i < 7 else "#E5E5E5", ec="white", lw=0.2)
-    ax.text(0.08, 0.23, "epsilon budget", ha="left", va="center", color=INK, fontsize=5.1)
-    ax.text(0.92, 0.23, "spent", ha="right", va="center", color=RED, fontsize=5.1)
+        rect(ax, x + i * w / 10, y, w / 10 - 0.004, h, RED, ec="white", lw=0.2)
+    ax.text(0.08, 0.23, "10 x eps=1", ha="left", va="center", color=INK, fontsize=5.1)
+    ax.text(0.92, 0.23, "eps~10", ha="right", va="center", color=RED, fontsize=5.1, fontweight="bold")
     write(fig, candidate["chapter"], curated_asset_name(candidate["id"]))
 
 
@@ -1755,6 +1913,8 @@ def _other_new(candidate):
         performance_engineering_kv_precision(candidate)
     elif cid == "vol2-performance-engineering-margin-004":
         performance_engineering_fleet_mfu(candidate)
+    elif cid == "vol2-responsible-ai-margin-001":
+        responsible_ai_shap_subset_explosion(candidate)
     elif cid == "vol2-responsible-ai-margin-002":
         responsible_ai_override_trend(candidate)
     elif cid == "vol2-responsible-ai-margin-003":
@@ -1846,6 +2006,7 @@ def generate_curated_margin_figures() -> None:
             "vol2-performance-engineering-margin-002",
             "vol2-performance-engineering-margin-003",
             "vol2-performance-engineering-margin-004",
+            "vol2-responsible-ai-margin-001",
             "vol2-responsible-ai-margin-002",
             "vol2-responsible-ai-margin-003",
             "vol2-responsible-ai-margin-004",
@@ -1929,9 +2090,9 @@ def alpha_beta():
 
 def generate() -> None:
     # Volume I
-    make_sparkline("vol1/benchmarking", "benchmarking_mlperf_speedup_divergence", threat=False, steep=2.0)
     make_ladder("vol1/benchmarking", "benchmarking_power_ladder", [("rack 10 kW", 10000), ("node 400 W", 400), ("edge 80 W", 80), ("RPi4 3.5 W", 3.5), ("MCU 25 mW", 0.025), ("NDP 150 uW", 0.00015)], domain="power")
     benchmarking_confidence_detectability()
+    benchmarking_tail_latency_gap()
     taxonomy_quadrant("vol1/data_engineering", "data_engineering_data_gravity_entropy", selected=(0, 1), xlabel="data gravity", ylabel="info entropy", labels={(0, 1): "high\ngain"})
     make_ladder("vol1/data_engineering", "data_engineering_storage_latency_hierarchy", [("internet 100ms", 0.1), ("network 500us", 5e-4), ("SSD 100us", 1e-4), ("DRAM 100ns", 1e-7), ("L1 0.5ns", 5e-10)], domain="time", wall=True)
     data_selection_compute_data_gap()
@@ -1943,7 +2104,7 @@ def generate() -> None:
     make_roofline("vol1/hw_acceleration", "hw_acceleration_roofline_elbow")
     make_ladder("vol1/introduction", "introduction_energy_hierarchy", [("DRAM 160 pJ", 160), ("FP16 1.1 pJ", 1.1), ("INT8 0.2 pJ", 0.2)], domain="energy")
     make_ironbar("vol1/introduction", "introduction_iron_law_bars", [("D", 0.58, MEM), ("C", 0.20, COMP), ("L", 0.22, NET)], dom=0)
-    make_ladder("vol1/ml_ops", "ml_ops_drift_threshold_knee", [("low traffic 10d", 14_400), ("100 QPS 17m", 17)], domain="time", wall=False)
+    make_ladder("vol1/ml_ops", "ml_ops_drift_threshold_knee", [("low traffic 10d", 14_400), ("1 QPS 17m", 17)], domain="time", wall=False)
     make_ladder("vol1/ml_systems", "ml_systems_deployment_span", [("Cloud 3 MW", 3_000_000), ("Edge 200 W", 200), ("Mobile 5 W", 5), ("Tiny 50 mW", 0.05)], domain="power")
     make_sparkline("vol1/ml_systems", "ml_systems_memory_wall_divergence", threat=True, steep=1.9)
     make_dam("vol1/ml_systems", "ml_systems_dam_locator", focus="all", vol="vol1")
@@ -1967,17 +2128,21 @@ def generate() -> None:
     make_knee("vol1/training", "training_cost_asymmetry", knee_frac=0.72)
     make_ironbar("vol1/training", "training_iron_law_bars", [("D", 0.16, MEM), ("C", 0.66, COMP), ("L", 0.18, NET)], dom=1)
     make_ironbar("vol1/training", "training_optimizer_memory", [("P", 0.25, GRID), ("G", 0.25, GRID), ("Adam", 0.50, MEM)], dom=2)
+    vol1_conclusion_fleet_mtbf_ladder()
 
     # Volume II
     make_ironbar("vol2/collective_communication", "collective_communication_comm_dominance", [("compute", 0.30, GRID), ("comm", 0.70, NET)], dom=1, style="trio")
     alpha_beta()
     make_sparkline("vol2/collective_communication", "collective_communication_ring_tree_divergence", threat=True, steep=2.0)
-    make_roofline("vol2/compute_infrastructure", "compute_infrastructure_decode_roofline", ridge=60, dot_ai=6)
-    make_sparkline("vol2/conclusion", "conclusion_tail_latency_rise", threat=True, steep=1.8)
+    make_roofline("vol2/compute_infrastructure", "compute_infrastructure_decode_roofline", ridge=295, dot_ai=1)
+    conclusion_tail_latency_fanout()
     make_dam("vol2/data_storage", "data_storage_dai_locator", focus=2, vol="vol2", style="pills")
     make_ladder("vol2/data_storage", "data_storage_checkpoint_dominance", [("Ckpts 7.56 PB", 7560), ("Data 6 TB", 6)], domain="memory")
     make_ladder("vol2/data_storage", "data_storage_bandwidth_cliff", [("HBM 3.35 TB/s", 3350), ("DRAM 200", 200), ("NVMe 7", 7)], domain="bandwidth")
+    data_storage_checkpoint_storm_write_time()
     make_ladder("vol2/distributed_training", "distributed_training_memory_budget", [("Optimizer 2100 GB", 2100), ("Gradients 350", 350), ("Weights 350", 350)], domain="memory")
+    distributed_training_pipeline_bubble_tax()
+    distributed_training_young_daly_checkpoint_curve()
     make_ladder("vol2/edge_intelligence", "edge_intelligence_bandwidth_ladder", [("HBM3 3350", 3350), ("Mobile 100", 100)], domain="bandwidth", wall=True)
     make_ladder("vol2/edge_intelligence", "edge_intelligence_device_memory_ladder", [("Phone 8 GB", 8000), ("IoT 1 GB", 1000), ("MCU 4 MB", 4), ("SRAM 520 KB", 0.52)], domain="memory")
     make_ladder("vol2/fault_tolerance", "fault_tolerance_mtbf_ladder", [("1 GPU 50K h", 50000), ("1K 50 h", 50), ("10K 5 h", 5)], domain="time")
@@ -2013,9 +2178,11 @@ def generate() -> None:
     intersectional_quadrant()
     make_ladder("vol2/responsible_ai", "responsible_ai_unlearning_cost_ladder", [("Full $4.6M", 4_600_000), ("SISA $46k", 46_000)], domain="compute")
     responsible_ai_representation_tax_ladder()
+    responsible_ai_monitoring_scale()
     fairness_tax("vol2/robust_ai", "robust_ai_robustness_tax", "Std", 0.76, "Robust", 0.50)
     make_knee("vol2/robust_ai", "robust_ai_psi_drift_knee", knee_frac=0.70)
     make_dam("vol2/security_privacy", "security_privacy_dai_attack_surface", focus="all", vol="vol2")
+    security_privacy_dp_dataset_threshold()
     energy_per_byte()
     make_sparkline("vol2/sustainable_ai", "sustainable_ai_inference_crossover", threat=True, steep=1.9)
     make_knee("vol2/sustainable_ai", "sustainable_ai_thermal_throttle_knee", knee_frac=0.70, style="twotone")

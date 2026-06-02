@@ -71,7 +71,12 @@ def new_fig(device):
     the HTML site and after the Linux SVG->PDF conversion — no fontconfig/Helvetica
     dependency on the build/CI machine (matches the book's vector-figure fidelity)."""
     viz.set_book_style()
-    plt.rcParams.update({'font.size': 5.5, 'axes.grid': False, 'svg.fonttype': 'path'})
+    plt.rcParams.update({
+        'font.size': 5.5,
+        'axes.grid': False,
+        'svg.fonttype': 'path',
+        'svg.hashsalt': 'mlsysbook-margin-figures',
+    })
     fig, ax = plt.subplots(figsize=FIGSIZE.get(device, (1.2, 1.1)), dpi=300)
     return fig, ax
 
@@ -96,7 +101,14 @@ def save(fig, path, pad=0.02):
                             os.sep + "images" + os.sep + "svg" + os.sep)
     svg_path = os.path.splitext(svg_path)[0] + ".svg"
     os.makedirs(os.path.dirname(svg_path), exist_ok=True)
-    fig.savefig(svg_path, format="svg", bbox_inches="tight", facecolor="white", pad_inches=pad)
+    fig.savefig(
+        svg_path,
+        format="svg",
+        bbox_inches="tight",
+        facecolor="white",
+        pad_inches=pad,
+        metadata={"Date": None},
+    )
     with open(svg_path, "r", encoding="utf-8") as f:
         svg = f.read()
     with open(svg_path, "w", encoding="utf-8") as f:
