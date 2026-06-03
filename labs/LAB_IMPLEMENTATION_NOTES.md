@@ -484,3 +484,52 @@ Tests or checks run:
 Follow-up:
 - Implement a shared compression candidate/frontier result layer before changing Parts A-E.
 - Migrate Parts A-C first because they are the core compression pedagogy and report evidence path.
+
+### 2026-06-03 - MLSysIM Compression Candidate Layer
+
+Lab:
+- V1-10 The Compression Paradox, shared MLSysIM solver layer.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `mlsysim/mlsysim/engine/results.py`
+- `mlsysim/mlsysim/engine/solvers/compression.py`
+- `mlsysim/tests/test_compression_candidates.py`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysim-0.1.2-py3-none-any.whl`
+
+What changed:
+- Added typed `CompressionCandidate` and `CompressionSweepResult` result models.
+- Extended `CompressionModel` with `candidate()` for one source-traced compression configuration and `sweep()` for a candidate list with Pareto status.
+- Candidate evaluation now records method, bit width, sparsity, compressed size, compression ratio, estimated accuracy delta, memory savings, speedup, hardware-support status, feasibility, binding constraint, guardrail violations, and source trace.
+- Sweep evaluation now marks candidates as `frontier` or `dominated` and selects a best feasible frontier candidate for the default objective.
+- Rebuilt the MLSysIM browser wheel so lab notebooks can use the new methods in WASM.
+
+MLSysIM facts/APIs needed:
+- This pass adds the reusable solver API needed by V1-10 Parts A-C.
+- Track-specific guardrail thresholds still need to be supplied by typed lab variants or a dedicated scenario contract.
+- Hardware support currently uses explicit precision entries and sparsity conventions from the hardware object; if a device needs INT8/NPU support represented, it must be added to the hardware registry rather than a notebook.
+
+Notebook-local constants removed:
+- None yet. This pass creates the MLSysIM API that will replace notebook-local compression candidate calculations in the next V1-10 pass.
+
+Reusable component or modality improved:
+- Compression candidate, feasibility, source trace, and Pareto metadata now have a single typed source in MLSysIM.
+
+Plan updates needed in other labs:
+- V1-10 should migrate Parts A-C to call `CompressionModel.candidate()` and `CompressionModel.sweep()`.
+- Any future compression, serving, or hardware lab that needs candidate/frontier reporting should consume these typed results instead of rebuilding the logic.
+
+Tests or checks run:
+- `python3 -m py_compile mlsysim/mlsysim/engine/results.py mlsysim/mlsysim/engine/solvers/compression.py mlsysim/tests/test_compression_candidates.py`
+- `python3 -m pytest mlsysim/tests/test_compression_candidates.py -q`
+- `python3 -m pytest mlsysim/tests/test_solver_suite.py::TestCompressionModel -q`
+- `python3 -m pytest mlsysim/tests/test_compression_candidates.py mlsysim/tests/test_solver_suite.py::TestCompressionModel mlsysim/tests/test_solver_module_exports.py -q`
+- `python3 -m pytest labs/tests/test_static.py::TestWheelConsistency::test_micropip_url_matches_pyproject_version -q`
+- Verified `wheels/mlsysim-0.1.2-py3-none-any.whl` contains `CompressionModel.candidate()`, `CompressionModel.sweep()`, `CompressionCandidate`, and `CompressionSweepResult`.
+
+Follow-up:
+- Migrate V1-10 Parts A-C to use the new MLSysIM compression candidate and sweep APIs.
+- Decide whether iPhone INT8 fast-path support should be encoded in `Hardware.Mobile.iPhone15Pro` before making iPhone-specific V1-10 feasibility claims.

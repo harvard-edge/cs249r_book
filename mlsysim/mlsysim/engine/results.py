@@ -250,6 +250,36 @@ class CompressionResult(SolverResult):
     inference_speedup: float = 1.0
 
 
+class CompressionCandidate(SolverResult):
+    """One evaluated compression configuration with lab-ready feasibility metadata."""
+    label: str
+    method: str
+    target_bitwidth: Optional[int] = None
+    sparsity: float = 0.0
+    sparsity_type: str = "unstructured"
+    original_size_gb: Quantity
+    compressed_size_gb: Quantity
+    compression_ratio: float
+    estimated_accuracy_delta: float
+    memory_savings_pct: float
+    inference_speedup: float = 1.0
+    hardware_supported: bool = True
+    feasible: bool = True
+    binding_constraint: str = "none"
+    guardrail_violations: List[str] = Field(default_factory=list)
+    pareto_status: str = "unknown"
+    source_trace: List[str] = Field(default_factory=list)
+
+
+class CompressionSweepResult(SolverResult):
+    """A compression design-space sweep with candidate and Pareto metadata."""
+    candidates: List[CompressionCandidate]
+    frontier_labels: List[str] = Field(default_factory=list)
+    dominated_labels: List[str] = Field(default_factory=list)
+    best_candidate_label: Optional[str] = None
+    objective: str = "min_size_max_speed_preserve_quality"
+
+
 class SynthesisResult(SolverResult):
     """Result from SynthesisSolver: inverse-Roofline hardware requirements."""
     required_bw: Quantity
