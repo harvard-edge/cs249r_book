@@ -1125,3 +1125,54 @@ Tests or checks run:
 - `python3 -m pytest labs/tests/test_engine.py -k "lab_13_model_serving" -q`
 - `python3 -m pytest labs/tests/test_serving_helpers.py labs/tests/test_lab_variants.py labs/tests/test_static.py -q`
 - `git diff --check`
+
+### 2026-06-03 - V1-14 Silent Degradation Deep Track Migration
+
+Lab:
+- `labs/vol1/lab_14_ml_ops.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/ops.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_ops_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/vol1/lab_14_ml_ops.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.ops`, a shared helper layer for drift visibility with delayed labels, retraining cadence, operations policy scoring, and technical debt cascade.
+- Added hand-authored V1-14 variants with track-specific drift sources, monitoring signals, label delays, quality floors, retraining economics, rollback/escalation policies, downstream dependency counts, and validation tests.
+- Replaced the old fraud-only notebook constants with a track selector, track context, source trace, selected-track defaults, helper-backed plots, ledger metadata, and local report export.
+- Converted Part A-D into track-aware narratives: drift visibility, retraining cadence, ops policy, and debt cascade.
+- Rebuilt the browser helper wheel and extended the wheel contract to include `mlsysbook_labs/ops.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required. The lab resolves:
+  - `Hardware.Mobile.iPhone15Pro` + `Models.Vision.MobileNetV2`
+  - `Hardware.Tiny.OuraRing` + `Models.Tiny.DS_CNN`
+  - `Hardware.Edge.RoboTaxi` + `Models.Vision.YOLOv8_Nano`
+  - `Hardware.Cloud.H100` + `Models.Language.BERT_Base`
+- Scenario-specific drift, monitoring, cadence, rollback, and escalation assumptions live in typed V1-14 variants.
+
+Notebook-local constants removed:
+- H100/Jetson retraining hardware constants, PayGuard-only drift values, hard-coded retraining cost examples, and notebook-local debt formulas were removed from V1-14.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.ops` can be reused by V2-07 fault tolerance, V2-08 fleet orchestration, V2-12 operations at scale, V2-14 robust AI, and V2-16 responsible AI whenever labs need drift, delayed labels, rollback, or debt-cascade evidence.
+
+Plan updates needed in other labs:
+- V1-15 should reuse the operations-policy report structure when defining responsibility/fairness mitigation and residual risk.
+- V2-12 should reuse the ops helper for fleet-scale monitoring, escalation, and rollback policies.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_14_ml_ops.py labs/mlsysbook_labs/ops.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "lab_14_ml_ops" -q`
+- `python3 -m pytest labs/tests/test_ops_helpers.py labs/tests/test_lab_variants.py labs/tests/test_static.py -q`
+- `git diff --check`

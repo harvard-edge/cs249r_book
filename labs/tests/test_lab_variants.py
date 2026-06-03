@@ -154,3 +154,25 @@ def test_v1_13_variants_define_serving_defaults():
         assert "scale_out_replicas" in variant.defaults
         assert "validation_tests" in variant.defaults
         assert variant.assumptions["report_artifact"] == "serving SLA plan"
+
+
+def test_v1_14_variants_define_ops_defaults():
+    for variant in list_lab_variants("v1_14_silent_degradation"):
+        assert "drift_source" in variant.defaults
+        assert "monitoring_signal" in variant.defaults
+        assert "rollback_policy" in variant.defaults
+        assert "escalation_policy" in variant.defaults
+        assert "baseline_quality_pct" in variant.defaults
+        assert "quality_floor_pct" in variant.defaults
+        assert "drift_rate_psi_per_day" in variant.defaults
+        assert "quality_loss_per_psi" in variant.defaults
+        assert "alert_threshold_psi" in variant.defaults
+        assert "label_delay_days" in variant.defaults
+        assert "retrain_cost" in variant.defaults
+        assert "drift_cost_per_day" in variant.defaults
+        assert "current_cadence_days" in variant.defaults
+        assert "monitoring_cost_per_day" in variant.defaults
+        assert "downstream_models" in variant.defaults
+        assert "base_loss_pp" in variant.defaults
+        assert "validation_tests" in variant.defaults
+        assert variant.assumptions["report_artifact"] == "operations policy memo"

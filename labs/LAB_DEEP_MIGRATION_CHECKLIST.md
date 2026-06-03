@@ -82,7 +82,7 @@ For each lab:
 - [x] 3. V2-10 Inference Economy: connects latency, cost, batching, and deployment target.
 - [x] 4. V1-12 Benchmarking Trap: standardizes benchmark plots and report evidence.
 - [x] 5. V1-13 Tail Latency Trap: extends serving and SLA evidence.
-- [ ] 6. V1-14 Silent Degradation: adds monitoring and drift evidence.
+- [x] 6. V1-14 Silent Degradation: adds monitoring and drift evidence.
 - [ ] 7. V2-06 Collective Communication: upgrade existing rich wrapper to canonical tracks.
 - [ ] 8. Finish remaining Volume I labs by dependency order.
 - [ ] 9. Finish remaining Volume II labs by dependency order.
@@ -352,15 +352,16 @@ Current status:
 - [x] Baseline track/report panel installed.
 
 Deep migration tasks:
-- [ ] Make monitoring signals and remediation options track-specific.
-- [ ] Add shared drift/degradation scenario catalog if useful.
-- [ ] Track examples:
+- [x] Make monitoring signals and remediation options track-specific.
+- [x] Add shared drift/degradation scenario catalog if useful.
+- [x] Track examples:
   - iPhone: app version/device OS drift.
   - Oura Ring: sensor placement or physiology drift.
   - RoboTaxi: weather/geography drift.
   - Cloud Fleet: traffic mix or upstream data drift.
-- [ ] Add plots for metric drift, alert thresholds, and false alarms.
-- [ ] Update report with monitoring plan, trigger, action, and residual risk.
+- [x] Add plots for metric drift, alert thresholds, and false alarms.
+- [x] Update report with monitoring plan, trigger, action, and residual risk.
+- [x] Add tests for operations helper/report fields.
 
 ### V1-15 - No Free Fairness
 
