@@ -822,3 +822,58 @@ Tests or checks run:
 
 Follow-up:
 - Batch-apply the migration shell to the remaining Volume II notebooks.
+
+### 2026-06-03 - Volume II Baseline Migration Panels
+
+Lab:
+- Volume II labs 01-17.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/vol2/lab_01_introduction.py`
+- `labs/vol2/lab_02_compute_infra.py`
+- `labs/vol2/lab_03_communication.py`
+- `labs/vol2/lab_04_data_storage.py`
+- `labs/vol2/lab_05_dist_train.py`
+- `labs/vol2/lab_06_collective_communication.py`
+- `labs/vol2/lab_07_fault_tolerance.py`
+- `labs/vol2/lab_08_fleet_orch.py`
+- `labs/vol2/lab_09_perf_engineering.py`
+- `labs/vol2/lab_10_inference.py`
+- `labs/vol2/lab_11_edge_intelligence.py`
+- `labs/vol2/lab_12_ops_scale.py`
+- `labs/vol2/lab_13_security_privacy.py`
+- `labs/vol2/lab_14_robust_ai.py`
+- `labs/vol2/lab_15_sustainable_ai.py`
+- `labs/vol2/lab_16_responsible_ai.py`
+- `labs/vol2/lab_17_fleet_synthesis.py`
+
+What changed:
+- Installed the `mlsysbook_labs` browser wheel in Volume II notebooks that did not already include it.
+- Added the shared track-aware migration panel to every Volume II catalog notebook.
+- V2-06 keeps its existing richer `mlsysbook_labs` wrapper and now also has the common track/report panel.
+- Each panel resolves catalog metadata, ledger track, canonical track profile, and lab variant from shared helpers.
+- The added panels expose learning objectives, track context, scenario brief, source trace, big takeaways, and local report export from one shared implementation.
+
+MLSysIM facts/APIs needed:
+- No new facts. This slice consumes the existing shared track profile, variant, catalog, and migration helper APIs.
+
+Notebook-local constants removed:
+- None in this slice. Existing Volume II lab interactions and ledger saves were preserved.
+
+Reusable component or modality improved:
+- The full lab catalog now has a consistent notebook-level track/report surface.
+
+Plan updates needed in other labs:
+- The next implementation pass should start replacing baseline panels with deeper part-level track realization where a lab needs solver-backed evidence, specialized plots, or device-specific computed constraints.
+- Any new hardware/model/system facts discovered during those deeper migrations must be added to MLSysIM or `mlsysbook_labs`, not embedded as notebook-local constants.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol2/lab_01_introduction.py labs/vol2/lab_02_compute_infra.py labs/vol2/lab_03_communication.py labs/vol2/lab_04_data_storage.py labs/vol2/lab_05_dist_train.py labs/vol2/lab_06_collective_communication.py labs/vol2/lab_07_fault_tolerance.py labs/vol2/lab_08_fleet_orch.py labs/vol2/lab_09_perf_engineering.py labs/vol2/lab_10_inference.py labs/vol2/lab_11_edge_intelligence.py labs/vol2/lab_12_ops_scale.py labs/vol2/lab_13_security_privacy.py labs/vol2/lab_14_robust_ai.py labs/vol2/lab_15_sustainable_ai.py labs/vol2/lab_16_responsible_ai.py labs/vol2/lab_17_fleet_synthesis.py`
+- `python3 -m pytest labs/tests/test_static.py::TestWheelConsistency -q`
+- `python3 -m pytest labs/tests/test_static.py -q`
+
+Follow-up:
+- Run catalog-wide checks that every `.py` lab has the common track/report surface, then decide which labs should receive deeper part-level migrations after V1-10.

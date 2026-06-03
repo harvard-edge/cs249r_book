@@ -47,6 +47,7 @@ async def _():
         import micropip
         await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
         await micropip.install("../../wheels/mlsysim-0.1.2-py3-none-any.whl", keep_going=False)
+        await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
         _labs_dir = Path(__file__).resolve().parents[1]
         if str(_labs_dir) not in sys.path:
@@ -1423,6 +1424,29 @@ def _(COLORS, partA_prediction, partB_prediction, partC_prediction, partD_predic
         <div><span class="hud-label">TIER</span> <span style="color:{_tier_color}; font-family:var(--font-mono);">{_tier.upper()}</span></div>
     </div>
     """)
+    return
+
+
+# ─── TRACK-AWARE MIGRATION SHELL ────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(ledger, mo):
+    from mlsysbook_labs import (
+        ACADEMIC_LAB_CSS,
+        get_lab_metadata,
+        get_lab_track_variant,
+        get_track_profile,
+        legacy_migration_panel,
+    )
+
+    _metadata = get_lab_metadata("vol2/lab_10_inference.py")
+    _saved_track = ledger.get_track()
+    _track_id = _saved_track if _saved_track and _saved_track != "NONE" else "iphone"
+    _profile = get_track_profile(_track_id)
+    _variant = get_lab_track_variant(_metadata.lab_id, _profile.track_id)
+    mo.vstack([
+        ACADEMIC_LAB_CSS,
+        legacy_migration_panel(_metadata, _profile, _variant),
+    ])
     return
 
 if __name__ == "__main__":

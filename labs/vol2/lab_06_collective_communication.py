@@ -768,5 +768,28 @@ def _(metadata, mo):
     return
 
 
+
+# ─── TRACK-AWARE MIGRATION SHELL ────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(ledger, mo):
+    from mlsysbook_labs import (
+        ACADEMIC_LAB_CSS,
+        get_lab_metadata,
+        get_lab_track_variant,
+        get_track_profile,
+        legacy_migration_panel,
+    )
+
+    _metadata = get_lab_metadata("vol2/lab_06_collective_communication.py")
+    _saved_track = ledger.get_track()
+    _track_id = _saved_track if _saved_track and _saved_track != "NONE" else "iphone"
+    _profile = get_track_profile(_track_id)
+    _variant = get_lab_track_variant(_metadata.lab_id, _profile.track_id)
+    mo.vstack([
+        ACADEMIC_LAB_CSS,
+        legacy_migration_panel(_metadata, _profile, _variant),
+    ])
+    return
+
 if __name__ == "__main__":
     app.run()
