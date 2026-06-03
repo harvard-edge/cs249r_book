@@ -260,6 +260,7 @@ class TestWheelConsistency:
             "mlsysbook_labs/workflow.py",
             "mlsysbook_labs/registry_refs.py",
             "mlsysbook_labs/migration.py",
+            "mlsysbook_labs/neural_compute.py",
             "mlsysbook_labs/ops.py",
             "mlsysbook_labs/responsibility.py",
             "mlsysbook_labs/roofline.py",

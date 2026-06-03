@@ -161,6 +161,28 @@ def test_v1_04_variants_define_data_pipeline_defaults():
         assert variant.assumptions["report_artifact"] == "data pipeline architecture memo"
 
 
+def test_v1_05_variants_define_neural_compute_defaults():
+    for variant in list_lab_variants("v1_05_neural_computation"):
+        assert "operator_story" in variant.defaults
+        assert "tensor_label" in variant.defaults
+        assert "batch" in variant.defaults
+        assert "channels" in variant.defaults
+        assert "height" in variant.defaults
+        assert "width" in variant.defaults
+        assert "sequence" in variant.defaults
+        assert "hidden" in variant.defaults
+        assert "precision_bytes" in variant.defaults
+        assert "activation_budget_mb" in variant.defaults
+        assert "bandwidth_budget_gbs" in variant.defaults
+        assert "latency_budget_ms" in variant.defaults
+        assert "power_budget_w" in variant.defaults
+        assert "default_shape_multiplier" in variant.defaults
+        assert "activation_multiplier" in variant.defaults
+        assert "ops_gmac_at_default" in variant.defaults
+        assert "design_options" in variant.defaults
+        assert variant.assumptions["report_artifact"] == "operator budget note"
+
+
 def test_v1_11_variants_define_roofline_defaults():
     for variant in list_lab_variants("v1_11_hardware_roofline"):
         assert "matrix_dim" in variant.defaults

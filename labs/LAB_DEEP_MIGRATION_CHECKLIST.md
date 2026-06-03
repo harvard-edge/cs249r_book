@@ -187,16 +187,16 @@ Current status:
 - [x] Baseline track/report panel installed.
 
 Deep migration tasks:
-- [ ] Tie neural computation concepts to per-track activation memory and compute budgets.
-- [ ] Add shared helper for activation footprint if not already available.
-- [ ] Use model refs from the shared variant registry.
-- [ ] Show how batch size, precision, and activation shape affect each track.
-- [ ] Add track-specific failure state:
+- [x] Tie neural computation concepts to per-track activation memory and compute budgets.
+- [x] Add shared helper for activation footprint if not already available.
+- [x] Use model refs from the shared variant registry.
+- [x] Show how batch size, precision, and activation shape affect each track.
+- [x] Add track-specific failure state:
   - iPhone: thermal or memory pressure.
   - Oura Ring: SRAM/energy overflow.
   - RoboTaxi: latency miss.
   - Cloud Fleet: utilization/cost miss.
-- [ ] Include activation-footprint evidence in the report.
+- [x] Include activation-footprint evidence in the report.
 
 ### V1-06 - Architecture Tax
 

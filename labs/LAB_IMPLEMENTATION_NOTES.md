@@ -1560,3 +1560,52 @@ Plan updates needed in other labs:
 Tests or checks run:
 - `python3 -m py_compile labs/vol1/lab_04_data_engr.py labs/mlsysbook_labs/data_pipeline.py labs/mlsysbook_labs/variants.py labs/mlsysbook_labs/__init__.py`
 - `python3 -m pytest labs/tests/test_engine.py -k "lab_04_data_engr" -q`
+
+### 2026-06-03 - V1-05 Activation Tax Deep Track Migration
+
+Lab:
+- `labs/vol1/lab_05_nn_compute.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/neural_compute.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_neural_compute_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/vol1/lab_05_nn_compute.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.neural_compute`, a shared helper layer for operation ledgers, activation memory cliffs, and operator design decisions.
+- Added hand-authored V1-05 variants with track-specific tensor shapes, activation/bandwidth/latency/power budgets, precision defaults, and operator design options.
+- Replaced the old transistor-tax-only notebook with a selected-track Activation Tax lab: dominant-resource prediction, operation ledger, activation cliff sweep, operator design choice, ledger save, and local report export.
+- Extended the wheel contract to include `mlsysbook_labs/neural_compute.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required. The lab resolves:
+  - `Hardware.Mobile.iPhone15Pro` + `Models.Vision.MobileNetV2`
+  - `Hardware.Tiny.OuraRing` + `Models.Tiny.DS_CNN`
+  - `Hardware.Edge.RoboTaxi` + `Models.Vision.YOLOv8_Nano`
+  - `Hardware.Cloud.H100` + `Models.Language.BERT_Base`
+- Track-specific tensor shapes, budgets, and operator design trade-offs live in typed V1-05 variants.
+
+Notebook-local constants removed:
+- Transistor-cost tables, memory-tier tables, width-scaling examples, and forward/backward memory examples were removed from V1-05.
+- Displayed weights, activations, operations, bytes moved, arithmetic intensity, activation cliffs, and design risks now come from `mlsysbook_labs.neural_compute`.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.neural_compute` can be reused by V1-06 architecture, V1-10 compression, V1-11 roofline, and Volume II attention/memory labs.
+
+Plan updates needed in other labs:
+- V1-06 should reuse operation-ledger evidence when comparing model families.
+- V1-10 can use activation cliff and operator-design language when a compression recipe changes runtime memory rather than only parameter size.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_05_nn_compute.py labs/mlsysbook_labs/neural_compute.py labs/mlsysbook_labs/variants.py labs/mlsysbook_labs/__init__.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "lab_05_nn_compute" -q`
