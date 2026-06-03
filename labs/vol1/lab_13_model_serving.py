@@ -7,6 +7,7 @@ app = marimo.App(width="full")
 # ZONE A: OPENING
 # ===========================================================================
 
+
 @app.cell
 async def _():
     import marimo as mo
@@ -28,99 +29,183 @@ async def _():
         native_bootstrap(__file__)
 
     import plotly.graph_objects as go
+    import mlsysim
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
-    from mlsysim import Hardware, Models, calc_kv_cache_size
-
-    H100 = Hardware.Cloud.H100
-    A100 = Hardware.Cloud.A100
-    JETSON = Hardware.Edge.JetsonOrinNX
-    LLAMA2_70B = Models.Language.Llama2_70B
-    RESNET50 = Models.Vision.ResNet50
-
-    H100_TFLOPS_FP16 = H100.compute.peak_flops.m_as("TFLOPs/s")
-    H100_BW_GBS      = H100.memory.bandwidth.m_as("GB/s")
-    H100_RAM_GB      = H100.memory.capacity.m_as("GB")
-    H100_TDP_W       = H100.tdp.m_as("W")
-
-    JETSON_TFLOPS    = JETSON.compute.peak_flops.m_as("TFLOPs/s")
-    JETSON_BW_GBS    = JETSON.memory.bandwidth.m_as("GB/s")
-    JETSON_RAM_GB    = JETSON.memory.capacity.m_as("GB")
-    JETSON_TDP_W     = JETSON.tdp.m_as("W")
-
-    PCIE_GEN5_GBS = H100.interconnect.bandwidth.m_as("GB/s")
-    PCIE_GEN4_GBS = A100.interconnect.bandwidth.m_as("GB/s")
-    NVME_SEQ_GBS  = Hardware.Tech.Storage.NvmeGen4.bandwidth.m_as("GB/s")
-    NET_FS_GBS    = 1.25
-
-    RESNET50_PARAMS = RESNET50.parameters.m_as("count")
-    RESNET50_FLOPS  = RESNET50.inference_flops.m_as("flop")
-
-    LLAMA2_70B_PARAMS = LLAMA2_70B.parameters.m_as("count")
-    LLAMA2_70B_LAYERS = LLAMA2_70B.layers
-    LLAMA2_70B_HIDDEN = LLAMA2_70B.hidden_dim
-    LLAMA2_70B_HEADS  = LLAMA2_70B.heads
+    from mlsysbook_labs import (
+        ACADEMIC_LAB_CSS,
+        batching_tax,
+        build_lab_report,
+        cache_capacity,
+        cold_start_latency,
+        get_lab_metadata,
+        get_lab_track_variant,
+        get_track_profile,
+        queueing_latency,
+        report_export_panel,
+        resolve_mlsysim_ref,
+        serving_track_profile,
+        source_trace,
+        track_context,
+        track_selector,
+    )
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         _ = await ledger.load_async()
     return (
-        COLORS, H100_BW_GBS, H100_RAM_GB, H100_TDP_W, H100_TFLOPS_FP16,
-        JETSON_BW_GBS, JETSON_RAM_GB, JETSON_TDP_W, JETSON_TFLOPS,
-        LAB_CSS, LLAMA2_70B_HEADS, LLAMA2_70B_HIDDEN, LLAMA2_70B_LAYERS,
-        LLAMA2_70B_PARAMS, NET_FS_GBS, NVME_SEQ_GBS, PCIE_GEN4_GBS,
-        PCIE_GEN5_GBS, RESNET50_FLOPS, RESNET50_PARAMS,
-        apply_plotly_theme, calc_kv_cache_size, go, ledger, math, mo, np,
+        ACADEMIC_LAB_CSS,
+        COLORS,
+        LAB_CSS,
+        apply_plotly_theme,
+        batching_tax,
+        build_lab_report,
+        cache_capacity,
+        cold_start_latency,
+        get_lab_metadata,
+        get_lab_track_variant,
+        get_track_profile,
+        go,
+        ledger,
+        math,
+        mlsysim,
+        mo,
+        np,
+        queueing_latency,
+        report_export_panel,
+        resolve_mlsysim_ref,
+        serving_track_profile,
+        source_trace,
+        track_context,
+        track_selector,
     )
 
+
+@app.cell
+def _(get_lab_metadata):
+    v1_13_metadata = get_lab_metadata("vol1/lab_13_model_serving.py")
+    return (v1_13_metadata,)
+
+
 @app.cell(hide_code=True)
-def _(LAB_CSS, mo):
+def _(ledger, track_selector):
+    _saved_track = ledger.get_track()
+    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "cloud_fleet"
+    v1_13_track_picker = track_selector(default=_default_track)
+    v1_13_track_picker
+    return (v1_13_track_picker,)
+
+
+@app.cell
+def _(
+    get_lab_track_variant,
+    get_track_profile,
+    resolve_mlsysim_ref,
+    serving_track_profile,
+    v1_13_track_picker,
+):
+    v1_13_track_id = v1_13_track_picker.value
+    v1_13_profile = get_track_profile(v1_13_track_id)
+    v1_13_variant = get_lab_track_variant("v1_13_tail_latency_trap", v1_13_profile.track_id)
+    v1_13_hardware = resolve_mlsysim_ref(v1_13_variant.hardware_ref)
+    v1_13_model = resolve_mlsysim_ref(v1_13_variant.model_ref)
+    v1_13_serving = serving_track_profile(
+        v1_13_profile,
+        v1_13_variant,
+        v1_13_hardware,
+        v1_13_model,
+    )
+    return (
+        v1_13_hardware,
+        v1_13_model,
+        v1_13_profile,
+        v1_13_serving,
+        v1_13_track_id,
+        v1_13_variant,
+    )
+
+
+@app.cell(hide_code=True)
+def _(
+    ACADEMIC_LAB_CSS,
+    LAB_CSS,
+    mo,
+    source_trace,
+    track_context,
+    v1_13_metadata,
+    v1_13_profile,
+    v1_13_serving,
+    v1_13_variant,
+):
     mo.vstack([
         LAB_CSS,
-        mo.Html("""
+        ACADEMIC_LAB_CSS,
+        mo.Html(f"""
         <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0c1a2e 100%);
                     padding: 36px 44px; border-radius: 16px; color: white;
                     box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
             <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
-                        color: #475569; text-transform: uppercase; margin-bottom: 10px;">
+                        color: #94a3b8; text-transform: uppercase; margin-bottom: 10px;">
                 Machine Learning Systems &middot; Volume I &middot; Lab 13
             </div>
             <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
-                       color: #f8fafc; line-height: 1.1; letter-spacing: -0.02em;">
+                       color: #f8fafc; line-height: 1.1;">
                 The Tail Latency Trap
             </h1>
             <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
                       color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
-                Queuing &middot; Batching &middot; KV Cache &middot; Cold Start
+                Queuing &middot; Batching &middot; State/Cache &middot; Cold Start
             </p>
-            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #64748b;
-                      max-width: 680px; line-height: 1.65;">
-                Your serving system looks healthy at 50% utilization and is on fire
-                at 80% &mdash; and the fire is invisible to every metric except the
-                one you are not measuring.
+            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #cbd5e1;
+                      max-width: 760px; line-height: 1.65;">
+                {v1_13_variant.workload_summary} The average path can look healthy
+                while p99 violates {v1_13_variant.guardrail_metric}.
             </p>
             <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
                 <span style="background: rgba(99,102,241,0.18); color: #a5b4fc;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
                              font-weight: 600; border: 1px solid rgba(99,102,241,0.3);">
-                    4 Parts + Synthesis &middot; ~50 min</span>
+                    4 Parts + Synthesis &middot; ~50 min
+                </span>
                 <span style="background: rgba(203,32,45,0.15); color: #fca5a5;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
                              font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
-                    Chapter 13: Model Serving</span>
+                    {v1_13_profile.label}
+                </span>
+                <span style="background: rgba(34,197,94,0.12); color: #86efac;
+                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
+                             font-weight: 600; border: 1px solid rgba(34,197,94,0.20);">
+                    {v1_13_serving.hardware_ref}
+                </span>
             </div>
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <span class="badge badge-info">M/M/1 Queuing</span>
+                <span class="badge badge-info">M/M/c Queue</span>
                 <span class="badge badge-warn">Batching Tax</span>
-                <span class="badge badge-fail">KV Cache OOM</span>
+                <span class="badge badge-fail">{v1_13_serving.state_kind}</span>
             </div>
         </div>
         """),
+        track_context(v1_13_profile),
+        source_trace(
+            {
+                "lab_id": v1_13_metadata.lab_id,
+                "track_id": v1_13_profile.track_id,
+                "hardware_ref": v1_13_variant.hardware_ref,
+                "model_ref": v1_13_variant.model_ref,
+                "shared_helper": "mlsysbook_labs.serving",
+                "arrival_qps": v1_13_serving.arrival_qps,
+                "service_ms": v1_13_serving.service_ms,
+                "slo_ms": v1_13_serving.slo_ms,
+                "source_policy": v1_13_profile.source_policy,
+            },
+            summary="V1-13 resolves serving scenarios through MLSysIM hardware/model refs and mlsysbook_labs.serving calculations.",
+        ),
     ])
     return
 
+
 @app.cell(hide_code=True)
-def _(COLORS, mo):
+def _(COLORS, mo, v1_13_serving, v1_13_variant):
     mo.Html(f"""
     <div style="border-left: 4px solid {COLORS['BlueLine']};
                 background: white; border-radius: 0 12px 12px 0;
@@ -129,14 +214,15 @@ def _(COLORS, mo):
         <div style="margin-bottom: 16px;">
             <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
                         text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Learning Objectives</div>
+                Learning Objectives
+            </div>
             <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Quantify the P99/mean latency divergence</strong>
-                    &mdash; at 80% utilization, P99 is 23x the service time while mean is only 5x.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Diagnose the batching tax</strong> &mdash;
-                    batch formation delay consumes 62% of a 50&nbsp;ms SLO budget before inference starts.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Calculate KV cache memory</strong> &mdash;
-                    at 128K context, a single Llama-2 70B request fills ~320&nbsp;GB of HBM.</div>
+                <div style="margin-bottom: 3px;">1. <strong>Quantify tail amplification:</strong>
+                    utilization and service-time variance turn a normal service time into a p99 SLO risk.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Separate throughput wins from latency taxes:</strong>
+                    static batching can improve throughput while spending the SLO before inference starts.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Size state and scale-out policy:</strong>
+                    {v1_13_serving.state_kind}, model weights, and cold starts determine safe concurrency.</div>
             </div>
         </div>
         <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
@@ -144,809 +230,785 @@ def _(COLORS, mo):
             <div style="flex: 1; min-width: 220px;">
                 <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
                             text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Prerequisites</div>
+                    Prerequisites
+                </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Iron Law equation from the Introduction chapter &middot;
-                    Memory wall from the Hardware Acceleration chapter &middot;
-                    Transformer architecture from the Network Architectures chapter</div>
+                    Queueing theory from the Model Serving chapter &middot;
+                    Memory and state accounting from Hardware Acceleration and Inference at Scale
+                </div>
             </div>
-            <div style="flex: 0 0 180px;">
+            <div style="flex: 0 0 220px;">
                 <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
                             text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Duration</div>
+                    Track Defaults
+                </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    <strong>~50 min</strong><br/>
-                    A: ~12 &middot; B: ~12 &middot; C: ~12 &middot; D: ~8 min</div>
+                    {v1_13_serving.arrival_qps:g} QPS &middot;
+                    {v1_13_serving.service_ms:g} ms service &middot;
+                    {v1_13_serving.slo_ms:g} ms p99 SLO
+                </div>
             </div>
         </div>
         <div style="border-top: 1px solid {COLORS['Border']}; margin: 12px -28px 0 -28px;
                     padding: 16px 28px 0 28px;">
             <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
                         text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Core Question</div>
+                Core Question
+            </div>
             <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
                         line-height: 1.5; font-style: italic;">
-                &ldquo;Your inference server reports 25&nbsp;ms average latency. Why are 1 in 100
-                users experiencing 115&nbsp;ms &mdash; and why does adding batching make it worse?&rdquo;
+                "For {v1_13_serving.label}, can a serving policy meet
+                {v1_13_serving.slo_ms:g} ms p99 while protecting
+                {v1_13_variant.guardrail_metric}?"
             </div>
         </div>
     </div>
     """)
     return
 
-# ===========================================================================
-# ZONE B: WIDGET DEFINITIONS
-# ===========================================================================
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
-    **Recommended Reading** &mdash; Complete before this lab:
+    **Recommended Reading** - Complete before this lab:
 
-    - **The Model Serving chapter** &mdash; Queuing theory for inference, M/M/1 model,
-      batching strategies, KV cache management, and cold start latency.
+    - **The Model Serving chapter** - queuing theory, batching strategies,
+      live state/cache management, autoscaling, and cold start latency.
     """), kind="info")
     return
 
-# ═════════════════════════════════════════════════════════════════════════════
-# MAIN LAB CELL
-# ═════════════════════════════════════════════════════════════════════════════
+
+# ===========================================================================
+# ZONE B: WIDGET DEFINITIONS
+# ===========================================================================
+
+
 @app.cell(hide_code=True)
-def _(
-    COLORS, H100_BW_GBS, H100_RAM_GB, JETSON_BW_GBS, JETSON_RAM_GB,
-    LLAMA2_70B_HEADS, LLAMA2_70B_HIDDEN,
-    LLAMA2_70B_LAYERS, NET_FS_GBS, NVME_SEQ_GBS, PCIE_GEN4_GBS,
-    PCIE_GEN5_GBS, apply_plotly_theme, go, math, mo, np,
-):
-    # ── Part A widgets ────────────────────────────────────────────────────────
+def _(mo, v1_13_serving):
     partA_pred = mo.ui.radio(
         options={
-            "A) ~10 ms (2x service time)": "10ms",
-            "B) ~25 ms (5x, matches the mean)": "25ms",
-            "C) ~50 ms (10x service time)": "50ms",
-            "D) ~115 ms (23x service time)": "115ms",
+            "A) Mean latency is enough": "mean",
+            "B) P99 is roughly 2x service time": "2x",
+            "C) P99 explodes near saturation": "tail",
+            "D) Replicas remove queueing entirely": "replicas",
         },
-        label="ResNet-50 server, 5 ms service time, 80% utilization. P99 latency?",
+        label=(
+            f"{v1_13_serving.label}: {v1_13_serving.arrival_qps:g} QPS, "
+            f"{v1_13_serving.service_ms:g} ms service, "
+            f"{v1_13_serving.replicas} replica(s). What happens to p99?"
+        ),
     )
     return (partA_pred,)
 
-@app.cell(hide_code=True)
-def _(mo):
-    partA_rho = mo.ui.slider(start=0.10, stop=0.95, value=0.80, step=0.05,
-                              label="Server utilization (rho)")
-    partA_svc = mo.ui.slider(start=1.0, stop=20.0, value=5.0, step=1.0,
-                              label="Service time (ms)")
-    partA_slo = mo.ui.slider(start=10.0, stop=200.0, value=50.0, step=10.0,
-                              label="SLO budget (ms)")
 
-    # ── Part B widgets ────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, v1_13_serving):
+    _capacity_qps = 1000 / v1_13_serving.service_ms * v1_13_serving.replicas
+    _raw_util = min(0.95, max(0.05, v1_13_serving.arrival_qps / _capacity_qps))
+    _default_util = round(round(_raw_util / 0.05) * 0.05, 2)
+    partA_rho = mo.ui.slider(
+        start=0.05,
+        stop=0.95,
+        value=_default_util,
+        step=0.05,
+        label="Server utilization (rho)",
+    )
+    partA_svc = mo.ui.slider(
+        start=1.0,
+        stop=max(200.0, v1_13_serving.service_ms * 3),
+        value=v1_13_serving.service_ms,
+        step=1.0,
+        label="Service time (ms)",
+    )
+    partA_slo = mo.ui.slider(
+        start=10.0,
+        stop=max(500.0, v1_13_serving.slo_ms * 3),
+        value=v1_13_serving.slo_ms,
+        step=10.0,
+        label="SLO budget (ms)",
+    )
+
     partB_pred = mo.ui.radio(
         options={
-            "A) Throughput improves 6.4x, latency within SLO": "ok",
-            "B) Throughput improves but latency slightly exceeds SLO": "slight",
-            "C) Formation delay alone (31 ms) consumes 62% of SLO": "delay",
-            "D) System crashes from memory overflow": "crash",
+            "A) Batching always improves p99": "always",
+            "B) Formation delay can consume the SLO": "delay",
+            "C) Batching only changes memory": "memory",
+            "D) Batching removes cold starts": "cold",
         },
-        label="Batch size 1 to 32, arrival 500 QPS, SLO 50 ms. What happens?",
+        label=(
+            f"Batch {v1_13_serving.batch_size} at "
+            f"{v1_13_serving.arrival_qps:g} QPS. What is the first latency tax?"
+        ),
     )
     return (partA_rho, partA_slo, partA_svc, partB_pred)
 
-@app.cell(hide_code=True)
-def _(mo):
-    partB_batch = mo.ui.slider(start=1, stop=64, value=1, step=1, label="Batch size")
-    partB_arr = mo.ui.slider(start=100, stop=2000, value=500, step=50, label="Arrival rate (QPS)")
-    partB_slo = mo.ui.slider(start=10, stop=100, value=50, step=5, label="SLO budget (ms)")
 
-    # ── Part C widgets ────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, v1_13_serving):
+    partB_batch = mo.ui.slider(
+        start=1,
+        stop=64,
+        value=v1_13_serving.batch_size,
+        step=1,
+        label="Batch size",
+    )
+    if v1_13_serving.arrival_qps < 1:
+        _arr_start = 0.01
+        _arr_stop = 1.0
+        _arr_step = 0.01
+        _arr_value = v1_13_serving.arrival_qps
+    else:
+        _arr_start = max(1.0, v1_13_serving.arrival_qps * 0.25)
+        _arr_stop = max(10.0, v1_13_serving.arrival_qps * 4)
+        _arr_step = max(1.0, v1_13_serving.arrival_qps / 20)
+        _arr_value = v1_13_serving.arrival_qps
+    partB_arr = mo.ui.slider(
+        start=_arr_start,
+        stop=_arr_stop,
+        value=_arr_value,
+        step=_arr_step,
+        label="Arrival rate (QPS)",
+    )
+    partB_slo = mo.ui.slider(
+        start=10,
+        stop=max(500, int(v1_13_serving.slo_ms * 3)),
+        value=int(v1_13_serving.slo_ms),
+        step=5,
+        label="SLO budget (ms)",
+    )
+
     partC_pred = mo.ui.radio(
         options={
-            "A) 8 (one per GPU)": "8",
-            "B) 4 (split model and cache)": "4",
-            "C) 1 (KV cache fills all memory)": "1",
-            "D) 16 (tensor parallelism)": "16",
+            "A) Peak compute sets concurrency": "compute",
+            "B) Weights plus live state/cache set concurrency": "memory",
+            "C) Replicas make memory irrelevant": "replicas",
+            "D) Context/window length does not matter": "context",
         },
-        label="Llama-2 70B, 128K context, 8xH100 (640 GB). Max concurrent batch?",
+        label=(
+            f"{v1_13_serving.model_name} on {v1_13_serving.hardware_name}: "
+            "what limits live requests?"
+        ),
     )
     return (partB_arr, partB_batch, partB_slo, partC_pred)
 
-@app.cell(hide_code=True)
-def _(mo):
-    partC_model = mo.ui.dropdown(options={"7B": 7, "13B": 13, "70B": 70}, value="70B",
-                                  label="Model size")
-    partC_prec = mo.ui.dropdown(
-        options={"FP16 (2B)": 2, "INT8 (1B)": 1, "INT4 (0.5B)": 0.5},
-        value="FP16 (2B)", label="Weight precision (bytes)")
-    partC_ctx = mo.ui.slider(start=2048, stop=131072, value=131072, step=2048,
-                              label="Context length (tokens)")
-    partC_gpus = mo.ui.dropdown(
-        options={"1 GPU (80 GB)": 1, "4 GPUs (320 GB)": 4, "8 GPUs (640 GB)": 8},
-        value="8 GPUs (640 GB)", label="GPU count")
 
-    # ── Part D widgets ────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, v1_13_serving):
+    partC_model = mo.ui.dropdown(
+        options={v1_13_serving.model_name: v1_13_serving.model_ref},
+        value=v1_13_serving.model_name,
+        label="Model ref",
+    )
+    partC_prec = mo.ui.dropdown(
+        options={"FP16 (2B)": 2.0, "INT8 (1B)": 1.0, "INT4 (0.5B)": 0.5},
+        value={2.0: "FP16 (2B)", 1.0: "INT8 (1B)", 0.5: "INT4 (0.5B)"}.get(
+            v1_13_serving.precision_bytes,
+            "FP16 (2B)",
+        ),
+        label="Weight precision (bytes)",
+    )
+    partC_ctx = mo.ui.slider(
+        start=256,
+        stop=max(131072, v1_13_serving.context_tokens),
+        value=v1_13_serving.context_tokens,
+        step=256 if v1_13_serving.context_tokens <= 4096 else 2048,
+        label="Context/window length (tokens)",
+    )
+    partC_gpus = mo.ui.dropdown(
+        options={"1 device": 1, "2 devices": 2, "4 devices": 4, "8 devices": 8},
+        value={1: "1 device", 2: "2 devices", 4: "4 devices", 8: "8 devices"}.get(
+            v1_13_serving.default_devices_per_replica,
+            "1 device",
+        ),
+        label="Devices per serving unit",
+    )
+
     partD_pred = mo.ui.radio(
         options={
-            "A) ~200 ms (normal inference latency)": "200ms",
-            "B) ~2 seconds (some loading overhead)": "2s",
-            "C) ~26 seconds (NVMe read bottleneck + deserialization)": "26s",
-            "D) ~60 seconds (loading from network storage)": "60s",
+            "A) Cold start is close to normal service time": "service",
+            "B) Data movement dominates first-request latency": "movement",
+            "C) Warm pools only affect throughput": "throughput",
+            "D) Cold starts are unrelated to SLO": "unrelated",
         },
-        label="Auto-scaling Llama-2 70B during traffic spike. First-user wait?",
+        label=(
+            f"{v1_13_serving.label}: scale out {v1_13_serving.model_name}. "
+            "What dominates the first uncached request?"
+        ),
     )
     return (partC_ctx, partC_gpus, partC_model, partC_prec, partD_pred)
 
-# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
+
 @app.cell(hide_code=True)
-def _(mo):
-    partD_model = mo.ui.dropdown(options={"7B": 7, "13B": 13, "70B": 70}, value="70B",
-                                  label="Model size")
+def _(mo, v1_13_serving):
+    partD_scaleout = mo.ui.slider(
+        start=1,
+        stop=16,
+        value=v1_13_serving.scale_out_replicas,
+        step=1,
+        label="Scale-out replicas",
+    )
     partD_stor = mo.ui.dropdown(
-        options={"NVMe SSD": "nvme", "Network FS": "nfs", "Cached in RAM": "ram"},
-        value="NVMe SSD", label="Storage type")
-    partD_pcie = mo.ui.dropdown(options={"PCIe Gen4": "gen4", "PCIe Gen5": "gen5"},
-                                 value="PCIe Gen5", label="Interconnect")
-    return (partD_model, partD_pcie, partD_stor)
+        options={
+            "Registry/default storage": "default",
+            "Slow network storage": "nfs",
+            "Cached in host RAM": "ram",
+        },
+        value="Registry/default storage",
+        label="Storage type",
+    )
+    partD_warm_pool = mo.ui.slider(
+        start=0,
+        stop=8,
+        value=v1_13_serving.warm_pool_replicas,
+        step=1,
+        label="Warm pool replicas",
+    )
+    return (partD_scaleout, partD_stor, partD_warm_pool)
+
+
+# ===========================================================================
+# ZONE C: MAIN LAB
+# ===========================================================================
+
 
 @app.cell(hide_code=True)
 def _(
-    COLORS, H100_BW_GBS, H100_RAM_GB, apply_plotly_theme, calc_kv_cache_size, go, math, mo, np,
-    partA_pred, partA_rho, partA_slo,
-    partA_svc, partB_arr, partB_batch, partB_pred,
-    partB_slo, partC_ctx, partC_gpus, partC_model,
-    partC_prec, partC_pred, partD_pred, partD_model,
-    partD_pcie, partD_stor,
-    LLAMA2_70B_HEADS, LLAMA2_70B_HIDDEN, LLAMA2_70B_LAYERS,
-    NET_FS_GBS, NVME_SEQ_GBS, PCIE_GEN4_GBS, PCIE_GEN5_GBS,
-    JETSON_BW_GBS, JETSON_RAM_GB,
+    COLORS,
+    apply_plotly_theme,
+    batching_tax,
+    cache_capacity,
+    cold_start_latency,
+    go,
+    math,
+    mo,
+    np,
+    partA_pred,
+    partA_rho,
+    partA_slo,
+    partA_svc,
+    partB_arr,
+    partB_batch,
+    partB_pred,
+    partB_slo,
+    partC_ctx,
+    partC_gpus,
+    partC_model,
+    partC_prec,
+    partC_pred,
+    partD_pred,
+    partD_scaleout,
+    partD_stor,
+    partD_warm_pool,
+    queueing_latency,
+    v1_13_model,
+    v1_13_profile,
+    v1_13_serving,
+    v1_13_variant,
 ):
+    def _metric_card(label, value, detail, color, border=False):
+        border_style = f"2px solid {color}" if border else "1px solid #e2e8f0"
+        return f"""
+        <div style="padding:16px; border:{border_style}; border-radius:10px;
+                    min-width:150px; text-align:center; background:white;
+                    border-top:3px solid {color}; flex:1;">
+            <div style="color:#64748b; font-size:0.78rem; font-weight:700;">{label}</div>
+            <div style="font-size:1.55rem; font-weight:800; color:{color};">{value}</div>
+            <div style="font-size:0.72rem; color:#64748b;">{detail}</div>
+        </div>
+        """
 
-    # ═════════════════════════════════════════════════════════════════════════
-    # PART A — The Tail Latency Explosion
-    # ═════════════════════════════════════════════════════════════════════════
     def build_part_a():
-        items = []
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; SRE Lead, InferenceCloud</div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;Our ResNet-50 cluster reports 25 ms average latency at 80% utilization.
-                Product says the system is healthy. But top-tier customers are complaining
-                about timeouts. Can you investigate?&rdquo;</div>
-        </div>"""))
+        items = [
+            mo.Html(f"""
+            <div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
+                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
+                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                    Incoming Message &middot; {v1_13_variant.stakeholder}
+                </div>
+                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                    "The average request looks fine on {v1_13_serving.label}. Can we trust
+                    that number, or will p99 violate {v1_13_serving.slo_ms:g} ms?"
+                </div>
+            </div>
+            """),
+            mo.md("""
+## Queueing Turns Utilization Into Tail Latency
 
-        items.append(mo.md("""
-## The M/M/1 Queuing Model Predicts Tail Latency Divergence
+The serving wall is not only service time. Once utilization rises, requests wait
+behind other requests. This lab uses the shared `mlsysbook_labs.queueing_latency`
+helper, an M/M/c queue with a service-variability adjustment.
 
 ```
-Mean wait  = service_time / (1 - rho)
-P99 wait   = ln(100) * service_time / (1 - rho) = 4.6 * service_time / (1 - rho)
+rho = arrival_rate / (replicas * service_rate)
+p99 = service_time + queue_tail(rho, replicas, service_cv)
 ```
-
-The P99/mean ratio is always **4.6x** for M/M/1, but absolute values explode
-as rho approaches 1.0. At rho=0.80, the 1/(1-rho) amplifier is 5x, making
-P99 = 4.6 * 5 * service_time = **23x service time**.
-        """))
-
-        items.append(mo.callout(mo.md(
-            "**Note:** M/M/1 assumes Poisson arrivals and exponential service times. Production "
-            "serving systems have bursty arrivals, bimodal latencies (cache hits vs misses), and "
-            "multiple servers. The M/M/1 model is a pedagogical lower bound — real P99 latencies "
-            "are typically 2-5x worse due to autocorrelation and load balancer overhead."
-        ), kind="info"))
-
-        items.append(partA_pred)
+            """),
+            partA_pred,
+        ]
         if partA_pred.value is None:
-            items.append(mo.callout(mo.md(
-                "Select your prediction to unlock the P99 latency instruments."), kind="warn"))
+            items.append(mo.callout(mo.md("Select your prediction to unlock the p99 instruments."), kind="warn"))
             return mo.vstack(items)
 
         items.append(mo.hstack([partA_rho, partA_svc, partA_slo], widths="equal"))
 
-        _rho = partA_rho.value
         _svc = partA_svc.value
+        _rho = partA_rho.value
         _slo = partA_slo.value
-        _mean = _svc / (1 - _rho) if _rho < 1.0 else 9999.0
-        _p99 = 4.6 * _svc / (1 - _rho) if _rho < 1.0 else 9999.0
-        _p99_ratio = _p99 / _svc if _svc > 0 else 0
+        _replicas = v1_13_serving.replicas
+        _arrival = _rho * _replicas * (1000 / _svc)
+        _queue = queueing_latency(
+            arrival_qps=_arrival,
+            service_ms=_svc,
+            replicas=_replicas,
+            service_cv=v1_13_serving.service_cv,
+            slo_ms=_slo,
+        )
 
-        # Divergence chart
         _rhos = np.linspace(0.05, 0.95, 50)
-        _means = [_svc / (1 - r) for r in _rhos]
-        _p99s = [4.6 * _svc / (1 - r) for r in _rhos]
+        _means = []
+        _p99s = []
+        for _r in _rhos:
+            _q = queueing_latency(
+                arrival_qps=_r * _replicas * (1000 / _svc),
+                service_ms=_svc,
+                replicas=_replicas,
+                service_cv=v1_13_serving.service_cv,
+                slo_ms=_slo,
+            )
+            _means.append(_q.mean_latency_ms if math.isfinite(_q.mean_latency_ms) else None)
+            _p99s.append(_q.p99_latency_ms if math.isfinite(_q.p99_latency_ms) else None)
 
         _fig = go.Figure()
-        _fig.add_trace(go.Scatter(x=_rhos, y=_means, mode='lines', name='Mean Latency',
-                                   line=dict(color=COLORS['BlueLine'], width=2),
-                                   hovertemplate="rho=%{x:.2f}: %{y:.1f} ms<extra></extra>"))
-        _fig.add_trace(go.Scatter(x=_rhos, y=_p99s, mode='lines', name='P99 Latency',
-                                   line=dict(color=COLORS['RedLine'], width=3),
-                                   hovertemplate="rho=%{x:.2f}: %{y:.1f} ms<extra></extra>"))
-        _fig.add_hline(y=_slo, line_dash="dash", line_color=COLORS['GreenLine'],
-                       annotation_text=f"SLO = {_slo:.0f} ms")
-        if _rho < 1.0:
-            _fig.add_trace(go.Scatter(x=[_rho], y=[_p99], mode='markers',
-                                       name=f'P99 @ rho={_rho:.2f}',
-                                       marker=dict(color=COLORS['RedLine'], size=14, symbol='diamond'),
-                                       hovertemplate="rho=%{x:.2f}: %{y:.1f} ms<extra></extra>"))
-            _fig.add_trace(go.Scatter(x=[_rho], y=[_mean], mode='markers',
-                                       name=f'Mean @ rho={_rho:.2f}',
-                                       marker=dict(color=COLORS['BlueLine'], size=10),
-                                       hovertemplate="rho=%{x:.2f}: %{y:.1f} ms<extra></extra>"))
-        _fig.update_layout(height=380, xaxis=dict(title="Utilization (rho)", range=[0, 1]),
-                           yaxis=dict(title="Latency (ms)", gridcolor="#f1f5f9"),
-                           legend=dict(orientation="h", y=1.12, x=0),
-                           margin=dict(l=50, r=20, t=60, b=40))
+        _fig.add_trace(go.Scatter(
+            x=_rhos,
+            y=_means,
+            mode="lines",
+            name="Mean latency",
+            line=dict(color=COLORS["BlueLine"], width=2),
+        ))
+        _fig.add_trace(go.Scatter(
+            x=_rhos,
+            y=_p99s,
+            mode="lines",
+            name="P99 latency",
+            line=dict(color=COLORS["RedLine"], width=3),
+        ))
+        _fig.add_hline(y=_slo, line_dash="dash", line_color=COLORS["GreenLine"], annotation_text=f"SLO = {_slo:.0f} ms")
+        _fig.add_trace(go.Scatter(
+            x=[_rho],
+            y=[_queue.p99_latency_ms],
+            mode="markers",
+            name="selected p99",
+            marker=dict(color=COLORS["RedLine"], size=14, symbol="diamond"),
+        ))
+        _fig.update_layout(
+            height=380,
+            xaxis=dict(title="Utilization (rho)", range=[0, 1]),
+            yaxis=dict(title="Latency (ms)", gridcolor="#f1f5f9"),
+            legend=dict(orientation="h", y=1.12, x=0),
+            margin=dict(l=50, r=20, t=60, b=40),
+        )
         apply_plotly_theme(_fig)
         items.append(mo.as_html(_fig))
 
-        _slo_viol = _p99 > _slo
-        _p99_col = COLORS['RedLine'] if _slo_viol else COLORS['GreenLine']
-        _mean_col = COLORS['GreenLine'] if _mean < _slo else COLORS['OrangeLine']
-
+        _p99_color = COLORS["RedLine"] if not _queue.slo_ok else COLORS["GreenLine"]
         items.append(mo.Html(f"""
         <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:140px; text-align:center; background:white;
-                        border-top:3px solid {_mean_col}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Mean Latency</div>
-                <div style="font-size:1.7rem; font-weight:800; color:{_mean_col};">{_mean:.1f} ms</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">{_mean/_svc:.1f}x service time</div></div>
-            <div style="padding:16px; border:2px solid {_p99_col}; border-radius:10px;
-                        min-width:140px; text-align:center; background:white;
-                        border-top:3px solid {_p99_col}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">P99 Latency</div>
-                <div style="font-size:1.7rem; font-weight:800; color:{_p99_col};">{_p99:.1f} ms</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">{_p99_ratio:.1f}x service time</div></div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:140px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">P99/Mean Ratio</div>
-                <div style="font-size:1.7rem; font-weight:800; color:{COLORS['OrangeLine']};">4.6x</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">ln(100) for M/M/1</div></div>
-        </div>"""))
+            {_metric_card("Utilization", f"{_queue.utilization:.2f}", f"{_arrival:.2f} QPS arrival", COLORS["OrangeLine"])}
+            {_metric_card("Mean Latency", f"{_queue.mean_latency_ms:.1f} ms", "wait + service", COLORS["BlueLine"])}
+            {_metric_card("P99 Latency", f"{_queue.p99_latency_ms:.1f} ms", f"{_queue.queue_amplifier:.1f}x service", _p99_color, True)}
+            {_metric_card("Wait Probability", f"{_queue.queue_wait_probability*100:.0f}%", "Erlang-C", COLORS["PurpleLine"] if "PurpleLine" in COLORS else COLORS["BlueLine"])}
+        </div>
+        """))
 
-        if _slo_viol:
+        if not _queue.slo_ok:
             items.append(mo.callout(mo.md(
-                f"**SLO VIOLATED.** P99 = {_p99:.1f} ms > {_slo:.0f} ms SLO. "
-                f"Mean looks healthy ({_mean:.1f} ms) but 1 in 100 users sees "
-                f"{_p99/_mean:.1f}x worse."), kind="danger"))
+                f"**SLO VIOLATED.** P99 = {_queue.p99_latency_ms:.1f} ms > {_slo:.0f} ms. "
+                f"The mean ({_queue.mean_latency_ms:.1f} ms) hides the one-in-100 experience."
+            ), kind="danger"))
 
         items.append(mo.md(f"""
-**M/M/1 &mdash; Live** (`rho={_rho:.2f}, service={_svc:.1f} ms`)
+**Queueing - Live Calculation**
 
 ```
-Mean = {_svc:.1f} / (1 - {_rho:.2f}) = {_svc:.1f} / {1-_rho:.2f} = {_mean:.1f} ms
-P99  = 4.6 * {_svc:.1f} / {1-_rho:.2f} = {_p99:.1f} ms  ({_p99_ratio:.1f}x service)
+replicas     = {_replicas}
+service time = {_svc:.1f} ms
+arrival      = {_arrival:.2f} QPS
+rho          = {_queue.utilization:.2f}
+mean         = {_queue.mean_latency_ms:.1f} ms
+p95 / p99    = {_queue.p95_latency_ms:.1f} / {_queue.p99_latency_ms:.1f} ms
 ```
-*Source: @eq-mm1-wait and @eq-p99-latency*
+*Source: `mlsysbook_labs.queueing_latency`, track `{v1_13_profile.track_id}`.*
         """))
 
-        _actual_p99 = 4.6 * 5.0 / 0.2  # 115 ms
-        if partA_pred.value == "115ms":
-            items.append(mo.callout(mo.md(
-                f"**Correct.** P99 = 4.6 * 5 / 0.2 = {_actual_p99:.0f} ms (23x service time). "
-                "Most engineers only monitor mean latency."), kind="success"))
-        elif partA_pred.value == "25ms":
-            items.append(mo.callout(mo.md(
-                f"**You confused mean with P99.** Mean is 25 ms. P99 = 4.6 * mean = "
-                f"{_actual_p99:.0f} ms. The ln(100) multiplier is the gap."), kind="warn"))
+        if partA_pred.value == "tail":
+            items.append(mo.callout(mo.md("**Correct.** Tail latency is the binding metric once utilization rises."), kind="success"))
         else:
             items.append(mo.callout(mo.md(
-                f"**Actual P99 is {_actual_p99:.0f} ms** &mdash; 23x service time. "
-                "The 1/(1-rho) amplifier at 0.80 is 5x, times ln(100)=4.6."), kind="warn"))
-
-        items.append(mo.accordion({
-            "Math Peek: M/M/1 Queue Latency": mo.md("""
-**Formula (mean sojourn time):**
-$$
-W = \\frac{1}{\\mu - \\lambda} = \\frac{1}{\\mu} \\cdot \\frac{1}{1 - \\rho}
-$$
-
-**P99 approximation (exponential tail):**
-$$
-P_{99} \\approx \\frac{\\ln(100)}{\\mu(1 - \\rho)} = \\frac{4.6}{\\mu(1 - \\rho)}
-$$
-
-**Variables:**
-- **$\\lambda$**: arrival rate (requests/s)
-- **$\\mu$**: service rate ($1/T_{\\text{service}}$)
-- **$\\rho = \\lambda / \\mu$**: server utilization
-- **$W$**: mean time in system (wait + service)
-
-At $\\rho = 0.80$: mean wait = $5\\times$ service time, P99 = $23\\times$ service time. The nonlinear $1/(1-\\rho)$ amplifier is why 80% utilization feels like a crisis.
-""")
-        }))
+                "**The trap is trusting the average.** Replicas help only if they reduce utilization enough; "
+                "p99 still needs direct measurement and SLO headroom."
+            ), kind="warn"))
         return mo.vstack(items)
 
-    # ═════════════════════════════════════════════════════════════════════════
-    # PART B — The Batching Tax
-    # ═════════════════════════════════════════════════════════════════════════
     def build_part_b():
-        items = []
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Escalation &middot; Performance Engineer, InferenceCloud</div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;We know tail latency is the problem. Throughput team says batching is the
-                fix &mdash; batch-32 gives 6.4x throughput. Will this fix SLO violations?&rdquo;</div>
-        </div>"""))
+        items = [
+            mo.Html(f"""
+            <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
+                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
+                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                    Escalation &middot; Serving Performance Engineer
+                </div>
+                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                    "Throughput improves when we batch. Does that automatically improve
+                    {v1_13_serving.label} p99?"
+                </div>
+            </div>
+            """),
+            mo.md("""
+## Batching Has a Formation Delay Tax
 
-        items.append(mo.md("""
-## Batching Imposes a Formation Delay Tax
+Static batching waits for requests to arrive before work starts. That waiting
+time is charged to the user's end-to-end latency.
 
 ```
-Formation delay = (B - 1) / (2 * lambda)     [seconds]
-Total latency   = Formation delay + Inference(B) + Queuing delay
+formation_delay = (batch_size - 1) / (2 * arrival_rate)
+total_p99       = formation_delay + batched_service + queue_tail
 ```
-
-Each request waits for the batch to fill. This delay is consumed **before**
-the GPU fires a single kernel.
-        """))
-
-        items.append(partB_pred)
+            """),
+            partB_pred,
+        ]
         if partB_pred.value is None:
-            items.append(mo.callout(mo.md(
-                "Select your prediction to unlock the batching instruments."), kind="warn"))
+            items.append(mo.callout(mo.md("Select your prediction to unlock the batching instruments."), kind="warn"))
             return mo.vstack(items)
 
         items.append(mo.hstack([partB_batch, partB_arr, partB_slo], widths="equal"))
-
-        _B = partB_batch.value
-        _lam = partB_arr.value
+        _batch = partB_batch.value
+        _arrival = partB_arr.value
         _slo = partB_slo.value
-        _form = (_B - 1) / (2 * _lam) * 1000  # ms
-        _infer = 0.5 + 0.1 * (_B - 1)  # ms (ResNet-50 on H100)
-        _eff_svc = _form + _infer
-        _eff_arr = _lam / max(_B, 1)
-        _eff_rho = _eff_arr * (_eff_svc / 1000) if _eff_svc > 0 else 0
-        _q_del = _eff_svc * _eff_rho / (1 - _eff_rho) if 0 < _eff_rho < 1 else 999.0
-        _total = _form + _infer + min(_q_del, 999)
-        _slo_viol = _total > _slo
-        _form_pct = _form / _slo * 100 if _slo > 0 else 0
-        _tput = _B / (_eff_svc / 1000) if _eff_svc > 0 else 0
-        _tput_ratio = _tput / (1 / (0.5 / 1000))
+        _batching = batching_tax(
+            batch_size=_batch,
+            arrival_qps=_arrival,
+            service_ms=v1_13_serving.service_ms,
+            slo_ms=_slo,
+            efficiency_gain=v1_13_serving.batch_efficiency_gain,
+            replicas=v1_13_serving.replicas,
+            service_cv=v1_13_serving.service_cv,
+        )
 
         _fig = go.Figure()
-        for _name, _val, _col in [
-            ("Formation Delay", _form, COLORS['OrangeLine']),
-            ("Inference", _infer, COLORS['BlueLine']),
-            ("Queuing", min(_q_del, 500), COLORS['RedLine']),
+        for _name, _value, _color in [
+            ("Formation delay", _batching.formation_delay_ms, COLORS["OrangeLine"]),
+            ("Batched service", _batching.batched_service_ms, COLORS["BlueLine"]),
+            ("Queue p99", _batching.queue_p99_ms, COLORS["RedLine"]),
         ]:
-            _fig.add_trace(go.Bar(name=_name, x=[_name], y=[_val],
-                                   marker_color=_col, opacity=0.88,
-                                   hovertemplate="%{x}: %{y:.1f} ms<extra></extra>"))
-        _fig.add_hline(y=_slo, line_dash="dash", line_color=COLORS['GreenLine'],
-                       annotation_text=f"SLO = {_slo} ms")
-        _fig.update_layout(height=340, yaxis=dict(title="Latency (ms)", gridcolor="#f1f5f9"),
-                           legend=dict(orientation="h", y=1.12, x=0),
-                           margin=dict(l=50, r=20, t=60, b=40))
+            _fig.add_trace(go.Bar(
+                name=_name,
+                x=[_name],
+                y=[_value],
+                marker_color=_color,
+                hovertemplate="%{x}: %{y:.1f} ms<extra></extra>",
+            ))
+        _fig.add_hline(y=_slo, line_dash="dash", line_color=COLORS["GreenLine"], annotation_text=f"SLO = {_slo} ms")
+        _fig.update_layout(
+            height=340,
+            yaxis=dict(title="Latency contribution (ms)", gridcolor="#f1f5f9"),
+            legend=dict(orientation="h", y=1.12, x=0),
+            margin=dict(l=50, r=20, t=60, b=40),
+        )
         apply_plotly_theme(_fig)
         items.append(mo.as_html(_fig))
 
-        _form_col = COLORS['RedLine'] if _form_pct > 50 else COLORS['OrangeLine']
-        _tot_col = COLORS['RedLine'] if _slo_viol else COLORS['GreenLine']
+        _total_color = COLORS["GreenLine"] if _batching.slo_ok else COLORS["RedLine"]
         items.append(mo.Html(f"""
         <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:130px; text-align:center; background:white;
-                        border-top:3px solid {_form_col}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Formation Delay</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{_form_col};">{_form:.1f} ms</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">{_form_pct:.0f}% of SLO</div></div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:130px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['BlueLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Throughput</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">{_tput:.0f} QPS</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">{_tput_ratio:.1f}x over batch=1</div></div>
-            <div style="padding:16px; border:2px solid {_tot_col}; border-radius:10px;
-                        min-width:130px; text-align:center; background:white;
-                        border-top:3px solid {_tot_col}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Total Latency</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{_tot_col};">{min(_total,999):.1f} ms</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">{"SLO VIOLATED" if _slo_viol else "Within SLO"}</div></div>
-        </div>"""))
+            {_metric_card("Formation Delay", f"{_batching.formation_delay_ms:.1f} ms", f"{_batching.formation_slo_pct:.0f}% of SLO", COLORS["OrangeLine"])}
+            {_metric_card("Throughput Gain", f"{_batching.throughput_gain:.1f}x", "service amortization", COLORS["BlueLine"])}
+            {_metric_card("Batch Utilization", f"{_batching.utilization:.2f}", "batch queue rho", COLORS["OrangeLine"])}
+            {_metric_card("Total P99", f"{_batching.total_p99_ms:.1f} ms", "formation + service + queue", _total_color, True)}
+        </div>
+        """))
 
-        if _slo_viol:
+        if not _batching.slo_ok:
             items.append(mo.callout(mo.md(
-                f"**SLO VIOLATED.** {_form:.1f} + {_infer:.1f} + {min(_q_del,999):.1f} = "
-                f"{min(_total,999):.1f} ms > {_slo} ms. Formation delay is "
-                f"{_form_pct:.0f}% of the SLO."), kind="danger"))
+                f"**SLO VIOLATED.** Total p99 = {_batching.total_p99_ms:.1f} ms > {_slo:g} ms. "
+                f"Formation delay alone consumes {_batching.formation_slo_pct:.0f}% of the SLO."
+            ), kind="danger"))
 
         items.append(mo.md(f"""
-**Batching Tax &mdash; Live** (`B={_B}, lambda={_lam} QPS, SLO={_slo} ms`)
+**Batching Tax - Live Calculation**
 
 ```
-Formation delay = ({_B}-1) / (2*{_lam}) * 1000 = {_form:.1f} ms  ({_form_pct:.0f}% of SLO)
-Inference       = {_infer:.1f} ms  (batch={_B} on H100)
-Queuing delay   = {min(_q_del,999):.1f} ms  (rho_eff={_eff_rho:.2f})
-Total           = {min(_total,999):.1f} ms
+batch size       = {_batch}
+arrival          = {_arrival:g} QPS
+formation delay  = {_batching.formation_delay_ms:.1f} ms
+batched service  = {_batching.batched_service_ms:.1f} ms
+queue p99        = {_batching.queue_p99_ms:.1f} ms
+total p99        = {_batching.total_p99_ms:.1f} ms
 ```
-*Source: formation delay from @sec-model-serving-batching*
+*Source: `mlsysbook_labs.batching_tax`.*
         """))
 
-        _ref_form = (32 - 1) / (2 * 500) * 1000
         if partB_pred.value == "delay":
-            items.append(mo.callout(mo.md(
-                f"**Correct.** Formation delay for B=32 at 500 QPS = {_ref_form:.0f} ms = "
-                f"62% of a 50 ms SLO."), kind="success"))
+            items.append(mo.callout(mo.md("**Correct.** Throughput batching has a latency bill: waiting for the batch to form."), kind="success"))
         else:
             items.append(mo.callout(mo.md(
-                f"**Formation delay kills the SLO.** B=32 at 500 QPS: {_ref_form:.0f} ms "
-                "of waiting before the GPU fires."), kind="warn"))
-
-        items.append(mo.accordion({
-            "Math Peek: Batch Formation Delay": mo.md("""
-**Formula (expected wait for batch to fill):**
-$$
-T_{\\text{formation}} = \\frac{B - 1}{2\\lambda}
-$$
-
-**Throughput gain vs. latency cost:**
-$$
-\\text{Throughput} = \\frac{B \\cdot \\mu}{1 + B \\cdot \\mu \\cdot T_{\\text{formation}}}
-$$
-
-**Variables:**
-- **$B$**: batch size
-- **$\\lambda$**: arrival rate (requests/s)
-- **$T_{\\text{formation}}$**: expected time for the last request in a batch to arrive
-
-At $B=32$ and $\\lambda=500$ QPS, the average request waits $(32-1)/(2 \\times 500) = 31$ ms just for the batch to fill -- 62% of a 50 ms SLO budget consumed before inference starts.
-""")
-        }))
+                "**Batching is not free.** It can be the right serving policy, but only if formation delay and p99 stay inside the SLO."
+            ), kind="warn"))
         return mo.vstack(items)
 
-    # ═════════════════════════════════════════════════════════════════════════
-    # PART C — The LLM Memory Wall
-    # ═════════════════════════════════════════════════════════════════════════
     def build_part_c():
-        items = []
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; Head of ML Infrastructure</div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;We need to serve Llama-2 70B with 128K context on 8xH100. Compute team
-                says we can batch 8 requests &mdash; one per GPU. Can you verify?&rdquo;</div>
-        </div>"""))
+        items = [
+            mo.Html(f"""
+            <div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
+                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
+                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                    Capacity Review &middot; {v1_13_variant.stakeholder}
+                </div>
+                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                    "Compute says the accelerator is fast enough. Before we approve the
+                    rollout, how many live requests actually fit in memory?"
+                </div>
+            </div>
+            """),
+            mo.md(f"""
+## Live State/Cache Capacity Sets Concurrency
 
-        items.append(mo.md("""
-## KV Cache Capacity Determines LLM Concurrency
+For this track, the live state is **{v1_13_serving.state_kind}**. A serving unit
+must fit model weights and one state/cache allocation per live request.
 
 ```
-KV cache (bytes) = 2 * layers * heads * head_dim * seq_len * batch * bytes_per_elem
-Total memory     = model_weights + KV_cache
-Max batch        = floor((HBM - weights) / KV_per_request)
+weights + live_requests * state_per_request <= device_memory
 ```
-
-At long context, KV cache exceeds model weights. Compute parallelism is irrelevant
-when memory capacity is the binding constraint.
-        """))
-
-        items.append(partC_pred)
+            """),
+            partC_pred,
+        ]
         if partC_pred.value is None:
-            items.append(mo.callout(mo.md(
-                "Select your prediction to unlock the KV cache calculator."), kind="warn"))
+            items.append(mo.callout(mo.md("Select your prediction to unlock the state/cache calculator."), kind="warn"))
             return mo.vstack(items)
 
         items.append(mo.hstack([partC_model, partC_prec, partC_ctx, partC_gpus], widths="equal"))
+        _precision = partC_prec.value
+        _context = partC_ctx.value
+        _devices = partC_gpus.value
+        _capacity = cache_capacity(
+            v1_13_serving,
+            v1_13_model,
+            context_tokens=_context,
+            precision_bytes=_precision,
+            devices_per_replica=_devices,
+            kv_precision_bytes=v1_13_serving.kv_precision_bytes,
+        )
 
-        _pb = partC_model.value
-        _bpp = partC_prec.value
-        _ctx = partC_ctx.value
-        _ng = partC_gpus.value
-
-        _cfgs = {7: (32, 32, 4096), 13: (40, 40, 5120), 70: (80, 64, 8192)}
-        _layers, _heads, _hidden = _cfgs[_pb]
-        _hdim = _hidden // _heads
-        _w_gb = _pb * 1e9 * _bpp / (1024**3)
-        _kv_gb = calc_kv_cache_size(
-            _layers, _heads, _hdim, _ctx, 1, bytes_per_elem=_bpp,
-        ).m_as("GB")
-        _hbm = _ng * H100_RAM_GB
-        _avail = _hbm - _w_gb
-        _max_b = max(0, int(_avail / _kv_gb)) if _kv_gb > 0 else 0
-        _bw = _ng * H100_BW_GBS
-        _tok_ms = (_w_gb + _kv_gb) / _bw * 1000 if _bw > 0 else 0
-
-        _br = list(range(1, min(_max_b + 3, 20)))
+        _max_show = max(3, min(_capacity.max_concurrent + 3, 20))
+        _batches = list(range(1, _max_show + 1))
         _fig = go.Figure()
-        _fig.add_trace(go.Bar(name="Weights", x=[str(b) for b in _br],
-                               y=[_w_gb]*len(_br), marker_color=COLORS['BlueLine'], opacity=0.88,
-                               hovertemplate="Batch %{x}: %{y:.1f} GB<extra></extra>"))
-        _fig.add_trace(go.Bar(name="KV Cache", x=[str(b) for b in _br],
-                               y=[_kv_gb*b for b in _br], marker_color=COLORS['OrangeLine'], opacity=0.88,
-                               hovertemplate="Batch %{x}: %{y:.1f} GB<extra></extra>"))
-        _fig.add_hline(y=_hbm, line_dash="dash", line_color=COLORS['RedLine'],
-                       annotation_text=f"HBM = {_hbm:.0f} GB")
-        _fig.update_layout(barmode="stack", height=380,
-                           xaxis=dict(title="Concurrent Batch Size"),
-                           yaxis=dict(title="Memory (GB)", gridcolor="#f1f5f9"),
-                           legend=dict(orientation="h", y=1.12, x=0),
-                           margin=dict(l=50, r=20, t=60, b=40))
+        _fig.add_trace(go.Bar(
+            name="Weights",
+            x=[str(_b) for _b in _batches],
+            y=[_capacity.weight_gb] * len(_batches),
+            marker_color=COLORS["BlueLine"],
+        ))
+        _fig.add_trace(go.Bar(
+            name=_capacity.state_kind,
+            x=[str(_b) for _b in _batches],
+            y=[_capacity.state_per_request_gb * _b for _b in _batches],
+            marker_color=COLORS["OrangeLine"],
+        ))
+        _fig.add_hline(
+            y=_capacity.total_memory_gb,
+            line_dash="dash",
+            line_color=COLORS["RedLine"],
+            annotation_text=f"memory = {_capacity.total_memory_gb:.2f} GB",
+        )
+        _fig.update_layout(
+            barmode="stack",
+            height=380,
+            xaxis=dict(title="Live requests"),
+            yaxis=dict(title="Memory (GB)", gridcolor="#f1f5f9"),
+            legend=dict(orientation="h", y=1.12, x=0),
+            margin=dict(l=50, r=20, t=60, b=40),
+        )
         apply_plotly_theme(_fig)
         items.append(mo.as_html(_fig))
 
-        _oom = _max_b == 0
-        _mem_col = COLORS['RedLine'] if _oom else COLORS['GreenLine']
-        _kv_col = COLORS['RedLine'] if _kv_gb > _avail else COLORS['OrangeLine']
+        _max_color = COLORS["RedLine"] if _capacity.oom else (COLORS["OrangeLine"] if _capacity.max_concurrent <= 2 else COLORS["GreenLine"])
         items.append(mo.Html(f"""
         <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:130px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['BlueLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Weights</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">{_w_gb:.0f} GB</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">{_pb}B x {_bpp} B/param</div></div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:130px; text-align:center; background:white;
-                        border-top:3px solid {_kv_col}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">KV / Request</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{_kv_col};">{_kv_gb:.1f} GB</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">{_ctx:,} tokens</div></div>
-            <div style="padding:16px; border:2px solid {_mem_col}; border-radius:10px;
-                        min-width:130px; text-align:center; background:white;
-                        border-top:3px solid {_mem_col}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Max Batch</div>
-                <div style="font-size:1.7rem; font-weight:800; color:{_mem_col};">{_max_b}</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">{_hbm:.0f} GB HBM</div></div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:130px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Token Time</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['OrangeLine']};">{_tok_ms:.1f} ms</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">mem-BW bound</div></div>
-        </div>"""))
+            {_metric_card("Weights", f"{_capacity.weight_gb:.3g} GB", f"{_precision:g} B/param", COLORS["BlueLine"])}
+            {_metric_card("State / Request", f"{_capacity.state_per_request_gb:.3g} GB", _capacity.state_kind, COLORS["OrangeLine"])}
+            {_metric_card("Available Memory", f"{_capacity.available_gb:.3g} GB", f"{_devices} device(s)", COLORS["BlueLine"])}
+            {_metric_card("Max Live Requests", f"{_capacity.max_concurrent}", "memory-bound", _max_color, True)}
+        </div>
+        """))
 
-        if _oom:
+        if _capacity.oom:
             items.append(mo.callout(mo.md(
-                f"**OOM.** Weights ({_w_gb:.0f} GB) + KV ({_kv_gb:.1f} GB) = "
-                f"{_w_gb+_kv_gb:.0f} GB > {_hbm:.0f} GB. Reduce context or quantize."), kind="danger"))
-        elif _max_b <= 2:
+                f"**OOM.** Weights ({_capacity.weight_gb:.3g} GB) plus one "
+                f"{_capacity.state_kind} allocation ({_capacity.state_per_request_gb:.3g} GB) "
+                f"exceed {_capacity.total_memory_gb:.3g} GB."
+            ), kind="danger"))
+        elif _capacity.max_concurrent <= 2:
             items.append(mo.callout(mo.md(
-                f"**Severe concurrency limit.** Max {_max_b} concurrent request(s). "
-                "KV cache dominates memory."), kind="warn"))
+                f"**Severe concurrency limit.** Only {_capacity.max_concurrent} live request(s) fit. "
+                "Throughput planning must account for memory, not just compute."
+            ), kind="warn"))
 
         items.append(mo.md(f"""
-**KV Cache &mdash; Live** (`{_pb}B, {_bpp}B/param, {_ctx:,} tokens, {_ng} GPUs`)
+**State/Cache Capacity - Live Calculation**
 
 ```
-Weights      = {_pb}B * {_bpp} = {_w_gb:.0f} GB
-KV/request   = 2*{_layers}*{_heads}*{_hdim}*{_ctx:,}*{_bpp} = {_kv_gb:.1f} GB
-Available    = {_hbm:.0f} - {_w_gb:.0f} = {_avail:.0f} GB
-Max batch    = floor({_avail:.0f} / {_kv_gb:.1f}) = {_max_b}
-T_token      = ({_w_gb:.0f}+{_kv_gb:.1f}) / {_bw:.0f} GB/s = {_tok_ms:.1f} ms
+hardware        = {v1_13_serving.hardware_ref}
+model           = {v1_13_serving.model_ref}
+context/window  = {_context:,}
+total memory    = {_capacity.total_memory_gb:.3g} GB
+weights         = {_capacity.weight_gb:.3g} GB
+state/request   = {_capacity.state_per_request_gb:.3g} GB
+max live reqs   = {_capacity.max_concurrent}
 ```
-*Source: @sec-model-serving-kv-cache*
+*Source: `mlsysbook_labs.cache_capacity`, with MLSysIM hardware and model refs.*
         """))
 
-        # Edge comparison: same model on Jetson Orin NX
-        _edge_hbm = JETSON_RAM_GB
-        _edge_fits = _w_gb <= _edge_hbm
-        _edge_max_b = max(0, int((_edge_hbm - _w_gb) / _kv_gb)) if _edge_fits and _kv_gb > 0 else 0
-        _edge_tok_ms = _w_gb / JETSON_BW_GBS * 1000 if JETSON_BW_GBS > 0 else float('inf')
-        items.append(mo.callout(mo.md(
-            f"**Edge comparison (Jetson Orin NX, {_edge_hbm:.0f} GB):** "
-            + (f"OOM — weights alone ({_w_gb:.0f} GB) exceed {_edge_hbm:.0f} GB memory."
-               if not _edge_fits else
-               f"Max batch = {_edge_max_b}, token time = {_edge_tok_ms:.0f} ms "
-               f"({_edge_tok_ms/_tok_ms:.0f}x slower). "
-               "Edge serving requires aggressive quantization and small context windows.")
-        ), kind="warn"))
-
-        if partC_pred.value == "1":
-            items.append(mo.callout(mo.md(
-                "**Correct.** 70B FP16 at 128K: KV = ~320 GB per request. "
-                "Weights = 140 GB. Total = 460 GB. Only 180 GB remains of 640 GB."), kind="success"))
-        elif partC_pred.value == "8":
-            items.append(mo.callout(mo.md(
-                "**Memory, not compute, sets concurrency.** 8 GPUs give 8-way parallelism, "
-                "but a single 128K request needs ~320 GB of KV cache."), kind="warn"))
+        if partC_pred.value == "memory":
+            items.append(mo.callout(mo.md("**Correct.** Serving concurrency is a memory/state problem before it is a peak-compute problem."), kind="success"))
         else:
             items.append(mo.callout(mo.md(
-                "**KV cache at 128K is ~320 GB per request.** Only 1 fits "
-                "after model weights in 640 GB HBM."), kind="warn"))
-
-        items.append(mo.accordion({
-            "Math Peek: KV Cache Memory per Request": mo.md("""
-**Formula:**
-$$
-M_{\\text{KV}} = 2 \\times L \\times H \\times d_h \\times S \\times b_{\\text{kv}}
-$$
-
-Total HBM budget:
-$$
-M_{\\text{weights}} + n \\times M_{\\text{KV}} \\leq M_{\\text{HBM}}
-$$
-
-**Variables:**
-- **$L$**: number of transformer layers
-- **$H$**: number of attention heads
-- **$d_h$**: head dimension ($d_{\\text{model}} / H$)
-- **$S$**: sequence length (context window)
-- **$b_{\\text{kv}}$**: bytes per KV element (2 for FP16)
-- **$n$**: concurrent batch size (requests in flight)
-- Factor of 2: one K tensor + one V tensor per layer
-
-At 128K context, Llama-2 70B KV cache = $2 \\times 80 \\times 64 \\times 128 \\times 131072 \\times 2 \\approx 320$ GB per request.
-""")
-        }))
+                "**Compute is incomplete evidence.** A serving unit must reserve model weights and live request state/cache."
+            ), kind="warn"))
         return mo.vstack(items)
 
-    # ═════════════════════════════════════════════════════════════════════════
-    # PART D — The Cold Start Tax
-    # ═════════════════════════════════════════════════════════════════════════
     def build_part_d():
-        items = []
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; DevOps Lead, ServerlessLLM</div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;We auto-scale Llama-2 70B on Kubernetes. During traffic spikes, new pods
-                take forever. Users complain about first-request timeouts. What is the
-                theoretical minimum cold start time?&rdquo;</div>
-        </div>"""))
-
-        items.append(mo.md("""
-## Cold Start = Data Movement + Initialization
+        items = [
+            mo.Html(f"""
+            <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
+                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
+                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                    Scale-Out Drill &middot; Operations Lead
+                </div>
+                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                    "Traffic spikes. New serving units need the model, runtime, and warmup.
+                    Which users see the cold path?"
+                </div>
+            </div>
+            """),
+            mo.md("""
+## Cold Start Is Data Movement Plus Runtime Initialization
 
 ```
-T_cold = model_size / min(storage_BW, interconnect_BW)
-       + deserialization + CUDA_init + warmup
+cold_start = weights / min(storage_bw, interconnect_bw)
+           + weights / deserialize_bw
+           + runtime_init + warmup
 ```
 
-For large models this is seconds to minutes, experienced by real users.
-        """))
-
-        items.append(partD_pred)
+Warm pools do not make cold starts disappear. They reduce the fraction of
+scale-out replicas whose first request is exposed to the cold path.
+            """),
+            partD_pred,
+        ]
         if partD_pred.value is None:
-            items.append(mo.callout(mo.md(
-                "Select your prediction to unlock the cold start calculator."), kind="warn"))
+            items.append(mo.callout(mo.md("Select your prediction to unlock the cold-start calculator."), kind="warn"))
             return mo.vstack(items)
 
-        items.append(mo.hstack([partD_model, partD_stor, partD_pcie], widths="equal"))
-
-        _pb = partD_model.value
-        _stor = partD_stor.value
-        _ic = partD_pcie.value
-        _m_gb = _pb * 1e9 * 2 / (1024**3)
-        _s_bw = {"nvme": NVME_SEQ_GBS, "nfs": NET_FS_GBS, "ram": 50.0}[_stor]
-        _s_lbl = {"nvme": "NVMe SSD", "nfs": "Network FS", "ram": "Host RAM"}[_stor]
-        _p_bw = PCIE_GEN5_GBS if _ic == "gen5" else PCIE_GEN4_GBS
-        _p_lbl = "PCIe Gen5" if _ic == "gen5" else "PCIe Gen4"
-        _eff = min(_s_bw, _p_bw)
-        _t_read = _m_gb / _eff
-        _t_deser = _m_gb / 20.0
-        _t_cuda = 0.8
-        _t_warm = 0.5
-        _t_total = _t_read + _t_deser + _t_cuda + _t_warm
-        _patience = 3.0
+        items.append(mo.hstack([partD_scaleout, partD_stor, partD_warm_pool], widths="equal"))
+        _storage_override = {"default": None, "nfs": 1.25, "ram": 50.0}[partD_stor.value]
+        _storage_label = {
+            "default": "registry/default storage",
+            "nfs": "slow network storage",
+            "ram": "cached in host RAM",
+        }[partD_stor.value]
+        _cold = cold_start_latency(
+            v1_13_serving,
+            precision_bytes=v1_13_serving.precision_bytes,
+            storage_bandwidth_gbs=_storage_override,
+            warm_pool_replicas=partD_warm_pool.value,
+            scale_out_replicas=partD_scaleout.value,
+        )
 
         _fig = go.Figure()
-        _cum = 0
-        for _nm, _dur, _cl in [
-            ("Disk Read", _t_read, COLORS['BlueLine']),
-            ("Deserialization", _t_deser, COLORS['OrangeLine']),
-            ("CUDA Init", _t_cuda, "#64748b"),
-            ("Warmup", _t_warm, COLORS['GreenLine']),
+        _base = 0.0
+        for _name, _duration_ms, _color in [
+            ("Read weights", _cold.read_ms, COLORS["BlueLine"]),
+            ("Deserialize", _cold.deserialize_ms, COLORS["OrangeLine"]),
+            ("Runtime init", _cold.runtime_init_ms, "#64748b"),
+            ("Warmup", _cold.warmup_ms, COLORS["GreenLine"]),
         ]:
-            _fig.add_trace(go.Bar(name=_nm, x=[_dur], y=["Cold Start"], orientation='h',
-                                   marker_color=_cl, opacity=0.88, base=_cum,
-                                   hovertemplate="%{fullData.name}: %{x:.2f} s<extra></extra>"))
-            _cum += _dur
-        _fig.add_vline(x=_patience, line_dash="dash", line_color=COLORS['RedLine'],
-                       annotation_text="User patience (3s)")
-        _fig.update_layout(height=240, barmode="stack",
-                           xaxis=dict(title="Time (seconds)", gridcolor="#f1f5f9"),
-                           legend=dict(orientation="h", y=1.3, x=0),
-                           margin=dict(l=80, r=20, t=50, b=40))
+            _fig.add_trace(go.Bar(
+                name=_name,
+                x=[_duration_ms / 1000],
+                y=["Cold start"],
+                orientation="h",
+                marker_color=_color,
+                base=_base / 1000,
+                hovertemplate="%{fullData.name}: %{x:.2f} s<extra></extra>",
+            ))
+            _base += _duration_ms
+        _fig.add_vline(x=v1_13_serving.slo_ms / 1000, line_dash="dash", line_color=COLORS["RedLine"], annotation_text="p99 SLO")
+        _fig.update_layout(
+            height=260,
+            barmode="stack",
+            xaxis=dict(title="Seconds", gridcolor="#f1f5f9"),
+            legend=dict(orientation="h", y=1.25, x=0),
+            margin=dict(l=90, r=20, t=50, b=40),
+        )
         apply_plotly_theme(_fig)
         items.append(mo.as_html(_fig))
 
-        _t_col = COLORS['RedLine'] if _t_total > _patience else COLORS['GreenLine']
+        _cold_color = COLORS["RedLine"] if _cold.exceeds_slo else COLORS["GreenLine"]
         items.append(mo.Html(f"""
         <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:130px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['BlueLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Model (FP16)</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">{_m_gb:.0f} GB</div></div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:130px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Effective BW</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['OrangeLine']};">{_eff:.1f} GB/s</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">min({_s_lbl}, {_p_lbl})</div></div>
-            <div style="padding:16px; border:2px solid {_t_col}; border-radius:10px;
-                        min-width:130px; text-align:center; background:white;
-                        border-top:3px solid {_t_col}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Cold Start</div>
-                <div style="font-size:1.7rem; font-weight:800; color:{_t_col};">{_t_total:.1f} s</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">{"EXCEEDS PATIENCE" if _t_total > _patience else "OK"}</div></div>
-        </div>"""))
-
-        if _t_total > _patience:
-            items.append(mo.callout(mo.md(
-                f"**Cold start exceeds patience.** {_t_total:.1f}s > 3s. "
-                "Pre-warm instances or cache models."), kind="danger"))
-
-        items.append(mo.md(f"""
-**Cold Start &mdash; Live** (`{_pb}B FP16, {_s_lbl}, {_p_lbl}`)
-
-```
-Disk read    = {_m_gb:.0f} / {_eff:.1f} = {_t_read:.1f} s
-Deserialize  = {_m_gb:.0f} / 20 = {_t_deser:.1f} s
-CUDA init    = {_t_cuda:.1f} s
-Warmup       = {_t_warm:.1f} s
-Total        = {_t_total:.1f} s
-```
-*Source: @sec-model-serving-cold-start*
+            {_metric_card("Model Weights", f"{_cold.model_weight_gb:.3g} GB", f"{v1_13_serving.precision_bytes:g} B/param", COLORS["BlueLine"])}
+            {_metric_card("Effective BW", f"{_cold.effective_bandwidth_gbs:.2f} GB/s", _storage_label, COLORS["OrangeLine"])}
+            {_metric_card("Protected", f"{_cold.protected_fraction*100:.0f}%", "warm-pool coverage", COLORS["GreenLine"])}
+            {_metric_card("Exposed First Request", f"{_cold.exposed_first_request_ms/1000:.2f} s", "service + cold path share", _cold_color, True)}
+        </div>
         """))
 
-        _ref = 130/7.0 + 130/20.0 + 0.8 + 0.5
-        if partD_pred.value == "26s":
+        if _cold.exceeds_slo:
             items.append(mo.callout(mo.md(
-                f"**Correct.** NVMe bottleneck (7 GB/s): ~{130/7:.0f}s read + "
-                f"~{130/20:.0f}s deserialize + 1.3s overhead = ~{_ref:.0f}s total."), kind="success"))
-        elif partD_pred.value == "200ms":
-            items.append(mo.callout(mo.md(
-                "**200 ms is inference latency, not cold start.** 140 GB must "
-                f"load first: ~{_ref:.0f}s."), kind="warn"))
+                f"**Cold-start SLO risk.** Exposed first-request latency is "
+                f"{_cold.exposed_first_request_ms/1000:.2f} s, above the "
+                f"{v1_13_serving.slo_ms:g} ms p99 SLO."
+            ), kind="danger"))
+
+        items.append(mo.md(f"""
+**Cold Start - Live Calculation**
+
+```
+weights       = {_cold.model_weight_gb:.3g} GB
+storage path  = {_storage_label}
+effective BW  = min({_cold.storage_bandwidth_gbs:.2f}, {_cold.interconnect_bandwidth_gbs:.2f}) = {_cold.effective_bandwidth_gbs:.2f} GB/s
+read          = {_cold.read_ms/1000:.2f} s
+deserialize   = {_cold.deserialize_ms/1000:.2f} s
+init + warmup = {(_cold.runtime_init_ms + _cold.warmup_ms)/1000:.2f} s
+cold path     = {_cold.cold_start_ms/1000:.2f} s
+```
+*Source: `mlsysbook_labs.cold_start_latency`.*
+        """))
+
+        if partD_pred.value == "movement":
+            items.append(mo.callout(mo.md("**Correct.** Large cold starts are dominated by moving and preparing model state."), kind="success"))
         else:
             items.append(mo.callout(mo.md(
-                f"**Cold start dominated by data movement.** 140 GB at 7 GB/s "
-                f"= ~{130/7:.0f}s transfer alone. Total: ~{_ref:.0f}s."), kind="warn"))
-
-        items.append(mo.accordion({
-            "Math Peek: Cold Start Latency Decomposition": mo.md("""
-**Formula:**
-$$
-T_{\\text{cold}} = \\frac{M_{\\text{weights}}}{\\text{BW}_{\\text{storage}}} + \\frac{M_{\\text{weights}}}{\\text{BW}_{\\text{deser}}} + T_{\\text{CUDA}} + T_{\\text{warmup}}
-$$
-
-**Variables:**
-- **$M_{\\text{weights}}$**: model size in bytes (e.g., 140 GB for 70B FP16)
-- **$\\text{BW}_{\\text{storage}}$**: storage read bandwidth (NVMe ~7 GB/s, network FS ~1.25 GB/s)
-- **$\\text{BW}_{\\text{deser}}$**: deserialization throughput (~20 GB/s)
-- **$T_{\\text{CUDA}}$**: CUDA context initialization (~0.8s)
-- **$T_{\\text{warmup}}$**: first-inference JIT warmup (~0.5s)
-
-Cold start is dominated by data movement: 140 GB / 7 GB/s = 20s from NVMe alone. Pre-warming and model caching are essential for auto-scaling.
-""")
-        }))
+                "**Cold start is a serving SLO problem.** Runtime and data movement can exceed normal inference latency by orders of magnitude."
+            ), kind="warn"))
         return mo.vstack(items)
 
-    # ═════════════════════════════════════════════════════════════════════════
-    # SYNTHESIS
-    # ═════════════════════════════════════════════════════════════════════════
     def build_synthesis():
         return mo.vstack([
             mo.md("## Key Takeaways"),
             mo.callout(mo.md(
-                "**1. P99 diverges from mean by 4.6x at every utilization level.**\n\n"
-                "At 80% utilization, P99 is 23x service time while mean is 5x. "
-                "Monitor P99, not mean."
+                f"**1. Tail latency is the serving metric for {v1_13_serving.label}.** "
+                "Mean latency is not enough evidence for an interactive, safety, wearable, or SLA-bound system."
             ), kind="info"),
             mo.callout(mo.md(
-                "**2. Batching taxes latency before inference starts.**\n\n"
-                "Formation delay = (B-1)/(2*lambda). At B=32, 500 QPS: 31 ms = "
-                "62% of a 50 ms SLO. Find the Pareto knee."
+                "**2. Batching is a policy, not a free win.** Formation delay, queueing, and SLO budget decide whether it helps."
             ), kind="info"),
             mo.callout(mo.md(
-                "**3. KV cache, not compute, limits LLM concurrency.**\n\n"
-                "At 128K context, 70B needs ~320 GB KV per request. On 8xH100, "
-                "max concurrency = 1."
+                f"**3. Live state and cold starts are source-of-truth calculations.** "
+                f"This lab uses MLSysIM refs plus `mlsysbook_labs.serving` for {v1_13_serving.state_kind}, memory, and scale-out evidence."
             ), kind="info"),
             mo.Html(f"""
             <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
@@ -958,9 +1020,9 @@ Cold start is dominated by data movement: 140 GB / 7 GB/s = 20s from NVMe alone.
                         What's Next
                     </div>
                     <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Lab 14: ML Operations</strong> -- Your model shipped. Lab 14
-                        reveals why it silently loses 3 accuracy points by Friday and 7 by
-                        month six -- while your dashboard stays green the entire time.
+                        <strong>Lab 14: ML Operations</strong> - your model shipped. Now
+                        the challenge is detecting drift, regressions, and operational failure
+                        before dashboards create false confidence.
                     </div>
                 </div>
                 <div style="flex: 1; min-width: 280px; background: white;
@@ -968,78 +1030,244 @@ Cold start is dominated by data movement: 140 GB / 7 GB/s = 20s from NVMe alone.
                             padding: 20px 24px;">
                     <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
                                 text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                        Textbook &amp; TinyTorch
+                        Report Focus
                     </div>
                     <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Read:</strong> the Model Serving chapter for queuing theory,
-                        KV cache management, and cold start mitigation.<br/>
-                        <strong>Build:</strong> TinyTorch Module 13 -- implement a basic
-                        model server with batching and latency tracking.
+                        Your report should name the selected track, p99 SLO, batching policy,
+                        memory-bound concurrency, warm-pool coverage, and residual risk.
                     </div>
                 </div>
             </div>
             """),
         ])
 
-    tabs = mo.ui.tabs({
-        "Part A \u2014 Tail Latency Explosion": build_part_a(),
-        "Part B \u2014 The Batching Tax":        build_part_b(),
-        "Part C \u2014 The LLM Memory Wall":     build_part_c(),
-        "Part D \u2014 The Cold Start Tax":       build_part_d(),
-        "Synthesis":                              build_synthesis(),
+    _tabs = mo.ui.tabs({
+        "Part A: Queueing Explosion": build_part_a(),
+        "Part B: Batching Tax": build_part_b(),
+        "Part C: State/Cache Wall": build_part_c(),
+        "Part D: Cold Start": build_part_d(),
+        "Synthesis": build_synthesis(),
     })
-    tabs
+    _tabs
     return
+
 
 # ===========================================================================
 # ZONE D: LEDGER HUD
 # ===========================================================================
 
+
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo, partA_pred, partB_pred, partC_pred, partD_pred):
-    _ch = ledger._state.history.get(13, {})
-    _track = ledger.get_track()
+def _(
+    COLORS,
+    ledger,
+    mo,
+    partA_pred,
+    partB_pred,
+    partC_pred,
+    partD_pred,
+    v1_13_profile,
+    v1_13_serving,
+    v1_13_variant,
+):
     if partA_pred.value is not None and partB_pred.value is not None and partC_pred.value is not None and partD_pred.value is not None:
         ledger.save(chapter=13, design={
             "chapter": "v1_13",
+            "track_id": v1_13_profile.track_id,
+            "scenario_id": v1_13_variant.scenario_id,
+            "hardware_ref": v1_13_serving.hardware_ref,
+            "model_ref": v1_13_serving.model_ref,
             "completed": True,
             "p99_latency_prediction": partA_pred.value,
             "batching_tax_prediction": partB_pred.value,
-            "kv_cache_max_batch": partC_pred.value,
+            "state_cache_prediction": partC_pred.value,
             "cold_start_prediction": partD_pred.value,
         })
 
     mo.Html(f"""
     <div class="lab-hud">
-        <span class="hud-label">LAB</span><span class="hud-value">13 &mdash; Model Serving</span>
+        <span class="hud-label">LAB</span>
+        <span class="hud-value">13 &middot; Model Serving</span>
         <span class="hud-label">TRACK</span>
-        <span class="{'hud-active' if _track != 'NONE' else 'hud-none'}">{_track}</span>
-        <span class="hud-label">STATUS</span><span class="hud-active">ACTIVE</span>
-    </div>""")
+        <span class="hud-value">{v1_13_profile.label}</span>
+        <span style="flex:1;"></span>
+        <span class="hud-label">SLO</span>
+        <span class="hud-value">{v1_13_serving.slo_ms:g} ms p99</span>
+        <span class="hud-label">STATUS</span>
+        <span class="hud-active">ACTIVE</span>
+    </div>
+    """)
     return
 
 
-# ─── TRACK-AWARE MIGRATION SHELL ────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(ledger, mo):
-    from mlsysbook_labs import (
-        ACADEMIC_LAB_CSS,
-        get_lab_metadata,
-        get_lab_track_variant,
-        get_track_profile,
-        legacy_migration_panel,
+def _(
+    batching_tax,
+    build_lab_report,
+    cache_capacity,
+    cold_start_latency,
+    mo,
+    partA_pred,
+    partA_rho,
+    partA_slo,
+    partA_svc,
+    partB_arr,
+    partB_batch,
+    partB_pred,
+    partB_slo,
+    partC_ctx,
+    partC_gpus,
+    partC_prec,
+    partC_pred,
+    partD_pred,
+    partD_scaleout,
+    partD_stor,
+    partD_warm_pool,
+    queueing_latency,
+    report_export_panel,
+    v1_13_metadata,
+    v1_13_model,
+    v1_13_profile,
+    v1_13_serving,
+    v1_13_variant,
+):
+    _arrival = partA_rho.value * v1_13_serving.replicas * (1000 / partA_svc.value)
+    _queue = queueing_latency(
+        arrival_qps=_arrival,
+        service_ms=partA_svc.value,
+        replicas=v1_13_serving.replicas,
+        service_cv=v1_13_serving.service_cv,
+        slo_ms=partA_slo.value,
+    )
+    _batching = batching_tax(
+        batch_size=partB_batch.value,
+        arrival_qps=partB_arr.value,
+        service_ms=v1_13_serving.service_ms,
+        slo_ms=partB_slo.value,
+        efficiency_gain=v1_13_serving.batch_efficiency_gain,
+        replicas=v1_13_serving.replicas,
+        service_cv=v1_13_serving.service_cv,
+    )
+    _capacity = cache_capacity(
+        v1_13_serving,
+        v1_13_model,
+        context_tokens=partC_ctx.value,
+        precision_bytes=partC_prec.value,
+        devices_per_replica=partC_gpus.value,
+        kv_precision_bytes=v1_13_serving.kv_precision_bytes,
+    )
+    _storage_override = {"default": None, "nfs": 1.25, "ram": 50.0}[partD_stor.value]
+    _cold = cold_start_latency(
+        v1_13_serving,
+        precision_bytes=v1_13_serving.precision_bytes,
+        storage_bandwidth_gbs=_storage_override,
+        warm_pool_replicas=partD_warm_pool.value,
+        scale_out_replicas=partD_scaleout.value,
     )
 
-    _metadata = get_lab_metadata("vol1/lab_13_model_serving.py")
-    _saved_track = ledger.get_track()
-    _track_id = _saved_track if _saved_track and _saved_track != "NONE" else "iphone"
-    _profile = get_track_profile(_track_id)
-    _variant = get_lab_track_variant(_metadata.lab_id, _profile.track_id)
+    _incomplete = []
+    if partA_pred.value is None:
+        _incomplete.append("Part A queueing prediction")
+    if partB_pred.value is None:
+        _incomplete.append("Part B batching prediction")
+    if partC_pred.value is None:
+        _incomplete.append("Part C state/cache prediction")
+    if partD_pred.value is None:
+        _incomplete.append("Part D cold-start prediction")
+
+    _report = build_lab_report(
+        v1_13_metadata,
+        track=v1_13_profile.label,
+        scenario=v1_13_variant.workload_summary,
+        learning_objectives=(
+            "Quantify how utilization and service variability amplify p99 latency.",
+            "Evaluate batching as a throughput/latency trade-off rather than a free win.",
+            "Compute live state/cache capacity and cold-start exposure for the selected track.",
+        ),
+        predictions={
+            "queueing_tail_latency": partA_pred.value,
+            "batching_tax": partB_pred.value,
+            "state_cache_wall": partC_pred.value,
+            "cold_start_tax": partD_pred.value,
+        },
+        knob_settings={
+            "rho": partA_rho.value,
+            "service_ms": partA_svc.value,
+            "partA_slo_ms": partA_slo.value,
+            "batch_size": partB_batch.value,
+            "batch_arrival_qps": partB_arr.value,
+            "batch_slo_ms": partB_slo.value,
+            "context_tokens": partC_ctx.value,
+            "precision_bytes": partC_prec.value,
+            "devices_per_serving_unit": partC_gpus.value,
+            "storage_mode": partD_stor.value,
+            "warm_pool_replicas": partD_warm_pool.value,
+            "scale_out_replicas": partD_scaleout.value,
+        },
+        evidence_summary={
+            "hardware_ref": v1_13_serving.hardware_ref,
+            "model_ref": v1_13_serving.model_ref,
+            "arrival_qps": round(_arrival, 3),
+            "queue_p99_ms": round(_queue.p99_latency_ms, 3),
+            "queue_slo_ok": _queue.slo_ok,
+            "batch_total_p99_ms": round(_batching.total_p99_ms, 3),
+            "formation_delay_ms": round(_batching.formation_delay_ms, 3),
+            "state_kind": _capacity.state_kind,
+            "state_per_request_gb": round(_capacity.state_per_request_gb, 6),
+            "max_live_requests": _capacity.max_concurrent,
+            "cold_start_ms": round(_cold.cold_start_ms, 3),
+            "exposed_first_request_ms": round(_cold.exposed_first_request_ms, 3),
+        },
+        final_decision=(
+            f"Use the {v1_13_variant.assumptions.get('serving_policy', 'selected serving policy')} "
+            f"only if p99, batching delay, {_capacity.state_kind}, and warm-pool evidence "
+            f"protect {v1_13_variant.guardrail_metric}."
+        ),
+        big_takeaways=(
+            "Average latency is not a serving SLO.",
+            "Batching improves throughput only after paying a formation-delay tax.",
+            "Weights, live state/cache, and cold starts must be included in capacity plans.",
+        ),
+        reflections={
+            "track_policy": v1_13_serving.serving_policy,
+            "validation_tests": v1_13_serving.validation_tests,
+            "residual_question": "Which production traces or hardware counters would you collect before launch?",
+        },
+        residual_risk=(
+            "The helper models are teaching estimates. Production deployment still needs real arrival traces, "
+            "service-time histograms, p99/p999 replay, hardware counters, memory telemetry, and warm-pool drills."
+        ),
+        source_trace={
+            "track_id": v1_13_profile.track_id,
+            "scenario_id": v1_13_variant.scenario_id,
+            "hardware_ref": v1_13_variant.hardware_ref,
+            "model_ref": v1_13_variant.model_ref,
+            "shared_helper": "mlsysbook_labs.serving",
+            "source_policy": v1_13_profile.source_policy,
+        },
+        result_snapshot={
+            "serving_profile": v1_13_serving,
+            "queueing": _queue,
+            "batching": _batching,
+            "capacity": _capacity,
+            "cold_start": _cold,
+        },
+        incomplete_fields=tuple(_incomplete),
+    )
+
     mo.vstack([
-        ACADEMIC_LAB_CSS,
-        legacy_migration_panel(_metadata, _profile, _variant),
+        mo.md("## Download Report"),
+        mo.callout(
+            mo.md(
+                "This V1-13 report is generated locally from the selected track, MLSysIM hardware/model refs, "
+                "and shared `mlsysbook_labs.serving` calculations."
+            ),
+            kind="info",
+        ),
+        report_export_panel(_report),
     ])
     return
+
 
 if __name__ == "__main__":
     app.run()

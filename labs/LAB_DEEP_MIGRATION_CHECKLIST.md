@@ -81,7 +81,7 @@ For each lab:
 - [x] 2. V1-11 Hardware Roofline: pressure-tests hardware registry and roofline plots.
 - [x] 3. V2-10 Inference Economy: connects latency, cost, batching, and deployment target.
 - [x] 4. V1-12 Benchmarking Trap: standardizes benchmark plots and report evidence.
-- [ ] 5. V1-13 Tail Latency Trap: extends serving and SLA evidence.
+- [x] 5. V1-13 Tail Latency Trap: extends serving and SLA evidence.
 - [ ] 6. V1-14 Silent Degradation: adds monitoring and drift evidence.
 - [ ] 7. V2-06 Collective Communication: upgrade existing rich wrapper to canonical tracks.
 - [ ] 8. Finish remaining Volume I labs by dependency order.
@@ -333,16 +333,16 @@ Current status:
 - [x] Baseline track/report panel installed.
 
 Deep migration tasks:
-- [ ] Tie serving choices to track-specific SLA and request pattern.
-- [ ] Add shared latency distribution helper if current logic is notebook-local.
-- [ ] Track examples:
+- [x] Tie serving choices to track-specific SLA and request pattern.
+- [x] Add shared latency distribution helper if current logic is notebook-local.
+- [x] Track examples:
   - iPhone: interactive on-device response.
   - Oura Ring: periodic background inference.
   - RoboTaxi: hard real-time perception budget.
   - Cloud Fleet: p95/p99 service SLO.
-- [ ] Display tail latency distributions and mitigation options by track.
-- [ ] Update report with SLA, tail driver, mitigation, and residual risk.
-- [ ] Add tests for latency helper/report fields.
+- [x] Display tail latency distributions and mitigation options by track.
+- [x] Update report with SLA, tail driver, mitigation, and residual risk.
+- [x] Add tests for latency helper/report fields.
 
 ### V1-14 - Silent Degradation
 

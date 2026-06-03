@@ -1074,3 +1074,54 @@ Tests or checks run:
 - `python3 -m py_compile labs/vol1/lab_12_perf_bench.py`
 - `python3 -m pytest labs/tests/test_benchmarking_helpers.py labs/tests/test_lab_variants.py -q`
 - `python3 -m pytest labs/tests/test_engine.py -k "vol1/lab_12 or lab_12_perf" -q`
+
+### 2026-06-03 - V1-13 Tail Latency Trap Deep Track Migration
+
+Lab:
+- `labs/vol1/lab_13_model_serving.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/serving.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_serving_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/vol1/lab_13_model_serving.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.serving`, a shared helper layer for queueing p50/p95/p99/p999, static batching formation delay, state/cache capacity, and cold-start exposure.
+- Added hand-authored V1-13 variants with track-specific arrival rates, service times, replicas, SLOs, service variability, batching policy, state/cache assumptions, cold-start settings, serving policy, and validation tests.
+- Replaced the old cloud-only notebook constants with a track selector, track context, source trace, selected-track widget defaults, helper-backed plots, ledger metadata, and local report export.
+- Converted Part A-D into track-aware narratives: queueing explosion, batching tax, state/cache wall, and cold-start scale-out.
+- Rebuilt the browser helper wheel and extended the wheel contract to include `mlsysbook_labs/serving.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required. The lab resolves:
+  - `Hardware.Mobile.iPhone15Pro` + `Models.Vision.MobileNetV2`
+  - `Hardware.Tiny.OuraRing` + `Models.Tiny.DS_CNN`
+  - `Hardware.Edge.RoboTaxi` + `Models.Vision.YOLOv8_Nano`
+  - `Hardware.Cloud.H100` + `Models.Language.Llama2_70B`
+- Scenario-specific request patterns, SLOs, batching defaults, state/cache teaching assumptions, and warm-pool policy live in typed V1-13 variants.
+
+Notebook-local constants removed:
+- H100/A100/Jetson hardware constants, ResNet/Llama constants, PCIe/NVMe/network storage constants, and notebook-local KV/cache formulas were removed from V1-13.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.serving` is now reusable by V2-09 performance engineering, V2-10 inference economy, V2-12 operations at scale, and any future lab that needs source-traced serving/SLA evidence.
+
+Plan updates needed in other labs:
+- V1-14 should reuse the report and source-trace structure when adding drift/degradation evidence.
+- V2-06 and V2-12 can reuse the queueing helper for collective/fleet overload narratives when p99 or backpressure is a teaching target.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_13_model_serving.py labs/mlsysbook_labs/serving.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "lab_13_model_serving" -q`
+- `python3 -m pytest labs/tests/test_serving_helpers.py labs/tests/test_lab_variants.py labs/tests/test_static.py -q`
+- `git diff --check`

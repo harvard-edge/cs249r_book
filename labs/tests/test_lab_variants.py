@@ -132,3 +132,25 @@ def test_v1_12_variants_define_benchmarking_defaults():
         assert "tail_slo_ms" in variant.defaults
         assert "validation_tests" in variant.defaults
         assert variant.assumptions["report_artifact"] == "benchmark protocol memo"
+
+
+def test_v1_13_variants_define_serving_defaults():
+    for variant in list_lab_variants("v1_13_tail_latency_trap"):
+        assert "arrival_qps" in variant.defaults
+        assert "service_ms" in variant.defaults
+        assert "replicas" in variant.defaults
+        assert "slo_ms" in variant.defaults
+        assert "service_cv" in variant.defaults
+        assert "batch_size" in variant.defaults
+        assert "batch_efficiency_gain" in variant.defaults
+        assert "context_tokens" in variant.defaults
+        assert "state_kind" in variant.defaults
+        assert "precision_bytes" in variant.defaults
+        assert "devices_per_replica" in variant.defaults
+        assert "deserialize_gbs" in variant.defaults
+        assert "runtime_init_ms" in variant.defaults
+        assert "warmup_ms" in variant.defaults
+        assert "warm_pool_replicas" in variant.defaults
+        assert "scale_out_replicas" in variant.defaults
+        assert "validation_tests" in variant.defaults
+        assert variant.assumptions["report_artifact"] == "serving SLA plan"
