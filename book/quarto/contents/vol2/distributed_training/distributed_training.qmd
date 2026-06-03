@@ -931,7 +931,7 @@ where $T_N$ is the training time on $N$ devices. An efficiency of 1.0 means perf
 
 ::: {#dfn-distributed-training-scaling-efficiency .callout-definition title="Scaling efficiency"}
 
-***Scaling Efficiency $(\eta_{\text{scaling}})$***\index{Scaling Efficiency!definition} is the ratio of actual throughput to ideal linear throughput when increasing the number of compute devices ($N$).
+***Scaling Efficiency $(\eta_{\text{scaling}})$***\index{Scaling Efficiency!definition} is the ratio of actual training throughput to ideal linear throughput when increasing the number of ML compute devices ($N$).
 
 1.  **Significance (quantitative)**: It is the most important metric for cluster productivity ($\eta_{\text{scaling}} = \frac{T_1}{N \times T_N}$). A scaling efficiency of 0.50 means that a 10,000-GPU cluster is delivering only the same useful work as a 5,000-GPU cluster, wasting 50 percent of the hardware investment.
 2.  **Distinction (durable)**: Unlike single-node efficiency (which captures local bottlenecks like $\text{BW}$), scaling efficiency captures the cluster-level overhead of communication time $(T_{\text{comm}}(N))$ and synchronization.
@@ -1415,7 +1415,7 @@ A fundamental property of distributed training is that adding more workers stops
 
 ::: {#dfn-distributed-training-critical-batch-size .callout-definition title="Critical batch size"}
 
-***Critical Batch Size***\index{Critical Batch Size!definition} $(B^{*})$ is the batch size at which the Gradient Noise Scale equals the Gradient Signal Scale.
+***Critical Batch Size***\index{Critical Batch Size!definition} $(B^{*})$ is the distributed-training batch size at which the Gradient Noise Scale equals the Gradient Signal Scale.
 
 1.  **Significance (quantitative)**: It marks the transition point for parallel scaling efficiency. Below $B^{*}$, increasing the batch size linearly improves the convergence per step. Above $B^{*}$, larger batches yield diminishing returns, requiring proportionally more samples $(D)$ to reach the same loss.
 2.  **Distinction (durable)**: Unlike the memory-limited batch size (determined by memory capacity and activation footprint), the critical batch size is an algorithmic property of the model and dataset.
@@ -1665,6 +1665,16 @@ The choice among these methods depends on the specific bottleneck. When network 
 
 When a model is so massive that even a single layer's weights exceed the memory capacity of a GPU, data parallelism entirely collapses. This is the memory capacity gap (Principle \ref{pri-memory-capacity-gap}) in operational form: model parameter growth outpaces device memory growth, forcing the model itself to be partitioned. The memory optimization techniques examined in the previous section extend data parallelism's reach, but eventually, we must partition the model itself.
 
+::: {#dfn-distributed-training-model-parallelism .callout-definition title="Model parallelism"}
+
+***Model Parallelism***\index{Model Parallelism!definition} is a distributed training strategy that partitions a single neural network's parameters or operations across multiple devices so each device computes a distinct portion of the model.
+
+1.  **Significance (quantitative)**: If a model with parameter state $S_{\text{model}}$ is split across $P$ devices, the ideal per-device parameter footprint falls toward $S_{\text{model}}/P$, enabling training of models that exceed single-device memory. The cost is extra communication for activations and gradients plus idle time from sequential dependencies, so the memory gain must exceed the transfer and pipeline-bubble overhead introduced by the partition.
+2.  **Distinction (durable)**: Unlike data parallelism, which replicates the full model on every worker and shards the minibatch, model parallelism shards the model itself. Pipeline parallelism and tensor parallelism are implementation forms of model parallelism: one partitions layers into stages, while the other partitions individual tensor operations.
+3.  **Common pitfall**: A frequent misconception is that model parallelism automatically speeds up training. Its primary benefit is capacity, not throughput; without careful scheduling and overlap, downstream devices wait for upstream activations and utilization can fall below a single-device baseline.
+
+:::
+
 ```{python}
 #| echo: false
 from mlsysim.solvers import DistributedModel
@@ -1845,7 +1855,9 @@ Verify your understanding of model sharding:
 
 ### Model parallelism implementation {#sec-distributed-training-systems-systems-model-parallelism-implementation-0728}
 
-Once the model itself is the object being partitioned, the implementation problem is placement: every cut must save enough memory to justify the activation transfer and idle time it introduces. Model parallelism\index{Model Parallelism!definition} divides the neural network across multiple computing devices, with each device computing a distinct portion of the model's operations. @Fig-dist-model-parallelism captures this bidirectional data flow: input data propagates forward through sequentially assigned model partitions while gradients flow backward to update parameters, with intermediate results transferring across device boundaries at each stage.
+Once the model itself is the object being partitioned, the implementation problem is placement: every cut must save enough memory to justify the activation transfer and idle time it introduces.
+
+@Fig-dist-model-parallelism captures this bidirectional data flow: input data propagates forward through sequentially assigned model partitions while gradients flow backward to update parameters, with intermediate results transferring across device boundaries at each stage.
 
 ::: {#fig-dist-model-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Model Parallelism Data Flow**: Sequential distribution of model partitions across three devices: input data flows forward through each partition in order (top path), while gradients propagate backward during the update phase (bottom path). Each device handles a distinct portion of the model, with intermediate activations and gradients transferring at partition boundaries. This approach enables training of models exceeding single-device memory at the cost of sequential dependencies that reduce hardware utilization." fig-alt="Linear flow diagram showing model parallelism: Input Data flows through Model Parts 1-3 on Devices 1-3 to Predictions via forward pass arrows above, with gradient update arrows returning below."}
 
