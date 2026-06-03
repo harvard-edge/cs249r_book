@@ -4592,30 +4592,27 @@ The Lottery Ticket results reveal the shape of compression trade-offs: aggressiv
 
 #### Large language model benchmarks {#sec-benchmarking-large-language-model-benchmarks-4ec7}
 
-The compression evaluation framework applies well to models with well-defined accuracy metrics: classification accuracy, detection mAP, segmentation IoU. Large language models present unique benchmarking challenges because their outputs resist such clean quantification. Unlike classification tasks where ground truth is well-defined, language model evaluation must assess open-ended generation quality, factual accuracy, reasoning capability, and safety—dimensions that resist simple quantification.
+The compression evaluation framework applies cleanly when the task has a stable label: classification accuracy, detection mAP, segmentation IoU. Large language models break that pattern. A team can choose a model because it scores well on a public benchmark, then discover in deployment that the model recognizes multiple-choice facts but cannot generate a grounded answer, responds too slowly for an interactive product, or produces confident unsafe text that the benchmark never stressed. LLM benchmarking therefore starts from a deployment question: which failure is this score supposed to rule out?
 
 \index{MMLU!multitask language understanding}
-Knowledge benchmarks like MMLU (Massive Multitask Language Understanding)[^fn-mmlu] evaluate factual knowledge across fifty-seven subjects. Scores range from 25 percent (random guessing) to 90 percent+ for frontier models; human experts average 89.8 percent. However, MMLU's multiple-choice format tests recognition rather than generation, potentially overestimating real-world capability since a model might select the correct answer from options while being unable to produce it unprompted.
+Knowledge benchmarks such as MMLU (Massive Multitask Language Understanding)[^fn-mmlu] answer the first part of that question: does the model possess broad factual and disciplinary knowledge? MMLU evaluates fifty-seven subjects, with scores ranging from 25 percent random guessing to over 90 percent for frontier models; human experts average 89.8 percent. That makes MMLU useful for capability screening, but its multiple-choice format tests recognition rather than generation. A model can choose the right answer from four options while still failing to produce the answer unprompted in a product workflow.
 
 [^fn-mmlu]: **MMLU (Massive Multitask Language Understanding)**: Introduced by @hendrycks2021mmlu with 15,908 multiple-choice questions across fifty-seven subjects. MMLU's benchmarking limitation is its format: multiple-choice recognition is fundamentally easier than open-ended generation, so models scoring 80 percent+ on MMLU may perform substantially worse on equivalent free-form questions, creating a gap between benchmark scores and production capability. \index{MMLU!format limitation}
 
-Holistic benchmarks like HELM (Holistic Evaluation of Language Models)[^fn-helm] address single-metric limitations by evaluating across seven dimensions: accuracy, calibration, robustness, fairness, bias, toxicity, and efficiency. This reveals trade-offs invisible to accuracy-only evaluation; a model achieving high accuracy may exhibit poor calibration or elevated toxicity. The same multi-dimensional principle from classification (accuracy alone is insufficient) applies with greater force to generative models.
+The next failure is that one score hides trade-offs. Holistic benchmarks such as HELM (Holistic Evaluation of Language Models)[^fn-helm] evaluate accuracy alongside calibration, robustness, fairness, bias, toxicity, and efficiency. This matters because a production assistant can be factually strong and still be poorly calibrated, brittle to prompt phrasing, expensive to serve, or unsafe under adversarial use. The same principle from postcompression validation applies with greater force here: average accuracy is not enough once the output becomes open-ended text.
 
 [^fn-helm]: **HELM (Holistic Evaluation of Language Models)**: Stanford's 2022 evaluation framework testing thirty-plus models across seven dimensions (accuracy, calibration, robustness, fairness, bias, toxicity, efficiency). HELM's contribution is methodological: by evaluating models that score similarly on accuracy but diverge on calibration or toxicity, it demonstrates that single-metric leaderboards systematically hide failure modes that matter for production deployment. \index{HELM!multi-dimensional evaluation}
 
-Generation-specific metrics belong in the benchmark only when they expose a deployment failure that accuracy cannot see:
-
 \index{Perplexity!language model prediction measure}
-
-- **Perplexity**[^fn-perplexity] measures how well a model predicts held-out text (lower is better). A perplexity of 10 means the model is "10-way confused" on average. Useful for comparing models on the same corpus, but does not directly measure generation quality.
+Perplexity[^fn-perplexity] answers a narrower question: how well does the model predict held-out text from the same corpus? A perplexity of 10 means the model is "10-way confused" on average. That signal is useful during model development and for comparisons on the same corpus, but it does not by itself establish whether generated answers are helpful, safe, or grounded. Treating perplexity as a user-quality metric repeats the same mistake as treating top-line accuracy as a deployment guarantee.
 
 \index{Perplexity!etymology}
 
 [^fn-perplexity]: **Perplexity**: From Latin *perplexus* (entangled); in information theory, $2^{H(p)}$ where $H$ is entropy. A perplexity of 10 means the model is "10-way confused" on average. The systems consequence: perplexity correlates with KV cache memory pressure because high-perplexity (uncertain) models assign probability mass across more tokens, requiring the serving system to track more candidates during beam search or nucleus sampling. Lower perplexity enables more aggressive memory optimization. \index{Perplexity!KV cache implication}
 
 \index{Latency!first-token, LLM responsiveness}
+Serving metrics expose a different class of failure: the model may be good enough but too slow or too costly for the product. First-token latency measures how long the user waits before generation begins, and it is dominated by prompt processing. Inter-token latency and token throughput measure the decode path after generation starts. Batching can improve throughput while increasing first-token latency, so a benchmark that reports only one number can hide the trade-off that determines whether an interactive application feels responsive.
 
-- **First-token latency** (time to first generated token) dominates user-perceived responsiveness for interactive applications. This metric is dominated by prompt processing, proportional to input length.
 ```{python}
 #| echo: false
 #| label: llm-throughput-calc
@@ -4630,8 +4627,8 @@ Generation-specific metrics belong in the benchmark only when they expose a depl
 # │ How: Calculate response duration for a 750-token payload across token rates.
 # │
 # │ Imports: mlsysim.book (fmt)
-# │ Exports: slow_s_str, fast_s_str, response_tokens_str, slow_toks_str,
-# │          fast_tokens_per_s_str
+# │ Exports: slow_s_str, fast_s_str, response_tokens_str,
+# │          slow_tokens_per_s_str, fast_tokens_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check, fmt_rate
 
@@ -4639,24 +4636,23 @@ class LLMThroughputCalc:
     """25 vs 100 tok/s on a 750-token response: 30 s vs 7.5 s—a 4× user-perceived difference."""
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     response_tokens = 750                                                       # ~500 words
-    slow_toks = 25
-    fast_toks = 100
+    slow_tokens_per_s = 25
+    fast_tokens_per_s = 100
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    slow_sec = response_tokens/slow_toks
-    fast_sec = response_tokens/fast_toks
+    slow_sec = response_tokens/slow_tokens_per_s
+    fast_sec = response_tokens/fast_tokens_per_s
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     slow_s_str = fmt_time(slow_sec, "second", precision=0, commas=False, style="word")
     fast_s_str = fmt_time(fast_sec, "second", precision=1, commas=False, style="word")
     response_tokens_str = fmt_count(response_tokens, commas=False, label="token")
-    slow_toks_str = fmt(slow_toks, precision=0, commas=False)
-    fast_tokens_per_s_str = fmt_rate(fast_toks, 'tokens/s', precision=0, commas=False)
+    slow_tokens_per_s_str = fmt_rate(slow_tokens_per_s, 'tokens/s', precision=0, commas=False)
+    fast_tokens_per_s_str = fmt_rate(fast_tokens_per_s, 'tokens/s', precision=0, commas=False)
 ```
 
-- **tokens/s**\index{Token Throughput!generation rate} measures generation throughput. Modern LLMs achieve 20–100 tokens/s depending on model size and hardware. For a response of ~`{python} LLMThroughputCalc.response_tokens_str`, `{python} LLMThroughputCalc.slow_toks_str` vs. `{python} LLMThroughputCalc.fast_tokens_per_s_str` means `{python} LLMThroughputCalc.slow_s_str` vs. `{python} LLMThroughputCalc.fast_s_str`.
-- **Time-to-first-token vs. inter-token latency**\index{Inter-Token Latency!throughput trade-off} jointly capture different bottlenecks requiring different optimizations. Batching improves throughput but typically increases first-token latency, a trade-off invisible if only one metric is measured.
+Token throughput\index{Token Throughput!generation rate} turns that trade-off into wall-clock time. For a response of about `{python} LLMThroughputCalc.response_tokens_str`, `{python} LLMThroughputCalc.slow_tokens_per_s_str` means `{python} LLMThroughputCalc.slow_s_str` of generation, while `{python} LLMThroughputCalc.fast_tokens_per_s_str` means `{python} LLMThroughputCalc.fast_s_str`. Time-to-first-token and inter-token latency\index{Inter-Token Latency!throughput trade-off} must therefore be reported together: one captures responsiveness at the start of the exchange, and the other captures the rate at which the answer arrives.
 
 \index{Benchmark Contamination!LLM memorization risk}
-Benchmark contamination is a unique LLM failure mode. Models trained on web-scale corpora may encounter benchmark questions during pretraining, inflating scores through memorization rather than capability [@xu2024benchmarking]. Leakage detection reframes this risk as something benchmark designers can test for rather than merely suspect. Mitigation strategies include temporal holdouts (benchmarks from content published after training cutoff), dynamic benchmarks (continuously generated evaluation instances), and contamination detection (testing whether models recall exact benchmark phrasing).
+The final failure is that a score may measure memory rather than capability. Benchmark contamination is a unique LLM risk because models trained on web-scale corpora may encounter benchmark questions during pretraining, inflating scores through memorization rather than skill [@xu2024benchmarking]. Leakage detection reframes this risk as something benchmark designers can test for rather than merely suspect. Temporal holdouts use content published after the training cutoff, dynamic benchmarks generate fresh instances continuously, and contamination tests ask whether the model recalls exact benchmark phrasing. These techniques keep the benchmark aligned with the deployment question instead of rewarding exposure to the test set.
 
 ### Data benchmarking {#sec-benchmarking-data-benchmarking-22f9}
 
