@@ -161,7 +161,11 @@ The programming model distinction between GPUs and TPUs has practical implicatio
 
 ::: {#exmp-compute-infrastructure-tpu-origin-story .callout-example title="The TPU origin story"}
 
-In 2013, Google engineers projected that if users spoke to their Android phones for just three minutes per day using voice search, the company would need to double its data center compute capacity to handle the inference load. The cost was prohibitive. When they profiled their production workloads, a striking pattern emerged: over 90 percent of inference cycles were spent on matrix multiplications in neural network models. The existing GPU fleet was powerful but expensive, and its general-purpose SIMT architecture carried the generality tax for capabilities that inference workloads never used. This observation led directly to the TPU v1, a purpose-built inference accelerator with a $256{\times}256$ systolic array that could deliver 92 TOPS (INT8) within a 75 W power envelope. The first TPUs were deployed in 2015 and served production inference workloads including RankBrain, portions of Google Neural Machine Translation, and AlphaGo match play [@silver2017; @jouppi2017].
+**Context**: In 2013, Google engineers projected that if users spoke to their Android phones for just three minutes per day using voice search, the company would need to double its data center compute capacity to handle the inference load. The cost was prohibitive.
+
+**System**: Profiling showed that over 90 percent of inference cycles were spent on matrix multiplications in neural network models. This observation led directly to the TPU v1, a purpose-built inference accelerator with a $256{\times}256$ systolic array that could deliver 92 TOPS (INT8) within a 75 W power envelope. The first TPUs were deployed in 2015 and served production inference workloads including RankBrain, portions of Google Neural Machine Translation, and AlphaGo match play [@silver2017; @jouppi2017].
+
+**Systems lesson**: Specialization became economically justified because the workload was stable, massive, and dominated by one operation class. The TPU story is a generality-tax case, not merely a faster-chip story.
 
 :::
 
@@ -688,7 +692,7 @@ Despite the `{python} InfraFrontierMemoryTilingRecap.frontier_params_b_str` mode
 
 ::: {#dfn-compute-infrastructure-high-bandwidth-memory-hbm .callout-definition title="High bandwidth memory (HBM)"}
 
-***High Bandwidth Memory (HBM)***\index{High Bandwidth Memory|see{HBM}}\index{HBM!definition} is the 3D-stacked DRAM architecture used by ML accelerators, in which multiple memory dies are vertically bonded and connected to the processor through thousands of Through-Silicon Vias (TSVs) on a shared silicon interposer, eliminating the centimeter-scale PCB traces of conventional DRAM and replacing them with micrometer-scale vertical paths.
+***High Bandwidth Memory (HBM)***\index{HBM!definition}\index{High Bandwidth Memory|see{HBM}} is the 3D-stacked DRAM architecture used by ML accelerators, in which multiple memory dies are vertically bonded and connected to the processor through thousands of Through-Silicon Vias (TSVs) on a shared silicon interposer, eliminating the centimeter-scale PCB traces of conventional DRAM and replacing them with micrometer-scale vertical paths.
 
 1.  **Significance (quantitative)**: HBM3 in the H100 delivers approximately 3.35 TB/s of memory bandwidth—roughly 16$\times$ DDR5's ~200 GB/s—at 2 pJ/bit vs. DDR5's ~20 pJ/bit. This bandwidth sets the $\text{BW}$ ceiling in the iron law: the H100's FP16 ridge point is approximately $989\,\text{TFLOP/s} / 3.35\,\text{TB/s} \approx 295$ FLOP/byte, so any operator with arithmetic intensity below 295 FLOP/byte (for example, attention at 5–20 FLOP/byte) remains memory-bound even with HBM.
 2.  **Distinction (durable)**: Unlike DDR memory, which connects through centimeters of PCB trace (introducing capacitance, attenuation, and high driving current), HBM uses 1,024-bit-wide TSV buses with path lengths measured in micrometers, a 1,000$\times$ reduction in signal distance that enables the wider bus without proportionally higher power.
@@ -1511,11 +1515,11 @@ class RooflineCalloutRecap:
 
 Consider our `{python} InfraFrontierMemoryMxRecap.frontier_params_b_str` model on an H100 with `{python} RooflineInferenceMath.h100_fp16_tflop_per_s_str` peak compute and `{python} RooflineInferenceMath.h100_bw_tb_per_s_str` memory bandwidth. The ridge point is `{python} RooflineCalloutRecap.h100_ridge_str` FLOP/byte.
 
-**Inference (Decode, Batch Size 1)**: Each token loads `{python} RooflineInferenceMath.inf_weight_gb_str` of FP16 weights and performs `{python} RooflineInferenceMath.inf_flops_math` FLOPs. Arithmetic intensity: $I =$ `{python} RooflineInferenceMath.inf_intensity_math` FLOP/byte. Since `{python} RooflineInferenceMath.inf_intensity_str` $\ll$ `{python} RooflineCalloutRecap.h100_ridge_str` (the ridge point), the workload is deeply memory-bound. The achievable throughput is `{python} RooflineInferenceMath.inf_throughput_math` TFLOP/s, which is about `{python} RooflineInferenceMath.inf_peak_pct_str` of the H100's peak `{python} RooflineCalloutRecap.h100_fp16_tflop_per_s_str`. No amount of additional compute will help; only more memory bandwidth improves throughput.
+**Inference (decode, batch size 1)**: Each token loads `{python} RooflineInferenceMath.inf_weight_gb_str` of FP16 weights and performs `{python} RooflineInferenceMath.inf_flops_math` FLOPs. Arithmetic intensity: $I =$ `{python} RooflineInferenceMath.inf_intensity_math` FLOP/byte. Since `{python} RooflineInferenceMath.inf_intensity_str` $\ll$ `{python} RooflineCalloutRecap.h100_ridge_str` (the ridge point), the workload is deeply memory-bound. The achievable throughput is `{python} RooflineInferenceMath.inf_throughput_math` TFLOP/s, which is about `{python} RooflineInferenceMath.inf_peak_pct_str` of the H100's peak `{python} RooflineCalloutRecap.h100_fp16_tflop_per_s_str`. No amount of additional compute will help; only more memory bandwidth improves throughput.
 
 **Training forward pass** (batch size `{python} RooflineInferenceMath.batch_size_str`): The same weight tensor is multiplied by a batch of `{python} RooflineInferenceMath.batch_size_str` activation vectors simultaneously, turning matrix-vector operations into matrix-matrix operations. The FLOPs increase by `{python} RooflineInferenceMath.batch_size_str`$\times$ while the weight loading remains constant: $I =$ `{python} RooflineInferenceMath.train_intensity_math` FLOP/byte. Since `{python} RooflineInferenceMath.train_intensity_str` $\gg$ `{python} RooflineCalloutRecap.h100_ridge_str`, the workload is compute-bound. The achievable throughput is now limited by the peak compute ceiling of `{python} RooflineCalloutRecap.h100_fp16_tflop_per_s_str`, and the memory bandwidth is irrelevant. Adding more TFLOP/s (through a newer GPU generation) directly improves performance.
 
-The contrast explains why organizations sometimes use different hardware for training and inference: *training* benefits from peak FLOP/s, while *inference* benefits from memory bandwidth per dollar.
+**Systems insight**: The contrast explains why organizations sometimes use different hardware for training and inference: *training* benefits from peak FLOP/s, while *inference* benefits from memory bandwidth per dollar.
 
 :::
 
@@ -2025,7 +2029,7 @@ For our `{python} InfraFrontierTdpBenchRecap.frontier_params_b_str` model, no si
 
 When evaluating accelerator options, the following metrics provide a more complete picture than peak TFLOP/s alone:
 
-- **Model FLOPs Utilization (MFU)**: The ratio of achieved FLOP/s during real training to peak hardware FLOP/s. An MFU of 50 percent means the hardware spends half its time on useful computation and half waiting for data, synchronizing, or idling.
+- **Model FLOPs utilization (MFU)**: The ratio of achieved FLOP/s during real training to peak hardware FLOP/s. An MFU of 50 percent means the hardware spends half its time on useful computation and half waiting for data, synchronizing, or idling.
 - **Time-to-Train (TTT)**: The wall-clock time to train a reference model to a target metric. This captures all system-level effects that MFU alone does not, including I/O stalls, checkpointing overhead, and job restart delays.
 - **Cost per Token**\index{Cost Per Token}: For language model training, the total cost (hardware amortization plus electricity) divided by the number of tokens processed. This metric normalizes across different hardware generations, cluster sizes, and pricing models.
 - **Tokens per Second per Dollar**\index{Tokens Per Second Per Dollar}: The inverse of cost per token, useful for comparing the economic efficiency of different systems.
@@ -2317,9 +2321,9 @@ class BandwidthStaircase:
 **Math**:
 Transfer time is $T_{\text{transfer}} = D_{\text{vol}} / \text{BW}$.
 
-1. **HBM (Intra-Chip)**: `{python} BandwidthStaircase.transfer_gb_str` / `{python} BandwidthStaircase.bs_hbm_bw_gb_per_s_str` $\approx$ `{python} BandwidthStaircase.hbm_ms_str`.
-2. **NVLink (Intra-Node)**: `{python} BandwidthStaircase.transfer_gb_str` / `{python} BandwidthStaircase.bs_nvlink_bw_gb_per_s_str` $\approx$ `{python} BandwidthStaircase.nvlink_ms_str`.
-3. **InfiniBand (Inter-Node)**: `{python} BandwidthStaircase.transfer_gb_str` / `{python} BandwidthStaircase.bs_ib_bw_gb_per_s_str` $\approx$ `{python} BandwidthStaircase.ib_ms_str`.
+1. **HBM (intra-chip)**: `{python} BandwidthStaircase.transfer_gb_str` / `{python} BandwidthStaircase.bs_hbm_bw_gb_per_s_str` $\approx$ `{python} BandwidthStaircase.hbm_ms_str`.
+2. **NVLink (intra-node)**: `{python} BandwidthStaircase.transfer_gb_str` / `{python} BandwidthStaircase.bs_nvlink_bw_gb_per_s_str` $\approx$ `{python} BandwidthStaircase.nvlink_ms_str`.
+3. **InfiniBand (inter-node)**: `{python} BandwidthStaircase.transfer_gb_str` / `{python} BandwidthStaircase.bs_ib_bw_gb_per_s_str` $\approx$ `{python} BandwidthStaircase.ib_ms_str`.
 
 **Systems insight**: Moving data across the cluster is `{python} BandwidthStaircase.bs_gap_nv_ib_mult_str` slower than moving it within a node. This "Bandwidth Staircase" is the primary driver of all parallelization strategies: we use tensor parallelism\index{Tensor Parallelism} where bandwidth is abundant (NVLink) and data parallelism\index{Data Parallelism} where it is scarce (InfiniBand). A model that "fits" in memory but ignores the staircase will spend 90 percent of its time waiting for the network.
 
@@ -2497,7 +2501,11 @@ class BandwidthHierarchyPcieExampleRecap:
 ::: {#exmp-compute-infrastructure-nvlink-bandwidth-surprise .callout-example title="The NVLink bandwidth surprise"}
 
 <!-- lego-ok-block: PCIe-vs-NVLink tensor-parallel diagnostic narrative -->
-Early users of multi-GPU nodes often attempted tensor parallelism over PCIe, expecting the `{python} BandwidthHierarchyPcieExampleRecap.pcie_bw_gb_per_s_str` bandwidth to suffice. In practice, tensor parallelism requires AllReduce after *every* Transformer layer, not just *once* per training step. A model with 96 layers generates 96 AllReduce operations per forward pass and another 96 during the backward pass, totaling 192 synchronization events per step. At PCIe bandwidth, each AllReduce for a 12,288-dimensional hidden state takes approximately 4 ms, accumulating to 768 ms of pure communication overhead per step. The compute per step is roughly 200 ms. The accelerators were spending nearly 80 percent of their time waiting for PCIe transfers. Switching to NVLink reduced each AllReduce to 0.2 ms, bringing total communication overhead to 38 ms and restoring accelerator utilization to over 80 percent. The lesson: for tensor parallelism, the interconnect is the bottleneck, and the difference between PCIe and NVLink is not incremental; it is the difference between a functional and a nonfunctional system.
+**Scenario**: Early users of multi-GPU nodes often attempted tensor parallelism over PCIe, expecting the `{python} BandwidthHierarchyPcieExampleRecap.pcie_bw_gb_per_s_str` bandwidth to suffice.
+
+**System**: Tensor parallelism requires AllReduce after *every* Transformer layer, not just *once* per training step. A model with 96 layers generates 96 AllReduce operations per forward pass and another 96 during the backward pass, totaling 192 synchronization events per step. At PCIe bandwidth, each AllReduce for a 12,288-dimensional hidden state takes approximately 4 ms, accumulating to 768 ms of pure communication overhead per step. The compute per step is roughly 200 ms. The accelerators were spending nearly 80 percent of their time waiting for PCIe transfers. Switching to NVLink reduced each AllReduce to 0.2 ms, bringing total communication overhead to 38 ms and restoring accelerator utilization to over 80 percent.
+
+**Systems lesson**: For tensor parallelism, the interconnect is the bottleneck, and the difference between PCIe and NVLink is not incremental; it is the difference between a functional and a nonfunctional system.
 <!-- end lego-ok-block -->
 
 :::
@@ -2972,6 +2980,8 @@ Gradients match the weight size: `{python} InfraFrontierNodeModelRecap.grad_gb_s
 <!-- lego-ok-block: post-mitigation HBM envelope after gradient accumulation/offloading -->
 **Resolution**: Use gradient accumulation\index{Gradient Accumulation} (accumulate over 2--4 microbatches before AllReduce, reducing peak activation memory) and gradient offloading\index{Gradient Offloading} (store inactive gradient shards in DDR5). With these techniques, the per-GPU HBM usage drops to approximately 70--75 GB, fitting within the 80 GB envelope with a small margin for NCCL communication buffers.
 <!-- end lego-ok-block -->
+
+**Systems insight**: Model capacity is not the only memory constraint. Training fits only when weights, gradients, optimizer state, activations, communication buffers, and fragmentation are managed together.
 
 :::
 
@@ -3463,7 +3473,7 @@ We can derive the training time for our `{python} InfraFrontierPodTimeRecap.fron
 3. **Idealized Training Time** (the "physics limit"):
    (`{python} PodTrainingMath.total_flops_math` FLOPs)/(`{python} PodTrainingMath.cluster_throughput_math` FLOP/s) $\div 3600 \approx$ `{python} TrainingTime175B.t_physics_hr_str`
 
-4. **Real-World Multipliers**:
+4. **Real-world multipliers**:
    - Communication overhead (scaling efficiency $\approx 0.85$): $\div 0.85 \rightarrow$ `{python} TrainingTime175B.t_comm_hr_str`
    - Pipeline bubbles ($\approx 5\%$): $\times 1.05 \rightarrow$ `{python} TrainingTime175B.t_bubble_hr_str`
    - Checkpoint overhead ($\approx 3\%$): $\times 1.03 \rightarrow$ `{python} TrainingTime175B.t_ckpt_hr_str`
@@ -3525,7 +3535,7 @@ At this scale, the unit of analysis is no longer a rack or pod of independent se
 
 ::: {#dfn-compute-infrastructure-warehouse-scale-computer-wsc .callout-definition title="Warehouse-scale computer (WSC)"}
 
-***Warehouse-Scale Computer (WSC)***\index{WSC!data center scale}\index{Warehouse-Scale Computer!definition} is a building-scale computing system in which thousands of servers are operated as a single coherent machine (with the network fabric serving as the system bus, distributed storage as the disk subsystem, and a cluster orchestrator as the operating system), enabling training workloads that would be physically impossible on any single machine.
+***Warehouse-Scale Computer (WSC)***\index{Warehouse-Scale Computer!definition}\index{WSC!data center scale} is a building-scale computing system in which thousands of servers are operated as a single coherent machine (with the network fabric serving as the system bus, distributed storage as the disk subsystem, and a cluster orchestrator as the operating system), enabling training workloads that would be physically impossible on any single machine.
 
 1.  **Significance (quantitative)**: A WSC of `{python} WscThroughput.n_gpus_str` H100 GPUs delivers approximately `{python} WscThroughput.wsc_fp16_eflop_per_s_str` ExaFLOP/s FP16 peak (and ~`{python} WscThroughput.wsc_fp8_eflop_per_s_str` EFLOP/s at FP8), enabling frontier model training at scales impossible on a single node. However, the system is only as fast as its bisection bandwidth: non-blocking InfiniBand at 50 GB/s per GPU provides `{python} WscThroughput.wsc_inject_tb_per_s_str` aggregate injection bandwidth; if the fabric is 4:1 oversubscribed, effective bisection bandwidth drops to `{python} WscThroughput.wsc_oversub_tb_per_s_str`, potentially bottlenecking AllReduce and dropping training throughput by 30–60 percent.
 2.  **Distinction (durable)**: Unlike a general-purpose compute cluster (which runs many independent jobs on separate nodes with no requirement for tight coupling), a WSC training cluster operates as a single synchronous instrument in which every node must participate in every AllReduce, making the failure or slowdown of a single node a cluster-wide performance event.

@@ -964,7 +964,11 @@ The original breakthrough was a change in how engineers understood the bottlenec
 
 ::: {#exmp-performance-engineering-flashattention-breakthrough .callout-example title="The FlashAttention breakthrough"}
 
-In 2022, Tri Dao challenged the prevailing wisdom that the attention mechanism's $\mathcal{O}(S^2)$ complexity required better matrix multiplication kernels. His insight was that the bottleneck was not compute, but memory hierarchy. Standard attention materialized the massive $S{\times}S$ attention score matrix in high-latency HBM. FlashAttention restructured the algorithm using tiling to keep running statistics in on-chip SRAM, computing the softmax without ever writing the full matrix to global memory. This reduced memory complexity to linear $\mathcal{O}(S)$ and wall-clock time by 2--4$\times$ on relevant attention workloads. It quickly influenced the attention kernels used across major ML frameworks and serving stacks.
+**Context**: In 2022, Tri Dao and coauthors introduced FlashAttention [@dao2022], challenging the prevailing wisdom that the attention mechanism's $\mathcal{O}(S^2)$ complexity required better matrix multiplication kernels.
+
+**System**: The bottleneck was memory hierarchy, not compute. Standard attention materialized the massive $S{\times}S$ attention score matrix in high-latency HBM. FlashAttention restructured the algorithm using tiling to keep running statistics in on-chip SRAM, computing the softmax without ever writing the full matrix to global memory. This reduced memory complexity to linear $\mathcal{O}(S)$ and wall-clock time by 2--4$\times$ on relevant attention workloads.
+
+**Systems lesson**: FlashAttention matters because it changes where the attention state lives. The durable optimization is not "a faster kernel" but a data-movement reduction that keeps quadratic intermediates out of HBM.
 
 :::
 
@@ -1100,7 +1104,7 @@ Applying uniform per-tensor INT8 quantization clips these outliers, destroying t
 
 ::: {#dfn-performance-engineering-block-wise-quantization .callout-definition title="Block-wise quantization"}
 
-***Block-wise Quantization***\index{Quantization!block-wise, definition} is an ML quantization scheme that partitions a weight tensor into nonoverlapping groups of $G_{\text{block}}$ elements and computes a per-group scale $s_i = (x_{\max,i} - x_{\min,i}) / (2^b - 1)$, bounding worst-case quantization error within each group independently.
+***Block-wise Quantization***\index{Block-wise quantization!definition}\index{Quantization!block-wise} is an ML quantization scheme that partitions a weight tensor into nonoverlapping groups of $G_{\text{block}}$ elements and computes a per-group scale $s_i = (x_{\max,i} - x_{\min,i}) / (2^b - 1)$, bounding worst-case quantization error within each group independently.
 
 1.  **Significance (quantitative)**: With block size $G_{\text{block}} = 64$ and $b = 4$ bits, weights compress from 16 bits to 4 bits (a 4$\times$ memory reduction) while each FP16 scale adds $16/64 = 0.25$ bits per weight. This yields an effective bit-width of $4.25$ bits per weight: 6.25 percent overhead relative to the INT4 payload, or about 1.6 percent of the original FP16 weight size.
 2.  **Distinction (durable)**: Unlike Per-Tensor Quantization\index{Quantization!per-tensor}, which applies a single scale across the entire weight matrix and forces that scale to accommodate outlier values at the cost of wasting precision on the majority of near-zero weights, Block-wise Quantization contains outlier damage within individual blocks, preventing a single extreme value from degrading quantization fidelity for the whole tensor.
@@ -2161,7 +2165,7 @@ class FleetEfficiencyCalc:
 
 With MFU defined as useful work rather than raw busyness, the next calculation shows how distributed overhead turns a strong single-node number into a weaker fleet-wide result.
 
-::: {#nbk-performance-engineering-scaling-tax .callout-notebook title="The scaling tax"}
+:::: {#nbk-performance-engineering-scaling-tax .callout-notebook title="The scaling tax"}
 
 **Problem**: A `{python} FleetEfficiencyCalc.fleet_params_b_str` parameter model achieves `{python} FleetEfficiencyCalc.fleet_local_mfu_str` MFU on a single 8-GPU node. When training scales to `{python} FleetEfficiencyCalc.fleet_nodes_str` H100 GPUs, how much MFU does inter-node communication overhead consume?
 
@@ -2176,15 +2180,15 @@ With MFU defined as useful work rather than raw busyness, the next calculation s
 
 **Systems insight**: The `{python} FleetEfficiencyCalc.fleet_scaling_tax_str` scaling tax represents the cost of inter-node communication (InfiniBand latency) and synchronization barriers. In a healthy fleet, this tax should remain stable; a sudden increase in the scaling tax signals a **Scaling Regression**\index{Scaling!regression}, typically caused by a misaligned parallelization strategy or a "gray failure" in the network fabric.
 
-:::
+::::
 
 ### Detecting scaling regressions {#sec-performance-engineering-detecting-scaling-regressions-7c11}
 
 At scale, the system is nonlinear. A code change that introduces a minor memory overhead on a single GPU can trigger a catastrophic performance collapse at 1,000 GPUs due to increased garbage collection pauses or exhausted InfiniBand credit buffers. Detecting these scaling regressions requires a tiered testing strategy:
 
-1.  **Small-Scale Canaries**\index{Small-Scale Canaries}: Running the model on 8 and 64 GPUs to establish a scaling efficiency curve.
-2.  **Fleet Baseline Comparison**\index{Fleet Baseline Comparison}: Continuously comparing every production run's MFU against the gold-standard baseline for that model architecture.
-3.  **Gray Failure Detection**\index{Gray Failure Detection}: Monitoring the distribution of step times across the fleet. A single "straggler" node that is 10 percent slower due to thermal throttling can reduce the entire cluster's MFU by 10 percent in a synchronous data-parallel workload.
+1.  **Small-scale canaries**\index{Small-Scale Canaries}: Running the model on 8 and 64 GPUs to establish a scaling efficiency curve.
+2.  **Fleet baseline comparison**\index{Fleet Baseline Comparison}: Continuously comparing every production run's MFU against the gold-standard baseline for that model architecture.
+3.  **Gray failure detection**\index{Gray Failure Detection}: Monitoring the distribution of step times across the fleet. A single "straggler" node that is 10 percent slower due to thermal throttling can reduce the entire cluster's MFU by 10 percent in a synchronous data-parallel workload.
 
 ::: {#psp-performance-engineering-hero-run-tax .callout-perspective title="Benchmark vs. reality: The hero run tax"}
 
@@ -2210,11 +2214,11 @@ Consider a raw, unoptimized 70-billion parameter PyTorch model that must serve 1
 
 When approaching a new ML workload for optimization, follow this sequence:
 
-1. **Baseline Measurement**\index{Baseline Measurement}: Measure end-to-end throughput (tokens/second for LLMs, samples/second for training) and collect a Nsight Systems trace. Compute the Model FLOPs Utilization (MFU) as established in @sec-performance-engineering-measurement-scale. An MFU below 30 percent indicates substantial optimization opportunity; above 50 percent is good; above 60 percent is excellent for large models.
+1. **Baseline measurement**\index{Baseline Measurement}: Measure end-to-end throughput (tokens/second for LLMs, samples/second for training) and collect a Nsight Systems trace. Compute the Model FLOPs Utilization (MFU) as established in @sec-performance-engineering-measurement-scale. An MFU below 30 percent indicates substantial optimization opportunity; above 50 percent is good; above 60 percent is excellent for large models.
 
-2. **Roofline Classification**\index{Roofline Classification}: For the dominant kernels, compute the arithmetic intensity and plot on the roofline. This immediately identifies whether the workload is compute-bound or memory-bound, which determines the entire optimization strategy.
+2. **Roofline classification**\index{Roofline Classification}: For the dominant kernels, compute the arithmetic intensity and plot on the roofline. This immediately identifies whether the workload is compute-bound or memory-bound, which determines the entire optimization strategy.
 
-3. **Selecting the Primary Bottleneck**\index{Bottleneck!primary selection}: The primary bottleneck falls into one of three categories, each with a different optimization path:
+3. **Selecting the primary bottleneck**\index{Bottleneck!primary selection}: The primary bottleneck falls into one of three categories, each with a different optimization path:
 
 For **memory-bound workloads**\index{Memory-Bound!optimization path} (the common case for inference):
 
