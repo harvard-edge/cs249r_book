@@ -3404,67 +3404,25 @@ During a major regional network outage, an e-commerce site suddenly loses access
 
 ### Degradation dimensions {#sec-fault-tolerance-reliability-reliability-degradation-dimensions-4b25}
 
-A degradation plan must name which service property will be sacrificed before an incident begins. The common dimensions are quality, latency, coverage, freshness, and feature completeness.
+A degradation plan must name which service property will be sacrificed before an incident begins. Quality is the most visible lever: the system serves predictions from simpler, faster models, such as falling back from a sophisticated multi-tower recommender to a collaborative-filtering model. Latency can also become the sacrifice; under high load, batching more requests together preserves throughput and model quality while accepting slower responses.
 
-Quality degradation is the most visible availability lever: the system serves predictions from simpler, faster models. A recommendation system might fall back from a sophisticated multi-tower model to a simpler collaborative filtering model.
-
-Latency degradation preserves model quality by accepting slower responses. Under high load, batching more requests together increases latency but maintains throughput.
-
-Coverage degradation preserves a useful response by serving partial results rather than complete results. A search system might return top-10 results instead of top-100 when compute is constrained.
-
-Freshness degradation preserves availability by serving cached or stale results rather than real-time computation. News recommendations might serve hour-old recommendations when the recommendation service is unavailable.
-
-Feature degradation preserves inference by using fewer features when feature retrieval fails. A recommendation system might use only content features when user history is unavailable.
+Other degradation dimensions preserve a useful answer by narrowing what the system promises. Coverage degradation returns partial results, such as top-10 search results instead of top-100. Freshness degradation serves cached or stale results rather than real-time computation, as when news recommendations use hour-old candidates during a recommendation-service outage. Feature degradation keeps inference running with fewer inputs, such as using content features when user history is unavailable.
 
 ### Graceful degradation strategies {#sec-fault-tolerance-reliability-reliability-graceful-degradation-strategies-e85e}
 
 #### Model fallback {#sec-fault-tolerance-reliability-reliability-model-fallback-bc6e}
 
-Model fallback turns quality into an explicit availability lever by maintaining multiple model versions with different resource requirements:
+Model fallback turns quality into an explicit availability lever by maintaining multiple model versions with different resource requirements. The primary model provides full capability at the highest resource cost, a secondary model reduces capability and resource demand, a tertiary model preserves minimal capability, and a static fallback serves precomputed defaults with no inference at all.\index{Primary Model}\index{Secondary Model}\index{Tertiary Model}\index{Static Fallback} When the primary path is unavailable or overloaded, the policy descends only as far as resource pressure requires, then returns upward after the primary path is healthy again.
 
-- **Primary model**\index{Primary Model}: Full capability, highest resource requirements
-- **Secondary model**\index{Secondary Model}: Reduced capability, lower resource requirements
-- **Tertiary model**\index{Tertiary Model}: Minimal capability, minimal resources
-- **Static fallback**\index{Static Fallback}: Precomputed defaults, no inference required
+An image classification cascade makes the trade-off concrete. A ViT-Large primary model with 307 million parameters might deliver 88 percent ImageNet top-1 accuracy, while an EfficientNet-B4 secondary model with 19 million parameters delivers 83 percent and a MobileNet-V3-Large tertiary model with 5.4 million parameters delivers 75 percent. If all inference paths fail, the fallback returns "classification unavailable" or cached results.\index{Fallback} For that ladder to be real rather than aspirational, the production system must keep multiple models deployed, route requests to the appropriate level, monitor fallback frequency, and measure the quality impact of each level.
 
-When the primary model is unavailable or overloaded, the policy descends only as far as resource pressure requires, then returns upward when the primary path is healthy again.
-
-An image classification cascade illustrates the trade-off between accuracy and resilience:
-
-1. **Primary**: ViT-Large (307M params, 88 percent ImageNet top-1)
-
-2. **Secondary**\index{Secondary Model}: EfficientNet-B4 (19M params, 83 percent ImageNet top-1)
-
-3. **Tertiary**\index{Tertiary Model}: MobileNet-V3-Large (5.4M params, 75 percent ImageNet top-1)
-
-4. **Fallback**\index{Fallback}: Return "classification unavailable" or cached results
-
-For that fallback path to be real rather than aspirational, the production system needs:
-
-- Multiple models deployed and ready to serve
-- Routing logic to select appropriate model
-- Monitoring to track fallback frequency
-- Quality metrics to measure degradation impact
-
-In production, recommendation and ranking systems routinely fall back from a complex deep learning model to a lightweight backup---a top-n popularity list, a linear ranker, or a cached response---when the primary serving stack becomes unavailable. Complex models often fight for the last mile of accuracy while simple heuristics provide the bulk of the utility, so the fallback path must be monitored as a first-class quality signal rather than treated as a silent failover; otherwise the product appears healthy while quality is silently traded for availability.
+Recommendation and ranking systems use the same pattern when a complex deep learning model falls back to a top-n popularity list, a linear ranker, or a cached response during primary serving failures. Complex models often fight for the last mile of accuracy while simple heuristics provide the bulk of the utility, so the fallback path must be monitored as a first-class quality signal rather than treated as a silent failover. Otherwise the product appears healthy while quality is silently traded for availability.
 
 #### Feature fallback {#sec-fault-tolerance-reliability-reliability-feature-fallback-0730}
 
-Feature fallback controls how much input quality the model may lose before the request must be blocked. When feature retrieval fails, use default or computed fallback values:
+Feature fallback controls how much input quality the model may lose before the request must be blocked. When feature retrieval fails, precomputed population-level defaults can substitute for missing user or item features: a recommender might use the average user embedding, genre-level item defaults, or the most recent cached value for a real-time signal. When defaults are too weak, the system can compute approximate features from available data, such as demographic similarity for missing user history, text embeddings for missing item attributes, or time-based defaults for missing context.
 
-Precomputed population-level defaults substitute for missing user or item features. For a recommendation system:
-
-- Missing user embedding: Use average embedding across all users
-- Missing item features: Use genre/category-level defaults
-- Missing real-time features: Use most recent cached value
-
-When defaults are insufficient, the system can compute approximate features from available data:
-
-- Missing user history: Use demographic similarity
-- Missing item attributes: Use text embedding from title/description
-- Missing contextual features: Use time-based defaults
-
-Prioritizing features by importance to prediction quality allows systems to degrade gracefully, as @tbl-feature-degradation-tiers summarizes:
+The key design step is prioritizing features by their contribution to prediction quality. @Tbl-feature-degradation-tiers summarizes a four-level policy in which critical features block the request, important features use defaults, useful features use cached values, and optional features can be omitted with bounded quality impact:
 
 | **Tier**      |      **Example Features**     | **Missing Action** |      **Quality Impact**     |
 |:--------------|:-----------------------------:|:------------------:|:---------------------------:|
@@ -3477,19 +3435,9 @@ Prioritizing features by importance to prediction quality allows systems to degr
 
 #### Load shedding {#sec-fault-tolerance-reliability-reliability-load-shedding-8476}
 
-Load shedding protects the system by sacrificing selected requests before overload spreads to every request:
+Load shedding protects the system by sacrificing selected requests before overload spreads to every request. Random shedding is the simplest policy: drop a fraction of incoming requests and preserve enough capacity for the rest. Its weakness is that it treats all requests as equally valuable. Priority-based shedding adds product judgment by serving premium users before free users, revenue-generating requests before analytics requests, and interactive traffic before background batch work.
 
-Random shedding drops a fraction of incoming requests. This approach is simple but does not prioritize valuable requests.
-
-Priority-based shedding classifies requests and drops low-priority requests first:
-
-- Premium users serviced before free users
-- Revenue-generating requests prioritized over analytics
-- Interactive requests prioritized over background batch
-
-Admission control\index{Admission Control} rate-limits at system entry points. It rejects requests that would exceed capacity rather than accepting and degrading all requests.
-
-Circuit breakers[^fn-circuit-breaker-ml-ft] prevent resource exhaustion by failing fast when dependent services are unhealthy.
+Admission control\index{Admission Control} applies the same idea at system entry points. It rejects requests that would exceed capacity rather than accepting work that will degrade every request already in the system. Circuit breakers[^fn-circuit-breaker-ml-ft] protect downstream dependencies by failing fast when a model replica, feature store, or supporting service is unhealthy.
 
 [^fn-circuit-breaker-ml-ft]: **Circuit Breaker**: Named after the electrical safety device that cuts power during overload. In software (popularized by Michael Nygard's 2007 *Release It!*), the pattern wraps service calls and "trips open" after a failure threshold, failing fast instead of waiting on a dead dependency. For ML serving, this prevents a single failing model replica or feature store from exhausting connection pools and cascading failures across the entire inference fleet. \index{Circuit Breaker!serving resilience}
 
@@ -3535,11 +3483,7 @@ Recovery needs the same control discipline. Hysteresis prevents oscillation, and
 
 Because graceful degradation trades quality for availability, monitoring must make that trade visible rather than letting the system appear healthy while serving lower-fidelity results.
 
-Track degradation metrics including percentage of requests served by fallback models, percentage of features using defaults, request drop rate from load shedding, and quality metric differences between primary and fallback.
-
-Alerting thresholds should reflect duration and blast radius. Degradation activation triggers an informational alert, sustained degradation beyond 5 minutes triggers a warning alert, severe degradation affecting over 50 percent of requests triggers a critical alert, and extended degradation beyond 1 hour triggers escalation.
-
-After degradation events, postincident analysis should identify the root cause, evaluate fallback effectiveness, measure user and business impact, and define improvements that prevent recurrence.
+Track degradation metrics including the percentage of requests served by fallback models, the percentage of features using defaults, the request drop rate from load shedding, and the quality difference between primary and fallback paths. Alerting thresholds should reflect duration and blast radius: degradation activation can trigger an informational alert, sustained degradation beyond 5 minutes can trigger a warning, severe degradation affecting over 50 percent of requests can trigger a critical alert, and degradation beyond 1 hour should escalate. After the event, postincident analysis should identify the root cause, evaluate fallback effectiveness, measure user and business impact, and define improvements that prevent recurrence.
 
 Implementing these fallback mechanisms safely requires deep visibility into the system's runtime state. When a complex recommendation pipeline begins degrading, operators must rapidly determine which microservice is failing, and that diagnosis depends on distributed debugging and observability.
 
