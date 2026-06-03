@@ -1920,7 +1920,7 @@ def _nested_ml_system(candidate):
     fig, ax = margin_axes("other-new", figsize=(1.20, 0.92))
     rect(ax, 0.08, 0.14, 0.84, 0.66, "#E8ECEF", ec=GRID, lw=0.8)
     rect(ax, 0.36, 0.39, 0.28, 0.16, COMP, ec="white", lw=0.8)
-    ax.text(0.50, 0.47, "ML code", ha="center", va="center", color="white", fontsize=4.7, fontweight="bold")
+    ax.text(0.50, 0.47, "ML code", ha="center", va="center", color="white", fontsize=4.0, fontweight="bold")
     ax.text(0.50, 0.72, "System 95%", ha="center", va="center", color=INK, fontsize=5.0)
     write(fig, candidate["chapter"], curated_asset_name(candidate["id"]))
 
