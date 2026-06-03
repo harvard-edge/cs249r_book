@@ -144,7 +144,7 @@ A single forward pass through GPT-2 requires roughly `{python} TrainingScenarios
 
 ::: {#dfn-training-training-systems .callout-definition title="Training systems"}
 
-***Machine Learning Training Systems***\index{Training!systems, definition} are software-hardware systems that execute the iterative optimization loop (forward pass, loss computation, backward pass, and parameter update) to minimize a loss function over a training dataset.
+***Machine Learning Training Systems***\index{Training systems!definition}\index{Training!systems} are software-hardware systems that execute the iterative optimization loop (forward pass, loss computation, backward pass, and parameter update) to minimize a loss function over a training dataset.
 
 1.  **Significance (quantitative)**: Training memory cost is `{python} TrainingScenarios.adam_training_memory_mult_str` the inference memory cost per parameter when using the Adaptive Moment Estimation (Adam) optimizer: a `{python} TrainingScenarios.adam_example_params_b_str`-parameter model requires `{python} TrainingScenarios.adam_inference_gb_str` (FP16 weights) + `{python} TrainingScenarios.adam_grad_gb_str` (FP16 gradients) + `{python} TrainingScenarios.adam_moments_gb_str` (Adam first and second moments in FP32) = `{python} TrainingScenarios.adam_training_state_gb_str` at least, before accounting for activation storage. This multiplier is the primary reason a model that runs inference on one GPU requires multiple GPUs for training.
 2.  **Distinction (durable)**: Unlike inference systems, which execute a single forward pass and discard intermediate activations, training systems must retain all intermediate activations from the forward pass for use during the backward pass, creating a memory footprint that grows linearly with model depth and batch size.
@@ -259,12 +259,12 @@ Training speed is governed by the utilization of hardware peaks.
 
 **The Utilization Gap**
 
-- [ ] **Peak vs. Real**: Why is 100 percent accelerator utilization impossible? (Memory bandwidth stalls, kernel launch overhead, communication latencies).
-- [ ] **Batch Size Physics**: Why does increasing batch size generally improve hardware utilization? (It increases arithmetic intensity, moving operations from memory-bound to compute bound. We formalize this as *Model FLOPs Utilization* in @sec-model-training-identifying-bottlenecks-f57f.)
+- [ ] **Peak vs. real**: Why is 100 percent accelerator utilization impossible? (Memory bandwidth stalls, kernel launch overhead, communication latencies).
+- [ ] **Batch size physics**: Why does increasing batch size generally improve hardware utilization? (It increases arithmetic intensity, moving operations from memory-bound to compute bound. We formalize this as *Model FLOPs Utilization* in @sec-model-training-identifying-bottlenecks-f57f.)
 
 **Precision Economics**
 
-- [ ] **Mixed Precision**: How does FP16/BF16 double throughput? (Tensor Cores run 2$\times$ faster, and memory bandwidth effectively doubles).
+- [ ] **Mixed precision**: How does FP16/BF16 double throughput? (Tensor Cores run 2$\times$ faster, and memory bandwidth effectively doubles).
 
 :::
 
@@ -316,11 +316,11 @@ class GPT2LighthouseSpecs:
 
 ### Running example: Training GPT-2 {#sec-model-training-running-example-training-gpt2-19cd}
 
-To ground the abstract principles of training systems in concrete engineering decisions, we use GPT-2 as a recurring worked example throughout this chapter. This Lighthouse Model is large enough to expose real systems bottlenecks yet small enough to reason about without massive cluster infrastructure.
+To ground the abstract principles of training systems in concrete engineering decisions, we use GPT-2 as a recurring worked example throughout this chapter. This Lighthouse Model is large enough to expose real systems bottlenecks yet small enough to reason about without massive cluster infrastructure. In inference, GPT-2 serves as the Bandwidth Hog lighthouse; in training, the same model exposes a different constraint mix: activation memory, accelerator utilization, and data-pipeline throughput.
 
 ::: {#lhs-training-lighthouse-example-training-gpt-2 .callout-lighthouse title="Lighthouse example: Training GPT-2"}
 
-**Why this model?**
+**Context**:
 GPT-2 (1.5 billion parameters) serves as our primary case study for large-scale training because it sits at the "sweet spot" of systems complexity. It is large enough to require distributed training and serious memory optimizations, yet small enough to comprehend without the massive infrastructure complexity of trillion-parameter clusters. @Tbl-training-gpt2-lighthouse-specs maps each model property to the systems constraint it creates:
 
 | **Property**     |                           **Specification**                           | **Systems Implication**                                                                                                                                        |
@@ -332,7 +332,7 @@ GPT-2 (1.5 billion parameters) serves as our primary case study for large-scale 
 
 : **GPT-2 (1.5 billion parameters) lighthouse model specifications**: Parameter count, architecture depth, dataset size, and total training compute mapped to their systems implications. Each row pairs a model property with the engineering constraint it creates—memory footprint for weights, activation pressure from pipeline depth, I/O throughput requirements, and parallelization demand. {#tbl-training-gpt2-lighthouse-specs tbl-colwidths="[20,26,54]"}
 
-**Key systems challenge**:
+**Challenge**:
 Training GPT-2 is primarily memory-bound (due to activation storage) and compute-intensive (requiring massive matrix multiplications). It forces us to move beyond simple training loops to sophisticated pipelines that manage data movement as carefully as computation.
 
 :::
@@ -1551,12 +1551,12 @@ Training large models requires managing the memory wall (the bandwidth bottlenec
 
 **The Bottleneck**
 
-- [ ] **Activation Memory**: Do you understand why activations (stored for backprop) dominate memory usage, often exceeding parameter size by 10$\times$?
-- [ ] **Optimization Strategy**: Can you explain how **Gradient Checkpointing** trades compute (re-calculating activations) for memory capacity?
+- [ ] **Activation memory**: Do you understand why activations (stored for backprop) dominate memory usage, often exceeding parameter size by 10$\times$?
+- [ ] **Optimization strategy**: Can you explain how **Gradient Checkpointing** trades compute (re-calculating activations) for memory capacity?
 
 **Scaling Limits**
 
-- [ ] **Batch Size Constraints**: Why does memory capacity limit the maximum batch size, and how does gradient accumulation solve this without increasing memory?
+- [ ] **Batch size constraints**: Why does memory capacity limit the maximum batch size, and how does gradient accumulation solve this without increasing memory?
 
 :::
 
@@ -2854,17 +2854,17 @@ Modern hardware accelerators, particularly GPUs, optimize these diverse computat
 
 \index{Wave Quantization!accelerator utilization}\index{Batch Size!hardware alignment}\index{Wave Quantization!tail effects}
 
-::: {.callout-warning title="Wave quantization and tail effects"}
+::: {#psp-training-wave-quantization-tail-effects .callout-perspective title="Wave quantization and tail effects"}
 
 A common mistake in ML systems is treating batch size as a continuous variable. In reality, GPU execution is *quantized* into "waves" of work.
 
 **The wave effect**: An NVIDIA GPU executes work in warps of 32 threads. With a batch size of 32, all 32 threads are busy. With a batch size of 33, the GPU must launch a second warp to process the single remaining sample. This second warp uses only 1/32 (3 percent) of its potential compute power, but takes just as long to execute as the first.
 
-**Tail Effects at Scale**: On a large GPU like the H100 with 132 Streaming Multiprocessors (SMs), the hardware can process thousands of threads in one "wave." If the total workload is just slightly over a wave boundary (e.g., 1.01 waves), the hardware must wait for a nearly empty wave to finish before the next task begins.
+**Tail effects at scale**: On a large GPU like the H100 with 132 Streaming Multiprocessors (SMs), the hardware can process thousands of threads in one "wave." If the total workload is just slightly over a wave boundary (e.g., 1.01 waves), the hardware must wait for a nearly empty wave to finish before the next task begins.
 
 @Tbl-training-wave-quantization quantifies the cost: batch sizes that straddle the 32-thread boundary launch additional partially filled warps and collapse utilization while leaving step time nearly unchanged.
 
-**Engineering Rule**: Always choose batch sizes and hidden dimensions that are powers of two or multiples of 8/32/64 to avoid this "quantization tax." A batch of 32 is often faster than 33, and a batch of 64 is often just as fast as 33.
+**Engineering rule**: Always choose batch sizes and hidden dimensions that are powers of two or multiples of 8/32/64 to avoid this "quantization tax." A batch of 32 is often faster than 33, and a batch of 64 is often just as fast as 33.
 
 Understanding these tail effects is the difference between a practitioner who tunes by trial-and-error and an engineer who designs for the hardware.
 
@@ -5546,7 +5546,7 @@ The targeted fix is to overlap input preparation with accelerator execution. Con
 | **Throughput**              |                       N/A                        |                   1,200 tokens/s                  |                                 —                                  |
 | **Time per epoch**          |                       N/A                        |                     8.3 hours                     |                                 —                                  |
 
-: **GPT-2 Optimization Final Profile**: Batch-4 memory figures from the walkthrough (`{python} GPT2WalkthroughCalc.total_fp32_gb_str` → `{python} GPT2WalkthroughCalc.total_ckpt_gb_str`); @tbl-gpt2-summary reports batch-32 totals. {#tbl-training-gpt2-final-profile tbl-colwidths="[31,23,23,23]"}
+: **GPT-2 optimization final profile**: Batch-4 memory figures from the walkthrough (`{python} GPT2WalkthroughCalc.total_fp32_gb_str` → `{python} GPT2WalkthroughCalc.total_ckpt_gb_str`); @tbl-gpt2-summary reports batch-32 totals. {#tbl-training-gpt2-final-profile tbl-colwidths="[31,23,23,23]"}
 
 The final profile is compute-bound, an Algorithm constraint in D·A·M terms, which is the desired endpoint for this single-device exercise. The run is now limited by useful training work rather than by avoidable memory capacity or input-pipeline failures.
 
@@ -6963,7 +6963,7 @@ Single-machine training optimization demonstrates how computational bottlenecks 
 
 This co-design principle, where algorithms, software frameworks, and hardware architectures evolve together, shapes modern training infrastructure. Matrix operation patterns drove GPU Tensor Core development, which frameworks exposed through mixed-precision APIs, enabling algorithmic techniques like FP16 training that further influenced next-generation hardware design. The chapter's FLOP and memory accounting provides the quantitative basis for comparing optimizers and estimating training cost at scale. These systems principles extend naturally from training infrastructure to the model-level efficiency techniques and deployment strategies examined in subsequent chapters.
 
-::: {.callout-takeaways title="Why training costs millions"}
+The practitioners who internalize the iron law can look at a slow training job and immediately classify the bottleneck: compute-bound (increase batch size, enable mixed precision), memory-bound (activate checkpointing, reduce model size), or communication-bound (adjust gradient accumulation, rethink parallelism strategy). This diagnostic discipline distinguishes engineers who solve problems from those who throw hardware at symptoms. Treating training as a black box leads to wasted GPU-months on misdiagnosed problems: hardware upgrades for algorithmic bottlenecks, more GPUs for data pipeline starvation, precision reduction for communication-bound workloads. As training runs scale to millions of dollars and months of calendar time, the ability to profile, diagnose, and apply targeted optimizations determines whether organizations can iterate fast enough to remain competitive.
 
 ```{python}
 #| echo: false
@@ -6998,6 +6998,8 @@ class GPT2SummaryChapterRecap:
     o_total_mem_gb_str = fmt_qty(o_total_mem * GB, GB, precision=1, commas=False)
 ```
 
+::: {.callout-takeaways title="Why training costs millions"}
+
 * **The iron law governs training**: $T_{\text{train}} = \frac{O}{R_{\text{peak}} \times \eta_{\text{hw}}}$. Every optimization affects one of these terms. Identifying which term is affected is essential for effective optimization.
 * **Memory and convergence are coupled**: Adam converges in roughly one-third the iterations of SGD but requires 3$\times$ the memory for per-parameter state. Activations add another batch-size-dependent memory term, so optimizer choice and activation management often determine whether training fits.
 * **Profiling precedes optimization**: The iterative loop is: profile → identify bottleneck → apply targeted fix → re-profile. Optimization without profiling typically wastes effort on nonbottlenecks.
@@ -7007,8 +7009,6 @@ class GPT2SummaryChapterRecap:
 * **Efficiency reduces scale-out, cost, and energy**: Distributed training adds communication overhead and complexity, so prefetching, mixed precision, checkpointing, and accumulation should be exhausted before scaling out. The same optimizations reduce training time, emissions, and cloud cost.
 
 :::
-
-The practitioners who internalize the iron law can look at a slow training job and immediately classify the bottleneck: compute-bound (increase batch size, enable mixed precision), memory-bound (activate checkpointing, reduce model size), or communication-bound (adjust gradient accumulation, rethink parallelism strategy). This diagnostic discipline distinguishes engineers who solve problems from those who throw hardware at symptoms. Treating training as a black box leads to wasted GPU-months on misdiagnosed problems: hardware upgrades for algorithmic bottlenecks, more GPUs for data pipeline starvation, precision reduction for communication-bound workloads. As training runs scale to millions of dollars and months of calendar time, the ability to profile, diagnose, and apply targeted optimizations determines whether organizations can iterate fast enough to remain competitive.
 
 ::: {.callout-chapter-connection title="From training to data selection"}
 

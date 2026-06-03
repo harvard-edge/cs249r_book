@@ -48,6 +48,43 @@ class AnomalyModel(Registry):
         name="Anomaly model energy", description="Per-inference energy of the TinyML anomaly detector.")
 
 
+class OuraSleepStudy(Registry):
+    """Oura Ring sleep-stage case-study anchors."""
+
+    Participants = sourced(
+        106, pc.OURA_SLEEP_STAGE_STUDY,
+        name="Oura sleep-study participants",
+        description="Participants in the Oura Ring sleep-stage validation study.")
+    RecordingNights = sourced(
+        440, pc.OURA_SLEEP_STAGE_STUDY,
+        name="Oura sleep-study nights",
+        description="Recorded nights in the Oura Ring sleep-stage validation study.")
+    RecordingHours = sourced_qty(
+        3444 * _hour, pc.OURA_SLEEP_STAGE_STUDY,
+        name="Oura sleep-study recording hours",
+        description="Combined PSG and wearable-ring recording duration.")
+    CrossValidationFolds = sourced(
+        5, pc.OURA_SLEEP_STAGE_STUDY,
+        name="Oura sleep-stage cross-validation folds",
+        description="Cross-validation folds used for model evaluation.")
+    AccelOnlyAccuracy = sourced(
+        0.57, pc.OURA_SLEEP_STAGE_STUDY,
+        name="Oura accelerometer-only sleep-stage accuracy",
+        description="Four-stage sleep classification accuracy for the accelerometer-only baseline.")
+    EnhancedAccuracy = sourced(
+        0.79, pc.OURA_SLEEP_STAGE_STUDY,
+        name="Oura enhanced sleep-stage accuracy",
+        description="Four-stage sleep classification accuracy for the enhanced multi-sensor model.")
+    PsgScorerAgreementLow = sourced(
+        0.82, pc.OURA_SLEEP_STAGE_STUDY,
+        name="PSG inter-scorer agreement low",
+        description="Lower bound of the expert PSG inter-scorer agreement band used as a practical ceiling.")
+    PsgScorerAgreementHigh = sourced(
+        0.83, pc.OURA_SLEEP_STAGE_STUDY,
+        name="PSG inter-scorer agreement high",
+        description="Upper bound of the expert PSG inter-scorer agreement band used as a practical ceiling.")
+
+
 class ClinicalImaging(Registry):
     """Clinical-imaging workflow anchors used by edge-deployment examples."""
 
@@ -55,59 +92,6 @@ class ClinicalImaging(Registry):
         5.0 * MB, pc.CLINICAL_IMAGING_WORKFLOW_ANCHORS,
         name="Retinal screening image size",
         description="Reference size for one retinal screening photograph in the rural-clinic workflow.")
-
-
-class OuraSleepStudy(Registry):
-    """Oura Ring sleep-stage case-study anchors."""
-
-    Participants = sourced(
-        106,
-        pc.OURA_SLEEP_STAGE_STUDY,
-        name="Oura sleep-stage study participants",
-        description="Participants included in the Oura sleep-stage validation dataset.",
-    )
-    Nights = sourced(
-        440,
-        pc.OURA_SLEEP_STAGE_STUDY,
-        name="Oura sleep-stage study nights",
-        description="Nights included in the Oura sleep-stage validation dataset.",
-    )
-    RecordingHours = sourced_qty(
-        3444 * _hour,
-        pc.OURA_SLEEP_STAGE_STUDY,
-        name="Oura sleep-stage study recording hours",
-        description="Combined PSG and wearable-ring recording duration.",
-    )
-    CrossValidationFolds = sourced(
-        5,
-        pc.OURA_SLEEP_STAGE_STUDY,
-        name="Oura sleep-stage cross-validation folds",
-        description="Cross-validation folds used for model evaluation.",
-    )
-    AccelerometerOnlyFourStageAccuracy = sourced(
-        0.57,
-        pc.OURA_SLEEP_STAGE_STUDY,
-        name="Oura accelerometer-only four-stage accuracy",
-        description="Four-stage sleep classification accuracy using accelerometer features only.",
-    )
-    EnhancedFourStageAccuracy = sourced(
-        0.79,
-        pc.OURA_SLEEP_STAGE_STUDY,
-        name="Oura enhanced four-stage accuracy",
-        description="Four-stage sleep classification accuracy using ANS-derived and circadian features.",
-    )
-    PsgScorerAgreementLow = sourced(
-        0.82,
-        pc.OURA_SLEEP_STAGE_STUDY,
-        name="PSG inter-scorer reliability low",
-        description="Lower bound of reported human PSG inter-scorer sleep-staging reliability.",
-    )
-    PsgScorerAgreementHigh = sourced(
-        0.83,
-        pc.OURA_SLEEP_STAGE_STUDY,
-        name="PSG inter-scorer reliability high",
-        description="Upper bound of reported human PSG inter-scorer sleep-staging reliability.",
-    )
 
 
 class EnergyAnchors(Registry):
@@ -257,8 +241,8 @@ class ReferenceStats(Registry):
 
     Workloads = Workloads
     AnomalyModel = AnomalyModel
-    ClinicalImaging = ClinicalImaging
     OuraSleepStudy = OuraSleepStudy
+    ClinicalImaging = ClinicalImaging
     EnergyAnchors = EnergyAnchors
     EmissionsAnchors = EmissionsAnchors
     TrainingScaleProfiles = TrainingScaleProfiles

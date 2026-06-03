@@ -296,9 +296,9 @@ class NinesReliability:
 
 **Math**:
 
-1.  **Single GPU Availability Probability** $(R_{\text{GPU}})$: A GPU with `{python} NinesReliability.availability_str` availability has an all-up probability $R_{\text{GPU}} =$ `{python} NinesReliability.survival_str` at a randomly chosen instant.
-2.  **Cluster Availability Probability** $(R_{\text{cluster}})$: $R_{\text{cluster}} = (R_{\text{GPU}})^{N}$.
-3.  **Calculation**: $(R_{\text{GPU}})^{N} \approx$ `{python} NinesReliability.cluster_prob_str`.
+1.  **Single GPU availability probability** $(R_{\text{GPU}})$: A GPU with `{python} NinesReliability.availability_str` availability has an all-up probability $R_{\text{GPU}} =$ `{python} NinesReliability.survival_str` at a randomly chosen instant.
+2.  **Cluster availability probability** $(R_{\text{cluster}})$: $R_{\text{cluster}} = (R_{\text{GPU}})^{N}$.
+3.  **Result**: $(R_{\text{GPU}})^{N} \approx$ `{python} NinesReliability.cluster_prob_str`.
 
 **Systems insight**: Even with `{python} NinesReliability.availability_str` reliable hardware, a `{python} NinesReliability.n_gpus_str`-GPU cluster has only a `{python} NinesReliability.cluster_pct_str` chance that every GPU is simultaneously available. Hardware reliability alone is insufficient; software must handle failures automatically.
 
@@ -1923,8 +1923,8 @@ class SDCCollective:
 
 **Problem**: Calculate the probability that at least one GPU in a `{python} SDCCollective.n_gpus_str`-GPU fleet experiences a silent ALU error during a single `{python} SDCCollective.training_step_s_str` training step.
 
-1. **Fleet Size**: `{python} SDCCollective.n_gpus_str` accelerators.
-2. **Individual Risk**: $10^{-6}$ per hour (a conservative estimate for SDC).
+1. **Fleet size**: `{python} SDCCollective.n_gpus_str` accelerators.
+2. **Individual risk**: $10^{-6}$ per hour (a conservative estimate for SDC).
 3. **The exposure**: In a 2-second window, the fleet has $100,000 \times (2/3600) \approx 55$ "GPU-hours" of exposure.
 4. **The probability**: $\Pr(\text{at least one SDC}) \approx$ `{python} SDCCollective.prob_str`.
 
@@ -2055,8 +2055,11 @@ Tools like **Fidelity**\index{Fidelity} [@he2020] address this gap by mapping lo
 
 ::: {#exmp-fault-tolerance-software-fault-injection-limits .callout-example title="Software fault injection limits"}
 
-**Question**: Why might a software-based fault injection tool underestimate the resilience of a system compared to physical beam testing?
-**Answer**: Software tools often miss **masking effects**\index{Masking Effect} at the circuit level. A bit flip in a hardware register might be corrected by ECC memory or masked by logical gates before it ever reaches the software layer. Software tools that inject faults directly into variables bypass these hardware-level natural defenses, potentially reporting a higher vulnerability than exists in reality.
+**Scenario**: A team validates a training system with software fault injection and concludes that a particular tensor bit flip always corrupts model output.
+
+**System**: Physical beam testing can produce a different result because hardware includes **masking effects**\index{Masking Effect} below the software abstraction. A bit flip in a hardware register might be corrected by ECC memory or masked by logical gates before it ever reaches the variable that software tools mutate directly.
+
+**Systems lesson**: Software fault injection is useful for fast coverage of model-visible states, but it can overstate vulnerability when it bypasses circuit-level defenses. Production resilience claims therefore need a hardware-calibrated fault model, not software injection alone.
 
 :::
 
@@ -2342,7 +2345,7 @@ Apply the Young-Daly formula: $\tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}
 
 This result demonstrates why failure analysis matters: without knowing the system MTBF, we cannot set checkpoint intervals rationally. With this interval, checkpoint overhead consumes approximately 2.8 percent of training time, but the estimate depends on assumptions that often fail in production.
 
-::: {.callout-perspective title="Young-Daly formula assumptions"}
+::: {#psp-fault-tolerance-young-daly-formula-assumptions .callout-perspective title="Young-Daly formula assumptions"}
 
 The Young-Daly formula provides valuable intuition but rests on assumptions that may not hold in practice:
 
@@ -2546,9 +2549,13 @@ class CheckpointOverheadCalc:
 
 While the theoretical overhead of checkpointing appears manageable for individual models, writing these massive state files introduces a new bottleneck. When thousands of GPUs simultaneously attempt to write gigabytes of data to a shared file system, the resulting I/O congestion threatens to bring the entire cluster to a halt. The scale of that I/O burst is easiest to see by expanding the example from one model to thousands of simultaneous writers.
 
-::: {.callout-warning title="The checkpoint storm"}
+::: {#exmp-fault-tolerance-checkpoint-storm .callout-example title="The checkpoint storm"}
 
-For the `{python} CheckpointOverheadCalc.archA_ckpt_tb_str` Archetype A checkpoint above, 1,000 workers would each write roughly 2.1 GB of state. The same mechanism becomes catastrophic in embedding-heavy recommendation or trillion-parameter mixture-of-experts jobs. Imagine 10,000 GPUs, each holding a 10 GB shard of model or embedding state, simultaneously opening connections to the parallel file system to save their checkpoints. The network fabric is instantly flooded with 100 TB of data, causing switch buffers to overflow and storage controllers to lock up. This "checkpoint storm" occurs when massive parallel writes overwhelm the cluster's I/O infrastructure.
+**Scenario**: A training job saves a distributed checkpoint from thousands of accelerators at the same instant.
+
+**System**: For the 2.1 TB Archetype A checkpoint above, 1,000 workers would each write roughly 2.1 GB of state. The same mechanism becomes catastrophic in embedding-heavy recommendation or trillion-parameter mixture-of-experts jobs: 10,000 GPUs, each holding a 10 GB shard of model or embedding state, can flood the network fabric with 100 TB of simultaneous writes.
+
+**Systems lesson**: A checkpoint storm occurs when massive parallel writes overwhelm the cluster's I/O infrastructure, causing switch buffers to overflow and storage controllers to lock up.
 
 :::
 
@@ -2697,7 +2704,7 @@ Understanding all three layers enables a targeted solution:
    - Phase 3: Background NVMe $\rightarrow$ NFS copy (overlapped with training)
 3. **Validation**\index{Validation}: The critical-path data copy drops to approximately `{python} CheckpointDebug.gpu_cpu_parallel_s_str` if GPU-to-CPU staging proceeds in parallel across `{python} CheckpointDebug.n_nodes_str` (or `{python} CheckpointDebug.gpu_cpu_single_path_s_str` if serialized through one `{python} CheckpointDebug.pcie_gb_per_s_str` path), reducing training impact from `{python} CheckpointDebug.overhead_pct_str` to under `{python} CheckpointDebug.residual_overhead_pct_str` once background NVMe and NFS copies are overlapped
 
-This example illustrates the fleet stack principle: diagnosing distributed systems failures requires examining all layers. A purely algorithmic fix (Distribution Layer) would fail because the physical bandwidth was insufficient. A purely hardware fix (infrastructure layer) would be wasteful without understanding the coordination pattern. The solution required changes at multiple layers working in concert.
+**Systems lesson**: Diagnosing distributed systems failures requires examining all layers. A purely algorithmic fix (Distribution Layer) would fail because the physical bandwidth was insufficient. A purely hardware fix (infrastructure layer) would be wasteful without understanding the coordination pattern. The solution required changes at multiple layers working in concert.
 
 :::
 
@@ -2848,7 +2855,7 @@ Training dynamics monitoring extends detection beyond explicit errors. Monitorin
 
 In practice, the gap between theoretical heartbeat timeouts and actual detection latencies is substantial, because distinguishing genuine failures from temporary stragglers remains an inherently difficult problem.
 
-::: {.callout-perspective title="Realistic failure detection latencies"}
+::: {#psp-fault-tolerance-realistic-detection-latencies .callout-perspective title="Realistic failure detection latencies"}
 
 Production experience shows that failure detection takes significantly longer than theoretical heartbeat timeouts suggest. The core challenge is distinguishing failures from stragglers, as @tbl-fault-tolerance-detection-latencies records. These latencies exist because aggressive timeouts cause false positives (killing healthy-but-slow workers), while conservative timeouts delay real failure detection. Production systems typically use multi-stage detection: fast initial timeout triggers investigation, slower confirmation timeout triggers recovery.
 
@@ -3070,7 +3077,7 @@ class StragglerTax:
     wasted_cost_str = fmt_usd(wasted_cost_per_hour, precision=0, per="hour")
 ```
 
-::: {#nbk-fault-tolerance-straggler-tax .callout-notebook title="The straggler tax"}
+:::: {#nbk-fault-tolerance-straggler-tax .callout-notebook title="The straggler tax"}
 
 Consider our `{python} StragglerTax.n_gpus_str`-GPU cluster where a normal training iteration takes `{python} StragglerTax.normal_step_str` second. A single GPU enters a thermally throttled state, clocking down to `{python} StragglerTax.throttle_pct_str` speed, and now takes `{python} StragglerTax.straggler_step_str` seconds to complete its computation.
 
@@ -3092,7 +3099,7 @@ A single failing device (`{python} StragglerTax.straggler_frac_str` of the hardw
 
 **Systems insight**: It is mathematically optimal to treat a severe straggler as a hard failure. Detecting and killing a slow node to force a restart onto healthy hardware yields higher long-term throughput than tolerating the degradation. The break-even point: if a straggler slows the cluster by more than $T_{\text{recovery}}/\text{MTBF}_{\text{system}}$ (the fraction of time spent recovering from failures), replacing it immediately is cheaper than waiting.
 
-:::
+::::
 
 However, killing a slow node and restarting the job implies waiting for a replacement to maintain the original GPU count. The previous sections assumed that recovery means restoring the *same* resource allocation: checkpoint, wait for a replacement, restart. Elastic recovery breaks that assumption by allowing the job to continue with *fewer* workers rather than idling the entire cluster until the original count is restored.
 
@@ -3100,7 +3107,7 @@ However, killing a slow node and restarting the job implies waiting for a replac
 
 ::: {#dfn-fault-tolerance-elastic-training .callout-definition title="Elastic training"}
 
-***Elastic Training***\index{Training!elastic, definition} is the capability of a distributed training job to dynamically adjust its worker count during execution without requiring a full restart.
+***Elastic Training***\index{Elastic training!definition}\index{Training!elastic} is the capability of a distributed training job to dynamically adjust its worker count during execution without requiring a full restart.
 
 1.  **Significance (quantitative)**: It converts hard failures into throughput degradations rather than full stops. A 1,024-GPU job that loses 8 GPUs continues at 99.2 percent capacity instead of dropping to zero. It requires learning rate recalibration and gradient accumulation adjustment to maintain mathematical consistency as the global batch size changes.
 2.  **Distinction (durable)**: Unlike checkpoint-restart recovery (which halts the job, waits for replacement hardware, and reloads state), elastic recovery is always-live: the optimization loop never stops, it only changes its parallel width.
@@ -3592,17 +3599,13 @@ Cascade failures occur when one failing component causes others to fail through 
 
 Cascade failures are particularly insidious because the root cause is obscured by the symptoms it generates. A concrete diagnosis shows how the three observability pillars work together to trace a cascade back to its origin.
 
-::: {.callout-tip title="Diagnosing a cascade failure"}
+::: {#exmp-fault-tolerance-diagnosing-cascade-failure .callout-example title="Diagnosing a cascade failure"}
 
-Consider a recommendation system experiencing sudden latency spikes. The three observability pillars work together to diagnose the root cause:
+**Scenario**: A recommendation system experiences sudden latency spikes.
 
-**Metrics**\index{Metric!observability} reveal the symptom: p99 latency jumped from 45 ms to 800 ms at 14:32, with error rate increasing from 0.1 percent to 15 percent.
+**System**: The three observability pillars work together to diagnose the root cause. **Metrics**\index{Metric!observability} reveal the symptom: p99 latency jumped from 45 ms to 800 ms at 14:32, with error rate increasing from 0.1 percent to 15 percent. **Traces**\index{Trace!observability} isolate the bottleneck: the feature-service span consumes 700 ms instead of the normal 12 ms, while the model-inference span remains normal at 40 ms. **Logs**\index{Logs!observability} identify the root cause: feature-service logs show repeated connection timeouts to the user embedding cache at 14:31, followed by cache miss storms as requests bypass the failed cache and hit the embedding database directly.
 
-**Traces**\index{Trace!observability} isolate the bottleneck: traces show the feature-service span consuming 700 ms instead of the normal 12 ms. The model-inference span remains normal at 40 ms.
-
-**Logs**\index{Logs!observability} identify the root cause: feature-service logs show repeated connection timeouts to the user embedding cache at 14:31, followed by cache miss storms as requests bypass the failed cache and hit the embedding database directly.
-
-The diagnosis: cache node failure caused cache miss avalanche, overwhelming the embedding database and propagating latency to all requests. The fix: circuit breaker on cache access, falling back to default embeddings when cache is unavailable.
+**Systems lesson**: The cache node failure caused a cache-miss avalanche, overwhelming the embedding database and propagating latency to all requests. The fix is a circuit breaker on cache access, falling back to default embeddings when cache is unavailable.
 
 :::
 
@@ -3792,6 +3795,8 @@ Checkpointing provides the foundational mechanism for preserving training progre
 
 Serving fault tolerance presents a fundamentally different challenge from training. Training tolerates minutes of recovery latency and benefits from SGD's mathematical tolerance of approximate restarts, while serving demands millisecond-level responsiveness and must preserve per-session state such as KV caches and conversation histories. Stateless serving achieves fault tolerance through straightforward replica redundancy and load balancing, but stateful serving for LLMs requires active state replication, session-affine routing, and graceful degradation hierarchies that fall back to lighter models when primary systems are unavailable. The case studies examined in this chapter, from Meta's OPT-175B training through over 35 hardware failures to Netflix's chaos engineering for ML serving, demonstrate that these principles are not theoretical but operational necessities at production scale.
 
+Engineers who internalize these principles gain a diagnostic framework for reasoning about resilience at any scale. When a training run stalls, they can immediately assess whether the bottleneck is checkpoint I/O overhead, insufficient detection speed, or a failure mode that elastic training cannot absorb. When a serving system drops requests, they can trace the fault through the redundancy hierarchy to determine whether the root cause is replica health, state replication lag, or an inadequate fallback strategy. This systematic reasoning distinguishes organizations that treat fault tolerance as an afterthought from those that engineer it as a first-class system property. As ML systems continue to scale, the cost of unplanned downtime grows proportionally: a 10,000-GPU cluster idled for an hour represents tens of thousands of dollars in wasted compute, making the techniques developed in this chapter not merely best practices but economic necessities.
+
 ::: {.callout-takeaways title="Failure is normal operation"}
 
 * **Scale guarantees failure**: A 10,000-GPU cluster\index{Failure!inevitability at scale} will encounter hardware failures every few hours; software must treat failure as a normal state.
@@ -3803,8 +3808,6 @@ Serving fault tolerance presents a fundamentally different challenge from traini
 * **Production scale validates the theory**: Meta's OPT-175B\index{Fault Tolerance!production evidence} experienced over 35 significant hardware failures during training, Google's TPUv4 supercomputer reached 99.98 percent availability by rerouting around hardware failures, and Netflix's chaos engineering exposed resilience gaps, confirming that fault tolerance must be continuously exercised rather than assumed.
 
 :::
-
-Engineers who internalize these principles gain a diagnostic framework for reasoning about resilience at any scale. When a training run stalls, they can immediately assess whether the bottleneck is checkpoint I/O overhead, insufficient detection speed, or a failure mode that elastic training cannot absorb. When a serving system drops requests, they can trace the fault through the redundancy hierarchy to determine whether the root cause is replica health, state replication lag, or an inadequate fallback strategy. This systematic reasoning distinguishes organizations that treat fault tolerance as an afterthought from those that engineer it as a first-class system property. As ML systems continue to scale, the cost of unplanned downtime grows proportionally: a 10,000-GPU cluster idled for an hour represents tens of thousands of dollars in wasted compute, making the techniques developed in this chapter not merely best practices but economic necessities.
 
 ::: {.callout-chapter-connection title="From resilience to resource management"}
 

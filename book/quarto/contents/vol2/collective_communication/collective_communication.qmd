@@ -359,7 +359,7 @@ A data center engineer cannot predict how long it takes to send ten megabytes ac
 
 Every message our gradient sends obeys the linear cost model $T(n) = \alpha + n/\beta$—a fixed startup tax plus a per-byte transit fee. Those two terms decide every algorithm choice in this chapter.
 
-::: {#dfn-collective-communication-model-hockney-model .callout-definition title="α-β model (Hockney Model)"}
+::: {#dfn-collective-communication-model-hockney-model .callout-definition title="α-β model (Hockney model)"}
 
 ***α-β Model (Hockney Model)***\index{Alpha-Beta Model!definition} is the linear communication cost model $T(n) = \alpha + n/\beta$ that decomposes message transfer time into a fixed startup latency ($\alpha$, the per-message overhead) and a message-size-dependent bandwidth term ($n/\beta$, proportional to bytes transferred), enabling algorithm designers to predict when message fusion or gradient compression will improve throughput [@hockney1994].
 
@@ -697,7 +697,7 @@ This ladder matters because the primitive determines the synchronization shape b
 
 The contrast between AllToAll and AllReduce highlights a fundamental difference in how collective operations scale with cluster size.
 
-::: {#psp-collective-communication-alltoall-vs-allreduce-why-scale-differs .callout-perspective title="AllToAll vs. AllReduce: Why scale differs"}
+:::: {#psp-collective-communication-alltoall-vs-allreduce-why-scale-differs .callout-perspective title="AllToAll vs. AllReduce: Why scale differs"}
 
 While AllReduce scales efficiently because it can be pipelined in a ring (where each node only talks to its neighbor), AllToAll is fundamentally harder to scale.
 
@@ -711,7 +711,7 @@ In an AllToAll, every process has a unique piece of data for every other process
 
 This is why Expert Parallelism (MoE) and large-scale recommendation systems\index{Recommendation Systems} often hit a "communication wall" much earlier than standard data-parallel models. The algorithm choice (AllReduce vs. AllToAll) determines the scaling ceiling.
 
-:::
+::::
 
 To make the AllToAll pattern concrete, consider a Mixture of Experts model with 64 experts distributed across 8 GPUs (8 experts per GPU). During each forward pass, a gating network assigns each input token to one or more experts. The tokens assigned to experts on remote GPUs must be physically moved to those GPUs before computation can proceed, and the results must be moved back afterward.
 
@@ -1433,7 +1433,7 @@ class HierarchicalAllreduceCalc:
 
 **Problem**: A cluster has `{python} HierarchicalAllreduceCalc.n_nodes_str`, each with `{python} HierarchicalAllreduceCalc.gpus_per_node_str` (`{python} HierarchicalAllreduceCalc.n_gpus_total_str` total). The system must AllReduce a `{python} HierarchicalAllreduceCalc.gradient_gb_str` gradient buffer. Compare flat Ring AllReduce vs. Hierarchical AllReduce.
 
-**Flat Ring AllReduce (ignoring hierarchy)**:
+**Flat ring AllReduce (ignoring hierarchy)**:
 
 - Each GPU sends ~`{python} HierarchicalAllreduceCalc.flat_send_gb_str` total (the bandwidth-optimal Ring AllReduce formula).
 - The ring crosses node boundaries multiple times.
@@ -1523,7 +1523,11 @@ Rail-optimized routing and hierarchical AllReduce reinforce each other. In the h
 
 ::: {#exmp-collective-communication-nccl-topology-discovery .callout-example title="NCCL topology discovery"}
 
-A software library running deep inside a GPU must determine whether another GPU sits on a local NVLink switch or 100 meters away across an InfiniBand fabric. NVIDIA's Collective Communications Library (NCCL) performs a critical "topology detection" phase at initialization to map these physical realities.
+**Scenario**: A collective communication library must determine whether another GPU sits on a local NVLink switch or 100 meters away across an InfiniBand fabric.
+
+**System**: NVIDIA's Collective Communications Library (NCCL) performs a topology-detection phase at initialization to map these physical realities.
+
+**Systems lesson**: Collective performance depends on matching the communication algorithm to the physical topology. Without topology discovery, a correct AllReduce can still route traffic through the wrong links and lose most of the available bandwidth.
 
 :::
 
@@ -1669,7 +1673,7 @@ class ErrorFeedbackTrace:
 | 4        |           0.4           |           0           |             0              |         1.3         |
 | 5        |           0.3           |           0           |           **0**            |       **1.6**       |
 
-: **Naive Compression Trace (No Error Feedback)**: Five-step worked trace showing how a greedy 1-bit quantizer transmits zero whenever individual gradients fall below the threshold. {#tbl-error-feedback-naive}
+: **Naive compression trace (no error feedback)**: Five-step worked trace showing how a greedy 1-bit quantizer transmits zero whenever individual gradients fall below the threshold. {#tbl-error-feedback-naive}
 
 **Naive compression outcome**: After 5 steps, the system has transmitted `{python} ErrorFeedbackTrace.naive_str` but the true cumulative gradient is `{python} ErrorFeedbackTrace.true_str`. The parameter never updates, and `{python} ErrorFeedbackTrace.naive_loss_pct_str` of gradient information is lost.
 
@@ -1683,7 +1687,7 @@ class ErrorFeedbackTrace:
 | 4        |    0.4    |    −0.1   |       0.3       |     0     |                0.3                |         1          |
 | 5        |    0.3    |    0.3    |       0.6       |     1     |                −0.4               |       **2**        |
 
-: **Error-Feedback Compression Trace**: Same five-step sequence under error-feedback compression. {#tbl-error-feedback}
+: **Error-feedback compression trace**: Same five-step sequence under error-feedback compression. {#tbl-error-feedback}
 
 **Result**: After 5 steps, the system has transmitted `{python} ErrorFeedbackTrace.cum_str` with a remaining error of `{python} ErrorFeedbackTrace.error_str`. The true cumulative is `{python} ErrorFeedbackTrace.true_str`, so transmitted $+$ error = `{python} ErrorFeedbackTrace.conservation_str` = `{python} ErrorFeedbackTrace.true_str` ✓
 
@@ -2091,18 +2095,6 @@ The Ring and Tree AllReduce algorithms occupy opposite ends of the latency-bandw
 
 When even the fastest wires are not enough, gradient compression provides the final squeeze. Quantization, sparsification, and compression-aware optimizers like 1-bit Adam reduce communication volume by 4--1000$\times$. Error Feedback ensures that while the journey may be compressed or delayed, no vital information is permanently lost, preserving the mathematical truth of the model's convergence. Finally, communication-computation overlap through layer-by-layer pipelining and bucket fusion hides the remaining communication time behind useful computation, reducing the effective communication overhead to 5--15 percent of total step time in well-configured systems.
 
-::: {.callout-takeaways title="Every byte has a travel cost"}
-
-* **The $\alpha$-$\beta$ model reveals the bottleneck**: The critical message size $n^* = \alpha \cdot \beta$ determines whether to optimize software latency (small messages) or hardware bandwidth (large payloads). In practice, NCCL's effective $\alpha$ is 5--10$\times$ higher than wire-level latency.
-* **Algorithm choice is scale-dependent**: Ring AllReduce is bandwidth-optimal but pays $\mathcal{O}(N)$ latency; Tree AllReduce is latency-optimal ($\mathcal{O}(\log N)$) but bandwidth-inefficient. Use the log-aware crossover estimate $M_{\text{crossover}} \approx N \alpha \beta / \log_2 N$ to reason about the switch point, and treat $N\alpha\beta$ only as a coarse upper-scale heuristic.
-* **Hierarchical algorithms multiply bandwidth**: By performing local reductions over fast NVLink before crossing the slow InfiniBand bridge, hierarchical collectives effectively multiply inter-node bandwidth by the number of GPUs per node.
-* **AllToAll is the contention king**: Unlike AllReduce, AllToAll creates $\mathcal{O}(N^2)$ logical connections. This makes Expert Parallelism (MoE) and Recommendation Systems fundamentally harder to scale than dense LLMs.
-* **Error feedback makes lossy compression safe**: Sparsification can discard 99 percent of gradients, provided the "error" is accumulated locally and added to the next step. This turns biased estimators into unbiased ones over time.
-* **Overlap is the final multiplier**: Communication-computation pipelining through gradient hooks and bucket fusion can hide 90--95 percent of communication time behind backward pass computation for deep models.
-* **Topology discovery is not optional**: Modern libraries like NCCL dynamically map logical rings to physical wires to avoid "hot spots" and maximize bisection bandwidth. Misaligned rank-to-GPU mapping can degrade performance by 2--4$\times$.
-
-:::
-
 The communication traffic patterns differ fundamentally across the Lighthouse Archetypes.
 
 ::: {#lhs-collective-communication-communication-archetype-patterns .callout-lighthouse title="Communication archetype patterns"}
@@ -2115,7 +2107,7 @@ The "Travel Manifest" for a gradient depends on the system's objective function 
 | **Archetype B (DLRM at Scale)**       |        AllToAll        | Latency ($\alpha$) & Contention | Topology-aware routing; token load-balancing |
 | **Archetype C (Federated MobileNet)** |       P2P/Async        |      Connectivity & Latency     | Aggressive quantization; Error Feedback      |
 
-: **Archetype-to-Collective Mapping**: Each lighthouse archetype's communication pattern is determined by its dominant bottleneck. {#tbl-archetype-collective-mapping}
+: **Archetype-to-collective mapping**: Each lighthouse archetype's communication pattern is determined by its dominant bottleneck. {#tbl-archetype-collective-mapping}
 
 The key insight is that Archetype A and Archetype B, despite both operating at data center scale, face fundamentally different bottlenecks. Archetype A (GPT-4/Llama-3) is bandwidth-bound and benefits from hierarchical AllReduce combined with communication-computation overlap. Archetype B (DLRM at Scale) is latency-bound and benefits from low-latency switches and topology-aware AllToAll routing. Applying the wrong optimization to the wrong archetype wastes engineering effort without improving performance.
 
@@ -2124,6 +2116,18 @@ The key insight is that Archetype A and Archetype B, despite both operating at d
 The communication patterns established in this chapter reveal that distributed training is fundamentally a network engineering problem disguised as a machine learning problem. The $\alpha$-$\beta$ model provides the analytical framework for reasoning about this problem: every communication design decision, from algorithm selection to compression to overlap, can be evaluated in terms of its effect on the latency and bandwidth terms. Understanding these models and techniques transforms practitioners from users of distributed frameworks into engineers who can diagnose bottlenecks, optimize topology configurations, and achieve the scaling efficiency that determines whether trillion-parameter training runs complete in weeks or months.
 
 As clusters grow from hundreds to tens of thousands of accelerators, the communication challenges intensify. The algorithms and techniques in this chapter remain the foundation, but their interaction with fault tolerance, scheduling, and multi-tenancy introduces additional complexity that the following chapters address.
+
+::: {.callout-takeaways title="Every byte has a travel cost"}
+
+* **The $\alpha$-$\beta$ model reveals the bottleneck**: The critical message size $n^* = \alpha \cdot \beta$ determines whether to optimize software latency (small messages) or hardware bandwidth (large payloads). In practice, NCCL's effective $\alpha$ is 5--10$\times$ higher than wire-level latency.
+* **Algorithm choice is scale-dependent**: Ring AllReduce is bandwidth-optimal but pays $\mathcal{O}(N)$ latency; Tree AllReduce is latency-optimal ($\mathcal{O}(\log N)$) but bandwidth-inefficient. Use the log-aware crossover estimate $M_{\text{crossover}} \approx N \alpha \beta / \log_2 N$ to reason about the switch point, and treat $N\alpha\beta$ only as a coarse upper-scale heuristic.
+* **Hierarchical algorithms multiply bandwidth**: By performing local reductions over fast NVLink before crossing the slow InfiniBand bridge, hierarchical collectives effectively multiply inter-node bandwidth by the number of GPUs per node.
+* **AllToAll is the contention king**: Unlike AllReduce, AllToAll creates $\mathcal{O}(N^2)$ logical connections. This makes Expert Parallelism (MoE) and Recommendation Systems fundamentally harder to scale than dense LLMs.
+* **Error feedback makes lossy compression safe**: Sparsification can discard 99 percent of gradients, provided the "error" is accumulated locally and added to the next step. This turns biased estimators into unbiased ones over time.
+* **Overlap is the final multiplier**: Communication-computation pipelining through gradient hooks and bucket fusion can hide 90--95 percent of communication time behind backward pass computation for deep models.
+* **Topology discovery is not optional**: Modern libraries like NCCL dynamically map logical rings to physical wires to avoid "hot spots" and maximize bisection bandwidth. Misaligned rank-to-GPU mapping can degrade performance by 2--4$\times$.
+
+:::
 
 ::: {.callout-chapter-connection title="From logic to resilience"}
 
