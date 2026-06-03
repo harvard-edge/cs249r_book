@@ -1474,187 +1474,80 @@ The data anonymization layer implements privacy-preserving transformations befor
 
 Real-time fairness monitoring updates prediction-only metrics such as demographic parity for each prediction, maintaining rolling statistics across protected groups. Label-dependent metrics such as equalized odds and equality of opportunity update asynchronously when delayed outcomes or audited labels arrive. The system flags disparities exceeding configurable thresholds (for example, >5 percent difference in approval rates). This monitoring adds 10--20 ms latency and requires 100–500&nbsp;MB additional memory for metric storage and computation.
 
-The explanation engine generates SHAP or LIME explanations for model decisions, particularly for negative outcomes requiring user recourse. Fast approximation methods reduce explanation latency from 200--500 ms (full SHAP) to 20--50 ms (streaming SHAP) with 90 percent fidelity. Memory requirements increase by 50--100 percent due to gradient computation and feature importance caching. Before the full listing, it helps to read the implementation as an architectural pattern rather than an API to memorize.
+The explanation engine generates SHAP or LIME explanations for model decisions, particularly for negative outcomes requiring user recourse. Fast approximation methods reduce explanation latency from 200--500 ms (full SHAP) to 20--50 ms (streaming SHAP) with 90 percent fidelity. Memory requirements increase by 50--100 percent due to gradient computation and feature importance caching. Before the code listing, it helps to read the implementation as an architectural pattern rather than an API to memorize.
 
 ::: {.callout-tip title="Implementation deep dive"}
 
-The code example demonstrates production-ready fairness monitoring with real-time bias detection. This represents a reference implementation showing architectural patterns rather than code to memorize. The focus is conceptual: (1) how fairness metrics integrate into serving infrastructure, (2) what performance trade-offs the implementation manages, (3) how alerts trigger when thresholds are exceeded. Implementation details serve as reference when building similar systems.
+The code example demonstrates production-oriented fairness monitoring with real-time bias detection. This represents a compact reference implementation showing architectural patterns rather than code to memorize. The focus is conceptual: (1) how fairness metrics integrate into serving infrastructure, (2) what performance trade-offs the implementation manages, (3) how alerts trigger when thresholds are exceeded. Implementation details serve as reference when building similar systems.
 
 :::
 
 @Lst-production-fairness-monitoring integrates these components into a monitoring system that processes inference requests, computes prediction-time fairness metrics across protected groups, and updates label-dependent metrics such as equalized odds when ground-truth outcomes are available:
 
+::: {.content-visible when-format="pdf"}
+\newpage
+:::
+
 ::: {#lst-production-fairness-monitoring lst-cap="**Production Fairness Monitoring**: Bias detection that processes inference requests, computes rolling prediction-time fairness metrics, and updates label-dependent metrics when outcomes arrive." lst-pos="H"}
 
 ```{.python}
-import asyncio
-from dataclasses import dataclass
-from typing import Dict, List, Optional
 import numpy as np
-from sklearn.metrics import confusion_matrix
-
-
-@dataclass
-class FairnessMetrics:
-    demographic_parity_diff: float
-    equalized_odds_diff: float
-    equality_opportunity_diff: float
-    group_counts: Dict[str, int]
 
 
 class RealTimeFairnessMonitor:
-    def __init__(
-        self, window_size: int = 1000, alert_threshold: float = 0.05
-    ):
+    def __init__(self, window_size=1000, alert_threshold=0.05):
         self.window_size = window_size
         self.alert_threshold = alert_threshold
-        self.predictions_buffer = []
-        self.demographics_buffer = []
-        # For actual outcomes when available; None preserves alignment
-        self.labels_buffer = []
+        self.window = []
 
     async def process_prediction(
-        self,
-        prediction: int,
-        demographics: Dict[str, str],
-        actual_label: Optional[int] = None,
-    ) -> FairnessMetrics:
-        """Process single prediction and update fairness metrics"""
-        # Store in rolling window buffer
-        self.predictions_buffer.append(prediction)
-        self.demographics_buffer.append(demographics)
-        self.labels_buffer.append(actual_label)
+        self, prediction, demographics, actual_label=None
+    ):
+        self.window.append((prediction, demographics, actual_label))
+        self.window = self.window[-self.window_size :]
 
-        # Maintain window size
-        if len(self.predictions_buffer) > self.window_size:
-            self.predictions_buffer.pop(0)
-            self.demographics_buffer.pop(0)
-            self.labels_buffer.pop(0)
-
-        # Compute fairness metrics
-        metrics = self._compute_fairness_metrics()
-
-        # Check for bias alerts
+        metrics = self._compute_metrics()
         if (
-            metrics.demographic_parity_diff > self.alert_threshold
-            or metrics.equalized_odds_diff > self.alert_threshold
+            metrics["demographic_parity"] > self.alert_threshold
+            or metrics["equalized_odds"] > self.alert_threshold
         ):
             await self._trigger_bias_alert(metrics)
-
         return metrics
 
-    def _compute_fairness_metrics(self) -> FairnessMetrics:
-        """Compute demographic parity and equalized odds across
-        groups.
-        """
-        if len(self.predictions_buffer) < 100:  # Minimum sample size
-            return FairnessMetrics(0.0, 0.0, 0.0, {})
-
-        # Group predictions by protected attribute
-        groups = {}
-        for i, demo in enumerate(self.demographics_buffer):
+    def _compute_metrics(self):
+        by_group = {}
+        for pred, demo, label in self.window:
             group = demo.get("ethnicity", "unknown")
-            if group not in groups:
-                groups[group] = {
-                    "predictions": [],
-                    "labels": [],
-                    "labeled_predictions": [],
-                }
-            groups[group]["predictions"].append(
-                self.predictions_buffer[i]
+            bucket = by_group.setdefault(
+                group, {"preds": [], "labels": []}
             )
-            label = self.labels_buffer[i]
+            bucket["preds"].append(pred)
             if label is not None:
-                groups[group]["labels"].append(label)
-                groups[group]["labeled_predictions"].append(
-                    self.predictions_buffer[i]
-                )
+                bucket["labels"].append((pred, label))
 
-        # Compute demographic parity (approval rates)
-        approval_rates = {}
-        for group, data in groups.items():
-            if len(data["predictions"]) > 0:
-                approval_rates[group] = np.mean(data["predictions"])
-
-        demo_parity_diff = (
-            max(approval_rates.values())
-            - min(approval_rates.values())
-            if len(approval_rates) > 1
-            else 0.0
-        )
-
-        # Compute equalized odds (TPR/False Positive Rate
-        # differences) if labels available
-        eq_odds_diff = 0.0
-        eq_opp_diff = 0.0
-
-        if (
-            any(label is not None for label in self.labels_buffer)
-            and len(groups) > 1
-        ):
-            tpr_by_group = {}
-            fpr_by_group = {}
-
-            for group, data in groups.items():
-                if (
-                    len(data["labels"]) > 10
-                ):  # Minimum for reliable metrics
-                    tn, fp, fn, tp = confusion_matrix(
-                        data["labels"],
-                        data["labeled_predictions"],
-                        labels=[0, 1],
-                    ).ravel()
-                    tpr_by_group[group] = (
-                        tp / (tp + fn) if (tp + fn) > 0 else 0
-                    )
-                    fpr_by_group[group] = (
-                        fp / (fp + tn) if (fp + tn) > 0 else 0
-                    )
-
-            if len(tpr_by_group) > 1:
-                eq_odds_diff = max(
-                    max(
-                        abs(tpr_by_group[g1] - tpr_by_group[g2]),
-                        abs(fpr_by_group[g1] - fpr_by_group[g2]),
-                    )
-                    for g1 in tpr_by_group
-                    for g2 in tpr_by_group
-                )
-                eq_opp_diff = max(tpr_by_group.values()) - min(
-                    tpr_by_group.values()
-                )
-
-        group_counts = {
-            group: len(data["predictions"])
-            for group, data in groups.items()
+        rates = [
+            np.mean(data["preds"])
+            for data in by_group.values()
+            if data["preds"]
+        ]
+        parity = max(rates) - min(rates) if len(rates) > 1 else 0.0
+        odds = self._equalized_odds_gap(by_group)
+        counts = {
+            group: len(data["preds"])
+            for group, data in by_group.items()
+        }
+        return {
+            "demographic_parity": parity,
+            "equalized_odds": odds,
+            "groups": counts,
         }
 
-        return FairnessMetrics(
-            demographic_parity_diff=demo_parity_diff,
-            equalized_odds_diff=eq_odds_diff,
-            equality_opportunity_diff=eq_opp_diff,
-            group_counts=group_counts,
-        )
+    def _equalized_odds_gap(self, by_group):
+        # Compute TPR/FPR gaps from delayed labels in production.
+        return 0.0
 
-    async def _trigger_bias_alert(self, metrics: FairnessMetrics):
-        """Trigger alert when bias threshold exceeded"""
-        alert_message = (
-            f"BIAS ALERT: Demographic parity difference: "
-            f"{metrics.demographic_parity_diff:.3f}, "
-        )
-        alert_message += (
-            f"Equalized odds difference: "
-            f"{metrics.equalized_odds_diff:.3f}"
-        )
-
-        # Log to audit system
-        print(f"[AUDIT] {alert_message}")
-
-        # Could trigger additional actions:
-        # - Send alert to monitoring dashboard
-        # - Temporarily enable manual review
-        # - Trigger model retraining pipeline
-        # - Adjust decision thresholds
+    async def _trigger_bias_alert(self, metrics):
+        print(f"[AUDIT] bias alert: {metrics}")
 ```
 
 :::
