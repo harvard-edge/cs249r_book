@@ -4269,32 +4269,19 @@ Runtime selection and precision tuning operate at the model level: they determin
 
 ## Node-Level Optimization {#sec-model-serving-nodelevel-optimization-3d9d}
 
-At that lower layer, node-level optimization identifies which boundary is wasting time on this machine. The answer may be the computation graph\index{Graph Compilation!optimization}, CPU execution when GPUs are absent, bytes moving from disk to memory, or gaps visible only in a profiling trace. The goal is not to apply every optimization, but to match the measured bottleneck to the smallest intervention that removes it.
+At that lower layer, node-level optimization identifies which boundary is wasting time on this machine. A serving node exposes four recurring boundaries: the computation graph\index{Graph Compilation!optimization} has to become kernels, CPU execution has to exploit the processor rather than scalar Python, model bytes have to move from disk into memory during cold starts, and the host has to keep the accelerator scheduled without gaps. These are not independent checklist items. They are places where a measured trace can explain why a request path is slower than the model benchmark promised.
 
 ### Runtime graph compilation {#sec-model-serving-runtime-graph-compilation-7a7e}
 
-Inference engines like TensorRT were introduced in @sec-model-serving-inference-runtime-selection-5eef. These engines achieve 2--5$\times$ speedups through graph compilation. Training computation graphs are *dynamic and mutable*, whereas serving graphs are *static*. This static nature allows compilers to perform aggressive optimizations that would be unsafe or too slow during training.
+Inference engines like TensorRT were introduced in @sec-model-serving-inference-runtime-selection-5eef. These engines achieve 2--5$\times$ speedups because serving changes the compiler problem. Training computation graphs are *dynamic and mutable*, whereas serving graphs are usually *static*. Once shapes and operators are fixed, the compiler can spend deployment-time work to remove runtime work.
 
-#### Operator fusion {#sec-model-serving-operator-fusion-f8d2}
+The first gain is operator fusion\index{Operator Fusion!graph compilation}. Memory bandwidth often limits performance more than compute (@sec-hardware-acceleration), so a chain such as `Conv2D` -> `BiasAdd` -> `ReLU` should not write an intermediate tensor to VRAM after each operation. Fusion collapses the chain into one kernel launch, keeps intermediate values in registers or cache, and turns several global-memory round trips into one. The same static graph also enables constant folding\index{Constant Folding!compile-time optimization}\index{Optimization!compile-time, constant folding}: if a subexpression depends only on fixed weights or constants, such as `x * (sqrt(2) / 2)`, the compiler replaces it with the precomputed multiplication `x * 0.707...`. Memory planning\index{Memory Planning!tensor allocation} applies the same idea to allocation rather than arithmetic. Since the tensor lifetimes are known, the runtime can precalculate memory offsets and reuse buffers instead of allocating reactively during the request.
 
-The most potent graph-level optimization is operator fusion\index{Operator Fusion!graph compilation}. Memory bandwidth often limits performance more than compute (@sec-hardware-acceleration). Fusion collapses multiple operations (for example, `Conv2D` -> `BiasAdd` -> `ReLU`) into a single kernel launch. This keeps intermediate data in the GPU's fast L1/L2 cache or registers, avoiding round-trips to global memory (VRAM).
-
-#### Constant folding {#sec-model-serving-constant-folding-c652}
-
-Parts of the graph that depend only on model weights\index{Constant Folding!compile-time optimization}\index{Optimization!compile-time, constant folding}, which are constant during serving, can be precomputed at compile time. For example, if a model contains `x * (sqrt(2) / 2)`, the compiler replaces the division and square root with a single multiplication by `0.707...`.
-
-#### Memory planning {#sec-model-serving-memory-planning-4cef}
-
-Since the graph structure is known, the compiler can precalculate the exact memory offsets for every tensor\index{Memory Planning!tensor allocation}. This leads to a central architectural choice: whether to compile on the first request and pay a one-time latency spike, or to compile before deployment and ship the optimized graph as a static artifact.
+These optimizations lead to a deployment choice. Just-in-time compilation adapts to the shapes observed at runtime, but the first request pays the compilation penalty. Ahead-of-time compilation removes that startup spike by shipping an optimized artifact, but the deployment must explicitly cover every shape profile the service will accept.
 
 ::: {#nbk-model-serving-jit-vs-aot-compilation .callout-notebook title="JIT vs. AOT compilation"}
 
-*   **Just-In-Time (JIT)**\index{JIT Compilation!runtime optimization}: Compiles the graph the first time it is run (for example, `torch.compile`).
-    *   Pros: Optimizes for the specific input shapes seen at runtime.
-    *   Cons: First request pays a "compilation penalty" (latency spike).
-*   **Ahead-of-Time (AOT)**\index{Ahead-of-Time Compilation!predeployment}: Compiles the graph before deployment (for example, `torch.export`, TensorRT `trtexec`).
-    *   Pros: Zero compilation latency at startup; guarantees a fixed graph.
-    *   Cons: Must handle all dynamic shapes explicitly or compile multiple profiles.
+Just-in-time compilation\index{JIT Compilation!runtime optimization}, such as `torch.compile`, waits until the graph is first executed and can specialize to the shapes it observes. That specialization is useful for variable traffic, but it moves compiler work into the serving path and creates a cold-request latency spike. Ahead-of-time compilation\index{Ahead-of-Time Compilation!predeployment}, such as `torch.export` or TensorRT `trtexec`, performs the compiler work before deployment. It gives the service a fixed graph and avoids startup compilation latency, at the cost of defining all dynamic shapes explicitly or compiling multiple profiles.
 
 :::
 
@@ -4302,23 +4289,15 @@ The JIT vs. AOT choice governs GPU compilation strategy; CPU inference faces its
 
 ### CPU inference optimization {#sec-model-serving-cpu-inference-optimization-ae86}
 
-GPUs dominate the narrative, yet CPUs remain the workhorse for a vast number of inference workloads, particularly for smaller models, latency-insensitive batch jobs, or cost-constrained environments. Optimizing for the CPU requires a different mindset.
-
-#### SIMD and vectorization {#sec-model-serving-simd-vectorization-6086}
-
-Modern CPUs[^fn-simd-cpu-serving]\index{SIMD!CPU vectorization} (Intel Xeon, AMD EPYC) pack powerful vector units (AVX-512, AMX). Standard Python loops cannot use these. Specialized runtimes like OpenVINO or Intel Extension for PyTorch (IPEX) map neural network operators directly to these vector instructions, achieving order-of-magnitude speedups over vanilla implementations.
+GPUs dominate the narrative, yet CPUs remain the workhorse for many inference workloads, especially small models, latency-insensitive batch jobs, and cost-constrained environments. CPU optimization starts from a different machine model. Modern CPUs[^fn-simd-cpu-serving]\index{SIMD!CPU vectorization} (Intel Xeon, AMD EPYC) contain vector units such as AVX-512 and AMX, but a scalar Python loop cannot use them. Specialized runtimes like OpenVINO or Intel Extension for PyTorch (IPEX) map neural network operators directly to these vector instructions, achieving order-of-magnitude speedups over vanilla implementations.
 
 [^fn-simd-cpu-serving]: **SIMD (Single Instruction, Multiple Data)**: From Michael Flynn's 1966 taxonomy of computer architectures, SIMD enables one instruction to operate on multiple data elements simultaneously. Intel's AVX-512 (2016) processes 512 bits (16 floats) per instruction; AMX (2023) extends this to matrix tile operations. For CPU inference, SIMD exploitation is the primary optimization lever: naive scalar matrix multiplication achieves ~1 percent of theoretical peak, while SIMD-optimized kernels approach 80--90 percent utilization---a gap that determines whether CPU-only serving is economically viable. \index{SIMD!CPU inference}
 
-#### Thread pinning and NUMA {#sec-model-serving-thread-pinning-numa-dc2b}
-
-On multi-socket servers[^fn-numa-cpu-serving]\index{NUMA!memory locality}\index{Thread Pinning!CPU affinity}, accessing memory attached to a different CPU socket (NUMA) adds significant latency. Inference servers must be "NUMA-aware," pinning threads to specific cores and ensuring that memory allocations remain local to those cores.
+The next CPU boundary is locality. On multi-socket servers[^fn-numa-cpu-serving]\index{NUMA!memory locality}\index{Thread Pinning!CPU affinity}, accessing memory attached to a different CPU socket (NUMA) adds significant latency. An inference server must therefore be NUMA-aware: threads should be pinned to specific cores, and the model weights and input buffers those threads touch should be allocated on the same socket.
 
 [^fn-numa-cpu-serving]: **NUMA (Non-Uniform Memory Access)**: Accessing memory local to a CPU socket is faster than accessing memory attached to a different socket. Pinning an inference thread to a core is insufficient if its required memory is allocated remotely, forcing every weight access across the slower inter-socket link. This failure to co-locate threads and data imposes a ~60 percent latency overhead, as remote access takes ~130 ns vs. ~80 ns for local. \index{NUMA!inference latency}
 
-#### Small batch advantage {#sec-model-serving-small-batch-advantage-c91c}
-
-CPUs often outperform GPUs at batch size 1 for small models\index{Batching!batch, small, CPU advantage}. The overhead of launching a GPU kernel (~10 $\mu$s) and transferring data (~50 $\mu$s) can exceed the compute time for a tiny dense layer. For models under 50 MB serving single requests, a well-optimized CPU runtime often delivers lower latency than a GPU.
+This is why CPUs often outperform GPUs at batch size one for small models\index{Batching!batch, small, CPU advantage}. Launching a GPU kernel (~10 $\mu$s) and transferring data (~50 $\mu$s) can exceed the compute time for a tiny dense layer. For models under 50 MB serving single requests, a well-optimized CPU runtime can deliver lower latency than a GPU because it avoids the accelerator handoff entirely.
 
 ### Model serialization and fast loading {#sec-model-serving-fast-model-loading-1109}
 
@@ -4328,42 +4307,72 @@ The standard PyTorch `torch.load()` uses Python's `pickle` format\index{Pickle!l
 
 Building on this zero-copy principle, Safetensors[^fn-safetensors-loading]\index{Safetensors!zero-copy loading} is a modern format designed specifically for fast loading. It stores tensors as raw bytes with a minimal JSON header. This enables zero-copy\index{Zero-Copy!model loading} loading: the raw bytes on disk are mapped directly into the tensor's memory buffer.
 
+```{python}
+#| echo: false
+#| label: safetensors-loading-speed-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SAFETENSORS LOADING SPEED
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @exmp-model-serving-loading-speed-safetensors-vs-pickle and
+# │          [^fn-safetensors-loading] in Node-Level Optimization.
+# │
+# │ Goal: Keep the model-size, load-time, and storage-bandwidth values in the
+# │       loading-speed example traceable and consistently formatted.
+# │ Show: Pickle vs. Safetensors load times for Stable Diffusion v1.5.
+# │ How: Use the MLSysIM Stable Diffusion v1.5 model entry, scenario load-time
+# │      assumptions, and the Gen3 NVMe storage registry to compute the speedup.
+# │
+# │ Imports: mlsysim public API (units, Systems registry, fmt helpers, checks)
+# │ Exports: model_size_str, pickle_load_s_str, safetensors_load_s_str,
+# │          nvme_bw_gb_per_s_str, load_speedup_mult_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+
+
+class SafetensorsLoadingSpeed:
+    """Loading-speed comparison for Pickle vs. Safetensors model weights."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    model = Models.GenerativeVision.StableDiffusion_v1_5
+    model_size = model.size_in_bytes(BYTES_FP16)
+    pickle_load = 15 * second  # scenario assumption: object reconstruction path
+    safetensors_load = 0.5 * second  # scenario assumption: memory-mapped tensor path
+    nvme_bw = Systems.Storage.LocalNvmeGen3.bandwidth
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    load_speedup = pickle_load / safetensors_load
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(safetensors_load < pickle_load, "Safetensors example should load faster than Pickle.")
+    check(load_speedup.to("").magnitude > 1, "Loading speedup must exceed 1x.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    model_size_str = fmt_memory(model_size, unit=GB, precision=0, commas=False)
+    pickle_load_s_str = fmt_time(pickle_load, second, precision=0, commas=False)
+    safetensors_load_s_str = fmt_time(safetensors_load, second, precision=1, commas=False)
+    nvme_bw_gb_per_s_str = fmt_bandwidth(nvme_bw, unit=GB / second, precision=1, commas=False)
+    load_speedup_mult_str = fmt_multiple(load_speedup, precision=0, commas=False)
+```
+
 ::: {#exmp-model-serving-loading-speed-safetensors-vs-pickle .callout-example title="Loading speed: Safetensors vs. Pickle"}
 
-Loading a 5 GB Stable Diffusion model:
-
-*   **Pickle (`torch.load`)**: ~15 seconds. High CPU usage.
-*   **Safetensors**: ~0.5 seconds. Near-zero CPU usage.
-
-By using `mmap` and formats like `safetensors`, loading speed becomes limited only by the disk's read speed (for example, 3 GB/s for NVMe), rather than CPU parsing overhead.
+Loading a `{python} SafetensorsLoadingSpeed.model_size_str` Stable Diffusion model through Pickle (`torch.load`) can take about `{python} SafetensorsLoadingSpeed.pickle_load_s_str` while consuming substantial CPU time because Python has to reconstruct objects before tensors are usable. The same weights stored with Safetensors can load in about `{python} SafetensorsLoadingSpeed.safetensors_load_s_str` with near-zero CPU usage, a `{python} SafetensorsLoadingSpeed.load_speedup_mult_str` improvement in this example. By using `mmap` and formats like `safetensors`, loading speed becomes limited mainly by the disk's read speed, for example `{python} SafetensorsLoadingSpeed.nvme_bw_gb_per_s_str` for local Gen3 NVMe, rather than by CPU parsing overhead.
 
 :::
 
-[^fn-safetensors-loading]: **Safetensors**: Created by Hugging Face (released 2022), the name emphasizes safety: unlike Python's pickle format, safetensors cannot execute arbitrary code during deserialization, eliminating a class of security vulnerabilities where malicious model files could compromise a serving system. The format stores tensors as contiguous raw bytes with a minimal JSON header, enabling memory-mapped loading that achieves 30--100$\times$ faster loading than pickle. For autoscaling serving fleets, this loading speed directly reduces cold start latency---the difference between a 15-second and 0.5-second model load determines whether new replicas can absorb traffic spikes before SLOs are violated. \index{Safetensors!fast loading}
+[^fn-safetensors-loading]: **Safetensors**: The name emphasizes safety: unlike Python's pickle format, safetensors cannot execute arbitrary code during deserialization, eliminating a class of security vulnerabilities where malicious model files could compromise a serving system [@huggingface_safetensors]. The format stores tensors as contiguous raw bytes with a minimal JSON header, enabling memory-mapped loading; in the local example above, that path is `{python} SafetensorsLoadingSpeed.load_speedup_mult_str` faster than pickle. For autoscaling serving fleets, this loading speed directly reduces cold start latency: the difference between a load that takes `{python} SafetensorsLoadingSpeed.pickle_load_s_str` and one that takes `{python} SafetensorsLoadingSpeed.safetensors_load_s_str` determines whether new replicas can absorb traffic spikes before SLOs are violated. \index{Safetensors!fast loading}
 
 ### Profiling the serving node {#sec-model-serving-profiling-serving-node-1e99}
 
-Optimization without measurement is guesswork. The system efficiency metric defined in @eq-system-efficiency provides the target: maximizing the fraction of wall-clock time the accelerator spends on useful computation. Achieving that target requires visualizing the execution flow to find where time is lost.
+Optimization without measurement is guesswork. The system efficiency metric defined in @eq-system-efficiency provides the target: maximizing the fraction of wall-clock time the accelerator spends on useful computation. Tools\index{Timeline Profiling!serving optimization} like PyTorch Profiler\index{Framework Profiler!timeline analysis} or NVIDIA Nsight Systems (nsys)\index{GPU Profiler!timeline analysis} make that target visible by showing the exact sequence of events on the CPU and GPU.
 
-#### The timeline view {#sec-model-serving-timeline-view-6159}
-
-Tools\index{Timeline Profiling!serving optimization} like PyTorch Profiler\index{Framework Profiler!timeline analysis} or NVIDIA Nsight Systems (nsys)\index{GPU Profiler!timeline analysis} generate a timeline trace. This visualization reveals the exact sequence of events on the CPU and GPU. A useful trace reading is bottleneck-first: each visible artifact points to a different class of fix.
-
-1.  **Gaps in the GPU timeline**: Empty spaces in the GPU bar indicate idle hardware. This usually means the GPU is waiting for the CPU (preprocessing bottleneck) or disk (data loading).
-2.  **Kernel launch overhead**: Thousands of tiny slivers on the GPU timeline indicate the model is launching too many small kernels. This is a prime candidate for operator fusion.
-3.  **Host-to-device transfers**: `MemcpyHtoD` (Host to Device) blocks reveal input movement. The diagnostic distinction is whether those transfers overlap with computation or block it.
+A useful trace reading is bottleneck-first. Empty spaces in the GPU bar mean idle hardware, usually because the GPU is waiting for CPU preprocessing or disk I/O. Thousands of tiny GPU slivers indicate excessive kernel launches and point toward operator fusion or graph compilation. `MemcpyHtoD` blocks expose host-to-device movement; the diagnostic question is whether those transfers overlap with computation or block it. The timeline therefore converts a vague complaint about slow serving into a concrete boundary in the request path.
 
 ::: {#exmp-model-serving-profiling-loop .callout-example title="The profiling loop"}
 
-1.  **Capture**: Run a warmup, then capture a trace of ten to fifty requests.
-2.  **Visualize**: Open the trace in a viewer (Chrome Tracing, Nsight).
-3.  **Identify**: Find the largest gap or the longest block.
-4.  **Optimize**: Apply a specific fix (for example, fusion, pinning).
-5.  **Verify**: Re-capture and confirm the gap is gone.
+Run a warmup, capture a trace of ten to fifty representative requests, and open the trace in Chrome Tracing, Nsight, or the runtime's profiler. The largest gap or longest block identifies the first intervention: fusion for kernel-launch fragmentation, pinning for CPU locality, zero-copy loading for startup, or scheduling changes for host-device stalls. After applying the fix, capture the trace again. The loop ends only when the targeted gap has actually disappeared.
 
 :::
-
-#### Optimization technique impact matrix {#sec-model-serving-optimization-technique-impact-matrix-7c1e}
 
 @Tbl-optimization-impact is a decision aid rather than a checklist: choose the technique whose target metric matches the measured bottleneck, not the row with the largest typical gain.
 
@@ -4377,11 +4386,11 @@ Tools\index{Timeline Profiling!serving optimization} like PyTorch Profiler\index
 
 : **Node-Level Optimization Impact**: A decision matrix for selecting optimization techniques. High-impact techniques like quantization often carry higher implementation costs (calibration data requirements), while architectural changes like zero-copy loading offer dramatic gains for specific metrics (startup time) with low effort. {#tbl-optimization-impact tbl-colwidths="[18,22,17,20,23]"}
 
-This hierarchy of impact guides where to invest engineering effort. A layered checkpoint keeps that prioritization tied to the serving stack.
+This hierarchy of impact guides where to invest engineering effort. A layered checkpoint keeps that prioritization tied to the serving stack, from request transport down to fused kernels.
 
 ::: {#chk-model-serving-optimization-hierarchy .callout-checkpoint title="The optimization hierarchy"}
 
-Optimizing inference requires a layered approach.
+Optimizing inference follows the request path from the outside in.
 
 *The stack*
 
