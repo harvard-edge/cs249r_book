@@ -384,15 +384,16 @@ Deep migration tasks:
 Path: `labs/vol1/lab_16_ml_conclusion.py`
 
 Current status:
-- [x] Baseline track/report panel installed.
+- [x] Deep track-aware capstone structure installed.
+- [x] Track selector, source trace, ledger replay, sensitivity audit, memo report export installed.
 
 Deep migration tasks:
-- [ ] Make the capstone synthesize the selected track across prior Volume I decisions.
-- [ ] Add ledger reader/helper if cross-lab decisions need normalized access.
-- [ ] Track examples should summarize the student's chosen device/service constraints.
-- [ ] Add final architecture report fields that reference prior lab evidence.
-- [ ] Confirm missing ledger entries degrade gracefully.
-- [ ] Add tests for any ledger summary helper.
+- [x] Make the capstone synthesize the selected track across prior Volume I decisions.
+- [x] Add ledger reader/helper if cross-lab decisions need normalized access.
+- [x] Track examples should summarize the student's chosen device/service constraints.
+- [x] Add final architecture report fields that reference prior lab evidence.
+- [x] Confirm missing ledger entries degrade gracefully.
+- [x] Add tests for any ledger summary helper.
 
 ## Volume II Labs
 

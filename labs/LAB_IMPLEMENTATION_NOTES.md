@@ -1271,3 +1271,54 @@ Tests or checks run:
 - `python3 -m pytest labs/tests/test_engine.py -k "lab_15_responsible_engr" -q`
 - `python3 -m pytest labs/tests/test_responsibility_helpers.py labs/tests/test_lab_variants.py labs/tests/test_static.py -q`
 - `git diff --check`
+
+### 2026-06-03 - V1-16 Architect's Audit Deep Track Migration
+
+Lab:
+- `labs/vol1/lab_16_ml_conclusion.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/capstone.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_capstone_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/vol1/lab_16_ml_conclusion.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.capstone`, a shared helper layer for ledger replay with track presets, sensitivity audits, and architecture memo packaging.
+- Added hand-authored V1-16 variants with track-specific architecture components, prior-decision presets, sensitivity thresholds, revision options, top risks, durable principles, and validation tests.
+- Replaced the old H100/Llama-only capstone with a selected-track architecture audit: ledger replay, architecture map, sensitivity audit, final revision memo, ledger metadata, and local report export.
+- Missing ledger entries now degrade gracefully by using labeled track presets instead of pretending the evidence exists.
+- Rebuilt the browser helper wheel and extended the wheel contract to include `mlsysbook_labs/capstone.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required. The lab resolves:
+  - `Hardware.Mobile.iPhone15Pro` + `Models.Vision.MobileNetV2`
+  - `Hardware.Tiny.OuraRing` + `Models.Tiny.DS_CNN`
+  - `Hardware.Edge.RoboTaxi` + `Models.Vision.YOLOv8_Nano`
+  - `Hardware.Cloud.H100` + `Models.Language.Llama2_70B`
+- Track-specific prior decisions, capstone sensitivity thresholds, and memo risks live in typed V1-16 variants.
+
+Notebook-local constants removed:
+- H100/Jetson/Llama capstone constants, class-median prediction profiles, notebook-local constraint cascade formulas, and the legacy migration shell were removed from V1-16.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.capstone` can be reused by Volume II capstones or any lab that needs ledger replay, preset fallback labeling, sensitivity scoring, or memo packaging.
+
+Plan updates needed in other labs:
+- Volume II labs should keep ledger/report fields structured enough for future capstones to replay them.
+- V2-17 can reuse the capstone helper rather than creating a separate ledger summarizer.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_16_ml_conclusion.py labs/mlsysbook_labs/capstone.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "lab_16_ml_conclusion" -q`
+- `python3 -m pytest labs/tests/test_capstone_helpers.py labs/tests/test_lab_variants.py labs/tests/test_static.py -q`
+- `git diff --check`

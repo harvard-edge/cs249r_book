@@ -205,6 +205,19 @@ def test_v1_15_variants_define_responsibility_defaults():
         assert variant.assumptions["report_artifact"] == "responsible engineering decision memo"
 
 
+def test_v1_16_variants_define_capstone_defaults():
+    for variant in list_lab_variants("v1_16_architects_audit"):
+        assert "architecture_goal" in variant.defaults
+        assert "architecture_components" in variant.defaults
+        assert "prior_decisions" in variant.defaults
+        assert "sensitivity_defaults" in variant.defaults
+        assert "revision_options" in variant.defaults
+        assert "top_risks" in variant.defaults
+        assert "durable_principle" in variant.defaults
+        assert "validation_tests" in variant.defaults
+        assert variant.assumptions["report_artifact"] == "Volume I architecture memo"
+
+
 def test_v2_06_variants_define_collective_defaults():
     for variant in list_lab_variants("v2_06_collective_communication"):
         assert "operation" in variant.defaults
