@@ -6322,16 +6322,26 @@ class ValidateCommand:
         for f in files:
             for v in mod.scan_file(f, allowlist):
                 snippet = v.raw_line if len(v.raw_line) <= 160 else v.raw_line[:157] + "..."
+                if getattr(v, "kind", "") == "term_head_case":
+                    code = "footnote_term_head_case"
+                    message = (
+                        f"Footnote term head has lowercase significant word(s): "
+                        f"{v.detail}; use Title Case or preserve only canonical "
+                        f"lowercase API/math/unit tokens"
+                    )
+                else:
+                    code = "footnote_lowercase_first_letter"
+                    message = (
+                        f"Footnote opens with lowercase {v.first_char!r}; "
+                        f"capitalize, or add the id to footnote_caps_allowlist.txt "
+                        f"if the lowercase is canonical (brand/math/SI)"
+                    )
                 issues.append(
                     ValidationIssue(
                         file=self._relative_file(f),
                         line=v.line_no,
-                        code="footnote_lowercase_first_letter",
-                        message=(
-                            f"Footnote opens with lowercase {v.first_char!r}; "
-                            f"capitalize, or add the id to footnote_caps_allowlist.txt "
-                            f"if the lowercase is canonical (brand/math/SI)"
-                        ),
+                        code=code,
+                        message=message,
                         severity="error",
                         context=snippet,
                     )
