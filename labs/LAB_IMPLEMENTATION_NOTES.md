@@ -1707,3 +1707,52 @@ Plan updates needed in other labs:
 Tests or checks run:
 - `python3 -m py_compile labs/vol1/lab_07_ml_frameworks.py labs/mlsysbook_labs/frameworks.py labs/mlsysbook_labs/variants.py labs/mlsysbook_labs/__init__.py`
 - `python3 -m pytest labs/tests/test_engine.py -k "lab_07_ml_frameworks" -q`
+
+### 2026-06-03 - V1-08 Training Gauntlet Deep Track Migration
+
+Lab:
+- `labs/vol1/lab_08_model_train.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/training.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_training_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/vol1/lab_08_model_train.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.training`, a shared helper layer for training/adaptation strategies, memory stacks, batch feasibility frontiers, and training plan memos.
+- Added hand-authored V1-08 variants with track-specific training locations, strategy options, memory/throughput budgets, validation tests, deployment handoff text, and report artifact metadata.
+- Replaced the old H100/V100/A100/Jetson training notebook with a selected-track Training Gauntlet lab: dominant-memory prediction, memory stack chart, batch frontier, training/adaptation strategy recommendation, ledger save, and local report export.
+- Extended the wheel contract to include `mlsysbook_labs/training.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM hardware facts were required. The lab resolves:
+  - `Hardware.Mobile.iPhone15Pro` + `Models.Vision.MobileNetV2`
+  - `Hardware.Tiny.OuraRing` + `Models.Tiny.DS_CNN`
+  - `Hardware.Edge.RoboTaxi` + `Models.Vision.YOLOv8_Nano`
+  - `Hardware.Cloud.H100` + `Models.Language.GPT2`
+- Track-specific training strategy assumptions, batch/frontier budgets, deployment handoff text, and validation requirements live in typed V1-08 variants.
+
+Notebook-local constants removed:
+- Fixed cloud accelerator constants, optimizer byte tables, GPT-only memory examples, and pipeline/communication formulas were removed from V1-08.
+- Displayed weights, gradients, optimizer state, activations, data batch memory, throughput, feasibility, hidden cost, and validation location now come from `mlsysbook_labs.training`.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.training` can be reused by distributed training, collective communication, operations, and sustainability labs that need training memory, checkpointing, adaptation, or deployment handoff evidence.
+
+Plan updates needed in other labs:
+- V2-05 distributed training should reuse training strategy and memory-stack terminology when introducing data/model/pipeline parallelism.
+- V1-14 operations should reference V1-08 deployment handoff when retraining cadence decisions create release and validation risk.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_08_model_train.py labs/mlsysbook_labs/training.py labs/mlsysbook_labs/variants.py labs/mlsysbook_labs/__init__.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "lab_08_model_train" -q`

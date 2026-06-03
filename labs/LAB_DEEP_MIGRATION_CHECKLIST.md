@@ -236,18 +236,18 @@ Deep migration tasks:
 Path: `labs/vol1/lab_08_model_train.py`
 
 Current status:
-- [x] Baseline track/report panel installed.
+- [x] Deep track-aware training migration installed.
 
 Deep migration tasks:
-- [ ] Separate training environment from deployment environment for each track.
-- [ ] Add shared training budget/cost helper if needed.
-- [ ] Track examples:
+- [x] Separate training environment from deployment environment for each track.
+- [x] Add shared training budget/cost helper if needed.
+- [x] Track examples:
   - iPhone: train centrally, personalize lightly on device if appropriate.
   - Oura Ring: train centrally, deploy tiny model, maybe adapt thresholds.
   - RoboTaxi: simulation/fleet retraining loop.
   - Cloud Fleet: large-scale distributed training and evaluation.
-- [ ] Show compute, data, and evaluation bottlenecks by track.
-- [ ] Update report with training strategy and deployment handoff risk.
+- [x] Show compute, data, and evaluation bottlenecks by track.
+- [x] Update report with training strategy and deployment handoff risk.
 
 ### V1-09 - Selection Paradox
 

@@ -257,6 +257,7 @@ class TestWheelConsistency:
             "mlsysbook_labs/inference.py",
             "mlsysbook_labs/schemas.py",
             "mlsysbook_labs/tracks.py",
+            "mlsysbook_labs/training.py",
             "mlsysbook_labs/triad.py",
             "mlsysbook_labs/variants.py",
             "mlsysbook_labs/workflow.py",

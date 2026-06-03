@@ -221,6 +221,24 @@ def test_v1_07_variants_define_framework_defaults():
         assert variant.assumptions["report_artifact"] == "runtime deployment recommendation"
 
 
+def test_v1_08_variants_define_training_defaults():
+    for variant in list_lab_variants("v1_08_training_gauntlet"):
+        assert "training_story" in variant.defaults
+        assert "workload_label" in variant.defaults
+        assert "default_batch_size" in variant.defaults
+        assert "batch_min" in variant.defaults
+        assert "batch_max" in variant.defaults
+        assert "sample_mb" in variant.defaults
+        assert "activation_mb_per_mparam" in variant.defaults
+        assert "training_memory_budget_mb" in variant.defaults
+        assert "throughput_budget_samples_s" in variant.defaults
+        assert "quality_floor_pct" in variant.defaults
+        assert "deployment_handoff" in variant.defaults
+        assert "strategy_options" in variant.defaults
+        assert "validation_tests" in variant.defaults
+        assert variant.assumptions["report_artifact"] == "training feasibility plan"
+
+
 def test_v1_11_variants_define_roofline_defaults():
     for variant in list_lab_variants("v1_11_hardware_roofline"):
         assert "matrix_dim" in variant.defaults
