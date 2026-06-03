@@ -4251,38 +4251,13 @@ For most production systems, two-choices provides the best trade-off between per
 
 ### Circuit breakers and backpressure {#sec-inference-scale-circuit-breakers-backpressure-e61c}
 
-When servers become overloaded, routing more requests exacerbates the problem. Circuit breakers and backpressure mechanisms protect the system from cascading failures.
+When a GPU inference server slows down, routing more requests to it can turn a local slowdown into a fleet-wide failure. Thermal throttling is a typical trigger: a replica that normally serves a request in 50 ms begins taking 500 ms, queues fill behind it, client timeouts generate retries, and those retries push load onto neighboring replicas. The load balancer needs a way to stop treating that replica as merely slow and start treating it as unavailable.
 
-**Circuit breaker pattern**\index{Circuit Breaker!circuit breaker pattern}[^fn-circuit-breaker-serving] [@nygard2007releaseit]:
+The **circuit breaker pattern**\index{Circuit Breaker!circuit breaker pattern}[^fn-circuit-breaker-serving] [@nygard2007releaseit] provides that control. In the closed state, the server receives normal traffic. When error rate, timeout rate, or latency exceeds a threshold, the breaker opens and requests fail fast or route elsewhere instead of waiting behind a saturated queue. After a recovery interval, the breaker becomes half-open: it admits a small number of probe requests, closes if they succeed, and reopens if they fail. The important systems property is bounded blast radius. The failed replica loses traffic quickly enough that its queue cannot export overload to the rest of the fleet.
 
 [^fn-circuit-breaker-serving]: **Circuit Breaker**: Named after the electrical safety device that cuts current before wires overheat. In inference serving, the three-state machine (closed, open, half-open) prevents a single overloaded GPU replica from cascading failure to the entire fleet: once error rate exceeds threshold, the breaker opens and fails requests fast (microseconds) rather than waiting for timeout (seconds), protecting upstream callers and preserving capacity for healthy replicas. \index{Circuit Breaker!serving}
 
-```
-States: CLOSED → OPEN → HALF-OPEN → CLOSED
-
-CLOSED: Normal operation, route requests
-OPEN: Server unhealthy, immediately reject requests
-HALF-OPEN: Allow limited requests to test recovery
-
-Transitions:
-
-- CLOSED → OPEN: Error rate exceeds threshold (e.g., 50%)
-- OPEN → HALF-OPEN: After timeout (e.g., 30s)
-- HALF-OPEN → CLOSED: Test requests succeed
-- HALF-OPEN → OPEN: Test requests fail
-```
-
-Backpressure propagation complements circuit breakers. When servers are overloaded, they signal upstream to reduce the request rate:
-
-```
-Server queue depth > threshold
-    → Return 503 Service Unavailable
-    → Load balancer marks server as degraded
-    → Routes fewer requests to this server
-    → If all servers degraded, apply admission control
-```
-
-Without these mechanisms, a single degraded server can trigger a chain reaction that takes down the entire serving fleet. Circuit breakers and backpressure convert that chain reaction into a contained local failure.
+Backpressure propagation complements the breaker by making overload visible upstream. When queue depth crosses a threshold, the server returns a signal such as `503 Service Unavailable`; the load balancer marks the replica as degraded and routes fewer requests to it. If all replicas become degraded, the system shifts from routing control to admission control, rejecting some requests at the edge rather than accepting work it cannot serve within the latency SLO. Circuit breakers isolate unhealthy replicas; backpressure tells the rest of the system to slow down before retries amplify the failure.
 
 ::: {#exmp-inference-cascading-failure-prevention .callout-example title="Cascading failure prevention"}
 
