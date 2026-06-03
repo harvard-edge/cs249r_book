@@ -123,6 +123,27 @@ def test_v1_02_variants_define_deployment_envelopes():
         assert variant.assumptions["report_artifact"] == "physics-of-deployment memo"
 
 
+def test_v1_03_variants_define_workflow_defaults():
+    for variant in list_lab_variants("v1_03_constraint_tax"):
+        assert "constraint_name" in variant.defaults
+        assert "failure_story" in variant.defaults
+        assert "stage_names" in variant.defaults
+        assert "default_discovery_stage" in variant.defaults
+        assert "recommended_gate_stage" in variant.defaults
+        assert "base_rework_days" in variant.defaults
+        assert "base_cycle_days" in variant.defaults
+        assert "base_residual_risk_pct" in variant.defaults
+        assert "min_residual_risk_pct" in variant.defaults
+        assert "default_validation_depth_pct" in variant.defaults
+        assert "default_automation_pct" in variant.defaults
+        assert "default_hardware_realism_pct" in variant.defaults
+        assert "default_data_scale_pct" in variant.defaults
+        assert "gate_options" in variant.defaults
+        assert "release_policies" in variant.defaults
+        assert "rollback_rules" in variant.defaults
+        assert variant.assumptions["report_artifact"] == "workflow policy memo"
+
+
 def test_v1_11_variants_define_roofline_defaults():
     for variant in list_lab_variants("v1_11_hardware_roofline"):
         assert "matrix_dim" in variant.defaults

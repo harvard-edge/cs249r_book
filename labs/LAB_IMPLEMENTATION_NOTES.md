@@ -1462,3 +1462,52 @@ Tests or checks run:
 - `python3 -m py_compile labs/vol1/lab_02_ml_systems.py labs/mlsysbook_labs/deployment.py labs/mlsysbook_labs/variants.py labs/mlsysbook_labs/__init__.py`
 - `python3 -m pytest labs/tests/test_engine.py -k "lab_02_ml_systems" -q`
 - `python3 -m pytest labs/tests/test_deployment_helpers.py labs/tests/test_lab_variants.py labs/tests/test_static.py -q`
+
+### 2026-06-03 - V1-03 Constraint Tax Deep Track Migration
+
+Lab:
+- `labs/vol1/lab_03_ml_workflow.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/workflow.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_workflow_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/vol1/lab_03_ml_workflow.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.workflow`, a shared helper layer for workflow gate metadata, constraint-tax rework costs, iteration-time versus residual-risk estimates, and workflow policy packaging.
+- Added hand-authored V1-03 variants with track-specific late-discovery stories, lifecycle stage names, gate options, release policies, rollback rules, and report artifact metadata.
+- Replaced the old DR/ESP32-only notebook with a selected-track workflow policy lab: gate timing prediction, rework cost table, iteration frontier, release policy choice, ledger save, and local report export.
+- Extended the wheel contract to include `mlsysbook_labs/workflow.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required. The lab resolves:
+  - `Hardware.Mobile.iPhone15Pro` + `Models.Vision.MobileNetV2`
+  - `Hardware.Tiny.OuraRing` + `Models.Tiny.DS_CNN`
+  - `Hardware.Edge.RoboTaxi` + `Models.Vision.YOLOv8_Nano`
+  - `Hardware.Cloud.H100` + `Models.Language.BERT_Base`
+- Track-specific workflow gates, late-discovery stories, and release/rollback policies live in typed V1-03 variants.
+
+Notebook-local constants removed:
+- ESP32/ResNet fixed scenario constants, generic lifecycle costs, and local feedback-loop formulas were removed from V1-03.
+- Rework, iteration risk, and policy evidence now come from `mlsysbook_labs.workflow`.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.workflow` can be reused by operations, monitoring, and capstone labs that need workflow gates, late-discovery cost, release policy, or rollback evidence.
+
+Plan updates needed in other labs:
+- V1-14 operations can reuse workflow policy naming for rollback and retraining gates.
+- V1-16 capstone can interpret V1-03 ledger entries as workflow-policy evidence rather than generic predictions.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_03_ml_workflow.py labs/mlsysbook_labs/workflow.py labs/mlsysbook_labs/variants.py labs/mlsysbook_labs/__init__.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "lab_03_ml_workflow" -q`

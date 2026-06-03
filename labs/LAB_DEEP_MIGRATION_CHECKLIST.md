@@ -154,12 +154,12 @@ Current status:
 - [x] Baseline track/report panel installed.
 
 Deep migration tasks:
-- [ ] Identify where the workflow creates hidden constraint tax for each track.
-- [ ] Add shared workflow-stage descriptors if they are reused by later labs.
-- [ ] Add track-specific examples for data collection, validation, deployment, and monitoring.
-- [ ] Make the final decision differ by track rather than only by generic workflow stage.
-- [ ] Ensure the report captures the most expensive workflow constraint and the mitigation plan.
-- [ ] Add tests for any shared workflow or ledger serialization helper.
+- [x] Identify where the workflow creates hidden constraint tax for each track.
+- [x] Add shared workflow-stage descriptors if they are reused by later labs.
+- [x] Add track-specific examples for data collection, validation, deployment, and monitoring.
+- [x] Make the final decision differ by track rather than only by generic workflow stage.
+- [x] Ensure the report captures the most expensive workflow constraint and the mitigation plan.
+- [x] Add tests for any shared workflow or ledger serialization helper.
 
 ### V1-04 - Data Gravity
 
