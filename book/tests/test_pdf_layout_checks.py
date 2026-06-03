@@ -291,3 +291,85 @@ def test_collision_csv_is_machine_readable(capsys):
     out = capsys.readouterr().out
     assert "chapter,sheet,label,band,y,snippet" in out
     assert "Inference at Scale,74,66,footer,688.4" in out
+
+
+# --------------------------------------------------------------------------
+# table-only layout audit extraction — pure, no Quarto/PDF render needed
+# --------------------------------------------------------------------------
+
+class _Cfg:
+    def __init__(self, root):
+        self.root_dir = root
+        self.book_dir = root / "book" / "quarto"
+
+
+def test_pipe_table_extraction_preserves_label_colwidths_and_source(tmp_path):
+    qmd_dir = (
+        tmp_path
+        / "book"
+        / "quarto"
+        / "contents"
+        / "vol2"
+        / "inference"
+    )
+    qmd_dir.mkdir(parents=True)
+    qmd = qmd_dir / "inference.qmd"
+    qmd.write_text(
+        "\n".join([
+            "# Inference",
+            "",
+            "| **Phase** | **Duration** |",
+            "|:----------|-------------:|",
+            "| Startup   | 5s           |",
+            "| Warmup    | 15s          |",
+            "",
+            ": **Cold-Start Timeline**: Per-phase duration. "
+            "{#tbl-cold-start tbl-colwidths=\"[60,40]\"}",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+
+    entries = LayoutCommand(_Cfg(tmp_path), None)._extract_pipe_tables(qmd)
+
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry.label == "tbl-cold-start"
+    assert entry.source_file == "contents/vol2/inference/inference.qmd"
+    assert entry.source_line == 8
+    assert entry.columns == 2
+    assert entry.rows == 2
+    assert entry.has_colwidths is True
+    assert entry.colwidths == "[60,40]"
+    assert "Cold-Start Timeline" in entry.caption
+
+
+def test_pipe_table_extraction_ignores_uncaptioned_tables(tmp_path):
+    qmd_dir = tmp_path / "book" / "quarto" / "contents" / "vol2" / "ops"
+    qmd_dir.mkdir(parents=True)
+    qmd = qmd_dir / "ops.qmd"
+    qmd.write_text(
+        "| A | B |\n|---|---|\n| 1 | 2 |\n\nNo caption here.\n",
+        encoding="utf-8",
+    )
+
+    assert LayoutCommand(_Cfg(tmp_path), None)._extract_pipe_tables(qmd) == []
+
+
+def test_static_table_warnings_flag_dense_tables_not_simple_defaults():
+    dense = LayoutCommand._static_table_warnings(
+        columns=5,
+        rows=6,
+        max_cell_chars=48,
+        has_colwidths=False,
+    )
+    simple = LayoutCommand._static_table_warnings(
+        columns=2,
+        rows=4,
+        max_cell_chars=20,
+        has_colwidths=True,
+    )
+
+    assert "wide-dense-table-without-colwidths" in dense
+    assert "many-columns-without-colwidths" in dense
+    assert "simple-table-has-colwidths-review-necessity" in simple
