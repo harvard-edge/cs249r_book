@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import html
 from dataclasses import asdict
-from typing import Any
+from typing import Any, Mapping
 
 import marimo as mo
 
@@ -130,6 +130,64 @@ ACADEMIC_LAB_CSS = mo.Html(
   margin-left: auto;
   margin-right: auto;
 }
+.mlsysbook-list {
+  margin: 8px 0 0 0;
+  padding-left: 20px;
+}
+.mlsysbook-list li {
+  margin: 6px 0;
+  line-height: 1.5;
+}
+.mlsysbook-status {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-size: 0.72rem;
+  font-weight: 750;
+  background: #EEF2F6;
+  color: #344054;
+}
+.mlsysbook-status.is-progress {
+  background: #EAF2FF;
+  color: var(--mlsysbook-blue);
+}
+.mlsysbook-status.is-ok {
+  background: #ECFDF3;
+  color: var(--mlsysbook-ok);
+}
+.mlsysbook-status.is-warn {
+  background: #FFF7E6;
+  color: var(--mlsysbook-warn);
+}
+.mlsysbook-status.is-danger {
+  background: #FEF3F2;
+  color: var(--mlsysbook-danger);
+}
+.mlsysbook-part-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+}
+.mlsysbook-part-title h2 {
+  margin-bottom: 0;
+}
+.mlsysbook-source-summary {
+  color: #475467;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  margin: 4px 0 10px 0;
+}
+.mlsysbook-source-trace details {
+  border-top: 1px solid #EDF0F5;
+  padding-top: 10px;
+}
+.mlsysbook-source-trace summary {
+  cursor: pointer;
+  color: var(--mlsysbook-blue);
+  font-weight: 750;
+}
 .lab-hud {
   width: min(var(--mlsysbook-readable-width), 100%) !important;
   max-width: min(var(--mlsysbook-readable-width), 100%) !important;
@@ -199,9 +257,108 @@ marimo-callout-output {
 """
 )
 
+COMPLETION_STATES = (
+    "not_started",
+    "prediction_saved",
+    "evidence_viewed",
+    "checkpoint_saved",
+    "decision_complete",
+)
+
+_COMPLETION_LABELS = {
+    "not_started": "Not Started",
+    "prediction_saved": "Prediction Saved",
+    "evidence_viewed": "Evidence Viewed",
+    "checkpoint_saved": "Checkpoint Saved",
+    "decision_complete": "Decision Complete",
+}
+
+_STATUS_CLASSES = {
+    "not_started": "",
+    "prediction_saved": "is-progress",
+    "evidence_viewed": "is-progress",
+    "checkpoint_saved": "is-ok",
+    "decision_complete": "is-ok",
+}
+
+_CONSTRAINT_LABELS = {
+    "pass": "Pass",
+    "ok": "Pass",
+    "warn": "Watch",
+    "warning": "Watch",
+    "fail": "Fails",
+    "failure": "Fails",
+    "danger": "Fails",
+}
+
+_CONSTRAINT_CLASSES = {
+    "pass": "is-ok",
+    "ok": "is-ok",
+    "warn": "is-warn",
+    "warning": "is-warn",
+    "fail": "is-danger",
+    "failure": "is-danger",
+    "danger": "is-danger",
+}
+
 
 def _accent(volume: str) -> str:
     return "#1F407A" if "II" in volume or volume.strip() == "2" else "#A51C30"
+
+
+def _items(values: Any) -> tuple[Any, ...]:
+    if values is None:
+        return ()
+    if isinstance(values, str):
+        return (values,)
+    return tuple(values)
+
+
+def _render_list(values: Any) -> str:
+    return "".join(f"<li>{html.escape(str(value))}</li>" for value in _items(values))
+
+
+def _render_fields(items: Mapping[str, Any]) -> str:
+    rows = []
+    for key, value in items.items():
+        if isinstance(value, Mapping):
+            value = "; ".join(f"{nested_key}: {nested_value}" for nested_key, nested_value in value.items())
+        elif isinstance(value, (list, tuple, set)):
+            value = ", ".join(str(item) for item in value)
+        rows.append(
+            f'<div class="mlsysbook-field"><strong>{html.escape(str(key).replace("_", " "))}</strong>{html.escape(str(value))}</div>'
+        )
+    return "".join(rows)
+
+
+def _part_value(part: Any, *keys: str, default: str = "") -> str:
+    for key in keys:
+        if isinstance(part, Mapping) and key in part:
+            return str(part[key])
+        if hasattr(part, key):
+            return str(getattr(part, key))
+    return default
+
+
+def _part_heading(part: str, concept: str) -> str:
+    label = part.strip()
+    if not label.lower().startswith("part "):
+        label = f"Part {label}"
+    if concept:
+        return f"{label} - {concept.strip()}"
+    return label
+
+
+def _completion_status(status: str) -> tuple[str, str]:
+    normalized = str(status or "not_started").strip().lower().replace("-", "_").replace(" ", "_")
+    if normalized not in COMPLETION_STATES:
+        normalized = "not_started"
+    return _COMPLETION_LABELS[normalized], _STATUS_CLASSES[normalized]
+
+
+def _constraint_status(status: str) -> tuple[str, str]:
+    normalized = str(status or "pass").strip().lower().replace("-", "_").replace(" ", "_")
+    return _CONSTRAINT_LABELS.get(normalized, str(status).strip().title()), _CONSTRAINT_CLASSES.get(normalized, "")
 
 
 def lab_header(metadata: LabMetadata, subtitle: str, *, chips: tuple[str, ...] = ()) -> mo.Html:
@@ -224,6 +381,20 @@ def lab_header(metadata: LabMetadata, subtitle: str, *, chips: tuple[str, ...] =
       {chip_html}
     </div>
   </div>
+</div>
+"""
+    )
+
+
+def learning_objectives(objectives: tuple[str, ...] | list[str]) -> mo.Html:
+    """Render the required measurable objectives block."""
+    return mo.Html(
+        f"""
+<div class="mlsysbook-panel">
+  <h2>Learning Objectives</h2>
+  <ol class="mlsysbook-list">
+    {_render_list(objectives)}
+  </ol>
 </div>
 """
     )
@@ -260,10 +431,7 @@ def chapter_recap(recap: ChapterRecap) -> mo.Html:
 
 
 def scenario_brief(title: str, stakeholder: str, objective: str, constraints: dict[str, Any]) -> mo.Html:
-    rows = "".join(
-        f'<div class="mlsysbook-field"><strong>{html.escape(str(k))}</strong>{html.escape(str(v))}</div>'
-        for k, v in constraints.items()
-    )
+    rows = _render_fields(constraints)
     return mo.Html(
         f"""
 <div class="mlsysbook-panel">
@@ -271,6 +439,39 @@ def scenario_brief(title: str, stakeholder: str, objective: str, constraints: di
   <div class="mlsysbook-callout"><strong>Stakeholder:</strong> {html.escape(stakeholder)}</div>
   <div class="mlsysbook-callout"><strong>Objective:</strong> {html.escape(objective)}</div>
   <div class="mlsysbook-grid">{rows}</div>
+</div>
+"""
+    )
+
+
+def lab_map(parts: tuple[Mapping[str, Any], ...] | list[Mapping[str, Any]], completion: Mapping[str, str] | None = None) -> mo.Html:
+    """Render the lab part navigator with contract completion states."""
+    completion = completion or {}
+    rows = []
+    for index, part in enumerate(parts, start=1):
+        part_id = _part_value(part, "part_id", "id", "part", default=str(index))
+        part_label = _part_value(part, "label", "part", default=part_id)
+        concept = _part_value(part, "concept", "title", default="")
+        question = _part_value(part, "question", "systems_question", default="")
+        status = completion.get(part_id) or completion.get(part_label) or completion.get(concept) or "not_started"
+        status_label, status_class = _completion_status(status)
+        heading = _part_heading(part_label, concept)
+        rows.append(
+            f"""
+    <div class="mlsysbook-field">
+      <strong>{html.escape(heading)}</strong>
+      <span class="mlsysbook-status {html.escape(status_class)}">{html.escape(status_label)}</span>
+      <div class="mlsysbook-version">{html.escape(question)}</div>
+    </div>
+"""
+        )
+    return mo.Html(
+        f"""
+<div class="mlsysbook-panel">
+  <h2>Lab Map</h2>
+  <div class="mlsysbook-grid">
+    {"".join(rows)}
+  </div>
 </div>
 """
     )
@@ -309,6 +510,97 @@ def track_context(track: str | TrackProfile) -> mo.Html:
     )
 
 
+def part_header(part: str, concept: str, systems_question: str, track_frame: str = "") -> mo.Html:
+    """Render the required part anchor and systems question."""
+    heading = _part_heading(part, concept)
+    frame_html = ""
+    if track_frame:
+        frame_html = f'<div class="mlsysbook-callout"><strong>Track frame:</strong> {html.escape(track_frame)}</div>'
+    return mo.Html(
+        f"""
+<div class="mlsysbook-panel mlsysbook-nugget">
+  <div class="mlsysbook-part-title">
+    <h2>{html.escape(heading)}</h2>
+  </div>
+  <div class="mlsysbook-callout"><strong>Systems question:</strong> {html.escape(systems_question)}</div>
+  {frame_html}
+</div>
+"""
+    )
+
+
+def what_you_need_to_know(
+    bullets: tuple[str, ...] | list[str],
+    *,
+    equation: str = "",
+    track_interpretation: str = "",
+    watch_for: str = "",
+) -> mo.Html:
+    """Render the compact micro-brief for a lab part."""
+    extra_fields = {}
+    if equation:
+        extra_fields["Key relationship"] = equation
+    if track_interpretation:
+        extra_fields["Track interpretation"] = track_interpretation
+    if watch_for:
+        extra_fields["Watch for"] = watch_for
+    fields = f'<div class="mlsysbook-grid">{_render_fields(extra_fields)}</div>' if extra_fields else ""
+    return mo.Html(
+        f"""
+<div class="mlsysbook-panel">
+  <h2>What You Need To Know</h2>
+  <ul class="mlsysbook-list">
+    {_render_list(bullets)}
+  </ul>
+  {fields}
+</div>
+"""
+    )
+
+
+def micro_brief(
+    bullets: tuple[str, ...] | list[str],
+    *,
+    equation: str = "",
+    track_interpretation: str = "",
+    watch_for: str = "",
+) -> mo.Html:
+    """Alias for the part-level `What You Need To Know` block."""
+    return what_you_need_to_know(
+        bullets,
+        equation=equation,
+        track_interpretation=track_interpretation,
+        watch_for=watch_for,
+    )
+
+
+def scenario_slice(
+    *,
+    stakeholder_pressure: str,
+    workload_slice: str,
+    active_constraint: str,
+    primary_metric: str,
+    guardrail_metric: str,
+) -> mo.Html:
+    """Render the part-specific track situation."""
+    return mo.Html(
+        f"""
+<div class="mlsysbook-panel">
+  <h2>Scenario Slice</h2>
+  <div class="mlsysbook-grid">
+    {_render_fields({
+        "Stakeholder pressure": stakeholder_pressure,
+        "Workload slice": workload_slice,
+        "Active constraint": active_constraint,
+        "Primary metric": primary_metric,
+        "Guardrail metric": guardrail_metric,
+    })}
+  </div>
+</div>
+"""
+    )
+
+
 def nugget_shell(spec: NuggetSpec, body: Any) -> mo.Html:
     return mo.Html(
         f"""
@@ -321,6 +613,112 @@ def nugget_shell(spec: NuggetSpec, body: Any) -> mo.Html:
     <div class="mlsysbook-field"><strong>Expected constraint</strong>{html.escape(spec.expected_constraint)}</div>
   </div>
   <div class="mlsysbook-callout">{mo.as_html(body).text if hasattr(mo.as_html(body), "text") else body}</div>
+</div>
+"""
+    )
+
+
+def constraint_check(
+    name: str,
+    value: Any,
+    limit: Any,
+    unit: str = "",
+    status: str = "pass",
+    mitigation: str = "",
+) -> mo.Html:
+    """Render a feasibility check for the active constraint."""
+    status_label, status_class = _constraint_status(status)
+    unit_label = f" {unit}" if unit else ""
+    mitigation_html = ""
+    if mitigation:
+        mitigation_html = f'<div class="mlsysbook-callout"><strong>First mitigation:</strong> {html.escape(mitigation)}</div>'
+    return mo.Html(
+        f"""
+<div class="mlsysbook-panel">
+  <h2>Constraint Check</h2>
+  <div class="mlsysbook-grid">
+    <div class="mlsysbook-field"><strong>Constraint</strong>{html.escape(name)}</div>
+    <div class="mlsysbook-field"><strong>Value</strong>{html.escape(str(value))}{html.escape(unit_label)}</div>
+    <div class="mlsysbook-field"><strong>Limit</strong>{html.escape(str(limit))}{html.escape(unit_label)}</div>
+    <div class="mlsysbook-field"><strong>Status</strong><span class="mlsysbook-status {html.escape(status_class)}">{html.escape(status_label)}</span></div>
+  </div>
+  {mitigation_html}
+</div>
+"""
+    )
+
+
+def source_trace(sources: Mapping[str, Any] | str, *, collapsed: bool = True, summary: str = "") -> mo.Html:
+    """Render MLSysIM APIs, registry refs, equations, and assumptions."""
+    if isinstance(sources, Mapping):
+        source_items = dict(sources)
+        visible_summary = summary or str(
+            source_items.get("summary")
+            or source_items.get("api")
+            or source_items.get("registry")
+            or source_items.get("hardware_ref")
+            or "MLSysIM-backed source trace"
+        )
+    else:
+        source_items = {"Summary": sources}
+        visible_summary = summary or str(sources)
+
+    details_open = "" if collapsed else " open"
+    return mo.Html(
+        f"""
+<div class="mlsysbook-panel mlsysbook-source-trace">
+  <h2>Source Trace</h2>
+  <div class="mlsysbook-source-summary">{html.escape(visible_summary)}</div>
+  <details{details_open}>
+    <summary>Show source details</summary>
+    <div class="mlsysbook-grid">
+      {_render_fields(source_items)}
+    </div>
+  </details>
+</div>
+"""
+    )
+
+
+def evidence_summary(items: Mapping[str, Any], *, caption: str = "") -> mo.Html:
+    """Render synthesis evidence in the same shape used by reports."""
+    caption_html = f'<div class="mlsysbook-source-summary">{html.escape(caption)}</div>' if caption else ""
+    return mo.Html(
+        f"""
+<div class="mlsysbook-panel">
+  <h2>Evidence Summary</h2>
+  {caption_html}
+  <div class="mlsysbook-grid">
+    {_render_fields(items)}
+  </div>
+</div>
+"""
+    )
+
+
+def checkpoint_card(fields: Mapping[str, Any], *, title: str = "Checkpoint") -> mo.Html:
+    """Render saved evidence fields for a part checkpoint or decision."""
+    return mo.Html(
+        f"""
+<div class="mlsysbook-panel">
+  <h2>{html.escape(title)}</h2>
+  <div class="mlsysbook-grid">
+    {_render_fields(fields)}
+  </div>
+</div>
+"""
+    )
+
+
+def big_takeaways(takeaways: tuple[str, ...] | list[str]) -> mo.Html:
+    """Render the required end-of-lab carry-forward takeaways."""
+    return mo.Html(
+        f"""
+<div class="mlsysbook-panel">
+  <h2>Big Takeaways</h2>
+  <ul class="mlsysbook-list">
+    {_render_list(takeaways)}
+  </ul>
 </div>
 """
     )

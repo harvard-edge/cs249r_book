@@ -395,3 +395,47 @@ Tests or checks run:
 Follow-up:
 - Implement shared modality helpers needed by V1-10.
 - Begin V1-10 Compression pilot migration using `get_lab_track_variant()`.
+
+### 2026-06-03 - Shared Modality Helper Layer
+
+Lab:
+- All labs, shared `mlsysbook_labs` UI layer.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/ui.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/tests/test_ui_helpers.py`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added reusable helpers for the contract sections: `learning_objectives()`, `lab_map()`, `part_header()`, `what_you_need_to_know()`, `scenario_slice()`, `constraint_check()`, `source_trace()`, `evidence_summary()`, `checkpoint_card()`, and `big_takeaways()`.
+- Added `COMPLETION_STATES` with the required lab-map order: not started, prediction saved, evidence viewed, checkpoint saved, and decision complete.
+- Added compact shared CSS for lists, status pills, part titles, and collapsed source traces.
+- Exported the helpers from `mlsysbook_labs` so browser notebooks can import the same structure vocabulary.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts. The helpers are renderers; they expect hardware, model, system, solver, and scenario values to come from MLSysIM registries or typed lab variant metadata.
+
+Notebook-local constants removed:
+- None. This pass creates the shared target APIs before migrating content-heavy notebooks.
+
+Reusable component or modality improved:
+- Lab-level structure, part-level structure, source trace, constraint check, evidence summary, checkpoint, big takeaways, and completion-state rendering now have one package-level implementation.
+
+Plan updates needed in other labs:
+- V1-10 should consume these helpers directly instead of writing notebook-local section HTML.
+- Future pilots should add missing helper APIs here first if a new modality is genuinely reusable.
+
+Tests or checks run:
+- `python3 -m py_compile labs/mlsysbook_labs/ui.py labs/mlsysbook_labs/__init__.py labs/tests/test_ui_helpers.py`
+- `python3 -m pytest labs/tests/test_ui_helpers.py -q`
+- `python3 -m pytest labs/tests/test_ui_helpers.py labs/tests/test_track_profiles.py labs/tests/test_lab_variants.py -q`
+- `python3 -m pytest labs/tests/test_static.py::TestWheelConsistency -q`
+- Verified `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl` contains the shared helper API in `mlsysbook_labs/ui.py`.
+
+Follow-up:
+- Begin V1-10 Compression pilot migration using the shared helper layer.
