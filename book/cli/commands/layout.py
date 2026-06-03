@@ -35,7 +35,10 @@ console = Console()
 HEADER_FRAC = 0.06   # top 6% of page height treated as running header
 FOOTER_FRAC = 0.06   # bottom 6% treated as running footer / page number
 MAIN_COL_RIGHT_FRAC = 0.55  # main column ends ~55% across the page
-# Anything with x0 above this fraction is considered margin-note / sidebar.
+LEFT_MARGIN_RIGHT_FRAC = 0.22
+RIGHT_MARGIN_LEFT_FRAC = 0.78
+# Margin material alternates sides in the bound PDF: verso pages use the left
+# band and recto pages use the right band.
 
 
 @dataclass
@@ -533,7 +536,8 @@ class LayoutCommand:
 
         console.print(
             f"[bold blue]Scanning margins[/bold blue] {pdf_path.name} "
-            f"[dim](margin col >{int(MAIN_COL_RIGHT_FRAC*100)}% width, "
+            f"[dim](margin col <{int(LEFT_MARGIN_RIGHT_FRAC*100)}% "
+            f"or >{int(RIGHT_MARGIN_LEFT_FRAC*100)}% width, "
             f"overflow = below {int((1-FOOTER_FRAC)*100)}% page height "
             f"+ {tol:.0f}pt)[/dim]"
         )
@@ -551,76 +555,90 @@ class LayoutCommand:
         return not any(f.severity == "error" for f in findings)
 
     @staticmethod
-    def _page_overflow(pw, ph, chars, images, tol):
+    def _margin_side(pw, x0, x1) -> str:
+        """Return the physical margin side containing an object, if any."""
+        if x1 <= pw * LEFT_MARGIN_RIGHT_FRAC:
+            return "left"
+        if x0 >= pw * RIGHT_MARGIN_LEFT_FRAC:
+            return "right"
+        return ""
+
+    @classmethod
+    def _margin_graphic_objects(cls, pw, images, rects=None, curves=None):
+        """Return substantial image/vector boxes that sit in a margin band."""
+        objects = list(images or []) + list(rects or []) + list(curves or [])
+        margin_max_w = pw * 0.25
+        graphics = []
+        for obj in objects:
+            x0 = obj.get("x0", 0)
+            x1 = obj.get("x1", 0)
+            top = obj.get("top", 0)
+            bottom = obj.get("bottom", 0)
+            width = x1 - x0
+            height = bottom - top
+            if not cls._margin_side(pw, x0, x1):
+                continue
+            if width <= 0 or height <= 0 or width > margin_max_w:
+                continue
+            graphics.append(obj)
+        return graphics
+
+    @classmethod
+    def _page_overflow(cls, pw, ph, chars, images, tol):
         """Pure geometry: true margin-column chars/images whose bottom runs
         below the usable bottom (footer band top + tol). Returns (over_chars,
         over_imgs). Coordinates follow pdfplumber: x0 from left, bottom from
         page top (increasing downward). Unit-tested with dict fixtures.
 
-        A char counts as margin content only when its whole text line sits in
-        the margin — i.e. the line's leftmost char also starts past the margin
-        boundary. This excludes full-width code listings, wide tables, and
-        figure legends whose right portion crosses the 55% line but which are
-        main-column content, not margin notes (the dominant false positive).
-        Likewise an image must start in the margin AND be narrow enough to be a
-        margin figure, not a full-text-block figure straddling the boundary.
+        A char counts as margin content when it sits in either physical margin
+        band. This handles bound PDFs where margin notes alternate left/right.
+        Likewise an image/vector box must be narrow and fully in a margin band,
+        not a full-text-block figure straddling the body column.
         """
-        margin_x = pw * MAIN_COL_RIGHT_FRAC
         usable_bottom = ph * (1.0 - FOOTER_FRAC) + tol
 
-        # Cluster chars into baselines (2pt tolerance), keep margin-only lines.
-        lines: Dict[float, list] = {}
-        for c in chars:
-            for ly in lines:
-                if abs(c["top"] - ly) < 2.0:
-                    lines[ly].append(c)
-                    break
-            else:
-                lines[c["top"]] = [c]
         # Text overflow is bounded to the page: a real margin caption clips at
         # the page edge (dips into the footer band, still on-page). Text flung
         # far BELOW the page edge (bottom > ph) is figure-internal label text
         # mispositioned off-canvas, not a margin caption — exclude it. Images
         # (below) stay uncapped: a tall margin figure legitimately runs off.
-        over_chars = []
-        for lchars in lines.values():
-            if min(c["x0"] for c in lchars) <= margin_x:
-                continue  # full-width / main-column line — not a margin note
-            over_chars.extend(
-                c for c in lchars if usable_bottom < c["bottom"] <= ph
-            )
-
-        margin_w = pw - margin_x  # width of the margin band
+        over_chars = [
+            line for line in cls._margin_text_lines(pw, chars)
+            if usable_bottom < line["bottom"] <= ph
+        ]
+        margin_max_w = pw * 0.25
         over_imgs = [
             im for im in images
-            if im["x0"] > margin_x
-            and (im["x1"] - im["x0"]) <= margin_w * 1.5
+            if cls._margin_side(pw, im.get("x0", 0), im.get("x1", 0))
+            and (im.get("x1", 0) - im.get("x0", 0)) <= margin_max_w
             and im["bottom"] > usable_bottom
         ]
         return over_chars, over_imgs
 
-    @staticmethod
-    def _margin_text_lines(pw, chars) -> List[dict]:
-        """Cluster margin-only chars into logical text-line boxes."""
-        margin_x = pw * MAIN_COL_RIGHT_FRAC
-        raw_lines: Dict[float, list] = {}
+    @classmethod
+    def _margin_text_lines(cls, pw, chars) -> List[dict]:
+        """Cluster left/right margin chars into logical text-line boxes."""
+        raw_lines: Dict[Tuple[str, float], list] = {}
         for c in chars:
-            for ly in raw_lines:
-                if abs(c["top"] - ly) < 2.0:
-                    raw_lines[ly].append(c)
+            side = cls._margin_side(pw, c["x0"], c["x1"])
+            if not side:
+                continue
+            for key in raw_lines:
+                key_side, ly = key
+                if key_side == side and abs(c["top"] - ly) < 2.0:
+                    raw_lines[key].append(c)
                     break
             else:
-                raw_lines[c["top"]] = [c]
+                raw_lines[(side, c["top"])] = [c]
 
         lines = []
-        for ly in sorted(raw_lines):
-            line_chars = sorted(raw_lines[ly], key=lambda c: c["x0"])
-            if min(ch["x0"] for ch in line_chars) <= margin_x:
-                continue
+        for key in sorted(raw_lines, key=lambda item: (item[0], item[1])):
+            line_chars = sorted(raw_lines[key], key=lambda c: c["x0"])
             text = "".join(ch.get("text", "") for ch in line_chars).strip()
             if not text:
                 continue
             lines.append({
+                "side": key[0],
                 "x0": min(ch["x0"] for ch in line_chars),
                 "x1": max(ch["x1"] for ch in line_chars),
                 "top": min(ch["top"] for ch in line_chars),
@@ -651,6 +669,8 @@ class LayoutCommand:
         lines = cls._margin_text_lines(pw, chars)
         findings: List[Tuple[dict, dict, float]] = []
         for prev, cur in zip(lines, lines[1:]):
+            if prev.get("side") != cur.get("side"):
+                continue
             if not (
                 cls._substantial_margin_text(prev["text"])
                 and cls._substantial_margin_text(cur["text"])
@@ -675,17 +695,19 @@ class LayoutCommand:
         Tiny icons are ignored; those often sit inside callout artwork and are
         expected to share a band with labels.
         """
-        margin_x = pw * MAIN_COL_RIGHT_FRAC
         lines = cls._margin_text_lines(pw, chars)
         overlaps: List[Tuple[dict, dict, float]] = []
         for im in images or []:
-            if im.get("x0", 0) <= margin_x:
+            im_side = cls._margin_side(pw, im.get("x0", 0), im.get("x1", 0))
+            if not im_side:
                 continue
             width = im.get("x1", 0) - im.get("x0", 0)
             height = im.get("bottom", 0) - im.get("top", 0)
             if width < min_image_edge or height < min_image_edge:
                 continue
             for line in lines:
+                if line.get("side") != im_side:
+                    continue
                 if not cls._substantial_margin_text(line["text"]):
                     continue
                 x_overlap = min(line["x1"], im["x1"]) - max(line["x0"], im["x0"])
@@ -724,7 +746,6 @@ class LayoutCommand:
                 page = pdf.pages[i]
                 sheet = i + 1
                 pw, ph = page.width, page.height
-                margin_x = pw * MAIN_COL_RIGHT_FRAC
                 footer_top = ph * (1.0 - FOOTER_FRAC)
                 chapter = self._chapter_for(sheet, chapter_starts)
                 if not self._matches_chapter(chapter, chapter_filter):
@@ -734,9 +755,12 @@ class LayoutCommand:
 
                 margin_text_lines = self._margin_text_lines(pw, page.chars)
                 line_texts = [line["text"] for line in margin_text_lines]
+                margin_graphics = self._margin_graphic_objects(
+                    pw, page.images, page.rects, page.curves
+                )
 
                 over_chars, over_imgs = self._page_overflow(
-                    pw, ph, page.chars, page.images, tol
+                    pw, ph, page.chars, margin_graphics, tol
                 )
 
                 if over_chars or over_imgs:
@@ -784,7 +808,7 @@ class LayoutCommand:
                         ))
 
                     image_overlaps = self._margin_image_text_overlaps(
-                        pw, page.chars, page.images
+                        pw, page.chars, margin_graphics
                     )
                     if image_overlaps:
                         line, im, y_overlap = max(
@@ -793,6 +817,8 @@ class LayoutCommand:
                         src_file, src_line, section = self._locate_margin_source(
                             repo_root, source_map, chapter, [line["text"]]
                         )
+                        if src_line <= 0:
+                            continue
                         related = (
                             f"image {im.get('x0', 0):.0f},"
                             f"{im.get('top', 0):.0f}-"

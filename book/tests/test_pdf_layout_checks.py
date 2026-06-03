@@ -115,7 +115,7 @@ def test_checklist_renders_warning_section():
 # margin-overflow geometry (A2) — pure, no PDF needed
 # --------------------------------------------------------------------------
 
-PW, PH = 600.0, 800.0   # footer band top = 752; margin column starts at x=330
+PW, PH = 600.0, 800.0   # footer band top = 752
 
 
 def _char(x0, bottom, text="x", x1=None):
@@ -135,22 +135,29 @@ def _img(x0, bottom):
 
 def test_margin_image_past_footer_is_flagged():
     over_c, over_i = LayoutCommand._page_overflow(
-        PW, PH, chars=[], images=[_img(400, 775)], tol=2.0
+        PW, PH, chars=[], images=[_img(500, 775)], tol=2.0
     )
     assert len(over_i) == 1 and not over_c
 
 
-def test_main_column_content_below_footer_is_not_margin_overflow():
-    # x0=100 is the main column, not the margin — handled by `collisions`, not here.
+def test_left_margin_content_past_footer_is_flagged():
     over_c, over_i = LayoutCommand._page_overflow(
-        PW, PH, chars=[_char(100, 775)], images=[_img(100, 775)], tol=2.0
+        PW, PH, chars=[_char(40, 775)], images=[_img(30, 775)], tol=2.0
+    )
+    assert len(over_c) == 1 and len(over_i) == 1
+
+
+def test_main_column_content_below_footer_is_not_margin_overflow():
+    # x0=200 is the main column, not the margin — handled by `collisions`, not here.
+    over_c, over_i = LayoutCommand._page_overflow(
+        PW, PH, chars=[_char(200, 775)], images=[_img(200, 775)], tol=2.0
     )
     assert not over_c and not over_i
 
 
 def test_margin_content_above_footer_is_clean():
     over_c, over_i = LayoutCommand._page_overflow(
-        PW, PH, chars=[_char(400, 740)], images=[_img(400, 700)], tol=2.0
+        PW, PH, chars=[_char(500, 740)], images=[_img(500, 700)], tol=2.0
     )
     assert not over_c and not over_i
 
@@ -158,21 +165,19 @@ def test_margin_content_above_footer_is_clean():
 def test_tolerance_respected():
     # bottom=755 is 3pt below the 752 footer line.
     over_tight, _ = LayoutCommand._page_overflow(
-        PW, PH, chars=[_char(400, 755)], images=[], tol=2.0
+        PW, PH, chars=[_char(500, 755)], images=[], tol=2.0
     )
     over_loose, _ = LayoutCommand._page_overflow(
-        PW, PH, chars=[_char(400, 755)], images=[], tol=10.0
+        PW, PH, chars=[_char(500, 755)], images=[], tol=10.0
     )
     assert len(over_tight) == 1   # 755 > 752+2
     assert len(over_loose) == 0   # 755 < 752+10
 
 
 def test_full_width_line_is_not_margin_overflow():
-    # A code-listing / wide-table line: leftmost char in the main column,
-    # rightmost char crosses past the 55% margin line. The right fragment must
-    # NOT be flagged — it is main-column content, not a margin note. (This was
-    # the dominant false positive: full-width listings dipping low.)
-    chars = [_char(100, 775), _char(400, 775)]  # same baseline
+    # A code-listing / wide-table line in the main/body column should not be
+    # flagged as margin content.
+    chars = [_char(200, 775), _char(400, 775)]  # same baseline
     over_c, _ = LayoutCommand._page_overflow(PW, PH, chars=chars, images=[], tol=2.0)
     assert not over_c
 
@@ -187,7 +192,7 @@ def test_full_width_image_straddling_margin_is_not_flagged():
 
 def test_narrow_margin_figure_past_footer_still_flagged():
     # A genuine margin figure: starts in the margin, ~1.25in (90pt) wide.
-    fig = {"x0": 400, "x1": 490, "bottom": 775, "top": 660}
+    fig = {"x0": 500, "x1": 590, "bottom": 775, "top": 660}
     _, over_i = LayoutCommand._page_overflow(PW, PH, chars=[], images=[fig], tol=2.0)
     assert len(over_i) == 1
 
@@ -196,7 +201,7 @@ def test_text_flung_below_page_edge_is_excluded():
     # Figure-internal label placed off-canvas (bottom well past page height) is
     # not a margin caption clipping at the edge — exclude from the text signal.
     over_c, _ = LayoutCommand._page_overflow(
-        PW, PH, chars=[_char(400, PH + 120)], images=[], tol=2.0
+        PW, PH, chars=[_char(500, PH + 120)], images=[], tol=2.0
     )
     assert not over_c
 
@@ -204,7 +209,7 @@ def test_text_flung_below_page_edge_is_excluded():
 def test_caption_clipping_at_page_edge_is_flagged():
     # A margin caption dipping into the footer band but still on-page → flagged.
     over_c, _ = LayoutCommand._page_overflow(
-        PW, PH, chars=[_char(400, PH - 5)], images=[], tol=2.0
+        PW, PH, chars=[_char(500, PH - 5)], images=[], tol=2.0
     )
     assert len(over_c) == 1
 
@@ -243,12 +248,12 @@ def test_source_map_is_scoped_to_pdf_volume(tmp_path):
 
 def test_margin_baseline_crowding_uses_baseline_gap_not_bbox_overlap():
     crowded = [
-        _char(400, 108, text="first line", x1=455),
-        _char(400, 110, text="second line", x1=460),
+        _char(500, 108, text="first line", x1=555),
+        _char(500, 110, text="second line", x1=560),
     ]
     normal = [
-        _char(400, 108, text="first line", x1=455),
-        _char(400, 116, text="second line", x1=460),
+        _char(500, 108, text="first line", x1=555),
+        _char(500, 116, text="second line", x1=560),
     ]
 
     assert len(LayoutCommand._margin_baseline_crowding(PW, crowded)) == 1
@@ -256,12 +261,19 @@ def test_margin_baseline_crowding_uses_baseline_gap_not_bbox_overlap():
 
 
 def test_margin_image_text_overlap_ignores_tiny_icons_and_flags_big_images():
-    chars = [_char(400, 108, text="substantial label", x1=480)]
-    tiny_icon = {"x0": 400, "x1": 410, "top": 96, "bottom": 112}
-    big_image = {"x0": 390, "x1": 500, "top": 96, "bottom": 130}
+    chars = [_char(500, 108, text="substantial label", x1=560)]
+    tiny_icon = {"x0": 500, "x1": 510, "top": 96, "bottom": 112}
+    big_image = {"x0": 490, "x1": 590, "top": 96, "bottom": 130}
 
     assert not LayoutCommand._margin_image_text_overlaps(PW, chars, [tiny_icon])
     assert len(LayoutCommand._margin_image_text_overlaps(PW, chars, [big_image])) == 1
+
+
+def test_left_margin_vector_text_overlap_is_flagged():
+    chars = [_char(40, 108, text="substantial label", x1=110)]
+    vector_box = {"x0": 30, "x1": 120, "top": 96, "bottom": 130}
+
+    assert len(LayoutCommand._margin_image_text_overlaps(PW, chars, [vector_box])) == 1
 
 
 def test_collision_csv_is_machine_readable(capsys):
