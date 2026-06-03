@@ -46,3 +46,21 @@ def test_nvlink_on_cloud_gpus():
     assert Hardware.Cloud.A100.nvlink.bandwidth.m_as(GB / second) == 600.0
     assert Hardware.Cloud.H100.nvlink.bandwidth.m_as(GB / second) == 900.0
     assert Hardware.Cloud.B200.nvlink.bandwidth.m_as(GB / second) == 1800.0
+
+
+def test_lab_track_hardware_profiles():
+    """Canonical lab tracks have MLSysIM-owned hardware profiles."""
+    oura = Hardware.Tiny.OuraRing
+    robotaxi = Hardware.Edge.RoboTaxi
+
+    assert oura.name == "Oura Ring 4 (wearable reference profile)"
+    assert oura.memory.sram_capacity.to("KiB").magnitude == pytest.approx(512)
+    assert oura.memory.flash_capacity.to("MB").magnitude == pytest.approx(2)
+    assert oura.battery_capacity.to("Wh").magnitude == pytest.approx(0.06)
+    assert oura.metadata.provenance.kind.value == "estimate"
+
+    assert robotaxi.name == "RoboTaxi Reference Compute (NVIDIA DRIVE AGX Orin class)"
+    assert robotaxi.compute.precision_flops["int8"].to("TOPS").magnitude == pytest.approx(254)
+    assert robotaxi.memory.capacity.to("GB").magnitude == pytest.approx(32)
+    assert robotaxi.tdp.to("W").magnitude == pytest.approx(60)
+    assert robotaxi.metadata.provenance.kind.value == "estimate"

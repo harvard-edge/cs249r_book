@@ -8,7 +8,8 @@ from typing import Any
 
 import marimo as mo
 
-from .schemas import ChapterRecap, DEFAULT_TRACKS, InstructorMetadata, LabMetadata, NuggetSpec
+from .schemas import ChapterRecap, InstructorMetadata, LabMetadata, NuggetSpec, TrackProfile
+from .tracks import DEFAULT_TRACK_ID, get_track_profile, normalize_track_id, track_options
 
 
 ACADEMIC_LAB_CSS = mo.Html(
@@ -275,10 +276,37 @@ def scenario_brief(title: str, stakeholder: str, objective: str, constraints: di
     )
 
 
-def track_selector(default: str = "cloud"):
-    """Return a Marimo radio selector for the standard deployment tracks."""
-    options = {track.label: track.track_id for track in DEFAULT_TRACKS}
-    return mo.ui.radio(options=options, value=default, label="Deployment track", inline=True)
+def track_selector(default: str = DEFAULT_TRACK_ID):
+    """Return a Marimo radio selector for the canonical student tracks."""
+    selected = normalize_track_id(default)
+    return mo.ui.radio(options=track_options(), value=selected, label="Your Track", inline=True)
+
+
+def track_context(track: str | TrackProfile) -> mo.Html:
+    """Render the selected track profile and its MLSysIM source references."""
+    profile = track if isinstance(track, TrackProfile) else get_track_profile(track)
+    metrics = ", ".join(html.escape(metric) for metric in profile.primary_metrics)
+    guardrails = ", ".join(html.escape(metric) for metric in profile.guardrail_metrics)
+    constraints = ", ".join(html.escape(constraint) for constraint in profile.dominant_constraints)
+    system_ref = profile.system_ref or "single-device profile"
+    return mo.Html(
+        f"""
+<div class="mlsysbook-panel">
+  <h2>Your Track</h2>
+  <div class="mlsysbook-grid">
+    <div class="mlsysbook-field"><strong>Track</strong>{html.escape(profile.label)} ({html.escape(profile.category)})</div>
+    <div class="mlsysbook-field"><strong>Stakeholder</strong>{html.escape(profile.stakeholder)}</div>
+    <div class="mlsysbook-field"><strong>Hardware source</strong><code>{html.escape(profile.hardware_ref)}</code></div>
+    <div class="mlsysbook-field"><strong>System source</strong><code>{html.escape(system_ref)}</code></div>
+    <div class="mlsysbook-field"><strong>Primary metrics</strong>{metrics}</div>
+    <div class="mlsysbook-field"><strong>Guardrails</strong>{guardrails}</div>
+    <div class="mlsysbook-field"><strong>Dominant constraints</strong>{constraints}</div>
+    <div class="mlsysbook-field"><strong>Narrative</strong>{html.escape(profile.narrative)}</div>
+  </div>
+  <div class="mlsysbook-version">{html.escape(profile.source_policy)}</div>
+</div>
+"""
+    )
 
 
 def nugget_shell(spec: NuggetSpec, body: Any) -> mo.Html:

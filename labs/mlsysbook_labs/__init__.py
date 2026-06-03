@@ -13,19 +13,30 @@ from .legacy_components import (
     StakeholderMessage,
 )
 from .catalog import LAB_CATALOG, get_lab_metadata
-from .reports import build_lab_report, report_export
+from .reports import build_lab_report, report_export, report_export_panel, report_text_fallback
 from .schemas import (
     DEFAULT_TRACKS,
     ChapterRecap,
     InstructorMetadata,
+    LabTrackVariant,
     LabMetadata,
     LabReport,
     LedgerEntry,
     NuggetSpec,
+    TrackProfile,
     TrackSpec,
 )
 from .state import DesignLedger, LedgerState
 from .style import ACADEMIC_LAB_CSS, COLORS, LAB_CSS, apply_plotly_theme
+from .tracks import (
+    CANONICAL_TRACKS,
+    DEFAULT_TRACK_ID,
+    TRACK_ALIASES,
+    get_track_profile,
+    normalize_track_id,
+    track_options,
+    track_profile_map,
+)
 from .ui import (
     advanced_knob_drawer,
     chapter_recap,
@@ -35,6 +46,7 @@ from .ui import (
     nugget_shell,
     reflection_card,
     scenario_brief,
+    track_context,
     track_selector,
 )
 from .versions import LEDGER_SCHEMA_VERSION, MLSYSBOOK_LABS_VERSION, REPORT_SCHEMA_VERSION, STABLE_RELEASE_CHANNEL
@@ -59,20 +71,30 @@ __all__ = [
     "LabMetadata",
     "ChapterRecap",
     "TrackSpec",
+    "TrackProfile",
+    "LabTrackVariant",
     "NuggetSpec",
     "InstructorMetadata",
     "LedgerEntry",
     "LabReport",
     "LAB_CATALOG",
     "DEFAULT_TRACKS",
+    "CANONICAL_TRACKS",
+    "DEFAULT_TRACK_ID",
+    "TRACK_ALIASES",
     "MLSYSBOOK_LABS_VERSION",
     "REPORT_SCHEMA_VERSION",
     "LEDGER_SCHEMA_VERSION",
     "STABLE_RELEASE_CHANNEL",
+    "normalize_track_id",
+    "get_track_profile",
+    "track_options",
+    "track_profile_map",
     "lab_header",
     "chapter_recap",
     "scenario_brief",
     "track_selector",
+    "track_context",
     "nugget_shell",
     "advanced_knob_drawer",
     "reflection_card",
@@ -80,5 +102,7 @@ __all__ = [
     "instructor_adoption_card",
     "build_lab_report",
     "report_export",
+    "report_export_panel",
+    "report_text_fallback",
     "get_lab_metadata",
 ]

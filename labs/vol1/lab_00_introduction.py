@@ -42,6 +42,7 @@ async def _():
         import micropip
         await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
         await micropip.install("../../wheels/mlsysim-0.1.2-py3-none-any.whl", keep_going=False)
+        await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
         _labs_dir = Path(__file__).resolve().parents[1]
         if str(_labs_dir) not in sys.path:
@@ -53,11 +54,12 @@ async def _():
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS
     from mlsysim.labs.components import DecisionLog
+    from mlsysbook_labs import get_track_profile
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         _ = await ledger.load_async()
-    return COLORS, DecisionLog, LAB_CSS, ledger, mo
+    return COLORS, DecisionLog, LAB_CSS, get_track_profile, ledger, mo
 
 # ─── CELL 1: HEADER ────────────────────────────────────────────────────────────
 @app.cell
@@ -1025,12 +1027,12 @@ def _(check1, check2empty, check3, mo):
 
     context_selector = mo.ui.radio(
         options={
-            "☁️  Cloud ML  — your constraint is the Memory Bandwidth Wall":          "cloud",
-            "🤖  Edge ML   — your constraint is the Latency Determinism Wall":        "edge",
-            "📱  Mobile ML — your constraint is the Thermal Power Wall":              "mobile",
-            "👂  TinyML    — your constraint is the SRAM Capacity Wall":              "tiny",
+            "☁️  Cloud Fleet — your constraint is the Memory Bandwidth Wall":         "cloud",
+            "🚕  RoboTaxi    — your constraint is the Latency Determinism Wall":       "edge",
+            "📱  iPhone      — your constraint is the Thermal Power Wall":             "mobile",
+            "💍  Oura Ring   — your constraint is the SRAM and Battery Wall":          "tiny",
         },
-        label="Select the deployment regime you will focus on throughout this curriculum:",
+        label="Select the track you will focus on throughout this curriculum:",
     )
     return (context_selector,)
 
@@ -1050,6 +1052,7 @@ def _(
     check3,
     context_selector,
     decision_ui,
+    get_track_profile,
     ledger,
     mo,
 ):
@@ -1065,14 +1068,21 @@ def _(
     )
 
     _key = context_selector.value
+    _track_id = {
+        "cloud": "cloud_fleet",
+        "edge": "robotaxi",
+        "mobile": "iphone",
+        "tiny": "oura_ring",
+    }[_key]
+    _track_profile = get_track_profile(_track_id)
     _contexts = {
         "cloud": {
             "color":     COLORS["BlueLine"],
             "bg":        COLORS["BlueL"],
-            "label":     "Cloud ML",
+            "label":     "Cloud Fleet",
             "nemesis":   "Memory Bandwidth Wall",
-            "role":      "LLM Infrastructure Lead",
-            "north_star":"Maximize sustained serving throughput for a 70B-parameter model on a multi-GPU cluster.",
+            "role":      "Fleet Service Owner",
+            "north_star":"Maximize sustained serving throughput on a reference H100 fleet while preserving SLA, cost, and carbon guardrails.",
             "persona":   "Your CTO",
             "quote": (
                 "We're burning $40,000 a day on GPU rentals. "
@@ -1093,10 +1103,10 @@ def _(
         "edge": {
             "color":     COLORS["RedLine"],
             "bg":        COLORS["RedL"],
-            "label":     "Edge ML",
+            "label":     "RoboTaxi",
             "nemesis":   "Latency Determinism Wall",
-            "role":      "Autonomous Systems Lead",
-            "north_star":"Maintain a deterministic 10 ms perception-to-decision loop on a Jetson Orin NX.",
+            "role":      "Autonomous Vehicle Platform Engineer",
+            "north_star":"Maintain a deterministic perception-to-decision loop on a RoboTaxi reference compute profile.",
             "persona":   "Your Safety Director",
             "quote": (
                 "A 5 ms latency spike added 15 cm of stopping distance at 60 mph. "
@@ -1117,10 +1127,10 @@ def _(
         "mobile": {
             "color":     COLORS["OrangeLine"],
             "bg":        COLORS["OrangeL"],
-            "label":     "Mobile ML",
-            "nemesis":   "Thermal Power Wall",
-            "role":      "Smartphone App Architect",
-            "north_star":"Run 60 FPS real-time on-device inference within a 2 W sustained thermal envelope.",
+            "label":     "iPhone",
+            "nemesis":   "Thermal and Battery Wall",
+            "role":      "Mobile Product Engineer",
+            "north_star":"Run responsive on-device inference within iPhone thermal, memory, privacy, and battery constraints.",
             "persona":   "Your UX Director",
             "quote": (
                 "Users are returning the device because it heats up after two minutes of AR. "
@@ -1141,10 +1151,10 @@ def _(
         "tiny": {
             "color":     COLORS["GreenLine"],
             "bg":        COLORS["GreenL"],
-            "label":     "TinyML",
-            "nemesis":   "SRAM Capacity Wall",
-            "role":      "TinyML / Embedded Systems Lead",
-            "north_star":"Fit real-time keyword spotting in under 256 KB SRAM, running under 1 mW.",
+            "label":     "Oura Ring",
+            "nemesis":   "SRAM, Flash, and Battery Wall",
+            "role":      "Wearable Firmware Engineer",
+            "north_star":"Fit always-on sensing and inference into a ring-scale memory, OTA, and battery budget.",
             "persona":   "Your Hardware Lead",
             "quote": (
                 "We have 256 KB of on-chip SRAM. Every weight byte you keep "
@@ -1167,8 +1177,16 @@ def _(
     _t = _contexts[_key]
 
     # Persist to Design Ledger
-    ledger.save(chapter=0, design={
+    ledger.save(track=_track_id, chapter=0, design={
         "deployment_context": _key,
+        "track_id": _track_id,
+        "track_label": _track_profile.label,
+        "track_category": _track_profile.category,
+        "hardware_ref": _track_profile.hardware_ref,
+        "system_ref": _track_profile.system_ref,
+        "primary_metrics": _track_profile.primary_metrics,
+        "guardrail_metrics": _track_profile.guardrail_metrics,
+        "dominant_constraints": _track_profile.dominant_constraints,
         "check1_answer":      check1.value,
         "check1_correct":     check1.value == "C",
         "check2_selections":  check2value_list(),
@@ -1219,6 +1237,11 @@ def _(
             <div style="font-size:1.25rem; font-weight:800; color:#0f172a; margin-bottom:4px;">
                 {_t['label']} · {_t['role']}
             </div>
+            <div style="font-size:0.82rem; color:#64748b; margin-bottom:10px; line-height:1.5;">
+                <strong>MLSysIM source:</strong>
+                <code>{_track_profile.hardware_ref}</code>
+                {f" · <code>{_track_profile.system_ref}</code>" if _track_profile.system_ref else ""}
+            </div>
             <div style="font-size:0.88rem; color:#475569; margin-bottom:4px; line-height:1.5;">
                 <strong>North Star:</strong> {_t['north_star']}
             </div>
@@ -1238,8 +1261,8 @@ def _(
 
         mo.callout(
             mo.md(
-                f"**Design Ledger initialized** — context: `{_key}`. "
-                "Your deployment regime pre-loads hardware defaults and scenario constraints "
+                f"**Design Ledger initialized** — track: `{_track_id}`. "
+                "Your track pre-loads hardware defaults and scenario constraints "
                 "in every lab from Lab 01 onward. Proceed to **Lab 01: ML Introduction**."
             ),
             kind="success",
@@ -1325,7 +1348,7 @@ def _(COLORS, mo):
 
         mo.accordion({
             "Self-Assessment: Can you answer these?": mo.md("""
-    1. Which deployment context (cloud, mobile, edge, or TinyML) did you choose, and what was the binding constraint that defined your track — compute, memory, power, or latency?
+    1. Which track (Cloud Fleet, iPhone, RoboTaxi, or Oura Ring) did you choose, and what was the binding constraint that defined your track — compute, memory, power, or latency?
 
     2. The D·A·M Triad claims that Data, Algorithm, and Machine are inseparable. After selecting your track, which axis most constrained what model architectures were feasible?
 
@@ -1339,17 +1362,25 @@ def _(COLORS, mo):
 
 # ─── CELL 21: LEDGER_HUD ───────────────────────────────────────────────────────
 @app.cell
-def _(COLORS, ledger, mo):
+def _(COLORS, get_track_profile, ledger, mo):
     _track   = ledger.get_track() or "NONE"
     _color_map = {
         "cloud":  COLORS["BlueLine"],
         "edge":   COLORS["RedLine"],
         "mobile": COLORS["OrangeLine"],
         "tiny":   COLORS["GreenLine"],
+        "cloud_fleet": COLORS["BlueLine"],
+        "robotaxi": COLORS["RedLine"],
+        "iphone": COLORS["OrangeLine"],
+        "oura_ring": COLORS["GreenLine"],
         "NONE":   "#475569",
     }
     _hud_color  = _color_map.get(_track, "#475569")
     _hud_status = "Uninitialized" if _track == "NONE" else "Active — Chapter 0"
+    try:
+        _hud_track = get_track_profile(_track).label
+    except KeyError:
+        _hud_track = _track.upper()
 
     mo.Html(f"""
     <div style="display:flex; gap:28px; align-items:center; padding:12px 24px;
@@ -1359,7 +1390,7 @@ def _(COLORS, ledger, mo):
         <div style="color:#475569; font-weight:600; letter-spacing:0.06em;">🗂️ DESIGN LEDGER</div>
         <div>
             <span style="color:#475569;">Context: </span>
-            <span style="color:{_hud_color}; font-weight:700;">{_track.upper()}</span>
+            <span style="color:{_hud_color}; font-weight:700;">{_hud_track}</span>
         </div>
         <div>
             <span style="color:#475569;">Chapter: </span>

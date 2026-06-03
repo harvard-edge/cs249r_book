@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import html
 from dataclasses import asdict
 from typing import Any
 
@@ -16,6 +17,54 @@ def _bullet_dict(values: dict[str, Any]) -> str:
     for key, value in values.items():
         lines.append(f"- {key}: {value}")
     return "\n".join(lines)
+
+
+def _bullet_list(values: tuple[str, ...] | list[str] | None) -> str:
+    if not values:
+        return "- Not recorded."
+    return "\n".join(f"- {value}" for value in values)
+
+
+def _section_value(value: Any) -> str:
+    if isinstance(value, dict):
+        return _bullet_dict(value)
+    if isinstance(value, (list, tuple)):
+        return _bullet_list(list(value))
+    if value:
+        return str(value)
+    return "Not recorded."
+
+
+def _missing_fields(
+    *,
+    track: str,
+    scenario: str,
+    predictions: dict[str, Any],
+    evidence_summary: Any,
+    final_decision: Any,
+    big_takeaways: tuple[str, ...] | list[str] | None,
+    reflections: dict[str, Any],
+    residual_risk: str,
+    explicit: tuple[str, ...] | list[str] | None,
+) -> list[str]:
+    missing = list(explicit or ())
+    if track == "not recorded":
+        missing.append("Track And Scenario: track")
+    if scenario == "not recorded":
+        missing.append("Track And Scenario: scenario")
+    if not predictions:
+        missing.append("Predictions")
+    if not evidence_summary:
+        missing.append("Evidence Summary")
+    if not final_decision:
+        missing.append("Final Decision")
+    if not big_takeaways:
+        missing.append("Big Takeaways")
+    if not reflections:
+        missing.append("Reflections")
+    if not residual_risk:
+        missing.append("Residual Risk")
+    return missing
 
 
 def build_lab_report(
@@ -32,6 +81,12 @@ def build_lab_report(
     reflections: dict[str, Any] | None = None,
     residual_risk: str = "",
     result_snapshot: Any | None = None,
+    learning_objectives: tuple[str, ...] | list[str] | None = None,
+    evidence_summary: dict[str, Any] | str | None = None,
+    final_decision: dict[str, Any] | str | None = None,
+    big_takeaways: tuple[str, ...] | list[str] | None = None,
+    source_trace: dict[str, Any] | str | None = None,
+    incomplete_fields: tuple[str, ...] | list[str] | None = None,
 ) -> LabReport:
     """Build a Markdown report and JSON snapshot for a lab submission."""
     predictions = predictions or {}
@@ -40,12 +95,23 @@ def build_lab_report(
     decisions = decisions or {}
     reflections = reflections or {}
     snapshot = to_plain(result_snapshot or {})
+    evidence = evidence_summary or {
+        "knob_settings": knob_settings or "Not recorded.",
+        "binding_constraints": binding_constraints or "Not recorded.",
+        "result_snapshot": snapshot or "Not recorded.",
+    }
+    has_evidence = bool(evidence_summary or knob_settings or binding_constraints or snapshot)
+    decision = final_decision or decisions
+    trace = source_trace or {
+        "mlsysim_version": metadata.mlsysim_version,
+        "mlsysbook_labs_version": metadata.mlsysbook_labs_version,
+        "report_schema_version": metadata.report_schema_version,
+        "book_anchor": metadata.book_anchor,
+    }
 
     recap_lines = ""
     if recap is not None:
         recap_lines = f"""
-## Chapter Recap
-
 - Emphasis: {recap.emphasis}
 - Key terms: {", ".join(recap.key_terms)}
 - ML concept: {recap.ml_concept}
@@ -55,38 +121,65 @@ def build_lab_report(
 - Suggested reading: {recap.suggested_reading}
 """
 
+    missing = _missing_fields(
+        track=track,
+        scenario=scenario,
+        predictions=predictions,
+        evidence_summary=has_evidence,
+        final_decision=decision,
+        big_takeaways=big_takeaways,
+        reflections=reflections,
+        residual_risk=residual_risk,
+        explicit=incomplete_fields,
+    )
+    incomplete_section = ""
+    if missing:
+        incomplete_section = f"""
+## Incomplete Fields
+
+{_bullet_list(missing)}
+"""
+
     markdown = f"""# {metadata.title} Lab Report
 
-## Submission Metadata
+## Lab
 
 - Student: {student_id or "Not provided"}
 - Lab ID: {metadata.lab_id}
+- Lab title: {metadata.title}
 - Lab version: {metadata.lab_version}
 - Book anchor: {metadata.book_anchor}
 - Updated at: {metadata.updated_at}
 - MLSysIM version: {metadata.mlsysim_version}
 - MLSysBook Labs version: {metadata.mlsysbook_labs_version}
 - Report schema version: {metadata.report_schema_version}
+
+## Track And Scenario
+
 - Track: {track}
 - Scenario: {scenario}
-{recap_lines}
+
+## Learning Objectives
+
+{_bullet_list(learning_objectives)}
+
 ## Predictions
 
 {_bullet_dict(predictions)}
 
-## Knob Settings
+## Evidence Summary
 
-{_bullet_dict(knob_settings)}
+{_section_value(evidence)}
 
-## Binding Constraints
+## Final Decision
 
-{_bullet_dict(binding_constraints)}
+{_section_value(decision)}
 
-## Engineering Decision
+## Big Takeaways
 
-{_bullet_dict(decisions)}
+{_bullet_list(big_takeaways)}
 
-## Reflection
+## Reflections
 
 {_bullet_dict(reflections)}
 
@@ -94,11 +187,18 @@ def build_lab_report(
 
 {residual_risk or "Not recorded."}
 
-## MLSysIM Result Snapshot
+## Source Trace
+
+{_section_value(trace)}
+
+{recap_lines}
+
+### MLSysIM Result Snapshot
 
 ```json
 {json.dumps(snapshot, indent=2, sort_keys=True)}
 ```
+{incomplete_section}
 """
 
     report_snapshot = {
@@ -106,13 +206,19 @@ def build_lab_report(
         "student_id": student_id,
         "track": track,
         "scenario": scenario,
+        "learning_objectives": to_plain(learning_objectives or ()),
         "predictions": to_plain(predictions),
         "knob_settings": to_plain(knob_settings),
         "binding_constraints": to_plain(binding_constraints),
+        "evidence_summary": to_plain(evidence),
+        "final_decision": to_plain(decision),
+        "big_takeaways": to_plain(big_takeaways or ()),
         "decisions": to_plain(decisions),
         "reflections": to_plain(reflections),
         "residual_risk": residual_risk,
+        "source_trace": to_plain(trace),
         "result_snapshot": snapshot,
+        "incomplete_fields": missing,
     }
     return LabReport(
         metadata=metadata,
@@ -146,3 +252,27 @@ def report_export(report: LabReport, *, include_json: bool = True):
         label="Download JSON snapshot",
     )
     return mo.hstack([md_download, json_download], justify="start")
+
+
+def report_text_fallback(report: LabReport) -> str:
+    """Return the local Markdown report text for fallback display or copying."""
+    return report.markdown
+
+
+def report_export_panel(report: LabReport, *, include_json: bool = True, include_fallback: bool = True):
+    """Return local download controls plus an optional visible Markdown fallback."""
+    import marimo as mo
+
+    controls = report_export(report, include_json=include_json)
+    if not include_fallback:
+        return controls
+
+    fallback = mo.Html(
+        f"""
+<div class="mlsysbook-panel">
+  <h2>Report Text Fallback</h2>
+  <textarea readonly style="width:100%; min-height:260px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size:0.85rem; line-height:1.45; border:1px solid #D9DEE8; border-radius:8px; padding:12px;">{html.escape(report.markdown)}</textarea>
+</div>
+"""
+    )
+    return mo.vstack([controls, mo.accordion({"Report text fallback": fallback}, multiple=False)])
