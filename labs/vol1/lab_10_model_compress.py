@@ -23,6 +23,7 @@ async def _():
         import micropip
         await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
         await micropip.install("../../wheels/mlsysim-0.1.2-py3-none-any.whl", keep_going=False)
+        await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
         _labs_dir = Path(__file__).resolve().parents[1]
         if str(_labs_dir) not in sys.path:
@@ -34,6 +35,25 @@ async def _():
     from mlsysim.labs.state import DesignLedger
     from mlsysim import Hardware, Models
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysbook_labs import (
+        ACADEMIC_LAB_CSS,
+        ChapterRecap,
+        DEFAULT_TRACK_ID,
+        LabMetadata,
+        big_takeaways,
+        build_lab_report,
+        chapter_recap,
+        get_lab_track_variant,
+        get_track_profile,
+        lab_header,
+        lab_map,
+        learning_objectives,
+        report_export_panel,
+        scenario_brief,
+        source_trace,
+        track_context,
+        track_selector,
+    )
 
     H100_TFLOPS = Hardware.Cloud.H100.compute.peak_flops.m_as("TFLOPs/s")
     H100_BW     = Hardware.Cloud.H100.memory.bandwidth.m_as("GB/s")
@@ -59,63 +79,88 @@ async def _():
     if getattr(ledger, "is_wasm", False):
         _ = await ledger.load_async()
     return (
+        ACADEMIC_LAB_CSS,
         COLORS, H100_BW, H100_RAM, H100_TDP, H100_TFLOPS,
+        ChapterRecap, DEFAULT_TRACK_ID,
         IPHONE_BW, IPHONE_RAM, IPHONE_TDP, IPHONE_TFLOPS,
         JETSON_BW, JETSON_RAM, JETSON_TFLOPS,
-        LAB_CSS, LLAMA3_8B_PARAMS,
+        LAB_CSS, LLAMA3_8B_PARAMS, LabMetadata,
         MOBILENET_FLOPS, MOBILENET_PARAMS,
         RESNET50_FLOPS, RESNET50_PARAMS,
-        apply_plotly_theme, go, ledger, math, mo, np,
+        apply_plotly_theme, big_takeaways, build_lab_report,
+        chapter_recap, get_lab_track_variant, get_track_profile,
+        go, lab_header, lab_map, learning_objectives, ledger, math,
+        mo, np, report_export_panel, scenario_brief, source_trace,
+        track_context, track_selector,
     )
 
 # ═════════════════════════════════════════════════════════════════════════════
 # CELL 1: HEADER
 # ═════════════════════════════════════════════════════════════════════════════
+
+@app.cell
+def _(ChapterRecap, LabMetadata):
+    lab_metadata = LabMetadata(
+        lab_id="v1_10_compression_paradox",
+        title="The Compression Paradox",
+        volume="Volume I",
+        chapter="Chapter 10: Model Compression",
+        book_anchor="Volume I, Chapter 10",
+        updated_at="2026-06-03",
+    )
+    lab_learning_objectives = (
+        "Quantify how quantization, pruning, and distillation change size, quality, and deployment feasibility.",
+        "Diagnose when a compression method fails because hardware support or a guardrail does not match the theory.",
+        "Compare compression candidates against the selected track's primary metric and guardrail metric.",
+        "Defend a track-specific compression recipe using evidence, source trace, and residual risk.",
+    )
+    chapter_10_recap = ChapterRecap(
+        emphasis="Compression changes representation, structure, or training targets; it is only useful when the deployment system can exploit the change.",
+        key_terms=("quantization", "structured pruning", "unstructured pruning", "distillation", "Pareto frontier"),
+        ml_concept="A model can be made smaller through lower precision, fewer effective parameters, or a smaller student architecture.",
+        systems_translation="The deployment win depends on memory hierarchy, kernel support, latency tail, energy, cost, and validation guardrails.",
+        what_to_watch="A compressed model can be smaller but slower, unsupported, less robust, or invalid for the selected device.",
+        common_trap="Treating a lower parameter count or sparse weight matrix as an automatic speedup.",
+        suggested_reading="Volume I, Chapter 10: Model Compression.",
+    )
+    lab_big_takeaways = (
+        "Compression is a deployment decision, not just a model-size reduction.",
+        "Hardware support decides whether sparsity and low precision turn into latency, energy, or cost gains.",
+        "The best recipe changes by track because the binding constraint changes by device or fleet.",
+        "A valid recipe must preserve the guardrail metric, not only improve the primary metric.",
+    )
+    return chapter_10_recap, lab_big_takeaways, lab_learning_objectives, lab_metadata
+
+
 @app.cell(hide_code=True)
-def _(LAB_CSS, mo):
+def _(DEFAULT_TRACK_ID, ledger, track_selector):
+    _saved_track = ledger.get_track()
+    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else DEFAULT_TRACK_ID
+    v1_10_track_picker = track_selector(default=_default_track)
+    return (v1_10_track_picker,)
+
+
+@app.cell
+def _(get_lab_track_variant, get_track_profile, v1_10_track_picker):
+    v1_10_track_id = v1_10_track_picker.value
+    v1_10_track_profile = get_track_profile(v1_10_track_id)
+    v1_10_variant = get_lab_track_variant("v1_10_compression_paradox", v1_10_track_id)
+    return v1_10_track_id, v1_10_track_profile, v1_10_variant
+
+
+@app.cell(hide_code=True)
+def _(ACADEMIC_LAB_CSS, LAB_CSS, lab_header, lab_metadata, mo):
     mo.vstack([
         LAB_CSS,
-        mo.Html("""
-        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0c1a2e 100%);
-                    padding: 36px 44px; border-radius: 16px; color: white;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
-            <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
-                        color: #475569; text-transform: uppercase; margin-bottom: 10px;">
-                Machine Learning Systems &middot; Volume I &middot; Lab 10
-            </div>
-            <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
-                       color: #f8fafc; line-height: 1.1; letter-spacing: -0.02em;">
-                The Compression Paradox
-            </h1>
-            <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
-                      color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
-                Quantization &middot; Pruning &middot; Pareto &middot; Energy &middot; Distillation
-            </p>
-            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #64748b;
-                      max-width: 680px; line-height: 1.65;">
-                Compression looks like free performance &mdash; until the hardware ignores
-                your zeros, the accuracy cliff is vertical, and the only reliable shortcut
-                is stealing knowledge from a model too large to deploy.
-            </p>
-            <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
-                <span style="background: rgba(99,102,241,0.18); color: #a5b4fc;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(99,102,241,0.3);">
-                    5 Parts &middot; ~56 min
-                </span>
-                <span style="background: rgba(203,32,45,0.15); color: #fca5a5;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
-                    Chapter 10: Model Compression
-                </span>
-            </div>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <span class="badge badge-info">Quantization Free Lunch</span>
-                <span class="badge badge-fail">Pruning Hardware Trap</span>
-                <span class="badge badge-warn">Dark Knowledge</span>
-            </div>
-        </div>
-        """),
+        ACADEMIC_LAB_CSS,
+        lab_header(
+            lab_metadata,
+            (
+                "Compression looks like free performance until hardware support, "
+                "quality cliffs, and deployment guardrails decide otherwise."
+            ),
+            chips=("Quantization", "Pruning", "Pareto", "Distillation", "Track-aware"),
+        ),
     ])
     return
 
@@ -123,66 +168,116 @@ def _(LAB_CSS, mo):
 # CELL 2: BRIEFING
 # ═════════════════════════════════════════════════════════════════════════════
 @app.cell(hide_code=True)
-def _(COLORS, mo):
-    mo.Html(f"""
-    <div style="border-left: 4px solid {COLORS['BlueLine']};
-                background: white; border-radius: 0 12px 12px 0;
-                padding: 20px 28px; margin: 8px 0 16px 0;
-                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-        <div style="margin-bottom: 16px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Learning Objectives
-            </div>
-            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Quantify the quantization free lunch</strong> &mdash;
-                    FP32 to INT8 gives 4x compression with &lt;1% accuracy loss, then accuracy
-                    collapses catastrophically below 4 bits.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Diagnose the pruning hardware trap</strong> &mdash;
-                    90% unstructured sparsity yields zero speedup on dense GPU kernels because
-                    the hardware cannot skip sparse multiplications.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Design a compression strategy</strong> &mdash; compose
-                    quantization, pruning, and distillation along the Pareto frontier to fit
-                    models across 8 GB, 4 GB, and 2 GB memory tiers.</div>
-            </div>
-        </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-        <div style="display: flex; gap: 32px; margin-top: 16px; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 220px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Prerequisites
-                </div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Neural network fundamentals from the Neural Computation chapter &middot;
-                    Training and optimization from the Training chapter
-                </div>
-            </div>
-            <div style="flex: 0 0 180px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Duration
-                </div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    <strong>~56 min</strong><br/>
-                    A: ~12 &middot; B: ~12 &middot; C: ~12 &middot; D: ~8 &middot; E: ~12 min
-                </div>
-            </div>
-        </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 12px -28px 0 -28px;
-                    padding: 16px 28px 0 28px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Core Question
-            </div>
-            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
-                        line-height: 1.5; font-style: italic;">
-                &ldquo;If removing 90% of a neural network's weights sounds like a 10x speedup,
-                why does the GPU not notice?&rdquo;
-            </div>
-        </div>
-    </div>
-    """)
+def _(
+    chapter_10_recap,
+    chapter_recap,
+    lab_learning_objectives,
+    lab_map,
+    learning_objectives,
+    mo,
+    pA_pred,
+    pB_pred,
+    pC_pred,
+    pD_pred,
+    pE_pred,
+    scenario_brief,
+    source_trace,
+    track_context,
+    v1_10_track_picker,
+    v1_10_track_profile,
+    v1_10_variant,
+):
+    _part_completion = {
+        "A": "prediction_saved" if pA_pred.value is not None else "not_started",
+        "B": "prediction_saved" if pB_pred.value is not None else "not_started",
+        "C": "prediction_saved" if pC_pred.value is not None else "not_started",
+        "D": "prediction_saved" if pD_pred.value is not None else "not_started",
+        "E": "prediction_saved" if pE_pred.value is not None else "not_started",
+        "Synthesis": (
+            "decision_complete"
+            if all(
+                prediction.value is not None
+                for prediction in (pA_pred, pB_pred, pC_pred, pD_pred, pE_pred)
+            )
+            else "not_started"
+        ),
+    }
+    _system_ref = v1_10_variant.system_ref or "single-device profile"
+    _source_trace = {
+        "summary": "Track profile and scenario variant come from mlsysbook_labs; hardware and model refs point to MLSysIM registries.",
+        "track_id": v1_10_track_profile.track_id,
+        "scenario_id": v1_10_variant.scenario_id,
+        "hardware_ref": v1_10_variant.hardware_ref,
+        "system_ref": _system_ref,
+        "model_ref": v1_10_variant.model_ref,
+        "defaults": dict(v1_10_variant.defaults),
+        "assumptions": dict(v1_10_variant.assumptions),
+        "equations": "model_size = parameters * bytes_per_parameter; compression_ratio = baseline_size / compressed_size",
+        "implementation_status": "Outer track/report contract migrated; Parts A-E calculations still use the legacy notebook formulas until the solver pass.",
+    }
+    mo.vstack(
+        [
+            learning_objectives(lab_learning_objectives),
+            chapter_recap(chapter_10_recap),
+            v1_10_track_picker,
+            track_context(v1_10_track_profile),
+            scenario_brief(
+                "Scenario Brief",
+                stakeholder=v1_10_variant.stakeholder,
+                objective=v1_10_variant.objective,
+                constraints={
+                    "Workload": v1_10_variant.workload_summary,
+                    "Model source": v1_10_variant.model_ref,
+                    "Hardware source": v1_10_variant.hardware_ref,
+                    "System source": _system_ref,
+                    "Primary metric": v1_10_variant.primary_metric,
+                    "Guardrail metric": v1_10_variant.guardrail_metric,
+                },
+            ),
+            lab_map(
+                (
+                    {
+                        "part_id": "A",
+                        "part": "A",
+                        "concept": "Quantization",
+                        "question": "When is lower precision a free lunch, and where is the quality cliff?",
+                    },
+                    {
+                        "part_id": "B",
+                        "part": "B",
+                        "concept": "Pruning Hardware Trap",
+                        "question": "Which sparsity patterns actually map to hardware speedup?",
+                    },
+                    {
+                        "part_id": "C",
+                        "part": "C",
+                        "concept": "Pareto Frontier",
+                        "question": "Which compressed candidates are dominated or feasible?",
+                    },
+                    {
+                        "part_id": "D",
+                        "part": "D",
+                        "concept": "Energy Dividend",
+                        "question": "Does compression move memory energy, compute energy, or both?",
+                    },
+                    {
+                        "part_id": "E",
+                        "part": "E",
+                        "concept": "Distillation",
+                        "question": "When does a smaller student preserve enough quality?",
+                    },
+                    {
+                        "part_id": "Synthesis",
+                        "part": "Synthesis",
+                        "concept": "Deployment Recipe Review",
+                        "question": "What compression recipe would you defend for this track?",
+                    },
+                ),
+                _part_completion,
+            ),
+            source_trace(_source_trace),
+        ]
+    )
     return
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1103,6 +1198,85 @@ The $T^2$ factor compensates for gradient magnitude reduction at high temperatur
     _tabs
     return
 
+
+@app.cell(hide_code=True)
+def _(
+    big_takeaways,
+    build_lab_report,
+    lab_big_takeaways,
+    lab_learning_objectives,
+    lab_metadata,
+    mo,
+    pA_pred,
+    pB_pred,
+    pC_pred,
+    pD_pred,
+    pE_pred,
+    report_export_panel,
+    v1_10_track_profile,
+    v1_10_variant,
+):
+    _prediction_values = {
+        "Part A - Quantization": pA_pred.value,
+        "Part B - Pruning": pB_pred.value,
+        "Part C - Pareto frontier": pC_pred.value,
+        "Part D - Energy dividend": pD_pred.value,
+        "Part E - Distillation": pE_pred.value,
+    }
+    _recorded_predictions = {
+        key: value for key, value in _prediction_values.items() if value is not None
+    }
+    _source_trace = {
+        "track_profile": v1_10_track_profile.track_id,
+        "scenario_id": v1_10_variant.scenario_id,
+        "hardware_ref": v1_10_variant.hardware_ref,
+        "system_ref": v1_10_variant.system_ref or "single-device profile",
+        "model_ref": v1_10_variant.model_ref,
+        "variant_defaults": dict(v1_10_variant.defaults),
+        "variant_assumptions": dict(v1_10_variant.assumptions),
+        "current_limitation": "Report export captures track, scenario, and predictions before the solver-backed evidence migration.",
+    }
+    _report = build_lab_report(
+        lab_metadata,
+        track=v1_10_track_profile.track_id,
+        scenario=v1_10_variant.scenario_id,
+        learning_objectives=lab_learning_objectives,
+        predictions=_recorded_predictions,
+        evidence_summary={
+            "track": v1_10_track_profile.label,
+            "primary_metric": v1_10_variant.primary_metric,
+            "guardrail_metric": v1_10_variant.guardrail_metric,
+            "legacy_notebook_status": "Parts A-E still use the pre-migration calculations in this slice.",
+        },
+        big_takeaways=lab_big_takeaways,
+        source_trace=_source_trace,
+        incomplete_fields=(
+            "Track-specific compression candidate evidence",
+            "Final recipe decision widget",
+            "Structured reflection fields",
+        ),
+    )
+    mo.vstack(
+        [
+            big_takeaways(lab_big_takeaways),
+            mo.Html(
+                """
+<div class="mlsysbook-panel">
+  <h2>Download Report</h2>
+  <p class="mlsysbook-source-summary">
+    This local report already records the selected track, scenario variant, source trace,
+    and any predictions you have made. It marks the final recipe and solver-backed
+    evidence as incomplete until the next migration slices land.
+  </p>
+</div>
+"""
+            ),
+            report_export_panel(_report),
+        ]
+    )
+    return
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # CELL 5: LEDGER HUD
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1112,17 +1286,29 @@ The $T^2$ factor compensates for gradient magnitude reduction at high temperatur
 # ===========================================================================
 
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo, pA_pred, pB_pred, pC_pred, pD_pred, pE_pred):
-    if pA_pred.value is not None and pB_pred.value is not None and pC_pred.value is not None and pD_pred.value is not None and pE_pred.value is not None:
-        ledger.save(chapter=10, design={
-            "lab": "model_compress",
-            "completed": True,
-            "quantization_accuracy_loss": pA_pred.value,
-            "pruning_speedup_prediction": pB_pred.value,
-            "deployment_strategy": pC_pred.value,
-            "energy_memory_vs_compute": pD_pred.value,
-            "distillation_accuracy": pE_pred.value,
-        })
+def _(COLORS, ledger, mo, pA_pred, pB_pred, pC_pred, pD_pred, pE_pred, v1_10_track_id, v1_10_variant):
+    _complete = all(
+        prediction.value is not None
+        for prediction in (pA_pred, pB_pred, pC_pred, pD_pred, pE_pred)
+    )
+    ledger.save(track=v1_10_track_id, chapter=10, design={
+        "lab": "model_compress",
+        "lab_id": "v1_10_compression_paradox",
+        "completed": _complete,
+        "track_id": v1_10_track_id,
+        "scenario_id": v1_10_variant.scenario_id,
+        "hardware_ref": v1_10_variant.hardware_ref,
+        "system_ref": v1_10_variant.system_ref,
+        "model_ref": v1_10_variant.model_ref,
+        "primary_metric": v1_10_variant.primary_metric,
+        "guardrail_metric": v1_10_variant.guardrail_metric,
+        "quantization_accuracy_loss": pA_pred.value,
+        "pruning_speedup_prediction": pB_pred.value,
+        "deployment_strategy": pC_pred.value,
+        "energy_memory_vs_compute": pD_pred.value,
+        "distillation_accuracy": pE_pred.value,
+    })
+    _status = "COMPLETE" if _complete else "IN PROGRESS"
     mo.Html(f"""
     <div class="lab-hud">
         <span class="hud-label">LAB</span>
@@ -1130,8 +1316,10 @@ def _(COLORS, ledger, mo, pA_pred, pB_pred, pC_pred, pD_pred, pE_pred):
         <span style="flex:1;"></span>
         <span class="hud-label">CH</span>
         <span class="hud-value">10</span>
+        <span class="hud-label">TRACK</span>
+        <span class="hud-value">{v1_10_track_id}</span>
         <span class="hud-label">STATUS</span>
-        <span class="hud-active">COMPLETE</span>
+        <span class="hud-active">{_status}</span>
     </div>
     """)
     return

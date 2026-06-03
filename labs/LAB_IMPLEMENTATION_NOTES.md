@@ -439,3 +439,48 @@ Tests or checks run:
 
 Follow-up:
 - Begin V1-10 Compression pilot migration using the shared helper layer.
+
+### 2026-06-03 - V1-10 Track-Aware Outer Contract Pass
+
+Lab:
+- V1-10 The Compression Paradox.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/vol1/lab_10_model_compress.py`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+
+What changed:
+- Added the `mlsysbook_labs` browser wheel install to the V1-10 WASM bootstrap.
+- Imported the shared lab metadata, track, structure, source-trace, and report helpers.
+- Added V1-10 `LabMetadata`, `ChapterRecap`, learning objectives, and big takeaways.
+- Added a canonical track selector that defaults from the local Design Ledger when Lab 00 has already stored a track.
+- Loaded the V1-10 `LabTrackVariant` for the selected canonical track.
+- Replaced the old opening hero/briefing with the shared academic header, `Learning Objectives`, `Chapter Recap`, `Your Track`, `Scenario Brief`, `Lab Map`, and `Source Trace` blocks.
+- Added a local `Download Report` section that records selected track, scenario variant, source trace, and prediction values while marking solver-backed evidence and the final recipe as incomplete.
+- Updated the ledger save payload to include canonical `track_id`, `scenario_id`, `hardware_ref`, `system_ref`, `model_ref`, primary metric, guardrail metric, and completion state.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts. This pass consumes existing track profiles and pilot variants.
+- The remaining V1-10 calculation code still needs a source-traced compression candidate/sweep API before notebook-local constants can be removed safely.
+
+Notebook-local constants removed:
+- None yet. H100, iPhone, Jetson, ResNet-50, MobileNetV2, and Llama constants are still used by the legacy Parts A-E calculations.
+
+Reusable component or modality improved:
+- V1-10 now proves the shared helper layer can drive a content-heavy lab opening and a local report skeleton.
+
+Plan updates needed in other labs:
+- Later migrations should copy this outer-contract pattern before changing part internals.
+- The compression solver pass should determine whether reusable compression result types belong in MLSysIM or `mlsysbook_labs` metadata before moving formulas out of the notebook.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_10_model_compress.py`
+- `python3 -m pytest labs/tests/test_static.py::TestSyntax::test_ast_parse labs/tests/test_static.py::TestWheelConsistency::test_mlsysbook_labs_wheel_present_when_imported labs/tests/test_static.py::TestWheelConsistency::test_micropip_url_matches_pyproject_version --tb=short -q labs/vol1/lab_10_model_compress.py`
+- `rg` check for `mlsysbook_labs`, `Scenario Brief`, `Lab Map`, `Source Trace`, `Download Report`, `build_lab_report`, and `ledger.save`.
+
+Follow-up:
+- Implement a shared compression candidate/frontier result layer before changing Parts A-E.
+- Migrate Parts A-C first because they are the core compression pedagogy and report evidence path.
