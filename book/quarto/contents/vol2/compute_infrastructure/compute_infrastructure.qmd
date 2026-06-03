@@ -1866,7 +1866,36 @@ Recommendation models\index{Recommendation Model} split the decision again. Embe
 
 Vision and diffusion workloads move back toward arithmetic throughput because convolutions, attention blocks, and denoising networks reuse data heavily. Diffusion inference makes this especially clear: generating one image requires many repeated denoising passes, so the service pays for a sequence of full model evaluations rather than one decode step per token. For these workloads, TFLOP/s per dollar often dominates bandwidth per dollar once model state fits in memory.
 
-Mixture-of-Experts\index{Mixture-of-Experts|see{MoE}}\index{MoE!infrastructure challenge} (MoE) and multi-modal models add a different constraint: routing and heterogeneity. MoE reduces per-token compute by activating only a subset of experts, but it introduces a many-to-many token exchange pattern, called AllToAll communication in later chapters, and load-balance risk because tokens must be routed to different expert placements. Multi-modal models combine text decode, vision processing, audio features, and sometimes video, each with different arithmetic intensity and batching behavior. These workloads favor platforms with flexible scheduling and strong bisection bandwidth rather than accelerators optimized for one regular dataflow.
+```{python}
+#| echo: false
+from mlsysim import Models
+from mlsysim.fmt import check, fmt_count, fmt_params
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: §Total cost of ownership and workload matching, MoE example.
+# │ Goal: Restore the concrete MoE scale anchor from the model registry.
+# │ Exports: MoETdpRecap.{total_params_b_str,active_params_b_str,
+# │          experts_count_str,active_experts_count_str}
+class MoETdpRecap:
+    m_moe = Models.Language.Mixtral_8x7B
+
+    # ┌── 1. LOAD (Source of truth) ───────────────────────────────────────────
+    total_params = m_moe.parameters
+    active_params = m_moe.active_parameters
+    experts = m_moe.experts
+    active_experts = m_moe.active_experts_per_token
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────────
+    check(active_params < total_params, "MoE active parameters must be fewer than total parameters.")
+    check(0 < active_experts <= experts, "MoE active experts must be within the expert count.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    total_params_b_str = fmt_params(total_params, scale="B", precision=1, commas=False)
+    active_params_b_str = fmt_params(active_params, scale="B", precision=1, commas=False)
+    experts_count_str = fmt_count(experts, label="expert", commas=False)
+    active_experts_count_str = fmt_count(active_experts, label="expert", commas=False)
+```
+
+Mixture-of-Experts\index{Mixture-of-Experts|see{MoE}}\index{MoE!infrastructure challenge} (MoE) and multi-modal models add a different constraint: routing and heterogeneity. MoE reduces per-token compute by activating only a subset of experts; Mixtral-8x7B [@jiang2024mixtral], for example, has `{python} MoETdpRecap.total_params_b_str` total parameters but only `{python} MoETdpRecap.active_params_b_str` active parameters per token because the router chooses `{python} MoETdpRecap.active_experts_count_str` from `{python} MoETdpRecap.experts_count_str`. That compute saving introduces a many-to-many token exchange pattern, called AllToAll communication in later chapters, and load-balance risk because tokens must be routed to different expert placements; high-bisection fabrics and load-balancing mechanisms such as auxiliary losses or capacity factors determine whether the theoretical saving appears in the training trace. Multi-modal models combine text decode, vision processing, audio features, and sometimes video, each with different arithmetic intensity and batching behavior. These workloads favor platforms with flexible scheduling and strong bisection bandwidth rather than accelerators optimized for one regular dataflow.
 
 ::: {#psp-compute-infrastructure-matching-hardware-workload .callout-perspective title="Matching hardware to workload"}
 
