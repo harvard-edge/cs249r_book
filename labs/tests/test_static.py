@@ -247,6 +247,7 @@ class TestWheelConsistency:
             names = set(zf.namelist())
         required = {
             "mlsysbook_labs/__init__.py",
+            "mlsysbook_labs/edge.py",
             "mlsysbook_labs/schemas.py",
             "mlsysbook_labs/tracks.py",
             "mlsysbook_labs/variants.py",

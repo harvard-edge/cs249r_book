@@ -13,6 +13,18 @@ from .legacy_components import (
     StakeholderMessage,
 )
 from .catalog import LAB_CATALOG, get_lab_metadata
+from .edge import (
+    AdaptationStorageResult,
+    EdgeDeviceProfile,
+    EnergyDrainResult,
+    FederatedCommunicationResult,
+    TrainingMemoryBreakdown,
+    adaptation_storage,
+    edge_device_profile,
+    energy_drain,
+    federated_communication,
+    training_memory_breakdown,
+)
 from .migration import (
     baseline_big_takeaways,
     baseline_learning_objectives,
@@ -85,6 +97,16 @@ __all__ = [
     "COLORS",
     "LAB_CSS",
     "apply_plotly_theme",
+    "AdaptationStorageResult",
+    "EdgeDeviceProfile",
+    "EnergyDrainResult",
+    "FederatedCommunicationResult",
+    "TrainingMemoryBreakdown",
+    "adaptation_storage",
+    "edge_device_profile",
+    "energy_drain",
+    "federated_communication",
+    "training_memory_breakdown",
     "baseline_big_takeaways",
     "baseline_learning_objectives",
     "build_migration_report",
