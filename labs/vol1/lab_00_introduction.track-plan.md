@@ -78,6 +78,8 @@ Track realization:
 - The selector should return the canonical profile, not free-form hardware.
 - The lab must render hardware facts from MLSysIM and narrative facts from the track profile.
 - Reports should include the selected track and a first "why this track changes the answer" statement.
+- Lab 00 is the canonical track-selection surface: it writes the canonical `track_id`
+  to the Design Ledger, and later labs use that value as their default track.
 
 ## Ledger And Report
 

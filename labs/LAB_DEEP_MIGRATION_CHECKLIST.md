@@ -101,11 +101,11 @@ Current status:
 - [x] Track profile references come from `mlsysbook_labs`.
 
 Remaining tasks:
-- [ ] Replace any remaining notebook-local track display facts with profile-derived fields.
-- [ ] Confirm the track picker writes a ledger value consumed by all later labs.
-- [ ] Add a regression test that Lab 00 exposes all four canonical track IDs.
-- [ ] Confirm the downloaded report includes track ID, hardware ref, system ref, and source policy.
-- [ ] Update the track-plan file if Lab 00 becomes the canonical place for student track selection.
+- [x] Replace any remaining notebook-local track display facts with profile-derived fields.
+- [x] Confirm the track picker writes a ledger value consumed by all later labs.
+- [x] Add a regression test that Lab 00 exposes all four canonical track IDs.
+- [x] Confirm the downloaded report includes track ID, hardware ref, system ref, and source policy.
+- [x] Update the track-plan file if Lab 00 becomes the canonical place for student track selection.
 
 ### V1-01 - The AI Triad
 

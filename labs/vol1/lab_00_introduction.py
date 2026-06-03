@@ -56,6 +56,7 @@ async def _():
     from mlsysim.labs.components import DecisionLog
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
+        CANONICAL_TRACKS,
         LabMetadata,
         build_lab_report,
         get_track_profile,
@@ -69,6 +70,7 @@ async def _():
     return (
         COLORS,
         ACADEMIC_LAB_CSS,
+        CANONICAL_TRACKS,
         DecisionLog,
         LAB_CSS,
         LabMetadata,
@@ -628,118 +630,67 @@ def _(
 # ─── CONCEPT 3: THE DEPLOYMENT REGIMES ────────────────────────────────────────
 
 @app.cell
-def _(check1, check2empty, mo):
+def _(CANONICAL_TRACKS, check1, check2empty, mo):
     mo.stop(check1.value is None or check2empty())
+
+    _color_by_track = {
+        "iphone": "#f59e0b",
+        "oura_ring": "#10b981",
+        "robotaxi": "#ef4444",
+        "cloud_fleet": "#6366f1",
+    }
+    _cards = ""
+    for _profile in CANONICAL_TRACKS:
+        _color = _color_by_track.get(_profile.track_id, "#6366f1")
+        _constraints = ", ".join(_profile.dominant_constraints)
+        _metrics = ", ".join(_profile.primary_metrics)
+        _guardrails = ", ".join(_profile.guardrail_metrics)
+        _system_ref = _profile.system_ref or "single-device profile"
+        _cards += f"""
+            <div style="background: white; border: 1px solid {_color}44; border-radius: 12px; padding: 20px;">
+                <div style="font-weight: 800; color: #1e293b; font-size: 1.0rem; margin-bottom: 4px;">
+                    {_profile.label}
+                </div>
+                <div style="font-size: 0.78rem; color: {_color}; font-weight: 700; margin-bottom: 10px;">
+                    {_profile.category}
+                </div>
+                <div style="color: #475569; font-size: 0.87rem; line-height: 1.6; margin-bottom: 12px;">
+                    {_profile.narrative}
+                </div>
+                <div style="background: #f8fafc; border-radius: 8px; padding: 8px 12px;
+                            font-size: 0.78rem; color: #334155; line-height: 1.55; margin-bottom: 8px;">
+                    <strong>Hardware:</strong> <code>{_profile.hardware_ref}</code><br/>
+                    <strong>System:</strong> <code>{_system_ref}</code>
+                </div>
+                <div style="background: {_color}12; border-radius: 8px; padding: 8px 12px;
+                            font-size: 0.78rem; color: #334155; line-height: 1.55;">
+                    <strong>Primary metrics:</strong> {_metrics}<br/>
+                    <strong>Guardrails:</strong> {_guardrails}<br/>
+                    <strong>Dominant constraints:</strong> {_constraints}
+                </div>
+            </div>
+        """
 
     mo.vstack([
         mo.md("---"),
         mo.md("""
-        ## The Four Physical Regimes
+        ## The Four Canonical Tracks
 
-        The physical constraints above don't create a continuum — they create
-        **four distinct operating envelopes**, each demanding different infrastructure,
-        different optimization strategies, and different definitions of "correct."
+        The physical constraints above do not create a generic continuum. In this
+        course they resolve into four canonical tracks. Each track has a canonical
+        profile in `mlsysbook_labs`, a hardware reference in MLSysIM, and a set of
+        metrics and guardrails that later labs reuse.
         """),
-        mo.Html("""
+        mo.Html(f"""
         <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin: 16px 0;">
-
-            <div style="background: white; border: 1px solid #c7d2fe; border-radius: 12px; padding: 20px;">
-                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
-                    <span style="font-size: 1.6rem;">☁️</span>
-                    <div>
-                        <div style="font-weight: 800; color: #1e293b;">Cloud ML</div>
-                        <div style="font-size: 0.78rem; color: #6366f1; font-weight: 600;">
-                            Binding constraint: Memory Bandwidth Wall
-                        </div>
-                    </div>
-                </div>
-                <div style="color: #475569; font-size: 0.87rem; line-height: 1.6; margin-bottom: 12px;">
-                    Virtually unlimited compute and storage. The binding constraint
-                    is not processing power — it is how fast data can move from
-                    memory to compute cores. Most large models are <em>memory-bandwidth-bound</em>,
-                    not compute-bound.
-                </div>
-                <div style="background: #eef2ff; border-radius: 8px; padding: 8px 12px;
-                            font-size: 0.8rem; color: #3730a3; font-weight: 600;">
-                    Latency: 100–500 ms · Power: kilowatts · Memory: terabytes
-                </div>
-            </div>
-
-            <div style="background: white; border: 1px solid #fecaca; border-radius: 12px; padding: 20px;">
-                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
-                    <span style="font-size: 1.6rem;">🤖</span>
-                    <div>
-                        <div style="font-weight: 800; color: #1e293b;">Edge ML</div>
-                        <div style="font-size: 0.78rem; color: #ef4444; font-weight: 600;">
-                            Binding constraint: Latency Determinism Wall
-                        </div>
-                    </div>
-                </div>
-                <div style="color: #475569; font-size: 0.87rem; line-height: 1.6; margin-bottom: 12px;">
-                    Computation happens near the data source — factory floors,
-                    vehicles, hospitals. The binding constraint is not average latency
-                    but <em>tail latency</em>: a single spike in a safety-critical system
-                    is a failure, not a statistic.
-                </div>
-                <div style="background: #fef2f2; border-radius: 8px; padding: 8px 12px;
-                            font-size: 0.8rem; color: #991b1b; font-weight: 600;">
-                    Latency: 10–100 ms · Power: watts–tens of watts · Memory: gigabytes
-                </div>
-            </div>
-
-            <div style="background: white; border: 1px solid #fed7aa; border-radius: 12px; padding: 20px;">
-                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
-                    <span style="font-size: 1.6rem;">📱</span>
-                    <div>
-                        <div style="font-weight: 800; color: #1e293b;">Mobile ML</div>
-                        <div style="font-size: 0.78rem; color: #f59e0b; font-weight: 600;">
-                            Binding constraint: Thermal Power Wall
-                        </div>
-                    </div>
-                </div>
-                <div style="color: #475569; font-size: 0.87rem; line-height: 1.6; margin-bottom: 12px;">
-                    Intelligence runs directly on consumer devices. Compute capability
-                    is substantial, but sustained operation is limited by heat
-                    accumulation in a sealed, handheld enclosure. After thermal
-                    throttling, <em>performance drops by 30–70%</em>.
-                </div>
-                <div style="background: #fffbeb; border-radius: 8px; padding: 8px 12px;
-                            font-size: 0.8rem; color: #92400e; font-weight: 600;">
-                    Latency: 5–50 ms · Power: 3–5 W sustained · Memory: 4–16 GB
-                </div>
-            </div>
-
-            <div style="background: white; border: 1px solid #bbf7d0; border-radius: 12px; padding: 20px;">
-                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
-                    <span style="font-size: 1.6rem;">👂</span>
-                    <div>
-                        <div style="font-weight: 800; color: #1e293b;">TinyML</div>
-                        <div style="font-size: 0.78rem; color: #10b981; font-weight: 600;">
-                            Binding constraint: SRAM Capacity Wall
-                        </div>
-                    </div>
-                </div>
-                <div style="color: #475569; font-size: 0.87rem; line-height: 1.6; margin-bottom: 12px;">
-                    Always-on intelligence in microcontrollers running on
-                    coin-cell batteries. There is no operating system, no virtual
-                    memory, no paging. If the model does not fit in 256 KB of SRAM,
-                    it does not run. <em>Every byte is a resource allocation decision</em>.
-                </div>
-                <div style="background: #ecfdf5; border-radius: 8px; padding: 8px 12px;
-                            font-size: 0.8rem; color: #064e3b; font-weight: 600;">
-                    Latency: 1–10 ms · Power: microwatts–milliwatts · Memory: kilobytes
-                </div>
-            </div>
-
+            {_cards}
         </div>
         """),
         mo.callout(
             mo.md(
-                "**Nine orders of magnitude** separate the largest cloud deployment "
-                "(megawatts, terabytes) from the smallest TinyML device (microwatts, kilobytes). "
-                "The engineering principles that govern one end of this spectrum "
-                "do not transfer to the other. This is why ML Systems is a discipline, "
-                "not a configuration setting."
+                "**Track choice is a source-of-truth decision.** Later labs read the selected "
+                "track from the Design Ledger and resolve hardware, system, scenario, and "
+                "report defaults from `mlsysbook_labs` and MLSysIM references."
             ),
             kind="info",
         ),
@@ -1111,10 +1062,10 @@ def _(check1, check2empty, check3, mo):
 
     context_selector = mo.ui.radio(
         options={
-            "☁️  Cloud Fleet — your constraint is the Memory Bandwidth Wall":         "cloud",
-            "🚕  RoboTaxi    — your constraint is the Latency Determinism Wall":       "edge",
-            "📱  iPhone      — your constraint is the Thermal Power Wall":             "mobile",
-            "💍  Oura Ring   — your constraint is the SRAM and Battery Wall":          "tiny",
+            "📱  iPhone — mobile privacy, thermal, battery, and latency": "iphone",
+            "💍  Oura Ring — wearable SRAM, flash, OTA, and battery": "oura_ring",
+            "🚕  RoboTaxi — edge p99 latency, reliability, and safety margin": "robotaxi",
+            "☁️  Cloud Fleet — throughput, p99 SLA, utilization, cost, and carbon": "cloud_fleet",
         },
         label="Select the track you will focus on throughout this curriculum:",
     )
@@ -1152,27 +1103,16 @@ def _(
         ])
     )
 
-    _key = context_selector.value
-    _track_id = {
-        "cloud": "cloud_fleet",
-        "edge": "robotaxi",
-        "mobile": "iphone",
-        "tiny": "oura_ring",
-    }[_key]
+    _track_id = context_selector.value
     _track_profile = get_track_profile(_track_id)
     _contexts = {
-        "cloud": {
+        "cloud_fleet": {
             "color":     COLORS["BlueLine"],
             "bg":        COLORS["BlueL"],
-            "label":     "Cloud Fleet",
-            "nemesis":   "Memory Bandwidth Wall",
-            "role":      "Fleet Service Owner",
-            "north_star":"Maximize sustained serving throughput on a reference H100 fleet while preserving SLA, cost, and carbon guardrails.",
             "persona":   "Your CTO",
             "quote": (
-                "We're burning $40,000 a day on GPU rentals. "
-                "If hardware utilization doesn't hit 50% by next quarter, "
-                "we run out of runway. The model is fine. The infrastructure is not. Fix it."
+                "The model is not the whole service. Show me throughput, p99, cost, "
+                "utilization, and carbon before you call this deployable."
             ),
             "arc": [
                 ("Labs 01–04", "Foundations",
@@ -1185,18 +1125,13 @@ def _(
                  "Benchmark, monitor, and operate a production serving system at scale"),
             ],
         },
-        "edge": {
+        "robotaxi": {
             "color":     COLORS["RedLine"],
             "bg":        COLORS["RedL"],
-            "label":     "RoboTaxi",
-            "nemesis":   "Latency Determinism Wall",
-            "role":      "Autonomous Vehicle Platform Engineer",
-            "north_star":"Maintain a deterministic perception-to-decision loop on a RoboTaxi reference compute profile.",
             "persona":   "Your Safety Director",
             "quote": (
-                "A 5 ms latency spike added 15 cm of stopping distance at 60 mph. "
-                "That is a regulatory failure. I do not care about your average latency. "
-                "One tail event is one too many. Zero tolerance."
+                "Average latency is not a safety case. Bring me p99 and p999 evidence, "
+                "rare-event replay, and a fallback plan."
             ),
             "arc": [
                 ("Labs 01–04", "Foundations",
@@ -1209,18 +1144,13 @@ def _(
                  "Validate deterministic SLAs on physical edge hardware under adversarial load"),
             ],
         },
-        "mobile": {
+        "iphone": {
             "color":     COLORS["OrangeLine"],
             "bg":        COLORS["OrangeL"],
-            "label":     "iPhone",
-            "nemesis":   "Thermal and Battery Wall",
-            "role":      "Mobile Product Engineer",
-            "north_star":"Run responsive on-device inference within iPhone thermal, memory, privacy, and battery constraints.",
             "persona":   "Your UX Director",
             "quote": (
-                "Users are returning the device because it heats up after two minutes of AR. "
-                "You have 2 Watts of sustained thermal headroom. Not 2.1. Two. "
-                "Every watt you save is a feature."
+                "A local model is only useful if the phone still feels responsive, "
+                "private, and comfortable after sustained use."
             ),
             "arc": [
                 ("Labs 01–04", "Foundations",
@@ -1233,18 +1163,13 @@ def _(
                  "Benchmark sustained throughput on a power-constrained device under realistic workloads"),
             ],
         },
-        "tiny": {
+        "oura_ring": {
             "color":     COLORS["GreenLine"],
             "bg":        COLORS["GreenL"],
-            "label":     "Oura Ring",
-            "nemesis":   "SRAM, Flash, and Battery Wall",
-            "role":      "Wearable Firmware Engineer",
-            "north_star":"Fit always-on sensing and inference into a ring-scale memory, OTA, and battery budget.",
             "persona":   "Your Hardware Lead",
             "quote": (
-                "We have 256 KB of on-chip SRAM. Every weight byte you keep "
-                "is audio buffer you lose. There is no paging. There is no swap. "
-                "If it does not fit, it does not run."
+                "Every byte and every radio wakeup has an owner. If the firmware, "
+                "model, sensor window, and OTA package do not fit together, it does not ship."
             ),
             "arc": [
                 ("Labs 01–04", "Foundations",
@@ -1259,12 +1184,12 @@ def _(
         },
     }
 
-    _t = _contexts[_key]
+    _t = _contexts[_track_id]
 
     # Persist to Design Ledger
     ledger.save(track=_track_id, chapter=0, design={
-        "deployment_context": _key,
-        "track_id": _track_id,
+        "deployment_context": _track_id,
+        "track_id": _track_profile.track_id,
         "track_label": _track_profile.label,
         "track_category": _track_profile.category,
         "hardware_ref": _track_profile.hardware_ref,
@@ -1321,7 +1246,7 @@ def _(
                 🎖️ Deployment Context Confirmed
             </div>
             <div style="font-size:1.25rem; font-weight:800; color:#0f172a; margin-bottom:4px;">
-                {_t['label']} · {_t['role']}
+                {_track_profile.label} · {_track_profile.stakeholder}
             </div>
             <div style="font-size:0.82rem; color:#64748b; margin-bottom:10px; line-height:1.5;">
                 <strong>MLSysIM source:</strong>
@@ -1329,11 +1254,11 @@ def _(
                 {f" · <code>{_track_profile.system_ref}</code>" if _track_profile.system_ref else ""}
             </div>
             <div style="font-size:0.88rem; color:#475569; margin-bottom:4px; line-height:1.5;">
-                <strong>North Star:</strong> {_t['north_star']}
+                <strong>North Star:</strong> {_track_profile.narrative}
             </div>
             <div style="font-size:0.88rem; margin-bottom:18px; line-height:1.5;">
                 <strong style="color:{_t['color']};">Arch Nemesis:</strong>
-                <span style="color:#334155;"> {_t['nemesis']}</span>
+                <span style="color:#334155;"> {", ".join(_track_profile.dominant_constraints)}</span>
             </div>
             <div style="font-size:0.75rem; font-weight:700; text-transform:uppercase;
                         letter-spacing:0.07em; color:#94a3b8; margin-bottom:8px;">
@@ -1379,12 +1304,7 @@ def _(
         mo.md("_Complete the checks and choose your track to unlock the local report._"),
     )
 
-    _track_id = {
-        "cloud": "cloud_fleet",
-        "edge": "robotaxi",
-        "mobile": "iphone",
-        "tiny": "oura_ring",
-    }[context_selector.value]
+    _track_id = context_selector.value
     _profile = get_track_profile(_track_id)
     _selected = f"{_profile.label} ({_profile.category})"
     _report = build_lab_report(

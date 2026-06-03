@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from mlsysbook_labs import (
     CANONICAL_TRACKS,
     LabMetadata,
@@ -10,6 +12,9 @@ from mlsysbook_labs import (
     track_options,
     track_profile_map,
 )
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_canonical_track_profiles_are_specific_devices_or_systems():
@@ -98,3 +103,16 @@ def test_lab_report_marks_missing_required_fields():
     assert "Predictions" in report.snapshot["incomplete_fields"]
     assert "Evidence Summary" in report.snapshot["incomplete_fields"]
     assert "Final Decision" in report.snapshot["incomplete_fields"]
+
+
+def test_lab00_exposes_canonical_tracks_and_report_sources():
+    source = (REPO_ROOT / "labs" / "vol1" / "lab_00_introduction.py").read_text()
+
+    for profile in CANONICAL_TRACKS:
+        assert f'"{profile.track_id}"' in source
+
+    assert "ledger.save(track=_track_id, chapter=0" in source
+    assert '"track_id": _track_profile.track_id' in source
+    assert '"hardware_ref": _track_profile.hardware_ref' in source
+    assert '"system_ref": _track_profile.system_ref' in source
+    assert '"source_policy": _profile.source_policy' in source

@@ -1322,3 +1322,43 @@ Tests or checks run:
 - `python3 -m pytest labs/tests/test_engine.py -k "lab_16_ml_conclusion" -q`
 - `python3 -m pytest labs/tests/test_capstone_helpers.py labs/tests/test_lab_variants.py labs/tests/test_static.py -q`
 - `git diff --check`
+
+### 2026-06-03 - V1-00 Orientation Track Contract Cleanup
+
+Lab:
+- `labs/vol1/lab_00_introduction.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/vol1/lab_00_introduction.py`
+- `labs/vol1/lab_00_introduction.track-plan.md`
+- `labs/tests/test_track_profiles.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+
+What changed:
+- Made the Lab 00 track selector return canonical track IDs directly: `iphone`, `oura_ring`, `robotaxi`, and `cloud_fleet`.
+- Replaced the old physical-regime display cards with profile-derived canonical track cards using `CANONICAL_TRACKS`.
+- Changed the track reveal copy to pull label, stakeholder, narrative, constraints, hardware ref, system ref, and source policy from the resolved `TrackProfile`.
+- Confirmed the ledger save writes the canonical track ID and profile-derived refs that later labs consume.
+- Added a regression test that Lab 00 exposes all four canonical track IDs and that its report/source trace include track, hardware, system, and source policy fields.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required. Lab 00 references track profiles; later labs resolve the hardware/system refs through MLSysIM.
+
+Notebook-local constants removed:
+- Old selector aliases and several hard-coded track reveal facts were replaced with canonical track profile fields.
+
+Reusable component or modality improved:
+- Lab 00 is now explicitly documented as the canonical track-selection surface for the course.
+
+Plan updates needed in other labs:
+- Later labs should continue to use `ledger.get_track()` plus `get_track_profile()`/`get_lab_track_variant()` rather than their own selector aliases.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_00_introduction.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "lab_00_introduction" -q`
+- `python3 -m pytest labs/tests/test_track_profiles.py labs/tests/test_ui_helpers.py labs/tests/test_static.py -q`
+- `git diff --check`
