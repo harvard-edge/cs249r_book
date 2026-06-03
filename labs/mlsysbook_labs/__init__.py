@@ -13,6 +13,13 @@ from .legacy_components import (
     StakeholderMessage,
 )
 from .catalog import LAB_CATALOG, get_lab_metadata
+from .migration import (
+    baseline_big_takeaways,
+    baseline_learning_objectives,
+    build_migration_report,
+    legacy_migration_panel,
+    variant_source_trace,
+)
 from .reports import build_lab_report, report_export, report_export_panel, report_text_fallback
 from .registry_refs import resolve_mlsysim_ref
 from .schemas import (
@@ -78,6 +85,11 @@ __all__ = [
     "COLORS",
     "LAB_CSS",
     "apply_plotly_theme",
+    "baseline_big_takeaways",
+    "baseline_learning_objectives",
+    "build_migration_report",
+    "legacy_migration_panel",
+    "variant_source_trace",
     "DesignLedger",
     "LedgerState",
     "Card",

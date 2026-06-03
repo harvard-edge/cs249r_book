@@ -723,3 +723,50 @@ Tests or checks run:
 
 Follow-up:
 - Add a compact shared migration shell for legacy notebooks so batch migration does not duplicate outer-contract/report boilerplate.
+
+### 2026-06-03 - Legacy Migration Shell Helper
+
+Lab:
+- All legacy notebooks pending batch migration.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/migration.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/tests/test_migration_shell.py`
+- `labs/tests/test_static.py`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `baseline_learning_objectives()` and `baseline_big_takeaways()` for not-yet-deep-migrated labs.
+- Added `variant_source_trace()` for serializable track/source metadata.
+- Added `build_migration_report()` to create a local report from metadata, track profile, and lab variant.
+- Added `legacy_migration_panel()` to render learning objectives, track context, scenario brief, source trace, big takeaways, and local report export from one shared helper.
+- Exported the migration helpers from `mlsysbook_labs`.
+- Added tests for baseline copy, source trace, and incomplete-field behavior.
+- Updated the wheel contract and rebuilt the browser wheel.
+
+MLSysIM facts/APIs needed:
+- No new facts. The helper consumes `LabMetadata`, `TrackProfile`, and `LabTrackVariant` source-of-truth values.
+
+Notebook-local constants removed:
+- None. The next batch pass can import this helper instead of copy-pasting track/report boilerplate into every notebook.
+
+Reusable component or modality improved:
+- Legacy notebooks now have a compact path to become track-aware and report-capable before deeper part-level solver migration.
+
+Plan updates needed in other labs:
+- Batch migrations should call `legacy_migration_panel()` as the baseline outer-contract layer.
+- Deeper lab-specific migrations can replace the baseline report fields with solver-backed evidence and hand-authored reflections.
+
+Tests or checks run:
+- `python3 -m py_compile labs/mlsysbook_labs/migration.py labs/mlsysbook_labs/__init__.py labs/tests/test_migration_shell.py`
+- `python3 -m pytest labs/tests/test_migration_shell.py labs/tests/test_lab_variants.py labs/tests/test_ui_helpers.py -q`
+- `python3 -m pytest labs/tests/test_migration_shell.py labs/tests/test_lab_variants.py labs/tests/test_static.py::TestWheelConsistency -q`
+- Verified `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl` contains `mlsysbook_labs/migration.py` and exports `legacy_migration_panel`.
+
+Follow-up:
+- Batch-apply the migration shell to the remaining Volume I notebooks first.
