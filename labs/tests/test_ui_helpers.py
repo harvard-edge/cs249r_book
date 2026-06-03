@@ -10,6 +10,7 @@ from mlsysbook_labs import (
     learning_objectives,
     part_header,
     scenario_slice,
+    track_selector,
     source_trace,
     what_you_need_to_know,
 )
@@ -17,6 +18,14 @@ from mlsysbook_labs import (
 
 def html_text(component) -> str:
     return component.text
+
+
+def test_track_selector_accepts_canonical_and_alias_defaults():
+    edge_selector = track_selector(default="edge")
+    tiny_selector = track_selector(default="oura_ring")
+
+    assert edge_selector.value == "robotaxi"
+    assert tiny_selector.value == "oura_ring"
 
 
 def test_lab_level_helpers_render_contract_headers():

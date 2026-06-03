@@ -877,3 +877,61 @@ Tests or checks run:
 
 Follow-up:
 - Run catalog-wide checks that every `.py` lab has the common track/report surface, then decide which labs should receive deeper part-level migrations after V1-10.
+
+### 2026-06-03 - V2-11 Edge Thermodynamics Deep Track Migration
+
+Lab:
+- `labs/vol2/lab_11_edge_intelligence.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/edge.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/ui.py`
+- `labs/tests/test_edge_helpers.py`
+- `labs/tests/test_ui_helpers.py`
+- `labs/tests/test_static.py`
+- `labs/vol2/lab_11_edge_intelligence.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added shared edge helper dataclasses and calculations for edge device profiles, training memory amplification, adaptation storage, energy budget use, and federated communication.
+- Built V2-11 edge profiles from canonical track profiles, hand-authored lab variants, and MLSysIM hardware references.
+- Replaced V2-11 notebook-local smartphone constants with shared `mlsysbook_labs.edge` calculations.
+- Added a track selector, track context, source trace, track-aware widget defaults, track-specific memory/energy/communication plots, and a local report export.
+- Replaced the baseline migration panel in V2-11 with a deep report that records predictions, knob settings, evidence, final decision, reflections, residual risk, and source trace.
+- Fixed a shared `track_selector()` bug where Marimo dictionary radio options require the selected display label as the initial value while returning the canonical track ID.
+- Corrected stale V2-10 labels in the V2-11 notebook.
+- Marked V2-11 complete in the deep migration checklist.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM hardware facts were required. Existing refs supply memory, TDP, and battery where available:
+  - `Hardware.Mobile.iPhone15Pro`
+  - `Hardware.Tiny.OuraRing`
+  - `Hardware.Edge.RoboTaxi`
+  - `Hardware.Cloud.H100`
+- Shared edge teaching thresholds, such as active memory budget and per-session energy budget, live in `mlsysbook_labs.edge`.
+
+Notebook-local constants removed:
+- Phone-only memory, battery, CPU/NPU power, NPU speedup, LoRA fraction, bias fraction, and FedAvg payload constants were removed from the V2-11 notebook path.
+
+Reusable component or modality improved:
+- `track_selector()` is now safe for Marimo radio dictionaries and can be reused by later deep-migrated labs.
+- `mlsysbook_labs.edge` is the reusable edge-device calculation layer for V2-11 and likely future V2-10/V1-11 work.
+
+Plan updates needed in other labs:
+- Use V2-11 as the reference pattern for track selector plus shared helper plus report export.
+- V1-11 Hardware Roofline is the next recommended deep migration target because it should reuse the same hardware-source discipline.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol2/lab_11_edge_intelligence.py`
+- `python3 -m pytest labs/tests/test_edge_helpers.py labs/tests/test_static.py::TestSyntax labs/tests/test_static.py::TestWheelConsistency labs/tests/test_static.py::TestLabCatalog -q`
+- `python3 -m pytest labs/tests/test_static.py -q`
+- `python3 -m pytest labs/tests/test_ui_helpers.py labs/tests/test_edge_helpers.py labs/tests/test_static.py::TestWheelConsistency -q`
+- `python3 -m pytest labs/tests/test_engine.py -k "vol2/lab_11 or lab_11_edge" -q`
+
+Follow-up:
+- Deep-migrate V1-11 Hardware Roofline next, reusing the source-traced hardware profile pattern.

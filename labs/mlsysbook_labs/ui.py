@@ -480,7 +480,9 @@ def lab_map(parts: tuple[Mapping[str, Any], ...] | list[Mapping[str, Any]], comp
 def track_selector(default: str = DEFAULT_TRACK_ID):
     """Return a Marimo radio selector for the canonical student tracks."""
     selected = normalize_track_id(default)
-    return mo.ui.radio(options=track_options(), value=selected, label="Your Track", inline=True)
+    options = track_options()
+    selected_label = next((label for label, track_id in options.items() if track_id == selected), "iPhone")
+    return mo.ui.radio(options=options, value=selected_label, label="Your Track", inline=True)
 
 
 def track_context(track: str | TrackProfile) -> mo.Html:

@@ -77,7 +77,7 @@ For each lab:
 
 ## Recommended Implementation Order
 
-- [ ] 1. V2-11 Edge Intelligence: closest to device-specific constraints.
+- [x] 1. V2-11 Edge Intelligence: closest to device-specific constraints.
 - [ ] 2. V1-11 Hardware Roofline: pressure-tests hardware registry and roofline plots.
 - [ ] 3. V2-10 Inference Economy: connects latency, cost, batching, and deployment target.
 - [ ] 4. V1-12 Benchmarking Trap: standardizes benchmark plots and report evidence.
@@ -576,20 +576,21 @@ Path: `labs/vol2/lab_11_edge_intelligence.py`
 Current status:
 - [x] Hand-authored variants exist.
 - [x] Baseline track/report panel installed.
+- [x] Deep track-aware notebook migration installed.
 
 Deep migration tasks:
-- [ ] Make this the first full device-track deep migration after V1-10.
-- [ ] Move any displayed device battery, memory, latency, or energy facts into MLSysIM/shared helpers.
-- [ ] Add a shared edge energy or duty-cycle helper if needed.
-- [ ] Wire each notebook part to the selected canonical track.
-- [ ] Track examples:
-  - iPhone: on-device adaptation under thermal and battery limits.
-  - Oura Ring: always-on sensing and tiny inference energy budget.
-  - RoboTaxi: edge perception and vehicle compute envelope.
-  - Cloud Fleet: compare edge offload against centralized inference.
-- [ ] Add track-specific plots for memory, battery/energy, and update payloads.
-- [ ] Update report with edge placement decision and thermodynamic residual risk.
-- [ ] Add tests for helper math and variant field completeness.
+- [x] Make this the first full device-track deep migration after V1-10.
+- [x] Move any displayed device battery, memory, latency, or energy facts into MLSysIM/shared helpers.
+- [x] Add a shared edge energy or duty-cycle helper if needed.
+- [x] Wire each notebook part to the selected canonical track.
+- [x] Track examples:
+  - [x] iPhone: on-device adaptation under thermal and battery limits.
+  - [x] Oura Ring: always-on sensing and tiny inference energy budget.
+  - [x] RoboTaxi: edge perception and vehicle compute envelope.
+  - [x] Cloud Fleet: compare edge offload against centralized inference.
+- [x] Add track-specific plots for memory, battery/energy, and update payloads.
+- [x] Update report with edge placement decision and thermodynamic residual risk.
+- [x] Add tests for helper math and variant field completeness.
 
 ### V2-12 - The Silent Fleet
 

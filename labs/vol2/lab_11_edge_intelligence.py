@@ -4,7 +4,7 @@ __generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# LAB V2-10: THE EDGE THERMODYNAMICS LAB
+# LAB V2-11: THE EDGE THERMODYNAMICS LAB
 #
 # Volume II, Chapter: Edge Intelligence (edge_intelligence.qmd)
 #
@@ -18,15 +18,15 @@ app = marimo.App(width="full")
 #             Prediction: total LoRA storage for 10 user contexts?
 #
 #   Part C — The Battery Drain Reality (10 min)
-#             NPU achieves 50x energy gain over CPU for fine-tuning.
-#             Prediction: battery drain per fine-tuning session on CPU?
+#             Accelerator choice changes energy budget use.
+#             Prediction: energy budget used per local session.
 #
 #   Part D — The Federation Paradox (15 min)
 #             Non-IID data causes 4-8x communication rounds explosion.
 #             Merges original Parts D+E: federation + communication-compression.
 #
-# Hardware: Smartphone — 8 GB RAM, 15 Wh battery, 35 TOPS NPU
-# Design Ledger: chapter="v2_10"
+# Hardware: selected canonical track hardware from MLSysIM
+# Design Ledger: chapter="v2_11"
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -58,68 +58,109 @@ async def _():
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysim.labs.components import DecisionLog
-    from mlsysim import Hardware, Models
+    from mlsysbook_labs import (
+        ACADEMIC_LAB_CSS,
+        adaptation_storage,
+        build_lab_report,
+        edge_device_profile,
+        energy_drain,
+        federated_communication,
+        get_lab_metadata,
+        get_lab_track_variant,
+        get_track_profile,
+        report_export_panel,
+        resolve_mlsysim_ref,
+        source_trace,
+        track_context,
+        track_selector,
+        training_memory_breakdown,
+    )
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         _ = await ledger.load_async()
 
-    # ── Hardware from registry ──────────────────────────────────────────────
-    _phone = Hardware.Mobile.iPhone15Pro   # iPhone 15 Pro (A17 Pro)
-    _cloud = Hardware.Cloud.H100           # Cloud tier for comparison
-
-    # ── Mobile hardware constants ────────────────────────────────────────────
-    # Source: @sec-edge-intelligence, smartphone compute constraints
-    MOBILE_RAM_GB     = _phone.memory.capacity.m_as("GB")  # 8 GB
-    MOBILE_RAM_AVAIL_MB = 300.0   # available for ML after OS/apps
-    MOBILE_BATTERY_WH = _phone.battery_capacity.m_as("Wh")  # 15 Wh
-    MOBILE_CPU_POWER_W = 3.0      # sustained CPU power draw
-    MOBILE_NPU_POWER_W = 0.5     # NPU power draw for equivalent workload
-    NPU_SPEEDUP       = 20.0     # NPU latency speedup over CPU
-    NPU_ENERGY_GAIN   = 50.0     # NPU energy efficiency gain over CPU
-
-    # Cloud tier specs — for edge-vs-cloud contrast
-    CLOUD_RAM_GB      = _cloud.memory.capacity.m_as("GiB")  # 80 GiB
-    CLOUD_TDP_W       = _cloud.tdp.m_as("W")                # 700 W
-
-    # ── Training memory model constants ──────────────────────────────────────
-    # Source: @tbl-training-amplification, @fig-training-memory-amplifier
-    BYTES_FP16 = 2
-    BYTES_FP32 = 4
-    # Adam optimizer stores 2 extra copies of parameters (m, v) in FP32
-    ADAM_MULTIPLIER = 2  # 2x parameter size for optimizer state (FP32)
-    # Activation memory ratio calibrated to chapter worked example
-    ACTIVATION_RATIO = 0.39  # FP32 activation bytes per param per batch item
-
-    # ── LoRA constants ───────────────────────────────────────────────────────
-    # Source: @sec-edge-intelligence, LoRA rank decomposition
-    LORA_RANK = 16
-    LORA_FRACTION = 0.01  # LoRA trainable parameters ~1% of full model
-    BIAS_FRACTION = 0.001  # Bias-only ~0.1% of parameters
-
-    # ── Federated learning constants ─────────────────────────────────────────
-    # Source: @sec-edge-intelligence, FedAvg convergence analysis
-    IID_ROUNDS = 50         # baseline IID convergence rounds
-    FL_TARGET_ACC = 0.90    # target accuracy for convergence
-
     return (
-        mo, ledger, COLORS, LAB_CSS, apply_plotly_theme,
-        go, np, math, DecisionLog,
-        MOBILE_RAM_GB, MOBILE_RAM_AVAIL_MB, MOBILE_BATTERY_WH,
-        MOBILE_CPU_POWER_W, MOBILE_NPU_POWER_W,
-        CLOUD_RAM_GB, CLOUD_TDP_W,
-        NPU_SPEEDUP, NPU_ENERGY_GAIN,
-        BYTES_FP16, BYTES_FP32, ADAM_MULTIPLIER, ACTIVATION_RATIO,
-        LORA_RANK, LORA_FRACTION, BIAS_FRACTION,
-        IID_ROUNDS, FL_TARGET_ACC,
+        ACADEMIC_LAB_CSS,
+        COLORS,
+        DecisionLog,
+        LAB_CSS,
+        adaptation_storage,
+        apply_plotly_theme,
+        build_lab_report,
+        edge_device_profile,
+        energy_drain,
+        federated_communication,
+        get_lab_metadata,
+        get_lab_track_variant,
+        get_track_profile,
+        go,
+        ledger,
+        math,
+        mo,
+        np,
+        report_export_panel,
+        resolve_mlsysim_ref,
+        source_trace,
+        track_context,
+        track_selector,
+        training_memory_breakdown,
+    )
+
+
+@app.cell
+def _(get_lab_metadata):
+    v2_11_metadata = get_lab_metadata("vol2/lab_11_edge_intelligence.py")
+    return (v2_11_metadata,)
+
+
+@app.cell(hide_code=True)
+def _(ledger, track_selector):
+    _saved_track = ledger.get_track()
+    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "iphone"
+    v2_11_track_picker = track_selector(default=_default_track)
+    v2_11_track_picker
+    return (v2_11_track_picker,)
+
+
+@app.cell
+def _(
+    edge_device_profile,
+    get_lab_track_variant,
+    get_track_profile,
+    resolve_mlsysim_ref,
+    v2_11_track_picker,
+):
+    v2_11_track_id = v2_11_track_picker.value
+    v2_11_profile = get_track_profile(v2_11_track_id)
+    v2_11_variant = get_lab_track_variant("v2_11_edge_thermodynamics", v2_11_track_id)
+    v2_11_hardware = resolve_mlsysim_ref(v2_11_variant.hardware_ref)
+    v2_11_device = edge_device_profile(v2_11_profile, v2_11_variant, v2_11_hardware)
+    return (
+        v2_11_device,
+        v2_11_hardware,
+        v2_11_profile,
+        v2_11_track_id,
+        v2_11_variant,
     )
 
 # ─── CELL 1: HEADER ─────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(LAB_CSS, mo):
+def _(
+    ACADEMIC_LAB_CSS,
+    LAB_CSS,
+    mo,
+    source_trace,
+    track_context,
+    v2_11_device,
+    v2_11_metadata,
+    v2_11_profile,
+    v2_11_variant,
+):
     mo.vstack([
         LAB_CSS,
-        mo.Html("""
+        ACADEMIC_LAB_CSS,
+        mo.Html(f"""
         <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
                     padding: 36px 44px; border-radius: 16px; color: white;
                     box-shadow: 0 8px 32px rgba(0,0,0,0.3); margin-bottom: 8px;">
@@ -128,7 +169,7 @@ def _(LAB_CSS, mo):
                 Machine Learning Systems &middot; Volume II &middot; Lab 11
             </div>
             <h1 style="margin: 0 0 10px 0; font-size: 2.2rem; font-weight: 900;
-                       color: #f8fafc; line-height: 1.1; letter-spacing: -0.02em;">
+                       color: #f8fafc; line-height: 1.1;">
                 The Edge Thermodynamics Lab
             </h1>
             <p style="margin: 0 0 6px 0; font-size: 1.1rem; font-weight: 600;
@@ -137,10 +178,9 @@ def _(LAB_CSS, mo):
             </p>
             <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #64748b;
                       max-width: 700px; line-height: 1.65;">
-                A product manager wants on-device fine-tuning: "It is just inference with
-                a backward pass, right?" Wrong. Training memory is 4-12x inference memory,
-                battery drain makes naive CPU training a product-killing feature, and
-                federated learning's communication cost explodes under non-IID data.
+                {v2_11_variant.workload_summary} The thermodynamic question is whether
+                memory, energy, latency, privacy, and communication leave enough margin
+                for the selected edge architecture.
             </p>
             <div style="display: flex; gap: 12px; flex-wrap: wrap;">
                 <span style="background: rgba(99,102,241,0.15); color: #a5b4fc;
@@ -151,22 +191,42 @@ def _(LAB_CSS, mo):
                 <span style="background: rgba(203,32,45,0.15); color: #fca5a5;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
                              font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
-                    Chapter: Edge Intelligence
+                    {v2_11_profile.label}
+                </span>
+                <span style="background: rgba(34,197,94,0.12); color: #86efac;
+                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
+                             font-weight: 600; border: 1px solid rgba(34,197,94,0.20);">
+                    {v2_11_device.hardware_ref}
                 </span>
             </div>
             <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px;">
-                <span class="badge badge-fail">4-12x memory amplification</span>
-                <span class="badge badge-warn">significant battery drain on CPU</span>
-                <span class="badge badge-info">NPU: 50x energy savings</span>
+                <span class="badge badge-fail">{v2_11_device.available_memory_mb:g} MB active memory budget</span>
+                <span class="badge badge-warn">{v2_11_device.energy_budget_wh:g} Wh {v2_11_device.energy_budget_label}</span>
+                <span class="badge badge-info">{v2_11_device.accelerator_label}: {v2_11_device.accelerator_energy_gain:g}x energy gain</span>
             </div>
         </div>
         """),
+        track_context(v2_11_profile),
+        source_trace(
+            {
+                "lab_id": v2_11_metadata.lab_id,
+                "track_id": v2_11_profile.track_id,
+                "hardware_ref": v2_11_variant.hardware_ref,
+                "model_ref": v2_11_variant.model_ref,
+                "shared_helper": "mlsysbook_labs.edge",
+                "memory_capacity_mb": v2_11_device.memory_capacity_mb,
+                "available_memory_mb": v2_11_device.available_memory_mb,
+                "energy_budget_wh": v2_11_device.energy_budget_wh,
+                "source_policy": v2_11_profile.source_policy,
+            },
+            summary="V2-11 uses MLSysIM hardware refs plus mlsysbook_labs.edge calculations.",
+        ),
     ])
     return
 
 # ─── CELL 2: BRIEFING ───────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(COLORS, mo):
+def _(COLORS, mo, v2_11_device, v2_11_profile):
     mo.Html(f"""
     <div style="border-left: 4px solid {COLORS['BlueLine']};
                 background: white; border-radius: 0 12px 12px 0;
@@ -220,8 +280,9 @@ def _(COLORS, mo):
             <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
                         line-height: 1.5; font-style: italic;">
                 &ldquo;On-device training is 'just inference with a backward pass.' Why does it
-                require 4-12x more memory, significantly drain the battery on CPU, and
-                need 4-8x more communication rounds when data is non-IID?&rdquo;
+                require 4-12x more memory, consume the {v2_11_device.energy_budget_label}
+                on CPU, and need 4-8x more communication rounds when data is non-IID
+                for {v2_11_profile.label}?&rdquo;
             </div>
         </div>
     </div>
@@ -237,7 +298,7 @@ def _(mo):
     - **Training Memory Amplification** &mdash; The 4-12x memory multiplier from activations,
       gradients, and optimizer state (the Edge Intelligence chapter).
     - **Adaptation Strategies** &mdash; LoRA, bias-only, and full fine-tuning trade-offs.
-    - **On-Device Energy** &mdash; CPU vs NPU power and latency for fine-tuning.
+    - **On-Device Energy** &mdash; CPU vs accelerator power and latency for adaptation.
     - **Federated Learning** &mdash; FedAvg, non-IID data impact, gradient compression.
     """), kind="info")
     return
@@ -248,30 +309,31 @@ def _(mo):
 
 # ─── CELL 4: PART A WIDGETS ──────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
+def _(mo, v2_11_device):
     pA_pred = mo.ui.radio(
         options={
-            "A: ~60 MB -- gradients add a bit": "A",
-            "B: ~120 MB -- double the inference footprint": "B",
-            "C: ~200-360 MB -- 5-9x amplification": "C",
-            "D: ~1 GB -- training is always an order of magnitude more": "D",
+            "A: Gradients add only a small amount": "A",
+            "B: Training is roughly 2x inference": "B",
+            "C: Training is often 5-9x inference": "C",
+            "D: Training is always impossible at the edge": "D",
         },
         label=(
-            "A 10M-parameter model runs inference comfortably on a smartphone (40 MB). "
-            "How much memory does full fine-tuning (Adam optimizer, batch size 8) require?"
+            f"A {v2_11_device.default_model_params_m:g}M-parameter model is being adapted "
+            f"for {v2_11_device.label}. How much memory does full fine-tuning with Adam "
+            "typically require relative to inference?"
         ),
     )
     return (pA_pred,)
 
 # ─── CELL 5: PART A CONTROLS + PART B WIDGETS ────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
+def _(mo, v2_11_device):
     pA_params = mo.ui.slider(
-        start=1, stop=100, value=10, step=1,
+        start=0.01, stop=500, value=v2_11_device.default_model_params_m, step=0.01,
         label="Model parameters (millions)",
     )
     pA_batch = mo.ui.slider(
-        start=1, stop=32, value=8, step=1,
+        start=1, stop=32, value=v2_11_device.default_batch_size, step=1,
         label="Batch size",
     )
     pA_strategy = mo.ui.dropdown(
@@ -288,36 +350,36 @@ def _(mo):
             "D: ~4 MB -- adapters are negligible": "D",
         },
         label=(
-            "You need to store personalized models for 10 user contexts. Full fine-tuning "
-            "stores a complete model per context (40 MB each = 400 MB). LoRA stores only "
-            "the adapter weights. What is the total LoRA storage?"
+            f"You need to store personalized models for {v2_11_device.default_contexts} "
+            "contexts. Full fine-tuning stores a complete model per context. "
+            "LoRA stores only adapter weights. What shape should the storage curve have?"
         ),
     )
     return (pA_batch, pA_params, pA_strategy, pB_pred)
 
 # ─── CELL 6: PART B CONTROLS + PART C WIDGETS ────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
+def _(mo, v2_11_device):
     pB_contexts = mo.ui.slider(
-        start=1, stop=20, value=10, step=1,
+        start=1, stop=20, value=v2_11_device.default_contexts, step=1,
         label="Number of user contexts",
     )
 
     pC_pred = mo.ui.number(
         start=0.1, stop=50.0, value=None, step=0.1,
         label=(
-            "A LoRA fine-tuning session takes 30 seconds on CPU at 3W. The phone has a 15 Wh "
-            "battery. What percentage of battery does this single session consume? "
-            "(Account for thermal throttling extending duration 2-3x.)"
+            f"A local adaptation session runs against the {v2_11_device.energy_budget_label}. "
+            "What percentage of that budget does one CPU session consume? "
+            "(Account for throttling or scheduling overhead extending duration 2-3x.)"
         ),
     )
     return (pB_contexts, pC_pred)
 
 # ─── CELL 7: PART C CONTROLS + PART D WIDGETS ────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
+def _(mo, v2_11_device):
     pC_target = mo.ui.radio(
-        options={"CPU": "cpu", "GPU (mobile)": "gpu", "NPU": "npu"},
+        options={"CPU": "cpu", "GPU": "gpu", v2_11_device.accelerator_label: "npu"},
         value="CPU",
         label="Execution target",
         inline=True,
@@ -331,7 +393,7 @@ def _(mo):
             "D: 1000+ rounds -- effectively never converges": "D",
         },
         label=(
-            "100 clients, non-IID data (beta=0.5). IID convergence takes 50 rounds. "
+            f"Non-IID edge data (beta=0.5). IID convergence takes {v2_11_device.iid_rounds} rounds. "
             "How many rounds does non-IID require to reach the same accuracy?"
         ),
     )
@@ -368,14 +430,12 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(
     COLORS, apply_plotly_theme, go, math,
-    mo, np, ledger, ACTIVATION_RATIO,
-    ADAM_MULTIPLIER, BYTES_FP16, BYTES_FP32, BIAS_FRACTION,
-    LORA_FRACTION, MOBILE_RAM_AVAIL_MB, MOBILE_BATTERY_WH, MOBILE_CPU_POWER_W,
-    MOBILE_NPU_POWER_W, NPU_SPEEDUP, NPU_ENERGY_GAIN, IID_ROUNDS,
-    FL_TARGET_ACC, pA_batch, pA_params, pA_pred,
+    mo, np, ledger, adaptation_storage, energy_drain,
+    federated_communication, training_memory_breakdown,
+    pA_batch, pA_params, pA_pred,
     pA_strategy, pB_contexts, pB_pred, pC_pred,
     pC_target, pD_beta, pD_compress, pD_epochs,
-    pD_pred,
+    pD_pred, v2_11_device, v2_11_profile, v2_11_variant,
 ):
     # ─────────────────────────────────────────────────────────────────────
     # PART A BUILDER -- The Memory Amplification Tax
@@ -389,13 +449,13 @@ def _(
             border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
     <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
                 text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-        Incoming Message &middot; Mobile ML Product Manager, Paxos Devices</div>
+        Incoming Message &middot; {v2_11_variant.stakeholder}</div>
     <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-        &ldquo;We want to fine-tune our 350M-parameter language model directly on-device. The phone has 6 GB of RAM,
-        but the OS and apps already consume 4 GB. Can we even fit the training graph in the remaining 2 GB,
-        or does the memory amplification from optimizer states and activations make this impossible?&rdquo;</div>
+        &ldquo;{v2_11_variant.objective} The active memory budget is
+        {v2_11_device.available_memory_mb:g} MB. Can the training graph fit, or do
+        optimizer states and activations make local adaptation impossible?&rdquo;</div>
     <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
-        &mdash; Priya Ramanathan, Mobile ML Product Manager &middot; Paxos Devices</div>
+        &mdash; {v2_11_variant.stakeholder} &middot; {v2_11_profile.label}</div>
 </div>
 """))
 
@@ -418,8 +478,8 @@ def _(
             </div>
             <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
                         line-height: 1.55; max-width: 700px;">
-                A model that comfortably runs inference on a smartphone cannot learn on that
-                same device. Full fine-tuning requires 4-12x more memory due to gradients,
+                A model that comfortably runs inference on one deployment target may not learn
+                on that same target. Full fine-tuning requires 4-12x more memory due to gradients,
                 optimizer state, and activation caching.
             </div>
         </div>
@@ -438,26 +498,22 @@ def _(
 
         # Computation
         _params_m = pA_params.value
-        _params = _params_m * 1e6
         _batch = pA_batch.value
         _strategy = pA_strategy.value
-
-        # Trainable fraction
-        _train_frac = {"full": 1.0, "lora": LORA_FRACTION, "bias": BIAS_FRACTION}[_strategy]
-        _trainable = _params * _train_frac
-
-        # Memory breakdown (all in MB)
-        _weights_mb = _params * BYTES_FP16 / (1024 * 1024)
-        _grads_mb = _trainable * BYTES_FP32 / (1024 * 1024)
-        _optim_mb = _trainable * BYTES_FP32 * ADAM_MULTIPLIER / (1024 * 1024)
-        _activ_mb = _params * _batch * ACTIVATION_RATIO * BYTES_FP32 / (1024 * 1024)
-        if _strategy != "full":
-            _activ_mb *= _train_frac * 10  # LoRA/bias need fewer activations but some
-        _total_mb = _weights_mb + _grads_mb + _optim_mb + _activ_mb
-        _infer_mb = _weights_mb
-
-        _amplification = _total_mb / max(_infer_mb, 0.01)
-        _oom = _total_mb > MOBILE_RAM_AVAIL_MB
+        _memory = training_memory_breakdown(
+            params_m=_params_m,
+            batch_size=_batch,
+            strategy=_strategy,
+            available_memory_mb=v2_11_device.available_memory_mb,
+        )
+        _weights_mb = _memory.weights_mb
+        _grads_mb = _memory.gradients_mb
+        _optim_mb = _memory.optimizer_mb
+        _activ_mb = _memory.activations_mb
+        _total_mb = _memory.total_mb
+        _infer_mb = _memory.inference_mb
+        _amplification = _memory.amplification
+        _oom = not _memory.fits_memory
 
         # Stacked bar chart
         _fig = go.Figure()
@@ -474,8 +530,8 @@ def _(
                 text=[f"{_val:.0f} MB"], textposition="inside",
             ))
         # RAM ceiling
-        _fig.add_hline(y=MOBILE_RAM_AVAIL_MB, line_dash="dash", line_color=COLORS["RedLine"],
-                       annotation_text=f"Smartphone RAM: {MOBILE_RAM_AVAIL_MB:.0f} MB",
+        _fig.add_hline(y=v2_11_device.available_memory_mb, line_dash="dash", line_color=COLORS["RedLine"],
+                       annotation_text=f"{v2_11_profile.label} active budget: {v2_11_device.available_memory_mb:g} MB",
                        annotation_position="top right")
         # Inference reference
         _fig.add_trace(go.Bar(
@@ -497,13 +553,13 @@ def _(
         if _oom:
             items.append(mo.callout(mo.md(
                 f"**OOM -- Training infeasible on this device.** "
-                f"Required: {_total_mb:.0f} MB | Available: {MOBILE_RAM_AVAIL_MB:.0f} MB. "
+                f"Required: {_total_mb:.2f} MB | Available: {v2_11_device.available_memory_mb:g} MB. "
                 f"Switch to LoRA or reduce model size."
             ), kind="danger"))
         else:
             items.append(mo.callout(mo.md(
-                f"Training fits within {MOBILE_RAM_AVAIL_MB:.0f} MB mobile RAM "
-                f"({_total_mb:.0f} MB used, {MOBILE_RAM_AVAIL_MB - _total_mb:.0f} MB headroom)."
+                f"Training fits within the {v2_11_profile.label} active memory budget "
+                f"({_total_mb:.2f} MB used, {v2_11_device.available_memory_mb - _total_mb:.2f} MB headroom)."
             ), kind="success"))
 
         # Cards
@@ -531,13 +587,13 @@ def _(
 **Training Memory Breakdown** ({_params_m}M params, batch={_batch}, {_strategy})
 
 ```
-Weights       = {_params_m}M x {BYTES_FP16} bytes  = {_weights_mb:.0f} MB
-Gradients     = {_trainable/1e6:.2f}M x {BYTES_FP32} bytes  = {_grads_mb:.0f} MB
-Optimizer (Adam) = {_trainable/1e6:.2f}M x {BYTES_FP32} x {ADAM_MULTIPLIER}  = {_optim_mb:.0f} MB
-Activations   = f(params, batch)         = {_activ_mb:.0f} MB
-Total         = {_total_mb:.0f} MB ({_amplification:.1f}x inference)
+Weights       = {_weights_mb:.2f} MB
+Gradients     = {_grads_mb:.2f} MB
+Optimizer     = {_optim_mb:.2f} MB
+Activations   = {_activ_mb:.2f} MB
+Total         = {_total_mb:.2f} MB ({_amplification:.1f}x inference)
 ```
-*Source: @sec-edge-intelligence, training amplification table*
+*Source: `mlsysbook_labs.training_memory_breakdown`, using `{v2_11_device.hardware_ref}`.*
 """))
 
         # Reveal
@@ -601,13 +657,13 @@ $$
             border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
     <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
                 text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-        Incoming Message &middot; Embedded Systems Engineer, Paxos Devices</div>
+        Incoming Message &middot; {v2_11_variant.stakeholder}</div>
     <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
         &ldquo;I keep hearing that LoRA solves the on-device fine-tuning problem, but nobody tells me
         the actual memory numbers. For a 350M model, how much storage does LoRA rank-16 really save
         compared to full fine-tuning? And does bias-only tuning even move the needle on accuracy?&rdquo;</div>
     <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
-        &mdash; Marcus Chen, Embedded Systems Engineer &middot; Paxos Devices</div>
+        &mdash; {v2_11_variant.stakeholder} &middot; {v2_11_profile.label}</div>
 </div>
 """))
 
@@ -649,22 +705,17 @@ $$
         items.append(pB_contexts)
 
         _n_ctx = pB_contexts.value
-        _model_mb = 40.0  # 10M params x 4 bytes (FP32 stored)
-
-        # Storage per context
-        _full_per_ctx = _model_mb  # store full model
-        _lora_per_ctx = _model_mb * LORA_FRACTION + 0.2  # adapters + metadata
-        _bias_per_ctx = _model_mb * BIAS_FRACTION + 0.1
-
-        # Total = base model + N context-specific weights
-        _full_total = _model_mb + _n_ctx * _full_per_ctx
-        _lora_total = _model_mb + _n_ctx * _lora_per_ctx  # shared base + N adapters
-        _bias_total = _model_mb + _n_ctx * _bias_per_ctx
+        _model_mb = v2_11_device.default_model_params_m * 1e6 * 4 / (1024 * 1024)
+        _storage = adaptation_storage(contexts=_n_ctx, model_mb=_model_mb)
+        _full_total = _storage.full_total_mb
+        _lora_total = _storage.lora_total_mb
+        _bias_total = _storage.bias_total_mb
 
         _ctx_range = np.arange(1, 21)
-        _full_curve = _model_mb + _ctx_range * _full_per_ctx
-        _lora_curve = _model_mb + _ctx_range * _lora_per_ctx
-        _bias_curve = _model_mb + _ctx_range * _bias_per_ctx
+        _storage_curve = [adaptation_storage(contexts=int(_ctx), model_mb=_model_mb) for _ctx in _ctx_range]
+        _full_curve = [_result.full_total_mb for _result in _storage_curve]
+        _lora_curve = [_result.lora_total_mb for _result in _storage_curve]
+        _bias_curve = [_result.bias_total_mb for _result in _storage_curve]
 
         _fig = go.Figure()
         _fig.add_trace(go.Scatter(
@@ -688,7 +739,7 @@ $$
         )
         apply_plotly_theme(_fig)
 
-        _savings = _full_total / max(_lora_total, 0.01)
+        _savings = _storage.lora_savings_ratio
 
         items.append(mo.as_html(_fig))
         items.append(mo.Html(f"""
@@ -712,10 +763,18 @@ $$
 
         # Reveal
         if pB_pred.value == "C":
-            _msg = "**Correct.** LoRA adapters are ~1% of model size. 10 contexts: base model (40 MB) + 10 adapters (~0.6 MB each) = ~46 MB total, roughly 10x savings over full fine-tuning."
+            _msg = (
+                f"**Correct shape.** LoRA adapters stay close to 1% of model size. "
+                f"For {_n_ctx} contexts on {v2_11_profile.label}, full fine-tuning uses "
+                f"{_full_total:.2f} MB while LoRA uses {_lora_total:.2f} MB."
+            )
             _kind = "success"
         else:
-            _msg = "**LoRA adapters are ~1% of model size.** A 10M-param model produces ~0.4 MB adapters per context. 10 contexts = base model (40 MB) + 10 x 0.6 MB = ~46 MB. Full fine-tuning would require 440 MB for the same 10 contexts."
+            _msg = (
+                f"**LoRA adapters are small because they avoid copying the full model per context.** "
+                f"Here the base model is {_model_mb:.2f} MB. Full fine-tuning for {_n_ctx} "
+                f"contexts reaches {_full_total:.2f} MB, while LoRA reaches {_lora_total:.2f} MB."
+            )
             _kind = "warn"
         items.append(mo.callout(mo.md(_msg), kind=_kind))
 
@@ -755,13 +814,14 @@ $$
             border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
     <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
                 text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-        Incoming Message &middot; Battery Team Lead, Paxos Devices</div>
+        Incoming Message &middot; {v2_11_variant.stakeholder}</div>
     <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-        &ldquo;Product wants continuous on-device inference, but our 5,000 mAh battery already struggles
-        to last a full day. How many joules does a single forward pass actually cost at different
-        batch sizes, and at what query rate do we start draining faster than the user can charge?&rdquo;</div>
+        &ldquo;Product wants local adaptation for {v2_11_profile.label}, but the available
+        {v2_11_device.energy_budget_label} is only {v2_11_device.energy_budget_wh:g} Wh.
+        How much does one local session consume, and when should we move work to
+        {v2_11_device.accelerator_label} or off-device?&rdquo;</div>
     <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
-        &mdash; Tomoko Ishida, Battery Systems Lead &middot; Paxos Devices</div>
+        &mdash; {v2_11_variant.stakeholder} &middot; {v2_11_profile.label}</div>
 </div>
 """))
 
@@ -785,53 +845,39 @@ $$
             <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
                         line-height: 1.55; max-width: 700px;">
                 LoRA makes fine-tuning fit in memory. But does it make it practical? A fine-tuning
-                session that visibly drains the battery is a product-killing feature, not a
-                product feature. The NPU changes the equation entirely.
+                session that visibly drains the energy budget is a product-killing feature,
+                not a product feature. The execution target changes the equation entirely.
             </div>
         </div>
         """))
 
         # Prediction
         items.append(mo.md("### Your Prediction"))
-        items.append(mo.md("*Enter battery drain percentage for one CPU fine-tuning session:*"))
+        items.append(mo.md(f"*Enter budget-use percentage for one CPU session on {v2_11_profile.label}:*"))
         items.append(pC_pred)
 
         if pC_pred.value is None:
-            items.append(mo.callout(mo.md("Enter your prediction to unlock the battery drain simulator."), kind="warn"))
+            items.append(mo.callout(mo.md("Enter your prediction to unlock the energy budget simulator."), kind="warn"))
             return mo.vstack(items)
 
         # Controls
         items.append(pC_target)
 
         _target = pC_target.value
-        _base_duration_s = 30.0  # CPU baseline
-
-        # Execution target properties
-        _target_props = {
-            "cpu": {"power_w": MOBILE_CPU_POWER_W, "duration_s": _base_duration_s * 2.5, "label": "CPU"},
-            "gpu": {"power_w": 2.0, "duration_s": _base_duration_s * 1.5, "label": "Mobile GPU"},
-            "npu": {"power_w": MOBILE_NPU_POWER_W, "duration_s": _base_duration_s / NPU_SPEEDUP, "label": "NPU"},
-        }
-        _props = _target_props[_target]
-        _power = _props["power_w"]
-        _duration = _props["duration_s"]
-
-        # Battery drain calculation
-        # drain_pct = (power_W * duration_s) / (battery_Wh * 3600) * 100
-        _energy_wh = _power * _duration / 3600
-        _drain_pct = (_energy_wh / MOBILE_BATTERY_WH) * 100
-        _sessions_per_charge = 100.0 / _drain_pct if _drain_pct > 0 else float('inf')
+        _energy = energy_drain(v2_11_device, target=_target)
+        _power = _energy.power_w
+        _duration = _energy.duration_s
+        _energy_wh = _energy.energy_wh
+        _drain_pct = _energy.budget_used_pct
+        _sessions_per_charge = _energy.sessions_per_budget
 
         # Comparison bars
-        _targets = ["CPU", "Mobile GPU", "NPU"]
+        _target_keys = ["cpu", "gpu", "npu"]
+        _results = [energy_drain(v2_11_device, target=_key) for _key in _target_keys]
+        _targets = [_result.label for _result in _results]
         _drains = []
-        _durations = []
         for _t in ["cpu", "gpu", "npu"]:
-            _p = _target_props[_t]
-            _e = _p["power_w"] * _p["duration_s"] / 3600
-            _d = (_e / MOBILE_BATTERY_WH) * 100
-            _drains.append(_d)
-            _durations.append(_p["duration_s"])
+            _drains.append(energy_drain(v2_11_device, target=_t).budget_used_pct)
 
         _fig = go.Figure()
         _bar_colors = [COLORS["RedLine"] if d > 5 else COLORS["OrangeLine"] if d > 1 else COLORS["GreenLine"]
@@ -844,7 +890,7 @@ $$
                        annotation_text="Target: <1% per session")
         _fig.update_layout(
             height=340,
-            yaxis=dict(title="Battery Drain per Session (%)"),
+            yaxis=dict(title=f"{v2_11_device.energy_budget_label.title()} Used per Session (%)"),
             margin=dict(l=50, r=20, t=30, b=40),
         )
         apply_plotly_theme(_fig)
@@ -855,18 +901,20 @@ $$
         _drain_color = COLORS["RedLine"] if _drain_pct > 5 else COLORS["OrangeLine"] if _drain_pct > 1 else COLORS["GreenLine"]
         if _drain_pct > 5:
             items.append(mo.callout(mo.md(
-                f"**Product-killing battery drain.** {_drain_pct:.1f}% per session means only "
-                f"{_sessions_per_charge:.0f} sessions per full charge. Users will disable this feature."
+                f"**Product-killing energy budget use.** {_drain_pct:.1f}% per session means only "
+                f"{_sessions_per_charge:.0f} sessions per {v2_11_device.energy_budget_label}. "
+                "Users or operators will disable this feature."
             ), kind="danger"))
         elif _drain_pct > 1:
             items.append(mo.callout(mo.md(
-                f"**Marginal.** {_drain_pct:.1f}% per session is noticeable. {_sessions_per_charge:.0f} "
-                f"sessions per charge. Consider NPU for production deployment."
+                f"**Marginal.** {_drain_pct:.1f}% per session is noticeable. "
+                f"{_sessions_per_charge:.0f} sessions per {v2_11_device.energy_budget_label}. "
+                f"Consider {v2_11_device.accelerator_label} for production deployment."
             ), kind="warn"))
         else:
             items.append(mo.callout(mo.md(
                 f"**Viable.** {_drain_pct:.2f}% per session. {_sessions_per_charge:.0f} sessions per "
-                f"full charge. This is a product feature, not a battery drain."
+                f"{v2_11_device.energy_budget_label}. This is a product feature, not a budget drain."
             ), kind="success"))
 
         # Cards
@@ -874,7 +922,7 @@ $$
         <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
             <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
                         text-align:center; background:white; border-top:3px solid {_drain_color}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Drain ({_props['label']})</div>
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Budget Use ({_energy.label})</div>
                 <div style="font-size:1.5rem; font-weight:800; color:{_drain_color};">{_drain_pct:.2f}%</div>
             </div>
             <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
@@ -895,17 +943,17 @@ $$
         _cpu_drain = _drains[0]
 
         items.append(mo.md(f"""
-**Battery Drain Formula**
+**Energy Budget Formula**
 
 ```
 Energy      = Power x Duration = {_power:.1f}W x {_duration:.1f}s = {_energy_wh:.4f} Wh
-Drain (%)   = Energy / Battery x 100 = {_energy_wh:.4f} / {MOBILE_BATTERY_WH} x 100 = {_drain_pct:.2f}%
+Budget (%)  = Energy / Budget x 100 = {_energy_wh:.4f} / {v2_11_device.energy_budget_wh:g} x 100 = {_drain_pct:.2f}%
 Sessions    = 100% / {_drain_pct:.2f}% = {_sessions_per_charge:.0f}
 ```
 
-You predicted: {_predicted:.1f}%. Actual CPU drain: {_cpu_drain:.1f}%.
+You predicted: {_predicted:.1f}%. Actual CPU budget use: {_cpu_drain:.1f}%.
 
-*Source: @sec-edge-intelligence, on-device energy model*
+*Source: `mlsysbook_labs.energy_drain`, using `{v2_11_device.hardware_ref}`.*
 """))
 
         items.append(mo.accordion({
@@ -920,16 +968,16 @@ $$
 - **$V$**: Supply voltage
 - **$f$**: Clock frequency
 
-**Energy per session and battery drain:**
+**Energy per session and budget use:**
 $$
 E_{\\text{session}} = P \\times t_{\\text{duration}} \\quad \\text{(Wh)}
 $$
 $$
-\\text{Drain}(\\%) = \\frac{E_{\\text{session}}}{E_{\\text{battery}}} \\times 100
+\\text{BudgetUse}(\\%) = \\frac{E_{\\text{session}}}{E_{\\text{budget}}} \\times 100
 $$
 
-**NPU advantage:** NPU achieves the same computation at lower $V$ and optimized $C$,
-yielding $\\sim$50x energy efficiency over CPU for ML workloads.
+**Accelerator advantage:** A specialized local accelerator achieves the same computation
+at lower effective switching cost, yielding large energy-efficiency gains over CPU for ML workloads.
 """)
         }))
 
@@ -947,13 +995,13 @@ yielding $\\sim$50x energy efficiency over CPU for ML workloads.
             border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
     <div style="font-size:0.72rem; font-weight:700; color:{COLORS['GreenLine']};
                 text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-        Incoming Message &middot; Privacy Officer, Paxos Devices</div>
+        Incoming Message &middot; {v2_11_variant.stakeholder}</div>
     <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
         &ldquo;Legal says we cannot send raw user data to the cloud, so we are betting on federated learning.
         But my engineers warn that with only 50 heterogeneous devices per round, the model may never converge.
         How many federation rounds does it actually take, and when does communication cost exceed centralized training?&rdquo;</div>
     <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
-        &mdash; Elena Vasquez, Chief Privacy Officer &middot; Paxos Devices</div>
+        &mdash; {v2_11_variant.stakeholder} &middot; {v2_11_profile.label}</div>
 </div>
 """))
 
@@ -998,47 +1046,32 @@ yielding $\\sim$50x energy efficiency over CPU for ML workloads.
         _beta = pD_beta.value
         _E = pD_epochs.value
         _compress = pD_compress.value
-
-        # Convergence model: non-IID penalty from heterogeneity
-        # Source: @sec-edge-intelligence, FedAvg convergence analysis
-        # Rounds scale as: R_noniid = R_iid * (1 + alpha / beta)
-        # where alpha captures the heterogeneity penalty
-        _alpha = 3.0  # calibrated so beta=0.5 gives ~4-8x rounds
-        _noniid_multiplier = 1 + _alpha / _beta
-
-        # Client drift from excess local epochs
-        # Beyond E=5, drift causes convergence to slow or diverge
-        _drift_penalty = 1.0 if _E <= 3 else 1 + 0.15 * (_E - 3)
-        if _E > 10:
-            _drift_penalty = 1 + 0.15 * 7 + 0.3 * (_E - 10)  # accelerating penalty
-
-        _noniid_rounds = IID_ROUNDS * _noniid_multiplier * _drift_penalty
-
-        # Compression effects
-        _compress_props = {
-            "none": {"bytes_mult": 1.0, "quality_penalty": 1.0, "label": "None"},
-            "int8": {"bytes_mult": 0.25, "quality_penalty": 1.05, "label": "INT8"},
-            "int4": {"bytes_mult": 0.125, "quality_penalty": 1.15, "label": "INT4"},
-            "topk": {"bytes_mult": 0.1, "quality_penalty": 1.25, "label": "Top-K"},
-        }
-        _cp = _compress_props[_compress]
-        _compressed_rounds = _noniid_rounds * _cp["quality_penalty"]
-        _bytes_per_round = 40.0  # MB baseline (10M params x 4 bytes)
-        _compressed_bytes = _bytes_per_round * _cp["bytes_mult"]
-        _total_comm_mb = _compressed_rounds * _compressed_bytes
+        _comm = federated_communication(
+            v2_11_device,
+            beta=_beta,
+            local_epochs=_E,
+            compression=_compress,
+        )
+        _iid_rounds = _comm.iid_rounds
+        _noniid_rounds = _comm.noniid_rounds
+        _compressed_rounds = _comm.compressed_rounds
+        _compressed_bytes = _comm.compressed_bytes_per_round_mb
+        _total_comm_mb = _comm.total_communication_mb
+        _drift_penalty = _comm.drift_penalty
+        _noniid_multiplier = _comm.round_multiplier / max(_drift_penalty, 1e-9)
 
         # Build convergence curves
         _round_range = np.arange(1, int(max(_noniid_rounds * 1.5, 200)))
         # IID accuracy curve: 1 - exp(-r / R_iid) * (1 - target)
-        _iid_acc = 0.90 * (1 - np.exp(-_round_range / IID_ROUNDS * 3))
+        _iid_acc = 0.90 * (1 - np.exp(-_round_range / _iid_rounds * 3))
         _iid_acc = np.clip(_iid_acc, 0, 0.95)
         # Non-IID curve: slower convergence
-        _noniid_rate = IID_ROUNDS / _noniid_rounds
-        _noniid_acc = 0.90 * (1 - np.exp(-_round_range / (IID_ROUNDS / _noniid_rate) * 3))
+        _noniid_rate = _iid_rounds / _noniid_rounds
+        _noniid_acc = 0.90 * (1 - np.exp(-_round_range / (_iid_rounds / _noniid_rate) * 3))
         _noniid_acc = np.clip(_noniid_acc, 0, 0.92)
         # Compressed curve: slightly worse convergence rate
-        _comp_rate = IID_ROUNDS / _compressed_rounds
-        _comp_acc = 0.90 * (1 - np.exp(-_round_range / (IID_ROUNDS / _comp_rate) * 3))
+        _comp_rate = _iid_rounds / _compressed_rounds
+        _comp_acc = 0.90 * (1 - np.exp(-_round_range / (_iid_rounds / _comp_rate) * 3))
         _comp_acc = np.clip(_comp_acc, 0, 0.91)
 
         _fig = go.Figure()
@@ -1052,7 +1085,7 @@ yielding $\\sim$50x energy efficiency over CPU for ML workloads.
         ))
         _fig.add_trace(go.Scatter(
             x=_round_range, y=_comp_acc, mode="lines",
-            name=f"Non-IID + {_cp['label']} compression",
+            name=f"Non-IID + {_comm.compression_label} compression",
             line=dict(color=COLORS["BlueLine"], width=2, dash="dash"),
         ))
         _fig.add_hline(y=0.90, line_dash="dot", line_color="#94a3b8",
@@ -1066,7 +1099,7 @@ yielding $\\sim$50x energy efficiency over CPU for ML workloads.
         )
         apply_plotly_theme(_fig)
 
-        _round_ratio = _noniid_rounds / IID_ROUNDS
+        _round_ratio = _comm.round_multiplier
         _r_color = COLORS["RedLine"] if _round_ratio > 5 else COLORS["OrangeLine"] if _round_ratio > 2 else COLORS["GreenLine"]
 
         items.append(mo.as_html(_fig))
@@ -1075,7 +1108,7 @@ yielding $\\sim$50x energy efficiency over CPU for ML workloads.
             <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
                         text-align:center; background:white; border-top:3px solid {COLORS['GreenLine']}; flex:1;">
                 <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">IID Rounds</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['GreenLine']};">{IID_ROUNDS}</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['GreenLine']};">{_iid_rounds}</div>
             </div>
             <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
                         text-align:center; background:white; border-top:3px solid {_r_color}; flex:1;">
@@ -1091,16 +1124,16 @@ yielding $\\sim$50x energy efficiency over CPU for ML workloads.
         </div>"""))
 
         items.append(mo.md(f"""
-**Federation Physics** (beta={_beta}, E={_E}, compression={_cp['label']})
+**Federation Physics** (beta={_beta}, E={_E}, compression={_comm.compression_label})
 
 ```
-Non-IID multiplier  = 1 + alpha/beta = 1 + {_alpha}/{_beta} = {_noniid_multiplier:.1f}x
+Non-IID multiplier  = {_noniid_multiplier:.1f}x
 Drift penalty (E={_E}) = {_drift_penalty:.2f}x
-Non-IID rounds      = {IID_ROUNDS} x {_noniid_multiplier:.1f} x {_drift_penalty:.2f} = {_noniid_rounds:.0f}
-Bytes/round          = {_compressed_bytes:.1f} MB ({_cp['label']})
+Non-IID rounds      = {_iid_rounds} x {_noniid_multiplier:.1f} x {_drift_penalty:.2f} = {_noniid_rounds:.0f}
+Bytes/round          = {_compressed_bytes:.1f} MB ({_comm.compression_label})
 Total communication  = {_compressed_rounds:.0f} x {_compressed_bytes:.1f} MB = {_total_comm_mb/1024:.1f} GB
 ```
-*Source: @sec-edge-intelligence, FedAvg convergence*
+*Source: `mlsysbook_labs.federated_communication`, using `{v2_11_device.hardware_ref}`.*
 """))
 
         # Reveal
@@ -1172,9 +1205,9 @@ $$
                 </div>
                 <div style="margin-bottom: 10px;">
                     <strong>2. The hardware execution target determines viability.</strong>
-                    CPU fine-tuning drains measurable battery per session due to thermal throttling.
-                    NPU fine-tuning is 50-100x more energy-efficient. Same algorithm,
-                    50x energy difference. The NPU makes on-device training a product feature.
+                    CPU adaptation can consume measurable energy budget per session.
+                    Specialized acceleration can be dramatically more energy-efficient. Same
+                    algorithm, different viability.
                 </div>
                 <div>
                     <strong>3. Non-IID data is the federation wall.</strong>
@@ -1196,7 +1229,7 @@ $$
                     What's Next
                 </div>
                 <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Lab V2-11: The Silent Fleet</strong> &mdash; You learned to train
+                    <strong>Lab V2-12: The Silent Fleet</strong> &mdash; You learned to adapt
                     on a single device. Now manage 200 models in production where silent failures
                     cost $1M/day and operational complexity grows quadratically with model count.
                 </div>
@@ -1239,7 +1272,21 @@ $$
 
 # ─── CELL 10: LEDGER HUD ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo, pA_pred, pA_strategy, pB_pred, pC_pred, pC_target, pD_pred, pD_compress):
+def _(
+    COLORS,
+    ledger,
+    mo,
+    pA_pred,
+    pA_strategy,
+    pB_pred,
+    pC_pred,
+    pC_target,
+    pD_pred,
+    pD_compress,
+    v2_11_device,
+    v2_11_profile,
+    v2_11_variant,
+):
     _mem_pred = pA_pred.value if hasattr(pA_pred, 'value') else None
     _adapt = pA_strategy.value if hasattr(pA_strategy, 'value') else "full"
     _lora_pred = pB_pred.value if hasattr(pB_pred, 'value') else None
@@ -1248,6 +1295,10 @@ def _(COLORS, ledger, mo, pA_pred, pA_strategy, pB_pred, pC_pred, pC_target, pD_
     _fed_pred = pD_pred.value if hasattr(pD_pred, 'value') else None
     _compress = pD_compress.value if hasattr(pD_compress, 'value') else "none"
     ledger.save(chapter=11, design={
+        "chapter": "v2_11",
+        "track_id": v2_11_profile.track_id,
+        "scenario_id": v2_11_variant.scenario_id,
+        "hardware_ref": v2_11_device.hardware_ref,
         "partA_memory_prediction": _mem_pred,
         "partA_adaptation_strategy": _adapt,
         "partB_lora_prediction": _lora_pred,
@@ -1262,13 +1313,15 @@ def _(COLORS, ledger, mo, pA_pred, pA_strategy, pB_pred, pC_pred, pC_target, pD_
                 margin-top: 32px; font-family: 'SF Mono', 'Fira Code', monospace;">
         <div style="color: #475569; font-size: 0.7rem; font-weight: 700;
                     text-transform: uppercase; letter-spacing: 0.14em; margin-bottom: 10px;">
-            Design Ledger &middot; Lab V2-10 Saved
+            Design Ledger &middot; Lab V2-11 Saved
         </div>
         <div style="color: #94a3b8; font-size: 0.82rem; line-height: 1.8;">
+            <span style="color: #64748b;">track:</span>
+            <span style="color: {COLORS['BlueLine']};">{v2_11_profile.label}</span><br/>
             <span style="color: #64748b;">memory_amplification:</span>
             <span style="color: {COLORS['RedLine']};">4-12x</span><br/>
             <span style="color: #64748b;">best_strategy:</span>
-            <span style="color: {COLORS['GreenLine']};">LoRA + NPU</span><br/>
+            <span style="color: {COLORS['GreenLine']};">LoRA + {v2_11_device.accelerator_label}</span><br/>
             <span style="color: #64748b;">federation_penalty:</span>
             <span style="color: {COLORS['OrangeLine']};">4-8x rounds (non-IID)</span>
         </div>
@@ -1277,25 +1330,151 @@ def _(COLORS, ledger, mo, pA_pred, pA_strategy, pB_pred, pC_pred, pC_target, pD_
     return
 
 
-# ─── TRACK-AWARE MIGRATION SHELL ────────────────────────────────────────────
+# ─── DOWNLOADABLE TRACK REPORT ──────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(ledger, mo):
-    from mlsysbook_labs import (
-        ACADEMIC_LAB_CSS,
-        get_lab_metadata,
-        get_lab_track_variant,
-        get_track_profile,
-        legacy_migration_panel,
+def _(
+    adaptation_storage,
+    build_lab_report,
+    energy_drain,
+    federated_communication,
+    mo,
+    pA_batch,
+    pA_params,
+    pA_pred,
+    pA_strategy,
+    pB_contexts,
+    pB_pred,
+    pC_pred,
+    pC_target,
+    pD_beta,
+    pD_compress,
+    pD_epochs,
+    pD_pred,
+    report_export_panel,
+    training_memory_breakdown,
+    v2_11_device,
+    v2_11_metadata,
+    v2_11_profile,
+    v2_11_variant,
+):
+    _memory = training_memory_breakdown(
+        params_m=pA_params.value,
+        batch_size=pA_batch.value,
+        strategy=pA_strategy.value,
+        available_memory_mb=v2_11_device.available_memory_mb,
+    )
+    _model_mb = v2_11_device.default_model_params_m * 1e6 * 4 / (1024 * 1024)
+    _storage = adaptation_storage(contexts=pB_contexts.value, model_mb=_model_mb)
+    _energy = energy_drain(v2_11_device, target=pC_target.value)
+    _comm = federated_communication(
+        v2_11_device,
+        beta=pD_beta.value,
+        local_epochs=pD_epochs.value,
+        compression=pD_compress.value,
     )
 
-    _metadata = get_lab_metadata("vol2/lab_11_edge_intelligence.py")
-    _saved_track = ledger.get_track()
-    _track_id = _saved_track if _saved_track and _saved_track != "NONE" else "iphone"
-    _profile = get_track_profile(_track_id)
-    _variant = get_lab_track_variant(_metadata.lab_id, _profile.track_id)
+    _incomplete = []
+    if pA_pred.value is None:
+        _incomplete.append("Part A prediction")
+    if pB_pred.value is None:
+        _incomplete.append("Part B prediction")
+    if pC_pred.value is None:
+        _incomplete.append("Part C energy prediction")
+    if pD_pred.value is None:
+        _incomplete.append("Part D federation prediction")
+
+    _report = build_lab_report(
+        v2_11_metadata,
+        track=v2_11_profile.label,
+        scenario=v2_11_variant.workload_summary,
+        learning_objectives=(
+            "Quantify edge training memory amplification for the selected track.",
+            "Compare full fine-tuning, LoRA, and bias-only adaptation storage.",
+            f"Estimate local energy budget use on {v2_11_profile.label}.",
+            "Explain why non-IID edge data increases communication rounds.",
+        ),
+        predictions={
+            "memory_amplification": pA_pred.value,
+            "lora_storage_shape": pB_pred.value,
+            "energy_budget_prediction_pct": pC_pred.value,
+            "federation_round_prediction": pD_pred.value,
+        },
+        knob_settings={
+            "model_params_m": pA_params.value,
+            "batch_size": pA_batch.value,
+            "adaptation_strategy": pA_strategy.value,
+            "contexts": pB_contexts.value,
+            "execution_target": pC_target.value,
+            "heterogeneity_beta": pD_beta.value,
+            "local_epochs": pD_epochs.value,
+            "compression": pD_compress.value,
+        },
+        evidence_summary={
+            "hardware_ref": v2_11_device.hardware_ref,
+            "model_ref": v2_11_variant.model_ref,
+            "active_memory_budget_mb": v2_11_device.available_memory_mb,
+            "training_memory_mb": round(_memory.total_mb, 3),
+            "training_fits": _memory.fits_memory,
+            "lora_storage_mb": round(_storage.lora_total_mb, 3),
+            "energy_budget_used_pct": round(_energy.budget_used_pct, 3),
+            "noniid_rounds": round(_comm.noniid_rounds, 1),
+            "total_communication_mb": round(_comm.total_communication_mb, 3),
+        },
+        final_decision=(
+            f"Use {pA_strategy.value} adaptation with {pC_target.value} execution for "
+            f"{v2_11_profile.label}, while treating non-IID communication as the residual scaling wall."
+        ),
+        big_takeaways=(
+            "Edge feasibility is a joint memory, energy, latency, privacy, and communication decision.",
+            "The same equations lead to different conclusions for iPhone, Oura Ring, RoboTaxi, and Cloud Fleet.",
+            "Federation protects data locality but does not make communication free.",
+        ),
+        reflections={
+            "diagnosis": (
+                f"{v2_11_profile.label} is constrained first by "
+                f"{', '.join(v2_11_profile.dominant_constraints)}."
+            ),
+            "tradeoff": (
+                f"The selected path optimizes {v2_11_variant.primary_metric} while guarding "
+                f"{v2_11_variant.guardrail_metric}."
+            ),
+            "residual_risk": (
+                "The helper uses first-order teaching estimates; production deployment still needs measured "
+                "device traces and rollout validation."
+            ),
+        },
+        residual_risk=(
+            "The report records source-traced estimates, not measured hardware traces. "
+            "Validate on representative devices before deployment."
+        ),
+        source_trace={
+            "track_id": v2_11_profile.track_id,
+            "scenario_id": v2_11_variant.scenario_id,
+            "hardware_ref": v2_11_variant.hardware_ref,
+            "model_ref": v2_11_variant.model_ref,
+            "shared_helper": "mlsysbook_labs.edge",
+            "source_policy": v2_11_profile.source_policy,
+        },
+        result_snapshot={
+            "device": v2_11_device,
+            "memory": _memory,
+            "storage": _storage,
+            "energy": _energy,
+            "communication": _comm,
+        },
+        incomplete_fields=tuple(_incomplete),
+    )
+
     mo.vstack([
-        ACADEMIC_LAB_CSS,
-        legacy_migration_panel(_metadata, _profile, _variant),
+        mo.md("## Download Report"),
+        mo.callout(
+            mo.md(
+                "This V2-11 report is generated locally from the selected track, current controls, "
+                "MLSysIM hardware refs, and shared `mlsysbook_labs.edge` calculations."
+            ),
+            kind="info",
+        ),
+        report_export_panel(_report),
     ])
     return
 
