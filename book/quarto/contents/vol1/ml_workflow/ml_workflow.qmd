@@ -381,9 +381,9 @@ class IterationTax:
     check(small_final_acc >= large_final_acc, f"Small model ({small_final_acc}%) failed to beat Large model ({large_final_acc}%) despite speed.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    weeks_str = fmt(weeks_total, precision=0, commas=False)
+    weeks_str = fmt_time(weeks_total, "week", precision=0, commas=False, style="word")
     weeks_span_str = fmt_time(weeks_total, "week", precision=0, commas=False, style="word")
-    hours_week_str = fmt(hours_per_week, precision=0, commas=False)
+    hours_week_str = fmt_time(hours_per_week, "hour", precision=0, commas=False, per="week")
     large_iters_str = fmt(large_iters, precision=0, commas=False)
 
     large_time_weeks_str = fmt_time(large_cycle_time_hours * hour, week, precision=0, commas=False, style="word")
@@ -409,7 +409,7 @@ class IterationTax:
 
 **Math**: In six months (~`{python} IterationTax.weeks_span_str`), the possible experiment count is:
 
-1. **Large model**: `{python} IterationTax.weeks_str` experiments at `{python} IterationTax.large_time_weeks_str` each. Each experiment improves accuracy by ~`{python} IterationTax.large_gain_str` (diminishing returns).
+1. **Large model**: `{python} IterationTax.weeks_str` of calendar time at `{python} IterationTax.large_time_weeks_str` per experiment. Each experiment improves accuracy by ~`{python} IterationTax.large_gain_str` (diminishing returns).
 2. **Small model**: `{python} IterationTax.weeks_str` $\times$ `{python} IterationTax.hours_week_str` = `{python} IterationTax.small_total_capacity_str` experiments at `{python} IterationTax.small_time_hours_str` each. Even with smaller gains per iteration, the compound effect is substantial.
 
 **Result**: If each iteration improves accuracy by `{python} IterationTax.small_gain_str` on average, the small model reaches: `{python} IterationTax.small_acc_str` + (`{python} IterationTax.small_iters_str` $\times$ `{python} IterationTax.small_gain_str`) = `{python} IterationTax.small_uncapped_str` before applying the `{python} IterationTax.acc_ceiling_pct_str` ceiling, so it renders as `{python} IterationTax.small_final_str`. The large model reaches: `{python} IterationTax.large_acc_str` + (`{python} IterationTax.large_iters_str` $\times$ `{python} IterationTax.large_gain_str`) = `{python} IterationTax.large_final_str`. Even assuming we use only a fraction of the theoretical capacity (for example, 100 effective iterations out of thousands possible), the compound effect dominates. In practice, the small model's rapid iteration enables discovering better architectures, data augmentations, and hyperparameters.
@@ -794,10 +794,10 @@ filllcolor=gray, drawcolor=BlueLine!70!black,Linewidth=0.7pt}};
 # │ How: Retrieve MobileNetV2 parameters and FLOPs from mlsysim.core.constants.
 # │
 # │ Imports: mlsysim.core.constants (Models.Vision.MobileNetV2.parameters, Models.Vision.MobileNetV2.inference_flops, BYTES_FP32, MB, MFLOPs)
-# │ Exports: MobilenetSpecs.mobilenet_size_mb_str, MobilenetSpecs.mobilenet_flops_str
+# │ Exports: MobilenetSpecs.mobilenet_size_mb_str, MobilenetSpecs.mobilenet_mflop_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt, fmt_qty, check
+from mlsysim.fmt import fmt, fmt_qty, check, fmt_flops
 from mlsysim.core.units import MB, MFLOPs, byte, param
 
 class MobilenetSpecs:
@@ -816,11 +816,11 @@ class MobilenetSpecs:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     mobilenet_size_mb_str = fmt_qty(mobilenet_size_q, MB, precision=0, commas=False)
-    mobilenet_flops_str = fmt_qty(mobilenet_flops_q, MFLOPs, precision=0, commas=False)
+    mobilenet_mflop_str = fmt_flops(mobilenet_flops_q, unit=MFLOPs, precision=0, commas=False)
 ```
 
 \index{MobileNetV2!workflow constraints}
-To make these stages concrete, consider *how* they apply to MobileNetV2, one of the Lighthouse Models in @sec-network-architectures-lighthouse-roster-model-biographies-a763 targeting mobile deployment. For MobileNetV2, Problem Definition establishes tight constraints: about `{python} MobilenetSpecs.mobilenet_size_mb_str` model size, about `{python} MobilenetSpecs.mobilenet_flops_str`, real-time inference on mobile GPUs. Data Collection must account for on-device preprocessing limitations. Model Development uses depthwise separable convolutions[^fn-depthwise-sep-mobile] specifically designed to meet the FLOP budget. Evaluation validates both accuracy and latency on target devices. Deployment targets mobile NPUs with quantization. Monitoring tracks performance across diverse device populations. Each stage's decisions propagate through subsequent stages, and the workflow framework makes these dependencies explicit. A DR screening model optimized for rural clinic deployment faces analogous pressures: limited device memory, strict power budgets, and the need for real-time inference without reliable connectivity. These shared constraints are why we use DR as the chapter's running case study.
+To make these stages concrete, consider *how* they apply to MobileNetV2, one of the Lighthouse Models in @sec-network-architectures-lighthouse-roster-model-biographies-a763 targeting mobile deployment. For MobileNetV2, Problem Definition establishes tight constraints: about `{python} MobilenetSpecs.mobilenet_size_mb_str` model size, about `{python} MobilenetSpecs.mobilenet_mflop_str`, real-time inference on mobile GPUs. Data Collection must account for on-device preprocessing limitations. Model Development uses depthwise separable convolutions[^fn-depthwise-sep-mobile] specifically designed to meet the FLOP budget. Evaluation validates both accuracy and latency on target devices. Deployment targets mobile NPUs with quantization. Monitoring tracks performance across diverse device populations. Each stage's decisions propagate through subsequent stages, and the workflow framework makes these dependencies explicit. A DR screening model optimized for rural clinic deployment faces analogous pressures: limited device memory, strict power budgets, and the need for real-time inference without reliable connectivity. These shared constraints are why we use DR as the chapter's running case study.
 
 [^fn-depthwise-sep-mobile]: **Depthwise Separable Convolutions**: Factorizes a standard convolution into a per-channel spatial filter (*depthwise*) followed by a $1{\times}1$ channel mixer (*pointwise*), reducing FLOPs by roughly 8--9$\times$ for typical kernel sizes. This reduction is what makes MobileNetV2's roughly 300 MFLOPs budget feasible: without it, the same accuracy would require a standard convolution layer consuming 2--3$\times$ the device's compute ceiling. @sec-network-architectures covers these architectural techniques in depth. \index{Depthwise Separable Convolution!mobile deployment}
 
@@ -909,14 +909,14 @@ This specification reveals why ML projects experience the iteration cycles diagr
 # │ How: Model a simple doubling rule across the six stages of the ML lifecycle.
 # │
 # │ Imports: IPython.display (Markdown)
-# │ Exports: ConstraintPropagation.cost_factor_str,
+# │ Exports: ConstraintPropagation.cost_factor_mult_str,
 # │          ConstraintPropagation.constraint_math,
 # │          ConstraintPropagation.rework_cycles_str,
 # │          ConstraintPropagation.rework_weeks_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim.physics import calc_constraint_propagation_factor
-from mlsysim.fmt import check, fmt, fmt_count_range, fmt_math, fmt_percent, fmt_qty, fmt_time, fmt_time_range
+from mlsysim.fmt import check, fmt_count_range, fmt_math, fmt_multiple, fmt_percent, fmt_qty, fmt_time, fmt_time_range
 
 class ConstraintPropagation:
     """Exponential cost multiplier for late constraint discovery across lifecycle stages."""
@@ -955,7 +955,7 @@ class ConstraintPropagation:
     check(rework_weeks_min == 8 and rework_weeks_max == 16, "Avoided cycle estimate should span 8--16 weeks.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    cost_factor_str = fmt(cost_factor, precision=0, commas=False)
+    cost_factor_mult_str = fmt_multiple(cost_factor, precision=0, commas=False)
     constraint_math = fmt_math(f"2^{{{stage_deployment - stage_definition}}} = {cost_factor}\\times")
     rework_cycles_str = fmt_count_range(
         avoided_cycles_min,
@@ -1085,15 +1085,15 @@ High-resolution retinal scans can generate tens of megabytes per image, creating
 # │          mlsysim.fmt (fmt, check)
 # │ Exports: BandwidthCompute.bw_patients_str, BandwidthCompute.bw_photos_str,
 # │          BandwidthCompute.bw_mb_per_photo_str, BandwidthCompute.bw_daily_mb_str,
-# │          BandwidthCompute.bw_daily_gb_str, BandwidthCompute.bw_upload_mbps_s_str,
+# │          BandwidthCompute.bw_daily_gb_str, BandwidthCompute.bw_upload_mbit_per_s_str,
 # │          BandwidthCompute.bw_upload_sec_str,
 # │          BandwidthCompute.bw_upload_hours_str,
 # │          BandwidthCompute.bw_clinic_hours_str,
 # │          BandwidthCompute.bw_bandwidth_pct_str,
-# │          BandwidthCompute.bw_summary_kb_str, BandwidthCompute.bw_reduction_str
+# │          BandwidthCompute.bw_summary_kb_str, BandwidthCompute.bw_reduction_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import ReferenceStats
-from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_multiple, fmt_percent, fmt_qty, fmt_time
+from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_multiple, fmt_percent, fmt_qty, fmt_rate, fmt_time
 from mlsysim.core.units import MB, GB, KB, hour, megabit, second
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -1132,19 +1132,19 @@ class BandwidthCompute:
     check(reduction_factor >= 1000, "Edge compression ratio too small to justify complexity.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    bw_patients_str = fmt(patients_day, precision=0, commas=False)
-    bw_photos_str = fmt(photos_per_patient, precision=0, commas=False)
+    bw_patients_str = fmt_rate(patients_day, "patients/day", precision=0, commas=False)
+    bw_photos_str = fmt_rate(photos_per_patient, "photos/patient", precision=0, commas=False)
     bw_mb_per_photo_str = fmt_qty(mb_per_photo_q, MB, precision=0, commas=False, per="photo")
     bw_daily_mb_str = fmt_qty(daily_q, MB, precision=0, commas=True)
     bw_daily_gb_str = fmt_qty(daily_q, GB, precision=1, commas=False, per="day")
-    bw_upload_mbps_s_str = fmt_bandwidth(uplink_q, unit=megabit / second, precision=0, commas=False)
-    bw_upload_mbs_str = fmt_qty(uplink_mbs_q, MB / second, precision=2, commas=False)
+    bw_upload_mbit_per_s_str = fmt_bandwidth(uplink_q, unit=megabit / second, precision=0, commas=False)
+    bw_upload_mb_per_s_str = fmt_qty(uplink_mbs_q, MB / second, precision=2, commas=False)
     bw_upload_sec_str = fmt_time(upload_time_q, second, precision=0, commas=True)
     bw_upload_hours_str = fmt_time(round(upload_time_q.to(hour).magnitude) * hour, hour, precision=0, commas=False)
     bw_clinic_hours_str = fmt_time(clinic_hours_q, hour, precision=0, commas=False)
     bw_bandwidth_pct_str = fmt_percent(saturation_ratio, precision=1, commas=False, style='symbol')
     bw_summary_kb_str = fmt_qty(summary_per_patient_q, KB, precision=0, commas=False, per="patient")
-    bw_reduction_str = fmt_multiple(reduction_factor, precision=0, commas=True)
+    bw_reduction_mult_str = fmt_multiple(reduction_factor, precision=0, commas=True)
 ```
 
 ::: {#nbk-ml-workflow-bandwidth-vs-compute .callout-notebook title="Bandwidth vs. compute"}
@@ -1153,11 +1153,11 @@ class BandwidthCompute:
 
 **Math**:
 
-1.  **Daily data**: `{python} BandwidthCompute.bw_patients_str` patients $\times$ `{python} BandwidthCompute.bw_photos_str` photos $\times$ `{python} BandwidthCompute.bw_mb_per_photo_str` = `{python} BandwidthCompute.bw_daily_gb_str`.
-2.  **Upload time**: The uplink is `{python} BandwidthCompute.bw_upload_mbps_s_str`, or `{python} BandwidthCompute.bw_upload_mbs_str`. Thus `{python} BandwidthCompute.bw_daily_mb_str` / `{python} BandwidthCompute.bw_upload_mbs_str` = `{python} BandwidthCompute.bw_upload_sec_str` ≈ `{python} BandwidthCompute.bw_upload_hours_str`.
+1.  **Daily data**: `{python} BandwidthCompute.bw_patients_str` $\times$ `{python} BandwidthCompute.bw_photos_str` $\times$ `{python} BandwidthCompute.bw_mb_per_photo_str` = `{python} BandwidthCompute.bw_daily_gb_str`.
+2.  **Upload time**: The uplink is `{python} BandwidthCompute.bw_upload_mbit_per_s_str`, or `{python} BandwidthCompute.bw_upload_mb_per_s_str`. Thus `{python} BandwidthCompute.bw_daily_mb_str` / `{python} BandwidthCompute.bw_upload_mb_per_s_str` = `{python} BandwidthCompute.bw_upload_sec_str` ≈ `{python} BandwidthCompute.bw_upload_hours_str`.
 3.  **The constraint**: If the clinic operates for `{python} BandwidthCompute.bw_clinic_hours_str`, uploading this data would require `{python} BandwidthCompute.bw_bandwidth_pct_str` of the clinic's total operating time, effectively saturating the connection and blocking all other operations.
 
-**Systems insight**: A Cloud-only architecture is too "expensive" in terms of bandwidth. Moving to the edge requires uploading only *detection summaries* (`{python} BandwidthCompute.bw_summary_kb_str`), reducing bandwidth usage by `{python} BandwidthCompute.bw_reduction_str`$\times$.
+**Systems insight**: A Cloud-only architecture is too "expensive" in terms of bandwidth. Moving to the edge requires uploading only *detection summaries* (`{python} BandwidthCompute.bw_summary_kb_str`), reducing bandwidth usage by `{python} BandwidthCompute.bw_reduction_mult_str`.
 
 :::
 
@@ -1194,7 +1194,7 @@ As the number of clinics grows from a handful to hundreds, data infrastructure m
 # │
 # │ Imports: mlsysim.core.constants (Infrastructure.Pricing.Storage.NvmeLowPerTbMonth.rate, Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate)
 # │ Exports: StorageCosts.cost_nvme_str, StorageCosts.cost_s3_str,
-# │          StorageCosts.cost_ratio_str
+# │          StorageCosts.cost_ratio_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim.fmt import check, fmt_multiple, fmt_usd
@@ -1216,13 +1216,13 @@ class StorageCosts:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     cost_nvme_str = fmt_usd(nvme_rate, precision=2, commas=False, per="GB/month", approx=True)
     cost_s3_str = fmt_usd(s3_rate, precision=3, commas=False, per="GB/month", approx=True)
-    cost_ratio_str = fmt_multiple(cost_ratio, precision=1, commas=False)
+    cost_ratio_mult_str = fmt_multiple(cost_ratio, precision=1, commas=False)
 ```
 
 \index{Tiered Storage!hot warm cold architecture}
 Storage tiers are another place where the data pipeline either preserves or erodes downstream iteration velocity. Different data access patterns demand different storage solutions, so teams typically implement tiered storage architectures[^fn-tiered-storage-ml]:
 
-[^fn-tiered-storage-ml]: **Tiered Storage**: Places data on different storage media based on access frequency and performance requirements. The storage price gap is roughly `{python} StorageCosts.cost_ratio_str`$\times$ in this example: NVMe SSDs deliver 500,000+ input/output operations per second (IOPS) at `{python} StorageCosts.cost_nvme_str`, while object storage costs `{python} StorageCosts.cost_s3_str` but with 100--200 ms latency. For ML training loops requiring sustained sequential reads at 1--10 GB/s, choosing the wrong tier converts a compute-bound training pipeline into an I/O-bound one, directly inflating the iron law's Data term $(D_{\text{vol}}/\text{BW})$. \index{Tiered Storage!ML I/O bottleneck}
+[^fn-tiered-storage-ml]: **Tiered Storage**: Places data on different storage media based on access frequency and performance requirements. The storage price gap is roughly `{python} StorageCosts.cost_ratio_mult_str` in this example: NVMe SSDs deliver 500,000+ input/output operations per second (IOPS) at `{python} StorageCosts.cost_nvme_str`, while object storage costs `{python} StorageCosts.cost_s3_str` but with 100--200 ms latency. For ML training loops requiring sustained sequential reads at 1--10 GB/s, choosing the wrong tier converts a compute-bound training pipeline into an I/O-bound one, directly inflating the iron law's Data term $(D_{\text{vol}}/\text{BW})$. \index{Tiered Storage!ML I/O bottleneck}
 
 - **Hot Storage**: High-throughput NVMe SSDs for data currently used in training loops.
 - **Warm Storage**: S3-compatible object storage for recent datasets and active validation sets.
@@ -1584,6 +1584,7 @@ These feedback pathways reinforce a central point: data collection does not end 
 # │          HyperparameterGrid.experiment_count_str,
 # │          HyperparameterGrid.formula_math
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, fmt_count, fmt_math, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class HyperparameterGrid:
@@ -1600,15 +1601,15 @@ class HyperparameterGrid:
     check(experiment_count == 1024, f"Expected 4^5 = 1,024 runs, got {experiment_count}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    n_hyperparams_str = fmt(n_hyperparams, precision=0, commas=False)
-    values_per_param_str = fmt(values_per_param, precision=0, commas=False)
+    n_hyperparams_str = fmt_count(n_hyperparams, label="hyperparameter", commas=False)
+    values_per_param_str = fmt_count(values_per_param, label="value", commas=False)
     experiment_count_str = fmt(experiment_count, precision=0, commas=True)
     formula_math = fmt_math(f"{values_per_param}^{{{n_hyperparams}}}")
 ```
 
 The DR team has 128,000 labeled retinal images, a validated preprocessing pipeline, and a target: >90 percent sensitivity\index{Sensitivity!medical AI metrics} on edge hardware with <50 ms inference latency. The question is no longer *what data* to collect but *what model* to build—and that question has no answer independent of the deployment constraints already established. In iron law terms, this stage defines the Operations $(O)$ term: architectural choices set the computational floor that hardware must sustain. The challenges extend well beyond selecting algorithms and tuning hyperparameters[^fn-hyperparameter-search-cost]. @Sec-model-training covers the training methodologies, infrastructure requirements, and distributed training strategies in detail. In high-stakes domains like healthcare, every design decision affects clinical outcomes, so technical performance and operational constraints must be integrated from the start.
 
-[^fn-hyperparameter-search-cost]: **Hyperparameter**: These architectural and optimizer choices (for example, learning rate, network depth) directly define the computational operations $(O)$ for each training run. Because each combination requires a full and independent training run, the search for an optimal configuration incurs a multiplicative, not additive, cost. A naive grid search over just `{python} HyperparameterGrid.n_hyperparams_str` hyperparameters with `{python} HyperparameterGrid.values_per_param_str` values each requires `{python} HyperparameterGrid.experiment_count_str` (`{python} HyperparameterGrid.formula_math`) complete training experiments, making it economically infeasible. \index{Hyperparameter!search cost}
+[^fn-hyperparameter-search-cost]: **Hyperparameter**: These architectural and optimizer choices (for example, learning rate, network depth) directly define the computational operations $(O)$ for each training run. Because each combination requires a full and independent training run, the search for an optimal configuration incurs a multiplicative, not additive, cost. A naive grid search over just `{python} HyperparameterGrid.n_hyperparams_str` with `{python} HyperparameterGrid.values_per_param_str` each requires `{python} HyperparameterGrid.experiment_count_str` (`{python} HyperparameterGrid.formula_math`) complete training experiments, making it economically infeasible. \index{Hyperparameter!search cost}
 
 \index{Transfer Learning!definition and history}
 The DR system faces a sharp optimization challenge: achieve expert-level diagnostic accuracy while fitting within edge device memory and latency budgets. Data and compute budgets are finite, so techniques that reduce both requirements without sacrificing accuracy become essential design choices. Transfer learning[^fn-transfer-learning-efficiency] addresses exactly this constraint: rather than training a model from scratch, it adapts models pretrained on large datasets (like ImageNet's\index{ImageNet!transfer learning pretraining} 14 million images) to specific tasks [@krizhevsky2012imagenet; @deng2009]. Because transfer learning reuses representations already learned from millions of general images, practitioners can achieve expert-level performance with thousands rather than millions of domain-specific training examples, sharply reducing both training time and data collection effort. This approach became widespread in the 2013--2014 era through influential work including @yosinski2014transferable, establishing it as the foundation for practical computer vision applications.
@@ -1892,7 +1893,7 @@ These requirements influence deployment strategies. The edge deployment decision
 # │          DeploymentEconomics.payback_years_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import ReferenceStats
-from mlsysim.fmt import check, fmt, fmt_int, fmt_time, fmt_usd, fmt_qty
+from mlsysim.fmt import check, fmt, fmt_int, fmt_rate, fmt_time, fmt_usd, fmt_qty
 from mlsysim.core.units import MB, USD, millisecond, year
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -1948,9 +1949,9 @@ class DeploymentEconomics:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     n_clinics_str = fmt(n_clinics, precision=0)
-    patients_per_day_str = fmt(patients_day, precision=0, commas=False)
+    patients_per_day_str = fmt_rate(patients_day, "patients/day", precision=0, commas=False)
     billable_images_per_patient_str = fmt(billable_images_per_patient, precision=0, commas=False)
-    days_per_year_str = fmt(days_year, precision=0, commas=False)
+    days_per_year_str = fmt_time(days_year, "day", precision=0, commas=False, style="word", per="year")
     monthly_images_str = fmt_int(round(total_images_year / 12 / THOUSAND) * THOUSAND)
     cloud_cost_per_image_str = fmt_usd(cloud_inf_cost_q, precision=2, commas=False, per="image")
     cloud_network_usd_str = fmt_usd(cloud_network_cost_q, precision=0, per="year")
@@ -1979,7 +1980,7 @@ class DeploymentEconomics:
 
 - Model runs on centralized GPU servers
 - Inference cost: ~`{python} DeploymentEconomics.cloud_cost_per_image_str` (cloud GPU time + API overhead)
-- Annual cost: `{python} DeploymentEconomics.n_clinics_str` clinics $\times$ `{python} DeploymentEconomics.patients_per_day_str` patients/day $\times$ `{python} DeploymentEconomics.billable_images_per_patient_str` billable image/patient $\times$ `{python} DeploymentEconomics.days_per_year_str` days $\times$ `{python} DeploymentEconomics.cloud_cost_per_image_str` = `{python} DeploymentEconomics.cloud_annual_usd_str`
+- Annual cost: `{python} DeploymentEconomics.n_clinics_str` clinics $\times$ `{python} DeploymentEconomics.patients_per_day_str` $\times$ `{python} DeploymentEconomics.billable_images_per_patient_str` billable image/patient $\times$ `{python} DeploymentEconomics.days_per_year_str` $\times$ `{python} DeploymentEconomics.cloud_cost_per_image_str` = `{python} DeploymentEconomics.cloud_annual_usd_str`
 - Plus: Network costs for uploading `{python} DeploymentEconomics.image_size_mb_str` = ~`{python} DeploymentEconomics.cloud_network_usd_str`
 - **Total**: ~`{python} DeploymentEconomics.cloud_total_usd_str` operational cost
 - Risk: `{python} DeploymentEconomics.cloud_latency_risk_ms_str` breaks clinical workflow; connectivity outages halt screening
@@ -2201,7 +2202,7 @@ Teams assume they can "finish" data preparation and move on to modeling. In prod
 # │ How: Recompute the constraint propagation rule from the chapter definition.
 # │
 # │ Imports: mlsysim.fmt (fmt, fmt_math, check)
-# │ Exports: FallaciesConstraintPropagation.constraint_math, .cost_factor_str
+# │ Exports: FallaciesConstraintPropagation.constraint_math, .cost_factor_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_math, check
 from mlsysim.physics import calc_constraint_propagation_factor
@@ -2226,7 +2227,7 @@ class FallaciesConstraintPropagation:
     check(cost_factor == 16, f"Stage 5 discovery should cost 16x, got {cost_factor}x.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    cost_factor_str = fmt(cost_factor, precision=0, commas=False)
+    cost_factor_mult_str = fmt_multiple(cost_factor, precision=0, commas=False)
     constraint_math = fmt_math(f"2^{{{stage_deployment - stage_definition}}} = {cost_factor}\\times")
 ```
 
@@ -2256,7 +2257,7 @@ Three engineering insights from this chapter guide engineering decisions:
 
 2. **Repeated iteration cycles**: Production-ready ML systems usually require repeated cycles across data, model, and infrastructure stages. Data quality issues are often a major source of rework, so investment in data engineering yields high leverage.
 
-3. **Cost escalation compounds across stages**: The constraint propagation principle says a constraint discovered at stage $N_{\text{stage}}$ costs roughly $2^{N_{\text{stage}}-1}$ times more to fix than if caught at stage 1. A deployment paradigm mismatch discovered at stage 5 triggers a `{python} FallaciesConstraintPropagation.cost_factor_str`$\times$ cost multiplier. Early validation pays exponential dividends.
+3. **Cost escalation compounds across stages**: The constraint propagation principle says a constraint discovered at stage $N_{\text{stage}}$ costs roughly $2^{N_{\text{stage}}-1}$ times more to fix than if caught at stage 1. A deployment paradigm mismatch discovered at stage 5 triggers a `{python} FallaciesConstraintPropagation.cost_factor_mult_str` cost multiplier. Early validation pays exponential dividends.
 
 ::: {.callout-takeaways title="See the whole map first"}
 

@@ -149,8 +149,8 @@ The transfer time for moving a dataset is simply $T = D_{\text{vol}} / \text{BW}
 # │ How:     Directly from representative benchmarks.
 # │
 # │ Imports: mlsysim.core.constants (MB, second)
-# │ Exports: csv_speed_mb_s_str, parquet_speed_mb_s_str, csv_cycles_str,
-# │          parquet_cycles_str, proto_speed_mb_s_str, proto_cycles_str
+# │ Exports: csv_speed_mb_per_s_str, parquet_speed_mb_per_s_str, csv_cycles_str,
+# │          parquet_cycles_str, proto_speed_mb_per_s_str, proto_cycles_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.constants import MB, second
 from mlsysim.fmt import fmt_qty, MarkdownStr
@@ -172,11 +172,11 @@ class SerializationCost:
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
     # Plain string literals → MarkdownStr per recipe Rule 1 escape-hatch
-    csv_speed_mb_s_str = fmt_qty(csv_speed, MB/second, precision=0, commas=False, approx=True)
-    parquet_speed_mb_s_str = fmt_qty(parquet_speed, MB/second, precision=0, commas=True, lower_bound=True)
+    csv_speed_mb_per_s_str = fmt_qty(csv_speed, MB/second, precision=0, commas=False, approx=True)
+    parquet_speed_mb_per_s_str = fmt_qty(parquet_speed, MB/second, precision=0, commas=True, lower_bound=True)
     csv_cycles_str = MarkdownStr("High")
     parquet_cycles_str = MarkdownStr("Low")
-    proto_speed_mb_s_str = fmt_qty(proto_speed, MB/second, precision=0, commas=False, approx=True)
+    proto_speed_mb_per_s_str = fmt_qty(proto_speed, MB/second, precision=0, commas=False, approx=True)
     proto_cycles_str = MarkdownStr("Medium")
 ```
 
@@ -184,11 +184,11 @@ Even after data arrives at the machine, we face one final hurdle: the serializat
 
 [^fn-serialization]: **Serialization**: From Latin *serialis* (forming a series). The process of converting in-memory data structures into a byte stream for storage or transmission, and the reverse (*deserialization*). In ML pipelines, the choice of serialization format can dominate end-to-end training time; @sec-data-engineering covers pipeline design strategies that minimize this overhead.
 
-| **Format**        |              **Decoding Speed (MB/s)**              |           **Relative CPU Decode Cost**          | **Suitability**     |
-|:------------------|:---------------------------------------------------:|:-----------------------------------------------:|:--------------------|
-| **CSV/JSON**      |   `{python} SerializationCost.csv_speed_mb_s_str`   |   `{python} SerializationCost.csv_cycles_str`   | Debugging only      |
-| **Protobuf**      |  `{python} SerializationCost.proto_speed_mb_s_str`  |  `{python} SerializationCost.proto_cycles_str`  | RPC/Messages        |
-| **Parquet/Arrow** | `{python} SerializationCost.parquet_speed_mb_s_str` | `{python} SerializationCost.parquet_cycles_str` | High-Scale Training |
+| **Format**        |                **Decoding Speed (MB/s)**                |           **Relative CPU Decode Cost**          | **Suitability**     |
+|:------------------|:-------------------------------------------------------:|:-----------------------------------------------:|:--------------------|
+| **CSV/JSON**      |   `{python} SerializationCost.csv_speed_mb_per_s_str`   |   `{python} SerializationCost.csv_cycles_str`   | Debugging only      |
+| **Protobuf**      |  `{python} SerializationCost.proto_speed_mb_per_s_str`  |  `{python} SerializationCost.proto_cycles_str`  | RPC/Messages        |
+| **Parquet/Arrow** | `{python} SerializationCost.parquet_speed_mb_per_s_str` | `{python} SerializationCost.parquet_cycles_str` | High-Scale Training |
 
 : **Serialization Overhead**: Zero-copy formats like Arrow are at least 10$\times$ faster than row-based text formats in this representative comparison because they align directly with internal memory structures. {#tbl-serialization-cost tbl-colwidths="[21,27,27,25]"}
 
@@ -341,7 +341,7 @@ class DataAlgebra:
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
     row_size_kb_str = fmt_qty(row_size_q, KB, precision=0, commas=False)
-    int_size_bytes_str = fmt(int_size_bytes, precision=0, commas=False)
+    int_size_bytes_value_str = fmt(int_size_bytes, precision=0, commas=False)
     waste_pct_str = fmt_percent(waste_pct/100, precision=1, commas=False, style='prose')
     join_table_tb_str = fmt_qty(join_table_q, TB, precision=0, commas=False)
     join_network_tb_str = fmt_qty(join_network_q, TB, precision=0, commas=False, approx=True)
@@ -355,7 +355,7 @@ Feature engineering is built on three Structured Query Language (SQL) primitives
     *   *Cost*: Cheap ($\mathcal{O}(\log N)$) if indexed; expensive ($\mathcal{O}(N)$) if full scan.
 
 2.  **Projection ($\pi$)**: Selecting columns (for example, `SELECT age`).
-    *   *Cost*: Free in columnar formats (only read relevant blocks). In row formats, the entire `{python} DataAlgebra.row_size_kb_str` row must be read just to extract the `{python} DataAlgebra.int_size_bytes_str`-byte integer, wasting `{python} DataAlgebra.waste_pct_str` of I/O bandwidth.
+    *   *Cost*: Free in columnar formats (only read relevant blocks). In row formats, the entire `{python} DataAlgebra.row_size_kb_str` row must be read just to extract the `{python} DataAlgebra.int_size_bytes_value_str`-byte integer, wasting `{python} DataAlgebra.waste_pct_str` of I/O bandwidth.
 
 3.  **Join ($\bowtie$)**: Combining tables. The most expensive operation.
     *   **Shuffle Join**: Both tables are partitioned by key and exchanged over the network.
@@ -384,13 +384,13 @@ Your monitoring dashboard says average latency is fine, but users are complainin
 # │ Context: @sec-appdx-data-foundations-distributions-long-tail-901f—P99 at scale
 # │
 # │ Goal:    Show how many users hit the P99 tail at production scale.
-# │ Show:    1% of 1M users = 10,000 unhappy people.
+# │ Show:    1% of 1M users = 10,000 affected users.
 # │ How:     Scalar multiplication.
 # │
 # │ Imports: mlsysim.core.constants (MILLION)
 # │ Exports: n_users_str, n_unhappy_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, MarkdownStr
+from mlsysim.fmt import fmt_count, check, MarkdownStr
 
 class LongTailScale:
     # ┌── 1. LOAD (Constants) ──────────────────────────────
@@ -406,12 +406,12 @@ class LongTailScale:
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
     # Plain "1M" literal → MarkdownStr per recipe Rule 1 escape-hatch
     n_users_str = MarkdownStr("1M")
-    n_unhappy_str = fmt(n_unhappy, precision=0)
+    n_unhappy_str = fmt_count(n_unhappy, label="user")
 ```
 
 ### Distributions and the long tail {#sec-appdx-data-foundations-distributions-long-tail-901f}
 
-In systems, the mean is often misleading. Latency distributions are almost always long-tailed (log-normal or power law). A "P99" (99th percentile) latency of 500 ms means 1 percent of requests experience that tail latency; with many requests per session, the fraction of users who see at least one slow request can be much higher. At scale (`{python} LongTailScale.n_users_str` users), even a 1 percent affected-user rate would be `{python} LongTailScale.n_unhappy_str` unhappy people.
+In systems, the mean is often misleading. Latency distributions are almost always long-tailed (log-normal or power law). A "P99" (99th percentile) latency of 500 ms means 1 percent of requests experience that tail latency; with many requests per session, the fraction of users who see at least one slow request can be much higher. At scale (`{python} LongTailScale.n_users_str` users), even a 1 percent affected-user rate would affect `{python} LongTailScale.n_unhappy_str`.
 
 ```{python}
 #| echo: false
@@ -428,7 +428,7 @@ In systems, the mean is often misleading. Latency distributions are almost alway
 # │ Imports: mlsysim.book (fmt, fmt_math)
 # │ Exports: p_slow_eq, p_slow_pct_str, p_slow_pct_math_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_math
+from mlsysim.fmt import fmt, fmt_math, fmt_percent
 
 class TailLatency:
     # ┌── 1. LOAD (Constants) ──────────────────────────────
@@ -445,10 +445,10 @@ class TailLatency:
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
     p_all_fast_str = fmt(p_all_fast, precision=3, commas=False)
     p_slow_pct_str = fmt_percent(p_slow, precision=1, commas=False, style='prose')
-    p_slow_pct_math_str = fmt(p_slow * 100, precision=1, commas=False)
+    p_slow_pct_value_str = fmt_percent(p_slow, precision=1, commas=False, style='number')
     p_slow_eq = fmt_math(
         f"\\Pr(\\text{{Slow}}) = 1 - ({p_fast})^{{{n_requests}}} "
-        f"\\approx 1 - {p_all_fast_str} = {p_slow_pct_math_str}\\%"
+        f"\\approx 1 - {p_all_fast_str} = {p_slow_pct_value_str}\\%"
     )
 ```
 

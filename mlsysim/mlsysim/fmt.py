@@ -440,7 +440,7 @@ def fmt(quantity, unit=None, precision=1, commas=True,
         fmt(value, precision=0, lower_bound=True)  # "> 1,000"
         fmt_percent(rate, precision=1, style="symbol")  # "12.4%"
         fmt_qty(bandwidth, unit=MB/second)         # "2.4 MB/s"
-        fmt_multiple(speedup)                      # prose adds "$\\times$"
+        fmt_multiple(speedup)                      # "3.2×"
 
     Safety: Raises ValueError if formatting would hide meaningful magnitude:
     non-zero values displayed as ``0``, non-integers displayed with
@@ -877,17 +877,18 @@ def fmt_pp(points, precision=None, commas=False, style="prose", attributive=Fals
 
 def fmt_multiple(factor, precision=None, commas=False):
     """
-    Format a multiplier / speedup / scaling factor as a **number only**.
+    Format a multiplier / speedup / scaling factor with its times glyph.
 
-    The multiplier glyph belongs in prose as LaTeX ``$\\times$``, never inside
-    the computed string (see .claude/rules/math.md §6 #14). This helper exists
-    so the value-kind is explicit at the source while keeping the glyph out of
-    the string:
+    The multiplier glyph is part of the value-kind, so this helper owns it:
 
-        speedup_str = fmt_multiple(3.2)            # "3.2"
-        # prose: `{python} speedup_str`$\\times$ faster
+        speedup_mult_str = fmt_multiple(3.2)       # "3.2×"
+        # prose: `{python} speedup_mult_str` faster
 
-    Guard: a multiplier is non-negative.
+    Guard: a multiplier is non-negative. Do not use this helper for values
+    substituted inside display math; use ``fmt_ratio`` for the bare coefficient
+    and keep ``\\times`` inside the equation. The helper emits a literal
+    rendered ``×`` glyph because Quarto inline substitutions do not reliably
+    re-parse math delimiters inside returned strings.
     """
     v = _dimensionless_magnitude(factor, what="multiplier")
     if v < 0:
@@ -896,13 +897,13 @@ def fmt_multiple(factor, precision=None, commas=False):
             f"multiplier almost always signals a sign or ordering bug."
         )
     p = _resolve_display_precision(v, precision)
-    return fmt(v, precision=p, commas=commas)
+    num = fmt(v, precision=p, commas=commas)
+    return MarkdownStr(f"{num}×")
 
 
 def fmt_multiple_range(lo, hi, *, precision=1, commas=False):
-    """Format a range of multiplier factors as bare numbers.
+    """Format a range of multiplier factors with one trailing times glyph.
 
-    The multiplication glyph remains prose-owned, as with ``fmt_multiple``.
     ``precision`` may be one int or a ``(lo_precision, hi_precision)`` pair.
     """
     lo_v = _dimensionless_magnitude(lo, what="multiplier range endpoint")
@@ -919,7 +920,7 @@ def fmt_multiple_range(lo, hi, *, precision=1, commas=False):
     lo_p, hi_p = _range_precisions(precision, what="fmt_multiple_range precision")
     a = fmt(lo_v, precision=lo_p, commas=commas)
     b = fmt(hi_v, precision=hi_p, commas=commas)
-    return MarkdownStr(f"{a}\u2013{b}")
+    return MarkdownStr(f"{a}\u2013{b}×")
 
 
 def fmt_count(
@@ -1110,8 +1111,16 @@ def fmt_tokens(
 
 
 _RATE_UNITS = {
-    "QPS", "FPS", "tokens/s", "tokens/hour", "img/s", "images/s", "req/s",
-    "requests/s", "samples/s", "samples/hour",
+    "QPS", "FPS", "IOPS", "MACs/cycle", "tokens/s", "tokens/hour", "img/s", "images/s",
+    "req/s", "requests/s", "requests/day", "events/s", "errors/hour",
+    "failures/hour", "failures/day", "inferences/s", "inferences/hour",
+    "inferences/day", "patients/day", "queries/hour", "queries/day",
+    "reviews/day", "samples/s", "samples/min", "samples/hour", "deploys/week",
+    "checkpoints/hour", "windows/month", "false wakes/month",
+    "feature reads/request", "queries/month", "queries/class", "incidents/year",
+    "models/year", "reads/year", "photos/patient",
+    "utterances/speaker", "cameras/store", "boards/store",
+    "cases/day",
 }
 
 

@@ -7,10 +7,14 @@ It catches:
 
 * ``body_multiplier_suffix``:
   ``speedup_str = fmt(speedup, suffix="×")`` or ``suffix="x"``.
-  Fix by exporting the number only and putting the glyph in prose::
+  Fix by using the typed multiplier formatter, whose output owns the glyph::
 
-      speedup_str = fmt(speedup, precision=1, commas=False)
-      `{python} speedup_str`$\\times$ speedup
+      speedup_mult_str = fmt_multiple(speedup, precision=1, commas=False)
+      `{python} speedup_mult_str` speedup
+
+* ``mult_double_glyph``:
+  a computed multiplier such as ``{python} speedup_mult_str`` followed by
+  another ``$\\times$`` / ``×`` / ``x``. The formatter already emits the glyph.
 
 * ``unicode_times_in_prose``:
   raw ``×`` in rendered prose or tables, e.g. ``3× faster``.
@@ -26,8 +30,9 @@ It catches:
 
       `{python} a_str` $\\times$ `{python} b_str`
 
-  Compact multiplier prose remains valid: ``10$\\times$ faster`` or
-  `` `{python} speedup_str`$\\times$ speedup ``.
+  Compact literal multiplier prose remains valid: ``10$\\times$ faster``.
+  Computed multiplier prose uses the closed formatter:
+  `` `{python} speedup_mult_str` speedup ``.
 
 * ``fmt_sci_math_context``:
   ``fmt_sci()`` used inside math output, e.g. ``value_math =
@@ -55,6 +60,8 @@ ASSIGN_NAME = re.compile(r"^\s*([A-Za-z_]\w*)\s*=")
 FMT_SCI_CALL = re.compile(r"\bfmt_sci\s*\(")
 MATH_SUFFIX_ASSIGN = re.compile(r"^\s*[A-Za-z_]\w*(?:_math|_eq)\s*=")
 MARKDOWN_MATH_LITERAL = re.compile(r"\bMarkdownStr\s*\(\s*f?[\"']\$")
+INLINE_PY = re.compile(r"`\{python\}\s+([A-Za-z_][\w.]*)`")
+MULT_AFTER = re.compile(r"^\s*(\$\\times\$|\\times|×|x\b)")
 
 
 @dataclass(frozen=True)
@@ -124,6 +131,13 @@ def _is_right_product_operand(ch: str) -> bool:
     return ch in "`$\\(" or ch.isdigit()
 
 
+def _has_mult_token(ref: str) -> bool:
+    bare = ref.split(".")[-1]
+    if not bare.endswith("_str"):
+        return False
+    return "mult" in bare[:-4].split("_")
+
+
 def _audit_file(path: Path) -> list[Violation]:
     violations: list[Violation] = []
     lines = path.read_text(encoding="utf-8").splitlines()
@@ -146,12 +160,6 @@ def _audit_file(path: Path) -> list[Violation]:
                 value = match.group(1) if match.group(1) is not None else match.group(2)
                 stripped_value = value.strip().lower()
                 if stripped_value == "x" or "×" in value:
-                    name_match = ASSIGN_NAME.match(line)
-                    inline_ref = (
-                        f"`{{python}} {name_match.group(1)}`"
-                        if name_match
-                        else "`{python} speedup_str`"
-                    )
                     violations.append(
                         Violation(
                             file=str(path),
@@ -159,13 +167,13 @@ def _audit_file(path: Path) -> list[Violation]:
                             code="body_multiplier_suffix",
                             message=(
                                 f"Body-prose multiplier uses suffix={value!r}; "
-                                "export the number only."
+                                "use fmt_multiple so the typed formatter owns the glyph."
                             ),
                             context=line.strip()[:160],
                             suggestion=(
-                                "Remove the x/× suffix from fmt(...). In body prose, "
-                                "write the computed value followed by LaTeX, e.g. "
-                                f"{inline_ref}$\\times$."
+                                "Replace fmt(..., suffix=...) with fmt_multiple(...), "
+                                "rename the export to *_mult_str, and use the computed "
+                                "ref by itself in prose."
                             ),
                         )
                     )
@@ -196,8 +204,15 @@ def _audit_file(path: Path) -> list[Violation]:
         if in_fence:
             continue
 
-        alt_intervals = _attribute_intervals(line, ("fig-alt", "tbl-alt", "alt"))
-        if "×" in line and not _all_positions_in_intervals(line, "×", alt_intervals):
+        # LaTeX is NOT processed in these attributes, so Unicode × is the correct
+        # (and only) choice there: fig-alt/tbl-alt/alt (screen-reader text) and
+        # title=/page-title (callout titles, HTML <title>, PDF bookmarks). Every
+        # context that DOES render (body prose, fig-cap/tbl-cap, table cells) must
+        # use $\times$, so × outside these attributes is still flagged.
+        noproc_intervals = _attribute_intervals(
+            line, ("fig-alt", "tbl-alt", "alt", "title", "page-title")
+        )
+        if "×" in line and not _all_positions_in_intervals(line, "×", noproc_intervals):
             violations.append(
                 Violation(
                     file=str(path),
@@ -213,6 +228,23 @@ def _audit_file(path: Path) -> list[Violation]:
                 )
             )
 
+        for match in INLINE_PY.finditer(line):
+            ref = match.group(1)
+            if _has_mult_token(ref) and MULT_AFTER.match(line[match.end():]):
+                violations.append(
+                    Violation(
+                        file=str(path),
+                        line=lineno,
+                        code="mult_double_glyph",
+                        message="Computed multiplier ref is followed by another times glyph.",
+                        context=line.strip()[:160],
+                        suggestion=(
+                            "Remove the prose times glyph. fmt_multiple/fmt_multiple_range "
+                            "already emits ×; use the `{python} *_mult_str` ref alone."
+                        ),
+                    )
+                )
+
         marker = "$\\times$"
         search_from = 0
         while True:
@@ -222,17 +254,17 @@ def _audit_file(path: Path) -> list[Violation]:
             op_end = op_start + len(marker)
             search_from = op_end
 
-            right = _next_nonspace(line, op_end)
-            if right is None or not _is_right_product_operand(right[1]):
+            # A genuine arithmetic product glues an operand IMMEDIATELY after the
+            # operator (e.g. `a_str`$\times$`b_str`, or $a$$\times$$b$). A compact
+            # multiplier always leaves a space after the operator ("N$\times$
+            # faster", "N$\times$ (clarification)") and is valid prose, not a
+            # product — so a space (or end of line) after $\times$ means skip.
+            after = line[op_end] if op_end < len(line) else ""
+            if after == "" or after.isspace() or not _is_right_product_operand(after):
                 continue
 
             left = _prev_nonspace(line, op_start)
             if left is None:
-                continue
-
-            before = line[op_start - 1] if op_start > 0 else ""
-            after = line[op_end] if op_end < len(line) else ""
-            if before.isspace() and after.isspace():
                 continue
 
             context = line[max(0, op_start - 30) : min(len(line), op_end + 30)].strip()

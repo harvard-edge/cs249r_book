@@ -4,12 +4,12 @@ codemod_fmt.py — paired (cell + prose) rewrites for the typed-fmt migration.
 
 Two strictly separated lanes (PLAN.md §6 WS1, ASSESSMENT.md §0a):
 
-PROVABLE (auto, value-identical) — the multiplier relocation
+RETIRED (pre-Design-B) — the old multiplier relocation lane
     cell:  ``X = fmt(f, ...,  suffix='×')``  →  ``X = fmt_multiple(f, ...)``
     prose: ``…`{python} C.X`…``              →  ``…`{python} C.X`$\\times$…``
-  fmt_multiple formats the *same* magnitude; only the glyph moves from the
-  string into prose. This is Regime 2: assess_equiv proves the visible prose is
-  unchanged, fmt_prose_contract proves the glyph isn't duplicated.
+  This lane is obsolete. Design B makes ``fmt_multiple`` own ``$\\times$`` and
+  requires ``*_mult_str`` export names. The public ``multiple`` command now
+  refuses to run so it cannot reintroduce prose-owned multiplier glyphs.
 
 AMBIGUOUS (never auto-touched) — emitted to an adjudication queue
     * suffix='%'  — fmt_percent needs a 0-1 *ratio*; whether the source value is
@@ -24,12 +24,6 @@ run the gauntlet: assess_equiv (value+visible-prose diff) then
 fmt_prose_contract, then the render checks (MIGRATION.md Phase 3).
 
 Usage::
-
-    # preview the provable multiplier rewrites for one chapter
-    python3 codemod_fmt.py multiple book/quarto/contents/vol1/training/training.qmd
-
-    # apply them (cell + prose), then verify with assess_equiv
-    python3 codemod_fmt.py multiple <qmd> --write
 
     # emit the human-adjudication queue (percent / scale / multi-line)
     python3 codemod_fmt.py queue --root book/quarto/contents --out /tmp/fmt_queue.json
@@ -945,11 +939,9 @@ def scan_file(path: Path, variants: bool = False):
 
     variants=False (default): only the provable, value-identical lane —
       fmt(…suffix='×') -> fmt_multiple (exact glyph). Everything else queued.
-    variants=True: ALSO emit edits for the intended-normalization multiplier
-      forms — fmt(…suffix='x'|'X'|' ×') and fmt_int(…×) — which standardize the
-      glyph to × and relocate it to prose. These change rendered output (x->×,
-      rounding made explicit) and MUST be verified with the transformation-aware
-      gate (run_multiplier_lane --variants), not the byte-identical gate.
+    variants=True: retired with the public ``multiple`` command. Under Design B,
+      multiplier variants should become ``fmt_multiple(...)`` exports named
+      ``*_mult_str``; prose uses the computed ref by itself.
     """
     text = path.read_text(encoding="utf-8", errors="replace")
     mult_edits: list[MultEdit] = []
@@ -1006,11 +998,12 @@ def scan_file(path: Path, variants: bool = False):
                         "fmt_int-multiplier", seg.replace("\n", " ⏎ "),
                         "fmt_int rounds; pick fmt_multiple(round(x), precision=0) if "
                         "integer display is intended, else fmt_multiple(x, precision=N). "
-                        "Then add $\\times$ in prose."))
+                        "Rename the export to *_mult_str and use the computed ref by itself."))
                 else:
                     queue.append(QueueItem(str(path), file_line, var, fname, suffix,
                         "multiline-multiplier", seg.replace("\n", " ⏎ "),
-                        "Convert by hand to fmt_multiple(...) + add $\\times$ in prose."))
+                        "Convert by hand to fmt_multiple(...), rename to *_mult_str, "
+                        "and use the computed ref by itself in prose."))
             elif sfx in {"×", "x", "X"}:
                 # space-padded glyph (' ×') or a LITERAL letter x, or an fmt_int
                 # multiplier. In variants mode these are converted (intended
@@ -1028,7 +1021,8 @@ def scan_file(path: Path, variants: bool = False):
                     queue.append(QueueItem(str(path), file_line, var, fname, suffix,
                         "multiplier-variant", seg.replace("\n", " ⏎ "),
                         f"suffix={suffix!r}: confirm it is a multiplier, then "
-                        "fmt_multiple(...) + $\\times$ in prose (drop the literal x/space)."))
+                        "convert to fmt_multiple(...), rename to *_mult_str, and "
+                        "drop the literal x/space from prose."))
             elif sfx in {g.strip() for g in PERCENT_GLYPHS}:
                 queue.append(QueueItem(str(path), file_line, var, fname, suffix,
                     "percent", seg.replace("\n", " ⏎ "),
@@ -1108,6 +1102,14 @@ def _apply_cell_edits(text: str, edits: list[MultEdit]) -> str:
 
 
 def cmd_multiple(args) -> int:
+    print(
+        "codemod_fmt.py multiple is retired. Design B makes fmt_multiple own "
+        "$\\times$ and uses *_mult_str exports; use "
+        "codemod_design_b_multipliers.py for current migrations.",
+        file=sys.stderr,
+    )
+    return 2
+
     files = [Path(p) for p in args.qmd]
     total_cell = total_prose = 0
     for path in files:
@@ -1163,7 +1165,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    m = sub.add_parser("multiple", help="provable multiplier relocation (cell+prose)")
+    m = sub.add_parser("multiple", help="retired pre-Design-B multiplier relocation")
     m.add_argument("qmd", nargs="+")
     m.add_argument("--write", action="store_true", help="apply edits (default: dry-run)")
     m.set_defaults(func=cmd_multiple)

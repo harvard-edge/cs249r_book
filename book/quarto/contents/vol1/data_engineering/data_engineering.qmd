@@ -129,8 +129,8 @@ Before any of these pipeline stages can be designed well, however, we need to un
 # │          mlsysim.fmt (fmt, fmt_math, check)
 # │ Exports: DataGravity.transfer_seconds_str, DataGravity.transfer_hours_str,
 # │          DataGravity.transfer_days_10g_str, DataGravity.transfer_cost_str,
-# │          DataGravity.tpu_hours_str, DataGravity.network_gbs_str,
-# │          DataGravity.dataset_gb_str, DataGravity.network_gbps_str,
+# │          DataGravity.tpu_hours_str, DataGravity.network_gb_per_s_str,
+# │          DataGravity.dataset_gb_str, DataGravity.network_gbit_per_s_str,
 # │          DataGravity.egress_cost_per_gb_str, DataGravity.tpu_cost_per_hour_str,
 # │          DataGravity.transfer_time_10g_math
 # └─────────────────────────────────────────────────────────────────────────────
@@ -180,9 +180,9 @@ class DataGravity:
     )
     transfer_cost_str = fmt_usd(transfer_cost, precision=0, commas=True)
     tpu_hours_str = fmt_count(equiv_tpu_hours, precision=0, commas=True, label="TPUv4-hour", plural_label="TPUv4-hours")
-    network_gbs_str = fmt_qty(network_bw, GB/second, precision=1, commas=False)
+    network_gb_per_s_str = fmt_qty(network_bw, GB/second, precision=1, commas=False)
     dataset_gb_str = fmt_qty(dataset, GB, precision=0, commas=True)
-    network_gbps_str = fmt_bandwidth(network_bw, unit=Gbps, precision=0, commas=False)
+    network_gbit_per_s_str = fmt_bandwidth(network_bw, unit=Gbps, precision=0, commas=False)
     egress_cost_per_gb_str = fmt_usd(egress_rate, precision=2, commas=False, per="GB")
     tpu_cost_per_hour_str = fmt_usd(tpu_rate, precision=0, commas=False, per="hour")
 ```
@@ -217,8 +217,8 @@ $$ \text{Data Selection Gain} \propto \frac{\text{Information Entropy}}{\text{Da
 # │ How: Calculate required bandwidth for ResNet-50 inference at peak TFLOP/s.
 # │
 # │ Imports: mlsysim.core.constants, mlsysim.book
-# │ Exports: FeedingProblem.req_bw_gbs_str, FeedingProblem.disk_bw_mbs_str,
-# │          FeedingProblem.feeding_tax_pct_str, FeedingProblem.img_per_sec_str
+# │ Exports: FeedingProblem.req_bw_gb_per_s_str, FeedingProblem.disk_bw_mb_per_s_str,
+# │          FeedingProblem.feeding_tax_pct_str, FeedingProblem.img_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, fmt, check, fmt_qty, fmt_rate, fmt_percent
 from mlsysim.core.units import GB, MB, second
@@ -262,17 +262,17 @@ class FeedingProblem:
     check(feeding_tax_pct > 50, f"Feeding tax ({feeding_tax_pct:.1f}%) should be significant for standard disks.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    req_bw_gbs_str = fmt_qty(req_bw, GB/second, precision=1, commas=False)
-    disk_bw_mbs_str = fmt_qty(disk_bw, MB/second, precision=0, commas=False)
+    req_bw_gb_per_s_str = fmt_qty(req_bw, GB/second, precision=1, commas=False)
+    disk_bw_mb_per_s_str = fmt_qty(disk_bw, MB/second, precision=0, commas=False)
     feeding_tax_pct_str = fmt_percent(feeding_tax_pct/100, precision=1, commas=False, style='symbol')
-    img_per_sec_str = fmt_rate(round(img_per_sec), 'img/s', precision=0, commas=True)
+    img_per_s_str = fmt_rate(round(img_per_sec), 'img/s', precision=0, commas=True)
 ```
 
 ### The feeding problem: Flow rate and the "feeding tax" {#sec-data-engineering-feeding-problem}
 
 Data gravity establishes the cost of moving the entire mass; **The Feeding Problem**\index{Feeding Problem!data pipeline throughput} establishes the cost of delivering it. In the Hennessy & Patterson tradition, we analyze this as a **Flow Rate**\index{Flow Rate!data pipeline} problem: the struggle to saturate a high-throughput "Machine" from a low-bandwidth "Data" source.
 
-According to the iron law, the system is only as fast as its slowest term. If a modern accelerator running ResNet-50 can process `{python} FeedingProblem.img_per_sec_str`, but the storage pipeline delivers only `{python} FeedingProblem.disk_bw_mbs_str`, the expensive silicon sits idle. We quantify this as **The Feeding Tax**\index{Feeding Tax!I/O wait cost}: the wall-clock time lost to I/O wait, which directly reduces the system efficiency $(\eta_{\text{hw}})$\index{System Efficiency!feeding tax} term. For a standard cloud volume, the feeding tax can exceed `{python} FeedingProblem.feeding_tax_pct_str`, meaning the GPU spends the majority of its time waiting for bits. This tax transforms the Data Pipeline from a simple storage concern into the primary regulator of the system's Duty Cycle. To saturate a 300 TFLOP/s processor, the pipeline must often sustain `{python} FeedingProblem.req_bw_gbs_str` transfer rates—a requirement that forces the shift from traditional file systems to the specialized storage architectures we examine in @sec-data-engineering-ml-storage-systems-architecture-options-67fa.
+According to the iron law, the system is only as fast as its slowest term. If a modern accelerator running ResNet-50 can process `{python} FeedingProblem.img_per_s_str`, but the storage pipeline delivers only `{python} FeedingProblem.disk_bw_mb_per_s_str`, the expensive silicon sits idle. We quantify this as **The Feeding Tax**\index{Feeding Tax!I/O wait cost}: the wall-clock time lost to I/O wait, which directly reduces the system efficiency $(\eta_{\text{hw}})$\index{System Efficiency!feeding tax} term. For a standard cloud volume, the feeding tax can exceed `{python} FeedingProblem.feeding_tax_pct_str`, meaning the GPU spends the majority of its time waiting for bits. This tax transforms the Data Pipeline from a simple storage concern into the primary regulator of the system's Duty Cycle. To saturate a 300 TFLOP/s processor, the pipeline must often sustain `{python} FeedingProblem.req_bw_gb_per_s_str` transfer rates—a requirement that forces the shift from traditional file systems to the specialized storage architectures we examine in @sec-data-engineering-ml-storage-systems-architecture-options-67fa.
 
 These physical properties also carry an energy cost: as data moves farther from the processor, movement increasingly dominates the budget.
 
@@ -291,8 +291,8 @@ These physical properties also carry an energy cost: as data moves farther from 
 # │ Imports: mlsysim Hardware.Tech.Memory.DRAM.energy_per_access, Hardware.Tech.Op.FlopFp32.energy;
 # │          mlsysim.fmt (fmt, fmt_int, check)
 # │ Exports: EnergyAccessCosts.energy_flop_fp32_str, EnergyAccessCosts.energy_dram_str,
-# │          EnergyAccessCosts.dram_multiplier_str, EnergyAccessCosts.local_ssd_multiplier_str,
-# │          EnergyAccessCosts.network_multiplier_str
+# │          EnergyAccessCosts.dram_mult_str, EnergyAccessCosts.local_ssd_mult_str,
+# │          EnergyAccessCosts.network_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, fmt, fmt_qty, check, fmt_percent, fmt_multiple
 from mlsysim.core.units import pJ, ureg
@@ -326,21 +326,21 @@ class EnergyAccessCosts:
     energy_flop_fp32_str = fmt_qty(energy_flop_fp32, pJ, precision=1, commas=False)
     local_ssd_energy_str = fmt_qty(energy_local_ssd * (32 * bit), pJ, precision=0, commas=True)
     network_energy_str = fmt_qty(energy_network * (32 * bit), pJ, precision=0, commas=True)
-    dram_multiplier_str = fmt_multiple(round(energy_dram_pj / energy_flop_fp32_pj), precision=0, commas=True)
-    local_ssd_multiplier_str = fmt_multiple(energy_local_ssd_pj_per_bit/energy_flop_fp32_pj_per_bit, precision=1, commas=True)
-    network_multiplier_str = fmt_multiple(energy_network_pj_per_bit/energy_flop_fp32_pj_per_bit, precision=1, commas=True)
+    dram_mult_str = fmt_multiple(round(energy_dram_pj / energy_flop_fp32_pj), precision=0, commas=True)
+    local_ssd_mult_str = fmt_multiple(energy_local_ssd_pj_per_bit/energy_flop_fp32_pj_per_bit, precision=1, commas=True)
+    network_mult_str = fmt_multiple(energy_network_pj_per_bit/energy_flop_fp32_pj_per_bit, precision=1, commas=True)
 ```
 
 ::: {#psp-data-engineering-energy-movement-invariant .callout-perspective title="The energy-movement invariant"}
 
 The iron law in @sec-introduction-iron-law-ml-systems-c32a and the memory-wall analysis in @sec-hardware-acceleration-understanding-ai-memory-wall-3ea9 imply a data-engineering invariant: *moving a bit costs anywhere from a hundred to nearly a million times more energy than computing on it*, with the multiplier rising as the data leaves the chip. While @sec-model-compression examines the energy cost inside the processor, we must also consider the cost of the information flow from the external world. The table quantifies just how dramatic these differences are:
 
-| **Operation**                   |                  **Energy (pJ)**                  |                       **Relative Cost**                       |
-|:--------------------------------|:-------------------------------------------------:|:-------------------------------------------------------------:|
-| **32-bit Floating Point MAC**   | `{python} EnergyAccessCosts.energy_flop_fp32_str` |                           1$\times$                           |
-| **DRAM Memory Access (32-bit)** |    `{python} EnergyAccessCosts.energy_dram_str`   |    `{python} EnergyAccessCosts.dram_multiplier_str`$\times$   |
-| **Local SSD Access (32-bit)**   | `{python} EnergyAccessCosts.local_ssd_energy_str` | `{python} EnergyAccessCosts.local_ssd_multiplier_str`$\times$ |
-| **Network Transfer (32-bit)**   |  `{python} EnergyAccessCosts.network_energy_str`  |  `{python} EnergyAccessCosts.network_multiplier_str`$\times$  |
+| **Operation**                   |                  **Energy (pJ)**                  |                **Relative Cost**                |
+|:--------------------------------|:-------------------------------------------------:|:-----------------------------------------------:|
+| **32-bit Floating Point MAC**   | `{python} EnergyAccessCosts.energy_flop_fp32_str` |                    1$\times$                    |
+| **DRAM Memory Access (32-bit)** |    `{python} EnergyAccessCosts.energy_dram_str`   |    `{python} EnergyAccessCosts.dram_mult_str`   |
+| **Local SSD Access (32-bit)**   | `{python} EnergyAccessCosts.local_ssd_energy_str` | `{python} EnergyAccessCosts.local_ssd_mult_str` |
+| **Network Transfer (32-bit)**   |  `{python} EnergyAccessCosts.network_energy_str`  |  `{python} EnergyAccessCosts.network_mult_str`  |
 
 : **Energy Cost of Moving vs. Computing on a Bit**: Approximate energy per operation at each stage of the data-movement hierarchy, with multipliers normalized to a single 32-bit MAC on a per-bit basis. All rows list energy per 32-bit access (SSD and network values scale per-bit transfer costs by 32). Moving a bit costs hundreds of times more energy than computing on it for DRAM-resident data, rising to hundreds of thousands of times more when the data must traverse a data-center network. {#tbl-energy-movement-cost tbl-colwidths="[34,33,33]"}
 
@@ -360,8 +360,8 @@ These principles operate at the level of individual files and batches. At datace
 
 **Physics**:
 
-1.  **Network bandwidth**: A dedicated `{python} DataGravity.network_gbps_str` line = `{python} DataGravity.network_gbs_str`.
-2.  **Transfer time**: `{python} DataGravity.dataset_gb_str` / `{python} DataGravity.network_gbs_str` = `{python} DataGravity.transfer_seconds_str` ≈ `{python} DataGravity.transfer_hours_str`.
+1.  **Network bandwidth**: A dedicated `{python} DataGravity.network_gbit_per_s_str` line = `{python} DataGravity.network_gb_per_s_str`.
+2.  **Transfer time**: `{python} DataGravity.dataset_gb_str` / `{python} DataGravity.network_gb_per_s_str` = `{python} DataGravity.transfer_seconds_str` ≈ `{python} DataGravity.transfer_hours_str`.
 3.  **Cost**: At `{python} DataGravity.egress_cost_per_gb_str` egress, moving 1 PB costs `{python} DataGravity.transfer_cost_str`. (Baseline: AWS data transfer out pricing, 2024.)
 
 **Systems insight**:
@@ -878,7 +878,7 @@ Of these metrics, the false positive rate deserves particular attention for alwa
 # │          FalsePositiveTarget.windows_per_month_str,
 # │          FalsePositiveTarget.fpr_str, FalsePositiveTarget.rejection_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_sci, check, MarkdownStr
+from mlsysim.fmt import fmt, fmt_rate, fmt_sci, fmt_time, check, MarkdownStr
 
 # ┌── LEGO ───────────────────────────────────────────────
 class FalsePositiveTarget:
@@ -907,8 +907,8 @@ class FalsePositiveTarget:
     min_str = MarkdownStr("60")
     hr_str = MarkdownStr("24")
     hr_duty_str = MarkdownStr("24 hours/day")
-    day_str = fmt(days_month, precision=0, commas=False)
-    windows_per_month_str = fmt(windows_per_month, precision=0)
+    day_str = fmt_time(days_month, "day", precision=0, commas=False, style="word")
+    windows_per_month_str = fmt_rate(windows_per_month, "windows/month", precision=0)
     fpr_str = fmt_sci(target_fpr, precision=1)
     rejection_pct_str = fmt_percent(rejection_pct/100, precision=5, commas=False, style='symbol')
 ```
@@ -921,7 +921,7 @@ class FalsePositiveTarget:
 
 - **Duty Cycle**: Always-on (`{python} FalsePositiveTarget.hr_duty_str`).
 - **Window size**: One-second classification windows.
-- **Windows per Month**: `{python} FalsePositiveTarget.sec_str` $\times$ `{python} FalsePositiveTarget.min_str` $\times$ `{python} FalsePositiveTarget.hr_str` $\times$ `{python} FalsePositiveTarget.day_str` = `{python} FalsePositiveTarget.windows_per_month_str` windows.
+- **Windows per Month**: `{python} FalsePositiveTarget.sec_str` $\times$ `{python} FalsePositiveTarget.min_str` $\times$ `{python} FalsePositiveTarget.hr_str` $\times$ `{python} FalsePositiveTarget.day_str` = `{python} FalsePositiveTarget.windows_per_month_str`.
 
 **Required Accuracy**
 
@@ -1037,7 +1037,7 @@ class BudgetAllocation:
 # │          KWSDesignConstraints.kws_memory_limit_design_kb_str,
 # │          KWSDesignConstraints.kws_timeline_months_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_usd, fmt_qty, check, fmt_time
+from mlsysim.fmt import fmt, fmt_rate, fmt_usd, fmt_qty, check, fmt_time
 from mlsysim.core.units import TB
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -1059,7 +1059,7 @@ class KWSDesignConstraints:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     kws_accuracy_target_str = fmt_percent(kws_accuracy_target/100, precision=0, commas=False, style='symbol')
-    kws_false_wake_month_str = fmt(kws_false_wake_month, precision=0, commas=False)
+    kws_false_wake_month_str = fmt_rate(kws_false_wake_month, "false wakes/month", precision=0, commas=False)
     kws_budget_str = fmt_usd(kws_budget, precision=0, commas=False, scale="K")
     kws_memory_limit_design_kb_str = fmt_qty(kws_memory_limit_design, KB, precision=0, commas=False)
     kws_timeline_months_str = fmt_time(kws_timeline_months, "month", precision=0, commas=False, style="word")
@@ -1070,7 +1070,7 @@ class KWSDesignConstraints:
 
 **Scenario**: A KWS system for a smart speaker has these constraints:
 
-- **Target**: `{python} KWSDesignConstraints.kws_accuracy_target_str` accuracy, < `{python} KWSDesignConstraints.kws_false_wake_month_str` false wake per month
+- **Target**: `{python} KWSDesignConstraints.kws_accuracy_target_str` accuracy, < `{python} KWSDesignConstraints.kws_false_wake_month_str`
 - **Budget**: `{python} KWSDesignConstraints.kws_budget_str` total data engineering budget
 - **Memory**: `{python} KWSDesignConstraints.kws_memory_limit_design_kb_str` model size limit (always-on island)
 - **Timeline**: `{python} KWSDesignConstraints.kws_timeline_months_str` to production
@@ -1291,8 +1291,8 @@ class DataEngineeringTimeConstants:
 # │ Exports: LabelingComputeRatio.labeling_budget_str,
 # │          LabelingComputeRatio.train_cost_low_str,
 # │          LabelingComputeRatio.train_cost_high_str,
-# │          LabelingComputeRatio.ratio_low_str,
-# │          LabelingComputeRatio.ratio_high_str
+# │          LabelingComputeRatio.ratio_low_mult_str,
+# │          LabelingComputeRatio.ratio_high_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_usd, check, fmt_multiple, fmt_percent
 from mlsysim.core.units import USD, hour
@@ -1322,15 +1322,15 @@ class LabelingComputeRatio:
     labeling_budget_str = fmt_usd(labeling_budget, precision=0, commas=False, scale="K")
     train_cost_low_str = fmt_usd(train_cost_low, precision=0, commas=False)
     train_cost_high_str = fmt_usd(train_cost_high, precision=0, commas=False)
-    ratio_low_str = fmt_multiple(ratio_low, precision=1, commas=True)
-    ratio_high_str = fmt_multiple(ratio_high, precision=1, commas=True)
+    ratio_low_mult_str = fmt_multiple(ratio_low, precision=1, commas=True)
+    ratio_high_mult_str = fmt_multiple(ratio_high, precision=1, commas=True)
     effort_majority_pct = 80
     effort_minority_pct = 20
     effort_majority_pct_str = fmt_percent(effort_majority_pct/100, precision=0, commas=False, style='symbol')
     effort_minority_pct_str = fmt_percent(effort_minority_pct/100, precision=0, commas=False, style='symbol')
 ```
 
-The contrast matters: weeks for human labeling, hours for GPU training, milliseconds for serving. Labeling is the bottleneck. It often costs hundreds to more than a thousand times more than a single optimized training run: a `{python} LabelingComputeRatio.labeling_budget_str` labeling budget compares with `{python} LabelingComputeRatio.train_cost_low_str`--`{python} LabelingComputeRatio.train_cost_high_str` for one 8× A100 ResNet-50 run, a `{python} LabelingComputeRatio.ratio_low_str`$\times$--`{python} LabelingComputeRatio.ratio_high_str`$\times$ ratio. And within that labeling spend, the effort distribution itself is skewed: `{python} LabelingComputeRatio.effort_majority_pct_str` of the work goes to `{python} LabelingComputeRatio.effort_minority_pct_str` of features—the long tail of edge cases, rare categories, and quality exceptions.
+The contrast matters: weeks for human labeling, hours for GPU training, milliseconds for serving. Labeling is the bottleneck. It often costs hundreds to more than a thousand times more than a single optimized training run: a `{python} LabelingComputeRatio.labeling_budget_str` labeling budget compares with `{python} LabelingComputeRatio.train_cost_low_str`--`{python} LabelingComputeRatio.train_cost_high_str` for one 8$\times$ A100 ResNet-50 run, a `{python} LabelingComputeRatio.ratio_low_mult_str`--`{python} LabelingComputeRatio.ratio_high_mult_str` ratio. And within that labeling spend, the effort distribution itself is skewed: `{python} LabelingComputeRatio.effort_majority_pct_str` of the work goes to `{python} LabelingComputeRatio.effort_minority_pct_str` of features—the long tail of edge cases, rare categories, and quality exceptions.
 
 All cost figures reflect approximate 2024 cloud provider rates and are intended to convey relative magnitudes rather than exact pricing.[^fn-pricing-cost-ratios] The consistent pattern across these numbers is that human labor (labeling, annotation, expert review) dominates hardware and storage costs by one to three orders of magnitude. A team that optimizes its labeling pipeline before scaling compute or storage addresses the largest cost term first.
 
@@ -1350,7 +1350,7 @@ All cost figures reflect approximate 2024 cloud provider rates and are intended 
 # │ Imports: mlsysim.core.constants (Infrastructure.Pricing.Storage.GlacierRetrievalPerGB.rate, dollar), mlsysim.fmt (fmt, check)
 # │ Exports: GlacierRetrievalPricing.retrieval_cost_glacier_str,
 # │          GlacierRetrievalPricing.retrieval_cost_glacier_expedited_str,
-# │          GlacierRetrievalPricing.retrieval_ratio_expedited_standard_str
+# │          GlacierRetrievalPricing.retrieval_ratio_expedited_standard_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_usd, check, fmt_multiple
 from mlsysim.core.units import USD, GB
@@ -1373,10 +1373,10 @@ class GlacierRetrievalPricing:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     retrieval_cost_glacier_str = fmt_usd(retrieval_cost_glacier, precision=2, commas=False, per="GB")
     retrieval_cost_glacier_expedited_str = fmt_usd(retrieval_cost_glacier_expedited, precision=2, commas=False, per="GB")
-    retrieval_ratio_expedited_standard_str = fmt_multiple(retrieval_ratio_expedited_standard, precision=0, commas=False)
+    retrieval_ratio_expedited_standard_mult_str = fmt_multiple(retrieval_ratio_expedited_standard, precision=0, commas=False)
 ```
 
-[^fn-pricing-cost-ratios]: **Pricing Ratios**: The absolute dollar amounts in this chapter will shift with provider pricing, but the ratios between paid tiers are remarkably stable because they reflect physical constraints, not business decisions. S3 Glacier retrieval illustrates the pattern: standard (`{python} GlacierRetrievalPricing.retrieval_cost_glacier_str`, 3--5 hours) and expedited (`{python} GlacierRetrievalPricing.retrieval_cost_glacier_expedited_str`, 1--5 minutes) span a `{python} GlacierRetrievalPricing.retrieval_ratio_expedited_standard_str`$\times$ paid-tier cost range, while bulk retrieval trades a zero retrieval charge for the slowest 5--12 hour latency. The design maps directly to the $D_{\text{vol}}/\text{BW}$ trade-off in the iron law. Engineers who memorize ratios rather than prices make storage decisions that survive the next pricing revision. \index{Cloud Pricing!cost-latency trade-off}
+[^fn-pricing-cost-ratios]: **Pricing Ratios**: The absolute dollar amounts in this chapter will shift with provider pricing, but the ratios between paid tiers are remarkably stable because they reflect physical constraints, not business decisions. S3 Glacier retrieval illustrates the pattern: standard (`{python} GlacierRetrievalPricing.retrieval_cost_glacier_str`, 3--5 hours) and expedited (`{python} GlacierRetrievalPricing.retrieval_cost_glacier_expedited_str`, 1--5 minutes) span a `{python} GlacierRetrievalPricing.retrieval_ratio_expedited_standard_mult_str` paid-tier cost range, while bulk retrieval trades a zero retrieval charge for the slowest 5--12 hour latency. The design maps directly to the $D_{\text{vol}}/\text{BW}$ trade-off in the iron law. Engineers who memorize ratios rather than prices make storage decisions that survive the next pricing revision. \index{Cloud Pricing!cost-latency trade-off}
 
 ::: {#chk-data-engineering-four-pillars-framework .callout-checkpoint title="Four pillars framework"}
 
@@ -2565,14 +2565,14 @@ Production systems must balance cost vs. latency trade-offs when selecting patte
 # │
 # │ Imports: mlsysim.core.constants (KB, GB, TB, MILLION, SEC_PER_HOUR),
 # │          mlsysim.book (fmt, check)
-# │ Exports: RealtimeCost.throughput_gb_s_str, RealtimeCost.hourly_tb_str,
+# │ Exports: RealtimeCost.throughput_gb_per_s_str, RealtimeCost.hourly_tb_str,
 # │          RealtimeCost.stream_cost_str, RealtimeCost.batch_cost_str,
-# │          RealtimeCost.cost_ratio_str, RealtimeCost.events_per_sec_str,
+# │          RealtimeCost.cost_ratio_mult_str, RealtimeCost.events_per_sec_str,
 # │          RealtimeCost.event_size_kb_str, RealtimeCost.stream_cores_str,
 # │          RealtimeCost.stream_hours_str, RealtimeCost.stream_cost_per_hr_str,
 # │          RealtimeCost.batch_core_hours_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt_usd, fmt, fmt_count, fmt_time, fmt_qty, fmt_qty_int, check, fmt_multiple
+from mlsysim.fmt import fmt_int, fmt_usd, fmt, fmt_count, fmt_rate, fmt_time, fmt_qty, fmt_qty_int, check, fmt_multiple
 from mlsysim.core.units import KB, GB, TB, second
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2605,36 +2605,36 @@ class RealtimeCost:
     check(batch_cost_day < stream_cost_day, "Batch reference should be cheaper than always-on streaming.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    throughput_gb_s_str = fmt_qty(throughput, GB/second, precision=0, commas=False)
+    throughput_gb_per_s_str = fmt_qty(throughput, GB/second, precision=0, commas=False)
     hourly_tb_str = fmt_qty_int(hourly_data, TB, commas=False)
     stream_cost_str = fmt_usd(stream_cost_day, precision=0, commas=False, per="day")
     batch_cost_str = fmt_usd(batch_cost_day, precision=0, commas=False, per="day")
-    cost_ratio_str = fmt_multiple(cost_ratio, precision=0, commas=False)
-    events_per_sec_str = fmt_count(events_per_sec, scale='M', commas=False)
+    cost_ratio_mult_str = fmt_multiple(cost_ratio, precision=0, commas=False)
+    events_per_sec_str = fmt_rate(events_per_sec, "events/s", scale="M", precision=0, commas=False)
     event_size_kb_str = fmt_qty(event_size, KB, precision=0, commas=False)
     stream_cores_str = fmt(stream_cores, precision=0, commas=False)
     stream_hours_str = fmt_time(stream_hours, "hour", precision=0, commas=False, style="word", per="day")
     stream_cost_per_hr_str = fmt_usd(stream_cost_per_hr, precision=2, commas=False, per="hr")
     batch_cores_str = fmt(batch_cores, precision=0, commas=False)
     batch_window_min_str = fmt_time(batch_window_min, "minute", precision=0, commas=False, style="word")
-    batch_core_hours_str = fmt(batch_core_hours, precision=0, commas=False)
+    batch_core_hours_str = fmt_count(batch_core_hours, commas=False, label="core-hour")
     batch_window_hr_str = fmt_time(
         1, "hour", precision=0, commas=False, style="word", attributive=True
     )
-    hours_per_day_str = fmt(hours_per_day, precision=0, commas=False)
+    hours_per_day_str = fmt_time(hours_per_day, "hour", precision=0, commas=False, style="word", per="day")
 ```
 
 ::: {#nbk-data-engineering-cost-real-time .callout-notebook title="The cost of real-time"}
 
-**Problem**: A pipeline ingests `{python} RealtimeCost.events_per_sec_str` events/second. Which is cheaper, Batch (hourly) or Stream (sub-second) ingestion?
+**Problem**: A pipeline ingests `{python} RealtimeCost.events_per_sec_str`. Which is cheaper, Batch (hourly) or Stream (sub-second) ingestion?
 
 **Physics**:
 
-1.  **Throughput**: `{python} RealtimeCost.events_per_sec_str` events/sec $\times$ `{python} RealtimeCost.event_size_kb_str`/event = `{python} RealtimeCost.throughput_gb_s_str`.
-2.  **Stream requirements**: To sustain `{python} RealtimeCost.throughput_gb_s_str` with < 100 ms latency, the system needs ~50 primary cores plus ~50 redundant cores, or `{python} RealtimeCost.stream_cores_str` always-on cores total. Cost: `{python} RealtimeCost.stream_cores_str` cores $\times$ `{python} RealtimeCost.stream_hours_str` $\times$ `{python} RealtimeCost.stream_cost_per_hr_str` = `{python} RealtimeCost.stream_cost_str`.
-3.  **Batch requirements**: Process `{python} RealtimeCost.hourly_tb_str` (`{python} RealtimeCost.batch_window_hr_str` window) in `{python} RealtimeCost.batch_window_min_str`. High throughput (sequential I/O) is efficient. The batch design needs `{python} RealtimeCost.batch_cores_str` cores for `{python} RealtimeCost.batch_window_min_str` per clock hour $\times$ `{python} RealtimeCost.hours_per_day_str` = `{python} RealtimeCost.batch_core_hours_str` core-hours/day. Cost: `{python} RealtimeCost.batch_core_hours_str` $\times$ `{python} RealtimeCost.stream_cost_per_hr_str` = `{python} RealtimeCost.batch_cost_str`.
+1.  **Throughput**: `{python} RealtimeCost.events_per_sec_str` $\times$ `{python} RealtimeCost.event_size_kb_str`/event = `{python} RealtimeCost.throughput_gb_per_s_str`.
+2.  **Stream requirements**: To sustain `{python} RealtimeCost.throughput_gb_per_s_str` with < 100 ms latency, the system needs ~50 primary cores plus ~50 redundant cores, or `{python} RealtimeCost.stream_cores_str` always-on cores total. Cost: `{python} RealtimeCost.stream_cores_str` cores $\times$ `{python} RealtimeCost.stream_hours_str` $\times$ `{python} RealtimeCost.stream_cost_per_hr_str` = `{python} RealtimeCost.stream_cost_str`.
+3.  **Batch requirements**: Process `{python} RealtimeCost.hourly_tb_str` (`{python} RealtimeCost.batch_window_hr_str` window) in `{python} RealtimeCost.batch_window_min_str`. High throughput (sequential I/O) is efficient. The batch design needs `{python} RealtimeCost.batch_cores_str` cores for `{python} RealtimeCost.batch_window_min_str` per clock hour $\times$ `{python} RealtimeCost.hours_per_day_str` = `{python} RealtimeCost.batch_core_hours_str`/day. Cost: `{python} RealtimeCost.batch_core_hours_str` $\times$ `{python} RealtimeCost.stream_cost_per_hr_str` = `{python} RealtimeCost.batch_cost_str`.
 
-**Systems insight**: Real-time is ~`{python} RealtimeCost.cost_ratio_str`$\times$ more expensive for the same data volume. This tax is justified only when the value of < 1 s latency exceeds the added cost.
+**Systems insight**: Real-time is ~`{python} RealtimeCost.cost_ratio_mult_str` more expensive for the same data volume. This tax is justified only when the value of < 1 s latency exceeds the added cost.
 
 :::
 
@@ -2901,7 +2901,7 @@ storage_savings_mo = elt_storage_mo - etl_storage_mo
 # │          EtlEltCost.etl_datasets_str, EtlEltCost.etl_tb_each_str,
 # │          EtlEltCost.etl_total_storage_tb_str, EtlEltCost.s3_per_tb_mo_usd_str,
 # │          EtlEltCost.retention_days_str, EtlEltCost.query_cost_per_str,
-# │          EtlEltCost.n_models_str, EtlEltCost.schema_change_ratio_str,
+# │          EtlEltCost.n_models_str, EtlEltCost.schema_change_ratio_mult_str,
 # │          EtlEltCost.etl_spark_monthly_usd_str, EtlEltCost.etl_total_usd_str,
 # │          EtlEltCost.elt_total_usd_str, EtlEltCost.total_savings_str
 # └─────────────────────────────────────────────────────────────────────────────
@@ -2968,7 +2968,7 @@ class EtlEltCost:
     retention_days_str = fmt_time(retention_days, "day", precision=0, commas=False, style="word")
     query_cost_per_str = fmt_usd(query_cost_per, precision=0, commas=False, per="query")
     n_models_str = fmt(n_models, precision=0, commas=False)
-    schema_change_ratio_str = fmt_multiple(schema_change_ratio, precision=0, commas=False)
+    schema_change_ratio_mult_str = fmt_multiple(schema_change_ratio, precision=0, commas=False)
     schema_change_etl_hours_str = fmt_time(schema_change_etl_hours, "hour", precision=0, commas=False, style="word")
     schema_change_elt_minutes_str = fmt_time(schema_change_elt_minutes, "minute", precision=0, commas=False, style="word")
 ```
@@ -2989,7 +2989,7 @@ class EtlEltCost:
     *   Query compute: `{python} EtlEltCost.n_models_str` models $\times$ `{python} EtlEltCost.query_cost_per_str` $\times$ `{python} EtlEltCost.retention_days_str` = `{python} EtlEltCost.elt_query_usd_str`
     *   Schema change cost: Rewrite SQL query (~`{python} EtlEltCost.schema_change_elt_minutes_str`) per change
 
-**Systems insight**: ETL saves `{python} EtlEltCost.savings_str` in storage. After normalizing Spark compute to a monthly cost, ETL totals `{python} EtlEltCost.etl_total_usd_str` (`{python} EtlEltCost.etl_spark_monthly_usd_str` compute + `{python} EtlEltCost.etl_storage_usd_str` storage), while ELT totals `{python} EtlEltCost.elt_total_usd_str` (`{python} EtlEltCost.elt_storage_usd_str` storage + `{python} EtlEltCost.elt_query_usd_str` query compute), for a cloud-cost advantage of `{python} EtlEltCost.total_savings_str` before engineering labor. ETL still costs `{python} EtlEltCost.schema_change_ratio_str`$\times$ more engineering time per schema change. The exact break-even point depends on engineering labor cost and schema-change frequency: stable schemas favor ETL's lower cloud cost, while frequent feature-definition changes favor ELT's faster iteration.
+**Systems insight**: ETL saves `{python} EtlEltCost.savings_str` in storage. After normalizing Spark compute to a monthly cost, ETL totals `{python} EtlEltCost.etl_total_usd_str` (`{python} EtlEltCost.etl_spark_monthly_usd_str` compute + `{python} EtlEltCost.etl_storage_usd_str` storage), while ELT totals `{python} EtlEltCost.elt_total_usd_str` (`{python} EtlEltCost.elt_storage_usd_str` storage + `{python} EtlEltCost.elt_query_usd_str` query compute), for a cloud-cost advantage of `{python} EtlEltCost.total_savings_str` before engineering labor. ETL still costs `{python} EtlEltCost.schema_change_ratio_mult_str` more engineering time per schema change. The exact break-even point depends on engineering labor cost and schema-change frequency: stable schemas favor ETL's lower cloud cost, while frequent feature-definition changes favor ELT's faster iteration.
 
 :::
 
@@ -3305,7 +3305,7 @@ Classification labels\index{Classification Labels!storage requirements} represen
 # │ Exports: SegmentationLabelScale.pixel_labels_m_str,
 # │          SegmentationLabelScale.box_count_str,
 # │          SegmentationLabelScale.box_coords_str,
-# │          SegmentationLabelScale.label_entry_ratio_str
+# │          SegmentationLabelScale.label_entry_ratio_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check
 
@@ -3332,10 +3332,10 @@ class SegmentationLabelScale:
     pixel_labels_m_str = fmt_count(pixel_labels, scale="M", precision=1, commas=False)
     box_count_str = fmt(box_count, precision=0, commas=False)
     box_coords_str = fmt(box_coords, precision=0, commas=False)
-    label_entry_ratio_str = fmt(label_entry_ratio, precision=0, commas=True)
+    label_entry_ratio_mult_str = fmt_multiple(label_entry_ratio, precision=0, commas=True)
 ```
 
-Segmentation maps\index{Semantic Segmentation!pixel-level labels} provide the most comprehensive information by classifying objects at the pixel level, highlighting each object in a distinct color. For our traffic monitoring system, this might mean precisely outlining each vehicle, pedestrian, and road sign. These detailed annotations significantly increase our storage and processing requirements. A segmentation mask for a $1920{\times}1080$ image requires about `{python} SegmentationLabelScale.pixel_labels_m_str` labels (one per pixel), compared to perhaps `{python} SegmentationLabelScale.box_count_str` bounding boxes or a single classification label. If each box stores `{python} SegmentationLabelScale.box_coords_str` coordinates, that is roughly `{python} SegmentationLabelScale.label_entry_ratio_str`$\times$ more scalar label entries than `{python} SegmentationLabelScale.box_count_str` boxes before accounting for per-value encoding, and the hours required per image for manual segmentation make this approach suitable only when pixel-level precision is essential.
+Segmentation maps\index{Semantic Segmentation!pixel-level labels} provide the most comprehensive information by classifying objects at the pixel level, highlighting each object in a distinct color. For our traffic monitoring system, this might mean precisely outlining each vehicle, pedestrian, and road sign. These detailed annotations significantly increase our storage and processing requirements. A segmentation mask for a $1920{\times}1080$ image requires about `{python} SegmentationLabelScale.pixel_labels_m_str` labels (one per pixel), compared to perhaps `{python} SegmentationLabelScale.box_count_str` bounding boxes or a single classification label. If each box stores `{python} SegmentationLabelScale.box_coords_str` coordinates, that is roughly `{python} SegmentationLabelScale.label_entry_ratio_mult_str` more scalar label entries than `{python} SegmentationLabelScale.box_count_str` boxes before accounting for per-value encoding, and the hours required per image for manual segmentation make this approach suitable only when pixel-level precision is essential.
 
 ::: {.column-margin}
 ![](images/svg/vol1_data_engineering_margin_004.svg){width="100%" fig-alt="Vertical count ladder comparing about 2.1 million segmentation-mask labels against 40 scalar bounding-box entries."}
@@ -3738,7 +3738,7 @@ Beyond the functional differences between storage systems, cost and performance 
 # │          KWSStorageEconomics.storage_s3_cost_str,
 # │          KWSStorageEconomics.storage_nvme_low_cost_str,
 # │          KWSStorageEconomics.storage_nvme_high_cost_str,
-# │          KWSStorageEconomics.load_speedup_str
+# │          KWSStorageEconomics.load_speedup_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Systems
 from mlsysim.fmt import fmt, fmt_usd, fmt_qty, check, fmt_multiple
@@ -3779,10 +3779,10 @@ class KWSStorageEconomics:
     storage_s3_cost_str = fmt_usd(storage_s3_cost, precision=1, commas=False, per="month")
     storage_nvme_low_cost_str = fmt_usd(storage_nvme_low_cost, precision=1, commas=False, per="month")
     storage_nvme_high_cost_str = fmt_usd(storage_nvme_high_cost, precision=1, commas=False, per="month")
-    load_speedup_str = fmt_multiple(load_speedup, precision=0, commas=False)
+    load_speedup_mult_str = fmt_multiple(load_speedup, precision=0, commas=False)
 ```
 
-@Tbl-storage-performance reveals why ML systems employ tiered storage architectures. Consider the economics of storing our KWS training dataset (`{python} KWSStorageEconomics.dataset_size_gb_str`): object storage costs `{python} KWSStorageEconomics.storage_s3_cost_str`, enabling affordable long-term retention of raw audio, while maintaining working datasets on NVMe[^fn-nvme-gpu-utilization] for active training costs `{python} KWSStorageEconomics.storage_nvme_low_cost_str`–`{python} KWSStorageEconomics.storage_nvme_high_cost_str` but provides `{python} KWSStorageEconomics.load_speedup_str`$\times$ faster data loading.
+@Tbl-storage-performance reveals why ML systems employ tiered storage architectures. Consider the economics of storing our KWS training dataset (`{python} KWSStorageEconomics.dataset_size_gb_str`): object storage costs `{python} KWSStorageEconomics.storage_s3_cost_str`, enabling affordable long-term retention of raw audio, while maintaining working datasets on NVMe[^fn-nvme-gpu-utilization] for active training costs `{python} KWSStorageEconomics.storage_nvme_low_cost_str`–`{python} KWSStorageEconomics.storage_nvme_high_cost_str` but provides `{python} KWSStorageEconomics.load_speedup_mult_str` faster data loading.
 
 | **Storage Tier**                         | **Cost (\$/TB/month)** | **Sequential Read** **Throughput** | **Random Read** **Latency** | **Typical ML Use Case**                       |
 |:-----------------------------------------|:----------------------:|:----------------------------------:|:---------------------------:|:----------------------------------------------|
@@ -3810,7 +3810,7 @@ class KWSStorageEconomics:
 # │
 # │ Imports: mlsysim.book (fmt, check)
 # │ Exports: StorageLoading.nvme_load_s_str, StorageLoading.obj_load_s_str,
-# │          StorageLoading.load_speedup_str, StorageLoading.nvme_bw_gbs_str
+# │          StorageLoading.load_speedup_mult_str, StorageLoading.nvme_bw_gb_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Systems
 from mlsysim.fmt import fmt, fmt_qty, check, fmt_time, fmt_multiple
@@ -3843,11 +3843,11 @@ class StorageLoading:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     nvme_load_s_str = fmt_time(nvme_load, 'second', precision=1, commas=False)
     obj_load_s_str = fmt_time(obj_load, 'second', precision=0, commas=True)
-    load_speedup_str = fmt_multiple(load_speedup, precision=0, commas=False)
-    nvme_bw_gbs_str = fmt_qty(nvme_bw, GB/second, precision=0, commas=False)
+    load_speedup_mult_str = fmt_multiple(load_speedup, precision=0, commas=False)
+    nvme_bw_gb_per_s_str = fmt_qty(nvme_bw, GB/second, precision=0, commas=False)
 ```
 
-The performance difference directly impacts iteration velocity. Training that loads data at `{python} StorageLoading.nvme_bw_gbs_str` completes dataset loading in `{python} StorageLoading.nvme_load_s_str`, compared to `{python} StorageLoading.obj_load_s_str` at typical object storage speeds. This `{python} StorageLoading.load_speedup_str`$\times$ difference determines whether teams can iterate multiple times daily or must wait hours between experiments.
+The performance difference directly impacts iteration velocity. Training that loads data at `{python} StorageLoading.nvme_bw_gb_per_s_str` completes dataset loading in `{python} StorageLoading.nvme_load_s_str`, compared to `{python} StorageLoading.obj_load_s_str` at typical object storage speeds. This `{python} StorageLoading.load_speedup_mult_str` difference determines whether teams can iterate multiple times daily or must wait hours between experiments.
 
 ::: {.column-margin}
 ![](images/svg/data_engineering_storage_latency_hierarchy.svg){width="100%" fig-alt="Vertical log-scale ladder of storage-access latencies as slate bars, fastest at bottom to slowest at top: L1 0.5 ns, DRAM 100 ns, SSD 100 µs, network 500 µs, internet 100 ms. A red ceiling caps the slowest tier; the span covers about eight orders of magnitude."}
@@ -3901,13 +3901,13 @@ Access pattern alone does not exhaust the storage problem. ML workloads also sto
 # │          GB, BYTES_FP32, BYTES_FP16, BILLION, MILLION),
 # │          mlsysim.book (fmt, check)
 # │ Exports: ModelStorageScale.gpt3_fp32_gb_str,
-# │          ModelStorageScale.gpt3_params_str,
+# │          ModelStorageScale.gpt3_params_b_str,
 # │          ModelStorageScale.gpt3_fp16_gb_str,
-# │          ModelStorageScale.alexnet_params_str,
-# │          ModelStorageScale.model_growth_str
+# │          ModelStorageScale.alexnet_params_m_str,
+# │          ModelStorageScale.model_growth_factor_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
-from mlsysim.fmt import fmt, fmt_qty, check, MarkdownStr
+from mlsysim.fmt import fmt, fmt_multiple, fmt_params, fmt_qty, check, MarkdownStr
 from mlsysim.core.units import Bparam, Mparam, GB
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -3930,14 +3930,14 @@ class ModelStorageScale:
     check(model_growth_factor > 1000, f"AlexNet-to-GPT-3 growth factor unexpectedly low: {model_growth_factor}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    gpt3_params_str = fmt(gpt3_params_b, precision=0, commas=False)
+    gpt3_params_b_str = fmt_params(m_gpt3.parameters, scale="B", precision=0, commas=False)
     gpt3_fp32_gb_str = fmt_qty(gpt3_fp32, GB, precision=0, commas=False)
     gpt3_fp16_gb_str = fmt_qty(gpt3_fp16, GB, precision=0, commas=False)
-    alexnet_params_str = fmt(alexnet_params_m, precision=0, commas=False)
-    model_growth_str = fmt(model_growth_factor, precision=0)
+    alexnet_params_m_str = fmt_params(m_alexnet.parameters, scale="M", precision=0, commas=False)
+    model_growth_factor_mult_str = fmt_multiple(model_growth_factor, precision=0)
 ```
 
-Modern ML models contain millions to trillions of parameters\index{Model Parameters!storage requirements} requiring storage and retrieval patterns fundamentally different from traditional data. GPT-3 [@brown2020language] requires approximately `{python} ModelStorageScale.gpt3_fp32_gb_str` for model weights when stored in FP32 format (`{python} ModelStorageScale.gpt3_params_str` billion parameters times 4 bytes), though practical deployments typically use FP16 (`{python} ModelStorageScale.gpt3_fp16_gb_str`) or quantized formats for reduced storage and faster inference (see @sec-model-compression for quantization techniques). Even at FP16 precision, this exceeds many organizations' entire operational databases. The trajectory reveals accelerating scale: from AlexNet's `{python} ModelStorageScale.alexnet_params_str` million parameters [@krizhevsky2012imagenet] to GPT-3's `{python} ModelStorageScale.gpt3_params_str` billion parameters [@brown2020language], model size grew approximately `{python} ModelStorageScale.model_growth_str`-fold in eight years. Storage systems must handle these dense numerical arrays efficiently for both capacity and access speed. Unlike typical files where sequential organization matters for readability, model weights benefit from block-aligned storage enabling parallel reads across parameter groups. When multiple GPUs need to read model data from shared storage, whether during training initialization or checkpoint loading, storage systems must deliver aggregate bandwidth approaching network interface limits, often 25 Gbps or higher, without introducing bottlenecks that would idle expensive compute resources.
+Modern ML models contain millions to trillions of parameters\index{Model Parameters!storage requirements} requiring storage and retrieval patterns fundamentally different from traditional data. GPT-3 [@brown2020language] requires approximately `{python} ModelStorageScale.gpt3_fp32_gb_str` for model weights when stored in FP32 format (`{python} ModelStorageScale.gpt3_params_b_str` parameters times 4 bytes), though practical deployments typically use FP16 (`{python} ModelStorageScale.gpt3_fp16_gb_str`) or quantized formats for reduced storage and faster inference (see @sec-model-compression for quantization techniques). Even at FP16 precision, this exceeds many organizations' entire operational databases. The trajectory reveals accelerating scale: from AlexNet's `{python} ModelStorageScale.alexnet_params_m_str` parameters [@krizhevsky2012imagenet] to GPT-3's `{python} ModelStorageScale.gpt3_params_b_str` parameters [@brown2020language], model size grew approximately `{python} ModelStorageScale.model_growth_factor_mult_str` in eight years. Storage systems must handle these dense numerical arrays efficiently for both capacity and access speed. Unlike typical files where sequential organization matters for readability, model weights benefit from block-aligned storage enabling parallel reads across parameter groups. When multiple GPUs need to read model data from shared storage, whether during training initialization or checkpoint loading, storage systems must deliver aggregate bandwidth approaching network interface limits, often 25 Gbps or higher, without introducing bottlenecks that would idle expensive compute resources.
 
 The iterative nature of ML development introduces versioning requirements\index{Model Versioning!requirements} qualitatively different from traditional software. Git excels at tracking code changes where files are predominantly text with small incremental modifications, but it fails for large binary files where even small model changes result in entirely new checkpoints. Storing ten versions of a 10 GB model naively would consume 100 GB; ML versioning systems typically keep lightweight metadata pointers in Git or a registry and store artifacts in external content-addressed storage. Identical files can be deduplicated, but changed binary checkpoints are often stored as separate objects unless the backend adds its own delta compression. Tools like DVC (Data Version Control) and MLflow\index{MLflow!model versioning} maintain pointers to model artifacts rather than storing copies, enabling efficient versioning while preserving the ability to reproduce any historical model. A typical ML project generates hundreds of model versions during hyperparameter tuning—one version per training run as engineers explore learning rates, batch sizes, architectures, and regularization strategies. Without systematic versioning capturing training configuration, accuracy metrics, and training data version alongside model weights, reproducing results becomes impossible when yesterday's model performed better than today's but teams cannot identify which configuration produced it. This reproducibility challenge connects directly to the governance requirements addressed by @sec-data-engineering-data-versioning-ml-reproducibility-16d0: regulatory compliance often requires demonstrating exactly which data and process produced specific model predictions.
 
@@ -3961,19 +3961,19 @@ Understanding these quantitative relationships enables informed architectural de
 # │
 # │ Imports: mlsysim.core.constants (KB, GB, flop, GFLOPs, TFLOPs),
 # │          mlsysim.book (fmt, check), mlsysim digital twins
-# │ Exports: StorageBandwidth.max_img_per_sec_str,
-# │          StorageBandwidth.required_bw_gbs_str,
-# │          StorageBandwidth.a100_flops_tflops_str,
-# │          StorageBandwidth.resnet_flops_g_str,
+# │ Exports: StorageBandwidth.max_img_per_s_str,
+# │          StorageBandwidth.required_bw_gb_per_s_str,
+# │          StorageBandwidth.a100_fp16_tflop_per_s_str,
+# │          StorageBandwidth.resnet_fwdbwd_gflop_str,
 # │          StorageBandwidth.image_size_kb_str,
-# │          StorageBandwidth.sata_bw_mbs_str,
-# │          StorageBandwidth.sata_max_img_sec_str,
+# │          StorageBandwidth.sata_bw_mb_per_s_str,
+# │          StorageBandwidth.sata_max_img_per_s_str,
 # │          StorageBandwidth.sata_utilization_pct_str,
-# │          StorageBandwidth.s3_bw_mbs_str,
+# │          StorageBandwidth.s3_bw_mb_per_s_str,
 # │          StorageBandwidth.s3_workers_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware, Models, Systems
-from mlsysim.fmt import fmt_int, fmt, fmt_count, check, fmt_qty, fmt_qty_int, fmt_rate, fmt_percent
+from mlsysim.fmt import fmt_int, fmt, fmt_count, check, fmt_qty, fmt_qty_int, fmt_rate, fmt_percent, fmt_flops
 from mlsysim.core.units import KB, GB, MB, byte, second, flop, GFLOPs, TFLOPs
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -4010,18 +4010,18 @@ class StorageBandwidth:
     check(s3_workers >= 30, f"S3 worker count unexpectedly low: {s3_workers}.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    max_img_per_sec_str = fmt_rate(max_img_per_sec, 'img/s', precision=0)
-    required_bw_gbs_str = fmt_qty(required_bw, GB/second, precision=1, commas=False)
-    a100_flops_tflops_str = fmt_qty_int(h_a100.compute.peak_flops, TFLOP/second, commas=False)
-    resnet_flops_g_str = fmt_qty(m_resnet.inference_flops * 3, GFLOPs, precision=1, commas=False)
+    max_img_per_s_str = fmt_rate(max_img_per_sec, 'img/s', precision=0)
+    required_bw_gb_per_s_str = fmt_qty(required_bw, GB/second, precision=1, commas=False)
+    a100_fp16_tflop_per_s_str = fmt_qty_int(h_a100.compute.peak_flops, TFLOP/second, commas=False)
+    resnet_fwdbwd_gflop_str = fmt_flops(m_resnet.inference_flops * 3, unit=GFLOPs, precision=1, commas=False)
     image_size_kb_str = fmt_qty(image_size, KB, precision=0, commas=False)
-    sata_bw_mbs_str = fmt_qty(sata_bw, MB/second, precision=0, commas=False)
-    sata_max_img_sec_str = fmt_rate(sata_max_img_sec, 'img/s', precision=0)
+    sata_bw_mb_per_s_str = fmt_qty(sata_bw, MB/second, precision=0, commas=False)
+    sata_max_img_per_s_str = fmt_rate(sata_max_img_sec, 'img/s', precision=0)
     sata_utilization_pct_str = fmt_percent(sata_utilization_pct/100, precision=0, commas=False, style='symbol')
-    s3_bw_mbs_str = fmt_qty(s3_bw, MB/second, precision=0, commas=False)
+    s3_bw_mb_per_s_str = fmt_qty(s3_bw, MB/second, precision=0, commas=False)
     s3_workers_str = fmt_count(s3_workers, commas=False, label="concurrent worker thread")
-    nvme_bw_low_gbs_str = fmt_qty(nvme_bw_low, GB/second, precision=0, commas=False)
-    nvme_bw_high_gbs_str = fmt_qty(nvme_bw_high, GB/second, precision=0, commas=False)
+    nvme_bw_low_gb_per_s_str = fmt_qty(nvme_bw_low, GB/second, precision=0, commas=False)
+    nvme_bw_high_gb_per_s_str = fmt_qty(nvme_bw_high, GB/second, precision=0, commas=False)
 ```
 
 Designing for high-throughput training starts by matching storage throughput to accelerator demand.
@@ -4032,28 +4032,28 @@ Designing for high-throughput training starts by matching storage throughput to 
 
 *The compute term (throughput ceiling)*
 
-*   **Hardware peak**: NVIDIA A100 = `{python} StorageBandwidth.a100_flops_tflops_str` (FP16 Tensor Core, dense operations).
-*   **Model cost**: ResNet-50 requires approximately four GFLOPs for the forward pass per image; including the backward pass, total is approximately `{python} StorageBandwidth.resnet_flops_g_str` per training step.
-*   **Maximum theoretical throughput**: `{python} StorageBandwidth.max_img_per_sec_str` (A100 peak FP16 throughput divided by ResNet-50 forward-plus-backward FLOPs per image).
+*   **Hardware peak**: NVIDIA A100 = `{python} StorageBandwidth.a100_fp16_tflop_per_s_str` (FP16 Tensor Core, dense operations).
+*   **Model cost**: ResNet-50 requires approximately four GFLOPs for the forward pass per image; including the backward pass, total is approximately `{python} StorageBandwidth.resnet_fwdbwd_gflop_str` per training step.
+*   **Maximum theoretical throughput**: `{python} StorageBandwidth.max_img_per_s_str` (A100 peak FP16 throughput divided by ResNet-50 forward-plus-backward FLOPs per image).
 
 *The data term (bandwidth requirement)*
 
 *   **Image size**: `{python} StorageBandwidth.image_size_kb_str` (JPEG compressed).
 *   **Required bandwidth**:
-    `{python} StorageBandwidth.max_img_per_sec_str` $\times$ `{python} StorageBandwidth.image_size_kb_str` per image ≈ `{python} StorageBandwidth.required_bw_gbs_str`
+    `{python} StorageBandwidth.max_img_per_s_str` $\times$ `{python} StorageBandwidth.image_size_kb_str` per image ≈ `{python} StorageBandwidth.required_bw_gb_per_s_str`
 
 *Storage options:*
-To saturate a single A100, storage must deliver `{python} StorageBandwidth.required_bw_gbs_str`.
+To saturate a single A100, storage must deliver `{python} StorageBandwidth.required_bw_gb_per_s_str`.
 
-*   **S3 Standard**: ~`{python} StorageBandwidth.s3_bw_mbs_str` per thread. The pipeline needs `{python} StorageBandwidth.s3_workers_str`.
-*   **SATA SSD**: ~`{python} StorageBandwidth.sata_bw_mbs_str` sequential. Totally insufficient (bottleneck).
-*   **NVMe SSD**\index{NVMe SSD!data pipeline}: approximately `{python} StorageBandwidth.nvme_bw_low_gbs_str`–`{python} StorageBandwidth.nvme_bw_high_gbs_str`. Required.
+*   **S3 Standard**: ~`{python} StorageBandwidth.s3_bw_mb_per_s_str` per thread. The pipeline needs `{python} StorageBandwidth.s3_workers_str`.
+*   **SATA SSD**: ~`{python} StorageBandwidth.sata_bw_mb_per_s_str` sequential. Totally insufficient (bottleneck).
+*   **NVMe SSD**\index{NVMe SSD!data pipeline}: approximately `{python} StorageBandwidth.nvme_bw_low_gb_per_s_str`–`{python} StorageBandwidth.nvme_bw_high_gb_per_s_str`. Required.
 
-**Systems insight**: With SATA SSDs, maximum throughput is capped at `{python} StorageBandwidth.sata_bw_mbs_str` / `{python} StorageBandwidth.image_size_kb_str` per image ≈ `{python} StorageBandwidth.sata_max_img_sec_str`. The \$15,000 GPU will run at `{python} StorageBandwidth.sata_utilization_pct_str` utilization (`{python} StorageBandwidth.sata_max_img_sec_str` / `{python} StorageBandwidth.max_img_per_sec_str`). Storage physics dictates training speed.
+**Systems insight**: With SATA SSDs, maximum throughput is capped at `{python} StorageBandwidth.sata_bw_mb_per_s_str` / `{python} StorageBandwidth.image_size_kb_str` per image ≈ `{python} StorageBandwidth.sata_max_img_per_s_str`. The \$15,000 GPU will run at `{python} StorageBandwidth.sata_utilization_pct_str` utilization (`{python} StorageBandwidth.sata_max_img_per_s_str` / `{python} StorageBandwidth.max_img_per_s_str`). Storage physics dictates training speed.
 
 :::
 
-The `{python} StorageBandwidth.sata_bw_mbs_str` figure represents SATA III sequential read throughput (the interface maximum is 600 MB/s). Real-world random read performance with small files can be significantly lower.
+The `{python} StorageBandwidth.sata_bw_mb_per_s_str` figure represents SATA III sequential read throughput (the interface maximum is 600 MB/s). Real-world random read performance with small files can be significantly lower.
 
 This calculation illustrates the general principle governing data pipelines: training throughput is bounded by the lower of compute capacity and the data supply rate. The bottleneck relation in @eq-training-throughput captures this limit, with the data supply rate defined in @eq-data-supply.
 $$\text{Training Throughput} = \min(\text{Compute Capacity}, \text{Data Supply Rate})$$ {#eq-training-throughput}\index{Throughput!training, compute vs. data}
@@ -4078,7 +4078,7 @@ File format selection dramatically impacts the data term $\left(\frac{D_{\text{v
 # │ Imports: mlsysim.book (fmt, check)
 # │ Exports: FormatEfficiency.eta_csv_str, FormatEfficiency.eta_parquet_str,
 # │          FormatEfficiency.waste_pct_str,
-# │          FormatEfficiency.throughput_ratio_str,
+# │          FormatEfficiency.throughput_ratio_mult_str,
 # │          FormatEfficiency.needed_cols_str, FormatEfficiency.total_cols_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check
@@ -4105,7 +4105,7 @@ class FormatEfficiency:
     eta_csv_str = fmt(eta_csv, precision=1, commas=False)
     eta_parquet_str = fmt(eta_parquet, precision=0, commas=False)
     waste_pct_str = fmt_percent(waste_pct/100, precision=0, commas=False, style='symbol')
-    throughput_ratio_str = fmt_multiple(throughput_ratio, precision=0, commas=False)
+    throughput_ratio_mult_str = fmt_multiple(throughput_ratio, precision=0, commas=False)
     needed_cols_str = fmt(needed_cols, precision=0, commas=False)
     total_cols_str = fmt(total_cols, precision=0, commas=False)
 ```
@@ -4122,9 +4122,9 @@ $$ \text{Effective Bandwidth} = \text{Physical Bandwidth} \times \eta_{\text{for
     - **CSV outcome**: The scan wastes `{python} FormatEfficiency.waste_pct_str` of disk bandwidth.
 - **Column-Oriented (Parquet)**: Reads only the `{python} FormatEfficiency.needed_cols_str` columns needed.
     - $\eta_{\text{format}}$ ≈ `{python} FormatEfficiency.eta_parquet_str` (ignoring metadata overhead).
-    - **Parquet outcome**: The pipeline gets `{python} FormatEfficiency.throughput_ratio_str`$\times$ higher effective throughput.
+    - **Parquet outcome**: The pipeline gets `{python} FormatEfficiency.throughput_ratio_mult_str` higher effective throughput.
 
-**Systems insight**: Switching from CSV to Parquet is not just a file change; it is mathematically equivalent to buying a `{python} FormatEfficiency.throughput_ratio_str`$\times$ faster hard drive. @Tbl-serialization-cost quantifies the serialization overhead of different formats. For a deeper treatment of row vs. columnar storage layouts and the algebra of data operations (selection, projection, join), see @sec-appdx-data-foundations-row-vs-columnar-formats-bca2.
+**Systems insight**: Switching from CSV to Parquet is not just a file change; it is mathematically equivalent to buying a `{python} FormatEfficiency.throughput_ratio_mult_str` faster hard drive. @Tbl-serialization-cost quantifies the serialization overhead of different formats. For a deeper treatment of row vs. columnar storage layouts and the algebra of data operations (selection, projection, join), see @sec-appdx-data-foundations-row-vs-columnar-formats-bca2.
 
 :::
 
@@ -4145,13 +4145,13 @@ Columnar storage formats\index{Parquet!columnar format}\index{ORC!columnar forma
 # │ How: Calculate total decompression latency for a 100 GB dataset.
 # │
 # │ Imports: mlsysim.book (fmt, check), mlsysim.core.constants (GB, MB)
-# │ Exports: CompressionTradeoff.decompress_speedup_str,
+# │ Exports: CompressionTradeoff.decompress_speedup_mult_str,
 # │          CompressionTradeoff.gzip_min_str,
 # │          CompressionTradeoff.snappy_min_str,
 # │          CompressionTradeoff.time_diff_min_str,
 # │          CompressionTradeoff.total_diff_hours_str,
-# │          CompressionTradeoff.snappy_decompress_mbs_str,
-# │          CompressionTradeoff.gzip_decompress_mbs_str,
+# │          CompressionTradeoff.snappy_decompress_mb_per_s_str,
+# │          CompressionTradeoff.gzip_decompress_mb_per_s_str,
 # │          CompressionTradeoff.dataset_gb_str,
 # │          CompressionTradeoff.n_epochs_str
 # └─────────────────────────────────────────────────────────────────────────────
@@ -4183,18 +4183,18 @@ class CompressionTradeoff:
     check(total_diff_hours > 5, f"Epoch-level decompression savings should compound to hours, got {total_diff_hours:.1f}h.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    decompress_speedup_str = fmt_multiple(decompress_speedup, precision=1, commas=False)
+    decompress_speedup_mult_str = fmt_multiple(decompress_speedup, precision=1, commas=False)
     gzip_min_str = fmt_time(gzip_decompress_min, "minute", precision=1, commas=False, style="word")
     snappy_min_str = fmt_time(snappy_decompress_min, "minute", precision=1, commas=False, style="word")
     time_diff_min_str = fmt_time(time_diff_min, "minute", precision=1, commas=False, style="word")
     total_diff_hours_str = fmt_time(round(total_diff_hours), "hour", precision=0, commas=False, style="word")
-    snappy_decompress_mbs_str = fmt_qty(snappy_decompress, MB/second, precision=0, commas=False)
-    gzip_decompress_mbs_str = fmt_qty(gzip_decompress, MB/second, precision=0, commas=False)
+    snappy_decompress_mb_per_s_str = fmt_qty(snappy_decompress, MB/second, precision=0, commas=False)
+    gzip_decompress_mb_per_s_str = fmt_qty(gzip_decompress, MB/second, precision=0, commas=False)
     compress_dataset_gb_str = fmt_qty(dataset, GB, precision=0, commas=False)
     n_epochs_str = fmt_count(n_epochs, commas=False, label="epoch", plural_label="epochs")
 ```
 
-Compression algorithm\index{Compression!algorithm selection} selection involves trade-offs between compression ratio and decompression speed. While gzip achieves higher compression ratios of six to eight times, Snappy\index{Snappy!decompression speed} achieves only two to three times compression but decompresses at `{python} CompressionTradeoff.snappy_decompress_mbs_str`, roughly `{python} CompressionTradeoff.decompress_speedup_str`$\times$ faster than gzip's `{python} CompressionTradeoff.gzip_decompress_mbs_str`. For ML training where throughput matters more than storage costs, Snappy's speed advantage often outweighs gzip's space savings. Training on a `{python} CompressionTradeoff.compress_dataset_gb_str` dataset compressed with gzip requires `{python} CompressionTradeoff.gzip_min_str` of decompression time, while Snappy requires only `{python} CompressionTradeoff.snappy_min_str`. When training iterates over data for `{python} CompressionTradeoff.n_epochs_str`, this `{python} CompressionTradeoff.time_diff_min_str` difference per epoch compounds to `{python} CompressionTradeoff.total_diff_hours_str` total, potentially the difference between running experiments overnight vs. waiting multiple days for results. The choice cascades through the system: faster decompression enables higher input throughput, reduced buffering requirements (less decompressed data needs staging), and better GPU utilization (less time idle waiting for data).
+Compression algorithm\index{Compression!algorithm selection} selection involves trade-offs between compression ratio and decompression speed. While gzip achieves higher compression ratios of six to eight times, Snappy\index{Snappy!decompression speed} achieves only two to three times compression but decompresses at `{python} CompressionTradeoff.snappy_decompress_mb_per_s_str`, roughly `{python} CompressionTradeoff.decompress_speedup_mult_str` faster than gzip's `{python} CompressionTradeoff.gzip_decompress_mb_per_s_str`. For ML training where throughput matters more than storage costs, Snappy's speed advantage often outweighs gzip's space savings. Training on a `{python} CompressionTradeoff.compress_dataset_gb_str` dataset compressed with gzip requires `{python} CompressionTradeoff.gzip_min_str` of decompression time, while Snappy requires only `{python} CompressionTradeoff.snappy_min_str`. When training iterates over data for `{python} CompressionTradeoff.n_epochs_str`, this `{python} CompressionTradeoff.time_diff_min_str` difference per epoch compounds to `{python} CompressionTradeoff.total_diff_hours_str` total, potentially the difference between running experiments overnight vs. waiting multiple days for results. The choice cascades through the system: faster decompression enables higher input throughput, reduced buffering requirements (less decompressed data needs staging), and better GPU utilization (less time idle waiting for data).
 
 Storage performance optimization extends beyond format and compression to data layout strategies. Data partitioning\index{Data!partitioning, query optimization} based on frequently used query parameters dramatically improves retrieval efficiency. A recommendation system processing user interactions might partition data by date and user demographic attributes, enabling training on recent data subsets or specific user segments without scanning the entire dataset. Partitioning strategies interact with distributed training patterns: range partitioning by user ID enables data parallel training where each worker processes a consistent user subset, while random partitioning ensures workers see diverse data distributions. The partitioning granularity matters: too few partitions limit parallelism, while too many partitions increase metadata overhead and reduce efficiency of sequential reads within partitions.
 
@@ -4223,10 +4223,10 @@ During development, flexibility matters more than raw performance. The key chall
 # │      image-to-feature sizes; multiply RPS by feature reads per request.
 # │
 # │ Imports: mlsysim.core.constants (KB, GB), mlsysim.book (fmt, check)
-# │ Exports: LifecycleStorageRequirements.train_img_per_sec_str,
+# │ Exports: LifecycleStorageRequirements.train_img_per_s_str,
 # │          LifecycleStorageRequirements.image_size_kb_str,
-# │          LifecycleStorageRequirements.training_bw_gbs_str,
-# │          LifecycleStorageRequirements.storage_reduction_str,
+# │          LifecycleStorageRequirements.training_bw_gb_per_s_str,
+# │          LifecycleStorageRequirements.storage_reduction_mult_str,
 # │          LifecycleStorageRequirements.feature_vector_kb_str,
 # │          LifecycleStorageRequirements.serving_rps_str,
 # │          LifecycleStorageRequirements.feature_reads_per_request_str,
@@ -4258,19 +4258,19 @@ class LifecycleStorageRequirements:
     check(random_reads_per_sec == 100_000, f"Serving read fanout should be 100K/s, got {random_reads_per_sec}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    train_img_per_sec_str = fmt_rate(train_img_per_sec, 'img/s', precision=0, commas=True)
+    train_img_per_s_str = fmt_rate(train_img_per_sec, 'img/s', precision=0, commas=True)
     image_size_kb_str = fmt_qty(image_size, KB, precision=0, commas=False)
-    training_bw_gbs_str = fmt_qty(training_bw, GB/second, precision=0, commas=False)
-    storage_reduction_str = fmt_multiple(storage_reduction, precision=0, commas=False)
+    training_bw_gb_per_s_str = fmt_qty(training_bw, GB/second, precision=0, commas=False)
+    storage_reduction_mult_str = fmt_multiple(storage_reduction, precision=0, commas=False)
     feature_vector_kb_str = fmt_qty(feature_vector, KB, precision=0, commas=False)
-    serving_rps_str = fmt(serving_rps, precision=0, commas=True)
-    feature_reads_per_request_str = fmt(feature_reads_per_request, precision=0, commas=False)
-    random_reads_per_sec_str = fmt(random_reads_per_sec, precision=0, commas=True)
+    serving_rps_str = fmt_rate(serving_rps, "req/s", precision=0, commas=True)
+    feature_reads_per_request_str = fmt_rate(feature_reads_per_request, "feature reads/request", precision=0, commas=False)
+    random_reads_per_sec_str = fmt_rate(random_reads_per_sec, "IOPS", precision=0, commas=True)
 ```
 
-Training phase requirements shift dramatically toward throughput. Modern deep learning processes massive datasets repeatedly across dozens or hundreds of epochs, making I/O efficiency critical. Training ResNet-50 on ImageNet across eight GPUs at `{python} LifecycleStorageRequirements.train_img_per_sec_str` would require roughly `{python} LifecycleStorageRequirements.training_bw_gbs_str` for `{python} LifecycleStorageRequirements.image_size_kb_str` compressed images, and substantially more if decoded FP32 tensors are staged. Storage unable to sustain this throughput idles GPUs, directly increasing infrastructure costs. The feature computation placement trade-off (@sec-data-engineering-feature-computation-placement-a998) is especially acute here: precomputing features achieves `{python} LifecycleStorageRequirements.storage_reduction_str`$\times$ storage reduction (`{python} LifecycleStorageRequirements.image_size_kb_str` to `{python} LifecycleStorageRequirements.feature_vector_kb_str` vectors) but introduces staleness risk when extraction logic changes.
+Training phase requirements shift dramatically toward throughput. Modern deep learning processes massive datasets repeatedly across dozens or hundreds of epochs, making I/O efficiency critical. Training ResNet-50 on ImageNet across eight GPUs at `{python} LifecycleStorageRequirements.train_img_per_s_str` would require roughly `{python} LifecycleStorageRequirements.training_bw_gb_per_s_str` for `{python} LifecycleStorageRequirements.image_size_kb_str` compressed images, and substantially more if decoded FP32 tensors are staged. Storage unable to sustain this throughput idles GPUs, directly increasing infrastructure costs. The feature computation placement trade-off (@sec-data-engineering-feature-computation-placement-a998) is especially acute here: precomputing features achieves `{python} LifecycleStorageRequirements.storage_reduction_mult_str` storage reduction (`{python} LifecycleStorageRequirements.image_size_kb_str` to `{python} LifecycleStorageRequirements.feature_vector_kb_str` vectors) but introduces staleness risk when extraction logic changes.
 
-Deployment and serving requirements prioritize low-latency random access.\index{Inference!real-time, storage requirements} A recommendation system serving `{python} LifecycleStorageRequirements.serving_rps_str` requests per second with 10 ms latency budgets and `{python} LifecycleStorageRequirements.feature_reads_per_request_str` feature reads per request requires `{python} LifecycleStorageRequirements.random_reads_per_sec_str` random reads per second, achievable only through in-memory databases like Redis\index{In-memory Database!feature serving}\index{In-memory Database!ML serving} or aggressive caching. Edge deployment\index{Edge Deployment!storage} adds further constraints: limited device storage, intermittent connectivity, and the need for model updates without disrupting inference, typically addressed through tiered storage\index{Tiered Storage!edge deployment} where models cache locally while reference data pulls from the cloud. Model versioning\index{Model Versioning!deployment patterns} must support smooth transitions between versions, rapid rollback, and serving multiple versions simultaneously for A/B testing, operational patterns examined in @sec-ml-operations.
+Deployment and serving requirements prioritize low-latency random access.\index{Inference!real-time, storage requirements} A recommendation system serving `{python} LifecycleStorageRequirements.serving_rps_str` with 10 ms latency budgets and `{python} LifecycleStorageRequirements.feature_reads_per_request_str` requires `{python} LifecycleStorageRequirements.random_reads_per_sec_str`, achievable only through in-memory databases like Redis\index{In-memory Database!feature serving}\index{In-memory Database!ML serving} or aggressive caching. Edge deployment\index{Edge Deployment!storage} adds further constraints: limited device storage, intermittent connectivity, and the need for model updates without disrupting inference, typically addressed through tiered storage\index{Tiered Storage!edge deployment} where models cache locally while reference data pulls from the cloud. Model versioning\index{Model Versioning!deployment patterns} must support smooth transitions between versions, rapid rollback, and serving multiple versions simultaneously for A/B testing, operational patterns examined in @sec-ml-operations.
 
 ### Data versioning for ML reproducibility {#sec-data-engineering-data-versioning-ml-reproducibility-16d0}
 
@@ -4721,8 +4721,8 @@ The technical architecture of data systems demonstrates how engineering decision
 # │
 # │ Imports: mlsysim.core.constants (Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate, MILLION,
 # │          dollar, hour), mlsysim.book (fmt, check)
-# │ Exports: DataEngineeringSummaryRecap.ratio_low_str,
-# │          DataEngineeringSummaryRecap.ratio_high_str,
+# │ Exports: DataEngineeringSummaryRecap.ratio_low_mult_str,
+# │          DataEngineeringSummaryRecap.ratio_high_mult_str,
 # │          DataEngineeringSummaryRecap.kws_dataset_size_m_round_str,
 # │          DataEngineeringSummaryRecap.kws_dataset_size_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
@@ -4763,8 +4763,8 @@ class DataEngineeringSummaryRecap:
     check(kws_total_examples > 20 * MILLION, f"KWS corpus unexpectedly small: {kws_total_examples:.0f}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    ratio_low_str = fmt_multiple(round(ratio_low), precision=0, commas=True)
-    ratio_high_str = fmt_multiple(round(ratio_high), precision=0, commas=True)
+    ratio_low_mult_str = fmt_multiple(round(ratio_low), precision=0, commas=True)
+    ratio_high_mult_str = fmt_multiple(round(ratio_high), precision=0, commas=True)
     kws_dataset_size_m_round_str = fmt_int(round(kws_dataset_size_m))
     kws_dataset_size_gb_str = fmt_qty(kws_dataset_size, GB, precision=0, commas=False)
 ```
@@ -4782,7 +4782,7 @@ class DataEngineeringSummaryRecap:
 # │ How: Recompute load times for the rounded 736 GB KWS corpus.
 # │
 # │ Imports: mlsysim.core.constants (MILLION, GB, byte), mlsysim.fmt (fmt, check)
-# │ Exports: StorageLoadingRecap.load_speedup_str, StorageLoadingRecap.nvme_bw_gbs_str
+# │ Exports: StorageLoadingRecap.load_speedup_mult_str, StorageLoadingRecap.nvme_bw_gb_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Systems
 from mlsysim.fmt import fmt, fmt_qty, check, fmt_multiple
@@ -4812,8 +4812,8 @@ class StorageLoadingRecap:
     check(abs(load_speedup - 50) < 1e-9, f"Expected 50x object-to-NVMe load speedup, got {load_speedup:.1f}x.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    load_speedup_str = fmt_multiple(load_speedup, precision=0, commas=False)
-    nvme_bw_gbs_str = fmt_qty(nvme_bw, GB/second, precision=0, commas=False)
+    load_speedup_mult_str = fmt_multiple(load_speedup, precision=0, commas=False)
+    nvme_bw_gb_per_s_str = fmt_qty(nvme_bw, GB/second, precision=0, commas=False)
 ```
 
 ::: {.callout-takeaways title="Data is the source code"}
@@ -4822,8 +4822,8 @@ class StorageLoadingRecap:
 * **Data is code: version it, test it, review it**: The data as code invariant established in Part I defines the engineering mindset: the dataset is the source code of an ML system. Apply the same rigor: version control, unit tests (validation), and code review (data review).
 * **Training-serving consistency is nonnegotiable**: Any transformation applied during training must be applied identically during serving. This is a mathematical requirement, not a best practice.
 * **Pipeline architecture choices have large cost implications**: Real-time streaming increases operational cost and complexity relative to batch, while ETL reduces storage footprint at the expense of higher engineering overhead during schema changes. Select ingestion patterns based on the value of latency, not the appeal of real-time.
-* **Labeling costs dominate and require substantial resource allocation**: Labeling can cost hundreds to more than a thousand times one optimized training run; in the reference calculation above, the ratio is `{python} DataEngineeringSummaryRecap.ratio_low_str`$\times$--`{python} DataEngineeringSummaryRecap.ratio_high_str`$\times$. Labeling is the serial bottleneck that parallelization cannot solve.
-* **Storage hierarchy determines iteration speed**: The `{python} StorageLoadingRecap.load_speedup_str`$\times$ throughput gap between local NVMe (`{python} StorageLoadingRecap.nvme_bw_gbs_str`) and cloud object storage (100 MB/s) determines whether iterations occur daily or weekly.
+* **Labeling costs dominate and require substantial resource allocation**: Labeling can cost hundreds to more than a thousand times one optimized training run; in the reference calculation above, the ratio is `{python} DataEngineeringSummaryRecap.ratio_low_mult_str`--`{python} DataEngineeringSummaryRecap.ratio_high_mult_str`. Labeling is the serial bottleneck that parallelization cannot solve.
+* **Storage hierarchy determines iteration speed**: The `{python} StorageLoadingRecap.load_speedup_mult_str` throughput gap between local NVMe (`{python} StorageLoadingRecap.nvme_bw_gb_per_s_str`) and cloud object storage (100 MB/s) determines whether iterations occur daily or weekly.
 * **Data debt compounds and requires continuous remediation**: Documentation, schema, quality, and freshness debt accumulate with compound interest. Allocate sustained engineering capacity to prevent remediation from overwhelming new feature work.
 * **The degradation equation becomes actionable through drift detection**: The divergence term $\mathcal{D}(P_t \lVert P_0)$ from the Introduction is exactly what PSI and KL divergence measure. Data engineering operationalizes this theoretical equation into monitoring infrastructure that catches silent model degradation before users are affected.
 

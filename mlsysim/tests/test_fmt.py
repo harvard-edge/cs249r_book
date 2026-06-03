@@ -525,18 +525,18 @@ class TestFmtPp:
 
 
 class TestFmtMultiple:
-    def test_number_only_no_glyph(self):
-        assert fmt_multiple(3.2) == "3.2"
-        assert fmt_multiple(10, precision=0) == "10"
+    def test_owns_times_glyph(self):
+        assert fmt_multiple(3.2) == "3.2×"
+        assert fmt_multiple(10, precision=0) == "10×"
 
     def test_inherits_fmt_precision_guard(self):
         # An integer-like factor at precision=1 would render "2.0" — the
         # shared fmt() guard rejects that; explicit precision=1 still errors.
         with pytest.raises(ValueError, match="spurious trailing zeros"):
             fmt_multiple(2.0, precision=1)
-        assert fmt_multiple(2.0, precision=0) == "2"
-        assert fmt_multiple(2) == "2"
-        assert fmt_multiple(2.0) == "2"
+        assert fmt_multiple(2.0, precision=0) == "2×"
+        assert fmt_multiple(2) == "2×"
+        assert fmt_multiple(2.0) == "2×"
 
     def test_rejects_negative_factor(self):
         with pytest.raises(ValueError, match="non-negative factor"):
@@ -785,10 +785,10 @@ class TestTypedRanges:
         with pytest.raises(ValueError, match="0-1 ratio"):
             fmt_percent_range(84.6, 88, precision=1)
 
-    def test_multiple_range_is_bare_and_checked(self):
+    def test_multiple_range_owns_times_glyph_and_is_checked(self):
         assert (
             fmt_multiple_range(3, 7.8, precision=(0, 1), commas=False)
-            == "3\u20137.8"
+            == "3\u20137.8×"
         )
         with pytest.raises(ValueError, match="non-negative"):
             fmt_multiple_range(-1, 2)
@@ -999,6 +999,27 @@ class TestDomainFormatters:
 
         assert fmt_ops_rate(2 * TOPS, precision=0, commas=False) == "2 TOPS"
         assert fmt_ops_rate(0.002 * TOPS, precision=0, commas=False) == "2 GOPS"
+
+    def test_fmt_rate_allows_iops(self):
+        assert fmt_rate(150, "IOPS", precision=0, commas=False) == "150 IOPS"
+        assert fmt_rate(6_000, "IOPS", scale="K", precision=0, commas=False) == "6K IOPS"
+
+    def test_fmt_rate_allows_macs_per_cycle(self):
+        assert fmt_rate(16_384, "MACs/cycle", precision=0, commas=True) == "16,384 MACs/cycle"
+
+    def test_fmt_rate_allows_event_and_inference_rates(self):
+        assert fmt_rate(20, "events/s", precision=0, commas=False) == "20 events/s"
+        assert fmt_rate(300, "inferences/s", precision=0, commas=False) == "300 inferences/s"
+
+    def test_fmt_rate_allows_book_service_rates(self):
+        assert fmt_rate(12.5, "failures/day", precision=1, commas=False) == "12.5 failures/day"
+        assert fmt_rate(90, "queries/hour", precision=0, commas=False) == "90 queries/hour"
+        assert fmt_rate(5000, "queries/class", precision=0, commas=True) == "5,000 queries/class"
+        assert fmt_rate(4, "deploys/week", precision=0, commas=False) == "4 deploys/week"
+        assert fmt_rate(40, "utterances/speaker", precision=0, commas=False) == "40 utterances/speaker"
+        assert fmt_rate(12, "cameras/store", precision=0, commas=False) == "12 cameras/store"
+        assert fmt_rate(3, "boards/store", precision=0, commas=False) == "3 boards/store"
+        assert fmt_rate(1000, "cases/day", precision=0, commas=True) == "1,000 cases/day"
 
     def test_small_physical_label_helpers(self):
         from mlsysim.core.units import second
