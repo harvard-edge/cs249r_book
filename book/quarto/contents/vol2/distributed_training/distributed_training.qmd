@@ -1461,7 +1461,11 @@ The critical batch size has important implications for distributed training syst
 
 ::: {#chk-distributed-training-scaling-decisions .callout-checkpoint title="Scaling decisions"}
 
-Given a 7B parameter model distributed across a cluster of 64 A100 GPUs (80 GB HBM2e each), what is the maximum useful batch size? To answer this, you must calculate the critical batch size $(B_{\text{crit}})$—the point where the gradient noise scale equals the batch size. Beyond this point, doubling the batch size yields diminishing returns in convergence speed (perfect scaling stops). Using the Gradient Noise Scale metric ($\mathcal{B} \approx \frac{\text{tr}(\Sigma)}{\|\mu\|^2}$), determine if your proposed batch size keeps scaling efficiency above 80 percent, or if you are simply wasting compute cycles for marginal gains.
+Given a 7B parameter model distributed across a cluster of 64 A100 GPUs (80 GB HBM2e each), determine the maximum useful batch size.
+
+1.  Calculate the critical batch size $(B_{\text{crit}})$, where the gradient noise scale equals the batch size.
+2.  Use the Gradient Noise Scale metric $\mathcal{B} \approx \frac{\text{tr}(\Sigma)}{\|\mu\|^2}$ to evaluate the proposed batch size.
+3.  Decide whether scaling efficiency remains above 80 percent or whether additional compute is producing only marginal convergence gains.
 
 :::
 
@@ -3252,17 +3256,6 @@ class DistTrainSummaryRecap:
     dlrm_mem_tb_str = MarkdownStr("10 TB")
 ```
 
-::: {.callout-takeaways title="Parallelism is a loop transformation"}
-
-* **Communication-computation ratio is the ceiling**: Distributed training is governed by an extended Amdahl's Law. Speedup is limited by the sequential nature of synchronization (AllReduce) relative to the parallel work of computation.
-* **Data parallelism is the default, but hits the batch trap**: Scaling replicas improves throughput linearly until the "critical batch size" is reached, beyond which larger batches yield diminishing returns in convergence.
-* **Tensor parallelism is node-local**: Because it partitions matrix operations, it requires the `{python} DistTrainSummaryRecap.nvlink_a100_gb_per_s_str`-`{python} DistTrainSummaryRecap.nvlink_h100_gb_per_s_str` bandwidth of NVLink. Scaling it across racks on standard Ethernet will stall the fleet.
-* **Pipeline parallelism minimizes bandwidth, but adds "bubbles"**: Splitting depth across nodes allows for massive models, but efficiency depends on microbatching $(m \gg p)$ to minimize idle time during fill and drain phases.
-* **Memory-efficient DP (ZeRO/FSDP) scales linear memory**: By sharding optimizer states, gradients, and parameters, ZeRO-3 allows 100B+ models to fit on commodity hardware that would otherwise require complex model parallelism.
-* **The linear scaling rule requires warmup**: Multiplying batch size $B$ by $k$ allows for multiplying learning rate by $k$, but only with a linear warmup period to maintain stability during the high-gradient-noise initial phase.
-
-:::
-
 Throughout this chapter, we applied these partitioning strategies to our Lighthouse Archetypes, revealing that there is no "one size fits all" configuration (@tbl-partitioning-archetypes).
 
 ::: {#lhs-distributed-training-distributed-archetype-spectrum .callout-lighthouse title="Distributed archetype spectrum"}
@@ -3280,6 +3273,17 @@ The "optimal point" in the 3D Parallelism Cube shifts depending on the system's 
 :::
 
 The parallelism strategies explored throughout this chapter (data, tensor, pipeline, and expert) provide the conceptual toolkit for partitioning any training workload across a cluster. The key insight is that these strategies are not mutually exclusive alternatives but complementary dimensions of a unified optimization space. Production systems like Megatron-LM achieve efficient scaling precisely because they combine all four strategies, using tensor parallelism within nodes, pipeline parallelism across node groups, data parallelism for throughput, and expert parallelism for capacity scaling.
+
+::: {.callout-takeaways title="Parallelism is a loop transformation"}
+
+* **Communication-computation ratio is the ceiling**: Distributed training is governed by an extended Amdahl's Law. Speedup is limited by the sequential nature of synchronization (AllReduce) relative to the parallel work of computation.
+* **Data parallelism is the default, but hits the batch trap**: Scaling replicas improves throughput linearly until the "critical batch size" is reached, beyond which larger batches yield diminishing returns in convergence.
+* **Tensor parallelism is node-local**: Because it partitions matrix operations, it requires the `{python} DistTrainSummaryRecap.nvlink_a100_gb_per_s_str`-`{python} DistTrainSummaryRecap.nvlink_h100_gb_per_s_str` bandwidth of NVLink. Scaling it across racks on standard Ethernet will stall the fleet.
+* **Pipeline parallelism minimizes bandwidth, but adds "bubbles"**: Splitting depth across nodes allows for massive models, but efficiency depends on microbatching $(m \gg p)$ to minimize idle time during fill and drain phases.
+* **Memory-efficient DP (ZeRO/FSDP) scales linear memory**: By sharding optimizer states, gradients, and parameters, ZeRO-3 allows 100B+ models to fit on commodity hardware that would otherwise require complex model parallelism.
+* **The linear scaling rule requires warmup**: Multiplying batch size $B$ by $k$ allows for multiplying learning rate by $k$, but only with a linear warmup period to maintain stability during the high-gradient-noise initial phase.
+
+:::
 
 ::: {.callout-chapter-connection title="From logic to traffic"}
 
