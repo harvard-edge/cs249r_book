@@ -1353,19 +1353,17 @@ Hardware redundancy uses component duplication and voting to detect and mask fau
 ![](images/svg/error-masking.svg)
 :::
 
-At the software level, the same decision tree continues in model-visible evidence. Runtime monitoring [@francalanza2017; @mahmoud2021] and anomaly detection, including statistical outlier detection and One-Class SVM methods [@chandola2009], flag gradients, losses, activations, or latencies that no longer match the expected distribution. Data-consistency checks validate that a model state or checkpoint still corresponds to trusted data [@lindholm2019], while heartbeat mechanisms [@kawazoe_aguilera1997] distinguish silent corruption from fail-stop node loss. Software-implemented fault tolerance techniques such as SWIFT [@reis2005swift], N-version programming, and Reed-Solomon error correction codes [@plank1997; @reed1960] add redundancy when hardware support is insufficient. Watchdog timers [@pont2002using] close the loop by triggering recovery when a task stops making progress.
+At the software level, the same decision tree continues through model-visible evidence. Runtime monitoring [@francalanza2017; @mahmoud2021] and anomaly detection, including statistical outlier detection and One-Class SVM methods [@chandola2009], flag gradients, losses, activations, or latencies that no longer match the expected distribution. Data-consistency checks decide whether a model state or checkpoint still corresponds to trusted data [@lindholm2019], while heartbeat mechanisms [@kawazoe_aguilera1997] distinguish fail-stop node loss from slow progress. When hardware protection is insufficient, software-implemented redundancy such as SWIFT [@reis2005swift], N-version programming, and Reed-Solomon error correction codes [@plank1997; @reed1960] provides a second way to compare or reconstruct state. Watchdog timers [@pont2002using] close the loop by triggering recovery when a task stops making progress.
 
 These mechanisms reduce the unreliable substrate risk, but they do not protect against faults introduced by the software stack itself. The next layer must reason about bugs that look like valid computation while corrupting the ML pipeline.
 
 ## Software Faults {#sec-ft-software-faults}
 
-A team spends three months fine-tuning an LLM to be perfectly robust against adversarial prompt injections, only to realize that their preprocessing script accidentally truncated all inputs at 512 tokens, silently discarding the system prompt entirely. In the pursuit of complex algorithmic robustness, engineers often overlook the most common cause of ML failure: mundane software bugs. In ML systems, a logic error in a data loader does not crash the pipeline; it just subtly degrades the gradient, making software faults uniquely catastrophic.
+A team spends three months testing an LLM against complex prompt-level failure cases, only to realize that its preprocessing script accidentally truncated all inputs at 512 tokens, silently discarding the system prompt entirely. In the pursuit of complex algorithmic robustness, engineers often overlook the most common cause of ML failure: mundane software bugs. In ML systems, a logic error in a data loader does not crash the pipeline; it subtly degrades the gradient, making software faults uniquely damaging.
 
 Software faults require a different recovery lens from hardware failures. Hardware faults enter from silicon, electrons, and physical wear; software faults enter through design choices, dependency versions, and pipeline glue. The fault-tolerance problem shifts from replacing a failed component to identifying which valid-looking transformation corrupted data, gradients, or predictions.
 
-The practical challenge of software faults lies in their ability to interact with and amplify every other system threat. A bug in data preprocessing might create the distribution shifts that expose model vulnerabilities. Implementation errors in numerical computations might corrupt model behavior in ways that evade detection. Race conditions in distributed training might cause model corruption that resembles adversarial attacks on learned representations.
-
-These interactions arise from the inherent complexity of modern AI software stacks, which span frameworks, libraries, runtime environments, distributed systems, and deployment infrastructure. Each layer boundary creates an opportunity for faults to emerge and propagate, making software-level mitigation essential for production-scale reliability.
+The practical challenge is that software faults interact with every other system threat. A bug in data preprocessing can create distribution shifts, an implementation error in numerical computation can corrupt model behavior while preserving valid tensor shapes, and a race condition in distributed training can make different workers update from inconsistent state. These interactions arise because modern AI software stacks span frameworks, libraries, runtime environments, distributed systems, and deployment infrastructure. Each layer boundary creates an opportunity for faults to emerge and propagate, making software-level mitigation essential for production-scale reliability.
 
 ### Software fault properties and propagation {#sec-ft-software-fault-properties}
 
@@ -3408,7 +3406,7 @@ The three-state cycle prevents a single failing dependency from consuming the en
 
 #### Graceful degradation implementation {#sec-fault-tolerance-reliability-reliability-graceful-degradation-implementation-1aa5}
 
-Implementation begins with health signals that choose when to enter and leave each degradation level. Track request latency percentiles at p50, p95, and p99. Monitor error rates by error type. Measure resource utilization for CPU, GPU, and memory. Watch queue depths and wait times.
+Implementation begins by turning the degradation ladder into a control loop. Tail-latency percentiles show when users experience delay, error rates show which dependency is failing, CPU/GPU/memory utilization shows whether the system is saturated, and queue depth shows whether the service is accepting work faster than it can finish it. These health signals choose when to enter and leave each degradation level.
 
 Degradation triggers define conditions that activate degradation. @Lst-degradation-triggers illustrates three common trigger conditions that progressively activate fallback mechanisms based on latency, error rate, and feature store health.\index{Graceful Degradation!triggers}
 
@@ -3430,15 +3428,13 @@ if feature_store_latency > threshold:
 
 :::
 
-Degradation should increase progressively as conditions worsen rather than switch at one cliff. The system can raise the fallback percentage gradually as load increases.
-
-Recovery needs the same control discipline. Hysteresis prevents oscillation, and sustained improvement should be required before traffic returns to higher-capability paths.
+Degradation should increase progressively as conditions worsen rather than switch at one cliff. The system can raise the fallback percentage gradually as load increases, then require sustained improvement before traffic returns to higher-capability paths. Hysteresis prevents oscillation between primary and fallback modes when the service hovers near a threshold.
 
 ### Degradation monitoring and alerting {#sec-fault-tolerance-reliability-reliability-degradation-monitoring-alerting-87c2}
 
 Because graceful degradation trades quality for availability, monitoring must make that trade visible rather than letting the system appear healthy while serving lower-fidelity results.
 
-Track degradation metrics including the percentage of requests served by fallback models, the percentage of features using defaults, the request drop rate from load shedding, and the quality difference between primary and fallback paths. Alerting thresholds should reflect duration and blast radius: degradation activation can trigger an informational alert, sustained degradation beyond 5 minutes can trigger a warning, severe degradation affecting over 50 percent of requests can trigger a critical alert, and degradation beyond 1 hour should escalate. After the event, postincident analysis should identify the root cause, evaluate fallback effectiveness, measure user and business impact, and define improvements that prevent recurrence.
+The monitoring surface must expose how much service quality has been traded away: the share of requests served by fallback models, the share of features using defaults, the request drop rate from load shedding, and the quality gap between primary and fallback paths. Alerting thresholds should reflect duration and blast radius. A short activation can remain informational, sustained degradation beyond 5 minutes can trigger a warning, severe degradation affecting over 50 percent of requests can trigger a critical alert, and degradation beyond 1 hour should escalate. After the event, postincident analysis should identify the root cause, evaluate fallback effectiveness, measure user and business impact, and define improvements that prevent recurrence.
 
 Implementing these fallback mechanisms safely requires deep visibility into the system's runtime state. When a complex recommendation pipeline begins degrading, operators must rapidly determine which microservice is failing, and that diagnosis depends on distributed debugging and observability.
 
@@ -3490,7 +3486,7 @@ Logs provide the event context that a metric intentionally discards. Structured 
 
 :::
 
-Log levels should map incidents to escalation consistently across all components: DEBUG records diagnostic detail, INFO records normal operational events, WARN records conditions that may become failures, ERROR records failed operations, and FATAL records system-wide failures that require immediate intervention. Log aggregation centralizes those events for search and analysis. The particular backend matters less than the ability to query distributed logs using the same trace and request identifiers that appear in metrics and spans.
+For fault tolerance, the important logging property is consistent correlation rather than the particular backend. Log levels should map incidents to escalation consistently across components, but the recovery system depends more on whether operators can query events by the same request, trace, model version, feature version, and deployment identifiers that appear in metrics and spans. Log aggregation is therefore useful because it preserves the join between local failure context and fleet-wide symptoms.
 
 Traces show where latency or failure propagated across distributed components. A **trace**\index{Trace} is the end-to-end journey of a request, a **span**\index{Span} is one operation within that journey, and **context propagation**\index{Context Propagation} carries the trace identity across service boundaries. A trace through an ML inference pipeline illustrates how these spans compose:
 
@@ -3579,23 +3575,11 @@ The observability pillars above enable detection of recurring failure patterns t
 ![](images/svg/training-failure-signatures.svg)
 :::
 
-A loss spike followed by recovery typically indicates a transient data issue or numerical instability. The spike is usually self-correcting but should be investigated to rule out systematic causes.
-
-A loss spike followed by a plateau signals a more serious problem: the learning rate may be too high, a checkpoint may be corrupted, or a data bug may have been introduced. This pattern requires investigation and potentially rollback to an earlier checkpoint.
-
-Gradual divergence is the most insidious training failure because it occurs slowly enough to evade threshold-based alerts. Causes include silent data corruption, hardware error, or distributed training desynchronization.
-
-A hang without error indicates a deadlock in collective communication or a crashed worker blocking synchronization. Because no error is raised, these failures require explicit timeout detection to identify.
+A training-loss signature is useful because it maps a curve to a recovery decision. A loss spike followed by recovery typically indicates a transient data issue or numerical instability; the job may continue, but the incident should be investigated to rule out a systematic input problem. A spike followed by a plateau is more serious because the learning rate may be too high, a checkpoint may be corrupted, or a data bug may have changed the training objective, so rollback to an earlier checkpoint may be necessary. Gradual divergence is harder to catch with threshold alerts because silent data corruption, hardware error, or distributed training desynchronization can accumulate slowly. A hang without an error points instead to a deadlock in collective communication or a crashed worker blocking synchronization, which means timeout detection becomes the diagnostic mechanism.
 
 #### Serving failures {#sec-fault-tolerance-reliability-reliability-serving-failures-3322}
 
-Latency spikes arise from resource contention, garbage collection, cold caches, or model reloads. Individual spikes are usually transient, but repeated occurrences indicate underlying capacity issues.
-
-An increase in error rate points to a dependency failure, a data format change, or a model bug. This pattern requires immediate investigation because errors compound rapidly across dependent services.
-
-Silent quality degradation occurs when model drift, feature degradation, or data pipeline issues erode prediction quality without triggering error-rate alarms. Detecting this failure mode requires dedicated quality monitoring beyond standard operational metrics.
-
-Cascade failures occur when one failing component causes others to fail through timeout exhaustion, resource depletion, or error propagation. Preventing cascades requires circuit breakers and isolation boundaries.
+Serving failures require the same symptom-to-action mapping under much tighter latency constraints. Latency spikes can arise from resource contention, garbage collection, cold caches, or model reloads; individual spikes may be transient, but repeated occurrences indicate a capacity or placement problem. Rising error rates point to dependency failure, data-format changes, or model bugs and require immediate investigation because errors compound rapidly across dependent services. Silent quality degradation is different: model drift, feature degradation, or data-pipeline faults erode predictions without raising error-rate alarms, so the serving system needs quality monitoring beyond standard operational metrics. Cascade failures occur when one failing component causes others to fail through timeout exhaustion, resource depletion, or error propagation, which makes circuit breakers and isolation boundaries part of the fault-tolerance design rather than an after-the-fact operations layer.
 
 Cascade failures are particularly insidious because the root cause is obscured by the symptoms it generates. A concrete diagnosis shows how the three observability pillars work together to trace a cascade back to its origin.
 
