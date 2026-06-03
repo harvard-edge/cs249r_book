@@ -2629,13 +2629,13 @@ class ResNetMemory:
     resnet_training_ratio_max_str = fmt(training_ratio_max, precision=1, commas=False)
 ```
 
-For a network with $N_L$ layers, the system must save approximately $N_L$ activation tensors, one per layer, for the entire batch. Consider a concrete example: ResNet-50 has `{python} ResNetMemory.resnet_params_m_str` parameters (~`{python} ResNetMemory.resnet_fp32_mb_str` in FP32) and processes batch size 64 with $224{\times}224$ images. The memory breakdown reveals the scale of this trade-off. Forward activations alone consume approximately 8--12 GB (varying by implementation and checkpointing strategy). Parameter gradients add another ~`{python} ResNetMemory.resnet_fp32_mb_str` (the same size as the parameters themselves), and Adaptive Moment Estimation (Adam) optimizer state contributes ~`{python} ResNetMemory.resnet_adam_mb_str` for its two momentum buffers per parameter. The total training footprint reaches `{python} ResNetMemory.resnet_training_min_gb_str`--`{python} ResNetMemory.resnet_training_max_gb_str`, compared to just ~`{python} ResNetMemory.resnet_fp32_mb_str` for inference alone.
-
 ::: {.column-margin}
 ![](images/svg/vol1_frameworks_margin_001.svg){width="100%" fig-alt="Vertical memory ladder comparing a ResNet-50 training footprint around 10 to 15 GB against an inference footprint around 102 MB."}
 
 *Training memory dwarfs inference memory.*
 :::
+
+For a network with $N_L$ layers, the system must save approximately $N_L$ activation tensors, one per layer, for the entire batch. Consider a concrete example: ResNet-50 has `{python} ResNetMemory.resnet_params_m_str` parameters (~`{python} ResNetMemory.resnet_fp32_mb_str` in FP32) and processes batch size 64 with $224{\times}224$ images. The memory breakdown reveals the scale of this trade-off. Forward activations alone consume approximately 8--12 GB (varying by implementation and checkpointing strategy). Parameter gradients add another ~`{python} ResNetMemory.resnet_fp32_mb_str` (the same size as the parameters themselves), and Adaptive Moment Estimation (Adam) optimizer state contributes ~`{python} ResNetMemory.resnet_adam_mb_str` for its two momentum buffers per parameter. The total training footprint reaches `{python} ResNetMemory.resnet_training_min_gb_str`--`{python} ResNetMemory.resnet_training_max_gb_str`, compared to just ~`{python} ResNetMemory.resnet_fp32_mb_str` for inference alone.
 
 This `{python} ResNetMemory.resnet_training_ratio_min_str`--`{python} ResNetMemory.resnet_training_ratio_max_str`$\times$ ratio between training and inference memory quantifies why the Data Movement $(D_{\text{vol}})$ term dominates training latency in the iron law. During training, the framework must write all activations to memory during the forward pass and read them back during the backward pass, doubling the memory traffic compared to inference alone. For a complete derivation of the four-component training memory equation ($M_{\text{total}} = M_{\text{weights}} + M_{\text{gradients}} + M_{\text{optimizer}} + M_{\text{activations}}$) and worked examples at larger model scales, see @sec-appdx-algorithm-foundations-true-cost-training-memory-e54e.
 
@@ -3723,16 +3723,16 @@ class DataloaderThroughput:
     pcie4_gbs_str = fmt_qty(pcie4, GB/second, precision=0, commas=False)
 ```
 
-\index{Data Pipeline!throughput optimization}
-Streams and events address the second question---*where does data live, and how does it move?*---by overlapping transfers with computation so that the GPU rarely stalls on a single tensor. Scheduling alone, however, cannot help if data arrives too slowly in the first place. The third question concerns *how data arrives fast enough* to sustain throughput. The core systems principle is straightforward: the data pipeline must sustain the accelerator's consumption rate. A GPU processing 1,000 images per second at `{python} DataloaderThroughput.img_res_str` by `{python} DataloaderThroughput.img_res_str` resolution requires approximately `{python} DataloaderThroughput.dataloader_mbs_str` of sustained raw uint8 image throughput. If the pipeline cannot maintain this rate, the accelerator idles and the effective utilization term in the iron law drops below 1.
-
-Frameworks address this throughput requirement through three mechanisms. The first is *parallel worker processes*: the DataLoader\index{DataLoader!throughput optimization} spawns multiple CPU processes, each independently loading and preprocessing samples. Because data loading involves disk I/O and CPU-bound transformations (decoding, augmentation, normalization), a single process cannot saturate a modern GPU. Multiple workers overlap I/O wait times with preprocessing computation, collectively sustaining throughput that no single process could achieve. When `num_workers > 0`, the DataLoader distributes sample indices across workers through a shared queue, and workers push completed samples to a data queue that the main process assembles into batches.
-
 ::: {.column-margin}
 ![](images/svg/vol1_frameworks_margin_003.svg){width="100%" fig-alt="DataLoader knobs mapped to CPU parallelism, prefetch depth, and DMA."}
 
 *Each DataLoader knob relieves a specific input bottleneck.*
 :::
+
+\index{Data Pipeline!throughput optimization}
+Streams and events address the second question---*where does data live, and how does it move?*---by overlapping transfers with computation so that the GPU rarely stalls on a single tensor. Scheduling alone, however, cannot help if data arrives too slowly in the first place. The third question concerns *how data arrives fast enough* to sustain throughput. The core systems principle is straightforward: the data pipeline must sustain the accelerator's consumption rate. A GPU processing 1,000 images per second at `{python} DataloaderThroughput.img_res_str` by `{python} DataloaderThroughput.img_res_str` resolution requires approximately `{python} DataloaderThroughput.dataloader_mbs_str` of sustained raw uint8 image throughput. If the pipeline cannot maintain this rate, the accelerator idles and the effective utilization term in the iron law drops below 1.
+
+Frameworks address this throughput requirement through three mechanisms. The first is *parallel worker processes*: the DataLoader\index{DataLoader!throughput optimization} spawns multiple CPU processes, each independently loading and preprocessing samples. Because data loading involves disk I/O and CPU-bound transformations (decoding, augmentation, normalization), a single process cannot saturate a modern GPU. Multiple workers overlap I/O wait times with preprocessing computation, collectively sustaining throughput that no single process could achieve. When `num_workers > 0`, the DataLoader distributes sample indices across workers through a shared queue, and workers push completed samples to a data queue that the main process assembles into batches.
 
 The second mechanism is *prefetching*. The `prefetch_factor` parameter (default 2) controls how many batches each worker prepares in advance. With four workers and `prefetch_factor=2`, the pipeline maintains eight batches in flight, ensuring the GPU never stalls waiting for data. While the model processes batch $N$ on the GPU, workers simultaneously load and preprocess batch $N+1$ through $N+8$ on CPUs, effectively hiding data loading latency behind computation. The cost is memory consumption proportional to batch size times prefetch depth.
 
