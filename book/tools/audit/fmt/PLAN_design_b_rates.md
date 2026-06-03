@@ -1,7 +1,7 @@
 # PLAN — Design B (formatter owns `×`) + Rate `_per_s` normalization
 
-**Status:** draft for execution. Two independent migrations, run sequentially, each
-proven *render-identical* before moving on. Author: fmt-convention pass.
+**Status:** implementation complete for Design B and rate-name normalization; full
+HTML/PDF verification remains the final gate. Author: fmt-convention pass.
 
 ## Guiding principles (locked by user)
 
@@ -27,7 +27,7 @@ proven *render-identical* before moving on. Author: fmt-convention pass.
 | **D3** | `fmt_multiple` is only for prose multipliers. Any value substituted into display math, or any genuinely bare ratio, moves to a number-only helper such as `fmt_ratio` and a name such as `*_value_str` / `*_ratio_str`. | Manual review showed the earlier "10 bare-ratio" list was overbroad: most were legitimate prose multipliers. The real invariant is context based: `fmt_multiple` may render `N×` only where that whole string belongs in prose. |
 | **D4** | Checker **inverts**: delete `mult_missing_glyph` + `mult_literal_x`; add `mult_double_glyph` (flag a `$\times$` *following* a `_mult_str` ref) + `mult_suffix` (a `fmt_multiple` export must be named `*_mult_str`, not generic `*_str`). | After B the bug class flips from "forgot ×" to "added × twice." |
 | **D5** | Rate exports use **`<unit>_per_s`**: `gb_per_s`, `tb_per_s`, `mb_per_s`, `gbit_per_s` (bits), `tflop_per_s`, `flop_per_s`, `tokens_per_s`. | One unambiguous form; dodges the bytes(`gb_s`)/bits(`gbps`) blur. |
-| **D6 (OPEN — confirm)** | Acronym rates `qps` / `rps` / `tps`: **keep as standard field acronyms** (recommended) vs convert to `queries_per_s` etc. | QPS/RPS/TPS are unambiguous, field-standard, and reader-facing output is owned by `fmt_rate`. Recommend keep; flag for user. |
+| **D6** | Acronym rates `qps` / `rps` / `tps` stay as standard field acronyms. | QPS/RPS/TPS are unambiguous, field-standard, and reader-facing output is owned by `fmt_rate`. |
 
 ---
 
@@ -151,11 +151,13 @@ approved final suffix; document `_mult_str` as the semantic multiplier token),
 
 ## PHASE 2 — Rate `_per_s` normalization
 
-**2.1 Codemod (build `codemod_rates.py`, dry-run).** Rename export + all refs:
+**2.1 Codemod (`codemod_design_b_rates.py`, dry-run first).** Rename export + all refs:
 `_gb_s_str`/`_gbs_str` → `_gb_per_s_str`; `_tb_s_str`/`_tbs_str` → `_tb_per_s_str`;
 `_mb_s_str`/`_mbs_str` → `_mb_per_s_str`; `_tflops_str`/`_tflop_s_str` → `_tflop_per_s_str`;
-`_tokens_s_str` → `_tokens_per_s_str`. **Leave `_gbps_/_mbps_` (bits) untouched** unless
-they should be `_gbit_per_s_` (decide per-site — bits stay bits). Per D6, leave qps/rps/tps.
+`_tokens_s_str` → `_tokens_per_s_str`; bit rates normalize to `_gbit_per_s_` /
+`_mbit_per_s_` when the displayed unit is bits/s. Per D6, leave qps/rps/tps
+acronym stems in place, but every reader-facing acronym-rate export must be
+built by `fmt_rate`.
 Dry-run counts must match the frozen inventory after applying the chosen exclusions
 (470 total candidates; with QPS/RPS/TPS retained, 441 non-acronym candidates).
 
@@ -166,8 +168,8 @@ Dry-run counts must match the frozen inventory after applying the chosen exclusi
 - **L2 spot render:** `./book/binder build html network_fabrics compute_infrastructure` →
   rendered-HTML scan; confirm bandwidths still read "3.35 TB/s" etc.
 
-**2.3 Docs.** `fmt.md §6.1` rate-token row already states `_per_s`; confirm + add the
-bits/bytes note and the qps/rps/tps carve-out.
+**2.3 Docs.** `fmt.md` / rule docs state `_per_s`, the bits/bytes distinction,
+and the qps/rps/tps carve-out.
 
 **Exit 2:** L0 green; L1 fully identical; L2 spot render clean.
 
@@ -209,6 +211,7 @@ Scan the PDF text for `××`, literal `\times`, `{python}`, missing-ref markers.
 - Full HTML build: minutes per volume; full PDF: longer (the slow gatekeeper).
 - Bulk is codemod-driven + assess_equiv-gated, so wall-time is dominated by the L3/L4 builds.
 
-## Open item for user
+## Resolved item
 
-- **D6:** keep `qps`/`rps`/`tps` acronyms, or convert to `queries_per_s` etc.? (Recommend keep.)
+- **D6:** keep `qps`/`rps`/`tps` acronyms; ensure they are formatted with
+  `fmt_rate`.
