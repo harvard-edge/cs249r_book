@@ -33,46 +33,101 @@ async def _():
 
     import plotly.graph_objects as go
     from mlsysim.labs.state import DesignLedger
-    from mlsysim import Hardware
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
-
-    H100_TFLOPS = Hardware.Cloud.H100.compute.peak_flops.m_as("TFLOPs/s")
-    H100_BW     = Hardware.Cloud.H100.memory.bandwidth.m_as("GB/s")
-    H100_RAM    = Hardware.Cloud.H100.memory.capacity.m_as("GB")
-    H100_TDP    = Hardware.Cloud.H100.tdp.m_as("W")
-
-    JETSON_TFLOPS = Hardware.Edge.JetsonOrinNX.compute.peak_flops.m_as("TFLOPs/s")
-    JETSON_BW     = Hardware.Edge.JetsonOrinNX.memory.bandwidth.m_as("GB/s")
-    JETSON_RAM    = Hardware.Edge.JetsonOrinNX.memory.capacity.m_as("GB")
-    JETSON_TDP    = Hardware.Edge.JetsonOrinNX.tdp.m_as("W")
-
-    IPHONE_TFLOPS = Hardware.Mobile.iPhone15Pro.compute.peak_flops.m_as("TFLOPs/s")
-    IPHONE_BW     = Hardware.Mobile.iPhone15Pro.memory.bandwidth.m_as("GB/s")
-    IPHONE_TDP    = Hardware.Mobile.iPhone15Pro.tdp.m_as("W")
-
-    # Ridge points: peak_flops / memory_bandwidth (FLOP/byte)
-    H100_RIDGE   = H100_TFLOPS * 1e12 / (H100_BW * 1e9)
-    JETSON_RIDGE = JETSON_TFLOPS * 1e12 / (JETSON_BW * 1e9)
-    IPHONE_RIDGE = IPHONE_TFLOPS * 1e12 / (IPHONE_BW * 1e9)
+    from mlsysbook_labs import (
+        ACADEMIC_LAB_CSS,
+        build_lab_report,
+        fusion_traffic,
+        gemm_workload,
+        get_lab_metadata,
+        get_lab_track_variant,
+        get_track_profile,
+        hardware_roofline_profile,
+        report_export_panel,
+        resolve_mlsysim_ref,
+        roofline_point,
+        source_trace,
+        track_context,
+        track_selector,
+    )
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         _ = await ledger.load_async()
     return (
-        COLORS, H100_BW, H100_RAM, H100_RIDGE, H100_TDP, H100_TFLOPS,
-        IPHONE_BW, IPHONE_RIDGE, IPHONE_TDP, IPHONE_TFLOPS,
-        JETSON_BW, JETSON_RAM, JETSON_RIDGE, JETSON_TDP, JETSON_TFLOPS,
-        LAB_CSS, apply_plotly_theme, go, ledger, math, mo, np,
+        ACADEMIC_LAB_CSS, COLORS, LAB_CSS, apply_plotly_theme,
+        build_lab_report, fusion_traffic, gemm_workload,
+        get_lab_metadata, get_lab_track_variant, get_track_profile, go,
+        hardware_roofline_profile, ledger, math, mo, np, report_export_panel,
+        resolve_mlsysim_ref, roofline_point, source_trace, track_context, track_selector,
+    )
+
+
+@app.cell
+def _(get_lab_metadata):
+    v1_11_metadata = get_lab_metadata("vol1/lab_11_hw_accel.py")
+    return (v1_11_metadata,)
+
+
+@app.cell(hide_code=True)
+def _(ledger, track_selector):
+    _saved_track = ledger.get_track()
+    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "iphone"
+    v1_11_track_picker = track_selector(default=_default_track)
+    v1_11_track_picker
+    return (v1_11_track_picker,)
+
+
+@app.cell
+def _(
+    get_lab_track_variant,
+    get_track_profile,
+    hardware_roofline_profile,
+    resolve_mlsysim_ref,
+    v1_11_track_picker,
+):
+    v1_11_track_id = v1_11_track_picker.value
+    v1_11_profile = get_track_profile(v1_11_track_id)
+    v1_11_variant = get_lab_track_variant("v1_11_hardware_roofline", v1_11_track_id)
+    v1_11_hardware = resolve_mlsysim_ref(v1_11_variant.hardware_ref)
+    v1_11_roofline = hardware_roofline_profile(v1_11_profile, v1_11_variant, v1_11_hardware)
+
+    _compare_ids = tuple(v1_11_variant.defaults.get("compare_tracks", (v1_11_track_id,)))
+    _profiles = []
+    for _track_id in dict.fromkeys((v1_11_track_id, *_compare_ids)):
+        _profile = get_track_profile(_track_id)
+        _variant = get_lab_track_variant("v1_11_hardware_roofline", _profile.track_id)
+        _hardware = resolve_mlsysim_ref(_variant.hardware_ref)
+        _profiles.append(hardware_roofline_profile(_profile, _variant, _hardware))
+    v1_11_comparison_profiles = tuple(_profiles)
+    return (
+        v1_11_comparison_profiles,
+        v1_11_hardware,
+        v1_11_profile,
+        v1_11_roofline,
+        v1_11_track_id,
+        v1_11_variant,
     )
 
 # ═════════════════════════════════════════════════════════════════════════════
 # CELL 1: HEADER
 # ═════════════════════════════════════════════════════════════════════════════
 @app.cell(hide_code=True)
-def _(LAB_CSS, mo):
+def _(
+    ACADEMIC_LAB_CSS,
+    LAB_CSS,
+    mo,
+    source_trace,
+    track_context,
+    v1_11_metadata,
+    v1_11_profile,
+    v1_11_roofline,
+    v1_11_variant,
+):
     mo.vstack([
         LAB_CSS,
-        mo.Html("""
+        ACADEMIC_LAB_CSS,
+        mo.Html(f"""
         <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0c1a2e 100%);
                     padding: 36px 44px; border-radius: 16px; color: white;
                     box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
@@ -81,7 +136,7 @@ def _(LAB_CSS, mo):
                 Machine Learning Systems &middot; Volume I &middot; Lab 11
             </div>
             <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
-                       color: #f8fafc; line-height: 1.1; letter-spacing: -0.02em;">
+                       color: #f8fafc; line-height: 1.1;">
                 The Hardware Roofline
             </h1>
             <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
@@ -90,8 +145,9 @@ def _(LAB_CSS, mo):
             </p>
             <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #64748b;
                       max-width: 680px; line-height: 1.65;">
-                Your code is not broken &mdash; your hardware has a ceiling, and that ceiling
-                changes shape depending on the chip, the operation, and whether you fuse your kernels.
+                {v1_11_variant.workload_summary} Your code is not broken &mdash; the selected
+                hardware has a ceiling, and that ceiling changes shape depending on arithmetic
+                intensity, memory bandwidth, precision, and fusion.
             </p>
             <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
                 <span style="background: rgba(99,102,241,0.18); color: #a5b4fc;
@@ -102,16 +158,36 @@ def _(LAB_CSS, mo):
                 <span style="background: rgba(203,32,45,0.15); color: #fca5a5;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
                              font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
-                    Chapter 11: Hardware Acceleration
+                    {v1_11_profile.label}
+                </span>
+                <span style="background: rgba(34,197,94,0.12); color: #86efac;
+                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
+                             font-weight: 600; border: 1px solid rgba(34,197,94,0.20);">
+                    {v1_11_roofline.hardware_ref}
                 </span>
             </div>
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
                 <span class="badge badge-info">Roofline Model</span>
-                <span class="badge badge-warn">Kernel Fusion</span>
-                <span class="badge badge-fail">Memory Wall</span>
+                <span class="badge badge-warn">{v1_11_roofline.ridge_flop_per_byte:.1f} FLOP/B ridge</span>
+                <span class="badge badge-fail">{v1_11_roofline.bandwidth_gbs:g} GB/s bandwidth</span>
             </div>
         </div>
         """),
+        track_context(v1_11_profile),
+        source_trace(
+            {
+                "lab_id": v1_11_metadata.lab_id,
+                "track_id": v1_11_profile.track_id,
+                "hardware_ref": v1_11_variant.hardware_ref,
+                "model_ref": v1_11_variant.model_ref,
+                "shared_helper": "mlsysbook_labs.roofline",
+                "peak_tflops": v1_11_roofline.peak_tflops,
+                "bandwidth_gbs": v1_11_roofline.bandwidth_gbs,
+                "ridge_flop_per_byte": v1_11_roofline.ridge_flop_per_byte,
+                "source_policy": v1_11_profile.source_policy,
+            },
+            summary="V1-11 uses MLSysIM hardware refs plus mlsysbook_labs.roofline calculations.",
+        ),
     ])
     return
 
@@ -190,7 +266,7 @@ def _(COLORS, mo):
 # ===========================================================================
 
 @app.cell(hide_code=True)
-def _(mo):
+def _(mo, v1_11_comparison_profiles):
     mo.callout(mo.md("""
     **Recommended Reading** -- Complete the following before this lab:
 
@@ -204,12 +280,7 @@ def _(mo):
 # CELL 4: TABS (Parts A-E + Synthesis)
 # ═════════════════════════════════════════════════════════════════════════════
 @app.cell(hide_code=True)
-def _(
-    COLORS, H100_BW, H100_RAM, H100_RIDGE, H100_TDP, H100_TFLOPS,
-    IPHONE_BW, IPHONE_RIDGE, IPHONE_TDP, IPHONE_TFLOPS,
-    JETSON_BW, JETSON_RIDGE, JETSON_TDP, JETSON_TFLOPS,
-    apply_plotly_theme, go, math, mo, np,
-):
+def _(mo, v1_11_roofline, v1_11_variant):
     # ── Widgets ───────────────────────────────────────────────────────────
     pA_pred = mo.ui.radio(
         options={
@@ -218,16 +289,21 @@ def _(
             "C) Memory-bandwidth-bound -- hitting the Roofline correctly": "roofline",
             "D) FP16 reduces peak throughput": "fp16",
         },
-        label="GEMM (N=512, FP16) on H100 achieves 31.5% of peak TFLOPS. What is the problem?",
+        label=(
+            f"GEMM on {v1_11_roofline.label} is far below peak for "
+            f"{v1_11_variant.primary_metric}. What is the most likely explanation?"
+        ),
     )
     return (pA_pred,)
 
 @app.cell(hide_code=True)
-def _(mo):
-    pA_dim = mo.ui.slider(start=128, stop=8192, value=512, step=128, label="Matrix dimension N")
+def _(mo, v1_11_variant):
+    _default_dim = int(v1_11_variant.defaults.get("matrix_dim", 512))
+    _default_precision = str(v1_11_variant.defaults.get("precision", "fp16")).upper()
+    pA_dim = mo.ui.slider(start=128, stop=8192, value=_default_dim, step=128, label="Matrix dimension N")
     pA_prec = mo.ui.radio(
         options={"FP32": "fp32", "FP16": "fp16", "INT8": "int8"},
-        value="FP16", label="Precision:", inline=True,
+        value=_default_precision, label="Precision:", inline=True,
     )
 
     pB_pred = mo.ui.radio(
@@ -249,23 +325,22 @@ def _(mo):
     )
     pB_batch = mo.ui.slider(start=1, stop=128, value=1, step=1, label="Batch size")
 
+    _labels = " and ".join(profile.label for profile in v1_11_comparison_profiles)
     pC_pred = mo.ui.radio(
         options={
             "A) Yes -- compute-bound on weak hw means compute-bound on strong": "yes",
-            "B) No -- H100 has higher ridge point, now memory-bound": "no",
+            "B) No -- ridge point can shift the regime": "no",
             "C) Depends on precision": "depends",
             "D) Memory-bound on both": "both",
         },
-        label="GEMM at N=1024 is compute-bound on Jetson Orin NX. Is it compute-bound on H100?",
+        label=f"GEMM at N=1024 is evaluated on {_labels}. Must it stay in the same regime?",
     )
     return (pB_batch, pB_mode, pC_pred)
 
 @app.cell(hide_code=True)
-def _(mo):
-    pC_hw = mo.ui.radio(
-        options={"Cloud (H100)": "h100", "Edge (Jetson Orin NX)": "jetson", "Mobile (A17 Pro)": "iphone"},
-        value="Cloud (H100)", label="Hardware:", inline=True,
-    )
+def _(mo, v1_11_comparison_profiles, v1_11_roofline):
+    _options = {profile.label: profile.track_id for profile in v1_11_comparison_profiles}
+    pC_hw = mo.ui.radio(options=_options, value=v1_11_roofline.label, label="Hardware:", inline=True)
 
     pD_pred = mo.ui.radio(
         options={
@@ -300,10 +375,11 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(
-    mo, pA_dim, pA_prec, pA_pred,
+    fusion_traffic, gemm_workload, mo, pA_dim, pA_prec, pA_pred,
     pB_batch, pB_mode, pB_pred, pC_hw,
     pC_pred, pD_pred, pE_pred, pE_seq,
-    pE_tile,
+    pE_tile, roofline_point, v1_11_comparison_profiles,
+    v1_11_profile, v1_11_roofline, v1_11_variant,
 ):
 
     # ── Helper: draw roofline ─────────────────────────────────────────────
@@ -333,9 +409,9 @@ def _(
                 Incoming Message &middot; Kernel Optimization Team
             </div>
             <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;Our GEMM kernel at N=512 achieves only 31% of peak TFLOPS on the H100.
-                We have optimized the code for two weeks. The profiler shows no bugs. What are
-                we missing?&rdquo;
+                &ldquo;Our GEMM-like kernel is far below peak on {v1_11_roofline.hardware_name}.
+                We optimized the code for two weeks. The profiler shows no bugs. Are we
+                compute-bound, memory-bound, or using the wrong accelerator path?&rdquo;
             </div>
         </div>
         """))
@@ -349,7 +425,7 @@ def _(
         ```
         Attainable GFLOP/s = min(Peak_TFLOPS, BW x AI)
         AI = FLOPs / Bytes_accessed
-        Ridge Point = Peak_TFLOPS / BW = {H100_RIDGE:.0f} FLOP/byte (H100)
+        Ridge Point = Peak_TFLOPS / BW = {v1_11_roofline.ridge_flop_per_byte:.1f} FLOP/byte ({v1_11_roofline.label})
         ```
 
         Below the ridge point: **memory-bound**. Above: **compute-bound**.
@@ -367,19 +443,27 @@ def _(
         items.append(mo.hstack([pA_dim, pA_prec], justify="start"))
 
         _N = pA_dim.value
-        # GEMM (NxN): FLOPs = 2*N^3, Bytes = 3*N^2*bpp (2 input + 1 output matrix)
-        _bpp = {"fp32": 4, "fp16": 2, "int8": 1}[pA_prec.value]
-        _flops = 2 * _N ** 3
-        _bytes = 3 * _N ** 2 * _bpp
-        _ai = _flops / _bytes
+        _workload = gemm_workload(dimension=_N, precision=pA_prec.value)
+        _point = roofline_point(v1_11_roofline, _workload.arithmetic_intensity)
+        _bpp = _workload.bytes_per_element
+        _flops = _workload.flops
+        _bytes = _workload.bytes_moved
+        _ai = _workload.arithmetic_intensity
 
-        _peak_gflops = H100_TFLOPS * 1000
-        _attainable = min(_peak_gflops, H100_BW * _ai)
-        _mfu = _attainable / _peak_gflops * 100
-        _regime = "Compute-bound" if _ai >= H100_RIDGE else "Memory-bound"
+        _peak_gflops = _point.peak_gflops
+        _attainable = _point.attainable_gflops
+        _mfu = _point.mfu_pct
+        _regime = _point.regime
 
         _fig = go.Figure()
-        _draw_roofline(_fig, H100_TFLOPS, H100_BW, H100_RIDGE, COLORS["BlueLine"], "H100 Roofline")
+        _draw_roofline(
+            _fig,
+            v1_11_roofline.peak_tflops,
+            v1_11_roofline.bandwidth_gbs,
+            v1_11_roofline.ridge_flop_per_byte,
+            COLORS["BlueLine"],
+            f"{v1_11_roofline.label} Roofline",
+        )
         _fig.add_trace(go.Scatter(
             x=[_ai], y=[_attainable], mode="markers+text",
             marker=dict(size=14, color=COLORS["RedLine"], symbol="diamond"),
@@ -403,7 +487,7 @@ def _(
                         text-align:center; background:white; border-top:3px solid {COLORS['BlueLine']}; flex:1;">
                 <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Arithmetic Intensity</div>
                 <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">{_ai:.0f} FLOP/B</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">Ridge: {H100_RIDGE:.0f} FLOP/B</div>
+                <div style="font-size:0.72rem; color:#94a3b8;">Ridge: {v1_11_roofline.ridge_flop_per_byte:.1f} FLOP/B</div>
             </div>
             <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
                         text-align:center; background:white; border-top:3px solid {_regime_color}; flex:1;">
@@ -427,21 +511,21 @@ def _(
 FLOPs  = 2 x N^3 = 2 x {_N}^3 = {_flops:.2e}
 Bytes  = 3 x N^2 x {_bpp} = {_bytes:.2e}
 AI     = {_flops:.2e} / {_bytes:.2e} = {_ai:.0f} FLOP/byte
-Ridge  = {H100_TFLOPS:.0f} TFLOP/s / {H100_BW:.0f} GB/s = {H100_RIDGE:.0f} FLOP/byte
-Regime = {"AI < Ridge => MEMORY-BOUND" if _ai < H100_RIDGE else "AI >= Ridge => COMPUTE-BOUND"}
+Ridge  = {v1_11_roofline.peak_tflops:.3g} TFLOP/s / {v1_11_roofline.bandwidth_gbs:.3g} GB/s = {v1_11_roofline.ridge_flop_per_byte:.1f} FLOP/byte
+Regime = {"AI < Ridge => MEMORY-BOUND" if _ai < v1_11_roofline.ridge_flop_per_byte else "AI >= Ridge => COMPUTE-BOUND"}
 MFU    = {_mfu:.1f}%
 ```
-*Source: Chapter 11, Roofline model (Williams et al., 2009)*
+*Source: `mlsysbook_labs.roofline_point`, using `{v1_11_roofline.hardware_ref}`.*
         """))
 
         if pA_pred.value == "roofline":
             items.append(mo.callout(mo.md("**Correct.** The kernel is hitting the bandwidth ceiling correctly. "
-                f"AI = {_ai:.0f} < Ridge = {H100_RIDGE:.0f} means it is memory-bound. "
+                f"AI = {_ai:.0f} vs ridge = {v1_11_roofline.ridge_flop_per_byte:.1f} means it is {_regime.lower()}. "
                 "Increase N with the slider to cross the ridge point and reach compute-bound territory."), kind="success"))
         else:
             items.append(mo.callout(mo.md("**Low utilization does not mean broken code.** "
-                f"At N={_N}, AI = {_ai:.0f} is below the ridge point ({H100_RIDGE:.0f}). "
-                "The kernel is correctly hitting the memory bandwidth ceiling."), kind="warn"))
+                f"At N={_N}, AI = {_ai:.0f} and the {v1_11_profile.label} ridge point is "
+                f"{v1_11_roofline.ridge_flop_per_byte:.1f}. The selected workload is {_regime.lower()}."), kind="warn"))
         items.append(mo.accordion({
             "Math Peek: The Roofline Model": mo.md("""
 **Formula:**
@@ -508,26 +592,34 @@ When $\\text{AI} < \\text{Ridge}$, the kernel is memory-bound and performance sc
         _bytes_per_elem = 2  # FP16
         _tensor_bytes = _batch * _hidden * _bytes_per_elem
 
-        # Eager: each op does a full HBM read + write
+        # Eager: each op does a full memory read + write
         _ln_flops = _batch * _hidden * 5  # mean, var, normalize, scale, shift
         _dropout_flops = _batch * _hidden * 1
         _relu_flops = _batch * _hidden * 1
 
-        _eager_reads = 3  # 3 separate kernel reads from HBM
-        _eager_writes = 3  # 3 separate kernel writes to HBM (intermediate results)
-        _eager_bytes = (_eager_reads + _eager_writes) * _tensor_bytes
+        _eager_reads = 3
+        _eager_writes = 3
         _eager_flops = _ln_flops + _dropout_flops + _relu_flops
 
         # Fused: single read + single write
         _fused_reads = 1
         _fused_writes = 1
-        _fused_bytes = (_fused_reads + _fused_writes) * _tensor_bytes
         _fused_flops = _eager_flops
 
-        # Latency (memory-bound for both, but fused has fewer bytes)
-        _eager_time = _eager_bytes / (H100_BW * 1e9) * 1e6  # microseconds
-        _fused_time = _fused_bytes / (H100_BW * 1e9) * 1e6
-        _speedup = _eager_time / _fused_time if _fused_time > 0 else 1
+        _fusion = fusion_traffic(
+            elements=_batch * _hidden,
+            bytes_per_element=_bytes_per_elem,
+            bandwidth_gbs=v1_11_roofline.bandwidth_gbs,
+            eager_reads=_eager_reads,
+            eager_writes=_eager_writes,
+            fused_reads=_fused_reads,
+            fused_writes=_fused_writes,
+        )
+        _eager_bytes = _fusion.eager_bytes
+        _fused_bytes = _fusion.fused_bytes
+        _eager_time = _fusion.eager_time_us
+        _fused_time = _fusion.fused_time_us
+        _speedup = _fusion.speedup
 
         _fig = go.Figure()
         _fig.add_trace(go.Bar(
@@ -571,7 +663,7 @@ Eager traffic: ({_eager_reads} reads + {_eager_writes} writes) x {_tensor_bytes:
 Fused traffic: ({_fused_reads} read + {_fused_writes} write) x {_tensor_bytes:,} = {_fused_bytes:,} bytes
 Speedup:       {_eager_bytes:,} / {_fused_bytes:,} = {_speedup:.1f}x
 ```
-*Source: Chapter 11, kernel fusion and memory traffic optimization*
+*Source: `mlsysbook_labs.fusion_traffic`, using {v1_11_roofline.bandwidth_gbs:g} GB/s from `{v1_11_roofline.hardware_ref}`.*
         """))
 
         if pB_pred.value == "3_5":
@@ -610,6 +702,7 @@ Fusion eliminates $K-1$ round-trips to HBM, giving up to $K\\times$ speedup for 
     # ─────────────────────────────────────────────────────────────────────
     def build_part_c():
         items = []
+        _comparison_names = " and ".join(profile.label for profile in v1_11_comparison_profiles)
         items.append(mo.Html(f"""
         <div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
                     border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
@@ -618,23 +711,24 @@ Fusion eliminates $K-1$ round-trips to HBM, giving up to $K\\times$ speedup for 
                 Incoming Message &middot; Cross-Platform Deployment
             </div>
             <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;Our GEMM kernel is compute-bound on the Jetson. We assumed it would also be
-                compute-bound on the H100. But the profiler says it is memory-bound. How can a faster
-                GPU make our kernel slower in relative terms?&rdquo;
+                &ldquo;Our GEMM kernel changes regime between {_comparison_names}. The code path
+                is the same, so why does the bottleneck move when the hardware changes?&rdquo;
             </div>
         </div>
         """))
+        _ridge_list = "\n".join(
+            f"- {profile.label}: {profile.ridge_flop_per_byte:.1f} FLOP/byte"
+            for profile in v1_11_comparison_profiles
+        )
         items.append(mo.md(f"""
         ## The Hardware Balance Shift
 
         The **ridge point** differs across hardware because compute grows faster than bandwidth:
-        - H100: {H100_RIDGE:.0f} FLOP/byte
-        - Jetson Orin NX: {JETSON_RIDGE:.0f} FLOP/byte
-        - iPhone A17 Pro: {IPHONE_RIDGE:.0f} FLOP/byte
+        {_ridge_list}
 
-        A kernel at AI=200 is compute-bound on Jetson ({JETSON_RIDGE:.0f}) but
-        memory-bound on H100 ({H100_RIDGE:.0f}). **More powerful accelerators are
-        paradoxically harder to saturate.**
+        A kernel at the same arithmetic intensity can change regime across these targets.
+        **More powerful accelerators can be harder to saturate** when peak compute grows
+        faster than memory bandwidth.
         """))
         items.append(pC_pred)
         if pC_pred.value is None:
@@ -643,26 +737,32 @@ Fusion eliminates $K-1$ round-trips to HBM, giving up to $K\\times$ speedup for 
 
         items.append(pC_hw)
 
-        _hw_map = {
-            "h100": ("H100", H100_TFLOPS, H100_BW, H100_RIDGE, COLORS["BlueLine"]),
-            "jetson": ("Jetson", JETSON_TFLOPS, JETSON_BW, JETSON_RIDGE, COLORS["GreenLine"]),
-            "iphone": ("A17 Pro", IPHONE_TFLOPS, IPHONE_BW, IPHONE_RIDGE, COLORS["OrangeLine"]),
-        }
-        _name, _tfl, _bw, _ridge, _color = _hw_map[pC_hw.value]
+        _color_cycle = (COLORS["BlueLine"], COLORS["GreenLine"], COLORS["OrangeLine"], "#7c3aed")
+        _hw_map = {profile.track_id: profile for profile in v1_11_comparison_profiles}
+        _selected = _hw_map[pC_hw.value]
+        _name = _selected.label
+        _ridge = _selected.ridge_flop_per_byte
+        _color = COLORS["RedLine"]
 
         _N = 1024
-        _bpp = 2
-        _ai = 2 * _N ** 3 / (3 * _N ** 2 * _bpp)
-        _peak_gf = _tfl * 1000
-        _attainable = min(_peak_gf, _bw * _ai)
-        _mfu = _attainable / _peak_gf * 100
-        _regime = "Compute-bound" if _ai >= _ridge else "Memory-bound"
+        _workload = gemm_workload(dimension=_N, precision="fp16")
+        _ai = _workload.arithmetic_intensity
+        _point = roofline_point(_selected, _ai)
+        _attainable = _point.attainable_gflops
+        _mfu = _point.mfu_pct
+        _regime = _point.regime
 
         _fig = go.Figure()
-        # Draw all three rooflines
-        _draw_roofline(_fig, H100_TFLOPS, H100_BW, H100_RIDGE, COLORS["BlueLine"], "H100")
-        _draw_roofline(_fig, JETSON_TFLOPS, JETSON_BW, JETSON_RIDGE, COLORS["GreenLine"], "Jetson")
-        _draw_roofline(_fig, IPHONE_TFLOPS, IPHONE_BW, IPHONE_RIDGE, COLORS["OrangeLine"], "A17 Pro")
+        # Draw selected comparison rooflines
+        for _idx, _profile in enumerate(v1_11_comparison_profiles):
+            _draw_roofline(
+                _fig,
+                _profile.peak_tflops,
+                _profile.bandwidth_gbs,
+                _profile.ridge_flop_per_byte,
+                _color_cycle[_idx % len(_color_cycle)],
+                _profile.label,
+            )
 
         _fig.add_trace(go.Scatter(
             x=[_ai], y=[_attainable], mode="markers",
@@ -686,7 +786,7 @@ Fusion eliminates $K-1$ round-trips to HBM, giving up to $K\\times$ speedup for 
                         text-align:center; background:white; border-top:3px solid {_color}; flex:1;">
                 <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Hardware</div>
                 <div style="font-size:1.3rem; font-weight:800; color:{_color};">{_name}</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">Ridge: {_ridge:.0f} FLOP/B</div>
+                <div style="font-size:0.72rem; color:#94a3b8;">Ridge: {_ridge:.1f} FLOP/B</div>
             </div>
             <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
                         text-align:center; background:white; border-top:3px solid {_rc}; flex:1;">
@@ -697,14 +797,20 @@ Fusion eliminates $K-1$ round-trips to HBM, giving up to $K\\times$ speedup for 
         </div>
         """))
 
-        if pC_pred.value == "no":
-            items.append(mo.callout(mo.md(f"**Correct.** The H100 ridge point ({H100_RIDGE:.0f}) is higher "
-                f"than the Jetson ({JETSON_RIDGE:.0f}). At AI={_ai:.0f}, the same operation is "
-                "compute-bound on Jetson but memory-bound on H100. Toggle between hardware to see the shift."), kind="success"))
+        _ridge_values = ", ".join(
+            f"{profile.label}: {profile.ridge_flop_per_byte:.1f} FLOP/B"
+            for profile in v1_11_comparison_profiles
+        )
+        if pC_pred.value in {"no", "depends"}:
+            items.append(mo.callout(mo.md(
+                f"**Correct idea.** The same AI={_ai:.0f} workload can change regime when ridge points differ. "
+                f"Here: {_ridge_values}. Toggle hardware to see the shift."
+            ), kind="success"))
         else:
-            items.append(mo.callout(mo.md("**More powerful does not mean easier to saturate.** "
-                f"The H100 ridge point ({H100_RIDGE:.0f}) is higher because compute grew faster "
-                "than bandwidth. The same kernel changes regime across platforms."), kind="warn"))
+            items.append(mo.callout(mo.md(
+                "**More powerful does not mean easier to saturate.** Ridge point is peak compute divided by bandwidth. "
+                f"The selected comparison set has these ridges: {_ridge_values}."
+            ), kind="warn"))
         items.append(mo.accordion({
             "Math Peek: Arithmetic Intensity of GEMM": mo.md("""
 **Formula (square GEMM, N x N):**
@@ -741,17 +847,18 @@ AI grows linearly with $N$. Small matrices are memory-bound; large matrices are 
             </div>
         </div>
         """))
-        items.append(mo.md("""
+        items.append(mo.md(f"""
         ## The Energy Roofline
 
-        Energy efficiency has its own Roofline. In the memory-bound regime, most
-        Joules go to data movement (~640 pJ/DRAM access at 45nm; ~50-80 pJ at modern
-        7nm nodes). In the compute-bound regime, most Joules go to useful arithmetic.
+        Energy efficiency has its own Roofline. For the **{v1_11_profile.label}** track,
+        the important question is whether bytes are crossing the expensive memory hierarchy
+        or staying close to the selected accelerator path. In the memory-bound regime, most
+        Joules go to data movement. In the compute-bound regime, most Joules go to useful arithmetic.
         The exact numbers vary with process node, but the ratio between data movement
-        and compute energy remains ~100x — this is the enduring insight.
+        and compute energy remains the enduring insight.
 
         ```
-        Energy/FLOP (memory-bound) = E_dram / AI    (decreases with AI)
+        Energy/FLOP (memory-bound) = E_memory / AI  (decreases with AI)
         Energy/FLOP (compute-bound) = E_compute      (constant floor)
         ```
 
@@ -762,7 +869,7 @@ AI grows linearly with $N$. Small matrices are memory-bound; large matrices are 
             items.append(mo.callout(mo.md("Select your prediction to unlock the energy Roofline."), kind="warn"))
             return mo.vstack(items)
 
-        _e_dram = 640  # pJ per DRAM access (per byte)
+        _e_dram = 640  # pJ per off-chip memory byte, chosen as a teaching-scale reference
         _e_compute = 3.7  # pJ per FP32 FLOP
 
         _ais = np.logspace(0, 3, 100)
@@ -823,7 +930,7 @@ AI grows linearly with $N$. Small matrices are memory-bound; large matrices are 
 
         if pD_pred.value == "10x":
             items.append(mo.callout(mo.md(f"**Correct.** The memory-bound operation uses {_ratio:.0f}x more "
-                "energy per FLOP. At AI=10, each FLOP costs 64 pJ in DRAM access energy alone. "
+                "energy per FLOP. At AI=10, each FLOP costs 64 pJ in memory traffic energy alone. "
                 "Same FLOPs does NOT mean same energy."), kind="success"))
         else:
             items.append(mo.callout(mo.md(f"**Same FLOPs does not mean same energy.** "
@@ -838,10 +945,10 @@ $$
 
 **Variables:**
 - **$E_{\\text{compute}}$**: energy per arithmetic operation (~0.2-3.7 pJ)
-- **$E_{\\text{DRAM per byte}}$**: energy per byte of DRAM access (~20-640 pJ)
+- **$E_{\\text{DRAM per byte}}$**: energy per off-chip memory byte (~20-640 pJ teaching range)
 - **$\\text{AI}$**: arithmetic intensity (FLOP/byte)
 
-At low AI (memory-bound), the $E_{\\text{DRAM}}/\\text{AI}$ term dominates. At AI=10, each FLOP costs ~64 pJ in DRAM energy alone. At AI=500, the DRAM cost is negligible.
+At low AI (memory-bound), the $E_{\\text{DRAM}}/\\text{AI}$ term dominates. At AI=10, each FLOP costs ~64 pJ in memory traffic energy alone. At AI=500, the memory traffic cost is negligible.
 """)
         }))
         return mo.vstack(items)
@@ -864,20 +971,22 @@ At low AI (memory-bound), the $E_{\\text{DRAM}}/\\text{AI}$ term dominates. At A
             </div>
         </div>
         """))
-        items.append(mo.md("""
+        _memory_name = "HBM" if v1_11_roofline.bandwidth_gbs >= 1000 else "device memory"
+        _scratchpad_name = "SRAM/cache" if v1_11_profile.track_id != "cloud_fleet" else "SRAM/L2"
+        items.append(mo.md(f"""
         ## The Tiling Dividend
 
-        Standard attention computes Q*K^T as a full NxN matrix, writes to HBM,
-        then reads back for softmax. **FlashAttention** tiles the computation into
-        SRAM-sized blocks, eliminating redundant HBM traffic.
+        Standard attention computes Q*K^T as a full NxN matrix, writes to {_memory_name},
+        then reads back for softmax. **FlashAttention-style tiling** tiles the computation into
+        {_scratchpad_name}-sized blocks, eliminating redundant memory traffic.
 
         ```
-        Standard:  HBM reads = O(N^2 * d)       (full attention matrix)
-        Tiled:     HBM reads = O(N^2 * d / M)   (M = SRAM size)
+        Standard:  memory reads = O(N^2 * d)       (full attention matrix)
+        Tiled:     memory reads = O(N^2 * d / M)   (M = scratchpad/cache size)
         Speedup    ~ M / (d * tile_ratio)
         ```
 
-        Tiling keeps hot data in fast SRAM before it escapes to slow HBM.
+        Tiling keeps hot data near the accelerator before it escapes to slower memory.
         """))
         items.append(pE_pred)
         if pE_pred.value is None:
@@ -889,7 +998,7 @@ At low AI (memory-bound), the $E_{\\text{DRAM}}/\\text{AI}$ term dominates. At A
         _tile = pE_tile.value
         _seq = pE_seq.value
         _d = 128  # head dimension
-        _sram_kb = 192  # H100 L2 per SM effective
+        _sram_kb = 192 if v1_11_profile.track_id == "cloud_fleet" else 64
 
         # Standard attention: read/write full NxN attention matrix
         _std_bytes = 2 * _seq * _seq * 2  # Q*K^T + softmax output, FP16
@@ -898,8 +1007,8 @@ At low AI (memory-bound), the $E_{\\text{DRAM}}/\\text{AI}$ term dominates. At A
         _tiled_bytes = 2 * _n_tiles * _tile * _d * 2 + _seq * _d * 2  # much less HBM traffic
         _tiled_bytes = max(_tiled_bytes, _seq * _d * 2)  # minimum is reading Q,K,V
 
-        _std_time_us = _std_bytes / (H100_BW * 1e9) * 1e6
-        _tiled_time_us = _tiled_bytes / (H100_BW * 1e9) * 1e6
+        _std_time_us = _std_bytes / (v1_11_roofline.bandwidth_gbs * 1e9) * 1e6
+        _tiled_time_us = _tiled_bytes / (v1_11_roofline.bandwidth_gbs * 1e9) * 1e6
         _speedup = _std_time_us / _tiled_time_us if _tiled_time_us > 0 else 1
         _speedup = min(_speedup, 10)  # cap at realistic max
 
@@ -946,7 +1055,7 @@ At low AI (memory-bound), the $E_{\\text{DRAM}}/\\text{AI}$ term dominates. At A
                 <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">HBM Traffic Saved</div>
                 <div style="font-size:1.7rem; font-weight:800; color:{COLORS['RedLine']};">
                     {(_std_bytes - _tiled_bytes) / (1024*1024):.1f} MB</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">per attention layer</div>
+                <div style="font-size:0.72rem; color:#94a3b8;">per layer on {v1_11_roofline.label}</div>
             </div>
         </div>
         """))
@@ -957,26 +1066,26 @@ At low AI (memory-bound), the $E_{\\text{DRAM}}/\\text{AI}$ term dominates. At A
                 "Increase sequence length to see even larger gains."), kind="success"))
         else:
             items.append(mo.callout(mo.md(f"**Tiling gives {_speedup:.1f}x speedup.** "
-                "Standard attention materializes the full NxN matrix in HBM. Tiling keeps "
-                "hot data in SRAM, dramatically reducing memory traffic."), kind="warn"))
+                "Standard attention materializes the full NxN matrix in memory. Tiling keeps "
+                "hot data near the accelerator, dramatically reducing memory traffic."), kind="warn"))
         items.append(mo.accordion({
             "Math Peek: FlashAttention Memory Complexity": mo.md("""
-**Standard attention HBM access:**
+**Standard attention memory access:**
 $$
-\\text{HBM}_{\\text{standard}} = \\Theta(N^2 \\cdot d) \\quad \\text{(materializes full } N \\times N \\text{ matrix)}
+\\text{Memory}_{\\text{standard}} = \\Theta(N^2 \\cdot d) \\quad \\text{(materializes full } N \\times N \\text{ matrix)}
 $$
 
-**Tiled (FlashAttention) HBM access:**
+**Tiled (FlashAttention-style) memory access:**
 $$
-\\text{HBM}_{\\text{tiled}} = \\Theta\\!\\left(\\frac{N^2 \\cdot d^2}{M}\\right)
+\\text{Memory}_{\\text{tiled}} = \\Theta\\!\\left(\\frac{N^2 \\cdot d^2}{M}\\right)
 $$
 
 **Variables:**
 - **$N$**: sequence length
 - **$d$**: head dimension
-- **$M$**: SRAM size (on-chip memory per SM)
+- **$M$**: available scratchpad/cache tile capacity
 
-Speedup $\\approx N / B$ (where $B$ is tile size), reaching ~10x at seq_len=4096, tile=256. Tiling keeps Q, K, V blocks in SRAM, avoiding the $N^2$ materialization in HBM.
+Speedup $\\approx N / B$ (where $B$ is tile size), reaching ~10x at seq_len=4096, tile=256. Tiling keeps Q, K, V blocks close to the accelerator, avoiding the $N^2$ materialization in slower memory.
 """)
         }))
         return mo.vstack(items)
@@ -1008,8 +1117,8 @@ Speedup $\\approx N / B$ (where $B$ is tile size), reaching ~10x at seq_len=4096
                     </div>
                     <div>
                         <strong>3. More powerful hardware is harder to saturate.</strong>
-                        The H100 ridge point ({H100_RIDGE:.0f}) exceeds the Jetson ({JETSON_RIDGE:.0f}).
-                        The same kernel can be compute-bound on edge and memory-bound on cloud.
+                        The selected comparison set has different ridge points. The same kernel
+                        can be compute-bound on one track and memory-bound on another.
                     </div>
                 </div>
             </div>
@@ -1065,10 +1174,13 @@ Speedup $\\approx N / B$ (where $B$ is tile size), reaching ~10x at seq_len=4096
 # ===========================================================================
 
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo, pA_pred, pB_pred, pC_pred, pD_pred, pE_pred):
+def _(COLORS, ledger, mo, pA_pred, pB_pred, pC_pred, pD_pred, pE_pred, v1_11_profile, v1_11_roofline, v1_11_variant):
     if pA_pred.value is not None and pB_pred.value is not None and pC_pred.value is not None and pD_pred.value is not None and pE_pred.value is not None:
         ledger.save(chapter=11, design={
             "lab": "hw_accel",
+            "track_id": v1_11_profile.track_id,
+            "scenario_id": v1_11_variant.scenario_id,
+            "hardware_ref": v1_11_roofline.hardware_ref,
             "completed": True,
             "roofline_diagnosis": pA_pred.value,
             "fusion_speedup_prediction": pB_pred.value,
@@ -1080,6 +1192,8 @@ def _(COLORS, ledger, mo, pA_pred, pB_pred, pC_pred, pD_pred, pE_pred):
     <div class="lab-hud">
         <span class="hud-label">LAB</span>
         <span class="hud-value">11 &middot; Hardware Roofline</span>
+        <span class="hud-label">TRACK</span>
+        <span class="hud-value">{v1_11_profile.label}</span>
         <span style="flex:1;"></span>
         <span class="hud-label">CH</span>
         <span class="hud-value">11</span>
@@ -1090,25 +1204,149 @@ def _(COLORS, ledger, mo, pA_pred, pB_pred, pC_pred, pD_pred, pE_pred):
     return
 
 
-# ─── TRACK-AWARE MIGRATION SHELL ────────────────────────────────────────────
+# ─── DOWNLOADABLE TRACK REPORT ──────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(ledger, mo):
-    from mlsysbook_labs import (
-        ACADEMIC_LAB_CSS,
-        get_lab_metadata,
-        get_lab_track_variant,
-        get_track_profile,
-        legacy_migration_panel,
+def _(
+    build_lab_report,
+    fusion_traffic,
+    gemm_workload,
+    mo,
+    pA_dim,
+    pA_prec,
+    pA_pred,
+    pB_batch,
+    pB_mode,
+    pB_pred,
+    pC_hw,
+    pC_pred,
+    pD_pred,
+    pE_pred,
+    pE_seq,
+    pE_tile,
+    report_export_panel,
+    roofline_point,
+    v1_11_comparison_profiles,
+    v1_11_metadata,
+    v1_11_profile,
+    v1_11_roofline,
+    v1_11_variant,
+):
+    _workload = gemm_workload(dimension=pA_dim.value, precision=pA_prec.value)
+    _primary_point = roofline_point(v1_11_roofline, _workload.arithmetic_intensity)
+    _comparison_map = {profile.track_id: profile for profile in v1_11_comparison_profiles}
+    _comparison = _comparison_map[pC_hw.value]
+    _comparison_point = roofline_point(_comparison, gemm_workload(dimension=1024, precision="fp16").arithmetic_intensity)
+    _fusion = fusion_traffic(
+        elements=pB_batch.value * 4096,
+        bytes_per_element=2,
+        bandwidth_gbs=v1_11_roofline.bandwidth_gbs,
     )
 
-    _metadata = get_lab_metadata("vol1/lab_11_hw_accel.py")
-    _saved_track = ledger.get_track()
-    _track_id = _saved_track if _saved_track and _saved_track != "NONE" else "iphone"
-    _profile = get_track_profile(_track_id)
-    _variant = get_lab_track_variant(_metadata.lab_id, _profile.track_id)
+    _incomplete = []
+    if pA_pred.value is None:
+        _incomplete.append("Part A roofline prediction")
+    if pB_pred.value is None:
+        _incomplete.append("Part B fusion prediction")
+    if pC_pred.value is None:
+        _incomplete.append("Part C balance-shift prediction")
+    if pD_pred.value is None:
+        _incomplete.append("Part D energy prediction")
+    if pE_pred.value is None:
+        _incomplete.append("Part E tiling prediction")
+
+    _report = build_lab_report(
+        v1_11_metadata,
+        track=v1_11_profile.label,
+        scenario=v1_11_variant.workload_summary,
+        learning_objectives=(
+            "Diagnose whether a workload is memory-bound or compute-bound on the selected hardware.",
+            "Explain how fusion, precision, batching, or tiling moves the roofline point.",
+            "Choose an accelerator path while naming the remaining hardware limitation.",
+        ),
+        predictions={
+            "roofline_diagnosis": pA_pred.value,
+            "fusion_speedup": pB_pred.value,
+            "balance_shift": pC_pred.value,
+            "energy_regime": pD_pred.value,
+            "tiling_speedup": pE_pred.value,
+        },
+        knob_settings={
+            "matrix_dim": pA_dim.value,
+            "precision": pA_prec.value,
+            "fusion_mode": pB_mode.value,
+            "fusion_batch": pB_batch.value,
+            "comparison_track": pC_hw.value,
+            "tile_size": pE_tile.value,
+            "sequence_length": pE_seq.value,
+        },
+        evidence_summary={
+            "hardware_ref": v1_11_roofline.hardware_ref,
+            "model_ref": v1_11_variant.model_ref,
+            "peak_tflops": round(v1_11_roofline.peak_tflops, 6),
+            "bandwidth_gbs": round(v1_11_roofline.bandwidth_gbs, 6),
+            "ridge_flop_per_byte": round(v1_11_roofline.ridge_flop_per_byte, 3),
+            "workload_ai": round(_workload.arithmetic_intensity, 3),
+            "primary_regime": _primary_point.regime,
+            "primary_mfu_pct": round(_primary_point.mfu_pct, 3),
+            "fusion_speedup": round(_fusion.speedup, 3),
+            "comparison_track": _comparison.label,
+            "comparison_regime": _comparison_point.regime,
+        },
+        final_decision=(
+            f"Use the {v1_11_variant.assumptions.get('accelerator_path', v1_11_profile.label)} path "
+            f"only if the workload point has enough headroom against {v1_11_variant.guardrail_metric}."
+        ),
+        big_takeaways=(
+            "Peak TOPS is not performance; ridge point decides which ceiling is active.",
+            "Fusion and tiling improve roofline position by reducing memory traffic.",
+            "The same workload can change regime across iPhone, Oura Ring, RoboTaxi, and Cloud Fleet.",
+        ),
+        reflections={
+            "diagnosis": (
+                f"{v1_11_profile.label} currently reports {_primary_point.regime.lower()} behavior "
+                f"for the selected GEMM point."
+            ),
+            "tradeoff": (
+                f"The track optimizes {v1_11_variant.primary_metric} while guarding "
+                f"{v1_11_variant.guardrail_metric}."
+            ),
+            "residual_risk": (
+                "Roofline estimates expose ceilings; production still needs profiler traces and supported-op checks."
+            ),
+        },
+        residual_risk=(
+            "The report uses source-traced roofline estimates. Validate with hardware counters, "
+            "operator support, thermal behavior, and p99 latency before deployment."
+        ),
+        source_trace={
+            "track_id": v1_11_profile.track_id,
+            "scenario_id": v1_11_variant.scenario_id,
+            "hardware_ref": v1_11_variant.hardware_ref,
+            "model_ref": v1_11_variant.model_ref,
+            "shared_helper": "mlsysbook_labs.roofline",
+            "source_policy": v1_11_profile.source_policy,
+        },
+        result_snapshot={
+            "roofline_profile": v1_11_roofline,
+            "workload": _workload,
+            "primary_point": _primary_point,
+            "comparison_profile": _comparison,
+            "comparison_point": _comparison_point,
+            "fusion": _fusion,
+        },
+        incomplete_fields=tuple(_incomplete),
+    )
+
     mo.vstack([
-        ACADEMIC_LAB_CSS,
-        legacy_migration_panel(_metadata, _profile, _variant),
+        mo.md("## Download Report"),
+        mo.callout(
+            mo.md(
+                "This V1-11 report is generated locally from the selected track, MLSysIM hardware refs, "
+                "and shared `mlsysbook_labs.roofline` calculations."
+            ),
+            kind="info",
+        ),
+        report_export_panel(_report),
     ])
     return
 

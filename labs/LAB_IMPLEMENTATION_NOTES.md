@@ -935,3 +935,45 @@ Tests or checks run:
 
 Follow-up:
 - Deep-migrate V1-11 Hardware Roofline next, reusing the source-traced hardware profile pattern.
+
+### 2026-06-03 - V1-11 Hardware Roofline Deep Track Migration
+
+Lab:
+- `labs/vol1/lab_11_hw_accel.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/vol1/lab_11_hw_accel.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+
+What changed:
+- Replaced the baseline migration shell in V1-11 with a full track selector, track context, source trace, and local report export.
+- Wired the selected track into the lab narrative, widget defaults, roofline plot, fusion calculation, hardware comparison, energy discussion, tiling estimate, synthesis, ledger payload, and downloadable report.
+- Removed stale notebook-local H100/Jetson/iPhone roofline constants from the setup path.
+- Report export now records predictions, knob settings, selected hardware ref, model ref, ridge point, workload arithmetic intensity, MFU, fusion speedup, comparison regime, final decision, reflections, residual risk, and source trace.
+- V1-11 uses the previously added `mlsysbook_labs.roofline` helpers and hand-authored `v1_11_hardware_roofline` track variants.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required for this slice. The lab resolves:
+  - `Hardware.Mobile.iPhone15Pro`
+  - `Hardware.Tiny.OuraRing`
+  - `Hardware.Edge.RoboTaxi`
+  - `Hardware.Cloud.H100`
+- Shared teaching calculations live in `mlsysbook_labs.roofline`: hardware roofline profiles, GEMM workload arithmetic intensity, roofline point evaluation, and fusion traffic.
+
+Notebook-local constants removed:
+- H100, Jetson, and iPhone peak/BW/TDP/ridge constants were removed from the V1-11 notebook setup. Displayed roofline facts now come from the selected track variant and MLSysIM hardware ref.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.roofline` is now exercised by a real notebook and should be reused for benchmarking, inference economy, and serving labs when they need source-traced hardware ceilings.
+
+Plan updates needed in other labs:
+- V2-10 should reuse roofline and edge helper patterns for deployment-target economics instead of introducing notebook-local latency/cost constants.
+- V1-12 and V1-13 should follow the same pattern: add shared solver/helper APIs first, then wire part-level plots and report evidence to those helpers.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_11_hw_accel.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "vol1/lab_11 or lab_11_hw" -q`
+- `python3 -m pytest labs/tests/test_static.py::TestSyntax labs/tests/test_static.py::TestLabCatalog -q`

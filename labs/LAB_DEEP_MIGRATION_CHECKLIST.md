@@ -78,7 +78,7 @@ For each lab:
 ## Recommended Implementation Order
 
 - [x] 1. V2-11 Edge Intelligence: closest to device-specific constraints.
-- [ ] 2. V1-11 Hardware Roofline: pressure-tests hardware registry and roofline plots.
+- [x] 2. V1-11 Hardware Roofline: pressure-tests hardware registry and roofline plots.
 - [ ] 3. V2-10 Inference Economy: connects latency, cost, batching, and deployment target.
 - [ ] 4. V1-12 Benchmarking Trap: standardizes benchmark plots and report evidence.
 - [ ] 5. V1-13 Tail Latency Trap: extends serving and SLA evidence.
@@ -286,24 +286,27 @@ Remaining tasks:
 Path: `labs/vol1/lab_11_hw_accel.py`
 
 Current status:
-- [x] Baseline track/report panel installed.
+- [x] Deep track-aware notebook migration installed.
+- [x] Track selector, track context, source trace, and local report export installed.
+- [x] Shared roofline helper backs GEMM, fusion, and roofline evidence.
+- [x] All displayed hardware roofline facts resolve through canonical track variants and MLSysIM refs.
 
 Deep migration tasks:
-- [ ] Build track-specific roofline evidence using hardware registry facts.
-- [ ] Add missing hardware capabilities to MLSysIM if roofline needs them:
+- [x] Build track-specific roofline evidence using hardware registry facts.
+- [x] Confirm no missing hardware capabilities are needed for this slice:
   - peak ops,
   - memory bandwidth,
   - memory capacity,
   - accelerator type,
   - supported precision.
-- [ ] Add shared roofline helper if current calculations are notebook-local.
-- [ ] Track examples:
+- [x] Add shared roofline helper if current calculations are notebook-local.
+- [x] Track examples:
   - iPhone: Neural Engine/GPU/CPU boundary.
   - Oura Ring: MCU/DSP-style tiny compute boundary.
   - RoboTaxi: edge accelerator throughput and deterministic latency.
   - Cloud Fleet: GPU roofline and utilization.
-- [ ] Update report with compute-bound vs memory-bound diagnosis.
-- [ ] Add tests for roofline helper and hardware ref resolution.
+- [x] Update report with compute-bound vs memory-bound diagnosis.
+- [x] Add tests for roofline helper and hardware ref resolution.
 
 ### V1-12 - Benchmarking Trap
 
