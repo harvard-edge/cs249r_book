@@ -5091,35 +5091,26 @@ These architectural differences translate directly into distinct resource profil
 
 #### Memory and computational resources {#sec-neural-computation-memory-computational-resources-d02b}
 
-Neural networks consume computational resources differently during inference than during training. Inference focuses on efficient forward pass computation with minimal memory overhead. The specific requirements for our canonical MNIST network (784-128-64-10) illustrate this:
+Neural networks consume computational resources differently during inference than during training. Inference has two memory obligations. The first is persistent: the trained weights and biases must remain available for every request. The second is transient: each layer produces an activation buffer that is needed only until the next layer consumes it. This distinction is the reason inference can be much leaner than training, even though the arithmetic in the forward pass is the same.
 
 \index{Floating Point!FP32 precision}
 \index{BF16!reduced-precision format}
-Memory requirements\index{Memory Footprint!parameter storage}\index{Memory Footprint!activation storage} during inference can be precisely quantified:
+For our canonical MNIST network (`{python} MnistInferenceResourceLocal.mnist_arch_str`), the persistent parameter block contains `{python} MnistInferenceResourceLocal.total_params_str`, or about `{python} MnistInferenceResourceLocal.param_mem_kb_str` at 32-bit floating point precision[^fn-fp32-precision]. The layer-level counts in @tbl-mnist-inference-resource-by-layer show why: each fully connected layer performs one multiply-add for each weight, so parameter memory and arithmetic scale together.
 
-1. Static Memory (Model Parameters):
-   * Layer 1: $784{\times}128$ = `{python} MnistInferenceResourceLocal.w1_str` weights + `{python} MnistInferenceResourceLocal.b1_str` biases
-   * Layer 2: $128{\times}64$ = `{python} MnistInferenceResourceLocal.w2_str` weights + `{python} MnistInferenceResourceLocal.b2_str` biases
-   * Layer 3: $64{\times}10$ = `{python} MnistInferenceResourceLocal.w3_str` weights + `{python} MnistInferenceResourceLocal.b3_str` biases
-   * Total: `{python} MnistInferenceResourceLocal.total_params_str` (≈ `{python} MnistInferenceResourceLocal.param_mem_kb_str` at 32-bit floating point precision[^fn-fp32-precision])
+| **Layer**   | **Weights**                                                      | **Biases**                                    | **Multiply-Adds**                                         |
+|:------------|:-----------------------------------------------------------------|:----------------------------------------------|:----------------------------------------------------------|
+| **Layer 1** | $784{\times}128$ = `{python} MnistInferenceResourceLocal.w1_str` | `{python} MnistInferenceResourceLocal.b1_str` | `{python} MnistInferenceResourceLocal.inf_madd_l1_str`    |
+| **Layer 2** | $128{\times}64$ = `{python} MnistInferenceResourceLocal.w2_str`  | `{python} MnistInferenceResourceLocal.b2_str` | `{python} MnistInferenceResourceLocal.inf_madd_l2_str`    |
+| **Output**  | $64{\times}10$ = `{python} MnistInferenceResourceLocal.w3_str`   | `{python} MnistInferenceResourceLocal.b3_str` | `{python} MnistInferenceResourceLocal.inf_madd_l3_str`    |
+| **Total**   | `{python} MnistInferenceResourceLocal.total_params_str`          | Included in total                             | `{python} MnistInferenceResourceLocal.inf_madd_total_str` |
+
+: **MNIST Inference Resources by Layer**: The persistent parameter block and multiply-add count for the canonical MNIST network. In fully connected layers, the same weights that occupy memory also determine the arithmetic work per inference. {#tbl-mnist-inference-resource-by-layer}
 
 [^fn-fp32-precision]: **FP32 (Single Precision)**: The IEEE 754 standard (1985) format using 32 bits (1 sign, 8 exponent, 23 mantissa) that became the default for neural network training because its dynamic range accommodates gradient magnitudes spanning many orders of magnitude. Halving to FP16 or BF16 ("brain floating point," developed at Google Brain) saves 2$\times$ memory and doubles throughput on hardware with 16-bit datapaths; further reduction to INT8 yields 4$\times$ savings but requires posttraining calibration. See @sec-appdx-machine-foundations-numerical-representations-c889 for a detailed comparison of numerical formats and their precision-throughput trade-offs. \index{FP32!numerical precision}
 
-2. Dynamic Memory (Input buffer and activations per image):
-   * Input buffer: 784 values
-   * Layer 1 output: 128 values
-   * Layer 2 output: 64 values
-   * Layer 3 output: 10 values
-   * Total: `{python} MnistInferenceResourceLocal.total_inf_act_str` values (≈ `{python} MnistInferenceResourceLocal.total_infer_act_kb_str` at 32-bit floating point precision)
+The transient side is smaller. A single image starts as 784 input values, then produces layer outputs of 128, 64, and 10 values. If counted naively, that is `{python} MnistInferenceResourceLocal.total_inf_act_str` activation values, or about `{python} MnistInferenceResourceLocal.total_infer_act_kb_str` at FP32. In a real inference engine, those values do not all need to persist at once. Once Layer 2 has consumed Layer 1's output, the Layer 1 buffer can be reused; once the output layer has consumed Layer 2's activations, that buffer can be reused as well. Training cannot discard those intermediates because backpropagation needs them later. That is why gradient storage and backpropagation overhead multiply training resource demands by `{python} MnistInferenceResourceLocal.training_ratio_mult_str` or more for this worked example (see @sec-neural-computation-model-size-computational-complexity-1f0f).
 
-Computational requirements follow a fixed pattern for each input:
-
-* First layer: `{python} MnistInferenceResourceLocal.inf_madd_l1_str` multiply-adds
-* Second layer: `{python} MnistInferenceResourceLocal.inf_madd_l2_str` multiply-adds
-* Output layer: `{python} MnistInferenceResourceLocal.inf_madd_l3_str` multiply-adds
-* Total: `{python} MnistInferenceResourceLocal.inf_madd_total_str` multiply-add operations per inference
-
-The resource profile differs markedly from training requirements, where gradient storage and backpropagation overhead multiply resource demands by `{python} MnistInferenceResourceLocal.training_ratio_mult_str` or more (see the worked example in @sec-neural-computation-model-size-computational-complexity-1f0f). The predictable, streamlined nature of inference enables optimization opportunities that training cannot exploit.
+This persistent-plus-rolling-buffer model also explains the deployment optimizations that follow. Batching increases arithmetic reuse and hardware occupancy but expands activation storage. Quantization shrinks the persistent parameter block and activation buffers, but only if accuracy survives the lower precision. Hardware-specific layouts improve cache reuse by keeping the rolling buffer close to the compute units. The predictable, streamlined nature of inference enables these optimizations precisely because parameters are fixed and activations have short lifetimes.
 
 #### Performance enhancement techniques {#sec-neural-computation-performance-enhancement-techniques-692f}
 
