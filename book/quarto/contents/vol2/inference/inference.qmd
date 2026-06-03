@@ -1068,13 +1068,13 @@ As @tbl-inference-continuous-batching-throughput shows, the 3$\times$ throughput
 
 Continuous batching removes waste caused by variable output length, but it does not make every request equally cheap. Reasoning-heavy inference pushes the same problem further: a prompt may demand test-time work proportional to task difficulty, forcing schedulers to budget compute per request instead of only filling decode slots.
 
-## The Logic Wall: Test-Time Compute Scaling {#sec-inference-logic-wall}
-
 ::: {.column-margin}
 ![](images/svg/inference_logic_wall_ladder.svg){width="100%" fig-alt="A two-rung magnitude ladder on a log scale, in slate. The reasoning response rung is about 12.8 seconds; the fast pattern-match rung is about 0.1 seconds. The gap is roughly 128 times."}
 
 *Reasoning expands latency about 128 times over fast pattern-matching.*
 :::
+
+## The Logic Wall: Test-Time Compute Scaling {#sec-inference-logic-wall}
 
 Large-model capability work describes emergent behaviors [@wei2022emergent], while later analysis cautions that some apparent emergence can be an artifact of metric choice [@schaeffer2023mirage]. From a serving-systems perspective, the serving-relevant shift is the work issued per request. Models that move from "fast thinking" (instant pattern matching) to "slow thinking" (deliberative reasoning) push pressure from HBM bandwidth toward **Test-Time Compute**\index{Test-Time Compute}: the scheduler must decide how many search steps or chain-of-thought (CoT) tokens a request may consume. The **Logic Wall**\index{Logic Wall} is the resulting serving constraint: for complex problems, compute per request grows with task difficulty, and a fleet optimized for tokens per second now needs a policy for allocating thinking time.
 
@@ -1883,6 +1883,12 @@ The memory management techniques that enable efficient LLM serving at scale incl
 
 Increasing the batch size to maximize throughput in LLM serving is bounded by the KV cache wall. As @fig-kv-cache-wall shows, model weights represent a fixed "static tax" on GPU memory, while the KV cache grows linearly with both batch size and sequence length.
 
+::: {.column-margin}
+![](images/svg/inference_kv_cache_ladder.svg){width="100%" fig-alt="Memory ladder on a log scale: a single token uses 0.33 MB, a 128K request uses 43 GB, and the available KV budget is 480 GB."}
+
+*The KV cache fills HBM, capping concurrent requests.*
+:::
+
 ::: {#fig-kv-cache-wall fig-env="figure" fig-pos="htb" fig-cap="**The KV Cache Wall**: Total GPU memory usage for a 4-bit quantized 70B model (35 GB weights) on an 80 GB H100. While the model fits easily at small context lengths, the KV cache (sloped lines) eventually consumes all remaining HBM. At 128K context, a batch size of 2 is physically impossible on a single GPU (35 GB + 84 GB > 80 GB), forcing the system to either reduce batch size (killing throughput) or shard the model." fig-alt="Memory usage plot. Horizontal dashed line at 80 GB shows capacity. Solid blue region at bottom is 35 GB weights. Sloped lines for Batch 1, 2, 4, and 8 show memory rising with sequence length. Batch 8 hits the 80 GB line very early (~16K tokens)."}
 
 ```{python}
@@ -1966,12 +1972,6 @@ plt.show()
 :::
 
 The visualization reveals why the Distribution Layer must sometimes shard models that would otherwise fit on a single GPU. Sharding provides the memory headroom needed to maintain high batch sizes for long-context requests. Without sharding, a 128K context request effectively "evicts" all other users from the GPU.
-
-::: {.column-margin}
-![](images/svg/inference_kv_cache_ladder.svg){width="100%" fig-alt="Memory ladder on a log scale: a single token uses 0.33 MB, a 128K request uses 43 GB, and the available KV budget is 480 GB."}
-
-*The KV cache fills HBM, capping concurrent requests.*
-:::
 
 The same formula can be turned into an explicit batch-size limit for production hardware.
 
@@ -2574,9 +2574,21 @@ class PrecisionDividend:
 
 :::
 
+::: {.content-visible when-format="pdf"}
+
+\newpage
+
+:::
+
 ### Speculative decoding {#sec-inference-scale-speculative-decoding-c438}
 
 The previous optimization improved capacity by shrinking state; speculative decoding attacks latency by letting the large model verify several proposed tokens in one pass.
+
+::: {.column-margin}
+![](images/svg/inference_decode_roofline.svg){width="100%" fig-alt="A roofline silhouette: a blue memory-bound slope rising to a dashed ridge line, then an orange compute-bound ceiling. A workload dot sits deep on the memory-bound slope, the regime batch-1 decode occupies before parallel verification raises its arithmetic intensity toward the ridge."}
+
+*Decode is memory-bound; parallel verification moves work toward the ridge.*
+:::
 
 ::: {#dfn-inference-speculative-decoding .callout-definition title="Speculative decoding"}
 
@@ -2601,12 +2613,6 @@ In speculative decoding\index{Speculative Decoding!acceptance rate}\index{Specul
 Autoregressive generation is inherently sequential: each token depends on previous tokens. Speculative decoding[^fn-speculative-cpu-analogy] [@leviathan2023speculative; @chen2023accelerating] breaks this bottleneck by having a small, fast model guess the next several tokens, allowing the massive main model to verify them all in a single parallel step.
 
 [^fn-speculative-cpu-analogy]: **Speculative Execution (CPU to LLM)**: Borrows from CPU branch prediction, where processors execute instructions ahead of confirmation and roll back on misprediction. The critical difference: CPU speculation is invisible to software, while LLM speculation requires explicit draft-verify logic and adds a second model's memory footprint to the serving budget. The trade-off is extra compute and memory for 2--3$\times$ latency reduction, but only when draft acceptance rates exceed roughly 70 percent. \index{Speculative Decoding!CPU analogy}
-
-::: {.column-margin}
-![](images/svg/inference_decode_roofline.svg){width="100%" fig-alt="A roofline silhouette: a blue memory-bound slope rising to a dashed ridge line, then an orange compute-bound ceiling. A workload dot sits deep on the memory-bound slope, the regime batch-1 decode occupies before parallel verification raises its arithmetic intensity toward the ridge."}
-
-*Decode is memory-bound; parallel verification moves work toward the ridge.*
-:::
 
 The speculative decoding algorithm proceeds in three phases:
 
@@ -5263,6 +5269,12 @@ Scaling global infrastructure aggressively is highly effective, but it is also e
 
 ## Weight Quantization for Serving {#sec-inference-scale-weight-quantization-serving-097b}
 
+::: {.column-margin}
+![](images/svg/inference_quantization_capacity_ladder.svg){width="100%" fig-alt="Memory ladder comparing a 140 GB FP16 70B model with a 35 GB INT4 70B model, with the 4x capacity reduction marked as a ratio annotation."}
+
+*INT4 turns a two-GPU model into a one-GPU candidate.*
+:::
+
 Weight quantization for serving is a bottleneck-selection decision: reducing weights from 16-bit floats to 8-bit or 4-bit integers can turn a 140 GB FP16 language model that requires two A100 GPUs into a 35 GB INT4 representation that fits on a single GPU. The trade-off is a small accuracy loss in exchange for a 4$\times$ reduction in memory bandwidth and capacity demand.
 
 ::: {#psp-inference-prior-knowledge-quantization .callout-perspective title="Prior knowledge: Quantization"}
@@ -5272,12 +5284,6 @@ The necessary background is quantization fundamentals including post-training qu
 :::
 
 Quantization reduces numerical precision of model weights and activations, decreasing memory footprint by 2--4$\times$ while increasing decode throughput, which is *memory-bandwidth limited* rather than *compute limited*. The serving decision is which quantity should shrink: resident weights for fit, bytes moved per decode step for bandwidth, activations for prefill throughput, or the precision path supported by target hardware. Serving at scale also introduces distinct challenges: models must be quantized after training without access to training data, quality must be preserved across diverse inputs, and hardware deployment targets vary from data center GPUs to edge accelerators. Production inference therefore needs quantization methods designed for specific serving constraints.
-
-::: {.column-margin}
-![](images/svg/inference_quantization_capacity_ladder.svg){width="100%" fig-alt="Memory ladder comparing a 140 GB FP16 70B model with a 35 GB INT4 70B model, with the 4x capacity reduction marked as a ratio annotation."}
-
-*INT4 turns a two-GPU model into a one-GPU candidate.*
-:::
 
 ### LLM-specific quantization challenges {#sec-inference-scale-llmspecific-quantization-challenges-b7a2}
 
