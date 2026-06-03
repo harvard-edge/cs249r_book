@@ -3984,95 +3984,85 @@ These physical and logistical constraints have defined the current generation of
 
 \index{CXL}
 
-A new data center will host three or four generations of accelerators over its 15-year structural lifetime, and each generation may demand capabilities that the facility must already support. Several technologies under active development matter for that reason: they could alter the constraints that shape fleet design, so infrastructure planners must anticipate shifts in the memory wall, communication wall, and power wall when committing to facility designs, power provisioning, and cooling architectures.
-
 ```{python}
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: InfraFrontierStragglerRecap22.frontier_params_b_str
-class InfraFrontierStragglerRecap22:
+# │ Exports: EmergingInfrastructureRecap.frontier_params_b_str,
+# │          EmergingInfrastructureRecap.frontier_weights_gb_str,
+# │          EmergingInfrastructureRecap.optimizer_state_gb_str,
+# │          EmergingInfrastructureRecap.h100_hbm_bw_tb_per_s_str,
+# │          EmergingInfrastructureRecap.cxl_bw_gb_per_s_str,
+# │          EmergingInfrastructureRecap.cxl_vs_hbm_gap_mult_str,
+# │          EmergingInfrastructureRecap.wse_sram_gb_str,
+# │          EmergingInfrastructureRecap.wse_sram_bw_pb_per_s_str,
+# │          EmergingInfrastructureRecap.wse_memoryx_bw_tb_per_s_str
+class EmergingInfrastructureRecap:
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────────
+    frontier = Models.Language.GPT3
+    h100 = Hardware.Cloud.H100
+    cxl = Hardware.Tech.Storage.CxlPcieGen5
+    wse = Hardware.Cloud.Cerebras_CS3
+
+    # ┌── 2. EXECUTE ──────────────────────────────────────────────────────────
+    frontier_weights = frontier.parameters * BYTES_FP16
+    optimizer_state = frontier.parameters * BYTES_FP32 * 2
+    cxl_vs_hbm_gap = h100.memory.bandwidth / cxl.bandwidth
+
+    # ┌── 3. GUARD ────────────────────────────────────────────────────────────
+    check(cxl.bandwidth < h100.memory.bandwidth, "CXL memory should remain slower than HBM")
+    check(wse.memory.capacity < frontier_weights, "WSE SRAM should not hold 175B FP16 weights")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
+    frontier_params_b_str = fmt_params(frontier.parameters, scale="B", precision=0, commas=False)
+    frontier_weights_gb_str = fmt_memory(frontier_weights, unit=GB, precision=0, commas=False)
+    optimizer_state_gb_str = fmt_memory(optimizer_state, unit=GB, precision=0, commas=True)
+    h100_hbm_bw_tb_per_s_str = fmt_bandwidth(h100.memory.bandwidth, unit=TB / second, precision=2, commas=False)
+    cxl_bw_gb_per_s_str = fmt_bandwidth(cxl.bandwidth, unit=GB / second, precision=0, commas=False)
+    cxl_vs_hbm_gap_mult_str = fmt_multiple(cxl_vs_hbm_gap.to_base_units().magnitude, precision=0, commas=False)
+    wse_sram_gb_str = fmt_memory(wse.memory.capacity, unit=GB, precision=0, commas=False)
+    wse_sram_bw_pb_per_s_str = fmt_bandwidth(wse.memory.bandwidth, unit=PB / second, precision=0, commas=False)
+    wse_memoryx_bw_tb_per_s_str = fmt_bandwidth(wse.interconnect.bandwidth, unit=TB / second, precision=1, commas=False)
 ```
 
-The next generation of hardware confronts head-on the three walls that have governed this chapter: memory, communication, and power. Compute Express Link (CXL) attacks the memory wall by decoupling capacity from individual accelerators, while Wafer-Scale Integration attacks the memory, communication, and power walls simultaneously by eliminating the off-chip boundary entirely. For our `{python} InfraFrontierStragglerRecap22.frontier_params_b_str` model, these technologies would progressively relax the constraints that currently force complex multi-node parallelism: if CXL memory pooling provides terabyte-scale capacity accessible from any accelerator, the memory-capacity constraint would decouple from the per-node HBM budget. (Advances in optical interconnects and disaggregated networking, which attack the communication wall, are covered in @sec-network-fabrics).
+A new data center will host three or four generations of accelerators over its 15-year structural lifetime, so future-facing technologies matter only when they change a durable planning constraint. The useful test is not whether a technology is novel, but which wall it moves, what new wall appears after the move, and which fleet-design decision changes as a result. Compute Express Link (CXL) moves the memory-capacity boundary. Wafer-scale integration moves the chip-to-chip communication boundary. Advanced packaging moves the die boundary inside the accelerator package. None of them repeals the physics of data movement; each relocates the place where infrastructure teams must spend power, cooling, cost, and software complexity.
 
 ### Compute express link (CXL) {#sec-compute-cxl}
 
 \index{CXL!memory pooling}
 
-The most significant near-term change to the node architecture is **Compute Express Link (CXL)**[^fn-cxl-coherent], a cache-coherent interconnect built on the PCIe physical layer that enables CPUs and accelerators to share a unified, coherent memory space. CXL addresses a fundamental limitation of the current architecture: the rigid boundary between GPU HBM and host DRAM.
+The most significant near-term change to the node architecture is **Compute Express Link (CXL)**[^fn-cxl-coherent], a cache-coherent interconnect built on the PCIe physical layer that enables CPUs, accelerators, and memory expansion devices to share a coherent address space. Its value is not that it makes remote memory fast. Its value is that it makes capacity less rigid. Instead of treating each node's host DRAM as a fixed local pool and each accelerator's HBM as an isolated high-speed island, a CXL fabric can expose memory expanders or pooled memory to the devices that need capacity at a particular phase of the training step.
 
-[^fn-cxl-coherent]: **CXL (Compute Express Link)**: An open standard (CXL Consortium, founded by Intel in 2019) that adds cache-coherent memory semantics atop the PCIe physical layer via three sub-protocols: CXL.io, CXL.cache, and CXL.mem. CXL 3.0 (ratified 2023) enables memory pooling, allowing terabyte-scale capacity shared across nodes at ~64 GB/s -- roughly 50$\times$ slower than HBM3 but sufficient for optimizer states that are accessed only during the parameter update step, potentially decoupling the memory-capacity constraint from the per-node HBM budget. \index{CXL!coherent interconnect}
+[^fn-cxl-coherent]: **CXL (Compute Express Link)**: An open standard (CXL Consortium, founded by Intel in 2019) that adds cache-coherent memory semantics atop the PCIe physical layer through CXL.io, CXL.cache, and CXL.mem. CXL 3.0 extends the model toward memory pooling, allowing capacity to be shared through a fabric rather than fixed permanently inside one server chassis. \index{CXL!coherent interconnect}
 
-In the current node design, GPU HBM and host DRAM are separate address spaces. Moving data between them requires explicit copies over PCIe, managed by the training framework's memory manager. This explicit management is a source of both software complexity and performance overhead: every byte that moves between HBM and DRAM incurs a PCIe transfer latency of several microseconds, and the programmer must carefully schedule these transfers to overlap with computation.
+For ML training, the natural target is cold or phase-local state rather than the active matrix-multiply working set. The Adam optimizer state for our `{python} EmergingInfrastructureRecap.frontier_params_b_str` model occupies `{python} EmergingInfrastructureRecap.optimizer_state_gb_str`, and it is touched during parameter updates rather than streamed through every Tensor Core operation. A shared CXL pool could therefore reduce per-node memory pressure by holding optimizer shards, embedding-table spillover, or local data-cache buffers outside the accelerator HBM tier. The training framework still has to schedule this state carefully, but the placement problem becomes less binary than "fits in this node" or "spills to storage."
 
-CXL changes this by creating a **unified memory fabric**\index{Unified memory fabric!CXL} where the GPU can directly access host-attached CXL memory (and vice versa) through load and store instructions, without explicit copies. The CXL protocol maintains cache coherence across the fabric, ensuring that all devices see a consistent view of the shared memory. For ML workloads, optimizer states stored in CXL-attached memory can be accessed by the GPU at CXL bandwidth (approximately 64 GB/s for CXL 3.0, compared to the current PCIe Gen5 effective bandwidth of 50--60 GB/s) without the programming complexity of explicit memory management.
-
-The more consequential application of CXL is **memory pooling**\index{Memory pooling!CXL}. CXL 3.0 enables a pool of memory devices (CXL memory expanders) connected to a CXL switch, with the pooled memory accessible by any processor or accelerator connected to the same switch. This decouples memory capacity from the number of compute devices: instead of each node having a fixed amount of DDR, a CXL memory pool can be dynamically allocated to whichever nodes need it most.
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: InfraFrontierEmergingCxlRecap.frontier_params_b_str
-class InfraFrontierEmergingCxlRecap:
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
-```
-For ML training, memory pooling addresses the optimizer state problem directly. The 1,400 GB of optimizer state for our `{python} InfraFrontierEmergingCxlRecap.frontier_params_b_str` model could reside in a shared CXL memory pool rather than being replicated or sharded across individual nodes. Nodes that are executing the compute-intensive forward and backward passes would access only their weight and activation shards from HBM, while the optimizer state would be fetched from the CXL pool only during the parameter update step. This architecture would reduce the per-node memory requirement and potentially allow training of larger models on fewer nodes.
-
-```{python}
-#| echo: false
-from mlsysim.fmt import fmt_qty
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: MemoryBandwidthEmergingRecap.h100_bw_tb_per_s_str
-class MemoryBandwidthEmergingRecap:
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    h100_bw_tb_per_s_str = fmt_qty(Hardware.Cloud.H100.memory.bandwidth, TB/second, precision=2, commas=False)
-```
+The new wall is bandwidth. A representative CXL memory path over PCIe Gen5 x16 provides `{python} EmergingInfrastructureRecap.cxl_bw_gb_per_s_str`, while H100 HBM provides `{python} EmergingInfrastructureRecap.h100_hbm_bw_tb_per_s_str`. That `{python} EmergingInfrastructureRecap.cxl_vs_hbm_gap_mult_str` gap means weights and activations for the forward and backward passes still belong in HBM. CXL is a capacity tier, not an HBM replacement. The fleet-design implication is concrete: planners should ask whether server platforms, rack layouts, and orchestration software can absorb CXL memory pooling as it matures, not whether CXL will remove the need for high-bandwidth accelerator memory.
 
 ::: {.content-visible when-format="pdf"}
 \newpage
 :::
 
 ::: {.column-margin}
-![](images/svg/compute_infrastructure_cxl_bandwidth_gap.svg){width="100%" fig-alt="Two-rung bandwidth ladder comparing HBM3 at about 3.35 terabytes per second with CXL3 at 64 gigabytes per second, annotated as roughly 50 times slower."}
+![](images/svg/compute_infrastructure_cxl_bandwidth_gap.svg){width="100%" fig-alt="Two-rung bandwidth ladder comparing HBM3 with CXL memory and showing a large bandwidth gap."}
 
-*HBM is 50-fold faster, so CXL is capacity only.*
+*HBM remains `{python} EmergingInfrastructureRecap.cxl_vs_hbm_gap_mult_str` faster, so CXL is capacity only.*
 :::
-
-The challenge is bandwidth. CXL 3.0 over a PCIe Gen5 x16 link provides approximately 64 GB/s of read bandwidth, which is roughly 50$\times$ slower than HBM3 (`{python} MemoryBandwidthEmergingRecap.h100_bw_tb_per_s_str`). Data that must be accessed at HBM speeds (weights and activations during the forward and backward passes) cannot reside in CXL memory without creating severe bottlenecks. CXL memory is therefore a complement to HBM, not a replacement: it extends the capacity of the memory hierarchy without competing with HBM's bandwidth tier.
-
-At the 2025–2027 planning horizon, the practical question is less whether CXL replaces HBM than whether the platform can absorb CXL memory pooling as it matures. Infrastructure planners should ensure that server platforms expose CXL support and that rack layouts can accommodate CXL memory expander modules.
 
 ### Wafer-scale integration {#sec-compute-wafer-scale-integration}
 
 \index{Wafer-Scale Integration}
 
-At the opposite extreme from disaggregation, **wafer-scale integration**\index{Wafer-scale integration!definition} maximizes the amount of compute on a single piece of silicon. Cerebras Systems' Wafer-Scale Engine (WSE) is the most prominent example: a single chip fabricated on an entire 300 mm silicon wafer, containing approximately 900,000 processing cores and 44 GB of on-chip SRAM distributed across the cores. The WSE eliminates the off-chip memory bottleneck entirely for models that fit in its on-chip SRAM, because every core can access any SRAM bank through the on-die mesh network at multi-hundred-TB/s aggregate bandwidth.
+At the opposite extreme from CXL, **wafer-scale integration**\index{Wafer-scale integration!definition} tries to make the cluster look like a chip. Cerebras Systems' CS-3 system, built around the WSE-3, exposes `{python} EmergingInfrastructureRecap.wse_sram_gb_str` of on-wafer SRAM and `{python} EmergingInfrastructureRecap.wse_sram_bw_pb_per_s_str` of local memory bandwidth. When a workload's active state fits this on-wafer memory, the usual chip-to-chip communication wall largely disappears: data moves across an on-die mesh instead of crossing package traces, board links, or a data-center fabric.
 
-The approach directly attacks the memory wall. By replacing HBM (which is off-chip, connected via an interposer) with distributed on-chip SRAM (which is on-die, connected via a few-millimeter mesh), the WSE reduces data access latency from nanoseconds (HBM) to sub-nanosecond (SRAM) and increases aggregate bandwidth to levels that no discrete accelerator can match. For models that fit within the 44 GB of on-chip memory, the WSE can achieve near-100 percent utilization of its arithmetic units, because the memory system is never the bottleneck.
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: InfraFrontierEmergingSramRecap.frontier_params_b_str
-class InfraFrontierEmergingSramRecap:
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
-```
-
-The limitation is that 44 GB of SRAM is insufficient for frontier models. Our `{python} InfraFrontierEmergingSramRecap.frontier_params_b_str` model requires 350 GB for weights alone, far exceeding the WSE's capacity. Cerebras addresses this through a model-parallel scheme where the WSE processes layers sequentially, with weights streamed from external memory (MemoryX units) to the chip. This weight streaming approach works well for inference (where each layer is used once per token) but introduces pipelining complexity for training (where each layer is used in both forward and backward passes with different activations).
+The new wall is capacity and injection bandwidth. Our `{python} EmergingInfrastructureRecap.frontier_params_b_str` running model needs `{python} EmergingInfrastructureRecap.frontier_weights_gb_str` for FP16 weights alone, far beyond the WSE's on-wafer SRAM. Cerebras addresses this class of workload through weight streaming, where external MemoryX units feed weights to the wafer over a `{python} EmergingInfrastructureRecap.wse_memoryx_bw_tb_per_s_str` path while the wafer executes the layer. That can be a good match for inference and for workloads whose computation can be staged cleanly, but training reintroduces harder scheduling questions because activations, gradients, and optimizer updates must be coordinated across forward and backward passes.
 
 Wafer-scale integration also faces manufacturing challenges. Because the chip spans an entire wafer, individual defective cores must be disabled and routed around using redundant interconnect paths. The yield model is fundamentally different from conventional chips: rather than discarding entire dies with defects, the WSE includes spare cores and spare interconnect links that can be activated to replace defective ones. This redundancy-based yield strategy works because neural network workloads are tolerant of slight variations in available compute (losing 1 percent of cores has negligible impact on training throughput).
 
-The wafer-scale approach is instructive even for organizations that do not deploy WSE systems, because it illustrates the fundamental trade-off between memory proximity and memory capacity. The WSE achieves extraordinary bandwidth by placing memory on the same die as compute, but at the cost of capacity. HBM achieves a middle ground: off-chip but on-package, with moderate bandwidth and moderate capacity. DDR achieves the other extreme: off-package, with low bandwidth but high capacity. Every point on this continuum represents a different resolution of the memory wall trade-off, and the optimal choice depends on the model's memory footprint and access pattern.
+The lesson for infrastructure planners is not that wafer-scale systems replace GPU fleets. It is that memory proximity and memory capacity trade against each other. WSE-style designs buy extraordinary local bandwidth by putting the working set near the arithmetic, while CXL buys flexible capacity by moving memory farther away. HBM sits between those extremes: off-chip but on-package, smaller than host memory but fast enough for the active computation. The right architecture is the one whose memory tier matches the workload's reuse pattern.
 
-Underpinning all of these technologies is the evolution of **advanced packaging**\index{Advanced Packaging}, which determines how efficiently multiple silicon dies can communicate within a single package. The reticle limit of approximately 858 mm$^2$ forces next-generation accelerators into multi-die (chiplet) designs, where the packaging technology determines the effective bandwidth between dies. Current **2.5D interposers**\index{2.5D interposers} (such as TSMC's CoWoS) mount multiple compute dies and HBM stacks on a passive silicon bridge, achieving bandwidth densities orders of magnitude higher than PCB traces. The next frontier is **3D stacking**\index{3D stacking} (SoIC), where SRAM caches or compute logic are vertically stacked directly atop one another, reducing data travel distance to microns. This vertical integration attacks the memory wall by placing cache memory directly above the compute logic, but introduces a thermal wall: dissipating heat from the bottom layer of a 3D stack without overheating the top layer requires exotic solutions like microfluidic cooling channels etched directly into the silicon substrate. For infrastructure planners, the implication is that next-generation accelerators will be larger, more complex packages that demand even more sophisticated cooling solutions and power delivery -- extending the trends already visible in the transition from H100 to B200.
+Underpinning both directions is the evolution of **advanced packaging**\index{Advanced Packaging}. Packaging moves the boundary inside the accelerator package rather than all the way out to the rack or all the way in to a single wafer. Current **2.5D interposers**\index{2.5D interposers} mount compute dies and HBM stacks on a shared silicon substrate, allowing chiplet-based accelerators to behave like a single device for most software. The next step, **3D stacking**\index{3D stacking}, places SRAM caches or logic vertically above one another, shortening data paths further. The wall that appears next is thermal: dense vertical integration makes it harder to remove heat from buried layers. The fleet-design consequence is that future accelerators may demand liquid cooling, tighter power transients, and more conservative rack layouts before their architectural advantages can be realized.
 
-The common theme is relocation rather than elimination: each technology seeks to flatten one or more of the bandwidth cliffs that define the current infrastructure hierarchy. CXL blurs the boundary between HBM and DRAM. Optical interconnects narrow the gap between intra-node and inter-node bandwidth. Disaggregated architectures decouple the fixed ratios that current node designs impose. Wafer-scale integration eliminates the off-chip memory boundary entirely. None of these technologies will eliminate the fundamental physics of data movement (signals travel at a finite speed, and moving data over longer distances consumes more energy), but each shifts the location and magnitude of the bottlenecks, which in turn reshapes the optimal fleet architecture.
+The common theme is relocation rather than elimination. CXL moves capacity outward into a fabric and leaves bandwidth as the limiting discipline. Wafer-scale integration moves communication inward and leaves capacity and yield as the limiting disciplines. Advanced packaging compresses die-to-die distance and leaves power density as the limiting discipline. Future infrastructure planning therefore still begins with the same question used throughout this chapter: where will the next byte move, how fast must it arrive, and what physical system has to be built so that movement does not dominate the workload?
 
 Because the bottlenecks move rather than disappear, the same planning mistakes recur: teams optimize the visible specification and miss the binding constraint.
 

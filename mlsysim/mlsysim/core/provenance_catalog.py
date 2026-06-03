@@ -149,6 +149,13 @@ STORAGE_TIER_CONVENTIONS = _conv(
     "prov:storage-tier-conventions",
     "Generic storage/memory bandwidth tiers (NVMe Gen3/4/5, DDR, host DRAM) from vendor datasheet ranges",
 )
+CXL_PCIE_GEN5_BW = Provenance(
+    id="prov:cxl-pcie-gen5-x16-bw-derived",
+    kind=ProvenanceKind.DERIVED,
+    ref="Reference CXL memory tier over PCIe Gen5 x16 -> 64 GB/s",
+    notes="Teaching anchor for a CXL 3.x memory-expansion link using the same byte-rate convention as the H100 PCIe Gen5 x16 profile.",
+    verified="2026-06-03",
+)
 STORAGE_ACCESS_PATH_REFERENCE = _conv(
     "prov:storage-access-path-reference",
     "Reference GPU-storage access-path latencies for traditional CPU-mediated I/O and GPU Direct Storage bypass paths",
