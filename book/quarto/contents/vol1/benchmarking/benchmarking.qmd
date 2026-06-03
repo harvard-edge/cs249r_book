@@ -59,7 +59,7 @@ ML benchmarking operates across three independent dimensions that map directly t
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Benchmarking definition callout (peak vs sustained gap).
 # │ Goal: A100 peak TFLOP/s for the significance bullet below.
-# │ Exports: A100PeakBenchmark.a100_tflops_fp16_str
+# │ Exports: A100PeakBenchmark.a100_fp16_tflop_per_s_str
 from mlsysim import *
 from mlsysim.core.constants import *
 from mlsysim import Hardware
@@ -70,14 +70,14 @@ class A100PeakBenchmark:
     _peak_flops = Hardware.Cloud.A100.compute.peak_flops
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    a100_tflops_fp16_str = fmt_flop_rate(_peak_flops, unit=TFLOP / second, precision=0, commas=False)
+    a100_fp16_tflop_per_s_str = fmt_flop_rate(_peak_flops, unit=TFLOP / second, precision=0, commas=False)
 ```
 
 ::: {#dfn-benchmarking-machine-learning-benchmarking .callout-definition title="Machine learning benchmarking"}
 
 ***Machine Learning Benchmarking***\index{Benchmarking!definition} is the empirical measurement of a system's end-to-end performance on representative ML workloads, designed to decouple marketed peak specifications from the sustained throughput and latency achievable under realistic operating conditions.
 
-1.  **Significance (quantitative)**: The gap between peak and sustained performance is large and structurally unavoidable. An A100 GPU delivers `{python} A100PeakBenchmark.a100_tflops_fp16_str` (BF16) at peak, but production transformer training runs typically sustain 90–155 TFLOP/s (30–50 percent MFU), about a 2--3.5$\times$ gap that exists even in optimally tuned systems due to memory stalls, pipeline bubbles, and kernel launch overhead. Benchmarking quantifies this $\eta_{\text{hw}}$ gap; vendor spec sheets do not.
+1.  **Significance (quantitative)**: The gap between peak and sustained performance is large and structurally unavoidable. An A100 GPU delivers `{python} A100PeakBenchmark.a100_fp16_tflop_per_s_str` (BF16) at peak, but production transformer training runs typically sustain 90–155 TFLOP/s (30–50 percent MFU), about a 2--3.5$\times$ gap that exists even in optimally tuned systems due to memory stalls, pipeline bubbles, and kernel launch overhead. Benchmarking quantifies this $\eta_{\text{hw}}$ gap; vendor spec sheets do not.
 2.  **Distinction (durable)**: Unlike micro-benchmarks, which measure individual kernel performance such as a general matrix multiply (GEMM) at peak matrix dimensions, ML benchmarks measure the full stack: data loading, preprocessing, forward pass, gradient computation, optimizer step, and checkpoint I/O—exposing bottlenecks that individual-component benchmarks will never reveal.
 3.  **Common pitfall**: A frequent misconception is that benchmark numbers are stable references. Both the workload (new model architectures) and the hardware (new GPU generations) evolve, so a benchmark result that represents state-of-the-art today becomes the new baseline within 12–18 months, making year-over-year comparisons meaningful only when the benchmark version is held constant.
 
@@ -455,7 +455,8 @@ The same metric trap appears concretely when a translation benchmark rewards BLE
 # │ How:     Direct ratios on the team's reported numbers, with invariants that
 # │          fix the 4x slowdown and 10x beam expansion.
 # │
-# │ Imports: mlsysim.fmt (fmt, check)
+# │ Imports: mlsysim.fmt (fmt, check, fmt_memory, fmt_multiple, fmt_percent,
+# │          fmt_pp, fmt_rate, fmt_time)
 # │ Exports: GoodhartBLEUCalc.original_bleu_str,
 # │          GoodhartBLEUCalc.optimized_bleu_str,
 # │          GoodhartBLEUCalc.bleu_gain_str,
@@ -601,8 +602,8 @@ System benchmarks serve two functions. For practitioners, they enable informed h
 # │
 # │ Imports: mlsysim (Hardware), mlsysim.constants (Hardware.Cloud.A100.compute.precision_flops["fp32"], TFLOPs,
 # │          second, TB, GB), mlsysim.book (fmt)
-# │ Exports: a100_tflops_fp16_str, a100_tflops_fp32_str,
-# │          a100_bw_tbs_str, a100_ridge_str
+# │ Exports: a100_fp16_tflop_per_s_str, a100_fp32_tflop_per_s_str,
+# │          a100_bw_tb_per_s_str, a100_ridge_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_bandwidth, fmt_flop_rate, fmt_int
 
@@ -617,15 +618,15 @@ class A100Roofline:
     _a100_ridge = Hardware.Cloud.A100.ridge_point().to(flop/byte).magnitude
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    a100_tflops_fp16_str = fmt_flop_rate(_a100_fp16, unit=TFLOP / second, precision=0, commas=False)
-    a100_tflops_fp32_str = fmt_flop_rate(_a100_fp32, unit=TFLOP / second, precision=1, commas=False)
-    a100_bw_tbs_str = fmt_bandwidth(_a100_bw, unit=TB / second, precision=2, commas=False)
+    a100_fp16_tflop_per_s_str = fmt_flop_rate(_a100_fp16, unit=TFLOP / second, precision=0, commas=False)
+    a100_fp32_tflop_per_s_str = fmt_flop_rate(_a100_fp32, unit=TFLOP / second, precision=1, commas=False)
+    a100_bw_tb_per_s_str = fmt_bandwidth(_a100_bw, unit=TB / second, precision=2, commas=False)
     a100_ridge_str = fmt_int(round(_a100_ridge), commas=False)
 ```
 
 \index{Arithmetic Intensity!threshold for compute vs. memory bound}
 \index{Accelerator!specifications, roofline analysis example}
-Effective benchmark interpretation requires knowing the performance characteristics of target hardware. Whether a specific AI workload is compute bound or memory-bound provides essential insight for optimization decisions. Computational intensity, measured as FLOP/byte[^fn-flops-throughput], determines performance limits. Consider an NVIDIA A100 GPU with `{python} A100Roofline.a100_tflops_fp16_str` of FP16 Tensor Core performance (FP32 is `{python} A100Roofline.a100_tflops_fp32_str`) and `{python} A100Roofline.a100_bw_tbs_str` memory bandwidth (SXM variant). Dividing peak compute by peak bandwidth yields an arithmetic intensity threshold of `{python} A100Roofline.a100_ridge_str` FLOP/byte. Workloads below this threshold are bottlenecked by memory bandwidth, while those above are bottlenecked by compute capacity. The roofline model in @sec-hardware-acceleration-roofline-model-42ff provides the architectural foundation for interpreting these benchmark results. @Sec-appdx-machine-foundations-roofline-model-2529 derives the roofline equation and the ridge-point threshold from first principles, so the arithmetic intensity bound used here can be reconstructed for any accelerator.
+Effective benchmark interpretation requires knowing the performance characteristics of target hardware. Whether a specific AI workload is compute bound or memory-bound provides essential insight for optimization decisions. Computational intensity, measured as FLOP/byte[^fn-flops-throughput], determines performance limits. Consider an NVIDIA A100 GPU with `{python} A100Roofline.a100_fp16_tflop_per_s_str` of FP16 Tensor Core performance (FP32 is `{python} A100Roofline.a100_fp32_tflop_per_s_str`) and `{python} A100Roofline.a100_bw_tb_per_s_str` memory bandwidth (SXM variant). Dividing peak compute by peak bandwidth yields an arithmetic intensity threshold of `{python} A100Roofline.a100_ridge_str` FLOP/byte. Workloads below this threshold are bottlenecked by memory bandwidth, while those above are bottlenecked by compute capacity. The roofline model in @sec-hardware-acceleration-roofline-model-42ff provides the architectural foundation for interpreting these benchmark results. @Sec-appdx-machine-foundations-roofline-model-2529 derives the roofline equation and the ridge-point threshold from first principles, so the arithmetic intensity bound used here can be reconstructed for any accelerator.
 
 ::: {#dfn-benchmarking-machine-learning-system-benchmarks .callout-definition title="Machine learning system benchmarks"}
 
@@ -653,7 +654,7 @@ Effective benchmark interpretation requires knowing the performance characterist
 # │ Imports: mlsysim.core.constants (Hardware.Cloud.A100.memory.bandwidth, Hardware.Cloud.A100.compute.peak_flops, TB, TFLOPs,
 # │          second), mlsysim.book (fmt)
 # │ Exports: resnet_ai_str, resnet_util_min_str, resnet_util_max_str,
-# │          resnet_perf_tflops_str, bert_ai_b1_str, bert_perf_b1_tflops_str,
+# │          resnet_perf_tflop_per_s_str, bert_ai_b1_str, bert_perf_b1_tflop_per_s_str,
 # │          bert_util_b1_str, utilization_peak_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
@@ -698,27 +699,27 @@ class RooflineExamples:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     # A100 context
-    a100_tflops_fp16_str = fmt_flop_rate(peak_flops, unit=TFLOP / second, precision=0, commas=False)
-    a100_bw_tbs_str = fmt_bandwidth(peak_bw, unit=TB / second, precision=2, commas=False)
+    a100_fp16_tflop_per_s_str = fmt_flop_rate(peak_flops, unit=TFLOP / second, precision=0, commas=False)
+    a100_bw_tb_per_s_str = fmt_bandwidth(peak_bw, unit=TB / second, precision=2, commas=False)
     a100_ridge_str = fmt_int(round(ridge_point), commas=False)
 
     # ResNet
     resnet_ai_str = fmt(resnet_ai, precision=0, commas=False)
     resnet_util_min_str = fmt_percent(resnet_util_min/100, precision=0, commas=False, style='prose')
     resnet_util_max_str = fmt_percent(resnet_util_max/100, precision=0, commas=False, style='prose')
-    resnet_perf_tflops_str = fmt_flop_rate(resnet_perf_tflops, unit=TFLOP / second, precision=1, commas=False)
+    resnet_perf_tflop_per_s_str = fmt_flop_rate(resnet_perf_tflops, unit=TFLOP / second, precision=1, commas=False)
 
     # BERT
     bert_ai_b1_str = fmt(bert_ai_b1, precision=0, commas=False)
-    bert_perf_b1_tflops_str = fmt_flop_rate(bert_perf_b1, unit=TFLOP / second, precision=1, commas=False)
+    bert_perf_b1_tflop_per_s_str = fmt_flop_rate(bert_perf_b1, unit=TFLOP / second, precision=1, commas=False)
     bert_util_b1_str = fmt_percent(bert_util_b1/100, precision=1, commas=False, style='prose')
     utilization_peak_pct_str = fmt_percent(bert_util_peak, precision=0, commas=False, style='prose')
 ```
 
-[^fn-flops-throughput]: **FLOP/s (Floating-Point Operations Per Second)**: The gap between advertised peak FLOP/s and achieved FLOP/s is the central tension in hardware benchmarking. The A100 advertises `{python} RooflineExamples.a100_tflops_fp16_str` FP16 Tensor Core, but real workloads achieve 30--60 percent of peak depending on arithmetic intensity and memory access patterns. Reporting peak FLOP/s without utilization context is the most common benchmarking distortion. \index{FLOP/s!peak vs. achieved}
+[^fn-flops-throughput]: **FLOP/s (Floating-Point Operations Per Second)**: The gap between advertised peak FLOP/s and achieved FLOP/s is the central tension in hardware benchmarking. The A100 advertises `{python} RooflineExamples.a100_fp16_tflop_per_s_str` FP16 Tensor Core, but real workloads achieve 30--60 percent of peak depending on arithmetic intensity and memory access patterns. Reporting peak FLOP/s without utilization context is the most common benchmarking distortion. \index{FLOP/s!peak vs. achieved}
 
 \index{ResNet-50!roofline analysis}
-High-intensity operations like dense matrix multiplication in certain AI model operations (typically >150 FLOP/byte) achieve near-peak computational throughput on the A100. For example, a ResNet-50 forward pass on large batch sizes (256+) achieves arithmetic intensity of ~`{python} RooflineExamples.resnet_ai_str` FLOP/byte, enabling `{python} RooflineExamples.resnet_util_min_str`–`{python} RooflineExamples.resnet_util_max_str` of peak tensor performance (approximately `{python} RooflineExamples.resnet_perf_tflops_str` achieved vs. `{python} RooflineExamples.a100_tflops_fp16_str` theoretical) [@choquette2021]. Conversely, low-intensity operations like activation functions and certain lightweight operations (<10 FLOP/byte) become memory bandwidth limited, using only a fraction of the GPU's computational capacity. Considering only weight loading bytes, a BERT inference with batch size one achieves only ~`{python} RooflineExamples.bert_ai_b1_str` FLOP/byte arithmetic intensity, limiting performance to ~`{python} RooflineExamples.bert_perf_b1_tflops_str` (`{python} RooflineExamples.a100_bw_tbs_str` $\times$ `{python} RooflineExamples.bert_ai_b1_str` FLOP/byte), representing roughly `{python} RooflineExamples.bert_util_b1_str` of peak computational capability. Including additional data movement (KV cache and activations) would lower this further, illustrating how data movement assumptions significantly affect roofline predictions. @Sec-appdx-machine-foundations-concrete-example-a100-analysis-5b30 works the same calculation end to end on the A100, contrasting a compute-bound GEMM against a memory-bound element-wise operation, so the intensity-to-utilization steps applied here generalize to any model-hardware pair.
+High-intensity operations like dense matrix multiplication in certain AI model operations (typically >150 FLOP/byte) achieve near-peak computational throughput on the A100. For example, a ResNet-50 forward pass on large batch sizes (256+) achieves arithmetic intensity of ~`{python} RooflineExamples.resnet_ai_str` FLOP/byte, enabling `{python} RooflineExamples.resnet_util_min_str`–`{python} RooflineExamples.resnet_util_max_str` of peak tensor performance (approximately `{python} RooflineExamples.resnet_perf_tflop_per_s_str` achieved vs. `{python} RooflineExamples.a100_fp16_tflop_per_s_str` theoretical) [@choquette2021]. Conversely, low-intensity operations like activation functions and certain lightweight operations (<10 FLOP/byte) become memory bandwidth limited, using only a fraction of the GPU's computational capacity. Considering only weight loading bytes, a BERT inference with batch size one achieves only ~`{python} RooflineExamples.bert_ai_b1_str` FLOP/byte arithmetic intensity, limiting performance to ~`{python} RooflineExamples.bert_perf_b1_tflop_per_s_str` (`{python} RooflineExamples.a100_bw_tb_per_s_str` $\times$ `{python} RooflineExamples.bert_ai_b1_str` FLOP/byte), representing roughly `{python} RooflineExamples.bert_util_b1_str` of peak computational capability. Including additional data movement (KV cache and activations) would lower this further, illustrating how data movement assumptions significantly affect roofline predictions. @Sec-appdx-machine-foundations-concrete-example-a100-analysis-5b30 works the same calculation end to end on the A100, contrasting a compute-bound GEMM against a memory-bound element-wise operation, so the intensity-to-utilization steps applied here generalize to any model-hardware pair.
 
 \index{BERT!roofline analysis at batch 1}
 \index{Roofline Model!batch size effect on utilization}
@@ -751,19 +752,19 @@ A worked BERT inference estimate shows how these roofline principles translate i
 # │ Show: How batching shifts BERT from the memory-bound to compute-bound regime.
 # │ How: Calculate arithmetic intensity and predict throughput across batch sizes.
 # │
-# │ Imports: mlsysim (Models, Hardware), mlsysim.constants (Hardware.Cloud.A100.compute.peak_flops, TFLOPs, second, Mparam, Bparam, BYTES_FP32, MB, TB),
+# │ Imports: mlsysim (Models, Hardware), mlsysim.constants (Hardware.Cloud.A100.compute.peak_flops, TFLOPs, second, Mparam, Bparam, BYTES_FP32, MB, TB, GFLOPs),
 # │          mlsysim.book (fmt)
-# │ Exports: BertRoofline.bert_params_m_str, BertRoofline.bert_flops_b_str,
+# │ Exports: BertRoofline.bert_params_m_str, BertRoofline.bert_gflop_str,
 # │          BertRoofline.bert_weight_mb_str, BertRoofline.bert_ai_b1_str,
-# │          BertRoofline.bert_perf_b1_tflops_str, BertRoofline.bert_util_b1_str,
-# │          BertRoofline.bert_batch32_flops_str, BertRoofline.bert_ai_b32_str,
+# │          BertRoofline.bert_perf_b1_tflop_per_s_str, BertRoofline.bert_util_b1_str,
+# │          BertRoofline.bert_batch32_gflop_str, BertRoofline.bert_ai_b32_str,
 # │          BertRoofline.bert_ai_eq_str, BertRoofline.bert_b32_flops_eq_str,
-# │          BertRoofline.bert_perf_b32_tflops_str, BertRoofline.batch32_str,
+# │          BertRoofline.bert_perf_b32_tflop_per_s_str, BertRoofline.batch32_str,
 # │          BertRoofline.utilization_peak_str,
 # │          BertRoofline.utilization_peak_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Hardware
-from mlsysim.fmt import fmt_int, fmt, check, MarkdownStr, fmt_bandwidth, fmt_flop_rate, fmt_memory
+from mlsysim.fmt import fmt_int, fmt, check, MarkdownStr, fmt_bandwidth, fmt_flop_rate, fmt_flops, fmt_magnitude, fmt_memory, fmt_params
 
 # ┌── LEGO ───────────────────────────────────────────────
 class BertRoofline:
@@ -814,35 +815,37 @@ class BertRoofline:
           "Weights-only AI must match FLOPs ÷ weight bytes.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    bert_params_m_str = fmt(bert_params_m, precision=0, commas=False)
-    bert_flops_b_str = fmt(bert_flops_b, precision=0, commas=False)
-    _bert_weight_mb_raw_str = fmt_memory(bert_weight, unit=MB, precision=0, commas=False)
+    bert_params_m_str = fmt_params(m_bert.parameters, scale="M", precision=0, commas=False)
+    bert_gflop_value_str = fmt_magnitude(m_bert.inference_flops, unit=GFLOPs, precision=0, commas=False)
+    bert_gflop_str = fmt_flops(m_bert.inference_flops, unit=GFLOPs, precision=0, commas=False)
+    bert_weight_mb_value_str = fmt_magnitude(bert_weight, unit=MB, precision=0, commas=False)
     bert_weight_mb_str = fmt_memory(bert_weight, unit=MB, precision=0, commas=False)
 
     bert_ai_b1_str = fmt_int(round(ai_b1), commas=False)
-    bert_perf_b1_tflops_str = fmt_flop_rate(perf_b1, unit=TFLOP / second, precision=1, commas=False)
+    bert_perf_b1_tflop_per_s_str = fmt_flop_rate(perf_b1, unit=TFLOP / second, precision=1, commas=False)
     bert_util_b1_str = fmt_percent(util_b1/100, precision=1, commas=False, style='prose')
 
-    bert_batch32_flops_str = fmt(flops_b32, precision=0, commas=False)
+    bert_batch32_gflop_value_str = fmt_magnitude(m_bert.inference_flops * batch_32, unit=GFLOPs, precision=0, commas=False)
+    bert_batch32_gflop_str = fmt_flops(m_bert.inference_flops * batch_32, unit=GFLOPs, precision=0, commas=False)
     bert_ai_b32_str = fmt_int(round(ai_b32), commas=False)
 
     # Wrap mixed prose+math in MarkdownStr() — use raw (unsuffixed) values
     bert_ai_eq_str = MarkdownStr(
-        f"({bert_flops_b_str} $\\times$ $10^{{9}}$) ÷ ({_bert_weight_mb_raw_str} $\\times$ $10^{{6}}$)"
+        f"({bert_gflop_value_str} $\\times$ $10^{{9}}$) ÷ ({bert_weight_mb_value_str} $\\times$ $10^{{6}}$)"
     )
-    bert_b32_flops_eq_str = MarkdownStr(f"{bert_flops_b_str} $\\times$ $10^{{9}}$ $\\times$ {batch_32}")
+    bert_b32_flops_eq_str = MarkdownStr(f"{bert_gflop_value_str} $\\times$ $10^{{9}}$ $\\times$ {batch_32}")
     bert_ai_b32_eq_str = MarkdownStr(
-        f"({bert_batch32_flops_str} $\\times$ $10^{{9}}$) ÷ ({_bert_weight_mb_raw_str} $\\times$ $10^{{6}}$)"
+        f"({bert_batch32_gflop_value_str} $\\times$ $10^{{9}}$) ÷ ({bert_weight_mb_value_str} $\\times$ $10^{{6}}$)"
     )
 
-    bert_perf_b32_tflops_str = fmt_flop_rate(perf_b32, unit=TFLOP / second, precision=1, commas=False)
+    bert_perf_b32_tflop_per_s_str = fmt_flop_rate(perf_b32, unit=TFLOP / second, precision=1, commas=False)
     batch32_str = MarkdownStr(str(batch_32))
     util_peak = 0.85
     utilization_peak_str = fmt_percent(util_peak, precision=0, commas=False, style='prose')
     utilization_peak_pct_str = fmt_percent(util_peak, precision=0, commas=False, style='prose')
 
-    a100_tflops_fp16_str = fmt_flop_rate(peak_flops, unit=TFLOP / second, precision=0, commas=False)
-    a100_bw_tbs_str = fmt_bandwidth(peak_bw, unit=TB / second, precision=2, commas=False)
+    a100_fp16_tflop_per_s_str = fmt_flop_rate(peak_flops, unit=TFLOP / second, precision=0, commas=False)
+    a100_bw_tb_per_s_str = fmt_bandwidth(peak_bw, unit=TB / second, precision=2, commas=False)
     a100_ridge_str = fmt_int(round(ridge_point), commas=False)
 ```
 
@@ -852,36 +855,36 @@ class BertRoofline:
 
 **Step 1**: Hardware limits.
 
-- Peak compute: `{python} BertRoofline.a100_tflops_fp16_str` (FP16 Tensor Core)
-- Memory bandwidth: `{python} BertRoofline.a100_bw_tbs_str`
-- Ridge point: `{python} BertRoofline.a100_tflops_fp16_str` ÷ `{python} BertRoofline.a100_bw_tbs_str` = `{python} BertRoofline.a100_ridge_str` FLOP/byte
+- Peak compute: `{python} BertRoofline.a100_fp16_tflop_per_s_str` (FP16 Tensor Core)
+- Memory bandwidth: `{python} BertRoofline.a100_bw_tb_per_s_str`
+- Ridge point: `{python} BertRoofline.a100_fp16_tflop_per_s_str` ÷ `{python} BertRoofline.a100_bw_tb_per_s_str` = `{python} BertRoofline.a100_ridge_str` FLOP/byte
 
 Any workload with arithmetic intensity below `{python} BertRoofline.a100_ridge_str` FLOP/byte is memory bound; above is compute bound.
 
 **Step 2**: BERT-base characteristics.
 
-- Parameters: `{python} BertRoofline.bert_params_m_str` M = `{python} BertRoofline.bert_weight_mb_str` (FP32)
-- FLOPs per inference: ~`{python} BertRoofline.bert_flops_b_str` billion (forward pass with sequence length $S=128$)
+- Parameters: `{python} BertRoofline.bert_params_m_str` = `{python} BertRoofline.bert_weight_mb_str` (FP32)
+- FLOPs per inference: ~`{python} BertRoofline.bert_gflop_str` (forward pass with sequence length $S=128$)
 - Data movement: ~`{python} BertRoofline.bert_weight_mb_str` (must load all weights from memory)
 - Arithmetic intensity: `{python} BertRoofline.bert_ai_eq_str` = `{python} BertRoofline.bert_ai_b1_str` FLOP/byte (weights-only model; see note in main text)
 
 **Step 3**: Performance prediction.
 Since `{python} BertRoofline.bert_ai_b1_str` < `{python} BertRoofline.a100_ridge_str`, BERT at batch = 1 is memory-bound:
 
-Achievable perf = `{python} BertRoofline.bert_ai_b1_str` FLOP/byte $\times$ `{python} BertRoofline.a100_bw_tbs_str` = `{python} BertRoofline.bert_perf_b1_tflops_str`
+Achievable perf = `{python} BertRoofline.bert_ai_b1_str` FLOP/byte $\times$ `{python} BertRoofline.a100_bw_tb_per_s_str` = `{python} BertRoofline.bert_perf_b1_tflop_per_s_str`
 
-GPU utilization = `{python} BertRoofline.bert_perf_b1_tflops_str` ÷ `{python} BertRoofline.a100_tflops_fp16_str` = `{python} BertRoofline.bert_util_b1_str`
+GPU utilization = `{python} BertRoofline.bert_perf_b1_tflop_per_s_str` ÷ `{python} BertRoofline.a100_fp16_tflop_per_s_str` = `{python} BertRoofline.bert_util_b1_str`
 
 **Step 4**: Optimization via batching.
 Increase batch size to `{python} BertRoofline.batch32_str`:
 
 - Same `{python} BertRoofline.bert_weight_mb_str` of weights, but `{python} BertRoofline.batch32_str`$\times$ more compute
-- New FLOPs: `{python} BertRoofline.bert_b32_flops_eq_str` = `{python} BertRoofline.bert_batch32_flops_str`$\times 10^{9}$
+- New FLOPs: `{python} BertRoofline.bert_b32_flops_eq_str` = `{python} BertRoofline.bert_batch32_gflop_str`
 - New intensity: `{python} BertRoofline.bert_ai_b32_eq_str` = `{python} BertRoofline.bert_ai_b32_str` FLOP/byte
 
 Since `{python} BertRoofline.bert_ai_b32_str` > `{python} BertRoofline.a100_ridge_str`, batch = 32 is compute-bound:
 
-Achievable perf ≈ `{python} BertRoofline.utilization_peak_str` $\times$ `{python} BertRoofline.a100_tflops_fp16_str` = `{python} BertRoofline.bert_perf_b32_tflops_str`
+Achievable perf ≈ `{python} BertRoofline.utilization_peak_str` $\times$ `{python} BertRoofline.a100_fp16_tflop_per_s_str` = `{python} BertRoofline.bert_perf_b32_tflop_per_s_str`
 $$\text{GPU utilization} \approx 85\%$$
 
 **Systems insight**: Batch size transforms memory-bound inference (`{python} BertRoofline.bert_util_b1_str` utilization) into compute-bound inference (`{python} BertRoofline.utilization_peak_pct_str` utilization). Batching, however, increases latency because the system must wait to accumulate requests. This is the fundamental throughput-latency trade-off that MLPerf scenarios capture: SingleStream (batch = 1, latency-optimized) vs. Offline (maximum batch, throughput-optimized).
@@ -1127,7 +1130,7 @@ Measuring these operations correctly requires discipline. A small set of measure
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Micro-benchmarking rules callout—SOL Check.
 # │ Goal: H100 FP16/FP8 peak TFLOP/s for speed-of-light diagnostics.
-# │ Exports: H100SolCheck.h100_tflops_fp16_str, H100SolCheck.h100_tflops_fp8_str
+# │ Exports: H100SolCheck.h100_fp16_tflop_per_s_str, H100SolCheck.h100_fp8_tflop_per_s_str
 from mlsysim import Hardware
 from mlsysim.fmt import fmt, fmt_bandwidth, fmt_flop_rate
 
@@ -1142,13 +1145,13 @@ class H100SolCheck:
     dram_bw_high_tbs = 2 * (TB / second)
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    h100_tflops_fp16_str = fmt_flop_rate(_h100_fp16, unit=TFLOP / second, precision=0, commas=False)
-    h100_tflops_fp8_str = fmt_flop_rate(_h100_fp8, unit=TFLOP / second, precision=0, commas=True)
-    sol_example_tflops_str = fmt_flop_rate(sol_example_tflops, unit=TFLOP / second, precision=0, commas=False)
-    cache_bw_low_tbs_str = fmt_bandwidth(cache_bw_low_tbs, unit=TB / second, precision=0, commas=False)
-    cache_bw_high_tbs_str = fmt_bandwidth(cache_bw_high_tbs, unit=TB / second, precision=0, commas=False)
-    dram_bw_low_tbs_str = fmt_bandwidth(dram_bw_low_tbs, unit=TB / second, precision=0, commas=False)
-    dram_bw_high_tbs_str = fmt_bandwidth(dram_bw_high_tbs, unit=TB / second, precision=0, commas=False)
+    h100_fp16_tflop_per_s_str = fmt_flop_rate(_h100_fp16, unit=TFLOP / second, precision=0, commas=False)
+    h100_fp8_tflop_per_s_str = fmt_flop_rate(_h100_fp8, unit=TFLOP / second, precision=0, commas=True)
+    sol_example_tflop_per_s_str = fmt_flop_rate(sol_example_tflops, unit=TFLOP / second, precision=0, commas=False)
+    cache_bw_low_tb_per_s_str = fmt_bandwidth(cache_bw_low_tbs, unit=TB / second, precision=0, commas=False)
+    cache_bw_high_tb_per_s_str = fmt_bandwidth(cache_bw_high_tbs, unit=TB / second, precision=0, commas=False)
+    dram_bw_low_tb_per_s_str = fmt_bandwidth(dram_bw_low_tbs, unit=TB / second, precision=0, commas=False)
+    dram_bw_high_tb_per_s_str = fmt_bandwidth(dram_bw_high_tbs, unit=TB / second, precision=0, commas=False)
 ```
 
 ::: {#psp-benchmarking-micro-benchmarking-rules .callout-perspective title="Micro-benchmarking rules"}
@@ -1158,8 +1161,8 @@ To avoid measuring hardware artifacts instead of kernel performance, follow the 
 1.  **The warm-up rule**: Never measure the first ten to fifty iterations. Modern hardware uses **DVFS (Dynamic Voltage and Frequency Scaling)**\index{DVFS!warm-up measurement artifact} and **Turbo Boost**\index{Turbo Boost!warm-up measurement artifact}. A "cold" GPU may take 100 ms to ramp from 300 MHz to 1.5 GHz. The first batch will appear 5$\times$ slower than reality.
 2.  **The variance rule**: Report the **Coefficient of Variation (CV)** $(\text{CV} = \sigma_{\text{run}} / \mu_{\text{run}})$, where $\sigma_{\text{run}}$ and $\mu_{\text{run}}$ are the standard deviation and mean across repeated benchmark runs. If $\text{CV} > 0.05$ (5 percent), the measurement is noisy. This usually indicates background OS jitter, thermal throttling\index{Thermal Throttling!impact on sustained perf}, or memory contention.
 \index{Speed of Light Check!utilization diagnosis}
-3.  **The "Speed of Light" (SOL) Check**: Compare the achieved throughput against the roofline. If a kernel achieves `{python} H100SolCheck.sol_example_tflops_str` on an H100 (peak ~`{python} H100SolCheck.h100_tflops_fp16_str` FP16, or ~`{python} H100SolCheck.h100_tflops_fp8_str` FP8 dense), the diagnostic step is to identify the cause of low utilization (often kernel launch latency from too many small kernels) before optimizing the code itself.
-4.  **The flush rule**: Memory bandwidth measurements must flush the L2 cache between runs; otherwise the reported "bandwidth" reflects cache speed (~`{python} H100SolCheck.cache_bw_low_tbs_str`--`{python} H100SolCheck.cache_bw_high_tbs_str`) rather than DRAM speed (~`{python} H100SolCheck.dram_bw_low_tbs_str`--`{python} H100SolCheck.dram_bw_high_tbs_str`).
+3.  **The "Speed of Light" (SOL) Check**: Compare the achieved throughput against the roofline. If a kernel achieves `{python} H100SolCheck.sol_example_tflop_per_s_str` on an H100 (peak ~`{python} H100SolCheck.h100_fp16_tflop_per_s_str` FP16, or ~`{python} H100SolCheck.h100_fp8_tflop_per_s_str` FP8 dense), the diagnostic step is to identify the cause of low utilization (often kernel launch latency from too many small kernels) before optimizing the code itself.
+4.  **The flush rule**: Memory bandwidth measurements must flush the L2 cache between runs; otherwise the reported "bandwidth" reflects cache speed (~`{python} H100SolCheck.cache_bw_low_tb_per_s_str`--`{python} H100SolCheck.cache_bw_high_tb_per_s_str`) rather than DRAM speed (~`{python} H100SolCheck.dram_bw_low_tb_per_s_str`--`{python} H100SolCheck.dram_bw_high_tb_per_s_str`).
 
 :::
 
@@ -1526,11 +1529,12 @@ Dataset selection is the first place a benchmark can lose contact with deploymen
 # │ Imports: mlsysim (Models), mlsysim.constants (Mparam), mlsysim.book (fmt)
 # │ Exports: bert_large_params_m_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_params
 
 class BertModelSpecs:
     """BERT-Large parameter count for the model selection footnote."""
     _bert_large_m = Models.Language.BERT_Large.parameters.to(Mparam).magnitude
-    bert_large_params_m_str = fmt(_bert_large_m, precision=0, commas=False)
+    bert_large_params_m_str = fmt_params(Models.Language.BERT_Large.parameters, scale="M", precision=0, commas=False)
 ```
 
 ### Model selection {#sec-benchmarking-model-selection-01e6}
@@ -1540,7 +1544,7 @@ With task and data specified, the benchmark must define which models to evaluate
 \index{Baseline Models!reference point selection}
 Baseline models serve as reference points spanning from basic implementations (linear regression, logistic regression) to advanced architectures with proven success in comparable domains. In NLP, models like BERT[^fn-bert] have emerged as standard baselines. Critically, the choice of baseline depends on the deployment framework: a PyTorch implementation may exhibit different performance characteristics than its TensorFlow equivalent due to framework-specific optimizations and operator implementations, meaning the benchmark must control for this variable.
 
-[^fn-bert]: **BERT (Bidirectional Encoder Representations from transformers)**: BERT-Large (`{python} BertModelSpecs.bert_large_params_m_str`M parameters) became the default NLP baseline because its fixed-size encoder produces deterministic latency per input, unlike autoregressive models whose cost scales with output length. This predictability is precisely why MLPerf Inference adopted BERT as its NLP reference workload: a baseline must isolate hardware and software differences from model-inherent variability, and BERT's constant-cost forward pass achieves that separation. \index{BERT!benchmarking baseline}
+[^fn-bert]: **BERT (Bidirectional Encoder Representations from transformers)**: BERT-Large (`{python} BertModelSpecs.bert_large_params_m_str` parameters) became the default NLP baseline because its fixed-size encoder produces deterministic latency per input, unlike autoregressive models whose cost scales with output length. This predictability is precisely why MLPerf Inference adopted BERT as its NLP reference workload: a baseline must isolate hardware and software differences from model-inherent variability, and BERT's constant-cost forward pass achieves that separation. \index{BERT!benchmarking baseline}
 
 Once the architecture is selected, model development follows two parallel optimization paths that the benchmark must track. Training optimization focuses on achieving target accuracy within computational constraints. Inference optimization addresses the transition to production—particularly precision reduction from FP32 to INT8 or lower, which demands careful calibration to maintain accuracy while reducing resource requirements. The benchmark must specify requirements for both paths, because a model that trains efficiently but deploys poorly (or vice versa) fails the full evaluation. This dual optimization naturally demands quantitative evaluation metrics that span all three dimensions of our benchmarking framework.
 
@@ -1703,7 +1707,7 @@ Producing benchmark numbers is the easy part; interpreting them correctly is whe
 # │          MobileNetTradeoffCalc.fps_int8_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
-from mlsysim.fmt import fmt, check, fmt_memory, fmt_time
+from mlsysim.fmt import fmt, check, fmt_memory, fmt_multiple, fmt_percent, fmt_pp, fmt_rate, fmt_time
 
 class MobileNetTradeoffCalc:
     """MobileNetV2 FP32 vs INT8 edge-deployment trade-off."""
@@ -1731,15 +1735,15 @@ class MobileNetTradeoffCalc:
     # OUTPUT
     latency_fp32_ms_str = fmt_time(latency_fp32_ms, unit="millisecond", precision=0, commas=False)
     latency_int8_ms_str = fmt_time(latency_int8_ms, unit="millisecond", precision=0, commas=False)
-    acc_fp32_str = fmt(acc_fp32, precision=1, commas=False)
-    acc_int8_str = fmt(acc_int8, precision=1, commas=False)
+    acc_fp32_str = fmt_percent(acc_fp32/100, precision=1, commas=False, style='symbol')
+    acc_int8_str = fmt_percent(acc_int8/100, precision=1, commas=False, style='symbol')
     size_fp32_mb_str = fmt_memory(size_fp32, unit=MB, precision=0, commas=False)
     size_int8_mb_str = fmt_memory(size_int8, unit=MB, precision=1, commas=False)
     latency_speedup_mult_str = fmt_multiple(latency_speedup, precision=1, commas=False)
     size_reduction_mult_str = fmt_multiple(size_reduction, precision=0, commas=False)
     acc_drop_str = fmt_pp(acc_drop, precision=1)
-    fps_fp32_str = fmt(fps_fp32, precision=1, commas=False)
-    fps_int8_str = fmt(fps_int8, precision=1, commas=False)
+    fps_fp32_str = fmt_rate(fps_fp32, "FPS", precision=1, commas=False)
+    fps_int8_str = fmt_rate(fps_int8, "FPS", precision=1, commas=False)
 ```
 
 ::: {#exmp-benchmarking-benchmarking-vision-model-edge-deployment .callout-example title="Benchmarking a vision model for edge deployment"}
@@ -1756,7 +1760,7 @@ The critical question is whether the accuracy cost of INT8 is acceptable for thi
 : **MobileNet INT8 Quantization Trade-Off**: Latency, accuracy, and model size for FP32 and INT8 precisions on MobileNet. {#tbl-benchmarking-mobilenet-int8-tradeoff}
 
 **Interpretation**:
-The `{python} MobileNetTradeoffCalc.latency_speedup_mult_str` speedup and `{python} MobileNetTradeoffCalc.size_reduction_mult_str` size reduction from quantization come at a cost of `{python} MobileNetTradeoffCalc.acc_drop_str` of top-1 accuracy. For a battery-powered real-time system with this tolerance, INT8 is the clear choice, enabling about `{python} MobileNetTradeoffCalc.fps_int8_str` FPS processing compared to about `{python} MobileNetTradeoffCalc.fps_fp32_str` FPS with FP32.
+The `{python} MobileNetTradeoffCalc.latency_speedup_mult_str` speedup and `{python} MobileNetTradeoffCalc.size_reduction_mult_str` size reduction from quantization come at a cost of `{python} MobileNetTradeoffCalc.acc_drop_str` of top-1 accuracy. For a battery-powered real-time system with this tolerance, INT8 is the clear choice, enabling about `{python} MobileNetTradeoffCalc.fps_int8_str` processing compared to about `{python} MobileNetTradeoffCalc.fps_fp32_str` with FP32.
 
 :::
 
@@ -2040,6 +2044,7 @@ These benchmarks are vital because training represents the largest capital expen
 # │          mlsysim.book (fmt)
 # │ Exports: gpt3_params_b_str, gpt3_tokens_b_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_params, fmt_tokens
 
 class GPT3TrainingSpecs:
     """GPT-3 parameter and token counts for training benchmark context."""
@@ -2048,13 +2053,13 @@ class GPT3TrainingSpecs:
     _tokens_b = Models.Language.GPT3.training_tokens.to('count').magnitude / BILLION
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    gpt3_params_b_str = fmt(_params_b, precision=0, commas=False)
-    gpt3_tokens_b_str = fmt(_tokens_b, precision=0, commas=False)
+    gpt3_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
+    gpt3_tokens_b_str = fmt_tokens(Models.Language.GPT3.training_tokens, scale="B", precision=0, commas=False)
 ```
 
-For instance, large-scale models like OpenAI's GPT-3[^fn-bench-gpt3] [@brown2020language], which consists of `{python} GPT3TrainingSpecs.gpt3_params_b_str` billion parameters trained on approximately 570 GB of filtered CommonCrawl text (from a ~45 TB raw dataset, combined with other sources to form `{python} GPT3TrainingSpecs.gpt3_tokens_b_str` billion training tokens), highlight the immense computational demands of modern training. Standardized ML training benchmarks provide systematic evaluation of the underlying systems to ensure that hardware and software configurations can meet these unprecedented demands efficiently.
+For instance, large-scale models like OpenAI's GPT-3[^fn-bench-gpt3] [@brown2020language], which consists of `{python} GPT3TrainingSpecs.gpt3_params_b_str` parameters trained on approximately 570 GB of filtered CommonCrawl text (from a ~45 TB raw dataset, combined with other sources to form `{python} GPT3TrainingSpecs.gpt3_tokens_b_str` training tokens), highlight the immense computational demands of modern training. Standardized ML training benchmarks provide systematic evaluation of the underlying systems to ensure that hardware and software configurations can meet these unprecedented demands efficiently.
 
-[^fn-bench-gpt3]: **GPT-3**: OpenAI's 2020 language model (`{python} GPT3TrainingSpecs.gpt3_params_b_str` billion parameters, `{python} GPT3TrainingSpecs.gpt3_tokens_b_str` billion training tokens) consumed an estimated 3,640 petaFLOP-days on 10,000 V100 GPUs [@patterson2021carbon]. This scale illustrates why training benchmarks are essential for predicting whether a planned training run is operationally viable before committing the compute. \index{GPT-3!training cost}
+[^fn-bench-gpt3]: **GPT-3**: OpenAI's 2020 language model (`{python} GPT3TrainingSpecs.gpt3_params_b_str` parameters, `{python} GPT3TrainingSpecs.gpt3_tokens_b_str` training tokens) consumed an estimated 3,640 petaFLOP-days on 10,000 V100 GPUs [@patterson2021carbon]. This scale illustrates why training benchmarks are essential for predicting whether a planned training run is operationally viable before committing the compute. \index{GPT-3!training cost}
 
 ::: {#dfn-benchmarking-ml-training-benchmarks .callout-definition title="ML training benchmarks"}
 
@@ -3047,7 +3052,7 @@ In serverless environments, where models are loaded on demand, cold-start latenc
 # │ Imports: mlsysim.fmt (fmt, check)
 # │ Exports: ColdStartTransferCalc.params_b_str,
 # │          ColdStartTransferCalc.model_size_gb_str,
-# │          ColdStartTransferCalc.pcie_effective_gbs_str,
+# │          ColdStartTransferCalc.pcie_effective_gb_per_s_str,
 # │          ColdStartTransferCalc.transfer_ms_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
@@ -3072,11 +3077,11 @@ class ColdStartTransferCalc:
     # OUTPUT
     params_b_str = fmt_params(params, scale='B', precision=0, commas=False)
     model_size_gb_str = fmt_memory(model_size, unit=GB, precision=0, commas=False)
-    pcie_effective_gbs_str = fmt_bandwidth(pcie_effective_bw, unit=GB / second, precision=0, commas=False)
+    pcie_effective_gb_per_s_str = fmt_bandwidth(pcie_effective_bw, unit=GB / second, precision=0, commas=False)
     transfer_ms_str = fmt_time(transfer, ms, precision=0, commas=False)
 ```
 
-[^fn-cold-start]: **Cold-Start Latency**: The initialization time from idle state, dominated by model weight loading from storage to accelerator memory. For a `{python} ColdStartTransferCalc.params_b_str`-parameter model in FP16 (~`{python} ColdStartTransferCalc.model_size_gb_str`), cold start on PCIe 4.0 (`{python} ColdStartTransferCalc.pcie_effective_gbs_str` effective) takes ~`{python} ColdStartTransferCalc.transfer_ms_str` for weight transfer alone, plus framework initialization overhead. This physical lower bound means that cold-start mitigation (model caching, speculative loading) is a systems design requirement, not just an operational convenience. \index{Cold Start Latency!physical lower bound}
+[^fn-cold-start]: **Cold-Start Latency**: The initialization time from idle state, dominated by model weight loading from storage to accelerator memory. For a `{python} ColdStartTransferCalc.params_b_str`-parameter model in FP16 (~`{python} ColdStartTransferCalc.model_size_gb_str`), cold start on PCIe 4.0 (`{python} ColdStartTransferCalc.pcie_effective_gb_per_s_str` effective) takes ~`{python} ColdStartTransferCalc.transfer_ms_str` for weight transfer alone, plus framework initialization overhead. This physical lower bound means that cold-start mitigation (model caching, speculative loading) is a systems design requirement, not just an operational convenience. \index{Cold Start Latency!physical lower bound}
 
 #### Isolated metrics evaluation {#sec-benchmarking-isolated-metrics-evaluation-922d}
 
@@ -3095,9 +3100,9 @@ Benchmarking inference systems often involves balancing competing metrics. For e
 # │ How: Read the H100 INT8 hardware constant and format it for prose.
 # │
 # │ Imports: mlsysim.core.constants (Hardware.Cloud.H100.compute.precision_flops["int8"], TOPS)
-# │ Exports: TopsFootnoteAnchor.h100_tops_int8_str
+# │ Exports: TopsFootnoteAnchor.h100_int8_tops_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_qty, check
+from mlsysim.fmt import fmt, fmt_ops_rate, fmt_qty, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class TopsFootnoteAnchor:
@@ -3113,12 +3118,12 @@ class TopsFootnoteAnchor:
     check(h100_tops_int8 > 1000, "H100 INT8 peak should exceed 1000 TOPS.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    h100_tops_int8_str = fmt(h100_tops_int8, precision=0, commas=False)
+    h100_int8_tops_str = fmt_ops_rate(Hardware.Cloud.H100.compute.precision_flops["int8"], unit=TOPS, precision=0, commas=False)
 ```
 
 Numerical precision optimization\index{Numerical Precision Optimization|see{Quantization}} exemplifies this challenge particularly well. Individual accelerator benchmarks show INT8 operation throughput[^fn-tops] reaching about 4$\times$ the FP32 floating-point throughput on the same accelerator, creating compelling performance narratives.
 
-[^fn-tops]: **TOPS (Tera Operations Per Second)**: A measure of raw computational throughput (trillions of operations/second). The H100 delivers `{python} TopsFootnoteAnchor.h100_tops_int8_str` TOPS INT8 vs. the Apple M2 Neural Engine at 15.8 TOPS and Edge TPU at 4 TOPS, but these numbers conflate different operation types—multiply-accumulate (MAC) vs. accumulate vs. activation. TOPS comparisons across vendors are meaningful only when the operation definition, precision, and sparsity assumptions are identical, conditions rarely met in vendor specifications. \index{TOPS!comparability limitation}
+[^fn-tops]: **TOPS (Tera Operations Per Second)**: A measure of raw computational throughput (trillions of operations/second). The H100 delivers `{python} TopsFootnoteAnchor.h100_int8_tops_str` INT8 vs. the Apple M2 Neural Engine at 15.8 TOPS and Edge TPU at 4 TOPS, but these numbers conflate different operation types—multiply-accumulate (MAC) vs. accumulate vs. activation. TOPS comparisons across vendors are meaningful only when the operation definition, precision, and sparsity assumptions are identical, conditions rarely met in vendor specifications. \index{TOPS!comparability limitation}
 
 #### Linear scaling assumption {#sec-benchmarking-linear-scaling-assumption-6a7a}
 
@@ -4626,7 +4631,7 @@ Generation-specific metrics belong in the benchmark only when they expose a depl
 # │
 # │ Imports: mlsysim.book (fmt)
 # │ Exports: slow_s_str, fast_s_str, response_tokens_str, slow_toks_str,
-# │          fast_toks_str
+# │          fast_tokens_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check, fmt_rate
 
@@ -4644,10 +4649,10 @@ class LLMThroughputCalc:
     fast_s_str = fmt_time(fast_sec, "second", precision=1, commas=False, style="word")
     response_tokens_str = fmt_count(response_tokens, commas=False, label="token")
     slow_toks_str = fmt(slow_toks, precision=0, commas=False)
-    fast_toks_str = fmt_rate(fast_toks, 'tokens/s', precision=0, commas=False)
+    fast_tokens_per_s_str = fmt_rate(fast_toks, 'tokens/s', precision=0, commas=False)
 ```
 
-- **tokens/s**\index{Token Throughput!generation rate} measures generation throughput. Modern LLMs achieve 20–100 tokens/s depending on model size and hardware. For a response of ~`{python} LLMThroughputCalc.response_tokens_str`, `{python} LLMThroughputCalc.slow_toks_str` vs. `{python} LLMThroughputCalc.fast_toks_str` means `{python} LLMThroughputCalc.slow_s_str` vs. `{python} LLMThroughputCalc.fast_s_str`.
+- **tokens/s**\index{Token Throughput!generation rate} measures generation throughput. Modern LLMs achieve 20–100 tokens/s depending on model size and hardware. For a response of ~`{python} LLMThroughputCalc.response_tokens_str`, `{python} LLMThroughputCalc.slow_toks_str` vs. `{python} LLMThroughputCalc.fast_tokens_per_s_str` means `{python} LLMThroughputCalc.slow_s_str` vs. `{python} LLMThroughputCalc.fast_s_str`.
 - **Time-to-first-token vs. inter-token latency**\index{Inter-Token Latency!throughput trade-off} jointly capture different bottlenecks requiring different optimizations. Batching improves throughput but typically increases first-token latency, a trade-off invisible if only one metric is measured.
 
 \index{Benchmark Contamination!LLM memorization risk}
@@ -5052,7 +5057,7 @@ With benchmarking principles, methodologies, and production considerations estab
 # │ Imports: (none—uses only Python builtins and f-strings)
 # │ Exports: benchmark_accuracy_pct_str, production_accuracy_range_str,
 # │          accuracy_drop_pct_str, benchmark_latency_mean_ms_str,
-# │          production_p99_range_str, latency_multiplier_str,
+# │          production_p99_range_str, latency_multiplier_mult_str,
 # │          pre_quant_latency_ms_str, post_quant_latency_ms_str,
 # │          ranking_improvement_str, energy_increase_pct_str,
 # │          ood_degradation_pct_str, accuracy_improvement_pct_str,
@@ -5073,6 +5078,7 @@ With benchmarking principles, methodologies, and production considerations estab
 from mlsysim.fmt import (
     MarkdownStr,
     fmt,
+    fmt_count,
     fmt_multiple,
     fmt_multiple_range,
     fmt_percent,
@@ -5141,7 +5147,7 @@ class FallaciesPitfallsSetup:
     accuracy_drop_pct_str = fmt_percent(accuracy_drop_pct/100, precision=0, commas=False, style='symbol')
     benchmark_latency_mean_ms_str = fmt_time(benchmark_latency_mean_ms, 'millisecond', precision=0, commas=False)
     production_p99_range_str = fmt_range(production_p99_low_ms, production_p99_high_ms, precision=0, commas=False, unit="ms")
-    latency_multiplier_str = fmt(latency_multiplier, precision=0, commas=False)
+    latency_multiplier_mult_str = fmt_multiple(latency_multiplier, precision=0, commas=False)
     pre_quant_latency_ms_str = fmt_time(pre_quant_latency_ms, 'millisecond', precision=0, commas=False)
     post_quant_latency_ms_str = fmt_time(post_quant_latency_ms, 'millisecond', precision=0, commas=False)
     ranking_improvement_str = fmt(ranking_improvement, precision=0, commas=False)
@@ -5161,8 +5167,8 @@ class FallaciesPitfallsSetup:
     imagenet_error_2010_pct_str = fmt_percent(imagenet_error_2010_pct/100, precision=1, commas=False, style='symbol')
     imagenet_error_2015_pct_str = fmt_percent(imagenet_error_2015_pct/100, precision=2, commas=False, style='symbol')
     imagenet_competition_end_year_str = fmt(imagenet_competition_end_year, precision=0, commas=False)
-    imagenet_teams_above_95_str = fmt(imagenet_teams_above_95, precision=0, commas=False)
-    imagenet_total_teams_str = fmt(imagenet_total_teams, precision=0, commas=False)
+    imagenet_teams_above_95_str = fmt_count(imagenet_teams_above_95, label="team", commas=False)
+    imagenet_total_teams_str = fmt_count(imagenet_total_teams, label="team", commas=False)
     mnist_accuracy_pct_str = fmt_percent(mnist_accuracy_pct/100, precision=1, commas=False, style='symbol')
     edge_memory_constraint_mult_str = fmt_multiple(edge_memory_constraint_x, precision=0, commas=False)
     edge_power_constraint_mult_str = fmt_multiple(edge_power_constraint_x, precision=0, commas=False)
@@ -5214,7 +5220,7 @@ A single number is seductively simple: this system is "94 percent accurate" or "
 \index{Benchmark Saturation!outdated benchmarks pitfall}
 **Pitfall**: *Using outdated benchmarks that no longer reflect current challenges and requirements.*
 
-Benchmarks have inertia: teams continue reporting on established benchmarks long after those benchmarks cease to provide meaningful discrimination. Saturation occurs when multiple approaches achieve near-identical performance, eliminating useful comparison. ImageNet top-5 classification error decreased from `{python} FallaciesPitfallsSetup.imagenet_error_2010_pct_str` in 2010 to `{python} FallaciesPitfallsSetup.imagenet_error_2015_pct_str` by 2015, with the competition ending in `{python} FallaciesPitfallsSetup.imagenet_competition_end_year_str`, at which point `{python} FallaciesPitfallsSetup.imagenet_teams_above_95_str` of `{python} FallaciesPitfallsSetup.imagenet_total_teams_str` teams exceeded 95 percent accuracy; further optimization beyond this threshold provides marginal value for most applications. Similarly, MNIST achieves `{python} FallaciesPitfallsSetup.mnist_accuracy_pct_str` accuracy with simple models, yet teams still report improvements at the third decimal place. As discussed in @sec-benchmarking-statistical-methodological-issues-7aa5, statistical confidence intervals around these measurements often exceed the claimed improvements. Changing deployment contexts compound the problem: benchmarks designed for server hardware become misleading for edge devices with `{python} FallaciesPitfallsSetup.edge_memory_constraint_mult_str` memory constraints and `{python} FallaciesPitfallsSetup.edge_power_constraint_mult_str` power budgets. Effective benchmarking requires retiring saturated benchmarks and developing evaluation frameworks matching current deployment realities.
+Benchmarks have inertia: teams continue reporting on established benchmarks long after those benchmarks cease to provide meaningful discrimination. Saturation occurs when multiple approaches achieve near-identical performance, eliminating useful comparison. ImageNet top-5 classification error decreased from `{python} FallaciesPitfallsSetup.imagenet_error_2010_pct_str` in 2010 to `{python} FallaciesPitfallsSetup.imagenet_error_2015_pct_str` by 2015, with the competition ending in `{python} FallaciesPitfallsSetup.imagenet_competition_end_year_str`, at which point `{python} FallaciesPitfallsSetup.imagenet_teams_above_95_str` of `{python} FallaciesPitfallsSetup.imagenet_total_teams_str` exceeded 95 percent accuracy; further optimization beyond this threshold provides marginal value for most applications. Similarly, MNIST achieves `{python} FallaciesPitfallsSetup.mnist_accuracy_pct_str` accuracy with simple models, yet teams still report improvements at the third decimal place. As discussed in @sec-benchmarking-statistical-methodological-issues-7aa5, statistical confidence intervals around these measurements often exceed the claimed improvements. Changing deployment contexts compound the problem: benchmarks designed for server hardware become misleading for edge devices with `{python} FallaciesPitfallsSetup.edge_memory_constraint_mult_str` memory constraints and `{python} FallaciesPitfallsSetup.edge_power_constraint_mult_str` power budgets. Effective benchmarking requires retiring saturated benchmarks and developing evaluation frameworks matching current deployment realities.
 
 \index{Amdahl's Law!optimization ceiling for ML pipelines}
 **Pitfall**: *Applying research-oriented benchmarks to evaluate production system performance.*

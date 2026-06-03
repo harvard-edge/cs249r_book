@@ -80,8 +80,8 @@ from mlsysim.fmt import fmt, check
 # │
 # │ Imports: mlsysim.core.constants (Hardware.Cloud.H100.memory.capacity, Hardware.Cloud.H100.memory.bandwidth, Hardware.Cloud.A100.memory.bandwidth,
 # │          Hardware.Cloud.H100.nvlink.bandwidth, GiB, GB, TB, second)
-# │ Exports: InferenceSetup.h100_mem_gb_str, InferenceSetup.h100_mem_bw_tbs_str,
-# │          InferenceSetup.a100_mem_bw_tbs_str, InferenceSetup.nvlink_h100_gbs_str
+# │ Exports: InferenceSetup.h100_mem_gb_str, InferenceSetup.h100_mem_bw_tb_per_s_str,
+# │          InferenceSetup.a100_mem_bw_tb_per_s_str, InferenceSetup.nvlink_h100_gb_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt_bandwidth, fmt_memory_capacity, fmt_qty_int
 
@@ -104,9 +104,9 @@ class InferenceSetup:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     h100_mem_gb_str = fmt_memory_capacity(h100_mem, unit=GiB, precision=0, commas=False)
-    h100_mem_bw_tbs_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
-    a100_mem_bw_tbs_str = fmt_bandwidth(a100_bw, unit=TB / second, precision=1, commas=False)
-    nvlink_h100_gbs_str = fmt_bandwidth(nvlink, unit=GB / second, precision=0, commas=False)
+    h100_mem_bw_tb_per_s_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
+    a100_mem_bw_tb_per_s_str = fmt_bandwidth(a100_bw, unit=TB / second, precision=1, commas=False)
+    nvlink_h100_gb_per_s_str = fmt_bandwidth(nvlink, unit=GB / second, precision=0, commas=False)
 ```
 
 ## The Economics and Architecture of Inference {#sec-inference-scale-scaling-inference-beyond-single-machines-54e6}
@@ -129,7 +129,7 @@ Three distinct signals indicate when distributed inference becomes necessary rat
 
 The first signal is memory exhaustion, which occurs when model parameters, key-value caches, or embedding tables exceed single-device capacity. A single NVIDIA H100 GPU provides `{python} InferenceSetup.h100_mem_gb_str` of HBM3[^fn-hbm3-bandwidth] memory; @sec-appdx-fleet-assumption-provenance records the provenance of this capacity figure and the other canonical hardware constants used throughout the analysis that follows. GPT-4 class models with hundreds of billions of parameters require 200–400 GB just for weights in FP16 precision, forcing distribution across multiple GPUs regardless of throughput requirements. Recommendation systems with trillion-parameter embedding tables face similar constraints: Meta's Deep Learning Recommendation Model (DLRM)[^fn-dlrm-scale] model stores embedding tables that require multiple terabytes of memory.
 
-[^fn-hbm3-bandwidth]: **HBM3 (High Bandwidth Memory 3)**: 3D-stacked DRAM delivering `{python} InferenceSetup.h100_mem_bw_tbs_str` on the H100 vs. `{python} InferenceSetup.a100_mem_bw_tbs_str` for HBM2e on the A100. Because large language model (LLM) decode is memory-bandwidth-bound, this improvement translates directly into higher tokens-per-second and larger feasible batch sizes, making HBM generation the single most consequential variable in inference cost-per-token. \index{HBM3!bandwidth}
+[^fn-hbm3-bandwidth]: **HBM3 (High Bandwidth Memory 3)**: 3D-stacked DRAM delivering `{python} InferenceSetup.h100_mem_bw_tb_per_s_str` on the H100 vs. `{python} InferenceSetup.a100_mem_bw_tb_per_s_str` for HBM2e on the A100. Because large language model (LLM) decode is memory-bandwidth-bound, this improvement translates directly into higher tokens-per-second and larger feasible batch sizes, making HBM generation the single most consequential variable in inference cost-per-token. \index{HBM3!bandwidth}
 
 [^fn-dlrm-scale]: **DLRM (Deep Learning Recommendation Model)**: Meta's 2019 reference architecture separates dense features—GPU-bound multilayer perceptrons (MLPs)—from sparse features (CPU-bound embedding lookups), creating a hybrid serving topology. Embedding tables can exceed 100 TB, making DLRM memory-capacity-bound rather than compute-bound and forcing distribution strategies fundamentally different from LLM model parallelism. \index{DLRM!scale}
 
@@ -294,7 +294,7 @@ where $C_{\text{training}}$ is the one-time cost to train the model, $C_{\text{s
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim import Infrastructure
-from mlsysim.fmt import fmt_int, fmt_usd, fmt, fmt_count, check, fmt_math, MarkdownStr
+from mlsysim.fmt import fmt_int, fmt_usd, fmt, fmt_count, fmt_rate, check, fmt_math, MarkdownStr
 from mlsysim.core.units import USD, hour
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -340,7 +340,7 @@ class InferenceEconomics:
     serving_cost_total_str = fmt_usd(serving_total_cost_val)
     training_cost_total_str = fmt_usd(training_total_cost)
     leverage_ratio_mult_str = fmt_multiple(leverage_ratio, precision=1, commas=False)
-    qps_str = fmt_int(qps)
+    qps_str = fmt_rate(qps, "QPS")
     serve_duration_days_str = fmt_int(serve_duration_days, commas=False)
     cost_per_million_queries_usd_str = fmt_usd(
         cost_per_query * MILLION,
@@ -356,7 +356,7 @@ class InferenceEconomics:
     engineering_mult_str = fmt_multiple(engineering_multiplier, commas=False, precision=0)
 ```
 
-The same leverage holds across application categories with different cost structures. A recommendation model (DLRM) trained for `{python} InferenceEconomics.training_cost_total_str` (`{python} InferenceEconomics.n_gpu_hours_str` of hardware at `{python} InferenceEconomics.cost_per_gpu_hour_usd_str`, amplified by a `{python} InferenceEconomics.engineering_mult_str` engineering overhead for data and experimentation) and served at `{python} InferenceEconomics.qps_str` QPS for `{python} InferenceEconomics.serve_duration_days_str` days accumulates `{python} InferenceEconomics.lifetime_queries_latex_math` lifetime queries, which at `{python} InferenceEconomics.cost_per_million_queries_usd_str` costs `{python} InferenceEconomics.serving_cost_total_str` to serve—a `{python} InferenceEconomics.leverage_ratio_mult_str` leverage on serving optimization over training optimization. The cost dominance ratio varies by application. @Tbl-cost-ratios quantifies this disparity:
+The same leverage holds across application categories with different cost structures. A recommendation model (DLRM) trained for `{python} InferenceEconomics.training_cost_total_str` (`{python} InferenceEconomics.n_gpu_hours_str` of hardware at `{python} InferenceEconomics.cost_per_gpu_hour_usd_str`, amplified by a `{python} InferenceEconomics.engineering_mult_str` engineering overhead for data and experimentation) and served at `{python} InferenceEconomics.qps_str` for `{python} InferenceEconomics.serve_duration_days_str` days accumulates `{python} InferenceEconomics.lifetime_queries_latex_math` lifetime queries, which at `{python} InferenceEconomics.cost_per_million_queries_usd_str` costs `{python} InferenceEconomics.serving_cost_total_str` to serve—a `{python} InferenceEconomics.leverage_ratio_mult_str` leverage on serving optimization over training optimization. The cost dominance ratio varies by application. @Tbl-cost-ratios quantifies this disparity:
 
 | **Application**               | **Training Cost** | **Annual Serving Cost** |         **Ratio** |
 |:------------------------------|------------------:|------------------------:|------------------:|
@@ -678,15 +678,15 @@ Single-GPU deployment is the simplest topology: the entire model fits in one dev
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Deployment topology — tensor-parallel NVLink bandwidth.
-# │ Exports: InferenceTopologyRecap.nvlink_h100_gbs_str
+# │ Exports: InferenceTopologyRecap.nvlink_h100_gb_per_s_str
 class InferenceTopologyRecap:
     nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth
     from mlsysim.fmt import fmt_bandwidth
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    nvlink_h100_gbs_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
+    nvlink_h100_gb_per_s_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
 ```
 
-Multi-GPU tensor parallelism shards each layer's weight matrices across multiple GPUs connected by high-bandwidth interconnect (NVLink at `{python} InferenceTopologyRecap.nvlink_h100_gbs_str` on H100). Each GPU computes a partial result for every layer, and an all-reduce operation synchronizes the partial results before the next layer. This topology is necessary when model weights exceed single-device memory and provides latency reduction proportional to the parallelism degree, at the cost of communication overhead per layer. The model sharding section (@sec-inference-scale-model-sharding-inference-82b3) analyzes the communication overhead quantitatively.
+Multi-GPU tensor parallelism shards each layer's weight matrices across multiple GPUs connected by high-bandwidth interconnect (NVLink at `{python} InferenceTopologyRecap.nvlink_h100_gb_per_s_str` on H100). Each GPU computes a partial result for every layer, and an all-reduce operation synchronizes the partial results before the next layer. This topology is necessary when model weights exceed single-device memory and provides latency reduction proportional to the parallelism degree, at the cost of communication overhead per layer. The model sharding section (@sec-inference-scale-model-sharding-inference-82b3) analyzes the communication overhead quantitatively.
 
 Disaggregated serving separates the prefill phase (processing the input prompt, which is compute-bound) from the decode phase (generating tokens one at a time, which is memory-bandwidth-bound) onto different hardware pools optimized for each workload profile. Prefill nodes use high-FLOP/s accelerators; decode nodes use high-bandwidth-memory configurations. This separation allows each phase to operate at its hardware's optimal operating point rather than compromising between the two regimes on shared hardware. The disaggregated serving section (@sec-inference-scale-disaggregated-serving-splitting-workload-b8f9) develops this architecture in detail.
 
@@ -1213,7 +1213,7 @@ class BatchingRequestTotals:
 # │ How: Compute max-output iteration count for traditional; per-output iteration
 # │   count for continuous; derive reduction % and per-request improvement ratios.
 # │
-# │ Imports: (none)
+# │ Imports: mlsysim.fmt
 # │ Exports: BatchingWorkedExample.mean_output_str,
 # │   BatchingWorkedExample.total_batch_time_ms_str,
 # │   BatchingWorkedExample.total_seq_iters_str,
@@ -1224,7 +1224,7 @@ class BatchingRequestTotals:
 # │   BatchingWorkedExample.latency_red_str, BatchingWorkedExample.r1_imp_mult_str,
 # │   BatchingWorkedExample.r3_imp_mult_str, BatchingWorkedExample.r4_imp_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, MarkdownStr, fmt_time
+from mlsysim.fmt import fmt_int, fmt, fmt_percent, MarkdownStr, fmt_time
 
 # ┌── LEGO ───────────────────────────────────────────────
 class BatchingWorkedExample:
@@ -1280,7 +1280,7 @@ class BatchingWorkedExample:
     # but use the MarkdownStr escape-hatch to preserve render byte-for-byte
     # against any future drift.
     cont_avg_lat_str = fmt_int(cont_avg_latency_ms)
-    latency_red_str = fmt(latency_reduction_pct, precision=1, commas=False)
+    latency_red_str = fmt_percent(latency_reduction_pct / 100, precision=1, commas=False, style='prose')
     r1_imp_mult_str = fmt_multiple(r1_improvement, precision=0, commas=False)
     r3_imp_mult_str = fmt_multiple(r3_improvement, precision=0, commas=False)
     r4_imp_mult_str = fmt_multiple(r4_improvement, precision=2, commas=False)
@@ -1508,9 +1508,9 @@ Even with modern frameworks, diagnosing tail latency anomalies requires systemat
 # │ Imports: mlsysim.core.constants (Hardware.Cloud.A100.memory.capacity, Hardware.Cloud.A100.memory.bandwidth, Hardware.Cloud.A100.nvlink.bandwidth,
 # │          Hardware.Cloud.A100.interconnect.bandwidth, GB, GiB, TB, second)
 # │ Exports: A100HardwareScenario.a100_mem_gb_str,
-# │          A100HardwareScenario.a100_mem_bw_tbs_str,
-# │          A100HardwareScenario.nvlink_a100_gbs_str,
-# │          A100HardwareScenario.pcie_gen4_gbs_str
+# │          A100HardwareScenario.a100_mem_bw_tb_per_s_str,
+# │          A100HardwareScenario.nvlink_a100_gb_per_s_str,
+# │          A100HardwareScenario.pcie_gen4_gb_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt_bandwidth, fmt_memory, fmt_memory_capacity, fmt_time, fmt_qty_int
 
@@ -1534,9 +1534,9 @@ class A100HardwareScenario:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     a100_mem_gb_str = fmt_memory_capacity(mem, unit=GiB, precision=0, commas=False)
-    a100_mem_bw_tbs_str = fmt_bandwidth(bw, unit=TB / second, precision=1, commas=False)
-    nvlink_a100_gbs_str = fmt_bandwidth(nvlink, unit=GB / second, precision=0, commas=False)
-    pcie_gen4_gbs_str = fmt_bandwidth(pcie, unit=GB / second, precision=0, commas=False)
+    a100_mem_bw_tb_per_s_str = fmt_bandwidth(bw, unit=TB / second, precision=1, commas=False)
+    nvlink_a100_gb_per_s_str = fmt_bandwidth(nvlink, unit=GB / second, precision=0, commas=False)
+    pcie_gen4_gb_per_s_str = fmt_bandwidth(pcie, unit=GB / second, precision=0, commas=False)
     activation_transfer_mb_str = fmt_memory(activation_transfer, unit=MB, precision=0, commas=False)
     pcie_transfer_ms_str = fmt_time(pcie_transfer, millisecond, precision=1, commas=False)
     nvlink_transfer_ms_str = fmt_time(nvlink_transfer, millisecond, precision=2, commas=False)
@@ -1548,7 +1548,7 @@ class A100HardwareScenario:
 
 **Infrastructure Layer Analysis** (Hardware Constraints):
 
-The system runs on 4 A100-`{python} A100HardwareScenario.a100_mem_gb_str` connected via PCIe Gen4 (`{python} A100HardwareScenario.pcie_gen4_gbs_str` per GPU) rather than NVLink. The server has a dual-socket CPU with NUMA topology. Memory bandwidth per GPU is `{python} A100HardwareScenario.a100_mem_bw_tbs_str` (HBM2e), adequate for decode operations. However, PCIe bandwidth limits tensor parallelism communication to `{python} A100HardwareScenario.pcie_gen4_gbs_str` vs. NVLink's `{python} A100HardwareScenario.nvlink_a100_gbs_str`. For a batch requiring `{python} A100HardwareScenario.activation_transfer_mb_str` activation transfers between GPUs, raw bandwidth math gives approximately `{python} A100HardwareScenario.pcie_transfer_ms_str` per synchronization point over PCIe vs. `{python} A100HardwareScenario.nvlink_transfer_ms_str` over NVLink.
+The system runs on 4 A100-`{python} A100HardwareScenario.a100_mem_gb_str` connected via PCIe Gen4 (`{python} A100HardwareScenario.pcie_gen4_gb_per_s_str` per GPU) rather than NVLink. The server has a dual-socket CPU with NUMA topology. Memory bandwidth per GPU is `{python} A100HardwareScenario.a100_mem_bw_tb_per_s_str` (HBM2e), adequate for decode operations. However, PCIe bandwidth limits tensor parallelism communication to `{python} A100HardwareScenario.pcie_gen4_gb_per_s_str` vs. NVLink's `{python} A100HardwareScenario.nvlink_a100_gb_per_s_str`. For a batch requiring `{python} A100HardwareScenario.activation_transfer_mb_str` activation transfers between GPUs, raw bandwidth math gives approximately `{python} A100HardwareScenario.pcie_transfer_ms_str` per synchronization point over PCIe vs. `{python} A100HardwareScenario.nvlink_transfer_ms_str` over NVLink.
 
 **Distribution Layer Analysis** (Algorithmic Behavior):
 
@@ -3111,7 +3111,7 @@ where $T_{\text{compute}}$ is the sequential compute time, $t$ is the tensor-par
 # │ Imports: (none—pure Python arithmetic, no pint quantities)
 # │ Exports: TpSpeedupCalc.tp_speedup_mult_str, TpSpeedupCalc.tp_theoretical_mult_str,
 # │   TpSpeedupCalc.n_layers_str, TpSpeedupCalc.seq_total_ms_str,
-# │   TpSpeedupCalc.tp8_total_ms_str, TpSpeedupCalc.nvlink_h100_gbs_str
+# │   TpSpeedupCalc.tp8_total_ms_str, TpSpeedupCalc.nvlink_h100_gb_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 class TpSpeedupCalc:
@@ -3147,7 +3147,7 @@ class TpSpeedupCalc:
     tp8_total_ms_str = fmt_time(round(tp8_total_ms), 'millisecond', precision=0, commas=True)
     tp_theoretical_mult_str = fmt_multiple(tp_theoretical, precision=0, commas=False)
     n_layers_str = fmt_int(n_layers, commas=False)
-    nvlink_h100_gbs_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
+    nvlink_h100_gb_per_s_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
     parameters_b_str = fmt_int(parameters_b, commas=False)
     attention_heads_str = fmt_int(attention_heads, commas=False)
     hidden_dim_str = fmt_int(hidden_dim)
@@ -3181,7 +3181,7 @@ $$\text{Memory}_{\text{70B}} = 70 \times 10^9 \times 2 = 140\text{ GB}$$
 - Sequential: `{python} TpSpeedupCalc.seq_total_ms_str` for the full prefill pass
 - 8-way TP: `{python} TpSpeedupCalc.tp8_total_ms_str` for the full prefill pass
 
-The `{python} TpSpeedupCalc.tp_speedup_mult_str` speedup (vs. theoretical `{python} TpSpeedupCalc.tp_theoretical_mult_str`) reflects communication overhead. At `{python} TpSpeedupCalc.nvlink_h100_gbs_str`, moving a `{python} TpSpeedupCalc.activation_mb_str` activation payload would take only about 0.01 ms by raw bandwidth math; the 0.3 ms budget shown here includes collective launch, synchronization, ring protocol, and framework overheads.
+The `{python} TpSpeedupCalc.tp_speedup_mult_str` speedup (vs. theoretical `{python} TpSpeedupCalc.tp_theoretical_mult_str`) reflects communication overhead. At `{python} TpSpeedupCalc.nvlink_h100_gb_per_s_str`, moving a `{python} TpSpeedupCalc.activation_mb_str` activation payload would take only about 0.01 ms by raw bandwidth math; the 0.3 ms budget shown here includes collective launch, synchronization, ring protocol, and framework overheads.
 
 **Time-to-first-token** (1024-token prompt):
 
@@ -3352,7 +3352,7 @@ class MoECapacityPlan:
     read_per_gpu_gb_str = fmt_memory(read_per_gpu, unit=GB, precision=1, commas=False)
     t_read_ms_str = fmt_time(t_read, millisecond, precision=2, commas=False)
     total_decode_ms_str = fmt_time(total_decode, millisecond, precision=1, commas=False)
-    tokens_per_sec_tokens_s_str = fmt_rate(tokens_per_sec, "tokens/s", precision=0, commas=True)
+    tokens_per_s_str = fmt_rate(tokens_per_sec, "tokens/s", precision=0, commas=True)
     total_weight_gb_str = fmt_memory(total_weight, unit=GB, precision=0, commas=False)
     node_capacity_gb_str = fmt_memory(node_capacity, unit=GB, precision=0, commas=False)
     nodes_needed_str = fmt_int(nodes_needed, commas=False)
@@ -3361,7 +3361,7 @@ class MoECapacityPlan:
     moe_active_params_b_str = fmt_params(moe_active_params, scale="B", precision=0, commas=False)
     n_gpus_str = fmt_count(n_gpus, commas=False, label="GPU")
     alltoall_overhead_ms_str = fmt_time(alltoall_overhead, millisecond, precision=1, commas=False)
-    h100_bw_tbs_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
+    h100_bw_tb_per_s_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
     h100_mem_gb_str = fmt_memory(h100_mem, unit=GB, precision=0, commas=False)
     moe_total_params_b_str = fmt_params(moe_total_params, scale="B", precision=0, commas=False)
     node_gpus_str = fmt_int(node_gpus, commas=False)
@@ -3374,8 +3374,8 @@ class MoECapacityPlan:
 **Math**:
 
 1.  **Memory**: Total weight memory = `{python} MoECapacityPlan.total_weight_gb_str`. A single node (`{python} MoECapacityPlan.node_capacity_gb_str`) is insufficient. `{python} MoECapacityPlan.nodes_needed_str` provide `{python} MoECapacityPlan.cluster_capacity_gb_str`, leaving enough room for KV caches.
-2.  **Latency**: Each decode step reads `{python} MoECapacityPlan.moe_active_params_b_str` active parameters (`{python} MoECapacityPlan.active_mem_gb_str`). Distributed across `{python} MoECapacityPlan.n_gpus_str`, each reads about `{python} MoECapacityPlan.read_per_gpu_gb_str`. At `{python} MoECapacityPlan.h100_bw_tbs_str` HBM bandwidth, $t_{\text{read}} \approx$ `{python} MoECapacityPlan.t_read_ms_str`. AllToAll routing adds about `{python} MoECapacityPlan.alltoall_overhead_ms_str`.
-3.  **Floor**: Estimated decode latency $\approx$ `{python} MoECapacityPlan.total_decode_ms_str`/token, or `{python} MoECapacityPlan.tokens_per_sec_tokens_s_str` at batch size 1.
+2.  **Latency**: Each decode step reads `{python} MoECapacityPlan.moe_active_params_b_str` active parameters (`{python} MoECapacityPlan.active_mem_gb_str`). Distributed across `{python} MoECapacityPlan.n_gpus_str`, each reads about `{python} MoECapacityPlan.read_per_gpu_gb_str`. At `{python} MoECapacityPlan.h100_bw_tb_per_s_str` HBM bandwidth, $t_{\text{read}} \approx$ `{python} MoECapacityPlan.t_read_ms_str`. AllToAll routing adds about `{python} MoECapacityPlan.alltoall_overhead_ms_str`.
+3.  **Floor**: Estimated decode latency $\approx$ `{python} MoECapacityPlan.total_decode_ms_str`/token, or `{python} MoECapacityPlan.tokens_per_s_str` at batch size 1.
 
 **Systems insight**: MoE allows a 671B model to approach the per-token bandwidth cost of a much smaller dense model, but capacity planning is still driven by the full parameter set that must remain resident.
 
@@ -3469,14 +3469,14 @@ Load balancing challenge: If gating decisions cluster on certain experts, device
 #| echo: false
 #| label: mixtral-8x7b-registry-spec
 from mlsysim import Bparam, Models
-from mlsysim.fmt import fmt_int
+from mlsysim.fmt import fmt_int, fmt_params
 
 class Mixtral8x7BSpec:
     """Book-facing Mixtral fields sourced from the model registry."""
 
     _model = Models.Language.Mixtral_8x7B
-    total_params_b_str = fmt_int(_model.parameters.to(Bparam).magnitude, commas=False)
-    active_params_b_str = fmt_int(_model.active_parameters.to(Bparam).magnitude, commas=False)
+    total_params_b_str = fmt_params(_model.parameters, scale="B", precision=0, commas=False)
+    active_params_b_str = fmt_params(_model.active_parameters, scale="B", precision=0, commas=False)
     experts_str = fmt_int(_model.experts, commas=False)
     active_experts_str = fmt_int(_model.active_experts_per_token, commas=False)
 ```
@@ -3487,7 +3487,7 @@ Mixtral-8x7B uses `{python} Mixtral8x7BSpec.experts_str` experts per MoE layer w
 
 **Model characteristics**:
 
-- Total parameters: `{python} Mixtral8x7BSpec.total_params_b_str`B (but only ~`{python} Mixtral8x7BSpec.active_params_b_str`B active per token)
+- Total parameters: `{python} Mixtral8x7BSpec.total_params_b_str` (but only ~`{python} Mixtral8x7BSpec.active_params_b_str` active per token)
 - Experts per layer: `{python} Mixtral8x7BSpec.experts_str`
 - Active experts per token: `{python} Mixtral8x7BSpec.active_experts_str` (top-$k$ = `{python} Mixtral8x7BSpec.active_experts_str`)
 - MoE layers: Every feed-forward layer (each FFN replaced by a `{python} Mixtral8x7BSpec.experts_str`-expert MoE block)
@@ -3770,7 +3770,7 @@ Both equations make clear that the achievable bandwidth $\beta$ and latency $\al
 # │ Exports: AllReduceInterconnect.nvlink_ms_str,
 # │          AllReduceInterconnect.ib_ms_str,
 # │          AllReduceInterconnect.eth_ms_str,
-# │          AllReduceInterconnect.nvlink_bw_gbs_str,
+# │          AllReduceInterconnect.nvlink_bw_gb_per_s_str,
 # │          AllReduceInterconnect.nvlink_pct_str,
 # │          AllReduceInterconnect.ib_pct_str,
 # │          AllReduceInterconnect.eth_pct_str
@@ -3805,7 +3805,7 @@ class AllReduceInterconnect:
     check(eth_pct < 5, f"Raw 100G Ethernet share should remain under 5%, got {eth_pct:.1f}%")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    nvlink_bw_gbs_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
+    nvlink_bw_gb_per_s_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
     nvlink_ms_str = fmt_time(nvlink_time, millisecond, precision=2, commas=False)
     ib_ms_str = fmt_time(ib_time, millisecond, precision=2, commas=False)
     eth_ms_str = fmt_time(eth_time, millisecond, precision=2, commas=False)
@@ -3849,15 +3849,15 @@ NVLink bandwidth has evolved significantly over GPU generations.[^fn-nvlink-band
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: NVLink bandwidth evolution footnote below.
-# │ Exports: TpNvlinkRecap.nvlink_h100_gbs_str
+# │ Exports: TpNvlinkRecap.nvlink_h100_gb_per_s_str
 class TpNvlinkRecap:
     nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth
     from mlsysim.fmt import fmt_bandwidth
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    nvlink_h100_gbs_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
+    nvlink_h100_gb_per_s_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
 ```
 
-[^fn-nvlink-bandwidth-inf]: **NVLink Bandwidth Evolution**: From 160 GB/s bidirectional on early NVLink implementations to `{python} TpNvlinkRecap.nvlink_h100_gbs_str` on Hopper-class GPUs to 1.8 TB/s on Blackwell-class GPUs---roughly a 10$\times$ improvement across three hardware generations. This bandwidth growth is what made intra-node tensor parallelism across 8 GPUs practical with less than 5 percent communication overhead, directly determining the maximum model size servable without crossing the slower cross-node interconnect.
+[^fn-nvlink-bandwidth-inf]: **NVLink Bandwidth Evolution**: From 160 GB/s bidirectional on early NVLink implementations to `{python} TpNvlinkRecap.nvlink_h100_gb_per_s_str` on Hopper-class GPUs to 1.8 TB/s on Blackwell-class GPUs---roughly a 10$\times$ improvement across three hardware generations. This bandwidth growth is what made intra-node tensor parallelism across 8 GPUs practical with less than 5 percent communication overhead, directly determining the maximum model size servable without crossing the slower cross-node interconnect.
 
 ### Sharding strategy selection {#sec-inference-scale-sharding-strategy-selection-f69c}
 
@@ -4482,7 +4482,7 @@ GPU memory contention is the most severe: a tenant with unexpectedly long sequen
 # │ Imports: mlsysim.fmt (check, fmt, MarkdownStr)
 # │ Exports: NoisyNeighborQuotaScenario.*_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, check, fmt, MarkdownStr, fmt_percent, fmt_time
+from mlsysim.fmt import fmt_int, check, fmt, MarkdownStr, fmt_percent, fmt_rate, fmt_time
 
 class NoisyNeighborQuotaScenario:
     """Resource-quota scenario with computed SLO statuses."""
@@ -4507,7 +4507,7 @@ class NoisyNeighborQuotaScenario:
     slo_ms_str = fmt_time(round(slo_ms), 'millisecond', precision=0, commas=False)
     tenant_base_qps_str = fmt_rate(tenant_base_qps, "QPS", commas=False)
     tenant_burst_qps_str = fmt_rate(tenant_burst_qps, "QPS", commas=False)
-    tenant_throttled_qps_str = fmt_int(tenant_throttled_qps, commas=False)
+    tenant_throttled_qps_str = fmt_rate(tenant_throttled_qps, "QPS", commas=False)
     protected_p99_ms_str = fmt_int(protected_p99_ms, commas=False)
     burst_p99_ms_str = fmt_int(burst_p99_ms, commas=False)
     protected_status_str = MarkdownStr(protected_status)
@@ -6030,7 +6030,7 @@ Larger GPU memory enables larger batches only for models whose throughput is cap
 # │ How: pulling constants from mlsysim.core.constants.
 # │
 # │ Imports: mlsysim.core.constants (Hardware.Cloud.H100.memory.capacity, Hardware.Cloud.H100.memory.bandwidth, GiB, TB, second)
-# │ Exports: FinalSummaryHardware.h100_mem_gb_str, FinalSummaryHardware.h100_mem_bw_tbs_str
+# │ Exports: FinalSummaryHardware.h100_mem_gb_str, FinalSummaryHardware.h100_mem_bw_tb_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 class FinalSummaryHardware:
@@ -6046,10 +6046,10 @@ class FinalSummaryHardware:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     h100_mem_gb_str = fmt_memory_capacity(h100_mem, unit=GiB, precision=0, commas=False)
-    h100_mem_bw_tbs_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
+    h100_mem_bw_tb_per_s_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
 ```
 
-While larger GPU memory enables larger batches for models that fit in memory, the bottleneck often shifts before memory is exhausted. Memory bandwidth limits throughput for bandwidth-bound operations (LLM decode). Compute limits throughput for compute-bound operations (prefill, vision inference). A bandwidth-bound decode workload on an H100 with `{python} FinalSummaryHardware.h100_mem_gb_str` memory eventually plateaus when HBM3 bandwidth (`{python} FinalSummaryHardware.h100_mem_bw_tbs_str`) saturates; adding memory alone does not raise token throughput once that point is reached. Understanding whether the workload is compute-bound, memory-bandwidth-bound, or capacity-bound guides appropriate resource allocation.
+While larger GPU memory enables larger batches for models that fit in memory, the bottleneck often shifts before memory is exhausted. Memory bandwidth limits throughput for bandwidth-bound operations (LLM decode). Compute limits throughput for compute-bound operations (prefill, vision inference). A bandwidth-bound decode workload on an H100 with `{python} FinalSummaryHardware.h100_mem_gb_str` memory eventually plateaus when HBM3 bandwidth (`{python} FinalSummaryHardware.h100_mem_bw_tb_per_s_str`) saturates; adding memory alone does not raise token throughput once that point is reached. Understanding whether the workload is compute-bound, memory-bandwidth-bound, or capacity-bound guides appropriate resource allocation.
 
 **Pitfall**: *Neglecting multi-tenancy isolation until production.*
 

@@ -85,7 +85,7 @@ from mlsysim.fmt import fmt_int, MarkdownStr, fmt, fmt_qty, fmt_qty_int, check, 
 # │
 # │ Imports: mlsysim (Hardware, Models), mlsysim.core.constants (*),
 # │          mlsysim.physics (calc_kv_cache_size, model_memory)
-# │ Exports: StorageFuelLineContext.h100_bw_tbs_str, .nvme_bw_gb_s_str,
+# │ Exports: StorageFuelLineContext.h100_bw_tb_per_s_str, .nvme_bw_gb_per_s_str,
 # │          .ckpt_total_gb_str, .gpt3_params_b_str, .bw_ratio_mult_str,
 # │          .ckpt_fleet_total_pb_str, .checkpoint_count_str, ...
 # └─────────────────────────────────────────────────────────────────────────────
@@ -116,8 +116,8 @@ class StorageFuelLineContext:
     check(checkpoint_count_val == 4320, "30 days at 10-min checkpoint interval should be 4320")
 
     # ┌── 4. OUTPUT ───────────────────────────────────────
-    h100_bw_tbs_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
-    nvme_bw_gb_s_str = fmt_bandwidth(nvme_bw_raw, unit=GB / second, precision=0, commas=False)
+    h100_bw_tb_per_s_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
+    nvme_bw_gb_per_s_str = fmt_bandwidth(nvme_bw_raw, unit=GB / second, precision=0, commas=False)
     bw_ratio_mult_str = fmt_multiple(bw_ratio_val, precision=1, commas=True)
     compressed_text_tb_str = fmt_memory(compressed_text, unit=TB, precision=0, commas=False)
     tokenized_text_tb_str = fmt_memory(tokenized_text, unit=TB, precision=0, commas=False)
@@ -144,7 +144,7 @@ In the Fleet Stack shown in @fig-fleet-stack, **Data Storage**\index{Data Storag
 
 Consider the running example that will thread through this chapter. A 175-billion parameter language model trains on 1.5 trillion tokens of text: roughly `{python} StorageFuelLineContext.compressed_text_tb_str` in compressed source form, or `{python} StorageFuelLineContext.tokenized_text_tb_str` once represented as 4-byte token IDs. Each training epoch reads every token once, in a shuffled order determined by the random seed. There is no "hot" subset of data that dominates access; every byte is consumed exactly once per pass. Meanwhile, each accelerator processes its local batch in roughly 200 ms, then waits for the next. If storage cannot deliver data within that 200 ms window, the accelerator sits idle, and the organization pays for silicon that produces heat instead of gradients.
 
-The problem is deceptive because storage technology has improved substantially. NVMe drives achieve `{python} StorageFuelLineContext.nvme_bw_gb_s_str` of sequential throughput, a figure that would have seemed out of reach a decade ago. The accelerators, however, improved faster. An H100 GPU consumes data from its HBM at `{python} StorageFuelLineContext.h100_bw_tbs_str`, roughly `{python} StorageFuelLineContext.bw_ratio_mult_str` faster than a single NVMe drive can feed it. The gap between storage delivery and accelerator consumption is the central tension of this chapter, and it cannot be solved by any single technology. Instead, it requires a hierarchy of storage tiers, each carefully matched to a specific phase of the ML lifecycle, connected by pipelines that hide latency through prefetching and pipelining.
+The problem is deceptive because storage technology has improved substantially. NVMe drives achieve `{python} StorageFuelLineContext.nvme_bw_gb_per_s_str` of sequential throughput, a figure that would have seemed out of reach a decade ago. The accelerators, however, improved faster. An H100 GPU consumes data from its HBM at `{python} StorageFuelLineContext.h100_bw_tb_per_s_str`, roughly `{python} StorageFuelLineContext.bw_ratio_mult_str` faster than a single NVMe drive can feed it. The gap between storage delivery and accelerator consumption is the central tension of this chapter, and it cannot be solved by any single technology. Instead, it requires a hierarchy of storage tiers, each carefully matched to a specific phase of the ML lifecycle, connected by pipelines that hide latency through prefetching and pipelining.
 
 The storage problem is fundamentally one of physics meeting economics. Physics dictates that data closer to the accelerator (in both physical distance and interconnect hops) can be delivered faster but in smaller quantities. Economics dictates that cheaper storage can hold more data but at greater distance. The engineering art is constructing a pipeline that bridges these constraints, keeping the expensive top tier full by drawing from cheaper lower tiers fast enough that the accelerator never perceives the delay. This chapter shows *how* to reason quantitatively about each tier in the hierarchy, *how* to size the pipeline that connects them, and *how* to make the economic tradeoffs that determine which data lives *where*.
 
@@ -492,22 +492,22 @@ A system architect must organize storage to serve workloads that simultaneously 
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @tbl-storage-hierarchy-merged and bandwidth cliffs
-# │ Exports: StorageHierarchyTable.h100_bw_tbs_str
+# │ Exports: StorageHierarchyTable.h100_bw_tb_per_s_str
 from mlsysim import Hardware
 from mlsysim.fmt import fmt_qty
 class StorageHierarchyTable:
     # ┌── 4. OUTPUT ───────────────────────────────────────
-    h100_bw_tbs_str = fmt_qty(Hardware.Cloud.H100.memory.bandwidth, TB/second, precision=2, commas=False)
+    h100_bw_tb_per_s_str = fmt_qty(Hardware.Cloud.H100.memory.bandwidth, TB/second, precision=2, commas=False)
 ```
 
-| **Storage Tier**         | **Typical Capacity** |                   **Bandwidth**\index{Bandwidth} | **Latency**\index{Latency} | **Cost (\$/GB)** |
-|:-------------------------|:---------------------|-------------------------------------------------:|---------------------------:|-----------------:|
-| **GPU HBM**              | 80 GB                | `{python} StorageHierarchyTable.h100_bw_tbs_str` |                    ~100 ns |           ~15.00 |
-| **Host DRAM**            | 512 GB–2 TB          |                                         200 GB/s |                    ~100 ns |            ~3.00 |
-| **Local NVMe SSD**       | 4–30 TB              |                                        7–25 GB/s |                     ~10 μs |            ~0.10 |
-| **Parallel File System** | 100+ PB              |                                1+ TB/s aggregate |                      ~1 ms |            ~0.03 |
-| **Object Storage**       | Unlimited            |                               100 GB/s aggregate |                     ~50 ms |            ~0.02 |
-| **Archive/Cold Storage** | Unlimited            |                                           1 GB/s |           Minutes to hours |           ~0.004 |
+| **Storage Tier**         | **Typical Capacity** |                        **Bandwidth**\index{Bandwidth} | **Latency**\index{Latency} | **Cost (\$/GB)** |
+|:-------------------------|:---------------------|------------------------------------------------------:|---------------------------:|-----------------:|
+| **GPU HBM**              | 80 GB                | `{python} StorageHierarchyTable.h100_bw_tb_per_s_str` |                    ~100 ns |           ~15.00 |
+| **Host DRAM**            | 512 GB–2 TB          |                                              200 GB/s |                    ~100 ns |            ~3.00 |
+| **Local NVMe SSD**       | 4–30 TB              |                                             7–25 GB/s |                     ~10 μs |            ~0.10 |
+| **Parallel File System** | 100+ PB              |                                     1+ TB/s aggregate |                      ~1 ms |            ~0.03 |
+| **Object Storage**       | Unlimited            |                                    100 GB/s aggregate |                     ~50 ms |            ~0.02 |
+| **Archive/Cold Storage** | Unlimited            |                                                1 GB/s |           Minutes to hours |           ~0.004 |
 
 : **Extended Memory Hierarchy for ML Systems**\index{Storage Hierarchy!extended memory hierarchy}: The roughly 30$\times$ aggregate-to-aggregate bandwidth gap between HBM and object storage (and a much larger per-client gap once a single inference instance pulls from a shared object endpoint) drives the need for sophisticated prefetching and caching across multiple levels. {#tbl-storage-hierarchy-merged}
 
@@ -521,8 +521,8 @@ The storage hierarchy principle (Principle \ref{pri-storage-hierarchy}) governs 
 # │ Exports: StoragePyramidContext.compressed_text_tb_str,
 # │          StoragePyramidContext.tokenized_text_tb_str,
 # │          StoragePyramidContext.hbm_host_dram_ratio_mult_str,
-# │          StoragePyramidContext.h100_bw_tbs_str,
-# │          StoragePyramidContext.host_dram_bw_gbs_str
+# │          StoragePyramidContext.h100_bw_tb_per_s_str,
+# │          StoragePyramidContext.host_dram_bw_gb_per_s_str
 from mlsysim import Hardware
 from mlsysim.fmt import fmt, fmt_bandwidth, fmt_memory, fmt_multiple, fmt_qty, fmt_qty_int
 class StoragePyramidContext:
@@ -536,8 +536,8 @@ class StoragePyramidContext:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     compressed_text_tb_str = fmt_memory(compressed_text, unit=TB, precision=0, commas=False)
     tokenized_text_tb_str = fmt_memory(tokenized_text, unit=TB, precision=0, commas=False)
-    h100_bw_tbs_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
-    host_dram_bw_gbs_str = fmt_bandwidth(host_dram_bw, unit=GB / second, precision=0, commas=False)
+    h100_bw_tb_per_s_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
+    host_dram_bw_gb_per_s_str = fmt_bandwidth(host_dram_bw, unit=GB / second, precision=0, commas=False)
     hbm_host_dram_ratio_mult_str = fmt_multiple(hbm_host_dram_ratio_val, precision=1, commas=False)
 ```
 @fig-storage-pyramid maps these six tiers into a spatial hierarchy, showing how bandwidth decreases and capacity increases at each step away from the accelerator.
@@ -554,9 +554,9 @@ The engineering challenge is to ensure that data flows upward through the pyrami
 
 ### Bandwidth cliffs between tiers {#sec-storage-bandwidth-cliffs}
 
-The bandwidth ratios between adjacent tiers reveal the severity of each transition in the hierarchy. Between HBM and host DRAM, the ratio is roughly `{python} StoragePyramidContext.hbm_host_dram_ratio_mult_str` (`{python} StoragePyramidContext.h100_bw_tbs_str` vs. ~`{python} StoragePyramidContext.host_dram_bw_gbs_str`). Between host DRAM and NVMe, the ratio is roughly 7$\times$ (`{python} StoragePyramidContext.host_dram_bw_gbs_str` vs. ~28 GB/s from a 4-drive RAID-0). Between NVMe and a parallel file system, the ratio depends on the per-node allocation: if a 1 TB/s aggregate PFS serves 256 nodes, each node receives roughly 4 GB/s, a 7$\times$ reduction from local NVMe. Between the parallel file system and object storage, the ratio is typically 10$\times$ or more, depending on the number of concurrent clients and network bandwidth.
+The bandwidth ratios between adjacent tiers reveal the severity of each transition in the hierarchy. Between HBM and host DRAM, the ratio is roughly `{python} StoragePyramidContext.hbm_host_dram_ratio_mult_str` (`{python} StoragePyramidContext.h100_bw_tb_per_s_str` vs. ~`{python} StoragePyramidContext.host_dram_bw_gb_per_s_str`). Between host DRAM and NVMe, the ratio is roughly 7$\times$ (`{python} StoragePyramidContext.host_dram_bw_gb_per_s_str` vs. ~28 GB/s from a 4-drive RAID-0). Between NVMe and a parallel file system, the ratio depends on the per-node allocation: if a 1 TB/s aggregate PFS serves 256 nodes, each node receives roughly 4 GB/s, a 7$\times$ reduction from local NVMe. Between the parallel file system and object storage, the ratio is typically 10$\times$ or more, depending on the number of concurrent clients and network bandwidth.
 
-These bandwidth cliffs have a critical implication: the pipeline cannot simply "stream through" the hierarchy in real time. If the accelerator consumes data at `{python} StoragePyramidContext.h100_bw_tbs_str` from HBM, and the next tier down delivers only 200 GB/s, then HBM can be emptied in under 50 ms but takes 400 ms to refill from host DRAM. The only way the accelerator avoids stalling is if the batch it needs next is already in HBM before it finishes the current batch. This is *why* every tier in the hierarchy serves as a prefetch buffer for the tier above it: host DRAM buffers data for HBM, NVMe buffers data for host DRAM, the parallel file system buffers data for NVMe, and object storage is the ultimate source of truth. Each buffer must be deep enough to absorb the latency and bandwidth variance of the tier below it.
+These bandwidth cliffs have a critical implication: the pipeline cannot simply "stream through" the hierarchy in real time. If the accelerator consumes data at `{python} StoragePyramidContext.h100_bw_tb_per_s_str` from HBM, and the next tier down delivers only 200 GB/s, then HBM can be emptied in under 50 ms but takes 400 ms to refill from host DRAM. The only way the accelerator avoids stalling is if the batch it needs next is already in HBM before it finishes the current batch. This is *why* every tier in the hierarchy serves as a prefetch buffer for the tier above it: host DRAM buffers data for HBM, NVMe buffers data for host DRAM, the parallel file system buffers data for NVMe, and object storage is the ultimate source of truth. Each buffer must be deep enough to absorb the latency and bandwidth variance of the tier below it.
 
 The bandwidth arithmetic also explains *why* increasing cluster size creates storage pressure. A single node with 8 GPUs needs roughly 4 to 40 GB/s of storage bandwidth (depending on workload). A cluster of 256 such nodes needs 1,000 to 10,000 GB/s. A cluster of 10,000 nodes needs 40 to 400 TB/s. At the upper end, even a world-class parallel file system with 1,000 OSS nodes delivering 1 TB/s aggregate cannot satisfy the demand, and the architecture must rely on local NVMe caching to reduce the load on shared storage.
 
@@ -574,14 +574,14 @@ The severity of that cluster-level pressure depends sharply on the data modality
 # │ Show: 168 MB/s text; 393 GB/s image; about 2,300x ratio.
 # │ How: BW = GPUs × per-GPU batch bytes / step time.
 # │
-# │ Imports: mlsysim.fmt (MarkdownStr, fmt, check)
+# │ Imports: mlsysim.fmt (MarkdownStr, fmt, fmt_count, check)
 # │ Exports: TextImageBandwidth.text_bw_display_math,
 # │          TextImageBandwidth.image_bw_display_math,
-# │          TextImageBandwidth.text_bw_mb_s_str,
-# │          TextImageBandwidth.image_bw_gb_s_str,
+# │          TextImageBandwidth.text_bw_mb_per_s_str,
+# │          TextImageBandwidth.image_bw_gb_per_s_str,
 # │          TextImageBandwidth.ratio_rounded_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import MarkdownStr, fmt, check, fmt_time, fmt_bandwidth
+from mlsysim.fmt import MarkdownStr, fmt, fmt_count, check, fmt_time, fmt_bandwidth
 
 class TextImageBandwidth:
     # ┌── 1. LOAD ─────────────────────────────────────────
@@ -606,22 +606,22 @@ class TextImageBandwidth:
     check(2300 < ratio_val < 2400, "Image/text bandwidth ratio should be about 2,344x")
 
     # ┌── 4. OUTPUT ───────────────────────────────────────
-    text_bw_mb_s_str = fmt_bandwidth(text_bw, unit=MB / second, precision=1, commas=False)
-    image_bw_gb_s_str = fmt_bandwidth(image_bw, unit=GB / second, precision=1, commas=False)
+    text_bw_mb_per_s_str = fmt_bandwidth(text_bw, unit=MB / second, precision=1, commas=False)
+    image_bw_gb_per_s_str = fmt_bandwidth(image_bw, unit=GB / second, precision=1, commas=False)
     ratio_rounded_mult_str = fmt_multiple(ratio_rounded_val, precision=0, commas=True)
     n_gpus_str = fmt(n_gpus, precision=0, commas=True)
-    text_tokens_per_gpu_str = fmt(text_tokens_per_gpu, precision=0, commas=True)
+    text_tokens_per_gpu_str = fmt_count(text_tokens_per_gpu, label="token")
     step_ms_str = fmt_time(step, ms, precision=0, commas=False)
     image_batch_per_gpu_str = fmt(image_batch_per_gpu, precision=0, commas=False)
     text_bw_display_math = MarkdownStr(
         "$$2{,}048 \\text{ GPUs} \\times 4{,}096 \\text{ tokens/GPU} "
         "\\times 4 \\text{ bytes/token} \\div 0.2\\text{s} "
-        f"\\approx \\mathbf{{{text_bw_mb_s_str}}}$$"
+        f"\\approx \\mathbf{{{text_bw_mb_per_s_str}}}$$"
     )
     image_bw_display_math = MarkdownStr(
         "$$2{,}048 \\text{ GPUs} \\times 256 \\text{ images/GPU} "
         "\\times 150 \\text{ KB/image} \\div 0.2\\text{s} "
-        f"\\approx \\mathbf{{{image_bw_gb_s_str}}}$$"
+        f"\\approx \\mathbf{{{image_bw_gb_per_s_str}}}$$"
     )
 ```
 
@@ -669,8 +669,8 @@ class HbmTierBandwidth:
     hbm_host_dram_ratio_val = h100_bw / host_dram_bw
     check(hbm_host_dram_ratio_val.to("").magnitude > 10, "HBM should be much faster than host DRAM")
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    h100_bw_tbs_str = fmt_qty(h100_bw, TB/second, precision=2, commas=False)
-    host_dram_bw_gbs_str = fmt_qty(host_dram_bw, GB/second, precision=0, commas=False)
+    h100_bw_tb_per_s_str = fmt_qty(h100_bw, TB/second, precision=2, commas=False)
+    host_dram_bw_gb_per_s_str = fmt_qty(host_dram_bw, GB/second, precision=0, commas=False)
     hbm_host_dram_ratio_mult_str = fmt_multiple(hbm_host_dram_ratio_val.to("").magnitude, precision=1, commas=False)
 ```
 ```{python}
@@ -719,7 +719,7 @@ class HbmModelBudget:
 
 ### Tier 0: GPU HBM {#sec-storage-tier0-hbm}
 
-\index{HBM!storage hierarchy}The most critical resource in the entire system is also the most scarce. High Bandwidth Memory (HBM) is the only storage tier where weights and activations can reside during active computation. As established in @sec-compute-hbm, HBM is a 3D-stacked memory technology that places DRAM dies vertically atop the accelerator, connected by thousands of through-silicon vias that provide aggregate bandwidth of `{python} HbmTierBandwidth.h100_bw_tbs_str` on an H100. This bandwidth is roughly 17$\times$ higher than the chapter's 200 GB/s host-DRAM figure and roughly 480$\times$ higher than a single 7 GB/s NVMe drive. That bandwidth is what makes modern deep learning feasible: a matrix multiplication involving billions of parameters requires reading those parameters from memory every forward and backward pass.
+\index{HBM!storage hierarchy}The most critical resource in the entire system is also the most scarce. High Bandwidth Memory (HBM) is the only storage tier where weights and activations can reside during active computation. As established in @sec-compute-hbm, HBM is a 3D-stacked memory technology that places DRAM dies vertically atop the accelerator, connected by thousands of through-silicon vias that provide aggregate bandwidth of `{python} HbmTierBandwidth.h100_bw_tb_per_s_str` on an H100. This bandwidth is roughly 17$\times$ higher than the chapter's 200 GB/s host-DRAM figure and roughly 480$\times$ higher than a single 7 GB/s NVMe drive. That bandwidth is what makes modern deep learning feasible: a matrix multiplication involving billions of parameters requires reading those parameters from memory every forward and backward pass.
 
 The constraint at this tier is *capacity*, not *bandwidth*. An H100 provides 80 GB of HBM, enough to hold a 40-billion parameter model in FP16 (2 bytes per parameter), but nowhere near enough for the 175B parameter models that define the frontier. To understand the severity of this constraint, consider the memory budget for training our 175B model. The model weights in FP16 consume `{python} HbmModelBudget.weights_fp16_gb_str`. The Adaptive Moment Estimation (Adam) optimizer maintains two additional states (momentum and variance) in FP32, consuming `{python} HbmModelBudget.adam_eq_math` GB. Activations for a single batch, depending on sequence length and batch size, can consume another 100 to 400 GB. The total memory footprint reaches roughly 1.85--2.15 TB depending on activation size, approaching or exceeding 25$\times$ the capacity of a single H100's HBM. From the storage hierarchy perspective, HBM is the destination that every lower tier exists to serve. The data pipeline's purpose is to ensure that the 80 GB of HBM always contains the data the accelerator needs *next*, not the data it needed *a second ago*.
 
@@ -830,7 +830,7 @@ From the data pipeline's perspective, Tier 0 is not a storage tier to be managed
 # │
 # │ Imports: mlsysim.core.constants (Hardware.Cloud.H100.interconnect.bandwidth, Hardware.Cloud.H100.nvlink.bandwidth, GB, second);
 # │          mlsysim.fmt (fmt_bandwidth)
-# │ Exports: DRAMInterconnect.pcie5_bw_gbs_str, DRAMInterconnect.nvlink_bw_gbs_str
+# │ Exports: DRAMInterconnect.pcie5_bw_gb_per_s_str, DRAMInterconnect.nvlink_bw_gb_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_bandwidth
 
@@ -839,12 +839,12 @@ class DRAMInterconnect:
     nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    pcie5_bw_gbs_str  = fmt_bandwidth(pcie5_bw, unit=GB / second, precision=0, commas=False)
-    nvlink_bw_gbs_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
+    pcie5_bw_gb_per_s_str  = fmt_bandwidth(pcie5_bw, unit=GB / second, precision=0, commas=False)
+    nvlink_bw_gb_per_s_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
 ```
 ### Tier 1: Host DRAM {#sec-storage-tier1-dram}
 
-\index{DRAM!data pipeline staging}One level below HBM, host DRAM serves as the staging area for the data pipeline. Every byte of training data that reaches the accelerator passes through host DRAM first (unless GPU Direct Storage bypasses it, as described in @sec-storage-gds). A typical training node contains 512 GB to 2 TB of system memory shared across the host CPU and its peripherals. While the bandwidth between host DRAM and the accelerator is limited to what PCIe Gen 5 (about `{python} DRAMInterconnect.pcie5_bw_gbs_str` per direction, 128 GB/s bidirectional) or NVLink (`{python} DRAMInterconnect.nvlink_bw_gbs_str`) can provide, host DRAM plays three critical roles in the ML storage hierarchy.
+\index{DRAM!data pipeline staging}One level below HBM, host DRAM serves as the staging area for the data pipeline. Every byte of training data that reaches the accelerator passes through host DRAM first (unless GPU Direct Storage bypasses it, as described in @sec-storage-gds). A typical training node contains 512 GB to 2 TB of system memory shared across the host CPU and its peripherals. While the bandwidth between host DRAM and the accelerator is limited to what PCIe Gen 5 (about `{python} DRAMInterconnect.pcie5_bw_gb_per_s_str` per direction, 128 GB/s bidirectional) or NVLink (`{python} DRAMInterconnect.nvlink_bw_gb_per_s_str`) can provide, host DRAM plays three critical roles in the ML storage hierarchy.
 
 The data loader pipeline that runs in host DRAM follows a multi-stage architecture. First, I/O threads read compressed data from NVMe or network storage into read buffers. Second, decode threads decompress the data (JPEG decoding for images, decompression for text). Third, augmentation threads apply transformations (random cropping, flipping, normalization for images; tokenization and sequence packing for text). Fourth, the collation stage assembles individual samples into batches and pins the memory for efficient DMA transfer to the accelerator. Each stage runs concurrently, forming a pipeline that overlaps I/O, CPU computation, and data transfer. The efficiency of this pipeline determines whether host DRAM can keep up with the accelerator's appetite.
 
@@ -860,7 +860,7 @@ The three roles interact in subtle ways. The prefetch buffer and the augmentatio
 
 The physical layout of DRAM has performance implications that are invisible in single-socket benchmarks but critical at production scale. Modern multi-socket servers exhibit Non-Uniform Memory Access (NUMA) topology where each CPU socket has "local" DRAM that it can access at full bandwidth and "remote" DRAM attached to the other socket at roughly half bandwidth. In a dual-socket DGX node with eight GPUs split four per socket, a data loader thread running on socket 0 that allocates its prefetch buffer in socket 1's DRAM pays a roughly 2$\times$ bandwidth penalty on every buffer access. The fix is **NUMA-aware allocation**\index{Data Loader!pipeline architecture}\index{NUMA!aware allocation}: pin each data loader worker to the same CPU socket (the same NUMA domain) as the GPUs it serves, and use `numactl` or `libnuma` to ensure memory allocation stays local. Proper NUMA pinning can improve data loading throughput by 30–50 percent on dual-socket systems, a gain that is invisible in development environments but essential when every percentage point of utilization translates to thousands of dollars per day.
 
-The gap between host DRAM bandwidth and HBM bandwidth is the first major cliff in the hierarchy: roughly `{python} HbmTierBandwidth.hbm_host_dram_ratio_mult_str` using the chapter's `{python} HbmTierBandwidth.host_dram_bw_gbs_str` host-DRAM reference and `{python} HbmTierBandwidth.h100_bw_tbs_str` HBM figure. The host-to-GPU interconnect adds a separate cliff, with effective transfer bandwidth depending on whether the node uses PCIe or NVLink. Any failure to keep host DRAM populated from lower tiers cascades immediately to accelerator starvation, because the accelerator cannot fetch directly from NVMe or network storage. In our running example, the 256-node cluster requires each node's host DRAM to sustain a continuous flow of decoded, augmented batches ready for PCIe transfer. If the NVMe-to-DRAM read pipeline falls behind by even a few hundred milliseconds, the prefetch buffer drains and the accelerator idles until the next batch arrives.
+The gap between host DRAM bandwidth and HBM bandwidth is the first major cliff in the hierarchy: roughly `{python} HbmTierBandwidth.hbm_host_dram_ratio_mult_str` using the chapter's `{python} HbmTierBandwidth.host_dram_bw_gb_per_s_str` host-DRAM reference and `{python} HbmTierBandwidth.h100_bw_tb_per_s_str` HBM figure. The host-to-GPU interconnect adds a separate cliff, with effective transfer bandwidth depending on whether the node uses PCIe or NVLink. Any failure to keep host DRAM populated from lower tiers cascades immediately to accelerator starvation, because the accelerator cannot fetch directly from NVMe or network storage. In our running example, the 256-node cluster requires each node's host DRAM to sustain a continuous flow of decoded, augmented batches ready for PCIe transfer. If the NVMe-to-DRAM read pipeline falls behind by even a few hundred milliseconds, the prefetch buffer drains and the accelerator idles until the next batch arrives.
 
 ```{python}
 #| echo: false
@@ -881,7 +881,7 @@ The gap between host DRAM bandwidth and HBM bandwidth is the first major cliff i
 # │
 # │ Imports: mlsysim.core.constants (Hardware.Tech.Storage.NvmeGen4.bandwidth, GB, second, BILLION, THOUSAND,
 # │          MILLION)
-# │ Exports: NVMeTierCalcs.raw_bw_mb_s_str, .hdd_slowdown_factor_mult_str,
+# │ Exports: NVMeTierCalcs.raw_bw_mb_per_s_str, .hdd_slowdown_factor_mult_str,
 # │          .hdd_util_ceiling_pct_str, .ckpt_nvme_s_str, .ckpt_pfs_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt, fmt_count, fmt_time, fmt_rate, fmt_memory, fmt_bandwidth
@@ -913,12 +913,12 @@ class NVMeTierCalcs:
     check(hdd_slowdown_val == 10, "HDD slowdown should be 10x")
 
     # ┌── 4. OUTPUT ───────────────────────────────────────
-    raw_bw_mb_s_str             = fmt_bandwidth(raw_bw, unit=MB / second, precision=0, commas=False)
-    images_per_sec_str     = fmt_rate(images_per_sec, 'images/s', precision=0, commas=False)
+    raw_bw_mb_per_s_str             = fmt_bandwidth(raw_bw, unit=MB / second, precision=0, commas=False)
+    images_per_s_str     = fmt_rate(images_per_sec, 'images/s', precision=0, commas=False)
     img_size_kb_str        = fmt_memory(img_size, unit=KB, precision=0, commas=False)
     imagenet_images_m_str  = fmt_count(imagenet_images, scale='M', precision=2, commas=False)
     imagenet_avg_kb_str    = fmt_memory(img_size, unit=KB, precision=0, commas=False)
-    hdd_iops_str           = fmt(hdd_iops, precision=0, commas=False)
+    hdd_iops_str           = fmt_rate(hdd_iops, "IOPS", precision=0, commas=False)
     hdd_slowdown_factor_mult_str = fmt_multiple(hdd_slowdown_val, precision=0, commas=False)
     hdd_util_ceiling_pct_str = fmt_percent(hdd_util_ceiling_pct_val/100, precision=0, commas=False, style='prose')
     ckpt_nvme_s_str        = fmt_time(ckpt_nvme, second, precision=1, commas=False, style='word')
@@ -955,7 +955,7 @@ class NvmeTierContext:
     ckpt_total = mem_res.total_memory
     check(local_nvme_capacity.to(TB).magnitude > 25, "Four 7.68 TB drives should exceed 25 TB local capacity")
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    nvme_bw_gb_s_str = fmt_bandwidth(nvme_per_drive_bw, unit=GB / second, precision=0, commas=False)
+    nvme_bw_gb_per_s_str = fmt_bandwidth(nvme_per_drive_bw, unit=GB / second, precision=0, commas=False)
     tokenized_text_tb_str = fmt_memory(tokenized_text, unit=TB, precision=0, commas=False)
     tokenized_local_stream_min_str = fmt_time(tokenized_local_stream, minute, precision=1, commas=False, style='word')
     local_nvme_capacity_tb_str = fmt_memory(local_nvme_capacity, unit=TB, precision=1, commas=False)
@@ -971,7 +971,7 @@ class NvmeTierContext:
 ```
 ### Tier 2: Local NVMe {#sec-storage-tier2-nvme}
 
-\index{NVMe!ML storage tier}When the working set exceeds host DRAM, the system falls to Tier 2: the local NVMe drives attached directly to the compute node. NVMe[^fn-nvme-protocol] provides a high-performance protocol designed specifically for solid-state drives, achieving `{python} NvmeTierContext.nvme_bw_gb_s_str` of sequential throughput per drive. With four drives in a RAID-0 configuration, a single node can sustain roughly 28 GB/s of sequential reads before overhead, sufficient to stream the `{python} NvmeTierContext.tokenized_text_tb_str` serialized dataset from local disk in about `{python} NvmeTierContext.tokenized_local_stream_min_str` under ideal sequential conditions.
+\index{NVMe!ML storage tier}When the working set exceeds host DRAM, the system falls to Tier 2: the local NVMe drives attached directly to the compute node. NVMe[^fn-nvme-protocol] provides a high-performance protocol designed specifically for solid-state drives, achieving `{python} NvmeTierContext.nvme_bw_gb_per_s_str` of sequential throughput per drive. With four drives in a RAID-0 configuration, a single node can sustain roughly 28 GB/s of sequential reads before overhead, sufficient to stream the `{python} NvmeTierContext.tokenized_text_tb_str` serialized dataset from local disk in about `{python} NvmeTierContext.tokenized_local_stream_min_str` under ideal sequential conditions.
 
 [^fn-nvme-protocol]: **NVMe (Non-Volatile Memory Express)**: A storage protocol designed for SSDs, connecting directly to the CPU via PCIe lanes. NVMe replaced AHCI's single queue of 32 commands with 64K queues of 64K commands each, a 130-million-fold increase in maximum outstanding I/O. This deep queue parallelism is what allows a multi-worker ML data loader to saturate the drive's bandwidth; with AHCI, 32 workers would serialize on the single command queue regardless of flash speed. \index{NVMe!queue parallelism}
 
@@ -999,12 +999,12 @@ A standard ImageNet training pipeline makes the cost of the wrong format visible
 
 ::: {#nbk-data-storage-imagenet-bottleneck-analysis .callout-notebook title="The ImageNet bottleneck analysis"}
 
-**Problem**\index{ImageNet!bottleneck analysis}: A ResNet-50 training job on ImageNet (`{python} NVMeTierCalcs.imagenet_images_m_str`, ~`{python} NVMeTierCalcs.imagenet_avg_kb_str` average) targets `{python} NVMeTierCalcs.images_per_sec_str`. The question is whether to use individual JPEG files on an HDD or NVMe.
+**Problem**\index{ImageNet!bottleneck analysis}: A ResNet-50 training job on ImageNet (`{python} NVMeTierCalcs.imagenet_images_m_str`, ~`{python} NVMeTierCalcs.imagenet_avg_kb_str` average) targets `{python} NVMeTierCalcs.images_per_s_str`. The question is whether to use individual JPEG files on an HDD or NVMe.
 
 **Math**:
 
-1.  **Raw Bandwidth**\index{ImageNet!raw bandwidth calculation}: `{python} NVMeTierCalcs.images_per_sec_str` $\times$ `{python} NVMeTierCalcs.img_size_kb_str` = `{python} NVMeTierCalcs.raw_bw_mb_s_str`.
-2.  **HDD Reality**: A 7200 RPM hard disk drive (HDD) delivers `{python} NVMeTierCalcs.hdd_iops_str` random IOPS\index{HDD!random IOPS bottleneck}. Sustaining `{python} NVMeTierCalcs.images_per_sec_str` requires `{python} NVMeTierCalcs.hdd_slowdown_factor_mult_str` more IOPS than the disk provides.
+1.  **Raw Bandwidth**\index{ImageNet!raw bandwidth calculation}: `{python} NVMeTierCalcs.images_per_s_str` $\times$ `{python} NVMeTierCalcs.img_size_kb_str` = `{python} NVMeTierCalcs.raw_bw_mb_per_s_str`.
+2.  **HDD Reality**: A 7200 RPM hard disk drive (HDD) delivers `{python} NVMeTierCalcs.hdd_iops_str` at random reads\index{HDD!random IOPS bottleneck}. Sustaining `{python} NVMeTierCalcs.images_per_s_str` requires `{python} NVMeTierCalcs.hdd_slowdown_factor_mult_str` more IOPS than the disk provides.
 3.  **Result**: Shuffling individual files on an HDD will starve the GPU, capping utilization at about `{python} NVMeTierCalcs.hdd_util_ceiling_pct_str` before decode, seek, and file-system overheads.
 
 **Systems insight**: The pipeline must either use NVMe (sub-10 μs random access) or convert the dataset to a sequential format (TFRecord/WebDataset) to achieve sequential throughput.
@@ -1240,11 +1240,11 @@ class ObjectStreamContext:
     tokenized_shard_count_val = round((tokenized_text / tokenized_shard).to("").magnitude)
     text_bw = 2048 * 4096 * token_id_bytes / step
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    text_bw_mb_s_str = fmt_bandwidth(text_bw, unit=MB / second, precision=1, commas=False)
+    text_bw_mb_per_s_str = fmt_bandwidth(text_bw, unit=MB / second, precision=1, commas=False)
     tokenized_shard_count_str = fmt(tokenized_shard_count_val, precision=0)
     tokenized_shard_gb_str = fmt_memory(tokenized_shard, unit=GB, precision=0, commas=False)
 ```
-Applying this streaming architecture to our running example makes the design concrete. The tokenized training set is stored in S3 as roughly `{python} ObjectStreamContext.tokenized_shard_count_str` shards of `{python} ObjectStreamContext.tokenized_shard_gb_str` each. The streaming architecture assigns each of the 256 compute nodes a unique subset of roughly 8 shards. Within each node, 8 data loader worker processes issue concurrent HTTP `Range` requests to fetch 256 MB chunks from their assigned shards. Across the cluster, this results in 2,048 concurrent requests, allowing the aggregate throughput from S3 to reach 50–100 GB/s, easily saturating the roughly `{python} ObjectStreamContext.text_bw_mb_s_str` required for text model training. In this regime, the bottleneck often shifts from the object store's bandwidth to the network bandwidth between the compute VPC and the S3 endpoint. Organizations that co-locate compute and storage in the same cloud availability zone can reduce this cross-network latency from a typical 20 ms to roughly 5 ms, a 4$\times$ improvement that directly reduces the required prefetch buffer depth and improves overall pipeline efficiency.
+Applying this streaming architecture to our running example makes the design concrete. The tokenized training set is stored in S3 as roughly `{python} ObjectStreamContext.tokenized_shard_count_str` shards of `{python} ObjectStreamContext.tokenized_shard_gb_str` each. The streaming architecture assigns each of the 256 compute nodes a unique subset of roughly 8 shards. Within each node, 8 data loader worker processes issue concurrent HTTP `Range` requests to fetch 256 MB chunks from their assigned shards. Across the cluster, this results in 2,048 concurrent requests, allowing the aggregate throughput from S3 to reach 50–100 GB/s, easily saturating the roughly `{python} ObjectStreamContext.text_bw_mb_per_s_str` required for text model training. In this regime, the bottleneck often shifts from the object store's bandwidth to the network bandwidth between the compute VPC and the S3 endpoint. Organizations that co-locate compute and storage in the same cloud availability zone can reduce this cross-network latency from a typical 20 ms to roughly 5 ms, a 4$\times$ improvement that directly reduces the required prefetch buffer depth and improves overall pipeline efficiency.
 
 The parallelism available in object storage access is practically unlimited. Each GET request is independent and can be served by a different storage node within the cloud provider's infrastructure. A training cluster with 1,024 nodes, each running 8 data loader workers issuing concurrent requests, generates 8,192 simultaneous GET requests. If each request fetches a 256 MB shard, the aggregate throughput depends on the cloud provider's network capacity and internal bandwidth, which for large providers exceeds tens of terabits per second. The practical limit is typically the network bandwidth between the compute cluster and the object storage service, not the storage service's internal throughput.
 
@@ -1368,7 +1368,7 @@ The comparison in @tbl-data-formats sets the data-volume term in the pipeline eq
 # │
 # │ Imports: mlsysim.core.constants (BILLION, THOUSAND)
 # │          mlsysim.fmt (fmt, check)
-# │ Exports: PipelineCalcs.req_bw_imagenet_gb_s_str, PipelineCalcs.data_stall_pct_str,
+# │ Exports: PipelineCalcs.req_bw_imagenet_gb_per_s_str, PipelineCalcs.data_stall_pct_str,
 # │          PipelineCalcs.t_comp_stall_str, PipelineCalcs.t_io_stall_str,
 # │          PipelineCalcs.stall_pct_display_math
 # └─────────────────────────────────────────────────────────────────────────────
@@ -1397,7 +1397,7 @@ class PipelineCalcs:
     check(data_stall_pct_val == 20, "Data stall calculation mismatch")
 
     # ┌── 4. OUTPUT ───────────────────────────────────────
-    req_bw_imagenet_gb_s_str = fmt_bandwidth(req_bw_imagenet, unit=GB / second, precision=1, commas=False)
+    req_bw_imagenet_gb_per_s_str = fmt_bandwidth(req_bw_imagenet, unit=GB / second, precision=1, commas=False)
     data_stall_pct_str  = fmt_percent(data_stall_pct_val/100, precision=0, commas=False, style='prose')
     t_comp_stall_str    = fmt_time(t_comp, ms, precision=0, commas=False)
     t_io_stall_str      = fmt_time(t_io, ms, precision=0, commas=False)
@@ -1419,7 +1419,7 @@ where $N_{\text{GPU}}$ is the number of accelerators, $U_{\text{target}}$ is the
 
 The equation reveals four levers for controlling storage demand. Reducing $N_{\text{GPU}}$ (fewer accelerators) directly reduces bandwidth requirements but also reduces training throughput. Lowering $U_{\text{target}}$ (accepting lower utilization) reduces the bandwidth needed but wastes expensive hardware. Decreasing $D_{\text{vol,batch}}$ (smaller batches) reduces per-iteration data volume but may harm model convergence. Increasing $T_{\text{iteration}}$ (slower iterations, perhaps from a larger model) gives storage more time to deliver each batch but extends total training time. In practice, none of these levers is free; the pipeline must be engineered to deliver the bandwidth that the training configuration demands.
 
-As a separate image-training example, consider 256 GPUs training with ImageNet-scale images, 200 ms iterations, and 80 percent target utilization. This configuration requires `{python} PipelineCalcs.req_bw_imagenet_gb_s_str` of aggregate storage throughput. The bandwidth must be sustained continuously for the duration of training, which may last days or weeks. If at any point the storage system delivers less than `{python} PipelineCalcs.req_bw_imagenet_gb_s_str`, accelerators begin to idle. For the chapter's 175B language-model running example, tokenized text has a much lower per-batch bandwidth demand, but the total data volume and checkpoint traffic over the run are much larger, shifting the bottleneck from peak training-data bandwidth to sustained throughput and checkpoint movement over weeks.
+As a separate image-training example, consider 256 GPUs training with ImageNet-scale images, 200 ms iterations, and 80 percent target utilization. This configuration requires `{python} PipelineCalcs.req_bw_imagenet_gb_per_s_str` of aggregate storage throughput. The bandwidth must be sustained continuously for the duration of training, which may last days or weeks. If at any point the storage system delivers less than `{python} PipelineCalcs.req_bw_imagenet_gb_per_s_str`, accelerators begin to idle. For the chapter's 175B language-model running example, tokenized text has a much lower per-batch bandwidth demand, but the total data volume and checkpoint traffic over the run are much larger, shifting the bottleneck from peak training-data bandwidth to sustained throughput and checkpoint movement over weeks.
 
 The consequences of falling short are captured by the **data stall ratio**\index{Data Stall Ratio!definition}, defined in @eq-data-stall as the fraction of each training step where the accelerator waits for data:
 
@@ -1752,10 +1752,10 @@ Feature store architectures address point-in-time correctness[^fn-point-in-time]
 # │ Goal: Make the 100 TB / 1,500 core-hour integrity-check estimate reproducible.
 # │ How: Dataset MB / effective per-core throughput / seconds per hour.
 # │ Exports: HashValidationCost.dataset_tb_str,
-# │          HashValidationCost.throughput_mb_s_str,
-# │          HashValidationCost.core_hours_str
+# │          HashValidationCost.throughput_mb_per_s_str,
+# │          HashValidationCost.cpu_core_hours_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_memory, fmt_bandwidth
+from mlsysim.fmt import check, fmt_bandwidth, fmt_count, fmt_memory
 
 class HashValidationCost:
     """Pipeline-level SHA-256 validation cost assumption."""
@@ -1773,13 +1773,13 @@ class HashValidationCost:
 
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
     dataset_tb_str = fmt_memory(dataset, unit=TB, precision=0, commas=False)
-    throughput_mb_s_str = fmt_bandwidth(throughput_per_core, unit=MB / second, precision=1, commas=False)
-    cpu_core_hours_str = fmt(core_hours, precision=1)
+    throughput_mb_per_s_str = fmt_bandwidth(throughput_per_core, unit=MB / second, precision=1, commas=False)
+    cpu_core_hours_str = fmt_count(core_hours, precision=1, label="CPU-core hour", allow_fractional=True)
 ```
 
 At the 10,000-GPU scale, the dataset is no longer a *static collection of files* but a *dynamic stream* that must be captured with absolute precision. Foundation-model runs can last weeks or months; in our 30-day running example, the data seen near the end of the run must be identical in composition and order to the data seen on day 1. Otherwise, we cannot distinguish between a model regression and a silent change in the input distribution. Dataset versioning\index{Dataset Versioning} provides the necessary "Git for data" capability by snapshotting the cryptographic hashes[^fn-hash-cost] of every data shard, the exact preprocessing code used for tokenization, and the random seeds governing the global shuffle.
 
-[^fn-hash-cost]: **Hash Cost (SHA-256)**: Verifying the integrity of a `{python} HashValidationCost.dataset_tb_str` dataset using SHA-256 consumes approximately `{python} HashValidationCost.cpu_core_hours_str` CPU-core hours under a pipeline-level throughput assumption of `{python} HashValidationCost.throughput_mb_s_str` per core. For a 30-day foundation model training run, this metadata validation step must be pipelined or performed during ingestion to avoid stalling the fleet's startup phase. \index{Cryptographic Hash!validation cost}
+[^fn-hash-cost]: **Hash Cost (SHA-256)**: Verifying the integrity of a `{python} HashValidationCost.dataset_tb_str` dataset using SHA-256 consumes approximately `{python} HashValidationCost.cpu_core_hours_str` under a pipeline-level throughput assumption of `{python} HashValidationCost.throughput_mb_per_s_str` per core. For a 30-day foundation model training run, this metadata validation step must be pipelined or performed during ingestion to avoid stalling the fleet's startup phase. \index{Cryptographic Hash!validation cost}
 
 This level of rigor is essential for audit trails and for debugging the subtle "loss spikes" that characterize large-scale training, where we must be able to replay the exact batch that caused a divergence to determine if the cause was a corrupted data sample or a numerical instability in the optimizer.
 
@@ -1841,7 +1841,7 @@ class GDSLatency:
     gds_freed_cpu_cores_str = fmt_int(gds_freed_cpu_cores_val, commas=False)
     image_kb_str = fmt_qty(150 * KB, KB, precision=0, commas=False)
     n_gpus_str = fmt_count(Systems.Nodes.DGX_H100.accelerators_per_node, commas=False, label="GPU")
-    images_per_s_per_gpu_str = fmt_rate(images_per_s_per_gpu, 'images/s', precision=0, commas=True)
+    per_gpu_images_per_s_str = fmt_rate(images_per_s_per_gpu, 'images/s', precision=0, commas=True)
 ```
 
 ## GPU Direct Storage and the CPU Bypass {#sec-storage-gds}
@@ -1878,7 +1878,7 @@ As @fig-gds-path illustrates, the throughput improvement from GDS is most pronou
 
 ::: {#nbk-data-storage-cpu-bypass-dividend .callout-notebook title="The CPU bypass dividend"}
 
-**Problem**: A training node with `{python} GDSLatency.n_gpus_str` loads `{python} GDSLatency.image_kb_str` at `{python} GDSLatency.images_per_s_per_gpu_str` per GPU (`{python} GDSLatency.gds_total_images_per_s_str` total). Compare the CPU load under traditional I/O vs. GDS.
+**Problem**: A training node with `{python} GDSLatency.n_gpus_str` loads `{python} GDSLatency.image_kb_str` at `{python} GDSLatency.per_gpu_images_per_s_str` per GPU (`{python} GDSLatency.gds_total_images_per_s_str` total). Compare the CPU load under traditional I/O vs. GDS.
 
 **Traditional path**\index{Traditional I/O!data path}: Each image requires a DMA from NVMe to DRAM, a `memcpy` from kernel to user space, and a PCIe transfer to GPU. At `{python} GDSLatency.gds_total_images_per_s_str` with `{python} GDSLatency.gds_trad_us_str` of CPU time per image, the CPU spends `{python} GDSLatency.gds_trad_cpu_seconds_str` of CPU time per wall-clock second, consuming roughly `{python} GDSLatency.gds_trad_cpu_cores_str` cores worth of processing just for data movement.
 
@@ -2121,7 +2121,7 @@ class StorageEconomicsCorpus:
 # └─────────────────────────────────────────────────────────────────────────────
 class BuildVsBuyStorageEconomics:
     # ┌── 1. LOAD ─────────────────────────────────────────
-    from mlsysim.fmt import check, fmt, fmt_usd, MarkdownStr, fmt_time
+    from mlsysim.fmt import check, fmt, fmt_rate, fmt_usd, MarkdownStr, fmt_time
     capex_low = 3_000_000
     capex_high = 5_000_000
     annual_ops = 500_000
@@ -2152,14 +2152,14 @@ class BuildVsBuyStorageEconomics:
     cloud_total_annual_usd_str = fmt_usd(cloud_total_annual, precision=0)
     annual_ops_usd_str = fmt_usd(annual_ops, precision=0)
     net_annual_savings_str = fmt_usd(net_annual_savings, precision=0)
-    reads_per_year_str = fmt(reads_per_year, precision=0, commas=False)
+    reads_per_year_str = fmt_rate(reads_per_year, "reads/year", precision=0, commas=False)
     cloud_cost_gb_month_str = fmt_usd(cloud_cost_gb_month, precision=2, commas=False, per="GB/month")
     breakeven_low_years_str = fmt_time(breakeven_low_years, 'year', precision=1, commas=False, style='word')
     breakeven_high_years_str = fmt_time(breakeven_high_years, 'year', precision=1, commas=False, style='word')
     breakeven_range_str = MarkdownStr(f"{breakeven_low_years_str}--{breakeven_high_years_str}")
 ```
 
-The decision to **build vs. buy**\index{Build vs. Buy!storage} storage infrastructure hinges on the trade-off between the high capital expenditure of an on-premises parallel file system and the recurring operational expenditure of cloud object storage. A 1-petabyte Lustre deployment costs roughly \$3–5 million in hardware, plus an additional `{python} BuildVsBuyStorageEconomics.annual_ops_usd_str` per year in operational overhead for power, cooling, and engineering support. Storing 1 PB in a cloud object store at `{python} BuildVsBuyStorageEconomics.cloud_cost_gb_month_str` costs `{python} BuildVsBuyStorageEconomics.cloud_storage_annual_usd_str` per year for storage alone. However, egress fees for accessing the data dominate the total cost: reading that petabyte `{python} BuildVsBuyStorageEconomics.reads_per_year_str` times in a year adds `{python} BuildVsBuyStorageEconomics.cloud_egress_annual_usd_str` in data transfer fees. Under these assumptions, annual cloud delivery costs `{python} BuildVsBuyStorageEconomics.cloud_total_annual_usd_str`; after subtracting `{python} BuildVsBuyStorageEconomics.annual_ops_usd_str` of on-premises operations, the net savings are `{python} BuildVsBuyStorageEconomics.net_annual_savings_str` per year. The resulting hardware break-even is roughly `{python} BuildVsBuyStorageEconomics.breakeven_range_str`, not 18 to 24 months. Reaching an 18- to 24-month payback requires a hotter workload with many more full-dataset reads per year, lower capital expense, or non-egress drivers such as checkpoint latency and shared-namespace requirements. For our running example, the `{python} StorageEconomicsCorpus.tokenized_text_tb_str` serialized corpus is much smaller than 1 PB, so the local-storage case is driven more by latency, repeated experiments, and checkpoint staging than by one-year egress savings alone.
+The decision to **build vs. buy**\index{Build vs. Buy!storage} storage infrastructure hinges on the trade-off between the high capital expenditure of an on-premises parallel file system and the recurring operational expenditure of cloud object storage. A 1-petabyte Lustre deployment costs roughly \$3–5 million in hardware, plus an additional `{python} BuildVsBuyStorageEconomics.annual_ops_usd_str` per year in operational overhead for power, cooling, and engineering support. Storing 1 PB in a cloud object store at `{python} BuildVsBuyStorageEconomics.cloud_cost_gb_month_str` costs `{python} BuildVsBuyStorageEconomics.cloud_storage_annual_usd_str` per year for storage alone. However, egress fees for accessing the data dominate the total cost: reading that petabyte at `{python} BuildVsBuyStorageEconomics.reads_per_year_str` adds `{python} BuildVsBuyStorageEconomics.cloud_egress_annual_usd_str` in data transfer fees. Under these assumptions, annual cloud delivery costs `{python} BuildVsBuyStorageEconomics.cloud_total_annual_usd_str`; after subtracting `{python} BuildVsBuyStorageEconomics.annual_ops_usd_str` of on-premises operations, the net savings are `{python} BuildVsBuyStorageEconomics.net_annual_savings_str` per year. The resulting hardware break-even is roughly `{python} BuildVsBuyStorageEconomics.breakeven_range_str`, not 18 to 24 months. Reaching an 18- to 24-month payback requires a hotter workload with many more full-dataset reads per year, lower capital expense, or non-egress drivers such as checkpoint latency and shared-namespace requirements. For our running example, the `{python} StorageEconomicsCorpus.tokenized_text_tb_str` serialized corpus is much smaller than 1 PB, so the local-storage case is driven more by latency, repeated experiments, and checkpoint staging than by one-year egress savings alone.
 
 Hardware degradation introduces the need for a **storage refresh cycle**\index{Storage Refresh Cycle}. NVMe drives are rated for a specific write endurance, measured in Drive Writes Per Day (DWPD) over a typical five-year warranty period. Most large-scale ML training workloads are predominantly read-heavy once the initial dataset is ingested, so drives in a training cluster often last well beyond their rated write lifespan. The primary driver for a refresh cycle is therefore not wear but the rapid increase in storage density: drive capacity doubles at a similar price point every three to four years. Refreshing a cluster from 7.68 TB to 15.36 TB NVMe drives doubles the local cache capacity, enabling larger datasets to be staged directly on compute nodes and reducing dependence on the parallel file system for steady-state reads.
 
@@ -2274,7 +2274,7 @@ A `{python} CheckpointModelIntro.gpt3_params_b_str` parameter model with Adam op
 # │      fabric write time at 100 GB/s.
 # │ Exports: CheckpointStormDefinition.*_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_time, fmt_memory
+from mlsysim.fmt import check, fmt, fmt_time, fmt_memory, fmt_params
 
 class CheckpointStormDefinition:
     """Checkpoint-storm arithmetic for the definition callout."""
@@ -2304,7 +2304,7 @@ class CheckpointStormDefinition:
     check(1420 < naive_write.to(second).magnitude < 1440, "Naive write at 100 GB/s should be about 1,430 s for Training_1K replicas")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
-    params_b_str = fmt(params_b, precision=0, commas=False)
+    params_b_str = fmt_params(params, scale="B", precision=0, commas=False)
     weights_gb_str = fmt_memory(weights, unit=GB, precision=0, commas=False)
     gradients_gb_str = fmt_memory(gradients, unit=GB, precision=0, commas=False)
     optimizer_state_gb_str = fmt_memory(optimizer_state, unit=GB, precision=0, commas=False)
@@ -2318,7 +2318,7 @@ class CheckpointStormDefinition:
 
 ***Checkpoint Storm***\index{Checkpoint Storm!definition} is a burst of synchronized network and storage traffic that occurs when all nodes in a training fleet save model state simultaneously.
 
-1.  **Significance (quantitative)**: The storm magnitude scales as $T_{\text{write}} = R \times \text{per-replica state} / \text{BW}_{\text{fabric}}$, where $R$ is the data-parallel replica count. For a `{python} CheckpointStormDefinition.params_b_str`B-parameter model in FP16 (`{python} CheckpointStormDefinition.weights_gb_str` of weights) trained across `{python} CheckpointStormDefinition.replicas_str` with vanilla data parallelism (every replica holding its own complete copy), a naive checkpoint generates `{python} CheckpointStormDefinition.naive_total_tb_str` of simultaneous writes; at 100 GB/s fabric bandwidth, $T_{\text{write}} \approx$ `{python} CheckpointStormDefinition.naive_write_s_str`, over `{python} CheckpointStormDefinition.naive_write_min_str` of training stall per checkpoint event. ZeRO-3 sharding collapses this to roughly `{python} CheckpointStormDefinition.zero3_total_tb_str` total (`{python} CheckpointStormDefinition.weights_gb_str` weights + `{python} CheckpointStormDefinition.gradients_gb_str` gradients + `{python} CheckpointStormDefinition.optimizer_state_gb_str` optimizer state, split across `{python} CheckpointStormDefinition.replicas_str`), bringing $T_{\text{write}}$ down to roughly `{python} CheckpointStormDefinition.zero3_write_s_str`. This stall is the checkpoint $T_{\text{write}}$ term and can dwarf the compute time between checkpoints when the sharding optimization is omitted.
+1.  **Significance (quantitative)**: The storm magnitude scales as $T_{\text{write}} = R \times \text{per-replica state} / \text{BW}_{\text{fabric}}$, where $R$ is the data-parallel replica count. For a `{python} CheckpointStormDefinition.params_b_str`-parameter model in FP16 (`{python} CheckpointStormDefinition.weights_gb_str` of weights) trained across `{python} CheckpointStormDefinition.replicas_str` with vanilla data parallelism (every replica holding its own complete copy), a naive checkpoint generates `{python} CheckpointStormDefinition.naive_total_tb_str` of simultaneous writes; at 100 GB/s fabric bandwidth, $T_{\text{write}} \approx$ `{python} CheckpointStormDefinition.naive_write_s_str`, over `{python} CheckpointStormDefinition.naive_write_min_str` of training stall per checkpoint event. ZeRO-3 sharding collapses this to roughly `{python} CheckpointStormDefinition.zero3_total_tb_str` total (`{python} CheckpointStormDefinition.weights_gb_str` weights + `{python} CheckpointStormDefinition.gradients_gb_str` gradients + `{python} CheckpointStormDefinition.optimizer_state_gb_str` optimizer state, split across `{python} CheckpointStormDefinition.replicas_str`), bringing $T_{\text{write}}$ down to roughly `{python} CheckpointStormDefinition.zero3_write_s_str`. This stall is the checkpoint $T_{\text{write}}$ term and can dwarf the compute time between checkpoints when the sharding optimization is omitted.
 2.  **Distinction (durable)**: Unlike general I/O contention (which is stochastic and unpredictable), a Checkpoint Storm is synchronous and periodic: every node writes at the same moment because the training orchestrator triggers checkpoint after a fixed step count. Its predictability makes it both more damaging (all nodes compete simultaneously) and more tractable (it can be prevented by design through staggered scheduling or asynchronous serialization).
 3.  **Common pitfall**: A frequent misconception is that checkpointing every 100 steps is "low overhead." At 70B scale, this assumption is catastrophically wrong: if each training step takes 10 seconds and a checkpoint storm takes 1,400 seconds, checkpointing every 100 steps means spending $1400/(100 \times 10) = 140\%$ of compute time on checkpointing—more time saving state than doing useful training.
 
@@ -2371,19 +2371,19 @@ class CheckpointStormCalc:
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
     ckpt_total_gb_str = fmt_memory(total_checkpoint, unit=GB, precision=0, commas=True)
     per_node_shard_gb_str = fmt_memory(per_node_shard, unit=GB, precision=1, commas=False)
-    local_bw_gbs_str = fmt_bandwidth(local_bw, unit=GB / second, precision=0, commas=False)
+    local_bw_gb_per_s_str = fmt_bandwidth(local_bw, unit=GB / second, precision=0, commas=False)
     local_write_s_str = fmt_time(local_write, second, precision=2, commas=False, style='word')
     total_pfs_tb_str = fmt_memory(total_checkpoint, unit=TB, precision=1, commas=False)
     pfs_copy_s_str = fmt_time(pfs_copy, second, precision=1, commas=False, style='word')
-    per_node_pfs_bw_gbs_str = fmt_bandwidth(per_node_pfs_bw, unit=GB / second, precision=1, commas=False)
+    per_node_pfs_bw_gb_per_s_str = fmt_bandwidth(per_node_pfs_bw, unit=GB / second, precision=1, commas=False)
     overhead_pct_str = fmt_percent(overhead_pct/100, precision=2, commas=False, style='prose')
     local_drive_count_str = fmt(local_drive_count, precision=0, commas=False)
-    local_drive_bw_gbs_str = fmt_bandwidth(local_drive_bw, unit=GB / second, precision=0, commas=False)
+    local_drive_bw_gb_per_s_str = fmt_bandwidth(local_drive_bw, unit=GB / second, precision=0, commas=False)
     nodes_str = fmt_count(nodes, commas=False, label="node")
-    pfs_aggregate_bw_tbs_str = fmt_bandwidth(pfs_aggregate_bw, unit=TB / second, precision=0, commas=False)
+    pfs_aggregate_bw_tb_per_s_str = fmt_bandwidth(pfs_aggregate_bw, unit=TB / second, precision=0, commas=False)
     checkpoint_interval_min_str = fmt_time(checkpoint_interval, minute, precision=0, commas=False, style='word')
     checkpoint_interval_s_str = fmt_time(checkpoint_interval, second, precision=0, commas=False, style='word')
-    pfs_aggregate_bw_gbs_str = fmt_bandwidth(pfs_aggregate_bw, unit=GB / second, precision=0, commas=False)
+    pfs_aggregate_bw_gb_per_s_str = fmt_bandwidth(pfs_aggregate_bw, unit=GB / second, precision=0, commas=False)
 ```
 
 ```{python}
@@ -2404,9 +2404,9 @@ class CheckpointTotalGbRecap:
 
 **Problem**: A `{python} CheckpointStormCalc.nodes_str`-node cluster saves a 175B-parameter checkpoint every `{python} CheckpointStormCalc.checkpoint_interval_min_str`. Each checkpoint totals `{python} CheckpointTotalGbRecap.ckpt_total_gb_str`. With ZeRO-3, each node saves roughly `{python} CheckpointStormCalc.per_node_shard_gb_str`.
 
-1. **Per-node write to local NVMe** (`{python} CheckpointStormCalc.local_drive_count_str` drives at `{python} CheckpointStormCalc.local_drive_bw_gbs_str` each = `{python} CheckpointStormCalc.local_bw_gbs_str`): `{python} CheckpointStormCalc.per_node_shard_gb_str` $\div$ `{python} CheckpointStormCalc.local_bw_gbs_str` $\approx$ `{python} CheckpointStormCalc.local_write_s_str`.
-2. **Async copy to PFS**\index{Checkpointing!async PFS copy}: `{python} CheckpointStormCalc.nodes_str` $\times$ `{python} CheckpointStormCalc.per_node_shard_gb_str` $\approx$ `{python} CheckpointStormCalc.total_pfs_tb_str` total. If the PFS provides `{python} CheckpointStormCalc.pfs_aggregate_bw_tbs_str` aggregate, the storm completes in roughly `{python} CheckpointStormCalc.pfs_copy_s_str`.
-3. **Per-node PFS bandwidth**\index{Bandwidth!per-node pfs}: If all `{python} CheckpointStormCalc.nodes_str` write simultaneously, each gets `{python} CheckpointStormCalc.pfs_aggregate_bw_gbs_str` $\div$ `{python} CheckpointStormCalc.nodes_str` = `{python} CheckpointStormCalc.per_node_pfs_bw_gbs_str`.
+1. **Per-node write to local NVMe** (`{python} CheckpointStormCalc.local_drive_count_str` drives at `{python} CheckpointStormCalc.local_drive_bw_gb_per_s_str` each = `{python} CheckpointStormCalc.local_bw_gb_per_s_str`): `{python} CheckpointStormCalc.per_node_shard_gb_str` $\div$ `{python} CheckpointStormCalc.local_bw_gb_per_s_str` $\approx$ `{python} CheckpointStormCalc.local_write_s_str`.
+2. **Async copy to PFS**\index{Checkpointing!async PFS copy}: `{python} CheckpointStormCalc.nodes_str` $\times$ `{python} CheckpointStormCalc.per_node_shard_gb_str` $\approx$ `{python} CheckpointStormCalc.total_pfs_tb_str` total. If the PFS provides `{python} CheckpointStormCalc.pfs_aggregate_bw_tb_per_s_str` aggregate, the storm completes in roughly `{python} CheckpointStormCalc.pfs_copy_s_str`.
+3. **Per-node PFS bandwidth**\index{Bandwidth!per-node pfs}: If all `{python} CheckpointStormCalc.nodes_str` write simultaneously, each gets `{python} CheckpointStormCalc.pfs_aggregate_bw_gb_per_s_str` $\div$ `{python} CheckpointStormCalc.nodes_str` = `{python} CheckpointStormCalc.per_node_pfs_bw_gb_per_s_str`.
 4. **Training pause**\index{Checkpointing!training pause}: only about `{python} CheckpointStormCalc.local_write_s_str` (the local NVMe write). The PFS copy overlaps with the next training iteration.
 5. **Overhead**\index{Checkpointing!overhead}: `{python} CheckpointStormCalc.local_write_s_str` pause every `{python} CheckpointStormCalc.checkpoint_interval_s_str` $\approx$ `{python} CheckpointStormCalc.overhead_pct_str` training time lost to checkpointing.
 
@@ -2475,8 +2475,8 @@ class CheckpointStorageDesignPrompt:
     # ┌── 4. OUTPUT ───────────────────────────────────────
     nodes_str = fmt_count(nodes, commas=True, label="node")
     checkpoint_interval_min_str = fmt_time(checkpoint_interval, minute, precision=0, commas=False, style='word')
-    local_nvme_bw_gbs_str = fmt_bandwidth(local_nvme_bw, unit=GB / second, precision=0, commas=False)
-    pfs_aggregate_tbs_str = fmt_bandwidth(pfs_aggregate_bw, unit=TB / second, precision=0, commas=False)
+    local_nvme_bw_gb_per_s_str = fmt_bandwidth(local_nvme_bw, unit=GB / second, precision=0, commas=False)
+    pfs_aggregate_tb_per_s_str = fmt_bandwidth(pfs_aggregate_bw, unit=TB / second, precision=0, commas=False)
 ```
 
 ::: {#chk-data-storage-checkpoint-storage-design .callout-checkpoint title="Checkpoint storage design"}
@@ -2484,8 +2484,8 @@ class CheckpointStorageDesignPrompt:
 A training cluster of `{python} CheckpointStorageDesignPrompt.nodes_str` saves a 175B-parameter model checkpoint every `{python} CheckpointStorageDesignPrompt.checkpoint_interval_min_str`. Each checkpoint is `{python} CheckpointTotalGbRecap.ckpt_total_gb_str` total, distributed across all nodes.
 
 1. What is the per-node checkpoint size?
-2. If each node writes to local NVMe at `{python} CheckpointStorageDesignPrompt.local_nvme_bw_gbs_str`, what is $T_{\text{write}}$ for the local write?
-3. If the parallel file system provides `{python} CheckpointStorageDesignPrompt.pfs_aggregate_tbs_str` aggregate and all `{python} CheckpointStorageDesignPrompt.nodes_str` write simultaneously, what is the per-node write bandwidth, and how long does the async copy take?
+2. If each node writes to local NVMe at `{python} CheckpointStorageDesignPrompt.local_nvme_bw_gb_per_s_str`, what is $T_{\text{write}}$ for the local write?
+3. If the parallel file system provides `{python} CheckpointStorageDesignPrompt.pfs_aggregate_tb_per_s_str` aggregate and all `{python} CheckpointStorageDesignPrompt.nodes_str` write simultaneously, what is the per-node write bandwidth, and how long does the async copy take?
 4. Why is tiered staging (local NVMe first, then async PFS copy) faster than writing directly to PFS?
 
 :::
@@ -2535,13 +2535,13 @@ class StorageFallaciesBandwidth:
     nvme_bw_raw = Hardware.Cloud.H100.storage.bandwidth
     bw_ratio_val = h100_bw.to(GB/second).magnitude / nvme_bw_raw.to(GB/second).magnitude
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    nvme_bw_gb_s_str = fmt_qty(nvme_bw_raw, GB/second, precision=0, commas=False)
-    h100_bw_tbs_str = fmt_qty(h100_bw, TB/second, precision=2, commas=False)
+    nvme_bw_gb_per_s_str = fmt_qty(nvme_bw_raw, GB/second, precision=0, commas=False)
+    h100_bw_tb_per_s_str = fmt_qty(h100_bw, TB/second, precision=2, commas=False)
     bw_ratio_mult_str = fmt_multiple(bw_ratio_val, precision=1, commas=True)
 ```
 **Fallacy**: *NVMe is fast enough to feed GPUs directly without pipelining.*
 
-A single NVMe drive delivers `{python} StorageFallaciesBandwidth.nvme_bw_gb_s_str`, while an H100 consumes `{python} StorageFallaciesBandwidth.h100_bw_tbs_str` from HBM. The gap is roughly `{python} StorageFallaciesBandwidth.bw_ratio_mult_str`. Even four drives in RAID-0 only close this gap to about 120$\times$ before overhead. Without pipelining and prefetching to hide the latency of loading from NVMe to host DRAM to HBM, every batch transfer introduces a stall equal to the transfer time. NVMe speed is necessary but nowhere near sufficient; the entire pipeline architecture (multi-worker loading, prefetch buffers, async transfers) exists precisely because no single storage device can match accelerator bandwidth. The confusion arises because NVMe bandwidth is quoted in *absolute terms* (GB/s), which sounds impressive, but the relevant metric is the *ratio* of storage bandwidth to accelerator consumption rate, and this ratio is unfavorable by two to three orders of magnitude.
+A single NVMe drive delivers `{python} StorageFallaciesBandwidth.nvme_bw_gb_per_s_str`, while an H100 consumes `{python} StorageFallaciesBandwidth.h100_bw_tb_per_s_str` from HBM. The gap is roughly `{python} StorageFallaciesBandwidth.bw_ratio_mult_str`. Even four drives in RAID-0 only close this gap to about 120$\times$ before overhead. Without pipelining and prefetching to hide the latency of loading from NVMe to host DRAM to HBM, every batch transfer introduces a stall equal to the transfer time. NVMe speed is necessary but nowhere near sufficient; the entire pipeline architecture (multi-worker loading, prefetch buffers, async transfers) exists precisely because no single storage device can match accelerator bandwidth. The confusion arises because NVMe bandwidth is quoted in *absolute terms* (GB/s), which sounds impressive, but the relevant metric is the *ratio* of storage bandwidth to accelerator consumption rate, and this ratio is unfavorable by two to three orders of magnitude.
 
 **Fallacy**: *Object storage latency does not matter because we prefetch everything.*
 

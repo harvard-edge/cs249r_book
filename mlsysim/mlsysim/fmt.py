@@ -1111,8 +1111,16 @@ def fmt_tokens(
 
 
 _RATE_UNITS = {
-    "QPS", "FPS", "tokens/s", "tokens/hour", "img/s", "images/s", "req/s",
-    "requests/s", "samples/s", "samples/hour",
+    "QPS", "FPS", "IOPS", "MACs/cycle", "tokens/s", "tokens/hour", "img/s", "images/s",
+    "req/s", "requests/s", "requests/day", "events/s", "errors/hour",
+    "failures/hour", "failures/day", "inferences/s", "inferences/hour",
+    "inferences/day", "patients/day", "queries/hour", "queries/day",
+    "reviews/day", "samples/s", "samples/min", "samples/hour", "deploys/week",
+    "checkpoints/hour", "windows/month", "false wakes/month",
+    "feature reads/request", "queries/month", "queries/class", "incidents/year",
+    "models/year", "reads/year", "photos/patient",
+    "utterances/speaker", "cameras/store", "boards/store",
+    "cases/day",
 }
 
 

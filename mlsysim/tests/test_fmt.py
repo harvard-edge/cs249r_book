@@ -1000,6 +1000,27 @@ class TestDomainFormatters:
         assert fmt_ops_rate(2 * TOPS, precision=0, commas=False) == "2 TOPS"
         assert fmt_ops_rate(0.002 * TOPS, precision=0, commas=False) == "2 GOPS"
 
+    def test_fmt_rate_allows_iops(self):
+        assert fmt_rate(150, "IOPS", precision=0, commas=False) == "150 IOPS"
+        assert fmt_rate(6_000, "IOPS", scale="K", precision=0, commas=False) == "6K IOPS"
+
+    def test_fmt_rate_allows_macs_per_cycle(self):
+        assert fmt_rate(16_384, "MACs/cycle", precision=0, commas=True) == "16,384 MACs/cycle"
+
+    def test_fmt_rate_allows_event_and_inference_rates(self):
+        assert fmt_rate(20, "events/s", precision=0, commas=False) == "20 events/s"
+        assert fmt_rate(300, "inferences/s", precision=0, commas=False) == "300 inferences/s"
+
+    def test_fmt_rate_allows_book_service_rates(self):
+        assert fmt_rate(12.5, "failures/day", precision=1, commas=False) == "12.5 failures/day"
+        assert fmt_rate(90, "queries/hour", precision=0, commas=False) == "90 queries/hour"
+        assert fmt_rate(5000, "queries/class", precision=0, commas=True) == "5,000 queries/class"
+        assert fmt_rate(4, "deploys/week", precision=0, commas=False) == "4 deploys/week"
+        assert fmt_rate(40, "utterances/speaker", precision=0, commas=False) == "40 utterances/speaker"
+        assert fmt_rate(12, "cameras/store", precision=0, commas=False) == "12 cameras/store"
+        assert fmt_rate(3, "boards/store", precision=0, commas=False) == "3 boards/store"
+        assert fmt_rate(1000, "cases/day", precision=0, commas=True) == "1,000 cases/day"
+
     def test_small_physical_label_helpers(self):
         from mlsysim.core.units import second
 
